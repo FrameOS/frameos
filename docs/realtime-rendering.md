@@ -18,18 +18,25 @@ paths twice (the shadow at `opacity="0.32"`) — and returns
 `frameos.svg(svg, {width, height})`. `refreshInterval` 0.0333.
 
 The second yardstick is the sample scene **Hellfire**
-(`repo/scenes/samples/Hellfire`): the Doom fire, a byte of heat per cell
-simulated in JS (a 480x480 panel at pixel size 4 is 14,400 cells a frame)
-and handed to `frameos.putPixels` as the `Uint8Array` it lives in, with a
-37-colour palette and each cell a 4x4 square; the `<img>` of that canvas
-is the frame. No SVG is built or parsed, so what it measures is the
-interpreter's loop and the raw pixel path (`docs/jsx-ui.md` "Canvases").
-On a laptop a frame is ~3 ms; the SenseCAP Indicator's number is still to
-be taken, and the scene reads it off the panel itself: its **FPS counter**
-field draws the renders a second the panel gets (simulation, blit and
-pacing included) in a corner, and its **Quality** field picks the cell
-size, 8, 4 or 2 px, so the same scene measures a fire a quarter or four
-times the work.
+(`repo/scenes/samples/Hellfire`): the Doom fire, a byte of heat per cell (a
+480x480 panel at pixel size 4 is 14,400 cells a frame), run by `frameos.fire`
+and returned as `frameos.pixels`, which writes the cells that changed straight
+into the panel's buffer. No SVG, JSX or canvas is involved, so what it measures
+is the raw pixel path. It reads its own number off the panel: its **FPS
+counter** field draws the renders a second the panel gets (simulation, blit and
+pacing included) in a corner, in the fire's own cells so that it does not slow
+what it measures, and its **Quality** field picks the cell size, 8, 4 or 2 px.
+On the SenseCAP Indicator it runs at **29 fps** (34 ms a frame), 27 at 8 px and
+26 at 2 px: a smaller cell changes how many cells change, and the bus moves
+about the same pixels either way. Written the first way, in JS into a canvas, it
+ran at 2.2:
+
+| Step | Frame | fps |
+| --- | --- | --- |
+| The spread in JS (156 ms), `putPixels` through `setPixel`'s per-pixel dither (237 ms), the canvas copied to the panel (42 ms) | 450 ms | 2.2 |
+| The palette packed once and only changed cells written (12 ms), the spread native (2 ms) | 75 ms | 13.2 |
+| `frameos.pixels`: no canvas to copy, no JSX to lay out | 31 ms | 32 |
+| The Quality and FPS counter state fields wired in | 34 ms | 29 |
 
 ## Where an ESP32 frame goes
 
@@ -137,9 +144,15 @@ not deep-sleep, animates:
   runs while a frame slower than the panel never waits.
 
 Every line the firmware logs is also printed on UART0 at 115200 baud
-(11.5 KB/s, a 2 KB transmit buffer): the ~2.2 KB of lines a fully logged pass
-prints cap a loop at about 5 fps on their own. That is why the quiet frames
-matter, not only for the logs' readers.
+(11.5 KB/s): the ~2.2 KB of lines a fully logged pass prints cap a loop at about
+5 fps on their own. The driver's 2 KB transmit buffer does not help: stdout
+reaches it a character at a time, each an item of its own, and ~70 characters
+fit. That is why the quiet frames matter, not only for the logs' readers, and
+why a running animation's periodic frame sends its lines to the backend and the
+cloud but prints only the `render:animation` summary (`frameos_nim_set_console_quiet`):
+in full it held one frame in ten seconds for 190 ms, a stutter in a 30 ms scene,
+and now 55 ms. The first frame of an animation, a frame a deploy waits for and a
+failure still print.
 
 ### The panel's buffer is the canvas (an RGB565 LCD)
 

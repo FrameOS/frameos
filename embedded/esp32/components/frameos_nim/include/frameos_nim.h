@@ -223,6 +223,10 @@ bool frameos_nim_send_event_wait(uint32_t origin, const char *event, const char 
 /* Provided by the firmware for the Nim side (logging hook). */
 void frameos_nim_log_hook(const char *msg);
 
+/* Lines keep going to the backend and the cloud, but not to the serial console:
+ * a running animation's periodic frame (fos_client.c). */
+void frameos_nim_set_console_quiet(bool quiet);
+
 /* Recent-log ring (see frameos_nim_glue.c). Entries come back oldest-first;
  * each `line` is a strdup the caller must free. `timestamp` is epoch seconds
  * (values before ~1e9 mean the clock was not SNTP-synced yet). */

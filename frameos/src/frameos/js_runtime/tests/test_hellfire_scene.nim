@@ -9,6 +9,7 @@ import std/[json, monotimes, os, sequtils, strutils, times, unittest]
 import pixie
 
 import frameos/js_runtime/app_runtime
+import frameos/utils/svg_frames
 import frameos/types
 import frameos/values
 
@@ -66,7 +67,161 @@ proc same(a, b: Image): bool =
 proc hot(c: ColorRGBX): bool = c.r.int + c.g.int + c.b.int > 3 * 0xb0
 proc dark(c: ColorRGBX): bool = c.r.int + c.g.int + c.b.int < 3 * 0x10
 
+# The rule as it first ran in JS. frameos.fire has to reach the same cells
+# from the same seed: that is what keeps the e2e snapshot and the fire of every
+# frame type the same.
+const ruleCheck = """
+function spread(heat, cols, rows, wind, seed) {
+  for (let y = rows - 1; y > 0; y--) {
+    const row = y * cols
+    const above = row - cols
+    for (let x = 0; x < cols; x++) {
+      const h = heat[row + x]
+      if (h === 0) {
+        heat[above + x] = 0
+        continue
+      }
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+      const r = seed >>> 30
+      let dx = x - r + wind
+      if (dx < 0) dx += cols
+      else if (dx >= cols) dx -= cols
+      heat[above + dx] = h - (r & 1)
+    }
+  }
+  return seed
+}
+export function get(app) {
+  const cols = 33, rows = 50
+  let same = true
+  for (const wind of [-3, -1, 0, 1, 3]) {
+    const a = new Uint8Array(cols * rows).fill(36, (rows - 1) * cols)
+    const b = a.slice()
+    let seedA = 4000000000 + wind, seedB = seedA
+    for (let i = 0; i < 90; i++) seedA = spread(a, cols, rows, wind, seedA)
+    seedB = frameos.fire(b, { width: cols, height: rows, wind, steps: 90, seed: seedB })
+    if (seedA !== seedB) same = false
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) same = false
+  }
+  const short = new Uint8Array(3)
+  const refused = frameos.fire(short, { width: 2, height: 2, seed: 7 }) === 7 && short[0] === 0
+  const narrow = new Uint8Array(4).fill(36, 2) // cols 2 and a wind past it: stays in the array
+  frameos.fire(narrow, { width: 2, height: 2, wind: 3, steps: 5, seed: 9 })
+  return frameos.svg('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="' +
+    (same && refused ? '#00ff00' : '#ff0000') + '"/></svg>', { width: 4, height: 4 })
+}
+"""
+
+const pixelFrames = """
+export function get(app) {
+  const cells = new Uint8Array(20 * 12)
+  if (Number(app.config.step) >= 1) cells.fill(1, 4 * 20, 6 * 20)
+  if (app.config.hole) cells[0] = 9
+  return frameos.pixels(cells, { width: Number(app.config.cols) || 20, height: 12, pixelSize: 5, palette: ['#000000', '#ff0000'] })
+}
+"""
+
+proc intoPanel(fire: Fire, target: Image, config: JsonNode, generation: uint32 = 1,
+    background = rgba(0, 255, 0, 255).color): tuple[image: Image, stillOwed: bool] =
+  ## One render of a panel buffer, the way the ESP32's render does it.
+  let context = ExecutionContext(scene: fire.scene, event: "render", payload: %*{},
+    hasImage: true, image: target, loopIndex: 0, loopKey: ".", nextSleep: -1,
+    decodeTargetImage: target, decodeTargetNodeId: 1.NodeId, decodeTargetScalingMode: "stretch",
+    wholeFrame: true, backgroundPending: true, backgroundColor: background)
+  beginPanelFrame(target.bufferPointer, generation)
+  let image = fire.runtime.get(fire.owner, config, context).asImage()
+  endPanelFrame()
+  (image, context.backgroundPending)
+
+suite "frameos.pixels":
+  const
+    black = rgb565ToRgbx(rgbxToRgb565(rgbx(0, 0, 0, 255)))
+    red = rgb565ToRgbx(rgbxToRgb565(rgbx(255, 0, 0, 255)))
+    green = rgb565ToRgbx(rgbxToRgb565(rgbx(0, 255, 0, 255)))
+    poked = rgb565ToRgbx(rgbxToRgb565(rgbx(0, 0, 255, 255)))
+
+  proc newPanelFire(id: string): Fire =
+    result = newFire(id, 100, 60)
+    result.runtime = newJsAppRuntime(category = "data", outputType = "image", source = pixelFrames,
+      sourceName = "app.tsx")
+
+  test "it is the target, written in place, and a frame that covers it owes no background":
+    let fire = newPanelFire("tests/pixels-target")
+    let target = newImage565(100, 60)
+    target.fill(rgbx(9, 9, 9, 255))
+    let (image, owed) = fire.intoPanel(target, %*{"step": 1})
+    check cast[pointer](image) == cast[pointer](target)
+    check not owed
+    check target[50, 19] == black and target[50, 20] == red and target[50, 29] == red and target[50, 30] == black
+
+  test "a frame that leaves anything uncovered pays the background first":
+    forgetPanelFrames()
+    let narrow = newPanelFire("tests/pixels-narrow")
+    let target = newImage565(100, 60)
+    discard narrow.intoPanel(target, %*{"step": 0, "cols": 19})
+    check target[50, 30] == black
+    check target[97, 30] == green # the column it does not reach
+    let holed = newPanelFire("tests/pixels-hole")
+    let other = newImage565(100, 60)
+    discard holed.intoPanel(other, %*{"step": 0, "hole": true})
+    check other[2, 2] == green # an index past the palette shows what is under it
+    check other[50, 30] == black
+
+  test "each panel buffer writes only the cells that differ from what it holds":
+    forgetPanelFrames()
+    let fire = newPanelFire("tests/pixels-shadow")
+    let target = newImage565(100, 60)
+    discard fire.intoPanel(target, %*{"step": 0}) # every cell
+    target[50, 2] = rgbx(0, 0, 255, 255)
+    discard fire.intoPanel(target, %*{"step": 0}) # the same cells: not one written
+    check target[50, 2] == poked
+    discard fire.intoPanel(target, %*{"step": 1}) # rows 4 and 5 only
+    check target[50, 2] == poked and target[50, 20] == red
+    discard fire.intoPanel(target, %*{"step": 0}) # and back
+    check target[50, 2] == poked and target[50, 20] == black
+
+  test "and writes them all when anything else may have drawn there":
+    forgetPanelFrames()
+    let fire = newPanelFire("tests/pixels-others")
+    let target = newImage565(100, 60)
+    discard fire.intoPanel(target, %*{"step": 0})
+    target[50, 2] = rgbx(0, 0, 255, 255)
+    discard fire.intoPanel(target, %*{"step": 0}, generation = 2) # the firmware wrote into it
+    check target[50, 2] == black
+    target[50, 2] = rgbx(0, 0, 255, 255)
+    beginPanelFrame(target.bufferPointer, 2) # a settings panel's render in between
+    endPanelFrame()
+    discard fire.intoPanel(target, %*{"step": 0}, generation = 2)
+    check target[50, 2] == black
+    let another = newImage565(100, 60) # no record for another buffer
+    another.fill(rgbx(0, 0, 255, 255))
+    discard fire.intoPanel(another, %*{"step": 0}, generation = 2)
+    check another[50, 2] == black
+
+  test "a grid larger than the frame is a whole picture of its own, not a sheared one":
+    let fire = newPanelFire("tests/pixels-large")
+    fire.scene.frameConfig.width = 40 # 8x6 cells would fit; the app sends 20x12 at 5
+    fire.scene.frameConfig.height = 30
+    fire.owner.frameConfig.width = 40
+    fire.owner.frameConfig.height = 30
+    let picture = fire.render(%*{"step": 1})
+    check picture.width == 100 and picture.height == 60
+    check picture[50, 20].r == 255 and picture[50, 2].r == 0
+
+  test "with no target to take, it is a picture of its own":
+    let fire = newPanelFire("tests/pixels-own")
+    let picture = fire.render(%*{"step": 1})
+    check picture.width == 100 and picture.height == 60
+    check picture[50, 20].r == 255 and picture[50, 2].r == 0
+
 suite "Hellfire":
+  test "frameos.fire is the JS rule, cell for cell; a short array is refused; a wide wind stays inside":
+    var check_runtime = newFire("tests/fire-rule", 4, 4)
+    check_runtime.runtime = newJsAppRuntime(category = "data", outputType = "image", source = ruleCheck,
+      sourceName = "app.tsx")
+    let picture = check_runtime.render(%*{})
+    check picture[1, 1].g > 200 and picture[1, 1].r < 50
+
   test "the e2e fixture is the sample's app, seeded":
     let fixtureApp = fixture["apps"]["hellfire"]
     check fixtureApp["sources"] == app["sources"]
@@ -157,6 +312,24 @@ suite "Hellfire":
     let second = a.render(config)
     check not same(first, second)
     check same(second, b.render(config))
+
+  test "the counter is drawn when asked for, and leaves the fire as it found it":
+    let
+      plain = newFire("tests/fire-plain", 64, 256)
+      counted = newFire("tests/fire-counted", 64, 256)
+      base = %*{"pixelSize": "2", "seed": "666", "wind": "1"}
+      asked = %*{"pixelSize": "2", "seed": "666", "wind": "1", "showFps": "true"}
+    # A counter needs a second to pass before it has a number. Until then, and
+    # after it (in frames compared far below the corner it draws in), the fire
+    # underneath is the same fire: the label goes into the heat for the blit
+    # and comes out before the next step.
+    for i in 0 .. 3:
+      let
+        a = plain.render(base)
+        b = counted.render(asked)
+      for y in 64 ..< 256:
+        for x in 0 ..< 64:
+          check a[x, y] == b[x, y]
 
   test "a frame of a 120x120 fire":
     let fire = newFire("tests/hellfire-time", 480, 480)

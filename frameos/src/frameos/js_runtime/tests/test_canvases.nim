@@ -231,6 +231,14 @@ export function get(app) {
     const big = new Uint8Array(20).fill(1)
     big[10] = 0
     ok = frameos.putPixels(c, big.subarray(10, 14), { x: 0, y: 0, width: 2, height: 2, palette: ['#ff0000', '#00ff00'] })
+  } else if (mode === 'changes') {
+    const cells = new Uint8Array(20 * 12)
+    const palette = ['#000000', '#ff0000']
+    const step = app.state.step
+    if (step >= 1) cells.fill(1, 4 * 20, 6 * 20) // rows 4 and 5
+    if (step === 3) frameos.clear(c, '#00ff00')
+    ok = frameos.putPixels(c, cells, { width: 20, height: 12, pixelSize: 5, palette })
+    if (step === 4) ok = frameos.putPixels(c, cells, { width: 20, height: 12, pixelSize: 5, palette: ['#000000', '#0000ff'] })
   } else if (mode === 'outside') {
     ok = frameos.putPixels(c, new Uint8Array(4), { x: 200, y: 0, width: 2, height: 2, palette: ['#000'] })
   }
@@ -334,6 +342,53 @@ suite "putPixels":
     let changed = log.changedSince(before)
     check changed.known
     check changed.boxes == @[rect(4, 6, 10, 10)]
+
+  test "a palette frame that fills the canvas writes and notes only the rows that changed":
+    let ui = pixelUi("changes", "changes")
+    ui.scene.state["step"] = %*0
+    discard ui.render() # the first is written whole
+    let c = ui.canvasOf()
+    let log = canvasLogOf(c)
+    check c[0, 0] == black and c[99, 59] == black
+    var before = log.version
+
+    discard ui.render() # the same cells: nothing at all
+    check ui.scene.state{"ok"}.getBool() == true
+    check log.version == before
+
+    ui.scene.state["step"] = %*1
+    discard ui.render()
+    check log.version == before + 1
+    check log.changedSince(before).boxes == @[rect(0, 20, 100, 10)]
+    check c[50, 19] == black and c[50, 20] == red and c[50, 29] == red and c[50, 30] == black
+    before = log.version
+
+    ui.scene.state["step"] = %*2 # the same cells as step 1
+    discard ui.render()
+    check log.version == before
+
+    # Anything else drawn into the canvas means the next frame cannot trust
+    # its copy: `clear` is a draw in the log, and every cell is written again.
+    ui.scene.state["step"] = %*3
+    discard ui.render()
+    check c[50, 0] == black and c[50, 25] == red and c[50, 59] == black
+
+    # So does another palette, whose cells look the same.
+    ui.scene.state["step"] = %*4
+    discard ui.render()
+    check c[50, 25] == blue and c[50, 0] == black
+
+  test "boxes that cost no more as one are one, in what a frame repaints":
+    let log = registerCanvas(newImage(100, 100))
+    log.drew(rect(0, 40, 100, 60))
+    log.drew(rect(0, 42, 100, 58))
+    log.drew(rect(0, 38, 100, 62))
+    check log.changedSince(0).boxes == @[rect(0, 38, 100, 62)] # one copy, not three
+    let apart = registerCanvas(newImage(100, 100))
+    apart.drew(rect(0, 0, 10, 10))
+    apart.drew(rect(9, 9, 10, 10)) # they meet at a corner: the join is 361 for 200
+    apart.drew(rect(50, 50, 10, 10))
+    check apart.changedSince(0).boxes.len == 3
 
   test "a 565 canvas (an LCD's) takes the same bytes":
     let ui = pixelUi("palette", "565")

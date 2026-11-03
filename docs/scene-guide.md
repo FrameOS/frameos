@@ -320,7 +320,12 @@ A raster the app computes itself (a fire, a plasma, a sprite) goes in with
 `frameos.putPixels(canvas, bytes, { width, height, pixelSize, palette })`
 (FrameOS 2026.11.1+): a `Uint8Array` of RGBA, or with `palette` one index per
 pixel, each source pixel a `pixelSize` square. Simulate at the canvas's size
-over `pixelSize` and hand the buffer over as it is, every frame.
+over `pixelSize` and hand the buffer over as it is, every frame. When that
+raster is the whole picture, `return frameos.pixels(cells, { width, height,
+pixelSize, palette })` from `get()` instead: no canvas and no JSX, written
+straight into an LCD's buffer. `frameos.fire(heat, { width, height, wind,
+steps, seed })` runs the Doom fire's spread rule natively and returns the next
+seed.
 
 **Assets and permissions.** Asset paths are relative to the frame's assets
 folder (`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos,
@@ -915,6 +920,23 @@ declare const frameos: {
     pixels: Uint8Array | Uint8ClampedArray | ArrayBuffer,
     options?: { x?: number; y?: number; width?: number; height?: number; pixelSize?: number; palette?: (string | number)[] }
   ): boolean;
+  /**
+   * A whole frame of palette cells, to return from get() (FrameOS 2026.11.1+): written straight into an LCD's
+   * buffer, with no canvas and no JSX, each cell a pixelSize square. An index past the palette, or a grid that stops
+   * short of the frame, shows the scene's background.
+   */
+  pixels(
+    cells: Uint8Array | Uint8ClampedArray | ArrayBuffer,
+    options: { width?: number; height?: number; pixelSize?: number; palette: (string | number)[] }
+  ): unknown;
+  /**
+   * The Doom fire's spread rule, run natively over one byte of heat per cell, the bottom row feeding it
+   * (FrameOS 2026.11.1+). Returns the seed to pass next time: the same seed is the same fire on every frame type.
+   */
+  fire(
+    heat: Uint8Array | ArrayBuffer,
+    options: { width: number; height: number; wind?: number; steps?: number; seed?: number }
+  ): number;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;
