@@ -230,7 +230,7 @@ which needs the privileged Docker setup described in
 - `e2e/`: the scene snapshot, Playwright and deploy test suites.
 
 Everything is licensed AGPL-3.0; the device protocols are documented so that
-anyone can reimplement them (see `NOTICE`).
+anyone can reimplement them (see [`cloud/NOTICE`](cloud/NOTICE) and [`docs/cloud-frames.md`](docs/cloud-frames.md)).
 
 ## Developing locally
 
