@@ -58,6 +58,12 @@ line in the map).
    libraries, paid-source budgets). Draft #496 and its
    `docs/scene-rhythm-todo.md` are superseded by #582, whose open work is the
    "Scenes inside scenes" section below.
+11. **`docs/ci-costs.md`** — the Depot bill (~$50/month, 250 GB of layer
+   cache) is four `depot/build-push-action` steps: the esp32-ci image on
+   every PR push and three times per release, and the multi-arch runtime
+   image. The plan there takes it to zero: a GHCR registry cache for
+   esp32-ci first (self-testing on the next PR), then native per-arch
+   runtime builds merged with `imagetools create`, then delete the project.
 
 ---
 
