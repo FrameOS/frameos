@@ -72,7 +72,7 @@ switcher: a header with Cancel, the scene's name (the host's scene list,
 
 | Field type | Row |
 |---|---|
-| any with `options` (select) | the choices as chips; a tap picks one |
+| any with `options` (select) | a select box (`docs/jsx-ui.md`): its list opens over the panel and scrolls |
 | `boolean` | a switch beside the label; a tap anywhere on the row flips it |
 | `text`, `json` | a `<textarea>` |
 | `integer`, `float` | an `<input type="number">`: the keyboard opens on its number pad |

@@ -483,6 +483,11 @@ export function get(app, context) {
   or `"number"`, `onKeyDown` with `e.key`; `focus:` and `placeholder:`
   classes). A tap gives a field the keyboard: on a touch screen with none
   of its own, a US keyboard on the screen under the UI. Always pass `value`.
+- Select boxes: `<select value={v} placeholder="…" onChange={(e) => { v =
+  e.target.value }}><option value="a">A</option></select>`. The list opens
+  above or below it, stays on the screen and scrolls; style the chosen one
+  through the `<option>`'s own `className`, and use it when the choices are
+  many (a few fit better as buttons on a touch screen).
 - Lists longer than the screen: give the box a height (`flex-1` in a
   column, `h-*`, `max-h-*`) and `overflow-y-auto`, and a finger (or a wheel)
   scrolls it; no paging needed on an LCD. `overflow-hidden` clips.

@@ -67,7 +67,7 @@ proc keyboardBox*(width, height: int, round = false): (int, int) =
       let radius = max(min(width, height) div 2 - RoundInset, 8)
       result[0] = max(min(height div 2 + radius * 4 div 5, height) - tall, 0)
 
-proc icon(d: string, filled: bool, size: int): SvgNode =
+proc icon*(d: string, filled: bool, size: int): SvgNode =
   var c = "shrink-0"
   c.px("size", size)
   result = SvgNode(tag: "svg", attrs: @[("viewBox", "0 0 24 24"), ("class", c)])

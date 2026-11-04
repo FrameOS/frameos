@@ -221,13 +221,31 @@ proc blurField(target: UiTarget) =
   target.inputOnly = true
 
 proc dismissKeyboard*(sceneId: string, nodeId: int): bool =
-  ## `back` while a field has the keyboard, as on a phone: the field lets go
-  ## and the keyboard goes away. False when no field had it.
+  ## `back` while a field has the keyboard or a <select> its list, as on a
+  ## phone: the field lets go and the keyboard goes away, or the list closes.
+  ## False when neither was up.
   let target = uiTarget(sceneId, nodeId, create = false)
-  if target.isNil or target.input.focus == 0:
+  if target.isNil or (target.input.focus == 0 and target.input.open == 0):
     return false
+  target.input.open = 0
   target.blurField()
   true
+
+proc changeOf(value: string): JsonNode =
+  ## What a field's or a <select>'s onChange hears.
+  result = newJObject()
+  result["value"] = newJString(value)
+
+proc pickOption(target: UiTarget, code: int) =
+  ## A tap on option `code` of an open <select>'s list, which its onChange
+  ## hears as `value`, as a field's text. The list closes.
+  var change = 0
+  let value = target.memo.selectOption(target.input.open - 1, code, change)
+  target.input.open = 0
+  target.inputOnly = true
+  if change > 0:
+    target.call(change - 1, "change", changeOf(value), [0'f32, 0, 0, 0])
+    target.inputOnly = false # whatever the handler changed, get() shows it
 
 proc fieldCall(target: UiTarget, kind: UiEvent, name: string, payload: JsonNode) =
   ## The focused field's onChange or onKeyDown, if it has one.
@@ -249,9 +267,7 @@ proc changed(target: UiTarget) =
   template i: untyped = target.input
   i.place = false
   i.reveal = true
-  let payload = newJObject()
-  payload["value"] = newJString(i.text)
-  target.fieldCall(ueChange, "change", payload)
+  target.fieldCall(ueChange, "change", changeOf(i.text))
   target.inputOnly = false
 
 proc insert(target: UiTarget, text: string) =
@@ -390,7 +406,11 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       continue
     when not defined(frameosEmbedded):
       if event in ["keyDown", "textInput"]:
-        if target.input.focus > 0:
+        if target.input.open > 0 and payload{"key"}.getStr() == "Escape":
+          target.input.open = 0
+          target.inputOnly = true
+          result = true
+        elif target.input.focus > 0:
           target.typedKey(event, payload)
           result = true
         continue
@@ -491,7 +511,20 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         if (r.field > 0 or r.handlers[ueClick] > 0) and r.inside(lx, ly):
           hit = i
           break
-      if hit >= 0 and target.regions[hit].field > 0:
+      if target.input.open > 0:
+        # The list is all there is to touch: around it, it closes.
+        if hit < 0:
+          target.input.open = 0
+          moved = true
+      elif hit >= 0 and target.regions[hit].field == 4:
+        # A <select>: its list opens (the keyboard goes first), the next
+        # layout knowing where the select is once it has gone.
+        if target.input.focus > 0:
+          target.blurField()
+        target.input.open = target.regions[hit].key + 1
+        target.input.fresh = true
+        moved = true
+      elif hit >= 0 and target.regions[hit].field > 0:
         target.focusField(target.regions[hit], lx, ly)
         moved = true
       elif target.input.focus > 0 and (hit < 0 or target.regions[hit].handlers[ueClick] <= KeyBase):
@@ -523,6 +556,10 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       let handler = r.handlers[UiEvent(kind)]
       if handler > 0 and r.inside(lx, ly):
         handled = true
+        if handler - 1 >= OptionBase:
+          target.pickOption(handler - 1 - OptionBase)
+          result = true
+          break
         if handler - 1 == KeyBase:
           # Between the keys or around them: the nearest key. The field keeps
           # the keyboard either way.

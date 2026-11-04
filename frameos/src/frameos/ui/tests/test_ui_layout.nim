@@ -1,4 +1,4 @@
-import std/[strutils, unittest]
+import std/[sequtils, strutils, unittest]
 import pixie
 import pixie/fileformats/svg
 import frameos/utils/font # installs the typeface resolver text uses
@@ -487,3 +487,106 @@ suite "fields, clipping and scrolling":
     regions.setLen(0)
     discard layout.layoutUi(el("div", "bg-slate-900"), 480, 480, state, regions)
     check state.focus == 0 and not state.keyboard
+
+suite "a <select>":
+  proc options(count: int): seq[SvgNode] =
+    for i in 0 ..< count:
+      let option = el("option", "", txt("Network " & $i))
+      option.attrs.add(("value", "n" & $i))
+      result.add option
+
+  proc select(y, count: int, value = "n0"): SvgNode =
+    ## A select 40 px tall, `y` from the top of a 480 x 480 page.
+    let box = el("select", "absolute left-[20px] w-[300px] h-[40px] top-[" & $y & "px] bg-zinc-800", options(count))
+    box.attrs.add(("value", value))
+    box.attrs.add(("on-change", "7"))
+    el("div", "w-full h-full bg-black text-white", box)
+
+  proc listOf(root: SvgNode, input: var UiInput): (UiRegion, seq[UiRegion]) =
+    ## The list's box and its rows, as the layout placed them.
+    var regions: seq[UiRegion]
+    discard layout.layoutUi(root, 480, 480, input, regions)
+    result[1] = regions.filterIt(it.handlers[ueClick] > OptionBase)
+    for r in regions:
+      if r.scrollY > 0:
+        result[0] = r
+
+  proc opened(y, count: int, value = "n0"): (float32, float32, float32, seq[UiRegion]) =
+    ## Opened on the select at `y`: the top and the bottom of what the rows
+    ## cover, how far the list can scroll, and the rows.
+    var input: UiInput
+    var regions: seq[UiRegion]
+    let root = select(y, count, value)
+    discard layout.layoutUi(root, 480, 480, input, regions)
+    let key = regions.filterIt(it.field == 4)[0].key
+    input.open = key + 1
+    input.fresh = true
+    let (box, rows) = root.listOf(input)
+    var top = 1e9'f32
+    var bottom = -1e9'f32
+    for r in rows:
+      top = min(top, r.visible[1])
+      bottom = max(bottom, r.visible[3])
+    (top, bottom, box.scrollY, rows)
+
+  test "closed, it shows what it holds and has a region of its own":
+    var input: UiInput
+    var regions: seq[UiRegion]
+    let svg = layout.layoutUi(select(100, 3, "n1"), 480, 480, input, regions)
+    check regions.anyIt(it.field == 4 and it.handlers[ueChange] == 8)
+    check svg.children.len > 0
+
+  test "a short list opens below, all of it, with nothing to scroll":
+    let (top, bottom, scroll, rows) = opened(100, 3)
+    check rows.len == 3
+    check top >= 140
+    check bottom <= 280
+    check scroll == 0
+
+  test "near the bottom it opens above":
+    let (top, bottom, _, rows) = opened(420, 3)
+    check rows.len == 3
+    check bottom <= 420
+    check top >= 8
+
+  test "a long list stays on the screen and scrolls":
+    let (top, bottom, scroll, _) = opened(100, 60)
+    check top >= 140
+    check bottom <= 472
+    check scroll > 0
+    # And above, the same.
+    let (above, ending, scrollUp, _) = opened(400, 60)
+    check above >= 8
+    check ending <= 400
+    check scrollUp > 0
+
+  test "it opens with what it holds in sight":
+    let (top, bottom, _, rows) = opened(100, 60, "n40")
+    let shown = rows.filterIt(it.handlers[ueClick] == OptionBase + 40 + 1)
+    check shown.len == 1
+    check shown[0].visible[1] >= top
+    check shown[0].visible[3] <= bottom
+
+  test "on a very small screen it still fits":
+    var input: UiInput
+    var regions: seq[UiRegion]
+    let box = el("select", "absolute left-[0px] top-[30px] w-[100px] h-[40px]", options(9))
+    let root = el("div", "w-full h-full", box)
+    discard layout.layoutUi(root, 100, 100, input, regions)
+    input.open = regions.filterIt(it.field == 4)[0].key + 1
+    regions.setLen(0)
+    discard layout.layoutUi(root, 100, 100, input, regions)
+    for r in regions.filterIt(it.handlers[ueClick] > OptionBase):
+      check r.visible[1] >= 8
+      check r.visible[3] <= 92
+
+  test "with no options there is nothing to open":
+    var input: UiInput
+    var regions: seq[UiRegion]
+    let root = select(100, 0)
+    discard layout.layoutUi(root, 480, 480, input, regions)
+    input.open = regions.filterIt(it.field == 4)[0].key + 1
+    regions.setLen(0)
+    discard layout.layoutUi(root, 480, 480, input, regions)
+    check input.open == 0
+    check regions.anyIt(it.field == 4)

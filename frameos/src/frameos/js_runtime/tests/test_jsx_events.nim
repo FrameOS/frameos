@@ -475,3 +475,60 @@ suite "jsx fields":
     check dispatchUiEvent(id, "tap", at(160, 45, "touch"))
     check ui.scene.state{"picked"}.getInt(-1) == 1
     check image[160, 45] == rgbx(0x22, 0xc5, 0x5e, 255) # row 1 is green
+
+const selectForm = """
+let city = 'riga'
+export function get(app) {
+  return (
+    <div className="flex flex-col gap-2 h-full p-2 bg-white text-black">
+      <input className="h-8 shrink-0 bg-slate-100" value="field" onChange={() => {}} />
+      <select className="h-8 shrink-0 px-2 bg-slate-200 focus:bg-sky-100" value={city}
+        onChange={(e) => { city = e.target.value; frameos.setState('city', city); frameos.setState('also', e.value) }}>
+        {['oslo', 'riga', 'kyiv'].map((c) =>
+          <option value={c} className={c === city ? 'bg-sky-600' : ''}>{c.toUpperCase()}</option>)}
+      </select>
+      <div className="h-8 shrink-0 bg-red-500" onClick={() => frameos.setState('hit', true)} />
+    </div>
+  )
+}
+"""
+
+suite "jsx select boxes":
+  test "a tap opens the list, a pick reaches onChange, and nothing else answers meanwhile":
+    forgetTypedKeys()
+    let id = "tests/jsx-select"
+    let ui = newUi(selectForm, id, 320, 240)
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    # A field has the keyboard: the select takes it away, and opens for the
+    # screen that leaves.
+    check dispatchUiEvent(id, "tap", at(160, 20, "touch"))
+    check target.input.keyboard
+    discard ui.render()
+    var select: UiRegion
+    for r in target.regions:
+      if r.field == 4: select = r
+    let (sx, sy) = (int(select.x + select.w / 2), int(select.y + select.h / 2))
+    check dispatchUiEvent(id, "tap", at(sx, sy, "touch"))
+    check target.input.open > 0 and not target.input.keyboard
+    var image = ui.render()
+    for r in target.regions:
+      check r.field != 4 # the list is all there is to touch
+    # A tap beside the list closes it and does nothing else.
+    check dispatchUiEvent(id, "tap", at(1, 238, "touch"))
+    check target.input.open == 0
+    check ui.scene.state{"hit"}.isNil
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(sx, sy, "touch"))
+    discard ui.render()
+    # The third row: KYIV.
+    var rows: seq[UiRegion]
+    for r in target.regions:
+      if r.handlers[ueClick] > OptionBase: rows.add r
+    check rows.len == 3
+    check dispatchUiEvent(id, "tap", at(int(rows[2].x + rows[2].w / 2), int(rows[2].y + rows[2].h / 2), "touch"))
+    check ui.scene.state{"city"}.getStr() == "kyiv"
+    check ui.scene.state{"also"}.getStr() == "kyiv"
+    check target.input.open == 0
+    image = ui.render()
+    check image.width == 320
