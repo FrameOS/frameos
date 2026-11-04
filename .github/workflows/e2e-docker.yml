@@ -74,12 +74,20 @@ jobs:
             echo "Signup request succeeded with status code $HTTP_CODE"
           fi
 
-  esp32_firmware_image:
-    name: Build and boot ESP32 firmware image
+  # The ONLY writer of the esp32-ci layer cache, and it runs on pushes to
+  # main alone. A pull request runs the workflow file from its own branch,
+  # so any job a pull request can reach must not hold `packages: write`:
+  # with it, a same-repo PR could rewrite a step and push layers that the
+  # next main build — and from there the release firmware and runtime image
+  # — would silently reuse. Keeping the write here, behind the event, closes
+  # that; the package can stay private, nothing needs it public. The build
+  # itself is the one the firmware job below runs, minus loading the image:
+  # on a main push both run side by side, this one refreshing the cache for
+  # the next run, the firmware job reading the previous one.
+  seed_esp32_cache:
+    name: Refresh the esp32-ci layer cache
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
-    # packages: write is for the layer cache below. Only a push to main
-    # writes it; a pull request (whose token is read-only on a fork anyway)
-    # just reads.
     permissions:
       contents: read
       packages: write
@@ -96,15 +104,53 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Same context and target as every reader of this tag (the firmware
+      # job below, the release's three esp32-ci builds), so what is written
+      # here is what they hit. mode=max keeps every stage's layers, the
+      # toolchain ones included; a run with no cache yet builds cold and
+      # seeds it.
+      - name: Build ESP32 CI Docker image and export its layers
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: esp32-ci
+          push: false
+          load: false
+          cache-from: type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci
+          cache-to: type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci,mode=max
+
+  esp32_firmware_image:
+    name: Build and boot ESP32 firmware image
+    runs-on: ubuntu-latest
+    # Read-only on the package, on every event: this job is reachable from
+    # a pull request (see seed_esp32_cache for why that rules out write).
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Reads a private package: a same-repo pull request's token can, a
+      # fork's read-only token can too once the package is linked to the
+      # repository, and a login that gets nothing simply means a cold build.
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       # The esp32-ci target (ESP-IDF for both chips, QEMU, Nim, the nimble
-      # packages, emsdk, the pnpm store) comes out of a registry layer cache
-      # on GHCR: a push to main writes it with mode=max,
-      # every other run — pull requests, forks, the three release jobs that
-      # build the same target — only reads it. The per-commit tail (the
-      # source COPYs and the steps after them) is built here and stored
-      # nowhere. A missing cache tag is a warning and a cold build, not a
-      # failure. load: true puts the image into the local Docker daemon for
-      # the `docker run` below.
+      # packages, emsdk, the pnpm store) comes out of the registry layer
+      # cache seed_esp32_cache keeps on GHCR; the release's three esp32-ci
+      # builds read the same tag. The per-commit tail (the source COPYs and
+      # the steps after them) is built here and stored nowhere. A missing or
+      # unreadable cache tag is a warning and a cold build, not a failure.
+      # load: true puts the image into the local Docker daemon for the
+      # `docker run` below.
       - name: Build ESP32 CI Docker image
         uses: docker/build-push-action@v6
         with:
@@ -114,7 +160,6 @@ jobs:
           load: true
           push: false
           cache-from: type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci
-          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci,mode=max' || '' }}
 
       # The step below builds the firmware three times (8 MB, QEMU, 32 MB).
       # They share a nimcache but not a single object file, and ESP-IDF ships
