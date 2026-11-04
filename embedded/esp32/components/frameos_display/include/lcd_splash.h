@@ -14,15 +14,17 @@
 #include <stdint.h>
 
 /* What the frame is waiting for, the line under the mark (lcd_splash_text.h,
- * in this order): what the boot waits for, and the one line the mark shows
+ * in this order): what the boot waits for, and the one word the mark shows
  * after the boot, while a scene store writes flash (lcd_st7701s_rgb.c
- * fos_lcd_st7701s_updating_begin). */
+ * fos_lcd_st7701s_updating_begin). That word is the first of the firmware
+ * line, drawn clipped to its width (FOS_SPLASH_TEXT_UPDATING_W): no runs of
+ * its own, since every byte of this image is paid for on every frame. */
 typedef enum {
     FOS_LCD_SPLASH_NO_STATUS = 0,
-    FOS_LCD_SPLASH_WIFI,            /* "Connecting to Wi-Fi" */
-    FOS_LCD_SPLASH_UPDATE,          /* "Updating firmware" */
-    FOS_LCD_SPLASH_STARTING,        /* "Starting" */
-    FOS_LCD_SPLASH_UPDATING_SCENES, /* "Updating scenes" */
+    FOS_LCD_SPLASH_WIFI,     /* "Connecting to Wi-Fi" */
+    FOS_LCD_SPLASH_UPDATE,   /* "Updating firmware" */
+    FOS_LCD_SPLASH_STARTING, /* "Starting" */
+    FOS_LCD_SPLASH_UPDATING, /* "Updating" */
 } fos_lcd_splash_status_t;
 
 /* One trip of the colors through the three squares, back to the logo. */
@@ -43,7 +45,8 @@ void fos_lcd_splash_square_colors(uint32_t t_ms, uint8_t colors[3][3]);
  * other pixel left as it is). A panel smaller than the mark gets nothing. */
 void fos_lcd_splash_draw(uint16_t *fb, int width, int height, uint32_t t_ms, bool squares_only);
 
-/* Draws `status`'s line centered under the mark, in gray on black, over
- * whatever line was there; FOS_LCD_SPLASH_NO_STATUS clears it. Nothing on a
- * panel too small for the mark and the line. */
+/* Draws `status`'s line (FOS_LCD_SPLASH_UPDATING: the firmware line's first
+ * word) centered under the mark, in gray on black, over whatever line was
+ * there; FOS_LCD_SPLASH_NO_STATUS clears it. Nothing on a panel too small
+ * for the mark and the line. */
 void fos_lcd_splash_draw_status(uint16_t *fb, int width, int height, fos_lcd_splash_status_t status);

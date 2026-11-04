@@ -372,8 +372,9 @@ for the two Spectra boards most of the bench work runs on:
   after a reboot anyway). Any other flash write (a settings save, an OTA) still
   costs one disturbed frame. A scene store is hundreds of them, so from the
   first write of a push to the new set's first picture the glass shows the
-  FrameOS mark on black with "Updating scenes" under it, the boot splash's
-  drawing (`fos_lcd_st7701s_updating_begin`): where a write tears it the
+  FrameOS mark on black with "Updating" under it, the boot splash's drawing
+  with the word clipped out of its "Updating firmware" line, so it costs no
+  bytes of its own (`fos_lcd_st7701s_updating_begin`): where a write tears it the
   bands are black, no picture is presented over it, the picture from before
   stays in its buffer and comes back if the store fails (or after a backend
   sync's write, whose scenes show at the next render as before), and a timer

@@ -2018,7 +2018,7 @@ static int cmd_lcd(int argc, char **argv)
            (unsigned long)st.frames, (unsigned long)st.glitches, (unsigned long)st.late_refills,
            (unsigned long)st.slack_us, (unsigned long)st.max_deviation_us, reset ? " (reset)" : "");
     if (st.updating_count) {
-        printf("lcd: \"Updating scenes\" up for %lu scene store(s), the last %lu ms%s\n",
+        printf("lcd: \"Updating\" up for %lu scene store(s), the last %lu ms%s\n",
                (unsigned long)st.updating_count, (unsigned long)st.updating_ms,
                st.updating_now ? " so far" : "");
     }

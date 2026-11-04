@@ -83,8 +83,8 @@ esp_err_t fos_lcd_st7701s_backlight(bool on);
 
 /* A scene store begins: hundreds of flash writes, through which the refill
  * interrupt cannot run and the picture would tear. The glass shows the FrameOS
- * mark on black with "Updating scenes" under it instead (the boot splash's
- * line when the boot is still on), and no picture is presented, until `end`:
+ * mark on black with "Updating" under it instead (the boot splash's line
+ * when the boot is still on), and no picture is presented, until `end`:
  * with `picture_follows` the new scene set's first picture is on its way,
  * without it the picture from before goes back on the glass. From any task.
  * Before init, nothing. */
@@ -123,7 +123,7 @@ typedef struct {
     uint32_t late_refills;     /* late past the bounce buffers' slack, not dropped (a band) */
     uint32_t slack_us;         /* that slack at this clock */
     uint32_t max_deviation_us; /* the worst frame's distance from the nominal period */
-    uint32_t updating_count;   /* scene stores the "Updating scenes" screen was up for */
+    uint32_t updating_count;   /* scene stores the "Updating" screen was up for */
     uint32_t updating_ms;      /* how long the last one lasted (so far) */
     bool updating_now;
     int64_t now_us;            /* esp_timer now, to place the glitches below */

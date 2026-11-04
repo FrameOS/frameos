@@ -238,7 +238,29 @@ static void test_a_status_line_sits_under_the_mark(void)
     CHECK(ink_in_rows(fb, 0, mark_bottom) == mark_ink, "and leaves the mark");
     fos_lcd_splash_draw_status(fb, PANEL, PANEL, (fos_lcd_splash_status_t)99); /* not a line: cleared, no crash */
     CHECK(ink_in_rows(fb, mark_bottom, PANEL) == 0, "an unknown status draws nothing");
-    CHECK(FOS_SPLASH_TEXT_COUNT == FOS_LCD_SPLASH_UPDATING_SCENES, "a line for every status");
+    CHECK(FOS_SPLASH_TEXT_COUNT == FOS_LCD_SPLASH_STARTING, "a line for every status but the word");
+
+    /* "Updating" is the firmware line's first word: exactly the ink of its
+     * first FOS_SPLASH_TEXT_UPDATING_W columns, centered on its own width. */
+    fos_lcd_splash_draw_status(fb, PANEL, PANEL, FOS_LCD_SPLASH_UPDATE);
+    int firmware_x0 = (PANEL - FOS_SPLASH_TEXT_W[FOS_SPLASH_TEXT_UPDATING_LINE]) / 2;
+    int word_in_line = 0;
+    for (int y = mark_bottom; y < PANEL; y++) {
+        for (int x = firmware_x0; x < firmware_x0 + FOS_SPLASH_TEXT_UPDATING_W; x++) word_in_line += fb[y * PANEL + x] != 0;
+    }
+    int firmware = ink_in_rows(fb, mark_bottom, PANEL);
+    fos_lcd_splash_draw_status(fb, PANEL, PANEL, FOS_LCD_SPLASH_UPDATING);
+    int word = ink_in_rows(fb, mark_bottom, PANEL);
+    CHECK(word > 100 && word < firmware, "\"Updating\" alone: %d (firmware line %d)", word, firmware);
+    CHECK(word == word_in_line, "the word is the line's first columns: %d vs %d", word, word_in_line);
+    int word_x0 = (PANEL - FOS_SPLASH_TEXT_UPDATING_W) / 2;
+    int outside = 0;
+    for (int y = mark_bottom; y < PANEL; y++) {
+        for (int x = 0; x < PANEL; x++) {
+            if ((x < word_x0 || x >= word_x0 + FOS_SPLASH_TEXT_UPDATING_W) && fb[y * PANEL + x] != 0) outside++;
+        }
+    }
+    CHECK(outside == 0, "%d pixels of the word outside its centered box", outside);
 }
 
 int main(void)

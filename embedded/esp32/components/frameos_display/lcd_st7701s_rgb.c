@@ -555,7 +555,7 @@ static void backlight_set(bool on)
     gpio_set_level((gpio_num_t)s_board->backlight, on ? 1 : 0);
 }
 
-/* A scene store's "Updating scenes" screen (fos_lcd_st7701s_updating_begin)
+/* A scene store's "Updating" screen (fos_lcd_st7701s_updating_begin)
  * holds the glass: while it is up no picture is presented. */
 static volatile bool s_updating = false;
 static int s_updating_shown = -1; /* the buffer it was presented from, -1 for none */
@@ -940,8 +940,9 @@ esp_err_t fos_lcd_st7701s_backlight(bool on)
  * 1.5 s between, and the glass shows the picture torn into repeating bands
  * the whole way through. No refill can run from PSRAM while the cache is
  * off, so the picture cannot be kept whole: for the store the glass shows the
- * FrameOS mark on black with "Updating scenes" under it (the boot splash's
- * drawing). Where that tears, the bands are black, and the mark and the line
+ * FrameOS mark on black with "Updating" under it (the boot splash's drawing,
+ * the word clipped out of its firmware line: no bytes of its own). Where
+ * that tears, the bands are black, and the mark and the word
  * are back at every blank. The screen is presented like a picture, so the one
  * from before stays in its buffer and comes back if no new picture follows
  * (a store that failed); until the end, nothing else is presented. The timer
@@ -953,7 +954,7 @@ static void draw_updating(uint8_t *fb)
     memset(fb, 0, LCD_FB_BYTES);
     fos_lcd_splash_draw((uint16_t *)fb, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, 0, false);
     fos_lcd_splash_draw_status((uint16_t *)fb, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT,
-                               FOS_LCD_SPLASH_UPDATING_SCENES);
+                               FOS_LCD_SPLASH_UPDATING);
 }
 
 /* The esp_timer task: a store that never ended. The picture from before
@@ -985,7 +986,7 @@ void fos_lcd_st7701s_updating_begin(void)
     s_updating_shown = -1;
     if (s_splash_on) {
         /* Still booting: the splash is up, and takes the line. */
-        fos_lcd_st7701s_splash_status(FOS_LCD_SPLASH_UPDATING_SCENES);
+        fos_lcd_st7701s_splash_status(FOS_LCD_SPLASH_UPDATING);
         s_updating = true;
         return;
     }

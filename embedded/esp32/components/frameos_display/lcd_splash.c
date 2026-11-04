@@ -87,11 +87,17 @@ void fos_lcd_splash_draw_status(uint16_t *fb, int width, int height, fos_lcd_spl
         memset(fb + (size_t)(y0 + y) * (size_t)width + (size_t)box_x, 0, FOS_SPLASH_TEXT_MAX_W * sizeof(uint16_t));
     }
     int line = (int)status - 1;
-    if (line < 0 || line >= FOS_SPLASH_TEXT_COUNT) return;
+    int line_w = 0; /* the pixels of it drawn: a run past them is left out */
+    if (status == FOS_LCD_SPLASH_UPDATING) {
+        line = FOS_SPLASH_TEXT_UPDATING_LINE;
+        line_w = FOS_SPLASH_TEXT_UPDATING_W;
+    } else if (line >= 0 && line < FOS_SPLASH_TEXT_COUNT) {
+        line_w = FOS_SPLASH_TEXT_W[line];
+    }
+    if (line_w <= 0) return;
     static const uint8_t gray[3] = {0x9c, 0xa3, 0xaf};
     uint16_t shades[32];
     for (int alpha = 0; alpha < 32; alpha++) shades[alpha] = shade(gray, alpha);
-    int line_w = FOS_SPLASH_TEXT_W[line];
     int x0 = (width - line_w) / 2;
     for (int y = 0; y < FOS_SPLASH_TEXT_H; y++) {
         uint16_t *row = fb + (size_t)(y0 + y) * (size_t)width + (size_t)x0;
