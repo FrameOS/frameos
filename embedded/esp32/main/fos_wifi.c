@@ -514,9 +514,10 @@ static void scan_task(void *arg)
     if (err == ESP_OK && found == NULL) err = ESP_ERR_NO_MEM;
     if (err == ESP_OK) {
         int n = 0;
-        /* One option per name, nameless ones left out, strongest first: the
-         * driver hands the records over strongest first, so a name's first
-         * record is its best and the first names are the ones to keep. */
+        /* One option per name, nameless ones left out. The driver hands the
+         * records over strongest first, so a name's first record is its best
+         * and the first names are the ones to keep; the kept ones are then
+         * put by name, the order a list of them is read in. */
         for (uint16_t i = 0; i < count && n < FOS_WIFI_SCAN_MAX; i++) {
             const char *ssid = (const char *)records[i].ssid;
             bool seen = !ssid[0];
@@ -526,6 +527,7 @@ static void scan_task(void *arg)
             found[n].rssi = records[i].rssi;
             n++;
         }
+        fos_wifi_networks_sort(found, n);
         taskENTER_CRITICAL(&s_networks_lock);
         fos_wifi_network_t *old = s_networks;
         s_networks = found;

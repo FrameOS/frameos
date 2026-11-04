@@ -68,10 +68,10 @@ in the scene module, set by the host's runtime (`embedded_runtime.nim`):
 - An ESP32's tab: Wi-Fi (connected to what, can't find it, wrong password,
   connecting), signal, address, what the last Save could not do, who manages
   the frame and the version; the
-  network (a select box of the networks in range, strongest first, up to 64
-  names, with the saved one and "Other network…" for a hidden one: a scan runs
-  when the tab opens off Wi-Fi, and on "Scan for networks", the button right
-  under it) and its password (never shown; empty
+  network (a select box of the networks in range by name, the 64 strongest
+  when there are more, with the saved one and "Other network…" for a hidden
+  one: a scan runs when the tab opens off Wi-Fi, and on "Scan for networks",
+  the button right under it) and its password (never shown; empty
   keeps it for the same network, and means an open one for another); the
   rotation, on a frame no control plane manages (a backend's settings poll
   or the cloud's `set_settings` would put theirs back: there it is a status
