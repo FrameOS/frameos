@@ -58,12 +58,6 @@ line in the map).
    libraries, paid-source budgets). Draft #496 and its
    `docs/scene-rhythm-todo.md` are superseded by #582, whose open work is the
    "Scenes inside scenes" section below.
-11. **`docs/ci-costs.md`** — CI off Depot (2026-11-04): the esp32-ci image
-   builds against a GHCR registry cache, the runtime image natively per
-   platform, merged by digest. Owner tasks left: watch the first push to
-   main seed the cache and the first release's two image legs, make the
-   `frameos-build-cache` package public, then delete the `DEPOT_TOKEN`
-   secret, Depot project `rsbh2wrlkj` and the subscription.
 
 ---
 

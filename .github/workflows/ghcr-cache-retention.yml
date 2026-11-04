@@ -1,7 +1,7 @@
 name: GHCR build-cache retention
 
-# The registry layer caches the image builds read and write
-# (docs/ci-costs.md) are tags of one package, ghcr.io/frameos/frameos-build-cache:
+# The registry layer caches the image builds read and write are tags of
+# one package, ghcr.io/frameos/frameos-build-cache:
 # esp32-ci (written by e2e-docker.yml on every push to main) and
 # runtime-amd64 / runtime-arm64 (written per release). Every write re-points
 # its tag and leaves the previous manifest behind as an untagged version. A

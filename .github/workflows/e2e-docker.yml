@@ -98,7 +98,7 @@ jobs:
 
       # The esp32-ci target (ESP-IDF for both chips, QEMU, Nim, the nimble
       # packages, emsdk, the pnpm store) comes out of a registry layer cache
-      # on GHCR (docs/ci-costs.md): a push to main writes it with mode=max,
+      # on GHCR: a push to main writes it with mode=max,
       # every other run — pull requests, forks, the three release jobs that
       # build the same target — only reads it. The per-commit tail (the
       # source COPYs and the steps after them) is built here and stored

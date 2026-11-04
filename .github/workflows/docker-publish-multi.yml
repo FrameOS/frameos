@@ -23,7 +23,7 @@ jobs:
   # per-arch — amd64/armv6 on epyc-8, arm64+armhf on GitHub's free ARM
   # runners — see backend/bin/cross for the mapping and measurements. The
   # container images build with buildx against a registry layer cache on
-  # GHCR (docs/ci-costs.md): the esp32-ci cache that e2e-docker.yml writes
+  # GHCR: the esp32-ci cache that e2e-docker.yml writes
   # on every push to main, and one cache per platform for the runtime image
   # that build-runtime-image writes per release. Nothing paid is left in
   # the workflow (Depot, 2026-11).
@@ -834,7 +834,7 @@ jobs:
             release-assets/*-pico-2w.uf2
           if-no-files-found: error
 
-  # The runtime image, one native build per platform (docs/ci-costs.md):
+  # The runtime image, one native build per platform:
   # amd64 on an epyc-8 slot, arm64 on GitHub's free Ampere runners, where the
   # cross legs already build. Never under QEMU: the image compiles QuickJS,
   # Nim programs, the wasm bundle and the frontend per platform, and an
