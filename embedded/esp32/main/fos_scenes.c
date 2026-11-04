@@ -93,6 +93,8 @@ static bool s_payload_stored_since_boot = false;
 /* The runtime shows a scene of its own (the scene switcher, the scene
  * settings) over the resident one, which stays loaded for the way back. */
 static bool s_built_in_shown = false;
+/* That scene is the settings (fos_scenes_settings_shown). */
+static volatile bool s_settings_shown = false;
 /* How long a frame that deep-sleeps stays up with the switcher on its panel:
  * the switcher's own idle timeout on e-paper (system/sceneSwitcher), so the
  * keys that walk it are heard, and it goes back before the frame sleeps. */
@@ -1209,6 +1211,7 @@ bool fos_scenes_apply_pending_selection(void)
             return false;
         }
         s_built_in_shown = true;
+        s_settings_shown = strcmp(scene_id, FOS_SCENE_SETTINGS_ID) == 0;
         s_scene_switched = true;
         fos_client_keep_awake_ms(BUILT_IN_SCENE_AWAKE_MS);
         ESP_LOGI(TAG, "scene selected: %s", scene_id);
@@ -1224,6 +1227,7 @@ bool fos_scenes_apply_pending_selection(void)
          * the scene it covered is still resident, so the early return below
          * would skip the loading mark while that scene renders again. */
         s_built_in_shown = false;
+        s_settings_shown = false;
         s_scene_switched = true;
         fos_display_loading_begin(asked_at, fos_config()->rotate);
     }
@@ -1531,4 +1535,9 @@ esp_err_t fos_scenes_sync(bool force)
     }
     free(buf);
     return err;
+}
+
+bool fos_scenes_settings_shown(void)
+{
+    return s_settings_shown;
 }

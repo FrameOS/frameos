@@ -34,6 +34,7 @@ from app.models.frame import (
 )
 from app.models.log import new_log as log
 from app.tasks.utils import get_fresh_frame
+from app.utils.embedded_report import reported_network_warning
 from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.render_scale import normalize_render_scale
 from app.utils.token import secure_token
@@ -1980,6 +1981,10 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
         warnings.append(
             "This frame has no Wi-Fi network configured, so the board starts its setup portal instead of connecting."
         )
+
+    network_warning = reported_network_warning(frame, wifi_ssid)
+    if network_warning:
+        warnings.append(network_warning)
 
     return {
         "supported": not blockers,

@@ -4710,6 +4710,7 @@ async def api_frame_update_endpoint(
     old_device = frame.device
     previous_sd_image = (frame.buildroot or {}).get("sdImage") if isinstance(frame.buildroot, dict) else None
     previous_embedded_boot = (frame.embedded or {}).get("lastBoot") if isinstance(frame.embedded, dict) else None
+    previous_embedded_report = (frame.embedded or {}).get("reported") if isinstance(frame.embedded, dict) else None
     previous_agent = frame.agent
     for field, value in update_data.items():
         setattr(frame, field, value)
@@ -4741,6 +4742,11 @@ async def api_frame_update_endpoint(
             embedded["lastBoot"] = previous_embedded_boot
         else:
             embedded.pop("lastBoot", None)
+        # So is what it reports (utils/embedded_report.py).
+        if previous_embedded_report is not None:
+            embedded["reported"] = previous_embedded_report
+        else:
+            embedded.pop("reported", None)
         frame.embedded = embedded
 
     if "timezone" in update_data:

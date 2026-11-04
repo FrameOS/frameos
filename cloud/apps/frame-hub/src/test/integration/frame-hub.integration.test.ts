@@ -1259,6 +1259,42 @@ describe("command redelivery", () => {
 // The frame-level local network access switch: the device reports it as
 // hardware.lanAccess (hello and state), and the code the owner types rides
 // lan_access_set to the device and is dropped from the row once answered.
+describe("What a frame reports of itself", () => {
+  it("the settings mirror follows its rotation, and its network is on the row", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey, {
+      hardware: { ip: "10.0.0.9", platform: "esp32s3", rotate: 90, wifiSsid: "Cafe" },
+    });
+    const row = await waitFor(async () => {
+      const [r] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      return (r?.settings as Record<string, unknown> | null)?.rotate === 90 ? r : undefined;
+    }, "the rotation from hello");
+    expect(row.hardware).toMatchObject({ ip: "10.0.0.9", wifiSsid: "Cafe" });
+    device.ws.close();
+  });
+
+  it("leaves the mirror alone while a settings push is on its way", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    await db.update(frames).set({ settings: { rotate: 180 } }).where(eq(frames.id, frame.id));
+    await db.insert(frameCommands).values({
+      expiresAt: new Date(Date.now() + 60_000),
+      frameId: frame.id,
+      payload: { settings: { rotate: 180 } },
+      type: "set_settings",
+    });
+    const device = await openDevice(token);
+    await handshake(device, privateKey, { hardware: { platform: "esp32s3", rotate: 0 } });
+    await waitFor(async () => {
+      const [r] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      return (r?.hardware as Record<string, unknown> | null)?.rotate === 0 ? r : undefined;
+    }, "the hello");
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect((row?.settings as Record<string, unknown>).rotate).toBe(180);
+    device.ws.close();
+  });
+});
+
 describe("Local network access", () => {
   it("stores the reported switch from hello and from state", async () => {
     const { frame, privateKey, token } = await createFrameFixture();

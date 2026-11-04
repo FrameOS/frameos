@@ -441,7 +441,12 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
       let order = loop.sceneOrderOf()
       if order.len > 0:
         next = order[0].string
-  if next.len == 0:
+  if next.len == 0 and current.isBuiltIn:
+    # Nothing to go back to (an ESP32 given no scene yet, which opened the
+    # settings from its status screen): the host lets the built-in scene go.
+    payload.put("sceneId", newJString(""))
+    result = loop.host.selectScene(payload)
+  elif next.len == 0:
     result = loop.refused(envelope, "noSceneOrder")
   else:
     payload.put("sceneId", newJString(next))

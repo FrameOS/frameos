@@ -236,7 +236,16 @@ proc selectFromEvent(host: SingleSceneHost, payload: JsonNode): bool =
   ## `setCurrentScene`, as the dispatcher hands it over.
   let nextId = payload{"sceneId"}.getStr()
   if nextId.len == 0:
-    return false
+    # A built-in scene closing with no scene to go back to (event_loop.nim
+    # builtInScene; an ESP32 given none yet): back to no scene, the status
+    # screen. Nothing for the firmware to load or persist.
+    if host.sceneId.isNone or not isBuiltInScene(host.sceneId.get().string):
+      return false
+    host.lifecycle("close", %*{})
+    host.dropScene()
+    host.sceneId = none(SceneId)
+    host.renderRequested = true
+    return true
   if host.sceneId.isSome and host.sceneId.get().string == nextId:
     # The scene already showing: `state` is applied, nothing switches.
     if not hasStatePayload(payload) or host.scene.isNil:

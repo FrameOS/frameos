@@ -582,3 +582,85 @@ async def test_firmware_before_the_queue_is_still_pushed_to(async_client, db):
     frame.embedded = {**frame.embedded, 'lastBoot': {'frameosVersion': 'v2026.10.5+abc'}}
     db.commit()
     assert embedded_frame_pulls_commands(frame)
+
+
+@pytest.mark.asyncio
+async def test_the_frames_report_lands_on_the_row_and_survives_a_form(async_client, no_auth_client, db):
+    frame = await _embedded_frame(async_client, db)
+    frame.frame_host = "192.168.1.5"
+    db.commit()
+    response = await no_auth_client.post(
+        f"/api/frames/{frame.id}/embedded/commands",
+        headers=_device_headers(frame),
+        json={"rotate": 90, "wifiSsid": "Cafe", "ip": "192.168.7.9", "password": "never"},
+    )
+    assert response.status_code == 200
+    db.expire_all()
+    frame = db.get(Frame, frame.id)
+    assert frame.embedded["reported"] == {"rotate": 90, "wifiSsid": "Cafe", "ip": "192.168.7.9"}
+    # The claim is not where the request came from: the host stays.
+    assert frame.frame_host == "192.168.1.5"
+
+    # A form loaded before the report does not put an older one back.
+    embedded = {key: value for key, value in frame.embedded.items() if key != "reported"}
+    response = await async_client.post(f"/api/frames/{frame.id}", json={"embedded": embedded})
+    assert response.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).embedded["reported"]["wifiSsid"] == "Cafe"
+
+
+@pytest.mark.asyncio
+async def test_a_report_from_the_address_it_claims_moves_the_host(async_client, no_auth_client, db):
+    frame = await _embedded_frame(async_client, db)
+    frame.frame_host = "192.168.1.5"
+    db.commit()
+    with patch("app.api.embedded_commands.client_ip_for_request", return_value="192.168.7.9"):
+        response = await no_auth_client.post(
+            f"/api/frames/{frame.id}/embedded/commands",
+            headers=_device_headers(frame),
+            json={"ip": "192.168.7.9"},
+        )
+    assert response.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).frame_host == "192.168.7.9"
+
+
+@pytest.mark.asyncio
+async def test_the_frames_rotation_stands_at_first_contact_only(async_client, no_auth_client, db):
+    frame = await _embedded_frame(async_client, db)
+    frame.rotate = 0
+    db.commit()
+    url = f"/api/frames/{frame.id}/embedded/settings"
+    response = await no_auth_client.get(f"{url}?rotate=270", headers=_device_headers(frame))
+    assert response.status_code == 200
+    assert response.json()["frame"]["rotate"] == 270
+    db.expire_all()
+    frame = db.get(Frame, frame.id)
+    assert frame.rotate == 270
+
+    # From then on the row is the truth: the owner's change goes to the frame.
+    frame.rotate = 90
+    db.commit()
+    response = await no_auth_client.get(f"{url}?rotate=270", headers=_device_headers(frame))
+    assert response.json()["frame"]["rotate"] == 90
+    db.expire_all()
+    assert db.get(Frame, frame.id).rotate == 90
+
+    # Nonsense is no rotation.
+    other = await _embedded_frame(async_client, db)
+    other.rotate = 180
+    db.commit()
+    response = await no_auth_client.get(
+        f"/api/frames/{other.id}/embedded/settings?rotate=45", headers=_device_headers(other)
+    )
+    assert response.json()["frame"]["rotate"] == 180
+
+
+def test_the_provisioning_plan_says_when_it_would_change_the_network():
+    from app.utils.embedded_report import reported_network_warning
+
+    frame = Frame(embedded={"reported": {"wifiSsid": "Cafe"}})
+    assert reported_network_warning(frame, "Cafe") is None
+    assert "“Home”" in reported_network_warning(frame, "Home")
+    assert "no Wi-Fi network set here" in reported_network_warning(frame, "")
+    assert reported_network_warning(Frame(embedded={}), "Home") is None

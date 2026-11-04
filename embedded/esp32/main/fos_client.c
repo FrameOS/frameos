@@ -1242,11 +1242,13 @@ static void push_status_info(void)
              "{\"name\":\"%s\",\"panel\":\"%s\",\"ip\":\"%s\","
              "\"portal\":%s,\"portal_ssid\":\"%s\",\"portal_ip\":\"%s\","
              "\"cloud_url\":\"%s\",\"cloud_state\":\"%s\",\"cloud_connected\":%s,"
-             "\"backend_url\":\"%s\",\"version\":\"%s\"}",
+             "\"backend_url\":\"%s\",\"version\":\"%s\",\"setup_on_screen\":%s}",
              name, panel, portal ? "" : fos_wifi_ip(),
              portal ? "true" : "false", ssid, portal ? fos_wifi_ip() : "",
              cloud_url, fos_cloud_state_name(), fos_cloud_ws_connected() ? "true" : "false",
-             backend_url, app ? app->version : "");
+             backend_url, app ? app->version : "",
+             /* main.c's touch_setup: no portal, the settings panel instead. */
+             fos_touch_present() && fos_display_is_lcd() ? "true" : "false");
     frameos_nim_set_status_info(info);
 }
 

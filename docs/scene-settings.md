@@ -45,6 +45,65 @@ scene, a schedule, the HTTP API with the frame access key or an admin
 session, the preview and the runtime. Not a driver (a key is bound through
 the event map), and not the cloud, which has no verb for it.
 
+## The frame tab
+
+On a host that has settings of its own, the panel has two tabs where the
+scene's name was, **Scene** and **Frame** (drawn as a field's choices; the
+scene's name heads its tab's list). Today that is the
+ESP32 (`main/fos_frame_settings.c`); a Pi and the preview set no hook, and the
+panel is the scene's alone, as before. The host speaks through three hooks
+in the scene module, set by the host's runtime (`embedded_runtime.nim`):
+
+| Hook | What |
+|---|---|
+| `frameSettingsRead` | on every render: `status` (label and text rows), `fields` and `values` (a scene field's shape; `select` makes one a select box whatever its options, and `other` adds a last option of that label that shows an input for a value of its own, with `otherPlaceholder`), `actions` (`{id, label}` buttons; `under` puts one right below the field of that name) |
+| `frameSettingsApply` | the frame tab's Save: the fields changed there, by name, each as a scene field's value is saved |
+| `frameSettingsAction` | an action's id, and `open` when the tab comes up |
+
+- The panel opens on the scene's tab, off Wi-Fi or a scene without fields too
+  (it says so), and on the frame tab only when no scene is showing.
+- The frame tab's Save applies and stays: what it did shows in the status.
+  Its Cancel is "Close". The scene's values typed before a tab switch stay
+  until the scene tab's Save or the panel closes.
+- An ESP32's tab: Wi-Fi (connected to what, can't find it, wrong password,
+  connecting), signal, address, what the last Save could not do, who manages
+  the frame and the version; the
+  network (a select box of the networks in range, strongest first, up to 64
+  names, with the saved one and "Other network…" for a hidden one: a scan runs
+  when the tab opens off Wi-Fi, and on "Scan for networks", the button right
+  under it) and its password (never shown; empty
+  keeps it for the same network, and means an open one for another); the
+  rotation, on a frame no control plane manages (a backend's settings poll
+  or the cloud's `set_settings` would put theirs back: there it is a status
+  row; the frame's stands when it first meets either plane, below). Save joins the network in the background; a rotation restarts the
+  frame, as one from a plane does. A join, a loss or a scan draws the panel
+  again (`fos_scenes_settings_shown`).
+- Flash: the tab and the report cost the ESP32-S3 image 12.1 KB on top of the
+  select box (the scene's tab code 5.6 KB, `fos_frame_settings.c` 2.2 KB, the
+  background join and scan in `fos_wifi.c` 1.3 KB, strings 1.5 KB). The host writes its JSON as
+  text, not with cJSON, and the tabs are the panel's own buttons: keep it that
+  lean.
+- **What a control plane knows of it.** Wi-Fi set here is the device's alone,
+  as the console's `wifi` and the portal's form are: neither plane can send a
+  frame a network, so a deploy never touches it, and no password ever leaves
+  the frame. The frame reports its rotation, network and address instead
+  (`fos_cloud_add_device_report`): on every cloud hello (`hardware.rotate`,
+  `hardware.wifiSsid`, `hardware.ip`), and in every backend commands pull,
+  which a new address asks for at once (`embedded.reported`,
+  `backend/app/utils/embedded_report.py`). Both settings pages say which
+  network the frame is on.
+  - **Rotation:** the first time a backend hears from a frame, the frame's
+    stands (the settings poll carries it as `?rotate=`, so it is not turned
+    back and restarted first); after that the row is the truth. The cloud's
+    mirror follows every hello unless a `set_settings` is on its way.
+  - **Address:** a backend moves `frame_host` under the bootup's rule (the
+    claim must be the address the request came from, a hostname stays). A
+    Wi-Fi join from the panel does not reboot, so it says no bootup. The cloud's
+    `local_origin` stays fill-only: it is where a sign-in redirects.
+  - **Flashing again** erases the frame's network, and the browser flasher
+    sends the backend's: its plan warns when that is not the one the frame
+    reports.
+
 ## Saving
 
 **Save** is `setCurrentScene {sceneId: from, state: values}`, from the

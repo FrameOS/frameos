@@ -126,6 +126,7 @@ static bool sync_pass(bool after_forced_pull)
     cJSON *hello = cJSON_CreateObject();
     if (hello == NULL) return false;
     fos_cloud_add_state_fields(hello);
+    fos_cloud_add_device_report(hello);
     const char *settings_etag = fos_settings_etag();
     if (settings_etag[0]) cJSON_AddStringToObject(hello, "settings_etag", settings_etag);
     char *body = cJSON_PrintUnformatted(hello);
