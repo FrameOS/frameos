@@ -33,8 +33,8 @@ as it resolves `sceneSwitcher`:
 - The frame's `back` (a swipe in from the left edge on every touch preset,
   docs/events.md) is Cancel too, as a phone's back is: with a field's
   keyboard up it puts the keyboard away first (`ui/events.nim`
-  `dismissKeyboard`), and the next one closes the panel. `forward` does
-  nothing here.
+  `dismissKeyboard`; a held key's accents, if those are up, before that), and
+  the next one closes the panel. `forward` does nothing here.
 - `sceneSwitcher` while the panel shows goes back the same way, and
   `sceneSettings` while the switcher shows goes back to the scene: a swipe
   from the other edge closes either built-in scene, so the frame never stacks

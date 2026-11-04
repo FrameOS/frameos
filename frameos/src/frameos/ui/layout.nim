@@ -18,6 +18,8 @@ import pixie/fileformats/svg
 import frameos/ui/tailwind
 import frameos/ui/keyboard
 import frameos/ui/tree
+when not defined(frameosEmbedded):
+  import frameos/panel_shape
 
 export keyboard.KeyboardPage
 
@@ -60,6 +62,7 @@ type
     keyboard*: bool      ## the on-screen keyboard is up (the frame has none of its own)
     page*: KeyboardPage  ## which keys it shows ...
     shift*: int          ## ... letters in capitals: 1 the next one, 2 all of them
+    accents*: int        ## the key whose accents show above it (its byte); 0 for none
     reveal*: bool        ## scroll the focused field into view at the next layout
     paper*: bool         ## e-paper: the keyboard shows no press
     round*: bool         ## a round panel's whole canvas: the keyboard stays inside its circle
@@ -87,6 +90,7 @@ type
     rootW, rootH: float32
     keyboard: UiNode     ## the on-screen keyboard's, likewise
     popup: UiNode        ## an open <select>'s list, likewise
+    accents: UiNode      ## a held key's accents, likewise
 
   UiNode {.acyclic.} = ref object
     kind: UiKind
@@ -157,6 +161,7 @@ const
     "on-change", "on-key-down"]
   KeyboardKey = 1 shl 21 ## the on-screen keyboard's root, far from the UI's keys
   PopupKey = 1 shl 22    ## an open <select>'s list, likewise
+  AccentKey = 1 shl 23   ## a held key's accents, likewise
   Unbounded = 1e9'f32
   MaxDepth = 64
 
@@ -1502,6 +1507,52 @@ proc popup(anchor: UiNode, r: UiRegion, width, height: float32, input: var UiInp
     memo.popup = shown
   true
 
+proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var seq[SvgNode],
+    gradients: var int, regions: var seq[UiRegion]): bool =
+  ## The accents of the held key, `r` its region as the keyboard was just
+  ## placed: a row of keys its size above it (ui/keyboard.nim `accentTree`),
+  ## centred on it as far as the screen, or a round panel's circle, allows,
+  ## and under it when there is no room above. It goes on top of everything;
+  ## the keyboard stays there to touch (a tap on it puts the row away and
+  ## types, ui/events.nim). False for a key without accents.
+  let count = accentCount(input.accents)
+  if count == 0:
+    return false
+  let
+    keyH = int(r.h)
+    gap = max(keyH div 8, 3)
+    edge = 4
+    popH = keyH + 2 * gap + 4 # its padding and border
+    above = int(r.y) - gap - popH
+    y = if above >= edge: above else: int(r.y + r.h) + gap
+  var
+    lo = edge
+    hi = width - edge
+  when not defined(frameosEmbedded):
+    if input.round:
+      # Inside the circle at the row's edge farther from its centre.
+      let
+        radius = max(min(width, height) div 2 - RoundInset, 8)
+        dy = max(abs(y - height div 2), abs(y + popH - height div 2))
+        half = chordHalf(radius, dy) - edge
+      lo = max(lo, width div 2 - half)
+      hi = min(hi, width div 2 + half)
+  let
+    # Each form a key as wide as the held one, narrower when the row would
+    # not fit between `lo` and `hi`.
+    keyW = max(min(int(r.w), (hi - lo - 4 - (count + 1) * gap) div count), 8)
+    popW = count * keyW + (count + 1) * gap + 4
+  let shown = accentTree(input.accents, input.shift, keyW, keyH, gap, input.paper)
+    .build(initText(), width.float32, height.float32, 0, AccentKey, input, false,
+      if memo.isNil: nil else: memo.accents)
+  shown.size = shown.layout(popW.float32, popH.float32, true, true)
+  shown.x = float32(clamp(int(r.x + r.w / 2) - popW div 2, lo, max(hi - popW, lo)))
+  shown.y = float32(y)
+  shown.emit(0, 0, 1, drawn, gradients, regions)
+  if not memo.isNil:
+    memo.accents = shown
+  true
+
 proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     regions: var seq[UiRegion], textMemo: UiMemo = nil): SvgNode =
   ## A UI tree laid out into a `width` x `height` image, as the SVG that
@@ -1558,13 +1609,26 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
       input.open = 0
   if kb > 0:
     let keys = keyboardTree(width, kb, input.page, input.shift, input.paper, input.round, kbTop,
-      height).build(initText(), w, kb.float32, 0, KeyboardKey, input, false,
+      height, input.accents).build(initText(), w, kb.float32, 0, KeyboardKey, input, false,
       if memo.isNil: nil else: memo.keyboard)
     keys.size = keys.layout(w, kb.float32, true, true)
     keys.y = h
     keys.emit(0, 0, 1, result.children, gradients, regions)
     if not memo.isNil:
       memo.keyboard = keys
+    if input.accents > 0:
+      # The held key's accents, over the keyboard, from where it drew the key
+      # (none when the page turned and the key is gone).
+      var shown = false
+      for i in countdown(regions.high, 0):
+        if regions[i].handlers[ueClick] - 1 == KeyBase + input.accents:
+          let key = regions[i]
+          shown = key.accentPopup(width, height, input, result.children, gradients, regions)
+          break
+      if not shown:
+        input.accents = 0
+  else:
+    input.accents = 0
   if input.focus > 0 and not focusSeen:
     # The field is gone: nothing has the keyboard.
     input.focus = 0

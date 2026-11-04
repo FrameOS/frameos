@@ -50,6 +50,7 @@ type
     dragPointer, dragKey: int
     dragX, dragY, dragSX, dragSY: float32
     dragging, dragged: bool
+    holdPointer: int            ## the pointer whose hold opened a key's accents, -1 for none
 
 const MaxTargets = 16
 
@@ -75,7 +76,7 @@ proc uiTarget*(sceneId: string, nodeId: int, create = true): UiTarget =
   if create:
     if targets.len >= MaxTargets:
       targets.delete(0)
-    result = UiTarget(sceneId: sceneId, nodeId: nodeId, memo: UiMemo(), dragKey: -1)
+    result = UiTarget(sceneId: sceneId, nodeId: nodeId, memo: UiMemo(), dragKey: -1, holdPointer: -1)
     targets.add result
 
 proc forgetUiTarget*(sceneId: string, nodeId: int) =
@@ -126,10 +127,13 @@ proc wants(r: UiRegion, event: string): bool =
 proc uiListens*(sceneId, event: string): bool =
   ## Whether a UI in the scene wants `event`: the dispatcher builds a pointer
   ## event only for a scene that listens (event_loop.nim). A field with the
-  ## keyboard wants keys, and a tap anywhere (one elsewhere puts it away).
+  ## keyboard wants keys, and a tap anywhere (one elsewhere puts it away);
+  ## a key's accents want the finger that holds it, wherever it slides.
   for target in targets:
     if target.sceneId == sceneId:
       if target.input.focus > 0 and event in ["tap", "keyDown", "textInput"]:
+        return true
+      if target.input.accents > 0 and event in ["pointerMove", "pointerUp", "pointerCancel"]:
         return true
       for r in target.regions:
         if r.wants(event):
@@ -159,14 +163,22 @@ proc nearestKey(target: UiTarget, lx, ly: float32): int =
   var best = high(float32)
   for r in target.regions:
     let code = r.handlers[ueClick] - 1 - KeyBase
-    if code <= 0:
-      continue # not a key: the app's, or the keyboard's own box
+    if code <= 0 or code >= AccentBase - KeyBase:
+      continue # not a key: the app's, the keyboard's own box, or an accent
     let
       dx = max(max(r.visible[0] - lx, lx - r.visible[2]), 0)
       dy = max(max(r.visible[1] - ly, ly - r.visible[3]), 0)
     if dx * dx + dy * dy < best:
       best = dx * dx + dy * dy
       result = code
+
+proc accentUnder(target: UiTarget, lx, ly: float32): int =
+  ## The region of the accent under (lx, ly), -1 for none.
+  for i in countdown(target.regions.high, 0):
+    if target.regions[i].handlers[ueClick] - 1 >= AccentBase and
+        target.regions[i].handlers[ueClick] - 1 < OptionBase and target.regions[i].inside(lx, ly):
+      return i
+  -1
 
 proc keysOver(target: UiTarget, lx, ly: float32, active: bool): seq[int] =
   ## The elements under the point: hover ones (and groups), or active ones.
@@ -205,6 +217,7 @@ proc focusField(target: UiTarget, r: UiRegion, lx, ly: float32) =
     i.text = target.memo.fieldText(r.key)
     i.page = if r.field == 3: kpNumbers else: kpLetters
     i.shift = 0
+    i.accents = 0
   i.caret = i.text.len
   i.place = true
   i.placeX = lx - r.x
@@ -218,15 +231,20 @@ proc blurField(target: UiTarget) =
   target.input.focus = 0
   target.input.keyboard = false
   target.input.place = false
+  target.input.accents = 0
   target.inputOnly = true
 
 proc dismissKeyboard*(sceneId: string, nodeId: int): bool =
   ## `back` while a field has the keyboard or a <select> its list, as on a
   ## phone: the field lets go and the keyboard goes away, or the list closes.
-  ## False when neither was up.
+  ## With a key's accents up, those go first. False when none was up.
   let target = uiTarget(sceneId, nodeId, create = false)
   if target.isNil or (target.input.focus == 0 and target.input.open == 0):
     return false
+  if target.input.accents > 0:
+    target.input.accents = 0
+    target.inputOnly = true
+    return true
   target.input.open = 0
   target.blurField()
   true
@@ -319,6 +337,7 @@ proc pressKey(target: UiTarget, code: int) =
   ## or what its byte stands for.
   template i: untyped = target.input
   target.inputOnly = true
+  i.accents = 0
   if code == ord(kShift): i.shift = if i.shift == 0: 1 else: 0
   elif code == ord(kCapsLock): i.shift = 2
   elif code == ord(kBackspace):
@@ -330,6 +349,34 @@ proc pressKey(target: UiTarget, code: int) =
   elif code == ord(kMore): i.page = kpMore
   elif code >= 32:
     let text = typed(code, i.shift)
+    target.keyDown(text)
+    target.insert(text)
+
+proc holdKey(target: UiTarget, code, pointer: int) =
+  ## A key held (`longPress`, while the finger is still down): its accents
+  ## come up above it, for that finger to slide onto one, or to lift and tap
+  ## one (ui/keyboard.nim `Accents`, drawn by ui/layout.nim). A key without
+  ## any has no long-press handler, so this never sees one.
+  template i: untyped = target.input
+  if accentCount(code) == 0:
+    return
+  i.accents = code
+  i.pressed.setLen(0)
+  target.holdPointer = pointer
+  target.inputOnly = true
+
+proc pickAccent(target: UiTarget, index: int) =
+  ## Accent number `index` of the held key, typed as a key is (a capital
+  ## under shift); the row goes away. Once: the release that picked it is
+  ## followed by no tap, but a tap on a row the next render has not yet
+  ## taken down finds nothing to pick.
+  template i: untyped = target.input
+  if i.accents == 0:
+    return
+  let text = accentText(i.accents, index, i.shift)
+  i.accents = 0
+  target.inputOnly = true
+  if text.len > 0:
     target.keyDown(text)
     target.insert(text)
 
@@ -452,6 +499,26 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
           target.dragging = false
           target.dragged = true
           result = true
+    if target.holdPointer == pointer and (follows or down):
+      # The finger that holds a key, its accents up: the accent it slides
+      # onto lights, and the one it lifts on is typed. Lifted elsewhere, the
+      # row stays for a tap.
+      if down or target.input.accents == 0:
+        target.holdPointer = -1
+      elif kind == ord(uePointerMove) and placed:
+        let over = target.accentUnder(lx, ly)
+        var pressed: seq[int]
+        if over >= 0 and target.regions[over].active:
+          pressed.add target.regions[over].key
+        if pressed != target.input.pressed:
+          target.input.pressed = pressed
+          moved = true
+      elif released:
+        target.holdPointer = -1
+        let over = if placed and event == "pointerUp": target.accentUnder(lx, ly) else: -1
+        if over >= 0:
+          target.pickAccent(target.regions[over].handlers[ueClick] - 1 - AccentBase)
+          result = true
     if released:
       target.release(pointer)
       if target.input.pressed.len > 0:
@@ -511,6 +578,13 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         if (r.field > 0 or r.handlers[ueClick] > 0) and r.inside(lx, ly):
           hit = i
           break
+      if target.input.accents > 0 and (hit < 0 or
+          target.regions[hit].handlers[ueClick] - 1 < AccentBase or
+          target.regions[hit].handlers[ueClick] - 1 >= OptionBase):
+        # A key's accents are up: a tap on one picks it (below); one
+        # anywhere else puts the row away, and then does what it does.
+        target.input.accents = 0
+        moved = true
       if target.input.open > 0:
         # The list is all there is to touch: around it, it closes.
         if hit < 0:
@@ -560,6 +634,10 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
           target.pickOption(handler - 1 - OptionBase)
           result = true
           break
+        if handler - 1 >= AccentBase:
+          target.pickAccent(handler - 1 - AccentBase)
+          result = true
+          break
         if handler - 1 == KeyBase:
           # Between the keys or around them: the nearest key. The field keeps
           # the keyboard either way.
@@ -569,7 +647,8 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
             result = true
           break
         if handler > KeyBase:
-          target.pressKey(handler - 1 - KeyBase)
+          if kind == ord(ueLongPress): target.holdKey(handler - 1 - KeyBase, pointer)
+          else: target.pressKey(handler - 1 - KeyBase)
         else:
           target.call(handler - 1, event, payload, [float32(lx - r.x), float32(ly - r.y), r.w, r.h])
           target.inputOnly = false # whatever the handler changed, get() shows it

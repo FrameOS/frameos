@@ -1,10 +1,11 @@
-import std/[sequtils, strutils, unittest]
+import std/[json, sequtils, strutils, unittest]
 import pixie
 import pixie/fileformats/svg
 import frameos/utils/font # installs the typeface resolver text uses
 import frameos/ui/tailwind
 import frameos/ui/layout
 import frameos/ui/keyboard
+import frameos/ui/events
 
 # The UI layout: Tailwind classes read, boxes placed the way a browser places
 # them for the subset it supports, and the SVG that comes out drawn by pixie.
@@ -487,6 +488,183 @@ suite "fields, clipping and scrolling":
     regions.setLen(0)
     discard layout.layoutUi(el("div", "bg-slate-900"), 480, 480, state, regions)
     check state.focus == 0 and not state.keyboard
+
+suite "a held key's accents":
+  # docs/jsx-ui.md "Fields and the keyboard": a key held shows its accented
+  # forms above it; the finger slides onto one and lifts, or lifts and taps.
+  test "the table: which keys have forms, and their capitals by arithmetic":
+    check accentCount(ord('a')) == 8 and accentCount(ord('e')) == 7 and accentCount(ord('y')) == 1
+    check accentCount(ord('b')) == 0 and accentCount(ord(' ')) == 0 and accentCount(ord(kShift)) == 0
+    check accentCount(ord('$')) == 4 and accentCount(ord('"')) == 5 and accentCount(ord('0')) == 1
+    check accentText(ord('a'), 0, 0) == "à" and accentText(ord('a'), 4, 0) == "æ" and accentText(ord('a'), 7, 0) == "ā"
+    check accentText(ord('a'), 8, 0) == "" and accentText(ord('b'), 0, 0) == ""
+    # Latin-1 (æ, ø, ÿ), Latin Extended-A at an even capital (ā, œ, š) and
+    # at an odd one (ń, ł, ž); ß and a symbol have no capital.
+    check accentText(ord('a'), 4, 1) == "Æ" and accentText(ord('o'), 5, 2) == "Ø" and accentText(ord('y'), 0, 1) == "Ÿ"
+    check accentText(ord('a'), 7, 1) == "Ā" and accentText(ord('o'), 4, 1) == "Œ" and accentText(ord('s'), 2, 1) == "Š"
+    check accentText(ord('n'), 1, 1) == "Ń" and accentText(ord('l'), 0, 1) == "Ł" and accentText(ord('z'), 0, 1) == "Ž"
+    check accentText(ord('s'), 0, 1) == "ß" and accentText(ord('$'), 0, 1) == "€" and accentText(ord('-'), 1, 1) == "—"
+    check accentText(ord('i'), 5, 1) == "Ì" and accentText(ord('u'), 4, 1) == "Ū" and accentText(ord('c'), 1, 1) == "Ć"
+
+  proc keyRegion(regions: seq[UiRegion], code: int): UiRegion =
+    for r in regions:
+      if r.handlers[ueClick] - 1 == KeyBase + code: return r
+    doAssert false, "no key " & $code
+
+  proc accentRegions(regions: seq[UiRegion]): seq[UiRegion] =
+    for r in regions:
+      if r.handlers[ueClick] - 1 >= AccentBase and r.handlers[ueClick] - 1 < OptionBase: result.add r
+
+  proc withKeyboard(width, height: int, state: var UiInput, regions: var seq[UiRegion], memo: UiMemo = nil,
+      value = ""): SvgNode =
+    let field = input("input", "w-full h-[30px] bg-white", {"value": value})
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-slate-900", field), width, height, state, regions, memo)
+    if state.focus == 0:
+      state.focus = regions[0].key + 1
+      state.keyboard = true
+    regions.setLen(0)
+    layout.layoutUi(el("div", "bg-slate-900", field), width, height, state, regions, memo)
+
+  test "the row sits above the held key, its forms keys of the key's size":
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    discard withKeyboard(480, 480, state, regions)
+    check accentRegions(regions).len == 0
+    let e = keyRegion(regions, ord('u'))
+    # Keys with forms take a long press, the others do not.
+    check e.handlers[ueLongPress] - 1 == KeyBase + ord('u')
+    check keyRegion(regions, ord('b')).handlers[ueLongPress] == 0
+    check keyRegion(regions, ord(kShift)).handlers[ueLongPress] == 0
+    state.accents = ord('u')
+    let svg = withKeyboard(480, 480, state, regions)
+    let forms = accentRegions(regions)
+    check forms.len == 5
+    for i, f in forms:
+      check f.handlers[ueClick] - 1 == AccentBase + i
+      check abs(f.w - e.w) < 1 and abs(f.h - e.h) < 1
+      check f.y + f.h < e.y # above the key ...
+      check f.x >= 0 and f.x + f.w <= 480 # ... on the screen
+    check forms[1].x > forms[0].x
+    # Centred on the key, as far as the screen allows: the row's middle is
+    # the key's.
+    let mid = (forms[0].x + forms[^1].x + forms[^1].w) / 2
+    check abs(mid - (e.x + e.w / 2)) < 2
+    # The held key is drawn lit: light where it was dark.
+    let image = newImage(parseSvg(svg, 480, 480))
+    let c = image.color(int(e.x + 3), int(e.y + 3))
+    check c.r > 200 and c.g > 200
+    # The key still there (the keyboard is not replaced by the row).
+    check keyRegion(regions, ord('q')).w > 0
+
+  test "at the edge the row stays on the screen, under shift it shows capitals, on a round panel inside the circle":
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    discard withKeyboard(480, 480, state, regions)
+    state.accents = ord('a') # the first key of its row
+    state.shift = 1
+    discard withKeyboard(480, 480, state, regions)
+    var forms = accentRegions(regions)
+    # The row would reach past the left edge centred on a: it starts at the
+    # edge instead (its border and padding before the first form).
+    check forms.len == 8 and forms[0].x >= 4 and forms[0].x < 16
+    # The row's keys read as capitals (the layout outlines the text, so ask
+    # the tree it was built from).
+    var texts: seq[string]
+    for key in accentTree(ord('a'), 1, 40, 40, 4, false).children:
+      texts.add key.children[0].text
+    check texts == @["À", "Á", "Â", "Ä", "Æ", "Ã", "Å", "Ā"]
+    # A 240 px round panel: the row stays inside the circle (RoundInset in
+    # from the rim), where the screen's corners are not.
+    state = UiInput()
+    state.round = true
+    regions.setLen(0)
+    discard withKeyboard(240, 240, state, regions)
+    let a = keyRegion(regions, ord('a'))
+    state.accents = ord('a')
+    discard withKeyboard(240, 240, state, regions)
+    forms = accentRegions(regions)
+    check forms.len == 8 and forms[0].w <= a.w
+    for f in [forms[0], forms[^1]]:
+      for (x, y) in [(f.x, f.y), (f.x + f.w, f.y), (f.x, f.y + f.h), (f.x + f.w, f.y + f.h)]:
+        check (x - 120) * (x - 120) + (y - 120) * (y - 120) <= 108'f32 * 108
+    # The page turned: the key is gone, and so is the row.
+    state.page = kpNumbers
+    discard withKeyboard(240, 240, state, regions)
+    check state.accents == 0 and accentRegions(regions).len == 0
+
+  test "held, slid onto and lifted; held, lifted and tapped; tapped away":
+    let target = uiTarget("scene", 7)
+    target.input.paper = false
+    target.call = proc(handler: int, name: string, event: JsonNode, hit: UiHit) = discard
+    proc relayout(): SvgNode =
+      # The field shows what was typed, as an app's onChange would make it.
+      withKeyboard(480, 480, target.input, target.regions, target.memo, target.input.text)
+    discard relayout()
+    proc at(r: UiRegion, event: string, pointer = 1, buttons = 0): bool =
+      dispatchUiEvent("scene", event, %*{"x": r.x + r.w / 2, "y": r.y + r.h / 2, "pointerId": pointer,
+        "pointerType": "touch", "buttons": buttons})
+    check uiListens("scene", "longPress")
+    check not uiListens("scene", "pointerMove")
+    # Hold e: the row comes up while the finger is down, and no tap follows.
+    let e = keyRegion(target.regions, ord('e'))
+    check at(e, "pointerDown", buttons = 1)
+    check at(e, "longPress")
+    check target.input.accents == ord('e')
+    check uiListens("scene", "pointerMove")
+    discard relayout()
+    var forms = accentRegions(target.regions)
+    check forms.len == 7
+    # Slid onto the second form: it lights (it is pressed); lifted there, typed.
+    check at(forms[1], "pointerMove", buttons = 1)
+    check target.input.pressed == @[forms[1].key]
+    check at(forms[1], "pointerUp")
+    check target.input.text == "é" and target.input.accents == 0
+    discard relayout()
+    check accentRegions(target.regions).len == 0
+    # Hold a, lift on it: the row stays; a tap on a form types it.
+    let a = keyRegion(target.regions, ord('a'))
+    check at(a, "pointerDown", buttons = 1)
+    check at(a, "longPress")
+    discard at(a, "pointerUp") # nothing to redraw: the key stays lit
+    check target.input.accents == ord('a')
+    discard relayout()
+    forms = accentRegions(target.regions)
+    check at(forms[3], "tap")
+    check target.input.text == "éä" and target.input.accents == 0
+    # Hold o, lift on it, then tap q instead: the row goes and q is typed.
+    discard relayout()
+    let o = keyRegion(target.regions, ord('o'))
+    check at(o, "pointerDown", buttons = 1)
+    check at(o, "longPress")
+    discard at(o, "pointerUp")
+    discard relayout()
+    check accentRegions(target.regions).len == 8
+    check at(keyRegion(target.regions, ord('q')), "tap")
+    check target.input.text == "éäq" and target.input.accents == 0
+    # Hold b: nothing comes up. Hold u, then back: the row goes, the keyboard stays.
+    discard relayout()
+    check not at(keyRegion(target.regions, ord('b')), "longPress")
+    check target.input.accents == 0
+    check at(keyRegion(target.regions, ord('u')), "longPress")
+    check target.input.accents == ord('u')
+    check dismissKeyboard("scene", 7)
+    check target.input.accents == 0 and target.input.keyboard and target.input.focus > 0
+    # On e-paper a form shows no press, but lifting on it still types it.
+    target.input.paper = true
+    discard relayout()
+    let s = keyRegion(target.regions, ord('s'))
+    discard at(s, "pointerDown", buttons = 1) # no press to show on paper
+    check at(s, "longPress")
+    discard relayout()
+    forms = accentRegions(target.regions)
+    discard at(forms[0], "pointerMove", buttons = 1)
+    check target.input.pressed.len == 0
+    check at(forms[0], "pointerUp")
+    check target.input.text == "éäqß"
+    forgetUiTarget("scene", 7)
 
 suite "a <select>":
   proc options(count: int): seq[SvgNode] =
