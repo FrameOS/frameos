@@ -1,0 +1,13 @@
+[Unit]
+Description=Weekly check that the runner VM image is current
+
+[Timer]
+# Sunday night UTC, when the pool is idle; a release that forces an update
+# gives a month's notice, so weekly is plenty. Persistent catches up a run
+# the host slept through.
+OnCalendar=Sun *-*-* 03:00:00 UTC
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

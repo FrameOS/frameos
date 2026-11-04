@@ -22,7 +22,16 @@ it never enters a VM), then build the image:
 
     sudo bin/gha-image-build.sh
 
-Rebuild the image whenever you want a newer actions-runner / toolchain.
+The image is kept current by `gha-image-refresh.timer` (Sunday 03:00 UTC,
+installed and enabled by `sync-to-host.sh`): `bin/gha-image-refresh.sh`
+rebuilds when actions/runner has a newer release than the one in the image
+(GitHub refuses jobs to a runner a month behind — the job logs warn first)
+or when the image is 30 days old, under a staging alias, boots a VM from it
+to check the runner version and docker, and only then re-points
+`gha-runner-noble`. New VM launches use it at once; nothing needs a
+restart. `journalctl -u gha-image-refresh` says what it did;
+`sudo bin/gha-image-refresh.sh --force` rebuilds now, and a bare
+`bin/gha-image-build.sh` still works but swaps the live alias untested.
 `/srv/gha-runners/cache` is mounted into every VM at `/mnt/cache` — point
 BR2_DL_DIR / ccache / buildx `type=local` caches there from the workflows.
 It is **read-only unless a slot's `GHA_CACHE_WRITABLE` says otherwise**
