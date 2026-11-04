@@ -53,12 +53,11 @@ const
     ## five minutes, as long as an ESP32 that deep-sleeps stays up for it
     ## (fos_scenes.c BUILT_IN_SCENE_AWAKE_MS).
   # What a handler number means: Cancel, Save, then per field (by its index
-  # in `state.fields`) a field's text, a switch, or one of its choices.
+  # in `state.fields`) a field's text (a select box's pick is one) or a switch.
   HCancel = 0
   HSave = 1
   HText = 1000
   HToggle = 2000
-  HChoice = 3000 ## + field * 100 + choice
   # The types the panel cannot edit: what they hold is not text.
   Unedited = ["node", "scene", "image"]
 
@@ -153,18 +152,12 @@ proc acting(self: SceneSettingsScene) =
   elif handler == HSave: self.save()
   else:
     let
-      index = if handler >= HChoice: (handler - HChoice) div 100 elif handler >= HToggle: handler - HToggle
-        else: handler - HText
+      index = if handler >= HToggle: handler - HToggle else: handler - HText
     if index >= 0 and index < fields.elems.len:
       let field = fields.elems[index]
       let name = field{"name"}.getStr()
       let values = self.valueMap()
-      if handler >= HChoice:
-        let choice = (handler - HChoice) mod 100
-        let options = field{"options"}
-        if not options.isNil and options.kind == JArray and choice < options.elems.len:
-          values.put(name, newJString(options.elems[choice]{"value"}.getStr()))
-      elif handler >= HToggle:
+      if handler >= HToggle:
         values.put(name, newJBool(not values{name}.isOn))
       else:
         values.put(name, newJString(actedText))
@@ -241,26 +234,25 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int): SvgNode =
   c.px("text", look.size * 4 div 5)
   result.children.add el("span", move c, SvgNode(text: label))
   if not options.isNil and options.kind == JArray and options.elems.len > 0:
-    # Choices: one tap picks one.
-    c = "flex flex-wrap"
-    c.px("gap", look.gap div 2)
-    let chips = el("div", move c)
-    let current = value.text
-    for j in 0 ..< min(options.elems.len, 100):
+    # A select box: its options, strings or {value, label}, in a list that
+    # opens over the panel (ui/layout.nim).
+    c = fieldBox(look)
+    c.px("h", look.line)
+    let select = el("select", move c)
+    let held = value.text
+    select.attrs.add(("value", held))
+    select.attrs.add(("placeholder", field{"placeholder"}.getStr()))
+    for j in 0 ..< options.elems.len:
       let option = options.elems[j]
-      var name = option{"label"}.getStr()
-      if name.len == 0:
-        name = option{"value"}.getStr()
-      c = "flex items-center rounded-full"
-      c.px("h", look.line * 4 div 5)
-      c.px("px", look.size * 3 div 4)
-      let picked = option{"value"}.getStr() == current
-      if look.paper:
-        c.add(if picked: " bg-black text-white border-2 border-black" else: " border-2 border-black")
-      else:
-        c.add(if picked: " bg-sky-600" else: " bg-zinc-800 active:bg-zinc-600")
-      chips.children.add el("div", move c, SvgNode(text: name)).on("on-click", HChoice + index * 100 + j)
-    result.children.add chips
+      let name = if option.kind == JObject: option{"value"}.text else: option.text
+      c = "rounded-lg"
+      if name == held: c.add(if look.paper: " bg-black text-white" else: " bg-sky-600")
+      elif not look.paper: c.add " active:bg-zinc-600"
+      let label = option{"label"}.getStr()
+      let item = el("option", move c, SvgNode(text: if label.len > 0: label else: name))
+      item.attrs.add(("value", name))
+      select.children.add item
+    result.children.add select.on("on-change", HText + index)
     return
   # Text to type: a line, or lines for text and JSON.
   let lines = kind in ["text", "json"]

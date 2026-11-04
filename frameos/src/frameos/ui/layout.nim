@@ -17,6 +17,7 @@ import pixie
 import pixie/fileformats/svg
 import frameos/ui/tailwind
 import frameos/ui/keyboard
+import frameos/ui/tree
 
 export keyboard.KeyboardPage
 
@@ -40,7 +41,7 @@ type
     key*: int                        ## its place in the tree, the same next render
     handlers*: array[UiEvent, int]   ## a handler's number + 1, 0 for none
     hover*, active*, group*: bool
-    field*: uint8                    ## 1 an <input>, 2 a <textarea>, 3 a number input
+    field*: uint8                    ## 1 an <input>, 2 a <textarea>, 3 a number input, 4 a <select>
     scrollX*, scrollY*: float32      ## how far a box can scroll each way; 0: not that way
     # Plain values only: regions are copied by the dozen on every layout
     # and every event (a field's text is `fieldText`).
@@ -63,6 +64,8 @@ type
     paper*: bool         ## e-paper: the keyboard shows no press
     round*: bool         ## a round panel's whole canvas: the keyboard stays inside its circle
     scrolls*: seq[(int, float32, float32)] ## how far each box that scrolled is, by key
+    open*: int           ## the <select> whose list is up: its key + 1; 0 for none
+    fresh*: bool         ## it just opened: the next layout scrolls to what it holds
 
   TextMemo = object
     key: string          ## the runs, their styles, the width and alignment
@@ -83,6 +86,7 @@ type
     root: UiNode         ## the last layout's tree, taken back where it did not change
     rootW, rootH: float32
     keyboard: UiNode     ## the on-screen keyboard's, likewise
+    popup: UiNode        ## an open <select>'s list, likewise
 
   UiNode {.acyclic.} = ref object
     kind: UiKind
@@ -137,18 +141,22 @@ type
     key: int
     handlers: array[UiEvent, int]
     hover, active, group: bool
-    field: uint8          # an <input> or a <textarea> (UiRegion.field) ...
+    field: uint8          # an <input>, a <textarea> or a <select> (UiRegion.field) ...
     value: string         # ... and its text
     keep: bool            # ukText: a field's text, its spaces kept as typed
     maxX, maxY: float32   # a box that clips: how much of it is out of sight ...
     scrollAt: (float32, float32) # ... and how far it was scrolled when built, then emitted
 
 const
+  OptionBase* = KeyBase + 512
+    ## An open <select>'s list: this handler + n for its option number n.
+    ## Above every key of the keyboard.
   # The attributes the JSX walker turns onClick, onLongPress, ... into.
   handlerAttrs: array[UiEvent, string] = ["on-click", "on-double-click",
     "on-long-press", "on-pointer-down", "on-pointer-up", "on-pointer-move", "on-swipe",
     "on-change", "on-key-down"]
   KeyboardKey = 1 shl 21 ## the on-screen keyboard's root, far from the UI's keys
+  PopupKey = 1 shl 22    ## an open <select>'s list, likewise
   Unbounded = 1e9'f32
   MaxDepth = 64
 
@@ -325,6 +333,30 @@ proc buildField(result: UiNode, n: SvgNode, text: Text, classes: string, rootW, 
   run.styles.add style
   result.children.add run
 
+proc heldOption(n: SvgNode): int =
+  ## Which of a <select>'s options (any child) has its `value`; -1 for none.
+  let value = n.attr("value")
+  for i in 0 ..< n.children.len:
+    if n.children[i].attr("value") == value:
+      return i
+  -1
+
+proc selectRow(n: SvgNode): SvgNode =
+  ## A <select> closed, as a box to lay out: its attributes, and in it what
+  ## the option it holds shows, else its `placeholder` at half strength, cut
+  ## to fit, and a chevron (`build` sizes it). The list is another tree
+  ## (`popup`).
+  let held = n.heldOption
+  var c = "grow truncate"
+  if held < 0:
+    c.add " opacity-50"
+  let shown = el("div", move c)
+  if held < 0:
+    shown.children.add SvgNode(text: n.attr("placeholder"))
+  else:
+    shown.children = n.children[held].children
+  SvgNode(tag: "div", attrs: n.attrs, children: @[shown, icon("M6 9l6 6 6-6", false, 0)])
+
 proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
     key: int, input: UiInput, groupHover: bool, prev: UiNode): UiNode =
   ## `n` as a node to lay out. `prev`, the node the last layout built at this
@@ -336,6 +368,15 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
       sameTree(prev.src, n) and prev.samePointer(input, groupHover) and
       (prev.field == 0 or key != input.focus - 1):
     return prev
+  if n.tag == "select":
+    result = n.selectRow.build(inherited, rootW, rootH, depth, key, input, groupHover, nil)
+    result.src = n
+    result.field = 4
+    result.box.display = diFlex
+    result.box.items = alCenter
+    result.children[1].box.w = px(result.text.size)
+    result.children[1].box.h = result.children[1].box.w
+    return
   var text = inherited
   tagStyle(n.tag, text)
   result = newUiNode(ukBox, text)
@@ -1390,6 +1431,77 @@ proc fieldText*(memo: UiMemo, key: int): string =
     if not n.isNil:
       result = n.value
 
+proc selectOption*(memo: UiMemo, key, option: int, handler: var int): string =
+  ## The value of option number `option` of the <select> at `key` as the last
+  ## layout had it, and its onChange as UiRegion.handlers has it.
+  let n = memo.root.fieldIn(key)
+  if not n.isNil:
+    handler = n.handlers[ueChange]
+    result = n.src.children[option].attr("value")
+
+proc popup(anchor: UiNode, r: UiRegion, width, height: float32, input: var UiInput, drawn: var seq[SvgNode],
+    gradients: var int, regions: var seq[UiRegion]): bool =
+  ## An open <select>'s list, as the region it opened from was just placed: a
+  ## box of its width under it, or above it when there is more room there and
+  ## not enough below, never past the screen. What does not fit scrolls. Each
+  ## option is a row as tall as the select, its classes the app's. It goes on
+  ## top of everything, and all there is to touch while it is up: `regions`,
+  ## which `r` is one of, start again. False with no option.
+  const
+    gap = 4'f32
+    inner = 4'f32 # the box's padding, each way
+    edge = 8'f32
+  # A round panel's corners are not there, and no ESP32 board is round.
+  let margin = when defined(frameosEmbedded): edge else: (if input.round: height / 8 else: edge)
+  let
+    options = anchor.src.children
+    count = options.len
+  if count == 0:
+    return false
+  let list = el("div", "flex flex-col overflow-y-auto p-[4px] border")
+  for i in 0 ..< count:
+    var row = options[i].attr("class")
+    row.add " shrink-0 flex items-center truncate"
+    row.px("h", int(r.h))
+    row.px("px", int(anchor.box.pad[3]))
+    list.children.add SvgNode(tag: "div", children: options[i].children,
+      attrs: @[("class", move row), ("on-click", $(OptionBase + i))])
+  let
+    rowH = r.h
+    wanted = rowH * count.float32 + 2 * inner + 2 # its padding and border
+    top = r.visible[1]
+    bottom = r.visible[3]
+    below = height - margin - bottom - gap
+    above = top - margin - gap
+    down = wanted <= below or below >= above
+    # With little room either side it keeps three rows, over the select.
+    h = min(min(wanted, height - 2 * margin), max(if down: below else: above, rowH * 3))
+    w = min(r.w, width - 2 * edge)
+  let shown = list.build(anchor.text, width, height, 0, PopupKey, input, false, if memo.isNil: nil else: memo.popup)
+  template box: untyped = shown.box
+  # The select's own box: its background (one that reads, without any), its
+  # corners, and a line around it to tell it from what is behind it.
+  box.bg = anchor.box.bg
+  if box.bg.a < 255:
+    box.bg = if anchor.text.color.g < 128: rgba(255, 255, 255, 255) else: rgba(0, 0, 0, 255)
+  box.radius = anchor.box.radius
+  box.borderColor = anchor.text.color
+  if not input.paper:
+    box.borderColor.a = box.borderColor.a div 3
+  shown.size = shown.layout(w, h, true, true)
+  shown.x = clamp(r.x, edge, max(width - edge - w, edge))
+  shown.y = clamp(if down: bottom + gap else: top - gap - h, margin, max(height - margin - h, margin))
+  if input.fresh:
+    # What it holds in the middle of the list, and in sight.
+    input.fresh = false
+    let held = max(anchor.src.heldOption, 0)
+    input.scrollTo(PopupKey, 0, clamp(rowH * held.float32 + inner - (h - rowH) / 2, 0, shown.maxY))
+  regions.setLen(0)
+  shown.emit(0, 0, 1, drawn, gradients, regions)
+  if not memo.isNil:
+    memo.popup = shown
+  true
+
 proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     regions: var seq[UiRegion], textMemo: UiMemo = nil): SvgNode =
   ## A UI tree laid out into a `width` x `height` image, as the SVG that
@@ -1434,6 +1546,16 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     result.children.add page
   var gradients = 0
   top.emit(0, 0, 1, result.children, gradients, regions)
+  if input.open > 0:
+    var shown = false
+    let anchor = top.fieldIn(input.open - 1)
+    if not anchor.isNil and anchor.field == 4:
+      for i in 0 ..< regions.len:
+        if regions[i].key == input.open - 1:
+          shown = anchor.popup(regions[i], w, h, input, result.children, gradients, regions)
+          break
+    if not shown:
+      input.open = 0
   if kb > 0:
     let keys = keyboardTree(width, kb, input.page, input.shift, input.paper, input.round, kbTop,
       height).build(initText(), w, kb.float32, 0, KeyboardKey, input, false,

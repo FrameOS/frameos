@@ -1,4 +1,4 @@
-import std/[json, options, os]
+import std/[json, options, os, sequtils]
 import pixie
 import frameos/channels
 import frameos/types
@@ -68,15 +68,15 @@ block the_form:
   scene.send("open", %*{"sceneId": SceneSettingsId})
   var image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings.png")
-  # A field per editable field (an image is not one), a switch, two choices,
+  # A field per editable field (an image is not one), a switch, a select box,
   # Cancel and Save.
   var fields, password = 0
   for r in uiTarget(SceneSettingsId, 1, create = false).regions:
-    if r.field > 0: inc fields
+    if r.field in 1'u8 .. 3'u8: inc fields
   doAssert fields == 3, $fields # city, days, the API key
   doAssert regionWith(1000 + 1).field == 3 # days: a number pad
   discard regionWith(2000 + 2) # the switch
-  discard regionWith(3000 + 3 * 100 + 1) # "Light"
+  doAssert uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4).len == 1 # the theme
   discard password
   # Type into the city: a tap on it, the keyboard up, then "s".
   scene.tap(regionWith(1000))
@@ -99,7 +99,9 @@ block the_form:
   doAssert not uiTarget(SceneSettingsId, 1, create = false).input.keyboard
   scene.tap(regionWith(2000 + 2))
   discard scene.draw()
-  scene.tap(regionWith(3000 + 3 * 100 + 1))
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+  discard scene.draw()
+  scene.tap(regionWith(OptionBase + 1)) # "Light"
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-changed.png")
   # Save: back to the scene with every value as its state holds it.
@@ -146,6 +148,99 @@ block back_takes_the_keyboard_away_then_the_form:
   sent.setLen(0)
   scene.send(evBack, %*{})
   doAssert sent.len == 1 and sent[0][0] == evSceneSettings and sent[0][1].len == 0, $sent
+  scene.send("close", %*{})
+
+block options_are_a_select_box:
+  # A scene's field with options is a select box, its options strings as well
+  # as {value, label}.
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "select",
+      "options": ["Oslo", "Riga", "Kyiv", "Lima", "Bern", "Baku"]}],
+    "values": {"city": "Riga"}}})
+  var image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-select.png")
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-select-open.png")
+  scene.tap(regionWith(OptionBase + 2))
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-select-picked.png")
+  sent.setLen(0)
+  scene.tap(regionWith(1))
+  doAssert sent[0][1]["state"] == %*{"city": "Kyiv"}, $sent
+  scene.send("close", %*{})
+
+block a_long_list_stays_on_the_screen:
+  # Fifty-eight options under four fields: the list opens above the select,
+  # on the screen, and scrolls. `back` closes it and leaves the panel up.
+  var fields = %*[{"name": "a", "label": "A", "type": "string"}, {"name": "b", "label": "B", "type": "string"},
+    {"name": "c", "label": "C", "type": "string"}]
+  var names = newJArray()
+  for i in 1 .. 58:
+    names.add %("Network " & $i)
+  fields.add %*{"name": "wifi", "label": "Network", "type": "select", "options": names,
+    "placeholder": "Choose a network"}
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": fields, "values": {"wifi": "Network 40"}}})
+  discard scene.draw()
+  let select = uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0]
+  scene.tap(select)
+  var image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-select-many.png")
+  let rows = uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.handlers[ueClick] > OptionBase)
+  doAssert rows.len > 0
+  for r in rows:
+    doAssert r.visible[1] >= 8 and r.visible[3] <= 472, $r.visible
+    doAssert r.visible[3] <= select.visible[1], "above the select"
+  doAssert rows.anyIt(it.handlers[ueClick] == OptionBase + 39 + 1), "what it holds is in sight"
+  sent.setLen(0)
+  scene.send(evBack, %*{})
+  discard scene.draw()
+  doAssert uiTarget(SceneSettingsId, 1, create = false).input.open == 0
+  doAssert sent.allIt(it[0] != evSceneSettings), "the panel stays up: " & $sent
+  scene.send("close", %*{})
+
+block e_paper_black_on_white:
+  let paper = FrameConfig(width: 480, height: 480, device: "pimoroni.inky_impression_7", scalingMode: "cover",
+    saveAssets: %*false)
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, paper, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "select", "options": ["Oslo", "Riga", "Kyiv"]}],
+    "values": {"city": "Riga"}}})
+  discard scene.draw()
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+  let image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-select-paper.png")
+  doAssert uiTarget(SceneSettingsId, 1, create = false).input.open > 0
+  scene.send("close", %*{})
+
+block a_string_option_shows_itself:
+  proc drawn(held: string): Image =
+    let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+    scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+      "fields": [{"name": "city", "label": "City", "type": "select", "options": ["Oslo", "Riga"]}],
+      "values": {"city": held}}})
+    result = scene.draw()
+    scene.send("close", %*{})
+  doAssert drawn("Riga").data != drawn("none of them").data, "the select box shows the option it holds"
+
+block a_few_options_as_a_select_box_too:
+  # Whatever the count, and without a label an option shows its value.
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "select",
+      "options": [{"value": "oslo"}, {"value": "riga", "label": "Riga"}]}],
+    "values": {"city": "riga"}}})
+  discard scene.draw()
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+  discard scene.draw()
+  scene.tap(regionWith(OptionBase + 0))
+  discard scene.draw()
+  sent.setLen(0)
+  scene.tap(regionWith(1))
+  doAssert sent[0][1]["state"] == %*{"city": "oslo"}, $sent
   scene.send("close", %*{})
 
 block nothing_to_set:

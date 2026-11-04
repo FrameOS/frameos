@@ -144,6 +144,12 @@ What kept it there: `UiRegion` holds plain values only (a field's text is
 checks and raises nothing, a viewport's transform is written out in pixie,
 and the ESP32 build leaves out the key and wheel events it never gets.
 
+Select boxes added about +2.9 KB (2026-11-04): the layout 2.7 KB, the events
+0.3 KB, and the settings panel, whose chips they replaced, 0.1 KB less. A
+closed select is laid out as a box with two children, and its list is an
+ordinary tree of classes built on the fly, as the keyboard is; a scene that
+shows no select pays only the code.
+
 ## Elements
 
 | Element | What it is |
@@ -153,6 +159,7 @@ and the ESP32 build leaves out the key and wheel events it never gets.
 | `span`, `b`, `strong`, `i`, `em`, `u`, `s`, `small`, `a`, `code`, `label`, `mark` | Inline: in a block they flow with the text around them and only their text classes count (color, size, weight, ...). In a flex or grid container they are items, like any element. |
 | `br` | A line break. |
 | `input`, `textarea` | A field to type into ([Fields and the keyboard](#fields-and-the-keyboard)). |
+| `select`, `option` | A select box ([Select boxes](#select-boxes)). |
 | anything else | A box: `div`, `p`, `h1`, `section`, `layout`, ... No tag has a default style (Tailwind's preflight). |
 
 Text is any string or number child; `null`, `undefined`, `true` and `false`
@@ -544,6 +551,58 @@ keyboard (`ui/keyboard.nim`, keys numbered from `KeyBase` like handlers),
 the caret from a tap with the text's own glyph boxes, draws it as a bar in
 the field's viewport, and lays the keyboard out under the UI as another
 tree with Tailwind classes.
+
+## Select boxes
+
+`<select>` holds its options, controlled as in React: it shows the `<option>`
+whose `value` is its `value`, and a pick calls `onChange` (or `onInput`) with
+the option's value, as `e.value` and `e.target.value`.
+
+```tsx
+let city = 'oslo'
+export function get(app) {
+  return (
+    <select className="h-12 px-3 rounded-lg bg-slate-800 text-xl"
+      value={city} placeholder="Choose a city"
+      onChange={(e) => { city = e.target.value }}>
+      <option value="oslo" className={city === 'oslo' ? 'bg-sky-600 rounded' : 'active:bg-slate-600 rounded'}>Oslo</option>
+      <option value="riga" className={city === 'riga' ? 'bg-sky-600 rounded' : 'active:bg-slate-600 rounded'}>Riga</option>
+    </select>
+  )
+}
+```
+
+- Every child of a `<select>` counts as an option, and what is in an option
+  is its row.
+- **Closed** it is a box like any other, a row of what the option shows (cut
+  with an ellipsis to fit) and a chevron in the text color. No option holds
+  its `value`: its `placeholder`, at half strength.
+- **A tap opens the list**, as wide as the select, on top of everything and
+  out of every box that clips or scrolls. A field with the keyboard lets go
+  first, and the list is placed for the screen that leaves.
+- **It stays on the screen.** It opens below the select if all of it fits
+  there or there is at least as much room as above, else above, and is no
+  taller than that room, 8 px from the edge. What does not fit scrolls like
+  any box, with a finger, a wheel and its bar, and it opens with the option
+  the select holds in the middle of it. With room for fewer than three rows
+  on either side it keeps three, moved up the screen over the select.
+- **A row is as tall as the select** and has its left padding. An option's
+  classes are its row's, so what the app lights is its own: the option it
+  holds, `active:` for the press. The list's box is the select's background
+  and corners with a thin line of its text color around it.
+- **While it is up nothing else answers**: a tap on an option picks it and
+  closes the list, a tap anywhere else, the frame's `back` in a built-in scene
+  or Escape closes it. A drag scrolls the list and picks nothing.
+- **On a round panel** it keeps an eighth of the height from the top and the
+  bottom.
+
+How: `<select>` is a region of the layout (`UiRegion.field` 4), and which one
+is open is kept with the UI's input (`UiInput.open`). `layoutUi` builds the
+list as another tree after the UI is emitted, as it does the keyboard, from
+where the select's region landed, so a scrolled or moved select needs no
+second pass; its regions are then the only ones, so the page under it needs no
+guard. A row's handler is `OptionBase` + its number (`ui/events.nim`
+`pickOption`).
 
 ## Scrolling and clipping
 
