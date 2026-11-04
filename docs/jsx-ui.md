@@ -526,6 +526,20 @@ export function get(app) {
   keys types instead of changing the scene. A key is typed where the finger
   lifts, however it rolled on the way, and a tap between the keys or in the
   keyboard's margin at the very edge is the nearest key, as on a phone.
+- **A key held shows its accents**, as on a phone: after the dispatcher's
+  long press (`gestures.longPressMs`, delivered while the finger is still
+  down on every host that ticks: the Pi, the ESP32 awake, the preview) the
+  key lights and its accented forms come up in a row of keys above it —
+  `a` gives `à á â ä æ ã å ā`, `e` `è é ê ë ē ė ę`, and so on for `c i l n
+  o s u y z`, with `$ - " ' . ? ! 0 %` giving `€ £ ¥`, dashes, curly quotes,
+  `…`, `¿ ¡ ° ‰` (`ui/keyboard.nim` `Accents`); under shift the letters are
+  capitals. The finger slides onto one and lifts to type it (the one under
+  it lights on an LCD), or lifts on the key and taps one. Lifted or tapped
+  anywhere else, the row goes away and the tap does what it does (a key
+  types); the frame's `back` closes the row first and keeps the keyboard.
+  The row is centred on the key as far as the screen, or a round panel's
+  circle, allows, and goes under the key when there is no room above. Keys
+  without accents have no hold.
 - **A real keyboard** (a Pi's, the computer's over the preview) types into
   the field instead: once a key has been typed on one, fields get no
   keyboard on the screen. Left and right, Home, End, Backspace and Delete
@@ -550,7 +564,11 @@ keyboard (`ui/keyboard.nim`, keys numbered from `KeyBase` like handlers),
 `textInput` or `keyDown`, then runs the field's handler. The layout places
 the caret from a tap with the text's own glyph boxes, draws it as a bar in
 the field's viewport, and lays the keyboard out under the UI as another
-tree with Tailwind classes.
+tree with Tailwind classes. A key with accents carries an `on-long-press`
+handler of its own number; the hold sets `UiInput.accents` to the key, the
+layout draws the row from where it placed that key (`accentPopup`, its
+forms handlers from `AccentBase`), and the holding pointer's moves and
+release are the row's until it lifts (`UiTarget.holdPointer`).
 
 ## Select boxes
 

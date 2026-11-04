@@ -10,7 +10,15 @@
 ## handler number is `KeyBase` plus that byte, so the hit test tells a key
 ## from an app's handler by its number alone.
 ##
-## Flash is the budget on an ESP32: four short strings, three drawn icons,
+## A key held (the dispatcher's `longPress`, delivered while the finger is
+## down) shows the accented forms of its character in a row above it
+## (`accentTree`), as a phone's keyboard does: the finger slides onto one
+## and lifts, or lifts and taps one. The forms are one packed string
+## (`Accents`): an ASCII byte starts a key's entry, the UTF-8 runes after it
+## are its forms, and under shift the Latin letters among them are their
+## capitals by arithmetic (`accentText`), not by a second table.
+##
+## Flash is the budget on an ESP32: five short strings, three drawn icons,
 ## and classes appended in place (see the scene switcher's notes).
 ##
 ## On a round panel (frameos/panel_shape.nim) the keyboard sits higher, its
@@ -18,6 +26,7 @@
 ## cut to the chord it sits on, its keys narrower where the circle is. No
 ## ESP32 board is round: the firmware carries the rectangle alone.
 
+import std/unicode
 import pixie/fileformats/svg
 import frameos/ui/tree
 when not defined(frameosEmbedded):
@@ -39,6 +48,13 @@ const
   KeyBase* = 1 shl 20
     ## A key's handler number: KeyBase + its byte. An app's handlers are
     ## numbered from 0, never this far.
+  AccentBase* = KeyBase + 256
+    ## The accents of a held key, in a row above it: this handler + n for its
+    ## form number n. Above every key, below a <select>'s options.
+  Accents = "aàáâäæãåācçćčeèéêëēėęiîïíīįìlłnñńoôöòóœøōõsßśšuûüùúūyÿzžźż" &
+    "$€£¥₩₽¢-–—•\"“”„«»'‘’‚‹›.…?¿!¡0°%‰"
+    ## Each key's accented forms, after the key's own ASCII byte (the one
+    ## byte below 0x80 in its entry, so the entries need no separator).
   Pages: array[KeyboardPage, string] = [
     "qwertyuiop\nasdfghjkl\n\x01zxcvbnm\x02\n\x05, .\x03",
     "1234567890\n-/:;()$&@\"\n\x06.,?!'\x02\n\x04 \x03",
@@ -75,6 +91,59 @@ proc icon*(d: string, filled: bool, size: int): SvgNode =
     ("fill", if filled: "currentColor" else: "none"), ("stroke", "currentColor"),
     ("stroke-width", "2"), ("stroke-linecap", "round"), ("stroke-linejoin", "round")])
 
+proc keyTextSize*(rowH: int): int =
+  ## The text size of a key in a row `rowH` px tall.
+  clamp(rowH * 9 div 20, 10, 28)
+
+proc accentSpan(code: int): (int, int) =
+  ## Where key `code`'s forms are in `Accents`: from the byte after its own
+  ## to the next ASCII byte; (0, 0) for a key without forms.
+  var i = 0
+  while i < Accents.len:
+    if ord(Accents[i]) == code:
+      var j = i + 1
+      while j < Accents.len and ord(Accents[j]) >= 0x80:
+        inc j
+      return (i + 1, j)
+    inc i
+
+proc accentCount*(code: int): int =
+  ## How many accented forms key `code` has; 0 for most keys.
+  let (a, b) = accentSpan(code)
+  var i = a
+  while i < b:
+    inc result
+    i += runeLenAt(Accents, i)
+
+proc capital(r: Rune): Rune =
+  ## The capital of a Latin-1 or Latin Extended-A small letter, by the
+  ## blocks' arithmetic: no case table. Anything else is itself (ß stays).
+  let c = int32(r)
+  if c >= 0xE0 and c <= 0xFE and c != 0xF7:
+    return Rune(c - 0x20)
+  if c == 0xFF:
+    return Rune(0x178)
+  if c >= 0x100 and c <= 0x17E:
+    # Pairs are (capital, small): at an even code in most of the block, at
+    # an odd one for U+0139–U+0148 and U+0179–U+017E.
+    let oddCapital = (c >= 0x139 and c <= 0x148) or c >= 0x179
+    if (c and 1) == (if oddCapital: 0 else: 1):
+      return Rune(c - 1)
+  r
+
+proc accentText*(code, index, shift: int): string =
+  ## Form number `index` of key `code`, a capital while `shift` is up; ""
+  ## past the last.
+  let (a, b) = accentSpan(code)
+  var i = a
+  var n = 0
+  while i < b:
+    let r = runeAt(Accents, i)
+    if n == index:
+      return (if shift > 0: capital(r) else: r).toUTF8
+    inc n
+    i += runeLenAt(Accents, i)
+
 proc typed*(code: int, shift: int): string =
   ## What a character key types: its own byte, a letter in capitals under
   ## shift; "" for the keys that do something else.
@@ -85,13 +154,14 @@ proc typed*(code: int, shift: int): string =
     result[0] = chr(code - 32)
 
 proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bool,
-    round = false, top = 0, canvasHeight = 0): SvgNode =
+    round = false, top = 0, canvasHeight = 0, held = 0): SvgNode =
   ## The keyboard for a `width` x `height` box: `page`'s keys, letters in
   ## capitals while `shift` is 1 (the next letter) or 2 (caps lock). On an
   ## LCD dark keys that light while pressed; on e-paper outlined keys and no
   ## press to show, since a refresh to show one costs seconds. `round`: the
   ## box is `top` px down a round `width` x `canvasHeight` panel, and each
-  ## row stays inside its circle, on no band of its own.
+  ## row stays inside its circle, on no band of its own. `held`: the key
+  ## whose accents are showing (its byte), drawn lit like shift.
   let
     pad = max(height div 40, 4)
     gap = max(height div 36, 3)
@@ -100,7 +170,7 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
     cols = if page == kpNumbers: 4 else: 10
     unit = min((width - 2 * pad - (cols - 1) * gap) div cols,
       if page == kpNumbers: rowH * 5 div 2 else: rowH * 3 div 2)
-    size = clamp(rowH * 9 div 20, 10, 28)
+    size = keyTextSize(rowH)
     text = Pages[page]
   var c = "flex flex-col items-center"
   c.px("p", pad)
@@ -155,7 +225,7 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
     let
       ch = text[i]
       code = ord(ch)
-      lit = code == ord(kShift) and shift > 0
+      lit = code == ord(kShift) and shift > 0 or code == held and code >= 32
     # Its width: a character one unit, space what is left, enter two, the
     # other keys one and a half (one on the number pad).
     c = "flex items-center justify-center rounded-md"
@@ -185,6 +255,30 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
     if code == ord(kShift):
       # Shift tapped twice: caps lock, until shift again.
       key.attrs.add(("on-double-click", $(KeyBase + ord(kCapsLock))))
+    elif accentCount(code) > 0:
+      # Held: its accents (ui/events.nim opens them, ui/layout.nim draws them).
+      key.attrs.add(("on-long-press", $(KeyBase + code)))
     row.children.add key
+
+proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool): SvgNode =
+  ## The accents of key `code` as a row of keys, each `keyW` x `keyH` with
+  ## `gap` between and around them, in the keyboard's look: a lit one is
+  ## the one the finger is on. ui/layout.nim puts it above the key.
+  var c = "flex rounded-lg border-2"
+  c.px("p", gap)
+  c.px("gap", gap)
+  c.px("text", keyTextSize(keyH))
+  if paper: c.add " bg-white text-black border-black"
+  else: c.add " bg-zinc-800 text-white border-zinc-500"
+  result = el("div", move c)
+  for i in 0 ..< accentCount(code):
+    c = "flex items-center justify-center rounded-md"
+    c.px("w", keyW)
+    c.px("h", keyH)
+    if paper: c.add " border-2 border-black"
+    else: c.add " bg-zinc-600 active:bg-zinc-100 active:text-zinc-900"
+    let key = el("div", move c, SvgNode(text: accentText(code, i, shift)))
+    key.attrs.add(("on-click", $(AccentBase + i)))
+    result.children.add key
 
 {.pop.}

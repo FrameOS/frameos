@@ -130,6 +130,36 @@ block a_number_that_is_no_number_is_not_saved:
   scene.tap(regionWith(1))
   doAssert sent[0][1]["state"] == newJObject(), $sent[0][1]
 
+block a_key_held_shows_its_accents:
+  # A key held on the keyboard on the screen (the dispatcher's longPress,
+  # while the finger is down) shows its accented forms above it; a tap on
+  # one types it into the field (docs/jsx-ui.md "Fields and the keyboard").
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {
+    "from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "string", "placeholder": "", "secret": false}],
+    "values": {"city": "Oslo"}}})
+  scene.send("open", %*{"sceneId": SceneSettingsId})
+  discard scene.draw()
+  scene.tap(regionWith(1000))
+  discard scene.draw()
+  var key: UiRegion
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    if r.handlers[ueClick] == KeyBase + ord('e') + 1: key = r
+  scene.send("longPress", tapAt(key.x + key.w / 2, key.y + key.h / 2))
+  doAssert uiTarget(SceneSettingsId, 1, create = false).input.accents == ord('e')
+  let image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-accents.png")
+  var forms: seq[UiRegion]
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    if r.handlers[ueClick] - 1 >= AccentBase and r.handlers[ueClick] - 1 < OptionBase: forms.add r
+  doAssert forms.len == 7, $forms.len
+  doAssert forms[0].y + forms[0].h < key.y
+  scene.tap(forms[1])
+  doAssert scene.state["values"]["city"].getStr() == "Osloé", $scene.state["values"]
+  doAssert uiTarget(SceneSettingsId, 1, create = false).input.accents == 0
+  discard scene.draw()
+
 block back_takes_the_keyboard_away_then_the_form:
   # The frame's `back` (a swipe in from the left), as on a phone: with a
   # field's keyboard up it puts that away and stays; then it closes, unsaved.
