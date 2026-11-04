@@ -339,4 +339,171 @@ block a_round_panel_keeps_the_form_and_the_keyboard_on_the_glass:
   scene.tap(regionWith(1))
   doAssert sent.len >= 1 and sent[0][0] == evSetCurrentScene, $sent
 
+block a_field_may_be_called_anything:
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [
+      {"name": "typing", "label": "Typing", "type": "string"},
+      {"name": "city", "label": "City", "type": "select",
+        "options": ["Oslo", "Riga", "Kyiv", "Lima", "Bern", "Baku"]}],
+    "values": {"typing": "kept", "city": "Riga"}}})
+  discard scene.draw()
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+  discard scene.draw()
+  scene.tap(regionWith(OptionBase + 2))
+  discard scene.draw()
+  sent.setLen(0)
+  scene.tap(regionWith(1))
+  doAssert sent[0][1]["state"] == %*{"typing": "kept", "city": "Kyiv"}, $sent
+
+block it_opens_on_the_frame_tab_with_no_scene_showing:
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    %*{"status": [], "fields": [], "values": {}, "actions": []}
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": ""}})
+  doAssert scene.state["tab"].getStr() == "frame"
+  # A scene without fields is still the scene's tab.
+  let plain = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  plain.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "fields": []}})
+  doAssert plain.state{"tab"}.getStr() != "frame"
+  frameSettingsRead = nil
+
+block the_frame_tab:
+  # A host with settings of its own (an ESP32: Wi-Fi, rotation): the scene's
+  # name becomes a tab beside "Frame"; the frame tab shows the host's status,
+  # its fields (the network a select box of the ones in range), its actions,
+  # and Save hands the host what changed, the panel staying up.
+  var
+    applied: seq[JsonNode]
+    actions: seq[string]
+    online = false
+    crowded = false
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      var networks = %*[{"value": "Home", "label": "Home"}, {"value": "Cafe", "label": "Cafe"}]
+      if crowded:
+        for i in 0 ..< 60:
+          networks.add(%*{"value": "Network " & $i, "label": "Network " & $i})
+        networks.add(%*{"value": "A very long network name of 32 b", "label": "A very long network name of 32 b"})
+      result = %*{
+        "status": [["Wi-Fi", if online: "Connected to Home" else: "Can't find “Home”"],
+          ["Address", if online: "192.168.1.20" else: "—"], ["Version", "2026.10.23"]],
+        "fields": [
+          {"name": "wifiSsid", "label": "Wi-Fi network", "type": "string", "placeholder": "Choose a network",
+            "select": true, "other": "Other network…", "otherPlaceholder": "Network name",
+            "options": networks},
+          {"name": "wifiPassword", "label": "Password", "type": "string", "secret": true,
+            "placeholder": "Leave empty to keep"},
+          {"name": "rotate", "label": "Rotation", "type": "integer",
+            "options": [{"value": "0", "label": "0°"}, {"value": "90", "label": "90°"},
+              {"value": "180", "label": "180°"}, {"value": "270", "label": "270°"}]}],
+        "values": {"wifiSsid": "Home", "wifiPassword": "", "rotate": 0},
+        "actions": [{"id": "scan", "label": "Scan again", "under": "wifiSsid"}]}
+  frameSettingsApply = proc (values: JsonNode) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: applied.add values
+  frameSettingsAction = proc (action: string) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: actions.add action
+  # Off Wi-Fi too the panel opens on the scene's tab; the frame's is a tap
+  # away, and the host hears it come up.
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "string"}], "values": {"city": "Oslo"}}})
+  doAssert scene.state{"tab"}.getStr() != "frame"
+  doAssert actions.len == 0, $actions
+  discard scene.draw()
+  scene.tap(regionWith(3000 + 1))
+  doAssert scene.state["tab"].getStr() == "frame"
+  doAssert actions == @["open"], $actions
+  var image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame.png")
+  # The select box opens its list, all there is to touch while it is up; the
+  # network is picked from it, a rotation picked, a password typed.
+  doAssert uiTarget(SceneSettingsId, 1, create = false).regions.anyIt(it.field == 4)
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-select.png")
+  doAssert uiTarget(SceneSettingsId, 1, create = false).regions.allIt(it.field != 4)
+  scene.tap(regionWith(OptionBase + 1)) # "Cafe"
+  doAssert uiTarget(SceneSettingsId, 1, create = false).input.open == 0
+  discard scene.draw()
+  # Past the panel's size it scrolls, on the screen, with what it holds in sight.
+  crowded = true
+  discard scene.draw()
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-select-many.png")
+  block crowd:
+    let regions = uiTarget(SceneSettingsId, 1, create = false).regions
+    doAssert regions.anyIt(it.scrollY > 0), "the list scrolls"
+    for r in regions.filterIt(it.scrollY > 0):
+      doAssert r.y >= 8 and r.y + r.h <= 472, $r
+  scene.send("tap", tapAt(470, 5)) # beside it: it closes, nothing else happens
+  doAssert uiTarget(SceneSettingsId, 1, create = false).input.open == 0
+  doAssert sent.len == 0 or sent[^1][0] == evRender, $sent
+  discard scene.draw()
+  crowded = false
+  discard scene.draw()
+  # "Other network…": an input to type a name that is not in the list.
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+  discard scene.draw()
+  scene.tap(regionWith(OptionBase + 2))
+  doAssert scene.state["frameValues"]["typing"].getBool()
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-other.png")
+  doAssert uiTarget(SceneSettingsId, 1, create = false).regions.anyIt(it.handlers[ueChange] == 1000 + 1 and it.field == 1)
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+  discard scene.draw()
+  scene.tap(regionWith(OptionBase + 1)) # back to "Cafe"
+  doAssert not scene.state["frameValues"]["typing"].getBool()
+  discard scene.draw()
+  scene.tap(regionWith(1000 + 1)) # the password
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-keyboard.png")
+  var key: UiRegion
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    if r.handlers[ueClick] == KeyBase + ord('x') + 1: key = r
+  scene.tap(key)
+  discard scene.draw()
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    if r.handlers[ueClick] == KeyBase + ord(kEnter) + 1: key = r
+  scene.tap(key)
+  discard scene.draw()
+  # 90°: the second select box, in sight with the keyboard away.
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[1])
+  discard scene.draw()
+  scene.tap(regionWith(OptionBase + 1))
+  discard scene.draw()
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-changed.png")
+  # An action goes to the host.
+  scene.tap(regionWith(20000))
+  doAssert actions == @["open", "scan"], $actions
+  # Save: the changes alone, as their fields hold them, and the panel stays.
+  sent.setLen(0)
+  scene.tap(regionWith(1))
+  doAssert applied.len == 1 and applied[0] == %*{"wifiSsid": "Cafe", "wifiPassword": "x", "rotate": 90},
+    $applied
+  doAssert sent.len == 0 or sent[0][0] == evRender, $sent
+  doAssert scene.state["frameValues"].len == 0
+  online = true
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-online.png")
+  # The scene's tab: its name over its fields; Save is the scene's.
+  scene.tap(regionWith(3000 + 0)) # the scene's tab
+  doAssert scene.state["tab"].getStr() == "scene"
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-scene-tab.png")
+  sent.setLen(0)
+  scene.tap(regionWith(1))
+  doAssert sent.len >= 1 and sent[0][0] == evSetCurrentScene and sent[0][1]["state"] == %*{"city": "Oslo"}, $sent
+  scene.send("close", %*{})
+  # Opened again: the scene's tab first.
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "string"}], "values": {"city": "Oslo"}}})
+  doAssert scene.state{"tab"}.getStr() != "frame"
+  scene.send("close", %*{})
+  frameSettingsRead = nil
+  frameSettingsApply = nil
+  frameSettingsAction = nil
+
 echo "scene settings: ok"

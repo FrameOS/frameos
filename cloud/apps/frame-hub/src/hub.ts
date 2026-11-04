@@ -51,6 +51,7 @@ import {
   maxAssetFileBytes,
   parseAssetEntries,
   redeployAssignedScenesToFrame,
+  settingsWithReportedRotate,
   spentCommandPayload,
   storeFrameAssetFile,
   supersedePendingCommands,
@@ -1060,6 +1061,28 @@ export async function startFrameHub(
           : {}),
       })
       .where(eq(frames.id, frameId));
+    // The rotation it reports is the mirror's, unless a push is still on its
+    // way to it: then the frame is about to change, and what it says now is
+    // the old one.
+    const reportedSettings = confirmed
+      ? settingsWithReportedRotate(session.frame.settings, hello.hardware)
+      : undefined;
+    if (reportedSettings) {
+      const [waiting] = await db
+        .select({ id: frameCommands.id })
+        .from(frameCommands)
+        .where(
+          and(
+            eq(frameCommands.frameId, frameId),
+            eq(frameCommands.type, "set_settings"),
+            inArray(frameCommands.status, ["pending", "sent"]),
+          ),
+        )
+        .limit(1);
+      if (!waiting) {
+        await db.update(frames).set({ settings: reportedSettings }).where(eq(frames.id, frameId));
+      }
+    }
     // The device is back: a deploy, update or restart waiting for its
     // bootup moves on to the first render (the hello is the `bootup` signal
     // of docs/deploy-progress-contract.json). Before the confirmed gate on

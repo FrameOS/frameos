@@ -578,6 +578,24 @@ export function mergeFrameSettings(
   return { ...readFrameSettings(stored), ...incoming };
 }
 
+// The stored settings with the rotation the frame reports (hello `hardware`,
+// an ESP32's since it can change on its own screen, before the frame is linked),
+// or undefined when there is nothing to change. The mirror follows the device:
+// without this the Settings panel showed a rotation the frame never had, and
+// the next save pushed it. The hub leaves it alone while a push is on its way.
+export function settingsWithReportedRotate(
+  stored: unknown,
+  hardware: unknown,
+): Record<string, unknown> | undefined {
+  const rotate =
+    hardware && typeof hardware === "object" ? (hardware as { rotate?: unknown }).rotate : undefined;
+  if (rotate === undefined || !allowedFrameSettings.get("rotate")!(rotate)) {
+    return undefined;
+  }
+  const settings = readFrameSettings(stored);
+  return settings.rotate === rotate ? undefined : { ...settings, rotate };
+}
+
 // Read the stored jsonb back through the allowlist. It is written through
 // validateFrameSettings, but it is still jsonb from a previous release's
 // (or a future release's) allowlist — screening it here keeps a retired key

@@ -4672,6 +4672,66 @@
       }
      }
     ]
+   },
+   {
+    "name": "the scene settings open on a frame with no scene, and close back to none",
+    "why": "A frame given no scene yet (an ESP32 showing its status screen) opens the settings too: they are where a touch LCD sets its Wi-Fi (docs/scene-settings.md \"The frame tab\"). `state.from` is empty, and closing them has no scene to go back to and no scene list to fall back on: the host lets the built-in scene go (`setCurrentScene {sceneId: \"\"}`, honoured only while a built-in scene shows), and the frame shows no scene again.",
+    "scenes": [],
+    "frameEventMap": [
+     {
+      "event": "edgeSwipe",
+      "match": {
+       "edge": "top"
+      },
+      "emit": "sceneSettings"
+     }
+    ],
+    "scene": "",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "top",
+         "direction": "down",
+         "x": 2,
+         "y": 2,
+         "startX": 2,
+         "startY": 0,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame edgeSwipe -> sceneSettings",
+       "select system/sceneSettings",
+       "run sceneSettings setCurrentScene",
+       "run sceneSettings open",
+       "render"
+      ],
+      "current": "system/sceneSettings",
+      "state": {
+       "from": ""
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSettings"
+       }
+      ],
+      "trace": [
+       "select none",
+       "run sceneSettings close",
+       "render"
+      ],
+      "current": ""
+     }
+    ]
    }
   ]
  },
