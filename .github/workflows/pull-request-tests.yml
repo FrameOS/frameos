@@ -1130,11 +1130,7 @@ jobs:
         run: make -C embedded/pico/tests
 
       - name: Install pico toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi \
-            libstdc++-arm-none-eabi-newlib
+        uses: ./.github/actions/pico-toolchain
 
       - name: Cache pico-sdk
         id: pico-sdk-cache
