@@ -22,7 +22,7 @@ const
   fontPath = "../assets/compiled/fonts/Ubuntu-Regular.ttf"
   textSize = 22.0
   # lcd_splash.h's fos_lcd_splash_status_t, in order from 1.
-  statusLines = ["Connecting to Wi-Fi", "Updating firmware", "Starting"]
+  statusLines = ["Connecting to Wi-Fi", "Updating firmware", "Starting", "Updating scenes"]
 
 let source = readFile(currentSourcePath().parentDir() / svgPath)
 let open = source.find("<svg")

@@ -238,7 +238,7 @@ static void test_a_status_line_sits_under_the_mark(void)
     CHECK(ink_in_rows(fb, 0, mark_bottom) == mark_ink, "and leaves the mark");
     fos_lcd_splash_draw_status(fb, PANEL, PANEL, (fos_lcd_splash_status_t)99); /* not a line: cleared, no crash */
     CHECK(ink_in_rows(fb, mark_bottom, PANEL) == 0, "an unknown status draws nothing");
-    CHECK(FOS_SPLASH_TEXT_COUNT == FOS_LCD_SPLASH_STARTING, "a line for every status");
+    CHECK(FOS_SPLASH_TEXT_COUNT == FOS_LCD_SPLASH_UPDATING_SCENES, "a line for every status");
 }
 
 int main(void)

@@ -1059,9 +1059,10 @@ bool fos_scenes_apply_pending(void)
         json = NULL;
     }
     free(json);
-    /* The writes are over: the old picture and the loading mark until the new
-     * scene's first frame. */
-    fos_display_flash_writes(false);
+    /* The writes are over. A set that loaded renders now (s_scene_switched):
+     * the "Updating scenes" screen, with the loading mark over it, until its
+     * first picture. One that did not gets the picture from before back. */
+    fos_display_updating_end(ok);
     if (pushed && !ok) fos_display_loading_end();
     /* Publish the outcome before the generation, so a poller that sees a new
      * generation always reads the matching result. */
@@ -1391,12 +1392,13 @@ esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
     }
     esp_err_t err = mount_state();
     if (err != ESP_OK) return err;
-    /* Dark until the apply on the render task has split it: flash writes the
-     * whole way (fos_lcd_st7701s_flash_writes). */
-    fos_display_flash_writes(true);
+    /* "Updating scenes" on the glass until the apply on the render task has
+     * split it and loaded it: flash writes the whole way
+     * (fos_lcd_st7701s_updating_begin). */
+    fos_display_updating_begin();
     err = write_file_replace(SCENES_PATH, SCENES_TMP_PATH, json, len);
     if (err != ESP_OK) {
-        fos_display_flash_writes(false);
+        fos_display_updating_end(false);
         log_scene_event("event:uploadScenes", "error", origin, "",
                         s_last_error[0] ? s_last_error : "store-failed",
                         len, 0, 0, err);
@@ -1496,9 +1498,11 @@ esp_err_t fos_scenes_sync(bool force)
     char response_etag[ETAG_LEN];
     strlcpy(response_etag, response.etag, sizeof(response_etag));
 
-    fos_display_flash_writes(true);
+    /* "Updating scenes" for the write; the picture from before comes back
+     * after it, and the new set shows at the next render, as before. */
+    fos_display_updating_begin();
     err = write_file_replace(SCENES_PATH, SCENES_TMP_PATH, buf, total);
-    fos_display_flash_writes(false);
+    fos_display_updating_end(false);
     if (err == ESP_OK) {
         save_etag(response_etag);
         /* Backend-served payload: declare it before load_into_nim promotes

@@ -13,13 +13,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* What the boot is waiting for, the line under the mark (lcd_splash_text.h,
- * in this order). */
+/* What the frame is waiting for, the line under the mark (lcd_splash_text.h,
+ * in this order): what the boot waits for, and the one line the mark shows
+ * after the boot, while a scene store writes flash (lcd_st7701s_rgb.c
+ * fos_lcd_st7701s_updating_begin). */
 typedef enum {
     FOS_LCD_SPLASH_NO_STATUS = 0,
-    FOS_LCD_SPLASH_WIFI,     /* "Connecting to Wi-Fi" */
-    FOS_LCD_SPLASH_UPDATE,   /* "Updating firmware" */
-    FOS_LCD_SPLASH_STARTING, /* "Starting" */
+    FOS_LCD_SPLASH_WIFI,            /* "Connecting to Wi-Fi" */
+    FOS_LCD_SPLASH_UPDATE,          /* "Updating firmware" */
+    FOS_LCD_SPLASH_STARTING,        /* "Starting" */
+    FOS_LCD_SPLASH_UPDATING_SCENES, /* "Updating scenes" */
 } fos_lcd_splash_status_t;
 
 /* One trip of the colors through the three squares, back to the logo. */
