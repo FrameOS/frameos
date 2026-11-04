@@ -1,0 +1,29 @@
+name: GHCR build-cache retention
+
+# The registry layer caches the image builds read and write
+# (docs/ci-costs.md) are tags of one package, ghcr.io/frameos/frameos-build-cache:
+# esp32-ci (written by e2e-docker.yml on every push to main) and
+# runtime-amd64 / runtime-arm64 (written per release). Every write re-points
+# its tag and leaves the previous manifest behind as an untagged version. A
+# public package costs nothing, so this is hygiene, not money: once a week,
+# drop the untagged versions. Nothing reads a cache by digest, only by tag,
+# so a build in flight is never cut off.
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  prune:
+    name: Delete untagged cache versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/delete-package-versions@v5
+        with:
+          package-name: frameos-build-cache
+          package-type: container
+          delete-only-untagged-versions: 'true'

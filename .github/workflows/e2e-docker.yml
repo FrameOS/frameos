@@ -77,48 +77,44 @@ jobs:
   esp32_firmware_image:
     name: Build and boot ESP32 firmware image
     runs-on: ubuntu-latest
+    # packages: write is for the layer cache below. Only a push to main
+    # writes it; a pull request (whose token is read-only on a fork anyway)
+    # just reads.
     permissions:
       contents: read
-    env:
-      # Token auth, same as the release workflow: OIDC would spare us the
-      # secret, but it needs a trust relationship configured in the Depot
-      # project first (until then the exchange dies with permission_denied).
-      # Secrets are absent on forked PRs, so those fall back to a plain
-      # docker build below.
-      DEPOT_AVAILABLE: ${{ secrets.DEPOT_TOKEN != '' && 'true' || 'false' }}
+      packages: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Depot CLI
-        if: env.DEPOT_AVAILABLE == 'true'
-        uses: depot/setup-action@v1
+      - uses: docker/setup-buildx-action@v3
 
-      # Depot keeps a persistent layer cache per project, so the esp32-ci
-      # target (ESP-IDF toolchain + Nim) only rebuilds layers that changed.
-      # load: true pulls the image into the local Docker daemon for the
-      # `docker run` below.
-      #
-      # Keep the cache-relevant inputs (project, context, target, build-args,
-      # platforms) identical to the esp32-ci build in docker-publish-multi.yml
-      # — this job runs on every push to main and is what warms the release
-      # build's cache.
-      - name: Build ESP32 CI Docker image (Depot)
-        if: env.DEPOT_AVAILABLE == 'true'
-        uses: depot/build-push-action@v1
+      - name: Login to GHCR
+        uses: docker/login-action@v3
         with:
-          project: rsbh2wrlkj
-          token: ${{ secrets.DEPOT_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The esp32-ci target (ESP-IDF for both chips, QEMU, Nim, the nimble
+      # packages, emsdk, the pnpm store) comes out of a registry layer cache
+      # on GHCR (docs/ci-costs.md): a push to main writes it with mode=max,
+      # every other run — pull requests, forks, the three release jobs that
+      # build the same target — only reads it. The per-commit tail (the
+      # source COPYs and the steps after them) is built here and stored
+      # nowhere. A missing cache tag is a warning and a cold build, not a
+      # failure. load: true puts the image into the local Docker daemon for
+      # the `docker run` below.
+      - name: Build ESP32 CI Docker image
+        uses: docker/build-push-action@v6
+        with:
           context: .
           target: esp32-ci
           tags: frameos-esp32-ci
           load: true
           push: false
-
-      - name: Build ESP32 CI Docker image (forked PR fallback)
-        if: env.DEPOT_AVAILABLE != 'true'
-        run: |
-          docker build --target esp32-ci -t frameos-esp32-ci .
+          cache-from: type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci,mode=max' || '' }}
 
       # The step below builds the firmware three times (8 MB, QEMU, 32 MB).
       # They share a nimcache but not a single object file, and ESP-IDF ships
