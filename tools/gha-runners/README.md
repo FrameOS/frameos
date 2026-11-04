@@ -45,10 +45,12 @@ workflow that wants a writable cache gets its own subdirectory on the slots
 it runs on, never a slot-wide `all` on a label pull requests reach.
 Concurrent jobs share it, so a cache whose files must agree with each other
 (the Nim tests' nimcache, whose `.o` is trusted when its `.c` matches) goes
-through immutable snapshots, not one directory everyone copies into:
-`frameos/tools/ci_nimcache.sh`, under `nimcache/frameos-tests-snapshots`.
-The old `nimcache/frameos-tests/shard-{1..8}` dirs (~31 G) serve only
-branches older than that change (5–8 nothing at all) and can be deleted.
+through one archive per shard, not one directory everyone copies into:
+`frameos/tools/ci_nimcache.sh`, under `nimcache/frameos-tests-archives`. Many
+small files are what is slow over virtiofs, about 2 ms each: keep a large
+cache here as one file. The older `nimcache/frameos-tests-snapshots` and
+`nimcache/frameos-tests/shard-{1..8}` dirs serve only branches from before
+these changes and can be deleted.
 Runners carry labels `self-hosted,monster,epyc-32|epyc-8|epyc-4,linux,x64`.
 
 ## Pool (since 2026-09-11)
