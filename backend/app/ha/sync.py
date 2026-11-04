@@ -6,8 +6,8 @@ Shares FrameOS frames with Home Assistant, both ways (docs/home-assistant.md):
 - every non-archived frame is an MQTT-discovered device: the latest render as
   an image, status / scene / last-seen sensors (the scene sensor carrying the
   showing scene's field values as attributes), a scene select, a display
-  switch and refresh / next / previous / restart / reboot buttons
-  (app/ha/discovery.py);
+  switch and refresh image / re-render / next / previous / restart / reboot
+  buttons (app/ha/discovery.py);
 - what Home Assistant sets on those entities, and free-form commands from
   automations (a scene with parameters, any event the frame's own API
   takes), come back over MQTT and go to the frame the way the editor's own
@@ -352,6 +352,13 @@ class HomeAssistantSync:
                     await _begin_control_progress_for(db, redis, row, action.kind)
                     await (restart_frame if action.kind == "restart" else reboot_frame)(frame_id, redis)
                     return
+                if action.kind == "refresh_image":
+                    # What the panel shows, pulled again (a frame that pushes
+                    # its image answers from the cache) and published whether
+                    # or not a render just was: the press is the throttle.
+                    await self._fetch_image(db, redis, row)
+                    await self._publish_frame_image(project_id, frame_id, throttle=False)
+                    return
                 await self._dispatch(db, redis, row, action.event or "", action.payload)
             except Exception as error:
                 detail = getattr(error, "detail", None) or str(error)
@@ -373,6 +380,13 @@ class HomeAssistantSync:
         from app.api.frames import dispatch_frame_event
 
         return await dispatch_frame_event(db, redis, frame, event, payload)
+
+    async def _fetch_image(self, db, redis, frame) -> None:
+        """The image route's pull of what the panel shows, into the frame's
+        image cache (a failure is logged on the frame there); a seam for tests."""
+        from app.api.frames import current_frame_image
+
+        await current_frame_image(db, redis, frame)
 
     # ---- event handling ------------------------------------------------------
 
@@ -588,6 +602,7 @@ class HomeAssistantSync:
         if image is None:
             return
         self._last_image_publish[frame_id] = now
+        image = await asyncio.get_running_loop().run_in_executor(None, discovery.fit_image, image)
         await self._publish(discovery.frame_image_topic(project_id, frame_id), image, retain=True)
 
     # ---- MQTT helpers ----------------------------------------------------------

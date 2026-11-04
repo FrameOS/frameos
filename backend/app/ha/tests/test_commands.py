@@ -21,6 +21,9 @@ def test_buttons():
     frame = frame_with_fields()
     render = resolve_command(Topic(3, 7, "press"), b"render", frame, "scene-2")
     assert (render.kind, render.event, render.payload) == ("event", "render", {})
+    # Refresh image is the backend's pull of the panel, never an event to the frame.
+    refresh = resolve_command(Topic(3, 7, "press"), b"refresh_image", frame, "scene-2")
+    assert (refresh.kind, refresh.event, refresh.summary) == ("refresh_image", None, "refresh image")
 
     following = resolve_command(Topic(3, 7, "press"), "next_scene", frame, "scene-2")
     assert (following.event, following.payload) == ("setCurrentScene", {"sceneId": "scene-3"})

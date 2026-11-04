@@ -10,7 +10,8 @@ Topics under the frame's base topic (docs/home-assistant.md):
 
 - `set/scene`   the scene select: a scene label, name or id
 - `set/display` the display switch: ON / OFF
-- `press`       a button: render | next_scene | previous_scene | restart | reboot
+- `press`       a button: refresh_image | render | next_scene | previous_scene |
+                restart | reboot
 - `command`     automations: {"event": name, "payload": {...}} or
                 {"scene": label or id, "state": {...}}
 
@@ -21,7 +22,9 @@ boolean), and passed through where it cannot.
 Event names on `command` are checked against the contract's `http:write`
 origin (docs/events-contract.json, the frame's own API with the access key):
 what a device on the network may ask of a frame, Home Assistant may too, and
-no more. Restart and reboot are tasks, not events, and come as button presses.
+no more. Restart and reboot are tasks, not events, and come as button presses;
+so does refresh_image, which asks the backend for what the panel shows (the
+image route's pull) and never the frame for a render.
 """
 
 from __future__ import annotations
@@ -56,10 +59,11 @@ class Action:
     """One thing to do to the frame.
 
     kind:
-      "event"   dispatch `event` with `payload` (the frame event route)
-      "restart" the restart task
-      "reboot"  the reboot task
-      "error"   nothing; `message` says why
+      "event"         dispatch `event` with `payload` (the frame event route)
+      "refresh_image" fetch what the panel shows and publish it again
+      "restart"       the restart task
+      "reboot"        the reboot task
+      "error"         nothing; `message` says why
     """
 
     kind: str
@@ -150,8 +154,10 @@ def resolve_command(topic: Topic, payload: Any, frame: dict, active_scene_id: Op
     text = _text(payload)
 
     if topic.kind == "press":
+        if text == "refresh_image":
+            return Action(kind="refresh_image", summary="refresh image")
         if text == "render":
-            return Action(kind="event", event="render", payload={}, summary="refresh")
+            return Action(kind="event", event="render", payload={}, summary="re-render")
         if text in ("next_scene", "previous_scene"):
             target = _neighbour_scene(frame, active_scene_id, 1 if text == "next_scene" else -1)
             if target is None:

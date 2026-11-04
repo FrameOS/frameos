@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # stdlib ---------------------------------------------------------------------
 import asyncio
+from dataclasses import dataclass, field as dataclass_field
 import base64
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
@@ -2791,38 +2792,12 @@ async def api_frame_get_image(
     )
 
     cache_key = _frame_image_cache_key(frame.id)
-    path = "/image"
 
     # Virtual frames have no device to fetch from: render server-side (the
     # same wasm path their public URLs use) instead of proxying to a
     # nonexistent host.
     if is_virtual_frame(frame):
-        # Serve the cached image; render only when there is none. Rendering
-        # on every poll made the preview flash "rendering" continuously —
-        # fresh frames come from deploy/activate/render events, which
-        # publish straight into this cache.
-        cached = await _get_cached_frame_image(redis, cache_key)
-        if cached is None:
-            from .virtual_frame import render_virtual_frame_png
-
-            try:
-                cached = await render_virtual_frame_png(db, redis, frame)
-            except RenderQueueFull as exc:
-                raise HTTPException(
-                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                    detail="Render queue is full, retry later",
-                    headers={"Retry-After": str(exc.retry_after)},
-                )
-            active_scene = await _active_scene_id_from_cache(redis, frame.id)
-            await _store_frame_image(
-                db, redis, frame, cached,
-                scene_id=active_scene or None, publish_rendered=False,
-            )
-        return Response(
-            content=cached,
-            media_type="image/png",
-            headers=await read_frame_sync_hint_headers(redis, frame.id),
-        )
+        return await _frame_image_response(frame, await current_frame_image(db, redis, frame))
 
     if request.method == "HEAD":
         headers = await read_frame_sync_hint_headers(redis, frame.id)
@@ -2848,34 +2823,91 @@ async def api_frame_get_image(
         else:
             return await _frame_image_placeholder_response(frame)
 
+    return await _frame_image_response(frame, await current_frame_image(db, redis, frame))
+
+
+async def _frame_image_response(frame: Frame, result: "FrameImageResult") -> Response:
+    if result.image is not None:
+        return Response(content=result.image, media_type="image/png", headers=result.headers)
+    if result.retry_after is not None:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=result.error,
+            headers={"Retry-After": str(result.retry_after)},
+        )
+    if result.error is not None:
+        return await _frame_image_error_response(frame, result.error, result.error_status)
+    return await _frame_image_placeholder_response(frame)
+
+
+@dataclass
+class FrameImageResult:
+    """What a frame's panel shows, as `current_frame_image` found it.
+
+    `image` is the picture (fresh from the device, or the cache when the
+    device could not be asked); `headers` the sync hint headers a response
+    carries. Without an image, `error` says why the pull failed (already
+    logged on the frame), `error_status` with what status, `retry_after`
+    that a virtual frame's render queue was full; all None means there is
+    nothing to show yet, not even a cache."""
+
+    image: bytes | None = None
+    headers: dict[str, str] = dataclass_field(default_factory=dict)
+    error: str | None = None
+    error_status: int | None = None
+    retry_after: int | None = None
+
+
+async def current_frame_image(db: Session, redis: Redis, frame: Frame) -> FrameImageResult:
+    """The image the frame's panel shows right now, without touching the
+    scene: what `GET …/image` serves and what Home Assistant's "Refresh
+    image" publishes. A virtual frame is rendered when nothing is cached, a
+    frame that pushes its image answers from the cache, and any other is
+    asked for `/image` (one pull at a time per frame across workers; a
+    caller that finds one running waits for its result). What is fetched is
+    stored as the frame's image, so every reader of the cache sees it."""
+    cache_key = _frame_image_cache_key(frame.id)
+
+    if is_virtual_frame(frame):
+        # Serve the cached image; render only when there is none. Rendering
+        # on every poll made the preview flash "rendering" continuously —
+        # fresh frames come from deploy/activate/render events, which
+        # publish straight into this cache.
+        cached = await _get_cached_frame_image(redis, cache_key)
+        if cached is None:
+            from .virtual_frame import render_virtual_frame_png
+
+            try:
+                cached = await render_virtual_frame_png(db, redis, frame)
+            except RenderQueueFull as exc:
+                return FrameImageResult(error="Render queue is full, retry later", retry_after=exc.retry_after)
+            active_scene = await _active_scene_id_from_cache(redis, frame.id)
+            await _store_frame_image(
+                db, redis, frame, cached,
+                scene_id=active_scene or None, publish_rendered=False,
+            )
+        return FrameImageResult(image=cached, headers=await read_frame_sync_hint_headers(redis, frame.id))
+
     # A frame that pushes its image has already put what the panel shows in
     # the cache. Pulling would only fail: it sleeps between renders, and has
     # no mDNS name to be found by.
     if await redis.get(_frame_image_pushed_key(frame.id)):
         pushed = await _get_cached_frame_image(redis, cache_key)
         if pushed:
-            return Response(
-                content=pushed,
-                media_type="image/png",
-                headers=await read_frame_sync_hint_headers(redis, frame.id),
-            )
+            return FrameImageResult(image=pushed, headers=await read_frame_sync_hint_headers(redis, frame.id))
 
-    frame_image_lock = _get_frame_image_lock(id)
+    frame_image_lock = _get_frame_image_lock(frame.id)
     waited_for_lock = frame_image_lock.locked()
     if waited_for_lock:
         cached = await _wait_for_cached_frame_image(redis, cache_key)
         if cached:
-            return Response(
-                content=cached,
-                media_type="image/png",
-                headers=await read_frame_sync_hint_headers(redis, frame.id),
-            )
-        return await _frame_image_placeholder_response(frame)
+            return FrameImageResult(image=cached, headers=await read_frame_sync_hint_headers(redis, frame.id))
+        return FrameImageResult()
 
     async with frame_image_lock:
         cached = await _get_cached_frame_image(redis, cache_key)
-        refresh_lock_key = _frame_image_refresh_lock_key(id)
-        refresh_lock_token = f"{config.INSTANCE_ID}:{time.time()}:{id}"
+        refresh_lock_key = _frame_image_refresh_lock_key(frame.id)
+        refresh_lock_token = f"{config.INSTANCE_ID}:{time.time()}:{frame.id}"
         refresh_lock_acquired = await redis.set(
             refresh_lock_key,
             refresh_lock_token,
@@ -2885,84 +2917,52 @@ async def api_frame_get_image(
         if not refresh_lock_acquired:
             cached = await _wait_for_cached_frame_image(redis, cache_key)
             if cached:
-                return Response(
-                    content=cached,
-                    media_type="image/png",
-                    headers=await read_frame_sync_hint_headers(redis, frame.id),
-                )
-            return await _frame_image_placeholder_response(frame)
+                return FrameImageResult(image=cached, headers=await read_frame_sync_hint_headers(redis, frame.id))
+            return FrameImageResult()
 
         async def log_fetch_error(detail: str) -> None:
             # A frame that was never deployed has no image to fetch yet, so
             # the failure is expected and stays out of its log.
             if frame.status == "uninitialized" and not frame.last_successful_deploy:
                 return
-            await log(db, redis, id, "stderr", f"Error fetching image from frame {id}: {detail}")
+            await log(db, redis, frame.id, "stderr", f"Error fetching image from frame {frame.id}: {detail}")
+
+        async def cached_or_error(logged: str, shown: str, status: int) -> FrameImageResult:
+            """The cache when there is one; else the failure, logged on the
+            frame as `logged` and returned as `shown`."""
+            if cached:
+                return FrameImageResult(image=cached, headers=await read_frame_sync_hint_headers(redis, frame.id))
+            await log_fetch_error(logged)
+            return FrameImageResult(error=shown, error_status=status)
 
         # Use shared semaphore and client
-        status = 0
-        body = b""
         try:
-            status, body, headers = await _fetch_frame_http_bytes(
-                frame, redis, path=path
+            status, body, headers = await _fetch_frame_http_bytes(frame, redis, path="/image")
+            if status != 200:
+                return await cached_or_error(f"{status} {body.decode(errors='ignore')}", "Unable to fetch image", status)
+
+            body = await asyncio.get_running_loop().run_in_executor(
+                None, _coerce_frame_image_to_png, body, headers
             )
-
-            if status == 200:
-                body = await asyncio.get_running_loop().run_in_executor(
-                    None, _coerce_frame_image_to_png, body, headers
-                )
-                scene_id = headers.get("x-scene-id")
-                if scene_id:
-                    # The frame says which scene drew this image.
-                    await redis.set(f"frame:{id}:active_scene", scene_id)
-                else:
-                    scene_id = await _active_scene_id_from_cache(redis, id) or None
-                await _store_frame_image(db, redis, frame, body, scene_id=scene_id, publish_rendered=False)
-                response_headers = await store_frame_sync_hint_headers(redis, frame.id, headers)
-
-                return Response(content=body, media_type="image/png", headers=response_headers)
+            scene_id = headers.get("x-scene-id")
+            if scene_id:
+                # The frame says which scene drew this image.
+                await redis.set(f"frame:{frame.id}:active_scene", scene_id)
             else:
-                if cached:
-                    return Response(
-                        content=cached,
-                        media_type="image/png",
-                        headers=await read_frame_sync_hint_headers(redis, frame.id),
-                    )
-                await log_fetch_error(f"{status} {body.decode(errors='ignore')}")
-                return await _frame_image_error_response(frame, "Unable to fetch image", status)
-
+                scene_id = await _active_scene_id_from_cache(redis, frame.id) or None
+            await _store_frame_image(db, redis, frame, body, scene_id=scene_id, publish_rendered=False)
+            response_headers = await store_frame_sync_hint_headers(redis, frame.id, headers)
+            return FrameImageResult(image=body, headers=response_headers)
         except httpx.ReadTimeout:
-            if cached:
-                return Response(
-                    content=cached,
-                    media_type="image/png",
-                    headers=await read_frame_sync_hint_headers(redis, frame.id),
-                )
-            await log_fetch_error("request timeout")
-            return await _frame_image_error_response(frame, "Request Timeout", HTTPStatus.REQUEST_TIMEOUT)
+            return await cached_or_error("request timeout", "Request Timeout", HTTPStatus.REQUEST_TIMEOUT)
         except HTTPException as exc:
-            if cached:
-                return Response(
-                    content=cached,
-                    media_type="image/png",
-                    headers=await read_frame_sync_hint_headers(redis, frame.id),
-                )
-            await log_fetch_error(f"{exc.status_code}: {exc.detail}")
-            return await _frame_image_error_response(frame, str(exc.detail), exc.status_code)
+            return await cached_or_error(f"{exc.status_code}: {exc.detail}", str(exc.detail), exc.status_code)
         except Exception as e:
-            if cached:
-                return Response(
-                    content=cached,
-                    media_type="image/png",
-                    headers=await read_frame_sync_hint_headers(redis, frame.id),
-                )
-            await log_fetch_error(str(e))
-            return await _frame_image_error_response(frame, str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
+            return await cached_or_error(str(e), str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
         finally:
             if refresh_lock_acquired:
                 with contextlib.suppress(Exception):
                     await _release_frame_image_refresh_lock(redis, refresh_lock_key, refresh_lock_token)
-
 
 # A frame's screenshot: a full-size PNG of a large panel is a few MB; the
 # body used to be read unbounded.

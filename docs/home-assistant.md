@@ -34,14 +34,32 @@ names in its attributes. On the frame's device:
 | Last seen | `sensor` (timestamp, diagnostic) | The last log line's time. |
 | Scene | `select` | The frame's scenes; picking one is `setCurrentScene`. |
 | Display | `switch` | `turnOn` / `turnOff`. Its state is what the frame last logged (`event:turnOn`, `event:turnOff`, a toggle), or what Home Assistant last asked for; unknown until either. |
-| Refresh | `button` | `render`. |
+| Refresh image | `button` | Fetches what the panel shows (the image route's pull, the workspace's "Refresh image") and publishes the Image again. Never touches the scene. |
+| Re-render | `button` | `render`: the scene runs again, as the workspace's render button does. A random-photo scene picks its next photo. |
 | Next scene, Previous scene | `button` | `setCurrentScene` to the neighbour in the frame's scene order, wrapping around. |
 | Restart FrameOS, Reboot | `button` (config) | The restart / reboot tasks, with a deploy-progress record like the workspace's buttons. |
 
 Two scenes with one name show as "Clock" and "Clock (2)", in the frame's order.
-That is the whole device, eleven entities, whatever the frame's scenes hold: a
+That is the whole device, twelve entities, whatever the frame's scenes hold: a
 scene's settings are never entities of their own (a frame has many scenes and a
 scene many fields; a thousand entities is not an integration).
+
+Refresh image and Re-render were one "Refresh" button, sending `render`, until
+2026.11.2: pressing it to see the frame's picture advanced a random-photo scene
+(#661). The press payloads are the distinction: `refresh_image` asks the
+backend, `render` asks the frame.
+
+### The image
+
+The Image entity is a copy of the latest render that fits an MQTT packet: at
+most 1280 px on its longest edge, stepped down (1024, 800, 640) until the PNG is
+under 1 MB. A panel-sized photo render is several MB, and a broker that caps
+`max_packet_size` (Mosquitto's default is no cap; the Home Assistant add-on has
+been reported at about 2 MB) drops the message and the entity goes stale. The
+workspace and the frame's own `/image` still serve the full picture. If your
+broker refuses even the fitted image, raise its limit: for the Mosquitto add-on,
+turn on `customize` (`active: true`, `folder: mosquitto`), write
+`max_packet_size 10000000` to `/share/mosquitto/mosquitto.conf`, and restart it.
 
 ### Scene settings as attributes
 
@@ -87,7 +105,7 @@ Everything a frame publishes and listens on lives under
 | `fields` | out, retained | `{scene_id, scene, fields: {<field>: <value>}}` for the scene showing (the Scene sensor's attributes) |
 | `set/scene` | in | a scene label (what the select shows), name or id |
 | `set/display` | in | `ON` / `OFF` |
-| `press` | in | `render`, `next_scene`, `previous_scene`, `restart`, `reboot` |
+| `press` | in | `refresh_image`, `render`, `next_scene`, `previous_scene`, `restart`, `reboot` |
 | `command` | in | free-form, below |
 
 `frameos/status` is the availability topic (`online` while the sync runs, the
@@ -157,7 +175,8 @@ Each carries `frame_id`, `frame_name`, `event` and the line's other keys under
   scene-change lines and the `sceneStateChanged` log events, debounced by a
   second.
 - The image follows `frame_rendered` / `new_scene_image`, at most once every
-  two seconds per frame.
+  two seconds per frame; the Refresh image button pulls the panel and
+  publishes it regardless.
 - "Save & sync now" on the settings page republishes everything and answers
   with the broker it used and how many frames it shared.
 
