@@ -52,7 +52,7 @@ const
     ## The accents of a held key, in a row above it: this handler + n for its
     ## form number n. Above every key, below a <select>'s options.
   Accents = "aàáâäæãåācçćčeèéêëēėęiîïíīįìlłnñńoôöòóœøōõsßśšuûüùúūyÿzžźż" &
-    "$€£¥₩₽¢-–—•\"“”„«»'‘’‚‹›.…?¿!¡0°%‰"
+    "$€£¥¢-–—•\"“”„«»'‘’‚‹›.…?¿!¡0°%‰"
     ## Each key's accented forms, after the key's own ASCII byte (the one
     ## byte below 0x80 in its entry, so the entries need no separator).
   Pages: array[KeyboardPage, string] = [

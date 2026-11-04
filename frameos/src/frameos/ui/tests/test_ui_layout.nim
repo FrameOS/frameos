@@ -495,7 +495,7 @@ suite "a held key's accents":
   test "the table: which keys have forms, and their capitals by arithmetic":
     check accentCount(ord('a')) == 8 and accentCount(ord('e')) == 7 and accentCount(ord('y')) == 1
     check accentCount(ord('b')) == 0 and accentCount(ord(' ')) == 0 and accentCount(ord(kShift)) == 0
-    check accentCount(ord('$')) == 6 and accentCount(ord('"')) == 5 and accentCount(ord('0')) == 1
+    check accentCount(ord('$')) == 4 and accentCount(ord('"')) == 5 and accentCount(ord('0')) == 1
     check accentText(ord('a'), 0, 0) == "à" and accentText(ord('a'), 4, 0) == "æ" and accentText(ord('a'), 7, 0) == "ā"
     check accentText(ord('a'), 8, 0) == "" and accentText(ord('b'), 0, 0) == ""
     # Latin-1 (æ, ø, ÿ), Latin Extended-A at an even capital (ā, œ, š) and
