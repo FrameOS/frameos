@@ -18,25 +18,29 @@ paths twice (the shadow at `opacity="0.32"`) — and returns
 `frameos.svg(svg, {width, height})`. `refreshInterval` 0.0333.
 
 The second yardstick is the sample scene **Hellfire**
-(`repo/scenes/samples/Hellfire`): the Doom fire, a byte of heat per cell (a
-480x480 panel at pixel size 4 is 14,400 cells a frame), run by `frameos.fire`
-and returned as `frameos.pixels`, which writes the cells that changed straight
-into the panel's buffer. No SVG, JSX or canvas is involved, so what it measures
-is the raw pixel path. It reads its own number off the panel: its **FPS
-counter** field draws the renders a second the panel gets (simulation, blit and
-pacing included) in a corner, in the fire's own cells so that it does not slow
-what it measures, and its **Quality** field picks the cell size, 8, 4 or 2 px.
-On the SenseCAP Indicator it runs at **29 fps** (34 ms a frame), 27 at 8 px and
-26 at 2 px: a smaller cell changes how many cells change, and the bus moves
-about the same pixels either way. Written the first way, in JS into a canvas, it
-ran at 2.2:
+(`repo/scenes/samples/Hellfire`): the Doom fire, a byte of heat per cell, its
+spread rule in the app's own JS and the cells returned as `frameos.pixels`,
+which writes the ones that changed straight into the panel's buffer. No SVG,
+JSX or canvas is involved, so what it measures is the interpreter's loop and
+the raw pixel path. It reads its own number off the panel: its **FPS counter**
+field draws the renders a second the panel gets (simulation, blit and pacing
+included) in a corner, in the fire's own cells so that it does not slow what it
+measures, and its **Quality** field picks the cell size: automatic (4 px, 8 on
+an ESP32), 8, 4 or 2 px. The rule stays in JS on purpose: a native Doom spread
+in every runtime (`frameos.fire`, tried and taken out again) was one scene's
+inner loop as a core API, and the interpreter's cost is what the yardstick is
+for. On the SenseCAP Indicator the JS spread took 156 ms a frame at 4 px
+(14,400 cells, ~11 µs a cell), which is why an ESP32 defaults to 8 px, a
+quarter of the cells. Measured on the way there:
 
 | Step | Frame | fps |
 | --- | --- | --- |
-| The spread in JS (156 ms), `putPixels` through `setPixel`'s per-pixel dither (237 ms), the canvas copied to the panel (42 ms) | 450 ms | 2.2 |
-| The palette packed once and only changed cells written (12 ms), the spread native (2 ms) | 75 ms | 13.2 |
-| `frameos.pixels`: no canvas to copy, no JSX to lay out | 31 ms | 32 |
-| The Quality and FPS counter state fields wired in | 34 ms | 29 |
+| 4 px cells: the spread in JS (156 ms), `putPixels` through `setPixel`'s per-pixel dither (237 ms), the canvas copied to the panel (42 ms) | 450 ms | 2.2 |
+| The palette packed once and only changed cells written (12 ms), `frameos.pixels` so no canvas to copy and no JSX to lay out, the spread native for this measurement (2 ms) | 31 ms | 32 |
+| The same frame with the spread in JS again at 4 px, by those numbers | ~185 ms | ~5, estimated |
+| 8 px cells, the ESP32 default: a quarter of the cells to spread | ~70 ms | ~14, estimated |
+
+The two estimated rows are still to be measured on the board.
 
 ## Where an ESP32 frame goes
 

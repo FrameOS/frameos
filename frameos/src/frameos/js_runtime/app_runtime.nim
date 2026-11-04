@@ -1797,30 +1797,6 @@ proc jsCanvasPutPixels(ctx: ptr JSContext, id: JSValue, pixels: JSValue, options
   registerCanvas(image).drew(rect(x1.float32, y1.float32, (x2 - x1).float32, (y2 - y1).float32))
   nimBoolToJS(ctx, true)
 
-proc jsFire(ctx: ptr JSContext, heat: JSValue, options: JSValue): JSValue {.nimcall.} =
-  ## `frameos.fire(heat, {width, height, wind, steps, seed})`: the Doom fire's
-  ## spread rule over a typed array of heat, `steps` times (pixel_ops.nim).
-  ## 14,400 cells take ~100 ms in QuickJS on an ESP32 and a millisecond or two
-  ## here. Returns the seed to pass next time; a refused call hands back the
-  ## one it was given.
-  let seedValue = JS_GetPropertyStr(ctx, options, "seed")
-  defer: JS_FreeValue(ctx, seedValue)
-  let
-    number = if jsIsNumber(seedValue): toNimFloat(ctx, seedValue) else: 1.0
-    seed = if number >= 0 and number < 4294967296.0: uint32(number.int64) else: 1'u32
-    (bytes, byteLen) = jsBytes(ctx, heat)
-    width = jsOptionInt(ctx, options, "width", 0)
-    height = jsOptionInt(ctx, options, "height", 0)
-  if bytes.isNil or width <= 0 or height <= 0 or width.int64 * height.int64 > byteLen.int64:
-    let e = env(ctx)
-    if e != nil:
-      frameos_apps.logError(e.owner, "frameos.fire needs a typed array of at least width x height cells")
-    return nimFloatToJS(ctx, seed.float64)
-  let
-    wind = clamp(jsOptionInt(ctx, options, "wind", 0), -64, 64)
-    steps = clamp(jsOptionInt(ctx, options, "steps", 1), 1, 1000)
-  nimFloatToJS(ctx, fireSpread(bytes, width, height, wind, steps, seed).float64)
-
 proc clearTransientImages(runtime: JsAppRuntime) =
   for id in runtime.transientImageIds:
     if runtime.images.hasKey(id):
@@ -2062,7 +2038,6 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsCanvasDraw", jsCanvasDraw)
   runtime.js.registerFunction("jsCanvasClear", jsCanvasClear)
   runtime.js.registerFunction("jsCanvasPutPixels", jsCanvasPutPixels)
-  runtime.js.registerFunction("jsFire", jsFire)
   runtime.js.registerFunction("jsAssets", jsAssets)
   runtime.js.registerFunction("jsStreams", jsStreams)
   runtime.js.registerFunction("jsGetSetting", jsGetSetting)
@@ -2122,7 +2097,6 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
     clear: (canvas, color) => jsCanvasClear(Number((canvas && canvas.id) || 0), String(color || "")) === true,
     putPixels: (canvas, pixels, options) => jsCanvasPutPixels(Number((canvas && canvas.id) || 0), pixels,
       options || {}) === true,
-    fire: (heat, options) => jsFire(heat, options || {}),
     pixels: (cells, options) => ({ __frameosType: "pixels", cells, options: options || {} }),
     listAssets: (dir) => __frameosAsset("list", dir) || [],
     assetExists: (path) => __frameosAsset("exists", path) === true,

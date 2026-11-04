@@ -42,7 +42,7 @@ if(NIM_GENERATED_SRCS)
         "@fcvkvr@feto565.nim.c"    # pixie/rgb565
         "@fcvkvr@fpbzzba.nim.c"    # pixie/common
         "@fsenzrbf@fhgvyf@ferfnzcyr.nim.c" # frameos/utils/resample: zoomPan's frame
-        "@fsenzrbf@fwf_ehagvzr@fcvkry_bcf.nim.c") # frameos/js_runtime/pixel_ops: putPixels, fire
+        "@fsenzrbf@fwf_ehagvzr@fcvkry_bcf.nim.c") # frameos/js_runtime/pixel_ops: putPixels, pixels
     foreach(src ${NIM_GENERATED_SRCS})
         foreach(hot ${FRAMEOS_NIM_HOT_MODULES})
             string(FIND "${src}" "${hot}" at)

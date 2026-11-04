@@ -1,42 +1,13 @@
-## The two loops an app computing its own raster spends a frame in, on their
-## own so that an ESP32 can compile them at -O2 while the JS runtime around
-## them stays -Os (FRAMEOS_NIM_HOT_MODULES,
+## The loops an app computing its own raster spends a frame in, on their own
+## so that an ESP32 can compile them at -O2 while the JS runtime around them
+## stays -Os (FRAMEOS_NIM_HOT_MODULES,
 ## embedded/esp32/components/frameos_nim/CMakeLists.txt). No QuickJS and no
-## pixie here: `frameos.fire` and `frameos.putPixels` (app_runtime.nim) unpack
-## their arguments and call in.
+## pixie here: `frameos.putPixels` and `frameos.pixels` (app_runtime.nim)
+## unpack their arguments and call in. What an app simulates (a fire's spread,
+## a plasma, an automaton) is the app's own JS: the runtime knows pixels, not
+## rules.
 
 type Cells* = ptr UncheckedArray[uint8]
-
-proc fireSpread*(heat: Cells; cols, rows, wind, steps: int; seed: uint32): uint32 {.raises: [].} =
-  ## The PlayStation Doom fire's spread rule over a byte of heat per cell, the
-  ## bottom row feeding it, `steps` times; the seed to go on from. A small LCG
-  ## keeps the same seed the same fire on every frame type.
-  result = seed
-  for _ in 0 ..< steps:
-    var y = rows - 1
-    while y > 0:
-      let
-        row = y * cols
-        above = row - cols
-      var lit = false
-      for x in 0 ..< cols:
-        let h = heat[row + x]
-        if h == 0:
-          heat[above + x] = 0
-          continue
-        lit = true
-        result = result * 1664525'u32 + 1013904223'u32
-        let r = int(result shr 30) # 0..3
-        var dx = x - r + wind
-        while dx < 0: dx += cols
-        while dx >= cols: dx -= cols
-        heat[above + dx] = h - uint8(r and 1)
-      if not lit:
-        # A row with no heat puts every row above it out, and the row above
-        # was just cleared by the loop.
-        zeroMem(heat, above)
-        break
-      dec y
 
 proc maxCell*(cells: Cells; count: int): uint8 {.raises: [].} =
   ## The largest index in `cells`: below the palette's length, none is left

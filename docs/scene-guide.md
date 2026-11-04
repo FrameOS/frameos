@@ -323,9 +323,9 @@ pixel, each source pixel a `pixelSize` square. Simulate at the canvas's size
 over `pixelSize` and hand the buffer over as it is, every frame. When that
 raster is the whole picture, `return frameos.pixels(cells, { width, height,
 pixelSize, palette })` from `get()` instead: no canvas and no JSX, written
-straight into an LCD's buffer. `frameos.fire(heat, { width, height, wind,
-steps, seed })` runs the Doom fire's spread rule natively and returns the next
-seed.
+straight into an LCD's buffer. The simulation itself is the app's JS: on an
+ESP32 budget ~11 µs a cell a step, and offer a coarser `pixelSize` there
+(`app.frame.embedded`).
 
 **Assets and permissions.** Asset paths are relative to the frame's assets
 folder (`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos,
@@ -929,14 +929,6 @@ declare const frameos: {
     cells: Uint8Array | Uint8ClampedArray | ArrayBuffer,
     options: { width?: number; height?: number; pixelSize?: number; palette: (string | number)[] }
   ): unknown;
-  /**
-   * The Doom fire's spread rule, run natively over one byte of heat per cell, the bottom row feeding it
-   * (FrameOS 2026.11.1+). Returns the seed to pass next time: the same seed is the same fire on every frame type.
-   */
-  fire(
-    heat: Uint8Array | ArrayBuffer,
-    options: { width: number; height: number; wind?: number; steps?: number; seed?: number }
-  ): number;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;

@@ -9,6 +9,7 @@ import std/[json, monotimes, os, sequtils, strutils, times, unittest]
 import pixie
 
 import frameos/js_runtime/app_runtime
+import frameos/utils/memory
 import frameos/utils/svg_frames
 import frameos/types
 import frameos/values
@@ -66,51 +67,6 @@ proc same(a, b: Image): bool =
 
 proc hot(c: ColorRGBX): bool = c.r.int + c.g.int + c.b.int > 3 * 0xb0
 proc dark(c: ColorRGBX): bool = c.r.int + c.g.int + c.b.int < 3 * 0x10
-
-# The rule as it first ran in JS. frameos.fire has to reach the same cells
-# from the same seed: that is what keeps the e2e snapshot and the fire of every
-# frame type the same.
-const ruleCheck = """
-function spread(heat, cols, rows, wind, seed) {
-  for (let y = rows - 1; y > 0; y--) {
-    const row = y * cols
-    const above = row - cols
-    for (let x = 0; x < cols; x++) {
-      const h = heat[row + x]
-      if (h === 0) {
-        heat[above + x] = 0
-        continue
-      }
-      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
-      const r = seed >>> 30
-      let dx = x - r + wind
-      if (dx < 0) dx += cols
-      else if (dx >= cols) dx -= cols
-      heat[above + dx] = h - (r & 1)
-    }
-  }
-  return seed
-}
-export function get(app) {
-  const cols = 33, rows = 50
-  let same = true
-  for (const wind of [-3, -1, 0, 1, 3]) {
-    const a = new Uint8Array(cols * rows).fill(36, (rows - 1) * cols)
-    const b = a.slice()
-    let seedA = 4000000000 + wind, seedB = seedA
-    for (let i = 0; i < 90; i++) seedA = spread(a, cols, rows, wind, seedA)
-    seedB = frameos.fire(b, { width: cols, height: rows, wind, steps: 90, seed: seedB })
-    if (seedA !== seedB) same = false
-    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) same = false
-  }
-  const short = new Uint8Array(3)
-  const refused = frameos.fire(short, { width: 2, height: 2, seed: 7 }) === 7 && short[0] === 0
-  const narrow = new Uint8Array(4).fill(36, 2) // cols 2 and a wind past it: stays in the array
-  frameos.fire(narrow, { width: 2, height: 2, wind: 3, steps: 5, seed: 9 })
-  return frameos.svg('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="' +
-    (same && refused ? '#00ff00' : '#ff0000') + '"/></svg>', { width: 4, height: 4 })
-}
-"""
 
 const pixelFrames = """
 export function get(app) {
@@ -215,13 +171,6 @@ suite "frameos.pixels":
     check picture[50, 20].r == 255 and picture[50, 2].r == 0
 
 suite "Hellfire":
-  test "frameos.fire is the JS rule, cell for cell; a short array is refused; a wide wind stays inside":
-    var check_runtime = newFire("tests/fire-rule", 4, 4)
-    check_runtime.runtime = newJsAppRuntime(category = "data", outputType = "image", source = ruleCheck,
-      sourceName = "app.tsx")
-    let picture = check_runtime.render(%*{})
-    check picture[1, 1].g > 200 and picture[1, 1].r < 50
-
   test "the e2e fixture is the sample's app, seeded":
     let fixtureApp = fixture["apps"]["hellfire"]
     check fixtureApp["sources"] == app["sources"]
@@ -235,8 +184,8 @@ suite "Hellfire":
       let fields = scene["fields"]
       check fields.len == 2
       check fields[0]["name"].getStr() == "quality" and fields[0]["type"].getStr() == "select"
-      check fields[0]["value"].getStr() == "4" # the app's own default, so the snapshot is the same fire
-      check fields[0]["options"].mapIt(it["value"].getStr()) == @["8", "4", "2"]
+      check fields[0]["value"].getStr() == "0" # automatic: 4 px on this host, so the snapshot is the same fire
+      check fields[0]["options"].mapIt(it["value"].getStr()) == @["0", "8", "4", "2"]
       check fields[1]["name"].getStr() == "showFps" and fields[1]["type"].getStr() == "boolean"
       check fields[1]["value"].getStr() == "false" # a counter is time, and a snapshot is not
       for field in fields:
@@ -280,6 +229,19 @@ suite "Hellfire":
     asString["showFps"] = %*"true"
     let c = newFire("tests/hellfire-string", 480, 480).render(asString)
     check not same(c, newFire("tests/hellfire-plain-2", 480, 480).render(config))
+
+  test "the automatic cell size is 4 px, and 8 on an ESP32":
+    # The spread is the app's JS, ~11 us a cell on an ESP32: a quarter of the
+    # cells there. An asked-for size wins on both.
+    let config = %*{"pixelSize": "0", "seed": "3", "wind": "1"}
+    let host = newFire("tests/hellfire-auto-host", 64, 64).render(config)
+    check same(host, newFire("tests/hellfire-four", 64, 64).render(%*{"pixelSize": "4", "seed": "3", "wind": "1"}))
+    setSimulatedEmbedded(true)
+    defer: setSimulatedEmbedded(false)
+    let device = newFire("tests/hellfire-auto-device", 64, 64).render(config)
+    check same(device, newFire("tests/hellfire-eight", 64, 64).render(%*{"pixelSize": "8", "seed": "3", "wind": "1"}))
+    check not same(host, device)
+    check same(newFire("tests/hellfire-asked", 64, 64).render(%*{"pixelSize": "4", "seed": "3", "wind": "1"}), host)
 
   test "hot at the bottom, out at the top, chunky pixels":
     # 32x128 cells: the flames climb ~70 rows, so the top is out.

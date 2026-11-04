@@ -285,12 +285,9 @@ export function get(app) {
   past the palette or the grid stops short of the frame (the scene's background
   shows there). Each panel buffer remembers its cells, so only the ones that
   changed are written. A grid larger than the frame is a picture of its own
-  for the next node to scale.
-- **`frameos.fire(heat, { width, height, wind, steps, seed })`** runs the
-  PlayStation Doom fire's spread rule natively over a typed array, one byte of
-  heat per cell, the bottom row feeding it. It returns the seed to pass next
-  time, so a seed is the same fire on every frame type. The Hellfire sample
-  scene (`repo/scenes/samples/Hellfire`) is the yardstick for all three.
+  for the next node to scale. What fills the cells is the app's own JS (the
+  runtime has no simulation of its own); the Hellfire sample scene
+  (`repo/scenes/samples/Hellfire`) is the yardstick for both calls.
 - **A frame repaints what was drawn**, not the canvas and not the rest of the
   UI.
   - Each draw is noted with its box (`utils/canvas_log.nim`), and each frame
