@@ -1,45 +1,35 @@
 # FrameOS
 
-**The operating system for smart frames.** Turn a Raspberry Pi or an ESP32-S3 and
-any display, e-ink, LCD or HDMI, into a calendar, dashboard or art frame that runs
-itself. Everything renders on the device, whether the screen updates once a minute
-or sixty times a second.
+FrameOS is an operating system for single function smart frames.
 
-Think smart home calendars, meeting room displays, photo frames, word clocks,
-thermostats, industrial dashboards and public signage.
+It runs on a Raspberry Pi or an ESP32-S3, with e-ink, LCD or HDMI displays. It works
+for screens that update once a minute and for screens that update 60 times a second.
 
 ![A 13.3 inch Spectra 6 e-ink panel in a 3D-printed frame, running FrameOS](https://frameos.net/images/photos/frame-13in3-spectra6.jpg)
 
-## How it works
+A frame shows a **scene**: a graph of nodes with some optional TypeScript, edited in
+the browser, written by the AI chat, or installed from the
+[scene store](https://scenes.frameos.net). The frame renders the scene itself. It
+keeps rendering when the server is down.
 
-- **Scenes** are what a frame shows: a graph of nodes (data sources, images,
-  text, layouts, logic) with optional TypeScript apps, built in a browser editor
-  or by the built-in AI chat, and installed from the
-  [scene store](https://scenes.frameos.net). Scenes are plain JSON and run in the
-  frame's own interpreted runtime.
-- **The runtime** is a single Nim binary (Raspberry Pi and other Linux boards) or
-  a signed ESP32-S3 firmware. It renders scenes on the device, drives the display,
-  handles schedules, buttons and touch, and keeps running when the control plane is
-  offline.
-- **A control plane** manages the frames: either the self-hosted
-  [FrameOS backend](https://frameos.net/guide/backend) (a Docker image or Home
-  Assistant add-on that deploys over SSH, with no account required) or
-  [FrameOS Cloud](https://cloud.frameos.net), which manages frames directly over
-  an outbound-only connection. Both flash the same release images and push the
-  same scenes; the frames do not depend on either to keep rendering.
+Frames are managed from one of two places:
 
-## Get started
+- The self-hosted [FrameOS backend](https://frameos.net/guide/backend), a Docker
+  image or Home Assistant add-on. No account needed.
+- [FrameOS Cloud](https://cloud.frameos.net), which talks to the frames directly.
 
-1. Pick a [supported device](https://frameos.net/devices/) and follow its hardware
-   page. A Raspberry Pi needs the display connected and the OS installed; an
-   ESP32-S3 board is flashed from the browser.
-2. Install the [FrameOS backend](https://frameos.net/guide/backend) (one command,
-   see below), or sign in to [FrameOS Cloud](https://cloud.frameos.net).
-3. Add the frame, install a scene from the store or build your own in the editor.
-4. Print a [case](https://frameos.net/cases/) for it.
+To get started:
 
-The full documentation is at [frameos.net/guide](https://frameos.net/guide/).
-Questions and show-and-tell go to [Discord](https://discord.gg/9dT9y7EzUw).
+1. Read the [device guide](https://frameos.net/devices/) for your screen. A Raspberry
+   Pi needs the display attached and the OS on an SD card. An ESP32-S3 board is
+   flashed from the browser.
+2. Install the [backend](https://frameos.net/guide/backend), or sign in to
+   [FrameOS Cloud](https://cloud.frameos.net).
+3. Add the frame, and install a scene.
+4. Print a [case](https://frameos.net/cases/).
+
+The docs are at [frameos.net](https://frameos.net/guide/). Questions go to
+[Discord](https://discord.gg/9dT9y7EzUw).
 
 ## Supported platforms
 
