@@ -165,10 +165,9 @@ jobs:
       # that the .o came from that .c. One shared directory that overlapping
       # runs copied into and out of paired one build's .c with another's .o
       # (shard 1 linked a stale object on three runs in a row, 2026-10-18), so
-      # tools/ci_nimcache.sh keeps the cache as snapshots written once and
-      # never changed: a save hardlinks what is unchanged and swaps a symlink,
-      # a restore copies the one snapshot it resolved. Both stay best effort:
-      # a warm-cache miss is never worth a red job.
+      # tools/ci_nimcache.sh keeps the cache as one archive per shard, which a
+      # save replaces in one rename and a restore unpacks whole. Both stay best
+      # effort: a warm-cache miss is never worth a red job.
       - name: Restore nimcache
         run: bash frameos/tools/ci_nimcache.sh restore ${{ matrix.shard }}
 
