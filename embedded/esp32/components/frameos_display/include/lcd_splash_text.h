@@ -5,6 +5,9 @@
 #define FOS_SPLASH_TEXT_COUNT 3
 #define FOS_SPLASH_TEXT_H 27
 #define FOS_SPLASH_TEXT_MAX_W 197
+/* Line 1 clipped to this many pixels reads "Updating". */
+#define FOS_SPLASH_TEXT_UPDATING_LINE 1
+#define FOS_SPLASH_TEXT_UPDATING_W 93
 
 /* Line i (fos_lcd_splash_status_t i + 1), in Ubuntu Regular at 22 px:
  *   0: "Connecting to Wi-Fi"

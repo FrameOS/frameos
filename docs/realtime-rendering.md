@@ -78,7 +78,12 @@ left.
   interrupt runs on the render core every 0.9 ms, and the driver preloads each
   next 19.2 KB chunk into the 32 KB data cache. A flash write that erases
   holds that interrupt off (the cache is off), so it costs a disturbed frame;
-  the driver restarts the DMA at the next vertical blank. Not with
+  the driver restarts the DMA at the next vertical blank. A scene store is
+  hundreds of such writes, so for its length (tens of seconds while SPIFFS
+  collects garbage) the glass shows the FrameOS mark on black with "Updating"
+  under it instead of the scene, which tears into black bands
+  (`lcd_st7701s_rgb.c` `fos_lcd_st7701s_updating_begin`); the picture from
+  before comes back if no new one follows. Not with
   `CONFIG_LCD_RGB_RESTART_IN_VSYNC`: in IDF 5.5 its restart at every blank
   keeps the refill count whose parity picks the buffer to refill, and after
   such a frame half the time every refill wrote the buffer in flight, the
