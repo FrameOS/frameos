@@ -100,10 +100,9 @@ Pimoroni's boards plug straight onto a Raspberry Pi's header, no wiring:
 
 ## FrameOS backend
 
-The backend is the self-hosted control plane. Run it on a server, a NAS, or on
-your computer when you need it: the frames keep rendering while it is offline,
-you only miss log collection in the meantime. It stores everything in SQLite and
-needs nothing else.
+The backend is where you set up your frames. Run it on a server, or on your
+computer when needed. The frames run on their own; if the backend is offline you
+only miss the logs.
 
 ### Quick install
 
@@ -142,9 +141,8 @@ docker run \
     frameos
 ```
 
-Or with the checked-in `docker-compose.yml`: `docker compose up -d`. Deploys
-install released binaries and SD card images are generated inside the container,
-so the plain container is all a normal install needs.
+Deploys install released binaries, and SD card images are built inside the
+container. Nothing else is needed.
 
 ### Home Assistant
 
@@ -187,54 +185,48 @@ The backend stores everything in SQLite (`./db/frameos.db` in the volume above) 
 
 ### Scripts and AI agents
 
-The backend serves a Model Context Protocol server at `POST /api/mcp` and accepts
-personal API tokens (`fb_api_…`) wherever a login is, so Claude Code or any MCP
-client can list frames, install and edit scenes, read logs and screenshots, and
-push settings. Mint a token under **Settings → API tokens and MCP**;
-[`docs/mcp.md`](docs/mcp.md) has the details. FrameOS Cloud has the same tools.
+The backend has an MCP server at `POST /api/mcp` and accepts API tokens
+(`fb_api_…`) wherever a login is. Claude Code or any other MCP client can list
+frames, edit scenes, read logs and screenshots and change settings. Make a token
+under **Settings → API tokens and MCP**. See [`docs/mcp.md`](docs/mcp.md). FrameOS
+Cloud has the same tools.
 
 ### Legacy compiled scenes
 
-FrameOS ships as released binaries and a deploy never compiles anything. A scene
-still on the old *compiled* path (Nim code nodes or Nim app sources) does not run
-on that binary: convert it to an interpreted scene at
-[scenes.frameos.net/nim-converter](https://scenes.frameos.net/nim-converter), in
-the editor, or with the CLI in `cloud/packages/scene-convert`
-([`docs/nim-to-js-conversion.md`](docs/nim-to-js-conversion.md)). Until it is
-converted, such a scene forces the old whole-frame source build on every deploy,
-which needs the privileged Docker setup described in
-[`docs/legacy-source-builds.md`](docs/legacy-source-builds.md).
+Scenes used to be compiled into the frame's binary. They are interpreted now, and a
+deploy never compiles anything. If you still have a scene with Nim code in it,
+convert it at [scenes.frameos.net/nim-converter](https://scenes.frameos.net/nim-converter)
+or in the editor ([`docs/nim-to-js-conversion.md`](docs/nim-to-js-conversion.md)).
+Until then that frame still gets the old source build on every deploy, which needs
+the Docker setup in [`docs/legacy-source-builds.md`](docs/legacy-source-builds.md).
 
 ## This repository
 
-- `backend/` and `frontend/`: the self-hosted backend (FastAPI, SQLite) and the
-  web UI (React, kea).
-- `cloud/` and `cloud-frontend/`: FrameOS Cloud and the scene store (Next.js,
-  Postgres). You never need these to use FrameOS; see [`cloud/README.md`](cloud/README.md).
-- `frameos/`: the Nim runtime that runs on the frames, with the drivers and the
-  repo apps under `frameos/repo/apps`.
-- `embedded/esp32/`: the ESP32-S3 firmware (ESP-IDF plus the Nim runtime
-  compiled to C). `embedded/pico/`: the Pico W thin client for the Pimoroni Inky
-  Frames, which the backend renders for.
-- `docs/`: the contracts and design notes shared by all of the above.
-- `e2e/`: the scene snapshot, Playwright and deploy test suites.
+- `backend/`, `frontend/`: the self-hosted backend (Python, SQLite) and its UI (React).
+- `cloud/`, `cloud-frontend/`: FrameOS Cloud and the scene store (Next.js, Postgres).
+  Not needed to use FrameOS. See [`cloud/README.md`](cloud/README.md).
+- `frameos/`: the Nim runtime that runs on the frames, the drivers, and the apps under
+  `frameos/repo/apps`.
+- `embedded/esp32/`: the ESP32-S3 firmware. `embedded/pico/`: the Pico W thin client
+  for the Pimoroni Inky Frames.
+- `docs/`: design docs and the contracts shared by the above.
+- `e2e/`: end-to-end tests.
 
-Everything is licensed AGPL-3.0; the device protocols are documented so that
-anyone can reimplement them (see [`cloud/NOTICE`](cloud/NOTICE) and [`docs/cloud-frames.md`](docs/cloud-frames.md)).
+Licensed AGPL-3.0. The device protocols are documented and anyone may reimplement
+them ([`cloud/NOTICE`](cloud/NOTICE), [`docs/cloud-frames.md`](docs/cloud-frames.md)).
 
 ## Developing locally
 
-The repo ships a checked-in [Flox](https://flox.dev) environment. `flox activate`
-installs the Python, pnpm and Nim toolchains and the repo-local dependencies, and
-`pnpm dev` starts every service in `mprocs`:
+Install [Flox](https://flox.dev). `flox activate` sets up Python, pnpm and Nim and
+installs the dependencies. `pnpm dev` starts everything in `mprocs`:
 
 ```bash
 flox activate
 pnpm dev
 ```
 
-[`CONTRIBUTING.md`](CONTRIBUTING.md) walks through the individual services, tests
-and the on-device runtime; [`AGENTS.md`](AGENTS.md) is the map of the codebase.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the individual services and tests, and
+[`AGENTS.md`](AGENTS.md) for a map of the code.
 
 ## Build infrastructure
 
