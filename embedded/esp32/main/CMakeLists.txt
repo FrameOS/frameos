@@ -23,6 +23,7 @@ idf_component_register(
         "fos_config_parse.c"
         "fos_framebuffer.c"
         "fos_wifi.c"
+        "fos_wifi_networks.c"
         "fos_frame_settings.c"
         "fos_http.c"
         "fos_animation.c"

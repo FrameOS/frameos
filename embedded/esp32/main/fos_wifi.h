@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "fos_wifi_networks.h"
 
 typedef enum {
     FOS_WIFI_OFFLINE = 0,
@@ -80,12 +81,8 @@ bool fos_wifi_join_reason_auth(uint8_t reason);
 
 /* The networks in range, for the frame settings: a scan in the background
  * (a joined station stays joined; one that is trying stops for it), its
- * results kept, strongest first, one per name. */
-#define FOS_WIFI_SCAN_MAX 64
-typedef struct {
-    char ssid[33];
-    int8_t rssi;
-} fos_wifi_network_t;
+ * results kept, one per name: the FOS_WIFI_SCAN_MAX strongest, by name
+ * (fos_wifi_networks.h). */
 esp_err_t fos_wifi_scan_start(void);
 bool fos_wifi_scanning(void);
 /* How long ago the last scan finished, -1 when none has. */

@@ -141,8 +141,8 @@ char *fos_frame_settings_json(void)
     put(&out, "],\"fields\":[{\"name\":\"wifiSsid\",\"label\":\"Wi-Fi network\",\"type\":\"string\","
               "\"select\":true,\"other\":\"Other network\xe2\x80\xa6\","
               "\"otherPlaceholder\":\"Network name\",\"placeholder\":\"Choose a network\",\"options\":[");
-    /* The networks in range, strongest first, after the saved one if it is
-     * not among them (out of range, or no scan yet). */
+    /* The networks in range, by name (the scan sorted them), after the saved
+     * one if it is not among them (out of range, or no scan yet). */
     fos_wifi_network_t *networks = fos_big_malloc(FOS_WIFI_SCAN_MAX * sizeof(*networks));
     int count = networks ? fos_wifi_scan_results(networks, FOS_WIFI_SCAN_MAX) : 0;
     bool saved = !ssid[0];
