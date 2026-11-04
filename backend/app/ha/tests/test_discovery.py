@@ -3,6 +3,7 @@ import json
 import pytest
 
 from app.ha import discovery
+from app.ha.discovery import fit_image
 
 
 def make_frame(**overrides) -> dict:
@@ -45,7 +46,7 @@ def weather_scene() -> dict:
 def test_frame_discovery_messages_cover_all_entities():
     messages = discovery.frame_discovery_messages(make_frame())
     topics = [topic for topic, _payload in messages]
-    # The same eleven entities for every frame, whatever its scenes hold:
+    # The same twelve entities for every frame, whatever its scenes hold:
     # the scenes' fields are the scene sensor's attributes, not entities.
     assert topics == [
         "homeassistant/image/frameos_3_7/image/config",
@@ -55,12 +56,13 @@ def test_frame_discovery_messages_cover_all_entities():
         "homeassistant/switch/frameos_3_7/display/config",
         "homeassistant/select/frameos_3_7/scene_select/config",
         "homeassistant/button/frameos_3_7/refresh/config",
+        "homeassistant/button/frameos_3_7/render/config",
         "homeassistant/button/frameos_3_7/next_scene/config",
         "homeassistant/button/frameos_3_7/previous_scene/config",
         "homeassistant/button/frameos_3_7/restart/config",
         "homeassistant/button/frameos_3_7/reboot/config",
     ]
-    assert len(discovery.frame_discovery_messages(make_frame(scenes=[weather_scene()]))) == 11
+    assert len(discovery.frame_discovery_messages(make_frame(scenes=[weather_scene()]))) == 12
     for _topic, payload in messages:
         assert payload["availability_topic"] == discovery.AVAILABILITY_TOPIC
         assert payload["device"]["identifiers"] == ["frameos_frame_3_7"]
@@ -95,7 +97,12 @@ def test_frame_discovery_messages_cover_all_entities():
     assert reboot["command_topic"] == "frameos/frame/3/7/press"
     assert reboot["payload_press"] == "reboot"
     assert reboot["entity_category"] == "config"
-    assert by_topic["homeassistant/button/frameos_3_7/refresh/config"]["payload_press"] == "render"
+    # Refresh image asks the backend for the panel; Re-render asks the frame
+    # for a render. One button for both advanced a random-photo scene (#661).
+    refresh = by_topic["homeassistant/button/frameos_3_7/refresh/config"]
+    assert (refresh["name"], refresh["payload_press"]) == ("Refresh image", "refresh_image")
+    render = by_topic["homeassistant/button/frameos_3_7/render/config"]
+    assert (render["name"], render["payload_press"]) == ("Re-render", "render")
     assert "entity_category" not in by_topic["homeassistant/button/frameos_3_7/next_scene/config"]
 
     # No scenes: no select (an empty option list is not an entity).
@@ -248,3 +255,48 @@ def test_ha_event_payload_strips_event_key():
         "event": "button_press",
         "payload": {"button": "a"},
     }
+
+
+def _png(width: int, height: int, noisy: bool) -> bytes:
+    import io
+    import os
+
+    from PIL import Image
+
+    if noisy:
+        image = Image.frombytes("RGB", (width, height), os.urandom(width * height * 3))
+    else:
+        image = Image.new("RGB", (width, height), (200, 30, 30))
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
+def test_fit_image_leaves_a_small_render_alone():
+    small = _png(800, 480, noisy=False)
+    assert fit_image(small) is small
+    assert fit_image(b"not an image") == b"not an image"
+
+
+def test_fit_image_downscales_a_large_render_to_the_packet_budget():
+    import io
+
+    from PIL import Image
+
+    # A photo frame's 1920x1080 render (noise: as incompressible as a photo
+    # gets) is several MB; the image topic gets a PNG under the budget, at
+    # most IMAGE_MAX_EDGE on its longest edge, in the render's aspect ratio.
+    large = _png(1920, 1080, noisy=True)
+    assert len(large) > discovery.IMAGE_MAX_BYTES
+    fitted = fit_image(large)
+    assert len(fitted) <= discovery.IMAGE_MAX_BYTES
+    with Image.open(io.BytesIO(fitted)) as image:
+        assert image.format == "PNG"
+        assert max(image.size) <= discovery.IMAGE_MAX_EDGE
+        assert max(image.size) in discovery.IMAGE_EDGES
+        assert abs(image.size[0] / image.size[1] - 16 / 9) < 0.01
+
+    # A large but plain render only needs the edge cap.
+    plain = _png(1600, 1200, noisy=False)
+    with Image.open(io.BytesIO(fit_image(plain))) as image:
+        assert image.size == (1280, 960)

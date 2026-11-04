@@ -11,8 +11,13 @@ What a frame is in Home Assistant (docs/home-assistant.md):
 - an `image` with the latest render, `sensor`s for status, scene and last
   seen;
 - a `select` of its scenes (pick one = `setCurrentScene`), a `switch` for
-  the display (`turnOn` / `turnOff`), `button`s for refresh, next and
-  previous scene, restart and reboot.
+  the display (`turnOn` / `turnOff`), `button`s for refresh image (what the
+  panel shows, fetched again: never the scene), re-render (the `render`
+  event: the scene runs again), next and previous scene, restart and reboot.
+
+The image topic carries a copy of the render that fits an MQTT broker's
+packet limit (`fit_image`), not the panel-sized PNG: a photo frame's
+1920x1080 render is several MB, and the Mosquitto add-on refuses it.
 
 The scene showing has its public field values as the scene sensor's
 attributes (the `fields` topic), never as entities of their own: a frame has
@@ -24,6 +29,7 @@ Every command entity publishes to a topic under the frame's base topic;
 `frame_command_subscriptions()` lists the filters the sync subscribes to.
 """
 
+import io
 import json
 from typing import Any, Optional
 
@@ -38,9 +44,14 @@ HA_EVENT_TYPE = "frameos_event"
 # forwarded to the HA event bus and the frame's MQTT event topic.
 SKIPPED_LOG_EVENTS = {"log", "debug", "metrics"}
 
-# Buttons on the frame's device: (object_id, name, press payload, icon, entity_category)
+# Buttons on the frame's device: (object_id, name, press payload, icon, entity_category).
+# Refresh image fetches what the panel shows (the workspace's "Refresh
+# image"); Re-render is the `render` event, which runs the scene again (a
+# random-photo scene picks its next photo). The two were one button until
+# 2026.11.2 (#661).
 FRAME_BUTTONS: tuple[tuple[str, str, str, str, Optional[str]], ...] = (
-    ("refresh", "Refresh", "render", "mdi:refresh", None),
+    ("refresh", "Refresh image", "refresh_image", "mdi:refresh", None),
+    ("render", "Re-render", "render", "mdi:image-sync-outline", None),
     ("next_scene", "Next scene", "next_scene", "mdi:skip-next", None),
     ("previous_scene", "Previous scene", "previous_scene", "mdi:skip-previous", None),
     ("restart", "Restart FrameOS", "restart", "mdi:restart", "config"),
@@ -52,6 +63,15 @@ BUTTON_PRESS_PAYLOADS = frozenset(button[2] for button in FRAME_BUTTONS)
 # (json, image, font, node, scene, path) are code, assets or wiring, not
 # settings, and may be large.
 ATTRIBUTE_FIELD_TYPES = frozenset({"boolean", "integer", "float", "select", "string", "text", "color", "date"})
+
+# The image topic's payload: at most this many pixels on the longest edge,
+# stepped down through IMAGE_EDGES until the PNG is under IMAGE_MAX_BYTES.
+# Mosquitto's `max_packet_size` is unlimited upstream, but a broker that
+# caps it (the reports say 2 MB) drops the message and the entity goes
+# stale; a dashboard preview does not need the panel's pixels.
+IMAGE_MAX_EDGE = 1280
+IMAGE_MAX_BYTES = 1_000_000
+IMAGE_EDGES = (1280, 1024, 800, 640)
 
 
 def frame_node_id(project_id: int, frame_id: int) -> str:
@@ -276,6 +296,45 @@ def scene_fields_payload(frame: dict, scene_id: Optional[str], reported: Optiona
             except (TypeError, ValueError):
                 values[name] = value
     return {"scene_id": scene_id if scene is not None else None, "scene": scene_label(frame, scene_id), "fields": values}
+
+
+# ---- the image -------------------------------------------------------------------
+
+
+def fit_image(image: bytes) -> bytes:
+    """The image topic's payload for a render: the bytes as they are when
+    they fit (longest edge at most IMAGE_MAX_EDGE, under IMAGE_MAX_BYTES),
+    else a PNG downscaled through IMAGE_EDGES to the first size that fits
+    (the smallest when none does). Anything PIL cannot read is passed on.
+    CPU-bound: call it off the event loop."""
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image)) as opened:
+            width, height = opened.size
+            if max(width, height) <= IMAGE_MAX_EDGE and len(image) <= IMAGE_MAX_BYTES:
+                return image
+            source = opened
+            if source.mode == "P":
+                source = source.convert("RGBA" if "transparency" in source.info else "RGB")
+            elif source.mode == "1":
+                source = source.convert("L")
+            elif source.mode not in ("L", "LA", "RGB", "RGBA"):
+                source = source.convert("RGB")
+            smallest = image
+            for edge in IMAGE_EDGES:
+                if edge > max(width, height):
+                    continue
+                scale = edge / max(width, height)
+                size = (max(1, round(width * scale)), max(1, round(height * scale)))
+                out = io.BytesIO()
+                source.resize(size, Image.Resampling.LANCZOS).save(out, format="PNG", optimize=True)
+                smallest = out.getvalue()
+                if len(smallest) <= IMAGE_MAX_BYTES:
+                    return smallest
+            return smallest
+    except Exception:
+        return image
 
 
 # ---- entities --------------------------------------------------------------------

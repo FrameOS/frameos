@@ -234,8 +234,13 @@
 
 - The self-hosted backend's Home Assistant link is `backend/app/ha/` (one task
   in the arq worker): every frame is an MQTT-discovered device with the SAME
-  eleven entities (an image, sensors, a scene `select`, a display `switch`,
-  refresh / next / previous / restart / reboot `button`s; `discovery.py`).
+  twelve entities (an image, sensors, a scene `select`, a display `switch`,
+  refresh image / re-render / next / previous / restart / reboot `button`s;
+  `discovery.py`). **Refresh is not render**: "Refresh image" is the image
+  route's pull of what the panel shows (`current_frame_image` in
+  `app/api/frames.py`, shared with `GET …/image`), "Re-render" the `render`
+  event; one button for both advanced a random-photo scene (#661). The image
+  topic gets `fit_image`'s copy (≤1280 px, under 1 MB), never the panel PNG.
   **A scene's settings are the Scene sensor's attributes (the `fields`
   topic), never entities**: one per field of every scene of every frame was
   tried and reverted the day it merged (2026-11-04, thousands of entities).

@@ -447,6 +447,34 @@ async def test_buttons_and_the_display_switch(db, redis, service, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_refresh_image_fetches_the_panel_and_republishes(db, redis, service, monkeypatch):
+    # "Refresh image" is the image route's pull of what the panel shows, never
+    # a render: a random-photo scene keeps its photo (#661). It publishes the
+    # image topic even right after a render published it.
+    frame = await _frame_with_scenes(db, redis, service)
+    dispatch = RecordingDispatch()
+    monkeypatch.setattr(service, "_dispatch", dispatch)
+    fetched: list[int] = []
+
+    async def fetch_image(db_, redis_, row):
+        fetched.append(row.id)
+        await redis.set(f"frame:{row.id}:image", b"\x89PNG from the panel")
+
+    monkeypatch.setattr(service, "_fetch_image", fetch_image)
+    image_topic = discovery.frame_image_topic(frame.project_id, frame.id)
+    await redis.set(f"frame:{frame.id}:image", b"\x89PNG from a render")
+    await service._handle_broadcast("frame_rendered", {"project_id": frame.project_id, "frameId": frame.id})
+    assert service._mqtt.payload_for(image_topic) == b"\x89PNG from a render"
+
+    await service._handle_command(f"frameos/frame/{frame.project_id}/{frame.id}/press", b"refresh_image")
+    assert fetched == [frame.id]
+    assert dispatch.calls == []
+    assert service._mqtt.payload_for(image_topic) == b"\x89PNG from the panel"
+    assert "Home Assistant asked for refresh image" in (await _last_log_line(db, frame.id) or "")
+
+
+
+@pytest.mark.asyncio
 async def test_commands_for_other_projects_archived_or_unknown_frames_do_nothing(db, redis, service, monkeypatch):
     frame = await _frame_with_scenes(db, redis, service)
     dispatch = RecordingDispatch()
@@ -560,8 +588,8 @@ async def test_scene_changes_rediscover_once(db, redis, service):
     await service._handle_broadcast("update_frame", frame_dict)
     select_topic = f"homeassistant/select/{node}/scene_select/config"
     assert json.loads(service._mqtt.payload_for(select_topic))["options"] == ["Clock", "Weather", "Photos"]
-    # Whatever the scenes hold, the device has its eleven entities and no more.
-    assert len([topic for topic in service._mqtt.topics() if topic.startswith("homeassistant/")]) == 11
+    # Whatever the scenes hold, the device has its twelve entities and no more.
+    assert len([topic for topic in service._mqtt.topics() if topic.startswith("homeassistant/")]) == 12
 
     # The same frame again (a status change, a log): discovery is not resent.
     service._mqtt.messages.clear()
@@ -575,4 +603,4 @@ async def test_scene_changes_rediscover_once(db, redis, service):
     service._mqtt.messages.clear()
     await service._handle_broadcast("update_frame", {"id": frame.id, "project_id": frame.project_id})
     assert json.loads(service._mqtt.payload_for(select_topic))["options"] == ["Clock", "Photos"]
-    assert len([topic for topic in service._mqtt.topics() if topic.startswith("homeassistant/")]) == 11
+    assert len([topic for topic in service._mqtt.topics() if topic.startswith("homeassistant/")]) == 12
