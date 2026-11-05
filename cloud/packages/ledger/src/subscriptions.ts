@@ -115,12 +115,12 @@ export interface SubscriptionRecord {
   status: string;
 }
 
-type SubscriptionRow = typeof subscriptions.$inferSelect;
-type PeriodRow = typeof subscriptionPeriods.$inferSelect;
+export type SubscriptionRow = typeof subscriptions.$inferSelect;
+export type PeriodRow = typeof subscriptionPeriods.$inferSelect;
 
 // Whether a subscription row still means anything: cancelled, or past its
 // cancel_at, is the same as no row.
-function isExpired(row: SubscriptionRow, now: Date): boolean {
+export function isExpired(row: SubscriptionRow, now: Date): boolean {
   return (
     row.status === "canceled" ||
     (row.cancelAt !== null && row.cancelAt.getTime() <= now.getTime())
@@ -160,7 +160,7 @@ export async function setAccountPlan(
 // PUT (two tabs, a retry) opened and charged two overlapping periods. The
 // kernel's own transaction nests as a savepoint inside this one, so an
 // event either posts with its subscription row or neither happens.
-async function withSubscriptionLock<T>(
+export async function withSubscriptionLock<T>(
   db: LedgerExecutor,
   accountId: string,
   run: (tx: LedgerExecutor) => Promise<T>,
@@ -205,6 +205,9 @@ async function setAccountPlanLocked(
           canceledAt: null,
           nextPlanCode: null,
           planCode: plan.code,
+          // A plan set here is billed by the nightly cycle, whoever
+          // collected for the run before it.
+          provider: null,
           // A return after a cancellation starts a NEW run of the
           // subscription: periods before this instant were not served and
           // must not be opened (§9.2 item 2).
@@ -220,6 +223,16 @@ async function setAccountPlanLocked(
     }
     await openAndChargePeriodsFor(db, row, now, options);
     return toRecord(row);
+  }
+
+  // The payment provider drives this subscription's periods and charges the
+  // card for them. Changing the plan here would bill the receivable for a
+  // second period next to the one the provider collects.
+  if (existing.provider) {
+    throw new LedgerError(
+      "invalid_draft",
+      `This subscription is billed through ${existing.provider}; change the plan there`,
+    );
   }
 
   const current = await readPlan(db, existing.planCode);
@@ -346,6 +359,13 @@ export async function closeOutSubscriptionForDeletedAccount(
   if (!row) {
     return;
   }
+  // A period the payment provider collected for was paid in cash and is not
+  // handed back when the account goes: it stays and is earned to its end.
+  // Only the plan stops.
+  if (row.provider) {
+    await cancelAccountPlan(db, accountId, { immediately: true, now });
+    return;
+  }
   const open = await currentPeriod(db, row.id, now);
   if (open) {
     if (open.chargedAt) {
@@ -402,6 +422,11 @@ export async function runSubscriptionCycle(
     .from(subscriptions)
     .where(eq(subscriptions.status, "active"));
   for (const subscription of active) {
+    // A provider-billed subscription gets its next period when the provider
+    // reports the payment for it (provider-subscriptions.ts), not on a date.
+    if (subscription.provider) {
+      continue;
+    }
     result.opened += await openDuePeriodsFor(
       db,
       subscription,
@@ -601,7 +626,7 @@ async function openAndChargePeriodsFor(
   }
 }
 
-async function currentPeriod(
+export async function currentPeriod(
   db: LedgerExecutor,
   subscriptionId: string,
   now: Date,
@@ -680,7 +705,7 @@ export function earnedToDateMicros(period: PeriodRow, at: Date): bigint {
 // Ends a period now. What recognition then earns is price − refunded −
 // already recognised, which after a prorated refund is exactly the part
 // that was served and not yet earned.
-async function closePeriodAt(db: LedgerExecutor, period: PeriodRow, at: Date): Promise<void> {
+export async function closePeriodAt(db: LedgerExecutor, period: PeriodRow, at: Date): Promise<void> {
   const end = at.getTime() > period.periodStart.getTime() ? at : new Date(period.periodStart.getTime() + 1);
   await db
     .update(subscriptionPeriods)
@@ -955,7 +980,7 @@ async function closeExpiredSubscriptions(
     );
 }
 
-function toRecord(row: SubscriptionRow): SubscriptionRecord {
+export function toRecord(row: SubscriptionRow): SubscriptionRecord {
   return {
     accountId: row.accountId,
     cancelAt: row.cancelAt,

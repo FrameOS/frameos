@@ -16,6 +16,10 @@ import {
   ledgerBalances,
   ledgerEntries,
   ledgerPostings,
+  providerEvents,
+  providerPayments,
+  providerProducts,
+  providerSubscriptions,
   linkedClients,
   auditEvents,
   subscriptionPeriods,
@@ -71,6 +75,10 @@ describe("cloud schema", () => {
       billingPlans,
       subscriptions,
       subscriptionPeriods,
+      providerProducts,
+      providerSubscriptions,
+      providerEvents,
+      providerPayments,
     ];
     const ledgerTableNames = new Set(
       ledgerTables.map((table) => getTableConfig(table).name),

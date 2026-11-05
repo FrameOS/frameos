@@ -1818,6 +1818,10 @@ export const subscriptions = pgTable(
     // and stops. Nothing is refunded by default.
     cancelAt: timestamp("cancel_at", { withTimezone: true }),
     canceledAt: timestamp("canceled_at", { withTimezone: true }),
+    // Who drives the periods (migration 0073). Null: the nightly cycle,
+    // charging the receivable. "creem": a period opens when the payment
+    // provider reports a payment, with the provider's bounds.
+    provider: text("provider"),
     ...timestamps,
   },
   (table) => ({
@@ -1874,6 +1878,136 @@ export const subscriptionPeriods = pgTable(
     unrecognizedIdx: index("subscription_periods_unrecognized_idx")
       .on(table.periodEnd)
       .where(sql`${table.recognizedAt} is null`),
+  }),
+);
+
+// The payment provider's side of the plans (migration 0073,
+// cloud/docs/billing.md). Creem is a merchant of record: it sells the plan,
+// charges the card and handles tax. Account ids are plain uuids here, like
+// every billing table, and every row names its mode: a test-mode purchase
+// is recorded and never posted to the ledger.
+export const providerProducts = pgTable(
+  "provider_products",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    provider: text("provider").notNull(),
+    mode: text("mode").notNull(),
+    planCode: text("plan_code").notNull(),
+    productId: text("product_id").notNull(),
+    priceMicros: bigint("price_micros", { mode: "bigint" }).notNull(),
+    currency: text("currency").default("USD").notNull(),
+    // The product a new checkout uses. A price change makes a new product;
+    // subscriptions on an older one still resolve through its row.
+    active: boolean("active").default(true).notNull(),
+    ...timestamps,
+  },
+  (table) => ({
+    planIdx: index("provider_products_plan_idx").on(
+      table.provider,
+      table.mode,
+      table.planCode,
+    ),
+    productUnique: uniqueIndex("provider_products_product_unique").on(
+      table.provider,
+      table.mode,
+      table.productId,
+    ),
+  }),
+);
+
+// The provider's subscription as last seen. What an account is entitled to
+// is still `subscriptions`; this is the collector's view of it.
+export const providerSubscriptions = pgTable(
+  "provider_subscriptions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    provider: text("provider").notNull(),
+    mode: text("mode").notNull(),
+    accountId: uuid("account_id").notNull(),
+    customerId: text("customer_id"),
+    subscriptionId: text("subscription_id").notNull(),
+    productId: text("product_id"),
+    planCode: text("plan_code"),
+    status: text("status").notNull(),
+    currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+    canceledAt: timestamp("canceled_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => ({
+    accountIdx: index("provider_subscriptions_account_idx").on(table.accountId),
+    subscriptionUnique: uniqueIndex(
+      "provider_subscriptions_subscription_unique",
+    ).on(table.provider, table.mode, table.subscriptionId),
+  }),
+);
+
+// Every webhook delivery, once, keyed by the provider's event id.
+export const providerEvents = pgTable(
+  "provider_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    provider: text("provider").notNull(),
+    mode: text("mode").notNull(),
+    eventId: text("event_id").notNull(),
+    eventType: text("event_type").notNull(),
+    accountId: uuid("account_id"),
+    subscriptionId: text("subscription_id"),
+    // Without the customer's name and email.
+    payload: jsonb("payload").default({}).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    error: text("error"),
+  },
+  (table) => ({
+    eventUnique: uniqueIndex("provider_events_event_unique").on(
+      table.provider,
+      table.eventId,
+    ),
+    receivedIdx: index("provider_events_received_idx").on(table.receivedAt),
+  }),
+);
+
+// Money the provider collected or handed back, once per transaction, net
+// of tax.
+export const providerPayments = pgTable(
+  "provider_payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    provider: text("provider").notNull(),
+    mode: text("mode").notNull(),
+    kind: text("kind").notNull(),
+    transactionId: text("transaction_id").notNull(),
+    accountId: uuid("account_id").notNull(),
+    subscriptionId: text("subscription_id"),
+    planCode: text("plan_code"),
+    amountMicros: bigint("amount_micros", { mode: "bigint" }).notNull(),
+    taxMicros: bigint("tax_micros", { mode: "bigint" }).default(0n).notNull(),
+    currency: text("currency").default("USD").notNull(),
+    // The subscription period this payment bought.
+    periodId: uuid("period_id"),
+    // False for a test-mode payment: recorded, never posted.
+    posted: boolean("posted").default(true).notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    accountIdx: index("provider_payments_account_idx").on(
+      table.accountId,
+      table.occurredAt,
+    ),
+    transactionUnique: uniqueIndex("provider_payments_transaction_unique").on(
+      table.provider,
+      table.mode,
+      table.kind,
+      table.transactionId,
+    ),
   }),
 );
 

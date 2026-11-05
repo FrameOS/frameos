@@ -2,6 +2,12 @@ import type { PostingRuleRegistry } from "../types";
 import { aiUsageEventType, aiUsageRule } from "./ai-usage";
 import { manualJournalEventType, manualJournalRule } from "./manual-journal";
 import {
+  paymentReceivedEventType,
+  paymentReceivedRule,
+  paymentRefundedEventType,
+  paymentRefundedRule,
+} from "./payment";
+import {
   reclassificationEventType,
   reclassificationRule,
 } from "./reclassification";
@@ -22,6 +28,8 @@ import {
 export const postingRules: PostingRuleRegistry = {
   [aiUsageEventType]: aiUsageRule,
   [manualJournalEventType]: manualJournalRule,
+  [paymentReceivedEventType]: paymentReceivedRule,
+  [paymentRefundedEventType]: paymentRefundedRule,
   [reclassificationEventType]: reclassificationRule,
   [reversalEventType]: reversalRule,
   [subscriptionChargeEventType]: subscriptionChargeRule,
@@ -31,6 +39,12 @@ export const postingRules: PostingRuleRegistry = {
 
 export { aiUsageEventType, aiUsageRule } from "./ai-usage";
 export { manualJournalEventType, manualJournalRule } from "./manual-journal";
+export {
+  paymentReceivedEventType,
+  paymentReceivedRule,
+  paymentRefundedEventType,
+  paymentRefundedRule,
+} from "./payment";
 export {
   reclassificationEventType,
   reclassificationRule,
