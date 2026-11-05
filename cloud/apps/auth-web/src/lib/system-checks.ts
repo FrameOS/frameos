@@ -189,7 +189,7 @@ export function runSystemChecks(): SystemCheck[] {
     {
       configured: Boolean(getSupportEmail()),
       detail:
-        "The support address in the footer, on /pricing and beside the plan cards. The payment provider requires one, and it must be the address in its Business Details.",
+        "The support address in the footer and beside the plan cards. The payment provider requires one, and it must be the address in its Business Details.",
       name: "FRAMEOS_SUPPORT_EMAIL",
       required: false,
     },

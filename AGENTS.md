@@ -573,8 +573,11 @@
   review checklist are in the doc.
 - **A plan lists only what exists.** The catalog
   (`cloud/apps/auth-web/src/lib/plan-catalog.ts`) names unbuilt features and
-  limits in `plannedFeatures` / `plannedLimits`: `/pricing` and the plan
-  cards mark them "planned" and a plan's row does not grant them. Take a
+  limits in `plannedFeatures` / `plannedLimits`: the plan cards mark them
+  "planned" and a plan's row does not grant them. The public price list is
+  frameos.net/pricing (`content/docs/pricing.mdx` in `frameos-docs`, numbers
+  repeated by hand); the cloud's `/pricing` only redirects, to the usage
+  page when signed in. Take a
   name off those lists in the change that ships the feature, never before.
   Creem's review (and plain honesty) rejects a site selling what it lacks.
 - **An account's plan changes only on what the provider says.** The return

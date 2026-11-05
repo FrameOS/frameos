@@ -17,17 +17,12 @@ import {
 // the only action is Sign in.
 // `title` is the page's heading, shown in the top row after the wordmark.
 export function PublicShell({
-  brand = "scenes",
   children,
   isSuperadmin = false,
   noCapture = false,
   signedIn,
   title,
 }: Readonly<{
-  // What a signed-out visitor's wordmark says and links to. The store pages
-  // are "FrameOS Scenes"; a page about the service itself (the price list)
-  // is "FrameOS Cloud" and leads to the cloud's front door.
-  brand?: "cloud" | "scenes";
   children: React.ReactNode;
   isSuperadmin?: boolean;
   // As AppShell's: suppresses autocapture for the page body. The store is
@@ -64,8 +59,8 @@ export function PublicShell({
           <HeaderBrand href={framesUrl} title={title} />
         ) : (
           <HeaderBrand
-            href={brand === "cloud" ? cloudBaseUrl : scenesHomeUrl}
-            name={brand === "cloud" ? "FrameOS Cloud" : "FrameOS Scenes"}
+            href={scenesHomeUrl}
+            name="FrameOS Scenes"
             title={title}
           />
         )}

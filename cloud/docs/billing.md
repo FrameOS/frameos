@@ -94,6 +94,7 @@ In `/etc/frameos-cloud/auth-web.env`:
 | `CREEM_TEST_LEDGER` | `1` posts test-mode payments to the ledger. For a development database only. |
 | `CREEM_TEST_OPEN` | `1` lets every account check out in test mode on a production build. Leave unset. |
 | `CREEM_API_URL` | Test mode only: another API host (the local stand-in). |
+| `FRAMEOS_PRICING_URL` | The public price list the footer and `/pricing` lead to. Defaults to `https://frameos.net/pricing/`. |
 
 **Test mode on production is safe.** A test payment grants the plan and is
 recorded with `posted = false`; it never reaches the ledger. On a production
@@ -176,9 +177,9 @@ Where each requirement stands:
 | Own custom domain | frameos.net. |
 | No false information | No testimonials or user counts anywhere. Unbuilt features are marked "planned" and not sold. |
 | Privacy Policy and Terms of Service | `/legal/privacy`, `/legal/terms`, readable signed out. Both cover paid plans and Creem. |
-| Product clearly visible | `/pricing` says what the service is; frameos.net is the product site. |
-| Pricing is visible | `/pricing` here, linked from every public page's footer, and `https://frameos.net/pricing` on the product site (top nav and footer). |
-| Customer support email | `FRAMEOS_SUPPORT_EMAIL`: footer, `/pricing`, the usage page, the refund policy. |
+| Product clearly visible | frameos.net is the product site. |
+| Pricing is visible | `https://frameos.net/pricing` on the product site (top nav and footer), linked from the footer of every public page here. The cloud has no price list of its own: `/pricing` sends a signed-in account to its usage page and everyone else to the product site. |
+| Customer support email | `FRAMEOS_SUPPORT_EMAIL`: footer, the usage page, the refund policy. |
 | Cancel from inside the product | Usage page, "Cancel my paid plan"; also the Creem portal behind "Manage billing". |
 | Refund policy | `/legal/refunds`. |
 | Moderation API | Not applicable: see below. |
@@ -189,21 +190,23 @@ To do, in order:
 1. **Deploy this in test mode**: `CREEM_API_KEY` is the test key and
    `CREEM_WEBHOOK_SECRET` comes from `creem webhooks secret <id>` for the
    `FrameOS Cloud` webhook. Press **Sync plans** (it adopts the existing
-   test products). Confirm `/pricing` and the footer on the live site, then
+   test products). Confirm the footer on the live site, then
    buy a plan as a superadmin with the test card.
 2. **Set `FRAMEOS_SUPPORT_EMAIL`** to a branded address that is read
    (Creem expects an answer within 3 business days and may refund on our
    behalf otherwise), and use the same address in Creem's Settings, Business
    Details.
-3. **Keep the two price lists alike.** `https://frameos.net/pricing`
-   (`content/docs/pricing.mdx` in the `frameos-docs` repo) repeats the
-   catalog's numbers by hand, and says paid plans "are being opened up now".
-   When the catalog changes, or once checkout is live for everyone, edit it.
+3. **Keep the public price list in step.** `https://frameos.net/pricing`
+   (`content/docs/pricing.mdx` in the `frameos-docs` repo) is the one public
+   price list. It repeats the catalog's numbers by hand, and says paid plans
+   "are being opened up now". When the catalog changes, or once checkout is
+   live for everyone, edit it. `FRAMEOS_PRICING_URL` points the footer and
+   `/pricing` somewhere else.
 4. **Read the three legal pages as the owner.** They state a 14-day refund, a
    30-day notice of price changes and how long payment records are kept.
    Those are commitments.
 5. **Submit for review** in Creem: Balance, Payout Account. Website URL
-   `https://frameos.net` (or `https://cloud.frameos.net/pricing`). Reviewers
+   `https://frameos.net`. Reviewers
    may make a test purchase with a 100% discount: it grants the plan and posts
    nothing.
 6. **When approved:** create a live API key and a live webhook, set

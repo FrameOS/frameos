@@ -10,6 +10,8 @@ vi.mock("../lib/env", () => ({
   getAccountUrl: (path?: string) =>
     `https://cloud.example.net${path ?? "/account"}`,
   getCloudBaseUrl: () => "https://cloud.example.net",
+  // The footer's price list link (the product site's).
+  getPricingUrl: () => "https://example.net/pricing/",
   getScenesBaseUrl: () => "https://scenes.example.net",
   getStoreUrl: () => "https://scenes.example.net/",
   // The shells render LegalFooter, which needs the cookie domain for the

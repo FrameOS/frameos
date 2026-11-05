@@ -79,10 +79,18 @@ export interface PlanBilling {
   subscription: PlanSubscription | null
 }
 
+/** Where the cards send someone who wants the long version. */
+export interface PlanLinks {
+  /** The public price list, with the reasoning behind it. */
+  pricing: string
+  refunds: string
+}
+
 export interface PlanResponse {
   billing: PlanBilling | null
   cancel_at: string | null
   catalog: PlanCatalog | null
+  links: PlanLinks | null
   next_plan_code: string | null
 }
 
@@ -232,6 +240,7 @@ export interface plansLogicValues {
   catalog: PlanCatalog | null
   catalogLoading: boolean
   checkoutOutcome: CheckoutOutcome | null
+  links: PlanLinks | null
   pendingChecksLeft: number
   planCards: PlanCard[]
   planResponse: PlanResponse | null
@@ -264,6 +273,7 @@ export interface plansLogicActions {
       billing: PlanBilling | null
       cancel_at: string | null
       catalog: PlanCatalog | null
+      links: PlanLinks | null
       next_plan_code: string | null
     },
     payload?: any
@@ -272,6 +282,7 @@ export interface plansLogicActions {
       billing: PlanBilling | null
       cancel_at: string | null
       catalog: PlanCatalog | null
+      links: PlanLinks | null
       next_plan_code: string | null
     }
     payload?: any
@@ -308,6 +319,7 @@ export interface plansLogicMeta {
   __keaTypeGenInternalSelectorTypes: {
     catalog: (planResponse: PlanResponse | null) => PlanCatalog | null
     billing: (planResponse: PlanResponse | null) => PlanBilling | null
+    links: (planResponse: PlanResponse | null) => PlanLinks | null
     catalogLoading: (planResponseLoading: boolean) => boolean
     planCards: (
       catalog: PlanCatalog | null,
@@ -350,6 +362,7 @@ export const plansLogic = kea<plansLogicType>([
             billing: payload.billing ?? null,
             cancel_at: payload.cancel_at ?? null,
             catalog: payload.catalog ?? null,
+            links: payload.links ?? null,
             next_plan_code: payload.next_plan_code ?? null,
           }
         },
@@ -397,6 +410,10 @@ export const plansLogic = kea<plansLogicType>([
     billing: [
       (s) => [s.planResponse],
       (planResponse: PlanResponse | null): PlanBilling | null => planResponse?.billing ?? null,
+    ],
+    links: [
+      (s) => [s.planResponse],
+      (planResponse: PlanResponse | null): PlanLinks | null => planResponse?.links ?? null,
     ],
     catalogLoading: [(s) => [s.planResponseLoading], (planResponseLoading: boolean): boolean => planResponseLoading],
     planCards: [

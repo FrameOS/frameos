@@ -350,7 +350,7 @@ function BillingStatus({ billing }: { billing: PlanBilling }): JSX.Element | nul
 }
 
 function PlanCards(): JSX.Element {
-  const { planCards, catalog, catalogLoading, billing, contactEmail } = useValues(plansLogic)
+  const { planCards, catalog, catalogLoading, billing, contactEmail, links } = useValues(plansLogic)
   if (planCards.length === 0) {
     return catalogLoading ? <Spinner /> : <></>
   }
@@ -358,6 +358,19 @@ function PlanCards(): JSX.Element {
   const anyPlanned = plannedLimits.length > 0 || planCards.some((card) => card.plannedFeatures.length > 0)
   return (
     <div className="space-y-3">
+      <p className="text-sm leading-relaxed">
+        FrameOS is free and open source, and the Free plan is meant to be all a household needs. A paid plan holds more
+        frames and more files. It pays for the hosting, and it is how you support a bootstrapped project.
+        {links ? (
+          <>
+            {' '}
+            <a className="frameos-link hover:underline" href={links.pricing} target="_blank" rel="noreferrer">
+              More about pricing
+            </a>
+            .
+          </>
+        ) : null}
+      </p>
       {billing ? <BillingStatus billing={billing} /> : null}
       <div className="grid gap-4 lg:grid-cols-3">
         {planCards.map((card) => (
@@ -369,6 +382,16 @@ function PlanCards(): JSX.Element {
         sales tax, which is added at checkout where it applies. AI is priced per request and costs the same on every
         plan.
         {anyPlanned ? ' Anything marked planned is not available yet and is not part of what you pay for today.' : ''}
+        {links ? (
+          <>
+            {' '}
+            A first payment is refunded in full if you ask within 14 days. See the{' '}
+            <a className="frameos-link hover:underline" href={links.refunds} target="_blank" rel="noreferrer">
+              refund policy
+            </a>
+            .
+          </>
+        ) : null}
         {contactEmail ? (
           <>
             {' '}

@@ -29,9 +29,9 @@ provides:
   from plain language, with every model call metered into a double-entry
   ledger (`packages/ledger`) that bills usage beyond the plan's allowance.
   Design: [`docs/accounting-todo.md`](docs/accounting-todo.md).
-- **Paid plans**: a public price list (`/pricing`) and plans bought at
-  checkout through Creem, a merchant of record, in test mode until it is
-  switched live. Design and go-live steps: [`docs/billing.md`](docs/billing.md).
+- **Paid plans**: plans bought at checkout through Creem, a merchant of
+  record, in test mode until it is switched live. The public price list is
+  on the product site (frameos.net/pricing). Design and go-live steps: [`docs/billing.md`](docs/billing.md).
 - **A Nim → JS scene converter** (`packages/scene-convert`) that turns
   compiled-era scenes into interpreted ones, as `POST /api/scenes/convert`,
   the `/nim-converter` page and a CLI.

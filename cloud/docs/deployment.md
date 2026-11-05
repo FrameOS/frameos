@@ -782,7 +782,7 @@ story and the go-live steps. In `/etc/frameos-cloud/auth-web.env`:
 CREEM_API_KEY=creem_test_…          # from Creem, Developers
 CREEM_WEBHOOK_SECRET=…              # of the webhook for {FRAMEOS_ACCOUNT_APP_URL}/api/webhooks/creem
 CREEM_MODE=test                     # or live, with a live key
-FRAMEOS_SUPPORT_EMAIL=support@…     # shown in the footer, on /pricing, on the usage page
+FRAMEOS_SUPPORT_EMAIL=support@…     # shown in the footer and on the usage page
 ```
 
 Unset, nothing can be bought and the plan cards say "Contact support". After

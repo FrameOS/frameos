@@ -33,6 +33,7 @@ import { GET as getCheckoutReturn } from "../../../app/api/account/plan/checkout
 import { POST as postPortal } from "../../../app/api/account/plan/portal/route";
 import { GET as getPlan, PUT as putPlan } from "../../../app/api/account/plan/route";
 import { POST as postWebhook } from "../../../app/api/webhooks/creem/route";
+import { GET as getPricing } from "../../../app/pricing/route";
 import {
   cancelForErasure,
   reconcileSubscriptions,
@@ -493,6 +494,25 @@ describe("buying a plan", () => {
     expect(creemSetup().config?.baseUrl).toBe("https://api.creem.io");
     process.env.CREEM_API_KEY = apiKey;
     expect(creemSetup().config).toBeNull();
+  });
+});
+
+describe("where the price list is", () => {
+  it("sends a visitor to the product site and an account to its own plans", async () => {
+    const visitor = await getPricing();
+    expect(visitor.status).toBe(307);
+    expect(visitor.headers.get("location")).toBe("https://frameos.net/pricing/");
+
+    await signIn();
+    const account = await getPricing();
+    expect(account.headers.get("location")).toBe(`${baseUrl}/account/usage`);
+    const view = (await (
+      await getPlan(new NextRequest(new URL("/api/account/plan", baseUrl)))
+    ).json()) as { links: { pricing: string; refunds: string } };
+    expect(view.links).toEqual({
+      pricing: "https://frameos.net/pricing/",
+      refunds: `${baseUrl}/legal/refunds`,
+    });
   });
 });
 

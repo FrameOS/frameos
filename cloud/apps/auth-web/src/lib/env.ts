@@ -184,6 +184,13 @@ export function getFramesUrl() {
   return new URL("/frames", getAccountBaseUrl()).toString();
 }
 
+// The public price list. It lives on the product site, not here: the cloud
+// shows an account its own plans on the usage page. A deployment that is
+// not frameos.net's points this at its own page.
+export function getPricingUrl() {
+  return process.env.FRAMEOS_PRICING_URL?.trim() || "https://frameos.net/pricing/";
+}
+
 // The SPA's home page (app/home/[[...path]]): where the root of the cloud
 // host sends a visitor, and what the store's root falls back to in dev.
 export function getHomeUrl() {

@@ -1,3 +1,4 @@
+import { getPricingUrl } from "../../../src/lib/env";
 import { getLegalEntity, placeholder } from "../../../src/lib/legal";
 
 export const metadata = { title: "Terms of Service" };
@@ -57,7 +58,7 @@ export default function TermsPage() {
       <p className="copy">
         The Free plan costs nothing. Paid plans give you room for more frames
         and more files; what each one includes and costs is on the{" "}
-        <a href="/pricing">pricing page</a>. Nothing is ever charged without
+        <a href={getPricingUrl()}>pricing page</a>. Nothing is ever charged without
         you choosing a plan and paying for it at checkout.
       </p>
       <p className="copy">

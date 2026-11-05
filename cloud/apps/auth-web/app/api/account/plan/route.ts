@@ -21,6 +21,7 @@ import {
   readJsonObject,
   requireDatabase,
 } from "../../../../src/lib/device-flow";
+import { getCloudBaseUrl, getPricingUrl } from "../../../../src/lib/env";
 import { reportError } from "../../../../src/lib/log";
 import { planCatalog } from "../../../../src/lib/plan-catalog";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
@@ -74,6 +75,11 @@ export async function GET(request: NextRequest) {
       // Free, Private and Business as the usage page draws them (plan-catalog.ts).
       // `plans` below is the billing_plans rows.
       catalog: planCatalog(limitsForPlan(free), current.plan.code, purchasable),
+      // Where the plan cards send someone who wants the long version.
+      links: {
+        pricing: getPricingUrl(),
+        refunds: new URL("/legal/refunds", getCloudBaseUrl()).toString(),
+      },
       // A downgrade waits for the renewal; this names where it lands.
       next_plan_code: current.nextPlanCode,
       plan: {
