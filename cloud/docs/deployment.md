@@ -773,6 +773,24 @@ keeps working. Set `POSTMARK_SERVER_TOKEN` and `POSTMARK_FROM_EMAIL` so
 password reset emails are delivered; without them reset links are only written
 to the server log.
 
+## Paid plans
+
+Paid plans are sold through Creem; [`billing.md`](billing.md) has the whole
+story and the go-live steps. In `/etc/frameos-cloud/auth-web.env`:
+
+```text
+CREEM_API_KEY=creem_test_…          # from Creem, Developers
+CREEM_WEBHOOK_SECRET=…              # of the webhook for {FRAMEOS_ACCOUNT_APP_URL}/api/webhooks/creem
+CREEM_MODE=test                     # or live, with a live key
+FRAMEOS_SUPPORT_EMAIL=support@…     # shown in the footer, on /pricing, on the usage page
+```
+
+Unset, nothing can be bought and the plan cards say "Contact support". After
+setting them, press **Sync plans** on `/admin/billing/payments` once per mode:
+it creates the products in Creem and the plan rows here. The nightly
+accounting job also reconciles subscriptions with Creem, so it needs no
+configuration of its own.
+
 ## Object Storage
 
 Blobs — store scene zips, scene previews and gallery images, and the per-frame

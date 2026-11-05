@@ -319,6 +319,10 @@ export const securityLogic = kea<securityLogicType>([
           actions.setDeleteError('That is not the email address on this account.')
         } else if (payload?.error === 'superadmin_cannot_self_delete') {
           actions.setDeleteError('Superadmin accounts cannot delete themselves. Hand over the flag first.')
+        } else if (payload?.error === 'subscription_cancel_failed') {
+          actions.setDeleteError(
+            'Your paid plan could not be cancelled just now, so the account was not deleted. Try again in a moment.'
+          )
         } else {
           actions.setDeleteError(describeHttpError(response.status))
         }

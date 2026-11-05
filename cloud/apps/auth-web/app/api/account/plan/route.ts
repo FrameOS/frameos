@@ -4,40 +4,41 @@ import {
   listPlans,
   paygPlanCode,
   readAccountPlan,
-  setAccountPlan,
 } from "@frameos-cloud/ledger";
 import { NextRequest, NextResponse } from "next/server";
 import { recordAuditEvent } from "../../../../src/lib/audit";
+import {
+  BillingError,
+  billingSummary,
+  cancelAtPeriodEnd,
+  changePaidPlan,
+  purchasablePlanCodes,
+} from "../../../../src/lib/billing-provider";
+import { CreemError, creemSetup } from "../../../../src/lib/creem";
 import { csrfResponse } from "../../../../src/lib/csrf";
 import {
   jsonError,
   readJsonObject,
   requireDatabase,
 } from "../../../../src/lib/device-flow";
+import { reportError } from "../../../../src/lib/log";
 import { planCatalog } from "../../../../src/lib/plan-catalog";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
+import { accountIsSuperadmin } from "../../../../src/lib/superadmin";
 import { limitsForPlan } from "../../../../src/lib/usage";
 
 export const runtime = "nodejs";
 
-// Which plan an account is on (cloud/docs/accounting-todo.md §0.1, Phase 5).
+// Which plan an account is on, and the changes it may make to it
+// (cloud/docs/billing.md, cloud/docs/accounting-todo.md §0.1).
 //
-// Self-service plan changes are gated behind FRAMEOS_CLOUD_PLANS_SELF_SERVE
-// and default OFF, on purpose. Subscribing accrues a real receivable
-// (§3.6's charge entry), and Phase 3b — the payment provider, the stored
-// payment method, the month-end invoice — does not exist yet. Letting
-// somebody subscribe today would run up a balance with no way to settle it,
-// which is a worse failure than not offering the button: the ledger would be
-// right and the customer would be stuck.
-//
-// Everything underneath is finished and tested, so switching this on is a
-// deployment decision rather than a build. Until then an operator moves
-// accounts by hand and the page shows the ladder without a buy button.
-function selfServeEnabled(env: Record<string, string | undefined> = process.env) {
-  const raw = (env.FRAMEOS_CLOUD_PLANS_SELF_SERVE ?? "").trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes";
-}
+// A paid plan is bought at the payment provider's checkout
+// (POST /api/account/plan/checkout), which is the only way onto one from
+// here. This route then moves a paying account between paid plans, takes a
+// cancellation back, and cancels. With no provider set up nothing can be
+// bought and the cards say "contact support"; an operator moves accounts by
+// hand (the admin plan route).
 
 export async function GET(request: NextRequest) {
   const limited = await rateLimitResponse(request, "account:plan", {
@@ -55,19 +56,25 @@ export async function GET(request: NextRequest) {
   if (!db) {
     return response;
   }
-  const [current, plans] = await Promise.all([
+  const setup = creemSetup();
+  const superadmin = await accountIsSuperadmin(session.accountId);
+  const [current, plans, purchasable, billing] = await Promise.all([
     readAccountPlan(db, session.accountId),
     listPlans(db),
+    purchasablePlanCodes(db, setup, superadmin),
+    billingSummary(db, setup, session.accountId, superadmin),
   ]);
   const free = plans.find((plan) => plan.code === paygPlanCode) ?? fallbackPaygPlan;
   return NextResponse.json(
     {
+      // The payment provider's side: whether a card can be charged here, in
+      // which mode, and the subscription it holds for this account.
+      billing,
       cancel_at: current.cancelAt?.toISOString() ?? null,
       // Free, Private and Business as the usage page draws them (plan-catalog.ts).
-      // `plans` below is the billing_plans rows, which a paid stop joins once
-      // support activates it.
-      catalog: planCatalog(limitsForPlan(free), current.plan.code),
-      // A downgrade waits for the rollover; this names where it lands.
+      // `plans` below is the billing_plans rows.
+      catalog: planCatalog(limitsForPlan(free), current.plan.code, purchasable),
+      // A downgrade waits for the renewal; this names where it lands.
       next_plan_code: current.nextPlanCode,
       plan: {
         code: current.plan.code,
@@ -86,7 +93,7 @@ export async function GET(request: NextRequest) {
           period: plan.period,
           price_micros: plan.priceMicros.toString(),
         })),
-      self_serve: selfServeEnabled(),
+      self_serve: billing.checkout,
       status: current.status,
       subscribed: current.subscribed,
     },
@@ -111,9 +118,8 @@ export async function PUT(request: NextRequest) {
     return jsonError("login_required", 401);
   }
   // Taking on a charge is a decision for the person, in a browser, never a
-  // script's bearer — the same line the frame-confirm and second-factor
-  // routes draw. Dormant until FRAMEOS_CLOUD_PLANS_SELF_SERVE flips, but the
-  // free downgrade branch below is reachable today too.
+  // script's bearer: the same line the frame-confirm and second-factor
+  // routes draw.
   if (session.apiToken) {
     return jsonError("api_token_not_allowed", 403);
   }
@@ -132,31 +138,47 @@ export async function PUT(request: NextRequest) {
   if (!target || !target.public) {
     return jsonError("unknown_plan", 404);
   }
-  // Downgrading to the free plan is always allowed — refusing to let somebody
-  // stop paying us would be an unpleasant thing to build. Only taking on a
-  // charge is gated.
-  if (!selfServeEnabled() && target.priceMicros > 0n) {
-    return jsonError("plans_not_available", 503, {
-      detail:
-        "Paid plans are not open yet. Nothing is charged for AI while FrameOS Cloud AI is in preview.",
-    });
-  }
+  const setup = creemSetup();
+  const accountId = session.accountId;
 
-  if (target.priceMicros === 0n) {
-    await cancelAccountPlan(db, session.accountId);
-  } else {
-    await setAccountPlan(db, session.accountId, target.code);
+  try {
+    if (target.priceMicros === 0n) {
+      // Stopping is always allowed. A plan the provider bills runs to the
+      // end of the period paid for; one set by hand ends as it always did.
+      const scheduled = setup.config ? await cancelAtPeriodEnd(db, setup.config, accountId) : false;
+      if (!scheduled) {
+        await cancelAccountPlan(db, accountId);
+      }
+    } else {
+      if (!setup.config) {
+        return jsonError("plans_not_available", 503, {
+          detail: "Paid plans cannot be bought here yet. Contact support to activate one.",
+        });
+      }
+      await changePaidPlan(db, setup.config, accountId, target.code);
+    }
+  } catch (error) {
+    if (error instanceof BillingError) {
+      return jsonError(error.code, error.status, { detail: error.message });
+    }
+    if (error instanceof CreemError) {
+      reportError("billing.plan_change_failed", error, { accountId, plan: target.code });
+      return jsonError("payment_provider_failed", 502, {
+        detail: "The payment provider did not accept the change. Nothing was charged. Try again in a moment.",
+      });
+    }
+    throw error;
   }
   await recordAuditEvent(db, {
-    accountId: session.accountId,
-    actor: { accountId: session.accountId, kind: "account" },
+    accountId,
+    actor: { accountId, kind: "account" },
     eventType:
       target.priceMicros === 0n ? "account.plan_canceled" : "account.plan_changed",
     metadata: { plan: target.code },
-    target: { accountId: session.accountId, kind: "account" },
+    target: { accountId, kind: "account" },
   });
 
-  const current = await readAccountPlan(db, session.accountId);
+  const current = await readAccountPlan(db, accountId);
   return NextResponse.json(
     {
       cancel_at: current.cancelAt?.toISOString() ?? null,

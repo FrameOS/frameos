@@ -6,6 +6,7 @@ import { accountIsSuperadmin } from "../../src/lib/superadmin";
 const pages = [
   { href: "/legal/terms", label: "Terms of Service" },
   { href: "/legal/privacy", label: "Privacy Policy" },
+  { href: "/legal/refunds", label: "Refund policy" },
   { href: "/legal/imprint", label: "Imprint" },
 ] as const;
 

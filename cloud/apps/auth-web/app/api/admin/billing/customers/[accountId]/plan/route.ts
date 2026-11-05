@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { accounts } from "@frameos-cloud/db";
+import { accounts, subscriptions } from "@frameos-cloud/db";
 import {
   cancelAccountPlan,
   LedgerError,
@@ -32,10 +32,16 @@ type RouteContext = { params: Promise<{ accountId: string }> };
 //  - non-public plans are allowed. `billing_plans.public = false` rows exist
 //    precisely for grandfathered or negotiated arrangements, and the only
 //    way onto one is this route;
-//  - self-serve gating does not apply. The FRAMEOS_CLOUD_PLANS_SELF_SERVE
-//    switch exists because a customer subscribing runs up a receivable
-//    Phase 3b cannot yet settle; an operator doing it on purpose, with a
-//    reason on record, is the exception that switch was written around.
+//  - no checkout. A plan set here is billed by the nightly cycle and runs
+//    up a receivable nothing collects yet; an operator doing that on
+//    purpose, with a reason on record, is what this route is for. A
+//    customer buys a plan at the payment provider's checkout instead
+//    (docs/billing.md).
+//
+// An account that pays through the payment provider is refused: its plan
+// follows what the provider bills, and changing it here would either bill
+// it twice or leave a card being charged for a plan it no longer has.
+// Change or cancel the subscription in the provider's dashboard.
 //
 // Moving to the free plan is a cancellation: run-to-period-end by default
 // (they owe for the period already charged and keep it), or `immediately`
@@ -98,6 +104,16 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   }
 
   const before = await readAccountPlan(db, accountId);
+  const [ours] = await db
+    .select({ provider: subscriptions.provider, status: subscriptions.status })
+    .from(subscriptions)
+    .where(eq(subscriptions.accountId, accountId))
+    .limit(1);
+  if (before.subscribed && ours?.provider && ours.status !== "canceled") {
+    return jsonError("billed_by_provider", 409, {
+      detail: `This account pays for its plan through ${ours.provider}. Change or cancel the subscription in the provider's dashboard; the account follows it.`,
+    });
+  }
   try {
     if (target.priceMicros === 0n) {
       await cancelAccountPlan(db, accountId, { immediately });

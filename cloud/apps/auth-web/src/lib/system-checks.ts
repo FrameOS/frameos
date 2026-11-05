@@ -14,8 +14,10 @@
 import { randomBytes } from "node:crypto";
 import { and, gt, isNotNull, sql } from "drizzle-orm";
 import { createDb, frameAssetFiles } from "@frameos-cloud/db";
+import { creemSetup } from "./creem";
 import { checkEmailDelivery } from "./email";
 import { hasDatabaseUrl } from "./env";
+import { getSupportEmail } from "./legal";
 import { objectStore } from "./object-store";
 import { activePhotoScanners } from "./photos/scan";
 import { getTurnstileSiteKey } from "./turnstile";
@@ -184,6 +186,25 @@ export function runSystemChecks(): SystemCheck[] {
       name: "FRAMEOS_LEGAL_ENTITY_* (see legal.ts)",
       required: true,
     },
+    {
+      configured: Boolean(getSupportEmail()),
+      detail:
+        "The support address in the footer, on /pricing and beside the plan cards. The payment provider requires one, and it must be the address in its Business Details.",
+      name: "FRAMEOS_SUPPORT_EMAIL",
+      required: false,
+    },
+    (() => {
+      const creem = creemSetup();
+      return {
+        configured: Boolean(creem.config),
+        detail: creem.config
+          ? `Paid plans are sold through Creem in ${creem.config.mode} mode (docs/billing.md).`
+          : (creem.problem ??
+            "Paid plans cannot be bought: the plan cards say “Contact support”. Set both with CREEM_MODE to sell them (docs/billing.md)."),
+        name: "CREEM_API_KEY + CREEM_WEBHOOK_SECRET",
+        required: false,
+      };
+    })(),
   ];
 }
 

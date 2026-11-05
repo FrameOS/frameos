@@ -31,6 +31,17 @@ export {
   type PlanEntitlements,
 } from "./plans";
 export {
+  applyProviderPayment,
+  applyProviderRefund,
+  noteProviderNextPlan,
+  setProviderSubscriptionState,
+  type ProviderMode,
+  type ProviderPaymentInput,
+  type ProviderPaymentResult,
+  type ProviderRefundInput,
+  type ProviderSubscriptionState,
+} from "./provider-subscriptions";
+export {
   accruePeriod,
   addMonth,
   addMonths,

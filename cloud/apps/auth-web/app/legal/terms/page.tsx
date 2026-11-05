@@ -2,7 +2,7 @@ import { getLegalEntity, placeholder } from "../../../src/lib/legal";
 
 export const metadata = { title: "Terms of Service" };
 
-const lastUpdated = "15 August 2026";
+const lastUpdated = "5 November 2026";
 
 export default function TermsPage() {
   const entity = getLegalEntity();
@@ -53,20 +53,71 @@ export default function TermsPage() {
         access.
       </p>
 
-      <h2>3. What it costs</h2>
+      <h2 id="costs">3. What it costs</h2>
       <p className="copy">
-        FrameOS Cloud is currently free to use. If we introduce paid plans, we
-        will say so clearly before you are asked for anything, existing
-        accounts will keep working, and no charge will ever appear without you
-        agreeing to it first. If you are a consumer in the EU, your statutory
-        right of withdrawal applies to any future paid subscription and we will
-        set out how to use it at the point of sale.
+        The Free plan costs nothing. Paid plans give you room for more frames
+        and more files; what each one includes and costs is on the{" "}
+        <a href="/pricing">pricing page</a>. Nothing is ever charged without
+        you choosing a plan and paying for it at checkout.
       </p>
       <p className="copy">
-        There are no published quotas yet. We may set fair-use limits on frame
-        count, storage and backup size; we will announce them before enforcing
-        them, and they will not be set so as to strand data you have already
-        stored.
+        Every plan has limits on frames and storage. They are shown on the
+        Usage page of your account. If we lower a limit we will announce it
+        first, and never so as to strand data you have already stored.
+      </p>
+      <p className="copy">
+        The AI assistant is free while FrameOS Cloud is in beta, within a daily
+        allowance. If we start charging for it we will say so clearly first,
+        and you can switch it off for your account at any time.
+      </p>
+
+      <h3 id="paid-plans">Paid plans</h3>
+      <p className="copy">
+        A paid plan is a monthly subscription, paid in advance. It renews each
+        month at the price shown when you bought it until you cancel. Prices
+        are in US dollars and exclude VAT or sales tax, which is added at
+        checkout where it applies.
+      </p>
+      <p className="copy">
+        Paid plans are sold by Creem (Armitage Labs O&Uuml;, Estonia), our
+        merchant of record. That means Creem is the seller for the payment: it
+        charges your card, handles the tax, sends your receipt and invoice and
+        appears on your card statement, and its{" "}
+        <a
+          href="https://www.creem.io/buyer-terms"
+          rel="noreferrer noopener"
+          target="_blank"
+        >
+          buyer terms
+        </a>{" "}
+        apply to the purchase. {entity.name} provides the service and answers
+        for it under these terms.
+      </p>
+      <p className="copy">
+        You can change plan from your account. A larger plan starts at once and
+        you pay the difference for the rest of the month; a smaller one starts
+        at your next renewal. If we change the price of a plan you are on, we
+        tell you by email at least 30 days before the renewal it applies to,
+        and you can cancel before then.
+      </p>
+
+      <h3 id="cancelling">Cancelling and refunds</h3>
+      <p className="copy">
+        You can cancel a paid plan at any time from the Usage page of your
+        account. It runs to the end of the month you paid for and is not
+        charged again. Nothing is deleted: if you hold more than the Free plan
+        allows you keep it, and you cannot add more until you are back under
+        the limit.
+      </p>
+      <p className="copy">
+        Within 14 days of your first payment for a plan you can ask for it back
+        in full, without giving a reason. If you are a consumer in the EU or
+        the UK this is also your statutory right of withdrawal. The full rules
+        are in the <a href="/legal/refunds">refund policy</a>.
+      </p>
+      <p className="copy">
+        If a payment fails, Creem tries the card again over the following days.
+        If it still fails the plan ends and the account moves to Free.
       </p>
 
       <h2>4. Your content stays yours</h2>
@@ -162,6 +213,11 @@ export default function TermsPage() {
         <a href="/account/security">account security page</a>. It takes effect
         immediately and removes your data — export it first if you want a copy
         (there is a button on the same page).
+      </p>
+      <p className="copy">
+        Deleting your account also cancels a paid plan at once. The rest of the
+        month is not refunded automatically; the{" "}
+        <a href="/legal/refunds">refund policy</a> says when it is.
       </p>
       <p className="copy">
         We may suspend or close an account that seriously or repeatedly breaks

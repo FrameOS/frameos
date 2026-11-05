@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   planCardsFor,
   wholeDollars,
+  type PlanBilling,
   type PlanCatalog,
 } from "../../../../../../frontend/src/scenes/settings/account/plansLogic";
 import { planCatalog } from "../../lib/plan-catalog";
@@ -59,5 +60,81 @@ describe("the plan cards", () => {
     );
     // Without a support address the card says so in words instead.
     expect(planCardsFor(catalog, {}, null)[1]!.contactHref).toBeNull();
+  });
+});
+
+describe("what a plan card's button does", () => {
+  const megabytes = 1024 * 1024;
+  const free = {
+    backupBytes: 100 * megabytes,
+    cloudRenderedFrames: 0,
+    frameLogBytes: 100 * megabytes,
+    frames: 20,
+    photoBytes: 250 * megabytes,
+    privateSceneBytes: 100 * megabytes,
+  };
+  const buyable = new Set(["private-2", "private-5", "private-9", "private-29"]);
+  const billing = (subscription: PlanBilling["subscription"] = null): PlanBilling => ({
+    checkout: true,
+    manage: subscription !== null,
+    mode: "test",
+    subscription,
+  });
+  const paying = (overrides: Partial<NonNullable<PlanBilling["subscription"]>> = {}) =>
+    billing({
+      cancel_at: null,
+      past_due: false,
+      plan_code: "private-5",
+      renews_at: "2026-12-05T10:00:00.000Z",
+      status: "active",
+      ...overrides,
+    });
+  const kinds = (cards: ReturnType<typeof planCardsFor>) => cards.map((card) => card.action.kind);
+
+  it("sends a free account to checkout for Private and to support for Business", () => {
+    const cards = planCardsFor(planCatalog(free, "payg", buyable), {}, "support@example.com", billing());
+    expect(kinds(cards)).toEqual(["current", "checkout", "contact"]);
+    expect(cards[1]!.contactHref).toBeNull();
+    expect(cards[2]!.contactHref).toContain("mailto:support@example.com");
+  });
+
+  it("asks support for everything when no card can be charged", () => {
+    const cards = planCardsFor(planCatalog(free, "payg"), {}, "support@example.com", {
+      checkout: false,
+      manage: false,
+      mode: null,
+      subscription: null,
+    });
+    expect(kinds(cards)).toEqual(["current", "contact", "contact"]);
+  });
+
+  it("lets a paying account move between stops, and cancel from the Free card", () => {
+    const paid = planCatalog(free, "private-5", buyable);
+    // The slider opens on the account's stop.
+    const onPlan = planCardsFor(paid, {}, null, paying());
+    expect(kinds(onPlan)).toEqual(["cancel", "current", "contact"]);
+    expect(onPlan[1]!.stop.code).toBe("private-5");
+
+    const larger = planCardsFor(paid, { private: 2 }, null, paying())[1]!;
+    expect(larger.action).toEqual({ dearer: true, kind: "switch" });
+    const smaller = planCardsFor(paid, { private: 0 }, null, paying())[1]!;
+    expect(smaller.action).toEqual({ dearer: false, kind: "switch" });
+  });
+
+  it("offers to keep a plan that is set to end", () => {
+    const ending = paying({ cancel_at: "2026-12-05T10:00:00.000Z", renews_at: null, status: "scheduled_cancel" });
+    const cards = planCardsFor(planCatalog(free, "private-5", buyable), {}, null, ending);
+    expect(cards[0]!.action).toEqual({ endsAt: "2026-12-05T10:00:00.000Z", kind: "ending" });
+    expect(cards[1]!.action).toEqual({ endsAt: "2026-12-05T10:00:00.000Z", kind: "keep" });
+  });
+
+  it("marks what is planned on each card", () => {
+    const cards = planCardsFor(planCatalog(free, "payg", buyable), {}, null, billing());
+    expect(cards.map((card) => card.plannedFeatures)).toEqual([
+      [],
+      expect.arrayContaining(["share_frames", "virtual_frames"]),
+      expect.arrayContaining(["sso"]),
+    ]);
+    expect(cards[2]!.plannedFeatures).not.toContain("priority_support");
   });
 });

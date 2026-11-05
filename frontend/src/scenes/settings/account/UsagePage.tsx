@@ -7,8 +7,8 @@ import { Button, buttonColor, buttonSize } from '../../../components/Button'
 import { Spinner } from '../../../components/Spinner'
 import { Tag } from '../../../components/Tag'
 import { AccountPageHeader, AccountSection, AccountTable } from './AccountPageHeader'
-import { dollars, formatBytes, formatDateTime, surfaceLabel } from './format'
-import { plansLogic, wholeDollars, type PlanCard, type PlanStopLimits } from './plansLogic'
+import { dollars, formatBytes, formatDate, formatDateTime, surfaceLabel } from './format'
+import { plansLogic, wholeDollars, type PlanBilling, type PlanCard, type PlanStopLimits } from './plansLogic'
 import { usageLogic, type AccountUsage, type AiUsage, type AiUsageMonth } from './usageLogic'
 
 interface Meter {
@@ -114,29 +114,109 @@ function planBytes(bytes: number): string {
   return bytes >= 1000 * 1024 * 1024 && bytes < gigabyte ? `${(bytes / gigabyte).toFixed(1)} GB` : formatBytes(bytes)
 }
 
-function planLimitRows(limits: PlanStopLimits): [string, string][] {
+interface PlanLimitRow {
+  label: string
+  value: string
+  /** Counts something that is not built yet: shown, and marked. */
+  planned: boolean
+}
+
+function planLimitRows(limits: PlanStopLimits, plannedLimits: string[]): PlanLimitRow[] {
   const count = (value: number): string => value.toLocaleString('en-US')
+  const row = (label: string, value: string, key?: string): PlanLimitRow => ({
+    label,
+    value,
+    planned: key !== undefined && plannedLimits.includes(key),
+  })
   return [
-    ['People', limits.people === 1 ? 'Just you' : count(limits.people)],
-    ['Frames', count(limits.frames)],
-    ['Virtual frames', limits.cloud_rendered_frames === 0 ? 'None' : count(limits.cloud_rendered_frames)],
-    ['Photos', planBytes(limits.photo_bytes)],
-    ['Private scenes', planBytes(limits.private_scene_bytes)],
-    ['Backups', planBytes(limits.backup_bytes)],
-    ['Frame logs', planBytes(limits.frame_log_bytes)],
+    row('People', limits.people === 1 ? 'Just you' : count(limits.people), limits.people === 1 ? undefined : 'people'),
+    row('Frames', count(limits.frames)),
+    row(
+      'Virtual frames',
+      limits.cloud_rendered_frames === 0 ? 'None' : count(limits.cloud_rendered_frames),
+      limits.cloud_rendered_frames === 0 ? undefined : 'cloud_rendered_frames'
+    ),
+    row('Photos', planBytes(limits.photo_bytes)),
+    row('Private scenes', planBytes(limits.private_scene_bytes)),
+    row('Backups', planBytes(limits.backup_bytes)),
+    row('Frame logs', planBytes(limits.frame_log_bytes)),
   ]
 }
 
-function PlanFeature({ label, muted }: { label: string; muted?: boolean }): JSX.Element {
+function PlanFeature({ label, muted, planned }: { label: string; muted?: boolean; planned?: boolean }): JSX.Element {
+  const faded = muted || planned
   return (
-    <li className={clsx('flex gap-2', muted && 'frameos-muted')}>
-      <CheckIcon className={clsx('mt-0.5 h-4 w-4 shrink-0', muted ? 'opacity-40' : 'text-[var(--frameos-primary)]')} />
-      <span>{label}</span>
+    <li className={clsx('flex gap-2', faded && 'frameos-muted')}>
+      <CheckIcon className={clsx('mt-0.5 h-4 w-4 shrink-0', faded ? 'opacity-40' : 'text-[var(--frameos-primary)]')} />
+      <span>
+        {label}
+        {planned ? ' (planned)' : ''}
+      </span>
     </li>
   )
 }
 
-function PlanCardBox({ card }: { card: PlanCard }): JSX.Element {
+// A card's button: buy it, move to it, keep it, cancel, or write to support.
+function PlanCardAction({ card }: { card: PlanCard }): JSX.Element | null {
+  const { busy } = useValues(plansLogic)
+  const { choosePlan, switchPlan, keepPlan, cancelPlan } = useActions(plansLogic)
+  const { action, group, stop } = card
+  const label = `${group.name} at ${wholeDollars(stop.price_micros)}/month`
+  const working = busy !== null
+  switch (action.kind) {
+    case 'current':
+      return (
+        <Button color="secondary" full disabled>
+          Your plan
+        </Button>
+      )
+    case 'keep':
+      return (
+        <div className="space-y-2">
+          <p className="frameos-muted text-center text-sm">
+            {action.endsAt ? `Ends ${formatDate(action.endsAt)}` : 'Ends at the end of this billing period'}
+          </p>
+          <Button color="primary" full disabled={working} onClick={() => keepPlan(stop.code)}>
+            {busy === stop.code ? 'Working…' : 'Keep this plan'}
+          </Button>
+        </div>
+      )
+    case 'checkout':
+      return (
+        <Button color="primary" full disabled={working} onClick={() => choosePlan(stop.code)}>
+          {busy === stop.code ? 'Opening checkout…' : `Choose ${label}`}
+        </Button>
+      )
+    case 'switch':
+      return (
+        <Button color="primary" full disabled={working} onClick={() => switchPlan(stop.code, label, action.dearer)}>
+          {busy === stop.code ? 'Working…' : `Switch to ${wholeDollars(stop.price_micros)}/month`}
+        </Button>
+      )
+    case 'cancel':
+      return (
+        <Button color="secondary" full disabled={working} onClick={() => cancelPlan()}>
+          {busy === 'cancel' ? 'Working…' : 'Cancel my paid plan'}
+        </Button>
+      )
+    case 'ending':
+      return (
+        <p className="frameos-muted text-center text-sm">
+          {action.endsAt ? `Your account moves here on ${formatDate(action.endsAt)}` : 'Your account moves here soon'}
+        </p>
+      )
+    case 'contact':
+      return card.contactHref ? (
+        <a className={clsx(buttonSize('normal'), buttonColor('primary'), 'block w-full')} href={card.contactHref}>
+          Contact support to activate
+        </a>
+      ) : (
+        <p className="frameos-muted text-center text-sm">Contact support to activate</p>
+      )
+  }
+}
+
+function PlanCardBox({ card, plannedLimits }: { card: PlanCard; plannedLimits: string[] }): JSX.Element {
   const { setStopIndex } = useActions(plansLogic)
   const { group, stop, stopIndex } = card
   const sliding = group.stops.length > 1
@@ -184,10 +264,13 @@ function PlanCardBox({ card }: { card: PlanCard }): JSX.Element {
         )}
       </div>
       <dl className="space-y-1.5 text-sm">
-        {planLimitRows(stop.limits).map(([label, value]) => (
+        {planLimitRows(stop.limits, plannedLimits).map(({ label, value, planned }) => (
           <div key={label} className="flex justify-between gap-3">
             <dt className="frameos-muted">{label}</dt>
-            <dd className="frameos-strong tabular-nums">{value}</dd>
+            <dd className={clsx('tabular-nums', planned ? 'frameos-muted' : 'frameos-strong')}>
+              {value}
+              {planned ? ' (planned)' : ''}
+            </dd>
           </div>
         ))}
       </dl>
@@ -196,7 +279,11 @@ function PlanCardBox({ card }: { card: PlanCard }): JSX.Element {
           <PlanFeature key={label} label={label} />
         ))}
         {card.features.map((feature) => (
-          <PlanFeature key={feature} label={planFeatureLabels[feature] ?? feature} />
+          <PlanFeature
+            key={feature}
+            label={planFeatureLabels[feature] ?? feature}
+            planned={card.plannedFeatures.includes(feature)}
+          />
         ))}
         {card.laterFeatures.map(({ feature, priceMicros }) => (
           <PlanFeature
@@ -207,38 +294,91 @@ function PlanCardBox({ card }: { card: PlanCard }): JSX.Element {
         ))}
       </ul>
       <div className="mt-auto pt-2">
-        {group.available ? (
-          card.current ? (
-            <Button color="secondary" full disabled>
-              Your plan
-            </Button>
-          ) : null
-        ) : card.contactHref ? (
-          <a className={clsx(buttonSize('normal'), buttonColor('primary'), 'block w-full')} href={card.contactHref}>
-            Contact support to activate
-          </a>
-        ) : (
-          <p className="frameos-muted text-center text-sm">Contact support to activate</p>
-        )}
+        <PlanCardAction card={card} />
       </div>
     </Box>
   )
 }
 
+// What the payment provider holds for the account: when the plan renews or
+// ends, a failed payment, and the way to its billing page.
+function BillingStatus({ billing }: { billing: PlanBilling }): JSX.Element | null {
+  const { busy, checkoutOutcome } = useValues(plansLogic)
+  const { openBilling } = useActions(plansLogic)
+  const { subscription } = billing
+  const lines: { text: string; warning?: boolean }[] = []
+  if (checkoutOutcome === 'active') {
+    lines.push({ text: 'Thank you. Your plan is active.' })
+  } else if (checkoutOutcome === 'pending') {
+    lines.push({ text: 'Thank you. Your payment is being confirmed. This usually takes a few seconds.' })
+  } else if (checkoutOutcome === 'failed') {
+    lines.push({ text: 'That checkout could not be matched to this account. Nothing changed here.', warning: true })
+  }
+  if (subscription?.past_due) {
+    lines.push({
+      text: 'Your last payment failed. Update your card under Manage billing to keep the plan.',
+      warning: true,
+    })
+  } else if (subscription?.cancel_at) {
+    lines.push({ text: `Your plan is cancelled and runs until ${formatDate(subscription.cancel_at)}.` })
+  } else if (subscription?.renews_at) {
+    lines.push({ text: `Your plan renews on ${formatDate(subscription.renews_at)}.` })
+  }
+  if (billing.mode === 'test' && billing.checkout) {
+    lines.push({ text: 'Payments are in test mode. Checkout takes test cards only and nothing is charged.' })
+  }
+  if (lines.length === 0 && !billing.manage) {
+    return null
+  }
+  return (
+    <Box className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm" data-billing-status>
+      <div className="space-y-1">
+        {lines.map(({ text, warning }) => (
+          <p key={text} className={warning ? 'text-amber-600' : undefined} role={warning ? 'alert' : undefined}>
+            {text}
+          </p>
+        ))}
+        {lines.length === 0 ? <p className="frameos-muted">Invoices and your card are on the billing page.</p> : null}
+      </div>
+      {billing.manage ? (
+        <Button color="secondary" size="small" disabled={busy !== null} onClick={() => openBilling()}>
+          {busy === 'billing' ? 'Opening…' : 'Manage billing'}
+        </Button>
+      ) : null}
+    </Box>
+  )
+}
+
 function PlanCards(): JSX.Element {
-  const { planCards, catalogLoading } = useValues(plansLogic)
+  const { planCards, catalog, catalogLoading, billing, contactEmail } = useValues(plansLogic)
   if (planCards.length === 0) {
     return catalogLoading ? <Spinner /> : <></>
   }
+  const plannedLimits = catalog?.planned_limits ?? []
+  const anyPlanned = plannedLimits.length > 0 || planCards.some((card) => card.plannedFeatures.length > 0)
   return (
     <div className="space-y-3">
+      {billing ? <BillingStatus billing={billing} /> : null}
       <div className="grid gap-4 lg:grid-cols-3">
         {planCards.map((card) => (
-          <PlanCardBox key={card.group.key} card={card} />
+          <PlanCardBox key={card.group.key} card={card} plannedLimits={plannedLimits} />
         ))}
       </div>
       <p className="frameos-muted text-sm leading-relaxed">
-        AI is priced per request and costs the same on every plan. See how pricing works below.
+        Paid plans are billed monthly and can be cancelled at any time. Prices are in US dollars and exclude VAT or
+        sales tax, which is added at checkout where it applies. AI is priced per request and costs the same on every
+        plan.
+        {anyPlanned ? ' Anything marked planned is not available yet and is not part of what you pay for today.' : ''}
+        {contactEmail ? (
+          <>
+            {' '}
+            Questions? Write to{' '}
+            <a className="frameos-link hover:underline" href={`mailto:${contactEmail}`}>
+              {contactEmail}
+            </a>
+            .
+          </>
+        ) : null}
       </p>
     </div>
   )
@@ -403,8 +543,8 @@ function PricingCard({ ai }: { ai: AiUsage }): JSX.Element {
   return (
     <Box className="space-y-3 p-4 text-sm leading-relaxed">
       <p>
-        FrameOS Cloud is in beta. The Free plan costs nothing, and while the beta lasts neither does AI usage. The paid
-        plans above are activated by support for now, and you will be told before anything is charged.
+        The Free plan costs nothing, and while FrameOS Cloud is in beta neither does AI usage. A paid plan is billed
+        monthly in advance through Creem, our payment partner, and you can cancel it at any time.
       </p>
       <p>
         Once billing starts, AI usage will be priced per request: what the model provider charges for the tokens it

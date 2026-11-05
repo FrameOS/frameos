@@ -3,12 +3,12 @@
 Status: the ledger, AI metering (**live** — every turn is measured, priced
 and posted to the customer's receivable), the admin/ops surfaces, the
 account's own usage view with its AI switch, the daily cap, and plans with
-their subscription lifecycle are built. **Phase 3b — the payment provider —
-is the only thing left, and it is paused on purpose (2026-09-03): no
-provider until there are users to invoice.** Nothing is *collected*: no
-invoice is cut and self-serve plan purchase stays gated off
-(`FRAMEOS_CLOUD_PLANS_SELF_SERVE`), because until 3b there is no way to
-settle a receivable. The open work is §7; §9 is the
+their subscription lifecycle are built. **Paid plans are collected through
+Creem, a merchant of record (2026-11-05, [`billing.md`](billing.md)):**
+checkout, webhooks, plan changes, cancellation and refunds, in test mode
+until Creem approves the account. What is left of Phase 3b is the other
+half: **nothing collects metered AI**, so no invoice is cut for usage and
+no turn is billable. The open work is §7; §9 is the
 2026-09-01 review and what its fixes did, kept because the code cites its
 item numbers.
 
@@ -97,11 +97,13 @@ cannot disagree with the meters above them.
 Higher stops buy capacity, never features; Business picks up where Private
 ends, with the same rules and its own features on top.
 
-- **Only Free is live.** The paid cards say "Contact support to activate".
-  Activating one means a `billing_plans` row with the stop's code
-  (`private-9`, `business-499`) and the stop's limits as entitlements, then
-  the operator plan route. No paid row is seeded yet: subscribing accrues a
-  receivable and Phase 3b has no way to settle it.
+- **Private is bought at checkout, Business through support.** A
+  self-serve group (`selfServe` in the catalog) gets its `billing_plans`
+  rows (`private-9`, the stop's limits as entitlements) and its products at
+  the payment provider from "Sync plans" on `/admin/billing/payments`
+  ([`billing.md`](billing.md)). Business stays "Contact support to
+  activate" until single sign-on exists: an operator gives the account a
+  row and uses the operator plan route.
 - **Photo storage is a plan number now** (`photo_bytes`, optional on a row).
   Free's is `FRAMEOS_CLOUD_MAX_PHOTO_MB`, 250 MB by default (was 1 GB); an
   unverified account stays capped at `FRAMEOS_CLOUD_MAX_UNVERIFIED_PHOTO_MB`
@@ -111,9 +113,11 @@ ends, with the same rules and its own features on top.
   margin instead (Maker $1.99 at 50%, Studio $6.99 at 20%); migration 0069
   took those two rows off every listing and renamed `payg` to Free. The
   rows stay for the ledger tests and any hand-made subscription.
-- **Sharing frames, SSO and dedicated support do not exist yet.** They are
-  on the cards as what the plan will include; build them before activating
-  a plan that promises them.
+- **Sharing frames, virtual frames and SSO do not exist yet.** The catalog
+  names them in `plannedFeatures` / `plannedLimits`: every page marks them
+  "planned", and a plan's row does not grant them. Take a name off those
+  lists in the change that ships the feature. What a paid plan sells today
+  is frames and storage.
 
 Open: a yearly price, and what happens to an account that moves below what
 it already uses (proposal: nothing breaks, nothing new can be added).
@@ -1168,9 +1172,12 @@ Standing decisions from building them, which the open work must respect:
   ignores them.
 - **The nightly job reports and never repairs.** Books that disagree with
   themselves need a human.
-- **Self-serve plan purchase is gated off** (`FRAMEOS_CLOUD_PLANS_SELF_SERVE`,
-  default false) until 3b: subscribing accrues a receivable nobody can
-  settle. Downgrading to the free plan is never gated.
+- **A plan bought at checkout is billed by the provider, not by the nightly
+  cycle** (`subscriptions.provider`). Its period opens when the provider
+  reports the payment, at what was collected net of tax, and the charge and
+  the payment post together, so nothing waits on the receivable. A plan an
+  operator sets by hand still accrues a receivable nobody can settle; that
+  is why there is no self-serve path onto one. Cancelling is never gated.
 - **Entitlements take the larger of the plan and the deployment's env
   floor**, so an operator's raised limit is never lowered by a plan row.
 - **`credential_source: "platform"` has no producer yet**, so nothing is
@@ -1193,41 +1200,33 @@ Standing decisions from building them, which the open work must respect:
 
 ### Phase 3b — the provider half
 
-**Paused 2026-09-03 until there are users to invoice.** Then: §8.15
-(entity), §8.7 (provider — Stripe and one merchant-of-record alternative
-are the candidates), and this list in order. The requirement stands: postpay
-needs a payment method stored and chargeable later, not a one-off hosted
-checkout (§3.2).
+**Plans: built 2026-11-05** on Creem ([`billing.md`](billing.md), migration
+0073): hosted checkout, signed webhooks with the provider's event id as the
+idempotency key, the `payment.received` / `payment.refunded` recipes
+(`rules/payment.ts`), plan changes, cancellation, the nightly reconcile and
+the legal and pricing pages. A merchant of record settles most of §8.15 for
+plans: Creem is the seller, invoices the customer and remits the tax.
 
-- [ ] **Which legal entity invoices, and from where** (§8.15): the entity on
-      the invoice, its VAT registration, whether invoices must be numbered
-      gaplessly by law (`invoices.number` is designed for that but nothing
-      assigns it), and whether B2C sales to other EU countries trigger OSS.
-- [ ] Choose the provider; SDK + env plumbing; webhook endpoint
-      `app/api/webhooks/<provider>/route.ts` (signature check, provider
-      event id as idempotency key, raw-body handling).
-- [ ] Migration `0048`: `invoices` (period bounds, sequential number,
-      status, provider payment ref) and the stored-payment-method reference.
-      The invoice holds no amount the ledger does not — §3.2 says why.
-- [ ] `source: "platform"` in `resolveAiCredentials` — the thing that makes
-      any of this billable at all, and still gated by §5.1 and §5.3 before
-      it is reached. The scene converter stays out of it: it is an absorbed
-      surface (§5), so it books pure cost when the billable key reaches it,
-      and neither the cap nor the switch may turn a free surface into a 402.
-- [ ] Month-close run in the nightly job: cut invoices over the period's
-      receivable, skip balances under the minimum threshold (§3.2), charge
-      the stored method.
-- [ ] Recipes: `invoice_payment`, `psp_fee`, `receivable_writeoff`, and
-      `promo_grant` against the receivable (§3.4).
-- [ ] Dunning: retry schedule, the age at which AI switches off for an
-      unpaid balance, the emails. Reads the receivable, writes none of it.
-- [ ] Golden-file test: turns → cap refusal → month close → invoice →
-      payment → fee → an unpaid month → write-off.
-- [ ] Legal/pricing page copy: that AI is billed monthly in arrears, that
-      a plan is billed in advance for the coming period (§0), what the
-      margin is, what the cap is, and how to turn it off. Plus §8.8's
-      billing-records retention line, which must land before the first
-      invoice, not after — and §8.15's answer (which entity invoices).
+**Metered AI: still open**, and still paused until there are users to
+invoice. Creem's hosted checkout sells a subscription; charging a month of
+usage in arrears needs a payment method chargeable later (§3.2). Before
+building, decide between Creem's usage-based billing and folding AI into
+the plans.
+
+- [ ] Go live with plans: the steps in `billing.md` "Going live" (Creem's
+      account review, live keys, `CREEM_MODE=live`).
+- [ ] Decide how metered AI is collected, then: `source: "platform"` in
+      `resolveAiCredentials` (the thing that makes a turn billable, still
+      gated by §5.1 and §5.3; the scene converter stays an absorbed
+      surface), the month-close run, and dunning.
+- [ ] `psp_fee`: Creem's fee (3.9% + $0.40 a transaction) is not in a
+      payment notice. Book it from the payout report (Phase 6), or
+      `asset:psp:main` overstates what Creem owes us by the fees.
+- [ ] `receivable_writeoff` and `promo_grant` against the receivable
+      (§3.4), for the receivables an operator-set plan or metered AI leave.
+- [ ] Disputes: `dispute.created` is recorded in `provider_events` and
+      nothing acts on it.
+- [ ] A yearly price (§0.1).
 
 ### Phase 6 — later, enabled by the above, not designed in detail here
 - [ ] Bank/PSP reconciliation: import the provider's payout reports + bank

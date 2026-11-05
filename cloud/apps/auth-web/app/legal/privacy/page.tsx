@@ -13,7 +13,7 @@ export const metadata = { title: "Privacy Policy" };
 // actually requires ("concise, transparent, intelligible... clear and plain
 // language", art. 12(1)) — the dense version is not the compliant one.
 
-const lastUpdated = "12 September 2026";
+const lastUpdated = "5 November 2026";
 
 export default function PrivacyPage() {
   const entity = getLegalEntity();
@@ -65,6 +65,32 @@ export default function PrivacyPage() {
         GDPR). Without it there is no service. We verify the email address
         because password resets and security notices have to reach the real
         owner of the account.
+      </p>
+
+      <h3>Paying for a plan</h3>
+      <p className="copy">
+        Paid plans are sold by Creem (Armitage Labs O&Uuml;, Estonia), our
+        merchant of record. When you go to checkout we send Creem your email
+        address, the plan you chose and an identifier for your account, so the
+        payment can be matched to it. You give your name, card and billing
+        address to Creem directly: we never see or store your card details.
+        Creem tells us whether you paid, how much, the tax and your country,
+        and when a plan renews, fails or ends. We keep that to know which plan
+        your account is on and to keep our books. The legal basis is{" "}
+        <strong>performance of a contract</strong> and, for the accounting
+        records, a <strong>legal obligation</strong> (art. 6(1)(c) GDPR).
+      </p>
+      <p className="copy">
+        For the payment itself Creem decides how your data is used and is
+        responsible for it, under its own{" "}
+        <a
+          href="https://www.creem.io/privacy"
+          rel="noreferrer noopener"
+          target="_blank"
+        >
+          privacy notice
+        </a>
+        . If you never buy a plan, Creem never hears of you.
       </p>
 
       <h3>Your frames, scenes and files</h3>
@@ -225,6 +251,13 @@ export default function PrivacyPage() {
           forgets who acted cannot show that an account was abused. We keep
           these entries for up to two years, then remove them. Nothing else
           about you survives deletion.
+        </li>
+        <li>
+          <strong>Payment records</strong> — which plan an account bought,
+          what was paid and when. Kept for as long as accounting and tax law
+          requires, up to ten years, also after the account is deleted. They
+          hold an account identifier, the amounts and your country, not your
+          name, email address or card.
         </li>
         <li>
           <strong>Backups</strong> — the off-site backups roll over on a

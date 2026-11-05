@@ -12,6 +12,8 @@ import {
   linkedClients,
   photoEntries,
   photoShares,
+  providerPayments,
+  providerSubscriptions,
   sessions,
   storeImages,
   storeSceneVersionImages,
@@ -295,8 +297,49 @@ export async function buildAccountExport(
       .orderBy(photoShares.path),
   ]);
 
+  // What the payment provider told us about this account's paid plans: the
+  // subscriptions and what was paid, net of tax. The card and the invoices
+  // are with the provider, not here.
+  const [billingSubscriptions, billingPayments] = await Promise.all([
+    db
+      .select({
+        canceledAt: providerSubscriptions.canceledAt,
+        createdAt: providerSubscriptions.createdAt,
+        currentPeriodEnd: providerSubscriptions.currentPeriodEnd,
+        currentPeriodStart: providerSubscriptions.currentPeriodStart,
+        mode: providerSubscriptions.mode,
+        planCode: providerSubscriptions.planCode,
+        provider: providerSubscriptions.provider,
+        status: providerSubscriptions.status,
+      })
+      .from(providerSubscriptions)
+      .where(eq(providerSubscriptions.accountId, accountId)),
+    db
+      .select({
+        amountMicros: providerPayments.amountMicros,
+        currency: providerPayments.currency,
+        kind: providerPayments.kind,
+        mode: providerPayments.mode,
+        occurredAt: providerPayments.occurredAt,
+        planCode: providerPayments.planCode,
+        provider: providerPayments.provider,
+        taxMicros: providerPayments.taxMicros,
+      })
+      .from(providerPayments)
+      .where(eq(providerPayments.accountId, accountId)),
+  ]);
+
   return {
     account,
+    billing: {
+      payments: billingPayments.map((payment) => ({
+        ...payment,
+        // Micros as strings: JSON has no integer wide enough to promise them.
+        amountMicros: payment.amountMicros.toString(),
+        taxMicros: payment.taxMicros.toString(),
+      })),
+      subscriptions: billingSubscriptions,
+    },
     aiChats: chats.map((chat) => ({
       ...chat,
       messages: messages.filter((message) => message.chatId === chat.id),

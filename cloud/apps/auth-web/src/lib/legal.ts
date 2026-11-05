@@ -97,6 +97,11 @@ export type Processor = {
 // grep for outbound hosts in apps/auth-web and apps/frame-hub. Keep this list
 // in step with that — it is the promise the privacy policy makes, and a
 // processor added in code but not here is a straightforward GDPR breach.
+//
+// Creem, the payment provider, is not in this list on purpose: as merchant
+// of record it is a controller of the buyer's payment data in its own right,
+// not a processor of ours. The privacy page says so under "Paying for a
+// plan".
 export const processors: Processor[] = [
   {
     data: "Everything you store: account, frames, scenes, uploaded files, backups.",
