@@ -115,7 +115,7 @@ void fos_battery_init(int8_t gpio, float divider, int8_t enable_gpio)
 }
 
 /* A board whose cell has no divider but a fuel gauge (the reTerminal
- * Sticky's BQ27220, fos_gauge.c) reads it from the gauge: the same two
+ * Sticky's BQ27220, the PhotoPainter's AXP2101; fos_gauge.c) reads it from the gauge: the same two
  * numbers, the gauge's own state of charge instead of the voltage curve. */
 bool fos_battery_present(void) { return s_present || fos_gauge_present(); }
 

@@ -318,8 +318,8 @@ static int cmd_status(int argc, char **argv)
         }
         fos_gauge_status_t gauge;
         if (fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK) {
-            printf("gauge:       bq27220, %d mV %d%% %d mA%s%s%s\n", gauge.mv, gauge.pct, gauge.current_ma,
-                   gauge.present ? "" : " (no cell)", gauge.discharging ? " discharging" : "",
+            printf("gauge:       %s, %d mV %d%% %d mA%s%s%s\n", fos_gauge_chip_name(), gauge.mv, gauge.pct,
+                   gauge.current_ma, gauge.present ? "" : " (no cell)", gauge.discharging ? " discharging" : "",
                    gauge.charging ? " charging" : gauge.full ? " full" : "");
         }
     }
@@ -1973,9 +1973,9 @@ static int cmd_i2c(int argc, char **argv)
     }
     fos_gauge_status_t gauge;
     if (fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK) {
-        printf("gauge: %d mV soc=%d%% current=%d mA present=%d discharging=%d charging=%d full=%d\n", gauge.mv,
-               gauge.pct, gauge.current_ma, (int)gauge.present, (int)gauge.discharging, (int)gauge.charging,
-               (int)gauge.full);
+        printf("gauge: %s %d mV soc=%d%% current=%d mA present=%d discharging=%d charging=%d full=%d\n",
+               fos_gauge_chip_name(), gauge.mv, gauge.pct, gauge.current_ma, (int)gauge.present,
+               (int)gauge.discharging, (int)gauge.charging, (int)gauge.full);
     }
     return 0;
 }

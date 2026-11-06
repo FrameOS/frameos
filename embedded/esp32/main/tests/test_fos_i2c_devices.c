@@ -1,7 +1,7 @@
 /*
  * Host tests for the pure halves of the I2C chip drivers: the charger's
  * register decode (fos_charger.c), the clock's BCD conversions (fos_rtc.c),
- * the fuel gauge's word decode (fos_gauge.c) and the climate sensor's
+ * the fuel gauges' decodes (fos_gauge.c: BQ27220, AXP2101) and the climate sensor's
  * measurement decode (fos_climate.c). No IDF: the files keep their
  * arithmetic above the ESP_PLATFORM guard.
  *
@@ -127,6 +127,39 @@ static void test_gauge_decode(void)
     CHECK(g.pct == -1, "soc 200 is no reading");
 }
 
+static void test_gauge_decode_axp2101(void)
+{
+    fos_gauge_status_t g;
+    const uint8_t batt = FOS_AXP2101_STATUS1_BATTERY, vbus = FOS_AXP2101_STATUS1_VBUS_GOOD;
+    /* USB in, constant-current charge (direction 01, state 010), 3987 mV
+     * (0x0F93), 64 %. */
+    fos_gauge_decode_axp2101(batt | vbus, (1u << 5) | 0x02, 0x0F, 0x93, 64, &g);
+    CHECK(g.present && g.mv == 3987 && g.pct == 64, "cell %d mV %d%%", g.mv, g.pct);
+    CHECK(g.charging && !g.discharging && !g.full, "charging on USB");
+    CHECK(g.current_ma == 0, "the AXP2101 reports no current");
+    /* Unplugged, the frame on the cell (direction 10, state 101). */
+    fos_gauge_decode_axp2101(batt, (2u << 5) | 0x05, 0x0E, 0xD8, 47, &g);
+    CHECK(g.discharging && !g.charging && !g.full && g.mv == 3800, "on battery %d mV", g.mv);
+    /* Full on USB: standby, charge done; neither charging nor on battery. */
+    fos_gauge_decode_axp2101(batt | vbus, 0x04, 0x10, 0x5E, 100, &g);
+    CHECK(!g.discharging && !g.charging && g.full && g.pct == 100, "full on USB");
+    /* USB in but topping up from the cell under load: still not on battery. */
+    fos_gauge_decode_axp2101(batt | vbus, (2u << 5) | 0x03, 0x0F, 0xA0, 80, &g);
+    CHECK(!g.discharging && !g.charging, "USB in is not on battery");
+    /* No cell: reads like a board without a battery, whatever the ADC says. */
+    fos_gauge_decode_axp2101(vbus, 0x05, 0x0F, 0xA0, 80, &g);
+    CHECK(!g.present && g.mv == 0 && g.pct == -1, "no cell is no battery: %d mV %d%%", g.mv, g.pct);
+    CHECK(!g.discharging && !g.charging && !g.full, "no cell, no flags");
+    /* The reserved high bits of REG34 are not voltage. */
+    fos_gauge_decode_axp2101(batt, 0, 0xEF, 0x93, 50, &g);
+    CHECK(g.mv == 3987, "masked VBAT %d mV", g.mv);
+    /* An ADC not sampled yet (0 V), or a percentage past 100. */
+    fos_gauge_decode_axp2101(batt, 0, 0x00, 0x00, 0, &g);
+    CHECK(g.pct == -1, "0 V is no reading");
+    fos_gauge_decode_axp2101(batt, 0, 0x0F, 0x00, 255, &g);
+    CHECK(g.pct == -1, "soc 255 is no reading");
+}
+
 static void test_climate_decode(void)
 {
     /* Sensirion's own CRC example: 0xBEEF -> 0x92. */
@@ -164,6 +197,7 @@ int main(void)
     test_charger_decode();
     test_rtc_decode_and_encode();
     test_gauge_decode();
+    test_gauge_decode_axp2101();
     test_climate_decode();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

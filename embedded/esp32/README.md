@@ -211,6 +211,17 @@ for the two Spectra boards most of the bench work runs on:
   key (the console's empty-value convention covers it now).
 - **PhotoPainter 7.3"** — 8 MB PSRAM, PMIC power-up, TF socket, and a KEY
   button next to BOOT (`0:BOOT`, `4:KEY1` in the preset's `gpio_buttons`).
+  The cell has no divider to an ADC pin: the AXP2101 PMIC (0x34 on the
+  SDA47/SCL48 bus, the one that switches EPD_VCC) is also its fuel gauge.
+  `fos_gauge.c` reads it as it reads the Sticky's BQ27220 — VBAT (REG34/35),
+  the gauge's state of charge (REG A4), VBUS-good and the charge state
+  (REG00/01) — so the metrics carry `batteryMillivolts` / `batteryPercent`
+  and `usbPower` / `charging`, and the frame deep-sleeps on the cell and
+  stays awake on USB. The chip boots with its gauge and VBAT ADC off; the
+  first read switches both on (REG18 bit 3, REG30 bit 0), after checking the
+  chip id (0x4A) so nothing else at 0x34 gets the writes. The gauge learns
+  the cell over its first few charge cycles, so the percentage is rough
+  until then; it reports no current (`current_ma` 0).
 - **Seeed reTerminal E-series (E1001/E1002/E1003/E1004)** — the TF socket shares
   the panel's SPI bus: `assets_sd_pins` names the panel's SCK7/MOSI9, so
   `fos_assets_sd.c` joins the display's bus instead of opening SPI3
