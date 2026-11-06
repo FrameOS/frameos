@@ -143,7 +143,20 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
     body: JSON.stringify({ settings }),
   })
   if (!response.ok) {
-    const detail = (await response.json().catch(() => ({}))) as { error?: string; min_frameos_version?: string }
+    const detail = (await response.json().catch(() => ({}))) as {
+      error?: string
+      min_frameos_version?: string
+      min_interval?: number
+    }
+    if (detail.error === 'interval_below_plan_floor') {
+      // A frame the cloud draws (a virtual frame) has a floor under its
+      // interval: renders are what it costs.
+      throw new Error(
+        `A frame FrameOS Cloud draws refreshes at most every ${
+          detail.min_interval ?? 300
+        } seconds. Set the refresh interval to that or more.`
+      )
+    }
     if (detail.error === 'settings_need_newer_firmware') {
       throw new Error(
         `Some of these settings need FrameOS ${

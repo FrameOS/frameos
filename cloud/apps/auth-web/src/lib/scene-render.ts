@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
+import { deflate } from "node:zlib";
 import { zlibSync } from "fflate";
 import { describeOutOfMemory, type DeviceLimits } from "frameos-wasm";
 import { logWarn } from "./log";
@@ -30,6 +31,19 @@ export type SceneRenderOptions = {
    * worker's own memory.
    */
   deviceLimits?: DeviceLimits | null | undefined;
+  /**
+   * Compress the PNG on the thread pool instead of this thread. For a caller
+   * whose event loop holds live sockets (the frame hub rendering a virtual
+   * frame): a full-HD frame is a few hundred milliseconds of deflate.
+   */
+  encodeOffThread?: boolean | undefined;
+  /**
+   * Events a control plane sent the scene since its last render (a button, a
+   * custom event), delivered before it draws. `origin` is the event
+   * contract's (docs/events-contract.json); the runtime refuses what that
+   * origin may not emit.
+   */
+  events?: { name: string; origin: string; payload?: unknown }[] | undefined;
   height: number;
   /**
    * The frame's own render scale (its `render_scale` setting, docs/jsx-ui.md
@@ -38,6 +52,11 @@ export type SceneRenderOptions = {
    * a render with no frame behind it, or a frame that never set one.
    */
   renderScale?: number | null | undefined;
+  /**
+   * Also hand back a small copy that fits a square of this many pixels
+   * (`thumbnail` in the result), averaged down from the same pixels.
+   */
+  thumbnailMaxDimension?: number | undefined;
   /**
    * Who the render is for (an account id, or a client key for anonymous
    * callers). At most one render per owner runs at a time and only a
@@ -66,6 +85,8 @@ export type SceneRenderResult = {
   renderMs: number;
   /** The selected scene's state after the render (what it changed). */
   state: unknown;
+  /** PNG of the small copy, when `thumbnailMaxDimension` asked for one. */
+  thumbnail?: Buffer;
   width: number;
 };
 
@@ -103,8 +124,22 @@ export class SceneRenderError extends Error {
   }
 }
 
+let wasmAssetsDirOverride: string | undefined;
+
+/**
+ * Where the runtime bundle is, for a process that is not auth-web: the frame
+ * hub renders virtual frames with the bundle auth-web ships, from its own
+ * working directory.
+ */
+export function setWasmAssetsDir(dir: string | undefined) {
+  wasmAssetsDirOverride = dir;
+}
+
 export function wasmAssetsDir(): string {
-  return path.join(process.cwd(), "public", "frameos-wasm");
+  return (
+    wasmAssetsDirOverride ??
+    (process.env.FRAMEOS_WASM_DIR?.trim() || path.join(process.cwd(), "public", "frameos-wasm"))
+  );
 }
 
 // The stamp build_wasm.sh writes next to the bundle and the release tarball
@@ -289,6 +324,7 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
       workerData: {
         assetsDir: wasmAssetsDir(),
         deviceLimits: options.deviceLimits ?? null,
+        eventsJson: JSON.stringify(options.events ?? []),
         height: options.height,
         maxLogs: maxCollectedLogs,
         renderScale: options.renderScale && options.renderScale > 0 ? options.renderScale : 0,
@@ -335,21 +371,7 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
           );
           return;
         }
-        try {
-          resolve({
-            errors: result.logs.filter(isRenderErrorLine),
-            height: result.height,
-            logs: result.logs,
-            png: encodePng(
-              new Uint8Array(result.buffer),
-              result.width,
-              result.height,
-            ),
-            renderMs: result.renderMs,
-            state: result.state,
-            width: result.width,
-          });
-        } catch (error) {
+        const encodeFailed = (error: unknown) =>
           reject(
             new SceneRenderError(
               "render_failed",
@@ -357,6 +379,31 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
               result.logs,
             ),
           );
+        const rgba = new Uint8Array(result.buffer);
+        const done = (png: Buffer) => {
+          const small =
+            options.thumbnailMaxDimension && options.thumbnailMaxDimension > 0
+              ? downscaleRgba(rgba, result.width, result.height, options.thumbnailMaxDimension)
+              : undefined;
+          resolve({
+            errors: result.logs.filter(isRenderErrorLine),
+            height: result.height,
+            logs: result.logs,
+            png,
+            renderMs: result.renderMs,
+            state: result.state,
+            ...(small ? { thumbnail: encodePng(small.rgba, small.width, small.height) } : {}),
+            width: result.width,
+          });
+        };
+        if (options.encodeOffThread) {
+          encodePngOffThread(rgba, result.width, result.height).then(done, encodeFailed);
+          return;
+        }
+        try {
+          done(encodePng(rgba, result.width, result.height));
+        } catch (error) {
+          encodeFailed(error);
         }
       });
     });
@@ -411,11 +458,56 @@ function chunk(type: string, data: Uint8Array): Buffer {
   return Buffer.concat([length, typeBytes, data, crc]);
 }
 
-export function encodePng(
+/**
+ * The picture averaged down to fit a square of `maxDimension` pixels (never
+ * up): each output pixel is the mean of the source pixels it covers. Returns
+ * the input when it already fits.
+ */
+export function downscaleRgba(
   rgba: Uint8Array,
   width: number,
   height: number,
-): Buffer {
+  maxDimension: number,
+): { height: number; rgba: Uint8Array; width: number } {
+  if (rgba.length !== width * height * 4) {
+    throw new Error(
+      `pixel buffer is ${rgba.length} bytes, expected ${width * height * 4}`,
+    );
+  }
+  const scale = Math.min(1, maxDimension / Math.max(width, height));
+  if (scale >= 1) {
+    return { height, rgba, width };
+  }
+  const outWidth = Math.max(1, Math.round(width * scale));
+  const outHeight = Math.max(1, Math.round(height * scale));
+  const sums = new Float64Array(outWidth * outHeight * 4);
+  const counts = new Uint32Array(outWidth * outHeight);
+  for (let y = 0; y < height; y += 1) {
+    const outY = Math.min(outHeight - 1, Math.floor((y * outHeight) / height));
+    for (let x = 0; x < width; x += 1) {
+      const outX = Math.min(outWidth - 1, Math.floor((x * outWidth) / width));
+      const source = (y * width + x) * 4;
+      const target = outY * outWidth + outX;
+      sums[target * 4] = (sums[target * 4] ?? 0) + (rgba[source] ?? 0);
+      sums[target * 4 + 1] = (sums[target * 4 + 1] ?? 0) + (rgba[source + 1] ?? 0);
+      sums[target * 4 + 2] = (sums[target * 4 + 2] ?? 0) + (rgba[source + 2] ?? 0);
+      sums[target * 4 + 3] = (sums[target * 4 + 3] ?? 0) + (rgba[source + 3] ?? 0);
+      counts[target] = (counts[target] ?? 0) + 1;
+    }
+  }
+  const out = new Uint8Array(outWidth * outHeight * 4);
+  for (let index = 0; index < counts.length; index += 1) {
+    const count = counts[index] || 1;
+    for (let channel = 0; channel < 4; channel += 1) {
+      out[index * 4 + channel] = Math.round((sums[index * 4 + channel] ?? 0) / count);
+    }
+  }
+  return { height: outHeight, rgba: out, width: outWidth };
+}
+
+// The scanlines as PNG wants them before compression: filter type 0 ahead of
+// every row.
+function pngScanlines(rgba: Uint8Array, width: number, height: number): Uint8Array {
   if (rgba.length !== width * height * 4) {
     throw new Error(
       `pixel buffer is ${rgba.length} bytes, expected ${width * height * 4}`,
@@ -427,6 +519,10 @@ export function encodePng(
     raw[y * (stride + 1)] = 0;
     raw.set(rgba.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1);
   }
+  return raw;
+}
+
+function pngFile(width: number, height: number, compressed: Uint8Array): Buffer {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
@@ -438,9 +534,41 @@ export function encodePng(
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
-    chunk("IDAT", zlibSync(raw, { level: 6 })),
+    chunk("IDAT", compressed),
     chunk("IEND", new Uint8Array(0)),
   ]);
+}
+
+export function encodePng(
+  rgba: Uint8Array,
+  width: number,
+  height: number,
+): Buffer {
+  return pngFile(width, height, zlibSync(pngScanlines(rgba, width, height), { level: 6 }));
+}
+
+/** encodePng with the deflate on the thread pool (SceneRenderOptions.encodeOffThread). */
+export function encodePngOffThread(
+  rgba: Uint8Array,
+  width: number,
+  height: number,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    let raw: Uint8Array;
+    try {
+      raw = pngScanlines(rgba, width, height);
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+    deflate(raw, { level: 6 }, (error, compressed) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(pngFile(width, height, compressed));
+    });
+  });
 }
 
 // The worker body, as source: `eval: true` keeps it out of Next's bundler
@@ -606,6 +734,32 @@ async function main() {
     try {
       call("frameos_wasm_set_scene_state", "boolean", ["string", "string"], [sceneId, JSON.stringify(state)]);
     } catch {
+      break;
+    }
+  }
+
+  // What a control plane sent the scene since its last render. An old bundle
+  // predates the export: the event then only re-renders.
+  let events = [];
+  try {
+    events = JSON.parse(workerData.eventsJson) || [];
+  } catch {
+    events = [];
+  }
+  for (const event of Array.isArray(events) ? events : []) {
+    if (!event || typeof event.name !== "string") continue;
+    try {
+      const delivered = call(
+        "frameos_wasm_control_event",
+        "boolean",
+        ["string", "string", "string"],
+        [String(event.origin || "cloud"), event.name, JSON.stringify(event.payload ?? {})],
+      );
+      if (!delivered) {
+        pushLog(JSON.stringify({ event: "event:refused", name: event.name, reason: lastError() }));
+      }
+    } catch (error) {
+      pushLog("scene events unavailable in this runtime build: " + error);
       break;
     }
   }

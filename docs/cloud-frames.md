@@ -608,11 +608,13 @@ while the provider, which has assigned it nothing, would list an empty frame.
 
 ### Previews
 
-**The cloud never renders a frame's scenes, and never asks a device to take a
-screenshot on demand.** Both were considered and refused: server-side
-rendering means the provider holds every scene's data sources and API keys,
-and an on-demand screenshot verb is a camera into someone's home that a stolen
-account could point wherever it liked. The two things that *are* allowed are
+**The cloud never renders a hardware frame's scenes, and never asks a device
+to take a screenshot on demand.** Both were considered and refused:
+server-side rendering means the provider holds every scene's data sources and
+API keys, and an on-demand screenshot verb is a camera into someone's home
+that a stolen account could point wherever it liked. (A virtual frame has no
+hardware to do the rendering: the provider is its device, by the owner's own
+choice. See "Virtual frames".) The two things that *are* allowed are
 narrower:
 
 - **Before deploy**, a scene is previewed by running it in the browser, in
@@ -1159,6 +1161,100 @@ secure boot, if the deployment warrants it) for anything installed where that
 matters. Revoking the frame in the owner's account is what invalidates a
 stolen token; the provider rejects the next connection and the device demotes
 itself.
+
+## Virtual frames
+
+A **virtual frame** is a frame with no hardware. The provider renders its
+scenes itself and shows the picture at a private link: a browser on a spare
+screen, an old tablet, a TV, a dashboard. It is the cloud's counterpart of the
+self-hosted backend's virtual frame (`backend/app/api/virtual_frame.py`), and
+on cloud.frameos.net it is part of the paid plans (`cloud_rendered_frames`,
+none on the free plan; `cloud/docs/accounting-todo.md` §0.2).
+
+**The provider is the device.** Nothing dials in. The reference provider runs
+one device object per virtual frame inside its frame hub
+(`cloud/apps/frame-hub/src/virtual-device.ts`), and that object speaks the
+frame side of this document: it is handed the command frames a socket would
+carry and answers with the same acks and the same `scene_ack`, `state`,
+`log_batch`, `render` and `asset_chunk` messages. So the command queue, the
+scene assignments, previews, the schedule, deploy progress, the activity
+trail and every route below work on a virtual frame without knowing it is
+one. What hardware keeps on its own disk (the pushed scene bundle, the scene
+showing, every scene's state) is a row; a render is a fresh runtime each
+time, and that row is its memory between two of them.
+
+What makes a frame virtual is that row, written only when its owner creates
+one. A device's `hardware` report is self-asserted, so `platform: "virtual"`
+in a hello never makes hardware virtual. The frame's link exists (the owner's
+log and service-key switches act on it as on any frame) but holds no
+credential anybody has: its token and private key are made at creation and
+kept nowhere.
+
+**Its profile.** `hardware` is `{"platform": "virtual", "device": "virtual",
+"width", "height"}`; `frameos_version` is the version of the runtime the
+provider renders with.
+
+| Verb | A virtual frame |
+|---|---|
+| `set_scenes`, `set_current_scene`, `scene_event`, `get_state`, `render` | as hardware. `setSceneState` is kept in the row, so it holds for every later render; any other event reaches the scene at the render that follows it, said by the `cloud` origin |
+| `set_settings`, `set_schedule`, `refresh_service_settings` | acked, then a render. The settings, the schedule and the service keys are the provider's own rows, read at every render and every schedule minute; the verb is the nudge. The schedule fires in the frame's `timezone` |
+| `image_get` | the last render, PNG (`no_image` before the first) |
+| `asset_get` | the scene snapshots only (`.frameos/scene_images/…`, as hardware names them); `not_found` otherwise |
+| `assets_list`, `get_logs` | acked, with an empty listing / batch: there is no assets directory, and log lines go out as each render writes them |
+| `restart_runtime`, `reboot` | acked; the device ends its session, starts a new one and renders, which is what a deploy's bar and the telemetry switch wait for |
+| `get_metrics`, `set_display_power`, `notify_update_available`, `scenes_get`, the asset write verbs, `lan_access_*` | `unsupported_verb` |
+
+**When it renders.** On every verb that changes what it shows, and, while
+somebody is looking, on its interval: its scene's own refresh interval, else
+the frame's `interval` setting, never under the plan's floor (300 s on
+cloud.frameos.net; a settings push below it is refused
+`interval_below_plan_floor`). "Looking" is a read of the view link or an open
+workspace page within the last three minutes. A picture nobody looks at is
+not drawn again, and the first look after a quiet spell gets the picture that
+is there and a new one seconds later. A render that fails keeps the previous
+picture, says why in the frame's log (`render:error`) and is tried again an
+interval later.
+
+**Where its scenes run.** On the provider, not in anyone's home: private,
+loopback and link-local addresses are refused at the socket (the guard of
+every server-side render), so there is no local network access to switch on.
+Service keys follow the frame's `settings:services` grant and the per-scene
+grants like on hardware, with the difference the UI states at creation: the
+provider uses them itself.
+
+**The view link.** `{provider}/v/{token}`, where the token (`vf_…`) is the
+credential, as on a photo album's share link:
+
+```http
+GET {provider}/v/{token}          # a black page showing the picture, for a kiosk browser
+GET {provider}/v/{token}/image    # the picture: image/png, ETag, 304 on If-None-Match; 404 no_image before the first render
+GET {provider}/v/{token}/status   # {"version", "rendered_at", "interval_seconds", "width", "height"}; `version` changes when the picture does
+```
+
+Whoever holds the link sees the picture and nothing else. All three are
+`no-store` / `private`, carry `Referrer-Policy: no-referrer`, and answer one
+404 for a wrong link, a replaced one and a deleted or revoked frame. The page
+asks `/status` every 20 s and loads a changed picture behind the one
+showing. It cannot be framed by another site (the provider's
+`frame-ancestors`); embed the picture's address instead.
+
+```http
+POST {provider}/api/frames/virtual             # {"name"?, "width"?, "height"?, "timezone"?} → 201 {"frame", "virtual": {"view_url", "image_url", …}}; 403 cloud_rendered_frame_quota_exceeded {"max_cloud_rendered_frames"}
+GET  {provider}/api/frames/{id}/virtual        # {"virtual": {"view_url", "image_url", "width", "height", "rendered_at", "render_ms", "render_error", "interval_seconds", "min_interval_seconds", "viewed_at"}}; 404 not_virtual
+POST {provider}/api/frames/{id}/virtual        # {"width"?, "height"?} → drawn again at the new size; {"reset_link": true} → a new link, the old one dead with that request
+```
+
+Width and height are whole pixels, 16 to 4096 each and at most 8 MP
+together (`invalid_size`, `size_too_large`). A virtual frame is created
+active (its owner is the one creating it) and is deleted like any other
+(`DELETE {provider}/api/frames/{id}`). It counts against the plan's
+cloud-rendered frames and not against its frames: those are for hardware
+the account owns.
+
+Not there yet: assets (a scene that reads the frame's own files finds none),
+a palette to quantize the picture to, and the thin clients the same
+entitlement is meant to cover (ESP32-C3, Pico), which cannot link to a
+provider at all.
 
 ## Provider-side HTTP API (account-authenticated)
 

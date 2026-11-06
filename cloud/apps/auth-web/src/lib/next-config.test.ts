@@ -59,6 +59,30 @@ describe("API cache headers", () => {
   });
 });
 
+describe("a virtual frame's view link", () => {
+  it("never rides a Referer and is not indexed", async () => {
+    // The address holds the link's secret (/v/vf_…). The catch-all's
+    // strict-origin-when-cross-origin would still send it to our own origin;
+    // this rule comes after it, and a later rule wins.
+    const config = createNextConfig(PHASE_PRODUCTION_SERVER);
+    const rules = (await config.headers?.()) ?? [];
+    const catchAllIndex = rules.findIndex((rule) => rule.source === "/(.*)");
+    const viewIndex = rules.findIndex((rule) => rule.source === "/v/:path*");
+    expect(viewIndex).toBeGreaterThan(catchAllIndex);
+    const headers = Object.fromEntries(rules[viewIndex]!.headers.map((header) => [header.key, header.value]));
+    expect(headers).toEqual({ "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex, nofollow" });
+    // @ts-expect-error -- Next ships this vendored dependency without types.
+    const { pathToRegexp } = (await import("next/dist/compiled/path-to-regexp")) as {
+      pathToRegexp: (source: string) => RegExp;
+    };
+    const matcher = pathToRegexp(rules[viewIndex]!.source);
+    for (const covered of ["/v/vf_abc", "/v/vf_abc/image", "/v/vf_abc/status"]) {
+      expect(matcher.test(covered), covered).toBe(true);
+    }
+    expect(matcher.test("/verify-email")).toBe(false);
+  });
+});
+
 describe("frames SPA asset rewrites", () => {
   it("serves the release wasm runtime under the SPA's assets base path", async () => {
     // cloud-frontend asks for /frames-app/frameos-wasm/preview-worker.js

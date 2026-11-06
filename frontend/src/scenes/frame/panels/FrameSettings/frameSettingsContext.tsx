@@ -365,7 +365,7 @@ export function FrameSettingsProvider({
   const inFrameAdminMode = isInFrameAdminMode()
   const workspaceSurfaceMode = workspaceMode()
   const surface = frameSettingsSurfaceFor(workspaceSurfaceMode, frame)
-  const cloudProfile = surface === 'cloudLinux' || surface === 'cloudEsp32'
+  const cloudProfile = surface === 'cloudLinux' || surface === 'cloudEsp32' || surface === 'cloudVirtual'
   const esp32CloudProfile = surface === 'cloudEsp32'
 
   // The 2026.8.30 batch (flip, error handling, control code, …) needs firmware

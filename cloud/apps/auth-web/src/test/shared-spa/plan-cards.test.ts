@@ -132,9 +132,12 @@ describe("what a plan card's button does", () => {
     const cards = planCardsFor(planCatalog(free, "payg", buyable), {}, null, billing());
     expect(cards.map((card) => card.plannedFeatures)).toEqual([
       [],
-      expect.arrayContaining(["share_frames", "virtual_frames"]),
+      expect.arrayContaining(["share_frames"]),
       expect.arrayContaining(["sso"]),
     ]);
     expect(cards[2]!.plannedFeatures).not.toContain("priority_support");
+    // Built: a card offers virtual frames without the "planned" mark.
+    expect(cards[1]!.features).toContain("virtual_frames");
+    expect(cards[1]!.plannedFeatures).not.toContain("virtual_frames");
   });
 });

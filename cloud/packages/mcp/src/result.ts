@@ -82,7 +82,7 @@ const hints: Record<string, Hint> = {
   frame_quota_exceeded:
     "The account is at its frame limit. Check account_quota; revoke a frame to free a slot (revoked frames count for 24 h).",
   cloud_rendered_frame_quota_exceeded:
-    "This board has no on-device renderer (ESP32-C3, Pico), so the cloud would render every frame for it, and the account's plan allows no more such frames. Check account_quota (cloud_rendered_frames).",
+    "The account's plan allows no more frames the cloud renders for: virtual frames, and boards with no renderer of their own (ESP32-C3, Pico). Check account_quota (cloud_rendered_frames); the free plan has none.",
   interval_below_plan_floor:
     "Cloud-rendered frames have a minimum refresh interval on this plan; use a longer interval (min_interval in the error is the floor in seconds).",
   frame_unreachable:

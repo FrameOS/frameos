@@ -115,10 +115,12 @@ describe("the plan catalog", () => {
     const catalog = planCatalog(free, "payg");
     expect(catalog.planned_limits).toEqual([...plannedLimits]);
     const [, privatePlan, business] = catalog.groups;
-    expect(privatePlan?.stops[0]?.planned_features).toEqual(["share_frames", "virtual_frames"]);
-    expect(business?.stops.at(-1)?.planned_features).toEqual(["share_frames", "virtual_frames", "sso"]);
-    // Support is a promise we can keep today.
+    expect(privatePlan?.stops[0]?.planned_features).toEqual(["share_frames"]);
+    expect(business?.stops.at(-1)?.planned_features).toEqual(["share_frames", "sso"]);
+    // Support is a promise we can keep today, and so are virtual frames.
     expect(plannedFeatures).not.toContain("priority_support");
+    expect(plannedFeatures).not.toContain("virtual_frames");
+    expect(plannedLimits).not.toContain("cloud_rendered_frames");
 
     const stop = selfServeStops().find((entry) => entry.code === "private-9")!;
     const row = planRowFor(free, stop, 10_000);
@@ -131,8 +133,8 @@ describe("the plan catalog", () => {
     });
     expect(row.entitlements).toEqual({
       backup_bytes: 900 * megabyte,
-      // Virtual frames are planned: the row gives what Free gives.
-      cloud_rendered_frames: 0,
+      // Virtual frames exist: the row grants the stop's own number.
+      cloud_rendered_frames: 9,
       frame_log_bytes: 900 * megabyte,
       frames: 80,
       photo_bytes: 2250 * megabyte,

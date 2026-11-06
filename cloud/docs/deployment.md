@@ -493,9 +493,26 @@ SESSION_SECRET=…         # MUST equal auth-web's, or browser sockets get 401
 FRAME_HUB_PORT=3100
 ```
 
-Optional, both with working defaults:
+Optional, all with working defaults:
 
 ```text
+FRAMEOS_CLOUD_ENCRYPTION_KEY=…  # auth-web's. Only for virtual frames: the hub
+                             # renders their scenes, and with the key it can
+                             # hand them the service keys their owner granted
+                             # (the account's sealed OpenAI / Unsplash / Home
+                             # Assistant settings). Without it they render
+                             # keyless and the hub logs
+                             # virtual.service_settings_unavailable.
+FRAMEOS_WASM_DIR=…           # where the wasm runtime is. Found next to
+                             # auth-web by default
+                             # (…/cloud/apps/auth-web/public/frameos-wasm,
+                             # resolved through the /opt/frameos-cloud
+                             # symlink, so a hub that outlives a deploy
+                             # renders with the new release's runtime).
+FRAMEOS_CLOUD_RENDERED_MIN_INTERVAL_SECONDS=300  # a virtual frame's refresh
+                             # floor. Set it to the same value as auth-web's
+                             # when you change it: auth-web refuses settings
+                             # below it, the hub paces renders by it.
 FRAME_HUB_ALLOWED_ORIGINS=…  # browser WS upgrades; defaults to the three app
                              # origins (FRAMEOS_CLOUD/ACCOUNT/SCENES_APP_URL).
                              # WebSocket handshakes bypass CORS, so this is
@@ -511,9 +528,17 @@ Behind nginx that must count the proxy hops, otherwise every upgrade in the
 fleet collapses onto the proxy's own address and the whole fleet shares one
 budget.
 
-(`FRAMEOS_CLOUD_ENCRYPTION_KEY` is not needed — the hub only ever compares
-hashed tokens.) Then `systemctl daemon-reload && systemctl enable --now
-frameos-cloud-frame-hub.service`.
+(`FRAMEOS_CLOUD_ENCRYPTION_KEY` is not needed for hardware — the hub only
+ever compares hashed tokens.) Then `systemctl daemon-reload && systemctl
+enable --now frameos-cloud-frame-hub.service`.
+
+The hub is also where **virtual frames** render (`docs/cloud-frames.md`
+"Virtual frames"): one worker thread per render, two at a time, each with a
+64 MB wasm heap, plus a short-lived child `node` per HTTP request a scene
+makes. That fits the unit above as it is (`ProtectSystem=strict` and
+`PrivateTmp` do not get in the way: a render writes no files). Size the box
+for it once there are many: a render is about a CPU-second, and a frame
+somebody is watching renders at most once per five minutes.
 
 Like auth-web, the hub is **single instance only**: on boot it resets the
 `connected` flag of every frame, because a lone hub owns all device sockets.

@@ -32,10 +32,15 @@ export type PlanGroupKey = "free" | "private" | "business";
 export type PlanLimitKey = "cloud_rendered_frames" | "people";
 
 /** On the cards as what the plan will include; not built yet. */
-export const plannedFeatures: readonly PlanFeature[] = ["share_frames", "virtual_frames", "sso"];
+export const plannedFeatures: readonly PlanFeature[] = ["share_frames", "sso"];
 
-/** Limits that count something not built yet (sharing, thin clients). */
-export const plannedLimits: readonly PlanLimitKey[] = ["people", "cloud_rendered_frames"];
+/**
+ * Limits that count something not built yet (sharing). `cloud_rendered_frames`
+ * left this list with virtual frames (docs/cloud-frames.md "Virtual frames");
+ * the thin clients the same number will also cover still cannot link, which
+ * the limit's own label says.
+ */
+export const plannedLimits: readonly PlanLimitKey[] = ["people"];
 
 export interface PlanStopDefinition {
   // Frames of your own hardware. Free has none of its own: it is the

@@ -290,6 +290,7 @@ const allFrameSettingsSections = [
   { id: 'frame-settings-upgrade', label: 'Update' },
   { id: 'frame-settings-power', label: 'Power' },
   { id: 'frame-settings-device', label: 'Device' },
+  { id: 'frame-settings-virtual', label: 'Virtual frame' },
   { id: 'frame-settings-ssh', label: 'SSH' },
   { id: 'frame-settings-agent', label: 'Remote' },
   { id: 'frame-settings-backend', label: 'Backend' },
