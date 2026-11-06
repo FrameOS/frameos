@@ -126,6 +126,13 @@ static bool panel_temperature(int *celsius)
     return true;
 }
 
+/* fos_display_set_i2c_lender: a board chip the display drives (the
+ * PhotoPainter's AXP2101) joins the bus fos_i2c.c already runs on its pins. */
+static void *lend_i2c_bus(int sda, int scl)
+{
+    return fos_i2c_lend_bus(sda, scl);
+}
+
 static void action_ota_now(void)
 {
     ESP_LOGW(TAG, "manual OTA requested");
@@ -294,6 +301,7 @@ void app_main(void)
         .mosi = config->pins.mosi, .pwr = config->pins.pwr,
     };
     BOOTMEM("after-config");
+    fos_display_set_i2c_lender(lend_i2c_bus);
     if (fos_display_init(&display_config) != ESP_OK) {
         ESP_LOGW(TAG, "display init failed, continuing headless");
     }

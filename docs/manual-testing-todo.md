@@ -85,8 +85,6 @@ most:
   (PhotoPainter) / BOOT (13.3E6) held talks and the transcript is right
   (the left ADC slot is the one taken: if it is silence, the microphones
   are on the right slot or need the TDM mode).
-- [ ] **The PhotoPainter's PMIC** still powers the panel with the codec on
-  its I2C port (the two share port 0).
 
 ### reTerminal E1002 bench (voice chat, `docs/voice-chat.md`)
 

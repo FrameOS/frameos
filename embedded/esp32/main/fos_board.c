@@ -264,8 +264,8 @@ static const struct {
 } k_i2c_buses[] = {
     /* The Waveshare boards' codec chips (fos_codec.c): the ES8311 and the
      * ES7210 on SDA47/SCL48 on the PhotoPainter — the bus its AXP2101 PMIC
-     * is on too (components/frameos_display/photo_painter_pmic.c shares the
-     * port) — and on SDA41/SCL42 on the 13.3E6 (Waveshare's examples). */
+     * is on too (components/frameos_display/photo_painter_pmic.c borrows
+     * the bus, fos_display_set_i2c_lender) — and on SDA41/SCL42 on the 13.3E6 (Waveshare's examples). */
     {"waveshare_esp32_s3_photopainter", "sda=47,scl=48"},
     {"waveshare_esp32_s3_epaper_13_3e6", "sda=41,scl=42"},
     /* The reTerminal Sticky's MISC/BFG bus (Seeed's porting specification):
