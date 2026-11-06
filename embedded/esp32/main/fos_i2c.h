@@ -23,7 +23,7 @@
 #include "esp_err.h"
 
 typedef enum {
-    FOS_I2C_PCF8563 = 0, /* real-time clock, 0x51 */
+    FOS_I2C_PCF8563 = 0, /* real-time clock, 0x51 (or a PCF85063 there: fos_rtc.c) */
     FOS_I2C_SHT4X = 1,   /* temperature / humidity, 0x44 */
     FOS_I2C_SY6974B = 2, /* battery charger, 0x6b */
     FOS_I2C_BQ27220 = 3, /* battery fuel gauge, 0x55 (fos_gauge.c; the reTerminal Sticky) */

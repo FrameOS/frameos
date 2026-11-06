@@ -288,6 +288,22 @@ const char *fos_board_i2c_buses(const char *hardware_preset)
     return "";
 }
 
+/* The clock at 0x51: an NXP PCF85063 on the PhotoPainter (Waveshare's
+ * docs), a PCF8563 everywhere else FrameOS knows one. */
+static const char *const k_pcf85063_presets[] = {
+    "waveshare_esp32_s3_photopainter",
+};
+
+const char *fos_board_rtc_chip(const char *hardware_preset)
+{
+    if (hardware_preset) {
+        for (size_t i = 0; i < sizeof(k_pcf85063_presets) / sizeof(k_pcf85063_presets[0]); i++) {
+            if (strcmp(hardware_preset, k_pcf85063_presets[i]) == 0) return "pcf85063";
+        }
+    }
+    return "pcf8563";
+}
+
 /* TF sockets. The Waveshare boards give the card a bus of its own (SPI3);
  * the reTerminal E-series hang it off the panel's SCK7/MOSI9 with MISO on
  * GPIO8 and CS on GPIO14, a card-detect contact on GPIO15 (low = seated) and

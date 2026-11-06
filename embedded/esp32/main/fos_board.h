@@ -73,6 +73,13 @@ bool fos_board_led(const char *hardware_preset, int *pin, int *type);
  * (the E1004's 39/40 is the J2 header). fos_i2c.c probes what is there. */
 const char *fos_board_i2c_buses(const char *hardware_preset);
 
+/* Which real-time clock answers at I2C 0x51 on the board: "pcf85063" on the
+ * Waveshare PhotoPainter, "pcf8563" for every other preset and for no preset
+ * at all (the reTerminal E-series and Sticky, a custom `i2c_buses` board).
+ * The two share the address but not the register map (fos_rtc.c), and
+ * nothing either chip answers tells them apart without writing to it. */
+const char *fos_board_rtc_chip(const char *hardware_preset);
+
 /* The board's TF socket as the `assets_sd_pins` spec, "" for a board with no
  * usable one. The reTerminal E-series share the panel's SPI bus (SCK7/MOSI9)
  * with MISO on GPIO8, CS on GPIO14, a card-detect contact on GPIO15 and a

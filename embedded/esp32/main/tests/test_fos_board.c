@@ -278,6 +278,20 @@ static void test_i2c_buses(void)
     CHECK(strcmp(fos_board_i2c_buses(NULL), "") == 0, "NULL preset");
 }
 
+static void test_rtc_chip(void)
+{
+    /* The PhotoPainter's PCF85063; the E-series and the Sticky keep their
+     * PCF8563, and so does a board without a preset. */
+    CHECK(strcmp(fos_board_rtc_chip("waveshare_esp32_s3_photopainter"), "pcf85063") == 0, "photopainter clock");
+    CHECK(strcmp(fos_board_rtc_chip("seeed_reterminal_e1001"), "pcf8563") == 0, "e1001 clock");
+    CHECK(strcmp(fos_board_rtc_chip("seeed_reterminal_e1002"), "pcf8563") == 0, "e1002 clock");
+    CHECK(strcmp(fos_board_rtc_chip("seeed_reterminal_e1003"), "pcf8563") == 0, "e1003 clock");
+    CHECK(strcmp(fos_board_rtc_chip("seeed_reterminal_e1004"), "pcf8563") == 0, "e1004 clock");
+    CHECK(strcmp(fos_board_rtc_chip("seeed_reterminal_sticky"), "pcf8563") == 0, "sticky clock");
+    CHECK(strcmp(fos_board_rtc_chip(""), "pcf8563") == 0, "no preset");
+    CHECK(strcmp(fos_board_rtc_chip(NULL), "pcf8563") == 0, "NULL preset");
+}
+
 static void test_sd_pins(void)
 {
     /* The Waveshare boards' own SPI3 sockets, as the console preset table
@@ -355,6 +369,7 @@ int main(void)
     test_mic_pins();
     test_leds();
     test_i2c_buses();
+    test_rtc_chip();
     test_sd_pins();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok",
            g_checks, g_failures);
