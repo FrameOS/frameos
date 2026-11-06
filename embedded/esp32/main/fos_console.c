@@ -2274,6 +2274,11 @@ static esp_err_t console_init_uart(void)
      * it drained (FOS_CONSOLE_PAYLOAD_PRIORITY). */
     err = uart_driver_install(FOS_CONSOLE_UART_NUM, 8192, 2048, 0, NULL, 0);
     if (err != ESP_OK) return err;
+    /* The driver's default interrupts at 120 of the FIFO's 128 bytes: 0.7 ms
+     * to overrun at 115200, and a frame writing PSRAM flat out holds the LCD's
+     * refill interrupt, and so this one, for most of that (a scene push lost a
+     * byte or two in 150 KB while Hellfire ran). 64 leaves 5.5 ms. */
+    uart_set_rx_full_threshold(FOS_CONSOLE_UART_NUM, 64);
     /* Interrupt-driven stdout: a polled FIFO write would spin the CPU for the
      * whole of a base64 preview at 115200 baud. */
     uart_vfs_dev_use_driver(FOS_CONSOLE_UART_NUM);

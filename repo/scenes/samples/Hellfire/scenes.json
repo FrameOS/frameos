@@ -1,0 +1,213 @@
+[
+  {
+    "id": "5f2b1c66-0666-4666-8666-666000000666",
+    "name": "Hellfire",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 0.02,
+      "backgroundColor": "#070707"
+    },
+    "fields": [
+      {
+        "name": "quality",
+        "type": "select",
+        "label": "Quality",
+        "options": [
+          {
+            "value": "0",
+            "label": "Automatic (4 px cells, 8 on an ESP32)"
+          },
+          {
+            "value": "8",
+            "label": "Low (8 px cells)"
+          },
+          {
+            "value": "4",
+            "label": "Medium (4 px cells)"
+          },
+          {
+            "value": "2",
+            "label": "High (2 px cells)"
+          }
+        ],
+        "value": "0",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "showFps",
+        "type": "boolean",
+        "label": "FPS counter",
+        "value": "false",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "hellfire": {
+        "origin": "hellfire",
+        "name": "Hellfire",
+        "category": "data",
+        "description": "The Doom fire, simulated a byte per cell in JS and written into the frame with frameos.pixels.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "pixelSize",
+            "type": "integer",
+            "value": "0",
+            "required": true,
+            "label": "Pixel size",
+            "hint": "Each cell of the fire is a square this many pixels wide. Smaller is finer and slower: a 480x480 panel at 4 is a 120x120 fire. 0 picks for the device: 4, or 8 on an ESP32, where the simulation runs slower."
+          },
+          {
+            "name": "palette",
+            "type": "select",
+            "options": [
+              "fire",
+              "ice",
+              "toxic"
+            ],
+            "value": "fire",
+            "required": true,
+            "label": "Palette"
+          },
+          {
+            "name": "wind",
+            "type": "integer",
+            "value": "1",
+            "required": true,
+            "label": "Wind",
+            "hint": "-3 to 3. 1 is Doom's own drift."
+          },
+          {
+            "name": "stepsPerRender",
+            "type": "integer",
+            "value": "1",
+            "required": true,
+            "label": "Steps per render",
+            "hint": "1 on an LCD that animates. On e-paper, 60 or so, so every refresh is a new flame."
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "value": "0",
+            "label": "Seed",
+            "hint": "0 for a different fire every time; any other number for the same one."
+          },
+          {
+            "name": "showFps",
+            "type": "boolean",
+            "value": "false",
+            "label": "FPS counter",
+            "hint": "Draws the frame rate in a corner: renders a second, as the panel gets them, and the size of the fire."
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Hellfire\",\n  \"category\": \"data\",\n  \"description\": \"The Doom fire, simulated a byte per cell in JS and written into the frame with frameos.pixels.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    { \"name\": \"pixelSize\", \"type\": \"integer\", \"value\": \"0\", \"required\": true, \"label\": \"Pixel size\", \"hint\": \"Each cell of the fire is a square this many pixels wide. Smaller is finer and slower: a 480x480 panel at 4 is a 120x120 fire. 0 picks for the device: 4, or 8 on an ESP32, where the simulation runs slower.\" },\n    { \"name\": \"palette\", \"type\": \"select\", \"options\": [\"fire\", \"ice\", \"toxic\"], \"value\": \"fire\", \"required\": true, \"label\": \"Palette\" },\n    { \"name\": \"wind\", \"type\": \"integer\", \"value\": \"1\", \"required\": true, \"label\": \"Wind\", \"hint\": \"-3 to 3. 1 is Doom's own drift.\" },\n    { \"name\": \"stepsPerRender\", \"type\": \"integer\", \"value\": \"1\", \"required\": true, \"label\": \"Steps per render\", \"hint\": \"1 on an LCD that animates. On e-paper, 60 or so, so every refresh is a new flame.\" },\n    { \"name\": \"seed\", \"type\": \"integer\", \"value\": \"0\", \"label\": \"Seed\", \"hint\": \"0 for a different fire every time; any other number for the same one.\" },\n    { \"name\": \"showFps\", \"type\": \"boolean\", \"value\": \"false\", \"label\": \"FPS counter\", \"hint\": \"Draws the frame rate in a corner: renders a second, as the panel gets them, and the size of the fire.\" }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// Hellfire: the PlayStation Doom fire, one byte of heat per cell, its spread\n// rule in this file's JS and frameos.pixels writing the cells straight into\n// the frame (no canvas, no SVG, no markup). The simulation runs at the\n// frame's size over pixelSize, so a 480x480 panel at 4 is a 120x120 grid:\n// 14,400 cells a frame, about 11 \u00b5s each in QuickJS on an ESP32, which is\n// why the automatic cell size is 8 there and 4 everywhere else.\n\n// Doom's 37 colours, black to white through the reds and yellows.\nconst FIRE = [\n  0x070707, 0x1f0707, 0x2f0f07, 0x470f07, 0x571707, 0x671f07, 0x771f07, 0x8f2707, 0x9f2f07, 0xaf3f07,\n  0xbf4707, 0xc74707, 0xdf4f07, 0xdf5707, 0xdf5707, 0xd75f07, 0xd75f07, 0xd7670f, 0xcf6f0f, 0xcf770f,\n  0xcf7f0f, 0xcf8717, 0xc78717, 0xc78f17, 0xc7971f, 0xbf9f1f, 0xbf9f1f, 0xbfa727, 0xbfa727, 0xbfaf2f,\n  0xb7af2f, 0xb7b72f, 0xb7b737, 0xcfcf6f, 0xdfdf9f, 0xefefc7, 0xffffff,\n]\nconst PALETTES = {\n  fire: FIRE,\n  ice: FIRE.map((c) => ((c & 0xff) << 16) | (c & 0xff00) | (c >> 16)),\n  toxic: FIRE.map((c) => (((c >> 8) & 0xff) << 16) | (((c >> 16) & 0xff) << 8) | (c & 0xff)),\n}\nconst HOT = FIRE.length - 1\n\n// What outlives a render while the interpreter does. An ESP32 short of\n// memory drops the interpreter and the fire restarts from its warm-up.\nlet heat = null\nlet cols = 0\nlet rows = 0\nlet seed = 1\n\n// One step of the spread. A small LCG: the same seed is the same fire on\n// every frame type, which is what makes a snapshot of it stable.\nfunction spread(wind) {\n  for (let y = rows - 1; y > 0; y--) {\n    const row = y * cols\n    const above = row - cols\n    for (let x = 0; x < cols; x++) {\n      const h = heat[row + x]\n      if (h === 0) {\n        heat[above + x] = 0\n        continue\n      }\n      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0\n      const r = seed >>> 30 // 0..3\n      let dx = x - r + wind\n      if (dx < 0) dx += cols\n      else if (dx >= cols) dx -= cols\n      heat[above + dx] = h - (r & 1)\n    }\n  }\n}\n\n// The frame rate, counted over the last second of renders: what the panel\n// really gets, simulation, blit and pacing included.\nlet fps = null\nlet frames = 0\nlet windowStart = 0\n\nfunction countFrame() {\n  const now = Date.now()\n  if (!windowStart) windowStart = now\n  frames++\n  const elapsed = now - windowStart\n  if (elapsed >= 1000) {\n    fps = Math.round((frames * 1000) / elapsed)\n    frames = 0\n    windowStart = now\n  }\n  return fps\n}\n\n// The counter, in a 3x5 font, 15 bits a glyph, top row first. It goes into the\n// heat for the blit and comes out before the next step: the same cheap write\n// as the flames, so it does not slow what it measures, and it never feeds them.\nconst GLYPHS = {\n  0: 0x7b6f, 1: 0x2c97, 2: 0x73e7, 3: 0x73cf, 4: 0x5bc9, 5: 0x79cf, 6: 0x79ef, 7: 0x7249, 8: 0x7bef, 9: 0x7bcf,\n  '-': 0x01c0, F: 0x79e4, P: 0x7be4, S: 0x79cf,\n}\nlet label = null\nlet labelText = ''\nlet labelScale = 0\nlet labelled = false\nlet labelWidth = 0\nlet labelHeight = 0\nlet under = null\n\nfunction setLabel(text, scale) {\n  if (text === labelText && scale === labelScale) return\n  labelText = text\n  labelScale = scale\n  labelWidth = (text.length * 4 + 1) * scale\n  labelHeight = 7 * scale\n  label = new Uint8Array(labelWidth * labelHeight) // 0 is the fire's black\n  under = new Uint8Array(labelWidth * labelHeight)\n  for (let g = 0; g < text.length; g++) {\n    const bits = GLYPHS[text[g]] || 0\n    for (let i = 0; i < 15; i++) {\n      if (!(bits & (1 << (14 - i)))) continue\n      const left = (g * 4 + 1 + (i % 3)) * scale\n      const top = (1 + Math.floor(i / 3)) * scale\n      for (let y = 0; y < scale; y++) label.fill(HOT, (top + y) * labelWidth + left, (top + y) * labelWidth + left + scale)\n    }\n  }\n}\n\nfunction labelFits() {\n  return labelWidth + labelScale <= cols && labelHeight + labelScale <= rows\n}\n\nfunction labelIn() {\n  for (let y = 0; y < labelHeight; y++) {\n    const at = (y + labelScale) * cols + labelScale\n    under.set(heat.subarray(at, at + labelWidth), y * labelWidth)\n    heat.set(label.subarray(y * labelWidth, (y + 1) * labelWidth), at)\n  }\n}\n\nfunction labelOut() {\n  for (let y = 0; y < labelHeight; y++) {\n    heat.set(under.subarray(y * labelWidth, (y + 1) * labelWidth), (y + labelScale) * cols + labelScale)\n  }\n}\n\nexport function get(app, context) {\n  if (labelled) labelOut() // the frame before this one has been written\n  labelled = false\n  const config = app.config\n  const asked = Math.round(Number(config.pixelSize) || 0)\n  const pixelSize = asked >= 1 ? Math.min(32, asked) : app.frame.embedded ? 8 : 4\n  const width = Math.max(pixelSize, context.imageWidth || app.frame.width)\n  const height = Math.max(pixelSize, context.imageHeight || app.frame.height)\n  const palette = PALETTES[config.palette] || FIRE\n  const wind = Math.max(-3, Math.min(3, Math.round(Number(config.wind) || 0)))\n  const steps = Math.max(1, Math.min(500, Math.round(Number(config.stepsPerRender) || 1)))\n  const w = Math.floor(width / pixelSize)\n  const h = Math.floor(height / pixelSize)\n  if (!heat || w !== cols || h !== rows) {\n    cols = w\n    rows = h\n    heat = new Uint8Array(cols * rows)\n    heat.fill(HOT, (rows - 1) * cols) // the bottom row burns\n    const given = Math.round(Number(config.seed) || 0)\n    seed = (given > 0 ? given : (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0) || 1\n    // Warm up: the flames climb about two rows per heat unit, so by then\n    // the first frame is a fire, not a glowing line.\n    const climb = Math.min(rows, HOT * 2)\n    for (let i = 0; i < climb; i++) spread(wind)\n  } else {\n    for (let i = 0; i < steps; i++) spread(wind)\n  }\n  const showFps = config.showFps === true || config.showFps === 'true'\n  if (showFps) {\n    const rate = countFrame()\n    setLabel((rate === null ? '--' : rate) + ' FPS', Math.ceil(4 / pixelSize))\n    labelled = labelFits()\n    if (labelled) labelIn()\n  } else {\n    frames = 0\n    windowStart = 0\n  }\n  return frameos.pixels(heat, { width: cols, height: rows, pixelSize, palette })\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "fire",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": 200
+        },
+        "data": {
+          "keyword": "hellfire",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      },
+      {
+        "id": "quality",
+        "type": "state",
+        "position": {
+          "x": -300,
+          "y": 200
+        },
+        "data": {
+          "keyword": "quality"
+        }
+      },
+      {
+        "id": "showFps",
+        "type": "state",
+        "position": {
+          "x": -300,
+          "y": 300
+        },
+        "data": {
+          "keyword": "showFps"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "fire-image",
+        "type": "codeNodeEdge",
+        "source": "fire",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      },
+      {
+        "id": "quality-fire",
+        "type": "codeNodeEdge",
+        "source": "quality",
+        "target": "fire",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/pixelSize"
+      },
+      {
+        "id": "showFps-fire",
+        "type": "codeNodeEdge",
+        "source": "showFps",
+        "target": "fire",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/showFps"
+      }
+    ]
+  }
+]

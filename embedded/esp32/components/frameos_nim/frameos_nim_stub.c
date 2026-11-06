@@ -110,6 +110,7 @@ bool frameos_nim_send_event_wait(uint32_t origin, const char *event, const char 
     return false;
 }
 void frameos_nim_log_hook(const char *msg) { (void)msg; }
+void frameos_nim_set_console_quiet(bool quiet) { (void)quiet; }
 size_t frameos_nim_log_recent(frameos_log_entry_t *out, size_t max)
 {
     (void)out; (void)max;

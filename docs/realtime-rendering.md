@@ -17,6 +17,31 @@ full-screen 480x480 SVG every frame — a background `<rect>`, the logo's five
 paths twice (the shadow at `opacity="0.32"`) — and returns
 `frameos.svg(svg, {width, height})`. `refreshInterval` 0.0333.
 
+The second yardstick is the sample scene **Hellfire**
+(`repo/scenes/samples/Hellfire`): the Doom fire, a byte of heat per cell, its
+spread rule in the app's own JS and the cells returned as `frameos.pixels`,
+which writes the ones that changed straight into the panel's buffer. No SVG,
+JSX or canvas is involved, so what it measures is the interpreter's loop and
+the raw pixel path. It reads its own number off the panel: its **FPS counter**
+field draws the renders a second the panel gets (simulation, blit and pacing
+included) in a corner, in the fire's own cells so that it does not slow what it
+measures, and its **Quality** field picks the cell size: automatic (4 px, 8 on
+an ESP32), 8, 4 or 2 px. The rule stays in JS on purpose: a native Doom spread
+in every runtime (`frameos.fire`, tried and taken out again) was one scene's
+inner loop as a core API, and the interpreter's cost is what the yardstick is
+for. On the SenseCAP Indicator the JS spread took 156 ms a frame at 4 px
+(14,400 cells, ~11 µs a cell), which is why an ESP32 defaults to 8 px, a
+quarter of the cells. Measured on the way there:
+
+| Step | Frame | fps |
+| --- | --- | --- |
+| 4 px cells: the spread in JS (156 ms), `putPixels` through `setPixel`'s per-pixel dither (237 ms), the canvas copied to the panel (42 ms) | 450 ms | 2.2 |
+| The palette packed once and only changed cells written (12 ms), `frameos.pixels` so no canvas to copy and no JSX to lay out, the spread native for this measurement (2 ms) | 31 ms | 32 |
+| The same frame with the spread in JS again at 4 px, by those numbers | ~185 ms | ~5, estimated |
+| 8 px cells, the ESP32 default: a quarter of the cells to spread | ~70 ms | ~14, estimated |
+
+The two estimated rows are still to be measured on the board.
+
 ## Where an ESP32 frame goes
 
 Measured on the SenseCAP Indicator D1S (ESP32-S3 at 240 MHz, 8 MB octal PSRAM
@@ -128,9 +153,15 @@ not deep-sleep, animates:
   runs while a frame slower than the panel never waits.
 
 Every line the firmware logs is also printed on UART0 at 115200 baud
-(11.5 KB/s, a 2 KB transmit buffer): the ~2.2 KB of lines a fully logged pass
-prints cap a loop at about 5 fps on their own. That is why the quiet frames
-matter, not only for the logs' readers.
+(11.5 KB/s): the ~2.2 KB of lines a fully logged pass prints cap a loop at about
+5 fps on their own. The driver's 2 KB transmit buffer does not help: stdout
+reaches it a character at a time, each an item of its own, and ~70 characters
+fit. That is why the quiet frames matter, not only for the logs' readers, and
+why a running animation's periodic frame sends its lines to the backend and the
+cloud but prints only the `render:animation` summary (`frameos_nim_set_console_quiet`):
+in full it held one frame in ten seconds for 190 ms, a stutter in a 30 ms scene,
+and now 55 ms. The first frame of an animation, a frame a deploy waits for and a
+failure still print.
 
 ### The panel's buffer is the canvas (an RGB565 LCD)
 

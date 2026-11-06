@@ -1218,6 +1218,13 @@ size_t frameos_nim_log_recent(frameos_log_entry_t *out, size_t max)
     return copied;
 }
 
+static volatile bool s_console_quiet = false;
+
+void frameos_nim_set_console_quiet(bool quiet)
+{
+    s_console_quiet = quiet;
+}
+
 void frameos_nim_log_hook(const char *msg)
 {
     /* printf, not ESP_LOGI: every FrameOS profile builds with
@@ -1229,7 +1236,7 @@ void frameos_nim_log_hook(const char *msg)
      * has to carry these unconditionally. Interleaving with a usb_api base64
      * payload is expected and handled: the browser drops non-base64 lines,
      * verifies the declared length and retries the transfer. */
-    printf("%s\n", msg ? msg : "");
+    if (!s_console_quiet) printf("%s\n", msg ? msg : "");
     queue_log_line(msg);
     uint32_t seq = ring_log_line(msg);
     /* The tap runs on whatever task logged; the cloud client's tap only

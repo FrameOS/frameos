@@ -316,6 +316,16 @@ stroke: give strokes `strokeLinecap="round"` and `strokeLinejoin="round"`,
 whose box is half the width around the line (a miter join's is wider). It
 lasts as long as the interpreter: when `canvas.fresh` is true, draw the
 record you keep in `frameos.remember` into it again.
+A raster the app computes itself (a fire, a plasma, a sprite) goes in with
+`frameos.putPixels(canvas, bytes, { width, height, pixelSize, palette })`
+(FrameOS 2026.11.1+): a `Uint8Array` of RGBA, or with `palette` one index per
+pixel, each source pixel a `pixelSize` square. Simulate at the canvas's size
+over `pixelSize` and hand the buffer over as it is, every frame. When that
+raster is the whole picture, `return frameos.pixels(cells, { width, height,
+pixelSize, palette })` from `get()` instead: no canvas and no JSX, written
+straight into an LCD's buffer. The simulation itself is the app's JS: on an
+ESP32 budget ~11 µs a cell a step, and offer a coarser `pixelSize` there
+(`app.frame.embedded`).
 
 **Assets and permissions.** Asset paths are relative to the frame's assets
 folder (`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos,
@@ -904,6 +914,26 @@ declare const frameos: {
   draw(canvas: FrameOSCanvasRef, content: FrameOSElement | string): boolean;
   /** Fills a canvas with color (white by default). */
   clear(canvas: FrameOSCanvasRef, color?: string): boolean;
+  /**
+   * Writes pixels straight into a canvas (FrameOS 2026.11.1+): RGBA bytes, four per pixel, rows top to bottom; with
+   * palette (CSS colors or 0xRRGGBB numbers, 256 at most) one index per pixel. Each source pixel is a pixelSize
+   * square, the grid width x height source pixels (the canvas over pixelSize by default) at x, y. Alpha 0, or an
+   * index past the palette, leaves the pixel as it was; what falls outside the canvas is clipped.
+   */
+  putPixels(
+    canvas: FrameOSCanvasRef,
+    pixels: Uint8Array | Uint8ClampedArray | ArrayBuffer,
+    options?: { x?: number; y?: number; width?: number; height?: number; pixelSize?: number; palette?: (string | number)[] }
+  ): boolean;
+  /**
+   * A whole frame of palette cells, to return from get() (FrameOS 2026.11.1+): written straight into an LCD's
+   * buffer, with no canvas and no JSX, each cell a pixelSize square. An index past the palette, or a grid that stops
+   * short of the frame, shows the scene's background.
+   */
+  pixels(
+    cells: Uint8Array | Uint8ClampedArray | ArrayBuffer,
+    options: { width?: number; height?: number; pixelSize?: number; palette: (string | number)[] }
+  ): unknown;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;

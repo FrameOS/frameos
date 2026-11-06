@@ -709,6 +709,15 @@ static void current_scene_details(char *scene_id, size_t scene_id_len,
 /* Defined below, next to the other render helpers. */
 static void render_failure_recover(const char *scene_name);
 
+/* A running animation's periodic frame: its lines still go to the backend and
+ * the cloud, and the console hears only the `render:animation` summary. stdout
+ * reaches the UART a character at a time, each one an item of its own in the
+ * driver's ring (~70 characters fit its 2 KB), so ~2.3 KB of lines held the
+ * frame 190 ms at 115200 baud: a visible stutter every ten seconds in a scene
+ * drawing a frame in 30 ms. A frame somebody waits for (the first of an
+ * animation, a deploy's RENDER_NOW) prints as before; so does a failure. */
+static bool s_console_quiet_frame = false;
+
 static void log_render_event(const char *event, const char *scene_id,
                              const char *scene_name, const char *status,
                              const char *stage, const char *mode,
@@ -752,6 +761,7 @@ static void log_render_event(const char *event, const char *scene_id,
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
              (int)esp_err, err_name_esc);
     frameos_nim_log_hook(log_line);
+    if (s_console_quiet_frame && strcmp(event, "render:error") != 0) return;
 
     /* The structured line above only reaches the serial console at INFO,
      * which the firmware log level (WARN) filters out — anyone watching the
@@ -2401,8 +2411,11 @@ static void client_task(void *arg)
                 bool quiet = !s_loud_next && (fos_animation_frame_quiet(&s_anim, frame_start) ||
                                               (scene_render && fos_animation_burst_quiet(&s_anim, frame_start)));
                 frame_quiet = quiet;
+                bool periodic = !quiet && !s_loud_next && s_anim.active && s_anim.logged_us != 0;
                 s_loud_next = false;
                 if (s_anim.active && !quiet) log_animation("running", true);
+                s_console_quiet_frame = periodic;
+                frameos_nim_set_console_quiet(periodic);
                 set_quiet(quiet);
                 s_render_in_flight = true;
                 render_once(quiet);
@@ -2424,6 +2437,8 @@ static void client_task(void *arg)
         bool sample_metrics = (s_anim.active || scene_render) && rendered ? !frame_quiet : housekeeping;
         if (sample_metrics) log_metrics_sample();
         frameos_nim_flush_logs(); /* the sample must not wait for next pass */
+        s_console_quiet_frame = false;
+        frameos_nim_set_console_quiet(false);
 
         /* The scene's refreshInterval is authoritative when a scene is
          * loaded and has an opinion (>= 1), matching the Pi runner where
