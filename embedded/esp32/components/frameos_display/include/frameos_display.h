@@ -42,6 +42,12 @@ esp_err_t fos_display_init(const fos_display_config_t *config);
  * by it and has no sensor of its own (the reTerminal E1003's IT8951, from
  * the board's SHT40): true with whole degrees Celsius, false when unknown. */
 void fos_display_set_temperature_hook(bool (*read_celsius)(int *celsius));
+/* How a board chip the display drives reaches an I2C bus the firmware
+ * already runs (fos_i2c_lend_bus: the PhotoPainter's AXP2101 shares
+ * SDA47/SCL48 with its clock and codec). The handle is an
+ * `i2c_master_bus_handle_t`, NULL when no bus runs on those pins. Set
+ * before fos_display_init. */
+void fos_display_set_i2c_lender(void *(*lend_bus)(int sda, int scl));
 bool fos_display_present(void);  /* false for panel "none" */
 /* The panel actually driving the display ("none" when headless). With the
  * whole panel table compiled in, fos_display_panel_name(0) is just the first

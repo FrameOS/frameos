@@ -21,6 +21,7 @@ void EPD_13IN3E_SetVariant(int variant) __attribute__((weak));
 
 static const fos_panel_entry_t *s_panel = NULL;
 static bool s_module_ready = false;
+static void *(*s_lend_i2c_bus)(int sda, int scl) = NULL;
 
 static bool is_photo_painter_hardware(const fos_display_config_t *config)
 {
@@ -121,7 +122,7 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
     fos_lcd_st7701s_select_board(config->hardware_preset);
 
     if (photo_painter) {
-        esp_err_t pmic_err = fos_photo_painter_enable_epd_power();
+        esp_err_t pmic_err = fos_photo_painter_enable_epd_power(s_lend_i2c_bus);
         if (pmic_err != ESP_OK) {
             ESP_LOGW(TAG, "PhotoPainter PMIC EPD power init failed: %s",
                      esp_err_to_name(pmic_err));
@@ -159,6 +160,11 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
 void fos_display_set_temperature_hook(bool (*read_celsius)(int *celsius))
 {
     fos_it8951_set_temperature_source(read_celsius);
+}
+
+void fos_display_set_i2c_lender(void *(*lend_bus)(int sda, int scl))
+{
+    s_lend_i2c_bus = lend_bus;
 }
 
 bool fos_display_present(void) { return s_panel != NULL; }
