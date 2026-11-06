@@ -249,6 +249,9 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     // same fields as the cloud profile, stored in `device_config`.
     'frame-settings-power',
     'frame-settings-device',
+    // Virtual frames only (the per-frame gate): the links the backend serves
+    // the frame at, its size and its color mode.
+    'frame-settings-virtual',
     'frame-settings-ssh',
     'frame-settings-agent',
     'frame-settings-backend',
@@ -337,6 +340,9 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-ssh',
     // The device-verified local network access switch (lan_access_challenge/_set).
     'frame-settings-lan-access',
+    // A virtual frame's size and view link (virtual frames only: the
+    // per-frame gate refuses it for everything with hardware).
+    'frame-settings-virtual',
   ],
 }
 
@@ -550,6 +556,24 @@ export function isVirtualFrame(frame?: FrameCapabilityInput | null): boolean {
 }
 
 /**
+ * A virtual frame on FrameOS Cloud: no hardware, drawn by the cloud itself
+ * and shown through a view link (docs/cloud-frames.md "Virtual frames"). The
+ * cloud's own flavour of the frame above: its device runs in the frame hub
+ * and reports `platform: "virtual"` like any hello does.
+ */
+export function isVirtualCloudFrame(
+  frame?: FrameCapabilityInput | null,
+  mode: WorkspaceMode = workspaceMode()
+): boolean {
+  return mode === 'cloud' && frame?.hardware?.platform === 'virtual'
+}
+
+/** A frame with no hardware, under either control plane. */
+function isHardwarelessFrame(frame: FrameCapabilityInput | null | undefined, mode: WorkspaceMode): boolean {
+  return isVirtualFrame(frame) || isVirtualCloudFrame(frame, mode)
+}
+
+/**
  * Unlike the esp32 cloud profile above — which DISABLES controls, because the
  * verbs exist and the firmware merely doesn't answer them yet — a virtual
  * frame HIDES these surfaces: the concepts themselves don't exist. There is
@@ -569,6 +593,25 @@ const virtualFrameHiddenMenuActions: readonly FrameMenuAction[] = [
   'restartRemote',
   'stop',
 ]
+
+/**
+ * What a cloud virtual frame hides on top of that. The cloud keeps no assets
+ * for it (the runtime draws with its own fonts, and its device answers the
+ * asset write verbs `unsupported_verb`), and there is no firmware to update:
+ * it runs whatever runtime the cloud runs.
+ */
+const virtualCloudFrameHiddenPanels: readonly WorkspaceUtilityPanel[] = ['assets']
+
+const virtualCloudFrameHiddenMenuActions: readonly FrameMenuAction[] = ['updateFirmware']
+
+/**
+ * The settings a cloud virtual frame has headings for: its own section (size
+ * and view link) and the log switch. The rest of the cloud's list is a
+ * panel's or a board's (flip, palette, buttons, power, SSH keys, local
+ * network access); the frame's name, interval and time zone are the block
+ * the panel opens on, which has no link.
+ */
+const virtualCloudFrameSettingsSections: readonly string[] = ['frame-settings-telemetry', 'frame-settings-virtual']
 
 /**
  * An embedded-mode frame with real hardware (ESP32 or Pico family — any
@@ -779,7 +822,10 @@ export function frameToolPanelIsAllowed(
   panel: WorkspaceUtilityPanel,
   frame?: FrameCapabilityInput | null
 ): boolean {
-  if (isVirtualFrame(frame) && virtualFrameHiddenPanels.includes(panel)) {
+  if (isHardwarelessFrame(frame, mode) && virtualFrameHiddenPanels.includes(panel)) {
+    return false
+  }
+  if (isVirtualCloudFrame(frame, mode) && virtualCloudFrameHiddenPanels.includes(panel)) {
     return false
   }
   if (isEmbeddedHardwareFrame(frame) && embeddedHardwareHiddenPanels.includes(panel)) {
@@ -805,7 +851,10 @@ export function sceneToolPanelIsAllowed(
   panel: WorkspaceUtilityPanel,
   frame?: FrameCapabilityInput | null
 ): boolean {
-  if (isVirtualFrame(frame) && virtualFrameHiddenPanels.includes(panel)) {
+  if (isHardwarelessFrame(frame, mode) && virtualFrameHiddenPanels.includes(panel)) {
+    return false
+  }
+  if (isVirtualCloudFrame(frame, mode) && virtualCloudFrameHiddenPanels.includes(panel)) {
     return false
   }
   if (isEmbeddedHardwareFrame(frame) && embeddedHardwareHiddenPanels.includes(panel)) {
@@ -834,7 +883,10 @@ export function frameMenuActionIsAllowed(
   action: FrameMenuAction,
   frame?: FrameCapabilityInput | null
 ): boolean {
-  if (isVirtualFrame(frame) && virtualFrameHiddenMenuActions.includes(action)) {
+  if (isHardwarelessFrame(frame, mode) && virtualFrameHiddenMenuActions.includes(action)) {
+    return false
+  }
+  if (isVirtualCloudFrame(frame, mode) && virtualCloudFrameHiddenMenuActions.includes(action)) {
     return false
   }
   if (isEmbeddedHardwareFrame(frame) && embeddedHardwareHiddenMenuActions.includes(action)) {
@@ -957,6 +1009,13 @@ export function frameSettingsSectionIsAllowed(
   sectionId: string,
   frame?: FrameCapabilityInput | null
 ): boolean {
+  if (sectionId === 'frame-settings-virtual' && !isHardwarelessFrame(frame, mode)) {
+    // Only a virtual frame draws the heading, on either plane.
+    return false
+  }
+  if (isVirtualCloudFrame(frame, mode)) {
+    return virtualCloudFrameSettingsSections.includes(sectionId)
+  }
   if (isEsp32CloudFrame(frame, mode)) {
     if (!esp32CloudFrameSettingsSections.includes(sectionId)) {
       return false

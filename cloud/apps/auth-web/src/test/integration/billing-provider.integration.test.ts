@@ -277,7 +277,8 @@ describe("syncing the plans", () => {
       sql`select entitlements from billing_plans where code = 'private-5'`,
     );
     expect(row?.entitlements.frames).toBe(60);
-    expect(row?.entitlements.cloud_rendered_frames).toBe(0);
+    // Virtual frames are built: a $5 plan grants five of them.
+    expect(row?.entitlements.cloud_rendered_frames).toBe(5);
   });
 
   it("adopts products the store already has, and replaces one that is gone", async () => {

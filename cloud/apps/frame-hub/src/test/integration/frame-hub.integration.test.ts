@@ -2848,6 +2848,9 @@ describe("sweep", () => {
     const statements: string[] = [];
     const extra = await startExtraHub({
       onQuery: (query) => statements.push(query),
+      // The pass over the virtual frames has its own timer and statement;
+      // it must not land in the window this test counts.
+      virtualTickIntervalMs: 3_600_000,
     });
     const devices = [await connectDevice(first, extra.port)];
     // Let the connect-time tail (update_frame broadcast, audit rows) finish

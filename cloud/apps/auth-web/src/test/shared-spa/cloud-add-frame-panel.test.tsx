@@ -252,7 +252,8 @@ describe("AddFramePanel", () => {
   it("opens on a chooser stage and drills into one path at a time", async () => {
     renderPanel();
 
-    // Stage one: all four paths as buttons, no forms yet.
+    // Stage one: every path as a button, no forms yet.
+    expect(screen.getByRole("button", { name: /virtual frame/i })).toBeDefined();
     expect(screen.getByRole("button", { name: /install script/i })).toBeDefined();
     expect(screen.getByRole("button", { name: /sd card image/i })).toBeDefined();
     expect(screen.getByRole("button", { name: /link a frame/i })).toBeDefined();
@@ -424,6 +425,95 @@ describe("AddFramePanel", () => {
       expect((screen.getByLabelText("Code from the frame") as HTMLInputElement).value).toBe("H7LU-JLWN");
       // One-shot: a second panel does not inherit it.
       expect(takeStashedLinkCode()).toBeUndefined();
+    });
+  });
+
+  // A virtual frame enrolls nothing: no claim code, no device. The cloud
+  // makes the frame itself and hands back the link it is shown at.
+  describe("a virtual frame", () => {
+    function createCalls() {
+      return fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/api/frames/virtual"));
+    }
+
+    function answerCreate(response: () => Response) {
+      fetchMock.mockImplementation((input) => {
+        if (String(input).endsWith("/api/frames/virtual")) {
+          return Promise.resolve(response());
+        }
+        if (String(input).endsWith("/api/frames")) {
+          return Promise.resolve(Response.json({ frames: [{ id: "f-1", name: "Hallway", status: "active" }] }));
+        }
+        return Promise.resolve(
+          Response.json({ claim_token: "FRCT_from_server", expires_at: "2030-01-01T00:00:00Z" }),
+        );
+      });
+    }
+
+    it("creates the frame at the chosen size and hands over its link", async () => {
+      answerCreate(() =>
+        Response.json(
+          {
+            frame: { id: "11111111-2222-3333-4444-555555555555", name: "Lobby" },
+            virtual: { view_url: "https://cloud.frameos.net/v/vf_abcdefghijklmnopqrstuvwxyz012345" },
+          },
+          { status: 201 },
+        ),
+      );
+      renderPanel();
+      openPath(/virtual frame/i);
+      // Nothing to copy scenes onto at enrollment: there is no enrollment.
+      expect(screen.queryByLabelText(/copy scenes from/i)).toBeNull();
+
+      fireEvent.change(screen.getByLabelText("Frame name"), { target: { value: "  Lobby " } });
+      fireEvent.change(screen.getByLabelText("Size"), { target: { value: "custom" } });
+      fireEvent.change(screen.getByLabelText("Width"), { target: { value: "1024" } });
+      fireEvent.change(screen.getByLabelText("Height"), { target: { value: "600" } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /create virtual frame/i }));
+      });
+
+      expect(createCalls()).toHaveLength(1);
+      const init = createCalls()[0]![1] as RequestInit;
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(String(init.body))).toMatchObject({ height: 600, name: "Lobby", width: 1024 });
+
+      expect(await screen.findByTestId("virtual-frame-created")).toBeDefined();
+      expect(screen.getByText("https://cloud.frameos.net/v/vf_abcdefghijklmnopqrstuvwxyz012345")).toBeDefined();
+      expect((screen.getByTestId("virtual-frame-open") as HTMLAnchorElement).getAttribute("href")).toContain(
+        "11111111-2222-3333-4444-555555555555",
+      );
+    });
+
+    it("says it is part of the paid plans when the plan has none", async () => {
+      answerCreate(() =>
+        Response.json({ error: "cloud_rendered_frame_quota_exceeded", max_cloud_rendered_frames: 0 }, { status: 403 }),
+      );
+      renderPanel();
+      openPath(/virtual frame/i);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /create virtual frame/i }));
+      });
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toContain("Virtual frames are part of the paid plans.");
+      expect((screen.getByRole("link", { name: /see the plans/i }) as HTMLAnchorElement).getAttribute("href")).toBe(
+        "/account/usage",
+      );
+      // The default size went out as numbers, not as the option's index.
+      expect(JSON.parse(String((createCalls()[0]![1] as RequestInit).body))).toMatchObject({ height: 480, width: 800 });
+    });
+
+    it("says how many the plan has when they are all in use", async () => {
+      answerCreate(() =>
+        Response.json({ error: "cloud_rendered_frame_quota_exceeded", max_cloud_rendered_frames: 2 }, { status: 403 }),
+      );
+      renderPanel();
+      openPath(/virtual frame/i);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /create virtual frame/i }));
+      });
+      expect((await screen.findByRole("alert")).textContent).toContain(
+        "Your plan includes 2 virtual frames, and they are all in use.",
+      );
     });
   });
 

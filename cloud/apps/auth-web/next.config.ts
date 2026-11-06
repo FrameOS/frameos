@@ -189,6 +189,24 @@ function createNextConfig(phase: string): NextConfig {
           source: "/frameos-editor/:path*",
         },
         {
+          // A virtual frame's view link (docs/cloud-frames.md "Virtual
+          // frames"): the address is the credential, so it must never ride a
+          // Referer anywhere, and nothing should index it. A rule here
+          // because a headers() rule overrides what the handler set, and the
+          // catch-all above says strict-origin-when-cross-origin.
+          headers: [
+            {
+              key: "Referrer-Policy",
+              value: "no-referrer",
+            },
+            {
+              key: "X-Robots-Tag",
+              value: "noindex, nofollow",
+            },
+          ],
+          source: "/v/:path*",
+        },
+        {
           // The editor html references hashed assets; keeping the html itself
           // uncached means a redeployed bundle is picked up immediately.
           headers: [noStoreHeader],

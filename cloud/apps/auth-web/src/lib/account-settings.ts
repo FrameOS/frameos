@@ -120,6 +120,36 @@ export async function storedAccountSettings(
   return result;
 }
 
+/**
+ * The account's service settings with their secrets opened, narrowed to
+ * {group: {field: string}}. For the two consumers the keys are for: a frame's
+ * service-settings pull, and the hub rendering a virtual frame (which is that
+ * frame's device). buildServiceSettingsPayload filters it again against what
+ * a device may receive and what the frame's scenes were granted.
+ */
+export async function revealedServiceSettings(
+  db: ReturnType<typeof createDb>,
+  accountId: string,
+): Promise<Record<string, Record<string, string>>> {
+  const revealed = await storedAccountSettings(db, accountId, { reveal: true });
+  const stored: Record<string, Record<string, string>> = {};
+  for (const [group, value] of Object.entries(revealed)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      continue;
+    }
+    const fields: Record<string, string> = {};
+    for (const [field, fieldValue] of Object.entries(
+      value as Record<string, unknown>,
+    )) {
+      if (typeof fieldValue === "string") {
+        fields[field] = fieldValue;
+      }
+    }
+    stored[group] = fields;
+  }
+  return stored;
+}
+
 // The one-off sweep behind scripts/reseal-account-settings.ts: every row that
 // still holds a legacy plaintext secret, re-sealed — what the read above does
 // lazily, for the rows nobody reads (an account that never opens its

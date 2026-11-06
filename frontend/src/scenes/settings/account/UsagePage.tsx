@@ -58,6 +58,19 @@ function StorageMeters({ usage }: { usage: AccountUsage }): JSX.Element {
     // First, because it is the quota people actually meet: storage is
     // generous, frames are a countable thing you add one at a time.
     { label: 'Frames', value: usage.frames.count, max: usage.frames.max_count, unit: 'frames' },
+    // A pool of its own, shown once the plan has any (the free plan has
+    // none) or the account still holds one from a plan it left.
+    ...(usage.cloud_rendered_frames &&
+    (usage.cloud_rendered_frames.max_count > 0 || usage.cloud_rendered_frames.count > 0)
+      ? [
+          {
+            label: 'Virtual frames',
+            value: usage.cloud_rendered_frames.count,
+            max: usage.cloud_rendered_frames.max_count,
+            unit: 'frames',
+          } satisfies Meter,
+        ]
+      : []),
     { label: 'Private scenes', value: usage.scenes.private_bytes, max: usage.scenes.private_max_bytes },
     { label: 'Backups', value: usage.backups.bytes, max: usage.backups.max_bytes },
     { label: 'Frame logs', value: usage.frame_logs.bytes, max: usage.frame_logs.max_bytes },
@@ -91,7 +104,7 @@ function StorageMeters({ usage }: { usage: AccountUsage }): JSX.Element {
 
 const planFeatureLabels: Record<string, string> = {
   share_frames: 'Share frames with the people on your plan',
-  virtual_frames: 'Virtual frames, and thin clients like the Inky Frame',
+  virtual_frames: 'Virtual frames: no hardware, shown on any screen through a link',
   sso: 'Single sign-on with SAML',
   priority_support: 'Priority support',
   dedicated_support: 'Dedicated support',

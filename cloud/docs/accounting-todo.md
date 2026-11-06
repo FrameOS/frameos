@@ -82,7 +82,7 @@ Three cards on `/account/usage`, built from one module,
 |---|---|---|---|
 | People | 1 | N | N |
 | Frames (your own hardware) | 20 | 40, 60, 80, 160 | 199, 299, 499, 999 |
-| Virtual frames, thin clients (§0.2) | 0 | N | N |
+| Virtual frames (§0.2; thin clients when they can link) | 0 | N | N |
 | Photos | 250 MB | 250 MB × N | 250 MB × N |
 | Private scenes, backups, frame logs | 100 MB each | 100 MB × N each | 100 MB × N each |
 | Features | | sharing frames, virtual frames | Private's, SSO (SAML), priority support; dedicated support at $499 |
@@ -113,11 +113,14 @@ ends, with the same rules and its own features on top.
   margin instead (Maker $1.99 at 50%, Studio $6.99 at 20%); migration 0069
   took those two rows off every listing and renamed `payg` to Free. The
   rows stay for the ledger tests and any hand-made subscription.
-- **Sharing frames, virtual frames and SSO do not exist yet.** The catalog
-  names them in `plannedFeatures` / `plannedLimits`: every page marks them
-  "planned", and a plan's row does not grant them. Take a name off those
-  lists in the change that ships the feature. What a paid plan sells today
-  is frames and storage.
+- **Sharing frames and SSO do not exist yet.** The catalog names them in
+  `plannedFeatures` / `plannedLimits`: every page marks them "planned", and
+  a plan's row does not grant them. Take a name off those lists in the
+  change that ships the feature. What a paid plan sells today is frames,
+  storage and, since 2026-11, virtual frames (§0.2): `virtual_frames` and
+  `cloud_rendered_frames` are off the lists, and a plan's row grants its N.
+  Rows synced before that hold zero, so "Sync plans" runs once after the
+  deploy ([`billing.md`](billing.md)).
 
 Open: a yearly price, and what happens to an account that moves below what
 it already uses (proposal: nothing breaks, nothing new can be added).
@@ -152,10 +155,31 @@ arithmetic:
   gives. Until then the entitlement is a *count check* at frame creation and
   costs the ledger nothing.
 
-Not designed here: whether a cloud-rendered frame counts against the
-50-frame cloud-managed limit (proposal: it is a separate pool, because the
-two have entirely different cost profiles — your own Pi costs us a WebSocket
-and a row).
+**Built, 2026-11: virtual frames** (`docs/cloud-frames.md` "Virtual
+frames"). The first thing the entitlement buys: a frame with no hardware,
+rendered by the frame hub and shown at a private link. What the two points
+above came to in code:
+
+- The count check is `createVirtualFrame` (one transaction, behind an
+  advisory lock on the account). **A virtual frame is its own pool**: it
+  counts against `cloud_rendered_frames` and not against `frames`
+  (`countFramesForAccount` leaves virtual frames out), because the two have
+  entirely different cost profiles — your own Pi costs us a WebSocket and a
+  row. A thin client's enrollment still passes both checks; it is hardware.
+- The floor is `FRAMEOS_CLOUD_RENDERED_MIN_INTERVAL_SECONDS` (300), enforced
+  twice: the settings route refuses an interval below it, and the hub's
+  render tick never paces under it whatever a scene asks for.
+- Renders are also bounded by attention, which the arithmetic above did not
+  assume: the interval runs only while the view link or a workspace page was
+  read in the last three minutes. A kiosk that is always on does cost the
+  288 renders a day; a dashboard opened twice a day costs two.
+- Not metered: there is still no per-frame attribution (§8.9), so a render
+  posts nothing to the ledger. The plan's number is the whole price.
+
+Still open: the thin clients the entitlement was first meant for. An
+ESP32-C3 or a Pico cannot link to the cloud at all (no hub client in either
+firmware, `docs/convergence-todo.md` §3), so the plan's line says "virtual
+frames" and nothing about boards.
 
 Direction comes from Airbnb's "Tracking the money" post
 (medium.com/airbnb-engineering/tracking-the-money-scaling-financial-reporting-at-airbnb-6d742b80f040).

@@ -10,6 +10,7 @@ import { ButtonActionsSection } from './fields/buttonActionsSection'
 import { ColorsSection } from './fields/colorsSection'
 import { FrameSettingsSection } from './sections/FrameSettingsSection'
 import { LanAccessSection } from './sections/lanAccessSection'
+import { CloudVirtualFrameSection } from './sections/virtualSections'
 import { SettingsHeaderActions } from './SettingsHeaderActions'
 import {
   CloudServiceSettingsSection,
@@ -132,6 +133,9 @@ function FrameSettingsPanel(): JSX.Element {
         </FrameSettingsSection>
         <FrameSettingsSection sectionKey="cloud-telemetry">
           <CloudTelemetrySection />
+        </FrameSettingsSection>
+        <FrameSettingsSection sectionKey="cloud-virtual">
+          <CloudVirtualFrameSection />
         </FrameSettingsSection>
 
         {/* The full self-hosted surface. */}

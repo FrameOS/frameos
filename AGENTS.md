@@ -565,6 +565,37 @@
   frame`. The SPA's logs panel matches that prefix, so keep it on both
   runtimes.
 
+## Virtual frames: both planes, two shapes, `docs/cloud-frames.md` "Virtual frames"
+
+- A virtual frame has no hardware: the control plane renders its scenes and
+  shows the picture at a link. The self-hosted backend's is
+  `backend/app/api/virtual_frame.py` (embedded mode, `platform: "virtual"`,
+  `is_virtual_frame` at each route that needs to know). The cloud's is a
+  paid-plan entitlement (`cloud_rendered_frames`, none on Free) and is built
+  the other way round: **the frame hub runs its device**
+  (`cloud/apps/frame-hub/src/virtual-device.ts`), which speaks the frame side
+  of the wire contract behind an in-process socket. A cloud route, MCP tool or
+  panel that works on a frame works on a virtual one; do not add an
+  `is virtual` branch to a cloud route — teach the device the verb, or answer
+  it `unsupported_verb` and hide the control (`workspaceSurfaces.ts`,
+  `isVirtualCloudFrame`).
+- **A frame is virtual because of its `virtual_frames` row**, which only the
+  create route writes. `hardware.platform` is what a device says of itself:
+  the SPA draws by it, the quota counts by it, and nothing trusts it.
+- The hub renders with auth-web's `scene-render.ts` and the runtime auth-web
+  ships. Its tests fake the renderer (`virtualRender`), except one that runs
+  the real runtime when `public/frameos-wasm` is installed. A change to what
+  a render is told (settings, state, events, size) is tested there.
+- It renders on a verb, and on its interval only while somebody looks
+  (`viewed_at`, `preview_watched_at`), never under the plan's floor. Keep
+  both bounds: renders per day are what a virtual frame costs.
+- The view link (`/v/{token}`) shows the picture and nothing else, and its
+  token appears in no log and no audit row. Virtual frames are their own
+  quota pool (`countFramesForAccount` leaves them out).
+- Deliberately one-sided: assets and a color mode exist on the backend's
+  virtual frame and not on the cloud's (yet); the plan gate and the hub
+  device exist on the cloud alone.
+
 ## Paid plans: `cloud/docs/billing.md`
 
 - Cloud-only by nature: FrameOS Cloud sells its paid plans through Creem, a

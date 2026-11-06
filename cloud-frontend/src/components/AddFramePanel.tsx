@@ -6,6 +6,7 @@ import {
   CpuChipIcon,
   DevicePhoneMobileIcon,
   QrCodeIcon,
+  TvIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { claimTokenTimeZoneFields } from '../lib/browser-time-zone'
@@ -15,6 +16,7 @@ import type { ReactElement } from 'react'
 import { Esp32CloudFlasher } from './Esp32CloudFlasher'
 import { LinkRunningFrameForm, takeStashedLinkCode } from './LinkRunningFrameForm'
 import { SdImageBuilder } from './SdImageBuilder'
+import { VirtualFrameForm } from './VirtualFrameForm'
 
 // Known error codes from POST /api/frames/claim-tokens. "Could not prepare the
 // enrollment" plus a raw code told the user nothing, and the old hint ("check
@@ -31,7 +33,8 @@ const mintErrorMessages: Record<string, string> = {
 }
 
 // "Add frame": four enrollment paths (install script, SD image, link code,
-// ESP32 USB flashing), presented in two stages — first a chooser with one
+// ESP32 USB flashing) and one that enrolls nothing — a virtual frame, which
+// has no hardware and is made by the cloud itself — presented in two stages — first a chooser with one
 // line per path, then the chosen path's full form. Claim codes are plumbing,
 // not UX: the install command is minted once per opening (see the mint site
 // below for why that is safe now), so it is ready to copy the moment the
@@ -62,7 +65,7 @@ export interface AddFramePanelProps {
   onClose?: (() => void) | undefined
 }
 
-type AddFramePath = 'script' | 'sd' | 'link' | 'esp32'
+type AddFramePath = 'script' | 'sd' | 'link' | 'esp32' | 'virtual'
 
 // Stage one: one button per enrollment path, each with a single line saying
 // what it is for. The chosen path's full form is stage two.
@@ -96,7 +99,18 @@ const pathChoices: {
     key: 'esp32',
     title: 'Flash an ESP32 from this browser',
   },
+  {
+    description: 'No hardware: FrameOS Cloud draws the scenes and any screen with a browser shows them. Paid plans.',
+    icon: TvIcon,
+    key: 'virtual',
+    title: 'Virtual frame (any screen with a browser)',
+  },
 ]
+
+// The paths that enroll a device with a claim code, and so can carry "start
+// it with the scenes from …". The link path uses the device flow, and a
+// virtual frame is made by the cloud with no code at all.
+const claimCodePaths: readonly AddFramePath[] = ['script', 'sd', 'esp32']
 
 export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddFramePanelProps): ReactElement {
   // A link code parked by LinkRunningFrameForm before a re-authentication
@@ -396,7 +410,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
             link path uses the device flow and mints no code, so it is not
             offered there. A frame that boots into an empty workspace is the
             thing this removes. */}
-        {path !== undefined && path !== 'link' && sceneSourceChoices.length > 0 ? (
+        {path !== undefined && claimCodePaths.includes(path) && sceneSourceChoices.length > 0 ? (
           <label className="frameos-muted flex items-center justify-between gap-2 text-xs">
             <span>Start it with the scenes from</span>
             <select
@@ -414,7 +428,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
             </select>
           </label>
         ) : null}
-        {path !== undefined && path !== 'link' && sceneSourceFrameId ? (
+        {path !== undefined && claimCodePaths.includes(path) && sceneSourceFrameId ? (
           <p className="frameos-muted text-xs">
             The new frame gets those scenes the moment you confirm it here — it has to reach the network to enroll
             anyway, so they arrive on its first connection. Assets are not copied.
@@ -488,6 +502,16 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
               Flash an ESP32 from this browser
             </h3>
             <Esp32CloudFlasher cloudOrigin={cloudOrigin} sceneSourceFrameId={sceneSourceFrameId || undefined} />
+          </section>
+        ) : null}
+
+        {path === 'virtual' ? (
+          <section className="frameos-card rounded-2xl border border-white/90 p-4 shadow-sm">
+            <h3 className="frameos-strong mb-1 flex items-center gap-2 text-sm font-semibold">
+              <TvIcon aria-hidden className="h-5 w-5" />
+              Virtual frame
+            </h3>
+            <VirtualFrameForm />
           </section>
         ) : null}
       </div>

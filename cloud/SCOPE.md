@@ -10,7 +10,8 @@ authorization (`client_kind` "backend"/"frame"), revocation/self-unlink/
 inventory/grants/token rotation, the `auth:login` login handoff, config
 backups (`/api/backends/backups`, 8 MB per blob / 500 per account), the
 scene store, the cloud-managed frames control plane + `apps/frame-hub`
-(design: `docs/cloud-frames.md`), optional 2FA plus re-authentication for
+(design: `docs/cloud-frames.md`), virtual frames (no hardware: the hub
+renders them, a paid-plan entitlement), optional 2FA plus re-authentication for
 sensitive actions and the audit trail (`docs/auth.md`), Postgres-backed rate
 limiting (`rate_limit_buckets`), hand-written SQL migrations, cross-repo
 E2E (`scripts/e2e-frameos.sh`), and the accounting module — a double-entry

@@ -17,9 +17,13 @@ month). **Business** is `selfServe: false` and stays "contact us" until single
 sign-on exists.
 
 A plan lists only what exists. `plannedFeatures` and `plannedLimits` in the
-catalog name what is not built yet (sharing frames, virtual frames, single
-sign-on, the people count). Every page marks those "planned" and a plan's row
-does not grant them. Take a name off those lists in the change that ships the
+catalog name what is not built yet (sharing frames, single sign-on, the
+people count). Every page marks those "planned" and a plan's row does not
+grant them. Virtual frames left the lists when they shipped (2026-11,
+`docs/cloud-frames.md` "Virtual frames"): a plan's row now carries its
+`cloud_rendered_frames`, and **"Sync plans" has to run once after that
+deploy** — rows written before it hold `cloud_rendered_frames: 0`, so a
+paying account would be told virtual frames are not in its plan. Take a name off those lists in the change that ships the
 feature. Creem's review rejects a site that sells what it does not have.
 
 ## How it works

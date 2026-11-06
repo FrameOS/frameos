@@ -37,6 +37,9 @@ const frameEventTypes = [
   "frame.session_kicked",
   "frame.settings_pushed",
   "frame.telemetry_scope_changed",
+  "frame.virtual_changed",
+  "frame.virtual_created",
+  "frame.virtual_link_reset",
 ];
 
 describe("auditEventLabel", () => {

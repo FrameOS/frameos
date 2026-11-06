@@ -2,6 +2,10 @@
 // frames. Wire contract: docs/cloud-frames.md at the repo root; design:
 // cloud/docs/cloud-frames.md ("WS hub placement", "Single-host constraint").
 //
+// It is also where a virtual frame's device runs (virtual-device.ts): a frame
+// with no hardware gets a session with no socket, and the hub renders its
+// scenes itself. See attachVirtualDevice.
+//
 // Three socket surfaces on one HTTP server:
 //   - /api/frames/ws               — device sockets (Bearer link token +
 //                                    Ed25519 challenge/response)
@@ -26,6 +30,7 @@ import {
   frames,
   linkedClients,
   recordAuditEvent,
+  virtualFrames,
 } from "@frameos-cloud/db";
 // Shared helpers imported directly from auth-web source; those files are
 // deliberately free of Next imports so the hub can consume them (see the
@@ -77,6 +82,13 @@ import { previewWatchGraceMs } from "../../auth-web/src/lib/frame-sleep";
 import { keywordsRuntimeLacks } from "../../auth-web/src/lib/retired-apps";
 import { safeLocalOrigin } from "../../auth-web/src/lib/local-origin";
 import { frameOwningBackend } from "../../auth-web/src/lib/frame-backend-owner";
+import { cloudRenderedMinIntervalSeconds } from "../../auth-web/src/lib/cloud-rendered";
+import { renderScenes, rendererVersion } from "../../auth-web/src/lib/scene-render";
+import {
+  virtualFrameDefaultIntervalSeconds,
+  virtualFrameWatchWindowMs,
+  virtualFramesNotifyChannel,
+} from "../../auth-web/src/lib/virtual-frames";
 import { replayCloudContentToFrame } from "../../auth-web/src/lib/frame-backend-release";
 import {
   allowsPrivateNetworkOrigins,
@@ -121,6 +133,11 @@ import {
   liveSessionHashes,
   type BrowserSession,
 } from "./session-auth";
+import {
+  createVirtualRenderQueue,
+  VirtualDevice,
+  type VirtualRender,
+} from "./virtual-device";
 
 const devicePath = "/api/frames/ws";
 const browserAccountPath = "/api/frames/updates";
@@ -168,6 +185,11 @@ const maxSleepSeconds = 7 * 86_400 + 3_600;
 const defaultAuthTimeoutMs = 15_000;
 const defaultHeartbeatIntervalMs = 30_000;
 const defaultSweepIntervalMs = 30_000;
+// How often virtual frames are looked over: which have no device yet, whose
+// schedule has an entry for this minute, which are due a render. The render
+// interval itself is minutes (the plan's floor), so this only bounds how
+// late one starts.
+const defaultVirtualTickIntervalMs = 15_000;
 // Connect/disconnect audit debounce: a frame on flaky Wi-Fi can bounce every
 // few seconds, and each bounce is two audit rows nobody wants to scroll
 // past. See recordLifecycleAudit.
@@ -277,6 +299,17 @@ export const maxAssetStreamsPerSession = 4;
 // assetStreamIdleMs + heartbeatIntervalMs.
 export const defaultAssetStreamIdleMs = 60_000;
 
+// What a session needs of its socket. A hardware frame's is a WebSocket; a
+// virtual frame's is the in-process pair of its VirtualDevice.
+interface DeviceSocket {
+  readonly bufferedAmount: number;
+  readonly readyState: number;
+  close(code?: number, reason?: string): void;
+  ping(): void;
+  send(data: string): void;
+  terminate(): void;
+}
+
 interface DeviceSession {
   alive: boolean;
   assetStreams: Map<string, AssetStream>;
@@ -305,7 +338,7 @@ interface DeviceSession {
   // The device announced a deep sleep (handleSleep): the close that follows
   // is the frame going dark on purpose, not a lost connection.
   sleeping: boolean;
-  ws: WebSocket;
+  ws: DeviceSocket;
 }
 
 interface BrowserConnection {
@@ -328,6 +361,13 @@ export interface FrameHubOptions {
   sweepIntervalMs?: number;
   lifecycleAuditDebounceMs?: number;
   assetStreamIdleMs?: number;
+  virtualTickIntervalMs?: number;
+  // The refresh floor of a virtual frame, in seconds (the plan's,
+  // FRAMEOS_CLOUD_RENDERED_MIN_INTERVAL_SECONDS). Tests shorten it.
+  virtualMinIntervalSeconds?: number;
+  // What renders a virtual frame's scenes. Production uses the wasm runtime
+  // (auth-web's scene-render.ts); tests hand in a stand-in.
+  virtualRender?: VirtualRender;
   // Test seam: called with the text of every statement this hub's pool
   // sends, so a test can count what one sweep costs. Gives the hub its own
   // (uncached) pool; production leaves it unset.
@@ -342,6 +382,8 @@ export interface FrameHub {
   sweep(): Promise<void>;
   // Timer ticks skipped because the previous sweep was still running.
   skippedSweeps(): number;
+  // Runs one pass over the virtual frames immediately (see runVirtualTick).
+  virtualTick(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -365,8 +407,18 @@ export async function startFrameHub(
     options.lifecycleAuditDebounceMs ?? lifecycleAuditDebounceMs;
   const assetStreamIdleMs =
     options.assetStreamIdleMs ?? defaultAssetStreamIdleMs;
+  const virtualTickIntervalMs =
+    options.virtualTickIntervalMs ?? defaultVirtualTickIntervalMs;
+  const virtualMinIntervalSeconds =
+    options.virtualMinIntervalSeconds ?? cloudRenderedMinIntervalSeconds;
+  const virtualRender = createVirtualRenderQueue(options.virtualRender ?? renderScenes);
 
+  let closed = false;
   const deviceSessions = new Map<string, DeviceSession>();
+  // The devices of the virtual frames with a live session, by frame id, and
+  // the frames one is being started for.
+  const virtualDevices = new Map<string, VirtualDevice>();
+  const virtualAttaching = new Set<string>();
   // Browser subscriptions: per-frame sockets keyed by frame id, fleet-view
   // sockets keyed by account id. Routing happens at broadcast time from the
   // frame row's account_id, so frames enrolled after a fleet socket opened
@@ -1719,8 +1771,10 @@ export async function startFrameHub(
   // it costs the frame an upload is decided here, by whether anyone has the
   // frame open. That is the fleet-preview doctrine in one function: the cloud
   // keeps a copy of what the device already drew for itself, while someone is
-  // looking, and otherwise leaves the frame alone. It never renders scenes
-  // itself and never asks a device to screenshot on demand.
+  // looking, and otherwise leaves the frame alone. It never renders hardware's
+  // scenes itself and never asks a device to screenshot on demand. (A virtual
+  // frame's `render` comes from the device in this process, which has already
+  // put the picture in the frame's image slot.)
   //
   // `image: "image_get"` (ESP32 firmware 2026.8.43+): the device keeps no
   // snapshot files — its image IS the framebuffer — so the fetch is an
@@ -2156,7 +2210,19 @@ export async function startFrameHub(
 
   async function handleDeviceMessage(session: DeviceSession, data: unknown) {
     const msg = parseJsonMessage(data);
-    if (!msg || typeof msg.type !== "string") {
+    if (!msg) {
+      return;
+    }
+    await dispatchDeviceMessage(session, msg);
+  }
+
+  // One frame → provider message, already parsed: from a socket, or straight
+  // from a virtual frame's device.
+  async function dispatchDeviceMessage(
+    session: DeviceSession,
+    msg: Record<string, unknown>,
+  ) {
+    if (typeof msg.type !== "string") {
       return;
     }
 
@@ -2353,6 +2419,214 @@ export async function startFrameHub(
         }),
       );
     });
+  }
+
+  // A virtual frame's session (docs/cloud-frames.md "Virtual frames"). There
+  // is no socket and no challenge: the device is an object in this process,
+  // made from a virtual_frames row only auth-web's create route writes — what
+  // a frame reports about itself never makes it virtual. From `hello` on it
+  // is a session like any other: the same activation, the same drain, the
+  // same handlers for what it sends back, the same kick when the frame is
+  // revoked or deleted.
+  async function attachVirtualDevice(
+    frameId: string,
+    { render = false }: { render?: boolean } = {},
+  ) {
+    if (closed || virtualAttaching.has(frameId) || deviceSessions.has(frameId)) {
+      return;
+    }
+    virtualAttaching.add(frameId);
+    try {
+      const [row] = await db
+        .select({ frame: frames, linkedClient: linkedClients })
+        .from(virtualFrames)
+        .innerJoin(frames, eq(frames.id, virtualFrames.frameId))
+        .innerJoin(linkedClients, eq(linkedClients.id, frames.linkedClientId))
+        .where(eq(virtualFrames.frameId, frameId))
+        .limit(1);
+      if (
+        !row ||
+        row.frame.status !== "active" ||
+        row.linkedClient.revokedAt !== null ||
+        closed
+      ) {
+        return;
+      }
+      let open = true;
+      const device = new VirtualDevice({
+        db,
+        deliver: (message) => {
+          session.handling = session.handling.then(() =>
+            dispatchDeviceMessage(session, message).catch((error: unknown) => {
+              logError("device.message_failed", {
+                error: errorField(error),
+                frameId,
+              });
+            }),
+          );
+        },
+        frameId,
+        render: virtualRender,
+        rendererVersion,
+        // `restart_runtime` / `reboot`: the device goes away and comes back,
+        // which is what the hub's own bookkeeping (and a deploy's bar) waits
+        // for. After the ack it just queued has been handled.
+        restart: () => {
+          session.handling = session.handling.then(() => {
+            end(1000);
+            if (!closed) {
+              setImmediate(() => {
+                attachVirtualDevice(frameId, { render: true }).catch((error: unknown) =>
+                  logError("virtual.attach_failed", { error: errorField(error), frameId }),
+                );
+              });
+            }
+          });
+        },
+      });
+      const end = (code: number) => {
+        if (!open) {
+          return;
+        }
+        open = false;
+        device.close();
+        session.closed = true;
+        if (virtualDevices.get(frameId) === device) {
+          virtualDevices.delete(frameId);
+        }
+        if (!session.ready) {
+          return;
+        }
+        logInfo("device.disconnected", { code, frameId, virtual: true });
+        markDeviceDisconnected(session, {
+          reason: deviceCloseReason(code),
+        }).catch((error: unknown) =>
+          logError("device.disconnect_failed", {
+            error: errorField(error),
+            frameId,
+          }),
+        );
+        // The link's scopes changed: come back with the new ones, as
+        // hardware redials after the same close.
+        if (code === closeRescoped && !closed) {
+          setImmediate(() => {
+            attachVirtualDevice(frameId).catch((error: unknown) =>
+              logError("virtual.attach_failed", { error: errorField(error), frameId }),
+            );
+          });
+        }
+      };
+      const socket: DeviceSocket = {
+        get bufferedAmount() {
+          return 0;
+        },
+        close: (code = 1000) => end(code),
+        ping: () => {
+          session.alive = true;
+        },
+        get readyState() {
+          return open ? WebSocket.OPEN : WebSocket.CLOSED;
+        },
+        send: (data) => device.receive(data),
+        terminate: () => end(1006),
+      };
+      const session: DeviceSession = {
+        alive: true,
+        assetStreams: new Map(),
+        authTimeout: undefined,
+        // Nothing to prove: no credential for this frame exists outside this
+        // process (its link token and private key were never kept).
+        authed: true,
+        closed: false,
+        disconnectHandled: false,
+        drainQueued: false,
+        draining: false,
+        frame: row.frame,
+        handling: Promise.resolve(),
+        hello: undefined,
+        hubSessionId: randomUUID(),
+        nonce: Buffer.alloc(0),
+        ready: false,
+        readySent: false,
+        scopes: linkedClientScopes(row.linkedClient),
+        sleeping: false,
+        storeResyncRequested: false,
+        ws: socket,
+      };
+      const hello = await device.hello();
+      if (!hello || closed) {
+        return;
+      }
+      session.hello = hello;
+      virtualDevices.set(frameId, device);
+      await activateDeviceSession(session);
+      if (render) {
+        device.requestRender();
+      }
+    } finally {
+      virtualAttaching.delete(frameId);
+    }
+  }
+
+  // One pass over the virtual frames: start the device of any that has none
+  // (a new frame whose notify was missed, every one of them after a restart,
+  // one kicked for a scope change), fire schedule entries, and render those
+  // that are due — someone looked within the watch window, and the frame's
+  // interval (its scene's, else its own, never under the plan's floor) has
+  // passed since the last render. One statement however many there are.
+  async function runVirtualTick() {
+    if (closed) {
+      return;
+    }
+    const watchedSince = new Date(Date.now() - virtualFrameWatchWindowMs).toISOString();
+    const rows = await db
+      .select({
+        due: sql<boolean>`(
+          ${virtualFrames.scenes} is not null
+          and greatest(
+            coalesce(${virtualFrames.viewedAt}, 'epoch'::timestamptz),
+            coalesce(${frames.previewWatchedAt}, 'epoch'::timestamptz)
+          ) > ${watchedSince}::timestamptz
+          and (
+            ${virtualFrames.renderedAt} is null
+            or ${virtualFrames.renderedAt} + make_interval(secs => greatest(
+              ${virtualMinIntervalSeconds}::float8,
+              coalesce(
+                ${virtualFrames.refreshSeconds}::float8,
+                case when jsonb_typeof(${frames.settings} -> 'interval') = 'number'
+                  then (${frames.settings} ->> 'interval')::float8 end,
+                ${virtualFrameDefaultIntervalSeconds}::float8
+              )
+            )) <= now()
+          )
+        )`,
+        frameId: virtualFrames.frameId,
+        hasSchedule: sql<boolean>`${frames.schedule} is not null`,
+      })
+      .from(virtualFrames)
+      .innerJoin(frames, eq(frames.id, virtualFrames.frameId))
+      .innerJoin(linkedClients, eq(linkedClients.id, frames.linkedClientId))
+      .where(and(eq(frames.status, "active"), isNull(linkedClients.revokedAt)));
+    for (const row of rows) {
+      try {
+        const device = virtualDevices.get(row.frameId);
+        if (!device) {
+          await attachVirtualDevice(row.frameId);
+          continue;
+        }
+        if (row.hasSchedule) {
+          await device.runSchedule();
+        }
+        if (row.due) {
+          device.requestRender();
+        }
+      } catch (error) {
+        logError("virtual.tick_failed", {
+          error: errorField(error),
+          frameId: row.frameId,
+        });
+      }
+    }
   }
 
   // Shared attachment for both browser socket flavors; `registry` is either
@@ -2634,6 +2908,25 @@ export async function startFrameHub(
     }
   });
 
+  // A virtual frame was created, or its row changed where no command says so
+  // (its size): start its device, or have the one it has draw again.
+  await listenClient.listen(virtualFramesNotifyChannel, (payload) => {
+    if (!payload || !uuidPattern.test(payload)) {
+      return;
+    }
+    const device = virtualDevices.get(payload);
+    if (device) {
+      device.poke();
+      return;
+    }
+    attachVirtualDevice(payload).catch((error: unknown) =>
+      logError("virtual.attach_failed", {
+        error: errorField(error),
+        frameId: payload,
+      }),
+    );
+  });
+
   // Liveness: ping every 30s, terminate sockets that missed a pong.
   function runHeartbeat() {
     const now = Date.now();
@@ -2785,6 +3078,14 @@ export async function startFrameHub(
     run: runSweep,
   });
 
+  const virtualTick = createGuardedInterval({
+    intervalMs: virtualTickIntervalMs,
+    onError: (error) =>
+      logError("virtual.tick_failed", { error: errorField(error) }),
+    onSkip: () => logWarn("virtual.tick_skipped"),
+    run: runVirtualTick,
+  });
+
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port, () => {
@@ -2796,7 +3097,11 @@ export async function startFrameHub(
   const port =
     address && typeof address === "object" ? address.port : options.port;
 
-  let closed = false;
+  // Every virtual frame gets its device back after a restart (the boot
+  // sweep above marked them all disconnected). Not awaited: the hub is up
+  // for hardware meanwhile.
+  void virtualTick.runNow();
+
   async function close() {
     if (closed) {
       return;
@@ -2804,6 +3109,7 @@ export async function startFrameHub(
     closed = true;
     heartbeat.stop();
     sweep.stop();
+    virtualTick.stop();
     try {
       await listenClient.end({ timeout: 5 });
     } catch (error) {
@@ -2862,5 +3168,6 @@ export async function startFrameHub(
     port,
     skippedSweeps: () => sweep.skipped(),
     sweep: () => sweep.runNow(),
+    virtualTick: () => virtualTick.runNow(),
   };
 }

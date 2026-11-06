@@ -1298,6 +1298,46 @@ export const frameDeviceScenes = pgTable("frame_device_scenes", {
     .notNull(),
 });
 
+// A virtual frame's device half (migration 0074, docs/cloud-frames.md
+// "Virtual frames"): what hardware would keep on its own disk. The frame hub
+// runs the device (apps/frame-hub/src/virtual-device.ts), renders its scenes
+// with the wasm runtime and serves the picture through the view link. A
+// frames row with no row here is hardware, whatever it reports about itself.
+export const virtualFrames = pgTable(
+  "virtual_frames",
+  {
+    frameId: uuid("frame_id")
+      .primaryKey()
+      .references(() => frames.id, { onDelete: "cascade" }),
+    // The view link's secret (`vf_…`). Text, not a hash: the owner copies the
+    // link again from Settings. Whoever holds it sees the picture only.
+    viewToken: text("view_token").notNull(),
+    // The last scene bundle pushed (`set_scenes`), previews included.
+    scenes: jsonb("scenes"),
+    scenesChecksum: text("scenes_checksum"),
+    activeScene: text("active_scene"),
+    // {sceneId: {field: value}}: a render is a fresh runtime each time, so
+    // this is the memory between two of them.
+    states: jsonb("states").default(sql`'{}'::jsonb`).notNull(),
+    // The shown scene's own refresh interval; NULL = the frame's interval.
+    refreshSeconds: integer("refresh_seconds"),
+    renderedAt: timestamp("rendered_at", { withTimezone: true }),
+    renderMs: integer("render_ms"),
+    renderError: text("render_error"),
+    // A digest of the picture: the view link's ETag.
+    imageVersion: text("image_version"),
+    // When the view link was last read. A frame nobody looks at (this and
+    // frames.preview_watched_at) is not rendered on its interval.
+    viewedAt: timestamp("viewed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => ({
+    viewTokenUnique: uniqueIndex("virtual_frames_view_token_unique").on(
+      table.viewToken,
+    ),
+  }),
+);
+
 // The import dedupe ledger (migration 0055): one row per (account, scene
 // content) a device scene was imported as, so a re-enrolled frame is given
 // the drafts it already has instead of a second copy of each.
