@@ -30,6 +30,7 @@ import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { AiElsewhereNote } from './AiElsewhereNote'
 import { FrameSidebarBattery, frameLastBatteryPercent } from './FrameBatteryIndicator'
 import { FrameImage } from '../../components/FrameImage'
+import { FrameSharingTag } from '../../components/FrameSharingTag'
 import { Modal } from '../../components/Modal'
 import { Spinner } from '../../components/Spinner'
 import { TextInput } from '../../components/TextInput'
@@ -342,6 +343,7 @@ function FrameTreeRow({
                   </span>
                 ) : null}
               </span>
+              <FrameSharingTag frame={frame} compact />
             </span>
             <FrameActivityLine frame={frame} />
           </button>

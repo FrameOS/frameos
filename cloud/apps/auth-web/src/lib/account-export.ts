@@ -9,6 +9,10 @@ import {
   clientBackups,
   createDb,
   frames,
+  organizationInvitations,
+  organizationMembers,
+  organizations,
+  projects,
   linkedClients,
   photoEntries,
   photoShares,
@@ -147,6 +151,7 @@ export async function buildAccountExport(
         id: frames.id,
         lastSeenAt: frames.lastSeenAt,
         name: frames.name,
+        projectId: frames.projectId,
         // The device's PUBLIC key only; we never hold the private half.
         publicKey: frames.publicKey,
         schedule: frames.schedule,
@@ -329,8 +334,78 @@ export async function buildAccountExport(
       .where(eq(providerPayments.accountId, accountId)),
   ]);
 
+  // Sharing (cloud/docs/sharing.md): the organization this account owns,
+  // with the people and projects in it, and the organizations of other
+  // people it is a member of. The other people's names and addresses are
+  // what this account already sees on its people page.
+  const [ownOrganization] = await db
+    .select()
+    .from(organizations)
+    .where(eq(organizations.ownerAccountId, accountId))
+    .limit(1);
+  const [organizationPeople, organizationProjects, organizationInvited, memberships] =
+    await Promise.all([
+      ownOrganization
+        ? db
+            .select({
+              email: accounts.primaryEmail,
+              joinedAt: organizationMembers.createdAt,
+              name: accounts.displayName,
+              role: organizationMembers.role,
+            })
+            .from(organizationMembers)
+            .innerJoin(accounts, eq(accounts.id, organizationMembers.accountId))
+            .where(eq(organizationMembers.organizationId, ownOrganization.id))
+        : [],
+      ownOrganization
+        ? db
+            .select({ createdAt: projects.createdAt, id: projects.id, name: projects.name })
+            .from(projects)
+            .where(eq(projects.organizationId, ownOrganization.id))
+        : [],
+      ownOrganization
+        ? db
+            .select({
+              acceptedAt: organizationInvitations.acceptedAt,
+              createdAt: organizationInvitations.createdAt,
+              email: organizationInvitations.email,
+              expiresAt: organizationInvitations.expiresAt,
+              revokedAt: organizationInvitations.revokedAt,
+              role: organizationInvitations.role,
+            })
+            .from(organizationInvitations)
+            .where(eq(organizationInvitations.organizationId, ownOrganization.id))
+        : [],
+      db
+        .select({
+          joinedAt: organizationMembers.createdAt,
+          organization: organizations.name,
+          role: organizationMembers.role,
+        })
+        .from(organizationMembers)
+        .innerJoin(organizations, eq(organizations.id, organizationMembers.organizationId))
+        .where(eq(organizationMembers.accountId, accountId)),
+    ]);
+
   return {
     account,
+    sharing: {
+      memberOf: memberships,
+      organization: ownOrganization
+        ? {
+            createdAt: ownOrganization.createdAt,
+            invitations: organizationInvited,
+            name: ownOrganization.name,
+            people: organizationPeople,
+            projects: organizationProjects.map((project) => ({
+              ...project,
+              frameIds: accountFrames
+                .filter((frame) => frame.projectId === project.id)
+                .map((frame) => frame.id),
+            })),
+          }
+        : null,
+    },
     billing: {
       payments: billingPayments.map((payment) => ({
         ...payment,

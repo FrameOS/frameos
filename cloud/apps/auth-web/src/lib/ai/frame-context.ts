@@ -59,7 +59,7 @@ export async function frameContextBlock(
   if (!frameId) {
     return { block: "", frameId: null };
   }
-  const frame = await frameForAccount(db, accountId, frameId);
+  const frame = await frameForAccount(db, accountId, frameId, "view");
   if (!frame) {
     return { block: "", frameId: null };
   }

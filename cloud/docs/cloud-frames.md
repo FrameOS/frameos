@@ -866,9 +866,9 @@ Business) are `docs/accounting-todo.md` §0.1.
   by license.
 - **Paid (subscription)** — candidates, roughly in order of likely value:
   - Backups beyond a small quota (scene/frame config history, restore).
-  - Private and org-shared scene hosting beyond the free quota; team
-    workspaces (the Organization/Project tenancy in the Python backend is
-    the model to eventually mirror).
+  - Private and org-shared scene hosting beyond the free quota. Sharing
+    frames with the people on a plan, through organizations and projects
+    like the Python backend's, shipped 2026-11 ([`sharing.md`](sharing.md)).
   - Extended telemetry retention, offline alerting/notifications.
   - Larger fleets (free tier covers a household, e.g. 3–5 frames).
 - **Explicitly deferred**: hosted full backends (compiler + SSH as a

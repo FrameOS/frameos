@@ -14,6 +14,7 @@ import {
   logUpdatesFrameActivity,
 } from '../../decorators/frame'
 import { FrameImage } from '../../components/FrameImage'
+import { FrameSharingTag } from '../../components/FrameSharingTag'
 import { FrameScene, FrameType, LogType, MetricsType, ScheduledEvent, FrameId } from '../../types'
 import { scheduledEventTitle } from '../../utils/scheduleEvents'
 import { frameIdsEqual, parseRouteFrameId } from '../../utils/frameId'
@@ -1214,6 +1215,7 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
         <h1 className="frameos-strong truncate text-3xl font-bold leading-tight tracking-normal text-slate-950 @md:text-4xl">
           {frame.name || frameHost(frame)}
         </h1>
+        <FrameSharingTag frame={frame} className="mt-2" />
       </header>
       <div className="space-y-5">
         <div className="grid gap-4 @md:grid-cols-2 @6xl:grid-cols-4">

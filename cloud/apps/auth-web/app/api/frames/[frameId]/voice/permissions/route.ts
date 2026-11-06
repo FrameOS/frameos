@@ -44,7 +44,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
   const { frameId } = await params;
   // Owner-only: frameForAccount is the ownership check.
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "manage");
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .set({ updatedAt: new Date(), voicePermissions: next })
       .where(eq(frames.id, frame.id));
     await recordAuditEvent(db, {
-      accountId: session.accountId,
+      accountId: frame.accountId,
       actor: { accountId: session.accountId, providerSubject: session.providerSubject },
       eventType: "frame.voice_permissions_changed",
       metadata: { from: current, to: next },

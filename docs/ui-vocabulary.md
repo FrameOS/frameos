@@ -19,6 +19,14 @@ this page does not list, add it here first.*
 | **Sync** | Reconcile changes made on the device itself (its admin panel) with the workspace. Two-way, so it is not a deploy. | The sidebar button and drawer title while the frame reports local changes, "Sync changes detected" |
 | **Activate** | Show a scene on the frame now. On the active scene the same action is **Apply** (it re-sends the state fields). A scene with changes is pushed as it is activated: the scene drawer's one main button puts the scene on the frame as it stands, saved or not. | "Activate", "Push & activate" / "Push to frame", "Apply", "Save & activate" (on the device), "Activate scene" (the status screen) |
 
+Two more verbs are about people, not about getting things onto a frame
+(FrameOS Cloud, `cloud/docs/sharing.md`):
+
+| Verb | Means | Where you see it |
+| --- | --- | --- |
+| **Share** | Let the people on your plan use a frame, by putting it in a project. The frame stays yours. | "Shared by Olive" / "Shared in Home" on a frame, "Shared with you" and the projects on the People page |
+| **Invite** | Offer someone a place on your plan, by a link mailed to them. An invitation is **taken back**, a person is **removed**, and someone who was invited **leaves**. | "Invite someone", "Send invitation", "Take back", "Remove", "Leave" (the People page) |
+
 Not user-facing, ever: **upgrade** (the device runtime's name for its
 release swap) and **redeploy**. "Reinstall" is allowed for a scene already
 on the frame's list. "Deploy" never takes scenes alone as its object

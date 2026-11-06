@@ -42,7 +42,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return response
   }
   const { frameId } = await params
-  const frame = await frameForAccount(db, session.accountId, frameId)
+  const frame = await frameForAccount(db, session.accountId, frameId, "edit")
   if (!frame) {
     return jsonError('invalid_frame', 404)
   }
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   await recordAuditEvent(db, {
-    accountId: session.accountId,
+    accountId: frame.accountId,
     actor: {
       accountId: session.accountId,
       providerSubject: session.providerSubject,
@@ -128,7 +128,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // both names, so the frame's activity feed shows old → new.
   if (typeof settings.name === 'string' && settings.name !== frame.name) {
     await recordAuditEvent(db, {
-      accountId: session.accountId,
+      accountId: frame.accountId,
       actor: {
         accountId: session.accountId,
         providerSubject: session.providerSubject,

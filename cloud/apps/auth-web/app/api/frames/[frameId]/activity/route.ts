@@ -47,7 +47,7 @@ export async function GET(
   }
 
   const { frameId } = await params;
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "view");
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
@@ -97,7 +97,9 @@ export async function GET(
     .from(auditEvents)
     .where(
       and(
-        eq(auditEvents.accountId, session.accountId),
+        // The frame's account: on a shared frame the trail is the owner's,
+        // and each row's actor says which of the people sharing it acted.
+        eq(auditEvents.accountId, frame.accountId),
         eq(frameTarget, frame.id),
         ...(cursor ? [cursor] : []),
       ),
@@ -136,10 +138,16 @@ export async function GET(
         const email = summary.accountId
           ? emails.get(summary.accountId)
           : undefined;
+        // An address is shown to the frame's owner, and to a person for
+        // their own actions: sharing a frame does not share where the other
+        // people (or the frame) connect from.
+        const showIp =
+          frame.accountId === session.accountId ||
+          summary.accountId === session.accountId;
         return {
           actor: {
             kind: summary.kind,
-            ...(summary.ip ? { ip: summary.ip } : {}),
+            ...(summary.ip && showIp ? { ip: summary.ip } : {}),
             ...(email ? { email } : {}),
           },
           created_at: row.createdAt.toISOString(),

@@ -593,6 +593,42 @@
   checkout page and portal) both run on it. It is not Creem: a change to
   how we read Creem's API is checked against Creem's real test mode.
 
+## Sharing frames: `cloud/docs/sharing.md`
+
+- Cloud-only: a paid plan's `people` share the frames its owner puts in a
+  **project**, from their own accounts. An organization is the people on
+  one account's plan (owner, `admin`, `member`); a frame in no project is
+  the owner's alone. The self-hosted backend's organizations and projects
+  (`backend/app/tenancy.py`) are the same shape without invitations or a
+  people count: there the operator decides who is in.
+- **A frame never changes hands.** `frame.accountId` is the owner whoever
+  is asking: its quota, service keys, scenes and audit trail. In a frame
+  route write `frame.accountId` where the frame's account is meant (an
+  audit row's `accountId`, a scene saved for the frame) and the session's
+  id where the person acting is (`actor`, `createdByAccountId`).
+- **`frameForAccount(db, accountId, frameId, need)`** is the one door, and
+  `need` is `view` | `edit` | `manage` | `owner` (`organizations.ts`). It
+  defaults to `owner`, so a new frame route shares nothing until it says
+  what it needs: reads are `view`, changes `edit`, the owner's switches
+  (service keys, telemetry, voice permissions, local network access)
+  `manage`, and delete / revoke / enrollment stay `owner`. A level the
+  person lacks answers 404, like a frame that is not there. Never query
+  `frames.accountId = session.accountId` in a route a member should reach.
+- Access is worked out from the tables on every request and nothing is
+  cached, so deleting a row revokes. The seats are the plan's `people`, in
+  joining order: a plan that shrinks leaves the last to join without
+  access and deletes nobody. The hub's fan-out to members' browsers is the
+  one list, refreshed each sweep (`refreshSharedFrameViewers`).
+- **A private scene on a frame belongs to the frame's account**
+  (`scene_private`). People who share the frame read and edit those
+  through the frame (`sceneReachableThroughFrames`), and a scene built on a
+  shared frame is saved into the owner's account (`frame_id` on
+  `POST /api/account/scenes`).
+- A change to who is on a plan is made by a signed-in person, never an API
+  token (`organization-route.ts`). The workspace's side is the People page
+  (`peopleLogic.ts`), `utils/frameAccess.ts` and
+  `ownerOnlyFrameMenuActions` in `workspaceSurfaces.ts`.
+
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】
 - `frontend/` – React + TypeScript single-page application built with esbuild, Tailwind, and kea state management. Compiled assets live in `frontend/dist` and are served by the backend when present. 【F:frontend/package.json†L1-L66】【F:backend/app/fastapi.py†L38-L86】

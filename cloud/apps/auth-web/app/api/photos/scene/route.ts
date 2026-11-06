@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
   if (frameId !== null && !isFrameId(frameId)) {
     return jsonError("invalid_frame_id", 400);
   }
-  if (frameId !== null && !(await frameForAccount(context.db, context.accountId, frameId))) {
+  if (frameId !== null && !(await frameForAccount(context.db, context.accountId, frameId, "edit"))) {
     return jsonError("frame_not_found", 404);
   }
   return withPhotoErrors(async () => {

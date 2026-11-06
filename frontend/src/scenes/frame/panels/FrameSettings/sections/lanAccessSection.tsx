@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react'
 import { useActions, useValues } from 'kea'
+import { canManageFrame, frameManageOnlyNote } from '../../../../../utils/frameAccess'
 import { Button } from '../../../../../components/Button'
 import { Field } from '../../../../../components/Field'
 import { Modal } from '../../../../../components/Modal'
@@ -18,10 +19,12 @@ import { SectionBody, SectionHeading } from './FrameSettingsSection'
  * panel to turn it on (lanAccessLogic).
  */
 export function LanAccessSection(): JSX.Element {
-  const { frameId } = useValues(frameLogic)
+  const { frameId, frame } = useValues(frameLogic)
   const { lanAccess, disabling, disableError, pendingNote } = useValues(lanAccessLogic({ frameId }))
   const { openModal, turnOff } = useActions(lanAccessLogic({ frameId }))
   const unknown = lanAccess === null
+  // A frame someone shares with a member: the switch is the owner's.
+  const mayChange = canManageFrame(frame)
 
   return (
     // A fragment like every section: the panel's CSS styles `form > h6 + div`.
@@ -45,18 +48,19 @@ export function LanAccessSection(): JSX.Element {
                   size="small"
                   color="secondary"
                   className="inline-flex items-center gap-1.5"
-                  disabled={disabling}
+                  disabled={disabling || !mayChange}
                   onClick={turnOff}
                 >
                   {disabling ? <Spinner /> : null}
                   Turn off
                 </Button>
               ) : lanAccess === false ? (
-                <Button type="button" size="small" color="secondary" onClick={openModal}>
+                <Button type="button" size="small" color="secondary" disabled={!mayChange} onClick={openModal}>
                   Turn on
                 </Button>
               ) : null}
             </div>
+            {!mayChange ? <div className="frameos-muted text-xs">{frameManageOnlyNote}</div> : null}
             {unknown ? (
               <div className="frameos-muted text-xs" data-testid="lan-access-unknown">
                 This frame does not report local network access yet. Update its FrameOS first.

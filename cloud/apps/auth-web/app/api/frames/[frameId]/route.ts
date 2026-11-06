@@ -20,6 +20,7 @@ import {
   scenePreviewsByFrame,
   supersedePendingCommands,
 } from "../../../../src/lib/frames";
+import { frameAccessForAccount, frameAccessSummary } from "../../../../src/lib/organizations";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { requireRecentAuth } from "../../../../src/lib/recent-auth";
 import { readSession } from "../../../../src/lib/session";
@@ -49,10 +50,11 @@ export async function GET(
   // frameForAccount screens the uuid shape itself, so a malformed id lands in
   // the same "invisible, not forbidden" 404 as someone else's frame.
   const { frameId } = await params;
-  const frame = await frameForAccount(db, session.accountId, frameId);
-  if (!frame) {
+  const found = await frameAccessForAccount(db, session.accountId, frameId, "view");
+  if (!found) {
     return jsonError("invalid_frame", 404);
   }
+  const { access, frame } = found;
   const [pendingTypes, previews] = await Promise.all([
     pendingCommandTypesByFrame(db, [frame.id]),
     scenePreviewsByFrame(db, [frame.id]),
@@ -60,6 +62,9 @@ export async function GET(
   return NextResponse.json({
     frame: {
       ...frameSummary(frame, await linkedClientForFrame(db, frame)),
+      // Who the account is to the frame, and the project it is shared
+      // through (cloud/docs/sharing.md).
+      access: frameAccessSummary(access),
       last_metrics: frame.lastMetrics,
       last_state: frame.lastState,
       pending_command_types: pendingTypes.get(frame.id) ?? [],
@@ -108,7 +113,7 @@ export async function POST(
     return response;
   }
   const { frameId } = await params;
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "edit");
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
@@ -148,7 +153,7 @@ export async function POST(
   }
 
   await recordAuditEvent(db, {
-    accountId: session.accountId,
+    accountId: frame.accountId,
     actor: {
       accountId: session.accountId,
       providerSubject: session.providerSubject,
@@ -217,7 +222,7 @@ export async function DELETE(
   }
   await db.delete(frames).where(eq(frames.id, frame.id));
   await recordAuditEvent(db, {
-    accountId: session.accountId,
+    accountId: frame.accountId,
     actor: {
       accountId: session.accountId,
       providerSubject: session.providerSubject,

@@ -593,6 +593,14 @@ export const storeScenes = pgTable(
     // Curated shelf on the store front. One of the fixed taxonomy slugs
     // (see storeCategories in the app); null = not yet categorized.
     category: text("category"),
+    // Who made the scene, when that is not the account it belongs to: a
+    // scene a member builds on a shared frame is the frame owner's
+    // (cloud/docs/sharing.md "Scenes"), and this lets the member install it
+    // before any frame holds it. NULL: the owner made it.
+    createdByAccountId: uuid("created_by_account_id").references(
+      () => accounts.id,
+      { onDelete: "set null" },
+    ),
     description: text("description"),
     downloadCount: integer("download_count").default(0).notNull(),
     // Curated by superadmins; null = not featured. A timestamp instead of a
@@ -641,6 +649,9 @@ export const storeScenes = pgTable(
   (table) => ({
     accountIdx: index("store_scenes_account_idx").on(table.accountId),
     categoryIdx: index("store_scenes_category_idx").on(table.category),
+    createdByIdx: index("store_scenes_created_by_idx")
+      .on(table.createdByAccountId)
+      .where(sql`${table.createdByAccountId} is not null`),
     linkedClientIdx: index("store_scenes_linked_client_idx")
       .on(table.linkedClientId)
       .where(sql`${table.linkedClientId} is not null`),
@@ -947,6 +958,160 @@ export const accountSettings = pgTable(
   }),
 );
 
+// Sharing frames with the people on a plan (cloud/docs/sharing.md, migration
+// 0074). An organization is the people on ONE account's plan: the account
+// that pays is the owner, and the plan's `people` entitlement is how many
+// there may be, the owner included. Access is worked out from these tables on
+// every request (auth-web's src/lib/organizations.ts); nothing is copied onto
+// a frame but the project it is in.
+export const organizations = pgTable(
+  "organizations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    ownerAccountId: uuid("owner_account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    ...timestamps,
+  },
+  (table) => ({
+    // One organization per plan: an account owns at most one.
+    ownerUnique: uniqueIndex("organizations_owner_unique").on(
+      table.ownerAccountId,
+    ),
+  }),
+);
+
+// The people on the plan besides the owner. role: "admin" (manages people and
+// projects, may use every project's frames) | "member" (the frames of the
+// projects it was added to). (created_at, id) is the order of the seats: when
+// the plan shrinks, the members who joined last are the ones without access.
+export const organizationMembers = pgTable(
+  "organization_members",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    role: text("role").default("member").notNull(),
+    invitedByAccountId: uuid("invited_by_account_id").references(
+      () => accounts.id,
+      { onDelete: "set null" },
+    ),
+    ...timestamps,
+  },
+  (table) => ({
+    accountIdx: index("organization_members_account_idx").on(table.accountId),
+    invitedByIdx: index("organization_members_invited_by_idx")
+      .on(table.invitedByAccountId)
+      .where(sql`${table.invitedByAccountId} is not null`),
+    orgAccountUnique: uniqueIndex(
+      "organization_members_org_account_unique",
+    ).on(table.organizationId, table.accountId),
+    roleCheck: check(
+      "organization_members_role_check",
+      sql`${table.role} in ('admin', 'member')`,
+    ),
+  }),
+);
+
+// A set of the owner's frames (frames.project_id) and the members who may
+// use them (project_members). A frame in no project is the owner's alone.
+export const projects = pgTable(
+  "projects",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    ...timestamps,
+  },
+  (table) => ({
+    organizationIdx: index("projects_organization_idx").on(
+      table.organizationId,
+    ),
+  }),
+);
+
+// Which members may use a project's frames. An admin needs no row.
+export const projectMembers = pgTable(
+  "project_members",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => organizationMembers.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    memberIdx: index("project_members_member_idx").on(table.memberId),
+    projectMemberUnique: uniqueIndex(
+      "project_members_project_member_unique",
+    ).on(table.projectId, table.memberId),
+  }),
+);
+
+// An invitation link mailed to an address, hashed at rest. It holds a seat
+// until it is accepted, revoked or expired. project_ids: the projects the
+// person joins on accepting (one deleted meanwhile is skipped).
+export const organizationInvitations = pgTable(
+  "organization_invitations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: text("role").default("member").notNull(),
+    projectIds: jsonb("project_ids")
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`)
+      .notNull(),
+    tokenHash: text("token_hash").notNull(),
+    invitedByAccountId: uuid("invited_by_account_id").references(
+      () => accounts.id,
+      { onDelete: "set null" },
+    ),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    acceptedByAccountId: uuid("accepted_by_account_id").references(
+      () => accounts.id,
+      { onDelete: "set null" },
+    ),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    acceptedByIdx: index("organization_invitations_accepted_by_idx")
+      .on(table.acceptedByAccountId)
+      .where(sql`${table.acceptedByAccountId} is not null`),
+    invitedByIdx: index("organization_invitations_invited_by_idx")
+      .on(table.invitedByAccountId)
+      .where(sql`${table.invitedByAccountId} is not null`),
+    organizationIdx: index("organization_invitations_organization_idx").on(
+      table.organizationId,
+    ),
+    roleCheck: check(
+      "organization_invitations_role_check",
+      sql`${table.role} in ('admin', 'member')`,
+    ),
+    tokenHashUnique: uniqueIndex(
+      "organization_invitations_token_hash_unique",
+    ).on(table.tokenHash),
+  }),
+);
+
 // Cloud-managed frames (wire contract: docs/cloud-frames.md at the repo
 // root; design: cloud/docs/cloud-frames.md). A frame is 1:1 with a
 // linked_clients row (client_kind = "frame"). We store only the device's
@@ -962,6 +1127,13 @@ export const frames = pgTable(
       .notNull()
       .references(() => linkedClients.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    // The project the frame is shared through (cloud/docs/sharing.md): its
+    // members may use the frame. NULL: the owner's alone. The project's
+    // organization is always the owner's (frame-project route), and deleting
+    // the project takes the frame back to NULL.
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "set null",
+    }),
     // base64 raw Ed25519 public key, verify-only. Never a private key.
     publicKey: text("public_key").notNull(),
     hardware: jsonb("hardware"),
@@ -1060,6 +1232,9 @@ export const frames = pgTable(
     linkedClientUnique: uniqueIndex("frames_linked_client_unique").on(
       table.linkedClientId,
     ),
+    projectIdx: index("frames_project_idx")
+      .on(table.projectId)
+      .where(sql`${table.projectId} is not null`),
     sceneSourceFrameIdx: index("frames_scene_source_frame_idx")
       .on(table.sceneSourceFrameId)
       .where(sql`${table.sceneSourceFrameId} is not null`),

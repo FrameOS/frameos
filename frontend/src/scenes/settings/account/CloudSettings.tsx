@@ -12,6 +12,7 @@ import {
   KeyIcon,
   ServerStackIcon,
   ShieldCheckIcon,
+  UsersIcon,
 } from '@heroicons/react/24/outline'
 
 import { urls } from '../../../urls'
@@ -22,6 +23,7 @@ import { ActivityPage } from './ActivityPage'
 import { BackendsPage } from './BackendsPage'
 import { BackupsPage } from './BackupsPage'
 import { DeveloperPage } from './DeveloperPage'
+import { PeoplePage } from './PeoplePage'
 import { SecurityPage } from './SecurityPage'
 import { ServicesPage } from './ServicesPage'
 import { SshKeysPage } from './SshKeysPage'
@@ -34,6 +36,7 @@ const pageIcons: Record<AccountPageKey, ComponentType<SVGProps<SVGSVGElement>>> 
   services: KeyIcon,
   ssh: CommandLineIcon,
   usage: ChartBarIcon,
+  people: UsersIcon,
   backups: ArchiveBoxIcon,
   activity: ClockIcon,
   security: ShieldCheckIcon,
@@ -55,6 +58,7 @@ const pageComponents: Record<AccountPageKey, () => JSX.Element> = {
   services: ServicesPage,
   ssh: SshKeysPage,
   usage: UsagePage,
+  people: PeoplePage,
   backups: BackupsPage,
   activity: ActivityPage,
   security: SecurityPage,

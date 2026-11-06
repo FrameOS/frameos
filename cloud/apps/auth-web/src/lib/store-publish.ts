@@ -391,7 +391,11 @@ export async function publishStoreScene(
     tags: tags.length ? tags : (classified?.tags ?? []),
   };
 
-  const scene = existing ?? (await createScene(db, accountId, name));
+  // A person saving into an account that is not theirs made it on a frame
+  // that account shares with them (cloud/docs/sharing.md "Scenes").
+  const createdByAccountId =
+    "accountId" in actor && actor.accountId !== accountId ? actor.accountId : null;
+  const scene = existing ?? (await createScene(db, accountId, name, createdByAccountId));
   if (!scene) {
     return jsonError("scene_create_failed", 500);
   }
@@ -493,6 +497,7 @@ async function createScene(
   db: ReturnType<typeof createDb>,
   accountId: string,
   name: string,
+  createdByAccountId: string | null,
 ) {
   const base = slugifyName(name);
   for (const candidate of [
@@ -503,7 +508,7 @@ async function createScene(
   ]) {
     const [created] = await db
       .insert(storeScenes)
-      .values({ accountId, name, slug: candidate })
+      .values({ accountId, createdByAccountId, name, slug: candidate })
       .onConflictDoNothing({ target: storeScenes.slug })
       .returning();
     if (created) {

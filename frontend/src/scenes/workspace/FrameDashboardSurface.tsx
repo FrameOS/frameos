@@ -22,6 +22,7 @@ import {
 import { HourglassIcon } from '../../components/HourglassIcon'
 
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
+import { FrameSharingTag } from '../../components/FrameSharingTag'
 import { FrameImage } from '../../components/FrameImage'
 import {
   frameDeployProgress,
@@ -388,6 +389,7 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
             {(frame.compiled_scene_count ?? 0) > 0 ? (
               <CompiledSceneTag count={frame.compiled_scene_count} className="!px-2 !py-0.5 !text-[11px] normal-case" />
             ) : null}
+            <FrameSharingTag frame={frame} />
             {archived ? (
               <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
                 Archived

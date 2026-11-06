@@ -50,7 +50,7 @@ export async function GET(
     return response;
   }
   const { frameId } = await params;
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "view");
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
@@ -95,10 +95,13 @@ export async function GET(
       // Only an update the account could actually take: a scene pulled from
       // the store, or flipped private by its publisher, keeps running what
       // the frame has and offers nothing newer.
+      // On a shared frame that includes the owner's scenes: whoever may
+      // edit the frame may move it to the owner's newer version.
       const installable =
         row.sceneStatus === "active" &&
         (row.visibility === "public" ||
-          row.sceneAccountId === session.accountId);
+          row.sceneAccountId === session.accountId ||
+          row.sceneAccountId === frame.accountId);
       return {
         assigned_version: assignedVersion,
         latest_version: row.latestVersion,
@@ -174,7 +177,7 @@ export async function POST(
     return response;
   }
   const { frameId } = await params;
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "edit");
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }

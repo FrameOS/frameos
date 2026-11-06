@@ -116,12 +116,12 @@ export async function POST(request: NextRequest) {
   }
   const credentials = access.credentials;
 
-  // A frame id the account does not own is dropped rather than refused: the
+  // A frame id the account cannot see is dropped rather than refused: the
   // chat is about the app's code, and the frame is only how the panel groups
   // its conversations.
   const requestedFrameId = stringOrNull(body.frameId);
   const frame = requestedFrameId
-    ? await frameForAccount(db, accountId, requestedFrameId)
+    ? await frameForAccount(db, accountId, requestedFrameId, "view")
     : undefined;
   const sceneId = stringOrNull(body.sceneId);
   const nodeId = stringOrNull(body.nodeId);

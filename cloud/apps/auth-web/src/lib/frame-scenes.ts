@@ -38,6 +38,7 @@ import {
 import { copySceneCoversIntoFrameCache } from "./scene-images";
 import { sceneEventMapsOf, type SceneEventMaps } from "./scene-event-map";
 import { reportError } from "./log";
+import { sceneReachableThroughFrames } from "./organizations";
 
 export const maxScenesPerFrame = 20;
 
@@ -253,15 +254,24 @@ export async function customEventRoutingForFrame(
   });
 }
 
-// Every scene must be accessible to this account (own scene or public), the
+// Every scene must be accessible to this account (own scene or public, or
+// the shared-frame case below), the
 // pinned version must exist, and a version carrying the store's "shell" risk
 // class is refused outright — a cloud push may never carry it (the device
 // refuses them independently). The risk flags checked are the PINNED
 // version's, not store_scenes.risk_flags, which only mirrors the latest.
+//
+// On a shared frame (cloud/docs/sharing.md "Scenes") the person pushing is
+// not always the account the scenes belong to. A private scene of the
+// frame's owner goes on when the person made it (a scene built on the frame
+// is saved into the owner's account) or can already read it on a frame they
+// share. Their own private scene does not: a private scene on a frame is
+// always the frame's account's (buildScenesPayloadForFrame), so it is
+// refused here by name instead of failing the payload.
 async function checkScenesAssignable(
   db: Database,
   accountId: string,
-  frame: { assignedSceneState: unknown },
+  frame: { accountId: string; assignedSceneState: unknown },
   requested: RequestedScene[],
   latestSceneIds: ReadonlySet<string>,
 ): Promise<AssignScenesFailure | null> {
@@ -271,6 +281,7 @@ async function checkScenesAssignable(
   const sceneRows = await db
     .select({
       accountId: storeScenes.accountId,
+      createdByAccountId: storeScenes.createdByAccountId,
       id: storeScenes.id,
       status: storeScenes.status,
       visibility: storeScenes.visibility,
@@ -288,10 +299,18 @@ async function checkScenesAssignable(
     if (!scene || scene.status !== "active") {
       return { code: "invalid_scene", detail: { scene_id: sceneId }, status: 400 };
     }
-    const accessible =
+    let accessible =
       scene.accountId === accountId || scene.visibility === "public";
+    if (!accessible && scene.accountId === frame.accountId) {
+      accessible =
+        scene.createdByAccountId === accountId ||
+        (await sceneReachableThroughFrames(db, accountId, scene, "view"));
+    }
     if (!accessible) {
       return { code: "invalid_scene", detail: { scene_id: sceneId }, status: 400 };
+    }
+    if (scene.visibility !== "public" && scene.accountId !== frame.accountId) {
+      return { code: "scene_private", detail: { scene_id: sceneId }, status: 400 };
     }
     // The version this push actually carries (the pin, the held version of
     // an unpinned assignment, else the newest — the same resolution as
@@ -346,6 +365,8 @@ export async function assignScenesToFrame(
     requested,
     via,
   }: {
+    // The person pushing: whose scenes these may be (checkScenesAssignable).
+    // The frame's own account is `frame.accountId`.
     accountId: string;
     // Which RUNTIME scene the push should activate — the workspace's save
     // passes the currently active scene so a deploy never yanks the display
@@ -535,7 +556,9 @@ export async function assignScenesToFrame(
   }
 
   await recordAuditEvent(db, {
-    accountId,
+    // The frame's account, which on a shared frame is not the person
+    // pushing: the trail of a frame is its owner's, and `actor` says who.
+    accountId: frame.accountId,
     actor,
     eventType: "frame.scenes_assigned",
     metadata: {

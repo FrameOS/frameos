@@ -142,6 +142,7 @@ async function handleGet(request: NextRequest, context: RouteContext) {
         db,
         request.headers.get("authorization"),
         scene.accountId,
+        sceneId,
       ))
     ) {
       return jsonError("image_not_found", 404);

@@ -77,6 +77,10 @@ import { previewWatchGraceMs } from "../../auth-web/src/lib/frame-sleep";
 import { keywordsRuntimeLacks } from "../../auth-web/src/lib/retired-apps";
 import { safeLocalOrigin } from "../../auth-web/src/lib/local-origin";
 import { frameOwningBackend } from "../../auth-web/src/lib/frame-backend-owner";
+import {
+  sharedFrameAccess,
+  sharedFrameViewers,
+} from "../../auth-web/src/lib/organizations";
 import { replayCloudContentToFrame } from "../../auth-web/src/lib/frame-backend-release";
 import {
   allowsPrivateNetworkOrigins,
@@ -310,6 +314,10 @@ interface DeviceSession {
 
 interface BrowserConnection {
   accountId: string;
+  // Set on a per-frame socket whose account does not own the frame: it is
+  // open because the frame is shared with the account (cloud/docs/sharing.md)
+  // and closes when that stops being true (refreshSharedFrameViewers).
+  sharedFrameId?: string;
   alive: boolean;
   tokenHash: string;
   ws: WebSocket;
@@ -373,6 +381,13 @@ export async function startFrameHub(
   // are covered automatically (no subscription list to refresh, no race).
   const frameBrowserSockets = new Map<string, Set<BrowserConnection>>();
   const accountBrowserSockets = new Map<string, Set<BrowserConnection>>();
+  // Frames shared through a project (cloud/docs/sharing.md): frame id → the
+  // accounts with a socket open that may see it without owning it. Unlike the
+  // owner's routing this IS a list to refresh, because who a frame is shared
+  // with is not on the frame row: refreshSharedFrameViewers rebuilds it when
+  // a fleet socket opens and on every sweep, so access given or taken away
+  // reaches an open page within one sweep interval.
+  let sharedFrameViewerAccounts = new Map<string, Set<string>>();
   // frame id → when the last connected/disconnected audit row was written.
   // In-memory on purpose: the hub is single-instance (see the boot sweep
   // below), and losing the map on restart only costs one extra pair of rows.
@@ -424,6 +439,55 @@ export async function startFrameHub(
     const message = browserEvent(event, data);
     sendToConnections(frameBrowserSockets.get(frame.id), message);
     sendToConnections(accountBrowserSockets.get(frame.accountId), message);
+    // The fleet sockets of the people the frame is shared with.
+    const viewers = sharedFrameViewerAccounts.get(frame.id);
+    if (viewers) {
+      for (const accountId of viewers) {
+        sendToConnections(accountBrowserSockets.get(accountId), message);
+      }
+    }
+  }
+
+  // Who sees which shared frame, for the accounts with a browser socket open
+  // here. One query for all of them (plus one plan lookup per owner whose
+  // frames are shared); nothing at all while no browser is connected, which
+  // is the sweep's steady state. A per-frame socket that was let in because
+  // the frame was shared is closed when the answer no longer lists it.
+  async function refreshSharedFrameViewers() {
+    const accountIds = new Set(accountBrowserSockets.keys());
+    const sharedFrameSockets: BrowserConnection[] = [];
+    for (const connections of frameBrowserSockets.values()) {
+      for (const connection of connections) {
+        if (connection.sharedFrameId) {
+          sharedFrameSockets.push(connection);
+          accountIds.add(connection.accountId);
+        }
+      }
+    }
+    if (accountIds.size === 0) {
+      sharedFrameViewerAccounts = new Map();
+      return;
+    }
+    const pairs = await sharedFrameViewers(db, [...accountIds]);
+    const next = new Map<string, Set<string>>();
+    for (const { accountId, frameId } of pairs) {
+      let viewers = next.get(frameId);
+      if (!viewers) {
+        viewers = new Set();
+        next.set(frameId, viewers);
+      }
+      viewers.add(accountId);
+    }
+    sharedFrameViewerAccounts = next;
+    for (const connection of sharedFrameSockets) {
+      if (!next.get(connection.sharedFrameId!)?.has(connection.accountId)) {
+        logInfo("browser.frame_access_ended", {
+          accountId: connection.accountId,
+          frameId: connection.sharedFrameId,
+        });
+        connection.ws.close(closeAuthFailed, "access_revoked");
+      }
+    }
   }
 
   // Device-side audit trail: the hub is the only party that sees a frame
@@ -2363,9 +2427,11 @@ export async function startFrameHub(
     registry: Map<string, Set<BrowserConnection>>,
     key: string,
     session: BrowserSession,
+    sharedFrameId?: string,
   ) {
     const connection: BrowserConnection = {
       accountId: session.accountId,
+      ...(sharedFrameId ? { sharedFrameId } : {}),
       alive: true,
       tokenHash: session.tokenHash,
       ws,
@@ -2562,6 +2628,11 @@ export async function startFrameHub(
       wss.handleUpgrade(req, socket, head, (ws) => {
         trackConnection(ws);
         attachBrowserSocket(ws, accountBrowserSockets, session.accountId, session);
+        // The frames shared with this account start arriving now, not at
+        // the next sweep.
+        refreshSharedFrameViewers().catch((error: unknown) =>
+          logError("browser.shared_frames_failed", { error: errorField(error) }),
+        );
       });
       return;
     }
@@ -2583,7 +2654,12 @@ export async function startFrameHub(
         .from(frames)
         .where(eq(frames.id, frameId))
         .limit(1);
-      if (!frame || frame.accountId !== session.accountId) {
+      // The owner, or someone the frame is shared with through a project.
+      const shared =
+        frame !== undefined &&
+        frame.accountId !== session.accountId &&
+        (await sharedFrameAccess(db, session.accountId, frameId)) !== undefined;
+      if (!frame || (frame.accountId !== session.accountId && !shared)) {
         // 403 either way; the not-found case stays indistinguishable so the
         // endpoint does not confirm which frame ids exist.
         rejectUpgrade(socket, 403, "forbidden");
@@ -2596,7 +2672,13 @@ export async function startFrameHub(
       }
       wss.handleUpgrade(req, socket, head, (ws) => {
         trackConnection(ws);
-        attachBrowserSocket(ws, frameBrowserSockets, frameId, session);
+        attachBrowserSocket(
+          ws,
+          frameBrowserSockets,
+          frameId,
+          session,
+          shared ? frameId : undefined,
+        );
       });
       // A browser socket on one frame is the strongest "someone is looking"
       // signal there is: the workspace opens it when the frame's page is on
@@ -2772,6 +2854,7 @@ export async function startFrameHub(
       }
     }
     await closeRevokedBrowserSockets();
+    await refreshSharedFrameViewers();
   }
 
   // Guarded: a tick that outlives the interval (a slow database, many frames

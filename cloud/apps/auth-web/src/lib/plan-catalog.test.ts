@@ -16,6 +16,7 @@ const free: PlanLimits = {
   cloudRenderedFrames: 0,
   frameLogBytes: 100 * megabyte,
   frames: 20,
+  people: 1,
   photoBytes: 250 * megabyte,
   privateSceneBytes: 100 * megabyte,
 };
@@ -115,8 +116,11 @@ describe("the plan catalog", () => {
     const catalog = planCatalog(free, "payg");
     expect(catalog.planned_limits).toEqual([...plannedLimits]);
     const [, privatePlan, business] = catalog.groups;
-    expect(privatePlan?.stops[0]?.planned_features).toEqual(["share_frames", "virtual_frames"]);
-    expect(business?.stops.at(-1)?.planned_features).toEqual(["share_frames", "virtual_frames", "sso"]);
+    expect(privatePlan?.stops[0]?.planned_features).toEqual(["virtual_frames"]);
+    expect(business?.stops.at(-1)?.planned_features).toEqual(["virtual_frames", "sso"]);
+    // Sharing frames exists, and so does the people count it is sold by.
+    expect(plannedFeatures).not.toContain("share_frames");
+    expect(plannedLimits).not.toContain("people");
     // Support is a promise we can keep today.
     expect(plannedFeatures).not.toContain("priority_support");
 
@@ -135,6 +139,8 @@ describe("the plan catalog", () => {
       cloud_rendered_frames: 0,
       frame_log_bytes: 900 * megabyte,
       frames: 80,
+      // The people who may share the plan's frames: granted by the row.
+      people: 9,
       photo_bytes: 2250 * megabyte,
       private_scene_bytes: 900 * megabyte,
     });

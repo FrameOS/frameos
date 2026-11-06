@@ -46,7 +46,7 @@ export async function GET(
     return response;
   }
   const { frameId } = await params;
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "view");
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
@@ -92,7 +92,7 @@ export async function POST(
     return response;
   }
   const { frameId } = await params;
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "edit");
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
@@ -105,7 +105,7 @@ export async function POST(
 
   if (action === "dismiss") {
     const dismissed = await dismissDeviceScenes(db, {
-      accountId: session.accountId,
+      accountId: frame.accountId,
       actor,
       frame,
     });
@@ -118,7 +118,7 @@ export async function POST(
   }
 
   const outcome = await importDeviceScenes(db, {
-    accountId: session.accountId,
+    accountId: frame.accountId,
     actor,
     frame,
   });

@@ -66,6 +66,16 @@ export const eventLabels: Record<string, string> = {
   "frame.session_kicked": "Frame session closed by the cloud",
   "frame.settings_pushed": "Frame settings updated",
   "frame.telemetry_scope_changed": "Frame log and metric shipping changed",
+  "organization.invitation_revoked": "Invitation to share frames taken back",
+  "organization.member_invited": "Someone invited to share frames",
+  "organization.member_joined": "Someone joined to share frames",
+  "organization.member_left": "Someone stopped sharing frames",
+  "organization.member_removed": "Someone removed from sharing frames",
+  "organization.member_role_changed": "A person's role changed",
+  "organization.project_changed": "Project changed",
+  "organization.project_created": "Project created",
+  "organization.project_deleted": "Project deleted",
+  "organization.renamed": "Organization renamed",
   "photos.folder_deleted": "Photo folder deleted",
   "photos.share_created": "Photo album share link created",
   "photos.share_deleted": "Photo album share link deleted",
@@ -166,6 +176,13 @@ export function auditEventDetail(metadata: unknown): string | undefined {
   }
   if (typeof record.freed === "number") {
     parts.push(`${record.freed} freed`);
+  }
+  // Sharing (organization.* events): which project, which person.
+  if (typeof record.project === "string") {
+    parts.push(record.project);
+  }
+  if (typeof record.email === "string") {
+    parts.push(record.email);
   }
   if (typeof record.via === "string") {
     parts.push(`via ${record.via.replace(/_/g, " ")}`);

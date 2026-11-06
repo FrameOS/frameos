@@ -310,7 +310,7 @@ export async function assetWriteRequestContext(
   if (!db) {
     return { response: response! };
   }
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "edit");
   if (!frame) {
     return { response: jsonError("invalid_frame", 404) };
   }
@@ -319,6 +319,8 @@ export async function assetWriteRequestContext(
   }
   return {
     db,
+    // The person acting: who queued the commands. The frame's own account
+    // (its audit trail) is `frame.accountId`.
     accountId: session.accountId,
     actor: {
       accountId: session.accountId,
@@ -343,15 +345,14 @@ export type AssetAuditEventType =
 export async function recordAssetWriteAudit(
   db: CommandDatabase,
   context: {
-    accountId: string;
     actor: { accountId: string; providerSubject?: string };
-    frame: { id: string };
+    frame: { accountId: string; id: string };
   },
   eventType: AssetAuditEventType,
   metadata: Record<string, unknown>,
 ) {
   await recordAuditEvent(db, {
-    accountId: context.accountId,
+    accountId: context.frame.accountId,
     actor: context.actor,
     eventType,
     metadata,

@@ -17,6 +17,7 @@ const catalog: PlanCatalog = planCatalog(
     cloudRenderedFrames: 0,
     frameLogBytes: 100 * megabyte,
     frames: 20,
+    people: 1,
     photoBytes: 250 * megabyte,
     privateSceneBytes: 100 * megabyte,
   },
@@ -70,6 +71,7 @@ describe("what a plan card's button does", () => {
     cloudRenderedFrames: 0,
     frameLogBytes: 100 * megabytes,
     frames: 20,
+    people: 1,
     photoBytes: 250 * megabytes,
     privateSceneBytes: 100 * megabytes,
   };
@@ -132,9 +134,13 @@ describe("what a plan card's button does", () => {
     const cards = planCardsFor(planCatalog(free, "payg", buyable), {}, null, billing());
     expect(cards.map((card) => card.plannedFeatures)).toEqual([
       [],
-      expect.arrayContaining(["share_frames", "virtual_frames"]),
+      expect.arrayContaining(["virtual_frames"]),
       expect.arrayContaining(["sso"]),
     ]);
     expect(cards[2]!.plannedFeatures).not.toContain("priority_support");
+    // Sharing frames is built (cloud/docs/sharing.md): never marked planned.
+    for (const card of cards) {
+      expect(card.plannedFeatures).not.toContain("share_frames");
+    }
   });
 });

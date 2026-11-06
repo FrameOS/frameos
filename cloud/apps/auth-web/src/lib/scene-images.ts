@@ -578,7 +578,7 @@ export async function framePreviewForNewScene(
   if (typeof frameId !== "string" || typeof sceneId !== "string" || !sceneId) {
     return undefined;
   }
-  const frame = await frameForAccount(db, accountId, frameId);
+  const frame = await frameForAccount(db, accountId, frameId, "view");
   if (!frame) {
     return undefined;
   }

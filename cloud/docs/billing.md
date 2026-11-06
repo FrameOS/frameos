@@ -17,10 +17,15 @@ month). **Business** is `selfServe: false` and stays "contact us" until single
 sign-on exists.
 
 A plan lists only what exists. `plannedFeatures` and `plannedLimits` in the
-catalog name what is not built yet (sharing frames, virtual frames, single
-sign-on, the people count). Every page marks those "planned" and a plan's row
-does not grant them. Take a name off those lists in the change that ships the
-feature. Creem's review rejects a site that sells what it does not have.
+catalog name what is not built yet (virtual frames, single sign-on). Every
+page marks those "planned" and a plan's row does not grant them. Take a name
+off those lists in the change that ships the feature. Creem's review rejects
+a site that sells what it does not have.
+
+Sharing frames came off those lists on 2026-11-06 ([`sharing.md`](sharing.md)):
+a plan's `people` is now an entitlement on its row (`planRowFor`), and it is
+what decides how many people an account may share its frames with. Rows that
+"Sync plans" wrote before then got the number from migration 0074.
 
 ## How it works
 

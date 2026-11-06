@@ -302,7 +302,9 @@ async function persistAndPushCloudFrameScenesNow(
       // edited content into a new private scene and swap the assignment.
       try {
         const name = row.name || sceneName(updated[0] ?? {})
-        const newSceneId = await createCloudAccountScene(name, updated, undefined, coverHint(frameId, updated))
+        // Saved into the frame's account: on a frame someone shares with you
+        // the copy is theirs, like every private scene on their frame.
+        const newSceneId = await createCloudAccountScene(name, updated, undefined, coverHint(frameId, updated), frameId)
         changedStoreSceneIds.push(newSceneId)
         // The fork inherits what the original was granted, narrowed to what
         // the edited copy still declares (the server intersects).
@@ -333,10 +335,13 @@ async function persistAndPushCloudFrameScenesNow(
       continue
     }
     const name = sceneName(scene)
-    const newSceneId = await createCloudAccountScene(name, [withoutSceneOrigin(scene)], undefined, {
-      frameId,
-      sceneId: scene.id,
-    })
+    const newSceneId = await createCloudAccountScene(
+      name,
+      [withoutSceneOrigin(scene)],
+      undefined,
+      { frameId, sceneId: scene.id },
+      frameId
+    )
     changedStoreSceneIds.push(newSceneId)
     // A scene the owner built here is granted what its apps declare — that
     // is the owner choosing it, the same consent as picking a template.

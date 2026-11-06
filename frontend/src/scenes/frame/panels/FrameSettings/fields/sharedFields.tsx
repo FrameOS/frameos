@@ -1,3 +1,4 @@
+import { canManageFrame, frameManageOnlyNote } from '../../../../../utils/frameAccess'
 import clsx from 'clsx'
 import { Group } from 'kea-forms'
 import { PencilSquareIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
@@ -602,12 +603,14 @@ const VOICE_PERMISSION_ROWS: {
 ]
 
 function VoicePermissionsField(): JSX.Element | null {
-  const { voicePermissions, setVoicePermission, voiceChat } = useFrameSettings()
+  const { voicePermissions, setVoicePermission, voiceChat, frame } = useFrameSettings()
   if (!voicePermissions || !voiceChat) {
     return null
   }
+  // On a frame someone shares with a member these are the owner's switches.
+  const mayChange = canManageFrame(frame)
   return (
-    <fieldset disabled={voiceChat.disabledReason !== undefined} className="min-w-0 space-y-2">
+    <fieldset disabled={voiceChat.disabledReason !== undefined || !mayChange} className="min-w-0 space-y-2">
       <div className="space-y-1 @md:flex @md:gap-2">
         <Label className="@md:w-1/3">
           Voice chat may
@@ -635,6 +638,7 @@ function VoicePermissionsField(): JSX.Element | null {
               />
             </div>
           ))}
+          {!mayChange ? <div className="frameos-muted text-xs">{frameManageOnlyNote}</div> : null}
         </div>
       </div>
     </fieldset>

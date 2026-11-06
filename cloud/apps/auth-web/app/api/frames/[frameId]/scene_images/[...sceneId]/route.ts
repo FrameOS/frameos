@@ -112,7 +112,7 @@ export async function GET(
   }
   const { frameId, sceneId: sceneIdSegments } = await params;
   const sceneId = sceneSegmentsToId(sceneIdSegments);
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "view");
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
@@ -253,7 +253,7 @@ export async function POST(
   }
   const { frameId, sceneId: sceneIdSegments } = await params;
   const sceneId = sceneSegmentsToId(sceneIdSegments);
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "edit");
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }

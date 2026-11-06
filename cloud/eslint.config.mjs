@@ -141,6 +141,8 @@ export default tseslint.config(
       "**/src/test/shared-spa/lan-access.test.tsx",
       // Imports the home page's logics (→ decorators/frame.tsx); out of the tsconfig too.
       "**/src/test/shared-spa/home-page.test.ts",
+      // Renders the People page (→ framesModel); out of the tsconfig too.
+      "**/src/test/shared-spa/people-page.test.tsx",
     ],
   },
   js.configs.recommended,

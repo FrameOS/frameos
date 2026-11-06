@@ -44,7 +44,7 @@ export async function handleFrameActionCommand(
     return response;
   }
   const { frameId } = await params;
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "edit");
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
@@ -60,7 +60,7 @@ export async function handleFrameActionCommand(
   });
 
   await recordAuditEvent(db, {
-    accountId: session.accountId,
+    accountId: frame.accountId,
     actor: {
       accountId: session.accountId,
       providerSubject: session.providerSubject,

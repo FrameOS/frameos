@@ -27,6 +27,10 @@ export interface PlanEntitlements {
   cloudRenderedFrames: number;
   frameLogBytes: number;
   frames: number;
+  // The people on the plan, the owner included (cloud/docs/sharing.md): how
+  // many may share its frames. One when the row does not name it, which is
+  // the free plan: sharing is what a paid plan adds.
+  people: number;
   // Null when the row does not name it: the free plan's photo storage is the
   // deployment's FRAMEOS_CLOUD_MAX_PHOTO_MB, which only auth-web reads.
   photoBytes: number | null;
@@ -78,6 +82,7 @@ export const fallbackPaygPlan: BillingPlan = {
     cloudRenderedFrames: 0,
     frameLogBytes: 100 * 1024 * 1024,
     frames: 20,
+    people: 1,
     photoBytes: null,
     privateSceneBytes: 100 * 1024 * 1024,
   },
@@ -112,6 +117,7 @@ export function entitlementsFrom(value: unknown): PlanEntitlements {
     cloudRenderedFrames: number("cloud_rendered_frames", base.cloudRenderedFrames),
     frameLogBytes: number("frame_log_bytes", base.frameLogBytes),
     frames: number("frames", base.frames),
+    people: Math.max(1, number("people", base.people)),
     photoBytes: number("photo_bytes", 0) || null,
     privateSceneBytes: number("private_scene_bytes", base.privateSceneBytes),
   };

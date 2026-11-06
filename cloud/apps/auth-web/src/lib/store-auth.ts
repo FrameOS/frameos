@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { createDb } from "@frameos-cloud/db";
 import { authenticateLinkedClient, linkedClientHasScope } from "./backend-auth";
+import { sceneReachableThroughFrames } from "./organizations";
 import { readSession } from "./session";
 import { storePublishScope } from "./store";
 import { accountIsSuperadmin } from "./superadmin";
@@ -10,13 +11,32 @@ import { accountIsSuperadmin } from "./superadmin";
 // with the store scope (the frameos backend fetching "My cloud drive" zips,
 // images, and scene pages on the user's behalf). Takes the authorization
 // header value so both route handlers and server components can call it.
+//
+// With `sceneId`, a signed-in person who shares a frame holding the scene
+// reads it too (cloud/docs/sharing.md "Scenes"): the workspace of a shared
+// frame draws and previews its scenes from these same routes. The callers
+// that pass it are the ones that serve what a frame runs (scenes.json, the
+// zip, the images, a render); the scene's own page does not.
 export async function canAccessPrivateScene(
   db: ReturnType<typeof createDb>,
   authorizationHeader: string | null,
   ownerAccountId: string,
+  sceneId?: string,
 ) {
   const session = await readSession();
   if (session?.accountId === ownerAccountId) {
+    return true;
+  }
+  if (
+    sceneId &&
+    session?.accountId &&
+    (await sceneReachableThroughFrames(
+      db,
+      session.accountId,
+      { accountId: ownerAccountId, id: sceneId },
+      "view",
+    ))
+  ) {
     return true;
   }
 

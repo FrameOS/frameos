@@ -264,6 +264,7 @@ async function loadStoredScenes(
       db,
       request.headers.get("authorization"),
       scene.accountId,
+      sceneId,
     ))
   ) {
     return { response: jsonError("scene_not_found", 404) };

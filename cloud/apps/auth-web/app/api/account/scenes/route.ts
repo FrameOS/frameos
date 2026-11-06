@@ -20,6 +20,7 @@ import {
 } from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
 import { maxPublishesPerHour } from "../../../../src/lib/store";
+import { frameForAccount } from "../../../../src/lib/frames";
 import { framePreviewForNewScene } from "../../../../src/lib/scene-images";
 
 export const runtime = "nodejs";
@@ -167,8 +168,25 @@ export async function POST(request: NextRequest) {
         )
       : undefined;
 
+  // A scene built on a frame is saved into that frame's account: on a frame
+  // shared with this person it becomes the owner's scene, on the owner's
+  // plan, and stays on the frame whatever happens to the person's access
+  // (cloud/docs/sharing.md "Scenes"). `frame_id` names the frame; without it
+  // the scene is the person's own.
+  let ownerAccountId = session.accountId;
+  if (body.frame_id !== undefined && body.frame_id !== null) {
+    const frame =
+      typeof body.frame_id === "string"
+        ? await frameForAccount(db, session.accountId, body.frame_id, "edit")
+        : undefined;
+    if (!frame) {
+      return jsonError("invalid_frame", 404);
+    }
+    ownerAccountId = frame.accountId;
+  }
+
   return createAccountScene(db, {
-    accountId: session.accountId,
+    accountId: ownerAccountId,
     actor: {
       accountId: session.accountId,
       providerSubject: session.providerSubject,

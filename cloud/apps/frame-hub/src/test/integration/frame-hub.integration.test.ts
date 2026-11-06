@@ -16,6 +16,7 @@ import WebSocket from "ws";
 import {
   accounts,
   auditEvents,
+  billingPlans,
   createDb,
   frameAssetFiles,
   frameCommands,
@@ -25,9 +26,14 @@ import {
   frames,
   frameSceneAssignments,
   linkedClients,
+  organizationMembers,
+  organizations,
+  projectMembers,
+  projects,
   sessions,
   storeScenes,
   storeSceneVersions,
+  subscriptions,
 } from "@frameos-cloud/db";
 import {
   enqueueFrameCommand,
@@ -3142,5 +3148,118 @@ describe("deploy progress", () => {
     rebooted.send({ active_scene: "clock", id: randomUUID(), type: "render" });
     await waitForStage(frame.id, "done", "done");
     rebooted.ws.close();
+  });
+});
+
+// Frames shared through a project (cloud/docs/sharing.md): the people a
+// frame is shared with hear its live events like its owner does, for as long
+// as it is shared with them.
+describe("shared frames", () => {
+  // The owner on a plan of `people`, the frame in a project, one member in it.
+  async function shareFrame(ownerAccountId: string, frameId: string, people = 3) {
+    await db.insert(billingPlans).values({
+      code: `private-${people}`,
+      entitlements: { people },
+      marginBasisPoints: 10_000,
+      name: "Private",
+      priceMicros: BigInt(people) * 1_000_000n,
+    });
+    await db.insert(subscriptions).values({ accountId: ownerAccountId, planCode: `private-${people}` });
+    const [organization] = await db
+      .insert(organizations)
+      .values({ name: "Hub Tester", ownerAccountId })
+      .returning();
+    const [project] = await db
+      .insert(projects)
+      .values({ name: "Home", organizationId: organization!.id })
+      .returning();
+    await db.update(frames).set({ projectId: project!.id }).where(eq(frames.id, frameId));
+    const [member] = await db.insert(accounts).values({ displayName: "Member" }).returning();
+    const [membership] = await db
+      .insert(organizationMembers)
+      .values({ accountId: member!.id, organizationId: organization!.id })
+      .returning();
+    await db.insert(projectMembers).values({ memberId: membership!.id, projectId: project!.id });
+    return { member: member!, membership: membership! };
+  }
+
+  const frameUpdate = (frameId: string) => (msg: Record<string, unknown>) =>
+    msg.event === "update_frame" && (msg.data as Record<string, unknown>).id === frameId;
+
+  it("reach the fleet and frame sockets of the people a frame is shared with", async () => {
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    const unshared = await createFrameForAccount(account.id);
+    const { member } = await shareFrame(account.id, frame.id);
+    const memberSession = await createBrowserSession(member.id);
+
+    const fleet = await openFleetBrowser(memberSession);
+    // The fleet socket reads who shares what when it opens.
+    await hub.sweep();
+    const perFrame = await openBrowser(frame.id, memberSession);
+
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+    await fleet.next(frameUpdate(frame.id), "shared frame on the member's fleet socket");
+    await perFrame.next(frameUpdate(frame.id), "shared frame on the member's frame socket");
+
+    // The owner's other frame is in no project: not the member's to open,
+    // and silent on their fleet socket.
+    expect(
+      await expectUpgradeRejected(`/api/frames/${unshared.frame.id}/updates`, {
+        cookie: `frameos_cloud_session=${memberSession}`,
+      }),
+    ).toBe(403);
+    const other = await openDevice(unshared.token);
+    await handshake(other, unshared.privateKey);
+    await expect(
+      fleet.next(frameUpdate(unshared.frame.id), "unshared frame leak", 500),
+    ).rejects.toThrow(/Timed out/);
+
+    fleet.ws.close();
+    perFrame.ws.close();
+    device.ws.close();
+    other.ws.close();
+  });
+
+  it("stop when the membership goes, and never start past the plan's people", async () => {
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    const { member, membership } = await shareFrame(account.id, frame.id);
+    const memberSession = await createBrowserSession(member.id);
+    const fleet = await openFleetBrowser(memberSession);
+    await hub.sweep();
+    const perFrame = await openBrowser(frame.id, memberSession);
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+    await fleet.next(frameUpdate(frame.id), "shared frame before the removal");
+
+    // Removed: the next sweep closes the frame socket and forgets the pair.
+    await db.delete(organizationMembers).where(eq(organizationMembers.id, membership.id));
+    await hub.sweep();
+    expect(await perFrame.closed).toBe(4401);
+    device.send({ id: randomUUID(), metrics: { cpu: 5 }, type: "metrics" });
+    await expect(
+      fleet.next((msg) => msg.event === "new_metrics", "event after removal", 500),
+    ).rejects.toThrow(/Timed out/);
+
+    // Back on the plan, but the plan is the owner alone again: no seat.
+    await db.insert(organizationMembers).values({
+      accountId: member.id,
+      organizationId: membership.organizationId,
+      role: "admin",
+    });
+    await db.delete(subscriptions).where(eq(subscriptions.accountId, account.id));
+    await hub.sweep();
+    expect(
+      await expectUpgradeRejected(`/api/frames/${frame.id}/updates`, {
+        cookie: `frameos_cloud_session=${memberSession}`,
+      }),
+    ).toBe(403);
+    device.send({ id: randomUUID(), metrics: { cpu: 6 }, type: "metrics" });
+    await expect(
+      fleet.next((msg) => msg.event === "new_metrics", "event without a seat", 500),
+    ).rejects.toThrow(/Timed out/);
+
+    fleet.ws.close();
+    device.ws.close();
   });
 });

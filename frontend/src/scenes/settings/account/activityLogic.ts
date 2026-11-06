@@ -10,6 +10,9 @@ import { apiFetch } from '../../../utils/apiFetch'
 // always describe the same slice.
 
 export interface ActivityEvent {
+  /** Who did it, when that was someone the account shares frames with
+   * rather than the account itself (cloud/docs/sharing.md "Activity"). */
+  by?: string | null
   created_at: string
   detail: string | null
   event_type: string

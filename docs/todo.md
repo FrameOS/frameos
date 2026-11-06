@@ -194,8 +194,8 @@ deep-sleep wake), the panel runs again: a *repaint*. Open:
 
 **New cloud services are not being built.** The scope names below are reserved
 in the device-flow allowlist and the designs are sketched, but none of them is
-planned work — as with organizations, projects, memberships, hosted backend
-lifecycle and metered billing (`cloud/SCOPE.md`). Disposable-email blocking
+planned work — as with hosted backend lifecycle and metered billing
+(`cloud/SCOPE.md`). Disposable-email blocking
 belongs on the same list: Turnstile plus the rate limiter covers the automated
 case, so it is skipped until abuse is actually observed.
 
@@ -243,9 +243,11 @@ Everything else parked:
   edge is visible over USB and nowhere else.
 - Fleet features: one cloud account administering many backends (installer /
   digital signage); a cloud-side "all my frames" dashboard.
-- Shared household access: invite a second account to a backend with a role
-  (the `cloud_membership` table anticipates this). With it: one backend link
-  per installation, or per organization/project?
+- Shared household access to a linked BACKEND: invite a second account to a
+  backend with a role (the `cloud_membership` table anticipates this). With
+  it: one backend link per installation, or per organization/project?
+  Cloud-managed frames are shared through projects since 2026-11
+  (`cloud/docs/sharing.md`).
 - Notifications: deploy finished / frame offline → push or email.
 - Community scene of the day, or a featured gallery as an opt-in feed.
 - Hosted backends: run the whole backend in the cloud. Out of scope for the

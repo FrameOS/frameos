@@ -321,7 +321,10 @@ export function ActivityPage(): JSX.Element {
                     '–'
                   )}
                 </td>
-                <td className="py-2 pr-3 align-top">{event.detail ?? '–'}</td>
+                <td className="py-2 pr-3 align-top">
+                  {event.detail ?? (event.by ? '' : '–')}
+                  {event.by ? <div className="frameos-muted text-xs">by {event.by}</div> : null}
+                </td>
                 <td className="py-2 align-top font-mono text-xs">{event.ip ?? '–'}</td>
               </tr>
             ))}

@@ -109,7 +109,7 @@ export async function GET(
     return response;
   }
   const { frameId } = await params;
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "view");
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }

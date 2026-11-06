@@ -65,7 +65,7 @@ async function lanAccessRequestContext(request: NextRequest, params: RouteParams
     return { response: response! };
   }
   const { frameId } = await params;
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "manage");
   if (!frame) {
     return { response: jsonError("invalid_frame", 404) };
   }
@@ -109,7 +109,7 @@ async function sendLanAccessVerb(
     type: verb,
   });
   await recordAuditEvent(db, {
-    accountId: session.accountId,
+    accountId: frame.accountId,
     actor: session,
     eventType: "frame.command_sent",
     // The verb and the switch position, never the code.
@@ -180,7 +180,7 @@ export async function handleLanAccessSet(request: NextRequest, params: RoutePara
   if (outcome.state === "acked") {
     await mirrorLanAccess(context.db, context.frame.id, payload.enabled);
     await recordAuditEvent(context.db, {
-      accountId: context.session.accountId,
+      accountId: context.frame.accountId,
       actor: context.session,
       eventType: "frame.lan_access_changed",
       metadata: { enabled: payload.enabled },

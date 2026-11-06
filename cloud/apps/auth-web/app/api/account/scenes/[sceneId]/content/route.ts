@@ -66,10 +66,13 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // where moderators' category edits land), the image set from the latest
 // version. Versions never mutate; each Save appends.
 export async function POST(request: NextRequest, context: RouteContext) {
-  const { db, errorResponse, scene, session } = await loadOwnedScene(
+  const { db, errorResponse, scene, session, viaFrame } = await loadOwnedScene(
     request,
     context,
     {
+      // Someone who shares a frame holding this scene saves its content from
+      // the frame's workspace (cloud/docs/sharing.md "Scenes").
+      allowFrameEditors: true,
       rateLimit: {
         action: "account:scene-content",
         limit: maxSceneEditsPer15Minutes,
@@ -119,6 +122,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
   if (body.scenes === undefined && listingInput === undefined && imagesInput === undefined) {
     return jsonError("nothing_to_update", 400);
+  }
+  // Through a shared frame only what the frame runs can be saved: the
+  // scene's page (its listing, pictures and version notes) stays the owner's.
+  if (
+    viaFrame &&
+    (listingInput !== undefined || imagesInput !== undefined || body.message !== undefined)
+  ) {
+    return jsonError("scene_owner_only", 403);
   }
   // The optional "what changed" note the save dialog asks for. It shows on
   // the public scene page, so it is moderated below with the name.
@@ -247,7 +258,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (!moderation.ok) {
       if (moderation.error === "content_rejected") {
         await recordAuditEvent(db, {
-          accountId: session.accountId,
+          accountId: scene.accountId,
           actor: {
             accountId: session.accountId,
             providerSubject: session.providerSubject,
@@ -279,7 +290,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (!moderation.ok) {
       if (moderation.error === "content_rejected") {
         await recordAuditEvent(db, {
-          accountId: session.accountId,
+          accountId: scene.accountId,
           actor: {
             accountId: session.accountId,
             providerSubject: session.providerSubject,
@@ -343,8 +354,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       .filter((image) => !previousShas.has(image.sha256))
       .reduce((sum, image) => sum + image.sizeBytes, 0);
     const [privateBytes, { privateSceneBytes: maxBytes }] = await Promise.all([
-      privateSceneBytesForAccount(db, session.accountId!),
-      accountLimits(db, session.accountId!),
+      // The scene's account: a save through a shared frame counts against
+      // the plan the scene is stored on.
+      privateSceneBytesForAccount(db, scene.accountId),
+      accountLimits(db, scene.accountId),
     ]);
     if (privateBytes + content.length + newImageBytes > maxBytes) {
       return jsonError("storage_quota_exceeded", 403, {
@@ -381,7 +394,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   if (closingShareLink) {
     await recordAuditEvent(db, {
-      accountId: session.accountId,
+      accountId: scene.accountId,
       actor: {
         accountId: session.accountId,
         providerSubject: session.providerSubject,
@@ -392,7 +405,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
   }
   await recordAuditEvent(db, {
-    accountId: session.accountId,
+    accountId: scene.accountId,
     actor: {
       accountId: session.accountId,
       providerSubject: session.providerSubject,

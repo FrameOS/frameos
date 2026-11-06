@@ -57,7 +57,7 @@ export async function POST(
   }
   const { frameId } = await params;
   // Owner-only: frameForAccount is the ownership check.
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "manage");
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
@@ -111,7 +111,7 @@ export async function POST(
   }
 
   await recordAuditEvent(db, {
-    accountId: session.accountId,
+    accountId: frame.accountId,
     actor: {
       accountId: session.accountId,
       providerSubject: session.providerSubject,

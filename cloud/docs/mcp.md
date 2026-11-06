@@ -150,7 +150,12 @@ a frame's logs must not be able to talk an agent into installing something.
   `account_settings_update` (merges over the current group before posting; a
   masked value posted back keeps the stored key), `api_tokens_list`,
   `api_token_revoke`.
-- **frames** — `frames_list`, `frame_get`, `frame_rename`, `frame_delete`,
+- **frames** — every frame the account can use: its own, and the ones
+  shared with it through a project ([`sharing.md`](sharing.md)), each with
+  `access` saying whose it is. A tool the account's role does not allow on a
+  shared frame answers as for a frame that is not there. Managing the people
+  and projects themselves is not a tool: a token may not change who is on a
+  plan. `frames_list`, `frame_get`, `frame_rename`, `frame_delete`,
   `frame_revoke` (always refused for tokens; kept so the agent learns why),
   `frame_confirm`, `frame_claim_token_create`, `frame_settings_update`,
   `frame_scenes_list`, `frame_scenes_set`, `frame_scene_install` (from a store

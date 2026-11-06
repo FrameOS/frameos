@@ -469,6 +469,22 @@ export interface FrameCapabilityInput {
   // `platform` is listed so a card the backend wrote (platform, no
   // `adopted`) types as this shape too, not only an adopted one.
   buildroot?: { adopted?: boolean | null; platform?: string | null } | null
+  // FrameOS Cloud: who the account is to the frame (utils/frameAccess.ts).
+  // Absent = the account's own frame.
+  access?: { role?: string | null } | null
+}
+
+/**
+ * What stays with the account a frame belongs to when the frame is shared
+ * with other people (cloud/docs/sharing.md): deleting it. The cloud refuses
+ * it from anyone else, so the menu does not offer it.
+ */
+export const ownerOnlyFrameMenuActions: readonly FrameMenuAction[] = ['delete']
+
+/** The frame is someone else's, shared with this account through a project. */
+export function frameIsSharedWithAccount(frame?: FrameCapabilityInput | null): boolean {
+  const role = frame?.access?.role
+  return role === 'admin' || role === 'member'
 }
 
 /** Whether any installed scene came from the public scene store. */
@@ -841,6 +857,9 @@ export function frameMenuActionIsAllowed(
     return false
   }
   if (hidesForAdminApiOnly(mode, frame) && adminApiOnlyHiddenMenuActions.includes(action)) {
+    return false
+  }
+  if (frameIsSharedWithAccount(frame) && ownerOnlyFrameMenuActions.includes(action)) {
     return false
   }
   // The one gate that hides rather than disables on the DEVICE rather than

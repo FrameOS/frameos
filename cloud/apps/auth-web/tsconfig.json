@@ -197,6 +197,9 @@
     "src/test/shared-spa/lan-access.test.tsx",
     // Imports the home page's logics (→ decorators/frame.tsx, framesModel),
     // same reason.
-    "src/test/shared-spa/home-page.test.ts"
+    "src/test/shared-spa/home-page.test.ts",
+    // Renders the People page, whose logic reloads the frames list
+    // (→ framesModel), same reason.
+    "src/test/shared-spa/people-page.test.tsx"
   ]
 }

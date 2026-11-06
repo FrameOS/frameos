@@ -164,6 +164,40 @@ export async function sendPasswordResetEmail(to: string, resetUrl: string) {
   });
 }
 
+// The bodies of an invitation to share frames (cloud/docs/sharing.md),
+// separate from the send so the wording can be unit-tested. The inviter and
+// the organization name are text an account typed: escaped in the HTML, and
+// never made into a link.
+export function organizationInvitationEmail(invitation: {
+  inviter: string;
+  organization: string;
+  url: string;
+}) {
+  const { inviter, organization, url } = invitation;
+  const intro = `${inviter} invited you to share their frames on FrameOS Cloud (${organization}).`;
+  const what =
+    "Accepting lets you see and change the frames they share with you, from your own FrameOS Cloud account.";
+  const outro =
+    "The link is valid for seven days and can be used once. If you do not know who this is from, you can ignore this email.";
+  return {
+    htmlBody: [
+      `<p>${escapeHtml(intro)}</p>`,
+      `<p>${what}</p>`,
+      `<p><a href="${escapeHtml(url)}">Accept the invitation</a></p>`,
+      `<p>${outro}</p>`,
+    ].join("\n"),
+    subject: "You were invited to share frames on FrameOS Cloud",
+    textBody: [intro, "", what, "", `Accept the invitation: ${url}`, "", outro].join("\n"),
+  };
+}
+
+export async function sendOrganizationInvitationEmail(
+  to: string,
+  invitation: { inviter: string; organization: string; url: string },
+) {
+  await sendEmail({ ...organizationInvitationEmail(invitation), to });
+}
+
 export type SecurityNotification = {
   // Which credential changed, as the subject line's noun phrase.
   what:

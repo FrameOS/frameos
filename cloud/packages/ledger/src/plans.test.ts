@@ -13,10 +13,22 @@ describe("the free plan fallback", () => {
       cloudRenderedFrames: 0,
       frameLogBytes: 100 * 1024 * 1024,
       frames: 20,
+      // One person: sharing frames is what a paid plan adds.
+      people: 1,
       photoBytes: null,
       privateSceneBytes: 100 * 1024 * 1024,
     });
     expect(fallbackPaygPlan.priceMicros).toBe(0n);
+  });
+
+  // The plan's people (cloud/docs/sharing.md "Seats"): the row's number, and
+  // never fewer than the owner. A row from before the entitlement existed
+  // names none and is one person until "Sync plans" or migration 0074 says.
+  it("reads the people from a row that names them, and one otherwise", () => {
+    expect(entitlementsFrom({ people: 5 }).people).toBe(5);
+    expect(entitlementsFrom({ frames: 100 }).people).toBe(1);
+    expect(entitlementsFrom({ people: 0 }).people).toBe(1);
+    expect(entitlementsFrom({ people: "many" }).people).toBe(1);
   });
 
   // Photo storage is a plan number only when the row names it; otherwise it

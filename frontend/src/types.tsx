@@ -3,6 +3,7 @@ import type { FrameCompilationModeOptionValue } from './utils/frameBuildOptions'
 import type { FrameId } from './utils/frameId'
 import type { ScheduledEventName } from './utils/scheduleEvents'
 import type { EventOrigin } from './utils/eventsContract.gen'
+import type { FrameAccess } from './utils/frameAccess'
 
 // Defined in utils/frameId.ts (which has no imports) and re-exported here so
 // the SPA's usual `from '../types'` import keeps working.
@@ -85,6 +86,11 @@ export interface FrameType {
   /** Which control plane manages this frame. Cloud-managed frames are
    * interpreted-only: no SSH, no compiled scenes, no shell-flagged apps. */
   managed_by?: 'backend' | 'cloud'
+  /** FrameOS Cloud: who the signed-in account is to the frame, and the
+   * project it is shared through (cloud/docs/sharing.md, utils/frameAccess.ts).
+   * Absent everywhere else, and on live updates that do not carry it: a
+   * frame without it is the account's own. */
+  access?: FrameAccess
   /** Cloud-managed frames: which service-settings groups ("unsplash",
    * "openAI", …) this frame's assigned scenes declare. Group NAMES only —
    * the keys themselves only ever travel over the device's own authenticated

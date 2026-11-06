@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
-import { auditEvents, frames, storeScenes } from "@frameos-cloud/db";
+import { accounts, auditEvents, frames, storeScenes } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import {
   activityConditions,
@@ -115,13 +115,37 @@ export async function GET(request: NextRequest) {
   const frameNames = new Map(frameRows.map((f) => [f.id, f.name]));
   const sceneNames = new Map(sceneRows.map((s) => [s.id, s.name]));
 
+  // Someone else on this account's trail: a person the account shares
+  // frames with changed one of them (cloud/docs/sharing.md "Activity"). The
+  // account's own rows need no name.
+  const actors = page.map((row) => summarizeAuditActor(row.actor));
+  const otherActorIds = [
+    ...new Set(
+      actors.flatMap((actor) =>
+        actor.accountId && actor.accountId !== accountId ? [actor.accountId] : [],
+      ),
+    ),
+  ];
+  const otherActors =
+    otherActorIds.length > 0
+      ? await db
+          .select({ displayName: accounts.displayName, id: accounts.id, primaryEmail: accounts.primaryEmail })
+          .from(accounts)
+          .where(inArray(accounts.id, otherActorIds))
+      : [];
+  const actorNames = new Map(
+    otherActors.map((actor) => [actor.id, actor.primaryEmail ?? actor.displayName ?? "Someone else"]),
+  );
+
   const last = page[page.length - 1];
   return NextResponse.json(
     {
       events: page.map((row, index) => {
         const target = targets[index] ?? {};
-        const actor = summarizeAuditActor(row.actor);
+        const actor = actors[index]!;
         return {
+          // Who did it, when that was not this account itself.
+          by: actor.accountId ? (actorNames.get(actor.accountId) ?? null) : null,
           created_at: row.createdAt.toISOString(),
           detail: auditEventDetail(row.metadata) ?? null,
           event_type: row.eventType,

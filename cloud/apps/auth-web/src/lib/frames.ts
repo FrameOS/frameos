@@ -61,6 +61,12 @@ import {
   cullFrameLogsForFrameOverBudget,
   cullFrameLogsOverBudget,
 } from "./usage";
+// organizations.ts imports nothing from this module.
+import {
+  roleAllows,
+  sharedFrameAccess,
+  type FrameAccessLevel,
+} from "./organizations";
 
 type Database = ReturnType<typeof createDb>;
 
@@ -889,10 +895,21 @@ export function isFrameId(value: unknown): value is string {
   return typeof value === "string" && frameIdPattern.test(value);
 }
 
+// The frame, when the account may do `need` with it (organizations.ts
+// FrameAccessLevel; cloud/docs/sharing.md has the table of what each route
+// asks for). The default is the strictest on purpose: a call that does not
+// say what it needs reaches the owner's frames only, so a new route shares
+// nothing until someone decides it should.
+//
+// The row is the OWNER's frame either way: `frame.accountId` is the account
+// its scenes, keys, quota and audit trail belong to, which for a shared frame
+// is not the session's. Write `frame.accountId` where the frame's account is
+// meant and the session's id where the person acting is.
 export async function frameForAccount(
   db: ReturnType<typeof createDb>,
   accountId: string,
   frameId: string,
+  need: FrameAccessLevel = "owner",
 ) {
   if (!isFrameId(frameId)) {
     return undefined;
@@ -902,7 +919,11 @@ export async function frameForAccount(
     .from(frames)
     .where(and(eq(frames.id, frameId), eq(frames.accountId, accountId)))
     .limit(1);
-  return frame;
+  if (frame || need === "owner") {
+    return frame;
+  }
+  const shared = await sharedFrameAccess(db, accountId, frameId);
+  return shared && roleAllows(shared.access.role, need) ? shared.frame : undefined;
 }
 
 // The link behind a frame, for callers that need its scopes (frameSummary's

@@ -22,6 +22,7 @@ import {
   setCloudFrameTelemetryEnabled,
 } from '../../../../../utils/cloudFrameApi'
 import type { CloudFrameSceneRow } from '../../../../../utils/cloudFrameScenes'
+import { canManageFrame, frameIsSharedWithMe, frameManageOnlyNote } from '../../../../../utils/frameAccess'
 import { collectSecretSettingsFromScenes, getSettingsValue, settingsDetails } from '../../secretSettings'
 import { frameLogic } from '../../../frameLogic'
 import { frameAdminUpgradeLogic } from '../frameAdminUpgradeLogic'
@@ -247,6 +248,8 @@ export function CloudServiceSettingsSection(): JSX.Element {
 
   const groups = frame?.service_setting_groups ?? []
   const enabled = frame?.service_settings_enabled === true
+  // Someone else's frame: its keys are the owner's account's, not this one's.
+  const sharedWithMe = frameIsSharedWithMe(frame)
 
   // Per-scene grants: the server's assignment list, each scene's declared
   // groups as checkboxes. Loaded on demand (the frame row carries only the
@@ -320,12 +323,21 @@ export function CloudServiceSettingsSection(): JSX.Element {
       </H6>
       <div className="pl-2 @md:pl-8 space-y-3">
         <div className="frameos-muted text-sm">
-          API keys your account stores (Settings → service secrets) are fetched by the frame itself over its own
-          authenticated connection. They are never pushed through the command queue.
+          {sharedWithMe
+            ? `This frame is shared with you, so the API keys are its owner's${
+                frame?.access?.owner_name ? ` (${frame.access.owner_name})` : ''
+              }, not yours. The frame fetches them itself over its own authenticated connection.`
+            : 'API keys your account stores (Settings → service secrets) are fetched by the frame itself over its own authenticated connection. They are never pushed through the command queue.'}
         </div>
         <Field name="_noop" label="Deliver keys to this frame">
           <div className="w-full space-y-1">
-            <Switch value={enabled} onChange={toggle} disabled={saving} label={enabled ? 'Enabled' : 'Disabled'} />
+            <Switch
+              value={enabled}
+              onChange={toggle}
+              disabled={saving || !canManageFrame(frame)}
+              label={enabled ? 'Enabled' : 'Disabled'}
+            />
+            {!canManageFrame(frame) ? <div className="frameos-muted text-xs">{frameManageOnlyNote}</div> : null}
             {!enabled ? (
               <div className="frameos-muted text-xs">
                 The frame is refused the keys and drops any it still holds at its next check.
@@ -347,10 +359,12 @@ export function CloudServiceSettingsSection(): JSX.Element {
                         hasSettingsFieldValue(getSettingsValue(savedSettings, field.path))
                       )
                     : false
+                  // Whether the owner has saved a key is theirs to see: a
+                  // person the frame is shared with is told the group alone.
                   return (
-                    <Tag key={group} color={saved ? 'teal' : 'yellow'}>
+                    <Tag key={group} color={saved || sharedWithMe ? 'teal' : 'yellow'}>
                       {details?.title ?? group}
-                      {saved ? '' : ' — not set'}
+                      {saved || sharedWithMe ? '' : ' — not set'}
                     </Tag>
                   )
                 })}
@@ -471,7 +485,13 @@ export function CloudTelemetrySection(): JSX.Element | null {
       <div className="pl-2 @md:pl-8 space-y-3">
         <Field name="_noop" label="Ship logs and metrics to the cloud">
           <div className="w-full space-y-1">
-            <Switch value={enabled} onChange={toggle} disabled={saving} label={enabled ? 'Enabled' : 'Disabled'} />
+            <Switch
+              value={enabled}
+              onChange={toggle}
+              disabled={saving || !canManageFrame(frame)}
+              label={enabled ? 'Enabled' : 'Disabled'}
+            />
+            {!canManageFrame(frame) ? <div className="frameos-muted text-xs">{frameManageOnlyNote}</div> : null}
             <div className="frameos-muted text-xs">
               {enabled
                 ? 'The Logs and Metrics panels fill from the device. Changing this restarts FrameOS on the frame.'

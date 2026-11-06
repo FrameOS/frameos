@@ -112,7 +112,7 @@ export async function POST(
     return response;
   }
   const { frameId, eventName } = await params;
-  const frame = await frameForAccount(db, session.accountId, frameId);
+  const frame = await frameForAccount(db, session.accountId, frameId, "edit");
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
@@ -208,7 +208,7 @@ export async function POST(
         });
         if (redeploy.ok) {
           await recordAuditEvent(db, {
-            accountId: session.accountId,
+            accountId: frame.accountId,
             actor: {
               accountId: session.accountId,
               providerSubject: session.providerSubject,
@@ -357,7 +357,7 @@ export async function POST(
   });
 
   await recordAuditEvent(db, {
-    accountId: session.accountId,
+    accountId: frame.accountId,
     actor: {
       accountId: session.accountId,
       providerSubject: session.providerSubject,

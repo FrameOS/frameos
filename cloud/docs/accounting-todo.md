@@ -113,14 +113,20 @@ ends, with the same rules and its own features on top.
   margin instead (Maker $1.99 at 50%, Studio $6.99 at 20%); migration 0069
   took those two rows off every listing and renamed `payg` to Free. The
   rows stay for the ledger tests and any hand-made subscription.
-- **Sharing frames, virtual frames and SSO do not exist yet.** The catalog
-  names them in `plannedFeatures` / `plannedLimits`: every page marks them
-  "planned", and a plan's row does not grant them. Take a name off those
-  lists in the change that ships the feature. What a paid plan sells today
-  is frames and storage.
+- **Virtual frames and SSO do not exist yet.** The catalog names them in
+  `plannedFeatures` / `plannedLimits`: every page marks them "planned", and
+  a plan's row does not grant them. Take a name off those lists in the
+  change that ships the feature. What a paid plan sells today is frames,
+  storage and people.
+- **Sharing frames exists since 2026-11-06** ([`sharing.md`](sharing.md)):
+  the plan's people are an entitlement on its row (`people`, one on Free),
+  the owner invites them and shares frames through projects.
 
 Open: a yearly price, and what happens to an account that moves below what
 it already uses (proposal: nothing breaks, nothing new can be added).
+People are the first answer to the second: the members who joined last
+have no access while the plan is too small for them, and nobody is removed
+(`sharing.md` "Seats").
 
 ### 0.2 Cloud-rendered frames — the entitlement that answers an old question
 

@@ -32,10 +32,10 @@ export type PlanGroupKey = "free" | "private" | "business";
 export type PlanLimitKey = "cloud_rendered_frames" | "people";
 
 /** On the cards as what the plan will include; not built yet. */
-export const plannedFeatures: readonly PlanFeature[] = ["share_frames", "virtual_frames", "sso"];
+export const plannedFeatures: readonly PlanFeature[] = ["virtual_frames", "sso"];
 
-/** Limits that count something not built yet (sharing, thin clients). */
-export const plannedLimits: readonly PlanLimitKey[] = ["people", "cloud_rendered_frames"];
+/** Limits that count something not built yet (thin clients). */
+export const plannedLimits: readonly PlanLimitKey[] = ["cloud_rendered_frames"];
 
 export interface PlanStopDefinition {
   // Frames of your own hardware. Free has none of its own: it is the
@@ -88,9 +88,7 @@ export const planGroups: PlanGroupDefinition[] = [
   },
 ];
 
-export interface CatalogLimits extends PlanLimits {
-  people: number;
-}
+export type CatalogLimits = PlanLimits;
 
 /** The numbers a stop comes with, from the free plan's. */
 export function catalogLimits(free: PlanLimits, { frames, usd }: PlanStopDefinition): CatalogLimits {
@@ -150,6 +148,8 @@ export function planRowFor(free: PlanLimits, entry: SelfServeStop, marginBasisPo
         : limits.cloudRenderedFrames,
       frame_log_bytes: limits.frameLogBytes,
       frames: limits.frames,
+      // The people who may share the plan's frames (cloud/docs/sharing.md).
+      people: limits.people,
       photo_bytes: limits.photoBytes,
       private_scene_bytes: limits.privateSceneBytes,
     },

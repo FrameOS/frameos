@@ -272,9 +272,13 @@ export function cloudSceneDeployErrorMessage(code: string | null | undefined, st
     case 'scene_not_assigned':
       return 'This scene is no longer on the frame'
     case 'invalid_scene':
-    case 'scene_private':
     case 'scene_pulled':
       return 'This scene is no longer available in the store'
+    case 'scene_private':
+      // A frame someone shares with you (cloud/docs/sharing.md "Scenes"):
+      // its private scenes are its owner's. One built on the frame is saved
+      // there; one from your own library is not.
+      return 'A private scene goes on the frames of its own account only. This frame is shared with you: build the scene on the frame, or make it public first'
     case 'scene_version_missing':
       return 'The store has no published version of this scene to update to'
     default:
@@ -615,7 +619,13 @@ export async function createCloudAccountScene(
    * server-side; the image never travels through the browser. Best effort:
    * a frame with nothing cached simply yields a scene without a preview.
    */
-  previewFromFrame?: { frameId: FrameId; sceneId: string }
+  previewFromFrame?: { frameId: FrameId; sceneId: string },
+  /**
+   * The frame the scene is being saved for. The cloud stores it in that
+   * frame's account, which on a frame someone shared with you is theirs
+   * (cloud/docs/sharing.md "Scenes"); on your own frame it changes nothing.
+   */
+  forFrameId?: FrameId
 ): Promise<string> {
   const response = await apiFetch(`/api/account/scenes`, {
     method: 'POST',
@@ -629,6 +639,7 @@ export async function createCloudAccountScene(
       ...(previewFromFrame
         ? { preview_from_frame: { frame_id: String(previewFromFrame.frameId), scene_id: previewFromFrame.sceneId } }
         : {}),
+      ...(forFrameId !== undefined ? { frame_id: String(forFrameId) } : {}),
     }),
   })
   await assertOk(response, `Failed to save "${name}" to your cloud scenes`)

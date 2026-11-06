@@ -16,14 +16,19 @@ limiting (`rate_limit_buckets`), hand-written SQL migrations, cross-repo
 E2E (`scripts/e2e-frameos.sh`), and the accounting module — a double-entry
 ledger in `packages/ledger`, AI metering (shadow mode), the per-account AI
 switch and daily cap, plans and subscriptions, paid plans sold through
-Creem as merchant of record (`docs/billing.md`), and `/admin/billing`
-(`docs/accounting-todo.md`, which also holds the billing todo).
+Creem as merchant of record (`docs/billing.md`), `/admin/billing`
+(`docs/accounting-todo.md`, which also holds the billing todo), and sharing
+frames with the people on a plan: organizations, members, invitations and
+projects (`docs/sharing.md`).
 
 Keep out until there is a concrete product design (scope names for these
 are already reserved in the device-flow allowlist, but no feature
 endpoints exist):
 
-- Cloud organizations, projects, memberships, and invitations.
+- More of the organization than sharing frames needs (`docs/sharing.md`
+  "Not built"): a view-only role, a shared scene library or photo albums,
+  staff enrolling frames into a company's account, one bill for several
+  people's AI.
 - Hosted backend lifecycle.
 - A payment provider integration: parked until there are users to invoice
   (2026-09-03), then `docs/accounting-todo.md` §8.15 (legal entity, VAT)

@@ -46,6 +46,11 @@ import {
   pinnedSceneVersion,
   supersedePendingCommands,
 } from "../frames";
+import {
+  framesForAccount,
+  sceneReachableThroughFrames,
+  type FrameAccessLevel,
+} from "../organizations";
 import { createAccountScene } from "../account-scene-create";
 import { storeCategories } from "../categories";
 import { maxSceneDescriptionChars, parseListingChanges } from "../store-listing";
@@ -817,12 +822,19 @@ export function untrustedResult(source: string, serialized: string): string {
   return `<untrusted_data source="${source}">\n${UNTRUSTED_DATA_NOTICE}\n${safe}\n</untrusted_data>`;
 }
 
-async function ownedFrame(ctx: ToolContext, frameIdArg: unknown) {
+// One of the user's frames: their own, or one shared with them through a
+// project (cloud/docs/sharing.md). `need` is what the tool does with it; the
+// tools that only read ask for "view".
+async function ownedFrame(
+  ctx: ToolContext,
+  frameIdArg: unknown,
+  need: FrameAccessLevel = "view",
+) {
   const frameId = asString(frameIdArg);
   if (!frameId) {
     throw new Error("frame_id is required");
   }
-  const frame = await frameForAccount(ctx.db, ctx.accountId, frameId);
+  const frame = await frameForAccount(ctx.db, ctx.accountId, frameId, need);
   if (!frame) {
     throw new Error(`No frame with id ${frameId} in this account`);
   }
@@ -1039,7 +1051,7 @@ function deliverScenes(
 
 
 async function proposeSceneInstall(ctx: ToolContext, args: JsonObject): Promise<string> {
-  const frame = await ownedFrame(ctx, args.frame_id);
+  const frame = await ownedFrame(ctx, args.frame_id, "edit");
   const sceneId = asString(args.scene_id);
   if (!sceneId || !sceneIdPattern.test(sceneId)) {
     return JSON.stringify({ error: "scene_id must be a store scene uuid" });
@@ -1981,14 +1993,17 @@ export async function executeTool(
       return untrustedResult("repo_file", JSON.stringify({ content: await readRepoFile(path), path }));
     }
     case "list_frames": {
-      const rows = await ctx.db
-        .select()
-        .from(frames)
-        .where(eq(frames.accountId, ctx.accountId))
-        .orderBy(desc(frames.lastSeenAt));
-      const result = rows.map((frame) => {
+      // The user's own frames and the ones shared with them, most recently
+      // seen first.
+      const rows = (await framesForAccount(ctx.db, ctx.accountId)).sort(
+        (a, b) => (b.frame.lastSeenAt?.getTime() ?? 0) - (a.frame.lastSeenAt?.getTime() ?? 0),
+      );
+      const result = rows.map(({ access, frame }) => {
         const hardware = (frame.hardware ?? {}) as JsonObject;
         return {
+          ...(access.role === "owner"
+            ? {}
+            : { shared_by: access.owner?.name ?? access.organization?.name ?? null }),
           connected: frame.connected,
           device: hardware.device,
           frameos_version: frame.frameosVersion,
@@ -2067,7 +2082,7 @@ export async function executeTool(
       );
     }
     case "request_live_metrics": {
-      const frame = await ownedFrame(ctx, args.frame_id);
+      const frame = await ownedFrame(ctx, args.frame_id, "edit");
       if (frame.status !== "active" || !frame.connected) {
         return JSON.stringify({
           error: `Frame is ${frame.status === "active" ? "offline" : frame.status}; live metrics need a connected, active frame.`,
@@ -2172,7 +2187,7 @@ export async function executeTool(
             ),
           ),
       );
-      const [scene] = await ctx.db
+      const [listed] = await ctx.db
         .select()
         .from(storeScenes)
         .where(
@@ -2186,6 +2201,25 @@ export async function executeTool(
           ),
         )
         .limit(1);
+      // Or one on a frame someone shares with the user, which the
+      // workspace reads the same way (organizations.ts, the scene rules).
+      let scene = listed;
+      let sharedThroughFrame = false;
+      if (!scene) {
+        const [candidate] = await ctx.db
+          .select()
+          .from(storeScenes)
+          .where(eq(storeScenes.id, sceneId))
+          .limit(1);
+        if (
+          candidate &&
+          candidate.status === "active" &&
+          (await sceneReachableThroughFrames(ctx.db, ctx.accountId, candidate, "view"))
+        ) {
+          scene = candidate;
+          sharedThroughFrame = true;
+        }
+      }
       if (!scene) {
         return JSON.stringify({ error: `No accessible store scene with id ${sceneId}` });
       }
@@ -2196,6 +2230,7 @@ export async function executeTool(
       // publisher withdrew from them. The payload builder refuses the same
       // leak on the deploy path; this is the read side of that rule.
       const readableAsListed =
+        sharedThroughFrame ||
         scene.accountId === ctx.accountId ||
         (scene.visibility === "public" && scene.status === "active");
       let pinnedVersion: number | null = null;

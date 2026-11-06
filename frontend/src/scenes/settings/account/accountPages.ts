@@ -16,6 +16,7 @@ export type AccountPageKey =
   | 'services'
   | 'ssh'
   | 'usage'
+  | 'people'
   | 'backups'
   | 'activity'
   | 'security'
@@ -58,6 +59,13 @@ export const accountPages: readonly AccountPage[] = [
     label: 'Usage',
     title: 'Usage',
     description: 'Storage, frames and AI usage against the limits of your plan.',
+  },
+  {
+    key: 'people',
+    label: 'People',
+    title: 'People and projects',
+    description:
+      'Share frames with the people on your plan. Invite them, group frames into projects, and choose who uses which.',
   },
   {
     key: 'backups',

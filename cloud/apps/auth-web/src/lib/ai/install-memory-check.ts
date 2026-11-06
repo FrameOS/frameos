@@ -160,7 +160,7 @@ export function accountInstallMemoryCheck(options: {
 }): InstallMemoryCheck {
   return {
     async frameDevice(frameId) {
-      const frame = await frameForAccount(options.db, options.accountId, frameId);
+      const frame = await frameForAccount(options.db, options.accountId, frameId, "view");
       const device = frame ? frameRenderDevice(frame) : null;
       const hardware = (frame?.hardware ?? {}) as { height?: unknown; width?: unknown };
       const { height, width } = hardware;

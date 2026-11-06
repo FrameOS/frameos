@@ -183,6 +183,9 @@ export interface AccountLimits {
   cloudRenderedFrames: number;
   frameLogBytes: number;
   frames: number;
+  // The people on the plan, the owner included: how many may share its
+  // frames (cloud/docs/sharing.md). One on the free plan.
+  people: number;
   // Before the unverified-email cap, which photoQuotaBytesForAccount applies.
   photoBytes: number;
   plan: {
@@ -202,6 +205,7 @@ export const freeTierLimits: PlanLimits = {
   cloudRenderedFrames: 0,
   frameLogBytes: maxFrameLogBytesPerAccount,
   frames: maxFramesPerAccount,
+  people: 1,
   photoBytes: maxPhotoBytesPerAccount,
   privateSceneBytes: maxPrivateSceneBytesPerAccount,
 };
@@ -219,6 +223,7 @@ export function limitsForPlan(plan: BillingPlan): PlanLimits {
     cloudRenderedFrames: entitlements.cloudRenderedFrames,
     frameLogBytes: Math.max(entitlements.frameLogBytes, maxFrameLogBytesPerAccount),
     frames: Math.max(entitlements.frames, maxFramesPerAccount),
+    people: Math.max(1, entitlements.people),
     photoBytes: Math.max(entitlements.photoBytes ?? 0, maxPhotoBytesPerAccount),
     privateSceneBytes: Math.max(entitlements.privateSceneBytes, maxPrivateSceneBytesPerAccount),
   };
