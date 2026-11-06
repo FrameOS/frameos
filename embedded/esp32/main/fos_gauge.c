@@ -90,14 +90,17 @@ static esp_err_t axp2101_set_bit(uint8_t reg, uint8_t bit, bool *wrote)
     return err;
 }
 
-/* The PMIC keeps both switched on through the ESP32's deep sleep, so on most
- * wakes this is two reads and no write. */
+/* The PMIC keeps them switched on through the ESP32's deep sleep, so on most
+ * wakes this is three reads and no write. */
 static esp_err_t axp2101_enable(void)
 {
     if (s_axp2101_enabled) return ESP_OK;
     bool wrote = false;
     esp_err_t err = axp2101_set_bit(FOS_AXP2101_REG_ADC_CTRL, FOS_AXP2101_ADC_VBAT_ENABLE, &wrote);
     if (err == ESP_OK) err = axp2101_set_bit(FOS_AXP2101_REG_GAUGE_CTRL, FOS_AXP2101_GAUGE_ENABLE, &wrote);
+    /* Without detection REG00 never says a cell is there, and the gauge's
+     * numbers read as "no battery" (the PhotoPainter, 2026-11-06). */
+    if (err == ESP_OK) err = axp2101_set_bit(FOS_AXP2101_REG_BATTERY_DET, FOS_AXP2101_BATTERY_DET_ENABLE, &wrote);
     if (err != ESP_OK) return err;
     /* A freshly enabled ADC has no sample yet: give it one conversion. */
     if (wrote) vTaskDelay(pdMS_TO_TICKS(20));
@@ -114,6 +117,21 @@ static esp_err_t axp2101_read(fos_gauge_status_t *out)
     if (err == ESP_OK) err = fos_i2c_read(FOS_I2C_AXP2101, FOS_AXP2101_REG_BATTERY_PCT, &soc, 1);
     if (err != ESP_OK) return err;
     fos_gauge_decode_axp2101(status[0], status[1], vbat[0], vbat[1], soc, out);
+    return ESP_OK;
+}
+
+esp_err_t fos_gauge_axp2101_raw(uint8_t out[8])
+{
+    static const uint8_t regs[8] = {
+        FOS_AXP2101_REG_STATUS1, FOS_AXP2101_REG_STATUS2, FOS_AXP2101_REG_GAUGE_CTRL,
+        FOS_AXP2101_REG_ADC_CTRL, FOS_AXP2101_REG_VBAT_H, FOS_AXP2101_REG_VBAT_L,
+        FOS_AXP2101_REG_BATTERY_DET, FOS_AXP2101_REG_BATTERY_PCT,
+    };
+    if (!axp2101_present()) return ESP_ERR_NOT_FOUND;
+    for (int i = 0; i < 8; i++) {
+        esp_err_t err = fos_i2c_read(FOS_I2C_AXP2101, regs[i], &out[i], 1);
+        if (err != ESP_OK) return err;
+    }
     return ESP_OK;
 }
 

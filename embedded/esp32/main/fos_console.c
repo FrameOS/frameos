@@ -1977,6 +1977,11 @@ static int cmd_i2c(int argc, char **argv)
                fos_gauge_chip_name(), gauge.mv, gauge.pct, gauge.current_ma, (int)gauge.present,
                (int)gauge.discharging, (int)gauge.charging, (int)gauge.full);
     }
+    uint8_t axp[8];
+    if (fos_gauge_axp2101_raw(axp) == ESP_OK) {
+        printf("axp2101: reg00=%02x reg01=%02x reg18=%02x reg30=%02x reg34=%02x reg35=%02x reg68=%02x regA4=%02x\n",
+               axp[0], axp[1], axp[2], axp[3], axp[4], axp[5], axp[6], axp[7]);
+    }
     return 0;
 }
 

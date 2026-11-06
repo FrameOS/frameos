@@ -17,8 +17,9 @@
  * The decodes are pure (main/tests/test_fos_i2c_devices.c argues with them);
  * the reads go through fos_i2c.c. The BQ27220 is read-only: its
  * configuration is the board maker's, and FrameOS does not touch it. The
- * AXP2101 boots with its gauge and battery-voltage ADC off, so the first read
- * switches both on (REG18 bit 3, REG30 bit 0) and touches nothing else.
+ * AXP2101 can boot with its gauge, battery detection and battery-voltage ADC
+ * off, so the first read switches the three on (REG18 bit 3, REG68 bit 0,
+ * REG30 bit 0) and touches nothing else.
  */
 #pragma once
 
@@ -45,6 +46,7 @@
 #define FOS_AXP2101_REG_ADC_CTRL 0x30      /* bit 0 battery voltage measurement enable */
 #define FOS_AXP2101_REG_VBAT_H 0x34        /* VBAT [12:8] in bits 4:0, mV */
 #define FOS_AXP2101_REG_VBAT_L 0x35        /* VBAT [7:0] */
+#define FOS_AXP2101_REG_BATTERY_DET 0x68   /* bit 0 battery detection enable */
 #define FOS_AXP2101_REG_BATTERY_PCT 0xA4   /* the gauge's state of charge, percent */
 #define FOS_AXP2101_CHIP_ID 0x4A
 
@@ -52,6 +54,7 @@
 #define FOS_AXP2101_STATUS1_BATTERY (1u << 3)
 #define FOS_AXP2101_GAUGE_ENABLE (1u << 3)
 #define FOS_AXP2101_ADC_VBAT_ENABLE (1u << 0)
+#define FOS_AXP2101_BATTERY_DET_ENABLE (1u << 0)
 
 typedef struct {
     int mv;          /* the cell's voltage; 0 without a reading */
@@ -81,6 +84,9 @@ void fos_gauge_decode_axp2101(uint8_t status1, uint8_t status2, uint8_t vbat_h, 
 bool fos_gauge_present(void);
 /* "bq27220", "axp2101", or "none": for the console and the status page. */
 const char *fos_gauge_chip_name(void);
+/* The AXP2101's registers behind a reading, for the console: REG00 REG01
+ * REG18 REG30 REG34 REG35 REG68 REG A4, in that order. */
+esp_err_t fos_gauge_axp2101_raw(uint8_t out[8]);
 /* Read and decode. ESP_ERR_NOT_FOUND without a gauge. */
 esp_err_t fos_gauge_read(fos_gauge_status_t *out);
 #endif

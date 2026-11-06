@@ -217,9 +217,11 @@ for the two Spectra boards most of the bench work runs on:
   the gauge's state of charge (REG A4), VBUS-good and the charge state
   (REG00/01) — so the metrics carry `batteryMillivolts` / `batteryPercent`
   and `usbPower` / `charging`, and the frame deep-sleeps on the cell and
-  stays awake on USB. The chip boots with its gauge and VBAT ADC off; the
-  first read switches both on (REG18 bit 3, REG30 bit 0), after checking the
-  chip id (0x4A) so nothing else at 0x34 gets the writes. The gauge learns
+  stays awake on USB. The chip can boot with its gauge, battery detection
+  and VBAT ADC off; the first read switches the three on (REG18 bit 3,
+  REG68 bit 0, REG30 bit 0), after checking the chip id (0x4A) so nothing
+  else at 0x34 gets the writes. The console's `i2c` prints the registers
+  raw (`axp2101: reg00=… regA4=…`). The gauge learns
   the cell over its first few charge cycles, so the percentage is rough
   until then; it reports no current (`current_ma` 0).
 - **Seeed reTerminal E-series (E1001/E1002/E1003/E1004)** — the TF socket shares
