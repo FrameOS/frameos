@@ -543,7 +543,9 @@ export function get(app) {
 - **A real keyboard** (a Pi's, the computer's over the preview) types into
   the field instead: once a key has been typed on one, fields get no
   keyboard on the screen. Left and right, Home, End, Backspace and Delete
-  move and erase.
+  move and erase; Up and Down move a line in a `<textarea>` (keeping the
+  column they set out from, to the start or the end off its first or last
+  line) and go to the start or the end of an `<input>`.
 - **`onKeyDown`** hears every key typed into the field, before it applies:
   `e.key` is the character, or `Enter`, `Backspace`, ... (and the rest of
   the `keyDown` payload from a real keyboard). It cannot stop the key.
@@ -552,7 +554,11 @@ export function get(app) {
   text's color.
 - **Styles**: a field is a box like any other (no default style), whose
   text is one line (`<input>`, scrolled sideways to keep the caret in sight)
-  or wraps (`<textarea>`, scrolled down to it). The caret is the text's
+  or wraps (`<textarea>`, scrolled down to it). A `<textarea>` with more
+  text than fits scrolls like a box with `overflow-y-auto` ([Scrolling](#scrolling-and-clipping)):
+  a finger drags it, a wheel scrolls it, a bar says where in it you are,
+  and it keeps its place when it lets go of the keyboard; an edit or a key
+  brings the caret back into sight. The caret is the text's
   color. `focus:` classes apply while it has the keyboard.
 - **A field without `value`** shows what is typed while it has the keyboard
   and forgets it after: always give it one.

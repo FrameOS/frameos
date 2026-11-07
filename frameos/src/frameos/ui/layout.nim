@@ -68,6 +68,9 @@ type
     paper*: bool         ## e-paper: the keyboard shows no press
     round*: bool         ## a round panel's whole canvas: the keyboard stays inside its circle
     scrolls*: seq[(int, float32, float32)] ## how far each box that scrolled is, by key
+    lineStep*: int       ## a key moved the caret a line up (-1) or down (1): the next layout knows the lines ...
+    goalX*: float32      ## ... and keeps the x it set out from across the lines it walks, while `goal`
+    goal*: bool
     open*: int           ## the <select> whose list is up: its key + 1; 0 for none
     fresh*: bool         ## it just opened: the next layout scrolls to what it holds
 
@@ -606,6 +609,7 @@ var
   memo {.threadvar.}: UiMemo ## the layout's, while layoutUi runs
   ui {.threadvar.}: ptr UiInput ## and the input it was asked for
   focusSeen {.threadvar.}: bool ## the focused field was laid out
+  revealCaret {.threadvar.}: bool ## and is scrolled to show its caret (an edit, a key, a tap)
 
 template scrollOf(key: int): (float32, float32) = ui[].scrolled(key)
 template setScroll(key: int, x, y: float32) = ui[].scrollTo(key, x, y)
@@ -1467,13 +1471,42 @@ proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32): array[4, fl
     return
   if ui.place:
     ui.place = false
+    ui.goal = false
     ui.caret = n.value.runeOffset(arrangement.caretAt(ui.placeX - (tx - x) + sx, ui.placeY - (ty - y) + sy))
   ui.caret = clamp(ui.caret, 0, n.value.len)
-  let
+  var
     i = min(n.value.toOpenArray(0, ui.caret - 1).runeLen, arrangement.runes.len)
     r = arrangement.selectionRects[min(i, arrangement.runes.high)]
-    cw = max(1'f32, round(t.text.size / 16))
+  when not defined(frameosEmbedded):
+    if ui.lineStep != 0:
+      # A line up or down (ArrowUp / ArrowDown on a keyboard): the nearest
+      # edge on that line to the x the caret set out from, kept across the
+      # lines it walks; off the first line the start, off the last the end.
+      var line = arrangement.lines.high
+      for l, span in arrangement.lines:
+        if i <= span[1]:
+          line = l
+          break
+      if not ui.goal:
+        ui.goal = true
+        ui.goalX = if i < arrangement.runes.len: r.x else: r.x + r.w
+      let to = line + ui.lineStep
+      ui.lineStep = 0
+      let rune =
+        if to < 0: 0
+        elif to > arrangement.lines.high: arrangement.runes.len
+        else:
+          let row = arrangement.selectionRects[arrangement.lines[to][0]]
+          arrangement.caretAt(ui.goalX, row.y + row.h / 2)
+      ui.caret = clamp(n.value.runeOffset(rune), 0, n.value.len)
+      i = min(n.value.toOpenArray(0, ui.caret - 1).runeLen, arrangement.runes.len)
+      r = arrangement.selectionRects[min(i, arrangement.runes.high)]
+  let cw = max(1'f32, round(t.text.size / 16))
   result = [tx + (if i < arrangement.runes.len: r.x else: r.x + r.w), ty + r.y, cw, r.h]
+  if not revealCaret:
+    # Scrolled by a finger or the wheel: the caret may be out of sight, as
+    # in a browser, until the next edit or key brings it back.
+    return
   # In sight: inside the content box, the caret's width to spare.
   let
     left = x + b.border[3] + b.pad[3]
@@ -1513,8 +1546,9 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     if n.field > 0 and n.key == ui.focus - 1 and n.children.len > 0:
       focusSeen = true
       caret = n.emitField(x, y, w, h, sx, sy)
-    elif n.field > 0:
-      # A field that lets go of the keyboard shows its text from the start.
+    elif n.field > 0 and n.field != 2:
+      # A field that lets go of the keyboard shows its text from the start;
+      # a <textarea> stays where it was scrolled to, like any box.
       sx = 0
       sy = 0
     setScroll(n.key, sx, sy)
@@ -1536,7 +1570,9 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     first = drawn.len
     firstRegion = regions.len
     firstGradient = gradients
-    scrolls = b.overflowX == ovScroll and n.maxX > 0 or b.overflowY == ovScroll and n.maxY > 0
+    # A <textarea> scrolls its text like a box with overflow-y-auto.
+    scrollsY = b.overflowY == ovScroll or n.field == 2
+    scrolls = b.overflowX == ovScroll and n.maxX > 0 or scrollsY and n.maxY > 0
   n.emitPaint(x, y, w, h, op, drawn, gradients)
   if n.hover or n.active or n.group or n.handlers != default(array[UiEvent, int]) or
       n.field > 0 or scrolls:
@@ -1544,7 +1580,7 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     regions.add UiRegion(x: x, y: y, w: w, h: h, visible: [x, y, x + w, y + h], key: n.key,
       handlers: n.handlers, hover: n.hover, active: n.active, group: n.group, field: n.field,
       scrollX: (if b.overflowX == ovScroll: n.maxX else: 0),
-      scrollY: (if b.overflowY == ovScroll: n.maxY else: 0))
+      scrollY: (if scrollsY: n.maxY else: 0))
   case n.kind
   of ukText:
     n.emitText(cx, cy, cw, op, drawn)
@@ -1613,7 +1649,7 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
           regions[k] = r
           inc k
       regions.setLen(k)
-      if b.overflowY == ovScroll and n.maxY > 0:
+      if scrollsY and n.maxY > 0:
         # Where in what it holds it shows: a thin bar at its right edge.
         let
           barH = max(vh * vh / (vh + n.maxY), min(vh, 16))
@@ -1829,6 +1865,7 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
   if input.reveal and input.focus > 0:
     var r: array[4, float32]
     discard top.reveal(input.focus - 1, r)
+  revealCaret = input.reveal or input.place or input.lineStep != 0
   input.reveal = false
   result = SvgNode(tag: "svg", attrs: @[("width", $width), ("height", $height)])
   if kb > 0 and top.box.bg.a == 255 and top.box.gradient == 0:
