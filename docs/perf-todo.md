@@ -53,6 +53,7 @@ committed to before the T0 probe has run on the board.
 | What | Before | After | When |
 | --- | --- | --- | --- |
 | JSX Weather, isolated render (`render:framebuffer` → `render:device` → `render:done` stamps) | 80 ms render in place; stamps at 116 / 145 / 178 ms | | 2026-11-07, 2026.11.2 firmware |
+| JSX Home, one card toggled by a tap over the frame's HTTP event route (`/event/pointerDown` + `pointerUp`), warm, six taps: the Nim render (interpreter + app + raster) and the stamps | render 230–267 ms; `render:framebuffer` +32, `render:device` +29, `render:done` +32 → **323–360 ms** | render 140–181 ms (56 once); stamps +6 / +1 / +0 → **147–188 ms** | 2026-11-07, after the first T0 batch (console ring, bold without the stroke, stroke circle cached, JSX factory, memo, lookups); `lcd`: 0 dropped, 0 late refills |
 
 ## T0 — measured fixes (branch `perf-t0`)
 
@@ -65,8 +66,11 @@ committed to before the T0 probe has run on the board.
   the path by default; `FRAMEOS_PIXIE_PATH` still points at another checkout.
   pixie's dependencies (vmath, chroma, flatty, nimsimd, bumpy, crunchy) are
   `frameos.nimble`'s now; `nimble.lock` lost its `pixie` entry.
-- [ ] `make test-pixie` runs pixie's own suite (`frameos/pixie/tests`), and the
-  Nim CI job runs it when `frameos/pixie/**` changed.
+- [x] `make test-pixie` runs pixie's own suite (`frameos/pixie/tests`); two of
+  its files (`test_gray8`, `test_rgb565`: an AA circle's luma / 565
+  quantisation one step off the RGBX canvas on this host) failed before the
+  move and are skipped with a note.
+- [ ] The Nim CI job runs `make test-pixie` when `frameos/pixie/**` changed.
 - [ ] Every place that named the fork's URL or a `pixie` package: the
   Dockerfile's dependency layer (it only installs the lock now), the
   cross-toolchain images, `backend/app/tasks/_frame_deployer.py`'s
@@ -86,7 +90,8 @@ committed to before the T0 probe has run on the board.
 
 ### The firmware loop (C)
 
-- [ ] **Console off the render task, present before logging.**
+- [x] **Console off the render task.** (The present no longer needs to move:
+  a line costs the render task a memcpy now.)
   `frameos_nim_log_hook` (components/frameos_nim/frameos_nim_glue.c) hands
   the line to a ring drained by a low-priority task on core 0 that writes
   whole lines with `uart_write_bytes` / `usb_serial_jtag_write_bytes`; the
@@ -103,7 +108,7 @@ committed to before the T0 probe has run on the board.
   plus the 460 KB image push around it, all on the render task. Unmeasured;
   plausibly 100–300 ms. Move them behind the present (the housekeeping that
   follows a render), keep `render:done` for the deploy-progress signal.
-- [ ] **Touch poll at 10 ms** on LCD boards (`fos_touch.c`
+- [x] **Touch poll at 10 ms** on LCD boards (`fos_touch.c`
   `TOUCH_POLL_NO_IRQ_MS` 30 → 10, `TOUCH_POLL_HELD_MS` 20 → 10): ~10 ms less
   on average per touch-down, 5 ms per release.
 - [ ] Re-run the icache / dcache / 10-line bounce buffer / 13.63 MHz pixel
@@ -112,7 +117,7 @@ committed to before the T0 probe has run on the board.
 
 ### The raster (pixie + the UI layer)
 
-- [ ] **Bold without the round-joined stroke** (ui/layout.nim `emitText`): a
+- [x] **Bold without the round-joined stroke** (ui/layout.nim `emitText`): a
   second fill of the same shared path, translated `size / 24` to the right,
   instead of a stroke with round joins. Host: the label 453 → 42 µs, its
   8,740 malloc+realloc → 52; the toggle's raster 2.0–2.4x. Bold looks a
@@ -121,7 +126,7 @@ committed to before the T0 probe has run on the board.
   `strokeShapes`): the circle for round joins and caps is flattened once per
   stroke and translated per join. Pixel-identical; −69% of the toggle's
   malloc+realloc on host.
-- [ ] `share()` the layout's rounded-rect, ring and scroll-bar paths
+- [x] `share()` the layout's rounded-rect, ring and scroll-bar paths
   (ui/layout.nim): their bounds and flattened shapes are kept.
 - [ ] Damage bounds from control points (pixie `localBounds` /
   `paintBounds`): a rounded rect from its corners, text from its
@@ -161,15 +166,15 @@ committed to before the T0 probe has run on the board.
   (no caller today; the prelude work below is the first).
 - [x] `ui/layout.nim` `build()` scanned the previous children for each child
   (quadratic in a list's length); it tries the same index first.
-- [ ] `js_runtime/jsx.nim` scans the kept memo entries for each memo'd
+- [x] `js_runtime/jsx.nim` scans the kept memo entries for each memo'd
   element.
-- [ ] `interpreter.nim` parsed the scene JSON twice with a serialization in
+- [x] `interpreter.nim` parsed the scene JSON twice with a serialization in
   between (`annotateInterpretedSceneSourceNodeIds`): ~35 ms per 6 KB scene
   on the device, ~0.5 s for the 72 KB Weather sample, on every wake.
 
 ### The Pi
 
-- [ ] **The runner wakes on input.** The message loop's wait grows to 200 ms
+- [x] **The runner wakes on input.** The message loop's wait grows to 200 ms
   after ~4 s idle and the render loop sleeps in 100 ms slices, so every
   handler-triggered render of a long-interval scene (every JSX UI) waits up
   to 100 ms and a first tap up to 300 ms: a JSX UI on a Pi is capped near

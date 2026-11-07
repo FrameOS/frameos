@@ -1809,46 +1809,12 @@ proc setDynamicJsAppField*(app: AppRoot, field: string, value: Value) =
     dynamicApp.runtime.releaseReplacedImageRef(dynamicApp.configJson[field], nextValue)
   dynamicApp.configJson[field] = nextValue
 
-proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: string = "") =
-  ## `sceneId` joins this runtime to the owning scene's shared heap budget
-  ## (runtime.sceneHeapBudgetFor): every JS app node of a scene draws on one
-  ## ceiling instead of each getting the full per-runtime limit.
-  if runtime.ready:
-    return
-
-  when defined(frameosEmbedded):
-    # Reclaim the other nodes' interpreters before building this one.
-    evictIdleJsRuntimes(runtime)
-  if not liveJsRuntimes.contains(runtime):
-    liveJsRuntimes.add(runtime)
-
-  when defined(memProbe): memProbe("    newQuickJS BEFORE")
-  runtime.js = newQuickJS(sceneJsConfig(frameConfig, sceneId))
-  when defined(memProbe): memProbe("    newQuickJS AFTER")
-  jsAppRuntimeByCtx[runtime.js.context] = runtime
-  runtime.js.setModuleLoader(jsAppModuleLoader, jsAppModuleNormalize)
-  runtime.js.registerFunction("jsAppLog", jsAppLog)
-  runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
-  runtime.js.registerFunction("jsSetState", jsSetState)
-  runtime.js.registerFunction("jsRemember", jsRemember)
-  runtime.js.registerFunction("jsRecall", jsRecall)
-  runtime.js.registerFunction("jsFetchText", jsFetchText)
-  runtime.js.registerFunction("jsHttpRequest", jsHttpRequest)
-  runtime.js.registerFunction("jsFetchImage", jsFetchImage)
-  runtime.js.registerFunction("jsReleaseImage", jsReleaseImage)
-  runtime.js.registerFunction("jsCanvas", jsCanvas)
-  runtime.js.registerFunction("jsCanvasDraw", jsCanvasDraw)
-  runtime.js.registerFunction("jsCanvasClear", jsCanvasClear)
-  runtime.js.registerFunction("jsAssets", jsAssets)
-  runtime.js.registerFunction("jsStreams", jsStreams)
-  runtime.js.registerFunction("jsGetSetting", jsGetSetting)
-  runtime.js.registerFunction("jsGetAppMeta", jsGetAppMeta)
-  runtime.js.registerFunction("jsGetAppConfig", jsGetAppConfig)
-  runtime.js.registerFunction("jsGetAppState", jsGetAppState)
-  runtime.js.registerFunction("jsGetAppFrame", jsGetAppFrame)
-  runtime.js.registerFunction("jsGetAppContext", jsGetAppContext)
-  runtime.js.registerFunction("jsGetAppKeys", jsGetAppKeys)
-  discard runtime.js.eval(static(compactJs("""
+# The app prelude: the frameos.* API glue, the JSX factory and memo() of
+# sceneJsPrelude, the Proxy views of app.config / state / frame / context.
+# Compiled on the device at every interpreter start (~102 ms of a SenseCAP
+# frame for 6.4 KB, docs/realtime-rendering.md), or loaded as the bytecode
+# tools/prelude_bytecode.nim wrote into the firmware image (evalAppPrelude).
+const appJsPrelude* = compactJs("""
   "use strict";
   const __jsReplacer = (k, v) =>
     (typeof v === 'bigint') ? { __bigint: v.toString() } : v;
@@ -1979,7 +1945,75 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
     }
     return undefined;
   }
-  """ & sceneJsPrelude)))
+  """ & sceneJsPrelude)
+
+
+when defined(frameosPreludeBytecode):
+  # The preludes as bytecode, written by tools/prelude_bytecode.nim for this
+  # exact QuickJS (embedded/esp32/build_nim.sh runs it). A module from another
+  # engine version or an older prelude is refused here, not on the device.
+  import std/hashes
+  import assets/prelude_bytecode
+  const quickjsVersionInTree = staticRead(
+    currentSourcePath().parentDir.parentDir.parentDir.parentDir / "quickjs" / "VERSION").strip()
+  static:
+    doAssert preludeBytecodeQuickjsVersion == quickjsVersionInTree,
+      "src/assets/prelude_bytecode.nim was written for QuickJS " & preludeBytecodeQuickjsVersion &
+      " and the tree has " & quickjsVersionInTree & ": rerun tools/prelude_bytecode.nim"
+    doAssert appPreludeSourceHash == hash(appJsPrelude),
+      "src/assets/prelude_bytecode.nim is stale (appJsPrelude changed): rerun tools/prelude_bytecode.nim"
+
+proc evalAppPrelude(js: QuickJS) =
+  ## The prelude into a fresh context: the bytecode built into the image when
+  ## there is one (a load, not a compile), else the source.
+  when defined(frameosPreludeBytecode):
+    try:
+      discard js.evalBytecode(appPreludeBytecode.toOpenArrayByte(0, appPreludeBytecode.high))
+      return
+    except JSException:
+      discard # a bytecode the engine would not take: the source is the same prelude
+  discard js.eval(appJsPrelude)
+
+proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: string = "") =
+  ## `sceneId` joins this runtime to the owning scene's shared heap budget
+  ## (runtime.sceneHeapBudgetFor): every JS app node of a scene draws on one
+  ## ceiling instead of each getting the full per-runtime limit.
+  if runtime.ready:
+    return
+
+  when defined(frameosEmbedded):
+    # Reclaim the other nodes' interpreters before building this one.
+    evictIdleJsRuntimes(runtime)
+  if not liveJsRuntimes.contains(runtime):
+    liveJsRuntimes.add(runtime)
+
+  when defined(memProbe): memProbe("    newQuickJS BEFORE")
+  runtime.js = newQuickJS(sceneJsConfig(frameConfig, sceneId))
+  when defined(memProbe): memProbe("    newQuickJS AFTER")
+  jsAppRuntimeByCtx[runtime.js.context] = runtime
+  runtime.js.setModuleLoader(jsAppModuleLoader, jsAppModuleNormalize)
+  runtime.js.registerFunction("jsAppLog", jsAppLog)
+  runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
+  runtime.js.registerFunction("jsSetState", jsSetState)
+  runtime.js.registerFunction("jsRemember", jsRemember)
+  runtime.js.registerFunction("jsRecall", jsRecall)
+  runtime.js.registerFunction("jsFetchText", jsFetchText)
+  runtime.js.registerFunction("jsHttpRequest", jsHttpRequest)
+  runtime.js.registerFunction("jsFetchImage", jsFetchImage)
+  runtime.js.registerFunction("jsReleaseImage", jsReleaseImage)
+  runtime.js.registerFunction("jsCanvas", jsCanvas)
+  runtime.js.registerFunction("jsCanvasDraw", jsCanvasDraw)
+  runtime.js.registerFunction("jsCanvasClear", jsCanvasClear)
+  runtime.js.registerFunction("jsAssets", jsAssets)
+  runtime.js.registerFunction("jsStreams", jsStreams)
+  runtime.js.registerFunction("jsGetSetting", jsGetSetting)
+  runtime.js.registerFunction("jsGetAppMeta", jsGetAppMeta)
+  runtime.js.registerFunction("jsGetAppConfig", jsGetAppConfig)
+  runtime.js.registerFunction("jsGetAppState", jsGetAppState)
+  runtime.js.registerFunction("jsGetAppFrame", jsGetAppFrame)
+  runtime.js.registerFunction("jsGetAppContext", jsGetAppContext)
+  runtime.js.registerFunction("jsGetAppKeys", jsGetAppKeys)
+  evalAppPrelude(runtime.js)
   # The test harness, when this runtime runs an app's tests (app_tests.nim):
   # after the prelude so it can wrap `frameos`, before the module so the
   # module's describe() calls land in it.

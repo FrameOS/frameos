@@ -818,6 +818,53 @@ when defined(frameosEmbedded):
       if other != keep and other.jsReady and not sceneJsStack.contains(other):
         closeSceneJsLocked(other)
 
+# The scene context's prelude: console, the state/args/context Proxies and
+# the code-node envelope helpers, plus sceneJsPrelude. Loaded as bytecode from
+# the firmware image when tools/prelude_bytecode.nim ran (evalScenePrelude).
+const sceneContextJsPrelude* = compactJs("""
+    "use strict";
+    const __jsReplacer = (k, v) =>
+      (typeof v === 'bigint') ? { __bigint: v.toString() }
+      : (v === undefined ? null : v);
+    globalThis.__frameosStringify = (v) => JSON.stringify(v, __jsReplacer);
+    const console = {
+      log: (...a) => jsLog("log", JSON.stringify(a, __jsReplacer)),
+      warn: (...a) => jsLog("warn", JSON.stringify(a, __jsReplacer)),
+      error: (...a) => jsLog("error", JSON.stringify(a, __jsReplacer)),
+    };
+    const __frameosUnwrap = (v) => (v && v.__frameosUndef === true) ? undefined : v;
+    const __state   = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getState(k))   : undefined; } });
+    const __args    = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getArg(k))     : undefined; } });
+    const __context = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getContext(k)) : undefined; } });
+    """ & sceneJsPrelude)
+
+
+when defined(frameosPreludeBytecode):
+  # The preludes as bytecode, written by tools/prelude_bytecode.nim for this
+  # exact QuickJS (embedded/esp32/build_nim.sh runs it). A module from another
+  # engine version or an older prelude is refused here, not on the device.
+  import std/[hashes, os]
+  import assets/prelude_bytecode
+  const quickjsVersionInTree = staticRead(
+    currentSourcePath().parentDir.parentDir.parentDir.parentDir / "quickjs" / "VERSION").strip()
+  static:
+    doAssert preludeBytecodeQuickjsVersion == quickjsVersionInTree,
+      "src/assets/prelude_bytecode.nim was written for QuickJS " & preludeBytecodeQuickjsVersion &
+      " and the tree has " & quickjsVersionInTree & ": rerun tools/prelude_bytecode.nim"
+    doAssert scenePreludeSourceHash == hash(sceneContextJsPrelude),
+      "src/assets/prelude_bytecode.nim is stale (sceneContextJsPrelude changed): rerun tools/prelude_bytecode.nim"
+
+proc evalScenePrelude(js: QuickJS) =
+  ## The prelude into a fresh context: the bytecode built into the image when
+  ## there is one (a load, not a compile), else the source.
+  when defined(frameosPreludeBytecode):
+    try:
+      discard js.evalBytecode(scenePreludeBytecode.toOpenArrayByte(0, scenePreludeBytecode.high))
+      return
+    except JSException:
+      discard # a bytecode the engine would not take: the source is the same prelude
+  discard js.eval(sceneContextJsPrelude)
+
 proc ensureSceneJs*(scene: InterpretedFrameScene) =
   withLock sceneJsLock:
     if scene.jsReady: return
@@ -834,22 +881,7 @@ proc ensureSceneJs*(scene: InterpretedFrameScene) =
     scene.js.registerFunction("parseTs", jsChronoParseTs)
     scene.js.registerFunction("format", jsChronoFormat)
     scene.js.registerFunction("now", jsChronoNow)
-    discard scene.js.eval(static(compactJs("""
-    "use strict";
-    const __jsReplacer = (k, v) =>
-      (typeof v === 'bigint') ? { __bigint: v.toString() }
-      : (v === undefined ? null : v);
-    globalThis.__frameosStringify = (v) => JSON.stringify(v, __jsReplacer);
-    const console = {
-      log: (...a) => jsLog("log", JSON.stringify(a, __jsReplacer)),
-      warn: (...a) => jsLog("warn", JSON.stringify(a, __jsReplacer)),
-      error: (...a) => jsLog("error", JSON.stringify(a, __jsReplacer)),
-    };
-    const __frameosUnwrap = (v) => (v && v.__frameosUndef === true) ? undefined : v;
-    const __state   = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getState(k))   : undefined; } });
-    const __args    = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getArg(k))     : undefined; } });
-    const __context = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getContext(k)) : undefined; } });
-    """ & sceneJsPrelude)))
+    evalScenePrelude(scene.js)
     # Initialize registries
     scene.jsFuncNameByNode = initTable[NodeId, string]()
     scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()

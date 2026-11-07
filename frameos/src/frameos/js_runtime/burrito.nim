@@ -320,6 +320,7 @@ proc JS_ReadObject*(ctx: ptr JSContext, buf: ptr uint8, bufLen: csize_t, flags: 
 {.pop.}
 
 const JS_STRIP_SOURCE* = 1.cint ## quickjs.h: strip source code
+const JS_STRIP_DEBUG* = 2.cint ## quickjs.h: strip all debug info, source included
 
 # Bytecode evaluation from quickjs-libc.h (not built on embedded/wasm)
 when not defined(frameosEmbedded) and not defined(frameosWasm):
