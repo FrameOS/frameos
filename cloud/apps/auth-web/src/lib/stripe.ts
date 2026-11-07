@@ -25,6 +25,18 @@ export const stripeProvider = "stripe";
 // run against test mode (docs/billing.md "Upgrading the API version").
 export const stripeApiVersion = "2026-09-30.endive";
 
+/**
+ * Whether a version is of our release: Stripe names a release after the
+ * date ("endive") and its monthly versions only add to objects, so a webhook
+ * endpoint on a later month of it sends what we read. The dashboard offers
+ * an endpoint the latest month only.
+ */
+export function sameApiRelease(version: string): boolean {
+  const release = (value: string) => /^\d{4}-\d{2}-\d{2}\.([a-z]+)$/.exec(value)?.[1] ?? null;
+  const ours = release(stripeApiVersion);
+  return version === stripeApiVersion || (ours !== null && release(version) === ours);
+}
+
 export interface StripeConfig {
   /** Let customers enter a promotion code at checkout. */
   allowPromotionCodes: boolean;
@@ -1116,9 +1128,9 @@ export async function accountChecks(
         ? []
         : webhookEvents.filter((event) => !sent.has(event));
       // Every object a notice names is read back in our version, so another
-      // version works; it is reported so the endpoint can be brought in line.
+      // release works; it is reported so the endpoint can be brought in line.
       const versions = [...new Set(enabled.map((endpoint) => endpoint.api_version ?? "account default"))];
-      webhook.apiVersion = versions.find((version) => version !== stripeApiVersion) ?? null;
+      webhook.apiVersion = versions.find((version) => !sameApiRelease(version)) ?? null;
     }
   } catch {
     // Unknown: a restricted key without "Webhook Endpoints: read".

@@ -64,6 +64,10 @@ that gives its VAT number is invoiced under the reverse charge.
   `STRIPE_TEST_LEDGER=1` for a development database), and on a production
   build only superadmins can check out in test mode (a test card would be
   a free plan).
+- **Live mode opens when told** (`checkoutOpenTo`): until
+  `STRIPE_CHECKOUT_OPEN=1`, only superadmins can check out, on any build,
+  so the first real payment is made and refunded before the plans are on
+  sale. Everyone else sees "Contact support".
 - **One currency.** Checkout passes `adaptive_pricing: {enabled: false}`;
   an invoice in another currency than its plan is refused, with the event
   kept for a person.
@@ -148,6 +152,7 @@ accounting module; every row names its mode.
 | `STRIPE_TAX_BEHAVIOR` | `exclusive` (default, VAT on top) or `inclusive`. A change makes new prices at the next Sync plans. |
 | `STRIPE_ALLOW_PROMOTION_CODES` | Promotion codes at checkout. Default off. |
 | `STRIPE_TEST_LEDGER` | Test payments post to this database's ledger. Development only. |
+| `STRIPE_CHECKOUT_OPEN` | Live mode: anyone may check out. Unset: superadmins only. |
 | `STRIPE_TEST_OPEN` | Anyone may check out in test mode on a production build. |
 | `STRIPE_TEST_CLOCKS` | Test mode: each checkout's customer gets its own test clock, so a renewal can be seen by advancing it. |
 | `STRIPE_API_URL` | Test mode: another API host (the integration suite's stand-in). |
@@ -161,31 +166,43 @@ template, plus **Tax: Write** (read is enough in production) and, for
 ## Going live
 
 1. **Stripe Tax** (live mode, Settings, Tax): head office address (Raaven
-   BV, Leuven), a registration for Belgium and, once EU sales to consumers
-   pass €10,000 a year, the EU One Stop Shop; registrations for any other
+   BV, Leuven), a registration for Belgium (done 2026-11-07 as "Small
+   Seller (EU)": Belgian VAT on every EU consumer while EU sales to
+   consumers stay under €10,000 a year) and, once they pass it, the EU One
+   Stop Shop; registrations for any other
    country where a threshold is passed (the UK, Norway, Switzerland have
    none or low ones for digital services). Without a registration Stripe
    Tax charges nothing there. `/admin/billing/payments` shows the status.
 2. **Webhook endpoint** (live mode, Developers, Webhooks):
    `https://cloud.frameos.net/api/webhooks/stripe`, API version
-   `2026-09-30.endive`, the events listed on `/admin/billing/payments`
+   `2026-09-30.endive` or a later month of the same release (the dashboard
+   offers only the latest, `2026-10-28.endive` on 2026-11-07; monthly
+   versions only add fields), the events listed on `/admin/billing/payments`
    (`webhookEvents` in `stripe.ts`). Its signing secret is
    `STRIPE_WEBHOOK_SECRET`.
 3. **Restricted live key** as above, then `STRIPE_SECRET_KEY`,
    `STRIPE_WEBHOOK_SECRET` and `STRIPE_MODE=live` in
-   `/etc/frameos-cloud/auth-web.env` (picked up by the next deploy).
+   `/etc/frameos-cloud/auth-web.env`, then `frameos-cloud-update
+   --activate /opt/frameos-cloud` on the box: the live release starts on
+   the other instance, reading the env file afresh, with no downtime.
 4. **Sync plans** on `/admin/billing/payments` (sudo). It must say
    "4 plans in place at Stripe" and no warning.
-5. **Billing settings** in Stripe's dashboard: Smart Retries on, and after
-   the last retry **cancel the subscription** (the terms promise that the
-   plan ends); customer emails for successful payments (receipts),
-   failed payments and expiring cards on; the public business name,
-   support email and statement descriptor (`FRAMEOS`) checked.
+5. **Billing settings** in Stripe's dashboard (done 2026-11-07): Smart
+   Retries on, and after the last retry **cancel the subscription** (the
+   terms promise that the plan ends) and mark the invoice uncollectible
+   (nobody pays later for a plan that ended); customer emails for
+   successful payments (receipts), refunds, failed payments and expiring
+   cards on, linking to Stripe's hosted page; the public business name,
+   support email, privacy and terms links and statement descriptor
+   (`FRAMEOS`) set.
 6. **Settlement currency**: the balance is in euros, so every dollar charge
    is converted (Stripe's conversion fee). Adding a USD settlement
    currency, or pricing in euros, is a decision for the owner.
-7. Buy the $2 plan with a real card, refund it from Stripe's dashboard,
-   and check `/admin/billing/payments` and the trial balance.
+7. Buy the $2 plan with a real card (as a superadmin: checkout is still
+   closed to everyone else), refund it from Stripe's dashboard, and check
+   `/admin/billing/payments` and the trial balance.
+8. **Open checkout**: `STRIPE_CHECKOUT_OPEN=1` in the env file and
+   `--activate` again, then the public price list on frameos.net/pricing.
 
 ## Local development and tests
 

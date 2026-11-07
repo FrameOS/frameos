@@ -3,6 +3,7 @@ import { feeMicrosIn, priceLookupKey, redactPayload } from "./billing-provider";
 import {
   parseInvoice,
   parseSubscription,
+  sameApiRelease,
   signWebhookForTests,
   stripeApiVersion,
   stripeSetup,
@@ -69,6 +70,15 @@ describe("stripeSetup", () => {
 
   it("pins an API version", () => {
     expect(stripeApiVersion).toMatch(/^\d{4}-\d{2}-\d{2}\.[a-z]+$/);
+  });
+
+  it("takes a later month of the same release for a webhook endpoint", () => {
+    const release = stripeApiVersion.split(".")[1];
+    expect(sameApiRelease(stripeApiVersion)).toBe(true);
+    expect(sameApiRelease(`2099-01-31.${release}`)).toBe(true);
+    expect(sameApiRelease("2099-01-31.preview")).toBe(false);
+    expect(sameApiRelease("2023-10-16")).toBe(false);
+    expect(sameApiRelease("account default")).toBe(false);
   });
 });
 

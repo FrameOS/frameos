@@ -627,7 +627,9 @@
   Changes are worked out from the plan paid for, never Stripe's current
   price. Test-mode payments never post to the ledger. A change to the flow
   is run against Stripe's test mode before it ships (the doc's checklist
-  and its last results).
+  and its last results). Live mode sells to superadmins only until
+  `STRIPE_CHECKOUT_OPEN=1` (`checkoutOpenTo`): a real payment is made and
+  refunded first.
 
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】

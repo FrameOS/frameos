@@ -111,16 +111,23 @@ export function postsToLedger(mode: StripeMode, env: Env = process.env): boolean
 }
 
 /**
- * Who may check out. In live mode, everyone. In test mode a plan can be had
- * with a test card, so on a production build it is the operators' alone.
+ * Who may check out. Operators always. In live mode everyone else only once
+ * STRIPE_CHECKOUT_OPEN is set, so the first real payment can be made and
+ * refunded before the plans are on sale; a development build is no
+ * exception, a live key is real money. In test mode a plan can be had with a
+ * test card, so on a production build it stays the operators' unless
+ * STRIPE_TEST_OPEN is set.
  */
 export function checkoutOpenTo(
   mode: StripeMode,
   superadmin: boolean,
   env: Env = process.env,
 ): boolean {
-  if (mode === "live" || superadmin) {
+  if (superadmin) {
     return true;
+  }
+  if (mode === "live") {
+    return flag(env.STRIPE_CHECKOUT_OPEN);
   }
   return env.NODE_ENV !== "production" || flag(env.STRIPE_TEST_OPEN);
 }

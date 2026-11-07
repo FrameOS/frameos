@@ -37,6 +37,7 @@ import { POST as postWebhook } from "../../../app/api/webhooks/stripe/route";
 import { GET as getPricing } from "../../../app/pricing/route";
 import {
   cancelForErasure,
+  checkoutOpenTo,
   priceLookupKey,
   reconcileSubscriptions,
   syncPlans,
@@ -159,6 +160,7 @@ afterEach(() => {
     "STRIPE_TEST_LEDGER",
     "STRIPE_MODE",
     "STRIPE_TEST_OPEN",
+    "STRIPE_CHECKOUT_OPEN",
     "STRIPE_TEST_CLOCKS",
     "STRIPE_AUTOMATIC_TAX",
   ]) {
@@ -665,6 +667,18 @@ describe("buying a plan", () => {
     await signIn({ superadmin: true });
     expect((await plan()).billing.checkout).toBe(true);
     expect((await startCheckout("private-5")).status).toBe(200);
+  });
+
+  it("keeps live mode to the operators until checkout is opened", () => {
+    expect(checkoutOpenTo("live", false, {})).toBe(false);
+    expect(checkoutOpenTo("live", true, {})).toBe(true);
+    expect(checkoutOpenTo("live", false, { STRIPE_CHECKOUT_OPEN: "1" })).toBe(true);
+    // A live key is real money on any build.
+    expect(checkoutOpenTo("live", false, { NODE_ENV: "development" })).toBe(false);
+    // Each mode has its own switch.
+    expect(checkoutOpenTo("live", false, { STRIPE_TEST_OPEN: "1" })).toBe(false);
+    expect(checkoutOpenTo("test", false, { NODE_ENV: "production", STRIPE_CHECKOUT_OPEN: "1" })).toBe(false);
+    expect(checkoutOpenTo("test", false, { NODE_ENV: "production", STRIPE_TEST_OPEN: "1" })).toBe(true);
   });
 
   it("grants a test purchase and keeps it out of the books", async () => {

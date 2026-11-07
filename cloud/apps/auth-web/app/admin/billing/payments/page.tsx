@@ -13,7 +13,7 @@ import { BillingPlanSyncButton } from "../../../../src/components/BillingPlanSyn
 import { SortableTable } from "../../../../src/components/SortableTable";
 import { requireSuperadmin } from "../../../../src/lib/admin-page";
 import { describeCustomer, resolveCustomerLabels } from "../../../../src/lib/billing-admin";
-import { postsToLedger } from "../../../../src/lib/billing-provider";
+import { checkoutOpenTo, postsToLedger } from "../../../../src/lib/billing-provider";
 import { getAccountBaseUrl } from "../../../../src/lib/env";
 import { formatDateTime, formatMicrosUsd } from "../../../../src/lib/format";
 import { selfServeStops } from "../../../../src/lib/plan-catalog";
@@ -193,11 +193,30 @@ export default async function AdminBillingPaymentsPage() {
                 ? "Real cards, real money, posted to the ledger."
                 : postsToLedger(mode)
                   ? "Test cards only. STRIPE_TEST_LEDGER is on, so test payments post to this database's ledger."
-                  : "Test cards only. A test payment grants the plan and is listed below, and never posts to the ledger. On a production build only operators can check out."}
+                  : "Test cards only. A test payment grants the plan and is listed below, and never posts to the ledger."}
               {setup.config?.testClocks
                 ? " Every checkout gets a customer on its own test clock: advance it in Stripe's dashboard to see a renewal."
                 : ""}
             </dd>
+            {setup.config ? (
+              <>
+                <dt>Checkout</dt>
+                <dd>
+                  {checkoutOpenTo(mode, false) ? (
+                    <>
+                      <span className="pill pill-ok">Open</span> Anyone signed in can buy a plan.
+                    </>
+                  ) : (
+                    <>
+                      <span className="pill pill-warning">Operators only</span>{" "}
+                      {mode === "live"
+                        ? "Everyone else sees “Contact support” on the plan cards. Make a real payment and refund it, then set STRIPE_CHECKOUT_OPEN=1 to put the plans on sale."
+                        : "Everyone else sees “Contact support” on the plan cards: a test card would be a free plan. STRIPE_TEST_OPEN=1 opens it."}
+                    </>
+                  )}
+                </dd>
+              </>
+            ) : null}
             <dt>Tax</dt>
             <dd>
               {setup.config ? (
