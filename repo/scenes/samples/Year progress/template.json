@@ -1,0 +1,10 @@
+{
+  "name": "Year progress / memento mori",
+  "description": "A minimalist time dashboard that turns the year into a dot grid, or switches to a memento-mori life calendar in weeks. Today is highlighted, with progress shown at a glance.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.0"
+}

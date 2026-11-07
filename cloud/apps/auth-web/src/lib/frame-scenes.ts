@@ -38,6 +38,7 @@ import {
 import { copySceneCoversIntoFrameCache } from "./scene-images";
 import { sceneEventMapsOf, type SceneEventMaps } from "./scene-event-map";
 import { reportError } from "./log";
+import { frameosVersionSatisfies } from "./store-versions";
 
 export const maxScenesPerFrame = 20;
 
@@ -258,10 +259,20 @@ export async function customEventRoutingForFrame(
 // class is refused outright — a cloud push may never carry it (the device
 // refuses them independently). The risk flags checked are the PINNED
 // version's, not store_scenes.risk_flags, which only mirrors the latest.
+//
+// A version that declares a minimum FrameOS newer than the frame reports
+// (store_scene_versions.frameos_version, from its template.json) is refused
+// with frame_update_required: the frame would show nothing (a JSX scene on a
+// runtime before 2026.10.21). Only a version the push MOVES the frame to is
+// checked — one the frame was already sent keeps going out with every other
+// push, so an old install never blocks a reorder or a grant. A frame that
+// reports no version, or a version without a minimum, passes
+// (frameosVersionSatisfies). Self-hosted backends get the same rule from the
+// versioned store index, which lists only what their version runs.
 async function checkScenesAssignable(
   db: Database,
   accountId: string,
-  frame: { assignedSceneState: unknown },
+  frame: { assignedSceneState: unknown; frameosVersion?: string | null | undefined },
   requested: RequestedScene[],
   latestSceneIds: ReadonlySet<string>,
 ): Promise<AssignScenesFailure | null> {
@@ -272,6 +283,7 @@ async function checkScenesAssignable(
     .select({
       accountId: storeScenes.accountId,
       id: storeScenes.id,
+      name: storeScenes.name,
       status: storeScenes.status,
       visibility: storeScenes.visibility,
     })
@@ -324,6 +336,24 @@ async function checkScenesAssignable(
           scene_version: version.version,
         },
         status: 403,
+      };
+    }
+    const alreadySent = assignedSceneVersion(frame, sceneId) === version.version;
+    if (
+      !alreadySent &&
+      !frameosVersionSatisfies(version.frameosVersion, frame.frameosVersion)
+    ) {
+      return {
+        code: "frame_update_required",
+        detail: {
+          // The sentence the workspace and the chat show as it is.
+          detail: `${scene.name} needs FrameOS ${version.frameosVersion} or later, and this frame runs ${frame.frameosVersion}. Update FrameOS on the frame first.`,
+          frameos_version: frame.frameosVersion,
+          min_frameos_version: version.frameosVersion,
+          scene_id: sceneId,
+          scene_version: version.version,
+        },
+        status: 409,
       };
     }
   }

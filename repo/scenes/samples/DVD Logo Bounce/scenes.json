@@ -1,0 +1,179 @@
+[
+  {
+    "id": "dvd-logo-bounce",
+    "name": "DVD Logo Bounce",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 0.0333333333,
+      "backgroundColor": "#090b14",
+      "renderScale": 1
+    },
+    "fields": [
+      {
+        "name": "speed",
+        "type": "float",
+        "label": "Speed (screen widths per half second)",
+        "description": "How far the logo moves sideways in half a second, in screen widths: 0.18 moves it 0.36 screen widths a second. It moves up and down 0.73 times as fast. 0 holds it still in the middle of the screen.",
+        "value": "0.18",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "logoColor",
+        "type": "select",
+        "label": "Logo color",
+        "value": "auto",
+        "options": [
+          "auto",
+          "cyan",
+          "magenta",
+          "lime",
+          "amber",
+          "white"
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "dvdBounce": {
+        "name": "DVD bouncing logo (JS)",
+        "category": "data",
+        "description": "A responsive, continuously animated DVD-style logo that changes color on each bounce.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "speed",
+            "label": "Speed (screen widths per half second)",
+            "type": "float",
+            "value": "0.18"
+          },
+          {
+            "name": "logoColor",
+            "label": "Logo color",
+            "type": "select",
+            "options": [
+              "auto",
+              "cyan",
+              "magenta",
+              "lime",
+              "amber",
+              "white"
+            ],
+            "value": "auto"
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"DVD bouncing logo (JS)\",\n  \"category\": \"data\",\n  \"description\": \"A responsive, continuously animated DVD-style logo that changes color on each bounce.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"speed\",\n      \"label\": \"Speed (screen widths per half second)\",\n      \"type\": \"float\",\n      \"value\": \"0.18\"\n    },\n    {\n      \"name\": \"logoColor\",\n      \"label\": \"Logo color\",\n      \"type\": \"select\",\n      \"options\": [\n        \"auto\",\n        \"cyan\",\n        \"magenta\",\n        \"lime\",\n        \"amber\",\n        \"white\"\n      ],\n      \"value\": \"auto\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// Faithful vector paths from the supplied classic DVD Video symbol.\nconst DVD_LETTERS =\n  'M108.605 58.081c1.766-2.129 11.285-13.399 11.285-13.399h35.936' +\n    'c18.197 0 30.922 9.53 28.012 21.776-2.906 12.247-20.248 21.778-38.359 21.778h-24.09l7.227-30.422' +\n    'H145.6l-4.949 20.833h3.812' +\n    'c10.139 0 19.738-3.697 21.756-12.189 1.854-7.798-4.873-12.188-15.791-12.188h-3.984' +\n    'l-16.529.014-39.02 44.041-15.324-43.274s-.112-.276-.254-.649' +\n    'c-.035-.089-.328-.397-.485-.338-.286.106-.24.603-.19.711.125.266.162.367.196.497' +\n    ' 1.368 3.34 1.446 8.946.89 11.187-3.031 12.218-20.25 21.778-38.359 21.778' +\n    'h-24.09l7.228-30.422H37.49l-4.949 20.833h3.812' +\n    'c10.138 0 19.682-3.697 21.699-12.189 1.852-7.798-4.817-12.188-15.734-12.188h-3.985' +\n    'l-16.983-.008 2.277-9.58H46.13l29.846-.039v.039h12.289s3.469 10.161 4.545 13.236' +\n    'c5.149 14.707 4.297 15.702 4.297 15.702s-.619-.949 11.498-15.54z'\nconst DVD_DISC =\n  'M8.504 110.273' +\n    'c0-6.496 37.163-11.762 83.001-11.762 45.841 0 83.001 5.266 83.001 11.762 0 6.498-37.16 11.764-83.001 11.764-45.838 0-83.001-5.266-83.001-11.764' +\n    'zm79.997 4.153' +\n    'c10.47 0 18.954-1.754 18.954-3.922 0-2.164-8.484-3.92-18.954-3.92-10.467 0-18.952 1.756-18.952 3.92 0 2.168 8.485 3.922 18.952 3.922' +\n    'z'\nconst DVD_VIDEO =\n  'M36.536 142.711h.062l5.119-10.32h4.816l-8.93 15.722h-2.622l-8.777-15.722h4.816l5.516 10.32z' +\n    'M61.983 147.707h-4.481v-15.316h4.481v15.316zM74.993 132.391h6.399' +\n    'c6.645 0 11.095 3.311 11.095 7.678 0 4.307-4.573 7.639-11.125 7.639h-6.37v-15.317h.001zm4.479 12.714' +\n    'h.731c5.517 0 7.651-2.031 7.651-5.059 0-3.33-2.562-5.057-7.651-5.057h-.731v10.116zM108.914 134.99' +\n    'v3.371h7.131v2.604h-7.131v4.14h7.406v2.602h-11.886v-15.316h11.886v2.599h-7.406zM127.955 140.027' +\n    'c0-4.287 4.662-8.045 11.367-8.045 6.703 0 11.369 3.758 11.369 8.045 0 4.387-4.666 8.086-11.369 8.086-6.705 0-11.367-3.699-11.367-8.086' +\n    'zm4.633-.119c0 2.312 2.926 5.26 6.734 5.26s6.734-2.947 6.734-5.26' +\n    'c0-2.479-2.803-4.979-6.734-4.979-3.933.001-6.734 2.501-6.734 4.979z'\n\n// How far the paths' ink reaches from the corner placeMark puts at (left, top),\n// in the symbol's units: 176.26 right (a little past the 176 of the logo box)\n// and 104.12 down.\nconst MARK_INK_RIGHT = 176.26\nconst MARK_INK_BOTTOM = 104.12\n\nfunction triangleWave(value) {\n  const phase = value - Math.floor(value)\n  return phase < 0.5 ? phase * 2 : 2 - phase * 2\n}\n\nconst PALETTE = {\n  cyan: '#55dfff',\n  magenta: '#ff72c8',\n  lime: '#b9ed67',\n  amber: '#ffc56b',\n  white: '#ffffff',\n}\nconst AUTO_COLORS = [PALETTE.cyan, PALETTE.magenta, PALETTE.lime, PALETTE.amber, PALETTE.white]\n\nconst DEFAULT_SPEED = 0.18\n\n// The speed field, in screen widths per half second (the logo moves twice its\n// value in screen widths a second). 0 holds the logo still. A float field\n// reaches the app as a number, and the runtime hands an empty or unreadable one\n// over as 0, so a 0 counts only when the scene's own `speed` state is a number.\nfunction readSpeed(app) {\n  const speed = Number(app.config.speed)\n  if (!Number.isFinite(speed)) {\n    return DEFAULT_SPEED\n  }\n  if (speed !== 0) {\n    return Math.max(0.02, speed)\n  }\n  return isNumber(app.state && app.state.speed) ? 0 : DEFAULT_SPEED\n}\n\nfunction isNumber(value) {\n  if (typeof value === 'number') {\n    return Number.isFinite(value)\n  }\n  return typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))\n}\n\nfunction colorFor(mode, bounceCount) {\n  if (mode && mode !== 'auto') {\n    return PALETTE[mode] || PALETTE.white\n  }\n  return AUTO_COLORS[bounceCount % AUTO_COLORS.length]\n}\n\n// The mark's transform: the symbol's top left corner (8, 44 in its own units)\n// at left, top, drawn at scale.\nfunction placeMark(left, top, scale) {\n  return `translate(${(left - 8 * scale).toFixed(2)} ${(top - 44 * scale).toFixed(2)}) scale(${scale.toFixed(5)})`\n}\n\n// The mark only changes with its fill, so memo() hands back the element it\n// made last frame (the shadow always, the logo until its next bounce).\nconst DvdMark = memo(({ fill }) => (\n  <g fill={fill} fillRule=\"evenodd\">\n    <path d={DVD_LETTERS} />\n    <path d={DVD_DISC} />\n    <path d={DVD_VIDEO} />\n  </g>\n))\n\nexport function get(app, context) {\n  const W = app.frame.width\n  const H = app.frame.height\n  const unit = Math.min(W, H)\n  const logoW = W * 0.2\n  const logoH = logoW * 0.62\n  const speed = readSpeed(app)\n  const horizontalTravel = Math.max(1, W - logoW)\n  const verticalTravel = Math.max(1, H - logoH)\n  const scale = logoW / 176\n  const markHeight = 104 * scale\n  const offsetY = (logoH - markHeight) / 2\n  const shadow = Math.max(2, unit * 0.009)\n\n  // Speed 0: a still logo in the middle of the panel.\n  let x = horizontalTravel / 2\n  let y = verticalTravel / 2\n  let bounces = 0\n  if (speed > 0) {\n    const seconds = Date.now() / 1000\n    const xCycles = (seconds * speed * W) / horizontalTravel\n    const yCycles = (seconds * speed * W * 0.73) / verticalTravel\n    // The shadow sits `shadow` px right of and below the logo, so the logo turns\n    // where the shadow's ink meets the right or bottom edge. It waits there for\n    // the moment the wave spends past that point, and moves as before elsewhere.\n    const rightTurn = Math.max(0, Math.min(horizontalTravel, W - MARK_INK_RIGHT * scale - shadow))\n    const bottomTurn = Math.max(0, Math.min(verticalTravel, H - offsetY - MARK_INK_BOTTOM * scale - shadow))\n    x = Math.min(triangleWave(xCycles) * horizontalTravel, rightTurn)\n    y = Math.min(triangleWave(yCycles) * verticalTravel, bottomTurn)\n    bounces = Math.floor(xCycles * 2) + Math.floor(yCycles * 2)\n  }\n  const color = colorFor(app.config.logoColor, bounces)\n\n  return (\n    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>\n      <rect x={0} y={0} width={W} height={H} fill=\"#090b14\" />\n      <g transform={placeMark(x + shadow, y + offsetY + shadow, scale)} opacity=\"0.32\">\n        <DvdMark fill=\"#000000\" />\n      </g>\n      <g transform={placeMark(x, y + offsetY, scale)}>\n        <DvdMark fill={color} />\n      </g>\n    </svg>\n  )\n}\n"
+        },
+        "origin": "dvdBounce"
+      }
+    },
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 1
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "dvd-art",
+        "type": "app",
+        "position": {
+          "x": 355,
+          "y": -190
+        },
+        "data": {
+          "keyword": "dvdBounce",
+          "config": {}
+        }
+      },
+      {
+        "id": "speed-state",
+        "type": "state",
+        "position": {
+          "x": 323,
+          "y": -286
+        },
+        "data": {
+          "keyword": "speed",
+          "value": "0.18"
+        }
+      },
+      {
+        "id": "color-state",
+        "type": "state",
+        "position": {
+          "x": 299,
+          "y": -350
+        },
+        "data": {
+          "keyword": "logoColor",
+          "value": "auto"
+        }
+      },
+      {
+        "id": "render-logo",
+        "type": "app",
+        "position": {
+          "x": 390,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-to-image",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "render-logo",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "speed-to-art",
+        "type": "codeNodeEdge",
+        "source": "speed-state",
+        "target": "dvd-art",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/speed"
+      },
+      {
+        "id": "color-to-art",
+        "type": "codeNodeEdge",
+        "source": "color-state",
+        "target": "dvd-art",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/logoColor"
+      },
+      {
+        "id": "art-to-image",
+        "type": "codeNodeEdge",
+        "source": "dvd-art",
+        "target": "render-logo",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ],
+    "customEvents": []
+  }
+]

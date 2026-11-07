@@ -1672,6 +1672,10 @@ export async function pinnedSceneVersion(
 ) {
   const [row] = await db
     .select({
+      // The version's declared minimum FrameOS (its template.json's
+      // frameosVersion): checkScenesAssignable refuses to send it to a frame
+      // that reports an older one.
+      frameosVersion: storeSceneVersions.frameosVersion,
       riskFlags: storeSceneVersions.riskFlags,
       version: storeSceneVersions.version,
     })

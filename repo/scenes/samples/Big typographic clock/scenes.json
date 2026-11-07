@@ -1,0 +1,903 @@
+[
+  {
+    "id": "big-typographic-clock",
+    "name": "Big typographic clock",
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "data": {
+          "keyword": "render"
+        },
+        "position": {
+          "x": 0,
+          "y": 1
+        }
+      },
+      {
+        "id": "time-format-state",
+        "type": "state",
+        "data": {
+          "keyword": "timeFormat",
+          "value": "HH:mm"
+        },
+        "position": {
+          "x": 248,
+          "y": -1923
+        }
+      },
+      {
+        "id": "date-style-state",
+        "type": "state",
+        "data": {
+          "keyword": "dateStyle",
+          "value": "weekday-month-day"
+        },
+        "position": {
+          "x": 323,
+          "y": -606
+        }
+      },
+      {
+        "id": "subtitle-state",
+        "type": "state",
+        "data": {
+          "keyword": "subtitle",
+          "value": ""
+        },
+        "position": {
+          "x": 299,
+          "y": -670
+        }
+      },
+      {
+        "id": "text-color-state",
+        "type": "state",
+        "data": {
+          "keyword": "textColor",
+          "value": "#F7F1E3"
+        },
+        "position": {
+          "x": 203,
+          "y": -926
+        }
+      },
+      {
+        "id": "date-color-state",
+        "type": "state",
+        "data": {
+          "keyword": "dateColor",
+          "value": "#D8CBA8"
+        },
+        "position": {
+          "x": 179,
+          "y": -990
+        }
+      },
+      {
+        "id": "accent-color-state",
+        "type": "state",
+        "data": {
+          "keyword": "accentColor",
+          "value": "#D9A441"
+        },
+        "position": {
+          "x": 155,
+          "y": -1054
+        }
+      },
+      {
+        "id": "background-start-state",
+        "type": "state",
+        "data": {
+          "keyword": "backgroundStart",
+          "value": "#132238"
+        },
+        "position": {
+          "x": 131,
+          "y": -1118
+        }
+      },
+      {
+        "id": "background-end-state",
+        "type": "state",
+        "data": {
+          "keyword": "backgroundEnd",
+          "value": "#2A1E3F"
+        },
+        "position": {
+          "x": 107,
+          "y": -1182
+        }
+      },
+      {
+        "id": "background-style-state",
+        "type": "state",
+        "data": {
+          "keyword": "backgroundStyle",
+          "value": "poster-dither"
+        },
+        "position": {
+          "x": 83,
+          "y": -1246
+        }
+      },
+      {
+        "id": "font-family-state",
+        "type": "state",
+        "data": {
+          "keyword": "fontFamily",
+          "value": "PTSans-Bold.ttf"
+        },
+        "position": {
+          "x": 59,
+          "y": -1310
+        }
+      },
+      {
+        "id": "clock-time",
+        "type": "app",
+        "data": {
+          "keyword": "data/clock",
+          "config": {
+            "format": "HH:mm",
+            "formatCustom": ""
+          }
+        },
+        "position": {
+          "x": 320,
+          "y": -1516
+        }
+      },
+      {
+        "id": "clock-date",
+        "type": "app",
+        "data": {
+          "keyword": "data/clock",
+          "config": {
+            "format": "yyyy-MM-dd",
+            "formatCustom": ""
+          }
+        },
+        "position": {
+          "x": 184,
+          "y": -2441
+        }
+      },
+      {
+        "id": "clock-panel",
+        "type": "app",
+        "data": {
+          "keyword": "typographicClockPanel",
+          "config": {
+            "time": "--:--",
+            "dateRaw": "2026-08-24",
+            "dateStyle": "weekday-month-day",
+            "subtitle": "",
+            "theme": "midnight-gallery",
+            "backgroundGradient": "true",
+            "decorativeElements": "true",
+            "ornamentalDetails": "true",
+            "dateBox": "true",
+            "textColor": "#F7F1E3",
+            "dateColor": "#D8CBA8",
+            "accentColor": "#D9A441",
+            "backgroundStart": "#132238",
+            "backgroundEnd": "#2A1E3F",
+            "backgroundStyle": "poster-dither",
+            "fontFamily": "PTSans-Bold.ttf"
+          }
+        },
+        "position": {
+          "x": 355,
+          "y": -526
+        }
+      },
+      {
+        "id": "paint-clock",
+        "type": "app",
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "offsetX": "0",
+            "offsetY": "0",
+            "blendMode": "normal"
+          }
+        },
+        "position": {
+          "x": 390,
+          "y": 0
+        }
+      },
+      {
+        "id": "theme-state",
+        "type": "state",
+        "data": {
+          "keyword": "theme",
+          "value": "midnight-gallery"
+        },
+        "position": {
+          "x": 275,
+          "y": -734
+        }
+      },
+      {
+        "id": "background-gradient-state",
+        "type": "state",
+        "data": {
+          "keyword": "backgroundGradient",
+          "value": "true"
+        },
+        "position": {
+          "x": 251,
+          "y": -798
+        }
+      },
+      {
+        "id": "decorative-elements-state",
+        "type": "state",
+        "data": {
+          "keyword": "decorativeElements",
+          "value": "true"
+        },
+        "position": {
+          "x": 227,
+          "y": -862
+        }
+      },
+      {
+        "id": "time-clock-format",
+        "type": "code",
+        "data": {
+          "codeJS": "(() => {\n  const value = String(timeFormat || 'HH:mm')\n  if (value === 'HH:mm:ss') return 'HH:mm:ss'\n  if (value === 'hh:mm tt' || value === 'hh:mm:ss tt') return 'custom'\n  return 'HH:mm'\n})()",
+          "codeArgs": [
+            {
+              "name": "timeFormat",
+              "type": "string"
+            }
+          ],
+          "codeOutputs": [
+            {
+              "name": "format",
+              "type": "string"
+            }
+          ]
+        },
+        "position": {
+          "x": 256,
+          "y": -1843
+        },
+        "style": {
+          "width": 340,
+          "height": 260
+        },
+        "width": 340,
+        "height": 260
+      },
+      {
+        "id": "time-clock-custom-format",
+        "type": "code",
+        "data": {
+          "codeJS": "(() => {\n  const value = String(timeFormat || 'HH:mm')\n  if (value === 'hh:mm:ss tt') return 'hh:mm:ss tt'\n  if (value === 'hh:mm tt') return 'hh:mm tt'\n  return ''\n})()",
+          "codeArgs": [
+            {
+              "name": "timeFormat",
+              "type": "string"
+            }
+          ],
+          "codeOutputs": [
+            {
+              "name": "formatCustom",
+              "type": "string"
+            }
+          ]
+        },
+        "position": {
+          "x": 220,
+          "y": -2201
+        },
+        "style": {
+          "width": 340,
+          "height": 260
+        },
+        "width": 340,
+        "height": 260
+      },
+      {
+        "type": "state",
+        "data": {
+          "keyword": "timeFormat",
+          "value": "HH:mm"
+        },
+        "position": {
+          "x": 212,
+          "y": -2281
+        },
+        "id": "time-format-state__for__time-clock-custom-format"
+      },
+      {
+        "id": "ornamental-details-state",
+        "type": "state",
+        "data": {
+          "keyword": "ornamentalDetails",
+          "value": "true"
+        },
+        "position": {
+          "x": 203,
+          "y": -900
+        }
+      },
+      {
+        "id": "date-box-state",
+        "type": "state",
+        "data": {
+          "keyword": "dateBox",
+          "value": "true"
+        },
+        "position": {
+          "x": 179,
+          "y": -450
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-to-paint",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "paint-clock",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "clock-time-to-panel",
+        "type": "codeNodeEdge",
+        "source": "clock-time",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/time"
+      },
+      {
+        "id": "clock-date-to-panel",
+        "type": "codeNodeEdge",
+        "source": "clock-date",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/dateRaw"
+      },
+      {
+        "id": "date-style-to-panel",
+        "type": "codeNodeEdge",
+        "source": "date-style-state",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/dateStyle"
+      },
+      {
+        "id": "subtitle-to-panel",
+        "type": "codeNodeEdge",
+        "source": "subtitle-state",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/subtitle"
+      },
+      {
+        "id": "text-color-to-panel",
+        "type": "codeNodeEdge",
+        "source": "text-color-state",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/textColor"
+      },
+      {
+        "id": "date-color-to-panel",
+        "type": "codeNodeEdge",
+        "source": "date-color-state",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/dateColor"
+      },
+      {
+        "id": "accent-color-to-panel",
+        "type": "codeNodeEdge",
+        "source": "accent-color-state",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/accentColor"
+      },
+      {
+        "id": "background-start-to-panel",
+        "type": "codeNodeEdge",
+        "source": "background-start-state",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/backgroundStart"
+      },
+      {
+        "id": "background-end-to-panel",
+        "type": "codeNodeEdge",
+        "source": "background-end-state",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/backgroundEnd"
+      },
+      {
+        "id": "background-style-to-panel",
+        "type": "codeNodeEdge",
+        "source": "background-style-state",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/backgroundStyle"
+      },
+      {
+        "id": "font-family-to-panel",
+        "type": "codeNodeEdge",
+        "source": "font-family-state",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/fontFamily"
+      },
+      {
+        "id": "panel-to-paint",
+        "type": "codeNodeEdge",
+        "source": "clock-panel",
+        "target": "paint-clock",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      },
+      {
+        "id": "theme-to-panel",
+        "type": "codeNodeEdge",
+        "source": "theme-state",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/theme"
+      },
+      {
+        "id": "background-gradient-to-panel",
+        "type": "codeNodeEdge",
+        "source": "background-gradient-state",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/backgroundGradient"
+      },
+      {
+        "id": "decorative-elements-to-panel",
+        "type": "codeNodeEdge",
+        "source": "decorative-elements-state",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/decorativeElements"
+      },
+      {
+        "id": "time-format-to-format-code",
+        "type": "codeNodeEdge",
+        "source": "time-format-state",
+        "target": "time-clock-format",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "codeField/timeFormat"
+      },
+      {
+        "id": "time-format-code-to-clock",
+        "type": "codeNodeEdge",
+        "source": "time-clock-format",
+        "target": "clock-time",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/format"
+      },
+      {
+        "id": "time-format-to-custom-code",
+        "type": "codeNodeEdge",
+        "source": "time-format-state__for__time-clock-custom-format",
+        "target": "time-clock-custom-format",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "codeField/timeFormat"
+      },
+      {
+        "id": "time-custom-code-to-clock",
+        "type": "codeNodeEdge",
+        "source": "time-clock-custom-format",
+        "target": "clock-time",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/formatCustom"
+      },
+      {
+        "id": "ornamental-details-to-panel",
+        "type": "codeNodeEdge",
+        "source": "ornamental-details-state",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/ornamentalDetails"
+      },
+      {
+        "id": "date-box-to-panel",
+        "type": "codeNodeEdge",
+        "source": "date-box-state",
+        "target": "clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/dateBox"
+      }
+    ],
+    "fields": [
+      {
+        "name": "timeFormat",
+        "type": "select",
+        "label": "Time format",
+        "description": "Choose a 24-hour or 12-hour clock. The scene refreshes once per minute by default; choose seconds only on fast-refresh panels.",
+        "value": "HH:mm",
+        "options": [
+          {
+            "value": "HH:mm",
+            "label": "24h, minutes"
+          },
+          {
+            "value": "HH:mm:ss",
+            "label": "24h, seconds"
+          },
+          {
+            "value": "hh:mm tt",
+            "label": "12h, minutes"
+          },
+          {
+            "value": "hh:mm:ss tt",
+            "label": "12h, seconds"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "dateStyle",
+        "type": "select",
+        "label": "Date style",
+        "value": "weekday-month-day",
+        "options": [
+          "weekday-month-day",
+          "short-weekday",
+          "iso",
+          "none"
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "subtitle",
+        "type": "string",
+        "label": "Small caption",
+        "description": "Optional tiny caption above the date.",
+        "value": "",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "dateStyle",
+            "operator": "ne",
+            "value": "none"
+          }
+        ]
+      },
+      {
+        "name": "theme",
+        "type": "select",
+        "label": "Theme",
+        "value": "midnight-gallery",
+        "options": [
+          "midnight-gallery",
+          "classic-black-on-white",
+          "classic-white-on-black",
+          "warm-paper",
+          "sepia-press",
+          "blueprint",
+          "forest-mist",
+          "terracotta",
+          "plum-night",
+          "slate-gold",
+          "red-gallery",
+          "green-room",
+          "sandstone",
+          "custom"
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "textColor",
+        "type": "color",
+        "label": "Main numeral color",
+        "value": "#F7F1E3",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "dateColor",
+        "type": "color",
+        "label": "Date color",
+        "value": "#D8CBA8",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "accentColor",
+        "type": "color",
+        "label": "Accent color",
+        "value": "#D9A441",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "backgroundStart",
+        "type": "color",
+        "label": "Background top color",
+        "value": "#132238",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "backgroundEnd",
+        "type": "color",
+        "label": "Background bottom color",
+        "value": "#2A1E3F",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "backgroundGradient",
+        "type": "boolean",
+        "label": "Background gradient",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "decorativeElements",
+        "type": "boolean",
+        "label": "Background texture",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "ornamentalDetails",
+        "type": "boolean",
+        "label": "Ornamental frame details",
+        "description": "Show the border, horizon shape, and side accent marks.",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "dateBox",
+        "type": "boolean",
+        "label": "Date box and rule",
+        "description": "Show the box around the date text and the line above it.",
+        "value": "true",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "dateStyle",
+            "operator": "ne",
+            "value": "none"
+          }
+        ]
+      },
+      {
+        "name": "backgroundStyle",
+        "type": "select",
+        "label": "Background texture style",
+        "description": "Optional gallery-inspired dithered background for e-ink panels.",
+        "value": "poster-dither",
+        "options": [
+          "none",
+          "soft-gallery",
+          "poster-dither"
+        ],
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "decorativeElements",
+            "operator": "eq",
+            "value": "true"
+          }
+        ]
+      },
+      {
+        "name": "fontFamily",
+        "type": "font",
+        "label": "Clock font",
+        "value": "PTSans-Bold.ttf",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "settings": {
+      "refreshInterval": 60,
+      "backgroundColor": "#132238",
+      "execution": "interpreted",
+      "autoArrangeOnLoad": true,
+      "renderScale": 1
+    },
+    "apps": {
+      "typographicClockPanel": {
+        "name": "Typographic clock panel",
+        "category": "data",
+        "description": "Responsive editorial SVG clock panel with optional dithered gallery-style background texture.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "time",
+            "label": "Time",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "dateRaw",
+            "label": "Date as YYYY-MM-DD",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "dateStyle",
+            "label": "Date style",
+            "type": "select",
+            "options": [
+              "weekday-month-day",
+              "short-weekday",
+              "iso",
+              "none"
+            ],
+            "value": "weekday-month-day"
+          },
+          {
+            "name": "subtitle",
+            "label": "Small caption",
+            "type": "string",
+            "value": ""
+          },
+          {
+            "name": "theme",
+            "label": "Theme",
+            "type": "select",
+            "options": [
+              "midnight-gallery",
+              "classic-black-on-white",
+              "classic-white-on-black",
+              "warm-paper",
+              "sepia-press",
+              "blueprint",
+              "forest-mist",
+              "terracotta",
+              "plum-night",
+              "slate-gold",
+              "red-gallery",
+              "green-room",
+              "sandstone",
+              "custom"
+            ],
+            "value": "midnight-gallery"
+          },
+          {
+            "name": "backgroundGradient",
+            "label": "Background gradient",
+            "type": "boolean",
+            "value": "true"
+          },
+          {
+            "name": "decorativeElements",
+            "label": "Background texture",
+            "type": "boolean",
+            "value": "true"
+          },
+          {
+            "name": "ornamentalDetails",
+            "label": "Ornamental frame details",
+            "type": "boolean",
+            "value": "true"
+          },
+          {
+            "name": "dateBox",
+            "label": "Date box and rule",
+            "type": "boolean",
+            "value": "true"
+          },
+          {
+            "name": "textColor",
+            "label": "Main numeral color",
+            "type": "color",
+            "value": "#F7F1E3"
+          },
+          {
+            "name": "dateColor",
+            "label": "Date color",
+            "type": "color",
+            "value": "#D8CBA8"
+          },
+          {
+            "name": "accentColor",
+            "label": "Accent color",
+            "type": "color",
+            "value": "#D9A441"
+          },
+          {
+            "name": "backgroundStart",
+            "label": "Background top color",
+            "type": "color",
+            "value": "#132238"
+          },
+          {
+            "name": "backgroundEnd",
+            "label": "Background bottom color",
+            "type": "color",
+            "value": "#2A1E3F"
+          },
+          {
+            "name": "backgroundStyle",
+            "label": "Background texture",
+            "type": "select",
+            "options": [
+              "none",
+              "soft-gallery",
+              "poster-dither"
+            ],
+            "value": "poster-dither"
+          },
+          {
+            "name": "fontFamily",
+            "label": "Clock font",
+            "type": "font",
+            "value": "PTSans-Bold.ttf"
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Typographic clock panel\",\n  \"category\": \"data\",\n  \"description\": \"Responsive editorial SVG clock panel with themes, date options, and optional background decoration.\",\n  \"version\": \"1.1.0\",\n  \"fields\": [\n    {\n      \"name\": \"time\",\n      \"label\": \"Time\",\n      \"type\": \"string\",\n      \"required\": true\n    },\n    {\n      \"name\": \"dateRaw\",\n      \"label\": \"Date as YYYY-MM-DD\",\n      \"type\": \"string\",\n      \"required\": true\n    },\n    {\n      \"name\": \"dateStyle\",\n      \"label\": \"Date style\",\n      \"type\": \"select\",\n      \"options\": [\n        \"weekday-month-day\",\n        \"short-weekday\",\n        \"iso\",\n        \"none\"\n      ],\n      \"value\": \"weekday-month-day\"\n    },\n    {\n      \"name\": \"subtitle\",\n      \"label\": \"Small caption\",\n      \"type\": \"string\",\n      \"value\": \"\"\n    },\n    {\n      \"name\": \"theme\",\n      \"label\": \"Theme\",\n      \"type\": \"select\",\n      \"options\": [\n        \"midnight-gallery\",\n        \"classic-black-on-white\",\n        \"classic-white-on-black\",\n        \"warm-paper\",\n        \"sepia-press\",\n        \"blueprint\",\n        \"forest-mist\",\n        \"terracotta\",\n        \"plum-night\",\n        \"slate-gold\",\n        \"red-gallery\",\n        \"green-room\",\n        \"sandstone\",\n        \"custom\"\n      ],\n      \"value\": \"midnight-gallery\"\n    },\n    {\n      \"name\": \"backgroundGradient\",\n      \"label\": \"Background gradient\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    },\n    {\n      \"name\": \"decorativeElements\",\n      \"label\": \"Background texture\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    },\n    {\n      \"name\": \"ornamentalDetails\",\n      \"label\": \"Ornamental frame details\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    },\n    {\n      \"name\": \"dateBox\",\n      \"label\": \"Date box and rule\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    },\n    {\n      \"name\": \"textColor\",\n      \"label\": \"Main numeral color\",\n      \"type\": \"color\",\n      \"value\": \"#F7F1E3\"\n    },\n    {\n      \"name\": \"dateColor\",\n      \"label\": \"Date color\",\n      \"type\": \"color\",\n      \"value\": \"#D8CBA8\"\n    },\n    {\n      \"name\": \"accentColor\",\n      \"label\": \"Accent color\",\n      \"type\": \"color\",\n      \"value\": \"#D9A441\"\n    },\n    {\n      \"name\": \"backgroundStart\",\n      \"label\": \"Background top color\",\n      \"type\": \"color\",\n      \"value\": \"#132238\"\n    },\n    {\n      \"name\": \"backgroundEnd\",\n      \"label\": \"Background bottom color\",\n      \"type\": \"color\",\n      \"value\": \"#2A1E3F\"\n    },\n    {\n      \"name\": \"backgroundStyle\",\n      \"label\": \"Background texture\",\n      \"type\": \"select\",\n      \"options\": [\n        \"none\",\n        \"soft-gallery\",\n        \"poster-dither\"\n      ],\n      \"value\": \"poster-dither\"\n    },\n    {\n      \"name\": \"fontFamily\",\n      \"label\": \"Clock font\",\n      \"type\": \"font\",\n      \"value\": \"PTSans-Bold.ttf\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "function clamp(value, min, max) {\n  if (value < min) {\n    return min\n  }\n  if (value > max) {\n    return max\n  }\n  return value\n}\n\n// Coordinates and sizes are drawn rounded to one decimal.\nfunction oneDecimal(value) {\n  return Number(value.toFixed(1))\n}\n\nfunction onlyHex(value, fallback) {\n  const text = String(value || '').trim()\n  if (/^#[0-9a-fA-F]{6}$/.test(text)) {\n    return text\n  }\n  return fallback\n}\n\nfunction hexToRgb(hex) {\n  const value = hex.charAt(0) === '#' ? hex.substring(1) : hex\n  return [\n    parseInt(value.substring(0, 2), 16),\n    parseInt(value.substring(2, 4), 16),\n    parseInt(value.substring(4, 6), 16),\n  ]\n}\n\nfunction rgbToHex(r, g, b) {\n  function component(value) {\n    const clamped = Math.round(clamp(value, 0, 255))\n    const hex = clamped.toString(16)\n    return hex.length === 1 ? '0' + hex : hex\n  }\n\n  return '#' + component(r) + component(g) + component(b)\n}\n\nfunction mix(a, b, amount) {\n  const ca = hexToRgb(a)\n  const cb = hexToRgb(b)\n  return rgbToHex(\n    ca[0] + (cb[0] - ca[0]) * amount,\n    ca[1] + (cb[1] - ca[1]) * amount,\n    ca[2] + (cb[2] - ca[2]) * amount,\n  )\n}\n\nfunction dayOfWeek(year, month, day) {\n  const offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4]\n  let y = year\n  if (month < 3) {\n    y -= 1\n  }\n  return (y + Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400) + offsets[month - 1] + day) % 7\n}\n\nfunction themeColors(name, custom) {\n  const themes = {\n    'midnight-gallery': ['#132238', '#2A1E3F', '#F7F1E3', '#D8CBA8', '#D9A441'],\n    'classic-black-on-white': ['#F8F8F2', '#EDEBE3', '#111111', '#333333', '#111111'],\n    'classic-white-on-black': ['#080808', '#171717', '#FFFFFF', '#D7D7D7', '#FFFFFF'],\n    'warm-paper': ['#F4E8CF', '#D8C7A3', '#2A2118', '#5B4630', '#B46A3C'],\n    'sepia-press': ['#38291D', '#6A4A2C', '#F5E6C8', '#D8B882', '#C8873A'],\n    'blueprint': ['#0A2540', '#173B63', '#EFF6FF', '#B9D7EA', '#73B7D6'],\n    'forest-mist': ['#0F2A24', '#25483B', '#F0F3DD', '#C9D6B8', '#94B77B'],\n    'terracotta': ['#321C19', '#6E3429', '#FFF1DE', '#E5B88B', '#D9825B'],\n    'plum-night': ['#211529', '#4A2948', '#FFF3F7', '#D9B8D7', '#D88BA6'],\n    'slate-gold': ['#19232D', '#35404A', '#F2EFE6', '#CFC6B2', '#D3A84C'],\n    'red-gallery': ['#2D1115', '#5D1F28', '#FFF0E8', '#E4B9A7', '#C75B4A'],\n    'green-room': ['#10271B', '#31533B', '#F5F2DD', '#D0D2A8', '#B6A94A'],\n    'sandstone': ['#E9D8B8', '#BA9466', '#271E17', '#5A432B', '#9D6540'],\n  }\n  const chosen = name === 'custom' ? null : themes[name]\n  if (!chosen) return custom\n  return { backgroundStart: chosen[0], backgroundEnd: chosen[1], textColor: chosen[2], dateColor: chosen[3], accentColor: chosen[4] }\n}\n\nfunction asBool(value, fallback) {\n  if (value === true || value === 'true' || value === '1') return true\n  if (value === false || value === 'false' || value === '0') return false\n  return fallback\n}\n\nfunction formatDate(raw, style) {\n  if (style === 'none') {\n    return ''\n  }\n\n  const parts = raw.split('-')\n  if (parts.length < 3) {\n    return raw\n  }\n\n  const year = Number(parts[0])\n  const month = Number(parts[1])\n  const day = Number(parts[2])\n  const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\n  const shortWeekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']\n  const months = [\n    'January', 'February', 'March', 'April', 'May', 'June',\n    'July', 'August', 'September', 'October', 'November', 'December',\n  ]\n  const dow = dayOfWeek(year, month, day)\n\n  if (style === 'iso') {\n    return raw\n  }\n  if (style === 'short-weekday') {\n    return shortWeekdays[dow] + ' ' + day + ' ' + months[month - 1].substring(0, 3)\n  }\n  return weekdays[dow] + ', ' + months[month - 1] + ' ' + day\n}\n\nfunction estimatedTextWidth(text, size) {\n  let units = 0\n  for (let i = 0; i < text.length; i++) {\n    const ch = text.charAt(i)\n    if (ch === ':' || ch === ' ') {\n      units += 0.32\n    } else if (ch === '1') {\n      units += 0.48\n    } else if (ch === ',' || ch === '.') {\n      units += 0.25\n    } else {\n      units += 0.58\n    }\n  }\n  return units * size\n}\n\nfunction fitFontSize(text, target, maxWidth) {\n  const width = estimatedTextWidth(text, target)\n  if (width <= maxWidth) {\n    return target\n  }\n  return target * maxWidth / Math.max(width, 1)\n}\n\nfunction truncateToWidth(text, size, maxWidth) {\n  if (estimatedTextWidth(text, size) <= maxWidth) {\n    return text\n  }\n\n  let out = text\n  while (out.length > 1 && estimatedTextWidth(out + '…', size) > maxWidth) {\n    out = out.substring(0, out.length - 1)\n  }\n  return out + '…'\n}\n\nfunction timeLines(time) {\n  const text = String(time || '')\n  const spaceParts = text.split(' ')\n  if (spaceParts.length >= 2) {\n    const suffix = spaceParts.slice(1).join(' ').toUpperCase()\n    return [spaceParts[0], suffix]\n  }\n\n  return [text]\n}\n\n// Path data for a rectangle with rounded corners.\nfunction roundedRectPath(x, y, w, h, r) {\n  const rr = clamp(r, 0, Math.min(w, h) / 2)\n  const left = oneDecimal(x)\n  const top = oneDecimal(y)\n  const right = oneDecimal(x + w)\n  const bottom = oneDecimal(y + h)\n  return `M ${oneDecimal(x + rr)} ${top}` +\n    ` L ${oneDecimal(x + w - rr)} ${top}` +\n    ` Q ${right} ${top} ${right} ${oneDecimal(y + rr)}` +\n    ` L ${right} ${oneDecimal(y + h - rr)}` +\n    ` Q ${right} ${bottom} ${oneDecimal(x + w - rr)} ${bottom}` +\n    ` L ${oneDecimal(x + rr)} ${bottom}` +\n    ` Q ${left} ${bottom} ${left} ${oneDecimal(y + h - rr)}` +\n    ` L ${left} ${oneDecimal(y + rr)}` +\n    ` Q ${left} ${top} ${oneDecimal(x + rr)} ${top} Z`\n}\n\n// The dithered dot field and the sweeping line behind the numerals.\nfunction BackgroundTexture({ W, H, style, start, end, accent }) {\n  if (style === 'none') {\n    return null\n  }\n\n  const dots = []\n  const minSide = Math.min(W, H)\n  const step = clamp(minSide / 20, 18, 56)\n  const dotA = mix(start, accent, 0.30)\n  const dotB = mix(end, '#ffffff', 0.16)\n  const columns = Math.ceil(W / step) + 1\n  const rows = Math.ceil(H / step) + 1\n\n  for (let y = 0; y < rows; y++) {\n    for (let x = 0; x < columns; x++) {\n      const wobble = ((x * 37 + y * 19) % 23) / 23\n      const px = x * step + (wobble - 0.5) * step * 0.35\n      const py = y * step + (((x * 11 + y * 29) % 17) / 17 - 0.5) * step * 0.35\n      const distance = Math.abs(px - W * 0.72) / W + Math.abs(py - H * 0.28) / H\n      let radius = step * clamp(0.07 + (1 - distance) * 0.20 + wobble * 0.08, 0.04, 0.25)\n      let color = (x + y) % 2 === 0 ? dotA : dotB\n\n      if (style === 'soft-gallery') {\n        radius *= 1.55\n        color = mix(color, end, 0.24)\n      }\n\n      dots.push(<circle cx={oneDecimal(px)} cy={oneDecimal(py)} r={oneDecimal(radius)} fill={color} opacity=\"0.42\" />)\n    }\n  }\n\n  const lineColor = mix(start, accent, style === 'soft-gallery' ? 0.28 : 0.44)\n  const lineWidth = clamp(minSide / 210, 1.1, 5)\n  const sweep =\n    `M ${oneDecimal(W * 0.08)} ${oneDecimal(H * 0.79)}` +\n    ` C ${oneDecimal(W * 0.27)} ${oneDecimal(H * 0.61)} ` +\n    `${oneDecimal(W * 0.50)} ${oneDecimal(H * 0.94)} ` +\n    `${oneDecimal(W * 0.92)} ${oneDecimal(H * 0.69)}`\n\n  return (\n    <>\n      {dots}\n      <path d={sweep} fill=\"none\" stroke={lineColor} strokeWidth={oneDecimal(lineWidth)} opacity=\"0.62\" />\n    </>\n  )\n}\n\nexport function get(app) {\n  // The scene sets settings.renderScale to 1, so the app is told the panel's\n  // own size even on a big panel: this clock's sizes and their pixel limits\n  // are worked out for the panel's pixels, and the drawing maps onto it one\n  // to one.\n  const W = app.frame.width\n  const H = app.frame.height\n  const minSide = Math.min(W, H)\n  const portrait = H > W * 1.08\n  const margin = minSide * 0.055\n\n  const time = String(app.config.time || '--:--')\n  const dateStyle = String(app.config.dateStyle || 'weekday-month-day')\n  const date = formatDate(String(app.config.dateRaw || ''), dateStyle)\n  const subtitle = dateStyle === 'none' ? '' : String(app.config.subtitle || '')\n  const customTheme = {\n    textColor: onlyHex(app.config.textColor, '#F7F1E3'),\n    dateColor: onlyHex(app.config.dateColor, '#D8CBA8'),\n    accentColor: onlyHex(app.config.accentColor, '#D9A441'),\n    backgroundStart: onlyHex(app.config.backgroundStart, '#132238'),\n    backgroundEnd: onlyHex(app.config.backgroundEnd, '#2A1E3F'),\n  }\n  const colors = themeColors(String(app.config.theme || 'midnight-gallery'), customTheme)\n  const textColor = colors.textColor\n  const dateColor = colors.dateColor\n  const accentColor = colors.accentColor\n  const bgStart = colors.backgroundStart\n  const bgEnd = colors.backgroundEnd\n  const textureEnabled = asBool(app.config.decorativeElements, true)\n  const ornamentalEnabled = asBool(app.config.ornamentalDetails, true)\n  const dateBoxEnabled = asBool(app.config.dateBox, true)\n  const bgStyle = textureEnabled ? String(app.config.backgroundStyle || 'poster-dither') : 'none'\n  const gradientEnabled = asBool(app.config.backgroundGradient, true)\n  const font = String(app.config.fontFamily || 'PTSans-Bold.ttf')\n\n  const innerW = W - margin * 2\n  const innerH = H - margin * 2\n  const clockMaxWidth = innerW * (portrait ? 0.88 : 0.90)\n  const ruleGap = minSide * 0.026\n  const lines = timeLines(time)\n  const dateSize = clamp(minSide * (portrait ? 0.056 : 0.060), 20, 78)\n  const captionSize = subtitle ? clamp(minSide * 0.032, 12, 36) : 0\n  const dateBlock = ruleGap * 2.55 + dateSize * 1.35 + captionSize * 1.35\n  const lineGap = portrait ? minSide * 0.018 : 0\n  const availableForTime = Math.max(minSide * 0.2, innerH - dateBlock - minSide * 0.038)\n  let timeSize = (availableForTime - lineGap * Math.max(0, lines.length - 1)) / Math.max(lines.length * 0.98, 1)\n\n  for (let i = 0; i < lines.length; i++) {\n    timeSize = Math.min(timeSize, fitFontSize(lines[i], timeSize, clockMaxWidth))\n  }\n  timeSize = clamp(timeSize, minSide * 0.13, portrait ? minSide * 0.52 : minSide * 0.49)\n\n  const hasDate = dateStyle !== 'none'\n  const timeBlockH = timeSize * lines.length + lineGap * Math.max(0, lines.length - 1)\n  const contentH = timeBlockH + (hasDate ? dateBlock : 0)\n  const top = margin + Math.max(0, (innerH - contentH) / 2)\n  const firstBaseline = top + timeSize * 0.82\n  const lastBaseline = firstBaseline + (timeSize + lineGap) * (lines.length - 1)\n  const timeBottom = lastBaseline + timeSize * 0.18\n  const ruleW = clamp(innerW * 0.22, minSide * 0.18, innerW * 0.42)\n  const ruleY = timeBottom + ruleGap\n  const captionY = ruleY + ruleGap + captionSize\n  const dateY = ruleY + ruleGap + (subtitle ? captionSize * 1.35 : 0) + dateSize\n  const safeDateY = Math.min(dateY, H - margin - dateSize * 0.15)\n  const dateText = truncateToWidth(date, dateSize, innerW * 0.88)\n  const captionText = truncateToWidth(subtitle.toUpperCase(), captionSize || 1, innerW)\n\n  const frameLine = mix(bgStart, accentColor, 0.36)\n  const cardFill = mix(bgEnd, bgStart, 0.50)\n  const cardStroke = mix(bgStart, accentColor, 0.46)\n  const shadow = mix(bgEnd, '#000000', 0.35)\n  const horizon = mix(bgEnd, accentColor, 0.20)\n  const glowCx = portrait ? W * 0.50 : W * 0.48\n  const glowCy = portrait ? H * 0.38 : H * 0.43\n  const glowR = Math.max(W, H) * (portrait ? 0.70 : 0.58)\n  const dateCardW = clamp(estimatedTextWidth(dateText, dateSize) + minSide * 0.18, innerW * 0.42, innerW * 0.94)\n  const dateCardH = dateSize * 1.62 + (subtitle ? captionSize * 1.30 : 0)\n  const dateCardX = (W - dateCardW) / 2\n  const dateCardY = safeDateY - dateSize * 1.04 - (subtitle ? captionSize * 1.25 : 0)\n  const cornerRadius = clamp(minSide * 0.024, 10, 28)\n  const dateCardPath = roundedRectPath(dateCardX, dateCardY, dateCardW, dateCardH, cornerRadius * 0.82)\n\n  const horizonPath =\n    `M 0 ${oneDecimal(H * 0.74)}` +\n    ` C ${oneDecimal(W * 0.22)} ${oneDecimal(H * 0.66)} ` +\n    `${oneDecimal(W * 0.52)} ${oneDecimal(H * 0.83)} ` +\n    `${W} ${oneDecimal(H * 0.70)}` +\n    ` L ${W} ${H} L 0 ${H} Z`\n  const accentBarPath =\n    `M ${oneDecimal(margin)} ${oneDecimal(margin + minSide * 0.095)}` +\n    ` L ${oneDecimal(margin)} ${oneDecimal(H - margin - minSide * 0.095)}`\n\n  // Each line of the time is drawn twice: a soft offset shadow, then the numerals.\n  const timeText = lines.map((line, i) => {\n    const baseline = firstBaseline + (timeSize + lineGap) * i\n    return (\n      <>\n        <text\n          x={oneDecimal(W / 2 + minSide * 0.010)}\n          y={oneDecimal(baseline + minSide * 0.014)}\n          textAnchor=\"middle\"\n          dominantBaseline=\"alphabetic\"\n          fontFamily={font}\n          fontSize={oneDecimal(timeSize)}\n          fontWeight=\"700\"\n          fill={shadow}\n          opacity=\"0.30\"\n        >\n          {line}\n        </text>\n        <text\n          x={oneDecimal(W / 2)}\n          y={oneDecimal(baseline)}\n          textAnchor=\"middle\"\n          dominantBaseline=\"alphabetic\"\n          fontFamily={font}\n          fontSize={oneDecimal(timeSize)}\n          fontWeight=\"700\"\n          fill={textColor}\n        >\n          {line}\n        </text>\n      </>\n    )\n  })\n\n  return (\n    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>\n      <defs>\n        <linearGradient id=\"bg\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2=\"0\" y2={H}>\n          <stop offset=\"0\" stopColor={bgStart} />\n          <stop offset=\"0.58\" stopColor={mix(bgStart, bgEnd, 0.52)} />\n          <stop offset=\"1\" stopColor={bgEnd} />\n        </linearGradient>\n        <radialGradient id=\"timeGlow\" gradientUnits=\"userSpaceOnUse\" cx={oneDecimal(glowCx)} cy={oneDecimal(glowCy)} r={oneDecimal(glowR)}>\n          <stop offset=\"0\" stopColor={accentColor} stopOpacity=\"0.30\" />\n          <stop offset=\"0.48\" stopColor={accentColor} stopOpacity=\"0.10\" />\n          <stop offset=\"1\" stopColor={accentColor} stopOpacity=\"0\" />\n        </radialGradient>\n        <radialGradient\n          id=\"vignette\"\n          gradientUnits=\"userSpaceOnUse\"\n          cx={oneDecimal(W * 0.50)}\n          cy={oneDecimal(H * 0.50)}\n          r={oneDecimal(Math.max(W, H) * 0.72)}\n        >\n          <stop offset=\"0\" stopColor=\"#000000\" stopOpacity=\"0\" />\n          <stop offset=\"0.72\" stopColor=\"#000000\" stopOpacity=\"0.08\" />\n          <stop offset=\"1\" stopColor=\"#000000\" stopOpacity=\"0.34\" />\n        </radialGradient>\n      </defs>\n      <rect x=\"0\" y=\"0\" width={W} height={H} fill={gradientEnabled ? 'url(#bg)' : bgStart} />\n      {gradientEnabled && <rect x=\"0\" y=\"0\" width={W} height={H} fill=\"url(#timeGlow)\" />}\n      {ornamentalEnabled && <path d={horizonPath} fill={horizon} opacity=\"0.20\" />}\n      <BackgroundTexture W={W} H={H} style={bgStyle} start={bgStart} end={bgEnd} accent={accentColor} />\n      {ornamentalEnabled && (\n        <>\n          <path\n            d={roundedRectPath(margin, margin, innerW, innerH, cornerRadius)}\n            fill=\"none\"\n            stroke={frameLine}\n            strokeWidth={oneDecimal(clamp(minSide / 260, 1, 5))}\n            opacity=\"0.86\"\n          />\n          <path d={accentBarPath} stroke={accentColor} strokeWidth={oneDecimal(clamp(minSide / 95, 4, 11))} opacity=\"0.78\" />\n        </>\n      )}\n\n      {timeText}\n\n      {hasDate && dateBoxEnabled && (\n        <>\n          <line\n            x1={oneDecimal((W - ruleW) / 2)}\n            y1={oneDecimal(ruleY)}\n            x2={oneDecimal((W + ruleW) / 2)}\n            y2={oneDecimal(ruleY)}\n            stroke={accentColor}\n            strokeWidth={oneDecimal(clamp(minSide / 130, 2, 8))}\n          />\n          <path d={dateCardPath} fill={cardFill} opacity=\"0.66\" />\n          <path\n            d={dateCardPath}\n            fill=\"none\"\n            stroke={cardStroke}\n            strokeWidth={oneDecimal(clamp(minSide / 420, 1, 3))}\n            opacity=\"0.74\"\n          />\n        </>\n      )}\n\n      {subtitle !== '' && hasDate && (\n        <text\n          x={oneDecimal(W / 2)}\n          y={oneDecimal(captionY)}\n          textAnchor=\"middle\"\n          dominantBaseline=\"alphabetic\"\n          fontFamily=\"PTSans-Bold.ttf\"\n          fontSize={oneDecimal(captionSize)}\n          fontWeight=\"700\"\n          fill={accentColor}\n        >\n          {captionText}\n        </text>\n      )}\n\n      {hasDate && (\n        <text\n          x={oneDecimal(W / 2)}\n          y={oneDecimal(safeDateY)}\n          textAnchor=\"middle\"\n          dominantBaseline=\"alphabetic\"\n          fontFamily=\"PTSans-Regular.ttf\"\n          fontSize={oneDecimal(dateSize)}\n          fill={dateColor}\n        >\n          {dateText}\n        </text>\n      )}\n      {gradientEnabled && <rect x=\"0\" y=\"0\" width={W} height={H} fill=\"url(#vignette)\" />}\n    </svg>\n  )\n}\n"
+        },
+        "origin": "typographicClockPanel"
+      }
+    },
+    "customEvents": []
+  }
+]

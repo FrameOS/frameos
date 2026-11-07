@@ -290,6 +290,8 @@ export function cloudSceneDeployErrorMessage(code: string | null | undefined, st
       return 'This scene is no longer available in the store'
     case 'scene_version_missing':
       return 'The store has no published version of this scene to update to'
+    case 'frame_update_required':
+      return "This scene needs a newer FrameOS than the frame runs. Update FrameOS on the frame first"
     default:
       return code ? `Failed to push the scenes (${code})` : `Failed to push the scenes (HTTP ${status})`
   }

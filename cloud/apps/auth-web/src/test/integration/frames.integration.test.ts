@@ -32,6 +32,7 @@ import {
   POST as assignFrameScenes,
 } from "../../../app/api/frames/[frameId]/scenes/route";
 import { POST as updateFrameScene } from "../../../app/api/frames/[frameId]/scenes/update/route";
+import { POST as addFrameScene } from "../../../app/api/frames/[frameId]/scenes/add/route";
 import {
   GET as getDeviceScenes,
   POST as postDeviceScenes,
@@ -323,10 +324,14 @@ async function publishSceneVersion(
   sceneId: string,
   version: number,
   riskFlags: string[] = [],
+  // The version's declared minimum FrameOS (template.json's frameosVersion);
+  // the scene row mirrors the latest version's, as store-publish does.
+  frameosVersion: string | null = null,
 ) {
   await db.insert(storeSceneVersions).values({
     content: sceneZip(`${sceneId}-v${version}`),
     contentType: "application/zip",
+    frameosVersion,
     riskFlags,
     sceneId,
     sha256: `test-v${version}`,
@@ -335,7 +340,7 @@ async function publishSceneVersion(
   });
   await db
     .update(storeScenes)
-    .set({ latestVersion: version, riskFlags })
+    .set({ frameosVersion, latestVersion: version, riskFlags })
     .where(eq(storeScenes.id, sceneId));
 }
 
@@ -4153,6 +4158,102 @@ describe("scene updates: a newer store version of an assigned scene", () => {
       { assigned_version: 1, latest_version: 2, scene_id: following.id, scene_version: null, update_available: true },
       { assigned_version: 1, latest_version: 2, scene_id: pinned.id, scene_version: 1, update_available: true },
     ]);
+  });
+
+  describe("a version that needs a newer FrameOS than the frame runs", () => {
+    // store_scene_versions.frameos_version is the version's declared minimum
+    // (template.json). The store's JSX scenes need 2026.10.21+; a frame on an
+    // older runtime would show nothing, so the cloud neither offers nor
+    // pushes such a version to it.
+    async function frameRunning(frameId: string, version: string | null) {
+      await db.update(frames).set({ frameosVersion: version }).where(eq(frames.id, frameId));
+    }
+
+    function add(frameId: string, body: Record<string, unknown>) {
+      return addFrameScene(
+        postJson(`/api/frames/${frameId}/scenes/add`, body, { origin: baseUrl }),
+        routeParams(frameId),
+      );
+    }
+
+    it("is not offered as an update, and the update route refuses it until the frame runs it", async () => {
+      const { accountId, frame_id } = await confirmedFrame();
+      await frameRunning(frame_id, "2026.10.12");
+      const scene = await createStoreScene(accountId, { name: "Clock" });
+      const assigned = await assignFrameScenes(
+        postJson(`/api/frames/${frame_id}/scenes`, { scenes: [{ scene_id: scene.id }] }, { origin: baseUrl }),
+        routeParams(frame_id),
+      );
+      expect(assigned.status).toBe(200);
+      await publishSceneVersion(scene.id, 2, [], "2026.11.0");
+
+      expect(await sceneRows(frame_id)).toMatchObject([
+        { assigned_version: 1, latest_version: 2, update_available: false, update_requires_frameos_version: "2026.11.0" },
+      ]);
+      const pushesBefore = (await setScenesCommands(frame_id)).length;
+      const refused = await update(frame_id, { scene_id: scene.id });
+      expect(refused.status).toBe(409);
+      const body = (await refused.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        error: "frame_update_required",
+        frameos_version: "2026.10.12",
+        min_frameos_version: "2026.11.0",
+        scene_id: scene.id,
+        scene_version: 2,
+      });
+      expect(body.detail).toBe(
+        "Clock needs FrameOS 2026.11.0 or later, and this frame runs 2026.10.12. Update FrameOS on the frame first.",
+      );
+      expect(await setScenesCommands(frame_id)).toHaveLength(pushesBefore);
+
+      await frameRunning(frame_id, "2026.11.3");
+      const [row] = await sceneRows(frame_id);
+      expect(row).toMatchObject({ update_available: true });
+      expect(row).not.toHaveProperty("update_requires_frameos_version");
+      const updated = await update(frame_id, { scene_id: scene.id });
+      expect(updated.status).toBe(200);
+      expect(await sceneRows(frame_id)).toMatchObject([{ assigned_version: 2, update_available: false }]);
+    });
+
+    it("refuses a new install of such a version, takes an older pinned one, and never blocks what the frame already holds", async () => {
+      const { accountId, frame_id } = await confirmedFrame();
+      await frameRunning(frame_id, "2026.10.12");
+      const held = await createStoreScene(accountId, { name: "Held" });
+      expect((await add(frame_id, { scene_id: held.id })).status).toBe(200);
+
+      const jsx = await createStoreScene(accountId, { name: "Word clock" });
+      await publishSceneVersion(jsx.id, 2, [], "2026.11.0");
+      const refused = await add(frame_id, { scene_id: jsx.id });
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toMatchObject({
+        error: "frame_update_required",
+        min_frameos_version: "2026.11.0",
+        scene_version: 2,
+      });
+      // Version 1 declared no minimum: pinning it installs.
+      expect((await add(frame_id, { scene_id: jsx.id, scene_version: 1 })).status).toBe(200);
+
+      // The version the frame already holds is not checked again: it went
+      // out before (an install from before this rule, here), and a push of
+      // the same list must not start failing because of it.
+      await db
+        .update(storeSceneVersions)
+        .set({ frameosVersion: "2026.11.0" })
+        .where(eq(storeSceneVersions.sceneId, held.id));
+      const resent = await assignFrameScenes(
+        postJson(
+          `/api/frames/${frame_id}/scenes`,
+          { scenes: [{ scene_id: jsx.id, scene_version: 1 }, { scene_id: held.id }] },
+          { origin: baseUrl },
+        ),
+        routeParams(frame_id),
+      );
+      expect(resent.status).toBe(200);
+
+      // A frame that reports no version is not held back.
+      await frameRunning(frame_id, null);
+      expect((await add(frame_id, { scene_id: jsx.id })).status).toBe(200);
+    });
   });
 
   it("updates one scene: a pin moves to the latest and stays a pin, and the push carries the new bytes", async () => {

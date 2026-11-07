@@ -1,0 +1,205 @@
+[
+  {
+    "id": "0b8946dd-82ff-4d52-8180-2b425a1e5a4d",
+    "name": "Day agenda",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 300,
+      "backgroundColor": "#fafaf9"
+    },
+    "fields": [
+      {
+        "name": "iCalURL",
+        "label": "iCal URL",
+        "type": "string",
+        "access": "public",
+        "persist": "disk",
+        "placeholder": "https://calendar.google.com/calendar/ical/.../basic.ics"
+      }
+    ],
+    "apps": {
+      "dayAgenda": {
+        "name": "Day agenda",
+        "description": "A day's events from a calendar feed, the day on the left: data/icalJson's events in, a JSX UI out.",
+        "category": "data",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "events",
+            "label": "Events (from iCal to Events JSON)",
+            "type": "json",
+            "value": "[]"
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Day agenda\",\n  \"category\": \"data\",\n  \"description\": \"A day's events from a calendar feed, the day on the left: data/icalJson's events in, a JSX UI out.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"events\",\n      \"label\": \"Events (from iCal to Events JSON)\",\n      \"type\": \"json\",\n      \"value\": \"[]\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// A day agenda from a calendar feed: the day on the left, its events on the\n// right. `events` is data/icalJson's list in the frame's time zone, each\n// { summary, startTime, endTime, location }: a time \"YYYY-MM-DDTHH:MM:SS\", an\n// all-day event's date alone (\"YYYY-MM-DD\", its end the last day it covers).\nconst DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nconst MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',\n  'September', 'October', 'November', 'December']\nconst BARS = ['border-sky-400', 'border-violet-400', 'border-amber-400', 'border-rose-400',\n  'border-emerald-400', 'border-teal-400', 'border-orange-400', 'border-indigo-400']\n\nconst pad = (n) => String(n).padStart(2, '0')\nconst dayOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`\nconst stampOf = (d) => `${dayOf(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`\nconst dateOf = (s) => new Date(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10),\n  +s.slice(11, 13) || 0, +s.slice(14, 16) || 0)\nconst allDay = (e) => e.startTime.length <= 10\nconst covers = (e, day) => e.startTime.slice(0, 10) <= day && e.endTime.slice(0, 10) >= day\n// The bar's color follows the title, so an event keeps it from day to day.\nconst bar = (title) => {\n  let h = 0\n  for (let i = 0; i < title.length; i++) h = (h * 31 + title.charCodeAt(i)) | 0\n  return BARS[Math.abs(h) % BARS.length]\n}\nconst inMinutes = (m) => m < 60 ? `${m} min`\n  : m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`\n\n// The size the UI is laid out at: the image it draws into, else the frame\n// as the scene sees it (app.frame is the panel's, before the turn).\nconst uiSize = (app, context) => {\n  const turned = [90, 270].includes(app.frame.rotate)\n  return [context?.imageWidth ?? (turned ? app.frame.height : app.frame.width),\n    context?.imageHeight ?? (turned ? app.frame.width : app.frame.height)]\n}\n\nexport function get(app, context) {\n  const [, height] = uiSize(app, context)\n  const now = new Date()\n  const nowStamp = stampOf(now)\n  const today = dayOf(now)\n  const tomorrow = dayOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1))\n  const events = (Array.isArray(app.config.events) ? app.config.events : []).filter((e) =>\n    e && typeof e.startTime === 'string' && typeof e.endTime === 'string')\n  const past = (e) => !allDay(e) && e.endTime <= nowStamp\n  const ongoing = (e) => !allDay(e) && e.startTime <= nowStamp && e.endTime > nowStamp\n\n  // Today while something on it is still to come, else the next day that has\n  // anything on it.\n  let day = today\n  if (!events.some((e) => covers(e, today) && !past(e))) {\n    const ahead = events.filter((e) => !past(e) && e.endTime.slice(0, 10) >= today)\n      .map((e) => (e.startTime.slice(0, 10) > today ? e.startTime.slice(0, 10) : tomorrow))\n      .sort()\n    if (ahead.length) day = ahead[0]\n  }\n  const list = events.filter((e) => covers(e, day)).sort((a, b) =>\n    allDay(a) !== allDay(b) ? (allDay(a) ? -1 : 1) : a.startTime < b.startTime ? -1 : 1)\n\n  // As many rows as fit: the ones that are over go first, then a \"more\" row.\n  const fit = Math.max(1, Math.floor((height - 36) / 76))\n  let rows = list.length > fit ? list.filter((e) => !past(e)) : list\n  const more = rows.length > fit ? rows.length - fit + 1 : 0\n  if (more) rows = rows.slice(0, fit - 1)\n\n  const date = dateOf(day)\n  const label = day === today ? DAYS[date.getDay()] : day === tomorrow ? 'Tomorrow' : DAYS[date.getDay()]\n  const current = list.find(ongoing)\n  const next = list.find((e) => !allDay(e) && e.startTime > nowStamp)\n  const status = current ? `Now: ${current.summary}`\n    : next && day === today ? `Next: ${next.summary} in ${inMinutes(Math.max(1,\n      Math.round((dateOf(next.startTime) - now) / 60000)))}`\n    : next ? `First: ${next.summary} at ${next.startTime.slice(11, 16)}`\n    : list.length || !app.state.iCalURL ? '' : 'Nothing coming up'\n\n  return (\n    <div className=\"flex bg-stone-50 text-stone-900\">\n      <div className=\"flex flex-col justify-between w-40 sm:w-64 p-4 sm:p-8 bg-stone-900 text-stone-50\">\n        <div className=\"flex flex-col\">\n          <span className=\"text-lg sm:text-2xl uppercase text-amber-300\">{label}</span>\n          <span className=\"text-7xl sm:text-9xl font-bold leading-none\">{date.getDate()}</span>\n          <span className=\"text-xl sm:text-3xl\">{MONTHS[date.getMonth()]}</span>\n        </div>\n        <div className=\"hidden sm:flex flex-col gap-1 text-stone-400\">\n          {list.length ? <span>{list.length === 1 ? '1 event' : `${list.length} events`}</span> : null}\n          {status ? <span className=\"line-clamp-2\">{status}</span> : null}\n        </div>\n      </div>\n      <div className=\"flex-1 min-w-0 flex flex-col gap-3 p-4 sm:p-6\">\n        {rows.length ? null : (\n          <div className=\"flex-1 flex items-center justify-center text-center text-xl text-stone-400 px-8\">\n            {app.state.iCalURL ? 'No events in the calendar' : \"Add the calendar's iCal URL in the scene's settings\"}\n          </div>\n        )}\n        {rows.map((e) => (\n          <div className={`flex gap-2 sm:gap-4 items-center border-l-4 ${bar(e.summary || '')} bg-white rounded-r-lg px-3 sm:px-4 py-2${past(e) ? ' opacity-50' : ''}`}>\n            <div className=\"hidden sm:flex flex-col w-14\">\n              {allDay(e)\n                ? <span className=\"text-sm font-semibold\">All day</span>\n                : <span className=\"text-lg font-semibold\">{e.startTime.slice(0, 10) < day ? 'Until' : e.startTime.slice(11, 16)}</span>}\n              {allDay(e) ? null : (\n                <span className=\"text-sm text-stone-400\">{e.endTime.slice(0, 10) > day ? 'later' : e.endTime.slice(11, 16)}</span>\n              )}\n            </div>\n            <div className=\"flex-1 flex flex-col\">\n              <span className=\"text-base sm:text-lg font-medium truncate\">{e.summary || 'Untitled'}</span>\n              {e.location ? <span className=\"text-sm text-stone-500 truncate\">{e.location}</span> : null}\n            </div>\n            {ongoing(e) ? (\n              <span className=\"text-xs uppercase rounded-full bg-emerald-100 px-2 py-1 text-emerald-700\">Now</span>\n            ) : null}\n          </div>\n        ))}\n        {more ? <span className=\"text-sm text-stone-500 px-4\">{`${more} more`}</span> : null}\n      </div>\n    </div>\n  )\n}\n"
+        },
+        "origin": "dayAgenda"
+      },
+      "safeIcalDownload": {
+        "name": "Safe iCal download",
+        "description": "Downloads an iCal feed when a URL is configured; otherwise returns an empty calendar.",
+        "category": "data",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "url",
+            "label": "URL",
+            "type": "text",
+            "value": ""
+          }
+        ],
+        "output": [
+          {
+            "name": "result",
+            "type": "string"
+          }
+        ],
+        "origin": "safeIcalDownload",
+        "sources": {
+          "config.json": "{\n  \"name\": \"Safe iCal download\",\n  \"category\": \"data\",\n  \"description\": \"Downloads an iCal feed when a URL is configured; otherwise returns an empty calendar.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"url\",\n      \"label\": \"URL\",\n      \"type\": \"text\",\n      \"value\": \"\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"result\",\n      \"type\": \"string\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.ts": "const EMPTY_CALENDAR = \"BEGIN:VCALENDAR\\nVERSION:2.0\\nEND:VCALENDAR\"\n\nexport function get(app) {\n  const url = typeof app.config.url === \"string\" ? app.config.url.trim() : \"\"\n  if (!url) return EMPTY_CALENDAR\n  return frameos.fetchText(url)\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "73230ec3-09c7-4b11-b560-edc9016bde44",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 1
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "7f860850-e81e-4f50-8e14-187b6b2d8543",
+        "type": "state",
+        "position": {
+          "x": 277,
+          "y": -940
+        },
+        "data": {
+          "keyword": "iCalURL"
+        }
+      },
+      {
+        "id": "748c9b8f-3b3a-4eb8-9bb4-a49803b2e260",
+        "type": "app",
+        "position": {
+          "x": 285,
+          "y": -842
+        },
+        "data": {
+          "keyword": "safeIcalDownload",
+          "config": {},
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true,
+            "durationEnabled": true,
+            "duration": "900"
+          }
+        }
+      },
+      {
+        "id": "f48f06e1-b1d8-45e8-a40c-6684d7318bb6",
+        "type": "app",
+        "position": {
+          "x": 320,
+          "y": -678
+        },
+        "data": {
+          "keyword": "data/icalJson",
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true
+          },
+          "config": {
+            "exportFrom": "2026-10-31",
+            "exportCount": "40",
+            "addLocation": "true",
+            "addUrl": "false"
+          }
+        }
+      },
+      {
+        "id": "769c14ee-7bdf-4a42-949b-4eb91e3bc181",
+        "type": "app",
+        "position": {
+          "x": 355,
+          "y": -164
+        },
+        "data": {
+          "keyword": "dayAgenda",
+          "config": {}
+        }
+      },
+      {
+        "id": "cd5d2471-9d04-4592-b08b-f4f83a87ecdf",
+        "type": "app",
+        "position": {
+          "x": 390,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "73230ec3-09c7-4b11-b560-edc9016bde44",
+        "target": "cd5d2471-9d04-4592-b08b-f4f83a87ecdf",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "ui-image",
+        "type": "codeNodeEdge",
+        "source": "769c14ee-7bdf-4a42-949b-4eb91e3bc181",
+        "target": "cd5d2471-9d04-4592-b08b-f4f83a87ecdf",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      },
+      {
+        "id": "ical-ui",
+        "type": "codeNodeEdge",
+        "source": "f48f06e1-b1d8-45e8-a40c-6684d7318bb6",
+        "target": "769c14ee-7bdf-4a42-949b-4eb91e3bc181",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/events"
+      },
+      {
+        "id": "download-ical",
+        "type": "codeNodeEdge",
+        "source": "748c9b8f-3b3a-4eb8-9bb4-a49803b2e260",
+        "target": "f48f06e1-b1d8-45e8-a40c-6684d7318bb6",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/ical"
+      },
+      {
+        "id": "url-download",
+        "type": "codeNodeEdge",
+        "source": "7f860850-e81e-4f50-8e14-187b6b2d8543",
+        "target": "748c9b8f-3b3a-4eb8-9bb4-a49803b2e260",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/url"
+      }
+    ],
+    "customEvents": []
+  }
+]

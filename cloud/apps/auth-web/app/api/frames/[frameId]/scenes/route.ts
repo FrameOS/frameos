@@ -27,6 +27,7 @@ import {
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readEventMapsField, sceneEventMapsOf } from "../../../../../src/lib/scene-event-map";
 import { readSession } from "../../../../../src/lib/session";
+import { frameosVersionSatisfies } from "../../../../../src/lib/store-versions";
 
 export const runtime = "nodejs";
 
@@ -59,6 +60,9 @@ export async function GET(
       declaredSettingsGroups: frameSceneAssignments.declaredSettingsGroups,
       eventMaps: frameSceneAssignments.eventMaps,
       grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
+      // The newest version's declared minimum FrameOS (the row is the
+      // latest version's listing).
+      latestFrameosVersion: storeScenes.frameosVersion,
       latestVersion: storeScenes.latestVersion,
       position: frameSceneAssignments.position,
       sceneAccountId: storeScenes.accountId,
@@ -99,6 +103,14 @@ export async function GET(
         row.sceneStatus === "active" &&
         (row.visibility === "public" ||
           row.sceneAccountId === session.accountId);
+      const newer = assignedVersion !== null && row.latestVersion > assignedVersion;
+      // A newer version that needs a newer FrameOS than the frame reports is
+      // not offered: POST /scenes/update would refuse it
+      // (frame_update_required). The field says what the frame needs.
+      const runsOnFrame = frameosVersionSatisfies(
+        row.latestFrameosVersion,
+        frame.frameosVersion,
+      );
       return {
         assigned_version: assignedVersion,
         latest_version: row.latestVersion,
@@ -121,10 +133,10 @@ export async function GET(
         ...(sceneEventMapsOf(row.eventMaps) ? { event_maps: sceneEventMapsOf(row.eventMaps) } : {}),
         slug: row.sceneSlug,
         // POST /scenes/update takes the frame there.
-        update_available:
-          installable &&
-          assignedVersion !== null &&
-          row.latestVersion > assignedVersion,
+        update_available: installable && newer && runsOnFrame,
+        ...(installable && newer && !runsOnFrame
+          ? { update_requires_frameos_version: row.latestFrameosVersion }
+          : {}),
         visibility: row.visibility,
       };
     }),

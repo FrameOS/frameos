@@ -489,6 +489,15 @@ const SVG_MARKUP_OPENING = /<\s*svg\b/i;
 const DRAW_WITH_JSX =
   'Draw it with a scene-local app.tsx whose get() returns JSX (an <svg viewBox> sized from context.imageWidth/imageHeight, or a UI) wired into render/image\'s "image" field: nothing to build or escape, and faster on the frame.';
 
+// JavaScript source without its comments, for the markup scans: a comment
+// that mentions "<svg>" ("returns an <svg> sized to the canvas") is not
+// markup, and read as one it failed the viewBox rule. Block comments, and
+// line comments that start a line; a `//` after code on the same line may be
+// a URL inside a string, so it stays.
+export function withoutJsComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^[ \t]*\/\/.*$/gm, "");
+}
+
 export function lintSvgMarkup(markup: string): string[] {
   const problems: string[] = [];
   if (!/<\s*svg\b/i.test(markup)) {
@@ -708,11 +717,12 @@ export function lintScene(
         // Only the main module is held to the get()/run() contract; helpers
         // export whatever app.ts imports from them.
         const contract = mainAppSourceFile.test(file) ? lintJsAppSource(content, sceneAppCategory(obj(raw))) : [];
-        for (const problem of [...contract, ...lintAppImports(file, content, fileNames), ...lintSvgMarkup(content)]) {
+        const code = withoutJsComments(content);
+        for (const problem of [...contract, ...lintAppImports(file, content, fileNames), ...lintSvgMarkup(code)]) {
           push("error", `Scene app "${keyword}" (${file}): ${problem}`);
         }
         // A catalog template (it has an origin) is the catalog's to convert.
-        const markupInFile = /\bframeos\.svg\s*\(/.test(content) || (!/\.(tsx|jsx)$/.test(file) && SVG_MARKUP_OPENING.test(content));
+        const markupInFile = /\bframeos\.svg\s*\(/.test(code) || (!/\.(tsx|jsx)$/.test(file) && SVG_MARKUP_OPENING.test(code));
         if (markupInFile && !str(obj(raw)?.origin)) {
           push("warning", `Scene app "${keyword}" (${file}) builds SVG markup as a string. ${DRAW_WITH_JSX}`);
         }
@@ -853,10 +863,11 @@ export function lintScene(
         const argNames = (Array.isArray(data.codeArgs) ? data.codeArgs : [])
           .map((arg) => str(obj(arg)?.name))
           .filter((name): name is string => Boolean(name));
-        for (const problem of [...lintCodeNodeJs(code, argNames), ...lintSvgMarkup(code)]) {
+        const codeOnly = withoutJsComments(code);
+        for (const problem of [...lintCodeNodeJs(code, argNames), ...lintSvgMarkup(codeOnly)]) {
           push("error", problem, id);
         }
-        if (SVG_MARKUP_OPENING.test(code)) {
+        if (SVG_MARKUP_OPENING.test(codeOnly)) {
           push("warning", `Code node builds SVG markup as a string. ${DRAW_WITH_JSX}`, id);
         }
         const fixed = hardcodedCanvasSize(code);

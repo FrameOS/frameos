@@ -28,7 +28,9 @@ const SamplesDir = "../repo/scenes/samples"
 let networkApps = toHashSet([
   "downloadImage", "wikicommons",
   "frameOSGallery", "weather", "beRecycle", "unsplash", "immich",
-  "googlePhotos", "openaiImage", "haSensor"
+  "googlePhotos", "openaiImage", "haSensor",
+  # the Chess puzzle sample's own JS app: Lichess's daily puzzle by default
+  "lichessPuzzlePanel"
 ])
 let hostOnlyApps = toHashSet(["chromiumScreenshot", "rstpSnapshot"])
 
