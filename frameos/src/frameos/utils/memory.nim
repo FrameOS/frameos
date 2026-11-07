@@ -7,6 +7,7 @@
 ## exhausting the device.
 
 import pixie/decodebudget
+from pixie/paths import clearCoverageCache
 
 export decodebudget
 
@@ -214,11 +215,13 @@ proc releaseRenderMemoryIfShort() =
   if not renderMemoryReleaseHook.isNil:
     let headroom = availableRenderHeadroomBytes()
     if headroom > 0 and headroom < RenderMemoryShortBytes:
+      clearCoverageCache() # pixie's kept masks: rebuilt by the fills that need them
       discard renderMemoryReleaseHook()
 
 proc releaseRenderMemory*(): bool =
   ## Lets go of what a render can rebuild, whatever the headroom: a fill or a
   ## decode was just refused. Whether anything went (then try it again).
+  clearCoverageCache()
   not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook()
 
 proc keepIdleInterpreters*(holdingPictures = false): bool =

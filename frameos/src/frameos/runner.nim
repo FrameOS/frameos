@@ -463,6 +463,9 @@ proc dispatchOpen(self: RunnerThread, exportedScene: ExportedScene, scene: Frame
   self.sceneEvents.deliverLifecycle(scene, "open", %*{"sceneId": scene.id.string})
 
 proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.} =
+  # pixie's coverage cache for this thread's fills (paths.nim): a Pi has the
+  # memory for a UI's every label and box.
+  coverageCacheBudget = 8 * 1024 * 1024
   self.logger.log(%*{"event": "render:startLoop"})
   var timer = getMonoTime()
   var driverTimer = getMonoTime()
