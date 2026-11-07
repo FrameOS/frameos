@@ -94,11 +94,11 @@ static const char *TAG = "fos_touch";
 #define TOUCH_POLL_IDLE_MS 2000
 /* Without an interrupt line (the SenseCAP Indicator's FT6336U: its INT is on
  * the IO expander, unwired) the task polls: a tap is 80 ms or longer, so
- * every 30 ms caught it, 15 ms late on average. At 10 ms (one two-byte read
- * at 400 kHz, ~0.1 ms, a hundred times a second) a touch-down reaches the
- * scene 5 ms late on average, a release 2.5 ms: the poll stopped being a
- * visible share of a tap once the rest of it came down (docs/perf-todo.md). */
-#define TOUCH_POLL_NO_IRQ_MS 10
+ * every 30 ms catches it while no finger is down; once one is, every 10 ms
+ * (TOUCH_POLL_HELD_MS), so a drag's moves and the release arrive 5 ms late
+ * on average, not 10. A 10 ms idle poll cost an animating scene about a
+ * frame a second on the SenseCAP Indicator (2026-11-07). */
+#define TOUCH_POLL_NO_IRQ_MS 30
 /* Edges a render can sit on. A move coalesces into the newest move of the
  * same finger, so this is mostly downs and ups: 64 is plenty. */
 #define TOUCH_QUEUE_LEN 64

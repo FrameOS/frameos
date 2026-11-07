@@ -1,5 +1,5 @@
 import blends, bumpy, chroma, common, decodebudget, images, internal, paints,
-    simd, std/fenv, std/monotimes, std/strutils, std/tables, std/times, vmath
+    simd, std/fenv, std/hashes, std/monotimes, std/strutils, std/tables, std/times, vmath
 
 type
   WindingRule* = enum
@@ -2535,12 +2535,13 @@ var
   coverageCacheTick {.threadvar.}: int
   coverageCacheHits* {.threadvar.}: int
   coverageCacheMisses* {.threadvar.}: int
-  coverageSeen {.threadvar.}: Table[CoverageKey, bool]
-    ## Drawn once already: a mask is made the second time. A UI's toggle
-    ## draws mostly paths it never draws again (the changed card's new
-    ## text), and making a mask for each was slower than filling it.
-
-const CoverageSeenMax = 4096
+  coverageSeen {.threadvar.}: array[1024, uint32]
+    ## Drawn once already, by the key's hash in a direct-mapped slot: a mask
+    ## is made the second time. A UI's toggle draws mostly paths it never
+    ## draws again (the changed card's new text), and making a mask for each
+    ## was slower than filling it. A fixed array, not a table: an animation
+    ## draws its shapes at a new subpixel offset every frame, a new key each,
+    ## and a table of them grew, rehashed and was cleared under it.
 
 type PathProbeKind* = enum
   ppFill = "fill"          ## a fill rasterized
@@ -2565,7 +2566,8 @@ template pathProbe(kind: PathProbeKind, body: untyped) =
 proc clearCoverageCache*() {.raises: [].} =
   ## Lets every kept mask go (render memory is short; the thread is done).
   coverageCache.clear()
-  coverageSeen.clear()
+  for slot in coverageSeen.mitems:
+    slot = 0
   coverageCacheBytes = 0
 
 proc coverageCacheUsedBytes*(): int {.raises: [].} =
@@ -2692,11 +2694,12 @@ proc fillFromCoverageCache(
   inc coverageCacheTick
   var mask = coverageCache.getOrDefault(key)
   if mask.isNil or mask.path != path:
-    if not coverageSeen.hasKey(key):
+    let
+      h = uint32(hash(key)) or 1
+      slot = int(h and uint32(coverageSeen.high))
+    if coverageSeen[slot] != h:
       # The first sight: drawn as always, remembered.
-      if coverageSeen.len >= CoverageSeenMax:
-        coverageSeen.clear()
-      coverageSeen[key] = true
+      coverageSeen[slot] = h
       return false
     # A mask covers the whole path; a fill under a view only what shows.
     # A large path seen through a small damage box is filled.

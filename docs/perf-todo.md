@@ -50,6 +50,24 @@ committed to before the T0 probe has run on the board.
 
 ## Measured (the device, this branch)
 
+**A/B on one SenseCAP Indicator, 2026-11-07** (the same scenes, the same
+scripted sequence: four cold switches, eight home-panel taps over the HTTP
+event route, the scene switcher opened twice, the JSX DVD bounce for 40 s;
+main built from 0267672c, 3,231,952 B, the release's size):
+
+| | main | this branch |
+| --- | --- | --- |
+| Home panel tap, render (steady) | 295–349 ms | **95–101 ms** |
+| Scene switcher open | 2,293–2,547 ms | **330–417 ms** |
+| Cold switch: Weather / Home / Calculator | 1,229 / 361–421 / 492 ms | 681–691 / 221–268 / 344–370 ms |
+| JSX DVD bounce (33 ms period) | 29.1–29.2 fps, max frame 170–182 ms | 28.5–28.7 fps, max 54–68 ms |
+
+The DVD's frames render faster on the branch (23 ms against 30 ms for a
+logged frame) and the 180 ms frame each logged second-tenth is gone, yet it
+loses about six frames in ten seconds to frames of 50–60 ms where main loses
+five to that one long frame. Open: find what those frames do (a 10 ms idle
+touch poll was a third of it and went back to 30 ms).
+
 | What | Before | After | When |
 | --- | --- | --- | --- |
 | JSX Weather, isolated render (`render:framebuffer` → `render:device` → `render:done` stamps) | 80 ms render in place; stamps at 116 / 145 / 178 ms | | 2026-11-07, 2026.11.2 firmware |
@@ -114,9 +132,10 @@ committed to before the T0 probe has run on the board.
   were. The bench board is standalone, so this is unmeasured.
 - [ ] The 460 KB image push after a render (`push_image_to_backend`, at most
   every 10 s) still hashes and POSTs on the render task.
-- [x] **Touch poll at 10 ms** on LCD boards (`fos_touch.c`
-  `TOUCH_POLL_NO_IRQ_MS` 30 → 10, `TOUCH_POLL_HELD_MS` 20 → 10): ~10 ms less
-  on average per touch-down, 5 ms per release.
+- [x] **Touch poll at 10 ms while a finger is down** (`fos_touch.c`
+  `TOUCH_POLL_HELD_MS` 20 → 10): a drag's moves and the release 5 ms late on
+  average, not 10. The idle poll stays at 30 ms: at 10 it cost the animating
+  DVD scene about a third of a frame a second.
 - [ ] Re-run the icache / dcache / 10-line bounce buffer / 13.63 MHz pixel
   clock experiments on the unquantized three-buffer loop; the recorded
   "no gain" predates the third buffer.
