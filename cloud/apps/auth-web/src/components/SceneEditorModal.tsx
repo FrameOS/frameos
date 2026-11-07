@@ -1601,7 +1601,15 @@ export function SceneEditorModal({
       draftTimerRef.current = null;
     }
     try {
-      const response = await fetch(scenesJsonUrl(sceneId, version, share));
+      // The newest version's URL has no ?version=, and the route lets a
+      // browser keep it for five minutes: a page opened just after a save
+      // would label the previous version's scenes with the new number, and
+      // an edit made there becomes a draft of the new version (#695). A
+      // pinned version never changes, so only the newest skips the cache.
+      const response = await fetch(
+        scenesJsonUrl(sceneId, version, share),
+        version === null ? { cache: "no-store" } : undefined,
+      );
       if (!response.ok) {
         throw new Error(`Could not load the scene (${response.status})`);
       }

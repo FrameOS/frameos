@@ -205,6 +205,10 @@ function scenesJsonUrls() {
   return fetchMock.mock.calls.map(([input]) => String(input)).filter((url) => url.includes("/scenes.json"));
 }
 
+function scenesJsonInits() {
+  return fetchMock.mock.calls.filter(([input]) => String(input).includes("/scenes.json")).map(([, init]) => init);
+}
+
 function versionSelect() {
   return screen.getByRole("combobox", { name: "Version" }) as HTMLSelectElement;
 }
@@ -622,6 +626,10 @@ describe("SceneEditorModal versions", () => {
       "/api/store/scenes/scene-1/scenes.json",
       "/api/store/scenes/scene-1/scenes.json?version=1",
     ]);
+    // The newest version's URL is the same before and after a save, so it
+    // never comes from the browser's cache (a page opened just after a save
+    // showed the old version under the new number, #695); a pinned one may.
+    expect(scenesJsonInits()).toEqual([{ cache: "no-store" }, undefined]);
     expect(screen.getByTestId("preview-panel").dataset.scenes).toBe(JSON.stringify(v1Scenes));
     expect(screen.getByText("Loaded v1")).toBeTruthy();
     expect(`${window.location.search}${window.location.hash}`).toBe("?version=1#scene-editor-preview");
