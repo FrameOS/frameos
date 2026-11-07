@@ -46,6 +46,21 @@ type
     ## The switcher's own type, its `entries` unused and `paper` the panel's:
     ## one set of destroy and trace hooks in flash for the two built-in scenes.
 
+  # The frame's own settings, the second tab (docs/scene-settings.md "The
+  # frame tab"): what the host has to say about itself, read on every render.
+  # nil on a host that has none to offer: then the panel is the scene's alone.
+  FrameSettingsRead* = proc(): JsonNode {.nimcall, gcsafe, raises: [].}
+    ## {status: [[label, text]…], fields: [<a scene field>…],
+    ## values: {name: value}, actions: [{id, label}…]}: the first status row
+    ## is also the line over a scene's fields. A field with `select` is a
+    ## select box whatever its options, and `other` adds a last option of
+    ## that label that shows an input (`otherPlaceholder`) to type one. An action
+    ## with `under` comes right below the field of that name.
+  FrameSettingsApply* = proc(values: JsonNode) {.nimcall, gcsafe, raises: [].}
+    ## The fields changed on the tab, each as `saved` makes it, by name.
+  FrameSettingsAction* = proc(action: string) {.nimcall, gcsafe, raises: [].}
+    ## One of the `actions` pressed, or "open" when the tab comes up.
+
 const
   SettingsNode = 1 ## the ui/events target its form lives in
   IdleSeconds* = 300.0
@@ -53,13 +68,23 @@ const
     ## five minutes, as long as an ESP32 that deep-sleeps stays up for it
     ## (fos_scenes.c BUILT_IN_SCENE_AWAKE_MS).
   # What a handler number means: Cancel, Save, then per field (by its index
-  # in `state.fields`) a field's text (a select box's pick is one) or a switch.
+  # in the tab's fields) a field's text, a switch or a select box's pick, and
+  # the tabs and the frame's actions.
   HCancel = 0
   HSave = 1
   HText = 1000
   HToggle = 2000
+  HTab = 3000 ## + 0 the scene's, + 1 the frame's
+  HSelect = 13000 ## + field: a select box's pick
+  HAction = 20000 ## + action
+  OtherValue = "\1" ## a select box's `other` option; no value of its own is this
   # The types the panel cannot edit: what they hold is not text.
   Unedited = ["node", "scene", "image"]
+
+var
+  frameSettingsRead*: FrameSettingsRead
+  frameSettingsApply*: FrameSettingsApply
+  frameSettingsAction*: FrameSettingsAction
 
 var
   # What the last handler did: its number and the text it carried. Read by
@@ -78,11 +103,46 @@ proc fieldList(self: SceneSettingsScene): JsonNode =
   if result.isNil or result.kind != JArray:
     result = newJArray()
 
-proc valueMap(self: SceneSettingsScene): JsonNode =
-  result = self.state{"values"}
+proc objectAt(self: SceneSettingsScene, key: string): JsonNode =
+  result = self.state{key}
   if result.isNil or result.kind != JObject:
     result = newJObject()
-    self.state.put("values", result)
+    self.state.put(key, result)
+
+proc valueMap(self: SceneSettingsScene): JsonNode =
+  self.objectAt("values")
+
+proc arrayOf(node: JsonNode): JsonNode =
+  if node.isNil or node.kind != JArray: newJArray() else: node
+
+proc frameInfo(): JsonNode =
+  ## What the host says about the frame now; nil without a host that does.
+  if not frameSettingsRead.isNil:
+    result = frameSettingsRead()
+    if not result.isNil and result.kind != JObject:
+      result = nil
+
+proc onFrame(self: SceneSettingsScene): bool =
+  self.state{"tab"}.getStr() == "frame"
+
+proc frameAction(action: string) =
+  if not frameSettingsAction.isNil:
+    frameSettingsAction(action)
+
+proc showTab(self: SceneSettingsScene, frame: bool) =
+  ## One tab or the other, its list at the top and no field with the
+  ## keyboard. The frame tab tells the host it is up (a scan, on an ESP32
+  ## that is not on Wi-Fi).
+  forgetUiTarget(SceneSettingsId, SettingsNode)
+  self.state.put("tab", newJString(if frame: "frame" else: "scene"))
+  if frame:
+    frameAction("open")
+
+proc current(edits, base: JsonNode, name: string): JsonNode =
+  ## A frame field's value: as changed on the tab, else as the host has it.
+  result = edits{name}
+  if result.isNil and not base.isNil:
+    result = base{"values", name}
 
 proc text(value: JsonNode): string =
   ## A value as the text a field shows: a string as it is, a whole number
@@ -100,7 +160,10 @@ proc isOn(value: JsonNode): bool =
 proc saved(field, value: JsonNode): JsonNode =
   ## A value as the scene's state holds its field: a number for a number, a
   ## boolean for a switch, else the text (a json field's text the scene
-  ## parses). nil when a number field holds no number: that one is not saved.
+  ## parses). nil when there is no value, or a number field holds no number:
+  ## that one is not saved.
+  if value.isNil:
+    return nil
   let kind = field{"type"}.getStr()
   let text = value.text.strip()
   var
@@ -111,7 +174,6 @@ proc saved(field, value: JsonNode): JsonNode =
     if text.len > 0 and parseInt(text, whole) == text.len: newJInt(whole) else: nil
   elif kind == "float":
     if text.len > 0 and parseFloat(text, number) == text.len: newJFloat(number) else: nil
-  elif value.isNil: nil
   else: newJString(value.text)
 
 proc opener(self: SceneSettingsScene): string =
@@ -122,43 +184,72 @@ proc leave() =
   ## knows which.
   sendEvent(evSceneSettings, newJObject(), eoScene)
 
-proc save(self: SceneSettingsScene) =
-  ## Back to the scene, its fields set to the values here.
-  if self.opener().len == 0:
-    leave()
-    return
-  let
-    state = newJObject()
-    values = self.valueMap()
-    fields = self.fieldList()
+proc collect(fields, values: JsonNode): JsonNode =
+  ## The values of `fields` as their owner keeps them (`saved`), by name.
+  result = newJObject()
   for i in 0 ..< fields.elems.len:
     let field = fields.elems[i]
     let name = field{"name"}.getStr()
     let value = field.saved(values{name})
     if not value.isNil:
-      state.put(name, value)
-  let payload = newJObject()
-  payload.put("sceneId", newJString(self.opener()))
-  payload.put("state", state)
-  sendEvent(evSetCurrentScene, payload, eoScene)
+      result.put(name, value)
+
+proc save(self: SceneSettingsScene, frame: bool, fields, values: JsonNode) =
+  ## The scene tab's: back to the scene, its fields set to the values here.
+  ## The frame tab's: what changed there to the host, which applies it (Wi-Fi
+  ## joins in the background, a rotation restarts an ESP32), the panel
+  ## staying up so what it did shows in the status.
+  let state = collect(fields, values)
+  if frame:
+    self.state.put("frameValues", newJObject())
+    if state.len > 0 and not frameSettingsApply.isNil:
+      forgetUiTarget(SceneSettingsId, SettingsNode)
+      frameSettingsApply(state)
+  elif self.opener().len == 0:
+    leave()
+  else:
+    let payload = newJObject()
+    payload.put("sceneId", newJString(self.opener()))
+    payload.put("state", state)
+    sendEvent(evSetCurrentScene, payload, eoScene)
 
 proc acting(self: SceneSettingsScene) =
-  ## What the last handler did, to the values.
+  ## What the last handler did, to the values of the tab showing.
   let
-    fields = self.fieldList()
+    frame = self.onFrame()
+    info = if frame: frameInfo() else: nil
+    fields = if frame: arrayOf(info{"fields"}) else: self.fieldList()
+    values = if frame: self.objectAt("frameValues") else: self.valueMap()
     handler = acted
   acted = -1
   if handler == HCancel: leave()
-  elif handler == HSave: self.save()
+  elif handler == HSave: self.save(frame, fields, values)
+  elif handler >= HAction:
+    let actions = arrayOf(info{"actions"})
+    if handler - HAction < actions.elems.len:
+      frameAction(actions.elems[handler - HAction]{"id"}.getStr())
+  elif handler >= HSelect:
+    let index = handler - HSelect
+    if index < fields.elems.len:
+      let
+        field = fields.elems[index]
+        other = actedText == OtherValue
+      values.put(field{"name"}.getStr(), newJString(if other: "" else: actedText))
+      # Beside the values, on a field that has an `other`: a host's, whose
+      # names it knows, never a scene's, which could be called anything.
+      if field{"other"}.getStr().len > 0:
+        values.put("typing", newJBool(other))
+  elif handler >= HTab:
+    if frame != (handler == HTab + 1):
+      self.showTab(not frame)
   else:
     let
       index = if handler >= HToggle: handler - HToggle else: handler - HText
     if index >= 0 and index < fields.elems.len:
       let field = fields.elems[index]
       let name = field{"name"}.getStr()
-      let values = self.valueMap()
       if handler >= HToggle:
-        values.put(name, newJBool(not values{name}.isOn))
+        values.put(name, newJBool(not (if frame: current(values, info, name) else: values{name}).isOn))
       else:
         values.put(name, newJString(actedText))
   self.touch()
@@ -193,14 +284,47 @@ proc button(look: Look, label: string, handler: int, primary: bool): SvgNode =
   else: c.add " bg-zinc-800 active:bg-zinc-600"
   el("div", move c, SvgNode(text: label)).on("on-click", handler)
 
+proc tab(look: Look, label: string, handler: int, lit: bool): SvgNode =
+  ## One of the two tabs: a button, the one showing lit.
+  result = look.button(label, handler, lit)
+  if look.paper and lit:
+    result.attrs[0][1].add " bg-black text-white"
+
 proc fieldBox(look: Look): string =
   result = "w-full rounded-lg"
   result.px("px", look.size * 2 div 3)
   if look.paper: result.add " border-2 border-black"
   else: result.add " bg-zinc-800 focus:bg-zinc-700 placeholder:text-zinc-500"
 
-proc row(look: Look, field: JsonNode, value: JsonNode, index: int): SvgNode =
-  ## One field: its label and what changes it.
+proc optionRow(look: Look, value, label: string, picked: bool): SvgNode =
+  ## One option of a select box's list, the one it holds lit.
+  var c = "rounded-lg"
+  if picked: c.add(if look.paper: " bg-black text-white" else: " bg-sky-600")
+  elif not look.paper: c.add " active:bg-zinc-600"
+  result = el("option", move c, SvgNode(text: label))
+  result.attrs.add(("value", value))
+
+proc selectBox(look: Look, field: JsonNode, options: JsonNode, held: string, index: int): SvgNode =
+  ## A select box: its options, strings or {value, label}, in a list that
+  ## opens over the panel (ui/layout.nim), and its `other` last.
+  var c = fieldBox(look)
+  c.px("h", look.line)
+  result = el("select", move c)
+  result.attrs.add(("value", held))
+  result.attrs.add(("placeholder", field{"placeholder"}.getStr()))
+  discard result.on("on-change", HSelect + index)
+  for j in 0 ..< options.elems.len:
+    let option = options.elems[j]
+    let name = if option.kind == JObject: option{"value"}.text else: option.text
+    let label = option{"label"}.getStr()
+    result.children.add look.optionRow(name, if label.len > 0: label else: name, name == held)
+  let other = field{"other"}.getStr()
+  if other.len > 0:
+    result.children.add look.optionRow(OtherValue, other, held == OtherValue)
+
+proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = false): SvgNode =
+  ## One field: its label and what changes it. `typing`: its select box's
+  ## `other` option is picked, and its own value is typed under it.
   let
     kind = field{"type"}.getStr()
     options = field{"options"}
@@ -233,27 +357,11 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int): SvgNode =
   if look.paper: c = ""
   c.px("text", look.size * 4 div 5)
   result.children.add el("span", move c, SvgNode(text: label))
-  if not options.isNil and options.kind == JArray and options.elems.len > 0:
-    # A select box: its options, strings or {value, label}, in a list that
-    # opens over the panel (ui/layout.nim).
-    c = fieldBox(look)
-    c.px("h", look.line)
-    let select = el("select", move c)
-    let held = value.text
-    select.attrs.add(("value", held))
-    select.attrs.add(("placeholder", field{"placeholder"}.getStr()))
-    for j in 0 ..< options.elems.len:
-      let option = options.elems[j]
-      let name = if option.kind == JObject: option{"value"}.text else: option.text
-      c = "rounded-lg"
-      if name == held: c.add(if look.paper: " bg-black text-white" else: " bg-sky-600")
-      elif not look.paper: c.add " active:bg-zinc-600"
-      let label = option{"label"}.getStr()
-      let item = el("option", move c, SvgNode(text: if label.len > 0: label else: name))
-      item.attrs.add(("value", name))
-      select.children.add item
-    result.children.add select.on("on-change", HText + index)
-    return
+  let choices = arrayOf(options)
+  if field{"select"}.getBool() or choices.elems.len > 0:
+    result.children.add look.selectBox(field, choices, if typing: OtherValue else: value.text, index)
+    if not typing:
+      return
   # Text to type: a line, or lines for text and JSON.
   let lines = kind in ["text", "json"]
   c = fieldBox(look)
@@ -264,7 +372,7 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int): SvgNode =
     c.px("h", look.line)
   let input = el(if lines: "textarea" else: "input", move c)
   input.attrs.add(("value", value.text))
-  input.attrs.add(("placeholder", field{"placeholder"}.getStr()))
+  input.attrs.add(("placeholder", field{if typing: "otherPlaceholder" else: "placeholder"}.getStr()))
   if field{"secret"}.getBool(): input.attrs.add(("type", "password"))
   elif kind in ["integer", "float"]: input.attrs.add(("type", "number"))
   result.children.add input.on("on-change", HText + index)
@@ -286,7 +394,49 @@ proc fieldList(self: SceneSettingsScene, look: Look, padX, padY: int): SvgNode =
   if result.children.len == 0:
     c = "text-center"
     if not look.paper: c.add " text-zinc-400"
-    result.children.add el("div", move c, SvgNode(text: "This scene has no settings."))
+    result.children.add el("div", move c,
+      SvgNode(text: if self.opener().len == 0: "No scene is showing." else: "This scene has no settings."))
+
+proc grey(look: Look): string =
+  ## Grey text (plain on e-paper).
+  if look.paper: "" else: "text-zinc-400"
+
+proc addActions(look: Look, into: SvgNode, actions: JsonNode, under: string) =
+  ## The host's actions that come below the field `under`, or below them all.
+  for j in 0 ..< min(actions.elems.len, 10):
+    if actions.elems[j]{"under"}.getStr() == under:
+      into.children.add el("div", "flex", look.button(actions.elems[j]{"label"}.getStr(), HAction + j, false))
+
+proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode): SvgNode =
+  ## The frame tab: how it is doing (a card of label and text rows), what can
+  ## be changed (the same rows as a scene's fields) and the host's actions.
+  var c = "flex flex-col"
+  c.px("p", look.pad)
+  c.px("gap", look.gap)
+  result = el("div", move c)
+  let card = el("div", if look.paper: "flex flex-col gap-1 p-3 rounded-lg border-2 border-black"
+    else: "flex flex-col gap-1 p-3 rounded-lg bg-zinc-900")
+  let status = arrayOf(info{"status"})
+  for i in 0 ..< status.elems.len:
+    let line = status.elems[i]
+    if line.kind == JArray and line.elems.len >= 2:
+      let row = el("div", "flex gap-3", el("span", look.grey, SvgNode(text: line.elems[0].getStr())))
+      row.children.add el("div", "grow min-w-0 flex justify-end",
+        el("span", "truncate", SvgNode(text: line.elems[1].getStr())))
+      card.children.add row
+  result.children.add card
+  let
+    fields = arrayOf(info{"fields"})
+    edits = self.objectAt("frameValues")
+    actions = arrayOf(info{"actions"})
+    typing = edits{"typing"}.getBool()
+  for i in 0 ..< fields.elems.len:
+    let field = fields.elems[i]
+    if field.kind == JObject:
+      let name = field{"name"}.getStr()
+      result.children.add look.row(field, current(edits, info, name), i, typing and field{"other"}.getStr().len > 0)
+      look.addActions(result, actions, name)
+  look.addActions(result, actions, "")
 
 when not defined(frameosEmbedded):
   proc box(c: var string, x, y, w, h: int) =
@@ -339,11 +489,12 @@ when not defined(frameosEmbedded):
     root.children.add el("div", move c, self.fieldList(look, 2, look.gap div 2))
 
 proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: string, round = false,
-    keyboardTop = high(int)): SvgNode =
+    keyboardTop = high(int), info: JsonNode = nil): SvgNode =
   ## The panel as a UI tree: a header with Cancel, the scene's name and
-  ## Save, and under it the fields in a list that scrolls. On a `round`
-  ## panel the same inside its circle, the keyboard's top at `keyboardTop`
-  ## while it is up.
+  ## Save, and under it the fields in a list that scrolls. With the host's
+  ## `info` (frameSettingsRead) the name is a tab beside "Frame", the frame's
+  ## own settings. On a `round` panel the scene's alone inside its circle,
+  ## the keyboard's top at `keyboardTop` while it is up.
   let unit = min(width, height)
   var look = Look(paper: paper, size: clamp(unit * 4 div 100, 14, 28))
   look.pad = clamp(unit * 4 div 100, 8, 32)
@@ -364,12 +515,30 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   c.px("px", look.pad)
   c.px("gap", look.gap div 2)
   c.add(if paper: " border-b-2 border-black" else: " border-b border-zinc-800")
-  let header = el("div", move c)
-  header.children.add look.button("Cancel", HCancel, false)
-  header.children.add el("span", "grow truncate text-center font-bold", SvgNode(text: title))
+  let
+    header = el("div", move c)
+    frame = not info.isNil and self.onFrame()
+  header.children.add look.button(if frame: "Close" else: "Cancel", HCancel, false)
+  if info.isNil:
+    header.children.add el("span", "grow truncate text-center font-bold", SvgNode(text: title))
+  else:
+    # The two tabs: the scene's name heads its list.
+    c = "grow flex justify-center"
+    c.px("gap", look.gap div 2)
+    let tabs = el("div", move c)
+    tabs.children.add look.tab("Scene", HTab, not frame)
+    tabs.children.add look.tab("Frame", HTab + 1, frame)
+    header.children.add tabs
   header.children.add look.button("Save", HSave, true)
   result.children.add header
-  result.children.add el("div", "flex-1 overflow-y-auto", self.fieldList(look, look.pad, look.pad))
+  var body: SvgNode
+  if frame:
+    body = self.frameList(look, info)
+  else:
+    body = self.fieldList(look, look.pad, look.pad)
+    if not info.isNil and title.len > 0:
+      body.children.insert(el("div", "truncate font-bold", SvgNode(text: title)), 0)
+  result.children.add el("div", "flex-1 overflow-y-auto", body)
 
 proc title(self: SceneSettingsScene): string =
   ## The scene's name, from the host's scene list (its id without one).
@@ -395,8 +564,11 @@ proc drawForm*(self: SceneSettingsScene, image: Image) =
     let target = uiTarget(SceneSettingsId, SettingsNode, create = false)
     if not target.isNil and target.input.keyboard and target.input.focus > 0:
       keyboardTop = keyboardBox(image.width, image.height, true)[0]
+  let info = if round: nil else: frameInfo()
+  if info.isNil and self.onFrame():
+    self.state.put("tab", newJString("scene"))
   if self.drawUi(SceneSettingsId, self.tree(image.width, image.height, self.paper, self.title(), round,
-      keyboardTop), image, self.paper, onHandler, IdleSeconds):
+      keyboardTop, info), image, self.paper, onHandler, IdleSeconds):
     leave()
 
 # ------------------------------------------------------------ the scene
@@ -413,6 +585,10 @@ proc runSettings(self: FrameScene, context: ExecutionContext) =
       let value = payload{"state", key}
       if not value.isNil:
         self.state.put(key, value)
+    # It opens on the scene's tab; with no scene showing there is nothing on
+    # that one, and the frame's is what the status screen sent you here for.
+    if self.state{"tab"}.isNil and self.opener().len == 0 and not frameInfo().isNil:
+      self.showTab(true)
   of "open":
     self.touch()
   of "close":

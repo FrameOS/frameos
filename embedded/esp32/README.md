@@ -19,7 +19,9 @@ main/                     boot orchestration + platform modules
   main.c                  app_main: config → display → wifi/portal → http → render loop
   fos_config.c            NVS config store (wifi, backend, panel, pins, intervals)
   fos_config_parse.c      the setting parsers/normalisers behind every writer (host-tested)
-  fos_wifi.c              STA connect, SoftAP portal, DNS hijack, SNTP
+  fos_wifi.c              STA connect (waited for, or in the background), SoftAP portal, DNS hijack, scan, SNTP
+  fos_frame_settings.c    the settings panel's Frame tab: Wi-Fi status and network (a select box of up to 64), rotation
+  fos_wifi_networks.c     the order a scan's networks are listed in there: by name (host-tested)
   fos_http.c              esp_http_server route layer (portal + /status + actions)
   fos_client.c            render loop: Nim local render or thin-client fetch → blit
   fos_ota.c               signed release OTA (manifest + streaming verify) when an OTA partition exists
@@ -82,7 +84,7 @@ build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcac
 main/tests/               host tests for the IDF-free modules (plain `cc`, no IDF; each file's
                           header carries its command line). The netguard, local network access code
                           (test_esp32_lan_access.py: fos_lan_access + fos_panel_draw), SD probe, board,
-                          power, wake, battery-filter, version, OTA download, LCD splash and loading mark
+                          power, wake, battery-filter, version, Wi-Fi network order, OTA download, LCD splash and loading mark
                           (lcd_loading.c) and scene-event (contract table +
                           fos_events.c dispatch) tests run from the backend's
                           pytest suite (backend/app/tasks/tests/test_esp32_*.py, which also
@@ -456,6 +458,19 @@ panel, render mode). A board flashed from a FrameOS backend or the cloud is
 provisioned over the USB console instead (below) and never sees the portal;
 the frame's HTTPS certificate — the same per-frame material the Linux
 runtime serves with OpenSSL — arrives with its first `/embedded/settings` pull.
+
+A **touch LCD** (the SenseCAP Indicator: a touch panel found at boot on an
+RGB LCD, `touch_setup` in `main.c`) has no portal and does not wait for
+Wi-Fi: it starts its scenes at once and joins the stored network in the
+background (`fos_wifi_start_background`), retrying quickly and then every
+30 s for as long as it takes. What a boot that waited does once online (SNTP,
+log upload, the `bootup` line, the OTA check) runs the first time the station
+gets an address. The network is set on the screen: a swipe down from the top
+opens the settings panel, whose **Frame** tab shows the Wi-Fi status, the
+networks in range by name and a password field, and the rotation on a frame no control
+plane manages (`fos_frame_settings.c`, docs/scene-settings.md "The frame
+tab"). The status screen of a frame with no scene says to swipe. Every other
+board keeps the 45 s wait and the portal.
 
 The serial console (115200) is always available and quicker for development.
 It answers on whichever USB port the board brings out: the chip's own

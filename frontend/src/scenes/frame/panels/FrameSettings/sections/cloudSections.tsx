@@ -1,3 +1,4 @@
+import { frameReportedNetwork } from '../../../../../utils/frameReportedNetwork'
 import { Field } from '../../../../../components/Field'
 import { PartialRefreshSettingsFields } from '../../../../../components/PartialRefreshSettingsFields'
 import { PowerSettingsFields } from '../../../../../components/PowerSettingsFields'
@@ -69,6 +70,7 @@ import {
 /** Name, refresh interval, rotation, scaling — what both cloud surfaces push. */
 export function CloudBaseSettingsSection(): JSX.Element {
   const { surface, frame, frameTimezoneOptions, cloudEsp32TimeZoneSupported } = useFrameSettings()
+  const reportedNetwork = frameReportedNetwork(frame)
   const esp32 = surface === 'cloudEsp32'
   // No hardware: nothing to rotate, no panel an image must be fitted to, no
   // device log to make verbose.
@@ -179,6 +181,7 @@ export function CloudBaseSettingsSection(): JSX.Element {
             ? 'This ESP32 frame accepts its name, refresh interval, rotation, scaling mode, scale, time zone and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or its FrameOS-XXXX setup hotspot.'
             : 'These are the settings a cloud-managed frame accepts; the display driver, palette and GPIO buttons are under Panel below. Everything else this frame runs on — network and WiFi, mount points, driver wiring and log settings — is owned by the device and configured on the frame itself, through its own admin panel or the card it was flashed from.'}
         </p>
+        {reportedNetwork ? <p className="frameos-muted text-sm">{reportedNetwork}</p> : null}
       </SectionBody>
     </>
   )

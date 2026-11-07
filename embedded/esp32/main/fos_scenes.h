@@ -86,6 +86,9 @@ bool fos_scenes_selection_pending(void);
  * sees it renders even when it woke only to check in — the panel shows the
  * previous scene. Render task only. */
 bool fos_scenes_take_switched(void);
+/* The scene settings (system/sceneSettings) are on the panel: what they show
+ * of the frame (fos_frame_settings.c) changed, so render them again. */
+bool fos_scenes_settings_shown(void);
 
 /* Monotonic count of apply attempts made by the render task, and whether the
  * most recent one loaded into the runtime. A producer records the generation

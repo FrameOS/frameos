@@ -1015,7 +1015,8 @@ export const frames = pgTable(
     // Last-pushed declarative settings (allowedFrameSettings in
     // auth-web's src/lib/frames.ts — interval/rotate/…). Devices own their
     // own copy; this is the control plane's mirror so the Settings panel
-    // renders what was pushed instead of blanks after a reload. `name` is
+    // renders what was pushed instead of blanks after a reload. `rotate` also
+    // follows what an ESP32 reports on hello. `name` is
     // NOT stored here: frames.name is authoritative for the display name.
     settings: jsonb("settings"),
     // Which service-settings GROUPS ("unsplash", "openAI", …) this frame's

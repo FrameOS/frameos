@@ -167,6 +167,16 @@
 - Bound to a swipe down from the top in every touch preset (`TOUCH_EDGE_SWIPES`
   and its two copies, `device_event_map.nim`): keep the presets alike. Both
   built-in scenes go through `isBuiltInScene`; a third goes the same way.
+- A host with settings of its own gets a **Frame** tab beside the scene's
+  (doc section "The frame tab"): three hooks in the scene module
+  (`frameSettingsRead` / `Apply` / `Action`), set today by the ESP32 alone
+  (`embedded_runtime.nim` → `main/fos_frame_settings.c`: Wi-Fi status, the
+  network with a scan, rotation where no plane owns it). It is where a touch
+  LCD sets its Wi-Fi: such a board (`touch_setup` in `main.c`) boots without
+  waiting for the network and never opens the setup hotspot. A plane never
+  sends a frame a network: the frame reports its rotation, network and address
+  (doc "What a control plane knows of it"; a new thing the frame can change on
+  itself goes through `fos_cloud_add_device_report` to both planes).
 
 ## Scene previews on a frame: `docs/scene-previews.md`
 

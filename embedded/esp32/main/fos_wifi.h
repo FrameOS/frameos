@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "fos_wifi_networks.h"
 
 typedef enum {
     FOS_WIFI_OFFLINE = 0,
@@ -58,3 +59,32 @@ esp_err_t fos_wifi_sync_time(uint32_t timeout_ms);
 void fos_wifi_set_late_time_hook(void (*hook)(void));
 bool fos_wifi_time_synced(void);
 void fos_wifi_set_scan_only(bool enabled);
+
+/* Join the stored network without waiting (a touch frame, main.c): the
+ * station keeps trying, quickly and then every 30 s, for as long as it takes,
+ * and never falls back to the portal. Called again with new credentials, it
+ * leaves the network it is on for the new one. */
+esp_err_t fos_wifi_start_background(void);
+/* Runs (from a worker task) every time the station gets an address outside
+ * the portal: the boot's online steps for a frame that did not wait. */
+typedef void (*fos_wifi_online_cb)(void);
+void fos_wifi_set_online_cb(fos_wifi_online_cb cb);
+/* Runs on any change the frame settings show (joined, lost, a failure's
+ * reason, a scan's start and end), from the event or scan task: set a bit,
+ * nothing more. */
+void fos_wifi_set_change_hook(void (*hook)(void));
+/* Why the last attempt to join failed (WIFI_REASON_*), 0 when none has or the
+ * station joined since; and what kind of failure that is. */
+uint8_t fos_wifi_join_reason(void);
+bool fos_wifi_join_reason_not_found(uint8_t reason);
+bool fos_wifi_join_reason_auth(uint8_t reason);
+
+/* The networks in range, for the frame settings: a scan in the background
+ * (a joined station stays joined; one that is trying stops for it), its
+ * results kept, one per name: the FOS_WIFI_SCAN_MAX strongest, by name
+ * (fos_wifi_networks.h). */
+esp_err_t fos_wifi_scan_start(void);
+bool fos_wifi_scanning(void);
+/* How long ago the last scan finished, -1 when none has. */
+int64_t fos_wifi_scan_age_us(void);
+int fos_wifi_scan_results(fos_wifi_network_t *out, int max);

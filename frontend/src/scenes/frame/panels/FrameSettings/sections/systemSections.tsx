@@ -1,3 +1,4 @@
+import { frameReportedNetwork } from '../../../../../utils/frameReportedNetwork'
 import { Group } from 'kea-forms'
 import { PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { Button } from '../../../../../components/Button'
@@ -33,7 +34,9 @@ import { FrameSettingsSection, SectionBody, SectionHeading } from './FrameSettin
  */
 
 export function NetworkSection(): JSX.Element {
-  const { frameForm, frameFormTouches, isEmbeddedMode, showWifiCredentials, touchFrameFormField } = useFrameSettings()
+  const { frame, frameForm, frameFormTouches, isEmbeddedMode, showWifiCredentials, touchFrameFormField } =
+    useFrameSettings()
+  const reportedNetwork = frame ? frameReportedNetwork(frame) : null
   return (
     <>
       <SectionHeading id="frame-settings-network">Network</SectionHeading>
@@ -44,6 +47,7 @@ export function NetworkSection(): JSX.Element {
               <Field name="wifiSSID" label="WiFi network">
                 <TextInput name="wifiSSID" placeholder="Home WiFi" autoComplete="off" />
               </Field>
+              {reportedNetwork ? <div className="text-xs text-gray-400">{reportedNetwork}</div> : null}
               <Field
                 name="wifiPassword"
                 label="WiFi password"

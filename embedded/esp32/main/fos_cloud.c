@@ -534,6 +534,7 @@ static void add_hardware_json(cJSON *parent)
      * its own and shows what the frame reports here, on every hello and
      * every `state` (one follows each lan_access_set). */
     cJSON_AddBoolToObject(hw, "lanAccess", config->allow_local_network);
+    fos_cloud_add_device_report(hw);
     /* A self-hosted backend set here owns the content: every content verb is
      * refused `backend_managed` (ws_handle_message). Its origin tells the
      * cloud why, and its absence on a later hello that the cloud may replay
@@ -3050,6 +3051,14 @@ static void dispatch_verb(const char *type, cJSON *root, const cJSON *id,
         ESP_LOGW(TAG, "ws: refusing verb \"%s\"", type[0] ? type : "(none)");
         ws_ack(id, false, "unknown_verb");
     }
+}
+
+void fos_cloud_add_device_report(cJSON *msg)
+{
+    const fos_config_t *config = fos_config();
+    cJSON_AddNumberToObject(msg, "rotate", config->rotate);
+    cJSON_AddStringToObject(msg, "wifiSsid", config->wifi_ssid);
+    cJSON_AddStringToObject(msg, "ip", fos_wifi_ip());
 }
 
 void fos_cloud_add_state_fields(cJSON *msg)

@@ -109,6 +109,10 @@ export interface FrameType {
    * with 2026.8 firmware (fos_cloud.c add_hardware_json) — older devices
    * report only the first six fields, so all of it stays optional. */
   hardware?: {
+    /** An ESP32's rotation, Wi-Fi network and address, on every hello. */
+    rotate?: number
+    wifiSsid?: string
+    ip?: string
     platform?: string | null
     /** Linux/Pi frames only: the Buildroot platform key of the board the
      * device detected itself to be (`raspberry-pi-5` / `raspberry-pi-64` /
@@ -1645,6 +1649,12 @@ export interface FrameEmbeddedConfig {
   platform?: string
   flashSize?: FrameEmbeddedFlashSize
   hardwarePreset?: FrameEmbeddedHardwarePreset
+  /** What the frame says it is on: can change on the frame itself (its panel, the console). */
+  reported?: {
+    rotate?: number
+    wifiSsid?: string
+    ip?: string
+  }
   lastBoot?: {
     at?: string
     source?: string

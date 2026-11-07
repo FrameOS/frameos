@@ -46,6 +46,8 @@ from app.redis import get_redis
 from app.utils.deploy_progress import fold as fold_deploy_progress
 from app.utils.deploy_progress import fold_command as fold_deploy_progress_command
 from app.utils.embedded_commands import command_label
+from app.utils.embedded_report import device_report, remember_device_report
+from app.utils.request_ip import client_ip_for_request
 from app.utils.frame_commands import (
     ack_frame_command,
     ack_pull_backed_commands,
@@ -175,6 +177,9 @@ async def api_embedded_device_commands(
     now = utcnow()
 
     await _remember_device_state(redis, frame, body)
+    # Strict, as for a bootup: this can move frame_host (api/log.py).
+    if remember_device_report(frame, device_report(body), client_ip_for_request(request, strict=True)):
+        await update_frame(db, redis, frame)
 
     # The cloud hello's name for it, and the older name this route first had.
     scenes_etag = _str_field(body, "scenes_checksum") or _str_field(body, "scenes_etag")

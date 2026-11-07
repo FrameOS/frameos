@@ -4,6 +4,9 @@
  * Boot: NVS config → display select → Wi-Fi (STA, or captive-portal
  * provisioning when unconfigured) → SNTP → HTTP server + render loop
  * (Nim runtime on-device, or thin client fetching backend bitmaps) → OTA.
+ * A touch LCD (the SenseCAP Indicator) does not wait for Wi-Fi and has no
+ * portal: it joins in the background and is set up on its own screen
+ * (the settings panel's Frame tab, fos_frame_settings.c).
  *
  * The serial console (USB) is always available: `help` for commands,
  * `wifi <ssid> [pass]` provisions a frame without the portal.
@@ -46,6 +49,7 @@
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_console.h"
+#include "fos_frame_settings.h"
 #include "fos_framebuffer.h"
 #include "fos_http.h"
 #include "fos_ota.h"
@@ -198,20 +202,41 @@ static void log_bootup_event(bool online);
 /* The stored Wi-Fi came back while the provisioning portal was serving.
  * fos_wifi has already dropped the open AP; bring the rest up the way the
  * online boot path does, and replace the portal status screen. */
+/* What a boot that waited for Wi-Fi did before its first render, for one
+ * that got it later. Not marking the image valid here: that happens after
+ * the first successful render (fos_client.c) — "reached Wi-Fi" said nothing
+ * about whether the Nim runtime or the scene survive. */
+static void online_steps(uint32_t sntp_timeout_ms)
+{
+    fos_wifi_sync_time(sntp_timeout_ms);
+    frameos_nim_set_log_upload_enabled(true);
+    log_bootup_event(true);
+    fos_ota_start_periodic_task(24);
+    fos_client_render_now();
+}
+
 static void on_portal_exit(void)
 {
     ESP_LOGI(TAG, "Wi-Fi recovered; leaving the provisioning portal");
     s_blink_period_ms = 2000;
     fos_http_stop();
     fos_http_start(false);
-    fos_wifi_sync_time(SNTP_TIMEOUT_MS);
-    /* Not marking the image valid here: that happens after the first
-     * successful render (fos_client.c) — "reached Wi-Fi" said nothing about
-     * whether the Nim runtime or the scene survive. */
-    frameos_nim_set_log_upload_enabled(true);
-    log_bootup_event(true);
-    fos_ota_start_periodic_task(24);
-    fos_client_render_now();
+    online_steps(SNTP_TIMEOUT_MS);
+}
+
+/* A touch LCD's boot went on without Wi-Fi (app_main, touch_setup): the
+ * steps an online boot takes before its first render, run the first time the
+ * station gets an address. Later addresses (a lost link back) need none. */
+static bool s_online_steps_done = false;
+
+static void on_wifi_online(void)
+{
+    if (__atomic_exchange_n(&s_online_steps_done, true, __ATOMIC_SEQ_CST)) return;
+    ESP_LOGI(TAG, "Wi-Fi up after boot (%s)", fos_wifi_ip());
+    if (fos_ota_boot_request_pending()) fos_ota_request_check();
+    /* An LCD renders without the clock and again when it comes. */
+    fos_wifi_set_late_time_hook(action_render_now);
+    online_steps(0);
 }
 
 static void log_bootup_event(bool online)
@@ -409,8 +434,20 @@ void app_main(void)
     scene_state_write_behind();
     frameos_nim_set_scene_state_hooks(fos_scene_state_load, fos_scene_state_save);
 
+    /* A touch LCD is set up on its own screen, so it neither waits for
+     * Wi-Fi nor opens a hotspot: the settings panel (a swipe down from the
+     * top) has the network, and the frame joins it in the background. */
+    bool touch_setup = fos_touch_present() && fos_display_is_lcd();
+    fos_frame_settings_init();
     bool online = false;
-    if (fos_config_wifi_ready()) {
+    if (touch_setup) {
+        if (fos_config_wifi_ready()) {
+            esp_err_t err = fos_wifi_start_background();
+            if (err != ESP_OK) ESP_LOGW(TAG, "Wi-Fi failed to start: %s", esp_err_to_name(err));
+        } else {
+            ESP_LOGI(TAG, "no Wi-Fi configured; set it up from the screen (swipe down from the top)");
+        }
+    } else if (fos_config_wifi_ready()) {
         fos_display_boot_status(FOS_LCD_SPLASH_WIFI);
         online = fos_wifi_connect(WIFI_CONNECT_TIMEOUT_MS) == ESP_OK;
         if (!online) {
@@ -453,7 +490,7 @@ void app_main(void)
      * rescue and whether rendering should stay paused this time. */
     /* The portal draws its own screen; a frame online is on its way to the
      * first render. */
-    fos_display_boot_status(online ? FOS_LCD_SPLASH_STARTING : FOS_LCD_SPLASH_NO_STATUS);
+    fos_display_boot_status(online || touch_setup ? FOS_LCD_SPLASH_STARTING : FOS_LCD_SPLASH_NO_STATUS);
     BOOTMEM("after-wifi");
     FOS_MEM_LOG_MILESTONE(TAG, "after-wifi");
     fos_client_render_recovery_boot();
@@ -572,7 +609,21 @@ void app_main(void)
      * fos_cloud_start: the enrolled state it gates on is loaded there. */
     fos_settings_boot_apply_cache();
 
-    if (online) {
+    if (touch_setup) {
+        /* The station may already have its address: then the online steps
+         * ran (or run) from fos_wifi's task, and the rest is the same either
+         * way. The HTTP server answers once there is a network to answer on. */
+        if (config->assets_sd.enabled) fos_assets_sd_log_status();
+        if (fos_rtc_present()) fos_rtc_log_status();
+        frameos_nim_set_log_upload_enabled(false);
+        fos_http_start(false);
+        if (!fos_config_wifi_ready()) fos_ota_mark_boot_valid();
+        /* Now that the runtime is up (its init resets the log upload): an
+         * address from here on runs the online steps, and one that came
+         * during the boot runs them now. */
+        fos_wifi_set_online_cb(on_wifi_online);
+        if (fos_wifi_state() == FOS_WIFI_CONNECTED) on_wifi_online();
+    } else if (online) {
         frameos_nim_set_log_upload_enabled(true);
         if (config->assets_sd.enabled) fos_assets_sd_log_status();
         if (fos_rtc_present()) fos_rtc_log_status();
