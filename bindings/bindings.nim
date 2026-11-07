@@ -1,0 +1,318 @@
+import genny, pixie, pixie/internal, unicode, bumpy, chroma, vmath
+
+var lastError: ref PixieError
+
+proc takeError(): string =
+  result = lastError.msg
+  lastError = nil
+
+proc checkError(): bool =
+  result = lastError != nil
+
+proc translate(x, y: float32): Mat3 =
+  vmath.translate(vec2(x, y))
+
+proc rotate(angle: float32): Mat3 =
+  vmath.rotate(angle)
+
+proc scale(x, y: float32): Mat3 =
+  vmath.scale(vec2(x, y))
+
+proc parseColor(s: string): Color {.raises: [PixieError]} =
+  try:
+    result = parseHtmlColor(s)
+  except:
+    raise currentExceptionAsPixieError()
+
+proc drawImage2(
+  ctx: Context, image: Image, dx, dy, dWidth, dHeight: float32
+) {.raises: [PixieError].} =
+  ctx.drawImage(image, dx, dy, dWidth, dHeight)
+
+proc drawImage3(
+  ctx: Context,
+  image: Image,
+  sx, sy, sWidth, sHeight,
+  dx, dy, dWidth, dHeight: float32
+) {.raises: [PixieError].} =
+  ctx.drawImage(image, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight)
+
+exportConsts:
+  defaultMiterLimit
+  autoLineHeight
+
+exportEnums:
+  FileFormat
+  BlendMode
+  PaintKind
+  WindingRule
+  LineCap
+  LineJoin
+  HorizontalAlignment
+  VerticalAlignment
+  TextCase
+
+exportProcs:
+  checkError
+  takeError
+
+exportObject vmath.Vec2:
+  fields:
+    x: float32
+    y: float32
+  procs:
+    `+`(Vec2, Vec2)
+    `-`(Vec2, Vec2)
+    `*`(Vec2, Vec2)
+    `/`(Vec2, Vec2)
+    `*`(Vec2, float32)
+    `/`(Vec2, float32)
+    length(Vec2)
+    normalize(Vec2)
+    dot(Vec2, Vec2)
+    dist(Vec2, Vec2)
+
+exportObject vmath.Mat3:
+  fields:
+    values: array[9, float32]
+  constructor:
+    mat3()
+  procs:
+    `*`(Mat3, Mat3)
+    `*`(Mat3, Vec2)
+    inverse(Mat3)
+    transpose(Mat3)
+    determinant(Mat3)
+
+exportObject bumpy.Rect:
+  discard
+
+exportObject chroma.Color:
+  discard
+
+exportObject ColorStop:
+  discard
+
+exportObject TextMetrics:
+  discard
+
+exportObject ImageDimensions:
+  discard
+
+exportSeq seq[float32]:
+  discard
+
+exportSeq seq[Span]:
+  procs:
+    typeset(seq[Span], Vec2, HorizontalAlignment, VerticalAlignment, bool)
+    layoutBounds(seq[Span])
+
+exportRefObject Image:
+  fields:
+    width
+    height
+  constructor:
+    newImage(int, int)
+  procs:
+    writeFile(Image, string)
+    encodeBase64
+    copy(Image)
+    getColor
+    setColor
+    fill(Image, Color)
+    fill(Image, Paint)
+    isOneColor(Image)
+    isTransparent(Image)
+    isOpaque(Image)
+    flipHorizontal
+    flipVertical
+    rotate90
+    subImage(Image, int, int, int, int)
+    subImage(Image, Rect)
+    minifyBy2(Image, int)
+    magnifyBy2(Image, int)
+    applyOpacity(Image, float32)
+    invert(Image)
+    ceil(Image)
+    blur(Image, float32, Color)
+    resize(Image, int, int)
+    shadow(Image, Vec2, float32, float32, Color)
+    superImage
+    draw(Image, Image, Mat3, BlendMode)
+    fillGradient
+    fillText(Image, Font, string, Mat3, Vec2, HorizontalAlignment, VerticalAlignment)
+    fillText(Image, Arrangement, Mat3)
+    strokeText(Image, Font, string, Mat3, float32, Vec2, HorizontalAlignment, VerticalAlignment, LineCap, LineJoin, float32, seq[float32])
+    strokeText(Image, Arrangement, Mat3, float32, LineCap, LineJoin, float32, seq[float32])
+    fillPath(Image, Path, Paint, Mat3, WindingRule)
+    strokePath(Image, Path, Paint, Mat3, float32, LineCap, LineJoin, float32, seq[float32])
+    newContext(Image)
+    opaqueBounds
+
+exportRefObject Paint:
+  fields:
+    kind
+    blendMode
+    opacity
+    color
+    image
+    imageMat
+    gradientHandlePositions
+    gradientStops
+  constructor:
+    newPaint(PaintKind)
+  procs:
+    copy(Paint)
+
+exportRefObject Path:
+  constructor:
+    newPath
+  procs:
+    copy(Path)
+    transform(Path, Mat3)
+    addPath(Path, Path)
+    closePath(Path)
+    computeBounds(Path)
+    fillOverlaps
+    strokeOverlaps
+    moveTo(Path, float32, float32)
+    lineTo(Path, float32, float32)
+    bezierCurveTo(Path, float32, float32, float32, float32, float32, float32)
+    quadraticCurveTo(Path, float32, float32, float32, float32)
+    ellipticalArcTo(Path, float32, float32, float32, bool, bool, float32, float32)
+    arc(Path, float32, float32, float32, float32, float32, bool)
+    arcTo(Path, float32, float32, float32, float32, float32)
+    rect(Path, float32, float32, float32, float32)
+    roundedRect(Path, float32, float32, float32, float32, float32, float32, float32, float32, bool)
+    ellipse(Path, float32, float32, float32, float32)
+    circle(Path, float32, float32, float32)
+    polygon(Path, float32, float32, float32, int)
+
+exportRefObject Typeface:
+  fields:
+    filePath
+  procs:
+    ascent
+    descent
+    lineGap
+    lineHeight
+    hasGlyph
+    getGlyphPath
+    getAdvance
+    getKerningAdjustment
+    newFont
+
+exportRefObject Font:
+  fields:
+    typeface
+    size
+    lineHeight
+    paints
+    paint
+    textCase
+    underline
+    strikethrough
+    noKerningAdjustments
+  procs:
+    copy(Font)
+    scale(Font)
+    defaultLineHeight
+    typeset(Font, string, Vec2, HorizontalAlignment, VerticalAlignment, bool)
+    layoutBounds(Font, string)
+
+exportRefObject Span:
+  fields:
+    text
+    font
+  constructor:
+    newSpan
+
+exportRefObject Arrangement:
+  procs:
+    layoutBounds(Arrangement)
+    computeBounds(Arrangement, Mat3)
+
+exportRefObject Context:
+  fields:
+    image
+    fillStyle
+    strokeStyle
+    globalAlpha
+    lineWidth
+    miterLimit
+    lineCap
+    lineJoin
+    font
+    fontSize
+    textAlign
+  constructor:
+    newContext(int, int)
+  procs:
+    save
+    saveLayer
+    restore
+    beginPath
+    closePath(Context)
+    fill(Context, WindingRule)
+    fill(Context, Path, WindingRule)
+    clip(Context, WindingRule)
+    clip(Context, Path, WindingRule)
+    stroke(Context)
+    stroke(Context, Path)
+    measureText
+    getTransform
+    setTransform
+    transform(Context, Mat3)
+    resetTransform
+    getLineDash
+    setLineDash
+    drawImage(Context, Image, float32, float32)
+    drawImage2
+    drawImage3
+    moveTo(Context, float32, float32)
+    lineTo(Context, float32, float32)
+    bezierCurveTo(Context, float32, float32, float32, float32, float32, float32)
+    quadraticCurveTo(Context, float32, float32, float32, float32)
+    arc(Context, float32, float32, float32, float32, float32, bool)
+    arcTo(Context, float32, float32, float32, float32, float32)
+    rect(Context, float32, float32, float32, float32)
+    roundedRect(Context, float32, float32, float32, float32, float32, float32, float32, float32)
+    ellipse(Context, float32, float32, float32, float32)
+    circle(Context, float32, float32, float32)
+    polygon(Context, float32, float32, float32, int)
+    clearRect(Context, float32, float32, float32, float32)
+    fillRect(Context, float32, float32, float32, float32)
+    strokeRect(Context, float32, float32, float32, float32)
+    strokeSegment(Context, float32, float32, float32, float32)
+    fillText(Context, string, float32, float32)
+    strokeText(Context, string, float32, float32)
+    translate(Context, float32, float32)
+    scale(Context, float32, float32)
+    rotate(Context, float32)
+    isPointInPath(Context, float32, float32, WindingRule)
+    isPointInPath(Context, Path, float32, float32, WindingRule)
+    isPointInStroke(Context, float32, float32)
+    isPointInStroke(Context, Path, float32, float32)
+
+exportProcs:
+  decodeBase64
+  decodeImage
+  decodeImageDimensions(string)
+  readImage
+  readImageDimensions
+  readTypeface
+  readFont
+  parsePath
+  miterLimitToAngle
+  angleToMiterLimit
+  parseColor
+  translate(float32, float32)
+  rotate(float32)
+  scale(float32, float32)
+  inverse(Mat3)
+  snapToPixels
+  mix(Color, Color, float32)
+
+writeFiles("bindings/generated", "Pixie")
+
+include generated/internal

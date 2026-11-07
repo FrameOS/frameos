@@ -1,0 +1,28 @@
+name: Github Actions
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Clone ImageTestSuite
+        shell: bash
+        run: git clone --depth 1 https://github.com/treeform/imagetestsuite ../imagetestsuite
+      - uses: treeform/setup-nim-action@v6
+      - name: Install dependencies
+        shell: bash
+        run: |
+          cd ..
+          nimby install -g pixie/pixie.nimble
+      - run: nim r tests/tests.nim
+      - run: nim cpp -r tests/tests.nim
+      - run: nim r tests/imagetestsuite.nim
