@@ -55,9 +55,9 @@ function keywordLabel(keyword: string): string {
   return last || keyword
 }
 
-/** The scene's app nodes as the tree lists them, in diagram order. Two
- * nodes of one name get their node id beside it, so neither hides the
- * other. */
+/** The scene's app nodes as the tree lists them: the scene's own apps
+ * first, then the built-in ones, each group in diagram order. Two nodes of
+ * one name get their node id beside it, so neither hides the other. */
 export function sceneAppEntries(scene: FrameScene | null | undefined): SceneAppEntry[] {
   if (!scene) {
     return []
@@ -86,9 +86,13 @@ export function sceneAppEntries(scene: FrameScene | null | undefined): SceneAppE
   for (const entry of entries) {
     counts.set(entry.label, (counts.get(entry.label) ?? 0) + 1)
   }
-  return entries.map((entry) =>
+  const labelled = entries.map((entry) =>
     (counts.get(entry.label) ?? 0) > 1 ? { ...entry, label: `${entry.label} (${entry.nodeId})` } : entry
   )
+  return [
+    ...labelled.filter((entry) => entry.source === 'scene'),
+    ...labelled.filter((entry) => entry.source === 'builtin'),
+  ]
 }
 
 /** The selection the pane can actually show: an app whose node is gone

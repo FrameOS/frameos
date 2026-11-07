@@ -27,6 +27,7 @@ import { ZoomOutArea } from '../icons/ZoomOutArea'
 import { editAppEditorKey, frameEditorsLogic } from '../scenes/frame/frameEditorsLogic'
 import { Diagram } from '../scenes/frame/panels/Diagram/Diagram'
 import { diagramLogic } from '../scenes/frame/panels/Diagram/diagramLogic'
+import { Button } from '../components/Button'
 import { EditApp } from '../scenes/frame/panels/EditApp/EditApp'
 import { editAppLogic } from '../scenes/frame/panels/EditApp/editAppLogic'
 import { Apps } from '../scenes/frame/panels/Apps/Apps'
@@ -587,29 +588,63 @@ function EmbedUtilityDrawer({
   )
 }
 
-function fileTitle(scene: FrameScene | null, appLabel: string | null, file: string | null): JSX.Element {
+/** The pane header's path: `scene / app / file`. The last part (the file)
+ * keeps its width; the rest truncates first, and the whole path is the
+ * tooltip. */
+function FilePath({ parts, suffix }: { parts: string[]; suffix?: JSX.Element | null }): JSX.Element {
+  const last = parts[parts.length - 1] ?? ''
+  const prefix = parts.slice(0, -1)
   return (
-    <span className="min-w-0 truncate font-mono text-xs">
-      {scene ? sceneFileName(scene) : null}
-      {appLabel ? (
-        <>
-          <span className="frameos-muted px-1">/</span>
-          {appLabel}
-        </>
+    <span className="flex min-w-0 flex-1 items-center overflow-hidden font-mono text-xs" title={parts.join(' / ')}>
+      {prefix.length > 0 ? (
+        <span className="frameos-muted min-w-0 shrink truncate">
+          {prefix.join(' / ')}
+          <span className="px-1">/</span>
+        </span>
       ) : null}
-      {file ? (
-        <>
-          <span className="frameos-muted px-1">/</span>
-          {file}
-        </>
-      ) : null}
+      <span className="min-w-0 shrink-0 truncate" style={{ maxWidth: '100%' }}>
+        {last}
+      </span>
+      {suffix}
     </span>
   )
 }
 
-function AppFileTitle({ scene, nodeId, label }: { scene: FrameScene; nodeId: string; label: string }): JSX.Element {
-  const { activeFile } = useValues(editAppLogic({ frameId: EMBED_FRAME_ID, sceneId: scene.id, nodeId }))
-  return fileTitle(scene, label, activeFile || null)
+/** An app file's header: its path, whether it is unsaved, Discard and Save
+ * (once a second row above the code, EditApp's toolbar). */
+function AppFileHeader({ scene, nodeId, label }: { scene: FrameScene; nodeId: string; label: string }): JSX.Element {
+  const logic = editAppLogic({ frameId: EMBED_FRAME_ID, sceneId: scene.id, nodeId })
+  const { activeFile, hasChanges, requiresCompiledOnSave } = useValues(logic)
+  const { saveChanges, discardChanges } = useActions(logic)
+  return (
+    <>
+      <FilePath
+        parts={[sceneFileName(scene), label, ...(activeFile ? [activeFile] : [])]}
+        suffix={hasChanges ? <span className="ml-1.5 shrink-0 font-sans text-xs font-semibold">(unsaved)</span> : null}
+      />
+      <div className="flex shrink-0 items-center gap-1.5">
+        <Button
+          size="tiny"
+          color="secondary"
+          onClick={() => discardChanges()}
+          disabled={!hasChanges}
+          className="!px-2 !text-xs"
+        >
+          Discard
+        </Button>
+        <Button
+          size="tiny"
+          color={hasChanges ? 'primary' : 'secondary'}
+          onClick={() => saveChanges()}
+          disabled={!hasChanges || requiresCompiledOnSave}
+          className="!px-2 !text-xs"
+          title={requiresCompiledOnSave ? 'Compiled Nim apps are read only here' : 'Save changes'}
+        >
+          Save
+        </Button>
+      </div>
+    </>
+  )
 }
 
 function EmbeddedEditorBody({
@@ -688,13 +723,13 @@ function EmbeddedEditorBody({
               <ChevronDoubleRightIcon className="h-4 w-4" />
             </button>
           )}
-          <div className="flex min-w-0 flex-1 items-center pl-1">
+          <div className="flex min-w-0 flex-1 items-center gap-2 pl-1">
             {shownSelection.kind === 'template' ? (
-              <span className="min-w-0 truncate font-mono text-xs">template.json</span>
+              <FilePath parts={['template.json']} />
             ) : shownSelection.kind === 'app' && appScene && appEntry ? (
-              <AppFileTitle scene={appScene} nodeId={appEntry.nodeId} label={appEntry.label} />
+              <AppFileHeader scene={appScene} nodeId={appEntry.nodeId} label={appEntry.label} />
             ) : (
-              fileTitle(selectedScene, null, null)
+              <FilePath parts={selectedScene ? [sceneFileName(selectedScene)] : []} />
             )}
           </div>
         </div>
@@ -717,7 +752,6 @@ function EmbeddedEditorBody({
               sceneId={appScene.id}
               nodeId={shownSelection.nodeId}
               showFileList={false}
-              showToolbar
             />
           </div>
         ) : (

@@ -4,150 +4,164 @@
 // follows the diagram — "Edit app" on a node opens the app's folder, where a
 // modal used to open — and hands the keyboard back to the diagram shown.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { initKea } from '../../../../../../frontend/src/initKea'
-import type { FrameScene, FrameType } from '../../../../../../frontend/src/types'
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { initKea } from "../../../../../../frontend/src/initKea";
+import type { FrameScene, FrameType } from "../../../../../../frontend/src/types";
 
-vi.mock('../../../../../../frontend/src/scenes/frame/frameLogic', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../../../../frontend/src/scenes/frame/frameLogic')>()
-  const { embedFrameLogic } = await import('../../../../../../frontend/src/embed/embedFrameLogic')
-  return { ...actual, frameLogic: embedFrameLogic }
-})
-vi.mock('../../../../../../frontend/src/scenes/frame/panels/Logs/logsLogic', async () => {
-  return await import('../../../../../../frontend/src/embed/logsLogicShim')
-})
+vi.mock("../../../../../../frontend/src/scenes/frame/frameLogic", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../../../../frontend/src/scenes/frame/frameLogic")>();
+  const { embedFrameLogic } = await import("../../../../../../frontend/src/embed/embedFrameLogic");
+  return { ...actual, frameLogic: embedFrameLogic };
+});
+vi.mock("../../../../../../frontend/src/scenes/frame/panels/Logs/logsLogic", async () => {
+  return await import("../../../../../../frontend/src/embed/logsLogicShim");
+});
 
-import { embedFrameLogic } from '../../../../../../frontend/src/embed/embedFrameLogic'
-import { appTreeKey, sceneTreeKey } from '../../../../../../frontend/src/embed/sceneFiles'
-import { sceneFileTreeLogic } from '../../../../../../frontend/src/embed/sceneFileTreeLogic'
-import { frameEditorsLogic } from '../../../../../../frontend/src/scenes/frame/frameEditorsLogic'
+import { embedFrameLogic } from "../../../../../../frontend/src/embed/embedFrameLogic";
+import { appTreeKey, sceneTreeKey } from "../../../../../../frontend/src/embed/sceneFiles";
+import { sceneFileTreeLogic } from "../../../../../../frontend/src/embed/sceneFileTreeLogic";
+import { frameEditorsLogic } from "../../../../../../frontend/src/scenes/frame/frameEditorsLogic";
 
-const frameId = 1 as unknown as FrameType['id']
+const frameId = 1 as unknown as FrameType["id"];
 
 function appNode(id: string, data: Record<string, unknown>) {
-  return { id, type: 'app', position: { x: 0, y: 0 }, data: { config: {}, ...data } }
+  return { id, type: "app", position: { x: 0, y: 0 }, data: { config: {}, ...data } };
 }
 
 const clock = {
-  id: 'clock',
-  name: 'Clock',
+  id: "clock",
+  name: "Clock",
   nodes: [
-    { id: 'render', type: 'event', position: { x: 0, y: 0 }, data: { keyword: 'render' } },
-    appNode('face', { keyword: 'face', name: 'Clock face' }),
-    appNode('text1', { keyword: 'render/text' }),
-    appNode('text2', { keyword: 'render/text' }),
-    appNode('inline', { keyword: 'inline', sources: { 'app.ts': '', 'config.json': '{}' } }),
-    appNode('shared', { keyword: 'weatherApp' }),
+    { id: "render", type: "event", position: { x: 0, y: 0 }, data: { keyword: "render" } },
+    appNode("face", { keyword: "face", name: "Clock face" }),
+    appNode("text1", { keyword: "render/text" }),
+    appNode("text2", { keyword: "render/text" }),
+    appNode("inline", { keyword: "inline", sources: { "app.ts": "", "config.json": "{}" } }),
+    appNode("shared", { keyword: "weatherApp" }),
   ],
   edges: [],
-  apps: { face: { name: 'Face', sources: { 'app.tsx': '' } }, weatherApp: { name: 'Weather', sources: {} } },
-  settings: { execution: 'interpreted' },
-} as unknown as FrameScene
+  apps: {
+    face: { name: "Face", sources: { "app.tsx": "" } },
+    weatherApp: { name: "Weather", sources: {} },
+  },
+  settings: { execution: "interpreted" },
+} as unknown as FrameScene;
 
 const photos = {
-  id: 'photos',
-  name: '  ',
-  nodes: [appNode('album', { keyword: 'repo/apps/image/photoAlbum', sources: { 'app.ts': '' } })],
+  id: "photos",
+  name: "  ",
+  nodes: [appNode("album", { keyword: "repo/apps/image/photoAlbum", sources: { "app.ts": "" } })],
   edges: [],
-  settings: { execution: 'interpreted' },
-} as unknown as FrameScene
+  settings: { execution: "interpreted" },
+} as unknown as FrameScene;
 
-describe('sceneFileTreeLogic', () => {
+describe("sceneFileTreeLogic", () => {
   beforeEach(() => {
-    ;(window as Window & { FRAMEOS_EMBEDDED_NO_BACKEND?: boolean }).FRAMEOS_EMBEDDED_NO_BACKEND = true
+    (window as Window & { FRAMEOS_EMBEDDED_NO_BACKEND?: boolean }).FRAMEOS_EMBEDDED_NO_BACKEND =
+      true;
     vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('null', { status: 404 }))
-    )
-    initKea({ memoryRouter: true })
-    embedFrameLogic({ frameId }).mount()
+      "fetch",
+      vi.fn(async () => new Response("null", { status: 404 })),
+    );
+    initKea({ memoryRouter: true });
+    embedFrameLogic({ frameId }).mount();
     embedFrameLogic({ frameId }).actions.initEmbedFrame({
       id: frameId,
-      name: 'Embedded',
+      name: "Embedded",
       scenes: [clock, photos],
       width: 800,
       height: 480,
-    } as Partial<FrameType>)
-  })
+    } as Partial<FrameType>);
+  });
 
   afterEach(() => {
-    vi.unstubAllGlobals()
-    delete (window as Window & { FRAMEOS_EMBEDDED_NO_BACKEND?: boolean }).FRAMEOS_EMBEDDED_NO_BACKEND
-  })
+    vi.unstubAllGlobals();
+    delete (window as Window & { FRAMEOS_EMBEDDED_NO_BACKEND?: boolean })
+      .FRAMEOS_EMBEDDED_NO_BACKEND;
+  });
 
-  it('opens on the diagram, scenes expanded and app folders closed', () => {
-    const logic = sceneFileTreeLogic({ frameId })
-    const unmount = logic.mount()
-    expect(logic.values.shownSelection).toEqual({ kind: 'diagram' })
-    expect(logic.values.isExpanded(sceneTreeKey('clock'))).toBe(true)
-    expect(logic.values.isExpanded(appTreeKey('clock', 'face'))).toBe(false)
-    logic.actions.toggleExpanded(sceneTreeKey('clock'))
-    expect(logic.values.isExpanded(sceneTreeKey('clock'))).toBe(false)
-    unmount()
-  })
+  it("opens on the diagram, scenes expanded and app folders closed", () => {
+    const logic = sceneFileTreeLogic({ frameId });
+    const unmount = logic.mount();
+    expect(logic.values.shownSelection).toEqual({ kind: "diagram" });
+    expect(logic.values.isExpanded(sceneTreeKey("clock"))).toBe(true);
+    expect(logic.values.isExpanded(appTreeKey("clock", "face"))).toBe(false);
+    logic.actions.toggleExpanded(sceneTreeKey("clock"));
+    expect(logic.values.isExpanded(sceneTreeKey("clock"))).toBe(false);
+    unmount();
+  });
 
-  it('opens on template.json when the host asks, again after a remount', () => {
-    const first = sceneFileTreeLogic({ frameId, initialFile: 'template' }).mount()
-    expect(sceneFileTreeLogic({ frameId }).values.shownSelection).toEqual({ kind: 'template' })
-    sceneFileTreeLogic({ frameId }).actions.showDiagram('clock')
-    first()
+  it("opens on template.json when the host asks, again after a remount", () => {
+    const first = sceneFileTreeLogic({ frameId, initialFile: "template" }).mount();
+    expect(sceneFileTreeLogic({ frameId }).values.shownSelection).toEqual({ kind: "template" });
+    sceneFileTreeLogic({ frameId }).actions.showDiagram("clock");
+    first();
     // StrictMode's (or a host's) remount starts from the prop again.
-    const second = sceneFileTreeLogic({ frameId, initialFile: 'template' }).mount()
-    expect(sceneFileTreeLogic({ frameId }).values.shownSelection).toEqual({ kind: 'template' })
-    second()
-  })
+    const second = sceneFileTreeLogic({ frameId, initialFile: "template" }).mount();
+    expect(sceneFileTreeLogic({ frameId }).values.shownSelection).toEqual({ kind: "template" });
+    second();
+  });
 
   it("opens a node's app in the tree, not in a modal, and gives the diagram back its keys", () => {
-    const logic = sceneFileTreeLogic({ frameId })
-    const unmount = logic.mount()
-    const editors = frameEditorsLogic({ frameId })
+    const logic = sceneFileTreeLogic({ frameId });
+    const unmount = logic.mount();
+    const editors = frameEditorsLogic({ frameId });
 
     // The diagram's "Edit app" (AppNode → openAppModal → editApp).
-    logic.actions.toggleExpanded(sceneTreeKey('photos'))
-    editors.actions.openAppModal('photos', 'album', photos.nodes[0]!.data as never)
-    expect(logic.values.shownSelection).toEqual({ kind: 'app', sceneId: 'photos', nodeId: 'album' })
+    logic.actions.toggleExpanded(sceneTreeKey("photos"));
+    editors.actions.openAppModal("photos", "album", photos.nodes[0]!.data as never);
+    expect(logic.values.shownSelection).toEqual({
+      kind: "app",
+      sceneId: "photos",
+      nodeId: "album",
+    });
     // Its scene and its folder open, so the file is in view.
-    expect(logic.values.isExpanded(sceneTreeKey('photos'))).toBe(true)
-    expect(logic.values.isExpanded(appTreeKey('photos', 'album'))).toBe(true)
-    expect(editors.values.activeEditor?.kind).toBe('editApp')
+    expect(logic.values.isExpanded(sceneTreeKey("photos"))).toBe(true);
+    expect(logic.values.isExpanded(appTreeKey("photos", "album"))).toBe(true);
+    expect(editors.values.activeEditor?.kind).toBe("editApp");
 
     // Back to the diagram: it is the active editor again, so its global
     // shortcuts (diagramLogic's isVisibleDiagram) work there.
-    logic.actions.showDiagram('photos')
-    expect(logic.values.shownSelection).toEqual({ kind: 'diagram' })
-    expect(editors.values.activeEditor).toMatchObject({ kind: 'diagram', sceneId: 'photos' })
+    logic.actions.showDiagram("photos");
+    expect(logic.values.shownSelection).toEqual({ kind: "diagram" });
+    expect(editors.values.activeEditor).toMatchObject({ kind: "diagram", sceneId: "photos" });
 
     // Another scene shown while the diagram is: it follows.
-    logic.actions.syncScene('clock')
-    expect(editors.values.activeEditor).toMatchObject({ kind: 'diagram', sceneId: 'clock' })
+    logic.actions.syncScene("clock");
+    expect(editors.values.activeEditor).toMatchObject({ kind: "diagram", sceneId: "clock" });
     // …but not while an app or the template is open.
-    logic.actions.selectTemplate()
-    logic.actions.syncScene('photos')
-    expect(editors.values.activeEditor).toMatchObject({ kind: 'diagram', sceneId: 'clock' })
-    unmount()
-  })
+    logic.actions.selectTemplate();
+    logic.actions.syncScene("photos");
+    expect(editors.values.activeEditor).toMatchObject({ kind: "diagram", sceneId: "clock" });
+    unmount();
+  });
 
-  it('opening an app file from the tree makes that app the active editor', () => {
-    const logic = sceneFileTreeLogic({ frameId })
-    const unmount = logic.mount()
-    logic.actions.openAppFile('clock', 'inline', 'config.json')
-    expect(logic.values.shownSelection).toEqual({ kind: 'app', sceneId: 'clock', nodeId: 'inline' })
+  it("opening an app file from the tree makes that app the active editor", () => {
+    const logic = sceneFileTreeLogic({ frameId });
+    const unmount = logic.mount();
+    logic.actions.openAppFile("clock", "inline", "config.json");
+    expect(logic.values.shownSelection).toEqual({
+      kind: "app",
+      sceneId: "clock",
+      nodeId: "inline",
+    });
     expect(frameEditorsLogic({ frameId }).values.activeEditor).toMatchObject({
-      kind: 'editApp',
-      sceneId: 'clock',
-      nodeId: 'inline',
-    })
-    unmount()
-  })
+      kind: "editApp",
+      sceneId: "clock",
+      nodeId: "inline",
+    });
+    unmount();
+  });
 
-  it('drops a template source error when the view changes', () => {
-    const logic = sceneFileTreeLogic({ frameId })
-    const unmount = logic.mount()
-    logic.actions.setTemplateSourceView(true)
-    logic.actions.setTemplateSourceError('Unexpected end of JSON input')
-    expect(logic.values.templateSourceError).toBe('Unexpected end of JSON input')
-    logic.actions.setTemplateSourceView(false)
-    expect(logic.values.templateSourceError).toBeNull()
-    unmount()
-  })
-})
+  it("drops a template source error when the view changes", () => {
+    const logic = sceneFileTreeLogic({ frameId });
+    const unmount = logic.mount();
+    logic.actions.setTemplateSourceView(true);
+    logic.actions.setTemplateSourceError("Unexpected end of JSON input");
+    expect(logic.values.templateSourceError).toBe("Unexpected end of JSON input");
+    logic.actions.setTemplateSourceView(false);
+    expect(logic.values.templateSourceError).toBeNull();
+    unmount();
+  });
+});
