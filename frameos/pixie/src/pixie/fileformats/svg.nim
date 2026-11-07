@@ -321,6 +321,38 @@ var
   pathCache {.threadvar.}: seq[(string, Path)]
   pathCacheChars {.threadvar.}: int
 
+proc cachedPathFor(key: string): Path =
+  ## The path the path cache holds for `key`, made most recent; nil.
+  for i in countdown(pathCache.high, 0):
+    if pathCache[i][0] == key:
+      result = pathCache[i][1]
+      if i != pathCache.high:
+        let entry = pathCache[i]
+        pathCache.delete(i)
+        pathCache.add(entry)
+      return
+
+proc keepPath(key: string, path: Path) =
+  path.share()
+  pathCache.add((key, path))
+  pathCacheChars += key.len
+  while pathCache.len > PathCacheEntries or pathCacheChars > PathCacheMaxChars:
+    pathCacheChars -= pathCache[0][0].len
+    pathCache.delete(0)
+
+template shapeCached(key: string, body: untyped): Path =
+  ## A shape element's path (a <line>, a <circle>, ...), shared by every SVG
+  ## that draws it with the same geometry, as `<path d>` is: a UI's icon is
+  ## parsed again whenever its node is new, and a new path every time kept
+  ## its coverage from ever being kept (paths.nim). Keyed by the tag and the
+  ## attributes' own text, a byte no path data starts with in front.
+  let shapeKey = key
+  var shapePath = cachedPathFor(shapeKey)
+  if shapePath.isNil:
+    shapePath = body
+    keepPath(shapeKey, shapePath)
+  shapePath
+
 proc parsePathCached(d: string): Path {.raises: [PixieError].} =
   ## `<path d>` parsed once and shared by every SVG that holds the same data.
   ## An animation renders the same shapes under a new transform every frame,
@@ -1082,9 +1114,11 @@ proc parseSvgElement(
       x2 = parseFloat(node.attrOrDefault("x2", "0"))
       y2 = parseFloat(node.attrOrDefault("y2", "0"))
 
-    let path = newPath()
-    path.moveTo(x1, y1)
-    path.lineTo(x2, y2)
+    let path = shapeCached("\x01line " & $x1 & " " & $y1 & " " & $x2 & " " & $y2):
+      let p = newPath()
+      p.moveTo(x1, y1)
+      p.lineTo(x2, y2)
+      p
 
     elements.add newSvgElement(path, props)
 
@@ -1110,15 +1144,16 @@ proc parseSvgElement(
     if vecs.len == 0:
       failInvalid()
 
-    let path = newPath()
-    path.moveTo(vecs[0])
-    for i in 1 ..< vecs.len:
-      path.lineTo(vecs[i])
-
-    # The difference between polyline and polygon is whether we close the path
-    # and fill or not
-    if node.tag == "polygon":
-      path.closePath()
+    let path = shapeCached("\x01" & node.tag & " " & points):
+      let p = newPath()
+      p.moveTo(vecs[0])
+      for i in 1 ..< vecs.len:
+        p.lineTo(vecs[i])
+      # The difference between polyline and polygon is whether we close the
+      # path and fill or not
+      if node.tag == "polygon":
+        p.closePath()
+      p
 
     elements.add newSvgElement(path, props)
 
@@ -1137,9 +1172,14 @@ proc parseSvgElement(
       rx = max(parseFloat(node.attrOrDefault("rx", "0")), 0)
       ry = max(parseFloat(node.attrOrDefault("ry", "0")), 0)
 
-    let path = newPath()
+    var path = newPath()
     var rectProps = props
     if rx > 0 or ry > 0:
+      let cachedRound = cachedPathFor("\x01rect " & $x & " " & $y & " " & $width & " " & $height &
+        " " & $rx & " " & $ry)
+      if not cachedRound.isNil:
+        elements.add newSvgElement(cachedRound, rectProps)
+        return
       if rx == 0:
         rx = ry
       elif ry == 0:
@@ -1156,6 +1196,9 @@ proc parseSvgElement(
       path.ellipticalArcTo(rx, ry, 0, false, true, x, y + height - ry)
       path.lineTo(x, y + ry)
       path.ellipticalArcTo(rx, ry, 0, false, true, x + rx, y)
+      keepPath("\x01rect " & $x & " " & $y & " " & $width & " " & $height & " " &
+        $max(parseFloat(node.attrOrDefault("rx", "0")), 0) & " " &
+        $max(parseFloat(node.attrOrDefault("ry", "0")), 0), path)
     else:
       path.rect(x, y, width, height)
       rectProps.isRect = true
@@ -1180,8 +1223,10 @@ proc parseSvgElement(
       rx = parseFloat(node.attrOrDefault("rx", "0"))
       ry = parseFloat(node.attrOrDefault("ry", "0"))
 
-    let path = newPath()
-    path.ellipse(cx, cy, rx, ry)
+    let path = shapeCached("\x01ellipse " & $cx & " " & $cy & " " & $rx & " " & $ry):
+      let p = newPath()
+      p.ellipse(cx, cy, rx, ry)
+      p
 
     elements.add newSvgElement(path, props)
 
