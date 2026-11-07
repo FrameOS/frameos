@@ -4,7 +4,7 @@ The [FrameOS](https://frameos.net) visual scene editor — the same node-graph e
 backend ships — as an embeddable static bundle. No backend needed: the app catalog and app sources
 are embedded at build time, scenes go in and come back out as JSON over `postMessage`. The editor
 carries the full scene workspace as a file tree: `template.json` (the template's name, description,
-category and tags, as a form or as JSON), then every scene as a folder: its diagram (`scene.diagram`,
+category and tags, as a form or as JSON), then every scene as a folder: its diagram (`scene.json`,
 with side panels for scene settings, state variables, the app catalog, events and raw scene JSON)
 and the apps the scene carries the source of, as folders of files, each opening in the editor pane
 (Monaco, `config.json` as a form). Built-in apps are not listed: a node's "Edit app" shows them in
