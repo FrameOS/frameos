@@ -1,5 +1,6 @@
 ## Load SVG files.
 
+import std/hashes
 import bumpy, chroma, ../common, ../fonts, ../images, ../internal, ../paints,
     ../paths, parsexml, strtabs, strutils, tables, unicode, vmath, xmlparser, xmltree
 
@@ -154,6 +155,17 @@ proc attrOrDefault(node: SvgNode, name, default: string): string =
   result = node.attr(name)
   if result.len == 0:
     result = default
+
+var fillColors {.threadvar.}: array[64, (string, Color)]
+  ## Colour strings parsed lately, by hash: a UI's nodes say the same few
+  ## colours over and over, and parseHtmlColor was ~0.1 ms a call on an ESP32.
+
+proc parseFillColor(fill: string): Color {.raises: [PixieError, ValueError].} =
+  let slot = hash(fill) and fillColors.high
+  if fillColors[slot][0] == fill and fill.len > 0:
+    return fillColors[slot][1]
+  result = parseHtmlColor(fill)
+  fillColors[slot] = (fill, result)
 
 proc initSvgProperties(): SvgProperties =
   result.display = true
@@ -470,7 +482,7 @@ proc parseSvgProperties(node: SvgNode, inherited: SvgProperties): SvgProperties 
     result.fillSolid = false
     if fill != "none" and not fill.startsWith("url("):
       try:
-        result.fillColor = parseHtmlColor(fill)
+        result.fillColor = parseFillColor(fill)
         result.fillSolid = true
       except CatchableError:
         discard # parsed again where it is drawn, and refused there as before
