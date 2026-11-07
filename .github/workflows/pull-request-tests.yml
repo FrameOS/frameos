@@ -179,6 +179,15 @@ jobs:
           cd frameos
           bash ./tools/run_test_shard.sh ${{ matrix.shard }}
 
+      # pixie's own suite (frameos/pixie, the fork in the tree since 2026-11-07):
+      # its image comparisons are what says a changed fill or stroke still
+      # draws the same pixels. One shard; a few minutes of compiles.
+      - name: pixie tests
+        if: ${{ matrix.shard == 2 }}
+        run: |
+          cd frameos
+          make test-pixie
+
       # Not after a cancel: a gcc killed mid-write leaves a truncated .o newer
       # than its .c, which the next run would link.
       - name: Save nimcache
