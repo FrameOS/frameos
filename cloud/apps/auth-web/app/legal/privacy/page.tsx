@@ -69,28 +69,18 @@ export default function PrivacyPage() {
 
       <h3>Paying for a plan</h3>
       <p className="copy">
-        Paid plans are sold by Creem (Armitage Labs O&Uuml;, Estonia), our
-        merchant of record. When you go to checkout we send Creem your email
-        address, the plan you chose and an identifier for your account, so the
-        payment can be matched to it. You give your name, card and billing
-        address to Creem directly: we never see or store your card details.
-        Creem tells us whether you paid, how much, the tax and your country,
-        and when a plan renews, fails or ends. We keep that to know which plan
-        your account is on and to keep our books. The legal basis is{" "}
+        When you buy a paid plan, the payment provider named at checkout
+        receives your email address, the plan you chose and an identifier for
+        your account, so the payment can be matched to it. You give your
+        name, card and billing address to the provider directly: we never see
+        or store your card details. The provider tells us whether you paid,
+        how much, the tax and your country, and when a plan renews, fails or
+        ends. We keep that to know which plan your account is on and to keep
+        our books. The legal basis is{" "}
         <strong>performance of a contract</strong> and, for the accounting
-        records, a <strong>legal obligation</strong> (art. 6(1)(c) GDPR).
-      </p>
-      <p className="copy">
-        For the payment itself Creem decides how your data is used and is
-        responsible for it, under its own{" "}
-        <a
-          href="https://www.creem.io/privacy"
-          rel="noreferrer noopener"
-          target="_blank"
-        >
-          privacy notice
-        </a>
-        . If you never buy a plan, Creem never hears of you.
+        records, a <strong>legal obligation</strong> (art. 6(1)(c) GDPR). The
+        provider is listed with the others below once paid plans open. If you
+        never buy a plan, it never hears of you.
       </p>
 
       <h3>Your frames, scenes and files</h3>

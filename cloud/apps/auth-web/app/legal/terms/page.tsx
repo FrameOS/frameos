@@ -80,19 +80,10 @@ export default function TermsPage() {
         checkout where it applies.
       </p>
       <p className="copy">
-        Paid plans are sold by Creem (Armitage Labs O&Uuml;, Estonia), our
-        merchant of record. That means Creem is the seller for the payment: it
-        charges your card, handles the tax, sends your receipt and invoice and
-        appears on your card statement, and its{" "}
-        <a
-          href="https://www.creem.io/buyer-terms"
-          rel="noreferrer noopener"
-          target="_blank"
-        >
-          buyer terms
-        </a>{" "}
-        apply to the purchase. {entity.name} provides the service and answers
-        for it under these terms.
+        Payments are taken by a payment provider, named at checkout. It
+        handles your card and sends your receipt; we never see your card
+        details. {entity.name} is the seller and answers for the service under
+        these terms.
       </p>
       <p className="copy">
         You can change plan from your account. A larger plan starts at once and
@@ -117,7 +108,7 @@ export default function TermsPage() {
         are in the <a href="/legal/refunds">refund policy</a>.
       </p>
       <p className="copy">
-        If a payment fails, Creem tries the card again over the following days.
+        If a payment fails, the card is tried again over the following days.
         If it still fails the plan ends and the account moves to Free.
       </p>
 

@@ -12,6 +12,7 @@ import { desc, eq, isNotNull } from "drizzle-orm";
 import { AdminNav } from "../../../../src/components/AdminNav";
 import { AppShell } from "../../../../src/components/AppShell";
 import { BillingNav } from "../../../../src/components/BillingNav";
+import { BillingPlanSyncButton } from "../../../../src/components/BillingPlanSyncButton";
 import { SortableTable } from "../../../../src/components/SortableTable";
 import {
   CustomerAiSwitch,
@@ -211,6 +212,13 @@ export default async function AdminBillingCustomersPage({ searchParams }: PagePr
               </p>
               <section className="card">
                 <h3>Plan</h3>
+                <p className="copy">
+                  The paid stops of the catalog need their rows here before an
+                  account can be moved onto one; Sync plans writes them.
+                </p>
+                <div className="filter-bar">
+                  <BillingPlanSyncButton />
+                </div>
                 <CustomerPlanForm
                   accountId={accountId}
                   currentCode={plan?.plan.code ?? "payg"}

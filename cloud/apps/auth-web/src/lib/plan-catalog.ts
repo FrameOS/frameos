@@ -5,12 +5,12 @@
 // follows the same rules from $49 up and adds its own features, so the
 // higher tiers buy capacity, never features.
 //
-// A self-serve group is bought through the payment provider
-// (cloud/docs/billing.md): each of its stops gets a billing_plans row with
-// the stop's code and these limits as entitlements, and a product at the
-// provider, both written by the admin's "Sync plans" (planRowFor). The
-// other groups are activated by support. The page, the row and the quota
-// refusals read the same numbers.
+// A self-serve group is meant to be bought at a payment provider's checkout
+// (cloud/docs/billing.md; no provider is wired up yet): each of its stops
+// gets a billing_plans row with the stop's code and these limits as
+// entitlements, written by the admin's "Sync plans" (planRowFor,
+// plan-rows.ts). The other groups are activated by support. The page, the
+// row and the quota refusals read the same numbers.
 //
 // What a plan lists is what it has today. A feature or limit that is not
 // built yet is named in `plannedFeatures` / `plannedLimits`: every page

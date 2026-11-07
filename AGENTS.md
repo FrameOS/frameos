@@ -598,31 +598,27 @@
 
 ## Paid plans: `cloud/docs/billing.md`
 
-- Cloud-only by nature: FrameOS Cloud sells its paid plans through Creem, a
-  merchant of record (it charges the card, remits the tax, invoices the
-  buyer). Test mode until `CREEM_MODE=live`; the go-live steps and Creem's
-  review checklist are in the doc.
+- Cloud-only by nature. The provider-neutral half is built (plan catalog,
+  plan cards, `provider_*` tables, the ledger's provider-billed periods);
+  **no payment provider is wired up**. Stripe is the plan; a Creem adapter
+  was built, run against Creem's test mode and removed on 2026-11-07 after
+  Creem's review demanded its moderation API on prompts that reach the
+  on-device image app. Don't bring a merchant of record back without
+  reading that history in the doc.
 - **A plan lists only what exists.** The catalog
   (`cloud/apps/auth-web/src/lib/plan-catalog.ts`) names unbuilt features and
   limits in `plannedFeatures` / `plannedLimits`: the plan cards mark them
-  "planned" and a plan's row does not grant them. The public price list is
-  frameos.net/pricing (`content/docs/pricing.mdx` in `frameos-docs`, numbers
-  repeated by hand); the cloud's `/pricing` only redirects, to the usage
-  page when signed in. Take a
-  name off those lists in the change that ships the feature, never before.
-  Creem's review (and plain honesty) rejects a site selling what it lacks.
-- **An account's plan changes only on what the provider says.** The return
-  from checkout, every webhook and the nightly reconcile all hand Creem's
-  subscription to `applySubscription` (`src/lib/billing-provider.ts`), which
-  is idempotent. A new path goes through it, never around it. The ledger
-  side is `packages/ledger/src/provider-subscriptions.ts`: the provider owns
-  the clock, so the nightly cycle skips `subscriptions.provider` rows.
-- **Test-mode payments never post to the ledger** (`postsToLedger`), and on
-  a production build only superadmins can check out in test mode.
-- `src/test/creem-fake.ts` is our reading of Creem's docs; the integration
-  suite and `pnpm --filter @frameos-cloud/auth-web creem:fake` (a local
-  checkout page and portal) both run on it. It is not Creem: a change to
-  how we read Creem's API is checked against Creem's real test mode.
+  "planned" and a plan's row does not grant them. Take a name off those
+  lists in the change that ships the feature, never before. The public
+  price list is frameos.net/pricing (`content/docs/pricing.mdx` in
+  `frameos-docs`, numbers repeated by hand); the cloud's `/pricing` only
+  redirects, to the usage page when signed in.
+- **An account's plan changes only on what the provider says**, through
+  one idempotent function per adapter; the ledger side is
+  `packages/ledger/src/provider-subscriptions.ts`, where the provider owns
+  the clock and the nightly cycle skips `subscriptions.provider` rows.
+  Test-mode payments never post to the ledger. The doc lists what an
+  adapter must do.
 
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】

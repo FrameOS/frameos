@@ -98,10 +98,9 @@ export type Processor = {
 // in step with that — it is the promise the privacy policy makes, and a
 // processor added in code but not here is a straightforward GDPR breach.
 //
-// Creem, the payment provider, is not in this list on purpose: as merchant
-// of record it is a controller of the buyer's payment data in its own right,
-// not a processor of ours. The privacy page says so under "Paying for a
-// plan".
+// The payment provider for paid plans goes in here when one is wired up
+// (as a processor, or named on the privacy page as a controller if it is a
+// merchant of record). The privacy page's "Paying for a plan" says so.
 export const processors: Processor[] = [
   {
     data: "Everything you store: account, frames, scenes, uploaded files, backups.",

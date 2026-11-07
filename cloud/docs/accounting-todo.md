@@ -3,12 +3,11 @@
 Status: the ledger, AI metering (**live** — every turn is measured, priced
 and posted to the customer's receivable), the admin/ops surfaces, the
 account's own usage view with its AI switch, the daily cap, and plans with
-their subscription lifecycle are built. **Paid plans are collected through
-Creem, a merchant of record (2026-11-05, [`billing.md`](billing.md)):**
-checkout, webhooks, plan changes, cancellation and refunds, in test mode
-until Creem approves the account. What is left of Phase 3b is the other
-half: **nothing collects metered AI**, so no invoice is cut for usage and
-no turn is billable. The open work is §7; §9 is the
+their subscription lifecycle are built, and so is the provider-neutral half
+of collecting for plans ([`billing.md`](billing.md)). **No payment provider
+is wired up** (Stripe is the plan, 2026-11-07), so a paid plan is activated
+by an operator and nothing collects metered AI: no invoice is cut for usage
+and no turn is billable. The open work is §7; §9 is the
 2026-09-01 review and what its fixes did, kept because the code cites its
 item numbers.
 
@@ -97,13 +96,13 @@ cannot disagree with the meters above them.
 Higher stops buy capacity, never features; Business picks up where Private
 ends, with the same rules and its own features on top.
 
-- **Private is bought at checkout, Business through support.** A
-  self-serve group (`selfServe` in the catalog) gets its `billing_plans`
-  rows (`private-9`, the stop's limits as entitlements) and its products at
-  the payment provider from "Sync plans" on `/admin/billing/payments`
-  ([`billing.md`](billing.md)). Business stays "Contact support to
-  activate" until single sign-on exists: an operator gives the account a
-  row and uses the operator plan route.
+- **Private is meant for checkout, Business for support.** A self-serve
+  group (`selfServe` in the catalog) gets its `billing_plans` rows
+  (`private-9`, the stop's limits as entitlements) from "Sync plans" on
+  `/admin/billing/customers`; a provider adapter adds its products to that
+  step ([`billing.md`](billing.md)). Until one exists every paid card says
+  "Contact support to activate" and an operator uses the operator plan
+  route. Business stays that way until single sign-on exists.
 - **Photo storage is a plan number now** (`photo_bytes`, optional on a row).
   Free's is `FRAMEOS_CLOUD_MAX_PHOTO_MB`, 250 MB by default (was 1 GB); an
   unverified account stays capped at `FRAMEOS_CLOUD_MAX_UNVERIFIED_PHOTO_MB`
@@ -1224,32 +1223,31 @@ Standing decisions from building them, which the open work must respect:
 
 ### Phase 3b — the provider half
 
-**Plans: built 2026-11-05** on Creem ([`billing.md`](billing.md), migration
-0073): hosted checkout, signed webhooks with the provider's event id as the
-idempotency key, the `payment.received` / `payment.refunded` recipes
-(`rules/payment.ts`), plan changes, cancellation, the nightly reconcile and
-the legal and pricing pages. A merchant of record settles most of §8.15 for
-plans: Creem is the seller, invoices the customer and remits the tax.
+**Plans, the provider-neutral half: built 2026-11-05** ([`billing.md`](billing.md),
+migration 0073): the `provider_*` tables, `subscriptions.provider`, the
+ledger's provider-billed periods (`provider-subscriptions.ts`), the
+`payment.received` / `payment.refunded` recipes (`rules/payment.ts`), the
+plan cards' buy/switch/cancel actions, the legal pages and the public price
+list. A Creem adapter was built and run against Creem's test mode, then
+removed on 2026-11-07: Creem's review demanded its moderation API on every
+prompt that reaches the on-device image app, which is not ours to police.
+**The provider is Stripe** (decided 2026-11-07, not started): Stripe Tax
+collects VAT and we remit it (§8.15 is ours again), and Stripe exposes its
+fee per charge, so `psp_fee` can post with each payment.
 
 **Metered AI: still open**, and still paused until there are users to
-invoice. Creem's hosted checkout sells a subscription; charging a month of
-usage in arrears needs a payment method chargeable later (§3.2). Before
-building, decide between Creem's usage-based billing and folding AI into
-the plans.
+invoice. A hosted checkout sells a subscription; charging a month of usage
+in arrears needs a stored payment method (§3.2), which Stripe has.
 
-- [ ] Go live with plans: the steps in `billing.md` "Going live" (Creem's
-      account review, live keys, `CREEM_MODE=live`).
+- [ ] The Stripe adapter: `billing.md` "What a provider adapter has to do".
 - [ ] Decide how metered AI is collected, then: `source: "platform"` in
       `resolveAiCredentials` (the thing that makes a turn billable, still
       gated by §5.1 and §5.3; the scene converter stays an absorbed
       surface), the month-close run, and dunning.
-- [ ] `psp_fee`: Creem's fee (3.9% + $0.40 a transaction) is not in a
-      payment notice. Book it from the payout report (Phase 6), or
-      `asset:psp:main` overstates what Creem owes us by the fees.
+- [ ] `psp_fee` per payment, from the charge's balance transaction.
 - [ ] `receivable_writeoff` and `promo_grant` against the receivable
       (§3.4), for the receivables an operator-set plan or metered AI leave.
-- [ ] Disputes: `dispute.created` is recorded in `provider_events` and
-      nothing acts on it.
+- [ ] Disputes: record them in `provider_events`; nothing acts on them.
 - [ ] A yearly price (§0.1).
 
 ### Phase 6 — later, enabled by the above, not designed in detail here

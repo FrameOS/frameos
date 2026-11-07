@@ -16,8 +16,9 @@ sensitive actions and the audit trail (`docs/auth.md`), Postgres-backed rate
 limiting (`rate_limit_buckets`), hand-written SQL migrations, cross-repo
 E2E (`scripts/e2e-frameos.sh`), and the accounting module — a double-entry
 ledger in `packages/ledger`, AI metering (shadow mode), the per-account AI
-switch and daily cap, plans and subscriptions, paid plans sold through
-Creem as merchant of record (`docs/billing.md`), and `/admin/billing`
+switch and daily cap, plans and subscriptions, the provider-neutral half
+of paid plans (`docs/billing.md`; the payment provider is not wired up yet),
+and `/admin/billing`
 (`docs/accounting-todo.md`, which also holds the billing todo).
 
 Keep out until there is a concrete product design (scope names for these

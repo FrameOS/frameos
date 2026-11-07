@@ -52,10 +52,9 @@ export default function RefundsPage() {
 
       <h2>How a refund reaches you</h2>
       <p className="copy">
-        Payments for FrameOS Cloud are handled by Creem (Armitage Labs OÜ), our
-        merchant of record, so the refund comes from Creem to the card or
-        account you paid with. It usually shows within 5 to 10 working days.
-        We answer refund requests within three working days.
+        The refund goes back to the card or account you paid with, through the
+        payment provider that took the payment. It usually shows within 5 to
+        10 working days. We answer refund requests within three working days.
       </p>
 
       <h2>Your legal rights</h2>

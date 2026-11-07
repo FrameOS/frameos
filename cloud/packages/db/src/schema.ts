@@ -1859,8 +1859,8 @@ export const subscriptions = pgTable(
     cancelAt: timestamp("cancel_at", { withTimezone: true }),
     canceledAt: timestamp("canceled_at", { withTimezone: true }),
     // Who drives the periods (migration 0073). Null: the nightly cycle,
-    // charging the receivable. "creem": a period opens when the payment
-    // provider reports a payment, with the provider's bounds.
+    // charging the receivable. A provider's name: a period opens when that
+    // payment provider reports a payment, with the provider's bounds.
     provider: text("provider"),
     ...timestamps,
   },
@@ -1922,10 +1922,10 @@ export const subscriptionPeriods = pgTable(
 );
 
 // The payment provider's side of the plans (migration 0073,
-// cloud/docs/billing.md). Creem is a merchant of record: it sells the plan,
-// charges the card and handles tax. Account ids are plain uuids here, like
-// every billing table, and every row names its mode: a test-mode purchase
-// is recorded and never posted to the ledger.
+// cloud/docs/billing.md): the products a plan is sold as, the provider's
+// subscriptions, its webhook deliveries and the money it collected. Account
+// ids are plain uuids here, like every billing table, and every row names
+// its mode: a test-mode purchase is recorded and never posted to the ledger.
 export const providerProducts = pgTable(
   "provider_products",
   {

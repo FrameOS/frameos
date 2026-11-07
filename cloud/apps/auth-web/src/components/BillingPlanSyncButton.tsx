@@ -11,11 +11,11 @@ import {
 
 const resumeAction = "billing-sync-plans";
 
-// "Sync plans" on /admin/billing/payments: makes the catalog's self-serve
-// plans buyable in the payment provider's current mode. The route is behind
-// sudo mode, so a session that has not proved itself lately goes through
-// /login/reauth and the sync runs on the way back.
-export function BillingPlanSyncButton({ disabled }: { disabled: boolean }) {
+// "Sync plans" on /admin/billing/customers: writes the catalog's self-serve
+// stops as billing_plans rows, so the operator plan form can move an account
+// onto one. The route is behind sudo mode, so a session that has not proved
+// itself lately goes through /login/reauth and the sync runs on the way back.
+export function BillingPlanSyncButton() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
@@ -33,14 +33,14 @@ export function BillingPlanSyncButton({ disabled }: { disabled: boolean }) {
     setError(undefined);
     setMessage(undefined);
     try {
-      const response = await fetch("/api/admin/billing/provider", {
+      const response = await fetch("/api/admin/billing/plans", {
         headers: { "content-type": "application/json" },
         method: "POST",
       });
       const body = (await response.json().catch(() => ({}))) as {
         detail?: string;
         error?: string;
-        plans?: { created: boolean }[];
+        plans?: string[];
       };
       if (!response.ok) {
         // A second refusal straight after confirming is an error to show,
@@ -54,8 +54,7 @@ export function BillingPlanSyncButton({ disabled }: { disabled: boolean }) {
         setError(body.detail ?? "Could not sync the plans. Try again in a moment.");
         return;
       }
-      const created = (body.plans ?? []).filter((plan) => plan.created).length;
-      setMessage(created > 0 ? `Created ${created} products.` : "Everything is in place.");
+      setMessage(`${(body.plans ?? []).length} plans in place.`);
       router.refresh();
     } catch {
       setError("Could not sync the plans. Try again in a moment.");
@@ -68,7 +67,7 @@ export function BillingPlanSyncButton({ disabled }: { disabled: boolean }) {
     <>
       <button
         className="button button--small"
-        disabled={busy || disabled}
+        disabled={busy}
         onClick={() => void sync()}
         type="button"
       >

@@ -800,21 +800,15 @@ to the server log.
 
 ## Paid plans
 
-Paid plans are sold through Creem; [`billing.md`](billing.md) has the whole
-story and the go-live steps. In `/etc/frameos-cloud/auth-web.env`:
+No payment provider is wired up yet, so nothing can be bought: the plan
+cards say "Contact support" and an operator activates a plan by hand.
+[`billing.md`](billing.md) has what is built and what a provider adapter
+has to do. Two settings matter already:
 
 ```text
-CREEM_API_KEY=creem_test_…          # from Creem, Developers
-CREEM_WEBHOOK_SECRET=…              # of the webhook for {FRAMEOS_ACCOUNT_APP_URL}/api/webhooks/creem
-CREEM_MODE=test                     # or live, with a live key
 FRAMEOS_SUPPORT_EMAIL=support@…     # shown in the footer and on the usage page
+FRAMEOS_PRICING_URL=…               # the public price list; defaults to https://frameos.net/pricing/
 ```
-
-Unset, nothing can be bought and the plan cards say "Contact support". After
-setting them, press **Sync plans** on `/admin/billing/payments` once per mode:
-it creates the products in Creem and the plan rows here. The nightly
-accounting job also reconciles subscriptions with Creem, so it needs no
-configuration of its own.
 
 ## Object Storage
 

@@ -46,7 +46,7 @@ function payment(
     periodStart: start,
     planCode: "maker",
     post: true,
-    provider: "creem",
+    provider: "psp",
     subscriptionId: "sub_1",
     transactionId: "tran_1",
     ...overrides,
@@ -240,7 +240,7 @@ describe("subscriptions a payment provider bills", () => {
         mode: "live",
         paymentTransactionId: "tran_1",
         post: true,
-        provider: "creem",
+        provider: "psp",
         refundId: "ref_1",
       },
       { now: tenDays },
@@ -260,7 +260,7 @@ describe("subscriptions a payment provider bills", () => {
         mode: "live",
         paymentTransactionId: "tran_1",
         post: true,
-        provider: "creem",
+        provider: "psp",
         refundId: "ref_1",
       },
       { now: tenDays },
@@ -280,7 +280,7 @@ describe("subscriptions a payment provider bills", () => {
         mode: "live",
         paymentTransactionId: "tran_unknown",
         post: true,
-        provider: "creem",
+        provider: "psp",
         refundId: "ref_2",
       }),
     ).rejects.toThrow(/books do not hold/);
@@ -291,18 +291,18 @@ describe("subscriptions a payment provider bills", () => {
     await applyProviderPayment(db, payment(accountId), { now: start });
     const soon = new Date(start.getTime() + day);
 
-    await setProviderSubscriptionState(db, accountId, "creem", { kind: "scheduled" }, { now: soon });
+    await setProviderSubscriptionState(db, accountId, "psp", { kind: "scheduled" }, { now: soon });
     let plan = await readAccountPlan(db, accountId);
     expect(plan.status).toBe("canceling");
     expect(plan.cancelAt?.toISOString()).toBe(nextMonth.toISOString());
     expect(plan.plan.code).toBe("maker");
 
-    await setProviderSubscriptionState(db, accountId, "creem", { kind: "active" }, { now: soon });
+    await setProviderSubscriptionState(db, accountId, "psp", { kind: "active" }, { now: soon });
     plan = await readAccountPlan(db, accountId);
     expect(plan.status).toBe("active");
     expect(plan.cancelAt).toBeNull();
 
-    await setProviderSubscriptionState(db, accountId, "creem", { kind: "canceled" }, { now: soon });
+    await setProviderSubscriptionState(db, accountId, "psp", { kind: "canceled" }, { now: soon });
     expect((await readAccountPlan(db, accountId)).plan.code).toBe("payg");
     // The month was paid for and is not handed back: it is earned to its end.
     await runSubscriptionCycle(db, { now: new Date(nextMonth.getTime() + day) });
@@ -320,7 +320,7 @@ describe("subscriptions a payment provider bills", () => {
     await applyProviderPayment(db, payment(accountId), { now: start });
     await expect(
       setAccountPlan(db, accountId, "studio", { now: new Date(start.getTime() + day) }),
-    ).rejects.toThrow(/billed through creem/);
+    ).rejects.toThrow(/billed through psp/);
   });
 
   it("keeps a paid period when the account is deleted", async () => {
@@ -340,7 +340,7 @@ describe("subscriptions a payment provider bills", () => {
   it("leaves a plan set by hand alone when the provider reports a cancellation", async () => {
     const accountId = await createAccount();
     await setAccountPlan(db, accountId, "maker", { now: start });
-    await setProviderSubscriptionState(db, accountId, "creem", { kind: "canceled" }, { now: start });
+    await setProviderSubscriptionState(db, accountId, "psp", { kind: "canceled" }, { now: start });
     expect((await readAccountPlan(db, accountId)).plan.code).toBe("maker");
   });
 });

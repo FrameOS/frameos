@@ -580,7 +580,7 @@ function PricingCard({ ai }: { ai: AiUsage }): JSX.Element {
     <Box className="space-y-3 p-4 text-sm leading-relaxed">
       <p>
         The Free plan costs nothing, and while FrameOS Cloud is in beta neither does AI usage. A paid plan is billed
-        monthly in advance through Creem, our payment partner, and you can cancel it at any time.
+        monthly in advance, and you can cancel it at any time.
       </p>
       <p>
         Once billing starts, AI usage will be priced per request: what the model provider charges for the tokens it

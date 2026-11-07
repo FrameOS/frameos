@@ -7,8 +7,6 @@ import {
 } from "@frameos-cloud/ledger";
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateJobToken } from "../../../../../src/lib/api-tokens";
-import { reconcileSubscriptions } from "../../../../../src/lib/billing-provider";
-import { creemSetup } from "../../../../../src/lib/creem";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import { logInfo, reportError } from "../../../../../src/lib/log";
@@ -88,19 +86,6 @@ export async function POST(request: NextRequest) {
     reportError("billing.sweep_failed", failure.error, { turnId: failure.turnId });
   }
 
-  // Ask the payment provider about every subscription whose period has run
-  // out: the safety net for a webhook that never arrived. Before the cycle,
-  // so a renewal found here is earned tonight like any other.
-  const provider = creemSetup().config;
-  const payments = provider
-    ? await reconcileSubscriptions(db, provider)
-    : { checked: 0, failures: [], lapsed: 0 };
-  for (const failure of payments.failures) {
-    reportError("billing.payment_reconcile_failed", failure.error, {
-      subscriptionId: failure.subscriptionId,
-    });
-  }
-
   const subscriptionCycle = await runSubscriptionCycle(db);
   for (const failure of subscriptionCycle.failures) {
     reportError("billing.subscription_cycle_failed", failure.error, {
@@ -156,8 +141,6 @@ export async function POST(request: NextRequest) {
     marginMicros: summary.marginMicros.toString(),
     meteringMode: settings.meteringMode,
     netRevenueMicros: summary.netRevenueMicros.toString(),
-    paymentsChecked: payments.checked,
-    paymentsFailed: payments.failures.length,
     revenueMicros: summary.revenueMicros.toString(),
     subscriptionsAccrued: subscriptionCycle.accrued,
     subscriptionsAccruedMicros: subscriptionCycle.accruedMicros.toString(),
@@ -174,7 +157,6 @@ export async function POST(request: NextRequest) {
   const ok =
     violations.length === 0 &&
     sweep.failures.length === 0 &&
-    payments.failures.length === 0 &&
     subscriptionCycle.failures.length === 0 &&
     subscriptionCycle.missingDowngradePlans.length === 0;
 
@@ -186,7 +168,6 @@ export async function POST(request: NextRequest) {
     healthcheck: healthcheckLine({
       missingDowngradePlans: subscriptionCycle.missingDowngradePlans.length,
       ok,
-      paymentsFailed: payments.failures.length,
       subscriptionsCharged: subscriptionCycle.charged,
       subscriptionsFailed: subscriptionCycle.failures.length,
       subscriptionsOpened: subscriptionCycle.opened,
@@ -196,11 +177,6 @@ export async function POST(request: NextRequest) {
     }),
     metering_mode: settings.meteringMode,
     ok,
-    payments: {
-      checked: payments.checked,
-      failed: payments.failures.length,
-      lapsed: payments.lapsed,
-    },
     summary: {
       cogs_micros: summary.cogsMicros.toString(),
       contra_revenue_micros: summary.contraRevenueMicros.toString(),
@@ -243,7 +219,6 @@ export async function POST(request: NextRequest) {
 function healthcheckLine(input: {
   missingDowngradePlans: number;
   ok: boolean;
-  paymentsFailed: number;
   subscriptionsCharged: number;
   subscriptionsFailed: number;
   subscriptionsOpened: number;
@@ -259,9 +234,6 @@ function healthcheckLine(input: {
   ];
   if (input.violations.length > 0) {
     parts.push(`checks=${[...new Set(input.violations)].join(",")}`);
-  }
-  if (input.paymentsFailed > 0) {
-    parts.push(`payment_reconcile_failed=${input.paymentsFailed}`);
   }
   if (input.missingDowngradePlans > 0) {
     parts.push(`downgrades_to_deleted_plans=${input.missingDowngradePlans}`);
