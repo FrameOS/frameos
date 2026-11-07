@@ -103,6 +103,49 @@ static void test_rtc_decode_and_encode(void)
     CHECK((back[5] & 0x80) == 0, "century bit clear on write");
 }
 
+static void test_rtc_pcf85063(void)
+{
+    /* Which chip, where its time starts. */
+    CHECK(fos_rtc_time_reg(FOS_RTC_PCF8563) == 0x02, "pcf8563 time at 0x02");
+    CHECK(fos_rtc_time_reg(FOS_RTC_PCF85063) == 0x04, "pcf85063 time at 0x04");
+    CHECK(fos_rtc_chip_from_name("pcf85063") == FOS_RTC_PCF85063, "pcf85063 by name");
+    CHECK(fos_rtc_chip_from_name("pcf8563") == FOS_RTC_PCF8563, "pcf8563 by name");
+    CHECK(fos_rtc_chip_from_name(NULL) == FOS_RTC_PCF8563 && fos_rtc_chip_from_name("") == FOS_RTC_PCF8563,
+          "no name is the pcf8563");
+    CHECK(strcmp(fos_rtc_chip_name(FOS_RTC_PCF85063), "pcf85063") == 0, "pcf85063 name");
+    CHECK(strcmp(fos_rtc_chip_name(FOS_RTC_PCF8563), "pcf8563") == 0, "pcf8563 name");
+    /* 2026-10-25 14:03:09 UTC as the PCF85063 holds it, registers 0x00-0x0A:
+     * Control_1, Control_2, Offset, RAM, then seconds … years. */
+    const uint8_t chip[11] = {0x00, 0x00, 0x00, 0x00, 0x09, 0x03, 0x14, 0x25, 0x00, 0x10, 0x26};
+    time_t t = 0;
+    CHECK(fos_rtc_decode(chip + fos_rtc_time_reg(FOS_RTC_PCF85063), &t), "pcf85063 decodes");
+    CHECK(t == 1792936989, "pcf85063 epoch %lld", (long long)t);
+    /* The bug this is for: the same chip read as a PCF8563 (from 0x02) takes
+     * Offset and RAM for the seconds and minutes and the weekday for the year. */
+    CHECK(!fos_rtc_decode(chip + fos_rtc_time_reg(FOS_RTC_PCF8563), &t) || t != 1792936989,
+          "read from 0x02 is not the time");
+    /* The OS bit: the oscillator stopped (first power-up, backup cell flat). */
+    uint8_t stopped[11];
+    memcpy(stopped, chip, sizeof(stopped));
+    stopped[0x04] |= 0x80;
+    CHECK(!fos_rtc_decode(stopped + 0x04, &t), "OS set is not a time");
+    /* The `not_set` boots: a PCF8563 read takes the real seconds (here 34)
+     * for the hours, and hour 34 is refused. */
+    const uint8_t hour34[FOS_RTC_TIME_LEN] = {0x00, 0x00, 0x34, 0x01, 0x00, 0x01, 0x26};
+    CHECK(!fos_rtc_decode(hour34, &t), "hour 34 refused");
+    /* Written at 0x04 the time block leaves Offset and RAM alone and fills
+     * the years at 0x0A; a Friday (5) fits the 3-bit weekday. */
+    uint8_t written[11] = {0x00, 0x00, 0x00, 0x00};
+    fos_rtc_encode(1793997296, written + fos_rtc_time_reg(FOS_RTC_PCF85063)); /* 2026-11-06 20:34:56 */
+    CHECK(written[0x02] == 0x00 && written[0x03] == 0x00, "offset and RAM untouched");
+    CHECK(written[0x04] == 0x56 && written[0x05] == 0x34 && written[0x06] == 0x20, "hh:mm:ss %02x:%02x:%02x",
+          written[0x06], written[0x05], written[0x04]);
+    CHECK(written[0x07] == 0x06 && written[0x08] == 5 && written[0x09] == 0x11 && written[0x0A] == 0x26,
+          "date %02x wd %u month %02x year %02x", written[0x07], written[0x08], written[0x09], written[0x0A]);
+    CHECK((written[0x04] & 0x80) == 0 && (written[0x09] & 0x80) == 0, "OS and the unused month bit clear");
+    CHECK(fos_rtc_decode(written + 0x04, &t) && t == 1793997296, "and decodes back");
+}
+
 static void test_gauge_decode(void)
 {
     fos_gauge_status_t g;
@@ -163,6 +206,7 @@ int main(void)
 {
     test_charger_decode();
     test_rtc_decode_and_encode();
+    test_rtc_pcf85063();
     test_gauge_decode();
     test_climate_decode();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok", g_checks, g_failures);

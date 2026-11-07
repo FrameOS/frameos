@@ -308,7 +308,7 @@ static int cmd_status(int argc, char **argv)
         fos_i2c_summary(i2c, sizeof(i2c));
         printf("i2c:         %s\n", i2c);
         if (fos_rtc_present()) {
-            printf("rtc:         pcf8563, %s\n", fos_rtc_time_loaded() ? "clock set from it at boot" : "not used for the clock this boot");
+            printf("rtc:         %s, %s\n", fos_rtc_chip_name(fos_rtc_chip()), fos_rtc_time_loaded() ? "clock set from it at boot" : "not used for the clock this boot");
         }
         fos_charger_status_t charger;
         if (fos_charger_present() && fos_charger_read(&charger) == ESP_OK) {
@@ -1955,7 +1955,7 @@ static int cmd_i2c(int argc, char **argv)
     if (fos_rtc_present()) {
         uint8_t regs[FOS_RTC_TIME_LEN];
         time_t rtc_time;
-        if (fos_i2c_read(FOS_I2C_PCF8563, FOS_RTC_REG_TIME, regs, sizeof(regs)) == ESP_OK) {
+        if (fos_i2c_read(FOS_I2C_PCF8563, fos_rtc_time_reg(fos_rtc_chip()), regs, sizeof(regs)) == ESP_OK) {
             if (fos_rtc_decode(regs, &rtc_time)) {
                 time_t now = time(NULL);
                 print_utc("rtc:  ", rtc_time);
