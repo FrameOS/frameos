@@ -37,7 +37,7 @@
       "value": "cover",
       "required": true,
       "label": "Fit mode",
-      "hint": "cover crops the photo to fill the frame, contain shows all of it."
+      "hint": "cover crops the photo to fill the frame, contain shows all of it. The Render Image node's placement is what draws the photo, and it wins when the frame reports it (FrameOS 2026.10.24 and later): set both the same, or wire both to one field."
     },
     {
       "name": "metadataStateKey",

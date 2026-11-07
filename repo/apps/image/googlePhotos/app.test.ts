@@ -25,6 +25,7 @@ describe('googlePhotos helpers', () => {
   it('sizes a photo url and wraps a counter', () => {
     expect(sizedPhotoUrl(HOST + 'p', 300, 200, 'cover')).toBe(`${HOST}p=w300-h200-c`)
     expect(sizedPhotoUrl(HOST + 'p', 300, 200, 'contain')).toBe(`${HOST}p=w300-h200-no`)
+    expect(sizedPhotoUrl(HOST + 'p', 300, 200, 'center')).toBe(`${HOST}p=w300-h200-no`)
     expect(wrapIndex(5, 3)).toBe(2)
     expect(wrapIndex(-1, 3)).toBe(2)
     expect(wrapIndex(7, 0)).toBe(0)
@@ -77,6 +78,23 @@ describe('googlePhotos', () => {
     mock.httpRequest(() => ({ status: 200, found: page }))
     mock.fetchImage(() => ({ image: null, error: 'no' }))
     expect(() => get(makeApp({ config }), makeContext())).toThrow('Error fetching image from Google Photos: no')
+  })
+
+  it("asks for the photo the image node's placement will draw, else fitMode's", () => {
+    mock.httpRequest(() => ({ status: 200, found: page }))
+    const fetchImage = mock.fetchImage(() => mock.image())
+    const sequential = { ...config, mode: 'sequential' }
+    const target = (targetFit?: string) =>
+      makeContext({ targetWidth: 390, targetHeight: 230, ...(targetFit ? { targetFit } : {}) })
+    // The issue: fitMode contain under a cover placement asked for a small whole photo that
+    // the node then blew up and cropped. The placement decides, both ways.
+    get(makeApp({ config: { ...sequential, fitMode: 'cover' } }), target('contain'))
+    expect(fetchImage.calls[0][0]).toBe(`${HOST}${long(1)}=w390-h230-no`)
+    get(makeApp({ config: { ...sequential, fitMode: 'contain' } }), target('cover'))
+    expect(fetchImage.calls[1][0]).toBe(`${HOST}${long(1)}=w390-h230-c`)
+    // A frame that does not report the placement (before 2026.10.24): fitMode.
+    get(makeApp({ config: { ...sequential, fitMode: 'contain' } }), target())
+    expect(fetchImage.calls[2][0]).toBe(`${HOST}${long(1)}=w390-h230-no`)
   })
 
   it('needs the canvas: it never sizes by the panel', () => {
