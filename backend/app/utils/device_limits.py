@@ -51,11 +51,16 @@ def esp32_device_limits(width: int, height: int, psram_bytes: int, pixel_format:
     pixels = max(1, width) * max(1, height)
     packed_bytes = pixels * 2 * 4 if pixel_format == ESP32_PIXEL_RGB565 else -(-pixels // 2)
     device_heap = max(512 * 1024, psram_bytes - packed_bytes - ESP32_EMERGENCY_RESERVE_BYTES)
-    preview_overhead = pixels * 4 - pixels * esp32_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
+    canvas_bytes_per_pixel = esp32_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
+    preview_overhead = pixels * 4 - pixels * canvas_bytes_per_pixel
     return {
         "memoryBytes": device_heap + preview_overhead,
         "memoryReserveBytes": 0,
         "previewOverheadBytes": preview_overhead,
+        # The canvas the device keeps, which the renderer draws in too
+        # (frameos_wasm_set_canvas_bytes_per_pixel); the bytes it saves against
+        # RGBX stay charged, so the two numbers above read the same either way.
+        "canvasBytesPerPixel": canvas_bytes_per_pixel,
         "embedded": True,
     }
 

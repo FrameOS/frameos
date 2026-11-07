@@ -348,6 +348,16 @@ if (request.deviceLimits) {
   } catch (error) {
     process.stderr.write(`embedded_wasm_render: device simulation unavailable (${error})\n`)
   }
+  // The canvas the device keeps (565 on a 13.3" colour panel with 8 MB): one
+  // for every render, as the frame draws. Old bundles predate the export and
+  // draw a fresh RGBX canvas, which the ceiling was worked out for.
+  if (request.deviceLimits.embedded && request.deviceLimits.canvasBytesPerPixel) {
+    try {
+      call('frameos_wasm_set_canvas_bytes_per_pixel', null, ['number'], [request.deviceLimits.canvasBytesPerPixel])
+    } catch (error) {
+      process.stderr.write(`embedded_wasm_render: device canvas unavailable (${error})\n`)
+    }
+  }
 }
 // The frame's render scale (frame.json `renderScale`): what a UI from a
 // .tsx/.jsx app is laid out for. Sent only when the frame set one; without

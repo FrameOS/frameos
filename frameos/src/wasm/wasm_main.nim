@@ -57,6 +57,25 @@ var
   # Backend-persisted scene state, seeded via frameos_wasm_set_scene_state
   # before the scene's first render and merged into scene.state at init.
   pendingSceneStates = initTable[string, JsonNode]()
+  # Running as an ESP32, every render draws into one canvas kept for the
+  # runtime's life, in the format that frame keeps it in (embedded_runtime
+  # `renderCanvas`): RGB565 on a 13.3" colour panel with 8 MB of PSRAM, luma
+  # on a grey one, RGBX where two of it fit. Before this the preview made a
+  # fresh RGBX canvas every render while the page still held the last one, so
+  # at 1200x1600 under 8 MB even a blank scene's second render was refused
+  # 7.3 MB: an out-of-memory the frame never has.
+  deviceCanvas: Image
+  deviceCanvasBytesPerPixel = 4
+  # A 565 or luma canvas expanded to RGBA for the page (frameos_wasm_buffer).
+  # It stands in for the panel buffer, which the device's heap leaves out, so
+  # it comes from plain malloc, outside the simulated ceiling.
+  rgbaOut: ptr UncheckedArray[ColorRGBX]
+  rgbaOutPixels = 0
+
+proc fosWasmMemorySetHeld(bytes: csize_t) {.
+  importc: "fos_wasm_memory_set_held", header: "<fos_wasm_mem.h>", cdecl.}
+proc cMalloc(size: csize_t): pointer {.importc: "malloc", header: "<stdlib.h>", cdecl.}
+proc cFree(p: pointer) {.importc: "free", header: "<stdlib.h>", cdecl.}
 
 proc currentSceneName(): string =
   host.sceneName
@@ -77,6 +96,59 @@ proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
         name: if scenes.hasKey(sceneId): scenes[sceneId].name else: "")
 
 sceneSwitcherListing = switcherListing
+
+# ------------------------------------------------------------------- canvas
+
+proc dropDeviceCanvas() =
+  if not deviceCanvas.isNil and lastImage == deviceCanvas:
+    lastImage = nil
+  deviceCanvas = nil
+  fosWasmMemorySetHeld(0)
+
+proc previewCanvas(): Image =
+  ## The canvas the next render draws into, or nil for a fresh RGBX one per
+  ## render, which is what a Pi's runner does. Made on first use, reused
+  ## after, like the device's. The bytes a 565 or luma canvas saves against
+  ## the RGBX one the simulated ceiling was worked out for
+  ## (devices.ts `previewOverheadBytes`) stay charged, so the ceiling and every
+  ## reading of it mean the same as with a bundle that drew RGBX.
+  if not runsAsEmbedded() or frameConfig.isNil:
+    if not deviceCanvas.isNil:
+      dropDeviceCanvas()
+    return nil
+  let
+    width = if frameConfig.rotate in [90, 270]: frameConfig.height else: frameConfig.width
+    height = if frameConfig.rotate in [90, 270]: frameConfig.width else: frameConfig.height
+    format =
+      case deviceCanvasBytesPerPixel
+      of 2: pfRgb565
+      of 1: pfGray8
+      else: pfRgbx
+  if not deviceCanvas.isNil and deviceCanvas.width == width and
+      deviceCanvas.height == height and deviceCanvas.format == format:
+    return deviceCanvas
+  dropDeviceCanvas()
+  deviceCanvas =
+    case format
+    of pfRgb565: newImage565(width, height)
+    of pfGray8: newImageGray8(width, height)
+    of pfRgbx: newImage(width, height)
+  let bytesPerPixel =
+    case format
+    of pfRgb565: 2
+    of pfGray8: 1
+    of pfRgbx: 4
+  if format == pfRgb565:
+    # The rounding the device's 565 stores do, so a gradient does not step.
+    deviceCanvas.ditherStores = true
+  fosWasmMemorySetHeld(csize_t(width * height * (4 - bytesPerPixel)))
+  let described =
+    case format
+    of pfRgb565: "rgb565 (dithered stores)"
+    of pfGray8: "gray8"
+    of pfRgbx: "rgbx"
+  log(&"canvas: {width}x{height} {described}")
+  deviceCanvas
 
 proc selectSceneById(sceneIdText: string): bool =
   let sceneId = SceneId(sceneIdText)
@@ -119,6 +191,8 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     scenesLoadedCount = 0
     host.renderRequested = false
     lastImage = nil
+    dropDeviceCanvas()
+    deviceCanvasBytesPerPixel = 4
     pendingSceneStates = initTable[string, JsonNode]()
 
     var settings = %*{}
@@ -290,6 +364,12 @@ proc frameos_wasm_set_embedded(enabled: bool) {.exportc, cdecl.} =
   ## canvas. Off by default, as a Pi; every frameos_wasm_init turns it off.
   setSimulatedEmbedded(enabled)
 
+proc frameos_wasm_set_canvas_bytes_per_pixel(bytesPerPixel: cint) {.exportc, cdecl.} =
+  ## The canvas the device keeps, while running as an ESP32
+  ## (devices.ts `canvasBytesPerPixel`): 2 RGB565, 1 luma, 4 RGBX, the
+  ## default every frameos_wasm_init restores. Anything else is RGBX.
+  deviceCanvasBytesPerPixel = if bytesPerPixel in [1.cint, 2.cint]: bytesPerPixel.int else: 4
+
 proc frameos_wasm_set_render_scale(scale: cdouble) {.exportc, cdecl.} =
   ## The frame's render scale (frame.json renderScale, render_scale.nim): what
   ## a .tsx app's JSX is laid out for. 0, the default every frameos_wasm_init
@@ -324,11 +404,15 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
     # each render happening even when cached apps return an identical image.
     log($(%*{"event": "render:scene", "width": frameConfig.width, "height": frameConfig.height}))
     let renderStarted = epochTime()
+    # Running as an ESP32: the persistent canvas goes in with the event, as on
+    # the device; the interpreter's "render" handler owes it the background.
+    let canvas = previewCanvas()
     let context = ExecutionContext(
       scene: host.scene,
       event: "render",
       payload: %*{},
-      hasImage: false,
+      image: canvas,
+      hasImage: not canvas.isNil,
       loopIndex: 0,
       loopKey: ".",
       nextSleep: -1
@@ -352,20 +436,46 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
   except Exception as e:
     setLastError("render failed: " & e.msg)
     try:
-      lastImage = renderError(frameConfig.width, frameConfig.height, "Render failed: " & e.msg)
+      if not deviceCanvas.isNil:
+        # Into the persistent canvas, as the device does: a fresh full-frame
+        # image is the allocation a frame with its canvas held cannot afford.
+        deviceCanvas.renderErrorInto(deviceCanvas.width, deviceCanvas.height,
+          "Render failed: " & e.msg)
+        lastImage = deviceCanvas
+      else:
+        lastImage = renderError(frameConfig.width, frameConfig.height, "Render failed: " & e.msg)
       1
     except CatchableError:
       lastImage = nil
       2
 
 proc frameos_wasm_buffer(): pointer {.exportc, cdecl.} =
-  if lastImage.isNil or lastImage.dataLen == 0 or not lastImage.isContiguous:
+  ## The last frame as RGBA, width * height * 4 bytes: an RGBX image's own
+  ## pixels, a 565 or luma canvas expanded into `rgbaOut` (opaque).
+  if lastImage.isNil or lastImage.width <= 0 or lastImage.height <= 0:
     return nil
-  addr lastImage.data[0]
+  if lastImage.format == pfRgbx:
+    if lastImage.dataLen == 0 or not lastImage.isContiguous:
+      return nil
+    return addr lastImage.data[0]
+  let pixels = lastImage.width * lastImage.height
+  if rgbaOut.isNil or rgbaOutPixels != pixels:
+    if not rgbaOut.isNil:
+      cFree(rgbaOut)
+    rgbaOut = cast[ptr UncheckedArray[ColorRGBX]](cMalloc(csize_t(pixels * 4)))
+    rgbaOutPixels = if rgbaOut.isNil: 0 else: pixels
+    if rgbaOut.isNil:
+      return nil
+  for y in 0 ..< lastImage.height:
+    let row = y * lastImage.width
+    for x in 0 ..< lastImage.width:
+      rgbaOut[row + x] = lastImage.unsafe[x, y]
+  rgbaOut
 
 proc frameos_wasm_buffer_len(): cint {.exportc, cdecl.} =
   if lastImage.isNil: 0.cint
-  else: (lastImage.dataLen * 4).cint
+  elif lastImage.format == pfRgbx: (lastImage.dataLen * 4).cint
+  else: (lastImage.width * lastImage.height * 4).cint
 
 proc frameos_wasm_width(): cint {.exportc, cdecl.} =
   if lastImage.isNil: 0.cint else: lastImage.width.cint

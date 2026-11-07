@@ -61,6 +61,12 @@ export interface FrameOSPreviewOptions {
   scenes: FrameOSScene[]
   /** Scene to select initially; defaults to the runtime's default scene. */
   sceneId?: string
+  /** Public field values for that scene, set before its first render: what
+   * a page keeps across a re-created preview (a resize, an edit), so the
+   * first frame already shows them. `PreviewRuntimeInfo.sceneStateSeeded`
+   * says whether the bundle took them; an older one renders the defaults
+   * and the page sends the values with `setSceneState` instead. */
+  sceneState?: Record<string, unknown>
   /** Frame name shown in logs. */
   name?: string
   /** IANA time zone for the simulated frame; defaults to the browser's. */
@@ -154,7 +160,13 @@ export class FrameOSPreview {
   /** How the runtime's /srv/assets is backed (set once `ready` fires). */
   assetsInfo: PreviewAssetsInfo | null = null
   /** Which FrameOS version the runtime is (set once `ready` fires). */
-  runtimeInfo: PreviewRuntimeInfo = { version: null, pointerEvents: false, inputEvents: false, gpioEvents: false }
+  runtimeInfo: PreviewRuntimeInfo = {
+    version: null,
+    pointerEvents: false,
+    inputEvents: false,
+    gpioEvents: false,
+    sceneStateSeeded: false,
+  }
   /** Latest public state of the current scene. */
   state: Record<string, unknown> = {}
   /** The scene currently selected in the runtime. */
@@ -189,6 +201,7 @@ export class FrameOSPreview {
       settingsJson: JSON.stringify(options.settings ?? {}),
       proxyUrl: options.proxyUrl || '',
       sceneId: options.sceneId || '',
+      sceneState: options.sceneState ?? null,
       fastMode: this.fastMode,
       saveAssets: options.saveAssets === undefined ? true : options.saveAssets,
       browserAssets: options.browserAssets === undefined ? true : options.browserAssets,
@@ -213,6 +226,7 @@ export class FrameOSPreview {
           pointerEvents: msg.pointerEvents === true,
           inputEvents: msg.inputEvents === true,
           gpioEvents: msg.gpioEvents === true,
+          sceneStateSeeded: msg.sceneStateSeeded === true,
         }
         this.options.onReady?.(msg.sceneInfo, this.assetsInfo, this.runtimeInfo)
         break

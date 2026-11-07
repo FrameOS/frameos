@@ -12,6 +12,7 @@ void *fos_wasm_calloc(size_t count, size_t size);
 void *fos_wasm_realloc(void *ptr, size_t size);
 void fos_wasm_free(void *ptr);
 void fos_wasm_fatal_oom(size_t size);
+void fos_wasm_memory_set_held(size_t bytes);
 
 void frameos_wasm_set_memory_limit(unsigned int bytes, unsigned int reserve);
 unsigned int frameos_wasm_memory_render_headroom(void);

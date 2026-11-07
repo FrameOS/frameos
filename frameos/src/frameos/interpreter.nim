@@ -807,11 +807,12 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               # …) — a nil image would only render as "No image provided".
               # Non-image fields reject the value and keep their defaults.
               try:
-                when defined(frameosEmbedded):
+                if runsAsEmbedded():
                   # Reuse the live canvas for the error frame: allocating a
                   # second full-frame image next to it OOMs memory-tight
-                  # devices. Paint only after the field accepted the image,
-                  # so a non-image field mismatch leaves the canvas untouched.
+                  # devices (and the preview running as one). Paint only
+                  # after the field accepted the image, so a non-image field
+                  # mismatch leaves the canvas untouched.
                   if context.hasImage and not context.image.isNil:
                     setInterpretedAppField(keyword, app, inputName,
                       Value(kind: fkImage, img: context.image))

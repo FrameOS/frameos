@@ -334,6 +334,20 @@ memory limit's ESP32 boards, a preview of an ESP32 frame) takes the device's
 always handed a 7.68 MB scratch and the preview ran out of memory where the
 E1004 upgrades to the live canvas and renders.
 
+It also draws the way the device does (`src/wasm/wasm_main.nim`
+`previewCanvas`): one canvas for every render, kept between them, in the
+format the board keeps it in (`DeviceLimits.canvasBytesPerPixel`, handed to
+`frameos_wasm_set_canvas_bytes_per_pixel`: RGB565 for a 13.3" colour panel
+on 8 MB, luma on a grey panel, RGBX where two of it fit). The bytes a 565 or
+luma canvas saves against RGBX stay charged (`fos_wasm_memory_set_held`), so
+`memoryBytes` and `previewOverheadBytes` read the same with a bundle from
+before it, which draws RGBX. A producer's error frame goes into that canvas
+too (`runsAsEmbedded`, as on the device). Through 2026.11.4 the preview made a
+fresh RGBX canvas every render while the page held the last one, so at
+1200×1600 under 8 MB even a blank scene's second render was refused 7.3 MB,
+and a scene whose app failed was refused its error frame: out-of-memory
+reports the frame never has.
+
 What a hit costs: one canvas-sized allocation for the length of the consumer's
 draw (freed with the render), against a re-download, a decode and its
 intermediates. What a miss adds: one sequential file write of `w×h×4` bytes.

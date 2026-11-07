@@ -30,6 +30,12 @@ export interface DeviceLimits {
    * it from both the ceiling and a measured peak to read them in the
    * device's own bytes — the ones its logs report. */
   previewOverheadBytes: number
+  /** Bytes per pixel of the canvas the device keeps (esp32CanvasBytesPerPixel:
+   * 2 RGB565, 1 luma, 4 RGBX; a Pi's is RGBX). A runtime that runs as an
+   * ESP32 draws every render into one canvas of it, as the frame does; the
+   * bytes it saves against RGBX stay charged, so `memoryBytes` and
+   * `previewOverheadBytes` read the same with a runtime that predates it. */
+  canvasBytesPerPixel: number
   /** QuickJS heap ceiling per scene context, in MB; -1 keeps the host default. */
   jsMemoryLimitMb: number
   /** QuickJS stack ceiling in KB; -1 keeps the host default. */
@@ -248,6 +254,7 @@ export function esp32DeviceLimits(
     // a worse prediction of it. A Pi has no such cliff, so it keeps its.
     memoryReserveBytes: 0,
     previewOverheadBytes: esp32PreviewOverheadBytes(width, height, psramBytes, pixelFormat),
+    canvasBytesPerPixel: esp32CanvasBytesPerPixel(width, height, psramBytes, pixelFormat),
     jsMemoryLimitMb: ESP32_JS_MEMORY_LIMIT_MB,
     jsMaxStackKb: ESP32_JS_MAX_STACK_KB,
     maxHttpResponseBytes: ESP32_MAX_HTTP_RESPONSE_BYTES,
@@ -267,6 +274,7 @@ export function deviceLimitsFor(
     memoryBytes: piDeviceHeapBytes(nominalRamBytes),
     memoryReserveBytes: PI_RENDER_RESERVE_BYTES,
     previewOverheadBytes: 0,
+    canvasBytesPerPixel: 4,
     jsMemoryLimitMb: -1,
     jsMaxStackKb: -1,
     maxHttpResponseBytes: 0,

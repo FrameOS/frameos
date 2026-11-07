@@ -16,6 +16,7 @@ def test_ceiling_matches_the_preview_package(case):
     limits = esp32_device_limits(case["width"], case["height"], case["psramBytes"], case.get("pixelFormat"))
     assert limits["memoryBytes"] == case["memoryBytes"]
     assert limits["previewOverheadBytes"] == case["previewOverheadBytes"]
+    assert limits["canvasBytesPerPixel"] == case["canvasBytesPerPixel"]
     assert limits["memoryReserveBytes"] == 0
     assert limits["embedded"] is True
 

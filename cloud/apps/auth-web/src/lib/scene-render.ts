@@ -697,6 +697,16 @@ async function main() {
     } catch (error) {
       pushLog("device simulation unavailable in this runtime build: " + error);
     }
+    // The canvas the device keeps (565 on a 13.3" colour panel with 8 MB),
+    // one for every render as on the frame. Old bundles predate the export
+    // and draw a fresh RGBX canvas, which the ceiling was worked out for.
+    if (limits.embedded && limits.canvasBytesPerPixel) {
+      try {
+        call("frameos_wasm_set_canvas_bytes_per_pixel", null, ["number"], [limits.canvasBytesPerPixel]);
+      } catch (error) {
+        pushLog("a device canvas is unavailable in this runtime build: " + error);
+      }
+    }
   }
   // The frame's own render scale, when it set one; otherwise the runtime is
   // automatic. Old bundles predate the export and render at 1.

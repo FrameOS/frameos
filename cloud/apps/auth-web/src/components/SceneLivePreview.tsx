@@ -659,10 +659,13 @@ export function SceneLivePreviewPanel({
     let preview: FrameOSPreview | null = null;
     setHasPaintedFrame(false);
     setSceneInfo(null);
-    setRuntimeState({});
     setLogs([]);
     frameArrivalsRef.current = [];
     setMeasuredFps(null);
+    // A new runtime starts with a clean heap: what the last one ran out of
+    // (or measured) is not this one's.
+    setOutOfMemory(null);
+    setDeviceMemory(null);
     setStatus("Loading FrameOS runtime…");
     // Overrides for fields the reloaded scenes no longer have are dropped;
     // the rest stay in the form (and, once applied, in the runtime).
@@ -673,6 +676,15 @@ export function SceneLivePreviewPanel({
       Object.fromEntries(Object.entries(values).filter(([key]) => fieldNames.has(key)));
     setEdits(keepKnown);
     appliedStateRef.current = keepKnown(appliedStateRef.current);
+    const replay = appliedStateRef.current;
+    // The form shows what the new runtime is given, not the scene's defaults
+    // while it boots: a Resize, a rotate or an editor edit kept wiping the
+    // values being tried out until the runtime reported them back.
+    setRuntimeState(replay);
+    // The scene being edited, from the first render on.
+    const wanted = editorSceneIdRef.current;
+    const startScene =
+      wanted !== null && scenes.some((scene) => scene.id === wanted) ? wanted : undefined;
     // Leading-edge throttle: the first line (or frame) after a quiet spell
     // lands at once, a burst collapses into one trailing update.
     const flushes: Record<string, { timer: ReturnType<typeof setTimeout> | null; lastAt: number }> = {};
@@ -718,6 +730,10 @@ export function SceneLivePreviewPanel({
         width: viewport.width,
         height: viewport.height,
         scenes,
+        ...(startScene === undefined ? {} : { sceneId: startScene }),
+        // Given to the scene before its first render (an older bundle
+        // ignores it, and gets them in onReady instead).
+        sceneState: replay,
         settings: previewSettings,
         // Fallback only: the runtime fetches URLs client-side first and
         // routes just CORS-blocked hosts through this endpoint.
@@ -770,17 +786,14 @@ export function SceneLivePreviewPanel({
           setPointerInput(runtime?.pointerEvents === true);
           setStatus("");
           // Show the scene being edited, not the default one, when the
-          // editor has several.
-          const wanted = editorSceneIdRef.current;
-          const wantedExists = wanted !== null && scenes.some((scene) => scene.id === wanted);
-          if (wantedExists && wanted !== info?.currentSceneId) {
-            preview.selectScene(wanted);
-            setCurrentSceneId(wanted);
+          // editor has several (an older bundle may not have started on it).
+          if (startScene !== undefined && startScene !== info?.currentSceneId) {
+            preview.selectScene(startScene);
+            setCurrentSceneId(startScene);
           } else {
             setCurrentSceneId(info?.currentSceneId ?? null);
           }
-          const replay = appliedStateRef.current;
-          if (Object.keys(replay).length > 0) {
+          if (runtime?.sceneStateSeeded !== true && Object.keys(replay).length > 0) {
             preview.setSceneState(replay);
           }
         },
@@ -860,11 +873,6 @@ export function SceneLivePreviewPanel({
     const canvas = canvasRef.current;
     return canvas ? forwardPointer(canvas, previewRef) : undefined;
   }, []);
-
-  // A new runtime starts with a clean heap.
-  useEffect(() => {
-    setOutOfMemory(null);
-  }, [restartCount]);
 
   function answerFastRender(enabled: boolean) {
     setFastMode(enabled);
@@ -1698,8 +1706,9 @@ export function SceneLivePreviewPanel({
           {formatMegabytes(
             outOfMemory.limitBytes - (deviceLimits?.previewOverheadBytes ?? 0)
           )}{" "}
-          usable and could not get it — this scene would fail on that frame.
-          Restart the preview after changing the scene.
+          usable and could not get it, so this scene would fail on that frame.
+          The preview stops here and starts again when the scene or the size
+          changes, or with Restart.
         </div>
       ) : null}
       {assetsOpen ? (

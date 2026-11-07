@@ -1,5 +1,5 @@
 {
-  "description": "esp32DeviceLimits (frameos/wasm/src/devices.ts, its copy frontend/src/utils/deviceLimits.ts) and esp32_device_limits (backend/app/utils/device_limits.py): the wasm renderer ceiling for an ESP32 frame. `pixelFormat` (fos_pixel_format_t, default unknown): the panel's format, which decides its canvas \u2014 one byte of luma on a grey or black-and-white panel (1, 4, 8) and RGB565 on an RGB565 LCD (9) whatever the PSRAM, RGBX while two of it fit PSRAM on any other. Replayed by cloud/apps/auth-web/src/lib/device-limits.test.ts and backend/app/utils/tests/test_device_limits.py.",
+  "description": "esp32DeviceLimits (frameos/wasm/src/devices.ts, its copy frontend/src/utils/deviceLimits.ts) and esp32_device_limits (backend/app/utils/device_limits.py): the wasm renderer ceiling for an ESP32 frame. `pixelFormat` (fos_pixel_format_t, default unknown): the panel's format, which decides its canvas \u2014 one byte of luma on a grey or black-and-white panel (1, 4, 8) and RGB565 on an RGB565 LCD (9) whatever the PSRAM, RGBX while two of it fit PSRAM on any other. `canvasBytesPerPixel` is that canvas, which the wasm runtime draws in while it runs as the ESP32 (src/wasm/wasm_main.nim previewCanvas). Replayed by cloud/apps/auth-web/src/lib/device-limits.test.ts and backend/app/utils/tests/test_device_limits.py.",
   "cases": [
     {
       "name": "7.3 inch on an 8 MB board: RGBX canvas",
@@ -7,7 +7,8 @@
       "height": 480,
       "psramBytes": 8388608,
       "memoryBytes": 7148032,
-      "previewOverheadBytes": 0
+      "previewOverheadBytes": 0,
+      "canvasBytesPerPixel": 4
     },
     {
       "name": "7.5 inch black and white on an 8 MB board: luma canvas, though RGBX fits",
@@ -16,7 +17,8 @@
       "psramBytes": 8388608,
       "pixelFormat": 1,
       "memoryBytes": 8300032,
-      "previewOverheadBytes": 1152000
+      "previewOverheadBytes": 1152000,
+      "canvasBytesPerPixel": 1
     },
     {
       "name": "13.3 inch on an 8 MB board (the E1004): RGB565 canvas",
@@ -24,7 +26,8 @@
       "height": 1600,
       "psramBytes": 8388608,
       "memoryBytes": 10220032,
-      "previewOverheadBytes": 3840000
+      "previewOverheadBytes": 3840000,
+      "canvasBytesPerPixel": 2
     },
     {
       "name": "10.3 inch sixteen greys on an 8 MB board (the E1003): luma canvas",
@@ -33,7 +36,8 @@
       "psramBytes": 8388608,
       "pixelFormat": 8,
       "memoryBytes": 13910752,
-      "previewOverheadBytes": 7884864
+      "previewOverheadBytes": 7884864,
+      "canvasBytesPerPixel": 1
     },
     {
       "name": "the same panel size in colour: RGB565 canvas",
@@ -41,7 +45,8 @@
       "height": 1404,
       "psramBytes": 8388608,
       "memoryBytes": 11282464,
-      "previewOverheadBytes": 5256576
+      "previewOverheadBytes": 5256576,
+      "canvasBytesPerPixel": 2
     },
     {
       "name": "13.3 inch on a 16 MB board: RGBX canvas",
@@ -49,7 +54,8 @@
       "height": 1600,
       "psramBytes": 16777216,
       "memoryBytes": 14768640,
-      "previewOverheadBytes": 0
+      "previewOverheadBytes": 0,
+      "canvasBytesPerPixel": 4
     },
     {
       "name": "a 2 MB board: the heap floor",
@@ -57,7 +63,8 @@
       "height": 480,
       "psramBytes": 2097152,
       "memoryBytes": 1624576,
-      "previewOverheadBytes": 768000
+      "previewOverheadBytes": 768000,
+      "canvasBytesPerPixel": 2
     },
     {
       "name": "the SenseCAP Indicator's 480x480 RGB565 LCD: a 565 canvas that is its own frame buffer",
@@ -66,7 +73,8 @@
       "psramBytes": 8388608,
       "pixelFormat": 9,
       "memoryBytes": 5957632,
-      "previewOverheadBytes": 460800
+      "previewOverheadBytes": 460800,
+      "canvasBytesPerPixel": 2
     }
   ]
 }

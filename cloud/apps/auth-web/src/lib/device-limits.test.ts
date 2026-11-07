@@ -220,6 +220,7 @@ const deviceLimitsFixtures = JSON.parse(
     name: string;
     pixelFormat?: number;
     previewOverheadBytes: number;
+    canvasBytesPerPixel: number;
     psramBytes: number;
     width: number;
   }[];
@@ -230,6 +231,7 @@ describe("esp32DeviceLimits", () => {
     const limits = esp32DeviceLimits(entry.width, entry.height, entry.psramBytes, entry.pixelFormat ?? null);
     expect(limits.memoryBytes).toBe(entry.memoryBytes);
     expect(limits.previewOverheadBytes).toBe(entry.previewOverheadBytes);
+    expect(limits.canvasBytesPerPixel).toBe(entry.canvasBytesPerPixel);
     expect(limits.memoryReserveBytes).toBe(0);
     expect(limits.embedded).toBe(true);
   });
