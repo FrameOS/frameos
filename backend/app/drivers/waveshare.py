@@ -75,6 +75,7 @@ VARIANT_COLORS = {
 
     "EPD_4in0e": "SpectraSixColor",
     "EPD_7in3e": "SpectraSixColor",
+    "EPD_9in7e": "SpectraSixColor",
     "EPD_13in3e": "SpectraSixColor",
 
     "EPD_10in3": "SixteenGray",

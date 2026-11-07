@@ -309,7 +309,7 @@ def test_embedded_panel_matrix_includes_new_panels():
     # and Spectra 6.
     for panel in ("EPD_7in5_V2", "EPD_7in5", "EPD_5in83", "EPD_4in2_V2",
                   "EPD_2in9_V2", "EPD_2in66", "EPD_2in13_V4", "EPD_1in54_V2",
-                  "EPD_7in3e", "EPD_4in0e", "EPD_13in3e", "EPD_7in3f",
+                  "EPD_7in3e", "EPD_4in0e", "EPD_13in3e", "EPD_9in7e", "EPD_7in3f",
                   "EPD_5in65f", "EPD_7in3g", "EPD_10in2b"):
         assert panel in EMBEDDED_SUPPORTED_PANELS
         assert embedded_panel_for_frame(Frame(device=f"waveshare.{panel}")) == panel
