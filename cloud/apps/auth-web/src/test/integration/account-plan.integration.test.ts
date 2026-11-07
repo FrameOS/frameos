@@ -91,6 +91,7 @@ describe("the plan route without a payment provider", () => {
       mode: null,
       prices_exclude_tax: false,
       subscription: null,
+      tax_label: null,
     });
     expect(view.self_serve).toBe(false);
     expect(view.catalog.groups.map((group) => [group.key, group.available])).toEqual([

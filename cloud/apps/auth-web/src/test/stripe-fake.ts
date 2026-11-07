@@ -151,6 +151,7 @@ interface FakeSubscription {
 interface FakeInvoice {
   amount_paid: number;
   billing_reason: string;
+  created: number;
   currency: string;
   customer: string;
   id: string;
@@ -284,14 +285,18 @@ export class StripeFake {
 
   invoiceObject(invoice: FakeInvoice): Json {
     return {
+      amount_due: invoice.total,
       amount_paid: invoice.amount_paid,
+      amount_remaining: invoice.status === "paid" ? 0 : invoice.total - invoice.amount_paid,
       billing_reason: invoice.billing_reason,
+      created: invoice.created,
       currency: invoice.currency,
       customer: invoice.customer,
       customer_email: "buyer@example.com",
       customer_name: "A Buyer",
       hosted_invoice_url: `https://invoice.stripe.fake/${invoice.id}`,
       id: invoice.id,
+      invoice_pdf: `https://pay.stripe.fake/invoice/${invoice.id}/pdf`,
       lines: {
         data: invoice.lines.map((line, index) => ({
           amount: line.amount,
@@ -340,6 +345,7 @@ export class StripeFake {
     const invoice: FakeInvoice = {
       amount_paid: 0,
       billing_reason: reason,
+      created: second(this.now()),
       currency: "usd",
       customer: subscription.customer,
       id: this.id("in"),
@@ -883,6 +889,19 @@ export class StripeFake {
         this.emit("customer.subscription.updated", this.subscriptionObject(subscription));
         return this.subscriptionObject(subscription, expands(params));
       }
+    }
+    if (resource === "invoices" && method === "GET" && !id) {
+      allow(params, ["customer", "limit"]);
+      const limit = Number(params["limit"] ?? 10);
+      // Newest first, as Stripe lists them.
+      const invoices = [...this.invoices.values()]
+        .filter((invoice) => !params["customer"] || invoice.customer === params["customer"])
+        .reverse()
+        .slice(0, limit);
+      return this.list(
+        invoices.map((invoice) => this.invoiceObject(invoice)),
+        "/v1/invoices",
+      );
     }
     if (resource === "invoices" && method === "GET" && id) {
       allow(params, ["expand"]);

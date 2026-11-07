@@ -32,6 +32,7 @@ import {
   ensureProduct,
   invoiceCharge,
   invoiceForCharge,
+  listCustomerInvoices,
   metadataKeys,
   parseCheckoutSession,
   parseDispute,
@@ -383,6 +384,25 @@ async function liveProviderSubscription(db: Database, mode: StripeMode, accountI
   return row && liveStatuses.has(row.status) ? row : undefined;
 }
 
+// Where the tax a checkout adds is called VAT: the EU, the rest of the
+// single market and its neighbours. Elsewhere it is "tax" (a sales tax, a
+// GST), or nothing where we are not registered, which checkout shows.
+const vatCountries = new Set([
+  "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR", "HU", "IE", "IT", "LT", "LU",
+  "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK",
+  "CH", "GB", "IS", "LI", "MC", "NO",
+]);
+
+/**
+ * What a price before tax is followed by ("+ VAT"), for a visitor in this
+ * country: Cloudflare's CF-IPCountry, a two-letter code. A guess from the
+ * connection, so only ever a word next to a price; checkout reads the
+ * billing address and is what charges.
+ */
+export function taxLabelFor(country: string | null | undefined): "VAT" | "tax" {
+  return vatCountries.has((country ?? "").trim().toUpperCase()) ? "VAT" : "tax";
+}
+
 export interface BillingSummary {
   /** A card can be charged here: Stripe is set up for this visitor. */
   checkout: boolean;
@@ -391,6 +411,8 @@ export interface BillingSummary {
   mode: StripeMode | null;
   /** Prices are shown before tax, which checkout adds for the buyer's country. */
   prices_exclude_tax: boolean;
+  /** The word after a price before tax, for where the visitor seems to be; null when prices include it. */
+  tax_label: "VAT" | "tax" | null;
   subscription: {
     cancel_at: string | null;
     /** The last charge failed and Stripe is retrying. */
@@ -406,18 +428,28 @@ export async function billingSummary(
   setup: StripeSetup,
   accountId: string,
   superadmin: boolean,
+  country: string | null = null,
 ): Promise<BillingSummary> {
   if (!setup.config) {
-    return { checkout: false, manage: false, mode: null, prices_exclude_tax: false, subscription: null };
+    return {
+      checkout: false,
+      manage: false,
+      mode: null,
+      prices_exclude_tax: false,
+      subscription: null,
+      tax_label: null,
+    };
   }
   const row = await latestProviderSubscription(db, setup.config.mode, accountId);
   const live = row && liveStatuses.has(row.status) ? row : undefined;
   const scheduled = live?.status === "scheduled_cancel";
+  const excludeTax = setup.config.automaticTax && setup.config.taxBehavior === "exclusive";
   return {
     checkout: checkoutOpenTo(setup.config.mode, superadmin),
     manage: Boolean(row?.customerId),
     mode: setup.config.mode,
-    prices_exclude_tax: setup.config.automaticTax && setup.config.taxBehavior === "exclusive",
+    prices_exclude_tax: excludeTax,
+    tax_label: excludeTax ? taxLabelFor(country) : null,
     subscription: live
       ? {
           cancel_at: scheduled ? (live.currentPeriodEnd?.toISOString() ?? null) : null,
@@ -1391,6 +1423,105 @@ export async function changePaidPlan(
 }
 
 /** Stripe's own page for invoices, the card and the billing details. */
+/** One of the account's invoices, as the usage page lists them. */
+export interface AccountInvoice {
+  /** Still to pay, tax included: an invoice waiting for its payment. */
+  amount_due_micros: string;
+  created_at: string;
+  currency: string;
+  id: string;
+  number: string | null;
+  /** Stripe's PDF of the invoice. */
+  pdf_url: string | null;
+  /** Handed back so far, tax included: refunds and lost disputes. */
+  refunded_micros: string;
+  status: "due" | "not_paid" | "paid" | "partly_refunded" | "refunded";
+  tax_micros: string;
+  total_micros: string;
+  /** Stripe's page for the invoice, where an open one is paid. */
+  url: string | null;
+}
+
+/**
+ * The account's invoices from Stripe, with what was refunded on each from
+ * our own records (a refund is on the charge, which the invoice does not
+ * show). Empty before the account has bought anything.
+ */
+export async function accountInvoices(
+  db: Database,
+  config: StripeConfig,
+  accountId: string,
+  fetchImpl?: StripeFetch,
+): Promise<AccountInvoice[]> {
+  const row = await latestProviderSubscription(db, config.mode, accountId);
+  if (!row?.customerId) {
+    return [];
+  }
+  const [invoices, payments] = await Promise.all([
+    listCustomerInvoices(config, row.customerId, { fetchImpl }),
+    db
+      .select({
+        amountMicros: providerPayments.amountMicros,
+        kind: providerPayments.kind,
+        paymentRef: providerPayments.paymentRef,
+        taxMicros: providerPayments.taxMicros,
+        transactionId: providerPayments.transactionId,
+      })
+      .from(providerPayments)
+      .where(
+        and(
+          eq(providerPayments.provider, stripeProvider),
+          eq(providerPayments.mode, config.mode),
+          eq(providerPayments.accountId, accountId),
+          inArray(providerPayments.kind, ["payment", "refund"]),
+        ),
+      ),
+  ]);
+  const chargeOf = new Map<string, string>();
+  const refundedByCharge = new Map<string, bigint>();
+  for (const payment of payments) {
+    if (!payment.paymentRef) {
+      continue;
+    }
+    if (payment.kind === "payment") {
+      chargeOf.set(payment.transactionId, payment.paymentRef);
+    } else {
+      refundedByCharge.set(
+        payment.paymentRef,
+        (refundedByCharge.get(payment.paymentRef) ?? 0n) + payment.amountMicros + payment.taxMicros,
+      );
+    }
+  }
+  return invoices.map((invoice) => {
+    const total = centsToMicros(invoice.totalCents);
+    const charge = chargeOf.get(invoice.id);
+    const refunded = charge ? (refundedByCharge.get(charge) ?? 0n) : 0n;
+    const status: AccountInvoice["status"] =
+      invoice.status === "open"
+        ? "due"
+        : invoice.status === "uncollectible"
+          ? "not_paid"
+          : refunded > 0n && refunded >= total
+            ? "refunded"
+            : refunded > 0n
+              ? "partly_refunded"
+              : "paid";
+    return {
+      amount_due_micros: centsToMicros(invoice.amountDueCents).toString(),
+      created_at: invoice.created.toISOString(),
+      currency: invoice.currency,
+      id: invoice.id,
+      number: invoice.number,
+      pdf_url: invoice.pdfUrl,
+      refunded_micros: refunded.toString(),
+      status,
+      tax_micros: centsToMicros(invoice.taxCents).toString(),
+      total_micros: total.toString(),
+      url: invoice.hostedInvoiceUrl,
+    };
+  });
+}
+
 export async function portalLink(
   db: Database,
   config: StripeConfig,

@@ -9,6 +9,7 @@ import {
   checkLedgerIntegrity,
   closeOutSubscriptionForDeletedAccount,
   customerReceivableCode,
+  customerStatement,
   readAccountPlan,
   runSubscriptionCycle,
   setAccountPlan,
@@ -360,6 +361,17 @@ describe("a provider that leaves the tax and its fee with us", () => {
     };
   }
 
+  // [direction, amount, description] of each line; the plan charge's
+  // description is the plan's, so it is left out.
+  async function statementLines(accountId: string) {
+    const { lines } = await customerStatement(db, customerReceivableCode(accountId), { limit: 100 });
+    return lines.map((line) =>
+      line.entryType.startsWith("sales_tax") || line.entryType.startsWith("invoice_payment") || line.entryType === "payment_refund"
+        ? [line.direction, line.amountMicros, line.description]
+        : [line.direction, line.amountMicros],
+    );
+  }
+
   it("books the VAT it collected as owed, apart from the price", async () => {
     const accountId = await createAccount();
     await applyProviderPayment(db, payment(accountId, { taxMicros: tax, taxRemittedBy: "us" }), {
@@ -371,6 +383,13 @@ describe("a provider that leaves the tax and its fee with us", () => {
     expect(view.receivable).toBe(0n);
     const [row] = await db.select().from(providerPayments);
     expect(row?.taxRemittedBy).toBe("us");
+    // The customer's statement reads like their invoice: the plan, the
+    // tax on it, and one payment of both.
+    expect(await statementLines(accountId)).toEqual([
+      ["debit", maker],
+      ["debit", tax, "VAT or sales tax"],
+      ["credit", maker + tax, "Payment received"],
+    ]);
     await expectBooksToHold();
   });
 
@@ -403,6 +422,11 @@ describe("a provider that leaves the tax and its fee with us", () => {
     expect(await owed()).toEqual({ fees: 0n, psp: 0n, salesTax: 0n });
     const [refund] = await db.select().from(providerPayments).where(eq(providerPayments.kind, "refund"));
     expect(refund?.taxRemittedBy).toBe("us");
+    // The whole card charge comes back, and the tax in it leaves the account.
+    const lines = await statementLines(accountId);
+    expect(lines).toContainEqual(["debit", maker + tax, "Payment refunded"]);
+    expect(lines).toContainEqual(["credit", tax, "VAT or sales tax refunded"]);
+    expect((await balances(accountId)).receivable).toBe(0n);
     await expectBooksToHold();
   });
 

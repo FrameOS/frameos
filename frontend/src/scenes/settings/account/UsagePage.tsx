@@ -6,10 +6,10 @@ import { Box } from '../../../components/Box'
 import { Button, buttonColor, buttonSize } from '../../../components/Button'
 import { Spinner } from '../../../components/Spinner'
 import { Tag } from '../../../components/Tag'
-import { AccountPageHeader, AccountSection, AccountTable } from './AccountPageHeader'
+import { AccountNotice, AccountPageHeader, AccountSection, AccountTable } from './AccountPageHeader'
 import { dollars, formatBytes, formatDate, formatDateTime, surfaceLabel } from './format'
-import { plansLogic, wholeDollars, type PlanBilling, type PlanCard, type PlanStopLimits } from './plansLogic'
-import { usageLogic, type AccountUsage, type AiUsage, type AiUsageMonth } from './usageLogic'
+import { plansLogic, wholeDollars, type AccountInvoice, type PlanCard, type PlanStopLimits } from './plansLogic'
+import { usageLogic, type AccountStatement, type AccountUsage, type AiUsage, type AiUsageMonth } from './usageLogic'
 
 interface Meter {
   label: string
@@ -230,9 +230,11 @@ function PlanCardAction({ card }: { card: PlanCard }): JSX.Element | null {
 }
 
 function PlanCardBox({ card, plannedLimits }: { card: PlanCard; plannedLimits: string[] }): JSX.Element {
+  const { taxSuffix } = useValues(plansLogic)
   const { setStopIndex } = useActions(plansLogic)
   const { group, stop, stopIndex } = card
   const sliding = group.stops.length > 1
+  const paid = BigInt(stop.price_micros || '0') > 0n
   return (
     <Box
       className="flex flex-col gap-4 p-5"
@@ -252,7 +254,7 @@ function PlanCardBox({ card, plannedLimits }: { card: PlanCard; plannedLimits: s
       <div>
         <div className="flex items-baseline gap-1">
           <span className="frameos-strong text-3xl font-bold tabular-nums">{wholeDollars(stop.price_micros)}</span>
-          <span className="frameos-muted text-sm">/month</span>
+          <span className="frameos-muted text-sm">/month{paid ? taxSuffix : ''}</span>
         </div>
         {sliding ? (
           <div className="mt-2">
@@ -313,57 +315,217 @@ function PlanCardBox({ card, plannedLimits }: { card: PlanCard; plannedLimits: s
   )
 }
 
-// What the payment provider holds for the account: when the plan renews or
-// ends, a failed payment, and the way to its billing page.
-function BillingStatus({ billing }: { billing: PlanBilling }): JSX.Element | null {
-  const { busy, checkoutOutcome } = useValues(plansLogic)
-  const { openBilling } = useActions(plansLogic)
-  const { subscription } = billing
-  const lines: { text: string; warning?: boolean }[] = []
+// The top of the page: the plan the account is on, what happens to it next,
+// and what a paying customer comes here for: their card and billing details
+// at Stripe, and cancelling. Cancelling asks once, says that the time left
+// is not refunded, and runs the plan to the end of the month paid for.
+function PlanSummary(): JSX.Element | null {
+  const { currentPlan, nextPlan, billing, busy, checkoutOutcome, taxSuffix, catalogLoading } = useValues(plansLogic)
+  const { openBilling, cancelPlan, keepPlan, showPlans } = useActions(plansLogic)
+  if (!currentPlan) {
+    return catalogLoading ? <Spinner /> : null
+  }
+  const subscription = billing?.subscription ?? null
+  const paid = BigInt(currentPlan.priceMicros || '0') > 0n
+  const working = busy !== null
+  const notices: { text: string; tone: 'error' | 'info' | 'success' }[] = []
   if (checkoutOutcome === 'active') {
-    lines.push({ text: 'Thank you. Your plan is active.' })
+    notices.push({ text: 'Thank you. Your plan is active.', tone: 'success' })
   } else if (checkoutOutcome === 'pending') {
-    lines.push({ text: 'Thank you. Your payment is being confirmed. This usually takes a few seconds.' })
+    notices.push({
+      text: 'Thank you. Your payment is being confirmed. This usually takes a few seconds.',
+      tone: 'info',
+    })
   } else if (checkoutOutcome === 'failed') {
-    lines.push({ text: 'That checkout could not be matched to this account. Nothing changed here.', warning: true })
+    notices.push({ text: 'That checkout could not be matched to this account. Nothing changed here.', tone: 'error' })
   }
   if (subscription?.past_due) {
-    lines.push({
-      text: 'Your last payment failed. Update your card under Manage billing to keep the plan.',
-      warning: true,
+    notices.push({
+      text: 'Your last payment failed. Stripe tries your card again over the next days. Update it under Card and billing details to keep the plan.',
+      tone: 'error',
     })
-  } else if (subscription?.cancel_at) {
-    lines.push({ text: `Your plan is cancelled and runs until ${formatDate(subscription.cancel_at)}.` })
-  } else if (subscription?.renews_at) {
-    lines.push({ text: `Your plan renews on ${formatDate(subscription.renews_at)}.` })
   }
-  if (billing.mode === 'test' && billing.checkout) {
-    lines.push({ text: 'Payments are in test mode. Checkout takes test cards only and nothing is charged.' })
+  if (billing?.mode === 'test' && billing.checkout) {
+    notices.push({
+      text: 'Payments are in test mode. Checkout takes test cards only and nothing is charged.',
+      tone: 'info',
+    })
   }
-  if (lines.length === 0 && !billing.manage) {
-    return null
-  }
+  const status = subscription?.cancel_at
+    ? `Cancelled. You keep it until ${formatDate(subscription.cancel_at)}, then the account moves to Free.`
+    : subscription?.renews_at
+    ? nextPlan
+      ? `Renews on ${formatDate(subscription.renews_at)} as ${nextPlan.name} at ${wholeDollars(
+          nextPlan.priceMicros
+        )}/month.`
+      : `Renews on ${formatDate(subscription.renews_at)}.`
+    : paid
+    ? 'Set up for you by support. Write to us to change it.'
+    : 'Everything a household needs. A paid plan holds more frames and more files.'
   return (
-    <Box className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm" data-billing-status>
-      <div className="space-y-1">
-        {lines.map(({ text, warning }) => (
-          <p key={text} className={warning ? 'text-amber-600' : undefined} role={warning ? 'alert' : undefined}>
-            {text}
-          </p>
-        ))}
-        {lines.length === 0 ? <p className="frameos-muted">Invoices and your card are on the billing page.</p> : null}
+    <Box className="space-y-4 p-5" data-plan-summary>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h3 className="frameos-strong text-2xl font-bold">{currentPlan.name}</h3>
+            <span className="frameos-muted tabular-nums">
+              {wholeDollars(currentPlan.priceMicros)}/month{paid ? taxSuffix : ''}
+            </span>
+          </div>
+          <p className="text-sm leading-relaxed">{status}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {billing?.manage ? (
+            <Button color="secondary" disabled={working} onClick={() => openBilling()}>
+              {busy === 'billing' ? 'Opening…' : 'Card and billing details'}
+            </Button>
+          ) : null}
+          {subscription && paid ? (
+            subscription.cancel_at ? (
+              <Button color="primary" disabled={working} onClick={() => keepPlan(currentPlan.code)}>
+                {busy === currentPlan.code ? 'Working…' : 'Keep my plan'}
+              </Button>
+            ) : (
+              <Button color="secondary" disabled={working} onClick={() => cancelPlan()}>
+                {busy === 'cancel' ? 'Working…' : 'Cancel plan'}
+              </Button>
+            )
+          ) : null}
+          {!paid ? (
+            <Button color="primary" onClick={() => showPlans()}>
+              See the paid plans
+            </Button>
+          ) : null}
+        </div>
       </div>
-      {billing.manage ? (
-        <Button color="secondary" size="small" disabled={busy !== null} onClick={() => openBilling()}>
-          {busy === 'billing' ? 'Opening…' : 'Manage billing'}
-        </Button>
-      ) : null}
+      {notices.map(({ text, tone }) => (
+        <AccountNotice key={text} tone={tone}>
+          {text}
+        </AccountNotice>
+      ))}
     </Box>
   )
 }
 
+const invoiceStatuses: Record<AccountInvoice['status'], { label: string; color: 'gray' | 'red' | 'teal' | 'yellow' }> =
+  {
+    due: { label: 'Due', color: 'yellow' },
+    not_paid: { label: 'Not paid', color: 'red' },
+    paid: { label: 'Paid', color: 'teal' },
+    partly_refunded: { label: 'Partly refunded', color: 'gray' },
+    refunded: { label: 'Refunded', color: 'gray' },
+  }
+
+// Stripe's invoices, newest first, each with its page and its PDF. An
+// invoice still waiting for its payment links to the page that takes it.
+function InvoiceTable(): JSX.Element {
+  const { invoices, invoicesError, billing } = useValues(plansLogic)
+  const { loadInvoices } = useActions(plansLogic)
+  const taxWord = billing?.tax_label === 'VAT' ? 'VAT' : 'tax'
+  if (invoices === null) {
+    return invoicesError ? (
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <p role="alert">{invoicesError}</p>
+        <Button size="small" color="secondary" onClick={() => loadInvoices()}>
+          Try again
+        </Button>
+      </div>
+    ) : (
+      <Spinner />
+    )
+  }
+  if (invoices.length === 0) {
+    return <p className="frameos-muted text-sm">No invoices yet.</p>
+  }
+  return (
+    <AccountTable head={['Date', 'Invoice', 'Amount', 'Status', '']}>
+      {invoices.map((invoice) => {
+        const status = invoiceStatuses[invoice.status]
+        const tax = BigInt(invoice.tax_micros || '0')
+        const refunded = BigInt(invoice.refunded_micros || '0')
+        const link = invoice.url
+        return (
+          <tr key={invoice.id} data-invoice={invoice.status}>
+            <td className="whitespace-nowrap py-2 pr-3">{formatDate(invoice.created_at)}</td>
+            <td className="py-2 pr-3 tabular-nums">{invoice.number ?? ''}</td>
+            <td className="py-2 pr-3 tabular-nums">
+              <span className="frameos-strong">{dollars(invoice.total_micros)}</span>
+              {tax > 0n ? (
+                <span className="frameos-muted">
+                  {' '}
+                  incl. {dollars(tax)} {taxWord}
+                </span>
+              ) : null}
+              {invoice.status === 'partly_refunded' ? (
+                <span className="frameos-muted">, {dollars(refunded)} refunded</span>
+              ) : null}
+            </td>
+            <td className="py-2 pr-3">
+              <Tag color={status.color}>{status.label}</Tag>
+            </td>
+            <td className="whitespace-nowrap py-2 text-right">
+              {link ? (
+                <a
+                  className={clsx('frameos-link hover:underline', invoice.status === 'due' && 'font-semibold')}
+                  href={link}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {invoice.status === 'due' ? `Pay ${dollars(invoice.amount_due_micros)}` : 'View'}
+                </a>
+              ) : null}
+              {link && invoice.pdf_url ? <span className="frameos-muted"> · </span> : null}
+              {invoice.pdf_url ? (
+                <a className="frameos-link hover:underline" href={invoice.pdf_url} target="_blank" rel="noreferrer">
+                  PDF
+                </a>
+              ) : null}
+            </td>
+          </tr>
+        )
+      })}
+    </AccountTable>
+  )
+}
+
+// The account's own books: every charge on it and every payment or credit
+// that settled one. Folded away while nothing is owed; open when something is.
+function StatementDetails({ statement }: { statement: AccountStatement }): JSX.Element {
+  const owed = BigInt(statement.owedMicros || '0')
+  return (
+    <details className="group" open={owed > 0n}>
+      <summary className="frameos-strong cursor-pointer font-semibold">Account statement</summary>
+      <div className="mt-2 space-y-2">
+        <p className="text-sm leading-relaxed">
+          {owed > 0n
+            ? `You owe ${dollars(
+                owed
+              )}. The month-end invoice collects it: metered usage and any plan fee, less any credit.`
+            : owed < 0n
+            ? `You have a credit of ${dollars(-owed)}, which goes against what you use next.`
+            : 'Nothing is owed. Charges are positive, and what paid or credited them is negative.'}
+        </p>
+        {statement.lines.length > 0 ? (
+          <AccountTable head={['When', 'What', 'Amount']}>
+            {statement.lines.map((line) => (
+              <tr key={`${line.id}-${line.description}-${line.direction}`}>
+                <td className="whitespace-nowrap py-2 pr-3">{formatDateTime(line.occurred_at)}</td>
+                <td className="py-2 pr-3">{line.description}</td>
+                <td className="py-2 text-right tabular-nums">
+                  {line.direction === 'debit' ? '' : '-'}
+                  {dollars(line.amount_micros)}
+                </td>
+              </tr>
+            ))}
+          </AccountTable>
+        ) : null}
+      </div>
+    </details>
+  )
+}
+
 function PlanCards(): JSX.Element {
-  const { planCards, catalog, catalogLoading, billing, contactEmail, links } = useValues(plansLogic)
+  const { planCards, catalog, catalogLoading, contactEmail, links } = useValues(plansLogic)
   if (planCards.length === 0) {
     return catalogLoading ? <Spinner /> : <></>
   }
@@ -384,16 +546,14 @@ function PlanCards(): JSX.Element {
           </>
         ) : null}
       </p>
-      {billing ? <BillingStatus billing={billing} /> : null}
       <div className="grid gap-4 lg:grid-cols-3">
         {planCards.map((card) => (
           <PlanCardBox key={card.group.key} card={card} plannedLimits={plannedLimits} />
         ))}
       </div>
       <p className="frameos-muted text-sm leading-relaxed">
-        Paid plans are billed monthly through Stripe and can be cancelled at any time. Prices are in US dollars and
-        exclude VAT or sales tax, which is added at checkout where it applies. AI is priced per request and costs the same on every
-        plan.
+        Paid plans are billed monthly through Stripe. Cancel at any time: the plan runs to the end of the month you paid
+        for. Prices are in US dollars and exclude VAT or sales tax, which is added at checkout where it applies.
         {anyPlanned ? ' Anything marked planned is not available yet and is not part of what you pay for today.' : ''}
         {links ? (
           <>
@@ -443,20 +603,20 @@ function collapseBySurface(month: AiUsageMonth): { micros: bigint; surface: stri
   )
 }
 
+// What AI cost this month, where it went, how it is priced and its daily
+// limit, and the switch that turns it off.
 function AiUsageCard({ ai }: { ai: AiUsage }): JSX.Element {
   const { togglingAi } = useValues(usageLogic)
   const { setAiEnabled } = useActions(usageLogic)
   const thisMonth = ai.months.current
   const lastMonth = ai.months.previous
-  const owed = BigInt(ai.balance.receivable_micros || '0')
-  const lines = ai.balance.recent_lines ?? []
   const billable = BigInt(thisMonth.micros || '0') > 0n && !thisMonth.own_key_only
   // Billed only when metering is live AND something in the month was
   // actually billable to them: a month spent entirely on the operator's
   // shared key or on absorbed surfaces owes nothing, and "this is billed at
   // the end of the month" over that number would be a bill-shaped lie.
   const billed = ai.metering_mode === 'live' && billable
-  const showBalance = ai.metering_mode === 'live' || owed !== 0n || lines.length > 0
+  const sharedKey = ai.cap.allowance === 'shared'
 
   return (
     <Box className="space-y-4 p-4" id="ai">
@@ -479,35 +639,6 @@ function AiUsageCard({ ai }: { ai: AiUsage }): JSX.Element {
           Every request this month ran on your own OpenAI key, so you owe us nothing for it. The figure above is what
           those tokens cost at OpenAI's list price, for your own reference.
         </p>
-      ) : null}
-
-      {showBalance ? (
-        <div className="space-y-2">
-          <h3 className="frameos-strong font-semibold">Your balance</h3>
-          <p className="text-sm leading-relaxed">
-            {owed > 0n
-              ? `You currently owe ${dollars(
-                  owed
-                )}. That is what the month-end invoice collects: metered usage, any plan fee, less any credit.`
-              : owed < 0n
-              ? `You have a credit of ${dollars(-owed)} in your favour, which nets against future usage.`
-              : 'Nothing is owed right now.'}
-          </p>
-          {lines.length > 0 ? (
-            <AccountTable head={['When', 'What', 'Amount']}>
-              {lines.map((line) => (
-                <tr key={line.id}>
-                  <td className="py-2 pr-3">{formatDateTime(line.occurred_at)}</td>
-                  <td className="py-2 pr-3">{line.description}</td>
-                  <td className="py-2 text-right tabular-nums">
-                    {line.direction === 'debit' ? '' : '-'}
-                    {dollars(line.amount_micros)}
-                  </td>
-                </tr>
-              ))}
-            </AccountTable>
-          ) : null}
-        </div>
       ) : null}
 
       <details className="group">
@@ -559,6 +690,24 @@ function AiUsageCard({ ai }: { ai: AiUsage }): JSX.Element {
         </div>
       </details>
 
+      <p className="frameos-muted text-sm leading-relaxed">
+        {billed
+          ? 'A request costs what the model provider charges for its tokens, plus our margin, the same on every plan.'
+          : 'Once AI is billed, a request will cost what the model provider charges for its tokens, plus our margin, the same on every plan.'}{' '}
+        The tokens and prices behind every request are kept, so each number here can be checked.{' '}
+        {sharedKey
+          ? `Your requests run on our shared OpenAI key, with a daily allowance of ${dollars(
+              ai.cap.daily_micros
+            )}. Today you have used ${dollars(ai.cap.today_micros)} of it, and it resets at ${formatDateTime(
+              ai.cap.resets_at
+            )}. Add your own OpenAI key under Service keys to use AI without the allowance.`
+          : `A daily limit of ${dollars(
+              ai.cap.daily_micros
+            )} applies, so a runaway loop can only cost a bounded amount. Today you have used ${dollars(
+              ai.cap.today_micros
+            )}, and it resets at ${formatDateTime(ai.cap.resets_at)}.`}
+      </p>
+
       {/* The AI opt-out: it says what stops working before it stops it. */}
       <div className="space-y-2">
         <Button size="small" color="secondary" disabled={togglingAi} onClick={() => setAiEnabled(!ai.enabled)}>
@@ -574,63 +723,44 @@ function AiUsageCard({ ai }: { ai: AiUsage }): JSX.Element {
   )
 }
 
-function PricingCard({ ai }: { ai: AiUsage }): JSX.Element {
-  const sharedKey = ai.cap.allowance === 'shared'
-  return (
-    <Box className="space-y-3 p-4 text-sm leading-relaxed">
-      <p>
-        The Free plan costs nothing, and while FrameOS Cloud is in beta neither does AI usage. A paid plan is billed
-        monthly in advance, and you can cancel it at any time.
-      </p>
-      <p>
-        Once billing starts, AI usage will be priced per request: what the model provider charges for the tokens it
-        used, plus our margin. The token counts and unit prices behind every request are kept, so each number on this
-        page can be checked.
-      </p>
-      <p>
-        You are on the <strong>{ai.plan.name}</strong> plan
-        {ai.plan.next_plan_code ? ` (moving to ${ai.plan.next_plan_code} at the next renewal)` : ''}
-        {ai.plan.cancel_at ? ` (ends ${formatDateTime(ai.plan.cancel_at)})` : ''}.
-        {BigInt(ai.plan.price_micros || '0') > 0n
-          ? ' The plan fee is billed at the start of each period, AI usage at the end of the month.'
-          : ''}{' '}
-        {sharedKey
-          ? `Your requests run on our shared OpenAI key, with a daily allowance of ${dollars(
-              ai.cap.daily_micros
-            )}. Today you have used ${dollars(ai.cap.today_micros)} of it, and it resets at ${formatDateTime(
-              ai.cap.resets_at
-            )}. Add your own OpenAI key under Service keys to use AI without the allowance.`
-          : `A daily limit of ${dollars(
-              ai.cap.daily_micros
-            )} applies, so a runaway loop can only cost a bounded amount. Today you have used ${dollars(
-              ai.cap.today_micros
-            )}, and it resets at ${formatDateTime(ai.cap.resets_at)}.`}
-      </p>
-    </Box>
-  )
-}
-
-// Everything the account uses, on one page: the storage and frame quotas
-// and where to ask for more, then AI usage with its switch and how pricing
-// works. Every number comes from the same accountUsage() the quota refusals
-// read.
+// Everything about the account's plan and what it uses, on one page: the
+// plan and what can be done with it, the storage and frame quotas, the
+// invoices and the account's statement, the plans to move to, then AI
+// usage with its switch. Every quota number comes from the same
+// accountUsage() the quota refusals read.
 export function UsagePage(): JSX.Element {
-  const { usage, usageLoading, ai, aiLoading } = useValues(usageLogic)
+  const { usage, usageLoading, ai, aiLoading, statement } = useValues(usageLogic)
+  const { billing, currentPlan } = useValues(plansLogic)
+  const paying = currentPlan ? BigInt(currentPlan.priceMicros || '0') > 0n : false
+  const invoices = Boolean(billing?.manage)
   return (
     <div className="space-y-8">
       <AccountPageHeader page="usage" />
+      <AccountSection title="Your plan">
+        <PlanSummary />
+      </AccountSection>
       <AccountSection title="Storage and frames">
         <Box className="p-4">{usage ? <StorageMeters usage={usage} /> : usageLoading ? <Spinner /> : null}</Box>
       </AccountSection>
-      <AccountSection title="Need more?">
+      {invoices || statement ? (
+        <AccountSection
+          title={invoices ? 'Invoices' : 'Account balance'}
+          description={
+            invoices
+              ? 'Every invoice Stripe sent you, with its PDF. Your card, address and VAT number are under Card and billing details.'
+              : undefined
+          }
+        >
+          <Box className="space-y-4 p-4">
+            {invoices ? <InvoiceTable /> : null}
+            {statement ? <StatementDetails statement={statement} /> : null}
+          </Box>
+        </AccountSection>
+      ) : null}
+      <AccountSection id="plans" title={paying ? 'Change plan' : 'Need more?'}>
         <PlanCards />
       </AccountSection>
       <AccountSection title="AI usage">{ai ? <AiUsageCard ai={ai} /> : aiLoading ? <Spinner /> : null}</AccountSection>
-      {ai ? (
-        <AccountSection title="How pricing works">
-          <PricingCard ai={ai} />
-        </AccountSection>
-      ) : null}
     </div>
   )
 }

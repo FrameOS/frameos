@@ -31,6 +31,7 @@ import { PUT as putCustomerPlan } from "../../../app/api/admin/billing/customers
 import { POST as postSync } from "../../../app/api/admin/billing/plans/route";
 import { POST as postCheckout } from "../../../app/api/account/plan/checkout/route";
 import { GET as getCheckoutReturn } from "../../../app/api/account/plan/checkout/return/route";
+import { GET as getInvoices } from "../../../app/api/account/plan/invoices/route";
 import { POST as postPortal } from "../../../app/api/account/plan/portal/route";
 import { GET as getPlan, PUT as putPlan } from "../../../app/api/account/plan/route";
 import { POST as postWebhook } from "../../../app/api/webhooks/stripe/route";
@@ -649,6 +650,7 @@ describe("buying a plan", () => {
       mode: null,
       prices_exclude_tax: false,
       subscription: null,
+      tax_label: null,
     });
     expect(view.catalog.groups.map((group) => group.available)).toEqual([true, false, false]);
     expect((await startCheckout("private-5")).status).toBe(503);
@@ -1211,6 +1213,101 @@ describe("when a notice goes wrong", () => {
     const [event] = await db.select().from(providerEvents);
     expect(event?.error).toMatch(/paid in EUR/);
     expect((await books(accountId)).psp).toBe(0n);
+  });
+});
+
+interface ListedInvoice {
+  amount_due_micros: string;
+  currency: string;
+  number: string | null;
+  pdf_url: string | null;
+  refunded_micros: string;
+  status: string;
+  tax_micros: string;
+  total_micros: string;
+  url: string | null;
+}
+
+async function invoices() {
+  const response = await getInvoices(new NextRequest(new URL("/api/account/plan/invoices", baseUrl)));
+  return { status: response.status, ...((await response.json()) as { invoices: ListedInvoice[] }) };
+}
+
+describe("the account's invoices", () => {
+  it("lists what was paid with its VAT, and what was refunded on it", async () => {
+    useFake({ taxPercent: 21 });
+    const accountId = await signIn();
+    expect(await invoices()).toEqual({ invoices: [], status: 200 });
+    const subscriptionId = await buy("private-9", accountId);
+    const [paid] = (await invoices()).invoices;
+    expect(paid).toMatchObject({
+      amount_due_micros: "0",
+      currency: "USD",
+      refunded_micros: "0",
+      status: "paid",
+      tax_micros: "1890000",
+      total_micros: "10890000",
+    });
+    expect(paid?.number).toMatch(/^FAKE-/);
+    expect(paid?.url).toBe(`https://invoice.stripe.fake/${latestInvoiceOf(subscriptionId)}`);
+    expect(paid?.pdf_url).toMatch(/\/pdf$/);
+
+    fake.refund(latestInvoiceOf(subscriptionId), { amount: 545 });
+    await deliver();
+    expect((await invoices()).invoices[0]).toMatchObject({ refunded_micros: "5450000", status: "partly_refunded" });
+    fake.refund(latestInvoiceOf(subscriptionId), { amount: 544 });
+    await deliver();
+    expect((await invoices()).invoices[0]).toMatchObject({ refunded_micros: "10890000", status: "refunded" });
+  });
+
+  it("shows an invoice waiting for its payment as due, newest first", async () => {
+    useFake({ taxPercent: 21 });
+    const accountId = await signIn();
+    await buy("private-5", accountId);
+    fake.nextChargeNeedsAction = true;
+    expect((await putPlan(jsonRequest("PUT", "/api/account/plan", { plan: "private-9" }))).status).toBe(402);
+    await deliver();
+    const listed = (await invoices()).invoices;
+    expect(listed.map((invoice) => invoice.status)).toEqual(["due", "paid"]);
+    expect(BigInt(listed[0]?.amount_due_micros ?? "0")).toBeGreaterThan(0n);
+  });
+
+  it("is empty without Stripe, and another account sees none of them", async () => {
+    const buyer = await signIn();
+    await buy("private-5", buyer);
+    await signIn();
+    expect((await invoices()).invoices).toEqual([]);
+    delete process.env.STRIPE_SECRET_KEY;
+    expect(await invoices()).toEqual({ invoices: [], status: 200 });
+  });
+});
+
+describe("the word after a price", () => {
+  async function taxLabel(country?: string) {
+    const response = await getPlan(
+      new NextRequest(new URL("/api/account/plan", baseUrl), {
+        headers: country ? { "cf-ipcountry": country } : {},
+      }),
+    );
+    return ((await response.json()) as { billing: { tax_label: string | null } }).billing.tax_label;
+  }
+
+  it("is VAT for a visitor in Europe and tax elsewhere, by Cloudflare's country", async () => {
+    await signIn();
+    expect(await taxLabel("BE")).toBe("VAT");
+    expect(await taxLabel("de")).toBe("VAT");
+    expect(await taxLabel("GB")).toBe("VAT");
+    expect(await taxLabel("US")).toBe("tax");
+    // Cloudflare's "unknown" and "Tor".
+    expect(await taxLabel("XX")).toBe("tax");
+    expect(await taxLabel("T1")).toBe("tax");
+    expect(await taxLabel()).toBe("tax");
+  });
+
+  it("is nothing when prices include the tax", async () => {
+    await signIn();
+    vi.stubEnv("STRIPE_TAX_BEHAVIOR", "inclusive");
+    expect(await taxLabel("BE")).toBeNull();
   });
 });
 

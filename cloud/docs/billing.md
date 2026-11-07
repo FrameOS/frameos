@@ -77,15 +77,21 @@ that gives its VAT number is invoiced under the reverse charge.
 
 ## What the books get
 
-Amounts net of tax, micro-dollars. Rules in
-`packages/ledger/src/rules/payment.ts` (v2) and `subscription.ts`.
+Micro-dollars. Rules in `packages/ledger/src/rules/payment.ts` (v3) and
+`subscription.ts`. Revenue is always net of tax. The VAT goes through the
+customer's receivable (v3, 2026-11-07), so their statement on the usage
+page reads like the invoice: the plan, the VAT, one payment of both. v2
+booked the same balances with the VAT going straight from the Stripe
+balance to `liability:sales_tax`, so a statement showed a payment smaller
+than the card charge; entries posted before v3 keep that shape (the
+journal is append-only).
 
 | Stripe says | Entries |
 |---|---|
-| Invoice paid, $5 + $1.05 VAT | `Dr receivable / Cr deferred` $5 (the period's charge); `Dr psp / Cr receivable` $5; `Dr psp / Cr liability:sales_tax` $1.05 |
+| Invoice paid, $5 + $1.05 VAT | `Dr receivable / Cr deferred` $5 (the period's charge); `Dr receivable / Cr liability:sales_tax` $1.05 ("VAT or sales tax"); `Dr psp / Cr receivable` $6.05 |
 | Its charge's fee, €0.53 at 0.8973 | `Dr expense:psp_fees / Cr psp` $0.590638 (`payment.fee`) |
 | Upgrade in the middle of a period | the old period's unearned rest back to the receivable, it closes; the new period is priced at that rest plus what was paid |
-| Refund, VAT included | net share out of the deferral first, then revenue; the VAT share `Dr sales_tax / Cr psp` |
+| Refund, VAT included | `Dr receivable / Cr psp` all of it; the VAT share `Dr sales_tax / Cr receivable`; the net share out of the deferral first, then revenue |
 | Dispute lost | as a refund of the disputed amount |
 | Dispute fee (won or lost) | `payment.fee`, at the charge's settlement rate when Stripe gives none |
 
@@ -120,13 +126,20 @@ accounting module; every row names its mode.
   `reconcileSubscriptions`, `cancelForErasure`.
 - Routes: `POST /api/account/plan/checkout`, `GET .../checkout/return`
   (`?session_id=`), `PUT /api/account/plan` (switch, keep, cancel),
-  `POST /api/account/plan/portal`, `POST /api/webhooks/stripe` (raw body,
+  `POST /api/account/plan/portal`, `GET /api/account/plan/invoices` (Stripe's
+  list with page and PDF links, refunds from `provider_payments`; not for API
+  tokens), `POST /api/webhooks/stripe` (raw body,
   `Stripe-Signature`, 5-minute tolerance, 1 MB cap, 503 when not set up),
   `POST /api/admin/billing/plans` (Sync plans), the nightly job's
   `reconcileSubscriptions`.
 - Pages: `/admin/billing/payments` (setup checks, this quarter's money,
-  plans, subscriptions, payments, refunds and fees, notices), the plan
-  cards (`frontend/src/scenes/settings/account/plansLogic.ts`), the legal
+  plans, subscriptions, payments, refunds and fees, notices); the usage
+  page (`frontend/src/scenes/settings/account/UsagePage.tsx` and
+  `plansLogic.ts`): the plan with "Card and billing details" (the portal)
+  and "Cancel plan" (at period end, nothing refunded, one confirmation),
+  the invoices table, the account statement, the plan cards (prices
+  followed by "+ VAT" or "+ tax" from Cloudflare's `CF-IPCountry`, a guess
+  for a word only: checkout charges by the billing address); the legal
   pages (Stripe named as the payment processor; `src/lib/legal.ts` lists
   it as an optional processor).
 - **Sync plans** writes the `billing_plans` rows and, in Stripe's current

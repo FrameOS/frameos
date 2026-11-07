@@ -781,6 +781,58 @@ export async function retrieveInvoice(
   });
 }
 
+/** An invoice as the customer's list of them shows it. */
+export interface StripeInvoiceListing {
+  /** Still to pay, in cents: an open invoice's remaining amount. */
+  amountDueCents: number;
+  created: Date;
+  /** Upper case, like the ledger's currencies. */
+  currency: string;
+  hostedInvoiceUrl: string | null;
+  id: string;
+  number: string | null;
+  pdfUrl: string | null;
+  status: string | null;
+  /** The tax in the total, in cents. */
+  taxCents: number;
+  /** Tax included, in cents. */
+  totalCents: number;
+}
+
+/**
+ * A customer's invoices, newest first: the ones a person can open. Drafts
+ * are not sent yet and a void invoice was never owed (an upgrade whose
+ * payment was abandoned), so neither is listed.
+ */
+export async function listCustomerInvoices(
+  config: StripeConfig,
+  customerId: string,
+  options: { fetchImpl?: StripeFetch | undefined; limit?: number } = {},
+): Promise<StripeInvoiceListing[]> {
+  const stripe = stripeClient(config, options.fetchImpl);
+  return call("invoice list", async () => {
+    const page = await stripe.invoices.list({ customer: customerId, limit: options.limit ?? 24 });
+    return page.data
+      .filter((invoice) => invoice.status !== "draft" && invoice.status !== "void")
+      .map((invoice) => ({
+        amountDueCents: invoice.status === "open" ? (invoice.amount_remaining ?? invoice.amount_due ?? 0) : 0,
+        created: new Date((invoice.created ?? 0) * 1000),
+        currency: (invoice.currency ?? "usd").toUpperCase(),
+        hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+        id: invoice.id ?? "",
+        number: invoice.number ?? null,
+        pdfUrl: invoice.invoice_pdf ?? null,
+        status: invoice.status ?? null,
+        taxCents: (invoice.total_taxes ?? []).reduce(
+          (sum, tax) => sum + (typeof tax.amount === "number" ? tax.amount : 0),
+          0,
+        ),
+        totalCents: invoice.total ?? 0,
+      }))
+      .filter((invoice) => invoice.id);
+  });
+}
+
 // ---- Subscriptions ----
 
 export async function retrieveSubscription(

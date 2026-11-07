@@ -63,7 +63,9 @@ export async function GET(request: NextRequest) {
     readAccountPlan(db, session.accountId),
     listPlans(db),
     purchasablePlanCodes(db, setup, superadmin),
-    billingSummary(db, setup, session.accountId, superadmin),
+    // Cloudflare's guess at the visitor's country, for "+ VAT" or "+ tax"
+    // after a price. Checkout charges by the billing address.
+    billingSummary(db, setup, session.accountId, superadmin, request.headers.get("cf-ipcountry")),
   ]);
   const free = plans.find((plan) => plan.code === paygPlanCode) ?? fallbackPaygPlan;
   return NextResponse.json(
