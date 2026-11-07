@@ -1859,8 +1859,8 @@ export const subscriptions = pgTable(
     cancelAt: timestamp("cancel_at", { withTimezone: true }),
     canceledAt: timestamp("canceled_at", { withTimezone: true }),
     // Who drives the periods (migration 0073). Null: the nightly cycle,
-    // charging the receivable. A provider's name: a period opens when that
-    // payment provider reports a payment, with the provider's bounds.
+    // charging the receivable. A provider's name ("stripe"): a period opens
+    // when that payment provider reports a payment, with its bounds.
     provider: text("provider"),
     ...timestamps,
   },
@@ -1922,10 +1922,11 @@ export const subscriptionPeriods = pgTable(
 );
 
 // The payment provider's side of the plans (migration 0073,
-// cloud/docs/billing.md): the products a plan is sold as, the provider's
-// subscriptions, its webhook deliveries and the money it collected. Account
-// ids are plain uuids here, like every billing table, and every row names
-// its mode: a test-mode purchase is recorded and never posted to the ledger.
+// cloud/docs/billing.md): the products a plan is sold as (Stripe: prices),
+// the provider's subscriptions, its webhook deliveries and the money it
+// collected. Account ids are plain uuids here, like every billing table, and
+// every row names its mode: a test-mode purchase is recorded and never
+// posted to the ledger.
 export const providerProducts = pgTable(
   "provider_products",
   {
@@ -2025,7 +2026,16 @@ export const providerPayments = pgTable(
     planCode: text("plan_code"),
     amountMicros: bigint("amount_micros", { mode: "bigint" }).notNull(),
     taxMicros: bigint("tax_micros", { mode: "bigint" }).default(0n).notNull(),
+    // Who pays `tax_micros` over to the tax authority (migration 0075):
+    // "provider" for a merchant of record, "us" for Stripe.
+    taxRemittedBy: text("tax_remitted_by").default("provider").notNull(),
     currency: text("currency").default("USD").notNull(),
+    // The provider's handle on the money (Stripe: the charge), which a
+    // refund, a dispute and a fee name (migration 0075).
+    paymentRef: text("payment_ref"),
+    // Provider facts kept for a person: an invoice number, the currency a
+    // fee settled in. Never the customer's details.
+    details: jsonb("details").$type<Record<string, unknown>>().default({}).notNull(),
     // The subscription period this payment bought.
     periodId: uuid("period_id"),
     // False for a test-mode payment: recorded, never posted.
@@ -2041,6 +2051,12 @@ export const providerPayments = pgTable(
     accountIdx: index("provider_payments_account_idx").on(
       table.accountId,
       table.occurredAt,
+    ),
+    // Partial (payment_ref IS NOT NULL) in migration 0075.
+    paymentRefIdx: index("provider_payments_payment_ref_idx").on(
+      table.provider,
+      table.mode,
+      table.paymentRef,
     ),
     transactionUnique: uniqueIndex("provider_payments_transaction_unique").on(
       table.provider,

@@ -52,8 +52,8 @@ export default function RefundsPage() {
 
       <h2>How a refund reaches you</h2>
       <p className="copy">
-        The refund goes back to the card or account you paid with, through the
-        payment provider that took the payment. It usually shows within 5 to
+        The refund goes back to the card or account you paid with, through
+        Stripe, which took the payment, with the VAT that was charged on it. It usually shows within 5 to
         10 working days. We answer refund requests within three working days.
       </p>
 

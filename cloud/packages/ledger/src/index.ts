@@ -31,15 +31,18 @@ export {
   type PlanEntitlements,
 } from "./plans";
 export {
+  applyProviderFee,
   applyProviderPayment,
   applyProviderRefund,
   noteProviderNextPlan,
   setProviderSubscriptionState,
+  type ProviderFeeInput,
   type ProviderMode,
   type ProviderPaymentInput,
   type ProviderPaymentResult,
   type ProviderRefundInput,
   type ProviderSubscriptionState,
+  type TaxRemitter,
 } from "./provider-subscriptions";
 export {
   accruePeriod,
@@ -152,6 +155,9 @@ export {
   aiUsageRule,
   manualJournalEventType,
   manualJournalRule,
+  paymentFeeEventType,
+  paymentReceivedEventType,
+  paymentRefundedEventType,
   postingRules,
   reclassificationEventType,
   reclassificationRule,

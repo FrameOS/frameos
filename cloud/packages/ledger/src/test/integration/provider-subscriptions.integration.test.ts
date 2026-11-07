@@ -3,6 +3,7 @@ import { providerPayments, subscriptionPeriods, subscriptions } from "@frameos-c
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
   accountBalanceMicros,
+  applyProviderFee,
   applyProviderPayment,
   applyProviderRefund,
   checkLedgerIntegrity,
@@ -342,5 +343,104 @@ describe("subscriptions a payment provider bills", () => {
     await setAccountPlan(db, accountId, "maker", { now: start });
     await setProviderSubscriptionState(db, accountId, "psp", { kind: "canceled" }, { now: start });
     expect((await readAccountPlan(db, accountId)).plan.code).toBe("maker");
+  });
+});
+
+// Stripe is a payment processor, not a merchant of record: the VAT it adds
+// lands in our balance and is owed to the tax authority, and its fee comes
+// out of every charge (migration 0075, rules/payment.ts).
+describe("a provider that leaves the tax and its fee with us", () => {
+  const tax = 417_900n; // 21% of $1.99
+
+  async function owed() {
+    return {
+      fees: await accountBalanceMicros(db, systemAccountCodes.pspFees),
+      psp: await accountBalanceMicros(db, systemAccountCodes.psp),
+      salesTax: await accountBalanceMicros(db, systemAccountCodes.salesTax),
+    };
+  }
+
+  it("books the VAT it collected as owed, apart from the price", async () => {
+    const accountId = await createAccount();
+    await applyProviderPayment(db, payment(accountId, { taxMicros: tax, taxRemittedBy: "us" }), {
+      now: start,
+    });
+    expect(await owed()).toEqual({ fees: 0n, psp: maker + tax, salesTax: tax });
+    const view = await balances(accountId);
+    expect(view.deferred).toBe(maker);
+    expect(view.receivable).toBe(0n);
+    const [row] = await db.select().from(providerPayments);
+    expect(row?.taxRemittedBy).toBe("us");
+    await expectBooksToHold();
+  });
+
+  it("leaves a merchant of record's tax out of the books", async () => {
+    const accountId = await createAccount();
+    await applyProviderPayment(db, payment(accountId, { taxMicros: tax }), { now: start });
+    expect(await owed()).toEqual({ fees: 0n, psp: maker, salesTax: 0n });
+    await expectBooksToHold();
+  });
+
+  it("hands the VAT back with a refund, as the payment booked it", async () => {
+    const accountId = await createAccount();
+    await applyProviderPayment(db, payment(accountId, { taxMicros: tax, taxRemittedBy: "us" }), {
+      now: start,
+    });
+    await applyProviderRefund(
+      db,
+      {
+        accountId,
+        amountMicros: maker,
+        mode: "live",
+        paymentTransactionId: "tran_1",
+        post: true,
+        provider: "psp",
+        refundId: "ref_1",
+        taxMicros: tax,
+      },
+      { now: new Date(start.getTime() + day) },
+    );
+    expect(await owed()).toEqual({ fees: 0n, psp: 0n, salesTax: 0n });
+    const [refund] = await db.select().from(providerPayments).where(eq(providerPayments.kind, "refund"));
+    expect(refund?.taxRemittedBy).toBe("us");
+    await expectBooksToHold();
+  });
+
+  it("books the provider's fee as a cost, once per fee", async () => {
+    const accountId = await createAccount();
+    await applyProviderPayment(db, payment(accountId), { now: start });
+    const fee = {
+      accountId,
+      amountMicros: 358_000n,
+      details: { settlement: { amount_minor: 33, currency: "EUR", exchange_rate: 0.92 } },
+      feeId: "txn_1",
+      mode: "live" as const,
+      paymentRef: "ch_1",
+      planCode: "maker",
+      post: true,
+      provider: "psp",
+    };
+    expect((await applyProviderFee(db, fee, { now: start })).applied).toBe(true);
+    expect((await applyProviderFee(db, fee, { now: start })).applied).toBe(false);
+    expect(await owed()).toEqual({ fees: 358_000n, psp: maker - 358_000n, salesTax: 0n });
+    // The customer owes nothing for it.
+    expect((await balances(accountId)).receivable).toBe(0n);
+    await expectBooksToHold();
+  });
+
+  it("records a test-mode fee and keeps it out of the books", async () => {
+    const accountId = await createAccount();
+    await applyProviderFee(db, {
+      accountId,
+      amountMicros: 358_000n,
+      feeId: "txn_test",
+      mode: "test",
+      post: false,
+      provider: "psp",
+    });
+    expect(await owed()).toEqual({ fees: 0n, psp: 0n, salesTax: 0n });
+    const [row] = await db.select().from(providerPayments);
+    expect(row?.kind).toBe("fee");
+    expect(row?.posted).toBe(false);
   });
 });

@@ -391,8 +391,8 @@ function PlanCards(): JSX.Element {
         ))}
       </div>
       <p className="frameos-muted text-sm leading-relaxed">
-        Paid plans are billed monthly and can be cancelled at any time. Prices are in US dollars and exclude VAT or
-        sales tax, which is added at checkout where it applies. AI is priced per request and costs the same on every
+        Paid plans are billed monthly through Stripe and can be cancelled at any time. Prices are in US dollars and
+        exclude VAT or sales tax, which is added at checkout where it applies. AI is priced per request and costs the same on every
         plan.
         {anyPlanned ? ' Anything marked planned is not available yet and is not part of what you pay for today.' : ''}
         {links ? (

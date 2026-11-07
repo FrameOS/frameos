@@ -69,18 +69,23 @@ export default function PrivacyPage() {
 
       <h3>Paying for a plan</h3>
       <p className="copy">
-        When you buy a paid plan, the payment provider named at checkout
+        Payments are taken by Stripe. When you buy a paid plan, Stripe
         receives your email address, the plan you chose and an identifier for
         your account, so the payment can be matched to it. You give your
-        name, card and billing address to the provider directly: we never see
-        or store your card details. The provider tells us whether you paid,
-        how much, the tax and your country, and when a plan renews, fails or
-        ends. We keep that to know which plan your account is on and to keep
-        our books. The legal basis is{" "}
-        <strong>performance of a contract</strong> and, for the accounting
-        records, a <strong>legal obligation</strong> (art. 6(1)(c) GDPR). The
-        provider is listed with the others below once paid plans open. If you
-        never buy a plan, it never hears of you.
+        name, card, billing address and, for a business, your VAT number to
+        Stripe directly: we never see or store your card details. Stripe tells
+        us whether you paid, how much, the VAT and your country, and when a
+        plan renews, fails or ends. We keep that to know which plan your
+        account is on, to keep our books and to file VAT returns. The legal
+        basis is <strong>performance of a contract</strong> and, for the
+        accounting and tax records, a <strong>legal obligation</strong> (art.
+        6(1)(c) GDPR). Stripe works for us as a processor, and also uses
+        payment data as a controller in its own right to prevent fraud and to
+        meet its own legal duties, as{" "}
+        <a href="https://stripe.com/privacy" rel="noreferrer" target="_blank">
+          its privacy policy
+        </a>{" "}
+        explains. If you never buy a plan, Stripe never hears of you.
       </p>
 
       <h3>Your frames, scenes and files</h3>

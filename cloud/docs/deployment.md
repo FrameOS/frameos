@@ -800,15 +800,24 @@ to the server log.
 
 ## Paid plans
 
-No payment provider is wired up yet, so nothing can be bought: the plan
-cards say "Contact support" and an operator activates a plan by hand.
-[`billing.md`](billing.md) has what is built and what a provider adapter
-has to do. Two settings matter already:
+Paid plans are sold through Stripe. Without its settings nothing can be
+bought: the plan cards say "Contact support" and an operator activates a
+plan by hand. [`billing.md`](billing.md) "Going live" has the Stripe side
+(tax registrations, the webhook endpoint and its API version, the
+restricted key, the retry and email settings); then:
 
 ```text
+STRIPE_SECRET_KEY=rk_live_…         # a restricted key, permissions in billing.md
+STRIPE_WEBHOOK_SECRET=whsec_…       # the endpoint's signing secret
+STRIPE_MODE=live                    # must agree with the key's prefix
 FRAMEOS_SUPPORT_EMAIL=support@…     # shown in the footer and on the usage page
 FRAMEOS_PRICING_URL=…               # the public price list; defaults to https://frameos.net/pricing/
 ```
+
+Then press **Sync plans** on `/admin/billing/payments`: it makes the
+prices and the portal settings at Stripe and says what is still missing.
+The nightly accounting job also asks Stripe about every subscription whose
+period has run out, in case a webhook never arrived.
 
 ## Object Storage
 

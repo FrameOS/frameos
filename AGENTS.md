@@ -598,13 +598,20 @@
 
 ## Paid plans: `cloud/docs/billing.md`
 
-- Cloud-only by nature. The provider-neutral half is built (plan catalog,
-  plan cards, `provider_*` tables, the ledger's provider-billed periods);
-  **no payment provider is wired up**. Stripe is the plan; a Creem adapter
-  was built, run against Creem's test mode and removed on 2026-11-07 after
-  Creem's review demanded its moderation API on prompts that reach the
-  on-device image app. Don't bring a merchant of record back without
-  reading that history in the doc.
+- Cloud-only by nature. Sold through **Stripe** (`src/lib/stripe.ts` the
+  API, `src/lib/billing-provider.ts` the mapping). Stripe is not a merchant
+  of record: Raaven BV sells, Stripe Tax adds the VAT, and the ledger books
+  it as owed (`liability:sales_tax`) and Stripe's fee as a cost
+  (`expense:psp_fees`, converted from the euro balance at Stripe's rate). A
+  Creem adapter was built and removed on 2026-11-07 after Creem's review
+  demanded its moderation API on prompts that reach the on-device image
+  app; don't bring a merchant of record back without reading that history.
+- **A webhook is a nudge**: every subscription, invoice, refund and dispute
+  it names is read back in the pinned API version (`stripeApiVersion`),
+  never taken from the payload, which is rendered in the endpoint's version.
+  A Stripe call goes through `stripe.ts`; the integration suite's stand-in
+  (`src/test/stripe-fake.ts`, a real HTTP server) refuses parameters it
+  does not know, so a new call or parameter needs it taught there too.
 - **A plan lists only what exists.** The catalog
   (`cloud/apps/auth-web/src/lib/plan-catalog.ts`) names unbuilt features and
   limits in `plannedFeatures` / `plannedLimits`: the plan cards mark them
@@ -613,12 +620,16 @@
   price list is frameos.net/pricing (`content/docs/pricing.mdx` in
   `frameos-docs`, numbers repeated by hand); the cloud's `/pricing` only
   redirects, to the usage page when signed in.
-- **An account's plan changes only on what the provider says**, through
-  one idempotent function per adapter; the ledger side is
+- **An account's plan changes only on what Stripe says**, through
+  `applySubscription`, which is idempotent; the ledger side is
   `packages/ledger/src/provider-subscriptions.ts`, where the provider owns
   the clock and the nightly cycle skips `subscriptions.provider` rows.
-  Test-mode payments never post to the ledger. The doc lists what an
-  adapter must do.
+  Changes are worked out from the plan paid for, never Stripe's current
+  price. Test-mode payments never post to the ledger. A change to the flow
+  is run against Stripe's test mode before it ships (the doc's checklist
+  and its last results). Live mode sells to superadmins only until
+  `STRIPE_CHECKOUT_OPEN=1` (`checkoutOpenTo`): a real payment is made and
+  refunded first.
 
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】
