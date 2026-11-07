@@ -6,7 +6,6 @@ import {
   ChevronRightIcon,
   ChevronDoubleLeftIcon,
   CodeBracketIcon,
-  CubeIcon,
   DocumentTextIcon,
   FolderIcon,
   FolderOpenIcon,
@@ -18,7 +17,14 @@ import {
 import type { FrameScene } from '../types'
 import { editAppLogic } from '../scenes/frame/panels/EditApp/editAppLogic'
 import { javascriptAppSourceFiles } from '../utils/sceneApps'
-import { appTreeKey, sceneAppEntries, sceneFileName, sceneTreeKey, type SceneAppEntry } from './sceneFiles'
+import {
+  SCENE_DIAGRAM_FILE,
+  appTreeKey,
+  sceneAppEntries,
+  sceneFolderName,
+  sceneTreeKey,
+  type SceneAppEntry,
+} from './sceneFiles'
 import { sceneFileTreeLogic } from './sceneFileTreeLogic'
 
 const indent = 14
@@ -122,8 +128,7 @@ function AppFolderFiles({
       </div>
     )
   }
-  const removable = (file: string): boolean =>
-    entry.source === 'scene' && ![...javascriptAppSourceFiles, 'app.nim', 'config.json'].includes(file)
+  const removable = (file: string): boolean => ![...javascriptAppSourceFiles, 'app.nim', 'config.json'].includes(file)
   return (
     <>
       {filenames.map((file) => (
@@ -163,17 +168,15 @@ function AppFolderFiles({
           }
         />
       ))}
-      {entry.source === 'scene' ? (
-        <TreeRow
-          depth={depth}
-          icon={<PlusIcon className="h-3.5 w-3.5" />}
-          label={<span className="frameos-muted">Add file</span>}
-          onClick={() => {
-            onOpenFile(activeFile)
-            addFile()
-          }}
-        />
-      ) : null}
+      <TreeRow
+        depth={depth}
+        icon={<PlusIcon className="h-3.5 w-3.5" />}
+        label={<span className="frameos-muted">Add file</span>}
+        onClick={() => {
+          onOpenFile(activeFile)
+          addFile()
+        }}
+      />
     </>
   )
 }
@@ -199,7 +202,9 @@ function closeIfOverlay(event: MouseEvent<HTMLElement> | undefined, close: () =>
 }
 
 // The embedded editor's left column: template.json, then every scene of the
-// template as a diagram, each with its app nodes as folders of files.
+// template as a folder — its diagram, then the apps it carries the source
+// of, each a folder of files. Built-in apps are not listed (the diagram's
+// "Edit app" shows them in a modal).
 export function SceneFileTree({
   frameId,
   scenes,
@@ -252,25 +257,45 @@ export function SceneFileTree({
           const apps = sceneAppEntries(scene)
           const sceneKey = sceneTreeKey(scene.id)
           const sceneExpanded = isExpanded(sceneKey)
+          const diagramActive = shownSelection.kind === 'diagram' && selectedSceneId === scene.id
           return (
             <div key={scene.id}>
               <TreeRow
                 depth={0}
-                active={shownSelection.kind === 'diagram' && selectedSceneId === scene.id}
-                icon={<RectangleGroupIcon className="h-4 w-4 text-violet-500" />}
-                label={sceneFileName(scene)}
-                title={`The diagram of "${scene.name || scene.id}"`}
-                expanded={apps.length > 0 ? sceneExpanded : undefined}
+                icon={
+                  sceneExpanded ? (
+                    <FolderOpenIcon className="h-4 w-4 text-violet-500" />
+                  ) : (
+                    <FolderIcon className="h-4 w-4 text-violet-500" />
+                  )
+                }
+                label={sceneFolderName(scene)}
+                title={`The scene "${scene.name || scene.id}"`}
+                expanded={sceneExpanded}
+                active={
+                  !sceneExpanded &&
+                  (diagramActive || (shownSelection.kind === 'app' && shownSelection.sceneId === scene.id))
+                }
                 onToggle={() => toggleExpanded(sceneKey)}
-                onClick={(event) => {
-                  onSelectScene(scene.id)
-                  showDiagram(scene.id)
-                  closeIfOverlay(event, () => setTreeOpen(false))
-                }}
+                onClick={() => toggleExpanded(sceneKey)}
                 testId="scene-file-scene"
               />
-              {apps.length > 0 && sceneExpanded
-                ? apps.map((entry) => {
+              {sceneExpanded ? (
+                <>
+                  <TreeRow
+                    depth={1}
+                    active={diagramActive}
+                    icon={<RectangleGroupIcon className="h-4 w-4 text-violet-500" />}
+                    label={SCENE_DIAGRAM_FILE}
+                    title={`The diagram of "${scene.name || scene.id}"`}
+                    onClick={(event) => {
+                      onSelectScene(scene.id)
+                      showDiagram(scene.id)
+                      closeIfOverlay(event, () => setTreeOpen(false))
+                    }}
+                    testId="scene-file-diagram"
+                  />
+                  {apps.map((entry) => {
                     const appKey = appTreeKey(scene.id, entry.nodeId)
                     const appExpanded = isExpanded(appKey)
                     const activeApp =
@@ -283,22 +308,13 @@ export function SceneFileTree({
                           depth={1}
                           active={activeApp && !appExpanded}
                           icon={
-                            entry.source === 'builtin' ? (
-                              <CubeIcon className="h-4 w-4 text-slate-400" />
-                            ) : appExpanded ? (
+                            appExpanded ? (
                               <FolderOpenIcon className="h-4 w-4 text-sky-500" />
                             ) : (
                               <FolderIcon className="h-4 w-4 text-sky-500" />
                             )
                           }
                           label={entry.label}
-                          suffix={
-                            entry.source === 'builtin' ? (
-                              <span className="frameos-muted shrink-0 text-[10px] uppercase tracking-wide">
-                                built-in
-                              </span>
-                            ) : null
-                          }
                           title={entry.keyword ? `${entry.label} (${entry.keyword})` : entry.label}
                           expanded={appExpanded}
                           onToggle={() => toggleExpanded(appKey)}
@@ -321,8 +337,9 @@ export function SceneFileTree({
                         ) : null}
                       </div>
                     )
-                  })
-                : null}
+                  })}
+                </>
+              ) : null}
             </div>
           )
         })}

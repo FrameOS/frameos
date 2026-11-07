@@ -1,28 +1,25 @@
 import type { AppNodeData, FrameScene } from '../types'
 
 // The embedded editor's file tree: a template is a folder of files, the way
-// its zip is — template.json (the listing), then each scene as a diagram
-// with its apps as folders beneath it. The pure half (what the tree lists)
+// its zip is — template.json (the listing), then each scene as a folder
+// holding its diagram and the apps whose source it carries. Built-in apps
+// (the FrameOS catalog's) are not files of the template: the tree leaves
+// them out and the diagram's "Edit app" shows them in a modal. The pure half (what the tree lists)
 // lives here so the shared-spa tests can pin it without a DOM.
 
-/** One app node of a scene, as a folder in the tree. */
+/** One app node of a scene whose source the scene carries (a JS app, or
+ * an inline one), as a folder in the tree. */
 export interface SceneAppEntry {
   nodeId: string
   /** The folder's name: the node's own name, else the app's, else its keyword. */
   label: string
   keyword: string
-  /** `scene`: the scene carries the source (a JS app, or an inline one) and
-   * it is edited here; `builtin`: an app from the FrameOS catalog, shown
-   * read only. */
-  source: 'scene' | 'builtin'
 }
 
 /** What the tree has open in the file pane. A scene's diagram is the scene
  * the editor shows (its own `selectedSceneId`), so `diagram` names none. */
 export type SceneFileSelection =
-  | { kind: 'template' }
-  | { kind: 'diagram' }
-  | { kind: 'app'; sceneId: string; nodeId: string }
+  { kind: 'template' } | { kind: 'diagram' } | { kind: 'app'; sceneId: string; nodeId: string }
 
 /** The template's listing, as its template.json carries it (the store
  * zip's manifest), minus the paths to its other files. */
@@ -45,9 +42,24 @@ export function appTreeKey(sceneId: string, nodeId: string): string {
   return `app:${sceneId}.${nodeId}`
 }
 
-/** The file name a scene's diagram goes by in the tree. */
-export function sceneFileName(scene: Pick<FrameScene, 'id' | 'name'>): string {
-  return `${scene.name?.trim() || scene.id}.scene`
+/** The name of a scene's folder in the tree. */
+export function sceneFolderName(scene: Pick<FrameScene, 'id' | 'name'>): string {
+  return scene.name?.trim() || scene.id
+}
+
+/** The file in a scene's folder that shows its diagram. */
+export const SCENE_DIAGRAM_FILE = 'scene.diagram'
+
+/** Whether the scene carries this app node's source (an app of its own, or
+ * an inline one): such an app is a folder in the tree; any other app node
+ * runs a built-in app. */
+export function isSceneApp(scene: FrameScene | null | undefined, nodeId: string): boolean {
+  const node = scene?.nodes?.find((candidate) => candidate.id === nodeId)
+  if (!scene || !node || node.type !== 'app') {
+    return false
+  }
+  const data = (node.data ?? {}) as Partial<AppNodeData>
+  return !!data.sources || (typeof data.keyword === 'string' && !!scene.apps?.[data.keyword])
 }
 
 function keywordLabel(keyword: string): string {
@@ -55,16 +67,16 @@ function keywordLabel(keyword: string): string {
   return last || keyword
 }
 
-/** The scene's app nodes as the tree lists them: the scene's own apps
- * first, then the built-in ones, each group in diagram order. Two nodes of
- * one name get their node id beside it, so neither hides the other. */
+/** The scene's own apps as the tree lists them, in diagram order: built-in
+ * apps are left out. Two nodes of one name get their node id beside it, so
+ * neither hides the other. */
 export function sceneAppEntries(scene: FrameScene | null | undefined): SceneAppEntry[] {
   if (!scene) {
     return []
   }
   const entries: SceneAppEntry[] = []
   for (const node of scene.nodes ?? []) {
-    if (node.type !== 'app') {
+    if (node.type !== 'app' || !isSceneApp(scene, node.id)) {
       continue
     }
     const data = (node.data ?? {}) as Partial<AppNodeData>
@@ -75,36 +87,26 @@ export function sceneAppEntries(scene: FrameScene | null | undefined): SceneAppE
       (typeof sceneApp?.name === 'string' && sceneApp.name.trim()) ||
       (keyword ? keywordLabel(keyword) : '') ||
       node.id
-    entries.push({
-      nodeId: node.id,
-      label,
-      keyword,
-      source: data.sources || sceneApp ? 'scene' : 'builtin',
-    })
+    entries.push({ nodeId: node.id, label, keyword })
   }
   const counts = new Map<string, number>()
   for (const entry of entries) {
     counts.set(entry.label, (counts.get(entry.label) ?? 0) + 1)
   }
-  const labelled = entries.map((entry) =>
+  return entries.map((entry) =>
     (counts.get(entry.label) ?? 0) > 1 ? { ...entry, label: `${entry.label} (${entry.nodeId})` } : entry
   )
-  return [
-    ...labelled.filter((entry) => entry.source === 'scene'),
-    ...labelled.filter((entry) => entry.source === 'builtin'),
-  ]
 }
 
 /** The selection the pane can actually show: an app whose node is gone
- * (deleted on the diagram, or a re-init swapped the scenes) falls back to
- * its scene's diagram. */
+ * (deleted on the diagram, or a re-init swapped the scenes) or is no app of
+ * the scene's own any more falls back to its scene's diagram. */
 export function shownSelection(selection: SceneFileSelection, scenes: FrameScene[]): SceneFileSelection {
   if (selection.kind !== 'app') {
     return selection
   }
   const scene = scenes.find((candidate) => candidate.id === selection.sceneId)
-  const node = scene?.nodes?.find((candidate) => candidate.id === selection.nodeId)
-  return node && node.type === 'app' ? selection : { kind: 'diagram' }
+  return isSceneApp(scene, selection.nodeId) ? selection : { kind: 'diagram' }
 }
 
 /** The template.json the form edits, as JSON text (the Source view). */

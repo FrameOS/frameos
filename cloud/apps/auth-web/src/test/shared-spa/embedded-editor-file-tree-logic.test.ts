@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 //
 // The embedded editor's file tree selection (sceneFileTreeLogic): how it
-// follows the diagram — "Edit app" on a node opens the app's folder, where a
-// modal used to open — and hands the keyboard back to the diagram shown.
+// follows the diagram — "Edit app" on a node opens the app's folder when the
+// scene carries its source, a modal for a built-in app — and hands the
+// keyboard back to the diagram shown.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initKea } from "../../../../../../frontend/src/initKea";
@@ -133,6 +134,31 @@ describe("sceneFileTreeLogic", () => {
     // …but not while an app or the template is open.
     logic.actions.selectTemplate();
     logic.actions.syncScene("photos");
+    expect(editors.values.activeEditor).toMatchObject({ kind: "diagram", sceneId: "clock" });
+    unmount();
+  });
+
+  it("shows a built-in app in a modal, leaving the tree's selection alone", () => {
+    const logic = sceneFileTreeLogic({ frameId });
+    const unmount = logic.mount();
+    const editors = frameEditorsLogic({ frameId });
+    logic.actions.showDiagram("clock");
+
+    editors.actions.openAppModal("clock", "text1", clock.nodes[2]!.data as never);
+    expect(logic.values.shownSelection).toEqual({ kind: "diagram" });
+    expect(logic.values.isExpanded(appTreeKey("clock", "text1"))).toBe(false);
+    expect(logic.values.builtinAppEditor).toMatchObject({
+      kind: "editApp",
+      sceneId: "clock",
+      nodeId: "text1",
+    });
+    // The modal has the keyboard while it is open…
+    expect(editors.values.activeEditor).toMatchObject({ kind: "editApp", nodeId: "text1" });
+
+    // …and closing it gives it back to the diagram shown.
+    logic.actions.closeBuiltinApp("clock", "text1");
+    expect(logic.values.builtinAppEditor).toBeNull();
+    expect(editors.values.openEditors.some((editor) => editor.nodeId === "text1")).toBe(false);
     expect(editors.values.activeEditor).toMatchObject({ kind: "diagram", sceneId: "clock" });
     unmount();
   });
