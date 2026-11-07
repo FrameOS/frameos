@@ -372,20 +372,30 @@ proc selectRow(n: SvgNode): SvgNode =
 # inherited text: the box and the text it left. A UI's elements repeat a few
 # class strings, and a toggle rebuilt a dozen nodes whose classes were read
 # again from the characters each time (~4 ms of a tap on an ESP32).
-type ClassRead = object
-  classes: string
-  states: set[UiState]
-  w, h: float32
-  textIn, textOut: Text
-  box: Box
+type
+  ClassFlags = object
+    ## What build() asks of a class string besides its box: its pointer
+    ## classes, hover:, active: and group.
+    pointer, hover, active, group: bool
+  ClassRead = object
+    classes: string
+    states: set[UiState]
+    w, h: float32
+    textIn, textOut: Text
+    box: Box
+  ClassFlagsRead = object
+    classes: string
+    flags: ClassFlags
 
-var classReads {.threadvar.}: array[128, ClassRead]
+var
+  classReads {.threadvar.}: array[128, ClassRead]
+  classFlagReads {.threadvar.}: array[128, ClassFlagsRead]
 
 proc readClasses(box: var Box, text: var Text, classes: string, w, h: float32, states: set[UiState]) =
-  let slot = (hash(classes) !& hash(states.card) !& hash(cast[uint8](states))).int and classReads.high
+  let slot = (hash(classes) !& hash(cast[uint8](states))).int and classReads.high
   template c: untyped = classReads[slot]
   if c.classes.len > 0 and c.classes == classes and c.states == states and c.w == w and c.h == h and
-      c.textIn == text and box == initBox():
+      c.textIn == text:
     box = c.box
     text = c.textOut
     return
@@ -393,6 +403,14 @@ proc readClasses(box: var Box, text: var Text, classes: string, w, h: float32, s
   box.applyClasses(text, classes, w, h, states)
   classReads[slot] = ClassRead(classes: classes, states: states, w: w, h: h, textIn: textIn,
     textOut: text, box: box)
+
+proc classFlags(classes: string): ClassFlags =
+  let slot = hash(classes).int and classFlagReads.high
+  if classFlagReads[slot].classes.len > 0 and classFlagReads[slot].classes == classes:
+    return classFlagReads[slot].flags
+  result = ClassFlags(pointer: classes.pointerClasses, hover: classes.variant("hover"),
+    active: classes.variant("active"), group: classes.hasClass("group"))
+  classFlagReads[slot] = ClassFlagsRead(classes: classes, flags: result)
 
 proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
     key: int, input: UiInput, groupHover: bool, prev: UiNode): UiNode =
@@ -421,11 +439,12 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
   result.src = n
   result.inherited = inherited
   result.inGroup = groupHover
-  result.pointer = classes.pointerClasses
+  let flags = classFlags(classes)
+  result.pointer = flags.pointer
   result.key = key
-  result.hover = classes.variant("hover")
-  result.active = classes.variant("active")
-  result.group = classes.hasClass("group")
+  result.hover = flags.hover
+  result.active = flags.active
+  result.group = flags.group
   for event in UiEvent:
     var id: float32
     # onInput is a field's onChange by another name, as in React.
