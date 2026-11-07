@@ -2338,13 +2338,16 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
       frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
       return nil
   # A UI's nodes come back from the layout where they did not change.
-  let intoTarget = svgIntoOfferedTarget(owner, context, svg, requestedWidth, requestedHeight,
-    reuse = root.tag != "svg")
+  var intoTarget: Image
+  probe(phDraw):
+    intoTarget = svgIntoOfferedTarget(owner, context, svg, requestedWidth, requestedHeight,
+      reuse = root.tag != "svg")
   if not intoTarget.isNil:
     if intoTarget.width == requestedWidth and intoTarget.height == requestedHeight:
       if regions.len > 0 or not target.isNil:
-        runtime.keepUiRegions(owner, sceneId, regions, intoTarget.origin mod max(intoTarget.stride, 1),
-          intoTarget.origin div max(intoTarget.stride, 1), regionScale)
+        probe(phRegions):
+          runtime.keepUiRegions(owner, sceneId, regions, intoTarget.origin mod max(intoTarget.stride, 1),
+            intoTarget.origin div max(intoTarget.stride, 1), regionScale)
     return intoTarget
   let (svgWidth, svgHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
   let image = decodeSvgWithFallback(svg, svgWidth, svgHeight)
@@ -2602,7 +2605,8 @@ proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
   runtime.initialized = true
 
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
-  runtime.init(owner, configJson)
+  probe(phInit):
+    runtime.init(owner, configJson)
   if not owner.scene.isNil:
     let target = uiTarget(owner.scene.id.string, owner.nodeId.int, create = false)
     if not target.isNil and target.inputOnly:
@@ -2649,7 +2653,8 @@ proc run*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
 
 proc getDynamicJsApp*(app: AppRoot, context: ExecutionContext): Value =
   let dynamicApp = DynamicJsApp(app)
-  dynamicApp.runtime.get(dynamicApp, dynamicApp.configJson, context)
+  probe(phApp):
+    result = dynamicApp.runtime.get(dynamicApp, dynamicApp.configJson, context)
 
 proc runDynamicJsApp*(app: AppRoot, context: ExecutionContext) =
   let dynamicApp = DynamicJsApp(app)

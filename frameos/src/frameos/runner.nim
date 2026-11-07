@@ -107,6 +107,12 @@ proc wakeRenderLoop*() =
     if not waiter.finished:
       waiter.complete()
 
+proc consumeRunnerWake() =
+  ## The loop is about to look at the channels: a wake from before this
+  ## point is answered by that look. One that comes after it still ends
+  ## the next sleep (runnerWakePending).
+  runnerWakePending = false
+
 proc ensureRunnerWake() =
   if runnerWakeInstalled:
     return
@@ -1024,6 +1030,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
     inc iterations
     if self.stopMessageLoop or (maxIterations > 0 and iterations > maxIterations):
       break
+    consumeRunnerWake()
     # Everything the other threads sent goes into the dispatcher's queue, which
     # is where the contract's coalescing happens: touch drags queue hundreds of
     # moves while a render blocks this loop, and replaying each one is

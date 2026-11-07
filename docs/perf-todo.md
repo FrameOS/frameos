@@ -55,6 +55,7 @@ committed to before the T0 probe has run on the board.
 | JSX Weather, isolated render (`render:framebuffer` → `render:device` → `render:done` stamps) | 80 ms render in place; stamps at 116 / 145 / 178 ms | | 2026-11-07, 2026.11.2 firmware |
 | JSX Home, warm tap, the probe's split (`set debug 1`, firmware with the first T0 batch + bytecode preludes) | documented (PR #631 session): get 15, walk 3, layout 12, emit 7, parse 5, damage 7, raster 70 | get 12–13, walk 3–4, layout 11–13, emit 9–10, parse 4.5–5, **damage 11–38**, **raster 68–98**; render 138–189 ms | 2026-11-07. The raster did not move with the bold fix: its device share of the stroke was below the host's 52–66%. The damage step is 2–5x the documented figure. Both are T1's. |
 | Cold scene switch (first render of jsx-weather / jsx-home after `scene …`), render ms | 877 / 448 / 403 / 374 | with bytecode preludes: 839 / 226 / 327 / 296 (the whole-frame raster of the weather scene is 459 ms of its 839) | 2026-11-07 |
+| JSX Home, warm toggle, T1 so far (coverage cache, glyph runs, pre-blend, shared box shapes, scaled icon masks, span blits) | raster 68–98, render 138–189 | **raster 31–32 ms** (fills 8, mask blits 9.5, one stroke 3.3; 28–31 cache hits), **render 93–95 ms**, `render:done` ~103 ms | 2026-11-07 |
 | JSX Home, one card toggled by a tap over the frame's HTTP event route (`/event/pointerDown` + `pointerUp`), warm, six taps: the Nim render (interpreter + app + raster) and the stamps | render 230–267 ms; `render:framebuffer` +32, `render:device` +29, `render:done` +32 → **323–360 ms** | render 140–181 ms (56 once); stamps +6 / +1 / +0 → **147–188 ms** | 2026-11-07, after the first T0 batch (console ring, bold without the stroke, stroke circle cached, JSX factory, memo, lookups); `lcd`: 0 dropped, 0 late refills |
 
 ## T0 — measured fixes (branch `perf-t0`)
@@ -191,21 +192,34 @@ committed to before the T0 probe has run on the board.
   (`src/wasm/wasm_main.nim`) with a repaint-rects export, and an e2e
   differential (kept canvas vs whole render after each scripted input): the
   gate for every raster step, so the editor runs the device's path.
-- [ ] Typed element kinds inside pixie's `Svg` (`seRoundRect`, `seRing`,
-  `seGlyphRun`, `seSprite` beside today's rect and image), a typed fill
-  colour parsed once; the layout emits them instead of attribute strings.
-  Damage, `coversOpaque`, the nested viewport and svg_frames stay one
-  implementation on every host.
-- [ ] Span fill for opaque rects, corner masks for rounded rects and rings
-  (masks built by pixie's own filler, so boxes stay pixel-identical); the
-  565 blend in spread words; Gray8 and RGBX kernels.
-- [ ] The A8 coverage cache (`utils/coverage_cache.nim`) behind glyph runs
-  and icon sprites: keyed on (face, glyph, device size, bold, quarter-pixel
-  phase), 64 KB LRU (16 KB on large e-paper canvases), released by
-  `renderMemoryReleaseHook`; a miss fills through pixie. Host: 13x on a
-  regular label, 182x on a semibold one, zero allocations.
-- [ ] Pre-blend a translucent box over a flat opaque parent (card
-  background 82 → 20 µs on host); apply only when nothing else lies under.
+- [x] **The coverage cache, inside pixie** (`paths.nim`, the fork's own
+  test `test_coverage_cache.nim`): a shared path filled or stroked again at
+  the same subpixel offset and axis-aligned scale is blended from an 8-bit
+  mask kept the second time it is seen (not the first: a toggle draws
+  mostly paths it never draws again), through the per-format coverage rows
+  a fresh fill uses, a row's fully covered run as a span. Keyed by path
+  identity, fill rule or stroke, offset fraction, scale. LRU within
+  `coverageCacheBudget`: 256 KB on an ESP32, 8 MB on a Pi's render thread,
+  2 MB in the preview; dropped when render memory runs short. A handful of
+  edge pixels may differ by one quantisation step from a fresh fill.
+- [x] **Text as glyph runs** (`ui/layout.nim` `emitGlyphs`): one shared path
+  per typeface, rune and size, placed by `SvgNode.offset` (new in the fork:
+  a translation without a transform string) at a quarter pixel; a letter
+  drawn again anywhere is a mask hit. Underlined and struck text keeps the
+  path per span. Glyphs sit up to 1/8 px from where the typesetter put them.
+- [x] **Box shapes shared per size** (`boxShape`): a rounded box and its
+  border ring are one shared path per (size, radii, border) at the origin,
+  placed by offset, so a card that only changes colour hits its mask. A box
+  with a gradient keeps its own path (the gradient's coordinates).
+- [x] **Translucent boxes pre-blended** over an in-flow parent whose
+  background is one flat opaque colour (`overBackdrop`); absolute children
+  are painted over nothing known. The two directions of a toggle were 28 ms
+  apart on the board for this alone.
+- [ ] Typed element kinds inside pixie's `Svg` for what is left of the
+  per-node string work (a fill colour parsed once, not `parseHtmlColor` per
+  element per box): parse is 6.5–7.5 ms of a toggle now.
+- [ ] Gray8 (e-paper) and RGBX: the cache and the span blits run on all
+  three surfaces (the test covers them); not measured on an e-paper board.
 - [ ] Text-memo fixes (press-feedback renders stop re-typesetting; cold flex
   rows typeset once).
 - [ ] `JS_NewContextRaw` with a chosen intrinsic list on embedded (−25 KB:
