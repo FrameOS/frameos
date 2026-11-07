@@ -61,6 +61,10 @@ type
     display: bool
     fillRule: WindingRule
     fill: string
+    # `fill` parsed once, when it is a plain colour (fillSolid): a UI's every
+    # glyph and box was a parseHtmlColor per element per draw.
+    fillColor: Color
+    fillSolid: bool
     stroke: ColorRGBX
     strokeWidth: float32
     strokeLineCap: LineCap
@@ -154,6 +158,8 @@ proc attrOrDefault(node: SvgNode, name, default: string): string =
 proc initSvgProperties(): SvgProperties =
   result.display = true
   result.fill = "black"
+  result.fillColor = color(0, 0, 0, 1)
+  result.fillSolid = true
   result.strokeWidth = 1
   result.transform = mat3()
   result.strokeMiterLimit = defaultMiterLimit
@@ -457,8 +463,17 @@ proc parseSvgProperties(node: SvgNode, inherited: SvgProperties): SvgProperties 
 
   if fill == "" or fill == "currentColor":
     result.fill = inherited.fill
+    result.fillColor = inherited.fillColor
+    result.fillSolid = inherited.fillSolid
   else:
     result.fill = fill
+    result.fillSolid = false
+    if fill != "none" and not fill.startsWith("url("):
+      try:
+        result.fillColor = parseHtmlColor(fill)
+        result.fillSolid = true
+      except CatchableError:
+        discard # parsed again where it is drawn, and refused there as before
 
   if stroke == "":
     discard # Inherit
@@ -1594,6 +1609,8 @@ proc hidesWindow(element: SvgElement, window: Rect): bool =
     return true
   if props.fill.len == 0 or props.fill == "none" or props.fill.startsWith("url("):
     return false
+  if props.fillSolid:
+    return props.fillColor.a >= 1
   try:
     parseHtmlColor(props.fill).a >= 1
   except:
@@ -1684,7 +1701,7 @@ proc renderSvg(
             else:
               raise newException(PixieError, "Missing SVG resource " & id)
           else:
-            paint = parseHtmlColor(props.fill).rgbx
+            paint = (if props.fillSolid: props.fillColor else: parseHtmlColor(props.fill)).rgbx
 
           paint.opacity = props.fillOpacity * props.opacity
           paint.blendMode = blendMode
@@ -1749,10 +1766,13 @@ proc coversOpaque*(svg: Svg, width, height: int): bool {.raises: [].} =
   if props.fill.len == 0 or props.fill == "none" or props.fill.startsWith("url("):
     return false
   var color: Color
-  try:
-    color = parseHtmlColor(props.fill)
-  except:
-    return false
+  if props.fillSolid:
+    color = props.fillColor
+  else:
+    try:
+      color = parseHtmlColor(props.fill)
+    except:
+      return false
   if color.a < 1:
     return false
   let m = props.transform

@@ -59,3 +59,7 @@ proc probeSummary*(): string =
     if counts[phase] > 0:
       parts.add($phase & " " & formatFloat(accNs[phase].float / 1_000_000, ffDecimal, 1))
   parts.join(" ")
+
+proc probeNs*(phase: RenderPhase): int64 =
+  ## What `phase` took this render, in nanoseconds (a host benchmark's unit).
+  accNs[phase]
