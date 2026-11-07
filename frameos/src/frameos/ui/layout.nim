@@ -12,7 +12,7 @@
 ## equal-column grids; `absolute` places a child against its parent's padding
 ## box. Text is set with pixie's typesetter and drawn as its outlines.
 
-import std/[math, strutils, tables, unicode]
+import std/[hashes, math, strutils, tables, unicode]
 import pixie
 import pixie/fileformats/svg
 import frameos/ui/tailwind
@@ -86,6 +86,10 @@ type
     ## their bounds and their flattened shapes (paths.share), so an
     ## unchanged label costs a repaint nothing.
     last, kept: seq[TextMemo]
+    older: seq[TextMemo]
+      ## What the layout before the last used and the last did not: a toggle
+      ## goes back and forth between two texts ("0 of 2 on", "1 of 2 on"),
+      ## and each was typeset again on every tap (~5 ms on an ESP32).
     gen: int             ## this layout's number: a node's `memo` holds for it only
     root: UiNode         ## the last layout's tree, taken back where it did not change
     rootW, rootH: float32
@@ -364,6 +368,32 @@ proc selectRow(n: SvgNode): SvgNode =
     shown.children = n.children[held].children
   SvgNode(tag: "div", attrs: n.attrs, children: @[shown, icon("M6 9l6 6 6-6", false, 0)])
 
+# What a class string said, for the same string, states, image size and
+# inherited text: the box and the text it left. A UI's elements repeat a few
+# class strings, and a toggle rebuilt a dozen nodes whose classes were read
+# again from the characters each time (~4 ms of a tap on an ESP32).
+type ClassRead = object
+  classes: string
+  states: set[UiState]
+  w, h: float32
+  textIn, textOut: Text
+  box: Box
+
+var classReads {.threadvar.}: array[128, ClassRead]
+
+proc readClasses(box: var Box, text: var Text, classes: string, w, h: float32, states: set[UiState]) =
+  let slot = (hash(classes) !& hash(states.card) !& hash(cast[uint8](states))).int and classReads.high
+  template c: untyped = classReads[slot]
+  if c.classes.len > 0 and c.classes == classes and c.states == states and c.w == w and c.h == h and
+      c.textIn == text and box == initBox():
+    box = c.box
+    text = c.textOut
+    return
+  let textIn = text
+  box.applyClasses(text, classes, w, h, states)
+  classReads[slot] = ClassRead(classes: classes, states: states, w: w, h: h, textIn: textIn,
+    textOut: text, box: box)
+
 proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
     key: int, input: UiInput, groupHover: bool, prev: UiNode): UiNode =
   ## `n` as a node to lay out. `prev`, the node the last layout built at this
@@ -408,7 +438,7 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
   if result.active and key in input.pressed: states.incl usActive
   if key == input.focus - 1: states.incl usFocus
   result.states = states
-  result.box.applyClasses(result.text, classes, rootW, rootH, states)
+  result.box.readClasses(result.text, classes, rootW, rootH, states)
   if result.box.overflowX != ovVisible or result.box.overflowY != ovVisible:
     result.pointer = true # a scroll builds it again (samePointer)
     result.scrollAt = input.scrolled(key)
@@ -578,11 +608,24 @@ proc recall(key: string): int =
       memo.kept.add move(memo.last[i])
       memo.last.del(i)
       return memo.kept.high
+  for i in 0 ..< memo.older.len:
+    if memo.older[i].key == key:
+      memo.kept.add move(memo.older[i])
+      memo.older.del(i)
+      return memo.kept.high
   -1
+
+proc arrangeUncached(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement
 
 proc arrange(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement =
   ## The text set into `width`, wrapped unless `whitespace-nowrap`, and cut
   ## with an ellipsis after `lines` lines (truncate, line-clamp-N).
+  if not n.arrangement.isNil and n.arrangedW == width and n.arrangedAlign == align:
+    return n.arrangement
+  probe(phText):
+    result = n.arrangeUncached(width, align)
+
+proc arrangeUncached(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement =
   if not n.arrangement.isNil and n.arrangedW == width and n.arrangedAlign == align:
     return n.arrangement
   var key: string
@@ -1736,7 +1779,8 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
       before = memo.root
   var top: UiNode
   probe(phLayout):
-    top = root.build(initText(), w, h, 0, 0, input, false, before)
+    probe(phBuild):
+      top = root.build(initText(), w, h, 0, 0, input, false, before)
     var
       rw = top.box.w.resolve(w)
       rh = top.box.h.resolve(h)
@@ -1797,7 +1841,11 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     input.focus = 0
     input.keyboard = false
   if not memo.isNil:
-    memo.last = move(memo.kept) # what this layout did not use is let go
+    # What this layout did not use waits one more layout, then is let go.
+    memo.older = move(memo.last)
+    if memo.older.len > 64:
+      memo.older.setLen(64)
+    memo.last = move(memo.kept)
     memo.root = top
     memo.rootW = w
     memo.rootH = h
