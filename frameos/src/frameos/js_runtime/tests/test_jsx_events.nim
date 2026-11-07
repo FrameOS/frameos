@@ -260,6 +260,35 @@ suite "jsx events":
     check ui.scene.state{"over"}.getStr() == "20,20"
     check ui.scene.state{"level"}.getInt() == 20
 
+  test "a slider follows a mouse only while it is pressed (docs/jsx-ui.md)":
+    # A mouse passing over a slider sends it moves too, as in a browser,
+    # with buttons 0: the documented slider acts on a move only while a
+    # button is held, so hovering changes nothing.
+    let id = "tests/jsx-slider-hover"
+    let ui = newUi("""
+      let level = 0
+      const setLevel = (e) => { level = Math.round((e.localX / e.width) * 100); frameos.setState('level', level) }
+      export const get = () => (
+        <div className="p-10 bg-white">
+          <div className="w-20 h-4 bg-black" onPointerDown={setLevel}
+            onPointerMove={(e) => { if (e.buttons) setLevel(e) }} />
+        </div>
+      )
+    """, id)
+    discard ui.render() # the track at 40,40, 80x16
+    proc mouse(x, y, buttons: int): JsonNode =
+      %*{"x": x, "y": y, "pointerId": 0, "pointerType": "mouse", "buttons": buttons}
+    discard dispatchUiEvent(id, "pointerMove", mouse(60, 48, 0))
+    discard dispatchUiEvent(id, "pointerMove", mouse(100, 48, 0))
+    check ui.scene.state{"level"}.isNil
+    check dispatchUiEvent(id, "pointerDown", mouse(60, 48, 1))
+    check ui.scene.state{"level"}.getInt() == 25
+    check dispatchUiEvent(id, "pointerMove", mouse(100, 48, 1))
+    check ui.scene.state{"level"}.getInt() == 75
+    discard dispatchUiEvent(id, "pointerUp", mouse(100, 48, 0)) # no onPointerUp: nothing to render
+    discard dispatchUiEvent(id, "pointerMove", mouse(50, 48, 0))
+    check ui.scene.state{"level"}.getInt() == 75
+
   test "a handler hears its element's size, so a slider needs no width of its own":
     let ui = newUi("""
       const put = (e) => frameos.setState('at', `${e.localX}/${e.width} ${e.localY}/${e.height}`)
