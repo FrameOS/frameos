@@ -18,6 +18,7 @@ import pixie/fileformats/svg
 import frameos/ui/tailwind
 import frameos/ui/keyboard
 import frameos/ui/tree
+import frameos/render_probe
 when not defined(frameosEmbedded):
   import frameos/panel_shape
 
@@ -1588,15 +1589,17 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     inc memo.gen
     if memo.rootW == w and memo.rootH == h:
       before = memo.root
-  let top = root.build(initText(), w, h, 0, 0, input, false, before)
-  var
-    rw = top.box.w.resolve(w)
-    rh = top.box.h.resolve(h)
-  if rw < 0: rw = w
-  if rh < 0: rh = h
-  top.size = top.layout(rw, rh, true, true)
-  top.x = max(top.box.margin[3].resolve(w), 0)
-  top.y = max(top.box.margin[0].resolve(h), 0)
+  var top: UiNode
+  probe(phLayout):
+    top = root.build(initText(), w, h, 0, 0, input, false, before)
+    var
+      rw = top.box.w.resolve(w)
+      rh = top.box.h.resolve(h)
+    if rw < 0: rw = w
+    if rh < 0: rh = h
+    top.size = top.layout(rw, rh, true, true)
+    top.x = max(top.box.margin[3].resolve(w), 0)
+    top.y = max(top.box.margin[0].resolve(h), 0)
   if input.reveal and input.focus > 0:
     var r: array[4, float32]
     discard top.reveal(input.focus - 1, r)
@@ -1609,7 +1612,8 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     page.paint(top.box.bg, 1)
     result.children.add page
   var gradients = 0
-  top.emit(0, 0, 1, result.children, gradients, regions)
+  probe(phEmit):
+    top.emit(0, 0, 1, result.children, gradients, regions)
   if input.open > 0:
     var shown = false
     let anchor = top.fieldIn(input.open - 1)

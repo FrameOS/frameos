@@ -843,15 +843,16 @@ when defined(frameosPreludeBytecode):
   # The preludes as bytecode, written by tools/prelude_bytecode.nim for this
   # exact QuickJS (embedded/esp32/build_nim.sh runs it). A module from another
   # engine version or an older prelude is refused here, not on the device.
-  import std/[hashes, os]
+  import std/os
   import assets/prelude_bytecode
+  import frameos/js_runtime/prelude_checksum
   const quickjsVersionInTree = staticRead(
     currentSourcePath().parentDir.parentDir.parentDir.parentDir / "quickjs" / "VERSION").strip()
   static:
     doAssert preludeBytecodeQuickjsVersion == quickjsVersionInTree,
       "src/assets/prelude_bytecode.nim was written for QuickJS " & preludeBytecodeQuickjsVersion &
       " and the tree has " & quickjsVersionInTree & ": rerun tools/prelude_bytecode.nim"
-    doAssert scenePreludeSourceHash == hash(sceneContextJsPrelude),
+    doAssert scenePreludeSourceChecksum == preludeChecksum(sceneContextJsPrelude),
       "src/assets/prelude_bytecode.nim is stale (sceneContextJsPrelude changed): rerun tools/prelude_bytecode.nim"
 
 proc evalScenePrelude(js: QuickJS) =

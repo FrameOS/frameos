@@ -19,6 +19,7 @@ import frameos/utils/canvas_log
 import frameos/utils/paths
 import frameos/utils/system
 import frameos/js_runtime/burrito
+import frameos/render_probe
 import frameos/js_runtime/jsx
 import frameos/ui/layout
 import frameos/ui/events
@@ -1952,15 +1953,15 @@ when defined(frameosPreludeBytecode):
   # The preludes as bytecode, written by tools/prelude_bytecode.nim for this
   # exact QuickJS (embedded/esp32/build_nim.sh runs it). A module from another
   # engine version or an older prelude is refused here, not on the device.
-  import std/hashes
   import assets/prelude_bytecode
+  import frameos/js_runtime/prelude_checksum
   const quickjsVersionInTree = staticRead(
     currentSourcePath().parentDir.parentDir.parentDir.parentDir / "quickjs" / "VERSION").strip()
   static:
     doAssert preludeBytecodeQuickjsVersion == quickjsVersionInTree,
       "src/assets/prelude_bytecode.nim was written for QuickJS " & preludeBytecodeQuickjsVersion &
       " and the tree has " & quickjsVersionInTree & ": rerun tools/prelude_bytecode.nim"
-    doAssert appPreludeSourceHash == hash(appJsPrelude),
+    doAssert appPreludeSourceChecksum == preludeChecksum(appJsPrelude),
       "src/assets/prelude_bytecode.nim is stale (appJsPrelude changed): rerun tools/prelude_bytecode.nim"
 
 proc evalAppPrelude(js: QuickJS) =
@@ -2013,7 +2014,8 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsGetAppFrame", jsGetAppFrame)
   runtime.js.registerFunction("jsGetAppContext", jsGetAppContext)
   runtime.js.registerFunction("jsGetAppKeys", jsGetAppKeys)
-  evalAppPrelude(runtime.js)
+  probe(phPrelude):
+    evalAppPrelude(runtime.js)
   # The test harness, when this runtime runs an app's tests (app_tests.nim):
   # after the prelude so it can wrap `frameos`, before the module so the
   # module's describe() calls land in it.
@@ -2031,7 +2033,8 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   let ctx = runtime.js.context
   var namespace: JSValue
   try:
-    namespace = runtime.js.evalModuleNamespace(runtime.source, filename, quicktsFlagsFor(filename))
+    probe(phCompile):
+      namespace = runtime.js.evalModuleNamespace(runtime.source, filename, quicktsFlagsFor(filename))
   except CatchableError as error:
     raise newException(JSException, mapJsErrorText(ctx, error.msg))
   let globalObj = JS_GetGlobalObject(ctx)
@@ -2481,7 +2484,8 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
     # has always been.
     let tag = jsxTag(ctx, payload)
     if tag.len > 0 and tag != "image":
-      runtime.lastJsx = jsxNode(ctx, payload, addr runtime.images, addr runtime.jsxMemo)
+      probe(phWalk):
+        runtime.lastJsx = jsxNode(ctx, payload, addr runtime.images, addr runtime.jsxMemo)
       return VImage(runtime.imageFromJsx(owner, context, runtime.lastJsx))
 
   if expectedType == "image" or jsIsObject(payload) or JS_IsArray(ctx, payload) != 0:
@@ -2531,7 +2535,10 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
   when defined(memProbe): memProbe("    js invoke " & fnName & " BEFORE")
   result =
     try:
-      callGlobalFunction(ctx, "__frameosInvoke", [fnNameValue])
+      var invoked: JSValue
+      probe(phGet):
+        invoked = callGlobalFunction(ctx, "__frameosInvoke", [fnNameValue])
+      invoked
     finally:
       if jsAppEnvByCtx.hasKey(ctx):
         jsAppEnvByCtx.del(ctx)

@@ -32,6 +32,7 @@ import pixie/fileformats/svg
 import frameos/utils/canvas_log
 import frameos/utils/image
 import frameos/utils/memory
+import frameos/render_probe
 
 const MaxRepaints = 6
   ## Boxes a frame repaints at most (pixie's damageRects joins the rest):
@@ -170,13 +171,18 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
     return false
   if panelBuffer.isNil or target.isNil or target.isView or not wholeFrame or
       target.bufferPointer != panelBuffer:
-    return renderSvgIntoTarget(root, target, owed)
+    # Not the panel's own buffer (or not the whole frame): parsed and drawn
+    # in one go, so the probe's raster carries its parse too.
+    probe(phRaster):
+      result = renderSvgIntoTarget(root, target, owed)
+    return result
   let held = panelHeld
   panelHeld = none(HeldFrame)
   refreshDecodeBudgetInto(forDecode = false) # a frame decodes nothing: kept interpreters stay
   var parsed: Svg
   try:
-    parsed = parseSvg(root, target.width, target.height, reuse)
+    probe(phParse):
+      parsed = parseSvg(root, target.width, target.height, reuse)
   except CatchableError:
     return false
   if not parsed.coversOpaque(target.width, target.height):
@@ -185,7 +191,8 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
       if owed.isSome:
         payBackground(target, owed.get())
         owed = none(Color)
-      parsed.renderInto(target)
+      probe(phRaster):
+        parsed.renderInto(target)
     except CatchableError:
       return false
     return true
@@ -194,34 +201,36 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
   var
     rects = @[(x: 0, y: 0, w: target.width, h: target.height)]
     base: Option[HeldFrame] # the frame the buffer holds after any copy
-  if held.isSome and held.get().generation == panelGeneration and
-      held.get().width == target.width and held.get().height == target.height:
-    rects = damageRects(held.get().svg, parsed, target.width, target.height, MaxRepaints).rects
-    base = held
-  if rects.area >= whole:
-    # Its own frame is no help (none, written over, another scene's): the
-    # newest frame another buffer holds, copied in, unless the damage
-    # against that is the whole frame too.
-    let source = newestHeldFrame(target)
-    if source >= 0:
-      let found = damageRects(heldFrames[source].svg, parsed, target.width, target.height, MaxRepaints)
-      if not found.full and found.rects.area < whole:
-        copyMem(target.bufferPointer, heldFrames[source].buffer, target.byteSize)
-        rects = found.rects
-        base = some(heldFrames[source])
-  if base.isSome and rects.area < whole:
-    # Canvases drawn into since: pixie sees the same picture in them.
-    rects.add canvasRects(base.get(), parsed, target)
+  probe(phDamage):
+    if held.isSome and held.get().generation == panelGeneration and
+        held.get().width == target.width and held.get().height == target.height:
+      rects = damageRects(held.get().svg, parsed, target.width, target.height, MaxRepaints).rects
+      base = held
+    if rects.area >= whole:
+      # Its own frame is no help (none, written over, another scene's): the
+      # newest frame another buffer holds, copied in, unless the damage
+      # against that is the whole frame too.
+      let source = newestHeldFrame(target)
+      if source >= 0:
+        let found = damageRects(heldFrames[source].svg, parsed, target.width, target.height, MaxRepaints)
+        if not found.full and found.rects.area < whole:
+          copyMem(target.bufferPointer, heldFrames[source].buffer, target.byteSize)
+          rects = found.rects
+          base = some(heldFrames[source])
+    if base.isSome and rects.area < whole:
+      # Canvases drawn into since: pixie sees the same picture in them.
+      rects.add canvasRects(base.get(), parsed, target)
   when defined(testing):
     svgFramePixelsForTest = 0
   try:
-    for r in rects:
-      if r.w == target.width and r.h == target.height:
-        parsed.renderInto(target)
-      else:
-        parsed.renderInto(target.view(r.x, r.y, r.w, r.h), r.x, r.y)
-      when defined(testing):
-        svgFramePixelsForTest += r.w * r.h
+    probe(phRaster):
+      for r in rects:
+        if r.w == target.width and r.h == target.height:
+          parsed.renderInto(target)
+        else:
+          parsed.renderInto(target.view(r.x, r.y, r.w, r.h), r.x, r.y)
+        when defined(testing):
+          svgFramePixelsForTest += r.w * r.h
   except CatchableError:
     return false
   heldFrames.add(HeldFrame(buffer: panelBuffer, generation: panelGeneration,

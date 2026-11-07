@@ -53,6 +53,8 @@ committed to before the T0 probe has run on the board.
 | What | Before | After | When |
 | --- | --- | --- | --- |
 | JSX Weather, isolated render (`render:framebuffer` → `render:device` → `render:done` stamps) | 80 ms render in place; stamps at 116 / 145 / 178 ms | | 2026-11-07, 2026.11.2 firmware |
+| JSX Home, warm tap, the probe's split (`set debug 1`, firmware with the first T0 batch + bytecode preludes) | documented (PR #631 session): get 15, walk 3, layout 12, emit 7, parse 5, damage 7, raster 70 | get 12–13, walk 3–4, layout 11–13, emit 9–10, parse 4.5–5, **damage 11–38**, **raster 68–98**; render 138–189 ms | 2026-11-07. The raster did not move with the bold fix: its device share of the stroke was below the host's 52–66%. The damage step is 2–5x the documented figure. Both are T1's. |
+| Cold scene switch (first render of jsx-weather / jsx-home after `scene …`), render ms | 877 / 448 / 403 / 374 | with bytecode preludes: 839 / 226 / 327 / 296 (the whole-frame raster of the weather scene is 459 ms of its 839) | 2026-11-07 |
 | JSX Home, one card toggled by a tap over the frame's HTTP event route (`/event/pointerDown` + `pointerUp`), warm, six taps: the Nim render (interpreter + app + raster) and the stamps | render 230–267 ms; `render:framebuffer` +32, `render:device` +29, `render:done` +32 → **323–360 ms** | render 140–181 ms (56 once); stamps +6 / +1 / +0 → **147–188 ms** | 2026-11-07, after the first T0 batch (console ring, bold without the stroke, stroke circle cached, JSX factory, memo, lookups); `lcd`: 0 dropped, 0 late refills |
 
 ## T0 — measured fixes (branch `perf-t0`)
@@ -79,14 +81,13 @@ committed to before the T0 probe has run on the board.
 
 ### The probe (first, and the gate for everything after T0)
 
-- [ ] A per-phase, per-element and heap-call probe behind the console's
-  `set debug 2`: `ensureReady` / `get()` / `toValue` (app_runtime.nim),
-  build / layout / emit (ui/layout.nim), parse / damage / raster
-  (utils/svg_frames.nim), each element's raster inside pixie's `renderSvg`
-  loop, `heap_caps_malloc` counts and time around `renderInto`
-  (frameos_nim_glue.c), an empty `__frameosInvoke`. Printed on the logged
-  frame only (every console line costs ~20 ms). Record which control plane
-  the board is on.
+- [x] A per-phase probe (`frameos/render_probe.nim`) behind the frame's
+  `debug` setting (`set debug 1` on the console): `get()`, the walk, layout,
+  emit, parse, damage, raster, accumulated per render and printed on the
+  render line (`[get 15.2 walk 3.1 …]`).
+- [ ] Still to add to it: each element's raster inside pixie's `renderSvg`
+  loop, `heap_caps_malloc` counts and time around `renderInto`, an empty
+  `__frameosInvoke`.
 
 ### The firmware loop (C)
 
@@ -102,12 +103,16 @@ committed to before the T0 probe has run on the board.
   the format strings and the driver). Cheap check first: a bench build at
   `CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600` should collapse the three ~30 ms
   stamp gaps to ~4 ms.
-- [ ] **A backend-managed frame's pulls off the tap path.** On an isolated
+- [x] **A backend-managed frame's pulls off the tap path.** On an isolated
   tap `fos_scenes_sync` (ETag GET), `fos_settings_sync` (GET) and
-  `fos_commands_sync` (POST) run before the render and a log POST per line
-  plus the 460 KB image push around it, all on the render task. Unmeasured;
-  plausibly 100–300 ms. Move them behind the present (the housekeeping that
-  follows a render), keep `render:done` for the deploy-progress signal.
+  `fos_commands_sync` (POST) ran before the render and a log POST per line
+  around it, all on the render task (unmeasured; plausibly 100–300 ms). On
+  an LCD a frame the scene asked for now renders first and pulls after
+  (a command that arrives with the tap lands one frame later), and the
+  mid-render log flushes wait for `render:done`; e-paper keeps both as they
+  were. The bench board is standalone, so this is unmeasured.
+- [ ] The 460 KB image push after a render (`push_image_to_backend`, at most
+  every 10 s) still hashes and POSTs on the render task.
 - [x] **Touch poll at 10 ms** on LCD boards (`fos_touch.c`
   `TOUCH_POLL_NO_IRQ_MS` 30 → 10, `TOUCH_POLL_HELD_MS` 20 → 10): ~10 ms less
   on average per touch-down, 5 ms per release.
@@ -128,10 +133,9 @@ committed to before the T0 probe has run on the board.
   malloc+realloc on host.
 - [x] `share()` the layout's rounded-rect, ring and scroll-bar paths
   (ui/layout.nim): their bounds and flattened shapes are kept.
-- [ ] Damage bounds from control points (pixie `localBounds` /
-  `paintBounds`): a rounded rect from its corners, text from its
-  arrangement, instead of flattening to measure. Most of the damage step's
-  ~7 ms on a changed tile; boxes may come out a little larger.
+- [x] Damage bounds without flattening: `share()` above does it — a shared
+  path's bounds are measured once and kept (pixie `localBounds`), and the
+  layout's boxes and the memo's text are all shared now.
 - [ ] Reuse pixie's raster scratch between fills (hits, coverage row, band
   entries): 20–50 malloc+realloc per fill today.
 
@@ -148,14 +152,13 @@ committed to before the T0 probe has run on the board.
   (js_runtime/jsx.nim).
 - [ ] `app.config`, `app.frame` as plain objects; `app.state` converted once
   per render (the Proxy getter is 24 bytecodes per read).
-- [ ] **Prelude as bytecode in the signed image**: a host build step linked
-  against the pinned quickts writes both preludes with `JS_STRIP_DEBUG`;
-  `ensureReady` / `ensureSceneJs` load them with `JS_ReadObject` +
-  `JS_EvalFunction`; the build fails on a `QuickjsVersion` mismatch. Cold
-  start per interpreter ~155–180 → ~65–100 ms (estimated: 9–14x on host);
-  +4.4–6.4 KB of flash (the reader is 5.3 KB on xtensa, the 7.1 KB bytecode
-  replaces the 8.0 KB source string). Bytecode never comes from a control
-  plane: QuickJS checks one `BC_VERSION` byte and verifies nothing.
+- [x] **Prelude as bytecode in the signed image** (`tools/prelude_bytecode.nim`,
+  run by `build_nim.sh` against a host QuickJS built from the tree's own
+  sources): both preludes with `JS_STRIP_DEBUG` (7.1 KB + 1.8 KB), loaded
+  with `JS_ReadObject` + `JS_EvalFunction`, the source as the fallback; a
+  module for another engine version or an older prelude fails the build.
+  Bytecode never comes from a control plane: QuickJS checks one `BC_VERSION`
+  byte and verifies nothing. Device cold start: see "Measured".
 - [ ] A device-written bytecode cache for apps at scene install (the same
   reader; no trust change; flash writes disturb an LCD's scan-out, so write
   at install only).

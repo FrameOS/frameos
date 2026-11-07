@@ -14,8 +14,9 @@
 ## load and verifies nothing else, so bytecode from outside the signed image
 ## would be code the frame runs unchecked.
 
-import std/[hashes, os, strutils]
+import std/[os, strutils]
 import frameos/js_runtime/burrito
+import frameos/js_runtime/prelude_checksum
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
 
@@ -65,14 +66,13 @@ proc main() =
 # js_runtime/app_runtime.nim (appJsPrelude) and js_runtime/runtime.nim
 # (sceneContextJsPrelude) as QuickJS bytecode. Do not edit; rerun the tool
 # (embedded/esp32/build_nim.sh does). Loaded only by a build that defines
-# frameosPreludeBytecode, which checks the version and the source hashes
+# frameosPreludeBytecode, which checks the version and the source checksums
 # below against what it compiles.
-import std/hashes
 
 const preludeBytecodeQuickjsVersion* = """ & "\"" & version & "\"" & "\n"
-  text.add "const appPreludeSourceHash* = Hash(" & $int(hash(appJsPrelude)) & ")\n"
+  text.add "const appPreludeSourceChecksum* = " & $preludeChecksum(appJsPrelude) & "'u32\n"
   text.add "const appPreludeBytecode* = " & nimStringLiteral(appBytes) & "\n"
-  text.add "const scenePreludeSourceHash* = Hash(" & $int(hash(sceneContextJsPrelude)) & ")\n"
+  text.add "const scenePreludeSourceChecksum* = " & $preludeChecksum(sceneContextJsPrelude) & "'u32\n"
   text.add "const scenePreludeBytecode* = " & nimStringLiteral(sceneBytes) & "\n"
   createDir(OutPath.parentDir)
   writeFile(OutPath, text)

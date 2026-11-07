@@ -465,6 +465,11 @@ proc fos_nim_set_quiet_impl(quiet: cint) {.exportc, cdecl.} =
   if not logger.isNil:
     logger.enabled = not quietRenders
 
+proc debugEnabled*(): bool =
+  ## The frame's `debug` setting (`set debug 1` on the console): the per-node
+  ## profile lines, and the render line's per-phase probe (render_probe.nim).
+  frameConfig.debug
+
 proc fos_nim_set_debug_impl(enabled: cint) {.exportc, cdecl.} =
   ## Turns the interpreter's per-node memory profile on and off at runtime
   ## (`set debug 1` on the console). It logs a line per node per render — the
