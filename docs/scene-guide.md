@@ -459,6 +459,10 @@ export function get(app, context) {
 - The outer element fills the image; lengths are pixels of it (`p-2` is
   8 px), so scale with `text-[5vh]`, `w-[30vw]` and the `md:` / `lg:`
   breakpoints (image width 768 / 1024 px) or `portrait:` / `landscape:`.
+- A UI reads its classes and nothing else: a `style` prop is ignored outside
+  an `<svg>`, so padding, margins and font sizes set there never show. Put a
+  size worked out in code in a bracket class,
+  ``className={`p-[${pad}px] text-[${size}px]`}``.
 - A big frame draws a .tsx app's JSX larger by itself: at render scale 2
   (automatic on a panel whose shorter edge is about 1200 px) the app is told
   its canvas is half the size (`context.imageWidth`, `app.frame.width`) and
@@ -469,6 +473,10 @@ export function get(app, context) {
   `justify-*`, `items-*`, `flex-wrap`; `grid grid-cols-N` with `col-span-N`;
   `absolute` with `inset-*` / `top-*` (against the parent). Sizes `w-*`,
   `h-*`, `size-*`, `max-w-*`, padding and margins (`mx-auto`).
+- Unlike a browser, a flex item without a set size can shrink to nothing,
+  and its text then wraps a character per line. In a row, give the parts that
+  must keep their width (a number, a label, an icon, a badge) `shrink-0` or a
+  `w-*`, and the long text `flex-1`.
 - Paint: `bg-*`, `text-*`, `border-*` from Tailwind's palette, `/50`
   opacity, `bg-[#hex]`, `bg-gradient-to-r from-* via-* to-*`, `border`,
   `rounded-*`, `opacity-*`.
