@@ -134,8 +134,14 @@ Hosts:
 - **`JS_NewContextRaw` without Proxy / normalize / WeakRef** (−25 KB on the
   ESP32): needs the prelude's Proxy views of `app.config` / `state` /
   `frame` / `context` replaced first.
-- **"Blocks"** (JSX lowered to a static template plus holes) needs a quickts
-  release: the lowering is in the quickts parser, a separate repository.
+- **"Blocks"** (JSX lowered to a static template plus holes): the parser
+  side shipped in quickts `2026-06-04-quickts.3` (2026-11-07) as
+  `JS_EVAL_FLAG_JSX_BLOCKS`, a `__frameosBlock(template, ...holes)` call per
+  site with the template a sealed constant-pool array (`docs/quickts.md`
+  "Blocks"). Still to do here: a `__frameosBlock` that reads a template once
+  by identity and diffs the holes (the walker's `JsxMemo` and `__frameosNode`
+  keyed reuse need redesigning around it), the prelude's JavaScript fallback,
+  then the flag in `quicktsFlagsFor`.
 - **Dirty flags and relayout boundaries** on the `UiNode` tree, an in-place
   reconcile: what is left of layout and emit.
 - **Refs with setters and a native `frameos.animate`** (a drag or an
