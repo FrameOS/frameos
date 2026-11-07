@@ -756,7 +756,8 @@ proc selectScene*(sceneIdText: string): bool =
   let sceneId = SceneId(sceneIdText)
   if isBuiltInScene(sceneIdText):
     # The scene switcher (fos_scenes.c applies it without a slot): the scene
-    # it covers goes, its parsed payload stays in the cache for the way back.
+    # it covers is kept while render memory allows (single_scene_host's
+    # `covered`), and its parsed payload stays in the cache for the way back.
     # Asked again while it shows (a reconnect re-announcing it), it keeps
     # what it was opened from. fos_scenes.c logs the switch.
     if host.sceneId != some(sceneId):
