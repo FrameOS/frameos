@@ -113,13 +113,15 @@ const __frameosSameProps = (a, b) => {
 // is gone with the swap. One map that only grew reached the interpreter's
 // 4 MB heap cap after about a thousand renders of a list with changing keys
 // (2026-11-07), on every host that keeps the interpreter between renders.
+// The same two Map objects, cleared, not a new one a render: an animation
+// renders thirty times a second.
 globalThis.memo = (component) => {
   let render = -1, turn = 0;
   let last = new Map(), used = new Map();
   return (props) => {
     if (render !== globalThis.__frameosRender) {
       render = globalThis.__frameosRender; turn = 0;
-      last = used; used = new Map();
+      const spare = last; last = used; used = spare; used.clear();
     }
     const slot = props.key !== undefined ? "k" + props.key : turn++;
     const before = last.get(slot);
