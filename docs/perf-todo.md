@@ -57,15 +57,22 @@ main built from 0267672c, 3,231,952 B, the release's size):
 
 | | main | this branch |
 | --- | --- | --- |
-| Home panel tap, render (steady) | 295–349 ms | **88–95 ms** |
+| Home panel tap, render (steady) | 295–349 ms | **76–83 ms** |
 | Scene switcher open (cold / again) | 2,293–2,547 ms | **812 / 319 ms** |
 | Scene switcher closed, back to the home panel | (a rebuild: ~250 ms) | **64 ms** when its buffer holds the panel, ~300 ms when it holds another frame |
 | Cold switch: Weather / Home / Calculator | 1,229 / 361–421 / 492 ms | 675–696 / 218–264 / 337–344 ms |
 | JSX DVD bounce (33 ms period) | 29.1–29.2 fps, max frame 170–182 ms | 28.0–28.7 fps, max 54–73 ms |
 
-A home-panel toggle's split now (`set debug 1`): get 12–13, walk 3.5,
-layout 12, emit 4.5–5, parse 7–8, damage 5.5, raster 26–27 (28–31 coverage
-hits), about 8 ms of interpreter and 6 of the app node's own around them.
+A home-panel toggle's split now (`set debug 1`): get 11–13, walk 3.5,
+layout 7.5 (build 4, text 1), emit 3, parse 5, damage 5, raster 26–28
+(28–31 coverage hits), about 8 ms of interpreter and 6 of the app node's own
+around them.
+
+Memory after the same sequence: internal RAM 67.7 KB free (largest block
+30.7 KB) against main's 72.4 KB (36.9 KB): the log ring's task stack. PSRAM
+3.44 MB free against 3.62 MB: the coverage cache (~110–250 KB of its 256 KB
+budget), the glyph paths and the scene a switcher covers. The image is
+3,278,784 B, 46.8 KB more than main's, 325,696 B free in the OTA slot.
 
 The DVD's frames render faster on the branch (23 ms against 30 ms for a
 logged frame) and the 180 ms frame each logged second-tenth is gone, yet it
@@ -257,11 +264,21 @@ touch poll was a third of it and went back to 30 ms).
 - [ ] Conditional on the probe's cache-miss answer: `JS_CallInternal` in
   IRAM, its dispatch table in DRAM, small QuickJS blocks in internal RAM.
 
-## T2 — the retained UI (branch `perf-t2`)
+## T2 — the retained UI
 
+- [x] The text memo keeps a layout's unused texts for one more layout: a
+  toggle's two texts are typeset once each (layout's text 5 → 1 ms).
+- [x] `build()` reads a class string, and its hover/active/group/pointer
+  flags, through small caches.
+- [x] **The JSX factory in C** (`js_runtime/jsx_native.nim`), installed over
+  the prelude's: ~1 ms of a memo()'d panel's get(), more for un-memo()'d
+  UIs. The rest of "blocks" (template + holes) needs a quickts release: the
+  JSX lowering is in the quickts parser, a separate repository.
+- [ ] A structural digest per JSX node so the take-back compares in one step
+  was tried and dropped: the layout did not move and the walk paid ~1 ms.
 - [ ] Dirty flags and relayout boundaries on the existing `UiNode` tree, an
-  in-place reconcile and a spliced display list: layout 12 → 2–4 ms, emit →
-  ~1 (estimated).
+  in-place reconcile and a spliced display list: what is left of layout
+  (build 4, measure 3) and emit.
 - [ ] Layout-supplied bounds for damage; parse → 0.
 - [ ] "Blocks": quickts lowers each JSX site to a static template plus
   dynamic holes; the walker diffs holes. Source-compatible in principle
