@@ -220,6 +220,8 @@ proc focusField(target: UiTarget, r: UiRegion, lx, ly: float32) =
     i.accents = 0
   i.caret = i.text.len
   i.place = true
+  i.goal = false
+  i.lineStep = 0
   i.placeX = lx - r.x
   i.placeY = ly - r.y
   i.keyboard = not physicalKeyboard
@@ -284,6 +286,8 @@ proc changed(target: UiTarget) =
   ## made of it.
   template i: untyped = target.input
   i.place = false
+  i.goal = false
+  i.lineStep = 0
   i.reveal = true
   target.fieldCall(ueChange, "change", changeOf(i.text))
   target.inputOnly = false
@@ -406,6 +410,20 @@ when not defined(frameosEmbedded):
         if key == "Home": 0
         elif key == "End": i.text.len
         else: step(i.text, clamp(i.caret, 0, i.text.len), key == "ArrowRight")
+      i.place = false
+      i.goal = false
+      i.reveal = true
+      target.inputOnly = true
+    of "ArrowUp", "ArrowDown":
+      # A line up or down in a <textarea>, by the next layout (it knows the
+      # lines); the start or the end of an <input>, as in a browser.
+      let
+        up = payload{"key"}.getStr() == "ArrowUp"
+        r = target.regionOf(i.focus - 1)
+      if r >= 0 and target.regions[r].field == 2:
+        i.lineStep = if up: -1 else: 1
+      else:
+        i.caret = if up: 0 else: i.text.len
       i.place = false
       i.reveal = true
       target.inputOnly = true

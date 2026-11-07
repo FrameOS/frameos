@@ -260,6 +260,35 @@ suite "jsx events":
     check ui.scene.state{"over"}.getStr() == "20,20"
     check ui.scene.state{"level"}.getInt() == 20
 
+  test "a slider follows a mouse only while it is pressed (docs/jsx-ui.md)":
+    # A mouse passing over a slider sends it moves too, as in a browser,
+    # with buttons 0: the documented slider acts on a move only while a
+    # button is held, so hovering changes nothing.
+    let id = "tests/jsx-slider-hover"
+    let ui = newUi("""
+      let level = 0
+      const setLevel = (e) => { level = Math.round((e.localX / e.width) * 100); frameos.setState('level', level) }
+      export const get = () => (
+        <div className="p-10 bg-white">
+          <div className="w-20 h-4 bg-black" onPointerDown={setLevel}
+            onPointerMove={(e) => { if (e.buttons) setLevel(e) }} />
+        </div>
+      )
+    """, id)
+    discard ui.render() # the track at 40,40, 80x16
+    proc mouse(x, y, buttons: int): JsonNode =
+      %*{"x": x, "y": y, "pointerId": 0, "pointerType": "mouse", "buttons": buttons}
+    discard dispatchUiEvent(id, "pointerMove", mouse(60, 48, 0))
+    discard dispatchUiEvent(id, "pointerMove", mouse(100, 48, 0))
+    check ui.scene.state{"level"}.isNil
+    check dispatchUiEvent(id, "pointerDown", mouse(60, 48, 1))
+    check ui.scene.state{"level"}.getInt() == 25
+    check dispatchUiEvent(id, "pointerMove", mouse(100, 48, 1))
+    check ui.scene.state{"level"}.getInt() == 75
+    discard dispatchUiEvent(id, "pointerUp", mouse(100, 48, 0)) # no onPointerUp: nothing to render
+    discard dispatchUiEvent(id, "pointerMove", mouse(50, 48, 0))
+    check ui.scene.state{"level"}.getInt() == 75
+
   test "a handler hears its element's size, so a slider needs no width of its own":
     let ui = newUi("""
       const put = (e) => frameos.setState('at', `${e.localX}/${e.width} ${e.localY}/${e.height}`)
@@ -475,6 +504,68 @@ suite "jsx fields":
     check dispatchUiEvent(id, "tap", at(160, 45, "touch"))
     check ui.scene.state{"picked"}.getInt(-1) == 1
     check image[160, 45] == rgbx(0x22, 0xc5, 0x5e, 255) # row 1 is green
+
+const notesForm = """
+let notes = 'one\ntwo\nthree\nfour\nfive\nsix'
+export function get(app) {
+  return (
+    <div className="flex flex-col h-full p-2 bg-white text-black">
+      <textarea className="h-[40px] shrink-0 bg-slate-100" value={notes}
+        onChange={(e) => { notes = e.target.value; frameos.setState('notes', notes) }}
+        onKeyDown={(e) => frameos.setState('key', e.key)} />
+      <div className="flex-1 overflow-y-auto">
+        {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => <div className="h-[40px]" />)}
+      </div>
+    </div>
+  )
+}
+"""
+
+suite "jsx textareas":
+  test "Up and Down walk the lines; a wheel scrolls the field, not the list around it":
+    forgetTypedKeys()
+    let id = "tests/jsx-textarea"
+    let ui = newUi(notesForm, id, 320, 240)
+    discard ui.render()
+    check uiListens(id, "wheel")
+    check dispatchUiEvent(id, "tap", at(12, 12)) # the top left corner: before the o
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    check target.input.caret == 0
+    var area, list = -1
+    for i, r in target.regions:
+      if r.field == 2: area = i
+      elif r.scrollY > 0: list = i
+    check area >= 0 and list >= 0 and target.regions[area].scrollY > 0
+    # Down a line at a time from the first column, to the end; Up keeps the column.
+    for expected in [4, 8, 14, 19, 24, 27]:
+      check dispatchUiEvent(id, "keyDown", %*{"key": "ArrowDown", "code": "ArrowDown"})
+      discard ui.render()
+      check target.input.caret == expected
+    check ui.scene.state{"key"}.getStr() == "ArrowDown"
+    check dispatchUiEvent(id, "keyDown", %*{"key": "ArrowUp", "code": "ArrowUp"})
+    discard ui.render()
+    check target.input.caret == 19
+    let
+      areaKey = target.regions[area].key
+      listKey = target.regions[list].key
+    check target.input.scrolled(areaKey)[1] > 0 # scrolled down to the caret
+    # The wheel over the field scrolls the field, and the caret stays where it
+    # is, out of sight or not, until a key brings it back.
+    check dispatchUiEvent(id, "wheel", %*{"x": 100, "y": 20, "deltaY": -2, "pointerId": 0, "pointerType": "mouse"})
+    discard ui.render()
+    check target.input.scrolled(areaKey)[1] == 0 and target.input.scrolled(listKey)[1] == 0
+    check dispatchUiEvent(id, "keyDown", %*{"key": "ArrowDown", "code": "ArrowDown"})
+    discard ui.render()
+    check target.input.scrolled(areaKey)[1] > 0
+    # A wheel over the list scrolls the list; the field lets go of the
+    # keyboard and keeps its scroll.
+    check dispatchUiEvent(id, "wheel", %*{"x": 100, "y": 200, "deltaY": 1, "pointerId": 0, "pointerType": "mouse"})
+    check target.input.scrolled(listKey)[1] == 48
+    check dispatchUiEvent(id, "keyDown", %*{"key": "Escape", "code": "Escape"})
+    discard ui.render()
+    check target.input.focus == 0 and target.input.scrolled(areaKey)[1] > 0
+    forgetTypedKeys()
 
 const selectForm = """
 let city = 'riga'

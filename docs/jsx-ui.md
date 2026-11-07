@@ -241,8 +241,8 @@ export function get(app) {
   canvas = frameos.canvas('paint', 448, 276, '#f1f5f9')
   if (canvas.fresh) replay(canvas) // made just now: draw the record into it again
   return (
-    <div onPointerMove={(e) => frameos.draw(canvas, <line x1={last.x} y1={last.y} x2={e.localX}
-      y2={e.localY} stroke="#0f172a" strokeWidth={6} strokeLinecap="round" />)}>
+    <div onPointerMove={(e) => e.buttons && frameos.draw(canvas, <line x1={last.x} y1={last.y}
+      x2={e.localX} y2={e.localY} stroke="#0f172a" strokeWidth={6} strokeLinecap="round" />)}>
       <img className="w-[448px] h-[276px]" src={canvas} />
     </div>
   )
@@ -439,13 +439,17 @@ export const get = () => (
   its box or not, and no other element hears them. `localX` / `localY` stay
   from its corner, so they go negative or past its width: a slider clamps
   them. `localX / width` is how far along it the finger is, so a slider
-  needs no width of its own and works on any frame. A move with no press goes to the element under it. A drag renders at
+  needs no width of its own and works on any frame. A move with no press goes to the element under it,
+  as in a browser, with `buttons` 0: a mouse or a pen passing over (a finger is over nothing
+  until it presses). `buttons` is the mask of what is held (`1 << button`), so a slider or a
+  paint brush that follows the pointer acts only while it is set. A drag renders at
   the frame's render rate, with the newest position (the ESP32 coalesces a
   finger's moves while a render runs).
 
   ```tsx
   const setLevel = (e) => { level = Math.max(0, Math.min(100, Math.round((e.localX / e.width) * 100))) }
-  <div className="h-8 rounded-full bg-white/10" onPointerDown={setLevel} onPointerMove={setLevel}>
+  <div className="h-8 rounded-full bg-white/10" onPointerDown={setLevel}
+    onPointerMove={(e) => { if (e.buttons) setLevel(e) }}>
     <div className={`h-8 w-[${level}%] rounded-full bg-sky-500`} />
   </div>
   ```
@@ -543,7 +547,9 @@ export function get(app) {
 - **A real keyboard** (a Pi's, the computer's over the preview) types into
   the field instead: once a key has been typed on one, fields get no
   keyboard on the screen. Left and right, Home, End, Backspace and Delete
-  move and erase.
+  move and erase; Up and Down move a line in a `<textarea>` (keeping the
+  column they set out from, to the start or the end off its first or last
+  line) and go to the start or the end of an `<input>`.
 - **`onKeyDown`** hears every key typed into the field, before it applies:
   `e.key` is the character, or `Enter`, `Backspace`, ... (and the rest of
   the `keyDown` payload from a real keyboard). It cannot stop the key.
@@ -552,7 +558,11 @@ export function get(app) {
   text's color.
 - **Styles**: a field is a box like any other (no default style), whose
   text is one line (`<input>`, scrolled sideways to keep the caret in sight)
-  or wraps (`<textarea>`, scrolled down to it). The caret is the text's
+  or wraps (`<textarea>`, scrolled down to it). A `<textarea>` with more
+  text than fits scrolls like a box with `overflow-y-auto` ([Scrolling](#scrolling-and-clipping)):
+  a finger drags it, a wheel scrolls it, a bar says where in it you are,
+  and it keeps its place when it lets go of the keyboard; an edit or a key
+  brings the caret back into sight. The caret is the text's
   color. `focus:` classes apply while it has the keyboard.
 - **A field without `value`** shows what is typed while it has the keyboard
   and forgets it after: always give it one.
