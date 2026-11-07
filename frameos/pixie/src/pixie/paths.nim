@@ -1,5 +1,5 @@
 import blends, bumpy, chroma, common, decodebudget, images, internal, paints,
-    simd, std/fenv, std/strutils, std/tables, vmath
+    simd, std/fenv, std/monotimes, std/strutils, std/tables, std/times, vmath
 
 type
   WindingRule* = enum
@@ -2511,6 +2511,7 @@ type
     x0, y0: int # the mask's top left, relative to the offset's integer part
     width, height: int
     rows: seq[seq[uint8]]
+    full: seq[(int32, int32)] # per row, the run [a, b) every pixel of which is covered whole
     bytes: int
     used: int
 
@@ -2519,6 +2520,7 @@ type
     stroke: bool
     rule: WindingRule
     fx, fy: int32 # the offset's fraction, 1/256 px
+    sx, sy: int32 # an axis-aligned scale (an icon's viewBox), 1/4096
     strokeWidth, miterLimit: int32 # 1/256; 0 for a fill
     cap: LineCap
     join: LineJoin
@@ -2540,6 +2542,26 @@ var
 
 const CoverageSeenMax = 4096
 
+type PathProbeKind* = enum
+  ppFill = "fill"          ## a fill rasterized
+  ppFillMask = "fillMask"  ## a fill blended from a kept mask
+  ppStroke = "stroke"      ## a stroke outlined and rasterized
+  ppStrokeMask = "strokeMask"
+
+var
+  pathProbeOn* {.threadvar.}: bool ## time fills and strokes (FrameOS's render probe)
+  pathProbeNs* {.threadvar.}: array[PathProbeKind, int64]
+  pathProbeCount* {.threadvar.}: array[PathProbeKind, int]
+
+template pathProbe(kind: PathProbeKind, body: untyped) =
+  if pathProbeOn:
+    let probeStart = getMonoTime()
+    body
+    pathProbeNs[kind] += (getMonoTime() - probeStart).inNanoseconds
+    inc pathProbeCount[kind]
+  else:
+    body
+
 proc clearCoverageCache*() {.raises: [].} =
   ## Lets every kept mask go (render memory is short; the thread is done).
   coverageCache.clear()
@@ -2549,9 +2571,10 @@ proc clearCoverageCache*() {.raises: [].} =
 proc coverageCacheUsedBytes*(): int {.raises: [].} =
   coverageCacheBytes
 
-proc isTranslation(m: Mat3): bool =
-  m[0, 0] == 1 and m[1, 1] == 1 and m[0, 1] == 0 and m[1, 0] == 0 and
-    m[0, 2] == 0 and m[1, 2] == 0 and m[2, 2] == 1
+proc isAxisAligned(m: Mat3): bool =
+  ## A scale along the axes and a translation: what a mask can be kept for.
+  m[0, 1] == 0 and m[1, 0] == 0 and m[0, 2] == 0 and m[1, 2] == 0 and m[2, 2] == 1 and
+    m[0, 0] > 0 and m[1, 1] > 0
 
 proc evictCoverage(needed: int) =
   while coverageCache.len > 0 and coverageCacheBytes + needed > coverageCacheBudget:
@@ -2586,13 +2609,34 @@ proc rasterizeMask(shapes: seq[Polygon], rule: WindingRule): CoverageMask =
   local.transform(translate(vec2(-x0.float32, -y0.float32)))
   let mask = newImageGray8(w, h)
   mask.fillShapes(local, rgbx(255, 255, 255, 255), rule, OverwriteBlend)
-  result = CoverageMask(x0: x0, y0: y0, width: w, height: h, bytes: w * h + h * 24 + 96)
+  result = CoverageMask(x0: x0, y0: y0, width: w, height: h, bytes: w * h + h * 32 + 96)
   result.rows = newSeq[seq[uint8]](h)
+  result.full = newSeq[(int32, int32)](h)
   for r in 0 ..< h:
     result.rows[r] = newSeq[uint8](w)
     copyMem(result.rows[r][0].addr, mask.data8[r * w].addr, w)
+    # The longest run of whole coverage: a box's inside, blitted as a span.
+    var
+      best = (0'i32, 0'i32)
+      start = -1
+    for i in 0 .. w:
+      if i < w and result.rows[r][i] == 255:
+        if start < 0: start = i
+      elif start >= 0:
+        if i - start > best[1] - best[0]: best = (start.int32, i.int32)
+        start = -1
+    result.full[r] = best
+
+proc spanFill(image: Image, rgbx: ColorRGBX, x0, x1, y: int) =
+  ## An opaque colour over [x0, x1) of row y, stored packed.
+  let start = image.dataIndex(x0, y)
+  case image.format
+  of pfRgb565: fillUnsafe16(image.data16, rgbxToRgb565(rgbx), start, x1 - x0)
+  of pfGray8: fillUnsafe8(image.data8, rgbxToGray8(rgbx), start, x1 - x0)
+  else: fillUnsafe(image.data, rgbx, start, x1 - x0)
 
 proc blitMask(image: Image, mask: CoverageMask, ix, iy: int, rgbx: ColorRGBX, blendMode: BlendMode) =
+  let solid = rgbx.a == 255 and blendMode in {NormalBlend, OverwriteBlend}
   for r in 0 ..< mask.height:
     let y = iy + mask.y0 + r
     if y < 0 or y >= image.height:
@@ -2603,7 +2647,20 @@ proc blitMask(image: Image, mask: CoverageMask, ix, iy: int, rgbx: ColorRGBX, bl
       xe = min(x + mask.width, image.width)
     if xe <= xs:
       continue
-    image.fillCoverage(rgbx, xs, y, mask.rows[r].toOpenArray(xs - x, xe - x - 1), blendMode)
+    let (fa, fb) = mask.full[r]
+    if solid and fb - fa >= 8:
+      # The edges blended by coverage, the inside stored as a span.
+      let
+        a = clamp(x + fa.int, xs, xe)
+        b = clamp(x + fb.int, xs, xe)
+      if a > xs:
+        image.fillCoverage(rgbx, xs, y, mask.rows[r].toOpenArray(xs - x, a - x - 1), blendMode)
+      if b > a:
+        image.spanFill(rgbx, a, b, y)
+      if xe > b:
+        image.fillCoverage(rgbx, b, y, mask.rows[r].toOpenArray(b - x, xe - x - 1), blendMode)
+    else:
+      image.fillCoverage(rgbx, xs, y, mask.rows[r].toOpenArray(xs - x, xe - x - 1), blendMode)
 
 proc fillFromCoverageCache(
   image: Image, path: Path, color: Color, transform: Mat3, rule: WindingRule,
@@ -2614,19 +2671,21 @@ proc fillFromCoverageCache(
   ## new. False when the cache does not apply (off, the path not shared, a
   ## transform that is not a translation, a blend it does not do, a dashed or
   ## huge stroke, a mask too large): the caller draws as it always has.
-  if coverageCacheBudget <= 0 or not path.shared or not transform.isTranslation():
+  if coverageCacheBudget <= 0 or not path.shared or not transform.isAxisAligned():
     return false
   if blendMode notin {NormalBlend, OverwriteBlend} or (stroke and dashes.len > 0):
     return false
   let
     tx = transform[2, 0]
     ty = transform[2, 1]
+    sx = transform[0, 0]
+    sy = transform[1, 1]
     ix = floor(tx).int
     iy = floor(ty).int
     fx = tx - ix.float32
     fy = ty - iy.float32
     key = CoverageKey(path: cast[uint](path), stroke: stroke, rule: rule,
-      fx: int32(fx * 256), fy: int32(fy * 256),
+      fx: int32(fx * 256), fy: int32(fy * 256), sx: int32(sx * 4096), sy: int32(sy * 4096),
       strokeWidth: if stroke: int32(strokeWidth * 256) else: 0,
       miterLimit: if stroke: int32(miterLimit * 256) else: 0,
       cap: cap, join: join)
@@ -2642,23 +2701,29 @@ proc fillFromCoverageCache(
     # A mask covers the whole path; a fill under a view only what shows.
     # A large path seen through a small damage box is filled.
     let
-      b = path.localBounds()
-      visible = max(0'f32, min(b.x + b.w + tx, image.width.float32) - max(b.x + tx, 0)) *
-        max(0'f32, min(b.y + b.h + ty, image.height.float32) - max(b.y + ty, 0))
-    if b.w * b.h > 4 * visible + 256:
+      lb = path.localBounds()
+      reach = if stroke: strokeWidth * max(1'f32, miterLimit) / 2 else: 0
+      bx = (lb.x - reach) * sx + tx
+      by = (lb.y - reach) * sy + ty
+      bw = (lb.w + reach * 2) * sx
+      bh = (lb.h + reach * 2) * sy
+      visible = max(0'f32, min(bx + bw, image.width.float32) - max(bx, 0)) *
+        max(0'f32, min(by + bh, image.height.float32) - max(by, 0))
+    if bw * bh > 4 * visible + 256:
       return false
+    let pixelScale = max(sx, sy)
     var shapes: seq[Polygon]
     if stroke:
       var points = 0
-      let open = path.commandsToShapes(false, 1.0)
+      let open = path.commandsToShapes(false, pixelScale)
       for shape in open:
         points += shape.len
       if points > strokeBatchPoints:
         return false # outlined whole, that would need the memory the batches avoid
-      shapes = strokeShapes(open, strokeWidth, cap, join, miterLimit, dashes, 1.0)
+      shapes = strokeShapes(open, strokeWidth, cap, join, miterLimit, dashes, pixelScale)
     else:
-      shapes = path.closedShapes(1.0)
-    shapes.transform(translate(vec2(fx, fy)))
+      shapes = path.closedShapes(pixelScale)
+    shapes.transform(translate(vec2(fx, fy)) * scale(vec2(sx, sy)))
     mask = rasterizeMask(shapes, rule)
     if mask.isNil:
       return false
@@ -2692,12 +2757,16 @@ proc fillPath*(
       var color = paint.color
       color.a *= paint.opacity
       when path is Path:
-        if image.fillFromCoverageCache(path, color, transform, windingRule, paint.blendMode,
-            false, 0, ButtCap, MiterJoin, 0, @[]):
+        var masked: bool
+        pathProbe(ppFillMask):
+          masked = image.fillFromCoverageCache(path, color, transform, windingRule, paint.blendMode,
+            false, 0, ButtCap, MiterJoin, 0, @[])
+        if masked:
           return
-      var shapes = parseSomePath(path, true, transform.pixelScale())
-      shapes.transform(transform)
-      image.fillShapes(shapes, color, windingRule, paint.blendMode)
+      pathProbe(ppFill):
+        var shapes = parseSomePath(path, true, transform.pixelScale())
+        shapes.transform(transform)
+        image.fillShapes(shapes, color, windingRule, paint.blendMode)
     return
 
   image.paintThroughMask(paint, transform, shapeBounds(path, transform)):
@@ -2725,9 +2794,17 @@ proc strokePath*(
       var color = paint.color
       color.a *= paint.opacity
       when path is Path:
-        if image.fillFromCoverageCache(path, color, transform, NonZero, paint.blendMode,
-            true, strokeWidth, lineCap, lineJoin, miterLimit, dashes):
+        var masked: bool
+        pathProbe(ppStrokeMask):
+          masked = image.fillFromCoverageCache(path, color, transform, NonZero, paint.blendMode,
+            true, strokeWidth, lineCap, lineJoin, miterLimit, dashes)
+        if masked:
           return
+      let probeStart = if pathProbeOn: getMonoTime() else: MonoTime()
+      defer:
+        if pathProbeOn:
+          pathProbeNs[ppStroke] += (getMonoTime() - probeStart).inNanoseconds
+          inc pathProbeCount[ppStroke]
       let
         pixelScale = transform.pixelScale()
         shapes = parseSomePath(path, false, pixelScale)

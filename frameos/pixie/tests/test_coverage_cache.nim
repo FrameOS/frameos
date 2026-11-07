@@ -49,6 +49,10 @@ proc draw(target: Image, box, blob: Path, offset: Vec2, view: bool) =
   image.fillPath(blob, rgba(10, 160, 60, 255), translate(offset + shift + vec2(150.7, 30.1)))
   image.strokePath(blob, rgba(0, 0, 0, 255), translate(offset + shift + vec2(150.7, 30.1)),
     strokeWidth = 2.5, lineCap = RoundCap, lineJoin = RoundJoin)
+  # An icon: its viewBox scales it.
+  image.strokePath(blob, rgba(90, 0, 120, 255),
+    translate(offset + shift + vec2(30.2, 90.6)) * scale(vec2(0.75, 0.75)),
+    strokeWidth = 2, lineCap = RoundCap, lineJoin = RoundJoin)
 
 proc make(kind: string): Image =
   case kind
@@ -75,11 +79,11 @@ for kind in ["rgbx", "565", "gray8"]:
     let cached = make(kind)
     cached.draw(box, shape, vec2(3.4, 2.75), view)
     let misses = coverageCacheMisses
-    doAssert misses == 4, "every element a miss the second time: " & $misses
+    doAssert misses == 5, "every element a miss the second time: " & $misses
     doAssert coverageCacheHits == 0
     let again = make(kind)
     again.draw(box, shape, vec2(3.4, 2.75), view)
-    doAssert coverageCacheHits == 4, "the second draw is hits: " & $coverageCacheHits
+    doAssert coverageCacheHits == 5, "the second draw is hits: " & $coverageCacheHits
     doAssert coverageCacheMisses == misses
     let diff = maxDiff(plain, cached)
     doAssert diff <= tolerance(kind), kind & " view=" & $view & ": cached differs from a fresh fill by " & $diff
@@ -89,7 +93,7 @@ for kind in ["rgbx", "565", "gray8"]:
     let moved = make(kind)
     moved.draw(box, shape, vec2(3.9, 2.75), view)
     moved.draw(box, shape, vec2(3.9, 2.75), view)
-    doAssert coverageCacheMisses == misses + 4
+    doAssert coverageCacheMisses == misses + 5
     coverageCacheBudget = 0
     let movedPlain = make(kind)
     movedPlain.draw(box, shape, vec2(3.9, 2.75), view)
