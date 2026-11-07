@@ -48,7 +48,7 @@ export function sceneFolderName(scene: Pick<FrameScene, 'id' | 'name'>): string 
 }
 
 /** The file in a scene's folder that shows its diagram. */
-export const SCENE_DIAGRAM_FILE = 'scene.diagram'
+export const SCENE_DIAGRAM_FILE = 'scene.json'
 
 /** Whether the scene carries this app node's source (an app of its own, or
  * an inline one): such an app is a folder in the tree; any other app node

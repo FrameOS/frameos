@@ -58,7 +58,7 @@ function TreeRow({
   return (
     <div
       className={clsx(
-        'scene-file-tree__row app-file-row group flex h-7 items-center gap-1 rounded-md pr-1 text-[13px]',
+        'scene-file-tree__row app-file-row group relative flex h-7 cursor-pointer items-center gap-1 rounded-md pr-1 text-[13px]',
         active && 'app-file-row-active'
       )}
       style={{ paddingLeft: 4 + depth * indent }}
@@ -71,7 +71,7 @@ function TreeRow({
           type="button"
           aria-label={expanded ? 'Collapse' : 'Expand'}
           onClick={onToggle}
-          className="frameos-muted flex h-4 w-4 shrink-0 items-center justify-center rounded"
+          className="frameos-muted relative z-10 flex h-4 w-4 shrink-0 items-center justify-center rounded"
         >
           {expanded ? <ChevronDownIcon className="h-3 w-3" /> : <ChevronRightIcon className="h-3 w-3" />}
         </button>
@@ -81,13 +81,13 @@ function TreeRow({
         onClick={onClick}
         title={title}
         aria-current={active ? 'true' : undefined}
-        className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus:outline-none"
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-left after:absolute after:inset-0 after:rounded-md focus:outline-none focus-visible:after:ring-2 focus-visible:after:ring-sky-500/60"
       >
         <span className="flex h-4 w-4 shrink-0 items-center justify-center">{icon}</span>
         <span className="min-w-0 truncate">{label}</span>
         {suffix}
       </button>
-      {actions ? <span className="hidden shrink-0 items-center group-hover:flex">{actions}</span> : null}
+      {actions ? <span className="relative z-10 hidden shrink-0 items-center group-hover:flex">{actions}</span> : null}
     </div>
   )
 }
@@ -240,7 +240,7 @@ export function SceneFileTree({
           <ChevronDoubleLeftIcon className="h-4 w-4" />
         </button>
       </div>
-      <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-1.5 pb-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
         <TreeRow
           depth={0}
           active={shownSelection.kind === 'template'}

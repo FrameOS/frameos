@@ -12,7 +12,6 @@ import {
   Cog6ToothIcon,
   CursorArrowRippleIcon,
   DocumentDuplicateIcon,
-  DocumentMagnifyingGlassIcon,
   FolderPlusIcon,
   TagIcon,
 } from '@heroicons/react/24/outline'
@@ -59,7 +58,7 @@ function SceneDropDownMenu({
   navigation = 'panels',
 }: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
-  const { editScene, editSceneJSON } = useActions(frameEditorsLogic)
+  const { editScene } = useActions(frameEditorsLogic)
   const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
   const { scenes, sceneUpdateVersions } = useValues(scenesLogic({ frameId }))
   const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON, confirmSceneUpdate } =
@@ -76,13 +75,6 @@ function SceneDropDownMenu({
       navigateToScene(frameId, scene.id)
     } else {
       editScene(scene.id)
-    }
-  }
-  const openSceneJSON = () => {
-    if (navigation === 'workspace') {
-      openWorkspaceSceneUtility(frameId, scene.id, 'json')
-    } else {
-      editSceneJSON(scene.id)
     }
   }
   const openSceneSettings = () => {
@@ -124,13 +116,6 @@ function SceneDropDownMenu({
               label: 'Edit scene',
               onClick: openSceneEditor,
               icon: <PencilSquareIcon className="w-5 h-5" />,
-            }
-          : null,
-        context === 'scenes'
-          ? {
-              label: 'Edit scene JSON',
-              onClick: openSceneJSON,
-              icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
             }
           : null,
         context === 'scenes'
