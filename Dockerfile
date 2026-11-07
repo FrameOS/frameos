@@ -123,8 +123,8 @@ FROM nim-toolchain AS app-builder
 
 ARG FRAMEOS_ARCHIVE_BASE_URL=https://archive.frameos.net
 # quickts: QuickJS plus native TypeScript/JSX (github.com/FrameOS/quickts)
-ARG QUICKJS_VERSION=2026-06-04-quickts.2
-ARG QUICKJS_SHA256=9d6435424992bd710b28b67e6de10fac57813da8b37ce26913c78343c83d463e
+ARG QUICKJS_VERSION=2026-06-04-quickts.3
+ARG QUICKJS_SHA256=1876780ef3c797ee84ebd9c5abb097c8dd7421e44a40c66d1f0ee4482bec37ba
 # emscripten, for the wasm live-preview bundle served by the frontend.
 # EMSDK_COMMIT is the emsdk tag of the same name (`git ls-remote
 # https://github.com/emscripten-core/emsdk.git refs/tags/<version>`); bump the

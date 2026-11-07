@@ -57,8 +57,8 @@ task relock, "Regenerate nimble.lock":
 # tools/prebuilt-deps/build.sh, the root Dockerfile and
 # backend/app/tasks/frame_deploy_helpers.py.
 const
-  QuickjsVersion = "2026-06-04-quickts.2"
-  QuickjsSha256 = "9d6435424992bd710b28b67e6de10fac57813da8b37ce26913c78343c83d463e"
+  QuickjsVersion = "2026-06-04-quickts.3"
+  QuickjsSha256 = "1876780ef3c797ee84ebd9c5abb097c8dd7421e44a40c66d1f0ee4482bec37ba"
 
 task build_quickjs, "Build QuickJS":
   if dirExists("quickjs"):
