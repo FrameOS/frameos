@@ -205,7 +205,16 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
     if held.isSome and held.get().generation == panelGeneration and
         held.get().width == target.width and held.get().height == target.height:
       rects = damageRects(held.get().svg, parsed, target.width, target.height, MaxRepaints).rects
-      base = held
+      # Its own frame is the base only when it saves a repaint. Assigned
+      # here unconditionally, the copy below assigned `base` a second time,
+      # and Nim 2.2.4 builds that `base = some(...)` into `base` without
+      # destroying what it held: every frame given up for another buffer's
+      # (a scene switch, a scene coming back) leaked its whole parse, 16-45 KB
+      # of PSRAM a switch on a SenseCAP Indicator, until the JSX UIs' idle
+      # interpreters went for want of room and took their onClick with them
+      # (2026-11-07). `base` is assigned once on any path now.
+      if rects.area < whole:
+        base = held
     if rects.area >= whole:
       # Its own frame is no help (none, written over, another scene's): the
       # newest frame another buffer holds, copied in, unless the damage

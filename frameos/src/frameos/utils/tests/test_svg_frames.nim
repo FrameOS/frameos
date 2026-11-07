@@ -250,6 +250,25 @@ block:
   gens[1] += 1
   bufs[1].view(0, 0, 40, 20).fill(rgba(255, 0, 255, 255))
   doAssert into(2, cards(2)) < W * H div 4 # two cards; no magenta corner
+
+  # A buffer whose own frame is another scene's, while another buffer holds
+  # this one's (going back to a scene): that frame is
+  # copied in, and the one the buffer held is let go. It was kept instead,
+  # its whole parse with it, at every such switch: a SenseCAP Indicator ran
+  # out of room for its JSX UIs' interpreters after a few dozen switches,
+  # and their buttons stopped answering (2026-11-07).
+  forgetPanelFrames()
+  proc goingBack() =
+    discard into(0, frame(20))
+    discard into(1, cards(3))
+    doAssert into(0, cards(3)) == 0 # buffer 1's frame, copied in: nothing to paint
+  for _ in 0 ..< 20:
+    goingBack()
+  let before = getOccupiedMem()
+  for _ in 0 ..< 200:
+    goingBack()
+  let grown = getOccupiedMem() - before
+  doAssert grown < 64 * 1024, &"{grown} bytes kept over 200 switches back"
   panelBufferGeneration = nil
 
 echo "svg frames ok"
