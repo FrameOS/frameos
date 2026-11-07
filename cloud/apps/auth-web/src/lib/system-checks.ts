@@ -17,6 +17,7 @@ import { createDb, frameAssetFiles } from "@frameos-cloud/db";
 import { checkEmailDelivery } from "./email";
 import { hasDatabaseUrl } from "./env";
 import { getSupportEmail } from "./legal";
+import { stripeSetup } from "./stripe";
 import { objectStore } from "./object-store";
 import { activePhotoScanners } from "./photos/scan";
 import { getTurnstileSiteKey } from "./turnstile";
@@ -192,6 +193,18 @@ export function runSystemChecks(): SystemCheck[] {
       name: "FRAMEOS_SUPPORT_EMAIL",
       required: false,
     },
+    (() => {
+      const stripe = stripeSetup();
+      return {
+        configured: Boolean(stripe.config),
+        detail: stripe.config
+          ? `Paid plans are sold through Stripe in ${stripe.config.mode} mode${stripe.config.automaticTax ? ", with Stripe Tax" : ", WITHOUT Stripe Tax: no VAT is charged"} (docs/billing.md). /admin/billing/payments checks the webhook and the tax settings.`
+          : (stripe.problem ??
+            "Paid plans cannot be bought: the plan cards say “Contact support”. Set both with STRIPE_MODE to sell them (docs/billing.md)."),
+        name: "STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET",
+        required: false,
+      };
+    })(),
   ];
 }
 

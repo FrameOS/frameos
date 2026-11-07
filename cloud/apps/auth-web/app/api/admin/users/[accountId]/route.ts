@@ -9,6 +9,8 @@ import {
   deleteErasedObjects,
 } from "../../../../../src/lib/account-erasure";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
+import { cancelForErasure } from "../../../../../src/lib/billing-provider";
+import { stripeSetup } from "../../../../../src/lib/stripe";
 import { NextRequest, NextResponse } from "next/server";
 import {
   getSuperadminContext,
@@ -114,6 +116,19 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
   assertDatabaseUrlConfigured();
   const db = createDb();
+  // A paid plan ends at Stripe first, or its card would keep
+  // being charged for an account that no longer exists.
+  try {
+    await cancelForErasure(db, stripeSetup(), accountId);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        detail: error instanceof Error ? error.message : "The paid plan could not be cancelled.",
+        error: "subscription_cancel_failed",
+      },
+      { status: 502 },
+    );
+  }
   // Books first (cloud/docs/accounting-todo.md §9.2 item 4): a subscription
   // in progress returns its unearned remainder to the receivable and ends,
   // so deleting the account cannot strand deferred revenue.

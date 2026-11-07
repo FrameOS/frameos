@@ -7,9 +7,12 @@ import {
   deleteErasedObjects,
 } from "../../../../src/lib/account-erasure";
 import { recordAuditEvent } from "../../../../src/lib/audit";
+import { cancelForErasure } from "../../../../src/lib/billing-provider";
+import { reportError } from "../../../../src/lib/log";
 import { csrfResponse } from "../../../../src/lib/csrf";
 import { assertDatabaseUrlConfigured } from "../../../../src/lib/env";
 import { verifyPasswordWithDummyFallback } from "../../../../src/lib/passwords";
+import { stripeSetup } from "../../../../src/lib/stripe";
 import {
   identityRateLimitResponse,
   rateLimitResponse,
@@ -136,6 +139,23 @@ export async function POST(request: NextRequest) {
     ) {
       return NextResponse.json({ error: "invalid_confirmation" }, { status: 400 });
     }
+  }
+
+  // A paid plan ends at Stripe first. If that cannot be done
+  // the account stays: deleting it would leave a card being charged every
+  // month for an account nobody can sign in to.
+  try {
+    await cancelForErasure(db, stripeSetup(), accountId);
+  } catch (error) {
+    reportError("billing.erasure_cancel_failed", error, { accountId });
+    return NextResponse.json(
+      {
+        detail:
+          "Your paid plan could not be cancelled just now, so the account was not deleted. Try again in a moment.",
+        error: "subscription_cancel_failed",
+      },
+      { status: 502 },
+    );
   }
 
   // Recorded BEFORE the delete: recordAuditEvent writes account_id, and after

@@ -85,7 +85,13 @@ describe("the plan route without a payment provider", () => {
       links: { pricing: string; refunds: string };
       self_serve: boolean;
     };
-    expect(view.billing).toEqual({ checkout: false, manage: false, mode: null, subscription: null });
+    expect(view.billing).toEqual({
+      checkout: false,
+      manage: false,
+      mode: null,
+      prices_exclude_tax: false,
+      subscription: null,
+    });
     expect(view.self_serve).toBe(false);
     expect(view.catalog.groups.map((group) => [group.key, group.available])).toEqual([
       ["free", true],

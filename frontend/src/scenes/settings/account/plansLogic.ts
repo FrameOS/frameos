@@ -76,6 +76,8 @@ export interface PlanBilling {
   /** The provider's billing page (invoices, the card) can be opened. */
   manage: boolean
   mode: 'live' | 'test' | null
+  /** Prices are before tax, which checkout adds for the buyer's country. */
+  prices_exclude_tax?: boolean
   subscription: PlanSubscription | null
 }
 
@@ -211,6 +213,12 @@ function readCheckoutOutcome(): CheckoutOutcome | null {
   }
   const url = new URL(window.location.href)
   const value = url.searchParams.get('checkout')
+  if (value === 'canceled') {
+    // Back from checkout without buying: nothing to say, nothing changed.
+    url.searchParams.delete('checkout')
+    window.history.replaceState(window.history.state, '', url.toString())
+    return null
+  }
   if (value !== 'active' && value !== 'failed' && value !== 'pending') {
     return null
   }
@@ -452,6 +460,29 @@ export const plansLogic = kea<plansLogicType>([
           return
         }
         const response = await apiCall('/api/account/plan', 'PUT', { plan: code })
+        if (response.status === 402) {
+          // The bank wants the customer to confirm the charge (3-D Secure),
+          // or declined it. Stripe holds the change until its invoice is
+          // paid, on Stripe's own invoice page.
+          const payload = await readJsonPayload(response)
+          const url = payload?.url
+          if (typeof url === 'string' && url) {
+            const pay = await confirmDialog({
+              title: 'Confirm the payment',
+              message: `${
+                typeof payload?.detail === 'string' ? payload.detail : 'Your bank needs to confirm this payment.'
+              } Stripe opens the invoice for the change, and ${label} starts once it is paid.`,
+              confirmLabel: 'Open the invoice',
+            })
+            if (pay) {
+              window.location.assign(url)
+            }
+            actions.loadPlan()
+            return
+          }
+          showErrorMessage(typeof payload?.detail === 'string' ? payload.detail : describeHttpError(402))
+          return
+        }
         if (!response.ok) {
           showErrorMessage(await describeFailure(response))
           return

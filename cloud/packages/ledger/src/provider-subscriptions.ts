@@ -6,7 +6,11 @@ import {
 } from "@frameos-cloud/db";
 import { postEvent, type PostEventOptions } from "./kernel";
 import { readPlan } from "./plans";
-import { paymentReceivedEventType, paymentRefundedEventType } from "./rules/payment";
+import {
+  paymentFeeEventType,
+  paymentReceivedEventType,
+  paymentRefundedEventType,
+} from "./rules/payment";
 import {
   addMonth,
   cancelAccountPlan,
@@ -37,8 +41,17 @@ import { LedgerError, type LedgerExecutor } from "./types";
 //
 // `post: false` is test mode: the plan is granted and the payment recorded,
 // and not one entry reaches the ledger.
+//
+// Who remits the tax depends on the provider. A merchant of record (Creem)
+// keeps it and remits it itself: we never see it as ours. A plain payment
+// processor (Stripe) leaves it in our balance, and it is a debt to the tax
+// authority from the moment it is collected (`taxRemittedBy: "us"`, booked
+// to liability:sales_tax by the payment rules).
 
 export type ProviderMode = "live" | "test";
+
+/** Who pays the tax on a payment over to the tax authority. */
+export type TaxRemitter = "provider" | "us";
 
 export interface ProviderPaymentInput {
   accountId: string;
@@ -56,8 +69,17 @@ export interface ProviderPaymentInput {
   /** The provider's subscription id, kept on the payment row. */
   subscriptionId?: string | null | undefined;
   taxMicros?: bigint | undefined;
+  /** "provider" (the default) for a merchant of record, "us" otherwise. */
+  taxRemittedBy?: TaxRemitter | undefined;
   /** The provider's transaction id: a payment is applied once per id. */
   transactionId: string;
+  /**
+   * The provider's handle on the money itself (Stripe: the charge), when it
+   * differs from the transaction id. A refund or a fee names it.
+   */
+  paymentRef?: string | null | undefined;
+  /** Provider-specific facts kept for a person (an invoice number). */
+  details?: Record<string, unknown> | undefined;
 }
 
 export interface ProviderPaymentResult {
@@ -107,20 +129,28 @@ export async function applyProviderPayment(
       );
     }
 
+    const taxRemittedBy = input.taxRemittedBy ?? "provider";
+    const taxMicros = input.taxMicros ?? 0n;
+    if (taxMicros < 0n) {
+      throw new LedgerError("invalid_amount", "Tax on a payment cannot be negative");
+    }
     const [payment] = await tx
       .insert(providerPayments)
       .values({
         accountId: input.accountId,
         amountMicros: input.amountMicros,
         currency,
+        details: input.details ?? {},
         kind: "payment",
         mode: input.mode,
         occurredAt: input.occurredAt ?? now,
+        paymentRef: input.paymentRef ?? null,
         planCode: plan.code,
         posted: input.post,
         provider: input.provider,
         subscriptionId: input.subscriptionId ?? null,
-        taxMicros: input.taxMicros ?? 0n,
+        taxMicros,
+        taxRemittedBy,
         transactionId: input.transactionId,
       })
       .onConflictDoNothing()
@@ -245,6 +275,10 @@ export async function applyProviderPayment(
             periodId: period.id,
             planCode: plan.code,
             provider: input.provider,
+            // The tax we collected and owe. A merchant of record's is not ours.
+            ...(taxRemittedBy === "us" && taxMicros > 0n
+              ? { taxMicros: taxMicros.toString() }
+              : {}),
           },
           source: "payments",
           sourceRef: input.transactionId,
@@ -273,7 +307,9 @@ export interface ProviderRefundInput {
   provider: string;
   /** The provider's refund id: a refund is applied once per id. */
   refundId: string;
+  /** The tax handed back with it. Who remits it follows the payment. */
   taxMicros?: bigint | undefined;
+  details?: Record<string, unknown> | undefined;
 }
 
 /**
@@ -312,21 +348,28 @@ export async function applyProviderRefund(
         `Refund ${input.refundId} is for a payment the books do not hold (${input.paymentTransactionId})`,
       );
     }
+    const taxMicros = input.taxMicros ?? 0n;
+    if (taxMicros < 0n) {
+      throw new LedgerError("invalid_amount", "Tax on a refund cannot be negative");
+    }
     const [refund] = await tx
       .insert(providerPayments)
       .values({
         accountId: input.accountId,
         amountMicros: input.amountMicros,
         currency: input.currency ?? paymentRow.currency,
+        details: input.details ?? {},
         kind: "refund",
         mode: input.mode,
         occurredAt: input.occurredAt ?? now,
+        paymentRef: paymentRow.paymentRef,
         periodId: paymentRow.periodId,
         planCode: paymentRow.planCode,
         posted: input.post && paymentRow.posted,
         provider: input.provider,
         subscriptionId: paymentRow.subscriptionId,
-        taxMicros: input.taxMicros ?? 0n,
+        taxMicros,
+        taxRemittedBy: paymentRow.taxRemittedBy,
         transactionId: input.refundId,
       })
       .onConflictDoNothing()
@@ -368,12 +411,100 @@ export async function applyProviderRefund(
           planCode: paymentRow.planCode,
           provider: input.provider,
           refundRef: input.refundId,
+          ...(paymentRow.taxRemittedBy === "us" && taxMicros > 0n
+            ? { taxMicros: taxMicros.toString() }
+            : {}),
         },
         source: "payments",
         sourceRef: input.refundId,
       },
       options,
     );
+    return { applied: true };
+  });
+}
+
+export interface ProviderFeeInput {
+  accountId: string;
+  /** In micros of `currency` (the plan's currency, converted if need be). */
+  amountMicros: bigint;
+  currency?: string | undefined;
+  /** What the fee was converted from, kept for a person (Stripe's balance
+   *  settles in the account's own currency). */
+  details?: Record<string, unknown> | undefined;
+  /** The provider's id for this fee: applied once per id. */
+  feeId: string;
+  mode: ProviderMode;
+  occurredAt?: Date | undefined;
+  /** The money it was charged on (Stripe: the charge). */
+  paymentRef?: string | null | undefined;
+  planCode?: string | null | undefined;
+  post: boolean;
+  provider: string;
+  subscriptionId?: string | null | undefined;
+}
+
+/**
+ * The provider kept a fee for moving money: a card payment's processing
+ * fee, or a dispute's. A cost of collecting, booked against the provider's
+ * balance (expense:psp_fees); the customer owes nothing for it.
+ */
+export async function applyProviderFee(
+  db: LedgerExecutor,
+  input: ProviderFeeInput,
+  options: PostEventOptions & { now?: Date | undefined } = {},
+): Promise<{ applied: boolean }> {
+  return withSubscriptionLock(db, input.accountId, async (tx) => {
+    const now = options.now ?? new Date();
+    if (input.amountMicros < 0n) {
+      throw new LedgerError("invalid_amount", "A fee cannot be negative");
+    }
+    const [row] = await tx
+      .insert(providerPayments)
+      .values({
+        accountId: input.accountId,
+        amountMicros: input.amountMicros,
+        currency: input.currency ?? "USD",
+        details: input.details ?? {},
+        kind: "fee",
+        mode: input.mode,
+        occurredAt: input.occurredAt ?? now,
+        paymentRef: input.paymentRef ?? null,
+        planCode: input.planCode ?? null,
+        posted: input.post,
+        provider: input.provider,
+        subscriptionId: input.subscriptionId ?? null,
+        transactionId: input.feeId,
+      })
+      .onConflictDoNothing()
+      .returning({ id: providerPayments.id });
+    if (!row) {
+      return { applied: false };
+    }
+    if (input.post && input.amountMicros > 0n) {
+      await postEvent(
+        tx,
+        {
+          accountId: input.accountId,
+          eventType: paymentFeeEventType,
+          idempotencyKey: `fee:${input.provider}:${input.mode}:${input.feeId}`,
+          occurredAt: input.occurredAt ?? now,
+          payload: {
+            amountMicros: input.amountMicros.toString(),
+            feeRef: input.feeId,
+            ...(input.paymentRef ? { paymentRef: input.paymentRef } : {}),
+            ...(input.planCode ? { planCode: input.planCode } : {}),
+            provider: input.provider,
+            ...(input.details?.["settlement"] !== undefined
+              ? { settlement: input.details["settlement"] }
+              : {}),
+          },
+          source: "payments",
+          sourceRef: input.feeId,
+        },
+        options,
+      );
+    }
     return { applied: true };
   });
 }
