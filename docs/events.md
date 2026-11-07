@@ -146,6 +146,7 @@ event. A new origin starts with nothing.
 | `cloud` | FrameOS Cloud, through a hub verb (`cloud.verb` names it) |
 | `system` | The runtime itself |
 | `eventMap` | The frame's or an installed scene's [event map](#event-map-what-a-button-does) replacing an event it matched: the owner's configuration, never a key or a request itself |
+| `panel` | The frame page of the settings on the frame's own screen ([scene-settings.md](scene-settings.md#the-frame-page)): a person at the frame pressing Render again, Restart FrameOS or Reboot. Only those three |
 
 The allow-list is asked by the dispatcher, of every envelope, whatever its
 origin. An edge that can answer sooner asks the same question for a better

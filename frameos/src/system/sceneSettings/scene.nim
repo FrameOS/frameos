@@ -64,7 +64,8 @@ type
     ## What Save changed: wifiSsid with wifiPassword (empty: the saved one
     ## for the same network, none for another), rotate, renderScale.
   FrameSettingsAction* = proc(action: string) {.nimcall, gcsafe, raises: [].}
-    ## "open" when the page comes up, "scan" for the networks in range.
+    ## "open" when the page comes up, "close" when it goes, "scan" for the
+    ## networks in range.
 
 const
   SettingsNode = 1 ## the ui/events target its form lives in
@@ -147,9 +148,11 @@ proc frameAction(action: string) =
 
 proc showPage(self: SceneSettingsScene, frame: bool) =
   ## The scene's form or the frame page, its list at the top and no field
-  ## with the keyboard. The frame page tells the host it is up (a scan, on a
-  ## frame that is not on Wi-Fi).
+  ## with the keyboard. The host hears the frame page come up (a scan, on a
+  ## frame that is not on Wi-Fi) and go away (no more redraws for its news).
   forgetUiTarget(SceneSettingsId, SettingsNode)
+  if self.onFrame() and not frame:
+    frameAction("close")
   self.state.put("page", newJString(if frame: "frame" else: "scene"))
   self.state.put("confirm", newJString(""))
   if frame:
@@ -775,6 +778,8 @@ proc runSettings(self: FrameScene, context: ExecutionContext) =
   of "close":
     # Opened again, it starts afresh: no field has the keyboard, the list is
     # at its top, and it knows no scene until the dispatcher says.
+    if self.onFrame():
+      frameAction("close")
     forgetUiTarget(SceneSettingsId, SettingsNode)
     self.state = newJObject()
   of "render":

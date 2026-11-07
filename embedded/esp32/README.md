@@ -20,7 +20,7 @@ main/                     boot orchestration + platform modules
   fos_config.c            NVS config store (wifi, backend, panel, pins, intervals)
   fos_config_parse.c      the setting parsers/normalisers behind every writer (host-tested)
   fos_wifi.c              STA connect (waited for, or in the background), SoftAP portal, DNS hijack, scan, SNTP
-  fos_frame_settings.c    the settings panel's Frame tab: Wi-Fi status and network (a select box of up to 64), rotation
+  fos_frame_settings.c    the settings panel's frame page (behind its gear): the facts it shows, the Wi-Fi, rotation and scale it sets
   fos_wifi_networks.c     the order a scan's networks are listed in there: by name (host-tested)
   fos_http.c              esp_http_server route layer (portal + /status + actions)
   fos_client.c            render loop: Nim local render or thin-client fetch → blit
@@ -466,11 +466,14 @@ background (`fos_wifi_start_background`), retrying quickly and then every
 30 s for as long as it takes. What a boot that waited does once online (SNTP,
 log upload, the `bootup` line, the OTA check) runs the first time the station
 gets an address. The network is set on the screen: a swipe down from the top
-opens the settings panel, whose **Frame** tab shows the Wi-Fi status, the
-networks in range by name and a password field, and the rotation on a frame no control
-plane manages (`fos_frame_settings.c`, docs/scene-settings.md "The frame
-tab"). The status screen of a frame with no scene says to swipe. Every other
-board keeps the 45 s wait and the portal.
+opens the settings panel, whose gear opens the frame page with the Wi-Fi
+status, the networks in range by name and a password field, the rotation, the
+scale, and Render again and Reboot (`fos_frame_settings.c`,
+docs/scene-settings.md "The frame page"). The frame's control plane can turn
+the page off (`frame_settings_on_screen`); `set settings_unlock 1` on this
+console turns it back on whatever the plane says. The status screen of a frame
+with no scene says to swipe. Every other board keeps the 45 s wait and the
+portal.
 
 The serial console (115200) is always available and quicker for development.
 It answers on whichever USB port the board brings out: the chip's own

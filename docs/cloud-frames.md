@@ -363,11 +363,12 @@ The hello's `hardware` object is the same shape enrollment sends; a provider
 should persist it on each successful session start so its copy tracks the
 device (cloud.frameos.net does, size-capped at the same 4 KiB the enroll
 route applies). Without that refresh the enrollment-time snapshot goes stale
-the first time the panel or firmware changes. An ESP32's also says what can
-change on the frame itself: `rotate`, `wifiSsid` and `ip` (never a password;
-empty when it has none). A provider's copy of the rotation should follow it
-unless a `set_settings` is still on its way; there is no verb that sends a
-frame a network.
+the first time the panel or firmware changes. It also says what can
+change on the frame itself, on its own screen (docs/scene-settings.md "The
+frame page"): `rotate` and `renderScale`, in every hello and `state`. A
+provider's settings mirror should follow them unless a `set_settings` is still
+on its way. The frame's Wi-Fi network is never reported, and there is no verb
+that sends a frame one.
 
 `platform` is frame.json's deployment MODE (`buildroot`, `rpios`, `esp32-s3`,
 …), never a board. Linux frames additionally send **`board`** — the Buildroot
