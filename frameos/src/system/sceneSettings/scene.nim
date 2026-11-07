@@ -30,6 +30,7 @@ import frameos/types
 import frameos/channels
 import frameos/events_gen
 import frameos/panel_shape
+import frameos/render_scale
 import frameos/ui/layout
 import frameos/ui/events
 import frameos/ui/keyboard
@@ -46,20 +47,24 @@ type
     ## The switcher's own type, its `entries` unused and `paper` the panel's:
     ## one set of destroy and trace hooks in flash for the two built-in scenes.
 
-  # The frame's own settings, the second tab (docs/scene-settings.md "The
-  # frame tab"): what the host has to say about itself, read on every render.
-  # nil on a host that has none to offer: then the panel is the scene's alone.
+  # The frame's own page (docs/scene-settings.md "The frame page"), behind
+  # the gear: what the host knows of the frame, read on every render. The
+  # host gives facts and the page has the words, so every host shows the
+  # same page.
   FrameSettingsRead* = proc(): JsonNode {.nimcall, gcsafe, raises: [].}
-    ## {status: [[label, text]…], fields: [<a scene field>…],
-    ## values: {name: value}, actions: [{id, label}…]}: the first status row
-    ## is also the line over a scene's fields. A field with `select` is a
-    ## select box whatever its options, and `other` adds a last option of
-    ## that label that shows an input (`otherPlaceholder`) to type one. An action
-    ## with `under` comes right below the field of that name.
-  FrameSettingsApply* = proc(values: JsonNode) {.nimcall, gcsafe, raises: [].}
-    ## The fields changed on the tab, each as `saved` makes it, by name.
+    ## nil when the page is not offered (no host has one, or the frame's
+    ## control plane turned it off). Else {wifi: {state, ssid, hotspot,
+    ## rssi, ip, networks: [name…], scanning, password}, rotate,
+    ## renderScale, managedBy, version, actions: ["restart"…], note}: `wifi`
+    ## absent, no network to set here; `state` one of connected, connecting,
+    ## notFound, auth, hotspot, unset, off; `password` a password is saved;
+    ## `actions` the device commands this host runs besides render and
+    ## reboot; `note` what the last Save could not do.
+  FrameSettingsApply* = proc(changes: JsonNode) {.nimcall, gcsafe, raises: [].}
+    ## What Save changed: wifiSsid with wifiPassword (empty: the saved one
+    ## for the same network, none for another), rotate, renderScale.
   FrameSettingsAction* = proc(action: string) {.nimcall, gcsafe, raises: [].}
-    ## One of the `actions` pressed, or "open" when the tab comes up.
+    ## "open" when the page comes up, "scan" for the networks in range.
 
 const
   SettingsNode = 1 ## the ui/events target its form lives in
@@ -67,19 +72,30 @@ const
     ## How long it waits for a touch or a key before it goes back unsaved:
     ## five minutes, as long as an ESP32 that deep-sleeps stays up for it
     ## (fos_scenes.c BUILT_IN_SCENE_AWAKE_MS).
-  # What a handler number means: Cancel, Save, then per field (by its index
-  # in the tab's fields) a field's text, a switch or a select box's pick, and
-  # the tabs and the frame's actions.
+  # What a handler number means: Cancel (Back on the frame page), Save, the
+  # gear, then per field (by its index in the page's fields) a field's text,
+  # a switch or a select box's pick, and the frame page's buttons.
   HCancel = 0
   HSave = 1
+  HGear = 2
   HText = 1000
   HToggle = 2000
-  HTab = 3000 ## + 0 the scene's, + 1 the frame's
   HSelect = 13000 ## + field: a select box's pick
-  HAction = 20000 ## + action
+  HAction = 20000 ## + one of the buttons below
+  AScan = 0
+  ARender = 1
+  ARestart = 2
+  AReboot = 3
   OtherValue = "\1" ## a select box's `other` option; no value of its own is this
   # The types the panel cannot edit: what they hold is not text.
   Unedited = ["node", "scene", "image"]
+  # The scales offered (frontend/src/utils/renderScale.ts RENDER_SCALE_STEPS).
+  Scales = ["1", "1.25", "1.5", "2", "2.5", "3", "4"]
+  # A gear, 24 units square, its hole cut out (fill-rule evenodd).
+  GearPath = "M10.1 4.6L10.4 1.6L13.6 1.6L13.9 4.6L15.9 5.5L18.2 3.5L20.5 5.8L18.5 8.1L19.4 10.1L22.4 10.4" &
+    "L22.4 13.6L19.4 13.9L18.5 15.9L20.5 18.2L18.2 20.5L15.9 18.5L13.9 19.4L13.6 22.4L10.4 22.4L10.1 19.4L8.1 18.5" &
+    "L5.8 20.5L3.5 18.2L5.5 15.9L4.6 13.9L1.6 13.6L1.6 10.4L4.6 10.1L5.5 8.1L3.5 5.8L5.8 3.5L8.1 5.5Z" &
+    "M8.6 12a3.4 3.4 0 1 0 6.8 0a3.4 3.4 0 1 0 -6.8 0Z"
 
 var
   frameSettingsRead*: FrameSettingsRead
@@ -116,33 +132,34 @@ proc arrayOf(node: JsonNode): JsonNode =
   if node.isNil or node.kind != JArray: newJArray() else: node
 
 proc frameInfo(): JsonNode =
-  ## What the host says about the frame now; nil without a host that does.
+  ## What the host says about the frame now; nil when it offers no page.
   if not frameSettingsRead.isNil:
     result = frameSettingsRead()
     if not result.isNil and result.kind != JObject:
       result = nil
 
 proc onFrame(self: SceneSettingsScene): bool =
-  self.state{"tab"}.getStr() == "frame"
+  self.state{"page"}.getStr() == "frame"
 
 proc frameAction(action: string) =
   if not frameSettingsAction.isNil:
     frameSettingsAction(action)
 
-proc showTab(self: SceneSettingsScene, frame: bool) =
-  ## One tab or the other, its list at the top and no field with the
-  ## keyboard. The frame tab tells the host it is up (a scan, on an ESP32
-  ## that is not on Wi-Fi).
+proc showPage(self: SceneSettingsScene, frame: bool) =
+  ## The scene's form or the frame page, its list at the top and no field
+  ## with the keyboard. The frame page tells the host it is up (a scan, on a
+  ## frame that is not on Wi-Fi).
   forgetUiTarget(SceneSettingsId, SettingsNode)
-  self.state.put("tab", newJString(if frame: "frame" else: "scene"))
+  self.state.put("page", newJString(if frame: "frame" else: "scene"))
+  self.state.put("confirm", newJString(""))
   if frame:
     frameAction("open")
 
 proc current(edits, base: JsonNode, name: string): JsonNode =
-  ## A frame field's value: as changed on the tab, else as the host has it.
+  ## A frame field's value: as changed on the page, else as the host has it.
   result = edits{name}
   if result.isNil and not base.isNil:
-    result = base{"values", name}
+    result = base{name}
 
 proc text(value: JsonNode): string =
   ## A value as the text a field shows: a string as it is, a whole number
@@ -176,6 +193,102 @@ proc saved(field, value: JsonNode): JsonNode =
     if text.len > 0 and parseFloat(text, number) == text.len: newJFloat(number) else: nil
   else: newJString(value.text)
 
+# -------------------------------------------------------- the frame page
+
+proc quoted(name: string): string =
+  "\xe2\x80\x9c" & name & "\xe2\x80\x9d"
+
+proc wifiLine(wifi: JsonNode): string =
+  ## How the frame is doing on Wi-Fi, in words.
+  let ssid = wifi{"ssid"}.getStr()
+  case wifi{"state"}.getStr()
+  of "connected": "Connected to " & quoted(ssid)
+  of "hotspot": "Setup hotspot " & quoted(wifi{"hotspot"}.getStr())
+  of "unset": "Not set up"
+  of "notFound": "Can't find " & quoted(ssid)
+  of "auth": "Wrong password for " & quoted(ssid) & "?"
+  of "connecting": "Connecting to " & quoted(ssid) & "\xe2\x80\xa6"
+  else: "Not connected"
+
+proc field(name, label, kind: string): JsonNode =
+  result = newJObject()
+  result.put("name", newJString(name))
+  result.put("label", newJString(label))
+  result.put("type", newJString(kind))
+
+proc option(value, label: string): JsonNode =
+  result = newJObject()
+  result.put("value", newJString(value))
+  result.put("label", newJString(label))
+
+proc scaleLabel(scale: string): string =
+  scale & "\xc3\x97"
+
+proc scaleText(scale: float): string =
+  ## A scale in quarters as the options spell it: 1, 1.25, 1.5, 2.
+  let quarters = int(scale * 4.0 + 0.5)
+  result = $(quarters div 4)
+  case quarters mod 4
+  of 1: result.add ".25"
+  of 2: result.add ".5"
+  of 3: result.add ".75"
+  else: discard
+
+proc frameFields(info: JsonNode, autoScale: string): JsonNode =
+  ## The page's fields, in the shape of a scene's, from the host's facts:
+  ## the network (those in range, the saved one first when it is not among
+  ## them, and a name to type), its password, the rotation and the scale.
+  result = newJArray()
+  let wifi = info{"wifi"}
+  if not wifi.isNil and wifi.kind == JObject:
+    let
+      saved = wifi{"ssid"}.getStr()
+      networks = arrayOf(wifi{"networks"})
+      network = field("wifiSsid", "Wi-Fi network", "string")
+      options = newJArray()
+    var listed = saved.len == 0
+    for i in 0 ..< networks.elems.len:
+      if networks.elems[i].getStr() == saved:
+        listed = true
+    if not listed:
+      options.elems.add newJString(saved)
+    for i in 0 ..< networks.elems.len:
+      if networks.elems[i].kind == JString:
+        options.elems.add networks.elems[i]
+    network.put("select", newJBool(true))
+    network.put("other", newJString("Other network\xe2\x80\xa6"))
+    network.put("otherPlaceholder", newJString("Network name"))
+    network.put("placeholder", newJString("Choose a network"))
+    network.put("options", options)
+    result.elems.add network
+    let password = field("wifiPassword", "Password", "string")
+    password.put("secret", newJBool(true))
+    password.put("placeholder", newJString(
+      if wifi{"password"}.getBool(): "Saved (type to change)" else: "Password"))
+    result.elems.add password
+  var
+    rotate = field("rotate", "Rotation", "integer")
+    options = newJArray()
+  for angle in ["0", "90", "180", "270"]:
+    options.elems.add option(angle, angle & "\xc2\xb0")
+  rotate.put("options", options)
+  result.elems.add rotate
+  var scale = field("renderScale", "Scale", "float")
+  options = newJArray()
+  options.elems.add option("0", "Automatic (" & scaleLabel(autoScale) & ")")
+  for step in Scales:
+    options.elems.add option(step, scaleLabel(step))
+  scale.put("options", options)
+  result.elems.add scale
+
+proc frameValues(info: JsonNode): JsonNode =
+  ## What the host has for each field, by name.
+  result = newJObject()
+  result.put("wifiSsid", newJString(info{"wifi", "ssid"}.getStr()))
+  result.put("rotate", newJInt(info{"rotate"}.getInt()))
+  let scale = info{"renderScale"}
+  result.put("renderScale", if scale.isNil: newJInt(0) else: scale)
+
 proc opener(self: SceneSettingsScene): string =
   self.state{"from"}.getStr()
 
@@ -194,40 +307,79 @@ proc collect(fields, values: JsonNode): JsonNode =
     if not value.isNil:
       result.put(name, value)
 
-proc save(self: SceneSettingsScene, frame: bool, fields, values: JsonNode) =
-  ## The scene tab's: back to the scene, its fields set to the values here.
-  ## The frame tab's: what changed there to the host, which applies it (Wi-Fi
-  ## joins in the background, a rotation restarts an ESP32), the panel
-  ## staying up so what it did shows in the status.
-  let state = collect(fields, values)
-  if frame:
-    self.state.put("frameValues", newJObject())
-    if state.len > 0 and not frameSettingsApply.isNil:
-      forgetUiTarget(SceneSettingsId, SettingsNode)
-      frameSettingsApply(state)
-  elif self.opener().len == 0:
+proc save(self: SceneSettingsScene) =
+  ## Back to the scene, its fields set to the values here.
+  if self.opener().len == 0:
     leave()
+    return
+  let payload = newJObject()
+  payload.put("sceneId", newJString(self.opener()))
+  payload.put("state", collect(self.fieldList(), self.valueMap()))
+  sendEvent(evSetCurrentScene, payload, eoScene)
+
+proc saveFrame(self: SceneSettingsScene, info: JsonNode, fields: JsonNode) =
+  ## The frame page's Save: what was changed there to the host, which
+  ## applies it (Wi-Fi joins in the background, a rotation restarts the
+  ## frame), the page staying up so what it did shows above. A network goes
+  ## with its password, typed or not.
+  let
+    edits = self.objectAt("frameValues")
+    base = frameValues(info)
+    changes = collect(fields, edits)
+  for name in ["rotate", "renderScale"]:
+    let value = changes{name}
+    if not value.isNil and value.text == base{name}.text:
+      changes.fields.del(name)
+  if not changes{"wifiSsid"}.isNil or not changes{"wifiPassword"}.isNil:
+    if changes{"wifiSsid"}.isNil:
+      changes.put("wifiSsid", base{"wifiSsid"})
+    if changes{"wifiPassword"}.isNil:
+      changes.put("wifiPassword", newJString(""))
+  self.state.put("frameValues", newJObject())
+  if changes.len > 0 and not frameSettingsApply.isNil:
+    forgetUiTarget(SceneSettingsId, SettingsNode)
+    frameSettingsApply(changes)
+
+proc press(self: SceneSettingsScene, action: int) =
+  ## One of the frame page's buttons. Restart and Reboot ask twice: the
+  ## first tap turns the button into "Tap again", the second sends the
+  ## device command (docs/events-contract.json, origin `panel`), which the
+  ## host runs as it runs a schedule's.
+  if action == AScan:
+    frameAction("scan")
+  elif action == ARender:
+    sendEvent(evRender, newJObject(), eoPanel)
+  elif self.state{"confirm"}.getStr() != $action:
+    self.state.put("confirm", newJString($action))
+    return
   else:
-    let payload = newJObject()
-    payload.put("sceneId", newJString(self.opener()))
-    payload.put("state", state)
-    sendEvent(evSetCurrentScene, payload, eoScene)
+    sendEvent(if action == ARestart: evRestart else: evReboot, newJObject(), eoPanel)
+  self.state.put("confirm", newJString(""))
 
 proc acting(self: SceneSettingsScene) =
-  ## What the last handler did, to the values of the tab showing.
+  ## What the last handler did, to the values of the page showing.
   let
     frame = self.onFrame()
     info = if frame: frameInfo() else: nil
-    fields = if frame: arrayOf(info{"fields"}) else: self.fieldList()
-    values = if frame: self.objectAt("frameValues") else: self.valueMap()
     handler = acted
   acted = -1
-  if handler == HCancel: leave()
-  elif handler == HSave: self.save(frame, fields, values)
+  if frame and info.isNil:
+    # Turned off while it showed: the scene's form, the frame's values gone.
+    self.showPage(false)
+    return
+  let
+    fields = if frame: frameFields(info, "") else: self.fieldList()
+    values = if frame: self.objectAt("frameValues") else: self.valueMap()
+  if handler < HAction:
+    self.state.put("confirm", newJString(""))
+  if handler == HCancel:
+    if frame: self.showPage(false) else: leave()
+  elif handler == HSave:
+    if frame: self.saveFrame(info, fields) else: self.save()
+  elif handler == HGear:
+    self.showPage(not frame)
   elif handler >= HAction:
-    let actions = arrayOf(info{"actions"})
-    if handler - HAction < actions.elems.len:
-      frameAction(actions.elems[handler - HAction]{"id"}.getStr())
+    self.press(handler - HAction)
   elif handler >= HSelect:
     let index = handler - HSelect
     if index < fields.elems.len:
@@ -235,13 +387,10 @@ proc acting(self: SceneSettingsScene) =
         field = fields.elems[index]
         other = actedText == OtherValue
       values.put(field{"name"}.getStr(), newJString(if other: "" else: actedText))
-      # Beside the values, on a field that has an `other`: a host's, whose
-      # names it knows, never a scene's, which could be called anything.
+      # Beside the values, on a field that has an `other`: the frame page's,
+      # whose names it knows, never a scene's, which could be called anything.
       if field{"other"}.getStr().len > 0:
         values.put("typing", newJBool(other))
-  elif handler >= HTab:
-    if frame != (handler == HTab + 1):
-      self.showTab(not frame)
   else:
     let
       index = if handler >= HToggle: handler - HToggle else: handler - HText
@@ -249,7 +398,7 @@ proc acting(self: SceneSettingsScene) =
       let field = fields.elems[index]
       let name = field{"name"}.getStr()
       if handler >= HToggle:
-        values.put(name, newJBool(not (if frame: current(values, info, name) else: values{name}).isOn))
+        values.put(name, newJBool(not values{name}.isOn))
       else:
         values.put(name, newJString(actedText))
   self.touch()
@@ -284,11 +433,21 @@ proc button(look: Look, label: string, handler: int, primary: bool): SvgNode =
   else: c.add " bg-zinc-800 active:bg-zinc-600"
   el("div", move c, SvgNode(text: label)).on("on-click", handler)
 
-proc tab(look: Look, label: string, handler: int, lit: bool): SvgNode =
-  ## One of the two tabs: a button, the one showing lit.
-  result = look.button(label, handler, lit)
-  if look.paper and lit:
-    result.attrs[0][1].add " bg-black text-white"
+proc gear(look: Look, lit: bool): SvgNode =
+  ## The gear that opens the frame page, lit while it shows.
+  var c = "shrink-0 flex items-center justify-center rounded-full"
+  c.px("h", look.line * 4 div 5)
+  c.px("w", look.line * 4 div 5)
+  if look.paper: c.add(if lit: " bg-black text-white" else: " border-2 border-black")
+  elif lit: c.add " bg-sky-600 active:bg-sky-500"
+  else: c.add " bg-zinc-800 active:bg-zinc-600"
+  let path = SvgNode(tag: "path", attrs: @[("d", GearPath), ("fill", "currentColor"), ("fill-rule", "evenodd")])
+  var i = ""
+  i.px("w", look.size * 6 div 5)
+  i.px("h", look.size * 6 div 5)
+  let icon = el("svg", move i, path)
+  icon.attrs.add(("viewBox", "0 0 24 24"))
+  el("div", move c, icon).on("on-click", HGear)
 
 proc fieldBox(look: Look): string =
   result = "w-full rounded-lg"
@@ -401,42 +560,64 @@ proc grey(look: Look): string =
   ## Grey text (plain on e-paper).
   if look.paper: "" else: "text-zinc-400"
 
-proc addActions(look: Look, into: SvgNode, actions: JsonNode, under: string) =
-  ## The host's actions that come below the field `under`, or below them all.
-  for j in 0 ..< min(actions.elems.len, 10):
-    if actions.elems[j]{"under"}.getStr() == under:
-      into.children.add el("div", "flex", look.button(actions.elems[j]{"label"}.getStr(), HAction + j, false))
+proc pressButton(look: Look, label: string, action: int, asking: bool): SvgNode =
+  ## One of the frame page's buttons; red while it asks for the second tap.
+  result = look.button(label, HAction + action, false)
+  if asking:
+    result.attrs[0][1].add(if look.paper: " bg-black text-white" else: " bg-red-600 active:bg-red-500")
 
-proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode): SvgNode =
-  ## The frame tab: how it is doing (a card of label and text rows), what can
-  ## be changed (the same rows as a scene's fields) and the host's actions.
+proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: string): SvgNode =
+  ## The frame page: how it is doing (a card of label and text rows), what
+  ## can be changed (the same rows as a scene's fields), and its buttons.
   var c = "flex flex-col"
   c.px("p", look.pad)
   c.px("gap", look.gap)
   result = el("div", move c)
   let card = el("div", if look.paper: "flex flex-col gap-1 p-3 rounded-lg border-2 border-black"
     else: "flex flex-col gap-1 p-3 rounded-lg bg-zinc-900")
-  let status = arrayOf(info{"status"})
-  for i in 0 ..< status.elems.len:
-    let line = status.elems[i]
-    if line.kind == JArray and line.elems.len >= 2:
-      let row = el("div", "flex gap-3", el("span", look.grey, SvgNode(text: line.elems[0].getStr())))
+  proc line(card: SvgNode, look: Look, label, text: string) =
+    if text.len > 0:
+      let row = el("div", "flex gap-3", el("span", look.grey, SvgNode(text: label)))
       row.children.add el("div", "grow min-w-0 flex justify-end",
-        el("span", "truncate", SvgNode(text: line.elems[1].getStr())))
+        el("span", "truncate", SvgNode(text: text)))
       card.children.add row
+  let wifi = info{"wifi"}
+  if not wifi.isNil and wifi.kind == JObject:
+    card.line(look, "Wi-Fi", wifiLine(wifi))
+    if wifi{"state"}.getStr() == "connected":
+      let rssi = wifi{"rssi"}
+      if not rssi.isNil and rssi.kind == JInt:
+        card.line(look, "Signal", $rssi.getInt() & " dBm")
+      card.line(look, "Address", wifi{"ip"}.getStr())
+  card.line(look, "Not saved", info{"note"}.getStr())
+  card.line(look, "Managed by", info{"managedBy"}.getStr())
+  card.line(look, "Version", info{"version"}.getStr())
   result.children.add card
   let
-    fields = arrayOf(info{"fields"})
+    fields = frameFields(info, autoScale)
     edits = self.objectAt("frameValues")
-    actions = arrayOf(info{"actions"})
+    base = frameValues(info)
     typing = edits{"typing"}.getBool()
+    asking = self.state{"confirm"}.getStr()
   for i in 0 ..< fields.elems.len:
     let field = fields.elems[i]
-    if field.kind == JObject:
-      let name = field{"name"}.getStr()
-      result.children.add look.row(field, current(edits, info, name), i, typing and field{"other"}.getStr().len > 0)
-      look.addActions(result, actions, name)
-  look.addActions(result, actions, "")
+    let name = field{"name"}.getStr()
+    result.children.add look.row(field, current(edits, base, name), i, typing and name == "wifiSsid")
+    if name == "wifiSsid":
+      result.children.add el("div", "flex", look.pressButton(
+        if wifi{"scanning"}.getBool(): "Scanning\xe2\x80\xa6" else: "Scan for networks", AScan, false))
+  c = "flex flex-wrap"
+  c.px("gap", look.gap div 2)
+  let buttons = el("div", move c)
+  buttons.children.add look.pressButton("Render again", ARender, false)
+  let commands = arrayOf(info{"actions"})
+  for i in 0 ..< commands.elems.len:
+    if commands.elems[i].getStr() == "restart":
+      buttons.children.add look.pressButton(
+        if asking == $ARestart: "Tap again to restart" else: "Restart FrameOS", ARestart, asking == $ARestart)
+  buttons.children.add look.pressButton(
+    if asking == $AReboot: "Tap again to reboot" else: "Reboot", AReboot, asking == $AReboot)
+  result.children.add buttons
 
 when not defined(frameosEmbedded):
   proc box(c: var string, x, y, w, h: int) =
@@ -492,9 +673,9 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
     keyboardTop = high(int), info: JsonNode = nil): SvgNode =
   ## The panel as a UI tree: a header with Cancel, the scene's name and
   ## Save, and under it the fields in a list that scrolls. With the host's
-  ## `info` (frameSettingsRead) the name is a tab beside "Frame", the frame's
-  ## own settings. On a `round` panel the scene's alone inside its circle,
-  ## the keyboard's top at `keyboardTop` while it is up.
+  ## `info` (frameSettingsRead) a gear left of Save opens the frame page,
+  ## where Cancel is Back. On a `round` panel the scene's alone inside its
+  ## circle, the keyboard's top at `keyboardTop` while it is up.
   let unit = min(width, height)
   var look = Look(paper: paper, size: clamp(unit * 4 div 100, 14, 28))
   look.pad = clamp(unit * 4 div 100, 8, 32)
@@ -518,26 +699,15 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   let
     header = el("div", move c)
     frame = not info.isNil and self.onFrame()
-  header.children.add look.button(if frame: "Close" else: "Cancel", HCancel, false)
-  if info.isNil:
-    header.children.add el("span", "grow truncate text-center font-bold", SvgNode(text: title))
-  else:
-    # The two tabs: the scene's name heads its list.
-    c = "grow flex justify-center"
-    c.px("gap", look.gap div 2)
-    let tabs = el("div", move c)
-    tabs.children.add look.tab("Scene", HTab, not frame)
-    tabs.children.add look.tab("Frame", HTab + 1, frame)
-    header.children.add tabs
+  header.children.add look.button(if frame: "Back" else: "Cancel", HCancel, false)
+  header.children.add el("span", "grow truncate text-center font-bold",
+    SvgNode(text: if frame: "Frame settings" else: title))
+  if not info.isNil:
+    header.children.add look.gear(frame)
   header.children.add look.button("Save", HSave, true)
   result.children.add header
-  var body: SvgNode
-  if frame:
-    body = self.frameList(look, info)
-  else:
-    body = self.fieldList(look, look.pad, look.pad)
-    if not info.isNil and title.len > 0:
-      body.children.insert(el("div", "truncate font-bold", SvgNode(text: title)), 0)
+  let body = if frame: self.frameList(look, info, scaleText(autoRenderScale(width, height)))
+    else: self.fieldList(look, look.pad, look.pad)
   result.children.add el("div", "flex-1 overflow-y-auto", body)
 
 proc title(self: SceneSettingsScene): string =
@@ -566,9 +736,19 @@ proc drawForm*(self: SceneSettingsScene, image: Image) =
       keyboardTop = keyboardBox(image.width, image.height, true)[0]
   let info = if round: nil else: frameInfo()
   if info.isNil and self.onFrame():
-    self.state.put("tab", newJString("scene"))
+    self.showPage(false)
   if self.drawUi(SceneSettingsId, self.tree(image.width, image.height, self.paper, self.title(), round,
       keyboardTop, info), image, self.paper, onHandler, IdleSeconds):
+    leave()
+
+proc back(self: SceneSettingsScene) =
+  ## One step back: from the frame page to the scene's form, from the form
+  ## to the scene.
+  if self.onFrame():
+    self.showPage(false)
+    self.touch()
+    sendEvent(evRender, newJObject(), eoScene)
+  else:
     leave()
 
 # ------------------------------------------------------------ the scene
@@ -585,10 +765,11 @@ proc runSettings(self: FrameScene, context: ExecutionContext) =
       let value = payload{"state", key}
       if not value.isNil:
         self.state.put(key, value)
-    # It opens on the scene's tab; with no scene showing there is nothing on
-    # that one, and the frame's is what the status screen sent you here for.
-    if self.state{"tab"}.isNil and self.opener().len == 0 and not frameInfo().isNil:
-      self.showTab(true)
+    # It opens on the scene's form; with no scene showing there is nothing
+    # on that one, and the frame page is what the status screen sent you here
+    # for.
+    if self.state{"page"}.isNil and self.opener().len == 0 and not frameInfo().isNil:
+      self.showPage(true)
   of "open":
     self.touch()
   of "close":
@@ -601,15 +782,15 @@ proc runSettings(self: FrameScene, context: ExecutionContext) =
       self.drawForm(context.image)
   of "button":
     if payload{"role"}.getStr() == "back" and payload{"action"}.getStr() == "press":
-      leave()
+      self.back()
   of evBack:
     # The frame's back (a swipe in from the left), as on a phone: the
-    # keyboard goes away first, then the form, unsaved.
+    # keyboard goes away first, then the frame page, then the form, unsaved.
     if dismissKeyboard(SceneSettingsId, SettingsNode):
       self.touch()
       sendEvent(evRender, newJObject(), eoScene)
     else:
-      leave()
+      self.back()
   else:
     # The pointer, and keys for a field (ui/events.nim hit-tests them). E-paper
     # shows no press: what only moves the press waits for a tap.

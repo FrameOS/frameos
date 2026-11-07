@@ -338,6 +338,33 @@
     "origin": "system",
     "event": "uploadScenes",
     "allowed": true
+   },
+   {
+    "origin": "panel",
+    "event": "render",
+    "allowed": true
+   },
+   {
+    "origin": "panel",
+    "event": "restart",
+    "allowed": true
+   },
+   {
+    "origin": "panel",
+    "event": "reboot",
+    "allowed": true
+   },
+   {
+    "origin": "panel",
+    "event": "reload",
+    "allowed": false,
+    "why": "The frame page's buttons are Render again, Restart FrameOS and Reboot; nothing else speaks as the panel."
+   },
+   {
+    "origin": "panel",
+    "event": "setCurrentScene",
+    "allowed": false,
+    "why": "The settings panel switches scenes as the scene it is (origin scene), never as the person at the frame."
    }
   ]
  },

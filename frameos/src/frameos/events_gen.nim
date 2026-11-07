@@ -13,6 +13,7 @@ type
     eoCloud = "cloud"
     eoSystem = "system"
     eoEventMap = "eventMap"
+    eoPanel = "panel"
   EventClass* = enum
     ecLifecycle = "lifecycle"
     ecInput = "input"
@@ -172,7 +173,7 @@ const
       linux: true, esp32: true, wasm: true),
     EventPolicy( # render
       class: ecLifecycle, device: edNone, listen: true, dispatch: true,
-      origins: {eoSystem, eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoEventMap},
+      origins: {eoSystem, eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoEventMap, eoPanel},
       renderAfter: raAlways, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
@@ -376,14 +377,14 @@ const
       linux: true, esp32: true, wasm: false),
     EventPolicy( # restart
       class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
-      origins: {eoSchedule, eoHttpAdmin, eoCloud, eoSystem},
+      origins: {eoSchedule, eoHttpAdmin, eoCloud, eoSystem, eoPanel},
       renderAfter: raNever, coalesceLatest: false, log: elFull,
       endsRuntime: true,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: false),
     EventPolicy( # reboot
       class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
-      origins: {eoSchedule, eoHttpAdmin, eoCloud, eoSystem},
+      origins: {eoSchedule, eoHttpAdmin, eoCloud, eoSystem, eoPanel},
       renderAfter: raNever, coalesceLatest: false, log: elFull,
       endsRuntime: true,
       aliasOfIndex: -1,
