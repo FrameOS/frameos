@@ -28,8 +28,8 @@ icon = "🔷"
 # quickts: QuickJS plus native TypeScript/JSX (github.com/FrameOS/quickts).
 # Keep in step with frameos/frameos.nimble and tools/prebuilt-deps/build.sh.
 QUICKJS_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/quickjs-{version}.tar.xz"
-DEFAULT_QUICKJS_VERSION = "2026-06-04-quickts.3"
-DEFAULT_QUICKJS_SHA256 = "1876780ef3c797ee84ebd9c5abb097c8dd7421e44a40c66d1f0ee4482bec37ba"
+DEFAULT_QUICKJS_VERSION = "2026-06-04-quickts.2"
+DEFAULT_QUICKJS_SHA256 = "9d6435424992bd710b28b67e6de10fac57813da8b37ce26913c78343c83d463e"
 # sha256 of each source tarball the legacy on-device build may fetch.
 QUICKJS_SOURCE_SHA256 = {DEFAULT_QUICKJS_VERSION: DEFAULT_QUICKJS_SHA256}
 

@@ -353,11 +353,6 @@ const
   # upstream's, so plain JavaScript never sees either pass.
   JS_EVAL_FLAG_TYPESCRIPT* = (1 shl 8)
   JS_EVAL_FLAG_JSX* = (1 shl 9)
-  # quickts.3: a JSX site as one `__frameosBlock(template, ...holes)` call,
-  # the template a sealed constant (quickts README, "JSX blocks"). Implies
-  # JSX. Not asked for yet: the walker that reads a template once and diffs
-  # the holes is `docs/perf-todo.md` "Blocks".
-  JS_EVAL_FLAG_JSX_BLOCKS* = (1 shl 10)
 
 proc quicktsFlagsFor*(filename: string): cint =
   ## The parser passes a source file gets, by extension. Matches

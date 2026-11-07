@@ -134,14 +134,6 @@ Hosts:
 - **`JS_NewContextRaw` without Proxy / normalize / WeakRef** (−25 KB on the
   ESP32): needs the prelude's Proxy views of `app.config` / `state` /
   `frame` / `context` replaced first.
-- **"Blocks"** (JSX lowered to a static template plus holes): the parser
-  side shipped in quickts `2026-06-04-quickts.3` (2026-11-07) as
-  `JS_EVAL_FLAG_JSX_BLOCKS`, a `__frameosBlock(template, ...holes)` call per
-  site with the template a sealed constant-pool array (`docs/quickts.md`
-  "Blocks"). Still to do here: a `__frameosBlock` that reads a template once
-  by identity and diffs the holes (the walker's `JsxMemo` and `__frameosNode`
-  keyed reuse need redesigning around it), the prelude's JavaScript fallback,
-  then the flag in `quicktsFlagsFor`.
 - **Dirty flags and relayout boundaries** on the `UiNode` tree, an in-place
   reconcile: what is left of layout and emit.
 - **Refs with setters and a native `frameos.animate`** (a drag or an
@@ -178,6 +170,19 @@ path stripped), not `firmware-size.json`'s groups, which moved with pixie.
 
 ## Not on the ladder, on purpose
 
+- **"Blocks"** (JSX lowered to a static template plus holes), tried and
+  parked 2026-11-07. quickts `2026-06-04-quickts.3` (#682) added the
+  lowering; the FrameOS half (#684, branch `jsx-blocks`: a C
+  `__frameosBlock` making lazy elements, the walker building them from
+  templates read once and taking back nodes whose values did not change)
+  halved a laptop's walk of a UI without memo(), but on the SenseCAP
+  Indicator a home-panel tap went 74.5 → 79.5 ms (`get()` 11.1 → 13.1: a
+  component's props built from the template cost more than the factory's
+  bytecode literal), a calculator tap stayed at 67 ms, the DVD bounce at 28
+  fps, and a scene's first walk grew 5 ms. The walk is 3–5 ms of a tap here,
+  so there was little to win, for +15.4 KB of flash and the parser's own
+  bytes. Both were reverted to quickts `.2`. Worth another look only with a
+  board scene whose walk is a real share of its frame.
 - A second rasterizer (LVGL +112 KB measured, ThorVG ~170 KB): one
   rasterizer, one damage model, one background rule (`docs/ui-todo.md`).
 - Scenes in Rust, Nim, C or wasm for frame time: `get()` is ~11 ms of ~80.

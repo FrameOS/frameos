@@ -48,7 +48,7 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     # part of an arena per class in use: the SenseCAP kitchen sink's ~156 KB
     # of objects sat in 268 KB with 4 KB arenas. 1 KB leaves a quarter of
     # that empty. (newlib's missing tm_gmtoff and malloc_usable_size are
-    # quickts's own business since 2026-06-04-quickts.3.)
+    # quickts's own business since 2026-06-04-quickts.2.)
     JS_MALLOC_ARENA_SIZE=1024)
 
 # Same semantics the upstream Makefile builds with; QuickJS C is not

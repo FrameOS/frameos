@@ -64,11 +64,10 @@ call `f<a>(b)`. It cannot affect `.js` sources, where the pass is off.
 ## How FrameOS uses it
 
 Done 2026-09-02 with `2026-06-04-quickts.1`; on `2026-06-04-quickts.2` since
-2026-10-27 and `2026-06-04-quickts.3` since 2026-11-07. The moving parts, for
-the next time the version changes:
+2026-10-27. The moving parts, for the next time the version changes:
 
 - **One source tarball, one version string.** Release `<version>` (now
-  `2026-06-04-quickts.3`) is the git tag `v<version>` in the quickts repo,
+  `2026-06-04-quickts.2`) is the git tag `v<version>` in the quickts repo,
   `git archive --prefix=quickjs-<version>/` of it published as
   `quickjs-<version>.tar.xz` (unpacks to `quickjs-<version>/`,
   Bellard's layout) both as a GitHub release asset and mirrored at
@@ -123,33 +122,6 @@ the next time the version changes:
   `frameos/tools/js_check.nim`, which links the same QuickJS and compiles the
   file with the same flags, instead of transpile + `node --check`. Built on
   first use, or `FRAMEOS_JS_CHECK` points at one; the Docker image builds it.
-
-## Blocks: a template per JSX site (quickts.3)
-
-`JS_EVAL_FLAG_JSX_BLOCKS` (1 shl 10, implies JSX; `JS_EVAL_FLAG_JSX_BLOCKS`
-in `burrito.nim`) lowers a JSX site to one call,
-`__frameosBlock(template, ...holes)`, instead of a factory call per element:
-
-```jsx
-<div className="flex" onClick={h}><span>{label}</span>{cond && <b>x</b>}</div>
-// → __frameosBlock(T, h, label, cond && <b>x</b>)
-//   T = ["div", ["className", "flex", "onClick", -1], ["span", null, -2], -3]
-```
-
-The template holds the whole element tree's tags, attribute names, static
-values and text (a `{}` with one number or string literal counts as static);
-every other expression is an argument in source order, the tag of a
-component first, and a negative number in the template is `-1 - i` for the
-i-th argument. It is a sealed array built at parse time and pushed from the
-function's constant pool, so it is the same object on every evaluation: the
-walker can read it once, keyed by identity, and per render touch only the
-holes, which is the retained-UI step `docs/perf-todo.md` calls "Blocks". The
-factory lowering stays the default and is what every frame runs today;
-`tests/quickts/cases/15-jsx-blocks.tsx` in the repo has the reference
-expansion of a template back into `{type, props}` elements, which is what the
-prelude's JavaScript fallback will be. The lowering costs 4.4 KB of `-Os`
-text and nothing per parse with the flag off; all 421 `.tsx` files in this
-repository parse with it on.
 
 ## Merging upstream QuickJS later
 

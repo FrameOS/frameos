@@ -52,8 +52,8 @@ python3 tools/prepare_assets.py
 # emcc needs the pinned version's sources, so fetch the source tarball into
 # the build dir unless quickjs/ has them. Version and sha256 must stay in
 # sync with the build_quickjs task in frameos.nimble.
-QJS_TARBALL_VERSION="2026-06-04-quickts.3"
-QJS_TARBALL_SHA256="1876780ef3c797ee84ebd9c5abb097c8dd7421e44a40c66d1f0ee4482bec37ba"
+QJS_TARBALL_VERSION="2026-06-04-quickts.2"
+QJS_TARBALL_SHA256="9d6435424992bd710b28b67e6de10fac57813da8b37ce26913c78343c83d463e"
 qjs_version_of() { head -n1 "$1/VERSION" 2>/dev/null || true; }
 QJS_SRC="$FRAMEOS_DIR/quickjs"
 if [[ ! -f "$QJS_SRC/quickjs.c" || "$(qjs_version_of "$QJS_SRC")" != "$QJS_TARBALL_VERSION" ]]; then

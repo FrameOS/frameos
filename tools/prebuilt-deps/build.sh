@@ -8,8 +8,8 @@ NIM_VERSION="${NIM_VERSION:-2.2.4}"
 # quickts (https://github.com/FrameOS/quickts): QuickJS with TypeScript and
 # JSX parsed natively. The tarball is mirrored at
 # archive.frameos.net/source/vendor/quickjs-<version>.tar.xz.
-QUICKJS_VERSION="${QUICKJS_VERSION:-2026-06-04-quickts.3}"
-QUICKJS_SHA256="${QUICKJS_SHA256:-1876780ef3c797ee84ebd9c5abb097c8dd7421e44a40c66d1f0ee4482bec37ba}"
+QUICKJS_VERSION="${QUICKJS_VERSION:-2026-06-04-quickts.2}"
+QUICKJS_SHA256="${QUICKJS_SHA256:-9d6435424992bd710b28b67e6de10fac57813da8b37ce26913c78343c83d463e}"
 
 declare -a COMPONENTS=("nim" "quickjs")
 
