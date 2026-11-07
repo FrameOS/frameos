@@ -197,16 +197,42 @@ suite "ui layout":
   test "inline elements flow with the text, items in a row":
     let svg = layoutUi(el("div", "text-black",
       txt("Hi "), el("b", "text-red-500", txt("there")), txt("!")), 400, 100)
-    var fills: seq[string]
-    var strikes: seq[string]
+    # Text is drawn a glyph at a time (emitGlyphs): the runs, by colour.
+    var runs: seq[string]
+    var red, struck: int
+    var last: SvgNode
     for node in svg.children:
       if node.tag == "path":
-        fills.add node.attr("fill")
-        strikes.add node.attr("transform")
-    # <b>: the same outline filled twice, the second a little to the right
-    # (no bold face on an ESP32), so the red run is two paths.
-    check fills == @["#000000", "#ef4444", "#ef4444", "#000000"]
-    check strikes[0] == "" and strikes[1] == "" and strikes[2].startsWith("translate(") and strikes[3] == ""
+        let fill = node.attr("fill")
+        if runs.len == 0 or runs[^1] != fill: runs.add fill
+        if fill == "#ef4444": inc red
+        # <b>: each glyph filled twice, the second a little to the right
+        # (no bold face on an ESP32).
+        if not last.isNil and last.path == node.path and node.offset.x > last.offset.x: inc struck
+        last = node
+    check runs == @["#000000", "#ef4444", "#000000"]
+    check red == 10 and struck == 5 # "there", twice
+
+  test "a translucent box over a flat opaque one is drawn as the colour it makes":
+    let ui = el("div", "bg-slate-900 p-4", el("div", "w-20 h-20 rounded-xl bg-white/10"),
+      el("div", "absolute top-0 left-0 w-10 h-10 bg-white/10"))
+    let svg = layoutUi(ui, 200, 200)
+    var fills, opacities: seq[string]
+    for node in svg.children:
+      fills.add node.attr("fill")
+      opacities.add node.attr("fill-opacity")
+    # The page, the in-flow card pre-blended (opaque), the absolute one as it was.
+    check fills.len == 3
+    check fills[1] != "#ffffff" and opacities[1] == ""
+    check fills[2] == "#ffffff" and opacities[2] != ""
+    # And it draws what the blend drew, within a step of rounding.
+    let
+      got = newImage(parseSvg(svg, 200, 200))
+      slate = parseHtmlColor("#0f172a").rgbx
+      want = [slate.r.float32 * 0.9 + 25.5, slate.g.float32 * 0.9 + 25.5, slate.b.float32 * 0.9 + 25.5]
+    check abs(got[40, 40].r.float32 - want[0]) <= 1.5
+    check abs(got[40, 40].g.float32 - want[1]) <= 1.5
+    check abs(got[40, 40].b.float32 - want[2]) <= 1.5
 
   test "text around a value keeps its spaces":
     proc drawn(children: varargs[SvgNode]): Image =
@@ -252,10 +278,12 @@ suite "ui layout":
       second = layoutUi(panel(true), 200, 120, UiInput(), regions, memo)
       a = first.paths
       b = second.paths
-    check a.len == 4 and b.len == 4   # the count, Lamp twice (bold), Heating
-    check b[0] != a[0]                # the count: set again
-    check b[1] == a[1] and b[2] == a[2] and b[3] == a[3] # the labels: the same nodes
-    check b[2].attr("transform").startsWith("translate(") # bold's second strike, kept too
+    # A glyph a node, spaces none: the count ("0 of 2 on" -> "1 of 2 on", 6
+    # glyphs), Lamp twice (bold, 8), Heating (7).
+    check a.len == 21 and b.len == 21
+    check b[0] != a[0]                    # the count: set again
+    for i in 6 ..< 21: check b[i] == a[i] # the labels: the same nodes
+    check b[7].path == b[6].path and b[7].offset.x > b[6].offset.x # bold's second strike, kept too
     # What the memo hands back draws what a layout without it draws.
     let
       got = newImage(parseSvg(second, 200, 120))
@@ -300,7 +328,7 @@ suite "ui layout":
     var kept, fresh: int
     for node in flipped.children:
       if node in again.children: inc kept else: inc fresh
-    check fresh > 0 and fresh < 6 and kept > 6
+    check fresh > 0 and kept > fresh
     check samePicture(flipped, layoutUi(panel([true, true, false]), 200, 200))
     # A box above them moves the cards down: drawn where they are now.
     let moved = layoutUi(panel([true, true, false], extra = true), 200, 200, UiInput(), regions, memo)

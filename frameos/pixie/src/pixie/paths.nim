@@ -2533,10 +2533,17 @@ var
   coverageCacheTick {.threadvar.}: int
   coverageCacheHits* {.threadvar.}: int
   coverageCacheMisses* {.threadvar.}: int
+  coverageSeen {.threadvar.}: Table[CoverageKey, bool]
+    ## Drawn once already: a mask is made the second time. A UI's toggle
+    ## draws mostly paths it never draws again (the changed card's new
+    ## text), and making a mask for each was slower than filling it.
+
+const CoverageSeenMax = 4096
 
 proc clearCoverageCache*() {.raises: [].} =
   ## Lets every kept mask go (render memory is short; the thread is done).
   coverageCache.clear()
+  coverageSeen.clear()
   coverageCacheBytes = 0
 
 proc coverageCacheUsedBytes*(): int {.raises: [].} =
@@ -2626,6 +2633,20 @@ proc fillFromCoverageCache(
   inc coverageCacheTick
   var mask = coverageCache.getOrDefault(key)
   if mask.isNil or mask.path != path:
+    if not coverageSeen.hasKey(key):
+      # The first sight: drawn as always, remembered.
+      if coverageSeen.len >= CoverageSeenMax:
+        coverageSeen.clear()
+      coverageSeen[key] = true
+      return false
+    # A mask covers the whole path; a fill under a view only what shows.
+    # A large path seen through a small damage box is filled.
+    let
+      b = path.localBounds()
+      visible = max(0'f32, min(b.x + b.w + tx, image.width.float32) - max(b.x + tx, 0)) *
+        max(0'f32, min(b.y + b.h + ty, image.height.float32) - max(b.y + ty, 0))
+    if b.w * b.h > 4 * visible + 256:
+      return false
     var shapes: seq[Polygon]
     if stroke:
       var points = 0

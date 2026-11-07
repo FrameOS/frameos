@@ -68,10 +68,14 @@ for kind in ["rgbx", "565", "gray8"]:
     clearCoverageCache()
     coverageCacheHits = 0
     coverageCacheMisses = 0
+    let first = make(kind)
+    first.draw(box, shape, vec2(3.4, 2.75), view) # seen once: filled as always
+    doAssert coverageCacheMisses == 0 and coverageCacheHits == 0
+    doAssert maxDiff(plain, first) == 0
     let cached = make(kind)
     cached.draw(box, shape, vec2(3.4, 2.75), view)
     let misses = coverageCacheMisses
-    doAssert misses == 4, "every element a miss the first time: " & $misses
+    doAssert misses == 4, "every element a miss the second time: " & $misses
     doAssert coverageCacheHits == 0
     let again = make(kind)
     again.draw(box, shape, vec2(3.4, 2.75), view)
@@ -83,6 +87,7 @@ for kind in ["rgbx", "565", "gray8"]:
     doAssert maxDiff(cached, again) == 0
     # A different fractional offset is another mask.
     let moved = make(kind)
+    moved.draw(box, shape, vec2(3.9, 2.75), view)
     moved.draw(box, shape, vec2(3.9, 2.75), view)
     doAssert coverageCacheMisses == misses + 4
     coverageCacheBudget = 0
@@ -97,6 +102,7 @@ coverageCacheBudget = 3000
 clearCoverageCache()
 let small = make("rgbx")
 let box = roundedBox()
+small.fillPath(box, rgba(0, 0, 0, 255), translate(vec2(1, 1)))
 small.fillPath(box, rgba(0, 0, 0, 255), translate(vec2(1, 1)))
 doAssert coverageCacheUsedBytes() == 0, "a 120x60 mask does not fit 3 KB"
 coverageCacheBudget = 0

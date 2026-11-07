@@ -12,7 +12,7 @@
 ## equal-column grids; `absolute` places a child against its parent's padding
 ## box. Text is set with pixie's typesetter and drawn as its outlines.
 
-import std/[math, strutils, unicode]
+import std/[math, strutils, tables, unicode]
 import pixie
 import pixie/fileformats/svg
 import frameos/ui/tailwind
@@ -140,6 +140,7 @@ type
     emitted: seq[SvgNode]
     emittedRegions: seq[UiRegion]
     emittedAt: array[7, float32]
+    emittedOver: ColorRGBA  ## the backdrop its emit pre-blended against
     emittedFor: (int, float32, float32)
     emittedGradients: (int, int)
     # What the pointer can do to it (UiRegion).
@@ -1059,6 +1060,25 @@ proc paint(node: SvgNode, c: ColorRGBA, opacity: float32, attr = "fill") =
 proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradients: var int,
     regions: var seq[UiRegion]) {.raises: [].}
 
+# What an in-flow box is painted over while the emit is inside it: its
+# parent's background when that is one flat opaque colour (a = 255), else
+# nothing known (a = 0). A translucent background over it (a card's
+# bg-white/10) is drawn as the opaque colour the blend makes: on a 565 or
+# grey panel a translucent fill unpacks, blends and packs every pixel, and
+# the "off" card of the home panel rastered 28 ms slower than the "on" one
+# on an ESP32 for that alone (2026-11-07). Absolute children may lie over
+# anything, so they are painted over nothing known.
+var emitBackdrop {.threadvar.}: ColorRGBA
+
+proc overBackdrop(c: ColorRGBA, opacity: float32): tuple[color: ColorRGBA, opacity: float32] =
+  ## `c` at `opacity`, as the colour it makes over the backdrop.
+  let a = c.a.float32 / 255 * opacity
+  if emitBackdrop.a != 255 or a >= 1 or a <= 0:
+    return (c, opacity)
+  template mix(f, g: uint8): uint8 =
+    uint8(clamp(round(f.float32 * a + g.float32 * (1 - a)), 0, 255))
+  (rgba(mix(c.r, emitBackdrop.r), mix(c.g, emitBackdrop.g), mix(c.b, emitBackdrop.b), 255), 1'f32)
+
 proc emitPaint(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode], gradients: var int) =
   ## The box's background and border.
   template b: untyped = n.box
@@ -1106,7 +1126,8 @@ proc emitPaint(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode],
       if opacity < 1:
         node.attrs.add(("opacity", num(opacity)))
     else:
-      node.paint(b.bg, opacity)
+      let (bg, bgOpacity) = overBackdrop(b.bg, opacity)
+      node.paint(bg, bgOpacity)
     drawn.add node
   let bw = b.border
   if bw != [0'f32, 0, 0, 0] and b.borderColor.a > 0:
@@ -1173,6 +1194,84 @@ proc emitSvg(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode]) =
   group.children = n.src.children
   drawn.add group.recolored(n.text.color.hex)
 
+# -------- Glyph runs
+#
+# Text is drawn a glyph at a time: each glyph one shared path per typeface,
+# rune and size (kept here), placed with the node's `offset` at a quarter
+# pixel. pixie keeps the coverage of a shared path at each subpixel offset
+# (paths.nim, the coverage cache), so a letter drawn again — in another
+# label, in the next render, in a changed card's new text — is a mask
+# blended into the panel, not an outline flattened and scanned. A run's
+# path, new for every new text, was most of a toggled card's raster on an
+# ESP32 (docs/perf-todo.md). Glyphs sit up to an eighth of a pixel from
+# where the typesetter put them.
+
+var glyphPaths {.threadvar.}: Table[(uint, int32, int32), Path]
+
+const GlyphPathsMax = 768
+
+proc quarter(v: float32): float32 {.inline.} =
+  round(v * 4) / 4
+
+proc glyphPath(font: Font, rune: Rune): Path =
+  ## The rune's outline at the font's size, at the origin, shared; nil for
+  ## a glyph that draws nothing.
+  let key = (cast[uint](font.typeface), rune.int32, int32(font.size * 64))
+  if glyphPaths.hasKey(key):
+    return glyphPaths.getOrDefault(key)
+  if glyphPaths.len >= GlyphPathsMax:
+    glyphPaths.clear()
+  var path: Path
+  try:
+    let typeface = font.typeface.fallbackTypeface(rune)
+    if typeface.isNil or not typeface.hasColorGlyph(rune):
+      path = font.typeface.getGlyphPath(rune)
+      path.transform(scale(vec2(font.scale)))
+      path.share()
+      let b = path.localBounds()
+      if b.w <= 0 or b.h <= 0:
+        path = nil
+  except PixieError:
+    path = nil
+  glyphPaths[key] = path
+  path
+
+proc emitGlyphs(arrangement: Arrangement, n: UiNode, x, y, opacity: float32,
+    drawn: var seq[SvgNode]): bool =
+  ## The arrangement as glyph runs; false when it has what glyphs cannot
+  ## carry (an underline, a strikethrough), for the path per span instead.
+  for font in arrangement.fonts:
+    if font.underline or font.strikethrough:
+      return false
+  for spanIndex, (start, stop) in arrangement.spans:
+    let
+      font = arrangement.fonts[spanIndex]
+      color = font.paint.color.rgba
+      bold = font in n.bold
+      strike = quarter(font.size / 24)
+    for i in start .. stop:
+      let rune = arrangement.runes[i]
+      if rune.isWhiteSpace:
+        continue
+      let path = glyphPath(font, rune)
+      if path.isNil:
+        continue
+      let
+        at = arrangement.positions[i]
+        offset = vec2(quarter(at.x + x), quarter(at.y + y))
+        node = SvgNode(tag: "path", path: path, offset: offset)
+      node.paint(color, opacity)
+      drawn.add node
+      if bold:
+        # No bold face to draw it in (an ESP32 has one): the same outline
+        # filled again a little to the right, the double strike of a
+        # typewriter. (It was a round-joined stroke of the outline, a circle
+        # per join: over half the raster of a toggled card, 2026-11-07.)
+        let second = SvgNode(tag: "path", path: path, offset: offset + vec2(strike, 0))
+        second.paint(color, opacity)
+        drawn.add second
+  true
+
 proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
   let arrangement = n.arrange(w, n.text.align)
   if arrangement.runes.len == 0:
@@ -1185,11 +1284,6 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
       drawn.add node
     return
   let first = drawn.len
-  var paths: seq[Path]
-  try:
-    paths = arrangement.computePaths()
-  except PixieError:
-    return
   # arrange() sets text a pixel wider than its box, to wrap where it was
   # measured: centered or right-aligned lines come back by what it added.
   let shift =
@@ -1197,6 +1291,12 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
     of CenterAlign: -0.5'f32
     of RightAlign: -1
     else: 0
+  var paths: seq[Path]
+  if not arrangement.emitGlyphs(n, x + shift, y, opacity, drawn):
+    try:
+      paths = arrangement.computePaths()
+    except PixieError:
+      return
   for i, path in paths:
     let font = arrangement.fonts[i]
     path.transform(translate(vec2(x + shift, y)))
@@ -1210,9 +1310,8 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
       # join, 303 for an 11-glyph label, and that one label was over half
       # the raster of a toggled home-panel card (2026-11-07). The second fill
       # shares the path, so its flattened shapes are flattened once.
-      let strike = SvgNode(tag: "path", path: path)
+      let strike = SvgNode(tag: "path", path: path, offset: vec2(font.size / 24, 0))
       strike.paint(font.paint.color.rgba, opacity)
-      strike.attrs.add(("transform", "translate(" & num(font.size / 24) & " 0)"))
       drawn.add strike
   if remembered:
     template entry: untyped = memo.kept[n.memo]
@@ -1314,7 +1413,8 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
   let
     at = [x, y, w, h, op, sx, sy]
     call = (n.lastFix, n.lastW, n.lastH)
-  if n.kind == ukBox and n.emittedAt == at and n.emittedFor == call and n.emittedGradients[0] == gradients:
+  if n.kind == ukBox and n.emittedAt == at and n.emittedFor == call and n.emittedGradients[0] == gradients and
+      n.emittedOver == emitBackdrop:
     # Taken back unchanged (build), laid out by the same call and placed
     # where it was: what it emitted then, the same nodes for pixie to keep.
     for node in n.emitted:
@@ -1365,11 +1465,26 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
         return
       view = SvgNode(tag: "svg", attrs: @[("x", num(vx)), ("y", num(vy)), ("width", num(vw)),
         ("height", num(vh)), ("viewBox", nums([vx + sx, vy + sy, vw, vh]))])
+    let outer = emitBackdrop
     for pass in [false, true]:
+      # What the children are painted over (overBackdrop): this box's own
+      # background when it leaves one flat opaque colour, the one it was
+      # painted over when it has none, nothing known under absolute ones.
+      emitBackdrop =
+        if pass: rgba(0, 0, 0, 0)
+        elif b.gradient > 0 or b.bg.a == 0 and op < 1: rgba(0, 0, 0, 0)
+        elif b.bg.a == 0: outer
+        else:
+          let saved = emitBackdrop
+          emitBackdrop = outer
+          let (bg, bgOpacity) = overBackdrop(b.bg, op)
+          emitBackdrop = saved
+          if bg.a == 255 and bgOpacity >= 1: bg else: rgba(0, 0, 0, 0)
       for c in n.children:
         if c.box.absolute == pass:
           if clips: c.emit(x, y, op, view.children, gradients, regions)
           else: c.emit(x, y, op, drawn, gradients, regions)
+    emitBackdrop = outer
     if clips:
       if caret[2] > 0:
         let bar = SvgNode(tag: "rect", attrs: @[("x", num(caret[0])), ("y", num(caret[1])),
@@ -1401,6 +1516,7 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     n.emitted = drawn[first .. ^1]
     n.emittedRegions = regions[firstRegion .. ^1]
     n.emittedAt = at
+    n.emittedOver = emitBackdrop
     n.emittedFor = call
     n.emittedGradients = (firstGradient, gradients - firstGradient)
 
@@ -1612,6 +1728,7 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     page.paint(top.box.bg, 1)
     result.children.add page
   var gradients = 0
+  emitBackdrop = rgba(0, 0, 0, 0) # the root is painted over whatever the scene drew
   probe(phEmit):
     top.emit(0, 0, 1, result.children, gradients, regions)
   if input.open > 0:

@@ -29,6 +29,9 @@ type
     children*: seq[SvgNode]
     image*: Image
     path*: Path
+    offset*: Vec2 ## a translation after `transform`: what a caller would
+                  ## otherwise write as a transform string for every glyph
+                  ## of a text run (frameos/ui/layout.nim emitText)
     # What parseSvg made of this node as a child of the document, and under
     # which inherited properties: a caller that hands the same node over
     # again (a UI's unchanged card) gets the same elements back unparsed.
@@ -561,6 +564,8 @@ proc parseSvgProperties(node: SvgNode, inherited: SvgProperties): SvgProperties 
     discard # Inherit
   else:
     result.transform = result.transform * parseSvgTransform(transform)
+  if node.offset.x != 0 or node.offset.y != 0:
+    result.transform = result.transform * translate(node.offset)
 
 type
   SvgTextPosition = object
