@@ -1,14 +1,16 @@
 // The embedded editor (frameos-editor, the store's Editor panel) is a file
-// tree: template.json, then each scene of the template as a diagram with its
-// app nodes as folders of files. What the tree lists and the template.json
+// tree: template.json, then each scene of the template as a folder holding
+// its diagram and the apps it carries the source of, as folders of files. What the tree lists and the template.json
 // it edits are pinned here; how the selection follows the diagram is in
 // embedded-editor-file-tree-logic.test.ts.
 
 import { describe, expect, it } from "vitest";
 import type { FrameScene } from "../../../../../../frontend/src/types";
 import {
+  SCENE_DIAGRAM_FILE,
+  isSceneApp,
   sceneAppEntries,
-  sceneFileName,
+  sceneFolderName,
   shownSelection,
   templateChangesFromJson,
   templateJsonText,
@@ -55,37 +57,46 @@ const template: SceneTemplateMetadata = {
 };
 
 describe("what the tree lists", () => {
-  it("names a scene's diagram after the scene, its id when it has no name", () => {
-    expect(sceneFileName(clock)).toBe("Clock.scene");
-    expect(sceneFileName(photos)).toBe("photos.scene");
+  it("names a scene's folder after the scene, its id when it has no name", () => {
+    expect(sceneFolderName(clock)).toBe("Clock");
+    expect(sceneFolderName(photos)).toBe("photos");
+    expect(SCENE_DIAGRAM_FILE).toBe("diagram.scene");
   });
 
-  it("lists every app node as a folder: the scene's own apps first, catalog built-ins last", () => {
+  it("lists the scene's own apps as folders, in diagram order, and no built-in", () => {
+    // The node's own name wins over the scene app's; the two render/text
+    // nodes run a built-in app and are not files of the template.
     expect(sceneAppEntries(clock)).toEqual([
-      // The scene's own apps first (the node's own name wins over the scene
-      // app's), then the built-ins; each group in diagram order.
-      { nodeId: "face", label: "Clock face", keyword: "face", source: "scene" },
-      { nodeId: "inline", label: "inline", keyword: "inline", source: "scene" },
-      { nodeId: "shared", label: "Weather", keyword: "weatherApp", source: "scene" },
-      // Two nodes of one name: each gets its node id, neither hides the other.
-      { nodeId: "text1", label: "text (text1)", keyword: "render/text", source: "builtin" },
-      { nodeId: "text2", label: "text (text2)", keyword: "render/text", source: "builtin" },
+      { nodeId: "face", label: "Clock face", keyword: "face" },
+      { nodeId: "inline", label: "inline", keyword: "inline" },
+      { nodeId: "shared", label: "Weather", keyword: "weatherApp" },
     ]);
     expect(sceneAppEntries(photos)).toEqual([
-      {
-        nodeId: "album",
-        label: "photoAlbum",
-        keyword: "repo/apps/image/photoAlbum",
-        source: "scene",
-      },
+      { nodeId: "album", label: "photoAlbum", keyword: "repo/apps/image/photoAlbum" },
     ]);
     expect(sceneAppEntries(null)).toEqual([]);
+    expect(isSceneApp(clock, "face")).toBe(true);
+    expect(isSceneApp(clock, "text1")).toBe(false);
+    expect(isSceneApp(clock, "render")).toBe(false);
+  });
+
+  it("tells two nodes of one name apart by their node ids", () => {
+    const twice = {
+      ...clock,
+      nodes: [
+        appNode("a", { keyword: "x", sources: { "app.ts": "" } }),
+        appNode("b", { keyword: "x", sources: { "app.ts": "" } }),
+      ],
+      apps: {},
+    } as unknown as FrameScene;
+    expect(sceneAppEntries(twice).map((entry) => entry.label)).toEqual(["x (a)", "x (b)"]);
   });
 
   it("falls back to the scene's diagram when the open app's node is gone", () => {
     const open = { kind: "app", sceneId: "clock", nodeId: "face" } as const;
     expect(shownSelection(open, [clock])).toEqual(open);
     expect(shownSelection({ ...open, nodeId: "deleted" }, [clock])).toEqual({ kind: "diagram" });
+    expect(shownSelection({ ...open, nodeId: "text1" }, [clock])).toEqual({ kind: "diagram" });
     expect(shownSelection(open, [photos])).toEqual({ kind: "diagram" });
     expect(shownSelection({ kind: "template" }, [])).toEqual({ kind: "template" });
   });

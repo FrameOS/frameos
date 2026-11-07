@@ -29,6 +29,7 @@ import { Diagram } from '../scenes/frame/panels/Diagram/Diagram'
 import { diagramLogic } from '../scenes/frame/panels/Diagram/diagramLogic'
 import { Button } from '../components/Button'
 import { EditApp } from '../scenes/frame/panels/EditApp/EditApp'
+import { EditAppModal } from '../scenes/frame/panels/EditApp/EditAppModal'
 import { editAppLogic } from '../scenes/frame/panels/EditApp/editAppLogic'
 import { Apps } from '../scenes/frame/panels/Apps/Apps'
 import { Events } from '../scenes/frame/panels/Events/Events'
@@ -49,7 +50,7 @@ import { ensurePortalRoots } from './portalRoots'
 import { frameLogic } from '../scenes/frame/frameLogic'
 import { sanitizeIncomingScenes } from './sanitizeIncomingScenes'
 import { SceneFileTree } from './SceneFileTree'
-import { sceneAppEntries, sceneFileName, type SceneTemplateMetadata } from './sceneFiles'
+import { SCENE_DIAGRAM_FILE, sceneAppEntries, sceneFolderName, type SceneTemplateMetadata } from './sceneFiles'
 import { sceneFileTreeLogic } from './sceneFileTreeLogic'
 import { TemplateFile, type TemplateCategoryOption } from './TemplateFile'
 
@@ -381,8 +382,8 @@ export function EmbeddedEditor(): JSX.Element {
             message.theme === 'dark' || message.theme === 'light'
               ? message.theme
               : document.documentElement.dataset.frameosTheme === 'dark'
-              ? 'dark'
-              : 'light',
+                ? 'dark'
+                : 'light',
           // Only a same-origin proxy: it sees every URL scene code fetches.
           previewProxyUrl: sameOriginPreviewProxyUrl(message.previewProxyUrl, window.location.origin),
           description: typeof message.description === 'string' ? message.description : undefined,
@@ -619,7 +620,7 @@ function AppFileHeader({ scene, nodeId, label }: { scene: FrameScene; nodeId: st
   return (
     <>
       <FilePath
-        parts={[sceneFileName(scene), label, ...(activeFile ? [activeFile] : [])]}
+        parts={[sceneFolderName(scene), label, ...(activeFile ? [activeFile] : [])]}
         suffix={hasChanges ? <span className="ml-1.5 shrink-0 font-sans text-xs font-semibold">(unsaved)</span> : null}
       />
       <div className="flex shrink-0 items-center gap-1.5">
@@ -673,8 +674,8 @@ function EmbeddedEditorBody({
   // Keep the preview logic (and the API keys applied to it) alive across
   // panel open/close cycles.
   useMountedLogic(livePreviewLogic({ frameId: EMBED_FRAME_ID }))
-  const { shownSelection, treeOpen } = useValues(sceneFileTreeLogic({ frameId: EMBED_FRAME_ID }))
-  const { setTreeOpen } = useActions(sceneFileTreeLogic({ frameId: EMBED_FRAME_ID }))
+  const { shownSelection, treeOpen, builtinAppEditor } = useValues(sceneFileTreeLogic({ frameId: EMBED_FRAME_ID }))
+  const { setTreeOpen, closeBuiltinApp } = useActions(sceneFileTreeLogic({ frameId: EMBED_FRAME_ID }))
   const [activePanel, setActivePanel] = useState<EmbedPanel | null>(null)
   const visiblePanels = showPreviewButton
     ? panelDefinitions
@@ -686,10 +687,10 @@ function EmbeddedEditorBody({
 
   const selectedScene = scenes.find((scene) => scene.id === selectedSceneId) ?? null
   const appScene =
-    shownSelection.kind === 'app' ? scenes.find((scene) => scene.id === shownSelection.sceneId) ?? null : null
+    shownSelection.kind === 'app' ? (scenes.find((scene) => scene.id === shownSelection.sceneId) ?? null) : null
   const appEntry =
     shownSelection.kind === 'app' && appScene
-      ? sceneAppEntries(appScene).find((entry) => entry.nodeId === shownSelection.nodeId) ?? null
+      ? (sceneAppEntries(appScene).find((entry) => entry.nodeId === shownSelection.nodeId) ?? null)
       : null
 
   return (
@@ -729,7 +730,7 @@ function EmbeddedEditorBody({
             ) : shownSelection.kind === 'app' && appScene && appEntry ? (
               <AppFileHeader scene={appScene} nodeId={appEntry.nodeId} label={appEntry.label} />
             ) : (
-              <FilePath parts={selectedScene ? [sceneFileName(selectedScene)] : []} />
+              <FilePath parts={selectedScene ? [sceneFolderName(selectedScene), SCENE_DIAGRAM_FILE] : []} />
             )}
           </div>
         </div>
@@ -798,6 +799,14 @@ function EmbeddedEditorBody({
           </div>
         )}
       </div>
+      {/* A built-in app is no file of the template: its "Edit app" shows it
+          over the pane, as the app editor always did. */}
+      {builtinAppEditor ? (
+        <EditAppModal
+          editor={builtinAppEditor}
+          onClose={() => closeBuiltinApp(builtinAppEditor.sceneId, builtinAppEditor.nodeId ?? '')}
+        />
+      ) : null}
     </div>
   )
 }
