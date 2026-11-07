@@ -189,6 +189,7 @@ describe("panel dither port", () => {
 describe("panel palette for a frame", () => {
   it("knows the panel families by device name", () => {
     expect(panelPaletteKindForDevice("waveshare.EPD_13in3e")).toBe("spectra6");
+    expect(panelPaletteKindForDevice("waveshare.EPD_9in7e")).toBe("spectra6");
     expect(panelPaletteKindForDevice("pimoroni.inky_impression_7")).toBe("spectra6");
     expect(panelPaletteKindForDevice("pimoroni.inky_impression_7_3")).toBe("sevenColor");
     expect(panelPaletteKindForDevice("waveshare.EPD_7in3f", 'Waveshare 7.3" (F) 800x480 7 Color')).toBe("sevenColor");

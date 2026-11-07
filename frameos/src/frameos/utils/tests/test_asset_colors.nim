@@ -183,6 +183,7 @@ suite "the frame's automatic fit":
 
   test "the panel palette follows the device name":
     check panelPaletteForDevice("waveshare.EPD_13in3e").len == 6
+    check panelPaletteForDevice("waveshare.EPD_9in7e").len == 6
     check panelPaletteForDevice("pimoroni.inky_impression_7_2025").len == 6
     check panelPaletteForDevice("pimoroni.inky_impression_7").len == 6
     check panelPaletteForDevice("pimoroni.inky_impression_7_3") == saturated7ColorPalette

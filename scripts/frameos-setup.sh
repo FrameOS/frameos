@@ -673,6 +673,7 @@ waveshare.EPD_7in5b_V2:800x480
 waveshare.EPD_7in5b_V2_old:800x480
 waveshare.EPD_7in5bc:640x384
 waveshare.EPD_7in5c:640x384
+waveshare.EPD_9in7e:1120x784
 web_only:800x480
 framebuffer:800x480
 http.upload:800x480

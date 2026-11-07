@@ -237,7 +237,7 @@ proc panelPaletteForDevice*(device: string, custom: seq[(int, int, int)] = @[]):
   ## two-colour ones, full-colour displays — where the fit stays off unless
   ## asked for. Mirrors `panelPaletteKindForDevice` in devicePalette.ts.
   let name = device.toLowerAscii()
-  let spectra = name.endsWith("e") and (name.contains("13in3e") or name.contains("7in3e") or
+  let spectra = name.endsWith("e") and (name.contains("13in3e") or name.contains("9in7e") or name.contains("7in3e") or
       name.contains("4in0e") or name.contains("photopainter")) or
     name.contains("inky_impression_4_2025") or name.contains("inky_impression_4_spectra6") or
     name.contains("inky_impression_7_2025") or name.contains("inky_impression_13") or

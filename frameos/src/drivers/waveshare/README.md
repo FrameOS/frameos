@@ -3,7 +3,9 @@
 `ePaper/` is the Waveshare reference tree
 (https://github.com/waveshareteam/e-Paper/blob/master/RaspberryPi_JetsonNano/c/lib/e-Paper/)
 plus a handful of FrameOS-maintained forks. Last synced with upstream commit
-`a794fbc` (2026-08). Every vendor driver additionally carries the FrameOS
+`d28b3c4` (2026-10-27; its one C change since `a794fbc` rewords the busy log
+lines of `EPD_7in3e.c`, a fork whose busy waits are FrameOS's own, so nothing
+was copied). Every vendor driver additionally carries the FrameOS
 busy-wait timeout (`EPD_BUSY_TIMEOUT_MS`, added in #230) — re-apply it to a
 freshly copied file, or the panel can hang the render thread forever. **The C files are the one
 implementation of every panel, on every target:**
@@ -39,6 +41,15 @@ The vendor drivers do not call `DEV_Busy_Wait`: each has its own bounded
 `DEV_Debug_Vendor`, which recognises that one message and parks the same
 `DEV_Error` — so a wedged panel is a failed render in all 72 drivers without
 touching vendor code, and a resync cannot undo it.
+
+## Panels from per-product repositories
+
+Some newer panels ship in a repository of their own instead of the shared
+tree; resync them from there:
+
+| File | Source |
+| --- | --- |
+| `EPD_9in7e.c/.h` | https://github.com/waveshareteam/9.7inch_e-Paper_E (`example/RaspberryPi_JetsonNano/c/lib/e-Paper`, commit `342301a`). FrameOS changes: bounded busy wait, the `printf` progress lines as `Debug`, CRLF line endings removed, and the header's `Show7Block` declaration dropped (the vendor never defines it). The binding was written by hand in c2nim's shape. |
 
 ## FrameOS-maintained forks (do not overwrite on resync)
 
