@@ -60,7 +60,7 @@ describe("what the tree lists", () => {
   it("names a scene's folder after the scene, its id when it has no name", () => {
     expect(sceneFolderName(clock)).toBe("Clock");
     expect(sceneFolderName(photos)).toBe("photos");
-    expect(SCENE_DIAGRAM_FILE).toBe("diagram.scene");
+    expect(SCENE_DIAGRAM_FILE).toBe("scene.diagram");
   });
 
   it("lists the scene's own apps as folders, in diagram order, and no built-in", () => {
