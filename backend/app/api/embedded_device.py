@@ -41,7 +41,6 @@ import re
 import struct
 from datetime import datetime, timezone
 from http import HTTPStatus
-from arq import ArqRedis as Redis
 
 from fastapi import Depends, Header, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -58,11 +57,9 @@ from app.models.frame import (
     normalize_frame_admin_auth,
     normalize_https_proxy,
     shipped_frame_settings,
-    update_frame,
 )
 from app.models.settings import get_settings_dict
 from app.redis import get_redis
-from app.utils.embedded_report import adopt_first_rotate
 from app.utils.embedded_render import RenderQueueFull, render_scene_rgba_and_state
 from app.utils.frame_commands import previewed_scenes
 from app.api.firmware_release import latest_release_ota_manifest, stream_latest_release_ota_image
@@ -952,15 +949,11 @@ def _frame_utc_offset_minutes(frame: Frame) -> int:
 @api_public.get("/frames/{id:int}/embedded/settings")
 async def api_embedded_device_settings(
     id: int,
-    rotate: int | None = Query(None),
     db: Session = Depends(get_db),
-    redis: Redis = Depends(get_redis),
     authorization: str = Header(None),
     if_none_match: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
-    if adopt_first_rotate(frame, rotate):
-        await update_frame(db, redis, frame)
     # Same cheap-poll contract as /embedded/scenes: the ETag is the payload's
     # sha256, so an unchanged configuration costs the device a 304.
     payload, etag = embedded_settings_document(db, frame)

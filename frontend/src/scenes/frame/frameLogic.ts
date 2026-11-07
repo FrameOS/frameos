@@ -1164,7 +1164,7 @@ function normalizeBuildrootForComparison(value: unknown): Record<string, unknown
  */
 function normalizeEmbeddedForComparison(value: unknown): Record<string, unknown> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-  const { lastBoot: _lastBoot, layout: _layout, firmware: _firmware, reported: _reported, ...rest } = source
+  const { lastBoot: _lastBoot, layout: _layout, firmware: _firmware, ...rest } = source
   return rest
 }
 

@@ -1260,17 +1260,28 @@ describe("command redelivery", () => {
 // hardware.lanAccess (hello and state), and the code the owner types rides
 // lan_access_set to the device and is dropped from the row once answered.
 describe("What a frame reports of itself", () => {
-  it("the settings mirror follows its rotation, and its network is on the row", async () => {
+  it("the settings mirror follows its rotation from hello and its scale from state", async () => {
     const { frame, privateKey, token } = await createFrameFixture();
     const device = await openDevice(token);
     await handshake(device, privateKey, {
-      hardware: { ip: "10.0.0.9", platform: "esp32s3", rotate: 90, wifiSsid: "Cafe" },
+      hardware: { platform: "esp32s3", renderScale: 0, rotate: 90 },
     });
-    const row = await waitFor(async () => {
+    await waitFor(async () => {
       const [r] = await db.select().from(frames).where(eq(frames.id, frame.id));
       return (r?.settings as Record<string, unknown> | null)?.rotate === 90 ? r : undefined;
     }, "the rotation from hello");
-    expect(row.hardware).toMatchObject({ ip: "10.0.0.9", wifiSsid: "Cafe" });
+    // Changed on its screen, live: the `state` that follows says so.
+    device.send({
+      hardware: { platform: "esp32s3", renderScale: 1.5, rotate: 90 },
+      id: randomUUID(),
+      states: { active_scene: "clock" },
+      type: "state",
+    });
+    const row = await waitFor(async () => {
+      const [r] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      return (r?.settings as Record<string, unknown> | null)?.render_scale === 1.5 ? r : undefined;
+    }, "the scale from state");
+    expect(row.settings).toMatchObject({ render_scale: 1.5, rotate: 90 });
     device.ws.close();
   });
 

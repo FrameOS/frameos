@@ -141,8 +141,9 @@ void fos_cloud_dispatch_backend_command(cJSON *root, void (*reply)(cJSON *msg, v
 /* The hello's state fields — frameos_version, active_scene, states (keyed by
  * scene id), scenes_checksum — on `msg`, from one bounded look at the runtime
  * (left out when it is busy). What the backend's commands pull reports too. */
-/* What can change on the frame itself (the panel on its screen, the console),
- * for a control plane's copy: its rotation, Wi-Fi network and address. Never
- * the password. */
+/* What can change on the frame itself (the settings on its screen, the
+ * console), for the cloud's settings mirror: its rotation and render scale,
+ * on every hello and `state` (docs/scene-settings.md "What a control plane
+ * learns"). Never its Wi-Fi: no plane is told the network. */
 void fos_cloud_add_device_report(cJSON *msg);
 void fos_cloud_add_state_fields(cJSON *msg);

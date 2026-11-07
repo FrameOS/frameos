@@ -1003,10 +1003,8 @@ static settings_source_t select_source(char *url, size_t url_len,
 {
     const fos_config_t *config = fos_config();
     if (config->backend_url[0] && config->frame_id != 0 && config->api_key[0]) {
-        /* Its rotation for the backend's first word with it: the frame's own
-         * stands then (app/utils/embedded_report.py). */
-        snprintf(url, url_len, "%s/api/frames/%lu/embedded/settings?rotate=%u",
-                 config->backend_url, (unsigned long)config->frame_id, (unsigned)config->rotate);
+        snprintf(url, url_len, "%s/api/frames/%lu/embedded/settings",
+                 config->backend_url, (unsigned long)config->frame_id);
         snprintf(auth, auth_len, "Bearer %s", config->api_key);
         return SETTINGS_SOURCE_BACKEND;
     }

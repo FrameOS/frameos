@@ -578,22 +578,43 @@ export function mergeFrameSettings(
   return { ...readFrameSettings(stored), ...incoming };
 }
 
-// The stored settings with the rotation the frame reports (hello `hardware`,
-// an ESP32's since it can change on its own screen, before the frame is linked),
-// or undefined when there is nothing to change. The mirror follows the device:
-// without this the Settings panel showed a rotation the frame never had, and
-// the next save pushed it. The hub leaves it alone while a push is on its way.
-export function settingsWithReportedRotate(
+// The settings a frame reports in its hello and `state` `hardware` (what it
+// has now: changed on its own screen, docs/scene-settings.md "What a control
+// plane learns", or set before it was linked), by the mirror's key. A plane
+// that leaves the page on adopts what the person at the frame chose.
+const reportedFrameSettings: ReadonlyArray<readonly [string, string]> = [
+  ["rotate", "rotate"],
+  ["renderScale", "render_scale"],
+];
+
+// The stored settings with what the frame reports, or undefined when there is
+// nothing to change. The mirror follows the device: without this the Settings
+// panel showed a rotation the frame no longer had, and the next save pushed it
+// back. A key the mirror never had is the device's default (0) and stays
+// unwritten while the device reports 0. The hub leaves the mirror alone while
+// a push is on its way.
+export function settingsWithReported(
   stored: unknown,
   hardware: unknown,
 ): Record<string, unknown> | undefined {
-  const rotate =
-    hardware && typeof hardware === "object" ? (hardware as { rotate?: unknown }).rotate : undefined;
-  if (rotate === undefined || !allowedFrameSettings.get("rotate")!(rotate)) {
+  if (!hardware || typeof hardware !== "object") {
     return undefined;
   }
   const settings = readFrameSettings(stored);
-  return settings.rotate === rotate ? undefined : { ...settings, rotate };
+  const next: Record<string, unknown> = { ...settings };
+  let changed = false;
+  for (const [reported, key] of reportedFrameSettings) {
+    const value = (hardware as Record<string, unknown>)[reported];
+    if (value === undefined || !allowedFrameSettings.get(key)!(value)) {
+      continue;
+    }
+    if (settings[key] === value || (settings[key] === undefined && value === 0)) {
+      continue;
+    }
+    next[key] = value;
+    changed = true;
+  }
+  return changed ? next : undefined;
 }
 
 // Read the stored jsonb back through the allowlist. It is written through

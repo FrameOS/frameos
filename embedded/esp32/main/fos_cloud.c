@@ -3057,8 +3057,7 @@ void fos_cloud_add_device_report(cJSON *msg)
 {
     const fos_config_t *config = fos_config();
     cJSON_AddNumberToObject(msg, "rotate", config->rotate);
-    cJSON_AddStringToObject(msg, "wifiSsid", config->wifi_ssid);
-    cJSON_AddStringToObject(msg, "ip", fos_wifi_ip());
+    cJSON_AddNumberToObject(msg, "renderScale", config->render_scale_milli / 1000.0);
 }
 
 void fos_cloud_add_state_fields(cJSON *msg)
