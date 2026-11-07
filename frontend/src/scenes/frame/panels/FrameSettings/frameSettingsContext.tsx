@@ -23,7 +23,9 @@ import {
   esp32LedCloudFrameSettingsMinVersion,
 } from '../../../../utils/cloudFrameApi'
 import {
+  cloudFrameSupportsFrameSettingsOnScreen,
   cloudFrameSupportsRenderScale,
+  frameSettingsOnScreenCloudFrameSettingsMinVersion,
   renderScaleCloudFrameSettingsMinVersion,
 } from '../../../../utils/cloudFrameSettings'
 import { frameRenderScaleOptions, type RenderScaleOption } from '../../../../utils/renderScale'
@@ -139,6 +141,10 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
   renderScaleDisabledReason: string | undefined
   /** The Scale select: "Automatic (N× on this panel)" and the steps (utils/renderScale.ts). */
   renderScaleOptions: RenderScaleOption[]
+  /** The frame page on the frame's own screen is a frame's with a screen: not a virtual frame's, not a Pico's. */
+  showFrameSettingsOnScreen: boolean
+  /** Why a cloud frame cannot take `frame_settings_on_screen` yet (older firmware); undefined when it can. */
+  frameSettingsOnScreenDisabledReason: string | undefined
 
   /** The panel this frame drives: the device reported it on the cloud, the form holds it elsewhere. */
   paletteDevice: string
@@ -582,6 +588,18 @@ export function FrameSettingsProvider({
   // keys above. Real ESP32 boards only: a virtual frame has no buttons to
   // press, and the Pico firmware has no buzzer support.
   const isPicoPlatform = (frameForm.embedded?.platform ?? frame.embedded?.platform ?? '').startsWith('pico')
+
+  // The frame page on the frame's own screen (docs/scene-settings.md "The
+  // frame page"): a frame with a screen of its own, both planes. A backend
+  // frame takes it with its next deploy whatever it runs (an older runtime
+  // ignores it); a cloud frame from the release that learned the key.
+  const showFrameSettingsOnScreen = surface !== 'cloudVirtual' && !isVirtualPlatform && !isPicoPlatform
+  const frameSettingsOnScreenDisabledReason =
+    !cloudProfile || cloudFrameSupportsFrameSettingsOnScreen(frame.frameos_version)
+      ? undefined
+      : frame.frameos_version
+      ? `This needs FrameOS ${frameSettingsOnScreenCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+      : `This needs FrameOS ${frameSettingsOnScreenCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
   const buttonBeep: FrameSettingsContextValue['buttonBeep'] = esp32CloudProfile
     ? {
         pin: frameForm.buzzer_pin,
@@ -911,6 +929,8 @@ export function FrameSettingsProvider({
     cloudBatteryEnablePinDisabledReason,
     renderScaleDisabledReason,
     renderScaleOptions,
+    showFrameSettingsOnScreen,
+    frameSettingsOnScreenDisabledReason,
 
     paletteDevice,
     palette: withCustomPalette[paletteDevice],

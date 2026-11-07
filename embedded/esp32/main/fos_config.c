@@ -53,6 +53,8 @@ static void load_defaults(void)
      * with every image edge materialized and the two panels compared. */
     s_config.image_fusion = true;
     s_config.allow_local_network = FRAMEOS_DEFAULT_ALLOW_LOCAL_NETWORK;
+    s_config.frame_settings_on_screen = true;
+    s_config.settings_unlock = false;
     s_config.tls_enable = FRAMEOS_DEFAULT_TLS_ENABLE;
     s_config.tls_port = FRAMEOS_DEFAULT_TLS_PORT;
     strlcpy(s_config.tls_server_cert, FRAMEOS_DEFAULT_TLS_SERVER_CERT, sizeof(s_config.tls_server_cert));
@@ -229,6 +231,8 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u8(nvs, "debug", &u8) == ESP_OK) s_config.debug_logging = u8 != 0;
     if (nvs_get_u8(nvs, "fusion", &u8) == ESP_OK) s_config.image_fusion = u8 != 0;
     if (nvs_get_u8(nvs, "allow_lan", &u8) == ESP_OK) s_config.allow_local_network = u8 != 0;
+    if (nvs_get_u8(nvs, "fs_on_screen", &u8) == ESP_OK) s_config.frame_settings_on_screen = u8 != 0;
+    if (nvs_get_u8(nvs, "settings_unlock", &u8) == ESP_OK) s_config.settings_unlock = u8 != 0;
     if (nvs_get_u8(nvs, "tls_enable", &u8) == ESP_OK) s_config.tls_enable = u8 != 0;
     if (nvs_get_u8(nvs, "admin_auth", &u8) == ESP_OK) s_config.admin_auth_enabled = u8 != 0;
     if (nvs_get_u32(nvs, "tls_port", &u32) == ESP_OK) s_config.tls_port = (uint16_t)u32;
@@ -408,6 +412,8 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u8(nvs, "debug", s_config.debug_logging ? 1 : 0), "debug");
     FOS_NVS_SET(nvs_set_u8(nvs, "fusion", s_config.image_fusion ? 1 : 0), "fusion");
     FOS_NVS_SET(nvs_set_u8(nvs, "allow_lan", s_config.allow_local_network ? 1 : 0), "allow_lan");
+    FOS_NVS_SET(nvs_set_u8(nvs, "fs_on_screen", s_config.frame_settings_on_screen ? 1 : 0), "fs_on_screen");
+    FOS_NVS_SET(nvs_set_u8(nvs, "settings_unlock", s_config.settings_unlock ? 1 : 0), "settings_unlock");
     FOS_NVS_SET(nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0), "tls_enable");
     FOS_NVS_SET(nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0), "admin_auth");
     FOS_NVS_SET(nvs_set_u32(nvs, "tls_port", s_config.tls_port), "tls_port");
@@ -495,6 +501,11 @@ esp_err_t fos_config_erase(void)
 bool fos_config_wifi_ready(void)
 {
     return s_config.wifi_ssid[0] != '\0';
+}
+
+bool fos_config_frame_page_offered(void)
+{
+    return s_config.frame_settings_on_screen || s_config.settings_unlock;
 }
 
 /* The chip's SPI flash / PSRAM pads, by target. esp_gpio_is_reserved below

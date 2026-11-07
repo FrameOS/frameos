@@ -2321,7 +2321,9 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * authoritative on the provider), `rotate` (the renderer sizes its canvas
  * once at init, so this one costs a reboot), `scaling_mode` (a per-decode
  * fallback fit, applied live on the next render pass), `render_scale` (what
- * JSX from .tsx/.jsx apps is laid out for, live the same way), `colors` (the
+ * JSX from .tsx/.jsx apps is laid out for, live the same way),
+ * `frame_settings_on_screen` (the frame page of the settings on the screen,
+ * read when the panel draws), `colors` (the
  * automatic fit switch and the frame-wide correction, applied live the same
  * way) and `palette` (the colour list the packer dithers to, live the same
  * way; the names ride along in the cloud only). The power keys —
@@ -2463,6 +2465,14 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
             return;
         }
         config->render_scale_milli = milli;
+    }
+    /* The frame page behind the gear of the settings on the screen
+     * (docs/scene-settings.md "The frame page"): read when the panel draws,
+     * live. The console's settings_unlock wins over false, and no plane
+     * sets that one. */
+    const cJSON *on_screen = cJSON_GetObjectItem(settings, "frame_settings_on_screen");
+    if (on_screen != NULL) {
+        config->frame_settings_on_screen = cJSON_IsTrue(on_screen);
     }
     const cJSON *colors = cJSON_GetObjectItem(settings, "colors");
     if (colors != NULL) {

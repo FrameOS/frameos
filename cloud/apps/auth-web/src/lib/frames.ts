@@ -255,6 +255,28 @@ export function frameSupportsRenderScaleSettings(
   return frameSupportsSettingsFrom(renderScaleFrameSettingsMinVersion, frameosVersion);
 }
 
+// 2026.11.5: `frame_settings_on_screen`, whether the settings on the frame's
+// own screen offer the frame page behind the gear (docs/scene-settings.md
+// "The frame page"). Both profiles learned it in the same release; the SPA's
+// floor is frameSettingsOnScreenCloudFrameSettingsMinVersion.
+export const frameSettingsOnScreenFrameSettingsMinVersion = "2026.11.5";
+export const frameSettingsOnScreenFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("linux", frameSettingsOnScreenFrameSettingsMinVersion)].filter(
+    (key) => key === "frame_settings_on_screen",
+  ),
+);
+export const esp32FrameSettingsOnScreenFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("esp32", frameSettingsOnScreenFrameSettingsMinVersion)].filter(
+    (key) => key === "frame_settings_on_screen",
+  ),
+);
+
+export function frameSupportsFrameSettingsOnScreen(
+  frameosVersion: string | null | undefined,
+): boolean {
+  return frameSupportsSettingsFrom(frameSettingsOnScreenFrameSettingsMinVersion, frameosVersion);
+}
+
 export function frameSupportsColorsSettings(
   frameosVersion: string | null | undefined,
 ): boolean {

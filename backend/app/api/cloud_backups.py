@@ -79,6 +79,7 @@ FRAME_RESTORE_FIELDS = (
     "max_http_response_bytes",
     "scaling_mode",
     "render_scale",
+    "frame_settings_on_screen",
     "rotate",
     "flip",
     "background_color",

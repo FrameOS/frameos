@@ -210,6 +210,18 @@ typedef struct {
      * not in the backend settings poll, not in the local HTTP API — because a
      * provider that could flip its own leash would not have one. */
     bool allow_local_network;
+    /* frame.json `frameSettingsOnScreen` (the contract's
+     * `frame_settings_on_screen`): the settings on the frame's own screen
+     * offer the frame page behind the gear (docs/scene-settings.md "The frame
+     * page"). NVS `fs_on_screen` (u8), absent = on. Set by the backend
+     * settings poll, the cloud set_settings and the console. */
+    bool frame_settings_on_screen;
+    /* The device's own override of the above: on, the frame page is offered
+     * whatever the control plane says, so a frame whose Wi-Fi broke behind a
+     * locked page is not locked out (a Pi's is a file on its boot partition).
+     * NVS `settings_unlock` (u8), absent = off; the USB console alone sets
+     * it, no plane does. */
+    bool settings_unlock;
     bool tls_enable;               /* serve the frame HTTP API over HTTPS too */
     uint16_t tls_port;             /* HTTPS port, default mirrors Pi Caddy proxy */
     char tls_server_cert[FOS_TLS_PEM_LEN];
@@ -272,6 +284,9 @@ esp_err_t fos_config_save(void);
 esp_err_t fos_config_nvs_stats(size_t *used_entries, size_t *free_entries, size_t *total_entries);
 esp_err_t fos_config_erase(void);
 bool fos_config_wifi_ready(void);
+/* Is the frame page of the settings on the screen offered: the control
+ * plane's `frame_settings_on_screen`, or the console's `settings_unlock`. */
+bool fos_config_frame_page_offered(void);
 /* Normalize a rotation onto the four the renderer supports. Any equivalent
  * angle is accepted (mod 360, negatives included); anything that is not a
  * right angle is refused. Every writer of `rotate` — the USB console, the

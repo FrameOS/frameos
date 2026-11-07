@@ -35,7 +35,7 @@ static const char *const s_ignored_keys[] = {
     "gpio_buttons", "assets_sd", "assets_sd_pins", "assets_sd_freq", "assets_sd_autoformat",
     "assets_path", "wake_schedule", "wake_check", "battery_pin", "battery_divider",
     "battery_enable_pin", "time_zone", "fusion", "allow_lan", "spill_force",
-    "tls_enable", "tls_port",
+    "tls_enable", "tls_port", "frame_settings_on_screen", "settings_unlock",
 };
 
 const pk_preset_t *pk_config_presets(size_t *count)

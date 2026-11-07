@@ -166,6 +166,26 @@ export function cloudFrameSupportsRenderScale(frameosVersion: string | null | un
   return cloudFrameSupportsSettingsFrom(renderScaleCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/** Firmware from here on takes `frame_settings_on_screen`. */
+export const frameSettingsOnScreenCloudFrameSettingsMinVersion = '2026.11.5'
+
+/**
+ * `frame_settings_on_screen` (frame.json `frameSettingsOnScreen`): whether the
+ * settings on the frame's own screen offer the frame page behind the gear
+ * (docs/scene-settings.md "The frame page"). Both profiles learned it in the
+ * same release. Callers gate on cloudFrameSupportsFrameSettingsOnScreen.
+ */
+export const frameSettingsOnScreenCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(
+  frameSettingsOnScreenCloudFrameSettingsMinVersion
+).filter((key) => key === 'frame_settings_on_screen')
+export const esp32FrameSettingsOnScreenCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
+  frameSettingsOnScreenCloudFrameSettingsMinVersion
+).filter((key) => key === 'frame_settings_on_screen')
+
+export function cloudFrameSupportsFrameSettingsOnScreen(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(frameSettingsOnScreenCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 /**
  * The events a rule may `emit`: the contract's, those the `eventMap` origin
  * is allowed to say (docs/events-contract.json `origins`), the same list the
@@ -393,6 +413,8 @@ export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.f
     ...esp32EventMapCloudFrameSettingKeys,
     ...renderScaleCloudFrameSettingKeys,
     ...esp32RenderScaleCloudFrameSettingKeys,
+    ...frameSettingsOnScreenCloudFrameSettingKeys,
+    ...esp32FrameSettingsOnScreenCloudFrameSettingKeys,
     ...esp32PowerSettingKeys,
   ])
 )

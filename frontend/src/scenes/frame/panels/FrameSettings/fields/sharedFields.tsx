@@ -689,6 +689,35 @@ export function RenderScaleField(): JSX.Element {
   )
 }
 
+/**
+ * `frame_settings_on_screen` (frame.json `frameSettingsOnScreen`): whether the
+ * settings on the frame's own screen offer the frame page behind the gear.
+ * Unset is on. Disabled with the reason on a cloud frame whose firmware
+ * predates the key.
+ */
+export function FrameSettingsOnScreenField(): JSX.Element | null {
+  const { showFrameSettingsOnScreen, frameSettingsOnScreenDisabledReason } = useFrameSettings()
+  if (!showFrameSettingsOnScreen) {
+    return null
+  }
+  return (
+    <fieldset disabled={!!frameSettingsOnScreenDisabledReason} className="min-w-0">
+      <Field
+        name="frame_settings_on_screen"
+        label="Frame settings on the screen"
+        tooltip="The gear in the settings you open on the frame itself (swipe down from the top). It lets anyone at the frame change its Wi-Fi, rotation and scale, render it again, restart FrameOS or reboot it. Off, the frame shows the scene's settings only. A file named frameos-settings-unlock on the boot partition (Raspberry Pi) or the USB console command set settings_unlock 1 (ESP32) turns it back on, whatever this says."
+        hint={
+          frameSettingsOnScreenDisabledReason ? (
+            <span className="frameos-muted">{frameSettingsOnScreenDisabledReason}</span>
+          ) : undefined
+        }
+      >
+        {({ value, onChange }) => <Switch value={value !== false} onChange={onChange} />}
+      </Field>
+    </fieldset>
+  )
+}
+
 export function MetricsIntervalField(): JSX.Element {
   return (
     <Field name="metrics_interval" label="Metrics reporting interval in seconds, 0 to disable">

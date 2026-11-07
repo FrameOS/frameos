@@ -399,6 +399,9 @@ export interface FrameType {
   scaling_mode: string
   /** What a UI from a .tsx/.jsx app is laid out for (utils/renderScale.ts); 0 or unset = automatic. */
   render_scale?: number
+  /** The frame page behind the gear of the settings on the frame's own screen
+   * (docs/scene-settings.md "The frame page"); unset = on. */
+  frame_settings_on_screen?: boolean
   rotate?: number
   /** ESP32 power management (cloud set_settings mirror, frames.settings). */
   deep_sleep?: boolean

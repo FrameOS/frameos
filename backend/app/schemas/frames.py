@@ -115,6 +115,7 @@ class FrameBase(BaseModel):
     max_http_response_bytes: Optional[int] = None
     scaling_mode: Optional[str]
     render_scale: float = 0
+    frame_settings_on_screen: bool = True
     rotate: Optional[int]
     flip: Optional[str]
     background_color: Optional[str]
@@ -253,6 +254,9 @@ class FrameUpdateRequest(BaseModel):
     scaling_mode: Optional[str] = None
     # 0 = automatic; the contract's rule (docs/cloud-frames-contract.json).
     render_scale: Optional[float] = None
+    # The frame page on the frame's own screen; the column is not nullable,
+    # so an explicit null is the default, on.
+    frame_settings_on_screen: Optional[bool] = None
     device: Optional[str] = None
     device_config: Optional[Dict[str, Any]] = None
     debug: Optional[bool] = None
@@ -286,6 +290,11 @@ class FrameUpdateRequest(BaseModel):
     @classmethod
     def validate_input_settings(cls, value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return _validate_input_settings(value)
+
+    @field_validator('frame_settings_on_screen')
+    @classmethod
+    def validate_frame_settings_on_screen(cls, value: Optional[bool]) -> bool:
+        return True if value is None else value
 
     @field_validator('render_scale')
     @classmethod

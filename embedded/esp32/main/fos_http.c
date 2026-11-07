@@ -1681,6 +1681,7 @@ static cJSON *frame_api_frame_json(void)
     cJSON_AddStringToObject(frame, "scaling_mode", config->scaling_mode);
     /* Thousandths in the config; 0 = automatic. */
     cJSON_AddNumberToObject(frame, "render_scale", config->render_scale_milli / 1000.0);
+    cJSON_AddBoolToObject(frame, "frame_settings_on_screen", config->frame_settings_on_screen);
     cJSON_AddNumberToObject(frame, "rotate", fos_config()->rotate);
     cJSON_AddStringToObject(frame, "flip", "");
     cJSON_AddStringToObject(frame, "background_color", "#000000");

@@ -124,6 +124,11 @@ type
     ## times smaller, drawn sharp at full size (render_scale.nim). 0 =
     ## automatic from the panel's size; a scene's own setting wins.
     renderScale*: float
+    ## The settings on the frame's own screen offer the frame page behind
+    ## their gear (docs/scene-settings.md "The frame page"). On unless the
+    ## control plane turned it off; frame_settings_lock.nim adds the device's
+    ## own unlock.
+    frameSettingsOnScreen*: bool
     settings*: JsonNode
     assetsPath*: string
     saveAssets*: JsonNode
