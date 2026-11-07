@@ -95,13 +95,14 @@ cannot disagree with the meters above them.
 Higher stops buy capacity, never features; Business picks up where Private
 ends, with the same rules and its own features on top.
 
-- **Private is meant for checkout, Business for support.** A self-serve
-  group (`selfServe` in the catalog) gets its `billing_plans` rows
-  (`private-9`, the stop's limits as entitlements) from "Sync plans" on
+- **Private and Business are both bought at checkout** (Business since
+  2026-11-07, with single sign-on marked planned). A self-serve group
+  (`selfServe` in the catalog) gets its `billing_plans` rows (`private-9`,
+  `business-49`, the stop's limits as entitlements) from "Sync plans" on
   `/admin/billing/customers`; a provider adapter adds its products to that
-  step ([`billing.md`](billing.md)). Until one exists every paid card says
+  step ([`billing.md`](billing.md)). Without one every paid card says
   "Contact support to activate" and an operator uses the operator plan
-  route. Business stays that way until single sign-on exists.
+  route.
 - **Photo storage is a plan number now** (`photo_bytes`, optional on a row).
   Free's is `FRAMEOS_CLOUD_MAX_PHOTO_MB`, 250 MB by default (was 1 GB); an
   unverified account stays capped at `FRAMEOS_CLOUD_MAX_UNVERIFIED_PHOTO_MB`

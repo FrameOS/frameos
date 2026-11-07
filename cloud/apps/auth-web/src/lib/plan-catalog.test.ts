@@ -93,22 +93,27 @@ describe("the plan catalog", () => {
     expect(moved.find((stop) => stop.code === "private-9")?.price_micros).toBe("9000000");
   });
 
-  it("sells Private at checkout and leaves Business to support", () => {
+  it("sells every paid stop at checkout, Private and Business", () => {
     expect(selfServeStops().map((entry) => entry.code)).toEqual([
       "private-2",
       "private-5",
       "private-9",
       "private-29",
+      "business-49",
+      "business-99",
+      "business-199",
+      "business-499",
     ]);
     // Nothing is buyable until the provider has a product for it.
     const closed = planCatalog(free, "payg").groups.flatMap((group) => group.stops);
     expect(closed.some((stop) => stop.purchasable)).toBe(false);
 
     const open = planCatalog(free, "payg", new Set(["private-5", "business-49"]));
-    expect(open.groups.map((group) => group.available)).toEqual([true, true, false]);
+    expect(open.groups.map((group) => group.available)).toEqual([true, true, true]);
     const buyable = open.groups.flatMap((group) => group.stops).filter((stop) => stop.purchasable);
-    // A Business stop is not sold here even when a product exists for it.
-    expect(buyable.map((stop) => stop.code)).toEqual(["private-5"]);
+    expect(buyable.map((stop) => stop.code)).toEqual(["private-5", "business-49"]);
+    // The free plan is never sold.
+    expect(planCatalog(free, "payg", new Set(["payg"])).groups[0]?.stops[0]?.purchasable).toBe(false);
   });
 
   it("says what is planned, and does not grant it", () => {
@@ -139,6 +144,13 @@ describe("the plan catalog", () => {
       frames: 80,
       photo_bytes: 2250 * megabyte,
       private_scene_bytes: 900 * megabyte,
+    });
+
+    const top = selfServeStops().find((entry) => entry.code === "business-499")!;
+    expect(planRowFor(free, top, 10_000)).toMatchObject({
+      entitlements: { cloud_rendered_frames: 499, frames: 999, photo_bytes: 499 * free.photoBytes },
+      name: "Business",
+      priceMicros: 499_000_000n,
     });
   });
 });

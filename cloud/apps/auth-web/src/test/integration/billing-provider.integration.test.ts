@@ -317,26 +317,45 @@ describe("syncing the plans", () => {
       ["private-5", true],
       ["private-9", true],
       ["private-29", true],
+      ["business-49", true],
+      ["business-99", true],
+      ["business-199", true],
+      ["business-499", true],
     ]);
     expect(body.checks).toEqual({
       tax_status: "active",
       webhook: { api_version: null, enabled: true, found: true, missing_events: [] },
     });
-    // One product for the group, one monthly price per stop, before tax.
-    expect(fake.products.size).toBe(1);
+    // One product per group, one monthly price per stop, before tax.
+    expect(fake.products.size).toBe(2);
     const prices = [...fake.prices.values()];
-    expect(prices.map((price) => price.unit_amount).sort((a, b) => a - b)).toEqual([200, 500, 900, 2900]);
+    expect(prices.map((price) => price.unit_amount).sort((a, b) => a - b)).toEqual([
+      200, 500, 900, 2900, 4900, 9900, 19900, 49900,
+    ]);
     expect(prices.every((price) => price.tax_behavior === "exclusive" && price.recurring.interval === "month")).toBe(true);
     expect(prices.map((price) => price.lookup_key)).toContain(priceLookupKey("private-5", "USD", 500, "exclusive"));
-    expect([...fake.products.values()][0]?.["tax_code"]).toBe("txcd_10103000");
+    expect(prices.map((price) => price.lookup_key)).toContain(priceLookupKey("business-499", "USD", 49900, "exclusive"));
+    const products = [...fake.products.values()];
+    const taxCodeOf = (group: string) =>
+      products.find((product) => (product["metadata"] as Record<string, string>)["frameos_cloud_group"] === group)?.[
+        "tax_code"
+      ];
+    expect(taxCodeOf("private")).toBe("txcd_10103000");
+    expect(taxCodeOf("business")).toBe("txcd_10103001");
+    // Each stop's price sits under its own group's product.
+    const productOfPrice = (amount: number) =>
+      prices.find((price) => price.unit_amount === amount)?.product;
+    expect(productOfPrice(4900)).toBe(productOfPrice(49900));
+    expect(productOfPrice(4900)).not.toBe(productOfPrice(2900));
     expect(fake.portalConfigurations.size).toBe(1);
 
     const second = await postSync(jsonRequest("POST", "/api/admin/billing/plans"));
     const again = (await second.json()) as { plans: { created: boolean }[] };
     expect(again.plans.every((entry) => !entry.created)).toBe(true);
-    expect(fake.prices.size).toBe(4);
+    expect(fake.prices.size).toBe(8);
+    expect(fake.products.size).toBe(2);
     expect(fake.portalConfigurations.size).toBe(1);
-    expect(await db.select().from(providerProducts)).toHaveLength(4);
+    expect(await db.select().from(providerProducts)).toHaveLength(8);
 
     const [row] = await db.execute<{ entitlements: Record<string, number> }>(
       sql`select entitlements from billing_plans where code = 'private-5'`,
@@ -370,14 +389,14 @@ describe("syncing the plans", () => {
   it("adopts prices Stripe already has, and replaces one that is archived", async () => {
     await syncPlans(db, config(), portalUrls);
     const first = await db.select().from(providerProducts);
-    expect(first).toHaveLength(4);
+    expect(first).toHaveLength(8);
 
     // Another deployment on the same Stripe account (a fresh database)
-    // sells the same four prices instead of making four more.
+    // sells the same eight prices instead of making eight more.
     await db.delete(providerProducts);
     const adopted = await syncPlans(db, config(), portalUrls);
     expect(adopted.plans.every((entry) => !entry.created)).toBe(true);
-    expect(fake.prices.size).toBe(4);
+    expect(fake.prices.size).toBe(8);
     expect((await db.select().from(providerProducts)).map((row) => row.productId).sort()).toEqual(
       first.map((row) => row.productId).sort(),
     );
@@ -406,7 +425,7 @@ describe("syncing the plans", () => {
     const response = await postSync(jsonRequest("POST", "/api/admin/billing/plans"));
     const body = (await response.json()) as { plans: { code: string }[]; provider: string | null };
     expect(body.provider).toBeNull();
-    expect(body.plans).toHaveLength(4);
+    expect(body.plans).toHaveLength(8);
     expect(fake.prices.size).toBe(0);
   });
 });
@@ -418,7 +437,7 @@ describe("buying a plan", () => {
     expect((await plan()).catalog.groups.map((group) => [group.key, group.available])).toEqual([
       ["free", true],
       ["private", true],
-      ["business", false],
+      ["business", true],
     ]);
     expect((await plan()).billing.prices_exclude_tax).toBe(true);
 
@@ -611,7 +630,8 @@ describe("buying a plan", () => {
     const accountId = await signIn();
     await buy("private-5", accountId);
     expect((await startCheckout("private-9")).body.error).toBe("already_subscribed");
-    expect((await startCheckout("business-49")).status).toBe(404);
+    expect((await startCheckout("business-49")).body.error).toBe("already_subscribed");
+    expect((await startCheckout("business-50")).status).toBe(404);
     expect((await startCheckout("payg")).status).toBe(404);
 
     await signIn({ verified: false });
@@ -795,6 +815,34 @@ describe("changing and ending a plan", () => {
       deferred: dollars(7),
       psp: dollars(7 * 1.21),
       salesTax: dollars(7 * 0.21),
+    });
+    expect(await checkLedgerIntegrity(db)).toEqual([]);
+  });
+
+  it("moves from Private to Business, from one product to the other", async () => {
+    useFake({ taxPercent: 21 });
+    const accountId = await signIn();
+    const subscriptionId = await buy("private-29", accountId);
+
+    const subscription = fake.subscriptions.get(subscriptionId)!;
+    clock = new Date((subscription.periodStart.getTime() + subscription.periodEnd.getTime()) / 2);
+    const response = await putPlan(jsonRequest("PUT", "/api/account/plan", { plan: "business-49" }));
+    expect(response.status).toBe(200);
+    await deliver();
+    const view = await plan();
+    expect(view.plan.code).toBe("business-49");
+    expect(view.next_plan_code).toBeNull();
+    // Stripe bills the Business product's price now.
+    const price = fake.prices.get(fake.subscriptions.get(subscriptionId)!.item.price)!;
+    expect(price.unit_amount).toBe(4900);
+    const product = fake.products.get(price.product)!;
+    expect((product["metadata"] as Record<string, string>)["frameos_cloud_group"]).toBe("business");
+    // $29 for the month, then half of the $20 difference, each with 21% VAT.
+    expect(await books(accountId)).toEqual({
+      ...nothingElse,
+      deferred: dollars(39),
+      psp: dollars(39 * 1.21),
+      salesTax: dollars(39 * 0.21),
     });
     expect(await checkLedgerIntegrity(db)).toEqual([]);
   });

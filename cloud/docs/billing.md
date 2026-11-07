@@ -17,11 +17,14 @@ is not a merchant of record adds: our VAT and its fees).
 
 The catalog is `apps/auth-web/src/lib/plan-catalog.ts`. A group with
 `selfServe: true` is bought at checkout: **Private** ($2, $5, $9, $29 a
-month). **Business** is `selfServe: false` and stays "contact us" until
-single sign-on exists. With Stripe not set up every paid card says "Contact
-support to activate" and an operator moves the account by hand
-(`/admin/billing/customers`, after **Sync plans** has written the
-`billing_plans` rows).
+month) and, since 2026-11-07, **Business** ($49, $99, $199, $499; single
+sign-on is on its card as "planned"). Each group is its own product at
+Stripe, and one subscription moves between them: Private $29 to Business
+$49 is an upgrade like any other. A stop without a price at Stripe (Sync
+plans not run since it was added) says "Contact support to activate", and
+so does every paid card with Stripe not set up; an operator then moves the
+account by hand (`/admin/billing/customers`, after **Sync plans** has
+written the `billing_plans` rows).
 
 A plan lists only what exists. `plannedFeatures` and `plannedLimits` in
 the catalog name what is not built yet; every page marks those "planned"
@@ -199,7 +202,7 @@ template, plus **Tax: Write** (read is enough in production) and, for
    --activate /opt/frameos-cloud` on the box: the live release starts on
    the other instance, reading the env file afresh, with no downtime.
 4. **Sync plans** on `/admin/billing/payments` (sudo). It must say
-   "4 plans in place at Stripe" and no warning.
+   "8 plans in place at Stripe" and no warning.
 5. **Billing settings** in Stripe's dashboard (done 2026-11-07): Smart
    Retries on, and after the last retry **cancel the subscription** (the
    terms promise that the plan ends) and mark the invoice uncollectible
@@ -274,4 +277,4 @@ giving up after its last retry, a live payment.
   `asset:psp:main`: conversion, Stripe's own monthly fees).
 - Charging for metered AI (an arrears invoice needs the stored card, which
   Stripe has; the postpay design is in `accounting-todo.md` §0).
-- A yearly price, and Business at checkout.
+- A yearly price.

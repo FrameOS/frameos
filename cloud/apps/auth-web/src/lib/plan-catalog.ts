@@ -5,7 +5,8 @@
 // follows the same rules from $49 up and adds its own features, so the
 // higher tiers buy capacity, never features.
 //
-// A self-serve group is bought through Stripe (cloud/docs/billing.md):
+// A self-serve group (Private and Business) is bought through Stripe
+// (cloud/docs/billing.md):
 // each of its stops gets a billing_plans row with the stop's code and these
 // limits as entitlements, and a monthly price at Stripe, both written by
 // the admin's "Sync plans" (planRowFor, plan-rows.ts, billing-provider.ts).
@@ -82,8 +83,8 @@ export const planGroups: PlanGroupDefinition[] = [
     featuresFrom: [{ feature: "dedicated_support", usd: 499 }],
     key: "business",
     name: "Business",
-    // Sold by support until single sign-on exists.
-    selfServe: false,
+    // At checkout like Private; single sign-on shows as planned until it ships.
+    selfServe: true,
     stops: [
       { frames: 199, usd: 49 },
       { frames: 299, usd: 99 },
