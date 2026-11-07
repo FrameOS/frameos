@@ -111,11 +111,14 @@ app catalog before you use it, with its exact field names, types and options.
   writing a JS app or a code node, and to change a scene, add the app that does
   the new part rather than rewriting an app that is already there.
 - When no app fits, build the logic from code nodes and generic apps
-  (`render/text`, `render/image`, `render/svg`) or write a JS app.
+  (`render/text`, `render/image`), and draw what the scene works out (a dial,
+  a grid, a chart of its own, a dashboard) with a `.tsx` JS app that returns
+  JSX (see [Drawing with JSX](#drawing-with-jsx)).
 
 Apps used often: `render/image` (an image into the canvas, with `placement`
 cover, contain, stretch, center…), `render/text` (wrapping text, with
-`richText: "basic-caret"` for caret styling), `render/svg`, `render/gradient`
+`richText: "basic-caret"` for caret styling), `render/svg` (fixed SVG markup
+someone pasted, never markup a scene builds), `render/gradient`
 (`startColor`, `endColor`, `angle`), `render/color`, `render/split` (`rows`,
 `columns`, cells as above), `data/clock` (the time as a string; its `format`
 options are its own, not the code-node tokens), `data/downloadUrl` (a URL's
@@ -165,8 +168,10 @@ several statements in an immediately called function that returns the value.
 
 - It has exactly one output: one `codeOutputs` entry, `{ name, type }`, with
   type `string`, `json`, `integer`, `float` or `boolean`. It cannot output an
-  image: to draw generated SVG, output a string into a
-  `render/svg` node's `svg` field.
+  image, and it never builds SVG markup as a string: a drawing is a `.tsx`
+  JS app returning JSX ([Drawing with JSX](#drawing-with-jsx)). A code node
+  can work out the numbers and text that app draws and feed them into its
+  fields.
 - An argument exists only when it is declared in `data.codeArgs`
   (`{ name, type }`) and fed by an edge into `codeField/<name>`. Arguments are
   constant bindings: `const lat = Number(lat)` is an error, write
@@ -218,7 +223,8 @@ QuickJS. A scene carries its own in the top-level `apps` map:
 
 and its nodes use `keyword: "myPanel"`.
 
-**Files.** `config.json` and `app.ts` (or `.tsx`, `.js`, `.jsx`), plus any
+**Files.** `config.json` and `app.ts` (or `.tsx`, `.js`, `.jsx`; an app that
+draws is `app.tsx`), plus any
 helper modules and `.json` data files, imported with relative paths
 (`import { row } from "./lib/row"`, `import icons from "./icons.json"`). Only
 the app's own files resolve: no npm packages, no `require()`, no dynamic
@@ -232,8 +238,8 @@ calls, and it calls no other:
 
 - A node that feeds a field (`fieldOutput` → `fieldInput/<field>`) calls
   `get(app, context)`. That is a `data` app: `get` returns the value its
-  `output` names, a string, JSON, or for an image `frameos.svg(...)`,
-  `frameos.image(...)` or an image from `frameos.fetchImage`. To show an
+  `output` names, a string, JSON, or for an image JSX (an `<svg>` or a UI,
+  from an `app.tsx`) or an image from `frameos.fetchImage`. To show an
   image, wire it into `render/image`'s `image` field.
 - A node in a flow (after an event node, `next` → `prev`) calls
   `run(app, context)`. That is a `logic` app: `run` returns nothing and acts,
@@ -269,7 +275,8 @@ calls, and it calls no other:
   ask a picture source for that size, else the canvas's (the gallery app
   does), never for `app.frame`'s.
 - `frameos`: everything the app can do: fetch (`fetchJson`, `fetchText`,
-  `httpRequest`, `fetchImage`), make images (`svg`, `image`), log (`log`,
+  `httpRequest`, `fetchImage`), make images (JSX; `svg` only for markup
+  fetched or read from an asset, never markup the app builds), log (`log`,
   `error`), keep values (`setState`, `remember`, `recall`), read the account's
   keys (`getSetting`, only for namespaces the app's `config.json` lists under
   `settings`), set the next sleep (`setNextSleep`, this render only), and
@@ -366,60 +373,70 @@ lacks them. A scene meant for such frames keeps to the rest.
 short comments where the logic is not obvious. People open and edit this code
 in the editor, so never minify it.
 
-## Images, SVG and text
+## Drawing with JSX
 
-`render/svg` and `frameos.svg()` use a strict renderer. Any tag outside this
-list fails the whole document ("Failed to render SVG"; in a JS app, "No image
-provided"): `svg` (with a `viewBox`), `g`, `path`, `rect`, `circle`,
-`ellipse`, `line`, `polyline`, `polygon`, `text` / `tspan`, `linearGradient`,
-`radialGradient`, `defs` (for gradients only), `title`, `desc`. Not supported:
-`use`, `image`, `filter`, `mask`, `clipPath`, `pattern`, `style`,
-`foreignObject`, `symbol`, `marker`.
+Anything a scene draws that it works out itself (a clock face, a grid of
+dots, a chart of its own, a weather panel, a dashboard) is a JS app whose main
+file is `app.tsx`: a `data` app with an `image` output whose `get()` returns
+JSX, wired into `render/image`'s `image` field. The frame reads the JSX
+straight into its drawing: no markup is built or parsed, nothing needs
+escaping, and on an LCD only what changed is drawn again. Never build SVG
+markup as a string (template literals, `join("")`, an escape helper) for
+`frameos.svg()` or `render/svg`: it is slower on every render, and one stray
+`&` blanks the picture. JSX needs FrameOS 2026.10.21 or later; older frames
+draw nothing.
 
-- Gradients always have `gradientUnits="userSpaceOnUse"` (the SVG default
-  fails the document), coordinates in viewBox units, and `<stop>` children
-  with an `offset` from 0 to 1, a hex `stop-color` and an optional
-  `stop-opacity`. Fills only: a stroke cannot use a gradient. For a
-  full-screen gradient, `render/gradient` is simpler.
+A picture made of shapes (a dial, a grid, a chart, a map, art) is an `<svg>`,
+drawn as it is with the tags and rules in
+[Images, SVG and text](#images-svg-and-text). Attributes take expressions,
+React's names work (`strokeWidth`, `strokeLinecap`, `fillRule`, `fontSize`,
+`textAnchor`, `stopColor`), and so do function components, `.map()` and
+fragments:
 
-  ```svg
-  <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="600">
-    <stop offset="0" stop-color="#0f172a"/><stop offset="1" stop-color="#1e3a5f"/>
-  </linearGradient>
-  <radialGradient id="glow" gradientUnits="userSpaceOnUse" cx="400" cy="120" r="360">
-    <stop offset="0" stop-color="#ffe08a" stop-opacity="0.8"/><stop offset="1" stop-color="#ffe08a" stop-opacity="0"/>
-  </radialGradient>
-  <rect width="800" height="600" fill="url(#bg)"/>
-  ```
-- SVG is XML. Escape every dynamic string you put in markup, text and
-  attributes alike (`&` as `&amp;`, `<` as `&lt;`, `>` as `&gt;`, `"` as
-  `&quot;`), through one helper: a single raw `&` fails the whole document.
-- `<text>` is drawn as glyph outlines, so fill, stroke, gradients, opacity and
-  transforms work on it. Supported: `x`, `y`, `dx` / `dy` (the first value),
-  `font-family`, `font-size`, `font-weight`, `font-style`, `text-anchor`,
-  `dominant-baseline`, and `<tspan>` children. Not supported: wrapping,
-  `textPath`, `textLength`, `letter-spacing`, per-glyph positions, emoji. One
-  line per `text` or `tspan`: break lines yourself.
-- `render/text` wraps text and takes caret styling with
-  `richText: "basic-caret"`: `^(16)` size, `^(#FF00FF)` color,
-  `^(PTSans-Bold.ttf)` font, `^(underline)`, combined as `^(16,#FF0000)`,
-  `^(reset)` to reset. Prefer it for paragraphs.
-- Fonts: `Ubuntu-*`, `PTSans-*`, `FiraGO-*`, `CormorantGaramond-*`,
-  `LiberationSans-*`, `LiberationSerif-*`, `LiberationMono-*`,
-  `CascadiaMono`, `ComicRelief`, `Galindo-Regular`, `Peralta-Regular` (all
-  `.ttf`), plus the fonts people upload. An SVG `font-family` matches them
-  loosely ("PT Sans" finds `PTSans-Regular.ttf`); an unknown one falls back to
-  the default face. On an ESP32, SVG text always uses the built-in Ubuntu
-  face, whatever `font-family` says.
+```tsx
+export function get(app, context) {
+  const W = context.imageWidth ?? app.frame.width
+  const H = context.imageHeight ?? app.frame.height
+  const r = Math.min(W, H) * 0.42
+  const now = new Date()
+  const minutes = now.getMinutes()
+  const hours = (now.getHours() % 12) + minutes / 60
+  const hand = (turns: number, length: number, width: number) => (
+    <line
+      x1={W / 2}
+      y1={H / 2}
+      x2={W / 2 + Math.sin(turns * 2 * Math.PI) * length}
+      y2={H / 2 - Math.cos(turns * 2 * Math.PI) * length}
+      stroke="#111827"
+      strokeWidth={width}
+      strokeLinecap="round"
+    />
+  )
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>
+      <rect width={W} height={H} fill="#f8fafc" />
+      <circle cx={W / 2} cy={H / 2} r={r} fill="none" stroke="#111827" strokeWidth={r * 0.03} />
+      {Array.from({ length: 12 }, (_, i) => (
+        <circle
+          cx={W / 2 + Math.sin((i * Math.PI) / 6) * r * 0.85}
+          cy={H / 2 - Math.cos((i * Math.PI) / 6) * r * 0.85}
+          r={r * 0.03}
+          fill="#111827"
+        />
+      ))}
+      {hand(hours / 12, r * 0.5, r * 0.06)}
+      {hand(minutes / 60, r * 0.75, r * 0.04)}
+      <text x={W / 2} y={H / 2 + r * 0.45} fontSize={r * 0.12} textAnchor="middle" fill="#334155">
+        {app.config.city}
+      </text>
+    </svg>
+  )
+}
+```
 
-## UIs and SVG from JSX
-
-A JS app whose main file is `app.tsx` can return JSX from `get()` as its
-image (FrameOS 2026.10.21 and later; older frames draw nothing). An `<svg>`
-is drawn with the renderer above, its tags and rules, without markup: no
-string building and no escaping. React's names work (`strokeWidth`,
-`fillRule`), and function components, `.map()` and fragments too. Anything
-else is a UI laid out with Tailwind classes:
+Anything else is a UI laid out with Tailwind classes: text, cards, lists,
+anything that wraps or lines up. Prefer it to placing text in an `<svg>` by
+hand; it can hold `<svg viewBox>` icons and pictures of its own:
 
 ```tsx
 export function get(app, context) {
@@ -442,6 +459,10 @@ export function get(app, context) {
 - The outer element fills the image; lengths are pixels of it (`p-2` is
   8 px), so scale with `text-[5vh]`, `w-[30vw]` and the `md:` / `lg:`
   breakpoints (image width 768 / 1024 px) or `portrait:` / `landscape:`.
+- A UI reads its classes and nothing else: a `style` prop is ignored outside
+  an `<svg>`, so padding, margins and font sizes set there never show. Put a
+  size worked out in code in a bracket class,
+  ``className={`p-[${pad}px] text-[${size}px]`}``.
 - A big frame draws a .tsx app's JSX larger by itself: at render scale 2
   (automatic on a panel whose shorter edge is about 1200 px) the app is told
   its canvas is half the size (`context.imageWidth`, `app.frame.width`) and
@@ -452,6 +473,10 @@ export function get(app, context) {
   `justify-*`, `items-*`, `flex-wrap`; `grid grid-cols-N` with `col-span-N`;
   `absolute` with `inset-*` / `top-*` (against the parent). Sizes `w-*`,
   `h-*`, `size-*`, `max-w-*`, padding and margins (`mx-auto`).
+- Unlike a browser, a flex item without a set size can shrink to nothing,
+  and its text then wraps a character per line. In a row, give the parts that
+  must keep their width (a number, a label, an icon, a badge) `shrink-0` or a
+  `w-*`, and the long text `flex-1`.
 - Paint: `bg-*`, `text-*`, `border-*` from Tailwind's palette, `/50`
   opacity, `bg-[#hex]`, `bg-gradient-to-r from-* via-* to-*`, `border`,
   `rounded-*`, `opacity-*`.
@@ -494,20 +519,74 @@ export function get(app, context) {
 - Not there: rounded clipping, shadows, transforms, `z-*`, momentum when a
   list is flung, text selection. `docs/jsx-ui.md` has the full list.
 
+## Images, SVG and text
+
+An `<svg>` from JSX, `render/svg` and `frameos.svg()` all use a strict
+renderer. Any tag outside this list fails the whole drawing ("Failed to render
+SVG"; in a JS app, "No image provided"): `svg` (with a `viewBox`), `g`,
+`path`, `rect`, `circle`, `ellipse`, `line`, `polyline`, `polygon`, `text` /
+`tspan`, `linearGradient`, `radialGradient`, `defs` (for gradients only),
+`title`, `desc`. Not supported: `use`, `image`, `filter`, `mask`, `clipPath`,
+`pattern`, `style`, `foreignObject`, `symbol`, `marker`.
+
+- Gradients always have `gradientUnits="userSpaceOnUse"` (the SVG default
+  fails the drawing), coordinates in viewBox units, and `<stop>` children
+  with an `offset` from 0 to 1, a hex `stopColor` and an optional
+  `stopOpacity`. Fills only: a stroke cannot use a gradient. For a
+  full-screen gradient, `render/gradient` is simpler.
+
+  ```tsx
+  <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>
+    <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2={H}>
+      <stop offset="0" stopColor="#0f172a" />
+      <stop offset="1" stopColor="#1e3a5f" />
+    </linearGradient>
+    <radialGradient id="glow" gradientUnits="userSpaceOnUse" cx={W / 2} cy={H * 0.2} r={H * 0.6}>
+      <stop offset="0" stopColor="#ffe08a" stopOpacity="0.8" />
+      <stop offset="1" stopColor="#ffe08a" stopOpacity="0" />
+    </radialGradient>
+    <rect width={W} height={H} fill="url(#bg)" />
+    <rect width={W} height={H} fill="url(#glow)" />
+  </svg>
+  ```
+- Text in JSX is drawn as written: `{name}` needs no escaping. Markup is
+  XML: an SVG string that came from elsewhere (`render/svg`,
+  `frameos.svg()`) fails whole on a single raw `&`.
+- `<text>` is drawn as glyph outlines, so fill, stroke, gradients, opacity and
+  transforms work on it. Supported: `x`, `y`, `dx` / `dy` (the first value),
+  `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `textAnchor`,
+  `dominantBaseline` (`font-family` and so on in markup), and `<tspan>`
+  children. Not supported: wrapping, `textPath`, `textLength`,
+  `letterSpacing`, per-glyph positions, emoji. One line per `text` or
+  `tspan`: break lines yourself, or set the text in a UI, which wraps it.
+- `render/text` wraps text and takes caret styling with
+  `richText: "basic-caret"`: `^(16)` size, `^(#FF00FF)` color,
+  `^(PTSans-Bold.ttf)` font, `^(underline)`, combined as `^(16,#FF0000)`,
+  `^(reset)` to reset. Use it for a paragraph over a picture another app drew.
+- Fonts: `Ubuntu-*`, `PTSans-*`, `FiraGO-*`, `CormorantGaramond-*`,
+  `LiberationSans-*`, `LiberationSerif-*`, `LiberationMono-*`,
+  `CascadiaMono`, `ComicRelief`, `Galindo-Regular`, `Peralta-Regular` (all
+  `.ttf`), plus the fonts people upload. A `fontFamily` matches them
+  loosely ("PT Sans" finds `PTSans-Regular.ttf`); an unknown one falls back to
+  the default face. On an ESP32, text always uses the built-in Ubuntu
+  face, whatever the family says.
+
 ## Layout and color
 
 - The same scene is installed on 800×480, 480×800, 1200×825 and 1600×1200
   panels. Work out every coordinate, size and font size from the canvas
   (`context.imageWidth` / `imageHeight` in a JS app and in a code node: the
   area being drawn into, already turned with the frame, a cell's when drawing
-  into a cell), for example `unit = Math.min(W, H) / 100`, and emit
-  `<svg viewBox="0 0 W H" width="W" height="H">` with those numbers. Never
-  hard-code 800×600, and never add width or height fields "just in case".
+  into a cell), for example `unit = Math.min(W, H) / 100`, and return
+  ``<svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>`` with those
+  numbers. Never hard-code 800×600, and never add width or height fields
+  "just in case".
 - Branch on orientation: when `H > W`, stack columns vertically.
 - Keep a margin of about 4% of the shorter side, and never draw past the
-  edge. Estimate a line's characters as `width / (fontSize * 0.55)`, wrap and
-  truncate with an ellipsis yourself in SVG, and shrink a headline that does
-  not fit. An 800×480 panel reads well at 24–48 px body text, 1600×1200 at
+  edge. A UI wraps and truncates text by itself (`truncate`,
+  `line-clamp-N`); inside an `<svg>`, estimate a line's characters as
+  `width / (fontSize * 0.55)`, wrap and truncate with an ellipsis yourself,
+  and shrink a headline that does not fit. An 800×480 panel reads well at 24–48 px body text, 1600×1200 at
   40–80 px.
 - Frames are color e-ink (a Spectra 6 panel dithers to black, white, red,
   yellow, green and blue), black-and-white e-ink, or HDMI and LCD panels.
@@ -533,15 +612,16 @@ terse code:
   at once, cut lists to what fits on screen before mapping over them, ask an
   API for fewer rows and fields when it allows, and never keep whole responses
   in module variables, `remember` or state.
-- Build output once: collect parts in one array and `join("")` at the end.
-  Keep generated SVG small: round coordinates to one decimal, thin polylines
-  to what the pixels can show, scale a shape with one
-  `<g transform="translate(x y) scale(s)">`, and stay in the hundreds of
-  elements, not thousands.
+- Build a drawing as JSX, with `.map()` over the data, never as a string.
+  Keep it small: round coordinates to one decimal, thin polylines to what the
+  pixels can show, scale a shape with one
+  `<g transform={`translate(${x} ${y}) scale(${s})`}>`, and stay in the
+  hundreds of elements, not thousands.
 - A scene that renders every second or faster sets up its buffers in `init()`
   and updates them in place: flat arrays of numbers, fixed-size pools, no new
-  objects, closures or big strings per frame, no fetch or `JSON.parse` while
-  rendering, and a hard cap on particle counts. Those buffers are rebuilt on
+  objects, closures or big strings per frame beyond the JSX it returns, no
+  fetch or `JSON.parse` while rendering, and a hard cap on particle counts.
+  `memo(Component)` hands back the part of the drawing that did not change. Those buffers are rebuilt on
   every render on an ESP32, so positions come from the clock.
 - The runtime stops a script after 20 seconds of JavaScript on an ESP32 (30
   on a Pi), and a render or an event after 90 seconds in all (120 on a Pi, 60
@@ -844,6 +924,7 @@ interface FrameOSContext {
 
 declare const frameos: {
   image(spec?: FrameOSImageSpec): FrameOSImageSpec & { __frameosType: "image" };
+  /** SVG markup that came from elsewhere (a download, an asset) as an image. A drawing the app makes is JSX returned from a .tsx app's get(), never markup built as a string. */
   svg(svg: string, spec?: FrameOSImageSpec): FrameOSImageSpec & { __frameosType: "image"; svg: string };
   node(nodeId: number): FrameOSNodeRef;
   scene(sceneId: string): FrameOSSceneRef;
@@ -951,7 +1032,8 @@ declare const console: {
   node sits in a flow, after any event node, is a `logic` app exporting `run`.
 - A JS app keeps what must outlast a render with `frameos.remember` (private)
   or `frameos.setState` (shared), never in a module variable.
-- SVG uses only the supported tags, gradients use `userSpaceOnUse`, and every
-  dynamic string is escaped.
+- A drawing is JSX from an `app.tsx` app, never SVG markup built as a
+  string; its `<svg>` uses only the supported tags, and gradients use
+  `userSpaceOnUse`.
 - Sizes come from the frame, not from constants.
 - Nothing big is embedded as an object literal or kept alive between renders.

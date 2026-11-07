@@ -672,7 +672,47 @@ describe("lintScenes", () => {
         ],
       }),
     ]);
-    expect(warnings).toEqual([expect.stringContaining("hard-coded viewBox (800x600)")]);
+    expect(warnings).toEqual([
+      expect.stringContaining("Code node builds SVG markup as a string"),
+      expect.stringContaining("hard-coded viewBox (800x600)"),
+    ]);
+  });
+
+  it("steers SVG markup built as a string to JSX, and leaves JSX and catalog templates alone", () => {
+    const withDrawing = (sources: Record<string, string>, origin?: string) =>
+      scene({
+        apps: {
+          dial: {
+            category: "data",
+            fields: [],
+            name: "Dial",
+            output: [{ name: "image", type: "image" }],
+            sources: { ...sources, "config.json": "{}" },
+            ...(origin ? { origin } : {}),
+          },
+        },
+        edges: [
+          { id: "e1", source: "ev", sourceHandle: "next", target: "img", targetHandle: "prev", type: "appNodeEdge" },
+          { id: "e2", source: "dial", sourceHandle: "fieldOutput", target: "img", targetHandle: "fieldInput/image", type: "codeNodeEdge" },
+        ],
+        nodes: [
+          { data: { keyword: "render" }, id: "ev", type: "event" },
+          { data: { config: {}, keyword: "render/image" }, id: "img", type: "app" },
+          { data: { config: {}, keyword: "dial" }, id: "dial", type: "app" },
+        ],
+      });
+    const markup = "export function get(app, context) {\n  const w = context.imageWidth\n  return frameos.svg(`<svg viewBox=\"0 0 ${w} ${w}\"><circle r=\"4\"/></svg>`)\n}";
+    expect(messages([withDrawing({ "app.ts": markup })]).warnings).toEqual([
+      expect.stringContaining('Scene app "dial" (app.ts) builds SVG markup as a string. Draw it with a scene-local app.tsx'),
+    ]);
+    // frameos.svg() in a .tsx is still markup built as a string.
+    expect(messages([withDrawing({ "app.tsx": markup })]).warnings).toEqual([
+      expect.stringContaining('Scene app "dial" (app.tsx) builds SVG markup as a string'),
+    ]);
+    const jsx =
+      "export function get(app, context) {\n  const w = context.imageWidth\n  return (\n    <svg viewBox={`0 0 ${w} ${w}`} width={w} height={w}>\n      <circle cx={w / 2} cy={w / 2} r={w / 4} fill=\"#111827\" />\n    </svg>\n  )\n}";
+    expect(messages([withDrawing({ "app.tsx": jsx })])).toEqual({ errors: [], warnings: [] });
+    expect(messages([withDrawing({ "app.ts": markup }, "repo/apps/image/chart")]).warnings).toEqual([]);
   });
 
   it("rejects code nodes that redeclare one of their arguments", () => {

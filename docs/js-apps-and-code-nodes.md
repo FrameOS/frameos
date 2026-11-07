@@ -340,7 +340,7 @@ called. A `get()`-only app in a button flow does nothing at all; from FrameOS
 
 | category | export the runtime calls | how the node is wired |
 |---|---|---|
-| `data` | `export function get(app, context)` → returns the `output` value (string, json, or `frameos.svg`/`frameos.image` or JSX for an image: `docs/jsx-ui.md`) | `codeNodeEdge` from `fieldOutput` into another node's `fieldInput/<field>` (e.g. `render/image`'s `image`) |
+| `data` | `export function get(app, context)` → returns the `output` value (string, json, or for an image JSX from an `app.tsx`, `docs/jsx-ui.md`, or `frameos.fetchImage`'s image) | `codeNodeEdge` from `fieldOutput` into another node's `fieldInput/<field>` (e.g. `render/image`'s `image`) |
 | `logic` | `export function run(app, context)` → returns nothing; acts with `frameos.setState`, `frameos.setNextSleep`, … | in a flow: `appNodeEdge` from an event node's `next` (or the node before it) into its `prev`, e.g. `button` → the app → a `render` dispatch |
 
 `export function init(app)` is optional and runs each time the app's
@@ -349,8 +349,10 @@ and in a preview running as one (see [Where an app keeps its values](#where-an-a
 Do **not** give a
 scene-local app `category: "render"`: as of Aug 2026 such an app placed in the
 prev/next chain draws nothing and logs nothing. The pattern that works is a
-**data app whose `get()` returns `frameos.svg(...)`**, wired into a
-`render/image` node — that is how the Weather sample's `weatherPanel` works.
+**data app whose `get()` returns the image**, wired into a `render/image`
+node. For anything the app draws itself, that image is JSX from an `app.tsx`:
+an `<svg>` or a UI (`docs/jsx-ui.md`), never SVG markup built as a string for
+`frameos.svg(...)` (see [SVG that the frame can draw](#svg-that-the-frame-can-draw)).
 
 ## The refresh interval is a state field
 
@@ -406,9 +408,16 @@ The rules live in `frameos/src/frameos/refresh_interval.nim` (runtime),
 
 ## SVG that the frame can draw
 
-`render/svg` (and `frameos.svg(...)` in JS apps, and `<svg>` JSX returned
-from a `.tsx` app's `get()`, which skips the markup: `docs/jsx-ui.md`) go
-through a strict renderer.
+A drawing an app makes is `<svg>` JSX returned from an `app.tsx`'s `get()`
+(`docs/jsx-ui.md`, FrameOS 2026.10.21 and later). The runtime reads the JSX
+objects straight into pixie's node tree: no markup is built in JS, none is
+parsed, nothing is escaped, and an LCD repaints only what changed. Building
+the same drawing as a string (template literals, `join("")`, an escape
+helper) for `frameos.svg(...)` or a code node feeding `render/svg` is the old
+route: slower every render, and one raw `&` blanks it. Keep `frameos.svg` and
+`render/svg` for markup that came from elsewhere (a download, an asset).
+
+All three go through a strict renderer.
 Any unsupported tag fails the **whole** document — `render/svg` prints
 "Failed to render SVG", a JS app's image comes back empty ("No image
 provided"). Supported: `svg` (with a `viewBox`), `g`, `path`, `rect`,
@@ -482,12 +491,12 @@ render allocates — not terse code:
   payload straight away, slice lists to what fits on screen *before* mapping
   over them, ask the API for fewer rows and fields when it lets you, and do
   not park whole responses in module-level variables or `app.state`.
-- **Build output once.** Collect parts in one array and `join("")` at the end
-  rather than growing strings in nested loops or chaining
-  `map`/`filter`/`concat` copies of a large array. Keep generated SVG small:
-  round coordinates to one decimal, thin polylines to what the pixel grid can
-  show, scale a shape with one `<g transform="translate(x y) scale(s)">`
-  instead of recomputing its points, and stay in the hundreds of elements.
+- **Build a drawing as JSX**, with one `.map()` over the data, not as a
+  string, and not with chained `map`/`filter`/`concat` copies of a large
+  array. Keep it small: round coordinates to one decimal, thin polylines to
+  what the pixel grid can show, scale a shape with one
+  ``<g transform={`translate(${x} ${y}) scale(${s})`}>`` instead of
+  recomputing its points, and stay in the hundreds of elements.
 - **Scenes that re-render every second or faster** set their buffers up in
   `init()` and update them in place: flat arrays of numbers and fixed-size
   pools, no new objects, closures or big strings per frame, no fetch or
@@ -504,7 +513,7 @@ render allocates — not terse code:
 - Every code node argument is both declared in `codeArgs` and fed by an edge.
 - Images flow only into image fields; text/json only into non-image fields.
 - Time formatting uses `{hour/2}`-style tokens.
-- Scene-local JS apps are data apps exporting `get`, wired into `render/image`.
+- Scene-local JS apps are data apps exporting `get`, wired into `render/image`; one that draws is an `app.tsx` returning JSX, never SVG markup built as a string.
 - SVG uses only the supported tags; gradients are top-level `linearGradient` with `userSpaceOnUse`.
 - Nothing big is embedded as an object literal or kept alive between renders (see "Write for the smallest frame").
 - A JS app keeps what must outlast a render with `frameos.remember` (private) or `frameos.setState` (shared), never in a module variable.
