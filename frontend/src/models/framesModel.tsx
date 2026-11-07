@@ -152,8 +152,9 @@ function startBrowserDownload(path: string): void {
 // the device reports as active_scene). scenes.json bodies are cached per
 // store scene id + version so the 15s fleet poll re-checks assignments
 // without refetching scene bodies; the assignment list itself is only
-// re-listed once a minute per frame unless forced (install flow), keeping
-// well under the endpoint's 240/15min rate limit.
+// re-listed once a minute per frame unless forced (install flow). A reload
+// still reads every body again: the endpoint limits a signed-in account to
+// 1200 per 15 min (anonymous callers 240 per address), sized for that.
 const cloudSceneJsonCache = new Map<string, FrameScene[]>()
 const cloudFrameSceneHydrationsInFlight = new Set<FrameId>()
 const cloudFrameScenesHydratedAt = new Map<FrameId, number>()
