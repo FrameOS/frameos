@@ -1079,6 +1079,40 @@ proc overBackdrop(c: ColorRGBA, opacity: float32): tuple[color: ColorRGBA, opaci
     uint8(clamp(round(f.float32 * a + g.float32 * (1 - a)), 0, 255))
   (rgba(mix(c.r, emitBackdrop.r), mix(c.g, emitBackdrop.g), mix(c.b, emitBackdrop.b), 255), 1'f32)
 
+# A box's rounded outline and its border ring, one shared path per size,
+# radii and border widths, at the origin, placed by SvgNode.offset: a card
+# that changes only its colour (a toggle) draws the same path, which pixie
+# then fills from its kept coverage (paths.nim). A box with a gradient keeps
+# a path of its own, where the gradient's coordinates are.
+var boxShapes {.threadvar.}: Table[array[10, int32], Path]
+
+const BoxShapesMax = 256
+
+proc boxShape(w, h: float32, r: array[4, float32], bw: array[4, float32], ring: bool): Path =
+  var key: array[10, int32]
+  key[0] = int32(w * 4)
+  key[1] = int32(h * 4)
+  for i in 0 .. 3:
+    key[2 + i] = int32(r[i] * 4)
+    key[6 + i] = if ring: int32(bw[i] * 4) + 1 else: 0
+  if boxShapes.hasKey(key):
+    return boxShapes.getOrDefault(key)
+  if boxShapes.len >= BoxShapesMax:
+    boxShapes.clear()
+  result = newPath()
+  result.roundedRect(0, 0, w, h, r[0], r[1], r[2], r[3])
+  if ring:
+    let
+      iw = w - bw[1] - bw[3]
+      ih = h - bw[0] - bw[2]
+    if iw > 0 and ih > 0:
+      result.roundedRect(bw[3], bw[0], iw, ih,
+        max(r[0] - max(bw[3], bw[0]), 0), max(r[1] - max(bw[1], bw[0]), 0),
+        max(r[2] - max(bw[1], bw[2]), 0), max(r[3] - max(bw[3], bw[2]), 0),
+        clockwise = false)
+  result.share() # never changed again: bounds, flattened shapes, coverage kept
+  boxShapes[key] = result
+
 proc emitPaint(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode], gradients: var int) =
   ## The box's background and border.
   template b: untyped = n.box
@@ -1117,10 +1151,13 @@ proc emitPaint(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode],
       node = SvgNode(tag: "rect")
       for v in [("x", x), ("y", y), ("width", w), ("height", h)]:
         node.attrs.add((v[0], num(v[1])))
-    else:
+    elif fill.len > 0:
       node = SvgNode(tag: "path", path: newPath())
       node.path.roundedRect(x, y, w, h, r[0], r[1], r[2], r[3])
       node.path.share() # never changed again: bounds and flattened shapes kept
+    else:
+      node = SvgNode(tag: "path", path: boxShape(w, h, r, bw = [0'f32, 0, 0, 0], ring = false),
+        offset: vec2(x, y))
     if fill.len > 0:
       node.attrs.add(("fill", "url(#" & fill & ")"))
       if opacity < 1:
@@ -1132,16 +1169,8 @@ proc emitPaint(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode],
   let bw = b.border
   if bw != [0'f32, 0, 0, 0] and b.borderColor.a > 0:
     # The ring between the box and its inside, one fill whatever the widths.
-    let node = SvgNode(tag: "path", path: newPath(), attrs: @[("fill-rule", "evenodd")])
-    node.path.roundedRect(x, y, w, h, r[0], r[1], r[2], r[3])
-    let
-      iw = w - bw[1] - bw[3]
-      ih = h - bw[0] - bw[2]
-    if iw > 0 and ih > 0:
-      node.path.roundedRect(x + bw[3], y + bw[0], iw, ih,
-        max(r[0] - max(bw[3], bw[0]), 0), max(r[1] - max(bw[1], bw[0]), 0),
-        max(r[2] - max(bw[1], bw[2]), 0), max(r[3] - max(bw[3], bw[2]), 0),
-        clockwise = false)
+    let node = SvgNode(tag: "path", path: boxShape(w, h, r, bw, ring = true),
+      offset: vec2(x, y), attrs: @[("fill-rule", "evenodd")])
     node.paint(b.borderColor, opacity)
     drawn.add node
 
