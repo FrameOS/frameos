@@ -2552,10 +2552,19 @@ type PathProbeKind* = enum
   ppStroke = "stroke"      ## a stroke outlined and rasterized
   ppStrokeMask = "strokeMask"
 
+type CacheSkip* = enum
+  csOff = "off", csNotShared = "notShared", csTransform = "transform", csBlend = "blend",
+  csFirstSight = "first", csTooBig = "big", csLongStroke = "longStroke", csEmpty = "empty"
+
 var
   pathProbeOn* {.threadvar.}: bool ## time fills and strokes (FrameOS's render probe)
   pathProbeNs* {.threadvar.}: array[PathProbeKind, int64]
   pathProbeCount* {.threadvar.}: array[PathProbeKind, int]
+  cacheSkips* {.threadvar.}: array[CacheSkip, int] ## why a fill did not use the coverage cache
+
+template skip(reason: CacheSkip): untyped =
+  inc cacheSkips[reason]
+  return false
 
 template pathProbe(kind: PathProbeKind, body: untyped) =
   if pathProbeOn:
@@ -2676,10 +2685,10 @@ proc fillFromCoverageCache(
   ## new. False when the cache does not apply (off, the path not shared, a
   ## transform that is not a translation, a blend it does not do, a dashed or
   ## huge stroke, a mask too large): the caller draws as it always has.
-  if coverageCacheBudget <= 0 or not path.shared or not transform.isAxisAligned():
-    return false
-  if blendMode notin {NormalBlend, OverwriteBlend} or (stroke and dashes.len > 0):
-    return false
+  if coverageCacheBudget <= 0: skip(csOff)
+  if not path.shared: skip(csNotShared)
+  if not transform.isAxisAligned(): skip(csTransform)
+  if blendMode notin {NormalBlend, OverwriteBlend} or (stroke and dashes.len > 0): skip(csBlend)
   let
     tx = transform[2, 0]
     ty = transform[2, 1]
@@ -2710,7 +2719,7 @@ proc fillFromCoverageCache(
       else:
         coverageSeen[other] = coverageSeen[slot]
         coverageSeen[slot] = h
-      return false
+      skip(csFirstSight)
     # A mask covers the whole path; a fill under a view only what shows.
     # A large path seen through a small damage box is filled.
     let
@@ -2723,7 +2732,7 @@ proc fillFromCoverageCache(
       visible = max(0'f32, min(bx + bw, image.width.float32) - max(bx, 0)) *
         max(0'f32, min(by + bh, image.height.float32) - max(by, 0))
     if bw * bh > 4 * visible + 256 or (bw + 3) * (bh + 3) > CoverageMaskMaxBytes:
-      return false
+      skip(csTooBig)
     let pixelScale = max(sx, sy)
     var shapes: seq[Polygon]
     if stroke:
@@ -2732,14 +2741,14 @@ proc fillFromCoverageCache(
       for shape in open:
         points += shape.len
       if points > strokeBatchPoints:
-        return false # outlined whole, that would need the memory the batches avoid
+        skip(csLongStroke) # outlined whole, that would need the memory the batches avoid
       shapes = strokeShapes(open, strokeWidth, cap, join, miterLimit, dashes, pixelScale)
     else:
       shapes = path.closedShapes(pixelScale)
     shapes.transform(translate(vec2(fx, fy)) * scale(vec2(sx, sy)))
     mask = rasterizeMask(shapes, rule)
     if mask.isNil:
-      return false
+      skip(csEmpty)
     mask.path = path
     inc coverageCacheMisses
     if mask.bytes <= coverageCacheBudget:

@@ -560,6 +560,8 @@ proc fos_nim_render_impl(
     for kind in PathProbeKind:
       pathProbeNs[kind] = 0
       pathProbeCount[kind] = 0
+    for reason in CacheSkip:
+      cacheSkips[reason] = 0
     let
       cacheHits0 = coverageCacheHits
       cacheMisses0 = coverageCacheMisses
@@ -590,6 +592,10 @@ proc fos_nim_render_impl(
         for kind in PathProbeKind:
           if pathProbeCount[kind] > 0:
             phases.add(&" {kind} {pathProbeCount[kind]}x{pathProbeNs[kind].float / 1_000_000:.1f}")
+        phases.add(" | skip")
+        for reason in CacheSkip:
+          if cacheSkips[reason] > 0:
+            phases.add(&" {reason} {cacheSkips[reason]}")
       log(&"render #{renderCount} ({source}, fmt={pixelFormat}): render {(renderedAt - start).inMilliseconds} ms, " &
           (if inPlace: &"in place, collect {(packed - renderedAt).inMilliseconds} ms"
            else: &"dither+pack {(packed - renderedAt).inMilliseconds} ms") &

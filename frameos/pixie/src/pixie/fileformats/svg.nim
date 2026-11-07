@@ -115,6 +115,11 @@ template failInvalid() =
   raise newException(PixieError, "Invalid SVG data")
 
 proc newSvgElement(path: Path, props: SvgProperties): SvgElement =
+  # An element is never changed once made, its path neither: shared, so its
+  # bounds and flattened shapes are kept, and a fill that draws it again (a
+  # kept icon's <circle> or <line>) blends its kept coverage (paths.nim).
+  if not path.isNil:
+    path.share()
   SvgElement(path: path, props: props, bounds: rect(0, 0, -1, -1))
 
 proc newSvgElement(element: (Path, SvgProperties)): SvgElement =
