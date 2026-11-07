@@ -1,45 +1,44 @@
-// The store scene page IS the full-screen workspace: the scene's Info column,
-// the diagram (Editor), the AI assistant and the live Preview, each a panel
-// the top bar toggles. The URL hash names the open set — SceneEditorModal
+// The store scene page IS the full-screen workspace: the Editor (the
+// template's files: template.json — the scene page's info, its gallery,
+// description, versions and listing — each scene's diagram, their apps),
+// the AI assistant and the live Preview, each a panel the top bar toggles. The URL hash names the open set — SceneEditorModal
 // reads it on load (falling back to the browser's remembered set, then the
 // default) and rewrites it in place on every toggle, so a link or a reload
 // restores the same view.
 //
-// Spellings: `#scene-editor[-info][-preview][-ai]` when the Editor is open
-// (the pre-Editor-toggle hashes, where the diagram was always there, keep
-// their meaning: `#scene-editor` is the editor alone, `#scene-editor-preview`
-// editor + preview), `#scene[-info][-preview][-ai]` when it is closed, and
-// the old `#live-preview` for the preview alone.
+// Spellings: `#scene-editor[-preview][-ai]` when the Editor is open (the
+// pre-Editor-toggle hashes, where the diagram was always there, keep their
+// meaning: `#scene-editor` is the editor alone, `#scene-editor-preview`
+// editor + preview), `#scene[-preview][-ai]` when it is closed, and the old
+// `#live-preview` for the preview alone. The Info column is gone — its
+// content is the editor's template.json — so an old link's `-info` token
+// reads as the Editor.
 
 /** The workspace's panels, in layout (and toggle) order. */
-export type SceneEditorPanelName = "info" | "editor" | "ai" | "preview";
+export type SceneEditorPanelName = "editor" | "ai" | "preview";
 
 /** Which panels the workspace shows. */
 export type SceneEditorPanels = Record<SceneEditorPanelName, boolean>;
 
-export const sceneEditorPanelNames: readonly SceneEditorPanelName[] = [
-  "info",
-  "editor",
-  "ai",
-  "preview",
-];
+export const sceneEditorPanelNames: readonly SceneEditorPanelName[] = ["editor", "ai", "preview"];
 
 /** The non-editor panels in the order they appear in a hash. */
-const hashTokens: readonly Exclude<SceneEditorPanelName, "editor">[] = ["info", "preview", "ai"];
+const hashTokens: readonly Exclude<SceneEditorPanelName, "editor">[] = ["preview", "ai"];
+/** The retired Info column's hash token: its content is the editor's now. */
+const legacyInfoToken = "info";
 
 export const noSceneEditorPanels: SceneEditorPanels = {
   ai: false,
   editor: false,
-  info: false,
   preview: false,
 };
 
-/** First visit (nothing remembered, no hash): the scene's info, its diagram
- * and its running preview; the AI assistant is a toggle away. */
+/** First visit (nothing remembered, no hash): the editor (opening on the
+ * template's info) and the running preview; the AI assistant is a toggle
+ * away. */
 export const defaultSceneEditorPanels: SceneEditorPanels = {
   ai: false,
   editor: true,
-  info: true,
   preview: true,
 };
 
@@ -67,7 +66,7 @@ export function onlyPanel(name: SceneEditorPanelName): SceneEditorPanels {
 
 /** The panel a narrow (single-panel) workspace shows for a set: the last
  * one the user picked while it is still in the set, else the Preview when
- * it is open, else the Info, else the first open one (null: empty set). */
+ * it is open, else the first open one (null: empty set). */
 export function singlePanelFor(
   panels: SceneEditorPanels,
   active: SceneEditorPanelName | null,
@@ -77,9 +76,6 @@ export function singlePanelFor(
   }
   if (panels.preview) {
     return "preview";
-  }
-  if (panels.info) {
-    return "info";
   }
   return sceneEditorPanelNames.find((name) => panels[name]) ?? null;
 }
@@ -123,7 +119,13 @@ export function sceneEditorPanelsForHash(hash: string): SceneEditorPanels | null
   if (!rest.startsWith("-")) {
     return null;
   }
+  let sawInfo = false;
   for (const part of rest.slice(1).split("-")) {
+    if (part === legacyInfoToken && !sawInfo) {
+      sawInfo = true;
+      panels.editor = true;
+      continue;
+    }
     if (!isHashToken(part) || panels[part]) {
       return null;
     }

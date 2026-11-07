@@ -7,10 +7,11 @@ import {
 } from './embedOrigins'
 import copy from 'copy-to-clipboard'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowsPointingInIcon,
   BoltIcon,
+  ChevronDoubleRightIcon,
   ClipboardDocumentIcon,
   Cog6ToothIcon,
   PuzzlePieceIcon,
@@ -23,10 +24,12 @@ import { PencilSquareIcon, PlayIcon } from '@heroicons/react/24/solid'
 import { FrameosTheme } from '../utils/frameosTheme'
 import { ZoomOutArea } from '../icons/ZoomOutArea'
 
-import { frameEditorsLogic } from '../scenes/frame/frameEditorsLogic'
+import { editAppEditorKey, frameEditorsLogic } from '../scenes/frame/frameEditorsLogic'
 import { Diagram } from '../scenes/frame/panels/Diagram/Diagram'
 import { diagramLogic } from '../scenes/frame/panels/Diagram/diagramLogic'
-import { EditAppModal } from '../scenes/frame/panels/EditApp/EditAppModal'
+import { Button } from '../components/Button'
+import { EditApp } from '../scenes/frame/panels/EditApp/EditApp'
+import { editAppLogic } from '../scenes/frame/panels/EditApp/editAppLogic'
 import { Apps } from '../scenes/frame/panels/Apps/Apps'
 import { Events } from '../scenes/frame/panels/Events/Events'
 import { SceneJSON } from '../scenes/frame/panels/SceneJSON/SceneJSON'
@@ -45,6 +48,12 @@ import { ensurePortalRoots } from './portalRoots'
 // dependency graph connects to.
 import { frameLogic } from '../scenes/frame/frameLogic'
 import { sanitizeIncomingScenes } from './sanitizeIncomingScenes'
+import { SceneFileTree } from './SceneFileTree'
+import { sceneAppEntries, sceneFileName, type SceneTemplateMetadata } from './sceneFiles'
+import { sceneFileTreeLogic } from './sceneFileTreeLogic'
+import { TemplateFile, type TemplateCategoryOption } from './TemplateFile'
+
+export type { SceneTemplateMetadata, TemplateCategoryOption }
 
 const EMBED_FRAME_ID = 1
 
@@ -92,10 +101,24 @@ export interface EmbeddedSceneEditorProps {
    * with their own live preview next to the diagram pass false. */
   showPreviewButton?: boolean
   /** Fires with the scene the editor shows whenever the user switches scene
-   * tabs (and once on init), so a host can follow the selection. */
+   * in the file tree (and once on init), so a host can follow the selection. */
   onSelectedSceneChanged?: (sceneId: string | null) => void
   /** Filled with the editor's imperative API while it is mounted. */
   apiRef?: { current: EmbeddedSceneEditorApi | null }
+  /** The template's listing, the file tree's template.json. Without one the
+   * tree shows a read-only template.json made of the first scene's name and
+   * `description`. */
+  template?: SceneTemplateMetadata
+  /** Edits to template.json (its form, or its source). Absent: read only. */
+  onTemplateChanged?: (changes: Partial<SceneTemplateMetadata>) => void
+  /** The choices the template's Category field offers. */
+  templateCategories?: TemplateCategoryOption[]
+  /** template.json's Form view, in place of the built-in form: the host's
+   * own view of the template (the store shows its scene page there). */
+  templateContent?: ReactNode
+  /** The file the editor opens on: the first scene's diagram (default) or
+   * template.json. Read once, on the first init. */
+  initialFile?: 'template' | 'diagram'
 }
 
 // The scene editor as a plain React component: render it inside any React
@@ -108,6 +131,9 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
   useState(ensurePortalRoots)
   const logicProps = { frameId: EMBED_FRAME_ID }
   useMountedLogic(embedFrameLogic(logicProps))
+  // The tree's logic takes the file to open on as a prop (its reducer's
+  // default), so a remount — StrictMode's, a host's — opens on it again.
+  useMountedLogic(sceneFileTreeLogic({ ...logicProps, initialFile: props.initialFile }))
   const { initEmbedFrame, updateScene } = useActions(embedFrameLogic(logicProps))
   const { scenes } = useValues(embedFrameLogic(logicProps))
   const { setTheme } = useActions(workspaceLogic)
@@ -164,8 +190,13 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
   onSelectedSceneChangedRef.current = props.onSelectedSceneChanged
   const selectedSceneIdRef = useRef(selectedSceneId)
   selectedSceneIdRef.current = selectedSceneId
+  const { syncScene } = useActions(sceneFileTreeLogic(logicProps))
   useEffect(() => {
     onSelectedSceneChangedRef.current?.(selectedSceneId)
+    if (selectedSceneId) {
+      syncScene(selectedSceneId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSceneId])
 
   useEffect(() => {
@@ -243,6 +274,18 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
           theme={theme}
           sceneDescription={props.description?.trim() ? props.description : null}
           showPreviewButton={props.showPreviewButton ?? true}
+          template={
+            props.template ?? {
+              name: (scenes[0]?.name || 'Untitled scene').trim(),
+              description: props.description?.trim() ? props.description : null,
+              category: null,
+              tags: [],
+              frameosVersion: null,
+            }
+          }
+          onTemplateChanged={props.onTemplateChanged}
+          templateCategories={props.templateCategories}
+          templateContent={props.templateContent}
         />
       </BindLogic>
     </BindLogic>
@@ -545,6 +588,65 @@ function EmbedUtilityDrawer({
   )
 }
 
+/** The pane header's path: `scene / app / file`. The last part (the file)
+ * keeps its width; the rest truncates first, and the whole path is the
+ * tooltip. */
+function FilePath({ parts, suffix }: { parts: string[]; suffix?: JSX.Element | null }): JSX.Element {
+  const last = parts[parts.length - 1] ?? ''
+  const prefix = parts.slice(0, -1)
+  return (
+    <span className="flex min-w-0 flex-1 items-center overflow-hidden font-mono text-xs" title={parts.join(' / ')}>
+      {prefix.length > 0 ? (
+        <span className="frameos-muted min-w-0 shrink truncate">
+          {prefix.join(' / ')}
+          <span className="px-1">/</span>
+        </span>
+      ) : null}
+      <span className="min-w-0 shrink-0 truncate" style={{ maxWidth: '100%' }}>
+        {last}
+      </span>
+      {suffix}
+    </span>
+  )
+}
+
+/** An app file's header: its path, whether it is unsaved, Discard and Save
+ * (once a second row above the code, EditApp's toolbar). */
+function AppFileHeader({ scene, nodeId, label }: { scene: FrameScene; nodeId: string; label: string }): JSX.Element {
+  const logic = editAppLogic({ frameId: EMBED_FRAME_ID, sceneId: scene.id, nodeId })
+  const { activeFile, hasChanges, requiresCompiledOnSave } = useValues(logic)
+  const { saveChanges, discardChanges } = useActions(logic)
+  return (
+    <>
+      <FilePath
+        parts={[sceneFileName(scene), label, ...(activeFile ? [activeFile] : [])]}
+        suffix={hasChanges ? <span className="ml-1.5 shrink-0 font-sans text-xs font-semibold">(unsaved)</span> : null}
+      />
+      <div className="flex shrink-0 items-center gap-1.5">
+        <Button
+          size="tiny"
+          color="secondary"
+          onClick={() => discardChanges()}
+          disabled={!hasChanges}
+          className="!px-2 !text-xs"
+        >
+          Discard
+        </Button>
+        <Button
+          size="tiny"
+          color={hasChanges ? 'primary' : 'secondary'}
+          onClick={() => saveChanges()}
+          disabled={!hasChanges || requiresCompiledOnSave}
+          className="!px-2 !text-xs"
+          title={requiresCompiledOnSave ? 'Compiled Nim apps are read only here' : 'Save changes'}
+        >
+          Save
+        </Button>
+      </div>
+    </>
+  )
+}
+
 function EmbeddedEditorBody({
   selectedSceneId,
   setSelectedSceneId,
@@ -552,6 +654,10 @@ function EmbeddedEditorBody({
   theme,
   sceneDescription,
   showPreviewButton,
+  template,
+  onTemplateChanged,
+  templateCategories,
+  templateContent,
 }: {
   selectedSceneId: string | null
   setSelectedSceneId: (sceneId: string) => void
@@ -559,14 +665,17 @@ function EmbeddedEditorBody({
   theme: FrameosTheme
   sceneDescription: string | null
   showPreviewButton: boolean
+  template: SceneTemplateMetadata
+  onTemplateChanged?: (changes: Partial<SceneTemplateMetadata>) => void
+  templateCategories?: TemplateCategoryOption[]
+  templateContent?: ReactNode
 }): JSX.Element {
-  const { activeEditor } = useValues(frameEditorsLogic({ frameId: EMBED_FRAME_ID }))
-  const { closeEditor } = useActions(frameEditorsLogic({ frameId: EMBED_FRAME_ID }))
   // Keep the preview logic (and the API keys applied to it) alive across
   // panel open/close cycles.
   useMountedLogic(livePreviewLogic({ frameId: EMBED_FRAME_ID }))
+  const { shownSelection, treeOpen } = useValues(sceneFileTreeLogic({ frameId: EMBED_FRAME_ID }))
+  const { setTreeOpen } = useActions(sceneFileTreeLogic({ frameId: EMBED_FRAME_ID }))
   const [activePanel, setActivePanel] = useState<EmbedPanel | null>(null)
-  const appEditor = activeEditor?.kind === 'editApp' ? activeEditor : null
   const visiblePanels = showPreviewButton
     ? panelDefinitions
     : panelDefinitions.filter((definition) => definition.panel !== 'preview')
@@ -574,74 +683,121 @@ function EmbeddedEditorBody({
   const dark = theme === 'dark'
   const surface = dark ? 'bg-[#16181c] text-slate-100' : 'bg-white text-slate-900'
   const divider = dark ? 'border-slate-700' : 'border-slate-200'
-  const mutedButton = dark
-    ? 'rounded px-3 py-1 text-sm text-slate-400 hover:bg-slate-800'
-    : 'rounded px-3 py-1 text-sm text-slate-500 hover:bg-slate-100'
 
   const selectedScene = scenes.find((scene) => scene.id === selectedSceneId) ?? null
+  const appScene =
+    shownSelection.kind === 'app' ? scenes.find((scene) => scene.id === shownSelection.sceneId) ?? null : null
+  const appEntry =
+    shownSelection.kind === 'app' && appScene
+      ? sceneAppEntries(appScene).find((entry) => entry.nodeId === shownSelection.nodeId) ?? null
+      : null
 
   return (
-    <div className={clsx('frameos-app-shell flex h-full flex-col overflow-hidden', `frameos-theme-${theme}`, surface)}>
-      {scenes.length > 1 ? (
-        <div className={clsx('flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1', divider)}>
-          {scenes.map((scene) => (
-            <button
-              key={scene.id}
-              type="button"
-              onClick={() => setSelectedSceneId(scene.id)}
-              className={
-                scene.id === selectedSceneId
-                  ? clsx('rounded px-3 py-1 text-sm font-semibold', dark ? 'bg-slate-700' : 'bg-slate-200')
-                  : mutedButton
-              }
-            >
-              {scene.name || scene.id}
-            </button>
-          ))}
-        </div>
+    <div
+      className={clsx(
+        'frameos-app-shell @container relative flex h-full overflow-hidden',
+        `frameos-theme-${theme}`,
+        surface
+      )}
+      data-testid="embedded-scene-editor"
+    >
+      {treeOpen ? (
+        <SceneFileTree
+          frameId={EMBED_FRAME_ID}
+          scenes={scenes}
+          selectedSceneId={selectedSceneId}
+          onSelectScene={setSelectedSceneId}
+          surfaceClassName={surface}
+        />
       ) : null}
-      <div className="scene-editor-canvas scene-editor-canvas-full @container relative min-h-0 flex-1 overflow-hidden">
-        {selectedSceneId ? <Diagram sceneId={selectedSceneId} showToolbar={false} /> : null}
-        {selectedSceneId ? (
-          <div className="scene-diagram-overlay pointer-events-none absolute inset-0 z-50">
-            {/* One vertical column at the right edge: the drawer opens to its
-                left (right-[4.5rem]), so the buttons stay clickable. */}
-            <div className="scene-diagram-corner-toolbar pointer-events-none absolute flex min-w-0 items-start gap-2">
-              <div className="scene-diagram-utility-buttons scene-diagram-utility-toolbar pointer-events-none flex shrink-0 flex-col items-center gap-2">
-                <EmbedDiagramButtons sceneId={selectedSceneId} />
-                <div className="h-2" />
-                {visiblePanels.map((definition) => (
-                  <button
-                    key={definition.panel}
-                    type="button"
-                    title={definition.label}
-                    onClick={() =>
-                      setActivePanel((current) => (current === definition.panel ? null : definition.panel))
-                    }
-                    className={clsx(
-                      utilityButtonClassName,
-                      activePanel === definition.panel
-                        ? 'frameos-primary-active text-white'
-                        : 'bg-white/90 text-slate-500'
-                    )}
-                  >
-                    {definition.icon}
-                  </button>
-                ))}
-              </div>
-            </div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className={clsx('flex h-10 shrink-0 items-center gap-2 border-b px-2', divider)}>
+          {treeOpen ? null : (
+            <button
+              type="button"
+              title="Show the files"
+              aria-label="Show the files"
+              onClick={() => setTreeOpen(true)}
+              className="frameos-icon-button frameos-muted flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
+            >
+              <ChevronDoubleRightIcon className="h-4 w-4" />
+            </button>
+          )}
+          <div className="flex min-w-0 flex-1 items-center gap-2 pl-1">
+            {shownSelection.kind === 'template' ? (
+              <FilePath parts={['template.json']} />
+            ) : shownSelection.kind === 'app' && appScene && appEntry ? (
+              <AppFileHeader scene={appScene} nodeId={appEntry.nodeId} label={appEntry.label} />
+            ) : (
+              <FilePath parts={selectedScene ? [sceneFileName(selectedScene)] : []} />
+            )}
           </div>
-        ) : null}
-        {activePanel && selectedScene && (showPreviewButton || activePanel !== 'preview') ? (
-          <EmbedUtilityDrawer
-            panel={activePanel}
-            scene={selectedScene}
-            sceneDescription={sceneDescription}
-            onClose={() => setActivePanel(null)}
-          />
-        ) : null}
+        </div>
+        {shownSelection.kind === 'template' ? (
+          <div className="min-h-0 flex-1">
+            <TemplateFile
+              frameId={EMBED_FRAME_ID}
+              template={template}
+              onChange={onTemplateChanged}
+              categories={templateCategories}
+              sceneCount={scenes.length}
+              content={templateContent}
+            />
+          </div>
+        ) : shownSelection.kind === 'app' && appScene ? (
+          <div className="@container min-h-0 flex-1 p-3">
+            <EditApp
+              key={`${appScene.id}.${shownSelection.nodeId}`}
+              editorKey={editAppEditorKey(appScene.id, shownSelection.nodeId)}
+              sceneId={appScene.id}
+              nodeId={shownSelection.nodeId}
+              showFileList={false}
+            />
+          </div>
+        ) : (
+          <div className="scene-editor-canvas scene-editor-canvas-full @container relative min-h-0 flex-1 overflow-hidden">
+            {selectedSceneId ? <Diagram sceneId={selectedSceneId} showToolbar={false} /> : null}
+            {selectedSceneId ? (
+              <div className="scene-diagram-overlay pointer-events-none absolute inset-0 z-50">
+                {/* One vertical column at the right edge: the drawer opens to its
+                    left (right-[4.5rem]), so the buttons stay clickable. */}
+                <div className="scene-diagram-corner-toolbar pointer-events-none absolute flex min-w-0 items-start gap-2">
+                  <div className="scene-diagram-utility-buttons scene-diagram-utility-toolbar pointer-events-none flex shrink-0 flex-col items-center gap-2">
+                    <EmbedDiagramButtons sceneId={selectedSceneId} />
+                    <div className="h-2" />
+                    {visiblePanels.map((definition) => (
+                      <button
+                        key={definition.panel}
+                        type="button"
+                        title={definition.label}
+                        onClick={() =>
+                          setActivePanel((current) => (current === definition.panel ? null : definition.panel))
+                        }
+                        className={clsx(
+                          utilityButtonClassName,
+                          activePanel === definition.panel
+                            ? 'frameos-primary-active text-white'
+                            : 'bg-white/90 text-slate-500'
+                        )}
+                      >
+                        {definition.icon}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+            {activePanel && selectedScene && (showPreviewButton || activePanel !== 'preview') ? (
+              <EmbedUtilityDrawer
+                panel={activePanel}
+                scene={selectedScene}
+                sceneDescription={sceneDescription}
+                onClose={() => setActivePanel(null)}
+              />
+            ) : null}
+          </div>
+        )}
       </div>
-      {appEditor ? <EditAppModal editor={appEditor} onClose={() => closeEditor(appEditor.key)} /> : null}
     </div>
   )
 }
