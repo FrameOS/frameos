@@ -10,6 +10,7 @@
 ## boolean test; the clock is read only when it is on.
 
 import std/[monotimes, times, strutils]
+import pixie/paths
 
 type RenderPhase* = enum
   phRuntime = "runtime" ## a QuickJS runtime and context made (a cold start)
@@ -48,22 +49,56 @@ proc probeAdd*(phase: RenderPhase, ns: int64) {.inline.} =
   inc counts[phase]
 
 template probe*(phase: RenderPhase, body: untyped) =
-  ## `body`, timed into `phase` when the probe is on.
+  ## `body`, timed into `phase` when the probe is on. The body is compiled
+  ## once (in `if true`, which scopes it as a branch did): an if/else with it
+  ## in both branches was every probed phase's code twice in the firmware.
+  let probeStart = if probeOn: getMonoTime() else: MonoTime()
+  if true:
+    body
   if probeOn:
-    let probeStart = getMonoTime()
-    body
     probeAdd(phase, (getMonoTime() - probeStart).inNanoseconds)
-  else:
-    body
+
+proc ms1(ns: int64): string =
+  ## Nanoseconds as milliseconds with a tenth: "15.2".
+  let tenths = (ns + 50_000) div 100_000
+  $(tenths div 10) & "." & $(tenths mod 10)
 
 proc probeSummary*(): string =
   ## "get 15.2 walk 3.1 layout 12.0 ..." in ms, the phases that ran; "" when
   ## none did (or the probe is off).
-  var parts: seq[string]
   for phase in RenderPhase:
     if counts[phase] > 0:
-      parts.add($phase & " " & formatFloat(accNs[phase].float / 1_000_000, ffDecimal, 1))
-  parts.join(" ")
+      if result.len > 0: result.add ' '
+      result.add $phase & " " & ms1(accNs[phase])
+
+proc probeBegin*(): (int, int) =
+  ## A render's probe begins: everything zeroed, pixie's path probe on with
+  ## it; the coverage cache's hit and miss counts so far, for probeLine.
+  probeReset()
+  pathProbeOn = probeOn
+  for kind in PathProbeKind:
+    pathProbeNs[kind] = 0
+    pathProbeCount[kind] = 0
+  for reason in CacheSkip:
+    cacheSkips[reason] = 0
+  (coverageCacheHits, coverageCacheMisses)
+
+proc probeLine*(cacheAtStart: (int, int)): string =
+  ## The render line's bracket: the phases, then pixie's coverage cache this
+  ## render (hits/misses, what it holds), the fills and strokes by kind, and
+  ## why fills skipped the cache. "" with the probe off.
+  result = probeSummary()
+  if not probeOn:
+    return
+  result.add " cache " & $(coverageCacheHits - cacheAtStart[0]) & "/" &
+    $(coverageCacheMisses - cacheAtStart[1]) & " " & $(coverageCacheUsedBytes() div 1024) & "K |"
+  for kind in PathProbeKind:
+    if pathProbeCount[kind] > 0:
+      result.add " " & $kind & " " & $pathProbeCount[kind] & "x" & ms1(pathProbeNs[kind])
+  result.add " | skip"
+  for reason in CacheSkip:
+    if cacheSkips[reason] > 0:
+      result.add " " & $reason & " " & $cacheSkips[reason]
 
 proc probeNs*(phase: RenderPhase): int64 =
   ## What `phase` took this render, in nanoseconds (a host benchmark's unit).

@@ -860,14 +860,13 @@ when defined(frameosPreludeBytecode):
 
 proc evalScenePrelude(js: QuickJS) =
   ## The prelude into a fresh context: the bytecode built into the image when
-  ## there is one (a load, not a compile), else the source.
+  ## there is one (a load, not a compile), else the source. Not both: the
+  ## source in the image as a fallback was 10 KB of the ESP32's flash for a
+  ## load the checks above make sure of (an engine that refuses it raises).
   when defined(frameosPreludeBytecode):
-    try:
-      discard js.evalBytecode(scenePreludeBytecode.toOpenArrayByte(0, scenePreludeBytecode.high))
-      return
-    except JSException:
-      discard # a bytecode the engine would not take: the source is the same prelude
-  discard js.eval(sceneContextJsPrelude)
+    discard js.evalBytecode(scenePreludeBytecode.toOpenArrayByte(0, scenePreludeBytecode.high))
+  else:
+    discard js.eval(sceneContextJsPrelude)
 
 proc ensureSceneJs*(scene: InterpretedFrameScene) =
   withLock sceneJsLock:

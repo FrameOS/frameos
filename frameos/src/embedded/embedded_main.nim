@@ -555,16 +555,7 @@ proc fos_nim_render_impl(
     # `set debug 1`: the render line below carries where this frame went
     # (frameos/render_probe.nim), the measurement docs/perf-todo.md is paced by.
     probeOn = debugEnabled()
-    probeReset()
-    pathProbeOn = probeOn
-    for kind in PathProbeKind:
-      pathProbeNs[kind] = 0
-      pathProbeCount[kind] = 0
-    for reason in CacheSkip:
-      cacheSkips[reason] = 0
-    let
-      cacheHits0 = coverageCacheHits
-      cacheMisses0 = coverageCacheMisses
+    let cacheAtStart = probeBegin()
     let start = getMonoTime()
     let rendered = renderFrameImage()
     var image = rendered.image
@@ -584,18 +575,7 @@ proc fos_nim_render_impl(
     inc renderCount
     lastRenderMs = ((packed - start).inMilliseconds).int
     if not quietRenders:
-      var phases = probeSummary()
-      if probeOn:
-        # pixie's coverage cache this render: hits/misses, and what it holds.
-        phases.add(&" cache {coverageCacheHits - cacheHits0}/{coverageCacheMisses - cacheMisses0} " &
-          &"{coverageCacheUsedBytes() div 1024}K |")
-        for kind in PathProbeKind:
-          if pathProbeCount[kind] > 0:
-            phases.add(&" {kind} {pathProbeCount[kind]}x{pathProbeNs[kind].float / 1_000_000:.1f}")
-        phases.add(" | skip")
-        for reason in CacheSkip:
-          if cacheSkips[reason] > 0:
-            phases.add(&" {reason} {cacheSkips[reason]}")
+      let phases = probeLine(cacheAtStart)
       log(&"render #{renderCount} ({source}, fmt={pixelFormat}): render {(renderedAt - start).inMilliseconds} ms, " &
           (if inPlace: &"in place, collect {(packed - renderedAt).inMilliseconds} ms"
            else: &"dither+pack {(packed - renderedAt).inMilliseconds} ms") &

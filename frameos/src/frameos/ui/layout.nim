@@ -1153,12 +1153,16 @@ proc overBackdrop(c: ColorRGBA, opacity: float32): tuple[color: ColorRGBA, opaci
 # that changes only its colour (a toggle) draws the same path, which pixie
 # then fills from its kept coverage (paths.nim). A box with a gradient keeps
 # a path of its own, where the gradient's coordinates are.
-var boxShapes {.threadvar.}: Table[array[10, int32], Path]
+type ShapeKey = array[10, int32]
+  ## The key of the shared paths below, boxes and glyphs alike: one Table
+  ## type, one copy of its code in the firmware.
+
+var boxShapes {.threadvar.}: Table[ShapeKey, Path]
 
 const BoxShapesMax = 256
 
 proc boxShape(w, h: float32, r: array[4, float32], bw: array[4, float32], ring: bool): Path =
-  var key: array[10, int32]
+  var key: ShapeKey
   key[0] = int32(w * 4)
   key[1] = int32(h * 4)
   for i in 0 .. 3:
@@ -1304,7 +1308,7 @@ proc emitSvg(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode]) =
 # ESP32 (docs/perf-todo.md). Glyphs sit up to an eighth of a pixel from
 # where the typesetter put them.
 
-var glyphPaths {.threadvar.}: Table[(uint, int32, int32), Path]
+var glyphPaths {.threadvar.}: Table[ShapeKey, Path]
 
 # A glyph's path keeps its flattened shapes too (a shared path's), a few KB
 # for a large size: an ESP32 holds a UI's worth, a host more.
@@ -1316,7 +1320,12 @@ proc quarter(v: float32): float32 {.inline.} =
 proc glyphPath(font: Font, rune: Rune): Path =
   ## The rune's outline at the font's size, at the origin, shared; nil for
   ## a glyph that draws nothing.
-  let key = (cast[uint](font.typeface), rune.int32, int32(font.size * 64))
+  let face = cast[uint64](font.typeface)
+  var key: ShapeKey
+  key[0] = cast[int32](uint32(face and 0xffff_ffff'u64))
+  key[1] = cast[int32](uint32(face shr 32))
+  key[2] = rune.int32
+  key[3] = int32(font.size * 64)
   if glyphPaths.hasKey(key):
     return glyphPaths.getOrDefault(key)
   if glyphPaths.len >= GlyphPathsMax:

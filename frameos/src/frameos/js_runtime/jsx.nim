@@ -45,7 +45,7 @@ type
     handlerCount: int
     previous: JSValue  # the last render's, for the handlers of kept nodes
     memo: ptr JsxMemo
-    keptIndex: Table[int, int]  # memo id -> its place in memo.kept, for this render
+    keptCursor: int  # where in memo.kept the next memo()'d element is looked for
 
 proc attrName(name: string): string =
   if name == "className":
@@ -124,7 +124,20 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
     if jsIsNumber(mark):
       memoId = ctx.int32Of(mark)
     JS_FreeValue(ctx, mark)
-  let keptAt = if memoId > 0: r.keptIndex.getOrDefault(memoId, -1) else: -1
+  var keptAt = -1
+  if memoId > 0:
+    # From where the last one was found: a tree's memo()'d elements come
+    # back in the order they were kept, so a list of a hundred rows finds
+    # each at the cursor (a scan of the kept entries from the start for each
+    # was quadratic in the list), and a row put in or taken out costs one
+    # pass over the gap. A Table here was 600 B of the ESP32's flash.
+    let n = r.memo.kept.len
+    for step in 0 ..< n:
+      let i = (r.keptCursor + step) mod n
+      if r.memo.kept[i].id == memoId:
+        keptAt = i
+        r.keptCursor = i + 1
+        break
   if keptAt >= 0:
     # Taken back where its handlers have the numbers they had: copied
     # from the last render's list into this one's at those numbers.
@@ -193,11 +206,8 @@ proc jsxNode*(ctx: ptr JSContext, v: JSValueConst, images: ptr Table[int, Image]
       previous: ctx.prop(global, "__frameosHandlers"))
     nodes: seq[SvgNode]
   if not memo.isNil:
-    # Indexed once: a list of a hundred memo()'d rows looked each of them up
-    # with a scan of the kept entries, quadratic in the list.
-    for i, kept in memo.kept.mpairs:
+    for kept in memo.kept.mitems:
       kept.used = false
-      reader.keptIndex[kept.id] = i
   reader.addNodes(v, nodes, 0)
   if not memo.isNil:
     # What this render's tree no longer holds is let go.

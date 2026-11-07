@@ -1,5 +1,5 @@
 import blends, bumpy, chroma, common, decodebudget, images, internal, paints,
-    simd, std/fenv, std/hashes, std/monotimes, std/strutils, std/tables, std/times, vmath
+    simd, std/fenv, std/hashes, std/monotimes, std/strutils, std/times, vmath
 
 type
   WindingRule* = enum
@@ -2508,6 +2508,7 @@ template paintThroughMask(
 type
   CoverageMask = ref object
     path: Path
+    key: CoverageKey
     x0, y0: int # the mask's top left, relative to the offset's integer part
     width, height: int
     data: seq[uint8] # width * height coverage values, row after row
@@ -2533,7 +2534,11 @@ const
 
 var
   coverageCacheBudget* {.threadvar.}: int ## bytes of masks kept on this thread; 0 = off
-  coverageCache {.threadvar.}: Table[CoverageKey, CoverageMask]
+  coverageKeys {.threadvar.}: seq[uint32] # each kept mask's key hash, scanned for a lookup
+  coverageMasks {.threadvar.}: seq[CoverageMask] # beside them, in the same order
+    ## Two seqs, not a Table: a budget's worth is a few dozen masks, the
+    ## scan reads one packed word each, and a Table of them cost 2 KB of
+    ## flash in instantiations.
   coverageCacheBytes {.threadvar.}: int
   coverageCacheTick {.threadvar.}: int
   coverageCacheHits* {.threadvar.}: int
@@ -2567,17 +2572,18 @@ template skip(reason: CacheSkip): untyped =
   return false
 
 template pathProbe(kind: PathProbeKind, body: untyped) =
-  if pathProbeOn:
-    let probeStart = getMonoTime()
+  # `body` once: an if/else with it in both branches compiled it twice.
+  let probeStart = if pathProbeOn: getMonoTime() else: MonoTime()
+  if true:
     body
+  if pathProbeOn:
     pathProbeNs[kind] += (getMonoTime() - probeStart).inNanoseconds
     inc pathProbeCount[kind]
-  else:
-    body
 
 proc clearCoverageCache*() {.raises: [].} =
   ## Lets every kept mask go (render memory is short; the thread is done).
-  coverageCache.clear()
+  coverageKeys.setLen(0)
+  coverageMasks.setLen(0)
   coverageSeen.setLen(0)
   coverageCacheBytes = 0
 
@@ -2590,19 +2596,19 @@ proc isAxisAligned(m: Mat3): bool =
     m[0, 0] > 0 and m[1, 1] > 0
 
 proc evictCoverage(needed: int) =
-  while coverageCache.len > 0 and coverageCacheBytes + needed > coverageCacheBudget:
-    var
-      oldestKey: CoverageKey
-      oldest = int.high
-    for key, mask in coverageCache:
-      if mask.used < oldest:
-        oldest = mask.used
-        oldestKey = key
-    var gone: CoverageMask
-    if coverageCache.pop(oldestKey, gone):
-      coverageCacheBytes -= gone.bytes
-    else:
-      break
+  while coverageMasks.len > 0 and coverageCacheBytes + needed > coverageCacheBudget:
+    var oldest = 0
+    for i in 1 ..< coverageMasks.len:
+      if coverageMasks[i].used < coverageMasks[oldest].used:
+        oldest = i
+    coverageCacheBytes -= coverageMasks[oldest].bytes
+    coverageMasks.del(oldest)
+    coverageKeys.del(oldest)
+
+proc findCoverage(key: CoverageKey, h: uint32): CoverageMask =
+  for i in 0 ..< coverageKeys.len:
+    if coverageKeys[i] == h and coverageMasks[i].key == key:
+      return coverageMasks[i]
 
 proc rasterizeMask(shapes: seq[Polygon], rule: WindingRule): CoverageMask =
   ## The coverage of `shapes` (already at their fractional offset) over their
@@ -2621,7 +2627,10 @@ proc rasterizeMask(shapes: seq[Polygon], rule: WindingRule): CoverageMask =
   var local = shapes
   local.transform(translate(vec2(-x0.float32, -y0.float32)))
   let mask = newImageGray8(w, h)
-  mask.fillShapes(local, rgbx(255, 255, 255, 255), rule, OverwriteBlend)
+  # A Color, as every other caller passes: fillShapes is generic in it, and
+  # a ColorRGBX here was a second 4 KB copy of it (and took gcc's inlining
+  # of computeCoverage, a call per scanline, out of the one every fill runs).
+  mask.fillShapes(local, color(1, 1, 1, 1), rule, OverwriteBlend)
   result = CoverageMask(x0: x0, y0: y0, width: w, height: h, bytes: w * h + h * 8 + 96)
   result.data = newSeq[uint8](w * h)
   copyMem(result.data[0].addr, mask.data8[0].addr, w * h)
@@ -2704,12 +2713,12 @@ proc fillFromCoverageCache(
       miterLimit: if stroke: int32(miterLimit * 256) else: 0,
       cap: cap, join: join)
   inc coverageCacheTick
-  var mask = coverageCache.getOrDefault(key)
+  let h = uint32(hash(key)) or 1
+  var mask = findCoverage(key, h)
   if mask.isNil or mask.path != path:
     if coverageSeen.len == 0:
       coverageSeen = newSeq[uint32](1024)
     let
-      h = uint32(hash(key)) or 1
       slot = int(h and uint32(coverageSeen.high))
       other = slot xor 1 # two slots a key: one collision does not forget it
     if coverageSeen[slot] != h and coverageSeen[other] != h:
@@ -2750,10 +2759,12 @@ proc fillFromCoverageCache(
     if mask.isNil:
       skip(csEmpty)
     mask.path = path
+    mask.key = key
     inc coverageCacheMisses
     if mask.bytes <= coverageCacheBudget:
       evictCoverage(mask.bytes)
-      coverageCache[key] = mask
+      coverageKeys.add h
+      coverageMasks.add mask
       coverageCacheBytes += mask.bytes
   else:
     inc coverageCacheHits
