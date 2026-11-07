@@ -42,6 +42,7 @@ static const struct {
     [FOS_I2C_LSM6DS3] = {"lsm6ds3", 0x6a},
     [FOS_I2C_ES8311] = {"es8311", 0x18},
     [FOS_I2C_ES7210] = {"es7210", 0x40},
+    [FOS_I2C_AXP2101] = {"axp2101", 0x34},
 };
 
 static SemaphoreHandle_t s_lock = NULL;
