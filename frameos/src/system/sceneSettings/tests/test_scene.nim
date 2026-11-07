@@ -571,6 +571,17 @@ block the_frame_page:
   sent.setLen(0)
   scene.tap(regionWith(1))
   doAssert sent.len >= 1 and sent[0][0] == evSetCurrentScene and sent[0][1]["state"] == %*{"city": "Oslo"}, $sent
+  # On e-paper, black on white, the gear lit inverted.
+  block on_paper:
+    let paper = FrameConfig(width: 480, height: 480, device: "pimoroni.inky_impression_7", scalingMode: "cover",
+      saveAssets: %*false)
+    let page = settings.exportedScene.init(SceneSettingsId.SceneId, paper, logger, %*{})
+    page.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": ""}})
+    let image = page.draw()
+    if previews.len > 0: image.writeFile(previews / "settings-frame-paper.png")
+    doAssert page.state["page"].getStr() == "frame"
+    page.send("close", %*{})
+  discard scene.draw()
   # Turned off while the page shows: back on the scene's form.
   discard scene.draw()
   scene.tap(regionWith(2))
