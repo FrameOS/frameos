@@ -340,6 +340,14 @@ proc keepPath(key: string, path: Path) =
     pathCacheChars -= pathCache[0][0].len
     pathCache.delete(0)
 
+proc shapeKey(node: SvgNode, names: openArray[string]): string =
+  ## The cache key of a shape element: its tag and its geometry attributes'
+  ## own text, behind a byte no path data starts with.
+  result = "\x01" & node.tag
+  for name in names:
+    result.add ' '
+    result.add node.attr(name)
+
 template shapeCached(key: string, body: untyped): Path =
   ## A shape element's path (a <line>, a <circle>, ...), shared by every SVG
   ## that draws it with the same geometry, as `<path d>` is: a UI's icon is
@@ -1114,7 +1122,7 @@ proc parseSvgElement(
       x2 = parseFloat(node.attrOrDefault("x2", "0"))
       y2 = parseFloat(node.attrOrDefault("y2", "0"))
 
-    let path = shapeCached("\x01line " & $x1 & " " & $y1 & " " & $x2 & " " & $y2):
+    let path = shapeCached(shapeKey(node, ["x1", "y1", "x2", "y2"])):
       let p = newPath()
       p.moveTo(x1, y1)
       p.lineTo(x2, y2)
@@ -1175,8 +1183,8 @@ proc parseSvgElement(
     var path = newPath()
     var rectProps = props
     if rx > 0 or ry > 0:
-      let cachedRound = cachedPathFor("\x01rect " & $x & " " & $y & " " & $width & " " & $height &
-        " " & $rx & " " & $ry)
+      let roundKey = shapeKey(node, ["x", "y", "width", "height", "rx", "ry"])
+      let cachedRound = cachedPathFor(roundKey)
       if not cachedRound.isNil:
         elements.add newSvgElement(cachedRound, rectProps)
         return
@@ -1196,9 +1204,7 @@ proc parseSvgElement(
       path.ellipticalArcTo(rx, ry, 0, false, true, x, y + height - ry)
       path.lineTo(x, y + ry)
       path.ellipticalArcTo(rx, ry, 0, false, true, x + rx, y)
-      keepPath("\x01rect " & $x & " " & $y & " " & $width & " " & $height & " " &
-        $max(parseFloat(node.attrOrDefault("rx", "0")), 0) & " " &
-        $max(parseFloat(node.attrOrDefault("ry", "0")), 0), path)
+      keepPath(roundKey, path)
     else:
       path.rect(x, y, width, height)
       rectProps.isRect = true
@@ -1223,7 +1229,7 @@ proc parseSvgElement(
       rx = parseFloat(node.attrOrDefault("rx", "0"))
       ry = parseFloat(node.attrOrDefault("ry", "0"))
 
-    let path = shapeCached("\x01ellipse " & $cx & " " & $cy & " " & $rx & " " & $ry):
+    let path = shapeCached(shapeKey(node, ["cx", "cy", "r", "rx", "ry"])):
       let p = newPath()
       p.ellipse(cx, cy, rx, ry)
       p

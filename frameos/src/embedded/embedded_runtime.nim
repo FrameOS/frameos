@@ -10,6 +10,7 @@
 import std/[json, locks, options, sequtils, strformat, tables]
 import pixie
 
+import frameos/render_probe
 import frameos/types
 import frameos/utils/asset_colors
 from frameos/render_scale import MaxRenderScale
@@ -993,8 +994,11 @@ proc renderCurrentScene*(): Option[Image] =
   )
   # renderScene hands the JS apps' interpreters back before it returns, so the
   # packing and display work below see the memory.
-  let image = host.renderScene(context)
-  persistSceneState()
+  var image: Image
+  probe(phScene):
+    image = host.renderScene(context)
+  probe(phPersist):
+    persistSceneState()
   when defined(memProbe): memProbe("  renderCurrentScene: idle js runtimes released")
   if image.isNil:
     log("render returned no image")

@@ -14,7 +14,7 @@
 ## The Linux runner holds many scenes on a thread of its own and is its own
 ## host (frameos/runner.nim).
 
-import std/[json, options, tables]
+import std/[json, monotimes, options, tables, times]
 import pixie
 import ./event_loop
 import ./interpreter
@@ -25,6 +25,7 @@ import ./utils/dither
 import ./utils/memory
 import ./js_runtime/app_runtime
 import ./js_runtime/run_budget
+import ./render_probe
 import ./js_runtime/runtime as jsRuntime
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
@@ -392,6 +393,7 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   # ESP32's touch queue, the preview worker's messages), so ticking to now
   # made a tap held across a 750 ms render a `longPress`, and the release
   # no tap. The platform ticks once it has delivered what it queued.
+  let settleStart = getMonoTime()
   discard host.events.drain()
   # The scene is done with its JS apps until the next render. On a
   # deep-sleeping ESP32 that is a fresh boot away, and the next decode wants
@@ -408,3 +410,5 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
     # it goes when render memory is short, or on a frame that keeps nothing.
     if not host.covered.isNil and (not host.keepJsRuntimes or not roomToCover()):
       host.dropCovered()
+  if probeOn:
+    probeAdd(phSettle, (getMonoTime() - settleStart).inNanoseconds)
