@@ -1,6 +1,6 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowTopRightOnSquareIcon,
   CameraIcon,
@@ -230,6 +230,18 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
     setEditStateValues(null)
   }
 
+  // One ref callback for the canvas's life: an inline one runs again on
+  // every render (null, then the element), and each run detached and
+  // re-attached the pointer forwarder, which forgot the button it was
+  // holding mid-drag and dropped the release.
+  const canvasRefCallback = useCallback(
+    (element: HTMLCanvasElement | null): void => {
+      canvasRef.current = element
+      registerCanvas(element)
+    },
+    [registerCanvas]
+  )
+
   const editableFields = editStateValues ? visiblePublicStateFields(publicFields, previewState, editStateValues) : []
   const locationFields = locationFieldPair(editableFields)
 
@@ -237,10 +249,7 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="relative flex shrink-0 items-center justify-center">
         <canvas
-          ref={(element) => {
-            canvasRef.current = element
-            registerCanvas(element)
-          }}
+          ref={canvasRefCallback}
           width={previewDimensions.width}
           height={previewDimensions.height}
           tabIndex={0}
