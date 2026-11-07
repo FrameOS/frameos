@@ -2538,7 +2538,7 @@ var
   coverageCacheTick {.threadvar.}: int
   coverageCacheHits* {.threadvar.}: int
   coverageCacheMisses* {.threadvar.}: int
-  coverageSeen {.threadvar.}: array[1024, uint32]
+  coverageSeen {.threadvar.}: seq[uint32] # 1,024 slots, made on first use (not .bss)
     ## Drawn once already, by the key's hash in a direct-mapped slot: a mask
     ## is made the second time. A UI's toggle draws mostly paths it never
     ## draws again (the changed card's new text), and making a mask for each
@@ -2569,8 +2569,7 @@ template pathProbe(kind: PathProbeKind, body: untyped) =
 proc clearCoverageCache*() {.raises: [].} =
   ## Lets every kept mask go (render memory is short; the thread is done).
   coverageCache.clear()
-  for slot in coverageSeen.mitems:
-    slot = 0
+  coverageSeen.setLen(0)
   coverageCacheBytes = 0
 
 proc coverageCacheUsedBytes*(): int {.raises: [].} =
@@ -2698,12 +2697,19 @@ proc fillFromCoverageCache(
   inc coverageCacheTick
   var mask = coverageCache.getOrDefault(key)
   if mask.isNil or mask.path != path:
+    if coverageSeen.len == 0:
+      coverageSeen = newSeq[uint32](1024)
     let
       h = uint32(hash(key)) or 1
       slot = int(h and uint32(coverageSeen.high))
-    if coverageSeen[slot] != h:
+      other = slot xor 1 # two slots a key: one collision does not forget it
+    if coverageSeen[slot] != h and coverageSeen[other] != h:
       # The first sight: drawn as always, remembered.
-      coverageSeen[slot] = h
+      if coverageSeen[slot] == 0: coverageSeen[slot] = h
+      elif coverageSeen[other] == 0: coverageSeen[other] = h
+      else:
+        coverageSeen[other] = coverageSeen[slot]
+        coverageSeen[slot] = h
       return false
     # A mask covers the whole path; a fill under a view only what shows.
     # A large path seen through a small damage box is filled.

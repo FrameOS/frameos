@@ -387,11 +387,16 @@ type
     classes: string
     flags: ClassFlags
 
+# On the heap, made on first use: a global array is the ESP32's internal
+# .bss (--threads:off makes a threadvar a global), and these were 47 KB of
+# the 80 KB of internal RAM a frame has.
 var
-  classReads {.threadvar.}: array[128, ClassRead]
-  classFlagReads {.threadvar.}: array[128, ClassFlagsRead]
+  classReads {.threadvar.}: seq[ClassRead]
+  classFlagReads {.threadvar.}: seq[ClassFlagsRead]
 
 proc readClasses(box: var Box, text: var Text, classes: string, w, h: float32, states: set[UiState]) =
+  if classReads.len == 0:
+    classReads = newSeq[ClassRead](128)
   let slot = (hash(classes) !& hash(cast[uint8](states))).int and classReads.high
   template c: untyped = classReads[slot]
   if c.classes.len > 0 and c.classes == classes and c.states == states and c.w == w and c.h == h and
@@ -405,6 +410,8 @@ proc readClasses(box: var Box, text: var Text, classes: string, w, h: float32, s
     textOut: text, box: box)
 
 proc classFlags(classes: string): ClassFlags =
+  if classFlagReads.len == 0:
+    classFlagReads = newSeq[ClassFlagsRead](128)
   let slot = hash(classes).int and classFlagReads.high
   if classFlagReads[slot].classes.len > 0 and classFlagReads[slot].classes == classes:
     return classFlagReads[slot].flags

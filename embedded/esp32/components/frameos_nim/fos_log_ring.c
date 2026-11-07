@@ -37,6 +37,10 @@ static uint32_t s_dropped_reported = 0;
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_task = NULL;
 static SemaphoreHandle_t s_drained = NULL;
+/* The drain's line buffers, in PSRAM with the ring: internal RAM is a few
+ * tens of KB on a running frame. */
+static char *s_line = NULL; /* FOS_LOG_RING_MAX_LINE */
+static char *s_out = NULL;  /* FOS_LOG_RING_MAX_LINE + 2 */
 
 static void ring_write_bytes(const uint8_t *src, size_t len)
 {
@@ -63,18 +67,23 @@ static void write_line_now(const char *line, size_t len)
     /* One write() per line: the UART VFS holds its lock for the whole call,
      * so a line from here never interleaves with another task's printf
      * inside the line. stdout's own buffering would split a long line. */
-    static char out[FOS_LOG_RING_MAX_LINE + 2];
     if (len > FOS_LOG_RING_MAX_LINE) len = FOS_LOG_RING_MAX_LINE;
-    memcpy(out, line, len);
-    out[len] = '\n';
     fflush(stdout); /* whatever printf left buffered goes first, in order */
-    write(fileno(stdout), out, len + 1);
+    if (s_out == NULL) {
+        /* Before the ring started (early boot): two writes, as printf did. */
+        write(fileno(stdout), line, len);
+        write(fileno(stdout), "\n", 1);
+        return;
+    }
+    memcpy(s_out, line, len);
+    s_out[len] = '\n';
+    write(fileno(stdout), s_out, len + 1);
 }
 
 static void drain_task(void *arg)
 {
     (void)arg;
-    static char line[FOS_LOG_RING_MAX_LINE];
+    char *line = s_line;
     while (true) {
         uint16_t len = 0;
         bool have = false;
@@ -114,17 +123,28 @@ void fos_log_ring_start(void)
 {
     if (s_task != NULL) return;
     uint8_t *ring = heap_caps_malloc(FOS_LOG_RING_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (ring == NULL) ring = heap_caps_malloc(FOS_LOG_RING_BYTES, MALLOC_CAP_8BIT);
-    if (ring == NULL) {
-        ESP_LOGW(TAG, "no memory for the log ring; lines print on the logging task");
+    char *line = heap_caps_malloc(FOS_LOG_RING_MAX_LINE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *out = heap_caps_malloc(FOS_LOG_RING_MAX_LINE + 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (ring == NULL || line == NULL || out == NULL) {
+        /* No PSRAM (a C3): the lines print on the logging task, as before. */
+        heap_caps_free(ring);
+        heap_caps_free(line);
+        heap_caps_free(out);
+        ESP_LOGW(TAG, "no PSRAM for the log ring; lines print on the logging task");
         return;
     }
+    s_line = line;
+    s_out = out;
     s_drained = xSemaphoreCreateBinary();
     TaskHandle_t task = NULL;
     if (xTaskCreatePinnedToCore(drain_task, "log_ring", FOS_LOG_RING_TASK_STACK, NULL,
                                 FOS_LOG_RING_TASK_PRIORITY, &task, FOS_LOG_RING_TASK_CORE) != pdPASS) {
         ESP_LOGW(TAG, "log ring task failed; lines print on the logging task");
         heap_caps_free(ring);
+        s_line = NULL;
+        s_out = NULL;
+        heap_caps_free(line);
+        heap_caps_free(out);
         return;
     }
     portENTER_CRITICAL(&s_lock);

@@ -156,11 +156,13 @@ proc attrOrDefault(node: SvgNode, name, default: string): string =
   if result.len == 0:
     result = default
 
-var fillColors {.threadvar.}: array[64, (string, Color)]
+var fillColors {.threadvar.}: seq[(string, Color)] # 64 slots, made on first use
   ## Colour strings parsed lately, by hash: a UI's nodes say the same few
   ## colours over and over, and parseHtmlColor was ~0.1 ms a call on an ESP32.
 
 proc parseFillColor(fill: string): Color {.raises: [PixieError, ValueError].} =
+  if fillColors.len == 0:
+    fillColors = newSeq[(string, Color)](64)
   let slot = hash(fill) and fillColors.high
   if fillColors[slot][0] == fill and fill.len > 0:
     return fillColors[slot][1]
