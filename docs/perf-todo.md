@@ -57,10 +57,15 @@ main built from 0267672c, 3,231,952 B, the release's size):
 
 | | main | this branch |
 | --- | --- | --- |
-| Home panel tap, render (steady) | 295–349 ms | **95–101 ms** |
-| Scene switcher open | 2,293–2,547 ms | **330–417 ms** |
-| Cold switch: Weather / Home / Calculator | 1,229 / 361–421 / 492 ms | 681–691 / 221–268 / 344–370 ms |
-| JSX DVD bounce (33 ms period) | 29.1–29.2 fps, max frame 170–182 ms | 28.5–28.7 fps, max 54–68 ms |
+| Home panel tap, render (steady) | 295–349 ms | **88–95 ms** |
+| Scene switcher open (cold / again) | 2,293–2,547 ms | **812 / 319 ms** |
+| Scene switcher closed, back to the home panel | (a rebuild: ~250 ms) | **64 ms** when its buffer holds the panel, ~300 ms when it holds another frame |
+| Cold switch: Weather / Home / Calculator | 1,229 / 361–421 / 492 ms | 675–696 / 218–264 / 337–344 ms |
+| JSX DVD bounce (33 ms period) | 29.1–29.2 fps, max frame 170–182 ms | 28.0–28.7 fps, max 54–73 ms |
+
+A home-panel toggle's split now (`set debug 1`): get 12–13, walk 3.5,
+layout 12, emit 4.5–5, parse 7–8, damage 5.5, raster 26–27 (28–31 coverage
+hits), about 8 ms of interpreter and 6 of the app node's own around them.
 
 The DVD's frames render faster on the branch (23 ms against 30 ms for a
 logged frame) and the 180 ms frame each logged second-tenth is gone, yet it
@@ -234,9 +239,14 @@ touch poll was a third of it and went back to 30 ms).
   background is one flat opaque colour (`overBackdrop`); absolute children
   are painted over nothing known. The two directions of a toggle were 28 ms
   apart on the board for this alone.
-- [ ] Typed element kinds inside pixie's `Svg` for what is left of the
-  per-node string work (a fill colour parsed once, not `parseHtmlColor` per
-  element per box): parse is 6.5–7.5 ms of a toggle now.
+- [x] An element's fill colour parsed once at parse time, from a cache of
+  the colour strings parsed lately (`parseFillColor`): it was a
+  `parseHtmlColor` per element per draw, ~0.1 ms a call on the board.
+- [x] **The scene a built-in scene opens over stays resident** for the way
+  back (`single_scene_host` `covered`), down to the headroom kept
+  interpreters use: no init, no rebuild from JSON when the switcher closes.
+- [ ] Typed element kinds inside pixie's `Svg` for the rest of the per-node
+  attribute work (parse is 7–8 ms of a toggle).
 - [ ] Gray8 (e-paper) and RGBX: the cache and the span blits run on all
   three surfaces (the test covers them); not measured on an e-paper board.
 - [ ] Text-memo fixes (press-feedback renders stop re-typesetting; cold flex
