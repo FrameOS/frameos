@@ -1,0 +1,616 @@
+[
+  {
+    "id": "1e9d05df-30e9-44c2-9a24-6de2b5d3127a",
+    "name": "Word clock",
+    "settings": {
+      "refreshInterval": 300,
+      "backgroundColor": "#101826",
+      "execution": "interpreted",
+      "renderScale": 1
+    },
+    "fields": [
+      {
+        "name": "displayMode",
+        "type": "select",
+        "label": "Display mode",
+        "description": "Choose the classic letter grid or a clean typeset phrase.",
+        "value": "grid",
+        "options": [
+          "grid",
+          "typeset"
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "theme",
+        "type": "select",
+        "label": "Theme",
+        "description": "Pick a built-in color palette, or choose Custom to edit the individual colors below.",
+        "value": "midnight",
+        "options": [
+          "midnight",
+          "aurora",
+          "ember",
+          "sage",
+          "plum",
+          "ocean",
+          "sandstone",
+          "rosewood",
+          "mono",
+          "white",
+          "paper",
+          "cobalt",
+          "moss",
+          "custom"
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "backgroundGradient",
+        "type": "boolean",
+        "label": "Background gradient",
+        "description": "Use the theme's gradient background. Turn off for a flat background color.",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "showFlair",
+        "type": "boolean",
+        "label": "Show flair",
+        "description": "Show the small analog clock and the optional exact digital time/date.",
+        "value": "false",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "clockDialLocation",
+        "type": "select",
+        "label": "Small clock dial",
+        "description": "Choose where to show the small analog clock, or hide it.",
+        "value": "top-right",
+        "options": [
+          "top-right",
+          "top-left",
+          "bottom-right",
+          "bottom-left",
+          "hidden"
+        ],
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "showFlair",
+            "operator": "eq",
+            "value": true
+          }
+        ]
+      },
+      {
+        "name": "showDigital",
+        "type": "boolean",
+        "label": "Show small digital time",
+        "description": "Adds a small exact time and date under the word clock.",
+        "value": "true",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "showFlair",
+            "operator": "eq",
+            "value": true
+          }
+        ]
+      },
+      {
+        "name": "startColor",
+        "type": "color",
+        "label": "Gradient start",
+        "value": "#101826",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "endColor",
+        "type": "color",
+        "label": "Gradient end",
+        "value": "#28485c",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "litColor",
+        "type": "color",
+        "label": "Lit word color",
+        "value": "#fff4d6",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "dimColor",
+        "type": "color",
+        "label": "Dim letter color",
+        "value": "#51677a",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "accentColor",
+        "type": "color",
+        "label": "Accent color",
+        "value": "#d9a441",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      }
+    ],
+    "apps": {
+      "wordClockPanel": {
+        "origin": "scene-local/wordClockPanel",
+        "name": "Word clock panel",
+        "category": "data",
+        "description": "Responsive SVG word clock panel with no network dependencies.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "timeInfo",
+            "label": "Local time info",
+            "type": "json",
+            "required": true
+          },
+          {
+            "name": "displayMode",
+            "label": "Display mode",
+            "type": "select",
+            "options": [
+              "grid",
+              "typeset"
+            ],
+            "value": "grid"
+          },
+          {
+            "name": "clockDialLocation",
+            "label": "Small clock dial",
+            "type": "select",
+            "options": [
+              "top-right",
+              "top-left",
+              "bottom-right",
+              "bottom-left",
+              "hidden"
+            ],
+            "value": "top-right"
+          },
+          {
+            "name": "showFlair",
+            "label": "Show flair",
+            "type": "boolean",
+            "value": "false"
+          },
+          {
+            "name": "backgroundGradient",
+            "label": "Background gradient",
+            "type": "boolean",
+            "value": "true"
+          },
+          {
+            "name": "theme",
+            "label": "Theme",
+            "type": "select",
+            "options": [
+              "midnight",
+              "aurora",
+              "ember",
+              "sage",
+              "plum",
+              "ocean",
+              "sandstone",
+              "rosewood",
+              "mono",
+              "white",
+              "paper",
+              "cobalt",
+              "moss",
+              "custom"
+            ],
+            "value": "midnight"
+          },
+          {
+            "name": "startColor",
+            "label": "Gradient start",
+            "type": "color",
+            "value": "#101826"
+          },
+          {
+            "name": "endColor",
+            "label": "Gradient end",
+            "type": "color",
+            "value": "#28485c"
+          },
+          {
+            "name": "litColor",
+            "label": "Lit word color",
+            "type": "color",
+            "value": "#fff4d6"
+          },
+          {
+            "name": "dimColor",
+            "label": "Dim letter color",
+            "type": "color",
+            "value": "#51677a"
+          },
+          {
+            "name": "accentColor",
+            "label": "Accent color",
+            "type": "color",
+            "value": "#d9a441"
+          },
+          {
+            "name": "showDigital",
+            "label": "Show small digital time",
+            "type": "boolean",
+            "value": "true"
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Word clock panel\",\n  \"category\": \"data\",\n  \"description\": \"Responsive SVG word clock panel with no network dependencies.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"timeInfo\",\n      \"label\": \"Local time info\",\n      \"type\": \"json\",\n      \"required\": true\n    },\n    {\n      \"name\": \"displayMode\",\n      \"label\": \"Display mode\",\n      \"type\": \"select\",\n      \"options\": [\n        \"grid\",\n        \"typeset\"\n      ],\n      \"value\": \"grid\"\n    },\n    {\n      \"name\": \"clockDialLocation\",\n      \"label\": \"Small clock dial\",\n      \"type\": \"select\",\n      \"options\": [\n        \"top-right\",\n        \"top-left\",\n        \"bottom-right\",\n        \"bottom-left\",\n        \"hidden\"\n      ],\n      \"value\": \"top-right\"\n    },\n    {\n      \"name\": \"showFlair\",\n      \"label\": \"Show flair\",\n      \"type\": \"boolean\",\n      \"value\": \"false\"\n    },\n    {\n      \"name\": \"backgroundGradient\",\n      \"label\": \"Background gradient\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    },\n    {\n      \"name\": \"theme\",\n      \"label\": \"Theme\",\n      \"type\": \"select\",\n      \"options\": [\n        \"midnight\",\n        \"aurora\",\n        \"ember\",\n        \"sage\",\n        \"plum\",\n        \"ocean\",\n        \"sandstone\",\n        \"rosewood\",\n        \"mono\",\n        \"white\",\n        \"paper\",\n        \"cobalt\",\n        \"moss\",\n        \"custom\"\n      ],\n      \"value\": \"midnight\"\n    },\n    {\n      \"name\": \"startColor\",\n      \"label\": \"Gradient start\",\n      \"type\": \"color\",\n      \"value\": \"#101826\"\n    },\n    {\n      \"name\": \"endColor\",\n      \"label\": \"Gradient end\",\n      \"type\": \"color\",\n      \"value\": \"#28485c\"\n    },\n    {\n      \"name\": \"litColor\",\n      \"label\": \"Lit word color\",\n      \"type\": \"color\",\n      \"value\": \"#fff4d6\"\n    },\n    {\n      \"name\": \"dimColor\",\n      \"label\": \"Dim letter color\",\n      \"type\": \"color\",\n      \"value\": \"#51677a\"\n    },\n    {\n      \"name\": \"accentColor\",\n      \"label\": \"Accent color\",\n      \"type\": \"color\",\n      \"value\": \"#d9a441\"\n    },\n    {\n      \"name\": \"showDigital\",\n      \"label\": \"Show small digital time\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}",
+          "app.tsx": "// The letter grid: ten rows of eleven letters.\nconst ROWS = [\n  'ITLISASTIME',\n  'ACQUARTERDC',\n  'TWENTYFIVEX',\n  'HALFBTENFTO',\n  'PASTERUNINE',\n  'ONESIXTHREE',\n  'FOURFIVETWO',\n  'EIGHTELEVEN',\n  'SEVENTWELVE',\n  'TENSEOCLOCK',\n]\n\n// Each word's cells in the grid, as [row, column]. M* are the minute words, H* the hours.\nconst WORDS = {\n  IT: [[0, 0], [0, 1]],\n  IS: [[0, 3], [0, 4]],\n  A: [[1, 0]],\n  QUARTER: [[1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [1, 8]],\n  TWENTY: [[2, 0], [2, 1], [2, 2], [2, 3], [2, 4], [2, 5]],\n  MFIVE: [[2, 6], [2, 7], [2, 8], [2, 9]],\n  HALF: [[3, 0], [3, 1], [3, 2], [3, 3]],\n  MTEN: [[3, 5], [3, 6], [3, 7]],\n  TO: [[3, 9], [3, 10]],\n  PAST: [[4, 0], [4, 1], [4, 2], [4, 3]],\n  HNINE: [[4, 7], [4, 8], [4, 9], [4, 10]],\n  HONE: [[5, 0], [5, 1], [5, 2]],\n  HSIX: [[5, 3], [5, 4], [5, 5]],\n  HTHREE: [[5, 6], [5, 7], [5, 8], [5, 9], [5, 10]],\n  HFOUR: [[6, 0], [6, 1], [6, 2], [6, 3]],\n  HFIVE: [[6, 4], [6, 5], [6, 6], [6, 7]],\n  HTWO: [[6, 8], [6, 9], [6, 10]],\n  HEIGHT: [[7, 0], [7, 1], [7, 2], [7, 3], [7, 4]],\n  HELEVEN: [[7, 5], [7, 6], [7, 7], [7, 8], [7, 9], [7, 10]],\n  HSEVEN: [[8, 0], [8, 1], [8, 2], [8, 3], [8, 4]],\n  HTWELVE: [[8, 5], [8, 6], [8, 7], [8, 8], [8, 9], [8, 10]],\n  HTEN: [[9, 0], [9, 1], [9, 2]],\n  OCLOCK: [[9, 5], [9, 6], [9, 7], [9, 8], [9, 9], [9, 10]],\n}\n\n// The grid word and the spoken word for each hour, 1 to 12.\nconst HOUR_KEYS = {\n  1: 'HONE', 2: 'HTWO', 3: 'HTHREE', 4: 'HFOUR', 5: 'HFIVE', 6: 'HSIX',\n  7: 'HSEVEN', 8: 'HEIGHT', 9: 'HNINE', 10: 'HTEN', 11: 'HELEVEN', 12: 'HTWELVE',\n}\nconst HOUR_LABELS = {\n  1: 'ONE', 2: 'TWO', 3: 'THREE', 4: 'FOUR', 5: 'FIVE', 6: 'SIX',\n  7: 'SEVEN', 8: 'EIGHT', 9: 'NINE', 10: 'TEN', 11: 'ELEVEN', 12: 'TWELVE',\n}\n\n// Each theme is [gradient start, gradient end, lit, dim, accent].\nconst THEMES = {\n  midnight: ['#101826', '#28485c', '#fff4d6', '#51677a', '#d9a441'],\n  aurora: ['#10251f', '#1f5c59', '#eafff6', '#6ea199', '#7dd3c7'],\n  ember: ['#2a1512', '#6b2d22', '#fff0dd', '#93675f', '#e08d4f'],\n  sage: ['#17231d', '#405846', '#f4f0d8', '#748371', '#c8b56b'],\n  plum: ['#1f1630', '#54365e', '#fff0fb', '#7d6b86', '#d8a1c4'],\n  ocean: ['#0b1d2b', '#17476b', '#edf8ff', '#5d7f95', '#76c7e8'],\n  sandstone: ['#2f2118', '#806246', '#fff2dc', '#a58c74', '#e5b46b'],\n  rosewood: ['#27171d', '#6a3342', '#fff1ee', '#9d6c75', '#df8f86'],\n  mono: ['#111111', '#343434', '#ffffff', '#777777', '#cfcfcf'],\n  white: ['#ffffff', '#f2f4f7', '#111827', '#9ca3af', '#334155'],\n  paper: ['#f4ead7', '#d6c5a5', '#2f2a23', '#8f806c', '#8b5e34'],\n  cobalt: ['#0d1838', '#2247a5', '#eef4ff', '#7589bd', '#f0c04f'],\n  moss: ['#101b12', '#314b2f', '#f0f5df', '#72856b', '#a9c46c'],\n}\n\nconst DIAL_LOCATIONS = ['top-right', 'top-left', 'bottom-right', 'bottom-left', 'hidden']\n\nfunction clamp(value, min, max) {\n  return Math.max(min, Math.min(max, value))\n}\n\nfunction isTrue(value) {\n  return value === true || value === 'true' || value === 1 || value === '1'\n}\n\nfunction color(value, fallback) {\n  const text = String(value || '').trim()\n  return /^#[0-9a-fA-F]{6}$/.test(text) ? text : fallback\n}\n\nfunction pad2(value) {\n  return value < 10 ? '0' + value : String(value)\n}\n\nfunction hour12(hour) {\n  const value = ((hour % 12) + 12) % 12\n  return value === 0 ? 12 : value\n}\n\nfunction themeFromConfig(config) {\n  const selected = THEMES[config.theme]\n  if (selected) {\n    return { start: selected[0], end: selected[1], lit: selected[2], dim: selected[3], accent: selected[4] }\n  }\n  return {\n    start: color(config.startColor, '#101826'),\n    end: color(config.endColor, '#28485c'),\n    lit: color(config.litColor, '#fff4d6'),\n    dim: color(config.dimColor, '#51677a'),\n    accent: color(config.accentColor, '#d9a441'),\n  }\n}\n\n// The time rounded to five minutes: which grid words are lit, and the phrase they spell.\nfunction makeClock(timeInfo) {\n  const hour = Number(timeInfo && timeInfo.hour) || 9\n  const minute = Number(timeInfo && timeInfo.minute) || 0\n  let rounded = Math.round(minute / 5) * 5\n  let displayHour = hour\n  if (rounded === 60) {\n    rounded = 0\n    displayHour += 1\n  }\n  const active = { IT: true, IS: true }\n  const phrase = ['IT', 'IS']\n  const add = (key) => {\n    active[key] = true\n  }\n  const finish = (targetHour) => {\n    const h = hour12(targetHour)\n    add(HOUR_KEYS[h])\n    phrase.push(HOUR_LABELS[h])\n  }\n  if (rounded === 0) {\n    finish(displayHour)\n    add('OCLOCK')\n    phrase.push(\"O'CLOCK\")\n  } else if (rounded === 5) {\n    add('MFIVE')\n    add('PAST')\n    phrase.push('FIVE', 'PAST')\n    finish(displayHour)\n  } else if (rounded === 10) {\n    add('MTEN')\n    add('PAST')\n    phrase.push('TEN', 'PAST')\n    finish(displayHour)\n  } else if (rounded === 15) {\n    add('A')\n    add('QUARTER')\n    add('PAST')\n    phrase.push('A', 'QUARTER', 'PAST')\n    finish(displayHour)\n  } else if (rounded === 20) {\n    add('TWENTY')\n    add('PAST')\n    phrase.push('TWENTY', 'PAST')\n    finish(displayHour)\n  } else if (rounded === 25) {\n    add('TWENTY')\n    add('MFIVE')\n    add('PAST')\n    phrase.push('TWENTY', 'FIVE', 'PAST')\n    finish(displayHour)\n  } else if (rounded === 30) {\n    add('HALF')\n    add('PAST')\n    phrase.push('HALF', 'PAST')\n    finish(displayHour)\n  } else if (rounded === 35) {\n    add('TWENTY')\n    add('MFIVE')\n    add('TO')\n    phrase.push('TWENTY', 'FIVE', 'TO')\n    finish(displayHour + 1)\n  } else if (rounded === 40) {\n    add('TWENTY')\n    add('TO')\n    phrase.push('TWENTY', 'TO')\n    finish(displayHour + 1)\n  } else if (rounded === 45) {\n    add('A')\n    add('QUARTER')\n    add('TO')\n    phrase.push('A', 'QUARTER', 'TO')\n    finish(displayHour + 1)\n  } else if (rounded === 50) {\n    add('MTEN')\n    add('TO')\n    phrase.push('TEN', 'TO')\n    finish(displayHour + 1)\n  } else {\n    add('MFIVE')\n    add('TO')\n    phrase.push('FIVE', 'TO')\n    finish(displayHour + 1)\n  }\n  return {\n    active,\n    phrase,\n    hour,\n    minute,\n    clock: timeInfo.clock || pad2(hour) + ':' + pad2(minute),\n    date: timeInfo.date || '',\n  }\n}\n\nfunction activeCells(active) {\n  const cells = {}\n  Object.keys(active).forEach((key) =>\n    (WORDS[key] || []).forEach((coord) => {\n      cells[coord[0] + ',' + coord[1]] = true\n    })\n  )\n  return cells\n}\n\nfunction dialPosition(width, height, pad, radius, location) {\n  if (location === 'hidden') return null\n  const left = location === 'top-left' || location === 'bottom-left'\n  const bottom = location === 'bottom-left' || location === 'bottom-right'\n  return {\n    x: left ? pad + radius : width - pad - radius,\n    y: bottom ? height - pad - radius : pad + radius,\n  }\n}\n\n// A flat fill, or the theme's gradient with a glow in the top right corner and a soft vignette.\nfunction Background({ width, height, theme, useGradient }) {\n  if (!useGradient) {\n    return <rect x=\"0\" y=\"0\" width={width} height={height} fill={theme.start} />\n  }\n  const longSide = Math.max(width, height)\n  return (\n    <>\n      <defs>\n        <linearGradient id=\"bg\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2={width} y2={height}>\n          <stop offset=\"0\" stopColor={theme.start} />\n          <stop offset=\"1\" stopColor={theme.end} />\n        </linearGradient>\n        <radialGradient\n          id=\"cornerGlow\"\n          gradientUnits=\"userSpaceOnUse\"\n          cx={(width * 0.78).toFixed(2)}\n          cy={(height * 0.18).toFixed(2)}\n          r={(longSide * 0.55).toFixed(2)}\n        >\n          <stop offset=\"0\" stopColor={theme.accent} stopOpacity=\"0.16\" />\n          <stop offset=\"0.46\" stopColor={theme.accent} stopOpacity=\"0.06\" />\n          <stop offset=\"1\" stopColor={theme.accent} stopOpacity=\"0\" />\n        </radialGradient>\n        <radialGradient\n          id=\"vignette\"\n          gradientUnits=\"userSpaceOnUse\"\n          cx={(width / 2).toFixed(2)}\n          cy={(height / 2).toFixed(2)}\n          r={(longSide * 0.76).toFixed(2)}\n        >\n          <stop offset=\"0.52\" stopColor=\"#000000\" stopOpacity=\"0\" />\n          <stop offset=\"1\" stopColor=\"#000000\" stopOpacity=\"0.34\" />\n        </radialGradient>\n      </defs>\n      <rect x=\"0\" y=\"0\" width={width} height={height} fill=\"url(#bg)\" />\n      <rect x=\"0\" y=\"0\" width={width} height={height} fill=\"url(#cornerGlow)\" />\n      <rect x=\"0\" y=\"0\" width={width} height={height} fill=\"url(#vignette)\" />\n    </>\n  )\n}\n\n// The small analog clock: a ring, twelve ticks, the hour and minute hands and a center dot.\nfunction Dial({ x, y, radius, theme, hour, minute, scale }) {\n  const stroke = clamp(radius * 0.055, 1 / scale, 4 / scale)\n  const minuteAngle = (Math.PI * 2 * minute) / 60 - Math.PI / 2\n  const hourAngle = (Math.PI * 2 * ((hour12(hour) % 12) + minute / 60)) / 12 - Math.PI / 2\n  return (\n    <>\n      <circle\n        cx={x.toFixed(2)}\n        cy={y.toFixed(2)}\n        r={(radius * 0.82).toFixed(2)}\n        fill=\"none\"\n        stroke={theme.accent}\n        strokeWidth={stroke.toFixed(2)}\n        opacity=\"0.48\"\n      />\n      {Array.from({ length: 12 }, (_, i) => {\n        const angle = (Math.PI * 2 * i) / 12 - Math.PI / 2\n        return (\n          <line\n            x1={(x + Math.cos(angle) * radius * 0.58).toFixed(2)}\n            y1={(y + Math.sin(angle) * radius * 0.58).toFixed(2)}\n            x2={(x + Math.cos(angle) * radius * 0.72).toFixed(2)}\n            y2={(y + Math.sin(angle) * radius * 0.72).toFixed(2)}\n            stroke={theme.lit}\n            strokeWidth={stroke.toFixed(2)}\n            opacity=\"0.35\"\n          />\n        )\n      })}\n      <line\n        x1={x.toFixed(2)}\n        y1={y.toFixed(2)}\n        x2={(x + Math.cos(hourAngle) * radius * 0.36).toFixed(2)}\n        y2={(y + Math.sin(hourAngle) * radius * 0.36).toFixed(2)}\n        stroke={theme.lit}\n        strokeWidth={(stroke * 1.65).toFixed(2)}\n        opacity=\"0.78\"\n      />\n      <line\n        x1={x.toFixed(2)}\n        y1={y.toFixed(2)}\n        x2={(x + Math.cos(minuteAngle) * radius * 0.52).toFixed(2)}\n        y2={(y + Math.sin(minuteAngle) * radius * 0.52).toFixed(2)}\n        stroke={theme.accent}\n        strokeWidth={(stroke * 1.25).toFixed(2)}\n        opacity=\"0.84\"\n      />\n      <circle cx={x.toFixed(2)} cy={y.toFixed(2)} r={(radius * 0.07).toFixed(2)} fill={theme.accent} opacity=\"0.86\" />\n    </>\n  )\n}\n\n// The classic word clock: every letter of the grid, the lit words bright with a soft dot behind each letter.\nfunction GridClock({ width, height, clock, theme, showDigital, clockDialLocation, scale }) {\n  const cols = 11\n  const rows = 10\n  const minSide = Math.min(width, height)\n  const pad = minSide * (height > width ? 0.055 : 0.06)\n  const footer = showDigital ? clamp(minSide * 0.10, 38 / scale, 76 / scale) : minSide * 0.03\n  const cell = Math.min((width - pad * 2) / cols, (height - pad * 2 - footer) / rows)\n  const gridWidth = cell * cols\n  const gridHeight = cell * rows\n  const left = (width - gridWidth) / 2\n  const top = pad + Math.max(0, (height - pad * 2 - footer - gridHeight) / 2)\n  const fontSize = cell * 0.62\n  const cardPad = cell * 0.38\n  const cells = activeCells(clock.active)\n  const dialRadius = clamp(minSide * 0.047, 18 / scale, 54 / scale)\n  const dial = dialPosition(width, height, pad, dialRadius, clockDialLocation)\n  return (\n    <>\n      <rect\n        x={(left - cardPad).toFixed(2)}\n        y={(top - cardPad).toFixed(2)}\n        width={(gridWidth + cardPad * 2).toFixed(2)}\n        height={(gridHeight + cardPad * 2).toFixed(2)}\n        rx={(cell * 0.34).toFixed(2)}\n        ry={(cell * 0.34).toFixed(2)}\n        fill=\"#ffffff\"\n        opacity=\"0.055\"\n      />\n      <rect\n        x={(left - cardPad).toFixed(2)}\n        y={(top - cardPad).toFixed(2)}\n        width={clamp(cell * 0.09, 3 / scale, 8 / scale).toFixed(2)}\n        height={(gridHeight + cardPad * 2).toFixed(2)}\n        rx={4 / scale}\n        ry={4 / scale}\n        fill={theme.accent}\n        opacity=\"0.72\"\n      />\n      {ROWS.map((letters, r) =>\n        letters.split('').map((letter, c) => {\n          const on = cells[r + ',' + c]\n          const x = left + cell * (c + 0.5)\n          const y = top + cell * (r + 0.56)\n          return (\n            <>\n              {on && (\n                <circle\n                  cx={x.toFixed(2)}\n                  cy={(y - cell * 0.03).toFixed(2)}\n                  r={(cell * 0.37).toFixed(2)}\n                  fill={theme.accent}\n                  opacity=\"0.13\"\n                />\n              )}\n              <text\n                x={x.toFixed(2)}\n                y={y.toFixed(2)}\n                textAnchor=\"middle\"\n                dominantBaseline=\"middle\"\n                fontFamily=\"PTSans-Bold.ttf\"\n                fontSize={fontSize.toFixed(2)}\n                fontWeight=\"700\"\n                fill={on ? theme.lit : theme.dim}\n                opacity={on ? '1' : '0.70'}\n              >\n                {letter}\n              </text>\n            </>\n          )\n        })\n      )}\n      {showDigital && (\n        <text\n          x={(width / 2).toFixed(2)}\n          y={Math.min(height - pad * 0.65, top + gridHeight + footer * 0.72).toFixed(2)}\n          textAnchor=\"middle\"\n          dominantBaseline=\"middle\"\n          fontFamily=\"PTSans-Regular.ttf\"\n          fontSize={clamp(minSide * 0.027, 12 / scale, 30 / scale).toFixed(2)}\n          fill={theme.accent}\n        >\n          {clock.phrase.join(' ') + '  ·  ' + clock.clock}\n        </text>\n      )}\n      {dial && (\n        <Dial\n          x={dial.x}\n          y={dial.y}\n          radius={dialRadius}\n          theme={theme}\n          hour={clock.hour}\n          minute={clock.minute}\n          scale={scale}\n        />\n      )}\n    </>\n  )\n}\n\n// The phrase set as two or three big centered lines under an accent rule, the last line in the accent color.\nfunction TypesetClock({ width, height, clock, theme, showDigital, clockDialLocation, scale }) {\n  const minSide = Math.min(width, height)\n  const pad = minSide * (height > width ? 0.075 : 0.08)\n  const usableWidth = width - pad * 2\n  const phrase = clock.phrase.slice()\n  const lines = ['IT IS']\n  if (phrase.length <= 4) {\n    lines.push(phrase.slice(2).join(' '))\n  } else {\n    lines.push(phrase.slice(2, phrase.length - 1).join(' '))\n    lines.push(phrase[phrase.length - 1])\n  }\n  const cleanLines = lines.filter((line) => line.length > 0)\n  let size = Math.min((height - pad * 2) / (cleanLines.length * 1.26), usableWidth / 7)\n  cleanLines.forEach((line) => {\n    size = Math.min(size, usableWidth / (line.length * 0.58))\n  })\n  size = clamp(size, minSide * 0.055, minSide * 0.18)\n  const lineGap = size * 1.10\n  const blockHeight = lineGap * (cleanLines.length - 1) + size\n  const startY = (height - blockHeight) / 2 + size * 0.58\n  const dialRadius = clamp(minSide * 0.052, 20 / scale, 60 / scale)\n  const dialPad = clockDialLocation === 'bottom-left' || clockDialLocation === 'bottom-right' ? pad * 0.85 : pad * 1.12\n  const dial = dialPosition(width, height, dialPad, dialRadius, clockDialLocation)\n  return (\n    <>\n      <line\n        x1={pad.toFixed(2)}\n        y1={(pad * 1.12).toFixed(2)}\n        x2={(width - pad).toFixed(2)}\n        y2={(pad * 1.12).toFixed(2)}\n        stroke={theme.accent}\n        strokeWidth={clamp(minSide * 0.006, 2 / scale, 7 / scale).toFixed(2)}\n        opacity=\"0.86\"\n      />\n      {cleanLines.map((line, i) => (\n        <text\n          x={(width / 2).toFixed(2)}\n          y={(startY + i * lineGap).toFixed(2)}\n          textAnchor=\"middle\"\n          dominantBaseline=\"middle\"\n          fontFamily=\"PTSans-Bold.ttf\"\n          fontSize={size.toFixed(2)}\n          fontWeight=\"700\"\n          fill={i === cleanLines.length - 1 ? theme.accent : theme.lit}\n        >\n          {line}\n        </text>\n      ))}\n      {dial && (\n        <Dial\n          x={dial.x}\n          y={dial.y}\n          radius={dialRadius}\n          theme={theme}\n          hour={clock.hour}\n          minute={clock.minute}\n          scale={scale}\n        />\n      )}\n      {showDigital && (\n        <text\n          x={(width / 2).toFixed(2)}\n          y={(height - pad * 0.85).toFixed(2)}\n          textAnchor=\"middle\"\n          dominantBaseline=\"middle\"\n          fontFamily=\"PTSans-Regular.ttf\"\n          fontSize={clamp(minSide * 0.03, 12 / scale, 34 / scale).toFixed(2)}\n          fill={theme.dim}\n        >\n          {clock.clock + (clock.date ? ' · ' + clock.date : '')}\n        </text>\n      )}\n    </>\n  )\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const width = context.imageWidth || app.frame.width\n  const height = context.imageHeight || app.frame.height\n  const theme = themeFromConfig(app.config)\n  const clock = makeClock(app.config.timeInfo || {})\n  const showFlair = isTrue(app.config.showFlair)\n  const showDigital = showFlair && isTrue(app.config.showDigital)\n  const mode = app.config.displayMode === 'typeset' ? 'typeset' : 'grid'\n  const clockDialLocation =\n    showFlair && DIAL_LOCATIONS.indexOf(app.config.clockDialLocation) >= 0 ? app.config.clockDialLocation : 'hidden'\n  const useGradient = isTrue(app.config.backgroundGradient)\n  // The render scale: a .tsx app on a big panel (shorter edge about 1200 px) is told its canvas is half the\n  // panel's size and its <svg> is stretched to fit. The few lengths fixed in panel pixels (the clamps' floors\n  // and ceilings, the accent bar's corners) are divided by it so the panel shows the same layout at any scale.\n  const scale = app.frame.scale || 1\n  const Clock = mode === 'typeset' ? TypesetClock : GridClock\n  return (\n    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>\n      <Background width={width} height={height} theme={theme} useGradient={useGradient} />\n      <Clock\n        width={width}\n        height={height}\n        clock={clock}\n        theme={theme}\n        showDigital={showDigital}\n        clockDialLocation={clockDialLocation}\n        scale={scale}\n      />\n    </svg>\n  )\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 1
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "time-code",
+        "type": "code",
+        "position": {
+          "x": 291,
+          "y": -1529
+        },
+        "data": {
+          "codeJS": "(() => {\n  const ts = now()\n  return {\n    ts,\n    hour: Number(format(ts, \"{hour}\")),\n    minute: Number(format(ts, \"{minute/2}\")),\n    clock: format(ts, \"{hour/2}:{minute/2}\"),\n    date: format(ts, \"{weekday/3}, {month/n/3} {day}\")\n  }\n})()",
+          "codeOutputs": [
+            {
+              "name": "timeInfo",
+              "type": "json"
+            }
+          ]
+        },
+        "style": {
+          "width": 460,
+          "height": 293
+        },
+        "width": 460,
+        "height": 293
+      },
+      {
+        "id": "displayMode-state",
+        "type": "state",
+        "position": {
+          "x": 323,
+          "y": -550
+        },
+        "data": {
+          "keyword": "displayMode",
+          "value": "grid"
+        }
+      },
+      {
+        "id": "clockDialLocation-state",
+        "type": "state",
+        "position": {
+          "x": 299,
+          "y": -614
+        },
+        "data": {
+          "keyword": "clockDialLocation",
+          "value": "top-right"
+        }
+      },
+      {
+        "id": "theme-state",
+        "type": "state",
+        "position": {
+          "x": 227,
+          "y": -806
+        },
+        "data": {
+          "keyword": "theme",
+          "value": "midnight"
+        }
+      },
+      {
+        "id": "startColor-state",
+        "type": "state",
+        "position": {
+          "x": 203,
+          "y": -870
+        },
+        "data": {
+          "keyword": "startColor",
+          "value": "#101826"
+        }
+      },
+      {
+        "id": "endColor-state",
+        "type": "state",
+        "position": {
+          "x": 179,
+          "y": -934
+        },
+        "data": {
+          "keyword": "endColor",
+          "value": "#28485c"
+        }
+      },
+      {
+        "id": "litColor-state",
+        "type": "state",
+        "position": {
+          "x": 155,
+          "y": -998
+        },
+        "data": {
+          "keyword": "litColor",
+          "value": "#fff4d6"
+        }
+      },
+      {
+        "id": "dimColor-state",
+        "type": "state",
+        "position": {
+          "x": 131,
+          "y": -1062
+        },
+        "data": {
+          "keyword": "dimColor",
+          "value": "#51677a"
+        }
+      },
+      {
+        "id": "accentColor-state",
+        "type": "state",
+        "position": {
+          "x": 107,
+          "y": -1126
+        },
+        "data": {
+          "keyword": "accentColor",
+          "value": "#d9a441"
+        }
+      },
+      {
+        "id": "showDigital-state",
+        "type": "state",
+        "position": {
+          "x": 83,
+          "y": -1190
+        },
+        "data": {
+          "keyword": "showDigital",
+          "value": "true"
+        }
+      },
+      {
+        "id": "word-clock-panel",
+        "type": "app",
+        "position": {
+          "x": 355,
+          "y": -470
+        },
+        "data": {
+          "keyword": "wordClockPanel",
+          "config": {}
+        }
+      },
+      {
+        "id": "render-image",
+        "type": "app",
+        "position": {
+          "x": 390,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "offsetX": "0",
+            "offsetY": "0",
+            "blendMode": "normal"
+          }
+        }
+      },
+      {
+        "id": "showFlair-state",
+        "type": "state",
+        "position": {
+          "x": 275,
+          "y": -678
+        },
+        "data": {
+          "keyword": "showFlair",
+          "value": "false"
+        }
+      },
+      {
+        "id": "backgroundGradient-state",
+        "type": "state",
+        "position": {
+          "x": 251,
+          "y": -742
+        },
+        "data": {
+          "keyword": "backgroundGradient",
+          "value": "true"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-render-to-image",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "render-image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "edge-time-to-panel",
+        "type": "codeNodeEdge",
+        "source": "time-code",
+        "target": "word-clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/timeInfo"
+      },
+      {
+        "id": "edge-panel-to-image",
+        "type": "codeNodeEdge",
+        "source": "word-clock-panel",
+        "target": "render-image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      },
+      {
+        "id": "edge-display-mode",
+        "type": "codeNodeEdge",
+        "source": "displayMode-state",
+        "target": "word-clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/displayMode"
+      },
+      {
+        "id": "edge-clock-dial-location",
+        "type": "codeNodeEdge",
+        "source": "clockDialLocation-state",
+        "target": "word-clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/clockDialLocation"
+      },
+      {
+        "id": "edge-theme",
+        "type": "codeNodeEdge",
+        "source": "theme-state",
+        "target": "word-clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/theme"
+      },
+      {
+        "id": "edge-start-color",
+        "type": "codeNodeEdge",
+        "source": "startColor-state",
+        "target": "word-clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/startColor"
+      },
+      {
+        "id": "edge-end-color",
+        "type": "codeNodeEdge",
+        "source": "endColor-state",
+        "target": "word-clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/endColor"
+      },
+      {
+        "id": "edge-lit-color",
+        "type": "codeNodeEdge",
+        "source": "litColor-state",
+        "target": "word-clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/litColor"
+      },
+      {
+        "id": "edge-dim-color",
+        "type": "codeNodeEdge",
+        "source": "dimColor-state",
+        "target": "word-clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/dimColor"
+      },
+      {
+        "id": "edge-accent-color",
+        "type": "codeNodeEdge",
+        "source": "accentColor-state",
+        "target": "word-clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/accentColor"
+      },
+      {
+        "id": "edge-show-digital",
+        "type": "codeNodeEdge",
+        "source": "showDigital-state",
+        "target": "word-clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/showDigital"
+      },
+      {
+        "id": "edge-show-flair",
+        "type": "codeNodeEdge",
+        "source": "showFlair-state",
+        "target": "word-clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/showFlair"
+      },
+      {
+        "id": "edge-background-gradient",
+        "type": "codeNodeEdge",
+        "source": "backgroundGradient-state",
+        "target": "word-clock-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/backgroundGradient"
+      }
+    ],
+    "customEvents": []
+  }
+]

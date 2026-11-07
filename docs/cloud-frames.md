@@ -1350,7 +1350,8 @@ newest one. `GET /api/frames/{id}/scenes` says where each scene is:
 was last sent, from the per-scene deploy ledger; null only on an unpinned
 scene of a frame that predates the ledger), `latest_version`, and
 `update_available` — the store is ahead of the frame AND the account can still
-install the scene (not pulled, not taken private by its publisher). The
+install the scene (not pulled, not taken private by its publisher) AND the
+frame runs the newest version's minimum FrameOS (below). The
 workspace shows the *assigned* version's content, lays an "Update" flag over
 the scene's image and offers "Update to latest" in the scene menu; both ask
 first, and the dialog stays up (its button spinning, the flag reading
@@ -1377,11 +1378,33 @@ should leave on screen. The answer carries `scene_version`,
 no push at all when the frame was already sent the newest version (a battery
 frame is not woken for nothing). `404 scene_not_assigned` when the scene is
 not on the frame; the assignment gates (`invalid_scene`, `scene_not_allowed`,
-`scene_version_missing`, `frame_not_active`) apply unchanged. No other push
+`scene_version_missing`, `frame_not_active`, `frame_update_required`) apply
+unchanged. No other push
 — a Save, a grant change, an activate on an out-of-sync frame, the hub's
 empty-store resync — moves a scene: until 2026-09-20 they all resolved every
 unpinned assignment to the newest version, so "Update" on one scene updated
 every scene on the frame.
+
+**A version's minimum FrameOS.** Every store version declares the oldest
+FrameOS it runs on (`store_scene_versions.frameos_version`, from its
+template.json; the scene row mirrors the latest version's). The store's
+JSX scenes need 2026.10.21 or later, and a runtime older than that draws
+nothing for them. So every assignment push checks the version it MOVES the
+frame to (an install through `POST …/scenes/add` or the chat's install
+card, an update, a `POST …/scenes` entry at a new version or with
+`"latest": true`) against the frame's reported `frameos_version`, and
+refuses it with `409 frame_update_required` (`min_frameos_version`,
+`frameos_version`, `scene_id`, `scene_version`, and a `detail` sentence the
+workspace shows as it is). A version the frame already holds is not checked
+again, so an old install never blocks a reorder or a grant; a frame that
+reports no version, or a version that declares no minimum, passes.
+`GET …/scenes` then offers no update and says why:
+`update_requires_frameos_version` on a scene whose newest version the frame
+cannot run. An older version can still be installed pinned
+(`scene_version`). The self-hosted backend gets the same rule another way:
+it tracks `/api/store/{its version}/repository.json`, which lists only what
+its FrameOS runs, so a scene whose newest version needs more drops out of
+its store list and its update banner.
 
 **Importing a frame's own scenes.** `GET /api/frames/{id}/scenes` carries
 `device_scenes` next to the assignments — `null` for a frame that reported

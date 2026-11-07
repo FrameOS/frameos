@@ -1,0 +1,873 @@
+[
+  {
+    "id": "analog-clock-face",
+    "name": "Analog clock face",
+    "settings": {
+      "refreshInterval": 60,
+      "backgroundColor": "#111827",
+      "execution": "interpreted",
+      "renderScale": 1
+    },
+    "fields": [
+      {
+        "name": "theme",
+        "type": "select",
+        "label": "Theme",
+        "description": "Choose a built-in palette, or Custom to edit the colours below.",
+        "required": true,
+        "value": "dusk",
+        "options": [
+          {
+            "value": "dusk",
+            "label": "Dusk"
+          },
+          {
+            "value": "midnight",
+            "label": "Midnight outline"
+          },
+          {
+            "value": "tron",
+            "label": "Neon grid"
+          },
+          {
+            "value": "cyberpunk",
+            "label": "Cyberpunk magenta"
+          },
+          {
+            "value": "blacklight",
+            "label": "Blacklight violet"
+          },
+          {
+            "value": "lava",
+            "label": "Lava core"
+          },
+          {
+            "value": "aurora",
+            "label": "Aurora wild"
+          },
+          {
+            "value": "paper",
+            "label": "Paper"
+          },
+          {
+            "value": "maritime",
+            "label": "Maritime"
+          },
+          {
+            "value": "monochrome",
+            "label": "Monochrome"
+          },
+          {
+            "value": "custom",
+            "label": "Custom"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "style",
+        "type": "select",
+        "label": "Clock style",
+        "description": "Choose the dial design.",
+        "required": true,
+        "value": "station clock",
+        "options": [
+          "station clock",
+          "minimal",
+          "roman"
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "showTitle",
+        "type": "boolean",
+        "label": "Show title",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "title",
+        "type": "string",
+        "label": "Title",
+        "description": "Small poster label shown beside or below the clock.",
+        "value": "Local time",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "showTitle",
+            "operator": "eq",
+            "value": true
+          }
+        ]
+      },
+      {
+        "name": "showDigital",
+        "type": "boolean",
+        "label": "Show digital time",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "use24Hour",
+        "type": "boolean",
+        "label": "Use 24-hour time",
+        "description": "Turn off to show the digital time as 12-hour AM/PM.",
+        "value": "true",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "showDigital",
+            "operator": "eq",
+            "value": true
+          }
+        ]
+      },
+      {
+        "name": "showMinuteTicks",
+        "type": "boolean",
+        "label": "Show minute ticks",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "showSecondHand",
+        "type": "boolean",
+        "label": "Show second hand",
+        "description": "The scene refreshes once per minute, so the second hand updates only on each render.",
+        "value": "false",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "showBackgroundFlair",
+        "type": "boolean",
+        "label": "Show background flair",
+        "description": "Add decorative glow, ribbons and subtle neon lines behind the dial.",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "backgroundStart",
+        "type": "color",
+        "label": "Background start",
+        "value": "#172033",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "backgroundEnd",
+        "type": "color",
+        "label": "Background end",
+        "value": "#315469",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "dialColor",
+        "type": "color",
+        "label": "Dial colour",
+        "value": "#F4EBDD",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "inkColor",
+        "type": "color",
+        "label": "Ink colour",
+        "value": "#16202A",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "mutedColor",
+        "type": "color",
+        "label": "Muted mark colour",
+        "value": "#7C8A92",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "accentColor",
+        "type": "color",
+        "label": "Accent colour",
+        "value": "#C66A4A",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      }
+    ],
+    "apps": {
+      "clockFace": {
+        "name": "Analog clock face renderer",
+        "category": "data",
+        "description": "Responsive SVG analog clock dial with selectable station, minimal and roman styles.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "time",
+            "label": "Current time",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "style",
+            "label": "Clock style",
+            "type": "select",
+            "options": [
+              "station clock",
+              "minimal",
+              "roman"
+            ],
+            "value": "station clock"
+          },
+          {
+            "name": "showTitle",
+            "label": "Show title",
+            "type": "boolean",
+            "value": "true"
+          },
+          {
+            "name": "title",
+            "label": "Title",
+            "type": "string",
+            "value": "Local time",
+            "showIf": [
+              {
+                "field": "showTitle",
+                "operator": "eq",
+                "value": true
+              }
+            ]
+          },
+          {
+            "name": "showDigital",
+            "label": "Show digital time",
+            "type": "boolean",
+            "value": "true"
+          },
+          {
+            "name": "use24Hour",
+            "label": "Use 24-hour time",
+            "type": "boolean",
+            "value": "true",
+            "showIf": [
+              {
+                "field": "showDigital",
+                "operator": "eq",
+                "value": true
+              }
+            ]
+          },
+          {
+            "name": "showMinuteTicks",
+            "label": "Show minute ticks",
+            "type": "boolean",
+            "value": "true"
+          },
+          {
+            "name": "showSecondHand",
+            "label": "Show second hand",
+            "type": "boolean",
+            "value": "false"
+          },
+          {
+            "name": "showBackgroundFlair",
+            "label": "Show background flair",
+            "type": "boolean",
+            "value": "true"
+          },
+          {
+            "name": "theme",
+            "label": "Theme",
+            "type": "select",
+            "options": [
+              {
+                "value": "dusk",
+                "label": "Dusk"
+              },
+              {
+                "value": "midnight",
+                "label": "Midnight outline"
+              },
+              {
+                "value": "tron",
+                "label": "Neon grid"
+              },
+              {
+                "value": "cyberpunk",
+                "label": "Cyberpunk magenta"
+              },
+              {
+                "value": "blacklight",
+                "label": "Blacklight violet"
+              },
+              {
+                "value": "lava",
+                "label": "Lava core"
+              },
+              {
+                "value": "aurora",
+                "label": "Aurora wild"
+              },
+              {
+                "value": "paper",
+                "label": "Paper"
+              },
+              {
+                "value": "maritime",
+                "label": "Maritime"
+              },
+              {
+                "value": "monochrome",
+                "label": "Monochrome"
+              },
+              {
+                "value": "custom",
+                "label": "Custom"
+              }
+            ],
+            "value": "dusk"
+          },
+          {
+            "name": "backgroundStart",
+            "label": "Background start",
+            "type": "color",
+            "value": "#172033",
+            "showIf": [
+              {
+                "field": "theme",
+                "operator": "eq",
+                "value": "custom"
+              }
+            ]
+          },
+          {
+            "name": "backgroundEnd",
+            "label": "Background end",
+            "type": "color",
+            "value": "#315469",
+            "showIf": [
+              {
+                "field": "theme",
+                "operator": "eq",
+                "value": "custom"
+              }
+            ]
+          },
+          {
+            "name": "dialColor",
+            "label": "Dial colour",
+            "type": "color",
+            "value": "#F4EBDD",
+            "showIf": [
+              {
+                "field": "theme",
+                "operator": "eq",
+                "value": "custom"
+              }
+            ]
+          },
+          {
+            "name": "inkColor",
+            "label": "Ink colour",
+            "type": "color",
+            "value": "#16202A",
+            "showIf": [
+              {
+                "field": "theme",
+                "operator": "eq",
+                "value": "custom"
+              }
+            ]
+          },
+          {
+            "name": "mutedColor",
+            "label": "Muted mark colour",
+            "type": "color",
+            "value": "#7C8A92",
+            "showIf": [
+              {
+                "field": "theme",
+                "operator": "eq",
+                "value": "custom"
+              }
+            ]
+          },
+          {
+            "name": "accentColor",
+            "label": "Accent colour",
+            "type": "color",
+            "value": "#C66A4A",
+            "showIf": [
+              {
+                "field": "theme",
+                "operator": "eq",
+                "value": "custom"
+              }
+            ]
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Analog clock face renderer\",\n  \"category\": \"data\",\n  \"description\": \"Responsive SVG analog clock dial with selectable station, minimal and roman styles.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"time\",\n      \"label\": \"Current time\",\n      \"type\": \"string\",\n      \"required\": true\n    },\n    {\n      \"name\": \"style\",\n      \"label\": \"Clock style\",\n      \"type\": \"select\",\n      \"options\": [\n        \"station clock\",\n        \"minimal\",\n        \"roman\"\n      ],\n      \"value\": \"station clock\"\n    },\n    {\n      \"name\": \"showTitle\",\n      \"label\": \"Show title\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    },\n    {\n      \"name\": \"title\",\n      \"label\": \"Title\",\n      \"type\": \"string\",\n      \"value\": \"Local time\",\n      \"showIf\": [\n        {\n          \"field\": \"showTitle\",\n          \"operator\": \"eq\",\n          \"value\": true\n        }\n      ]\n    },\n    {\n      \"name\": \"showDigital\",\n      \"label\": \"Show digital time\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    },\n    {\n      \"name\": \"use24Hour\",\n      \"label\": \"Use 24-hour time\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"showIf\": [\n        {\n          \"field\": \"showDigital\",\n          \"operator\": \"eq\",\n          \"value\": true\n        }\n      ]\n    },\n    {\n      \"name\": \"showMinuteTicks\",\n      \"label\": \"Show minute ticks\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    },\n    {\n      \"name\": \"showSecondHand\",\n      \"label\": \"Show second hand\",\n      \"type\": \"boolean\",\n      \"value\": \"false\"\n    },\n    {\n      \"name\": \"showBackgroundFlair\",\n      \"label\": \"Show background flair\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    },\n    {\n      \"name\": \"theme\",\n      \"label\": \"Theme\",\n      \"type\": \"select\",\n      \"options\": [\n        {\n          \"value\": \"dusk\",\n          \"label\": \"Dusk\"\n        },\n        {\n          \"value\": \"midnight\",\n          \"label\": \"Midnight outline\"\n        },\n        {\n          \"value\": \"tron\",\n          \"label\": \"Neon grid\"\n        },\n        {\n          \"value\": \"cyberpunk\",\n          \"label\": \"Cyberpunk magenta\"\n        },\n        {\n          \"value\": \"blacklight\",\n          \"label\": \"Blacklight violet\"\n        },\n        {\n          \"value\": \"lava\",\n          \"label\": \"Lava core\"\n        },\n        {\n          \"value\": \"aurora\",\n          \"label\": \"Aurora wild\"\n        },\n        {\n          \"value\": \"paper\",\n          \"label\": \"Paper\"\n        },\n        {\n          \"value\": \"maritime\",\n          \"label\": \"Maritime\"\n        },\n        {\n          \"value\": \"monochrome\",\n          \"label\": \"Monochrome\"\n        },\n        {\n          \"value\": \"custom\",\n          \"label\": \"Custom\"\n        }\n      ],\n      \"value\": \"dusk\"\n    },\n    {\n      \"name\": \"backgroundStart\",\n      \"label\": \"Background start\",\n      \"type\": \"color\",\n      \"value\": \"#172033\",\n      \"showIf\": [\n        {\n          \"field\": \"theme\",\n          \"operator\": \"eq\",\n          \"value\": \"custom\"\n        }\n      ]\n    },\n    {\n      \"name\": \"backgroundEnd\",\n      \"label\": \"Background end\",\n      \"type\": \"color\",\n      \"value\": \"#315469\",\n      \"showIf\": [\n        {\n          \"field\": \"theme\",\n          \"operator\": \"eq\",\n          \"value\": \"custom\"\n        }\n      ]\n    },\n    {\n      \"name\": \"dialColor\",\n      \"label\": \"Dial colour\",\n      \"type\": \"color\",\n      \"value\": \"#F4EBDD\",\n      \"showIf\": [\n        {\n          \"field\": \"theme\",\n          \"operator\": \"eq\",\n          \"value\": \"custom\"\n        }\n      ]\n    },\n    {\n      \"name\": \"inkColor\",\n      \"label\": \"Ink colour\",\n      \"type\": \"color\",\n      \"value\": \"#16202A\",\n      \"showIf\": [\n        {\n          \"field\": \"theme\",\n          \"operator\": \"eq\",\n          \"value\": \"custom\"\n        }\n      ]\n    },\n    {\n      \"name\": \"mutedColor\",\n      \"label\": \"Muted mark colour\",\n      \"type\": \"color\",\n      \"value\": \"#7C8A92\",\n      \"showIf\": [\n        {\n          \"field\": \"theme\",\n          \"operator\": \"eq\",\n          \"value\": \"custom\"\n        }\n      ]\n    },\n    {\n      \"name\": \"accentColor\",\n      \"label\": \"Accent colour\",\n      \"type\": \"color\",\n      \"value\": \"#C66A4A\",\n      \"showIf\": [\n        {\n          \"field\": \"theme\",\n          \"operator\": \"eq\",\n          \"value\": \"custom\"\n        }\n      ]\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "function boolValue(value) {\n  return value === true || value === 'true' || value === 1 || value === '1'\n}\n\nfunction color(value, fallback) {\n  if (typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value)) {\n    return value\n  }\n  return fallback\n}\n\nfunction themePalette(theme, config) {\n  const palettes = {\n    dusk: {\n      bgStart: '#172033',\n      bgEnd: '#315469',\n      dial: '#F4EBDD',\n      ink: '#16202A',\n      muted: '#7C8A92',\n      accent: '#C66A4A',\n    },\n    paper: {\n      bgStart: '#E8DDC9',\n      bgEnd: '#B9A98E',\n      dial: '#FAF4E8',\n      ink: '#25211B',\n      muted: '#817765',\n      accent: '#9A5A32',\n    },\n    maritime: {\n      bgStart: '#0F2B35',\n      bgEnd: '#2F6F73',\n      dial: '#EEF3EA',\n      ink: '#10242B',\n      muted: '#6D8790',\n      accent: '#D08B55',\n    },\n    monochrome: {\n      bgStart: '#111827',\n      bgEnd: '#374151',\n      dial: '#F3F4F6',\n      ink: '#111827',\n      muted: '#6B7280',\n      accent: '#D1D5DB',\n    },\n    midnight: {\n      bgStart: '#020617',\n      bgEnd: '#0B1120',\n      dial: '#050505',\n      ink: '#F8FAFC',\n      muted: '#94A3B8',\n      accent: '#38BDF8',\n    },\n    tron: {\n      bgStart: '#020617',\n      bgEnd: '#071826',\n      dial: '#030712',\n      ink: '#E0F2FE',\n      muted: '#0EA5E9',\n      accent: '#22D3EE',\n    },\n    cyberpunk: {\n      bgStart: '#18001F',\n      bgEnd: '#2D0638',\n      dial: '#07040A',\n      ink: '#FDF4FF',\n      muted: '#C084FC',\n      accent: '#F472B6',\n    },\n    blacklight: {\n      bgStart: '#090014',\n      bgEnd: '#1E1B4B',\n      dial: '#05030D',\n      ink: '#F5F3FF',\n      muted: '#A78BFA',\n      accent: '#C4B5FD',\n    },\n    lava: {\n      bgStart: '#1C0702',\n      bgEnd: '#3B1006',\n      dial: '#080402',\n      ink: '#FFF7ED',\n      muted: '#FB923C',\n      accent: '#F97316',\n    },\n    aurora: {\n      bgStart: '#031B1A',\n      bgEnd: '#172554',\n      dial: '#031313',\n      ink: '#ECFEFF',\n      muted: '#5EEAD4',\n      accent: '#A3E635',\n    },\n  }\n\n  if (theme === 'custom') {\n    return {\n      bgStart: color(config.backgroundStart, '#172033'),\n      bgEnd: color(config.backgroundEnd, '#315469'),\n      dial: color(config.dialColor, '#F4EBDD'),\n      ink: color(config.inkColor, '#16202A'),\n      muted: color(config.mutedColor, '#7C8A92'),\n      accent: color(config.accentColor, '#C66A4A'),\n    }\n  }\n\n  return palettes[theme] || palettes.dusk\n}\n\nfunction clamp(value, min, max) {\n  return Math.max(min, Math.min(max, value))\n}\n\n// Every coordinate and size is drawn rounded to two decimals.\nfunction round2(value) {\n  return Number(value.toFixed(2))\n}\n\nfunction polar(cx, cy, radius, degrees) {\n  const radians = (degrees - 90) * Math.PI / 180\n  return {\n    x: cx + Math.cos(radians) * radius,\n    y: cy + Math.sin(radians) * radius,\n  }\n}\n\nfunction handPolygon(cx, cy, length, tail, angle, halfWidth) {\n  const tip = polar(cx, cy, length, angle)\n  const back = polar(cx, cy, tail, angle + 180)\n  const left = polar(cx, cy, halfWidth, angle - 90)\n  const right = polar(cx, cy, halfWidth, angle + 90)\n  return [tip, left, back, right].map((point) => point.x.toFixed(2) + ',' + point.y.toFixed(2)).join(' ')\n}\n\nfunction fitLabel(value, maxChars) {\n  const text = String(value || '').trim()\n  if (text.length <= maxChars) {\n    return text\n  }\n  return text.substring(0, Math.max(1, maxChars - 1)).trim() + '…'\n}\n\nfunction parseTime(value) {\n  const match = String(value || '').match(/^(\\d{1,2}):(\\d{2})(?::(\\d{2}))?/)\n  if (!match) {\n    return null\n  }\n  return {\n    hour: clamp(parseInt(match[1], 10), 0, 23),\n    minute: clamp(parseInt(match[2], 10), 0, 59),\n    second: clamp(parseInt(match[3] || '0', 10), 0, 59),\n  }\n}\n\nfunction arcPath(cx, cy, radius, startDegrees, endDegrees) {\n  const start = polar(cx, cy, radius, startDegrees)\n  const end = polar(cx, cy, radius, endDegrees)\n  const large = Math.abs(endDegrees - startDegrees) > 180 ? 1 : 0\n  return 'M ' + start.x.toFixed(2) + ' ' + start.y.toFixed(2) + ' A ' + radius.toFixed(2) + ' ' + radius.toFixed(2) + ' 0 ' + large + ' 1 ' + end.x.toFixed(2) + ' ' + end.y.toFixed(2)\n}\n\nfunction computeLayout(W, H, config, unit) {\n  const portrait = H > W\n  const minSide = Math.min(W, H)\n  const margin = minSide * 0.055\n  const outerFactor = 1.08\n\n  if (portrait) {\n    const hasPosterText = config.showTitle || config.showDigital\n    const textReserve = hasPosterText ? H * 0.26 : 0\n    const gap = hasPosterText ? Math.max(unit * 8, H * 0.045) : 0\n    const availableHeight = H - margin * 2 - textReserve - gap\n    const availableWidth = W - margin * 2.6\n    const radius = Math.min(availableWidth / (2 * outerFactor), availableHeight / (2 * outerFactor)) * 0.98\n    const safeRadius = Math.max(unit * 18, radius)\n    const clockBlockHeight = safeRadius * outerFactor * 2\n    const totalHeight = hasPosterText ? clockBlockHeight + gap + textReserve : clockBlockHeight\n    const balancedTop = (H - totalHeight) / 2\n    const verticalNudge = hasPosterText ? Math.min(gap * 0.45, margin * 1.1) : 0\n    const top = Math.max(margin * 1.15, balancedTop + verticalNudge)\n    const cy = top + clockBlockHeight / 2\n\n    return {\n      portrait: true,\n      cx: W / 2,\n      cy: cy,\n      radius: safeRadius,\n      textX: W / 2,\n      textY: hasPosterText ? cy + safeRadius * outerFactor + gap + textReserve * 0.36 : H / 2,\n      textWidth: W - margin * 2.4,\n    }\n  }\n\n  const hasPosterText = config.showTitle || config.showDigital\n  if (!hasPosterText) {\n    const radius = Math.min((W - margin * 2) / (2 * outerFactor), (H - margin * 2) / (2 * outerFactor)) * 0.98\n    return {\n      portrait: false,\n      cx: W / 2,\n      cy: H / 2,\n      radius: Math.max(unit * 18, radius),\n      textX: margin,\n      textY: H / 2,\n      textWidth: 0,\n    }\n  }\n\n  const textWidth = clamp(W * 0.25, minSide * 0.26, minSide * 0.42)\n  const gutter = minSide * 0.07\n  const clockLeft = margin + textWidth + gutter\n  const clockRight = W - margin\n  const clockWidth = Math.max(minSide * 0.42, clockRight - clockLeft)\n  const maxRadiusByWidth = clockWidth / (2 * outerFactor)\n  const maxRadiusByHeight = (H - margin * 2) / (2 * outerFactor)\n  const radius = Math.min(maxRadiusByWidth, maxRadiusByHeight) * 0.96\n\n  return {\n    portrait: false,\n    cx: Math.min(clockRight - radius * outerFactor, Math.max(clockLeft + radius * outerFactor, clockLeft + clockWidth / 2)),\n    cy: H / 2,\n    radius: Math.max(unit * 18, radius),\n    textX: margin,\n    textY: H * 0.45,\n    textWidth: textWidth,\n  }\n}\n\nfunction PolarLine({ cx, cy, inner, outer, degrees, stroke, width }) {\n  const a = polar(cx, cy, inner, degrees)\n  const b = polar(cx, cy, outer, degrees)\n  return (\n    <line\n      x1={round2(a.x)}\n      y1={round2(a.y)}\n      x2={round2(b.x)}\n      y2={round2(b.y)}\n      stroke={stroke}\n      strokeWidth={round2(width)}\n      strokeLinecap=\"round\"\n    />\n  )\n}\n\nfunction RoundedRect({ x, y, width, height, radius, fill, stroke, strokeWidth, opacity }) {\n  return (\n    <rect\n      x={round2(x)}\n      y={round2(y)}\n      width={round2(width)}\n      height={round2(height)}\n      rx={round2(radius)}\n      ry={round2(radius)}\n      fill={fill}\n      opacity={opacity}\n      stroke={stroke || undefined}\n      strokeWidth={stroke ? round2(strokeWidth) : undefined}\n    />\n  )\n}\n\nfunction NumberText({ text, x, y, size, fill, font, weight }) {\n  return (\n    <text\n      x={round2(x)}\n      y={round2(y)}\n      fontFamily={font}\n      fontSize={round2(size)}\n      fontWeight={weight}\n      textAnchor=\"middle\"\n      dominantBaseline=\"middle\"\n      fill={fill}\n    >\n      {text}\n    </text>\n  )\n}\n\nfunction Background({ W, H, layout, palette, unit, showFlair }) {\n  const glowCx = layout.portrait ? W * 0.5 : layout.cx\n  const glowCy = layout.portrait ? layout.cy * 0.82 : layout.cy * 0.72\n  const glowR = Math.max(W, H) * 0.54\n  const cornerCx = layout.portrait ? W * 0.18 : W * 0.08\n  const cornerCy = layout.portrait ? H * 0.92 : H * 0.16\n  const cornerR = Math.max(W, H) * 0.42\n  const ribbonY = layout.portrait ? H * 0.78 : H * 0.12\n\n  return (\n    <>\n      <defs>\n        <linearGradient id=\"bg\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2={W} y2={H}>\n          <stop offset=\"0\" stopColor={palette.bgStart} />\n          <stop offset=\"1\" stopColor={palette.bgEnd} />\n        </linearGradient>\n        <radialGradient id=\"clockGlow\" gradientUnits=\"userSpaceOnUse\" cx={round2(glowCx)} cy={round2(glowCy)} r={round2(glowR)}>\n          <stop offset=\"0\" stopColor={palette.accent} stopOpacity=\"0.34\" />\n          <stop offset=\"0.48\" stopColor={palette.accent} stopOpacity=\"0.10\" />\n          <stop offset=\"1\" stopColor={palette.accent} stopOpacity=\"0\" />\n        </radialGradient>\n        <radialGradient id=\"cornerVignette\" gradientUnits=\"userSpaceOnUse\" cx={round2(cornerCx)} cy={round2(cornerCy)} r={round2(cornerR)}>\n          <stop offset=\"0\" stopColor=\"#F7F0E6\" stopOpacity=\"0.16\" />\n          <stop offset=\"1\" stopColor=\"#F7F0E6\" stopOpacity=\"0\" />\n        </radialGradient>\n      </defs>\n      <rect x=\"0\" y=\"0\" width={W} height={H} fill=\"url(#bg)\" />\n      {showFlair && (\n        <>\n          <rect x=\"0\" y=\"0\" width={W} height={H} fill=\"url(#clockGlow)\" />\n          <rect x=\"0\" y=\"0\" width={W} height={H} fill=\"url(#cornerVignette)\" />\n          <circle cx={round2(W * 0.92)} cy={round2(H * 0.12)} r={round2(unit * 17)} fill=\"#0B1220\" opacity=\"0.16\" />\n          <circle cx={round2(W * 0.86)} cy={round2(H * 0.90)} r={round2(unit * 9)} fill=\"#F7F0E6\" opacity=\"0.08\" />\n          <line\n            x1={round2(W * 0.06)}\n            y1={round2(ribbonY)}\n            x2={round2(W * 0.94)}\n            y2={round2(ribbonY - unit * 8)}\n            stroke=\"#F7F0E6\"\n            strokeWidth={round2(unit * 0.18)}\n            opacity=\"0.22\"\n          />\n          {Array.from({ length: 7 }, (_, i) => {\n            const y = H * (0.18 + i * 0.10)\n            return (\n              <line\n                x1={round2(W * 0.10)}\n                y1={round2(y)}\n                x2={round2(W * 0.90)}\n                y2={round2(y - unit * 5)}\n                stroke={palette.accent}\n                strokeWidth={round2(unit * 0.10)}\n                opacity=\"0.12\"\n              />\n            )\n          })}\n        </>\n      )}\n    </>\n  )\n}\n\nfunction Ticks({ cx, cy, radius, style, palette, showMinuteTicks, unit }) {\n  const minuteWidth = style === 'minimal' ? unit * 0.2 : unit * 0.28\n  const minuteInner = style === 'minimal' ? radius * 0.93 : radius * 0.89\n  const hourWidth = style === 'minimal' ? unit * 0.78 : unit * 1.05\n  const hourInner = style === 'roman' ? radius * 0.82 : radius * 0.84\n  // Every minute but the five-minute ones, where the hour marks go.\n  const minutes = showMinuteTicks ? Array.from({ length: 60 }, (_, i) => i).filter((i) => i % 5 !== 0) : []\n\n  return (\n    <>\n      {minutes.map((minute) => (\n        <PolarLine cx={cx} cy={cy} inner={minuteInner} outer={radius * 0.96} degrees={minute * 6} stroke={palette.muted} width={minuteWidth} />\n      ))}\n      {Array.from({ length: 12 }, (_, hour) => (\n        <PolarLine cx={cx} cy={cy} inner={hourInner} outer={radius * 0.96} degrees={hour * 30} stroke={palette.ink} width={hourWidth} />\n      ))}\n    </>\n  )\n}\n\nfunction Numbers({ cx, cy, radius, style, palette, unit }) {\n  if (style === 'minimal') {\n    return Array.from({ length: 12 }, (_, i) => {\n      const p = polar(cx, cy, radius * 0.75, i * 30)\n      const r = i === 0 ? unit * 0.95 : unit * 0.58\n      return <circle cx={round2(p.x)} cy={round2(p.y)} r={round2(r)} fill={i === 0 ? palette.accent : palette.muted} />\n    })\n  }\n\n  const roman = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI']\n  const font = style === 'roman' ? 'CormorantGaramond-Bold.ttf' : 'PTSans-Bold.ttf'\n  const size = style === 'roman' ? unit * 5.4 : unit * 4.6\n  const labelRadius = style === 'roman' ? radius * 0.68 : radius * 0.69\n\n  return Array.from({ length: 12 }, (_, i) => {\n    const p = polar(cx, cy, labelRadius, i * 30)\n    const label = style === 'roman' ? roman[i] : String(i === 0 ? 12 : i)\n    return <NumberText text={label} x={p.x} y={p.y} size={size} fill={palette.ink} font={font} weight=\"700\" />\n  })\n}\n\nfunction Hands({ cx, cy, radius, time, palette, style, showSecondHand, unit }) {\n  const hourAngle = ((time.hour % 12) + time.minute / 60 + time.second / 3600) * 30\n  const minuteAngle = (time.minute + time.second / 60) * 6\n  const secondAngle = time.second * 6\n\n  const minute = polar(cx, cy, radius * 0.73, minuteAngle)\n  const tailMinute = polar(cx, cy, radius * 0.12, minuteAngle + 180)\n  const second = polar(cx, cy, radius * 0.79, secondAngle)\n  const tailSecond = polar(cx, cy, radius * 0.18, secondAngle + 180)\n  const cap = style === 'minimal' ? 'round' : 'butt'\n\n  return (\n    <>\n      <polygon points={handPolygon(cx, cy, radius * 0.46, radius * 0.07, hourAngle, unit * 1.2)} fill={palette.ink} />\n      <circle cx={round2(cx)} cy={round2(cy)} r={round2(unit * 1.05)} fill={palette.ink} />\n      <line\n        x1={round2(tailMinute.x)}\n        y1={round2(tailMinute.y)}\n        x2={round2(minute.x)}\n        y2={round2(minute.y)}\n        stroke={palette.ink}\n        strokeWidth={round2(unit * 0.95)}\n        strokeLinecap={cap}\n      />\n      {showSecondHand && (\n        <line\n          x1={round2(tailSecond.x)}\n          y1={round2(tailSecond.y)}\n          x2={round2(second.x)}\n          y2={round2(second.y)}\n          stroke={palette.accent}\n          strokeWidth={round2(unit * 0.42)}\n          strokeLinecap=\"round\"\n        />\n      )}\n      <circle cx={round2(cx)} cy={round2(cy)} r={round2(unit * 2.1)} fill={palette.accent} />\n      <circle cx={round2(cx)} cy={round2(cy)} r={round2(unit * 0.72)} fill={palette.dial} />\n    </>\n  )\n}\n\nfunction TimeIcon({ x, y, size, time, palette }) {\n  const isNight = time.hour < 6 || time.hour >= 18\n  if (isNight) {\n    return (\n      <>\n        <circle cx={round2(x)} cy={round2(y)} r={round2(size * 0.42)} fill={palette.accent} />\n        <circle cx={round2(x + size * 0.18)} cy={round2(y - size * 0.13)} r={round2(size * 0.42)} fill=\"#0F1724\" opacity=\"0.82\" />\n        <circle cx={round2(x + size * 0.40)} cy={round2(y - size * 0.32)} r={round2(size * 0.06)} fill=\"#F7F0E6\" opacity=\"0.72\" />\n      </>\n    )\n  }\n\n  return (\n    <>\n      <circle cx={round2(x)} cy={round2(y)} r={round2(size * 0.34)} fill={palette.accent} />\n      {Array.from({ length: 8 }, (_, i) => (\n        <PolarLine cx={x} cy={y} inner={size * 0.48} outer={size * 0.66} degrees={i * 45} stroke={palette.accent} width={size * 0.08} />\n      ))}\n    </>\n  )\n}\n\nfunction PosterText({ layout, time, palette, config, unit }) {\n  if (!config.showTitle && !config.showDigital) {\n    return null\n  }\n\n  const titleSize = clamp(unit * (layout.portrait ? 5.4 : 4.8), 18, 66)\n  const digitalSize = clamp(unit * (layout.portrait ? 5.0 : 4.2), 16, 56)\n  const titleMax = Math.floor(layout.textWidth / (titleSize * 0.55))\n  const title = fitLabel(config.title || 'Local time', Math.max(6, titleMax))\n  const use24Hour = boolValue(config.use24Hour)\n  const hour12 = time.hour % 12 || 12\n  const displayHour = use24Hour ? time.hour : hour12\n  const suffix = use24Hour ? '' : (time.hour < 12 ? ' AM' : ' PM')\n  const digital = (displayHour < 10 ? '0' : '') + displayHour + ':' + (time.minute < 10 ? '0' : '') + time.minute + suffix\n  const x = layout.textX\n\n  if (layout.portrait) {\n    const cardWidth = Math.min(layout.textWidth, unit * 72)\n    const cardHeight = unit * (config.showTitle && config.showDigital ? 17 : 12)\n    const cardX = x - cardWidth / 2\n    const cardY = layout.textY - cardHeight * 0.42\n    // The digital time goes under the title, or in its place.\n    const titleY = layout.textY - titleSize * 0.18\n    const digitalY = config.showTitle ? titleY + titleSize * 1.05 : titleY\n\n    return (\n      <>\n        <RoundedRect x={cardX + unit * 0.9} y={cardY + unit * 0.9} width={cardWidth} height={cardHeight} radius={unit * 2.8} fill=\"#0B1220\" opacity=\"0.22\" />\n        <RoundedRect x={cardX} y={cardY} width={cardWidth} height={cardHeight} radius={unit * 2.8} fill=\"#F7F0E6\" stroke=\"#F7F0E6\" strokeWidth={unit * 0.16} opacity=\"0.10\" />\n        <TimeIcon x={cardX + unit * 7} y={cardY + cardHeight / 2} size={unit * 4.7} time={time} palette={palette} />\n        {config.showTitle && (\n          <text\n            x={round2(x)}\n            y={round2(titleY)}\n            fontFamily=\"PTSans-Bold.ttf\"\n            fontSize={round2(titleSize)}\n            fontWeight=\"700\"\n            textAnchor=\"middle\"\n            dominantBaseline=\"middle\"\n            fill=\"#F7F0E6\"\n          >\n            {title}\n          </text>\n        )}\n        {config.showDigital && (\n          <text\n            x={round2(x)}\n            y={round2(digitalY)}\n            fontFamily=\"CascadiaMono.ttf\"\n            fontSize={round2(digitalSize)}\n            textAnchor=\"middle\"\n            dominantBaseline=\"middle\"\n            fill={palette.accent}\n          >\n            {digital}\n          </text>\n        )}\n      </>\n    )\n  }\n\n  const cardWidth = layout.textWidth\n  const cardHeight = unit * (config.showTitle && config.showDigital ? 27 : 20)\n  const cardY = layout.textY - cardHeight * 0.44\n  const textX = x + unit * 4.4\n  const titleY = layout.textY\n  const digitalY = config.showTitle ? titleY + titleSize * 1.16 : titleY\n\n  return (\n    <>\n      <RoundedRect x={x + unit * 1.1} y={cardY + unit * 1.1} width={cardWidth} height={cardHeight} radius={unit * 3.1} fill=\"#0B1220\" opacity=\"0.20\" />\n      <RoundedRect x={x} y={cardY} width={cardWidth} height={cardHeight} radius={unit * 3.1} fill=\"#F7F0E6\" stroke=\"#F7F0E6\" strokeWidth={unit * 0.16} opacity=\"0.11\" />\n      <rect\n        x={round2(x)}\n        y={round2(cardY)}\n        width={round2(unit * 1.15)}\n        height={round2(cardHeight)}\n        rx={round2(unit * 0.58)}\n        ry={round2(unit * 0.58)}\n        fill={palette.accent}\n      />\n      <TimeIcon x={x + cardWidth - unit * 5.2} y={cardY + unit * 5.0} size={unit * 4.0} time={time} palette={palette} />\n      {config.showTitle && (\n        <text\n          x={round2(textX)}\n          y={round2(titleY)}\n          fontFamily=\"PTSans-Bold.ttf\"\n          fontSize={round2(titleSize)}\n          fontWeight=\"700\"\n          textAnchor=\"start\"\n          dominantBaseline=\"middle\"\n          fill=\"#F7F0E6\"\n        >\n          {title}\n        </text>\n      )}\n      {config.showDigital && (\n        <text\n          x={round2(textX)}\n          y={round2(digitalY)}\n          fontFamily=\"CascadiaMono.ttf\"\n          fontSize={round2(digitalSize)}\n          textAnchor=\"start\"\n          dominantBaseline=\"middle\"\n          fill={palette.accent}\n        >\n          {digital}\n        </text>\n      )}\n    </>\n  )\n}\n\nfunction Placeholder({ W, H, palette, unit }) {\n  const size = clamp(unit * 5.2, 16, 54)\n  return (\n    <>\n      <rect x=\"0\" y=\"0\" width={W} height={H} fill={palette.bgStart} />\n      <text\n        x={round2(W / 2)}\n        y={round2(H / 2 - size * 0.4)}\n        fontFamily=\"PTSans-Bold.ttf\"\n        fontSize={round2(size)}\n        fontWeight=\"700\"\n        textAnchor=\"middle\"\n        dominantBaseline=\"middle\"\n        fill=\"#F7F0E6\"\n      >\n        Clock time is starting…\n      </text>\n      <text\n        x={round2(W / 2)}\n        y={round2(H / 2 + size * 0.95)}\n        fontFamily=\"PTSans-Regular.ttf\"\n        fontSize={round2(size * 0.52)}\n        textAnchor=\"middle\"\n        dominantBaseline=\"middle\"\n        fill={palette.accent}\n      >\n        The frame will render the dial as soon as the clock value is available.\n      </text>\n    </>\n  )\n}\n\n// The bezel, the dial and its rings, under the ticks, numbers and hands.\nfunction Dial({ cx, cy, radius, style, palette, unit }) {\n  return (\n    <>\n      {style === 'roman' && (\n        <path\n          d={arcPath(cx, cy, radius * 1.04, 218, 322)}\n          fill=\"none\"\n          stroke={palette.accent}\n          strokeWidth={round2(unit * 0.95)}\n          strokeLinecap=\"round\"\n        />\n      )}\n      <circle cx={round2(cx + unit * 1.6)} cy={round2(cy + unit * 1.9)} r={round2(radius * 1.06)} fill=\"#0B1220\" opacity=\"0.28\" />\n      <circle cx={round2(cx)} cy={round2(cy)} r={round2(radius * 1.075)} fill=\"#F7F0E6\" opacity=\"0.12\" />\n      <circle cx={round2(cx)} cy={round2(cy)} r={round2(radius * 1.045)} fill=\"#0F1724\" />\n      <circle cx={round2(cx)} cy={round2(cy)} r={round2(radius)} fill={palette.dial} />\n      {style === 'station clock' ? (\n        <circle cx={round2(cx)} cy={round2(cy)} r={round2(radius * 0.955)} fill=\"none\" stroke={palette.ink} strokeWidth={round2(unit * 0.9)} />\n      ) : (\n        <circle cx={round2(cx)} cy={round2(cy)} r={round2(radius * 0.94)} fill=\"none\" stroke={palette.muted} strokeWidth={round2(unit * 0.38)} />\n      )}\n      <circle cx={round2(cx)} cy={round2(cy)} r={round2(radius * 0.79)} fill=\"none\" stroke={palette.muted} strokeWidth={round2(unit * 0.16)} opacity=\"0.45\" />\n    </>\n  )\n}\n\nfunction Clock({ W, H, unit, time, palette, appConfig }) {\n  const style = ['station clock', 'minimal', 'roman'].indexOf(appConfig.style) >= 0 ? appConfig.style : 'station clock'\n  const showMinuteTicks = boolValue(appConfig.showMinuteTicks)\n  const showSecondHand = boolValue(appConfig.showSecondHand)\n  const config = {\n    title: appConfig.title || 'Local time',\n    showTitle: boolValue(appConfig.showTitle),\n    showDigital: boolValue(appConfig.showDigital),\n    use24Hour: boolValue(appConfig.use24Hour),\n    showBackgroundFlair: boolValue(appConfig.showBackgroundFlair),\n  }\n  const layout = computeLayout(W, H, config, unit)\n  const cx = layout.cx\n  const cy = layout.cy\n  const radius = layout.radius\n\n  return (\n    <>\n      <Background W={W} H={H} layout={layout} palette={palette} unit={unit} showFlair={config.showBackgroundFlair} />\n      <PosterText layout={layout} time={time} palette={palette} config={config} unit={unit} />\n      <Dial cx={cx} cy={cy} radius={radius} style={style} palette={palette} unit={unit} />\n      <Ticks cx={cx} cy={cy} radius={radius} style={style} palette={palette} showMinuteTicks={showMinuteTicks} unit={unit} />\n      <Numbers cx={cx} cy={cy} radius={radius} style={style} palette={palette} unit={unit} />\n      <Hands cx={cx} cy={cy} radius={radius} time={time} palette={palette} style={style} showSecondHand={showSecondHand} unit={unit} />\n    </>\n  )\n}\n\nexport function get(app, context) {\n  const W = app.frame.width\n  const H = app.frame.height\n  const unit = Math.min(W, H) / 100\n  const time = parseTime(app.config.time)\n  const themes = ['dusk', 'midnight', 'tron', 'cyberpunk', 'blacklight', 'lava', 'aurora', 'paper', 'maritime', 'monochrome', 'custom']\n  const theme = themes.indexOf(app.config.theme) >= 0 ? app.config.theme : 'dusk'\n  const palette = themePalette(theme, app.config)\n\n  return (\n    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>\n      {time ? (\n        <Clock W={W} H={H} unit={unit} time={time} palette={palette} appConfig={app.config} />\n      ) : (\n        <Placeholder W={W} H={H} palette={palette} unit={unit} />\n      )}\n    </svg>\n  )\n}\n"
+        },
+        "origin": "clockFace"
+      }
+    },
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "data": {
+          "keyword": "render"
+        },
+        "position": {
+          "x": 0,
+          "y": 1
+        }
+      },
+      {
+        "id": "clock-time",
+        "type": "app",
+        "data": {
+          "keyword": "data/clock",
+          "config": {
+            "format": "HH:mm:ss"
+          }
+        },
+        "position": {
+          "x": 320,
+          "y": -1478
+        }
+      },
+      {
+        "id": "state-style",
+        "type": "state",
+        "data": {
+          "keyword": "style",
+          "value": "station clock"
+        },
+        "position": {
+          "x": 323,
+          "y": -438
+        }
+      },
+      {
+        "id": "state-title",
+        "type": "state",
+        "data": {
+          "keyword": "title",
+          "value": "Local time"
+        },
+        "position": {
+          "x": 275,
+          "y": -566
+        }
+      },
+      {
+        "id": "state-showTitle",
+        "type": "state",
+        "data": {
+          "keyword": "showTitle",
+          "value": "true"
+        },
+        "position": {
+          "x": 299,
+          "y": -502
+        }
+      },
+      {
+        "id": "state-showDigital",
+        "type": "state",
+        "data": {
+          "keyword": "showDigital",
+          "value": "true"
+        },
+        "position": {
+          "x": 251,
+          "y": -630
+        }
+      },
+      {
+        "id": "state-showMinuteTicks",
+        "type": "state",
+        "data": {
+          "keyword": "showMinuteTicks",
+          "value": "true"
+        },
+        "position": {
+          "x": 227,
+          "y": -694
+        }
+      },
+      {
+        "id": "state-showSecondHand",
+        "type": "state",
+        "data": {
+          "keyword": "showSecondHand",
+          "value": "false"
+        },
+        "position": {
+          "x": 203,
+          "y": -758
+        }
+      },
+      {
+        "id": "state-backgroundStart",
+        "type": "state",
+        "data": {
+          "keyword": "backgroundStart",
+          "value": "#172033"
+        },
+        "position": {
+          "x": 131,
+          "y": -950
+        }
+      },
+      {
+        "id": "state-backgroundEnd",
+        "type": "state",
+        "data": {
+          "keyword": "backgroundEnd",
+          "value": "#315469"
+        },
+        "position": {
+          "x": 107,
+          "y": -1014
+        }
+      },
+      {
+        "id": "state-dialColor",
+        "type": "state",
+        "data": {
+          "keyword": "dialColor",
+          "value": "#F4EBDD"
+        },
+        "position": {
+          "x": 83,
+          "y": -1078
+        }
+      },
+      {
+        "id": "state-inkColor",
+        "type": "state",
+        "data": {
+          "keyword": "inkColor",
+          "value": "#16202A"
+        },
+        "position": {
+          "x": 59,
+          "y": -1142
+        }
+      },
+      {
+        "id": "state-mutedColor",
+        "type": "state",
+        "data": {
+          "keyword": "mutedColor",
+          "value": "#7C8A92"
+        },
+        "position": {
+          "x": 35,
+          "y": -1206
+        }
+      },
+      {
+        "id": "state-accentColor",
+        "type": "state",
+        "data": {
+          "keyword": "accentColor",
+          "value": "#C66A4A"
+        },
+        "position": {
+          "x": 11,
+          "y": -1270
+        }
+      },
+      {
+        "id": "clock-face",
+        "type": "app",
+        "data": {
+          "keyword": "clockFace",
+          "config": {
+            "time": "",
+            "style": "station clock",
+            "showTitle": "true",
+            "title": "Local time",
+            "showDigital": "true",
+            "use24Hour": "true",
+            "showMinuteTicks": "true",
+            "showSecondHand": "false",
+            "showBackgroundFlair": "true",
+            "theme": "dusk",
+            "backgroundStart": "#172033",
+            "backgroundEnd": "#315469",
+            "dialColor": "#F4EBDD",
+            "inkColor": "#16202A",
+            "mutedColor": "#7C8A92",
+            "accentColor": "#C66A4A"
+          }
+        },
+        "position": {
+          "x": 355,
+          "y": -358
+        }
+      },
+      {
+        "id": "render-image",
+        "type": "app",
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "offsetX": "0",
+            "offsetY": "0",
+            "blendMode": "normal"
+          }
+        },
+        "position": {
+          "x": 390,
+          "y": 0
+        }
+      },
+      {
+        "id": "state-theme",
+        "type": "state",
+        "data": {
+          "keyword": "theme",
+          "value": "dusk"
+        },
+        "position": {
+          "x": 155,
+          "y": -886
+        }
+      },
+      {
+        "id": "state-showBackgroundFlair",
+        "type": "state",
+        "data": {
+          "keyword": "showBackgroundFlair",
+          "value": "true"
+        },
+        "position": {
+          "x": 179,
+          "y": -822
+        }
+      },
+      {
+        "id": "state-use24Hour",
+        "type": "state",
+        "data": {
+          "keyword": "use24Hour",
+          "value": "true"
+        },
+        "position": {
+          "x": 239,
+          "y": -662
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-render-to-image",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "render-image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "edge-clock-to-face",
+        "type": "codeNodeEdge",
+        "source": "clock-time",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/time"
+      },
+      {
+        "id": "edge-style-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-style",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/style"
+      },
+      {
+        "id": "edge-title-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-title",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/title"
+      },
+      {
+        "id": "edge-showTitle-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-showTitle",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/showTitle"
+      },
+      {
+        "id": "edge-showDigital-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-showDigital",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/showDigital"
+      },
+      {
+        "id": "edge-showMinuteTicks-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-showMinuteTicks",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/showMinuteTicks"
+      },
+      {
+        "id": "edge-showSecondHand-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-showSecondHand",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/showSecondHand"
+      },
+      {
+        "id": "edge-backgroundStart-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-backgroundStart",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/backgroundStart"
+      },
+      {
+        "id": "edge-backgroundEnd-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-backgroundEnd",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/backgroundEnd"
+      },
+      {
+        "id": "edge-dialColor-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-dialColor",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/dialColor"
+      },
+      {
+        "id": "edge-inkColor-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-inkColor",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/inkColor"
+      },
+      {
+        "id": "edge-mutedColor-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-mutedColor",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/mutedColor"
+      },
+      {
+        "id": "edge-accentColor-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-accentColor",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/accentColor"
+      },
+      {
+        "id": "edge-face-to-image",
+        "type": "codeNodeEdge",
+        "source": "clock-face",
+        "target": "render-image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      },
+      {
+        "id": "edge-theme-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-theme",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/theme"
+      },
+      {
+        "id": "edge-showBackgroundFlair-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-showBackgroundFlair",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/showBackgroundFlair"
+      },
+      {
+        "id": "edge-use24Hour-to-face",
+        "type": "codeNodeEdge",
+        "source": "state-use24Hour",
+        "target": "clock-face",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/use24Hour"
+      }
+    ],
+    "customEvents": []
+  }
+]

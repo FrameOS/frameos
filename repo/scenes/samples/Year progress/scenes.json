@@ -1,0 +1,754 @@
+[
+  {
+    "id": "f38cf9c8-0b57-4ac8-a148-d93db9bb83a8",
+    "name": "Year progress / memento mori",
+    "settings": {
+      "refreshInterval": 86400,
+      "backgroundColor": "#102033",
+      "execution": "interpreted"
+    },
+    "fields": [
+      {
+        "name": "mode",
+        "type": "select",
+        "label": "Mode",
+        "description": "Show the current year as days, or a life calendar as weeks.",
+        "value": "year",
+        "options": [
+          "year",
+          "life"
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "birthDate",
+        "type": "date",
+        "label": "Birth date",
+        "description": "Used for life calendar mode. Leave the default or set your own date.",
+        "value": "1990-01-01",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "lifeExpectancyYears",
+        "type": "integer",
+        "label": "Life expectancy in years",
+        "description": "Total span for the life calendar.",
+        "value": "80",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "title",
+        "type": "string",
+        "label": "Title",
+        "value": "Memento mori",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "subtitle",
+        "type": "text",
+        "label": "Subtitle",
+        "value": "A quiet daily reminder to spend the year well.",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "theme",
+        "type": "select",
+        "label": "Theme",
+        "description": "Choose a built-in palette, or Custom to show and edit the individual color fields.",
+        "value": "ember",
+        "options": [
+          {
+            "value": "ember",
+            "label": "Ember teal"
+          },
+          {
+            "value": "classicLight",
+            "label": "Classic black on white"
+          },
+          {
+            "value": "classicDark",
+            "label": "Classic white on black"
+          },
+          {
+            "value": "sepia",
+            "label": "Sepia"
+          },
+          {
+            "value": "forest",
+            "label": "Forest"
+          },
+          {
+            "value": "ocean",
+            "label": "Ocean"
+          },
+          {
+            "value": "plum",
+            "label": "Plum"
+          },
+          {
+            "value": "terracotta",
+            "label": "Terracotta"
+          },
+          {
+            "value": "slate",
+            "label": "Slate"
+          },
+          {
+            "value": "sage",
+            "label": "Sage"
+          },
+          {
+            "value": "sand",
+            "label": "Sand"
+          },
+          {
+            "value": "rose",
+            "label": "Rose"
+          },
+          {
+            "value": "midnight",
+            "label": "Midnight"
+          },
+          {
+            "value": "custom",
+            "label": "Custom colors"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "accentColor",
+        "type": "color",
+        "label": "Accent color",
+        "value": "#D69A5E",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "startColor",
+        "type": "color",
+        "label": "Background start",
+        "value": "#102033",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "endColor",
+        "type": "color",
+        "label": "Background end",
+        "value": "#214A4F",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "textColor",
+        "type": "color",
+        "label": "Text color",
+        "value": "#F6EFE7",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "completedColor",
+        "type": "color",
+        "label": "Completed dot color",
+        "value": "#D8C6AD",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      },
+      {
+        "name": "remainingColor",
+        "type": "color",
+        "label": "Remaining dot color",
+        "value": "#5C7478",
+        "access": "public",
+        "persist": "disk",
+        "showIf": [
+          {
+            "field": "theme",
+            "operator": "eq",
+            "value": "custom"
+          }
+        ]
+      }
+    ],
+    "apps": {
+      "yearProgressPoster": {
+        "origin": "scene-local/yearProgressPoster",
+        "name": "Year progress poster",
+        "category": "data",
+        "description": "Adaptive year-progress and memento-mori dot-grid poster.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "currentDate",
+            "label": "Current date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "mode",
+            "label": "Mode",
+            "type": "select",
+            "options": [
+              "year",
+              "life"
+            ],
+            "value": "year"
+          },
+          {
+            "name": "birthDate",
+            "label": "Birth date",
+            "type": "date",
+            "value": "1990-01-01"
+          },
+          {
+            "name": "lifeExpectancyYears",
+            "label": "Life expectancy in years",
+            "type": "integer",
+            "value": "80"
+          },
+          {
+            "name": "title",
+            "label": "Title",
+            "type": "string",
+            "value": "Memento mori"
+          },
+          {
+            "name": "subtitle",
+            "label": "Subtitle",
+            "type": "text",
+            "value": "A quiet daily reminder to spend the year well."
+          },
+          {
+            "name": "theme",
+            "label": "Theme",
+            "type": "select",
+            "options": [
+              {
+                "value": "ember",
+                "label": "Ember teal"
+              },
+              {
+                "value": "classicLight",
+                "label": "Classic black on white"
+              },
+              {
+                "value": "classicDark",
+                "label": "Classic white on black"
+              },
+              {
+                "value": "sepia",
+                "label": "Sepia"
+              },
+              {
+                "value": "forest",
+                "label": "Forest"
+              },
+              {
+                "value": "ocean",
+                "label": "Ocean"
+              },
+              {
+                "value": "plum",
+                "label": "Plum"
+              },
+              {
+                "value": "terracotta",
+                "label": "Terracotta"
+              },
+              {
+                "value": "slate",
+                "label": "Slate"
+              },
+              {
+                "value": "sage",
+                "label": "Sage"
+              },
+              {
+                "value": "sand",
+                "label": "Sand"
+              },
+              {
+                "value": "rose",
+                "label": "Rose"
+              },
+              {
+                "value": "midnight",
+                "label": "Midnight"
+              },
+              {
+                "value": "custom",
+                "label": "Custom colors"
+              }
+            ],
+            "value": "ember"
+          },
+          {
+            "name": "accentColor",
+            "label": "Accent color",
+            "type": "color",
+            "value": "#D69A5E",
+            "showIf": [
+              {
+                "field": "theme",
+                "operator": "eq",
+                "value": "custom"
+              }
+            ]
+          },
+          {
+            "name": "startColor",
+            "label": "Background start",
+            "type": "color",
+            "value": "#102033",
+            "showIf": [
+              {
+                "field": "theme",
+                "operator": "eq",
+                "value": "custom"
+              }
+            ]
+          },
+          {
+            "name": "endColor",
+            "label": "Background end",
+            "type": "color",
+            "value": "#214A4F",
+            "showIf": [
+              {
+                "field": "theme",
+                "operator": "eq",
+                "value": "custom"
+              }
+            ]
+          },
+          {
+            "name": "textColor",
+            "label": "Text color",
+            "type": "color",
+            "value": "#F6EFE7",
+            "showIf": [
+              {
+                "field": "theme",
+                "operator": "eq",
+                "value": "custom"
+              }
+            ]
+          },
+          {
+            "name": "completedColor",
+            "label": "Completed dot color",
+            "type": "color",
+            "value": "#D8C6AD",
+            "showIf": [
+              {
+                "field": "theme",
+                "operator": "eq",
+                "value": "custom"
+              }
+            ]
+          },
+          {
+            "name": "remainingColor",
+            "label": "Remaining dot color",
+            "type": "color",
+            "value": "#5C7478",
+            "showIf": [
+              {
+                "field": "theme",
+                "operator": "eq",
+                "value": "custom"
+              }
+            ]
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Year progress poster\",\n  \"category\": \"data\",\n  \"description\": \"Adaptive year-progress and memento-mori dot-grid poster.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"currentDate\",\n      \"label\": \"Current date\",\n      \"type\": \"string\",\n      \"required\": true\n    },\n    {\n      \"name\": \"mode\",\n      \"label\": \"Mode\",\n      \"type\": \"select\",\n      \"options\": [\n        \"year\",\n        \"life\"\n      ],\n      \"value\": \"year\"\n    },\n    {\n      \"name\": \"birthDate\",\n      \"label\": \"Birth date\",\n      \"type\": \"date\",\n      \"value\": \"1990-01-01\"\n    },\n    {\n      \"name\": \"lifeExpectancyYears\",\n      \"label\": \"Life expectancy in years\",\n      \"type\": \"integer\",\n      \"value\": \"80\"\n    },\n    {\n      \"name\": \"title\",\n      \"label\": \"Title\",\n      \"type\": \"string\",\n      \"value\": \"Memento mori\"\n    },\n    {\n      \"name\": \"subtitle\",\n      \"label\": \"Subtitle\",\n      \"type\": \"text\",\n      \"value\": \"A quiet daily reminder to spend the year well.\"\n    },\n    {\n      \"name\": \"theme\",\n      \"label\": \"Theme\",\n      \"type\": \"select\",\n      \"options\": [\n        {\n          \"value\": \"ember\",\n          \"label\": \"Ember teal\"\n        },\n        {\n          \"value\": \"classicLight\",\n          \"label\": \"Classic black on white\"\n        },\n        {\n          \"value\": \"classicDark\",\n          \"label\": \"Classic white on black\"\n        },\n        {\n          \"value\": \"sepia\",\n          \"label\": \"Sepia\"\n        },\n        {\n          \"value\": \"forest\",\n          \"label\": \"Forest\"\n        },\n        {\n          \"value\": \"ocean\",\n          \"label\": \"Ocean\"\n        },\n        {\n          \"value\": \"plum\",\n          \"label\": \"Plum\"\n        },\n        {\n          \"value\": \"terracotta\",\n          \"label\": \"Terracotta\"\n        },\n        {\n          \"value\": \"slate\",\n          \"label\": \"Slate\"\n        },\n        {\n          \"value\": \"sage\",\n          \"label\": \"Sage\"\n        },\n        {\n          \"value\": \"sand\",\n          \"label\": \"Sand\"\n        },\n        {\n          \"value\": \"rose\",\n          \"label\": \"Rose\"\n        },\n        {\n          \"value\": \"midnight\",\n          \"label\": \"Midnight\"\n        },\n        {\n          \"value\": \"custom\",\n          \"label\": \"Custom colors\"\n        }\n      ],\n      \"value\": \"ember\"\n    },\n    {\n      \"name\": \"accentColor\",\n      \"label\": \"Accent color\",\n      \"type\": \"color\",\n      \"value\": \"#D69A5E\",\n      \"showIf\": [\n        {\n          \"field\": \"theme\",\n          \"operator\": \"eq\",\n          \"value\": \"custom\"\n        }\n      ]\n    },\n    {\n      \"name\": \"startColor\",\n      \"label\": \"Background start\",\n      \"type\": \"color\",\n      \"value\": \"#102033\",\n      \"showIf\": [\n        {\n          \"field\": \"theme\",\n          \"operator\": \"eq\",\n          \"value\": \"custom\"\n        }\n      ]\n    },\n    {\n      \"name\": \"endColor\",\n      \"label\": \"Background end\",\n      \"type\": \"color\",\n      \"value\": \"#214A4F\",\n      \"showIf\": [\n        {\n          \"field\": \"theme\",\n          \"operator\": \"eq\",\n          \"value\": \"custom\"\n        }\n      ]\n    },\n    {\n      \"name\": \"textColor\",\n      \"label\": \"Text color\",\n      \"type\": \"color\",\n      \"value\": \"#F6EFE7\",\n      \"showIf\": [\n        {\n          \"field\": \"theme\",\n          \"operator\": \"eq\",\n          \"value\": \"custom\"\n        }\n      ]\n    },\n    {\n      \"name\": \"completedColor\",\n      \"label\": \"Completed dot color\",\n      \"type\": \"color\",\n      \"value\": \"#D8C6AD\",\n      \"showIf\": [\n        {\n          \"field\": \"theme\",\n          \"operator\": \"eq\",\n          \"value\": \"custom\"\n        }\n      ]\n    },\n    {\n      \"name\": \"remainingColor\",\n      \"label\": \"Remaining dot color\",\n      \"type\": \"color\",\n      \"value\": \"#5C7478\",\n      \"showIf\": [\n        {\n          \"field\": \"theme\",\n          \"operator\": \"eq\",\n          \"value\": \"custom\"\n        }\n      ]\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']\nconst DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]\nconst THEMES = {\n  custom: ['#102033', '#214A4F', '#F6EFE7', '#D69A5E', '#D8C6AD', '#5C7478'],\n  ember: ['#102033', '#214A4F', '#F6EFE7', '#D69A5E', '#D8C6AD', '#5C7478'],\n  classicLight: ['#F8F5EE', '#FFFFFF', '#111111', '#111111', '#111111', '#D2D2D2'],\n  classicDark: ['#050607', '#171A1F', '#FFFFFF', '#FFFFFF', '#FFFFFF', '#4C5563'],\n  sepia: ['#F1E3C6', '#D8B982', '#2D2115', '#8A4F23', '#6B4A2C', '#BFA77F'],\n  forest: ['#0F2A22', '#23483A', '#F1F5DD', '#D8A84E', '#BDD3A6', '#587264'],\n  ocean: ['#08233A', '#14556B', '#EEF8F6', '#7CC8C2', '#B8DDE0', '#486F7B'],\n  plum: ['#26172F', '#56395E', '#FFF3EA', '#D8A1B8', '#D8C1D9', '#75607C'],\n  terracotta: ['#3B211B', '#8E4D38', '#FFF1E4', '#E7A95E', '#E8C0A3', '#8F6B5D'],\n  slate: ['#18212B', '#344155', '#F4F0E8', '#B7C4D8', '#D7DDE7', '#697789'],\n  sage: ['#E6E8D8', '#C3CBB1', '#1F2A1F', '#6D7F45', '#52613C', '#A8B092'],\n  sand: ['#EFE4CE', '#CBAF82', '#2A241B', '#B06A3B', '#6D5940', '#BAA783'],\n  rose: ['#2B1820', '#693345', '#FFF1F4', '#E6A0A8', '#E7C3C8', '#78535D'],\n  midnight: ['#07111F', '#142B46', '#EFF6FF', '#D6B15E', '#C9D8E6', '#465C78']\n}\n\nfunction clamp(value, min, max) { return Math.max(min, Math.min(max, value)) }\nfunction leap(year) { return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) }\nfunction monthDays(year, month) { return month === 2 && leap(year) ? 29 : DAYS[month - 1] }\nfunction parseDate(value) {\n  const match = String(value || '').match(/^(\\d{4})-(\\d{2})-(\\d{2})/)\n  if (!match) return null\n  const y = Number(match[1]), m = Number(match[2]), d = Number(match[3])\n  if (m < 1 || m > 12 || d < 1 || d > monthDays(y, m)) return null\n  return { y, m, d }\n}\nfunction dayOfYear(date) {\n  let total = date.d\n  for (let month = 1; month < date.m; month++) total += monthDays(date.y, month)\n  return total\n}\nfunction utcDay(date) { return Math.floor(Date.UTC(date.y, date.m - 1, date.d) / 86400000) }\nfunction validColor(value, fallback) { return /^#[0-9a-fA-F]{6}$/.test(String(value || '').trim()) ? String(value).trim() : fallback }\nfunction percent(value) { return (Math.round(value * 10) / 10).toFixed(1) + '%' }\nfunction wrap(value, maxChars) {\n  const words = String(value || '').trim().replace(/\\s+/g, ' ').split(' ')\n  const lines = [], current = []\n  for (const word of words) {\n    const next = current.concat(word).join(' ')\n    if (next.length > maxChars && current.length) { lines.push(current.join(' ')); current.length = 0 }\n    current.push(word)\n    if (lines.length === 2) break\n  }\n  if (current.length && lines.length < 3) lines.push(current.join(' '))\n  return lines.slice(0, 3)\n}\n\nfunction Dot({ x, y, r, state, colors }) {\n  if (state === 'today') return <g><circle cx={x} cy={y} r={r * 1.85} fill=\"none\" stroke={colors.accent} strokeWidth={Math.max(1.2, r * 0.45)} /><circle cx={x} cy={y} r={r * 0.82} fill={colors.accent} /></g>\n  return <circle cx={x} cy={y} r={r} fill={state === 'done' ? colors.completed : colors.remaining} />\n}\n\nexport function get(app) {\n  const W = app.frame.width\n  const H = app.frame.height\n  const unit = Math.min(W, H) / 100\n  const today = parseDate(app.config.currentDate)\n  const birth = parseDate(app.config.birthDate)\n  const mode = app.config.mode === 'life' ? 'life' : 'year'\n  const themeName = THEMES[app.config.theme] ? app.config.theme : 'ember'\n  const palette = THEMES[themeName]\n  const custom = themeName === 'custom'\n  const colors = {\n    start: custom ? validColor(app.config.startColor, palette[0]) : palette[0], end: custom ? validColor(app.config.endColor, palette[1]) : palette[1],\n    text: custom ? validColor(app.config.textColor, palette[2]) : palette[2], accent: custom ? validColor(app.config.accentColor, palette[3]) : palette[3],\n    completed: custom ? validColor(app.config.completedColor, palette[4]) : palette[4], remaining: custom ? validColor(app.config.remainingColor, palette[5]) : palette[5]\n  }\n  const margin = clamp(Math.min(W, H) * 0.045, 14, 56)\n  if (!today || (mode === 'life' && !birth)) {\n    const message = !today ? 'The clock value is unavailable.' : 'Use the Birth date field to start the life calendar.'\n    return <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}><defs><linearGradient id=\"bg\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2={W} y2={H}><stop offset=\"0\" stopColor={colors.start} /><stop offset=\"1\" stopColor={colors.end} /></linearGradient></defs><rect width={W} height={H} fill=\"url(#bg)\" /><text x={W / 2} y={H / 2 - unit * 3} textAnchor=\"middle\" fontFamily=\"PT Sans\" fontWeight=\"700\" fontSize={unit * 8} fill={colors.text}>Set a birth date</text><text x={W / 2} y={H / 2 + unit * 4} textAnchor=\"middle\" fontFamily=\"PT Sans\" fontSize={unit * 3.5} fill={colors.text}>{message}</text></svg>\n  }\n\n  const portrait = H > W\n  const copyW = portrait ? W - margin * 2 : W * 0.31 - margin\n  const gridX = portrait ? margin : W * 0.33\n  const gridY = portrait ? H * 0.30 : margin\n  const gridW = portrait ? W - margin * 2 : W - gridX - margin\n  const gridH = portrait ? H - gridY - margin * 1.7 : H - margin * 2\n  const dots = []\n  let stat\n\n  if (mode === 'year') {\n    const current = dayOfYear(today), total = leap(today.y) ? 366 : 365\n    const labelW = Math.min(gridW * 0.13, unit * 9), gap = unit * 0.8\n    const pitch = Math.min((gridW - labelW - gap) / 31, gridH / 12)\n    const r = clamp(pitch * 0.28, 1.4, unit * 1.2)\n    const x0 = gridX + labelW + gap + (gridW - labelW - gap - pitch * 31) / 2 + pitch / 2\n    const y0 = gridY + (gridH - pitch * 12) / 2 + pitch / 2\n    let count = 0\n    for (let month = 1; month <= 12; month++) {\n      const y = y0 + (month - 1) * pitch\n      dots.push(<text key={`m${month}`} x={gridX} y={y + pitch * 0.16} fontFamily=\"PT Sans\" fontSize={clamp(pitch * 0.42, unit * 1.7, unit * 2.8)} fill={colors.text}>{MONTHS[month - 1]}</text>)\n      for (let day = 1; day <= monthDays(today.y, month); day++) { count++; dots.push(<Dot key={`${month}-${day}`} x={x0 + (day - 1) * pitch} y={y} r={r} state={count < current ? 'done' : count === current ? 'today' : 'future'} colors={colors} />) }\n    }\n    stat = { pct: percent(current / total * 100), caption: `Day ${current} of ${total}`, kicker: `${today.y} YEAR PROGRESS`, foot: 'Each dot is one day. The ring is today.' }\n  } else {\n    const years = clamp(Math.round(Number(app.config.lifeExpectancyYears) || 80), 1, 130)\n    const total = Math.max(52, Math.round(years * 52)), lived = clamp(Math.floor((utcDay(today) - utcDay(birth)) / 7), 0, total)\n    const cols = Math.ceil(Math.sqrt(total * gridW / gridH)), rows = Math.ceil(total / cols), pitch = Math.min(gridW / cols, gridH / rows), r = clamp(pitch * 0.28, 0.75, unit * 0.95)\n    const x0 = gridX + (gridW - pitch * cols) / 2 + pitch / 2, y0 = gridY + (gridH - pitch * rows) / 2 + pitch / 2\n    for (let i = 0; i < total; i++) dots.push(<Dot key={i} x={x0 + (i % cols) * pitch} y={y0 + Math.floor(i / cols) * pitch} r={r} state={i < lived ? 'done' : i === lived ? 'today' : 'future'} colors={colors} />)\n    stat = { pct: percent(lived / total * 100), caption: `Week ${lived + 1} of ${total}`, kicker: `${years} YEAR LIFE CALENDAR`, foot: 'Each dot is one week. The ring is now.' }\n  }\n\n  const title = String(app.config.title || 'Memento mori'), subtitle = String(app.config.subtitle || '')\n  const titleSize = clamp(copyW * (portrait ? 0.07 : 0.11), unit * 4.4, unit * 9.5)\n  const pctSize = clamp(copyW * (portrait ? 0.17 : 0.23), unit * 8.5, unit * 22)\n  const bodySize = clamp(copyW * 0.046, unit * 3.2, unit * 5)\n  const anchor = portrait ? 'middle' : 'start', copyX = portrait ? W / 2 : margin, copyY = portrait ? margin + titleSize : margin + titleSize\n  const lines = wrap(subtitle, Math.max(12, Math.floor(copyW / (bodySize * 0.55))))\n  return <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}><defs><linearGradient id=\"bg\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2={W} y2={H}><stop offset=\"0\" stopColor={colors.start} /><stop offset=\"1\" stopColor={colors.end} /></linearGradient></defs><rect width={W} height={H} fill=\"url(#bg)\" />{dots}<text x={copyX} y={copyY} textAnchor={anchor} fontFamily=\"PT Sans\" fontWeight=\"700\" fontSize={titleSize} fill={colors.text}>{title}</text><text x={copyX} y={copyY + unit * 5} textAnchor={anchor} fontFamily=\"PT Sans\" fontSize={unit * 2.8} fill={colors.accent}>{stat.kicker}</text><text x={copyX} y={copyY + pctSize + unit * 7} textAnchor={anchor} fontFamily=\"PT Sans\" fontWeight=\"700\" fontSize={pctSize} fill={colors.text}>{stat.pct}</text><text x={copyX} y={copyY + pctSize + unit * 12} textAnchor={anchor} fontFamily=\"PT Sans\" fontSize={unit * 2.8} fill={colors.text}>{stat.caption}</text>{!portrait && lines.map((line, i) => <text key={i} x={copyX} y={copyY + pctSize + unit * (19 + i * 5)} textAnchor=\"start\" fontFamily=\"PT Sans\" fontSize={bodySize} fill={colors.text}>{line}</text>)}<text x={W - margin} y={H - margin * 0.45} textAnchor=\"end\" fontFamily=\"PT Sans\" fontSize={clamp(unit * 2.3, 10, 18)} fill={colors.text}>{stat.foot}</text></svg>\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "9e531470-62f0-4ec4-9d28-7c2ea2b71eba",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 1
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "f0dba6c6-1f3d-44d7-8d43-a241889c8218",
+        "type": "app",
+        "position": {
+          "x": 320,
+          "y": -1350
+        },
+        "data": {
+          "keyword": "data/clock",
+          "config": {
+            "format": "yyyy-MM-dd"
+          }
+        }
+      },
+      {
+        "id": "a28c2c61-8976-43ef-a05e-29eb79c7ef88",
+        "type": "state",
+        "position": {
+          "x": 323,
+          "y": -414
+        },
+        "data": {
+          "keyword": "mode",
+          "value": "year"
+        }
+      },
+      {
+        "id": "863982ab-050d-4d73-bbea-392d3c374518",
+        "type": "state",
+        "position": {
+          "x": 299,
+          "y": -480
+        },
+        "data": {
+          "keyword": "birthDate",
+          "value": "1990-01-01"
+        }
+      },
+      {
+        "id": "f8e071ac-182a-4d19-b92d-e532e657640a",
+        "type": "state",
+        "position": {
+          "x": 275,
+          "y": -546
+        },
+        "data": {
+          "keyword": "lifeExpectancyYears",
+          "value": "80"
+        }
+      },
+      {
+        "id": "47c0efea-0914-43a4-a9bb-d373054ef072",
+        "type": "state",
+        "position": {
+          "x": 251,
+          "y": -612
+        },
+        "data": {
+          "keyword": "title",
+          "value": "Memento mori"
+        }
+      },
+      {
+        "id": "52897cbf-c93a-4699-a249-d988ba34316c",
+        "type": "state",
+        "position": {
+          "x": 227,
+          "y": -678
+        },
+        "data": {
+          "keyword": "subtitle",
+          "value": "A quiet daily reminder to spend the year well."
+        }
+      },
+      {
+        "id": "931a6a20-0a9b-480d-9032-33659c715ab6",
+        "type": "state",
+        "position": {
+          "x": 179,
+          "y": -810
+        },
+        "data": {
+          "keyword": "accentColor",
+          "value": "#D69A5E"
+        }
+      },
+      {
+        "id": "9060ced4-0bdf-48cf-a612-fe2712320cf9",
+        "type": "state",
+        "position": {
+          "x": 155,
+          "y": -876
+        },
+        "data": {
+          "keyword": "startColor",
+          "value": "#102033"
+        }
+      },
+      {
+        "id": "6297405f-d429-41ea-b41a-494bd1413893",
+        "type": "state",
+        "position": {
+          "x": 131,
+          "y": -942
+        },
+        "data": {
+          "keyword": "endColor",
+          "value": "#214A4F"
+        }
+      },
+      {
+        "id": "501fe7e4-834a-4e32-9476-e0ef7012690f",
+        "type": "state",
+        "position": {
+          "x": 107,
+          "y": -1008
+        },
+        "data": {
+          "keyword": "textColor",
+          "value": "#F6EFE7"
+        }
+      },
+      {
+        "id": "93632ea9-dd98-41be-a4fa-68172be809ab",
+        "type": "state",
+        "position": {
+          "x": 83,
+          "y": -1074
+        },
+        "data": {
+          "keyword": "completedColor",
+          "value": "#D8C6AD"
+        }
+      },
+      {
+        "id": "512a7794-6c8f-4232-978e-210231c3e7f4",
+        "type": "state",
+        "position": {
+          "x": 59,
+          "y": -1140
+        },
+        "data": {
+          "keyword": "remainingColor",
+          "value": "#5C7478"
+        }
+      },
+      {
+        "id": "4da6124a-b806-4609-a100-6af4640cc431",
+        "type": "app",
+        "position": {
+          "x": 355,
+          "y": -332
+        },
+        "data": {
+          "keyword": "yearProgressPoster",
+          "config": {
+            "currentDate": "2026-08-24",
+            "mode": "year",
+            "birthDate": "1990-01-01",
+            "lifeExpectancyYears": "80",
+            "title": "Memento mori",
+            "subtitle": "A quiet daily reminder to spend the year well.",
+            "theme": "ember",
+            "accentColor": "#D69A5E",
+            "startColor": "#102033",
+            "endColor": "#214A4F",
+            "textColor": "#F6EFE7",
+            "completedColor": "#D8C6AD",
+            "remainingColor": "#5C7478"
+          }
+        }
+      },
+      {
+        "id": "1dc50796-c332-41ef-bfe3-162048c93f29",
+        "type": "app",
+        "position": {
+          "x": 390,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      },
+      {
+        "id": "theme-state",
+        "type": "state",
+        "position": {
+          "x": 203,
+          "y": -744
+        },
+        "data": {
+          "keyword": "theme",
+          "value": "ember"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-render-to-image",
+        "type": "appNodeEdge",
+        "source": "9e531470-62f0-4ec4-9d28-7c2ea2b71eba",
+        "target": "1dc50796-c332-41ef-bfe3-162048c93f29",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "edge-clock-date",
+        "type": "codeNodeEdge",
+        "source": "f0dba6c6-1f3d-44d7-8d43-a241889c8218",
+        "target": "4da6124a-b806-4609-a100-6af4640cc431",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/currentDate"
+      },
+      {
+        "id": "edge-mode",
+        "type": "codeNodeEdge",
+        "source": "a28c2c61-8976-43ef-a05e-29eb79c7ef88",
+        "target": "4da6124a-b806-4609-a100-6af4640cc431",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/mode"
+      },
+      {
+        "id": "edge-birth-date",
+        "type": "codeNodeEdge",
+        "source": "863982ab-050d-4d73-bbea-392d3c374518",
+        "target": "4da6124a-b806-4609-a100-6af4640cc431",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/birthDate"
+      },
+      {
+        "id": "edge-life-years",
+        "type": "codeNodeEdge",
+        "source": "f8e071ac-182a-4d19-b92d-e532e657640a",
+        "target": "4da6124a-b806-4609-a100-6af4640cc431",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/lifeExpectancyYears"
+      },
+      {
+        "id": "edge-title",
+        "type": "codeNodeEdge",
+        "source": "47c0efea-0914-43a4-a9bb-d373054ef072",
+        "target": "4da6124a-b806-4609-a100-6af4640cc431",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/title"
+      },
+      {
+        "id": "edge-subtitle",
+        "type": "codeNodeEdge",
+        "source": "52897cbf-c93a-4699-a249-d988ba34316c",
+        "target": "4da6124a-b806-4609-a100-6af4640cc431",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/subtitle"
+      },
+      {
+        "id": "edge-accent",
+        "type": "codeNodeEdge",
+        "source": "931a6a20-0a9b-480d-9032-33659c715ab6",
+        "target": "4da6124a-b806-4609-a100-6af4640cc431",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/accentColor"
+      },
+      {
+        "id": "edge-start-color",
+        "type": "codeNodeEdge",
+        "source": "9060ced4-0bdf-48cf-a612-fe2712320cf9",
+        "target": "4da6124a-b806-4609-a100-6af4640cc431",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/startColor"
+      },
+      {
+        "id": "edge-end-color",
+        "type": "codeNodeEdge",
+        "source": "6297405f-d429-41ea-b41a-494bd1413893",
+        "target": "4da6124a-b806-4609-a100-6af4640cc431",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/endColor"
+      },
+      {
+        "id": "edge-text-color",
+        "type": "codeNodeEdge",
+        "source": "501fe7e4-834a-4e32-9476-e0ef7012690f",
+        "target": "4da6124a-b806-4609-a100-6af4640cc431",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/textColor"
+      },
+      {
+        "id": "edge-completed-color",
+        "type": "codeNodeEdge",
+        "source": "93632ea9-dd98-41be-a4fa-68172be809ab",
+        "target": "4da6124a-b806-4609-a100-6af4640cc431",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/completedColor"
+      },
+      {
+        "id": "edge-remaining-color",
+        "type": "codeNodeEdge",
+        "source": "512a7794-6c8f-4232-978e-210231c3e7f4",
+        "target": "4da6124a-b806-4609-a100-6af4640cc431",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/remainingColor"
+      },
+      {
+        "id": "edge-poster-image",
+        "type": "codeNodeEdge",
+        "source": "4da6124a-b806-4609-a100-6af4640cc431",
+        "target": "1dc50796-c332-41ef-bfe3-162048c93f29",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      },
+      {
+        "id": "edge-theme",
+        "type": "codeNodeEdge",
+        "source": "theme-state",
+        "target": "4da6124a-b806-4609-a100-6af4640cc431",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/theme"
+      }
+    ],
+    "customEvents": []
+  }
+]

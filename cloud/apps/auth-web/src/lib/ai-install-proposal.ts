@@ -127,6 +127,8 @@ export function installErrorMessage(code: string): string {
       return "The scene is no longer available.";
     case "scene_version_missing":
       return "That version of the scene no longer exists.";
+    case "frame_update_required":
+      return "This scene needs a newer FrameOS than the frame runs. Update FrameOS on the frame first.";
     case "reauth_required":
       return "Sign in again to change this frame.";
     default:

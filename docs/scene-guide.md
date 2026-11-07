@@ -467,7 +467,9 @@ export function get(app, context) {
   (automatic on a panel whose shorter edge is about 1200 px) the app is told
   its canvas is half the size (`context.imageWidth`, `app.frame.width`) and
   what it returns is drawn sharp at full size. Design for the size you are
-  told; `app.frame.scale` says the factor. A scene can set its own
+  told; `app.frame.scale` says the factor. A position from outside the app
+  is in panel pixels (a pointer's `x` / `y` kept in state): divide it by
+  `app.frame.scale` before drawing it. A scene can set its own
   `settings.renderScale` (1 keeps every pixel).
 - Layout: block (stacked), `flex` / `flex-col` with `gap`, `grow`, `flex-1`,
   `justify-*`, `items-*`, `flex-wrap`; `grid grid-cols-N` with `col-span-N`;
