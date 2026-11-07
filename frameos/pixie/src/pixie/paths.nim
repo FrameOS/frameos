@@ -2510,7 +2510,7 @@ type
     path: Path
     x0, y0: int # the mask's top left, relative to the offset's integer part
     width, height: int
-    rows: seq[seq[uint8]]
+    data: seq[uint8] # width * height coverage values, row after row
     full: seq[(int32, int32)] # per row, the run [a, b) every pixel of which is covered whole
     bytes: int
     used: int
@@ -2526,7 +2526,10 @@ type
     join: LineJoin
 
 const
-  CoverageMaskMaxBytes = 192 * 1024 # a mask larger than this is not kept
+  CoverageMaskMaxBytes = 48 * 1024
+    ## A mask larger than this is not made (a 220 px square): a box larger
+    ## than a card fills fast from its spans anyway, and a page-sized mask
+    ## would take a fifth of an ESP32's budget for one element.
 
 var
   coverageCacheBudget* {.threadvar.}: int ## bytes of masks kept on this thread; 0 = off
@@ -2611,18 +2614,17 @@ proc rasterizeMask(shapes: seq[Polygon], rule: WindingRule): CoverageMask =
   local.transform(translate(vec2(-x0.float32, -y0.float32)))
   let mask = newImageGray8(w, h)
   mask.fillShapes(local, rgbx(255, 255, 255, 255), rule, OverwriteBlend)
-  result = CoverageMask(x0: x0, y0: y0, width: w, height: h, bytes: w * h + h * 32 + 96)
-  result.rows = newSeq[seq[uint8]](h)
+  result = CoverageMask(x0: x0, y0: y0, width: w, height: h, bytes: w * h + h * 8 + 96)
+  result.data = newSeq[uint8](w * h)
+  copyMem(result.data[0].addr, mask.data8[0].addr, w * h)
   result.full = newSeq[(int32, int32)](h)
   for r in 0 ..< h:
-    result.rows[r] = newSeq[uint8](w)
-    copyMem(result.rows[r][0].addr, mask.data8[r * w].addr, w)
     # The longest run of whole coverage: a box's inside, blitted as a span.
     var
       best = (0'i32, 0'i32)
       start = -1
     for i in 0 .. w:
-      if i < w and result.rows[r][i] == 255:
+      if i < w and result.data[r * w + i] == 255:
         if start < 0: start = i
       elif start >= 0:
         if i - start > best[1] - best[0]: best = (start.int32, i.int32)
@@ -2649,20 +2651,22 @@ proc blitMask(image: Image, mask: CoverageMask, ix, iy: int, rgbx: ColorRGBX, bl
       xe = min(x + mask.width, image.width)
     if xe <= xs:
       continue
-    let (fa, fb) = mask.full[r]
+    let
+      row = r * mask.width
+      (fa, fb) = mask.full[r]
     if solid and fb - fa >= 8:
       # The edges blended by coverage, the inside stored as a span.
       let
         a = clamp(x + fa.int, xs, xe)
         b = clamp(x + fb.int, xs, xe)
       if a > xs:
-        image.fillCoverage(rgbx, xs, y, mask.rows[r].toOpenArray(xs - x, a - x - 1), blendMode)
+        image.fillCoverage(rgbx, xs, y, mask.data.toOpenArray(row + xs - x, row + a - x - 1), blendMode)
       if b > a:
         image.spanFill(rgbx, a, b, y)
       if xe > b:
-        image.fillCoverage(rgbx, b, y, mask.rows[r].toOpenArray(b - x, xe - x - 1), blendMode)
+        image.fillCoverage(rgbx, b, y, mask.data.toOpenArray(row + b - x, row + xe - x - 1), blendMode)
     else:
-      image.fillCoverage(rgbx, xs, y, mask.rows[r].toOpenArray(xs - x, xe - x - 1), blendMode)
+      image.fillCoverage(rgbx, xs, y, mask.data.toOpenArray(row + xs - x, row + xe - x - 1), blendMode)
 
 proc fillFromCoverageCache(
   image: Image, path: Path, color: Color, transform: Mat3, rule: WindingRule,
@@ -2712,7 +2716,7 @@ proc fillFromCoverageCache(
       bh = (lb.h + reach * 2) * sy
       visible = max(0'f32, min(bx + bw, image.width.float32) - max(bx, 0)) *
         max(0'f32, min(by + bh, image.height.float32) - max(by, 0))
-    if bw * bh > 4 * visible + 256:
+    if bw * bh > 4 * visible + 256 or (bw + 3) * (bh + 3) > CoverageMaskMaxBytes:
       return false
     let pixelScale = max(sx, sy)
     var shapes: seq[Polygon]
