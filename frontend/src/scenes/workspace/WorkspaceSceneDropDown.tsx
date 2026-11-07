@@ -9,7 +9,6 @@ import {
   CloudArrowUpIcon,
   CursorArrowRippleIcon,
   DocumentDuplicateIcon,
-  DocumentMagnifyingGlassIcon,
   FolderPlusIcon,
   TagIcon,
 } from '@heroicons/react/24/outline'
@@ -32,7 +31,7 @@ import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { stripSecretFieldValues } from '../../utils/stripSecretFieldValues'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 
-import { openWorkspaceSceneUtility, workspaceLogic } from './workspaceLogic'
+import { workspaceLogic } from './workspaceLogic'
 
 interface WorkspaceSceneDropDownProps {
   frame: FrameType
@@ -112,11 +111,6 @@ export function WorkspaceSceneDropDown({
             label: 'Edit scene',
             onClick: () => navigateToScene(frame.id, scene.id),
             icon: <PencilSquareIcon className="h-5 w-5" />,
-          },
-          {
-            label: 'Edit scene JSON',
-            onClick: () => openWorkspaceSceneUtility(frame.id, scene.id, 'json'),
-            icon: <DocumentMagnifyingGlassIcon className="h-5 w-5" />,
           },
           {
             // The install's button map (docs/events.md "Event map"): which
