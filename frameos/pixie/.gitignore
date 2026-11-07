@@ -1,0 +1,31 @@
+# Ignore files with no extention.
+*
+!*/
+!*.*
+!LICENSE
+
+# Ignore hidden files, but not the license or github files.
+.*
+!.github/
+!.github/**
+!.gitignore
+
+# Normal ignores.
+*.exe
+nimcache
+*.pdb
+*.ilk
+*.out
+
+# Project specific ignores.
+*.dll
+__pycache__
+bindings/generated
+*.dSYM
+dump.txt
+tests/fileformats/jpeg/generated
+tests/fileformats/jpeg/diffs
+tests/fileformats/webp/generated
+tests/fileformats/webp/diffs
+*.dylib
+tmp/

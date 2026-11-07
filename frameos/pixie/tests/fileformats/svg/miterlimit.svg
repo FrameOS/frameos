@@ -1,0 +1,24 @@
+<svg viewBox="0 0 760 600" xmlns="http://www.w3.org/2000/svg">
+  <rect width="760" height="600" fill="white"/>
+
+  <!-- Impact of the default miter limit -->
+  <path stroke="black" fill="none" stroke-linejoin="miter" stroke-width="20" id="p1" d="M20,180 l140   ,-60 l140   ,60
+           m40,0 l70 ,-60 l140 ,60
+           m40,0 l40   ,-60 l40   ,60
+           m40,0 l15,-60 l30,60
+           m40,0 l10 ,-60 l20 ,60"></path>
+
+  <!-- Impact of the smallest miter limit (1) -->
+  <path stroke="black" fill="none" stroke-linejoin="miter" stroke-width="20" stroke-miterlimit="1" id="p2" d="M20,380 l140   ,-60 l140   ,60
+           m40, 0 l70 ,-60 l140 ,60
+           m40, 0 l40   ,-60 l40   ,60
+           m40, 0 l15,-60 l15,60
+           m40, 0 l10 ,-60 l10 ,60"></path>
+
+  <!-- Impact of a large miter limit (8) -->
+  <path stroke="black" fill="none" stroke-linejoin="miter" stroke-width="20" stroke-miterlimit="8" id="p3" d="M20,580 l140   ,-60 l140   ,60
+           m40, 0 l70 ,-60 l140 ,60
+           m40, 0 l40   ,-60 l40   ,60
+           m40, 0 l15,-60 l15,60
+           m40, 0 l10 ,-60 l10 ,60"></path>
+</svg>
