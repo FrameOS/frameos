@@ -863,6 +863,9 @@ static char s_scene_ack_checksum[96] = "";
 static uint32_t s_scene_ack_generation = 0;
 static int64_t s_scene_ack_deadline_us = 0;
 static volatile bool s_scene_ack_pending = false;
+/* A `state` wanted from somewhere that may not send it (fos_cloud_request_state):
+ * sent by the cloud task, which takes the runtime snapshot it needs. */
+static volatile bool s_state_wanted = false;
 /* The checksum of the last cloud set_scenes payload the render task actually
  * applied, persisted so a reboot does not amnesia it: fos_scenes stores every
  * pushed payload with etag "local" (a backend-sync guard, not a checksum), so
@@ -3053,6 +3056,11 @@ static void dispatch_verb(const char *type, cJSON *root, const cJSON *id,
     }
 }
 
+void fos_cloud_request_state(void)
+{
+    s_state_wanted = true;
+}
+
 void fos_cloud_add_device_report(cJSON *msg)
 {
     const fos_config_t *config = fos_config();
@@ -3753,6 +3761,10 @@ static void cloud_task(void *arg)
             }
 #endif
             ws_poll_scene_ack();
+            if (s_state_wanted && s_ws_ready) {
+                s_state_wanted = false;
+                ws_send_state(NULL);
+            }
             ws_poll_logs();
             ws_poll_metrics();
             ws_poll_active_scene();

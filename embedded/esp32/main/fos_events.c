@@ -249,9 +249,10 @@ static bool run_runtime_command(fos_event_origin_t origin, const char *command,
 }
 
 /* The Nim runtime's device-command hook (frameos_nim_set_runtime_command_hook):
- * a command a scene reached the dispatcher with — `metrics` is the only one a
- * scene may say, everything else was refused there by its origin. Runs on
- * whatever task called into Nim, UNDER the runtime lock. */
+ * a command that reached the dispatcher there — `metrics` from a scene, or
+ * `restart` / `reboot` from the settings panel's frame page (origin `panel`,
+ * logged by the dispatcher with it); everything else was refused there by its
+ * origin. Runs on whatever task called into Nim, UNDER the runtime lock. */
 static bool runtime_command(const char *command, const char *payload)
 {
     return run_runtime_command(FOS_ORIGIN_SCENE, command,

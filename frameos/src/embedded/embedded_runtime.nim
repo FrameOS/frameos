@@ -753,9 +753,10 @@ proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
 
 sceneSwitcherListing = switcherListing
 
-# The settings panel's Frame tab (docs/scene-settings.md "The frame tab"):
-# Wi-Fi and the rotation, read and set by main/fos_frame_settings.c. Every
-# call comes from the scene, on the render task.
+# The settings panel's frame page, behind its gear (docs/scene-settings.md
+# "The frame page"): the facts it shows and what it sets (Wi-Fi, rotation,
+# scale), from main/fos_frame_settings.c. Every call comes from the scene, on
+# the render task.
 proc fos_frame_settings_json(): cstring {.importc, cdecl.}
 proc fos_frame_settings_apply(json: cstring) {.importc, cdecl.}
 proc fos_frame_settings_action(action: cstring) {.importc, cdecl.}
