@@ -52,6 +52,7 @@
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
+#include "fos_log_ring.h"
 #include "fos_commands.h"
 
 static const char *TAG = "fos_client";
@@ -758,18 +759,18 @@ static void log_render_event(const char *event, const char *scene_id,
      * USB stream during a deploy sees nothing for the minutes a render
      * takes. Print the key lifecycle moments directly. */
     if (strcmp(event, "render:scene") == 0) {
-        printf("render #%lu started: scene \"%s\"\n", (unsigned long)count,
-               scene_name && scene_name[0] ? scene_name : scene_id);
+        fos_log_ring_printf("render #%lu started: scene \"%s\"", (unsigned long)count,
+                            scene_name && scene_name[0] ? scene_name : scene_id);
     } else if (strcmp(event, "render:device") == 0 &&
                strcmp(status, "refreshing") == 0) {
-        printf("render #%lu refreshing display (%lld ms so far)\n",
-               (unsigned long)count, ms);
+        fos_log_ring_printf("render #%lu refreshing display (%lld ms so far)",
+                            (unsigned long)count, ms);
     } else if (strcmp(event, "render:done") == 0) {
-        printf("render #%lu done in %lld ms\n", (unsigned long)count, ms);
+        fos_log_ring_printf("render #%lu done in %lld ms", (unsigned long)count, ms);
     } else if (strcmp(event, "render:error") == 0) {
-        printf("render #%lu failed at %s: %s\n", (unsigned long)count,
-               stage && stage[0] ? stage : "?",
-               reason && reason[0] ? reason : esp_err_to_name(esp_err));
+        fos_log_ring_printf("render #%lu failed at %s: %s", (unsigned long)count,
+                            stage && stage[0] ? stage : "?",
+                            reason && reason[0] ? reason : esp_err_to_name(esp_err));
     }
 }
 
@@ -2685,7 +2686,9 @@ static void client_task(void *arg)
              * have its own wake-up (a bootloader pass) roll the image back.
              * A Nim panic never gets here — it resets first, and rolls back. */
             fos_ota_mark_boot_valid();
-            /* USB console drops in deep sleep; that's the point (battery). */
+            /* USB console drops in deep sleep; that's the point (battery).
+             * What the log ring still holds goes out first. */
+            fos_log_ring_flush(FOS_SLEEP_LOG_DRAIN_MS);
             esp_deep_sleep((uint64_t)chunk * 1000000ULL);
         }
         if (deep_sleep_now && fos_display_present() && keep_awake_s > 0) {

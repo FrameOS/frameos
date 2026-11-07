@@ -1854,8 +1854,12 @@ proc evalBytecode*(js: QuickJS, bytecode: openArray[byte], loadOnly: bool = fals
   } else {
     // For simple values, just return them
     `evalResult` = `obj`;
-    `obj` = JS_UNDEFINED;  // Don't free twice
   }
+  // JS_EvalFunction takes the object (it frees it on every branch, success
+  // or exception), and the plain-value branch hands it on as the result:
+  // nothing below may free it again. It did (2026-11-07), a double free on
+  // the first bytecode load.
+  `obj` = JS_UNDEFINED;
   """.}
 
   if JS_IsException(evalResult) != 0:

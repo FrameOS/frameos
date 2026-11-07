@@ -45,6 +45,7 @@ type
     handlerCount: int
     previous: JSValue  # the last render's, for the handlers of kept nodes
     memo: ptr JsxMemo
+    keptIndex: Table[int, int]  # memo id -> its place in memo.kept, for this render
 
 proc attrName(name: string): string =
   if name == "className":
@@ -123,18 +124,19 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
     if jsIsNumber(mark):
       memoId = ctx.int32Of(mark)
     JS_FreeValue(ctx, mark)
-  if memoId > 0:
-    for kept in r.memo.kept.mitems:
-      # Taken back where its handlers have the numbers they had: copied
-      # from the last render's list into this one's at those numbers.
-      if kept.id == memoId and kept.firstHandler == r.handlerCount:
-        for h in kept.firstHandler ..< kept.firstHandler + kept.handlers:
-          discard JS_SetPropertyUint32(ctx, r.handlers, h.uint32, JS_GetPropertyUint32(ctx, r.previous, h.uint32))
-        r.handlerCount += kept.handlers
-        r.nodes += kept.nodes
-        kept.used = true
-        into.add kept.node
-        return
+  let keptAt = if memoId > 0: r.keptIndex.getOrDefault(memoId, -1) else: -1
+  if keptAt >= 0:
+    # Taken back where its handlers have the numbers they had: copied
+    # from the last render's list into this one's at those numbers.
+    template kept: untyped = r.memo.kept[keptAt]
+    if kept.firstHandler == r.handlerCount:
+      for h in kept.firstHandler ..< kept.firstHandler + kept.handlers:
+        discard JS_SetPropertyUint32(ctx, r.handlers, h.uint32, JS_GetPropertyUint32(ctx, r.previous, h.uint32))
+      r.handlerCount += kept.handlers
+      r.nodes += kept.nodes
+      kept.used = true
+      into.add kept.node
+      return
   let
     firstHandler = r.handlerCount
     firstNode = r.nodes
@@ -191,8 +193,11 @@ proc jsxNode*(ctx: ptr JSContext, v: JSValueConst, images: ptr Table[int, Image]
       previous: ctx.prop(global, "__frameosHandlers"))
     nodes: seq[SvgNode]
   if not memo.isNil:
-    for kept in memo.kept.mitems:
+    # Indexed once: a list of a hundred memo()'d rows looked each of them up
+    # with a scan of the kept entries, quadratic in the list.
+    for i, kept in memo.kept.mpairs:
       kept.used = false
+      reader.keptIndex[kept.id] = i
   reader.addNodes(v, nodes, 0)
   if not memo.isNil:
     # What this render's tree no longer holds is let go.

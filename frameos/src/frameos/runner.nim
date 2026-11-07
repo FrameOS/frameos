@@ -86,6 +86,54 @@ proc beginSceneLoading(self: RunnerThread) =
   ## part of the wait.
   discard beginLoadingMark(self.frameConfig.device, self.frameConfig.rotate, self.frameConfig.flip)
 
+# -------- The runner's wake
+# Both loops below sleep in slices and used to notice an event or a render
+# request only when a slice ended. A producer on another thread triggers the
+# AsyncEvent channels.nim made (wakeRunner), the dispatcher on this thread
+# calls wakeRenderLoop, and either ends every sleepOrWake in progress.
+var
+  runnerWakeInstalled {.threadvar.}: bool
+  runnerWakeWaiters {.threadvar.}: seq[Future[void]]
+  runnerWakePending {.threadvar.}: bool
+
+proc wakeRenderLoop*() =
+  ## Ends the loops' sleeps now; a wake with nobody asleep ends the next one.
+  if runnerWakeWaiters.len == 0:
+    runnerWakePending = true
+    return
+  let waiters = runnerWakeWaiters
+  runnerWakeWaiters.setLen(0)
+  for waiter in waiters:
+    if not waiter.finished:
+      waiter.complete()
+
+proc ensureRunnerWake() =
+  if runnerWakeInstalled:
+    return
+  runnerWakeInstalled = true
+  let event = initRunnerWake()
+  addEvent(event, proc (fd: AsyncFD): bool =
+    wakeRenderLoop()
+    false) # stays registered
+
+proc sleepOrWake(ms: int): Future[void] {.async.} =
+  ## sleepAsync(ms), ended early by wakeRunner (another thread queued an event
+  ## or an input) or wakeRenderLoop (this thread asked for a render).
+  ensureRunnerWake()
+  if runnerWakePending:
+    runnerWakePending = false
+    return
+  let waiter = newFuture[void]("runner.sleepOrWake")
+  runnerWakeWaiters.add waiter
+  await waiter or sleepAsync(max(ms, 1))
+  if not waiter.finished:
+    # The slice ended first: forget the waiter, or idle hours would pile
+    # them up until the next wake.
+    let at = runnerWakeWaiters.find(waiter)
+    if at >= 0:
+      runnerWakeWaiters.del(at)
+    waiter.complete()
+
 # How frequently we announce a new render via websockets
 const SERVER_RENDER_DELAY_SECONDS = 1.0
 const RENDER_SLEEP_SLICE_MS = 100.0
@@ -733,8 +781,11 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
           self.presentCursor()
         let nextSleepMs = min(remainingSleepMs,
           if self.sceneEvents.inputState.cursorVisible: CURSOR_SLEEP_SLICE_MS else: RENDER_SLEEP_SLICE_MS)
-        await sleepAsync(nextSleepMs)
-        remainingSleepMs -= nextSleepMs
+        # Ended early by an event or a render request: only the time that
+        # passed comes off the wait, so the interval keeps its schedule.
+        let sleptFrom = getMonoTime()
+        await sleepOrWake(nextSleepMs.int)
+        remainingSleepMs -= min(nextSleepMs, float((getMonoTime() - sleptFrom).inMilliseconds))
       if not driverRetryImage.isNil:
         # The next pass renders its own frame; do not carry this one into it.
         driverRetryImage = nil
@@ -886,6 +937,7 @@ proc runtimeCommand(self: RunnerThread, command: RuntimeCommand, payload: JsonNo
     self.configureLinkCodeOverlay()
     self.forceSceneReload = true
     self.triggerRenderNext = true
+    wakeRenderLoop()
     self.announceNextRender = true
   of rcRestart:
     self.logger.log(%*{"event": "restart", "message": "Restarting FrameOS runtime"})
@@ -916,13 +968,14 @@ proc runtimeCommand(self: RunnerThread, command: RuntimeCommand, payload: JsonNo
     self.currentSceneId = mainSceneId.get()
     self.forceSceneReload = true
     self.triggerRenderNext = true
+    wakeRenderLoop()
 
 proc sceneEvents*(self: RunnerThread): EventLoop =
   ## This runner's dispatcher, made on first use. Owned by the runner thread:
   ## every other thread reaches it through `eventChannel`.
   if self.eventLoop.isNil:
     self.eventLoop = newEventLoop(EventHost(
-      requestRender: proc () = self.triggerRenderNext = true,
+      requestRender: proc () = (self.triggerRenderNext = true; wakeRenderLoop()),
       selectScene: proc (payload: JsonNode): bool = self.selectScene(payload),
       displayPower: proc (on: bool) =
         if on: drivers.turnOn() else: drivers.turnOff(),
@@ -1008,7 +1061,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
     if self.triggerRenderNext and not self.isRendering:
       await sleepAsync(1)
     else:
-      await sleepAsync(waitTime)
+      await sleepOrWake(waitTime)
       if waitTime < 200:
         waitTime += 5
 

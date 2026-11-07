@@ -444,10 +444,15 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
       let childKey = key * 31 + i + 1
       var before: UiNode
       if not prev.isNil:
-        for c in prev.children:
-          if c.kind != ukText and c.key == childKey:
-            before = c
-            break
+        # The same place first: a list that kept its order is one probe per
+        # child, not a scan of every earlier child (quadratic in a long list).
+        if i < prev.children.len and prev.children[i].kind != ukText and prev.children[i].key == childKey:
+          before = prev.children[i]
+        else:
+          for c in prev.children:
+            if c.kind != ukText and c.key == childKey:
+              before = c
+              break
       let built = child.build(result.text, rootW, rootH, depth + 1, childKey, input, childGroup, before)
       if built.pointer:
         result.pointer = true
@@ -1094,6 +1099,7 @@ proc emitPaint(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode],
     else:
       node = SvgNode(tag: "path", path: newPath())
       node.path.roundedRect(x, y, w, h, r[0], r[1], r[2], r[3])
+      node.path.share() # never changed again: bounds and flattened shapes kept
     if fill.len > 0:
       node.attrs.add(("fill", "url(#" & fill & ")"))
       if opacity < 1:
@@ -1195,12 +1201,18 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
     path.transform(translate(vec2(x + shift, y)))
     let node = SvgNode(tag: "path", path: path)
     node.paint(font.paint.color.rgba, opacity)
-    if font in n.bold:
-      # No bold face to draw it in (an ESP32 has one): the outline, thickened.
-      node.paint(font.paint.color.rgba, 1, "stroke")
-      node.attrs.add(("stroke-width", num(font.size / 24)))
-      node.attrs.add(("stroke-linejoin", "round"))
     drawn.add node
+    if font in n.bold:
+      # No bold face to draw it in (an ESP32 has one): the same outline filled
+      # again a little to the right, the double strike of a typewriter. It
+      # was a round-joined stroke of the outline; pixie built a circle per
+      # join, 303 for an 11-glyph label, and that one label was over half
+      # the raster of a toggled home-panel card (2026-11-07). The second fill
+      # shares the path, so its flattened shapes are flattened once.
+      let strike = SvgNode(tag: "path", path: path)
+      strike.paint(font.paint.color.rgba, opacity)
+      strike.attrs.add(("transform", "translate(" & num(font.size / 24) & " 0)"))
+      drawn.add strike
   if remembered:
     template entry: untyped = memo.kept[n.memo]
     entry.drawnAt = at
@@ -1382,6 +1394,7 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
           barH = max(vh * vh / (vh + n.maxY), min(vh, 16))
           bar = SvgNode(tag: "path", path: newPath())
         bar.path.roundedRect(vx + vw - 5, vy + (vh - barH) * sy / n.maxY, 3, barH, 1.5, 1.5, 1.5, 1.5)
+        bar.path.share()
         bar.paint(n.text.color, op * 0.35)
         drawn.add bar
     n.emitted = drawn[first .. ^1]

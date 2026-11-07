@@ -80,17 +80,17 @@ initLock(sceneJsLock)
 
 const sceneJsPrelude* = compactJs("""
 const __frameosFragment = Symbol.for("frameos.fragment");
+// quickts lowers every JSX site to a call with null or a fresh object literal
+// for the attributes (quickts_jsx.h), so the props object is this element's
+// own: no copy. 76 bytecodes and ~15 allocations an element with the copy,
+// about half without (2026-11-07).
 const __frameosJsx = (type, props, ...children) => {
-  const nextProps = props ? { ...props } : {};
-  const normalized = children.length === 0
-    ? nextProps.children
-    : children.length === 1 ? children[0] : children;
-  delete nextProps.children;
-  if (type === __frameosFragment) {
-    return normalized ?? null;
+  const nextProps = props ?? {};
+  if (children.length !== 0) {
+    nextProps.children = children.length === 1 ? children[0] : children;
   }
-  if (normalized !== undefined) {
-    nextProps.children = normalized;
+  if (type === __frameosFragment) {
+    return nextProps.children ?? null;
   }
   // A function component runs now: the tree an app returns is plain elements.
   return typeof type === "function" ? type(nextProps) : { type, props: nextProps };
@@ -107,17 +107,25 @@ const __frameosSameProps = (a, b) => {
   for (const k of keys) if (!Object.is(a[k], b[k])) return false;
   return true;
 };
+// Two maps, swapped each render: what the last render used is what this one
+// may take back, and a slot not used again (a keyed row that left the list)
+// is gone with the swap. One map that only grew reached the interpreter's
+// 4 MB heap cap after about a thousand renders of a list with changing keys
+// (2026-11-07), on every host that keeps the interpreter between renders.
 globalThis.memo = (component) => {
   let render = -1, turn = 0;
-  const last = new Map();
+  let last = new Map(), used = new Map();
   return (props) => {
-    if (render !== globalThis.__frameosRender) { render = globalThis.__frameosRender; turn = 0; }
+    if (render !== globalThis.__frameosRender) {
+      render = globalThis.__frameosRender; turn = 0;
+      last = used; used = new Map();
+    }
     const slot = props.key !== undefined ? "k" + props.key : turn++;
     const before = last.get(slot);
-    if (before !== undefined && __frameosSameProps(before[0], props)) return before[1];
+    if (before !== undefined && __frameosSameProps(before[0], props)) { used.set(slot, before); return before[1]; }
     const element = component(props);
     if (element !== null && typeof element === "object" && !Array.isArray(element)) element.__frameosNode = 0;
-    last.set(slot, [props, element]);
+    used.set(slot, [props, element]);
     return element;
   };
 };

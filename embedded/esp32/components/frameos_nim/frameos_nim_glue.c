@@ -2,6 +2,7 @@
  * Owns NimMain() (one-shot Nim module init), the log hook, and the
  * outbound-HTTP hook the Nim http_client HAL calls into. */
 #include "frameos_nim.h"
+#include "fos_log_ring.h"
 #include "fos_heap_walk.h"
 #include "fos_qjs_glue.h"
 
@@ -1228,8 +1229,13 @@ void frameos_nim_log_hook(const char *msg)
      * session lacks telemetry:logs, or when there is no network at all, so it
      * has to carry these unconditionally. Interleaving with a usb_api base64
      * payload is expected and handled: the browser drops non-base64 lines,
-     * verifies the declared length and retries the transfer. */
-    printf("%s\n", msg ? msg : "");
+     * verifies the declared length and retries the transfer.
+     *
+     * Through the log ring (fos_log_ring.c), not a printf here: a printf
+     * blocked the logging task — the render task, on an LCD board — for
+     * 30 ms per 380-character line at 115200 baud, a third of an isolated
+     * tap (docs/perf-todo.md, 2026-11-07). */
+    fos_log_ring_puts(msg ? msg : "");
     queue_log_line(msg);
     uint32_t seq = ring_log_line(msg);
     /* The tap runs on whatever task logged; the cloud client's tap only

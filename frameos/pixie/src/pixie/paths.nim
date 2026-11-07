@@ -2175,10 +2175,19 @@ proc strokeShapes(
     halfStroke = strokeWidth / 2
     miterAngleLimit = miterLimitToAngle(miterLimit)
 
+  # The circle a round join or cap adds is the same circle every time: flatten
+  # it once per stroke, at the origin, and move it. A round-joined outline of
+  # an 11-glyph label added 303 of them, each a new Path, an ellipse and an
+  # adaptive flattening (2026-11-07); the pictures are identical.
+  var circle: Polygon
   proc makeCircle(at: Vec2): Polygon =
-    let path = newPath()
-    path.ellipse(at, halfStroke, halfStroke)
-    path.commandsToShapes(true, pixelScale)[0]
+    if circle.len == 0:
+      let path = newPath()
+      path.ellipse(vec2(0, 0), halfStroke, halfStroke)
+      circle = path.commandsToShapes(true, pixelScale)[0]
+    result = newSeq[Vec2](circle.len)
+    for i, p in circle:
+      result[i] = p + at
 
   proc makeRect(at, to: Vec2): Polygon =
     # Rectangle corners

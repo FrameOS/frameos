@@ -198,9 +198,15 @@ suite "ui layout":
     let svg = layoutUi(el("div", "text-black",
       txt("Hi "), el("b", "text-red-500", txt("there")), txt("!")), 400, 100)
     var fills: seq[string]
+    var strikes: seq[string]
     for node in svg.children:
-      if node.tag == "path": fills.add node.attr("fill")
-    check fills == @["#000000", "#ff0000".replace("ff0000", "ef4444"), "#000000"]
+      if node.tag == "path":
+        fills.add node.attr("fill")
+        strikes.add node.attr("transform")
+    # <b>: the same outline filled twice, the second a little to the right
+    # (no bold face on an ESP32), so the red run is two paths.
+    check fills == @["#000000", "#ef4444", "#ef4444", "#000000"]
+    check strikes[0] == "" and strikes[1] == "" and strikes[2].startsWith("translate(") and strikes[3] == ""
 
   test "text around a value keeps its spaces":
     proc drawn(children: varargs[SvgNode]): Image =
@@ -246,10 +252,10 @@ suite "ui layout":
       second = layoutUi(panel(true), 200, 120, UiInput(), regions, memo)
       a = first.paths
       b = second.paths
-    check a.len == 3 and b.len == 3
+    check a.len == 4 and b.len == 4   # the count, Lamp twice (bold), Heating
     check b[0] != a[0]                # the count: set again
-    check b[1] == a[1] and b[2] == a[2] # the labels: the same nodes
-    check b[1].attr("stroke").len > 0   # bold drawn as its outline still
+    check b[1] == a[1] and b[2] == a[2] and b[3] == a[3] # the labels: the same nodes
+    check b[2].attr("transform").startsWith("translate(") # bold's second strike, kept too
     # What the memo hands back draws what a layout without it draws.
     let
       got = newImage(parseSvg(second, 200, 120))
