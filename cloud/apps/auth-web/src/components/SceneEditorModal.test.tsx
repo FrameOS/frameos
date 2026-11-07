@@ -27,6 +27,9 @@ type StubEditorProps = {
   onScenesChanged?: ((scenes: unknown[]) => void) | undefined;
   onSelectedSceneChanged?: ((sceneId: string | null) => void) | undefined;
   apiRef?: { current: StubEditorApi | null } | undefined;
+  /** What the real editor shows as template.json's form (the info panel). */
+  templateContent?: ReactNode;
+  initialFile?: "template" | "diagram" | undefined;
 };
 const renameCalls: Array<[string, string]> = [];
 const panCalls: Array<[number, number]> = [];
@@ -67,7 +70,13 @@ function StubEditor(props: StubEditorProps) {
     };
   });
   return (
-    <div data-scenes={JSON.stringify(props.scenes)} data-show-preview={String(props.showPreviewButton)} data-testid="editor">
+    <div
+      data-initial-file={props.initialFile}
+      data-scenes={JSON.stringify(props.scenes)}
+      data-show-preview={String(props.showPreviewButton)}
+      data-testid="editor"
+    >
+      {props.templateContent}
       <button onClick={() => emit([{ id: "s1", name: "Edited" }])} type="button">
         emit edit
       </button>
@@ -264,7 +273,7 @@ const info = {
   })),
 };
 
-type ToggleName = "Info" | "Editor" | "AI" | "Preview";
+type ToggleName = "Editor" | "AI" | "Preview";
 
 /** The bar's copy of the toggles: with every panel closed the workspace
  * shows a second, larger set in the middle of the page. */
@@ -281,7 +290,7 @@ function pressed(): Record<ToggleName, boolean | null> {
     const button = within(barToggles()).queryByRole("button", { name });
     return button ? button.getAttribute("aria-pressed") === "true" : null;
   };
-  return { AI: read("AI"), Editor: read("Editor"), Info: read("Info"), Preview: read("Preview") };
+  return { AI: read("AI"), Editor: read("Editor"), Preview: read("Preview") };
 }
 
 function toggleOrder() {
@@ -329,11 +338,15 @@ afterEach(() => {
 });
 
 describe("SceneEditorModal landing", () => {
-  it("lands on Info + Editor + Preview with nothing remembered and no hash", async () => {
+  it("lands on Editor + Preview with nothing remembered and no hash, the editor on template.json", async () => {
     render(<SceneEditorModal info={info} sceneId="scene-1" versions={versions} />);
-    expect(toggleOrder()).toEqual(["Info", "Editor", "AI", "Preview"]);
-    expect(pressed()).toEqual({ AI: false, Editor: true, Info: true, Preview: true });
-    expect(screen.getByTestId("info-panel")).toBeTruthy();
+    expect(toggleOrder()).toEqual(["Editor", "AI", "Preview"]);
+    expect(pressed()).toEqual({ AI: false, Editor: true, Preview: true });
+    // The scene page's info is the editor's template.json, and what it opens on.
+    const editor = await screen.findByTestId("editor");
+    expect(within(editor).getByTestId("info-panel")).toBeTruthy();
+    expect(editor.dataset.initialFile).toBe("template");
+    expect(screen.queryByRole("complementary", { name: "Scene info" })).toBeNull();
     expect(screen.queryByTestId("ai-panel")).toBeNull();
     // The preview mounts once scenes.json is in, on the loaded scenes.
     const panel = await screen.findByTestId("preview-panel");
@@ -361,32 +374,29 @@ describe("SceneEditorModal landing", () => {
   it("follows the remembered set, reading a pre-Editor-toggle memory as editor on", async () => {
     remember({ ai: true, preview: false });
     const { unmount } = render(<SceneEditorModal info={info} sceneId="scene-1" />);
-    expect(pressed()).toEqual({ AI: true, Editor: true, Info: false, Preview: false });
+    expect(pressed()).toEqual({ AI: true, Editor: true, Preview: false });
     await screen.findByTestId("editor");
     expect(screen.getByTestId("editor").dataset.showPreview).toBe("false");
     expect(screen.getByTestId("ai-panel")).toBeTruthy();
     unmount();
 
+    // A remembered Info column (retired) reads as the Editor, where its
+    // content is now.
     remember({ ai: false, editor: false, info: true, preview: false });
     render(<SceneEditorModal info={info} sceneId="scene-1" />);
-    expect(pressed()).toEqual({ AI: false, Editor: false, Info: true, Preview: false });
-    expect(panelToggle("Info").disabled).toBe(false);
-    expect(panelToggle("Editor").disabled).toBe(false);
+    expect(pressed()).toEqual({ AI: false, Editor: true, Preview: false });
   });
 
   it("honours every hash spelling, bringing old ones onto today's", async () => {
     const cases: Array<[string, Record<ToggleName, boolean>, string]> = [
-      ["#scene-editor", { AI: false, Editor: true, Info: false, Preview: false }, "#scene-editor"],
-      ["#scene-editor-preview", { AI: false, Editor: true, Info: false, Preview: true }, "#scene-editor-preview"],
-      ["#scene-editor-ai", { AI: true, Editor: true, Info: false, Preview: false }, "#scene-editor-ai"],
-      [
-        "#scene-editor-info-preview-ai",
-        { AI: true, Editor: true, Info: true, Preview: true },
-        "#scene-editor-info-preview-ai",
-      ],
-      ["#live-preview", { AI: false, Editor: false, Info: false, Preview: true }, "#scene-preview"],
-      ["#scene-info-preview", { AI: false, Editor: false, Info: true, Preview: true }, "#scene-info-preview"],
-      ["#scene-ai-info", { AI: true, Editor: false, Info: true, Preview: false }, "#scene-info-ai"],
+      ["#scene-editor", { AI: false, Editor: true, Preview: false }, "#scene-editor"],
+      ["#scene-editor-preview", { AI: false, Editor: true, Preview: true }, "#scene-editor-preview"],
+      ["#scene-editor-ai", { AI: true, Editor: true, Preview: false }, "#scene-editor-ai"],
+      // The retired Info column's links open the editor (its template.json).
+      ["#scene-editor-info-preview-ai", { AI: true, Editor: true, Preview: true }, "#scene-editor-preview-ai"],
+      ["#live-preview", { AI: false, Editor: false, Preview: true }, "#scene-preview"],
+      ["#scene-info-preview", { AI: false, Editor: true, Preview: true }, "#scene-editor-preview"],
+      ["#scene-ai-info", { AI: true, Editor: true, Preview: false }, "#scene-editor-ai"],
     ];
     for (const [hash, expected, canonical] of cases) {
       window.history.replaceState(null, "", `/s/clock${hash}`);
@@ -400,67 +410,64 @@ describe("SceneEditorModal landing", () => {
 
   it("follows the hash live (back/forward, a hand-edited URL)", async () => {
     render(<SceneEditorModal info={info} sceneId="scene-1" />);
-    expect(pressed()).toEqual({ AI: false, Editor: true, Info: true, Preview: true });
+    expect(pressed()).toEqual({ AI: false, Editor: true, Preview: true });
     window.history.replaceState(null, "", "/s/clock#scene-editor-ai");
     act(() => window.dispatchEvent(new Event("hashchange")));
-    expect(pressed()).toEqual({ AI: true, Editor: true, Info: false, Preview: false });
+    expect(pressed()).toEqual({ AI: true, Editor: true, Preview: false });
     window.history.replaceState(null, "", "/s/clock");
     act(() => window.dispatchEvent(new Event("popstate")));
     // No hash: back to what is remembered (nothing) → the default.
-    expect(pressed()).toEqual({ AI: false, Editor: true, Info: true, Preview: true });
+    expect(pressed()).toEqual({ AI: false, Editor: true, Preview: true });
   });
 
   it("drops the panels a scene cannot show", async () => {
-    window.history.replaceState(null, "", "/s/clock#scene-info-preview");
-    const { unmount } = render(<SceneEditorModal sceneId="scene-1" />);
-    expect(toggleOrder()).toEqual(["Editor", "AI", "Preview"]);
-    expect(pressed()).toEqual({ AI: false, Editor: false, Info: null, Preview: true });
+    window.history.replaceState(null, "", "/s/clock#scene-preview");
+    const { unmount } = render(<SceneEditorModal canRemix={false} sceneId="scene-1" />);
+    expect(toggleOrder()).toEqual(["Editor", "Preview"]);
+    expect(pressed()).toEqual({ AI: null, Editor: false, Preview: true });
     expect(window.location.hash).toBe("#scene-preview");
-    expect(screen.queryByTestId("info-panel")).toBeNull();
     unmount();
+
+    // Without page info, template.json is the editor's own form and the
+    // editor opens on the diagram.
+    window.history.replaceState(null, "", "/s/clock#scene-editor");
+    const second = render(<SceneEditorModal sceneId="scene-1" />);
+    const editor = await screen.findByTestId("editor");
+    expect(editor.dataset.initialFile).toBe("diagram");
+    expect(screen.queryByTestId("info-panel")).toBeNull();
+    second.unmount();
 
     window.history.replaceState(null, "", "/s/clock");
     render(<SceneEditorModal canPreview={false} canRemix={false} sceneId="scene-1" />);
     expect(toggleOrder()).toEqual(["Editor"]);
     // Nothing of the default is available: the editor stands in.
-    expect(pressed()).toEqual({ AI: null, Editor: true, Info: null, Preview: null });
+    expect(pressed()).toEqual({ AI: null, Editor: true, Preview: null });
     expect(window.location.hash).toBe("");
   });
 
   it("opens the AI panel with the prompt from ?ai=", async () => {
     window.history.replaceState(null, "", "/s/clock?ai=make+it+blue");
     render(<SceneEditorModal info={info} sceneId="scene-1" />);
-    expect(pressed()).toEqual({ AI: true, Editor: true, Info: true, Preview: true });
+    expect(pressed()).toEqual({ AI: true, Editor: true, Preview: true });
     expect(screen.getByTestId("ai-panel").dataset.prompt).toBe("make it blue");
   });
 });
 
 describe("SceneEditorModal panel toggles", () => {
   it("toggles each panel, keeps the hash and the memory truthful, in layout order", async () => {
-    remember({ ai: false, editor: true, info: false, preview: false });
+    remember({ ai: false, editor: true, preview: false });
     render(<SceneEditorModal info={info} sceneId="scene-1" />);
     await screen.findByTestId("editor");
     expect(screen.queryByTestId("preview-panel")).toBeNull();
     expect(screen.queryByTestId("ai-panel")).toBeNull();
 
-    fireEvent.click(panelToggle("Info"));
-    expect(window.location.hash).toBe("#scene-editor-info");
-    expect(storedPanels()).toEqual({ ai: false, editor: true, info: true, preview: false });
-    expect(screen.getByRole("complementary", { name: "Scene info" })).toBeTruthy();
-    expect(screen.getByRole("separator", { name: "Resize the Info panel" })).toBeTruthy();
-
     fireEvent.click(panelToggle("AI"));
     fireEvent.click(panelToggle("Preview"));
-    expect(window.location.hash).toBe("#scene-editor-info-preview-ai");
-    expect(storedPanels()).toEqual({ ai: true, editor: true, info: true, preview: true });
+    expect(window.location.hash).toBe("#scene-editor-preview-ai");
+    expect(storedPanels()).toEqual({ ai: true, editor: true, preview: true });
     await screen.findByTestId("preview-panel");
-    // Column order: Info, Editor, AI, Preview.
-    const order = [
-      screen.getByTestId("info-panel"),
-      screen.getByTestId("editor"),
-      screen.getByTestId("ai-panel"),
-      screen.getByTestId("preview-panel"),
-    ];
+    // Column order: Editor, AI, Preview.
+    const order = [screen.getByTestId("editor"), screen.getByTestId("ai-panel"), screen.getByTestId("preview-panel")];
     for (let index = 1; index < order.length; index += 1) {
       expect(
         order[index - 1]!.compareDocumentPosition(order[index]!) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -470,33 +477,31 @@ describe("SceneEditorModal panel toggles", () => {
     expect(screen.getByRole("separator", { name: "Resize the Preview panel" })).toBeTruthy();
 
     fireEvent.click(panelToggle("Editor"));
-    expect(window.location.hash).toBe("#scene-info-preview-ai");
-    expect(storedPanels()).toEqual({ ai: true, editor: false, info: true, preview: true });
+    expect(window.location.hash).toBe("#scene-preview-ai");
+    expect(storedPanels()).toEqual({ ai: true, editor: false, preview: true });
     // Hidden, not unmounted.
     expect(editorCell().hidden).toBe(true);
     expect(screen.getByTestId("editor")).toBeTruthy();
-    // With the editor gone the leftover width is the preview's: the handles
-    // now sit on Info's and AI's right edges, and drag those.
+    // With the editor gone the leftover width is the preview's: the handle
+    // now sits on AI's right edge, and drags it.
     expect(screen.getAllByRole("separator").map((handle) => handle.getAttribute("aria-label"))).toEqual([
-      "Resize the Info panel",
       "Resize the AI panel",
     ]);
 
-    fireEvent.click(panelToggle("Info"));
     fireEvent.click(panelToggle("AI"));
     expect(window.location.hash).toBe("#scene-preview");
-    expect(storedPanels()).toEqual({ ai: false, editor: false, info: false, preview: true });
+    expect(storedPanels()).toEqual({ ai: false, editor: false, preview: true });
     // Toggling replaces the URL in place: no history entries pile up.
     expect(window.history.state).toBeNull();
   });
 
   it("closes the last panel too, and offers them again in the middle of the page", async () => {
-    remember({ ai: false, editor: true, info: false, preview: false });
+    remember({ ai: false, editor: true, preview: false });
     render(<SceneEditorModal info={info} sceneId="scene-1" />);
     const editorToggle = panelToggle("Editor");
     expect(editorToggle.disabled).toBe(false);
     fireEvent.click(editorToggle);
-    expect(pressed()).toEqual({ AI: false, Editor: false, Info: false, Preview: false });
+    expect(pressed()).toEqual({ AI: false, Editor: false, Preview: false });
     expect(window.location.hash).toBe("#scene-none");
 
     // The scene's name and a second, larger set of toggles.
@@ -504,19 +509,19 @@ describe("SceneEditorModal panel toggles", () => {
     expect(empty).toBeTruthy();
     expect(within(empty as HTMLElement).getByRole("heading", { level: 1 }).textContent).toBe("Clock");
     const hero = within(empty as HTMLElement).getAllByRole("button");
-    expect(hero.map((button) => button.textContent)).toEqual(["Info", "Editor", "AI", "Preview"]);
+    expect(hero.map((button) => button.textContent)).toEqual(["Editor", "AI", "Preview"]);
     // The bar keeps its own copy.
     expect(document.querySelectorAll(".editor-modal__panels").length).toBe(2);
 
     // One of them opens its panel again.
-    fireEvent.click(hero[3]!);
+    fireEvent.click(hero[2]!);
     expect(pressed().Preview).toBe(true);
     expect(document.querySelector(".editor-modal__empty")).toBeNull();
     expect(window.location.hash).toBe("#scene-preview");
   });
 
   it("keeps unsaved edits while the Editor is hidden", async () => {
-    remember({ ai: false, editor: true, info: false, preview: true });
+    remember({ ai: false, editor: true, preview: true });
     render(<SceneEditorModal canSave info={info} sceneId="scene-1" />);
     await screen.findByTestId("editor");
     fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
@@ -540,7 +545,7 @@ describe("SceneEditorModal panel toggles", () => {
   });
 
   it("does not count the editor's normalised echo of the loaded scenes as an edit", async () => {
-    remember({ ai: false, editor: true, info: false, preview: false });
+    remember({ ai: false, editor: true, preview: false });
     render(<SceneEditorModal canSave sceneId="scene-1" />);
     await screen.findByTestId("editor");
     expect(screen.queryByText("Unsaved changes")).toBeNull();
@@ -559,7 +564,7 @@ describe("SceneEditorModal panel toggles", () => {
   });
 
   it("hands the Preview panel the current scenes when it is opened after edits", async () => {
-    remember({ ai: false, editor: true, info: false, preview: false });
+    remember({ ai: false, editor: true, preview: false });
     render(<SceneEditorModal sceneId="scene-1" />);
     await screen.findByTestId("editor");
     fireEvent.click(screen.getByRole("button", { name: "emit edit" }));
@@ -570,7 +575,7 @@ describe("SceneEditorModal panel toggles", () => {
   });
 
   it("hands the AI panel the size the Preview draws at, a rotate or Resize included", async () => {
-    remember({ ai: true, editor: false, info: false, preview: true });
+    remember({ ai: true, editor: false, preview: true });
     render(<SceneEditorModal height={1200} sceneId="scene-1" width={1600} />);
     await screen.findByTestId("preview-panel");
     expect(screen.getByTestId("ai-panel").dataset.size).toBe("1600x1200");
@@ -595,7 +600,8 @@ describe("SceneEditorModal versions", () => {
     await screen.findByTestId("editor");
     // The dropdown sits right after the panel toggles.
     const left = document.querySelector(".editor-modal__title")!;
-    expect(Array.from(left.children).map((child) => child.getAttribute("aria-label"))).toEqual([
+    // (Then the scene's name.)
+    expect(Array.from(left.children).slice(0, 3).map((child) => child.getAttribute("aria-label"))).toEqual([
       "Back",
       "Panels",
       "Version",
@@ -618,7 +624,7 @@ describe("SceneEditorModal versions", () => {
     ]);
     expect(screen.getByTestId("preview-panel").dataset.scenes).toBe(JSON.stringify(v1Scenes));
     expect(screen.getByText("Loaded v1")).toBeTruthy();
-    expect(`${window.location.search}${window.location.hash}`).toBe("?version=1#scene-editor-info-preview");
+    expect(`${window.location.search}${window.location.hash}`).toBe("?version=1#scene-editor-preview");
     expect(screen.getByRole("link", { name: /Download \.zip/ }).getAttribute("href")).toBe(
       "/api/store/scenes/scene-1/download?version=1",
     );
@@ -630,7 +636,7 @@ describe("SceneEditorModal versions", () => {
     // Back to the latest: no ?version=, nothing pinned.
     fireEvent.change(versionSelect(), { target: { value: "2" } });
     await waitFor(() => expect(screen.getByTestId("editor").dataset.scenes).toBe(JSON.stringify(loadedScenes)));
-    expect(`${window.location.search}${window.location.hash}`).toBe("#scene-editor-info-preview");
+    expect(`${window.location.search}${window.location.hash}`).toBe("#scene-editor-preview");
     expect(screen.getByRole("link", { name: /Download \.zip/ }).getAttribute("href")).toBe(
       "/api/store/scenes/scene-1/download",
     );
@@ -846,7 +852,7 @@ describe("SceneEditorModal save dialog", () => {
   });
 
   it("starts the note off with what the AI panel was asked for", async () => {
-    remember({ ai: true, editor: true, info: false, preview: false });
+    remember({ ai: true, editor: true, preview: false });
     render(<SceneEditorModal canSave canRemix sceneId="scene-1" versions={versions} />);
     await screen.findByTestId("editor");
     fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
@@ -865,8 +871,8 @@ describe("SceneEditorModal save dialog", () => {
 
 describe("SceneEditorModal Install dialog", () => {
   it("opens from the bar for everyone, pinning the previewed version when it is not the latest", async () => {
-    remember({ ai: false, editor: false, info: true, preview: true });
-    window.history.replaceState(null, "", "/s/clock?share=tok#scene-info-preview");
+    remember({ ai: false, editor: false, preview: true });
+    window.history.replaceState(null, "", "/s/clock?share=tok#scene-preview");
     render(<SceneEditorModal info={info} sceneId="scene-1" versions={versions} />);
     expect(screen.queryByTestId("install-dialog")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Install" }));
@@ -874,7 +880,7 @@ describe("SceneEditorModal Install dialog", () => {
     expect(dialog.dataset.version).toBe("");
     expect(dialog.dataset.signedIn).toBe("true");
     expect(dialog.dataset.pageUrl).toBe("https://scenes.frameos.net/s/clock");
-    expect(dialog.dataset.returnTo).toBe("/s/clock?share=tok#scene-info-preview");
+    expect(dialog.dataset.returnTo).toBe("/s/clock?share=tok#scene-preview");
     fireEvent.click(screen.getByRole("button", { name: "close install" }));
     expect(screen.queryByTestId("install-dialog")).toBeNull();
 
@@ -923,7 +929,7 @@ describe("SceneEditorWorkspace diagram centring", () => {
   });
 
   it("fits the diagram when its column appears or jumps, pans it by half a smaller change, skips a hidden column", async () => {
-    remember({ ai: false, editor: true, info: true, preview: false });
+    remember({ ai: false, editor: true, preview: false });
     render(<SceneEditorModal info={info} sceneId="scene-1" />);
     await screen.findByTestId("editor");
     // The column's first measure: fit to it.
@@ -968,66 +974,52 @@ describe("SceneEditorWorkspace diagram centring", () => {
 });
 
 describe("SceneEditorWorkspace column widths", () => {
-  const widths = { ai: 380, editor: 640, info: 380, preview: 520 };
-  const all = ["info", "editor", "ai", "preview"] as const;
+  const widths = { ai: 380, editor: 640, preview: 520 };
+  const all = ["editor", "ai", "preview"] as const;
 
   it("gives the fixed columns their widths while they fit beside the editor's floor", () => {
-    // 1400 wide: the editor's floor is 30% = 420; Info + Preview fit as stored.
-    expect(panelColumnTemplate(["info", "editor", "preview"], "editor", widths, 1400)).toBe(
-      "380px 6px minmax(420px, 1fr) 6px 520px",
-    );
+    // 1400 wide: the editor's floor is 30% = 420; AI + Preview fit as stored.
+    expect(panelColumnTemplate(all, "editor", widths, 1400)).toBe("minmax(420px, 1fr) 6px 380px 6px 520px");
     // Narrow enough that 360 beats 30%.
     expect(panelColumnTemplate(["editor", "preview"], "editor", widths, 1000)).toBe(
       "minmax(360px, 1fr) 6px 520px",
     );
     // Not measured yet: the widths as stored.
-    expect(panelColumnTemplate(all, "editor", widths, null)).toBe(
-      "380px 6px minmax(360px, 1fr) 6px 380px 6px 520px",
-    );
+    expect(panelColumnTemplate(all, "editor", widths, null)).toBe("minmax(360px, 1fr) 6px 380px 6px 520px");
   });
 
   it("shrinks the fixed columns uniformly, down to their minimums, when they do not", () => {
-    // 1400 - 3 handles (18) - the editor's 420 leaves 962 for 1280 stored:
-    // each keeps 962/1280 of its width.
-    expect(panelColumnTemplate(all, "editor", widths, 1400)).toBe(
-      "285px 6px minmax(420px, 1fr) 6px 285px 6px 390px",
-    );
-    // 1200 - 18 - 360 = 822 for 1280: Info/AI would be 244, Preview 333.
-    expect(panelColumnTemplate(all, "editor", widths, 1200)).toBe(
-      "244px 6px minmax(360px, 1fr) 6px 244px 6px 333px",
-    );
-    // 1100 - 18 - 360 = 722: even the minimums (240 + 240 + 320) overflow,
-    // so they all give the same share below them.
-    expect(panelColumnTemplate(all, "editor", widths, 1100)).toBe(
-      "216px 6px minmax(360px, 1fr) 6px 216px 6px 288px",
-    );
+    // 1200 - 2 handles (12) - the editor's 360 leaves 828 for 900 stored:
+    // each keeps 828/900 of its width.
+    expect(panelColumnTemplate(all, "editor", widths, 1200)).toBe("minmax(360px, 1fr) 6px 349px 6px 478px");
+    // 1000 - 12 - 360 = 628: AI 265, Preview 362.
+    expect(panelColumnTemplate(all, "editor", widths, 1000)).toBe("minmax(360px, 1fr) 6px 265px 6px 362px");
+    // 900 - 12 - 360 = 528: even the minimums (240 + 320) overflow, so they
+    // all give the same share below them.
+    expect(panelColumnTemplate(all, "editor", widths, 900)).toBe("minmax(360px, 1fr) 6px 226px 6px 301px");
   });
 
   it("lets the Preview take the leftover width when the editor is closed", () => {
-    expect(panelColumnTemplate(["info", "preview"], "preview", widths, 1400)).toBe(
-      "380px 6px minmax(320px, 1fr)",
-    );
-    expect(panelColumnTemplate(["info", "ai", "preview"], "preview", widths, 900)).toBe(
-      "284px 6px 284px 6px minmax(320px, 1fr)",
-    );
+    expect(panelColumnTemplate(["ai", "preview"], "preview", widths, 1400)).toBe("380px 6px minmax(320px, 1fr)");
+    expect(panelColumnTemplate(["ai", "preview"], "preview", widths, 600)).toBe("274px 6px minmax(320px, 1fr)");
   });
 
   it("lays the columns out from the measured frame width, following resizes", async () => {
     observers.clear();
     vi.stubGlobal("ResizeObserver", FakeResizeObserver);
-    remember({ ai: true, editor: true, info: true, preview: true });
+    remember({ ai: true, editor: true, preview: true });
     const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 1400 } as DOMRect);
     render(<SceneEditorModal info={info} sceneId="scene-1" />);
     await screen.findByTestId("editor");
-    expect(frameElement().style.gridTemplateColumns).toBe("285px 6px minmax(420px, 1fr) 6px 285px 6px 390px");
+    expect(frameElement().style.gridTemplateColumns).toBe("minmax(420px, 1fr) 6px 380px 6px 520px");
     // The frame's own observer…
     rect.mockReturnValue({ width: 1100 } as DOMRect);
     fakeResize(frameElement(), 1100);
-    expect(frameElement().style.gridTemplateColumns).toBe("216px 6px minmax(360px, 1fr) 6px 216px 6px 288px");
+    expect(frameElement().style.gridTemplateColumns).toBe("minmax(360px, 1fr) 6px 307px 6px 420px");
     // …and the window's resize (the frame spans the viewport) both re-measure.
     rect.mockReturnValue({ width: 2000 } as DOMRect);
     act(() => window.dispatchEvent(new Event("resize")));
-    expect(frameElement().style.gridTemplateColumns).toBe("380px 6px minmax(600px, 1fr) 6px 380px 6px 520px");
+    expect(frameElement().style.gridTemplateColumns).toBe("minmax(600px, 1fr) 6px 380px 6px 520px");
   });
 });
 
@@ -1058,7 +1050,7 @@ describe("SceneEditorModal bar", () => {
     );
     const left = document.querySelector(".editor-modal__title")!;
     const label = (child: Element) => child.getAttribute("aria-label") ?? child.textContent?.trim();
-    expect(Array.from(left.children).map(label)).toEqual(["Back", "Panels", "Version"]);
+    expect(Array.from(left.children).slice(0, 3).map(label)).toEqual(["Back", "Panels", "Version"]);
     const right = document.querySelector(".editor-modal__bar .button-row")!;
     expect(Array.from(right.children).map(label)).toEqual([
       "Save as new version",
@@ -1067,16 +1059,16 @@ describe("SceneEditorModal bar", () => {
       "Install",
     ]);
     expect(left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // The scene's name heads the Info panel, not the bar.
-    await waitFor(() => expect(screen.getByText("Loaded")).toBeTruthy());
-    expect(screen.getByTestId("info-heading").contains(screen.getByText("Loaded"))).toBe(true);
-    expect(left.textContent).not.toContain("Loaded");
+    // The bar carries the scene's name; template.json's info is headed by
+    // the template's (the store listing's) own.
+    await waitFor(() => expect(left.textContent).toContain("Loaded"));
+    expect(screen.getByTestId("info-heading").textContent).toBe("Clock");
     // Editing puts the Unsaved pill immediately left of Save (its long and
     // its phone-length spelling; CSS shows one), and the left side is
     // untouched.
     fireEvent.click(await screen.findByRole("button", { name: "emit echo" }));
     fireEvent.click(screen.getByRole("button", { name: "emit edit" }));
-    expect(Array.from(left.children).map(label)).toEqual(["Back", "Panels", "Version"]);
+    expect(Array.from(left.children).slice(0, 3).map(label)).toEqual(["Back", "Panels", "Version"]);
     expect(Array.from(right.children).map(label)).toEqual([
       "Unsaved changesUnsaved",
       "Save as new version",
@@ -1087,14 +1079,10 @@ describe("SceneEditorModal bar", () => {
     expect(within(right.children[0] as HTMLElement).getByText("Unsaved changes")).toBeTruthy();
   });
 
-  it("keeps the scene's name in the bar while the Info panel is closed, and without one", async () => {
-    remember({ ai: false, editor: true, info: false, preview: false });
+  it("keeps the scene's name in the bar, with page info and without", async () => {
+    remember({ ai: false, editor: true, preview: false });
     const { unmount } = render(<SceneEditorModal info={info} sceneId="scene-1" />);
-    await waitFor(() => expect(screen.getByText("Loaded")).toBeTruthy());
-    expect(document.querySelector(".editor-modal__title")!.textContent).toContain("Loaded");
-    fireEvent.click(panelToggle("Info"));
-    expect(document.querySelector(".editor-modal__title")!.textContent).not.toContain("Loaded");
-    expect(screen.getByTestId("info-heading").textContent).toContain("Loaded");
+    await waitFor(() => expect(document.querySelector(".editor-modal__title")!.textContent).toContain("Loaded"));
     unmount();
 
     render(<SceneEditorModal sceneId="scene-1" />);
@@ -1166,7 +1154,7 @@ describe("SceneEditorModal bar", () => {
 
 describe("SceneEditorModal scene name", () => {
   async function openEditor() {
-    remember({ ai: false, editor: true, info: false, preview: false });
+    remember({ ai: false, editor: true, preview: false });
     render(<SceneEditorModal canSave sceneId="scene-1" />);
     await screen.findByTestId("editor");
     fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
@@ -1197,25 +1185,6 @@ describe("SceneEditorModal scene name", () => {
     await waitFor(() => expect(screen.queryByText("Unsaved changes")).toBeNull());
     expect(refreshMock).toHaveBeenCalled();
     expect(screen.getByTestId("editor")).toBeTruthy();
-  });
-
-  it("renames from the Info panel's heading, through the editor, into Save", async () => {
-    remember({ ai: false, editor: true, info: true, preview: false });
-    render(<SceneEditorModal canSave info={info} sceneId="scene-1" />);
-    await screen.findByTestId("editor");
-    fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
-    const heading = screen.getByTestId("info-heading");
-    fireEvent.click(within(heading).getByRole("button", { name: "Rename scene" }));
-    const input = within(heading).getByRole("textbox", { name: "Scene name" }) as HTMLInputElement;
-    expect(input.value).toBe("Loaded");
-    fireEvent.change(input, { target: { value: "From the panel" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(within(heading).getByText("From the panel")).toBeTruthy();
-    expect(renameCalls).toEqual([["s1", "From the panel"]]);
-    expect(screen.getByText("Unsaved changes")).toBeTruthy();
-
-    await saveVersion();
-    await waitFor(() => expect(postedContent()?.scenes[0]?.name).toBe("From the panel"));
   });
 
   it("follows the editor's own rename", async () => {
@@ -1266,7 +1235,7 @@ describe("SceneEditorModal scene name", () => {
   });
 
   it("renames before the editor has mounted, by handing it the renamed scenes", async () => {
-    remember({ ai: false, editor: false, info: false, preview: true });
+    remember({ ai: false, editor: false, preview: true });
     render(<SceneEditorModal canSave sceneId="scene-1" />);
     await waitFor(() => expect(screen.getByText("Loaded")).toBeTruthy());
     expect(screen.queryByTestId("editor")).toBeNull();
@@ -1287,7 +1256,7 @@ describe("SceneEditorModal scene name", () => {
 
   it("follows the scene selected in the editor when there are several", async () => {
     scenesJson = twoScenes;
-    remember({ ai: false, editor: true, info: false, preview: true });
+    remember({ ai: false, editor: true, preview: true });
     render(<SceneEditorModal canSave sceneId="scene-1" />);
     await screen.findByTestId("preview-panel");
     await screen.findByTestId("editor");
@@ -1509,69 +1478,57 @@ describe("SceneEditorModal single-panel mode", () => {
 
   it("shows one panel of the set at a time on a narrow viewport, the toggles as tabs", async () => {
     narrowViewport = true;
-    remember({ ai: false, editor: true, info: true, preview: true });
+    remember({ ai: false, editor: true, preview: true });
     render(<SceneEditorModal info={info} sceneId="scene-1" />);
     // The Preview, being in the set, is the one shown first.
-    expect(tabs()).toEqual(["Info", "Editor", "AI", "Preview*"]);
+    expect(tabs()).toEqual(["Editor", "AI", "Preview*"]);
     await screen.findByTestId("preview-panel");
-    expect(screen.queryByTestId("info-panel")).toBeNull();
     expect(screen.queryByTestId("ai-panel")).toBeNull();
     expect(editorCell().hidden).toBe(true);
     expect(screen.queryByRole("separator")).toBeNull();
-    // With the Info panel off screen the bar carries the name.
-    await waitFor(() => expect(screen.getByText("Loaded")).toBeTruthy());
-    expect(document.querySelector(".editor-modal__title")!.textContent).toContain("Loaded");
+    await waitFor(() => expect(document.querySelector(".editor-modal__title")!.textContent).toContain("Loaded"));
 
     // A tab shows just that panel; the set (and its hash / memory) is as it was.
     fireEvent.click(screen.getByRole("tab", { name: "Editor" }));
-    expect(tabs()).toEqual(["Info", "Editor*", "AI", "Preview"]);
+    expect(tabs()).toEqual(["Editor*", "AI", "Preview"]);
     expect(editorCell().hidden).toBe(false);
     expect(screen.queryByTestId("preview-panel")).toBeNull();
     expect(window.location.hash).toBe("");
-    expect(storedPanels()).toEqual({ ai: false, editor: true, info: true, preview: true });
+    expect(storedPanels()).toEqual({ ai: false, editor: true, preview: true });
 
     // A panel outside the set joins it (a wide viewport shows it too).
     fireEvent.click(screen.getByRole("tab", { name: "AI" }));
-    expect(tabs()).toEqual(["Info", "Editor", "AI*", "Preview"]);
+    expect(tabs()).toEqual(["Editor", "AI*", "Preview"]);
     expect(screen.getByTestId("ai-panel")).toBeTruthy();
     expect(editorCell().hidden).toBe(true);
-    expect(window.location.hash).toBe("#scene-editor-info-preview-ai");
-    expect(storedPanels()).toEqual({ ai: true, editor: true, info: true, preview: true });
+    expect(window.location.hash).toBe("#scene-editor-preview-ai");
+    expect(storedPanels()).toEqual({ ai: true, editor: true, preview: true });
 
     // Wide again: the whole set, side by side.
     setViewport(false);
     expect(screen.queryByRole("tablist")).toBeNull();
-    expect(pressed()).toEqual({ AI: true, Editor: true, Info: true, Preview: true });
-    expect(screen.getByTestId("info-panel")).toBeTruthy();
+    expect(pressed()).toEqual({ AI: true, Editor: true, Preview: true });
     expect(screen.getByTestId("ai-panel")).toBeTruthy();
     await screen.findByTestId("preview-panel");
     expect(editorCell().hidden).toBe(false);
-    expect(screen.getAllByRole("separator")).toHaveLength(3);
+    expect(screen.getAllByRole("separator")).toHaveLength(2);
 
     // Narrow once more: the last panel picked there.
     setViewport(true);
-    expect(tabs()).toEqual(["Info", "Editor", "AI*", "Preview"]);
+    expect(tabs()).toEqual(["Editor", "AI*", "Preview"]);
     expect(screen.getByTestId("ai-panel")).toBeTruthy();
-    expect(screen.queryByTestId("info-panel")).toBeNull();
     // Dropping it from the set on a wide viewport forgets the pick.
     setViewport(false);
     fireEvent.click(panelToggle("AI"));
     setViewport(true);
-    expect(tabs()).toEqual(["Info", "Editor", "AI", "Preview*"]);
+    expect(tabs()).toEqual(["Editor", "AI", "Preview*"]);
   });
 
-  it("starts on the Info panel without a Preview in the set, else on the first open one", async () => {
+  it("starts on the Preview when the set has one, else on the first open one", async () => {
     narrowViewport = true;
-    remember({ ai: true, editor: true, info: true, preview: false });
-    const { unmount } = render(<SceneEditorModal info={info} sceneId="scene-1" />);
-    expect(tabs()).toEqual(["Info*", "Editor", "AI", "Preview"]);
-    expect(screen.getByTestId("info-panel")).toBeTruthy();
-    expect(screen.queryByTestId("ai-panel")).toBeNull();
-    unmount();
-
-    remember({ ai: true, editor: true, info: false, preview: false });
+    remember({ ai: true, editor: true, preview: false });
     render(<SceneEditorModal info={info} sceneId="scene-1" />);
-    expect(tabs()).toEqual(["Info", "Editor*", "AI", "Preview"]);
+    expect(tabs()).toEqual(["Editor*", "AI", "Preview"]);
     await screen.findByTestId("editor");
     expect(editorCell().hidden).toBe(false);
     expect(screen.queryByTestId("ai-panel")).toBeNull();
@@ -1581,14 +1538,12 @@ describe("SceneEditorModal single-panel mode", () => {
     const set = (names: string[]) => ({
       ai: names.includes("ai"),
       editor: names.includes("editor"),
-      info: names.includes("info"),
       preview: names.includes("preview"),
     });
-    expect(singlePanelFor(set(["info", "editor", "preview"]), null)).toBe("preview");
-    expect(singlePanelFor(set(["info", "editor", "preview"]), "editor")).toBe("editor");
+    expect(singlePanelFor(set(["editor", "preview"]), null)).toBe("preview");
+    expect(singlePanelFor(set(["editor", "preview"]), "editor")).toBe("editor");
     // A pick that left the set does not count.
-    expect(singlePanelFor(set(["info", "editor", "preview"]), "ai")).toBe("preview");
-    expect(singlePanelFor(set(["info", "editor", "ai"]), null)).toBe("info");
+    expect(singlePanelFor(set(["editor", "preview"]), "ai")).toBe("preview");
     expect(singlePanelFor(set(["editor", "ai"]), null)).toBe("editor");
     expect(singlePanelFor(set(["ai"]), null)).toBe("ai");
     expect(singlePanelFor(set([]), null)).toBeNull();

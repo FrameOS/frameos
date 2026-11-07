@@ -1,11 +1,14 @@
 "use client";
 
-import type { EmbeddedSceneEditorApi } from "frameos-editor/react";
+import type {
+  EmbeddedSceneEditorApi,
+  SceneTemplateMetadata,
+  TemplateCategoryOption,
+} from "frameos-editor/react";
 import {
   ArrowLeft,
   FileArchive,
   GitFork,
-  Info,
   LogIn,
   MonitorDown,
   MoreHorizontal,
@@ -30,6 +33,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { storeCategories } from "../lib/categories";
 import { applyAiScenes, type AiScenesEvent, type SceneJson } from "../lib/ai-scenes-apply";
 import type { AiListingChanges } from "../lib/ai-chat-client";
 import { requiredSettingsForScenes } from "../lib/preview-settings";
@@ -121,8 +125,8 @@ type SceneEditorModalProps = {
    * the workspace then loads it rather than the latest. */
   pinnedVersion?: number | null | undefined;
   /** What the scene page shows besides the diagram (gallery, description,
-   * versions, install instructions…), for the Info panel. Without it there
-   * is no Info panel (the page renders it itself, full width). */
+   * versions, install instructions…), shown as the editor's template.json.
+   * Without it template.json is the editor's own read-only form. */
   info?: SceneInfoData | undefined;
   /** Where Back goes when there is no same-origin page to go back to: the
    * store front. */
@@ -307,14 +311,15 @@ export function readStoredPanels(): SceneEditorPanels | null {
     if (!raw) {
       return null;
     }
-    const parsed = JSON.parse(raw) as Partial<SceneEditorPanels> | null;
+    const parsed = JSON.parse(raw) as (Partial<SceneEditorPanels> & { info?: boolean }) | null;
     if (!parsed || typeof parsed !== "object") {
       return null;
     }
     return {
       ai: parsed.ai === true,
-      editor: "editor" in parsed ? parsed.editor === true : true,
-      info: parsed.info === true,
+      // A remembered Info column (retired: its content is template.json in
+      // the editor) reads as the Editor.
+      editor: "editor" in parsed ? parsed.editor === true || parsed.info === true : true,
       preview: parsed.preview === true,
     };
   } catch {
@@ -330,8 +335,8 @@ export function storePanels(panels: SceneEditorPanels) {
   }
 }
 
-/** Which panels a workspace can show at all (no Info without page info, no
- * Preview for a pulled scene…); anything not mentioned is available. */
+/** Which panels a workspace can show at all (no Preview for a pulled
+ * scene…); anything not mentioned is available. */
 export type SceneEditorPanelAvailability = Partial<Record<SceneEditorPanelName, boolean>>;
 
 /** A panel set limited to the available panels — and never empty: the
@@ -432,7 +437,6 @@ export function editorViewportForWidthChange(
 const panelWidths: Record<SceneEditorPanelName, { initial: number; min: number; max: number }> = {
   ai: { initial: 380, max: 640, min: 300 },
   editor: { initial: 640, max: 1600, min: 320 },
-  info: { initial: 380, max: 720, min: 280 },
   preview: { initial: 520, max: 900, min: 320 },
 };
 
@@ -441,7 +445,6 @@ const panelWidths: Record<SceneEditorPanelName, { initial: number; min: number; 
 export const panelMinWidths: Record<SceneEditorPanelName, number> = {
   ai: 240,
   editor: 360,
-  info: 240,
   preview: 320,
 };
 
@@ -589,31 +592,40 @@ type SceneEditorWorkspaceProps = {
   panels: SceneEditorPanels;
   ai: Omit<SceneAiPanelProps, "width" | "height" | "selectedSceneId">;
   preview: SceneEditorPreviewOptions;
-  /** The Info column's content (left of the diagram); none for a scene
+  /** template.json's view in the editor (the scene page's info); none for a scene
    * that has no page yet. */
   info?: ReactNode;
   /** What fills the frame when every panel is closed. */
   empty?: ReactNode;
   /** The X in the AI and preview panels' corners: closes that panel. */
   onClosePanel?: ((panel: "ai" | "preview") => void) | undefined;
+  /** The editor's template.json: the listing the draft holds. */
+  template?: SceneTemplateMetadata | undefined;
+  /** Edits to template.json; absent: read only (a visitor's playground). */
+  onTemplateChanged?: ((changes: Partial<SceneTemplateMetadata>) => void) | undefined;
 };
+
+/** The store's categories as template.json's Category field offers them. */
+export const templateCategoryOptions: TemplateCategoryOption[] = storeCategories.map((category) => ({
+  label: category.title,
+  value: category.slug,
+}));
 
 const panelCopy: Record<
   SceneEditorPanelName,
-  { label: string; Icon: typeof Info; show: string; hide: string }
+  { label: string; Icon: LucideIcon; show: string; hide: string }
 > = {
   ai: { Icon: Sparkles, hide: "Hide the AI assistant", label: "AI", show: "Show the AI assistant" },
-  editor: { Icon: Workflow, hide: "Hide the diagram", label: "Editor", show: "Show the scene's diagram" },
-  info: {
-    Icon: Info,
-    hide: "Hide the scene info",
-    label: "Info",
-    show: "Show the scene's images, description and versions",
+  editor: {
+    Icon: Workflow,
+    hide: "Hide the editor",
+    label: "Editor",
+    show: "Show the template's files: its info, its scenes' diagrams and their apps",
   },
   preview: { Icon: Play, hide: "Hide the live preview", label: "Preview", show: "Run the scene in your browser" },
 };
 
-/** The segmented panel switch in the bar: Info · Editor · AI · Preview, each
+/** The segmented panel switch in the bar: Editor · AI · Preview, each
  * on or off on its own — except the last open one, which stays. In
  * single-panel mode (`active` given) they are tabs: one shown at a time. */
 export function SceneEditorPanelToggles({
@@ -1038,9 +1050,10 @@ export function SceneEditorBackButton({
   );
 }
 
-// The area below the bar: the open panels as columns — Info, the embedded
-// FrameOS editor, the AI panel, the live preview — each draggable wider or
-// narrower, the leftover width going to the Editor (else the Preview).
+// The area below the bar: the open panels as columns — the embedded FrameOS
+// editor (whose template.json shows `info`), the AI panel, the live preview
+// — each draggable wider or narrower, the leftover width going to the
+// Editor (else the Preview).
 // Shared by the store scene's workspace and the "new scene" page.
 export function SceneEditorWorkspace({
   scenes,
@@ -1059,14 +1072,15 @@ export function SceneEditorWorkspace({
   info,
   empty,
   onClosePanel,
+  template,
+  onTemplateChanged,
 }: SceneEditorWorkspaceProps) {
   const resizes: Record<SceneEditorPanelName, Resize> = {
     ai: useResizableWidth(panelWidths.ai),
     editor: useResizableWidth(panelWidths.editor),
-    info: useResizableWidth(panelWidths.info),
     preview: useResizableWidth(panelWidths.preview),
   };
-  const open: SceneEditorPanels = { ...panels, info: panels.info && info !== undefined };
+  const open: SceneEditorPanels = panels;
   const layout = sceneEditorPanelNames.filter((name) => open[name]);
   // The size the Preview panel draws at (its Resize and rotate included):
   // the AI panel's render check and the assistant's render_scene use it, so
@@ -1143,10 +1157,10 @@ export function SceneEditorWorkspace({
   // Every panel closed: the frame carries `empty` instead of columns, while
   // the editor stays mounted (hidden) below it with its edits intact.
   const nothingOpen = layout.length === 0;
-  const template = panelColumnTemplate(
+  const columns = panelColumnTemplate(
     layout,
     flexible,
-    { ai: resizes.ai.width, editor: resizes.editor.width, info: resizes.info.width, preview: resizes.preview.width },
+    { ai: resizes.ai.width, editor: resizes.editor.width, preview: resizes.preview.width },
     frameWidth,
   );
 
@@ -1164,7 +1178,6 @@ export function SceneEditorWorkspace({
     const target = dragsLeft ? layout[index - 1]! : name;
     return (
       <PanelResizer
-        className={target === "info" ? "editor-modal__resizer--info" : undefined}
         label={`Resize the ${panelCopy[target].label} panel`}
         resize={resizes[target]}
         side={dragsLeft ? "left" : "right"}
@@ -1180,15 +1193,9 @@ export function SceneEditorWorkspace({
           : `editor-modal__frame editor-modal__frame--with-panels editor-modal__frame--panels-${layout.length}`
       }
       ref={frameRef}
-      style={editorOnly || nothingOpen ? undefined : { gridTemplateColumns: template }}
+      style={editorOnly || nothingOpen ? undefined : { gridTemplateColumns: columns }}
     >
       {nothingOpen ? empty : null}
-      {open.info ? (
-        <aside aria-label="Scene info" className="editor-modal__info">
-          {info}
-        </aside>
-      ) : null}
-      {open.editor ? resizerBefore("editor") : null}
       <div className="editor-modal__editor" hidden={!open.editor} ref={editorCellRef}>
         {scenes && editorMounted ? (
           <EmbeddedSceneEditor
@@ -1208,6 +1215,15 @@ export function SceneEditorWorkspace({
             onSaveScreenshot={onSaveScreenshot}
             apiRef={editorApiRef}
             showPreviewButton={false}
+            template={template}
+            onTemplateChanged={onTemplateChanged}
+            templateCategories={templateCategoryOptions}
+            // The scene page's own content (gallery, description, versions,
+            // listing) is template.json's form, and what the editor opens on.
+            templateContent={
+              info === undefined ? undefined : <div className="editor-modal__template-info">{info}</div>
+            }
+            initialFile={info === undefined ? "diagram" : "template"}
           />
         ) : null}
       </div>
@@ -1356,8 +1372,8 @@ export function versionOptionLabel(option: SceneVersionOption, latestVersion: nu
 
 const manageVersionsValue = "manage";
 
-// The store scene page's workspace: the scene's Info column, the FrameOS
-// editor rendered as a component in this page's React tree, the AI panel
+// The store scene page's workspace: the FrameOS editor (its template.json
+// is the scene page's info) rendered as a component in this page's React tree, the AI panel
 // and the live preview, toggled from the bar. The bar's version dropdown
 // loads any published version into the whole workspace (the diagram, the
 // preview, the AI all see it). Saving publishes the edited scenes as a new
@@ -1468,7 +1484,6 @@ export function SceneEditorModal({
   latestVersionRef.current = latestVersion;
   const available: SceneEditorPanelAvailability = {
     ai: canRemix,
-    info: info !== undefined,
     preview: canPreview,
   };
   const availableRef = useRef(available);
@@ -2020,10 +2035,9 @@ export function SceneEditorModal({
   // What is on screen: the set, or in single-panel mode one of it.
   const shown = shownPanels(panels, narrow, activePanel);
   const single = narrow ? singlePanelFor(panels, activePanel) : undefined;
-  // The scene's name (and its rename pencil) heads the Info column; only
+  // The scene's name (and its rename pencil) heads the bar.
   // while that column is closed does the bar carry it.
   const nameTitle = <SceneNameTitle name={sceneName} onRename={renameScene} />;
-  const nameInInfo = info !== undefined && shown.info;
   // The version the workspace holds: a cloud install pins it when it is
   // not the latest, and the zip link downloads it.
   const installVersion =
@@ -2159,7 +2173,7 @@ export function SceneEditorModal({
             ) : null}
           </select>
         ) : null}
-        {nameInInfo ? null : nameTitle}
+        {nameTitle}
         {!canSave ? (
           <span
             className="pill"
@@ -2190,7 +2204,7 @@ export function SceneEditorModal({
                     }
                   : undefined
               }
-              heading={nameTitle}
+              heading={info.scene.name}
               shown={{ images, listing }}
             />
           ) : undefined
@@ -2213,6 +2227,16 @@ export function SceneEditorModal({
           storeSceneId: sceneId,
         }}
         description={listing.description ?? description ?? undefined}
+        template={{
+          category: listing.category,
+          description: listing.description,
+          frameosVersion: listing.frameosVersion,
+          name: info?.scene.name ?? sceneName ?? "Untitled scene",
+          tags: listing.tags,
+        }}
+        // Only the owner's draft is published; a visitor's template.json is
+        // shown, not edited.
+        onTemplateChanged={canSave ? applyListingChanges : undefined}
         editorApiRef={editorApiRef}
         height={height || 480}
         onSaveScreenshot={saveScreenshot}

@@ -8,21 +8,19 @@ import {
 } from "./scene-views";
 
 function panels(open: Partial<SceneEditorPanels>): SceneEditorPanels {
-  return { ai: false, editor: false, info: false, preview: false, ...open };
+  return { ai: false, editor: false, preview: false, ...open };
 }
 
 describe("scene editor hashes", () => {
   it("round-trips every non-empty panel combination through its hash", () => {
-    for (const info of [false, true]) {
-      for (const editor of [false, true]) {
-        for (const ai of [false, true]) {
-          for (const preview of [false, true]) {
-            const set = panels({ ai, editor, info, preview });
-            if (openPanelCount(set) === 0) {
-              continue;
-            }
-            expect(sceneEditorPanelsForHash(sceneEditorHashFor(set))).toEqual(set);
+    for (const editor of [false, true]) {
+      for (const ai of [false, true]) {
+        for (const preview of [false, true]) {
+          const set = panels({ ai, editor, preview });
+          if (openPanelCount(set) === 0) {
+            continue;
           }
+          expect(sceneEditorPanelsForHash(sceneEditorHashFor(set))).toEqual(set);
         }
       }
     }
@@ -35,19 +33,24 @@ describe("scene editor hashes", () => {
     expect(sceneEditorHashFor(panels({ ai: true, editor: true, preview: true }))).toBe(
       "#scene-editor-preview-ai",
     );
-    expect(sceneEditorHashFor(panels({ editor: true, info: true, preview: true }))).toBe(
-      "#scene-editor-info-preview",
+  });
+
+  it("reads the retired Info column's links as the Editor, where its content is now", () => {
+    expect(sceneEditorPanelsForHash("#scene-editor-info-preview")).toEqual(
+      panels({ editor: true, preview: true }),
     );
-    expect(sceneEditorHashFor(panels({ ai: true, editor: true, info: true, preview: true }))).toBe(
-      "#scene-editor-info-preview-ai",
+    expect(sceneEditorPanelsForHash("#scene-editor-info-preview-ai")).toEqual(
+      panels({ ai: true, editor: true, preview: true }),
     );
+    expect(sceneEditorPanelsForHash("#scene-info-preview")).toEqual(panels({ editor: true, preview: true }));
+    expect(sceneEditorPanelsForHash("#scene-info")).toEqual(panels({ editor: true }));
+    expect(sceneEditorPanelsForHash("#scene-ai-info")).toEqual(panels({ ai: true, editor: true }));
+    expect(sceneEditorPanelsForHash("#scene-info-info")).toBeNull();
   });
 
   it("spells editor-less sets with the plain #scene prefix", () => {
-    expect(sceneEditorHashFor(panels({ info: true, preview: true }))).toBe("#scene-info-preview");
     expect(sceneEditorHashFor(panels({ preview: true }))).toBe("#scene-preview");
-    expect(sceneEditorHashFor(panels({ info: true }))).toBe("#scene-info");
-    expect(sceneEditorHashFor(panels({ ai: true, info: true }))).toBe("#scene-info-ai");
+    expect(sceneEditorHashFor(panels({ ai: true }))).toBe("#scene-ai");
     expect(sceneEditorHashFor(panels({ ai: true, preview: true }))).toBe("#scene-preview-ai");
     // Nothing open is a view of its own.
     expect(sceneEditorHashFor(panels({}))).toBe("#scene-none");
@@ -58,7 +61,7 @@ describe("scene editor hashes", () => {
     expect(sceneEditorPanelsForHash("#scene-editor-ai-preview")).toEqual(
       panels({ ai: true, editor: true, preview: true }),
     );
-    expect(sceneEditorPanelsForHash("#scene-ai-info")).toEqual(panels({ ai: true, info: true }));
+    expect(sceneEditorPanelsForHash("#scene-ai-preview")).toEqual(panels({ ai: true, preview: true }));
     expect(sceneEditorPanelsForHash("#scene-editor-preview-preview")).toBeNull();
     expect(sceneEditorPanelsForHash("#scene-editor-editor")).toBeNull();
     expect(sceneEditorPanelsForHash("#scene-editor-settings")).toBeNull();
@@ -80,14 +83,14 @@ describe("scene editor hashes", () => {
 });
 
 describe("defaultSceneEditorPanels", () => {
-  it("is Info + Editor + Preview, the AI assistant off", () => {
-    expect(defaultSceneEditorPanels).toEqual({ ai: false, editor: true, info: true, preview: true });
+  it("is Editor + Preview, the AI assistant off", () => {
+    expect(defaultSceneEditorPanels).toEqual({ ai: false, editor: true, preview: true });
   });
 });
 
 describe("openPanelCount", () => {
   it("counts the open panels", () => {
     expect(openPanelCount(panels({}))).toBe(0);
-    expect(openPanelCount(panels({ editor: true, info: true }))).toBe(2);
+    expect(openPanelCount(panels({ editor: true, preview: true }))).toBe(2);
   });
 });

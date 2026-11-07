@@ -3,8 +3,13 @@
 The [FrameOS](https://frameos.net) visual scene editor — the same node-graph editor the FrameOS
 backend ships — as an embeddable static bundle. No backend needed: the app catalog and app sources
 are embedded at build time, scenes go in and come back out as JSON over `postMessage`. The editor
-carries the full scene workspace: the node diagram plus side panels for scene settings, state
-variables, the app catalog, events and raw scene JSON; app sources open in a Monaco editor modal.
+carries the full scene workspace as a file tree: `template.json` (the template's name, description,
+category and tags, as a form or as JSON), then every scene as a diagram (`<name>.scene`, with side
+panels for scene settings, state variables, the app catalog, events and raw scene JSON) and its app
+nodes as folders of files, each opening in the editor pane (Monaco, `config.json` as a form). The
+React component's `template` / `onTemplateChanged` / `templateCategories` props drive
+`template.json` (`templateContent` replaces its form with the host's own view, `initialFile:
+'template'` opens on it); without them it is read only.
 When the [`frameos-wasm`](https://www.npmjs.com/package/frameos-wasm) package's assets are served
 next to the bundle (at `./frameos-wasm/` relative to `dist/`), the Preview panel runs the edited
 scenes live through the FrameOS WebAssembly runtime — canvas, scene state and runtime logs included.

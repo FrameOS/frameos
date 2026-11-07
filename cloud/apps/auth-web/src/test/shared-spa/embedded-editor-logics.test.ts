@@ -46,6 +46,7 @@ import { livePreviewLogic } from "../../../../../../frontend/src/scenes/frame/pa
 import { sceneSettingsLogic } from "../../../../../../frontend/src/scenes/frame/panels/Scenes/sceneSettingsLogic";
 import { scenesLogic } from "../../../../../../frontend/src/scenes/frame/panels/Scenes/scenesLogic";
 import { workspaceLogic } from "../../../../../../frontend/src/scenes/workspace/workspaceLogic";
+import { sceneFileTreeLogic } from "../../../../../../frontend/src/embed/sceneFileTreeLogic";
 
 const frameId = 1 as unknown as FrameType["id"];
 const sceneId = "analog-clock-face";
@@ -79,6 +80,7 @@ const alertMock = vi.fn();
 // and the panels it renders), with the props each is keyed on.
 const editorLogics: Array<[string, () => { mount: () => () => void }]> = [
   ["frameEditorsLogic", () => frameEditorsLogic({ frameId })],
+  ["sceneFileTreeLogic", () => sceneFileTreeLogic({ frameId })],
   ["workspaceLogic", () => workspaceLogic({ frameId })],
   ["scenesLogic", () => scenesLogic({ frameId })],
   ["appsLogic", () => appsLogic({ frameId })],

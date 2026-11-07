@@ -101,7 +101,7 @@ export function NewSceneWithAi({
   // sends it; follows the editor's edits and its scene tabs.
   const [sceneName, setSceneName] = useState<string | null>(null);
   const [presetIndex, setPresetIndex] = useState(0);
-  const [panels, setPanels] = useState<SceneEditorPanels>({ ai: true, editor: true, info: false, preview: false });
+  const [panels, setPanels] = useState<SceneEditorPanels>({ ai: true, editor: true, preview: false });
   // A narrow viewport shows one panel of the set at a time (the last one
   // picked there, else singlePanelFor's).
   const narrow = useSinglePanelMode();
@@ -266,7 +266,7 @@ export function NewSceneWithAi({
         )
       : [blankScene()];
     if (handedOff) {
-      setPanels({ ai: false, editor: true, info: false, preview: true });
+      setPanels({ ai: false, editor: true, preview: true });
       setTouched(true);
     } else {
       // The editor answers with its own normalised copy of the blank scene;
@@ -465,7 +465,6 @@ export function NewSceneWithAi({
         <SceneEditorBackButton href={myScenesUrl} label="Back" />
         <SceneEditorPanelToggles
           active={narrow ? singlePanelFor(panels, activePanel) : undefined}
-          available={{ info: false }}
           onToggle={togglePanel}
           panels={panels}
         />

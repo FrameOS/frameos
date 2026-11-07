@@ -61,6 +61,7 @@ export default tseslint.config(
       // Same exclusion, same reason: builds every logic the embedded editor
       // mounts; workspaceLogic reaches the legacy workspace components.
       "**/src/test/shared-spa/embedded-editor-logics.test.ts",
+      "**/src/test/shared-spa/embedded-editor-file-tree-logic.test.ts",
       "**/src/test/shared-spa/scene-state-logic.test.ts",
       // Same exclusion, same reason: frameStatusGroups's import graph
       // reaches decorators/frame.tsx and the legacy components.
