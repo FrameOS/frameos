@@ -145,7 +145,7 @@ ${APP_GUIDE}
 
 // The scene guide's sections about writing an app (docs/scene-guide.md); the
 // backend's app AI reads the same ones (backend/app/utils/ai_app.py).
-const appGuideSectionIds = ["js-apps", "images-svg-and-text", "layout-and-color", "small-frames", "js-api-reference"];
+const appGuideSectionIds = ["js-apps", "drawing-with-jsx", "images-svg-and-text", "layout-and-color", "small-frames", "js-api-reference"];
 const APP_GUIDE = appGuideSectionIds
   .map((id) => {
     const section = SCENE_GUIDE_SECTIONS.find((entry) => entry.id === id);

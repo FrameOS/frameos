@@ -210,6 +210,7 @@ ${appContextMembers}  [key: string]: any;
 
 declare const frameos: {
   image(spec?: FrameOSImageSpec): FrameOSImageSpec & { __frameosType: "image" };
+  /** SVG markup that came from elsewhere (a download, an asset) as an image. A drawing the app makes is JSX returned from a .tsx app's get(), never markup built as a string. */
   svg(svg: string, spec?: FrameOSImageSpec): FrameOSImageSpec & { __frameosType: "image"; svg: string };
   node(nodeId: number): FrameOSNodeRef;
   scene(sceneId: string): FrameOSSceneRef;
