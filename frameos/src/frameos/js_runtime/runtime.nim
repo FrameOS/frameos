@@ -6,6 +6,7 @@ import frameos/types
 import frameos/values
 import frameos/js_runtime/source_map
 import frameos/js_runtime/burrito
+import frameos/js_runtime/jsx_native
 when defined(frameosEmbedded): import frameos/utils/memory
 import lib/tz
 import tables, json, strutils, locks, sequtils
@@ -883,6 +884,7 @@ proc ensureSceneJs*(scene: InterpretedFrameScene) =
     scene.js.registerFunction("format", jsChronoFormat)
     scene.js.registerFunction("now", jsChronoNow)
     evalScenePrelude(scene.js)
+    discard scene.js.installNativeJsx() # the JSX factory in C (jsx_native.nim)
     # Initialize registries
     scene.jsFuncNameByNode = initTable[NodeId, string]()
     scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()

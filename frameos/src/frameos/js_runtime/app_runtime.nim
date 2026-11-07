@@ -19,6 +19,7 @@ import frameos/utils/canvas_log
 import frameos/utils/paths
 import frameos/utils/system
 import frameos/js_runtime/burrito
+import frameos/js_runtime/jsx_native
 import frameos/render_probe
 import frameos/js_runtime/jsx
 import frameos/ui/layout
@@ -2016,6 +2017,8 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsGetAppKeys", jsGetAppKeys)
   probe(phPrelude):
     evalAppPrelude(runtime.js)
+    # The JSX factory in C (jsx_native.nim): every element of a UI's get().
+    discard runtime.js.installNativeJsx()
   # The test harness, when this runtime runs an app's tests (app_tests.nim):
   # after the prelude so it can wrap `frameos`, before the module so the
   # module's describe() calls land in it.
