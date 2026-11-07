@@ -41,10 +41,10 @@ opened twice, the JSX DVD bounce for 40 s); main built from 0267672c
 | Scene switcher open (cold / again) | 2,293–2,547 ms | **812–854 / 319–340 ms** |
 | Switcher closed, back to the home panel | a rebuild, ~250 ms | **64 ms** (its buffer holds the panel), ~300 ms (it holds another frame) |
 | Cold switch: Weather / Home / Calculator | 1,229 / 361–421 / 492 ms | 675–696 / 218–264 / 337–344 ms |
-| JSX DVD bounce, 33 ms period | 29.1–29.2 fps, max 170–182 ms | 27.7–28.7 fps, max 54–75 ms |
+| JSX DVD bounce, 33 ms period | 29.0–29.2 fps; a quiet frame 31.4 ms on average (the max, 170–185 ms, is the frame logged in full) | 29.5–29.6 fps; a quiet frame 30.5–30.7 ms, the logged one 39 ms |
 | Free internal RAM after the sequence | 72.4 KB (largest 36.9 KB) | 67.7 KB (largest 30.7 KB): the log ring task's stack |
 | Free PSRAM after the sequence | 3.62 MB | 3.44 MB: coverage masks, glyph paths, the covered scene |
-| App image | 3,231,952 B | 3,281,536 B (+49.6 KB; 322,944 B free in the OTA slot) |
+| App image | 3,231,952 B | 3,261,328 B (+29.4 KB; 343,152 B free in the OTA slot) |
 
 A toggle's split now (`set debug 1` puts it on every render line): scene 76
 = the JS app node 69 (get 11, walk 3.5, layout 8: build 4, text 1–1.5; emit
@@ -89,6 +89,15 @@ The raster (pixie and the UI layer):
 - Translucent backgrounds over an in-flow box with a flat opaque background
   are pre-blended; a fill colour is parsed once per element (from a cache of
   recent colour strings), not per draw.
+- **A path whose masks go unused makes no more for a while** (`maskWaste` on
+  the path, `| skip wasted` on the probe line). The JSX DVD bounce places its
+  logo at `Date.now()`'s whole milliseconds × 0.11 px, a hundred fractions
+  that recur, so the second-sight rule made a 10 KB mask in most frames, each
+  evicted before its fraction came back: 0 hits, 1–2 misses a frame, the
+  cache full at 255 KB with the UI's masks pushed out, and frames spread from
+  under 28 ms to 40 ms where main's sat at 28–33 (a frame faster than the
+  period banks nothing, one slower makes the next late). That was the
+  branch's "DVD ~1 fps below main" (27.7–28.7 fps), now 29.5–29.6.
 
 The layout and the JS side:
 - The text memo keeps a layout's unused texts one layout longer (a toggle's
@@ -117,11 +126,6 @@ Hosts:
 
 ## Still open
 
-- **The DVD bounce is ~1 fps below main** (28.2 against 29.2) though each
-  frame renders faster: it loses ~6 frames in 10 s to 50–75 ms frames where
-  main lost ~5 to one 180 ms logged frame. Not the log ring (measured off:
-  the same 28.2) nor the idle touch poll (measured). Unknown; a binary layout
-  effect on the 16 KB instruction cache is the remaining suspect.
 - **~7 ms of interpreter** around one app node per render, and ~6 ms inside
   the app node outside the probed phases: not located.
 - **Build** (4 ms of a toggle): what is left after the class caches.
@@ -145,6 +149,26 @@ Hosts:
 - An e-paper board (Gray8 surface, the reTerminal E1003's touch) and a Pi
   have not been benchmarked with these changes; the cache and blits run on
   every surface and their test covers RGBX, 565 and Gray8.
+
+## What it costs in flash
+
++29.4 KB over main (it was +49.6 KB until the map was read symbol by symbol:
+the prelude's source stayed in the image beside its bytecode, 10.3 KB;
+`rasterizeMask` called pixie's generic `fillShapes` with a `ColorRGBX`, a
+second 4.2 KB copy of it, which also took gcc's inlining of
+`computeCoverage` — a call per scanline — out of every fill; three `Table`
+instantiations, 3.9 KB; the probe templates compiling the timed code twice
+and `strformat` for its line, ~2 KB). What is left, roughly: the layout's
+glyph runs, shared boxes and caches 5.7 KB; the coverage cache 4.9 KB; the
+QuickJS bytecode reader 4.4 KB (the bytecode itself is 0.9 KB smaller than
+the source it replaced); the probe ~4 KB; pixie's SVG shape sharing 2.8 KB;
+generic seq code 2.1 KB; the covered scene 1.5 KB; the log ring 1.5 KB; the
+C JSX factory 0.7 KB. A build with no render probe would save its ~4 KB; it
+stays, so a frame in the field can say where its time goes.
+
+To read a change's cost: build both trees, then diff the two
+`frameos_esp32.map` files by symbol (Nim's `_u<n>` suffixes and the pixie
+path stripped), not `firmware-size.json`'s groups, which moved with pixie.
 
 ## Not on the ladder, on purpose
 

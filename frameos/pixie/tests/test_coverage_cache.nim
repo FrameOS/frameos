@@ -109,5 +109,28 @@ let box = roundedBox()
 small.fillPath(box, rgba(0, 0, 0, 255), translate(vec2(1, 1)))
 small.fillPath(box, rgba(0, 0, 0, 255), translate(vec2(1, 1)))
 doAssert coverageCacheUsedBytes() == 0, "a 120x60 mask does not fit 3 KB"
+
+# An animation: a path at fifty fractions over and over (the JSX DVD bounce
+# at `Date.now()`'s whole milliseconds), in a budget of two masks, beside a
+# label drawn where it always is. The second-sight rule alone made a mask
+# for nearly every frame of it, each evicted before its fraction came back.
+block:
+  coverageCacheBudget = 20 * 1024
+  clearCoverageCache()
+  let
+    canvas = make("rgbx")
+    moving = roundedBox()
+    label = blob()
+  var churnMisses, labelHits: int
+  for round in 0 ..< 4:
+    for i in 0 ..< 50:
+      let misses0 = coverageCacheMisses
+      canvas.fillPath(moving, rgba(0, 0, 0, 255), translate(vec2(20 + i.float32 / 50, 10)))
+      if round >= 2: churnMisses += coverageCacheMisses - misses0
+      let hits0 = coverageCacheHits
+      canvas.fillPath(label, rgba(0, 0, 255, 255), translate(vec2(150.5, 40.25)))
+      if round >= 2: labelHits += coverageCacheHits - hits0
+  doAssert churnMisses <= 4, "the moving path keeps making masks: " & $churnMisses & " in 100 draws"
+  doAssert labelHits == 100, "the label's mask is hit every draw: " & $labelHits
 coverageCacheBudget = 0
 echo "coverage cache ok"

@@ -30,6 +30,8 @@ type
     flat: seq[Polygon] # a shared path's closed shapes at `flatScale`
     bounded: bool # `bounds` measured (a shared path's, `localBounds`)
     bounds: Rect
+    maskWaste: int32 # coverage masks of it let go unused, less its hits since
+    maskBanUntil: int # no new mask of it before this coverage-cache tick
 
   SomePath* = Path | string
 
@@ -2515,6 +2517,7 @@ type
     full: seq[(int32, int32)] # per row, the run [a, b) every pixel of which is covered whole
     bytes: int
     used: int
+    hits: int
 
   CoverageKey = object
     path: uint
@@ -2559,7 +2562,8 @@ type PathProbeKind* = enum
 
 type CacheSkip* = enum
   csOff = "off", csNotShared = "notShared", csTransform = "transform", csBlend = "blend",
-  csFirstSight = "first", csTooBig = "big", csLongStroke = "longStroke", csEmpty = "empty"
+  csFirstSight = "first", csTooBig = "big", csLongStroke = "longStroke", csEmpty = "empty",
+  csWasted = "wasted"
 
 var
   pathProbeOn* {.threadvar.}: bool ## time fills and strokes (FrameOS's render probe)
@@ -2595,13 +2599,32 @@ proc isAxisAligned(m: Mat3): bool =
   m[0, 1] == 0 and m[1, 0] == 0 and m[0, 2] == 0 and m[1, 2] == 0 and m[2, 2] == 1 and
     m[0, 0] > 0 and m[1, 1] > 0
 
+const
+  MaskWasteLimit = 2
+    ## A path whose masks went unused this many times more than they were
+    ## hit makes no new one for a while (MaskBanTicks).
+  MaskBanTicks = 1024
+    ## Fills, a few seconds of an animation: then one more mask is tried.
+
 proc evictCoverage(needed: int) =
   while coverageMasks.len > 0 and coverageCacheBytes + needed > coverageCacheBudget:
     var oldest = 0
     for i in 1 ..< coverageMasks.len:
       if coverageMasks[i].used < coverageMasks[oldest].used:
         oldest = i
-    coverageCacheBytes -= coverageMasks[oldest].bytes
+    let gone = coverageMasks[oldest]
+    if gone.hits == 0:
+      # Made and let go unused: a path that does this keeps a budget's worth
+      # of masks churning. The JSX DVD bounce draws its logo at a new
+      # fraction every frame — a hundred of them, as `Date.now()` is whole
+      # milliseconds — so the second-sight rule let it make a 10 KB mask most
+      # frames, each evicted before its fraction came round again: no hits,
+      # a mask's making dearer than the fill, and the UI's masks pushed out
+      # (2026-11-07, 0 hits and 1-2 misses a frame at a full 255 KB).
+      inc gone.path.maskWaste
+      if gone.path.maskWaste >= MaskWasteLimit:
+        gone.path.maskBanUntil = coverageCacheTick + MaskBanTicks
+    coverageCacheBytes -= gone.bytes
     coverageMasks.del(oldest)
     coverageKeys.del(oldest)
 
@@ -2729,6 +2752,8 @@ proc fillFromCoverageCache(
         coverageSeen[other] = coverageSeen[slot]
         coverageSeen[slot] = h
       skip(csFirstSight)
+    if path.maskWaste >= MaskWasteLimit and coverageCacheTick < path.maskBanUntil:
+      skip(csWasted)
     # A mask covers the whole path; a fill under a view only what shows.
     # A large path seen through a small damage box is filled.
     let
@@ -2768,6 +2793,8 @@ proc fillFromCoverageCache(
       coverageCacheBytes += mask.bytes
   else:
     inc coverageCacheHits
+    inc mask.hits
+    if mask.path.maskWaste > 0: dec mask.path.maskWaste
   mask.used = coverageCacheTick
   image.blitMask(mask, ix, iy, color.asRgbx(), blendMode)
   true
