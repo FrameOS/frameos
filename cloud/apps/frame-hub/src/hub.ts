@@ -317,6 +317,9 @@ interface DeviceSession {
   authed: boolean;
   closed: boolean;
   disconnectHandled: boolean;
+  // The disconnect bookkeeping the close started (markDeviceDisconnected),
+  // for a shutdown to wait on.
+  disconnecting: Promise<void> | undefined;
   drainQueued: boolean;
   draining: boolean;
   frame: FrameRow;
@@ -2336,6 +2339,7 @@ export async function startFrameHub(
       authed: false,
       closed: false,
       disconnectHandled: false,
+      disconnecting: undefined,
       drainQueued: false,
       draining: false,
       frame,
@@ -2410,7 +2414,7 @@ export async function startFrameHub(
         return;
       }
       logInfo("device.disconnected", { code, frameId: frame.id });
-      markDeviceDisconnected(session, {
+      session.disconnecting = markDeviceDisconnected(session, {
         reason: session.sleeping ? "asleep" : deviceCloseReason(code),
       }).catch((error: unknown) =>
         logError("device.disconnect_failed", {
@@ -2428,7 +2432,19 @@ export async function startFrameHub(
   // is a session like any other: the same activation, the same drain, the
   // same handlers for what it sends back, the same kick when the frame is
   // revoked or deleted.
-  async function attachVirtualDevice(
+  // Every attach in flight, for close() to wait on: one ends on its own (it
+  // reads `closed` after its queries), but a session it already made must be
+  // in the shutdown's list.
+  const virtualAttaches = new Set<Promise<void>>();
+  function attachVirtualDevice(frameId: string, options?: { render?: boolean }) {
+    const attach = attachVirtualDeviceNow(frameId, options).finally(() => {
+      virtualAttaches.delete(attach);
+    });
+    virtualAttaches.add(attach);
+    return attach;
+  }
+
+  async function attachVirtualDeviceNow(
     frameId: string,
     { render = false }: { render?: boolean } = {},
   ) {
@@ -2498,7 +2514,7 @@ export async function startFrameHub(
           return;
         }
         logInfo("device.disconnected", { code, frameId, virtual: true });
-        markDeviceDisconnected(session, {
+        session.disconnecting = markDeviceDisconnected(session, {
           reason: deviceCloseReason(code),
         }).catch((error: unknown) =>
           logError("device.disconnect_failed", {
@@ -2539,6 +2555,7 @@ export async function startFrameHub(
         authed: true,
         closed: false,
         disconnectHandled: false,
+        disconnecting: undefined,
         drainQueued: false,
         draining: false,
         frame: row.frame,
@@ -3110,6 +3127,9 @@ export async function startFrameHub(
     heartbeat.stop();
     sweep.stop();
     virtualTick.stop();
+    // Attaches in flight (see attachVirtualDevice): a session one made is in
+    // the list below only once it is done.
+    await Promise.all([...virtualAttaches].map((attach) => attach.catch(() => undefined)));
     try {
       await listenClient.end({ timeout: 5 });
     } catch (error) {
@@ -3120,6 +3140,9 @@ export async function startFrameHub(
     // (guarded by hub_session_id) before dropping the sockets.
     const sessions = [...deviceSessions.values()];
     deviceSessions.clear();
+    // The virtual devices, before their sessions' close takes them off the
+    // map: each is awaited below.
+    const devices = [...virtualDevices.values()];
     for (const session of sessions) {
       session.closed = true;
       try {
@@ -3140,6 +3163,19 @@ export async function startFrameHub(
       }
       session.ws.close(1001, "shutting_down");
     }
+    // Nothing of a session's may still be running when close() resolves:
+    // the messages it was handling (each ends with a broadcast's SELECTs),
+    // a virtual device's render in flight, and the disconnect bookkeeping
+    // its close started. A query left running would land on whatever comes
+    // after the hub — in the integration suites the next test's TRUNCATE,
+    // which it deadlocks. The device's render is bounded by the renderer's
+    // own timeout.
+    for (const session of sessions) {
+      await session.handling;
+    }
+    for (const device of devices) {
+      await device.settle();
+    }
     for (const registry of [frameBrowserSockets, accountBrowserSockets]) {
       for (const connections of registry.values()) {
         for (const connection of connections) {
@@ -3155,6 +3191,11 @@ export async function startFrameHub(
       // so shutdown cannot hang on a half-open peer.
       setTimeout(() => server.closeAllConnections(), 250).unref();
     });
+    // A hardware socket's close event, which starts its disconnect
+    // bookkeeping, fires only once its connection is gone (above).
+    for (const session of sessions) {
+      await session.disconnecting;
+    }
     // An observed pool is this hub's own (see FrameHubOptions.onQuery); the
     // shared cached one belongs to whoever created it.
     if (options.onQuery) {

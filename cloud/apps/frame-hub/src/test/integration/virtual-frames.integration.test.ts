@@ -456,6 +456,39 @@ describe("a virtual frame's device", () => {
     expect((await frameRow(frame.id)).hardware).toMatchObject({ height: 24, width: 48 });
   });
 
+  it("closes only once the render in flight has ended, and keeps nothing of it", async () => {
+    const { frame } = await createVirtualFixture();
+    const hub = await startHub();
+    await connected(frame.id);
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let renderEnded = false;
+    renderAnswer = async (options) => {
+      await held;
+      renderEnded = true;
+      return picture(options);
+    };
+    await settled((await push(frame.id, { checksum: "sum-1", scenes })).id);
+    await waitFor(async () => (renders.length === 1 ? true : undefined), "the render to start");
+
+    // The session goes at once; the close itself waits for the device.
+    let closeResolved = false;
+    const closing = hub.close().then(() => {
+      closeResolved = true;
+    });
+    await waitFor(async () => ((await frameRow(frame.id)).connected ? undefined : true), "the disconnect");
+    expect(hub.connectedFrames()).toBe(0);
+    expect(closeResolved).toBe(false);
+    release!();
+    await closing;
+    expect(renderEnded).toBe(true);
+    // A closed device stores nothing: no query of its is left to run against
+    // whatever follows the hub (here, the next test's TRUNCATE).
+    expect(await imageBytes(frame.id)).toBeUndefined();
+  });
+
   it("comes back and draws again when it is told to restart", async () => {
     const { frame } = await createVirtualFixture();
     const hub = await startHub();

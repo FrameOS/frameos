@@ -193,6 +193,8 @@ export class VirtualDevice {
   // Events a verb delivered for the scene, waiting for the render that runs
   // them (a render is the only time the scene's code runs).
   private pendingEvents: { name: string; origin: string; payload?: unknown }[] = [];
+  // The render loop while one runs (requestRender): what settle() waits for.
+  private renderLoop: Promise<void> = Promise.resolve();
   private renderRunning = false;
   private renderWanted = false;
   private scopes: string[] = [];
@@ -289,6 +291,19 @@ export class VirtualDevice {
 
   close() {
     this.closed = true;
+  }
+
+  /**
+   * Resolves once every verb received so far has been handled and the render
+   * running, if any, has finished. After close() nothing new starts, so a hub
+   * shutting down awaits this to end with no query of this device's in
+   * flight: a late one would run against whatever follows the hub (in the
+   * integration suite the next test's TRUNCATE, which it deadlocks).
+   */
+  async settle() {
+    // A verb may start a render; a render never queues a verb.
+    await this.handling;
+    await this.renderLoop;
   }
 
   /** The row changed under the device (its size): show it. */
@@ -576,7 +591,7 @@ export class VirtualDevice {
       return;
     }
     this.renderRunning = true;
-    void (async () => {
+    this.renderLoop = (async () => {
       try {
         while (this.renderWanted && !this.closed) {
           this.renderWanted = false;
