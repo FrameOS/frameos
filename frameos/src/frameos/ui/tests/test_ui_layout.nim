@@ -494,6 +494,68 @@ suite "fields, clipping and scrolling":
     discard layout.layoutUi(el("div", "", secret), 240, 60, state, regions, memo)
     check memo.fieldText(regions[0].key) == "abc"
 
+  test "a textarea: Up and Down walk its lines, and it scrolls like a box":
+    # Three lines, 24 px each (text-base), in a box two lines tall.
+    let area = input("textarea", "w-[200px] h-[40px] text-black bg-white", {"value": "ab\ncd\nef"})
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    discard layout.layoutUi(el("div", "bg-white", area), 240, 60, state, regions)
+    check regions.len == 1 and regions[0].field == 2
+    check regions[0].scrollY > 0 and regions[0].scrollY < 40 # 72 px of lines, 40 shown
+    let key = regions[0].key
+    # Focused with the caret before the d (byte 4, line 1): a line up is the
+    # same column on line 0 (after the a); up again is the start.
+    state.focus = key + 1
+    state.text = "ab\ncd\nef"
+    state.caret = 4
+    state.lineStep = -1
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-white", area), 240, 60, state, regions)
+    check state.caret == 1 and state.lineStep == 0 and state.goal
+    state.lineStep = -1
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-white", area), 240, 60, state, regions)
+    check state.caret == 0
+    # Down keeps the column it set out from: line 1 after the c, line 2
+    # after the e, then the end.
+    for expected in [4, 7, 8]:
+      state.lineStep = 1
+      regions.setLen(0)
+      discard layout.layoutUi(el("div", "bg-white", area), 240, 60, state, regions)
+      check state.caret == expected
+    # The caret on the last line scrolled the box to show it ...
+    check state.scrolled(key)[1] > 0
+    # ... and a scroll by hand stays: a layout nothing asked to reveal keeps
+    # the caret out of sight, a line step brings it back.
+    state.scrollTo(key, 0, 0)
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-white", area), 240, 60, state, regions)
+    check state.scrolled(key)[1] == 0
+    state.lineStep = -1
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-white", area), 240, 60, state, regions)
+    check state.caret == 4 and state.scrolled(key)[1] > 0 # line 1 under the end: after the c
+    # Let go of the keyboard, it keeps where it was scrolled to (an input
+    # shows its text from the start again), and draws its bar.
+    state.focus = 0
+    state.scrollTo(key, 0, 20)
+    regions.setLen(0)
+    let svg = layout.layoutUi(el("div", "bg-white", area), 240, 60, state, regions)
+    check state.scrolled(key)[1] == 20 and regions[0].scrollY > 0
+    var bars = 0
+    for node in svg.children:
+      if node.tag == "path": inc bars
+    check bars == 1
+    let line = input("input", "w-[40px] h-[30px] text-black bg-white", {"value": "Hello there"})
+    state = UiInput()
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-white", line), 240, 60, state, regions)
+    state.scrollTo(regions[0].key, 30, 0)
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-white", line), 240, 60, state, regions)
+    check state.scrolled(regions[0].key)[0] == 0 and regions[0].scrollY == 0
+
   test "the on-screen keyboard: under the UI, its keys regions":
     let field = input("input", "w-full h-[30px] bg-white", {"value": ""})
     var

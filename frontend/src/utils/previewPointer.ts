@@ -155,6 +155,7 @@ export function attachPointerInput(
   // What is held, per pointer, and where each pointer was last seen: a
   // cancel may come without coordinates, and it happens where the pointer was.
   const pressed = new Map<number, Set<number>>()
+  const pointerTypes = new Map<number, 'mouse' | 'touch' | 'pen'>()
   const lastPositions = new Map<number, { x: number; y: number }>()
   let wheelCarryX = 0
   let wheelCarryY = 0
@@ -213,6 +214,18 @@ export function attachPointerInput(
       }
       return
     }
+    const held = pressed.get(pointerIdOf(event))
+    if (held && Number.isFinite(event.buttons)) {
+      // A move that holds less than was pressed: the release happened where
+      // this page never heard it (off the canvas, its capture gone). It
+      // happens here, before the move, or the scene goes on dragging.
+      const mask = pointerButtonsMask(event.buttons)
+      for (const button of [...held]) {
+        if (!(mask & (1 << button))) {
+          releaseButton(event, button)
+        }
+      }
+    }
     queueMove(event)
     if (moveFrame === null) {
       moveFrame = requestAnimationFrame(() => {
@@ -236,6 +249,7 @@ export function attachPointerInput(
       pressed.set(id, new Set())
     }
     pressed.get(id)!.add(button)
+    pointerTypes.set(id, pointerTypeOf(event))
     try {
       canvas.setPointerCapture(event.pointerId)
     } catch {
@@ -248,8 +262,9 @@ export function attachPointerInput(
     send(v2() ? 'pointerDown' : 'mouseDown', v2() ? { ...pointerPayload(event), button } : { button })
   }
 
-  const release = (event: PointerEvent): void => {
-    const button = pointerButton(event.button)
+  const release = (event: PointerEvent): void => releaseButton(event, pointerButton(event.button))
+
+  const releaseButton = (event: PointerEvent, button: number): void => {
     const id = pointerIdOf(event)
     const held = pressed.get(id)
     if (!held || !held.has(button)) {
@@ -258,29 +273,38 @@ export function attachPointerInput(
     held.delete(button)
     if (held.size === 0) {
       pressed.delete(id)
+      pointerTypes.delete(id)
     }
     queueMove(event)
     flushMoves()
     send(v2() ? 'pointerUp' : 'mouseUp', v2() ? { ...pointerPayload(event), button } : { button })
   }
 
-  // A cancelled touch (the browser took it for a scroll) never reports which
-  // button went up: let go of everything that pointer holds.
-  const onCancel = (event: PointerEvent): void => {
-    flushMoves()
-    const id = pointerIdOf(event)
+  // A pointer let go of without its release: a cancelled touch (the browser
+  // took it for a scroll) never reports which button went up, a capture lost
+  // mid-drag (the canvas replaced or hidden) ends with no pointerup, and a
+  // detach while a button is held would leave the scene holding a drag
+  // nothing ends. Let go of everything that pointer holds.
+  const cancelPointer = (id: number, position: { x: number; y: number }): void => {
     const held = pressed.get(id)
     if (!held) {
       return
     }
     pressed.delete(id)
+    const pointerType = pointerTypes.get(id) ?? 'mouse'
+    pointerTypes.delete(id)
     if (v2()) {
-      send('pointerCancel', { ...positionOf(event), pointerId: id, pointerType: pointerTypeOf(event) })
+      send('pointerCancel', { ...position, pointerId: id, pointerType })
     } else {
       for (const button of held) {
         send('mouseUp', { button })
       }
     }
+  }
+
+  const onCancel = (event: PointerEvent): void => {
+    flushMoves()
+    cancelPointer(pointerIdOf(event), positionOf(event))
   }
 
   const onWheel = (event: WheelEvent): void => {
@@ -310,6 +334,7 @@ export function attachPointerInput(
   canvas.addEventListener('pointerdown', onDown)
   canvas.addEventListener('pointerup', release)
   canvas.addEventListener('pointercancel', onCancel)
+  canvas.addEventListener('lostpointercapture', onCancel)
   canvas.addEventListener('wheel', onWheel, { passive: false })
   canvas.addEventListener('contextmenu', onContextMenu)
 
@@ -318,6 +343,7 @@ export function attachPointerInput(
     canvas.removeEventListener('pointerdown', onDown)
     canvas.removeEventListener('pointerup', release)
     canvas.removeEventListener('pointercancel', onCancel)
+    canvas.removeEventListener('lostpointercapture', onCancel)
     canvas.removeEventListener('wheel', onWheel)
     canvas.removeEventListener('contextmenu', onContextMenu)
     if (moveFrame !== null) {
@@ -325,7 +351,11 @@ export function attachPointerInput(
       moveFrame = null
     }
     queuedMoves.clear()
+    for (const id of [...pressed.keys()]) {
+      cancelPointer(id, lastPositions.get(id) ?? { x: 0, y: 0 })
+    }
     pressed.clear()
+    pointerTypes.clear()
     lastPositions.clear()
   }
 }
