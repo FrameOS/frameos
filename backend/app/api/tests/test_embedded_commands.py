@@ -611,3 +611,30 @@ async def test_the_address_in_a_pull_moves_the_host_only_from_where_it_came(asyn
     assert response.status_code == 200
     db.expire_all()
     assert db.get(Frame, frame.id).frame_host == "192.168.7.9"
+
+
+# ------------------------------------------------- the frame page's changes
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_the_frame_page_rotation_and_scale_land_on_the_row_and_baseline(_pub, async_client, db, redis):
+    frame = await _embedded_frame(async_client, db)
+    frame.rotate = 0
+    frame.render_scale = 0
+    frame.last_successful_deploy = {"rotate": 0, "render_scale": 0, "interval": 300}
+    db.commit()
+    await process_log(db, redis, frame, {
+        'event': 'settings:frame', 'source': 'esp32', 'origin': 'panel', 'changes': 'rotate,renderScale',
+        'rotate': 90, 'renderScale': 1.5,
+    })
+    db.refresh(frame)
+    assert frame.rotate == 90 and frame.render_scale == 1.5
+    # The drawer has nothing to deploy for them: the frame already has them.
+    assert frame.last_successful_deploy == {"rotate": 90, "render_scale": 1.5, "interval": 300}
+
+    # Only the page speaks for the person at the frame, and only in range.
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'scene', 'rotate': 180})
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'panel', 'rotate': 45,
+                                         'renderScale': 9})
+    db.refresh(frame)
+    assert frame.rotate == 90 and frame.render_scale == 1.5
