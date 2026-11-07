@@ -1299,7 +1299,9 @@ proc emitSvg(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode]) =
 
 var glyphPaths {.threadvar.}: Table[(uint, int32, int32), Path]
 
-const GlyphPathsMax = 768
+# A glyph's path keeps its flattened shapes too (a shared path's), a few KB
+# for a large size: an ESP32 holds a UI's worth, a host more.
+const GlyphPathsMax = when defined(frameosEmbedded): 256 else: 1024
 
 proc quarter(v: float32): float32 {.inline.} =
   round(v * 4) / 4
