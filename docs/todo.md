@@ -48,6 +48,12 @@ line in the map).
    went from one frame per 300 s to 19.6 fps). **Next up:** the LCD refill
    off the CPU (GDMA), then the SVG parse and a retained compositor. The
    model is `docs/realtime-rendering.md`.
+   **`docs/perf-todo.md`** — interactive UI speed (2026-11-07): a JSX tap on
+   the SenseCAP Indicator went from ~330 to ~85 ms (the console off the
+   render task, a coverage cache and glyph runs in pixie, the layout's memos,
+   prelude bytecode); pixie is in the tree as `frameos/pixie`. **Next up:**
+   the DVD bounce's last frame a second, the interpreter's ~7 ms, a kept
+   canvas in the wasm preview.
 8. **`docs/scenes-todo.md`** — 49 store scene ideas, which
    `build-todo-scenes.ts` builds from. Lower priority for now, not parked.
 9. **`cloud/STORE-TODO.md`** — the store's design record (decisions, threat

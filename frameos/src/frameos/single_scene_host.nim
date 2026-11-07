@@ -14,7 +14,7 @@
 ## The Linux runner holds many scenes on a thread of its own and is its own
 ## host (frameos/runner.nim).
 
-import std/[json, options, tables]
+import std/[json, monotimes, options, tables, times]
 import pixie
 import ./event_loop
 import ./interpreter
@@ -25,6 +25,7 @@ import ./utils/dither
 import ./utils/memory
 import ./js_runtime/app_runtime
 import ./js_runtime/run_budget
+import ./render_probe
 import ./js_runtime/runtime as jsRuntime
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
@@ -43,6 +44,16 @@ type
       ## settings, system/sceneSettings/scene.nim), which draws itself
       ## through the same three procs.
     sceneId*: Option[SceneId]             ## the current scene, resident or not
+    covered: FrameScene
+      ## The scene the scene switcher or the scene settings opened over, kept
+      ## while there is room, and current again without its init when the
+      ## way back leads to it: its JS interpreters, memo and laid-out tree
+      ## are still there (they go on their own when memory is short, as any
+      ## idle interpreter does). Closing the switcher rebuilt the scene from
+      ## its JSON on an ESP32, ~250 ms of the SenseCAP Indicator's way back
+      ## (2026-11-07). A Pi keeps every scene it showed; this keeps one.
+    coveredExported: ExportedInterpretedScene
+    coveredId: Option[SceneId]
     renderRequested*: bool
     keepJsRuntimes*: bool
       ## Keep the scene's idle JS interpreters between renders while there is
@@ -155,6 +166,22 @@ proc dropScene*(host: SingleSceneHost) =
     host.scene = nil
     host.exported = nil
 
+proc dropCovered*(host: SingleSceneHost) =
+  ## Let go of the scene a built-in scene opened over.
+  if not host.covered.isNil:
+    cleanupScene(host.covered)
+  host.covered = nil
+  host.coveredExported = nil
+  host.coveredId = none(SceneId)
+
+proc roomToCover(): bool =
+  ## Keep a covered scene down to the headroom idle interpreters are kept to
+  ## between renders that decode nothing (utils/memory KeepInterpretersBytes;
+  ## a host without a ceiling answers 0: room). A decode that finds memory
+  ## short releases the interpreters first, as for any kept scene.
+  let headroom = availableRenderHeadroomBytes()
+  headroom <= 0 or headroom >= KeepInterpretersBytes
+
 proc runOn(host: SingleSceneHost, scene: FrameScene, event: string, payload: JsonNode) =
   ## One run of the resident scene, through its export: the interpreter's for
   ## a scene off the list, the switcher's own for the switcher.
@@ -186,7 +213,21 @@ proc makeCurrent*(host: SingleSceneHost, sceneId: SceneId, drop = true) =
     clearRenderPaletteOverride()
     clearGradedImages()
   if drop:
-    host.dropScene()
+    let
+      leaving = host.sceneId
+      opensOver = isBuiltInScene(sceneId.string) and leaving.isSome and
+        not isBuiltInScene(leaving.get().string) and not host.scene.isNil
+    if opensOver and roomToCover():
+      host.dropCovered()
+      host.covered = host.scene
+      host.coveredExported = host.exported
+      host.coveredId = leaving
+      host.scene = nil
+      host.exported = nil
+    else:
+      host.dropScene()
+      if host.coveredId.isSome and host.coveredId.get() != sceneId and not isBuiltInScene(sceneId.string):
+        host.dropCovered() # the way back led somewhere else
   host.sceneId = some(sceneId)
   host.renderRequested = true
 
@@ -198,6 +239,24 @@ proc ensureScene*(host: SingleSceneHost): bool =
   if host.sceneId.isNone:
     return false
   let sceneId = host.sceneId.get()
+  if host.coveredId == some(sceneId) and not host.covered.isNil:
+    # Back from the switcher or the settings to the scene they covered: the
+    # same instance, told it is current again. A switch that carried state
+    # applies it as it would to a fresh one.
+    host.scene = host.covered
+    host.exported = host.coveredExported
+    host.covered = nil
+    host.coveredExported = nil
+    host.coveredId = none(SceneId)
+    if host.pendingSwitchId == sceneId.string and not host.pendingSwitchPayload.isNil:
+      try:
+        host.runNow("setCurrentScene", host.pendingSwitchPayload)
+      except Exception as e:
+        host.say("setCurrentScene state failed: " & e.msg)
+    host.pendingSwitchId = ""
+    host.pendingSwitchPayload = nil
+    host.lifecycle("open", %*{"sceneId": sceneId.string})
+    return true
   let builtIn = isBuiltInScene(sceneId.string)
   if builtIn:
     # The scene switcher or the scene settings: drawn by the runtime,
@@ -334,6 +393,7 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   # ESP32's touch queue, the preview worker's messages), so ticking to now
   # made a tap held across a 750 ms render a `longPress`, and the release
   # no tap. The platform ticks once it has delivered what it queued.
+  let settleStart = getMonoTime()
   discard host.events.drain()
   # The scene is done with its JS apps until the next render. On a
   # deep-sleeping ESP32 that is a fresh boot away, and the next decode wants
@@ -346,3 +406,9 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   # a Pi does.
   if runsAsEmbedded():
     discard settleIdleJsAppRuntimes(host.keepJsRuntimes)
+    # A covered scene holds more than its interpreters (its nodes' images):
+    # it goes when render memory is short, or on a frame that keeps nothing.
+    if not host.covered.isNil and (not host.keepJsRuntimes or not roomToCover()):
+      host.dropCovered()
+  if probeOn:
+    probeAdd(phSettle, (getMonoTime() - settleStart).inNanoseconds)

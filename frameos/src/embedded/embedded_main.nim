@@ -23,6 +23,7 @@ import frameos/utils/dither
 from frameos/utils/http_client import releaseStrandedHttp
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
+import frameos/render_probe
 
 # `log` comes from embedded_runtime (same frameos_nim_log_hook C hook).
 
@@ -422,6 +423,11 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
     when defined(memProbe): memProbe("INIT after armEmergencyReserve")
     initRuntime(frameWidth, frameHeight, frameName, maxHttpResponseBytes.int, frameRotate)
     when defined(memProbe): memProbe("INIT after initRuntime")
+    # pixie keeps the coverage of shared paths (a kept label, a shared icon,
+    # a share()d box) up to this many bytes of PSRAM and draws them as masks:
+    # the geometry of a UI's unchanged elements was most of a repaint
+    # (docs/perf-todo.md). Let go with the rest when render memory is short.
+    coverageCacheBudget = 256 * 1024
     initScene()
     when defined(memProbe): memProbe("INIT after initScene")
     log(&"nim runtime initialized: {frameWidth}x{frameHeight} rotate={frameRotate} " &
@@ -546,6 +552,10 @@ proc fos_nim_render_impl(
     # decode lets kept interpreters go (utils/memory.refreshDecodeBudget).
     refreshDecodeBudget(forDecode = false)
     setAssetColorsPanelPalette(panelPaletteForFormat(pixelFormat.int))
+    # `set debug 1`: the render line below carries where this frame went
+    # (frameos/render_probe.nim), the measurement docs/perf-todo.md is paced by.
+    probeOn = debugEnabled()
+    let cacheAtStart = probeBegin()
     let start = getMonoTime()
     let rendered = renderFrameImage()
     var image = rendered.image
@@ -565,9 +575,11 @@ proc fos_nim_render_impl(
     inc renderCount
     lastRenderMs = ((packed - start).inMilliseconds).int
     if not quietRenders:
+      let phases = probeLine(cacheAtStart)
       log(&"render #{renderCount} ({source}, fmt={pixelFormat}): render {(renderedAt - start).inMilliseconds} ms, " &
           (if inPlace: &"in place, collect {(packed - renderedAt).inMilliseconds} ms"
-           else: &"dither+pack {(packed - renderedAt).inMilliseconds} ms"))
+           else: &"dither+pack {(packed - renderedAt).inMilliseconds} ms") &
+          (if phases.len > 0: " [" & phases & "]" else: ""))
     recoverEmergencyReserve("render")
     # Many interpreted scene graphs dispatch "render" while responding to the
     # render event itself. On embedded that should not immediately replay the

@@ -367,3 +367,33 @@ block scene_switcher_on_one_scene:
   switchHost.dropScene()
   sceneSwitcherListing = nil
 echo "ok"
+
+# ------------------------------------------- the scene a switcher covers
+#
+# Opening the scene switcher over a scene keeps that scene (while there is
+# room), and the way back makes the same instance current again: no second
+# init, no rebuild from its JSON. The way to somewhere else lets it go.
+block:
+  let coverHost = SingleSceneHost(frameConfig: config, logger: logger)
+  coverHost.requestSelect = proc (sceneId: string): bool = true
+  coverHost.start()
+  let fromId = "fixtures/dispatcher/switchFrom".SceneId
+  coverHost.makeCurrent(fromId)
+  doAssert coverHost.ensureScene()
+  let first = coverHost.scene
+  coverHost.makeCurrent("system/sceneSwitcher".SceneId)
+  doAssert coverHost.ensureScene()
+  doAssert coverHost.scene != first, "the switcher is resident while it shows"
+  coverHost.makeCurrent(fromId)
+  doAssert coverHost.ensureScene()
+  doAssert coverHost.scene == first, "back to the covered scene: the same instance"
+  # Covered again, and the way back leads elsewhere: the covered one goes.
+  coverHost.makeCurrent("system/sceneSwitcher".SceneId)
+  doAssert coverHost.ensureScene()
+  coverHost.makeCurrent("fixtures/dispatcher/switchTo".SceneId)
+  doAssert coverHost.ensureScene()
+  doAssert coverHost.scene != first
+  coverHost.makeCurrent(fromId)
+  doAssert coverHost.ensureScene()
+  doAssert coverHost.scene != first, "switchTo was shown in between: switchFrom is built again"
+  echo "covered scene ok"

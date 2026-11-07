@@ -45,6 +45,7 @@ type
     handlerCount: int
     previous: JSValue  # the last render's, for the handlers of kept nodes
     memo: ptr JsxMemo
+    keptCursor: int  # where in memo.kept the next memo()'d element is looked for
 
 proc attrName(name: string): string =
   if name == "className":
@@ -123,18 +124,32 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
     if jsIsNumber(mark):
       memoId = ctx.int32Of(mark)
     JS_FreeValue(ctx, mark)
+  var keptAt = -1
   if memoId > 0:
-    for kept in r.memo.kept.mitems:
-      # Taken back where its handlers have the numbers they had: copied
-      # from the last render's list into this one's at those numbers.
-      if kept.id == memoId and kept.firstHandler == r.handlerCount:
-        for h in kept.firstHandler ..< kept.firstHandler + kept.handlers:
-          discard JS_SetPropertyUint32(ctx, r.handlers, h.uint32, JS_GetPropertyUint32(ctx, r.previous, h.uint32))
-        r.handlerCount += kept.handlers
-        r.nodes += kept.nodes
-        kept.used = true
-        into.add kept.node
-        return
+    # From where the last one was found: a tree's memo()'d elements come
+    # back in the order they were kept, so a list of a hundred rows finds
+    # each at the cursor (a scan of the kept entries from the start for each
+    # was quadratic in the list), and a row put in or taken out costs one
+    # pass over the gap. A Table here was 600 B of the ESP32's flash.
+    let n = r.memo.kept.len
+    for step in 0 ..< n:
+      let i = (r.keptCursor + step) mod n
+      if r.memo.kept[i].id == memoId:
+        keptAt = i
+        r.keptCursor = i + 1
+        break
+  if keptAt >= 0:
+    # Taken back where its handlers have the numbers they had: copied
+    # from the last render's list into this one's at those numbers.
+    template kept: untyped = r.memo.kept[keptAt]
+    if kept.firstHandler == r.handlerCount:
+      for h in kept.firstHandler ..< kept.firstHandler + kept.handlers:
+        discard JS_SetPropertyUint32(ctx, r.handlers, h.uint32, JS_GetPropertyUint32(ctx, r.previous, h.uint32))
+      r.handlerCount += kept.handlers
+      r.nodes += kept.nodes
+      kept.used = true
+      into.add kept.node
+      return
   let
     firstHandler = r.handlerCount
     firstNode = r.nodes

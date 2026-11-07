@@ -6,6 +6,7 @@ import frameos/types
 import frameos/values
 import frameos/js_runtime/source_map
 import frameos/js_runtime/burrito
+import frameos/js_runtime/jsx_native
 when defined(frameosEmbedded): import frameos/utils/memory
 import lib/tz
 import tables, json, strutils, locks, sequtils
@@ -80,17 +81,17 @@ initLock(sceneJsLock)
 
 const sceneJsPrelude* = compactJs("""
 const __frameosFragment = Symbol.for("frameos.fragment");
+// quickts lowers every JSX site to a call with null or a fresh object literal
+// for the attributes (quickts_jsx.h), so the props object is this element's
+// own: no copy. 76 bytecodes and ~15 allocations an element with the copy,
+// about half without (2026-11-07).
 const __frameosJsx = (type, props, ...children) => {
-  const nextProps = props ? { ...props } : {};
-  const normalized = children.length === 0
-    ? nextProps.children
-    : children.length === 1 ? children[0] : children;
-  delete nextProps.children;
-  if (type === __frameosFragment) {
-    return normalized ?? null;
+  const nextProps = props ?? {};
+  if (children.length !== 0) {
+    nextProps.children = children.length === 1 ? children[0] : children;
   }
-  if (normalized !== undefined) {
-    nextProps.children = normalized;
+  if (type === __frameosFragment) {
+    return nextProps.children ?? null;
   }
   // A function component runs now: the tree an app returns is plain elements.
   return typeof type === "function" ? type(nextProps) : { type, props: nextProps };
@@ -107,17 +108,27 @@ const __frameosSameProps = (a, b) => {
   for (const k of keys) if (!Object.is(a[k], b[k])) return false;
   return true;
 };
+// Two maps, swapped each render: what the last render used is what this one
+// may take back, and a slot not used again (a keyed row that left the list)
+// is gone with the swap. One map that only grew reached the interpreter's
+// 4 MB heap cap after about a thousand renders of a list with changing keys
+// (2026-11-07), on every host that keeps the interpreter between renders.
+// The same two Map objects, cleared, not a new one a render: an animation
+// renders thirty times a second.
 globalThis.memo = (component) => {
   let render = -1, turn = 0;
-  const last = new Map();
+  let last = new Map(), used = new Map();
   return (props) => {
-    if (render !== globalThis.__frameosRender) { render = globalThis.__frameosRender; turn = 0; }
+    if (render !== globalThis.__frameosRender) {
+      render = globalThis.__frameosRender; turn = 0;
+      const spare = last; last = used; used = spare; used.clear();
+    }
     const slot = props.key !== undefined ? "k" + props.key : turn++;
     const before = last.get(slot);
-    if (before !== undefined && __frameosSameProps(before[0], props)) return before[1];
+    if (before !== undefined && __frameosSameProps(before[0], props)) { used.set(slot, before); return before[1]; }
     const element = component(props);
     if (element !== null && typeof element === "object" && !Array.isArray(element)) element.__frameosNode = 0;
-    last.set(slot, [props, element]);
+    used.set(slot, [props, element]);
     return element;
   };
 };
@@ -810,6 +821,53 @@ when defined(frameosEmbedded):
       if other != keep and other.jsReady and not sceneJsStack.contains(other):
         closeSceneJsLocked(other)
 
+# The scene context's prelude: console, the state/args/context Proxies and
+# the code-node envelope helpers, plus sceneJsPrelude. Loaded as bytecode from
+# the firmware image when tools/prelude_bytecode.nim ran (evalScenePrelude).
+const sceneContextJsPrelude* = compactJs("""
+    "use strict";
+    const __jsReplacer = (k, v) =>
+      (typeof v === 'bigint') ? { __bigint: v.toString() }
+      : (v === undefined ? null : v);
+    globalThis.__frameosStringify = (v) => JSON.stringify(v, __jsReplacer);
+    const console = {
+      log: (...a) => jsLog("log", JSON.stringify(a, __jsReplacer)),
+      warn: (...a) => jsLog("warn", JSON.stringify(a, __jsReplacer)),
+      error: (...a) => jsLog("error", JSON.stringify(a, __jsReplacer)),
+    };
+    const __frameosUnwrap = (v) => (v && v.__frameosUndef === true) ? undefined : v;
+    const __state   = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getState(k))   : undefined; } });
+    const __args    = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getArg(k))     : undefined; } });
+    const __context = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getContext(k)) : undefined; } });
+    """ & sceneJsPrelude)
+
+
+when defined(frameosPreludeBytecode):
+  # The preludes as bytecode, written by tools/prelude_bytecode.nim for this
+  # exact QuickJS (embedded/esp32/build_nim.sh runs it). A module from another
+  # engine version or an older prelude is refused here, not on the device.
+  import std/os
+  import assets/prelude_bytecode
+  import frameos/js_runtime/prelude_checksum
+  const quickjsVersionInTree = staticRead(
+    currentSourcePath().parentDir.parentDir.parentDir.parentDir / "quickjs" / "VERSION").strip()
+  static:
+    doAssert preludeBytecodeQuickjsVersion == quickjsVersionInTree,
+      "src/assets/prelude_bytecode.nim was written for QuickJS " & preludeBytecodeQuickjsVersion &
+      " and the tree has " & quickjsVersionInTree & ": rerun tools/prelude_bytecode.nim"
+    doAssert scenePreludeSourceChecksum == preludeChecksum(sceneContextJsPrelude),
+      "src/assets/prelude_bytecode.nim is stale (sceneContextJsPrelude changed): rerun tools/prelude_bytecode.nim"
+
+proc evalScenePrelude(js: QuickJS) =
+  ## The prelude into a fresh context: the bytecode built into the image when
+  ## there is one (a load, not a compile), else the source. Not both: the
+  ## source in the image as a fallback was 10 KB of the ESP32's flash for a
+  ## load the checks above make sure of (an engine that refuses it raises).
+  when defined(frameosPreludeBytecode):
+    discard js.evalBytecode(scenePreludeBytecode.toOpenArrayByte(0, scenePreludeBytecode.high))
+  else:
+    discard js.eval(sceneContextJsPrelude)
+
 proc ensureSceneJs*(scene: InterpretedFrameScene) =
   withLock sceneJsLock:
     if scene.jsReady: return
@@ -826,22 +884,8 @@ proc ensureSceneJs*(scene: InterpretedFrameScene) =
     scene.js.registerFunction("parseTs", jsChronoParseTs)
     scene.js.registerFunction("format", jsChronoFormat)
     scene.js.registerFunction("now", jsChronoNow)
-    discard scene.js.eval(static(compactJs("""
-    "use strict";
-    const __jsReplacer = (k, v) =>
-      (typeof v === 'bigint') ? { __bigint: v.toString() }
-      : (v === undefined ? null : v);
-    globalThis.__frameosStringify = (v) => JSON.stringify(v, __jsReplacer);
-    const console = {
-      log: (...a) => jsLog("log", JSON.stringify(a, __jsReplacer)),
-      warn: (...a) => jsLog("warn", JSON.stringify(a, __jsReplacer)),
-      error: (...a) => jsLog("error", JSON.stringify(a, __jsReplacer)),
-    };
-    const __frameosUnwrap = (v) => (v && v.__frameosUndef === true) ? undefined : v;
-    const __state   = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getState(k))   : undefined; } });
-    const __args    = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getArg(k))     : undefined; } });
-    const __context = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getContext(k)) : undefined; } });
-    """ & sceneJsPrelude)))
+    evalScenePrelude(scene.js)
+    discard scene.js.installNativeJsx() # the JSX factory in C (jsx_native.nim)
     # Initialize registries
     scene.jsFuncNameByNode = initTable[NodeId, string]()
     scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()

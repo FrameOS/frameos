@@ -6,7 +6,14 @@ when withDir(thisDir(), system.fileExists("nimble.paths")):
 
 import std/[json, os, strutils]
 
-let frameosPixiePath = getEnv("FRAMEOS_PIXIE_PATH")
+# pixie is FrameOS's own fork, in the tree at frameos/pixie since 2026-11-07
+# (it was https://github.com/FrameOS/pixie, pinned by nimble.lock): the UI
+# layer, the damage repaint, the 565 and Gray8 surfaces and the streaming
+# decoders are written on both sides of that line, so it is one repository.
+# FRAMEOS_PIXIE_PATH still points the build at another checkout of it.
+let frameosPixiePath = block:
+  let fromEnv = getEnv("FRAMEOS_PIXIE_PATH")
+  if fromEnv.len > 0: fromEnv else: thisDir() / "pixie"
 let frameosZippyPath = getEnv("FRAMEOS_ZIPPY_PATH")
 
 # nimble.paths is what `nimble setup` made of nimble.lock the day it last ran:
@@ -18,7 +25,7 @@ if fileExists(thisDir() / "nimble.paths") and fileExists(thisDir() / "nimble.loc
   let nimblePaths = readFile(thisDir() / "nimble.paths")
   var stalePackages: seq[string]
   for name, package in parseJson(readFile(thisDir() / "nimble.lock"))["packages"].pairs:
-    if name == "pixie" and frameosPixiePath.len > 0 or name == "zippy" and frameosZippyPath.len > 0:
+    if name == "zippy" and frameosZippyPath.len > 0:
       continue # a checkout of its own, below
     let packageDir = name & "-" & package["version"].getStr() & "-" & package["checksums"]["sha1"].getStr()
     if ("/" & packageDir & "\"") notin nimblePaths:
@@ -27,10 +34,10 @@ if fileExists(thisDir() / "nimble.paths") and fileExists(thisDir() / "nimble.loc
     quit("frameos/nimble.paths does not match nimble.lock (" & stalePackages.join(", ") &
       "): run `python3 tools/nimble_paths.py` in frameos/", QuitFailure)
 
-if frameosPixiePath.len > 0:
+block:
   let frameosPixieSrc = frameosPixiePath / "src"
   if not dirExists(frameosPixieSrc / "pixie"):
-    quit("FRAMEOS_PIXIE_PATH must point to a pixie checkout with src/pixie/", QuitFailure)
+    quit("FRAMEOS_PIXIE_PATH must point to a pixie checkout with src/pixie/ (the tree's own is frameos/pixie)", QuitFailure)
 
   # Nim resolves later paths first, so this must come after nimble.paths.
   switch("path", frameosPixieSrc)

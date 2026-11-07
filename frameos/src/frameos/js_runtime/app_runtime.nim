@@ -19,6 +19,8 @@ import frameos/utils/canvas_log
 import frameos/utils/paths
 import frameos/utils/system
 import frameos/js_runtime/burrito
+import frameos/js_runtime/jsx_native
+import frameos/render_probe
 import frameos/js_runtime/jsx
 import frameos/ui/layout
 import frameos/ui/events
@@ -1809,46 +1811,12 @@ proc setDynamicJsAppField*(app: AppRoot, field: string, value: Value) =
     dynamicApp.runtime.releaseReplacedImageRef(dynamicApp.configJson[field], nextValue)
   dynamicApp.configJson[field] = nextValue
 
-proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: string = "") =
-  ## `sceneId` joins this runtime to the owning scene's shared heap budget
-  ## (runtime.sceneHeapBudgetFor): every JS app node of a scene draws on one
-  ## ceiling instead of each getting the full per-runtime limit.
-  if runtime.ready:
-    return
-
-  when defined(frameosEmbedded):
-    # Reclaim the other nodes' interpreters before building this one.
-    evictIdleJsRuntimes(runtime)
-  if not liveJsRuntimes.contains(runtime):
-    liveJsRuntimes.add(runtime)
-
-  when defined(memProbe): memProbe("    newQuickJS BEFORE")
-  runtime.js = newQuickJS(sceneJsConfig(frameConfig, sceneId))
-  when defined(memProbe): memProbe("    newQuickJS AFTER")
-  jsAppRuntimeByCtx[runtime.js.context] = runtime
-  runtime.js.setModuleLoader(jsAppModuleLoader, jsAppModuleNormalize)
-  runtime.js.registerFunction("jsAppLog", jsAppLog)
-  runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
-  runtime.js.registerFunction("jsSetState", jsSetState)
-  runtime.js.registerFunction("jsRemember", jsRemember)
-  runtime.js.registerFunction("jsRecall", jsRecall)
-  runtime.js.registerFunction("jsFetchText", jsFetchText)
-  runtime.js.registerFunction("jsHttpRequest", jsHttpRequest)
-  runtime.js.registerFunction("jsFetchImage", jsFetchImage)
-  runtime.js.registerFunction("jsReleaseImage", jsReleaseImage)
-  runtime.js.registerFunction("jsCanvas", jsCanvas)
-  runtime.js.registerFunction("jsCanvasDraw", jsCanvasDraw)
-  runtime.js.registerFunction("jsCanvasClear", jsCanvasClear)
-  runtime.js.registerFunction("jsAssets", jsAssets)
-  runtime.js.registerFunction("jsStreams", jsStreams)
-  runtime.js.registerFunction("jsGetSetting", jsGetSetting)
-  runtime.js.registerFunction("jsGetAppMeta", jsGetAppMeta)
-  runtime.js.registerFunction("jsGetAppConfig", jsGetAppConfig)
-  runtime.js.registerFunction("jsGetAppState", jsGetAppState)
-  runtime.js.registerFunction("jsGetAppFrame", jsGetAppFrame)
-  runtime.js.registerFunction("jsGetAppContext", jsGetAppContext)
-  runtime.js.registerFunction("jsGetAppKeys", jsGetAppKeys)
-  discard runtime.js.eval(static(compactJs("""
+# The app prelude: the frameos.* API glue, the JSX factory and memo() of
+# sceneJsPrelude, the Proxy views of app.config / state / frame / context.
+# Compiled on the device at every interpreter start (~102 ms of a SenseCAP
+# frame for 6.4 KB, docs/realtime-rendering.md), or loaded as the bytecode
+# tools/prelude_bytecode.nim wrote into the firmware image (evalAppPrelude).
+const appJsPrelude* = compactJs("""
   "use strict";
   const __jsReplacer = (k, v) =>
     (typeof v === 'bigint') ? { __bigint: v.toString() } : v;
@@ -1979,7 +1947,77 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
     }
     return undefined;
   }
-  """ & sceneJsPrelude)))
+  """ & sceneJsPrelude)
+
+
+when defined(frameosPreludeBytecode):
+  # The preludes as bytecode, written by tools/prelude_bytecode.nim for this
+  # exact QuickJS (embedded/esp32/build_nim.sh runs it). A module from another
+  # engine version or an older prelude is refused here, not on the device.
+  import assets/prelude_bytecode
+  import frameos/js_runtime/prelude_checksum
+  const quickjsVersionInTree = staticRead(
+    currentSourcePath().parentDir.parentDir.parentDir.parentDir / "quickjs" / "VERSION").strip()
+  static:
+    doAssert preludeBytecodeQuickjsVersion == quickjsVersionInTree,
+      "src/assets/prelude_bytecode.nim was written for QuickJS " & preludeBytecodeQuickjsVersion &
+      " and the tree has " & quickjsVersionInTree & ": rerun tools/prelude_bytecode.nim"
+    doAssert appPreludeSourceChecksum == preludeChecksum(appJsPrelude),
+      "src/assets/prelude_bytecode.nim is stale (appJsPrelude changed): rerun tools/prelude_bytecode.nim"
+
+proc evalAppPrelude(js: QuickJS) =
+  ## The prelude into a fresh context: the bytecode built into the image when
+  ## there is one (a load, not a compile), else the source. Not both: the
+  ## source in the image as a fallback was 10 KB of the ESP32's flash for a
+  ## load the checks above make sure of (an engine that refuses it raises).
+  when defined(frameosPreludeBytecode):
+    discard js.evalBytecode(appPreludeBytecode.toOpenArrayByte(0, appPreludeBytecode.high))
+  else:
+    discard js.eval(appJsPrelude)
+
+proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: string = "") =
+  ## `sceneId` joins this runtime to the owning scene's shared heap budget
+  ## (runtime.sceneHeapBudgetFor): every JS app node of a scene draws on one
+  ## ceiling instead of each getting the full per-runtime limit.
+  if runtime.ready:
+    return
+
+  when defined(frameosEmbedded):
+    # Reclaim the other nodes' interpreters before building this one.
+    evictIdleJsRuntimes(runtime)
+  if not liveJsRuntimes.contains(runtime):
+    liveJsRuntimes.add(runtime)
+
+  when defined(memProbe): memProbe("    newQuickJS BEFORE")
+  runtime.js = newQuickJS(sceneJsConfig(frameConfig, sceneId))
+  when defined(memProbe): memProbe("    newQuickJS AFTER")
+  jsAppRuntimeByCtx[runtime.js.context] = runtime
+  runtime.js.setModuleLoader(jsAppModuleLoader, jsAppModuleNormalize)
+  runtime.js.registerFunction("jsAppLog", jsAppLog)
+  runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
+  runtime.js.registerFunction("jsSetState", jsSetState)
+  runtime.js.registerFunction("jsRemember", jsRemember)
+  runtime.js.registerFunction("jsRecall", jsRecall)
+  runtime.js.registerFunction("jsFetchText", jsFetchText)
+  runtime.js.registerFunction("jsHttpRequest", jsHttpRequest)
+  runtime.js.registerFunction("jsFetchImage", jsFetchImage)
+  runtime.js.registerFunction("jsReleaseImage", jsReleaseImage)
+  runtime.js.registerFunction("jsCanvas", jsCanvas)
+  runtime.js.registerFunction("jsCanvasDraw", jsCanvasDraw)
+  runtime.js.registerFunction("jsCanvasClear", jsCanvasClear)
+  runtime.js.registerFunction("jsAssets", jsAssets)
+  runtime.js.registerFunction("jsStreams", jsStreams)
+  runtime.js.registerFunction("jsGetSetting", jsGetSetting)
+  runtime.js.registerFunction("jsGetAppMeta", jsGetAppMeta)
+  runtime.js.registerFunction("jsGetAppConfig", jsGetAppConfig)
+  runtime.js.registerFunction("jsGetAppState", jsGetAppState)
+  runtime.js.registerFunction("jsGetAppFrame", jsGetAppFrame)
+  runtime.js.registerFunction("jsGetAppContext", jsGetAppContext)
+  runtime.js.registerFunction("jsGetAppKeys", jsGetAppKeys)
+  probe(phPrelude):
+    evalAppPrelude(runtime.js)
+    # The JSX factory in C (jsx_native.nim): every element of a UI's get().
+    discard runtime.js.installNativeJsx()
   # The test harness, when this runtime runs an app's tests (app_tests.nim):
   # after the prelude so it can wrap `frameos`, before the module so the
   # module's describe() calls land in it.
@@ -1997,7 +2035,8 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   let ctx = runtime.js.context
   var namespace: JSValue
   try:
-    namespace = runtime.js.evalModuleNamespace(runtime.source, filename, quicktsFlagsFor(filename))
+    probe(phCompile):
+      namespace = runtime.js.evalModuleNamespace(runtime.source, filename, quicktsFlagsFor(filename))
   except CatchableError as error:
     raise newException(JSException, mapJsErrorText(ctx, error.msg))
   let globalObj = JS_GetGlobalObject(ctx)
@@ -2301,13 +2340,16 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
       frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
       return nil
   # A UI's nodes come back from the layout where they did not change.
-  let intoTarget = svgIntoOfferedTarget(owner, context, svg, requestedWidth, requestedHeight,
-    reuse = root.tag != "svg")
+  var intoTarget: Image
+  probe(phDraw):
+    intoTarget = svgIntoOfferedTarget(owner, context, svg, requestedWidth, requestedHeight,
+      reuse = root.tag != "svg")
   if not intoTarget.isNil:
     if intoTarget.width == requestedWidth and intoTarget.height == requestedHeight:
       if regions.len > 0 or not target.isNil:
-        runtime.keepUiRegions(owner, sceneId, regions, intoTarget.origin mod max(intoTarget.stride, 1),
-          intoTarget.origin div max(intoTarget.stride, 1), regionScale)
+        probe(phRegions):
+          runtime.keepUiRegions(owner, sceneId, regions, intoTarget.origin mod max(intoTarget.stride, 1),
+            intoTarget.origin div max(intoTarget.stride, 1), regionScale)
     return intoTarget
   let (svgWidth, svgHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
   let image = decodeSvgWithFallback(svg, svgWidth, svgHeight)
@@ -2447,7 +2489,8 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
     # has always been.
     let tag = jsxTag(ctx, payload)
     if tag.len > 0 and tag != "image":
-      runtime.lastJsx = jsxNode(ctx, payload, addr runtime.images, addr runtime.jsxMemo)
+      probe(phWalk):
+        runtime.lastJsx = jsxNode(ctx, payload, addr runtime.images, addr runtime.jsxMemo)
       return VImage(runtime.imageFromJsx(owner, context, runtime.lastJsx))
 
   if expectedType == "image" or jsIsObject(payload) or JS_IsArray(ctx, payload) != 0:
@@ -2497,7 +2540,10 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
   when defined(memProbe): memProbe("    js invoke " & fnName & " BEFORE")
   result =
     try:
-      callGlobalFunction(ctx, "__frameosInvoke", [fnNameValue])
+      var invoked: JSValue
+      probe(phGet):
+        invoked = callGlobalFunction(ctx, "__frameosInvoke", [fnNameValue])
+      invoked
     finally:
       if jsAppEnvByCtx.hasKey(ctx):
         jsAppEnvByCtx.del(ctx)
@@ -2561,7 +2607,8 @@ proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
   runtime.initialized = true
 
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
-  runtime.init(owner, configJson)
+  probe(phInit):
+    runtime.init(owner, configJson)
   if not owner.scene.isNil:
     let target = uiTarget(owner.scene.id.string, owner.nodeId.int, create = false)
     if not target.isNil and target.inputOnly:
@@ -2608,7 +2655,8 @@ proc run*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
 
 proc getDynamicJsApp*(app: AppRoot, context: ExecutionContext): Value =
   let dynamicApp = DynamicJsApp(app)
-  dynamicApp.runtime.get(dynamicApp, dynamicApp.configJson, context)
+  probe(phApp):
+    result = dynamicApp.runtime.get(dynamicApp, dynamicApp.configJson, context)
 
 proc runDynamicJsApp*(app: AppRoot, context: ExecutionContext) =
   let dynamicApp = DynamicJsApp(app)

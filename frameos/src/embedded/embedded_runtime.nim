@@ -10,6 +10,7 @@
 import std/[json, locks, options, sequtils, strformat, tables]
 import pixie
 
+import frameos/render_probe
 import frameos/types
 import frameos/utils/asset_colors
 from frameos/render_scale import MaxRenderScale
@@ -465,6 +466,11 @@ proc fos_nim_set_quiet_impl(quiet: cint) {.exportc, cdecl.} =
   if not logger.isNil:
     logger.enabled = not quietRenders
 
+proc debugEnabled*(): bool =
+  ## The frame's `debug` setting (`set debug 1` on the console): the per-node
+  ## profile lines, and the render line's per-phase probe (render_probe.nim).
+  frameConfig.debug
+
 proc fos_nim_set_debug_impl(enabled: cint) {.exportc, cdecl.} =
   ## Turns the interpreter's per-node memory profile on and off at runtime
   ## (`set debug 1` on the console). It logs a line per node per render — the
@@ -751,7 +757,8 @@ proc selectScene*(sceneIdText: string): bool =
   let sceneId = SceneId(sceneIdText)
   if isBuiltInScene(sceneIdText):
     # The scene switcher (fos_scenes.c applies it without a slot): the scene
-    # it covers goes, its parsed payload stays in the cache for the way back.
+    # it covers is kept while render memory allows (single_scene_host's
+    # `covered`), and its parsed payload stays in the cache for the way back.
     # Asked again while it shows (a reconnect re-announcing it), it keeps
     # what it was opened from. fos_scenes.c logs the switch.
     if host.sceneId != some(sceneId):
@@ -987,8 +994,11 @@ proc renderCurrentScene*(): Option[Image] =
   )
   # renderScene hands the JS apps' interpreters back before it returns, so the
   # packing and display work below see the memory.
-  let image = host.renderScene(context)
-  persistSceneState()
+  var image: Image
+  probe(phScene):
+    image = host.renderScene(context)
+  probe(phPersist):
+    persistSceneState()
   when defined(memProbe): memProbe("  renderCurrentScene: idle js runtimes released")
   if image.isNil:
     log("render returned no image")

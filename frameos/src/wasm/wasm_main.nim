@@ -103,6 +103,7 @@ proc frameZoneOffset(time: int64): cint {.cdecl.} =
 
 proc frameos_wasm_init(width, height: cint, name: cstring,
     timeZone: cstring, settingsJson: cstring): bool {.exportc, cdecl.} =
+  coverageCacheBudget = 2 * 1024 * 1024 # pixie keeps shared paths' coverage, as the devices do
   ## Build the minimal FrameConfig + Logger the interpreter and apps expect.
   ## Safe to call repeatedly; every call resets scenes and state.
   ##

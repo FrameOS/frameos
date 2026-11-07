@@ -88,3 +88,10 @@ embedded/esp32/.cache/
 e2e/tmp
 e2e/frameos
 e2e/generated
+# pixie is in the tree (frameos/pixie); the image needs its src/ only, not
+# its 50 MB of test images, docs and examples.
+frameos/pixie/tests
+frameos/pixie/docs
+frameos/pixie/examples
+frameos/pixie/experiments
+frameos/pixie/bindings

@@ -1912,15 +1912,33 @@ proc renameHook*(v: var StateField, fieldName: var string) =
   if fieldName == "type":
     fieldName = "fieldType"
 
+# The id as the scene JSON wrote it, for the node whose `id` was parsed last:
+# postHook below puts it on that node's data as `__frameosSourceNodeId`, the
+# name an error line gives the editor. Set here, read there, on one thread.
+var lastParsedNodeIdSource {.threadvar.}: tuple[source: string, id: NodeId]
+
 proc parseHook*(s: string, i: var int, v: var NodeId) =
   var str: string
   parseHook(s, i, str)
   if nodeMappingTable.hasKey(str):
     v = nodeMappingTable[str]
-    return
-  globalNodeCounter += 1
-  nodeMappingTable[str] = NodeId(globalNodeCounter)
-  v = NodeId(globalNodeCounter)
+  else:
+    globalNodeCounter += 1
+    nodeMappingTable[str] = NodeId(globalNodeCounter)
+    v = NodeId(globalNodeCounter)
+  lastParsedNodeIdSource = (str, v)
+
+proc postHook*(v: var DiagramNode) =
+  ## The scene used to be parsed into a JsonNode, each node's id copied into
+  ## its data, the tree serialized again and parsed a second time with jsony:
+  ## three passes over every scene on every load, ~35 ms per 6 KB of scene on
+  ## an ESP32 and half a second for the Weather sample, on every wake
+  ## (2026-11-07). The id is written on the way through instead.
+  if lastParsedNodeIdSource.id == v.id and lastParsedNodeIdSource.source.len > 0:
+    if v.data.isNil or v.data.kind != JObject:
+      v.data = newJObject()
+    if not v.data.hasKey("__frameosSourceNodeId"):
+      v.data["__frameosSourceNodeId"] = %lastParsedNodeIdSource.source
 
 type RawStateFieldOption = object
   value: string
@@ -1998,25 +2016,6 @@ proc jsonNodeIdString(value: JsonNode): string =
   else:
     return ""
 
-proc annotateInterpretedSceneSourceNodeIds(data: string): string =
-  let scenes = parseJson(data)
-  if scenes.kind != JArray:
-    return data
-  for scene in scenes:
-    if scene.kind != JObject or not scene.hasKey("nodes") or scene["nodes"].kind != JArray:
-      continue
-    for node in scene["nodes"]:
-      if node.kind != JObject or not node.hasKey("id"):
-        continue
-      let sourceNodeId = jsonNodeIdString(node["id"])
-      if sourceNodeId.len == 0:
-        continue
-      if not node.hasKey("data") or node["data"].kind != JObject:
-        node["data"] = newJObject()
-      if not node["data"].hasKey("__frameosSourceNodeId"):
-        node["data"]["__frameosSourceNodeId"] = %sourceNodeId
-  $scenes
-
 # -------------------------
 # Scene registry (loader)
 # -------------------------
@@ -2063,7 +2062,8 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
 proc parseInterpretedSceneInputs*(data: string): seq[FrameSceneInput] =
   if data == "":
     return @[]
-  annotateInterpretedSceneSourceNodeIds(data).fromJson(seq[FrameSceneInput])
+  # Each node's source id lands on its data as it is parsed (postHook above).
+  data.fromJson(seq[FrameSceneInput])
 
 proc buildInterpretedScenes*(scenes: seq[FrameSceneInput]): Table[SceneId, ExportedInterpretedScene] =
   result = initTable[SceneId, ExportedInterpretedScene]()

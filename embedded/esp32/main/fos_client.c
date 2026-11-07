@@ -52,6 +52,7 @@
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
+#include "fos_log_ring.h"
 #include "fos_commands.h"
 
 static const char *TAG = "fos_client";
@@ -758,18 +759,18 @@ static void log_render_event(const char *event, const char *scene_id,
      * USB stream during a deploy sees nothing for the minutes a render
      * takes. Print the key lifecycle moments directly. */
     if (strcmp(event, "render:scene") == 0) {
-        printf("render #%lu started: scene \"%s\"\n", (unsigned long)count,
-               scene_name && scene_name[0] ? scene_name : scene_id);
+        fos_log_ring_printf("render #%lu started: scene \"%s\"", (unsigned long)count,
+                            scene_name && scene_name[0] ? scene_name : scene_id);
     } else if (strcmp(event, "render:device") == 0 &&
                strcmp(status, "refreshing") == 0) {
-        printf("render #%lu refreshing display (%lld ms so far)\n",
-               (unsigned long)count, ms);
+        fos_log_ring_printf("render #%lu refreshing display (%lld ms so far)",
+                            (unsigned long)count, ms);
     } else if (strcmp(event, "render:done") == 0) {
-        printf("render #%lu done in %lld ms\n", (unsigned long)count, ms);
+        fos_log_ring_printf("render #%lu done in %lld ms", (unsigned long)count, ms);
     } else if (strcmp(event, "render:error") == 0) {
-        printf("render #%lu failed at %s: %s\n", (unsigned long)count,
-               stage && stage[0] ? stage : "?",
-               reason && reason[0] ? reason : esp_err_to_name(esp_err));
+        fos_log_ring_printf("render #%lu failed at %s: %s", (unsigned long)count,
+                            stage && stage[0] ? stage : "?",
+                            reason && reason[0] ? reason : esp_err_to_name(esp_err));
     }
 }
 
@@ -1610,7 +1611,11 @@ static esp_err_t render_once(bool quiet)
                          mode, fos_display_present() ? "pending" : "none",
                          err == ESP_OK ? "" : "render-failed", render_attempt,
                          framebuffer_ms, width, height, format, buf_len, err);
-        frameos_nim_flush_logs();
+        /* On a backend-managed frame a flush is a POST on this task. An
+         * e-paper refresh takes seconds, so its lines go out before it; an
+         * LCD shows the frame in a buffer switch, and its lines go with
+         * render:done, after the picture is up (docs/perf-todo.md). */
+        if (!fos_display_is_lcd()) frameos_nim_flush_logs();
     }
 
     /* The hash is an e-paper fact: an unchanged picture skips a refresh that
@@ -1666,7 +1671,7 @@ static esp_err_t render_once(bool quiet)
                                  "display", mode, refresh, "", render_attempt,
                                  (esp_timer_get_time() - start) / 1000, width, height,
                                  format, buf_len, ESP_OK);
-                frameos_nim_flush_logs();
+                if (!fos_display_is_lcd()) frameos_nim_flush_logs();
             }
             err = fos_display_blit(buf, buf_len);
             refresh = err == ESP_OK ? "updated" : "failed";
@@ -2150,6 +2155,13 @@ static void client_task(void *arg)
          * settings pushes below run once a second, not once a frame. Outside
          * animation every pass does them. */
         bool housekeeping = fos_animation_housekeeping_due(&s_anim, cycle_start);
+        /* A frame the scene asked for after a touch, on a panel that shows it
+         * at once: its picture first, the backend pulls after it (below). On
+         * a backend-managed frame the scenes ETag GET, the settings GET and
+         * the commands POST are three round trips on this task, and they ran
+         * in front of every isolated tap's render (docs/perf-todo.md). A
+         * command that arrives with the tap lands one frame later. */
+        bool pulls_after_render = housekeeping && force_render && s_scene_render && fos_display_is_lcd();
         /* Scene state that has waited its delay (fos_scene_state.h). */
         if (housekeeping) fos_scene_state_flush(false);
 
@@ -2182,7 +2194,7 @@ static void client_task(void *arg)
          * pushed over HTTP/console since the last pass. Both touch the Nim
          * runtime, so they only ever run here on the render task. */
         if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
-            if (housekeeping) fos_scenes_sync(false);
+            if (housekeeping && !pulls_after_render) fos_scenes_sync(false);
             fos_scenes_apply_pending();
             /* Scene events from HTTP, the cloud or the console since the last
              * look (fos_events_defer): to the scene now, before this pass
@@ -2207,16 +2219,18 @@ static void client_task(void *arg)
         /* The once-a-second work while animating starts here and ends with
          * the power decision. */
         if (housekeeping) {
-            /* Live settings: pick up backend-side interval/name/render-mode
-             * changes without a rebuild. ETag'd, so steady state is a 304. */
-            fos_settings_sync(false);
-            /* The backend's command queue — what the workspace asked for while
-             * this frame slept (a scene switch, a state, a render, an update) —
-             * before the render, so a switch lands in THIS pass's render instead
-             * of costing a second panel refresh. */
-            if (fos_commands_sync() && config->render_mode == FOS_RENDER_LOCAL &&
-                frameos_nim_available()) {
-                fos_scenes_apply_pending_selection();
+            if (!pulls_after_render) {
+                /* Live settings: pick up backend-side interval/name/render-mode
+                 * changes without a rebuild. ETag'd, so steady state is a 304. */
+                fos_settings_sync(false);
+                /* The backend's command queue — what the workspace asked for while
+                 * this frame slept (a scene switch, a state, a render, an update) —
+                 * before the render, so a switch lands in THIS pass's render instead
+                 * of costing a second panel refresh. */
+                if (fos_commands_sync() && config->render_mode == FOS_RENDER_LOCAL &&
+                    frameos_nim_available()) {
+                    fos_scenes_apply_pending_selection();
+                }
             }
             /* A zone name with no tzdata slice yet (console `set time_zone`,
              * an older provider): one fetch from tz.frameos.net, rate-limited. */
@@ -2415,6 +2429,16 @@ static void client_task(void *arg)
                 if (scene_render) {
                     fos_animation_burst_frame_done(&s_anim, frame_start, esp_timer_get_time(), quiet);
                 }
+            }
+        }
+        if (pulls_after_render) {
+            /* The pulls this pass put after its picture: a switch or a state
+             * they bring is applied now and rendered by the next pass. */
+            fos_scenes_sync(false);
+            fos_settings_sync(false);
+            if (fos_commands_sync() && config->render_mode == FOS_RENDER_LOCAL &&
+                frameos_nim_available()) {
+                fos_scenes_apply_pending_selection();
             }
         }
         /* An animation samples with the frame it logs in full, every ten
@@ -2685,7 +2709,9 @@ static void client_task(void *arg)
              * have its own wake-up (a bootloader pass) roll the image back.
              * A Nim panic never gets here — it resets first, and rolls back. */
             fos_ota_mark_boot_valid();
-            /* USB console drops in deep sleep; that's the point (battery). */
+            /* USB console drops in deep sleep; that's the point (battery).
+             * What the log ring still holds goes out first. */
+            fos_log_ring_flush(FOS_SLEEP_LOG_DRAIN_MS);
             esp_deep_sleep((uint64_t)chunk * 1000000ULL);
         }
         if (deep_sleep_now && fos_display_present() && keep_awake_s > 0) {

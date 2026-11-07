@@ -62,6 +62,7 @@
 #include "soc/rtc.h"
 #endif
 #include "frameos_nim.h"
+#include "fos_log_ring.h"
 
 static const char *TAG = "frameos";
 
@@ -172,6 +173,13 @@ static void scene_state_lock(void)
 static void scene_state_unlock(void)
 {
     xSemaphoreGive(s_scene_state_mutex);
+}
+
+static void log_ring_flush_on_restart(void)
+{
+    /* esp_restart: the lines explaining why go out before the reset. A
+     * panic never gets here; those are lost with the ring. */
+    fos_log_ring_flush(500);
 }
 
 static void scene_state_flush_on_restart(void)
@@ -559,6 +567,10 @@ void app_main(void)
 
     BOOTMEM("after-spill");
     fos_console_start();
+    /* Log lines leave the logging task here on: a printf on the render task
+     * was a third of an isolated tap on an LCD board (fos_log_ring.h). */
+    fos_log_ring_start();
+    esp_register_shutdown_handler(log_ring_flush_on_restart);
 
     /* Cloud-managed frames (docs/cloud-frames.md): idles until cloud_url and
      * a claim token are provisioned (USB `set`, flasher) and Wi-Fi is up,
