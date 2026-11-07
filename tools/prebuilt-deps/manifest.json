@@ -235,20 +235,20 @@
       "target": "ubuntu-26.04-amd64",
       "versions": {
         "nim": "2.2.4",
-        "quickjs": "2026-06-04-quickts.2"
+        "quickjs": "2026-06-04-quickts.3"
       },
       "object_key": null,
-      "updated_at": "2026-10-27T09:19:52.792085+00:00",
+      "updated_at": "2026-11-07T11:19:33.360151+00:00",
       "component_keys": {
         "nim": "prebuilt-deps/ubuntu-26.04-amd64/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/ubuntu-26.04-amd64/quickjs-2026-06-04-quickts.2.tar.gz"
+        "quickjs": "prebuilt-deps/ubuntu-26.04-amd64/quickjs-2026-06-04-quickts.3.tar.gz"
       },
       "component_md5sums": {
         "nim": "72b0230d68eb7842fa0b229efc05749c-3",
-        "quickjs": "11dbf5b2d9c50134c276d1ce8cad38d5"
+        "quickjs": "f368fda6e90d52c68cc10d2d29ce786e"
       },
       "component_sha256sums": {
-        "quickjs": "3b8b5f4f7ab17a30a60181ffd1834c2a3e64d58b69b96749a8df5feb0f0b76d0",
+        "quickjs": "51d7a9b04140486ca58b46657061ce09af41f4eee29b1bf793dc1861c06448eb",
         "nim": "1db641c9d8b9592025fc8843545477b5269fd0a8ceb718532500946b508278bc"
       }
     },
