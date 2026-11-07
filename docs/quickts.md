@@ -141,15 +141,43 @@ values and text (a `{}` with one number or string literal counts as static);
 every other expression is an argument in source order, the tag of a
 component first, and a negative number in the template is `-1 - i` for the
 i-th argument. It is a sealed array built at parse time and pushed from the
-function's constant pool, so it is the same object on every evaluation: the
-walker can read it once, keyed by identity, and per render touch only the
-holes, which is the retained-UI step `docs/perf-todo.md` calls "Blocks". The
-factory lowering stays the default and is what every frame runs today;
-`tests/quickts/cases/15-jsx-blocks.tsx` in the repo has the reference
-expansion of a template back into `{type, props}` elements, which is what the
-prelude's JavaScript fallback will be. The lowering costs 4.4 KB of `-Os`
-text and nothing per parse with the flag off; all 421 `.tsx` files in this
-repository parse with it on.
+function's constant pool, so it is the same object on every evaluation.
+`tests/quickts/cases/15-jsx-blocks.tsx` in the quickts repo has the reference
+expansion of a template back into `{type, props}` elements. The lowering costs
+4.4 KB of `-Os` text and nothing per parse with the flag off; all 421 `.tsx`
+files in this repository parse with it on.
+
+**What FrameOS does with it.** `quicktsFlagsFor` asks for it for every app
+source that is not plain JavaScript (`.tsx`, `.ts`, `.jsx`, an `app` with no
+extension); code nodes and inline expressions keep the factory lowering
+(`snippetEvalFlags`). `__frameosBlock` is C (`js_runtime/jsx_native.nim`),
+installed with the C factory wherever a prelude runs; its JavaScript reference,
+`jsxBlockReferenceJs` in `js_runtime/runtime.nim`, is in no prelude (2.9 KB of
+the ESP32's flash as bytecode) and is what the tests compare the C one with:
+
+- Components run in the call, with the props the factory gives them (an
+  element in a component's children is passed as an element). The holes are
+  evaluated first, as arguments are, so `<A />{f()}` calls `f` before `A`;
+  the factory called `A` first. Nothing should depend on that order.
+- A host element is `{type, props}` with `props` an enumerable getter that
+  builds the props the first time something reads them; `Object.keys`,
+  `JSON.stringify` and `el.props.children` see what the factory made. It
+  also holds, not enumerable, `__frameosSite` (its node of the template) and
+  `__frameosHoles` (the site's values, a component's output as `[output]` in
+  the component's place). A site with no host element (`<Tile i={i} />`)
+  makes neither the values array nor any element of its own.
+- Once its props are read, the element is a plain one: `__frameosSite` is
+  cleared, since what it holds can have been changed.
+
+The walker (`js_runtime/jsx.nim`) compiles each template node once, keyed by
+its identity (tags, attribute names converted to SVG's, static values as
+strings; a node with a spread, a `children` attribute, a name twice or an
+element as an attribute's value is not compiled, and its element is read off
+its props), builds an element from it and the values without reading `props`,
+and takes the last render's node back when the values are the same
+(`docs/jsx-ui.md` "Repainting what changed"). The four combinations
+(factory or blocks, JavaScript or C) are checked to make the same nodes and
+the same elements by `js_runtime/tests/test_jsx_blocks.nim`.
 
 ## Merging upstream QuickJS later
 

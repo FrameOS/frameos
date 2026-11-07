@@ -32,12 +32,21 @@ canvas spec `frameos.image(...)` makes.
 
 ## How it works
 
-The prelude's JSX factory (`__frameosJsx`, `js_runtime/runtime.nim`) makes
-plain `{type, props}` objects and calls a function component on the spot, so
-what `get()` returns is a tree of elements. The runtime reads that tree
-straight off the JS objects (`js_runtime/jsx.nim`) into the node tree pixie
-draws from (`SvgNode`, FrameOS/pixie): no markup is built in JS and none is
-parsed in Nim. A UI goes through the layout (`ui/layout.nim`, with
+An app's sources are parsed with quickts' block lowering
+(`docs/quickts.md` "Blocks"): a JSX site is one call, `__frameosBlock(template,
+...holes)`, with the static parts in a template that is the same object every
+render. The block (C, `js_runtime/jsx_native.nim`; `jsxBlockReferenceJs` in
+`js_runtime/runtime.nim` is the JavaScript reference) calls a function component
+on the spot, as the factory `__frameosJsx` does, so what `get()` returns is a
+tree of `{type, props}` elements. A host element is lazy: its `props` are
+built only if something reads them, and it carries its node of the template
+and the site's values. The runtime reads that tree (`js_runtime/jsx.nim`)
+into the node tree pixie draws from (`SvgNode`, FrameOS/pixie), a block's
+element from its template, read once, and its values: no markup is built in
+JS and none is parsed in Nim. An element whose props were read is read off
+them, like the factory's (an app may have changed it), and so is one whose
+template holds a spread, a `children` attribute, a name twice or an element
+as an attribute's value: rare, and not worth the flash of a second way. A UI goes through the layout (`ui/layout.nim`, with
 `ui/tailwind.nim` reading the classes), which hands back another node tree,
 an SVG one. From there both take the road a `frameos.svg` spec takes: into
 the target the planner offered when there is one (no second image), the
@@ -91,6 +100,18 @@ cheap is that the pictures are reconciled, not the code:
   is handed again (`parseSvg`'s `reuse`), and damageRects knows those
   elements without comparing them. Gradient ids and handler numbers are part
   of what must match.
+- **An element made of the same values is not walked again.** Where the walk
+  meets a block's element, it compares the element's values with those of
+  the element at its place in the last render (same template, in walk
+  order): strings and numbers by value, nested elements by their own
+  template and values, arrays item by item, a `src={ref}` by the picture it
+  names, a memo()'d element as the same object, a component by its output.
+  When they all match, the last render's node comes back with every node
+  inside it, the walk skipped; a handler made anew each render is not a
+  difference, it is put under the number it had. An element the factory
+  made, or one read off its props, and anything too big to compare are
+  walked as before. Without memo() a home panel's walk went from
+  27 µs to 6 µs on a laptop (`docs/perf-todo.md`).
 - **`memo(Component)`**, as React's (the prelude's, `js_runtime/runtime.nim`):
   a component called with props shallow-equal to its last call at the same
   place (its turn among the render's calls, or its `key`) returns the element

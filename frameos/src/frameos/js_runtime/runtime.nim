@@ -134,6 +134,73 @@ globalThis.memo = (component) => {
 };
 """)
 
+# quickts' block lowering in JavaScript: the reference for jsx_native.nim's C
+# `__frameosBlock`, which every runtime installs (installNativeJsx), so it is
+# in no prelude (2.9 KB of the ESP32's flash as prelude bytecode). The tests
+# evaluate it and check that both make the same elements and the same nodes
+# (js_runtime/tests/test_jsx_blocks.nim).
+const jsxBlockReferenceJs* = compactJs("""
+// A JSX site is one call, __frameosBlock(template, ...holes). Components run
+// now, with the props the factory gives them. A host element is lazy:
+// {type, props} with props a getter that builds them when something reads
+// them, and, not enumerable, its node of the template (the same sealed array
+// every evaluation) and the site's values, a component's output as [output]
+// in place of the component. The walker reads it from those
+// (js_runtime/jsx.nim); one whose props were read loses __frameosSite and is
+// read as the factory's.
+const __frameosBlockProps = function () {
+  const props = __frameosBlockBuild(this.__frameosSite, this.__frameosHoles, false);
+  Object.defineProperty(this, "props", { value: props, writable: true, enumerable: true, configurable: true });
+  Object.defineProperty(this, "__frameosSite", { value: undefined, writable: true, configurable: true });
+  return props;
+};
+const __frameosBlockBuild = (site, dyn, running) => {
+  const fill = (v) => typeof v === "number" ? (v < 0 ? dyn[-1 - v] : v) : Array.isArray(v) ? value(v) : v;
+  const make = (t, type) => {
+    let props = null;
+    if (t[1] !== null) {
+      props = {};
+      for (let i = 0; i < t[1].length; i += 2) {
+        const v = fill(t[1][i + 1]);
+        if (t[1][i] === null) Object.assign(props, v);
+        else props[t[1][i]] = v;
+      }
+    }
+    const children = [];
+    for (let i = 2; i < t.length; i++) children.push(fill(t[i]));
+    return __frameosJsx(type, props, ...children);
+  };
+  const run = (t) => {
+    if (t[1] !== null) for (let i = 1; i < t[1].length; i += 2) if (Array.isArray(t[1][i])) value(t[1][i]);
+    for (let i = 2; i < t.length; i++) if (Array.isArray(t[i])) value(t[i]);
+  };
+  const lazy = (t, type) => {
+    if (running) run(t);
+    const element = { type };
+    Object.defineProperty(element, "props", { get: __frameosBlockProps, enumerable: true, configurable: true });
+    Object.defineProperty(element, "__frameosSite", { value: t, writable: true, configurable: true });
+    Object.defineProperty(element, "__frameosHoles", { value: dyn, writable: true, configurable: true });
+    return element;
+  };
+  const value = (t) => {
+    const tag = t[0];
+    if (tag === null) return make(t, __frameosFragment);
+    if (typeof tag === "string") return lazy(t, tag);
+    const type = dyn[-1 - tag];
+    if (typeof type === "string") return lazy(t, type);
+    if (!running) return type[0];
+    const made = make(t, type);
+    dyn[-1 - tag] = [made];
+    return made;
+  };
+  if (running) return value(site);
+  // The getter's half: the props of host node site (the factory hands a
+  // function its props).
+  return make(site, (props) => props);
+};
+globalThis.__frameosBlock = (template, ...holes) => __frameosBlockBuild(template, holes, true);
+""")
+
 # -------------------------
 # Small string/JS helpers
 # -------------------------

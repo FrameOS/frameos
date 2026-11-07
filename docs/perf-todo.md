@@ -124,6 +124,50 @@ Hosts:
   queueing, and both runner loops end their sleep on it.
 - `frameos/render_probe.nim`: the per-phase split on the device's render line.
 
+## Blocks (quickts.3, the PR after #682)
+
+quickts `2026-06-04-quickts.3` lowers a JSX site to `__frameosBlock(template,
+...holes)` (`docs/quickts.md` "Blocks"); every app source is now parsed that
+way (`quicktsFlagsFor`). What FrameOS does with it:
+
+- `__frameosBlock` is C (`js_runtime/jsx_native.nim`). Components run in the
+  call, as the factory runs them; a host element is lazy, `{type, props}`
+  with `props` a getter, plus its template node and the site's values (not
+  enumerable). A site that is only a component makes no values array and no
+  element of its own; a site with no function among its holes looks for no
+  component. The JavaScript reference (`jsxBlockReferenceJs`) is in no
+  prelude: it would be 2.9 KB of flash as prelude bytecode.
+- The walker (`js_runtime/jsx.nim`) compiles a template node once, by
+  identity, and builds the element from it and the values without building
+  props. Wherever it meets a block's element, it compares the element's
+  values with those of the element at its place in the last render (in walk
+  order, nested elements by their template and values, a component by its
+  output, a `src` by the picture it names) and takes the node back, with
+  every node inside it, when they match; a handler made anew each render is
+  put under its old number. `JsxMemo` holds the values: `releaseJsxMemo`
+  before the context goes (QuickJS asserts otherwise).
+- Rare shapes (a spread, a `children` attribute, a name twice, an element as
+  an attribute's value) are read off their props, as the factory's elements
+  are; so is an element whose props an app read.
+
+The home panel (`e2e/scenes/jsxSquareHome.json`) on a laptop, µs per render,
+`get()` / the walk, 20,000 renders (`-d:release`):
+
+| | factory | blocks |
+| --- | --- | --- |
+| as written (memo()'d tiles), nothing changed | 7.6 / 2.3 | 7.5 / 1.7 |
+| as written, one tile toggled each render | 10.2 / 7.0 | 9.3 / 6.0 |
+| without memo(), nothing changed | 12.8 / 26.8 | 9.5 / 5.7 |
+| without memo(), one tile toggled | 12.8 / 26.5 | 9.5 / 12.1 |
+
+A UI written without memo() gets most of what memo() buys; one written with
+it gets a little more. Flash: +15.3 KB on the ESP32-S3 image (3,280,128 B
+against 3,264,800 B for #682's head, both built locally from the same
+QuickJS): the walker's compile, build, compare and keep ~11.7 KB, the C block
+~3.7 KB. It was +20.6 KB before the JavaScript reference left the prelude
+(2.9 KB), a `Table` became a pointer-keyed array (1.5 KB) and the rare
+shapes went to the props path.
+
 ## Still open
 
 - **~7 ms of interpreter** around one app node per render, and ~6 ms inside
@@ -134,14 +178,16 @@ Hosts:
 - **`JS_NewContextRaw` without Proxy / normalize / WeakRef** (−25 KB on the
   ESP32): needs the prelude's Proxy views of `app.config` / `state` /
   `frame` / `context` replaced first.
-- **"Blocks"** (JSX lowered to a static template plus holes): the parser
-  side shipped in quickts `2026-06-04-quickts.3` (2026-11-07) as
-  `JS_EVAL_FLAG_JSX_BLOCKS`, a `__frameosBlock(template, ...holes)` call per
-  site with the template a sealed constant-pool array (`docs/quickts.md`
-  "Blocks"). Still to do here: a `__frameosBlock` that reads a template once
-  by identity and diffs the holes (the walker's `JsxMemo` and `__frameosNode`
-  keyed reuse need redesigning around it), the prelude's JavaScript fallback,
-  then the flag in `quicktsFlagsFor`.
+- **Blocks on the bench board**: the numbers below are a laptop's. The
+  home-panel tap, the switcher and the DVD bounce on the SenseCAP Indicator
+  with blocks against without are still to be measured.
+- **Blocks for code nodes and inline expressions**: they keep the factory
+  lowering (`snippetEvalFlags`); a snippet's JSX is small and goes through
+  no walk with a memo.
+- **A component's props from a block** are built with an atom lookup per
+  attribute name (`JS_ValueToAtom` on the template's string) where the
+  factory's object literal has its atoms in the bytecode: the one place a
+  block's call costs more than the factory's (`<Tile i={i} on={on} />`).
 - **Dirty flags and relayout boundaries** on the `UiNode` tree, an in-place
   reconcile: what is left of layout and emit.
 - **Refs with setters and a native `frameos.animate`** (a drag or an

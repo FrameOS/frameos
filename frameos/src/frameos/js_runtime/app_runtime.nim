@@ -123,6 +123,8 @@ proc teardownJsRuntime(runtime: JsAppRuntime) =
     if jsAppRuntimeByCtx.hasKey(runtime.js.context):
       jsAppRuntimeByCtx.del(runtime.js.context)
     clearJsSourceMaps(runtime.js.context)
+    # The walker's kept elements and templates hold this context's values.
+    releaseJsxMemo(runtime.jsxMemo, runtime.js.context)
   runtime.js.close()
   runtime.ready = false
   runtime.initialized = false
@@ -1561,7 +1563,7 @@ proc jsCanvasDraw(ctx: ptr JSContext, id: JSValue, content: JSValue): JSValue {.
         else: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" & $image.width &
           "\" height=\"" & $image.height & "\">" & markup & "</svg>")
     else:
-      node = jsxNode(ctx, content, addr e.runtime.images, drawing = true)
+      node = jsxNode(ctx, content, addr e.runtime.images, addr e.runtime.jsxMemo, drawing = true)
       if node.tag != "svg":
         node = SvgNode(tag: "svg", attrs: @size, children: @[node])
     if node.attr("viewBox").len == 0 and node.attr("width").len == 0:

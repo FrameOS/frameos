@@ -350,7 +350,14 @@
 
 - A `.tsx` app's `get()` may return JSX as its image. `js_runtime/jsx.nim`
   reads the tree straight off the JS objects into pixie's `SvgNode`s (no
-  JSON, no markup); an `<svg>` is drawn as it is, anything else is a UI that
+  JSON, no markup). App sources are parsed with quickts' block lowering
+  (`docs/quickts.md` "Blocks"): `__frameosBlock` (C, `jsx_native.nim`) makes
+  lazy elements that carry their template node and the site's values, the
+  walker builds them from the template and takes a node back when the values
+  match; a new reader of elements must not build `props` it does not need
+  (`jsxTag` checks `__frameosSite` first), and the C block and its JavaScript
+  reference (`jsxBlockReferenceJs`) are pinned together by
+  `test_jsx_blocks.nim`. An `<svg>` is drawn as it is, anything else is a UI that
   `ui/layout.nim` lays out (block, flex, grid, absolute; Tailwind classes read
   by `ui/tailwind.nim`) and **emits as SVG nodes**. There is one rasterizer:
   never paint a UI some other way, or it loses the damage repaint and the

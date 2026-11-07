@@ -354,9 +354,9 @@ const
   JS_EVAL_FLAG_TYPESCRIPT* = (1 shl 8)
   JS_EVAL_FLAG_JSX* = (1 shl 9)
   # quickts.3: a JSX site as one `__frameosBlock(template, ...holes)` call,
-  # the template a sealed constant (quickts README, "JSX blocks"). Implies
-  # JSX. Not asked for yet: the walker that reads a template once and diffs
-  # the holes is `docs/perf-todo.md` "Blocks".
+  # the template a sealed constant (docs/quickts.md "Blocks"). Implies JSX.
+  # The prelude defines `__frameosBlock` (jsx_native.nim's C one replaces
+  # it) and js_runtime/jsx.nim reads its elements from their templates.
   JS_EVAL_FLAG_JSX_BLOCKS* = (1 shl 10)
 
 proc quicktsFlagsFor*(filename: string): cint =
@@ -368,12 +368,13 @@ proc quicktsFlagsFor*(filename: string): cint =
   ## both. JSX is safe to leave on: it only claims a `<` that would otherwise
   ## be a syntax error. Real `.js` stays on the untouched parser, where a
   ## `f < a > (b)` comparison still means what JavaScript says it means.
+  ## JSX is lowered to blocks (`__frameosBlock`, docs/quickts.md "Blocks").
   if filename.endsWith(".js") or filename.endsWith(".mjs") or filename.endsWith(".cjs"):
     0
   elif filename.endsWith(".jsx"):
-    JS_EVAL_FLAG_JSX
+    JS_EVAL_FLAG_JSX_BLOCKS
   else:
-    JS_EVAL_FLAG_TYPESCRIPT or JS_EVAL_FLAG_JSX
+    JS_EVAL_FLAG_TYPESCRIPT or JS_EVAL_FLAG_JSX_BLOCKS
 
 # Property flags
 const
