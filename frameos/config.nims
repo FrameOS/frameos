@@ -71,6 +71,11 @@ elif defined(frameosEmbedded):
   # the same names packed into one string are about 2 KB.
   patchFile("chroma", "names", "src/embedded/patched_chroma_names")
 
+  # std/tables copies its probe loop and rehash into the image once per
+  # Table[K, V] pair (47 of them); these two share them (fos_table_probe.nim).
+  patchFile("stdlib", "hashcommon", "src/embedded/patched_hashcommon")
+  patchFile("stdlib", "tableimpl", "src/embedded/patched_tableimpl")
+
 when defined(testing):
   # Test binaries (testament passes -d:testing) are built without C
   # optimisation. nim.cfg's -d:release means -O3, and for a test that pulls
