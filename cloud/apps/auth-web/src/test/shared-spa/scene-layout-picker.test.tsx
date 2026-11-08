@@ -16,6 +16,8 @@ vi.mock("../../../../../../frontend/src/utils/apiFetch", async (importOriginal) 
 import { initKea } from "../../../../../../frontend/src/initKea";
 import { framesModel } from "../../../../../../frontend/src/models/framesModel";
 import { frameLogic } from "../../../../../../frontend/src/scenes/frame/frameLogic";
+import { frameSettingsSectionRenders } from "../../../../../../frontend/src/scenes/frame/panels/FrameSettings/frameSettingsSurface";
+import { FrameLayoutsFields } from "../../../../../../frontend/src/scenes/frame/panels/FrameSettings/sections/layoutsSection";
 import { SceneLayoutPicker } from "../../../../../../frontend/src/scenes/frame/panels/Scenes/SceneLayoutPicker";
 import { sceneLayoutLogic } from "../../../../../../frontend/src/scenes/frame/panels/Scenes/sceneLayoutLogic";
 import type { FrameType } from "../../../../../../frontend/src/types";
@@ -102,5 +104,45 @@ describe("the layout picker", () => {
       null,
       SCENE_YIELD_ID,
     ]);
+  });
+});
+
+describe("the Layouts section of a frame's settings", () => {
+  async function mountedWithThree() {
+    const logic = await mounted();
+    logic.actions.setFrameFormValues({
+      scenes: [
+        { ...frame.scenes[0], layout: { sceneId: "bar", state: { height: 60 } } },
+        { id: "photos", name: "Photos", nodes: [], edges: [] },
+        frame.scenes[1],
+      ],
+    } as never);
+    return logic;
+  }
+
+  it("sets one scene, then all of them, keeping the settings of a scene that already wears it", async () => {
+    const logic = await mountedWithThree();
+    render(<FrameLayoutsFields frameId={frameId} />);
+    const all = screen.getByLabelText("Layout for all scenes") as HTMLSelectElement;
+    expect(all.value).toBe("__different");
+
+    fireEvent.change(screen.getByLabelText("Layout for Photos"), { target: { value: "bar" } });
+    expect(sceneNamed(logic, "photos")?.layout).toEqual({ sceneId: "bar" });
+    expect(all.value).toBe("bar");
+
+    fireEvent.change(all, { target: { value: "" } });
+    expect(sceneNamed(logic, "clock")).not.toHaveProperty("layout");
+    expect(sceneNamed(logic, "photos")).not.toHaveProperty("layout");
+    expect(sceneNamed(logic, "bar")).not.toHaveProperty("layout");
+
+    fireEvent.change(all, { target: { value: "bar" } });
+    expect(sceneNamed(logic, "clock")?.layout).toEqual({ sceneId: "bar" });
+    expect(sceneNamed(logic, "bar")).not.toHaveProperty("layout");
+  });
+
+  it("is on every surface that saves scenes", () => {
+    for (const surface of ["backend", "frameAdmin", "cloudLinux", "cloudEsp32", "cloudVirtual"] as const) {
+      expect(frameSettingsSectionRenders("layouts", surface)).toBe(true);
+    }
   });
 });

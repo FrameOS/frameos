@@ -286,6 +286,7 @@ const allFrameSettingsSections = [
   // store-scene service keys sit above Info.
   { id: 'frame-settings-cloud', label: 'Cloud' },
   { id: 'frame-settings-store-scene-services', label: 'Service keys' },
+  { id: 'frame-settings-layouts', label: 'Layouts' },
   { id: 'frame-settings-telemetry', label: 'Log shipping' },
   { id: 'frame-settings-info', label: 'Info' },
   { id: 'frame-settings-upgrade', label: 'Update' },

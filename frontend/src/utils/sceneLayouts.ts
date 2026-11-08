@@ -52,6 +52,26 @@ export function withoutSceneLayout<T extends Partial<FrameScene>>(scene: T): T {
 }
 
 /**
+ * Every scene on the list wears this layout (`''`: none). Layouts themselves
+ * are left alone, and a scene already wearing it keeps its settings.
+ */
+export function withLayoutOnEveryScene<T extends Partial<FrameScene>>(
+  scenes: readonly T[],
+  layoutSceneId: string
+): T[] {
+  return scenes.map((scene) => {
+    if (isLayoutScene(scene as Pick<FrameScene, 'settings'>)) {
+      return scene
+    }
+    const worn = sceneLayoutRef(scene.layout)
+    return withSceneLayout(
+      scene,
+      !layoutSceneId ? null : worn?.sceneId === layoutSceneId ? worn : { sceneId: layoutSceneId }
+    )
+  })
+}
+
+/**
  * The layout a scene wears, by what the frame still has: a layout deleted
  * since reads as none (the runtime draws such a scene without one too).
  */
@@ -61,4 +81,13 @@ export function currentSceneLayout(
 ): SceneLayoutRef | null {
   const ref = sceneLayoutRef(scene?.layout)
   return ref && layouts.some((layout) => layout.id === ref.sceneId) ? ref : null
+}
+
+/** The layout id every scene shares (`''`: none of them wears one), or null when they differ. */
+export function commonSceneLayoutId(
+  scenes: readonly Pick<FrameScene, 'layout'>[],
+  layouts: readonly Pick<FrameScene, 'id'>[]
+): string | null {
+  const ids = new Set(scenes.map((scene) => currentSceneLayout(scene, layouts)?.sceneId ?? ''))
+  return ids.size > 1 ? null : [...ids][0] ?? ''
 }

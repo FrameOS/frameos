@@ -10,6 +10,7 @@ import { ButtonActionsSection } from './fields/buttonActionsSection'
 import { ColorsSection } from './fields/colorsSection'
 import { FrameSettingsSection } from './sections/FrameSettingsSection'
 import { LanAccessSection } from './sections/lanAccessSection'
+import { LayoutsSection } from './sections/layoutsSection'
 import { CloudVirtualFrameSection } from './sections/virtualSections'
 import { SettingsHeaderActions } from './SettingsHeaderActions'
 import {
@@ -130,6 +131,9 @@ function FrameSettingsPanel(): JSX.Element {
         </FrameSettingsSection>
         <FrameSettingsSection sectionKey="store-scene-service-settings">
           <StoreSceneServiceSettingsSection />
+        </FrameSettingsSection>
+        <FrameSettingsSection sectionKey="layouts">
+          <LayoutsSection />
         </FrameSettingsSection>
         <FrameSettingsSection sectionKey="cloud-telemetry">
           <CloudTelemetrySection />

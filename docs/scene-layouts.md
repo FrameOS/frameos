@@ -76,8 +76,10 @@ out on both planes (the cloud lists assignments, so a push settles
 
 In the editor: "Use as layout" in a scene's settings, "New layout" under Add
 scene (a split with a bar above a Content panel), and a small select under each
-scene's picture once the frame has a layout. "Layout settings" in the scene's
-menu edits `layout.state`. In the split drawer of a layout, the Content panel
+scene's picture once the frame has a layout. The same choice is in the frame's
+Settings under Layouts: one select per scene and one for all of them, which
+sets the scenes the frame has now (a scene added later starts with no layout).
+"Layout settings" in the scene's menu edits `layout.state`. In the split drawer of a layout, the Content panel
 is `SCENE_YIELD_ID` (`system/yield`, `docs/events-contract.json` `scenes.yield`),
 a scene node's keyword meaning "the scene this layout wraps".
 

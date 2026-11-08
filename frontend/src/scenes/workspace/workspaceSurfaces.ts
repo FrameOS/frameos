@@ -243,6 +243,7 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     // per-frame gate (storeSceneOnlyFrameSettingsSections) hides the link
     // otherwise, so it never scrolls nowhere.
     'frame-settings-store-scene-services',
+    'frame-settings-layouts',
     'frame-settings-info',
     // ESP32 frames only; the per-frame gate (esp32OnlyFrameSettingsSections)
     // refuses it for every other device. Backend-managed ESP32s render the
@@ -282,6 +283,7 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     // page are not the only ones it cannot jump to.
     'frame-settings-cloud',
     'frame-settings-store-scene-services',
+    'frame-settings-layouts',
     'frame-settings-info',
     'frame-settings-upgrade',
     'frame-settings-device',
@@ -316,6 +318,8 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
   // handling; QR control code — disabled with a note on firmware older than
   // 2026.8.30, but always present), and Power on an ESP32.
   cloud: [
+    // Which layout each scene wears (saved with the form as the scenes').
+    'frame-settings-layouts',
     // The owner's log-shipping switch (the telemetry scopes on the link);
     // renders above Defaults, after the service keys.
     'frame-settings-telemetry',
@@ -611,7 +615,11 @@ const virtualCloudFrameHiddenMenuActions: readonly FrameMenuAction[] = ['updateF
  * network access); the frame's name, interval and time zone are the block
  * the panel opens on, which has no link.
  */
-const virtualCloudFrameSettingsSections: readonly string[] = ['frame-settings-telemetry', 'frame-settings-virtual']
+const virtualCloudFrameSettingsSections: readonly string[] = [
+  'frame-settings-layouts',
+  'frame-settings-telemetry',
+  'frame-settings-virtual',
+]
 
 /**
  * An embedded-mode frame with real hardware (ESP32 or Pico family — any
@@ -941,6 +949,7 @@ export function frameSupportsUsbSerialConsole(
  * pure noise.
  */
 const esp32CloudFrameSettingsSections: readonly string[] = [
+  'frame-settings-layouts',
   'frame-settings-power',
   'frame-settings-palette',
   'frame-settings-colors',

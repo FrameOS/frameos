@@ -13,10 +13,12 @@ export function SceneLayoutPicker({
   frameId,
   sceneId,
   className,
+  ariaLabel = 'Layout',
 }: {
   frameId: FrameId
   sceneId: string
   className?: string
+  ariaLabel?: string
 }): JSX.Element | null {
   const logic = sceneLayoutLogic({ frameId, sceneId })
   const { pickerVisible, layouts, current } = useValues(logic)
@@ -26,7 +28,7 @@ export function SceneLayoutPicker({
   }
   return (
     <select
-      aria-label="Layout"
+      aria-label={ariaLabel}
       title="The layout this scene is drawn inside. Save the frame to push it."
       value={current?.sceneId ?? ''}
       onClick={(event) => event.stopPropagation()}
