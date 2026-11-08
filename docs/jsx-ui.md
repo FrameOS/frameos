@@ -292,6 +292,11 @@ export function get(app) {
 - **It is in the canvas's pixel format**, as kept photos are: on an ESP32,
   RGB565 (a 448x276 canvas is 242 KB), and drawn 1:1 by `<img>` at its own
   size.
+- **`imageRendering="pixelated"`** on an `<image>` draws a scaled RGB565
+  canvas as its nearest pixels: blocky, with no copy and a few ms a frame on
+  an ESP32 (2026.11.5+), where a smooth scale takes ~600 ms at 480x480. For a
+  picture that follows fingers and is drawn again when they lift, as the Map
+  scene's pinch is.
 
 ## Layout
 
@@ -467,7 +472,9 @@ export const get = () => (
 - **Renders cost what they cost on the panel.** On an LCD, a HyperPixel or
   the browser preview a click answers at once; on e-paper it answers in a
   refresh, and `hover:` / `active:` are a refresh each: keep them for
-  screens that redraw in a blink.
+  screens that redraw in a blink. Every handler is a render too, so an app
+  that follows a finger checks `app.frame.paper` (2026.11.5+) and takes the
+  whole drag as one `onSwipe` there, as the Map scene does.
 - **Where the events come from**: the dispatcher's pointer events and
   gestures (`docs/events.md` "Input"), on every host: a Pi's touch screen or
   mouse, the touch glass of an ESP32 LCD board (the SenseCAP Indicator, the

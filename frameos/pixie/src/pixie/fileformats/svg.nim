@@ -90,6 +90,7 @@ type
     image: Image
     imageBox: Rect
     imageClip: bool
+    imagePixelated: bool # image-rendering="pixelated"
     # The viewport of a nested `<svg>` it is inside (and of every one around
     # that), in the parsed image's pixels: nothing is drawn outside it. An
     # axis-aligned box; w < 0: none. Inherited.
@@ -392,6 +393,7 @@ proc parseSvgProperties(node: SvgNode, inherited: SvgProperties): SvgProperties 
   result.isRect = false
   result.image = nil
   result.imageClip = false
+  result.imagePixelated = false
 
   var
     fillRule = node.attr("fill-rule")
@@ -988,6 +990,7 @@ proc parseSvgImage(node: SvgNode, props: SvgProperties): (Path, SvgProperties) =
     box = rect(x + (w - fw) * ax, y + (h - fh) * ay, fw, fh)
     result[1].imageClip = slice
   result[1].image = image
+  result[1].imagePixelated = node.attr("image-rendering") == "pixelated"
   result[1].imageBox = box
   result[1].rectX = x
   result[1].rectY = y
@@ -1529,6 +1532,61 @@ proc parseSvg*(data: string, width = 0, height = 0): Svg {.raises: [PixieError].
   ## Parse SVG data. Defaults to the SVG's view box size.
   parseSvgNodes(data).parseSvg(width, height)
 
+proc drawNearest565(target, image: Image, transform: Mat3): bool {.raises: [].} =
+  ## `image-rendering="pixelated"`: a 565 picture scaled onto a 565 target,
+  ## axis aligned, as the source pixel under each target pixel's centre,
+  ## unfiltered and with nothing allocated. For a picture that follows two
+  ## fingers and is redrawn when they lift: blocky is fine and slow is not.
+  ## Through `draw` a scaled 480x480 picture was an RGBX copy and the float
+  ## sampler, 600 ms a frame on an ESP32-S3 (2026-11-08). False when this is
+  ## not that case, and nothing is drawn.
+  let
+    sx = transform[0, 0].float64
+    sy = transform[1, 1].float64
+    tx = transform[2, 0].float64
+    ty = transform[2, 1].float64
+  if target.format != pfRgb565 or image.format != pfRgb565 or
+      transform[0, 1] != 0 or transform[1, 0] != 0 or sx <= 0 or sy <= 0:
+    return false
+  if sx == 1 and sy == 1 and tx == floor(tx) and ty == floor(ty):
+    return false # `draw` copies these rows as they are
+  let
+    x0 = clamp(ceil(tx - 0.5).int, 0, target.width)
+    y0 = clamp(ceil(ty - 0.5).int, 0, target.height)
+    y1 = clamp(ceil(ty + image.height.float64 * sy - 0.5).int, 0, target.height)
+    # 16.16 source columns: 4096 px fit, and truncating the step only ever
+    # falls short of the picture's last column.
+    uStart = (max(0.0, (x0.float64 + 0.5 - tx) / sx) * 65536.0).uint32
+    du = (65536.0 / sx).uint32
+  var x1 = clamp(ceil(tx + image.width.float64 * sx - 0.5).int, 0, target.width)
+  while x1 > x0 and ((uStart + du * (x1 - 1 - x0).uint32) shr 16).int >= image.width:
+    dec x1
+  result = true
+  let
+    count = x1 - x0
+    dst = target.data16
+    src = image.data16
+  if count <= 0:
+    return
+  var
+    lastRow = -1
+    lastOut = 0
+  for y in y0 ..< y1:
+    let row = floor((y.float64 + 0.5 - ty) / sy).int
+    if row < 0 or row >= image.height:
+      continue
+    let at = target.dataIndex(x0, y)
+    if row == lastRow:
+      copyMem(dst[at].addr, dst[lastOut].addr, count * 2)
+    else:
+      let line = image.dataIndex(0, row)
+      var u = uStart
+      for i in 0 ..< count:
+        dst[at + i] = src[line + (u shr 16).int]
+        u += du
+      lastRow = row
+    lastOut = at
+
 proc drawSvgImage(target: Image, props: SvgProperties) {.raises: [PixieError].} =
   ## An `<image>` element: its picture stretched into `imageBox`, and with
   ## `imageClip` only where it falls inside the element's box, which an axis
@@ -1544,7 +1602,8 @@ proc drawSvgImage(target: Image, props: SvgProperties) {.raises: [PixieError].} 
   let transform = m * translate(vec2(box.x, box.y)) *
     scale(vec2(box.w / image.width.float32, box.h / image.height.float32))
   if not props.imageClip or m[0, 1] != 0 or m[1, 0] != 0:
-    target.draw(image, transform)
+    if not (props.imagePixelated and target.drawNearest565(image, transform)):
+      target.draw(image, transform)
     return
   let
     a = m * vec2(props.rectX, props.rectY)

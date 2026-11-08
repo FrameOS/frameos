@@ -196,6 +196,9 @@ interface FrameOSApp {
     /** The render scale that applies to the scene. A .tsx or .jsx app's sizes are the panel's
      * divided by it, and its JSX is drawn that many times larger (FrameOS 2026.10.22+; undefined before). */
     scale?: number;
+    /** A panel that shows a change only in a refresh, as e-paper and a monochrome OLED do. An app that follows
+     * a finger waits for it to lift there (FrameOS 2026.11.5+; undefined before). */
+    paper?: boolean;
   };
   initialized?: boolean;
   log(...args: any[]): void;

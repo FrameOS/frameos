@@ -101,6 +101,68 @@ block: # An RGB565 target takes an <image> too
   parseSvg(el("svg", {"width": "4", "height": "2"}, node), 4, 2).renderInto(target)
   doAssert target[0, 0].r > 200 and target[3, 1].b > 200
 
+block: # A 565 picture scaled onto a 565 target: its nearest pixels, wherever it lands
+  const
+    red = rgbx(255, 0, 0, 255)
+    blue = rgbx(0, 0, 255, 255)
+    green = rgbx(0, 255, 0, 255)
+    white = rgbx(255, 255, 255, 255)
+    black = rgbx(0, 0, 0, 255)
+  # 4x4: red top left, blue top right, green bottom left, white bottom right.
+  let pic = newImage565(4, 4)
+  for y in 0 ..< 4:
+    for x in 0 ..< 4:
+      pic[x, y] = if y < 2: (if x < 2: red else: blue) else: (if x < 2: green else: white)
+  proc drawn(w, h: int, x, y, bw, bh: string, rendering = "pixelated"): Image =
+    let node = el("image", {"x": x, "y": y, "width": bw, "height": bh, "preserveAspectRatio": "none",
+      "image-rendering": rendering})
+    node.image = pic
+    result = newImage565(w, h)
+    result.fill(black)
+    parseSvg(el("svg", {"width": $w, "height": $h}, node), w, h).renderInto(result)
+
+  block: # twice the size, edges sharp
+    let t = drawn(8, 8, "0", "0", "8", "8")
+    doAssert t[3, 3] == red and t[4, 3] == blue and t[3, 4] == green and t[4, 4] == white
+    doAssert t[0, 0] == red and t[7, 7] == white
+
+  block: # only when asked: any other picture stays smooth
+    let t = drawn(6, 6, "0", "0", "6", "6", rendering = "auto") # 1.5x: exactly 2x is blocky anyway
+    doAssert t[2, 1] != red and t[2, 1] != blue
+    let blocky = drawn(6, 6, "0", "0", "6", "6")
+    doAssert blocky[2, 1] == red or blocky[2, 1] == blue
+
+  block: # half the size picks pixels, it does not mix them
+    let t = drawn(2, 2, "0", "0", "2", "2")
+    doAssert t[0, 0] == red and t[1, 0] == blue and t[0, 1] == green and t[1, 1] == white
+
+  block: # hanging off every side: no fault, and only what is inside drawn
+    let t = drawn(6, 6, "-4", "-4", "16", "16") # 4x: each quadrant 8 px, split at 4
+    doAssert t[3, 3] == red and t[4, 3] == blue and t[3, 4] == green and t[5, 5] == white
+    let small = drawn(6, 6, "4", "4", "8", "8")
+    doAssert small[3, 3] == black and small[4, 4] == red and small[5, 5] == red
+
+  block: # around the box nothing changes, at a fractional place and scale
+    let t = drawn(12, 12, "1.5", "2.5", "6", "6")
+    doAssert t[0, 5] == black and t[8, 5] == black and t[5, 1] == black and t[5, 9] == black
+    doAssert t[2, 3] == red and t[6, 7] == white
+
+  block: # a window of the target repaints what a whole render would
+    let
+      node = el("image", {"x": "1", "y": "1", "width": "10", "height": "10", "preserveAspectRatio": "none",
+        "image-rendering": "pixelated"})
+      whole = newImage565(12, 12)
+      windowed = newImage565(12, 12)
+    node.image = pic
+    let svg = parseSvg(el("svg", {"width": "12", "height": "12"}, node), 12, 12)
+    whole.fill(black)
+    windowed.fill(black)
+    svg.renderInto(whole)
+    svg.renderInto(windowed.view(3, 4, 5, 6), 3, 4)
+    for y in 4 ..< 10:
+      for x in 3 ..< 8:
+        doAssert windowed[x, y] == whole[x, y], $x & "," & $y
+
 echo "test_svg_nodes ok"
 
 block:
