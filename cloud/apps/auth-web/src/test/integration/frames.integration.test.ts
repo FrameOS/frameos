@@ -1619,6 +1619,77 @@ describe("frame management API", () => {
     expect(await listedMaps()).toBeUndefined();
   });
 
+  it("carries an install's layout like its button map (docs/scene-layouts.md)", async () => {
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const scene = await createStoreScene(accountId, { name: "Layouts" });
+    const layout = { sceneId: "bar", state: { height: 40 } };
+    const assign = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id, layouts: { [scene.id]: layout } }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(assign.status).toBe(200);
+    const pushedScenes = async () => {
+      const [command] = await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.frameId, frame_id))
+        .orderBy(desc(frameCommands.createdAt))
+        .limit(1);
+      return (command?.payload as { scenes: Record<string, unknown>[] }).scenes;
+    };
+    const listedLayouts = async () => {
+      const listed = await getFrameScenes(
+        getRequest(`/api/frames/${frame_id}/scenes`),
+        routeParams(frame_id),
+      );
+      const { scenes } = (await listed.json()) as { scenes: { layouts?: unknown }[] };
+      return scenes[0]?.layouts;
+    };
+    expect((await pushedScenes())[0]?.layout).toEqual(layout);
+    expect(await listedLayouts()).toEqual({ [scene.id]: layout });
+
+    // Omitted keeps it, what a scene update and a reorder do.
+    await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id, settings_groups: [] }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect((await pushedScenes())[0]?.layout).toEqual(layout);
+
+    const refused = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id, layouts: { [scene.id]: { nope: true } } }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(refused.status).toBe(400);
+
+    const cleared = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id, layouts: null }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(cleared.status).toBe(200);
+    expect((await pushedScenes())[0]).not.toHaveProperty("layout");
+    expect(await listedLayouts()).toBeUndefined();
+  });
+
   it("gates on the PINNED version's risk flags, not the latest version's", async () => {
     // Publish shell-flagged v1, publish clean v2 (which overwrites
     // store_scenes.risk_flags), then pin v1: the old gate read the scene row

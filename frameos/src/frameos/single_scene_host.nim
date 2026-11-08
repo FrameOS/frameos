@@ -109,6 +109,7 @@ proc cleanupScene*(scene: FrameScene) =
   let interpreted = InterpretedFrameScene(scene)
   for _, childScene in interpreted.sceneNodes:
     cleanupScene(childScene)
+  rhythmReleaseScene(scene)
   interpreted.execNode = nil
   interpreted.getDataNode = nil
   # Before the apps are dropped: each JS app node owns a QuickJS runtime with

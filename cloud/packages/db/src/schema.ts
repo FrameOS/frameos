@@ -1163,6 +1163,14 @@ export const frameSceneAssignments = pgTable(
     // onto each pushed scene as `eventMap`. Kept across every assignment
     // write that omits it, so a scene update leaves it alone. NULL = none.
     eventMaps: jsonb("event_maps"),
+    // The owner's per-install layouts (migration 0076, docs/scene-layouts.md):
+    // { [runtime scene id]: {sceneId, state?} }, written onto each pushed
+    // scene as `layout`. Kept like event_maps. NULL = none.
+    layouts: jsonb("layouts"),
+    // Every runtime scene of the assigned version is a layout (settings.
+    // isLayout), so a voice turn does not offer it as a scene. Settled with
+    // the grants, while the push has the version open.
+    isLayout: boolean("is_layout").default(false).notNull(),
     ...timestamps,
   },
   (table) => ({

@@ -11,7 +11,7 @@ import {
   sceneAccess,
   sceneAccessFlagLabel,
 } from '../../../../utils/sceneAccess'
-import { splitSceneRhythmHint } from '../../../../utils/sceneRhythm'
+import { framePacedByInterval, splitSceneRhythmHint } from '../../../../utils/sceneRhythm'
 import { renderScaleFieldIndex, sceneRenderScaleOptions, type RenderScaleOption } from '../../../../utils/renderScale'
 
 export interface SceneSettingsLogicProps {
@@ -39,6 +39,7 @@ export interface ScenePermissionApp {
 export interface sceneSettingsLogicValues {
   frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
+  pacedByInterval: boolean
   permissionApps: ScenePermissionApp[]
   permissionRows: ScenePermissionRow[]
   renderScaleFieldName: string | null
@@ -58,6 +59,7 @@ export interface sceneSettingsLogicMeta {
     scene: (scenes: FrameScene[], sceneId: string | null) => FrameScene | null
     sceneIndex: (scenes: FrameScene[], sceneId: string | null) => number
     splitRhythm: (scene: FrameScene | null, scenes: FrameScene[], frameForm: Partial<FrameType>) => string | null
+    pacedByInterval: (frameForm: Partial<FrameType>) => boolean
     sceneAccess: (scene: FrameScene | null) => SceneAccess | null
     permissionRows: (sceneAccess: SceneAccess | null) => ScenePermissionRow[]
     renderScaleOptions: (scene: FrameScene | null) => RenderScaleOption[]
@@ -101,7 +103,12 @@ export const sceneSettingsLogic = kea<sceneSettingsLogicType>([
         scene: sceneSettingsLogicValues['scene'],
         scenes: sceneSettingsLogicValues['scenes'],
         frameForm: sceneSettingsLogicValues['frameForm']
-      ): string | null => splitSceneRhythmHint(scene, scenes, frameForm.interval || 300),
+      ): string | null =>
+        splitSceneRhythmHint(scene, scenes, frameForm.interval || 300, framePacedByInterval(frameForm as FrameType)),
+    ],
+    pacedByInterval: [
+      (s) => [s.frameForm],
+      (frameForm: sceneSettingsLogicValues['frameForm']): boolean => framePacedByInterval(frameForm as FrameType),
     ],
     // What the scene's apps ask for (utils/sceneAccess.ts), recomputed as the
     // scene is edited.

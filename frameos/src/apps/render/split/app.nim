@@ -1,4 +1,5 @@
 import strutils
+import tables
 import pixie
 import options
 import frameos/apps
@@ -108,6 +109,53 @@ proc splitDimensions*(width: int, height: int, appConfig: AppConfig): seq[(int, 
     for col in 0..<columns:
       result[row * columns + col] = (cellWidths[col], cellHeights[row])
 
+proc rendersItsOwnCell(self: App, node: NodeId): bool =
+  ## A scene node in a cell paints its own background, or leaves what the
+  ## canvas holds (frameos/scene_rhythm.nim).
+  if self.scene.isNil or not (self.scene of InterpretedFrameScene):
+    return false
+  let scene = InterpretedFrameScene(self.scene)
+  scene.nodes.hasKey(node) and scene.nodes[node].nodeType == "scene"
+
+proc settleBackground(self: App, context: ExecutionContext, image: Image, cellDims: seq[(int, int)]) =
+  ## The background owed: on the margins, the gaps and the cells nothing
+  ## draws in, but not under a panel, whose pixels may be staying.
+  context.backgroundPending = false
+  let (marginTop, _, _, marginLeft) = extractMargins(self.appConfig.margin)
+  let (gapHorizontal, gapVertical) = extractGaps(self.appConfig.gap)
+  proc paint(x, y, w, h: int) =
+    let
+      x1 = clamp(x, 0, image.width)
+      y1 = clamp(y, 0, image.height)
+      w1 = min(w, image.width - x1)
+      h1 = min(h, image.height - y1)
+    if w1 > 0 and h1 > 0:
+      image.view(x1, y1, w1, h1).fill(context.backgroundColor)
+  var bottom = 0
+  var cellY = marginTop
+  for row in 0 ..< self.appConfig.rows:
+    let top = cellY.toInt
+    paint(0, bottom, image.width, top - bottom)
+    var right = 0
+    var cellX = marginLeft
+    let rowH = cellDims[row * self.appConfig.columns][1]
+    for column in 0 ..< self.appConfig.columns:
+      let cell = row * self.appConfig.columns + column
+      let (cellW, _) = cellDims[cell]
+      let left = cellX.toInt
+      paint(right, top, left - right, rowH)
+      let fns = self.appConfig.renderFunctions
+      let renderer: NodeId = if row < fns.len and column < fns[row].len and fns[row][column] != 0: fns[row][column]
+                             else: self.appConfig.renderFunction
+      if renderer == 0 or not self.rendersItsOwnCell(renderer):
+        paint(left, top, cellW, rowH)
+      right = left + cellW
+      cellX += cellW.toFloat + gapHorizontal
+    paint(right, top, image.width - right, rowH)
+    bottom = top + rowH
+    cellY += rowH.toFloat + gapVertical
+  paint(0, bottom, image.width, image.height - bottom)
+
 proc render*(self: App, context: ExecutionContext, image: var Image) =
   let
     rows = self.appConfig.rows
@@ -127,6 +175,9 @@ proc render*(self: App, context: ExecutionContext, image: var Image) =
     cellDims = splitDimensions(image.width, image.height, self.appConfig)
     (marginTop, marginRight {.used.}, marginBottom {.used.}, marginLeft) = extractMargins(self.appConfig.margin)
     (gapHorizontal, gapVertical) = extractGaps(self.appConfig.gap)
+
+  if context.backgroundPending:
+    self.settleBackground(context, image, cellDims)
 
   # Loop through each cell defined by rows and columns
   var cellY = marginTop

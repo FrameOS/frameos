@@ -30,6 +30,7 @@ import frameos/utils/time
 import frameos/scenes
 import frameos/scene_switcher_linux
 from system/sceneSwitcher/scene import isBuiltInScene
+from frameos/scene_rhythm import rhythmCanvasGeneration
 import frameos/boot_guard
 import frameos/runtime_diagnostics
 from frameos/upgrade import UpgradeLogWatcher, initUpgradeLogWatcher, poll
@@ -1024,6 +1025,16 @@ proc sceneEvents*(self: RunnerThread): EventLoop =
   EventLoop(self.eventLoop)
 
 const MessageLoopYieldEvery = DefaultDrainBudget
+
+proc canvasGenerationForRhythm(canvas: Image): int64 {.nimcall, raises: [].} =
+  ## A frame-wide colour correction rewrites the canvas after every render: a
+  ## kept panel would be corrected again. Asked of the panel canvas alone.
+  {.cast(raises: []).}:
+    if frameColorSettings.global.hasAdjustments():
+      return -1
+  panelCanvasGeneration(canvas)
+
+rhythmCanvasGeneration = canvasGenerationForRhythm
 
 proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.async.} =
   var waitTime = 10

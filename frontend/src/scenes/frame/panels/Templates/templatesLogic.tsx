@@ -12,6 +12,7 @@ import { assignCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { stripSecretFieldValues } from '../../../../utils/stripSecretFieldValues'
 import { withoutSceneEventMap } from '../../../../utils/sceneEventMap'
+import { withoutSceneLayout } from '../../../../utils/sceneLayouts'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { longRunningTasksModel, reportTaskOutcome } from '../../../../models/longRunningTasksModel'
 import { framesModel } from '../../../../models/framesModel'
@@ -681,7 +682,9 @@ export const templatesLogic = kea<templatesLogicType>([
             .filter((scene) => exportScenes.includes(scene.id))
             // Saved the way a save leaves them: each JS app's permissions
             // filled from its code (utils/sceneAccess.ts).
-            .map((scene) => withAppPermissions(stripSecretFieldValues(withoutSceneEventMap(scene), values.apps)))
+            .map((scene) =>
+              withAppPermissions(stripSecretFieldValues(withoutSceneLayout(withoutSceneEventMap(scene)), values.apps))
+            )
 
           if (target === 'cloud') {
             const response = await apiFetch('/api/cloud/store/publish', {

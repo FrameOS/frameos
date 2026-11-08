@@ -7,6 +7,7 @@ import frameos/channels
 import frameos/cloud/scene_guard
 import frameos/hal/files as halFiles
 import frameos/types
+import frameos/scene_rhythm
 import frameos/interpreter
 import frameos/values
 import frameos/refresh_interval
@@ -176,6 +177,7 @@ proc cleanupSceneRuntime*(scene: FrameScene) =
     let interpreted = InterpretedFrameScene(scene)
     for _, childScene in interpreted.sceneNodes:
       cleanupSceneRuntime(childScene)
+    rhythmReleaseScene(scene)
     # Break common ORC/ARC cycles before closing the JS runtime.
     interpreted.execNode = nil
     interpreted.getDataNode = nil
@@ -865,10 +867,13 @@ proc getFirstSceneId*(): SceneId =
     if lastSceneId.isSome() and hasExportedScene(lastSceneId.get()):
       return lastSceneId.get()
     withLock sceneRegistryLock:
-      for key in keys(uploadedScenes):
-        return key
-      for key in keys(interpretedScenes):
-        return key
+      # Never a layout: it has nothing to show on its own.
+      for key, scene in uploadedScenes.pairs:
+        if not (scene of ExportedInterpretedScene and ExportedInterpretedScene(scene).isLayout):
+          return key
+      for key, scene in interpretedScenes.pairs:
+        if not (scene of ExportedInterpretedScene and ExportedInterpretedScene(scene).isLayout):
+          return key
       if defaultSceneId.isSome() and exportedScenes.hasKey(defaultSceneId.get()):
         return defaultSceneId.get()
       for key in keys(compiledScenes):

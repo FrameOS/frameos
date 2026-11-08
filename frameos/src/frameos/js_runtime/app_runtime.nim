@@ -2302,6 +2302,40 @@ proc keepUiRegions(runtime: JsAppRuntime, owner: AppRoot, sceneId: string,
     except Exception:
       discard # a handler's failure is logged; one in the logging has nowhere to go
 
+var embeddedSceneRenderer*: proc(owner: FrameScene, nodeId: NodeId, index: int, sceneId, props: string,
+    box: array[4, float32], width, height: int, context: ExecutionContext): Image {.nimcall.}
+  ## Set by the interpreter: a `<Scene>`'s or `<yield />`'s picture. `box` is
+  ## where it lands in the owner's canvas, for the pointer.
+
+proc fillSceneImages(owner: AppRoot, context: ExecutionContext, node: SvgNode, scale: float32,
+    index: var int, ox, oy: float32) =
+  ## The layout emitted a `<Scene>` as an `<image>` waiting for its picture
+  ## (it could not know the size before): the scenes run here, each at the
+  ## size it got. Walks the UI's tree, nested viewports included; only for a
+  ## UI whose JSX held a scene.
+  if node.tag == "image":
+    let id = node.attr("scene-id")
+    if id.len > 0 and not embeddedSceneRenderer.isNil:
+      let
+        x = ox + parseFloat(node.attr("x")).float32
+        y = oy + parseFloat(node.attr("y")).float32
+        w = parseFloat(node.attr("width")).float32
+        h = parseFloat(node.attr("height")).float32
+      node.image = embeddedSceneRenderer(owner.scene, owner.nodeId, index, id, node.attr("scene-props"),
+        [x * scale, y * scale, w * scale, h * scale], round(w * scale).int, round(h * scale).int, context)
+      inc index
+      if node.image.isNil:
+        node.attrs.add(("opacity", "0"))
+    return
+  var nx = ox
+  var ny = oy
+  if node.tag == "svg" and node.attr("x").len > 0:
+    nx += parseFloat(node.attr("x")).float32
+    ny += parseFloat(node.attr("y")).float32
+  for child in node.children:
+    fillSceneImages(owner, context, child, scale, index, nx, ny)
+
+
 proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, root: SvgNode): Image =
   ## A JSX tree an app returned: an `<svg>` drawn as it is, anything else a
   ## UI laid out at the size of the image asked for (ui/layout.nim) and drawn
@@ -2345,6 +2379,12 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
     except CatchableError as error:
       frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
       return nil
+  # The scenes it embeds, each drawn now that its size is known. The offered
+  # target comes after: its corner moves the slots only when it is a cell.
+  let firstSlot = if owner.scene.isNil: 0 else: owner.scene.slots.len
+  if runtime.jsxMemo.sawScene and root.tag != "svg":
+    var index = 0
+    fillSceneImages(owner, context, svg, regionScale, index, 0, 0)
   # A UI's nodes come back from the layout where they did not change.
   var intoTarget: Image
   probe(phDraw):
@@ -2352,10 +2392,16 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
       reuse = root.tag != "svg")
   if not intoTarget.isNil:
     if intoTarget.width == requestedWidth and intoTarget.height == requestedHeight:
+      let
+        localX = (intoTarget.origin mod max(intoTarget.stride, 1)) - (if owner.scene.isNil: 0 else: owner.scene.canvasX.int)
+        localY = (intoTarget.origin div max(intoTarget.stride, 1)) - (if owner.scene.isNil: 0 else: owner.scene.canvasY.int)
+      if not owner.scene.isNil:
+        for i in firstSlot ..< owner.scene.slots.len:
+          owner.scene.slots[i].x += localX.float32
+          owner.scene.slots[i].y += localY.float32
       if regions.len > 0 or not target.isNil:
         probe(phRegions):
-          runtime.keepUiRegions(owner, sceneId, regions, intoTarget.origin mod max(intoTarget.stride, 1),
-            intoTarget.origin div max(intoTarget.stride, 1), regionScale)
+          runtime.keepUiRegions(owner, sceneId, regions, localX, localY, regionScale)
     return intoTarget
   let (svgWidth, svgHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
   let image = decodeSvgWithFallback(svg, svgWidth, svgHeight)

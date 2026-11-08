@@ -70,4 +70,14 @@ describe("scenePush", () => {
       description: "Push this scene and 2 connected scenes to the frame",
     });
   });
+
+  it("takes a scene's layout and the scenes its JSX names along, but no yield", () => {
+    const wrapped = {
+      ...scene("page"),
+      layout: { sceneId: "bar" },
+      apps: { ui: { sources: { "app.tsx": 'export function get() { return <Scene id="clock" city="Oslo" /> }' } } },
+    } as unknown as FrameScene;
+    const bar = scene("bar", [{ id: "1", type: "scene", data: { keyword: "system/yield" } }]);
+    expect(connectedSceneIds("page", [wrapped, bar, scene("clock"), scene("other")])).toEqual(["page", "bar", "clock"]);
+  });
 });

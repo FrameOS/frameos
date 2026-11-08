@@ -2,6 +2,9 @@
 
 EVENTS_CONTRACT_VERSION = 1
 
+# What a layout's scene node names for the scene it wraps: no scene of the frame.
+SCENE_YIELD_ID = "system/yield"
+
 # origin -> contract events it may not emit. `http:write` is the frame access
 # key: what it is refused needs an admin session or the serverApiKey instead.
 REFUSED_BY_ORIGIN: dict[str, frozenset[str]] = {

@@ -216,11 +216,14 @@ export async function POST(
   }
 
   // What the frame holds, by store id and name, and which one it reports
-  // showing (a runtime id, mapped back to its store scene).
-  const scenes: VoiceScene[] = (await assignedScenes(db, frame.id)).map((row) => ({
-    id: row.sceneId,
-    name: row.name,
-  }));
+  // showing (a runtime id, mapped back to its store scene). A layout is not
+  // something to switch to (docs/scene-layouts.md).
+  const scenes: VoiceScene[] = (await assignedScenes(db, frame.id))
+    .filter((row) => !row.isLayout)
+    .map((row) => ({
+      id: row.sceneId,
+      name: row.name,
+    }));
   const reportedActive = reportedActiveSceneId(frame.lastState);
   const activeStoreId = reportedActive
     ? await resolveStoreSceneForFrameScene(db, frame.id, reportedActive)

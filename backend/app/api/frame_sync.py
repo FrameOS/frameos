@@ -622,6 +622,8 @@ def _scene_compare_value(scene: Any) -> dict[str, Any]:
         # The installed copy's button map (docs/events.md "Event map"): beside
         # the scene, so a frame still running without it is out of sync.
         "eventMap": _sync_prune_empty(scene.get("eventMap")) or [],
+        # The layout this install wears (docs/scene-layouts.md), the same way.
+        "layout": _sync_prune_empty(scene.get("layout")) or {},
         "apps": _sync_prune_empty(scene.get("apps")) or {},
         "nodes": {
             key: _scene_node_compare_value(node)
@@ -651,6 +653,7 @@ def _scene_diff_details(backend_scene: Any, frame_scene: Any, *, limit: int = 12
         ("fields", "Fields"),
         ("customEvents", "Custom events"),
         ("eventMap", "Button map"),
+        ("layout", "Layout"),
         ("apps", "Apps"),
     ):
         if len(details) >= limit:

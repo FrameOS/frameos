@@ -11,6 +11,10 @@ import { TextArea } from '../../../../components/TextArea'
 import { AdvancedSection } from '../../../../components/AdvancedSection'
 import { Tooltip } from '../../../../components/Tooltip'
 import { SceneAccessTags } from './SceneAccessTags'
+import { Switch } from '../../../../components/Switch'
+import { SceneLayoutPicker } from './SceneLayoutPicker'
+import { sceneLayoutLogic } from './sceneLayoutLogic'
+import type { FrameId } from '../../../../types'
 import clsx from 'clsx'
 import { sceneRequiresCompilation } from '../../../../utils/sceneApps'
 import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../../../utils/sceneExecution'
@@ -20,6 +24,19 @@ import {
   sceneRenderScaleFromSelect,
   sceneRenderScaleSelectValue,
 } from '../../../../utils/renderScale'
+
+function SceneLayoutField({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): JSX.Element | null {
+  const { pickerVisible } = useValues(sceneLayoutLogic({ frameId, sceneId }))
+  if (!pickerVisible) {
+    return null
+  }
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <SceneSettingsLabel>Layout</SceneSettingsLabel>
+      <SceneLayoutPicker frameId={frameId} sceneId={sceneId} className="!h-10 @md:max-w-[12rem]" />
+    </div>
+  )
+}
 
 export interface SceneSettingsProps {
   sceneId: string
@@ -42,8 +59,16 @@ function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
 export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSettingsProps): JSX.Element {
   const { frameId, frameForm, convertingSceneId } = useValues(frameLogic)
   const { convertSceneToInterpreted } = useActions(frameLogic)
-  const { sceneIndex, scene, permissionRows, permissionApps, splitRhythm, renderScaleOptions, renderScaleFieldName } =
-    useValues(sceneSettingsLogic({ frameId, sceneId }))
+  const {
+    sceneIndex,
+    scene,
+    permissionRows,
+    permissionApps,
+    splitRhythm,
+    pacedByInterval,
+    renderScaleOptions,
+    renderScaleFieldName,
+  } = useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
     return <></>
   }
@@ -98,11 +123,20 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                 hint={splitRhythm ?? undefined}
                 tooltip={
                   splitRhythm !== null ? (
-                    <>
-                      The fastest this split renders. Each panel renders when its own scene is due, and the others keep
-                      their picture until their time comes; the split waits longer when no panel is due. Set a panel's
-                      own interval in its options. Rendering the frame by hand redraws every panel.
-                    </>
+                    pacedByInterval ? (
+                      <>
+                        The fastest this split renders on this display. Each panel renders when its own scene is due,
+                        and the others keep their picture until their time comes; the split waits longer when no panel
+                        is due. Set a panel's own interval in its options. Rendering the frame by hand redraws every
+                        panel.
+                      </>
+                    ) : (
+                      <>
+                        On this display the split renders whenever one of its panels is due, so this number holds it
+                        back from nothing. The others keep their picture until their time comes. Set a panel's own
+                        interval in its options. Rendering the frame by hand redraws every panel.
+                      </>
+                    )
                   ) : (
                     <>
                       {refreshIntervalTooltip} Scene code reads it as <code>state.{REFRESH_INTERVAL_FIELD_NAME}</code>.
@@ -118,7 +152,18 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
               </Field>
             </Group>
           )}
+          <div className={clsx(fieldClassName, 'space-y-1')} data-scene-settings-layout>
+            <SceneLayoutField frameId={frameId} sceneId={sceneId} />
+          </div>
           <Group name={['settings']}>
+            <Field
+              className={fieldClassName}
+              name="isLayout"
+              label={<SceneSettingsLabel>Use as layout</SceneSettingsLabel>}
+              tooltip="A layout wraps other scenes (a clock bar above them, say). It leaves the scene lists and goes under Layouts, and any scene on this frame can then wear it."
+            >
+              <Switch name="isLayout" />
+            </Field>
             <Field
               className={fieldClassName}
               name="backgroundColor"

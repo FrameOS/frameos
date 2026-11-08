@@ -1257,6 +1257,14 @@ export interface FrameSceneSettings {
   execution?: 'compiled' | 'interpreted'
   autoArrangeOnLoad?: boolean
   splitScreenLayout?: Record<string, any>
+  /** This scene is a layout: it wraps other scenes and stays out of the scene lists (docs/scene-layouts.md). */
+  isLayout?: boolean
+}
+
+/** The layout an installed scene wears, and the layout's settings for it. */
+export interface SceneLayoutRef {
+  sceneId: string
+  state?: Record<string, any>
 }
 
 /**
@@ -1322,6 +1330,9 @@ export interface FrameScene {
    * assignment row (`event_maps`, hydrated in here per runtime scene).
    */
   eventMap?: EventMapRule[]
+  /** The layout this installed copy wears, beside the scene like `eventMap`
+   * (docs/scene-layouts.md): the cloud's assignment row keeps it as `layouts`. */
+  layout?: SceneLayoutRef | null
 }
 
 export interface FrameSceneIndexed {

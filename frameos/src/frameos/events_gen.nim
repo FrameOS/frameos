@@ -81,6 +81,8 @@ const
   SceneSwitcherId* = "system/sceneSwitcher"
   ## The built-in scene `sceneSettings` shows (docs/scene-settings.md).
   SceneSettingsId* = "system/sceneSettings"
+  ## What a layout's scene node names for the scene it wraps (docs/scene-layouts.md).
+  SceneYieldId* = "system/yield"
   ## Origins a scene opts into per custom event (`origins` on its declaration).
   CustomEventDeclarableOrigins*: set[EventOrigin] = {eoSchedule, eoCloud}
 

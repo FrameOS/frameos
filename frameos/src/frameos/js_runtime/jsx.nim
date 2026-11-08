@@ -11,6 +11,7 @@ import std/tables
 import pixie
 import pixie/fileformats/svg
 import frameos/js_runtime/burrito
+import frameos/events_gen
 
 proc JS_AtomToCString(ctx: ptr JSContext, atom: JSAtom): cstring {.importc, header: "quickjs/quickjs.h".}
 
@@ -20,6 +21,7 @@ const
   keepCamel = ["viewBox", "gradientUnits", "gradientTransform", "preserveAspectRatio"]
   MaxNodes = 20_000
   MaxDepth = 64
+  SceneYieldTag = SceneYieldId
 
 {.push raises: [].}
 
@@ -36,6 +38,7 @@ type
     ## are the same, and its nodes are taken back without reading it.
     kept: seq[JsxKept]
     nextId: int
+    sawScene*: bool ## a `<Scene>` or `<yield />` has been read: its UI's layout is searched for them
 
   JsxReader = object
     ctx: ptr JSContext
@@ -157,6 +160,24 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
   if not ctx.stringProp(v, "type", node.tag):
     return
   let props = ctx.prop(v, "props")
+  if node.tag in ["Scene", "scene", "yield", "Yield"]:
+    # A scene's props are its state, typed as JS gave them (`count={3}` is 3):
+    # they are the scene's to read, not attributes of an element.
+    if not r.memo.isNil:
+      r.memo.sawScene = true
+    var id = ""
+    if node.tag in ["yield", "Yield"]:
+      id = SceneYieldTag
+    elif jsIsObject(props):
+      discard ctx.stringProp(props, "id", id)
+    let json = if jsIsObject(props): JS_JSONStringify(ctx, props, jsUndefined(ctx), jsUndefined(ctx)) else: jsUndefined(ctx)
+    node.tag = "Scene"
+    node.attrs.add(("id", id))
+    node.attrs.add(("props", if jsIsString(json): toNimString(ctx, json) else: "{}"))
+    JS_FreeValue(ctx, json)
+    JS_FreeValue(ctx, props)
+    into.add node
+    return
   var
     tab: ptr UncheckedArray[JSPropertyEnum]
     count: uint32

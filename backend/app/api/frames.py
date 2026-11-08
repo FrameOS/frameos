@@ -131,7 +131,7 @@ from app.utils.embedded_commands import (
     is_queued_embedded_frame,
     queue_embedded_command,
 )
-from app.utils.events_contract_gen import CLOUD_EVENT_ROUTE_VERBS, CONTRACT_EVENTS
+from app.utils.events_contract_gen import CLOUD_EVENT_ROUTE_VERBS, CONTRACT_EVENTS, SCENE_YIELD_ID
 from app.utils.frame_commands import (
     cancel_frame_command,
     frame_is_asleep,
@@ -880,7 +880,7 @@ def _validate_upload_scenes_payload(
                 keyword = data.get("keyword")
                 if not isinstance(keyword, str) or not keyword:
                     _bad_request(f"Scene '{scene.get('id')}' has invalid scene reference")
-                if keyword not in scene_ids:
+                if keyword not in scene_ids and keyword != SCENE_YIELD_ID:
                     _bad_request(f"Scene '{scene.get('id')}' references missing scene '{keyword}'")
             elif node_type == "dispatch" and data.get("keyword") == "setCurrentScene":
                 config = data.get("config") or {}

@@ -1,3 +1,4 @@
+import { scenesWithoutLayouts } from '../../../../utils/sceneLayouts'
 import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
 import { frameLogic } from '../../frameLogic'
@@ -348,7 +349,7 @@ export const controlLogic = kea<controlLogicType>([
     scenesAsOptions: [
       (s) => [s.scenes],
       (scenes: controlLogicValues['scenes']): { label: string; value: string }[] =>
-        (scenes ?? []).map((scene) => ({
+        scenesWithoutLayouts(scenes).map((scene) => ({
           label: scene.name || 'Unnamed Scene',
           value: scene.id || '',
         })),

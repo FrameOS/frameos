@@ -437,11 +437,39 @@ type
     ## interval (refresh_interval.syncRefreshInterval).
     refreshFollowsChildren*: bool
     followInterval*: float
+    ## A scene with embedded scenes that pace it without being a split (a JSX
+    ## `<Scene>`): `followInterval` brings its own interval forward.
+    embedPaced*: bool
+    ## This pass's display cannot show frames back to back (e-paper, a deep
+    ## sleeper): a split's own interval stays the fastest it renders.
+    holdsIntervalFloor*: bool
+    ## The scene runs inside a layout (docs/scene-layouts.md): what every
+    ## host reads is the time until the layout or the scene is due next.
+    layoutPaced*: bool
+    layoutInterval*: float
+    ## Where this scene's rectangle starts on the canvas it was last drawn
+    ## on, and what it holds in its own coordinates: a pointer event goes to
+    ## the embedded scene under it, in that scene's coordinates.
+    canvasX*, canvasY*: int32
+    slots*: seq[SceneSlot]
     ## True while this scene runs although it is not due: the device kept no
     ## copy of what it drew last time, so it draws again only to put that
     ## picture back. Whatever can answer from what it fetched or computed last
     ## time (a node cache) should, rather than fetch or advance anew.
     repainting*: bool
+
+  # An embedded scene's rectangle in the scene that draws it, in canvas pixels.
+  SceneSlot* = object
+    child*: FrameScene
+    x*, y*, w*, h*: float32
+
+  # One rectangle a scene drew on the canvas. `copy` is its picture as it left
+  # it, when one was kept; nil when the canvas itself holds it.
+  RhythmCell* = object
+    origin*, stride*, width*, height*: int
+    format*: PixelFormat
+    drawnPass*: int ## the pass that last ran the scene here
+    copy*: Image
 
   # The schedule of one scene drawn through a scene node, and the picture it
   # left there (frameos/scene_rhythm.nim).
@@ -453,8 +481,9 @@ type
     scheduledPass*: int   ## the pass whose run set `dueAt`
     runsThisPass*: bool   ## that pass found it due: it runs in every cell it draws
     copyRefused*: bool    ## the last copy did not fit the budget (logged once)
-    copies*: seq[Image]   ## each cell it drew, as it left it, in the canvas's format
-    copyAt*: seq[int]     ## per copy, three: its canvas origin, stride, and the pass that wrote it
+    cells*: seq[RhythmCell] ## each rectangle it drew
+    embedImage*: Image    ## a `<Scene>`'s own picture (the UI draws it as an image)
+    embedProps*: string   ## the props last written into its state, as JSON
 
   FontStyle* = ref object
     typeface*: Typeface
@@ -507,6 +536,9 @@ type
     customEventOrigins*: Table[string, set[EventOrigin]] ## see FrameScene.customEventOrigins
     eventMap*: JsonNode ## see FrameScene.eventMap
     refreshFollowsChildren*: bool ## see FrameScene.refreshFollowsChildren
+    isLayout*: bool ## `settings.isLayout`: in no scene list (docs/scene-layouts.md)
+    layoutSceneId*: SceneId ## the layout this install is wrapped in, "" for none
+    layoutState*: JsonNode ## its parameters, as a scene node's config
     renderScaleKey*: string ## see FrameScene.renderScaleKey
     renderScaleSetting*: float ## see FrameScene.renderScaleSetting
 
@@ -537,6 +569,8 @@ type
     ## only asks whether it is there, so the value is skipped, not parsed
     ## (interpreter.nim's parseHook).
     splitScreenLayout*: SplitLayoutMarker
+    ## The scene is a layout: it wraps other scenes and is in no scene list.
+    isLayout*: bool
 
   SplitLayoutMarker* = object
     present*: bool
@@ -557,6 +591,8 @@ type
     ## The installed copy's event map ([{event, match, as}], docs/events.md
     ## "Event map"), written by the control plane beside the scene; nil when absent.
     eventMap*: JsonNode
+    ## The installed copy's layout ({sceneId, state}), docs/scene-layouts.md.
+    layout*: JsonNode
 
   # Runtime state while running the scene (for interpreted frames), adds cached nodes/edges
   InterpretedFrameScene* = ref object of FrameScene
@@ -571,6 +607,10 @@ type
     codeInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from code node id to code arg name to connected node id
     codeInlineInputsForNodeId*: Table[NodeId, Table[string, string]] # mapping from code node id to code arg name to inline code
     sceneNodes*: Table[NodeId, FrameScene]                                     # cache of instantiated child scenes
+    layoutSceneId*: SceneId
+    layoutState*: JsonNode
+    layoutFailed*: bool                                                        # logged once; the scene shows without it
+    slotCaptures*: seq[(int, FrameScene)]                                      # the press on an embedded scene, by pointer
     sceneExportByNodeId*: Table[NodeId, ExportedScene]                         # exported metadata for cached child scenes
     publicStateFields*: seq[StateField]
     js*: QuickJS

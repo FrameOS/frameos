@@ -14,3 +14,8 @@ proc hash*(x: SceneId): Hash = x.string.hash
 proc `==`*(x, y: SceneId): bool = x.string == y.string
 proc `$`*(x: SceneId): string = x.string
 proc `%`*(x: SceneId): JsonNode = %*(x.string)
+
+const LayoutSceneKey* = NodeId(-1)
+  ## Where a scene keeps its layout among the embedded scenes it holds
+  ## (`sceneNodes`): teardown, the copy budget and the pace walk see it there.
+  ## A `<Scene>` is kept under another negative key.

@@ -11,6 +11,7 @@
 // warnings are delivered with the scene so the model can choose to fix them.
 // Mirrors frameos/src/frameos/interpreter.nim (edge pass) — keep in step.
 
+import { sceneYieldId } from "../events-contract.gen";
 import { appCatalog, sceneEvents, type AiAppConfig } from "./context";
 import type { JsonObject } from "./scene-utils";
 import {
@@ -901,7 +902,7 @@ export function lintScene(
       const keyword = str(data.keyword);
       if (!keyword) {
         push("error", "Scene node has no keyword (the id of the scene to embed).", id);
-      } else if (options.allSceneIds && !options.allSceneIds.has(keyword)) {
+      } else if (keyword !== sceneYieldId && options.allSceneIds && !options.allSceneIds.has(keyword)) {
         push("warning", `Scene node embeds scene "${keyword}", which is not among the scenes provided.`, id);
       }
     } else if (type === "app") {

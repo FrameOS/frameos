@@ -781,7 +781,9 @@
     "$switcherComment": "The scene `sceneSwitcher` shows: built into every runtime (docs/scene-switcher.md), never in a scene list, never the scene a reboot comes back to. `sceneSwitcher` hands it `state.from` (the scene it was opened from); opened by name with `setCurrentScene` it has none and goes back to the list's first. While it shows, `direction` walks the list from `state.from`.",
     "switcher": "system/sceneSwitcher",
     "$settingsComment": "The scene `sceneSettings` shows: built into every runtime (docs/scene-settings.md), like the switcher in no scene list and never the scene a reboot comes back to. `sceneSettings` hands it `state.from` (the scene it was opened from), `state.fields` (that scene's public fields) and `state.values` (theirs as it opened); Save is a `setCurrentScene` back to `from` with the values as its state.",
-    "settings": "system/sceneSettings"
+    "settings": "system/sceneSettings",
+    "$yieldComment": "Not a scene: the id a scene node names to mean \"the scene this layout is wrapped around\" (docs/scene-layouts.md), `<yield />` in JSX. In no scene list; a layout shown on its own has nothing to yield and leaves the panel empty.",
+    "yield": "system/yield"
   },
   "gestures": {
     "$comment": "How the dispatcher makes tap, doubleTap, longPress and swipe out of pointerDown / pointerUp, in scene pixels and milliseconds. The same numbers on every host.",

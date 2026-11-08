@@ -1,3 +1,6 @@
+import { layoutScenes, scenesWithoutLayouts } from '../../utils/sceneLayouts'
+import { SceneLayoutPicker } from '../frame/panels/Scenes/SceneLayoutPicker'
+import { sceneLayoutLogic } from '../frame/panels/Scenes/sceneLayoutLogic'
 import { useActions, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
@@ -559,6 +562,9 @@ function FrameSceneTile({
   // Also while the update runs: the banner is what spins until it has landed.
   const updateVersion = sceneUpdateVersions[scene.id] || updatingSceneIds[scene.id]
   const hasChildScenes = (childSceneCount ?? 0) > 0
+  // Under the picture, over the summary line: on a frame with layouts.
+  const { pickerVisible } = useValues(sceneLayoutLogic({ frameId: frame.id, sceneId: scene.id }))
+  const layoutPicker = pickerVisible && !multiSelectEnabled
 
   const handleTileClick = (): void => {
     if (multiSelectEnabled) {
@@ -590,7 +596,9 @@ function FrameSceneTile({
         <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
           {scene.name || 'Untitled scene'}
         </div>
-        <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">{sceneTileSummaryLabel(scene)}</div>
+        <div className={clsx('frameos-muted mt-0.5 truncate text-xs text-slate-500', layoutPicker && 'invisible')}>
+          {sceneTileSummaryLabel(scene)}
+        </div>
       </div>
     </>
   )
@@ -612,6 +620,9 @@ function FrameSceneTile({
       <button type="button" onClick={handleTileClick} className="flex h-full w-full flex-col">
         {buttonContent}
       </button>
+      {layoutPicker ? (
+        <SceneLayoutPicker frameId={frame.id} sceneId={scene.id} className="absolute bottom-1.5 left-3 !w-[7.5rem]" />
+      ) : null}
       {multiSelectEnabled ? (
         <div className="pointer-events-none absolute right-2 top-2 z-20">
           <div
@@ -816,7 +827,8 @@ function FrameScenesBlock({
   // needs the full (live) list so parents of a match still render.
   // Alphabetical: this list is how you find a scene, and a new one (a
   // converted copy, say) appended at the end is where nobody looks.
-  const allScenes = sortScenesAlphabetically(searchIsActive ? liveScenes : scenes)
+  const allScenes = sortScenesAlphabetically(searchIsActive ? scenesWithoutLayouts(liveScenes) : scenes)
+  const frameLayouts = sortScenesAlphabetically(layoutScenes(liveScenes))
   const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(allScenes)
   const matchingSceneIds = searchIsActive ? new Set(scenes.map((scene) => scene.id)) : null
   const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frame.id, 'overview')
@@ -975,6 +987,28 @@ function FrameScenesBlock({
           </div>
         </div>
       )}
+      {frameLayouts.length > 0 ? (
+        // Out of the way, not out of reach: a layout is edited like any scene
+        // (docs/scene-layouts.md).
+        <details className="mt-4" data-workspace-layouts={frame.id}>
+          <summary className="frameos-muted cursor-pointer text-xs font-semibold uppercase tracking-wide">
+            Layouts ({frameLayouts.length})
+          </summary>
+          <div className="mt-3 flex flex-wrap gap-4">
+            {frameLayouts.map((layout) => (
+              <FrameSceneTile
+                key={layout.id}
+                frame={frame}
+                scene={layout}
+                scenes={allScenes}
+                active={false}
+                highlighted={sceneControlSelection?.frameId === frame.id && sceneControlSelection.sceneId === layout.id}
+                showMenu={showSceneMenus}
+              />
+            ))}
+          </div>
+        </details>
+      ) : null}
     </div>
   )
 }

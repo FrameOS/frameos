@@ -113,6 +113,16 @@ VOICE_PERMISSION_DEVICE_CONFIG_KEYS = {
     "create_scenes": ("voiceCreateScenes", "voice_create_scenes"),
     "use_albums": ("voiceUseAlbums", "voice_use_albums"),
 }
+def voice_scenes(scenes: Any) -> list[JsonObject]:
+    """What a voice turn may name: the frame's scenes, less its layouts, which
+    are not something to switch to (docs/scene-layouts.md)."""
+    return [
+        scene
+        for scene in (scenes or [])
+        if isinstance(scene, dict) and scene.get("id") and not (scene.get("settings") or {}).get("isLayout")
+    ]
+
+
 # Which switch each tool answers to. A tool not listed (list_scenes) is
 # always offered: it reads, and it is what the model names when it must
 # decline. show_image, create_scene and change_scene put a scene the frame did
@@ -703,7 +713,7 @@ class VoiceTools(ToolBox):
         return VOICE_TOOL_LABELS.get(name, name)
 
     def scenes(self) -> list[JsonObject]:
-        return [scene for scene in (self._frame.scenes or []) if isinstance(scene, dict) and scene.get("id")]
+        return voice_scenes(self._frame.scenes)
 
     def showing_scene(self) -> JsonObject | None:
         """The scene on the panel: the preview when it is the one showing (or

@@ -18,6 +18,7 @@ import lib/tz
 import std/times
 import frameos/channels
 import frameos/single_scene_host
+import frameos/scene_rhythm
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
 when defined(memProbe): import frameos/utils/memory
@@ -453,7 +454,9 @@ var quietRenders* = false
 proc fos_nim_set_keep_js_impl(keep: cint) {.exportc, cdecl.} =
   ## The firmware's say on keeping the scene's JS interpreters between
   ## renders (single_scene_host.keepJsRuntimes): yes on a frame that does not
-  ## deep-sleep, while there is room.
+  ## deep-sleep, while there is room. A deep sleeper also keeps its split's
+  ## own interval as the fastest it wakes.
+  rhythmHoldFloor = keep == 0
   host.keepJsRuntimes = keep != 0
 
 proc fos_nim_js_runtime_bytes_impl(): csize_t {.exportc, cdecl.} =
@@ -612,7 +615,7 @@ proc loadScenes*(payload: string): int =
   scenesLoadedCount = newScenes.len
   loadedSceneOrder = @[]
   for input in inputs:
-    if newScenes.hasKey(input.id):
+    if newScenes.hasKey(input.id) and not newScenes[input.id].isLayout:
       loadedSceneOrder.add(input.id)
 
   # Keep the current scene across updates when it still exists; otherwise
@@ -650,7 +653,8 @@ proc setSceneCatalog*(indexJson: string): int =
       if item.kind != JObject:
         continue
       let id = item{"id"}.getStr()
-      if id.len == 0:
+      if id.len == 0 or item{"isLayout"}.getBool(false):
+        # Read off flash by id when a scene names it, and in no list.
         continue
       entries.add(SceneCatalogEntry(
         id: id,
@@ -987,6 +991,26 @@ proc renderCanvas*(): Image =
     of pfRgbx: "rgbx"
   log(&"canvas: {width}x{height} {described}")
   sceneCanvas
+
+proc canvasGenerationForRhythm(canvas: Image): int64 {.nimcall, raises: [].} =
+  ## What wrote into this kept canvas since it was drawn (scene_rhythm.nim): a
+  ## panel buffer's count from the firmware, nothing on the scene canvas but
+  ## what `rhythmForgetCanvases` hears of; -1 when a frame-wide colour
+  ## correction would apply to a kept panel a second time.
+  {.cast(raises: []).}:
+    if frameColorSettings.global.hasAdjustments():
+      return -1
+  if canvas.isNil:
+    -1
+  elif canvas == sceneCanvas:
+    0
+  elif not panelBufferGeneration.isNil and canvas in panelCanvases:
+    # This buffer or the one the rhythm is asking about (its neighbour).
+    panelBufferGeneration(canvas.bufferPointer)
+  else:
+    -1
+
+rhythmCanvasGeneration = canvasGenerationForRhythm
 
 proc sceneRefreshSeconds*(): float =
   if not host.scene.isNil and host.scene.refreshInterval > 0:

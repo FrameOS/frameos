@@ -203,6 +203,8 @@ def load():
     for key, event in (("switcher", "sceneSwitcher"), ("settings", "sceneSettings")):
         if not re.fullmatch(r"system/[a-zA-Z]+", doc["scenes"].get(key, "")):
             fail(f"scenes.{key}: the built-in scene `{event}` shows, `system/<name>`")
+    if not re.fullmatch(r"system/[a-zA-Z]+", doc["scenes"].get("yield", "")):
+        fail("scenes.yield: the id a layout's scene node yields through, `system/<name>`")
     if doc["gestures"].get("directions") != ["left", "right", "up", "down"]:
         fail("gestures.directions: left, right, up, down")
     if doc["gestures"].get("edges") != ["left", "right", "top", "bottom"]:
@@ -406,6 +408,8 @@ def gen_nim(doc):
         f"  SceneSwitcherId* = {nim_str(doc['scenes']['switcher'])}",
         "  ## The built-in scene `sceneSettings` shows (docs/scene-settings.md).",
         f"  SceneSettingsId* = {nim_str(doc['scenes']['settings'])}",
+        "  ## What a layout's scene node names for the scene it wraps (docs/scene-layouts.md).",
+        f"  SceneYieldId* = {nim_str(doc['scenes']['yield'])}",
         "  ## Origins a scene opts into per custom event (`origins` on its declaration).",
         f"  CustomEventDeclarableOrigins*: set[EventOrigin] = {{{', '.join(nim_origin(o) for o in doc['customEvents'].get('declarableOrigins', []))}}}",
         "",
@@ -791,6 +795,8 @@ def gen_ts_frontend(doc):
     out.append(f"export const SCENE_SWITCHER_ID = '{doc['scenes']['switcher']}'")
     out.append("/** The built-in scene `sceneSettings` shows (docs/scene-settings.md). */")
     out.append(f"export const SCENE_SETTINGS_ID = '{doc['scenes']['settings']}'")
+    out.append("/** What a layout's scene node names for the scene it wraps (docs/scene-layouts.md). */")
+    out.append(f"export const SCENE_YIELD_ID = '{doc['scenes']['yield']}'")
     out.append("")
     out.append("export type EventOrigin = " + " | ".join(f"'{o}'" for o in origins))
     out.append("export type EventClass = " + " | ".join(f"'{c}'" for c in CLASSES))
@@ -920,6 +926,9 @@ def gen_ts_cloud(doc):
         "",
         f"export const customEventMaxNameLength = {int(doc['customEvents']['maxNameLength'])};",
         "",
+        "/** What a layout's scene node names for the scene it wraps: no scene of the frame. */",
+        f"export const sceneYieldId = {json.dumps(doc['scenes']['yield'])};",
+        "",
         "/** Every built-in event name. Any other name is a custom scene event. */",
         f"export const contractEventNames: readonly string[] = {ts_json([e['name'] for e in doc['events']], None)};",
         "",
@@ -952,6 +961,9 @@ def gen_ts_cloud(doc):
 def gen_py(doc):
     refused = refused_by_origin(doc)
     out = [f'"""{BANNER}"""', "", f"EVENTS_CONTRACT_VERSION = {int(doc['version'])}", ""]
+    out.append(f"# What a layout's scene node names for the scene it wraps: no scene of the frame.")
+    out.append(f"SCENE_YIELD_ID = {json.dumps(doc['scenes']['yield'])}")
+    out.append("")
     out.append("# origin -> contract events it may not emit. `http:write` is the frame access")
     out.append("# key: what it is refused needs an admin session or the serverApiKey instead.")
     out.append("REFUSED_BY_ORIGIN: dict[str, frozenset[str]] = {")

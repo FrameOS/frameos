@@ -356,11 +356,31 @@
   the ESP32 and the preview). Copies are capped at a quarter of free render
   memory (1 MiB at most on an ESP32); without one the panel runs again with
   `FrameScene.repainting` set, which is the hook for exact repaints (#555).
-- A generated split's own interval is the fastest it renders, and it waits
-  longer when no panel is due. A `render` from outside the scene (API, cloud,
+- On an LCD or HDMI a generated split wakes for its first panel, its own
+  interval no floor; on e-paper and a deep sleeper the interval is the fastest
+  it renders. A panel that is not due and that a canvas still holds is not
+  touched at all (`rdKeep`, `rhythmCanvasGeneration`; a new writer into a kept
+  canvas that is not a render bumps that count or calls `rhythmForgetCanvases`). A `render` from outside the scene (API, cloud,
   schedule, button, console, preview) redraws every panel: `event_loop.nim`
   on Linux and in the preview, `fos_events.c` on the ESP32. Keep the two
   rules alike.
+
+## Layouts and `<Scene>`: `docs/scene-layouts.md`
+
+- A layout is a regular scene (`settings.isLayout`, in no scene list) with
+  `<yield />` or a `system/yield` split panel (`scenes.yield` in the events
+  contract) where the wrapped scene goes. What wraps a scene is the install's,
+  like its button map: `layout: {sceneId, state}` beside `eventMap`, on the
+  backend's `frame.scenes` entry and the cloud's `layouts` assignment column.
+- The host keeps one scene. `interpreter.runEvent` enters the layout on a render
+  pass and for pointer events (`routePointer`, which also gives a split's panels
+  and `<Scene>`s their taps, in their own coordinates); yield goes through
+  `runSceneNodeRender`. The frame's next wake is `syncRefreshInterval`'s, never a
+  host's. Anything added to a layout pass goes in `interpreter.nim`, not in a host.
+- `<Scene id>` is a raster image in the layout's SVG tree, drawn at the size the
+  layout gave it (`ukImage` + `fillSceneImages`), on its own schedule, with its
+  picture under the panel copy budget (`SceneRhythm.embedImage`). A scene's
+  `<Scene>` children live in `sceneNodes` under negative keys.
 
 ## JSX from JS apps: `docs/jsx-ui.md`
 

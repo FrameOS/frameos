@@ -3,6 +3,7 @@ import { actionToUrl, router, urlToAction } from 'kea-router'
 import { framesModel } from '../../models/framesModel'
 import { frameHost, frameIsActive } from '../../decorators/frame'
 import { FrameScene, FrameType, FrameId } from '../../types'
+import { scenesWithoutLayouts } from '../../utils/sceneLayouts'
 import { frameIdsEqual, parseRouteFrameId } from '../../utils/frameId'
 import { urls } from '../../urls'
 import { applyFrameosTheme } from '../../utils/frameosTheme'
@@ -1758,8 +1759,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
           .map(({ frame, archived }) => {
             const matchesFrame = frameMatchesSearch(frame, normalizedSearch)
             const scenes = normalizedSearch
-              ? (frame.scenes ?? []).filter((scene) => sceneMatchesSearch(scene, normalizedSearch))
-              : frame.scenes ?? []
+              ? scenesWithoutLayouts(frame.scenes).filter((scene) => sceneMatchesSearch(scene, normalizedSearch))
+              : scenesWithoutLayouts(frame.scenes)
             return { frame, scenes, archived, frameMatchesSearch: matchesFrame }
           })
           .filter(({ scenes, frameMatchesSearch }) => !normalizedSearch || frameMatchesSearch || scenes.length > 0)
@@ -1798,14 +1799,16 @@ export const workspaceLogic = kea<workspaceLogicType>([
       (s) => [s.selectedFrame, s.search],
       (selectedFrame: workspaceLogicValues['selectedFrame'], search: workspaceLogicValues['search']): FrameScene[] => {
         const normalizedSearch = search.trim().toLowerCase()
-        return (selectedFrame?.scenes ?? []).filter((scene) => sceneMatchesSearch(scene, normalizedSearch))
+        return scenesWithoutLayouts(selectedFrame?.scenes).filter((scene) =>
+          sceneMatchesSearch(scene, normalizedSearch)
+        )
       },
     ],
     allSceneOptions: [
       (s) => [s.framesList],
       (framesList: workspaceLogicValues['framesList']): WorkspaceSceneOption[] =>
         framesList.flatMap((frame) =>
-          (frame.scenes ?? []).map((scene) => ({
+          scenesWithoutLayouts(frame.scenes).map((scene) => ({
             frameId: frame.id,
             sceneId: scene.id,
             frameName: frame.name || frameHost(frame),

@@ -9,6 +9,8 @@ export const CUSTOM_EVENT_MAX_NAME_LENGTH = 63
 export const SCENE_SWITCHER_ID = 'system/sceneSwitcher'
 /** The built-in scene `sceneSettings` shows (docs/scene-settings.md). */
 export const SCENE_SETTINGS_ID = 'system/sceneSettings'
+/** What a layout's scene node names for the scene it wraps (docs/scene-layouts.md). */
+export const SCENE_YIELD_ID = 'system/yield'
 
 export type EventOrigin = 'driver' | 'preview' | 'scene' | 'schedule' | 'http:write' | 'http:admin' | 'cloud' | 'system' | 'eventMap' | 'panel'
 export type EventClass = 'lifecycle' | 'input' | 'scene-command' | 'device-command'

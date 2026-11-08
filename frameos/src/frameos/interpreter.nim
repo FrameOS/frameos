@@ -22,6 +22,9 @@ import frameos/render_scale
 import frameos/runtime_diagnostics
 import frameos/scene_rhythm
 import frameos/ui/events as ui_events
+import frameos/utils/canvas_log
+import frameos/events_gen
+import std/hashes
 from frameos/utils/app_images import paintPendingBackground
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times, math
 import apps/apps
@@ -61,7 +64,7 @@ proc cachedImageMemoryLimit(): int =
   else:
     0
 
-const FlowAppsSettlingBackground = ["render/svg"]
+const FlowAppsSettlingBackground = ["render/svg", "render/split"]
   ## Flow apps that settle the scene background still owed themselves (paint
   ## it before their first paint, or waive it when that paint covers the
   ## canvas), so it is not painted ahead of them. render/svg: a full-canvas
@@ -486,6 +489,9 @@ var uploadedSceneOrder: seq[SceneId]
 proc setUploadedSceneOrder*(order: seq[SceneId]) =
   uploadedSceneOrder = order
 
+proc isLayoutOrNil(scene: ExportedInterpretedScene): bool =
+  scene.isNil or scene.isLayout
+
 proc sceneOrderSnapshot*(): seq[SceneId] =
   ## The frame's scene list in the control plane's order: a pushed set first,
   ## then the deployed scenes it does not name (the same two tables
@@ -494,6 +500,9 @@ proc sceneOrderSnapshot*(): seq[SceneId] =
   for sceneId in deployedSceneOrder:
     if sceneId notin result:
       result.add(sceneId)
+  # A layout is no scene to page to (docs/scene-layouts.md).
+  result.keepItIf(not (uploadedScenes.getOrDefault(it, nil).isLayoutOrNil and
+    loadedScenes.getOrDefault(it, nil).isLayoutOrNil))
 
 # -------------------------
 # Forward decl
@@ -514,27 +523,215 @@ proc diagnosticKeyword(node: DiagramNode): string =
 # Scene nodes on their own schedule
 # -------------------------
 
-proc runSceneNodeRender(child: FrameScene, exportedChild: ExportedScene,
-    context: ExecutionContext) {.noinline.} =
+var yieldScene {.threadvar.}: FrameScene
+  ## The scene the layout on the way here wraps; nil outside a layout.
+
+proc runSceneNodeRender(parent: FrameScene, child: FrameScene,
+    runChild: proc (self: FrameScene, context: ExecutionContext), context: ExecutionContext) {.noinline.} =
   ## A scene node handling `render` (frameos/scene_rhythm.nim): the scene it
-  ## draws runs only when it is due, and otherwise its last picture goes back.
-  ## Its `nextSleep` is its own: inside a split, `logic/nextSleepDuration`
-  ## means "this panel next renders in N seconds" and never reaches the frame.
+  ## draws runs only when it is due, and otherwise its last picture stays or
+  ## goes back. Its `nextSleep` is its own: inside a split,
+  ## `logic/nextSleepDuration` means "this panel next renders in N seconds"
+  ## and never reaches the frame.
   ##
   ## No `finally`: a scene's runEvent catches every node's exception itself
   ## (runEventInner), so nothing raises past it.
   let given = context.image
+  let stride = max(given.stride, 1)
+  child.canvasX = int32(given.origin mod stride)
+  child.canvasY = int32(given.origin div stride)
+  parent.slots.add(SceneSlot(child: child, x: float32(child.canvasX - parent.canvasX),
+    y: float32(child.canvasY - parent.canvasY), w: given.width.float32, h: given.height.float32))
   let decision = rhythmVisit(child, given)
+  if decision == rdKeep:
+    return
   if decision == rdRestore:
     rhythmRestore(child, given)
     return
   let parentSleep = context.nextSleep
   context.nextSleep = -1
   child.repainting = decision == rdRepaint
-  exportedChild.runEvent(child, context)
+  let saved = rhythmEnterChild(child)
+  runChild(child, context)
+  rhythmLeaveChild(saved)
   child.repainting = false
   rhythmAfterRun(child, decision, given, context.image, context.nextSleep)
   context.nextSleep = parentSleep
+
+proc resolveSceneExport(sceneId: SceneId): ExportedScene =
+  ## The scene with this id, resident or read in, nil when there is none. An
+  ## uploaded one comes before a deployed one, as in scenes.nim.
+  if uploadedScenes.hasKey(sceneId):
+    ExportedScene(uploadedScenes[sceneId])
+  elif loadedScenes.hasKey(sceneId):
+    ExportedScene(loadedScenes[sceneId])
+  elif compiledSceneExports.hasKey(sceneId):
+    compiledSceneExports[sceneId]
+  elif not sceneLoader.isNil and sceneLoader(sceneId) and loadedScenes.hasKey(sceneId):
+    ExportedScene(loadedScenes[sceneId])
+  else:
+    nil
+
+proc ensureLayoutScene(self: InterpretedFrameScene): FrameScene =
+  ## The layout this scene is wrapped in, made on the first pass that shows
+  ## the scene as the frame's (a scene in a panel has no layout of its own).
+  ## A layout that is not on the frame leaves the scene as it is, and says so once.
+  result = self.sceneNodes.getOrDefault(LayoutSceneKey, nil)
+  if not result.isNil or self.layoutSceneId.string.len == 0 or self.layoutFailed:
+    return
+  var exported: ExportedScene
+  if self.layoutSceneId != self.id:
+    exported = resolveSceneExport(self.layoutSceneId)
+  if exported.isNil or not (exported of ExportedInterpretedScene):
+    self.layoutFailed = true
+    self.logger.log(%*{"event": "layout:missing", "sceneId": self.id.string,
+      "layoutSceneId": self.layoutSceneId.string})
+    return
+  result = exported.init(self.layoutSceneId, self.frameConfig, self.logger,
+    if self.layoutState.isNil: %*{} else: self.layoutState)
+  self.sceneNodes[LayoutSceneKey] = result
+  self.sceneExportByNodeId[LayoutSceneKey] = exported
+
+proc translatedPayload(payload: JsonNode, slot: SceneSlot): JsonNode =
+  result = copy(payload)
+  for (key, by) in [("x", slot.x), ("startX", slot.x), ("y", slot.y), ("startY", slot.y)]:
+    if result.hasKey(key):
+      result[key] = %(result[key].getFloat() - by)
+
+proc routePointer(self: InterpretedFrameScene, context: ExecutionContext): bool =
+  ## A pointer event over an embedded scene is that scene's, in its own
+  ## coordinates; a press stays with the scene it began on until it lifts.
+  if self.slots.len == 0 or context.payload.isNil or context.payload.kind != JObject:
+    return false
+  let
+    payload = context.payload
+    pid = payload{"pointerId"}.getInt(0)
+    placed = payload.hasKey("x") and payload.hasKey("y")
+    x = (if payload.hasKey("startX"): payload["startX"] elif placed: payload["x"] else: newJFloat(-1)).getFloat()
+    y = (if payload.hasKey("startY"): payload["startY"] elif placed: payload["y"] else: newJFloat(-1)).getFloat()
+  var slot = -1
+  var held: FrameScene
+  for capture in self.slotCaptures:
+    if capture[0] == pid:
+      held = capture[1]
+  if context.event in ["pointerMove", "pointerUp", "pointerCancel"] and not held.isNil:
+    for i in 0 ..< self.slots.len:
+      if self.slots[i].child == held:
+        slot = i
+  if slot < 0 and placed:
+    for i in countdown(self.slots.high, 0):
+      template s: untyped = self.slots[i]
+      if x >= s.x and y >= s.y and x < s.x + s.w and y < s.y + s.h:
+        slot = i
+        break
+  if context.event == "pointerDown" and slot >= 0:
+    self.slotCaptures.add((pid, self.slots[slot].child))
+  elif context.event in ["pointerUp", "pointerCancel"]:
+    self.slotCaptures.keepItIf(it[0] != pid)
+  if slot < 0 or not (self.slots[slot].child of InterpretedFrameScene):
+    return false
+  let child = self.slots[slot].child
+  let inner = ExecutionContext(scene: child, event: context.event,
+    payload: translatedPayload(payload, self.slots[slot]), parent: context,
+    loopIndex: context.loopIndex, loopKey: context.loopKey, nextSleep: -1)
+  runEvent(child, inner)
+  true
+
+const PointerEvents = ["tap", "doubleTap", "longPress", "swipe", "pointerDown", "pointerUp",
+  "pointerMove", "pointerCancel"]
+
+proc parseEmbedProps(props: string): JsonNode =
+  try:
+    result = parseJson(if props.len > 0: props else: "{}")
+    if result.kind != JObject:
+      return %*{}
+    for key in ["id", "key", "ref", "children"]:
+      if result.hasKey(key):
+        result.delete(key)
+  except CatchableError:
+    result = %*{}
+
+proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId, props: string,
+    box: array[4, float32], width, height: int, context: ExecutionContext): Image =
+  ## A `<Scene id>` or `<yield />` in a UI: its picture at this size, what
+  ## the walker draws as a raster image. Runs when it is due, like any
+  ## embedded scene, and keeps its picture while the memory allows; a device
+  ## that cannot afford to keep one renders it again each pass.
+  if owner.isNil or not (owner of InterpretedFrameScene) or width <= 0 or height <= 0 or rhythmDepth() > 8:
+    return nil
+  let parent = InterpretedFrameScene(owner)
+  var child: FrameScene
+  if sceneId == SceneYieldId:
+    if yieldScene.isNil or yieldScene == owner:
+      return nil
+    child = yieldScene
+  else:
+    if sceneId == owner.id.string:
+      return nil
+    let key = NodeId(-((hash(sceneId) !& nodeId.int !& index) and 0x3fff_ffff) - 2)
+    child = parent.sceneNodes.getOrDefault(key, nil)
+    if child.isNil:
+      let exported = resolveSceneExport(SceneId(sceneId))
+      if exported.isNil:
+        owner.logger.log(%*{"event": "scene:embed:unknown", "sceneId": owner.id.string, "embedded": sceneId})
+        return nil
+      child = exported.init(SceneId(sceneId), owner.frameConfig, owner.logger, parseEmbedProps(props))
+      parent.sceneNodes[key] = child
+      parent.sceneExportByNodeId[key] = exported
+  owner.slots.add(SceneSlot(child: child, x: box[0], y: box[1], w: box[2], h: box[3]))
+  if child.rhythm.isNil:
+    child.rhythm = SceneRhythm()
+  let r = child.rhythm
+  if props != r.embedProps and sceneId != SceneYieldId:
+    # Before the schedule decides: a change of state makes the scene due.
+    r.embedProps = props
+    let values = parseEmbedProps(props)
+    if child.state.kind == JObject:
+      for key, value in values.pairs:
+        child.state[key] = value
+  let due = rhythmEmbedDue(child)
+  let format = if context.hasImage and not context.image.isNil: context.image.format else: pfRgbx
+  if not due and not r.embedImage.isNil and r.embedImage.width == width and
+      r.embedImage.height == height and r.embedImage.format == format:
+    return r.embedImage
+  var image = r.embedImage
+  if image.isNil or image.width != width or image.height != height or image.format != format:
+    if not image.isNil:
+      noteEmbedImage(-image.byteSize)
+      unregisterCanvas(image)
+      r.embedImage = nil
+    try:
+      image = case format
+        of pfRgb565: newImage565(width, height)
+        of pfGray8: newImageGray8(width, height)
+        else: newImage(width, height)
+    except CatchableError:
+      owner.logger.log(%*{"event": "scene:embed:noMemory", "sceneId": owner.id.string, "embedded": sceneId})
+      return nil
+    if format == pfRgb565:
+      image.ditherStores = true
+  let inner = ExecutionContext(scene: child, image: image, hasImage: true, event: "render",
+    payload: %*{}, parent: context, loopIndex: 0, loopKey: ".", nextSleep: -1)
+  child.canvasX = 0
+  child.canvasY = 0
+  child.repainting = not due
+  let saved = rhythmEnterEmbed()
+  runEvent(child, inner)
+  rhythmLeaveChild(saved)
+  child.repainting = false
+  if due:
+    rhythmEmbedRan(child, inner.nextSleep)
+  if not r.embedImage.isNil or embedBytesAllowed(image.byteSize):
+    if r.embedImage.isNil:
+      r.embedImage = image
+      noteEmbedImage(image.byteSize)
+      discard registerCanvas(image)
+    let log = canvasLogOf(image)
+    if not log.isNil:
+      log.drew(rect(0, 0, width.float32, height.float32))
+  image
+
+embeddedSceneRenderer = renderEmbeddedScene
 
 # -------------------------
 # Core node runner
@@ -645,7 +842,17 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         not (nodeType == "app" and (self.imageFusionPlans.hasKey(currentNodeId) or
           currentNode.data{"keyword"}.getStr() in FlowAppsSettlingBackground)):
       paintPendingBackground(context)
-    case nodeType:
+    case (if nodeType == "scene" and currentNode.data{"keyword"}.getStr() == SceneYieldId: "yield"
+          else: nodeType):
+    of "yield":
+      # The scene this layout wraps (docs/scene-layouts.md), on the same
+      # schedule as a panel: the chrome and the content each render when due.
+      if context.event == "render" and context.hasImage and not context.image.isNil:
+        if yieldScene.isNil or yieldScene == self:
+          # A layout on its own (the editor): nothing to show there yet.
+          context.image.fill(rgba(128, 128, 128, 255))
+        else:
+          runSceneNodeRender(self, yieldScene, runEvent, context)
     of "app":
       let keyword = currentNode.data{"keyword"}.getStr()
       if TRACING:
@@ -1270,7 +1477,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword,
           childSceneId = childScene.id.string)
       if context.event == "render" and context.hasImage and not context.image.isNil:
-        runSceneNodeRender(childScene, exportedChild, context)
+        runSceneNodeRender(self, childScene, exportedChild.runEvent, context)
       else:
         exportedChild.runEvent(childScene, context)
     else:
@@ -1415,6 +1622,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     eventMap: exportedScene.eventMap,
     refreshFollowsChildren: exportedScene.refreshFollowsChildren,
     followInterval: -1,
+    layoutSceneId: exportedScene.layoutSceneId,
+    layoutState: exportedScene.layoutState,
     nextNodeIds: initTable[NodeId, NodeId](),
     appsByNodeId: initTable[NodeId, AppRoot](),
     eventListeners: initTable[string, seq[NodeId]](),
@@ -1611,7 +1820,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         })
       scene.appsByNodeId[node.id] = initInterpretedApp(keyword, node, scene)
 
-    elif node.nodeType == "scene":
+    elif node.nodeType == "scene" and node.data{"keyword"}.getStr() != SceneYieldId:
       let childSceneId = node.data{"keyword"}.getStr().SceneId
       var exportedChild: ExportedScene
       var isInterpretedChild = false
@@ -1725,7 +1934,17 @@ proc sceneListensTo*(scene: FrameScene, event: string): bool =
   ## interpreted keeps every event, because nothing here can tell.
   if scene.isNil or not (scene of InterpretedFrameScene):
     return true
-  InterpretedFrameScene(scene).eventListeners.hasKey(event) or uiListens(scene.id.string, event)
+  let interpreted = InterpretedFrameScene(scene)
+  if interpreted.eventListeners.hasKey(event) or uiListens(scene.id.string, event):
+    return true
+  # A pointer event is built for a scene that listens, and what it embeds
+  # hears it through that scene: its layout, the panels, its `<Scene>`s.
+  let layout = interpreted.sceneNodes.getOrDefault(LayoutSceneKey, nil)
+  if not layout.isNil and sceneListensTo(layout, event):
+    return true
+  for slot in scene.slots:
+    if slot.child != scene and sceneListensTo(slot.child, event):
+      return true
 
 proc sceneKeyboardAt*(sceneId: SceneId, x, y: int): bool =
   ## Whether the scene's keyboard on the screen (a JSX field's) is under
@@ -1760,6 +1979,7 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
     # backgroundPending). Paid below when nothing draws.
     context.backgroundColor = scene.backgroundColor
     context.backgroundPending = true
+    scene.slots.setLen(0)
     # One render listener whose flow is one node: what that node draws is the
     # whole frame.
     context.wholeFrame = false
@@ -1772,7 +1992,8 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
     # A JSX UI's handlers and hover:/active: classes, its fields and the
     # boxes that scroll (ui/events.nim). A run of a handler, a change in
     # what the pointer is over, a field's text or a scroll is a new picture.
-    if dispatchUiEvent(self.id.string, context.event, context.payload):
+    if not routePointer(scene, context) and dispatchUiEvent(self.id.string, context.event, context.payload):
+      rhythmMarkDue(self)
       sendEvent("render", %*{}, eoScene)
   else:
     when defined(frameosEmbedded):
@@ -1860,9 +2081,35 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
   # The outermost render is a pass: embedded scenes decide against its start
   # whether they are due (scene_rhythm.nim).
   let rendering = context.event == "render"
-  let passStarted = rendering and rhythmEnterRender(self)
+  let passStarted = rendering and rhythmEnterRender(self, if context.hasImage: context.image else: nil)
   try:
-    runEventInner(self, context)
+    let interpreted = if self of InterpretedFrameScene and self != yieldScene: InterpretedFrameScene(self) else: nil
+    # The layout wraps the frame's own scene and nothing else, so it comes to
+    # life on the pass that starts here and is looked at no other time.
+    let layout = if interpreted.isNil: nil
+      elif passStarted: ensureLayoutScene(interpreted)
+      else: interpreted.sceneNodes.getOrDefault(LayoutSceneKey, nil)
+    if layout.isNil:
+      runEventInner(self, context)
+    else:
+      let outer = yieldScene
+      yieldScene = interpreted
+      try:
+        if rendering:
+          let saved = rhythmEnterLayout(layout)
+          runEvent(layout, context)
+          rhythmLeaveChild(saved)
+        elif context.event in PointerEvents:
+          # Over the chrome it is the layout's; over the content it comes
+          # back here through the layout's slots.
+          runEvent(layout, context)
+        else:
+          runEventInner(self, context)
+          # What is said to the scene's state is the scene's alone.
+          if context.event notin ["setCurrentScene", "setSceneState", "uiTimer"]:
+            runEvent(layout, context)
+      finally:
+        yieldScene = outer
   finally:
     if rendering:
       rhythmLeaveRender(self, passStarted)
@@ -1894,6 +2141,7 @@ proc clearRunNodeStacks*(scene: FrameScene) =
     return
   let interpreted = InterpretedFrameScene(scene)
   interpreted.runNodeStack.setLen(0)
+  yieldScene = nil # the same abort skipped the layout's `finally`
   for _, child in interpreted.sceneNodes:
     clearRunNodeStacks(child)
 
@@ -2042,6 +2290,10 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     # changes: it waits for its panels, but never renders more often than
     # its own interval (scene_rhythm.nim).
     refreshFollowsChildren: scene.settings != nil and scene.settings.splitScreenLayout.present,
+    # The install's layout, read here so that nothing else knows its shape.
+    isLayout: scene.settings != nil and scene.settings.isLayout,
+    layoutSceneId: (if scene.layout.isNil or scene.layout.kind != JObject: "" else: scene.layout{"sceneId"}.getStr()).SceneId,
+    layoutState: (if scene.layout.isNil or scene.layout.kind != JObject: nil else: scene.layout{"state"}),
     # Fields without an explicit access default to public for interpreted
     # scenes to keep older scenes.json exports controllable.
     publicStateFields: refresh.fields.filterIt(it.access != "private"),

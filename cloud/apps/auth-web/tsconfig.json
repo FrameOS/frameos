@@ -189,6 +189,8 @@
     // Mounts buttonMapLogic (→ frameLogic, framesModel) and renders the
     // "Map buttons" dialog, same reason.
     "src/test/shared-spa/button-map-modal.test.tsx",
+    // Mounts sceneLayoutLogic (→ frameLogic, framesModel), same reason.
+    "src/test/shared-spa/scene-layout-picker.test.tsx",
     // Mounts templatesLogic (→ frameLogic), same reason.
     "src/test/shared-spa/template-install-feedback.test.ts",
     // Mounts eventsLogic (→ frameLogic), same reason.

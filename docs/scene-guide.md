@@ -463,6 +463,11 @@ export function get(app, context) {
   an `<svg>`, so padding, margins and font sizes set there never show. Put a
   size worked out in code in a bracket class,
   ``className={`p-[${pad}px] text-[${size}px]`}``.
+- `<Scene id="other" someField="x" />` draws another scene of the frame there,
+  sized by the UI (it takes the room left unless its classes say otherwise),
+  its props set as that scene's state. It renders on its own
+  `refreshInterval`, so a slow scene costs nothing on the renders in between.
+  `<yield />` is the same for a layout's content.
 - A big frame draws a .tsx app's JSX larger by itself: at render scale 2
   (automatic on a panel whose shorter edge is about 1200 px) the app is told
   its canvas is half the size (`context.imageWidth`, `app.frame.width`) and
@@ -788,6 +793,17 @@ interface FrameOSElementProps {
   onKeyDown?: (event: FrameOSUiEvent) => void;
   [attribute: string]: any;
 }
+/**
+ * <Scene id="..." /> draws another scene of this frame as a picture, at the place and size the UI
+ * gives it (flex-1 unless the classes say). Other props are that scene's state. It renders on its
+ * own schedule. FrameOS 2026.11.5+.
+ */
+declare const Scene: string;
+/**
+ * <Yield /> or <yield />: where a layout shows the scene it wraps (docs/scene-layouts.md).
+ * FrameOS 2026.11.5+.
+ */
+declare const Yield: string;
 declare namespace JSX {
   type Element = FrameOSElement;
   interface ElementChildrenAttribute { children: {}; }

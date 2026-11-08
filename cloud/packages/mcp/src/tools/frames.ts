@@ -60,6 +60,21 @@ const eventMaps = z
     "Per-install button maps, { [runtime scene id]: [{event, match, as}] }: an event of that name whose payload has every `match` value reaches the scene with `as` written over it, e.g. [{\"event\": \"button\", \"match\": {\"label\": \"REFRESH\", \"action\": \"longPress\"}, \"as\": {\"label\": \"B\", \"role\": \"next\", \"action\": \"press\"}}]. Kept across scene updates. Omit to keep the installed scene's maps; null clears them.",
   );
 
+// The layout each runtime scene of an install wears (docs/scene-layouts.md).
+const sceneLayouts = z
+  .record(
+    z.string().min(1).max(256),
+    z.object({
+      sceneId: z.string().min(1).max(256),
+      state: z.record(z.string().min(1).max(64), z.unknown()).optional(),
+    }),
+  )
+  .nullable()
+  .optional()
+  .describe(
+    "Per-install layouts, { [runtime scene id]: {sceneId, state?} }: the layout scene (settings.isLayout) that wraps this scene on this frame, with its settings. Kept across scene updates. Omit to keep the installed scene's; null clears them.",
+  );
+
 function compactFrame(frame: FrameSummary) {
   return {
     connected: frame.connected ?? false,
@@ -328,6 +343,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
                 ),
               settings_groups: settingsGroups,
               event_maps: eventMaps,
+              layouts: sceneLayouts,
             }),
           )
           .max(20),

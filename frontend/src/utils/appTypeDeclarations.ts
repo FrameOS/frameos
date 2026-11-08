@@ -161,6 +161,17 @@ interface FrameOSElementProps {
   onKeyDown?: (event: FrameOSUiEvent) => void;
   [attribute: string]: any;
 }
+/**
+ * <Scene id="..." /> draws another scene of this frame as a picture, at the place and size the UI
+ * gives it (flex-1 unless the classes say). Other props are that scene's state. It renders on its
+ * own schedule. FrameOS 2026.11.5+.
+ */
+declare const Scene: string;
+/**
+ * <Yield /> or <yield />: where a layout shows the scene it wraps (docs/scene-layouts.md).
+ * FrameOS 2026.11.5+.
+ */
+declare const Yield: string;
 declare namespace JSX {
   type Element = FrameOSElement;
   interface ElementChildrenAttribute { children: {}; }

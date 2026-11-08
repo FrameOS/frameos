@@ -481,6 +481,15 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
   if n.tag == "img" or n.tag == "svg":
     result.kind = if n.tag == "img": ukImage else: ukSvg
     return
+  if n.tag == "Scene":
+    # A picture whose size comes from the room it gets (flex-1 unless it
+    # says): the scene runs once the layout knows it (app_runtime.nim).
+    result.kind = ukImage
+    if result.box.grow == 0 and result.box.w.kind == lkAuto and result.box.h.kind == lkAuto:
+      result.box.grow = 1
+      result.box.shrink = 1
+      result.box.basis = Len(kind: lkPct, v: 0)
+    return
   if n.tag == "input" or n.tag == "textarea":
     result.buildField(n, text, classes, rootW, rootH, input)
     return
@@ -1590,7 +1599,15 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
   of ukText:
     n.emitText(cx, cy, cw, op, drawn)
   of ukImage:
-    if not n.src.image.isNil and cw > 0 and ch > 0:
+    if n.src.tag == "Scene":
+      if cw > 0 and ch > 0:
+        let node = SvgNode(tag: "image", attrs: @[("x", num(cx)), ("y", num(cy)), ("width", num(cw)),
+          ("height", num(ch)), ("preserveAspectRatio", "none"), ("scene-id", n.src.attr("id")),
+          ("scene-props", n.src.attr("props"))])
+        if op < 1:
+          node.attrs.add(("opacity", num(op)))
+        drawn.add node
+    elif not n.src.image.isNil and cw > 0 and ch > 0:
       let node = SvgNode(tag: "image", image: n.src.image, attrs: @[("x", num(cx)),
         ("y", num(cy)), ("width", num(cw)), ("height", num(ch)),
         ("preserveAspectRatio", ["none", "xMidYMid meet", "xMidYMid slice"][ord(b.fit)])])

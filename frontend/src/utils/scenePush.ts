@@ -1,4 +1,5 @@
 import type { FrameScene } from '../types'
+import { SCENE_YIELD_ID } from './eventsContract.gen'
 
 // What "Push" from the scene drawer sends (docs/ui-vocabulary.md): the scene
 // and the connected scenes it needs that have changes of their own. A
@@ -23,6 +24,23 @@ export function referencedSceneIds(scene: FrameScene): string[] {
       }
     }
   }
+
+  // What the runtime pulls in by id without a node saying so: the layout the
+  // scene is wrapped in, and the `<Scene id="...">` tags of its JSX.
+  if (scene.layout?.sceneId) {
+    sceneIds.add(scene.layout.sceneId)
+  }
+  for (const app of Object.values(scene.apps ?? {}) as { sources?: Record<string, unknown> }[]) {
+    for (const [name, source] of Object.entries(app?.sources ?? {})) {
+      if (typeof source === 'string' && /\.[jt]sx$/.test(name)) {
+        for (const match of source.matchAll(/<Scene\b[^>]*?\bid=(?:"([^"]+)"|'([^']+)'|\{"([^"]+)"\})/g)) {
+          sceneIds.add(match[1] ?? match[2] ?? match[3] ?? '')
+        }
+      }
+    }
+  }
+  sceneIds.delete(SCENE_YIELD_ID)
+  sceneIds.delete('')
 
   return Array.from(sceneIds)
 }

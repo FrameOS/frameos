@@ -26,6 +26,7 @@ import {
 } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readEventMapsField, sceneEventMapsOf } from "../../../../../src/lib/scene-event-map";
+import { readLayoutsField, sceneLayoutsOf } from "../../../../../src/lib/scene-layouts";
 import { readSession } from "../../../../../src/lib/session";
 import { frameosVersionSatisfies } from "../../../../../src/lib/store-versions";
 
@@ -60,6 +61,7 @@ export async function GET(
       declaredSettingsGroups: frameSceneAssignments.declaredSettingsGroups,
       eventMaps: frameSceneAssignments.eventMaps,
       grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
+      layouts: frameSceneAssignments.layouts,
       // The newest version's declared minimum FrameOS (the row is the
       // latest version's listing).
       latestFrameosVersion: storeScenes.frameosVersion,
@@ -131,6 +133,9 @@ export async function GET(
         // (docs/events.md "Event map"); the workspace hydrates each scene's
         // `eventMap` from it. Absent when there is none.
         ...(sceneEventMapsOf(row.eventMaps) ? { event_maps: sceneEventMapsOf(row.eventMaps) } : {}),
+        // The layout each runtime scene wears (docs/scene-layouts.md), the
+        // same way: each scene's `layout`. Absent when there is none.
+        ...(sceneLayoutsOf(row.layouts) ? { layouts: sceneLayoutsOf(row.layouts) } : {}),
         slug: row.sceneSlug,
         // POST /scenes/update takes the frame there.
         update_available: installable && newer && runsOnFrame,
@@ -248,12 +253,18 @@ export async function POST(
     if (eventMaps === false) {
       return jsonError("invalid_scenes", 400);
     }
+    // Per-install layouts, the same way.
+    const layouts = readLayoutsField((entry as Record<string, unknown>).layouts);
+    if (layouts === false) {
+      return jsonError("invalid_scenes", 400);
+    }
     requested.push({
       sceneId,
       sceneVersion: typeof sceneVersion === "number" ? sceneVersion : null,
       ...(latest === true ? { latest } : {}),
       ...(settingsGroups ? { settingsGroups } : {}),
       ...(eventMaps !== undefined ? { eventMaps } : {}),
+      ...(layouts !== undefined ? { layouts } : {}),
     });
   }
 

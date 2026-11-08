@@ -1,3 +1,4 @@
+import { scenesWithoutLayouts } from '../../utils/sceneLayouts'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
@@ -1447,7 +1448,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
   const activeToolScrollKey = frameToolScrollKey(frameId, activeToolPanel)
   const frameToolScrollPositionsRef = useRef(frameToolScrollPositions)
   const lastObservedFrameToolScrollTopRef = useRef(0)
-  const visibleScenes = scenes
+  const visibleScenes = scenesWithoutLayouts(scenes)
   const frameLoaded = !!frame
   const toolUsesSearch = false
   const toolUsesPageScroll = toolRoute.kind === 'panel' ? frameToolUsesPageScroll(activeToolPanel) : true
@@ -1600,7 +1601,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
                   activeTool={activeToolPanel}
                   frame={frame}
                   scenes={visibleScenes}
-                  totalScenes={scenes.length}
+                  totalScenes={visibleScenes.length}
                   pageScroll={toolUsesPageScroll}
                 />
               )}

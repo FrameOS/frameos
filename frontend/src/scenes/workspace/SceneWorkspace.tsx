@@ -1,3 +1,4 @@
+import { isLayoutScene, layoutScenes, scenesWithoutLayouts } from '../../utils/sceneLayouts'
 import { A } from 'kea-router'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
@@ -375,7 +376,8 @@ function SceneSelector({
                 </div>
               </div>
             ) : null}
-            {scenes.map((scene) => {
+            {[...scenesWithoutLayouts(scenes), ...layoutScenes(scenes)].map((scene, index, listed) => {
+              const startsLayouts = isLayoutScene(scene) && !isLayoutScene(listed[index - 1])
               const selected = scene.id === selectedSceneId
               const active = scene.id === linkedActiveSceneId
               const unsaved = unsavedSceneIds.has(scene.id)
@@ -391,7 +393,15 @@ function SceneSelector({
                 .join(' · ')
               const compiled = sceneIsCompiled(scene, frame.mode)
 
-              return (
+              return [
+                startsLayouts ? (
+                  <div
+                    key="layouts-heading"
+                    className="frameos-muted px-2 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide"
+                  >
+                    Layouts
+                  </div>
+                ) : null,
                 <div
                   key={scene.id}
                   draggable
@@ -491,8 +501,8 @@ function SceneSelector({
                   <div className="pr-1">
                     <SceneDropDown context="scenes" sceneId={scene.id} navigation="workspace" />
                   </div>
-                </div>
-              )
+                </div>,
+              ]
             })}
           </div>
         )}

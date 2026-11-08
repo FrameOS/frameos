@@ -143,6 +143,7 @@ def compact_scene(scene: dict[str, Any]) -> dict[str, Any]:
         "settings": scene.get("settings") or {},
         "origin": scene.get("origin"),
         **({"eventMap": scene["eventMap"]} if scene.get("eventMap") else {}),
+        **({"layout": scene["layout"]} if scene.get("layout") else {}),
     }
 
 
@@ -598,6 +599,9 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
             # (docs/events.md "Event map"): a new version keeps it.
             if "eventMap" not in new_scene and scenes[index].get("eventMap"):
                 new_scene["eventMap"] = scenes[index]["eventMap"]
+            # So is the layout it wears (docs/scene-layouts.md).
+            if "layout" not in new_scene and scenes[index].get("layout"):
+                new_scene["layout"] = scenes[index]["layout"]
             scenes[index] = new_scene
             await save_scenes(frame_id, scenes, project_id)
             return text({"updated": {"id": new_scene.get("id"), "name": new_scene.get("name")}, **(await deploy_after(frame_id, deploy, project_id))})

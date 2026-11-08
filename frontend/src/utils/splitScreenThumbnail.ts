@@ -1,5 +1,6 @@
 import type { FrameType, FrameId } from '../types'
 import { getBasePath } from './getBasePath'
+import { SCENE_YIELD_ID } from './eventsContract.gen'
 import { projectApiPath } from './projectApi'
 import { withObjectUrl } from './objectUrl'
 import {
@@ -127,7 +128,10 @@ export async function buildSplitScreenThumbnail(
 
   const rects = splitLayoutLeafRects(layout.root)
   const borderEdges = splitLayoutLeafBorderEdges(rects)
-  const sceneIds = Array.from(new Set(rects.map((rect) => rect.sceneId).filter(Boolean))) as string[]
+  // A layout's Content panel has no picture of its own.
+  const sceneIds = Array.from(
+    new Set(rects.map((rect) => rect.sceneId).filter((id) => id && id !== SCENE_YIELD_ID))
+  ) as string[]
   const images = new Map<string, HTMLImageElement | null>()
   if (background.sceneId && backgroundImage) {
     images.set(background.sceneId, backgroundImage)
