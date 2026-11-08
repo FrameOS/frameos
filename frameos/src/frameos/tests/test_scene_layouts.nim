@@ -203,6 +203,17 @@ suite "layouts":
     discard pass(scene)
     check sceneListensTo(scene, "tap")
 
+  test "an event nobody on the way listens for ends the asking":
+    # The layout's panel is the scene that wears it: asking round that circle
+    # overflowed the stack on every tap an ESP32 had no listener for.
+    let scene = newScene("tests/content")
+    discard pass(scene)
+    check not sceneListensTo(scene, "pointerDown")
+    # And a <yield /> in a JSX layout, whose slot is made while it draws.
+    let inUi = newScene("tests/inUiLayout")
+    discard pass(inUi)
+    check not sceneListensTo(inUi, "swipe")
+
   test "a press on the chrome is not the content's":
     let scene = newScene("tests/counter")
     let before = pass(scene)

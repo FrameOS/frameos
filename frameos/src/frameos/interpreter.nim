@@ -1928,10 +1928,9 @@ proc eventNodeMatchesPayload(node: DiagramNode, payload: JsonNode): bool =
 
   true
 
-proc sceneListensTo*(scene: FrameScene, event: string): bool =
-  ## Whether the scene has an event node for `event`. The dispatcher builds an
-  ## input event's payload only when this is true; a scene that is not
-  ## interpreted keeps every event, because nothing here can tell.
+proc listensThrough(scene: FrameScene, event: string, wearer: FrameScene): bool =
+  ## `wearer`: the scene this one is the layout of, asked already. It is also
+  ## this layout's content slot, and asking it again never ends.
   if scene.isNil or not (scene of InterpretedFrameScene):
     return true
   let interpreted = InterpretedFrameScene(scene)
@@ -1940,11 +1939,17 @@ proc sceneListensTo*(scene: FrameScene, event: string): bool =
   # A pointer event is built for a scene that listens, and what it embeds
   # hears it through that scene: its layout, the panels, its `<Scene>`s.
   let layout = interpreted.sceneNodes.getOrDefault(LayoutSceneKey, nil)
-  if not layout.isNil and sceneListensTo(layout, event):
+  if not layout.isNil and listensThrough(layout, event, scene):
     return true
   for slot in scene.slots:
-    if slot.child != scene and sceneListensTo(slot.child, event):
+    if slot.child != scene and slot.child != wearer and listensThrough(slot.child, event, nil):
       return true
+
+proc sceneListensTo*(scene: FrameScene, event: string): bool =
+  ## Whether the scene has an event node for `event`. The dispatcher builds an
+  ## input event's payload only when this is true; a scene that is not
+  ## interpreted keeps every event, because nothing here can tell.
+  listensThrough(scene, event, nil)
 
 proc sceneKeyboardAt*(sceneId: SceneId, x, y: int): bool =
   ## Whether the scene's keyboard on the screen (a JSX field's) is under
