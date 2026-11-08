@@ -476,6 +476,15 @@ scene it covers stays resident), but the panel still waits for a render. A
 switch begun while another still loads keeps the first one's start, and its
 mark if one is up. A frame rendered for an older switch ends nothing.
 
+**Every render counts as well**, so nothing has to ask for the mark: a tap whose
+next frame is slow, the scene settings' gear, a refresh that fetches something.
+Each render pass begins it (`runner.nim` at the top of a pass, `fos_client.c`
+before `render_once`) and its frame ends it. Timer-driven renders are included,
+so a scene that takes 3 s to refresh shows the mark for the last 2.8 s of it.
+The one exception is an animation (a `refreshInterval` under one second; on the
+ESP32 a scene `fos_animation` is pacing): it would blink the mark on every frame
+that ran a little over the delay.
+
 **The mark** is `frameos/loading_mark.nim`, one drawing for both runtimes,
 a frame of it every 50 ms. It composes a rectangle of the panel's own pixels
 from a copy of what was there, so a host puts it away by writing the copy
