@@ -256,8 +256,9 @@ doAssert count("fetched 200") == 1, $logLines
 doAssert count("deadline") == 0, $logLines
 jsHttpRequestHook = nil
 
-proc renderValuesThrice() =
+proc renderValuesThrice(keep = false) =
   let valuesHost = SingleSceneHost(frameConfig: config, logger: abortLogger)
+  valuesHost.keepJsRuntimes = keep
   valuesHost.requestSelect = proc (sceneId: string): bool = true
   valuesHost.start()
   valuesHost.makeCurrent(valuesSceneId.SceneId)
@@ -273,6 +274,14 @@ renderValuesThrice()
 for kept in 1..3:
   doAssert count("module 1 init 1 kept " & $kept) == 1,
     "as an ESP32: a fresh module and init() per render, remember carries over: " & $logLines
+
+# An ESP32 that stays awake, and the preview running as one (wasm_main
+# `frameos_wasm_set_embedded`): the interpreter stays while there is room, so
+# an interactive scene's module state and handlers outlive a render.
+renderValuesThrice(keep = true)
+for n in 1..3:
+  doAssert count("module " & $n & " init 1 kept " & $n) == 1,
+    "as an awake ESP32: one module and one init() while there is room: " & $logLines
 
 setSimulatedEmbedded(false)
 renderValuesThrice()

@@ -599,9 +599,9 @@ function applyRenderScale(scale) {
   }
 }
 
-// Run as an ESP32 (memory.runsAsEmbedded in the runtime): a JS app's
-// interpreter lasts one render, `app.frame.embedded` is true and downloads
-// decode into the canvas. The device picker's ESP32 presets ask for it, and so
+// Run as an ESP32 (memory.runsAsEmbedded in the runtime): `app.frame.embedded`
+// is true, downloads decode into the canvas, and a JS app's interpreter stays
+// between renders while the simulated memory has room, as on an awake ESP32. The device picker's ESP32 presets ask for it, and so
 // does a preview of an ESP32 frame; anything else runs as a Pi.
 function applyEmbedded(enabled) {
   if (!enabled) {

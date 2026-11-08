@@ -162,13 +162,12 @@ when defined(frameosEmbedded):
 
 proc releaseIdleJsAppRuntimes*() =
   ## Drop every JS app interpreter that is not mid-call. The single-scene host
-  ## calls it after every render (single_scene_host.renderScene) on an ESP32,
-  ## and in the editor's preview while it runs as one (runsAsEmbedded): there
-  ## an app's module variables last one render and its init() runs on every
-  ## one, and what must last longer goes through `frameos.remember`. The
-  ## preview does it so that an app leaning on module state shows it in the
-  ## editor, not on the frame. A Pi keeps its interpreters for the scene's
-  ## life and never calls this.
+  ## calls it after every render (single_scene_host.renderScene) on an ESP32
+  ## that deep-sleeps, and on one that stays awake (the editor's preview
+  ## running as one included) when memory is short: there an app's module
+  ## variables last one render and its init() runs on every one, and what
+  ## must last longer goes through `frameos.remember`. A Pi keeps its
+  ## interpreters for the scene's life and never calls this.
   ##
   ## Eviction otherwise only ever runs from ensureReady — that is, when ANOTHER
   ## JS node is about to be built. Nothing on the image path triggers it, so a
@@ -223,12 +222,13 @@ proc liveJsAppRuntimeBytes*(): int =
     if runtime.ready:
       result += runtime.js.heapBytes()
 
-when defined(frameosEmbedded):
+when defined(frameosEmbedded) or defined(frameosWasm):
   proc releaseKeptJsAppRuntimes(): bool {.nimcall, raises: [].} =
     ## utils/memory's release hook: render memory is short, so the
     ## interpreters a frame kept between renders go, as releasing them after
-    ## every render used to guarantee.
-    if not hasIdleJsAppRuntimes():
+    ## every render used to guarantee. The preview's too, while it runs as an
+    ## ESP32 under a simulated limit and keeps them as an awake one does.
+    if not runsAsEmbedded() or not hasIdleJsAppRuntimes():
       return false
     try:
       releaseIdleJsAppRuntimes()

@@ -360,10 +360,17 @@ proc frameos_wasm_set_fusion(enabled: bool) {.exportc, cdecl.} =
   imageFusionEnabled = enabled
 
 proc frameos_wasm_set_embedded(enabled: bool) {.exportc, cdecl.} =
-  ## Run as an ESP32 (memory.runsAsEmbedded): a JS app's interpreter lasts
-  ## one render, `app.frame.embedded` is true, downloads decode into the
-  ## canvas. Off by default, as a Pi; every frameos_wasm_init turns it off.
+  ## Run as an ESP32 (memory.runsAsEmbedded): `app.frame.embedded` is true,
+  ## downloads decode into the canvas, and a JS app's interpreter is kept
+  ## between renders while the simulated memory has room, as on an ESP32 that
+  ## stays awake (fos_client.c `frameos_nim_set_keep_js`), which is every
+  ## frame anybody taps. Releasing them after each render, as a deep-sleeping
+  ## frame does, lost an interactive scene's module state and the handlers
+  ## of the picture on screen with every render: clicks did nothing and
+  ## `active:` never held (jsx-now-playing, 2026-11-08). Off by default, as
+  ## a Pi; every frameos_wasm_init turns it off.
   setSimulatedEmbedded(enabled)
+  host.keepJsRuntimes = enabled
 
 proc frameos_wasm_set_canvas_bytes_per_pixel(bytesPerPixel: cint) {.exportc, cdecl.} =
   ## The canvas the device keeps, while running as an ESP32

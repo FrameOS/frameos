@@ -58,8 +58,8 @@ type
     keepJsRuntimes*: bool
       ## Keep the scene's idle JS interpreters between renders while there is
       ## room (settleIdleJsAppRuntimes): an ESP32 that does not deep-sleep.
-      ## The preview leaves it off and releases them, as a deep-sleeping
-      ## frame must, so an app leaning on module state shows it there.
+      ## The preview sets it while it runs as an ESP32 (wasm_main
+      ## `frameos_wasm_set_embedded`): an awake frame's, the one you tap.
     events*: EventLoop
     # The payload of a `setCurrentScene` that carried `state`, held until that
     # scene is the resident one.
@@ -400,10 +400,9 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   # the memory: they go. An ESP32 that stays awake keeps them while there is
   # room (keepJsRuntimes), and the next render skips building them again;
   # they still go for a decode, an image or a fill that finds memory short
-  # (utils/memory.nim). The preview releases them while it runs as an ESP32,
-  # so that an app keeping values in module variables misbehaves in the
-  # editor rather than only on a sleeping frame; otherwise it keeps them, as
-  # a Pi does.
+  # (utils/memory.nim). The preview keeps them as an awake ESP32 does while
+  # it runs as one (under its simulated memory limit), and as a Pi does
+  # otherwise.
   if runsAsEmbedded():
     discard settleIdleJsAppRuntimes(host.keepJsRuntimes)
     # A covered scene holds more than its interpreters (its nodes' images):

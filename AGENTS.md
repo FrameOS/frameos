@@ -448,8 +448,9 @@
   steps; run `python3 frameos/tools/generate_retired_apps.py` after touching
   the contract or a replacement's files (`test_retired_apps.py` checks it).
 - A port must behave like the Nim app on an ESP32 too: a deep-sleeping one
-  (and the editor's preview) tears every idle JS interpreter down after each
-  render, and one that stays awake does when memory runs short, so state that
+  tears every idle JS interpreter down after each render, and one that stays
+  awake (and the editor's preview running as one, which a tapped scene needs)
+  does when memory runs short, so state that
   outlives a render goes through `frameos.remember` / `recall`, not module
   variables; a
   throw in `get()` fails the node like a raising Nim app (defaulted args, no
