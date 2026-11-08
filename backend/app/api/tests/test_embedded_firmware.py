@@ -1114,6 +1114,44 @@ def test_embedded_hardware_preset_for_trmnl_diy_kits():
         assert frame.device_config["batteryEnablePin"] == 6
 
 
+def test_embedded_hardware_presets_for_seeed_xiao_epaper_boards():
+    base = {"rst": 38, "dc": 10, "cs": 44, "cs2": -1, "busy": 4, "sck": 7, "mosi": 9, "pwr": 43}
+    for preset, panel, pins, key3, battery_enable in (
+        ("seeed_xiao_ee02", "EPD_13in3e", {**base, "cs2": 41}, 5, 6),
+        ("seeed_xiao_ee03", "EPD_10in3", {**base, "dc": 8}, 5, 6),
+        ("seeed_xiao_ee04", "EPD_7in5_V2", base, 5, 6),
+        ("seeed_xiao_ee05", "EPD_7in5_V2", base, 8, 39),
+    ):
+        frame = Frame(id=9, embedded={"hardwarePreset": preset})
+        ensure_embedded_frame_defaults(frame)
+        assert embedded_panel_for_frame(frame) == panel
+        assert embedded_platform_for_frame(frame) == "esp32-s3"
+        assert embedded_flash_size_for_frame(frame) == "16MB"
+        assert embedded_pins_for_frame(frame) == pins
+        assert {"pin": key3, "label": "KEY3"} in frame.gpio_buttons
+        assert frame.device_config["batteryPin"] == 1
+        assert frame.device_config["batteryEnablePin"] == battery_enable
+        check_embedded_panel_fits_memory(frame)
+
+
+def test_carrier_board_preset_keeps_the_panel_the_frame_names():
+    frame = Frame(id=9, device="waveshare.EPD_7in3e", embedded={"hardwarePreset": "seeed_xiao_ee04"})
+    ensure_embedded_frame_defaults(frame)
+    assert frame.device == "waveshare.EPD_7in3e"
+    assert embedded_panel_for_frame(frame) == "EPD_7in3e"
+    assert frame.device_config["pins"]["pwr"] == 43
+
+    # Not a panel the firmware drives: the board's default.
+    frame = Frame(id=9, device="web_only", embedded={"hardwarePreset": "seeed_xiao_ee05"})
+    ensure_embedded_frame_defaults(frame)
+    assert frame.device == "waveshare.EPD_7in5_V2"
+
+    # Every other board's preset still is the whole hardware.
+    frame = Frame(id=9, device="waveshare.EPD_7in3e", embedded={"hardwarePreset": "seeed_reterminal_e1004"})
+    ensure_embedded_frame_defaults(frame)
+    assert frame.device == "waveshare.EPD_13in3e"
+
+
 _FOS_CONSOLE_C = Path(__file__).resolve().parents[4] / "embedded" / "esp32" / "main" / "fos_console.c"
 _FOS_BOARD_C = _FOS_CONSOLE_C.with_name("fos_board.c")
 

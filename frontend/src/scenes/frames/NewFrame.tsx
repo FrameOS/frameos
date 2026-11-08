@@ -364,6 +364,22 @@ const TRMNL_OG_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>[
   mosi: 8,
   pwr: -1,
 }
+// Seeed XIAO ePaper Display Boards. Mirrors EMBEDDED_SEEED_XIAO_EE_* in the backend.
+const SEEED_XIAO_EE_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 38,
+  dc: 10,
+  cs: 44,
+  cs2: -1,
+  busy: 4,
+  sck: 7,
+  mosi: 9,
+  pwr: 43,
+}
+const SEEED_XIAO_EE_GPIO_BUTTONS: GPIOButton[] = [
+  { pin: 2, label: 'KEY1' },
+  { pin: 3, label: 'KEY2' },
+  { pin: 5, label: 'KEY3' },
+]
 const XIAO_EPAPER_DRIVER_BOARD_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: 38,
   dc: 10,
@@ -507,6 +523,8 @@ interface EmbeddedHardwarePresetConfig {
   /** What the board's buttons do whatever scene shows (docs/events.md "Event map"), seeded onto the frame. */
   eventMap?: EventMapRule[]
   sdCardAssets?: NonNullable<NonNullable<NewFrameFormType['device_config']>['sdCardAssets']>
+  /** A carrier board for many panels: `device` is only the default, and picking another keeps the preset. */
+  panelSelectable?: boolean
 }
 
 // Mirrors EMBEDDED_HARDWARE_PRESETS in backend/app/tasks/embedded_firmware.py
@@ -682,6 +700,57 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     ],
     eventMap: SEEED_RETERMINAL_EVENT_MAP,
     sdCardAssets: seeedReterminalSdCardAssets('seeed_reterminal_e1004'),
+  },
+  seeed_xiao_ee02: {
+    label: 'Seeed XIAO ePaper EE02 (13.3" color ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_13in3e',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: { ...SEEED_XIAO_EE_PINS, cs2: 41 },
+    gpioButtons: SEEED_XIAO_EE_GPIO_BUTTONS,
+  },
+  seeed_xiao_ee03: {
+    label: 'Seeed XIAO ePaper EE03 (10.3" grayscale ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_10in3',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: { ...SEEED_XIAO_EE_PINS, dc: 8 },
+    gpioButtons: SEEED_XIAO_EE_GPIO_BUTTONS,
+  },
+  seeed_xiao_ee04: {
+    label: 'Seeed XIAO ePaper EE04 (24/50-pin panels, ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in5_V2',
+    panelSelectable: true,
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: SEEED_XIAO_EE_PINS,
+    gpioButtons: SEEED_XIAO_EE_GPIO_BUTTONS,
+  },
+  seeed_xiao_ee05: {
+    label: 'Seeed XIAO ePaper EE05 (24-pin panels, ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in5_V2',
+    panelSelectable: true,
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: SEEED_XIAO_EE_PINS,
+    gpioButtons: [
+      { pin: 2, label: 'KEY1' },
+      { pin: 3, label: 'KEY2' },
+      { pin: 8, label: 'KEY3' },
+    ],
+  },
+  seeed_xiao_epaper_7in5: {
+    label: 'Seeed XIAO 7.5" ePaper Panel (ESP32-C3)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: { rst: 2, dc: 5, cs: 3, cs2: -1, busy: 4, sck: 8, mosi: 10, pwr: -1 },
+    gpioButtons: [{ pin: 9, label: 'BOOT' }],
   },
   elecrow_crowpanel_5in79: {
     label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
@@ -1072,7 +1141,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
 
   const setEmbeddedDevice = (device: string): void => {
     const presetConfig = embeddedHardwarePresetConfig(embeddedHardwarePreset)
-    if (presetConfig && device !== presetConfig.device) {
+    if (presetConfig && device !== presetConfig.device && !presetConfig.panelSelectable) {
       setNewFrameValues({
         device,
         embedded: { ...(newFrame.embedded ?? {}), hardwarePreset: 'custom' },

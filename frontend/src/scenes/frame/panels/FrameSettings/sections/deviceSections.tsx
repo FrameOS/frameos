@@ -212,7 +212,7 @@ export function DeviceSettingsSection(): JSX.Element {
                     const currentPins = frameForm.device_config?.pins
                     const currentPresetConfig = esp32HardwarePresetConfig(embeddedHardwarePreset)
                     const nextHardwarePreset =
-                      currentPresetConfig && nextDevice !== currentPresetConfig.device
+                      currentPresetConfig && nextDevice !== currentPresetConfig.device && !currentPresetConfig.panelSelectable
                         ? 'custom'
                         : embeddedHardwarePreset
                     const previousPins = normalizeEsp32PinLayout(currentPins, previousDevice, embeddedHardwarePreset)
