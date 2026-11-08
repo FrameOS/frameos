@@ -480,6 +480,14 @@ being a fixed wait. A host that floods faster than 115200 baud sustained is
 not a case this can cover; the USB-Serial/JTAG channel has its own flow
 control at the USB layer and does not need either.
 
+A `usb_api` command may end in LF or in CR LF (a terminal, most serial
+scripts). The console runs a line at either, so a CR-ended command's LF is
+drained before `READY` (`usb_api_ready`): it used to be read as the payload's
+first byte, leaving the last one on the wire, and an upload stored cut short
+replaced the frame's scenes with one the runtime refused. The store now
+refuses a payload that does not open and close as one JSON array or object
+(`fos_json_whole`).
+
 ```
 frameos> status
 frameos> wifi MySSID MyPassword          # saves and reboots
@@ -1222,7 +1230,9 @@ Slot numbers rather than scene ids, because `CONFIG_SPIFFS_OBJ_NAME_LEN` is
 all. The id ↔ slot mapping lives in the index. Every failure path (an
 unsplittable payload, more than 32 scenes, a full partition) falls back to
 loading the combined file whole, so a frame cannot lose its scenes to a
-failed optimization.
+failed optimization; the index of the set it had stays until that payload
+has loaded, and one the runtime refuses too is dropped for the set from
+before.
 
 ## The render canvas is 16-bit (2026.8.31)
 

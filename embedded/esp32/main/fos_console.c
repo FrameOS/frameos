@@ -101,6 +101,11 @@ typedef enum {
 /* The channel whose command is executing right now (commands run on the
  * console task, one at a time), so usb_api payload reads follow it. */
 static fos_console_channel_t s_active_channel = FOS_CONSOLE_CHANNEL_NONE;
+/* The command running ended on CR (a terminal's or a script's "\r\n"), and
+ * the first byte read after it, when usb_api_ready read one that was not the
+ * LF it looked for (-1: none). */
+static bool s_line_cr = false;
+static int s_payload_first = -1;
 
 /* Up to len bytes from one channel, waiting at most ticks for the first;
  * returns the count, 0 on timeout, -1 for a channel this build lacks. */
@@ -1411,6 +1416,19 @@ static void usb_api_error(const char *name, esp_err_t err, const char *message)
 
 static void usb_api_ready(const char *name)
 {
+    /* A command sent "...\r\n" ran at the CR (fos_console_line.h), and its LF
+     * is still on the wire: read as the payload's first byte, it pushed the
+     * payload's last byte out of the read. An upload lost its closing `}`
+     * that way and was stored as it came (2026-11-08). Drained here, before
+     * READY, so it cannot be payload: the host sends none before READY. */
+    s_payload_first = -1;
+    if (s_line_cr) {
+        s_line_cr = false;
+        uint8_t ch;
+        if (console_channel_read(s_active_channel, &ch, 1, pdMS_TO_TICKS(5)) == 1 && ch != '\n') {
+            s_payload_first = ch; /* a host that did not wait: its first byte */
+        }
+    }
     printf("%s %s\n", USB_API_READY, name);
     fflush(stdout);
 }
@@ -1448,6 +1466,11 @@ static bool usb_api_read_exact_locked(uint8_t *buf, size_t len, TickType_t timeo
     size_t off = 0;
     TickType_t start = xTaskGetTickCount();
     if (bytes_read) *bytes_read = 0;
+    if (s_payload_first >= 0 && len > 0) {
+        buf[off++] = (uint8_t)s_payload_first;
+        if (bytes_read) *bytes_read = off;
+    }
+    s_payload_first = -1;
     while (off < len) {
         /* The payload follows the command on the same channel. */
         size_t remaining = len - off;
@@ -2174,7 +2197,9 @@ static void console_feed_byte(console_line_state_t *state, uint8_t ch)
     switch (fos_console_line_feed(&state->assembler, ch)) {
         case FOS_CONSOLE_LINE_READY:
             s_active_channel = state->channel;
+            s_line_cr = state->assembler.cr;
             run_console_line(state->line);
+            s_line_cr = false;
             s_active_channel = FOS_CONSOLE_CHANNEL_NONE;
             console_prompt();
             break;
