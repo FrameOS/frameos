@@ -294,7 +294,7 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
       var h = "absolute leading-none"
       h.px("top", max(rowH div 14, 2))
       h.px("right", max(rowUnit div 10, 2))
-      h.px("text", max(size div 2, 9))
+      h.px("text", max(size * 3 div 5, 10))
       if lit and not paper: h.add " text-zinc-500"
       elif paper and lit: h.add " text-white"
       elif not paper: h.add " text-zinc-400"
