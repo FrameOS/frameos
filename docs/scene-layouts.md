@@ -27,9 +27,11 @@ or a saved scene is edited, the cloud refuses a store version
 to the AI. The runtime does not check: a layout with no yield shows no content.
 
 **Starters.** Every repo sample whose scene is a layout (`Top bar`, `Bottom bar`,
-`Side rail` in `repo/scenes/samples`) is also a one-click "Add a layout" in the
-frame's Settings under Layouts, on both planes
-(`frontend/scripts/generateLayoutStarters.mjs`).
+`Side rail` in `repo/scenes/samples`) is also one click away on both planes
+(`frontend/scripts/generateLayoutStarters.mjs`): "New layout" in the frame's
+Layouts group, "Add layout" at the end of the Add scene drawer while it has none,
+and "Add a layout" in its Settings under Layouts. Each sample's `thumb.jpg` is
+shown in those lists and saved as the added layout's picture.
 
 ## How it works
 

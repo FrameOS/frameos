@@ -81,14 +81,14 @@ export const allowedFrameToolPanels: Record<WorkspaceMode, readonly WorkspaceUti
  * (GenerateElsewhereModal in FramesHome): hiding it left people hunting for a
  * button the other two surfaces have, which was the worse of the two answers.
  */
-export type AddSceneAction = 'blank' | 'splitScreen' | 'generate' | 'upload' | 'starred' | 'photos'
+export type AddSceneAction = 'blank' | 'splitScreen' | 'layout' | 'generate' | 'upload' | 'starred' | 'photos'
 
 // 'photos' installs scenes that play albums from the Photos library, which
 // only the two control planes keep.
 export const allowedAddSceneActions: Record<WorkspaceMode, readonly AddSceneAction[]> = {
-  backend: ['blank', 'splitScreen', 'generate', 'upload', 'starred', 'photos'],
-  frameAdmin: ['blank', 'splitScreen', 'generate', 'upload', 'starred'],
-  cloud: ['blank', 'splitScreen', 'generate', 'upload', 'starred', 'photos'],
+  backend: ['blank', 'splitScreen', 'layout', 'generate', 'upload', 'starred', 'photos'],
+  frameAdmin: ['blank', 'splitScreen', 'layout', 'generate', 'upload', 'starred'],
+  cloud: ['blank', 'splitScreen', 'layout', 'generate', 'upload', 'starred', 'photos'],
 }
 
 export function addSceneActionIsAllowed(mode: WorkspaceMode, action: AddSceneAction): boolean {

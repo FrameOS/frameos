@@ -98,6 +98,13 @@ export function sceneChildExpansionKey(frameId: FrameId, sceneId: string): strin
   return frameAssetFolderExpansionKey(frameId, sceneChildExpansionPath(sceneId))
 }
 
+/** A frame's collapsed Layouts group, remembered like an expanded folder. */
+export const LAYOUTS_GROUP_EXPANSION_PATH = 'layouts-group'
+
+export function layoutsGroupExpansionKey(frameId: FrameId): string {
+  return frameAssetFolderExpansionKey(frameId, LAYOUTS_GROUP_EXPANSION_PATH)
+}
+
 export function sceneChildExpansionPath(sceneId: string): string {
   return `scene-children:${sceneId}`
 }
@@ -345,11 +352,11 @@ export interface ChatDrawerSelection {
 
 /** The Add scene drawer's pages: the actions, its two scene lists, or the
  * photo album installer. Kept in the URL (`drawerPage`). */
-export type AddScenePage = 'actions' | 'store' | 'saved' | 'photos'
+export type AddScenePage = 'actions' | 'store' | 'saved' | 'photos' | 'layouts'
 
 function templateDrawerPageFromSearch(search: Record<string, unknown>): AddScenePage {
   const page = searchValue(search, 'drawerPage')
-  return page === 'store' || page === 'saved' || page === 'photos' ? page : 'actions'
+  return page === 'store' || page === 'saved' || page === 'photos' || page === 'layouts' ? page : 'actions'
 }
 
 /** The `q` (scene search) of the Add scene drawer, if the URL carries one. */

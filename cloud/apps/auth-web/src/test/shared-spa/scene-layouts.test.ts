@@ -92,6 +92,7 @@ describe("what can be a layout", () => {
     for (const starter of LAYOUT_STARTERS) {
       expect(isLayoutScene(starter.scene)).toBe(true);
       expect(sceneLayoutProblem(starter.scene)).toBeNull();
+      expect(starter.image).toMatch(/^data:image\/jpeg;base64,/);
     }
   });
 });

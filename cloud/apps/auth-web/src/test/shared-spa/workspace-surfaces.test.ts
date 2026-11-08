@@ -777,7 +777,7 @@ describe("the Add scene drawer's action stack", () => {
   // surfaces have is easier to explain than one that is missing.
   it("offers every add-scene action on the on-device panel", () => {
     expect(addSceneActionIsAllowed("frameAdmin", "generate")).toBe(true);
-    for (const action of ["blank", "splitScreen", "upload", "starred"] as const) {
+    for (const action of ["blank", "splitScreen", "layout", "upload", "starred"] as const) {
       expect(addSceneActionIsAllowed("frameAdmin", action)).toBe(true);
     }
   });

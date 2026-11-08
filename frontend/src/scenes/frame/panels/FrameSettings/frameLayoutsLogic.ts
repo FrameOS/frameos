@@ -10,6 +10,7 @@ import {
 } from '../../../../utils/sceneLayouts'
 import { LAYOUT_STARTERS } from '../../../../generated/layoutStarters'
 import { frameLogic } from '../../frameLogic'
+import { LAYOUTS_GROUP_EXPANSION_PATH, workspaceLogic } from '../../../workspace/workspaceLogic'
 
 // The Layouts section of a frame's Settings (docs/scene-layouts.md): the one
 // select that dresses every scene. A scene's own select is SceneLayoutPicker.
@@ -43,6 +44,15 @@ export interface frameLayoutsLogicActions {
   setFrameFormValues: (values: DeepPartial<FrameType>) => {
     values: DeepPartial<FrameType>
   } // frameLogic
+  setFrameAssetFolderExpanded: (
+    frameId: FrameId,
+    path: string,
+    expanded: boolean
+  ) => {
+    expanded: boolean
+    frameId: FrameId
+    path: string
+  } // workspaceLogic
   addStarterLayout: (name: string) => {
     name: string
   }
@@ -69,13 +79,24 @@ export type frameLayoutsLogicType = MakeLogicType<
 > &
   frameLayoutsLogicMeta
 
+function dataUrlBlob(url: string): Blob {
+  const [head, body] = url.split(',')
+  const type = head.slice('data:'.length, head.indexOf(';'))
+  return new Blob([Uint8Array.from(atob(body), (char) => char.charCodeAt(0))], { type })
+}
+
 export const frameLayoutsLogic = kea<frameLayoutsLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'FrameSettings', 'frameLayoutsLogic']),
   props({} as FrameLayoutsLogicProps),
   key((props) => props.frameId),
   connect(({ frameId }: FrameLayoutsLogicProps) => ({
     values: [frameLogic({ frameId }), ['frame', 'frameForm']],
-    actions: [frameLogic({ frameId }), ['setFrameFormValues', 'applyTemplate']],
+    actions: [
+      frameLogic({ frameId }),
+      ['setFrameFormValues', 'applyTemplate'],
+      workspaceLogic,
+      ['setFrameAssetFolderExpanded'],
+    ],
   })),
   actions({
     chooseLayoutForEveryScene: (layoutSceneId: string) => ({ layoutSceneId }),
@@ -95,7 +116,7 @@ export const frameLayoutsLogic = kea<frameLayoutsLogicType>([
         commonSceneLayoutId(contentScenes, layouts),
     ],
   }),
-  listeners(({ actions, values }) => ({
+  listeners(({ actions, values, props }) => ({
     chooseLayoutForEveryScene: ({ layoutSceneId }) => {
       actions.setFrameFormValues({
         scenes: withLayoutOnEveryScene(values.scenes, layoutSceneId),
@@ -104,7 +125,8 @@ export const frameLayoutsLogic = kea<frameLayoutsLogicType>([
     addStarterLayout: ({ name }) => {
       const starter = LAYOUT_STARTERS.find((candidate) => candidate.name === name)
       if (starter) {
-        actions.applyTemplate({ name: starter.name, scenes: [starter.scene] }, false)
+        actions.applyTemplate({ name: starter.name, scenes: [starter.scene], image: dataUrlBlob(starter.image) }, false)
+        actions.setFrameAssetFolderExpanded(props.frameId, LAYOUTS_GROUP_EXPANSION_PATH, true)
       }
     },
   })),

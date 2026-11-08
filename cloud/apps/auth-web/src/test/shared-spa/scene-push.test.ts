@@ -60,6 +60,13 @@ describe("scenePush", () => {
     ]);
   });
 
+  it("does not offer to activate a layout, which never shows on its own", () => {
+    expect(scenePushActionCopy({ active: false, connected: 0, saves: true, noun: "layout" })).toEqual({
+      label: "Push to frame",
+      description: "Save and push this layout to the frame",
+    });
+  });
+
   it("names the drawer's main action for what it does", () => {
     expect(scenePushActionCopy({ active: false, connected: 0, saves: true })).toEqual({
       label: "Push & activate",

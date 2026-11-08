@@ -23,7 +23,13 @@ for (const entry of (await fs.readdir(samplesRoot, { withFileTypes: true })).sor
     continue
   }
   const template = JSON.parse(await fs.readFile(path.join(samplesRoot, entry.name, 'template.json'), 'utf8'))
-  starters.push({ name: scenes[0].name, description: template.description, scene: scenes[0] })
+  const thumb = await fs.readFile(path.join(samplesRoot, entry.name, 'thumb.jpg'))
+  starters.push({
+    name: scenes[0].name,
+    description: template.description,
+    image: `data:image/jpeg;base64,${thumb.toString('base64')}`,
+    scene: scenes[0],
+  })
 }
 
 await fs.writeFile(
@@ -34,6 +40,8 @@ import type { FrameScene } from '../types'
 export interface LayoutStarter {
   name: string
   description: string
+  /** A small picture of it, as a data URL: shown in the list, saved as the added scene's image. */
+  image: string
   scene: FrameScene
 }
 

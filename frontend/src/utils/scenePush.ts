@@ -104,14 +104,18 @@ export function scenePushActionCopy({
   active,
   connected,
   saves,
+  noun = 'scene',
 }: {
   active: boolean
   connected: number
   saves: boolean
+  /** A layout is never shown on its own, so pushing one activates nothing. */
+  noun?: 'scene' | 'layout'
 }): { label: string; description: string } {
-  const what = connected ? `this scene and ${connected} connected scene${connected === 1 ? '' : 's'}` : 'this scene'
+  const staysPut = active || noun === 'layout'
+  const what = connected ? `this ${noun} and ${connected} connected scene${connected === 1 ? '' : 's'}` : `this ${noun}`
   return {
-    label: active ? 'Push to frame' : 'Push & activate',
-    description: `${saves ? 'Save and push' : 'Push'} ${what} to the frame${active ? '' : ', then show it'}`,
+    label: staysPut ? 'Push to frame' : 'Push & activate',
+    description: `${saves ? 'Save and push' : 'Push'} ${what} to the frame${staysPut ? '' : ', then show it'}`,
   }
 }

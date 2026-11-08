@@ -67,6 +67,8 @@ import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { SceneDependencyConnector } from './SceneDependencyConnector'
 import { SceneDependencyFormatMenu } from './SceneDependencyFormatMenu'
 import {
+  LAYOUTS_GROUP_EXPANSION_PATH,
+  layoutsGroupExpansionKey,
   sceneChildExpansionKey,
   sceneChildExpansionPath,
   sceneDependencyGroupingIsEnabled,
@@ -704,22 +706,32 @@ function FrameSceneTile({
   )
 }
 
-export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType; compact?: boolean }): JSX.Element {
-  const { templateDrawerFrameId } = useValues(workspaceLogic)
+export function FrameAddSceneTile({
+  frame,
+  compact = false,
+  newLayout = false,
+}: {
+  frame: FrameType
+  compact?: boolean
+  /** The Layouts group's tile: straight to the starters. */
+  newLayout?: boolean
+}): JSX.Element {
+  const { templateDrawerFrameId, templateDrawerPage } = useValues(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
   const { closeSceneControl, openTemplateDrawer } = useActions(workspaceLogic)
-  const active = templateDrawerFrameId === frame.id
+  const active = templateDrawerFrameId === frame.id && newLayout === (templateDrawerPage === 'layouts')
 
   return (
     <button
       type="button"
-      data-workspace-add-scene-tile={frame.id}
-      data-workspace-add-scene-tile-frame={frame.id}
+      {...(newLayout
+        ? { 'data-workspace-new-layout-tile': frame.id }
+        : { 'data-workspace-add-scene-tile': frame.id, 'data-workspace-add-scene-tile-frame': frame.id })}
       onClick={() => {
         hideForm()
         closeSceneControl()
         closeSplitGenerator(frame.id)
-        openTemplateDrawer(frame.id)
+        openTemplateDrawer(frame.id, newLayout ? 'layouts' : 'actions')
       }}
       className={clsx(
         'frameos-primary-hover-text frameos-add-scene-hover frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-dashed bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
@@ -731,7 +743,9 @@ export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType
       <span className="frameos-primary-hover-text frameos-icon-tile flex h-12 w-12 items-center justify-center rounded-full bg-white/80 text-slate-400 shadow-sm transition">
         <PlusIcon className="h-7 w-7" />
       </span>
-      <span className="frameos-strong text-sm font-semibold text-slate-700">Add scene</span>
+      <span className="frameos-strong text-center text-sm font-semibold text-slate-700">
+        {newLayout ? 'New layout' : 'Add scene'}
+      </span>
     </button>
   )
 }
@@ -990,7 +1004,14 @@ function FrameScenesBlock({
       {frameLayouts.length > 0 ? (
         // Out of the way, not out of reach: a layout is edited like any scene
         // (docs/scene-layouts.md).
-        <details className="mt-4" data-workspace-layouts={frame.id}>
+        <details
+          className="mt-4"
+          data-workspace-layouts={frame.id}
+          open={!!frameAssetFolderExpansion[layoutsGroupExpansionKey(frame.id)]}
+          onToggle={(event) =>
+            setFrameAssetFolderExpanded(frame.id, LAYOUTS_GROUP_EXPANSION_PATH, event.currentTarget.open)
+          }
+        >
           <summary className="frameos-muted cursor-pointer text-xs font-semibold uppercase tracking-wide">
             Layouts ({frameLayouts.length})
           </summary>
@@ -1006,6 +1027,7 @@ function FrameScenesBlock({
                 showMenu={showSceneMenus}
               />
             ))}
+            <FrameAddSceneTile frame={frame} compact newLayout />
           </div>
         </details>
       ) : null}

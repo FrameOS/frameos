@@ -15,6 +15,7 @@ import { scenesLogic } from './scenesLogic'
 import { frameLogic } from '../../frameLogic'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { scenePushActionCopy } from '../../../../utils/scenePush'
+import { isLayoutScene } from '../../../../utils/sceneLayouts'
 import { sceneIdsRefer } from '../../../../utils/systemScenes'
 import { PlayIcon } from '@heroicons/react/24/solid'
 import { WindowIcon } from '@heroicons/react/24/outline'
@@ -87,7 +88,9 @@ export function ExpandedScene({
   const sceneIsCurrent = sceneIdsRefer(sceneId, currentSceneId)
   const pushSceneIds = scenePushIds(sceneId)
   const needsPush = !frameAdminMode && (sceneHasChanges || pushSceneIds.length > 0)
+  const sceneIsALayout = isLayoutScene(scene)
   const pushCopy = scenePushActionCopy({
+    noun: sceneIsALayout ? 'layout' : 'scene',
     active: sceneIsCurrent,
     connected: pushSceneIds.filter((id) => id !== sceneId).length,
     saves: !isCloudMode() && (sceneIsUnsaved || pushSceneIds.some((id) => unsavedSceneIds.has(id))),
@@ -139,6 +142,10 @@ export function ExpandedScene({
     }
 
     if (needsPush) {
+      if (sceneIsALayout) {
+        pushScene(sceneId, false) // never shown on its own: nothing to activate
+        return
+      }
       pushScene(sceneId, true, buildNextState())
     } else {
       submitStateChanges()
@@ -194,6 +201,27 @@ export function ExpandedScene({
       Reset
     </Button>
   )
+
+  if (sceneIsALayout) {
+    // Its values are each scene's to set (Layout settings in that scene's
+    // menu): nothing typed here would reach the frame, since it never runs
+    // as the frame's own scene.
+    const layoutActions = (
+      <div className="flex w-full min-w-0 items-center gap-2">
+        {needsPush ? activateButton : null}
+        {previewButton}
+      </div>
+    )
+    return (
+      <div className="space-y-3">
+        <p className="frameos-muted text-sm">
+          Each scene wearing this layout sets its own values: open the scene&apos;s menu and choose Layout settings.
+        </p>
+        {placeActions(layoutActions, layoutActions)}
+        {livePreviewSceneId === sceneId ? <LivePreviewModal frameId={frameId} /> : null}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-3">
