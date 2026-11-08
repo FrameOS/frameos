@@ -301,6 +301,9 @@ planner, the JS runtime and the font cache. Not a good trade. Two pairs
 byte-identical C because a `distinct int` key makes a distinct table type;
 merging those is worth ~1.4 KB each and needs the two declarations found first.
 
+**Update (2026-11-08): the copies are shared now, without touching a call
+site.** See "One probe loop for all the tables" at the end.
+
 ## Constant data
 
 - **String literals cost about twice their text.** 4,709 payloads and 6,443
@@ -510,3 +513,44 @@ Almost all of it is feature code; the Nim traps above (seq hooks per type,
   2026-10-26 audit, skipped then.
 - pixie's QOI (2.4 KB), GIF (5.7 KB) and BMP (7.7 KB) decoders: formats a URL
   might still serve.
+
+---
+
+# One probe loop for all the tables (2026-11-08)
+
+*`esp32-s3`, 8 MB layout, `EPD_7in5_V2`, fresh `ci_build_image.sh` builds of
+main at 34349f181 and the branch.*
+
+**3,257,360 → 3,235,408 bytes (−21,952). OTA slot 90.4% → 89.8% full.**
+
+`patchFile` swaps two of std/tables' include files on `frameosEmbedded` builds
+(`src/embedded/patched_hashcommon.nim`, `patched_tableimpl.nim`). What differs
+per `Table[K, V]` pair turned out to be only a slot's size and where its key
+sits, so those are arguments of `src/embedded/fos_table_probe.nim`:
+
+| Change | Saves |
+|---|---:|
+| `enlarge`: one `fosTableRehash` loop, 45 thin `fosEnlarge` wrappers | −12,320 (first build, with the next row) |
+| `rawGet`: one probe per key shape (string, machine word) | |
+| One init block in `[]=` at a constant size, `mustRehash` shared, no bounds/overflow checks on masked indices, `raises: []` on the lookups | −9,632 |
+
+- The rehash moves slots with `copyMem` and zeroes the old ones, what `move`
+  did slot by slot; a zeroed slot is `wasMoved`'s state, so the old seq's
+  destructor frees its block and nothing else. OrderedTable keeps its `enlarge`
+  (it walks `next`), and so do `SharedTable` and `CountTable`.
+- Keys that stay generic: anything not a string, a machine word or a pointer
+  (`uint16` glyph ids, tuples). A distinct key must compare like its base.
+- `fosEnlarge` still propagates a failed `newSeq`, before any slot has moved.
+  `rawInsert` too: copying a string key can allocate.
+- Compile-time tables (`when nimvm`) run the stock code. Both files refuse a
+  Nim other than 2.2, to be re-derived from its `lib/pure/collections`.
+- Checked: `tests/test_patched_tables.nim` (a `.nims` beside it patches the
+  same two files; it refuses to build against the stock ones) churns five key
+  types against a model, on the host and under AddressSanitizer. The event
+  loop, dispatcher fixtures, interpreter and calendar JS app suites also pass
+  built through the patch.
+- Looked at and left: `nuctoUpper` / `nuctoLower` (9.9 KB of case tables) are
+  live for pixie's text case. `setLen` ×144 (14.7 KB), `add` ×114 (9.6 KB) and
+  `shrink` ×96 (5.9 KB) are the same shape of problem in `system/seqs_v2`; a
+  third of `shrink`'s instances are plain data, the place to start, but that
+  patches `system` and was not a quick change.
