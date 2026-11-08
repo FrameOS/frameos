@@ -459,8 +459,9 @@
   `lcd_loading.c` + `lcd_st7701s_rgb.c`) draws it over the picture showing,
   and the next frame put on the panel ends it. A host's switch begins it
   (runner.nim `beginSceneLoading`, fos_scenes.c at apply), and so does every
-  render pass that is not an animation's (so a slow tap or refresh shows it
-  with nothing asking), never the dispatcher. The mark writes behind the driver, so on a Pi every push to the
+  render pass whose scene's interval is 5 s or more (so a slow refresh shows it
+  with nothing asking; a clock bar ticking every second does not), never the
+  dispatcher. The mark writes behind the driver, so on a Pi every push to the
   driver goes through `withLoadingMarkAway`, and on the ESP32 every present
   runs `present_back` (which puts it away): a new push or present path keeps
   that, or the driver's row diff and the damage repaint go wrong. The

@@ -515,9 +515,11 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       if sceneId != self.currentSceneId:
         self.currentSceneId = sceneId
       # This pass's frame ends the loading mark, whoever began it. The pass
-      # counts as a wait of its own, except for an animation: a scene drawing
-      # continuously would blink the mark on every frame a little over the delay.
-      if currentScene.isNil or currentScene.id != sceneId or currentScene.refreshInterval >= 1:
+      # counts as a wait of its own, except when nobody is waiting for it: a
+      # scene the frame's clock redraws every few seconds or faster would
+      # blink the mark on every tick a little over the delay.
+      if currentScene.isNil or currentScene.id != sceneId or
+          currentScene.refreshInterval >= LoadingMarkMinIntervalSeconds.float:
         self.beginSceneLoading()
       let markSwitch = loadingMarkSwitches()
       if lastSceneId != sceneId:

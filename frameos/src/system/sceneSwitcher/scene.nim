@@ -34,6 +34,7 @@ import frameos/channels
 import frameos/events_gen
 import frameos/panel_shape
 import frameos/render_scale
+import frameos/scene_rhythm
 import frameos/ui/layout
 import frameos/ui/events
 import frameos/ui/tree
@@ -643,6 +644,9 @@ proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, pap
   ## divided by the same scale. True once nobody has touched it for `idle`
   ## seconds, when the scene goes back; until then the next render is due
   ## when that time is up.
+  # Not a pass of the scene_rhythm: the panel the scene underneath left in
+  # these buffers is gone, and a panel of it that is not due must not stay.
+  rhythmForgetCanvases()
   let target = uiTarget(sceneId, 1)
   target.input.paper = paper
   target.input.round = isRound(self.frameConfig)

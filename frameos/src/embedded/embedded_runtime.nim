@@ -881,10 +881,13 @@ var sceneCanvas: Image
 # (fos_nim_render_panel_impl: an LCD's back frame buffer). A canvas in the
 # panel's format and orientation IS that buffer: the scene draws straight
 # into what the panel scans next, and there is nothing to pack or copy. The
-# LCD has two such buffers, used in turn; their wrappers are kept.
+# LCD has up to three such buffers (LCD_FBS), used in turn; their wrappers are
+# kept. A wrapper that fell out of this list reads as a canvas nobody can vouch
+# for (canvasGenerationForRhythm), so every buffer needs a slot: with two slots
+# for three buffers a layout's panel was run again on every tick of its chrome.
 var panelTarget: pointer
 var panelTargetBytes: int
-var panelCanvases: array[2, Image]
+var panelCanvases: array[3, Image]
 var nextPanelCanvas = 0
 
 proc displayBufferGeneration(buffer: pointer): int64 {.importc: "fos_display_buffer_generation", cdecl.}
@@ -940,7 +943,7 @@ proc panelCanvas(width, height: int, format: PixelFormat): Image =
   # so a gradient on the glass does not step every eight levels.
   result.ditherStores = true
   panelCanvases[nextPanelCanvas] = result
-  nextPanelCanvas = 1 - nextPanelCanvas
+  nextPanelCanvas = (nextPanelCanvas + 1) mod panelCanvases.len
 
 proc renderCanvasIsPanel*(image: Image): bool =
   ## Whether `image` is the panel buffer handed in for this render: drawn

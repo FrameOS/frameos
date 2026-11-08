@@ -50,6 +50,7 @@ def test_the_esp32_and_the_pi_wait_and_animate_alike():
     assert _c_define("FOS_LCD_LOADING_DELAY_MS") == _nim_const(NIM_MARK, "LoadingMarkDelayMs")
     assert _c_define("FOS_LCD_LOADING_FRAME_MS") == _nim_const(NIM_MARK, "LoadingMarkFrameMs")
     assert _c_define("FOS_LCD_LOADING_MAX_MS") == _nim_const(NIM_PANEL, "LoadingMarkMaxMs")
+    assert _c_define("FOS_LCD_LOADING_MIN_INTERVAL_S") == _nim_const(NIM_MARK, "LoadingMarkMinIntervalSeconds")
 
 
 @pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler on PATH")

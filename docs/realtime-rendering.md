@@ -480,10 +480,12 @@ mark if one is up. A frame rendered for an older switch ends nothing.
 next frame is slow, the scene settings' gear, a refresh that fetches something.
 Each render pass begins it (`runner.nim` at the top of a pass, `fos_client.c`
 before `render_once`) and its frame ends it. Timer-driven renders are included,
-so a scene that takes 3 s to refresh shows the mark for the last 2.8 s of it.
-The one exception is an animation (a `refreshInterval` under one second; on the
-ESP32 a scene `fos_animation` is pacing): it would blink the mark on every frame
-that ran a little over the delay.
+so a scene that refreshes every minute and takes 3 s to do it shows the mark
+for the last 2.8 s. The exception is a render the frame's own clock repeats
+more often than every 5 seconds (`LoadingMarkMinIntervalSeconds`): an animation
+(on the ESP32 a scene `fos_animation` is pacing), a ticking clock, a layout's
+clock bar. Nobody is waiting for those, and the mark would blink on every tick
+that ran a little over the delay. A switch still shows it.
 
 **The mark** is `frameos/loading_mark.nim`, one drawing for both runtimes,
 a frame of it every 50 ms. It composes a rectangle of the panel's own pixels

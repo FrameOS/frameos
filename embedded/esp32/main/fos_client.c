@@ -51,6 +51,7 @@
 #include "fos_wake.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
+#include "lcd_loading.h"
 #include "frameos_nim.h"
 #include "fos_log_ring.h"
 #include "fos_commands.h"
@@ -2420,10 +2421,15 @@ static void client_task(void *arg)
                 s_loud_next = false;
                 if (s_anim.active && !quiet) log_animation("running", true);
                 set_quiet(quiet);
-                /* Any render that takes a while shows the loading mark; an
-                 * animation does not, or it would blink on every frame a
-                 * little over the delay. */
-                if (!s_anim.active) fos_display_loading_begin(xTaskGetTickCount(), fos_config()->rotate);
+                /* Any render that takes a while shows the loading mark, but
+                 * not one nobody is waiting for: an animation would blink it
+                 * on every frame a little over the delay, and so would a
+                 * scene the frame's own clock redraws every few seconds (a
+                 * layout's clock bar). A switch begins it itself. */
+                double every = frameos_nim_scene_interval();
+                if (!s_anim.active && (every <= 0.0 || every >= FOS_LCD_LOADING_MIN_INTERVAL_S)) {
+                    fos_display_loading_begin(xTaskGetTickCount(), fos_config()->rotate);
+                }
                 s_render_in_flight = true;
                 render_once(quiet);
                 s_render_in_flight = false;

@@ -4,6 +4,7 @@ import ../events_gen
 import ../interpreter
 import ../scene_rhythm
 import ../types
+import system/sceneSwitcher/scene as switcher
 
 # Layouts, <yield /> and <Scene> (docs/scene-layouts.md), and the pass the
 # canvas keeps for free. Each panel counts its runs in its state.
@@ -267,6 +268,20 @@ suite "a canvas that stays":
     discard pass(scene, b)
     check scene.runs == 1
     check b.color(5, 35) == colored("#0000ff") # out of the other buffer
+
+  test "a built-in scene drawn over the canvas leaves nothing to keep":
+    # Back from the switcher, a panel that is not due must not stay as the
+    # switcher's picture: the switcher draws outside the rhythm.
+    let scene = newScene("tests/content")
+    let canvas = newImage(W, H)
+    discard pass(scene, canvas)
+    let built = switcher.exportedScene.init(SceneSwitcherId.SceneId, config, logger(), %*{})
+    discard switcher.exportedScene.render(built, ExecutionContext(scene: built, event: "render",
+      payload: %*{}, image: canvas, hasImage: true, loopIndex: 0, loopKey: ".", nextSleep: -1))
+    rhythmClockOverride = 1001.0
+    discard pass(scene, canvas)
+    check scene.runs == 2
+    check canvas.color(5, 35) == colored("#0000ff")
 
 suite "the frame's next wake":
   setup:
