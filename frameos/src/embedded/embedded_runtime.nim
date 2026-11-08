@@ -1022,6 +1022,10 @@ proc sceneRefreshSeconds*(): float =
     return host.exported.refreshInterval
   0.0
 
+proc sceneAwaited*(): bool =
+  ## May the next pass show the loading mark (scene_rhythm.nim)?
+  rhythmAwaited(host.scene)
+
 var lastNextSleep: float = -1
 
 proc sceneNextSleepSeconds*(): float =

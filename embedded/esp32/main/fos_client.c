@@ -51,7 +51,6 @@
 #include "fos_wake.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
-#include "lcd_loading.h"
 #include "frameos_nim.h"
 #include "fos_log_ring.h"
 #include "fos_commands.h"
@@ -2449,8 +2448,7 @@ static void client_task(void *arg)
                  * on every frame a little over the delay, and so would a
                  * scene the frame's own clock redraws every few seconds (a
                  * layout's clock bar). A switch begins it itself. */
-                double every = frameos_nim_scene_interval();
-                if (!s_anim.active && (every <= 0.0 || every >= FOS_LCD_LOADING_MIN_INTERVAL_S)) {
+                if (!s_anim.active && frameos_nim_scene_awaited()) {
                     fos_display_loading_begin(xTaskGetTickCount(), fos_config()->rotate);
                 }
                 s_render_in_flight = true;

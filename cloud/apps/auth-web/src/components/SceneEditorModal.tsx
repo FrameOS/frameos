@@ -1,5 +1,6 @@
 "use client";
 
+import { sceneLayoutProblemText } from "../../../../../frontend/src/utils/sceneLayoutRule";
 import type {
   EmbeddedSceneEditorApi,
   SceneTemplateMetadata,
@@ -145,6 +146,12 @@ export function sceneNameFor(scenes: SceneJson[] | null, sceneId: string | null)
     return null;
   }
   return typeof scene.name === "string" && scene.name.trim() ? scene.name : "Untitled scene";
+}
+
+/** Why the scene the editor shows cannot be a layout, null when it can. */
+export function sceneLayoutProblemFor(scenes: SceneJson[] | null, sceneId: string | null): string | null {
+  const scene = scenes?.find((candidate) => candidate.id === sceneId) ?? scenes?.[0];
+  return scene ? sceneLayoutProblemText(scene) : null;
 }
 
 /** Whether the scene the editor shows is a layout (null: no such scene yet). */
@@ -1471,6 +1478,7 @@ export function SceneEditorModal({
   const [sceneName, setSceneName] = useState<string | null>(null);
   // Layout or normal scene, as the Info column shows it; follows the same edits.
   const [sceneIsLayout, setSceneIsLayout] = useState<boolean | null>(null);
+  const [sceneLayoutProblem, setSceneLayoutProblem] = useState<string | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   // The editor's latest scenes as state, for the Preview panel; only kept
   // up to date while that panel is open (each update re-renders the page).
@@ -1505,6 +1513,7 @@ export function SceneEditorModal({
     latestScenesRef.current = next;
     setSceneName(sceneNameFor(next, selectedSceneIdRef.current));
     setSceneIsLayout(sceneIsLayoutFor(next, selectedSceneIdRef.current));
+    setSceneLayoutProblem(sceneLayoutProblemFor(next, selectedSceneIdRef.current));
     if (panelsRef.current?.preview || next === null) {
       setPreviewScenes(next);
     }
@@ -1515,6 +1524,7 @@ export function SceneEditorModal({
     setSelectedSceneId(nextSceneId);
     setSceneName(sceneNameFor(latestScenesRef.current, nextSceneId));
     setSceneIsLayout(sceneIsLayoutFor(latestScenesRef.current, nextSceneId));
+    setSceneLayoutProblem(sceneLayoutProblemFor(latestScenesRef.current, nextSceneId));
   }
 
   // Every edit lands in localStorage (debounced) so a navigation away — a
@@ -2251,6 +2261,7 @@ export function SceneEditorModal({
                   : undefined
               }
               isLayout={sceneIsLayout ?? undefined}
+              layoutProblem={sceneLayoutProblem}
               heading={info.scene.name}
               shown={{ images, listing }}
             />

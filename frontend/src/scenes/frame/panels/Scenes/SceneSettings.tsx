@@ -68,6 +68,7 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
     pacedByInterval,
     renderScaleOptions,
     renderScaleFieldName,
+    layoutProblem,
   } = useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
     return <></>
@@ -160,9 +161,10 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
               className={fieldClassName}
               name="isLayout"
               label={<SceneSettingsLabel>Use as layout</SceneSettingsLabel>}
+              hint={layoutProblem ?? undefined}
               tooltip="A layout wraps other scenes (a clock bar above them, say). It leaves the scene lists and goes under Layouts, and any scene on this frame can then wear it."
             >
-              <Switch name="isLayout" />
+              <Switch name="isLayout" disabled={!!layoutProblem && !scene.settings?.isLayout} />
             </Field>
             <Field
               className={fieldClassName}

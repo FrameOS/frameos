@@ -1,6 +1,8 @@
 import { useActions, useValues } from 'kea'
 
+import { Button } from '../../../../../components/Button'
 import { H6 } from '../../../../../components/H6'
+import { LAYOUT_STARTERS } from '../../../../../generated/layoutStarters'
 import type { FrameId, FrameScene } from '../../../../../types'
 import { SceneLayoutPicker } from '../../Scenes/SceneLayoutPicker'
 import { useFrameSettings } from '../frameSettingsContext'
@@ -12,7 +14,7 @@ const DIFFERENT = '__different'
 export function FrameLayoutsFields({ frameId }: { frameId: FrameId }): JSX.Element {
   const logic = frameLayoutsLogic({ frameId })
   const { layouts, contentScenes, commonLayoutId } = useValues(logic)
-  const { chooseLayoutForEveryScene } = useActions(logic)
+  const { chooseLayoutForEveryScene, addStarterLayout } = useActions(logic)
   return (
     <>
       <H6 id="frame-settings-layouts" className="mt-4">
@@ -21,7 +23,8 @@ export function FrameLayoutsFields({ frameId }: { frameId: FrameId }): JSX.Eleme
       <div className="pl-2 @md:pl-8 space-y-2">
         {layouts.length === 0 ? (
           <div className="frameos-muted text-xs">
-            This frame has no layouts yet. Turn on &quot;Use as layout&quot; in a scene&apos;s settings to make one.
+            This frame has no layouts yet. Add one below to get started, or turn on &quot;Use as layout&quot; for a JSX
+            scene that has a &lt;yield /&gt;.
           </div>
         ) : (
           <>
@@ -64,6 +67,20 @@ export function FrameLayoutsFields({ frameId }: { frameId: FrameId }): JSX.Eleme
             ))}
           </>
         )}
+        <div className="flex flex-wrap items-center gap-2" data-layout-starters>
+          <span className="frameos-muted text-xs">Add a layout:</span>
+          {LAYOUT_STARTERS.map((starter) => (
+            <Button
+              key={starter.name}
+              size="tiny"
+              color="secondary"
+              title={starter.description}
+              onClick={() => addStarterLayout(starter.name)}
+            >
+              {starter.name}
+            </Button>
+          ))}
+        </div>
       </div>
     </>
   )

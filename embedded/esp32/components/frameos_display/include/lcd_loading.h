@@ -29,13 +29,10 @@
  * loading_mark_panel.nim LoadingMarkMaxMs (test_esp32_lcd_loading.py keeps
  * them equal): the mark shows once a switch has taken 200 ms, is drawn again
  * 20 times a second, and stops by itself after two minutes, past every
- * render's own deadline. A render the frame's own clock repeats more often
- * than every FOS_LCD_LOADING_MIN_INTERVAL_S (LoadingMarkMinIntervalSeconds)
- * does not begin it. */
+ * render's own deadline. */
 #define FOS_LCD_LOADING_DELAY_MS 200
 #define FOS_LCD_LOADING_FRAME_MS 50
 #define FOS_LCD_LOADING_MAX_MS 120000
-#define FOS_LCD_LOADING_MIN_INTERVAL_S 5
 
 /* frameos/loading_mark.nim MarkRect: panel pixels, `w` 0 for none. */
 typedef struct {

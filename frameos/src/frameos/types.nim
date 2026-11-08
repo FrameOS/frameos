@@ -452,6 +452,10 @@ type
     ## the embedded scene under it, in that scene's coordinates.
     canvasX*, canvasY*: int32
     slots*: seq[SceneSlot]
+    ## A layout with a `<yield />` hole: where the scene it wraps draws, in
+    ## canvas pixels (holeW 0: none), and the pass that last put it there.
+    holeX*, holeY*, holeW*, holeH*: int32
+    holePass*: int
     ## True while this scene runs although it is not due: the device kept no
     ## copy of what it drew last time, so it draws again only to put that
     ## picture back. Whatever can answer from what it fetched or computed last
@@ -462,6 +466,7 @@ type
   SceneSlot* = object
     child*: FrameScene
     x*, y*, w*, h*: float32
+    visible*: array[4, float32] ## the left, top, right and bottom of the part that shows
 
   # One rectangle a scene drew on the canvas. `copy` is its picture as it left
   # it, when one was kept; nil when the canvas itself holds it.
@@ -484,6 +489,7 @@ type
     cells*: seq[RhythmCell] ## each rectangle it drew
     embedImage*: Image    ## a `<Scene>`'s own picture (the UI draws it as an image)
     embedProps*: string   ## the props last written into its state, as JSON
+    chromePass*: int      ## a layout with a hole: the pass that last drew around it
 
   FontStyle* = ref object
     typeface*: Typeface
@@ -601,6 +607,7 @@ type
     apps*: JsonNode
     nextNodeIds*: Table[NodeId, NodeId] # mapping from current node id to next node id for quick lookup
     eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
+    eventApps*: Table[string, seq[NodeId]] # JS app nodes by the event their config.json `events` names ("*" for all)
     appsByNodeId*: Table[NodeId, AppRoot] # mapping from node id to instantiated app for quick lookup
     appInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from node id to app input name to connected node id
     appInlineInputsForNodeId*: Table[NodeId, Table[string, string]]            # mapping from node id to app input name to inline code

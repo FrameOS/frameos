@@ -194,6 +194,7 @@ proc cleanupSceneRuntime*(scene: FrameScene) =
     interpreted.sceneExportByNodeId = initTable[NodeId, ExportedScene]()
     interpreted.nextNodeIds = initTable[NodeId, NodeId]()
     interpreted.eventListeners = initTable[string, seq[NodeId]]()
+    interpreted.eventApps = initTable[string, seq[NodeId]]()
     interpreted.nodes = initTable[NodeId, DiagramNode]()
     interpreted.edges = @[]
     interpreted.cacheValues = initTable[NodeId, Value]()

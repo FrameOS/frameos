@@ -1,3 +1,4 @@
+import { sceneLayoutProblemText } from '../../../../utils/sceneLayouts'
 import { MakeLogicType, connect, kea, key, path, props, selectors } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { FrameScene, FrameId } from '../../../../types'
@@ -39,6 +40,7 @@ export interface ScenePermissionApp {
 export interface sceneSettingsLogicValues {
   frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
+  layoutProblem: string | null
   pacedByInterval: boolean
   permissionApps: ScenePermissionApp[]
   permissionRows: ScenePermissionRow[]
@@ -62,6 +64,7 @@ export interface sceneSettingsLogicMeta {
     pacedByInterval: (frameForm: Partial<FrameType>) => boolean
     sceneAccess: (scene: FrameScene | null) => SceneAccess | null
     permissionRows: (sceneAccess: SceneAccess | null) => ScenePermissionRow[]
+    layoutProblem: (scene: FrameScene | null) => string | null
     renderScaleOptions: (scene: FrameScene | null) => RenderScaleOption[]
     renderScaleFieldName: (scene: FrameScene | null) => string | null
     permissionApps: (sceneAccess: SceneAccess | null) => ScenePermissionApp[]
@@ -147,6 +150,11 @@ export const sceneSettingsLogic = kea<sceneSettingsLogicType>([
     ],
     // The Scale select: the frame's, then the steps (and the scene's own
     // value if it is none of them).
+    /** Why this scene cannot be a layout, null when it can (docs/scene-layouts.md). */
+    layoutProblem: [
+      (s) => [s.scene],
+      (scene: sceneSettingsLogicValues['scene']): string | null => sceneLayoutProblemText(scene),
+    ],
     renderScaleOptions: [
       (s) => [s.scene],
       (scene: sceneSettingsLogicValues['scene']): RenderScaleOption[] =>
@@ -174,8 +182,8 @@ export const sceneSettingsLogic = kea<sceneSettingsLogicType>([
                 app.declared === null
                   ? 'no list yet'
                   : app.declared.join() === app.detected.join()
-                  ? 'from its code'
-                  : 'updates on the next save',
+                    ? 'from its code'
+                    : 'updates on the next save',
               warning:
                 shortfall.length > 0
                   ? `${app.reasons.join(' and ')} but does not ask for ${shortfall

@@ -16,8 +16,7 @@ import { FrameImage } from '../../components/FrameImage'
 import type { FrameId, FrameScene, FrameType, StateField } from '../../types'
 import { buildSplitScene, frameLogic } from '../frame/frameLogic'
 import { framePacedByInterval, splitPanelRhythm } from '../../utils/sceneRhythm'
-import { isLayoutScene, scenesWithoutLayouts } from '../../utils/sceneLayouts'
-import { SCENE_YIELD_ID } from '../../utils/eventsContract.gen'
+import { scenesWithoutLayouts } from '../../utils/sceneLayouts'
 import { StateFieldEdit } from '../frame/panels/Scenes/StateFieldEdit'
 import { assignSceneImages } from '../../utils/sceneImages'
 import { buildSplitScreenThumbnail } from '../../utils/splitScreenThumbnail'
@@ -90,21 +89,8 @@ function frameAspectValue(frame: FrameType): number {
   return width > 0 && height > 0 ? width / height : 16 / 10
 }
 
-// A layout's panel showing the scene it wraps: not on the frame's list, drawn
-// as a named placeholder (docs/scene-layouts.md).
-const CONTENT_PANEL_SCENE = {
-  id: SCENE_YIELD_ID,
-  name: 'Content',
-  nodes: [],
-  edges: [],
-  fields: [],
-} as unknown as FrameScene
-
 function sceneById(frame: FrameType): Map<string, FrameScene> {
-  return new Map([
-    ...(frame.scenes ?? []).map((scene): [string, FrameScene] => [scene.id, scene]),
-    [SCENE_YIELD_ID, CONTENT_PANEL_SCENE],
-  ])
+  return new Map((frame.scenes ?? []).map((scene): [string, FrameScene] => [scene.id, scene]))
 }
 
 function sceneTitlePart(scene: FrameScene): string {
@@ -200,14 +186,11 @@ function SceneSourceStrip({
   onPickScene,
   onSearchChange,
   search,
-  offerContent,
 }: {
   frame: FrameType
   onPickScene: (sceneId: string) => void
   onSearchChange: (search: string) => void
   search: string
-  /** The scene being edited is a layout: a panel can show the scene it wraps. */
-  offerContent: boolean
 }): JSX.Element {
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
@@ -252,21 +235,6 @@ function SceneSourceStrip({
         </div>
       ) : (
         <div className="flex gap-2 overflow-x-auto pb-1">
-          {offerContent ? (
-            <div className="relative w-36 shrink-0 sm:w-32">
-              <button
-                type="button"
-                data-split-source-content
-                onClick={() => onPickScene(SCENE_YIELD_ID)}
-                draggable
-                onDragStart={(event) => setFrameosSceneDragData(event.dataTransfer, SCENE_YIELD_ID)}
-                className="frameos-card frameos-inset flex h-full min-h-24 w-full flex-col items-center justify-center rounded-lg border border-dashed p-2 text-center text-xs font-semibold transition hover:-translate-y-0.5 hover:shadow-md"
-              >
-                <span className="frameos-strong">Content</span>
-                <span className="frameos-muted font-normal">The scene wearing this layout</span>
-              </button>
-            </div>
-          ) : null}
           {sceneEntries.map(({ scene, key, nested }) => {
             const childSceneCount = groupingEnabled ? childrenBySceneId.get(scene.id)?.length ?? 0 : 0
             const childrenExpanded = !!frameAssetFolderExpansion[sceneChildExpansionKey(frame.id, scene.id)]
@@ -543,20 +511,14 @@ function SplitPreviewCell({
       >
         {scene ? (
           <>
-            {scene.id === SCENE_YIELD_ID ? (
-              <div className="frameos-muted flex h-full w-full items-center justify-center text-xs font-semibold">
-                The scene wearing this layout
-              </div>
-            ) : (
-              <FrameImage
-                frameId={frame.id}
-                sceneId={scene.id}
-                thumb
-                refreshable={false}
-                objectFit="cover"
-                className="h-full w-full rounded-none"
-              />
-            )}
+            <FrameImage
+              frameId={frame.id}
+              sceneId={scene.id}
+              thumb
+              refreshable={false}
+              objectFit="cover"
+              className="h-full w-full rounded-none"
+            />
             <div className="frameos-split-cell-label frameos-strong absolute inset-x-0 bottom-0 flex items-center gap-1.5 px-2 py-1 text-xs font-semibold backdrop-blur">
               <CellDimensionEditor
                 frame={frame}
@@ -840,12 +802,6 @@ function SplitSceneOptionsPanel({
     )
   } else if (!scene) {
     body = <div className="frameos-muted text-sm font-semibold">The selected scene is not available.</div>
-  } else if (leaf.sceneId === SCENE_YIELD_ID) {
-    body = (
-      <div className="frameos-muted text-sm font-semibold">
-        Whichever scene wears this layout is drawn in this panel, on its own schedule.
-      </div>
-    )
   } else if (fields.length === 0) {
     body = <div className="frameos-muted text-sm font-semibold">This scene does not expose public options.</div>
   } else {
@@ -995,18 +951,14 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
   const selectedLeaf = selectedLeafId ? leaves.find((leaf) => leaf.id === selectedLeafId) ?? null : null
   const selectedLeafScene = selectedLeaf?.sceneId ? scenes.get(selectedLeaf.sceneId) ?? null : null
   const editingScene = editingSceneId ? scenes.get(editingSceneId) ?? null : null
-  const isLayout = isLayoutScene(editingScene)
-  const selectedLeafRhythm =
-    selectedLeaf?.sceneId === SCENE_YIELD_ID
-      ? null
-      : splitPanelRhythm(
-          selectedLeafScene,
-          selectedLeaf?.state,
-          frameScenes,
-          frame.interval || 300,
-          editingScene ? sceneRefreshSeconds(editingScene) : frame.interval || 300,
-          framePacedByInterval(frame)
-        )
+  const selectedLeafRhythm = splitPanelRhythm(
+    selectedLeafScene,
+    selectedLeaf?.state,
+    frameScenes,
+    frame.interval || 300,
+    editingScene ? sceneRefreshSeconds(editingScene) : frame.interval || 300,
+    framePacedByInterval(frame)
+  )
   const rects = splitLayoutLeafRects(layout.root)
   const borderEdges = splitLayoutLeafBorderEdges(rects)
   const dividers = splitLayoutDividers(layout.root)
@@ -1074,7 +1026,7 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
       ...layout,
       name: layout.name.trim() || suggestedTitle,
     }
-    const scene = buildSplitScene(frame, saveLayout, editingSceneId, isLayout)
+    const scene = buildSplitScene(frame, saveLayout, editingSceneId)
     updateScene(scene.id, scene)
     await frameKea.asyncActions.submitFrameForm()
     openSceneControl(frame.id, scene.id)
@@ -1233,7 +1185,6 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
             search={sceneSearch}
             onPickScene={handlePickScene}
             onSearchChange={setSceneSearch}
-            offerContent={isLayout}
           />
         </div>
       </div>

@@ -40,6 +40,7 @@ from app.utils.upload_limits import (
     reject_oversized_content_length,
 )
 from app.utils.scene_execution import normalize_scenes_execution
+from app.utils.scene_layouts import bad_layouts_message
 from app.utils.versions import current_frameos_version
 from app.api.auth import get_current_user_from_request
 
@@ -478,7 +479,12 @@ async def update_template(template_id: str, data: UpdateTemplateRequest, db: Ses
     if data.description is not None:
         template.description = data.description
     if data.isLayout is not None:
-        template.scenes = with_main_scene_layout(template.scenes, data.isLayout)
+        scenes = with_main_scene_layout(template.scenes, data.isLayout)
+        if data.isLayout:
+            bad_layouts = bad_layouts_message(scenes)
+            if bad_layouts:
+                raise HTTPException(status_code=400, detail=bad_layouts)
+        template.scenes = scenes
     db.commit()
     db.refresh(template)
 

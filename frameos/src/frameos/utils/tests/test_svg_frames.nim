@@ -2,6 +2,7 @@ import std/[options, strformat]
 import pixie
 import pixie/fileformats/svg
 import ../svg_frames
+from ../image import svgRoot
 import ../font # the typeface resolver the layout's text uses
 import ../../ui/layout
 
@@ -306,3 +307,98 @@ block a_scaled_ui_with_a_box_that_clips:
   for i in 0 ..< 12:
     discard renderInto(200 + i, clipped(i))
     doAssert closeTo(buffers[(200 + i) mod 2], whole(clipped(i))), &"clipped frame {i} differs from a whole render"
+
+block a_rectangle_of_the_panel:
+  # A scene drawn into a rectangle of the buffer (a layout's hole, a split's
+  # panel) repaints its own damage there and touches nothing around it.
+  const
+    TopH = 20
+    RegionH = H - TopH
+  proc scene(i: int): string =
+    let x = (i * 9) mod 150
+    &"""<svg width="{W}" height="{RegionH}"><rect x="0" y="0" width="{W}" height="{RegionH}" fill="#090b14"/>""" &
+      &"""<rect x="{x}" y="30" width="40" height="30" fill="#55dfff"/></svg>"""
+  proc whole(doc: string): Image =
+    result = newImage565(W, RegionH)
+    result.ditherStores = true
+    parseSvg(doc, W, RegionH).renderInto(result)
+  proc sameAsWhole(view: Image, doc: string): bool =
+    let want = whole(doc)
+    for y in 0 ..< RegionH:
+      for x in 0 ..< W:
+        let (p, q) = (view[x, y], want[x, y])
+        if abs(p.r.int - q.r.int) > 9 or abs(p.g.int - q.g.int) > 9 or abs(p.b.int - q.b.int) > 9:
+          return false
+    true
+  var
+    store: array[2, seq[uint16]]
+    bufs: array[2, Image]
+    gens: array[2, uint32]
+  forgetPanelFrames()
+  for b in 0 .. 1:
+    store[b] = newSeq[uint16](W * H)
+    bufs[b] = newImage565Over(W, H, addr store[b][0])
+    bufs[b].fill(rgba(255, 0, 255, 255))
+  proc generationOf(buffer: pointer): int64 {.nimcall, raises: [].} =
+    for b in 0 .. 1:
+      if bufs[b].bufferPointer == buffer:
+        return gens[b].int64
+    -1
+  panelBufferGeneration = generationOf
+  proc into(b: int, doc: string, take = true): int =
+    beginPanelFrame(bufs[b].bufferPointer, gens[b])
+    let view = bufs[b].view(0, TopH, W, RegionH)
+    if take:
+      takePanelRegion(view)
+    var owed = some(color(0, 0, 0, 1))
+    svgFramePixelsForTest = -1
+    doAssert renderSvgFrame(doc, view, owed, true)
+    endPanelFrame()
+    doAssert sameAsWhole(view, doc), "the rectangle differs from a whole render"
+    doAssert bufs[b][5, 5] == rgbx(255, 0, 255, 255), "the render reached outside its rectangle"
+    svgFramePixelsForTest
+  let region = W * RegionH
+  doAssert into(0, scene(0)) == region
+  doAssert into(0, scene(1)) < region div 4         # its own damage
+  # Nothing to compare against without the record the host takes off the shelf.
+  doAssert into(0, scene(2), take = false) == region
+  # The other buffer has none of its own: this one's frame, copied in, and the damage.
+  doAssert into(1, scene(3)) < region div 4
+  # Pixels that came from somewhere else: no record, drawn whole.
+  beginPanelFrame(bufs[0].bufferPointer, gens[0])
+  forgetPanelRegion(bufs[0].view(0, TopH, W, RegionH))
+  endPanelFrame()
+  gens[1] += 1 # and nothing to copy from either
+  doAssert into(0, scene(4)) == region
+  doAssert into(0, scene(5)) < region div 4
+  # Gone with the scene that drew them; a whole frame's record is another matter.
+  forgetPanelRegions()
+  doAssert into(0, scene(6)) == region
+  panelBufferGeneration = nil
+
+block the_chrome_around_a_hole:
+  const
+    HX = 30
+    HY = 20
+    HW = 150
+    HH = 100
+  let target = newImage565(W, H)
+  target.fill(rgba(255, 0, 255, 255))
+  let page = svgRoot(&"""<svg width="{W}" height="{H}"><rect x="10" y="10" width="{W - 20}" height="{H - 20}" fill="#ffffff"/></svg>""")
+  var owed = some(color(0, 0, 0, 1))
+  doAssert renderSvgAround(page, target, (x: HX, y: HY, w: HW, h: HH), owed)
+  doAssert owed.isNone
+  doAssert target[2, 2] == rgbx(0, 0, 0, 255), "the background owed around the hole"
+  doAssert target[15, 15] == rgbx(255, 255, 255, 255)
+  doAssert target[HX + HW + 5, HY + 5] == rgbx(255, 255, 255, 255), "the side of the hole"
+  doAssert target[15, HY + HH + 5] == rgbx(255, 255, 255, 255), "below the hole"
+  for (x, y) in [(HX, HY), (HX + HW - 1, HY), (HX, HY + HH - 1), (HX + HW - 1, HY + HH - 1), (HX + 40, HY + 40)]:
+    doAssert target[x, y] == rgbx(255, 0, 255, 255), "inside the hole"
+
+  # A hole in a corner leaves no empty strips to draw.
+  let corner = newImage565(W, H)
+  var nothingOwed = none(Color)
+  doAssert renderSvgAround(page, corner, (x: 0, y: 0, w: W, h: 30), nothingOwed)
+  doAssert corner[20, 40] == rgbx(255, 255, 255, 255)
+
+echo "svg frames in rectangles ok"

@@ -194,9 +194,11 @@ takes an image ref like `img`.
 
 `<Scene id="clock" city="Oslo" />` draws another scene of the frame where the
 element lands, the way an `<img>` draws a picture; its other props are that
-scene's state (`count={3}` stays a number). `<yield />` is the same for a
-layout's content (`docs/scene-layouts.md`). With no size of its own it takes
-the room left (`flex-1`), so in a block give it a height.
+scene's state (`count={3}` stays a number). `<yield />` is where a layout's
+content goes (`docs/scene-layouts.md`): a hole in the canvas the content draws
+straight into, not a picture, unless something asks it to be one (opacity,
+something painted over it, a box that scrolls around it). With no size of its
+own it takes the room left (`flex-1`), so in a block give it a height.
 
 It runs on its own `refreshInterval`: a render of the UI that finds it not due
 draws its last picture and the scene does not run (`docs/scene-rhythm.md`), and

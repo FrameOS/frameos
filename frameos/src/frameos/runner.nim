@@ -30,7 +30,7 @@ import frameos/utils/time
 import frameos/scenes
 import frameos/scene_switcher_linux
 from system/sceneSwitcher/scene import isBuiltInScene
-from frameos/scene_rhythm import rhythmCanvasGeneration
+from frameos/scene_rhythm import rhythmCanvasGeneration, rhythmAwaited
 import frameos/boot_guard
 import frameos/runtime_diagnostics
 from frameos/upgrade import UpgradeLogWatcher, initUpgradeLogWatcher, poll
@@ -518,8 +518,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       # counts as a wait of its own, except when nobody is waiting for it: a
       # scene the frame's clock redraws every few seconds or faster would
       # blink the mark on every tick a little over the delay.
-      if currentScene.isNil or currentScene.id != sceneId or
-          currentScene.refreshInterval >= LoadingMarkMinIntervalSeconds.float:
+      if currentScene.isNil or currentScene.id != sceneId or rhythmAwaited(currentScene):
         self.beginSceneLoading()
       let markSwitch = loadingMarkSwitches()
       if lastSceneId != sceneId:

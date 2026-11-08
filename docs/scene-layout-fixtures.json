@@ -1,0 +1,875 @@
+{
+  "$comment": "Whether a scene can be a layout: one JSX app, drawn to the frame, with a <yield /> (docs/scene-layouts.md). `problem` is null when it can, else what stops it: `render` (the render flow is not one render/image), `app` (the image is not fed by a JSX app) or `yield` (no <yield /> tag). Replayed by the SPA's sceneLayoutProblem (cloud shared-spa scene-layouts.test.ts) and the backend's scene_layout_problem (app/utils/tests/test_scene_layouts.py).",
+  "cases": [
+    {
+      "name": "one JSX app with a yield",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "e",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "ui",
+              "config": {}
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/image",
+              "config": {
+                "placement": "stretch"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "1",
+            "source": "e",
+            "sourceHandle": "next",
+            "target": "d",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "2",
+            "source": "a",
+            "sourceHandle": "fieldOutput",
+            "target": "d",
+            "targetHandle": "fieldInput/image"
+          }
+        ],
+        "apps": {
+          "ui": {
+            "sources": {
+              "app.tsx": "export function get(app) { return <div><yield /></div> }",
+              "config.json": "{}"
+            }
+          }
+        }
+      },
+      "problem": null
+    },
+    {
+      "name": "the capitalised tag",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "e",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "ui",
+              "config": {}
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/image",
+              "config": {
+                "placement": "stretch"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "1",
+            "source": "e",
+            "sourceHandle": "next",
+            "target": "d",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "2",
+            "source": "a",
+            "sourceHandle": "fieldOutput",
+            "target": "d",
+            "targetHandle": "fieldInput/image"
+          }
+        ],
+        "apps": {
+          "ui": {
+            "sources": {
+              "app.tsx": "export function get() { return <Yield /> }",
+              "config.json": "{}"
+            }
+          }
+        }
+      },
+      "problem": null
+    },
+    {
+      "name": "a .jsx file",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "e",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "ui",
+              "config": {}
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/image",
+              "config": {
+                "placement": "stretch"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "1",
+            "source": "e",
+            "sourceHandle": "next",
+            "target": "d",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "2",
+            "source": "a",
+            "sourceHandle": "fieldOutput",
+            "target": "d",
+            "targetHandle": "fieldInput/image"
+          }
+        ],
+        "apps": {
+          "ui": {
+            "sources": {
+              "app.jsx": "export function get(app) { return <div><yield /></div> }",
+              "config.json": "{}"
+            }
+          }
+        }
+      },
+      "problem": null
+    },
+    {
+      "name": "sources on the node",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "e",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "ui",
+              "sources": {
+                "app.tsx": "export function get(app) { return <div><yield /></div> }"
+              }
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/image",
+              "config": {
+                "placement": "stretch"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "1",
+            "source": "e",
+            "sourceHandle": "next",
+            "target": "d",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "2",
+            "source": "a",
+            "sourceHandle": "fieldOutput",
+            "target": "d",
+            "targetHandle": "fieldInput/image"
+          }
+        ],
+        "apps": {}
+      },
+      "problem": null
+    },
+    {
+      "name": "a button flow beside the render",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "e",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "b",
+            "type": "event",
+            "data": {
+              "keyword": "button"
+            }
+          },
+          {
+            "id": "l",
+            "type": "app",
+            "data": {
+              "keyword": "logic/setAsState"
+            }
+          },
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "ui",
+              "config": {}
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/image",
+              "config": {
+                "placement": "stretch"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "1",
+            "source": "e",
+            "sourceHandle": "next",
+            "target": "d",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "2",
+            "source": "a",
+            "sourceHandle": "fieldOutput",
+            "target": "d",
+            "targetHandle": "fieldInput/image"
+          },
+          {
+            "id": "3",
+            "source": "b",
+            "sourceHandle": "next",
+            "target": "l",
+            "targetHandle": "prev"
+          }
+        ],
+        "apps": {
+          "ui": {
+            "sources": {
+              "app.tsx": "export function get(app) { return <div><yield /></div> }",
+              "config.json": "{}"
+            }
+          }
+        }
+      },
+      "problem": null
+    },
+    {
+      "name": "no render event",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "ui",
+              "config": {}
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/image",
+              "config": {
+                "placement": "stretch"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "2",
+            "source": "a",
+            "sourceHandle": "fieldOutput",
+            "target": "d",
+            "targetHandle": "fieldInput/image"
+          }
+        ],
+        "apps": {
+          "ui": {
+            "sources": {
+              "app.tsx": "export function get(app) { return <div><yield /></div> }",
+              "config.json": "{}"
+            }
+          }
+        }
+      },
+      "problem": "render"
+    },
+    {
+      "name": "two render events",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "e",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "e2",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "ui",
+              "config": {}
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/image",
+              "config": {
+                "placement": "stretch"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "1",
+            "source": "e",
+            "sourceHandle": "next",
+            "target": "d",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "2",
+            "source": "a",
+            "sourceHandle": "fieldOutput",
+            "target": "d",
+            "targetHandle": "fieldInput/image"
+          }
+        ],
+        "apps": {
+          "ui": {
+            "sources": {
+              "app.tsx": "export function get(app) { return <div><yield /></div> }",
+              "config.json": "{}"
+            }
+          }
+        }
+      },
+      "problem": "render"
+    },
+    {
+      "name": "a render that goes nowhere",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "e",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "ui",
+              "config": {}
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/image",
+              "config": {
+                "placement": "stretch"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "2",
+            "source": "a",
+            "sourceHandle": "fieldOutput",
+            "target": "d",
+            "targetHandle": "fieldInput/image"
+          }
+        ],
+        "apps": {
+          "ui": {
+            "sources": {
+              "app.tsx": "export function get(app) { return <div><yield /></div> }",
+              "config.json": "{}"
+            }
+          }
+        }
+      },
+      "problem": "render"
+    },
+    {
+      "name": "a split with a scene in each panel",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "e",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/split",
+              "config": {
+                "rows": 2
+              }
+            }
+          },
+          {
+            "id": "y",
+            "type": "scene",
+            "data": {
+              "keyword": "system/yield"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "1",
+            "source": "e",
+            "sourceHandle": "next",
+            "target": "d",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "2",
+            "source": "d",
+            "sourceHandle": "field/render_functions[1][1]",
+            "target": "y",
+            "targetHandle": "prev"
+          }
+        ],
+        "apps": {}
+      },
+      "problem": "render"
+    },
+    {
+      "name": "something drawn after the app",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "e",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "ui",
+              "config": {}
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/image",
+              "config": {
+                "placement": "stretch"
+              }
+            }
+          },
+          {
+            "id": "t",
+            "type": "app",
+            "data": {
+              "keyword": "render/text"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "1",
+            "source": "e",
+            "sourceHandle": "next",
+            "target": "d",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "2",
+            "source": "a",
+            "sourceHandle": "fieldOutput",
+            "target": "d",
+            "targetHandle": "fieldInput/image"
+          },
+          {
+            "id": "3",
+            "source": "d",
+            "sourceHandle": "next",
+            "target": "t",
+            "targetHandle": "prev"
+          }
+        ],
+        "apps": {
+          "ui": {
+            "sources": {
+              "app.tsx": "export function get(app) { return <div><yield /></div> }",
+              "config.json": "{}"
+            }
+          }
+        }
+      },
+      "problem": "render"
+    },
+    {
+      "name": "the image fed by nothing",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "e",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "ui",
+              "config": {}
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/image",
+              "config": {
+                "placement": "stretch"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "1",
+            "source": "e",
+            "sourceHandle": "next",
+            "target": "d",
+            "targetHandle": "prev"
+          }
+        ],
+        "apps": {
+          "ui": {
+            "sources": {
+              "app.tsx": "export function get(app) { return <div><yield /></div> }",
+              "config.json": "{}"
+            }
+          }
+        }
+      },
+      "problem": "app"
+    },
+    {
+      "name": "the image fed by a built-in app",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "e",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "data/downloadImage"
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/image",
+              "config": {
+                "placement": "stretch"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "1",
+            "source": "e",
+            "sourceHandle": "next",
+            "target": "d",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "2",
+            "source": "a",
+            "sourceHandle": "fieldOutput",
+            "target": "d",
+            "targetHandle": "fieldInput/image"
+          }
+        ],
+        "apps": {}
+      },
+      "problem": "app"
+    },
+    {
+      "name": "the image fed by a state node",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "e",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "a",
+            "type": "state",
+            "data": {
+              "keyword": "picture"
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/image",
+              "config": {
+                "placement": "stretch"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "1",
+            "source": "e",
+            "sourceHandle": "next",
+            "target": "d",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "2",
+            "source": "a",
+            "sourceHandle": "fieldOutput",
+            "target": "d",
+            "targetHandle": "fieldInput/image"
+          }
+        ],
+        "apps": {}
+      },
+      "problem": "app"
+    },
+    {
+      "name": "a JS app that is not JSX",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "e",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "ui",
+              "config": {}
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/image",
+              "config": {
+                "placement": "stretch"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "1",
+            "source": "e",
+            "sourceHandle": "next",
+            "target": "d",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "2",
+            "source": "a",
+            "sourceHandle": "fieldOutput",
+            "target": "d",
+            "targetHandle": "fieldInput/image"
+          }
+        ],
+        "apps": {
+          "ui": {
+            "sources": {
+              "app.ts": "export function get() { return \"<yield />\" }",
+              "config.json": "{}"
+            }
+          }
+        }
+      },
+      "problem": "app"
+    },
+    {
+      "name": "JSX without a yield",
+      "scene": {
+        "id": "s",
+        "name": "S",
+        "nodes": [
+          {
+            "id": "e",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "ui",
+              "config": {}
+            }
+          },
+          {
+            "id": "d",
+            "type": "app",
+            "data": {
+              "keyword": "render/image",
+              "config": {
+                "placement": "stretch"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "1",
+            "source": "e",
+            "sourceHandle": "next",
+            "target": "d",
+            "targetHandle": "prev"
+          },
+          {
+            "id": "2",
+            "source": "a",
+            "sourceHandle": "fieldOutput",
+            "target": "d",
+            "targetHandle": "fieldInput/image"
+          }
+        ],
+        "apps": {
+          "ui": {
+            "sources": {
+              "app.tsx": "export function get() { return <div /> }",
+              "config.json": "{}"
+            }
+          }
+        }
+      },
+      "problem": "yield"
+    }
+  ]
+}

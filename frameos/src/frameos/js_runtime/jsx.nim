@@ -39,6 +39,7 @@ type
     kept: seq[JsxKept]
     nextId: int
     sawScene*: bool ## a `<Scene>` or `<yield />` has been read: its UI's layout is searched for them
+    handlers*: int ## the handlers (onClick, ...) of the last UI read: they live in its interpreter
 
   JsxReader = object
     ctx: ptr JSContext
@@ -230,6 +231,8 @@ proc jsxNode*(ctx: ptr JSContext, v: JSValueConst, images: ptr Table[int, Image]
     for kept in memo.kept.mitems:
       kept.used = false
   reader.addNodes(v, nodes, 0)
+  if not memo.isNil and not drawing:
+    memo.handlers = reader.handlerCount
   if not memo.isNil:
     # What this render's tree no longer holds is let go.
     var i = 0

@@ -256,6 +256,11 @@ calls, and it calls no other:
 - `init(app)` is optional and runs each time the app's interpreter starts:
   once per scene on a Pi, before every render on an ESP32 and in a preview
   running as one.
+- `onEvent(app, context)` is optional and needs no wiring: it hears the events
+  listed in the app's `config.json` as `"events": ["button"]`, or `["*"]` for
+  everything but pointer motion. `context.event` is the name and
+  `context.payload` what it carries. Return `true` to draw the scene again.
+  Frames older than 2026.11 ignore it.
 
 **What the app sees.**
 
@@ -470,7 +475,12 @@ export function get(app, context) {
   sized by the UI (it takes the room left unless its classes say otherwise),
   its props set as that scene's state. It renders on its own
   `refreshInterval`, so a slow scene costs nothing on the renders in between.
-  `<yield />` is the same for a layout's content.
+  `<yield />` marks where a layout's content goes: a hole the content draws
+  straight into, which is as fast as no layout. Keep it opaque, with nothing
+  drawn over it and no scrolling box around it, or the frame has to composite
+  a picture of the content instead. A layout (`settings.isLayout`) has to be
+  exactly this: a `render` event, one `render/image`, and one `app.tsx` with a
+  `<yield />` feeding its image. A split with a content panel cannot be one.
 - A big frame draws a .tsx app's JSX larger by itself: at render scale 2
   (automatic on a panel whose shorter edge is about 1200 px) the app is told
   its canvas is half the size (`context.imageWidth`, `app.frame.width`) and

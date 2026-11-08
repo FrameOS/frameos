@@ -3234,6 +3234,13 @@ a.stat-tile:hover {
   display: contents;
 }
 
+.scene-facts__hint {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
 .scene-facts dt {
   color: var(--muted);
   font-size: 12px;

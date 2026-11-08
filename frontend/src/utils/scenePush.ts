@@ -1,5 +1,4 @@
 import type { FrameScene } from '../types'
-import { SCENE_YIELD_ID } from './eventsContract.gen'
 
 // What "Push" from the scene drawer sends (docs/ui-vocabulary.md): the scene
 // and the connected scenes it needs that have changes of their own. A
@@ -39,7 +38,6 @@ export function referencedSceneIds(scene: FrameScene): string[] {
       }
     }
   }
-  sceneIds.delete(SCENE_YIELD_ID)
   sceneIds.delete('')
 
   return Array.from(sceneIds)

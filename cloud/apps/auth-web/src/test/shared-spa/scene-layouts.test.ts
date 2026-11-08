@@ -1,11 +1,15 @@
 // Layouts (docs/scene-layouts.md): marked `settings.isLayout`, kept out of the
 // scene lists, and worn per install through `layout` beside `nodes`.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { LAYOUT_STARTERS } from "../../../../../../frontend/src/generated/layoutStarters";
 import {
   currentSceneLayout,
   isLayoutScene,
   layoutScenes,
   mainScene,
+  sceneLayoutProblem,
+  sceneLayoutProblemText,
   sceneLayoutRef,
   scenesWithoutLayouts,
   withIsLayout,
@@ -66,5 +70,28 @@ describe("layout scenes", () => {
     expect(sceneLayoutRef({ sceneId: "bar", state: {} })).toEqual({ sceneId: "bar" });
     expect(sceneLayoutRef({ sceneId: "" })).toBeNull();
     expect(sceneLayoutRef("bar")).toBeNull();
+  });
+});
+
+describe("what can be a layout", () => {
+  const { cases } = JSON.parse(
+    readFileSync(new URL("../../../../../../docs/scene-layout-fixtures.json", import.meta.url), "utf8"),
+  ) as { cases: { name: string; scene: unknown; problem: string | null }[] };
+
+  it.each(cases)("$name", ({ scene, problem }) => {
+    expect(sceneLayoutProblem(scene)).toBe(problem);
+  });
+
+  it("says why in words", () => {
+    expect(sceneLayoutProblemText(cases.find((c) => c.problem === null)!.scene)).toBeNull();
+    expect(sceneLayoutProblemText(cases.find((c) => c.problem === "yield")!.scene)).toContain("<yield />");
+  });
+
+  it("has starters, and every one of them is a layout", () => {
+    expect(LAYOUT_STARTERS.map((starter) => starter.name)).toEqual(["Top bar", "Side rail", "Bottom bar"]);
+    for (const starter of LAYOUT_STARTERS) {
+      expect(isLayoutScene(starter.scene)).toBe(true);
+      expect(sceneLayoutProblem(starter.scene)).toBeNull();
+    }
   });
 });

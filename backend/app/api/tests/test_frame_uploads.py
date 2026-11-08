@@ -52,17 +52,15 @@ async def test_api_frame_event_upload_scenes_invalid_reference(async_client, db,
 
 
 @pytest.mark.asyncio
-async def test_api_frame_upload_scenes_accepts_a_layouts_yield(async_client, db, redis):
+async def test_api_frame_upload_scenes_refuses_what_cannot_be_a_layout(async_client, db, redis):
     frame = await new_frame(db, redis, "UploadScenesYield", "localhost", "localhost")
     payload = {
-        "scenes": [
-            {"id": "bar", "settings": {"isLayout": True},
-             "nodes": [{"id": "1", "type": "scene", "data": {"keyword": "system/yield"}}]},
-        ],
+        "scenes": [{"id": "bar", "name": "Bar", "settings": {"isLayout": True}, "nodes": [], "edges": []}],
         "sceneId": "bar",
     }
     response = await async_client.post(f"/api/frames/{frame.id}/event/uploadScenes", json=payload)
-    assert "references missing scene" not in response.text
+    assert response.status_code == 400
+    assert "Bar" in response.json()["detail"] and "can't be a layout" in response.json()["detail"]
 
 
 @pytest.mark.asyncio

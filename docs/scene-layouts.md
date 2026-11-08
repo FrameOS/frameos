@@ -1,18 +1,35 @@
 # Scene layouts
 
-A layout is a regular scene that wraps other scenes: a split or a JSX app with a
-hole where the scene goes, for chrome like a task bar with the clock and the
-battery. The default is no layout (a scene is the whole frame).
+A layout is a scene that wraps other scenes: one JSX app with a hole where the
+scene goes, for chrome like a task bar with the clock and the battery. The
+default is no layout (a scene is the whole frame).
 
-A layout is written like any scene, with one extra piece:
-
-- **`<yield />`** in JSX, or a split panel showing **Content** (`system/yield`,
-  the contract's `scenes.yield`), is where the wrapped scene goes.
+- **`<yield />`** (the contract's `scenes.yield`) is where the wrapped scene goes.
 - `settings.isLayout: true` keeps it out of the scene list, the scene switcher
   and next/previous. A frame never boots to one. Shown on its own (the editor,
-  a `setCurrentScene` by id) its yield is a grey rectangle or nothing.
+  a `setCurrentScene` by id) its yield draws nothing.
 - Its fields are parameters. Each scene that uses it sets them in
   `layout.state` on the install, as a split panel sets a panel's options.
+
+## What can be a layout
+
+A layout's render is **one JSX app, drawn to the frame, with a `<yield />`**: a
+`render` event, one `render/image` and nothing after it, its image fed by an app
+with an `app.tsx`. That shape is what lets the runtime draw around the scene it
+wraps instead of compositing a picture of it, which was 5x slower on an animated
+scene on an ESP32-S3 (`docs/scene-layout-fixtures.json` pins the rule, in
+`sceneLayoutProblem` and the backend's `scene_layout_problem`).
+
+Every door checks: the "Use as layout" switches and the cloud's Type field stay
+off and say why, a backend refuses it when a frame is saved, a scene is uploaded
+or a saved scene is edited, the cloud refuses a store version
+(`invalid_layout_scene`, in `validateSceneZip`), and `scene-lint` bounces it back
+to the AI. The runtime does not check: a layout with no yield shows no content.
+
+**Starters.** Every repo sample whose scene is a layout (`Top bar`, `Bottom bar`,
+`Side rail` in `repo/scenes/samples`) is also a one-click "Add a layout" in the
+frame's Settings under Layouts, on both planes
+(`frontend/scripts/generateLayoutStarters.mjs`).
 
 ## How it works
 
@@ -26,16 +43,31 @@ From then on, one host loop and one scene:
   no state of its own on disk.
 - **A render pass enters the layout**, and the yield runs the content through
   the same schedule as any panel. Chrome and content each render when due
-  (`docs/scene-rhythm.md`), the frame wakes for whichever comes first, and on a
-  generated split a part that is not due is not touched at all.
+  (`docs/scene-rhythm.md`), the frame wakes for whichever comes first, and what
+  is not due is not touched at all.
 - **Pointer events go to what is under them, in its own coordinates**: over the
-  content to the content, over a chrome panel to that panel. Keys, buttons and
+  content to the content, over the chrome to the layout. Keys, buttons and
   custom events go to the content and then the layout.
 - A scene shown as a panel of another has no layout of its own: only the scene
   the frame shows is wrapped.
 - A layout that is not on the frame leaves the scene as it is (`layout:missing`,
   logged once).
-- **No floating chrome yet:** a layout tiles the panel.
+- **A `<yield />` is a hole in the canvas.** The chrome is drawn around it and
+  the content straight into that rectangle of the canvas, as a split's panel
+  is: no picture of the content is made, what is not due stays where it is, and
+  a scene's damage repaint works there as it does on the whole panel. A pass
+  the chrome has nothing to do in does not enter the layout at all (no
+  JavaScript, no tree, no raster): a 20 fps scene in a clock bar pays for the
+  bar once a second. Its chrome comes out of whichever frame buffer holds it,
+  around the hole.
+- **What makes a yield a picture instead:** `opacity` on it or around it,
+  anything painted after it that lands on it, a box that scrolls around it, a
+  second `<yield />`, or a layout whose render is more than the one app. It
+  still shows, composited like a `<Scene>`, at that cost.
+- **No floating chrome yet:** a layout tiles the panel, and something drawn
+  over its yield makes it a picture.
+- A layout's JS app can hear the frame's events: `events` in its `config.json`
+  and an `onEvent` (`docs/events.md` "Apps that subscribe").
 
 Inside a JSX `<Scene>` or a panel, the keyboard-on-the-screen's flash and held
 backspace (`uiTimer`) only reach the frame's own scene, not a nested one.
@@ -81,11 +113,9 @@ page's Info column, and "Use as layout" in a backend's saved scene Edit dialog
 A small select sits under each scene's picture once the frame has a layout. The same choice is in the frame's
 Settings under Layouts: one select per scene and one for all of them, which
 sets the scenes the frame has now (a scene added later starts with no layout).
-"Layout settings" in the scene's menu edits `layout.state`. In the split drawer of a layout, the Content panel
-is `SCENE_YIELD_ID` (`system/yield`, `docs/events-contract.json` `scenes.yield`),
-a scene node's keyword meaning "the scene this layout wraps".
+"Layout settings" in the scene's menu edits `layout.state`.
 
 **How often it renders** (`utils/sceneRhythm.ts`, `framePacedByInterval`):
-where a render is free, a split or a worn layout renders when its first panel
-is due; on e-paper or a deep-sleeping frame the scene's own interval stays the
-fastest it renders.
+where a render is free, a worn layout renders when its chrome or its scene is
+due; on e-paper or a deep-sleeping frame the scene's own interval stays the
+fastest it renders, whatever the chrome's clock says.

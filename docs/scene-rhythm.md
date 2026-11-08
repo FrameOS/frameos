@@ -26,6 +26,11 @@ runtime side; this is what it does.
   once-a-second clock and an hourly weather panel wakes at the clock's pace and
   nothing else runs but what is due. A scene with `settings.splitScreenLayout`
   draws nothing that changes with time, so its own interval has nothing to do.
+- **A layout's `<yield />` that is a hole has the same schedule, without a
+  node.** The content runs when it is due, straight into its rectangle, and the
+  chrome around it has a due time of its own: `rhythmVisitChrome` either leaves
+  it alone (`rdKeep`), copies it out of the frame buffer that holds it around
+  the hole (`rdRestore`), or runs the layout (`docs/scene-layouts.md`).
 - **On e-paper and on a deep sleeper the split's own interval stays the fastest
   it renders.** A panel's refresh costs 40 seconds or a battery wake, so a panel
   that defaults to 24 fps must not make the frame refresh back to back. Set the

@@ -1,5 +1,6 @@
 import { sceneRequiresCompilation } from "@frameos-cloud/scene-convert";
 import { sceneAccessFlags } from "../../../../../frontend/src/utils/sceneAccess";
+import { isBrokenLayout } from "../../../../../frontend/src/utils/sceneLayoutRule";
 import { randomBytes } from "node:crypto";
 import { strToU8, unzlibSync, zipSync } from "fflate";
 import { unzipBounded } from "./zip-bounded";
@@ -489,6 +490,10 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
   const scenes = scenesRaw ? parseJson(scenesRaw) : undefined;
   if (!Array.isArray(scenes) || scenes.length === 0) {
     return { ok: false, error: "missing_scenes" };
+  }
+  // docs/scene-layouts.md: every way a scene reaches the store comes through here.
+  if (scenes.some(isBrokenLayout)) {
+    return { ok: false, error: "invalid_layout_scene" };
   }
 
   const record = manifest as Record<string, unknown>;

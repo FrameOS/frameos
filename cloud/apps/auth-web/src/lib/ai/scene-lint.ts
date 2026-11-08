@@ -20,6 +20,7 @@ import {
   isScenePermission,
   sceneAccess,
 } from "../../../../../../frontend/src/utils/sceneAccess";
+import { isBrokenLayout, sceneLayoutProblemText } from "../../../../../../frontend/src/utils/sceneLayoutRule";
 
 export type LintLevel = "error" | "warning";
 
@@ -574,6 +575,10 @@ export function lintScene(
   const edges = Array.isArray(scene.edges) ? scene.edges.map(obj).filter(Boolean) as JsonObject[] : [];
   const sceneApps = obj(scene.apps);
   const settings = obj(scene.settings) ?? {};
+
+  if (isBrokenLayout(scene)) {
+    push("error", `settings.isLayout is set, but this scene cannot be a layout. ${sceneLayoutProblemText(scene)}`);
+  }
 
   // --- scene fields -------------------------------------------------------
   const declaredFields = new Map<string, JsonObject>();

@@ -1862,8 +1862,7 @@ function splitNodeConfig(branch: SplitLayoutBranch, gapWidth: number, outerBorde
 export function buildSplitScene(
   frame: Partial<FrameType>,
   layout: SplitScreenSceneLayout,
-  sceneId?: string | null,
-  isLayout = false
+  sceneId?: string | null
 ): FrameScene {
   const nodes: DiagramNode[] = []
   const edges: DiagramEdge[] = []
@@ -1992,7 +1991,6 @@ export function buildSplitScene(
         backgroundColor: background.color,
         execution: 'interpreted',
         splitScreenLayout: cloneSplitScreenSceneLayout(layout) as unknown as Record<string, any>,
-        ...(isLayout ? { isLayout: true } : {}),
       },
     },
     frame

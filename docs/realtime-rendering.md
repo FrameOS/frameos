@@ -485,7 +485,22 @@ for the last 2.8 s. The exception is a render the frame's own clock repeats
 more often than every 5 seconds (`LoadingMarkMinIntervalSeconds`): an animation
 (on the ESP32 a scene `fos_animation` is pacing), a ticking clock, a layout's
 clock bar. Nobody is waiting for those, and the mark would blink on every tick
-that ran a little over the delay. A switch still shows it.
+that ran a little over the delay. With a layout the interval that counts is the
+scene's own, and only on a pass that will run it (`rhythmAwaited`): a slow map
+inside a clock bar shows the mark when the map renders and not when the bar
+ticks. A switch still shows it.
+
+**An interpreter that holds a UI's handlers is not let go to save memory.** An
+awake ESP32 keeps its JS interpreters between renders while there is room, but
+a UI's `onClick` and friends live only in its interpreter, so one released
+between renders leaves a picture that no longer answers. It stays whatever the
+headroom, and goes only when an allocation actually failed
+(`keepIdleInterpreters`, `releaseRenderMemory`). Any interpreter that does go
+while its scene stays is logged (`js:interpreterDiscarded`, with the reason),
+and when it held handlers the panel says so for a few seconds
+(`reportInterpreterDiscards`). `test_kitchen_sink_esp32.nim` and
+`tools/esp32_kitchen_sink.mjs` (CI: the wasm runtime in an 8 MB board's memory)
+keep the Kitchen sink working on the smallest board that runs it.
 
 **The mark** is `frameos/loading_mark.nim`, one drawing for both runtimes,
 a frame of it every 50 ms. It composes a rectangle of the panel's own pixels

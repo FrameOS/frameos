@@ -199,7 +199,7 @@ const
     ## paint strips), on top of the reserve that headroom already leaves.
 
 var
-  renderMemoryReleaseHook*: proc(): bool {.nimcall, raises: [].}
+  renderMemoryReleaseHook*: proc(refused: bool): bool {.nimcall, raises: [].}
     ## Lets go of what a render can rebuild: the idle JS interpreters an ESP32
     ## that does not deep-sleep keeps between renders (js_runtime/app_runtime.nim).
     ## Whether anything went. Called for a decode when render memory is short,
@@ -208,6 +208,8 @@ var
     ## first time a decode asks for it); and by a fill pixie refused
     ## (releaseRenderMemory). Not before every render: a JSX UI just over the
     ## line lost its interpreter, its memo and its laid-out tree every frame.
+    ## `refused`: an allocation actually failed. Only then may an interpreter
+    ## holding a UI's handlers go (keepIdleInterpreters).
   decodedSinceSettle: bool
     ## A decode ran since the interpreters were last settled.
 
@@ -216,15 +218,15 @@ proc releaseRenderMemoryIfShort() =
     let headroom = availableRenderHeadroomBytes()
     if headroom > 0 and headroom < RenderMemoryShortBytes:
       clearCoverageCache() # pixie's kept masks: rebuilt by the fills that need them
-      discard renderMemoryReleaseHook()
+      discard renderMemoryReleaseHook(false)
 
 proc releaseRenderMemory*(): bool =
   ## Lets go of what a render can rebuild, whatever the headroom: a fill or a
   ## decode was just refused. Whether anything went (then try it again).
   clearCoverageCache()
-  not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook()
+  not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook(true)
 
-proc keepIdleInterpreters*(holdingPictures = false): bool =
+proc keepIdleInterpreters*(holdingPictures = false, answeringPointer = false): bool =
   ## Whether the idle JS interpreters may stay for the next render: while the
   ## headroom holds RenderMemoryShortBytes after a render that decoded
   ## something (the next may decode again, at full resolution), and
@@ -235,18 +237,25 @@ proc keepIdleInterpreters*(holdingPictures = false): bool =
   ## JSX gallery's photo), which go with it. Letting it go would not spare
   ## the next decode, it would cause one, so it stays down to
   ## KeepInterpretersBytes after a decode too.
+  ##
+  ## `answeringPointer`: one of them holds a UI's handlers. Those live nowhere
+  ## else, so letting it go here leaves a picture nobody can press, and the
+  ## next render builds it again only to lose it again (the SenseCAP Indicator's
+  ## Kitchen sink at 1.0 MB of headroom, 2026-11-08). It stays whatever the
+  ## headroom, until an allocation that did not fit asks for the room
+  ## (releaseRenderMemory).
   let headroom = availableRenderHeadroomBytes()
   let floor = if decodedSinceSettle and not holdingPictures: RenderMemoryShortBytes
               else: KeepInterpretersBytes
   decodedSinceSettle = false
-  headroom <= 0 or headroom >= floor
+  answeringPointer or headroom <= 0 or headroom >= floor
 
 when defined(frameosEmbedded):
   proc largestDecodeBlock(): int {.nimcall, raises: [].} =
     ## The contiguous decode budget, measured when a decode first asks for it.
     result = fos_psram_largest_free_block().int
     if result < RenderMemoryShortBytes and not renderMemoryReleaseHook.isNil and
-        renderMemoryReleaseHook():
+        renderMemoryReleaseHook(false):
       result = fos_psram_largest_free_block().int
 
 proc refreshDecodeContiguousBudget() =

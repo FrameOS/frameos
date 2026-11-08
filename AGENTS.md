@@ -104,6 +104,9 @@
   `pointerDown` / `pointerMove` / `pointerUp` on the wire and the render task
   delivers them) and the old-name aliases with them, not the keyboard half. `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
   evdev translator's `test_translate.nim` are where a rule gets its test.
+  A JS app subscribes in its `config.json` (`events`, `"*"` per the contract's
+  `heardByAll`) and hears through `onEvent`: `eventApps` beside `eventListeners`,
+  so `sceneListensTo` stays a question no JavaScript answers.
 
 - **Two event maps, one rule shape** (`docs/events.md` "Event map";
   `event_map.nim`, applied by `event_loop.nim` on every host). The
@@ -367,9 +370,10 @@
 
 ## Layouts and `<Scene>`: `docs/scene-layouts.md`
 
-- A layout is a regular scene (`settings.isLayout`, in no scene list) with
-  `<yield />` or a `system/yield` split panel (`scenes.yield` in the events
-  contract) where the wrapped scene goes. What wraps a scene is the install's,
+- A layout is one JSX app (`settings.isLayout`, in no scene list) with a
+  `<yield />` (`scenes.yield` in the events contract) where the wrapped scene
+  goes. `sceneLayoutProblem` and `scene_layout_problem` are the rule, pinned by
+  `docs/scene-layout-fixtures.json`; both planes refuse anything else on save. What wraps a scene is the install's,
   like its button map: `layout: {sceneId, state}` beside `eventMap`, on the
   backend's `frame.scenes` entry and the cloud's `layouts` assignment column.
 - The host keeps one scene. `interpreter.runEvent` enters the layout on a render
@@ -381,6 +385,13 @@
   layout gave it (`ukImage` + `fillSceneImages`), on its own schedule, with its
   picture under the panel copy budget (`SceneRhythm.embedImage`). A scene's
   `<Scene>` children live in `sceneNodes` under negative keys.
+- `<yield />` is a hole instead wherever it can be (`yieldHole`, `holeOf` in
+  `app_runtime.nim`): `renderSvgAround` draws the chrome, the content goes through
+  `runSceneNodeRender` into a view of the canvas, and a pass the chrome has
+  nothing to do in never enters the layout (`renderLayout`, `rhythmVisitChrome`).
+  A rectangle of the panel keeps its own damage record in `svg_frames.nim`
+  (`takePanelRegion`): a new way to write a rectangle's pixels without a render
+  of it calls `forgetPanelRegion`.
 
 ## JSX from JS apps: `docs/jsx-ui.md`
 
@@ -448,7 +459,9 @@
   budget measures it only when a decode asks
   (`setDecodeContiguousBudgetProvider`).
 - A frame that stays awake keeps its scene's JS interpreters between renders
-  (`settleIdleJsAppRuntimes`), and a whole-frame SVG on an LCD repaints only
+  (`settleIdleJsAppRuntimes`; one holding a UI's handlers goes only when an
+  allocation failed, and any discard is logged and, if it cost taps, shown on
+  the panel: `reportInterpreterDiscards`), and a whole-frame SVG on an LCD repaints only
   pixie's damage box (`utils/svg_frames.nim`, keyed on the firmware's write
   count per buffer): a new writer into an LCD buffer that is not a render in
   place calls `fos_display_mark_written`.
@@ -459,9 +472,9 @@
   `lcd_loading.c` + `lcd_st7701s_rgb.c`) draws it over the picture showing,
   and the next frame put on the panel ends it. A host's switch begins it
   (runner.nim `beginSceneLoading`, fos_scenes.c at apply), and so does every
-  render pass whose scene's interval is 5 s or more (so a slow refresh shows it
-  with nothing asking; a clock bar ticking every second does not), never the
-  dispatcher. The mark writes behind the driver, so on a Pi every push to the
+  render pass somebody waits for (`rhythmAwaited`: a scene whose own interval
+  is 5 s or more, on a pass that runs it, so a slow refresh shows it with nothing
+  asking and a clock bar ticking every second does not), never the dispatcher. The mark writes behind the driver, so on a Pi every push to the
   driver goes through `withLoadingMarkAway`, and on the ESP32 every present
   runs `present_back` (which puts it away): a new push or present path keeps
   that, or the driver's row diff and the damage repaint go wrong. The

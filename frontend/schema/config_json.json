@@ -25,6 +25,13 @@
           "description": "Description for this app",
           "type": "string"
         },
+        "events": {
+          "description": "The events a JS app's onEvent hears, without an event node: contract names, the scene's custom events, or \"*\" (docs/events.md \"Apps that subscribe\"; FrameOS 2026.11+).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "fields": {
           "description": "Fields for app in diagram editor",
           "items": {

@@ -131,7 +131,8 @@ from app.utils.embedded_commands import (
     is_queued_embedded_frame,
     queue_embedded_command,
 )
-from app.utils.events_contract_gen import CLOUD_EVENT_ROUTE_VERBS, CONTRACT_EVENTS, SCENE_YIELD_ID
+from app.utils.events_contract_gen import CLOUD_EVENT_ROUTE_VERBS, CONTRACT_EVENTS
+from app.utils.scene_layouts import bad_layouts_message
 from app.utils.frame_commands import (
     cancel_frame_command,
     frame_is_asleep,
@@ -865,6 +866,10 @@ def _validate_upload_scenes_payload(
     if scene_id and scene_id not in scene_ids:
         _bad_request("uploadScenes sceneId must reference one of the uploaded scenes")
 
+    bad_layouts = bad_layouts_message(scenes)
+    if bad_layouts:
+        _bad_request(bad_layouts)
+
     for scene in scenes:
         nodes = scene.get("nodes") or []
         if not isinstance(nodes, list):
@@ -880,7 +885,7 @@ def _validate_upload_scenes_payload(
                 keyword = data.get("keyword")
                 if not isinstance(keyword, str) or not keyword:
                     _bad_request(f"Scene '{scene.get('id')}' has invalid scene reference")
-                if keyword not in scene_ids and keyword != SCENE_YIELD_ID:
+                if keyword not in scene_ids:
                     _bad_request(f"Scene '{scene.get('id')}' references missing scene '{keyword}'")
             elif node_type == "dispatch" and data.get("keyword") == "setCurrentScene":
                 config = data.get("config") or {}
@@ -4685,6 +4690,9 @@ async def api_frame_update_endpoint(
             raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
     # Templates, imports and chat-built scenes arrive without an execution
     # mode; stamp it here so nothing downstream has to guess.
+    bad_layouts = bad_layouts_message(update_data.get("scenes"))
+    if bad_layouts:
+        _bad_request(bad_layouts)
     normalize_scenes_execution(update_data.get("scenes"))
     # An editor tab or a saved draft from before the upgrade still holds the
     # retired Nim keyword (data/immich); store it as the JS app it became.

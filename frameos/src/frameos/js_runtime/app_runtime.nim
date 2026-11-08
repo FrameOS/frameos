@@ -23,6 +23,7 @@ import frameos/js_runtime/jsx_native
 import frameos/render_probe
 import frameos/js_runtime/jsx
 import frameos/ui/layout
+import frameos/events_gen
 import frameos/ui/events
 import frameos/render_scale
 import frameos/panel_shape
@@ -60,6 +61,7 @@ type
     nextImageId*: int
     images*: Table[int, Image]
     jsxMemo*: JsxMemo ## the nodes of memo()'s elements (js_runtime/jsx.nim)
+    sceneId: string ## the scene it draws for, to say so when it is discarded
     # The last tree get() returned, for a render only the pointer asked for
     # (hover:, active:): laid out again with the new pointer, get() not run,
     # as a browser restyles :hover without React rendering again.
@@ -111,6 +113,30 @@ template midCall(runtime: JsAppRuntime, body: untyped) =
     if jsRuntimeStack.len > 0 and jsRuntimeStack[^1] == runtime:
       discard jsRuntimeStack.pop()
 
+type InterpreterDiscard* = object
+  ## An interpreter that went while its scene stayed.
+  sceneId*, reason*: string
+  heldHandlers*: bool ## a UI's onClick and friends went with it
+  count*: int
+
+const MaxPendingDiscards = 8
+
+var pendingDiscards {.threadvar.}: seq[InterpreterDiscard]
+
+proc takeInterpreterDiscards*(): seq[InterpreterDiscard] =
+  ## What was discarded since the last call, for the host to report once the
+  ## render is over: the moment of a discard is a moment short of memory.
+  result = move(pendingDiscards)
+
+proc noteInterpreterDiscard(runtime: JsAppRuntime, reason: string) =
+  let held = runtime.jsxMemo.handlers > 0
+  for known in pendingDiscards.mitems:
+    if known.sceneId == runtime.sceneId and known.reason == reason and known.heldHandlers == held:
+      inc known.count
+      return
+  if pendingDiscards.len < MaxPendingDiscards:
+    pendingDiscards.add InterpreterDiscard(sceneId: runtime.sceneId, reason: reason, heldHandlers: held, count: 1)
+
 proc teardownJsRuntime(runtime: JsAppRuntime) =
   ## Close one JS app node's interpreter. Not embedded-only: JsAppRuntime has
   ## no destructor, so a runtime that merely goes out of scope leaks its whole
@@ -157,10 +183,14 @@ when defined(frameosEmbedded):
     if headroom <= 0 or headroom >= RenderMemoryShortBytes:
       return
     for other in liveJsRuntimes:
-      if other != keep and other.ready and not jsRuntimeStack.contains(other):
+      # Not one holding a UI's handlers: they live nowhere else, and the
+      # picture on the screen would stop answering (keepIdleInterpreters).
+      if other != keep and other.ready and not jsRuntimeStack.contains(other) and
+          other.jsxMemo.handlers == 0:
+        noteInterpreterDiscard(other, "another app needed the memory")
         teardownJsRuntime(other)
 
-proc releaseIdleJsAppRuntimes*() =
+proc releaseIdleJsAppRuntimes*(reason = "", keepAnswering = false): bool {.discardable.} =
   ## Drop every JS app interpreter that is not mid-call. The single-scene host
   ## calls it after every render (single_scene_host.renderScene) on an ESP32
   ## that deep-sleeps, and on one that stays awake (the editor's preview
@@ -178,9 +208,17 @@ proc releaseIdleJsAppRuntimes*() =
   ## Cheap to undo: rebuilding re-parses and re-evaluates the module, which
   ## is a few milliseconds even for the bundled 36 KB Weather app now that
   ## QuickJS parses the TypeScript itself.
+  ##
+  ## `reason`: why, on a frame that would rather have kept them; the host
+  ## reports it. Empty for a release nobody loses by (a frame about to sleep).
+  ## `keepAnswering`: not the ones holding a UI's handlers. Whether any went.
   for runtime in liveJsRuntimes:
-    if runtime.ready and not jsRuntimeStack.contains(runtime):
+    if runtime.ready and not jsRuntimeStack.contains(runtime) and
+        not (keepAnswering and runtime.jsxMemo.handlers > 0):
+      if reason.len > 0:
+        noteInterpreterDiscard(runtime, reason)
       teardownJsRuntime(runtime)
+      result = true
 
 proc hasIdleJsAppRuntimes(): bool =
   for runtime in liveJsRuntimes:
@@ -193,6 +231,13 @@ proc idleJsAppRuntimesHoldPictures(): bool =
   for runtime in liveJsRuntimes:
     if runtime.ready and not jsRuntimeStack.contains(runtime) and
         (runtime.keptImageIds.len > 0 or runtime.canvases.len > 0):
+      return true
+  false
+
+proc idleJsAppRuntimesAnswerPointer(): bool =
+  ## Whether an idle interpreter holds the handlers of a UI on the screen.
+  for runtime in liveJsRuntimes:
+    if runtime.ready and not jsRuntimeStack.contains(runtime) and runtime.jsxMemo.handlers > 0:
       return true
   false
 
@@ -209,9 +254,10 @@ proc settleIdleJsAppRuntimes*(keep: bool): bool =
   ## An interpreter that keeps pictures stays down to the lower floor after
   ## a decode too: they would only be decoded again. Whether they were kept.
   if keep and hasIdleJsAppRuntimes() and
-      keepIdleInterpreters(holdingPictures = idleJsAppRuntimesHoldPictures()):
+      keepIdleInterpreters(holdingPictures = idleJsAppRuntimesHoldPictures(),
+        answeringPointer = idleJsAppRuntimesAnswerPointer()):
     return true
-  releaseIdleJsAppRuntimes()
+  releaseIdleJsAppRuntimes(if keep: "the frame is short of memory" else: "")
   false
 
 proc liveJsAppRuntimeBytes*(): int =
@@ -222,19 +268,20 @@ proc liveJsAppRuntimeBytes*(): int =
     if runtime.ready:
       result += runtime.js.heapBytes()
 
-when defined(frameosEmbedded) or defined(frameosWasm):
-  proc releaseKeptJsAppRuntimes(): bool {.nimcall, raises: [].} =
+when defined(frameosEmbedded) or defined(frameosWasm) or defined(testing):
+  proc releaseKeptJsAppRuntimes(refused: bool): bool {.nimcall, raises: [].} =
     ## utils/memory's release hook: render memory is short, so the
     ## interpreters a frame kept between renders go, as releasing them after
     ## every render used to guarantee. The preview's too, while it runs as an
     ## ESP32 under a simulated limit and keeps them as an awake one does.
+    ## One holding a UI's handlers goes only for an allocation that failed.
     if not runsAsEmbedded() or not hasIdleJsAppRuntimes():
       return false
     try:
-      releaseIdleJsAppRuntimes()
+      result = releaseIdleJsAppRuntimes(
+        if refused: "an allocation failed" else: "a picture needed the memory", keepAnswering = not refused)
     except CatchableError:
       discard
-    true
 
   renderMemoryReleaseHook = releaseKeptJsAppRuntimes
 
@@ -248,6 +295,7 @@ proc abandonMidCallJsAppRuntimes*(): tuple[count, bytes: int] =
   for runtime in jsRuntimeStack:
     if runtime.isNil or not runtime.ready:
       continue  # already dropped: a runtime re-entered further up the chain
+    noteInterpreterDiscard(runtime, "it ran out of memory")
     let ctx = runtime.js.context
     if not ctx.isNil:
       jsAppEnvByCtx.del(ctx)
@@ -1296,6 +1344,7 @@ type
   DynamicJsApp* = ref object of AppRoot
     configJson*: JsonNode
     runtime*: JsAppRuntime
+    events*: seq[string] ## config.json `events`: what its onEvent hears ("*": all of it)
 
 proc appFile(runtime: JsAppRuntime, name: string): string =
   ## Contents of one of the app's files, "" when absent.
@@ -1771,6 +1820,17 @@ proc assetGrantFromConfig*(config: JsonNode): JsAssetGrant =
       of "assets", "files": result = max(result, agRead)
       else: discard
 
+proc eventsFromConfig*(config: JsonNode): seq[string] =
+  ## config.json `events`: the names an app's onEvent hears. Its own render and
+  ## init are the app's get() and init(), not something to be told about.
+  let declared = config{"events"}
+  if declared.isNil or declared.kind != JArray:
+    return
+  for item in declared.elems:
+    let name = item.getStr()
+    if name.len > 0 and name != evRender and name != evInit and name notin result:
+      result.add name
+
 proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, sources: JsonNode): AppRoot =
   let source = jsAppSourceFromSources(sources)
   if source.len == 0:
@@ -1794,7 +1854,8 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
     scene: scene,
     frameConfig: scene.frameConfig,
     configJson: runtimeConfigFromNode(config, node.data{"config"}),
-    runtime: runtime
+    runtime: runtime,
+    events: eventsFromConfig(config)
   )
 
 proc isDynamicJsApp*(app: AppRoot): bool =
@@ -1968,6 +2029,8 @@ const appJsPrelude* = compactJs("""
       __frameosMissing[name] = true;
       jsAppLog("error", JSON.stringify([name === "run"
         ? "This app has no run(), so it does nothing in a flow: a node after an event calls run(app, context), and get() only when its output feeds a field."
+        : name === "onEvent"
+        ? "This app lists events in its config.json and has no onEvent(app, context) to hear them."
         : "This app has no get(), so its output is empty: a node feeding a field calls get(app, context), and run() only in a flow."]));
     }
     return undefined;
@@ -2006,6 +2069,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   ## ceiling instead of each getting the full per-runtime limit.
   if runtime.ready:
     return
+  runtime.sceneId = sceneId
 
   when defined(frameosEmbedded):
     # Reclaim the other nodes' interpreters before building this one.
@@ -2322,18 +2386,38 @@ proc keepUiRegions(runtime: JsAppRuntime, owner: AppRoot, sceneId: string,
       discard # a handler's failure is logged; one in the logging has nowhere to go
 
 var embeddedSceneRenderer*: proc(owner: FrameScene, nodeId: NodeId, index: int, sceneId, props: string,
-    box: array[4, float32], width, height: int, context: ExecutionContext): Image {.nimcall.}
+    box, visible: array[4, float32], width, height: int, context: ExecutionContext): Image {.nimcall.}
   ## Set by the interpreter: a `<Scene>`'s or `<yield />`'s picture. `box` is
-  ## where it lands in the owner's canvas, for the pointer.
+  ## where it lands in the owner's canvas and `visible` the part of that which
+  ## shows (left, top, right, bottom), for the pointer.
+
+var embeddedYieldReady*: proc(owner: FrameScene): bool {.nimcall.}
+  ## Set by the interpreter: whether `owner` is a layout with a scene to wrap.
+
+var embeddedYieldInto*: proc(owner: FrameScene, x, y, w, h: int, context: ExecutionContext) {.nimcall.}
+  ## Set by the interpreter: the wrapped scene, drawn straight into this
+  ## rectangle of the canvas (a `<yield />` that is a hole).
 
 proc fillSceneImages(owner: AppRoot, context: ExecutionContext, node: SvgNode, scale: float32,
-    index: var int, ox, oy: float32) =
+    index: var int, ox, oy: float32, clip: array[4, float32], hole: bool) =
   ## The layout emitted a `<Scene>` as an `<image>` waiting for its picture
   ## (it could not know the size before): the scenes run here, each at the
   ## size it got. Walks the UI's tree, nested viewports included; only for a
-  ## UI whose JSX held a scene.
-  if node.tag == "image":
+  ## UI whose JSX held a scene. (`ox`, `oy`): where this level's coordinates
+  ## start on the UI; `clip`: left, top, right and bottom of what shows there.
+  if node.tag == "image" or node.tag == "g" and node.attr("scene-id").len > 0:
     let id = node.attr("scene-id")
+    if hole and id == SceneYieldId:
+      # A hole is nothing to draw: an empty group, not a picture pixie would
+      # stretch across the bounds of every window around it.
+      if node.tag != "g":
+        node.tag = "g"
+        node.image = nil
+        node.forgetParse()
+      return
+    if node.tag == "g":
+      node.tag = "image"
+      node.forgetParse()
     if id.len > 0 and not embeddedSceneRenderer.isNil:
       let
         x = ox + parseFloat(node.attr("x")).float32
@@ -2341,19 +2425,55 @@ proc fillSceneImages(owner: AppRoot, context: ExecutionContext, node: SvgNode, s
         w = parseFloat(node.attr("width")).float32
         h = parseFloat(node.attr("height")).float32
       node.image = embeddedSceneRenderer(owner.scene, owner.nodeId, index, id, node.attr("scene-props"),
-        [x * scale, y * scale, w * scale, h * scale], round(w * scale).int, round(h * scale).int, context)
+        [x * scale, y * scale, w * scale, h * scale],
+        [max(x, clip[0]) * scale, max(y, clip[1]) * scale, min(x + w, clip[2]) * scale, min(y + h, clip[3]) * scale],
+        round(w * scale).int, round(h * scale).int, context)
       inc index
       if node.image.isNil:
-        node.attrs.add(("opacity", "0"))
+        # Nothing to show here (a layout seen on its own, a scene that is
+        # gone): nothing is what it draws.
+        node.tag = "g"
+        node.forgetParse()
     return
   var nx = ox
   var ny = oy
+  var inner = clip
   if node.tag == "svg" and node.attr("x").len > 0:
-    nx += parseFloat(node.attr("x")).float32
-    ny += parseFloat(node.attr("y")).float32
+    # A box that clips (ui/layout.nim): a viewport at x, y whose viewBox starts
+    # where its children's coordinates do, moved on by how far it is scrolled.
+    let
+      left = ox + parseFloat(node.attr("x")).float32
+      top = oy + parseFloat(node.attr("y")).float32
+      view = node.attr("viewBox").splitWhitespace()
+    inner = [max(clip[0], left), max(clip[1], top),
+      min(clip[2], left + parseFloat(node.attr("width")).float32),
+      min(clip[3], top + parseFloat(node.attr("height")).float32)]
+    nx = left - (if view.len == 4: parseFloat(view[0]).float32 else: 0)
+    ny = top - (if view.len == 4: parseFloat(view[1]).float32 else: 0)
   for child in node.children:
-    fillSceneImages(owner, context, child, scale, index, nx, ny)
+    fillSceneImages(owner, context, child, scale, index, nx, ny, inner, hole)
 
+proc holeOf(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, target: UiTarget,
+    requestedWidth, requestedHeight, layoutWidth, layoutHeight: int, regionScale: float32):
+    tuple[active: bool, x, y, w, h: int] =
+  ## Where this UI's `<yield />` can be a hole in the canvas the planner
+  ## offered: a layout with a scene to wrap, its whole render this one node,
+  ## drawn at the canvas's own size.
+  if owner.scene.isNil or embeddedYieldReady.isNil or not embeddedYieldReady(owner.scene) or
+      not context.wholeFrame or not context.hasImage or context.image.isNil or
+      context.decodeTargetImage != context.image or context.image.isView or
+      requestedWidth != context.image.width or requestedHeight != context.image.height:
+    return
+  let found = yieldHole(target.memo, layoutWidth, layoutHeight, target.input)
+  if not found.found or not found.clean:
+    return
+  let
+    x0 = clamp(round(found.x * regionScale).int, 0, requestedWidth)
+    y0 = clamp(round(found.y * regionScale).int, 0, requestedHeight)
+    x1 = clamp(round((found.x + found.w) * regionScale).int, 0, requestedWidth)
+    y1 = clamp(round((found.y + found.h) * regionScale).int, 0, requestedHeight)
+  if x1 > x0 and y1 > y0:
+    result = (true, x0, y0, x1 - x0, y1 - y0)
 
 proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, root: SvgNode): Image =
   ## A JSX tree an app returned: an `<svg>` drawn as it is, anything else a
@@ -2401,9 +2521,28 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
   # The scenes it embeds, each drawn now that its size is known. The offered
   # target comes after: its corner moves the slots only when it is a cell.
   let firstSlot = if owner.scene.isNil: 0 else: owner.scene.slots.len
+  var hole: tuple[active: bool, x, y, w, h: int]
   if runtime.jsxMemo.sawScene and root.tag != "svg":
+    hole = runtime.holeOf(owner, context, target, requestedWidth, requestedHeight, layoutWidth, layoutHeight, regionScale)
     var index = 0
-    fillSceneImages(owner, context, svg, regionScale, index, 0, 0)
+    fillSceneImages(owner, context, svg, regionScale, index, 0, 0,
+      [0'f32, 0, layoutWidth.float32, layoutHeight.float32], hole.active)
+  if hole.active:
+    # The chrome around the hole, the content straight into it: no picture of
+    # the content to make, none to composite, and what is not due stays.
+    let (canvas, _) = owner.takeDecodeTarget(context, deferBackground = true)
+    var owed = takeOwedBackground(context, canvas)
+    var drawn = false
+    probe(phDraw):
+      drawn = renderSvgAround(svg, canvas, (hole.x, hole.y, hole.w, hole.h), owed, reuse = true)
+      if not drawn and releaseRenderMemory():
+        drawn = renderSvgAround(svg, canvas, (hole.x, hole.y, hole.w, hole.h), owed, reuse = true)
+    if not drawn:
+      frameos_apps.logError(owner, "JS app returned JSX that failed to render around its <yield />")
+    embeddedYieldInto(owner.scene, hole.x, hole.y, hole.w, hole.h, context)
+    probe(phRegions):
+      runtime.keepUiRegions(owner, sceneId, regions, 0, 0, regionScale)
+    return canvas
   # A UI's nodes come back from the layout where they did not change.
   var intoTarget: Image
   probe(phDraw):
@@ -2418,6 +2557,8 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
         for i in firstSlot ..< owner.scene.slots.len:
           owner.scene.slots[i].x += localX.float32
           owner.scene.slots[i].y += localY.float32
+          for edge in 0 .. 3:
+            owner.scene.slots[i].visible[edge] += (if edge mod 2 == 0: localX.float32 else: localY.float32)
       if regions.len > 0 or not target.isNil:
         probe(phRegions):
           runtime.keepUiRegions(owner, sceneId, regions, localX, localY, regionScale)
@@ -2723,6 +2864,26 @@ proc run*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
             min(drawn.height, context.image.height), drawn)
   finally:
     runtime.clearTransientImages()
+
+proc onEvent(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): bool =
+  ## An event the app subscribed to (config.json `events`). True when the app
+  ## asks to be drawn again.
+  runtime.init(owner, configJson)
+  try:
+    runtime.midCall:
+      let payload = runtime.invoke(owner, configJson, context, "onEvent")
+      defer: JS_FreeValue(runtime.js.context, payload)
+      result = jsIsBool(payload) and toNimBool(runtime.js.context, payload)
+  finally:
+    runtime.clearTransientImages()
+
+proc dynamicJsAppEvents*(app: AppRoot): seq[string] =
+  if app.isDynamicJsApp():
+    return DynamicJsApp(app).events
+
+proc onEventDynamicJsApp*(app: AppRoot, context: ExecutionContext): bool =
+  let dynamicApp = DynamicJsApp(app)
+  dynamicApp.runtime.onEvent(dynamicApp, dynamicApp.configJson, context)
 
 proc getDynamicJsApp*(app: AppRoot, context: ExecutionContext): Value =
   let dynamicApp = DynamicJsApp(app)

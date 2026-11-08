@@ -235,6 +235,13 @@ describe("SceneInfoPanel", () => {
     expect(draft.onIsLayoutChange).toHaveBeenCalledWith(true);
     unmount();
 
+    const refused = render(
+      <SceneInfoPanel {...info} draft={draft} isLayout={false} isOwner layoutProblem="Needs a yield." signedIn />,
+    );
+    expect(screen.getByRole<HTMLOptionElement>("option", { name: "Layout" }).disabled).toBe(true);
+    expect(screen.getByText("Needs a yield.")).toBeTruthy();
+    refused.unmount();
+
     const visitor = render(<SceneInfoPanel {...info} isLayout={false} signedIn />);
     expect(screen.queryByText("Type")).toBeNull();
     visitor.unmount();

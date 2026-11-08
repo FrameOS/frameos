@@ -720,10 +720,12 @@ function EditLocalSceneModal(): JSX.Element | null {
             <Switch
               label="Use as layout"
               value={editTemplateForm.isLayout}
+              disabled={!editTemplateForm.isLayout && !!editTemplateForm.layoutProblem}
               onChange={(isLayout: boolean) => setEditTemplateValues({ isLayout })}
             />
             <p className="frameos-muted mt-1 text-xs">
-              A layout wraps other scenes, a clock bar above them for example. Off, it is a normal scene.
+              {editTemplateForm.layoutProblem ??
+                'A layout wraps other scenes, a clock bar above them for example. Off, it is a normal scene.'}
             </p>
           </div>
         ) : null}

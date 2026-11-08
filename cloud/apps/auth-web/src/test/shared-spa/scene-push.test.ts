@@ -71,13 +71,13 @@ describe("scenePush", () => {
     });
   });
 
-  it("takes a scene's layout and the scenes its JSX names along, but no yield", () => {
+  it("takes a scene's layout and the scenes its JSX names along", () => {
     const wrapped = {
       ...scene("page"),
       layout: { sceneId: "bar" },
       apps: { ui: { sources: { "app.tsx": 'export function get() { return <Scene id="clock" city="Oslo" /> }' } } },
     } as unknown as FrameScene;
-    const bar = scene("bar", [{ id: "1", type: "scene", data: { keyword: "system/yield" } }]);
+    const bar = scene("bar");
     expect(connectedSceneIds("page", [wrapped, bar, scene("clock"), scene("other")])).toEqual(["page", "bar", "clock"]);
   });
 });

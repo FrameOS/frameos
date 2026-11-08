@@ -169,6 +169,8 @@ def load():
                 fail(f"{where}.{fname}: filter: \"more\" folds a catalog field of a listenable event until a filter is set")
         if "synthesized" in event and (not isinstance(event["synthesized"], bool) or "driver" not in event["origins"]):
             fail(f"{where}: `synthesized` marks an event the dispatcher makes out of others; it keeps the driver origin")
+        if "wildcard" in event and (event["wildcard"] is not False or not event["listen"]):
+            fail(f"{where}: `wildcard: false` keeps a listenable event out of an app's \"*\"; there is no other value")
         alias_of = event.get("aliasOf")
         if alias_of is not None:
             target = by_name.get(alias_of)
@@ -382,6 +384,7 @@ def gen_nim(doc):
         "    endsRuntime*: bool ## the runtime does not survive it (a schedule must remember it fired)",
         "    synthesized*: bool ## made by the dispatcher out of other events (a tap, a textInput)",
         "    aliasOfIndex*: int ## the contract index of the event this one is an old name for, -1 for none",
+        "    heardByAll*: bool ## a JS app whose config.json `events` holds \"*\" hears it",
         "    linux*, esp32*, wasm*: bool",
         "",
         "const",
@@ -408,7 +411,7 @@ def gen_nim(doc):
         f"  SceneSwitcherId* = {nim_str(doc['scenes']['switcher'])}",
         "  ## The built-in scene `sceneSettings` shows (docs/scene-settings.md).",
         f"  SceneSettingsId* = {nim_str(doc['scenes']['settings'])}",
-        "  ## What a layout's scene node names for the scene it wraps (docs/scene-layouts.md).",
+        "  ## The scene a layout's <yield /> stands for (docs/scene-layouts.md).",
         f"  SceneYieldId* = {nim_str(doc['scenes']['yield'])}",
         "  ## Origins a scene opts into per custom event (`origins` on its declaration).",
         f"  CustomEventDeclarableOrigins*: set[EventOrigin] = {{{', '.join(nim_origin(o) for o in doc['customEvents'].get('declarableOrigins', []))}}}",
@@ -435,13 +438,15 @@ def gen_nim(doc):
             out.append("      synthesized: true,")
         alias_index = index_of(events, event["aliasOf"]) if event.get("aliasOf") else -1
         out.append(f"      aliasOfIndex: {alias_index},")
+        if event["listen"] and event["coalesce"] != "latest" and alias_index < 0 and event.get("wildcard", True):
+            out.append("      heardByAll: true,")
         out.append(f"      {hosts}),")
     out.append("  ]")
     out.append("")
     out.append("  CustomEventPolicy* = EventPolicy(")
     out.append("    class: ecCustom, device: edNone, listen: true, dispatch: true,")
     out.append(nim_policy(doc["customEvents"]) + ",")
-    out.append("    aliasOfIndex: -1,")
+    out.append("    aliasOfIndex: -1, heardByAll: true,")
     out.append("    " + ", ".join(f"{host}: true" for host in doc["hosts"]) + ")")
     out.append("")
     for name, lines in log_events(doc).items():

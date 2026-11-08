@@ -761,6 +761,12 @@ proc fos_nim_recover_oom_abort_impl(jsBytes: ptr csize_t; httpReleased: ptr cint
   except Defect, CatchableError:
     -1
 
+proc fos_nim_scene_awaited_impl(): bool {.exportc, cdecl.} =
+  try:
+    sceneAwaited()
+  except Defect, CatchableError:
+    true
+
 proc fos_nim_scene_interval_impl(): cdouble {.exportc, cdecl.} =
   ## Refresh interval requested by the active interpreted scene, in seconds;
   ## 0 means "no opinion" (firmware falls back to its configured interval).

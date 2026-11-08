@@ -79,6 +79,7 @@ extern void fos_nim_set_status_info_impl(const char *info_json);
 extern void fos_nim_set_time_zone_impl(const char *time_zone);
 extern const char *fos_nim_load_tz_data_impl(const char *slice_json, const char *time_zone);
 extern double fos_nim_scene_interval_impl(void);
+extern bool fos_nim_scene_awaited_impl(void);
 extern double fos_nim_next_sleep_impl(void);
 extern bool fos_nim_render_requested_impl(void);
 extern bool fos_nim_tick_impl(void);
@@ -1012,6 +1013,15 @@ double frameos_nim_scene_interval(void)
     double interval = fos_nim_scene_interval_impl();
     nim_lock_give();
     return interval;
+}
+
+bool frameos_nim_scene_awaited(void)
+{
+    if (!s_nim_ready) return true;
+    if (!nim_lock_take()) return true;
+    bool awaited = fos_nim_scene_awaited_impl();
+    nim_lock_give();
+    return awaited;
 }
 
 double frameos_nim_next_sleep(void)

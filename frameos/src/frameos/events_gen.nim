@@ -55,6 +55,7 @@ type
     endsRuntime*: bool ## the runtime does not survive it (a schedule must remember it fired)
     synthesized*: bool ## made by the dispatcher out of other events (a tap, a textInput)
     aliasOfIndex*: int ## the contract index of the event this one is an old name for, -1 for none
+    heardByAll*: bool ## a JS app whose config.json `events` holds "*" hears it
     linux*, esp32*, wasm*: bool
 
 const
@@ -81,7 +82,7 @@ const
   SceneSwitcherId* = "system/sceneSwitcher"
   ## The built-in scene `sceneSettings` shows (docs/scene-settings.md).
   SceneSettingsId* = "system/sceneSettings"
-  ## What a layout's scene node names for the scene it wraps (docs/scene-layouts.md).
+  ## The scene a layout's <yield /> stands for (docs/scene-layouts.md).
   SceneYieldId* = "system/yield"
   ## Origins a scene opts into per custom event (`origins` on its declaration).
   CustomEventDeclarableOrigins*: set[EventOrigin] = {eoSchedule, eoCloud}
@@ -184,24 +185,28 @@ const
       origins: {eoSystem, eoHttpAdmin},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # close
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
       renderAfter: raNever, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # keyDown
       class: ecInput, device: edKeyboard, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elNameOnly,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: false, wasm: true),
     EventPolicy( # keyUp
       class: ecInput, device: edKeyboard, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elNameOnly,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: false, wasm: true),
     EventPolicy( # textInput
       class: ecInput, device: edKeyboard, listen: true, dispatch: false,
@@ -209,6 +214,7 @@ const
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elNameOnly,
       synthesized: true,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: false, wasm: true),
     EventPolicy( # pointerMove
       class: ecInput, device: edPointer, listen: true, dispatch: false,
@@ -221,18 +227,21 @@ const
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # pointerUp
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # pointerCancel
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # uiTimer
       class: ecInput, device: edPointer, listen: false, dispatch: false,
@@ -264,6 +273,7 @@ const
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       synthesized: true,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # doubleTap
       class: ecInput, device: edPointer, listen: true, dispatch: false,
@@ -271,6 +281,7 @@ const
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       synthesized: true,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # longPress
       class: ecInput, device: edPointer, listen: true, dispatch: false,
@@ -278,6 +289,7 @@ const
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       synthesized: true,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # swipe
       class: ecInput, device: edPointer, listen: true, dispatch: false,
@@ -285,6 +297,7 @@ const
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       synthesized: true,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # edgeSwipe
       class: ecInput, device: edPointer, listen: true, dispatch: false,
@@ -292,24 +305,28 @@ const
       renderAfter: raNever, coalesceLatest: false, log: elFull,
       synthesized: true,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # wheel
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: false, wasm: true),
     EventPolicy( # turnOn
       class: ecSceneCommand, device: edNone, listen: true, dispatch: true,
       origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # turnOff
       class: ecSceneCommand, device: edNone, listen: true, dispatch: true,
       origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # toggleScreen
       class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
@@ -322,12 +339,14 @@ const
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # button
       class: ecInput, device: edButton, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # setSceneState
       class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
@@ -358,12 +377,14 @@ const
       origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # forward
       class: ecSceneCommand, device: edNone, listen: true, dispatch: false,
       origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # metrics
       class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
@@ -409,7 +430,7 @@ const
     class: ecCustom, device: edNone, listen: true, dispatch: true,
     origins: {eoDriver, eoPreview, eoScene, eoHttpWrite, eoHttpAdmin, eoSystem},
     renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
-    aliasOfIndex: -1,
+    aliasOfIndex: -1, heardByAll: true,
     linux: true, esp32: true, wasm: true)
 
   SceneChangedLogEvents*: array[3, string] = ["render:scene", "render:sceneChange", "event:setCurrentScene"]

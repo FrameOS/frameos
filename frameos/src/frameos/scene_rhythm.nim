@@ -30,6 +30,8 @@ import frameos/types
 import frameos/panel_shape
 import frameos/refresh_interval
 import frameos/utils/canvas_log
+from frameos/utils/svg_frames import forgetPanelRegions
+from frameos/loading_mark import LoadingMarkMinIntervalSeconds
 from frameos/utils/memory import availableRenderBytes, availableRenderHeadroomBytes, runsAsEmbedded
 
 type
@@ -287,6 +289,21 @@ proc rhythmMarkDue*(scene: FrameScene) =
   if not scene.isNil and not scene.rhythm.isNil:
     scene.rhythm.dueAt = 0
 
+proc rhythmAwaited*(scene: FrameScene): bool =
+  ## May the next pass show the loading mark? Not when the frame's own clock
+  ## repeats what it draws within seconds: an animation, a ticking clock. With
+  ## a layout that is the scene's own interval, not the bar's, and only a pass
+  ## that will run the scene counts: the bar ticking over a slow map is not
+  ## something anybody waits for, the map coming in is.
+  if scene.isNil:
+    return true
+  let every = if scene.layoutPaced: contentInterval(scene) else: scene.refreshInterval
+  if every > 0 and every < LoadingMarkMinIntervalSeconds.float:
+    return false
+  let r = scene.rhythm
+  not scene.layoutPaced or r.isNil or freshRequested or r.dueAt <= 0 or
+    stateKey(scene) != r.stateKey or r.dueBy(rhythmNow())
+
 proc rhythmEnterRender*(scene: FrameScene, canvas: Image): bool =
   ## Every render run of an interpreted scene comes through here
   ## (interpreter.runEvent). The outermost one is a pass, and true is returned.
@@ -301,6 +318,7 @@ proc rhythmEnterRender*(scene: FrameScene, canvas: Image): bool =
   if switched:
     discard walkCopies(passRoot, Inf)
     canvasMarks.setLen(0)
+    forgetPanelRegions()
   passFresh = freshRequested or switched
   freshRequested = false
   passRoot = scene
@@ -317,12 +335,6 @@ proc rhythmEnterRender*(scene: FrameScene, canvas: Image): bool =
   passKept = 0
   true
 
-proc rhythmEnterLayout*(layout: FrameScene): bool =
-  ## The pass's canvas is the layout's: whether its panels can stay is its
-  ## business. The old value, for rhythmLeaveChild.
-  result = keepAllowed
-  keepAllowed = layout.refreshFollowsChildren and passGeneration >= 0
-
 proc rhythmEnterChild*(child: FrameScene): bool =
   ## A scene is about to run inside the current one. What it draws under
   ## lasts only if it, too, draws nothing but its panels.
@@ -334,6 +346,15 @@ proc rhythmEnterEmbed*(): bool =
   ## holds anything from last time.
   result = keepAllowed
   keepAllowed = false
+
+proc rhythmEnterHole*(): bool =
+  ## A layout's `<yield />` hole: nothing is drawn over it, so what the canvas
+  ## holds there stays, as under a generated split's panel.
+  result = keepAllowed
+  keepAllowed = passGeneration >= 0
+
+proc rhythmPass*(): int =
+  passId
 
 proc rhythmDepth*(): int =
   ## How many renders deep this one is, for the check that stops a scene
@@ -368,8 +389,15 @@ proc rhythmLeaveRender*(scene: FrameScene, passStarted: bool) =
     if passStarted:
       let layout = InterpretedFrameScene(scene).sceneNodes.getOrDefault(LayoutSceneKey, nil)
       if not layout.isNil:
-        # The layout's own wait (its chrome), and the scene it wraps.
+        # The layout's own wait (its chrome), and the scene it wraps. The full
+        # interval even around a hole, whose chrome knows when it is due: a
+        # wait under a second reads as an animation on an ESP32, which would
+        # run another pass at once after every tap.
         var wait = layout.refreshInterval
+        if passHoldsFloor:
+          # On e-paper or a deep sleeper the chrome never wakes the frame
+          # sooner than the scene it wraps would.
+          wait = max(wait, contentInterval(scene))
         if not scene.rhythm.isNil and scene.rhythm.visitPass == passId:
           wait = min(wait, scene.rhythm.dueAt - passStart)
         scene.layoutInterval = max(ShortestPace, wait)
@@ -408,12 +436,14 @@ proc rhythmForgetCanvases*() =
   ## Something other than a scene drew over the canvas (an error screen, the
   ## status screen).
   canvasMarks.setLen(0)
+  forgetPanelRegions()
 
 proc rhythmResetAfterAbort*() =
   ## The ESP32's out-of-memory abort skips every `finally`: the next render
   ## must still start a pass (single_scene_host.recoverAbortedRun).
   passDepth = 0
   canvasMarks.setLen(0)
+  forgetPanelRegions()
   keepAllowed = false
 
 # ------------------------------------------------------------- scene nodes
@@ -495,6 +525,82 @@ proc rhythmAfterRun*(scene: FrameScene, decision: RhythmDecision, given, drawn: 
       r.cells[i].copy = nil
     return
   keepCopy(scene, given, i)
+
+# --------------------------------------------------- around a layout's hole
+
+proc rhythmVisitChrome*(layout: FrameScene): RhythmDecision =
+  ## May this pass leave a layout's chrome (all of it but its `<yield />`
+  ## hole) as it is, and not run the layout at all? A scene that animates at
+  ## 20 frames a second inside a clock bar would otherwise pay for the bar's
+  ## JavaScript, tree and layout twenty times a second.
+  ##
+  ## A layout holding other `<Scene>`s runs on every pass: their pictures are
+  ## part of its drawing.
+  if passDepth == 0 or layout.holeW <= 0:
+    return rdRun
+  if layout of InterpretedFrameScene and InterpretedFrameScene(layout).sceneNodes.len > 0:
+    return rdRun
+  if layout.rhythm.isNil:
+    layout.rhythm = SceneRhythm()
+  let r = layout.rhythm
+  # Not dueBy: its whole-second slack calls a one-second clock bar due on any
+  # pass at all, so a tap on the content would pay for the bar as well. A bar
+  # a little early waits for the pass its own due time wakes.
+  if passFresh or r.dueAt <= 0 or stateKey(layout) != r.stateKey or
+      r.dueAt <= passStart + clamp(r.interval * DueSlackShare, DueSlackMinSeconds, DueSlackMaxSeconds):
+    return rdRun
+  if passGeneration < 0:
+    return rdRepaint
+  let i = canvasMarkOf(passCanvas)
+  if i >= 0 and canvasMarks[i].markHolds(r.chromePass):
+    return rdKeep
+  for m in canvasMarks:
+    if m.canvas.bufferPointer != passCanvas.bufferPointer and m.canvas.width == passCanvas.width and
+        m.canvas.height == passCanvas.height and m.canvas.format == passCanvas.format and
+        m.markHolds(r.chromePass):
+      return rdRestore
+  rdRepaint
+
+proc rhythmRestoreChrome*(layout: FrameScene) =
+  ## The chrome out of the frame buffer that holds it, around the hole: what
+  ## this buffer's hole holds is the content's business.
+  let r = layout.rhythm
+  for m in canvasMarks:
+    if m.canvas.bufferPointer != passCanvas.bufferPointer and m.canvas.width == passCanvas.width and
+        m.canvas.height == passCanvas.height and m.canvas.format == passCanvas.format and
+        m.markHolds(r.chromePass):
+      let
+        src = m.canvas
+        dst = passCanvas
+        bpp = dst.bytesPerPixel
+        d = cast[ptr UncheckedArray[byte]](dst.bufferPointer)
+        s = cast[ptr UncheckedArray[byte]](src.bufferPointer)
+        hx = layout.holeX.int
+        hy = layout.holeY.int
+        hw = layout.holeW.int
+        hh = layout.holeH.int
+      for y in 0 ..< dst.height:
+        if y < hy or y >= hy + hh:
+          copyMem(d[dst.dataIndex(0, y) * bpp].addr, s[src.dataIndex(0, y) * bpp].addr, dst.width * bpp)
+        else:
+          if hx > 0:
+            copyMem(d[dst.dataIndex(0, y) * bpp].addr, s[src.dataIndex(0, y) * bpp].addr, hx * bpp)
+          if hx + hw < dst.width:
+            copyMem(d[dst.dataIndex(hx + hw, y) * bpp].addr, s[src.dataIndex(hx + hw, y) * bpp].addr,
+              (dst.width - hx - hw) * bpp)
+      return
+
+proc rhythmChromeRan*(layout: FrameScene, decision: RhythmDecision, nextSleep: float) =
+  ## The layout just drew around its hole: schedule it (a due run only).
+  if layout.rhythm.isNil:
+    layout.rhythm = SceneRhythm()
+  let r = layout.rhythm
+  r.chromePass = passId
+  r.stateKey = stateKey(layout)
+  if decision == rdRun:
+    let wait = max(if nextSleep >= 0: nextSleep else: layout.refreshInterval, 0.0)
+    r.interval = wait
+    r.dueAt = passStart + wait
 
 # ------------------------------------------------------------- `<Scene>` tags
 

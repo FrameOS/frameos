@@ -1,5 +1,5 @@
 {
-  "$comment": "The scene event contract: every built-in event name, what it carries, who may emit it and what a host does with it. Source of truth for frameos/tools/generate_events_contract.py, which writes the Nim, C, TypeScript and Python tables and the editor catalog (frontend/schema/events.json). The prose is docs/events.md; the conformance corpus every runner must pass is docs/event-fixtures.json. Add an event HERE, regenerate, add a fixture — never to one of the generated files.",
+  "$comment": "The scene event contract: every built-in event name, what it carries, who may emit it and what a host does with it. Source of truth for frameos/tools/generate_events_contract.py, which writes the Nim, C, TypeScript and Python tables and the editor catalog (frontend/schema/events.json). The prose is docs/events.md; the conformance corpus every runner must pass is docs/event-fixtures.json. Add an event HERE, regenerate, add a fixture — never to one of the generated files. A JS app's `\"events\": [\"*\"]` hears every event a scene can listen for, except what is reported at the rate of a moving finger (`coalesce: latest`), an old name for another event (`aliasOf`) and an event marked `wildcard: false` (the app's own init and render).",
   "version": 1,
   "hosts": ["linux", "esp32", "wasm"],
   "origins": {
@@ -95,6 +95,7 @@
       "description": "Once per scene, when it is first loaded and its apps are ready — before its first open and render.",
       "listen": true,
       "dispatch": false,
+      "wildcard": false,
       "payload": [],
       "sceneState": "read",
       "origins": ["system", "http:admin"],
@@ -110,6 +111,7 @@
       "description": "Render the scene. Triggered according to the frame's refresh interval, or when explicitly requested.",
       "listen": true,
       "dispatch": true,
+      "wildcard": false,
       "payload": [],
       "sceneState": "read",
       "origins": ["system", "driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud", "eventMap", "panel"],

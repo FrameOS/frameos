@@ -7,6 +7,9 @@
 // Import-light on purpose: the cloud's node test suite exercises it directly.
 import type { FrameScene, SceneLayoutRef } from '../types'
 
+export { sceneLayoutProblem, sceneLayoutProblemText } from './sceneLayoutRule'
+export type { SceneLayoutProblem } from './sceneLayoutRule'
+
 export function isLayoutScene(scene: Pick<FrameScene, 'settings'> | null | undefined): boolean {
   return scene?.settings?.isLayout === true
 }

@@ -23,6 +23,7 @@ import frameos/runtime_diagnostics
 import frameos/scene_rhythm
 import frameos/ui/events as ui_events
 import frameos/utils/canvas_log
+from frameos/utils/svg_frames import takePanelRegion, forgetPanelRegion, forgetPanelRegions
 import frameos/events_gen
 import std/hashes
 from frameos/utils/app_images import paintPendingBackground
@@ -527,7 +528,8 @@ var yieldScene {.threadvar.}: FrameScene
   ## The scene the layout on the way here wraps; nil outside a layout.
 
 proc runSceneNodeRender(parent: FrameScene, child: FrameScene,
-    runChild: proc (self: FrameScene, context: ExecutionContext), context: ExecutionContext) {.noinline.} =
+    runChild: proc (self: FrameScene, context: ExecutionContext), context: ExecutionContext,
+    addSlot = true) {.noinline.} =
   ## A scene node handling `render` (frameos/scene_rhythm.nim): the scene it
   ## draws runs only when it is due, and otherwise its last picture stays or
   ## goes back. Its `nextSleep` is its own: inside a split,
@@ -540,14 +542,21 @@ proc runSceneNodeRender(parent: FrameScene, child: FrameScene,
   let stride = max(given.stride, 1)
   child.canvasX = int32(given.origin mod stride)
   child.canvasY = int32(given.origin div stride)
-  parent.slots.add(SceneSlot(child: child, x: float32(child.canvasX - parent.canvasX),
-    y: float32(child.canvasY - parent.canvasY), w: given.width.float32, h: given.height.float32))
+  if addSlot:
+    let
+      x = float32(child.canvasX - parent.canvasX)
+      y = float32(child.canvasY - parent.canvasY)
+      w = given.width.float32
+      h = given.height.float32
+    parent.slots.add(SceneSlot(child: child, x: x, y: y, w: w, h: h, visible: [x, y, x + w, y + h]))
   let decision = rhythmVisit(child, given)
   if decision == rdKeep:
     return
   if decision == rdRestore:
+    forgetPanelRegion(given)
     rhythmRestore(child, given)
     return
+  takePanelRegion(given)
   let parentSleep = context.nextSleep
   context.nextSleep = -1
   child.repainting = decision == rdRepaint
@@ -587,8 +596,15 @@ proc ensureLayoutScene(self: InterpretedFrameScene): FrameScene =
     self.logger.log(%*{"event": "layout:missing", "sceneId": self.id.string,
       "layoutSceneId": self.layoutSceneId.string})
     return
-  result = exported.init(self.layoutSceneId, self.frameConfig, self.logger,
-    if self.layoutState.isNil: %*{} else: self.layoutState)
+  try:
+    result = exported.init(self.layoutSceneId, self.frameConfig, self.logger,
+      if self.layoutState.isNil: %*{} else: self.layoutState)
+  except Exception as error:
+    # One that cannot start must not take the scene down with it.
+    self.layoutFailed = true
+    self.logger.log(%*{"event": "layout:missing", "sceneId": self.id.string,
+      "layoutSceneId": self.layoutSceneId.string, "error": error.msg})
+    return nil
   self.sceneNodes[LayoutSceneKey] = result
   self.sceneExportByNodeId[LayoutSceneKey] = exported
 
@@ -621,7 +637,7 @@ proc routePointer(self: InterpretedFrameScene, context: ExecutionContext): bool 
   if slot < 0 and placed:
     for i in countdown(self.slots.high, 0):
       template s: untyped = self.slots[i]
-      if x >= s.x and y >= s.y and x < s.x + s.w and y < s.y + s.h:
+      if x >= s.visible[0] and y >= s.visible[1] and x < s.visible[2] and y < s.visible[3]:
         slot = i
         break
   if context.event == "pointerDown" and slot >= 0:
@@ -652,7 +668,7 @@ proc parseEmbedProps(props: string): JsonNode =
     result = %*{}
 
 proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId, props: string,
-    box: array[4, float32], width, height: int, context: ExecutionContext): Image =
+    box, visible: array[4, float32], width, height: int, context: ExecutionContext): Image =
   ## A `<Scene id>` or `<yield />` in a UI: its picture at this size, what
   ## the walker draws as a raster image. Runs when it is due, like any
   ## embedded scene, and keeps its picture while the memory allows; a device
@@ -678,7 +694,7 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
       child = exported.init(SceneId(sceneId), owner.frameConfig, owner.logger, parseEmbedProps(props))
       parent.sceneNodes[key] = child
       parent.sceneExportByNodeId[key] = exported
-  owner.slots.add(SceneSlot(child: child, x: box[0], y: box[1], w: box[2], h: box[3]))
+  owner.slots.add(SceneSlot(child: child, x: box[0], y: box[1], w: box[2], h: box[3], visible: visible))
   if child.rhythm.isNil:
     child.rhythm = SceneRhythm()
   let r = child.rhythm
@@ -732,6 +748,61 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
   image
 
 embeddedSceneRenderer = renderEmbeddedScene
+
+proc yieldIntoHole(layout, content: FrameScene, canvas: Image, context: ExecutionContext, addSlot: bool) =
+  ## The wrapped scene, on its own schedule, straight into the layout's hole.
+  let view = canvas.view(layout.holeX, layout.holeY, layout.holeW, layout.holeH)
+  let inner = ExecutionContext(scene: content, image: view, hasImage: true, event: "render",
+    payload: %*{}, parent: context, loopIndex: 0, loopKey: ".", nextSleep: -1)
+  let saved = rhythmEnterHole()
+  runSceneNodeRender(layout, content, runEvent, inner, addSlot)
+  rhythmLeaveChild(saved)
+  if inner.image != view:
+    # The content swapped its canvas for an image of its own: nothing wrote
+    # through, so it is composited into place (as a split does for a cell).
+    canvas.draw(inner.image, translate(vec2(layout.holeX.float32, layout.holeY.float32)))
+
+proc yieldReady(owner: FrameScene): bool =
+  not yieldScene.isNil and yieldScene != owner
+
+proc yieldInto(owner: FrameScene, x, y, w, h: int, context: ExecutionContext) =
+  ## A `<yield />` drawn as a hole. A hole that moved leaves nothing the canvas
+  ## can be trusted with: the chrome has just painted where the content was.
+  if owner.holeX != x.int32 or owner.holeY != y.int32 or owner.holeW != w.int32 or owner.holeH != h.int32:
+    rhythmMarkDue(yieldScene)
+    forgetPanelRegions()
+  owner.holeX = x.int32
+  owner.holeY = y.int32
+  owner.holeW = w.int32
+  owner.holeH = h.int32
+  owner.holePass = rhythmPass()
+  yieldIntoHole(owner, yieldScene, context.image, context, addSlot = true)
+
+embeddedYieldReady = yieldReady
+embeddedYieldInto = yieldInto
+
+proc renderLayout(layout, content: FrameScene, context: ExecutionContext) =
+  ## A pass of a layout and the scene it wraps. With a hole, a pass the chrome
+  ## has nothing to do in never enters the layout: its picture is on the canvas
+  ## already, or comes out of another frame buffer around the hole.
+  let decision = rhythmVisitChrome(layout)
+  case decision
+  of rdKeep, rdRestore:
+    if decision == rdRestore:
+      rhythmRestoreChrome(layout)
+    yieldIntoHole(layout, content, context.image, context, addSlot = false)
+  of rdRun, rdRepaint:
+    # A layout's nextSleep is the layout's: it never reaches the frame.
+    let parentSleep = context.nextSleep
+    context.nextSleep = -1
+    runEvent(layout, context)
+    let layoutSleep = context.nextSleep
+    context.nextSleep = parentSleep
+    if layout.holePass == rhythmPass():
+      rhythmChromeRan(layout, decision, layoutSleep)
+    else:
+      # It did not draw a hole this time (it failed, or it cannot be one now).
+      layout.holeW = 0
 
 # -------------------------
 # Core node runner
@@ -842,17 +913,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         not (nodeType == "app" and (self.imageFusionPlans.hasKey(currentNodeId) or
           currentNode.data{"keyword"}.getStr() in FlowAppsSettlingBackground)):
       paintPendingBackground(context)
-    case (if nodeType == "scene" and currentNode.data{"keyword"}.getStr() == SceneYieldId: "yield"
-          else: nodeType):
-    of "yield":
-      # The scene this layout wraps (docs/scene-layouts.md), on the same
-      # schedule as a panel: the chrome and the content each render when due.
-      if context.event == "render" and context.hasImage and not context.image.isNil:
-        if yieldScene.isNil or yieldScene == self:
-          # A layout on its own (the editor): nothing to show there yet.
-          context.image.fill(rgba(128, 128, 128, 255))
-        else:
-          runSceneNodeRender(self, yieldScene, runEvent, context)
+    case nodeType:
     of "app":
       let keyword = currentNode.data{"keyword"}.getStr()
       if TRACING:
@@ -1627,6 +1688,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     nextNodeIds: initTable[NodeId, NodeId](),
     appsByNodeId: initTable[NodeId, AppRoot](),
     eventListeners: initTable[string, seq[NodeId]](),
+    eventApps: initTable[string, seq[NodeId]](),
     appInputsForNodeId: initTable[NodeId, Table[string, NodeId]](),
     appInlineInputsForNodeId: initTable[NodeId, Table[string, string]](),
     codeInputsForNodeId: initTable[NodeId, Table[string, NodeId]](),
@@ -1819,8 +1881,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
           @[])
         })
       scene.appsByNodeId[node.id] = initInterpretedApp(keyword, node, scene)
+      for eventName in scene.appsByNodeId[node.id].dynamicJsAppEvents():
+        scene.eventApps.mgetOrPut(eventName, @[]).add(node.id)
 
-    elif node.nodeType == "scene" and node.data{"keyword"}.getStr() != SceneYieldId:
+    elif node.nodeType == "scene":
       let childSceneId = node.data{"keyword"}.getStr().SceneId
       var exportedChild: ExportedScene
       var isInterpretedChild = false
@@ -1928,13 +1992,18 @@ proc eventNodeMatchesPayload(node: DiagramNode, payload: JsonNode): bool =
 
   true
 
+proc appsHear(scene: InterpretedFrameScene, event: string): bool =
+  ## A JS app subscribed to `event` by name, or through "*".
+  scene.eventApps.len > 0 and (scene.eventApps.hasKey(event) or
+    (scene.eventApps.hasKey("*") and eventPolicy(event).heardByAll))
+
 proc listensThrough(scene: FrameScene, event: string, wearer: FrameScene): bool =
   ## `wearer`: the scene this one is the layout of, asked already. It is also
   ## this layout's content slot, and asking it again never ends.
   if scene.isNil or not (scene of InterpretedFrameScene):
     return true
   let interpreted = InterpretedFrameScene(scene)
-  if interpreted.eventListeners.hasKey(event) or uiListens(scene.id.string, event):
+  if interpreted.eventListeners.hasKey(event) or uiListens(scene.id.string, event) or interpreted.appsHear(event):
     return true
   # A pointer event is built for a scene that listens, and what it embeds
   # hears it through that scene: its layout, the panels, its `<Scene>`s.
@@ -1955,6 +2024,31 @@ proc sceneKeyboardAt*(sceneId: SceneId, x, y: int): bool =
   ## Whether the scene's keyboard on the screen (a JSX field's) is under
   ## (x, y), scene pixels: the hosts' `EventHost.keyboardAt`.
   ui_events.keyboardAt(sceneId.string, x.float32, y.float32)
+
+proc runEventApps(scene: InterpretedFrameScene, context: ExecutionContext) =
+  ## The onEvent of the JS apps that subscribed to this event, by name first.
+  ## One that returns true is drawn again, as a run of a JSX handler is.
+  if not scene.appsHear(context.event):
+    return
+  var wantsRender = false
+  let named = scene.eventApps.getOrDefault(context.event)
+  proc hear(nodeId: NodeId) =
+    try:
+      inc eventListenersRun
+      if onEventDynamicJsApp(scene.appsByNodeId[nodeId], context):
+        wantsRender = true
+    except Exception as e:
+      scene.logger.log(%*{"event": "runEventInterpreted:error", "sceneId": scene.id,
+        "contextEvent": context.event, "nodeId": nodeId.int, "error": $e.msg})
+  for nodeId in named:
+    hear(nodeId)
+  if scene.eventApps.hasKey("*") and context.event != "*" and eventPolicy(context.event).heardByAll:
+    for nodeId in scene.eventApps["*"]:
+      if nodeId notin named:
+        hear(nodeId)
+  if wantsRender:
+    rhythmMarkDue(scene)
+    sendEvent("render", %*{}, eoScene)
 
 proc runEventInner(self: FrameScene, context: ExecutionContext) =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
@@ -2061,6 +2155,7 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
         "error": "\"" & context.event & "\" reached the scene but every listener filtered it out" &
           (if expectedFilters.len > 0: " (nodes want " & expectedFilters.join(", ") & ")" else: "")
       }, context.event, context.payload))
+  scene.runEventApps(context)
   # A render in which nothing drew still shows the background.
   paintPendingBackground(context)
 
@@ -2101,9 +2196,7 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
       yieldScene = interpreted
       try:
         if rendering:
-          let saved = rhythmEnterLayout(layout)
-          runEvent(layout, context)
-          rhythmLeaveChild(saved)
+          renderLayout(layout, interpreted, context)
         elif context.event in PointerEvents:
           # Over the chrome it is the layout's; over the content it comes
           # back here through the layout's slots.

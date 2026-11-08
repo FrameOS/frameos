@@ -61,6 +61,10 @@ function messages(scenes: JsonObject[]) {
 }
 
 describe("lintScenes", () => {
+  it("refuses a layout that is not one JSX app with a yield", () => {
+    expect(messages([scene({ settings: { isLayout: true } })]).errors.join("\n")).toContain("cannot be a layout");
+  });
+
   it("accepts a minimal render chain", () => {
     expect(messages([scene()])).toEqual({ errors: [], warnings: [] });
   });

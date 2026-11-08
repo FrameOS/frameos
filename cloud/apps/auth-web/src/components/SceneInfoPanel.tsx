@@ -109,6 +109,8 @@ export type SceneInfoPanelProps = SceneInfoData & {
   draft?: SceneInfoDraft | undefined;
   /** The scene the editor shows is a layout; undefined until its scenes have loaded. */
   isLayout?: boolean | undefined;
+  /** Why this scene cannot be a layout, null when it can. */
+  layoutProblem?: string | null | undefined;
 };
 
 // Everything the scene page says about a scene, top to bottom: its name
@@ -130,6 +132,7 @@ export function SceneInfoPanel({
   shown,
   draft,
   isLayout,
+  layoutProblem,
 }: SceneInfoPanelProps) {
   const isPrivate = scene.visibility !== "public";
   const isActive = scene.status === "active";
@@ -226,8 +229,11 @@ export function SceneInfoPanel({
                       value={isLayout ? "layout" : "scene"}
                     >
                       <option value="scene">Normal scene</option>
-                      <option value="layout">Layout</option>
+                      <option disabled={!isLayout && !!layoutProblem} value="layout">
+                        Layout
+                      </option>
                     </select>
+                    {layoutProblem ? <small className="scene-facts__hint">{layoutProblem}</small> : null}
                   </span>
                 ) : (
                   "Layout"

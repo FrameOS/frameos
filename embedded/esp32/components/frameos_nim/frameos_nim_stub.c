@@ -94,6 +94,7 @@ bool frameos_nim_load_tz_data(const char *slice_json, const char *time_zone, cha
     return false;
 }
 double frameos_nim_scene_interval(void) { return 0; }
+bool frameos_nim_scene_awaited(void) { return true; }
 double frameos_nim_next_sleep(void) { return -1; }
 bool frameos_nim_render_requested(void) { return false; }
 bool frameos_nim_tick(void) { return false; }

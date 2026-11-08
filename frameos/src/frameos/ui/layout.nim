@@ -15,6 +15,7 @@
 import std/[hashes, math, strutils, tables, unicode]
 import pixie
 import pixie/fileformats/svg
+import frameos/events_gen
 import frameos/ui/tailwind
 import frameos/ui/keyboard
 import frameos/ui/tree
@@ -85,6 +86,11 @@ type
     bold: seq[Font]      ## its fonts drawn with a stroke (UiNode.bold)
     drawnAt: array[3, float32] ## x, y, opacity `drawn` was emitted for
     drawn: seq[SvgNode]  ## its outlines as emitted there, paths shared
+
+  UiHole* = object
+    ## A `<yield />` (yieldHole), in the UI's pixels.
+    found*, clean*: bool
+    x*, y*, w*, h*: float32
 
   UiMemo* = ref object
     ## What the last layout of a UI set in type, for the next one (one per
@@ -1972,5 +1978,57 @@ proc layoutUi*(root: SvgNode, width, height: int): SvgNode =
     regions: seq[UiRegion]
     input: UiInput
   layoutUi(root, width, height, input, regions)
+
+proc seekHole(n: UiNode, ox, oy, opacity: float32, scrolled: bool, clip: array[4, float32], hole: var UiHole) =
+  ## In paint order, as `emit` walks: the first `<yield />`, then whether
+  ## anything painted after it lands on it.
+  template b: untyped = n.box
+  let op = opacity * b.opacity
+  if b.display == diNone or op <= 0:
+    return
+  let
+    x = round(ox + n.x)
+    y = round(oy + n.y)
+    w = round(ox + n.x + n.size.x) - x
+    h = round(oy + n.y + n.size.y) - y
+  if hole.found and x < hole.x + hole.w and x + w > hole.x and y < hole.y + hole.h and y + h > hole.y and
+      (n.kind != ukBox or b.bg.a > 0 or b.gradient > 0 or b.border != [0'f32, 0, 0, 0]):
+    hole.clean = false
+  if n.kind == ukImage and n.src.tag == "Scene" and n.src.attr("id") == SceneYieldId:
+    if hole.found:
+      hole.clean = false
+      return
+    let
+      cx = x + b.pad[3] + b.border[3]
+      cy = y + b.pad[0] + b.border[0]
+      cw = w - b.padX
+      ch = h - b.padY
+    hole = UiHole(found: true, x: cx, y: cy, w: cw, h: ch, clean: op >= 1 and not scrolled and cw > 0 and ch > 0 and
+      cx >= clip[0] and cy >= clip[1] and cx + cw <= clip[2] and cy + ch <= clip[3])
+    return
+  if n.kind != ukBox:
+    return
+  var
+    inner = clip
+    moves = scrolled
+  if b.overflowX != ovVisible or b.overflowY != ovVisible:
+    moves = moves or n.maxX > 0 or n.maxY > 0
+    inner = [max(clip[0], x + b.border[3]), max(clip[1], y + b.border[0]),
+      min(clip[2], x + w - b.border[1]), min(clip[3], y + h - b.border[2])]
+  for pass in [false, true]:
+    for c in n.children:
+      if c.box.absolute == pass:
+        c.seekHole(x, y, op, moves, inner, hole)
+
+proc yieldHole*(memo: UiMemo, width, height: int, input: UiInput): UiHole =
+  ## Where the `<yield />` of the UI just laid out sits, in its own pixels, and
+  ## whether it can be a hole: one yield, fully opaque, nothing painted over it,
+  ## not in anything that scrolls. A popup or a held key's accents can land on
+  ## it, so a UI showing one is drawn the slow way until it goes.
+  if memo.isNil or memo.root.isNil:
+    return
+  memo.root.seekHole(0, 0, 1, false, [0'f32, 0, width.float32, height.float32], result)
+  if input.open > 0 or input.accents > 0:
+    result.clean = false
 
 {.pop.}
