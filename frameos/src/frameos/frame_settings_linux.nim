@@ -237,7 +237,7 @@ proc linuxFrameSettingsRead*(): JsonNode {.nimcall, gcsafe, raises: [].} =
         if f.connected and f.ip.len > 0:
           wifi["ip"] = %f.ip
         result["wifi"] = wifi
-    except CatchableError:
+    except Exception:
       result = nil
 
 proc linuxFrameSettingsAction*(action: string) {.nimcall, gcsafe, raises: [].} =
@@ -261,7 +261,7 @@ proc linuxFrameSettingsAction*(action: string) {.nimcall, gcsafe, raises: [].} =
           pageOpen = false
       else:
         discard
-    except CatchableError:
+    except Exception:
       discard
 
 proc linuxFrameSettingsApply*(changes: JsonNode) {.nimcall, gcsafe, raises: [].} =
@@ -299,7 +299,7 @@ proc linuxFrameSettingsApply*(changes: JsonNode) {.nimcall, gcsafe, raises: [].}
       log(line)
       # The runtime's own consequence of new settings, as after a cloud push.
       sendEvent(if preview.change.restart: evRestart else: evReload, newJObject(), eoSystem)
-    except CatchableError as error:
+    except Exception as error:
       log(%*{"event": "settings:frame:error", "origin": "panel", "error": error.msg})
 
 proc installFrameSettingsHooks*(frameOS: FrameOS) =
