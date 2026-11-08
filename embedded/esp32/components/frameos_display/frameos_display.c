@@ -29,25 +29,28 @@ static bool is_photo_painter_hardware(const fos_display_config_t *config)
            strcmp(config->hardware_preset, "waveshare_esp32_s3_photopainter") == 0;
 }
 
-/* Seeed reTerminal E1004: the same 1200x1600 Spectra 6 panel class as the
- * Waveshare 13.3" E6 and driven by the same EPD_13in3e code, but its T133A01
- * panel wants the vendor's own analogue tuning in the init sequence. Like the
- * PhotoPainter PMIC, that is a fact about the board, so the preset selects
- * it; the panel key stays EPD_13in3e everywhere else. */
-static bool is_reterminal_e1004_hardware(const fos_display_config_t *config)
+/* Seeed reTerminal E1004 and XIAO EE02: the same 1200x1600 Spectra 6 panel
+ * class as the Waveshare 13.3" E6 and driven by the same EPD_13in3e code, but
+ * their T133A01 panel wants the vendor's own analogue tuning in the init
+ * sequence. Like the PhotoPainter PMIC, that is a fact about the board, so
+ * the preset selects it; the panel key stays EPD_13in3e everywhere else. */
+static bool has_t133a01_panel(const fos_display_config_t *config)
 {
     return config && config->hardware_preset &&
-           strcmp(config->hardware_preset, "seeed_reterminal_e1004") == 0;
+           (strcmp(config->hardware_preset, "seeed_reterminal_e1004") == 0 ||
+            strcmp(config->hardware_preset, "seeed_xiao_ee02") == 0);
 }
 
-/* Seeed reTerminal E1003: the Waveshare 10.3" HAT's ED103TC2 behind the same
- * IT8951, panel key EPD_10in3, but a board of its own: its own VCOM, columns
- * that run right to left and a controller that must be told the temperature
- * (it8951.c). Selected by the preset, like the E1004's T133A01 tuning. */
-static bool is_reterminal_e1003_hardware(const fos_display_config_t *config)
+/* Seeed reTerminal E1003 and XIAO EE03: the Waveshare 10.3" HAT's ED103TC2
+ * behind the same IT8951, panel key EPD_10in3, but Seeed's own build of it:
+ * its own VCOM, columns that run right to left and a controller that must be
+ * told the temperature (it8951.c; Seeed_GFX2 drives both boards the same).
+ * Selected by the preset, like the T133A01 tuning. */
+static bool has_seeed_it8951_panel(const fos_display_config_t *config)
 {
     return config && config->hardware_preset &&
-           strcmp(config->hardware_preset, "seeed_reterminal_e1003") == 0;
+           (strcmp(config->hardware_preset, "seeed_reterminal_e1003") == 0 ||
+            strcmp(config->hardware_preset, "seeed_xiao_ee03") == 0);
 }
 
 static size_t panel_buffer_size(int width, int height, fos_pixel_format_t format)
@@ -109,12 +112,12 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
         EPD_7IN3E_SetPhotoPainterMode(photo_painter ? 1 : 0);
     }
     if (EPD_13IN3E_SetVariant) {
-        EPD_13IN3E_SetVariant(is_reterminal_e1004_hardware(config)
+        EPD_13IN3E_SetVariant(has_t133a01_panel(config)
                                   ? FOS_EPD_13IN3E_VARIANT_T133A01
                                   : FOS_EPD_13IN3E_VARIANT_WAVESHARE);
     }
-    fos_it8951_set_variant(is_reterminal_e1003_hardware(config) ? FOS_IT8951_VARIANT_SEEED_E1003
-                                                                : FOS_IT8951_VARIANT_WAVESHARE);
+    fos_it8951_set_variant(has_seeed_it8951_panel(config) ? FOS_IT8951_VARIANT_SEEED_E1003
+                                                          : FOS_IT8951_VARIANT_WAVESHARE);
 
     /* The RGB LCD's control wiring (its IO expander, its 3-wire SPI, its
      * backlight) is the board's, not the panel's: the preset picks the

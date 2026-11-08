@@ -277,6 +277,9 @@ static const struct {
     {"seeed_reterminal_e1002", "sda=19,scl=20;sda=39,scl=40"},
     {"seeed_reterminal_e1003", "sda=19,scl=20"},
     {"seeed_reterminal_e1004", "sda=19,scl=20"},
+    /* The XIAO EE03's SHT40 (0x44), which its IT8951 needs for the panel
+     * temperature: SDA GPIO42 / SCL GPIO41 (Seeed's schematic). */
+    {"seeed_xiao_ee03", "sda=42,scl=41"},
 };
 
 const char *fos_board_i2c_buses(const char *hardware_preset)

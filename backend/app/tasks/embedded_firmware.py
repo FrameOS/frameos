@@ -624,6 +624,59 @@ EMBEDDED_INKY_FRAME_PINS = {
 # Buttons A-E live behind the shift register (bits 0-4), not GPIOs; the list
 # stays empty so nothing tries to configure GPIO interrupts for them.
 EMBEDDED_INKY_FRAME_GPIO_BUTTONS: list[dict[str, Any]] = []
+# Seeed XIAO ePaper Display Boards: a XIAO ESP32-S3 Plus (16MB flash, 8MB
+# octal PSRAM) soldered to a panel carrier. From Seeed's schematics and
+# Seeed_GFX2: the panel on SCK7/MOSI9, CS44, RST38, BUSY4, its power switch
+# on GPIO43, three keys, and VBAT through a 2:1 divider on GPIO1 behind a
+# switch. Hardware-unverified in FrameOS. GPIO43/44 are the XIAO's UART0: the
+# panel takes them over and the console is the USB-Serial/JTAG one.
+EMBEDDED_SEEED_XIAO_EE_PINS = {
+    "rst": 38,
+    "dc": 10,
+    "cs": 44,
+    "cs2": -1,
+    "busy": 4,
+    "sck": 7,
+    "mosi": 9,
+    "pwr": 43,
+}
+# EE02: the dual-controller T133A01 needs the second chip select.
+EMBEDDED_SEEED_XIAO_EE02_PINS = {**EMBEDDED_SEEED_XIAO_EE_PINS, "cs2": 41}
+# EE03: an IT8951 has no D/C and answers on MISO GPIO8, which the dc slot
+# carries (as on the E1003).
+EMBEDDED_SEEED_XIAO_EE03_PINS = {**EMBEDDED_SEEED_XIAO_EE_PINS, "dc": 8}
+EMBEDDED_SEEED_XIAO_EE_GPIO_BUTTONS = [
+    {"pin": 2, "label": "KEY1"},
+    {"pin": 3, "label": "KEY2"},
+    {"pin": 5, "label": "KEY3"},
+]
+EMBEDDED_SEEED_XIAO_EE_BATTERY = {
+    "batteryPin": 1,
+    "batteryDivider": 2.0,
+    "batteryEnablePin": 6,
+}
+# The EE05 keeps GPIO5/6 for its extension header: KEY3 is GPIO8 and the
+# divider's switch GPIO39 (Seeed's EE05 schematic and wiki).
+EMBEDDED_SEEED_XIAO_EE05_GPIO_BUTTONS = [
+    {"pin": 2, "label": "KEY1"},
+    {"pin": 3, "label": "KEY2"},
+    {"pin": 8, "label": "KEY3"},
+]
+EMBEDDED_SEEED_XIAO_EE05_BATTERY = {**EMBEDDED_SEEED_XIAO_EE_BATTERY, "batteryEnablePin": 39}
+# The EE03's SHT40 sits on SDA42/SCL41; its IT8951 needs the temperature.
+EMBEDDED_SEEED_XIAO_EE03_I2C = {"i2cBuses": "sda=42,scl=41"}
+# Seeed XIAO 7.5" ePaper Panel: a XIAO ESP32-C3 (4MB, no PSRAM: thin client)
+# with a UC8179 800x480 panel. Seeed's ESPHome page; no battery sense wired.
+EMBEDDED_SEEED_XIAO_EPAPER_7IN5_PINS = {
+    "rst": 2,
+    "dc": 5,
+    "cs": 3,
+    "cs2": -1,
+    "busy": 4,
+    "sck": 8,
+    "mosi": 10,
+    "pwr": -1,
+}
 EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
     "waveshare_esp32_s3_photopainter": {
         "device": "waveshare.EPD_7in3e",
@@ -821,6 +874,53 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         # every 15 min for control-plane commands; stays connected on USB.
         "deepSleepOnBattery": True,
         "wakeCheckSeconds": 900,
+    },
+    "seeed_xiao_ee02": {
+        # The E1004's panel on half the flash; same 16-bit canvas on 8MB.
+        "device": "waveshare.EPD_13in3e",
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_XIAO_EE02_PINS,
+        "gpioButtons": EMBEDDED_SEEED_XIAO_EE_GPIO_BUTTONS,
+        **EMBEDDED_SEEED_XIAO_EE_BATTERY,
+    },
+    "seeed_xiao_ee03": {
+        # The E1003's panel: an 8-bit luma canvas on the 8MB module.
+        "device": "waveshare.EPD_10in3",
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_XIAO_EE03_PINS,
+        "gpioButtons": EMBEDDED_SEEED_XIAO_EE_GPIO_BUTTONS,
+        **EMBEDDED_SEEED_XIAO_EE_BATTERY,
+        **EMBEDDED_SEEED_XIAO_EE03_I2C,
+    },
+    "seeed_xiao_ee04": {
+        # A carrier for many panels (24-pin, or the 7.3" Spectra on the 50-pin
+        # socket): `device` is only the default.
+        "device": "waveshare.EPD_7in5_V2",
+        "panelSelectable": True,
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_XIAO_EE_PINS,
+        "gpioButtons": EMBEDDED_SEEED_XIAO_EE_GPIO_BUTTONS,
+        **EMBEDDED_SEEED_XIAO_EE_BATTERY,
+    },
+    "seeed_xiao_ee05": {
+        "device": "waveshare.EPD_7in5_V2",
+        "panelSelectable": True,
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_XIAO_EE_PINS,
+        "gpioButtons": EMBEDDED_SEEED_XIAO_EE05_GPIO_BUTTONS,
+        **EMBEDDED_SEEED_XIAO_EE05_BATTERY,
+    },
+    "seeed_xiao_epaper_7in5": {
+        "device": "waveshare.EPD_7in5_V2",
+        "platform": "esp32-c3",
+        "flashSize": "4MB",
+        "psramMB": 0,
+        "pins": EMBEDDED_SEEED_XIAO_EPAPER_7IN5_PINS,
+        "gpioButtons": [{"pin": 9, "label": "BOOT"}],
     },
     "elecrow_crowpanel_5in79": {
         "device": "waveshare.EPD_5in79",
@@ -1299,7 +1399,10 @@ def apply_embedded_hardware_preset(frame: Frame) -> str:
         return ""
     preset = EMBEDDED_HARDWARE_PRESETS[preset_key]
 
-    frame.device = preset["device"]
+    # A carrier board (`panelSelectable`) keeps the panel the frame names; on
+    # every other board the preset is the whole hardware.
+    if not (preset.get("panelSelectable") and embedded_panel_for_device(frame.device)):
+        frame.device = preset["device"]
     preset_gpio_buttons = preset.get("gpioButtons")
     if frame.gpio_buttons is None and isinstance(preset_gpio_buttons, list):
         frame.gpio_buttons = [dict(button) for button in preset_gpio_buttons]

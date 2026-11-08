@@ -33,6 +33,24 @@ has never seen a Sticky. In order of what breaks the most:
 - [ ] **The TF socket** mounts on the shared bus (CS8, MISO12, power 10,
   detect 11); if not, try mounting before the display init (Seeed's note).
 
+### Seeed XIAO ePaper Display Boards (EE02–EE05): no board has run these yet
+
+Every pin comes from Seeed's schematics and Seeed_GFX2 (`seeed_xiao_ee02` …
+`ee05`). In the order of what breaks the most:
+
+- [ ] **The panel powers up and draws**: `set hardware seeed_xiao_ee02` (or
+  `ee03`, `ee04` + `set panel <key>`, `ee05` likewise) and a restart, then
+  `display_test bands`. GPIO43 is the panel's power switch AND the XIAO's
+  UART0 TX; the panel takes it, so the console must be the USB-Serial/JTAG one.
+- [ ] **EE02**: both halves of the 13.3" panel refresh (second CS GPIO41) with
+  the T133A01 colours the E1004 shows.
+- [ ] **EE03**: the `it8951: 1872x1404 … VCOM -1400 mV, mirrored, temperature
+  NN C` line, the picture the right way round (the E1003's `mirror_x`), and a
+  real temperature from the SHT40 on I2C 42/41.
+- [ ] **Keys and battery**: `buttons` shows GPIO2/3/5 (GPIO2/3/8 on the EE05)
+  and they fire; the battery reads a sane voltage (GPIO1 ÷2, switch GPIO6,
+  GPIO39 on the EE05).
+
 ### reTerminal E1003 bench (everything: no board has run this yet)
 
 The IT8951 driver (`components/frameos_display/it8951.c`) and every pin are

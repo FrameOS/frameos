@@ -786,6 +786,36 @@ static int cmd_set(int argc, char **argv)
                * wake every 15 min for cloud commands (renders still follow the
                * scene's own interval). On USB power it stays connected. */
               1, 900 },
+            /* Seeed XIAO ePaper Display Boards (a XIAO ESP32-S3 Plus on the
+             * board; Seeed's schematics and Seeed_GFX2): panel power GPIO43,
+             * VBAT ÷2 on GPIO1. The EE02 is the E1004's T133A01 and the EE03
+             * the E1003's ED103TC2 + IT8951 (answering on MISO GPIO8, the dc
+             * slot), with the tuning chosen by these names in the display
+             * component; the EE03's SHT40 comes from fos_board. The EE04 and
+             * EE05 take many 24-pin panels: a `set panel` after this one
+             * picks another. The EE05 differs: KEY3 GPIO8, battery switch
+             * GPIO39. */
+            { "seeed_xiao_ee02", "EPD_13in3e",
+              "rst=38,dc=10,cs=44,cs2=41,busy=4,sck=7,mosi=9,pwr=43",
+              "2:KEY1\n3:KEY2\n5:KEY3",
+              1, 2.0f, 6, 0, 0 },
+            { "seeed_xiao_ee03", "EPD_10in3",
+              "rst=38,dc=8,cs=44,cs2=-1,busy=4,sck=7,mosi=9,pwr=43",
+              "2:KEY1\n3:KEY2\n5:KEY3",
+              1, 2.0f, 6, 0, 0 },
+            { "seeed_xiao_ee04", "EPD_7in5_V2",
+              "rst=38,dc=10,cs=44,cs2=-1,busy=4,sck=7,mosi=9,pwr=43",
+              "2:KEY1\n3:KEY2\n5:KEY3",
+              1, 2.0f, 6, 0, 0 },
+            { "seeed_xiao_ee05", "EPD_7in5_V2",
+              "rst=38,dc=10,cs=44,cs2=-1,busy=4,sck=7,mosi=9,pwr=43",
+              "2:KEY1\n3:KEY2\n8:KEY3",
+              1, 2.0f, 39, 0, 0 },
+            /* Seeed XIAO 7.5" ePaper Panel (a XIAO ESP32-C3: thin client). */
+            { "seeed_xiao_epaper_7in5", "EPD_7in5_V2",
+              "rst=2,dc=5,cs=3,cs2=-1,busy=4,sck=8,mosi=10,pwr=-1",
+              "9:BOOT",
+              -1, 2.0f, -1, 0, 0 },
             /* Elecrow CrowPanel 5.79" (ESP32-S3-WROOM-1-N8R8). */
             { "elecrow_crowpanel_5in79", "EPD_5in79",
               "rst=47,dc=46,cs=45,cs2=-1,busy=48,sck=12,mosi=11,pwr=-1",
