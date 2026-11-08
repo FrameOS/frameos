@@ -343,6 +343,8 @@ Map scene's lines) fetches a quarter of the data.
   shorter edge.
   A scale below 1 (0.25, 0.5 and 0.75 are offered) works the other way: the
   layout gets more room than the panel has and everything is drawn smaller.
+  The built-in scenes (the switcher, the settings panel) follow the frame's
+  scale between 0.75 and a 320 px layout (docs/scene-settings.md).
   Out-of-range values (above 4) are ignored.
 - **What a scaled app sees.** `context.imageWidth` / `imageHeight`,
   `targetWidth` / `targetHeight` and `app.frame.width` / `height`, divided by

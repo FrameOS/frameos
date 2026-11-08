@@ -92,7 +92,9 @@ It builds a UI tree in Nim (`SvgNode`s with Tailwind classes) and lays it out
 with the JSX layer (`ui/layout.nim`), so it needs no QuickJS and draws
 through the one rasterizer (`utils/svg_frames.nim`): on an LCD only the
 tile that changed is repainted. Its tiles are regions for `ui/events.nim`,
-which hit-tests the taps as it does a JS app's UI.
+which hit-tests the taps as it does a JS app's UI. It is laid out at the
+frame's render scale, sized from the panel, within the bounds the settings
+panel keeps (docs/scene-settings.md, "At the frame's scale").
 
 `switcherGrid` puts every scene on one page while the tiles stay big enough
 to read (at least a fifth of the shorter side across, up to six by six), and

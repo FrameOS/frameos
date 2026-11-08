@@ -107,6 +107,27 @@ export function get(app, context) {
       check pressed[1].getFloat() == 800
       check abs(pressed[0].getFloat() - 780) < 2
 
+  test "below 1 a list that scrolls shows all of its width":
+    # A box that scrolls is a nested <svg> viewport (ui/layout.nim): at 0.5 it
+    # is 800 layout pixels wide in a 400 pixel canvas, and what it holds past
+    # the canvas's own width in layout pixels shows.
+    let ui = newUi("""
+export function get(app, context) {
+  return (
+    <div className="bg-white w-full h-full overflow-y-auto">
+      <div className="w-full h-[1000px] flex">
+        <div className="w-[600px] h-[50px]" />
+        <div className="w-[100px] h-[50px] bg-red-500" />
+      </div>
+    </div>
+  )
+}
+""", "tests/jsx-scale-scroll", renderScale = 0.5)
+    let image = ui.render(newImage(400, 200)).asImage()
+    # Layout x 600..700 is canvas x 300..350.
+    check image[325, 10] == red
+    check image[280, 10] == white
+
   test "a plain .js app keeps the panel's pixels and reads the scale":
     let ui = newUi("""
       export function get(app, context) {

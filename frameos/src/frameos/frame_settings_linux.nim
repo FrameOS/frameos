@@ -270,23 +270,32 @@ proc linuxFrameSettingsAction*(action: string) {.nimcall, gcsafe, raises: [].} =
 proc linuxFrameSettingsApply*(changes: JsonNode) {.nimcall, gcsafe, raises: [].} =
   {.cast(gcsafe).}:
     try:
-      let ssid = changes{"wifiSsid"}
-      if not ssid.isNil and ssid.kind == JString and ssid.getStr().len > 0:
-        var same = false
+      if not changes{"wifiSsid"}.isNil or not changes{"wifiPassword"}.isNil:
+        # A password alone is for the saved network.
+        var
+          ssid = changes{"wifiSsid"}.getStr()
+          same = false
+        let password = changes{"wifiPassword"}.getStr()
         withLock factsLock:
-          same = facts.connected and facts.ssid == ssid.getStr() and changes{"wifiPassword"}.getStr().len == 0
+          if ssid.len == 0:
+            ssid = facts.ssid
+          same = ssid.len == 0 or facts.connected and facts.ssid == ssid and password.len == 0
           if not same:
             facts.joining = true
             facts.note = ""
         if not same:
-          queue(Job(kind: jkJoin, ssid: ssid.getStr(), password: changes{"wifiPassword"}.getStr()))
-      # The rotation and the scale, through the persist a cloud push takes.
+          queue(Job(kind: jkJoin, ssid: ssid, password: password))
+      # The rotation and the scale that differ from the frame's, through the
+      # persist a cloud push takes.
+      let config = runnerConfig()
       var payload = newJObject()
       let rotate = changes{"rotate"}
-      if not rotate.isNil and rotate.kind == JInt and rotate.getInt() in [0, 90, 180, 270]:
+      if not rotate.isNil and rotate.kind == JInt and rotate.getInt() in [0, 90, 180, 270] and
+          (config.isNil or rotate.getInt() != config.rotate):
         payload["rotate"] = rotate
       let scale = changes{"renderScale"}
-      if not scale.isNil and scale.kind in {JInt, JFloat} and scale.getFloat() >= 0 and scale.getFloat() <= 4:
+      if not scale.isNil and scale.kind in {JInt, JFloat} and scale.getFloat() >= 0 and scale.getFloat() <= 4 and
+          (config.isNil or scale.getFloat() != config.renderScale):
         payload["render_scale"] = %scale.getFloat()
       if payload.len == 0:
         return

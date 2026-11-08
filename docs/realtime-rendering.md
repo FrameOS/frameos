@@ -141,7 +141,12 @@ buffer neither scanned nor waiting to be,
 `embedded_runtime.nim`, pixie's `newImage565Over` with `ditherStores`, the
 rounding the pack used to do), and the blit is a buffer switch — no pack, no
 copy, no SHA, and with three buffers (below) no wait for the panel either. A
-rotated panel still packs, into the same buffer.
+rotated panel draws into a 565 canvas of its own and copies it into the
+buffer turned: the words go to their places in 32 x 32 tiles, nothing read
+back or dithered again (`packImageRgb565`; 30 ms a frame at 480x480, where
+the general pack took 787 ms). That copy is the price of a rotation, and the
+settings panel says so under it (docs/scene-settings.md). The boot mark
+(`lcd_splash.c`) is drawn turned too.
 
 The snapshot behind `/image`, `image_get` and the backend push is the front
 buffer itself, dropped before it is drawn in again; a stream copies it out

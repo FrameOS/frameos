@@ -83,20 +83,40 @@ What the page holds, top to bottom:
   password for the same network and means an open network for another; a
   Linux runtime holds no password (NetworkManager or the supplicant does), so
   there an empty one is an open network.
-- **Rotation** and **Scale** (Automatic with what that is on this panel, then
-  0.25x to 4x, `RENDER_SCALE_STEPS`; below 1 everything is drawn smaller). The scale is the frame's: a scene with its
-  own (`settings.renderScale`, a `renderScale` field) keeps it.
+- **Rotation**, with a line under it on an LCD: any rotation but 0° adds a
+  noticeable delay to every frame of an animated scene. A turned panel cannot
+  be drawn on directly, so each frame is copied to its place (30 ms at
+  480x480 on an ESP32, `packImageRgb565`); on e-paper the frame is packed
+  anyway.
+- **Scale**: Automatic (with what that is on this panel), then the steps of
+  `RENDER_SCALE_STEPS` from 0.25x that leave a layout of at least 320 px on
+  the panel's shorter edge (up to 1.5x at 480 px), and a scale set elsewhere
+  as it is. Below 1 everything is drawn smaller. The scale is the frame's: a
+  scene with its own (`settings.renderScale`, a `renderScale` field) keeps
+  it. The settings panel and the scene switcher follow it too (below).
 - **Render again**, **Restart FrameOS** (where the host lists it) and
-  **Reboot**. Restart and Reboot ask for a second tap ("Tap again to
-  reboot", red); anything else in between asks again. They send the
+  **Reboot**. Restart and Reboot ask for a second tap ("Tap again", red);
+  anything else in between asks again. They send the
   contract's device commands from the origin `panel`
   (`docs/events-contract.json`), so every host runs the restart and reboot it
   runs for a schedule.
 
-Save applies what changed and stays: a join, a drop or a scan result draws the
-page again (the ESP32 while `fos_scenes_settings_shown`, a Linux frame between
-`open` and `close`). A value picked again as it was is no change. A rotation
-restarts the frame on an ESP32.
+Save is lit only while there is something to save, on either page, and goes
+quiet once it is pressed: that is how the page says it took it. On the frame
+page it hands the host what was edited, and the host applies what differs
+from what it has; the page stays up, and a join, a drop or a scan result draws
+it again (the ESP32 while `fos_scenes_settings_shown`, a Linux frame between
+`open` and `close`). A rotation restarts the frame on an ESP32. A new scale is
+drawn at once, this page included (the ESP32 hands it to the runtime every
+pass; a Linux frame sets it in the live config instead of reloading, which
+would rebuild every scene, this page among them).
+
+**At the frame's scale.** The settings panel and the scene switcher are laid
+out at the frame's render scale as a scene is, sized from the panel
+(sceneSwitcher's `uiScale` / `uiRoom`): at 1.5 everything is half as large
+again with less room, and the pointer is divided back. They stop at 0.75 and
+at a layout of 320 px, whatever the scale, so the page that sets it can always
+set it back.
 
 **Turned off by the control plane.** The frame's `frame_settings_on_screen`
 (frame.json `frameSettingsOnScreen`, on unless the owner turns it off in the

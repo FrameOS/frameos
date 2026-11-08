@@ -301,24 +301,29 @@ proc packImageRgb565(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int):
     # unrotated, embedded_runtime.nim panelCanvas): its words are the panel's
     # already, dithered as they were stored; only their places turn. The
     # general loop below read each back as RGBX, mapped it and dithered it
-    # again: 787 ms a frame at 480x480 on the SenseCAP Indicator. Row by row
-    # from the canvas, so the writes walk at most a panel's height of lines.
+    # again: 787 ms a frame at 480x480 on the SenseCAP Indicator. In 32 x 32
+    # tiles: a quarter turn writes down the panel's columns, and row by row
+    # every word was a cache line of PSRAM of its own (320 ms); a tile's rows
+    # and columns are a few KB that stay cached.
     let
       src = cast[ptr UncheckedArray[uint16]](image.bufferPointer)
       dst = cast[ptr UncheckedArray[uint16]](buf)
-    var i = 0
-    for y in 0 ..< height:
-      # panelCoords, a step at a time: x moves the panel index by `step`.
-      var (index, step) =
-        case frameRotate
-        of 90: (height - 1 - y, frameWidth)
-        of 180: ((height - 1 - y) * frameWidth + width - 1, -1)
-        of 270: ((width - 1) * frameWidth + y, -frameWidth)
-        else: (y * frameWidth, 1)
-      for x in 0 ..< width:
-        dst[index] = src[i]
-        index += step
-        inc i
+    const Tile = 32
+    for ty in countup(0, height - 1, Tile):
+      for tx in countup(0, width - 1, Tile):
+        for y in ty ..< min(ty + Tile, height):
+          # panelCoords at (tx, y), then a step per x.
+          var (index, step) =
+            case frameRotate
+            of 90: (tx * frameWidth + height - 1 - y, frameWidth)
+            of 180: ((height - 1 - y) * frameWidth + width - 1 - tx, -1)
+            of 270: ((width - 1 - tx) * frameWidth + y, -frameWidth)
+            else: (y * frameWidth + tx, 1)
+          var i = y * width + tx
+          for x in tx ..< min(tx + Tile, width):
+            dst[index] = src[i]
+            index += step
+            inc i
     return true
   template clip(value: int): int =
     (if value < 0: 0 elif value > 255: 255 else: value)

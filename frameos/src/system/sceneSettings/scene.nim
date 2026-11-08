@@ -92,11 +92,14 @@ const
   Unedited = ["node", "scene", "image"]
   # The scales offered (frontend/src/utils/renderScale.ts RENDER_SCALE_STEPS).
   Scales = ["0.25", "0.5", "0.75", "1", "1.25", "1.5", "2", "2.5", "3", "4"]
-  # A gear, 24 units square, its hole cut out (fill-rule evenodd).
-  GearPath = "M10.1 4.6L10.4 1.6L13.6 1.6L13.9 4.6L15.9 5.5L18.2 3.5L20.5 5.8L18.5 8.1L19.4 10.1L22.4 10.4" &
-    "L22.4 13.6L19.4 13.9L18.5 15.9L20.5 18.2L18.2 20.5L15.9 18.5L13.9 19.4L13.6 22.4L10.4 22.4L10.1 19.4L8.1 18.5" &
-    "L5.8 20.5L3.5 18.2L5.5 15.9L4.6 13.9L1.6 13.6L1.6 10.4L4.6 10.1L5.5 8.1L3.5 5.8L5.8 3.5L8.1 5.5Z" &
-    "M8.6 12a3.4 3.4 0 1 0 6.8 0a3.4 3.4 0 1 0 -6.8 0Z"
+  # A gear, 48 units square: the teeth clockwise, the hole the other way.
+  GearPath = "M20 9L21 3L27 3L28 9L32 11L36 7L41 12L37 16L39 20L45 21L45 27L39 28L37 32L41 36L36 41L32 37" &
+    "L28 39L27 45L21 45L20 39L16 37L12 41L7 36L11 32L9 28L3 27L3 21L9 20L11 16L7 12L12 7L16 11Z" &
+    "M17 24a7 7 0 1 0 14 0a7 7 0 1 0 -14 0Z"
+  # wifiLine's words, by the host's `state`.
+  WifiStates = ["connected", "hotspot", "notFound", "auth", "connecting", "unset"]
+  WifiBefore = ["Connected to ", "Setup hotspot ", "Can't find ", "Wrong password for ", "Connecting to "]
+  WifiAfter = ["", "", "", "?", "\xe2\x80\xa6"]
 
 var
   frameSettingsRead*: FrameSettingsRead
@@ -154,15 +157,15 @@ proc showPage(self: SceneSettingsScene, frame: bool) =
   if self.onFrame() and not frame:
     frameAction("close")
   self.state.put("page", newJString(if frame: "frame" else: "scene"))
-  self.state.put("confirm", newJString(""))
+  self.state.put("confirm", newJInt(-1))
   if frame:
     frameAction("open")
 
-proc current(edits, base: JsonNode, name: string): JsonNode =
+proc current(edits, info: JsonNode, name: string): JsonNode =
   ## A frame field's value: as changed on the page, else as the host has it.
   result = edits{name}
-  if result.isNil and not base.isNil:
-    result = base{name}
+  if result.isNil:
+    result = if name == "wifiSsid": info{"wifi", "ssid"} else: info{name}
 
 proc text(value: JsonNode): string =
   ## A value as the text a field shows: a string as it is, a whole number
@@ -203,15 +206,10 @@ proc quoted(name: string): string =
 
 proc wifiLine(wifi: JsonNode): string =
   ## How the frame is doing on Wi-Fi, in words.
-  let ssid = wifi{"ssid"}.getStr()
-  case wifi{"state"}.getStr()
-  of "connected": "Connected to " & quoted(ssid)
-  of "hotspot": "Setup hotspot " & quoted(wifi{"hotspot"}.getStr())
-  of "unset": "Not set up"
-  of "notFound": "Can't find " & quoted(ssid)
-  of "auth": "Wrong password for " & quoted(ssid) & "?"
-  of "connecting": "Connecting to " & quoted(ssid) & "\xe2\x80\xa6"
-  else: "Not connected"
+  let i = WifiStates.find(wifi{"state"}.getStr())
+  if i < 0: "Not connected"
+  elif i == WifiBefore.len: "Not set up"
+  else: WifiBefore[i] & quoted(wifi{if i == 1: "hotspot" else: "ssid"}.getStr()) & WifiAfter[i]
 
 proc field(name, label, kind: string): JsonNode =
   result = newJObject()
@@ -289,14 +287,6 @@ proc frameFields(info: JsonNode, autoScale: string, unit = 0): JsonNode =
   scale.put("options", options)
   result.elems.add scale
 
-proc frameValues(info: JsonNode): JsonNode =
-  ## What the host has for each field, by name.
-  result = newJObject()
-  result.put("wifiSsid", newJString(info{"wifi", "ssid"}.getStr()))
-  result.put("rotate", newJInt(info{"rotate"}.getInt()))
-  let scale = info{"renderScale"}
-  result.put("renderScale", if scale.isNil: newJInt(0) else: scale)
-
 proc opener(self: SceneSettingsScene): string =
   self.state{"from"}.getStr()
 
@@ -325,24 +315,12 @@ proc save(self: SceneSettingsScene) =
   payload.put("state", collect(self.fieldList(), self.valueMap()))
   sendEvent(evSetCurrentScene, payload, eoScene)
 
-proc saveFrame(self: SceneSettingsScene, info: JsonNode, fields: JsonNode) =
-  ## The frame page's Save: what was changed there to the host, which
-  ## applies it (Wi-Fi joins in the background, a rotation restarts the
-  ## frame), the page staying up so what it did shows above. A network goes
-  ## with its password, typed or not.
-  let
-    edits = self.objectAt("frameValues")
-    base = frameValues(info)
-    changes = collect(fields, edits)
-  for name in ["rotate", "renderScale"]:
-    let value = changes{name}
-    if not value.isNil and value.text == base{name}.text:
-      changes.fields.del(name)
-  if not changes{"wifiSsid"}.isNil or not changes{"wifiPassword"}.isNil:
-    if changes{"wifiSsid"}.isNil:
-      changes.put("wifiSsid", base{"wifiSsid"})
-    if changes{"wifiPassword"}.isNil:
-      changes.put("wifiPassword", newJString(""))
+proc saveFrame(self: SceneSettingsScene, fields: JsonNode) =
+  ## The frame page's Save: what was edited there to the host, which applies
+  ## what differs from what it has (Wi-Fi joins in the background, the scale
+  ## is drawn at once, a rotation restarts the frame) and takes a password
+  ## alone for the saved network. The page stays up so what it did shows.
+  let changes = collect(fields, self.objectAt("frameValues"))
   self.state.put("frameValues", newJObject())
   if changes.len > 0 and not frameSettingsApply.isNil:
     forgetUiTarget(SceneSettingsId, SettingsNode)
@@ -353,16 +331,16 @@ proc press(self: SceneSettingsScene, action: int) =
   ## first tap turns the button into "Tap again", the second sends the
   ## device command (docs/events-contract.json, origin `panel`), which the
   ## host runs as it runs a schedule's.
+  var asking = -1
   if action == AScan:
     frameAction("scan")
   elif action == ARender:
     sendEvent(evRender, newJObject(), eoPanel)
-  elif self.state{"confirm"}.getStr() != $action:
-    self.state.put("confirm", newJString($action))
-    return
-  else:
+  elif self.state{"confirm"}.getInt(-1) == action:
     sendEvent(if action == ARestart: evRestart else: evReboot, newJObject(), eoPanel)
-  self.state.put("confirm", newJString(""))
+  else:
+    asking = action
+  self.state.put("confirm", newJInt(asking))
 
 proc acting(self: SceneSettingsScene) =
   ## What the last handler did, to the values of the page showing.
@@ -379,11 +357,11 @@ proc acting(self: SceneSettingsScene) =
     fields = if frame: frameFields(info, "") else: self.fieldList()
     values = if frame: self.objectAt("frameValues") else: self.valueMap()
   if handler < HAction:
-    self.state.put("confirm", newJString(""))
+    self.state.put("confirm", newJInt(-1))
   if handler == HCancel:
     if frame: self.showPage(false) else: leave()
   elif handler == HSave:
-    if frame: self.saveFrame(info, fields) else: self.save()
+    if frame: self.saveFrame(fields) else: self.save()
   elif handler == HGear:
     self.showPage(not frame)
   elif handler >= HAction:
@@ -453,12 +431,13 @@ proc gear(look: Look, lit: bool): SvgNode =
   if look.paper: c.add(if lit: " bg-black text-white" else: " border-2 border-black")
   elif lit: c.add " bg-sky-600 active:bg-sky-500"
   else: c.add " bg-zinc-800 active:bg-zinc-600"
-  let path = SvgNode(tag: "path", attrs: @[("d", GearPath), ("fill", "currentColor"), ("fill-rule", "evenodd")])
+  # The hole winds against the teeth: the default fill rule cuts it out.
+  let path = SvgNode(tag: "path", attrs: @[("d", GearPath), ("fill", "currentColor")])
   var i = ""
   i.px("w", look.size * 6 div 5)
   i.px("h", look.size * 6 div 5)
   let icon = el("svg", move i, path)
-  icon.attrs.add(("viewBox", "0 0 24 24"))
+  icon.attrs.add(("viewBox", "0 0 48 48"))
   el("div", move c, icon).on("on-click", HGear)
 
 proc fieldBox(look: Look): string =
@@ -572,10 +551,11 @@ proc grey(look: Look): string =
   ## Grey text (plain on e-paper).
   if look.paper: "" else: "text-zinc-400"
 
-proc pressButton(look: Look, label: string, action: int, asking: bool): SvgNode =
-  ## One of the frame page's buttons; red while it asks for the second tap.
-  result = look.button(label, HAction + action, false)
-  if asking:
+proc pressButton(look: Look, label: string, action: int, asking = -1): SvgNode =
+  ## One of the frame page's buttons; "Tap again" in red while it asks for
+  ## the second tap (`asking` is it).
+  result = look.button(if asking == action: "Tap again" else: label, HAction + action, false)
+  if asking == action:
     result.attrs[0][1].add(if look.paper: " bg-black text-white" else: " bg-red-600 active:bg-red-500")
 
 proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: string, unit: int): SvgNode =
@@ -608,27 +588,28 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   let
     fields = frameFields(info, autoScale, unit)
     edits = self.objectAt("frameValues")
-    base = frameValues(info)
     typing = edits{"typing"}.getBool()
-    asking = self.state{"confirm"}.getStr()
+    asking = self.state{"confirm"}.getInt(-1)
   for i in 0 ..< fields.elems.len:
     let field = fields.elems[i]
     let name = field{"name"}.getStr()
-    result.children.add look.row(field, current(edits, base, name), i, typing and name == "wifiSsid")
+    result.children.add look.row(field, current(edits, info, name), i, typing and name == "wifiSsid")
+    if name == "rotate" and not look.paper:
+      # A turned LCD copies every frame to its place (embedded_main.nim
+      # packImageRgb565, 30 ms at 480x480): there is no drawing it turned.
+      var c = look.grey
+      c.px("text", look.size * 3 div 4)
+      result.children.add el("div", move c, SvgNode(text: "Any rotation but 0\xc2\xb0 adds a noticeable delay to every frame of an animated scene."))
     if name == "wifiSsid":
       result.children.add el("div", "flex", look.pressButton(
-        if wifi{"scanning"}.getBool(): "Scanning\xe2\x80\xa6" else: "Scan for networks", AScan, false))
+        if wifi{"scanning"}.getBool(): "Scanning\xe2\x80\xa6" else: "Scan for networks", AScan))
   c = "flex flex-wrap"
   c.px("gap", look.gap div 2)
   let buttons = el("div", move c)
-  buttons.children.add look.pressButton("Render again", ARender, false)
-  let commands = arrayOf(info{"actions"})
-  for i in 0 ..< commands.elems.len:
-    if commands.elems[i].getStr() == "restart":
-      buttons.children.add look.pressButton(
-        if asking == $ARestart: "Tap again to restart" else: "Restart FrameOS", ARestart, asking == $ARestart)
-  buttons.children.add look.pressButton(
-    if asking == $AReboot: "Tap again to reboot" else: "Reboot", AReboot, asking == $AReboot)
+  buttons.children.add look.pressButton("Render again", ARender)
+  if %"restart" in arrayOf(info{"actions"}).elems:
+    buttons.children.add look.pressButton("Restart FrameOS", ARestart, asking)
+  buttons.children.add look.pressButton("Reboot", AReboot, asking)
   result.children.add buttons
 
 when not defined(frameosEmbedded):

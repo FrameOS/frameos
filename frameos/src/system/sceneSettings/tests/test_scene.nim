@@ -57,13 +57,15 @@ proc regionWith(handler: int): UiRegion =
 proc tap(scene: FrameScene, r: UiRegion) =
   scene.send("tap", tapAt(r.x + r.w / 2, r.y + r.h / 2))
 
-proc scrollToEnd(scene: FrameScene) =
-  ## The list that scrolls, at its end, as a finger would leave it.
+proc scrollTo(scene: FrameScene, y: float32) =
+  ## The list that scrolls, at `y` (clamped to its end), as a finger would leave it.
   let target = uiTarget(SceneSettingsId, 1, create = false)
   for r in target.regions:
     if r.scrollY > 0:
-      target.input.scrollTo(r.key, 0, 10000)
+      target.input.scrollTo(r.key, 0, min(y, r.scrollY.float32))
   discard scene.draw()
+
+proc scrollToEnd(scene: FrameScene) = scene.scrollTo(10000)
 
 block the_form:
   let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
@@ -547,7 +549,8 @@ block the_frame_page:
   discard scene.draw()
   scene.tap(regionWith(OptionBase + 1))
   discard scene.draw()
-  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[2])
+  scene.scrollToEnd()
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[^1])
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-scale.png")
   # On 480 px the scales stop at 1.5 (a layout of 320 px): Automatic, 0.25,
@@ -557,6 +560,7 @@ block the_frame_page:
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-changed.png")
   # Scanning goes to the host.
+  scene.scrollTo(0)
   scene.tap(regionWith(20000 + 0))
   doAssert actions == @["open", "scan"], $actions
   discard scene.draw()
@@ -571,14 +575,16 @@ block the_frame_page:
   online = true
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-online.png")
-  # A value picked again as it is changes nothing.
+  # Save hands over what was picked, as it is too: the host applies what
+  # differs from what it has (fos_frame_settings.c, frame_settings_linux.nim).
   scene.scrollToEnd()
-  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[1])
+  let boxes = uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)
+  scene.tap(boxes[^1]) # the scale, the last select box
   discard scene.draw()
-  scene.tap(regionWith(OptionBase + 0)) # 0°, as it is
+  scene.tap(regionWith(OptionBase + 0)) # Automatic, as it is
   discard scene.draw()
   scene.tap(regionWith(1))
-  doAssert applied.len == 1, $applied
+  doAssert applied.len == 2 and applied[1] == %*{"renderScale": 0.0}, $applied
   discard scene.draw()
   # Render again at once; Restart and Reboot only on a second tap.
   scene.scrollToEnd()
@@ -594,13 +600,13 @@ block the_frame_page:
   discard scene.draw()
   scene.tap(regionWith(20000 + 2))
   discard scene.draw()
-  scene.tap(regionWith(20000 + 0)) # anything else in between asks again
+  scene.tap(regionWith(20000 + 1)) # anything else in between asks again
   discard scene.draw()
   scene.tap(regionWith(20000 + 2))
-  doAssert panelSent == @[evRender, evReboot], $panelSent
+  doAssert panelSent == @[evRender, evReboot, evRender], $panelSent
   discard scene.draw()
   scene.tap(regionWith(20000 + 2))
-  doAssert panelSent == @[evRender, evReboot, evRestart], $panelSent
+  doAssert panelSent == @[evRender, evReboot, evRender, evRestart], $panelSent
   discard scene.draw()
   # Back, the frame's back and the gear: to the scene's form, never away.
   scene.tap(regionWith(0))
