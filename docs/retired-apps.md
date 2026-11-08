@@ -18,6 +18,7 @@ noticing. `docs/retired-apps.json` lists them:
 | `data/beRecycle` | `repo/apps/json/beRecycle` | 2026.10.13 | a throw in `get()` fails the node |
 | `render/chart` | `repo/apps/image/chart` | 2026.10.13 | nothing new: an older frame keeps the built-in chart it has |
 | `data/eventsToAgenda` | `repo/apps/text/eventsToAgenda` | 2026.10.22 | nothing new: an older frame keeps the built-in agenda it has |
+| `render/calendar` | `repo/apps/image/calendar` | 2026.11.5 | nothing new: an older frame keeps the built-in calendar it has |
 
 The replacement runs only on a runtime that has what it `needs`. Firmware
 older than `runtime` still has the Nim app, so it is sent the Nim keyword.
@@ -35,7 +36,8 @@ config, cache and edges are untouched, since the fields keep their names.
 A node that carries its own `data.sources` is an edited copy and is left alone.
 
 **Render apps.** A retired render app's replacement is a data app that returns
-the image (the chart returns an SVG sized to the area it draws into), so a
+the image (the chart and the calendar return an SVG sized to the area they
+draw into), so a
 node of it in the render flow, with an edge into its `prev` or out of its
 `next`, cannot just change keyword. The entry's `renderFlow` names what takes
 its place: the node keeps its id and its place in the chain as that app
@@ -43,7 +45,10 @@ its place: the node keeps its id and its place in the chain as that app
 replacement takes the old config, cache and the edges into its fields, and
 feeds the image (`fieldInput/image`). A node read as a value just changes
 keyword. Going back to an older runtime only changes the new node's keyword,
-since the built-in chart works as a value too.
+since the built-in chart and calendar work as values too. The calendar's
+`inputImage` (an image to draw on) has no field in the port. In the render
+flow nothing read it; a calendar read as a value with an image wired into it
+returns the calendar alone, to be drawn over that image by its consumer.
 
 - **Backend:** an alembic migration (frames, their deploy baseline,
   templates), then every door scenes come in by: template import, backup

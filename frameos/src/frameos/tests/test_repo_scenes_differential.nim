@@ -23,8 +23,8 @@ const SamplesDir = "../repo/scenes/samples"
 
 # downloadUrl is deliberately NOT here: every sample but XKCD (excluded via
 # downloadImage) leaves its url empty, which fails fast and deterministically
-# — and that keeps the Calendar-family scenes, whose render/calendar edge is
-# exactly the fused generator this comparison wants to exercise.
+# — and that keeps the Calendar-family scenes, whose calendar -> render/image
+# edge (a JS app's SVG into the canvas) is exactly the fused generator this comparison wants to exercise.
 let networkApps = toHashSet([
   "downloadImage", "wikicommons",
   "frameOSGallery", "weather", "beRecycle", "unsplash", "immich",
