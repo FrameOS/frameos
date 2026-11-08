@@ -230,7 +230,7 @@ proc getInterpretedApp(keyword: string, app: AppRoot, context: ExecutionContext)
 proc runInterpretedApp(keyword: string, app: AppRoot, context: ExecutionContext) =
   if app.isDynamicJsApp():
     if isRetiredRenderApp(keyword) and context.hasImage and not context.image.isNil:
-      # A render/chart node still on a Pi's disk runs the JavaScript chart,
+      # A render/chart or render/calendar node still on a Pi's disk runs its JavaScript port,
       # which returns its image instead of drawing it (frameos/retired_apps.nim).
       let value = app.getDynamicJsApp(context)
       if value.kind == fkImage and not value.asImage().isNil:

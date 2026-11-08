@@ -632,24 +632,24 @@ def test_static_byte_iter_config_value_is_wrapped_in_a_spool():
 
 
 def test_static_json_config_value_is_parsed_not_quoted():
-    # A json port's static value (render/calendar `events`, logic/setAsState
-    # `valueJson`) is a JsonNode in the compiled AppConfig; the editor stores the
-    # text, and a hand-written scene may carry the object.
-    def scene_with(events):
+    # A json port's static value (logic/setAsState `valueJson`, data/log
+    # `inputJson`) is a JsonNode in the compiled AppConfig; the editor stores
+    # the text, and a hand-written scene may carry the object.
+    def scene_with(value):
         return {
             "id": "scene",
             "name": "Scene",
             "nodes": [
                 {"id": "event", "type": "event", "data": {"keyword": "render"}, "position": {"x": 0, "y": 0}},
                 {
-                    "id": "cal",
+                    "id": "set",
                     "type": "app",
-                    "data": {"keyword": "render/calendar", "config": {"events": events, "year": "2024"}},
+                    "data": {"keyword": "logic/setAsState", "config": {"stateKey": "events", "valueJson": value}},
                     "position": {"x": 1, "y": 1},
                 },
             ],
             "edges": [
-                {"source": "event", "sourceHandle": "next", "target": "cal", "targetHandle": "prev"},
+                {"source": "event", "sourceHandle": "next", "target": "set", "targetHandle": "prev"},
             ],
             "fields": [],
             "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
@@ -657,10 +657,9 @@ def test_static_json_config_value_is_parsed_not_quoted():
 
     frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
     text_source = write_scene_nim(frame, scene_with('[{"summary": "Dentist", "startTime": "2024-03-05"}]'))
-    assert 'events: parseJson("[{\\"summary\\": \\"Dentist\\", \\"startTime\\": \\"2024-03-05\\"}]")' in text_source
+    assert 'valueJson: parseJson("[{\\"summary\\": \\"Dentist\\", \\"startTime\\": \\"2024-03-05\\"}]")' in text_source
     object_source = write_scene_nim(frame, scene_with([{"summary": "Dentist"}]))
-    assert 'events: parseJson("[{\\"summary\\": \\"Dentist\\"}]")' in object_source
+    assert 'valueJson: parseJson("[{\\"summary\\": \\"Dentist\\"}]")' in object_source
     # Text that is not JSON becomes null rather than a string the app would
-    # trip over; the default (an empty list in config.json) parses as one.
-    assert 'events: parseJson("null")' in write_scene_nim(frame, scene_with("not json"))
-    assert 'events: parseJson("[]")' in write_scene_nim(frame, scene_with(None))
+    # trip over.
+    assert 'valueJson: parseJson("null")' in write_scene_nim(frame, scene_with("not json"))

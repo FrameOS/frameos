@@ -7,7 +7,7 @@ import ../utils/http_client
 import ../utils/memory
 
 # The byte-side tier, end to end through the interpreter: the Calendar graph
-# (downloadUrl -> icalJson -> render/calendar -> render/image) fed a multi-MB
+# (downloadUrl -> icalJson -> the calendar JS app -> render/image) fed a multi-MB
 # ICS document over real HTTP, with an ESP32-sized memory budget so the body
 # spools to a file. This is the scene shape phase 2 was built for — big input,
 # small output — exercised as a scene rather than as units
@@ -72,6 +72,15 @@ proc serverLoop() {.thread.} =
     client.close()
   server.close()
 
+const CalendarAppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "apps" / "image" / "calendar"
+
+proc calendarApps(): JsonNode =
+  ## The scene carries the calendar JS app the way a converted scene does.
+  %*{"calendar": {"sources": {
+    "app.ts": readFile(CalendarAppDir / "app.ts"),
+    "config.json": readFile(CalendarAppDir / "config.json")
+  }}}
+
 proc node(id: int, nodeType: string, data: JsonNode): DiagramNode =
   DiagramNode(id: id.NodeId, nodeType: nodeType, data: data)
 
@@ -89,7 +98,7 @@ proc buildScene(url: string): ExportedInterpretedScene =
     nodes: @[
       node(1, "event", %*{"keyword": "render"}),
       node(2, "app", %*{"keyword": "render/image", "config": {}}),
-      node(3, "app", %*{"keyword": "render/calendar", "config": {}}),
+      node(3, "app", %*{"keyword": "calendar", "config": {}}),
       node(4, "app", %*{"keyword": "data/icalJson", "config": {
         "exportFrom": "last month", "exportUntil": "next month",
         "exportCount": "500"}}),
@@ -101,7 +110,7 @@ proc buildScene(url: string): ExportedInterpretedScene =
       edge(3, 4, "fieldOutput", 3, "fieldInput/events"),
       edge(4, 5, "fieldOutput", 4, "fieldInput/ical")
     ],
-    apps: %*{}
+    apps: calendarApps()
   )
 
 createThread(serverThread, serverLoop)

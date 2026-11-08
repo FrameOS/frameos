@@ -263,7 +263,7 @@ honest).
 | Lever | Saves | Cost |
 |---|---:|---|
 | `--panics:on` | −147,920 (measured 2026-09-01) | An out-of-memory render reboots the frame instead of degrading (the `except Defect` containment in `embedded_main.nim` goes dead). The escape hatch is a patched `system/fatal.nim` that longjmps to a barrier at the render entry. |
-| calendar, icalJson and eventsToAgenda as JS repo apps | −88,613 of Nim (50,110 + 30,003 + 8,500) | The retired-apps path (`docs/retired-apps.md`): a port, conversions on both planes, and iCal parsing in QuickJS within an ESP32's memory. |
+| calendar, icalJson and eventsToAgenda as JS repo apps (eventsToAgenda done 2026-10-29, calendar 2026-11-08) | −88,613 of Nim (50,110 + 30,003 + 8,500) | The retired-apps path (`docs/retired-apps.md`): a port, conversions on both planes, and iCal parsing in QuickJS within an ESP32's memory. |
 | One XML parser | ≈ −10 KB | `parsexml`, `xmlparser`, `xmltree` and `lexbase` (12,668 B) stay because `xmlToJson` and pixie's full-SVG fallback use them, while pixie's fast parser covers markup an app writes. Making one complete (entities, CDATA, declarations, text) is parser work with correctness risk. |
 | Tailwind classes as a table (#628) | ≈ −2 KB, not measured | `applyClass` is a 3,992 B `case` over class names plus 1,916 B of strings. |
 | `appCapabilities` as data | ≈ −3 KB, not measured | The generated `apps/apps.nim` builds an object with five seqs per app at runtime (3,694 B of code, 1,736 B of strings). |

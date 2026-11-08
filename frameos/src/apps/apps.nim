@@ -18,7 +18,6 @@ import apps/logic/breakIfRendering/app_loader as logic_breakIfRendering_loader
 import apps/logic/ifElse/app_loader as logic_ifElse_loader
 import apps/logic/nextSleepDuration/app_loader as logic_nextSleepDuration_loader
 import apps/logic/setAsState/app_loader as logic_setAsState_loader
-import apps/render/calendar/app_loader as render_calendar_loader
 import apps/render/color/app_loader as render_color_loader
 import apps/render/gradient/app_loader as render_gradient_loader
 import apps/render/image/app_loader as render_image_loader
@@ -61,7 +60,6 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     AppEntry(keyword: "logic/ifElse", initProc: logic_ifElse_loader.init, setFieldProc: logic_ifElse_loader.setField, getProc: nil, runProc: logic_ifElse_loader.run),
     AppEntry(keyword: "logic/nextSleepDuration", initProc: logic_nextSleepDuration_loader.init, setFieldProc: logic_nextSleepDuration_loader.setField, getProc: nil, runProc: logic_nextSleepDuration_loader.run),
     AppEntry(keyword: "logic/setAsState", initProc: logic_setAsState_loader.init, setFieldProc: logic_setAsState_loader.setField, getProc: nil, runProc: logic_setAsState_loader.run),
-    AppEntry(keyword: "render/calendar", initProc: render_calendar_loader.init, setFieldProc: render_calendar_loader.setField, getProc: render_calendar_loader.get, runProc: render_calendar_loader.run),
     AppEntry(keyword: "render/color", initProc: render_color_loader.init, setFieldProc: render_color_loader.setField, getProc: render_color_loader.get, runProc: render_color_loader.run),
     AppEntry(keyword: "render/gradient", initProc: render_gradient_loader.init, setFieldProc: render_gradient_loader.setField, getProc: render_gradient_loader.get, runProc: render_gradient_loader.run),
     AppEntry(keyword: "render/image", initProc: render_image_loader.init, setFieldProc: render_image_loader.setField, getProc: render_image_loader.get, runProc: render_image_loader.run),
@@ -92,7 +90,6 @@ else:
     AppEntry(keyword: "logic/ifElse", initProc: logic_ifElse_loader.init, setFieldProc: logic_ifElse_loader.setField, getProc: nil, runProc: logic_ifElse_loader.run),
     AppEntry(keyword: "logic/nextSleepDuration", initProc: logic_nextSleepDuration_loader.init, setFieldProc: logic_nextSleepDuration_loader.setField, getProc: nil, runProc: logic_nextSleepDuration_loader.run),
     AppEntry(keyword: "logic/setAsState", initProc: logic_setAsState_loader.init, setFieldProc: logic_setAsState_loader.setField, getProc: nil, runProc: logic_setAsState_loader.run),
-    AppEntry(keyword: "render/calendar", initProc: render_calendar_loader.init, setFieldProc: render_calendar_loader.setField, getProc: render_calendar_loader.get, runProc: render_calendar_loader.run),
     AppEntry(keyword: "render/color", initProc: render_color_loader.init, setFieldProc: render_color_loader.setField, getProc: render_color_loader.get, runProc: render_color_loader.run),
     AppEntry(keyword: "render/gradient", initProc: render_gradient_loader.init, setFieldProc: render_gradient_loader.setField, getProc: render_gradient_loader.get, runProc: render_gradient_loader.run),
     AppEntry(keyword: "render/image", initProc: render_image_loader.init, setFieldProc: render_image_loader.setField, getProc: render_image_loader.get, runProc: render_image_loader.run),
@@ -176,13 +173,6 @@ const capabilities_data_rotateImage = AppCapabilities(
       forwardsBounds: @[ForwardsBoundsSpec(output: "image", input: "image", boundsField: "rotationDegree", swapValues: @["90", "90.0", "270", "270.0", "-90", "-90.0", "-270", "-270.0", "450", "450.0"], keepValues: @["0", "0.0", "180", "180.0", "-180", "-180.0", "360", "360.0", "540", "540.0"], widthFrom: "", heightFrom: "", multiplyFrom: @[])],
       requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "rotationDegree", value: "0")])
-const capabilities_render_calendar = AppCapabilities(
-      providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @[])],
-      forwardsTarget: @[],
-      forwardsBounds: @[],
-      requestsBounds: @[],
-      fieldDefaults: @[FieldMatch(field: "inputImage", value: "")])
 const capabilities_render_color = AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["natural"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @["color"])],
@@ -227,7 +217,6 @@ proc appCapabilities*(keyword: string): AppCapabilities =
   of "data/localImage": capabilities_data_localImage
   of "data/resizeImage": capabilities_data_resizeImage
   of "data/rotateImage": capabilities_data_rotateImage
-  of "render/calendar": capabilities_render_calendar
   of "render/color": capabilities_render_color
   of "render/gradient": capabilities_render_gradient
   of "render/image": capabilities_render_image

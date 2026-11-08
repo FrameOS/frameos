@@ -66,7 +66,7 @@ schema; `frameos/app_capabilities.nim` holds the types.
 | Protocol | Declared on | Meaning | Used by |
 |---|---|---|---|
 | `materialized` | — | whole value returned (the floor) | everything |
-| `intoTarget(fit)` | output port | producer writes into a caller-supplied `Image` with the requested fit | the 8 former whitelist producers, `render/calendar`, `render/gradient`, `render/color` |
+| `intoTarget(fit)` | output port | producer writes into a caller-supplied `Image` with the requested fit | the 8 former whitelist producers, `render/gradient`, `render/color`; a JS app's `frameos.svg()` renders into an offered target too (the chart, the calendar) |
 | `providesTarget` | input port | consumer offers a target to whatever feeds this input | `render/image` |
 | `forwardsTarget` | output port | transformer passes the target request upstream and mutates in place | `render/opacity`, `data/rotateImage` at 180° |
 | `byteIter` | input port | consumes a string as a bounded-window `Spool` | `icalJson` |
@@ -170,7 +170,8 @@ plan is not the claim; now one log field says which you have.
 
 ### The image side
 
-- The whitelist block is deleted; the 8 producers + `render/calendar` declare
+- The whitelist block is deleted; the 8 producers + `render/calendar` (since
+  retired for the calendar JS app, whose SVG takes the same target) declare
   `intoTarget`, `render/image` declares `providesTarget`, and the planner
   wires every edge. Two tiers above the floor: the live canvas (uncached
   producer decodes straight into it) and a canvas-sized owned scratch
