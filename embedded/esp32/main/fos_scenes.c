@@ -837,6 +837,11 @@ static int load_scene_index(void)
  * be recognised as a no-op. Empty means "nothing resident". */
 static char s_resident_scene_id[SCENE_ID_LEN]; /* forward-declared above */
 
+void fos_scenes_loading_begin(void)
+{
+    fos_display_loading_begin(xTaskGetTickCount(), fos_config()->rotate);
+}
+
 /* A resident scene may embed others: a split screen's panels are scene nodes
  * pointing at sibling scenes of the same payload. The runtime asks for each
  * one by id while the split starts (interpreter.nim `sceneLoader`): its slot

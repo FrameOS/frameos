@@ -476,6 +476,12 @@ scene it covers stays resident), but the panel still waits for a render. A
 switch begun while another still loads keeps the first one's start, and its
 mark if one is up. A frame rendered for an older switch ends nothing.
 
+A press can count as one too: a JSX element with the `loading` attribute
+(docs/jsx-ui.md "Events"; the gear and the frame page's Back in the scene
+settings are built with it) begins the mark through `uiLoadingHook`
+(`ui/events.nim`), on the thread that runs scene code, before its handler
+runs. No new scene is involved, and the frame the handler asks for lands it.
+
 **The mark** is `frameos/loading_mark.nim`, one drawing for both runtimes,
 a frame of it every 50 ms. It composes a rectangle of the panel's own pixels
 from a copy of what was there, so a host puts it away by writing the copy

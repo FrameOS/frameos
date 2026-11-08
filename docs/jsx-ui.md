@@ -460,6 +460,17 @@ export const get = () => (
 - **The frame renders again after a handler**, whatever it did: a handler
   changes what the next `get()` returns (a module variable, `frameos.setState`,
   `frameos.remember`), and the picture follows.
+- **`loading`** says a press on this element may take a while (2026.11.5+):
+  `<div loading onClick={openPage}>`, or `loading={needsFetch}` for some
+  presses only. It is the mark a scene switch shows (docs/realtime-rendering.md
+  "A switch that takes a while"), under the same rules: nothing for 200 ms,
+  so a quick press shows nothing, and the next frame on the panel ends it.
+  It holds for what its element's handlers run, one press at a time: the
+  scene cannot leave it on, and it goes with the frame the handler asked for
+  (every handler asks for one). Drags don't count: `onPointerMove` starts no
+  mark. It shows where the switch's does, on the panels that have one (a Pi's
+  framebuffer family, an ESP32 RGB LCD); elsewhere, e-paper and the preview,
+  it does nothing.
 - **`hover:`** applies while the pointer is over the element, **`active:`**
   while it is pressed on it, **`group-hover:`** while the pointer is over an
   ancestor with the class `group`. A change renders again. A finger that

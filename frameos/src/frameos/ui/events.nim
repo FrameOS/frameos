@@ -35,6 +35,9 @@ type
   UiHandlerCall* = proc(handler: int, name: string, event: JsonNode, hit: UiHit) {.closure, raises: [].}
     ## Runs handler number `handler` of the UI's last render, in its app,
     ## with the event, where in the element it landed and the element's size.
+  UiLoadingHook* = proc() {.nimcall, gcsafe, raises: [].}
+    ## The host's loading mark, as for a scene switch: it shows if the next
+    ## frame takes a while and that frame ends it (docs/jsx-ui.md "Events").
 
   UiTarget* = ref object
     sceneId*: string
@@ -89,6 +92,7 @@ const
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off, raises: [].}
 
 var
+  uiLoadingHook*: UiLoadingHook ## nil on a host with no mark (the preview)
   targets {.threadvar.}: seq[UiTarget]
   physicalKeyboard {.threadvar.}: bool
     ## A key was typed on a keyboard: fields need no keyboard on the screen.
@@ -606,6 +610,12 @@ when not defined(frameosEmbedded):
 
 # ------------------------------------------------------------------ dispatch
 
+proc expectWait(r: UiRegion, kind: int) {.inline.} =
+  ## A press on a `loading` element: the frame it asks for may take a while.
+  ## Every move of a drag is not a press.
+  if r.loading and kind != ord(uePointerMove) and not uiLoadingHook.isNil:
+    uiLoadingHook()
+
 proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
   ## Hands a pointer event, or a key for a field, to the scene's UIs. True
   ## when the frame should render again: a handler ran (whatever it changed,
@@ -846,6 +856,7 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
           if r.key == captured:
             let handler = r.handlers[UiEvent(kind)]
             if handler > 0:
+              r.expectWait(kind)
               target.call(handler - 1, event, payload, [float32(lx - r.x), float32(ly - r.y), r.w, r.h])
               target.inputOnly = false # whatever the handler changed, get() shows it
               handled = true
@@ -879,6 +890,7 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
           if kind == ord(ueLongPress): target.holdKey(handler - 1 - KeyBase, pointer, lx)
           else: target.pressKey(handler - 1 - KeyBase)
         else:
+          r.expectWait(kind)
           target.call(handler - 1, event, payload, [float32(lx - r.x), float32(ly - r.y), r.w, r.h])
           target.inputOnly = false # whatever the handler changed, get() shows it
         result = true

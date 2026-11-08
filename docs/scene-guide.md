@@ -499,6 +499,10 @@ export function get(app, context) {
   `active:` and `group-hover:` (inside a `group`) follow the pointer. Each is
   a render: on e-paper a tap answers in a refresh, so keep hover: and
   active: for LCDs.
+- A handler whose next frame is slow (a fetch, a whole new page): add
+  `loading` to its element, `<div loading onClick={openPage}>`, and the
+  frame's loading mark answers if the frame is late. The next frame ends it.
+  `loading={needsFetch}` turns it on for some presses only.
 - Every render builds the whole tree again, and what did not change is
   taken back laid out and drawn: an LCD repaints only what changed. For a
   card repeated in a list, `memo(Card)` (as React's) skips running it while
@@ -777,6 +781,8 @@ interface FrameOSElementProps {
   onPointerMove?: (event: FrameOSUiEvent) => void;
   /** A swipe that began on the element, with its direction; one in from the screen edge is the frame's. */
   onSwipe?: (event: FrameOSUiEvent) => void;
+  /** With a handler: a press may take a while, so the frame's loading mark answers if the next frame is late (2026.11.5+). */
+  loading?: boolean;
   /** <input> and <textarea>: the text shown (keep it in a variable, set it in onChange), a hint while empty, and the kind of field. */
   value?: string | number;
   placeholder?: string;

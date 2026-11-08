@@ -18,6 +18,7 @@ import frameos/driver_render_hint
 import frameos/render_stats
 import frameos/local_access
 import frameos/loading_mark_panel
+from frameos/ui/events import uiLoadingHook
 import frameos/cloud/device_flow
 import frameos/cloud/link_state
 import frameos/logger
@@ -86,6 +87,18 @@ proc beginSceneLoading(self: RunnerThread) =
   ## (frameos/loading_mark). Called before the new scene's init, which is
   ## part of the wait.
   discard beginLoadingMark(self.frameConfig.device, self.frameConfig.rotate, self.frameConfig.flip)
+
+var loadingRunner {.threadvar.}: RunnerThread
+  ## Who a press on a `loading` element is for: UI events run on this thread.
+
+proc beginPressLoading() {.nimcall, gcsafe, raises: [].} =
+  ## uiLoadingHook: the frame this press asks for counts as a switch's first.
+  try:
+    {.cast(gcsafe).}:
+      if not loadingRunner.isNil:
+        loadingRunner.beginSceneLoading()
+  except Exception:
+    discard
 
 # -------- The runner's wake
 # Both loops below sleep in slices and used to notice an event or a render
@@ -1020,6 +1033,8 @@ proc sceneEvents*(self: RunnerThread): EventLoop =
 const MessageLoopYieldEvery = DefaultDrainBudget
 
 proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.async.} =
+  loadingRunner = self
+  uiLoadingHook = beginPressLoading
   var waitTime = 10
   var iterations = 0
   let events = self.sceneEvents

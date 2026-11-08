@@ -44,6 +44,7 @@ type
     key*: int                        ## its place in the tree, the same next render
     handlers*: array[UiEvent, int]   ## a handler's number + 1, 0 for none
     hover*, active*, group*: bool
+    loading*: bool                   ## `loading`: a press may take a while (ui/events.nim uiLoadingHook)
     field*: uint8                    ## 1 an <input>, 2 a <textarea>, 3 a number input, 4 a <select>
     scrollX*, scrollY*: float32      ## how far a box can scroll each way; 0: not that way
     # Plain values only: regions are copied by the dozen on every layout
@@ -158,7 +159,7 @@ type
     # What the pointer can do to it (UiRegion).
     key: int
     handlers: array[UiEvent, int]
-    hover, active, group: bool
+    hover, active, group, loading: bool
     field: uint8          # an <input>, a <textarea> or a <select> (UiRegion.field) ...
     value: string         # ... and its text
     keep: bool            # ukText: a field's text, its spaces kept as typed
@@ -466,6 +467,7 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
     let value = n.attr(if event == ueChange and n.attr("on-input").len > 0: "on-input" else: handlerAttrs[event])
     if value.len > 0 and number(value, 0, value.len, id):
       result.handlers[event] = int(id) + 1
+  result.loading = n.attr("loading") == "true"
   var states: set[UiState]
   if groupHover: states.incl usGroupHover
   if result.hover and key in input.hovered: states.incl usHover
@@ -1583,8 +1585,8 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
       n.field > 0 or scrolls:
     # In paint order: whatever comes later is on top.
     regions.add UiRegion(x: x, y: y, w: w, h: h, visible: [x, y, x + w, y + h], key: n.key,
-      handlers: n.handlers, hover: n.hover, active: n.active, group: n.group, field: n.field,
-      scrollX: (if b.overflowX == ovScroll: n.maxX else: 0),
+      handlers: n.handlers, hover: n.hover, active: n.active, group: n.group, loading: n.loading,
+      field: n.field, scrollX: (if b.overflowX == ovScroll: n.maxX else: 0),
       scrollY: (if scrollsY: n.maxY else: 0))
   case n.kind
   of ukText:
