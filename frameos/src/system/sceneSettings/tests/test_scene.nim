@@ -609,21 +609,10 @@ block the_frame_page:
   doAssert panelSent == @[evRender, evReboot, evRender, evRestart], $panelSent
   discard scene.draw()
   # Back, the frame's back and the gear: to the scene's form, never away.
-  # Back and the gear each draw a whole page: the loading mark answers.
-  var marks {.global.} = 0
-  uiLoadingHook = proc() {.nimcall, gcsafe, raises: [].} =
-    {.cast(gcsafe).}:
-      inc marks
-  doAssert regionWith(0).loading and regionWith(2).loading
-  doAssert not regionWith(1).loading, "Save stays on its page"
   scene.tap(regionWith(0))
-  doAssert marks == 1, $marks
   doAssert scene.state["page"].getStr() == "scene"
   discard scene.draw()
-  doAssert not regionWith(0).loading, "Cancel leaves through a switch"
   scene.tap(regionWith(2))
-  doAssert marks == 2, $marks
-  uiLoadingHook = nil
   discard scene.draw()
   sent.setLen(0)
   scene.send(evBack, %*{})

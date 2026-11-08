@@ -20,7 +20,6 @@ import frameos/channels
 import frameos/single_scene_host
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
-from frameos/ui/events import uiLoadingHook
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
 import frameos/values
@@ -781,13 +780,6 @@ proc frameSettingsDo(action: string) {.nimcall, gcsafe, raises: [].} =
 sceneSettings.frameSettingsRead = frameSettingsJson
 sceneSettings.frameSettingsApply = frameSettingsSet
 sceneSettings.frameSettingsAction = frameSettingsDo
-
-proc fos_scenes_loading_begin() {.importc, cdecl, raises: [].}
-
-proc pressLoading() {.nimcall, gcsafe, raises: [].} =
-  fos_scenes_loading_begin()
-
-uiLoadingHook = pressLoading
 
 proc selectScene*(sceneIdText: string): bool =
   when defined(memProbe): memProbe("  >>> selectScene " & sceneIdText)

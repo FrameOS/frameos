@@ -62,10 +62,6 @@ char *fos_scenes_json_copy(size_t *out_len);
  * payload has no such scene. */
 char *fos_scenes_read_scene_json(const char *scene_id, size_t *out_len);
 
-/* A press on a `loading` JSX element, on the render task: the LCD's loading
- * mark counts from now and the next picture ends it, as for a switch. */
-void fos_scenes_loading_begin(void);
-
 /* Ask the render task to force a backend sync on its next pass. */
 void fos_scenes_request_sync(void);
 

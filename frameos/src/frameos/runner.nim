@@ -18,7 +18,6 @@ import frameos/driver_render_hint
 import frameos/render_stats
 import frameos/local_access
 import frameos/loading_mark_panel
-from frameos/ui/events import uiLoadingHook
 import frameos/cloud/device_flow
 import frameos/cloud/link_state
 import frameos/logger
@@ -82,23 +81,10 @@ proc pushToPanel(image: Image, rotation: int, markSwitch = -1) =
     noteDriverRendered()
 
 proc beginSceneLoading(self: RunnerThread) =
-  ## The scene shown is going away and the next one is being built: on a
-  ## fast panel the loading mark shows if that takes a while
-  ## (frameos/loading_mark). Called before the new scene's init, which is
-  ## part of the wait.
+  ## A new picture is on its way, from a switch or a render: on a fast panel
+  ## the loading mark shows if it takes a while (frameos/loading_mark). A
+  ## switch calls this before the new scene's init, which is part of the wait.
   discard beginLoadingMark(self.frameConfig.device, self.frameConfig.rotate, self.frameConfig.flip)
-
-var loadingRunner {.threadvar.}: RunnerThread
-  ## Who a press on a `loading` element is for: UI events run on this thread.
-
-proc beginPressLoading() {.nimcall, gcsafe, raises: [].} =
-  ## uiLoadingHook: the frame this press asks for counts as a switch's first.
-  try:
-    {.cast(gcsafe).}:
-      if not loadingRunner.isNil:
-        loadingRunner.beginSceneLoading()
-  except Exception:
-    discard
 
 # -------- The runner's wake
 # Both loops below sleep in slices and used to notice an event or a render
@@ -503,8 +489,6 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
     try:
       timer = getMonoTime()
       self.isRendering = true
-      # The newest scene switch: this pass's frame lands it (the loading mark).
-      let markSwitch = loadingMarkSwitches()
       # Re-enable scene render logs once the fast-render pause window elapses,
       # regardless of which render path this iteration takes. Otherwise switching
       # to a slow scene after a fast burst (when the block below is skipped) would
@@ -529,6 +513,12 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         continue
       if sceneId != self.currentSceneId:
         self.currentSceneId = sceneId
+      # This pass's frame ends the loading mark, whoever began it. The pass
+      # counts as a wait of its own, except for an animation: a scene drawing
+      # continuously would blink the mark on every frame a little over the delay.
+      if currentScene.isNil or currentScene.id != sceneId or currentScene.refreshInterval >= 1:
+        self.beginSceneLoading()
+      let markSwitch = loadingMarkSwitches()
       if lastSceneId != sceneId:
         sceneChangedThisCycle = true
         var sceneInitialized = true
@@ -824,6 +814,9 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       # Never let one escaped exception kill the render thread (and with it
       # the whole process under systemd). Log, reset state, and back off.
       self.isRendering = false
+      # No frame is coming to end the loading mark this pass began.
+      withLoadingMarkAway(loadingMarkSwitches()):
+        discard
       try:
         self.logSignal(%*{"event": "render:error:loop", "error": $e.msg, "stacktrace": e.getStackTrace()})
       except Exception:
@@ -1033,8 +1026,6 @@ proc sceneEvents*(self: RunnerThread): EventLoop =
 const MessageLoopYieldEvery = DefaultDrainBudget
 
 proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.async.} =
-  loadingRunner = self
-  uiLoadingHook = beginPressLoading
   var waitTime = 10
   var iterations = 0
   let events = self.sceneEvents

@@ -150,8 +150,6 @@ interface FrameOSElementProps {
   onPointerMove?: (event: FrameOSUiEvent) => void;
   /** A swipe that began on the element, with its direction; one in from the screen edge is the frame's. */
   onSwipe?: (event: FrameOSUiEvent) => void;
-  /** With a handler: a press may take a while, so the frame's loading mark answers if the next frame is late (2026.11.5+). */
-  loading?: boolean;
   /** <input> and <textarea>: the text shown (keep it in a variable, set it in onChange), a hint while empty, and the kind of field. */
   value?: string | number;
   placeholder?: string;

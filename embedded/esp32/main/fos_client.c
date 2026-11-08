@@ -2420,6 +2420,10 @@ static void client_task(void *arg)
                 s_loud_next = false;
                 if (s_anim.active && !quiet) log_animation("running", true);
                 set_quiet(quiet);
+                /* Any render that takes a while shows the loading mark; an
+                 * animation does not, or it would blink on every frame a
+                 * little over the delay. */
+                if (!s_anim.active) fos_display_loading_begin(xTaskGetTickCount(), fos_config()->rotate);
                 s_render_in_flight = true;
                 render_once(quiet);
                 s_render_in_flight = false;

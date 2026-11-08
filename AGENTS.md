@@ -438,10 +438,9 @@
   `loading_mark_panel.nim`, straight into /dev/fb0) or a core-0 task (ESP32,
   `lcd_loading.c` + `lcd_st7701s_rgb.c`) draws it over the picture showing,
   and the next frame put on the panel ends it. A host's switch begins it
-  (runner.nim `beginSceneLoading`, fos_scenes.c at apply), never the
-  dispatcher; so does a press on a JSX element with `loading`
-  (`uiLoadingHook`, `docs/jsx-ui.md` "Events"), which is how a scene asks for
-  it. The mark writes behind the driver, so on a Pi every push to the
+  (runner.nim `beginSceneLoading`, fos_scenes.c at apply), and so does every
+  render pass that is not an animation's (so a slow tap or refresh shows it
+  with nothing asking), never the dispatcher. The mark writes behind the driver, so on a Pi every push to the
   driver goes through `withLoadingMarkAway`, and on the ESP32 every present
   runs `present_back` (which puts it away): a new push or present path keeps
   that, or the driver's row diff and the damage repaint go wrong. The

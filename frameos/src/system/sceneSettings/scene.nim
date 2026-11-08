@@ -410,12 +410,6 @@ proc on(node: sink SvgNode, attr: string, handler: int): SvgNode =
   node.attrs.add((attr, $handler))
   node
 
-proc slow(node: SvgNode): SvgNode =
-  ## Pressing it draws a whole page: the loading mark answers if that takes
-  ## a while (docs/jsx-ui.md "Events").
-  node.attrs.add(("loading", "true"))
-  node
-
 type Look = object
   paper: bool
   size, pad, gap, line: int
@@ -444,7 +438,7 @@ proc gear(look: Look, lit: bool): SvgNode =
   i.px("h", look.size * 6 div 5)
   let icon = el("svg", move i, path)
   icon.attrs.add(("viewBox", "0 0 48 48"))
-  el("div", move c, icon).on("on-click", HGear).slow()
+  el("div", move c, icon).on("on-click", HGear)
 
 proc fieldBox(look: Look): string =
   result = "w-full rounded-lg"
@@ -700,9 +694,7 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   let
     header = el("div", move c)
     frame = not info.isNil and self.onFrame()
-  # Cancel leaves through a switch, which has the mark already.
-  header.children.add(if frame: look.button("Back", HCancel, false).slow()
-    else: look.button("Cancel", HCancel, false))
+  header.children.add look.button(if frame: "Back" else: "Cancel", HCancel, false)
   header.children.add el("span", "grow truncate text-center font-bold",
     SvgNode(text: if frame: "Frame settings" else: title))
   if not info.isNil:
