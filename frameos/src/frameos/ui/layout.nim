@@ -65,6 +65,7 @@ type
     shift*: int          ## ... letters in capitals: 1 the next one, 2 all of them
     accents*: int        ## the key whose accents show above it (its byte); 0 for none
     accentX*: float32    ## ... the x of the finger that holds it: the accent nearest lights, < 0 none
+    accentFrom*: float32 ## ... and where it held: a letter's row lights by how far it went from there
     accentLit*: int      ## ... which one the last layout lit, -1 for none
     flash*: int          ## a key just typed (its byte), drawn lit for a moment after the press; 0 none
     flashDrawn*: bool    ## ... and a layout has drawn it so
@@ -1794,7 +1795,9 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
   ## and under it when there is no room above. It goes on top of everything;
   ## the keyboard stays there to touch (a tap on it puts the row away and
   ## types, ui/events.nim). False for a key without accents.
-  let count = accentCount(input.accents)
+  let
+    count = formCount(input.accents)
+    hinted = hintOf(input.accents).len > 0
   if count == 0:
     return false
   let
@@ -1821,14 +1824,19 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
     # not fit between `lo` and `hi`.
     keyW = max(min(int(r.w), (hi - lo - 4 - (count + 1) * gap) div count), 8)
     popW = count * keyW + (count + 1) * gap + 4
-    x = clamp(int(r.x + r.w / 2) - popW div 2, lo, max(hi - popW, lo))
+    # A letter's row starts with its symbol right over the key; any other
+    # row is centred on it.
+    x = clamp(int(r.x + r.w / 2) - (if hinted: 2 + gap + keyW div 2 else: popW div 2), lo, max(hi - popW, lo))
+    first = float32(x + 2 + gap) + float32(keyW) / 2 # the first form's middle
   # The accent under the finger's x, as near as it gets: a finger that slides
-  # sideways off the key it holds needs to go no higher than the row.
+  # sideways off the key it holds needs to go no higher than the row. On a
+  # letter's row, by how far the finger went from where it held (`accentFrom`):
+  # the symbol is lit until it moves, wherever the screen's edge put the row.
   input.accentLit = -1
   if input.accentX >= 0:
-    # The form whose middle is nearest, as ui/events.nim's `accentNear`.
-    let first = float32(x + 2 + gap) + float32(keyW) / 2
-    input.accentLit = clamp(int(round((input.accentX - first) / float32(keyW + gap))), 0, count - 1)
+    # As ui/events.nim's `accentNear`.
+    let at = if hinted: input.accentX - input.accentFrom + first else: input.accentX
+    input.accentLit = clamp(int(round((at - first) / float32(keyW + gap))), 0, count - 1)
   let shown = accentTree(input.accents, input.shift, keyW, keyH, gap, input.paper, input.accentLit)
     .build(initText(), width.float32, height.float32, 0, AccentKey, input, false,
       if memo.isNil: nil else: memo.accents)

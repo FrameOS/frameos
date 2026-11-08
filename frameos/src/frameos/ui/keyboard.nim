@@ -18,6 +18,13 @@
 ## are its forms, and under shift the Latin letters among them are their
 ## capitals by arithmetic (`accentText`), not by a second table.
 ##
+## Every letter also has a symbol (`Hints`, after SwiftKey: the digits over
+## the top row, `@ # & * - + = ( )` and `_ $ " ' : ; /` over the others),
+## drawn small and dim in the key's corner and first in its held row
+## (`formCount` / `formText`), right over the key and lit, so holding a
+## letter and lifting types its symbol, and sliding along reaches the
+## accents.
+##
 ## Flash is the budget on an ESP32: five short strings, three drawn icons,
 ## and classes appended in place (see the scene switcher's notes).
 ##
@@ -55,6 +62,8 @@ const
     "$€£¥¢-–—•\"“”„«»'‘’‚‹›.…?¿!¡0°%‰"
     ## Each key's accented forms, after the key's own ASCII byte (the one
     ## byte below 0x80 in its entry, so the entries need no separator).
+  Hints = "q1w2e3r4t5y6u7i8o9p0a@s#d&f*g-h+j=k(l)z_x$c\"v'b:n;m/"
+    ## Each letter's symbol, after it.
   Pages: array[KeyboardPage, string] = [
     "qwertyuiop\nasdfghjkl\n\x01zxcvbnm\x02\n\x05, .\x03",
     "1234567890\n-/:;()$&@\"\n\x06.,?!'\x02\n\x04 \x03",
@@ -143,6 +152,29 @@ proc accentText*(code, index, shift: int): string =
       return (if shift > 0: capital(r) else: r).toUTF8
     inc n
     i += runeLenAt(Accents, i)
+
+proc hintOf*(code: int): string =
+  ## The symbol a letter key holds (`Hints`), "" for any other key.
+  if code >= ord('a') and code <= ord('z'):
+    var i = 0
+    while i + 1 < Hints.len:
+      if ord(Hints[i]) == code:
+        return $Hints[i + 1]
+      i += 2
+
+proc formCount*(code: int): int =
+  ## What key `code`'s held row holds: its symbol, then its accents.
+  accentCount(code) + (if hintOf(code).len > 0: 1 else: 0)
+
+proc formText*(code, index, shift: int): string =
+  ## Form number `index` of key `code`'s held row: its symbol first (never a
+  ## capital), then its accents; "" past the last.
+  let hint = hintOf(code)
+  if hint.len > 0:
+    if index == 0: hint
+    else: accentText(code, index - 1, shift)
+  else:
+    accentText(code, index, shift)
 
 proc typed*(code: int, shift: int): string =
   ## What a character key types: its own byte, a letter in capitals under
@@ -253,12 +285,25 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
       label = el("div", move t, SvgNode(text: if code == ord(kSymbols): "123" elif code == ord(kMore): "#+=" else: "ABC"))
     elif ch != ' ':
       label = SvgNode(text: typed(code, shift))
+    let hint = hintOf(code)
+    if hint.len > 0:
+      c.add " relative"
     let key = el("div", move c, label)
+    if hint.len > 0:
+      # The symbol a hold gives, small and dim in the top right corner.
+      var h = "absolute leading-none"
+      h.px("top", max(rowH div 14, 2))
+      h.px("right", max(rowUnit div 10, 2))
+      h.px("text", max(size div 2, 9))
+      if lit and not paper: h.add " text-zinc-500"
+      elif paper and lit: h.add " text-white"
+      elif not paper: h.add " text-zinc-400"
+      key.children.add el("div", move h, SvgNode(text: hint))
     key.attrs.add(("on-click", $(KeyBase + code)))
     if code == ord(kShift):
       # Shift tapped twice: caps lock, until shift again.
       key.attrs.add(("on-double-click", $(KeyBase + ord(kCapsLock))))
-    elif accentCount(code) > 0 or code == ord(kBackspace):
+    elif formCount(code) > 0 or code == ord(kBackspace):
       # Held: its accents (ui/events.nim opens them, ui/layout.nim draws
       # them), or backspace erasing again and again.
       key.attrs.add(("on-long-press", $(KeyBase + code)))
@@ -276,7 +321,7 @@ proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool, lit = -1): SvgN
   if paper: c.add " bg-white text-black border-black"
   else: c.add " bg-zinc-800 text-white border-zinc-500"
   result = el("div", move c)
-  for i in 0 ..< accentCount(code):
+  for i in 0 ..< formCount(code):
     c = "flex items-center justify-center rounded-md"
     c.px("w", keyW)
     c.px("h", keyH)
@@ -285,7 +330,7 @@ proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool, lit = -1): SvgN
       if i == lit: c.add " bg-black text-white"
     elif i == lit: c.add " bg-zinc-100 text-zinc-900"
     else: c.add " bg-zinc-600"
-    let key = el("div", move c, SvgNode(text: accentText(code, i, shift)))
+    let key = el("div", move c, SvgNode(text: formText(code, i, shift)))
     key.attrs.add(("on-click", $(AccentBase + i)))
     result.children.add key
 

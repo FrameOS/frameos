@@ -132,8 +132,8 @@ block a_number_that_is_no_number_is_not_saved:
 
 block a_key_held_shows_its_accents:
   # A key held on the keyboard on the screen (the dispatcher's longPress,
-  # while the finger is down) shows its accented forms above it; a tap on
-  # one types it into the field (docs/jsx-ui.md "Fields and the keyboard").
+  # while the finger is down) shows its symbol and accented forms above it;
+  # a tap on one types it into the field (docs/jsx-ui.md "Fields and the keyboard").
   let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
   scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {
     "from": "scenes/weather",
@@ -153,9 +153,9 @@ block a_key_held_shows_its_accents:
   var forms: seq[UiRegion]
   for r in uiTarget(SceneSettingsId, 1, create = false).regions:
     if r.handlers[ueClick] - 1 >= AccentBase and r.handlers[ueClick] - 1 < OptionBase: forms.add r
-  doAssert forms.len == 7, $forms.len
+  doAssert forms.len == 8, $forms.len # its symbol, 3, then è é ê ë ē ė ę
   doAssert forms[0].y + forms[0].h < key.y
-  scene.tap(forms[1])
+  scene.tap(forms[2])
   doAssert scene.state["values"]["city"].getStr() == "Osloé", $scene.state["values"]
   doAssert uiTarget(SceneSettingsId, 1, create = false).input.accents == 0
   discard scene.draw()

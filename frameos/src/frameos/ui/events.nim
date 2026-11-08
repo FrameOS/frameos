@@ -241,19 +241,26 @@ proc nearestKey(target: UiTarget, lx, ly: float32): int =
 proc accentNear(target: UiTarget, lx, ly: float32): int =
   ## The accent whose x is nearest lx, by its number, while the finger is
   ## no further from the row than the key it holds (above the row, or two
-  ## rows below it); -1 when it is, -2 when the last render drew no row.
+  ## rows below it); -1 when it is, -2 when the last render drew no row. On
+  ## a letter's row (its symbol first), by how far the finger went from
+  ## where it held, from the symbol: as ui/layout.nim's `accentPopup`.
   result = -2
   var
     best = high(float32)
     top = high(float32)
     bottom = 0'f32
+    x = lx
+  if hintOf(target.input.accents).len > 0:
+    for r in target.regions:
+      if r.handlers[ueClick] - 1 == AccentBase:
+        x = lx - target.input.accentFrom + r.x + r.w / 2
   for r in target.regions:
     let handler = r.handlers[ueClick] - 1
     if handler < AccentBase or handler >= OptionBase:
       continue
     top = min(top, r.y)
     bottom = max(bottom, r.y + r.h)
-    let d = abs(lx - (r.x + r.w / 2))
+    let d = abs(x - (r.x + r.w / 2))
     if d < best:
       best = d
       result = handler - AccentBase
@@ -465,10 +472,11 @@ proc holdKey(target: UiTarget, code, pointer: int, lx: float32) =
     target.repeats = 0
     target.repeatDue = getMonoTime() + initDuration(milliseconds = RepeatFirstMs)
     return
-  if accentCount(code) == 0:
+  if formCount(code) == 0:
     return
   i.accents = code
   i.accentX = lx
+  i.accentFrom = lx
   i.accentLit = -1
   i.pressed.setLen(0)
   target.holdPointer = pointer
@@ -502,7 +510,7 @@ proc pickAccent(target: UiTarget, index: int) =
   template i: untyped = target.input
   if i.accents == 0:
     return
-  let text = accentText(i.accents, index, i.shift)
+  let text = formText(i.accents, index, i.shift)
   i.accents = 0
   target.inputOnly = true
   if text.len > 0:

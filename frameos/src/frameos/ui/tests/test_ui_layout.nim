@@ -632,28 +632,47 @@ suite "a held key's accents":
     let e = keyRegion(regions, ord('u'))
     # Keys with forms take a long press, the others do not.
     check e.handlers[ueLongPress] - 1 == KeyBase + ord('u')
-    check keyRegion(regions, ord('b')).handlers[ueLongPress] == 0
+    check keyRegion(regions, ord('b')).handlers[ueLongPress] - 1 == KeyBase + ord('b') # its symbol, ':'
+    check keyRegion(regions, ord(',')).handlers[ueLongPress] == 0
     check keyRegion(regions, ord(kShift)).handlers[ueLongPress] == 0
     # Backspace takes one too: held, it erases again and again.
     check keyRegion(regions, ord(kBackspace)).handlers[ueLongPress] - 1 == KeyBase + ord(kBackspace)
     state.accents = ord('u')
-    let svg = withKeyboard(480, 480, state, regions)
+    discard withKeyboard(480, 480, state, regions)
     let forms = accentRegions(regions)
-    check forms.len == 5
+    check forms.len == 6 # 7, then û ü ù ú ū
     for i, f in forms:
       check f.handlers[ueClick] - 1 == AccentBase + i
       check abs(f.w - e.w) < 1 and abs(f.h - e.h) < 1
       check f.y + f.h < e.y # above the key ...
       check f.x >= 0 and f.x + f.w <= 480 # ... on the screen
     check forms[1].x > forms[0].x
-    # Centred on the key, as far as the screen allows: the row's middle is
-    # the key's.
-    let mid = (forms[0].x + forms[^1].x + forms[^1].w) / 2
-    check abs(mid - (e.x + e.w / 2)) < 2
+    # A letter's row starts right over the key where the screen has room (w:
+    # 2, alone), its symbol where the finger is.
+    let w = keyRegion(regions, ord('w'))
+    state.accents = ord('w')
+    discard withKeyboard(480, 480, state, regions)
+    let two = accentRegions(regions)
+    check two.len == 1 and abs(two[0].x + two[0].w / 2 - (w.x + w.w / 2)) < 2
+    # Any other row is centred on its key, as far as the screen allows.
+    state.page = kpSymbols
+    discard withKeyboard(480, 480, state, regions)
+    let dollar = keyRegion(regions, ord('$'))
+    state.accents = ord('$')
+    discard withKeyboard(480, 480, state, regions)
+    let money = accentRegions(regions)
+    check money.len == 4
+    check abs((money[0].x + money[^1].x + money[^1].w) / 2 - (dollar.x + dollar.w / 2)) < 2
+    state.accents = 0
+    state.page = kpLetters
+    let svg = withKeyboard(480, 480, state, regions)
     # The held key is drawn lit: light where it was dark.
-    let image = newImage(parseSvg(svg, 480, 480))
-    let c = image.color(int(e.x + 3), int(e.y + 3))
+    state.accents = ord('u')
+    let held = withKeyboard(480, 480, state, regions)
+    let image = newImage(parseSvg(held, 480, 480))
+    let c = image.color(int(e.x + 3), int(e.y + e.h - 3))
     check c.r > 200 and c.g > 200
+    discard svg
     # The key still there (the keyboard is not replaced by the row).
     check keyRegion(regions, ord('q')).w > 0
 
@@ -666,15 +685,14 @@ suite "a held key's accents":
     state.shift = 1
     discard withKeyboard(480, 480, state, regions)
     var forms = accentRegions(regions)
-    # The row would reach past the left edge centred on a: it starts at the
-    # edge instead (its border and padding before the first form).
-    check forms.len == 8 and forms[0].x >= 4 and forms[0].x < 16
+    # The symbol over a, the row on the screen.
+    check forms.len == 9 and forms[0].x >= 4 and forms[^1].x + forms[^1].w <= 476
     # The row's keys read as capitals (the layout outlines the text, so ask
     # the tree it was built from).
     var texts: seq[string]
     for key in accentTree(ord('a'), 1, 40, 40, 4, false).children:
       texts.add key.children[0].text
-    check texts == @["À", "Á", "Â", "Ä", "Æ", "Ã", "Å", "Ā"]
+    check texts == @["@", "À", "Á", "Â", "Ä", "Æ", "Ã", "Å", "Ā"] # a symbol has no capital
     # A 240 px round panel: the row stays inside the circle (RoundInset in
     # from the rim), where the screen's corners are not.
     state = UiInput()
@@ -685,7 +703,7 @@ suite "a held key's accents":
     state.accents = ord('a')
     discard withKeyboard(240, 240, state, regions)
     forms = accentRegions(regions)
-    check forms.len == 8 and forms[0].w <= a.w
+    check forms.len == 9 and forms[0].w <= a.w
     for f in [forms[0], forms[^1]]:
       for (x, y) in [(f.x, f.y), (f.x + f.w, f.y), (f.x, f.y + f.h), (f.x + f.w, f.y + f.h)]:
         check (x - 120) * (x - 120) + (y - 120) * (y - 120) <= 108'f32 * 108
@@ -694,7 +712,7 @@ suite "a held key's accents":
     discard withKeyboard(240, 240, state, regions)
     check state.accents == 0 and accentRegions(regions).len == 0
 
-  test "the accent under the finger's x lights before it moves":
+  test "a letter's symbol lights first, and the finger's slide walks the row":
     var
       regions: seq[UiRegion]
       state: UiInput
@@ -702,30 +720,69 @@ suite "a held key's accents":
     let e = keyRegion(regions, ord('e'))
     state.accents = ord('e')
     state.accentX = e.x + e.w / 2
+    state.accentFrom = state.accentX
     let svg = withKeyboard(480, 480, state, regions)
     let forms = accentRegions(regions)
-    # The form whose middle is nearest the finger's x lights (the row is
-    # pushed off-centre by the screen's edge).
-    proc nearest(forms: seq[UiRegion], x: float32): int =
-      var best = 1e9'f32
-      for i, f in forms:
-        if abs(f.x + f.w / 2 - x) < best:
-          best = abs(f.x + f.w / 2 - x)
-          result = i
-    let near = nearest(forms, e.x + e.w / 2)
-    check state.accentLit == near and near > 0
+    # Held still: the symbol, 3.
+    check forms.len == 8 and state.accentLit == 0
     let image = newImage(parseSvg(svg, 480, 480))
-    let lit = image.color(int(forms[near].x + 3), int(forms[near].y + 3))
+    let lit = image.color(int(forms[0].x + 3), int(forms[0].y + 3))
     let dim = image.color(int(forms[^1].x + 3), int(forms[^1].y + 3))
     check lit.r > 200 and dim.r < 128
-    # Far to the left of the row: its first form.
+    # Two forms' width to the right: é.
+    state.accentX += 2 * (forms[1].x - forms[0].x)
+    discard withKeyboard(480, 480, state, regions)
+    check state.accentLit == 2
+    # Far to the left: the first; far to the right: the last.
     state.accentX = 0
+    discard withKeyboard(480, 480, state, regions)
+    check state.accentLit == 0
+    state.accentX = 479
+    discard withKeyboard(480, 480, state, regions)
+    check state.accentLit == forms.len - 1
+    # At the right edge (p, o) the row is pushed left: still the symbol first.
+    let o = keyRegion(regions, ord('o'))
+    state.accents = ord('o')
+    state.accentX = o.x + o.w / 2
+    state.accentFrom = state.accentX
     discard withKeyboard(480, 480, state, regions)
     check state.accentLit == 0
     # No finger near it: none.
     state.accentX = -1
     discard withKeyboard(480, 480, state, regions)
     check state.accentLit == -1
+    # A row with no symbol (the symbols page's $) lights by the finger's x.
+    state.page = kpSymbols
+    state.accents = 0
+    discard withKeyboard(480, 480, state, regions)
+    let dollar = keyRegion(regions, ord('$'))
+    state.accents = ord('$')
+    state.accentX = dollar.x + dollar.w / 2
+    discard withKeyboard(480, 480, state, regions)
+    check state.accentLit in [1, 2] # the middle of four
+
+  test "the letters carry their symbols, SwiftKey's":
+    check hintOf(ord('q')) == "1" and hintOf(ord('p')) == "0" and hintOf(ord('a')) == "@"
+    check hintOf(ord('l')) == ")" and hintOf(ord('z')) == "_" and hintOf(ord('c')) == "\"" and hintOf(ord('m')) == "/"
+    check hintOf(ord('1')) == "" and hintOf(ord(',')) == "" and hintOf(ord(kShift)) == ""
+    check formCount(ord('a')) == 9 and formCount(ord('b')) == 1 and formCount(ord('$')) == 4 and formCount(ord(',')) == 0
+    check formText(ord('a'), 0, 1) == "@" and formText(ord('a'), 1, 1) == "À" and formText(ord('$'), 0, 0) == "€"
+    check formText(ord('b'), 1, 0) == ""
+    # Drawn small in the key's corner: a text node in the key's top right.
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    let svg = withKeyboard(480, 480, state, regions)
+    let w = keyRegion(regions, ord('w'))
+    let image = newImage(parseSvg(svg, 480, 480))
+    var corner, opposite = 0
+    for y in int(w.y) + 1 ..< int(w.y + w.h / 4):
+      for x in int(w.x + w.w / 2) ..< int(w.x + w.w) - 1:
+        if image.color(x, y).r > 110: inc corner
+      for x in int(w.x) + 1 ..< int(w.x + w.w / 2):
+        if image.color(x, y).r > 110: inc opposite
+    checkpoint "corner " & $corner & ", opposite " & $opposite
+    check corner > 5 and opposite == 0
 
   test "held, slid along and lifted; held, lifted far and tapped; tapped away":
     let target = uiTarget("scene", 7)
@@ -748,24 +805,24 @@ suite "a held key's accents":
     check uiListens("scene", "pointerMove")
     discard relayout()
     var forms = accentRegions(target.regions)
-    check forms.len == 7
-    # Held at e's own middle, the form nearest it lights (not the first).
-    check target.input.accentLit > 0
+    check forms.len == 8
+    # Held still, its symbol lights (3).
+    check target.input.accentLit == 0
     # Slid sideways, on the key's own row and not up onto the forms: the
-    # one above the finger's x lights; lifted there, typed.
+    # one the slide reaches lights; lifted there, typed.
     proc atXY(x, y: float32, event: string, pointer = 1, buttons = 0): bool =
       dispatchUiEvent("scene", event, %*{"x": x, "y": y, "pointerId": pointer,
         "pointerType": "touch", "buttons": buttons})
     let y = e.y + e.h / 2
-    check atXY(forms[1].x + forms[1].w / 2, y, "pointerMove", buttons = 1)
-    check target.input.accentX == forms[1].x + forms[1].w / 2
+    check atXY(forms[2].x + forms[2].w / 2, y, "pointerMove", buttons = 1)
+    check target.input.accentX == forms[2].x + forms[2].w / 2
     discard relayout()
-    check target.input.accentLit == 1
-    check atXY(forms[1].x + forms[1].w / 2 + 2, y, "pointerUp")
+    check target.input.accentLit == 2
+    check atXY(forms[2].x + forms[2].w / 2 + 2, y, "pointerUp")
     check target.input.text == "é" and target.input.accents == 0
     discard relayout()
     check accentRegions(target.regions).len == 0
-    # Hold a, lift on it: the form above it is typed (à). Hold it again and
+    # Hold a, lift on it: its symbol is typed (@). Hold it again and
     # slide far below the row: nothing is lit, and lifted there the row
     # stays; a tap on a form types it.
     var a = keyRegion(target.regions, ord('a'))
@@ -773,7 +830,7 @@ suite "a held key's accents":
     check at(a, "longPress")
     discard relayout()
     check at(a, "pointerUp")
-    check target.input.text == "éà" and target.input.accents == 0
+    check target.input.text == "é@" and target.input.accents == 0
     target.input.text = "é"
     target.input.caret = target.input.text.len
     discard relayout()
@@ -789,7 +846,7 @@ suite "a held key's accents":
     check target.input.accents == ord('a') and target.input.text == "é"
     discard relayout()
     forms = accentRegions(target.regions)
-    check at(forms[3], "tap")
+    check at(forms[4], "tap")
     check target.input.text == "éä" and target.input.accents == 0
     # Hold o, lift on it, then tap q instead: the row goes and q is typed.
     discard relayout()
@@ -799,12 +856,12 @@ suite "a held key's accents":
     discard atXY(o.x + o.w / 2, 479, "pointerMove", buttons = 1)
     discard atXY(o.x + o.w / 2, 479, "pointerUp")
     discard relayout()
-    check accentRegions(target.regions).len == 8
+    check accentRegions(target.regions).len == 9
     check at(keyRegion(target.regions, ord('q')), "tap")
     check target.input.text == "éäq" and target.input.accents == 0
-    # Hold b: nothing comes up. Hold u, then back: the row goes, the keyboard stays.
+    # Hold the comma: nothing comes up. Hold u, then back: the row goes, the keyboard stays.
     discard relayout()
-    check not at(keyRegion(target.regions, ord('b')), "longPress")
+    check not at(keyRegion(target.regions, ord(',')), "longPress")
     check target.input.accents == 0
     check at(keyRegion(target.regions, ord('u')), "longPress")
     check target.input.accents == ord('u')
@@ -819,7 +876,7 @@ suite "a held key's accents":
     discard relayout()
     forms = accentRegions(target.regions)
     check not at(forms[1], "pointerMove", buttons = 1)
-    check at(forms[0], "pointerUp")
+    check at(forms[1], "pointerUp") # # ß ś š
     check target.input.text == "éäqß"
     forgetUiTarget("scene", 7)
 

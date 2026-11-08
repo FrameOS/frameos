@@ -533,23 +533,30 @@ export function get(app) {
 - **A key just typed stays lit** for a moment (250 ms from the first render
   that shows it) in its pressed color, so a quick tap that the panel never
   showed pressed still says which key it was. Not on e-paper.
-- **A key held shows its accents**, as on a phone: after the dispatcher's
+- **A key held shows its symbol and accents**, as on a phone: after the dispatcher's
   long press (`gestures.longPressMs`, delivered while the finger is still
   down on every host that ticks: the Pi, the ESP32 awake, the preview) the
   key lights and its accented forms come up in a row of keys above it —
   `a` gives `à á â ä æ ã å ā`, `e` `è é ê ë ē ė ę`, and so on for `c i l n
   o s u y z`, with `$ - " ' . ? ! 0 %` giving `€ £ ¥`, dashes, curly quotes,
   `…`, `¿ ¡ ° ‰` (`ui/keyboard.nim` `Accents`); under shift the letters are
-  capitals. The one nearest the finger's x is lit from the start; sliding
-  sideways moves the light along the row, at any height from above the row
-  to a couple of rows below it (no need to go up onto the row), and lifting
+  capitals. Every letter also holds a symbol, after SwiftKey: the digits
+  over `q`–`p`, `@ # & * - + = ( )` over `a`–`l`, `_ $ " ' : ; /` over
+  `z`–`m` (`ui/keyboard.nim` `Hints`), drawn small and dim in the key's top
+  right corner. It is the first form of the letter's row, which starts right
+  over the key (pushed left at the screen's edge) with the symbol lit: hold a
+  letter and lift, and its symbol is typed. Sliding sideways moves the light
+  along the row by how far the finger went (`UiInput.accentFrom`), at any
+  height from above the row to a couple of rows below it (no need to go up
+  onto the row); a row without a symbol (`$` on the symbols page) is
+  centred on its key and lights the form nearest the finger's x. Lifting
   types the lit one. Slid far away from the row, nothing is lit, and lifted
   there the row stays up for a tap on one. Lifted or tapped anywhere else,
   the row goes away and the tap does what it does (a key types); the
   frame's `back` closes the row first and keeps the keyboard.
   The row is centred on the key as far as the screen, or a round panel's
   circle, allows, and goes under the key when there is no room above. Keys
-  without accents have no hold, but for backspace:
+  with neither a symbol nor accents have no hold, but for backspace:
 - **Backspace held erases** one character at the long press, then one every
   100 ms, every 50 ms after a dozen, until the finger lifts. On e-paper it
   erases once: a refresh a character is seconds.
