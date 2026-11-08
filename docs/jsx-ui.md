@@ -341,6 +341,8 @@ Map scene's lines) fetches a quarter of the data.
   to a quarter, never below 1 (800x480 and 720x720 are 1, 1200x1600 is 2,
   1872x1404 is 2.25), so a scaled layout keeps at least 600 px on its
   shorter edge.
+  A scale below 1 (0.25, 0.5 and 0.75 are offered) works the other way: the
+  layout gets more room than the panel has and everything is drawn smaller.
   Out-of-range values (above 4) are ignored.
 - **What a scaled app sees.** `context.imageWidth` / `imageHeight`,
   `targetWidth` / `targetHeight` and `app.frame.width` / `height`, divided by

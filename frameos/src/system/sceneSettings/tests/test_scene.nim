@@ -506,7 +506,7 @@ block the_frame_page:
   scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[2])
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-scale.png")
-  scene.tap(regionWith(OptionBase + 4)) # Automatic, 1, 1.25, 1.5, 2
+  scene.tap(regionWith(OptionBase + 7)) # Automatic, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-changed.png")
   # Scanning goes to the host.

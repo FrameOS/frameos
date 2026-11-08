@@ -84,7 +84,7 @@ What the page holds, top to bottom:
   Linux runtime holds no password (NetworkManager or the supplicant does), so
   there an empty one is an open network.
 - **Rotation** and **Scale** (Automatic with what that is on this panel, then
-  1x to 4x, `RENDER_SCALE_STEPS`). The scale is the frame's: a scene with its
+  0.25x to 4x, `RENDER_SCALE_STEPS`; below 1 everything is drawn smaller). The scale is the frame's: a scene with its
   own (`settings.renderScale`, a `renderScale` field) keeps it.
 - **Render again**, **Restart FrameOS** (where the host lists it) and
   **Reboot**. Restart and Reboot ask for a second tap ("Tap again to

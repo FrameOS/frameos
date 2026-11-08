@@ -25,7 +25,8 @@ export const MAX_RENDER_SCALE = 4
 /** The shorter edge that automatic scaling treats as 1×. */
 export const AUTO_RENDER_SCALE_EDGE = 600
 /** The scales the settings offer; any other number up to 4 still works. */
-export const RENDER_SCALE_STEPS: readonly number[] = [1, 1.25, 1.5, 2, 2.5, 3, 4]
+/** Below 1 a layout gets more room than the panel has: everything drawn smaller. */
+export const RENDER_SCALE_STEPS: readonly number[] = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4]
 
 export const RENDER_SCALE_HELP =
   'Scenes built with JSX are laid out for a screen this many times smaller and drawn sharp at full size, so a ' +

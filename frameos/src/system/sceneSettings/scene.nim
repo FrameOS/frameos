@@ -91,7 +91,7 @@ const
   # The types the panel cannot edit: what they hold is not text.
   Unedited = ["node", "scene", "image"]
   # The scales offered (frontend/src/utils/renderScale.ts RENDER_SCALE_STEPS).
-  Scales = ["1", "1.25", "1.5", "2", "2.5", "3", "4"]
+  Scales = ["0.25", "0.5", "0.75", "1", "1.25", "1.5", "2", "2.5", "3", "4"]
   # A gear, 24 units square, its hole cut out (fill-rule evenodd).
   GearPath = "M10.1 4.6L10.4 1.6L13.6 1.6L13.9 4.6L15.9 5.5L18.2 3.5L20.5 5.8L18.5 8.1L19.4 10.1L22.4 10.4" &
     "L22.4 13.6L19.4 13.9L18.5 15.9L20.5 18.2L18.2 20.5L15.9 18.5L13.9 19.4L13.6 22.4L10.4 22.4L10.1 19.4L8.1 18.5" &
