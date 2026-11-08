@@ -17,6 +17,7 @@ import frameos/channels
 import frameos/single_scene_host
 import system/sceneSwitcher/scene as sceneSwitcher
 import frameos/relayed_input
+from frameos/ui/events as uiEvents import uiTimersPending
 import frameos/interpreter
 import frameos/planner
 import frameos/utils/image as frameos_image
@@ -556,11 +557,13 @@ proc frameos_wasm_tick(): bool {.exportc, cdecl.} =
 
 proc frameos_wasm_pointers_down(): cint {.exportc, cdecl.} =
   ## How much input the runtime is still timing: pointers held, GPIO buttons
-  ## held, and button presses waiting out their double-press window. The
+  ## held, button presses waiting out their double-press window, and a UI's
+  ## timer (a key's light, a held key: ui/events.nim). The
   ## worker ticks while any is, so a long press lands while the finger is
   ## down and a `press` once its window closes.
   if host.events.isNil: 0.cint
-  else: (host.events.inputState.pointersDown + host.events.inputState.buttonsBusy).cint
+  else: (host.events.inputState.pointersDown + host.events.inputState.buttonsBusy +
+    (if uiTimersPending(): 1 else: 0)).cint
 
 proc frameos_wasm_render_requested(): bool {.exportc, cdecl.} =
   host.renderRequested

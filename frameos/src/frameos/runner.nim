@@ -29,6 +29,7 @@ import frameos/utils/image
 import frameos/utils/time
 import frameos/scenes
 import frameos/scene_switcher_linux
+from system/sceneSwitcher/scene import isBuiltInScene
 import frameos/boot_guard
 import frameos/runtime_diagnostics
 from frameos/upgrade import UpgradeLogWatcher, initUpgradeLogWatcher, poll
@@ -567,23 +568,12 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       # one on disk has gone stale. Writing it only once per scene — which is
       # what "not sceneImageExists" alone did — left the workspace showing a
       # frame's boot render for as long as it stayed on one scene, which is
-      # forever for most frames.
-      if sceneChangedThisCycle or sceneImageIsStale(self.frameConfig.assetsPath, currentScene.id):
-        try:
-          let savedImage = saveLastSceneImagePng(self.frameConfig.assetsPath, currentScene.id)
-          noteSceneImageSaved()
-          self.logger.log(%*{
-            "event": "render:sceneImage:saved",
-            "sceneId": currentScene.id.string,
-            "publicSceneId": savedImage.sceneId,
-            "bytes": savedImage.size,
-          })
-        except Exception as e:
-          self.logSignal(%*{
-            "event": "render:sceneImage:error",
-            "sceneId": currentScene.id.string,
-            "error": e.msg,
-          })
+      # forever for most frames. Written once the panel has the picture
+      # (below): the PNG encode is most of a second on a Pi Zero, and it
+      # held every switch back by that. Never for a built-in scene (the
+      # switcher, the settings): no list shows one.
+      let saveSnapshot = not isBuiltInScene(currentScene.id.string) and
+        (sceneChangedThisCycle or sceneImageIsStale(self.frameConfig.assetsPath, currentScene.id))
       clearBootCrashCount()
       successfulSceneRenders += 1
       if interval < 1:
@@ -657,6 +647,24 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         if driverRetryImage.isNil:
           reclaimRenderMemory()
         clearNextRenderSeconds()
+      if saveSnapshot:
+        try:
+          let savedImage = saveLastSceneImagePng(self.frameConfig.assetsPath, currentScene.id)
+          noteSceneImageSaved()
+          # The switcher's picture of it, from the pixels in hand: no decode.
+          noteSceneSnapshot(self.frameConfig.assetsPath, currentScene.id.string, getLastImageCopy())
+          self.logger.log(%*{
+            "event": "render:sceneImage:saved",
+            "sceneId": currentScene.id.string,
+            "publicSceneId": savedImage.sceneId,
+            "bytes": savedImage.size,
+          })
+        except Exception as e:
+          self.logSignal(%*{
+            "event": "render:sceneImage:error",
+            "sceneId": currentScene.id.string,
+            "error": e.msg,
+          })
       markRuntimeDone()
 
       if interval < 1 or (nextSleep > 0 and nextSleep < interval):
@@ -1072,7 +1080,10 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
       await sleepAsync(1)
     else:
       await sleepOrWake(waitTime)
-      if waitTime < 200:
+      if uiTimersPending():
+        # A key's light to put out, a held key to type again: on time.
+        waitTime = min(waitTime, 20)
+      elif waitTime < 200:
         waitTime += 5
 
 proc createRunnerThread*(args: (FrameConfig, Logger, Option[SceneId])) =

@@ -52,6 +52,9 @@ type
   SwitcherThumbnail* = proc (frameConfig: FrameConfig, sceneId: string,
       width, height: int): Image {.nimcall, gcsafe.}
     ## A scene's last picture, `width` x `height` exactly, or nil.
+  SwitcherThumbnailPass* = proc (start: bool): bool {.nimcall, gcsafe.}
+    ## Around a render's pictures: `start` before the first, then after the
+    ## last, whether one was left out for time (and another render is due).
 
   SwitcherGrid* = object
     ## Where the tiles go: `perPage` of them, `cols` across, from (x0, y0).
@@ -81,6 +84,7 @@ const
 var
   sceneSwitcherListing*: SwitcherListing
   sceneSwitcherThumbnail*: SwitcherThumbnail
+  sceneSwitcherThumbnailPass*: SwitcherThumbnailPass
   # What the last hit test ran: a tile's index, Close (the tile count), an
   # arrow (count + 1, + 2), or -1. Read by runEvent once the hit test is
   # done, so the handler holds nothing of the scene's.
@@ -655,9 +659,22 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
   # flashing for nothing. `pointer` hands it taps alone, which leave the
   # target's input (what is hovered, what is pressed) empty. Back by itself
   # once nobody has touched it for a while.
-  if self.drawUi(SceneSwitcherId, self.tree(image.width, image.height, self.paper), image, self.paper,
-      onTap, idleSeconds(self.paper)):
+  var more = false
+  when not defined(frameosEmbedded):
+    # Pictures that would have kept the panel waiting come in the next
+    # render (the Linux host's decode budget, scene_switcher_linux.nim). Not
+    # on e-paper, where each render is a refresh: it waits for all of them.
+    let pass = if self.paper: nil else: sceneSwitcherThumbnailPass
+    if not pass.isNil:
+      try: discard pass(true) except Exception: discard
+  let tree = self.tree(image.width, image.height, self.paper)
+  when not defined(frameosEmbedded):
+    if not pass.isNil:
+      try: more = pass(false) except Exception: more = false
+  if self.drawUi(SceneSwitcherId, tree, image, self.paper, onTap, idleSeconds(self.paper)):
     leave()
+  elif more:
+    sendEvent(evRender, newJObject(), eoScene)
 
 # ------------------------------------------------------------ the scene
 

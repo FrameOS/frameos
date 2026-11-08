@@ -315,6 +315,15 @@ x, y, startX, startY, …}` — down and up at least `swipeMinPx` apart, in one 
 `left` / `right` / `up` / `down`. Gestures render `if-state-changed`, like a
 button; the raw pointer events never do.
 
+**A UI's timer, `uiTimer`.** The runtime's own (`internal` in the contract:
+from `system` alone, neither listened for nor dispatched by a scene). The
+dispatcher's tick sends it to the scene showing when one of its JSX UIs has
+a timer due (`ui/events.nim` `uiTimerDue`): the keyboard on the screen's
+light on a key just typed going out, backspace held erasing again
+([jsx-ui.md](jsx-ui.md) "Fields and the keyboard"). Its UI handles it and
+asks for the render; a host that ticks only while input is held ticks while
+one is pending too (`uiTimersPending`).
+
 **Edge swipes.** A touch or pen press within `gestures.edgePx` of an edge of
 the screen (on a screen at least four of those across) is held back from the
 scene until it shows what it is. On a round screen (the HyperPixel 2.1"

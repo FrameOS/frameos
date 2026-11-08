@@ -34,9 +34,10 @@ A `setCurrentScene {sceneId: "system/sceneSwitcher"}` opens it by name (the
 HTTP API, a schedule) without `state.from`: it highlights the list's first
 scene and goes back there, and so does a switcher whose `from` has left the
 list (it forgets `from` then, and when it is left). While it shows,
-`setCurrentScene {direction}` walks the list from `state.from`: on a
-reTerminal, RIGHT held in the switcher is the scene after the one it was
-opened from.
+`setCurrentScene {direction}` turns its page instead (`next` is `forward`,
+`prev` is `back`): the swipe or the key the frame's event map walks the
+scenes with walks the tiles in the switcher, and the frame stays on it. On a
+reTerminal, RIGHT held in the switcher is the next page.
 
 Who may say it (`origins`): the frame's event map, a scene (a "Scenes" button
 in a scene's own UI), a schedule, the HTTP API with the frame access key or
@@ -121,10 +122,28 @@ page, with the page and two arrows in the header.
 
 On Linux each tile shows the scene's last snapshot: the PNG the runner writes
 under `<assets>/.frameos/scene_images/` on every switch and at most once a
-minute after (`render:sceneImage:saved`). `scene_switcher_linux.nim` fits it
-to the tile (halved by pixie's box filter, then drawn), and keeps it until
-the file changes, so the decode is paid once per scene and snapshot. A scene
-not shown since the card was made has its number in the picture's place.
+minute after (`render:sceneImage:saved`), once the panel has the picture
+(the encode is most of a second on a Pi Zero, and it used to hold every
+switch back), and never for the switcher or the settings themselves.
+`scene_switcher_linux.nim` fits it to the tile (halved by pixie's box
+filter, then drawn), and keeps it until the file changes. A scene not shown
+since the card was made has its number in the picture's place.
+
+Opening it is fast on a Pi Zero (a 720x720 PNG is a few hundred ms to decode
+there):
+
+- The runner hands the switcher the snapshot it just wrote while it still
+  has the pixels (`noteSceneSnapshot`): kept halved down to a shorter side
+  of 320 to 639 px (360x360 on a HyperPixel 4.0 Square), with no decode.
+- It writes that small copy beside the snapshots
+  (`.frameos/scene_thumbs/<snapshot>.qoi`; QOI is a few ms to write and to
+  read), and after a restart the switcher reads the copy, unless the
+  snapshot is newer (one from an older runtime, or put there by a control
+  plane), which it decodes.
+- A render on a fast panel decodes for 120 ms at most; the tiles it did not
+  get to show their older picture, or their number, and the switcher
+  renders again at once (`sceneSwitcherThumbnailPass`). E-paper waits for
+  all of them: every render there is a refresh.
 
 The ESP32 and the preview list names only. The firmware keeps one picture,
 the panel's, and a picture per scene would be a decode and a few hundred KB
@@ -143,8 +162,9 @@ of PSRAM per tile, or flash writes on every switch.
   two, so pressing NEXT three times moves three tiles whatever the button
   layer made of the taps, and presses made during an e-paper refresh land
   together with their timing, so the next refresh shows where they got to.
-  A long press stays the frame's: on a reTerminal LEFT and RIGHT held are
-  still the previous and the next scene.
+  A long press stays the frame's: on a reTerminal LEFT and RIGHT held walk
+  the scenes, which in the switcher is its pages (`setCurrentScene
+  {direction}` turns the page there).
 - **A keyboard** (Linux): the arrows walk the grid, Page Up and Down turn
   the page, Enter shows the scene, Escape goes back.
 - **Nobody there:** it goes back by itself after a minute on a fast panel and

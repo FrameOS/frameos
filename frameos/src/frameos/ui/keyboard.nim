@@ -154,14 +154,16 @@ proc typed*(code: int, shift: int): string =
     result[0] = chr(code - 32)
 
 proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bool,
-    round = false, top = 0, canvasHeight = 0, held = 0): SvgNode =
+    round = false, top = 0, canvasHeight = 0, held = 0, flash = 0): SvgNode =
   ## The keyboard for a `width` x `height` box: `page`'s keys, letters in
   ## capitals while `shift` is 1 (the next letter) or 2 (caps lock). On an
   ## LCD dark keys that light while pressed; on e-paper outlined keys and no
   ## press to show, since a refresh to show one costs seconds. `round`: the
   ## box is `top` px down a round `width` x `canvasHeight` panel, and each
   ## row stays inside its circle, on no band of its own. `held`: the key
-  ## whose accents are showing (its byte), drawn lit like shift.
+  ## whose accents are showing (its byte), drawn lit like shift. `flash`:
+  ## the key just typed, drawn as it was while pressed for a moment after
+  ## (ui/events.nim times it), so a quick tap shows which key it was.
   let
     pad = max(height div 40, 4)
     gap = max(height div 36, 3)
@@ -239,6 +241,7 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
     else:
       c.add(if code < 32: " bg-zinc-700" else: " bg-zinc-600")
       if lit: c.add " bg-zinc-100 text-zinc-900"
+      elif code == flash: c.add " bg-zinc-400"
       c.add " active:bg-zinc-400"
     var label: SvgNode
     if code == ord(kShift): label = icon(ShiftPath, lit, size)
@@ -255,15 +258,17 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
     if code == ord(kShift):
       # Shift tapped twice: caps lock, until shift again.
       key.attrs.add(("on-double-click", $(KeyBase + ord(kCapsLock))))
-    elif accentCount(code) > 0:
-      # Held: its accents (ui/events.nim opens them, ui/layout.nim draws them).
+    elif accentCount(code) > 0 or code == ord(kBackspace):
+      # Held: its accents (ui/events.nim opens them, ui/layout.nim draws
+      # them), or backspace erasing again and again.
       key.attrs.add(("on-long-press", $(KeyBase + code)))
     row.children.add key
 
-proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool): SvgNode =
+proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool, lit = -1): SvgNode =
   ## The accents of key `code` as a row of keys, each `keyW` x `keyH` with
-  ## `gap` between and around them, in the keyboard's look: a lit one is
-  ## the one the finger is on. ui/layout.nim puts it above the key.
+  ## `gap` between and around them, in the keyboard's look: number `lit` is
+  ## the one nearest the finger, which lifting types. ui/layout.nim puts it
+  ## above the key.
   var c = "flex rounded-lg border-2"
   c.px("p", gap)
   c.px("gap", gap)
@@ -275,8 +280,11 @@ proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool): SvgNode =
     c = "flex items-center justify-center rounded-md"
     c.px("w", keyW)
     c.px("h", keyH)
-    if paper: c.add " border-2 border-black"
-    else: c.add " bg-zinc-600 active:bg-zinc-100 active:text-zinc-900"
+    if paper:
+      c.add " border-2 border-black"
+      if i == lit: c.add " bg-black text-white"
+    elif i == lit: c.add " bg-zinc-100 text-zinc-900"
+    else: c.add " bg-zinc-600"
     let key = el("div", move c, SvgNode(text: accentText(code, i, shift)))
     key.attrs.add(("on-click", $(AccentBase + i)))
     result.children.add key

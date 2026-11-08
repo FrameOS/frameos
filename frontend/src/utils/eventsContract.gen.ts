@@ -28,6 +28,7 @@ export type ContractEventName =
   | 'pointerDown'
   | 'pointerUp'
   | 'pointerCancel'
+  | 'uiTimer'
   | 'mouseMove'
   | 'mouseDown'
   | 'mouseUp'
@@ -333,6 +334,24 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "wasm": true
     },
     "since": "2026.9.23"
+  },
+  "uiTimer": {
+    "class": "input",
+    "device": "pointer",
+    "listen": false,
+    "dispatch": false,
+    "origins": [
+      "system"
+    ],
+    "renderAfter": "never",
+    "coalesce": "latest",
+    "log": "none",
+    "hosts": {
+      "linux": true,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.11.5"
   },
   "mouseMove": {
     "class": "input",

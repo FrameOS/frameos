@@ -530,6 +530,9 @@ export function get(app) {
   keys types instead of changing the scene. A key is typed where the finger
   lifts, however it rolled on the way, and a tap between the keys or in the
   keyboard's margin at the very edge is the nearest key, as on a phone.
+- **A key just typed stays lit** for a moment (250 ms from the first render
+  that shows it) in its pressed color, so a quick tap that the panel never
+  showed pressed still says which key it was. Not on e-paper.
 - **A key held shows its accents**, as on a phone: after the dispatcher's
   long press (`gestures.longPressMs`, delivered while the finger is still
   down on every host that ticks: the Pi, the ESP32 awake, the preview) the
@@ -537,13 +540,24 @@ export function get(app) {
   `a` gives `à á â ä æ ã å ā`, `e` `è é ê ë ē ė ę`, and so on for `c i l n
   o s u y z`, with `$ - " ' . ? ! 0 %` giving `€ £ ¥`, dashes, curly quotes,
   `…`, `¿ ¡ ° ‰` (`ui/keyboard.nim` `Accents`); under shift the letters are
-  capitals. The finger slides onto one and lifts to type it (the one under
-  it lights on an LCD), or lifts on the key and taps one. Lifted or tapped
-  anywhere else, the row goes away and the tap does what it does (a key
-  types); the frame's `back` closes the row first and keeps the keyboard.
+  capitals. The one nearest the finger's x is lit from the start; sliding
+  sideways moves the light along the row, at any height from above the row
+  to a couple of rows below it (no need to go up onto the row), and lifting
+  types the lit one. Slid far away from the row, nothing is lit, and lifted
+  there the row stays up for a tap on one. Lifted or tapped anywhere else,
+  the row goes away and the tap does what it does (a key types); the
+  frame's `back` closes the row first and keeps the keyboard.
   The row is centred on the key as far as the screen, or a round panel's
   circle, allows, and goes under the key when there is no room above. Keys
-  without accents have no hold.
+  without accents have no hold, but for backspace:
+- **Backspace held erases** one character at the long press, then one every
+  100 ms, every 50 ms after a dozen, until the finger lifts. On e-paper it
+  erases once: a refresh a character is seconds.
+- **The space bar dragged moves the caret**, as on a phone: once the finger
+  has moved more than a tap's slop, every 0.45 of the bar's height sideways
+  is one character left or right, and every bar's height up or down a line
+  in a `<textarea>` (the start or the end of an `<input>`), each an arrow
+  key to `onKeyDown`. Its release types no space.
 - **A real keyboard** (a Pi's, the computer's over the preview) types into
   the field instead: once a key has been typed on one, fields get no
   keyboard on the screen. Left and right, Home, End, Backspace and Delete
@@ -578,7 +592,14 @@ tree with Tailwind classes. A key with accents carries an `on-long-press`
 handler of its own number; the hold sets `UiInput.accents` to the key, the
 layout draws the row from where it placed that key (`accentPopup`, its
 forms handlers from `AccentBase`), and the holding pointer's moves and
-release are the row's until it lifts (`UiTarget.holdPointer`).
+release are the row's until it lifts (`UiTarget.holdPointer`, the finger's
+x in `UiInput.accentX`, the lit form in `accentLit`). What happens with
+time — a typed key's light going out (`UiInput.flash`), backspace held —
+is the dispatcher's tick asking `uiTimerDue` and sending the scene showing
+`uiTimer` (docs/events-contract.json: the runtime's own, `internal`, no
+scene listens for it), which `dispatchUiEvent` turns into the next erase or
+a render. A host that ticks only while input is held (the preview) also
+ticks while `uiTimersPending`; the Pi's message loop wakes every 20 ms then.
 
 ## Select boxes
 
