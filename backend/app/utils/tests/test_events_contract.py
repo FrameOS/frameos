@@ -41,9 +41,12 @@ def test_control_paths_are_what_the_access_key_is_refused():
 
 def test_what_a_scene_is_refused_is_a_device_command_or_a_lifecycle_event():
     # A scene may not run the device, and it may not fake the runtime's own
-    # `init` / `open` / `close` either. Anything else it is refused is a bug.
+    # `init` / `open` / `close` either, nor its internal `uiTimer` (a JSX UI's
+    # timer). Anything else it is refused is a bug.
     lifecycle = {event["name"] for event in CONTRACT["events"] if event["class"] == "lifecycle"}
-    assert REFUSED_BY_ORIGIN["scene"] <= DEVICE_COMMAND_EVENTS | lifecycle
+    internal = {event["name"] for event in CONTRACT["events"] if event.get("internal")}
+    assert internal == {"uiTimer"}
+    assert REFUSED_BY_ORIGIN["scene"] <= DEVICE_COMMAND_EVENTS | lifecycle | internal
 
 
 def test_scene_changed_log_events_are_the_contracts():

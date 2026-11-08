@@ -15,8 +15,13 @@
 ## slides off its end. A move with no press goes to the element under it.
 ## Every call also says how big the element is (`width`, `height`), so a
 ## slider works out how far along it a finger is at any frame size.
+##
+## Time passes for the keyboard on the screen too (`uiTimerDue`, asked by the
+## dispatcher's tick, which sends the scene `uiTimer`): a key just typed
+## stays lit for a moment once a render has shown it, and backspace held
+## erases again and again until the finger lifts.
 
-import std/json
+import std/[json, monotimes, times]
 import frameos/events_gen
 import frameos/ui/layout
 import frameos/ui/keyboard
@@ -51,8 +56,33 @@ type
     dragX, dragY, dragSX, dragSY: float32
     dragging, dragged: bool
     holdPointer: int            ## the pointer whose hold opened a key's accents, -1 for none
+    # A key held that types again (backspace): its pointer (-1 for none), the
+    # key, when it next types and how many times it has.
+    repeatPointer, repeatCode, repeats: int
+    repeatDue: MonoTime
+    # The key just typed (`input.flash`): when it goes out, once a render
+    # has shown it (`flashSeen`).
+    flashDue: MonoTime
+    flashSeen: bool
+    # A finger that went down on the space bar (-1 for none): where, in the
+    # UI's pixels, how far apart its steps are, the steps it has made the
+    # caret take, and whether it moved enough to be a drag. A drag's tap
+    # (the one its release makes) types no space (`swallowTap`).
+    spacePointer: int
+    spaceX, spaceY, spaceStep, spaceRow: float32
+    spaceCols, spaceRows: int
+    spaceDragging: bool
+    swallowTap: int
 
-const MaxTargets = 16
+const
+  MaxTargets = 16
+  FlashMs = 250
+    ## How long a key just typed stays lit after a render first shows it.
+  RepeatFirstMs = 100
+  RepeatFastMs = 50
+  RepeatFastAfter = 12
+    ## Backspace held: one erase at the long press, then one every
+    ## RepeatFirstMs, every RepeatFastMs after RepeatFastAfter of them.
 
 # Flash on an ESP32: no checks the code above them already makes, and
 # nothing raises (see ui/layout.nim).
@@ -76,7 +106,9 @@ proc uiTarget*(sceneId: string, nodeId: int, create = true): UiTarget =
   if create:
     if targets.len >= MaxTargets:
       targets.delete(0)
-    result = UiTarget(sceneId: sceneId, nodeId: nodeId, memo: UiMemo(), dragKey: -1, holdPointer: -1)
+    result = UiTarget(sceneId: sceneId, nodeId: nodeId, memo: UiMemo(), dragKey: -1, holdPointer: -1,
+      repeatPointer: -1, spacePointer: -1, swallowTap: -1)
+    result.input.accentLit = -1
     targets.add result
 
 proc forgetUiTarget*(sceneId: string, nodeId: int) =
@@ -106,6 +138,34 @@ proc handlerKind(event: string): int =
   of "swipe": ord(ueSwipe)
   else: -1
 
+proc timerPending(target: UiTarget): bool =
+  target.input.flash > 0 or target.repeatPointer >= 0
+
+proc uiTimersPending*(): bool =
+  ## Whether a UI is timing something (a key's light, a key held): a host
+  ## that ticks only while input is held keeps ticking.
+  for target in targets:
+    if target.timerPending:
+      return true
+
+proc uiTimerDue*(sceneId: string, now: MonoTime): bool =
+  ## Whether a UI of the scene showing has a timer due: the dispatcher's tick
+  ## asks, and sends the scene `uiTimer`. A key's light starts its time when
+  ## a render has shown it. A held key of a scene no longer showing lets go:
+  ## its release went to another scene.
+  for target in targets:
+    if target.sceneId != sceneId:
+      target.repeatPointer = -1
+      continue
+    if target.input.flash > 0 and target.input.flashDrawn:
+      if not target.flashSeen:
+        target.flashSeen = true
+        target.flashDue = now + initDuration(milliseconds = FlashMs)
+      elif now >= target.flashDue:
+        result = true
+    if target.repeatPointer >= 0 and now >= target.repeatDue:
+      result = true
+
 template scrolls(r: UiRegion): bool = r.scrollX > 0 or r.scrollY > 0
 
 template inside(r: UiRegion, lx, ly: float32): bool =
@@ -134,6 +194,12 @@ proc uiListens*(sceneId, event: string): bool =
       if target.input.focus > 0 and event in ["tap", "keyDown", "textInput"]:
         return true
       if target.input.accents > 0 and event in ["pointerMove", "pointerUp", "pointerCancel"]:
+        return true
+      if target.input.keyboard and event in ["pointerDown", "pointerUp", "pointerCancel"]:
+        return true # a key held lets go, the space bar may be dragged
+      if target.spacePointer >= 0 and event == "pointerMove":
+        return true
+      if event == "uiTimer" and target.timerPending:
         return true
       for r in target.regions:
         if r.wants(event):
@@ -172,13 +238,27 @@ proc nearestKey(target: UiTarget, lx, ly: float32): int =
       best = dx * dx + dy * dy
       result = code
 
-proc accentUnder(target: UiTarget, lx, ly: float32): int =
-  ## The region of the accent under (lx, ly), -1 for none.
-  for i in countdown(target.regions.high, 0):
-    if target.regions[i].handlers[ueClick] - 1 >= AccentBase and
-        target.regions[i].handlers[ueClick] - 1 < OptionBase and target.regions[i].inside(lx, ly):
-      return i
-  -1
+proc accentNear(target: UiTarget, lx, ly: float32): int =
+  ## The accent whose x is nearest lx, by its number, while the finger is
+  ## no further from the row than the key it holds (above the row, or two
+  ## rows below it); -1 when it is, -2 when the last render drew no row.
+  result = -2
+  var
+    best = high(float32)
+    top = high(float32)
+    bottom = 0'f32
+  for r in target.regions:
+    let handler = r.handlers[ueClick] - 1
+    if handler < AccentBase or handler >= OptionBase:
+      continue
+    top = min(top, r.y)
+    bottom = max(bottom, r.y + r.h)
+    let d = abs(lx - (r.x + r.w / 2))
+    if d < best:
+      best = d
+      result = handler - AccentBase
+  if result >= 0 and (ly < top - (bottom - top) or ly > bottom + 3 * (bottom - top)):
+    result = -1
 
 proc keysOver(target: UiTarget, lx, ly: float32, active: bool): seq[int] =
   ## The elements under the point: hover ones (and groups), or active ones.
@@ -336,12 +416,24 @@ proc enter(target: UiTarget) =
   else:
     target.blurField()
 
+proc flashKey(target: UiTarget, code: int) =
+  ## The key just typed stays lit for a moment once a render shows it
+  ## (`uiTimerDue`), so a quick tap says which key it was. Not on e-paper,
+  ## where a refresh to put the light out costs seconds.
+  if target.input.paper:
+    return
+  target.input.flash = code
+  target.input.flashDrawn = false
+  target.flashSeen = false
+
 proc pressKey(target: UiTarget, code: int) =
   ## A key of the on-screen keyboard (ui/keyboard.nim): a character typed,
   ## or what its byte stands for.
   template i: untyped = target.input
   target.inputOnly = true
   i.accents = 0
+  if code >= 32 or code == ord(kBackspace) or code == ord(kEnter):
+    target.flashKey(code)
   if code == ord(kShift): i.shift = if i.shift == 0: 1 else: 0
   elif code == ord(kCapsLock): i.shift = 2
   elif code == ord(kBackspace):
@@ -356,18 +448,51 @@ proc pressKey(target: UiTarget, code: int) =
     target.keyDown(text)
     target.insert(text)
 
-proc holdKey(target: UiTarget, code, pointer: int) =
-  ## A key held (`longPress`, while the finger is still down): its accents
-  ## come up above it, for that finger to slide onto one, or to lift and tap
-  ## one (ui/keyboard.nim `Accents`, drawn by ui/layout.nim). A key without
-  ## any has no long-press handler, so this never sees one.
+proc holdKey(target: UiTarget, code, pointer: int, lx: float32) =
+  ## A key held (`longPress`, while the finger is still down at `lx`): its
+  ## accents come up above it, the one nearest the finger's x lit, for that
+  ## finger to slide along and lift on, or to lift away from and tap one
+  ## (ui/keyboard.nim `Accents`, drawn by ui/layout.nim). Backspace erases,
+  ## and goes on erasing until the finger lifts (`uiTimer`). A key with
+  ## neither has no long-press handler, so this never sees one.
   template i: untyped = target.input
+  if code == ord(kBackspace):
+    target.pressKey(code)
+    if i.paper:
+      return # one: a refresh a character is seconds
+    target.repeatPointer = pointer
+    target.repeatCode = code
+    target.repeats = 0
+    target.repeatDue = getMonoTime() + initDuration(milliseconds = RepeatFirstMs)
+    return
   if accentCount(code) == 0:
     return
   i.accents = code
+  i.accentX = lx
+  i.accentLit = -1
   i.pressed.setLen(0)
   target.holdPointer = pointer
   target.inputOnly = true
+
+proc timePassed(target: UiTarget, now: MonoTime): bool =
+  ## `uiTimer`: a key's light goes out, a held key types again. True when
+  ## the picture changed.
+  template i: untyped = target.input
+  if i.flash > 0 and target.flashSeen and now >= target.flashDue:
+    i.flash = 0
+    i.flashDrawn = false
+    target.flashSeen = false
+    target.inputOnly = true
+    result = true
+  if target.repeatPointer >= 0 and now >= target.repeatDue:
+    if i.focus == 0 or not i.keyboard:
+      target.repeatPointer = -1
+    else:
+      inc target.repeats
+      target.pressKey(target.repeatCode)
+      target.repeatDue = now + initDuration(milliseconds =
+        if target.repeats >= RepeatFastAfter: RepeatFastMs else: RepeatFirstMs)
+      result = true
 
 proc pickAccent(target: UiTarget, index: int) =
   ## Accent number `index` of the held key, typed as a key is (a capital
@@ -383,6 +508,63 @@ proc pickAccent(target: UiTarget, index: int) =
   if text.len > 0:
     target.keyDown(text)
     target.insert(text)
+
+proc moveCaret(target: UiTarget, key: string) =
+  ## An arrow, Home or End: the caret a rune, a line or to an end. A key on a
+  ## keyboard, or the space bar dragged.
+  template i: untyped = target.input
+  case key
+  of "ArrowLeft", "ArrowRight", "Home", "End":
+    i.caret =
+      if key == "Home": 0
+      elif key == "End": i.text.len
+      else: step(i.text, clamp(i.caret, 0, i.text.len), key == "ArrowRight")
+    i.place = false
+    i.goal = false
+    i.reveal = true
+    target.inputOnly = true
+  of "ArrowUp", "ArrowDown":
+    # A line up or down in a <textarea>, by the next layout (it knows the
+    # lines); the start or the end of an <input>, as in a browser.
+    let
+      up = key == "ArrowUp"
+      r = target.regionOf(i.focus - 1)
+    if r >= 0 and target.regions[r].field == 2:
+      i.lineStep = if up: -1 else: 1
+    else:
+      i.caret = if up: 0 else: i.text.len
+    i.place = false
+    i.reveal = true
+    target.inputOnly = true
+  else: discard
+
+proc spaceDrag(target: UiTarget, lx, ly: float32, slop: float32): bool =
+  ## The space bar held and dragged, as on a phone: the caret follows the
+  ## finger, a rune per step across and a line per row up or down, as the
+  ## arrow keys would (the field's onKeyDown hears them). True when it moved.
+  let
+    dx = lx - target.spaceX
+    dy = ly - target.spaceY
+  if not target.spaceDragging:
+    if abs(dx) <= slop and abs(dy) <= slop:
+      return false
+    target.spaceDragging = true
+  let
+    cols = int(dx / target.spaceStep)
+    rows = int(dy / target.spaceRow)
+  while target.spaceCols != cols:
+    let key = if cols > target.spaceCols: "ArrowRight" else: "ArrowLeft"
+    target.spaceCols += (if cols > target.spaceCols: 1 else: -1)
+    target.keyDown(key)
+    target.moveCaret(key)
+    result = true
+  if target.spaceRows != rows:
+    # One line a layout: it knows where the lines are.
+    let key = if rows > target.spaceRows: "ArrowDown" else: "ArrowUp"
+    target.spaceRows += (if rows > target.spaceRows: 1 else: -1)
+    target.keyDown(key)
+    target.moveCaret(key)
+    result = true
 
 when not defined(frameosEmbedded):
   # No keyboard on an ESP32 (docs/events.md "Input"): typed keys and the
@@ -404,30 +586,7 @@ when not defined(frameosEmbedded):
     of "Delete": target.erase(true)
     of "Enter": target.enter()
     of "Escape": target.blurField()
-    of "ArrowLeft", "ArrowRight", "Home", "End":
-      let key = payload{"key"}.getStr()
-      i.caret =
-        if key == "Home": 0
-        elif key == "End": i.text.len
-        else: step(i.text, clamp(i.caret, 0, i.text.len), key == "ArrowRight")
-      i.place = false
-      i.goal = false
-      i.reveal = true
-      target.inputOnly = true
-    of "ArrowUp", "ArrowDown":
-      # A line up or down in a <textarea>, by the next layout (it knows the
-      # lines); the start or the end of an <input>, as in a browser.
-      let
-        up = payload{"key"}.getStr() == "ArrowUp"
-        r = target.regionOf(i.focus - 1)
-      if r >= 0 and target.regions[r].field == 2:
-        i.lineStep = if up: -1 else: 1
-      else:
-        i.caret = if up: 0 else: i.text.len
-      i.place = false
-      i.reveal = true
-      target.inputOnly = true
-    else: discard
+    else: target.moveCaret(payload{"key"}.getStr())
 
   proc wheel(target: UiTarget, r: UiRegion, payload: JsonNode) =
     ## A wheel over a box that scrolls: 48 px a notch.
@@ -466,6 +625,12 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       if target.sceneId == sceneId and target.captureOf(pointer) >= 0:
         capturing = target
         break
+  if event == "uiTimer":
+    let now = getMonoTime()
+    for target in targets:
+      if target.sceneId == sceneId and target.timePassed(now):
+        result = true
+    return
   for target in targets:
     if target.sceneId != sceneId:
       continue
@@ -517,26 +682,43 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
           target.dragging = false
           target.dragged = true
           result = true
+    if target.repeatPointer == pointer and (released or down):
+      target.repeatPointer = -1 # backspace let go
     if target.holdPointer == pointer and (follows or down):
-      # The finger that holds a key, its accents up: the accent it slides
-      # onto lights, and the one it lifts on is typed. Lifted elsewhere, the
-      # row stays for a tap.
+      # The finger that holds a key, its accents up: the accent nearest its
+      # x lights, wherever it is along the row, and lifting types it. Gone
+      # far from the row, none is lit, and lifted there the row stays for a
+      # tap.
       if down or target.input.accents == 0:
         target.holdPointer = -1
       elif kind == ord(uePointerMove) and placed:
-        let over = target.accentUnder(lx, ly)
-        var pressed: seq[int]
-        if over >= 0 and target.regions[over].active:
-          pressed.add target.regions[over].key
-        if pressed != target.input.pressed:
-          target.input.pressed = pressed
-          moved = true
+        # Not drawn yet (-2): the layout lights the one nearest the x.
+        let near = target.accentNear(lx, ly)
+        target.input.accentX = if near == -1: -1 else: lx
+        if near >= -1 and near != target.input.accentLit:
+          # E-paper shows which once the finger lifts on it.
+          moved = not target.input.paper
       elif released:
         target.holdPointer = -1
-        let over = if placed and event == "pointerUp": target.accentUnder(lx, ly) else: -1
-        if over >= 0:
-          target.pickAccent(target.regions[over].handlers[ueClick] - 1 - AccentBase)
+        # Lifted on the row's x, the accent there; far from it, or before a
+        # render drew the row, the row stays for a tap.
+        let near = if placed and event == "pointerUp": target.accentNear(lx, ly) else: -1
+        target.input.accentX = -1
+        if near >= 0:
+          target.pickAccent(near)
           result = true
+        else:
+          moved = true
+    if target.spacePointer == pointer and (follows or down):
+      if down:
+        target.spacePointer = -1
+      elif kind == ord(uePointerMove) and placed:
+        if target.input.focus > 0 and target.spaceDrag(lx, ly, float32(GestureTapSlopPx) / scale):
+          moved = true
+      elif released:
+        if target.spaceDragging:
+          target.swallowTap = pointer # its tap types no space
+        target.spacePointer = -1
     if released:
       target.release(pointer)
       if target.input.pressed.len > 0:
@@ -556,6 +738,20 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         if pressed != target.input.pressed:
           target.input.pressed = pressed
           moved = true
+        # The space bar: held, the finger may drag the caret.
+        target.swallowTap = -1
+        if target.input.keyboard and target.input.focus > 0:
+          for r in target.regions:
+            if r.handlers[ueClick] - 1 == KeyBase + ord(' ') and r.inside(lx, ly):
+              target.spacePointer = pointer
+              target.spaceX = lx
+              target.spaceY = ly
+              target.spaceStep = max(r.h * 0.45, 4)
+              target.spaceRow = max(r.h, 8)
+              target.spaceCols = 0
+              target.spaceRows = 0
+              target.spaceDragging = false
+              break
         # The innermost element that takes a press holds the pointer; else
         # the innermost box that scrolls may be dragged.
         target.release(pointer)
@@ -586,6 +782,13 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
     if kind == ord(ueSwipe) and target.dragged:
       # The swipe a drag made scrolled the box: nothing else hears it.
       target.dragged = false
+      continue
+    if kind == ord(ueClick) and target.swallowTap >= 0 and target.swallowTap == pointer:
+      # The tap a drag of the space bar made on its release: no space.
+      target.swallowTap = -1
+      if moved:
+        target.inputOnly = true
+        result = true
       continue
     if kind == ord(ueClick) and placed:
       # A tap on a field gives it the keyboard; one anywhere else but the
@@ -665,7 +868,7 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
             result = true
           break
         if handler > KeyBase:
-          if kind == ord(ueLongPress): target.holdKey(handler - 1 - KeyBase, pointer)
+          if kind == ord(ueLongPress): target.holdKey(handler - 1 - KeyBase, pointer, lx)
           else: target.pressKey(handler - 1 - KeyBase)
         else:
           target.call(handler - 1, event, payload, [float32(lx - r.x), float32(ly - r.y), r.w, r.h])

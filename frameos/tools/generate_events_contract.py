@@ -140,7 +140,11 @@ def load():
                 fail(f"{where}: `{flag}` must be true or false")
         if event["class"] == "device-command" and (event["listen"] or event["dispatch"]):
             fail(f"{where}: a device command is never delivered to a scene nor offered to one")
-        if event["class"] != "device-command" and not (event["listen"] or event["dispatch"]):
+        if "internal" in event and (event["internal"] is not True or event["listen"] or event["dispatch"]
+                                    or event["origins"] != ["system"]):
+            fail(f"{where}: `internal` marks the runtime's own event (a UI's timer): from `system` alone, "
+                 "neither listenable nor dispatchable")
+        if event["class"] != "device-command" and not (event["listen"] or event["dispatch"] or event.get("internal")):
             fail(f"{where}: neither listenable nor dispatchable — what is it for?")
         check_policy(where, event)
         if event.get("sceneState") is not None and event["sceneState"] not in SCENE_STATE:

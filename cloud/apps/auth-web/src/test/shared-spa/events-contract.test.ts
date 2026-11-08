@@ -106,7 +106,7 @@ describe("preview buttons", () => {
       expect(KEYBOARD_EVENTS.has(event.name), event.name).toBe(isKeyboardEvent(event.name));
     }
     expect([...POINTER_EVENTS]).toEqual([
-      "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp",
+      "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp",
       "tap", "doubleTap", "longPress", "swipe", "edgeSwipe", "wheel",
     ]);
     expect([...KEYBOARD_EVENTS]).toEqual(["keyDown", "keyUp", "textInput"]);

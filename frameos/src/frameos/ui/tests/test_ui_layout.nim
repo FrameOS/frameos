@@ -1,4 +1,4 @@
-import std/[json, sequtils, strutils, unittest]
+import std/[json, monotimes, os, sequtils, strutils, times, unittest]
 import pixie
 import pixie/fileformats/svg
 import frameos/utils/font # installs the typeface resolver text uses
@@ -587,7 +587,8 @@ suite "fields, clipping and scrolling":
 
 suite "a held key's accents":
   # docs/jsx-ui.md "Fields and the keyboard": a key held shows its accented
-  # forms above it; the finger slides onto one and lifts, or lifts and taps.
+  # forms above it, the one nearest the finger's x lit; the finger slides
+  # along (at any height near the row) and lifts, or goes far and taps.
   test "the table: which keys have forms, and their capitals by arithmetic":
     check accentCount(ord('a')) == 8 and accentCount(ord('e')) == 7 and accentCount(ord('y')) == 1
     check accentCount(ord('b')) == 0 and accentCount(ord(' ')) == 0 and accentCount(ord(kShift)) == 0
@@ -633,6 +634,8 @@ suite "a held key's accents":
     check e.handlers[ueLongPress] - 1 == KeyBase + ord('u')
     check keyRegion(regions, ord('b')).handlers[ueLongPress] == 0
     check keyRegion(regions, ord(kShift)).handlers[ueLongPress] == 0
+    # Backspace takes one too: held, it erases again and again.
+    check keyRegion(regions, ord(kBackspace)).handlers[ueLongPress] - 1 == KeyBase + ord(kBackspace)
     state.accents = ord('u')
     let svg = withKeyboard(480, 480, state, regions)
     let forms = accentRegions(regions)
@@ -691,7 +694,40 @@ suite "a held key's accents":
     discard withKeyboard(240, 240, state, regions)
     check state.accents == 0 and accentRegions(regions).len == 0
 
-  test "held, slid onto and lifted; held, lifted and tapped; tapped away":
+  test "the accent under the finger's x lights before it moves":
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    discard withKeyboard(480, 480, state, regions)
+    let e = keyRegion(regions, ord('e'))
+    state.accents = ord('e')
+    state.accentX = e.x + e.w / 2
+    let svg = withKeyboard(480, 480, state, regions)
+    let forms = accentRegions(regions)
+    # The form whose middle is nearest the finger's x lights (the row is
+    # pushed off-centre by the screen's edge).
+    proc nearest(forms: seq[UiRegion], x: float32): int =
+      var best = 1e9'f32
+      for i, f in forms:
+        if abs(f.x + f.w / 2 - x) < best:
+          best = abs(f.x + f.w / 2 - x)
+          result = i
+    let near = nearest(forms, e.x + e.w / 2)
+    check state.accentLit == near and near > 0
+    let image = newImage(parseSvg(svg, 480, 480))
+    let lit = image.color(int(forms[near].x + 3), int(forms[near].y + 3))
+    let dim = image.color(int(forms[^1].x + 3), int(forms[^1].y + 3))
+    check lit.r > 200 and dim.r < 128
+    # Far to the left of the row: its first form.
+    state.accentX = 0
+    discard withKeyboard(480, 480, state, regions)
+    check state.accentLit == 0
+    # No finger near it: none.
+    state.accentX = -1
+    discard withKeyboard(480, 480, state, regions)
+    check state.accentLit == -1
+
+  test "held, slid along and lifted; held, lifted far and tapped; tapped away":
     let target = uiTarget("scene", 7)
     target.input.paper = false
     target.call = proc(handler: int, name: string, event: JsonNode, hit: UiHit) = discard
@@ -713,19 +749,44 @@ suite "a held key's accents":
     discard relayout()
     var forms = accentRegions(target.regions)
     check forms.len == 7
-    # Slid onto the second form: it lights (it is pressed); lifted there, typed.
-    check at(forms[1], "pointerMove", buttons = 1)
-    check target.input.pressed == @[forms[1].key]
-    check at(forms[1], "pointerUp")
+    # Held at e's own middle, the form nearest it lights (not the first).
+    check target.input.accentLit > 0
+    # Slid sideways, on the key's own row and not up onto the forms: the
+    # one above the finger's x lights; lifted there, typed.
+    proc atXY(x, y: float32, event: string, pointer = 1, buttons = 0): bool =
+      dispatchUiEvent("scene", event, %*{"x": x, "y": y, "pointerId": pointer,
+        "pointerType": "touch", "buttons": buttons})
+    let y = e.y + e.h / 2
+    check atXY(forms[1].x + forms[1].w / 2, y, "pointerMove", buttons = 1)
+    check target.input.accentX == forms[1].x + forms[1].w / 2
+    discard relayout()
+    check target.input.accentLit == 1
+    check atXY(forms[1].x + forms[1].w / 2 + 2, y, "pointerUp")
     check target.input.text == "é" and target.input.accents == 0
     discard relayout()
     check accentRegions(target.regions).len == 0
-    # Hold a, lift on it: the row stays; a tap on a form types it.
-    let a = keyRegion(target.regions, ord('a'))
+    # Hold a, lift on it: the form above it is typed (à). Hold it again and
+    # slide far below the row: nothing is lit, and lifted there the row
+    # stays; a tap on a form types it.
+    var a = keyRegion(target.regions, ord('a'))
     check at(a, "pointerDown", buttons = 1)
     check at(a, "longPress")
-    discard at(a, "pointerUp") # nothing to redraw: the key stays lit
-    check target.input.accents == ord('a')
+    discard relayout()
+    check at(a, "pointerUp")
+    check target.input.text == "éà" and target.input.accents == 0
+    target.input.text = "é"
+    target.input.caret = target.input.text.len
+    discard relayout()
+    a = keyRegion(target.regions, ord('a'))
+    check at(a, "pointerDown", buttons = 1)
+    check at(a, "longPress")
+    discard relayout()
+    check atXY(a.x + a.w / 2, 479, "pointerMove", buttons = 1)
+    check target.input.accentX < 0
+    discard relayout()
+    check target.input.accentLit == -1
+    discard atXY(a.x + a.w / 2, 479, "pointerUp")
+    check target.input.accents == ord('a') and target.input.text == "é"
     discard relayout()
     forms = accentRegions(target.regions)
     check at(forms[3], "tap")
@@ -735,7 +796,8 @@ suite "a held key's accents":
     let o = keyRegion(target.regions, ord('o'))
     check at(o, "pointerDown", buttons = 1)
     check at(o, "longPress")
-    discard at(o, "pointerUp")
+    discard atXY(o.x + o.w / 2, 479, "pointerMove", buttons = 1)
+    discard atXY(o.x + o.w / 2, 479, "pointerUp")
     discard relayout()
     check accentRegions(target.regions).len == 8
     check at(keyRegion(target.regions, ord('q')), "tap")
@@ -748,7 +810,7 @@ suite "a held key's accents":
     check target.input.accents == ord('u')
     check dismissKeyboard("scene", 7)
     check target.input.accents == 0 and target.input.keyboard and target.input.focus > 0
-    # On e-paper a form shows no press, but lifting on it still types it.
+    # On e-paper a slide asks for no refresh, but lifting on a form types it.
     target.input.paper = true
     discard relayout()
     let s = keyRegion(target.regions, ord('s'))
@@ -756,11 +818,161 @@ suite "a held key's accents":
     check at(s, "longPress")
     discard relayout()
     forms = accentRegions(target.regions)
-    discard at(forms[0], "pointerMove", buttons = 1)
-    check target.input.pressed.len == 0
+    check not at(forms[1], "pointerMove", buttons = 1)
     check at(forms[0], "pointerUp")
     check target.input.text == "éäqß"
     forgetUiTarget("scene", 7)
+
+suite "the keyboard in time":
+  # docs/jsx-ui.md "Fields and the keyboard": a key just typed stays lit a
+  # moment once a render shows it; backspace held erases until the finger
+  # lifts; the space bar dragged walks the caret.
+  proc keyRegion(regions: seq[UiRegion], code: int): UiRegion =
+    for r in regions:
+      if r.handlers[ueClick] - 1 == KeyBase + code: return r
+    doAssert false, "no key " & $code
+
+  proc setup(id: string, text: string): UiTarget =
+    result = uiTarget(id, 3)
+    let target = result
+    target.input.paper = false
+    target.call = proc(handler: int, name: string, event: JsonNode, hit: UiHit) = discard
+    let field = input("input", "w-full h-[30px] bg-white", {"value": text})
+    discard layout.layoutUi(el("div", "bg-slate-900", field), 480, 480, target.input, target.regions, target.memo)
+    target.input.focus = target.regions[0].key + 1
+    target.input.keyboard = true
+    target.input.text = text
+    target.input.caret = text.len
+
+  proc relayout(target: UiTarget) =
+    let field = input("input", "w-full h-[30px] bg-white", {"value": target.input.text})
+    target.regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-slate-900", field), 480, 480, target.input, target.regions, target.memo)
+
+  proc at(id: string, r: UiRegion, event: string, dx = 0'f32, dy = 0'f32, pointer = 1): bool =
+    dispatchUiEvent(id, event, %*{"x": r.x + r.w / 2 + dx, "y": r.y + r.h / 2 + dy, "pointerId": pointer,
+      "pointerType": "touch", "buttons": (if event in ["pointerUp", "tap"]: 0 else: 1)})
+
+  test "a key just typed stays lit a moment after a render shows it":
+    let id = "timed-flash"
+    let target = setup(id, "")
+    target.relayout()
+    let k = keyRegion(target.regions, ord('k'))
+    check not uiTimersPending()
+    check at(id, k, "tap")
+    check target.input.text == "k" and target.input.flash == ord('k')
+    check uiTimersPending() and uiListens(id, "uiTimer")
+    # Nothing is due before a render has shown it.
+    var now = getMonoTime()
+    check not uiTimerDue(id, now + initDuration(seconds = 5))
+    target.relayout()
+    check target.input.flashDrawn
+    # Shown: from now, its time runs.
+    check not uiTimerDue(id, now)
+    check not uiTimerDue(id, now + initDuration(milliseconds = 100))
+    check uiTimerDue(id, now + initDuration(milliseconds = 400))
+    # Another scene's timers are not this one's.
+    check not uiTimerDue("another-scene", now + initDuration(milliseconds = 400))
+    # The scene hears `uiTimer`, and the light goes out.
+    sleep(300)
+    check dispatchUiEvent(id, "uiTimer", newJObject())
+    check target.input.flash == 0 and not uiTimersPending()
+    # E-paper: no light to put out.
+    target.input.paper = true
+    target.relayout()
+    check at(id, keyRegion(target.regions, ord('j')), "tap")
+    check target.input.text == "kj" and target.input.flash == 0
+    forgetUiTarget(id, 3)
+
+  test "the key just typed is drawn as it was while pressed":
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    let field = input("input", "w-full h-[30px] bg-white", {"value": ""})
+    discard layout.layoutUi(el("div", "bg-slate-900", field), 480, 480, state, regions)
+    state.focus = regions[0].key + 1
+    state.keyboard = true
+    regions.setLen(0)
+    var image = newImage(parseSvg(layout.layoutUi(el("div", "bg-slate-900", field), 480, 480, state, regions), 480, 480))
+    let k = keyRegion(regions, ord('k'))
+    let before = image.color(int(k.x + 3), int(k.y + 3))
+    state.flash = ord('k')
+    regions.setLen(0)
+    image = newImage(parseSvg(layout.layoutUi(el("div", "bg-slate-900", field), 480, 480, state, regions), 480, 480))
+    let after = image.color(int(k.x + 3), int(k.y + 3))
+    check after.r.int > before.r.int + 40 # zinc-400 where it was zinc-600
+    check state.flashDrawn
+
+  test "backspace held erases until the finger lifts":
+    let id = "timed-repeat"
+    let target = setup(id, "hello world")
+    target.relayout()
+    let bs = keyRegion(target.regions, ord(kBackspace))
+    check at(id, bs, "pointerDown")
+    check at(id, bs, "longPress")
+    check target.input.text == "hello worl" # one at the long press
+    check uiTimersPending()
+    var now = getMonoTime()
+    check not uiTimerDue(id, now)
+    check uiTimerDue(id, now + initDuration(milliseconds = 150))
+    sleep(120)
+    check dispatchUiEvent(id, "uiTimer", newJObject())
+    check target.input.text == "hello wor"
+    sleep(120)
+    check dispatchUiEvent(id, "uiTimer", newJObject())
+    check target.input.text == "hello wo"
+    # Lifted: no more, and no tap after a long press.
+    discard at(id, bs, "pointerUp")
+    target.relayout()
+    sleep(120)
+    discard dispatchUiEvent(id, "uiTimer", newJObject())
+    check target.input.text == "hello wo"
+    # A scene no longer showing lets its held key go.
+    check at(id, bs, "pointerDown", pointer = 2)
+    check at(id, bs, "longPress", pointer = 2)
+    check target.input.text == "hello w"
+    discard uiTimerDue("another-scene", getMonoTime())
+    sleep(120)
+    discard dispatchUiEvent(id, "uiTimer", newJObject())
+    check target.input.text == "hello w"
+    forgetUiTarget(id, 3)
+
+  test "the space bar dragged walks the caret, and types no space":
+    let id = "space-drag"
+    let target = setup(id, "abcdef")
+    target.relayout()
+    let space = keyRegion(target.regions, ord(' '))
+    check uiListens(id, "pointerDown")
+    check not uiListens(id, "pointerMove")
+    check at(id, space, "pointerDown")
+    check uiListens(id, "pointerMove")
+    # Within the slop: nothing yet.
+    check not at(id, space, "pointerMove", dx = -2)
+    check target.input.caret == 6
+    # Left, three steps of the bar's step (0.45 of its height).
+    let step = space.h * 0.45
+    check at(id, space, "pointerMove", dx = -3.2 * step)
+    check target.input.caret == 3
+    # Back right one.
+    check at(id, space, "pointerMove", dx = -2.2 * step)
+    check target.input.caret == 4
+    discard at(id, space, "pointerUp", dx = -2.2 * step)
+    # Its tap is swallowed: no space.
+    discard at(id, space, "tap", dx = -2.2 * step)
+    check target.input.text == "abcdef" and target.input.caret == 4
+    # A plain tap on it still types a space, where the caret is.
+    target.relayout()
+    check at(id, space, "pointerDown")
+    discard at(id, space, "pointerUp")
+    check at(id, space, "tap")
+    check target.input.text == "abcd ef"
+    # Up in an <input>: to its start.
+    target.relayout()
+    check at(id, space, "pointerDown")
+    check at(id, space, "pointerMove", dy = -1.5 * space.h)
+    check target.input.caret == 0
+    discard at(id, space, "pointerUp", dy = -1.5 * space.h)
+    forgetUiTarget(id, 3)
 
 suite "a <select>":
   proc options(count: int): seq[SvgNode] =

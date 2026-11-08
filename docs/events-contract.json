@@ -297,6 +297,22 @@
       "since": "2026.9.23"
     },
     {
+      "name": "uiTimer",
+      "class": "input",
+      "device": "pointer",
+      "description": "Time passing for a JSX UI (docs/jsx-ui.md): a key of the on-screen keyboard held down types again, and a key just typed stops being lit. The dispatcher's tick makes it for the scene whose UI asked for one, and the UI layer handles it: the runtime's own, never offered to a scene.",
+      "listen": false,
+      "dispatch": false,
+      "internal": true,
+      "payload": [],
+      "origins": ["system"],
+      "renderAfter": "never",
+      "coalesce": "latest",
+      "log": "none",
+      "hosts": {"linux": true, "esp32": true, "wasm": true},
+      "since": "2026.11.5"
+    },
+    {
       "name": "mouseMove",
       "aliasOf": "pointerMove",
       "class": "input",

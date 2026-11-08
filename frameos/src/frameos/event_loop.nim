@@ -33,10 +33,12 @@ import ./driver_abi
 import ./input_state
 import ./event_map
 import ./scene_rhythm
+from ./ui/events as uiEvents import uiTimerDue, uiTimersPending
 
 export events
 export input_state.InputState, input_state.cursorVisible, input_state.takeCursorDirty,
   input_state.pointersDown, input_state.buttonsHeld, input_state.buttonsBusy
+export uiTimersPending
 
 const
   DefaultLaneCapacity* = 256
@@ -350,20 +352,27 @@ proc sceneOrderOf(loop: EventLoop): seq[SceneId] =
 proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
   ## `setCurrentScene`: by `sceneId`, or by `direction` through the host's
   ## scene order (`next` / `prev` of the scene showing, wrapping around; the
-  ## list's first or last when nothing is). While the scene switcher shows,
-  ## the scene it was opened from is the one a direction walks from. False
-  ## when nothing could switch: a direction the contract does not know, or a
-  ## frame with no scene list.
+  ## list's first or last when nothing is). While the scene switcher shows, a
+  ## direction turns its page instead (`forward` / `back` to it): the swipe
+  ## or the key that walks the scenes walks the tiles there. While the scene
+  ## settings show, the scene they were opened from is the one a direction
+  ## walks from. False when nothing could switch: a direction the contract
+  ## does not know, or a frame with no scene list.
   var payload = envelope.payload
   if payload{"sceneId"}.getStr().len == 0:
     let direction = payload{"direction"}.getStr()
     if direction.len > 0:
       if direction notin SceneDirections:
         return loop.refused(envelope, "direction")
+      let current = loop.host.sceneFor(none(SceneId))
+      if not current.isNil and current.id.string == SceneSwitcherId:
+        var heard = envelope
+        heard.name = if direction == "next": evForward else: evBack
+        heard.payload = newJObject()
+        return loop.deliver(heard, eventPolicy(heard.name))
       let order = loop.sceneOrderOf()
       if order.len == 0:
         return loop.refused(envelope, "noSceneOrder")
-      let current = loop.host.sceneFor(none(SceneId))
       let opener = switcherOpener(current)
       var index = if opener.len > 0: order.find(SceneId(opener))
         elif current.isNil: -1
@@ -628,10 +637,22 @@ proc drain*(loop: EventLoop, budget = DefaultDrainBudget): int =
 proc tick*(loop: EventLoop, now = getMonoTime()): int =
   ## Time passing for the input state: a held pointer becomes a `longPress`,
   ## a held button one at every whole second, a short button press whose
-  ## double-press window closed a `press`, an idle cursor hides. What it makes
-  ## is queued (input lane) for the drain that follows; returns how many.
+  ## double-press window closed a `press`, an idle cursor hides. And for the
+  ## showing scene's UI (ui/events.nim): a `uiTimer` when a key's light is to
+  ## go out or a held key types again. What it makes is queued (input lane)
+  ## for the drain that follows; returns how many.
   var made: seq[InputDelivery]
   loop.inputState.tick(now, made)
+  if uiTimersPending():
+    let current = loop.host.sceneFor(none(SceneId))
+    if not current.isNil and uiTimerDue(current.id.string, now):
+      var queued = false
+      for envelope in loop.input:
+        if envelope.name == evUiTimer:
+          queued = true
+          break
+      if not queued:
+        made.add(InputDelivery(name: evUiTimer, payload: newJObject(), origin: eoSystem))
   for delivery in made:
     if loop.input.len >= loop.laneCapacity:
       inc loop.dropped

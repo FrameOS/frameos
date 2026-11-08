@@ -94,6 +94,7 @@ const
   evPointerDown* = "pointerDown"
   evPointerUp* = "pointerUp"
   evPointerCancel* = "pointerCancel"
+  evUiTimer* = "uiTimer"
   evMouseMove* = "mouseMove"
   evMouseDown* = "mouseDown"
   evMouseUp* = "mouseUp"
@@ -121,7 +122,7 @@ const
   evUploadScenes* = "uploadScenes"
   evVoiceChat* = "voiceChat"
 
-  ContractEventNames*: array[37, string] = [
+  ContractEventNames*: array[38, string] = [
     evInit,
     evRender,
     evOpen,
@@ -133,6 +134,7 @@ const
     evPointerDown,
     evPointerUp,
     evPointerCancel,
+    evUiTimer,
     evMouseMove,
     evMouseDown,
     evMouseUp,
@@ -161,7 +163,7 @@ const
     evVoiceChat,
   ]
 
-  ContractEventPolicies*: array[37, EventPolicy] = [
+  ContractEventPolicies*: array[38, EventPolicy] = [
     EventPolicy( # init
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
@@ -227,6 +229,12 @@ const
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
+      aliasOfIndex: -1,
+      linux: true, esp32: true, wasm: true),
+    EventPolicy( # uiTimer
+      class: ecInput, device: edPointer, listen: false, dispatch: false,
+      origins: {eoSystem},
+      renderAfter: raNever, coalesceLatest: true, log: elNone,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # mouseMove
@@ -419,32 +427,33 @@ proc contractEventIndex*(name: string): int =
   of evPointerDown: 8
   of evPointerUp: 9
   of evPointerCancel: 10
-  of evMouseMove: 11
-  of evMouseDown: 12
-  of evMouseUp: 13
-  of evTap: 14
-  of evDoubleTap: 15
-  of evLongPress: 16
-  of evSwipe: 17
-  of evEdgeSwipe: 18
-  of evWheel: 19
-  of evTurnOn: 20
-  of evTurnOff: 21
-  of evToggleScreen: 22
-  of evGpio: 23
-  of evButton: 24
-  of evSetSceneState: 25
-  of evSetCurrentScene: 26
-  of evSceneSwitcher: 27
-  of evSceneSettings: 28
-  of evBack: 29
-  of evForward: 30
-  of evMetrics: 31
-  of evReload: 32
-  of evRestart: 33
-  of evReboot: 34
-  of evUploadScenes: 35
-  of evVoiceChat: 36
+  of evUiTimer: 11
+  of evMouseMove: 12
+  of evMouseDown: 13
+  of evMouseUp: 14
+  of evTap: 15
+  of evDoubleTap: 16
+  of evLongPress: 17
+  of evSwipe: 18
+  of evEdgeSwipe: 19
+  of evWheel: 20
+  of evTurnOn: 21
+  of evTurnOff: 22
+  of evToggleScreen: 23
+  of evGpio: 24
+  of evButton: 25
+  of evSetSceneState: 26
+  of evSetCurrentScene: 27
+  of evSceneSwitcher: 28
+  of evSceneSettings: 29
+  of evBack: 30
+  of evForward: 31
+  of evMetrics: 32
+  of evReload: 33
+  of evRestart: 34
+  of evReboot: 35
+  of evUploadScenes: 36
+  of evVoiceChat: 37
   else: -1
 
 proc eventAliasCount*(name: string): int =

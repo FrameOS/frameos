@@ -64,6 +64,10 @@ type
     page*: KeyboardPage  ## which keys it shows ...
     shift*: int          ## ... letters in capitals: 1 the next one, 2 all of them
     accents*: int        ## the key whose accents show above it (its byte); 0 for none
+    accentX*: float32    ## ... the x of the finger that holds it: the accent nearest lights, < 0 none
+    accentLit*: int      ## ... which one the last layout lit, -1 for none
+    flash*: int          ## a key just typed (its byte), drawn lit for a moment after the press; 0 none
+    flashDrawn*: bool    ## ... and a layout has drawn it so
     reveal*: bool        ## scroll the focused field into view at the next layout
     paper*: bool         ## e-paper: the keyboard shows no press
     round*: bool         ## a round panel's whole canvas: the keyboard stays inside its circle
@@ -1817,11 +1821,19 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
     # not fit between `lo` and `hi`.
     keyW = max(min(int(r.w), (hi - lo - 4 - (count + 1) * gap) div count), 8)
     popW = count * keyW + (count + 1) * gap + 4
-  let shown = accentTree(input.accents, input.shift, keyW, keyH, gap, input.paper)
+    x = clamp(int(r.x + r.w / 2) - popW div 2, lo, max(hi - popW, lo))
+  # The accent under the finger's x, as near as it gets: a finger that slides
+  # sideways off the key it holds needs to go no higher than the row.
+  input.accentLit = -1
+  if input.accentX >= 0:
+    # The form whose middle is nearest, as ui/events.nim's `accentNear`.
+    let first = float32(x + 2 + gap) + float32(keyW) / 2
+    input.accentLit = clamp(int(round((input.accentX - first) / float32(keyW + gap))), 0, count - 1)
+  let shown = accentTree(input.accents, input.shift, keyW, keyH, gap, input.paper, input.accentLit)
     .build(initText(), width.float32, height.float32, 0, AccentKey, input, false,
       if memo.isNil: nil else: memo.accents)
   shown.size = shown.layout(popW.float32, popH.float32, true, true)
-  shown.x = float32(clamp(int(r.x + r.w / 2) - popW div 2, lo, max(hi - popW, lo)))
+  shown.x = float32(x)
   shown.y = float32(y)
   shown.emit(0, 0, 1, drawn, gradients, regions)
   if not memo.isNil:
@@ -1890,11 +1902,13 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
       input.open = 0
   if kb > 0:
     let keys = keyboardTree(width, kb, input.page, input.shift, input.paper, input.round, kbTop,
-      height, input.accents).build(initText(), w, kb.float32, 0, KeyboardKey, input, false,
+      height, input.accents, input.flash).build(initText(), w, kb.float32, 0, KeyboardKey, input, false,
       if memo.isNil: nil else: memo.keyboard)
     keys.size = keys.layout(w, kb.float32, true, true)
     keys.y = h
     keys.emit(0, 0, 1, result.children, gradients, regions)
+    if input.flash > 0:
+      input.flashDrawn = true
     if not memo.isNil:
       memo.keyboard = keys
     if input.accents > 0:
@@ -1910,6 +1924,8 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
         input.accents = 0
   else:
     input.accents = 0
+  if input.accents == 0:
+    input.accentLit = -1
   if input.focus > 0 and not focusSeen:
     # The field is gone: nothing has the keyboard.
     input.focus = 0

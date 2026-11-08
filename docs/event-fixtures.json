@@ -3694,8 +3694,8 @@
     ]
    },
    {
-    "name": "the scene switcher opens from the scene showing, and the same again goes back; back and forward turn its page",
-    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, `setCurrentScene {direction}` walks the list from the scene it was opened from. Opened by name instead (`setCurrentScene` to it), it knows no scene it came from: it highlights the list's first, and goes back there. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The frame's `back` and `forward` (a swipe in from the left and the right edge) turn its page, the one before and the next, wrapping around, and the frame stays on it. The switcher is in no scene list.",
+    "name": "the scene switcher opens from the scene showing, and the same again goes back; back, forward and a scene direction turn its page",
+    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, `setCurrentScene {direction}` turns its page instead (`forward` for `next`, `back` for `prev`): the swipe or the key the frame walks its scenes with walks the tiles there, and the frame stays on the switcher. Opened by name instead (`setCurrentScene` to it), it knows no scene it came from: it highlights the list's first, and goes back there. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The frame's `back` and `forward` (a swipe in from the left and the right edge) turn its page, the one before and the next, wrapping around, and the frame stays on it. The switcher is in no scene list.",
     "scenes": [
      {
       "id": "fixtures/dispatcher/switcherA",
@@ -3894,6 +3894,30 @@
       ],
       "trace": [
        "mapped frame button -> setCurrentScene",
+       "run sceneSwitcher forward",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/switcherA",
+       "page": 1,
+       "highlight": "fixtures/dispatcher/switcherB"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "REFRESH",
+         "role": "refresh",
+         "action": "press"
+        }
+       }
+      ],
+      "trace": [
+       "run sceneSwitcher button",
        "select fixtures/dispatcher/switcherB",
        "run sceneSwitcher close",
        "run switcherB open",
