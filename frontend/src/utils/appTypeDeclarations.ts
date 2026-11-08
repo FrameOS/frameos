@@ -210,6 +210,12 @@ interface FrameOSApp {
     /** A panel that shows a change only in a refresh, as e-paper and a monochrome OLED do. An app that follows
      * a finger waits for it to lift there (FrameOS 2026.11.5+; undefined before). */
     paper?: boolean;
+    /** The battery's charge from 0 to 100, on an ESP32 frame with a battery. Undefined elsewhere, so check
+     * before drawing it (FrameOS 2026.11.5+; undefined before). */
+    batteryPercent?: number;
+    /** The Wi-Fi signal in dBm, about -50 strong and -85 weak, on an ESP32 frame that is connected. Undefined
+     * elsewhere, so check before drawing it (FrameOS 2026.11.5+; undefined before). */
+    wifiRssi?: number;
   };
   initialized?: boolean;
   log(...args: any[]): void;

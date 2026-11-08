@@ -63,6 +63,33 @@ async def test_get_templates(async_client, db):
 
 
 @pytest.mark.asyncio
+async def test_update_template_makes_its_main_scene_a_layout_and_back(async_client, db):
+    helper = {"id": "helper", "name": "Helper", "settings": {"refreshInterval": 60}}
+    main = {"id": "main", "name": "Main", "default": True, "settings": {"refreshInterval": 1}}
+    t = Template(project_id=async_client.project_id, name="Bar", scenes=[helper, main], config={})
+    db.add(t)
+    db.commit()
+
+    response = await async_client.patch(
+        f"/api/templates/{t.id}", json={"name": "Bar", "description": None, "isLayout": True}
+    )
+    assert response.status_code == 200
+    scenes = response.json()["scenes"]
+    assert scenes[1]["settings"] == {"refreshInterval": 1, "isLayout": True}
+    assert scenes[0]["settings"] == {"refreshInterval": 60}
+
+    response = await async_client.patch(
+        f"/api/templates/{t.id}", json={"name": "Bar", "description": None, "isLayout": False}
+    )
+    assert response.json()["scenes"][1]["settings"] == {"refreshInterval": 1}
+
+    # A rename leaves the scenes alone.
+    response = await async_client.patch(f"/api/templates/{t.id}", json={"name": "Clock bar", "description": None})
+    assert response.json()["name"] == "Clock bar"
+    assert response.json()["scenes"][1]["settings"] == {"refreshInterval": 1}
+
+
+@pytest.mark.asyncio
 async def test_get_nonexistent_template(async_client):
     response = await async_client.get('/api/templates/999999')
     assert response.status_code == 404

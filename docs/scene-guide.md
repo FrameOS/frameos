@@ -263,8 +263,11 @@ calls, and it calls no other:
 - `app.state`: the scene's state, read by key. Write it with
   `frameos.setState(key, value)`.
 - `app.frame`: the frame, read only: `width`, `height` (always set, also in
-  the preview), `rotate`, `timeZone`, `assetsPath`, `debug`, and `embedded`
-  (true on an ESP32, and in a preview running as one).
+  the preview), `rotate`, `timeZone`, `assetsPath`, `debug`, `embedded`
+  (true on an ESP32, and in a preview running as one), and `batteryPercent`
+  (0 to 100) and `wifiRssi` (dBm), which are undefined wherever the frame
+  cannot tell (a Pi, the preview, an ESP32 with no battery or off Wi-Fi), so
+  draw them only when they are numbers.
 - `app.nodeId`, `app.nodeName`.
 - `context`: this run: `event`, `payload`, and when an image is flowing
   through, `imageWidth` / `imageHeight`. That is the area being drawn into (a
@@ -842,6 +845,12 @@ interface FrameOSApp {
     /** A panel that shows a change only in a refresh, as e-paper and a monochrome OLED do. An app that follows
      * a finger waits for it to lift there (FrameOS 2026.11.5+; undefined before). */
     paper?: boolean;
+    /** The battery's charge from 0 to 100, on an ESP32 frame with a battery. Undefined elsewhere, so check
+     * before drawing it (FrameOS 2026.11.5+; undefined before). */
+    batteryPercent?: number;
+    /** The Wi-Fi signal in dBm, about -50 strong and -85 weak, on an ESP32 frame that is connected. Undefined
+     * elsewhere, so check before drawing it (FrameOS 2026.11.5+; undefined before). */
+    wifiRssi?: number;
   };
   initialized?: boolean;
   log(...args: any[]): void;

@@ -5,8 +5,10 @@ import {
   currentSceneLayout,
   isLayoutScene,
   layoutScenes,
+  mainScene,
   sceneLayoutRef,
   scenesWithoutLayouts,
+  withIsLayout,
   withSceneLayout,
   withoutSceneLayout,
 } from "../../../../../../frontend/src/utils/sceneLayouts";
@@ -29,6 +31,20 @@ describe("layout scenes", () => {
     expect(scenesWithoutLayouts([clock, bar])).toEqual([clock]);
     expect(layoutScenes([clock, bar])).toEqual([bar]);
     expect(scenesWithoutLayouts(undefined)).toEqual([]);
+  });
+
+  it("switch to a normal scene and back, and a normal scene carries no flag", () => {
+    expect(withIsLayout({ refreshInterval: 1 }, true)).toEqual({ refreshInterval: 1, isLayout: true });
+    expect(withIsLayout({ refreshInterval: 1, isLayout: true }, false)).toEqual({ refreshInterval: 1 });
+    expect(withIsLayout(undefined, false)).toEqual({});
+  });
+
+  it("are found in a saved pack by the scene it starts on, else the first", () => {
+    const starts = { ...clock, default: true };
+    expect(mainScene([bar, starts])).toBe(starts);
+    expect(mainScene([bar, clock])).toBe(bar);
+    expect(mainScene([])).toBeNull();
+    expect(mainScene(undefined)).toBeNull();
   });
 
   it("are chosen per install", () => {

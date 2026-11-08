@@ -21,8 +21,6 @@ import { FrameLayoutsFields } from "../../../../../../frontend/src/scenes/frame/
 import { SceneLayoutPicker } from "../../../../../../frontend/src/scenes/frame/panels/Scenes/SceneLayoutPicker";
 import { sceneLayoutLogic } from "../../../../../../frontend/src/scenes/frame/panels/Scenes/sceneLayoutLogic";
 import type { FrameType } from "../../../../../../frontend/src/types";
-import { newSceneLayoutDraft } from "../../../../../../frontend/src/utils/splitScreenLayouts";
-import { SCENE_YIELD_ID } from "../../../../../../frontend/src/utils/eventsContract.gen";
 
 type TestWindow = Window & { FRAMEOS_EMBEDDED_NO_BACKEND?: boolean };
 const testWindow = window as TestWindow;
@@ -94,16 +92,6 @@ describe("the layout picker", () => {
     await mounted();
     const { container } = render(<SceneLayoutPicker frameId={frameId} sceneId="bar" />);
     expect(container.querySelector("select")).toBeNull();
-  });
-
-  it("starts a new layout as a bar above the content", () => {
-    const draft = newSceneLayoutDraft(SCENE_YIELD_ID);
-    expect(SCENE_YIELD_ID).toBe("system/yield");
-    expect(draft.root.direction).toBe("column");
-    expect(draft.root.children.map((child) => (child.type === "leaf" ? child.sceneId : "split"))).toEqual([
-      null,
-      SCENE_YIELD_ID,
-    ]);
   });
 });
 

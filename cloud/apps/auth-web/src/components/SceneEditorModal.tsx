@@ -147,6 +147,12 @@ export function sceneNameFor(scenes: SceneJson[] | null, sceneId: string | null)
   return typeof scene.name === "string" && scene.name.trim() ? scene.name : "Untitled scene";
 }
 
+/** Whether the scene the editor shows is a layout (null: no such scene yet). */
+export function sceneIsLayoutFor(scenes: SceneJson[] | null, sceneId: string | null): boolean | null {
+  const scene = scenes?.find((candidate) => candidate.id === sceneId) ?? scenes?.[0];
+  return scene ? (scene.settings as { isLayout?: unknown } | undefined)?.isLayout === true : null;
+}
+
 type SceneNameTitleProps = {
   /** null while the scenes are still loading. */
   name: string | null;
@@ -1463,6 +1469,8 @@ export function SceneEditorModal({
   // The selected scene's name, as the bar shows it; follows the editor's
   // edits (its own Rename included) and the scene tabs.
   const [sceneName, setSceneName] = useState<string | null>(null);
+  // Layout or normal scene, as the Info column shows it; follows the same edits.
+  const [sceneIsLayout, setSceneIsLayout] = useState<boolean | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   // The editor's latest scenes as state, for the Preview panel; only kept
   // up to date while that panel is open (each update re-renders the page).
@@ -1496,6 +1504,7 @@ export function SceneEditorModal({
   function publishScenes(next: SceneJson[] | null) {
     latestScenesRef.current = next;
     setSceneName(sceneNameFor(next, selectedSceneIdRef.current));
+    setSceneIsLayout(sceneIsLayoutFor(next, selectedSceneIdRef.current));
     if (panelsRef.current?.preview || next === null) {
       setPreviewScenes(next);
     }
@@ -1505,6 +1514,7 @@ export function SceneEditorModal({
     selectedSceneIdRef.current = nextSceneId;
     setSelectedSceneId(nextSceneId);
     setSceneName(sceneNameFor(latestScenesRef.current, nextSceneId));
+    setSceneIsLayout(sceneIsLayoutFor(latestScenesRef.current, nextSceneId));
   }
 
   // Every edit lands in localStorage (debounced) so a navigation away — a
@@ -1581,6 +1591,33 @@ export function SceneEditorModal({
     scheduleDraftPersist();
     if (editorApiRef.current) {
       editorApiRef.current.renameScene(targetId, name);
+    } else {
+      baselinePendingRef.current = false;
+      setScenes(next);
+    }
+  }
+
+  // The Info column's Type: the selected scene, a layout or a normal one.
+  // The same road as a rename. A normal scene carries no flag, so switching
+  // there and back leaves nothing to save.
+  function changeSceneIsLayout(isLayout: boolean) {
+    const current = latestScenesRef.current;
+    const targetId = selectedSceneIdRef.current ?? current?.[0]?.id ?? null;
+    if (!current || targetId === null) {
+      return;
+    }
+    const next = current.map((scene) => {
+      if (scene.id !== targetId) {
+        return scene;
+      }
+      const { isLayout: _dropped, ...settings } = (scene.settings ?? {}) as Record<string, unknown>;
+      return { ...scene, settings: isLayout ? { ...settings, isLayout: true } : settings };
+    });
+    publishScenes(next);
+    setDirty(JSON.stringify(next) !== initialJsonRef.current);
+    scheduleDraftPersist();
+    if (editorApiRef.current) {
+      editorApiRef.current.setSceneIsLayout(targetId, isLayout);
     } else {
       baselinePendingRef.current = false;
       setScenes(next);
@@ -2209,9 +2246,11 @@ export function SceneEditorModal({
                       listing,
                       onImagesChange: setDraftImages,
                       onListingChange: applyListingChanges,
+                      onIsLayoutChange: changeSceneIsLayout,
                     }
                   : undefined
               }
+              isLayout={sceneIsLayout ?? undefined}
               heading={info.scene.name}
               shown={{ images, listing }}
             />

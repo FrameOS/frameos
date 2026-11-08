@@ -11,6 +11,17 @@ export function isLayoutScene(scene: Pick<FrameScene, 'settings'> | null | undef
   return scene?.settings?.isLayout === true
 }
 
+/** `settings` with the scene made a layout or a normal one. A normal scene carries no flag. */
+export function withIsLayout<T extends object>(settings: T | null | undefined, isLayout: boolean): T {
+  const { isLayout: _dropped, ...rest } = (settings ?? {}) as T & { isLayout?: boolean }
+  return (isLayout ? { ...rest, isLayout: true } : rest) as unknown as T
+}
+
+/** The scene a saved pack of scenes stands for: the one it starts on, else the first. */
+export function mainScene<T extends Pick<FrameScene, 'default'>>(scenes: readonly T[] | null | undefined): T | null {
+  return scenes?.find((scene) => scene.default) ?? scenes?.[0] ?? null
+}
+
 /** The scenes a person picks between: every list but the Layouts group. */
 export function scenesWithoutLayouts<T extends Pick<FrameScene, 'settings'>>(
   scenes: readonly T[] | null | undefined

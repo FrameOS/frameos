@@ -21,8 +21,7 @@ export function FrameLayoutsFields({ frameId }: { frameId: FrameId }): JSX.Eleme
       <div className="pl-2 @md:pl-8 space-y-2">
         {layouts.length === 0 ? (
           <div className="frameos-muted text-xs">
-            This frame has no layouts yet. Add one with &quot;New layout&quot; under Add scene, or turn on &quot;Use as
-            layout&quot; in a scene&apos;s settings.
+            This frame has no layouts yet. Turn on &quot;Use as layout&quot; in a scene&apos;s settings to make one.
           </div>
         ) : (
           <>

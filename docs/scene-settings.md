@@ -73,8 +73,9 @@ hooks in the scene module, set by the host's runtime:
 What the page holds, top to bottom:
 
 - **A card**: Wi-Fi (connected to what, can't find it, wrong password?,
-  connecting, the setup hotspot), signal, address, what the last Save could
-  not do, who manages the frame, the version.
+  connecting, the setup hotspot), signal, address, the battery on a frame
+  that has one, what the last Save could not do, who manages the frame, the
+  version.
 - **Wi-Fi network**: a select box of the networks in range, the saved one first
   when it is not among them, and "Other network…" for a hidden one (an input
   to type its name). "Scan for networks" sits right under it; a scan runs when

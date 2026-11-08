@@ -1128,6 +1128,11 @@ proc pictureFormatLike(context: ExecutionContext): Image =
   elif not context.decodeTargetImage.isNil: context.decodeTargetImage
   else: context.contextImage()
 
+when defined(freertos):
+  # What only the firmware knows (fos_client.c).
+  proc fos_client_battery_percent(): cint {.importc, cdecl.}
+  proc fos_client_wifi_rssi(): cint {.importc, cdecl.}
+
 proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
   if e == nil:
@@ -1161,6 +1166,19 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     let like = pictureFormatLike(e.context)
     return nimBoolToJS(ctx, panelIsPaper(e.owner.frameConfig.device,
       not like.isNil and like.format == pfRgb565))
+  of "batteryPercent":
+    # An ESP32 with a battery. A Pi and the preview have nothing to say.
+    when defined(freertos):
+      let percent = fos_client_battery_percent()
+      if percent >= 0:
+        return nimIntToJS(ctx, percent.int32)
+    return jsUndefSentinel(ctx)
+  of "wifiRssi":
+    when defined(freertos):
+      let rssi = fos_client_wifi_rssi()
+      if rssi != 0:
+        return nimIntToJS(ctx, rssi.int32)
+    return jsUndefSentinel(ctx)
   else:
     return jsUndefSentinel(ctx)
 
@@ -1232,7 +1250,8 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
       for key in state.keys:
         keys.add(key)
   of "frame":
-    keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale", "paper"]
+    keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale", "paper",
+      "batteryPercent", "wifiRssi"]
   of "context":
     keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep"]
     if e.context.hasImage and not e.context.image.isNil:

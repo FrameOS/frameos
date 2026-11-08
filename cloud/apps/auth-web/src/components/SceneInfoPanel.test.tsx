@@ -222,6 +222,28 @@ describe("SceneInfoPanel", () => {
     expect(screen.getByText("Private, only you")).toBeTruthy();
   });
 
+  it("lets the owner switch the scene between a layout and a normal one, and tells visitors only of a layout", () => {
+    const draft = {
+      images: info.images,
+      listing: { ...info.versions[0]!.listing },
+      onImagesChange: vi.fn(),
+      onListingChange: vi.fn(),
+      onIsLayoutChange: vi.fn(),
+    };
+    const { unmount } = render(<SceneInfoPanel {...info} draft={draft} isLayout={false} isOwner signedIn />);
+    fireEvent.change(screen.getByLabelText("Scene type"), { target: { value: "layout" } });
+    expect(draft.onIsLayoutChange).toHaveBeenCalledWith(true);
+    unmount();
+
+    const visitor = render(<SceneInfoPanel {...info} isLayout={false} signedIn />);
+    expect(screen.queryByText("Type")).toBeNull();
+    visitor.unmount();
+    render(<SceneInfoPanel {...info} isLayout signedIn />);
+    expect(screen.getByText("Type")).toBeTruthy();
+    expect(screen.getByText("Layout")).toBeTruthy();
+    expect(screen.queryByLabelText("Scene type")).toBeNull();
+  });
+
   it("opens the category editor from the owner's category pill, where a visitor's pill links to the store", () => {
     const draft = {
       images: info.images,

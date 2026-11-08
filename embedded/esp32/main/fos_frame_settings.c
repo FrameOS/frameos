@@ -143,6 +143,11 @@ char *fos_frame_settings_json(void)
              fos_wifi_scanning() ? "true" : "false", config->wifi_pass[0] ? "true" : "false",
              (unsigned)config->rotate, config->render_scale_milli / 1000.0);
     put(&out, line);
+    int battery = fos_client_battery_percent();
+    if (battery >= 0) {
+        snprintf(line, sizeof(line), ",\"battery\":{\"percent\":%d}", battery);
+        put(&out, line);
+    }
     if (manager() != NULL) put_pair(&out, "managedBy", manager());
     put_pair(&out, "version", esp_app_get_description()->version);
     if (s_refused[0]) put_pair(&out, "note", s_refused);

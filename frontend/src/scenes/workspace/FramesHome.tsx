@@ -1,7 +1,4 @@
 import { scenesWithoutLayouts } from '../../utils/sceneLayouts'
-import { SCENE_YIELD_ID } from '../../utils/eventsContract.gen'
-import { RectangleGroupIcon } from '@heroicons/react/24/outline'
-import { newSceneLayoutDraft } from '../../utils/splitScreenLayouts'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
@@ -1005,21 +1002,6 @@ function AddSceneDrawerActions({
         <span className="min-w-0 flex-1">
           <span className="frameos-strong block truncate text-sm font-semibold">New blank scene</span>
           <span className="frameos-muted block text-xs">Start with a render event</span>
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={() => {
-          openGenerator(null, newSceneLayoutDraft(SCENE_YIELD_ID), true)
-        }}
-        className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-      >
-        <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
-          <RectangleGroupIcon className="h-6 w-6" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="frameos-strong block truncate text-sm font-semibold">New layout</span>
-          <span className="frameos-muted block text-xs">A bar or panels around any scene on this frame</span>
         </span>
       </button>
       <button

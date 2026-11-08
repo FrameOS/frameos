@@ -456,6 +456,7 @@ block the_frame_page:
     online = false
     crowded = false
     locked = false
+    battery = -1
   frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
     {.cast(gcsafe).}:
       if locked:
@@ -470,7 +471,9 @@ block the_frame_page:
           "ip": if online: "192.168.1.20" else: "", "networks": networks, "scanning": false, "password": true},
         "rotate": 0, "renderScale": 0, "managedBy": "FrameOS Cloud", "version": "2026.11.5",
         "actions": ["restart"]}
-  frameSettingsApply = proc (values: JsonNode) {.nimcall, gcsafe, raises: [].} =
+      if battery >= 0:
+        result["battery"] = %*{"percent": battery}
+  frameSettingsApply =proc (values: JsonNode) {.nimcall, gcsafe, raises: [].} =
     {.cast(gcsafe).}: applied.add values
   frameSettingsAction = proc (action: string) {.nimcall, gcsafe, raises: [].} =
     {.cast(gcsafe).}: actions.add action
@@ -575,6 +578,17 @@ block the_frame_page:
   online = true
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-online.png")
+  # The battery sits with the Wi-Fi facts, on a frame that has one.
+  battery = 78
+  let withBattery = scene.draw()
+  var batteryShown = false
+  for y in 0 ..< image.height:
+    for x in 0 ..< image.width:
+      if image[x, y] != withBattery[x, y]:
+        batteryShown = true
+  doAssert batteryShown, "no Battery line on the frame page"
+  battery = -1
+  discard scene.draw()
   # Save hands over what was picked, as it is too: the host applies what
   # differs from what it has (fos_frame_settings.c, frame_settings_linux.nim).
   scene.scrollToEnd()

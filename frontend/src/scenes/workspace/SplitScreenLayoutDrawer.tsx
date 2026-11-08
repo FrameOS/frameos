@@ -987,7 +987,6 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
     startResize,
   } = useActions(logic)
   const { updateScene } = useActions(frameKea)
-  const { asLayout } = useValues(logic)
   const { openSceneControl } = useActions(workspaceLogic)
   const previewRef = useRef<HTMLDivElement>(null)
   const scenes = sceneById(frame)
@@ -996,7 +995,7 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
   const selectedLeaf = selectedLeafId ? leaves.find((leaf) => leaf.id === selectedLeafId) ?? null : null
   const selectedLeafScene = selectedLeaf?.sceneId ? scenes.get(selectedLeaf.sceneId) ?? null : null
   const editingScene = editingSceneId ? scenes.get(editingSceneId) ?? null : null
-  const isLayout = asLayout || isLayoutScene(editingScene)
+  const isLayout = isLayoutScene(editingScene)
   const selectedLeafRhythm =
     selectedLeaf?.sceneId === SCENE_YIELD_ID
       ? null

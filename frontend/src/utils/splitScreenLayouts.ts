@@ -33,22 +33,6 @@ export interface SplitScreenSceneLayout {
   root: SplitLayoutBranch
 }
 
-/** A new layout's start: a bar above the scene it wraps (docs/scene-layouts.md). */
-export function newSceneLayoutDraft(contentSceneId: string): SplitScreenSceneLayout {
-  return {
-    name: 'New layout',
-    borderWidth: 0,
-    outerBorderWidth: 0,
-    background: { ...defaultSplitScreenBackground },
-    root: split(
-      'layout/root',
-      'column',
-      [1, 8],
-      [leaf('layout/bar'), { ...leaf('layout/content'), sceneId: contentSceneId }]
-    ),
-  }
-}
-
 export interface SplitLayoutPreset {
   id: string
   name: string

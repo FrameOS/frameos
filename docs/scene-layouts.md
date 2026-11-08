@@ -74,9 +74,11 @@ like any scene. The voice chat's `list_scenes` and `activate_scene` leave them
 out on both planes (the cloud lists assignments, so a push settles
 `frame_scene_assignments.is_layout`: every runtime scene of the version is one).
 
-In the editor: "Use as layout" in a scene's settings, "New layout" under Add
-scene (a split with a bar above a Content panel), and a small select under each
-scene's picture once the frame has a layout. The same choice is in the frame's
+Any scene becomes a layout, and back, where its settings are: "Use as layout"
+in the frame's scene settings and the embedded editor, Type in the cloud scene
+page's Info column, and "Use as layout" in a backend's saved scene Edit dialog
+(`PATCH /api/templates/{id}` `isLayout`, on the scene the template starts on).
+A small select sits under each scene's picture once the frame has a layout. The same choice is in the frame's
 Settings under Layouts: one select per scene and one for all of them, which
 sets the scenes the frame has now (a scene added later starts with no layout).
 "Layout settings" in the scene's menu edits `layout.state`. In the split drawer of a layout, the Content panel

@@ -55,7 +55,8 @@ type
     ## nil when the page is not offered (no host has one, or the frame's
     ## control plane turned it off). Else {wifi: {state, ssid, hotspot,
     ## rssi, ip, networks: [name…], scanning, password}, rotate,
-    ## renderScale, managedBy, version, actions: ["restart"…], note}: `wifi`
+    ## renderScale, battery: {percent}, managedBy, version,
+    ## actions: ["restart"…], note}: `battery` absent without one; `wifi`
     ## absent, no network to set here; `state` one of connected, connecting,
     ## notFound, auth, hotspot, unset, off; `password` a password is saved;
     ## `actions` the device commands this host runs besides render and
@@ -581,6 +582,9 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
       if not rssi.isNil and rssi.kind == JInt:
         card.line(look, "Signal", $rssi.getInt() & " dBm")
       card.line(look, "Address", wifi{"ip"}.getStr())
+  let battery = info{"battery", "percent"}
+  if not battery.isNil and battery.kind == JInt:
+    card.line(look, "Battery", $battery.getInt() & "%")
   card.line(look, "Not saved", info{"note"}.getStr())
   card.line(look, "Managed by", info{"managedBy"}.getStr())
   card.line(look, "Version", info{"version"}.getStr())

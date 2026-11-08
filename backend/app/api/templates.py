@@ -453,6 +453,22 @@ async def export_template(template_id: str, db: Session = Depends(get_db)):
     return respond_with_template(template)
 
 
+def with_main_scene_layout(scenes: list | None, is_layout: bool) -> list | None:
+    """The scenes with the one the template starts on (else the first) made a
+    layout or a normal scene (docs/scene-layouts.md). A new list, so the JSON
+    column sees the change."""
+    if not scenes:
+        return scenes
+    updated = copy.deepcopy(scenes)
+    main = next((scene for scene in updated if isinstance(scene, dict) and scene.get("default")), updated[0])
+    if isinstance(main, dict):
+        settings = {key: value for key, value in (main.get("settings") or {}).items() if key != "isLayout"}
+        if is_layout:
+            settings["isLayout"] = True
+        main["settings"] = settings
+    return updated
+
+
 @api_project.patch("/templates/{template_id}", response_model=TemplateResponse)
 async def update_template(template_id: str, data: UpdateTemplateRequest, db: Session = Depends(get_db)):
     template = project_get_or_404(db, Template, template_id, detail="Template not found")
@@ -461,6 +477,8 @@ async def update_template(template_id: str, data: UpdateTemplateRequest, db: Ses
         template.name = data.name
     if data.description is not None:
         template.description = data.description
+    if data.isLayout is not None:
+        template.scenes = with_main_scene_layout(template.scenes, data.isLayout)
     db.commit()
     db.refresh(template)
 
