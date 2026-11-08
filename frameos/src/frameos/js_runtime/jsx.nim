@@ -161,22 +161,22 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
   if not ctx.stringProp(v, "type", node.tag):
     return
   let props = ctx.prop(v, "props")
-  if node.tag in ["Scene", "scene", "yield", "Yield"]:
+  if node.tag == "Scene" or node.tag == "yield":
     # A scene's props are its state, typed as JS gave them (`count={3}` is 3):
     # they are the scene's to read, not attributes of an element.
     if not r.memo.isNil:
       r.memo.sawScene = true
     var id = ""
-    if node.tag in ["yield", "Yield"]:
-      id = SceneYieldTag
-    elif jsIsObject(props):
+    var json = "{}"
+    if jsIsObject(props):
       discard ctx.stringProp(props, "id", id)
-    let json = if jsIsObject(props): JS_JSONStringify(ctx, props, jsUndefined(ctx), jsUndefined(ctx)) else: jsUndefined(ctx)
-    node.tag = "Scene"
-    node.attrs.add(("id", id))
-    node.attrs.add(("props", if jsIsString(json): toNimString(ctx, json) else: "{}"))
-    JS_FreeValue(ctx, json)
+      let text = JS_JSONStringify(ctx, props, jsUndefined(ctx), jsUndefined(ctx))
+      if jsIsString(text):
+        json = toNimString(ctx, text)
+      JS_FreeValue(ctx, text)
     JS_FreeValue(ctx, props)
+    node.attrs = @[("id", if node.tag == "yield": SceneYieldTag else: id), ("props", json)]
+    node.tag = "Scene"
     into.add node
     return
   var

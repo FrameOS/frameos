@@ -30,9 +30,11 @@ import frameos/types
 import frameos/panel_shape
 import frameos/refresh_interval
 import frameos/utils/canvas_log
-from frameos/utils/svg_frames import forgetPanelRegions
+from frameos/utils/svg_frames import forgetPanelRegions, aroundHole
 from frameos/loading_mark import LoadingMarkMinIntervalSeconds
 from frameos/utils/memory import availableRenderBytes, availableRenderHeadroomBytes, runsAsEmbedded
+
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
 type
   RhythmDecision* = enum
@@ -92,7 +94,8 @@ var
   keepAllowed {.threadvar.}: bool
     ## This pass may leave a cell as the canvas holds it: every scene on the
     ## way here draws nothing but its panels (a generated split).
-  canvasMarks {.threadvar.}: seq[CanvasMark]
+  canvasMarks {.threadvar.}: array[MaxCanvasMarks, CanvasMark]
+  nextCanvasMark {.threadvar.}: int
   rhythmHoldFloor*: bool
     ## Set by a host whose next wake is expensive whatever its panel (an
     ## ESP32 in deep sleep).
@@ -111,11 +114,13 @@ proc rhythmNow*(): float =
       return rhythmClockOverride
   getMonoTime().ticks.float / 1e9
 
+proc earlySlack(interval: float): float =
+  clamp(interval * DueSlackShare, DueSlackMinSeconds, DueSlackMaxSeconds)
+
 proc dueSlack(interval: float): float =
   # Only when the task will sleep in whole seconds: at 20 frames a second the
   # 1.5 s would make a once-a-second panel due on every frame.
-  clamp(interval * DueSlackShare, DueSlackMinSeconds, DueSlackMaxSeconds) +
-    (if passPace >= 1.0: WholeSecondSleepSlack else: 0.0)
+  earlySlack(interval) + (if passPace >= 1.0: WholeSecondSleepSlack else: 0.0)
 
 proc dueBy(r: SceneRhythm, at: float): bool =
   r.dueAt <= at + dueSlack(r.interval)
@@ -159,29 +164,25 @@ proc copyPixels(dst, src: Image) =
   for y in 0 ..< src.height:
     copyMem(d[dst.dataIndex(0, y) * bpp].addr, s[src.dataIndex(0, y) * bpp].addr, src.width * bpp)
 
-proc cellIndex(r: SceneRhythm, image: Image): int =
-  ## The cell of `image`'s rectangle, or -1. A rectangle is its place on the
+proc cellOf(r: SceneRhythm, image: Image): RhythmCell =
+  ## The cell of `image`'s rectangle, or nil. A rectangle is its place on the
   ## canvas (origin and stride) and its size: one scene drawn into several
   ## cells has one entry per cell, nested splits included.
-  for i in 0 ..< r.cells.len:
-    template c: untyped = r.cells[i]
-    if c.width == image.width and c.height == image.height and c.format == image.format and
-        c.origin == image.origin and c.stride == image.stride:
-      return i
-  -1
+  result = r.cells
+  while not result.isNil and not (result.width == image.width and result.height == image.height and
+      result.format == image.format and result.origin == image.origin and result.stride == image.stride):
+    result = result.next
 
-proc dropCell(r: SceneRhythm, i: int) =
-  ## The last cell takes its slot: cells are found by their place, not their
-  ## order, and a shifting `delete` cost 600 bytes of ESP32 image.
-  if not r.cells[i].copy.isNil:
-    heldBytes -= r.cells[i].copy.byteSize
-  r.cells[i] = r.cells[r.cells.high]
-  r.cells.setLen(r.cells.high)
-
-proc dropCell(r: SceneRhythm, image: Image) =
-  let i = r.cellIndex(image)
-  if i >= 0:
-    r.dropCell(i)
+proc dropCell(r: SceneRhythm, c: RhythmCell) =
+  if not c.copy.isNil:
+    heldBytes -= c.copy.byteSize
+  if r.cells == c:
+    r.cells = c.next
+  else:
+    var before = r.cells
+    while before.next != c:
+      before = before.next
+    before.next = c.next
 
 proc walkCopies(scene: FrameScene, dropDueBy: float): int =
   ## The bytes still kept for `scene` and the scenes it embeds, after letting
@@ -190,13 +191,14 @@ proc walkCopies(scene: FrameScene, dropDueBy: float): int =
   ## layout that changed).
   let r = scene.rhythm
   if not r.isNil:
-    var i = r.cells.len
-    while i > 0:
-      dec i
-      if r.dueBy(dropDueBy) or r.cells[i].drawnPass < r.scheduledPass:
-        r.dropCell(i)
-      elif not r.cells[i].copy.isNil:
-        result += r.cells[i].copy.byteSize
+    var c = r.cells
+    while not c.isNil:
+      let next = c.next
+      if r.dueBy(dropDueBy) or c.drawnPass < r.scheduledPass:
+        r.dropCell(c)
+      elif not c.copy.isNil:
+        result += c.copy.byteSize
+      c = next
     if not r.embedImage.isNil:
       if dropDueBy == Inf:
         unregisterCanvas(r.embedImage)
@@ -215,10 +217,9 @@ proc copyBudgetBytes(): int =
   if runsAsEmbedded():
     result = min(result, EmbeddedCopyCapBytes)
 
-proc keepCopy(scene: FrameScene, image: Image, i: int) =
-  ## Cell `i` (the rectangle of `image`) as the scene just left it.
+proc keepCopy(scene: FrameScene, image: Image, c: RhythmCell) =
+  ## Cell `c` (the rectangle of `image`) as the scene just left it.
   let r = scene.rhythm
-  template c: untyped = r.cells[i]
   let bytes = image.byteSize
   let others = heldBytes - (if c.copy.isNil: 0 else: bytes)
   let budget = copyBudgetBytes()
@@ -226,7 +227,7 @@ proc keepCopy(scene: FrameScene, image: Image, i: int) =
   # have even with the budget to spare.
   let largest = availableRenderBytes()
   if others + bytes > budget or not (not c.copy.isNil or bytes <= largest or (largest <= 0 and not runsAsEmbedded())):
-    r.dropCell(i)
+    r.dropCell(c)
     if not r.copyRefused:
       r.copyRefused = true
       scene.logLine(%*{"event": "render:rhythm:copyRefused", "sceneId": scene.id.string, "bytes": bytes})
@@ -249,8 +250,8 @@ proc noteEmbedImage*(delta: int) =
 
 proc canvasMarkOf(canvas: Image): int =
   if canvas.isNil: return -1
-  for i in 0 ..< canvasMarks.len:
-    if canvasMarks[i].canvas.bufferPointer == canvas.bufferPointer:
+  for i in 0 ..< MaxCanvasMarks:
+    if not canvasMarks[i].canvas.isNil and canvasMarks[i].canvas.bufferPointer == canvas.bufferPointer:
       return i
   -1
 
@@ -265,16 +266,24 @@ proc keepable(c: RhythmCell): bool =
   let i = canvasMarkOf(passCanvas)
   keepAllowed and i >= 0 and canvasMarks[i].markHolds(c.drawnPass)
 
-proc otherCanvasHolding(c: RhythmCell, image: Image): Image =
-  ## An LCD's other frame buffer that holds this cell's pixels: the picture to
+proc otherCanvasHolding(drawnPass: int): Image =
+  ## An LCD's other frame buffer that holds what that pass drew: the picture to
   ## put back when this buffer's is a frame or two old, with no memory of its
   ## own. Same size, same format: they are buffers of one panel.
+  for i in 0 ..< MaxCanvasMarks:
+    template m: untyped = canvasMarks[i]
+    if not m.canvas.isNil and m.canvas.bufferPointer != passCanvas.bufferPointer and
+        m.canvas.width == passCanvas.width and m.canvas.height == passCanvas.height and
+        m.canvas.format == passCanvas.format and m.markHolds(drawnPass):
+      return m.canvas
+
+proc cellHolder(c: RhythmCell): Image =
   if keepAllowed and not passCanvas.isNil:
-    for m in canvasMarks:
-      if m.canvas.bufferPointer != passCanvas.bufferPointer and m.canvas.width == passCanvas.width and
-          m.canvas.height == passCanvas.height and m.canvas.format == passCanvas.format and
-          m.markHolds(c.drawnPass):
-        return m.canvas
+    result = otherCanvasHolding(c.drawnPass)
+
+proc forgetCanvasMarks() =
+  for i in 0 ..< MaxCanvasMarks:
+    canvasMarks[i].canvas = nil
 
 # ------------------------------------------------------------------- passes
 
@@ -317,7 +326,7 @@ proc rhythmEnterRender*(scene: FrameScene, canvas: Image): bool =
   let switched = not passRoot.isNil and passRoot != scene
   if switched:
     discard walkCopies(passRoot, Inf)
-    canvasMarks.setLen(0)
+    forgetCanvasMarks()
     forgetPanelRegions()
   passFresh = freshRequested or switched
   freshRequested = false
@@ -412,9 +421,8 @@ proc rhythmLeaveRender*(scene: FrameScene, passStarted: bool) =
       canvasMarks[i].generation = passGeneration
       canvasMarks[i].finishedPass = passId
     else:
-      if canvasMarks.len >= MaxCanvasMarks:
-        canvasMarks.del(0)
-      canvasMarks.add(CanvasMark(canvas: passCanvas, generation: passGeneration, finishedPass: passId))
+      canvasMarks[nextCanvasMark] = CanvasMark(canvas: passCanvas, generation: passGeneration, finishedPass: passId)
+      nextCanvasMark = (nextCanvasMark + 1) mod MaxCanvasMarks
   # Pictures of scenes that will run on the next pass anyway would only cost
   # a copy per pass.
   discard walkCopies(scene, passStart + followedInterval(scene))
@@ -435,40 +443,46 @@ proc rhythmReleaseScene*(scene: FrameScene) =
 proc rhythmForgetCanvases*() =
   ## Something other than a scene drew over the canvas (an error screen, the
   ## status screen).
-  canvasMarks.setLen(0)
+  forgetCanvasMarks()
   forgetPanelRegions()
 
 proc rhythmResetAfterAbort*() =
   ## The ESP32's out-of-memory abort skips every `finally`: the next render
   ## must still start a pass (single_scene_host.recoverAbortedRun).
   passDepth = 0
-  canvasMarks.setLen(0)
-  forgetPanelRegions()
+  rhythmForgetCanvases()
   keepAllowed = false
 
 # ------------------------------------------------------------- scene nodes
 
-proc rhythmVisit*(scene: FrameScene, image: Image): RhythmDecision =
-  ## A scene node is about to draw `scene` into `image`. The first visit in a
-  ## pass decides whether it is due: a scene drawn into several cells (a
-  ## split's "render all other cells") runs in all of them or in none.
-  if passDepth == 0:
-    return rdRun
+proc rhythmOf(scene: FrameScene): SceneRhythm =
   if scene.rhythm.isNil:
     scene.rhythm = SceneRhythm()
-  let r = scene.rhythm
-  if r.visitPass != passId:
-    r.visitPass = passId
-    r.runsThisPass = passFresh or r.dueAt <= 0 or stateKey(scene) != r.stateKey or
-      r.dueBy(passStart)
+  scene.rhythm
+
+proc decided(scene: FrameScene): SceneRhythm =
+  ## The first visit in a pass decides whether the scene is due: a scene drawn
+  ## into several cells (a split's "render all other cells") runs in all of
+  ## them or in none.
+  result = rhythmOf(scene)
+  if result.visitPass != passId:
+    result.visitPass = passId
+    result.runsThisPass = passFresh or result.dueAt <= 0 or stateKey(scene) != result.stateKey or
+      result.dueBy(passStart)
+
+proc rhythmVisit*(scene: FrameScene, image: Image): RhythmDecision =
+  ## A scene node is about to draw `scene` into `image`.
+  if passDepth == 0:
+    return rdRun
+  let r = decided(scene)
   if r.runsThisPass:
     return rdRun
-  let i = r.cellIndex(image)
-  if i >= 0:
-    if r.cells[i].keepable:
+  let c = r.cellOf(image)
+  if not c.isNil:
+    if c.keepable:
       inc passKept
       return rdKeep
-    if not r.cells[i].copy.isNil or not otherCanvasHolding(r.cells[i], image).isNil:
+    if not c.copy.isNil or not c.cellHolder.isNil:
       inc passReused
       return rdRestore
   inc passRepainted
@@ -476,9 +490,8 @@ proc rhythmVisit*(scene: FrameScene, image: Image): RhythmDecision =
 
 proc rhythmRestore*(scene: FrameScene, image: Image) =
   let
-    r = scene.rhythm
-    c = r.cells[r.cellIndex(image)]
-    other = otherCanvasHolding(c, image)
+    c = scene.rhythm.cellOf(image)
+    other = c.cellHolder
   if not other.isNil:
     let
       x = image.origin mod max(image.stride, 1)
@@ -493,7 +506,8 @@ proc rhythmAfterRun*(scene: FrameScene, decision: RhythmDecision, given, drawn: 
   ## keep what it drew if it will not be due again by the next pass and the
   ## canvas will not keep it for us. `nextSleep` is what its run set (-1:
   ## nothing), which means "this scene next renders in N seconds" and never
-  ## reaches the scene drawing it.
+  ## reaches the scene drawing it. Nothing `given` (a `<Scene>`, a layout's
+  ## chrome): the schedule alone.
   let r = scene.rhythm
   if r.isNil:
     return
@@ -506,25 +520,26 @@ proc rhythmAfterRun*(scene: FrameScene, decision: RhythmDecision, given, drawn: 
     r.dueAt = passStart + wait
   if given.isNil:
     return
+  var c = r.cellOf(given)
   # A scene that swapped its canvas for an image of its own did not draw into
   # the rectangle, and one due again by the next pass would be copied for
   # nothing.
   if drawn != given or r.dueBy(passNext):
-    r.dropCell(given)
+    if not c.isNil:
+      r.dropCell(c)
     return
-  var i = r.cellIndex(given)
-  if i < 0:
-    r.cells.add(RhythmCell(origin: given.origin, stride: given.stride, width: given.width,
-      height: given.height, format: given.format))
-    i = r.cells.high
-  r.cells[i].drawnPass = passId
+  if c.isNil:
+    c = RhythmCell(origin: given.origin, stride: given.stride, width: given.width,
+      height: given.height, format: given.format, next: r.cells)
+    r.cells = c
+  c.drawnPass = passId
   if keepAllowed:
     # The canvas stays: nothing to keep but the record that it holds this.
-    if not r.cells[i].copy.isNil:
-      heldBytes -= r.cells[i].copy.byteSize
-      r.cells[i].copy = nil
+    if not c.copy.isNil:
+      heldBytes -= c.copy.byteSize
+      c.copy = nil
     return
-  keepCopy(scene, given, i)
+  keepCopy(scene, given, c)
 
 # --------------------------------------------------- around a layout's hole
 
@@ -540,91 +555,41 @@ proc rhythmVisitChrome*(layout: FrameScene): RhythmDecision =
     return rdRun
   if layout of InterpretedFrameScene and InterpretedFrameScene(layout).sceneNodes.len > 0:
     return rdRun
-  if layout.rhythm.isNil:
-    layout.rhythm = SceneRhythm()
-  let r = layout.rhythm
+  let r = rhythmOf(layout)
   # Not dueBy: its whole-second slack calls a one-second clock bar due on any
   # pass at all, so a tap on the content would pay for the bar as well. A bar
   # a little early waits for the pass its own due time wakes.
   if passFresh or r.dueAt <= 0 or stateKey(layout) != r.stateKey or
-      r.dueAt <= passStart + clamp(r.interval * DueSlackShare, DueSlackMinSeconds, DueSlackMaxSeconds):
+      r.dueAt <= passStart + earlySlack(r.interval):
     return rdRun
   if passGeneration < 0:
     return rdRepaint
   let i = canvasMarkOf(passCanvas)
   if i >= 0 and canvasMarks[i].markHolds(r.chromePass):
     return rdKeep
-  for m in canvasMarks:
-    if m.canvas.bufferPointer != passCanvas.bufferPointer and m.canvas.width == passCanvas.width and
-        m.canvas.height == passCanvas.height and m.canvas.format == passCanvas.format and
-        m.markHolds(r.chromePass):
-      return rdRestore
+  if not otherCanvasHolding(r.chromePass).isNil:
+    return rdRestore
   rdRepaint
 
 proc rhythmRestoreChrome*(layout: FrameScene) =
   ## The chrome out of the frame buffer that holds it, around the hole: what
   ## this buffer's hole holds is the content's business.
-  let r = layout.rhythm
-  for m in canvasMarks:
-    if m.canvas.bufferPointer != passCanvas.bufferPointer and m.canvas.width == passCanvas.width and
-        m.canvas.height == passCanvas.height and m.canvas.format == passCanvas.format and
-        m.markHolds(r.chromePass):
-      let
-        src = m.canvas
-        dst = passCanvas
-        bpp = dst.bytesPerPixel
-        d = cast[ptr UncheckedArray[byte]](dst.bufferPointer)
-        s = cast[ptr UncheckedArray[byte]](src.bufferPointer)
-        hx = layout.holeX.int
-        hy = layout.holeY.int
-        hw = layout.holeW.int
-        hh = layout.holeH.int
-      for y in 0 ..< dst.height:
-        if y < hy or y >= hy + hh:
-          copyMem(d[dst.dataIndex(0, y) * bpp].addr, s[src.dataIndex(0, y) * bpp].addr, dst.width * bpp)
-        else:
-          if hx > 0:
-            copyMem(d[dst.dataIndex(0, y) * bpp].addr, s[src.dataIndex(0, y) * bpp].addr, hx * bpp)
-          if hx + hw < dst.width:
-            copyMem(d[dst.dataIndex(hx + hw, y) * bpp].addr, s[src.dataIndex(hx + hw, y) * bpp].addr,
-              (dst.width - hx - hw) * bpp)
-      return
+  let src = otherCanvasHolding(layout.rhythm.chromePass)
+  if src.isNil:
+    return
+  for r in aroundHole(passCanvas.width, passCanvas.height, layout.holeX, layout.holeY, layout.holeW, layout.holeH):
+    if r.w > 0 and r.h > 0:
+      copyPixels(passCanvas.view(r.x, r.y, r.w, r.h), src.view(r.x, r.y, r.w, r.h))
 
 proc rhythmChromeRan*(layout: FrameScene, decision: RhythmDecision, nextSleep: float) =
   ## The layout just drew around its hole: schedule it (a due run only).
-  if layout.rhythm.isNil:
-    layout.rhythm = SceneRhythm()
-  let r = layout.rhythm
-  r.chromePass = passId
-  r.stateKey = stateKey(layout)
-  if decision == rdRun:
-    let wait = max(if nextSleep >= 0: nextSleep else: layout.refreshInterval, 0.0)
-    r.interval = wait
-    r.dueAt = passStart + wait
+  rhythmOf(layout).chromePass = passId
+  rhythmAfterRun(layout, decision, nil, nil, nextSleep)
 
 # ------------------------------------------------------------- `<Scene>` tags
 
 proc rhythmEmbedDue*(scene: FrameScene): bool =
   ## A `<Scene>`, whose picture the UI draws: does it run on this pass?
-  if passDepth == 0:
-    return true
-  if scene.rhythm.isNil:
-    scene.rhythm = SceneRhythm()
-  let r = scene.rhythm
-  if r.visitPass != passId:
-    r.visitPass = passId
-    r.runsThisPass = passFresh or r.dueAt <= 0 or stateKey(scene) != r.stateKey or
-      r.dueBy(passStart)
-  r.runsThisPass
+  passDepth == 0 or decided(scene).runsThisPass
 
-proc rhythmEmbedRan*(scene: FrameScene, nextSleep: float) =
-  let r = scene.rhythm
-  if r.isNil:
-    return
-  r.stateKey = stateKey(scene)
-  if r.scheduledPass != passId:
-    r.scheduledPass = passId
-    let interval = if scene.layoutPaced: contentInterval(scene) else: scene.refreshInterval
-    let wait = max(if nextSleep >= 0: nextSleep else: interval, 0.0)
-    r.interval = wait
-    r.dueAt = passStart + wait
+{.pop.}

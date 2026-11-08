@@ -366,7 +366,7 @@ block a_rectangle_of_the_panel:
   doAssert into(1, scene(3)) < region div 4
   # Pixels that came from somewhere else: no record, drawn whole.
   beginPanelFrame(bufs[0].bufferPointer, gens[0])
-  forgetPanelRegion(bufs[0].view(0, TopH, W, RegionH))
+  takePanelRegion(bufs[0].view(0, TopH, W, RegionH))
   endPanelFrame()
   gens[1] += 1 # and nothing to copy from either
   doAssert into(0, scene(4)) == region

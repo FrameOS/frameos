@@ -157,8 +157,10 @@ proc runs(scene: FrameScene): int =
   scene.state{"runs"}.getInt()
 
 proc copies(r: SceneRhythm): seq[Image] =
-  for cell in r.cells:
+  var cell = r.cells
+  while not cell.isNil:
     if not cell.copy.isNil: result.add cell.copy
+    cell = cell.next
 
 proc pixel(image: Image, x, y: int): ColorRGBX =
   image.getPixel(image.dataIndex(x, y))
@@ -384,7 +386,7 @@ suite "scene rhythm":
     let photo = scene.child(4)
     # A copy from a rectangle that is not on the canvas any more (an older
     # layout), written before the photo's last due run.
-    photo.rhythm.cells.add(RhythmCell(origin: 0, stride: 3, width: 3, height: 3, format: pfRgbx, copy: newImage(3, 3), drawnPass: 0))
+    photo.rhythm.cells = RhythmCell(origin: 0, stride: 3, width: 3, height: 3, format: pfRgbx, copy: newImage(3, 3), drawnPass: 0, next: photo.rhythm.cells)
     rhythmClockOverride = 1001.0
     discard scene.pass()
     check photo.rhythm.copies.len == 1

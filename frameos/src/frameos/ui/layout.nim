@@ -1605,18 +1605,14 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
   of ukText:
     n.emitText(cx, cy, cw, op, drawn)
   of ukImage:
-    if n.src.tag == "Scene":
-      if cw > 0 and ch > 0:
-        let node = SvgNode(tag: "image", attrs: @[("x", num(cx)), ("y", num(cy)), ("width", num(cw)),
-          ("height", num(ch)), ("preserveAspectRatio", "none"), ("scene-id", n.src.attr("id")),
-          ("scene-props", n.src.attr("props"))])
-        if op < 1:
-          node.attrs.add(("opacity", num(op)))
-        drawn.add node
-    elif not n.src.image.isNil and cw > 0 and ch > 0:
+    let embedded = n.src.tag == "Scene"
+    if (embedded or not n.src.image.isNil) and cw > 0 and ch > 0:
       let node = SvgNode(tag: "image", image: n.src.image, attrs: @[("x", num(cx)),
         ("y", num(cy)), ("width", num(cw)), ("height", num(ch)),
         ("preserveAspectRatio", ["none", "xMidYMid meet", "xMidYMid slice"][ord(b.fit)])])
+      if embedded:
+        node.attrs.add(("scene-id", n.src.attr("id")))
+        node.attrs.add(("scene-props", n.src.attr("props")))
       if op < 1:
         node.attrs.add(("opacity", num(op)))
       drawn.add node
@@ -1979,7 +1975,7 @@ proc layoutUi*(root: SvgNode, width, height: int): SvgNode =
     input: UiInput
   layoutUi(root, width, height, input, regions)
 
-proc seekHole(n: UiNode, ox, oy, opacity: float32, scrolled: bool, clip: array[4, float32], hole: var UiHole) =
+proc seekHole(n: UiNode, ox, oy, opacity: float32, scrolled: bool, hole: var UiHole) =
   ## In paint order, as `emit` walks: the first `<yield />`, then whether
   ## anything painted after it lands on it.
   template b: untyped = n.box
@@ -1992,42 +1988,35 @@ proc seekHole(n: UiNode, ox, oy, opacity: float32, scrolled: bool, clip: array[4
     w = round(ox + n.x + n.size.x) - x
     h = round(oy + n.y + n.size.y) - y
   if hole.found and x < hole.x + hole.w and x + w > hole.x and y < hole.y + hole.h and y + h > hole.y and
-      (n.kind != ukBox or b.bg.a > 0 or b.gradient > 0 or b.border != [0'f32, 0, 0, 0]):
+      (n.kind != ukBox or b.bg.a > 0 or b.gradient > 0 or b.border[0] + b.border[1] + b.border[2] + b.border[3] > 0):
     hole.clean = false
   if n.kind == ukImage and n.src.tag == "Scene" and n.src.attr("id") == SceneYieldId:
     if hole.found:
       hole.clean = false
       return
     let
-      cx = x + b.pad[3] + b.border[3]
-      cy = y + b.pad[0] + b.border[0]
       cw = w - b.padX
       ch = h - b.padY
-    hole = UiHole(found: true, x: cx, y: cy, w: cw, h: ch, clean: op >= 1 and not scrolled and cw > 0 and ch > 0 and
-      cx >= clip[0] and cy >= clip[1] and cx + cw <= clip[2] and cy + ch <= clip[3])
+    hole = UiHole(found: true, x: x + b.pad[3] + b.border[3], y: y + b.pad[0] + b.border[0], w: cw, h: ch,
+      clean: op >= 1 and not scrolled and cw > 0 and ch > 0 and n.x >= 0 and n.y >= 0)
     return
   if n.kind != ukBox:
     return
-  var
-    inner = clip
-    moves = scrolled
-  if b.overflowX != ovVisible or b.overflowY != ovVisible:
-    moves = moves or n.maxX > 0 or n.maxY > 0
-    inner = [max(clip[0], x + b.border[3]), max(clip[1], y + b.border[0]),
-      min(clip[2], x + w - b.border[1]), min(clip[3], y + h - b.border[2])]
+  # A box that clips and has nothing out of sight clips nothing.
+  let moves = scrolled or (b.overflowX != ovVisible or b.overflowY != ovVisible) and (n.maxX > 0 or n.maxY > 0)
   for pass in [false, true]:
     for c in n.children:
       if c.box.absolute == pass:
-        c.seekHole(x, y, op, moves, inner, hole)
+        c.seekHole(x, y, op, moves, hole)
 
-proc yieldHole*(memo: UiMemo, width, height: int, input: UiInput): UiHole =
+proc yieldHole*(memo: UiMemo, input: UiInput): UiHole =
   ## Where the `<yield />` of the UI just laid out sits, in its own pixels, and
   ## whether it can be a hole: one yield, fully opaque, nothing painted over it,
   ## not in anything that scrolls. A popup or a held key's accents can land on
   ## it, so a UI showing one is drawn the slow way until it goes.
   if memo.isNil or memo.root.isNil:
     return
-  memo.root.seekHole(0, 0, 1, false, [0'f32, 0, width.float32, height.float32], result)
+  memo.root.seekHole(0, 0, 1, false, result)
   if input.open > 0 or input.accents > 0:
     result.clean = false
 

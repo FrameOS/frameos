@@ -60,11 +60,10 @@ type
     coveredExported: ExportedInterpretedScene
     coveredId: Option[SceneId]
     renderRequested*: bool
-    discardNoticeUntil: MonoTime
-      ## A notice on the panel until then: a scene lost its interpreter, and
-      ## the tap that needed it did nothing (reportInterpreterDiscards).
-    discardLoggedAt: MonoTime
-    discardsUnlogged: int
+    discardNoticeUntil: int64
+      ## A notice on the panel until then (monotonic ns): a scene lost its
+      ## interpreter, and the tap that needed it did nothing
+      ## (reportInterpreterDiscards).
     keepJsRuntimes*: bool
       ## Keep the scene's idle JS interpreters between renders while there is
       ## room (settleIdleJsAppRuntimes): an ESP32 that does not deep-sleep.
@@ -137,7 +136,7 @@ proc cleanupScene*(scene: FrameScene) =
   interpreted.sceneExportByNodeId = initTable[NodeId, ExportedScene]()
   interpreted.nextNodeIds = initTable[NodeId, NodeId]()
   interpreted.eventListeners = initTable[string, seq[NodeId]]()
-  interpreted.eventApps = initTable[string, seq[NodeId]]()
+  interpreted.eventApps = @[]
   interpreted.nodes = initTable[NodeId, DiagramNode]()
   interpreted.edges = @[]
   interpreted.cacheValues = initTable[NodeId, Value]()
@@ -403,16 +402,16 @@ proc queue*(host: SingleSceneHost, origin: EventOrigin, event: string, payload: 
     host.events.enqueue(origin, event, payload, target)
 
 const
-  DiscardNoticeSeconds = 6
+  DiscardNoticeNanos = 6_000_000_000'i64
   DiscardNoticeText = "Low memory: this scene was reloaded. Please tap again."
-  DiscardLogEverySeconds = 30
-    ## A frame that keeps losing them says so twice a minute, with a count.
+
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
 proc drawDiscardNotice(image: Image) =
   ## A strip along the bottom of the picture. Drawn with the JSX layout, as
   ## the built-in scenes are: no fonts or text code of its own.
   let height = clamp(image.height div 12, 28, 64)
-  var classes = "flex items-center justify-center w-full h-full bg-black text-white font-semibold"
+  var classes = "flex items-center justify-center w-full h-full bg-black text-white"
   classes.px("text", height div 2 - 2)
   try:
     let strip = image.view(0, image.height - height, image.width, height)
@@ -429,24 +428,21 @@ proc reportInterpreterDiscards*(host: SingleSceneHost, context: ExecutionContext
   ## goes keeps its picture and stops answering, and without this nobody would
   ## know why. The frame's log says each one, and when it cost a UI its tap
   ## handlers the panel says so too.
-  let now = getMonoTime()
-  for discarded in takeInterpreterDiscards():
-    host.discardsUnlogged += discarded.count
+  let now = getMonoTime().ticks
+  let discarded = takeInterpreterDiscards()
+  if discarded.count > 0:
     if discarded.heldHandlers:
-      host.discardNoticeUntil = now + initDuration(seconds = DiscardNoticeSeconds)
-    if host.discardLoggedAt == default(MonoTime) or discarded.heldHandlers or
-        now - host.discardLoggedAt >= initDuration(seconds = DiscardLogEverySeconds):
-      host.logger.log(%*{"event": "js:interpreterDiscarded", "sceneId": discarded.sceneId,
-        "reason": discarded.reason, "heldHandlers": discarded.heldHandlers, "count": host.discardsUnlogged,
-        "freeBytes": availableRenderHeadroomBytes()})
-      host.discardLoggedAt = now
-      host.discardsUnlogged = 0
+      host.discardNoticeUntil = now + DiscardNoticeNanos
+    host.logger.log(%*{"event": "js:interpreterDiscarded", "sceneId": discarded.sceneId,
+      "reason": discarded.reason, "count": discarded.count, "freeBytes": availableRenderHeadroomBytes()})
   if now < host.discardNoticeUntil and not image.isNil:
     drawDiscardNotice(image)
     # The pass that takes the notice away.
-    let left = (host.discardNoticeUntil - now).inMilliseconds.float / 1000
+    let left = (host.discardNoticeUntil - now).float / 1e9
     if context.nextSleep < 0 or context.nextSleep > left:
       context.nextSleep = left
+
+{.pop.}
 
 proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   ## One render pass of the resident scene, then whatever it (and an `init` or

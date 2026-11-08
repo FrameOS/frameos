@@ -462,19 +462,21 @@ type
     ## time (a node cache) should, rather than fetch or advance anew.
     repainting*: bool
 
-  # An embedded scene's rectangle in the scene that draws it, in canvas pixels.
+  # An embedded scene in the scene that draws it, in canvas pixels: where its
+  # coordinates start, and the left, top, right and bottom of the part that shows.
   SceneSlot* = object
     child*: FrameScene
-    x*, y*, w*, h*: float32
-    visible*: array[4, float32] ## the left, top, right and bottom of the part that shows
+    x*, y*: float32
+    visible*: array[4, float32]
 
   # One rectangle a scene drew on the canvas. `copy` is its picture as it left
   # it, when one was kept; nil when the canvas itself holds it.
-  RhythmCell* = object
+  RhythmCell* {.acyclic.} = ref object
     origin*, stride*, width*, height*: int
     format*: PixelFormat
     drawnPass*: int ## the pass that last ran the scene here
     copy*: Image
+    next*: RhythmCell ## a list and not a seq: a seq of these cost over a KB of ESP32 image in hooks
 
   # The schedule of one scene drawn through a scene node, and the picture it
   # left there (frameos/scene_rhythm.nim).
@@ -486,7 +488,7 @@ type
     scheduledPass*: int   ## the pass whose run set `dueAt`
     runsThisPass*: bool   ## that pass found it due: it runs in every cell it draws
     copyRefused*: bool    ## the last copy did not fit the budget (logged once)
-    cells*: seq[RhythmCell] ## each rectangle it drew
+    cells*: RhythmCell    ## each rectangle it drew
     embedImage*: Image    ## a `<Scene>`'s own picture (the UI draws it as an image)
     embedProps*: string   ## the props last written into its state, as JSON
     chromePass*: int      ## a layout with a hole: the pass that last drew around it
@@ -607,7 +609,7 @@ type
     apps*: JsonNode
     nextNodeIds*: Table[NodeId, NodeId] # mapping from current node id to next node id for quick lookup
     eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
-    eventApps*: Table[string, seq[NodeId]] # JS app nodes by the event their config.json `events` names ("*" for all)
+    eventApps*: seq[NodeId]                                                    # JS app nodes with `events` in their config.json
     appsByNodeId*: Table[NodeId, AppRoot] # mapping from node id to instantiated app for quick lookup
     appInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from node id to app input name to connected node id
     appInlineInputsForNodeId*: Table[NodeId, Table[string, string]]            # mapping from node id to app input name to inline code
@@ -617,7 +619,8 @@ type
     layoutSceneId*: SceneId
     layoutState*: JsonNode
     layoutFailed*: bool                                                        # logged once; the scene shows without it
-    slotCaptures*: seq[(int, FrameScene)]                                      # the press on an embedded scene, by pointer
+    capturedChild*: FrameScene                                                 # the embedded scene a pointer pressed on, until it lifts
+    capturedPointer*: int
     sceneExportByNodeId*: Table[NodeId, ExportedScene]                         # exported metadata for cached child scenes
     publicStateFields*: seq[StateField]
     js*: QuickJS

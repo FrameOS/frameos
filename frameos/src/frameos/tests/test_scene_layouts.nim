@@ -391,7 +391,7 @@ suite "a canvas that stays":
     discard pass(scene, canvas)
     let chrome = scene.panelOf("tests/chrome")
     let content = scene.panelOf("tests/splitContent")
-    check content.rhythm.cells.len == 1 and content.rhythm.cells[0].copy.isNil
+    check not content.rhythm.cells.isNil and content.rhythm.cells.next.isNil and content.rhythm.cells.copy.isNil
     # A mark no run would leave: it survives only if nothing draws there.
     canvas[3, 35] = rgbx(9, 9, 9, 255)
     rhythmClockOverride = 1001.0

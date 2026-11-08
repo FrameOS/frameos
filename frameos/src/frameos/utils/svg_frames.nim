@@ -29,18 +29,20 @@
 ## A scene drawn into a rectangle of the panel's buffer (a layout's hole, a
 ## split's panel) keeps a record of its own, for that rectangle. Taken off the
 ## shelf when the scene is about to draw there (`takePanelRegion`); a rectangle
-## whose pixels came from elsewhere is forgotten (`forgetPanelRegion`), and
+## whose pixels came from elsewhere takes its record off the same way, and
 ## every record goes when the buffers stop showing what they were showing
 ## (`forgetPanelFrames`, called on a scene switch and when something draws over
 ## the canvas).
 
-import std/[options, sequtils]
+import std/options
 import pixie
 import pixie/fileformats/svg
 import frameos/utils/canvas_log
 import frameos/utils/image
 import frameos/utils/memory
 import frameos/render_probe
+
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
 const
   MaxRepaints = 6
@@ -81,7 +83,7 @@ proc beginPanelFrame*(buffer: pointer, generation: uint32) =
   panelGeneration = generation
   panelHeld = none(HeldFrame)
   for i in 0 ..< heldFrames.len:
-    if heldFrames[i].buffer == buffer and heldFrames[i].origin == 0 and not heldFrames[i].isRegion:
+    if heldFrames[i].buffer == buffer and not heldFrames[i].isRegion:
       panelHeld = some(heldFrames[i])
       heldFrames.delete(i)
       break
@@ -101,22 +103,15 @@ proc regionRecord(view: Image): int =
   -1
 
 proc takePanelRegion*(view: Image) =
-  ## A scene is about to draw into this rectangle: its record leaves the
-  ## shelf, and only a render that draws the rectangle whole puts one back.
+  ## A scene is about to draw into this rectangle, or its pixels are about to
+  ## come from another buffer: its record leaves the shelf, and only a render
+  ## that draws the rectangle whole puts one back.
   regionHeld = none(HeldFrame)
   if panelBuffer.isNil or view.isNil or view.bufferPointer != panelBuffer or not view.isView:
     return
   let i = view.regionRecord
   if i >= 0:
     regionHeld = some(heldFrames[i])
-    heldFrames.delete(i)
-
-proc forgetPanelRegion*(view: Image) =
-  ## This rectangle's pixels came from somewhere else (another buffer).
-  if panelBuffer.isNil or view.isNil or view.bufferPointer != panelBuffer:
-    return
-  let i = view.regionRecord
-  if i >= 0:
     heldFrames.delete(i)
 
 proc area(rects: seq[tuple[x, y, w, h: int]]): int =
@@ -139,9 +134,6 @@ proc newestHeldFrame(target: Image): int =
 
 proc copyFrameIn(target: Image, source: pointer) =
   ## What `source` (another of the panel's buffers) holds where `target` is.
-  if not target.isView:
-    copyMem(target.bufferPointer, source, target.byteSize)
-    return
   let
     bpp = target.bytesPerPixel
     d = cast[ptr UncheckedArray[byte]](target.bufferPointer)
@@ -217,10 +209,16 @@ proc forgetPanelFrames*() =
 
 proc forgetPanelRegions*() =
   ## What the rectangles of the panel's buffers held is not known any more (a
-  ## scene switch, a hole that moved, something drawn over the canvas). A whole
-  ## frame's record is checked against the buffer's generation and its own SVG.
-  heldFrames.keepItIf(not it.isRegion)
+  ## scene switch, a hole that moved, something drawn over the canvas). Whole
+  ## frames' records go too: the next frame is drawn whole anyway. The frame
+  ## being drawn is left alone.
+  heldFrames.setLen(0)
   regionHeld = none(HeldFrame)
+
+proc aroundHole*(width, height, x, y, w, h: int): array[4, tuple[x, y, w, h: int]] =
+  ## A rectangle's surroundings: the rows above and below it at full width,
+  ## the two sides of its own rows.
+  [(0, 0, width, y), (0, y + h, width, height - y - h), (0, y, x, h), (x + w, y, width - x - w, h)]
 
 proc renderSvgAround*(root: SvgNode, target: Image, hole: tuple[x, y, w, h: int], owed: var Option[Color],
     reuse = false): bool =
@@ -237,15 +235,9 @@ proc renderSvgAround*(root: SvgNode, target: Image, hole: tuple[x, y, w, h: int]
     var parsed: Svg
     probe(phParse):
       parsed = parseSvg(root, target.width, target.height, reuse)
-    var rects: array[4, tuple[x, y, w, h: int]]
-    # The rows above and below it at full width, the two sides of its own rows.
-    rects[0] = (0, 0, target.width, hole.y)
-    rects[1] = (0, hole.y + hole.h, target.width, target.height - hole.y - hole.h)
-    rects[2] = (0, hole.y, hole.x, hole.h)
-    rects[3] = (hole.x + hole.w, hole.y, target.width - hole.x - hole.w, hole.h)
     let pay = owed.isSome and not parsed.coversOpaque(target.width, target.height)
     probe(phRaster):
-      for r in rects:
+      for r in aroundHole(target.width, target.height, hole.x, hole.y, hole.w, hole.h):
         if r.w > 0 and r.h > 0:
           let window = target.view(r.x, r.y, r.w, r.h)
           if pay:
@@ -357,3 +349,5 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
 
 proc renderSvgFrame*(svg: string, target: Image, owed: var Option[Color], wholeFrame: bool): bool =
   renderSvgFrame(svgRoot(svg), target, owed, wholeFrame)
+
+{.pop.}

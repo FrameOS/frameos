@@ -391,7 +391,7 @@
   nothing to do in never enters the layout (`renderLayout`, `rhythmVisitChrome`).
   A rectangle of the panel keeps its own damage record in `svg_frames.nim`
   (`takePanelRegion`): a new way to write a rectangle's pixels without a render
-  of it calls `forgetPanelRegion`.
+  of it takes that record too.
 
 ## JSX from JS apps: `docs/jsx-ui.md`
 
