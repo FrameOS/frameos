@@ -19,6 +19,7 @@ import std/times
 import frameos/channels
 import frameos/single_scene_host
 import system/sceneSwitcher/scene as sceneSwitcher
+import system/sceneSettings/scene as sceneSettings
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
 import frameos/values
@@ -751,6 +752,34 @@ proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
           name: if scenes.hasKey(sceneId): scenes[sceneId].name else: "")
 
 sceneSwitcherListing = switcherListing
+
+# The settings panel's frame page, behind its gear (docs/scene-settings.md
+# "The frame page"): the facts it shows and what it sets (Wi-Fi, rotation,
+# scale), from main/fos_frame_settings.c. Every call comes from the scene, on
+# the render task.
+proc fos_frame_settings_json(): cstring {.importc, cdecl.}
+proc fos_frame_settings_apply(json: cstring) {.importc, cdecl.}
+proc fos_frame_settings_action(action: cstring) {.importc, cdecl.}
+
+proc frameSettingsJson(): JsonNode {.nimcall, gcsafe, raises: [].} =
+  let raw = fos_frame_settings_json()
+  if raw.isNil:
+    return nil
+  try:
+    result = parseJson($raw)
+  except Exception:
+    result = nil
+  cFree(raw)
+
+proc frameSettingsSet(values: JsonNode) {.nimcall, gcsafe, raises: [].} =
+  fos_frame_settings_apply(($values).cstring)
+
+proc frameSettingsDo(action: string) {.nimcall, gcsafe, raises: [].} =
+  fos_frame_settings_action(action.cstring)
+
+sceneSettings.frameSettingsRead = frameSettingsJson
+sceneSettings.frameSettingsApply = frameSettingsSet
+sceneSettings.frameSettingsAction = frameSettingsDo
 
 proc selectScene*(sceneIdText: string): bool =
   when defined(memProbe): memProbe("  >>> selectScene " & sceneIdText)

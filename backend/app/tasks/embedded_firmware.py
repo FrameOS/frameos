@@ -1865,6 +1865,10 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     render_scale = embedded_render_scale_for_frame(frame)
     if render_scale > 0:
         settings.append(_provisioning_setting("render_scale", f"{render_scale:g}"))
+    # Only when turned off: on is the firmware's default, and a release image
+    # from before the key would refuse it (the settings poll carries it).
+    if frame.frame_settings_on_screen is False:
+        settings.append(_provisioning_setting("frame_settings_on_screen", 0))
     settings.append(_provisioning_setting("server_send_logs", 1 if frame.server_send_logs is not False else 0))
     max_http = embedded_max_http_response_bytes_for_frame(frame)
     if max_http != EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES:

@@ -375,6 +375,11 @@ async def process_log(
 
     changes: dict[str, Any] = {}
     changes.update(_sleep_forecast_changes(frame, event, log, timestamp))
+    # The rotation and scale a person set on the frame's own screen
+    # (docs/scene-settings.md "What a control plane learns").
+    from app.utils.frame_settings_adopt import panel_settings_changes
+
+    changes.update(panel_settings_changes(frame, log))
     # The device narrating its firmware update (`ota:<plane>` from an ESP32,
     # `cloud:upgrade` from a Pi) lands on the row as the cloud hub lands it,
     # so the workspace shows the download instead of a frame that reads

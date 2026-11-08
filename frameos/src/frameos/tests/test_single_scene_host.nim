@@ -375,6 +375,37 @@ block scene_switcher_on_one_scene:
   doAssert switchHost.scene.isNil or switchHost.sceneId.get() == order[0]
   switchHost.dropScene()
   sceneSwitcherListing = nil
+
+# An ESP32 given no scene yet opens the settings from its status screen (the
+# Wi-Fi is set there, docs/scene-settings.md "The frame tab"); closing them
+# goes back to no scene, the status screen, and asks the firmware for nothing.
+block scene_settings_with_no_scene:
+  let noneConfig = FrameConfig(width: 320, height: 240, rotate: 0, scalingMode: "cover",
+    device: "embedded", debug: false, saveAssets: %*false)
+  let noneHost = SingleSceneHost(frameConfig: noneConfig, logger: logger)
+  var picked: seq[string]
+  noneHost.requestSelect = proc (sceneId: string): bool =
+    picked.add(sceneId)
+    noneHost.makeCurrent(SceneId(sceneId))
+    true
+  noneHost.sceneOrder = proc (): seq[SceneId] = @[]
+  noneHost.start()
+  localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
+    {.cast(gcsafe).}:
+      noneHost.queue(origin, event, payload, scene)
+  doAssert noneHost.sceneId.isNone and not noneHost.ensureScene()
+  doAssert noneHost.send(eoEventMap, "sceneSettings", %*{})
+  doAssert picked == @[SceneSettingsId], $picked
+  doAssert noneHost.ensureScene() and noneHost.scene.state{"from"}.getStr() == ""
+  doAssert noneHost.send(eoEventMap, "sceneSettings", %*{})
+  doAssert picked == @[SceneSettingsId], "the way back is the host's own: " & $picked
+  doAssert noneHost.sceneId.isNone and noneHost.scene.isNil and noneHost.renderRequested
+  # Not a way out of a scene: an empty id for one that is not built in is refused.
+  noneHost.makeCurrent(SceneId("fixtures/dispatcher/switchFrom"))
+  doAssert not noneHost.send(eoScene, "setCurrentScene", %*{"sceneId": ""})
+  doAssert noneHost.sceneId.get().string == "fixtures/dispatcher/switchFrom"
+  noneHost.dropScene()
+  localEventSink = nil
 echo "ok"
 
 # ------------------------------------------- the scene a switcher covers

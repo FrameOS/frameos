@@ -883,6 +883,10 @@ def embedded_frame_settings(frame: Frame) -> dict:
         # times smaller (docs/jsx-ui.md "Scale"); 0 = automatic from the
         # panel. Applied on the next render; older firmware ignores the key.
         "renderScale": embedded_render_scale_for_frame(frame),
+        # The frame page behind the gear of the settings on the frame's screen
+        # (docs/scene-settings.md "The frame page"); the console's
+        # `settings_unlock` wins over false. Older firmware ignores the key.
+        "frameSettingsOnScreen": frame.frame_settings_on_screen is not False,
         # frame.json's `colors` block (docs/asset-color-profiles.md): kept as
         # compact JSON on the device and applied live, no restart. Older
         # firmware ignores the key.

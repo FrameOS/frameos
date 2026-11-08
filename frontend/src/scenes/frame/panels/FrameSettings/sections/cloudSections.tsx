@@ -40,6 +40,7 @@ import {
   MetricsIntervalField,
   PaletteField,
   RenderScaleField,
+  FrameSettingsOnScreenField,
   SaveAssetsField,
   TimezoneUpdaterFields,
 } from '../fields/sharedFields'
@@ -136,6 +137,7 @@ export function CloudBaseSettingsSection(): JSX.Element {
           </>
         )}
         <RenderScaleField />
+        <FrameSettingsOnScreenField />
         {esp32 ? (
           <fieldset disabled={!cloudEsp32TimeZoneSupported} className="min-w-0">
             <Field

@@ -51,6 +51,7 @@ import {
   maxAssetFileBytes,
   parseAssetEntries,
   redeployAssignedScenesToFrame,
+  settingsWithReported,
   spentCommandPayload,
   storeFrameAssetFile,
   supersedePendingCommands,
@@ -1060,6 +1061,9 @@ export async function startFrameHub(
           : {}),
       })
       .where(eq(frames.id, frameId));
+    if (confirmed) {
+      await followReportedSettings(frameId, hello.hardware);
+    }
     // The device is back: a deploy, update or restart waiting for its
     // bootup moves on to the first render (the hello is the `bootup` signal
     // of docs/deploy-progress-contract.json). Before the confirmed gate on
@@ -1645,6 +1649,36 @@ export async function startFrameHub(
     );
   }
 
+  // What the frame reports it has (hello and `state` `hardware`: its
+  // rotation and render scale, changed on its own screen or not) becomes the
+  // settings mirror's, unless a push is still on its way to it: then the
+  // frame is about to change, and what it says now is the old value. Read
+  // from the row, not the session: a `state` follows a hello that changed it.
+  async function followReportedSettings(frameId: string, hardware: unknown) {
+    if (!isRecord(hardware)) {
+      return;
+    }
+    const [row] = await db.select({ settings: frames.settings }).from(frames).where(eq(frames.id, frameId));
+    const next = settingsWithReported(row?.settings, hardware);
+    if (!next) {
+      return;
+    }
+    const [waiting] = await db
+      .select({ id: frameCommands.id })
+      .from(frameCommands)
+      .where(
+        and(
+          eq(frameCommands.frameId, frameId),
+          eq(frameCommands.type, "set_settings"),
+          inArray(frameCommands.status, ["pending", "sent"]),
+        ),
+      )
+      .limit(1);
+    if (!waiting) {
+      await db.update(frames).set({ settings: next }).where(eq(frames.id, frameId));
+    }
+  }
+
   async function handleState(
     session: DeviceSession,
     msg: Record<string, unknown>,
@@ -1686,6 +1720,7 @@ export async function startFrameHub(
           : {}),
       })
       .where(eq(frames.id, session.frame.id));
+    await followReportedSettings(session.frame.id, rest.hardware);
     await broadcastFrameUpdate(session.frame.id);
   }
 

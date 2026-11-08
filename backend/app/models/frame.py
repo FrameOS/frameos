@@ -450,6 +450,11 @@ class Frame(Base):
     # a panel this many times smaller, drawn sharp at full size. 0 = automatic
     # from the panel's size (app/utils/render_scale.py).
     render_scale = mapped_column(Double, nullable=False, default=0)
+    # frame.json `frameSettingsOnScreen`: the settings panel on the frame's
+    # own screen offers the frame page behind its gear (Wi-Fi, rotation,
+    # scale, Restart, Reboot; docs/scene-settings.md "The frame page"). Off
+    # leaves the scene's form; an unlock on the device wins over it.
+    frame_settings_on_screen = mapped_column(Boolean, nullable=False, default=True)
     rotate = mapped_column(Integer, nullable=True)
     flip = mapped_column(String(32), nullable=True)
     log_to_file = mapped_column(Text, nullable=True)
@@ -560,6 +565,7 @@ class Frame(Base):
             'max_http_response_bytes': self.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
             'scaling_mode': self.scaling_mode,
             'render_scale': normalize_render_scale(self.render_scale),
+            'frame_settings_on_screen': self.frame_settings_on_screen is not False,
             'rotate': self.rotate,
             'flip': self.flip,
             'background_color': self.background_color,
@@ -755,6 +761,7 @@ async def new_frame(
         apps=[],
         scaling_mode="contain",
         render_scale=0,
+        frame_settings_on_screen=True,
         rotate=0,
         device=device or "web_only",
         timezone=None,
@@ -1063,6 +1070,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "scalingMode": frame.scaling_mode or "contain",
         # 0 = automatic from the panel's size; a scene's own setting wins.
         "renderScale": normalize_render_scale(frame.render_scale),
+        "frameSettingsOnScreen": frame.frame_settings_on_screen is not False,
         "rotate": frame.rotate or 0,
         "flip": frame.flip,
         "logToFile": frame.log_to_file,

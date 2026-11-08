@@ -16,11 +16,17 @@ import system/sceneSettings/scene as settings
 # a choice, what Save hands the dispatcher, Cancel and the frame's back.
 # FRAMEOS_SETTINGS_PREVIEWS=<dir> also writes the pictures.
 
-var sent: seq[(string, JsonNode)]
+var
+  sent: seq[(string, JsonNode)]
+  panelSent: seq[string] # what the frame page's buttons said, origin `panel`
 localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
   {.cast(gcsafe).}:
-    doAssert origin == eoScene, "the panel speaks as a scene"
-    sent.add((event, payload))
+    if origin == eoPanel:
+      doAssert event in [evRender, evRestart, evReboot], "the frame page's buttons alone speak as the panel"
+      panelSent.add event
+    else:
+      doAssert origin == eoScene, "the panel speaks as a scene"
+      sent.add((event, payload))
 
 sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
   @[SwitcherEntry(id: "scenes/weather", name: "Weather")]
@@ -50,6 +56,16 @@ proc regionWith(handler: int): UiRegion =
 
 proc tap(scene: FrameScene, r: UiRegion) =
   scene.send("tap", tapAt(r.x + r.w / 2, r.y + r.h / 2))
+
+proc scrollTo(scene: FrameScene, y: float32) =
+  ## The list that scrolls, at `y` (clamped to its end), as a finger would leave it.
+  let target = uiTarget(SceneSettingsId, 1, create = false)
+  for r in target.regions:
+    if r.scrollY > 0:
+      target.input.scrollTo(r.key, 0, min(y, r.scrollY.float32))
+  discard scene.draw()
+
+proc scrollToEnd(scene: FrameScene) = scene.scrollTo(10000)
 
 block the_form:
   let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
@@ -338,5 +354,303 @@ block a_round_panel_keeps_the_form_and_the_keyboard_on_the_glass:
   sent.setLen(0)
   scene.tap(regionWith(1))
   doAssert sent.len >= 1 and sent[0][0] == evSetCurrentScene, $sent
+
+block a_field_may_be_called_anything:
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [
+      {"name": "typing", "label": "Typing", "type": "string"},
+      {"name": "city", "label": "City", "type": "select",
+        "options": ["Oslo", "Riga", "Kyiv", "Lima", "Bern", "Baku"]}],
+    "values": {"typing": "kept", "city": "Riga"}}})
+  discard scene.draw()
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+  discard scene.draw()
+  scene.tap(regionWith(OptionBase + 2))
+  discard scene.draw()
+  sent.setLen(0)
+  scene.tap(regionWith(1))
+  doAssert sent[0][1]["state"] == %*{"typing": "kept", "city": "Kyiv"}, $sent
+
+block the_page_follows_the_frames_scale:
+  # The frame's render scale, as its scenes have it: at 1.5 the page is laid
+  # out on 320 px and drawn half as large again; the pointer is divided back.
+  # It stops at 3/4 and at a layout of 320 px, so it can always be set back.
+  proc opened(scale: float): FrameScene =
+    let config = FrameConfig(width: 480, height: 480, device: "pimoroni.hyperpixel4sq_touch",
+      scalingMode: "cover", saveAssets: %*false, renderScale: scale)
+    result = settings.exportedScene.init(SceneSettingsId.SceneId, config, logger, %*{})
+    result.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+      "fields": [{"name": "city", "label": "City", "type": "string"}], "values": {"city": "Oslo"}}})
+  let sky = rgbx(0x02, 0x84, 0xc7, 255)
+  var scene = opened(1.5)
+  var image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-scaled.png")
+  doAssert abs(uiTarget(SceneSettingsId, 1, create = false).scale - 1.5) < 0.01
+  let save = regionWith(1)
+  # Nothing changed yet: Save is not lit.
+  doAssert image[int((save.x + 4) * 1.5), int((save.y + save.h / 2) * 1.5)] != sky
+  # A tap where Save is drawn, its box times the scale, saves.
+  sent.setLen(0)
+  scene.send("tap", tapAt((save.x + save.w / 2) * 1.5, (save.y + save.h / 2) * 1.5))
+  doAssert sent.len >= 1 and sent[0][0] == evSetCurrentScene, $sent
+  scene.send("close", %*{})
+  # An edit lights it.
+  scene = opened(1.0)
+  discard scene.draw()
+  scene.send("textInput", %*{"text": "x"}) # nothing focused: no edit
+  scene.tap(regionWith(1000 + 0))
+  discard scene.draw()
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    if r.handlers[ueClick] == KeyBase + ord('x') + 1:
+      scene.tap(r)
+      break
+  image = scene.draw()
+  let lit = regionWith(1)
+  doAssert image[int(lit.x + 4), int(lit.y + lit.h / 2)] == sky
+  scene.send("close", %*{})
+  for (asked, drawn) in [(0.25, 0.75), (4.0, 1.5)]:
+    scene = opened(asked)
+    discard scene.draw()
+    doAssert abs(uiTarget(SceneSettingsId, 1, create = false).scale - drawn) < 0.01,
+      $asked & " drew at " & $uiTarget(SceneSettingsId, 1, create = false).scale
+    scene.send("close", %*{})
+
+block it_opens_on_the_frame_page_with_no_scene_showing:
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    %*{"rotate": 0, "renderScale": 0, "actions": []}
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": ""}})
+  doAssert scene.state["page"].getStr() == "frame"
+  # A scene without fields is still the scene's form.
+  let plain = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  plain.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "fields": []}})
+  doAssert plain.state{"page"}.getStr() != "frame"
+  frameSettingsRead = nil
+
+block no_gear_without_a_page:
+  # No host page, or one the frame's control plane turned off (the host's
+  # read answers nil): the scene's form alone, no gear.
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} = nil
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "string"}], "values": {"city": "Oslo"}}})
+  discard scene.draw()
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    doAssert r.handlers[ueClick] != 2 + 1, "a gear"
+  # With no scene showing either, it stays on the form.
+  let empty = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  empty.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": ""}})
+  doAssert empty.state{"page"}.getStr() != "frame"
+  scene.send("close", %*{})
+  frameSettingsRead = nil
+
+block the_frame_page:
+  # A host with a page (an ESP32, a Pi): a gear left of Save opens it. The
+  # page shows the host's facts in words, the network as a select box of the
+  # ones in range, the rotation and the scale, and its buttons; Save hands
+  # the host what changed and the page stays up.
+  var
+    applied: seq[JsonNode]
+    actions: seq[string]
+    online = false
+    crowded = false
+    locked = false
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      if locked:
+        return nil
+      var networks = %*["Home", "Cafe"]
+      if crowded:
+        for i in 0 ..< 60:
+          networks.add(%("Network " & $i))
+        networks.add(%"A very long network name of 32 b")
+      result = %*{
+        "wifi": {"state": if online: "connected" else: "notFound", "ssid": "Home", "rssi": -61,
+          "ip": if online: "192.168.1.20" else: "", "networks": networks, "scanning": false, "password": true},
+        "rotate": 0, "renderScale": 0, "managedBy": "FrameOS Cloud", "version": "2026.11.5",
+        "actions": ["restart"]}
+  frameSettingsApply = proc (values: JsonNode) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: applied.add values
+  frameSettingsAction = proc (action: string) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: actions.add action
+  # Off Wi-Fi too the panel opens on the scene's form; the frame page is the
+  # gear away, and the host hears it come up.
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "string"}], "values": {"city": "Oslo"}}})
+  doAssert scene.state{"page"}.getStr() != "frame"
+  doAssert actions.len == 0, $actions
+  var image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-gear.png")
+  block gear_left_of_save:
+    let gear = regionWith(2)
+    let save = regionWith(1)
+    doAssert gear.x + gear.w <= save.x and abs(gear.y - save.y) < 8, $gear & " " & $save
+  scene.tap(regionWith(2))
+  doAssert scene.state["page"].getStr() == "frame"
+  doAssert actions == @["open"], $actions
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame.png")
+  # The select box opens its list, all there is to touch while it is up; the
+  # network is picked from it.
+  doAssert uiTarget(SceneSettingsId, 1, create = false).regions.anyIt(it.field == 4)
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-select.png")
+  doAssert uiTarget(SceneSettingsId, 1, create = false).regions.allIt(it.field != 4)
+  scene.tap(regionWith(OptionBase + 1)) # "Cafe"
+  doAssert uiTarget(SceneSettingsId, 1, create = false).input.open == 0
+  discard scene.draw()
+  # Past the panel's size it scrolls, on the screen, with what it holds in sight.
+  crowded = true
+  discard scene.draw()
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-select-many.png")
+  block crowd:
+    let regions = uiTarget(SceneSettingsId, 1, create = false).regions
+    doAssert regions.anyIt(it.scrollY > 0), "the list scrolls"
+    for r in regions.filterIt(it.scrollY > 0):
+      doAssert r.y >= 8 and r.y + r.h <= 472, $r
+  scene.send("tap", tapAt(470, 5)) # beside it: it closes, nothing else happens
+  doAssert uiTarget(SceneSettingsId, 1, create = false).input.open == 0
+  doAssert sent.len == 0 or sent[^1][0] == evRender, $sent
+  discard scene.draw()
+  crowded = false
+  discard scene.draw()
+  # "Other network…": an input to type a name that is not in the list.
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+  discard scene.draw()
+  scene.tap(regionWith(OptionBase + 2))
+  doAssert scene.state["frameValues"]["typing"].getBool()
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-other.png")
+  doAssert uiTarget(SceneSettingsId, 1, create = false).regions.anyIt(it.handlers[ueChange] == 1000 + 1 and it.field == 1)
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+  discard scene.draw()
+  scene.tap(regionWith(OptionBase + 1)) # back to "Cafe"
+  doAssert not scene.state["frameValues"]["typing"].getBool()
+  discard scene.draw()
+  scene.tap(regionWith(1000 + 1)) # the password
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-keyboard.png")
+  var key: UiRegion
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    if r.handlers[ueClick] == KeyBase + ord('x') + 1: key = r
+  scene.tap(key)
+  discard scene.draw()
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    if r.handlers[ueClick] == KeyBase + ord(kEnter) + 1: key = r
+  scene.tap(key)
+  discard scene.draw()
+  # 90° and 1.5×: the second and third select boxes, the keyboard away.
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[1])
+  discard scene.draw()
+  scene.tap(regionWith(OptionBase + 1))
+  discard scene.draw()
+  scene.scrollToEnd()
+  scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[^1])
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-scale.png")
+  # On 480 px the scales stop at 1.5 (a layout of 320 px): Automatic, 0.25,
+  # 0.5, 0.75, 1, 1.25, 1.5.
+  doAssert uiTarget(SceneSettingsId, 1, create = false).regions.allIt(it.handlers[ueClick] != OptionBase + 7 + 1)
+  scene.tap(regionWith(OptionBase + 6))
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-changed.png")
+  # Scanning goes to the host.
+  scene.scrollTo(0)
+  scene.tap(regionWith(20000 + 0))
+  doAssert actions == @["open", "scan"], $actions
+  discard scene.draw()
+  # Save: the changes alone, as their fields hold them, and the page stays.
+  sent.setLen(0)
+  scene.tap(regionWith(1))
+  doAssert applied.len == 1 and applied[0] == %*{"wifiSsid": "Cafe", "wifiPassword": "x", "rotate": 90,
+    "renderScale": 1.5}, $applied
+  doAssert sent.len == 0 or sent[0][0] == evRender, $sent
+  doAssert scene.state["frameValues"].len == 0
+  doAssert scene.state["page"].getStr() == "frame"
+  online = true
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-online.png")
+  # Save hands over what was picked, as it is too: the host applies what
+  # differs from what it has (fos_frame_settings.c, frame_settings_linux.nim).
+  scene.scrollToEnd()
+  let boxes = uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)
+  scene.tap(boxes[^1]) # the scale, the last select box
+  discard scene.draw()
+  scene.tap(regionWith(OptionBase + 0)) # Automatic, as it is
+  discard scene.draw()
+  scene.tap(regionWith(1))
+  doAssert applied.len == 2 and applied[1] == %*{"renderScale": 0.0}, $applied
+  discard scene.draw()
+  # Render again at once; Restart and Reboot only on a second tap.
+  scene.scrollToEnd()
+  scene.tap(regionWith(20000 + 1))
+  doAssert panelSent == @[evRender], $panelSent
+  discard scene.draw()
+  scene.tap(regionWith(20000 + 3))
+  doAssert panelSent == @[evRender], $panelSent
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-reboot.png")
+  scene.tap(regionWith(20000 + 3))
+  doAssert panelSent == @[evRender, evReboot], $panelSent
+  discard scene.draw()
+  scene.tap(regionWith(20000 + 2))
+  discard scene.draw()
+  scene.tap(regionWith(20000 + 1)) # anything else in between asks again
+  discard scene.draw()
+  scene.tap(regionWith(20000 + 2))
+  doAssert panelSent == @[evRender, evReboot, evRender], $panelSent
+  discard scene.draw()
+  scene.tap(regionWith(20000 + 2))
+  doAssert panelSent == @[evRender, evReboot, evRender, evRestart], $panelSent
+  discard scene.draw()
+  # Back, the frame's back and the gear: to the scene's form, never away.
+  scene.tap(regionWith(0))
+  doAssert scene.state["page"].getStr() == "scene"
+  discard scene.draw()
+  scene.tap(regionWith(2))
+  discard scene.draw()
+  sent.setLen(0)
+  scene.send(evBack, %*{})
+  doAssert scene.state["page"].getStr() == "scene"
+  doAssert sent.allIt(it[0] == evRender), $sent
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-scene.png")
+  # The scene's Save is the scene's.
+  sent.setLen(0)
+  scene.tap(regionWith(1))
+  doAssert sent.len >= 1 and sent[0][0] == evSetCurrentScene and sent[0][1]["state"] == %*{"city": "Oslo"}, $sent
+  # On e-paper, black on white, the gear lit inverted.
+  block on_paper:
+    let paper = FrameConfig(width: 480, height: 480, device: "pimoroni.inky_impression_7", scalingMode: "cover",
+      saveAssets: %*false)
+    let page = settings.exportedScene.init(SceneSettingsId.SceneId, paper, logger, %*{})
+    page.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": ""}})
+    let image = page.draw()
+    if previews.len > 0: image.writeFile(previews / "settings-frame-paper.png")
+    doAssert page.state["page"].getStr() == "frame"
+    page.send("close", %*{})
+  discard scene.draw()
+  # Turned off while the page shows: back on the scene's form.
+  discard scene.draw()
+  scene.tap(regionWith(2))
+  doAssert scene.state["page"].getStr() == "frame"
+  locked = true
+  discard scene.draw()
+  doAssert scene.state["page"].getStr() == "scene"
+  locked = false
+  scene.send("close", %*{})
+  # Opened again: the scene's form first.
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "string"}], "values": {"city": "Oslo"}}})
+  doAssert scene.state{"page"}.getStr() != "frame"
+  scene.send("close", %*{})
+  frameSettingsRead = nil
+  frameSettingsApply = nil
+  frameSettingsAction = nil
 
 echo "scene settings: ok"

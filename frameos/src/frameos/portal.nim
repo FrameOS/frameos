@@ -1588,15 +1588,19 @@ proc attemptConnectSupplicant(frameConfig: FrameConfig, ssid, password: string):
     rememberError(res.message)
   res.ok
 
-proc attemptConnect*(frameOS: FrameOS, frameConfig: FrameConfig, ssid, password: string): bool {.gcsafe.} =
+proc attemptConnect*(frameOS: FrameOS, frameConfig: FrameConfig, ssid, password: string,
+    showFirstScene = true): bool {.gcsafe.} =
   ## Joins `ssid`. `frameConfig` is the calling thread's own (startAp says
   ## why); only the supplicant backend reads it, for the Wi-Fi country.
+  ## `showFirstScene`: the frame goes to its first scene after, as the setup
+  ## portal wants; the settings panel's frame page stays up instead.
   frameOS.network.status = NetworkStatus.connecting
 
   if activeNetworkBackend() == nbSupplicant:
     result = attemptConnectSupplicant(frameConfig, ssid, password)
     frameOS.network.status = if result: NetworkStatus.connected else: NetworkStatus.error
-    sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
+    if showFirstScene:
+      sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
     return
 
   if privilegedDoorAvailable():
@@ -1608,7 +1612,8 @@ proc attemptConnect*(frameOS: FrameOS, frameConfig: FrameConfig, ssid, password:
     frameOS.network.status = if result: NetworkStatus.connected else: NetworkStatus.error
     if frameOS.network.status == NetworkStatus.connected:
       portalSleepHook(5000) # give DHCP etc a moment
-    sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
+    if showFirstScene:
+      sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
     return
 
   discard run(fmt"sudo -n nmcli connection delete '{nmConnectionName}' 2>/dev/null || true")
@@ -1650,7 +1655,8 @@ proc attemptConnect*(frameOS: FrameOS, frameConfig: FrameConfig, ssid, password:
   if frameOS.network.status == NetworkStatus.connected:
     portalSleepHook(5000) # give DHCP etc a moment
 
-  sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
+  if showFirstScene:
+    sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
 
 # Immediately sync the clock so HTTPS certificates validate
 const clockSyncMarkerPath = "/run/systemd/timesync/synchronized"

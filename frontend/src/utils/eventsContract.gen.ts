@@ -10,7 +10,7 @@ export const SCENE_SWITCHER_ID = 'system/sceneSwitcher'
 /** The built-in scene `sceneSettings` shows (docs/scene-settings.md). */
 export const SCENE_SETTINGS_ID = 'system/sceneSettings'
 
-export type EventOrigin = 'driver' | 'preview' | 'scene' | 'schedule' | 'http:write' | 'http:admin' | 'cloud' | 'system' | 'eventMap'
+export type EventOrigin = 'driver' | 'preview' | 'scene' | 'schedule' | 'http:write' | 'http:admin' | 'cloud' | 'system' | 'eventMap' | 'panel'
 export type EventClass = 'lifecycle' | 'input' | 'scene-command' | 'device-command'
 export type EventDevice = 'keyboard' | 'pointer' | 'button'
 export type EventRenderAfter = 'never' | 'always' | 'if-state-changed'
@@ -118,7 +118,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "http:write",
       "http:admin",
       "cloud",
-      "eventMap"
+      "eventMap",
+      "panel"
     ],
     "renderAfter": "always",
     "coalesce": "none",
@@ -909,7 +910,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "schedule",
       "http:admin",
       "cloud",
-      "system"
+      "system",
+      "panel"
     ],
     "renderAfter": "never",
     "coalesce": "none",
@@ -938,7 +940,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "schedule",
       "http:admin",
       "cloud",
-      "system"
+      "system",
+      "panel"
     ],
     "renderAfter": "never",
     "coalesce": "none",

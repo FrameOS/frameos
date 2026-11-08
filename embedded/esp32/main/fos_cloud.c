@@ -534,6 +534,7 @@ static void add_hardware_json(cJSON *parent)
      * its own and shows what the frame reports here, on every hello and
      * every `state` (one follows each lan_access_set). */
     cJSON_AddBoolToObject(hw, "lanAccess", config->allow_local_network);
+    fos_cloud_add_device_report(hw);
     /* A self-hosted backend set here owns the content: every content verb is
      * refused `backend_managed` (ws_handle_message). Its origin tells the
      * cloud why, and its absence on a later hello that the cloud may replay
@@ -862,6 +863,9 @@ static char s_scene_ack_checksum[96] = "";
 static uint32_t s_scene_ack_generation = 0;
 static int64_t s_scene_ack_deadline_us = 0;
 static volatile bool s_scene_ack_pending = false;
+/* A `state` wanted from somewhere that may not send it (fos_cloud_request_state):
+ * sent by the cloud task, which takes the runtime snapshot it needs. */
+static volatile bool s_state_wanted = false;
 /* The checksum of the last cloud set_scenes payload the render task actually
  * applied, persisted so a reboot does not amnesia it: fos_scenes stores every
  * pushed payload with etag "local" (a backend-sync guard, not a checksum), so
@@ -2317,7 +2321,9 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * authoritative on the provider), `rotate` (the renderer sizes its canvas
  * once at init, so this one costs a reboot), `scaling_mode` (a per-decode
  * fallback fit, applied live on the next render pass), `render_scale` (what
- * JSX from .tsx/.jsx apps is laid out for, live the same way), `colors` (the
+ * JSX from .tsx/.jsx apps is laid out for, live the same way),
+ * `frame_settings_on_screen` (the frame page of the settings on the screen,
+ * read when the panel draws), `colors` (the
  * automatic fit switch and the frame-wide correction, applied live the same
  * way) and `palette` (the colour list the packer dithers to, live the same
  * way; the names ride along in the cloud only). The power keys —
@@ -2459,6 +2465,14 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
             return;
         }
         config->render_scale_milli = milli;
+    }
+    /* The frame page behind the gear of the settings on the screen
+     * (docs/scene-settings.md "The frame page"): read when the panel draws,
+     * live. The console's settings_unlock wins over false, and no plane
+     * sets that one. */
+    const cJSON *on_screen = cJSON_GetObjectItem(settings, "frame_settings_on_screen");
+    if (on_screen != NULL) {
+        config->frame_settings_on_screen = cJSON_IsTrue(on_screen);
     }
     const cJSON *colors = cJSON_GetObjectItem(settings, "colors");
     if (colors != NULL) {
@@ -3050,6 +3064,18 @@ static void dispatch_verb(const char *type, cJSON *root, const cJSON *id,
         ESP_LOGW(TAG, "ws: refusing verb \"%s\"", type[0] ? type : "(none)");
         ws_ack(id, false, "unknown_verb");
     }
+}
+
+void fos_cloud_request_state(void)
+{
+    s_state_wanted = true;
+}
+
+void fos_cloud_add_device_report(cJSON *msg)
+{
+    const fos_config_t *config = fos_config();
+    cJSON_AddNumberToObject(msg, "rotate", config->rotate);
+    cJSON_AddNumberToObject(msg, "renderScale", config->render_scale_milli / 1000.0);
 }
 
 void fos_cloud_add_state_fields(cJSON *msg)
@@ -3745,6 +3771,10 @@ static void cloud_task(void *arg)
             }
 #endif
             ws_poll_scene_ack();
+            if (s_state_wanted && s_ws_ready) {
+                s_state_wanted = false;
+                ws_send_state(NULL);
+            }
             ws_poll_logs();
             ws_poll_metrics();
             ws_poll_active_scene();

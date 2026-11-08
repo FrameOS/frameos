@@ -238,6 +238,7 @@ FRAME_SYNC_LABELS = {
     "max_http_response_bytes": "HTTP response limit",
     "scaling_mode": "Scaling mode",
     "render_scale": "Scale",
+    "frame_settings_on_screen": "Frame settings on the screen",
     "background_color": "Background color",
     "log_to_file": "Log file",
     "assets_path": "Assets path",
@@ -447,6 +448,9 @@ def _sync_frame_value(key: str, value: Any) -> Any:
         # Always a number, 0 = automatic: a runtime from before the key
         # reports none, which is the same as the backend's default.
         return normalize_render_scale(value)
+    if key == "frame_settings_on_screen":
+        # On unless turned off: a runtime from before the key reports none.
+        return _sync_bool(value, default=True)
     if key == "frame_admin_auth":
         return _sync_prune_empty(normalize_frame_admin_auth(value))
     return _sync_prune_empty(value)

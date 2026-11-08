@@ -272,3 +272,37 @@ block:
   panelBufferGeneration = nil
 
 echo "svg frames ok"
+
+block a_ui_laid_out_larger_than_the_panel:
+  # A UI at render scale 0.5 (render_scale.nim) is laid out twice the canvas's
+  # size and drawn into it: the root's width and height are the layout's, the
+  # target the panel. A change on the right half of the layout is damage on
+  # the right half of the panel, repainted there.
+  proc scaled(i: int): string =
+    let x = W + 20 + (i mod 4) * 40 # always past the panel's own width, in layout pixels
+    &"""<svg width="{2 * W}" height="{2 * H}"><rect x="0" y="0" width="{2 * W}" height="{2 * H}" fill="#090b14"/>""" &
+      &"""<rect x="{x}" y="40" width="50" height="50" fill="#55dfff"/></svg>"""
+  proc whole(doc: string): Image =
+    result = newImage565(W, H)
+    result.ditherStores = true
+    parseSvg(doc, W, H).renderInto(result)
+  for i in 0 ..< 8:
+    discard renderInto(100 + i, scaled(i))
+    doAssert closeTo(buffers[(100 + i) mod 2], whole(scaled(i))), &"scaled frame {i} differs from a whole render"
+
+block a_scaled_ui_with_a_box_that_clips:
+  # The same at 0.5 with what a page's box that clips makes (ui/layout.nim):
+  # its children in a nested <svg> viewport. The right half of the layout,
+  # inside it, repaints on the right half of the panel.
+  proc clipped(i: int): string =
+    let w = 40 + (i mod 6) * 70 # a bar growing across the layout's whole width
+    &"""<svg width="{2 * W}" height="{2 * H}"><rect x="0" y="0" width="{2 * W}" height="{2 * H}" fill="#090b14"/>""" &
+      &"""<svg x="0" y="0" width="{2 * W}" height="{2 * H}" viewBox="0 0 {2 * W} {2 * H}">""" &
+      &"""<rect x="10" y="40" width="{w}" height="30" fill="#55dfff"/></svg></svg>"""
+  proc whole(doc: string): Image =
+    result = newImage565(W, H)
+    result.ditherStores = true
+    parseSvg(doc, W, H).renderInto(result)
+  for i in 0 ..< 12:
+    discard renderInto(200 + i, clipped(i))
+    doAssert closeTo(buffers[(200 + i) mod 2], whole(clipped(i))), &"clipped frame {i} differs from a whole render"

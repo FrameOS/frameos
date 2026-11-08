@@ -109,6 +109,10 @@ export interface FrameType {
    * with 2026.8 firmware (fos_cloud.c add_hardware_json) — older devices
    * report only the first six fields, so all of it stays optional. */
   hardware?: {
+    /** What the frame has now, changed on its own screen or not (docs/scene-settings.md
+     * "What a control plane learns"): the cloud's settings mirror follows them. */
+    rotate?: number
+    renderScale?: number
     platform?: string | null
     /** Linux/Pi frames only: the Buildroot platform key of the board the
      * device detected itself to be (`raspberry-pi-5` / `raspberry-pi-64` /
@@ -395,6 +399,9 @@ export interface FrameType {
   scaling_mode: string
   /** What a UI from a .tsx/.jsx app is laid out for (utils/renderScale.ts); 0 or unset = automatic. */
   render_scale?: number
+  /** The frame page behind the gear of the settings on the frame's own screen
+   * (docs/scene-settings.md "The frame page"); unset = on. */
+  frame_settings_on_screen?: boolean
   rotate?: number
   /** ESP32 power management (cloud set_settings mirror, frames.settings). */
   deep_sleep?: boolean

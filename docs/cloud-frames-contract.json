@@ -71,6 +71,11 @@
       "rule": {"type": "number", "min": 0, "max": 4},
       "profiles": {"linux": {"since": "2026.10.22"}, "esp32": {"since": "2026.10.22"}}
     },
+    "frame_settings_on_screen": {
+      "$comment": "frame.json `frameSettingsOnScreen`: whether the settings panel on the frame's own screen offers the frame page behind its gear (Wi-Fi, rotation, scale, Render again, Restart FrameOS, Reboot; docs/scene-settings.md \"The frame page\"). Never hides the scene's settings form. Absent = true. An unlock on the device wins over false: a file `frameos-settings-unlock` on a Pi's boot partition, `set settings_unlock 1` on an ESP32's USB console.",
+      "rule": {"type": "bool"},
+      "profiles": {"linux": {"since": "2026.11.5"}, "esp32": {"since": "2026.11.5"}}
+    },
     "timezone": {
       "rule": {"type": "string", "minLen": 1, "maxLen": 64, "format": "iana_zone"},
       "profiles": {"linux": {"since": null}, "esp32": {"since": "2026.8.34"}}

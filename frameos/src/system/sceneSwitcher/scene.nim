@@ -33,6 +33,7 @@ import frameos/types
 import frameos/channels
 import frameos/events_gen
 import frameos/panel_shape
+import frameos/render_scale
 import frameos/ui/layout
 import frameos/ui/events
 import frameos/ui/tree
@@ -128,6 +129,20 @@ proc canvasSize(frameConfig: FrameConfig): (int, int) =
   if frameConfig.rotate == 90 or frameConfig.rotate == 270: (frameConfig.height, frameConfig.width)
   else: (frameConfig.width, frameConfig.height)
 
+proc uiScale*(frameConfig: FrameConfig, width, height: int): float =
+  ## The frame's render scale (render_scale.nim) for a built-in scene's UI,
+  ## the switcher's and the settings', kept where they stay usable: no
+  ## smaller than 3/4 and laid out on no less than 320 px, so the settings
+  ## that set it can always set it back.
+  clamp(frameRenderScale(frameConfig), 0.75, max(1.0, min(width, height).float / 320.0))
+
+proc uiRoom*(frameConfig: FrameConfig, width, height: int): (int, int) =
+  ## What a built-in UI is laid out on: the canvas over its scale. Its
+  ## sizes come from the canvas (its `unit`), so at 1.5 everything is half
+  ## as large again with less room, as a scaled JSX scene is.
+  let scale = uiScale(frameConfig, width, height)
+  (scaledLength(width, scale), scaledLength(height, scale))
+
 proc ensureCanvas*(self: FrameScene, context: ExecutionContext) =
   ## The canvas a built-in scene draws into: the host's, else one the size of
   ## the frame as it is turned.
@@ -138,14 +153,16 @@ proc ensureCanvas*(self: FrameScene, context: ExecutionContext) =
 
 proc permille(v, p: int): int {.inline.} = (v * p + 500) div 1000
 
-proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false): SwitcherGrid =
+proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false, unit = 0): SwitcherGrid =
   ## The tile grid for `count` scenes on a `width` x `height` canvas: every
   ## scene on one page while the tiles stay big enough to read, else as many
   ## per page as fit. Among the grids that hold them all, the one whose
   ## pictures (at the canvas's own aspect) or name cards come out largest.
   ## On a round panel the grid is the square inscribed in the circle that
   ## stays `RoundInset` in from the rim, so no tile has a corner off the glass.
-  let unit = min(width, height)
+  ## `unit`: what the sizes are a share of (the panel's shorter edge, for a
+  ## UI laid out at its render scale); the canvas's shorter edge without it.
+  let unit = if unit > 0: unit else: min(width, height)
   result.pad = clamp(permille(unit, 35), 4, 24)
   result.gap = clamp(permille(unit, 25), 3, 16)
   result.headerH = clamp(permille(unit, 110), 18, 64)
@@ -215,16 +232,18 @@ proc isRound*(frameConfig: FrameConfig): bool =
   when defined(frameosEmbedded): false
   else: not frameConfig.isNil and panelIsRound(frameConfig.device)
 
-proc grid(self: SceneSwitcherScene, width, height: int): SwitcherGrid =
+proc grid(self: SceneSwitcherScene, width, height: int, unit = 0): SwitcherGrid =
   when defined(frameosEmbedded):
-    switcherGrid(self.entries.len, width, height, false)
+    switcherGrid(self.entries.len, width, height, false, unit = unit)
   else:
     switcherGrid(self.entries.len, width, height, not sceneSwitcherThumbnail.isNil,
-      round = isRound(self.frameConfig))
+      round = isRound(self.frameConfig), unit = unit)
 
 proc grid(self: SceneSwitcherScene): SwitcherGrid =
+  ## The grid the last render drew: at the UI's scale (uiRoom).
   let (width, height) = canvasSize(self.frameConfig)
-  self.grid(width, height)
+  let (roomW, roomH) = uiRoom(self.frameConfig, width, height)
+  self.grid(roomW, roomH, min(width, height))
 
 proc indexOf(self: SceneSwitcherScene, sceneId: string): int =
   for i in 0 ..< self.entries.len:
@@ -563,13 +582,14 @@ when not defined(frameosEmbedded):
       root.children.add left
       root.children.add right
 
-proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool): SvgNode =
+proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0): SvgNode =
   ## The switcher as a UI tree: the header (its title, the page and its
   ## arrows, Close), or on a round panel the same around the circle, and one
   ## page of tiles, each where switcherGrid put it. The outermost element
   ## fills the canvas by itself (ui/layout.nim), its children placed on it.
+  ## `unit`: what its sizes are a share of (uiRoom).
   let
-    grid = self.grid(width, height)
+    grid = self.grid(width, height, unit)
     page = clamp(self.state{"page"}.getInt(0), 0, grid.pages - 1)
     lit = self.highlighted()
     size = clamp(grid.headerH * 45 div 100, 12, 32)
@@ -616,16 +636,18 @@ proc background*(paper: bool): Color =
   if paper: PaperWhite else: Zinc950
 
 proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, paper: bool,
-    call: UiHandlerCall, idle: float): bool =
+    call: UiHandlerCall, idle: float, roomW, roomH: int): bool =
   ## A built-in scene's render (the switcher's, the settings'): `tree` laid
-  ## out and drawn into `image`, and its regions left with `call` for the
-  ## pointer. True once nobody has touched it for `idle` seconds, when the
-  ## scene goes back; until then the next render is due when that time is up.
+  ## out on `roomW` x `roomH` (uiRoom), drawn stretched to fill `image` as
+  ## vectors, and its regions left with `call` for the pointer, which is
+  ## divided by the same scale. True once nobody has touched it for `idle`
+  ## seconds, when the scene goes back; until then the next render is due
+  ## when that time is up.
   let target = uiTarget(sceneId, 1)
   target.input.paper = paper
   target.input.round = isRound(self.frameConfig)
   var regions: seq[UiRegion]
-  let svg = layoutUi(tree, image.width, image.height, target.input, regions, target.memo)
+  let svg = layoutUi(tree, roomW, roomH, target.input, regions, target.memo)
   let bg = background(paper)
   var owed = some(bg)
   if not renderSvgFrame(svg, image, owed, wholeFrame = true, reuse = true):
@@ -635,6 +657,7 @@ proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, pap
   target.regions = move(regions)
   target.offsetX = 0
   target.offsetY = 0
+  target.scale = image.width.float32 / max(roomW, 1).float32
   target.call = call
   let
     now = epochTime()
@@ -667,11 +690,12 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
     let pass = if self.paper: nil else: sceneSwitcherThumbnailPass
     if not pass.isNil:
       try: discard pass(true) except Exception: discard
-  let tree = self.tree(image.width, image.height, self.paper)
+  let (roomW, roomH) = uiRoom(self.frameConfig, image.width, image.height)
+  let tree = self.tree(roomW, roomH, self.paper, min(image.width, image.height))
   when not defined(frameosEmbedded):
     if not pass.isNil:
       try: more = pass(false) except Exception: more = false
-  if self.drawUi(SceneSwitcherId, tree, image, self.paper, onTap, idleSeconds(self.paper)):
+  if self.drawUi(SceneSwitcherId, tree, image, self.paper, onTap, idleSeconds(self.paper), roomW, roomH):
     leave()
   elif more:
     sendEvent(evRender, newJObject(), eoScene)

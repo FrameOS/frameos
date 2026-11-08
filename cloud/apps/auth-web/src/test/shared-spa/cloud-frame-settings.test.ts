@@ -58,6 +58,10 @@ import {
   esp32RenderScaleCloudFrameSettingKeys,
   renderScaleCloudFrameSettingKeys,
   renderScaleCloudFrameSettingsMinVersion,
+  cloudFrameSupportsFrameSettingsOnScreen,
+  esp32FrameSettingsOnScreenCloudFrameSettingKeys,
+  frameSettingsOnScreenCloudFrameSettingKeys,
+  frameSettingsOnScreenCloudFrameSettingsMinVersion,
 } from "../../../../../../frontend/src/utils/cloudFrameSettings";
 import {
   allowedFrameCommandTypes,
@@ -103,6 +107,10 @@ import {
   frameSupportsRenderScaleSettings,
   renderScaleFrameSettingKeys,
   renderScaleFrameSettingsMinVersion,
+  esp32FrameSettingsOnScreenFrameSettingKeys,
+  frameSettingsOnScreenFrameSettingKeys,
+  frameSettingsOnScreenFrameSettingsMinVersion,
+  frameSupportsFrameSettingsOnScreen,
 } from "../../lib/frames";
 
 // Save and Render in the shared SPA used to POST /api/frames/{id} and
@@ -162,6 +170,7 @@ describe("cloud settings push", () => {
         !esp32ColorsFrameSettingKeys.has(key) &&
         !esp32EventMapFrameSettingKeys.has(key) &&
         !esp32RenderScaleFrameSettingKeys.has(key) &&
+        !esp32FrameSettingsOnScreenFrameSettingKeys.has(key) &&
         !esp32PaletteFrameSettingKeys.has(key) &&
         !esp32BuzzerFrameSettingKeys.has(key) &&
         !esp32VoiceChatFrameSettingKeys.has(key) &&
@@ -601,6 +610,34 @@ describe("cloud settings push", () => {
     expect(allowedFrameSettings.get("event_map")?.({ event: "button" })).toBe(false);
     // An empty list is a value (it clears the bindings), not "unset".
     expect(cloudFrameSettingsPayload({ event_map: [] } as never, cloudFrameSettingKeysForVersion("2026.10.20")).event_map).toEqual([]);
+  });
+
+  it("gates the frame page switch on its floor, both profiles", () => {
+    // 2026.11.5: `frame_settings_on_screen`, the frame page behind the gear
+    // of the settings on the frame's own screen. One floor for the Pi
+    // runtime and the ESP32 firmware.
+    expect([...frameSettingsOnScreenCloudFrameSettingKeys]).toEqual(["frame_settings_on_screen"]);
+    expect(new Set(frameSettingsOnScreenCloudFrameSettingKeys)).toEqual(frameSettingsOnScreenFrameSettingKeys);
+    expect([...esp32FrameSettingsOnScreenCloudFrameSettingKeys]).toEqual(["frame_settings_on_screen"]);
+    expect(new Set(esp32FrameSettingsOnScreenCloudFrameSettingKeys)).toEqual(esp32FrameSettingsOnScreenFrameSettingKeys);
+    expect(frameSettingsOnScreenCloudFrameSettingsMinVersion).toBe(frameSettingsOnScreenFrameSettingsMinVersion);
+    for (const version of ["2026.11.4", "2026.11.5", "2026.12.0", "unknown", null, ""]) {
+      expect(cloudFrameSupportsFrameSettingsOnScreen(version), `${version}`).toBe(
+        frameSupportsFrameSettingsOnScreen(version),
+      );
+    }
+    expect(cloudFrameSettingKeysForVersion("2026.11.4")).not.toContain("frame_settings_on_screen");
+    expect(cloudFrameSettingKeysForVersion("2026.11.5")).toContain("frame_settings_on_screen");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.11.4")).not.toContain("frame_settings_on_screen");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.11.5")).toContain("frame_settings_on_screen");
+    // A boolean goes as it is: off is a value, not "unset".
+    const payload = cloudFrameSettingsPayload(
+      { frame_settings_on_screen: false } as never,
+      cloudFrameSettingKeysForVersion("2026.11.5"),
+    );
+    expect(payload.frame_settings_on_screen).toBe(false);
+    expect(allowedFrameSettings.get("frame_settings_on_screen")?.(false)).toBe(true);
+    expect(allowedFrameSettings.get("frame_settings_on_screen")?.("off")).toBe(false);
   });
 
   it("gates the render scale on its floor, both profiles", () => {

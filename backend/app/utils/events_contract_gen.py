@@ -14,6 +14,7 @@ REFUSED_BY_ORIGIN: dict[str, frozenset[str]] = {
     "cloud": frozenset({"init", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "edgeSwipe", "wheel", "toggleScreen", "gpio", "sceneSwitcher", "sceneSettings", "back", "forward", "reload", "voiceChat"}),
     "system": frozenset({"voiceChat"}),
     "eventMap": frozenset({"init", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "edgeSwipe", "wheel", "gpio", "button", "metrics", "reload", "restart", "reboot", "uploadScenes"}),
+    "panel": frozenset({"init", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "edgeSwipe", "wheel", "turnOn", "turnOff", "toggleScreen", "gpio", "button", "setSceneState", "setCurrentScene", "sceneSwitcher", "sceneSettings", "back", "forward", "metrics", "reload", "uploadScenes", "voiceChat"}),
 }
 
 # Origins a scene opts into per custom event: `origins` on its declaration.

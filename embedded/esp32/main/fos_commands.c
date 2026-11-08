@@ -126,6 +126,9 @@ static bool sync_pass(bool after_forced_pull)
     cJSON *hello = cJSON_CreateObject();
     if (hello == NULL) return false;
     fos_cloud_add_state_fields(hello);
+    /* Where it is now, for a frame that joined another network on its own
+     * screen and so said no bootup (app/utils/embedded_report.py). */
+    if (fos_wifi_ip()[0]) cJSON_AddStringToObject(hello, "ip", fos_wifi_ip());
     const char *settings_etag = fos_settings_etag();
     if (settings_etag[0]) cJSON_AddStringToObject(hello, "settings_etag", settings_etag);
     char *body = cJSON_PrintUnformatted(hello);

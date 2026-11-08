@@ -50,6 +50,9 @@ describe("the Scale selects", () => {
   it("offer automatic and the steps for a frame", () => {
     expect(frameRenderScaleOptions(1200, 1600)).toEqual([
       { label: "Automatic (2× on this panel)", value: "0" },
+      { label: "0.25×", value: "0.25" },
+      { label: "0.5×", value: "0.5" },
+      { label: "0.75×", value: "0.75" },
       { label: "1× (as designed)", value: "1" },
       { label: "1.25×", value: "1.25" },
       { label: "1.5×", value: "1.5" },
@@ -60,7 +63,7 @@ describe("the Scale selects", () => {
     ]);
     // A scale set through the API stays selectable as itself.
     expect(frameRenderScaleOptions(800, 480, 1.75).map((option) => option.value)).toEqual([
-      "0", "1", "1.25", "1.5", "1.75", "2", "2.5", "3", "4",
+      "0", "0.25", "0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.5", "3", "4",
     ]);
     expect(frameRenderScaleSelectValue(undefined)).toBe("0");
     expect(frameRenderScaleSelectValue(0)).toBe("0");

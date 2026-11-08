@@ -723,6 +723,15 @@ static bool apply_frame_settings(const cJSON *frame)
         changed = true;
     }
 
+    /* `frameSettingsOnScreen` (docs/scene-settings.md "The frame page"): the
+     * frame page behind the gear of the settings on the screen, read when the
+     * panel draws, so no restart. Absent leaves it as it is. */
+    const cJSON *on_screen = cJSON_GetObjectItem(frame, "frameSettingsOnScreen");
+    if (cJSON_IsBool(on_screen) && config->frame_settings_on_screen != cJSON_IsTrue(on_screen)) {
+        config->frame_settings_on_screen = cJSON_IsTrue(on_screen);
+        changed = true;
+    }
+
     /* `colors` (docs/asset-color-profiles.md): kept as compact JSON and
      * pushed into the Nim runtime every pass like scalingMode, so it applies
      * live. An empty object is the defaults; a block too big for the slot is
@@ -904,6 +913,9 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
         char buf[24];
         snprintf(buf, sizeof(buf), "%g", after->render_scale_milli / 1000.0);
         change_append(out, out_len, "render_scale", buf);
+    }
+    if (before->frame_settings_on_screen != after->frame_settings_on_screen) {
+        change_append(out, out_len, "frame_settings_on_screen", after->frame_settings_on_screen ? "on" : "off");
     }
     if (strcmp(before->colors, after->colors) != 0) {
         change_append(out, out_len, "colors", after->colors[0] ? "set" : "default");

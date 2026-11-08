@@ -582,3 +582,59 @@ async def test_firmware_before_the_queue_is_still_pushed_to(async_client, db):
     frame.embedded = {**frame.embedded, 'lastBoot': {'frameosVersion': 'v2026.10.5+abc'}}
     db.commit()
     assert embedded_frame_pulls_commands(frame)
+
+
+@pytest.mark.asyncio
+async def test_the_address_in_a_pull_moves_the_host_only_from_where_it_came(async_client, no_auth_client, db):
+    frame = await _embedded_frame(async_client, db)
+    frame.frame_host = "192.168.1.5"
+    db.commit()
+    # The claim is not where the request came from: the host stays, and
+    # nothing else the body says (a network's name) lands anywhere.
+    response = await no_auth_client.post(
+        f"/api/frames/{frame.id}/embedded/commands",
+        headers=_device_headers(frame),
+        json={"ip": "192.168.7.9", "wifiSsid": "Cafe"},
+    )
+    assert response.status_code == 200
+    db.expire_all()
+    frame = db.get(Frame, frame.id)
+    assert frame.frame_host == "192.168.1.5"
+    assert "Cafe" not in str(frame.embedded)
+
+    with patch("app.api.embedded_commands.client_ip_for_request", return_value="192.168.7.9"):
+        response = await no_auth_client.post(
+            f"/api/frames/{frame.id}/embedded/commands",
+            headers=_device_headers(frame),
+            json={"ip": "192.168.7.9"},
+        )
+    assert response.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).frame_host == "192.168.7.9"
+
+
+# ------------------------------------------------- the frame page's changes
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_the_frame_page_rotation_and_scale_land_on_the_row_and_baseline(_pub, async_client, db, redis):
+    frame = await _embedded_frame(async_client, db)
+    frame.rotate = 0
+    frame.render_scale = 0
+    frame.last_successful_deploy = {"rotate": 0, "render_scale": 0, "interval": 300}
+    db.commit()
+    await process_log(db, redis, frame, {
+        'event': 'settings:frame', 'source': 'esp32', 'origin': 'panel', 'changes': 'rotate,renderScale',
+        'rotate': 90, 'renderScale': 1.5,
+    })
+    db.refresh(frame)
+    assert frame.rotate == 90 and frame.render_scale == 1.5
+    # The drawer has nothing to deploy for them: the frame already has them.
+    assert frame.last_successful_deploy == {"rotate": 90, "render_scale": 1.5, "interval": 300}
+
+    # Only the page speaks for the person at the frame, and only in range.
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'scene', 'rotate': 180})
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'panel', 'rotate': 45,
+                                         'renderScale': 9})
+    db.refresh(frame)
+    assert frame.rotate == 90 and frame.render_scale == 1.5

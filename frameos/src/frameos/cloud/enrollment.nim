@@ -189,6 +189,11 @@ proc hardwarePayload*(frameConfig: FrameConfig): JsonNode =
   # copy of its own: it shows this, and moves it only through the lan_access
   # verbs.
   result["lanAccess"] = %lanAccessEnabled(frameConfig)
+  # What the frame has now, set on its own screen or not (docs/scene-settings.md
+  # "What a control plane learns"): the provider's settings mirror follows.
+  if frameConfig != nil:
+    result["rotate"] = %frameConfig.rotate
+    result["renderScale"] = %frameConfig.renderScale
   # "color" only lives in raw frame.json (device color variant); include it
   # when present, drop it otherwise — providers must drop unknown/missing
   # optional fields anyway.

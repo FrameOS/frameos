@@ -55,7 +55,8 @@ proc flag(key: string): bool =
 proc buildStatusScreen*(canvas: Image; frameName: string): StatusScreen =
   ## Keys read from the pushed status: name, panel, ip, portal (bool),
   ## portal_ssid, portal_ip, cloud_url, cloud_state (none|pending|enrolled|
-  ## error), cloud_connected (bool), backend_url, version.
+  ## error), cloud_connected (bool), backend_url, version, setup_on_screen
+  ## (bool: a touch LCD, set up from the settings panel, no portal).
   let name = if str("name").len > 0: str("name") elif frameName.len > 0: frameName else: "Unnamed frame"
   let panel = if str("panel").len > 0: str("panel") else: "unknown panel"
   let ip = str("ip")
@@ -65,6 +66,7 @@ proc buildStatusScreen*(canvas: Image; frameName: string): StatusScreen =
   let cloudConnected = flag("cloud_connected")
   let backendUrl = str("backend_url")
   let version = str("version")
+  let onScreen = flag("setup_on_screen")
 
   var cloudHost = cloudUrl
   for prefix in ["https://", "http://"]:
@@ -95,7 +97,9 @@ proc buildStatusScreen*(canvas: Image; frameName: string): StatusScreen =
     result.rows.add(("Frame", &"http://{ip}/"))
   result.footer = if version.len > 0: "FrameOS v" & version else: "FrameOS"
   result.status =
-    if portal:
+    if onScreen and ip.len == 0:
+      "Not on Wi-Fi. Swipe down from the top of the screen to connect."
+    elif portal:
       "Not on Wi-Fi. Join the setup hotspot and open http://" &
         (if str("portal_ip").len > 0: str("portal_ip") else: "192.168.4.1") & "/ to set up."
     elif cloudUrl.len > 0 and cloudState == "enrolled" and cloudConnected:
@@ -107,6 +111,8 @@ proc buildStatusScreen*(canvas: Image; frameName: string): StatusScreen =
     elif backendUrl.len > 0: "Waiting for the backend to deploy a scene."
     else: "No scenes installed yet."
   result.notes = @["No scenes installed yet."]
+  if onScreen:
+    result.notes.add("Swipe down from the top for the frame's settings.")
   if frameosSceneName.len > 0 and frameosSceneName != "default":
     result.notes.add("Built-in scene: " & frameosSceneName)
 

@@ -11,7 +11,8 @@
     "http:admin": "The frame's HTTP API with an admin session or the serverApiKey bearer — the self-hosted backend.",
     "cloud": "FrameOS Cloud, through a hub verb.",
     "system": "The runtime itself: boot, the portal, settings apply, device flow.",
-    "eventMap": "The frame's or an installed scene's event map (docs/events.md, \"Event map\") replacing an event it matched with the one its rule names: the owner's configuration speaking, never a key or a request itself. What it emits is never mapped again."
+    "eventMap": "The frame's or an installed scene's event map (docs/events.md, \"Event map\") replacing an event it matched with the one its rule names: the owner's configuration speaking, never a key or a request itself. What it emits is never mapped again.",
+    "panel": "The frame page of the settings on the frame's own screen (docs/scene-settings.md, \"The frame page\"): a person at the frame pressing Render again, Restart FrameOS or Reboot. Only when the frame's control plane leaves that page on."
   },
   "classes": {
     "lifecycle": "Sent by the host to a scene as it is loaded, shown, rendered and left.",
@@ -111,7 +112,7 @@
       "dispatch": true,
       "payload": [],
       "sceneState": "read",
-      "origins": ["system", "driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud", "eventMap"],
+      "origins": ["system", "driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud", "eventMap", "panel"],
       "cloud": {"verb": "render"},
       "renderAfter": "always",
       "coalesce": "none",
@@ -718,7 +719,7 @@
       "listen": false,
       "dispatch": false,
       "payload": [],
-      "origins": ["schedule", "http:admin", "cloud", "system"],
+      "origins": ["schedule", "http:admin", "cloud", "system", "panel"],
       "cloud": {"verb": "restart_runtime", "eventRoute": false},
       "schedule": {"label": "Restart FrameOS", "description": "Exit and relaunch the FrameOS runtime. A few seconds of downtime; the device stays up.", "since": "2026.8.32", "endsRuntime": true},
       "renderAfter": "never",
@@ -733,7 +734,7 @@
       "listen": false,
       "dispatch": false,
       "payload": [],
-      "origins": ["schedule", "http:admin", "cloud", "system"],
+      "origins": ["schedule", "http:admin", "cloud", "system", "panel"],
       "cloud": {"verb": "reboot", "eventRoute": false},
       "schedule": {"label": "Reboot device", "description": "Reboot the whole device. Use this for the nightly reboot some panels and Wi-Fi chips like.", "since": "2026.8.32", "endsRuntime": true},
       "renderAfter": "never",
