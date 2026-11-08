@@ -1121,6 +1121,13 @@ proc appLength(ctx: ptr JSContext, e: JsAppEvalEnv, length: int): JSValue =
   ## scale for a .tsx or .jsx app (render_scale.nim).
   nimIntToJS(ctx, scaledLength(length, e.runtime.jsxScale(e.owner)).int32)
 
+proc pictureFormatLike(context: ExecutionContext): Image =
+  ## An image in the canvas's pixel format, if one is about: what an app's
+  ## own picture is made like, so drawing it later is a copy.
+  if context.isNil: nil
+  elif not context.decodeTargetImage.isNil: context.decodeTargetImage
+  else: context.contextImage()
+
 proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
   if e == nil:
@@ -1148,6 +1155,12 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     # assets, a few MB of PSRAM. The OpenAI image app asks for a lighter
     # picture there.
     return nimBoolToJS(ctx, runsAsEmbedded())
+  of "paper":
+    # A panel that shows a change only in a refresh (panel_shape.nim): an app
+    # that follows a finger waits for it to lift there.
+    let like = pictureFormatLike(e.context)
+    return nimBoolToJS(ctx, panelIsPaper(e.owner.frameConfig.device,
+      not like.isNil and like.format == pfRgb565))
   else:
     return jsUndefSentinel(ctx)
 
@@ -1219,7 +1232,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
       for key in state.keys:
         keys.add(key)
   of "frame":
-    keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale"]
+    keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale", "paper"]
   of "context":
     keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep"]
     if e.context.hasImage and not e.context.image.isNil:
@@ -1475,13 +1488,6 @@ proc canvasImage(runtime: JsAppRuntime, id: int): Image =
   for canvas in runtime.canvases:
     if canvas.id == id:
       return runtime.images.getOrDefault(id, nil)
-
-proc pictureFormatLike(context: ExecutionContext): Image =
-  ## An image in the canvas's pixel format, if one is about: what an app's
-  ## own picture is made like, so drawing it later is a copy.
-  if context.isNil: nil
-  elif not context.decodeTargetImage.isNil: context.decodeTargetImage
-  else: context.contextImage()
 
 proc jsCanvas(ctx: ptr JSContext, key: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## `frameos.canvas(key, width, height, color)`: the app's canvas called

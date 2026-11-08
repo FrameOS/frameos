@@ -53,6 +53,15 @@ int fos_touch_wire(int value, int max)
     return (int)(((long)value * FOS_TOUCH_WIRE_MAX) / (max - 1));
 }
 
+int fos_touch_move_slot(const fos_touch_event_t *queue, size_t capacity, size_t head, size_t count, uint8_t id)
+{
+    for (size_t i = count; i-- > 0;) {
+        size_t slot = (head + i) % capacity;
+        if (queue[slot].id == id) return queue[slot].kind == FOS_TOUCH_MOVE ? (int)slot : -1;
+    }
+    return -1;
+}
+
 bool fos_touch_axes_swapped(int touch_x_max, int touch_y_max, int panel_width, int panel_height)
 {
     if (touch_x_max <= 0 || touch_y_max <= 0 || panel_width <= 0 || panel_height <= 0) return false;
@@ -103,16 +112,6 @@ static const char *TAG = "fos_touch";
  * same finger, so this is mostly downs and ups: 64 is plenty. */
 #define TOUCH_QUEUE_LEN 64
 
-typedef enum { TOUCH_DOWN = 0, TOUCH_MOVE = 1, TOUCH_UP = 2 } touch_kind_t;
-
-typedef struct {
-    uint8_t kind;
-    uint8_t id;
-    uint16_t x; /* wire units */
-    uint16_t y;
-    int64_t at_ms; /* esp_timer, when the controller reported it */
-} touch_event_t;
-
 typedef enum { CTRL_GT911 = 0, CTRL_FT6X36 = 1 } controller_t;
 static const char *const k_controller_names[] = {"gt911", "ft6x36"};
 
@@ -132,7 +131,7 @@ static bool s_swap = false;
 static int s_mirror = 0; /* FOS_BOARD_TOUCH_MIRROR_*, after the swap */
 static SemaphoreHandle_t s_irq = NULL;
 static portMUX_TYPE s_queue_lock = portMUX_INITIALIZER_UNLOCKED;
-static touch_event_t s_queue[TOUCH_QUEUE_LEN];
+static fos_touch_event_t s_queue[TOUCH_QUEUE_LEN];
 static uint8_t s_head = 0, s_count = 0;
 static uint32_t s_dropped = 0;
 /* What is down, by track id, and where it last was (wire units). */
@@ -143,16 +142,16 @@ static bool s_woke = false;
 
 /* ------------------------------------------------------------- the queue */
 
-static void enqueue(touch_kind_t kind, uint8_t id, uint16_t x, uint16_t y)
+static void enqueue(uint8_t kind, uint8_t id, uint16_t x, uint16_t y)
 {
     int64_t at_ms = esp_timer_get_time() / 1000;
     portENTER_CRITICAL(&s_queue_lock);
-    if (kind == TOUCH_MOVE && s_count > 0) {
-        touch_event_t *tail = &s_queue[(s_head + s_count - 1) % TOUCH_QUEUE_LEN];
-        if (tail->kind == TOUCH_MOVE && tail->id == id) {
-            tail->x = x;
-            tail->y = y;
-            tail->at_ms = at_ms;
+    if (kind == FOS_TOUCH_MOVE) {
+        int merge = fos_touch_move_slot(s_queue, TOUCH_QUEUE_LEN, s_head, s_count, id);
+        if (merge >= 0) {
+            s_queue[merge].x = x;
+            s_queue[merge].y = y;
+            s_queue[merge].at_ms = at_ms;
             portEXIT_CRITICAL(&s_queue_lock);
             return;
         }
@@ -162,7 +161,7 @@ static void enqueue(touch_kind_t kind, uint8_t id, uint16_t x, uint16_t y)
         portEXIT_CRITICAL(&s_queue_lock);
         return;
     }
-    touch_event_t *slot = &s_queue[(s_head + s_count) % TOUCH_QUEUE_LEN];
+    fos_touch_event_t *slot = &s_queue[(s_head + s_count) % TOUCH_QUEUE_LEN];
     slot->kind = (uint8_t)kind;
     slot->id = id;
     slot->x = x;
@@ -173,7 +172,7 @@ static void enqueue(touch_kind_t kind, uint8_t id, uint16_t x, uint16_t y)
     fos_client_wake_for_events();
 }
 
-static bool dequeue(touch_event_t *out)
+static bool dequeue(fos_touch_event_t *out)
 {
     portENTER_CRITICAL(&s_queue_lock);
     if (s_count == 0) {
@@ -194,10 +193,15 @@ bool fos_touch_pending(void)
 
 bool fos_touch_process_events(void)
 {
-    touch_event_t event;
+    fos_touch_event_t event;
     bool any = false;
     static const char *const names[] = {FOS_EVENT_POINTER_DOWN, FOS_EVENT_POINTER_MOVE, FOS_EVENT_POINTER_UP};
-    while (dequeue(&event)) {
+    /* What is queued now and no more: what arrives while these run waits for
+     * the next pass, after a frame. A JS handler takes ~14 ms on an ESP32-S3
+     * and two fingers report every 10 ms, so draining until empty held the
+     * render off for seconds (305 moves, 4.3 s between frames, 2026-11-08). */
+    uint8_t budget = s_count;
+    while (budget-- > 0 && dequeue(&event)) {
         char payload[160];
         /* The wire position, the finger (pointer ids from 1: 0 is the one
          * mouse cursor), `touch`, and for a down or an up the primary
@@ -205,14 +209,14 @@ bool fos_touch_process_events(void)
          * (`atMs`, the clock the Nim side reads): the queue is drained
          * between renders, and a tap is timed by its own two reports, not
          * by when they were delivered (docs/events.md "Pointer"). */
-        if (event.kind == TOUCH_MOVE) {
+        if (event.kind == FOS_TOUCH_MOVE) {
             snprintf(payload, sizeof(payload),
                      "{\"x\":%u,\"y\":%u,\"pointerId\":%u,\"pointerType\":\"touch\",\"buttons\":1}",
                      event.x, event.y, event.id + 1);
         } else {
             snprintf(payload, sizeof(payload),
                      "{\"x\":%u,\"y\":%u,\"pointerId\":%u,\"pointerType\":\"touch\",\"button\":0,\"buttons\":%d,\"atMs\":%lld}",
-                     event.x, event.y, event.id + 1, event.kind == TOUCH_DOWN ? 1 : 0, (long long)event.at_ms);
+                     event.x, event.y, event.id + 1, event.kind == FOS_TOUCH_DOWN ? 1 : 0, (long long)event.at_ms);
         }
         /* `driver`: the glass talking. This is the render task, so the
          * runtime lock is free; fos_events.c asks for the render when a
@@ -355,17 +359,17 @@ static void touch_task(void *arg)
                  * a scene that follows the pointer by its moves (the Touch
                  * test's `mouseMove`) sees a tap where it was, not only a
                  * finger dragged. */
-                enqueue(TOUCH_MOVE, p->id, wx, wy);
-                enqueue(TOUCH_DOWN, p->id, wx, wy);
+                enqueue(FOS_TOUCH_MOVE, p->id, wx, wy);
+                enqueue(FOS_TOUCH_DOWN, p->id, wx, wy);
             } else if (wx != s_last_x[p->id] || wy != s_last_y[p->id]) {
-                enqueue(TOUCH_MOVE, p->id, wx, wy);
+                enqueue(FOS_TOUCH_MOVE, p->id, wx, wy);
             }
             s_last_x[p->id] = wx;
             s_last_y[p->id] = wy;
         }
         uint8_t lifted = s_down_mask & (uint8_t)~seen;
         for (int id = 0; id < FOS_TOUCH_POINTS_MAX; id++) {
-            if (lifted & (1u << id)) enqueue(TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
+            if (lifted & (1u << id)) enqueue(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
         }
         s_down_mask = seen;
     }

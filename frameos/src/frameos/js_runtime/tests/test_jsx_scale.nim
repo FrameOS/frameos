@@ -141,6 +141,29 @@ export function get(app, context) {
     check seen["frameWidth"].getInt() == 400
     check seen["scale"].getFloat() == 2.0
 
+  test "app.frame.paper says a change costs the panel a refresh":
+    const source = """
+      export function get(app) {
+        frameos.setState('paper', app.frame.paper)
+        return { ok: true }
+      }
+    """
+    proc paper(device: string, canvas: Image, producer = false): bool =
+      let ui = newUi(source, "tests/paper", sourceName = "app.js", outputType = "json")
+      ui.owner.frameConfig.device = device
+      let context = ExecutionContext(scene: ui.scene, event: "render", payload: %*{},
+        hasImage: not producer, image: (if producer: nil else: canvas), loopIndex: 0, loopKey: ".", nextSleep: -1)
+      if producer:
+        context.decodeTargetImage = canvas
+      discard ui.runtime.get(ui.owner, %*{}, context)
+      ui.scene.state["paper"].getBool()
+    check paper("waveshare.EPD_7in5_V2", newImage(400, 200))
+    check paper("pimoroni.inky_impression", newImage(400, 200))
+    check not paper("framebuffer", newImage(400, 200))
+    # An LCD's RGB565 canvas, drawn on or fed to the node that draws on it.
+    check not paper("waveshare.EPD_7in5_V2", newImage565(400, 200))
+    check not paper("waveshare.EPD_7in5_V2", newImage565(400, 200), producer = true)
+
   test "the scene's own scale wins over the frame's, and its role field over its setting":
     let ui = newUi(box, "tests/jsx-scale-scene")
     ui.scene.renderScaleSetting = 1.0

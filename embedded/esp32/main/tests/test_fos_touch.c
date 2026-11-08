@@ -120,12 +120,41 @@ static void test_axes(void)
     CHECK(!fos_touch_axes_swapped(480, 800, 0, 0), "no panel");
 }
 
+static void test_move_slot(void)
+{
+    fos_touch_event_t q[4];
+    memset(q, 0, sizeof(q));
+    CHECK(fos_touch_move_slot(q, 4, 0, 0, 0) == -1, "an empty queue merges nothing");
+
+    /* Two fingers moving: each new move finds its own, past the other's. */
+    q[0] = (fos_touch_event_t){.kind = FOS_TOUCH_MOVE, .id = 0};
+    q[1] = (fos_touch_event_t){.kind = FOS_TOUCH_MOVE, .id = 1};
+    CHECK(fos_touch_move_slot(q, 4, 0, 2, 0) == 0, "finger 0 past finger 1");
+    CHECK(fos_touch_move_slot(q, 4, 0, 2, 1) == 1, "finger 1 at the tail");
+    CHECK(fos_touch_move_slot(q, 4, 0, 2, 2) == -1, "a finger with nothing queued");
+
+    /* A press or a release stays ahead of what follows it. */
+    q[2] = (fos_touch_event_t){.kind = FOS_TOUCH_UP, .id = 0};
+    CHECK(fos_touch_move_slot(q, 4, 0, 3, 0) == -1, "never past a release");
+    q[2] = (fos_touch_event_t){.kind = FOS_TOUCH_DOWN, .id = 0};
+    CHECK(fos_touch_move_slot(q, 4, 0, 3, 0) == -1, "never past a press");
+    CHECK(fos_touch_move_slot(q, 4, 0, 3, 1) == 1, "the other finger is not held back");
+
+    /* Around the end of the ring: slots 3, 0, 1, oldest first. */
+    q[3] = (fos_touch_event_t){.kind = FOS_TOUCH_MOVE, .id = 0};
+    q[0] = (fos_touch_event_t){.kind = FOS_TOUCH_MOVE, .id = 1};
+    q[1] = (fos_touch_event_t){.kind = FOS_TOUCH_MOVE, .id = 1};
+    CHECK(fos_touch_move_slot(q, 4, 3, 3, 0) == 3, "wraps to the oldest slot");
+    CHECK(fos_touch_move_slot(q, 4, 3, 3, 1) == 1, "the newest of the same finger");
+}
+
 int main(void)
 {
     test_decode();
     test_decode_ft();
     test_wire();
     test_axes();
+    test_move_slot();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
