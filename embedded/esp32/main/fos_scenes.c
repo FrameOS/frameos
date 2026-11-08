@@ -21,6 +21,7 @@
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_events_gen.h"
+#include "fos_json_guard.h"
 #include "fos_mem.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
@@ -1051,12 +1052,25 @@ bool fos_scenes_apply_pending(void)
         }
     } else {
         /* Payload the splitter cannot handle (not an array, too many scenes,
-         * a write that failed): keep the old whole-payload behaviour. */
-        unlink(SCENES_INDEX_PATH);
+         * a write that failed): the whole-payload path. The live set's index
+         * goes only once this one has loaded: a payload the runtime refuses
+         * as well used to take the frame's scenes with it (2026-11-08, an
+         * upload stored cut short). Refused, it goes, and the set from before
+         * comes back; the apply still reports the failure. */
+        int slots_before = s_slot_count;
         s_slot_count = 0;
         ok = load_into_nim(json, len, "stored");
         free(json);
         json = NULL;
+        if (ok) {
+            unlink(SCENES_INDEX_PATH);
+        } else {
+            unlink(SCENES_PATH);
+            s_slot_count = slots_before;
+            if (!activate_from_index("restored")) {
+                ESP_LOGW(TAG, "refused payload dropped; no earlier set to come back to");
+            }
+        }
     }
     free(json);
     /* The writes are over. A set that loaded renders now (s_scene_switched):
@@ -1388,6 +1402,13 @@ esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
     s_last_error[0] = '\0';
     if (json == NULL || len == 0 || len > SCENES_MAX_BYTES) {
         set_scene_simple_error("invalid scenes payload length", len);
+        return ESP_ERR_INVALID_ARG;
+    }
+    /* Refused before it is stored: a payload cut short would be applied in
+     * place of the scenes the frame has, and fail there. */
+    if (!fos_json_whole(json, len)) {
+        set_scene_simple_error("scenes payload is not one whole JSON array or object", len);
+        log_scene_event("event:uploadScenes", "error", origin, "", s_last_error, len, 0, 0, ESP_ERR_INVALID_ARG);
         return ESP_ERR_INVALID_ARG;
     }
     esp_err_t err = mount_state();

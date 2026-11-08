@@ -22,16 +22,18 @@ typedef struct {
     size_t cap; /* bytes in buf, NUL included */
     size_t len;
     bool discarding;
+    bool cr; /* the last line ended on CR: its LF may still be on the wire */
 } fos_console_line_t;
 
 /* Feed one byte. An over-long line is refused once (TOO_LONG) and every byte
  * up to its newline is dropped. Restarting the buffer at the limit instead
  * ran the line's TAIL as a command of its own at the newline — whatever a
  * provisioning script's oversized `set …` value happened to end with. CR
- * and LF both end a line; backspace/DEL edit it. */
+ * and LF both end a line (`cr` says which did); backspace/DEL edit it. */
 static inline fos_console_line_result_t fos_console_line_feed(fos_console_line_t *line, uint8_t ch)
 {
     if (ch == '\r' || ch == '\n') {
+        line->cr = ch == '\r';
         if (line->discarding) {
             line->discarding = false;
             line->len = 0;

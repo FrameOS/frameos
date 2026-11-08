@@ -19,3 +19,9 @@
  * (quotes and escapes honoured, so brackets inside strings do not count).
  * A NULL text is "ok": there is nothing to overflow on. */
 bool fos_json_depth_ok(const char *text, size_t len, int max_depth);
+
+/* True when `len` bytes of `text`, white space aside, open with `[` and close
+ * with `]`, or open with `{` and close with `}`: a payload cut short (its
+ * last byte lost on a serial line) or with a stray byte in front fails it,
+ * at the cost of two scans for space, not a parse. */
+bool fos_json_whole(const char *text, size_t len);
