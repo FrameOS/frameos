@@ -78,6 +78,35 @@ suite "jsx render scale":
     discard ui.render(newImage(400, 200))
     check ui.scene.state["seen"]["taps"].getInt() == 1
 
+  test "below 1 the UI gets more room, is drawn smaller, and the pointer reaches all of it":
+    # At 0.5 a 400x200 canvas is an 800x400 UI: a full-width slider pressed
+    # near the canvas's right edge is pressed near its own right end.
+    let ui = newUi("""
+let pressed = null
+export function get(app, context) {
+  frameos.setState('seen', { frameWidth: app.frame.width, pressed })
+  return (
+    <div className="bg-white w-full h-full">
+      <div className="w-[100px] h-[50px] bg-red-500" />
+      <div className="w-full h-[40px] bg-black" onPointerDown={(e) => { pressed = [e.localX, e.width] }} />
+    </div>
+  )
+}
+""", "tests/jsx-scale-half", renderScale = 0.5)
+    let image = ui.render(newImage(400, 200)).asImage()
+    check ui.scene.state["seen"]["frameWidth"].getInt() == 800
+    # The 100x50 box covers 50x25 canvas pixels.
+    check image[45, 20] == red
+    check image[55, 20] == white
+    check dispatchUiEvent("tests/jsx-scale-half", "pointerDown", %*{"x": 390, "y": 35, "pointerId": 0,
+      "pointerType": "touch", "buttons": 1})
+    discard ui.render(newImage(400, 200))
+    let pressed = ui.scene.state["seen"]["pressed"]
+    check pressed.kind == JArray
+    if pressed.kind == JArray:
+      check pressed[1].getFloat() == 800
+      check abs(pressed[0].getFloat() - 780) < 2
+
   test "a plain .js app keeps the panel's pixels and reads the scale":
     let ui = newUi("""
       export function get(app, context) {

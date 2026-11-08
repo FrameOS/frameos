@@ -62,6 +62,7 @@
 #include "fos_mem.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
+#include "lcd_splash.h"
 #if CONFIG_IDF_TARGET_ESP32S3
 #include "soc/rtc.h"
 #endif
@@ -334,6 +335,8 @@ void app_main(void)
         .mosi = config->pins.mosi, .pwr = config->pins.pwr,
     };
     BOOTMEM("after-config");
+    /* An LCD's boot mark is drawn the way up the frame's pictures are. */
+    fos_lcd_splash_set_rotation(config->rotate);
     fos_display_set_i2c_lender(lend_i2c_bus);
     if (fos_display_init(&display_config) != ESP_OK) {
         ESP_LOGW(TAG, "display init failed, continuing headless");

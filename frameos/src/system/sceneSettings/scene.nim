@@ -237,10 +237,13 @@ proc scaleText(scale: float): string =
   of 3: result.add ".75"
   else: discard
 
-proc frameFields(info: JsonNode, autoScale: string): JsonNode =
+proc frameFields(info: JsonNode, autoScale: string, unit = 0): JsonNode =
   ## The page's fields, in the shape of a scene's, from the host's facts:
   ## the network (those in range, the saved one first when it is not among
   ## them, and a name to type), its password, the rotation and the scale.
+  ## The scales offered leave a layout of 320 px or more on the panel's
+  ## shorter edge `unit` (uiScale's floor: past it the page itself stops
+  ## following), and the scale set elsewhere stays as it is.
   result = newJArray()
   let wifi = info{"wifi"}
   if not wifi.isNil and wifi.kind == JObject:
@@ -279,8 +282,10 @@ proc frameFields(info: JsonNode, autoScale: string): JsonNode =
   var scale = field("renderScale", "Scale", "float")
   options = newJArray()
   options.elems.add option("0", "Automatic (" & scaleLabel(autoScale) & ")")
+  let held = info{"renderScale"}.text
   for step in Scales:
-    options.elems.add option(step, scaleLabel(step))
+    if unit == 0 or parseFloat(step) * 320 <= max(unit, 320).float or step == held:
+      options.elems.add option(step, scaleLabel(step))
   scale.put("options", options)
   result.elems.add scale
 
@@ -390,6 +395,8 @@ proc acting(self: SceneSettingsScene) =
         field = fields.elems[index]
         other = actedText == OtherValue
       values.put(field{"name"}.getStr(), newJString(if other: "" else: actedText))
+      if not frame:
+        self.objectAt("edited").put(field{"name"}.getStr(), newJBool(true))
       # Beside the values, on a field that has an `other`: the frame page's,
       # whose names it knows, never a scene's, which could be called anything.
       if field{"other"}.getStr().len > 0:
@@ -404,6 +411,8 @@ proc acting(self: SceneSettingsScene) =
         values.put(name, newJBool(not values{name}.isOn))
       else:
         values.put(name, newJString(actedText))
+      if not frame:
+        self.objectAt("edited").put(name, newJBool(true))
   self.touch()
 
 proc onHandler(handler: int, name: string, event: JsonNode, hit: UiHit) {.raises: [].} =
@@ -569,7 +578,7 @@ proc pressButton(look: Look, label: string, action: int, asking: bool): SvgNode 
   if asking:
     result.attrs[0][1].add(if look.paper: " bg-black text-white" else: " bg-red-600 active:bg-red-500")
 
-proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: string): SvgNode =
+proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: string, unit: int): SvgNode =
   ## The frame page: how it is doing (a card of label and text rows), what
   ## can be changed (the same rows as a scene's fields), and its buttons.
   var c = "flex flex-col"
@@ -597,7 +606,7 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   card.line(look, "Version", info{"version"}.getStr())
   result.children.add card
   let
-    fields = frameFields(info, autoScale)
+    fields = frameFields(info, autoScale, unit)
     edits = self.objectAt("frameValues")
     base = frameValues(info)
     typing = edits{"typing"}.getBool()
@@ -673,13 +682,15 @@ when not defined(frameosEmbedded):
     root.children.add el("div", move c, self.fieldList(look, 2, look.gap div 2))
 
 proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: string, round = false,
-    keyboardTop = high(int), info: JsonNode = nil): SvgNode =
+    keyboardTop = high(int), info: JsonNode = nil, sizeUnit = 0): SvgNode =
   ## The panel as a UI tree: a header with Cancel, the scene's name and
   ## Save, and under it the fields in a list that scrolls. With the host's
   ## `info` (frameSettingsRead) a gear left of Save opens the frame page,
   ## where Cancel is Back. On a `round` panel the scene's alone inside its
-  ## circle, the keyboard's top at `keyboardTop` while it is up.
-  let unit = min(width, height)
+  ## circle, the keyboard's top at `keyboardTop` while it is up. `sizeUnit`:
+  ## what its sizes are a share of, the panel's shorter edge for a UI laid out
+  ## at its render scale (sceneSwitcher's uiRoom); the canvas's without it.
+  let unit = if sizeUnit > 0: sizeUnit else: min(width, height)
   var look = Look(paper: paper, size: clamp(unit * 4 div 100, 14, 28))
   look.pad = clamp(unit * 4 div 100, 8, 32)
   look.gap = look.size
@@ -707,9 +718,12 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
     SvgNode(text: if frame: "Frame settings" else: title))
   if not info.isNil:
     header.children.add look.gear(frame)
-  header.children.add look.button("Save", HSave, true)
+  # Lit while there is something to save: after a Save it goes quiet, which
+  # is how the frame page says it took it.
+  let edits = self.state{if frame: "frameValues" else: "edited"}
+  header.children.add look.button("Save", HSave, not edits.isNil and edits.len > 0)
   result.children.add header
-  let body = if frame: self.frameList(look, info, scaleText(autoRenderScale(width, height)))
+  let body = if frame: self.frameList(look, info, scaleText(autoRenderScale(unit, unit)), unit)
     else: self.fieldList(look, look.pad, look.pad)
   result.children.add el("div", "flex-1 overflow-y-auto", body)
 
@@ -731,17 +745,20 @@ proc drawForm*(self: SceneSettingsScene, image: Image) =
   ## for a while (the switcher's `drawUi`).
   self.paper = paperPanel(self.frameConfig, image)
   let round = isRound(self.frameConfig)
+  # At the frame's render scale, as its scenes are (sceneSwitcher's uiRoom).
+  let (roomW, roomH) = uiRoom(self.frameConfig, image.width, image.height)
   var keyboardTop = high(int)
   if round:
     # The keyboard is up: where it will go (ui/layout.nim asks the same).
     let target = uiTarget(SceneSettingsId, SettingsNode, create = false)
     if not target.isNil and target.input.keyboard and target.input.focus > 0:
-      keyboardTop = keyboardBox(image.width, image.height, true)[0]
+      keyboardTop = keyboardBox(roomW, roomH, true)[0]
   let info = if round: nil else: frameInfo()
   if info.isNil and self.onFrame():
     self.showPage(false)
-  if self.drawUi(SceneSettingsId, self.tree(image.width, image.height, self.paper, self.title(), round,
-      keyboardTop, info), image, self.paper, onHandler, IdleSeconds):
+  if self.drawUi(SceneSettingsId, self.tree(roomW, roomH, self.paper, self.title(), round,
+      keyboardTop, info, min(image.width, image.height)), image, self.paper, onHandler, IdleSeconds,
+      roomW, roomH):
     leave()
 
 proc back(self: SceneSettingsScene) =

@@ -43,6 +43,9 @@ void fos_lcd_splash_square_colors(uint32_t t_ms, uint8_t colors[3][3]);
  * little-endian RGB565 words, over black: the frame and the squares, or
  * with `squares_only` the squares alone (a frame of the animation, every
  * other pixel left as it is). A panel smaller than the mark gets nothing. */
+/* The frame's rotation (0/90/180/270), before the first draw: the mark and
+ * its line are drawn the way up the frame's pictures are. */
+void fos_lcd_splash_set_rotation(int degrees);
 void fos_lcd_splash_draw(uint16_t *fb, int width, int height, uint32_t t_ms, bool squares_only);
 
 /* Draws `status`'s line (FOS_LCD_SPLASH_UPDATING: the firmware line's first

@@ -296,6 +296,30 @@ proc packImageRgb565(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int):
           b = (if bv < 0: 0 elif bv > 255: 255 else: bv) shr 3
         dst[index] = (r.uint16 shl 11) or (g.uint16 shl 5) or b.uint16
     return true
+  if image.format == pfRgb565 and width * height == frameWidth * frameHeight:
+    # A rotated LCD's canvas (the panel's buffer is the canvas only
+    # unrotated, embedded_runtime.nim panelCanvas): its words are the panel's
+    # already, dithered as they were stored; only their places turn. The
+    # general loop below read each back as RGBX, mapped it and dithered it
+    # again: 787 ms a frame at 480x480 on the SenseCAP Indicator. Row by row
+    # from the canvas, so the writes walk at most a panel's height of lines.
+    let
+      src = cast[ptr UncheckedArray[uint16]](image.bufferPointer)
+      dst = cast[ptr UncheckedArray[uint16]](buf)
+    var i = 0
+    for y in 0 ..< height:
+      # panelCoords, a step at a time: x moves the panel index by `step`.
+      var (index, step) =
+        case frameRotate
+        of 90: (height - 1 - y, frameWidth)
+        of 180: ((height - 1 - y) * frameWidth + width - 1, -1)
+        of 270: ((width - 1) * frameWidth + y, -frameWidth)
+        else: (y * frameWidth, 1)
+      for x in 0 ..< width:
+        dst[index] = src[i]
+        index += step
+        inc i
+    return true
   template clip(value: int): int =
     (if value < 0: 0 elif value > 255: 255 else: value)
   for y in 0 ..< height:

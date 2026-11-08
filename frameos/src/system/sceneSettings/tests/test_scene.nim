@@ -370,6 +370,50 @@ block a_field_may_be_called_anything:
   scene.tap(regionWith(1))
   doAssert sent[0][1]["state"] == %*{"typing": "kept", "city": "Kyiv"}, $sent
 
+block the_page_follows_the_frames_scale:
+  # The frame's render scale, as its scenes have it: at 1.5 the page is laid
+  # out on 320 px and drawn half as large again; the pointer is divided back.
+  # It stops at 3/4 and at a layout of 320 px, so it can always be set back.
+  proc opened(scale: float): FrameScene =
+    let config = FrameConfig(width: 480, height: 480, device: "pimoroni.hyperpixel4sq_touch",
+      scalingMode: "cover", saveAssets: %*false, renderScale: scale)
+    result = settings.exportedScene.init(SceneSettingsId.SceneId, config, logger, %*{})
+    result.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+      "fields": [{"name": "city", "label": "City", "type": "string"}], "values": {"city": "Oslo"}}})
+  let sky = rgbx(0x02, 0x84, 0xc7, 255)
+  var scene = opened(1.5)
+  var image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-scaled.png")
+  doAssert abs(uiTarget(SceneSettingsId, 1, create = false).scale - 1.5) < 0.01
+  let save = regionWith(1)
+  # Nothing changed yet: Save is not lit.
+  doAssert image[int((save.x + 4) * 1.5), int((save.y + save.h / 2) * 1.5)] != sky
+  # A tap where Save is drawn, its box times the scale, saves.
+  sent.setLen(0)
+  scene.send("tap", tapAt((save.x + save.w / 2) * 1.5, (save.y + save.h / 2) * 1.5))
+  doAssert sent.len >= 1 and sent[0][0] == evSetCurrentScene, $sent
+  scene.send("close", %*{})
+  # An edit lights it.
+  scene = opened(1.0)
+  discard scene.draw()
+  scene.send("textInput", %*{"text": "x"}) # nothing focused: no edit
+  scene.tap(regionWith(1000 + 0))
+  discard scene.draw()
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    if r.handlers[ueClick] == KeyBase + ord('x') + 1:
+      scene.tap(r)
+      break
+  image = scene.draw()
+  let lit = regionWith(1)
+  doAssert image[int(lit.x + 4), int(lit.y + lit.h / 2)] == sky
+  scene.send("close", %*{})
+  for (asked, drawn) in [(0.25, 0.75), (4.0, 1.5)]:
+    scene = opened(asked)
+    discard scene.draw()
+    doAssert abs(uiTarget(SceneSettingsId, 1, create = false).scale - drawn) < 0.01,
+      $asked & " drew at " & $uiTarget(SceneSettingsId, 1, create = false).scale
+    scene.send("close", %*{})
+
 block it_opens_on_the_frame_page_with_no_scene_showing:
   frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
     %*{"rotate": 0, "renderScale": 0, "actions": []}
@@ -498,7 +542,7 @@ block the_frame_page:
     if r.handlers[ueClick] == KeyBase + ord(kEnter) + 1: key = r
   scene.tap(key)
   discard scene.draw()
-  # 90° and 2×: the second and third select boxes, the keyboard away.
+  # 90° and 1.5×: the second and third select boxes, the keyboard away.
   scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[1])
   discard scene.draw()
   scene.tap(regionWith(OptionBase + 1))
@@ -506,7 +550,10 @@ block the_frame_page:
   scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[2])
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-scale.png")
-  scene.tap(regionWith(OptionBase + 7)) # Automatic, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2
+  # On 480 px the scales stop at 1.5 (a layout of 320 px): Automatic, 0.25,
+  # 0.5, 0.75, 1, 1.25, 1.5.
+  doAssert uiTarget(SceneSettingsId, 1, create = false).regions.allIt(it.handlers[ueClick] != OptionBase + 7 + 1)
+  scene.tap(regionWith(OptionBase + 6))
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-changed.png")
   # Scanning goes to the host.
@@ -517,7 +564,7 @@ block the_frame_page:
   sent.setLen(0)
   scene.tap(regionWith(1))
   doAssert applied.len == 1 and applied[0] == %*{"wifiSsid": "Cafe", "wifiPassword": "x", "rotate": 90,
-    "renderScale": 2.0}, $applied
+    "renderScale": 1.5}, $applied
   doAssert sent.len == 0 or sent[0][0] == evRender, $sent
   doAssert scene.state["frameValues"].len == 0
   doAssert scene.state["page"].getStr() == "frame"

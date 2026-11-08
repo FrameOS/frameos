@@ -78,6 +78,20 @@ suite "the frame page on a Linux frame":
     check sent.len == 1
     check sent[0][0] in [evReload, evRestart] and sent[0][1] == eoSystem
 
+  test "the scale alone is set in the live config and drawn, with no reload":
+    let live = FrameConfig(renderScale: 1.5)
+    setLiveConfigForTest(live)
+    discard logged("settings:frame")
+    sent.setLen(0)
+    linuxFrameSettingsApply(%*{"renderScale": 0.75})
+    check parseFile(configPath)["renderScale"].getFloat() == 0.75
+    check live.renderScale == 0.75
+    check sent.len == 1 and sent[0][0] == evRender
+    check logged("settings:frame").len == 1
+    # Back as it was for the tests below.
+    linuxFrameSettingsApply(%*{"renderScale": 1.5})
+    setLiveConfigForTest(nil)
+
   test "a value as it is changes nothing":
     sent.setLen(0)
     discard logged("settings:frame")

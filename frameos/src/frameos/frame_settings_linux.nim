@@ -61,6 +61,9 @@ var
   workerStarted = false
   pageOpen = false ## guarded by factsLock: redraw on news only while it shows
   runtime: netportal.RuntimeHandle
+  liveConfig: pointer
+    ## The runtime's FrameConfig, uncounted (portal.nim's RuntimeHandle says
+    ## why): it lives as long as the process, and only the runner writes it.
 
 initLock(factsLock)
 
@@ -297,15 +300,29 @@ proc linuxFrameSettingsApply*(changes: JsonNode) {.nimcall, gcsafe, raises: [].}
       if payload.hasKey("render_scale"):
         line["renderScale"] = payload["render_scale"]
       log(line)
-      # The runtime's own consequence of new settings, as after a cloud push.
-      sendEvent(if preview.change.restart: evRestart else: evReload, newJObject(), eoSystem)
+      if not payload.hasKey("rotate") and not liveConfig.isNil:
+        # The scale alone: every render reads it off the live config, so it is
+        # set there and drawn now. A reload would rebuild every scene, this
+        # page among them, which would come back empty.
+        let live {.cursor.} = cast[FrameConfig](liveConfig)
+        withLiveConfigLock:
+          live.renderScale = payload["render_scale"].getFloat()
+        noteFrameConfigChanged()
+        sendEvent(evRender, newJObject(), eoSystem)
+      else:
+        # The runtime's own consequence of new settings, as after a cloud push.
+        sendEvent(if preview.change.restart: evRestart else: evReload, newJObject(), eoSystem)
     except Exception as error:
       log(%*{"event": "settings:frame:error", "origin": "panel", "error": error.msg})
+
+proc setLiveConfigForTest*(config: FrameConfig) =
+  liveConfig = cast[pointer](config)
 
 proc installFrameSettingsHooks*(frameOS: FrameOS) =
   ## Once, at startup, before the runner draws anything. The runtime's one
   ## FrameOS outlives every thread, so the worker takes it by handle.
   runtime = netportal.runtimeHandle(frameOS)
+  liveConfig = cast[pointer](frameOS.frameConfig)
   sceneSettings.frameSettingsRead = linuxFrameSettingsRead
   sceneSettings.frameSettingsApply = linuxFrameSettingsApply
   sceneSettings.frameSettingsAction = linuxFrameSettingsAction
