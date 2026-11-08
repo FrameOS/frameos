@@ -20,10 +20,13 @@
 #include "fos_backend_http.h"
 #include "fos_boot_scene.h"
 #include "fos_client.h"
+#include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_events_gen.h"
 #include "fos_json_guard.h"
 #include "fos_mem.h"
+#include "fos_scene_state.h"
+#include "fos_scene_store.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -41,14 +44,13 @@ static const char *TAG = "fos_scenes";
  * Slot NUMBERS, not scene ids, because CONFIG_SPIFFS_OBJ_NAME_LEN is 32 and a
  * scene id is a 36-character uuid: "/<uuid>.json" cannot be opened at all.
  * The id ↔ slot mapping lives in the index. */
-#define SCENES_INDEX_PATH "/state/scene-index.json"
-#define SCENES_INDEX_TMP_PATH "/state/scene-index.tmp"
-#define SCENES_SLOT_PATH_FMT "/state/scene-%d.json"
-#define SCENES_SLOT_TMP_PATH "/state/scene-slot.tmp"
+#define SCENES_INDEX_PATH "/state/" FOS_SCENE_STORE_INDEX_NAME
+#define SCENES_INDEX_TMP_PATH "/state/" FOS_SCENE_STORE_INDEX_TMP_NAME
+#define SCENES_SLOT_TMP_PATH "/state/" FOS_SCENE_STORE_SLOT_TMP_NAME
 /* Above this the payload stays in one file and the legacy path runs: the
  * split's bookkeeping is bounded, and a frame with this many scenes is not
  * the case this optimizes for. */
-#define SCENES_SLOT_MAX 32
+#define SCENES_SLOT_MAX FOS_SCENE_STORE_SLOTS
 #define SCENES_SLOT_PATH_LEN 48
 #define SCENES_MAX_BYTES (512 * 1024)
 #define ETAG_LEN 80
@@ -57,6 +59,10 @@ static const char *TAG = "fos_scenes";
 
 static bool s_mounted = false;
 static volatile bool s_pending = false;
+/* What is pending is a change the per-scene store already holds (one scene
+ * put or deleted), not a combined payload: only the catalog is read again,
+ * and the resident scene reloads only if that scene is what changed. */
+static volatile bool s_patch_pending = false;
 /* Who installed the scenes. s_source is the RESIDENT store's source (what the
  * index on flash says, i.e. what the frame is rendering); s_pending_source is
  * the source declared by the producer of a stored-but-not-yet-applied payload,
@@ -110,12 +116,28 @@ static bool is_built_in_scene(const char *scene_id)
     return scene_id != NULL &&
            (strcmp(scene_id, FOS_SCENE_SWITCHER_ID) == 0 || strcmp(scene_id, FOS_SCENE_SETTINGS_ID) == 0);
 }
-/* Serializes writers of /state/scenes.json: the USB upload (console task)
- * and the backend sync (fos_client task) share one tmp path, and two
- * concurrent write+rename dances delete each other's tmp file (rename then
- * fails ENOENT on a freshly written file). Created in fos_scenes_init(),
- * which runs before either task starts. */
+/* Serializes the store: the USB upload (console task) and the backend sync
+ * (fos_client task) share one tmp path, and two concurrent write+rename
+ * dances delete each other's tmp file (rename then fails ENOENT on a freshly
+ * written file). A one-scene change, the split, a whole-store read and the
+ * sweep each hold it for the duration, so nobody sees the index mid-swap or a
+ * slot the sweep is removing. Recursive, because those compose. Created in
+ * fos_scenes_init(), which runs before either task starts.
+ *
+ * Never take it while calling into the Nim runtime from a task other than
+ * the render task, and never block on the runtime holding it: the runtime
+ * lock is only ever taken first. */
 static SemaphoreHandle_t s_scene_file_lock = NULL;
+
+static void store_lock(void)
+{
+    if (s_scene_file_lock != NULL) xSemaphoreTakeRecursive(s_scene_file_lock, portMAX_DELAY);
+}
+
+static void store_unlock(void)
+{
+    if (s_scene_file_lock != NULL) xSemaphoreGiveRecursive(s_scene_file_lock);
+}
 
 static void json_escape_value(const char *src, char *out, size_t out_len)
 {
@@ -611,7 +633,7 @@ static char s_default_scene_id[SCENE_ID_LEN] = "";
 
 static void slot_path(int slot, char *out, size_t out_len)
 {
-    snprintf(out, out_len, SCENES_SLOT_PATH_FMT, slot);
+    fos_scene_store_slot_path(slot, out, out_len);
 }
 
 static int slot_for_scene(const char *scene_id)
@@ -704,17 +726,18 @@ void fos_scenes_wipe_state(void)
 
 static void remove_slots_from(int first_slot)
 {
+    /* Every slot: one-scene changes leave gaps, so a run can't stop at one. */
     for (int slot = first_slot; slot < SCENES_SLOT_MAX; slot++) {
         char path[SCENES_SLOT_PATH_LEN];
         slot_path(slot, path, sizeof(path));
-        if (unlink(path) != 0) break; /* first gap ends the run */
+        unlink(path);
     }
 }
 
 /* Split the combined payload. On any failure nothing is deleted and the index
  * is removed, so the caller falls back to loading the combined file whole —
  * a frame never loses its scenes to a failed optimization. */
-static esp_err_t split_scenes(const char *json, size_t len)
+static esp_err_t split_scenes_locked(const char *json, size_t len)
 {
     static size_t starts[SCENES_SLOT_MAX];
     static size_t ends[SCENES_SLOT_MAX];
@@ -765,6 +788,7 @@ static esp_err_t split_scenes(const char *json, size_t len)
             cJSON_AddNumberToObject(entry, "refreshInterval", refresh->valuedouble);
         }
         cJSON_AddNumberToObject(entry, "slot", i);
+        cJSON_AddNumberToObject(entry, "bytes", (double)item_len);
         cJSON_AddItemToArray(scenes, entry);
         /* A layout (docs/scene-layouts.md) is read by id when a scene names
          * it; it is in no list and never what a frame boots to. */
@@ -806,6 +830,14 @@ static esp_err_t split_scenes(const char *json, size_t len)
     ESP_LOGI(TAG, "split %d scene(s) into per-scene files (%u bytes total)",
              written, (unsigned)len);
     return ESP_OK;
+}
+
+static esp_err_t split_scenes(const char *json, size_t len)
+{
+    store_lock();
+    esp_err_t err = split_scenes_locked(json, len);
+    store_unlock();
+    return err;
 }
 
 /* Read the index, hand the catalog to the runtime, and fill the id→slot map.
@@ -1041,9 +1073,109 @@ static bool load_into_nim(const char *json, size_t len, const char *origin)
     return true;
 }
 
+/* The index changed under a resident scene (one scene put or deleted): the
+ * catalog is read again and the resident scene reloads only if it, or a
+ * scene it embeds, is what changed. A change always lands in a new slot,
+ * which is how that shows. */
+
+/* A split's panels are other scenes of the set, referred to by id: a slot
+ * change for one of those is a change to what the resident scene draws. */
+static bool resident_embeds_changed(const scene_slot_t *before, int before_count,
+                                    const char *resident, int resident_slot)
+{
+    char *json = NULL;
+    bool found = false;
+    for (int i = 0; i < s_slot_count && !found; i++) {
+        if (strcmp(s_slots[i].id, resident) == 0) continue;
+        bool same = false;
+        for (int j = 0; j < before_count && !same; j++) {
+            same = before[j].slot == s_slots[i].slot && strcmp(before[j].id, s_slots[i].id) == 0;
+        }
+        if (same) continue;
+        if (json == NULL) {
+            char path[SCENES_SLOT_PATH_LEN];
+            slot_path(resident_slot, path, sizeof(path));
+            size_t len = 0;
+            json = read_file(path, &len);
+            if (json == NULL) return true; /* cannot tell: reload */
+        }
+        found = strstr(json, s_slots[i].id) != NULL;
+    }
+    free(json);
+    return found;
+}
+
+static bool apply_index_change(void)
+{
+    s_pending = false;
+    s_patch_pending = false;
+    scene_slot_t *before = malloc(sizeof(s_slots));
+    int before_count = s_slot_count;
+    if (before != NULL) memcpy(before, s_slots, sizeof(s_slots));
+    char resident[SCENE_ID_LEN];
+    snprintf(resident, sizeof(resident), "%s", s_resident_scene_id);
+
+    /* Under the lock: a put swapping the index would otherwise be read as
+     * no index at all. */
+    store_lock();
+    int count = load_scene_index();
+    store_unlock();
+
+    bool ok = count > 0;
+    if (ok) {
+        int resident_slot = resident[0] ? slot_for_scene(resident) : -1;
+        int before_slot = -1;
+        for (int i = 0; before != NULL && i < before_count; i++) {
+            if (strcmp(before[i].id, resident) == 0) before_slot = before[i].slot;
+        }
+        bool reload = resident_slot < 0 || before == NULL || resident_slot != before_slot ||
+                      resident_embeds_changed(before, before_count, resident, resident_slot);
+        if (reload) {
+            s_scene_switched = true;
+            fos_display_loading_begin(xTaskGetTickCount(), fos_config()->rotate);
+            if (resident_slot >= 0) {
+                ok = load_scene_slot(resident_slot, resident, "stored");
+                if (!ok && before_slot >= 0 && before_slot != resident_slot) {
+                    /* A scene the runtime refuses does not take the working
+                     * one with it: the old file is still there until the
+                     * sweep below. The apply still reports the failure. */
+                    ESP_LOGW(TAG, "scene %s refused; going back to slot %d", resident, before_slot);
+                    store_lock();
+                    fos_scene_store_repoint(resident, before_slot);
+                    load_scene_index();
+                    store_unlock();
+                    load_scene_slot(before_slot, resident, "restored");
+                }
+            } else {
+                ok = activate_from_index("stored");
+            }
+            if (!ok) fos_display_loading_end();
+        }
+    } else {
+        ESP_LOGW(TAG, "scene index unreadable after a change");
+    }
+    free(before);
+    if (count > 0) {
+        store_lock();
+        /* Not while another change waits for its own apply: s_slots still
+         * names the slot that change replaced. Its apply sweeps. */
+        if (!s_patch_pending) fos_scene_store_sweep();
+        store_unlock();
+    }
+    s_apply_ok = ok;
+    s_apply_generation++;
+    return ok;
+}
+
 bool fos_scenes_apply_pending(void)
 {
     if (!s_pending || !s_mounted) return false;
+    {
+        /* A combined payload stored since wins over a change made before it. */
+        struct stat combined;
+        if (s_patch_pending && stat(SCENES_PATH, &combined) != 0) return apply_index_change();
+    }
+    s_patch_pending = false;
     /* A new payload invalidates whatever is parsed, even if the id matches. */
     s_resident_scene_id[0] = '\0';
     s_pending = false;
@@ -1113,6 +1245,7 @@ bool fos_scenes_apply_pending(void)
 
 uint32_t fos_scenes_apply_generation(void) { return s_apply_generation; }
 bool fos_scenes_apply_succeeded(void) { return s_apply_ok; }
+bool fos_scenes_patch_pending(void) { return s_pending && s_patch_pending && s_mounted; }
 
 int fos_scenes_loaded(void) { return s_loaded; }
 const char *fos_scenes_etag(void) { return s_etag; }
@@ -1129,37 +1262,48 @@ void fos_scenes_request_sync(void) { s_sync_requested = true; }
 /* The whole payload, for callers that download or re-upload it (the USB API,
  * the backend sync's etag comparison). On the lazy path the combined file no
  * longer exists, so it is rebuilt from the slots — in PSRAM, transiently, and
- * only when something actually asks. */
+ * only when something actually asks. From the index on flash under the lock:
+ * s_slots belongs to the render task, and this is not always it. */
 char *fos_scenes_json_copy(size_t *out_len)
 {
     if (out_len != NULL) *out_len = 0;
     esp_err_t err = mount_state();
     if (err != ESP_OK) return NULL;
+    store_lock();
     char *combined = read_file(SCENES_PATH, out_len);
-    if (combined != NULL) return combined;
-    if (s_slot_count == 0 && load_scene_index() == 0) return NULL;
-
+    if (combined != NULL) {
+        store_unlock();
+        return combined;
+    }
+    fos_scene_store_entry_t *entries = malloc(sizeof(*entries) * SCENES_SLOT_MAX);
+    int count = entries ? fos_scene_store_read_entries(entries, SCENES_SLOT_MAX) : -1;
+    if (count <= 0) {
+        free(entries);
+        store_unlock();
+        return NULL;
+    }
     size_t cap = 2; /* "[" + "]" */
-    for (int i = 0; i < s_slot_count; i++) {
+    char *buf = NULL;
+    for (int i = 0; i < count; i++) {
         char path[SCENES_SLOT_PATH_LEN];
-        slot_path(s_slots[i].slot, path, sizeof(path));
+        slot_path(entries[i].slot, path, sizeof(path));
         struct stat st;
-        if (stat(path, &st) != 0) return NULL;
+        if (stat(path, &st) != 0) goto fail;
         cap += (size_t)st.st_size + 1; /* + comma */
     }
-    char *buf = fos_big_malloc(cap + 1);
+    buf = fos_big_malloc(cap + 1);
     if (buf == NULL) buf = malloc(cap + 1);
-    if (buf == NULL) return NULL;
+    if (buf == NULL) goto fail;
     size_t used = 0;
     buf[used++] = '[';
-    for (int i = 0; i < s_slot_count; i++) {
+    for (int i = 0; i < count; i++) {
         char path[SCENES_SLOT_PATH_LEN];
-        slot_path(s_slots[i].slot, path, sizeof(path));
+        slot_path(entries[i].slot, path, sizeof(path));
         size_t part_len = 0;
         char *part = read_file(path, &part_len);
-        if (part == NULL) { free(buf); return NULL; }
+        if (part == NULL) goto fail;
         if (i > 0 && used < cap) buf[used++] = ',';
-        if (used + part_len > cap) { free(part); free(buf); return NULL; }
+        if (used + part_len > cap) { free(part); goto fail; }
         memcpy(buf + used, part, part_len);
         used += part_len;
         free(part);
@@ -1167,7 +1311,14 @@ char *fos_scenes_json_copy(size_t *out_len)
     buf[used++] = ']';
     buf[used] = '\0';
     if (out_len != NULL) *out_len = used;
+    free(entries);
+    store_unlock();
     return buf;
+fail:
+    free(buf);
+    free(entries);
+    store_unlock();
+    return NULL;
 }
 
 esp_err_t fos_scenes_select(const char *scene_id)
@@ -1197,6 +1348,11 @@ bool fos_scenes_work_pending(void)
 {
     /* A payload the render task cannot apply (no /state) is not work. */
     return (s_pending && s_mounted) || s_scene_select_pending;
+}
+
+bool fos_scenes_switched_pending(void)
+{
+    return s_scene_switched;
 }
 
 bool fos_scenes_take_switched(void)
@@ -1338,13 +1494,9 @@ bool fos_scenes_apply_pending_selection(void)
 static esp_err_t write_file_replace(const char *path, const char *tmp_path,
                                     const char *data, size_t len)
 {
-    if (s_scene_file_lock != NULL) {
-        xSemaphoreTake(s_scene_file_lock, portMAX_DELAY);
-    }
+    store_lock();
     esp_err_t err = write_file_replace_locked(path, tmp_path, data, len);
-    if (s_scene_file_lock != NULL) {
-        xSemaphoreGive(s_scene_file_lock);
-    }
+    store_unlock();
     return err;
 }
 
@@ -1361,13 +1513,19 @@ static bool select_scene_from_runtime(const char *scene_id)
 esp_err_t fos_scenes_init(void)
 {
     if (s_scene_file_lock == NULL) {
-        s_scene_file_lock = xSemaphoreCreateMutex();
+        s_scene_file_lock = xSemaphoreCreateRecursiveMutex();
     }
+    fos_scene_store_hooks_t store_hooks = {.make_room = make_room, .big_alloc = fos_big_malloc};
+    fos_scene_store_set_hooks(&store_hooks);
     /* Before the mount: a frame whose /state failed still holds its bundled
      * scenes, and a dispatch node switches between those too. */
     frameos_nim_set_scene_select_hook(select_scene_from_runtime);
     esp_err_t err = mount_state();
     if (err != ESP_OK) return err;
+    /* A power cut inside the store's remove + rename of the index, and the
+     * files a change left for a sweep that never came. */
+    if (fos_scene_store_recover_index()) ESP_LOGW(TAG, "scene index recovered from its tmp file");
+    fos_scene_store_sweep();
     load_etag();
     /* Restore the stored scenes' source BEFORE any task can ask: main() calls
      * fos_cloud_start() after this, and its boot-time apply_network_policy()
@@ -1475,6 +1633,251 @@ esp_err_t fos_scenes_set_json(const char *json, size_t len)
     return fos_scenes_set_json_from(json, len, FOS_SCENES_SOURCE_LOCAL);
 }
 
+/* ------------------------------------------------------- one scene at a time */
+
+static esp_err_t store_err_to_esp(fos_scene_store_err_t err)
+{
+    switch (err) {
+    case FOS_SCENE_STORE_OK: return ESP_OK;
+    case FOS_SCENE_STORE_ERR_NOT_FOUND: return ESP_ERR_NOT_FOUND;
+    case FOS_SCENE_STORE_ERR_INVALID:
+    case FOS_SCENE_STORE_ERR_MISSING_SCENE: return ESP_ERR_INVALID_ARG;
+    case FOS_SCENE_STORE_ERR_LAST_SCENE: return ESP_ERR_INVALID_STATE;
+    case FOS_SCENE_STORE_ERR_NO_SLOTS:
+    case FOS_SCENE_STORE_ERR_NO_SPACE:
+    case FOS_SCENE_STORE_ERR_NO_MEMORY: return ESP_ERR_NO_MEM;
+    default: return ESP_FAIL;
+    }
+}
+
+/* A one-scene change is made on the per-scene store. A combined payload not
+ * yet split is split here (a frame that last synced from a backend holds one
+ * until its next boot), unless the render task is about to apply it. */
+static esp_err_t ensure_split_locked(size_t bytes)
+{
+    struct stat st;
+    if (stat(SCENES_PATH, &st) != 0 || st.st_size <= 2) return ESP_OK;
+    if (s_pending) {
+        set_scene_simple_error("a scene upload is waiting to be applied, try again", bytes);
+        return ESP_ERR_INVALID_STATE;
+    }
+    size_t len = 0;
+    char *json = read_file(SCENES_PATH, &len);
+    if (json == NULL) {
+        set_scene_simple_error("the stored scenes cannot be read", bytes);
+        return ESP_FAIL;
+    }
+    esp_err_t err = split_scenes_locked(json, len);
+    free(json);
+    if (err != ESP_OK) {
+        set_scene_simple_error("the stored scenes cannot be split per scene, upload them all", bytes);
+        return ESP_ERR_INVALID_STATE;
+    }
+    return ESP_OK;
+}
+
+static void forget_dropped_scene(const char *scene_id, void *ctx)
+{
+    (void)ctx;
+    /* The state a deleted scene kept across deep sleep, deleted with it. */
+    fos_scene_state_forget(scene_id);
+}
+
+static esp_err_t apply_store_change(fos_scene_store_change_t *change, fos_scenes_source_t source,
+                                    const char *etag, const char *event, size_t bytes,
+                                    fos_scene_store_result_t *result)
+{
+    const char *origin = scene_source_str((int)source);
+    s_last_error[0] = '\0';
+    esp_err_t err = mount_state();
+    if (err != ESP_OK) return err;
+    /* A local edit leaves the set whose it was: scenes the cloud pushed stay
+     * fenced off the LAN (fos_cloud.c) however one of them was edited. */
+    int effective = source == FOS_SCENES_SOURCE_LOCAL ? (s_pending ? s_pending_source : s_source) : (int)source;
+    change->source = scene_source_str(effective);
+
+    store_lock();
+    err = ensure_split_locked(bytes);
+    if (err == ESP_OK) {
+        fos_scene_store_err_t store_err = fos_scene_store_apply(change, result, forget_dropped_scene, NULL);
+        if (store_err != FOS_SCENE_STORE_OK) {
+            err = store_err_to_esp(store_err);
+            set_scene_simple_error(fos_scene_store_err_str(store_err), bytes);
+        }
+    }
+    if (err == ESP_OK) {
+        /* Inside the lock: the render task's sweep must see the change coming
+         * before it treats a slot the old index named as unused. */
+        s_patch_pending = true;
+        s_pending = true;
+    }
+    store_unlock();
+    if (err != ESP_OK) {
+        log_scene_event(event, "error", origin, "", s_last_error, bytes, 0, 0, err);
+        return err;
+    }
+    save_etag(etag ? etag : "local");
+    if (source == FOS_SCENES_SOURCE_LOCAL && effective == FOS_SCENES_SOURCE_CLOUD) {
+        /* The cloud's checksum no longer describes what the frame holds. */
+        fos_cloud_forget_applied_scenes();
+    }
+    s_pending_source = effective;
+    persist_scene_source(effective);
+    log_scene_event(event, "stored", origin, result->first_put_id, "pending-apply",
+                    bytes, result->scene_count, 0, ESP_OK);
+    return ESP_OK;
+}
+
+esp_err_t fos_scenes_put(const char *json, size_t len, fos_scenes_source_t source,
+                         char *out_id, size_t out_id_len)
+{
+    if (json == NULL || len == 0) return ESP_ERR_INVALID_ARG;
+    fos_scene_store_put_t put = {.json = json, .len = len};
+    fos_scene_store_change_t change = {.puts = &put, .put_count = 1};
+    fos_scene_store_result_t result;
+    esp_err_t err = apply_store_change(&change, source, NULL, "scenes:put", len, &result);
+    if (err != ESP_OK) return err;
+    if (out_id != NULL && out_id_len > 0) snprintf(out_id, out_id_len, "%s", result.first_put_id);
+    fos_client_wake_for_events();
+    return ESP_OK;
+}
+
+esp_err_t fos_scenes_delete(const char *scene_id, fos_scenes_source_t source)
+{
+    if (scene_id == NULL || scene_id[0] == '\0') return ESP_ERR_INVALID_ARG;
+    fos_scene_store_change_t change = {.remove_id = scene_id};
+    fos_scene_store_result_t result;
+    esp_err_t err = apply_store_change(&change, source, NULL, "scenes:delete", 0, &result);
+    if (err != ESP_OK) return err;
+    fos_client_wake_for_events();
+    return ESP_OK;
+}
+
+esp_err_t fos_scenes_apply_patch(const cJSON *put, const cJSON *order,
+                                 fos_scenes_source_t source, const char *etag)
+{
+    int put_count = cJSON_IsArray(put) ? cJSON_GetArraySize(put) : 0;
+    int order_count = cJSON_IsArray(order) ? cJSON_GetArraySize(order) : 0;
+    if (order_count <= 0 || order_count > SCENES_SLOT_MAX || put_count > SCENES_SLOT_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    fos_scene_store_put_t *puts = calloc((size_t)(put_count ? put_count : 1), sizeof(*puts));
+    const char **ids = calloc((size_t)order_count, sizeof(*ids));
+    if (puts == NULL || ids == NULL) {
+        free(puts);
+        free(ids);
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t err = ESP_OK;
+    int printed = 0;
+    size_t bytes = 0;
+    const cJSON *item = NULL;
+    cJSON_ArrayForEach(item, put) {
+        /* One scene printed at a time, next to the message it arrived in. */
+        char *json = cJSON_PrintUnformatted(item);
+        if (json == NULL) {
+            err = ESP_ERR_NO_MEM;
+            break;
+        }
+        puts[printed].json = json;
+        puts[printed].len = strlen(json);
+        bytes += puts[printed].len;
+        printed++;
+    }
+    int id_count = 0;
+    cJSON_ArrayForEach(item, order) {
+        if (!cJSON_IsString(item) || item->valuestring == NULL) {
+            err = ESP_ERR_INVALID_ARG;
+            break;
+        }
+        ids[id_count++] = item->valuestring;
+    }
+    if (err == ESP_OK) {
+        fos_scene_store_change_t change = {.puts = puts, .put_count = printed, .order = ids, .order_count = id_count};
+        fos_scene_store_result_t result;
+        err = apply_store_change(&change, source, etag, "scenes:patch", bytes, &result);
+        if (err == ESP_OK) fos_client_wake_for_events();
+    }
+    for (int i = 0; i < printed; i++) cJSON_free((void *)puts[i].json);
+    free(puts);
+    free(ids);
+    return err;
+}
+
+char *fos_scenes_get_json(const char *scene_id, size_t *out_len)
+{
+    if (out_len != NULL) *out_len = 0;
+    if (mount_state() != ESP_OK) return NULL;
+    store_lock();
+    char *json = fos_scene_store_read_scene(scene_id, out_len);
+    store_unlock();
+    return json;
+}
+
+void fos_scenes_storage_summary(fos_scenes_storage_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (!s_mounted) return;
+    state_usage(&out->state_total_bytes, &out->state_used_bytes);
+    store_lock();
+    fos_scene_store_entry_t *entries = malloc(sizeof(*entries) * SCENES_SLOT_MAX);
+    int count = entries ? fos_scene_store_read_entries(entries, SCENES_SLOT_MAX) : -1;
+    if (count > 0) {
+        out->scene_count = count;
+        for (int i = 0; i < count; i++) out->scenes_bytes += entries[i].bytes;
+    } else {
+        /* Not split (yet): the combined payload's size. */
+        struct stat st;
+        if (stat(SCENES_PATH, &st) == 0) out->scenes_bytes = (size_t)st.st_size;
+        out->scene_count = s_loaded;
+    }
+    free(entries);
+    store_unlock();
+}
+
+char *fos_scenes_list_json(void)
+{
+    if (mount_state() != ESP_OK) return NULL;
+    store_lock();
+    cJSON *tree = fos_scene_store_list_tree();
+    store_unlock();
+    if (tree == NULL) return NULL;
+    fos_scenes_storage_t storage;
+    fos_scenes_storage_summary(&storage);
+    cJSON *report = cJSON_AddObjectToObject(tree, "storage");
+    if (report != NULL) {
+        cJSON_AddNumberToObject(report, "stateTotalBytes", (double)storage.state_total_bytes);
+        cJSON_AddNumberToObject(report, "stateUsedBytes", (double)storage.state_used_bytes);
+        cJSON_AddNumberToObject(report, "scenesBytes", (double)storage.scenes_bytes);
+        cJSON_AddNumberToObject(report, "sceneCount", storage.scene_count);
+    }
+    char *json = cJSON_PrintUnformatted(tree);
+    cJSON_Delete(tree);
+    return json;
+}
+
+/* A backend's answer to `?patch=1` when it knows what this frame holds:
+ * {"patch":true,"base":"<etag>","order":[...],"put":[...]}. Anything not
+ * against the set this frame holds forces the whole payload next pass. */
+static esp_err_t apply_backend_patch(const char *body, size_t len, const char *etag)
+{
+    if (!fos_json_depth_ok(body, len, FOS_JSON_MAX_DEPTH)) return ESP_ERR_INVALID_ARG;
+    cJSON *root = cJSON_ParseWithLength(body, len);
+    if (root == NULL) return ESP_ERR_NO_MEM;
+    esp_err_t err;
+    const cJSON *base = cJSON_GetObjectItem(root, "base");
+    if (!cJSON_IsString(base) || base->valuestring == NULL || strcmp(base->valuestring, s_etag) != 0) {
+        s_sync_requested = true;
+        err = ESP_ERR_INVALID_STATE;
+    } else {
+        err = fos_scenes_apply_patch(cJSON_GetObjectItem(root, "put"), cJSON_GetObjectItem(root, "order"),
+                                     FOS_SCENES_SOURCE_BACKEND, etag);
+        if (err != ESP_OK) s_sync_requested = true;
+    }
+    cJSON_Delete(root);
+    return err;
+}
+
 /* ------------------------------------------------------------- backend */
 
 esp_err_t fos_scenes_sync(bool force)
@@ -1497,7 +1900,7 @@ esp_err_t fos_scenes_sync(bool force)
     if (err != ESP_OK) return err;
 
     char url[FOS_URL_LEN + 64];
-    fos_backend_url("/embedded/scenes", url, sizeof(url));
+    fos_backend_url("/embedded/scenes?patch=1", url, sizeof(url));
     char auth[FOS_STR_LEN + 16];
     fos_backend_auth(auth, sizeof(auth));
     fos_http_request_t request = {
@@ -1546,6 +1949,16 @@ esp_err_t fos_scenes_sync(bool force)
     size_t total = response.body_len;
     char response_etag[ETAG_LEN];
     strlcpy(response_etag, response.etag, sizeof(response_etag));
+
+    /* An object, not the array a whole payload is: only the scenes that
+     * changed since the set this frame holds. */
+    if (total > 0 && buf[0] == '{') {
+        err = apply_backend_patch(buf, total, response_etag);
+        free(buf);
+        log_scene_event("scenes:sync", err == ESP_OK ? "updated" : "error", "backend", "",
+                        err == ESP_OK ? "patched" : "patch-refused", total, 0, status, err);
+        return err;
+    }
 
     /* "Updating" for the write; the picture from before comes back
      * after it, and the new set shows at the next render, as before. */

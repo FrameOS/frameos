@@ -42,6 +42,7 @@ idf_component_register(
         "fos_console.c"
         "fos_scenes.c"
         "fos_scene_state.c"
+        "fos_scene_store.c"
         "fos_commands.c"
         "fos_backend_http.c"
         "fos_events.c"

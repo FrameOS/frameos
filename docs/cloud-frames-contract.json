@@ -365,6 +365,9 @@
   },
   "verbs": [
     {"type": "set_scenes", "scope": null, "content": true, "profiles": ["linux", "esp32"]},
+    {"type": "scenes_patch", "scope": null, "content": true, "profiles": ["esp32"],
+     "parity": {"only": "esp32",
+                "why": "A set_scenes sent as only what changed. The ESP32 keeps one file per scene on a small flash partition, so a one-scene change is one file written instead of the whole set again (embedded/esp32/README.md, Scene storage). The Linux runtime keeps one scenes.json.gz and has the memory to take the whole list; a provider sends it set_scenes."}},
     {"type": "set_current_scene", "scope": null, "content": true, "profiles": ["linux", "esp32"]},
     {"type": "set_settings", "scope": null, "content": true, "profiles": ["linux", "esp32"]},
     {"type": "set_schedule", "scope": null, "content": true, "profiles": ["linux", "esp32"]},
@@ -398,6 +401,7 @@
     "$comment": "The tokens every implementation answers with. Per-verb tokens beyond these are in docs/cloud-frames.md.",
     "common": ["unknown_verb", "unsupported_verb", "message_too_large", "invalid_json", "no_memory"],
     "set_settings": ["invalid_settings", "setting_not_allowed", "persist_failed"],
+    "scenes_patch": ["invalid_patch", "base_mismatch", "no_room", "patch_refused"],
     "lan_access_challenge": ["no_panel", "rate_limited", "challenge_failed"],
     "lan_access_set": ["invalid_lan_access", "code_required", "invalid_code", "code_expired", "too_many_attempts", "rate_limited", "persist_failed"],
     "backend_managed": "a device whose content a self-hosted backend owns refuses every `content` verb with this"

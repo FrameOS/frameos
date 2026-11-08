@@ -214,6 +214,25 @@
   the bundle. A new pusher sets `source` and goes through the same two
   routes, never a store of its own.
 
+## One scene at a time on the ESP32: `embedded/esp32/README.md` "Scene storage"
+
+- The firmware keeps one file per scene (`main/fos_scene_store.c`, pure, host
+  test `test_fos_scene_store.c`), and a scene can be read, added, replaced or
+  removed alone over USB (`usb_api scene-*`), HTTP (`/api/frames/<id>/scenes`)
+  and from a control plane. `scene-list` / `GET .../scenes` / `hardware.storage`
+  / `embedded.storage` report what the partition holds (`stateUsedBytes` of
+  `stateTotalBytes`, `scenesBytes`), and each scene's `bytes`.
+- A changed scene goes to a NEW slot and the index is switched: the render
+  task's copy (`s_slots`) stays valid until it re-reads the index and sweeps.
+  A reader that is not the render task reads the index on flash under the store
+  lock. Never overwrite a slot in place, never unlink one from another task.
+- Both planes send only what changed when they can, and always fall back to
+  the whole list: the cloud's `scenes_patch` (the hub decides at send time from
+  the row's `scene_hashes`, `lib/scenes-patch.ts`; the queue row stays
+  `set_scenes`), a backend's `/embedded/scenes?patch=1` (what it last served
+  per frame, in Redis). A device refuses a patch that is not against the set it
+  holds (`base_mismatch`), and the plane sends the whole list.
+
 ## Voice chat: `docs/voice-chat.md` is the contract
 
 - Holding the voice key — the key whose long press the frame's event map

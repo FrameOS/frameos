@@ -112,6 +112,25 @@ async def _remember_device_state(redis: Redis, frame: Frame, body: dict[str, Any
     await _write_frame_states_cache(redis, _frame_states_cache_key(frame.id), record, fetched_at=time.time())
 
 
+async def _remember_device_storage(db: Session, redis: Redis, frame: Frame, body: dict[str, Any]) -> None:
+    """What /state holds, kept on the row (embedded.storage) for the workspace.
+    Written only when it changed: this route runs once per render pass."""
+    reported = body.get("storage")
+    if not isinstance(reported, dict):
+        return
+    storage = {
+        key: int(reported[key])
+        for key in ("stateTotalBytes", "stateUsedBytes", "scenesBytes", "sceneCount")
+        if isinstance(reported.get(key), (int, float)) and reported[key] >= 0
+    }
+    embedded = dict(frame.embedded or {})
+    if not storage or embedded.get("storage") == storage:
+        return
+    embedded["storage"] = storage
+    frame.embedded = embedded
+    await update_frame(db, redis, frame)
+
+
 async def _clear_sleep_forecast(db: Session, redis: Redis, frame: Frame) -> None:
     """The device is talking: whatever it forecast before its last sleep is
     spent (the cloud clears next_wake_at on connect the same way)."""
@@ -177,6 +196,7 @@ async def api_embedded_device_commands(
     now = utcnow()
 
     await _remember_device_state(redis, frame, body)
+    await _remember_device_storage(db, redis, frame, body)
     # A frame that joined another network on its own screen says where it
     # is now. Strict, as for a bootup: this can move frame_host (api/log.py).
     if follow_device_address(frame, reported_address(body), client_ip_for_request(request, strict=True)):

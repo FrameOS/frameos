@@ -1601,7 +1601,7 @@ static void usb_api_payload_base64(const char *name, const uint8_t *data, size_t
 static int cmd_usb_api(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene|scene-payload|ota|scene-state|logs|set|wifi|wifi-scan|restart|factory-reset|list-assets|remount-sd|format-sd> ...\n");
+        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene-list|scene-get|scene-put|scene-delete|scene|scene-payload|ota|scene-state|logs|set|wifi|wifi-scan|restart|factory-reset|list-assets|remount-sd|format-sd> ...\n");
         return 1;
     }
 
@@ -1906,6 +1906,92 @@ static int cmd_usb_api(int argc, char **argv)
             return 1;
         }
         fos_client_render_now();
+        usb_api_ok(subcommand);
+        return 0;
+    }
+
+    /* One scene at a time: the rest of the frame's scenes are not read,
+     * written or sent. */
+    if (strcmp(subcommand, "scene-list") == 0) {
+        char *json = fos_scenes_list_json();
+        if (!json) {
+            usb_api_error(subcommand, ESP_ERR_NO_MEM, "scene list failed");
+            return 1;
+        }
+        usb_api_payload_text(subcommand, json);
+        cJSON_free(json);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "scene-get") == 0) {
+        if (argc < 3) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "missing scene id");
+            return 1;
+        }
+        size_t len = 0;
+        char *json = fos_scenes_get_json(argv[2], &len);
+        if (!json) {
+            usb_api_error(subcommand, ESP_ERR_NOT_FOUND, "no such scene");
+            return 1;
+        }
+        usb_api_payload_text(subcommand, json);
+        free(json);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "scene-put") == 0) {
+        if (argc < 3) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "missing byte length");
+            return 1;
+        }
+        size_t len = (size_t)strtoul(argv[2], NULL, 10);
+        if (len == 0 || len > FOS_USB_API_MAX_UPLOAD) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_SIZE, "bad upload length");
+            return 1;
+        }
+        bool activate = argc >= 4 && strcmp(argv[3], "activate") == 0;
+        uint8_t *body = fos_big_malloc(len + 1);
+        if (!body) body = malloc(len + 1);
+        if (!body) {
+            usb_api_error(subcommand, ESP_ERR_NO_MEM, "upload allocation failed");
+            return 1;
+        }
+        usb_api_ready(subcommand);
+        size_t bytes_read = 0;
+        if (!usb_api_read_exact(body, len, &bytes_read)) {
+            free(body);
+            usb_api_payload_timeout_error(subcommand, bytes_read, len);
+            return 1;
+        }
+        body[len] = '\0';
+        char scene_id[FOS_USB_API_MAX_SCENE_ID];
+        esp_err_t err = fos_scenes_put((const char *)body, len, FOS_SCENES_SOURCE_LOCAL,
+                                       scene_id, sizeof(scene_id));
+        free(body);
+        if (err != ESP_OK) {
+            const char *detail = fos_scenes_last_error();
+            usb_api_error(subcommand, err, (detail && detail[0]) ? detail : "scene put failed");
+            return 1;
+        }
+        if (activate) {
+            fos_scenes_select(scene_id);
+            fos_client_render_now();
+        }
+        usb_api_ok(subcommand);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "scene-delete") == 0) {
+        if (argc < 3) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "missing scene id");
+            return 1;
+        }
+        esp_err_t err = fos_scenes_delete(argv[2], FOS_SCENES_SOURCE_LOCAL);
+        if (err != ESP_OK) {
+            const char *detail = fos_scenes_last_error();
+            usb_api_error(subcommand, err, (detail && detail[0]) ? detail : "scene delete failed");
+            return 1;
+        }
         usb_api_ok(subcommand);
         return 0;
     }

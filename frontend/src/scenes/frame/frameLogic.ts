@@ -1169,11 +1169,12 @@ function normalizeBuildrootForComparison(value: unknown): Record<string, unknown
  * rewritten from every bootup line, and `layout` is computed on every read.
  * Compared whole, a sleeping ESP32 put "Embedded settings" in the pending
  * changes after every wake, the deploy's own boot included (frame 70,
- * 2026-10-13: only `lastBoot.at` differed).
+ * 2026-10-13: only `lastBoot.at` differed). `storage` is what the state
+ * partition holds at the frame's last check-in, reported the same way.
  */
 function normalizeEmbeddedForComparison(value: unknown): Record<string, unknown> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-  const { lastBoot: _lastBoot, layout: _layout, firmware: _firmware, ...rest } = source
+  const { lastBoot: _lastBoot, layout: _layout, firmware: _firmware, storage: _storage, ...rest } = source
   return rest
 }
 

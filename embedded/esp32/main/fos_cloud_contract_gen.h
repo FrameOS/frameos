@@ -185,6 +185,7 @@ static const fos_contract_setting_t k_fos_contract_settings[] = {
 typedef struct { const char *verb; const char *scope; uint8_t content; } fos_contract_verb_t;
 static const fos_contract_verb_t k_fos_contract_verbs[] = {
     {"set_scenes", NULL, 1},
+    {"scenes_patch", NULL, 1},
     {"set_current_scene", NULL, 1},
     {"set_settings", NULL, 1},
     {"set_schedule", NULL, 1},
@@ -210,7 +211,7 @@ static const fos_contract_verb_t k_fos_contract_verbs[] = {
     {"lan_access_set", NULL, 0},
     {"scenes_get", NULL, 0},
 };
-#define FOS_CONTRACT_VERBS_COUNT 25
+#define FOS_CONTRACT_VERBS_COUNT 26
 
 #define FOS_CONTRACT_ASSET_MAX_FILE_BYTES 8388608
 #define FOS_CONTRACT_ASSET_PUT_MAX_BYTES 262144

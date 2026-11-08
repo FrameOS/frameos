@@ -21,7 +21,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
-import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import postgres from "postgres";
 import { WebSocket, WebSocketServer } from "ws";
 import {
@@ -42,6 +42,7 @@ import {
   enqueueFrameCommand,
   frameCommandsNotifyChannel,
   frameForLinkedClient,
+  frameHardwareIsEsp32,
   frameImageAssetPath,
   framePreviewIsWatched,
   frameTelemetryLogsScope,
@@ -82,6 +83,8 @@ import {
 import { previewWatchGraceMs } from "../../auth-web/src/lib/frame-sleep";
 import { keywordsRuntimeLacks } from "../../auth-web/src/lib/retired-apps";
 import { safeLocalOrigin } from "../../auth-web/src/lib/local-origin";
+import { buildScenesPatchMessage, scenesPatchMinVersion } from "../../auth-web/src/lib/scenes-patch";
+import { frameosVersionSatisfies } from "../../auth-web/src/lib/store-versions";
 import { frameOwningBackend } from "../../auth-web/src/lib/frame-backend-owner";
 import { cloudRenderedMinIntervalSeconds } from "../../auth-web/src/lib/cloud-rendered";
 import { renderScenes, rendererVersion } from "../../auth-web/src/lib/scene-render";
@@ -323,6 +326,9 @@ interface DeviceSession {
   // for a shutdown to wait on.
   disconnecting: Promise<void> | undefined;
   drainQueued: boolean;
+  // set_scenes rows that went out as a scenes_patch and are waiting for the
+  // device's answer: a refusal sends the row again as the whole list.
+  patchedCommands: Set<string>;
   draining: boolean;
   frame: FrameRow;
   hello: Record<string, unknown> | undefined;
@@ -795,7 +801,7 @@ export async function startFrameHub(
           // device closes → reconnect → redeliverSentCommands requeues it →
           // send again, forever, with every other command behind it stuck.
           // Fail the row instead, where the owner can see it.
-          const message = JSON.stringify(commandMessage(command));
+          const message = JSON.stringify(await outgoingCommandMessage(session, command));
           const messageBytes = Buffer.byteLength(message, "utf8");
           if (messageBytes > maxPayloadBytes) {
             logWarn("command.payload_too_large", {
@@ -834,6 +840,59 @@ export async function startFrameHub(
     } finally {
       session.draining = false;
     }
+  }
+
+  // What a queued command goes out as: the row's own message, except that a
+  // set_scenes to an ESP32 whose current set is known goes as the difference
+  // from it (scenes_patch, lib/scenes-patch.ts). No reason not to is a reason
+  // to send the whole list: a patch is only ever a saving.
+  async function outgoingCommandMessage(
+    session: DeviceSession,
+    command: { id: string; type: string; payload: unknown },
+  ): Promise<Record<string, unknown>> {
+    if (command.type === "set_scenes" && isRecord(command.payload) && command.payload.no_patch !== true) {
+      const [frame] = await db
+        .select({
+          frameosVersion: frames.frameosVersion,
+          hardware: frames.hardware,
+          scenesChecksum: frames.scenesChecksum,
+        })
+        .from(frames)
+        .where(eq(frames.id, session.frame.id))
+        .limit(1);
+      if (
+        frame?.scenesChecksum &&
+        frameHardwareIsEsp32(frame) &&
+        frame.frameosVersion &&
+        frameosVersionSatisfies(scenesPatchMinVersion, frame.frameosVersion)
+      ) {
+        const [held] = await db
+          .select({ payload: frameCommands.payload })
+          .from(frameCommands)
+          .where(
+            and(
+              eq(frameCommands.frameId, session.frame.id),
+              eq(frameCommands.type, "set_scenes"),
+              eq(frameCommands.status, "acked"),
+              sql`${frameCommands.payload} ->> 'checksum' = ${frame.scenesChecksum}`,
+            ),
+          )
+          .orderBy(desc(frameCommands.createdAt))
+          .limit(1);
+        const hashes = isRecord(held?.payload) ? held.payload.scene_hashes : undefined;
+        if (isRecord(hashes)) {
+          const patch = buildScenesPatchMessage(command, {
+            checksum: frame.scenesChecksum,
+            hashes: hashes as Record<string, string>,
+          });
+          if (patch) {
+            session.patchedCommands.add(command.id);
+            return patch;
+          }
+        }
+      }
+    }
+    return commandMessage(command);
   }
 
   // Revocation kick: revokeFrame() in auth-web marks the linked client and
@@ -1489,6 +1548,31 @@ export async function startFrameHub(
       return;
     }
     const ok = msg.ok === true;
+    // A patch the frame refused (its set is not the one the patch was worked
+    // out from, or it does not know the verb): the same row, as the whole list.
+    if (session.patchedCommands.delete(commandId) && !ok) {
+      await db
+        .update(frameCommands)
+        .set({
+          payload: sql`coalesce(${frameCommands.payload}, '{}'::jsonb) || '{"no_patch":true}'::jsonb`,
+          sentAt: null,
+          status: "pending",
+        })
+        .where(
+          and(
+            eq(frameCommands.id, commandId),
+            eq(frameCommands.frameId, session.frame.id),
+            inArray(frameCommands.status, ["pending", "sent"]),
+          ),
+        );
+      logInfo("command.scenes_patch_refused", {
+        commandId,
+        error: typeof msg.error === "string" ? msg.error.slice(0, 128) : undefined,
+        frameId: session.frame.id,
+      });
+      await drainCommands(session);
+      return;
+    }
     // A failed set_scenes deliberately leaves frames.assigned_checksum as is:
     // desired != acked keeps the frame showing out-of-sync in the UI.
     const [command] = await db
@@ -2377,6 +2461,7 @@ export async function startFrameHub(
       disconnectHandled: false,
       disconnecting: undefined,
       drainQueued: false,
+      patchedCommands: new Set(),
       draining: false,
       frame,
       handling: Promise.resolve(),
@@ -2599,6 +2684,7 @@ export async function startFrameHub(
         disconnectHandled: false,
         disconnecting: undefined,
         drainQueued: false,
+        patchedCommands: new Set(),
         draining: false,
         frame: row.frame,
         handling: Promise.resolve(),

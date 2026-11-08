@@ -589,6 +589,15 @@ static void add_hardware_json(cJSON *parent)
         cJSON_AddNumberToObject(storage, "otaBytes", info.ota_bytes);
         cJSON_AddNumberToObject(storage, "stateBytes", info.state_bytes);
     }
+    if (storage) {
+        /* What is in /state, not its size on the map: the owner sees it fill. */
+        fos_scenes_storage_t state;
+        fos_scenes_storage_summary(&state);
+        cJSON_AddNumberToObject(storage, "stateTotalBytes", (double)state.state_total_bytes);
+        cJSON_AddNumberToObject(storage, "stateUsedBytes", (double)state.state_used_bytes);
+        cJSON_AddNumberToObject(storage, "scenesBytes", (double)state.scenes_bytes);
+        cJSON_AddNumberToObject(storage, "sceneCount", state.scene_count);
+    }
     cJSON *ota = cJSON_AddObjectToObject(hw, "ota");
     if (ota) {
         cJSON_AddBoolToObject(ota, "supported", info.ota_slots > 0);
@@ -2208,6 +2217,52 @@ static void ws_handle_set_scenes(const cJSON *root, const cJSON *id)
     s_scene_ack_pending = true;
 }
 
+/* scenes_patch: the same set the full push would have sent, as the difference
+ * from the one this frame holds. `base_checksum` names that set; a frame
+ * holding anything else refuses and the provider sends the whole list. Acked
+ * and scene_acked exactly as set_scenes is, so `checksum` is the whole set's. */
+static void ws_handle_scenes_patch(const cJSON *root, const cJSON *id)
+{
+    const cJSON *checksum = cJSON_GetObjectItem(root, "checksum");
+    const cJSON *base = cJSON_GetObjectItem(root, "base_checksum");
+    if (!cJSON_IsString(checksum) || !checksum->valuestring || !cJSON_IsString(base) || !base->valuestring) {
+        ws_ack(id, false, "invalid_patch");
+        return;
+    }
+    /* A redelivered patch this frame already applied. Its scene_ack went out
+     * then, or the hello carried the checksum. */
+    if (strcmp(checksum->valuestring, s_applied_scenes_checksum) == 0 && fos_scenes_from_cloud()) {
+        ws_ack(id, true, NULL);
+        return;
+    }
+    if (!fos_scenes_from_cloud() || strcmp(base->valuestring, s_applied_scenes_checksum) != 0) {
+        ws_ack(id, false, "base_mismatch");
+        return;
+    }
+    uint32_t generation = fos_scenes_apply_generation();
+    esp_err_t err = fos_scenes_apply_patch(cJSON_GetObjectItem(root, "put"), cJSON_GetObjectItem(root, "order"),
+                                           FOS_SCENES_SOURCE_CLOUD, NULL);
+    if (err != ESP_OK) {
+        ws_ack(id, false, err == ESP_ERR_NO_MEM ? "no_room" : "patch_refused");
+        return;
+    }
+    /* No render of its own: a scene that is not on the panel costs no
+     * refresh, and one that is renders when the render task picks it up. */
+    const cJSON *scene_id = cJSON_GetObjectItem(root, "scene_id");
+    if (cJSON_IsString(scene_id) && scene_id->valuestring && scene_id->valuestring[0]) {
+        fos_scenes_select(scene_id->valuestring);
+        fos_client_render_now();
+    }
+    ws_ack(id, true, NULL);
+
+    /* As for set_scenes: live when the render task has applied it. */
+    strlcpy(s_scene_ack_checksum, checksum->valuestring, sizeof(s_scene_ack_checksum));
+    s_scene_ack_generation = generation;
+    s_scene_ack_deadline_us =
+        esp_timer_get_time() + (int64_t)FOS_CLOUD_SCENE_ACK_TIMEOUT_MS * 1000;
+    s_scene_ack_pending = true;
+}
+
 /* Skip one JSON value starting at *i (which points at its first byte).
  * Purely structural: it never allocates and never reads past `len`. */
 static void raw_skip_value(const char *data, size_t len, size_t *i)
@@ -2969,6 +3024,8 @@ static void dispatch_verb(const char *type, cJSON *root, const cJSON *id,
         ws_handle_scene_event(root, id, origin);
     } else if (strcmp(type, "set_scenes") == 0) {
         ws_handle_set_scenes(root, id);
+    } else if (strcmp(type, "scenes_patch") == 0) {
+        ws_handle_scenes_patch(root, id);
     } else if (strcmp(type, "set_settings") == 0) {
         ws_handle_set_settings(root, id);
     } else if (strcmp(type, "assets_list") == 0) {
@@ -3075,6 +3132,13 @@ static void dispatch_verb(const char *type, cJSON *root, const cJSON *id,
         ESP_LOGW(TAG, "ws: refusing verb \"%s\"", type[0] ? type : "(none)");
         ws_ack(id, false, "unknown_verb");
     }
+}
+
+void fos_cloud_forget_applied_scenes(void)
+{
+    if (!s_applied_scenes_checksum[0]) return;
+    s_applied_scenes_checksum[0] = '\0';
+    nvs_erase_key_quiet("cloud_scn_sum");
 }
 
 void fos_cloud_request_state(void)

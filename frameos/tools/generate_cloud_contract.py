@@ -192,7 +192,10 @@ def gen_nim(doc):
     out.append("]")
     out.append("")
     out.append("const CloudContractVerbs* = @[")
+    # The Linux runtime's own verbs: an ESP32-only verb is one it never serves.
     for verb in doc["verbs"]:
+        if "linux" not in verb["profiles"]:
+            continue
         scope = nim_str(verb["scope"] or "")
         out.append(f"  VerbSpec(verb: {nim_str(verb['type'])}, scope: {scope}, content: {'true' if verb.get('content') else 'false'}),")
     out.append("]")

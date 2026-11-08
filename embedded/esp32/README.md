@@ -1282,6 +1282,33 @@ failed optimization; the index of the set it had stays until that payload
 has loaded, and one the runtime refuses too is dropped for the set from
 before.
 
+### One scene at a time
+
+A scene can be read, added, replaced or removed on its own (`main/fos_scene_store.c`,
+pure C, host-tested), without touching the others:
+
+| Over | Read one | List, sizes, free space | Add or replace | Remove |
+| --- | --- | --- | --- | --- |
+| USB | `usb_api scene-get <id>` | `usb_api scene-list` | `usb_api scene-put <bytes> [activate]`, then the scene's JSON | `usb_api scene-delete <id>` |
+| HTTP (admin login or the server key) | `GET /api/frames/<id>/scenes/<sceneId>` | `GET /api/frames/<id>/scenes` | `POST /api/frames/<id>/scenes` (`?activate=1` shows it) | `POST /api/frames/<id>/scenes/delete` `{"id"}` |
+
+A changed scene is written to a new slot file and the index is switched to it;
+the old file goes at the next sweep. A power cut, a full partition, or a scene
+the runtime refuses (when it is the one on the panel) leaves the scene that
+worked. Only the scene on the panel, or one it embeds as a split panel, is
+reloaded; adding any other scene costs one file and no render. Deleting the
+last scene is refused. The state a removed scene kept across deep sleep goes
+with it. A control plane uses the same store: the cloud's `scenes_patch` verb
+(`docs/cloud-frames.md`), and a backend answering `/embedded/scenes?patch=1`
+with `{"patch":true,"base":"<etag>","order":[...],"put":[...]}` when it knows
+what the frame holds.
+
+**How much room there is.** `usb_api scene-list` and `GET .../scenes` report
+`storage`: `stateTotalBytes` and `stateUsedBytes` (the SPIFFS partition,
+`esp_spiffs_info`), `scenesBytes` and `sceneCount`, with `bytes` per scene. The
+same four numbers are in `status` under `storage`, in the cloud `hardware.storage`
+and in the backend's `embedded.storage`, which is what the workspace draws.
+
 ## The render canvas is 16-bit (2026.8.31)
 
 A sixteen-grey panel has a 4-bit canvas in its own buffer's layout, each

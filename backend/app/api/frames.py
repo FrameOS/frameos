@@ -4718,6 +4718,7 @@ async def api_frame_update_endpoint(
     old_device = frame.device
     previous_sd_image = (frame.buildroot or {}).get("sdImage") if isinstance(frame.buildroot, dict) else None
     previous_embedded_boot = (frame.embedded or {}).get("lastBoot") if isinstance(frame.embedded, dict) else None
+    previous_embedded_storage = (frame.embedded or {}).get("storage") if isinstance(frame.embedded, dict) else None
     previous_agent = frame.agent
     for field, value in update_data.items():
         setattr(frame, field, value)
@@ -4749,6 +4750,11 @@ async def api_frame_update_endpoint(
             embedded["lastBoot"] = previous_embedded_boot
         else:
             embedded.pop("lastBoot", None)
+        # And embedded.storage, what the board said its state partition holds.
+        if previous_embedded_storage is not None:
+            embedded["storage"] = previous_embedded_storage
+        else:
+            embedded.pop("storage", None)
         frame.embedded = embedded
 
     if "timezone" in update_data:

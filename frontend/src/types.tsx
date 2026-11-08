@@ -194,6 +194,11 @@ export interface FrameType {
       otaSlotBytes?: number | null
       otaBytes?: number | null
       stateBytes?: number | null
+      /** ESP32: what the state partition holds right now (see `frameSceneStorage`). */
+      stateTotalBytes?: number | null
+      stateUsedBytes?: number | null
+      scenesBytes?: number | null
+      sceneCount?: number | null
     } | null
     ota?: {
       supported?: boolean | null
@@ -1681,6 +1686,13 @@ export interface FrameRpiOSConfig {
 export interface FrameEmbeddedConfig {
   platform?: string
   flashSize?: FrameEmbeddedFlashSize
+  /** What the state partition holds, from the frame's last check-in. */
+  storage?: {
+    stateTotalBytes?: number | null
+    stateUsedBytes?: number | null
+    scenesBytes?: number | null
+    sceneCount?: number | null
+  }
   hardwarePreset?: FrameEmbeddedHardwarePreset
   lastBoot?: {
     at?: string

@@ -189,7 +189,7 @@ describe("frameFormKeysEqual", () => {
   // settings" after every wake. The bootup line rewrites embedded.lastBoot
   // and the backend derives embedded.layout on read; only the user's choices
   // in `embedded` are a change.
-  it("ignores what an ESP32 reports in embedded: lastBoot and layout", () => {
+  it("ignores what an ESP32 reports in embedded: lastBoot, layout and storage", () => {
     const row = frame({
       name: "esptest",
       mode: "embedded",
@@ -198,6 +198,7 @@ describe("frameFormKeysEqual", () => {
         flashSize: "32MB",
         lastBoot: { at: "2026-10-12T22:17:48+00:00", ip: "10.8.0.9", version: "2026.10.11" },
         layout: { ram: { panel: "EPD_13in3e" } },
+        storage: { stateTotalBytes: 957314, stateUsedBytes: 412000, scenesBytes: 312000, sceneCount: 18 },
       },
     });
     const woke = {
@@ -206,6 +207,7 @@ describe("frameFormKeysEqual", () => {
         platform: "esp32-s3",
         flashSize: "32MB",
         lastBoot: { at: "2026-10-12T22:22:31+00:00", ip: "10.8.0.10", version: "2026.10.11" },
+        storage: { stateTotalBytes: 957314, stateUsedBytes: 418000, scenesBytes: 318000, sceneCount: 19 },
       },
     } as FrameType;
     expect(frameFormKeysEqual(row, woke)).toBe(true);

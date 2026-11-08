@@ -613,6 +613,31 @@ async def test_the_address_in_a_pull_moves_the_host_only_from_where_it_came(asyn
     assert db.get(Frame, frame.id).frame_host == "192.168.7.9"
 
 
+@pytest.mark.asyncio
+async def test_the_device_reports_what_its_state_partition_holds(async_client, no_auth_client, db):
+    frame = await _embedded_frame(async_client, db)
+    storage = {"stateTotalBytes": 957314, "stateUsedBytes": 412000, "scenesBytes": 312000, "sceneCount": 18}
+
+    response = await no_auth_client.post(
+        f"/api/frames/{frame.id}/embedded/commands",
+        headers=_device_headers(frame),
+        json={"storage": {**storage, "secret": "ignored", "stateUsedBytes": 412000}},
+    )
+    assert response.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).embedded["storage"] == storage
+
+    # Only the numbers it reports, never anything else.
+    response = await no_auth_client.post(
+        f"/api/frames/{frame.id}/embedded/commands",
+        headers=_device_headers(frame),
+        json={"storage": {"stateUsedBytes": "lots"}},
+    )
+    assert response.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).embedded["storage"] == storage
+
+
 # ------------------------------------------------- the frame page's changes
 
 @pytest.mark.asyncio

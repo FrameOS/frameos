@@ -42,7 +42,8 @@ export function commandMessage(command: {
   type: string;
   payload: unknown;
 }): Record<string, unknown> {
-  const payload = isRecord(command.payload) ? command.payload : {};
+  // scene_hashes and no_patch are the hub's own bookkeeping (scenes-patch.ts).
+  const { scene_hashes: _hashes, no_patch: _noPatch, ...payload } = isRecord(command.payload) ? command.payload : {};
   return { ...payload, id: command.id, type: command.type };
 }
 

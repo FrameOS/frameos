@@ -1521,6 +1521,7 @@ async def test_api_frame_update_keeps_the_boards_last_boot_and_drops_layout(asyn
         'platform': 'esp32-s3',
         'flashSize': '32MB',
         'lastBoot': {'at': '2026-10-12T22:22:31+00:00', 'ip': '10.8.0.9', 'frameosVersion': '2026.10.11'},
+        'storage': {'stateTotalBytes': 957314, 'stateUsedBytes': 418000, 'scenesBytes': 318000, 'sceneCount': 19},
     }
     db.add(frame)
     db.commit()
@@ -1530,12 +1531,14 @@ async def test_api_frame_update_keeps_the_boards_last_boot_and_drops_layout(asyn
         'flashSize': '16MB',
         'lastBoot': {'at': '2026-10-12T22:17:48+00:00', 'ip': '10.8.0.3', 'frameosVersion': '2026.10.10'},
         'layout': {'ram': {'panel': 'EPD_13in3e'}},
+        'storage': {'stateTotalBytes': 957314, 'stateUsedBytes': 1, 'scenesBytes': 1, 'sceneCount': 1},
     }})
     assert resp.status_code == 200
     db.expire_all()
     stored = db.get(Frame, frame.id).embedded
     assert stored['flashSize'] == '16MB'
     assert stored['lastBoot'] == {'at': '2026-10-12T22:22:31+00:00', 'ip': '10.8.0.9', 'frameosVersion': '2026.10.11'}
+    assert stored['storage']['stateUsedBytes'] == 418000
     assert 'layout' not in stored
 
 

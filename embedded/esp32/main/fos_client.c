@@ -2935,6 +2935,13 @@ static void client_task(void *arg)
             if (!input_hold_on()) {
                 fos_scene_state_flush(false);
                 frameos_nim_flush_scene_thumb();
+                if (nim && fos_scenes_patch_pending()) {
+                    /* One scene stored or removed (USB, HTTP, the cloud):
+                     * the catalog now, and a render only if it is the scene
+                     * showing. Flash reads, so it waits out a tap too. */
+                    fos_scenes_apply_pending();
+                    if (fos_scenes_switched_pending()) want_render = true;
+                }
             }
             if (nim) {
                 process_input_events();

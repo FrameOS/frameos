@@ -88,6 +88,8 @@ type
     id*: string
     name*: string
     refreshInterval*: float
+    bytes*: int
+      ## The scene's size on flash, from the index.
 
 var sceneCatalog: seq[SceneCatalogEntry] = @[]
   ## Empty on the legacy path (one scenes.json parsed whole), in which case
@@ -120,6 +122,7 @@ proc sceneInfoJson*(): string =
         "id": entry.id,
         "name": if entry.name.len > 0: entry.name else: entry.id,
         "refreshInterval": entry.refreshInterval,
+        "bytes": entry.bytes,
       })
     available = sceneCatalog.len
   else:
@@ -686,6 +689,7 @@ proc setSceneCatalog*(indexJson: string): int =
         id: id,
         name: item{"name"}.getStr(),
         refreshInterval: item{"refreshInterval"}.getFloat(0.0),
+        bytes: item{"bytes"}.getInt(0),
       ))
   sceneCatalog = entries
   layoutCatalog = layouts

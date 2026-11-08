@@ -975,6 +975,61 @@ async def test_scenes_returns_payload_with_etag(async_client, no_auth_client, db
 
 
 @pytest.mark.asyncio
+async def test_scenes_patch_sends_only_what_changed(async_client, no_auth_client, db, redis):
+    frame = await device_frame(async_client, db)
+    scene = {'id': 'a', 'name': 'A', 'nodes': [], 'edges': []}
+    other = {'id': 'b', 'name': 'B', 'nodes': [], 'edges': []}
+    frame.scenes = [scene, other]
+    db.commit()
+    url = f'/api/frames/{frame.id}/embedded/scenes?patch=1'
+
+    # A first pull is the whole list; the backend remembers what it served.
+    first = await no_auth_client.get(url, headers=auth(frame))
+    assert isinstance(first.json(), list)
+    etag = first.headers['etag']
+
+    # One scene changes: only it travels, with the order of the whole set.
+    frame.scenes = [scene, {**other, 'name': 'B2'}]
+    db.commit()
+    response = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': etag})
+    assert response.status_code == 200
+    body = response.json()
+    assert body['patch'] is True
+    assert body['base'] == etag
+    assert body['order'] == ['a', 'b']
+    assert [item['name'] for item in body['put']] == ['B2']
+    new_etag = response.headers['etag']
+    assert new_etag != etag
+
+    # The patched set is what is remembered: removing a scene patches too.
+    frame.scenes = [scene]
+    db.commit()
+    response = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': new_etag})
+    assert response.json() == {'patch': True, 'base': new_etag, 'order': ['a'], 'put': []}
+
+    # Older firmware does not ask; a set this backend did not serve gets it all.
+    plain = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/scenes',
+        headers={**auth(frame), 'If-None-Match': etag})
+    assert isinstance(plain.json(), list)
+    unknown = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': '"nope"'})
+    assert isinstance(unknown.json(), list)
+
+
+@pytest.mark.asyncio
+async def test_scenes_patch_never_sends_every_scene_as_one(async_client, no_auth_client, db, redis):
+    frame = await device_frame(async_client, db)
+    frame.scenes = [{'id': 'a', 'name': 'A', 'nodes': [], 'edges': []}]
+    db.commit()
+    url = f'/api/frames/{frame.id}/embedded/scenes?patch=1'
+    first = await no_auth_client.get(url, headers=auth(frame))
+    frame.scenes = [{'id': 'a', 'name': 'A2', 'nodes': [], 'edges': []}]
+    db.commit()
+    response = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': first.headers['etag']})
+    assert isinstance(response.json(), list)
+
+
+@pytest.mark.asyncio
 async def test_settings_returns_scene_required_service_settings(async_client, no_auth_client, db):
     frame = await device_frame(async_client, db)
     frame.scenes = [{
