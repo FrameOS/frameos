@@ -1,7 +1,7 @@
 """frames: whether the settings on the frame's screen offer the frame page
 
 Revision ID: b8d4e1f6a2c3
-Revises: e7a3c9d2f5b1
+Revises: c3b7e1f9a4d6
 Create Date: 2026-11-08 12:00:00.000000
 
 frame.json `frameSettingsOnScreen` (docs/scene-settings.md "The frame page"):
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'b8d4e1f6a2c3'
-down_revision = 'e7a3c9d2f5b1'
+down_revision = 'c3b7e1f9a4d6'
 branch_labels = None
 depends_on = None
 
