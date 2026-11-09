@@ -494,6 +494,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   event_map: '2026.10.20',
   voice_chat: '2026.10.20',
   touch_beep: '2026.11.6',
+  awake_after_input_seconds: '2026.11.6',
   render_scale: '2026.10.22',
   frame_settings_on_screen: '2026.11.5',
 }
@@ -590,6 +591,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   deep_sleep: 'Deep sleep between renders',
   deep_sleep_on_battery: 'Deep sleep on battery',
   wake_check_seconds: 'Wake-up check interval',
+  awake_after_input_seconds: 'Stay awake after a press or tap',
   battery_pin: 'Battery sense GPIO',
   battery_divider: 'Battery voltage divider',
   battery_enable_pin: 'Battery enable GPIO',

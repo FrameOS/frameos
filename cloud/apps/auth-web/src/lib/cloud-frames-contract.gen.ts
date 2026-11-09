@@ -792,6 +792,18 @@ export const cloudFramesContract = {
         }
       }
     },
+    "awake_after_input_seconds": {
+      "rule": {
+        "type": "int",
+        "min": 0,
+        "max": 3600
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.11.6"
+        }
+      }
+    },
     "wake_check_seconds": {
       "rule": {
         "type": "int",

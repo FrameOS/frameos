@@ -76,6 +76,7 @@ static void load_defaults(void)
     s_config.deep_sleep_on_battery = FRAMEOS_DEFAULT_DEEP_SLEEP_ON_BATTERY;
     s_config.wake_schedule = FRAMEOS_DEFAULT_WAKE_SCHEDULE;
     s_config.wake_check_sec = FRAMEOS_DEFAULT_WAKE_CHECK_SEC;
+    s_config.awake_after_input_sec = FRAMEOS_DEFAULT_AWAKE_AFTER_INPUT_SEC;
     s_config.battery_pin = FRAMEOS_DEFAULT_BATTERY_PIN;
     s_config.battery_divider = FRAMEOS_DEFAULT_BATTERY_DIVIDER;
     s_config.battery_enable_pin = FRAMEOS_DEFAULT_BATTERY_ENABLE_PIN;
@@ -266,6 +267,7 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u8(nvs, "sleep_batt", &u8) == ESP_OK) s_config.deep_sleep_on_battery = u8 != 0;
     if (nvs_get_u8(nvs, "wake_sched", &u8) == ESP_OK) s_config.wake_schedule = u8 != 0;
     if (nvs_get_u32(nvs, "wake_check", &u32) == ESP_OK) s_config.wake_check_sec = u32;
+    if (nvs_get_u32(nvs, "awake_input", &u32) == ESP_OK) s_config.awake_after_input_sec = u32;
     if (nvs_get_i8(nvs, "batt_pin", &i8) == ESP_OK) s_config.battery_pin = i8;
     if (nvs_get_u32(nvs, "batt_div_m", &u32) == ESP_OK) s_config.battery_divider = (float)u32 / 1000.0f;
     if (nvs_get_i8(nvs, "batt_en", &i8) == ESP_OK) s_config.battery_enable_pin = i8;
@@ -434,6 +436,7 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u8(nvs, "sleep_batt", s_config.deep_sleep_on_battery ? 1 : 0), "sleep_batt");
     FOS_NVS_SET(nvs_set_u8(nvs, "wake_sched", s_config.wake_schedule ? 1 : 0), "wake_sched");
     FOS_NVS_SET(nvs_set_u32(nvs, "wake_check", s_config.wake_check_sec), "wake_check");
+    FOS_NVS_SET(nvs_set_u32(nvs, "awake_input", s_config.awake_after_input_sec), "awake_input");
     FOS_NVS_SET(nvs_set_i8(nvs, "batt_pin", s_config.battery_pin), "batt_pin");
     FOS_NVS_SET(nvs_set_u32(nvs, "batt_div_m", (uint32_t)(s_config.battery_divider * 1000.0f)), "batt_div_m");
     FOS_NVS_SET(nvs_set_i8(nvs, "batt_en", s_config.battery_enable_pin), "batt_en");

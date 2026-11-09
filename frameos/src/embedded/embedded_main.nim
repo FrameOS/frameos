@@ -185,6 +185,64 @@ proc packImageGray(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int; ma
       buf[outIndex] = buf[outIndex] or ((level.uint8 and 0x0F'u8) shl (if (px mod 2) == 0: 4 else: 0))
   true
 
+type Gray16Job = object
+  pixels, buf: ptr UncheckedArray[uint8]
+  width, rowBytes: int
+
+proc runGrayRows(fn: proc (ctx: pointer; worker, first, last: int32) {.cdecl.}; ctx: pointer; rows, blockRows: int32)
+  {.importc: "fos_rows_run", cdecl.}
+
+proc packGray16Rows(ctx: pointer; worker, first, last: int32) {.cdecl, hotLoop.} =
+  ## On both cores (fos_rows.c): plain pointers, nothing that allocates or raises.
+  let job = cast[ptr Gray16Job](ctx)
+  let
+    pixels = job.pixels
+    buf = job.buf
+    width = job.width
+  for y in first.int ..< last.int:
+    let
+      row = y * width
+      cell = (y and 3) * 4
+    var at = y * job.rowBytes
+    for byteIndex in 0 ..< width div 2:
+      let
+        x = byteIndex * 2
+        left = grayLevel16Ordered(pixels[row + x], OrderedThresholds4x4[cell + (x and 3)])
+        right = grayLevel16Ordered(pixels[row + x + 1], OrderedThresholds4x4[cell + ((x + 1) and 3)])
+      buf[at] = (left shl 4) or right
+      inc at
+    if (width and 1) != 0:
+      buf[at] = grayLevel16Ordered(pixels[row + width - 1], OrderedThresholds4x4[cell + ((width - 1) and 3)]) shl 4
+
+proc packImageGray16(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): bool {.hotLoop.} =
+  ## The 4-bit grey panels: ordered sixteen greys (grayLevel16Ordered), the
+  ## left pixel in the high nibble.
+  let
+    width = image.width
+    height = image.height
+    rowBytes = (frameWidth + 1) div 2
+  if rowBytes * frameHeight != bufLen:
+    log(&"pack gray: buffer mismatch, want {rowBytes * frameHeight} bytes, got {bufLen}")
+    return false
+  if image.format == pfGray8 and not image.isView and frameRotate == 0 and
+      width == frameWidth and height == frameHeight:
+    var job = Gray16Job(
+      pixels: cast[ptr UncheckedArray[uint8]](image.bufferPointer), buf: buf, width: width, rowBytes: rowBytes)
+    runGrayRows(packGray16Rows, job.addr, height.int32, 32)
+    return true
+  for i in 0 ..< bufLen:
+    buf[i] = 0
+  for y in 0 ..< height:
+    for x in 0 ..< width:
+      let
+        pixel = image.unsafe[x, y]
+        luma = (pixel.r.uint32 * 77 + pixel.g.uint32 * 150 + pixel.b.uint32 * 29) shr 8
+        level = grayLevel16Ordered(luma.uint8, OrderedThresholds4x4[(y and 3) * 4 + (x and 3)])
+        (px, py) = panelCoords(x, y, width, height)
+        at = py * rowBytes + px div 2
+      buf[at] = buf[at] or (level shl (if (px and 1) == 0: 4 else: 0))
+  true
+
 proc packImageDual1bpp(
     image: Image;
     buf: ptr UncheckedArray[uint8];
@@ -473,7 +531,7 @@ proc packImageForFormat(
   of 7:
     packImagePalette(image, buf, bufLen, activePalette(framePalette(spectra6ColorPalette)))
   of 8:
-    packImageGray(image, buf, bufLen, 15)
+    packImageGray16(image, buf, bufLen)
   of 9:
     packImageRgb565(image, buf, bufLen)
   else:
@@ -496,6 +554,9 @@ proc packedLenForFormat(width, height, pixelFormat: int): int =
     width * height * 2
   else:
     0
+
+var lastPackedFromCanvas = false
+  ## The last render left its picture on the scene canvas, as it is.
 
 proc renderBufferAlloc(len: csize_t): pointer {.importc: "frameos_nim_alloc_render_buffer".}
 proc renderBufferFree(p: pointer) {.importc: "frameos_nim_free_render_buffer".}
@@ -728,6 +789,35 @@ proc renderErrorFallbackAlloc(
     GC_fullCollect()
     1
 
+proc fos_nim_repack_alloc_impl(
+    outBuf: var pointer;
+    outLen: var csize_t;
+    pixelFormat: cint
+  ): cint {.exportc, cdecl.} =
+  ## The canvas packed again without running the scene: a panel that drew a
+  ## tapped area roughly settles from it (frameos_nim_repack_alloc).
+  outBuf = nil
+  outLen = 0
+  try:
+    if not lastPackedFromCanvas:
+      return 1
+    let canvas = renderCanvas()
+    let packedLen = packedLenForFormat(canvas.width, canvas.height, pixelFormat.int)
+    if packedLen <= 0:
+      return 1
+    let raw = renderBufferAlloc(packedLen.csize_t)
+    if raw == nil:
+      return 1
+    if not packImageForFormat(canvas, cast[ptr UncheckedArray[uint8]](raw), packedLen, pixelFormat.int):
+      renderBufferFree(raw)
+      return 1
+    outBuf = raw
+    outLen = packedLen.csize_t
+    result = 0
+  except Exception as e:
+    log("repack failed: " & e.msg)
+    result = 1
+
 proc fos_nim_render_alloc_impl(
     outBuf: var pointer;
     outLen: var csize_t;
@@ -746,6 +836,7 @@ proc fos_nim_render_alloc_impl(
     var image = rendered.image
     let source = rendered.source
     let renderedAt = getMonoTime()
+    lastPackedFromCanvas = cast[pointer](image) == cast[pointer](renderCanvas())
     let packedLen = packedLenForFormat(image.width, image.height, pixelFormat.int)
     if packedLen <= 0:
       log(&"pack: unsupported pixel format {pixelFormat}")

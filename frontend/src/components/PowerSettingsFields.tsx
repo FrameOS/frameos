@@ -33,6 +33,8 @@ export interface PowerSettingsValues {
   deepSleep: boolean
   deepSleepOnBattery: boolean
   wakeCheckSeconds: number | undefined
+  /** How long a press or a tap keeps a deep-sleeping frame awake; undefined = the firmware's 5 minutes. */
+  awakeAfterInputSeconds?: number | undefined
   batteryPin: number | undefined
   batteryDivider: number | undefined
   /** GPIO held high to switch the divider on while sampling; -1 = none (always on). */
@@ -62,6 +64,14 @@ export interface PowerSettingsFieldsProps {
   batteryEnablePinDisabledReason?: string
   className?: string
 }
+
+const awakeAfterInputChoices = [
+  { value: '0', label: 'Sleep as soon as it can' },
+  { value: '60', label: '1 minute' },
+  { value: '300', label: '5 minutes' },
+  { value: '600', label: '10 minutes' },
+  { value: '1800', label: '30 minutes' },
+]
 
 const wakeCheckChoices = [
   { value: '0', label: 'Only wake to render' },
@@ -144,6 +154,29 @@ export function PowerSettingsFields({
           ]}
         />
       </PowerField>
+      {sleeps ? (
+        <PowerField
+          label="Stay awake after a press or tap"
+          tooltip={
+            <>
+              How long the frame stays up after a button press or a tap on the screen, so the next one is answered at
+              once instead of waking it again. Staying awake costs battery.
+            </>
+          }
+        >
+          <Select
+            value={String(value.awakeAfterInputSeconds ?? 300)}
+            onChange={(seconds) => onChange({ awakeAfterInputSeconds: parseInt(seconds) })}
+            options={[
+              ...awakeAfterInputChoices,
+              ...(value.awakeAfterInputSeconds !== undefined &&
+              !awakeAfterInputChoices.some((choice) => choice.value === String(value.awakeAfterInputSeconds))
+                ? [{ value: String(value.awakeAfterInputSeconds), label: `${value.awakeAfterInputSeconds} seconds` }]
+                : []),
+            ]}
+          />
+        </PowerField>
+      ) : null}
       {sleeps ? (
         <PowerField
           label="Check for commands while sleeping"

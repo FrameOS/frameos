@@ -63,6 +63,10 @@ void DEV_SPI_Write_nByte(uint8_t *pData, uint32_t Len);
 /* One 16-bit word out, most significant byte first, and the word clocked in
  * on MISO meanwhile (the IT8951's bus protocol). */
 UWORD DEV_SPI_Transfer16(UWORD Value);
+/* One word clocked in at `hz`: reads through the GPIO matrix do not survive
+ * the clock writes run at (the IT8951's answers came back scrambled at 20 MHz
+ * on the reTerminal E1003). */
+UWORD DEV_SPI_Read16(int hz);
 void DEV_Delay_ms(UDOUBLE xms);
 UDOUBLE DEV_Millis(void);
 

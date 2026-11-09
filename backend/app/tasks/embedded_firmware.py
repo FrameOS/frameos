@@ -1393,6 +1393,7 @@ EMBEDDED_PRESET_SEED_ONLY_KEYS = (
     ("ledType", "led_type"),
     ("deepSleepOnBattery", "deep_sleep_on_battery"),
     ("wakeCheckSeconds", "wake_check_seconds"),
+    ("awakeAfterInputSeconds", "awake_after_input_seconds"),
 )
 
 
@@ -2028,6 +2029,9 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     wake_check_seconds = _embedded_device_config_value(frame, "wakeCheckSeconds", "wake_check_seconds")
     if isinstance(wake_check_seconds, int) and not isinstance(wake_check_seconds, bool):
         settings.append(_provisioning_setting("wake_check", max(0, wake_check_seconds)))
+    awake_after_input = _embedded_device_config_value(frame, "awakeAfterInputSeconds", "awake_after_input_seconds")
+    if isinstance(awake_after_input, int) and not isinstance(awake_after_input, bool):
+        settings.append(_provisioning_setting("awake_input", max(0, awake_after_input)))
     battery_pin = _embedded_device_config_value(frame, "batteryPin", "battery_pin")
     if isinstance(battery_pin, int) and not isinstance(battery_pin, bool):
         settings.append(_provisioning_setting("battery_pin", battery_pin))

@@ -522,6 +522,7 @@ export const numericCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = [
   'interval',
   'rotate',
   'wake_check_seconds',
+  'awake_after_input_seconds',
   'battery_pin',
   'battery_divider',
   'battery_enable_pin',

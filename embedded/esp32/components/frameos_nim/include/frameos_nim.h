@@ -41,6 +41,11 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format);
  * scene image is created. The caller owns `*buf` and must free it with free().
  * This lowers peak PSRAM on large panels. */
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format);
+/* The picture the last render drew, packed again without running the scene:
+ * what a panel settles from once nobody is tapping (fos_display_settle_due).
+ * -1 when the last render did not leave one. As frameos_nim_render_alloc,
+ * the caller owns `*buf`. */
+int frameos_nim_repack_alloc(uint8_t **buf, size_t *len, int pixel_format);
 /* Render the current scene into the panel's own buffer — an LCD's back frame
  * buffer (fos_display_render_target), shown afterwards with a buffer switch
  * and no copy. Where the scene canvas can be that buffer (a 565 panel,

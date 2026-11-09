@@ -133,6 +133,9 @@ export const cloudFramesContractSettings = {
     "deep_sleep_on_battery": {
       "since": null
     },
+    "awake_after_input_seconds": {
+      "since": "2026.11.6"
+    },
     "wake_check_seconds": {
       "since": null
     },

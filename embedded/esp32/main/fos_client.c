@@ -626,10 +626,26 @@ static bool input_hold_on(void)
  * held. A release waiting in the touch queue behind the render its press
  * caused would otherwise be a finger held all along: a tap read as a long
  * press. The render task's, like every Nim call. */
+/* Someone is at the frame: on battery too it stays up for a while
+ * (awake_after_input_sec), or every tap would be another boot. */
+static void note_input_awake(void)
+{
+    s_last_input_us = esp_timer_get_time();
+    uint32_t seconds = fos_config()->awake_after_input_sec;
+    if (seconds > 0) fos_client_keep_awake_ms(seconds * 1000);
+}
+
+static bool input_keeps_awake(void)
+{
+    uint32_t seconds = fos_config()->awake_after_input_sec;
+    return seconds > 0 && s_last_input_us != 0 &&
+           esp_timer_get_time() - s_last_input_us < (int64_t)seconds * 1000000;
+}
+
 static void process_input_events(void)
 {
     if (input_queued()) {
-        s_last_input_us = esp_timer_get_time();
+        note_input_awake();
         if (fos_display_supports_partial()) fos_input_hold_note(&s_input_hold, s_last_input_us);
     }
     fos_buttons_process_events();
@@ -1140,6 +1156,13 @@ static void image_push_begin(void *ctx, size_t total)
 static bool image_push_write(void *ctx, const uint8_t *data, size_t len)
 {
     image_push_t *push = (image_push_t *)ctx;
+    /* A big panel's picture is 1.3 MB, 10 s on Wi-Fi with the render task
+     * waiting here: a tap gets the task back, and the push starts over. */
+    if (fos_display_supports_partial() && input_queued()) {
+        push->failed = true;
+        s_last_image_push_us = 0;
+        return false;
+    }
     while (len > 0 && !push->failed) {
         size_t take = sizeof(push->buf) - push->used;
         if (take > len) take = len;
@@ -2127,6 +2150,19 @@ static bool input_takes_over(void)
 
 /* What the input hold put off, once. One round trip at a time, so a tap waits
  * for one at the most. */
+/* The greys a tapping session drew as a halftone, from the canvas as it is:
+ * the scene is not run again for this. */
+static void settle_panel(void)
+{
+    uint8_t *buf = NULL;
+    size_t len = 0;
+    if (frameos_nim_repack_alloc(&buf, &len, (int)fos_display_format()) != 0 || !buf) return;
+    bool partial = false;
+    esp_err_t err = fos_display_update(buf, len, true, false, &partial);
+    if (err != ESP_OK) ESP_LOGW(TAG, "settling the panel failed: %s", esp_err_to_name(err));
+    fos_framebuffer_release(buf);
+}
+
 static void run_held_network(const fos_config_t *config)
 {
     while (frameos_nim_flush_log_batch()) {
@@ -2212,6 +2248,7 @@ static void client_task(void *arg)
         char label_esc[FOS_GPIO_BUTTON_LABEL_LEN * 2];
         bool button_wake = fos_buttons_woke_by_button(&wake_pin, wake_label, sizeof(wake_label));
         force_render = button_wake;
+        if (button_wake || fos_touch_woke_chip()) note_input_awake();
         json_escape_value(wake_label, label_esc, sizeof(label_esc));
         char line[192];
         if (button_wake) {
@@ -2406,7 +2443,10 @@ static void client_task(void *arg)
             fos_power_decision_t power;
             fos_power_decide(&power_in, &s_power_state, &power);
             bool battery_critical = power.critical;
-            bool deep_sleep_now = power.deep_sleep;
+            /* A frame someone is using is an awake frame, its interpreters
+             * and its partial updates too. A cell that is nearly flat still
+             * goes to sleep. */
+            bool deep_sleep_now = power.deep_sleep && (power.critical || !input_keeps_awake());
             /* Say what this pass decided and from what: the one line that tells
              * "deep sleep silently off" from "the owner switched it off". Only
              * where it can say something — a stay-connected frame without a
@@ -2862,6 +2902,7 @@ static void client_task(void *arg)
              * the tap and its `longPress`es on each second, and only the
              * process_events below delivers them. */
             uint32_t max_slice = fos_buttons_busy() ? 50 : 1000;
+            if (frameos_nim_available() && fos_display_settle_due(esp_timer_get_time())) settle_panel();
             fos_display_park_if_idle(esp_timer_get_time());
             EventBits_t bits = xEventGroupWaitBits(
                 s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT,

@@ -325,22 +325,27 @@ for the two Spectra boards most of the bench work runs on:
   the `dc` pin slot is its **MISO** (`FOS_PANEL_BUS_SPI_READ`; the E1003's
   is GPIO8, the TF socket's line), `pwr` the panel's power switch (GPIO11)
   and `cs2` the controller's (GPIO21, which keeps the S3 heartbeat LED off
-  it); HRDY is the busy pin, and the bus runs at 20 MHz for this panel
-  (FastEPD's clock for the E1003; the write-only panels keep 8 MHz). The
+  it); HRDY is the busy pin, and the bus writes at 20 MHz for this panel
+  (FastEPD's clock for the E1003; the write-only panels keep 8 MHz) and reads
+  at 4 MHz, because MISO comes through the GPIO matrix and at 20 MHz the words
+  came back scrambled. The
   first refresh of a boot resets the controller, reads its info (a panel
   that is not 1872×1404 fails the init with the size it reported) and
   writes VCOM only when the controller holds another value (it tries the
   setter Waveshare's examples use, then Seeed's, and reads back). Between
   refreshes the controller waits in **standby, which keeps its picture**,
-  so a refresh wakes it, sends only the rows whose 64-bit digest changed
-  (4-bit big-endian loads straight from the packed buffer, four rows to a
-  DMA transfer, runs of changed rows merged over gaps of two), runs GC16
-  over the band they span and waits for `LUTAFSR` to clear before standby;
-  a frame with no changed row is no refresh at all. A whole frame is 1.25 MiB
-  on the wire, about half a second; a clock's digits, a few milliseconds. A
-  failed step, a clear (the INIT waveform) or a boot sends the next picture
-  whole. The console prints `it8951: N of 1404 rows up in … ms, GC16 over
-  rows a-b in … ms` per refresh. The
+  so a refresh wakes it, sends only the tiles (32x8 pixels) whose digest
+  changed, as up to three rectangles (4-bit big-endian loads straight from
+  the packed buffer, a few rows to a DMA transfer), and waits for `LUTAFSR`
+  to clear before standby; a frame with nothing changed is no refresh at all.
+  A whole frame is 1.25 MiB on the wire, about 0.65 s; a clock's digits, a few
+  milliseconds. A failed step, a clear (the INIT waveform) or a boot sends the
+  next picture whole. A new scene runs GC16 over the whole panel and a change
+  in the same scene goes as a partial update, while someone taps one DU over
+  all of it with greys as a halftone and their real greys 2.5 s later
+  (docs/realtime-rendering.md, "Partial refresh on e-paper"). The console
+  prints `it8951: N rect(s) up in … ms, GC16 in … ms` or `it8951: partial[
+  fast], N rect(s) (G grey) up in … ms, waveform … ms` per refresh. The
   preset picks the E1003's variant: VCOM -1.40 V, columns that run right to
   left (rows go out mirrored, as Seeed's GxEPD2 and Gray16 examples, FastEPD
   and Zephyr's board file have it), and a temperature the controller must be
@@ -851,6 +856,11 @@ signal we have; no supported board exposes VBUS on a readable pin, so a
 plugged-in-and-charging frame counts as "on battery" too, which just means it
 sleeps while charging). Without a configured battery pin the flag never fires
 and the frame stays connected.
+
+`awake_input` (`awake_after_input_seconds` on the control planes, seconds, default
+300, 0 = off) keeps a deep-sleeping frame up after a press or a tap, as an awake
+frame with its interpreters and partial updates, so the next one is answered at
+once; a nearly flat cell still sleeps.
 
 `wake_check` (seconds, 0 = off, floored to 60) makes a deep-sleeping frame
 wake at least this often to check the control plane for queued commands. The

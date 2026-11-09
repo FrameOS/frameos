@@ -1341,6 +1341,7 @@ export type EmbeddedUsbConfigKey =
   | 'deep_sleep_on_battery'
   | 'wake_schedule'
   | 'wake_check'
+  | 'awake_input'
   | 'battery_pin'
   | 'battery_divider'
   | 'battery_enable_pin'

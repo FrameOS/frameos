@@ -58,6 +58,7 @@ extern void fos_nim_set_quiet_impl(int quiet);
 extern void fos_nim_set_keep_js_impl(int keep);
 extern size_t fos_nim_js_runtime_bytes_impl(void);
 extern int fos_nim_render_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
+extern int fos_nim_repack_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
 extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
 extern const char *fos_nim_info_impl(void);
 extern const char *fos_nim_scene_info_json_impl(void);
@@ -794,6 +795,28 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
         result = -1;
     }
     /* On success ownership of the packed buffer moves to the caller. */
+    s_pending_render_buffer = NULL;
+    s_nim_oom_jmp_armed = false;
+    nim_lock_give();
+    return result;
+}
+
+int frameos_nim_repack_alloc(uint8_t **buf, size_t *len, int pixel_format)
+{
+    if (!s_nim_ready || !buf || !len) return -1;
+    if (!nim_lock_take()) return -1;
+    int result;
+    s_pending_render_buffer = NULL;
+    if (setjmp(s_nim_oom_jmp) == 0) {
+        s_nim_oom_jmp_armed = true;
+        result = fos_nim_repack_alloc_impl(buf, len, pixel_format);
+    } else {
+        nim_oom_abort_note("repack");
+        if (s_pending_render_buffer != NULL) render_buffer_dispose(s_pending_render_buffer);
+        *buf = NULL;
+        *len = 0;
+        result = -1;
+    }
     s_pending_render_buffer = NULL;
     s_nim_oom_jmp_armed = false;
     nim_lock_give();

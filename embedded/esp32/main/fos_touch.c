@@ -450,7 +450,12 @@ esp_err_t fos_touch_start(void)
      * same two GPIOs twice. Its pins are then the display's business. */
     void *shared = NULL;
     bool share = fos_display_shared_i2c_bus(pins->sda, pins->scl, &shared) == ESP_OK && shared;
-    const int candidates[] = {share ? -1 : pins->sda, share ? -1 : pins->scl, pins->irq, pins->rst, pins->en};
+    /* A controller on a bus fos_i2c.c already runs (the reTerminal E1003's, on
+     * the clock's 19/20) joins it too: a second bus on the same pins would
+     * take them from the first, and its pins are that bus's, already claimed. */
+    i2c_master_bus_handle_t lent = share ? NULL : fos_i2c_lend_bus(pins->sda, pins->scl);
+    bool joined = share || lent;
+    const int candidates[] = {joined ? -1 : pins->sda, joined ? -1 : pins->scl, pins->irq, pins->rst, pins->en};
     for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
         const char *why = candidates[i] >= 0 ? fos_config_gpio_pin_reserved(candidates[i]) : NULL;
         if (why) {
@@ -465,10 +470,7 @@ esp_err_t fos_touch_start(void)
         gpio_set_level((gpio_num_t)pins->en, 1);
         vTaskDelay(pdMS_TO_TICKS(TOUCH_POWER_SETTLE_MS));
     }
-    /* A controller on a bus fos_i2c.c already runs (the reTerminal E1003's,
-     * on the clock's 19/20) joins it too: a second bus on the same pins would
-     * take them from the first. */
-    s_bus = share ? (i2c_master_bus_handle_t)shared : fos_i2c_lend_bus(pins->sda, pins->scl);
+    s_bus = share ? (i2c_master_bus_handle_t)shared : lent;
     s_bus_owned = false;
     if (!s_bus) {
         i2c_master_bus_config_t bus_config = {

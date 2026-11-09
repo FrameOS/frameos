@@ -445,8 +445,13 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
     if current of InterpretedFrameScene and InterpretedFrameScene(current).layoutSceneId.string.len > 0:
       let worn = newJObject()
       worn.put("sceneId", newJString(InterpretedFrameScene(current).layoutSceneId.string))
-      if not InterpretedFrameScene(current).layoutState.isNil:
-        worn.put("state", InterpretedFrameScene(current).layoutState)
+      # The layout is made afresh around the built-in scene: what it has open
+      # goes with it, by name, for a taskbar to keep showing.
+      let layoutState =
+        if InterpretedFrameScene(current).layoutState.isNil: newJObject()
+        else: copy(InterpretedFrameScene(current).layoutState)
+      layoutState.put("openedOver", newJString(current.shownName))
+      worn.put("state", layoutState)
       state.put("layout", worn)
     if sceneId == SceneSettingsId:
       current.settingsOf(state)

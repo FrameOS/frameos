@@ -23,10 +23,22 @@ block:
   doAssert keepIdleInterpreters()
 
 block:
+  # A paint-server fill asks for the largest block to size its strips, and
+  # that is no decode: a short block is no reason to lose an interpreter
+  # until something actually decodes.
+  discard keepIdleInterpreters() # settle
+  refreshDecodeBudget(forDecode = false)
+  doAssert not decodeWantsRoom(512 * 1024)
+  refreshDecodeBudgetInto(forDecode = false)
+  doAssert not decodeWantsRoom(512 * 1024)
+
+block:
   # A decode, still short: they go first, and the render that decoded
   # settles with the higher floor; the next render, decoding nothing, keeps.
   refreshDecodeBudget()
   doAssert released == 1
+  doAssert decodeWantsRoom(512 * 1024)
+  doAssert not decodeWantsRoom(RenderMemoryShortBytes)
   doAssert not keepIdleInterpreters()
   doAssert keepIdleInterpreters()
   refreshDecodeBudgetInto()
