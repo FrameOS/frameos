@@ -164,7 +164,7 @@ pnpm deploy:prod
 
 `pnpm verify` runs the same lint/typecheck/test/build pass as CI's `verify`
 job, cloud-frontend included; CI then adds the three Postgres integration
-suites (`AGENTS.md`, "Cloud tests before you push"). `pnpm deploy:prod` deploys the
+suites (`AGENTS.md`, "Tests: CI is the gate, and you watch it"). `pnpm deploy:prod` deploys the
 pushed HEAD to production; see `docs/deployment.md` for the mechanics and
 rollback procedure.
 
