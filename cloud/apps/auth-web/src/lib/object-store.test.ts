@@ -1,6 +1,9 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Agent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   blobNamespaces,
@@ -353,6 +356,65 @@ describe("the S3 driver's requests", () => {
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+});
+
+describe("the S3 driver on a real socket", () => {
+  // The requests above stop at a stubbed fetch, so they cannot see what fetch
+  // itself refuses. npm undici, loaded before a process's first fetch (the
+  // frame hub did, through ssrf.ts), becomes the dispatcher behind the global
+  // fetch, and it refused every buffer upload carrying a hand-set
+  // content-length: "fetch failed", before a byte left the process. Dev and CI
+  // use the filesystem driver, so only this shows it. Here fetch has already
+  // run, so the dispatcher is installed by hand.
+  type Received = { body: Buffer; contentLength: string | undefined };
+
+  async function withBucket(run: (received: Received[]) => Promise<void>) {
+    const dispatcher = getGlobalDispatcher();
+    setGlobalDispatcher(new Agent());
+    const received: Received[] = [];
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        received.push({ body: Buffer.concat(chunks), contentLength: request.headers["content-length"] });
+        response.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    process.env.R2_CLOUD_ENDPOINT = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    process.env.R2_CLOUD_ACCESS_KEY_ID = "key";
+    process.env.R2_CLOUD_SECRET_ACCESS_KEY = "secret";
+    resetObjectStoreForTests();
+    try {
+      await run(received);
+    } finally {
+      setGlobalDispatcher(dispatcher);
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+
+  it("uploads a buffer, its length set by fetch", async () => {
+    await withBucket(async (received) => {
+      const body = Buffer.alloc(204_800, 7);
+      await objectStore().put("frames/x/cache/abc", body, "image/png");
+      expect(received).toHaveLength(1);
+      expect(received[0]!.contentLength).toBe(String(body.length));
+      expect(received[0]!.body.equals(body)).toBe(true);
+    });
+  });
+
+  it("uploads a file from disk with its length", async () => {
+    await withBucket(async (received) => {
+      const path = join(root, "upload.bin");
+      const body = Buffer.alloc(204_800, 9);
+      await writeFile(path, body);
+      await objectStore().put("photos/x/y", { path, size: body.length }, "image/png");
+      expect(received).toHaveLength(1);
+      expect(received[0]!.contentLength).toBe(String(body.length));
+      expect(received[0]!.body.equals(body)).toBe(true);
+    });
   });
 });
 
