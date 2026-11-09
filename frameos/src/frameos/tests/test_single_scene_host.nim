@@ -436,4 +436,12 @@ block:
   coverHost.makeCurrent(fromId)
   doAssert coverHost.ensureScene()
   doAssert coverHost.scene != first, "switchTo was shown in between: switchFrom is built again"
+  # On an ESP32 the switch waits for the scene to be read from flash, and the
+  # scene left behind must not outlive the switch: its teardown, later, took the
+  # layout's taps with it.
+  coverHost.makeCurrent("system/sceneSwitcher".SceneId)
+  doAssert coverHost.ensureScene()
+  doAssert not coverHost.covered.isNil
+  coverHost.makeCurrent("fixtures/dispatcher/switchTo".SceneId, drop = false)
+  doAssert coverHost.covered.isNil, "the way back led elsewhere"
   echo "covered scene ok"

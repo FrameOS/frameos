@@ -6,6 +6,8 @@ import ../interpreter
 import ../layout_choice
 import ../scene_rhythm
 import ../types
+import ../js_runtime/app_runtime
+from ../ui/events import uiListens
 import system/sceneSwitcher/scene as switcher
 
 # Layouts, <yield /> and <Scene> (docs/scene-layouts.md), and the pass the
@@ -426,6 +428,23 @@ suite "layouts":
     let scene = newScene("tests/inTaskbar")
     discard pass(scene)
     check scene.layoutOf.state{"named"}.getStr() == "tests/inTaskbar"
+
+  test "one instance of a layout going leaves the taps of another that drew since":
+    let first = newScene("tests/inTaskbar")
+    discard pass(first)
+    let second = newScene("tests/inTaskbar")
+    discard pass(second)
+    for app in InterpretedFrameScene(first.layoutOf).appsByNodeId.values:
+      releaseJsAppRuntime(app)
+    check uiListens("tests/taskbar", "tap")
+    let tap = %*{"x": 5, "y": 35, "pointerId": 0, "pointerType": "mouse"}
+    runEvent(second, ExecutionContext(scene: second, event: "tap", payload: tap, loopIndex: 0, loopKey: ".", nextSleep: -1))
+    var sent: seq[string]
+    while true:
+      let (ok, message) = eventChannel.tryRecv()
+      if not ok: break
+      sent.add message[1]
+    check "sceneSwitcher" in sent
 
   test "a handler can send what a scene may send, and only that":
     let scene = newScene("tests/inTaskbar")

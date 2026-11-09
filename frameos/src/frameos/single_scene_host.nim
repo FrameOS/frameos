@@ -49,7 +49,7 @@ type
       ## settings, system/sceneSettings/scene.nim), which draws itself
       ## through the same three procs.
     sceneId*: Option[SceneId]             ## the current scene, resident or not
-    covered: FrameScene
+    covered*: FrameScene
       ## The scene the scene switcher or the scene settings opened over, kept
       ## while there is room, and current again without its init when the
       ## way back leads to it: its JS interpreters, memo and laid-out tree
@@ -240,8 +240,11 @@ proc makeCurrent*(host: SingleSceneHost, sceneId: SceneId, drop = true) =
       host.exported = nil
     else:
       host.dropScene()
-      if host.coveredId.isSome and host.coveredId.get() != sceneId and not isBuiltInScene(sceneId.string):
-        host.dropCovered() # the way back led somewhere else
+  # The way back led somewhere else. Also when the old instance stays until the
+  # firmware has read the new one from flash: left for later, it went when
+  # memory ran short, in the middle of the next scene.
+  if host.coveredId.isSome and host.coveredId.get() != sceneId and not isBuiltInScene(sceneId.string):
+    host.dropCovered()
   host.sceneId = some(sceneId)
   host.renderRequested = true
 

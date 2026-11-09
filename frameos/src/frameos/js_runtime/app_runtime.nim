@@ -1915,7 +1915,7 @@ proc releaseJsAppRuntime*(app: AppRoot) =
   if not (app of DynamicJsApp):
     return
   if not app.scene.isNil:
-    forgetUiTarget(app.scene.id.string, app.nodeId.int)
+    forgetUiTarget(app.scene.id.string, app.nodeId.int, cast[pointer](app))
   let runtime = DynamicJsApp(app).runtime
   if runtime.isNil:
     return
@@ -2415,6 +2415,7 @@ proc keepUiRegions(runtime: JsAppRuntime, owner: AppRoot, sceneId: string,
   ## What the pointer can do to the UI just drawn with its corner at x, y,
   ## `scale` canvas pixels to each of its own.
   let target = uiTarget(sceneId, owner.nodeId.int)
+  target.owner = cast[pointer](owner)
   target.regions = move(regions)
   target.offsetX = x.float32
   target.offsetY = y.float32

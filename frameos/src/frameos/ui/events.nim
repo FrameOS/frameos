@@ -39,6 +39,8 @@ type
   UiTarget* = ref object
     sceneId*: string
     nodeId*: int
+    owner*: pointer             ## the app that last drew here. Two instances of a scene share this target:
+                                ## a layout worn by the scene and by the switcher opened over it
     offsetX*, offsetY*: float32 ## the UI's corner in the scene's canvas
     scale*: float32             ## canvas pixels per layout pixel (render_scale.nim); 0 = 1
     regions*: seq[UiRegion]     ## the last render's, in paint order
@@ -111,12 +113,15 @@ proc uiTarget*(sceneId: string, nodeId: int, create = true): UiTarget =
     result.input.accentLit = -1
     targets.add result
 
-proc forgetUiTarget*(sceneId: string, nodeId: int) =
+proc forgetUiTarget*(sceneId: string, nodeId: int, owner: pointer = nil) =
   ## The app node's scene is torn down: its regions, what the pointer was
   ## doing over them and its way into the app go with it. A target kept
-  ## called the app the scene had before, which was gone.
+  ## called the app the scene had before, which was gone. With `owner`, only
+  ## if that app is the one that last drew here: another instance of the scene
+  ## may have, and its taps are not this one's to take away.
   for i in countdown(targets.high, 0):
-    if targets[i].sceneId == sceneId and targets[i].nodeId == nodeId:
+    if targets[i].sceneId == sceneId and targets[i].nodeId == nodeId and
+        (owner.isNil or targets[i].owner.isNil or targets[i].owner == owner):
       targets.delete(i)
 
 proc uiSceneEvent*(sceneId: string) =
