@@ -1,6 +1,8 @@
-import std/[json, tables, unittest, os, strutils]
+import std/[json, options, tables, unittest, os, strutils]
 import pixie
 import ../channels
+import ../event_loop
+import ../events
 import ../events_gen
 import ../interpreter
 import ../layout_choice
@@ -880,6 +882,54 @@ suite "the layout chosen on the frame":
     rhythmClockOverride = 1002.0
     discard pass(wears)
     check wears.layoutOf.id.string == "tests/layout"
+
+  test "ten pulls from the top edge take a worn layout off, and a slow pull starts the count over":
+    var scene = newScene("tests/content")
+    discard pass(scene)
+    check not scene.wornLayout.isNil
+    var renders = 0
+    let loop = newEventLoop(EventHost(
+      requestRender: (proc () = renders += 1),
+      sceneFor: (proc (target: Option[SceneId]): FrameScene = scene),
+      runScene: (proc (scene: FrameScene, event: string, payload: JsonNode) = discard),
+      sceneListens: (proc (scene: FrameScene, event: string): bool = false),
+      log: (proc (entry: JsonNode) = logged.add(entry))), config)
+    proc pull() =
+      loop.enqueue(eoDriver, evEdgeSwipe, %*{"edge": "top", "direction": "down"})
+      discard loop.drain()
+    for i in 1 .. 9:
+      pull()
+    loop.backdatePullsForTest(GestureSafeModeGapMs + 1000)
+    pull() # too long after the ninth: this is the first again
+    for i in 1 .. 8:
+      pull()
+    check chosenLayout() == ""
+    # Another edge is not a pull, and does not break the count either.
+    loop.enqueue(eoDriver, evEdgeSwipe, %*{"edge": "bottom", "direction": "up"})
+    discard loop.drain()
+    check chosenLayout() == ""
+    pull()
+    check chosenLayout() == NoLayout
+    check renders == 1
+    check ($logged).contains("layout:safeMode")
+    rhythmClockOverride = 1001.0
+    discard pass(scene)
+    check scene.wornLayout.isNil
+
+  test "the pulls mean nothing on a frame wearing no layout":
+    var scene = newScene("tests/child")
+    discard pass(scene)
+    check scene.wornLayout.isNil
+    let loop = newEventLoop(EventHost(
+      requestRender: (proc () = discard),
+      sceneFor: (proc (target: Option[SceneId]): FrameScene = scene),
+      runScene: (proc (scene: FrameScene, event: string, payload: JsonNode) = discard),
+      sceneListens: (proc (scene: FrameScene, event: string): bool = false),
+      log: (proc (entry: JsonNode) = discard)), config)
+    for i in 1 .. 12:
+      loop.enqueue(eoDriver, evEdgeSwipe, %*{"edge": "top", "direction": "down"})
+      discard loop.drain()
+    check chosenLayout() == ""
 
   test "what was set on the frame for a layout is what it starts from":
     saveLayoutState("tests/uiLayout", %*{"title": "From the frame"})

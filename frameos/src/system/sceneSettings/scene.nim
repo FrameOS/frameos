@@ -92,6 +92,8 @@ const
   ARestart = 2
   AReboot = 3
   ALayout = 4
+  ACheckUpdate = 5
+  AInstallUpdate = 6
   OtherValue = "\1" ## a select box's `other` option; no value of its own is this
   # The types the panel cannot edit: what they hold is not text.
   Unedited = ["node", "scene", "image"]
@@ -342,6 +344,14 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
       options.elems.add option(step, scaleLabel(step))
   scale.put("options", options)
   result.elems.add scale
+  if not info{"clockDate"}.isNil:
+    # An ESP32's clock, set by hand where no network time reaches it.
+    let date = field("clockDate", "Date", "string")
+    date.put("placeholder", newJString("YYYY-MM-DD"))
+    result.elems.add date
+    let time = field("clockTime", "Time", "string")
+    time.put("placeholder", newJString("HH:MM"))
+    result.elems.add time
 
 proc opener(self: SceneSettingsScene): string =
   self.state{"from"}.getStr()
@@ -418,12 +428,17 @@ proc press(self: SceneSettingsScene, action: int) =
   var asking = -1
   if action == AScan:
     frameAction("scan")
+  elif action == ACheckUpdate:
+    frameAction("checkUpdate")
   elif action == ALayout:
     self.openLayoutPage()
   elif action == ARender:
     sendEvent(evRender, newJObject(), eoPanel)
   elif self.state{"confirm"}.getInt(-1) == action:
-    sendEvent(if action == ARestart: evRestart else: evReboot, newJObject(), eoPanel)
+    if action == AInstallUpdate:
+      frameAction("installUpdate")
+    else:
+      sendEvent(if action == ARestart: evRestart else: evReboot, newJObject(), eoPanel)
   else:
     asking = action
   self.state.put("confirm", newJInt(asking))
@@ -689,6 +704,16 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   card.line(look, "Not saved", info{"note"}.getStr())
   card.line(look, "Managed by", info{"managedBy"}.getStr())
   card.line(look, "Version", info{"version"}.getStr())
+  let
+    update = info{"update"}
+    updateState = update{"state"}.getStr()
+  card.line(look, "Update", case updateState
+    of "checking": "Checking\xe2\x80\xa6"
+    of "current": "This is the latest version"
+    of "available": update{"version"}.getStr() & " is available"
+    of "failed": "Could not check for updates"
+    of "installing": "Installing. The frame restarts when it is done."
+    else: "")
   result.children.add card
   let
     fields = self.frameFields(info, autoScale, unit)
@@ -705,10 +730,18 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
       var c = look.grey
       c.px("text", look.size * 3 div 4)
       result.children.add el("div", move c, SvgNode(text: "Any rotation but 0\xc2\xb0 adds a noticeable delay to every frame of an animated scene."))
+    elif name == "clockTime" and info{"wifi", "state"}.getStr() == "connected":
+      var c = look.grey
+      c.px("text", look.size * 3 div 4)
+      result.children.add el("div", move c, SvgNode(text: "While this frame can reach the internet, its clock follows network time."))
   c = "flex flex-wrap"
   c.px("gap", look.gap div 2)
   let buttons = el("div", move c)
   buttons.children.add look.pressButton("Render again", ARender)
+  if updateState == "available":
+    buttons.children.add look.pressButton("Install update", AInstallUpdate, asking)
+  elif updateState.len > 0 and updateState != "checking" and updateState != "installing":
+    buttons.children.add look.pressButton("Check for updates", ACheckUpdate)
   if %"restart" in arrayOf(info{"actions"}).elems:
     buttons.children.add look.pressButton("Restart FrameOS", ARestart, asking)
   buttons.children.add look.pressButton("Reboot", AReboot, asking)

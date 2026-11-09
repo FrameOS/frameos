@@ -799,6 +799,9 @@
     "directions": ["left", "right", "up", "down"],
     "$edgeComment": "edgeSwipe: a touch or pen press this close to an edge, in scene pixels, is held back from the scene until it is a swipe away from that edge (then the frame's) or not (then the scene's, delivered as it happened).",
     "edgePx": 24,
+    "$safeModeComment": "The way out of a layout that cannot be used: this many edgeSwipes from the top edge, each within safeModeGapMs of the last, take the layout off the frame (docs/scene-layouts.md \"Safe mode\"), whatever the frame's event map says those swipes do.",
+    "safeModePulls": 10,
+    "safeModeGapMs": 5000,
     "edges": ["left", "right", "top", "bottom"]
   },
   "buttons": {

@@ -197,7 +197,7 @@ def load():
             if "since" in schedule and not VERSION_RE.fullmatch(schedule["since"]):
                 fail(f"{where}: schedule.since must be a FrameOS version")
 
-    for section, keys in (("gestures", ("tapSlopPx", "tapMs", "doubleTapMs", "longPressMs", "swipeMinPx", "edgePx")),
+    for section, keys in (("gestures", ("tapSlopPx", "tapMs", "doubleTapMs", "longPressMs", "swipeMinPx", "edgePx", "safeModePulls", "safeModeGapMs")),
                           ("buttons", ("doublePressMs", "longPressMs"))):
         for key in keys:
             if not isinstance(doc[section].get(key), int) or doc[section][key] <= 0:
@@ -398,6 +398,9 @@ def gen_nim(doc):
         f"  GestureLongPressMs* = {int(doc['gestures']['longPressMs'])}",
         f"  GestureSwipeMinPx* = {int(doc['gestures']['swipeMinPx'])}",
         f"  GestureEdgePx* = {int(doc['gestures']['edgePx'])}",
+        "  ## The way out of a layout that cannot be used (docs/scene-layouts.md \"Safe mode\").",
+        f"  GestureSafeModePulls* = {int(doc['gestures']['safeModePulls'])}",
+        f"  GestureSafeModeGapMs* = {int(doc['gestures']['safeModeGapMs'])}",
         "  ## A GPIO button: a short press waits `ButtonDoublePressMs` for a second down; a hold is a `longPress` at every whole `ButtonLongPressMs`.",
         f"  ButtonDoublePressMs* = {int(doc['buttons']['doublePressMs'])}",
         f"  ButtonLongPressMs* = {int(doc['buttons']['longPressMs'])}",

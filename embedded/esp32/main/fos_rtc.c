@@ -1,5 +1,6 @@
 #include "fos_rtc.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 /* PCF8563 time registers, all BCD: 0x02 VL(7) seconds(6:0), 0x03 minutes,
@@ -10,6 +11,52 @@
 #define RTC_VL_BIT 0x80 /* VL on the PCF8563, OS on the PCF85063 */
 #define PCF8563_REG_TIME 0x02
 #define PCF85063_REG_TIME 0x04
+
+static bool all_digits(const char *text, int count)
+{
+    for (int i = 0; i < count; i++) {
+        if (text[i] < '0' || text[i] > '9') return false;
+    }
+    return true;
+}
+
+bool fos_rtc_parse_date(const char *text, struct tm *tm)
+{
+    if (text == NULL || strlen(text) != 10 || text[4] != '-' || text[7] != '-' || !all_digits(text, 4) ||
+        !all_digits(text + 5, 2) || !all_digits(text + 8, 2)) {
+        return false;
+    }
+    static const uint8_t days[12] = {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    int year = atoi(text);
+    int month = atoi(text + 5);
+    int day = atoi(text + 8);
+    bool leap = year % 4 == 0; /* 2024 to 2099: no century in between */
+    if (year < 2024 || year > 2099 || month < 1 || month > 12 || day < 1 || day > days[month - 1] ||
+        (month == 2 && day == 29 && !leap)) {
+        return false;
+    }
+    tm->tm_year = year - 1900;
+    tm->tm_mon = month - 1;
+    tm->tm_mday = day;
+    return true;
+}
+
+bool fos_rtc_parse_time(const char *text, struct tm *tm)
+{
+    if (text == NULL) return false;
+    size_t len = strlen(text);
+    int colon = len == 4 ? 1 : 2;
+    if ((len != 4 && len != 5) || text[colon] != ':' || !all_digits(text, colon) || !all_digits(text + colon + 1, 2)) {
+        return false;
+    }
+    int hour = atoi(text);
+    int minute = atoi(text + colon + 1);
+    if (hour > 23 || minute > 59) return false;
+    tm->tm_hour = hour;
+    tm->tm_min = minute;
+    tm->tm_sec = 0;
+    return true;
+}
 
 uint8_t fos_rtc_time_reg(fos_rtc_chip_t chip)
 {

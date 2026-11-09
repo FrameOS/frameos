@@ -27,11 +27,27 @@ or a saved scene is edited, the cloud refuses a store version
 to the AI. The runtime does not check: a layout with no yield shows no content.
 
 **Starters.** Every repo sample whose scene is a layout (`Top bar`, `Bottom bar`,
-`Side rail`, `Windows 98` in `repo/scenes/samples`) is also one click away on both planes
+`Side rail`, `Windows 98`, `Polaroid`, `Front page`, `Terminal`, `Gallery wall` in
+`repo/scenes/samples`) is also one click away on both planes
 (`frontend/scripts/generateLayoutStarters.mjs`): "New layout" in the frame's
 Layouts group, "Add layout" at the end of the Add scene drawer while it has none,
 and "Add a layout" in its Settings under Layouts. Each sample's `thumb.jpg` is
 shown in those lists and saved as the added layout's picture.
+
+**In the store.** Layouts have their own shelf (`layouts` in
+`cloud/apps/auth-web/src/lib/categories.ts`). A scene published with a layout as
+the one it starts on goes there without asking the classifier, and an owner can
+still move it.
+
+**Safe mode.** A layout can leave a frame unusable, and the settings that would
+take it off are drawn inside it. Ten pulls down from the top edge of a touch
+screen, each within five seconds of the last (`gestures.safeModePulls` and
+`safeModeGapMs` in the events contract), take the layout off: the frame's own
+choice becomes "No layout", as if picked on its settings page, and it stays that
+way until another is picked there. The dispatcher counts them before any event
+map, so a bad map cannot hide them, and logs `layout:safeMode`. On a frame wearing
+no layout they mean nothing. A frame with keys alone has no pull; there the
+control plane changes the layout.
 
 **Around the built-in scenes.** The scene list and the settings are drawn in the
 layout of the scene they were opened from, so a taskbar stays up. The dispatcher

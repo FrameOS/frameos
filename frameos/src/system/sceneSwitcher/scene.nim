@@ -53,7 +53,8 @@ type
     ## The frame's scenes in its scene list's order, with their names.
   SwitcherThumbnail* = proc (frameConfig: FrameConfig, sceneId: string,
       width, height: int): Image {.nimcall, gcsafe.}
-    ## A scene's last picture, `width` x `height` exactly, or nil.
+    ## A scene's last picture, `width` x `height` or smaller in that shape
+    ## (it is stretched to the tile), or nil.
   SwitcherThumbnailPass* = proc (start: bool): bool {.nimcall, gcsafe.}
     ## Around a render's pictures: `start` before the first, then after the
     ## last, whether one was left out for time (and another render is due).
@@ -432,37 +433,37 @@ proc titleRow(look: TileLook, index, size: int, height = 0): SvgNode =
     else: d.add " bg-black"
     result.children.add el("div", d)
 
-when not defined(frameosEmbedded):
-  proc pictureTile(self: SceneSwitcherScene, tile: SvgNode, look: TileLook, index: int,
-      grid: SwitcherGrid, title: string) =
-    ## A tile's picture and the title under it: the scene's last snapshot,
-    ## where the host keeps one (Linux), or its number in the picture's place.
-    let
-      titleH = clamp(int(round(grid.tileH.float * 0.2)), 14, 44)
-      pw = max(grid.tileW - 2 * look.border - 2 * look.inner, 1)
-      ph = max(grid.tileH - 2 * look.border - 2 * look.inner - titleH, 1)
-      size = clamp(int(round(min(titleH.float * 0.62, grid.tileW.float * 0.13))), 10, 28)
-    var picture: Image
-    try:
-      picture = sceneSwitcherThumbnail(self.frameConfig, self.entries[index].id, pw, ph)
-    except Exception:
-      picture = nil
-    var c = "shrink-0"
-    c.px("rounded", max(look.radius - look.inner, 2))
-    c.px("w", pw)
-    c.px("h", ph)
-    if not picture.isNil:
-      tile.children.add SvgNode(tag: "img", image: picture, attrs: @[("class", c)])
-    else:
-      # No picture yet (a scene not shown since the card was made).
-      c.add " flex items-center justify-center font-bold"
-      c.add(if not look.paper: " bg-zinc-700" elif look.lit: " border-2 border-white" else: " border-2 border-black")
-      c.px("text", clamp(ph div 3, 12, 64))
-      c.mute(look)
-      tile.children.add el("div", c, txt($(index + 1)))
-    let row = look.titleRow(index, size, titleH)
-    row.children.add el("span", if look.paper: "truncate font-bold" else: "truncate", txt(title))
-    tile.children.add row
+proc pictureTile(self: SceneSwitcherScene, tile: SvgNode, look: TileLook, index: int,
+    grid: SwitcherGrid, title: string) =
+  ## A tile's picture and the title under it: the scene's last snapshot,
+  ## where the host keeps one (Linux, an ESP32), or its number in the
+  ## picture's place.
+  let
+    titleH = clamp(permille(grid.tileH, 200), 14, 44)
+    pw = max(grid.tileW - 2 * look.border - 2 * look.inner, 1)
+    ph = max(grid.tileH - 2 * look.border - 2 * look.inner - titleH, 1)
+    size = clamp(min(permille(titleH, 620), permille(grid.tileW, 130)), 10, 28)
+  var picture: Image
+  try:
+    picture = sceneSwitcherThumbnail(self.frameConfig, self.entries[index].id, pw, ph)
+  except Exception:
+    picture = nil
+  var c = "shrink-0"
+  c.px("rounded", max(look.radius - look.inner, 2))
+  c.px("w", pw)
+  c.px("h", ph)
+  if not picture.isNil:
+    tile.children.add SvgNode(tag: "img", image: picture, attrs: @[("class", c)])
+  else:
+    # No picture yet (a scene not shown since the card was made).
+    c.add " flex items-center justify-center font-bold"
+    c.add(if not look.paper: " bg-zinc-700" elif look.lit: " border-2 border-white" else: " border-2 border-black")
+    c.px("text", clamp(ph div 3, 12, 64))
+    c.mute(look)
+    tile.children.add el("div", c, txt($(index + 1)))
+  let row = look.titleRow(index, size, titleH)
+  row.children.add el("span", if look.paper: "truncate font-bold" else: "truncate", txt(title))
+  tile.children.add row
 
 proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: SwitcherGrid,
     button: string): SvgNode =
@@ -487,11 +488,10 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: Swit
   var title = self.entries[index].name
   if title.len == 0:
     title = self.entries[index].id
-  when not defined(frameosEmbedded):
-    if not sceneSwitcherThumbnail.isNil:
-      self.pictureTile(result, look, index, grid, title)
-      return
-  # Names only: an ESP32 keeps no picture of a scene it is not showing.
+  if not sceneSwitcherThumbnail.isNil:
+    self.pictureTile(result, look, index, grid, title)
+    return
+  # Names only: the preview keeps no picture of a scene it is not showing.
   let size = clamp(min(permille(grid.tileH, 180), permille(grid.tileW, 140)), 12, 40)
   result.children.add look.titleRow(index, size)
   var name = "grow flex items-center justify-center text-center font-bold line-clamp-3"

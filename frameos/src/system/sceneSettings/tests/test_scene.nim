@@ -719,3 +719,52 @@ block the_frame_page_has_the_layout_and_scans_on_the_network_line:
   layoutListing = nil
   chooseLayout("")
   echo "layout row ok"
+
+block the_frame_page_sets_the_clock_and_offers_an_update:
+  var
+    actions: seq[string]
+    applied: seq[JsonNode]
+    updateState = "available"
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      result = %*{"wifi": {"state": "connected", "ssid": "Home", "rssi": -61, "ip": "192.168.1.20",
+        "networks": ["Home"], "scanning": false, "password": true},
+        "rotate": 0, "renderScale": 0, "version": "2026.11.5", "clockDate": "2026-11-09", "clockTime": "08:57",
+        "update": {"state": updateState, "version": "2026.11.6"}}
+  frameSettingsApply = proc (values: JsonNode) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: applied.add values
+  frameSettingsAction = proc (action: string) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: actions.add action
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
+  discard scene.draw()
+  scene.scrollTo(2000)
+  discard scene.draw()
+  # Installing restarts the frame: it asks twice, like Reboot.
+  scene.tap(regionWith(20006))
+  doAssert "installUpdate" notin actions, $actions
+  discard scene.draw()
+  scene.scrollTo(2000)
+  discard scene.draw()
+  scene.tap(regionWith(20006))
+  doAssert "installUpdate" in actions, $actions
+  # With nothing to install it offers to look again, and not while it looks.
+  updateState = "current"
+  discard scene.draw()
+  scene.scrollTo(2000)
+  discard scene.draw()
+  scene.tap(regionWith(20005))
+  doAssert "checkUpdate" in actions, $actions
+  updateState = "checking"
+  discard scene.draw()
+  doAssert not uiTarget(SceneSettingsId, 1, create = false).regions.anyIt(it.handlers[ueClick] == 20005 + 1)
+  # A time edited alone goes to the host alone: it keeps the date it has.
+  scene.state["frameValues"] = %*{"clockTime": "07:30"}
+  discard scene.draw()
+  scene.tap(regionWith(1))
+  doAssert applied.len == 1, $applied
+  doAssert applied[0]{"clockTime"}.getStr() == "07:30" and applied[0]{"clockDate"}.isNil, $applied
+  frameSettingsRead = nil
+  frameSettingsApply = nil
+  frameSettingsAction = nil
+  echo "clock and update ok"

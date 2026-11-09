@@ -75,6 +75,8 @@ static TaskHandle_t s_ota_task_handle = NULL;
 static volatile bool s_ota_busy = false;
 static volatile bool s_ota_reboot_scheduled = false;
 static volatile bool s_cloud_ota_running = false;
+#define FOS_OTA_CHECK_VERSION_MAX 32
+static void note_install_failed(void);
 
 /* ----------------------------------------------------------- platform
  * The release publishes one signed app image per chip × flash layout
@@ -957,23 +959,149 @@ esp_err_t fos_ota_request_check(void)
     return ESP_OK;
 }
 
+/* ------------------------------------- is there one? (the settings page) */
+
+typedef enum {
+    CHECK_IDLE,
+    CHECK_RUNNING,
+    CHECK_CURRENT,
+    CHECK_AVAILABLE,
+    CHECK_FAILED,
+    CHECK_INSTALLING,
+} check_state_t;
+
+static volatile check_state_t s_check = CHECK_IDLE;
+static char s_check_version[FOS_OTA_CHECK_VERSION_MAX] = "";
+static int64_t s_checked_at_us = -1;
+static void (*s_check_hook)(void) = NULL;
+
+void fos_ota_set_check_hook(void (*hook)(void)) { s_check_hook = hook; }
+
+static void check_done(check_state_t state)
+{
+    s_check = state;
+    if (s_check_hook) s_check_hook();
+}
+
+static void note_install_failed(void)
+{
+    if (s_check == CHECK_INSTALLING) check_done(CHECK_FAILED);
+}
+
+bool fos_ota_has_control_plane(void)
+{
+    const fos_config_t *config = fos_config();
+    return (config->backend_url[0] && config->frame_id != 0 && config->api_key[0]) || fos_cloud_frame_id()[0];
+}
+
+static bool cloud_source(ota_source_t *src);
+
+static bool source_of_this_board(ota_source_t *src)
+{
+    const fos_config_t *config = fos_config();
+    if (config->backend_url[0] && config->frame_id != 0 && config->api_key[0]) return backend_source(src);
+    return fos_cloud_frame_id()[0] && cloud_source(src);
+}
+
+static void ota_check_task(void *arg)
+{
+    (void)arg;
+    ota_source_t src;
+    ota_manifest_t manifest = {0};
+    bool up_to_date = false;
+    esp_err_t err = ESP_FAIL;
+    SemaphoreHandle_t lock = ota_lock();
+    if (lock != NULL && xSemaphoreTake(lock, 0) == pdTRUE) {
+        if (source_of_this_board(&src)) err = ota_fetch_manifest(&src, &manifest, &up_to_date);
+        xSemaphoreGive(lock);
+    }
+    if (err == ESP_OK && !up_to_date) strlcpy(s_check_version, manifest.version, sizeof(s_check_version));
+    s_checked_at_us = esp_timer_get_time();
+    check_done(err != ESP_OK ? CHECK_FAILED : up_to_date ? CHECK_CURRENT : CHECK_AVAILABLE);
+    vTaskDelete(NULL);
+}
+
+void fos_ota_check_start(void)
+{
+    taskENTER_CRITICAL(&s_ota_request_mux);
+    bool running = s_check == CHECK_RUNNING || s_check == CHECK_INSTALLING;
+    if (!running) s_check = CHECK_RUNNING;
+    taskEXIT_CRITICAL(&s_ota_request_mux);
+    if (running) return;
+    if (s_check_hook) s_check_hook();
+    if (xTaskCreate(ota_check_task, "fos_ota_check", 8192, NULL, 4, NULL) != pdPASS) check_done(CHECK_FAILED);
+}
+
+const char *fos_ota_check_state(char *version, size_t cap)
+{
+    if (version != NULL && cap > 0) strlcpy(version, s_check == CHECK_AVAILABLE ? s_check_version : "", cap);
+    switch (s_check) {
+    case CHECK_RUNNING: return "checking";
+    case CHECK_CURRENT: return "current";
+    case CHECK_AVAILABLE: return "available";
+    case CHECK_FAILED: return "failed";
+    case CHECK_INSTALLING: return "installing";
+    default: return "idle";
+    }
+}
+
+int64_t fos_ota_check_age_s(void)
+{
+    return s_checked_at_us < 0 ? -1 : (esp_timer_get_time() - s_checked_at_us) / 1000000;
+}
+
+esp_err_t fos_ota_install_checked(void)
+{
+    if (s_check != CHECK_AVAILABLE) return ESP_ERR_INVALID_STATE;
+    check_done(CHECK_INSTALLING);
+    esp_err_t err = fos_ota_request_for_control_plane(NULL);
+    if (err != ESP_OK) check_done(CHECK_FAILED);
+    return err;
+}
+
+/* Two OTA paths exist and a board only ever has one of them: the backend one
+ * (manifest under backend_url, authenticated with the frame api_key, applied
+ * by the early updater after a reboot) and the cloud one (device-authed
+ * manifest + minisign verification, fos_ota_request_cloud_update). An enrolled
+ * cloud frame has no backend_url/api_key at all, so sending it down the
+ * backend path could only ever answer ESP_ERR_INVALID_STATE, which read like
+ * "OTA is broken" rather than "wrong path". Pick by what this board is. */
+esp_err_t fos_ota_request_for_control_plane(const char **plane_out)
+{
+    const fos_config_t *config = fos_config();
+    bool backend_ready = config->backend_url[0] && config->frame_id != 0 && config->api_key[0];
+    if (!backend_ready && fos_cloud_frame_id()[0]) {
+        if (plane_out) *plane_out = "cloud";
+        fos_ota_request_cloud_update();
+        return ESP_OK;
+    }
+    if (plane_out) *plane_out = "backend";
+    return fos_ota_request_check();
+}
+
 /* ----------------------------------------------------------- cloud plane */
+
+static bool cloud_source(ota_source_t *src)
+{
+    memset(src, 0, sizeof(*src));
+    src->plane = "cloud";
+    char frame_id[64];
+    if (!fos_cloud_api_access(src->base_url, sizeof(src->base_url), frame_id, sizeof(frame_id),
+                              src->auth, sizeof(src->auth))) {
+        ota_log(src, "skipped", "not-enrolled");
+        return false;
+    }
+    snprintf(src->manifest_url, sizeof(src->manifest_url),
+             "%s/api/frames/%s/firmware/manifest?platform=%s",
+             src->base_url, frame_id, fos_ota_platform());
+    src->trust_base_transport = false;
+    return true;
+}
 
 static esp_err_t cloud_ota_run(void)
 {
     ota_source_t src;
-    memset(&src, 0, sizeof(src));
-    src.plane = "cloud";
-    char frame_id[64];
-    if (!fos_cloud_api_access(src.base_url, sizeof(src.base_url), frame_id, sizeof(frame_id),
-                              src.auth, sizeof(src.auth))) {
-        ota_log(&src, "skipped", "not-enrolled");
-        return ESP_ERR_INVALID_STATE;
-    }
-    snprintf(src.manifest_url, sizeof(src.manifest_url),
-             "%s/api/frames/%s/firmware/manifest?platform=%s",
-             src.base_url, frame_id, fos_ota_platform());
-    src.trust_base_transport = false;
+    if (!cloud_source(&src)) return ESP_ERR_INVALID_STATE;
     return ota_run_signed(&src);
 }
 
@@ -1008,6 +1136,7 @@ static void cloud_ota_task(void *arg)
     s_cloud_ota_running = false;
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "cloud ota: finished with %s", esp_err_to_name(err));
+        note_install_failed();
     }
     vTaskDelete(NULL);
 }

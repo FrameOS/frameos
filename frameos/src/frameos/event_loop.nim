@@ -33,6 +33,8 @@ import ./driver_abi
 import ./input_state
 import ./event_map
 import ./scene_rhythm
+from ./layout_choice import chooseLayout, NoLayout
+from std/times import inMilliseconds, initDuration
 from ./ui/events as uiEvents import uiTimerDue, uiTimersPending
 
 export events
@@ -102,6 +104,9 @@ type
     main: Deque[EventEnvelope]
     input: Deque[EventEnvelope]
     nextSeq: uint64
+    # Pulls down from the top edge in a row: the way out of a bad layout.
+    pulls: int
+    lastPull: MonoTime
     draining: bool
     renderWanted: bool
     # The render rule's one exception. `if-state-changed` exists so that what a
@@ -323,6 +328,11 @@ proc refused(loop: EventLoop, envelope: EventEnvelope, reason: string, sceneId =
   loop.log(entry)
   false
 
+when defined(testing):
+  proc backdatePullsForTest*(loop: EventLoop, ms: int) =
+    ## As if the last pull were `ms` longer ago.
+    loop.lastPull = loop.lastPull - initDuration(milliseconds = ms)
+
 proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): bool =
   var payload = envelope.payload
   if not loop.frameMapped(envelope.origin, envelope.name, payload):
@@ -499,6 +509,27 @@ proc pointerIdOf(delivery: InputDelivery): int =
     return -1
   delivery.payload["pointerId"].getInt(-1)
 
+proc notePull(loop: EventLoop, target: Option[SceneId], delivery: InputDelivery) =
+  ## Safe mode (docs/scene-layouts.md): counted before any event map, so a
+  ## frame whose map or layout is the problem still hears it. Nothing happens
+  ## on a frame wearing no layout: the choice it writes outlives this.
+  if delivery.name != evEdgeSwipe or delivery.payload.isNil or delivery.payload{"edge"}.getStr() != "top":
+    return
+  let now = getMonoTime()
+  if loop.pulls > 0 and (now - loop.lastPull).inMilliseconds > GestureSafeModeGapMs:
+    loop.pulls = 0
+  loop.lastPull = now
+  inc loop.pulls
+  if loop.pulls < GestureSafeModePulls:
+    return
+  loop.pulls = 0
+  let scene = loop.host.sceneFor(target)
+  if scene.isNil or scene.wornLayout.isNil:
+    return
+  loop.log(%*{"event": "layout:safeMode", "sceneId": scene.id.string, "layout": scene.wornLayout.id.string})
+  chooseLayout(NoLayout)
+  loop.enqueue(eoSystem, evRender, newJObject())
+
 proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDelivery, fromRender: bool): bool =
   ## An input event to the scene: under its name, and under each old name it
   ## has (`mouseMove` for `pointerMove`), each only when the scene listens.
@@ -507,6 +538,7 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
   if eventIsLogged(delivery.name):
     loop.log(withEventPayload(%*{"event": "event:" & delivery.name, "origin": $delivery.origin},
       delivery.name, delivery.payload))
+  loop.notePull(target, delivery)
   var payload = delivery.payload
   # The frame's event map first, scene or no scene: a long press of LEFT is
   # the previous scene, and the scene never hears that press.

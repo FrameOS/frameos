@@ -55,6 +55,12 @@ proc sceneStateLoad(sceneId: cstring): cstring {.importc: "frameos_nim_scene_sta
   ## JSON this side frees, or nil.
 proc sceneStateSave(sceneId: cstring, json: cstring): bool {.importc: "frameos_nim_scene_state_save", cdecl.}
 proc cFree(p: pointer) {.importc: "free", header: "<stdlib.h>", cdecl.}
+proc sceneThumbEdge(): cint {.importc: "fos_scene_thumb_edge", cdecl.}
+proc sceneThumbFresh(sceneId: cstring, now, maxAge: uint32): bool {.importc: "fos_scene_thumb_fresh", cdecl.}
+proc sceneThumbSave(sceneId: cstring, width, height: cint, taken: uint32, pixels: pointer): bool {.
+  importc: "fos_scene_thumb_save", cdecl.}
+proc sceneThumbLoad(sceneId: cstring, width, height: ptr cint): ptr UncheckedArray[uint16] {.
+  importc: "fos_scene_thumb_load", cdecl.}
 
 proc log*(msg: string) =
   espLog(msg.cstring)
@@ -781,6 +787,76 @@ proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
 
 sceneSwitcherListing = switcherListing
 
+# A small picture of each scene for the scene switcher, kept on flash and
+# refreshed at most hourly (components/frameos_nim/fos_scene_thumb.c;
+# docs/scene-switcher.md).
+# From the canvas before the firmware draws anything over it, so a presence
+# code never reaches one.
+const
+  ThumbMaxAgeSeconds = 3600'u32
+  ThumbCheckEverySeconds = 60.0
+
+var
+  thumbSceneId = ""
+  thumbCheckAt = 0.0
+
+proc noteSceneThumbnail(image: Image) =
+  if host.sceneId.isNone or image.isNil or image.width <= 0 or image.height <= 0:
+    return
+  let sceneId = host.sceneId.get().string
+  if isBuiltInScene(sceneId):
+    return
+  let now = epochTime()
+  if sceneId == thumbSceneId and now < thumbCheckAt:
+    return
+  thumbSceneId = sceneId
+  thumbCheckAt = now + ThumbCheckEverySeconds
+  let edge = sceneThumbEdge().int
+  # A clock not set yet would stamp the picture as old as the epoch.
+  if edge <= 0 or now < 1_000_000_000.0 or sceneThumbFresh(sceneId.cstring, now.uint32, ThumbMaxAgeSeconds):
+    return
+  let
+    scale = max(1, (max(image.width, image.height) + edge - 1) div edge)
+    width = max(1, image.width div scale)
+    height = max(1, image.height div scale)
+    quarter = max(scale div 4, 0)
+  var pixels = newSeq[uint16](width * height)
+  for y in 0 ..< height:
+    for x in 0 ..< width:
+      # Four samples a cell, so dither and thin lines do not read as noise.
+      var r, g, b = 0
+      for (dx, dy) in [(quarter, quarter), (3 * quarter, quarter), (quarter, 3 * quarter), (3 * quarter, 3 * quarter)]:
+        let p = image.getPixel(image.dataIndex(min(x * scale + dx, image.width - 1), min(y * scale + dy, image.height - 1)))
+        r += p.r.int
+        g += p.g.int
+        b += p.b.int
+      pixels[y * width + x] = uint16((((r div 4) and 0xF8) shl 8) or (((g div 4) and 0xFC) shl 3) or ((b div 4) shr 3))
+  discard sceneThumbSave(sceneId.cstring, width.cint, height.cint, now.uint32, addr pixels[0])
+
+proc embeddedSceneThumbnail(frameConfig: FrameConfig, sceneId: string, width, height: int): Image {.nimcall, gcsafe.} =
+  ## The scene's picture off flash, cropped to the tile's shape; nil for none
+  ## yet or no memory to spare (the tile shows its number).
+  {.cast(gcsafe).}:
+    var w, h: cint
+    let data = sceneThumbLoad(sceneId.cstring, addr w, addr h)
+    if data.isNil:
+      return nil
+    defer: cFree(data)
+    var cropW = w.int
+    var cropH = h.int
+    if w.int * height > h.int * width:
+      cropW = max(1, h.int * width div height)
+    else:
+      cropH = max(1, w.int * height div width)
+    let
+      x0 = (w.int - cropW) div 2
+      y0 = (h.int - cropH) div 2
+    result = newImage565(cropW, cropH)
+    for y in 0 ..< cropH:
+      copyMem(result.pixelAddr(result.dataIndex(0, y)), addr data[(y0 + y) * w.int + x0], cropW * 2)
+
+sceneSwitcherThumbnail = embeddedSceneThumbnail
+
 proc embeddedLayouts(): seq[LayoutEntry] {.nimcall, gcsafe.} =
   {.cast(gcsafe).}:
     layoutCatalog
@@ -1118,4 +1194,5 @@ proc renderCurrentScene*(): Option[Image] =
     log("render returned no image")
     return none(Image)
   lastNextSleep = context.nextSleep
+  noteSceneThumbnail(image)
   some(image)

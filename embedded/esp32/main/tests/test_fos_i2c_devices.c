@@ -71,6 +71,20 @@ static void test_rtc_decode_and_encode(void)
     uint8_t regs[FOS_RTC_TIME_LEN] = {0x09, 0x03, 0x14, 0x25, 0x00, 0x10, 0x26};
     time_t t = 0;
     CHECK(fos_rtc_decode(regs, &t), "decoded");
+    {
+        struct tm tm = {.tm_year = 1, .tm_mon = 2, .tm_mday = 3, .tm_hour = 4, .tm_min = 5, .tm_sec = 6};
+        CHECK(fos_rtc_parse_date("2026-11-09", &tm) && tm.tm_year == 126 && tm.tm_mon == 10 && tm.tm_mday == 9, "a date");
+        CHECK(tm.tm_hour == 4 && tm.tm_sec == 6, "a date leaves the time alone");
+        CHECK(fos_rtc_parse_date("2028-02-29", &tm) && tm.tm_mday == 29, "a leap day");
+        CHECK(!fos_rtc_parse_date("2027-02-29", &tm) && tm.tm_year == 128, "no leap day that year, nothing written");
+        CHECK(!fos_rtc_parse_date("2026-13-01", &tm), "month 13");
+        CHECK(!fos_rtc_parse_date("2026-04-31", &tm), "the 31st of April");
+        CHECK(!fos_rtc_parse_date("26-11-09", &tm) && !fos_rtc_parse_date("", &tm), "not a date");
+        CHECK(fos_rtc_parse_time("08:57", &tm) && tm.tm_hour == 8 && tm.tm_min == 57 && tm.tm_sec == 0, "a time");
+        CHECK(fos_rtc_parse_time("7:05", &tm) && tm.tm_hour == 7 && tm.tm_min == 5, "one digit for the hour");
+        CHECK(!fos_rtc_parse_time("24:00", &tm) && !fos_rtc_parse_time("12:60", &tm), "out of range");
+        CHECK(!fos_rtc_parse_time("1257", &tm) && !fos_rtc_parse_time("a:bc", &tm) && !fos_rtc_parse_time(NULL, &tm), "not a time");
+    }
     CHECK(t == 1792936989, "epoch %lld", (long long)t);
     uint8_t back[FOS_RTC_TIME_LEN];
     fos_rtc_encode(t, back);

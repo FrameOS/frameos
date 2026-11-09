@@ -32,6 +32,13 @@ typedef enum {
 #define FOS_RTC_TIME_LEN 7
 #define FOS_RTC_PCF85063_REG_OFFSET 0x02
 
+/* What a person typed on the frame's settings page, into `tm`: a date as
+ * YYYY-MM-DD (2024 to 2099, a day that exists) sets the year, month and day; a
+ * time as H:MM or HH:MM sets the hours and minutes and zeroes the seconds.
+ * False, and `tm` untouched, for anything else. Pure. */
+bool fos_rtc_parse_date(const char *text, struct tm *tm);
+bool fos_rtc_parse_time(const char *text, struct tm *tm);
+
 /* The register the time block starts at on that chip. */
 uint8_t fos_rtc_time_reg(fos_rtc_chip_t chip);
 /* The chip for fos_board_rtc_chip's spelling ("pcf85063"); anything else is

@@ -18,6 +18,8 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -53,6 +55,25 @@ esp_err_t fos_ota_request_check(void);
 /* Let the NEXT manifest fetch install a release older than the running one.
  * Console `ota downgrade`; see the downgrade note in fos_ota.c. */
 void fos_ota_allow_downgrade_once(void);
+
+/* Whichever of the two paths this board has (a backend's, a cloud's); the
+ * console's `ota` and the settings page's Install. `plane_out` may be NULL. */
+esp_err_t fos_ota_request_for_control_plane(const char **plane_out);
+/* A control plane that offers this board images. */
+bool fos_ota_has_control_plane(void);
+
+/* Asking the control plane whether an update exists, in a task of its own, for
+ * the settings page: the same manifest and signature checks as an install,
+ * with nothing downloaded. "idle", "checking", "current", "available",
+ * "failed" or "installing"; `version` (may be NULL) is the release offered. */
+void fos_ota_check_start(void);
+const char *fos_ota_check_state(char *version, size_t cap);
+/* Age of the last finished check in seconds, -1 for none this boot. */
+int64_t fos_ota_check_age_s(void);
+/* Called (from the checking task) when the answer changes. */
+void fos_ota_set_check_hook(void (*hook)(void));
+/* Installs what the check found. */
+esp_err_t fos_ota_install_checked(void);
 
 /* Cloud-managed frames: the same signed path against the enrolled cloud's
  * manifest route, in its own one-shot task; a second request while one runs
