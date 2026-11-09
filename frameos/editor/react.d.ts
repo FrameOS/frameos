@@ -24,6 +24,9 @@ export interface EmbeddedSceneEditorApi {
   /** Renames a scene through the editor's own form: the diagram keeps its
    * layout and the change streams out through onScenesChanged. */
   renameScene: (sceneId: string, name: string) => void
+  /** Makes a scene a layout or a normal one through the editor's own form, so
+   * the change streams out through onScenesChanged like a rename. */
+  setSceneIsLayout: (sceneId: string, isLayout: boolean) => void
   /** Shifts the shown scene's diagram by (dx, dy) screen pixels — what a host
    * calls with half its column's width change to keep the diagram centred. */
   panBy: (dx: number, dy: number) => void

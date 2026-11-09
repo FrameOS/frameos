@@ -1,4 +1,4 @@
-import type { CloudSceneSource, EventMapRule, FrameScene } from '../types'
+import type { CloudSceneSource, EventMapRule, FrameScene, SceneLayoutRef } from '../types'
 import { cloudSceneHeldVersion, type CloudFrameSceneRow } from './cloudFrameScenes'
 import {
   cloudDeployActiveSceneId,
@@ -104,6 +104,8 @@ interface AssignmentPlan {
   settings_groups?: string[] | undefined
   /** The install's button maps by runtime scene id; omitted = keep, null = none. */
   event_maps?: Record<string, EventMapRule[]> | null | undefined
+  /** The layout each runtime scene wears, the same way. */
+  layouts?: Record<string, SceneLayoutRef> | null | undefined
 }
 
 // The button maps the form holds for one pack's runtime scenes: what this
@@ -125,6 +127,23 @@ function formEventMaps(
     return maps
   }
   return row?.event_maps && Object.keys(row.event_maps).length > 0 ? null : undefined
+}
+
+// The layouts, the same way (docs/scene-layouts.md).
+function formLayouts(
+  formScenes: readonly Partial<FrameScene>[],
+  row?: Pick<CloudFrameSceneRow, 'layouts'>
+): Record<string, SceneLayoutRef> | null | undefined {
+  const layouts: Record<string, SceneLayoutRef> = {}
+  for (const scene of formScenes) {
+    if (scene?.id && scene.layout?.sceneId) {
+      layouts[scene.id] = scene.layout
+    }
+  }
+  if (Object.keys(layouts).length > 0) {
+    return layouts
+  }
+  return row?.layouts && Object.keys(row.layouts).length > 0 ? null : undefined
 }
 
 // Every save re-posts each kept assignment's grant explicitly, so a row
@@ -156,16 +175,21 @@ function rawSceneUnchanged(stored: FrameScene, form: FrameScene): boolean {
 
 /**
  * The scene without the install's bookkeeping: `origin` (where it came from)
- * and `eventMap` (the owner's button map, docs/events.md "Event map"). Both
- * belong to the installed copy and never to a published version: an
+ * `eventMap` (the owner's button map, docs/events.md "Event map") and
+ * `layout` (the layout it wears, docs/scene-layouts.md). All three belong to the installed copy and never to a published version: an
  * `eventMap` inside scene content would be an edit on every save and would
  * remap every other install of the scene.
  */
 export function withoutSceneOrigin<T extends Partial<FrameScene>>(scene: T): T {
-  if (!scene || (!('origin' in scene) && !('eventMap' in scene))) {
+  if (!scene || (!('origin' in scene) && !('eventMap' in scene) && !('layout' in scene))) {
     return scene
   }
-  const { origin: _origin, eventMap: _eventMap, ...rest } = scene as T & { origin?: unknown; eventMap?: unknown }
+  const {
+    origin: _origin,
+    eventMap: _eventMap,
+    layout: _layout,
+    ...rest
+  } = scene as T & { origin?: unknown; eventMap?: unknown; layout?: unknown }
   return rest as T
 }
 
@@ -274,12 +298,17 @@ async function persistAndPushCloudFrameScenesNow(
       presentIds.map((id) => formById.get(id)!),
       row
     )
+    const layouts = formLayouts(
+      presentIds.map((id) => formById.get(id)!),
+      row
+    )
     if (!edited) {
       assignments.push({
         scene_id: row.scene_id,
         scene_version: row.scene_version ?? null,
         settings_groups: keptGrant(row),
         event_maps,
+        layouts,
       })
       continue
     }
@@ -292,10 +321,11 @@ async function persistAndPushCloudFrameScenesNow(
         // A pinned assignment follows the edit it just made; an unpinned one
         // is moved to the latest (which now IS the edit) — the only scene of
         // this push that moves, the rest stay at the version the frame holds.
-        scene_version: row.scene_version ? (version ?? null) : null,
+        scene_version: row.scene_version ? version ?? null : null,
         latest: true,
         settings_groups: keptGrant(row),
         event_maps,
+        layouts,
       })
     } catch (error) {
       // Not ours to edit (public install), name clash, moderation… — fork the
@@ -310,6 +340,7 @@ async function persistAndPushCloudFrameScenesNow(
           scene_id: newSceneId,
           settings_groups: keptGrant(row) ?? grantForNew(updated),
           event_maps,
+          layouts,
         })
         notes.push(`Saved the edited "${name}" as a new private cloud scene`)
       } catch (forkError) {
@@ -320,6 +351,7 @@ async function persistAndPushCloudFrameScenesNow(
           scene_version: row.scene_version ?? null,
           settings_groups: keptGrant(row),
           event_maps,
+          layouts,
         })
       }
     }
@@ -344,6 +376,7 @@ async function persistAndPushCloudFrameScenesNow(
       scene_id: newSceneId,
       settings_groups: grantForNew([scene]),
       event_maps: formEventMaps([scene]),
+      layouts: formLayouts([scene]),
     })
   }
 

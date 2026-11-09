@@ -958,6 +958,12 @@ proc parseSvgGradient(node: SvgNode, svg: Svg) =
   gradient.stops = node.parseSvgGradientStops()
   svg.gradients[id] = gradient
 
+proc forgetParse*(node: SvgNode) =
+  ## The caller changed what the node draws (its picture): the next parse
+  ## reads it again instead of bringing its elements back.
+  node.parsed.setLen(0)
+  node.parsedUnder = nil
+
 proc parseSvgImage(node: SvgNode, props: SvgProperties): (Path, SvgProperties) =
   ## An `<image>` whose picture the caller decoded (`SvgNode.image`): drawn
   ## into its x/y/width/height box (the picture's own size when absent), fitted

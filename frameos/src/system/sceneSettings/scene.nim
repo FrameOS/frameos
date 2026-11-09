@@ -32,6 +32,9 @@ import frameos/events_gen
 import frameos/panel_shape
 import frameos/render_scale
 import frameos/ui/layout
+from frameos/scene_rhythm import builtInRunner, rhythmMarkDue
+from frameos/event_loop import settingsOf
+import frameos/layout_choice
 import frameos/ui/events
 import frameos/ui/keyboard
 import frameos/ui/tree
@@ -55,7 +58,8 @@ type
     ## nil when the page is not offered (no host has one, or the frame's
     ## control plane turned it off). Else {wifi: {state, ssid, hotspot,
     ## rssi, ip, networks: [name…], scanning, password}, rotate,
-    ## renderScale, managedBy, version, actions: ["restart"…], note}: `wifi`
+    ## renderScale, battery: {percent}, managedBy, version,
+    ## actions: ["restart"…], note}: `battery` absent without one; `wifi`
     ## absent, no network to set here; `state` one of connected, connecting,
     ## notFound, auth, hotspot, unset, off; `password` a password is saved;
     ## `actions` the device commands this host runs besides render and
@@ -87,6 +91,7 @@ const
   ARender = 1
   ARestart = 2
   AReboot = 3
+  ALayout = 4
   OtherValue = "\1" ## a select box's `other` option; no value of its own is this
   # The types the panel cannot edit: what they hold is not text.
   Unedited = ["node", "scene", "image"]
@@ -96,6 +101,8 @@ const
   GearPath = "M20 9L21 3L27 3L28 9L32 11L36 7L41 12L37 16L39 20L45 21L45 27L39 28L37 32L41 36L36 41L32 37" &
     "L28 39L27 45L21 45L20 39L16 37L12 41L7 36L11 32L9 28L3 27L3 21L9 20L11 16L7 12L12 7L16 11Z" &
     "M17 24a7 7 0 1 0 14 0a7 7 0 1 0 -14 0Z"
+  # A circle with an arrow, the same 48 units.
+  RefreshPath = "M24 8a16 16 0 1 0 16 16h-5a11 11 0 1 1-11-11v6l10-8.5L24 2Z"
   # wifiLine's words, by the host's `state`.
   WifiStates = ["connected", "hotspot", "notFound", "auth", "connecting", "unset"]
   WifiBefore = ["Connected to ", "Setup hotspot ", "Can't find ", "Wrong password for ", "Connecting to "]
@@ -118,8 +125,12 @@ proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
 
 # ------------------------------------------------------------------ values
 
+proc form(self: SceneSettingsScene): JsonNode =
+  ## What the page's fields live in: the layout's on its page, else the scene's.
+  result = if self.state{"page"}.getStr() == "layout": self.state{"layoutForm"} else: self.state
+
 proc fieldList(self: SceneSettingsScene): JsonNode =
-  result = self.state{"fields"}
+  result = self.form(){"fields"}
   if result.isNil or result.kind != JArray:
     result = newJArray()
 
@@ -129,8 +140,15 @@ proc objectAt(self: SceneSettingsScene, key: string): JsonNode =
     result = newJObject()
     self.state.put(key, result)
 
+proc formObject(self: SceneSettingsScene, key: string): JsonNode =
+  let form = self.form()
+  result = form{key}
+  if result.isNil or result.kind != JObject:
+    result = newJObject()
+    form.put(key, result)
+
 proc valueMap(self: SceneSettingsScene): JsonNode =
-  self.objectAt("values")
+  self.formObject("values")
 
 proc arrayOf(node: JsonNode): JsonNode =
   if node.isNil or node.kind != JArray: newJArray() else: node
@@ -145,6 +163,21 @@ proc frameInfo(): JsonNode =
 proc onFrame(self: SceneSettingsScene): bool =
   self.state{"page"}.getStr() == "frame"
 
+proc onLayoutPage(self: SceneSettingsScene): bool =
+  self.state{"page"}.getStr() == "layout"
+
+proc showName(self: SceneSettingsScene, name: string) =
+  ## What a layout around it calls this page.
+  self.shownName = name
+  if not self.wornLayout.isNil:
+    self.wornLayout.shownName = name
+    rhythmMarkDue(self.wornLayout)
+
+proc openedOnFrame(self: SceneSettingsScene): bool =
+  ## Opened straight on the frame page (`sceneSettings {page: "frame"}`): Back
+  ## goes to the scene, not by way of its form.
+  self.state{"opened"}.getStr() == "frame"
+
 proc frameAction(action: string) =
   if not frameSettingsAction.isNil:
     frameSettingsAction(action)
@@ -158,6 +191,7 @@ proc showPage(self: SceneSettingsScene, frame: bool) =
     frameAction("close")
   self.state.put("page", newJString(if frame: "frame" else: "scene"))
   self.state.put("confirm", newJInt(-1))
+  self.showName(if frame: "Frame settings" else: "Scene settings")
   if frame:
     frameAction("open")
 
@@ -235,7 +269,25 @@ proc scaleText(scale: float): string =
   of 3: result.add ".75"
   else: discard
 
-proc frameFields(info: JsonNode, autoScale: string, unit = 0): JsonNode =
+proc layoutField(self: SceneSettingsScene, info: JsonNode): JsonNode =
+  ## The layout the frame shows its scenes in, its gear beside it for one with
+  ## settings. nil for a frame with no layouts on it.
+  let layouts = if layoutListing.isNil: @[] else: layoutListing()
+  if layouts.len == 0:
+    return nil
+  result = field("layout", "Layout", "string")
+  let options = newJArray()
+  if chosenLayout().len > 0:
+    options.elems.add option("", "As each scene says")
+  options.elems.add option(NoLayout, "No layout")
+  for i in 0 ..< layouts.len:
+    options.elems.add option(layouts[i].id, layouts[i].name)
+  result.put("options", options)
+  info.put("layout", newJString(if self.wornLayout.isNil: NoLayout else: self.wornLayout.id.string))
+  if not self.wornLayout.isNil and InterpretedFrameScene(self.wornLayout).publicStateFields.len > 0:
+    result.put("button", newJInt(ALayout))
+
+proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, unit = 0): JsonNode =
   ## The page's fields, in the shape of a scene's, from the host's facts:
   ## the network (those in range, the saved one first when it is not among
   ## them, and a name to type), its password, the rotation and the scale.
@@ -264,12 +316,16 @@ proc frameFields(info: JsonNode, autoScale: string, unit = 0): JsonNode =
     network.put("otherPlaceholder", newJString("Network name"))
     network.put("placeholder", newJString("Choose a network"))
     network.put("options", options)
+    network.put("button", newJInt(AScan))
     result.elems.add network
     let password = field("wifiPassword", "Password", "string")
     password.put("secret", newJBool(true))
     password.put("placeholder", newJString(
       if wifi{"password"}.getBool(): "Saved (type to change)" else: "Password"))
     result.elems.add password
+  let layout = self.layoutField(info)
+  if not layout.isNil:
+    result.elems.add layout
   var
     rotate = field("rotate", "Rotation", "integer")
     options = newJArray()
@@ -322,9 +378,37 @@ proc saveFrame(self: SceneSettingsScene, fields: JsonNode) =
   ## alone for the saved network. The page stays up so what it did shows.
   let changes = collect(fields, self.objectAt("frameValues"))
   self.state.put("frameValues", newJObject())
+  let layout = changes{"layout"}
+  if not layout.isNil:
+    # The frame's own to keep: no host setting.
+    chooseLayout(layout.getStr())
+    changes.delete("layout")
   if changes.len > 0 and not frameSettingsApply.isNil:
     forgetUiTarget(SceneSettingsId, SettingsNode)
     frameSettingsApply(changes)
+
+proc openLayoutPage(self: SceneSettingsScene) =
+  ## The settings of the layout showing, on a page of their own.
+  if self.wornLayout.isNil:
+    return
+  let form = newJObject()
+  settingsOf(self.wornLayout, form)
+  self.state.put("layoutForm", form)
+  forgetUiTarget(SceneSettingsId, SettingsNode)
+  frameAction("close")
+  self.state.put("page", newJString("layout"))
+  self.showName("Layout settings")
+
+proc saveLayoutPage(self: SceneSettingsScene) =
+  ## Kept on the frame under the layout's id, and on the bar at once.
+  let worn = self.wornLayout
+  let values = collect(self.fieldList(), self.valueMap())
+  if not worn.isNil and values.len > 0:
+    saveLayoutState(worn.id.string, values)
+    for key, value in values.pairs:
+      worn.state.put(key, value)
+    rhythmMarkDue(worn)
+  self.showPage(true)
 
 proc press(self: SceneSettingsScene, action: int) =
   ## One of the frame page's buttons. Restart and Reboot ask twice: the
@@ -334,6 +418,8 @@ proc press(self: SceneSettingsScene, action: int) =
   var asking = -1
   if action == AScan:
     frameAction("scan")
+  elif action == ALayout:
+    self.openLayoutPage()
   elif action == ARender:
     sendEvent(evRender, newJObject(), eoPanel)
   elif self.state{"confirm"}.getInt(-1) == action:
@@ -354,14 +440,18 @@ proc acting(self: SceneSettingsScene) =
     self.showPage(false)
     return
   let
-    fields = if frame: frameFields(info, "") else: self.fieldList()
+    fields = if frame: self.frameFields(info, "") else: self.fieldList()
     values = if frame: self.objectAt("frameValues") else: self.valueMap()
   if handler < HAction:
     self.state.put("confirm", newJInt(-1))
   if handler == HCancel:
-    if frame: self.showPage(false) else: leave()
+    if self.onLayoutPage(): self.showPage(true)
+    elif frame and not self.openedOnFrame(): self.showPage(false)
+    else: leave()
   elif handler == HSave:
-    if frame: self.saveFrame(fields) else: self.save()
+    if self.onLayoutPage(): self.saveLayoutPage()
+    elif frame: self.saveFrame(fields)
+    else: self.save()
   elif handler == HGear:
     self.showPage(not frame)
   elif handler >= HAction:
@@ -374,7 +464,7 @@ proc acting(self: SceneSettingsScene) =
         other = actedText == OtherValue
       values.put(field{"name"}.getStr(), newJString(if other: "" else: actedText))
       if not frame:
-        self.objectAt("edited").put(field{"name"}.getStr(), newJBool(true))
+        self.formObject("edited").put(field{"name"}.getStr(), newJBool(true))
       # Beside the values, on a field that has an `other`: the frame page's,
       # whose names it knows, never a scene's, which could be called anything.
       if field{"other"}.getStr().len > 0:
@@ -390,7 +480,7 @@ proc acting(self: SceneSettingsScene) =
       else:
         values.put(name, newJString(actedText))
       if not frame:
-        self.objectAt("edited").put(name, newJBool(true))
+        self.formObject("edited").put(name, newJBool(true))
   self.touch()
 
 proc onHandler(handler: int, name: string, event: JsonNode, hit: UiHit) {.raises: [].} =
@@ -423,8 +513,8 @@ proc button(look: Look, label: string, handler: int, primary: bool): SvgNode =
   else: c.add " bg-zinc-800 active:bg-zinc-600"
   el("div", move c, SvgNode(text: label)).on("on-click", handler)
 
-proc gear(look: Look, lit: bool): SvgNode =
-  ## The gear that opens the frame page, lit while it shows.
+proc iconButton(look: Look, lit: bool, path: string, handler: int): SvgNode =
+  ## A round button with a picture on it.
   var c = "shrink-0 flex items-center justify-center rounded-full"
   c.px("h", look.line * 4 div 5)
   c.px("w", look.line * 4 div 5)
@@ -432,13 +522,17 @@ proc gear(look: Look, lit: bool): SvgNode =
   elif lit: c.add " bg-sky-600 active:bg-sky-500"
   else: c.add " bg-zinc-800 active:bg-zinc-600"
   # The hole winds against the teeth: the default fill rule cuts it out.
-  let path = SvgNode(tag: "path", attrs: @[("d", GearPath), ("fill", "currentColor")])
+  let path = SvgNode(tag: "path", attrs: @[("d", path), ("fill", "currentColor")])
   var i = ""
   i.px("w", look.size * 6 div 5)
   i.px("h", look.size * 6 div 5)
   let icon = el("svg", move i, path)
   icon.attrs.add(("viewBox", "0 0 48 48"))
-  el("div", move c, icon).on("on-click", HGear)
+  el("div", move c, icon).on("on-click", handler)
+
+proc gear(look: Look, lit: bool): SvgNode =
+  ## The gear that opens the frame page, lit while it shows.
+  look.iconButton(lit, GearPath, HGear)
 
 proc fieldBox(look: Look): string =
   result = "w-full rounded-lg"
@@ -509,7 +603,15 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = fals
   result.children.add el("span", move c, SvgNode(text: label))
   let choices = arrayOf(options)
   if field{"select"}.getBool() or choices.elems.len > 0:
-    result.children.add look.selectBox(field, choices, if typing: OtherValue else: value.text, index)
+    let box = look.selectBox(field, choices, if typing: OtherValue else: value.text, index)
+    let action = field{"button"}.getInt(-1)
+    if action < 0:
+      result.children.add box
+    else:
+      # A button on the select box's line: scan for networks, a layout's gear.
+      let boxLine = el("div", "flex items-center gap-2", el("div", "flex-1 min-w-0", box))
+      boxLine.children.add look.iconButton(false, if action == AScan: RefreshPath else: GearPath, HAction + action)
+      result.children.add boxLine
     if not typing:
       return
   # Text to type: a line, or lines for text and JSON.
@@ -581,12 +683,15 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
       if not rssi.isNil and rssi.kind == JInt:
         card.line(look, "Signal", $rssi.getInt() & " dBm")
       card.line(look, "Address", wifi{"ip"}.getStr())
+  let battery = info{"battery", "percent"}
+  if not battery.isNil and battery.kind == JInt:
+    card.line(look, "Battery", $battery.getInt() & "%")
   card.line(look, "Not saved", info{"note"}.getStr())
   card.line(look, "Managed by", info{"managedBy"}.getStr())
   card.line(look, "Version", info{"version"}.getStr())
   result.children.add card
   let
-    fields = frameFields(info, autoScale, unit)
+    fields = self.frameFields(info, autoScale, unit)
     edits = self.objectAt("frameValues")
     typing = edits{"typing"}.getBool()
     asking = self.state{"confirm"}.getInt(-1)
@@ -600,9 +705,6 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
       var c = look.grey
       c.px("text", look.size * 3 div 4)
       result.children.add el("div", move c, SvgNode(text: "Any rotation but 0\xc2\xb0 adds a noticeable delay to every frame of an animated scene."))
-    if name == "wifiSsid":
-      result.children.add el("div", "flex", look.pressButton(
-        if wifi{"scanning"}.getBool(): "Scanning\xe2\x80\xa6" else: "Scan for networks", AScan))
   c = "flex flex-wrap"
   c.px("gap", look.gap div 2)
   let buttons = el("div", move c)
@@ -694,14 +796,15 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   let
     header = el("div", move c)
     frame = not info.isNil and self.onFrame()
-  header.children.add look.button(if frame: "Back" else: "Cancel", HCancel, false)
+    layoutPage = self.onLayoutPage()
+  header.children.add look.button(if frame or layoutPage: "Back" else: "Cancel", HCancel, false)
   header.children.add el("span", "grow truncate text-center font-bold",
     SvgNode(text: if frame: "Frame settings" else: title))
-  if not info.isNil:
+  if not info.isNil and not layoutPage:
     header.children.add look.gear(frame)
   # Lit while there is something to save: after a Save it goes quiet, which
   # is how the frame page says it took it.
-  let edits = self.state{if frame: "frameValues" else: "edited"}
+  let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
   header.children.add look.button("Save", HSave, not edits.isNil and edits.len > 0)
   result.children.add header
   let body = if frame: self.frameList(look, info, scaleText(autoRenderScale(unit, unit)), unit)
@@ -710,6 +813,8 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
 
 proc title(self: SceneSettingsScene): string =
   ## The scene's name, from the host's scene list (its id without one).
+  if self.onLayoutPage():
+    return "Layout settings"
   result = self.opener()
   if not sceneSwitcherListing.isNil:
     try:
@@ -745,7 +850,11 @@ proc drawForm*(self: SceneSettingsScene, image: Image) =
 proc back(self: SceneSettingsScene) =
   ## One step back: from the frame page to the scene's form, from the form
   ## to the scene.
-  if self.onFrame():
+  if self.onLayoutPage():
+    self.showPage(true)
+    self.touch()
+    sendEvent(evRender, newJObject(), eoScene)
+  elif self.onFrame() and not self.openedOnFrame():
     self.showPage(false)
     self.touch()
     sendEvent(evRender, newJObject(), eoScene)
@@ -754,7 +863,7 @@ proc back(self: SceneSettingsScene) =
 
 # ------------------------------------------------------------ the scene
 
-proc runSettings(self: FrameScene, context: ExecutionContext) =
+proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   ## What raises here is reported by the caller, as for any scene. The
   ## payload is read with `{}` alone, which answers nil for what is missing.
   let self = SceneSettingsScene(self)
@@ -762,14 +871,14 @@ proc runSettings(self: FrameScene, context: ExecutionContext) =
   case context.event
   of "setCurrentScene":
     # What the dispatcher read off the scene it was opened from.
-    for key in ["from", "fields", "values"]:
+    for key in ["from", "fields", "values", "opened", "layout"]:
       let value = payload{"state", key}
       if not value.isNil:
         self.state.put(key, value)
     # It opens on the scene's form; with no scene showing there is nothing
     # on that one, and the frame page is what the status screen sent you here
     # for.
-    if self.state{"page"}.isNil and self.opener().len == 0 and not frameInfo().isNil:
+    if self.state{"page"}.isNil and (self.opener().len == 0 or self.openedOnFrame()) and not frameInfo().isNil:
       self.showPage(true)
   of "open":
     self.touch()
@@ -806,6 +915,10 @@ proc runSettings(self: FrameScene, context: ExecutionContext) =
       if not self.paper or context.event in ["tap", "pointerUp", "keyDown", "textInput"]:
         sendEvent(evRender, newJObject(), eoScene)
 
+proc runSettings(self: FrameScene, context: ExecutionContext) =
+  if builtInRunner.isNil or not builtInRunner(self, context):
+    settingsOwnRun(self, context)
+
 proc renderSettings(self: FrameScene, context: ExecutionContext): Image =
   self.ensureCanvas(context)
   runSettings(self, context)
@@ -814,8 +927,8 @@ proc renderSettings(self: FrameScene, context: ExecutionContext): Image =
 proc initSettings(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
   ## Nothing persisted to start from: what it shows comes with the switch.
   let paper = paperPanel(frameConfig)
-  SceneSettingsScene(id: sceneId, frameConfig: frameConfig, logger: logger, state: newJObject(),
-    refreshInterval: IdleSeconds, backgroundColor: background(paper), paper: paper)
+  SceneSettingsScene(id: sceneId, frameConfig: frameConfig, logger: logger, state: newJObject(), ownRun: settingsOwnRun,
+    shownName: "Scene settings", refreshInterval: IdleSeconds, backgroundColor: background(paper), paper: paper)
 
 var exportedScene* = ExportedInterpretedScene(
   name: "Scene settings",

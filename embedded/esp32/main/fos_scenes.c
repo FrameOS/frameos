@@ -734,6 +734,7 @@ static esp_err_t split_scenes(const char *json, size_t len)
 
     esp_err_t err = ESP_OK;
     int written = 0;
+    bool has_default = false;
     for (int i = 0; i < count; i++) {
         size_t item_len = ends[i] - starts[i];
         err = write_slot(i, json + starts[i], item_len);
@@ -760,7 +761,16 @@ static esp_err_t split_scenes(const char *json, size_t len)
         }
         cJSON_AddNumberToObject(entry, "slot", i);
         cJSON_AddItemToArray(scenes, entry);
-        if (i == 0) cJSON_AddStringToObject(index, "default", id->valuestring);
+        /* A layout (docs/scene-layouts.md) is read by id when a scene names
+         * it; it is in no list and never what a frame boots to. */
+        const cJSON *settings = cJSON_GetObjectItem(item, "settings");
+        bool is_layout = cJSON_IsTrue(cJSON_GetObjectItem(settings, "isLayout"));
+        if (is_layout) {
+            cJSON_AddBoolToObject(entry, "isLayout", true);
+        } else if (!has_default) {
+            has_default = true;
+            cJSON_AddStringToObject(index, "default", id->valuestring);
+        }
         cJSON_Delete(item);
     }
 

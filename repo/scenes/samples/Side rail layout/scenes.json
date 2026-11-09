@@ -1,0 +1,120 @@
+[
+  {
+    "id": "layout-side-rail",
+    "name": "Side rail",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 1,
+      "backgroundColor": "#0f172a",
+      "isLayout": true
+    },
+    "fields": [
+      {
+        "name": "barColor",
+        "type": "color",
+        "label": "Bar color",
+        "value": "#0f172a",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "textColor",
+        "type": "color",
+        "label": "Text color",
+        "value": "#f8fafc",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "side",
+        "type": "select",
+        "label": "Side",
+        "value": "left",
+        "access": "public",
+        "persist": "disk",
+        "options": [
+          "left",
+          "right"
+        ]
+      }
+    ],
+    "apps": {
+      "sideRail": {
+        "name": "Side rail",
+        "category": "data",
+        "description": "A rail beside each scene with the time, the date, the Wi-Fi signal and the battery.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Side rail\",\n  \"category\": \"data\",\n  \"description\": \"A rail beside each scene with the time, the date, the Wi-Fi signal and the battery.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n",
+          "app.tsx": "// A rail beside the scene it wraps: the time stacked up, the date, the Wi-Fi signal and the battery.\nconst pad = (n) => String(n).padStart(2, '0')\nconst on = (value) => value === true || value === 'true'\n\nconst clock = (now, seconds) =>\n  `${pad(now.getHours())}:${pad(now.getMinutes())}${seconds ? `:${pad(now.getSeconds())}` : ''}`\n\n// Four bars for the Wi-Fi signal, nothing on a frame that cannot tell.\nfunction Signal({ rssi, color }) {\n  if (typeof rssi !== 'number') return null\n  const level = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1\n  return (\n    <div className=\"flex items-end gap-[0.4vh] h-[3vh]\">\n      {[1.2, 1.8, 2.4, 3].map((height, i) => (\n        <div className={`w-[0.7vh] h-[${height}vh] bg-[${color}] ${i < level ? '' : 'opacity-30'}`} />\n      ))}\n    </div>\n  )\n}\n\nconst Battery = ({ percent }) => (typeof percent === 'number' ? <span>{`${percent}%`}</span> : null)\nconst days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']\nconst months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']\n\nexport function get(app) {\n  const { barColor, textColor, side } = app.state\n  const now = new Date()\n  const rail = (\n    <div className=\"flex flex-col items-center justify-between w-[14vw] h-full py-[3vh]\">\n      <div className=\"flex flex-col items-center font-bold text-[7vh]\">\n        <span>{pad(now.getHours())}</span>\n        <span>{pad(now.getMinutes())}</span>\n      </div>\n      <div className=\"flex flex-col items-center text-[3vh] font-semibold\">\n        <span>{days[now.getDay()]}</span>\n        <span>{`${now.getDate()} ${months[now.getMonth()]}`}</span>\n      </div>\n      <div className=\"flex flex-col items-center gap-[1vh] text-[2.6vh] font-semibold\">\n        <Signal rssi={app.frame.wifiRssi} color={textColor} />\n        <Battery percent={app.frame.batteryPercent} />\n      </div>\n    </div>\n  )\n  return (\n    <div className={`flex w-full h-full bg-[${barColor}] text-[${textColor}]`}>\n      {side === 'right' ? null : rail}\n      <yield />\n      {side === 'right' ? rail : null}\n    </div>\n  )\n}\n"
+        },
+        "origin": "sideRail"
+      }
+    },
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "chrome",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "sideRail",
+          "config": {}
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-to-draw",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "chrome-to-draw",
+        "type": "codeNodeEdge",
+        "source": "chrome",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  }
+]

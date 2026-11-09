@@ -461,11 +461,7 @@ interface LeafAxisTarget {
 // Find the deepest ancestor split that controls a leaf's size along the given axis.
 // Width is controlled by 'row' splits, height by 'column' splits. A leaf that has no
 // such ancestor (e.g. it always spans the full axis) returns null.
-function findLeafAxisTarget(
-  root: SplitLayoutBranch,
-  leafId: string,
-  axis: SplitLayoutAxis
-): LeafAxisTarget | null {
+function findLeafAxisTarget(root: SplitLayoutBranch, leafId: string, axis: SplitLayoutAxis): LeafAxisTarget | null {
   const wantDirection: SplitLayoutDirection = axis === 'width' ? 'row' : 'column'
   let result: LeafAxisTarget | null = null
 
@@ -495,11 +491,7 @@ function findLeafAxisTarget(
   return result
 }
 
-export function splitLayoutLeafAxisAdjustable(
-  root: SplitLayoutBranch,
-  leafId: string,
-  axis: SplitLayoutAxis
-): boolean {
+export function splitLayoutLeafAxisAdjustable(root: SplitLayoutBranch, leafId: string, axis: SplitLayoutAxis): boolean {
   return findLeafAxisTarget(root, leafId, axis) !== null
 }
 

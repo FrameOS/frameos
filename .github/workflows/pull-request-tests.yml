@@ -227,6 +227,41 @@ jobs:
             --nimcache:/tmp/frameos-esp32-nimcache \
             src/embedded/embedded_main.nim
 
+  esp32-kitchen-sink:
+    # The biggest thing a UI does on an ESP32, in the memory one has: the wasm
+    # build of this commit's runtime, its heap capped to an 8 MB SenseCAP
+    # Indicator's, played through as a person would (a layout, its pages, forty
+    # brush strokes). Emscripten is too slow for the Nim shards.
+    name: Kitchen sink in an ESP32's memory
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: 2.2.4
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build the wasm runtime
+        run: |
+          set -euo pipefail
+          (cd frameos && nimble install -d -y && ./tools/build_wasm.sh --out "$RUNNER_TEMP/frameos-wasm")
+
+      - name: Play the Kitchen sink in 8 MB
+        run: node frameos/tools/esp32_kitchen_sink.mjs "$RUNNER_TEMP/frameos-wasm"
+
   visual-regression:
     name: Visual Regression Tests (${{ matrix.shard }}/2)
     # Pixie renders these snapshots in software from fonts in the repo — no

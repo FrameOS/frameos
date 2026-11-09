@@ -1,0 +1,10 @@
+{
+  "name": "Top bar layout",
+  "description": "A bar above each scene with a title, the time, the Wi-Fi signal and the battery.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.5"
+}

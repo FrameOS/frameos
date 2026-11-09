@@ -573,6 +573,8 @@ which the snapshot harness drives with their `e2eEvents`).
   for hardware that is not there.
 - **`aliasOf`** — an old name of another event; **`synthesized`** — made by
   the dispatcher out of other events (a tap, a textInput). See [Input](#input).
+- **`wildcard`** — `false` keeps a listenable event out of an app's `"*"` (the
+  app's own `init` and `render`). See [Apps that subscribe](#apps-that-subscribe).
 - **`schedule`** — the Schedule panel offers the event, under this label.
   `endsRuntime`: the runtime does not survive it, so the scheduler persists
   the minute it fired in, or it would fire again after the restart.
@@ -587,6 +589,50 @@ dropped. `render` dispatched while handling `render` is ignored
 event never empties the queue, so one drain delivers at most 32 events and
 hands back with the rest still queued: the render loop (or the host's one task)
 gets its turn, and nothing is dropped.
+
+### Apps that subscribe
+
+A JS app hears events without an event node by naming them in its
+`config.json`, and exporting `onEvent`:
+
+```json
+{ "name": "Status bar", "category": "data", "events": ["button", "myEvent"] }
+```
+
+```tsx
+export function onEvent(app, context) {
+  if (context.event === "button") frameos.setState("presses", (app.state.presses || 0) + 1)
+  return true // draw this scene again
+}
+```
+
+- Names are contract events or the scene's custom events. `"*"` is every event
+  a scene can listen for, except what comes at the rate of a moving finger
+  (`coalesce: latest`: `pointerMove`, its old name `mouseMove`, `uiTimer`), an
+  old name for another event (`aliasOf`), and the app's own `init` and `render`
+  (`wildcard: false`). A name written next to `"*"` is heard as well, once:
+  `["*", "pointerMove"]` asks for the motion too. `render` and `init` as names
+  are ignored: those are `get()` and `init()`.
+- It is a declaration because the dispatcher asks whether anyone listens before
+  it builds an input event's payload, on every motion report, and no JavaScript
+  runs for that (`interpreter.sceneListensTo`, `EventHost.sceneListens`).
+- `onEvent(app, context)` has what `get` has; `context.event` is the name and
+  `context.payload` what it carries. Returning `true` asks for a render of the
+  app's own scene, as a JSX handler's run does, even when its interval says
+  otherwise. The contract's `renderAfter` applies either way.
+- A layout's app gets keys, buttons and custom events after the scene it wraps,
+  and pointer events first, in the layout's coordinates (`docs/scene-layouts.md`).
+- A frame older than 2026.11 ignores `events`. Nothing else differs.
+
+### Apps that send
+
+`frameos.dispatch(event, payload)` is the `dispatch` node for code: from a JSX
+handler, `onEvent` or `run`. It goes through the node's own door
+(`dispatchFromScene` in `js_runtime/app_runtime.nim`), so the origin is `scene`
+and the same three things stop it: a `render` asked for during a render, an event
+the contract's `origins` do not give a scene (`reboot`, `uploadScenes`), and the
+run's dispatch budget. Each is logged as `interpreter:dispatch:ignored`. The
+payload is the event's own shape: `setSceneState` takes `{state: {...}}`.
 
 ### Event map: what a button does
 

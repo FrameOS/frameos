@@ -256,6 +256,14 @@ calls, and it calls no other:
 - `init(app)` is optional and runs each time the app's interpreter starts:
   once per scene on a Pi, before every render on an ESP32 and in a preview
   running as one.
+- `onEvent(app, context)` is optional and needs no wiring: it hears the events
+  listed in the app's `config.json` as `"events": ["button"]`, or `["*"]` for
+  everything but pointer motion. `context.event` is the name and
+  `context.payload` what it carries. Return `true` to draw the scene again.
+- `frameos.dispatch(event, payload)` sends an event as a `dispatch` node does,
+  from a JSX handler, `onEvent` or `run`. `frameos.dispatch('sceneSwitcher')`
+  opens the scene list and `'sceneSettings'` the settings of the scene showing.
+  Frames older than 2026.11 ignore it.
 
 **What the app sees.**
 
@@ -263,8 +271,11 @@ calls, and it calls no other:
 - `app.state`: the scene's state, read by key. Write it with
   `frameos.setState(key, value)`.
 - `app.frame`: the frame, read only: `width`, `height` (always set, also in
-  the preview), `rotate`, `timeZone`, `assetsPath`, `debug`, and `embedded`
-  (true on an ESP32, and in a preview running as one).
+  the preview), `rotate`, `timeZone`, `assetsPath`, `debug`, `embedded`
+  (true on an ESP32, and in a preview running as one), and `batteryPercent`
+  (0 to 100) and `wifiRssi` (dBm), which are undefined wherever the frame
+  cannot tell (a Pi, the preview, an ESP32 with no battery or off Wi-Fi), so
+  draw them only when they are numbers.
 - `app.nodeId`, `app.nodeName`.
 - `context`: this run: `event`, `payload`, and when an image is flowing
   through, `imageWidth` / `imageHeight`. That is the area being drawn into (a
@@ -463,6 +474,18 @@ export function get(app, context) {
   an `<svg>`, so padding, margins and font sizes set there never show. Put a
   size worked out in code in a bracket class,
   ``className={`p-[${pad}px] text-[${size}px]`}``.
+- `<Scene id="other" someField="x" />` draws another scene of the frame there,
+  sized by the UI (it takes the room left unless its classes say otherwise),
+  its props set as that scene's state. It renders on its own
+  `refreshInterval`, straight into the canvas when nothing is drawn over it, so
+  a slow scene costs nothing on the renders in between and a tile that is due
+  redraws alone.
+  In a layout, `app.frame.sceneName` is the name of the scene it wraps.
+  `<yield />` marks where a layout's content goes: a hole the content draws
+  straight into, which is as fast as no layout. Keep it opaque, with nothing
+  drawn over it and no scrolling box around it, or the frame has to composite
+  a picture of the content instead. A split with a content panel cannot be a
+  layout (see Layouts below).
 - A big frame draws a .tsx app's JSX larger by itself: at render scale 2
   (automatic on a panel whose shorter edge is about 1200 px) the app is told
   its canvas is half the size (`context.imageWidth`, `app.frame.width`) and
@@ -520,6 +543,57 @@ export function get(app, context) {
   scrolls it; no paging needed on an LCD. `overflow-hidden` clips.
 - Not there: rounded clipping, shadows, transforms, `z-*`, momentum when a
   list is flung, text selection. `docs/jsx-ui.md` has the full list.
+
+## Layouts
+
+A layout is what goes around the other scenes of a frame: a status bar with the
+clock, a taskbar, a border. When someone asks for a layout, or for anything that
+should stay around every scene, build a layout, not a split and not a copy of
+their scene with a bar added.
+
+A layout is one scene, and it has to be exactly this: `"isLayout": true` in its
+`settings`, an `event` node for `render`, one `render/image` node, and one
+`app.tsx` app feeding that node's `image` that returns JSX with a `<yield />`
+where the wrapped scene goes. `<yield />` is written in lower case. Anything else
+is refused when it is saved.
+
+```tsx
+export function get(app) {
+  const now = new Date()
+  // Nothing changes until the minute does.
+  frameos.setNextSleep(60 - now.getSeconds())
+  return (
+    <div className="flex flex-col w-full h-full bg-black text-white">
+      <div className="flex items-center h-[9vh] px-[3vw] text-[4vh]" onClick={() => frameos.dispatch('sceneSwitcher')}>
+        <span className="flex-1 truncate">{app.frame.sceneName}</span>
+        <span>{`${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`}</span>
+      </div>
+      <yield />
+    </div>
+  )
+}
+```
+
+- Give the app no fields it does not need. The scene's public `fields` are the
+  layout's settings; the person sets them for each scene that wears it.
+- Set `refreshInterval` to 1 and use `frameos.setNextSleep` as above: the bar
+  draws once a minute, and only what is due redraws.
+- Size the bar in `vh` and `vw`, so it fits every panel.
+- `<yield />` must stay opaque, with nothing drawn over it and no scrolling box
+  around it, or the frame has to composite a picture of the scene at a real cost.
+- `app.frame.sceneName` is the name of the scene it wraps. `app.frame.wifiRssi`
+  and `app.frame.batteryPercent` are undefined on a frame that cannot tell: check
+  first and draw nothing then.
+- Handlers open the frame's own screens: `frameos.dispatch('sceneSwitcher')` the
+  scene list, `frameos.dispatch('sceneSettings')` the settings of the scene
+  showing, and `frameos.dispatch('sceneSettings', {page: 'frame'})` the frame's.
+- A layout stays up around those built-in screens too. To give them the whole
+  panel, start `get` with `if (app.frame.systemScene) return <yield />`.
+- A layout on its own has nothing to wrap, so its `<yield />` is an empty area in
+  a render. That is correct, not a blank to fix.
+- A layout is in no scene list and is never shown by itself. It goes on a scene
+  under that scene's picture, or for all of them in the frame's Settings under
+  Layouts. Tell the person that once it is built.
 
 ## Images, SVG and text
 
@@ -676,7 +750,7 @@ back gesture), and a key may be bound to them. They never change the scene.
 | `setSceneState` |  | yes | `state`? json, `render`? boolean | all | Set the scene's public state. |
 | `setCurrentScene` |  | yes | `sceneId`? scene, `direction`? string, `state`? json | all | Switch the frame to another scene: the one `sceneId` names, or with `direction` the `next` / `prev` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). |
 | `sceneSwitcher` |  | yes |  | all | Show the scene switcher (`scenes.switcher`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. |
-| `sceneSettings` |  | yes |  | all | Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. |
+| `sceneSettings` |  | yes | `page`? string | all | Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. |
 | `back` | yes |  |  | all | Go back, as a phone's back gesture does: what that is is the scene's (the photo or the page before; the scene switcher turns its page back, the scene settings close unsaved), and a scene that does not listen for it stays as it is. |
 | `forward` | yes |  |  | all | Go forward, the other way from `back`: the next photo or page (the scene switcher turns its page on). |
 <!-- END GENERATED: events -->
@@ -788,6 +862,16 @@ interface FrameOSElementProps {
   onKeyDown?: (event: FrameOSUiEvent) => void;
   [attribute: string]: any;
 }
+/**
+ * <Scene id="..." /> draws another scene of this frame, at the place and size the UI
+ * gives it (flex-1 unless the classes say). Other props are that scene's state. It renders on its
+ * own schedule. FrameOS 2026.11.5+.
+ */
+declare const Scene: string;
+/**
+ * <yield />: where a layout shows the scene it wraps (docs/scene-layouts.md).
+ * FrameOS 2026.11.5+.
+ */
 declare namespace JSX {
   type Element = FrameOSElement;
   interface ElementChildrenAttribute { children: {}; }
@@ -826,6 +910,18 @@ interface FrameOSApp {
     /** A panel that shows a change only in a refresh, as e-paper and a monochrome OLED do. An app that follows
      * a finger waits for it to lift there (FrameOS 2026.11.5+; undefined before). */
     paper?: boolean;
+    /** The name of the scene showing. A layout's app gets the name of the scene it wraps (FrameOS 2026.11.5+;
+     * undefined before). */
+    sceneName?: string;
+    /** True in a layout's app while it wraps a built-in scene (the scene list, the settings). Returning a bare <yield />
+     * then gives that scene the whole panel (FrameOS 2026.11.5+; undefined before). */
+    systemScene?: boolean;
+    /** The battery's charge from 0 to 100, on an ESP32 frame with a battery. Undefined elsewhere, so check
+     * before drawing it (FrameOS 2026.11.5+; undefined before). */
+    batteryPercent?: number;
+    /** The Wi-Fi signal in dBm, about -50 strong and -85 weak, on an ESP32 frame that is connected. Undefined
+     * elsewhere, so check before drawing it (FrameOS 2026.11.5+; undefined before). */
+    wifiRssi?: number;
   };
   initialized?: boolean;
   log(...args: any[]): void;
@@ -892,7 +988,7 @@ interface FrameOSEventPayloads {
   /** Show the scene switcher (`scenes.switcher`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. While it or the scene settings show, go back to the scene they were opened from instead. The frame's event map binds it to a swipe in from the bottom edge on a touch screen. */
   sceneSwitcher: Record<string, never>;
   /** Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen. */
-  sceneSettings: Record<string, never>;
+  sceneSettings: { page?: string };
   /** Go back, as a phone's back gesture does: what that is is the scene's (the photo or the page before; the scene switcher turns its page back, the scene settings close unsaved), and a scene that does not listen for it stays as it is. It never switches the scene. The frame's event map binds it to a swipe in from the left edge on a touch screen. */
   back: Record<string, never>;
   /** Go forward, the other way from `back`: the next photo or page (the scene switcher turns its page on). It never switches the scene. The frame's event map binds it to a swipe in from the right edge on a touch screen. */
@@ -937,6 +1033,9 @@ declare const frameos: {
   log(...args: any[]): void;
   error(...args: any[]): void;
   setNextSleep(seconds: number): void;
+  /** Sends an event as a dispatch node does: render, setCurrentScene, setSceneState, sceneSwitcher, sceneSettings or a
+   * custom event of the scene's. An event a scene may not send is logged and dropped (FrameOS 2026.11.5+). */
+  dispatch(event: string, payload?: Record<string, any>): void;
   fetchText(url: string): string;
   fetchJson(url: string): any;
   httpRequest(

@@ -102,3 +102,8 @@ bool fos_client_render_pending(void);
 /* True while a render pass is rendering (fetches, scene, dither, panel
  * refresh); the OTA waits it out before it downloads (fos_ota.c). */
 bool fos_client_render_in_flight(void);
+/* What a scene (app.frame) and the frame page are told: the battery's charge
+ * 0..100 as the last metrics sample believed it, -1 without a battery; the
+ * Wi-Fi signal in dBm, 0 when not connected. Cheap enough to ask per render. */
+int fos_client_battery_percent(void);
+int fos_client_wifi_rssi(void);

@@ -164,6 +164,19 @@ export function get(app, context) {
     check not paper("waveshare.EPD_7in5_V2", newImage565(400, 200))
     check not paper("waveshare.EPD_7in5_V2", newImage565(400, 200), producer = true)
 
+  test "app.frame says nothing of a battery or Wi-Fi where the host cannot tell":
+    const source = """
+      export function get(app) {
+        frameos.setState('quiet', app.frame.batteryPercent === undefined && app.frame.wifiRssi === undefined)
+        return { ok: true }
+      }
+    """
+    let ui = newUi(source, "tests/device-facts", sourceName = "app.js", outputType = "json")
+    let context = ExecutionContext(scene: ui.scene, event: "render", payload: %*{},
+      hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    discard ui.runtime.get(ui.owner, %*{}, context)
+    check ui.scene.state["quiet"].getBool()
+
   test "the scene's own scale wins over the frame's, and its role field over its setting":
     let ui = newUi(box, "tests/jsx-scale-scene")
     ui.scene.renderScaleSetting = 1.0

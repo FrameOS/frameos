@@ -94,6 +94,8 @@ export type SceneInfoDraft = {
   images: string[];
   onListingChange: (changes: Partial<SceneListingData>) => void;
   onImagesChange: (images: string[]) => void;
+  /** The scene the editor shows becomes a layout, or a normal scene. */
+  onIsLayoutChange?: ((isLayout: boolean) => void) | undefined;
 };
 
 export type SceneInfoPanelProps = SceneInfoData & {
@@ -105,6 +107,10 @@ export type SceneInfoPanelProps = SceneInfoData & {
   shown?: { listing: SceneListingData; images: string[] } | undefined;
   /** Owner editing: the draft the editors write into. */
   draft?: SceneInfoDraft | undefined;
+  /** The scene the editor shows is a layout; undefined until its scenes have loaded. */
+  isLayout?: boolean | undefined;
+  /** Why this scene cannot be a layout, null when it can. */
+  layoutProblem?: string | null | undefined;
 };
 
 // Everything the scene page says about a scene, top to bottom: its name
@@ -125,6 +131,8 @@ export function SceneInfoPanel({
   heading,
   shown,
   draft,
+  isLayout,
+  layoutProblem,
 }: SceneInfoPanelProps) {
   const isPrivate = scene.visibility !== "public";
   const isActive = scene.status === "active";
@@ -147,6 +155,8 @@ export function SceneInfoPanel({
         : "Private, only you";
   const showCategory = categoryTitle !== null || editing;
   const showVersion = listing.frameosVersion !== null || editing;
+  const canSetType = editing && draft.onIsLayoutChange !== undefined;
+  const showType = isLayout !== undefined && (canSetType || isLayout);
   // The API keys the scene's apps read (key:<namespace> risk flags).
   const keyTitles = knownSceneAccessFlags(scene.riskFlags)
     .map((flag) => keyFlagNamespace(flag))
@@ -204,8 +214,33 @@ export function SceneInfoPanel({
         share={share}
       />
 
-      {showCategory || showVersion || isOwner ? (
+      {showCategory || showVersion || showType || isOwner ? (
         <dl className="scene-facts">
+          {showType ? (
+            <div className="scene-facts__row">
+              <dt>Type</dt>
+              <dd>
+                {canSetType ? (
+                  <span className="tag-editor">
+                    <select
+                      aria-label="Scene type"
+                      className="tag-editor__select"
+                      onChange={(event) => draft.onIsLayoutChange?.(event.target.value === "layout")}
+                      value={isLayout ? "layout" : "scene"}
+                    >
+                      <option value="scene">Normal scene</option>
+                      <option disabled={!isLayout && !!layoutProblem} value="layout">
+                        Layout
+                      </option>
+                    </select>
+                    {layoutProblem ? <small className="scene-facts__hint">{layoutProblem}</small> : null}
+                  </span>
+                ) : (
+                  "Layout"
+                )}
+              </dd>
+            </div>
+          ) : null}
           {showCategory ? (
             <div className="scene-facts__row">
               <dt>Category</dt>

@@ -26,6 +26,11 @@ import ./utils/memory
 import ./js_runtime/app_runtime
 import ./js_runtime/run_budget
 import ./render_probe
+import ./ui/layout
+import ./ui/tree
+from ./utils/image import renderSvgIntoTarget
+from ./utils/svg_frames import forgetPanelFrames
+import pixie/fileformats/svg
 import ./js_runtime/runtime as jsRuntime
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
@@ -44,7 +49,7 @@ type
       ## settings, system/sceneSettings/scene.nim), which draws itself
       ## through the same three procs.
     sceneId*: Option[SceneId]             ## the current scene, resident or not
-    covered: FrameScene
+    covered*: FrameScene
       ## The scene the scene switcher or the scene settings opened over, kept
       ## while there is room, and current again without its init when the
       ## way back leads to it: its JS interpreters, memo and laid-out tree
@@ -55,6 +60,10 @@ type
     coveredExported: ExportedInterpretedScene
     coveredId: Option[SceneId]
     renderRequested*: bool
+    discardNoticeUntil: int64
+      ## A notice on the panel until then (monotonic ns): a scene lost its
+      ## interpreter, and the tap that needed it did nothing
+      ## (reportInterpreterDiscards).
     keepJsRuntimes*: bool
       ## Keep the scene's idle JS interpreters between renders while there is
       ## room (settleIdleJsAppRuntimes): an ESP32 that does not deep-sleep.
@@ -103,12 +112,16 @@ proc cleanupScene*(scene: FrameScene) =
   ## Break ORC cycles and close the scene's QuickJS context before dropping
   ## the last reference (mirrors scenes.nim cleanupSceneRuntime, which lives
   ## outside these builds).
+  if not scene.isNil and not scene.wornLayout.isNil:
+    cleanupScene(scene.wornLayout)
+    scene.wornLayout = nil
   if scene.isNil or not (scene of InterpretedFrameScene):
     return
   when defined(memProbe): memProbe("  cleanupScene: entry")
   let interpreted = InterpretedFrameScene(scene)
   for _, childScene in interpreted.sceneNodes:
     cleanupScene(childScene)
+  rhythmReleaseScene(scene)
   interpreted.execNode = nil
   interpreted.getDataNode = nil
   # Before the apps are dropped: each JS app node owns a QuickJS runtime with
@@ -126,6 +139,7 @@ proc cleanupScene*(scene: FrameScene) =
   interpreted.sceneExportByNodeId = initTable[NodeId, ExportedScene]()
   interpreted.nextNodeIds = initTable[NodeId, NodeId]()
   interpreted.eventListeners = initTable[string, seq[NodeId]]()
+  interpreted.eventApps = @[]
   interpreted.nodes = initTable[NodeId, DiagramNode]()
   interpreted.edges = @[]
   interpreted.cacheValues = initTable[NodeId, Value]()
@@ -226,8 +240,11 @@ proc makeCurrent*(host: SingleSceneHost, sceneId: SceneId, drop = true) =
       host.exported = nil
     else:
       host.dropScene()
-      if host.coveredId.isSome and host.coveredId.get() != sceneId and not isBuiltInScene(sceneId.string):
-        host.dropCovered() # the way back led somewhere else
+  # The way back led somewhere else. Also when the old instance stays until the
+  # firmware has read the new one from flash: left for later, it went when
+  # memory ran short, in the middle of the next scene.
+  if host.coveredId.isSome and host.coveredId.get() != sceneId and not isBuiltInScene(sceneId.string):
+    host.dropCovered()
   host.sceneId = some(sceneId)
   host.renderRequested = true
 
@@ -390,6 +407,49 @@ proc queue*(host: SingleSceneHost, origin: EventOrigin, event: string, payload: 
   if not host.events.isNil:
     host.events.enqueue(origin, event, payload, target)
 
+const
+  DiscardNoticeNanos = 6_000_000_000'i64
+  DiscardNoticeText = "Low memory: this scene was reloaded. Please tap again."
+
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
+
+proc drawDiscardNotice(image: Image) =
+  ## A strip along the bottom of the picture. Drawn with the JSX layout, as
+  ## the built-in scenes are: no fonts or text code of its own.
+  let height = clamp(image.height div 12, 28, 64)
+  var classes = "flex items-center justify-center w-full h-full bg-black text-white"
+  classes.px("text", height div 2 - 2)
+  try:
+    let strip = image.view(0, image.height - height, image.width, height)
+    discard renderSvgIntoTarget(layoutUi(el("div", classes, SvgNode(text: DiscardNoticeText)), image.width, height), strip)
+  except CatchableError:
+    discard # a notice is not worth a render
+  # Nothing about what these buffers hold can be trusted now: the next pass
+  # draws everything, the strip's pixels included.
+  rhythmForgetCanvases()
+  forgetPanelFrames()
+
+proc reportInterpreterDiscards*(host: SingleSceneHost, context: ExecutionContext, image: Image) =
+  ## What became of the JS interpreters this render: a scene whose interpreter
+  ## goes keeps its picture and stops answering, and without this nobody would
+  ## know why. The frame's log says each one, and when it cost a UI its tap
+  ## handlers the panel says so too.
+  let now = getMonoTime().ticks
+  let discarded = takeInterpreterDiscards()
+  if discarded.count > 0:
+    if discarded.heldHandlers:
+      host.discardNoticeUntil = now + DiscardNoticeNanos
+    host.logger.log(%*{"event": "js:interpreterDiscarded", "sceneId": discarded.sceneId,
+      "reason": discarded.reason, "count": discarded.count, "freeBytes": availableRenderHeadroomBytes()})
+  if now < host.discardNoticeUntil and not image.isNil:
+    drawDiscardNotice(image)
+    # The pass that takes the notice away.
+    let left = (host.discardNoticeUntil - now).float / 1e9
+    if context.nextSleep < 0 or context.nextSleep > left:
+      context.nextSleep = left
+
+{.pop.}
+
 proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   ## One render pass of the resident scene, then whatever it (and an `init` or
   ## `open` before it) dispatched: delivered now that the run is over. A
@@ -418,5 +478,6 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
     # it goes when render memory is short, or on a frame that keeps nothing.
     if not host.covered.isNil and (not host.keepJsRuntimes or not roomToCover()):
       host.dropCovered()
+    host.reportInterpreterDiscards(context, result)
   if probeOn:
     probeAdd(phSettle, (getMonoTime() - settleStart).inNanoseconds)

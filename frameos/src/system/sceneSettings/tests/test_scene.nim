@@ -10,6 +10,7 @@ import frameos/ui/layout
 import frameos/utils/font
 import system/sceneSwitcher/scene as switcher
 import system/sceneSettings/scene as settings
+import frameos/layout_choice
 
 # The scene settings (docs/scene-settings.md): the form it builds of a
 # scene's fields, a text typed on the keyboard on the screen, a switch and
@@ -456,6 +457,7 @@ block the_frame_page:
     online = false
     crowded = false
     locked = false
+    battery = -1
   frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
     {.cast(gcsafe).}:
       if locked:
@@ -470,7 +472,9 @@ block the_frame_page:
           "ip": if online: "192.168.1.20" else: "", "networks": networks, "scanning": false, "password": true},
         "rotate": 0, "renderScale": 0, "managedBy": "FrameOS Cloud", "version": "2026.11.5",
         "actions": ["restart"]}
-  frameSettingsApply = proc (values: JsonNode) {.nimcall, gcsafe, raises: [].} =
+      if battery >= 0:
+        result["battery"] = %*{"percent": battery}
+  frameSettingsApply =proc (values: JsonNode) {.nimcall, gcsafe, raises: [].} =
     {.cast(gcsafe).}: applied.add values
   frameSettingsAction = proc (action: string) {.nimcall, gcsafe, raises: [].} =
     {.cast(gcsafe).}: actions.add action
@@ -575,6 +579,17 @@ block the_frame_page:
   online = true
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-online.png")
+  # The battery sits with the Wi-Fi facts, on a frame that has one.
+  battery = 78
+  let withBattery = scene.draw()
+  var batteryShown = false
+  for y in 0 ..< image.height:
+    for x in 0 ..< image.width:
+      if image[x, y] != withBattery[x, y]:
+        batteryShown = true
+  doAssert batteryShown, "no Battery line on the frame page"
+  battery = -1
+  discard scene.draw()
   # Save hands over what was picked, as it is too: the host applies what
   # differs from what it has (fos_frame_settings.c, frame_settings_linux.nim).
   scene.scrollToEnd()
@@ -654,3 +669,53 @@ block the_frame_page:
   frameSettingsAction = nil
 
 echo "scene settings: ok"
+
+block the_frame_page_has_the_layout_and_scans_on_the_network_line:
+  var actions: seq[string]
+  layoutListing = proc (): seq[LayoutEntry] {.nimcall, gcsafe.} = @[LayoutEntry(id: "layouts/bar", name: "Bar")]
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      result = %*{"wifi": {"state": "connected", "ssid": "Home", "rssi": -61, "ip": "192.168.1.20",
+        "networks": ["Home", "Cafe"], "scanning": false, "password": true},
+        "rotate": 0, "renderScale": 0, "version": "2026.11.5"}
+  frameSettingsAction = proc (action: string) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: actions.add action
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.wornLayout = InterpretedFrameScene(id: "layouts/bar".SceneId, state: %*{"side": "top"},
+    publicStateFields: @[StateField(name: "side", label: "Side", fieldType: "string")])
+  # Opened on the frame page by name: that is what it says it is.
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
+  doAssert scene.state["page"].getStr() == "frame"
+  doAssert scene.shownName == "Frame settings", scene.shownName
+  doAssert scene.wornLayout.shownName == "Frame settings"
+  var image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-layout.png")
+  # Scan is a button on the network select's own line.
+  let network = uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0]
+  let scan = regionWith(20000)
+  doAssert scan.x >= network.x + network.w and abs((scan.y + scan.h / 2) - (network.y + network.h / 2)) < 4,
+    $scan & " " & $network
+  scene.tap(scan)
+  doAssert "scan" in actions, $actions
+  # The gear beside Layout opens the layout's settings, with its fields.
+  discard scene.draw()
+  scene.scrollTo(2000)
+  discard scene.draw()
+  scene.tap(regionWith(20004))
+  doAssert scene.state["page"].getStr() == "layout"
+  doAssert scene.shownName == "Layout settings"
+  doAssert settings.exportedScene.render(scene, ExecutionContext(scene: scene, event: "render", payload: %*{},
+    image: newImage(480, 480), hasImage: true)) != nil
+  if previews.len > 0:
+    image = scene.draw()
+    image.writeFile(previews / "settings-layout.png")
+  # Back to the frame page; a layout chosen there is the frame's, not the host's.
+  discard scene.draw()
+  scene.tap(regionWith(0))
+  doAssert scene.state["page"].getStr() == "frame"
+  doAssert scene.shownName == "Frame settings"
+  frameSettingsRead = nil
+  frameSettingsAction = nil
+  layoutListing = nil
+  chooseLayout("")
+  echo "layout row ok"

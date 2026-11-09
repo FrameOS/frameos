@@ -18,6 +18,7 @@ import {
 // renamed scenes through onScenesChanged).
 type StubEditorApi = {
   renameScene: (sceneId: string, name: string) => void;
+  setSceneIsLayout: (sceneId: string, isLayout: boolean) => void;
   panBy: (dx: number, dy: number) => void;
   fitView: () => void;
 };
@@ -32,6 +33,7 @@ type StubEditorProps = {
   initialFile?: "template" | "diagram" | undefined;
 };
 const renameCalls: Array<[string, string]> = [];
+const isLayoutCalls: Array<[string, boolean]> = [];
 const panCalls: Array<[number, number]> = [];
 let fitCalls = 0;
 function StubEditor(props: StubEditorProps) {
@@ -61,6 +63,15 @@ function StubEditor(props: StubEditorProps) {
           currentRef.current.map((scene) => {
             const entry = scene as { id: string };
             return entry.id === sceneId ? { ...entry, name } : entry;
+          }),
+        );
+      },
+      setSceneIsLayout: (sceneId, isLayout) => {
+        isLayoutCalls.push([sceneId, isLayout]);
+        emit(
+          currentRef.current.map((scene) => {
+            const entry = scene as { id: string };
+            return entry.id === sceneId ? { ...entry, settings: isLayout ? { isLayout: true } : {} } : entry;
           }),
         );
       },
@@ -143,11 +154,19 @@ vi.mock("./SceneAiPanel", () => ({
 type InfoProps = {
   heading?: ReactNode;
   scene: { name: string };
+  isLayout?: boolean | undefined;
+  draft?: { onIsLayoutChange?: ((isLayout: boolean) => void) | undefined } | undefined;
 };
 vi.mock("./SceneInfoPanel", () => ({
   SceneInfoPanel: (props: InfoProps) => (
-    <div data-scene={props.scene.name} data-testid="info-panel">
+    <div data-is-layout={String(props.isLayout)} data-scene={props.scene.name} data-testid="info-panel">
       <div data-testid="info-heading">{props.heading}</div>
+      <button onClick={() => props.draft?.onIsLayoutChange?.(true)} type="button">
+        make layout
+      </button>
+      <button onClick={() => props.draft?.onIsLayoutChange?.(false)} type="button">
+        make normal
+      </button>
     </div>
   ),
 }));
@@ -328,6 +347,7 @@ beforeEach(() => {
   setReferrer("");
   scenesJson = loadedScenes;
   renameCalls.length = 0;
+  isLayoutCalls.length = 0;
   panCalls.length = 0;
   fitCalls = 0;
   pushMock.mockClear();
@@ -1193,6 +1213,28 @@ describe("SceneEditorModal scene name", () => {
     await waitFor(() => expect(screen.queryByText("Unsaved changes")).toBeNull());
     expect(refreshMock).toHaveBeenCalled();
     expect(screen.getByTestId("editor")).toBeTruthy();
+  });
+
+  it("switches the scene between a layout and a normal one through the editor, into Save", async () => {
+    remember({ ai: false, editor: true, info: true, preview: false });
+    render(<SceneEditorModal canSave info={info} sceneId="scene-1" />);
+    await screen.findByTestId("editor");
+    fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
+    const panel = screen.getByTestId("info-panel");
+    expect(panel.dataset.isLayout).toBe("false");
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "make layout" }));
+    expect(isLayoutCalls).toEqual([["s1", true]]);
+    expect(panel.dataset.isLayout).toBe("true");
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "make normal" }));
+    expect(isLayoutCalls).toEqual([
+      ["s1", true],
+      ["s1", false],
+    ]);
+    expect(panel.dataset.isLayout).toBe("false");
   });
 
   it("follows the editor's own rename", async () => {

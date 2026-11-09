@@ -15,6 +15,7 @@
 import std/[hashes, math, strutils, tables, unicode]
 import pixie
 import pixie/fileformats/svg
+import frameos/events_gen
 import frameos/ui/tailwind
 import frameos/ui/keyboard
 import frameos/ui/tree
@@ -23,6 +24,9 @@ when not defined(frameosEmbedded):
   import frameos/panel_shape
 
 export keyboard.KeyboardPage
+
+const MaxHoles* = 8
+  ## Past this many a `<Scene>` is a picture, as one that cannot be a hole is.
 
 type
   UiKind = enum
@@ -85,6 +89,18 @@ type
     bold: seq[Font]      ## its fonts drawn with a stroke (UiNode.bold)
     drawnAt: array[3, float32] ## x, y, opacity `drawn` was emitted for
     drawn: seq[SvgNode]  ## its outlines as emitted there, paths shared
+
+  UiHole* = object
+    ## A `<Scene>` or `<yield />` (seekHoles), in the UI's pixels, and in the
+    ## canvas's (left to bottom, for whoever knows the scale).
+    clean*: bool
+    x*, y*, w*, h*: float32
+    left*, top*, right*, bottom*: int32
+
+  UiHoles* = object
+    count*: int
+    firstYield: int ## its place + 1
+    items*: array[MaxHoles, UiHole]
 
   UiMemo* = ref object
     ## What the last layout of a UI set in type, for the next one (one per
@@ -480,6 +496,15 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
   let childGroup = groupHover or (result.group and key in input.hovered)
   if n.tag == "img" or n.tag == "svg":
     result.kind = if n.tag == "img": ukImage else: ukSvg
+    return
+  if n.tag == "Scene":
+    # A picture whose size comes from the room it gets (flex-1 unless it
+    # says): the scene runs once the layout knows it (app_runtime.nim).
+    result.kind = ukImage
+    if result.box.grow == 0 and result.box.w.kind == lkAuto and result.box.h.kind == lkAuto:
+      result.box.grow = 1
+      result.box.shrink = 1
+      result.box.basis = Len(kind: lkPct, v: 0)
     return
   if n.tag == "input" or n.tag == "textarea":
     result.buildField(n, text, classes, rootW, rootH, input)
@@ -1590,10 +1615,14 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
   of ukText:
     n.emitText(cx, cy, cw, op, drawn)
   of ukImage:
-    if not n.src.image.isNil and cw > 0 and ch > 0:
+    let embedded = n.src.tag == "Scene"
+    if (embedded or not n.src.image.isNil) and cw > 0 and ch > 0:
       let node = SvgNode(tag: "image", image: n.src.image, attrs: @[("x", num(cx)),
         ("y", num(cy)), ("width", num(cw)), ("height", num(ch)),
         ("preserveAspectRatio", ["none", "xMidYMid meet", "xMidYMid slice"][ord(b.fit)])])
+      if embedded:
+        node.attrs.add(("scene-id", n.src.attr("id")))
+        node.attrs.add(("scene-props", n.src.attr("props")))
       if op < 1:
         node.attrs.add(("opacity", num(op)))
       drawn.add node
@@ -1955,5 +1984,68 @@ proc layoutUi*(root: SvgNode, width, height: int): SvgNode =
     regions: seq[UiRegion]
     input: UiInput
   layoutUi(root, width, height, input, regions)
+
+proc seekHoles(n: UiNode, ox, oy, opacity: float32, scrolled, yieldReady: bool, holes: var UiHoles) =
+  ## In paint order, as `emit` walks: each `<Scene>` and `<yield />`, then
+  ## whether anything painted after it lands on it.
+  template b: untyped = n.box
+  let op = opacity * b.opacity
+  if b.display == diNone or op <= 0:
+    return
+  let
+    x = round(ox + n.x)
+    y = round(oy + n.y)
+    w = round(ox + n.x + n.size.x) - x
+    h = round(oy + n.y + n.size.y) - y
+  if n.kind != ukBox or b.bg.a > 0 or b.gradient > 0 or b.border[0] + b.border[1] + b.border[2] + b.border[3] > 0:
+    for i in 0 ..< holes.count:
+      template hole: untyped = holes.items[i]
+      if x < hole.x + hole.w and x + w > hole.x and y < hole.y + hole.h and y + h > hole.y:
+        hole.clean = false
+  if n.kind == ukImage and n.src.tag == "Scene":
+    let
+      yields = n.src.attr("id") == SceneYieldId
+      cw = w - b.padX
+      ch = h - b.padY
+    if cw <= 0 or ch <= 0 or holes.count == MaxHoles or (yields and not yieldReady):
+      return
+    if yields:
+      if holes.firstYield > 0:
+        # The same scene in two places is drawn as pictures.
+        holes.items[holes.firstYield - 1].clean = false
+        return
+      holes.firstYield = holes.count + 1
+    holes.items[holes.count] = UiHole(x: x + b.pad[3] + b.border[3], y: y + b.pad[0] + b.border[0], w: cw, h: ch,
+      clean: op >= 1 and not scrolled and n.x >= 0 and n.y >= 0)
+    inc holes.count
+    return
+  if n.kind != ukBox:
+    return
+  # A box that clips and has nothing out of sight clips nothing.
+  let moves = scrolled or (b.overflowX != ovVisible or b.overflowY != ovVisible) and (n.maxX > 0 or n.maxY > 0)
+  for pass in [false, true]:
+    for c in n.children:
+      if c.box.absolute == pass:
+        c.seekHoles(x, y, op, moves, yieldReady, holes)
+
+proc seekHoles*(memo: UiMemo, input: UiInput, yieldReady: bool): UiHoles =
+  ## Where the embedded scenes of the UI just laid out sit, in its own pixels,
+  ## and which can be holes: fully opaque, nothing painted over them, not in
+  ## anything that scrolls, and for `<yield />` only one and a scene to wrap. A
+  ## popup or a held key's accents can land on any, so a UI showing one is drawn
+  ## the slow way until it goes.
+  if memo.isNil or memo.root.isNil:
+    return
+  memo.root.seekHoles(0, 0, 1, false, yieldReady, result)
+  if input.open > 0 or input.accents > 0:
+    for i in 0 ..< result.count:
+      result.items[i].clean = false
+
+proc indexAt*(holes: UiHoles, x, y: float32): int =
+  ## The clean hole at this place in the UI, -1 for none.
+  for i in 0 ..< holes.count:
+    if holes.items[i].clean and abs(holes.items[i].x - x) < 0.5 and abs(holes.items[i].y - y) < 0.5:
+      return i
+  -1
 
 {.pop.}

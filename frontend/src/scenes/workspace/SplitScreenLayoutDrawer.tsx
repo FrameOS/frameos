@@ -15,7 +15,8 @@ import { ColorInput } from '../../components/ColorInput'
 import { FrameImage } from '../../components/FrameImage'
 import type { FrameId, FrameScene, FrameType, StateField } from '../../types'
 import { buildSplitScene, frameLogic } from '../frame/frameLogic'
-import { splitPanelRhythm } from '../../utils/sceneRhythm'
+import { framePacedByInterval, splitPanelRhythm } from '../../utils/sceneRhythm'
+import { scenesWithoutLayouts } from '../../utils/sceneLayouts'
 import { StateFieldEdit } from '../frame/panels/Scenes/StateFieldEdit'
 import { assignSceneImages } from '../../utils/sceneImages'
 import { buildSplitScreenThumbnail } from '../../utils/splitScreenThumbnail'
@@ -89,7 +90,7 @@ function frameAspectValue(frame: FrameType): number {
 }
 
 function sceneById(frame: FrameType): Map<string, FrameScene> {
-  return new Map((frame.scenes ?? []).map((scene) => [scene.id, scene]))
+  return new Map((frame.scenes ?? []).map((scene): [string, FrameScene] => [scene.id, scene]))
 }
 
 function sceneTitlePart(scene: FrameScene): string {
@@ -193,7 +194,7 @@ function SceneSourceStrip({
 }): JSX.Element {
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
-  const scenes = sortScenesAlphabetically(frame.scenes ?? [])
+  const scenes = sortScenesAlphabetically(scenesWithoutLayouts(frame.scenes))
   const searchTerm = search.trim().toLowerCase()
   const filteredScenes = searchTerm
     ? scenes.filter((scene) => `${scene.name || ''} ${scene.id}`.toLowerCase().includes(searchTerm))
@@ -955,7 +956,8 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
     selectedLeaf?.state,
     frameScenes,
     frame.interval || 300,
-    editingScene ? sceneRefreshSeconds(editingScene) : frame.interval || 300
+    editingScene ? sceneRefreshSeconds(editingScene) : frame.interval || 300,
+    framePacedByInterval(frame)
   )
   const rects = splitLayoutLeafRects(layout.root)
   const borderEdges = splitLayoutLeafBorderEdges(rects)

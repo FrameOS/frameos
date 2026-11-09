@@ -1,5 +1,5 @@
 {
-  "$comment": "The scene event contract: every built-in event name, what it carries, who may emit it and what a host does with it. Source of truth for frameos/tools/generate_events_contract.py, which writes the Nim, C, TypeScript and Python tables and the editor catalog (frontend/schema/events.json). The prose is docs/events.md; the conformance corpus every runner must pass is docs/event-fixtures.json. Add an event HERE, regenerate, add a fixture — never to one of the generated files.",
+  "$comment": "The scene event contract: every built-in event name, what it carries, who may emit it and what a host does with it. Source of truth for frameos/tools/generate_events_contract.py, which writes the Nim, C, TypeScript and Python tables and the editor catalog (frontend/schema/events.json). The prose is docs/events.md; the conformance corpus every runner must pass is docs/event-fixtures.json. Add an event HERE, regenerate, add a fixture — never to one of the generated files. A JS app's `\"events\": [\"*\"]` hears every event a scene can listen for, except what is reported at the rate of a moving finger (`coalesce: latest`), an old name for another event (`aliasOf`) and an event marked `wildcard: false` (the app's own init and render).",
   "version": 1,
   "hosts": ["linux", "esp32", "wasm"],
   "origins": {
@@ -95,6 +95,7 @@
       "description": "Once per scene, when it is first loaded and its apps are ready — before its first open and render.",
       "listen": true,
       "dispatch": false,
+      "wildcard": false,
       "payload": [],
       "sceneState": "read",
       "origins": ["system", "http:admin"],
@@ -110,6 +111,7 @@
       "description": "Render the scene. Triggered according to the frame's refresh interval, or when explicitly requested.",
       "listen": true,
       "dispatch": true,
+      "wildcard": false,
       "payload": [],
       "sceneState": "read",
       "origins": ["system", "driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud", "eventMap", "panel"],
@@ -649,7 +651,9 @@
       "description": "Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen.",
       "listen": false,
       "dispatch": true,
-      "payload": [],
+      "payload": [
+        {"name": "page", "label": "Page", "type": "string", "required": false}
+      ],
       "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap"],
       "renderAfter": "always",
       "coalesce": "none",
@@ -781,7 +785,9 @@
     "$switcherComment": "The scene `sceneSwitcher` shows: built into every runtime (docs/scene-switcher.md), never in a scene list, never the scene a reboot comes back to. `sceneSwitcher` hands it `state.from` (the scene it was opened from); opened by name with `setCurrentScene` it has none and goes back to the list's first. While it shows, `direction` walks the list from `state.from`.",
     "switcher": "system/sceneSwitcher",
     "$settingsComment": "The scene `sceneSettings` shows: built into every runtime (docs/scene-settings.md), like the switcher in no scene list and never the scene a reboot comes back to. `sceneSettings` hands it `state.from` (the scene it was opened from), `state.fields` (that scene's public fields) and `state.values` (theirs as it opened); Save is a `setCurrentScene` back to `from` with the values as its state.",
-    "settings": "system/sceneSettings"
+    "settings": "system/sceneSettings",
+    "$yieldComment": "Not a scene: the id a scene node names to mean \"the scene this layout is wrapped around\" (docs/scene-layouts.md), `<yield />` in JSX. In no scene list; a layout shown on its own has nothing to yield and leaves the panel empty.",
+    "yield": "system/yield"
   },
   "gestures": {
     "$comment": "How the dispatcher makes tap, doubleTap, longPress and swipe out of pointerDown / pointerUp, in scene pixels and milliseconds. The same numbers on every host.",

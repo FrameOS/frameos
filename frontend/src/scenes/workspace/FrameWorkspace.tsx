@@ -1,3 +1,4 @@
+import { scenesWithoutLayouts } from '../../utils/sceneLayouts'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
@@ -285,6 +286,7 @@ const allFrameSettingsSections = [
   // store-scene service keys sit above Info.
   { id: 'frame-settings-cloud', label: 'Cloud' },
   { id: 'frame-settings-store-scene-services', label: 'Service keys' },
+  { id: 'frame-settings-layouts', label: 'Layouts' },
   { id: 'frame-settings-telemetry', label: 'Log shipping' },
   { id: 'frame-settings-info', label: 'Info' },
   { id: 'frame-settings-upgrade', label: 'Update' },
@@ -1447,7 +1449,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
   const activeToolScrollKey = frameToolScrollKey(frameId, activeToolPanel)
   const frameToolScrollPositionsRef = useRef(frameToolScrollPositions)
   const lastObservedFrameToolScrollTopRef = useRef(0)
-  const visibleScenes = scenes
+  const visibleScenes = scenesWithoutLayouts(scenes)
   const frameLoaded = !!frame
   const toolUsesSearch = false
   const toolUsesPageScroll = toolRoute.kind === 'panel' ? frameToolUsesPageScroll(activeToolPanel) : true
@@ -1600,7 +1602,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
                   activeTool={activeToolPanel}
                   frame={frame}
                   scenes={visibleScenes}
-                  totalScenes={scenes.length}
+                  totalScenes={visibleScenes.length}
                   pageScroll={toolUsesPageScroll}
                 />
               )}

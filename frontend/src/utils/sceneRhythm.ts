@@ -1,5 +1,8 @@
-import { FrameScene } from '../types'
+import { FrameScene, FrameType } from '../types'
 import { sceneRefreshSeconds } from './refreshInterval'
+
+/** The RGB565 LCD format (deviceLimits.ts ESP32_PIXEL_RGB565; fos_pixel_format_t 9). */
+const ESP32_PIXEL_RGB565 = 9
 
 /**
  * How often a scene renders, as the editor can tell before a deploy.
@@ -7,8 +10,9 @@ import { sceneRefreshSeconds } from './refreshInterval'
  * On a frame every scene drawn through a scene node renders when IT is due
  * (frameos/src/frameos/scene_rhythm.nim), on the refresh interval its state
  * holds (utils/refreshInterval.ts). A scene the split drawer generated draws
- * nothing of its own: its interval is the fastest it renders, and it waits
- * longer when none of its panels is due by then.
+ * nothing of its own, so it renders when its first panel is due. On a panel
+ * where a render is a visible refresh (e-paper) or a wake (deep sleep) its
+ * own interval is also the fastest it renders: `framePacedByInterval`.
  */
 
 export interface SceneRhythm {
@@ -16,6 +20,28 @@ export interface SceneRhythm {
   seconds: number
   /** Where the number came from: the scene's own interval, or its panels being slower. */
   source: 'interval' | 'children'
+}
+
+/**
+ * Whether a frame's own interval holds a split back: e-paper, or a frame that
+ * deep-sleeps between renders. The runtime's rule is panelIsPaper
+ * (frameos/src/frameos/panel_shape.nim): on an ESP32 anything but an RGB565
+ * LCD, on a Pi by its device.
+ */
+export function framePacedByInterval(
+  frame: Pick<FrameType, 'device' | 'hardware' | 'deep_sleep'> | null | undefined
+): boolean {
+  if (!frame) {
+    return false
+  }
+  if (frame.deep_sleep) {
+    return true
+  }
+  const device = frame.device ?? ''
+  if (device === 'embedded') {
+    return frame.hardware?.pixelFormat !== ESP32_PIXEL_RGB565
+  }
+  return device.startsWith('waveshare.') || device.startsWith('inky') || device.startsWith('pimoroni.inky')
 }
 
 /** True for scenes that render when their embedded scenes do (generated splits). */
@@ -27,13 +53,15 @@ export function sceneFollowsChildren(scene: Pick<FrameScene, 'settings'> | null 
 /**
  * How often `scene` renders when embedded with `state` (the scene node's
  * config: a split panel's option overrides, the refresh interval among them).
- * `scenes` resolves the scenes a split embeds; `fallbackInterval` is the frame's.
+ * `scenes` resolves the scenes a split embeds; `fallbackInterval` is the
+ * frame's; `paced`: the frame's interval holds a split back (framePacedByInterval).
  */
 export function sceneRhythm(
   scene: FrameScene,
   state: Record<string, any> = {},
   scenes: Map<string, FrameScene> | FrameScene[] = [],
   fallbackInterval = 300,
+  paced = false,
   depth = 0
 ): SceneRhythm {
   // The interval is a state field every scene has (utils/refreshInterval.ts):
@@ -52,11 +80,22 @@ export function sceneRhythm(
       if (!child) {
         continue
       }
-      const rhythm = sceneRhythm(child, data.config ?? {}, lookup, fallbackInterval, depth + 1)
+      const rhythm = sceneRhythm(child, data.config ?? {}, lookup, fallbackInterval, paced, depth + 1)
       soonest = soonest === null ? rhythm.seconds : Math.min(soonest, rhythm.seconds)
     }
-    if (soonest !== null && soonest > ownSeconds) {
+    if (soonest !== null && (!paced || soonest > ownSeconds)) {
       return { seconds: soonest, source: 'children' }
+    }
+  }
+  // A layout's panels wake the scene that wears it, where nothing holds it back.
+  if (!paced && depth === 0 && scene.layout?.sceneId) {
+    const lookup = scenes instanceof Map ? scenes : new Map(scenes.map((candidate) => [candidate.id, candidate]))
+    const layout = lookup.get(scene.layout.sceneId)
+    if (layout) {
+      const chrome = sceneRhythm(layout, scene.layout.state ?? {}, lookup, fallbackInterval, paced, depth + 1)
+      if (chrome.seconds < ownSeconds) {
+        return { seconds: chrome.seconds, source: 'children' }
+      }
     }
   }
   return { seconds: ownSeconds, source: 'interval' }
@@ -94,15 +133,18 @@ export function describeSceneRhythm(rhythm: SceneRhythm): string {
 export function splitSceneRhythmHint(
   scene: FrameScene | null,
   scenes: FrameScene[],
-  fallbackInterval: number
+  fallbackInterval: number,
+  paced = false
 ): string | null {
   if (!scene || !sceneFollowsChildren(scene)) {
     return null
   }
-  const rhythm = sceneRhythm(scene, {}, scenes, fallbackInterval)
-  return `Each panel renders on its own schedule, at most this often. With these panels: ${describeSceneRhythm(
-    rhythm
-  )}.`
+  const rhythm = sceneRhythm(scene, {}, scenes, fallbackInterval, paced)
+  return paced
+    ? `Each panel renders on its own schedule, at most this often. With these panels: ${describeSceneRhythm(rhythm)}.`
+    : `Each panel renders on its own schedule, and the frame wakes when the first one is due. With these panels: ${describeSceneRhythm(
+        rhythm
+      )}.`
 }
 
 /**
@@ -114,13 +156,14 @@ export function splitPanelRhythm(
   panelState: Record<string, any> | null | undefined,
   scenes: FrameScene[],
   fallbackInterval: number,
-  splitSeconds: number
+  splitSeconds: number,
+  paced = false
 ): string | null {
   if (!panelScene) {
     return null
   }
-  const rhythm = sceneRhythm(panelScene, panelState ?? {}, scenes, fallbackInterval)
-  return rhythm.seconds < splitSeconds
+  const rhythm = sceneRhythm(panelScene, panelState ?? {}, scenes, fallbackInterval, paced)
+  return paced && rhythm.seconds < splitSeconds
     ? `${describeRhythmSeconds(splitSeconds)} (the split's interval)`
     : describeSceneRhythm(rhythm)
 }

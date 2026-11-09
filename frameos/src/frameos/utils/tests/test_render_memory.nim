@@ -7,7 +7,7 @@
 import ../memory
 
 var released = 0
-proc fakeRelease(): bool {.nimcall, raises: [].} =
+proc fakeRelease(refused: bool): bool {.nimcall, raises: [].} =
   inc released
   true
 renderMemoryReleaseHook = fakeRelease

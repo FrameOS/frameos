@@ -273,6 +273,21 @@ describe("validateSceneZip transparency rejection", () => {
     );
   }
 
+  it("rejects a scene marked as a layout that cannot be one", () => {
+    const zip = (scene: Record<string, unknown>) =>
+      Buffer.from(
+        zipSync({
+          "scenes.json": strToU8(JSON.stringify([{ id: "a", nodes: [], edges: [], ...scene }])),
+          "template.json": strToU8(JSON.stringify({ name: "Scene" })),
+        }),
+      );
+    expect(validateSceneZip(zip({ settings: { isLayout: true } }))).toEqual({
+      ok: false,
+      error: "invalid_layout_scene",
+    });
+    expect(validateSceneZip(zip({ settings: {} })).ok).toBe(true);
+  });
+
   it("rejects a zip whose preview is proven fully transparent", () => {
     const result = validateSceneZip(sceneZip(transparentRgba(4, 4)));
     expect(result).toEqual({

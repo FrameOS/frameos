@@ -297,6 +297,29 @@ describe("cloud scene persistence", () => {
     ]);
   });
 
+  it("posts the install's layout beside the scene and never as scene content", async () => {
+    // docs/scene-layouts.md: the layout is the install's, like the button map.
+    const store = fakeStore();
+    store.scenes.set("public-1", { scenes: [storedScene("rt-1", "Clock")], owned: false, version: 3 });
+    store.assignments = [{ scene_id: "public-1" }];
+    installFetch(store);
+    const layout = { sceneId: "bar", state: { height: 40 } };
+
+    const wearing = { ...sanitizedCopy(storedScene("rt-1", "Clock")), layout };
+    await persistAndPushCloudFrameScenes(frameId, [wearing], null, { sceneUnchanged: workspaceEquality });
+    expect(store.created).toEqual([]);
+    expect(store.updated).toEqual([]);
+    expect((store.pushes.at(-1) as { scenes: unknown[] }).scenes).toEqual([
+      { scene_id: "public-1", layouts: { "rt-1": layout } },
+    ]);
+
+    store.assignments = [{ scene_id: "public-1", layouts: { "rt-1": layout } } as never];
+    await persistAndPushCloudFrameScenes(frameId, [sanitizedCopy(storedScene("rt-1", "Clock"))], null, {
+      sceneUnchanged: workspaceEquality,
+    });
+    expect((store.pushes.at(-1) as { scenes: unknown[] }).scenes).toEqual([{ scene_id: "public-1", layouts: null }]);
+  });
+
   it("keeps a pack claimed when its scenes.json cannot be re-read (rate limit, blip)", async () => {
     const store = fakeStore();
     store.scenes.set("public-1", { scenes: [storedScene("rt-1", "Abstract Architecture")], owned: false, version: 3 });

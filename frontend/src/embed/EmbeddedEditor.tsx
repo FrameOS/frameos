@@ -36,6 +36,7 @@ import { Events } from '../scenes/frame/panels/Events/Events'
 import { SceneJSON } from '../scenes/frame/panels/SceneJSON/SceneJSON'
 import { SceneState } from '../scenes/frame/panels/SceneState/SceneState'
 import { SceneSettings } from '../scenes/frame/panels/Scenes/SceneSettings'
+import { withIsLayout } from '../utils/sceneLayouts'
 import { RenameSceneModal } from '../scenes/frame/panels/Scenes/RenameSceneModal'
 import { scenesLogic } from '../scenes/frame/panels/Scenes/scenesLogic'
 import { livePreviewLogic } from '../scenes/frame/panels/Scenes/livePreviewLogic'
@@ -70,6 +71,9 @@ export interface EmbeddedSceneEditorApi {
   /** Renames a scene through the editor's own form: the diagram keeps its
    * layout and the change streams out through onScenesChanged. */
   renameScene: (sceneId: string, name: string) => void
+  /** Makes a scene a layout or a normal one through the editor's own form, so
+   * the change streams out through onScenesChanged like a rename. */
+  setSceneIsLayout: (sceneId: string, isLayout: boolean) => void
   /** Shifts the shown scene's diagram by (dx, dy) screen pixels — what a host
    * calls with half its column's width change to keep the diagram centred. */
   panBy: (dx: number, dy: number) => void
@@ -212,6 +216,10 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
     }
     apiRef.current = {
       renameScene: (sceneId, name) => updateScene(sceneId, { name }),
+      setSceneIsLayout: (sceneId, isLayout) => {
+        const scene = embedFrameLogic(logicProps).values.scenes?.find((candidate) => candidate.id === sceneId)
+        updateScene(sceneId, { settings: withIsLayout(scene?.settings, isLayout) })
+      },
       panBy: (dx, dy) => shownDiagram()?.actions.panDiagramView(dx, dy),
       fitView: () => shownDiagram()?.actions.fitDiagramView(),
     }

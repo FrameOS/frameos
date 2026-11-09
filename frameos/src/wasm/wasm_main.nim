@@ -308,7 +308,8 @@ proc frameos_wasm_load_scenes(payload: cstring): cint {.exportc, cdecl.} =
     host.dropScene()
     replaceInterpretedScenesCache(newScenes)
     scenesLoadedCount = newScenes.len
-    loadedSceneOrder = inputs.mapIt(it.id).filterIt(newScenes.hasKey(it))
+    # A layout is in no scene list (docs/scene-layouts.md).
+    loadedSceneOrder = inputs.mapIt(it.id).filterIt(newScenes.hasKey(it) and not newScenes[it].isLayout)
 
     if host.sceneId.isSome and not newScenes.hasKey(host.sceneId.get()):
       host.sceneId = none(SceneId)

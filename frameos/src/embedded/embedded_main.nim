@@ -378,6 +378,7 @@ proc renderFrameImage(): tuple[image: Image, source: string] =
     # The frame-wide colour correction, once on the finished canvas.
     applyGlobalColorCorrection(interpreted.get())
     return (interpreted.get(), "interpreted scene \"" & currentSceneName() & "\"")
+  rhythmForgetCanvases()
   (renderDemoInto(renderCanvas(), frameName, renderCount + 1), "status screen")
 
 proc packImageForFormat(
@@ -556,6 +557,7 @@ proc renderErrorFallback(
     # the allocation an OOM-aborted render could not afford.
     let image = renderCanvas()
     image.renderErrorInto(image.width, image.height, message)
+    rhythmForgetCanvases()
     if not renderCanvasIsPanel(image) and not packImageForFormat(image, buf, bufLen, pixelFormat):
       return 1
     GC_fullCollect()
@@ -641,6 +643,7 @@ proc renderErrorFallbackAlloc(
       return 1
     let image = renderCanvas()
     image.renderErrorInto(image.width, image.height, message)
+    rhythmForgetCanvases()
     if not packImageForFormat(image, cast[ptr UncheckedArray[uint8]](raw), packedLen, pixelFormat):
       renderBufferFree(raw)
       return 1
@@ -757,6 +760,12 @@ proc fos_nim_recover_oom_abort_impl(jsBytes: ptr csize_t; httpReleased: ptr cint
     js.jsDropped.cint
   except Defect, CatchableError:
     -1
+
+proc fos_nim_scene_awaited_impl(): bool {.exportc, cdecl.} =
+  try:
+    sceneAwaited()
+  except Defect, CatchableError:
+    true
 
 proc fos_nim_scene_interval_impl(): cdouble {.exportc, cdecl.} =
   ## Refresh interval requested by the active interpreted scene, in seconds;

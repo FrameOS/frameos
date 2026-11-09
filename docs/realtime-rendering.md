@@ -480,10 +480,27 @@ mark if one is up. A frame rendered for an older switch ends nothing.
 next frame is slow, the scene settings' gear, a refresh that fetches something.
 Each render pass begins it (`runner.nim` at the top of a pass, `fos_client.c`
 before `render_once`) and its frame ends it. Timer-driven renders are included,
-so a scene that takes 3 s to refresh shows the mark for the last 2.8 s of it.
-The one exception is an animation (a `refreshInterval` under one second; on the
-ESP32 a scene `fos_animation` is pacing): it would blink the mark on every frame
-that ran a little over the delay.
+so a scene that refreshes every minute and takes 3 s to do it shows the mark
+for the last 2.8 s. The exception is a render the frame's own clock repeats
+more often than every 5 seconds (`LoadingMarkMinIntervalSeconds`): an animation
+(on the ESP32 a scene `fos_animation` is pacing), a ticking clock, a layout's
+clock bar. Nobody is waiting for those, and the mark would blink on every tick
+that ran a little over the delay. With a layout the interval that counts is the
+scene's own, and only on a pass that will run it (`rhythmAwaited`): a slow map
+inside a clock bar shows the mark when the map renders and not when the bar
+ticks. A switch still shows it.
+
+**An interpreter that holds a UI's handlers is not let go to save memory.** An
+awake ESP32 keeps its JS interpreters between renders while there is room, but
+a UI's `onClick` and friends live only in its interpreter, so one released
+between renders leaves a picture that no longer answers. It stays whatever the
+headroom, and goes only when an allocation actually failed
+(`keepIdleInterpreters`, `releaseRenderMemory`). Any interpreter that does go
+while its scene stays is logged (`js:interpreterDiscarded`, with the reason),
+and when it held handlers the panel says so for a few seconds
+(`reportInterpreterDiscards`). `test_kitchen_sink_esp32.nim` and
+`tools/esp32_kitchen_sink.mjs` (CI: the wasm runtime in an 8 MB board's memory)
+keep the Kitchen sink working on the smallest board that runs it.
 
 **The mark** is `frameos/loading_mark.nim`, one drawing for both runtimes,
 a frame of it every 50 ms. It composes a rectangle of the panel's own pixels

@@ -143,6 +143,7 @@ def compact_scene(scene: dict[str, Any]) -> dict[str, Any]:
         "settings": scene.get("settings") or {},
         "origin": scene.get("origin"),
         **({"eventMap": scene["eventMap"]} if scene.get("eventMap") else {}),
+        **({"layout": scene["layout"]} if scene.get("layout") else {}),
     }
 
 
@@ -512,6 +513,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
         preserve_ids: bool = False,
         deploy: str = "fast",
         project_id: int | None = None,
+        layout: dict[str, Any] | None = None,
     ):
         async def go():
             new_scenes, origin = await resolve_scene_source(scenes, template_id, repository, template, url, project_id)
@@ -528,6 +530,11 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
                 new_scenes[:] = duplicate_scenes(new_scenes)
             if name and len(new_scenes) == 1:
                 new_scenes[0]["name"] = name
+            if layout and layout.get("sceneId"):
+                # What these scenes wear is the install's (docs/scene-layouts.md); a layout wears none.
+                for scene in new_scenes:
+                    if not (scene.get("settings") or {}).get("isLayout"):
+                        scene["layout"] = layout
             if not new_scenes:
                 raise McpInputError(f"Nothing to install: these scene ids are already on the frame ({', '.join(map(str, skipped))}).")
             await save_scenes(frame_id, existing + new_scenes, project_id)
@@ -573,6 +580,10 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
             "name": {"type": "string", "description": "Name for the scene when exactly one is installed."},
             "activate": {"type": "boolean"},
             "preserve_ids": {"type": "boolean"},
+            "layout": {
+                "type": "object",
+                "description": "The layout these scenes wear: {sceneId, state?}, a scene on the frame with settings.isLayout.",
+            },
             "deploy": DEPLOY,
         },
         required=["confirm", "frame_id"],
@@ -598,6 +609,9 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
             # (docs/events.md "Event map"): a new version keeps it.
             if "eventMap" not in new_scene and scenes[index].get("eventMap"):
                 new_scene["eventMap"] = scenes[index]["eventMap"]
+            # So is the layout it wears (docs/scene-layouts.md).
+            if "layout" not in new_scene and scenes[index].get("layout"):
+                new_scene["layout"] = scenes[index]["layout"]
             scenes[index] = new_scene
             await save_scenes(frame_id, scenes, project_id)
             return text({"updated": {"id": new_scene.get("id"), "name": new_scene.get("name")}, **(await deploy_after(frame_id, deploy, project_id))})

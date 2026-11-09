@@ -3,6 +3,7 @@ import { actionToUrl, router, urlToAction } from 'kea-router'
 import { framesModel } from '../../models/framesModel'
 import { frameHost, frameIsActive } from '../../decorators/frame'
 import { FrameScene, FrameType, FrameId } from '../../types'
+import { scenesWithoutLayouts } from '../../utils/sceneLayouts'
 import { frameIdsEqual, parseRouteFrameId } from '../../utils/frameId'
 import { urls } from '../../urls'
 import { applyFrameosTheme } from '../../utils/frameosTheme'
@@ -95,6 +96,13 @@ export function frameAssetFolderExpansionKey(frameId: FrameId, path: string): st
 
 export function sceneChildExpansionKey(frameId: FrameId, sceneId: string): string {
   return frameAssetFolderExpansionKey(frameId, sceneChildExpansionPath(sceneId))
+}
+
+/** A frame's collapsed Layouts group, remembered like an expanded folder. */
+export const LAYOUTS_GROUP_EXPANSION_PATH = 'layouts-group'
+
+export function layoutsGroupExpansionKey(frameId: FrameId): string {
+  return frameAssetFolderExpansionKey(frameId, LAYOUTS_GROUP_EXPANSION_PATH)
 }
 
 export function sceneChildExpansionPath(sceneId: string): string {
@@ -344,11 +352,11 @@ export interface ChatDrawerSelection {
 
 /** The Add scene drawer's pages: the actions, its two scene lists, or the
  * photo album installer. Kept in the URL (`drawerPage`). */
-export type AddScenePage = 'actions' | 'store' | 'saved' | 'photos'
+export type AddScenePage = 'actions' | 'store' | 'saved' | 'photos' | 'layouts'
 
 function templateDrawerPageFromSearch(search: Record<string, unknown>): AddScenePage {
   const page = searchValue(search, 'drawerPage')
-  return page === 'store' || page === 'saved' || page === 'photos' ? page : 'actions'
+  return page === 'store' || page === 'saved' || page === 'photos' || page === 'layouts' ? page : 'actions'
 }
 
 /** The `q` (scene search) of the Add scene drawer, if the URL carries one. */
@@ -1758,8 +1766,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
           .map(({ frame, archived }) => {
             const matchesFrame = frameMatchesSearch(frame, normalizedSearch)
             const scenes = normalizedSearch
-              ? (frame.scenes ?? []).filter((scene) => sceneMatchesSearch(scene, normalizedSearch))
-              : frame.scenes ?? []
+              ? scenesWithoutLayouts(frame.scenes).filter((scene) => sceneMatchesSearch(scene, normalizedSearch))
+              : scenesWithoutLayouts(frame.scenes)
             return { frame, scenes, archived, frameMatchesSearch: matchesFrame }
           })
           .filter(({ scenes, frameMatchesSearch }) => !normalizedSearch || frameMatchesSearch || scenes.length > 0)
@@ -1798,14 +1806,16 @@ export const workspaceLogic = kea<workspaceLogicType>([
       (s) => [s.selectedFrame, s.search],
       (selectedFrame: workspaceLogicValues['selectedFrame'], search: workspaceLogicValues['search']): FrameScene[] => {
         const normalizedSearch = search.trim().toLowerCase()
-        return (selectedFrame?.scenes ?? []).filter((scene) => sceneMatchesSearch(scene, normalizedSearch))
+        return scenesWithoutLayouts(selectedFrame?.scenes).filter((scene) =>
+          sceneMatchesSearch(scene, normalizedSearch)
+        )
       },
     ],
     allSceneOptions: [
       (s) => [s.framesList],
       (framesList: workspaceLogicValues['framesList']): WorkspaceSceneOption[] =>
         framesList.flatMap((frame) =>
-          (frame.scenes ?? []).map((scene) => ({
+          scenesWithoutLayouts(frame.scenes).map((scene) => ({
             frameId: frame.id,
             sceneId: scene.id,
             frameName: frame.name || frameHost(frame),

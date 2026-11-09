@@ -36,6 +36,7 @@ import { requiredSettingsForScenes } from "./preview-settings";
 import { scenesForEmbeddedRuntime, scenesForRuntime } from "./retired-apps";
 import { withStoreSceneOrigin } from "./scene-origin";
 import { sceneEventMapsOf, withSceneEventMaps } from "./scene-event-map";
+import { sceneLayoutsOf, versionIsLayout, withSceneLayouts } from "./scene-layouts";
 import { compiledSceneNames } from "./store";
 import { maxSceneZipUncompressedBytes } from "./store";
 import { unzipBounded } from "./zip-bounded";
@@ -1808,6 +1809,7 @@ export type AssignmentSettingsGroups = {
   id: string;
   sceneId: string;
   declaredSettingsGroups: string[];
+  isLayout: boolean;
   grantedSettingsGroups: unknown;
 };
 
@@ -1863,6 +1865,7 @@ export async function buildScenesPayloadForFrame(
       eventMaps: frameSceneAssignments.eventMaps,
       grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
       id: frameSceneAssignments.id,
+      layouts: frameSceneAssignments.layouts,
       sceneAccountId: storeScenes.accountId,
       sceneId: frameSceneAssignments.sceneId,
       sceneName: storeScenes.name,
@@ -1982,18 +1985,23 @@ export async function buildScenesPayloadForFrame(
     // ...and with the owner's button maps for THIS install written on as
     // `eventMap` (scene-event-map.ts): the installed copy's, kept on the
     // assignment row across versions, never part of the published bytes.
+    // ...and the layout that install wears, written on as `layout` the same
+    // way (scene-layouts.ts).
     const stamped = (frameHardwareIsEsp32(frameRow) ? scenesForEmbeddedRuntime : scenesForRuntime)(
-      withSceneEventMaps(
-        withStoreSceneOrigin(
-          extracted.scenes,
-          {
-            id: assignment.sceneId,
-            slug: assignment.sceneSlug,
-            version: versionRow.version,
-          },
-          { appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, targetVersion) },
+      withSceneLayouts(
+        withSceneEventMaps(
+          withStoreSceneOrigin(
+            extracted.scenes,
+            {
+              id: assignment.sceneId,
+              slug: assignment.sceneSlug,
+              version: versionRow.version,
+            },
+            { appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, targetVersion) },
+          ),
+          sceneEventMapsOf(assignment.eventMaps),
         ),
-        sceneEventMapsOf(assignment.eventMaps),
+        sceneLayoutsOf(assignment.layouts),
       ),
       targetVersion,
     );
@@ -2003,6 +2011,7 @@ export async function buildScenesPayloadForFrame(
       declaredSettingsGroups: declaredServiceSettingGroups(stamped),
       grantedSettingsGroups: assignment.grantedSettingsGroups,
       id: assignment.id,
+      isLayout: versionIsLayout(stamped),
       sceneId: assignment.sceneId,
     });
     // The digest of just this assignment's slice of the payload. Comparing

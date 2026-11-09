@@ -1,4 +1,4 @@
-import type { EventMapRule, FrameScene, FrameSchedule, FrameType } from '../types'
+import type { EventMapRule, FrameScene, FrameSchedule, FrameType, SceneLayoutRef } from '../types'
 import { apiFetch } from './apiFetch'
 import type { CloudDeviceScenes, CloudDeviceScenesImportResult } from './cloudDeviceScenes'
 import type { CloudFrameSceneRow } from './cloudFrameScenes'
@@ -291,7 +291,7 @@ export function cloudSceneDeployErrorMessage(code: string | null | undefined, st
     case 'scene_version_missing':
       return 'The store has no published version of this scene to update to'
     case 'frame_update_required':
-      return "This scene needs a newer FrameOS than the frame runs. Update FrameOS on the frame first"
+      return 'This scene needs a newer FrameOS than the frame runs. Update FrameOS on the frame first'
     default:
       return code ? `Failed to push the scenes (${code})` : `Failed to push the scenes (HTTP ${status})`
   }
@@ -413,6 +413,8 @@ export interface CloudSceneAssignmentInput {
    * clears them. The workspace save posts the current maps every time.
    */
   event_maps?: Record<string, EventMapRule[]> | null | undefined
+  /** The layout each runtime scene wears (docs/scene-layouts.md), the same way: omitted keeps, null clears. */
+  layouts?: Record<string, SceneLayoutRef> | null | undefined
   /**
    * Move this UNPINNED scene to the store's newest version on this push.
    * Without it a scene the frame already has is pushed again at the version
@@ -429,6 +431,7 @@ function cloudSceneAssignmentEntry(scene: CloudSceneAssignmentInput): Record<str
     ...(scene.latest ? { latest: true } : {}),
     ...(scene.settings_groups ? { settings_groups: scene.settings_groups } : {}),
     ...(scene.event_maps !== undefined ? { event_maps: scene.event_maps } : {}),
+    ...(scene.layouts !== undefined ? { layouts: scene.layouts } : {}),
   }
 }
 

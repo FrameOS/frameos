@@ -923,3 +923,13 @@ def test_the_voice_tools_match_the_cloud():
         assert f'{tool}: "{switch}"' in cloud, tool
     for switch, value in DEFAULT_VOICE_PERMISSIONS.items():
         assert f"{switch}: {'true' if value else 'false'}" in cloud, switch
+
+
+def test_a_voice_turn_leaves_layouts_out():
+    # docs/scene-layouts.md: a layout wraps scenes, nobody switches to it.
+    from app.utils.voice_chat import voice_scenes
+
+    clock = {"id": "clock", "name": "Clock"}
+    bar = {"id": "bar", "name": "Bar", "settings": {"isLayout": True}}
+    assert voice_scenes([clock, bar, "junk", {"name": "no id"}]) == [clock]
+    assert voice_scenes(None) == []

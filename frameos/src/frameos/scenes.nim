@@ -3,10 +3,12 @@ import pixie/fileformats/png
 import checksums/md5
 import scenes/scenes
 import system/scenes as systemScenesRegistry
+import frameos/layout_choice
 import frameos/channels
 import frameos/cloud/scene_guard
 import frameos/hal/files as halFiles
 import frameos/types
+import frameos/scene_rhythm
 import frameos/interpreter
 import frameos/values
 import frameos/refresh_interval
@@ -170,12 +172,16 @@ proc findExportedScene*(sceneId: SceneId): Option[ExportedScene] =
   none(ExportedScene)
 
 proc cleanupSceneRuntime*(scene: FrameScene) =
+  if not scene.isNil and not scene.wornLayout.isNil:
+    cleanupSceneRuntime(scene.wornLayout)
+    scene.wornLayout = nil
   if scene.isNil:
     return
   if scene of InterpretedFrameScene:
     let interpreted = InterpretedFrameScene(scene)
     for _, childScene in interpreted.sceneNodes:
       cleanupSceneRuntime(childScene)
+    rhythmReleaseScene(scene)
     # Break common ORC/ARC cycles before closing the JS runtime.
     interpreted.execNode = nil
     interpreted.getDataNode = nil
@@ -192,6 +198,7 @@ proc cleanupSceneRuntime*(scene: FrameScene) =
     interpreted.sceneExportByNodeId = initTable[NodeId, ExportedScene]()
     interpreted.nextNodeIds = initTable[NodeId, NodeId]()
     interpreted.eventListeners = initTable[string, seq[NodeId]]()
+    interpreted.eventApps = @[]
     interpreted.nodes = initTable[NodeId, DiagramNode]()
     interpreted.edges = @[]
     interpreted.cacheValues = initTable[NodeId, Value]()
@@ -640,6 +647,18 @@ proc setPersistedStateFromPayload*(sceneId: SceneId, payload: JsonNode) =
     persistedState[key] = copy(payload[key])
   writeTextFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json", $persistedState)
 
+proc readLayoutState(id: string): JsonNode {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    if lastPersistedStates.hasKey(id):
+      result = lastPersistedStates[id]
+
+proc writeLayoutState(id: string, state: JsonNode) {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    setPersistedStateFromPayload(id.SceneId, state)
+
+layoutStateRead = readLayoutState
+layoutStateWrite = writeLayoutState
+
 proc migrateLegacyUploadedStateFiles(uploadedSceneIds: seq[SceneId]) =
   ## Runtimes before 2026.10.18 kept an uploaded scene's state in
   ## scene-uploaded_<id>.json. The scene is registered under its own id now,
@@ -865,10 +884,13 @@ proc getFirstSceneId*(): SceneId =
     if lastSceneId.isSome() and hasExportedScene(lastSceneId.get()):
       return lastSceneId.get()
     withLock sceneRegistryLock:
-      for key in keys(uploadedScenes):
-        return key
-      for key in keys(interpretedScenes):
-        return key
+      # Never a layout: it has nothing to show on its own.
+      for key, scene in uploadedScenes.pairs:
+        if not (scene of ExportedInterpretedScene and ExportedInterpretedScene(scene).isLayout):
+          return key
+      for key, scene in interpretedScenes.pairs:
+        if not (scene of ExportedInterpretedScene and ExportedInterpretedScene(scene).isLayout):
+          return key
       if defaultSceneId.isSome() and exportedScenes.hasKey(defaultSceneId.get()):
         return defaultSceneId.get()
       for key in keys(compiledScenes):

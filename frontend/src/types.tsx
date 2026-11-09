@@ -1051,6 +1051,11 @@ export interface AppConfig {
    * on every save; the frame gives the app exactly this list (FrameOS 2026.10.16+).
    */
   permissions?: ('shell' | 'files' | 'assets' | 'assets-write')[]
+  /**
+   * The events a JS app's onEvent hears, without an event node: contract names, the scene's
+   * custom events, or "*" (docs/events.md "Apps that subscribe"; FrameOS 2026.11+).
+   */
+  events?: string[]
   /** List of apt packages to install (mode=rpios) */
   apt?: string[]
   /** Fields for app in diagram editor */
@@ -1262,6 +1267,14 @@ export interface FrameSceneSettings {
   execution?: 'compiled' | 'interpreted'
   autoArrangeOnLoad?: boolean
   splitScreenLayout?: Record<string, any>
+  /** This scene is a layout: it wraps other scenes and stays out of the scene lists (docs/scene-layouts.md). */
+  isLayout?: boolean
+}
+
+/** The layout an installed scene wears, and the layout's settings for it. */
+export interface SceneLayoutRef {
+  sceneId: string
+  state?: Record<string, any>
 }
 
 /**
@@ -1327,6 +1340,9 @@ export interface FrameScene {
    * assignment row (`event_maps`, hydrated in here per runtime scene).
    */
   eventMap?: EventMapRule[]
+  /** The layout this installed copy wears, beside the scene like `eventMap`
+   * (docs/scene-layouts.md): the cloud's assignment row keeps it as `layouts`. */
+  layout?: SceneLayoutRef | null
 }
 
 export interface FrameSceneIndexed {

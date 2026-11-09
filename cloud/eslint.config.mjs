@@ -132,6 +132,8 @@ export default tseslint.config(
       "**/src/test/shared-spa/scene-update-banner.test.tsx",
       // Mounts buttonMapLogic (→ frameLogic); out of the tsconfig too.
       "**/src/test/shared-spa/button-map-modal.test.tsx",
+      // Same exclusion, same reason: mounts sceneLayoutLogic (→ frameLogic).
+      "**/src/test/shared-spa/scene-layout-picker.test.tsx",
       // Mounts templatesLogic (→ frameLogic); out of the tsconfig too.
       "**/src/test/shared-spa/template-install-feedback.test.ts",
       // Mounts eventsLogic (→ frameLogic); out of the tsconfig too.

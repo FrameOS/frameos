@@ -1,3 +1,6 @@
+import { sceneLayoutLogic } from '../frame/panels/Scenes/sceneLayoutLogic'
+import { SceneLayoutSettingsModal } from '../frame/panels/Scenes/SceneLayoutSettingsModal'
+import { AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
 import { BindLogic, useActions, useValues } from 'kea'
 import { useState, type FormEvent } from 'react'
 import { v4 as uuidv4 } from 'uuid'
@@ -61,6 +64,10 @@ export function WorkspaceSceneDropDown({
   const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
   const { isOpen: buttonMapOpen } = useValues(buttonMapLogic({ frameId: frame.id, sceneId: scene.id }))
   const { openButtonMap } = useActions(buttonMapLogic({ frameId: frame.id, sceneId: scene.id }))
+  const { current: currentLayout, settingsOpen: layoutSettingsOpen } = useValues(
+    sceneLayoutLogic({ frameId: frame.id, sceneId: scene.id })
+  )
+  const { openLayoutSettings } = useActions(sceneLayoutLogic({ frameId: frame.id, sceneId: scene.id }))
   const { saveAsTemplate, saveAsZip, saveAsCloudTemplate } = useActions(templatesLogic({ frameId: frame.id }))
   const { apps } = useValues(appsModel)
   const { hasDriveScope } = useValues(cloudDriveLogic)
@@ -119,6 +126,16 @@ export function WorkspaceSceneDropDown({
             onClick: () => openButtonMap(),
             icon: <CursorArrowRippleIcon className="h-5 w-5" />,
           },
+          ...(currentLayout
+            ? [
+                {
+                  // The chosen layout's fields, for this install (docs/scene-layouts.md).
+                  label: 'Layout settings',
+                  onClick: () => openLayoutSettings(),
+                  icon: <AdjustmentsHorizontalIcon className="h-5 w-5" />,
+                },
+              ]
+            : []),
           {
             label: 'Copy scene JSON',
             // Inline (not scenesLogic.copySceneJSON): mounting scenesLogic here
@@ -253,6 +270,7 @@ export function WorkspaceSceneDropDown({
           <EditTemplateModal />
         </BindLogic>
       ) : null}
+      {layoutSettingsOpen ? <SceneLayoutSettingsModal frameId={frame.id} sceneId={scene.id} /> : null}
     </>
   )
 }

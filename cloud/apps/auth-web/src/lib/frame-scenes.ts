@@ -37,6 +37,7 @@ import {
 } from "./frame-events";
 import { copySceneCoversIntoFrameCache } from "./scene-images";
 import { sceneEventMapsOf, type SceneEventMaps } from "./scene-event-map";
+import { sceneLayoutsOf, type SceneLayouts } from "./scene-layouts";
 import { reportError } from "./log";
 import { frameosVersionSatisfies } from "./store-versions";
 
@@ -65,6 +66,9 @@ export type RequestedScene = {
   // assigned scene keeps its maps (a scene update, a reorder, a grant never
   // touch them); null clears them.
   eventMaps?: SceneEventMaps | null | undefined;
+  // The layout each runtime scene of this install wears (scene-layouts.ts;
+  // docs/scene-layouts.md), the same way: omitted keeps, null clears.
+  layouts?: SceneLayouts | null | undefined;
 };
 
 // The most groups one assignment may name. Six are deliverable today; the
@@ -202,6 +206,7 @@ export async function currentSceneAssignments(
       declaredSettingsGroups: frameSceneAssignments.declaredSettingsGroups,
       eventMaps: frameSceneAssignments.eventMaps,
       grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
+      layouts: frameSceneAssignments.layouts,
       sceneId: frameSceneAssignments.sceneId,
       sceneVersion: frameSceneAssignments.sceneVersion,
     })
@@ -215,6 +220,7 @@ export async function currentSceneAssignments(
     // onto another frame keeps them); an assignment without any stays
     // "omitted", which re-assignment keeps as-is.
     ...(row.eventMaps === null ? {} : { eventMaps: sceneEventMapsOf(row.eventMaps) }),
+    ...(row.layouts === null ? {} : { layouts: sceneLayoutsOf(row.layouts) }),
     // The effective grant, so a caller that feeds this list back in (the
     // add route, a provisioning copy onto another frame) carries it. A row
     // from before grants existed with nothing computed yet stays "omitted",
@@ -437,6 +443,7 @@ export async function assignScenesToFrame(
         .select({
           eventMaps: frameSceneAssignments.eventMaps,
           grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
+          layouts: frameSceneAssignments.layouts,
           sceneId: frameSceneAssignments.sceneId,
         })
         .from(frameSceneAssignments)
@@ -462,6 +469,11 @@ export async function assignScenesToFrame(
               entry.eventMaps !== undefined
                 ? entry.eventMaps
                 : sceneEventMapsOf(existingByScene.get(entry.sceneId)?.eventMaps),
+            // The layouts, by the same rule.
+            layouts:
+              entry.layouts !== undefined
+                ? entry.layouts
+                : sceneLayoutsOf(existingByScene.get(entry.sceneId)?.layouts),
           })),
         );
       }
@@ -490,6 +502,7 @@ export async function assignScenesToFrame(
           .set({
             declaredSettingsGroups: assignment.declaredSettingsGroups,
             grantedSettingsGroups: granted,
+            isLayout: assignment.isLayout,
           })
           .where(eq(frameSceneAssignments.id, assignment.id));
         const row = {

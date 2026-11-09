@@ -30,6 +30,10 @@ fi
 command -v nim >/dev/null || { echo "nim not found on PATH" >&2; exit 1; }
 command -v emcc >/dev/null || { echo "emcc not found on PATH (install emscripten)" >&2; exit 1; }
 command -v emar >/dev/null || { echo "emar not found on PATH (install emscripten)" >&2; exit 1; }
+# The node emscripten was configured with can stop starting (a Homebrew upgrade
+# that left it without a library), and a failed build here leaves the preview on
+# its last bundle with nothing on screen to say so. Use the one that runs the rest.
+export EM_NODE_JS="${EM_NODE_JS:-$(command -v node)}"
 
 cd "$FRAMEOS_DIR"
 

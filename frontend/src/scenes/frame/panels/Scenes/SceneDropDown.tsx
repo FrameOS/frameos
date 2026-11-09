@@ -5,6 +5,7 @@ import { DropdownMenu, DropdownMenuProps } from '../../../../components/Dropdown
 import { PencilSquareIcon, TrashIcon, FlagIcon, PlayIcon } from '@heroicons/react/24/solid'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
 import {
+  AdjustmentsHorizontalIcon,
   ArrowPathIcon,
   ClipboardDocumentIcon,
   CloudArrowDownIcon,
@@ -22,6 +23,8 @@ import { findConnectedScenes } from './utils'
 import { openWorkspaceSceneUtility, workspaceLogic } from '../../../workspace/workspaceLogic'
 import { ButtonMapModal } from './ButtonMapModal'
 import { buttonMapLogic } from './buttonMapLogic'
+import { sceneLayoutLogic } from './sceneLayoutLogic'
+import { SceneLayoutSettingsModal } from './SceneLayoutSettingsModal'
 
 interface SceneDropDownProps {
   sceneId: string
@@ -41,10 +44,12 @@ export function SceneDropDown(props: SceneDropDownProps) {
   // dialog's state is the scene's, buttonMapLogic).
   const { frameId } = useValues(frameLogic)
   const { isOpen: buttonMapOpen } = useValues(buttonMapLogic({ frameId, sceneId: props.sceneId }))
+  const { settingsOpen: layoutSettingsOpen } = useValues(sceneLayoutLogic({ frameId, sceneId: props.sceneId }))
   return (
     <>
       <SceneDropDownMenu {...props} />
       {buttonMapOpen ? <ButtonMapModal frameId={frameId} sceneId={props.sceneId} /> : null}
+      {layoutSettingsOpen ? <SceneLayoutSettingsModal frameId={frameId} sceneId={props.sceneId} /> : null}
     </>
   )
 }
@@ -66,6 +71,8 @@ function SceneDropDownMenu({
   const { saveAsTemplate, saveAsZip, saveAsCloudTemplate } = useActions(templatesLogic({ frameId }))
   const { hasDriveScope } = useValues(cloudDriveLogic)
   const { openButtonMap } = useActions(buttonMapLogic({ frameId, sceneId }))
+  const { current: currentLayout } = useValues(sceneLayoutLogic({ frameId, sceneId }))
+  const { openLayoutSettings } = useActions(sceneLayoutLogic({ frameId, sceneId }))
   const scene = scenes.find((s) => s.id === sceneId)
   if (!scene) {
     return null
@@ -124,6 +131,14 @@ function SceneDropDownMenu({
               label: 'Map buttons',
               onClick: () => openButtonMap(),
               icon: <CursorArrowRippleIcon className="w-5 h-5" />,
+            }
+          : null,
+        context === 'scenes' && currentLayout
+          ? {
+              // The chosen layout's fields, for this install (docs/scene-layouts.md).
+              label: 'Layout settings',
+              onClick: () => openLayoutSettings(),
+              icon: <AdjustmentsHorizontalIcon className="w-5 h-5" />,
             }
           : null,
         {

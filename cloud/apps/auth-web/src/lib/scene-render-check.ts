@@ -8,6 +8,8 @@
 // account (GET /api/settings) and CORS-blocked fetches go through the
 // store's preview proxy.
 
+import { sceneYieldId } from "./events-contract.gen";
+
 export const RENDER_CHECK_SETTLE_MS = 2000;
 export const RENDER_CHECK_TIMEOUT_MS = 30_000;
 const MAX_COLLECTED_LOGS = 100;
@@ -130,6 +132,25 @@ export function logLineIsError(message: string): boolean {
 
 // Scene ids a scene reaches through "scene" nodes and setCurrentScene
 // dispatches; those scenes ship with it so the runtime can resolve them.
+/** The ids in a JS app's `<Scene id="...">` tags: a preview needs them too. */
+function jsxSceneIds(scene: RenderCheckScene): string[] {
+  const apps = (scene as { apps?: unknown }).apps;
+  if (!apps || typeof apps !== "object") {
+    return [];
+  }
+  const ids: string[] = [];
+  for (const app of Object.values(apps as Record<string, { sources?: Record<string, unknown> }>)) {
+    for (const [name, source] of Object.entries(app?.sources ?? {})) {
+      if (typeof source === "string" && /\.[jt]sx$/.test(name)) {
+        for (const match of source.matchAll(/<Scene\b[^>]*?\bid=(?:"([^"]+)"|'([^']+)'|\{"([^"]+)"\})/g)) {
+          ids.push(match[1] ?? match[2] ?? match[3] ?? "");
+        }
+      }
+    }
+  }
+  return ids;
+}
+
 function referencedSceneIds(scene: RenderCheckScene): string[] {
   const ids = new Set<string>();
   const nodes = Array.isArray(scene.nodes) ? (scene.nodes as unknown[]) : [];
@@ -152,6 +173,14 @@ function referencedSceneIds(scene: RenderCheckScene): string[] {
       }
     }
   }
+  const layout = (scene as { layout?: { sceneId?: unknown } | null }).layout;
+  if (typeof layout?.sceneId === "string" && layout.sceneId) {
+    ids.add(layout.sceneId);
+  }
+  for (const id of jsxSceneIds(scene)) {
+    ids.add(id);
+  }
+  ids.delete(sceneYieldId);
   return [...ids];
 }
 

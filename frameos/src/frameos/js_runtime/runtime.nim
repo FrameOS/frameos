@@ -98,6 +98,9 @@ const __frameosJsx = (type, props, ...children) => {
 };
 globalThis.__frameosFragment = __frameosFragment;
 globalThis.__frameosJsx = __frameosJsx;
+// <Scene id="..." /> (docs/scene-layouts.md): a plain tag, read by name in
+// js_runtime/jsx.nim, as <yield /> is.
+globalThis.Scene = "Scene";
 // memo(Component), as React's: called with props shallow-equal to its last
 // call at the same place (its turn among this render's calls, or its key), it
 // returns the element it made then, the same object, and the walker takes

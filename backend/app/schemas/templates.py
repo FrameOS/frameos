@@ -41,6 +41,7 @@ class CreateTemplateRequest(BaseModel):
 class UpdateTemplateRequest(BaseModel):
     name: Optional[str]
     description: Optional[str]
+    isLayout: Optional[bool] = None
 
 class TemplateImageTokenResponse(ImageTokenResponse):
     pass

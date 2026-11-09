@@ -160,6 +160,7 @@ shows no select pays only the code.
 | `br` | A line break. |
 | `input`, `textarea` | A field to type into ([Fields and the keyboard](#fields-and-the-keyboard)). |
 | `select`, `option` | A select box ([Select boxes](#select-boxes)). |
+| `Scene`, `yield` | Another scene, as a picture ([Scenes inside a UI](#scenes-inside-a-ui)). |
 | anything else | A box: `div`, `p`, `h1`, `section`, `layout`, ... No tag has a default style (Tailwind's preflight). |
 
 Text is any string or number child; `null`, `undefined`, `true` and `false`
@@ -188,6 +189,27 @@ In an `<svg>`, React's camelCase attribute names are read as SVG's
 (`viewBox`, `gradientUnits`, `gradientTransform`, `preserveAspectRatio`);
 `style={{ fill: "red" }}` becomes a style attribute; `<image href={ref}>`
 takes an image ref like `img`.
+
+### Scenes inside a UI
+
+`<Scene id="clock" city="Oslo" />` draws another scene of the frame where the
+element lands; its other props are that scene's state (`count={3}` stays a
+number). `<yield />` is where a layout's content goes (`docs/scene-layouts.md`).
+Both are holes in the canvas the scene draws straight into, not pictures, unless
+something asks them to be one (opacity, something painted over it, a box that
+scrolls around it). With no size of its own it takes the room left (`flex-1`),
+so in a block give it a height.
+
+It runs on its own `refreshInterval`: a pass that finds it not due leaves its
+pixels alone and the scene does not run (`docs/scene-rhythm.md`), and the frame's
+next wake comes forward to when it is due. When only it is due the UI around it
+sits out. A tap on it is the scene's, in its own coordinates. One drawn as a
+picture counts against the same budget as a panel's copy (a quarter of free
+render memory, at most 1 MiB on an ESP32); a device that cannot keep it runs the
+scene again each render. An LCD repaints what the scene changed.
+
+A scene cannot hold itself, and nesting stops eight deep. A `<Scene>` inside a
+root `<svg>` draws nothing: it needs the layout to know its size.
 
 ### Photos that stay
 

@@ -1,3 +1,6 @@
+import { isLayoutScene, layoutScenes, scenesWithoutLayouts } from '../../utils/sceneLayouts'
+import { LAYOUT_STARTERS } from '../../generated/layoutStarters'
+import { frameLayoutsLogic } from '../frame/panels/FrameSettings/frameLayoutsLogic'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
@@ -16,6 +19,7 @@ import {
   KeyIcon,
   PhotoIcon,
   PencilSquareIcon,
+  RectangleGroupIcon,
   PlusIcon,
   SparklesIcon,
   Squares2X2Icon,
@@ -651,6 +655,7 @@ const ADD_SCENE_PAGE_TITLES: Record<AddScenePage, string> = {
   store: 'Scene store',
   saved: 'Private scenes',
   photos: 'Photos',
+  layouts: 'New layout',
 }
 
 // A list fetched within the last minute is fresh enough to reuse when the
@@ -793,6 +798,8 @@ function OpenTemplateDrawer({ frame }: { frame: FrameType }): JSX.Element {
                   <AddSceneDrawerActions frame={frame} onOpenPage={setPage} />
                 ) : page === 'photos' ? (
                   <InstallPhotoScenes frame={frame} />
+                ) : page === 'layouts' ? (
+                  <NewLayoutStarters frame={frame} />
                 ) : (
                   <Templates section={page} />
                 )}
@@ -802,6 +809,33 @@ function OpenTemplateDrawer({ frame }: { frame: FrameType }): JSX.Element {
           </div>
         </BindLogic>
       </BindLogic>
+    </div>
+  )
+}
+
+/** The layouts a frame can start from: a click adds one to the frame, unsaved like any added scene. */
+function NewLayoutStarters({ frame }: { frame: FrameType }): JSX.Element {
+  const { addStarterLayout } = useActions(frameLayoutsLogic({ frameId: frame.id }))
+  const { closeTemplateDrawer } = useActions(workspaceLogic)
+  return (
+    <div className="mb-4 grid gap-3" data-layout-starter-list>
+      {LAYOUT_STARTERS.map((starter) => (
+        <button
+          key={starter.name}
+          type="button"
+          onClick={() => {
+            addStarterLayout(starter.name)
+            closeTemplateDrawer()
+          }}
+          className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/70 p-3 text-left transition hover:-translate-y-0.5 hover:shadow-lg"
+        >
+          <img src={starter.image} alt="" className="h-[66px] w-[110px] shrink-0 rounded-lg object-cover" />
+          <span className="min-w-0 flex-1">
+            <span className="frameos-strong block truncate text-sm font-semibold">{starter.name}</span>
+            <span className="frameos-muted block text-xs">{starter.description}</span>
+          </span>
+        </button>
+      ))}
     </div>
   )
 }
@@ -935,6 +969,8 @@ function AddSceneDrawerActions({
     : 'Your private cloud scenes, local scenes and repositories'
   // Live list, so "Split screen" unlocks as soon as the first scene is added.
   const hasScenes = liveScenes.length > 0
+  // A frame with a layout has "New layout" in its Layouts group instead.
+  const offersFirstLayout = layoutScenes(liveScenes).length === 0 && addSceneActionIsAllowed(workspaceMode(), 'layout')
   const favouriteTemplateCount = favouriteTemplates.length
   const installableFavouriteTemplateCount = installableFavouriteTemplates.length
 
@@ -1100,6 +1136,22 @@ function AddSceneDrawerActions({
           </span>
         </button>
       ) : null}
+      {offersFirstLayout ? (
+        <button
+          type="button"
+          onClick={() => onOpenPage('layouts')}
+          className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/70 p-3 text-left transition hover:-translate-y-0.5 hover:shadow-lg"
+        >
+          <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-xl">
+            <RectangleGroupIcon className="h-6 w-6" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="frameos-strong block truncate text-sm font-semibold">Add layout</span>
+            <span className="frameos-muted block text-xs">A bar or a rail drawn around your scenes</span>
+          </span>
+          <ChevronRightIcon className="frameos-muted h-5 w-5 shrink-0 text-slate-400" />
+        </button>
+      ) : null}
       {newBlankSceneModalOpen ? (
         <NewBlankSceneModal
           onClose={() => setNewBlankSceneModalOpen(false)}
@@ -1194,16 +1246,16 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
   const { scenes: liveScenes } = useValues(frameLogic({ frameId: frame.id }))
   const { search } = useValues(workspaceLogic)
   const normalizedSearch = search.trim().toLowerCase()
-  const visibleScenes = useMemo(
-    () => (normalizedSearch ? liveScenes.filter((scene) => sceneMatchesSearch(scene, normalizedSearch)) : liveScenes),
-    [liveScenes, normalizedSearch]
-  )
+  const visibleScenes = useMemo(() => {
+    const listed = scenesWithoutLayouts(liveScenes)
+    return normalizedSearch ? listed.filter((scene) => sceneMatchesSearch(scene, normalizedSearch)) : listed
+  }, [liveScenes, normalizedSearch])
 
   return (
     <FrameDashboardSurface
       frame={frame}
       scenes={visibleScenes}
-      totalScenes={liveScenes.length}
+      totalScenes={scenesWithoutLayouts(liveScenes).length}
       archived={archived}
       frameMatchesSearch={frameMatchesSearch}
       sectionId={`workspace-frame-${frame.id}`}
@@ -1463,6 +1515,7 @@ function SceneControlPanelContent({
   const sceneIsUnsaved = sceneIsEditable && (!saved || unsavedSceneIds.has(sceneId))
   const sceneIsUndeployed = sceneIsEditable && (!saved || undeployedSceneIds.has(sceneId))
   const splitLayout = normalizeSplitScreenSceneLayout(scene.settings?.splitScreenLayout)
+  const sceneIsALayout = isLayoutScene(scene)
 
   const handleEditSplit = (): void => {
     if (!splitLayout) {
@@ -1482,9 +1535,19 @@ function SceneControlPanelContent({
                 <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
                   {frame.name || frameHost(frame)}
                 </div>
-                <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
-                  {scene.name || 'Active scene'}
-                </h2>
+                <div className="flex min-w-0 items-center gap-2">
+                  <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
+                    {scene.name || (sceneIsALayout ? 'Layout' : 'Active scene')}
+                  </h2>
+                  {sceneIsALayout ? (
+                    <span
+                      data-scene-control-layout-tag
+                      className="frameos-icon-tile shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                    >
+                      Layout
+                    </span>
+                  ) : null}
+                </div>
               </div>
               <button
                 type="button"
@@ -1570,8 +1633,9 @@ function SceneControlPanelContent({
               {isCloudMode() ? (
                 <SceneKeysNotice frame={frame} scene={scene} sceneIsActive={selectedSceneIsActive} />
               ) : null}
-              <SceneControlPanelModeTitle />
+              <SceneControlPanelModeTitle layout={sceneIsALayout} />
               <SceneControlChangeNotice
+                layout={sceneIsALayout}
                 busy={isFrameFormSubmitting}
                 sceneIsActive={selectedSceneIsActive}
                 sceneIsUndeployed={sceneIsUndeployed}
@@ -1684,15 +1748,21 @@ function StatusScreenControlPanel({
   )
 }
 
-function SceneControlPanelModeTitle(): JSX.Element {
+function SceneControlPanelModeTitle({ layout = false }: { layout?: boolean }): JSX.Element {
   return (
     <div className="frameos-divider mb-4 border-t border-slate-200/80 pt-4">
-      <div className="frameos-muted text-xs font-semibold uppercase tracking-wide">Scene control</div>
+      <div className="frameos-muted text-xs font-semibold uppercase tracking-wide">
+        {layout ? 'Layout control' : 'Scene control'}
+      </div>
+      {layout ? (
+        <p className="frameos-muted mt-1 text-sm">This is a layout. It wraps your scenes and never shows on its own.</p>
+      ) : null}
     </div>
   )
 }
 
 function SceneControlChangeNotice({
+  layout,
   busy,
   sceneIsActive,
   sceneIsUndeployed,
@@ -1700,6 +1770,7 @@ function SceneControlChangeNotice({
   onPush,
   onSave,
 }: {
+  layout: boolean
   // A save is seconds of network on the cloud with nothing to look at;
   // without this the button just sat there and people clicked it again.
   busy: boolean
@@ -1717,6 +1788,7 @@ function SceneControlChangeNotice({
     sceneIsUnsaved,
     sceneIsUndeployed,
     sceneIsActive,
+    noun: layout ? 'layout' : 'scene',
   })
   if (!content) {
     return null

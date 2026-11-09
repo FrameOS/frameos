@@ -23,6 +23,7 @@ import {
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { Modal } from '../../components/Modal'
 import { Spinner } from '../../components/Spinner'
+import { Switch } from '../../components/Switch'
 import { TextArea } from '../../components/TextArea'
 import { TextInput } from '../../components/TextInput'
 import type { RepositoryType, TemplateType } from '../../types'
@@ -714,6 +715,20 @@ function EditLocalSceneModal(): JSX.Element | null {
             onChange={(description: string) => setEditTemplateValues({ description })}
           />
         </label>
+        {editTemplateForm.hasScenes ? (
+          <div>
+            <Switch
+              label="Use as layout"
+              value={editTemplateForm.isLayout}
+              disabled={!editTemplateForm.isLayout && !!editTemplateForm.layoutProblem}
+              onChange={(isLayout: boolean) => setEditTemplateValues({ isLayout })}
+            />
+            <p className="frameos-muted mt-1 text-xs">
+              {editTemplateForm.layoutProblem ??
+                'A layout wraps other scenes, a clock bar above them for example. Off, it is a normal scene.'}
+            </p>
+          </div>
+        ) : null}
         {editTemplateError ? <p className="text-sm text-red-600">{editTemplateError}</p> : null}
         <div className="flex justify-end gap-2">
           <button

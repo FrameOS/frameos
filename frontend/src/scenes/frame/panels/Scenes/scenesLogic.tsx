@@ -1,3 +1,4 @@
+import { scenesWithoutLayouts } from '../../../../utils/sceneLayouts'
 import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { FrameScene, SceneNodeData, FrameId } from '../../../../types'
 import { frameCanUseFastDeploy, frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
@@ -891,10 +892,11 @@ export const scenesLogic = kea<scenesLogicType>([
           .toLowerCase()
           .split(' ')
           .filter((s) => s)
+        const listed = scenesWithoutLayouts(scenes)
         if (searchPieces.length === 0) {
-          return scenes
+          return listed
         }
-        return scenes.filter((scene) => searchPieces.every((piece) => scene.name.toLowerCase().includes(piece)))
+        return listed.filter((scene) => searchPieces.every((piece) => scene.name.toLowerCase().includes(piece)))
       },
     ],
     sceneTitles: [
@@ -970,7 +972,7 @@ export const scenesLogic = kea<scenesLogicType>([
         uploadedScenes: scenesLogicValues['uploadedScenes']
       ) =>
         missingActiveSceneId
-          ? (uploadedScenes.find((scene) => sceneIdsRefer(scene.id, missingActiveSceneId)) ?? null)
+          ? uploadedScenes.find((scene) => sceneIdsRefer(scene.id, missingActiveSceneId)) ?? null
           : null,
     ],
     missingActiveMatchesSearch: [
@@ -1340,8 +1342,8 @@ export const scenesLogic = kea<scenesLogicType>([
             error instanceof Error
               ? error.message
               : values.isFrameAdminMode
-                ? 'Failed to activate the scene'
-                : 'Failed to preview the scene',
+              ? 'Failed to activate the scene'
+              : 'Failed to preview the scene',
         })
         actions.previewSceneFailure()
       }

@@ -189,6 +189,10 @@ void frameos_nim_set_time_zone(const char *time_zone);
  * and keep UTC — or the slice does not hold the zone. */
 bool frameos_nim_load_tz_data(const char *slice_json, const char *time_zone, char *rule_out, size_t rule_len);
 double frameos_nim_scene_interval(void);
+/* Whether somebody waits for the next pass, so it may show the loading mark:
+ * not an animation or a clock, and with a layout only a pass that runs the
+ * scene itself (scene_rhythm.nim, rhythmAwaited). */
+bool frameos_nim_scene_awaited(void);
 /* Sleep override from the scene's last render (logic/nextSleepDuration);
  * negative = no override. Consult only right after a successful render. */
 double frameos_nim_next_sleep(void);

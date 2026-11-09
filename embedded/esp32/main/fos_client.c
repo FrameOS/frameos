@@ -204,6 +204,28 @@ static fos_metrics_sample_t s_metrics_ring[FOS_METRICS_RING_CAP];
 static size_t s_metrics_next = 0;
 static size_t s_metrics_count = 0;
 
+/* The charge the last metrics sample believed (-1: none yet), for a scene and
+ * the frame page: a panel ticking every second then costs no ADC reads of its
+ * own, and a read is 25-45 ms on a board with an enable pin. */
+static int s_battery_percent = -1;
+
+int fos_client_battery_percent(void)
+{
+    if (!fos_battery_present()) return -1;
+    int percent = __atomic_load_n(&s_battery_percent, __ATOMIC_RELAXED);
+    if (percent < 0) {
+        /* Before the first sample, as on every wake of a deep sleeper. */
+        fos_battery_read(NULL, &percent);
+        __atomic_store_n(&s_battery_percent, percent, __ATOMIC_RELAXED);
+    }
+    return percent;
+}
+
+int fos_client_wifi_rssi(void)
+{
+    return fos_wifi_state() == FOS_WIFI_CONNECTED ? fos_wifi_rssi() : 0;
+}
+
 /* Why this boot happened, for the metrics sample and the wake log line: a
  * deep-sleep frame's battery story is unreadable without knowing which wakes
  * were the timer, which a button, and which a crash. */
@@ -253,6 +275,7 @@ static void log_metrics_sample(void)
             battery_mv = believed;
             battery_pct = fos_battery_percent_for(believed);
         }
+        __atomic_store_n(&s_battery_percent, battery_pct, __ATOMIC_RELAXED);
     }
     size_t used = (size_t)snprintf(
         json, sizeof(json),
@@ -2420,10 +2443,14 @@ static void client_task(void *arg)
                 s_loud_next = false;
                 if (s_anim.active && !quiet) log_animation("running", true);
                 set_quiet(quiet);
-                /* Any render that takes a while shows the loading mark; an
-                 * animation does not, or it would blink on every frame a
-                 * little over the delay. */
-                if (!s_anim.active) fos_display_loading_begin(xTaskGetTickCount(), fos_config()->rotate);
+                /* Any render that takes a while shows the loading mark, but
+                 * not one nobody is waiting for: an animation would blink it
+                 * on every frame a little over the delay, and so would a
+                 * scene the frame's own clock redraws every few seconds (a
+                 * layout's clock bar). A switch begins it itself. */
+                if (!s_anim.active && frameos_nim_scene_awaited()) {
+                    fos_display_loading_begin(xTaskGetTickCount(), fos_config()->rotate);
+                }
                 s_render_in_flight = true;
                 render_once(quiet);
                 s_render_in_flight = false;

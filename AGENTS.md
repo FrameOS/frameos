@@ -76,6 +76,9 @@
   `events_contract_gen.py`, the cloud's `events-contract.gen.ts`): an event the
   cloud should be able to send needs a `cloud.verb` in the contract, not a new
   `case` alone.
+- A scene's own code sends events through one door, `dispatchFromScene`
+  (`js_runtime/app_runtime.nim`): the `dispatch` node and `frameos.dispatch`.
+  It owns the origin check, the render-during-render guard and the budget.
 - **One dispatcher, `frameos/src/frameos/event_loop.nim`, for Linux, the ESP32
   and the wasm preview.** It owns the queue, the origin allow-list, the
   command/event split and the render rule (`renderAfter`); a host supplies an
@@ -104,6 +107,9 @@
   `pointerDown` / `pointerMove` / `pointerUp` on the wire and the render task
   delivers them) and the old-name aliases with them, not the keyboard half. `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
   evdev translator's `test_translate.nim` are where a rule gets its test.
+  A JS app subscribes in its `config.json` (`events`, `"*"` per the contract's
+  `heardByAll`) and hears through `onEvent`: `eventApps` beside `eventListeners`,
+  so `sceneListensTo` stays a question no JavaScript answers.
 
 - **Two event maps, one rule shape** (`docs/events.md` "Event map";
   `event_map.nim`, applied by `event_loop.nim` on every host). The
@@ -145,6 +151,9 @@
   scene's last snapshot (`sceneSwitcherThumbnail`,
   `frameos/scene_switcher_linux.nim`); fast panels get a dark grid, e-paper
   black on white with the keys walking an inverted highlight.
+- Both built-in scenes are drawn in the layout of the scene they were opened
+  from (`state.layout` from the dispatcher, `ownRun` / `builtInRunner` into
+  `interpreter.runEvent`; `docs/scene-layouts.md`). A new one goes the same way.
 - It is never persisted on any host (no `scene.json`, no ESP32 `last_scene`
   or `pending_scene`, no state file) and is in no scene list: test with
   `isBuiltInScene`. `single_scene_host` runs every scene through its export
@@ -356,11 +365,41 @@
   the ESP32 and the preview). Copies are capped at a quarter of free render
   memory (1 MiB at most on an ESP32); without one the panel runs again with
   `FrameScene.repainting` set, which is the hook for exact repaints (#555).
-- A generated split's own interval is the fastest it renders, and it waits
-  longer when no panel is due. A `render` from outside the scene (API, cloud,
+- On an LCD or HDMI a generated split wakes for its first panel, its own
+  interval no floor; on e-paper and a deep sleeper the interval is the fastest
+  it renders. A panel that is not due and that a canvas still holds is not
+  touched at all (`rdKeep`, `rhythmCanvasGeneration`; a new writer into a kept
+  canvas that is not a render bumps that count or calls `rhythmForgetCanvases`). A `render` from outside the scene (API, cloud,
   schedule, button, console, preview) redraws every panel: `event_loop.nim`
   on Linux and in the preview, `fos_events.c` on the ESP32. Keep the two
   rules alike.
+
+## Layouts and `<Scene>`: `docs/scene-layouts.md`
+
+- A layout is one JSX app (`settings.isLayout`, in no scene list) with a
+  `<yield />` (`scenes.yield` in the events contract) where the wrapped scene
+  goes. `sceneLayoutProblem` and `scene_layout_problem` are the rule, pinned by
+  `docs/scene-layout-fixtures.json`; both planes refuse anything else on save. What wraps a scene is the install's,
+  like its button map: `layout: {sceneId, state}` beside `eventMap`, on the
+  backend's `frame.scenes` entry and the cloud's `layouts` assignment column.
+- The host keeps one scene. `interpreter.runEvent` enters the layout on a render
+  pass and for pointer events (`routePointer`, which also gives a split's panels
+  and `<Scene>`s their taps, in their own coordinates); yield goes through
+  `runSceneNodeRender`. The frame's next wake is `syncRefreshInterval`'s, never a
+  host's. Anything added to a layout pass goes in `interpreter.nim`, not in a host.
+- `<Scene id>` and `<yield />` are holes in the canvas wherever they can be
+  (`seekHoles` in `ui/layout.nim`, `holesOf` in `app_runtime.nim`; a slot with
+  `hole` set): `renderSvgAround` draws the chrome, each scene goes through
+  `runSceneNodeRender` into a view of the canvas, and a pass the UI has nothing
+  to do in never enters it (`renderChrome`, `rhythmVisitChrome`, its own
+  `chromeDueAt`). One that cannot be a hole (opacity, something painted over it,
+  a scroller) is a raster image in the UI's SVG tree (`ukImage` +
+  `fillSceneImages`), its picture under the panel copy budget
+  (`SceneRhythm.embedImage`). A scene's `<Scene>` children live in `sceneNodes`
+  under negative keys.
+  A rectangle of the panel keeps its own damage record in `svg_frames.nim`
+  (`takePanelRegion`): a new way to write a rectangle's pixels without a render
+  of it takes that record too.
 
 ## JSX from JS apps: `docs/jsx-ui.md`
 
@@ -428,7 +467,9 @@
   budget measures it only when a decode asks
   (`setDecodeContiguousBudgetProvider`).
 - A frame that stays awake keeps its scene's JS interpreters between renders
-  (`settleIdleJsAppRuntimes`), and a whole-frame SVG on an LCD repaints only
+  (`settleIdleJsAppRuntimes`; one holding a UI's handlers goes only when an
+  allocation failed, and any discard is logged and, if it cost taps, shown on
+  the panel: `reportInterpreterDiscards`), and a whole-frame SVG on an LCD repaints only
   pixie's damage box (`utils/svg_frames.nim`, keyed on the firmware's write
   count per buffer): a new writer into an LCD buffer that is not a render in
   place calls `fos_display_mark_written`.
@@ -439,8 +480,9 @@
   `lcd_loading.c` + `lcd_st7701s_rgb.c`) draws it over the picture showing,
   and the next frame put on the panel ends it. A host's switch begins it
   (runner.nim `beginSceneLoading`, fos_scenes.c at apply), and so does every
-  render pass that is not an animation's (so a slow tap or refresh shows it
-  with nothing asking), never the dispatcher. The mark writes behind the driver, so on a Pi every push to the
+  render pass somebody waits for (`rhythmAwaited`: a scene whose own interval
+  is 5 s or more, on a pass that runs it, so a slow refresh shows it with nothing
+  asking and a clock bar ticking every second does not), never the dispatcher. The mark writes behind the driver, so on a Pi every push to the
   driver goes through `withLoadingMarkAway`, and on the ESP32 every present
   runs `present_back` (which puts it away): a new push or present path keeps
   that, or the driver's row diff and the damage repaint go wrong. The
