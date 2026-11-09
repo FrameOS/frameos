@@ -14,11 +14,11 @@
 ## * and `materialize` as the floor, which every consumer can always fall back
 ##   to and which raises rather than lying when the bytes will not fit.
 ##
-## Consumers that can work incrementally iterate `lines` or `windows` and never
-## hold more than the window. Consumers that cannot call `materialize` and
+## Consumers that can work incrementally read `windows` or a `newStream` and
+## never hold more than the window. Consumers that cannot call `materialize` and
 ## behave exactly as they did before.
 
-import std/[os, strutils]
+import std/[os, streams, strutils]
 import frameos/utils/system
 
 const
@@ -159,51 +159,47 @@ iterator windows*(spool: Spool, windowBytes = DefaultWindowBytes): string =
       finally:
         file.close()
 
-iterator lines*(spool: Spool, windowBytes = DefaultWindowBytes): string =
-  ## Line-oriented view, for the formats that are (ICS, RSS-ish text, CSV).
-  ## Carries at most one window plus the partial line across reads, so a 4MB
-  ## calendar costs the window, not 4MB.
-  ##
-  ## `\r\n`, `\n` and a bare `\r` all terminate a line — the same three
-  ## `strutils.splitLines` accepts, which is what consumers folded over before
-  ## the spool existed. A trailing line without a terminator is yielded too.
-  var pending = ""
-  for window in spool.windows(windowBytes):
-    pending.add(window)
-    var start = 0
-    var i = 0
-    while i < pending.len:
-      case pending[i]
-      of '\n':
-        yield pending[start ..< i]
-        inc i
-        start = i
-      of '\r':
-        if i == pending.high:
-          # Could be the first half of a \r\n split across windows; wait for
-          # the next window to decide. The flush below settles a final \r.
-          break
-        yield pending[start ..< i]
-        i += (if pending[i + 1] == '\n': 2 else: 1)
-        start = i
-      else:
-        inc i
-    if start > 0:
-      pending = pending[start .. ^1]
-  var start = 0
-  var i = 0
-  while i < pending.len:
-    if pending[i] in {'\r', '\n'}:
-      yield pending[start ..< i]
-      if pending[i] == '\r' and i < pending.high and pending[i + 1] == '\n':
-        i += 2
-      else:
-        inc i
-      start = i
-    else:
-      inc i
-  if start < pending.len:
-    yield pending[start .. ^1]
+type SpoolMemoryStream = ref object of StreamObj
+  ## Reads an in-memory spool in place: a copy for the stream would be a
+  ## second body, which is what a spool is there to avoid.
+  spool: Spool
+  pos: int
+
+proc memoryAtEnd(s: Stream): bool =
+  let stream = SpoolMemoryStream(s)
+  stream.pos >= stream.spool.data.len
+
+proc memorySetPosition(s: Stream, pos: int) =
+  let stream = SpoolMemoryStream(s)
+  stream.pos = clamp(pos, 0, stream.spool.data.len)
+
+proc memoryGetPosition(s: Stream): int =
+  SpoolMemoryStream(s).pos
+
+proc memoryReadData(s: Stream, buffer: pointer, length: int): int =
+  let stream = SpoolMemoryStream(s)
+  result = min(length, stream.spool.data.len - stream.pos)
+  if result > 0:
+    copyMem(buffer, addr stream.spool.data[stream.pos], result)
+    stream.pos += result
+  else:
+    result = 0
+
+proc newStream*(spool: Spool): Stream =
+  ## The bytes as a Stream, from the top. A file-backed spool's stream holds
+  ## the file open, so whoever keeps the stream keeps the spool too: the file
+  ## goes with the spool.
+  if spool.isFileBacked():
+    result = newFileStream(spool.path, fmRead)
+    if result.isNil:
+      raise newException(IOError, "Cannot open spooled body: " & spool.path)
+  else:
+    let stream = SpoolMemoryStream(spool: (if spool.isNil: newMemorySpool("") else: spool))
+    stream.atEndImpl = memoryAtEnd
+    stream.setPositionImpl = memorySetPosition
+    stream.getPositionImpl = memoryGetPosition
+    stream.readDataImpl = memoryReadData
+    result = stream
 
 proc startsWithBytes*(spool: Spool, prefix: string): bool =
   ## Prefix test that reads only as far as it has to. "Is this a URL rather

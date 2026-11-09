@@ -1,6 +1,6 @@
 """Built-in Nim apps retired in favour of a repo JavaScript app.
 
-Thirteen of them so far (data/immich, data/frameOSGallery, render/chart, render/calendar, …): each
+Fourteen of them so far (data/immich, data/frameOSGallery, render/chart, render/calendar, data/icalJson, …): each
 became the scene-local JS app of the same name from `repo/apps/<folder>/`, which
 runs on the runtime its `runtime` names and later. A retired render app's node
 in the render flow becomes the app its `renderFlow` names (render/image), fed
@@ -111,6 +111,12 @@ RETIRED_APPS: dict[str, dict[str, str]] = {
         "runtime": "2026.11.5",
         "needs": "nothing new: an older frame keeps the built-in calendar it has",
         "renderFlow": "render/image",
+    },
+    "data/icalJson": {
+        "replacement": "repo/apps/json/icalJson",
+        "sceneAppKey": "icalJson",
+        "runtime": "2026.11.6",
+        "needs": "frameos.openLines and a spooled field reaching a JS app (byteIter), so a feed never has to fit the JS heap",
     },
 }
 

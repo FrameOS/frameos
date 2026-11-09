@@ -509,6 +509,19 @@
   runs on a task the Nim runtime knows nothing about: plain values and
   pointers only, no ref, no allocation, no log, nothing that raises.
 
+## Big text in a JS app: `frameos.openLines`
+
+- A JS app's field with `"capabilities": { "byteIter": {} }` gets a spooled body
+  as a stream instead of a string (`setDynamicJsAppField`, kept on the runtime
+  in `spoolFields`), and `frameos.openLines` / `nextLine` / `nextBlock` read it
+  in one window (`frameos/utils/line_reader.nim`; the stream API gets it too).
+  The filters run natively on purpose: `only` drops a line before it is a JS
+  string, because the JS heap and the 20 s interpreter budget are what limit a
+  long feed on an ESP32. `repo/apps/json/icalJson` is the worked example; a
+  new reader option is a `LineOptions` field and the declarations in
+  `appTypeDeclarations.ts`. A reader lives for the call that opened it, and a
+  temp file stays on the card while a reader holds its spool.
+
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 
 - A Nim app that gets a repo JavaScript replacement (`data/immich` →

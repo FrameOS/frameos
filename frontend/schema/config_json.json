@@ -342,6 +342,13 @@
     "InputPortCapabilities": {
       "additionalProperties": false,
       "properties": {
+        "byteIter": {
+          "additionalProperties": {
+            "not": {}
+          },
+          "description": "Consumes the string a window at a time: the value can be bigger than memory. A JS app reads it with frameos.openLines.",
+          "type": "object"
+        },
         "providesTarget": {
           "$ref": "#/definitions/ProvidesTargetCapability",
           "description": "This input can hand its producer an image to write into"

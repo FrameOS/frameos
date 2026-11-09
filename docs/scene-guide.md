@@ -806,7 +806,7 @@ interface FrameOSColorRef {
   __frameosType: "color";
   color: string;
 }
-interface FrameOSStreamRef { __frameosType: "streamRef"; id: number; }
+interface FrameOSStreamRef { __frameosType: "streamRef"; id?: number; spool?: string; }
 
 /**
  * What JSX makes in an app (.tsx): get() can return it as its image. An <svg>
@@ -1104,6 +1104,33 @@ declare const frameos: {
   streamAtEnd(stream: FrameOSStreamRef | number): boolean;
   streamRewind(stream: FrameOSStreamRef | number): boolean;
   streamClose(stream: FrameOSStreamRef | number): boolean;
+  /**
+   * Reads text a line at a time without ever holding it whole (FrameOS 2026.11.6+): a string, a stream, or a
+   * field whose config.json entry has "capabilities": { "byteIter": {} }, which gets a downloaded body as a stream
+   * however large it is. Lines not starting with one of `only` are read past natively and cost nothing. Closed when
+   * the call that opened it returns.
+   */
+  openLines(
+    source: FrameOSStreamRef | string,
+    options?: {
+      /** A line starting with a space or tab continues the one before (iCal, vCard, mail headers). */
+      unfold?: boolean;
+      /** Strip whitespace off both ends. */
+      trim?: boolean;
+      /** Keep only the lines starting with one of these. */
+      only?: string[];
+      /** Bytes; a longer line is cut. 65536 by default. */
+      maxLength?: number;
+    }
+  ): FrameOSStreamRef | null;
+  /** The next line of an openLines reader, or null at the end. */
+  nextLine(stream: FrameOSStreamRef | number): string | null;
+  /** The lines up to the next one starting with stop (which only must keep), joined with newlines, stop left out;
+   * null when the text ends first. One call for a whole record, the cheap way through a long feed. */
+  nextBlock(stream: FrameOSStreamRef | number, stop: string): string | null;
+  /** A time zone's canonical name and its UTC offsets: changes is [start, offset, start, offset, ...] in seconds,
+   * empty on a frame without that zone's data (FrameOS 2026.11.6+). */
+  timeZone(name: string): { name: string; changes: number[] };
   getSetting(...path: string[]): any;
   setState(key: string, value: FrameOSJson): void;
   /** Keep a value for this node between renders (FrameOS 2026.10.13+). null forgets it. */
