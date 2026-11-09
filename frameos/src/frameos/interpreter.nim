@@ -652,7 +652,8 @@ proc ensureBuiltInLayout(self: FrameScene): FrameScene =
   ## (event_loop.nim hands it over in `state.layout`), or the frame's choice.
   let own = self.state{"layout"}
   let ownId = own{"sceneId"}.getStr()
-  let wanted = layoutFor(ownId)
+  # Safe mode's settings panel (event_loop.nim): no layout, whatever is chosen.
+  let wanted = if self.state{"noLayout"}.getBool(): "" else: layoutFor(ownId)
   if not self.wornLayout.isNil and self.wornLayout.id.string != wanted:
     dropLayout(self.wornLayout)
     self.wornLayout = nil
@@ -2268,7 +2269,7 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
       setDispatchBudget(0)
 
 proc runBuiltIn(self: FrameScene, context: ExecutionContext): bool =
-  if self == yieldScene or layoutFor(self.state{"layout", "sceneId"}.getStr()).len == 0:
+  if self == yieldScene or self.state{"noLayout"}.getBool() or layoutFor(self.state{"layout", "sceneId"}.getStr()).len == 0:
     return false
   runEvent(self, context)
   true

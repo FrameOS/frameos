@@ -1163,7 +1163,7 @@ interface FrameOSEventPayloads {
   setCurrentScene: { sceneId?: string; direction?: string; state?: any };
   /** Show the scene switcher (\`scenes.switcher\`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. While it or the scene settings show, go back to the scene they were opened from instead. The frame's event map binds it to a swipe in from the bottom edge on a touch screen. */
   sceneSwitcher: Record<string, never>;
-  /** Show the scene's settings (\`scenes.settings\`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen. */
+  /** Show the scene's settings (\`scenes.settings\`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen. \`page\` opens it on \`frame\` (the frame's own page) or \`safe\` (that page with no layout around it, for as long as it stays open). */
   sceneSettings: { page?: string };
   /** Go back, as a phone's back gesture does: what that is is the scene's (the photo or the page before; the scene switcher turns its page back, the scene settings close unsaved), and a scene that does not listen for it stays as it is. It never switches the scene. The frame's event map binds it to a swipe in from the left edge on a touch screen. */
   back: Record<string, never>;

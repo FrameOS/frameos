@@ -648,7 +648,7 @@
     {
       "name": "sceneSettings",
       "class": "scene-command",
-      "description": "Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen.",
+      "description": "Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen. `page` opens it on `frame` (the frame's own page) or `safe` (that page with no layout around it, for as long as it stays open).",
       "listen": false,
       "dispatch": true,
       "payload": [
@@ -799,7 +799,7 @@
     "directions": ["left", "right", "up", "down"],
     "$edgeComment": "edgeSwipe: a touch or pen press this close to an edge, in scene pixels, is held back from the scene until it is a swipe away from that edge (then the frame's) or not (then the scene's, delivered as it happened).",
     "edgePx": 24,
-    "$safeModeComment": "The way out of a layout that cannot be used: this many edgeSwipes from the top edge, each within safeModeGapMs of the last, take the layout off the frame (docs/scene-layouts.md \"Safe mode\"), whatever the frame's event map says those swipes do.",
+    "$safeModeComment": "The way out of a layout that cannot be used: this many edgeSwipes from the top edge, each within safeModeGapMs of the last, open the frame's settings page with no layout around it (docs/scene-layouts.md \"Safe mode\"), whatever the frame's event map says those swipes do. Nothing is changed unless that page is saved.",
     "safeModePulls": 10,
     "safeModeGapMs": 5000,
     "edges": ["left", "right", "top", "bottom"]

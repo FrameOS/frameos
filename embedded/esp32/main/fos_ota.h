@@ -64,12 +64,20 @@ bool fos_ota_has_control_plane(void);
 
 /* Asking the control plane whether an update exists, in a task of its own, for
  * the settings page: the same manifest and signature checks as an install,
- * with nothing downloaded. "idle", "checking", "current", "available",
- * "failed" or "installing"; `version` (may be NULL) is the release offered. */
-void fos_ota_check_start(void);
-const char *fos_ota_check_state(char *version, size_t cap);
-/* Age of the last finished check in seconds, -1 for none this boot. */
-int64_t fos_ota_check_age_s(void);
+ * with nothing downloaded. The values are the page's `updateState`
+ * (system/sceneSettings/scene.nim). */
+typedef enum {
+    FOS_OTA_CHECK_IDLE,
+    FOS_OTA_CHECK_RUNNING,
+    FOS_OTA_CHECK_CURRENT,
+    FOS_OTA_CHECK_AVAILABLE,
+    FOS_OTA_CHECK_FAILED,
+    FOS_OTA_CHECK_INSTALLING,
+} fos_ota_check_t;
+/* Unless a check finished under `fresh_s` seconds ago (0: always). */
+void fos_ota_check_start(int fresh_s);
+/* `version` is the release on offer, "" for none. */
+fos_ota_check_t fos_ota_check_state(char *version, size_t cap);
 /* Called (from the checking task) when the answer changes. */
 void fos_ota_set_check_hook(void (*hook)(void));
 /* Installs what the check found. */

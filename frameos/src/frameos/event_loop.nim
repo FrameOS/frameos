@@ -33,8 +33,6 @@ import ./driver_abi
 import ./input_state
 import ./event_map
 import ./scene_rhythm
-from ./layout_choice import chooseLayout, NoLayout
-from std/times import inMilliseconds, initDuration
 from ./ui/events as uiEvents import uiTimerDue, uiTimersPending
 
 export events
@@ -106,7 +104,7 @@ type
     nextSeq: uint64
     # Pulls down from the top edge in a row: the way out of a bad layout.
     pulls: int
-    lastPull: MonoTime
+    lastPull: int64 ## monotonic ticks, nanoseconds
     draining: bool
     renderWanted: bool
     # The render rule's one exception. `if-state-changed` exists so that what a
@@ -331,7 +329,7 @@ proc refused(loop: EventLoop, envelope: EventEnvelope, reason: string, sceneId =
 when defined(testing):
   proc backdatePullsForTest*(loop: EventLoop, ms: int) =
     ## As if the last pull were `ms` longer ago.
-    loop.lastPull = loop.lastPull - initDuration(milliseconds = ms)
+    loop.lastPull -= ms.int64 * 1_000_000
 
 proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): bool =
   var payload = envelope.payload
@@ -448,20 +446,27 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
   let current = loop.host.sceneFor(none(SceneId))
   let payload = newJObject()
   var next = sceneId
-  if not current.isBuiltIn:
+  # `{page: "safe"}` (safe mode): the frame page with no layout around it,
+  # opened or not already. The scene it came from, and its layout, stay as they
+  # are, so closing it unsaved changes nothing.
+  let safe = envelope.payload{"page"}.getStr() == "safe"
+  if not current.isBuiltIn or safe:
     let state = newJObject()
-    state.put("from", newJString(if current.isNil: "" else: current.id.string))
+    state.put("from", newJString(if current.isNil: "" elif current.isBuiltIn: current.state{"from"}.getStr() else: current.id.string))
     # It is drawn in the layout of the scene it was opened from.
-    if current of InterpretedFrameScene and InterpretedFrameScene(current).layoutSceneId.string.len > 0:
+    if safe:
+      state.put("noLayout", newJBool(true))
+    elif current of InterpretedFrameScene and InterpretedFrameScene(current).layoutSceneId.string.len > 0:
       let worn = newJObject()
       worn.put("sceneId", newJString(InterpretedFrameScene(current).layoutSceneId.string))
       if not InterpretedFrameScene(current).layoutState.isNil:
         worn.put("state", InterpretedFrameScene(current).layoutState)
       state.put("layout", worn)
     if sceneId == SceneSettingsId:
-      current.settingsOf(state)
+      if not current.isBuiltIn:
+        current.settingsOf(state)
       # `{page: "frame"}`: straight to the frame's own page, if it has one.
-      if envelope.payload{"page"}.getStr() == "frame":
+      if safe or envelope.payload{"page"}.getStr() == "frame":
         state.put("opened", newJString("frame"))
     payload.put("state", state)
   else:
@@ -470,7 +475,11 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
       let order = loop.sceneOrderOf()
       if order.len > 0:
         next = order[0].string
-  if next.len == 0 and current.isBuiltIn:
+  if safe and not current.isNil and current.id.string == sceneId:
+    # Already up (the pull before this one opened it): no switch to make.
+    loop.runOnScene(current, evSetCurrentScene, payload, eventPolicy(evSetCurrentScene), envelope.fromRender)
+    result = true
+  elif next.len == 0 and current.isBuiltIn:
     # Nothing to go back to (an ESP32 given no scene yet, which opened the
     # settings from its status screen): the host lets the built-in scene go.
     payload.put("sceneId", newJString(""))
@@ -509,26 +518,25 @@ proc pointerIdOf(delivery: InputDelivery): int =
     return -1
   delivery.payload["pointerId"].getInt(-1)
 
-proc notePull(loop: EventLoop, target: Option[SceneId], delivery: InputDelivery) =
-  ## Safe mode (docs/scene-layouts.md): counted before any event map, so a
-  ## frame whose map or layout is the problem still hears it. Nothing happens
-  ## on a frame wearing no layout: the choice it writes outlives this.
+proc notePull(loop: EventLoop, delivery: InputDelivery): bool =
+  ## Safe mode (docs/scene-layouts.md): true when this pull is the last of
+  ## them, and is the way in and nothing else. Counted before any event map, so
+  ## a frame whose map or layout is the problem still hears it. Nothing is
+  ## changed here: the panel it opens has no layout around it until it closes.
   if delivery.name != evEdgeSwipe or delivery.payload.isNil or delivery.payload{"edge"}.getStr() != "top":
-    return
-  let now = getMonoTime()
-  if loop.pulls > 0 and (now - loop.lastPull).inMilliseconds > GestureSafeModeGapMs:
+    return false
+  let now = getMonoTime().ticks
+  if loop.pulls > 0 and now - loop.lastPull > GestureSafeModeGapMs * 1_000_000:
     loop.pulls = 0
   loop.lastPull = now
   inc loop.pulls
-  if loop.pulls < GestureSafeModePulls:
-    return
-  loop.pulls = 0
-  let scene = loop.host.sceneFor(target)
-  if scene.isNil or scene.wornLayout.isNil:
-    return
-  loop.log(%*{"event": "layout:safeMode", "sceneId": scene.id.string, "layout": scene.wornLayout.id.string})
-  chooseLayout(NoLayout)
-  loop.enqueue(eoSystem, evRender, newJObject())
+  if loop.pulls >= GestureSafeModePulls:
+    loop.pulls = 0
+    loop.log(%*{"event": "layout:safeMode"})
+    let open = newJObject()
+    open.put("page", newJString("safe"))
+    loop.enqueue(eoSystem, evSceneSettings, open)
+    result = true
 
 proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDelivery, fromRender: bool): bool =
   ## An input event to the scene: under its name, and under each old name it
@@ -538,7 +546,8 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
   if eventIsLogged(delivery.name):
     loop.log(withEventPayload(%*{"event": "event:" & delivery.name, "origin": $delivery.origin},
       delivery.name, delivery.payload))
-  loop.notePull(target, delivery)
+  if loop.notePull(delivery):
+    return true
   var payload = delivery.payload
   # The frame's event map first, scene or no scene: a long press of LEFT is
   # the previous scene, and the scene never hears that press.

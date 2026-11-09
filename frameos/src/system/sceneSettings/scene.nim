@@ -94,6 +94,11 @@ const
   ALayout = 4
   ACheckUpdate = 5
   AInstallUpdate = 6
+  # The host's `updateState` (fos_ota_check_t): the words are the page's.
+  UpdateChecking = 1
+  UpdateAvailable = 3
+  UpdateInstalling = 5
+  UpdateWords = ["", "Checking\xe2\x80\xa6", "Up to date", "", "Could not check", "Installing\xe2\x80\xa6"]
   OtherValue = "\1" ## a select box's `other` option; no value of its own is this
   # The types the panel cannot edit: what they hold is not text.
   Unedited = ["node", "scene", "image"]
@@ -344,14 +349,11 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
       options.elems.add option(step, scaleLabel(step))
   scale.put("options", options)
   result.elems.add scale
-  if not info{"clockDate"}.isNil:
+  if not info{"clock"}.isNil:
     # An ESP32's clock, set by hand where no network time reaches it.
-    let date = field("clockDate", "Date", "string")
-    date.put("placeholder", newJString("YYYY-MM-DD"))
-    result.elems.add date
-    let time = field("clockTime", "Time", "string")
-    time.put("placeholder", newJString("HH:MM"))
-    result.elems.add time
+    let clock = field("clock", "Date and time", "string")
+    clock.put("placeholder", newJString("YYYY-MM-DD HH:MM"))
+    result.elems.add clock
 
 proc opener(self: SceneSettingsScene): string =
   self.state{"from"}.getStr()
@@ -704,16 +706,11 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   card.line(look, "Not saved", info{"note"}.getStr())
   card.line(look, "Managed by", info{"managedBy"}.getStr())
   card.line(look, "Version", info{"version"}.getStr())
-  let
-    update = info{"update"}
-    updateState = update{"state"}.getStr()
-  card.line(look, "Update", case updateState
-    of "checking": "Checking\xe2\x80\xa6"
-    of "current": "This is the latest version"
-    of "available": update{"version"}.getStr() & " is available"
-    of "failed": "Could not check for updates"
-    of "installing": "Installing. The frame restarts when it is done."
-    else: "")
+  let update = info{"updateState"}.getInt(-1)
+  if update == UpdateAvailable:
+    card.line(look, "Update", info{"updateVersion"}.getStr() & " available")
+  elif update >= 0:
+    card.line(look, "Update", UpdateWords[update])
   result.children.add card
   let
     fields = self.frameFields(info, autoScale, unit)
@@ -724,23 +721,23 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     let field = fields.elems[i]
     let name = field{"name"}.getStr()
     result.children.add look.row(field, current(edits, info, name), i, typing and name == "wifiSsid")
-    if name == "rotate" and not look.paper:
-      # A turned LCD copies every frame to its place (embedded_main.nim
-      # packImageRgb565, 30 ms at 480x480): there is no drawing it turned.
+    # A turned LCD copies every frame to its place (embedded_main.nim
+    # packImageRgb565, 30 ms at 480x480): there is no drawing it turned.
+    let note =
+      if name == "rotate" and not look.paper: "Any rotation but 0\xc2\xb0 adds a noticeable delay to every frame of an animated scene."
+      elif name == "clock" and info{"wifi", "state"}.getStr() == "connected": "Online, the clock follows network time."
+      else: ""
+    if note.len > 0:
       var c = look.grey
       c.px("text", look.size * 3 div 4)
-      result.children.add el("div", move c, SvgNode(text: "Any rotation but 0\xc2\xb0 adds a noticeable delay to every frame of an animated scene."))
-    elif name == "clockTime" and info{"wifi", "state"}.getStr() == "connected":
-      var c = look.grey
-      c.px("text", look.size * 3 div 4)
-      result.children.add el("div", move c, SvgNode(text: "While this frame can reach the internet, its clock follows network time."))
+      result.children.add el("div", move c, SvgNode(text: note))
   c = "flex flex-wrap"
   c.px("gap", look.gap div 2)
   let buttons = el("div", move c)
   buttons.children.add look.pressButton("Render again", ARender)
-  if updateState == "available":
+  if update == UpdateAvailable:
     buttons.children.add look.pressButton("Install update", AInstallUpdate, asking)
-  elif updateState.len > 0 and updateState != "checking" and updateState != "installing":
+  elif update >= 0 and update != UpdateChecking and update != UpdateInstalling:
     buttons.children.add look.pressButton("Check for updates", ACheckUpdate)
   if %"restart" in arrayOf(info{"actions"}).elems:
     buttons.children.add look.pressButton("Restart FrameOS", ARestart, asking)
@@ -904,14 +901,15 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   case context.event
   of "setCurrentScene":
     # What the dispatcher read off the scene it was opened from.
-    for key in ["from", "fields", "values", "opened", "layout"]:
+    for key in ["from", "fields", "values", "opened", "layout", "noLayout"]:
       let value = payload{"state", key}
       if not value.isNil:
         self.state.put(key, value)
     # It opens on the scene's form; with no scene showing there is nothing
     # on that one, and the frame page is what the status screen sent you here
     # for.
-    if self.state{"page"}.isNil and (self.opener().len == 0 or self.openedOnFrame()) and not frameInfo().isNil:
+    if (self.state{"page"}.isNil or not payload{"state", "noLayout"}.isNil) and
+        (self.opener().len == 0 or self.openedOnFrame()) and not frameInfo().isNil:
       self.showPage(true)
   of "open":
     self.touch()

@@ -160,9 +160,11 @@ over it, so a presence code never reaches one:
 - Pictures stop at 60% of the partition in use. Past that all of them go and
   those in use come back as their scenes show, which also clears pictures of
   scenes that were removed.
-- A tile is read off flash into PSRAM when the switcher draws, and shows its
-  number if that would leave under 600 KB free, or if the scene has not been
-  shown since the picture was last dropped.
+- A tile is read off flash into PSRAM when the switcher draws. It is its name
+  card if that would leave under 600 KB free, or if the scene has not been shown
+  since the picture was last dropped.
+- The firmware's sampling and cropping are C (`fos_scene_thumb.c`), which took
+  the pictures from 2.6 KB of flash to 1.5 KB.
 
 The preview lists names only.
 

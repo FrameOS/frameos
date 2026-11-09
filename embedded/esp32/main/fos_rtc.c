@@ -12,49 +12,20 @@
 #define PCF8563_REG_TIME 0x02
 #define PCF85063_REG_TIME 0x04
 
-static bool all_digits(const char *text, int count)
+bool fos_rtc_parse_clock(const char *text, struct tm *tm)
 {
-    for (int i = 0; i < count; i++) {
-        if (text[i] < '0' || text[i] > '9') return false;
+    static const char shape[] = "dddd-dd-dd dd:dd";
+    if (text == NULL || strlen(text) != sizeof(shape) - 1) return false;
+    for (size_t i = 0; i < sizeof(shape) - 1; i++) {
+        if (shape[i] == 'd' ? text[i] < '0' || text[i] > '9' : text[i] != shape[i]) return false;
     }
-    return true;
-}
-
-bool fos_rtc_parse_date(const char *text, struct tm *tm)
-{
-    if (text == NULL || strlen(text) != 10 || text[4] != '-' || text[7] != '-' || !all_digits(text, 4) ||
-        !all_digits(text + 5, 2) || !all_digits(text + 8, 2)) {
-        return false;
-    }
-    static const uint8_t days[12] = {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-    int year = atoi(text);
-    int month = atoi(text + 5);
-    int day = atoi(text + 8);
-    bool leap = year % 4 == 0; /* 2024 to 2099: no century in between */
-    if (year < 2024 || year > 2099 || month < 1 || month > 12 || day < 1 || day > days[month - 1] ||
-        (month == 2 && day == 29 && !leap)) {
-        return false;
-    }
-    tm->tm_year = year - 1900;
-    tm->tm_mon = month - 1;
-    tm->tm_mday = day;
-    return true;
-}
-
-bool fos_rtc_parse_time(const char *text, struct tm *tm)
-{
-    if (text == NULL) return false;
-    size_t len = strlen(text);
-    int colon = len == 4 ? 1 : 2;
-    if ((len != 4 && len != 5) || text[colon] != ':' || !all_digits(text, colon) || !all_digits(text + colon + 1, 2)) {
-        return false;
-    }
-    int hour = atoi(text);
-    int minute = atoi(text + colon + 1);
-    if (hour > 23 || minute > 59) return false;
-    tm->tm_hour = hour;
-    tm->tm_min = minute;
-    tm->tm_sec = 0;
+    int year = atoi(text), month = atoi(text + 5), day = atoi(text + 8), hour = atoi(text + 11), minute = atoi(text + 14);
+    if (year < 2024 || year > 2099 || hour > 23 || minute > 59) return false;
+    /* mktime carries a day or a month that does not exist into the next. */
+    struct tm parsed = {.tm_year = year - 1900, .tm_mon = month - 1, .tm_mday = day, .tm_hour = hour, .tm_min = minute, .tm_isdst = -1};
+    struct tm carried = parsed;
+    if (mktime(&carried) == (time_t)-1 || carried.tm_mday != day || carried.tm_mon != month - 1) return false;
+    *tm = parsed;
     return true;
 }
 

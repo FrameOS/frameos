@@ -1,21 +1,22 @@
 #include "fos_scene_thumb.h"
 
 #include <dirent.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "esp_heap_caps.h"
-#include "esp_log.h"
 #include "esp_spiffs.h"
-
-static const char *TAG = "fos_scene_thumb";
 
 #define STATE_DIR "/state"
 #define PREFIX "th-"
 /* width, height (uint16), the time it was taken (uint32), then the rows. */
 #define HEADER_BYTES 8
+#define PATH_MAX_BYTES 48
+#define MAX_AGE_SECONDS 3600u
+#define CLOCK_SET_AFTER 1000000000u
 /* A partition this big holds pictures that read well on a large panel. */
 #define ROOMY_PARTITION_BYTES (8u * 1024u * 1024u)
 #define EDGE_ROOMY 200
@@ -24,44 +25,31 @@ static const char *TAG = "fos_scene_thumb";
 #define USED_PERCENT_MAX 60u
 /* What a picture may not take the render's PSRAM below. */
 #define LOAD_KEEP_FREE_BYTES (600u * 1024u)
+#define PSRAM (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
-static void thumb_path(const char *scene_id, char *out, size_t cap)
+static void thumb_path(const char *scene_id, char *out)
 {
     uint32_t hash = 2166136261u;
     for (const unsigned char *p = (const unsigned char *)scene_id; *p; p++) {
         hash = (hash ^ *p) * 16777619u;
     }
-    snprintf(out, cap, STATE_DIR "/" PREFIX "%08lx.bin", (unsigned long)hash);
+    snprintf(out, PATH_MAX_BYTES, STATE_DIR "/" PREFIX "%08lx.bin", (unsigned long)hash);
 }
 
-int fos_scene_thumb_edge(void)
+/* The open picture and its header; NULL for none. */
+static FILE *open_thumb(const char *path, uint16_t size[2], uint32_t *taken)
 {
-    size_t total = 0, used = 0;
-    if (esp_spiffs_info("state", &total, &used) != ESP_OK || total == 0) return 0;
-    return total >= ROOMY_PARTITION_BYTES ? EDGE_ROOMY : EDGE_TIGHT;
-}
-
-static bool read_header(FILE *file, uint16_t *width, uint16_t *height, uint32_t *taken)
-{
-    uint8_t h[HEADER_BYTES];
-    if (fread(h, 1, sizeof(h), file) != sizeof(h)) return false;
-    *width = (uint16_t)(h[0] | (h[1] << 8));
-    *height = (uint16_t)(h[2] | (h[3] << 8));
-    *taken = (uint32_t)h[4] | ((uint32_t)h[5] << 8) | ((uint32_t)h[6] << 16) | ((uint32_t)h[7] << 24);
-    return *width > 0 && *height > 0;
-}
-
-bool fos_scene_thumb_fresh(const char *scene_id, uint32_t now, uint32_t max_age)
-{
-    char path[48];
-    thumb_path(scene_id, path, sizeof(path));
     FILE *file = fopen(path, "rb");
-    if (file == NULL) return false;
-    uint16_t width, height;
-    uint32_t taken = 0;
-    bool ok = read_header(file, &width, &height, &taken);
-    fclose(file);
-    return ok && taken <= now && now - taken <= max_age;
+    if (file == NULL) return NULL;
+    uint32_t h[2];
+    if (fread(h, 1, HEADER_BYTES, file) != HEADER_BYTES || (h[0] & 0xffff) == 0 || (h[0] >> 16) == 0) {
+        fclose(file);
+        return NULL;
+    }
+    size[0] = (uint16_t)h[0];
+    size[1] = (uint16_t)(h[0] >> 16);
+    *taken = h[1];
+    return file;
 }
 
 /* Out of room: every picture goes, and the ones in use come back as their
@@ -83,58 +71,96 @@ static void drop_all(void)
 static bool has_room(size_t bytes)
 {
     size_t total = 0, used = 0;
-    if (esp_spiffs_info("state", &total, &used) != ESP_OK || total == 0) return false;
-    return used + bytes <= total / 100u * USED_PERCENT_MAX;
+    return esp_spiffs_info("state", &total, &used) == ESP_OK && used + bytes <= total / 100u * USED_PERCENT_MAX;
 }
 
-bool fos_scene_thumb_save(const char *scene_id, int width, int height, uint32_t taken, const void *pixels)
+void fos_scene_thumb_capture(const char *scene_id, const void *canvas, int width, int height, int stride,
+                             int bytes_per_pixel, uint32_t now)
 {
-    if (width <= 0 || height <= 0 || width > UINT16_MAX || height > UINT16_MAX || pixels == NULL) return false;
-    size_t bytes = HEADER_BYTES + (size_t)width * (size_t)height * 2u;
-    char path[48];
-    thumb_path(scene_id, path, sizeof(path));
+    size_t total = 0, used = 0;
+    if (now < CLOCK_SET_AFTER || esp_spiffs_info("state", &total, &used) != ESP_OK || total == 0) return;
+    char path[PATH_MAX_BYTES];
+    thumb_path(scene_id, path);
+    uint16_t size[2];
+    uint32_t taken = 0;
+    FILE *file = open_thumb(path, size, &taken);
+    if (file != NULL) {
+        fclose(file);
+        if (taken <= now && now - taken <= MAX_AGE_SECONDS) return;
+    }
+    int edge = total >= ROOMY_PARTITION_BYTES ? EDGE_ROOMY : EDGE_TIGHT;
+    int longest = width > height ? width : height;
+    int scale = (longest + edge - 1) / edge;
+    int w = width / scale, h = height / scale;
+    if (w < 1 || h < 1) return;
+    size_t bytes = (size_t)w * (size_t)h * 2u;
+    uint16_t *pixels = heap_caps_malloc(bytes, PSRAM);
+    if (pixels == NULL) return;
+    /* Four samples a cell, so dither and thin lines do not read as noise. */
+    int step = scale / 2;
+    int quarter = scale / 4;
+    const uint8_t *base = canvas;
+    uint16_t *out = pixels;
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            int r = 0, g = 0, b = 0;
+            for (int s = 0; s < 4; s++) {
+                int px = x * scale + quarter + (s & 1) * step;
+                int py = y * scale + quarter + (s >> 1) * step;
+                const uint8_t *p = base + (size_t)(py * stride + px) * (size_t)bytes_per_pixel;
+                if (bytes_per_pixel == 2) {
+                    uint16_t v = (uint16_t)(p[0] | (p[1] << 8));
+                    r += (v >> 8) & 0xF8;
+                    g += (v >> 3) & 0xFC;
+                    b += (v << 3) & 0xF8;
+                } else if (bytes_per_pixel == 1) {
+                    r += p[0], g += p[0], b += p[0];
+                } else {
+                    r += p[0], g += p[1], b += p[2];
+                }
+            }
+            *out++ = (uint16_t)((((r / 4) & 0xF8) << 8) | (((g / 4) & 0xFC) << 3) | ((b / 4) >> 3));
+        }
+    }
     unlink(path); /* its own old copy is room too */
-    if (!has_room(bytes)) {
-        drop_all();
-        if (!has_room(bytes)) {
-            ESP_LOGW(TAG, "no room for a %u byte scene picture", (unsigned)bytes);
-            return false;
-        }
+    if (!has_room(bytes + HEADER_BYTES)) drop_all();
+    if (has_room(bytes + HEADER_BYTES) && (file = fopen(path, "wb")) != NULL) {
+        uint32_t header[2] = {(uint32_t)w | ((uint32_t)h << 16), now};
+        bool ok = fwrite(header, 1, HEADER_BYTES, file) == HEADER_BYTES && fwrite(pixels, 1, bytes, file) == bytes;
+        fclose(file);
+        if (!ok) unlink(path); /* a torn picture reads as none */
     }
-    FILE *file = fopen(path, "wb");
-    if (file == NULL) return false;
-    const uint8_t h[HEADER_BYTES] = {
-        (uint8_t)width, (uint8_t)(width >> 8), (uint8_t)height, (uint8_t)(height >> 8),
-        (uint8_t)taken, (uint8_t)(taken >> 8), (uint8_t)(taken >> 16), (uint8_t)(taken >> 24),
-    };
-    bool ok = fwrite(h, 1, sizeof(h), file) == sizeof(h) &&
-              fwrite(pixels, 2, (size_t)width * (size_t)height, file) == (size_t)width * (size_t)height;
-    fclose(file);
-    if (!ok) unlink(path); /* a torn picture reads as none */
-    return ok;
+    free(pixels);
 }
 
-uint16_t *fos_scene_thumb_load(const char *scene_id, int *width, int *height)
+uint16_t *fos_scene_thumb_load(const char *scene_id, int tile_width, int tile_height, int *width, int *height)
 {
-    char path[48];
-    thumb_path(scene_id, path, sizeof(path));
-    FILE *file = fopen(path, "rb");
-    if (file == NULL) return NULL;
-    uint16_t w, h;
+    char path[PATH_MAX_BYTES];
+    thumb_path(scene_id, path);
+    uint16_t size[2];
     uint32_t taken;
+    FILE *file = open_thumb(path, size, &taken);
+    if (file == NULL) return NULL;
+    int w = size[0], h = size[1];
+    size_t count = (size_t)w * (size_t)h;
     uint16_t *pixels = NULL;
-    if (read_header(file, &w, &h, &taken)) {
-        size_t count = (size_t)w * (size_t)h;
-        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) >= count * 4u + LOAD_KEEP_FREE_BYTES) {
-            pixels = heap_caps_malloc(count * 2u, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        }
-        if (pixels != NULL && fread(pixels, 2, count, file) != count) {
-            free(pixels);
-            pixels = NULL;
-        }
-        *width = w;
-        *height = h;
+    if (heap_caps_get_free_size(PSRAM) >= count * 4u + LOAD_KEEP_FREE_BYTES) pixels = heap_caps_malloc(count * 2u, PSRAM);
+    if (pixels != NULL && fread(pixels, 2, count, file) != count) {
+        free(pixels);
+        pixels = NULL;
     }
     fclose(file);
+    if (pixels == NULL) return NULL;
+    int crop_w = w, crop_h = h;
+    if (w * tile_height > h * tile_width) crop_w = h * tile_width / tile_height;
+    else crop_h = w * tile_height / tile_width;
+    if (crop_w < 1) crop_w = 1;
+    if (crop_h < 1) crop_h = 1;
+    for (int y = 0; y < crop_h; y++) {
+        memmove(pixels + (size_t)y * (size_t)crop_w, pixels + (size_t)((h - crop_h) / 2 + y) * (size_t)w + (size_t)((w - crop_w) / 2),
+                (size_t)crop_w * 2u);
+    }
+    *width = crop_w;
+    *height = crop_h;
     return pixels;
 }

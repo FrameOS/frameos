@@ -157,25 +157,23 @@ char *fos_frame_settings_json(void)
     }
     if (manager() != NULL) put_pair(&out, "managedBy", manager());
     put_pair(&out, "version", esp_app_get_description()->version);
-    /* The clock in the frame's own time zone; empty while it is not set. */
+    /* The clock in the frame's own time zone; empty while it is not set.
+     * Not strftime, which alone brings 12 KB of libc. */
     time_t now = time(NULL);
-    char date[16] = "", clock_time[8] = "";
+    struct tm local;
+    localtime_r(&now, &local);
     if (now > 1000000000) {
-        struct tm local;
-        localtime_r(&now, &local);
-        strftime(date, sizeof(date), "%Y-%m-%d", &local);
-        strftime(clock_time, sizeof(clock_time), "%H:%M", &local);
+        snprintf(line, sizeof(line), ",\"clock\":\"%04d-%02d-%02d %02d:%02d\"", local.tm_year + 1900, local.tm_mon + 1,
+                 local.tm_mday, local.tm_hour, local.tm_min);
+        put(&out, line);
+    } else {
+        put(&out, ",\"clock\":\"\"");
     }
-    put_pair(&out, "clockDate", date);
-    put_pair(&out, "clockTime", clock_time);
     if (fos_ota_has_control_plane()) {
         char version[32];
-        put(&out, ",\"update\":{");
-        const char *update = fos_ota_check_state(version, sizeof(version));
-        put(&out, "\"state\":");
-        put_string(&out, update);
-        if (version[0]) put_pair(&out, "version", version);
-        put(&out, "}");
+        snprintf(line, sizeof(line), ",\"updateState\":%d", (int)fos_ota_check_state(version, sizeof(version)));
+        put(&out, line);
+        if (version[0]) put_pair(&out, "updateVersion", version);
     }
     if (s_refused[0]) put_pair(&out, "note", s_refused);
     /* Restart is a reboot here: the page shows Reboot alone. */
@@ -265,26 +263,17 @@ void fos_frame_settings_apply(const char *json)
         scale = true;
     }
     /* The clock, in the frame's own time zone, and on the board's battery
-     * clock too so the next cold boot starts right. What the page did not
-     * edit stays as it is. */
-    const cJSON *date_text = cJSON_GetObjectItem(root, "clockDate");
-    const cJSON *time_text = cJSON_GetObjectItem(root, "clockTime");
+     * clock too so the next cold boot starts right. */
+    const cJSON *clock_text = cJSON_GetObjectItem(root, "clock");
     bool clock_changed = false;
-    if (cJSON_IsString(date_text) || cJSON_IsString(time_text)) {
-        time_t now = time(NULL);
+    if (cJSON_IsString(clock_text)) {
         struct tm local;
-        localtime_r(&now, &local);
-        if (cJSON_IsString(date_text) && !fos_rtc_parse_date(date_text->valuestring, &local)) {
-            strlcpy(s_refused, "A date is written YYYY-MM-DD", sizeof(s_refused));
-        } else if (cJSON_IsString(time_text) && !fos_rtc_parse_time(time_text->valuestring, &local)) {
-            strlcpy(s_refused, "A time is written HH:MM", sizeof(s_refused));
-        } else {
-            local.tm_isdst = -1;
-            struct timeval set = {.tv_sec = mktime(&local), .tv_usec = 0};
-            if (set.tv_sec > 1000000000 && settimeofday(&set, NULL) == 0) {
-                fos_rtc_mark_dirty();
-                clock_changed = true;
-            }
+        struct timeval set = {0};
+        if (!fos_rtc_parse_clock(clock_text->valuestring, &local)) {
+            strlcpy(s_refused, "Write the time as YYYY-MM-DD HH:MM", sizeof(s_refused));
+        } else if ((set.tv_sec = mktime(&local)), settimeofday(&set, NULL) == 0) {
+            fos_rtc_mark_dirty();
+            clock_changed = true;
         }
     }
     cJSON_Delete(root);
@@ -355,7 +344,7 @@ void fos_frame_settings_action(const char *action)
     if (strcmp(action, "scan") == 0) {
         fos_wifi_scan_start();
     } else if (strcmp(action, "checkUpdate") == 0) {
-        fos_ota_check_start();
+        fos_ota_check_start(0);
     } else if (strcmp(action, "installUpdate") == 0) {
         if (fos_ota_install_checked() != ESP_OK) ESP_LOGW(TAG, "update refused: nothing to install");
     } else if (strcmp(action, "open") == 0) {
@@ -363,10 +352,6 @@ void fos_frame_settings_action(const char *action)
         if (fos_wifi_state() != FOS_WIFI_CONNECTED && !fos_wifi_scanning() && (age < 0 || age > SCAN_FRESH_US)) {
             fos_wifi_scan_start();
         }
-        int64_t checked = fos_ota_check_age_s();
-        if (fos_wifi_state() == FOS_WIFI_CONNECTED && fos_ota_has_control_plane() &&
-            (checked < 0 || checked > UPDATE_CHECK_FRESH_S)) {
-            fos_ota_check_start();
-        }
+        if (fos_wifi_state() == FOS_WIFI_CONNECTED) fos_ota_check_start(UPDATE_CHECK_FRESH_S);
     }
 }

@@ -961,23 +961,14 @@ esp_err_t fos_ota_request_check(void)
 
 /* ------------------------------------- is there one? (the settings page) */
 
-typedef enum {
-    CHECK_IDLE,
-    CHECK_RUNNING,
-    CHECK_CURRENT,
-    CHECK_AVAILABLE,
-    CHECK_FAILED,
-    CHECK_INSTALLING,
-} check_state_t;
-
-static volatile check_state_t s_check = CHECK_IDLE;
+static volatile fos_ota_check_t s_check = FOS_OTA_CHECK_IDLE;
 static char s_check_version[FOS_OTA_CHECK_VERSION_MAX] = "";
 static int64_t s_checked_at_us = -1;
 static void (*s_check_hook)(void) = NULL;
 
 void fos_ota_set_check_hook(void (*hook)(void)) { s_check_hook = hook; }
 
-static void check_done(check_state_t state)
+static void check_done(fos_ota_check_t state)
 {
     s_check = state;
     if (s_check_hook) s_check_hook();
@@ -985,23 +976,18 @@ static void check_done(check_state_t state)
 
 static void note_install_failed(void)
 {
-    if (s_check == CHECK_INSTALLING) check_done(CHECK_FAILED);
+    if (s_check == FOS_OTA_CHECK_INSTALLING) check_done(FOS_OTA_CHECK_FAILED);
 }
 
-bool fos_ota_has_control_plane(void)
+static bool backend_ready(void)
 {
     const fos_config_t *config = fos_config();
-    return (config->backend_url[0] && config->frame_id != 0 && config->api_key[0]) || fos_cloud_frame_id()[0];
+    return config->backend_url[0] && config->frame_id != 0 && config->api_key[0];
 }
+
+bool fos_ota_has_control_plane(void) { return backend_ready() || fos_cloud_frame_id()[0]; }
 
 static bool cloud_source(ota_source_t *src);
-
-static bool source_of_this_board(ota_source_t *src)
-{
-    const fos_config_t *config = fos_config();
-    if (config->backend_url[0] && config->frame_id != 0 && config->api_key[0]) return backend_source(src);
-    return fos_cloud_frame_id()[0] && cloud_source(src);
-}
 
 static void ota_check_task(void *arg)
 {
@@ -1012,50 +998,40 @@ static void ota_check_task(void *arg)
     esp_err_t err = ESP_FAIL;
     SemaphoreHandle_t lock = ota_lock();
     if (lock != NULL && xSemaphoreTake(lock, 0) == pdTRUE) {
-        if (source_of_this_board(&src)) err = ota_fetch_manifest(&src, &manifest, &up_to_date);
+        if (backend_ready() ? backend_source(&src) : cloud_source(&src)) err = ota_fetch_manifest(&src, &manifest, &up_to_date);
         xSemaphoreGive(lock);
     }
     if (err == ESP_OK && !up_to_date) strlcpy(s_check_version, manifest.version, sizeof(s_check_version));
     s_checked_at_us = esp_timer_get_time();
-    check_done(err != ESP_OK ? CHECK_FAILED : up_to_date ? CHECK_CURRENT : CHECK_AVAILABLE);
+    check_done(err != ESP_OK ? FOS_OTA_CHECK_FAILED : up_to_date ? FOS_OTA_CHECK_CURRENT : FOS_OTA_CHECK_AVAILABLE);
     vTaskDelete(NULL);
 }
 
-void fos_ota_check_start(void)
+void fos_ota_check_start(int fresh_s)
 {
+    if (!fos_ota_has_control_plane()) return;
+    if (fresh_s > 0 && s_checked_at_us >= 0 && (esp_timer_get_time() - s_checked_at_us) / 1000000 < fresh_s) return;
     taskENTER_CRITICAL(&s_ota_request_mux);
-    bool running = s_check == CHECK_RUNNING || s_check == CHECK_INSTALLING;
-    if (!running) s_check = CHECK_RUNNING;
+    bool running = s_check == FOS_OTA_CHECK_RUNNING || s_check == FOS_OTA_CHECK_INSTALLING;
+    if (!running) s_check = FOS_OTA_CHECK_RUNNING;
     taskEXIT_CRITICAL(&s_ota_request_mux);
     if (running) return;
     if (s_check_hook) s_check_hook();
-    if (xTaskCreate(ota_check_task, "fos_ota_check", 8192, NULL, 4, NULL) != pdPASS) check_done(CHECK_FAILED);
+    if (xTaskCreate(ota_check_task, "fos_ota_check", 8192, NULL, 4, NULL) != pdPASS) check_done(FOS_OTA_CHECK_FAILED);
 }
 
-const char *fos_ota_check_state(char *version, size_t cap)
+fos_ota_check_t fos_ota_check_state(char *version, size_t cap)
 {
-    if (version != NULL && cap > 0) strlcpy(version, s_check == CHECK_AVAILABLE ? s_check_version : "", cap);
-    switch (s_check) {
-    case CHECK_RUNNING: return "checking";
-    case CHECK_CURRENT: return "current";
-    case CHECK_AVAILABLE: return "available";
-    case CHECK_FAILED: return "failed";
-    case CHECK_INSTALLING: return "installing";
-    default: return "idle";
-    }
-}
-
-int64_t fos_ota_check_age_s(void)
-{
-    return s_checked_at_us < 0 ? -1 : (esp_timer_get_time() - s_checked_at_us) / 1000000;
+    strlcpy(version, s_check == FOS_OTA_CHECK_AVAILABLE ? s_check_version : "", cap);
+    return s_check;
 }
 
 esp_err_t fos_ota_install_checked(void)
 {
-    if (s_check != CHECK_AVAILABLE) return ESP_ERR_INVALID_STATE;
-    check_done(CHECK_INSTALLING);
+    if (s_check != FOS_OTA_CHECK_AVAILABLE) return ESP_ERR_INVALID_STATE;
+    check_done(FOS_OTA_CHECK_INSTALLING);
     esp_err_t err = fos_ota_request_for_control_plane(NULL);
-    if (err != ESP_OK) check_done(CHECK_FAILED);
+    if (err != ESP_OK) check_done(FOS_OTA_CHECK_FAILED);
     return err;
 }
 
@@ -1068,9 +1044,7 @@ esp_err_t fos_ota_install_checked(void)
  * "OTA is broken" rather than "wrong path". Pick by what this board is. */
 esp_err_t fos_ota_request_for_control_plane(const char **plane_out)
 {
-    const fos_config_t *config = fos_config();
-    bool backend_ready = config->backend_url[0] && config->frame_id != 0 && config->api_key[0];
-    if (!backend_ready && fos_cloud_frame_id()[0]) {
+    if (!backend_ready() && fos_cloud_frame_id()[0]) {
         if (plane_out) *plane_out = "cloud";
         fos_ota_request_cloud_update();
         return ESP_OK;

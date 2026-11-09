@@ -42,12 +42,14 @@ still move it.
 **Safe mode.** A layout can leave a frame unusable, and the settings that would
 take it off are drawn inside it. Ten pulls down from the top edge of a touch
 screen, each within five seconds of the last (`gestures.safeModePulls` and
-`safeModeGapMs` in the events contract), take the layout off: the frame's own
-choice becomes "No layout", as if picked on its settings page, and it stays that
-way until another is picked there. The dispatcher counts them before any event
-map, so a bad map cannot hide them, and logs `layout:safeMode`. On a frame wearing
-no layout they mean nothing. A frame with keys alone has no pull; there the
-control plane changes the layout.
+`safeModeGapMs` in the events contract), open the frame's settings page with no
+layout around it (`sceneSettings {page: "safe"}`). Safe mode changes nothing by
+itself: the layout is only left out of that panel, so Cancel, Back or the idle
+timeout go back to the scene as it was, and anything set there is what Save saves.
+The dispatcher counts the pulls before any event map, so a bad map cannot hide
+them, and logs `layout:safeMode`. A frame whose control plane turned the page off
+gets the scene's form, without the layout, instead. A frame with keys alone has no
+pull; there the control plane changes the layout.
 
 **Around the built-in scenes.** The scene list and the settings are drawn in the
 layout of the scene they were opened from, so a taskbar stays up. The dispatcher

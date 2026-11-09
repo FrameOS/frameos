@@ -4848,8 +4848,8 @@
     ]
    },
    {
-    "name": "ten pulls down from the top edge take a worn layout off the frame",
-    "why": "The way out of a layout nobody can use (docs/scene-layouts.md \"Safe mode\"): counted before any event map, and only on a frame wearing one. Nine are nothing; the tenth asks for a render without it.",
+    "name": "ten pulls down from the top edge open the frame page with no layout around it",
+    "why": "The way out of a layout nobody can use (docs/scene-layouts.md \"Safe mode\"): counted before any event map. Nine are nothing; the tenth opens the settings without the layout and changes nothing else.",
     "scenes": [
      {
       "id": "fixtures/dispatcher/wearsLayout",
@@ -4989,6 +4989,10 @@
        }
       ],
       "trace": [
+       "select system/sceneSettings",
+       "run wearsLayout close",
+       "run sceneSettings setCurrentScene",
+       "run sceneSettings open",
        "render"
       ]
      }
