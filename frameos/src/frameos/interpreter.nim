@@ -2020,6 +2020,35 @@ proc sceneKeyboardAt*(sceneId: SceneId, x, y: int): bool =
   ## (x, y), scene pixels: the hosts' `EventHost.keyboardAt`.
   ui_events.keyboardAt(sceneId.string, x.float32, y.float32)
 
+proc takesPresses(scene: InterpretedFrameScene): bool =
+  ## A listener of its own for what a press becomes.
+  for event in ["pointerDown", "pointerUp", "tap", "doubleTap", "longPress"]:
+    if scene.eventListeners.hasKey(event) or scene.appsHear(event):
+      return true
+
+proc pressTakenIn(scene: FrameScene; x, y: float32; wearer: FrameScene; depth: int): bool =
+  ## The way a pointer event goes (routePointer): into the scene's layout, to
+  ## the panel under it in that panel's coordinates, else the scene's own UI.
+  if scene.isNil or depth > 8:
+    return false
+  if scene != wearer and not scene.wornLayout.isNil:
+    return pressTakenIn(scene.wornLayout, x, y, scene, depth + 1)
+  if scene of InterpretedFrameScene and InterpretedFrameScene(scene).takesPresses():
+    return true
+  for i in countdown(scene.slots.high, 0):
+    template s: untyped = scene.slots[i]
+    if x >= s.visible[0] and y >= s.visible[1] and x < s.visible[2] and y < s.visible[3]:
+      return pressTakenIn(s.child, x - s.x.float32, y - s.y.float32, wearer, depth + 1)
+  uiTakesPressAt(scene.id.string, x, y)
+
+proc pressTakenAt*(scene: FrameScene; x, y: int): bool =
+  ## Whether something on the frame does something with a press at (x, y), the
+  ## scene's pixels. Asked at the moment of the press, of what the last render
+  ## drew: an element with only an onClick hears no pointerDown, and a press
+  ## near the edge of a touch panel is not delivered until it is known not to
+  ## be a swipe.
+  pressTakenIn(scene, x.float32, y.float32, nil, 0)
+
 proc runEventApps(scene: InterpretedFrameScene, context: ExecutionContext) =
   ## The onEvent of the JS apps that subscribed to this event. One that returns
   ## true is drawn again, as a run of a JSX handler is.

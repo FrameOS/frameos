@@ -877,6 +877,16 @@ export const cloudFramesContract = {
         }
       }
     },
+    "touch_beep": {
+      "rule": {
+        "type": "bool"
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.11.6"
+        }
+      }
+    },
     "mic_clk_pin": {
       "rule": {
         "type": "int",

@@ -68,6 +68,8 @@ suite "a layout around a captioned photo on a 13.3\" ESP32":
 
     let config = FrameConfig(name: "e1004", mode: "embedded", device: "waveshare.EPD_13in3e",
       width: 1200, height: 1600, rotate: 0, scalingMode: "cover", debug: false, settings: %*{},
+      # What this panel ran at when the long caption aborted it; automatic is 1 now.
+      renderScale: 2.0,
       saveAssets: %*false, assetsPath: getTempDir() / "frameos-layout-memory-test")
     var problems: seq[string]
     var logger = Logger(frameConfig: config, enabled: true)
@@ -107,7 +109,7 @@ suite "a layout around a captioned photo on a 13.3\" ESP32":
     check at(600, 1599).r > 150 and at(600, 1599).g > 150 and at(600, 1599).b > 150
     check at(600, 500).b > at(600, 500).r
     var captionPixels = 0
-    for y in 900 ..< 1300:
+    for y in 900 ..< 1480:
       for x in 40 ..< 900:
         if at(x, y).r > 200 and at(x, y).g > 200 and at(x, y).b > 200:
           inc captionPixels

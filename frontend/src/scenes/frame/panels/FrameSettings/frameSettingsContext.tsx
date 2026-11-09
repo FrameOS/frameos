@@ -10,6 +10,7 @@ import { paletteDeviceOf } from '../../../../utils/assetColors/devicePalette'
 import {
   cloudFrameSupportsEsp32BatteryEnablePin,
   cloudFrameSupportsEsp32Buzzer,
+  cloudFrameSupportsEsp32TouchBeep,
   cloudFrameSupportsEsp32VoiceChat,
   cloudFrameSupportsEsp32Led,
   cloudFrameSupportsEsp32ExtendedSettings,
@@ -19,6 +20,7 @@ import {
   cloudFrameSupportsDisplayDriverSetting,
   esp32BatteryEnablePinCloudFrameSettingsMinVersion,
   esp32BuzzerCloudFrameSettingsMinVersion,
+  esp32TouchBeepCloudFrameSettingsMinVersion,
   esp32VoiceChatCloudFrameSettingsMinVersion,
   esp32LedCloudFrameSettingsMinVersion,
 } from '../../../../utils/cloudFrameApi'
@@ -171,8 +173,11 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
     reportedPin: number | undefined
     reportedToneHz: number | undefined
     disabledReason: string | undefined
+    /** Whether a press on the glass clicks: on unless the owner turned it off. */
+    touchBeep: boolean
+    touchBeepDisabledReason: string | undefined
   } | null
-  setButtonBeep: (patch: { pin?: number; toneHz?: number }) => void
+  setButtonBeep: (patch: { pin?: number; toneHz?: number; touchBeep?: boolean }) => void
   /**
    * ESP32 only, null elsewhere: the PDM microphone's clock, data and power
    * GPIO (docs/voice-chat.md; fos_mic.c), -1 = none, undefined = the board's
@@ -417,6 +422,7 @@ export function FrameSettingsProvider({
   const renderScaleOptions = frameRenderScaleOptions(
     frameForm.width ?? frame.width ?? frame.hardware?.width,
     frameForm.height ?? frame.height ?? frame.hardware?.height,
+    frameForm.device ?? frame.device ?? frame.hardware?.device,
     frameForm.render_scale
   )
 
@@ -611,6 +617,10 @@ export function FrameSettingsProvider({
           : frame.frameos_version
           ? `The button beep needs FrameOS ${esp32BuzzerCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
           : `The button beep needs FrameOS ${esp32BuzzerCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`,
+        touchBeep: (frameForm.touch_beep ?? frame.hardware?.touchBeep) !== false,
+        touchBeepDisabledReason: cloudFrameSupportsEsp32TouchBeep(frame.frameos_version)
+          ? undefined
+          : `The touch beep needs FrameOS ${esp32TouchBeepCloudFrameSettingsMinVersion} or newer on the frame.`,
       }
     : !cloudProfile && isEmbeddedMode && !isVirtualPlatform && !isPicoPlatform
     ? {
@@ -619,13 +629,16 @@ export function FrameSettingsProvider({
         reportedPin: undefined,
         reportedToneHz: undefined,
         disabledReason: undefined,
+        touchBeep: (powerDeviceConfig.touchBeep ?? powerDeviceConfig.touch_beep) !== false,
+        touchBeepDisabledReason: undefined,
       }
     : null
-  const setButtonBeep = (patch: { pin?: number; toneHz?: number }): void => {
+  const setButtonBeep = (patch: { pin?: number; toneHz?: number; touchBeep?: boolean }): void => {
     if (esp32CloudProfile) {
       setFrameFormValues({
         ...('pin' in patch ? { buzzer_pin: patch.pin } : {}),
         ...('toneHz' in patch ? { buzzer_tone_hz: patch.toneHz } : {}),
+        ...('touchBeep' in patch ? { touch_beep: patch.touchBeep } : {}),
       })
       return
     }
@@ -649,6 +662,10 @@ export function FrameSettingsProvider({
     }
     if ('toneHz' in patch) {
       write('buzzerToneHz', 'buzzer_tone_hz', patch.toneHz)
+    }
+    if ('touchBeep' in patch) {
+      delete next.touch_beep
+      next.touchBeep = patch.touchBeep
     }
     setFrameFormValues({ device_config: next })
   }

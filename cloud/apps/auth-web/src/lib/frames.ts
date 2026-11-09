@@ -500,6 +500,12 @@ export const esp32MicrophoneFrameSettingKeys = new Set<string>(
 export const esp32LedFrameSettingKeys = new Set<string>(
   [...contractSettingKeysSince("esp32", esp32VoiceChatFrameSettingsMinVersion)].filter((key) => key.startsWith("led_")),
 );
+// 2026.11.6: `touch_beep`, the click of a press on the glass and the chirps of
+// a load someone asked for on e-paper. Live, no reboot.
+export const esp32TouchBeepFrameSettingsMinVersion = "2026.11.6";
+export const esp32TouchBeepFrameSettingKeys = new Set(
+  contractSettingKeysSince("esp32", esp32TouchBeepFrameSettingsMinVersion),
+);
 
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata

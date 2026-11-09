@@ -304,7 +304,7 @@ function ButtonBeepField(): JSX.Element | null {
   if (!buttonBeep) {
     return null
   }
-  const { pin, toneHz, reportedPin, reportedToneHz, disabledReason } = buttonBeep
+  const { pin, toneHz, reportedPin, reportedToneHz, disabledReason, touchBeep, touchBeepDisabledReason } = buttonBeep
   const pinPlaceholder =
     reportedPin === undefined
       ? 'Board default, -1 = off'
@@ -361,6 +361,24 @@ function ButtonBeepField(): JSX.Element | null {
           />
         </div>
       </div>
+      <fieldset disabled={touchBeepDisabledReason !== undefined} className="min-w-0 space-y-1 @md:flex @md:gap-2">
+        <Label className="@md:w-1/3">
+          Touch beep
+          <Tooltip
+            title={
+              touchBeepDisabledReason ??
+              'On e-paper, a click when something on the screen takes a press (a button, a field, a scene that listens) and when it lifts, and a different click for a second finger. The picture takes a moment to answer, the click does not. While what you asked for loads, the buzzer chirps quietly.'
+            }
+          />
+        </Label>
+        <div className="w-full">
+          <Switch
+            value={touchBeep}
+            onChange={(next) => setButtonBeep({ touchBeep: next })}
+            label={touchBeep ? 'On: a press something takes clicks' : 'Off: the glass is silent'}
+          />
+        </div>
+      </fieldset>
     </fieldset>
   )
 }

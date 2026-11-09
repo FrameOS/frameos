@@ -157,6 +157,9 @@ export const cloudFramesContractSettings = {
     "voice_chat": {
       "since": "2026.10.20"
     },
+    "touch_beep": {
+      "since": "2026.11.6"
+    },
     "mic_clk_pin": {
       "since": "2026.10.20"
     },

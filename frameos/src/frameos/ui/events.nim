@@ -611,6 +611,25 @@ when not defined(frameosEmbedded):
 
 # ------------------------------------------------------------------ dispatch
 
+proc uiTakesPressAt*(sceneId: string; x, y: float32): bool =
+  ## Whether a press at (x, y), in the scene's pixels, lands on something a UI
+  ## of the scene does something with: an element with a handler, a field, a
+  ## box that scrolls. Asked of what the last render drew.
+  for target in targets:
+    if target.sceneId != sceneId:
+      continue
+    let
+      scale = if target.scale > 0: target.scale else: 1'f32
+      lx = (x - target.offsetX) / scale
+      ly = (y - target.offsetY) / scale
+    for r in target.regions:
+      if r.inside(lx, ly):
+        if r.field > 0 or r.scrolls:
+          return true
+        for handler in r.handlers:
+          if handler > 0:
+            return true
+
 proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
   ## Hands a pointer event, or a key for a field, to the scene's UIs. True
   ## when the frame should render again: a handler ran (whatever it changed,

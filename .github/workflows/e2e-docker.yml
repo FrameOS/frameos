@@ -284,6 +284,16 @@ jobs:
                 embedded/esp32/main/fos_animation.c embedded/esp32/main/tests/test_fos_animation.c \
                 -o /tmp/test_fos_animation
               /tmp/test_fos_animation
+              # Which scene a frame starts on: never a layout, pure.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/fos_boot_scene.c embedded/esp32/main/tests/test_fos_boot_scene.c \
+                -o /tmp/test_fos_boot_scene
+              /tmp/test_fos_boot_scene
+              # When an e-paper panel takes a partial update, pure.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/components/frameos_display/include \
+                embedded/esp32/components/frameos_display/fos_partial_refresh.c embedded/esp32/main/tests/test_fos_partial_refresh.c \
+                -o /tmp/test_fos_partial_refresh
+              /tmp/test_fos_partial_refresh
               # The charger register decode, the RTC conversions, the fuel gauge decode
               # and the climate sensor decode, pure.
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \

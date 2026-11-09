@@ -186,6 +186,44 @@ static void test_bursts(void)
     CHECK(!fos_animation_burst_end(&a, 310 * S, &st, &owed), "and nothing ends");
 }
 
+static void test_input_hold(void)
+{
+    fos_input_hold_t h = {0};
+    CHECK(!fos_input_hold_engaged(&h), "no hold before any input");
+    CHECK(!fos_input_hold_release(&h, 100 * S), "nothing to release");
+
+    fos_input_hold_note(&h, 100 * S);
+    CHECK(fos_input_hold_engaged(&h), "a tap holds the network back");
+    CHECK(!fos_input_hold_release(&h, 109 * S), "still inside the quiet window");
+    fos_input_hold_note(&h, 109 * S);
+    CHECK(!fos_input_hold_release(&h, 118 * S), "another tap extends it");
+    CHECK(fos_input_hold_release(&h, 119 * S), "released ten quiet seconds after the last tap");
+    CHECK(!fos_input_hold_engaged(&h), "and over");
+    CHECK(!fos_input_hold_release(&h, 120 * S), "released once");
+
+    /* Tapping without a pause: the cap lets the held work through, and the
+     * next tap starts a new hold. */
+    for (int64_t t = 200; t < 260; t++) {
+        fos_input_hold_note(&h, t * S);
+        CHECK(!fos_input_hold_release(&h, t * S), "held at %lld s", (long long)t);
+    }
+    fos_input_hold_note(&h, 260 * S);
+    CHECK(fos_input_hold_release(&h, 260 * S), "a minute is the most it holds");
+    fos_input_hold_note(&h, 261 * S);
+    CHECK(fos_input_hold_engaged(&h), "a new hold");
+    CHECK(!fos_input_hold_release(&h, 262 * S), "with its own minute");
+}
+
+static void test_loading_taps(void)
+{
+    CHECK(fos_loading_taps_wanted(false, true, false, 100 * S, 105 * S), "someone just asked");
+    CHECK(!fos_loading_taps_wanted(false, true, false, 0, 105 * S), "nobody has touched it");
+    CHECK(!fos_loading_taps_wanted(false, true, false, 100 * S, 110 * S), "a schedule, ten seconds after a tap");
+    CHECK(!fos_loading_taps_wanted(true, true, false, 100 * S, 105 * S), "an LCD draws its mark");
+    CHECK(!fos_loading_taps_wanted(false, false, false, 100 * S, 105 * S), "the owner turned the sounds off");
+    CHECK(!fos_loading_taps_wanted(false, true, true, 100 * S, 105 * S), "a voice session has the buzzer");
+}
+
 int main(void)
 {
     test_wanted();
@@ -194,6 +232,8 @@ int main(void)
     test_pacing();
     test_logging_cadence();
     test_bursts();
+    test_input_hold();
+    test_loading_taps();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

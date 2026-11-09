@@ -23,6 +23,7 @@ import frameos/utils/dither
 from frameos/utils/http_client import releaseStrandedHttp
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
+import frameos/utils/panel_damage
 import frameos/render_probe
 
 # `log` comes from embedded_runtime (same frameos_nim_log_hook C hook).
@@ -52,11 +53,7 @@ proc sceneHeight(): int {.inline.} =
 # second full-frame image is never allocated (rotating 1200x1600 RGBA
 # out-of-place costs 7.7MB, which OOMs the 16MB-PSRAM boards mid-pack).
 proc panelCoords(x, y, srcW, srcH: int): tuple[px, py: int] {.inline.} =
-  case frameRotate
-  of 90: (srcH - 1 - y, x)
-  of 180: (srcW - 1 - x, srcH - 1 - y)
-  of 270: (y, srcW - 1 - x)
-  else: (x, y)
+  panelPoint(x, y, srcW, srcH, frameRotate)
 
 # --------------------------------------------------------- out-of-memory
 # The patched allocator (src/embedded/patched_malloc.nim via config.nims)
@@ -381,6 +378,79 @@ proc renderFrameImage(): tuple[image: Image, source: string] =
   rhythmForgetCanvases()
   (renderDemoInto(renderCanvas(), frameName, renderCount + 1), "status screen")
 
+proc renderKeptFrameImage(): tuple[image: Image, source: string] =
+  ## renderFrameImage for a canvas that is packed afterwards: a panel with a
+  ## partial waveform keeps the SVG damage records an LCD's buffer has.
+  let kept = beginKeptCanvasFrame()
+  try:
+    renderFrameImage()
+  finally:
+    if kept:
+      endKeptCanvasFrame()
+
+# A panel with a partial waveform: the canvas as it was last packed and what
+# that packed to, so that only what changed is dithered (utils/panel_damage).
+var
+  packedErrors: ptr UncheckedArray[int32]
+  packedRuns: ptr UncheckedArray[ChangedRun]
+  packedPicture: ptr UncheckedArray[uint8]
+  packedCanvas: ptr UncheckedArray[uint8]
+  packedWidth, packedHeight, packedRotate: int
+  packedKnown = false
+  packedAllocTried = false
+
+proc allocPsram(len: csize_t): pointer {.importc: "fos_display_alloc_psram", cdecl.}
+
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
+
+proc packCanvas1bpp(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): bool =
+  let
+    width = image.width
+    height = image.height
+    rowBytes = (frameWidth + 7) div 8
+  if not panelHasPartialWaveform() or image.format != pfGray8 or image.isView or
+      width * height != frameWidth * frameHeight or rowBytes * frameHeight != bufLen:
+    return packImage1bpp(image, buf, bufLen)
+  if not packedAllocTried:
+    # One block, kept: the errors of two rows of the longer edge (a frame can
+    # be rotated later), the runs, the packed picture and the canvas.
+    packedAllocTried = true
+    let
+      errorBytes = 2 * (max(width, height) + 2) * sizeof(int32)
+      runBytes = MaxRuns * sizeof(ChangedRun)
+      base = cast[int](allocPsram(csize_t(errorBytes + runBytes + bufLen + width * height)))
+    if base != 0:
+      packedErrors = cast[ptr UncheckedArray[int32]](base)
+      packedRuns = cast[ptr UncheckedArray[ChangedRun]](base + errorBytes)
+      packedPicture = cast[ptr UncheckedArray[uint8]](base + errorBytes + runBytes)
+      packedCanvas = cast[ptr UncheckedArray[uint8]](base + errorBytes + runBytes + bufLen)
+  if packedErrors.isNil:
+    return packImage1bpp(image, buf, bufLen)
+  let pixels = cast[ptr UncheckedArray[uint8]](image.bufferPointer)
+  if packedKnown and packedWidth == width and packedHeight == height and packedRotate == frameRotate:
+    var count = 0
+    if changedRuns(pixels, packedCanvas, width, height, packedRuns, count) * 2 < width * height:
+      copyMem(buf, packedPicture, bufLen)
+      packRuns1bpp(pixels, width, height, buf, rowBytes, toOpenArray(packedRuns, 0, count - 1), frameRotate, packedErrors)
+      for i in 0 ..< count:
+        let
+          run = packedRuns[i]
+          at = run.y.int * width + run.left.int
+        copyMem(packedCanvas[at].addr, pixels[at].addr, int(run.right - run.left))
+      copyMem(packedPicture, buf, bufLen)
+      return true
+  if not packImage1bpp(image, buf, bufLen):
+    return false
+  copyMem(packedCanvas, pixels, width * height)
+  copyMem(packedPicture, buf, bufLen)
+  packedWidth = width
+  packedHeight = height
+  packedRotate = frameRotate
+  packedKnown = true
+  true
+
+{.pop.}
+
 proc packImageForFormat(
     image: Image;
     buf: ptr UncheckedArray[uint8];
@@ -389,7 +459,7 @@ proc packImageForFormat(
   ): bool =
   case pixelFormat:
   of 1:
-    packImage1bpp(image, buf, bufLen)
+    packCanvas1bpp(image, buf, bufLen)
   of 2:
     packImageDual1bpp(image, buf, bufLen, true)
   of 3:
@@ -672,7 +742,7 @@ proc fos_nim_render_alloc_impl(
     refreshDecodeBudget(forDecode = false)
     setAssetColorsPanelPalette(panelPaletteForFormat(pixelFormat.int))
     let start = getMonoTime()
-    let rendered = renderFrameImage()
+    let rendered = renderKeptFrameImage()
     var image = rendered.image
     let source = rendered.source
     let renderedAt = getMonoTime()
@@ -795,6 +865,13 @@ proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
   ## True once when a scene event (e.g. dispatched "render") asked for a
   ## redraw; clears the flag.
   takeRenderRequested()
+
+proc fos_nim_press_taken_impl(wireX, wireY: cint): bool {.exportc, cdecl.} =
+  ## Whether something on the frame takes a press at this position on the glass.
+  try:
+    pressTaken(wireX.int, wireY.int)
+  except Exception:
+    false
 
 proc fos_nim_tick_impl(): bool {.exportc, cdecl.} =
   ## Time passing for the dispatcher's input state (frameos/input_state.nim):

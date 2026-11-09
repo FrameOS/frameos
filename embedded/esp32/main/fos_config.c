@@ -87,6 +87,7 @@ static void load_defaults(void)
     memset(&s_config.touch_pins, -1, sizeof(s_config.touch_pins));
     memset(&s_config.codec_pins, -1, sizeof(s_config.codec_pins));
     s_config.voice_chat = true;
+    s_config.touch_beep = true;
     s_config.led_pin = -1;
     s_config.led_type = FOS_LED_GPIO;
     s_config.i2c_bus_count = 0;
@@ -222,7 +223,7 @@ esp_err_t fos_config_init(void)
      * after `hardware`, which the board default keys on. */
     size_t event_map_len = sizeof(s_config.event_map);
     if (nvs_get_str(nvs, "event_map", s_config.event_map, &event_map_len) != ESP_OK) {
-        strlcpy(s_config.event_map, fos_board_event_map(s_config.hardware_preset), sizeof(s_config.event_map));
+        fos_board_event_map(s_config.hardware_preset, s_config.event_map, sizeof(s_config.event_map));
     }
     if (nvs_get_u32(nvs, "max_http", &u32) == ESP_OK) s_config.max_http_response_bytes = u32;
     uint8_t u8;
@@ -298,6 +299,7 @@ esp_err_t fos_config_init(void)
         s_config.mic_pins.pwr = (int8_t)pwr;
     }
     if (nvs_get_u8(nvs, "voice", &u8) == ESP_OK) s_config.voice_chat = u8 != 0;
+    if (nvs_get_u8(nvs, "touch_beep", &u8) == ESP_OK) s_config.touch_beep = u8 != 0;
     /* The touch panel and the audio codec the same way: stored, else the
      * board's own (fos_board_touch_pins / fos_board_codec_pins), so a Sticky
      * or a PhotoPainter provisioned before the keys existed gets them with
@@ -441,6 +443,7 @@ esp_err_t fos_config_save(void)
     fos_config_format_mic_pins(&s_config.mic_pins, mic_pins, sizeof(mic_pins));
     FOS_NVS_SET(nvs_set_str(nvs, "mic_pins", mic_pins), "mic_pins");
     FOS_NVS_SET(nvs_set_u8(nvs, "voice", s_config.voice_chat ? 1 : 0), "voice");
+    FOS_NVS_SET(nvs_set_u8(nvs, "touch_beep", s_config.touch_beep ? 1 : 0), "touch_beep");
     char touch_pins[FOS_STR_LEN];
     fos_config_format_touch_pins(&s_config.touch_pins, touch_pins, sizeof(touch_pins));
     FOS_NVS_SET(nvs_set_str(nvs, "touch_pins", touch_pins), "touch_pins");

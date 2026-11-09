@@ -51,8 +51,19 @@
 #define LONG_HEAD_MS 8
 #define LONG_TAIL_MS 20
 
+/* A load being waited for: a chirp and a lower one close together, then a long
+ * rest. Below the press pitch, where a piezo is far quieter than at its
+ * resonance, and short. */
+#define LOADING_DELAY_US (1500 * 1000)
+#define LOADING_PERIOD_US (1300 * 1000)
+#define LOADING_ROUNDS 15 /* 20 seconds */
+#define LOADING_TAP_MS 8
+#define LOADING_GAP_MS 90
+
 static SemaphoreHandle_t s_lock = NULL;
 static esp_timer_handle_t s_stop_timer = NULL;
+static esp_timer_handle_t s_loading_timer = NULL;
+static volatile uint8_t s_loading_rounds = 0; /* left to play, 0: not loading */
 static bool s_timer_ready = false;
 static uint32_t s_freq_hz = 0;
 static int s_pin = -1;         /* the pin the channel drives, -1 = none */
@@ -194,6 +205,8 @@ static void stop_tone(void *arg)
     xSemaphoreGive(s_lock);
 }
 
+static void loading_tap(void *arg);
+
 void fos_buzzer_init(void)
 {
     if (s_lock) return;
@@ -206,7 +219,13 @@ void fos_buzzer_init(void)
         if (s_lock) vSemaphoreDelete(s_lock);
         s_lock = NULL;
         s_stop_timer = NULL;
+        return;
     }
+    const esp_timer_create_args_t loading_args = {
+        .callback = loading_tap,
+        .name = "fos_loading",
+    };
+    if (esp_timer_create(&loading_args, &s_loading_timer) != ESP_OK) s_loading_timer = NULL;
 }
 
 void fos_buzzer_play(const fos_buzzer_note_t *notes, size_t count)
@@ -282,6 +301,35 @@ void fos_buzzer_long_press(void)
     fos_buzzer_play(notes, sizeof(notes) / sizeof(notes[0]));
 }
 
+
+static void loading_tap(void *arg)
+{
+    (void)arg;
+    if (s_loading_rounds == 0) return;
+    if (--s_loading_rounds > 0) esp_timer_start_once(s_loading_timer, LOADING_PERIOD_US);
+    if (s_note_count != 0) return; /* a press's click goes first */
+    const fos_buzzer_note_t taps[] = {
+        {scaled_hz(3, 4), LOADING_TAP_MS},
+        {0, LOADING_GAP_MS},
+        {scaled_hz(1, 2), LOADING_TAP_MS},
+    };
+    fos_buzzer_play(taps, sizeof(taps) / sizeof(taps[0]));
+}
+
+void fos_buzzer_loading_begin(void)
+{
+    if (!s_loading_timer || s_loading_rounds != 0) return;
+    s_loading_rounds = LOADING_ROUNDS;
+    esp_timer_stop(s_loading_timer);
+    esp_timer_start_once(s_loading_timer, LOADING_DELAY_US);
+}
+
+void fos_buzzer_loading_end(void)
+{
+    if (!s_loading_timer) return;
+    s_loading_rounds = 0;
+    esp_timer_stop(s_loading_timer);
+}
 
 /* The voice chat's sounds (docs/voice-chat.md). Arpeggios, not chords: the
  * LEDC channel plays one pitch at a time, so "sparkle" is a quick run up

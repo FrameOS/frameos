@@ -12,21 +12,22 @@ proc initScene(id: string, config: FrameConfig): InterpretedFrameScene =
   InterpretedFrameScene(init(id.SceneId, config, logger, %*{}))
 
 suite "render scale":
-  test "automatic: the shorter edge over 600 px, rounded down to a quarter, at least 1":
-    check autoRenderScale(800, 480) == 1.0
-    check autoRenderScale(480, 800) == 1.0
-    check autoRenderScale(1200, 1600) == 2.0
-    check autoRenderScale(1600, 1200) == 2.0
-    check autoRenderScale(1872, 1404) == 2.25 # 1404 / 600 = 2.34
-    check autoRenderScale(1304, 984) == 1.5   # 984 / 600 = 1.64
-    check autoRenderScale(1920, 1080) == 1.75 # 1.8
-    check autoRenderScale(720, 720) == 1.0    # 1.2: a HyperPixel square keeps its pixels
-    check autoRenderScale(240, 240) == 1.0
-    check autoRenderScale(0, 0) == 1.0
+  test "automatic: 1, and 2 on a 4K or larger screen on HDMI":
+    check autoRenderScale(800, 480, "waveshare.EPD_3in97") == 1.0
+    check autoRenderScale(1200, 1600, "waveshare.EPD_13in3e") == 1.0
+    check autoRenderScale(1920, 1080, "framebuffer") == 1.0
+    check autoRenderScale(2560, 1440, "framebuffer") == 1.0
+    check autoRenderScale(3840, 2160, "framebuffer") == 2.0
+    check autoRenderScale(2160, 3840, "framebuffer") == 2.0 # hung in portrait
+    check autoRenderScale(7680, 4320, "framebuffer") == 2.0
+    check autoRenderScale(3840, 2160, "web_only") == 1.0
+    check autoRenderScale(0, 0, "framebuffer") == 1.0
 
   test "a frame's own scale, else the automatic one":
-    check frameRenderScale(FrameConfig(width: 1200, height: 1600)) == 2.0
-    check frameRenderScale(FrameConfig(width: 1200, height: 1600, renderScale: 1.0)) == 1.0
+    check frameRenderScale(FrameConfig(width: 1200, height: 1600)) == 1.0
+    check frameRenderScale(FrameConfig(width: 3840, height: 2160, device: "framebuffer")) == 2.0
+    check frameRenderScale(FrameConfig(width: 3840, height: 2160, device: "framebuffer", renderScale: 1.0)) == 1.0
+    check frameRenderScale(FrameConfig(width: 1200, height: 1600, renderScale: 2.0)) == 2.0
     check frameRenderScale(FrameConfig(width: 800, height: 480, renderScale: 1.5)) == 1.5
     check frameRenderScale(FrameConfig(width: 800, height: 480, renderScale: 9.0)) == 1.0 # out of range: automatic
     check frameRenderScale(nil) == 1.0
@@ -42,7 +43,7 @@ suite "render scale":
     check parseRenderScale(nil) == 0.0
 
   test "the scene's role field, else its setting, else the frame's":
-    let config = FrameConfig(width: 1200, height: 1600)
+    let config = FrameConfig(width: 3840, height: 2160, device: "framebuffer")
     let scene = FrameScene(frameConfig: config, state: %*{})
     check effectiveRenderScale(scene, config) == 2.0
     scene.renderScaleSetting = 1.0
@@ -83,7 +84,7 @@ suite "render scale":
     check exports["tests/scale-field".SceneId].renderScaleKey == "zoom"
     check exports["tests/scale-none".SceneId].renderScaleSetting == 9.0 # kept; ignored where read
     setUploadedInterpretedScenes(exports)
-    let config = FrameConfig(width: 1200, height: 1600)
+    let config = FrameConfig(width: 3840, height: 2160, device: "framebuffer")
     check effectiveRenderScale(initScene("tests/scale-setting", config), config) == 1.5
     check effectiveRenderScale(initScene("tests/scale-none", config), config) == 2.0
     let field = initScene("tests/scale-field", config)

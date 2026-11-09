@@ -25,6 +25,14 @@
  * ends the caller logs its summary and, if its last frame was quiet, makes
  * up the render announce and the backend push that frame skipped.
  *
+ * The input hold: on a panel that answers a tap at once, the render task
+ * must not be on the network or writing to flash while someone is tapping. It
+ * also drains the touch queue, so a tap made during either waits it out, and
+ * the ones behind it arrive in one go. The hold starts at the first touch or key and
+ * lasts until FOS_INPUT_HOLD_QUIET_US without one, FOS_INPUT_HOLD_MAX_US at
+ * the most (the log queue is bounded, and a plane should hear from its frame).
+ * The caller runs what it held back once, when it is released.
+ *
  * Pure: no IDF, no clock of its own (the caller passes esp_timer time), so
  * main/tests/test_fos_animation.c runs it on the host.
  */
@@ -108,6 +116,29 @@ bool fos_animation_burst_quiet(const fos_animation_t *a, int64_t now_us);
 /* Outside animation: a frame the scene asked for started at `start_us`,
  * ended at `end_us`, logged in full or quiet. */
 void fos_animation_burst_frame_done(fos_animation_t *a, int64_t start_us, int64_t end_us, bool quiet);
+
+#define FOS_INPUT_HOLD_QUIET_US (10 * 1000000LL)
+#define FOS_INPUT_HOLD_MAX_US (60 * 1000000LL)
+
+typedef struct {
+    int64_t since_us; /* 0: not holding */
+    int64_t last_input_us;
+} fos_input_hold_t;
+
+/* A touch or a key: starts the hold, or extends it. */
+void fos_input_hold_note(fos_input_hold_t *h, int64_t now_us);
+
+/* Whether the network is being held back right now. */
+static inline bool fos_input_hold_engaged(const fos_input_hold_t *h) { return h->since_us != 0; }
+
+/* True, once, when the hold is over: the caller owes what it held back. */
+bool fos_input_hold_release(fos_input_hold_t *h, int64_t now_us);
+
+/* Whether a load starting now gets the buzzer's quiet taps
+ * (fos_buzzer_loading_begin): e-paper has no loading mark to draw, and a
+ * frame must not tap at a room nobody is in, so only when someone at the frame
+ * touched it or pressed a key moments ago. `last_input_us` 0: nobody has. */
+bool fos_loading_taps_wanted(bool lcd, bool sounds_on, bool render_held, int64_t last_input_us, int64_t now_us);
 
 /* True once a burst is over (no frame for FOS_ANIMATION_BURST_US) that is
  * worth saying so: more than one frame, or a quiet last frame. `out` gets

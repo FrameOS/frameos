@@ -738,7 +738,15 @@ def test_embedded_hardware_preset_for_seeed_reterminal_sticky():
     # The AI/Power key and the two arrows; UP/DOWN held walk the scenes, AI
     # held talks (docs/voice-chat.md).
     assert embedded_gpio_buttons_for_frame(frame) == [(4, "AI"), (5, "UP"), (6, "DOWN")]
-    assert [rule["emit"] for rule in frame.event_map] == ["setCurrentScene", "setCurrentScene", "voiceChat"]
+    assert [rule["emit"] for rule in frame.event_map] == [
+        "setCurrentScene",
+        "setCurrentScene",
+        "voiceChat",
+        "forward",
+        "back",
+        "sceneSwitcher",
+        "sceneSettings",
+    ]
     assert frame.event_map[2]["match"] == {"label": "AI", "action": "longPress"}
     # The 4 kHz electromagnetic buzzer on GPIO48, at its own pitch.
     assert frame.device_config["buzzerPin"] == 48

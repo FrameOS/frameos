@@ -29,6 +29,7 @@ import frameos/planner
 import frameos/js_runtime/runtime as jsRuntime
 import frameos/js_runtime/app_runtime
 import frameos/utils/svg_frames
+from frameos/utils/image import pointerToScenePoint
 # The loading mark's C entry points (fos_nim_loading_mark_*_impl), drawn by
 # the RGB LCD's own task while a scene switch loads (lcd_st7701s_rgb.c).
 import frameos/loading_mark
@@ -1023,6 +1024,30 @@ proc renderCanvas*(): Image =
     of pfRgbx: "rgbx"
   log(&"canvas: {width}x{height} {described}")
   sceneCanvas
+
+proc panelHasPartialWaveform*(): bool {.importc: "fos_display_supports_partial", cdecl.}
+
+proc beginKeptCanvasFrame*(): bool =
+  ## A render on a panel with a partial waveform: the kept canvas holds the
+  ## last frame as an LCD's buffer does, so an SVG repaints only its damage
+  ## (utils/svg_frames.nim). What else writes into it says so through
+  ## rhythmForgetCanvases. A frame-wide color correction is applied to the
+  ## finished canvas, and pixels left in place would take it twice.
+  if panelHasPartialWaveform() and not frameColorSettings.global.hasAdjustments():
+    beginPanelFrame(renderCanvas().bufferPointer, 0)
+    result = true
+
+proc endKeptCanvasFrame*() =
+  endPanelFrame()
+
+proc pressTaken*(wireX, wireY: int): bool =
+  ## A position on the glass (0..PointerAxisMax) as the showing scene's pixel,
+  ## and whether something there takes a press.
+  if host.scene.isNil or frameConfig.isNil:
+    return false
+  let at = pointerToScenePoint(wireX, wireY, frameConfig.width, frameConfig.height, frameConfig.rotate,
+    frameConfig.flip)
+  pressTakenAt(host.scene, at.x, at.y)
 
 proc canvasGenerationForRhythm(canvas: Image): int64 {.nimcall, raises: [].} =
   ## What wrote into this kept canvas since it was drawn (scene_rhythm.nim): a

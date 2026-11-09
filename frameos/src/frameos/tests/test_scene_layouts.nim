@@ -486,6 +486,17 @@ suite "layouts":
     let after = pass(scene)
     check after.color(5, 35) == before.color(5, 35)
 
+  test "whether a press lands on something goes through the layout":
+    # An onClick hears no pointerDown, so the question is put to the last
+    # render: the touch beep sounds before anything is delivered.
+    let chrome = newScene("tests/inTaskbar")
+    discard pass(chrome)
+    check pressTakenAt(chrome, 5, 35)
+    let content = newScene("tests/counter")
+    discard pass(content)
+    check pressTakenAt(content, 5, 35)
+    check not pressTakenAt(content, 5, 5)
+
 suite "a canvas that stays":
   var generation = 0'i64
   setup:

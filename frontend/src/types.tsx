@@ -154,6 +154,7 @@ export interface FrameType {
      * (docs/voice-chat.md), and whether voice chat is on (2026.10.20+). */
     microphone?: boolean | null
     voiceChat?: boolean | null
+    touchBeep?: boolean | null
     /** ESP32 only: the status LED that follows the buzzer's notes (fos_led.c),
      * -1 = none, and how it is lit (2026.10.20+). */
     ledPin?: number | null
@@ -329,6 +330,8 @@ export interface FrameType {
     /** Voice chat: holding the voice key opens the microphone (docs/voice-chat.md). Default on. */
     voiceChat?: boolean
     voice_chat?: boolean
+    touchBeep?: boolean
+    touch_beep?: boolean
     /** What the voice chat may do (docs/voice-chat.md "What the voice chat may
      * do"): the backend's spelling of the three switches; plane-side, never
      * polled by the device. Unset = the default (settings and installed
@@ -421,6 +424,7 @@ export interface FrameType {
   buzzer_tone_hz?: number
   /** ESP32: voice chat, the microphone switch of the voice key's hold (docs/voice-chat.md). */
   voice_chat?: boolean
+  touch_beep?: boolean
   /** ESP32: the PDM microphone's clock, data and power GPIO; -1 = none. */
   mic_clk_pin?: number
   mic_data_pin?: number

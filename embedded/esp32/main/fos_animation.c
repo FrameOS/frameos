@@ -143,3 +143,27 @@ bool fos_animation_burst_end(fos_animation_t *a, int64_t now_us, fos_animation_s
     a->render_us_max = 0;
     return worth;
 }
+
+void fos_input_hold_note(fos_input_hold_t *h, int64_t now_us)
+{
+    if (h->since_us == 0) h->since_us = now_us;
+    h->last_input_us = now_us;
+}
+
+bool fos_input_hold_release(fos_input_hold_t *h, int64_t now_us)
+{
+    if (h->since_us == 0) return false;
+    if (now_us - h->last_input_us < FOS_INPUT_HOLD_QUIET_US &&
+        now_us - h->since_us < FOS_INPUT_HOLD_MAX_US) {
+        return false;
+    }
+    h->since_us = 0;
+    h->last_input_us = 0;
+    return true;
+}
+
+bool fos_loading_taps_wanted(bool lcd, bool sounds_on, bool render_held, int64_t last_input_us, int64_t now_us)
+{
+    if (lcd || !sounds_on || render_held || last_input_us == 0) return false;
+    return now_us - last_input_us < FOS_INPUT_HOLD_QUIET_US;
+}

@@ -45,6 +45,8 @@ import {
   esp32BuzzerCloudFrameSettingKeys,
   esp32MicrophoneCloudFrameSettingKeys,
   esp32LedCloudFrameSettingKeys,
+  esp32TouchBeepCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32TouchBeep,
   cloudFrameSupportsEsp32Led,
   esp32BuzzerCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Buzzer,
@@ -73,6 +75,8 @@ import {
   esp32VoiceChatFrameSettingKeys,
   esp32MicrophoneFrameSettingKeys,
   esp32LedFrameSettingKeys,
+  esp32TouchBeepFrameSettingKeys,
+  esp32TouchBeepFrameSettingsMinVersion,
   esp32VoiceChatFrameSettingsMinVersion,
   esp32ExtendedFrameSettingKeys,
   esp32ExtendedFrameSettingsMinVersion,
@@ -175,7 +179,8 @@ describe("cloud settings push", () => {
         !esp32BuzzerFrameSettingKeys.has(key) &&
         !esp32VoiceChatFrameSettingKeys.has(key) &&
         !esp32MicrophoneFrameSettingKeys.has(key) &&
-        !esp32LedFrameSettingKeys.has(key),
+        !esp32LedFrameSettingKeys.has(key) &&
+        !esp32TouchBeepFrameSettingKeys.has(key),
     );
     expect(new Set(esp32CloudFrameSettingKeys)).toEqual(new Set(ungated));
     expect(new Set(esp32ExtendedCloudFrameSettingKeys)).toEqual(esp32ExtendedFrameSettingKeys);
@@ -337,6 +342,13 @@ describe("cloud settings push", () => {
       mic_data_pin: 41,
       mic_pwr_pin: -1,
     });
+  });
+
+  it("gates the touch beep on its own floor", () => {
+    expect([...esp32TouchBeepFrameSettingKeys]).toEqual(["touch_beep"]);
+    expect(esp32TouchBeepCloudFrameSettingsMinVersion).toBe(esp32TouchBeepFrameSettingsMinVersion);
+    expect(cloudFrameSupportsEsp32TouchBeep("2026.11.5")).toBe(false);
+    expect(cloudFrameSupportsEsp32TouchBeep("2026.11.6")).toBe(true);
   });
 
   it("gates the ESP32 status LED on the voice chat floor, as its own list", () => {

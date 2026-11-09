@@ -336,7 +336,7 @@ startY, …}` (`edge` where it began, `direction` the way it went) and the
 frame's: the scene hears no `pointerDown`, `pointerMove`, `pointerUp` or
 gesture of that touch, so the slider it began on stays where it was, and
 the frame's event map can make it something of the frame's whatever the
-scene draws (the SenseCAP Indicator's and the reTerminal E1003's presets: in
+scene draws (the SenseCAP Indicator's, the reTerminal E1003's and the Sticky's presets: in
 from the left edge `back`, from the right `forward`, up from the bottom the
 scene switcher, down from the top the scene's settings). Lifted, held
 for a `longPress`, or moved along the edge instead, it is the scene's after
@@ -441,7 +441,8 @@ happens: a click on `down`, a lower one on every `up`, and a higher click
 for the second `down` of a `doublePress`. While a key is held a short falling pair sounds at every whole
 second, counting the hold out loud; the scene's `longPress` still comes once,
 with the `up`. A `press` adds no sound: its clicks were the down and the up
-(`embedded/esp32/README.md`, "Button beep").
+(`embedded/esp32/README.md`, "Button beep"). On e-paper a press on the glass
+that something takes clicks the same way, unless the frame's `touch_beep` is off.
 
 `atMs` is when the driver saw the edge, in milliseconds on the frame's
 monotonic clock (the one the dispatcher's tick reads: `CLOCK_MONOTONIC` on

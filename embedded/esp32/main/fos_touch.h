@@ -98,6 +98,17 @@ typedef struct {
  * and would fill the queue during a slow render. Pure. */
 int fos_touch_move_slot(const fos_touch_event_t *queue, size_t capacity, size_t head, size_t count, uint8_t id);
 
+/* What a finger on the glass sounds like: its down and its up click when
+ * something took the press, a different down for a finger added to one already
+ * there. `held` and `beeped` are finger masks kept between calls. */
+typedef enum {
+    FOS_TOUCH_BEEP_NONE,
+    FOS_TOUCH_BEEP_DOWN,
+    FOS_TOUCH_BEEP_SECOND_DOWN,
+    FOS_TOUCH_BEEP_UP,
+} fos_touch_beep_t;
+fos_touch_beep_t fos_touch_beep_step(uint8_t kind, uint8_t id, bool captured, uint8_t *held, uint8_t *beeped);
+
 #ifdef ESP_PLATFORM
 #include "esp_err.h"
 /* Once at boot, after fos_config_init and the display (the panel's size

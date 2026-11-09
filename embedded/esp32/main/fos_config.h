@@ -270,6 +270,9 @@ typedef struct {
                                     * talks to the AI chat (docs/voice-chat.md);
                                     * off keeps the microphone shut whatever
                                     * the map says. Default on. */
+    bool touch_beep;               /* e-paper: a click when something takes a
+                                    * press on the glass, and when it lifts.
+                                    * Default on. */
     size_t gpio_button_count;
     fos_gpio_button_t gpio_buttons[FOS_GPIO_BUTTONS_MAX];
     fos_pins_t pins;

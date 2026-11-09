@@ -512,6 +512,7 @@ static void add_hardware_json(cJSON *parent)
     cJSON_AddNumberToObject(hw, "micDataPin", config->mic_pins.data);
     cJSON_AddNumberToObject(hw, "micPwrPin", config->mic_pins.pwr);
     cJSON_AddBoolToObject(hw, "voiceChat", config->voice_chat);
+    cJSON_AddBoolToObject(hw, "touchBeep", config->touch_beep);
     /* The status LED the buzzer's notes light (fos_led.c; -1 = none) and how
      * it is lit, the preset's when no push set them. */
     cJSON_AddNumberToObject(hw, "ledPin", config->led_pin);
@@ -2598,6 +2599,10 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     }
     /* Voice chat (docs/voice-chat.md): whether the voice key's hold opens
      * the microphone. Live: the hold asks on every press. */
+    const cJSON *touch_beep = cJSON_GetObjectItem(settings, "touch_beep");
+    if (touch_beep != NULL) {
+        config->touch_beep = cJSON_IsTrue(touch_beep);
+    }
     const cJSON *voice_chat = cJSON_GetObjectItem(settings, "voice_chat");
     if (voice_chat != NULL) {
         config->voice_chat = cJSON_IsTrue(voice_chat);

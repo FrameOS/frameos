@@ -314,6 +314,12 @@
       "profiles": {"esp32": {"since": "2026.10.20"}},
       "parity": {"only": "esp32", "why": "The key hold, the PDM microphone and the relay live in the ESP32 firmware (fos_voice.c); no Pi frame has a microphone path."}
     },
+    "touch_beep": {
+      "$comment": "E-paper: a click when something on the screen takes a press (an onClick, a field, a scene's own listener) and when it lifts, a different one for a second finger (fos_touch.c, docs/events.md \"Input\"). Default on; an LCD answers on the glass and stays silent. Live, no reboot.",
+      "rule": {"type": "bool"},
+      "profiles": {"esp32": {"since": "2026.11.6"}},
+      "parity": {"only": "esp32", "why": "The touch panel's feedback lives in the ESP32 firmware's buzzer path (fos_touch.c, fos_buzzer.c); a Pi frame has no buzzer."}
+    },
     "mic_clk_pin": {
       "$comment": "The PDM microphone's clock GPIO (reTerminal E1001/E1002: 42; the E1004 has no microphone, and a PDM mic on its J2 header is the pins named here), with mic_data_pin and mic_pwr_pin; -1 = no microphone. The firmware opens the microphone at every voice session (docs/voice-chat.md, fos_mic.c), so the three apply live; no stored value leaves the board preset's own. Same reserved-pin refusal as battery_pin. Reported as hardware.micClkPin.",
       "rule": {"type": "int", "min": -1, "max": 48},

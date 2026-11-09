@@ -493,6 +493,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   colors: '2026.10.2',
   event_map: '2026.10.20',
   voice_chat: '2026.10.20',
+  touch_beep: '2026.11.6',
   render_scale: '2026.10.22',
   frame_settings_on_screen: '2026.11.5',
 }
@@ -595,6 +596,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   buzzer_pin: 'Button beep GPIO',
   buzzer_tone_hz: 'Button beep tone',
   voice_chat: 'Voice chat',
+  touch_beep: 'Touch beep',
   mic_clk_pin: 'Microphone clock GPIO',
   mic_data_pin: 'Microphone data GPIO',
   mic_pwr_pin: 'Microphone power GPIO',
