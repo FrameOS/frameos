@@ -648,7 +648,7 @@
     {
       "name": "sceneSettings",
       "class": "scene-command",
-      "description": "Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen. `page` opens it on `frame` (the frame's own page) or `safe` (that page with no layout around it, for as long as it stays open).",
+      "description": "Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen.",
       "listen": false,
       "dispatch": true,
       "payload": [
