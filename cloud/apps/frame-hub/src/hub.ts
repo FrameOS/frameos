@@ -98,6 +98,7 @@ import {
   getMaxConnections,
   isAllowedBrowserOrigin,
 } from "./env";
+import { raiseAlert } from "./alerts";
 import { errorField, logError, logInfo, logWarn } from "./log";
 import { createGuardedInterval } from "./periodic";
 import {
@@ -2426,10 +2427,7 @@ export async function startFrameHub(
       // that order too.
       session.handling = session.handling.then(() =>
         handleDeviceMessage(session, data).catch((error: unknown) => {
-          logError("device.message_failed", {
-            error: errorField(error),
-            frameId: frame.id,
-          });
+          reportDeviceMessageFailure(frame.id, error);
         }),
       );
     });
@@ -2471,6 +2469,18 @@ export async function startFrameHub(
   // reads `closed` after its queries), but a session it already made must be
   // in the shutdown's list.
   const virtualAttaches = new Set<Promise<void>>();
+
+  // Both kinds of device, socket and virtual. Most often an asset the hub
+  // could not cache, which leaves the frame's preview stale.
+  function reportDeviceMessageFailure(frameId: string, error: unknown) {
+    const reason = errorField(error);
+    logError("device.message_failed", { error: reason, frameId });
+    raiseAlert("hub_device_message_failed", "The frame hub could not handle a message from a frame.", {
+      frameId,
+      reason,
+    });
+  }
+
   function attachVirtualDevice(frameId: string, options?: { render?: boolean }) {
     const attach = attachVirtualDeviceNow(frameId, options).finally(() => {
       virtualAttaches.delete(attach);
@@ -2509,10 +2519,7 @@ export async function startFrameHub(
         deliver: (message) => {
           session.handling = session.handling.then(() =>
             dispatchDeviceMessage(session, message).catch((error: unknown) => {
-              logError("device.message_failed", {
-                error: errorField(error),
-                frameId,
-              });
+              reportDeviceMessageFailure(frameId, error);
             }),
           );
         },

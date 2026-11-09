@@ -80,6 +80,7 @@ state_file="/etc/frameos-cloud/active-port"
 # deploy that does not change the hub can leave it — and every connected
 # frame — alone. See restart_frame_hub.
 hub_state_file="/etc/frameos-cloud/frame-hub-bundle.sha256"
+hub_env_file="/etc/frameos-cloud/frame-hub.env"
 upstream_file="/etc/nginx/conf.d/frameos-cloud-upstream.conf"
 unit_prefix="frameos-cloud-auth-web@"
 unit_dir="/etc/systemd/system"
@@ -396,6 +397,48 @@ restart_frame_hub() {
   return 0
 }
 
+# Can the frame hub in this release store a picture? Asked of the bundle about
+# to ship, before migrations and before anything is flipped, under the hub's
+# own sandbox, with the R2 keys from its env file and nothing else (the
+# migrations' rule: the least the job needs). A hub went live on 2026-11-07
+# that could not upload a new picture, and nothing here noticed.
+check_hub_object_store() {
+  local staging="$1"
+  local bundle="$staging/cloud/apps/frame-hub/dist/index.cjs"
+  systemctl cat "$hub_unit" >/dev/null 2>&1 || return 0
+  # A bundle from before the check takes any argument for "start a hub".
+  if ! grep -q 'frame_hub.object_store_check' "$bundle" 2>/dev/null; then
+    log "this release's frame hub has no object store check; skipping it"
+    return 0
+  fi
+  [ -r "$hub_env_file" ] || {
+    log "cannot read $hub_env_file"
+    return 1
+  }
+  local keys status=0
+  keys="$(mktemp /run/frameos-cloud-hub-check.XXXXXX)"
+  chmod 600 "$keys"
+  grep -E '^R2_CLOUD_[A-Z_]+=' "$hub_env_file" >"$keys" || true
+  if [ ! -s "$keys" ]; then
+    log "no R2 keys in $hub_env_file; skipping the frame hub's object store check"
+    rm -f "$keys"
+    return 0
+  fi
+  log "checking that the new frame hub can store a picture"
+  systemd-run --quiet --wait --pipe --collect \
+    --uid="$service_user" \
+    --working-directory="$staging/cloud/apps/frame-hub" \
+    --property=EnvironmentFile="$keys" \
+    --property=NoNewPrivileges=true \
+    --property=ProtectSystem=strict \
+    --property=ProtectHome=true \
+    --property=PrivateTmp=true \
+    --property=RuntimeMaxSec=90 \
+    /usr/bin/node "$bundle" check-object-store </dev/null || status=$?
+  rm -f "$keys"
+  return "$status"
+}
+
 prune_releases() {
   local keep_paths=() release count=0 path
   for path in "$app_link" "$previous_link" "$instances_dir"/*; do
@@ -645,6 +688,8 @@ cmd_archive() {
   local release
   release="$releases_dir/${sha}-$(date -u +%Y%m%dT%H%M%SZ)"
   [ -e "$release" ] && rm -rf "$release"
+
+  check_hub_object_store "$staging" || die "the new frame hub cannot store pictures; production untouched"
 
   # Migrations run from the NEW release and before anything is flipped, so a
   # failing migration leaves the running app untouched — the staging

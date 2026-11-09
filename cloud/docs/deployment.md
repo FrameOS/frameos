@@ -271,6 +271,19 @@ the same `pnpm deploy:prod` a person runs — there is no second deploy path to
 keep in sync — so everything above still applies, including that a release
 which never answers `/healthz` is a failed deploy rather than an outage.
 
+Before migrations and before anything is switched, `frameos-cloud-update` asks
+the new frame hub bundle to write, read and delete a test object in R2
+(`dist/index.cjs check-object-store`), with the R2 keys from `frame-hub.env`
+and under the hub unit's sandbox. If that fails three times the deploy stops
+and production is untouched. `--rollback` skips it, because a rollback must
+work while R2 is down.
+
+A merge that `verify` refuses never reaches this job, so its own report cannot
+run; the separate `report-undeployed` job sends a `cloud ops alert` event to
+PostHog instead. The frame hub raises the same event when it cannot save a
+picture or handle a frame's message (at most once per kind per 15 minutes),
+and the PostHog workflow listening for it posts to Discord.
+
 Which merges count is the workflow's `paths:` filter, and it mirrors the
 input closure of `turbo run build --filter=@frameos-cloud/auth-web` — the
 shared `frontend/`, the frames SPA in `cloud-frontend/`, `repo/`, and
@@ -496,6 +509,8 @@ FRAME_HUB_PORT=3100
 Optional, all with working defaults:
 
 ```text
+NEXT_PUBLIC_POSTHOG_KEY=…    # auth-web's, and public. Without it the hub raises
+                             # no `cloud ops alert` events (src/alerts.ts).
 FRAMEOS_CLOUD_ENCRYPTION_KEY=…  # auth-web's. Only for virtual frames: the hub
                              # renders their scenes, and with the key it can
                              # hand them the service keys their owner granted
