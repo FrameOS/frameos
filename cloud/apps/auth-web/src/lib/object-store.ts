@@ -216,13 +216,16 @@ function createS3Store(config: {
     driver: "s3",
     async put(key, body, contentType) {
       // A file streams from disk: the signer sends S3 an unsigned payload
-      // (its default for a body it cannot hash) and a half-duplex request.
+      // (its default for a body it cannot hash) and a half-duplex request,
+      // and fetch cannot know the length, so it is stated. A buffer's length
+      // is fetch's own to set: npm undici behind the global fetch (see
+      // object-store.test.ts) refuses a second one before a byte leaves.
       const response = await client.fetch(urlFor(key), {
         body: Buffer.isBuffer(body)
           ? new Uint8Array(body)
           : (Readable.toWeb(createReadStream(body.path)) as unknown as ReadableStream),
         headers: {
-          "content-length": String(Buffer.isBuffer(body) ? body.length : body.size),
+          ...(Buffer.isBuffer(body) ? {} : { "content-length": String(body.size) }),
           "content-type": contentType || "application/octet-stream",
         },
         method: "PUT",
