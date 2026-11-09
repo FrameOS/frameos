@@ -19,6 +19,7 @@ noticing. `docs/retired-apps.json` lists them:
 | `render/chart` | `repo/apps/image/chart` | 2026.10.13 | nothing new: an older frame keeps the built-in chart it has |
 | `data/eventsToAgenda` | `repo/apps/text/eventsToAgenda` | 2026.10.22 | nothing new: an older frame keeps the built-in agenda it has |
 | `render/calendar` | `repo/apps/image/calendar` | 2026.11.5 | nothing new: an older frame keeps the built-in calendar it has |
+| `data/icalJson` | `repo/apps/json/icalJson` | 2026.11.6 | `frameos.openLines` and a spooled field reaching a JS app (`byteIter`) |
 
 The replacement runs only on a runtime that has what it `needs`. Firmware
 older than `runtime` still has the Nim app, so it is sent the Nim keyword.

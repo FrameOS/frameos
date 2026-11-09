@@ -73,13 +73,20 @@ proc serverLoop() {.thread.} =
   server.close()
 
 const CalendarAppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "apps" / "image" / "calendar"
+const IcalAppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "apps" / "json" / "icalJson"
 
 proc calendarApps(): JsonNode =
-  ## The scene carries the calendar JS app the way a converted scene does.
-  %*{"calendar": {"sources": {
-    "app.ts": readFile(CalendarAppDir / "app.ts"),
-    "config.json": readFile(CalendarAppDir / "config.json")
-  }}}
+  ## The scene carries the JS apps the way a converted scene does.
+  %*{
+    "calendar": {"sources": {
+      "app.ts": readFile(CalendarAppDir / "app.ts"),
+      "config.json": readFile(CalendarAppDir / "config.json")
+    }},
+    "icalJson": {"sources": {
+      "app.ts": readFile(IcalAppDir / "app.ts"),
+      "config.json": readFile(IcalAppDir / "config.json")
+    }}
+  }
 
 proc node(id: int, nodeType: string, data: JsonNode): DiagramNode =
   DiagramNode(id: id.NodeId, nodeType: nodeType, data: data)
@@ -99,7 +106,7 @@ proc buildScene(url: string): ExportedInterpretedScene =
       node(1, "event", %*{"keyword": "render"}),
       node(2, "app", %*{"keyword": "render/image", "config": {}}),
       node(3, "app", %*{"keyword": "calendar", "config": {}}),
-      node(4, "app", %*{"keyword": "data/icalJson", "config": {
+      node(4, "app", %*{"keyword": "icalJson", "config": {
         "exportFrom": "last month", "exportUntil": "next month",
         "exportCount": "500"}}),
       node(5, "app", %*{"keyword": "data/downloadUrl", "config": {"url": url}})

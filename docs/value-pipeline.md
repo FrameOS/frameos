@@ -69,7 +69,7 @@ schema; `frameos/app_capabilities.nim` holds the types.
 | `intoTarget(fit)` | output port | producer writes into a caller-supplied `Image` with the requested fit | the 8 former whitelist producers, `render/gradient`, `render/color`; a JS app's `frameos.svg()` renders into an offered target too (the chart, the calendar) |
 | `providesTarget` | input port | consumer offers a target to whatever feeds this input | `render/image` |
 | `forwardsTarget` | output port | transformer passes the target request upstream and mutates in place | `render/opacity`, `data/rotateImage` at 180° |
-| `byteIter` | input port | consumes a string as a bounded-window `Spool` | `icalJson` |
+| `byteIter` | input port | consumes a string as a bounded-window `Spool`; a JS app's field gets it as a stream to read with `frameos.openLines` | the `icalJson` JS app |
 | `forwardsBounds` | output port | passes the consumer's useful-resolution bounds upstream, transformed (swap for 90/270 rotations, replace for resizes) | `data/rotateImage`, `data/resizeImage` |
 | `rowStream` | — | reserved for phase 3 (gated; see "What remains") | — |
 
@@ -241,14 +241,15 @@ plan is not the claim; now one log field says which you have.
   PSRAM-chunked bodies past the threshold. Redirect hops and error bodies
   still materialize — they are about to become a Location read or an error
   message.
-- **The fold honours the asymmetry twice.** `icalJson` folds the spool a line
-  at a time (CRLF, LF and bare CR alike), and applies its export window
-  *during* the fold: one-off events outside it are dropped as they are
-  parsed, while recurring masters and RECURRENCE-ID overrides are kept
-  regardless of their own dates. A multi-year subscribed feed keeps the
-  window's events resident, not its history — the first hardware run proved
-  the raw bytes could cross the edge for 8KB while ~3.5MB of parsed VEvents
-  OOM-aborted the render anyway.
+- **The fold honours the asymmetry twice.** The `icalJson` JS app folds the
+  spool through `frameos.openLines` (CRLF, LF and bare CR alike; a line nobody
+  asked for never becomes a JS string, `utils/line_reader.nim`), and drops an
+  event outside its export window as soon as the event ends, its dates read
+  as text: one-off events, overrides of instances outside the window and
+  series that ended before it. A multi-year subscribed feed keeps the window's
+  events resident, not its history — the first hardware run proved the raw
+  bytes could cross the edge for 8KB while ~3.5MB of parsed VEvents OOM-aborted
+  the render anyway.
 - Deliberately **not** built, with the reasoning recorded: folding the ICS as
   the socket delivers it, with no spool file. The parse never needs the file,
   but the file is not there for the parse — it makes the edge a re-readable
@@ -650,8 +651,9 @@ down.
 
 ## Non-goals
 
-- Streaming through JS/QuickJS code nodes. Opaque forever until proven
-  necessary.
+- Streaming through JS/QuickJS code nodes. A JS *app* that declares `byteIter`
+  reads a spool a line at a time (`frameos.openLines`); a code node's value
+  stays a whole string.
 - Editor-visible pipeline configuration of any kind.
 - Host-side streaming decode. (Its old precondition — a quality-preserving
   scaler — exists; what gates it now is a shipped scene that needs it.)

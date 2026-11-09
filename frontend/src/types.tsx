@@ -995,6 +995,8 @@ export interface ForwardsTargetCapability {
 }
 
 export interface InputPortCapabilities {
+  /** Consumes the string a window at a time: the value can be bigger than memory. A JS app reads it with frameos.openLines. */
+  byteIter?: Record<string, never>
   /** This input can hand its producer an image to write into */
   providesTarget?: ProvidesTargetCapability
 }

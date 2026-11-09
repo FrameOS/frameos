@@ -9,6 +9,10 @@ import frameos/js_runtime/run_budget
 import frameos/types
 import frameos/values
 import frameos/utils/http_client
+import frameos/utils/line_reader
+import frameos/spool
+import lib/tz
+from chrono import findTimeZone, findDstChanges, valid
 import frameos/utils/app_images
 import frameos/utils/asset_colors
 import frameos/utils/dither
@@ -89,6 +93,11 @@ type
     ## A script evaluated after the prelude and before the main module: the
     ## test harness (app_tests.nim). Empty for an app on a frame.
     extraPrelude*: string
+    ## A field that declares `byteIter` and got a spooled value: the bytes
+    ## stay here and the app gets a reference to open (frameos.openLines).
+    spoolFields: Table[string, Spool]
+    ## The line readers of the call in progress, closed when it returns.
+    lineStreamIds: seq[int]
 
   JsAppEvalEnv = ref object
     runtime: JsAppRuntime
@@ -1006,27 +1015,145 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
 const MaxOpenJsStreams = 64
 const DefaultJsStreamChunkBytes = 65536
 
-var jsStreamsGlobal = initOrderedTable[int, Stream]()
+type JsStream = object
+  stream: Stream
+  lines: LineReader ## set by openLines: what nextLine reads
+  spool: Spool ## the bytes a line reader reads, kept as long as it is open
+
+var jsStreamsGlobal = initOrderedTable[int, JsStream]()
 var jsNextStreamId = 0
 
-proc registerJsStream(stream: Stream): JsonNode =
+proc registerJsStream(stream: Stream, lines: LineReader = nil, spool: Spool = nil): JsonNode =
   while jsStreamsGlobal.len >= MaxOpenJsStreams:
     for id in jsStreamsGlobal.keys:
       try:
-        jsStreamsGlobal[id].close()
+        jsStreamsGlobal[id].stream.close()
       except CatchableError:
         discard
       jsStreamsGlobal.del(id)
       break
   inc jsNextStreamId
-  jsStreamsGlobal[jsNextStreamId] = stream
+  jsStreamsGlobal[jsNextStreamId] = JsStream(stream: stream, lines: lines, spool: spool)
   return %*{"__frameosType": "streamRef", "id": jsNextStreamId}
 
 proc jsStreamById(options: JsonNode): Stream =
   let id = options{"id"}.getInt(0)
   if id != 0 and jsStreamsGlobal.hasKey(id):
-    return jsStreamsGlobal[id]
+    return jsStreamsGlobal[id].stream
   return nil
+
+proc closeJsStream(id: int): bool =
+  if id == 0 or not jsStreamsGlobal.hasKey(id):
+    return false
+  try:
+    jsStreamsGlobal[id].stream.close()
+  finally:
+    jsStreamsGlobal.del(id)
+  true
+
+proc closeLineStreams(runtime: JsAppRuntime) =
+  ## What a call left open goes when it returns: a spool's file stays on the
+  ## card for as long as a reader holds it.
+  for id in runtime.lineStreamIds:
+    try:
+      discard closeJsStream(id)
+    except CatchableError:
+      discard
+  runtime.lineStreamIds.setLen(0)
+
+proc lineOptions(options: JsonNode): LineOptions =
+  result.unfold = options{"unfold"}.getBool(false)
+  result.trim = options{"trim"}.getBool(false)
+  result.maxLength = max(0, options{"maxLength"}.getInt(0))
+  let only = options{"only"}
+  if not only.isNil and only.kind == JArray:
+    for item in only.elems:
+      if item.kind == JString and item.getStr().len > 0:
+        result.only.add(item.getStr())
+
+proc jsOpenLines(ctx: ptr JSContext, text: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
+  ## A line reader over a string or a stream (docs/js-apps-and-code-nodes.md).
+  ## Options JSON: {source, unfold, trim, only, maxLength}, where `source`
+  ## (null for the string) is a streamRef, a byteIter field's among them.
+  let e = env(ctx)
+  if e == nil:
+    return jsUndefSentinel(ctx)
+  var options = %*{}
+  try:
+    options = parseJson(toNimString(ctx, optionsJson))
+  except CatchableError:
+    discard
+  if options.isNil or options.kind != JObject:
+    options = %*{}
+  try:
+    let source = options{"source"}
+    var reference: JsonNode = nil
+    if source.isNil or source.kind == JNull:
+      reference = registerJsStream(newStringStream(toNimString(ctx, text)))
+    elif source{"spool"}.getStr("").len > 0:
+      let field = source{"spool"}.getStr()
+      if not e.runtime.spoolFields.hasKey(field):
+        return jsNull(ctx)
+      let spool = e.runtime.spoolFields[field]
+      reference = registerJsStream(newStream(spool), spool = spool)
+    else:
+      let id = source{"id"}.getInt(0)
+      if not jsStreamsGlobal.hasKey(id):
+        return jsNull(ctx)
+      reference = %*{"__frameosType": "streamRef", "id": id}
+    let id = reference{"id"}.getInt()
+    jsStreamsGlobal[id].lines = newLineReader(jsStreamsGlobal[id].stream, lineOptions(options))
+    e.runtime.lineStreamIds.add(id)
+    return jsonToJS(ctx, reference)
+  except CatchableError as err:
+    frameos_apps.logError(e.owner, "JS app openLines failed: " & err.msg)
+    return jsNull(ctx)
+
+proc jsNextLine(ctx: ptr JSContext, id: JSValue): JSValue {.nimcall.} =
+  ## The next line, or null at the end. Called once per line of a feed.
+  let streamId = toNimFloat(ctx, id).int
+  if not jsStreamsGlobal.hasKey(streamId) or jsStreamsGlobal[streamId].lines.isNil:
+    return jsNull(ctx)
+  var line = ""
+  try:
+    if jsStreamsGlobal[streamId].lines.nextLine(line):
+      return nimStringToJS(ctx, line)
+  except CatchableError as err:
+    let e = env(ctx)
+    if e != nil:
+      frameos_apps.logError(e.owner, "JS app nextLine failed: " & err.msg)
+  return jsNull(ctx)
+
+proc jsNextBlock(ctx: ptr JSContext, id: JSValue, stop: JSValue): JSValue {.nimcall.} =
+  ## The lines up to the next one starting with `stop`, or null at the end.
+  let streamId = toNimFloat(ctx, id).int
+  if not jsStreamsGlobal.hasKey(streamId) or jsStreamsGlobal[streamId].lines.isNil:
+    return jsNull(ctx)
+  var text = ""
+  try:
+    if jsStreamsGlobal[streamId].lines.nextBlock(toNimString(ctx, stop), text):
+      return nimStringToJS(ctx, text)
+  except CatchableError as err:
+    let e = env(ctx)
+    if e != nil:
+      frameos_apps.logError(e.owner, "JS app nextBlock failed: " & err.msg)
+  return jsNull(ctx)
+
+proc jsTimeZoneInfo(ctx: ptr JSContext, name: JSValue): JSValue {.nimcall.} =
+  ## {name, changes: [start, offset, ...]}: the zone's canonical name and its
+  ## UTC offsets as chrono holds them, for an app working in wall-clock time
+  ## of zones other than the frame's. Empty on a frame without that zone's
+  ## data, which is UTC, as it is for the Nim side.
+  let canonical = canonicalTimeZone(toNimString(ctx, name))
+  var changes = newJArray()
+  if canonical.len > 0:
+    initTimeZone()
+    let zone = findTimeZone(canonical)
+    if zone.valid:
+      for change in findDstChanges(zone):
+        changes.add(%change.start.float)
+        changes.add(%change.offset.int)
+  return jsonToJS(ctx, %*{"name": canonical, "changes": changes})
 
 proc jsStreams(ctx: ptr JSContext, op: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## Ops: openAsset {path, mode: r|w|a} -> streamRef, create {base64} -> streamRef,
@@ -1097,20 +1224,16 @@ proc jsStreams(ctx: ptr JSContext, op: JSValue, optionsJson: JSValue): JSValue {
         return nimBoolToJS(ctx, true)
       return nimBoolToJS(ctx, stream.atEnd())
     of "rewind":
-      let stream = jsStreamById(options)
-      if stream.isNil:
+      let id = options{"id"}.getInt(0)
+      if not jsStreamsGlobal.hasKey(id):
         return nimBoolToJS(ctx, false)
-      stream.setPosition(0)
+      if jsStreamsGlobal[id].lines.isNil:
+        jsStreamsGlobal[id].stream.setPosition(0)
+      else:
+        jsStreamsGlobal[id].lines.rewind()
       return nimBoolToJS(ctx, true)
     of "close":
-      let id = options{"id"}.getInt(0)
-      if id == 0 or not jsStreamsGlobal.hasKey(id):
-        return nimBoolToJS(ctx, false)
-      try:
-        jsStreamsGlobal[id].close()
-      finally:
-        jsStreamsGlobal.del(id)
-      return nimBoolToJS(ctx, true)
+      return nimBoolToJS(ctx, closeJsStream(options{"id"}.getInt(0)))
     else:
       frameos_apps.logError(e.owner, "JS app streams: unknown operation: " & opStr)
       return jsUndefSentinel(ctx)
@@ -1396,6 +1519,7 @@ type
     configJson*: JsonNode
     runtime*: JsAppRuntime
     events*: JsonNode ## config.json `events`: what its onEvent hears ("*": all of it)
+    byteIterFields: seq[string] ## config.json fields with the `byteIter` capability
 
 proc appFile(runtime: JsAppRuntime, name: string): string =
   ## Contents of one of the app's files, "" when absent.
@@ -1887,6 +2011,13 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
   let runtime = newJsAppRuntime(category, outputType, source, settingsKeys,
                                 jsAppSourceNameFromSources(sources), sources,
                                 assetGrantFromConfig(config))
+  var byteIterFields: seq[string] = @[]
+  let fields = config{"fields"}
+  if not fields.isNil and fields.kind == JArray:
+    for field in fields.elems:
+      let capabilities = if field.kind == JObject: field{"capabilities"} else: nil
+      if not capabilities.isNil and capabilities.kind == JObject and capabilities.hasKey("byteIter"):
+        byteIterFields.add(field{"name"}.getStr(""))
   return DynamicJsApp(
     nodeId: node.id,
     nodeName: node.data{"name"}.getStr(keyword),
@@ -1895,7 +2026,8 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
     frameConfig: scene.frameConfig,
     configJson: runtimeConfigFromNode(config, node.data{"config"}),
     runtime: runtime,
-    events: config{"events"}
+    events: config{"events"},
+    byteIterFields: byteIterFields
   )
 
 proc isDynamicJsApp*(app: AppRoot): bool =
@@ -1932,7 +2064,16 @@ proc setDynamicJsAppField*(app: AppRoot, field: string, value: Value) =
   let dynamicApp = DynamicJsApp(app)
   if dynamicApp.configJson.isNil or dynamicApp.configJson.kind != JObject:
     dynamicApp.configJson = %*{}
-  let nextValue = dynamicApp.runtime.jsAppValueToJson(value)
+  var nextValue: JsonNode
+  if value.kind == fkSpool and field in dynamicApp.byteIterFields:
+    # Declared `byteIter`: the bytes stay out of the interpreter. A plain
+    # string on the same edge still arrives as a string, which openLines reads
+    # the same way.
+    dynamicApp.runtime.spoolFields[field] = value.sp
+    nextValue = %*{"__frameosType": "streamRef", "spool": field}
+  else:
+    dynamicApp.runtime.spoolFields.del(field)
+    nextValue = dynamicApp.runtime.jsAppValueToJson(value)
   if dynamicApp.configJson.hasKey(field):
     dynamicApp.runtime.releaseReplacedImageRef(dynamicApp.configJson[field], nextValue)
   dynamicApp.configJson[field] = nextValue
@@ -2006,6 +2147,13 @@ const appJsPrelude* = compactJs("""
     streamAtEnd: (ref) => __frameosStream("atEnd", { id: __frameosStreamId(ref) }) === true,
     streamRewind: (ref) => __frameosStream("rewind", { id: __frameosStreamId(ref) }) === true,
     streamClose: (ref) => __frameosStream("close", { id: __frameosStreamId(ref) }) === true,
+    openLines: (source, options) => __frameosUnwrap(jsOpenLines(
+      typeof source === "string" ? source : "",
+      JSON.stringify({ ...options, source: typeof source === "string" ? null : source })
+    )) ?? null,
+    nextLine: (ref) => jsNextLine(__frameosStreamId(ref)),
+    nextBlock: (ref, stop) => jsNextBlock(__frameosStreamId(ref), String(stop || "")),
+    timeZone: (name) => __frameosUnwrap(jsTimeZoneInfo(String(name || ""))),
     getSetting: (...path) => __frameosUnwrap(jsGetSetting(
       JSON.stringify(path.flat().map((p) => String(p)))
     )),
@@ -2138,6 +2286,10 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsCanvasClear", jsCanvasClear)
   runtime.js.registerFunction("jsAssets", jsAssets)
   runtime.js.registerFunction("jsStreams", jsStreams)
+  runtime.js.registerFunction("jsOpenLines", jsOpenLines)
+  runtime.js.registerFunction("jsNextLine", jsNextLine)
+  runtime.js.registerFunction("jsNextBlock", jsNextBlock)
+  runtime.js.registerFunction("jsTimeZoneInfo", jsTimeZoneInfo)
   runtime.js.registerFunction("jsGetSetting", jsGetSetting)
   runtime.js.registerFunction("jsGetAppMeta", jsGetAppMeta)
   runtime.js.registerFunction("jsGetAppConfig", jsGetAppConfig)
@@ -2831,6 +2983,7 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
     finally:
       if jsAppEnvByCtx.hasKey(ctx):
         jsAppEnvByCtx.del(ctx)
+      runtime.closeLineStreams()
       when defined(memProbe): memProbe("    js invoke " & fnName & " AFTER")
 
   if JS_IsException(result) != 0:

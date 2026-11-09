@@ -600,20 +600,39 @@ def test_nim_string_literal_escapes_every_way_out_of_the_literal():
     assert nim_comment("a\0b\r\nc") == "ab  c"
 
 
-def test_static_byte_iter_config_value_is_wrapped_in_a_spool():
-    # data/icalJson declares `ical` as a byteIter port, so the compiled
-    # AppConfig field is a Spool; a document pasted into the editor has to
-    # be wrapped or the generated scene does not compile (the e2e
-    # dataIcalAgenda fixture is exactly that).
+def test_static_byte_iter_config_value_is_wrapped_in_a_spool(tmp_path, monkeypatch):
+    # A built-in app field declaring `byteIter` is a Spool in the compiled
+    # AppConfig; a document pasted into the editor has to be wrapped or the
+    # generated scene does not compile.
+    import json
+
+    from app.codegen import scene_nim
+
+    app_dir = tmp_path / "data" / "spoolField"
+    app_dir.mkdir(parents=True)
+    (app_dir / "app.nim").write_text("")
+    (app_dir / "config.json").write_text(json.dumps({
+        "name": "Spool field",
+        "category": "data",
+        "fields": [
+            {"name": "body", "type": "string", "capabilities": {"byteIter": {}}},
+            {"name": "other", "type": "string", "value": ""},
+        ],
+        "output": [{"name": "result", "type": "json"}],
+    }))
+    real_path = scene_nim.get_local_app_path
+    real_apps = scene_nim.get_local_frame_apps
+    monkeypatch.setattr(scene_nim, "get_local_app_path", lambda name: str(app_dir) if name == "data/spoolField" else real_path(name))
+    monkeypatch.setattr(scene_nim, "get_local_frame_apps", lambda: [*real_apps(), "data/spoolField"])
     scene = {
         "id": "scene",
         "name": "Scene",
         "nodes": [
             {"id": "event", "type": "event", "data": {"keyword": "render"}, "position": {"x": 0, "y": 0}},
             {
-                "id": "ical",
+                "id": "body",
                 "type": "app",
-                "data": {"keyword": "data/icalJson", "config": {"ical": "BEGIN:VCALENDAR\nEND:VCALENDAR\n"}},
+                "data": {"keyword": "data/spoolField", "config": {"body": "BEGIN:VCALENDAR\nEND:VCALENDAR\n"}},
                 "position": {"x": 1, "y": 1},
             },
             {"id": "text", "type": "app", "data": {"keyword": "render/text", "config": {}}, "position": {"x": 2, "y": 2}},
@@ -626,9 +645,9 @@ def test_static_byte_iter_config_value_is_wrapped_in_a_spool():
     }
     frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
     source = write_scene_nim(frame, scene)
-    assert 'ical: newMemorySpool("BEGIN:VCALENDAR\\nEND:VCALENDAR\\n")' in source
+    assert 'body: newMemorySpool("BEGIN:VCALENDAR\\nEND:VCALENDAR\\n")' in source
     # Plain string ports stay plain.
-    assert 'exportFrom: "",' in source
+    assert 'other: "",' in source
 
 
 def test_static_json_config_value_is_parsed_not_quoted():

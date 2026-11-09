@@ -100,7 +100,8 @@ namespaces the app's `config.json` declares under `settings`),
 calls `listAssets`, `assetExists`, `assetSize`, `readAsset`, `writeAsset`,
 `appendAsset`, `deleteAsset`, `loadAssetImage`, and the stream calls
 `openAssetStream`, `createStream`, `streamRead`, `streamWrite`,
-`streamAtEnd`, `streamRewind`, `streamClose` (base64 in and out). Asset
+`streamAtEnd`, `streamRewind`, `streamClose` (base64 in and out; see "Big
+text" below for text a line at a time). Asset
 paths are relative to the frame's assets folder; nothing outside it
 resolves, and a symlink inside it is not a way out. What the app may do
 there is its `config.json` `"permissions"` list: `"assets"` to read,
@@ -358,6 +359,32 @@ prev/next chain draws nothing and logs nothing. The pattern that works is a
 node. For anything the app draws itself, that image is JSX from an `app.tsx`:
 an `<svg>` or a UI (`docs/jsx-ui.md`), never SVG markup built as a string for
 `frameos.svg(...)` (see [SVG that the frame can draw](#svg-that-the-frame-can-draw)).
+
+
+### Big text
+
+A field with `"capabilities": { "byteIter": {} }` in `config.json` gets a
+downloaded body as a stream however large it is (a plain string stays a
+string). Read either with `frameos.openLines(source, options)`:
+
+```ts
+const lines = frameos.openLines(app.config.feed, { unfold: true, trim: true, only: ['BEGIN:VEVENT', 'SUMMARY'] })
+let line
+while ((line = frameos.nextLine(lines)) !== null) {
+  if (line.startsWith('BEGIN:VEVENT')) {
+    const record = frameos.nextBlock(lines, 'END:VEVENT') // the record's kept lines, joined with newlines
+  }
+}
+```
+
+The file stays on disk and only one 8 KB window plus the line in hand is ever
+held. Everything happens before JavaScript sees it: `only` keeps lines by
+prefix and reads past the rest (folded continuations included), `unfold` joins
+continuation lines, `maxLength` cuts one (64 KB by default) on a character.
+`nextBlock` reads a whole record up to a line starting with its argument, which
+`only` must keep. A reader lives for the call that opened it, and closes with
+`frameos.streamClose`. Keep what you take: in a long feed, decide from the fewest lines you
+can, and do not hold what is outside what you will return (`repo/apps/json/icalJson`).
 
 ## The refresh interval is a state field
 
