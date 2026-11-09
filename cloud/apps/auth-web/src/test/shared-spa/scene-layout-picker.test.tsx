@@ -45,6 +45,15 @@ const frame = {
 };
 
 beforeEach(() => {
+  // headlessui's Dialog measures itself; jsdom has no ResizeObserver.
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   testWindow.FRAMEOS_EMBEDDED_NO_BACKEND = true;
   apiFetchMock.mockReset();
   apiFetchMock.mockImplementation(async (input) =>
@@ -125,6 +134,31 @@ describe("the Layouts section of a frame's settings", () => {
 
     fireEvent.change(all, { target: { value: "bar" } });
     expect(sceneNamed(logic, "clock")?.layout).toEqual({ sceneId: "bar" });
+    expect(sceneNamed(logic, "bar")).not.toHaveProperty("layout");
+  });
+
+  it("has the layout's settings beside its select, for one scene or for all of them", async () => {
+    const logic = await mountedWithThree();
+    logic.actions.setFrameFormValues({
+      scenes: logic.values.frameForm.scenes?.map((scene: { id: string; layout?: unknown }) =>
+        scene.id === "bar" ? scene : { ...scene, layout: { sceneId: "bar", state: { height: 60 } } }
+      ),
+    } as never);
+    render(<FrameLayoutsFields frameId={frameId} />);
+
+    fireEvent.click(screen.getByLabelText("Layout settings for Photos"));
+    const one = sceneLayoutLogic({ frameId, sceneId: "photos" });
+    one.actions.setStateValue({ name: "height" } as never, 40);
+    one.actions.saveLayoutSettings();
+    expect(sceneNamed(logic, "photos")?.layout).toEqual({ sceneId: "bar", state: { height: 40 } });
+    expect(sceneNamed(logic, "clock")?.layout).toEqual({ sceneId: "bar", state: { height: 60 } });
+
+    fireEvent.click(screen.getByLabelText("Layout settings for all scenes"));
+    const every = sceneLayoutLogic({ frameId, sceneId: "clock" });
+    every.actions.setStateValue({ name: "height" } as never, 80);
+    every.actions.saveLayoutSettings();
+    expect(sceneNamed(logic, "photos")?.layout).toEqual({ sceneId: "bar", state: { height: 80 } });
+    expect(sceneNamed(logic, "clock")?.layout).toEqual({ sceneId: "bar", state: { height: 80 } });
     expect(sceneNamed(logic, "bar")).not.toHaveProperty("layout");
   });
 

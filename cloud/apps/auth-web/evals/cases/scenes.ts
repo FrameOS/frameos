@@ -11,6 +11,42 @@ const portrait = { height: 800, width: 480 };
 const big = { height: 1200, width: 1600 };
 
 export const cases: EvalCase[] = [
+  // --------------------------------------------------------------- layouts
+  {
+    checks: [
+      { type: "delivered", tool: "build_scene" },
+      { type: "lint_clean" },
+      { type: "render_ok" },
+      { type: "json_matches", pattern: "\"isLayout\":\\s*true" },
+      { type: "json_matches", pattern: "<yield" },
+      { type: "json_matches", pattern: "wifiRssi" },
+      { type: "json_matches", pattern: "batteryPercent" },
+      { type: "judge", min: 3 },
+    ],
+    id: "create-layout-status-bar",
+    judgeRubric:
+      "A layout on its own: a slim status bar with the time. A preview has no Wi-Fi or battery to report, so it is right that they are missing here. The rest of the panel is empty on purpose, that is where the wrapped scene goes; do not mark it down for either.",
+    prompt:
+      "Make me a layout: a slim status bar along the top of every scene, with the time on the left and the Wi-Fi signal and the battery on the right.",
+    tags: ["create", "layout"],
+  },
+  {
+    checks: [
+      { type: "delivered", tool: "build_scene" },
+      { type: "lint_clean" },
+      { type: "render_ok" },
+      { type: "json_matches", pattern: "\"isLayout\":\\s*true" },
+      { type: "json_matches", pattern: "sceneSwitcher" },
+      { type: "json_matches", pattern: "sceneName" },
+      { type: "judge", min: 3 },
+    ],
+    id: "create-layout-taskbar",
+    judgeRubric:
+      "A retro taskbar along the bottom with a Start button, the current scene's name and a clock. The rest of the panel is empty on purpose, that is where the wrapped scene goes; do not mark it down for that.",
+    prompt:
+      "I want an old-school computer taskbar around all my scenes: a Start button that opens the list of scenes, the name of the scene showing, and a clock in the corner.",
+    tags: ["create", "layout"],
+  },
   // ---------------------------------------------------------------- create
   {
     checks: [

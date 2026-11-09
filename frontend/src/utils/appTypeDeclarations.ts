@@ -212,6 +212,9 @@ interface FrameOSApp {
     /** The name of the scene showing. A layout's app gets the name of the scene it wraps (FrameOS 2026.11.5+;
      * undefined before). */
     sceneName?: string;
+    /** True in a layout's app while it wraps a built-in scene (the scene list, the settings). Returning a bare <yield />
+     * then gives that scene the whole panel (FrameOS 2026.11.5+; undefined before). */
+    systemScene?: boolean;
     /** The battery's charge from 0 to 100, on an ESP32 frame with a battery. Undefined elsewhere, so check
      * before drawing it (FrameOS 2026.11.5+; undefined before). */
     batteryPercent?: number;

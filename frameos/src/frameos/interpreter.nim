@@ -21,6 +21,7 @@ import frameos/refresh_interval
 import frameos/render_scale
 import frameos/runtime_diagnostics
 import frameos/scene_rhythm
+import frameos/layout_choice
 import frameos/ui/events as ui_events
 import frameos/utils/canvas_log
 from frameos/utils/svg_frames import takePanelRegion, forgetPanelRegions
@@ -490,6 +491,20 @@ var uploadedSceneOrder: seq[SceneId]
 proc setUploadedSceneOrder*(order: seq[SceneId]) =
   uploadedSceneOrder = order
 
+when not defined(frameosEmbedded):
+  # An ESP32 holds one scene at a time, and lists its layouts off flash.
+  proc interpreterLayouts(): seq[LayoutEntry] {.nimcall, gcsafe.} =
+    ## The layouts the frame holds as scenes.
+    {.cast(gcsafe).}:
+      for sceneId, scene in uploadedScenes.pairs:
+        if scene.isLayout:
+          result.add LayoutEntry(id: sceneId.string, name: scene.name)
+      for sceneId, scene in loadedScenes.pairs:
+        if scene.isLayout and not uploadedScenes.hasKey(sceneId):
+          result.add LayoutEntry(id: sceneId.string, name: scene.name)
+
+  layoutListing = interpreterLayouts
+
 proc isLayoutOrNil(scene: ExportedInterpretedScene): bool =
   scene.isNil or scene.isLayout
 
@@ -586,29 +601,68 @@ proc resolveSceneExport(sceneId: SceneId): ExportedScene =
   if result.isNil and not sceneLoader.isNil and sceneLoader(sceneId):
     result = loadedScenes.getOrDefault(sceneId, nil)
 
-proc ensureLayoutScene(self: InterpretedFrameScene): FrameScene =
-  ## The layout this scene is wrapped in, made on the first pass that shows
-  ## the scene as the frame's (a scene in a panel has no layout of its own).
-  ## One that is not on the frame or cannot start leaves the scene as it is,
-  ## and says so once.
-  result = self.sceneNodes.getOrDefault(LayoutSceneKey, nil)
-  if not result.isNil or self.layoutSceneId.string.len == 0 or self.layoutFailed:
-    return
-  var named = self.layoutSceneId.string
-  let exported = if self.layoutSceneId != self.id: resolveSceneExport(self.layoutSceneId) else: nil
+proc dropLayout(layout: FrameScene) =
+  ## A layout the frame stopped wearing: its interpreters go with it.
+  if layout of InterpretedFrameScene:
+    for child in InterpretedFrameScene(layout).sceneNodes.values:
+      dropLayout(child)
+    for app in InterpretedFrameScene(layout).appsByNodeId.values:
+      releaseJsAppRuntime(app)
+
+proc startLayout(owner: FrameScene, layoutId: string, ownId: string, ownState: JsonNode): FrameScene =
+  ## The layout `owner` wears, made: what the install set for it, under what
+  ## was set on the frame. One that is not on the frame or cannot start leaves
+  ## the scene as it is, and says so.
+  var named = layoutId
+  let exported = if layoutId != owner.id.string: resolveSceneExport(layoutId.SceneId) else: nil
   if exported of ExportedInterpretedScene:
     try:
-      result = exported.init(self.layoutSceneId, self.frameConfig, self.logger,
-        if self.layoutState.isNil: %*{} else: self.layoutState)
-      result.shownName = self.shownName
-      self.sceneNodes[LayoutSceneKey] = result
-      self.sceneExportByNodeId[LayoutSceneKey] = exported
+      let state = if layoutId == ownId and not ownState.isNil: copy(ownState) else: newJObject()
+      let kept = savedLayoutState(layoutId)
+      if not kept.isNil and kept.kind == JObject:
+        for key, value in kept.pairs:
+          state[key] = value
+      result = exported.init(layoutId.SceneId, owner.frameConfig, owner.logger, state)
+      result.shownName = owner.shownName
       return
     except Exception as error:
       named.add ": "
       named.add error.msg
-  self.layoutFailed = true
-  self.logScene("layout:missing", "layoutSceneId", named)
+  owner.logScene("layout:missing", "layoutSceneId", named)
+
+proc ensureLayoutScene(self: InterpretedFrameScene): FrameScene =
+  ## The layout this scene is wrapped in, made on the first pass that shows
+  ## the scene as the frame's (a scene in a panel has no layout of its own).
+  let wanted = layoutFor(self.layoutSceneId.string)
+  result = self.wornLayout
+  if not result.isNil and result.id.string != wanted:
+    dropLayout(result)
+    self.wornLayout = nil
+    result = nil
+  if not result.isNil or wanted.len == 0 or self.layoutFailedFor == wanted:
+    return
+  result = startLayout(self, wanted, self.layoutSceneId.string, self.layoutState)
+  if result.isNil:
+    self.layoutFailedFor = wanted
+  else:
+    self.wornLayout = result
+
+proc ensureBuiltInLayout(self: FrameScene): FrameScene =
+  ## A built-in scene wears the layout of the scene it was opened from
+  ## (event_loop.nim hands it over in `state.layout`), or the frame's choice.
+  let own = self.state{"layout"}
+  let ownId = own{"sceneId"}.getStr()
+  let wanted = layoutFor(ownId)
+  if not self.wornLayout.isNil and self.wornLayout.id.string != wanted:
+    dropLayout(self.wornLayout)
+    self.wornLayout = nil
+  if self.wornLayout.isNil and wanted.len > 0 and self.wornLayoutFailedFor != wanted:
+    self.wornLayout = startLayout(self, wanted, ownId, own{"state"})
+    if self.wornLayout.isNil:
+      self.wornLayoutFailedFor = wanted
+    else:
+      self.wornLayout.systemScene = true
+  self.wornLayout
 
 proc translatedPayload(payload: JsonNode, slot: SceneSlot): JsonNode =
   result = copy(payload)
@@ -645,7 +699,7 @@ proc routePointer(self: InterpretedFrameScene, context: ExecutionContext): bool 
     self.capturedPointer = pid
   elif held and lifted:
     self.capturedChild = nil
-  if slot < 0 or not (self.slots[slot].child of InterpretedFrameScene):
+  if slot < 0 or not (self.slots[slot].child of InterpretedFrameScene or not self.slots[slot].child.ownRun.isNil):
     return false
   let child = self.slots[slot].child
   let inner = ExecutionContext(scene: child, event: event,
@@ -1948,7 +2002,7 @@ proc listensThrough(scene: FrameScene, event: string, wearer: FrameScene): bool 
     return true
   # A pointer event is built for a scene that listens, and what it embeds
   # hears it through that scene: its layout, the panels, its `<Scene>`s.
-  let layout = interpreted.sceneNodes.getOrDefault(LayoutSceneKey, nil)
+  let layout = scene.wornLayout
   if not layout.isNil and listensThrough(layout, event, scene):
     return true
   for slot in scene.slots:
@@ -1986,6 +2040,12 @@ proc runEventApps(scene: InterpretedFrameScene, context: ExecutionContext) =
 {.pop.}
 
 proc runEventInner(self: FrameScene, context: ExecutionContext) =
+  if not self.ownRun.isNil:
+    # A built-in scene. What happens to it is what it draws next.
+    if context.event != "render":
+      rhythmMarkDue(self)
+    self.ownRun(self, context)
+    return
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
   markRuntimeCheckpoint("event:start", currentSceneId = self.id.string, contextEvent = context.event,
     clearNode = true)
@@ -2134,19 +2194,21 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
   let passStarted = rendering and rhythmEnterRender(self, if context.hasImage: context.image else: nil)
   let outerYield = yieldScene
   try:
-    let interpreted = if self of InterpretedFrameScene and self != yieldScene: InterpretedFrameScene(self) else: nil
     # The layout wraps the frame's own scene and nothing else, so it comes to
     # life on the pass that starts here and is looked at no other time.
-    let layout = if interpreted.isNil: nil
-      elif passStarted: ensureLayoutScene(interpreted)
-      else: interpreted.sceneNodes.getOrDefault(LayoutSceneKey, nil)
+    let layout =
+      if self == yieldScene: nil
+      elif self of InterpretedFrameScene:
+        (if passStarted: ensureLayoutScene(InterpretedFrameScene(self)) else: self.wornLayout)
+      elif self.ownRun.isNil: nil
+      else: ensureBuiltInLayout(self)
     if layout.isNil:
       if rendering:
         renderChrome(self, context)
       else:
         runEventInner(self, context)
     else:
-      yieldScene = interpreted
+      yieldScene = self
       if rendering:
         # A layout's nextSleep is the layout's: it never reaches the frame.
         let parentSleep = context.nextSleep
@@ -2176,6 +2238,14 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
       disarmRenderDeadline()
       setDispatchBudget(0)
 
+proc runBuiltIn(self: FrameScene, context: ExecutionContext): bool =
+  if self == yieldScene or layoutFor(self.state{"layout", "sceneId"}.getStr()).len == 0:
+    return false
+  runEvent(self, context)
+  true
+
+builtInRunner = runBuiltIn
+
 proc render*(self: FrameScene, context: ExecutionContext): Image =
   if TRACING:
     self.logger.log(%*{
@@ -2197,6 +2267,7 @@ proc clearRunNodeStacks*(scene: FrameScene) =
   let interpreted = InterpretedFrameScene(scene)
   interpreted.runNodeStack.setLen(0)
   yieldScene = nil # the same abort skipped the layout's `finally`
+  clearRunNodeStacks(scene.wornLayout)
   for _, child in interpreted.sceneNodes:
     clearRunNodeStacks(child)
 

@@ -29,6 +29,7 @@ import pixie
 import frameos/types
 import frameos/panel_shape
 import frameos/refresh_interval
+import frameos/layout_choice
 import frameos/utils/canvas_log
 from frameos/utils/svg_frames import forgetPanelRegions, aroundHoles, PixelBox
 from frameos/loading_mark import LoadingMarkMinIntervalSeconds
@@ -112,6 +113,10 @@ when defined(testing):
   var rhythmClockOverride* {.threadvar.}: float
     ## Tests set the monotonic clock (seconds); 0 = the real one.
 
+var builtInRunner*: proc(scene: FrameScene, context: ExecutionContext): bool {.nimcall.}
+  ## Set by the interpreter: a built-in scene's event, through the layout it
+  ## wears; false when it wears none, and the scene runs by itself.
+
 proc rhythmNow*(): float =
   when defined(testing):
     if rhythmClockOverride > 0:
@@ -145,7 +150,8 @@ proc followedInterval(scene: FrameScene): float =
     return scene.layoutInterval
   if scene of InterpretedFrameScene:
     let interpreted = InterpretedFrameScene(scene)
-    if interpreted.layoutSceneId.string.len > 0 and not interpreted.layoutFailed:
+    let wanted = layoutFor(interpreted.layoutSceneId.string)
+    if wanted.len > 0 and interpreted.layoutFailedFor != wanted:
       return 0
   if scene.refreshFollowsChildren and scene.followInterval < 0 and scene of InterpretedFrameScene:
     let own = ownRefreshInterval(scene)
@@ -209,6 +215,8 @@ proc walkCopies(scene: FrameScene, dropDueBy: float): int =
         r.embedImage = nil
       else:
         result += r.embedImage.byteSize
+  if not scene.wornLayout.isNil:
+    result += walkCopies(scene.wornLayout, dropDueBy)
   if scene of InterpretedFrameScene:
     for child in InterpretedFrameScene(scene).sceneNodes.values:
       result += walkCopies(child, dropDueBy)
@@ -403,24 +411,24 @@ proc rhythmLeaveRender*(scene: FrameScene, passStarted: bool) =
       scene.followInterval = max(ShortestPace, soonest - passStart)
     if not scene.refreshFollowsChildren:
       scene.embedPaced = soonest != Inf
-    if passStarted:
-      let layout = InterpretedFrameScene(scene).sceneNodes.getOrDefault(LayoutSceneKey, nil)
-      if not layout.isNil:
-        # The layout's own wait (its chrome), and the scene it wraps. The full
-        # interval even around a hole, whose chrome knows when it is due: a
-        # wait under a second reads as an animation on an ESP32, which would
-        # run another pass at once after every tap.
-        var wait = layout.refreshInterval
-        if passHoldsFloor:
-          # On e-paper or a deep sleeper the chrome never wakes the frame
-          # sooner than the scene it wraps would.
-          wait = max(wait, contentInterval(scene))
-        if not scene.rhythm.isNil and scene.rhythm.visitPass == passId:
-          wait = min(wait, scene.rhythm.dueAt - passStart)
-        scene.layoutInterval = max(ShortestPace, wait)
-        scene.layoutPaced = true
-      else:
-        scene.layoutPaced = false
+  if passStarted:
+    let layout = scene.wornLayout
+    if not layout.isNil:
+      # The layout's own wait (its chrome), and the scene it wraps. The full
+      # interval even around a hole, whose chrome knows when it is due: a
+      # wait under a second reads as an animation on an ESP32, which would
+      # run another pass at once after every tap.
+      var wait = layout.refreshInterval
+      if passHoldsFloor:
+        # On e-paper or a deep sleeper the chrome never wakes the frame
+        # sooner than the scene it wraps would.
+        wait = max(wait, contentInterval(scene))
+      if not scene.rhythm.isNil and scene.rhythm.visitPass == passId:
+        wait = min(wait, scene.rhythm.dueAt - passStart)
+      scene.layoutInterval = max(ShortestPace, wait)
+      scene.layoutPaced = true
+    else:
+      scene.layoutPaced = false
   if not passStarted:
     return
   if not passCanvas.isNil and passGeneration >= 0:

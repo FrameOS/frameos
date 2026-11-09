@@ -668,6 +668,8 @@ proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, pap
     since = now - self.state{"touchedAt"}.getFloat(now)
   result = since >= idle
   self.refreshInterval = if result: idle else: max(idle - since, 1.0)
+  # What a layout around it goes by (refresh_interval.ownRefreshInterval).
+  self.refreshIntervalDefault = self.refreshInterval
 
 proc onTap(handler: int, name: string, event: JsonNode, hit: UiHit) {.raises: [].} =
   ## The tiles' one handler, run by the hit test (ui/events.nim): what it
@@ -702,6 +704,7 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
   if self.drawUi(SceneSwitcherId, tree, image, self.paper, onTap, idleSeconds(self.paper), roomW, roomH):
     leave()
   elif more:
+    rhythmMarkDue(self)
     sendEvent(evRender, newJObject(), eoScene)
 
 # ------------------------------------------------------------ the scene
@@ -727,7 +730,7 @@ proc pointer(self: SceneSwitcherScene, event: string, payload: JsonNode) =
     # What is pressed moved: an LCD shows it.
     sendEvent(evRender, newJObject(), eoScene)
 
-proc runSwitcher(self: FrameScene, context: ExecutionContext) =
+proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   ## What raises here is reported by the caller, as for any scene: the
   ## dispatcher's `event:error`, the render pass's own. The payload is read
   ## with `{}` alone, which answers a nil or a non-object payload with nil.
@@ -736,9 +739,10 @@ proc runSwitcher(self: FrameScene, context: ExecutionContext) =
   case context.event
   of "setCurrentScene":
     # What the dispatcher says it was opened from (event_loop.nim).
-    let opener = payload{"state", "from"}
-    if not opener.isNil:
-      self.state.put("from", opener)
+    for key in ["from", "layout"]:
+      let value = payload{"state", key}
+      if not value.isNil:
+        self.state.put(key, value)
   of "open":
     self.opened()
   of "close":
@@ -770,6 +774,10 @@ proc runSwitcher(self: FrameScene, context: ExecutionContext) =
     # nothing of: it has no position).
     self.pointer(context.event, payload)
 
+proc runSwitcher(self: FrameScene, context: ExecutionContext) =
+  if builtInRunner.isNil or not builtInRunner(self, context):
+    switcherOwnRun(self, context)
+
 proc renderSwitcher(self: FrameScene, context: ExecutionContext): Image =
   self.ensureCanvas(context)
   runSwitcher(self, context)
@@ -779,8 +787,8 @@ proc initSwitcher(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, pe
   ## Nothing persisted to start from: the switcher keeps no state file.
   # Until the first render says (an ESP32's LCD is known by its canvas).
   let paper = paperPanel(frameConfig)
-  SceneSwitcherScene(id: sceneId, frameConfig: frameConfig, logger: logger, state: newJObject(),
-    refreshInterval: idleSeconds(paper), backgroundColor: background(paper), paper: paper)
+  SceneSwitcherScene(id: sceneId, frameConfig: frameConfig, logger: logger, state: newJObject(), ownRun: switcherOwnRun,
+    shownName: "Scene switcher", refreshInterval: idleSeconds(paper), backgroundColor: background(paper), paper: paper)
 
 var exportedScene* = ExportedInterpretedScene(
   name: "Scene switcher",

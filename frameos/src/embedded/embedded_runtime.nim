@@ -19,6 +19,7 @@ import std/times
 import frameos/channels
 import frameos/single_scene_host
 import frameos/scene_rhythm
+import frameos/layout_choice
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
 when defined(memProbe): import frameos/utils/memory
@@ -67,6 +68,7 @@ var
   # The legacy single-payload path's scene order (the lazy path's is the
   # catalog), for `setCurrentScene {direction}`.
   loadedSceneOrder: seq[SceneId]
+  layoutCatalog: seq[LayoutEntry]
   # The scene's lifetime, its lifecycle events and the dispatcher's EventHost:
   # shared with the wasm preview (frameos/single_scene_host). Allocated here so
   # the status procs below can be asked before initRuntime.
@@ -214,6 +216,10 @@ proc residentSceneState(persistable: bool): JsonNode =
         (not persistable or worthPersistingState(declaredFields, key, scene.state[key])):
       result[key] = scene.state[key]
 
+proc readLayoutState(id: string): JsonNode {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    result = loadPersistedSceneState(id)
+
 proc persistableSceneState(): JsonNode =
   ## The resident scene's keys worth a file.
   residentSceneState(persistable = true)
@@ -237,6 +243,13 @@ proc mergePersistedSceneState(sceneId: string, state: JsonNode) =
   for key, value in state:
     current[key] = value
   saveSceneState(sceneId, current)
+
+proc writeLayoutState(id: string, state: JsonNode) {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    mergePersistedSceneState(id, state)
+
+layoutStateRead = readLayoutState
+layoutStateWrite = writeLayoutState
 
 proc sceneStateJson*(): string =
   ## The current scene's public state: what `/state`, the cloud hello and the
@@ -614,9 +627,13 @@ proc loadScenes*(payload: string): int =
   when defined(memProbe): memProbe("  loadScene: scenes cache replaced")
   scenesLoadedCount = newScenes.len
   loadedSceneOrder = @[]
+  layoutCatalog.setLen(0)
   for input in inputs:
-    if newScenes.hasKey(input.id) and not newScenes[input.id].isLayout:
-      loadedSceneOrder.add(input.id)
+    if newScenes.hasKey(input.id):
+      if newScenes[input.id].isLayout:
+        layoutCatalog.add LayoutEntry(id: input.id.string, name: newScenes[input.id].name)
+      else:
+        loadedSceneOrder.add(input.id)
 
   # Keep the current scene across updates when it still exists; otherwise
   # fall back to the first scene in the payload.
@@ -647,14 +664,19 @@ proc setSceneCatalog*(indexJson: string): int =
     log("setSceneCatalog: index is not an object")
     return 0
   var entries: seq[SceneCatalogEntry] = @[]
+  var layouts: seq[LayoutEntry] = @[]
   let scenesNode = parsed{"scenes"}
   if not scenesNode.isNil and scenesNode.kind == JArray:
     for item in scenesNode.items:
       if item.kind != JObject:
         continue
       let id = item{"id"}.getStr()
-      if id.len == 0 or item{"isLayout"}.getBool(false):
-        # Read off flash by id when a scene names it, and in no list.
+      if id.len > 0 and item{"isLayout"}.getBool(false):
+        # Read off flash by id when a scene names it, and in no list but the
+        # frame page's.
+        layouts.add LayoutEntry(id: id, name: item{"name"}.getStr())
+        continue
+      if id.len == 0:
         continue
       entries.add(SceneCatalogEntry(
         id: id,
@@ -662,6 +684,7 @@ proc setSceneCatalog*(indexJson: string): int =
         refreshInterval: item{"refreshInterval"}.getFloat(0.0),
       ))
   sceneCatalog = entries
+  layoutCatalog = layouts
   if entries.len == 0:
     log("setSceneCatalog: no scenes in index")
     return 0
@@ -756,6 +779,12 @@ proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
           name: if scenes.hasKey(sceneId): scenes[sceneId].name else: "")
 
 sceneSwitcherListing = switcherListing
+
+proc embeddedLayouts(): seq[LayoutEntry] {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    layoutCatalog
+
+layoutListing = embeddedLayouts
 
 # The settings panel's frame page, behind its gear (docs/scene-settings.md
 # "The frame page"): the facts it shows and what it sets (Wi-Fi, rotation,

@@ -33,12 +33,27 @@ Layouts group, "Add layout" at the end of the Add scene drawer while it has none
 and "Add a layout" in its Settings under Layouts. Each sample's `thumb.jpg` is
 shown in those lists and saved as the added layout's picture.
 
+**Around the built-in scenes.** The scene list and the settings are drawn in the
+layout of the scene they were opened from, so a taskbar stays up. The dispatcher
+hands the built-in scene that layout (`state.layout`, `event_loop.nim`), and it
+runs through the same pass as any scene wearing one (`FrameScene.ownRun`,
+`builtInRunner`). `app.frame.systemScene` is true in the layout's app meanwhile:
+`if (app.frame.systemScene) return <yield />` gives them the whole panel.
+
+**On the frame.** Frame settings has a Layout select, with a gear for that
+layout's fields. The choice covers every scene until "As each scene says" is
+picked, and what the gear sets overlays the install's `layout.state`. Both are
+the frame's to keep (`layout_choice.nim`, in the hosts' per-scene state files under
+`frame-layout` and the layout's id). No plane is told: the selects in the
+workspace keep showing what each scene was given.
+
 **What a layout can ask.** `app.frame.sceneName` is the name of the scene it
 wraps (its own, shown on its own), `app.frame.wifiRssi` and
 `app.frame.batteryPercent` are what the frame knows, and its handlers can open
-the built-in screens with `frameos.dispatch('sceneSwitcher')` and
-`frameos.dispatch('sceneSettings')`, which is all the Windows 98 taskbar's Start
-and Control Panel buttons do. A clock that shows no seconds calls
+the built-in screens with `frameos.dispatch('sceneSwitcher')`,
+`frameos.dispatch('sceneSettings')` and `frameos.dispatch('sceneSettings', {page:
+'frame'})` for the frame's own page, which is all the Windows 98 taskbar's Start,
+gear and tray do. A clock that shows no seconds calls
 `frameos.setNextSleep` with the seconds left in the minute, and the chrome then
 costs nothing until it changes.
 
@@ -125,7 +140,9 @@ page's Info column, and "Use as layout" in a backend's saved scene Edit dialog
 A small select sits under each scene's picture once the frame has a layout. The same choice is in the frame's
 Settings under Layouts: one select per scene and one for all of them, which
 sets the scenes the frame has now (a scene added later starts with no layout).
-"Layout settings" in the scene's menu edits `layout.state`.
+"Layout settings" in the scene's menu edits `layout.state`, and so does the gear
+beside each select in those Settings; the one beside "All scenes" writes it to
+every scene wearing that layout.
 
 **How often it renders** (`utils/sceneRhythm.ts`, `framePacedByInterval`):
 where a render is free, a worn layout renders when its chrome or its scene is

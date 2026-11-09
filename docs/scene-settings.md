@@ -51,7 +51,11 @@ A gear left of Save opens the frame's own settings: **Frame settings**, where
 Cancel becomes Back and the gear stays lit. Back, the gear again, a key with
 the role `back` and the frame's `back` (once any keyboard is away) go back to
 the scene's form with its edits kept; the swipe that opened the panel closes
-it from either page. The panel opens on the scene's form, off Wi-Fi or on a
+it from either page. `sceneSettings {page: "frame"}` (the tray of the Windows 98
+layout) opens straight on the frame page, and there Back goes to the scene. The page
+has a refresh button on the Wi-Fi network's line and a Layout select with a gear for
+that layout's fields (`docs/scene-layouts.md` "On the frame"). Without
+it the panel opens on the scene's form, off Wi-Fi or on a
 scene without fields too, and on the frame page only when no scene is showing
 (an ESP32 with nothing installed opens it from its status screen).
 

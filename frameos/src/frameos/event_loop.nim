@@ -392,7 +392,7 @@ proc put(node: JsonNode, key: string, value: JsonNode) =
   ## inline `[]=` brings into every caller.
   node.fields[key] = value
 
-proc settingsOf(scene: FrameScene, state: JsonNode) =
+proc settingsOf*(scene: FrameScene, state: JsonNode) =
   ## What the settings panel shows of `scene`: its public fields (`fields`)
   ## and their values now (`values`), read before the switch, which on a
   ## host that holds one scene lets the scene go.
@@ -441,8 +441,18 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
   if not current.isBuiltIn:
     let state = newJObject()
     state.put("from", newJString(if current.isNil: "" else: current.id.string))
+    # It is drawn in the layout of the scene it was opened from.
+    if current of InterpretedFrameScene and InterpretedFrameScene(current).layoutSceneId.string.len > 0:
+      let worn = newJObject()
+      worn.put("sceneId", newJString(InterpretedFrameScene(current).layoutSceneId.string))
+      if not InterpretedFrameScene(current).layoutState.isNil:
+        worn.put("state", InterpretedFrameScene(current).layoutState)
+      state.put("layout", worn)
     if sceneId == SceneSettingsId:
       current.settingsOf(state)
+      # `{page: "frame"}`: straight to the frame's own page, if it has one.
+      if envelope.payload{"page"}.getStr() == "frame":
+        state.put("opened", newJString("frame"))
     payload.put("state", state)
   else:
     next = current.state{"from"}.getStr()

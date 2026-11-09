@@ -3,7 +3,13 @@ import type { DeepPartial } from 'kea-forms'
 
 import type { FrameId, FrameScene, FrameType, SceneLayoutRef, StateField } from '../../../../types'
 import { sceneStateFields } from '../../../../utils/refreshInterval'
-import { currentSceneLayout, isLayoutScene, layoutScenes, withSceneLayout } from '../../../../utils/sceneLayouts'
+import {
+  currentSceneLayout,
+  isLayoutScene,
+  layoutScenes,
+  sceneLayoutRef,
+  withSceneLayout,
+} from '../../../../utils/sceneLayouts'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
 import { frameLogic } from '../../frameLogic'
 
@@ -30,6 +36,7 @@ export interface sceneLayoutLogicValues {
   pickerVisible: boolean
   scene: FrameScene | null
   scenes: FrameScene[]
+  settingsForEveryScene: boolean
   settingsOpen: boolean
 }
 
@@ -44,8 +51,8 @@ export interface sceneLayoutLogicActions {
   closeLayoutSettings: () => {
     value: true
   }
-  openLayoutSettings: () => {
-    value: true
+  openLayoutSettings: (everyScene?: boolean) => {
+    everyScene: boolean
   }
   saveLayoutSettings: () => {
     value: true
@@ -93,7 +100,8 @@ export const sceneLayoutLogic = kea<sceneLayoutLogicType>([
   })),
   actions({
     chooseLayout: (layoutSceneId: string) => ({ layoutSceneId }),
-    openLayoutSettings: true,
+    /** `everyScene`: Apply writes the settings to every scene wearing this layout, not this one alone. */
+    openLayoutSettings: (everyScene: boolean = false) => ({ everyScene }),
     closeLayoutSettings: true,
     setStateValue: (field: StateField, value: any) => ({ field, value }),
     seedState: (state: Record<string, any>) => ({ state }),
@@ -106,6 +114,12 @@ export const sceneLayoutLogic = kea<sceneLayoutLogicType>([
         openLayoutSettings: () => true,
         closeLayoutSettings: () => false,
         saveLayoutSettings: () => false,
+      },
+    ],
+    settingsForEveryScene: [
+      false,
+      {
+        openLayoutSettings: (_, { everyScene }) => everyScene,
       },
     ],
     draftState: [
@@ -180,7 +194,8 @@ export const sceneLayoutLogic = kea<sceneLayoutLogicType>([
       const scenes: FrameScene[] = values.scenes
       actions.setFrameFormValues({
         scenes: scenes.map((scene) =>
-          scene.id === props.sceneId
+          scene.id === props.sceneId ||
+          (values.settingsForEveryScene && sceneLayoutRef(scene.layout)?.sceneId === current.sceneId)
             ? withSceneLayout(scene, { sceneId: current.sceneId, state: values.draftState })
             : scene
         ),

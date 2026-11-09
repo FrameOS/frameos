@@ -3,6 +3,7 @@ import pixie
 import ../channels
 import ../events_gen
 import ../interpreter
+import ../layout_choice
 import ../scene_rhythm
 import ../types
 import system/sceneSwitcher/scene as switcher
@@ -110,6 +111,18 @@ export function get(app) {
     <div className="relative w-full h-full bg-white">
       <div className="absolute inset-0 flex"><Scene id="tests/child" /></div>
       <div className="absolute top-[30px] left-[5px] w-[10px] h-[5px] bg-black" />
+    </div>
+  )
+}
+"""
+
+const escapingUi = """
+export function get(app) {
+  if (app.frame.systemScene) return <yield />
+  return (
+    <div className="flex flex-col w-full h-full">
+      <div className="h-[20px] bg-white" />
+      <yield />
     </div>
   )
 }
@@ -276,6 +289,7 @@ let scenesJson = "[" & [
   panel("tests/inHole", "#0000ff", 600.0).withLayout("tests/holeLayout"),
   panel("tests/fastInHole", "#0000ff", 0.05).withLayout("tests/holeLayout"),
   jsxScene("tests/counter2", counterUi, 3000.0).withLayout("tests/holeLayout"),
+  jsxScene("tests/escaping", escapingUi, 1.0, ""","isLayout": true"""),
   panel("tests/fastChild", "#ff00ff", 1.0),
   jsxScene("tests/twoHoles", twoScenesUi, 300.0),
   jsxScene("tests/coveredScene", coveredSceneUi, 300.0),
@@ -333,7 +347,7 @@ proc holeIn(scene: FrameScene): tuple[found: bool, x, y, w, h: int] =
       return (true, slot.x.int, slot.y.int, int(slot.visible[2] - slot.x), int(slot.visible[3] - slot.y))
 
 proc layoutOf(scene: FrameScene): FrameScene =
-  InterpretedFrameScene(scene).sceneNodes[LayoutSceneKey]
+  scene.wornLayout
 
 proc panelOf(scene: FrameScene, id: string): FrameScene =
   for child in InterpretedFrameScene(scene).sceneNodes.values:
@@ -812,6 +826,72 @@ suite "apps that subscribe to events":
     check sceneListensTo(scene, "button")
     scene.fire("button")
     check scene.layoutOf.heard == @["button:A"]
+
+suite "the layout chosen on the frame":
+  setup:
+    rhythmClockOverride = 1000.0
+
+  teardown:
+    chooseLayout("")
+
+  test "it goes on every scene, whatever each was given, and can take them all off":
+    let wears = newScene("tests/content")
+    let bare = newScene("tests/child")
+    chooseLayout("tests/uiLayout")
+    discard pass(wears)
+    discard pass(bare)
+    check wears.layoutOf.id.string == "tests/uiLayout"
+    check bare.layoutOf.id.string == "tests/uiLayout"
+    chooseLayout(NoLayout)
+    rhythmClockOverride = 1001.0
+    discard pass(wears)
+    check wears.wornLayout.isNil
+    chooseLayout("")
+    rhythmClockOverride = 1002.0
+    discard pass(wears)
+    check wears.layoutOf.id.string == "tests/layout"
+
+  test "what was set on the frame for a layout is what it starts from":
+    saveLayoutState("tests/uiLayout", %*{"title": "From the frame"})
+    chooseLayout("tests/uiLayout")
+    let scene = newScene("tests/content")
+    discard pass(scene)
+    check scene.layoutOf.state{"title"}.getStr() == "From the frame"
+    saveLayoutState("tests/uiLayout", %*{})
+
+suite "a layout around the built-in scenes":
+  setup:
+    rhythmClockOverride = 1000.0
+    logged = @[]
+
+  proc opened(layoutId: string): FrameScene =
+    result = switcher.exportedScene.init(SceneSwitcherId.SceneId, config, logger(), %*{})
+    switcher.exportedScene.runEvent(result, ExecutionContext(scene: result, event: "setCurrentScene",
+      payload: %*{"state": {"from": "tests/content", "layout": {"sceneId": layoutId}}},
+      loopIndex: 0, loopKey: ".", nextSleep: -1))
+
+  proc drawn(scene: FrameScene): Image =
+    switcher.exportedScene.render(scene, ExecutionContext(scene: scene, event: "render", payload: %*{},
+      image: newImage(W, H), hasImage: true, loopIndex: 0, loopKey: ".", nextSleep: -1))
+
+  test "the scene list is drawn inside the layout of the scene it was opened from":
+    let scene = opened("tests/uiLayout")
+    let canvas = drawn(scene)
+    check canvas.color(5, 5) == colored("#ffffff")
+    check not scene.wornLayout.isNil and scene.wornLayout.holeIn.found
+    check scene.wornLayout.holeIn.y == 20
+    check canvas.color(20, 30) != colored("#ffffff")
+
+  test "a layout can give a built-in scene the whole panel":
+    let scene = opened("tests/escaping")
+    let canvas = drawn(scene)
+    check canvas.color(5, 5) != colored("#ffffff")
+    check scene.wornLayout.holeIn.y == 0 and scene.wornLayout.holeIn.h == H
+
+  test "opened from a scene with no layout it wears none":
+    let scene = switcher.exportedScene.init(SceneSwitcherId.SceneId, config, logger(), %*{})
+    discard drawn(scene)
+    check scene.wornLayout.isNil
 
 suite "the starter layouts":
   # Every sample that is a layout, on the runtime it ships for: its chrome and

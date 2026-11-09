@@ -651,7 +651,9 @@
       "description": "Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen.",
       "listen": false,
       "dispatch": true,
-      "payload": [],
+      "payload": [
+        {"name": "page", "label": "Page", "type": "string", "required": false}
+      ],
       "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap"],
       "renderAfter": "always",
       "coalesce": "none",

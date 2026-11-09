@@ -112,6 +112,9 @@ proc cleanupScene*(scene: FrameScene) =
   ## Break ORC cycles and close the scene's QuickJS context before dropping
   ## the last reference (mirrors scenes.nim cleanupSceneRuntime, which lives
   ## outside these builds).
+  if not scene.isNil and not scene.wornLayout.isNil:
+    cleanupScene(scene.wornLayout)
+    scene.wornLayout = nil
   if scene.isNil or not (scene of InterpretedFrameScene):
     return
   when defined(memProbe): memProbe("  cleanupScene: entry")

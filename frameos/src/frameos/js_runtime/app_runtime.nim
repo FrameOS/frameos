@@ -1259,6 +1259,12 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     if not e.owner.scene.isNil and e.owner.scene.shownName.len > 0:
       return nimStringToJS(ctx, e.owner.scene.shownName)
     return jsUndefSentinel(ctx)
+  of "systemScene":
+    # A layout around the scene list or the settings: it may give them the
+    # whole panel by returning a bare <yield />.
+    if not e.owner.scene.isNil and e.owner.scene.systemScene:
+      return nimBoolToJS(ctx, true)
+    return jsUndefSentinel(ctx)
   of "batteryPercent":
     # An ESP32 with a battery. A Pi and the preview have nothing to say.
     when defined(freertos):
@@ -1344,7 +1350,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
         keys.add(key)
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale", "paper",
-      "sceneName", "batteryPercent", "wifiRssi"]
+      "sceneName", "systemScene", "batteryPercent", "wifiRssi"]
   of "context":
     keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep"]
     if e.context.hasImage and not e.context.image.isNil:

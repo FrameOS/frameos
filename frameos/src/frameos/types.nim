@@ -431,6 +431,12 @@ type
     ## What `app.frame.sceneName` says: the scene's name, and for a layout the
     ## name of the scene it wraps.
     shownName*: string
+    ## A built-in scene (system/): what runs it, and the layout of the scene it
+    ## was opened from, around it. `systemScene` is on that layout.
+    ownRun*: proc (self: FrameScene, context: ExecutionContext) {.nimcall.}
+    wornLayout*: FrameScene
+    wornLayoutFailedFor*: string
+    systemScene*: bool
     ## When this scene renders next, if it is drawn through a scene node
     ## (frameos/scene_rhythm.nim); nil until the first such render.
     rhythm*: SceneRhythm
@@ -624,7 +630,7 @@ type
     sceneNodes*: Table[NodeId, FrameScene]                                     # cache of instantiated child scenes
     layoutSceneId*: SceneId
     layoutState*: JsonNode
-    layoutFailed*: bool                                                        # logged once; the scene shows without it
+    layoutFailedFor*: string                                                   # logged once; the scene shows without it
     capturedChild*: FrameScene                                                 # the embedded scene a pointer pressed on, until it lifts
     capturedPointer*: int
     sceneExportByNodeId*: Table[NodeId, ExportedScene]                         # exported metadata for cached child scenes

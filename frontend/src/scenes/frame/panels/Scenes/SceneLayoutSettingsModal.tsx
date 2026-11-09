@@ -15,7 +15,7 @@ export function SceneLayoutSettingsModal({
   sceneId: string
 }): JSX.Element | null {
   const logic = sceneLayoutLogic({ frameId, sceneId })
-  const { settingsOpen, currentLayoutScene, fields, draftState } = useValues(logic)
+  const { settingsOpen, settingsForEveryScene, currentLayoutScene, fields, draftState } = useValues(logic)
   const { closeLayoutSettings, setStateValue, saveLayoutSettings } = useActions(logic)
   if (!settingsOpen || !currentLayoutScene) {
     return null
@@ -47,7 +47,10 @@ export function SceneLayoutSettingsModal({
           </div>
         )}
         <p className="frameos-muted text-xs">
-          These belong to this installed scene: other scenes wearing the layout keep their own. Save the frame to push
+          {settingsForEveryScene
+            ? 'These go on every scene wearing this layout.'
+            : 'These belong to this installed scene: other scenes wearing the layout keep their own.'}{' '}
+          Save the frame to push
           them.
         </p>
         <div className="flex justify-end gap-2">

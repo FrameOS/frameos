@@ -3,6 +3,7 @@ import pixie/fileformats/png
 import checksums/md5
 import scenes/scenes
 import system/scenes as systemScenesRegistry
+import frameos/layout_choice
 import frameos/channels
 import frameos/cloud/scene_guard
 import frameos/hal/files as halFiles
@@ -171,6 +172,9 @@ proc findExportedScene*(sceneId: SceneId): Option[ExportedScene] =
   none(ExportedScene)
 
 proc cleanupSceneRuntime*(scene: FrameScene) =
+  if not scene.isNil and not scene.wornLayout.isNil:
+    cleanupSceneRuntime(scene.wornLayout)
+    scene.wornLayout = nil
   if scene.isNil:
     return
   if scene of InterpretedFrameScene:
@@ -642,6 +646,18 @@ proc setPersistedStateFromPayload*(sceneId: SceneId, payload: JsonNode) =
   for key in payload.keys:
     persistedState[key] = copy(payload[key])
   writeTextFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json", $persistedState)
+
+proc readLayoutState(id: string): JsonNode {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    if lastPersistedStates.hasKey(id):
+      result = lastPersistedStates[id]
+
+proc writeLayoutState(id: string, state: JsonNode) {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    setPersistedStateFromPayload(id.SceneId, state)
+
+layoutStateRead = readLayoutState
+layoutStateWrite = writeLayoutState
 
 proc migrateLegacyUploadedStateFiles(uploadedSceneIds: seq[SceneId]) =
   ## Runtimes before 2026.10.18 kept an uploaded scene's state in

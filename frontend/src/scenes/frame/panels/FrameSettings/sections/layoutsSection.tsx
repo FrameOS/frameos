@@ -1,3 +1,4 @@
+import { Cog6ToothIcon } from '@heroicons/react/24/outline'
 import { useActions, useValues } from 'kea'
 
 import { Button } from '../../../../../components/Button'
@@ -5,12 +6,49 @@ import { H6 } from '../../../../../components/H6'
 import { LAYOUT_STARTERS } from '../../../../../generated/layoutStarters'
 import type { FrameId, FrameScene } from '../../../../../types'
 import { SceneLayoutPicker } from '../../Scenes/SceneLayoutPicker'
+import { SceneLayoutSettingsModal } from '../../Scenes/SceneLayoutSettingsModal'
+import { sceneLayoutLogic } from '../../Scenes/sceneLayoutLogic'
 import { useFrameSettings } from '../frameSettingsContext'
 import { frameLayoutsLogic } from '../frameLayoutsLogic'
 
 const DIFFERENT = '__different'
 
-/** Which layout each scene on the frame wears, and one select for all of them. */
+/** The settings of the layout a scene wears, beside its select; a layout with none has no button. */
+function LayoutSettingsButton({
+  frameId,
+  sceneId,
+  everyScene = false,
+  label,
+}: {
+  frameId: FrameId
+  sceneId: string
+  everyScene?: boolean
+  label: string
+}): JSX.Element {
+  const logic = sceneLayoutLogic({ frameId, sceneId })
+  const { fields, currentLayoutScene, settingsOpen, settingsForEveryScene } = useValues(logic)
+  const { openLayoutSettings } = useActions(logic)
+  return (
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center">
+      {currentLayoutScene && fields.length > 0 ? (
+        <button
+          type="button"
+          title={label}
+          aria-label={label}
+          onClick={() => openLayoutSettings(everyScene)}
+          className="frameos-secondary-button rounded p-1.5"
+        >
+          <Cog6ToothIcon className="h-4 w-4" />
+        </button>
+      ) : null}
+      {settingsOpen && settingsForEveryScene === everyScene ? (
+        <SceneLayoutSettingsModal frameId={frameId} sceneId={sceneId} />
+      ) : null}
+    </span>
+  )
+}
+
+/** Which layout each scene on the frame wears and its settings, and one select for all of them. */
 export function FrameLayoutsFields({ frameId }: { frameId: FrameId }): JSX.Element {
   const logic = frameLayoutsLogic({ frameId })
   const { layouts, contentScenes, commonLayoutId } = useValues(logic)
@@ -52,6 +90,16 @@ export function FrameLayoutsFields({ frameId }: { frameId: FrameId }): JSX.Eleme
                     </option>
                   ))}
                 </select>
+                {commonLayoutId ? (
+                  <LayoutSettingsButton
+                    frameId={frameId}
+                    sceneId={contentScenes[0].id}
+                    everyScene
+                    label="Layout settings for all scenes"
+                  />
+                ) : (
+                  <span className="h-8 w-8 shrink-0" />
+                )}
               </div>
             ) : null}
             {(contentScenes as FrameScene[]).map((scene) => (
@@ -62,6 +110,11 @@ export function FrameLayoutsFields({ frameId }: { frameId: FrameId }): JSX.Eleme
                   sceneId={scene.id}
                   ariaLabel={`Layout for ${scene.name || 'Untitled scene'}`}
                   className="!h-8 max-w-[14rem] !text-sm !font-normal"
+                />
+                <LayoutSettingsButton
+                  frameId={frameId}
+                  sceneId={scene.id}
+                  label={`Layout settings for ${scene.name || 'Untitled scene'}`}
                 />
               </div>
             ))}

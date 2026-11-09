@@ -151,6 +151,9 @@
   scene's last snapshot (`sceneSwitcherThumbnail`,
   `frameos/scene_switcher_linux.nim`); fast panels get a dark grid, e-paper
   black on white with the keys walking an inverted highlight.
+- Both built-in scenes are drawn in the layout of the scene they were opened
+  from (`state.layout` from the dispatcher, `ownRun` / `builtInRunner` into
+  `interpreter.runEvent`; `docs/scene-layouts.md`). A new one goes the same way.
 - It is never persisted on any host (no `scene.json`, no ESP32 `last_scene`
   or `pending_scene`, no state file) and is in no scene list: test with
   `isBuiltInScene`. `single_scene_host` runs every scene through its export
