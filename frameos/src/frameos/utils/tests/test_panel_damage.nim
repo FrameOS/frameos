@@ -16,9 +16,19 @@ proc bit(buf: seq[uint8]; rowBytes, px, py: int): bool =
   (buf[py * rowBytes + (px shr 3)] and (0x80'u8 shr (px and 7))) != 0
 
 proc runsOf(current, previous: seq[uint8]; width, height: int): tuple[runs: seq[ChangedRun], area: int] =
-  result.area = changedRuns(pixels(current), pixels(previous), width, height, result.runs)
+  result.runs = newSeq[ChangedRun](MaxRuns)
+  var count = 0
+  result.area = changedRuns(pixels(current), pixels(previous), width, height,
+    cast[ptr UncheckedArray[ChangedRun]](result.runs[0].addr), count)
+  result.runs.setLen(count)
 
-proc run(y, left, right: int): ChangedRun = (y.int32, left.int32, right.int32)
+proc run(y, left, right: int): ChangedRun = (y.uint16, left.uint16, right.uint16)
+
+proc packRuns1bpp(gray: ptr UncheckedArray[uint8]; width, height: int; buf: ptr UncheckedArray[uint8];
+    rowBytes: int; runs: openArray[ChangedRun]; rotate: int) =
+  var errors = newSeq[int32](2 * (width + 2))
+  panel_damage.packRuns1bpp(gray, width, height, buf, rowBytes, runs, rotate,
+    cast[ptr UncheckedArray[int32]](errors[0].addr))
 
 suite "changedRuns":
   test "identical canvases have nothing changed":

@@ -152,19 +152,13 @@ static void EPD_3in97_SetCursor(UWORD Xstart, UWORD Ystart)
 }
 
 /******************************************************************************
-function :	Initialize the e-Paper register
+function :	What a full and a partial init share. They differ in the border
+            waveform and in the RED plane: bypassed as 0 for a full refresh,
+            compared for a partial update
 parameter:
 ******************************************************************************/
-void EPD_3in97_Init(void)
+static void EPD_3in97_Setup(UBYTE border, UBYTE ramControl)
 {
-    EPD_3in97_AnalogOn = 0;
-    EPD_3in97_Reset();
-    DEV_Delay_ms(100);
-
-    EPD_3in97_ReadBusy();
-    EPD_3in97_SendCommand(0x12);  //SWRESET
-    EPD_3in97_ReadBusy();
-
     EPD_3in97_SendCommand(0x18); // use the internal temperature sensor
     EPD_3in97_SendData(0x80);
 
@@ -181,7 +175,7 @@ void EPD_3in97_Init(void)
     EPD_3in97_SendData(0x02);
 
     EPD_3in97_SendCommand(0x3C);   // border setting
-    EPD_3in97_SendData(0x01);
+    EPD_3in97_SendData(border);
 
     EPD_3in97_SendCommand(0x11);   // data entry mode: X-mode x+ y-
     EPD_3in97_SendData(0x01);
@@ -190,11 +184,28 @@ void EPD_3in97_Init(void)
 
     EPD_3in97_SetCursor(0, 0);
 
-    EPD_3in97_SendCommand(0x21);   // display update control: bypass RED as 0
-    EPD_3in97_SendData(0x40);
+    EPD_3in97_SendCommand(0x21);   // display update control
+    EPD_3in97_SendData(ramControl);
     EPD_3in97_SendData(0x00);
 
     EPD_3in97_ReadBusy();
+}
+
+/******************************************************************************
+function :	Initialize the e-Paper register
+parameter:
+******************************************************************************/
+void EPD_3in97_Init(void)
+{
+    EPD_3in97_AnalogOn = 0;
+    EPD_3in97_Reset();
+    DEV_Delay_ms(100);
+
+    EPD_3in97_ReadBusy();
+    EPD_3in97_SendCommand(0x12);  //SWRESET
+    EPD_3in97_ReadBusy();
+
+    EPD_3in97_Setup(0x01, 0x40);
 }
 
 /******************************************************************************
@@ -244,8 +255,7 @@ void EPD_3in97_Display(UBYTE *Image)
 }
 
 /******************************************************************************
-function :	Initialize the panel for a partial update: no software reset, the
-            partial border waveform, and the RED plane compared, not bypassed
+function :	Initialize the panel for a partial update: no software reset
 parameter:
 ******************************************************************************/
 void EPD_3in97_Init_Partial(void)
@@ -254,34 +264,7 @@ void EPD_3in97_Init_Partial(void)
     EPD_3in97_Reset();
     EPD_3in97_ReadBusy();
 
-    EPD_3in97_SendCommand(0x18); // use the internal temperature sensor
-    EPD_3in97_SendData(0x80);
-
-    EPD_3in97_SendCommand(0x0C); //set soft start
-    EPD_3in97_SendData(0xAE);
-    EPD_3in97_SendData(0xC7);
-    EPD_3in97_SendData(0xC3);
-    EPD_3in97_SendData(0xC0);
-    EPD_3in97_SendData(0x80);
-
-    EPD_3in97_SendCommand(0x01);   // drive output control
-    EPD_3in97_SendData((EPD_3in97_HEIGHT-1)%256);
-    EPD_3in97_SendData((EPD_3in97_HEIGHT-1)/256);
-    EPD_3in97_SendData(0x02);
-
-    EPD_3in97_SendCommand(0x3C);   // border setting
-    EPD_3in97_SendData(0x80);
-
-    EPD_3in97_SendCommand(0x11);   // data entry mode: X-mode x+ y-
-    EPD_3in97_SendData(0x01);
-
-    EPD_3in97_SetWindows(0, EPD_3in97_HEIGHT-1, EPD_3in97_WIDTH-1, 0);
-
-    EPD_3in97_SendCommand(0x21);   // display update control: compare RED
-    EPD_3in97_SendData(0x00);
-    EPD_3in97_SendData(0x00);
-
-    EPD_3in97_ReadBusy();
+    EPD_3in97_Setup(0x80, 0x00);
 }
 
 /******************************************************************************

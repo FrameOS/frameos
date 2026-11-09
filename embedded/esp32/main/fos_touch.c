@@ -166,10 +166,6 @@ static uint32_t s_dropped = 0;
 static uint8_t s_down_mask = 0;
 static uint16_t s_last_x[FOS_TOUCH_POINTS_MAX], s_last_y[FOS_TOUCH_POINTS_MAX];
 static int s_last_raw_x = -1, s_last_raw_y = -1;
-/* For `touch`: what the controller is doing when no finger gets through. */
-static volatile uint32_t s_irqs = 0;
-static uint32_t s_reports = 0, s_read_errors = 0;
-static uint8_t s_last_status = 0;
 static bool s_woke = false;
 
 /* ------------------------------------------------------------- the queue */
@@ -299,7 +295,6 @@ static esp_err_t ft_read(uint8_t reg, uint8_t *buf, size_t len)
 static void IRAM_ATTR on_irq(void *arg)
 {
     (void)arg;
-    s_irqs++;
     BaseType_t woke = pdFALSE;
     xSemaphoreGiveFromISR(s_irq, &woke);
     if (woke) portYIELD_FROM_ISR();
@@ -371,18 +366,11 @@ static int read_points(fos_touch_point_t *points)
         return fos_touch_decode_ft(report, sizeof(report), points, FOS_TOUCH_POINTS_MAX);
     }
     uint8_t report[FOS_TOUCH_REPORT_BYTES];
-    if (reg_read(FOS_TOUCH_REG_STATUS, report, sizeof(report)) != ESP_OK) {
-        s_read_errors++;
-        return -1;
-    }
-    s_last_status = report[0];
+    if (reg_read(FOS_TOUCH_REG_STATUS, report, sizeof(report)) != ESP_OK) return -1;
     int count = fos_touch_decode(report, sizeof(report), points, FOS_TOUCH_POINTS_MAX);
     /* Every ready report is cleared, one that does not decode too: left set,
      * the controller sends no other. */
-    if (report[0] & FOS_TOUCH_STATUS_READY) {
-        s_reports++;
-        reg_write_byte(FOS_TOUCH_REG_STATUS, 0);
-    }
+    if (report[0] & FOS_TOUCH_STATUS_READY) reg_write_byte(FOS_TOUCH_REG_STATUS, 0);
     return count;
 }
 
@@ -624,13 +612,10 @@ void fos_touch_print_status(void)
                (int)pins->sda, (int)pins->scl, (int)pins->irq);
         return;
     }
-    printf("touch:       %s at 0x%02x, %dx%d%s%s%s%s, int GPIO %d%s, fingers down 0x%02x, last raw %d,%d, dropped %lu, "
-           "status 0x%02x, reports %lu, read errors %lu, interrupts %lu, int level %d\n",
+    printf("touch:       %s at 0x%02x, %dx%d%s%s%s%s, int GPIO %d%s, fingers down 0x%02x, last raw %d,%d, dropped %lu\n",
            k_controller_names[s_controller], s_addr, s_x_max, s_y_max, s_swap ? " (axes swapped)" : "",
            s_mirror ? " (mirrored " : "", s_mirror ? mirror_name() : "", s_mirror ? ")" : "",
            (int)pins->irq, s_polled ? " (polled)" : "", (unsigned)s_down_mask,
-           s_last_raw_x, s_last_raw_y, (unsigned long)s_dropped,
-           (unsigned)s_last_status, (unsigned long)s_reports, (unsigned long)s_read_errors,
-           (unsigned long)s_irqs, pins->irq >= 0 ? gpio_get_level((gpio_num_t)pins->irq) : -1);
+           s_last_raw_x, s_last_raw_y, (unsigned long)s_dropped);
 }
 #endif /* ESP_PLATFORM */

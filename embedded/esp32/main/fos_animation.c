@@ -150,11 +150,6 @@ void fos_input_hold_note(fos_input_hold_t *h, int64_t now_us)
     h->last_input_us = now_us;
 }
 
-bool fos_input_hold_engaged(const fos_input_hold_t *h)
-{
-    return h->since_us != 0;
-}
-
 bool fos_input_hold_release(fos_input_hold_t *h, int64_t now_us)
 {
     if (h->since_us == 0) return false;

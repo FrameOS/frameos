@@ -391,13 +391,17 @@ proc renderKeptFrameImage(): tuple[image: Image, source: string] =
 # A panel with a partial waveform: the canvas as it was last packed and what
 # that packed to, so that only what changed is dithered (utils/panel_damage).
 var
-  packedCanvas: ptr UncheckedArray[uint8]
+  packedErrors: ptr UncheckedArray[int32]
+  packedRuns: ptr UncheckedArray[ChangedRun]
   packedPicture: ptr UncheckedArray[uint8]
+  packedCanvas: ptr UncheckedArray[uint8]
   packedWidth, packedHeight, packedRotate: int
   packedKnown = false
   packedAllocTried = false
 
 proc allocPsram(len: csize_t): pointer {.importc: "fos_display_alloc_psram", cdecl.}
+
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
 proc packCanvas1bpp(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): bool =
   let
@@ -408,19 +412,30 @@ proc packCanvas1bpp(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): 
       width * height != frameWidth * frameHeight or rowBytes * frameHeight != bufLen:
     return packImage1bpp(image, buf, bufLen)
   if not packedAllocTried:
+    # One block, kept: the errors of two rows of the longer edge (a frame can
+    # be rotated later), the runs, the packed picture and the canvas.
     packedAllocTried = true
-    packedCanvas = cast[ptr UncheckedArray[uint8]](allocPsram(csize_t(width * height)))
-    packedPicture = cast[ptr UncheckedArray[uint8]](allocPsram(csize_t(bufLen)))
-  if packedCanvas.isNil or packedPicture.isNil:
+    let
+      errorBytes = 2 * (max(width, height) + 2) * sizeof(int32)
+      runBytes = MaxRuns * sizeof(ChangedRun)
+      base = cast[int](allocPsram(csize_t(errorBytes + runBytes + bufLen + width * height)))
+    if base != 0:
+      packedErrors = cast[ptr UncheckedArray[int32]](base)
+      packedRuns = cast[ptr UncheckedArray[ChangedRun]](base + errorBytes)
+      packedPicture = cast[ptr UncheckedArray[uint8]](base + errorBytes + runBytes)
+      packedCanvas = cast[ptr UncheckedArray[uint8]](base + errorBytes + runBytes + bufLen)
+  if packedErrors.isNil:
     return packImage1bpp(image, buf, bufLen)
   let pixels = cast[ptr UncheckedArray[uint8]](image.bufferPointer)
   if packedKnown and packedWidth == width and packedHeight == height and packedRotate == frameRotate:
-    var runs: seq[ChangedRun]
-    if changedRuns(pixels, packedCanvas, width, height, runs) * 2 < width * height:
+    var count = 0
+    if changedRuns(pixels, packedCanvas, width, height, packedRuns, count) * 2 < width * height:
       copyMem(buf, packedPicture, bufLen)
-      packRuns1bpp(pixels, width, height, buf, rowBytes, runs, frameRotate)
-      for run in runs:
-        let at = run.y.int * width + run.left.int
+      packRuns1bpp(pixels, width, height, buf, rowBytes, toOpenArray(packedRuns, 0, count - 1), frameRotate, packedErrors)
+      for i in 0 ..< count:
+        let
+          run = packedRuns[i]
+          at = run.y.int * width + run.left.int
         copyMem(packedCanvas[at].addr, pixels[at].addr, int(run.right - run.left))
       copyMem(packedPicture, buf, bufLen)
       return true
@@ -433,6 +448,8 @@ proc packCanvas1bpp(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): 
   packedRotate = frameRotate
   packedKnown = true
   true
+
+{.pop.}
 
 proc packImageForFormat(
     image: Image;

@@ -179,24 +179,7 @@ def panel_wrappers(panel: str, variant) -> str:
         sleep_body = f"    {variant.sleep_function}();"
     else:
         sleep_body = "    /* driver has no sleep function */"
-    partial = ""
-    if panel in PARTIAL_PANELS:
-        partial_init, partial_display, partial_rest = PARTIAL_PANELS[panel]
-        partial = f"""static int fos_partial_init_{panel}(void)
-{{
-    {partial_init}();
-    return 0;
-}}
-static void fos_partial_{panel}(uint8_t *buf, uint8_t *previous)
-{{
-    {partial_display}((UBYTE *)buf, (UBYTE *)previous);
-}}
-static void fos_partial_rest_{panel}(void)
-{{
-    {partial_rest}();
-}}
-"""
-    return partial + f"""static int fos_init_{panel}(void)
+    return f"""static int fos_init_{panel}(void)
 {{
 {init_body}
 }}
@@ -237,13 +220,22 @@ typedef struct {
     void (*clear)(void);
     void (*display)(uint8_t *buf);
     void (*sleep)(void);
-    int (*partial_init)(void);                       /* NULL: no partial waveform */
-    void (*partial)(uint8_t *buf, uint8_t *previous); /* `previous`: what the glass shows */
-    void (*partial_rest)(void);                      /* the analog supply off, the controller awake */
 } fos_panel_entry_t;
 
 extern const fos_panel_entry_t fos_panel_table[];
 extern const size_t fos_panel_table_count;
+
+/* A panel with a partial waveform. Its own table: three pointers on every
+ * entry above were 1 KB of flash for one panel. */
+typedef struct {
+    const char *name;
+    void (*init)(void);
+    void (*show)(uint8_t *buf, uint8_t *previous); /* `previous`: what the glass shows */
+    void (*rest)(void);                            /* the analog supply off, the controller awake */
+} fos_panel_partial_t;
+
+#define FOS_PANEL_PARTIAL_COUNT @PARTIAL_COUNT@
+extern const fos_panel_partial_t fos_panel_partial_table[FOS_PANEL_PARTIAL_COUNT];
 """
 
 
@@ -312,7 +304,7 @@ def generate(repo_root: Path, out_dir: Path) -> None:
     for key in keys:
         variant = variants[key]
         parts.append(
-            "    { %s, %d, %d, %d, %d, %d, fos_init_%s, fos_clear_%s, fos_show_%s, fos_sleep_%s, %s, %s, %s },"
+            "    { %s, %d, %d, %d, %d, %d, fos_init_%s, fos_clear_%s, fos_show_%s, fos_sleep_%s },"
             % (
                 c_string(key),
                 int(variant.width),
@@ -321,14 +313,11 @@ def generate(repo_root: Path, out_dir: Path) -> None:
                 1 if key == "EPD_13in3e" else 0,
                 FOS_PANEL_BUS_SPI,
                 key, key, key, key,
-                f"fos_partial_init_{key}" if key in PARTIAL_PANELS else "NULL",
-                f"fos_partial_{key}" if key in PARTIAL_PANELS else "NULL",
-                f"fos_partial_rest_{key}" if key in PARTIAL_PANELS else "NULL",
             )
         )
     for panel in EXTRA_PANELS:
         parts.append(
-            "    { %s, %d, %d, %d, 0, %d, %s, %s, %s, %s, NULL, NULL, NULL },"
+            "    { %s, %d, %d, %d, 0, %d, %s, %s, %s, %s },"
             % (
                 c_string(panel["name"]),
                 int(panel["width"]),
@@ -340,9 +329,12 @@ def generate(repo_root: Path, out_dir: Path) -> None:
         )
     parts.append("};")
     parts.append("const size_t fos_panel_table_count = sizeof(fos_panel_table) / sizeof(fos_panel_table[0]);")
+    parts.append("const fos_panel_partial_t fos_panel_partial_table[FOS_PANEL_PARTIAL_COUNT] = {")
+    parts.extend(f"    {{ {c_string(key)}, {init}, {show}, {rest} }}," for key, (init, show, rest) in PARTIAL_PANELS.items())
+    parts.append("};")
     parts.append("")
 
-    (out_dir / "frameos_panel_table.h").write_text(HEADER_TEXT)
+    (out_dir / "frameos_panel_table.h").write_text(HEADER_TEXT.replace("@PARTIAL_COUNT@", str(len(PARTIAL_PANELS))))
     (out_dir / "frameos_panel_table.c").write_text("\n".join(parts))
 
     cmake_lines = ["set(FRAMEOS_PANEL_SOURCES"]

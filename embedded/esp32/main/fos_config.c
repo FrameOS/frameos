@@ -223,7 +223,7 @@ esp_err_t fos_config_init(void)
      * after `hardware`, which the board default keys on. */
     size_t event_map_len = sizeof(s_config.event_map);
     if (nvs_get_str(nvs, "event_map", s_config.event_map, &event_map_len) != ESP_OK) {
-        strlcpy(s_config.event_map, fos_board_event_map(s_config.hardware_preset), sizeof(s_config.event_map));
+        fos_board_event_map(s_config.hardware_preset, s_config.event_map, sizeof(s_config.event_map));
     }
     if (nvs_get_u32(nvs, "max_http", &u32) == ESP_OK) s_config.max_http_response_bytes = u32;
     uint8_t u8;

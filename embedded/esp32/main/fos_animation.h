@@ -129,7 +129,7 @@ typedef struct {
 void fos_input_hold_note(fos_input_hold_t *h, int64_t now_us);
 
 /* Whether the network is being held back right now. */
-bool fos_input_hold_engaged(const fos_input_hold_t *h);
+static inline bool fos_input_hold_engaged(const fos_input_hold_t *h) { return h->since_us != 0; }
 
 /* True, once, when the hold is over: the caller owes what it held back. */
 bool fos_input_hold_release(fos_input_hold_t *h, int64_t now_us);

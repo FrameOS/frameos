@@ -2,6 +2,7 @@
 #define FOS_BOARD_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 /* What chip and board this firmware is actually running on.
  *
@@ -45,7 +46,7 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset);
  * stored-config default when NVS has no `event_map` key. Keep in step with
  * `eventMap` in EMBEDDED_HARDWARE_PRESETS (backend/app/tasks/embedded_firmware.py)
  * and the SPA's preset table. */
-const char *fos_board_event_map(const char *hardware_preset);
+void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len);
 
 /* The board's PDM microphone for a hardware preset key: clock, data and the
  * power-enable GPIO (-1 each when the preset names a board without one, or no

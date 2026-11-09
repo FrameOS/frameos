@@ -27,6 +27,7 @@ static void *(*s_lend_i2c_bus)(int sda, int scl) = NULL;
 /* What a panel with a partial waveform shows, byte for byte: every picture
  * that reaches the glass goes through fos_display_blit or fos_display_update
  * and is copied here, whoever drew it (a status screen, an overlay). */
+static const fos_panel_partial_t *s_partial = NULL;
 static uint8_t *s_glass = NULL;
 static bool s_glass_known = false;
 static uint32_t s_partials_since_full = 0;
@@ -156,11 +157,15 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
 
     DEV_SetPinConfig(config->rst, config->dc, config->cs, config->cs2, config->busy,
                      config->sck, config->mosi, config->pwr);
+    s_partial = NULL;
+    for (size_t i = 0; i < FOS_PANEL_PARTIAL_COUNT; i++) {
+        if (strcmp(fos_panel_partial_table[i].name, entry->name) == 0) s_partial = &fos_panel_partial_table[i];
+    }
     if (entry->bus == FOS_PANEL_BUS_SPI_READ) {
         DEV_SetReadPin(config->dc);
         DEV_SetSpiClock(FOS_IT8951_SPI_HZ);
     } else {
-        DEV_SetSpiClock(entry->partial ? FOS_PARTIAL_SPI_HZ : 0);
+        DEV_SetSpiClock(s_partial ? FOS_PARTIAL_SPI_HZ : 0);
     }
     s_panel = entry;
     /* An RGB LCD comes up now, not at the first blit: its scan-out starts
@@ -413,7 +418,7 @@ esp_err_t fos_display_blit(const uint8_t *buf, size_t len)
 
 bool fos_display_supports_partial(void)
 {
-    return s_panel && s_panel->partial && s_panel->partial_init;
+    return s_partial != NULL;
 }
 
 esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bool input_recent,
@@ -437,12 +442,8 @@ esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bo
 
     /* One bus hold, as a full refresh. */
     DEV_SPI_Acquire();
-    if (!s_panel_awake && s_panel->partial_init() != 0) {
-        DEV_SPI_Release();
-        ESP_LOGE(TAG, "panel partial init failed");
-        return ESP_FAIL;
-    }
-    s_panel->partial((uint8_t *)buf, s_glass);
+    if (!s_panel_awake) s_partial->init();
+    s_partial->show((uint8_t *)buf, s_glass);
     DEV_SPI_Release();
     s_last_partial_us = esp_timer_get_time();
     s_panel_awake = true;
@@ -473,7 +474,7 @@ void fos_display_park_if_idle(int64_t now_us)
         fos_display_park();
     } else if (idle_us >= FOS_PANEL_ANALOG_US && !s_panel_rested) {
         DEV_SPI_Acquire();
-        s_panel->partial_rest();
+        s_partial->rest();
         DEV_SPI_Release();
         s_panel_rested = true;
     }

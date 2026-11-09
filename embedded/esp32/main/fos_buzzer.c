@@ -56,14 +56,14 @@
  * resonance, and short. */
 #define LOADING_DELAY_US (1500 * 1000)
 #define LOADING_PERIOD_US (1300 * 1000)
-#define LOADING_MAX_US (20 * 1000 * 1000)
+#define LOADING_ROUNDS 15 /* 20 seconds */
 #define LOADING_TAP_MS 8
 #define LOADING_GAP_MS 90
 
 static SemaphoreHandle_t s_lock = NULL;
 static esp_timer_handle_t s_stop_timer = NULL;
 static esp_timer_handle_t s_loading_timer = NULL;
-static int64_t s_loading_since_us = 0; /* 0: not loading */
+static volatile uint8_t s_loading_rounds = 0; /* left to play, 0: not loading */
 static bool s_timer_ready = false;
 static uint32_t s_freq_hz = 0;
 static int s_pin = -1;         /* the pin the channel drives, -1 = none */
@@ -305,13 +305,9 @@ void fos_buzzer_long_press(void)
 static void loading_tap(void *arg)
 {
     (void)arg;
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    bool loading = s_loading_since_us != 0 && esp_timer_get_time() - s_loading_since_us < LOADING_MAX_US;
-    bool sounding = s_note_count != 0; /* a press's click: it goes first */
-    if (loading) esp_timer_start_once(s_loading_timer, LOADING_PERIOD_US);
-    else s_loading_since_us = 0;
-    xSemaphoreGive(s_lock);
-    if (!loading || sounding) return;
+    if (s_loading_rounds == 0) return;
+    if (--s_loading_rounds > 0) esp_timer_start_once(s_loading_timer, LOADING_PERIOD_US);
+    if (s_note_count != 0) return; /* a press's click goes first */
     const fos_buzzer_note_t taps[] = {
         {scaled_hz(3, 4), LOADING_TAP_MS},
         {0, LOADING_GAP_MS},
@@ -322,23 +318,17 @@ static void loading_tap(void *arg)
 
 void fos_buzzer_loading_begin(void)
 {
-    if (!s_lock || !s_loading_timer) return;
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (s_loading_since_us == 0) {
-        s_loading_since_us = esp_timer_get_time();
-        esp_timer_stop(s_loading_timer);
-        esp_timer_start_once(s_loading_timer, LOADING_DELAY_US);
-    }
-    xSemaphoreGive(s_lock);
+    if (!s_loading_timer || s_loading_rounds != 0) return;
+    s_loading_rounds = LOADING_ROUNDS;
+    esp_timer_stop(s_loading_timer);
+    esp_timer_start_once(s_loading_timer, LOADING_DELAY_US);
 }
 
 void fos_buzzer_loading_end(void)
 {
-    if (!s_lock || !s_loading_timer) return;
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_loading_since_us = 0;
+    if (!s_loading_timer) return;
+    s_loading_rounds = 0;
     esp_timer_stop(s_loading_timer);
-    xSemaphoreGive(s_lock);
 }
 
 /* The voice chat's sounds (docs/voice-chat.md). Arpeggios, not chords: the

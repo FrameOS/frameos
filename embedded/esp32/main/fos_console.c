@@ -853,7 +853,7 @@ static int cmd_set(int argc, char **argv)
             }
             /* What the board's buttons do whatever scene shows (a reTerminal's
              * arrows held walk the scenes); a control plane's push replaces it. */
-            strlcpy(config->event_map, fos_board_event_map(presets[i].name), sizeof(config->event_map));
+            fos_board_event_map(presets[i].name, config->event_map, sizeof(config->event_map));
 
             /* The board's microphone, or none: a preset switch from an E1002
              * to an E1004 must not leave a PDM clock on the E1004's panel
