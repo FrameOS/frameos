@@ -162,16 +162,15 @@ interface FrameOSElementProps {
   [attribute: string]: any;
 }
 /**
- * <Scene id="..." /> draws another scene of this frame as a picture, at the place and size the UI
+ * <Scene id="..." /> draws another scene of this frame, at the place and size the UI
  * gives it (flex-1 unless the classes say). Other props are that scene's state. It renders on its
  * own schedule. FrameOS 2026.11.5+.
  */
 declare const Scene: string;
 /**
- * <Yield /> or <yield />: where a layout shows the scene it wraps (docs/scene-layouts.md).
+ * <yield />: where a layout shows the scene it wraps (docs/scene-layouts.md).
  * FrameOS 2026.11.5+.
  */
-declare const Yield: string;
 declare namespace JSX {
   type Element = FrameOSElement;
   interface ElementChildrenAttribute { children: {}; }
@@ -210,6 +209,9 @@ interface FrameOSApp {
     /** A panel that shows a change only in a refresh, as e-paper and a monochrome OLED do. An app that follows
      * a finger waits for it to lift there (FrameOS 2026.11.5+; undefined before). */
     paper?: boolean;
+    /** The name of the scene showing. A layout's app gets the name of the scene it wraps (FrameOS 2026.11.5+;
+     * undefined before). */
+    sceneName?: string;
     /** The battery's charge from 0 to 100, on an ESP32 frame with a battery. Undefined elsewhere, so check
      * before drawing it (FrameOS 2026.11.5+; undefined before). */
     batteryPercent?: number;
@@ -238,6 +240,9 @@ declare const frameos: {
   log(...args: any[]): void;
   error(...args: any[]): void;
   setNextSleep(seconds: number): void;
+  /** Sends an event as a dispatch node does: render, setCurrentScene, setSceneState, sceneSwitcher, sceneSettings or a
+   * custom event of the scene's. An event a scene may not send is logged and dropped (FrameOS 2026.11.5+). */
+  dispatch(event: string, payload?: Record<string, any>): void;
   fetchText(url: string): string;
   fetchJson(url: string): any;
   httpRequest(
@@ -442,6 +447,7 @@ declare const mock: {
   remember(impl?: (typeof frameos)["remember"]): FrameOSMockFn<(typeof frameos)["remember"]>;
   recall(impl?: (typeof frameos)["recall"]): FrameOSMockFn<(typeof frameos)["recall"]>;
   setNextSleep(impl?: (typeof frameos)["setNextSleep"]): FrameOSMockFn<(typeof frameos)["setNextSleep"]>;
+  dispatch(impl?: (typeof frameos)["dispatch"]): FrameOSMockFn<(typeof frameos)["dispatch"]>;
   listAssets(impl?: (typeof frameos)["listAssets"]): FrameOSMockFn<(typeof frameos)["listAssets"]>;
   assetExists(impl?: (typeof frameos)["assetExists"]): FrameOSMockFn<(typeof frameos)["assetExists"]>;
   assetSize(impl?: (typeof frameos)["assetSize"]): FrameOSMockFn<(typeof frameos)["assetSize"]>;

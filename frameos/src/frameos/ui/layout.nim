@@ -25,6 +25,9 @@ when not defined(frameosEmbedded):
 
 export keyboard.KeyboardPage
 
+const MaxHoles* = 8
+  ## Past this many a `<Scene>` is a picture, as one that cannot be a hole is.
+
 type
   UiKind = enum
     ukBox, ukText, ukImage, ukSvg
@@ -88,9 +91,16 @@ type
     drawn: seq[SvgNode]  ## its outlines as emitted there, paths shared
 
   UiHole* = object
-    ## A `<yield />` (yieldHole), in the UI's pixels.
-    found*, clean*: bool
+    ## A `<Scene>` or `<yield />` (seekHoles), in the UI's pixels, and in the
+    ## canvas's (left to bottom, for whoever knows the scale).
+    clean*: bool
     x*, y*, w*, h*: float32
+    left*, top*, right*, bottom*: int32
+
+  UiHoles* = object
+    count*: int
+    firstYield: int ## its place + 1
+    items*: array[MaxHoles, UiHole]
 
   UiMemo* = ref object
     ## What the last layout of a UI set in type, for the next one (one per
@@ -1975,9 +1985,9 @@ proc layoutUi*(root: SvgNode, width, height: int): SvgNode =
     input: UiInput
   layoutUi(root, width, height, input, regions)
 
-proc seekHole(n: UiNode, ox, oy, opacity: float32, scrolled: bool, hole: var UiHole) =
-  ## In paint order, as `emit` walks: the first `<yield />`, then whether
-  ## anything painted after it lands on it.
+proc seekHoles(n: UiNode, ox, oy, opacity: float32, scrolled, yieldReady: bool, holes: var UiHoles) =
+  ## In paint order, as `emit` walks: each `<Scene>` and `<yield />`, then
+  ## whether anything painted after it lands on it.
   template b: untyped = n.box
   let op = opacity * b.opacity
   if b.display == diNone or op <= 0:
@@ -1987,18 +1997,27 @@ proc seekHole(n: UiNode, ox, oy, opacity: float32, scrolled: bool, hole: var UiH
     y = round(oy + n.y)
     w = round(ox + n.x + n.size.x) - x
     h = round(oy + n.y + n.size.y) - y
-  if hole.found and x < hole.x + hole.w and x + w > hole.x and y < hole.y + hole.h and y + h > hole.y and
-      (n.kind != ukBox or b.bg.a > 0 or b.gradient > 0 or b.border[0] + b.border[1] + b.border[2] + b.border[3] > 0):
-    hole.clean = false
-  if n.kind == ukImage and n.src.tag == "Scene" and n.src.attr("id") == SceneYieldId:
-    if hole.found:
-      hole.clean = false
-      return
+  if n.kind != ukBox or b.bg.a > 0 or b.gradient > 0 or b.border[0] + b.border[1] + b.border[2] + b.border[3] > 0:
+    for i in 0 ..< holes.count:
+      template hole: untyped = holes.items[i]
+      if x < hole.x + hole.w and x + w > hole.x and y < hole.y + hole.h and y + h > hole.y:
+        hole.clean = false
+  if n.kind == ukImage and n.src.tag == "Scene":
     let
+      yields = n.src.attr("id") == SceneYieldId
       cw = w - b.padX
       ch = h - b.padY
-    hole = UiHole(found: true, x: x + b.pad[3] + b.border[3], y: y + b.pad[0] + b.border[0], w: cw, h: ch,
-      clean: op >= 1 and not scrolled and cw > 0 and ch > 0 and n.x >= 0 and n.y >= 0)
+    if cw <= 0 or ch <= 0 or holes.count == MaxHoles or (yields and not yieldReady):
+      return
+    if yields:
+      if holes.firstYield > 0:
+        # The same scene in two places is drawn as pictures.
+        holes.items[holes.firstYield - 1].clean = false
+        return
+      holes.firstYield = holes.count + 1
+    holes.items[holes.count] = UiHole(x: x + b.pad[3] + b.border[3], y: y + b.pad[0] + b.border[0], w: cw, h: ch,
+      clean: op >= 1 and not scrolled and n.x >= 0 and n.y >= 0)
+    inc holes.count
     return
   if n.kind != ukBox:
     return
@@ -2007,17 +2026,26 @@ proc seekHole(n: UiNode, ox, oy, opacity: float32, scrolled: bool, hole: var UiH
   for pass in [false, true]:
     for c in n.children:
       if c.box.absolute == pass:
-        c.seekHole(x, y, op, moves, hole)
+        c.seekHoles(x, y, op, moves, yieldReady, holes)
 
-proc yieldHole*(memo: UiMemo, input: UiInput): UiHole =
-  ## Where the `<yield />` of the UI just laid out sits, in its own pixels, and
-  ## whether it can be a hole: one yield, fully opaque, nothing painted over it,
-  ## not in anything that scrolls. A popup or a held key's accents can land on
-  ## it, so a UI showing one is drawn the slow way until it goes.
+proc seekHoles*(memo: UiMemo, input: UiInput, yieldReady: bool): UiHoles =
+  ## Where the embedded scenes of the UI just laid out sit, in its own pixels,
+  ## and which can be holes: fully opaque, nothing painted over them, not in
+  ## anything that scrolls, and for `<yield />` only one and a scene to wrap. A
+  ## popup or a held key's accents can land on any, so a UI showing one is drawn
+  ## the slow way until it goes.
   if memo.isNil or memo.root.isNil:
     return
-  memo.root.seekHole(0, 0, 1, false, result)
+  memo.root.seekHoles(0, 0, 1, false, yieldReady, result)
   if input.open > 0 or input.accents > 0:
-    result.clean = false
+    for i in 0 ..< result.count:
+      result.items[i].clean = false
+
+proc indexAt*(holes: UiHoles, x, y: float32): int =
+  ## The clean hole at this place in the UI, -1 for none.
+  for i in 0 ..< holes.count:
+    if holes.items[i].clean and abs(holes.items[i].x - x) < 0.5 and abs(holes.items[i].y - y) < 0.5:
+      return i
+  -1
 
 {.pop.}

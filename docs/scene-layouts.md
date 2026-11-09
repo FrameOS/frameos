@@ -27,11 +27,20 @@ or a saved scene is edited, the cloud refuses a store version
 to the AI. The runtime does not check: a layout with no yield shows no content.
 
 **Starters.** Every repo sample whose scene is a layout (`Top bar`, `Bottom bar`,
-`Side rail` in `repo/scenes/samples`) is also one click away on both planes
+`Side rail`, `Windows 98` in `repo/scenes/samples`) is also one click away on both planes
 (`frontend/scripts/generateLayoutStarters.mjs`): "New layout" in the frame's
 Layouts group, "Add layout" at the end of the Add scene drawer while it has none,
 and "Add a layout" in its Settings under Layouts. Each sample's `thumb.jpg` is
 shown in those lists and saved as the added layout's picture.
+
+**What a layout can ask.** `app.frame.sceneName` is the name of the scene it
+wraps (its own, shown on its own), `app.frame.wifiRssi` and
+`app.frame.batteryPercent` are what the frame knows, and its handlers can open
+the built-in screens with `frameos.dispatch('sceneSwitcher')` and
+`frameos.dispatch('sceneSettings')`, which is all the Windows 98 taskbar's Start
+and Control Panel buttons do. A clock that shows no seconds calls
+`frameos.setNextSleep` with the seconds left in the minute, and the chrome then
+costs nothing until it changes.
 
 ## How it works
 
@@ -54,18 +63,19 @@ From then on, one host loop and one scene:
   the frame shows is wrapped.
 - A layout that is not on the frame leaves the scene as it is (`layout:missing`,
   logged once).
-- **A `<yield />` is a hole in the canvas.** The chrome is drawn around it and
-  the content straight into that rectangle of the canvas, as a split's panel
-  is: no picture of the content is made, what is not due stays where it is, and
-  a scene's damage repaint works there as it does on the whole panel. A pass
-  the chrome has nothing to do in does not enter the layout at all (no
-  JavaScript, no tree, no raster): a 20 fps scene in a clock bar pays for the
-  bar once a second. Its chrome comes out of whichever frame buffer holds it,
-  around the hole.
-- **What makes a yield a picture instead:** `opacity` on it or around it,
-  anything painted after it that lands on it, a box that scrolls around it, a
-  second `<yield />`, or a layout whose render is more than the one app. It
-  still shows, composited like a `<Scene>`, at that cost.
+- **A `<yield />` and a `<Scene>` are holes in the canvas** (up to eight in a
+  UI). The chrome is drawn around them and each scene straight into its
+  rectangle of the canvas, as a split's panel is: no picture of it is made, what
+  is not due stays where it is, and a scene's damage repaint works there as it
+  does on the whole panel. A pass the UI has nothing to do in does not enter it
+  at all (no JavaScript, no tree, no raster): a 20 fps scene in a clock bar pays
+  for the bar once a second, and a dashboard of `<Scene>` tiles redraws only the
+  tile that is due. Its chrome comes out of whichever frame buffer holds it,
+  around the holes. That holds inside another hole too.
+- **What makes one a picture instead:** `opacity` on it or around it, anything
+  painted after it that lands on it, a box that scrolls around it, a second
+  `<yield />`, or a UI whose render is more than the one app. It still shows,
+  composited, at that cost. A UI holding a picture runs on every pass.
 - **No floating chrome yet:** a layout tiles the panel, and something drawn
   over its yield makes it a picture.
 - A layout's JS app can hear the frame's events: `events` in its `config.json`

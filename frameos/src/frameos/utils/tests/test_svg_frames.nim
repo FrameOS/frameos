@@ -376,6 +376,25 @@ block a_rectangle_of_the_panel:
   doAssert into(0, scene(6)) == region
   panelBufferGeneration = nil
 
+block around_several_holes:
+  # What is left of the canvas: every pixel once, none in a hole.
+  proc check(holes: openArray[PixelBox]) =
+    var seen: array[100 * 100, int]
+    for box in aroundHoles(100, 100, holes):
+      for y in box.y ..< box.y + box.h:
+        for x in box.x ..< box.x + box.w:
+          inc seen[y * 100 + x]
+    for y in 0 ..< 100:
+      for x in 0 ..< 100:
+        var inHole = 0
+        for h in holes:
+          if x >= h.x and x < h.x + h.w and y >= h.y and y < h.y + h.h: inc inHole
+        doAssert seen[y * 100 + x] == 1 - inHole, $(x, y, seen[y * 100 + x])
+  check([])
+  check([(x: 0, y: 0, w: 100, h: 100)])
+  check([(x: 0, y: 10, w: 40, h: 80), (x: 60, y: 10, w: 40, h: 80)])
+  check([(x: 10, y: 0, w: 30, h: 30), (x: 50, y: 20, w: 30, h: 50), (x: 5, y: 60, w: 20, h: 40)])
+
 block the_chrome_around_a_hole:
   const
     HX = 30
@@ -386,7 +405,7 @@ block the_chrome_around_a_hole:
   target.fill(rgba(255, 0, 255, 255))
   let page = svgRoot(&"""<svg width="{W}" height="{H}"><rect x="10" y="10" width="{W - 20}" height="{H - 20}" fill="#ffffff"/></svg>""")
   var owed = some(color(0, 0, 0, 1))
-  doAssert renderSvgAround(page, target, (x: HX, y: HY, w: HW, h: HH), owed)
+  doAssert renderSvgAround(page, target, [(x: HX, y: HY, w: HW, h: HH)], owed)
   doAssert owed.isNone
   doAssert target[2, 2] == rgbx(0, 0, 0, 255), "the background owed around the hole"
   doAssert target[15, 15] == rgbx(255, 255, 255, 255)
@@ -398,7 +417,7 @@ block the_chrome_around_a_hole:
   # A hole in a corner leaves no empty strips to draw.
   let corner = newImage565(W, H)
   var nothingOwed = none(Color)
-  doAssert renderSvgAround(page, corner, (x: 0, y: 0, w: W, h: 30), nothingOwed)
+  doAssert renderSvgAround(page, corner, [(x: 0, y: 0, w: W, h: 30)], nothingOwed)
   doAssert corner[20, 40] == rgbx(255, 255, 255, 255)
 
 echo "svg frames in rectangles ok"

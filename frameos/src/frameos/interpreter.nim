@@ -531,7 +531,7 @@ var yieldScene {.threadvar.}: FrameScene
 
 proc runSceneNodeRender(parent: FrameScene, child: FrameScene,
     runChild: proc (self: FrameScene, context: ExecutionContext), context: ExecutionContext,
-    addSlot = true) {.noinline.} =
+    addSlot = true, hole = false) {.noinline.} =
   ## A scene node handling `render` (frameos/scene_rhythm.nim): the scene it
   ## draws runs only when it is due, and otherwise its last picture stays or
   ## goes back. Its `nextSleep` is its own: inside a split,
@@ -549,7 +549,7 @@ proc runSceneNodeRender(parent: FrameScene, child: FrameScene,
       x = float32(child.canvasX - parent.canvasX)
       y = float32(child.canvasY - parent.canvasY)
     parent.slots.add(SceneSlot(child: child, x: x, y: y,
-      visible: [x, y, x + given.width.float32, y + given.height.float32]))
+      visible: [x, y, x + given.width.float32, y + given.height.float32], hole: hole))
   let decision = rhythmVisit(child, given)
   if decision == rdKeep:
     return
@@ -600,6 +600,7 @@ proc ensureLayoutScene(self: InterpretedFrameScene): FrameScene =
     try:
       result = exported.init(self.layoutSceneId, self.frameConfig, self.logger,
         if self.layoutState.isNil: %*{} else: self.layoutState)
+      result.shownName = self.shownName
       self.sceneNodes[LayoutSceneKey] = result
       self.sceneExportByNodeId[LayoutSceneKey] = exported
       return
@@ -656,6 +657,23 @@ proc routePointer(self: InterpretedFrameScene, context: ExecutionContext): bool 
 const PointerEvents = ["tap", "doubleTap", "longPress", "swipe", "pointerDown", "pointerUp",
   "pointerMove", "pointerCancel"]
 
+proc drawIntoHole(host, child: FrameScene, canvas: Image, x, y, w, h: int, context: ExecutionContext, addSlot: bool) =
+  ## `child`, on its own schedule, straight into a hole in `host`'s canvas.
+  let view = canvas.view(x, y, w, h)
+  let inner = renderContext(child, view, context)
+  let saved = rhythmEnterHole()
+  runSceneNodeRender(host, child, runEvent, inner, addSlot, hole = true)
+  rhythmLeaveChild(saved)
+  if inner.image != view:
+    # It swapped its canvas for an image of its own: nothing wrote through, so
+    # it is composited into place (as a split does for a cell).
+    canvas.draw(inner.image, translate(vec2(x.float32, y.float32)))
+
+proc dropEmbedImage(r: SceneRhythm) =
+  noteEmbedImage(-r.embedImage.byteSize)
+  unregisterCanvas(r.embedImage)
+  r.embedImage = nil
+
 proc parseEmbedProps(props: string): JsonNode =
   ## What the walker stringified, less the tag's own names. An exception here
   ## is the node's, like any failure of the UI that holds the tag.
@@ -667,11 +685,12 @@ proc parseEmbedProps(props: string): JsonNode =
       result.delete(key)
 
 proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId, props: string,
-    x, y: float32, visible: array[4, float32], width, height: int, context: ExecutionContext): Image =
-  ## A `<Scene id>` or `<yield />` in a UI: its picture at this size, what
-  ## the walker draws as a raster image. Runs when it is due, like any
-  ## embedded scene, and keeps its picture while the memory allows; a device
-  ## that cannot afford to keep one renders it again each pass.
+    x, y: float32, visible: array[4, float32], width, height: int, asHole: bool, context: ExecutionContext): Image =
+  ## A `<Scene id>` or `<yield />` in a UI. `asHole`: drawn straight into the
+  ## canvas at (`x`, `y`), and non-nil when it was. Otherwise its picture at
+  ## this size, what the walker draws as a raster image: it runs when it is due,
+  ## like any embedded scene, and keeps its picture while the memory allows; a
+  ## device that cannot afford to keep one renders it again each pass.
   if owner.isNil or not (owner of InterpretedFrameScene) or width <= 0 or height <= 0 or rhythmDepth() > 8:
     return nil
   let parent {.cursor.} = InterpretedFrameScene(owner)
@@ -694,7 +713,6 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
       child = exported.init(SceneId(sceneId), owner.frameConfig, owner.logger, parseEmbedProps(props))
       parent.sceneNodes[key] = child
       parent.sceneExportByNodeId[key] = exported
-  owner.slots.add(SceneSlot(child: child, x: x, y: y, visible: visible))
   if child.rhythm.isNil:
     child.rhythm = SceneRhythm()
   let r {.cursor.} = child.rhythm
@@ -704,6 +722,15 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
     if child.state.kind == JObject:
       for key, value in parseEmbedProps(props).pairs:
         child.state[key] = value
+  if asHole:
+    if not r.embedImage.isNil:
+      dropEmbedImage(r)
+    if owner.holesMoved:
+      # The chrome has just painted where it was.
+      rhythmMarkDue(child)
+    drawIntoHole(owner, child, context.image, x.int, y.int, width, height, context, addSlot = true)
+    return context.image
+  owner.slots.add(SceneSlot(child: child, x: x, y: y, visible: visible))
   let due = rhythmEmbedDue(child)
   let like {.cursor.} = if context.hasImage: context.image else: nil
   let format = if like.isNil: pfRgbx else: like.format
@@ -713,9 +740,7 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
     return image
   if not fits:
     if not image.isNil:
-      noteEmbedImage(-image.byteSize)
-      unregisterCanvas(image)
-      r.embedImage = nil
+      dropEmbedImage(r)
     try:
       image = if like.isNil: newImage(width, height) else: newImageLike(like, width, height)
     except CatchableError:
@@ -745,59 +770,10 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
 
 embeddedSceneRenderer = renderEmbeddedScene
 
-proc yieldIntoHole(layout, content: FrameScene, canvas: Image, context: ExecutionContext, addSlot: bool) =
-  ## The wrapped scene, on its own schedule, straight into the layout's hole.
-  let view = canvas.view(layout.holeX, layout.holeY, layout.holeW, layout.holeH)
-  let inner = renderContext(content, view, context)
-  let saved = rhythmEnterHole()
-  runSceneNodeRender(layout, content, runEvent, inner, addSlot)
-  rhythmLeaveChild(saved)
-  if inner.image != view:
-    # The content swapped its canvas for an image of its own: nothing wrote
-    # through, so it is composited into place (as a split does for a cell).
-    canvas.draw(inner.image, translate(vec2(layout.holeX.float32, layout.holeY.float32)))
-
 proc yieldReady(owner: FrameScene): bool =
   not yieldScene.isNil and yieldScene != owner
 
-proc yieldInto(owner: FrameScene, x, y, w, h: int, context: ExecutionContext) =
-  ## A `<yield />` drawn as a hole. A hole that moved leaves nothing the canvas
-  ## can be trusted with: the chrome has just painted where the content was.
-  if owner.holeX != x.int32 or owner.holeY != y.int32 or owner.holeW != w.int32 or owner.holeH != h.int32:
-    rhythmMarkDue(yieldScene)
-    forgetPanelRegions()
-  owner.holeX = x.int32
-  owner.holeY = y.int32
-  owner.holeW = w.int32
-  owner.holeH = h.int32
-  owner.holePass = rhythmPass()
-  yieldIntoHole(owner, yieldScene, context.image, context, addSlot = true)
-
 embeddedYieldReady = yieldReady
-embeddedYieldInto = yieldInto
-
-proc renderLayout(layout, content: FrameScene, context: ExecutionContext) =
-  ## A pass of a layout and the scene it wraps. With a hole, a pass the chrome
-  ## has nothing to do in never enters the layout: its picture is on the canvas
-  ## already, or comes out of another frame buffer around the hole.
-  let decision = rhythmVisitChrome(layout)
-  case decision
-  of rdKeep, rdRestore:
-    if decision == rdRestore:
-      rhythmRestoreChrome(layout)
-    yieldIntoHole(layout, content, context.image, context, addSlot = false)
-  of rdRun, rdRepaint:
-    # A layout's nextSleep is the layout's: it never reaches the frame.
-    let parentSleep = context.nextSleep
-    context.nextSleep = -1
-    runEvent(layout, context)
-    let layoutSleep = context.nextSleep
-    context.nextSleep = parentSleep
-    if layout.holePass == rhythmPass():
-      rhythmChromeRan(layout, decision, layoutSleep)
-    else:
-      # It did not draw a hole this time (it failed, or it cannot be one now).
-      layout.holeW = 0
 
 {.pop.}
 
@@ -1250,48 +1226,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           "eventName": eventName,
           "payload": finalPayload
         })
-      if eventName == "render" and context.event == "render":
-        self.logger.log(%*{
-          "event": "interpreter:dispatch:ignored",
-          "sceneId": self.id.string,
-          "nodeId": currentNodeId.int,
-          "eventName": eventName,
-          "reason": "renderSelfDispatch"
-        })
-      elif not originMayEmit(eoScene, eventName):
-        # Scene code is untrusted (it may be anyone's store scene). A dispatch
-        # node may drive scenes and state; it may not replace the installed
-        # scene set (skipping every guard the push path applies) or take the
-        # runtime down on each render.
-        self.logger.log(%*{
-          "event": "interpreter:dispatch:ignored",
-          "sceneId": self.id.string,
-          "nodeId": currentNodeId.int,
-          "eventName": eventName,
-          "reason": "runtimeVerb"
-        })
-      else:
-        # One run may fire only so many events (run_budget.nim): a handler that
-        # dispatches its own event is an unbounded chain that starves rendering
-        # on the Pi and recurses on the ESP32. Logged once per run, then dropped.
-        case takeDispatchBudget()
-        of dvAllowed:
-          if eventName == "render":
-            # A scene asking to be drawn again means this one, also when it
-            # sits in a split and is not due (scene_rhythm.nim).
-            rhythmMarkDue(self)
-          sendEvent(eventName, finalPayload, eoScene)
-        of dvRefusedFirst:
-          self.logger.log(%*{
-            "event": "interpreter:dispatch:ignored",
-            "sceneId": self.id.string,
-            "nodeId": currentNodeId.int,
-            "eventName": eventName,
-            "reason": "dispatchBudget",
-            "budget": dispatchBudgetTotalNow()
-          })
-        of dvRefused:
-          discard
+      dispatchFromScene(self, eventName, finalPayload, currentNodeId.int, context.event)
       if asDataNode:
         result = VJson(copy(finalPayload))
     of "code":
@@ -1678,6 +1613,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     apps: exportedScene.apps,
     customEventOrigins: exportedScene.customEventOrigins,
     eventMap: exportedScene.eventMap,
+    shownName: exportedScene.name,
     refreshFollowsChildren: exportedScene.refreshFollowsChildren,
     followInterval: -1,
     layoutSceneId: exportedScene.layoutSceneId,
@@ -2161,6 +2097,28 @@ proc resolvedDispatchBudget(frameConfig: FrameConfig): int =
     return frameConfig.js.dispatchBudget
   DefaultDispatchBudget
 
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
+
+proc renderChrome(host: FrameScene, context: ExecutionContext) =
+  ## A render of a scene whose UI may have holes (a layout around its
+  ## `<yield />`, a UI with `<Scene>`s). A pass the UI has nothing to do in
+  ## never enters it: its picture is on the canvas already, or comes out of
+  ## another frame buffer around the holes, and what is in the holes gets its turn.
+  let decision = rhythmVisitChrome(host)
+  if decision == rdKeep or decision == rdRestore:
+    if decision == rdRestore:
+      rhythmRestoreChrome(host, context.image)
+    for i in 0 ..< host.slots.len:
+      template s: untyped = host.slots[i]
+      drawIntoHole(host, s.child, context.image, s.x.int, s.y.int, int(s.visible[2] - s.x), int(s.visible[3] - s.y),
+        context, addSlot = false)
+    return
+  runEventInner(host, context)
+  if rhythmChromeCanStay(host):
+    rhythmChromeRan(host, decision, context.nextSleep)
+
+{.pop.}
+
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
   ## Every run of a scene — a render, an event, a child scene's init — enters
   ## here on every host (runner.nim, embedded_runtime.nim, wasm_main.nim), so
@@ -2183,11 +2141,20 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
       elif passStarted: ensureLayoutScene(interpreted)
       else: interpreted.sceneNodes.getOrDefault(LayoutSceneKey, nil)
     if layout.isNil:
-      runEventInner(self, context)
+      if rendering:
+        renderChrome(self, context)
+      else:
+        runEventInner(self, context)
     else:
       yieldScene = interpreted
       if rendering:
-        renderLayout(layout, interpreted, context)
+        # A layout's nextSleep is the layout's: it never reaches the frame.
+        let parentSleep = context.nextSleep
+        let saved = rhythmEnterHole()
+        context.nextSleep = -1
+        runEvent(layout, context)
+        rhythmLeaveChild(saved)
+        context.nextSleep = parentSleep
       elif context.event in PointerEvents:
         # Over the chrome it is the layout's; over the content it comes
         # back here through the layout's slots.

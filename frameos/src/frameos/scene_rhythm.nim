@@ -30,7 +30,7 @@ import frameos/types
 import frameos/panel_shape
 import frameos/refresh_interval
 import frameos/utils/canvas_log
-from frameos/utils/svg_frames import forgetPanelRegions, aroundHole
+from frameos/utils/svg_frames import forgetPanelRegions, aroundHoles, PixelBox
 from frameos/loading_mark import LoadingMarkMinIntervalSeconds
 from frameos/utils/memory import availableRenderBytes, availableRenderHeadroomBytes, runsAsEmbedded
 
@@ -94,6 +94,10 @@ var
   keepAllowed {.threadvar.}: bool
     ## This pass may leave a cell as the canvas holds it: every scene on the
     ## way here draws nothing but its panels (a generated split).
+  chromeStays {.threadvar.}: bool
+    ## Nothing outside the scene entered last will paint over its rectangle,
+    ## so its UI's chrome can be left there (rhythmVisitChrome). Not
+    ## `keepAllowed`, which also asks what that scene itself paints.
   canvasMarks {.threadvar.}: array[MaxCanvasMarks, CanvasMark]
   nextCanvasMark {.threadvar.}: int
   rhythmHoldFloor*: bool
@@ -297,6 +301,7 @@ proc rhythmMarkDue*(scene: FrameScene) =
   ## The scene asked to be drawn again (its own `render` dispatch).
   if not scene.isNil and not scene.rhythm.isNil:
     scene.rhythm.dueAt = 0
+    scene.rhythm.chromeDueAt = 0
 
 proc rhythmAwaited*(scene: FrameScene): bool =
   ## May the next pass show the loading mark? Not when the frame's own clock
@@ -348,6 +353,7 @@ proc rhythmEnterChild*(child: FrameScene): bool =
   ## A scene is about to run inside the current one. What it draws under
   ## lasts only if it, too, draws nothing but its panels.
   result = keepAllowed
+  chromeStays = keepAllowed
   keepAllowed = keepAllowed and child.refreshFollowsChildren
 
 proc rhythmEnterEmbed*(): bool =
@@ -355,12 +361,14 @@ proc rhythmEnterEmbed*(): bool =
   ## holds anything from last time.
   result = keepAllowed
   keepAllowed = false
+  chromeStays = false
 
 proc rhythmEnterHole*(): bool =
   ## A layout's `<yield />` hole: nothing is drawn over it, so what the canvas
   ## holds there stays, as under a generated split's panel.
   result = keepAllowed
   keepAllowed = passGeneration >= 0
+  chromeStays = keepAllowed
 
 proc rhythmPass*(): int =
   passId
@@ -543,26 +551,30 @@ proc rhythmAfterRun*(scene: FrameScene, decision: RhythmDecision, given, drawn: 
 
 # --------------------------------------------------- around a layout's hole
 
-proc rhythmVisitChrome*(layout: FrameScene): RhythmDecision =
-  ## May this pass leave a layout's chrome (all of it but its `<yield />`
-  ## hole) as it is, and not run the layout at all? A scene that animates at
-  ## 20 frames a second inside a clock bar would otherwise pay for the bar's
-  ## JavaScript, tree and layout twenty times a second.
-  ##
-  ## A layout holding other `<Scene>`s runs on every pass: their pictures are
-  ## part of its drawing.
-  if passDepth == 0 or layout.holeW <= 0:
+proc rhythmChromeCanStay*(host: FrameScene): bool =
+  ## Every embedded scene of this UI is a hole. A picture of one is part of the
+  ## UI's drawing, and a split's panels are no UI of its own.
+  for i in 0 ..< host.slots.len:
+    if not host.slots[i].hole:
+      return false
+  host.slots.len > 0
+
+proc rhythmVisitChrome*(host: FrameScene): RhythmDecision =
+  ## May this pass leave a UI's chrome (all of it but its holes) as it is, and
+  ## not run the UI at all? A scene that animates at 20 frames a second inside a
+  ## clock bar would otherwise pay for the bar's JavaScript, tree and layout
+  ## twenty times a second.
+  if passDepth == 0 or not rhythmChromeCanStay(host):
     return rdRun
-  if layout of InterpretedFrameScene and InterpretedFrameScene(layout).sceneNodes.len > 0:
-    return rdRun
-  let r = rhythmOf(layout)
+  let r = rhythmOf(host)
   # Not dueBy: its whole-second slack calls a one-second clock bar due on any
   # pass at all, so a tap on the content would pay for the bar as well. A bar
   # a little early waits for the pass its own due time wakes.
-  if passFresh or r.dueAt <= 0 or stateKey(layout) != r.stateKey or
-      r.dueAt <= passStart + earlySlack(r.interval):
+  if passFresh or r.chromeDueAt <= 0 or stateKey(host) != r.stateKey or
+      r.chromeDueAt <= passStart + earlySlack(r.chromeInterval):
     return rdRun
-  if passGeneration < 0:
+  # Inside something else, what is under it lasts only if that says so.
+  if passGeneration < 0 or (passDepth > 1 and not chromeStays):
     return rdRepaint
   let i = canvasMarkOf(passCanvas)
   if i >= 0 and canvasMarks[i].markHolds(r.chromePass):
@@ -571,20 +583,29 @@ proc rhythmVisitChrome*(layout: FrameScene): RhythmDecision =
     return rdRestore
   rdRepaint
 
-proc rhythmRestoreChrome*(layout: FrameScene) =
-  ## The chrome out of the frame buffer that holds it, around the hole: what
-  ## this buffer's hole holds is the content's business.
-  let src = otherCanvasHolding(layout.rhythm.chromePass)
+proc rhythmRestoreChrome*(host: FrameScene, image: Image) =
+  ## The chrome out of the frame buffer that holds it, around the holes: what
+  ## this buffer's holes hold is their scenes' business.
+  let src = otherCanvasHolding(host.rhythm.chromePass)
   if src.isNil:
     return
-  for r in aroundHole(passCanvas.width, passCanvas.height, layout.holeX, layout.holeY, layout.holeW, layout.holeH):
+  var holes: seq[PixelBox]
+  for i in 0 ..< host.slots.len:
+    template s: untyped = host.slots[i]
+    holes.add((s.x.int, s.y.int, int(s.visible[2] - s.x), int(s.visible[3] - s.y)))
+  for r in aroundHoles(image.width, image.height, holes):
     if r.w > 0 and r.h > 0:
-      copyPixels(passCanvas.view(r.x, r.y, r.w, r.h), src.view(r.x, r.y, r.w, r.h))
+      copyPixels(image.view(r.x, r.y, r.w, r.h), src.view(host.canvasX.int + r.x, host.canvasY.int + r.y, r.w, r.h))
 
-proc rhythmChromeRan*(layout: FrameScene, decision: RhythmDecision, nextSleep: float) =
-  ## The layout just drew around its hole: schedule it (a due run only).
-  rhythmOf(layout).chromePass = passId
-  rhythmAfterRun(layout, decision, nil, nil, nextSleep)
+proc rhythmChromeRan*(host: FrameScene, decision: RhythmDecision, nextSleep: float) =
+  ## The UI just drew around its holes: schedule it (a due run only). Its own
+  ## interval: when its embedded scenes are due is theirs to say.
+  let r = rhythmOf(host)
+  r.chromePass = passId
+  r.stateKey = stateKey(host)
+  if decision == rdRun:
+    r.chromeInterval = max(if nextSleep >= 0: nextSleep else: ownRefreshInterval(host), 0.0)
+    r.chromeDueAt = passStart + r.chromeInterval
 
 # ------------------------------------------------------------- `<Scene>` tags
 

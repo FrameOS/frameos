@@ -93,7 +93,8 @@ timeoutMs, find, findLength, findLimit})` (see [Big pages](#big-pages)), `frameo
 [Photos from the network](#photos-from-the-network)), `frameos.svg(svg,
 spec)`, `frameos.image(spec)`,
 `frameos.log()`, `frameos.error()`, `frameos.setState()`,
-`frameos.setNextSleep()`, `frameos.getSetting("namespace", "key")` (only
+`frameos.setNextSleep()`, `frameos.dispatch(event, payload)` (what a `dispatch`
+node sends), `frameos.getSetting("namespace", "key")` (only
 namespaces the app's `config.json` declares under `settings`),
 `frameos.remember(key, value)` / `frameos.recall(key)` (see below), the asset
 calls `listAssets`, `assetExists`, `assetSize`, `readAsset`, `writeAsset`,

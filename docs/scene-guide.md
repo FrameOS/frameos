@@ -260,6 +260,9 @@ calls, and it calls no other:
   listed in the app's `config.json` as `"events": ["button"]`, or `["*"]` for
   everything but pointer motion. `context.event` is the name and
   `context.payload` what it carries. Return `true` to draw the scene again.
+- `frameos.dispatch(event, payload)` sends an event as a `dispatch` node does,
+  from a JSX handler, `onEvent` or `run`. `frameos.dispatch('sceneSwitcher')`
+  opens the scene list and `'sceneSettings'` the settings of the scene showing.
   Frames older than 2026.11 ignore it.
 
 **What the app sees.**
@@ -474,7 +477,10 @@ export function get(app, context) {
 - `<Scene id="other" someField="x" />` draws another scene of the frame there,
   sized by the UI (it takes the room left unless its classes say otherwise),
   its props set as that scene's state. It renders on its own
-  `refreshInterval`, so a slow scene costs nothing on the renders in between.
+  `refreshInterval`, straight into the canvas when nothing is drawn over it, so
+  a slow scene costs nothing on the renders in between and a tile that is due
+  redraws alone.
+  In a layout, `app.frame.sceneName` is the name of the scene it wraps.
   `<yield />` marks where a layout's content goes: a hole the content draws
   straight into, which is as fast as no layout. Keep it opaque, with nothing
   drawn over it and no scrolling box around it, or the frame has to composite
@@ -807,16 +813,15 @@ interface FrameOSElementProps {
   [attribute: string]: any;
 }
 /**
- * <Scene id="..." /> draws another scene of this frame as a picture, at the place and size the UI
+ * <Scene id="..." /> draws another scene of this frame, at the place and size the UI
  * gives it (flex-1 unless the classes say). Other props are that scene's state. It renders on its
  * own schedule. FrameOS 2026.11.5+.
  */
 declare const Scene: string;
 /**
- * <Yield /> or <yield />: where a layout shows the scene it wraps (docs/scene-layouts.md).
+ * <yield />: where a layout shows the scene it wraps (docs/scene-layouts.md).
  * FrameOS 2026.11.5+.
  */
-declare const Yield: string;
 declare namespace JSX {
   type Element = FrameOSElement;
   interface ElementChildrenAttribute { children: {}; }
@@ -855,6 +860,9 @@ interface FrameOSApp {
     /** A panel that shows a change only in a refresh, as e-paper and a monochrome OLED do. An app that follows
      * a finger waits for it to lift there (FrameOS 2026.11.5+; undefined before). */
     paper?: boolean;
+    /** The name of the scene showing. A layout's app gets the name of the scene it wraps (FrameOS 2026.11.5+;
+     * undefined before). */
+    sceneName?: string;
     /** The battery's charge from 0 to 100, on an ESP32 frame with a battery. Undefined elsewhere, so check
      * before drawing it (FrameOS 2026.11.5+; undefined before). */
     batteryPercent?: number;
@@ -972,6 +980,9 @@ declare const frameos: {
   log(...args: any[]): void;
   error(...args: any[]): void;
   setNextSleep(seconds: number): void;
+  /** Sends an event as a dispatch node does: render, setCurrentScene, setSceneState, sceneSwitcher, sceneSettings or a
+   * custom event of the scene's. An event a scene may not send is logged and dropped (FrameOS 2026.11.5+). */
+  dispatch(event: string, payload?: Record<string, any>): void;
   fetchText(url: string): string;
   fetchJson(url: string): any;
   httpRequest(

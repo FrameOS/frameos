@@ -76,6 +76,9 @@
   `events_contract_gen.py`, the cloud's `events-contract.gen.ts`): an event the
   cloud should be able to send needs a `cloud.verb` in the contract, not a new
   `case` alone.
+- A scene's own code sends events through one door, `dispatchFromScene`
+  (`js_runtime/app_runtime.nim`): the `dispatch` node and `frameos.dispatch`.
+  It owns the origin check, the render-during-render guard and the budget.
 - **One dispatcher, `frameos/src/frameos/event_loop.nim`, for Linux, the ESP32
   and the wasm preview.** It owns the queue, the origin allow-list, the
   command/event split and the render rule (`renderAfter`); a host supplies an
@@ -381,14 +384,16 @@
   and `<Scene>`s their taps, in their own coordinates); yield goes through
   `runSceneNodeRender`. The frame's next wake is `syncRefreshInterval`'s, never a
   host's. Anything added to a layout pass goes in `interpreter.nim`, not in a host.
-- `<Scene id>` is a raster image in the layout's SVG tree, drawn at the size the
-  layout gave it (`ukImage` + `fillSceneImages`), on its own schedule, with its
-  picture under the panel copy budget (`SceneRhythm.embedImage`). A scene's
-  `<Scene>` children live in `sceneNodes` under negative keys.
-- `<yield />` is a hole instead wherever it can be (`yieldHole`, `holeOf` in
-  `app_runtime.nim`): `renderSvgAround` draws the chrome, the content goes through
-  `runSceneNodeRender` into a view of the canvas, and a pass the chrome has
-  nothing to do in never enters the layout (`renderLayout`, `rhythmVisitChrome`).
+- `<Scene id>` and `<yield />` are holes in the canvas wherever they can be
+  (`seekHoles` in `ui/layout.nim`, `holesOf` in `app_runtime.nim`; a slot with
+  `hole` set): `renderSvgAround` draws the chrome, each scene goes through
+  `runSceneNodeRender` into a view of the canvas, and a pass the UI has nothing
+  to do in never enters it (`renderChrome`, `rhythmVisitChrome`, its own
+  `chromeDueAt`). One that cannot be a hole (opacity, something painted over it,
+  a scroller) is a raster image in the UI's SVG tree (`ukImage` +
+  `fillSceneImages`), its picture under the panel copy budget
+  (`SceneRhythm.embedImage`). A scene's `<Scene>` children live in `sceneNodes`
+  under negative keys.
   A rectangle of the panel keeps its own damage record in `svg_frames.nim`
   (`takePanelRegion`): a new way to write a rectangle's pixels without a render
   of it takes that record too.

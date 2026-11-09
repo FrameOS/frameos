@@ -215,16 +215,38 @@ proc forgetPanelRegions*() =
   heldFrames.setLen(0)
   regionHeld = none(HeldFrame)
 
-proc aroundHole*(width, height, x, y, w, h: int): array[4, tuple[x, y, w, h: int]] =
-  ## A rectangle's surroundings: the rows above and below it at full width,
-  ## the two sides of its own rows.
-  [(0, 0, width, y), (0, y + h, width, height - y - h), (0, y, x, h), (x + w, y, width - x - w, h)]
+type PixelBox* = tuple[x, y, w, h: int]
 
-proc renderSvgAround*(root: SvgNode, target: Image, hole: tuple[x, y, w, h: int], owed: var Option[Color],
+proc aroundHoles*(width, height: int, holes: openArray[PixelBox]): seq[PixelBox] =
+  ## A rectangle less `holes`, which do not overlap, as boxes: a band for each
+  ## run of rows where the same holes are, cut at their sides.
+  var top = 0
+  while top < height:
+    var bottom = height
+    for h in holes:
+      if h.y > top and h.y < bottom: bottom = h.y
+      if h.y + h.h > top and h.y + h.h < bottom: bottom = h.y + h.h
+    var x = 0
+    while true:
+      var next = -1
+      for i in 0 ..< holes.len:
+        if holes[i].w > 0 and holes[i].y <= top and holes[i].y + holes[i].h >= bottom and holes[i].x >= x and
+            (next < 0 or holes[i].x < holes[next].x):
+          next = i
+      if next < 0:
+        break
+      if holes[next].x > x:
+        result.add((x, top, holes[next].x - x, bottom - top))
+      x = holes[next].x + holes[next].w
+    if x < width:
+      result.add((x, top, width - x, bottom - top))
+    top = bottom
+
+proc renderSvgAround*(root: SvgNode, target: Image, holes: openArray[PixelBox], owed: var Option[Color],
     reuse = false): bool =
-  ## A layout's chrome: `root` drawn everywhere on `target` but the hole, whose
-  ## pixels are the wrapped scene's (a `<yield />`, docs/scene-layouts.md). The
-  ## scene background still owed is settled the same way, around the hole.
+  ## A UI's chrome: `root` drawn everywhere on `target` but its holes, whose
+  ## pixels are the embedded scenes' (docs/scene-layouts.md). The scene
+  ## background still owed is settled the same way, around them.
   ##
   ## No damage boxes: the chrome is a strip of the panel, drawn when it is due,
   ## and most of what a damage record would save is its own parse.
@@ -237,7 +259,7 @@ proc renderSvgAround*(root: SvgNode, target: Image, hole: tuple[x, y, w, h: int]
       parsed = parseSvg(root, target.width, target.height, reuse)
     let pay = owed.isSome and not parsed.coversOpaque(target.width, target.height)
     probe(phRaster):
-      for r in aroundHole(target.width, target.height, hole.x, hole.y, hole.w, hole.h):
+      for r in aroundHoles(target.width, target.height, holes):
         if r.w > 0 and r.h > 0:
           let window = target.view(r.x, r.y, r.w, r.h)
           if pay:

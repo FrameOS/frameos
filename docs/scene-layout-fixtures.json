@@ -117,7 +117,7 @@
           }
         }
       },
-      "problem": null
+      "problem": "yield"
     },
     {
       "name": "a .jsx file",

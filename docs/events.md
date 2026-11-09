@@ -624,6 +624,16 @@ export function onEvent(app, context) {
   and pointer events first, in the layout's coordinates (`docs/scene-layouts.md`).
 - A frame older than 2026.11 ignores `events`. Nothing else differs.
 
+### Apps that send
+
+`frameos.dispatch(event, payload)` is the `dispatch` node for code: from a JSX
+handler, `onEvent` or `run`. It goes through the node's own door
+(`dispatchFromScene` in `js_runtime/app_runtime.nim`), so the origin is `scene`
+and the same three things stop it: a `render` asked for during a render, an event
+the contract's `origins` do not give a scene (`reboot`, `uploadScenes`), and the
+run's dispatch budget. Each is logged as `interpreter:dispatch:ignored`. The
+payload is the event's own shape: `setSceneState` takes `{state: {...}}`.
+
 ### Event map: what a button does
 
 A frame has the keys it has (a reTerminal's LEFT, RIGHT and REFRESH) and a

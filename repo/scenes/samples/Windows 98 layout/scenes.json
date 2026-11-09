@@ -1,0 +1,100 @@
+[
+  {
+    "id": "layout-windows-98",
+    "name": "Windows 98",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 1,
+      "backgroundColor": "#008080",
+      "isLayout": true
+    },
+    "fields": [
+      {
+        "name": "twentyFourHour",
+        "type": "boolean",
+        "label": "24-hour clock",
+        "value": "false",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "windows98": {
+        "name": "Windows 98",
+        "category": "data",
+        "description": "A gray taskbar below each scene: Start opens the scene list, Control Panel the settings, and the tray has the signal, the battery and the clock.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Windows 98\",\n  \"category\": \"data\",\n  \"description\": \"A gray taskbar below each scene: Start opens the scene list, Control Panel the settings, and the tray has the signal, the battery and the clock.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n",
+          "app.tsx": "// The taskbar of a desktop from 1998, below the scene it wraps. Start opens the\n// scene list, the sunken button is the scene showing, Control Panel opens its\n// settings, and the tray has the signal, the battery and the clock.\nconst pad = (n) => String(n).padStart(2, '0')\nconst on = (value) => value === true || value === 'true'\n\nfunction clock(now, twentyFour) {\n  const minutes = pad(now.getMinutes())\n  if (twentyFour) return `${pad(now.getHours())}:${minutes}`\n  return `${now.getHours() % 12 || 12}:${minutes} ${now.getHours() < 12 ? 'AM' : 'PM'}`\n}\n\n// A box has one border color, so a bevel is three boxes inside each other.\nconst Raised = ({ className = '', onClick, children }) => (\n  <div className={`flex bg-[#c0c0c0] active:bg-[#a8a8a8] border-t border-l border-white ${className}`} onClick={onClick}>\n    <div className=\"flex flex-1 min-w-0 border-b border-r border-black\">\n      <div className=\"flex flex-1 min-w-0 items-center gap-[1vh] px-[1.2vh] border-b border-r border-[#808080]\">\n        {children}\n      </div>\n    </div>\n  </div>\n)\n\nconst Sunken = ({ className = '', children }) => (\n  <div className={`flex border-t border-l border-[#808080] ${className}`}>\n    <div className=\"flex flex-1 min-w-0 border-b border-r border-white\">\n      <div className=\"flex flex-1 min-w-0 items-center gap-[1.2vh] px-[1.2vh]\">{children}</div>\n    </div>\n  </div>\n)\n\nconst Logo = () => (\n  <svg viewBox=\"0 0 46 54\" className=\"w-[4.2vh] h-[4.9vh]\">\n    <path fill=\"#111418\" d=\"M0 0H46V5H5V30H0ZM26 49H41V32H46V54H26Z\" />\n    <rect x=\"7\" y=\"36\" width=\"12\" height=\"11\" rx=\"1.4\" fill=\"#1c7c66\" />\n    <rect x=\"20\" y=\"24\" width=\"12\" height=\"11\" rx=\"1.4\" fill=\"#8baa3a\" />\n    <rect x=\"33\" y=\"12\" width=\"12.5\" height=\"11.5\" rx=\"1.4\" fill=\"#c8a247\" />\n  </svg>\n)\n\nconst WindowIcon = () => (\n  <svg viewBox=\"0 0 16 16\" className=\"w-[3.4vh] h-[3.4vh]\">\n    <rect x=\"0.5\" y=\"1.5\" width=\"15\" height=\"13\" fill=\"#ffffff\" stroke=\"#000000\" />\n    <rect x=\"1\" y=\"2\" width=\"14\" height=\"3\" fill=\"#000080\" />\n  </svg>\n)\n\nconst PanelIcon = () => (\n  <svg viewBox=\"0 0 16 16\" className=\"w-[3.4vh] h-[3.4vh]\">\n    <rect x=\"0.5\" y=\"0.5\" width=\"15\" height=\"15\" fill=\"#ffffff\" stroke=\"#000000\" />\n    <rect x=\"2\" y=\"4\" width=\"12\" height=\"1\" fill=\"#000000\" />\n    <rect x=\"2\" y=\"11\" width=\"12\" height=\"1\" fill=\"#000000\" />\n    <rect x=\"9\" y=\"2\" width=\"3\" height=\"5\" fill=\"#000080\" />\n    <rect x=\"4\" y=\"9\" width=\"3\" height=\"5\" fill=\"#008080\" />\n  </svg>\n)\n\n// Four bars for the Wi-Fi signal, nothing on a frame that cannot tell.\nfunction Signal({ rssi }) {\n  if (typeof rssi !== 'number') return null\n  const level = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1\n  return (\n    <div className=\"flex items-end gap-[0.3vh] h-[3vh]\">\n      {[1.2, 1.8, 2.4, 3].map((height, i) => (\n        <div className={`w-[0.6vh] h-[${height}vh] ${i < level ? 'bg-black' : 'bg-[#808080]'}`} />\n      ))}\n    </div>\n  )\n}\n\nfunction Battery({ percent }) {\n  if (typeof percent !== 'number') return null\n  return (\n    <svg viewBox=\"0 0 22 12\" className=\"w-[4.4vh] h-[2.4vh]\">\n      <rect x=\"0.5\" y=\"0.5\" width=\"18\" height=\"11\" fill=\"none\" stroke=\"#000000\" />\n      <rect x=\"19\" y=\"4\" width=\"3\" height=\"4\" fill=\"#000000\" />\n      <rect x=\"2\" y=\"2\" width={(15 * percent) / 100} height=\"8\" fill={percent > 15 ? '#000000' : '#800000'} />\n    </svg>\n  )\n}\n\nexport function get(app) {\n  const now = new Date()\n  // The clock changes on the minute: nothing to draw until then.\n  frameos.setNextSleep(60 - now.getSeconds())\n  return (\n    <div className=\"flex flex-col w-full h-full bg-[#008080] text-black text-[3.6vh]\">\n      <yield />\n      <div className=\"bg-[#c0c0c0] border-t border-[#dfdfdf]\">\n        <div className=\"flex items-stretch h-[9vh] gap-[0.8vh] p-[0.7vh] border-t border-white\">\n          <Raised onClick={() => frameos.dispatch('sceneSwitcher')}>\n            <Logo />\n            <span className=\"font-bold\">Start</span>\n          </Raised>\n          <Sunken className=\"flex-1 min-w-0 bg-[#e4e4e4]\">\n            <WindowIcon />\n            <span className=\"flex-1 font-bold truncate\">{app.frame.sceneName || 'FrameOS'}</span>\n          </Sunken>\n          <Raised onClick={() => frameos.dispatch('sceneSettings')}>\n            <PanelIcon />\n            {app.frame.width >= 640 ? <span>Control Panel</span> : null}\n          </Raised>\n          <Sunken>\n            <Signal rssi={app.frame.wifiRssi} />\n            <Battery percent={app.frame.batteryPercent} />\n            <span className=\"whitespace-nowrap\">{clock(now, on(app.state.twentyFourHour))}</span>\n          </Sunken>\n        </div>\n      </div>\n    </div>\n  )\n}\n"
+        },
+        "origin": "windows98"
+      }
+    },
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "chrome",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "windows98",
+          "config": {}
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-to-draw",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "chrome-to-draw",
+        "type": "codeNodeEdge",
+        "source": "chrome",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  }
+]

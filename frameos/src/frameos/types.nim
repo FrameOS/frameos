@@ -428,6 +428,9 @@ type
     ## The installed copy's event map (event_map.nim): the rule list as the
     ## control plane wrote it (`[{event, match, as}]`), nil for most scenes.
     eventMap*: JsonNode
+    ## What `app.frame.sceneName` says: the scene's name, and for a layout the
+    ## name of the scene it wraps.
+    shownName*: string
     ## When this scene renders next, if it is drawn through a scene node
     ## (frameos/scene_rhythm.nim); nil until the first such render.
     rhythm*: SceneRhythm
@@ -452,10 +455,10 @@ type
     ## the embedded scene under it, in that scene's coordinates.
     canvasX*, canvasY*: int32
     slots*: seq[SceneSlot]
-    ## A layout with a `<yield />` hole: where the scene it wraps draws, in
-    ## canvas pixels (holeW 0: none), and the pass that last put it there.
-    holeX*, holeY*, holeW*, holeH*: int32
-    holePass*: int
+    ## A UI with holes (its `slots` that are): their rectangles, as one number,
+    ## and whether this run found them moved.
+    holesKey*: int
+    holesMoved*: bool
     ## True while this scene runs although it is not due: the device kept no
     ## copy of what it drew last time, so it draws again only to put that
     ## picture back. Whatever can answer from what it fetched or computed last
@@ -468,6 +471,7 @@ type
     child*: FrameScene
     x*, y*: float32
     visible*: array[4, float32]
+    hole*: bool ## drawn straight into the canvas of the scene that holds it
 
   # One rectangle a scene drew on the canvas. `copy` is its picture as it left
   # it, when one was kept; nil when the canvas itself holds it.
@@ -491,7 +495,9 @@ type
     cells*: RhythmCell    ## each rectangle it drew
     embedImage*: Image    ## a `<Scene>`'s own picture (the UI draws it as an image)
     embedProps*: string   ## the props last written into its state, as JSON
-    chromePass*: int      ## a layout with a hole: the pass that last drew around it
+    chromePass*: int      ## a UI with holes: the pass that last drew around them
+    chromeDueAt*: float   ## and its own schedule, which its embedded scenes do not move
+    chromeInterval*: float
 
   FontStyle* = ref object
     typeface*: Typeface

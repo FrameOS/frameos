@@ -23,8 +23,11 @@ import frameos/js_runtime/jsx_native
 import frameos/render_probe
 import frameos/js_runtime/jsx
 import frameos/ui/layout
+import std/hashes
 import frameos/events_gen
 import frameos/events
+import frameos/channels
+import frameos/scene_rhythm
 import frameos/ui/events
 import frameos/render_scale
 import frameos/panel_shape
@@ -362,6 +365,45 @@ proc jsAppLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue
       frameos_apps.logError(e.owner, payloadStr)
     else:
       frameos_apps.log(e.owner, payloadStr)
+  return jsUndefSentinel(ctx)
+
+proc dispatchFromScene*(scene: FrameScene, eventName: string, payload: JsonNode, nodeId: int, during: string) =
+  ## An event sent by a scene's code: a dispatch node's, or an app's
+  ## `frameos.dispatch`. Scene code is untrusted (it may be anyone's store
+  ## scene): it may drive scenes and state, and may not replace the installed
+  ## scene set (skipping every guard the push path applies) or take the runtime
+  ## down on each render. One run may fire only so many events (run_budget.nim):
+  ## a handler that dispatches its own event is an unbounded chain that starves
+  ## rendering on the Pi and recurses on the ESP32. Logged once per run.
+  var reason = ""
+  if eventName == "render" and during == "render":
+    reason = "renderSelfDispatch"
+  elif not originMayEmit(eoScene, eventName):
+    reason = "runtimeVerb"
+  else:
+    case takeDispatchBudget()
+    of dvAllowed:
+      if eventName == "render":
+        # A scene asking to be drawn again means this one, also when it sits
+        # in a split and is not due (scene_rhythm.nim).
+        rhythmMarkDue(scene)
+      sendEvent(eventName, payload, eoScene)
+    of dvRefusedFirst:
+      reason = "dispatchBudget"
+    of dvRefused:
+      discard
+  if reason.len > 0:
+    scene.logger.log(%*{"event": "interpreter:dispatch:ignored", "sceneId": scene.id.string, "nodeId": nodeId,
+      "eventName": eventName, "reason": reason, "budget": dispatchBudgetTotalNow()})
+
+proc jsDispatch(ctx: ptr JSContext, event: JSValue, payloadJson: JSValue): JSValue {.nimcall.} =
+  let e = env(ctx)
+  if e != nil and not e.owner.scene.isNil:
+    try:
+      dispatchFromScene(e.owner.scene, toNimString(ctx, event), parseJson(toNimString(ctx, payloadJson)),
+        e.owner.nodeId.int, e.context.event)
+    except CatchableError as error:
+      frameos_apps.logError(e.owner, "frameos.dispatch failed: " & error.msg)
   return jsUndefSentinel(ctx)
 
 proc jsSetNextSleep(ctx: ptr JSContext, seconds: JSValue): JSValue {.nimcall.} =
@@ -1212,6 +1254,11 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     let like = pictureFormatLike(e.context)
     return nimBoolToJS(ctx, panelIsPaper(e.owner.frameConfig.device,
       not like.isNil and like.format == pfRgb565))
+  of "sceneName":
+    # A layout's is the name of the scene it wraps (interpreter.ensureLayoutScene).
+    if not e.owner.scene.isNil and e.owner.scene.shownName.len > 0:
+      return nimStringToJS(ctx, e.owner.scene.shownName)
+    return jsUndefSentinel(ctx)
   of "batteryPercent":
     # An ESP32 with a battery. A Pi and the preview have nothing to say.
     when defined(freertos):
@@ -1297,7 +1344,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
         keys.add(key)
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale", "paper",
-      "batteryPercent", "wifiRssi"]
+      "sceneName", "batteryPercent", "wifiRssi"]
   of "context":
     keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep"]
     if e.context.hasImage and not e.context.image.isNil:
@@ -1923,6 +1970,7 @@ const appJsPrelude* = compactJs("""
     log: (...args) => jsAppLog("log", JSON.stringify(args, __jsReplacer)),
     error: (...args) => jsAppLog("error", JSON.stringify(args, __jsReplacer)),
     setNextSleep: (seconds) => jsSetNextSleep(Number(seconds || 0)),
+    dispatch: (event, payload) => jsDispatch(String(event || ""), JSON.stringify(payload || {}, __jsReplacer)),
     fetchText: (url) => jsFetchText(String(url || "")),
     fetchJson: (url) => JSON.parse(jsFetchText(String(url || "")) || "null"),
     httpRequest: (url, options) => JSON.parse(
@@ -2071,6 +2119,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.setModuleLoader(jsAppModuleLoader, jsAppModuleNormalize)
   runtime.js.registerFunction("jsAppLog", jsAppLog)
   runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
+  runtime.js.registerFunction("jsDispatch", jsDispatch)
   runtime.js.registerFunction("jsSetState", jsSetState)
   runtime.js.registerFunction("jsRemember", jsRemember)
   runtime.js.registerFunction("jsRecall", jsRecall)
@@ -2373,17 +2422,14 @@ proc keepUiRegions(runtime: JsAppRuntime, owner: AppRoot, sceneId: string,
       discard # a handler's failure is logged; one in the logging has nowhere to go
 
 var embeddedSceneRenderer*: proc(owner: FrameScene, nodeId: NodeId, index: int, sceneId, props: string,
-    x, y: float32, visible: array[4, float32], width, height: int, context: ExecutionContext): Image {.nimcall.}
-  ## Set by the interpreter: a `<Scene>`'s or `<yield />`'s picture. (`x`, `y`)
-  ## is where it lands in the owner's canvas and `visible` the part of that
-  ## which shows (left, top, right, bottom), for the pointer.
+    x, y: float32, visible: array[4, float32], width, height: int, asHole: bool, context: ExecutionContext): Image {.nimcall.}
+  ## Set by the interpreter: a `<Scene>`'s or `<yield />`'s picture, or with
+  ## `asHole` the scene itself drawn into the canvas (non-nil when it was).
+  ## (`x`, `y`) is where it lands in the owner's canvas and `visible` the part
+  ## of that which shows (left, top, right, bottom), for the pointer.
 
 var embeddedYieldReady*: proc(owner: FrameScene): bool {.nimcall.}
   ## Set by the interpreter: whether `owner` is a layout with a scene to wrap.
-
-var embeddedYieldInto*: proc(owner: FrameScene, x, y, w, h: int, context: ExecutionContext) {.nimcall.}
-  ## Set by the interpreter: the wrapped scene, drawn straight into this
-  ## rectangle of the canvas (a `<yield />` that is a hole).
 
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
@@ -2391,28 +2437,37 @@ proc attrFloat(node: SvgNode, name: string): float32 =
   parseFloat(node.attr(name)).float32
 
 proc fillSceneImages(owner: AppRoot, context: ExecutionContext, node: SvgNode, scale: float32,
-    index: var int, ox, oy: float32, clip: array[4, float32], hole: bool) =
+    index: var int, ox, oy: float32, clip: array[4, float32], holes: var UiHoles) =
   ## The layout emitted a `<Scene>` as an `<image>` waiting for its picture
   ## (it could not know the size before): the scenes run here, each at the
-  ## size it got. Walks the UI's tree, nested viewports included; only for a
-  ## UI whose JSX held a scene. (`ox`, `oy`): where this level's coordinates
-  ## start on the UI; `clip`: left, top, right and bottom of what shows there.
+  ## size it got, a hole straight into the canvas. Walks the UI's tree, nested
+  ## viewports included; only for a UI whose JSX held a scene. (`ox`, `oy`):
+  ## where this level's coordinates start on the UI; `clip`: left, top, right
+  ## and bottom of what shows there.
   let id = node.attr("scene-id")
   if id.len > 0:
     # A hole, a layout seen on its own, a scene that is gone: nothing to show,
     # an empty group, not a picture pixie would stretch across the bounds of
     # every window around it.
     var image: Image
-    if not (hole and id == SceneYieldId) and not embeddedSceneRenderer.isNil:
+    if not embeddedSceneRenderer.isNil:
       let
         x = ox + node.attrFloat("x")
         y = oy + node.attrFloat("y")
         w = node.attrFloat("width")
         h = node.attrFloat("height")
-      image = embeddedSceneRenderer(owner.scene, owner.nodeId, index, id, node.attr("scene-props"),
-        x * scale, y * scale,
-        [max(x, clip[0]) * scale, max(y, clip[1]) * scale, min(x + w, clip[2]) * scale, min(y + h, clip[3]) * scale],
-        round(w * scale).int, round(h * scale).int, context)
+        at = holes.indexAt(x, y)
+        props = node.attr("scene-props")
+      if at >= 0:
+        template hole: untyped = holes.items[at]
+        let box = [hole.left.float32, hole.top.float32, hole.right.float32, hole.bottom.float32]
+        # Nothing to put there: the chrome paints where it would have been.
+        hole.clean = not embeddedSceneRenderer(owner.scene, owner.nodeId, index, id, props, box[0], box[1], box,
+          int(hole.right - hole.left), int(hole.bottom - hole.top), true, context).isNil
+      else:
+        image = embeddedSceneRenderer(owner.scene, owner.nodeId, index, id, props, x * scale, y * scale,
+          [max(x, clip[0]) * scale, max(y, clip[1]) * scale, min(x + w, clip[2]) * scale, min(y + h, clip[3]) * scale],
+          round(w * scale).int, round(h * scale).int, false, context)
     inc index
     node.image = image
     let tag = if image.isNil: "g" else: "image"
@@ -2438,32 +2493,41 @@ proc fillSceneImages(owner: AppRoot, context: ExecutionContext, node: SvgNode, s
       nx -= parseFloat(view[0]).float32
       ny -= parseFloat(view[1]).float32
   for child in node.children:
-    fillSceneImages(owner, context, child, scale, index, nx, ny, inner, hole)
+    fillSceneImages(owner, context, child, scale, index, nx, ny, inner, holes)
 
 proc placed(v, scale: float32, limit: int): int =
   clamp(round(v * scale).int, 0, limit)
 
-proc holeOf(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, target: UiTarget,
-    requestedWidth, requestedHeight: int, regionScale: float32):
-    tuple[active: bool, x, y, w, h: int] =
-  ## Where this UI's `<yield />` can be a hole in the canvas the planner
-  ## offered: a layout with a scene to wrap, its whole render this one node,
-  ## drawn at the canvas's own size.
-  if owner.scene.isNil or embeddedYieldReady.isNil or not embeddedYieldReady(owner.scene) or
-      not context.wholeFrame or not context.hasImage or context.image.isNil or
-      context.decodeTargetImage != context.image or context.image.isView or
+proc holesOf(owner: AppRoot, context: ExecutionContext, target: UiTarget,
+    requestedWidth, requestedHeight: int, regionScale: float32): UiHoles =
+  ## Where this UI's embedded scenes can be holes in the canvas the planner
+  ## offered: its whole render this one node, drawn at the canvas's own size.
+  if owner.scene.isNil or not context.wholeFrame or not context.hasImage or context.image.isNil or
+      context.decodeTargetImage != context.image or
       requestedWidth != context.image.width or requestedHeight != context.image.height:
     return
-  let found = yieldHole(target.memo, target.input)
-  if not found.found or not found.clean:
-    return
-  let
-    x0 = placed(found.x, regionScale, requestedWidth)
-    y0 = placed(found.y, regionScale, requestedHeight)
-    x1 = placed(found.x + found.w, regionScale, requestedWidth)
-    y1 = placed(found.y + found.h, regionScale, requestedHeight)
-  if x1 > x0 and y1 > y0:
-    result = (true, x0, y0, x1 - x0, y1 - y0)
+  result = seekHoles(target.memo, target.input, not embeddedYieldReady.isNil and embeddedYieldReady(owner.scene))
+  for i in 0 ..< result.count:
+    template h: untyped = result.items[i]
+    h.left = placed(h.x, regionScale, requestedWidth).int32
+    h.top = placed(h.y, regionScale, requestedHeight).int32
+    h.right = placed(h.x + h.w, regionScale, requestedWidth).int32
+    h.bottom = placed(h.y + h.h, regionScale, requestedHeight).int32
+    if h.right <= h.left or h.bottom <= h.top:
+      h.clean = false
+
+proc noteHoles(scene: FrameScene, holes: UiHoles) =
+  ## Holes that moved, came or went leave nothing the canvas can be trusted
+  ## with: the chrome has painted where they were.
+  var key = 0
+  for i in 0 ..< holes.count:
+    template h: untyped = holes.items[i]
+    if h.clean:
+      key = key !& h.left.int !& h.top.int !& h.right.int !& h.bottom.int
+  scene.holesMoved = key != scene.holesKey
+  if scene.holesMoved:
+    scene.holesKey = key
+    forgetPanelRegions()
 
 proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, root: SvgNode): Image =
   ## A JSX tree an app returned: an `<svg>` drawn as it is, anything else a
@@ -2511,25 +2575,37 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
   # The scenes it embeds, each drawn now that its size is known. The offered
   # target comes after: its corner moves the slots only when it is a cell.
   let firstSlot = if owner.scene.isNil: 0 else: owner.scene.slots.len
-  var hole: tuple[active: bool, x, y, w, h: int]
+  var holes: UiHoles
+  var aroundHolesOf: Image
   if runtime.jsxMemo.sawScene and root.tag != "svg":
-    hole = runtime.holeOf(owner, context, target, requestedWidth, requestedHeight, regionScale)
+    holes = holesOf(owner, context, target, requestedWidth, requestedHeight, regionScale)
+    for i in 0 ..< holes.count:
+      if holes.items[i].clean:
+        # Before the first scene runs: the target can be taken once.
+        aroundHolesOf = owner.takeDecodeTarget(context, deferBackground = true).image
+        break
+    if aroundHolesOf.isNil:
+      holes = UiHoles()
+    if not owner.scene.isNil:
+      noteHoles(owner.scene, holes)
     var index = 0
     fillSceneImages(owner, context, svg, regionScale, index, 0, 0,
-      [0'f32, 0, layoutWidth.float32, layoutHeight.float32], hole.active)
+      [0'f32, 0, layoutWidth.float32, layoutHeight.float32], holes)
   var intoTarget: Image
-  if hole.active:
-    # The chrome around the hole, the content straight into it: no picture of
-    # the content to make, none to composite, and what is not due stays.
-    let (canvas, _) = owner.takeDecodeTarget(context, deferBackground = true)
-    var owed = takeOwedBackground(context, canvas)
-    let rectangle = (x: hole.x, y: hole.y, w: hole.w, h: hole.h)
+  if not aroundHolesOf.isNil:
+    # The chrome around the holes, the scenes straight into them: no picture of
+    # them to make, none to composite, and what is not due stays.
+    var boxes: seq[PixelBox]
+    for i in 0 ..< holes.count:
+      template h: untyped = holes.items[i]
+      if h.clean:
+        boxes.add((h.left.int, h.top.int, int(h.right - h.left), int(h.bottom - h.top)))
+    var owed = takeOwedBackground(context, aroundHolesOf)
     probe(phDraw):
-      if not renderSvgAround(svg, canvas, rectangle, owed, reuse = true) and
-          not (releaseRenderMemory() and renderSvgAround(svg, canvas, rectangle, owed, reuse = true)):
-        frameos_apps.logError(owner, "JS app: JSX failed to render around its <yield />")
-    embeddedYieldInto(owner.scene, hole.x, hole.y, hole.w, hole.h, context)
-    intoTarget = canvas
+      if not renderSvgAround(svg, aroundHolesOf, boxes, owed, reuse = true) and
+          not (releaseRenderMemory() and renderSvgAround(svg, aroundHolesOf, boxes, owed, reuse = true)):
+        frameos_apps.logError(owner, "JS app: JSX failed to render around its scenes")
+    intoTarget = aroundHolesOf
   else:
     # A UI's nodes come back from the layout where they did not change.
     probe(phDraw):

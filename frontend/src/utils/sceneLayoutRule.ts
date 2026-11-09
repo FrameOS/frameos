@@ -35,7 +35,7 @@ export function sceneLayoutProblem(scene: unknown): SceneLayoutProblem | null {
   if (jsx.length === 0) {
     return 'app'
   }
-  return jsx.some(([, source]) => /<\s*[Yy]ield\b/.test(source as string)) ? null : 'yield'
+  return jsx.some(([, source]) => /<\s*yield\b/.test(source as string)) ? null : 'yield'
 }
 
 const SCENE_LAYOUT_PROBLEM_TEXT: Record<SceneLayoutProblem, string> = {

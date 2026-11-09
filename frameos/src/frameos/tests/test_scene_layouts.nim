@@ -1,5 +1,6 @@
 import std/[json, tables, unittest, os, strutils]
 import pixie
+import ../channels
 import ../events_gen
 import ../interpreter
 import ../scene_rhythm
@@ -62,6 +63,53 @@ export function get(app) {
     <div className="flex flex-col w-full h-full">
       <div className="h-[20px] bg-[#ff0000]" />
       <yield />
+    </div>
+  )
+}
+"""
+
+# A taskbar's worth of asking: the name of the scene inside, and two buttons
+# that send events, one a scene may send and one it may not.
+const taskbarUi = """
+export function get(app) {
+  frameos.setState("named", app.frame.sceneName)
+  frameos.setState("uiRuns", (app.state.uiRuns || 0) + 1)
+  frameos.setNextSleep(30)
+  return (
+    <div className="flex flex-col w-full h-full">
+      <yield />
+      <div className="flex h-[10px]">
+        <div className="flex-1 bg-white" onClick={() => frameos.dispatch('sceneSwitcher')} />
+        <div className="flex-1 bg-black" onClick={() => frameos.dispatch('reboot')} />
+      </div>
+    </div>
+  )
+}
+"""
+
+# Two scenes side by side under a bar, counting the UI's own runs.
+const twoScenesUi = """
+export function get(app) {
+  frameos.setState("uiRuns", (app.state.uiRuns || 0) + 1)
+  return (
+    <div className="flex flex-col w-full h-full bg-white">
+      <div className="h-[10px] bg-black" />
+      <div className="flex flex-1">
+        <Scene id="tests/child" />
+        <Scene id="tests/fastChild" />
+      </div>
+    </div>
+  )
+}
+"""
+
+# The same with something painted over the first of them.
+const coveredSceneUi = """
+export function get(app) {
+  return (
+    <div className="relative w-full h-full bg-white">
+      <div className="absolute inset-0 flex"><Scene id="tests/child" /></div>
+      <div className="absolute top-[30px] left-[5px] w-[10px] h-[5px] bg-black" />
     </div>
   )
 }
@@ -228,6 +276,12 @@ let scenesJson = "[" & [
   panel("tests/inHole", "#0000ff", 600.0).withLayout("tests/holeLayout"),
   panel("tests/fastInHole", "#0000ff", 0.05).withLayout("tests/holeLayout"),
   jsxScene("tests/counter2", counterUi, 3000.0).withLayout("tests/holeLayout"),
+  panel("tests/fastChild", "#ff00ff", 1.0),
+  jsxScene("tests/twoHoles", twoScenesUi, 300.0),
+  jsxScene("tests/coveredScene", coveredSceneUi, 300.0),
+  jsxScene("tests/twoHolesInLayout", twoScenesUi, 300.0).withLayout("tests/holeLayout"),
+  jsxScene("tests/taskbar", taskbarUi, 1.0, ""","isLayout": true"""),
+  panel("tests/inTaskbar", "#0000ff", 600.0).withLayout("tests/taskbar"),
   jsxScene("tests/fadedLayout", fadedYieldUi, 300.0, ""","isLayout": true"""),
   panel("tests/inFaded", "#0000ff", 600.0).withLayout("tests/fadedLayout"),
   jsxScene("tests/coveredLayout", coveredYieldUi, 300.0, ""","isLayout": true"""),
@@ -272,6 +326,11 @@ proc pass(scene: FrameScene, canvas = newImage(W, H)): Image =
   let context = ExecutionContext(scene: scene, event: "render", payload: %*{},
     image: canvas, hasImage: true, loopIndex: 0, loopKey: ".", nextSleep: -1)
   render(scene, context)
+
+proc holeIn(scene: FrameScene): tuple[found: bool, x, y, w, h: int] =
+  for slot in scene.slots:
+    if slot.hole:
+      return (true, slot.x.int, slot.y.int, int(slot.visible[2] - slot.x), int(slot.visible[3] - slot.y))
 
 proc layoutOf(scene: FrameScene): FrameScene =
   InterpretedFrameScene(scene).sceneNodes[LayoutSceneKey]
@@ -348,6 +407,25 @@ suite "layouts":
     rhythmClockOverride = 1000.01
     let green = pass(scene)
     check green.color(5, 35) == colored("#22c55e")
+
+  test "a layout is told the name of the scene it wraps":
+    let scene = newScene("tests/inTaskbar")
+    discard pass(scene)
+    check scene.layoutOf.state{"named"}.getStr() == "tests/inTaskbar"
+
+  test "a handler can send what a scene may send, and only that":
+    let scene = newScene("tests/inTaskbar")
+    discard pass(scene)
+    proc tapped(x: int): seq[string] =
+      let tap = %*{"x": x, "y": 35, "pointerId": 0, "pointerType": "mouse"}
+      runEvent(scene, ExecutionContext(scene: scene, event: "tap", payload: tap, loopIndex: 0, loopKey: ".", nextSleep: -1))
+      while true:
+        let (ok, message) = eventChannel.tryRecv()
+        if not ok: break
+        result.add message[1]
+    check "sceneSwitcher" in tapped(5)
+    check "reboot" notin tapped(35)
+    check ($logged).contains("runtimeVerb")
 
   test "a layout makes the dispatcher build pointer events for the scene inside it":
     # The content has handlers; the top scene's own list does not know that.
@@ -515,7 +593,7 @@ suite "a <yield /> that is a hole":
     check image == canvas
     check image.color(5, 5) == rgbx(255, 255, 255, 255)
     check image.color(5, 30) == colored("#0000ff")
-    check scene.layoutOf.holeY == 20 and scene.layoutOf.holeH == 20
+    check scene.layoutOf.holeIn.y == 20 and scene.layoutOf.holeIn.h == 20
     # No picture of it was made to composite.
     check scene.rhythm.isNil or scene.rhythm.embedImage.isNil
 
@@ -556,6 +634,64 @@ suite "a <yield /> that is a hole":
     check scene.uiRuns == 1 and scene.runs == 1
     check canvas[3, 3] == rgbx(9, 9, 9, 255)
     check canvas[3, 35] == rgbx(8, 8, 8, 255)
+
+  test "a <Scene> is a hole, and a UI that is not due sits out when only it is":
+    let scene = newScene("tests/twoHoles")
+    let canvas = newImage(W, H)
+    discard pass(scene, canvas)
+    check scene.state{"uiRuns"}.getInt() == 1
+    check scene.slots.len == 2 and scene.slots[0].hole and scene.slots[1].hole
+    let slow = scene.panelOf("tests/child")
+    let fast = scene.panelOf("tests/fastChild")
+    check slow.rhythm.embedImage.isNil and fast.rhythm.embedImage.isNil
+    check canvas.color(5, 25) == colored("#00ffff")
+    check canvas.color(35, 25) == colored("#ff00ff")
+    check canvas.color(5, 5) == colored("#000000")
+    canvas[3, 3] = rgbx(9, 9, 9, 255)
+    canvas[5, 25] = rgbx(8, 8, 8, 255)
+    rhythmClockOverride = 1001.0
+    discard pass(scene, canvas)
+    check scene.state{"uiRuns"}.getInt() == 1
+    check fast.runs == 2 and slow.runs == 1
+    check canvas[3, 3] == rgbx(9, 9, 9, 255)   # the chrome was not touched
+    check canvas[5, 25] == rgbx(8, 8, 8, 255)  # nor the scene that was not due
+    rhythmClockOverride = 1300.0
+    discard pass(scene, canvas)
+    check scene.state{"uiRuns"}.getInt() == 2
+
+  test "a <Scene> inside a scene inside a layout's hole is a hole too":
+    let scene = newScene("tests/twoHolesInLayout")
+    let canvas = newImage(W, H)
+    discard pass(scene, canvas)
+    check scene.state{"uiRuns"}.getInt() == 1
+    check scene.slots.len == 2 and scene.slots[1].hole
+    let fast = scene.panelOf("tests/fastChild")
+    let first = fast.runs
+    rhythmClockOverride = 1001.0
+    discard pass(scene, canvas)
+    check scene.state{"uiRuns"}.getInt() == 1
+    check fast.runs == first + 1
+    check canvas.color(35, 35) == colored("#ff00ff")
+
+  test "a <Scene> with something over it stays a picture":
+    let scene = newScene("tests/coveredScene")
+    let canvas = newImage(W, H)
+    discard pass(scene, canvas)
+    check not scene.slots[0].hole
+    check canvas.color(20, 20) == colored("#00ffff")
+    check canvas.color(10, 32) == colored("#000000")
+
+  test "chrome that sets its next sleep is left alone until then":
+    let scene = newScene("tests/inTaskbar")
+    let canvas = newImage(W, H)
+    discard pass(scene, canvas)
+    check scene.uiRuns == 1
+    rhythmClockOverride = 1005.0
+    discard pass(scene, canvas)
+    check scene.uiRuns == 1
+    rhythmClockOverride = 1031.0
+    discard pass(scene, canvas)
+    check scene.uiRuns == 2
 
   test "chrome that ticks leaves the content's pixels":
     let scene = newScene("tests/inHole")
@@ -603,11 +739,11 @@ suite "a <yield /> that is a hole":
   test "a yield under opacity or under something else is composited instead":
     let faded = newScene("tests/inFaded")
     let image = pass(faded, newImage(W, H))
-    check faded.layoutOf.holeW == 0
+    check not faded.layoutOf.holeIn.found
     check image.color(5, 30) != colored("#0000ff") # half through
     let covered = newScene("tests/inCovered")
     let picture = pass(covered, newImage(W, H))
-    check covered.layoutOf.holeW == 0
+    check not covered.layoutOf.holeIn.found
     check picture.color(5, 5) == colored("#0000ff")
     check picture.color(7, 32) == rgbx(255, 255, 255, 255) # the overlay, on top
 
@@ -655,10 +791,10 @@ suite "apps that subscribe to events":
   test "returning true draws a layout with a hole again, whatever its interval":
     let scene = newScene("tests/wearsHoleListener")
     discard pass(scene)
-    check scene.layoutOf.holeW > 0
-    check scene.layoutOf.rhythm.dueAt > 1000.0
+    check scene.layoutOf.holeIn.found
+    check scene.layoutOf.rhythm.chromeDueAt > 1000.0
     scene.fire("button", %*{"label": "nothing"})
-    check scene.layoutOf.rhythm.dueAt > 1000.0
+    check scene.layoutOf.rhythm.chromeDueAt > 1000.0
     scene.fire("button", %*{"label": "redraw"})
     check scene.layoutOf.rhythm.dueAt == 0
 
@@ -705,9 +841,9 @@ suite "the starter layouts":
       let canvas = newImage(W, H)
       discard pass(scene, canvas)
       let layout = scene.layoutOf
-      check layout.holeW > 0 and layout.holeH > 0 and layout.holeW.int * layout.holeH.int < W * H
-      check canvas.color(layout.holeX.int + layout.holeW.int div 2,
-        layout.holeY.int + layout.holeH.int div 2) == colored("#0000ff")
+      let hole = layout.holeIn
+      check hole.found and hole.w > 0 and hole.h > 0 and hole.w * hole.h < W * H
+      check canvas.color(hole.x + hole.w div 2, hole.y + hole.h div 2) == colored("#0000ff")
       check not ($logged).contains("error")
   test "there are starters to check":
     check found >= 3

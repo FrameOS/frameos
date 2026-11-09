@@ -12,7 +12,7 @@ import re
 from typing import Any
 
 _JSX_FILE = re.compile(r"\.[jt]sx$")
-_YIELD_TAG = re.compile(r"<\s*[Yy]ield\b")
+_YIELD_TAG = re.compile(r"<\s*yield\b")
 
 _PROBLEM_TEXT = {
     "render": "A layout draws one JSX app to the frame and nothing else.",
