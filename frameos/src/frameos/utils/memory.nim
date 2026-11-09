@@ -60,8 +60,12 @@ elif defined(linux) and not defined(frameosWasm):
 
 when defined(testing):
   # Lets tests simulate a memory-constrained device (e.g. ESP32 PSRAM
-  # headroom) on a development host. 0 disables the override.
+  # headroom) on a development host. 0 disables the override; negative is a
+  # device with nothing left under its reserve.
   var availableRenderBytesOverride* = 0
+  var contiguousBudgetOverride* = 0
+    ## The largest free block a test's device has: what an ESP32's budget
+    ## measures. 0 is a host's, unlimited.
 
 when defined(frameosWasm) or defined(testing):
   var simulatingEmbedded = false
@@ -126,8 +130,8 @@ proc availableRenderBytes*(): int =
   ## Best-effort estimate of memory currently available for image-sized
   ## render allocations. 0 means "unknown"; callers treat that as unlimited.
   when defined(testing):
-    if availableRenderBytesOverride > 0:
-      return availableRenderBytesOverride
+    if availableRenderBytesOverride != 0:
+      return max(0, availableRenderBytesOverride)
   when defined(frameosEmbedded):
     let largest = fos_psram_largest_free_block().int
     let free = fos_psram_free_bytes().int
@@ -155,8 +159,8 @@ proc availableRenderHeadroomBytes*(): int =
   ## contiguous block sits near 1.7MB while over 5MB is free, and a headroom
   ## question asked against the block answer refuses everything.
   when defined(testing):
-    if availableRenderBytesOverride > 0:
-      return availableRenderBytesOverride
+    if availableRenderBytesOverride != 0:
+      return max(0, availableRenderBytesOverride)
   when defined(frameosEmbedded):
     max(0, fos_psram_free_bytes().int - EmbeddedReserveBytes)
   elif defined(frameosWasm):
@@ -216,7 +220,8 @@ var
 proc releaseRenderMemoryIfShort() =
   if not renderMemoryReleaseHook.isNil:
     let headroom = availableRenderHeadroomBytes()
-    if headroom > 0 and headroom < RenderMemoryShortBytes:
+    # 0 on an ESP32 is under the reserve: as short as it gets.
+    if (headroom > 0 or runsAsEmbedded()) and headroom < RenderMemoryShortBytes:
       clearCoverageCache() # pixie's kept masks: rebuilt by the fills that need them
       discard renderMemoryReleaseHook(false)
 
@@ -271,6 +276,8 @@ proc refreshDecodeContiguousBudget() =
   ## report "plenty" and effectively leave it unlimited.
   when defined(frameosEmbedded):
     setDecodeContiguousBudgetProvider(largestDecodeBlock)
+  elif defined(testing):
+    setDecodeContiguousBudgetBytes(contiguousBudgetOverride)
   else:
     setDecodeContiguousBudgetBytes(0)
 

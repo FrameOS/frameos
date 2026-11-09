@@ -18,8 +18,10 @@ import { framesModel } from "../../../../../../frontend/src/models/framesModel";
 import { frameLogic } from "../../../../../../frontend/src/scenes/frame/frameLogic";
 import { frameSettingsSectionRenders } from "../../../../../../frontend/src/scenes/frame/panels/FrameSettings/frameSettingsSurface";
 import { FrameLayoutsFields } from "../../../../../../frontend/src/scenes/frame/panels/FrameSettings/sections/layoutsSection";
+import { frameLayoutsLogic } from "../../../../../../frontend/src/scenes/frame/panels/FrameSettings/frameLayoutsLogic";
 import { SceneLayoutPicker } from "../../../../../../frontend/src/scenes/frame/panels/Scenes/SceneLayoutPicker";
 import { sceneLayoutLogic } from "../../../../../../frontend/src/scenes/frame/panels/Scenes/sceneLayoutLogic";
+import { scenesLogic } from "../../../../../../frontend/src/scenes/frame/panels/Scenes/scenesLogic";
 import type { FrameType } from "../../../../../../frontend/src/types";
 
 type TestWindow = Window & { FRAMEOS_EMBEDDED_NO_BACKEND?: boolean };
@@ -105,6 +107,21 @@ describe("the layout picker", () => {
 });
 
 describe("the Layouts section of a frame's settings", () => {
+  function openAdvanced() {
+    const fields = frameLayoutsLogic({ frameId });
+    fields.mount();
+    fields.actions.setAdvancedOpen(true);
+  }
+
+  it("is one select until Advanced is opened", async () => {
+    await mountedWithThree();
+    render(<FrameLayoutsFields frameId={frameId} />);
+    expect(screen.getByLabelText("Layout for all scenes")).toBeTruthy();
+    expect(screen.queryByLabelText("Layout for Photos")).toBeNull();
+    openAdvanced();
+    await waitFor(() => expect(screen.getByLabelText("Layout for Photos")).toBeTruthy());
+  });
+
   async function mountedWithThree() {
     const logic = await mounted();
     logic.actions.setFrameFormValues({
@@ -119,6 +136,7 @@ describe("the Layouts section of a frame's settings", () => {
 
   it("sets one scene, then all of them, keeping the settings of a scene that already wears it", async () => {
     const logic = await mountedWithThree();
+    openAdvanced();
     render(<FrameLayoutsFields frameId={frameId} />);
     const all = screen.getByLabelText("Layout for all scenes") as HTMLSelectElement;
     expect(all.value).toBe("__different");
@@ -144,6 +162,7 @@ describe("the Layouts section of a frame's settings", () => {
         scene.id === "bar" ? scene : { ...scene, layout: { sceneId: "bar", state: { height: 60 } } }
       ),
     } as never);
+    openAdvanced();
     render(<FrameLayoutsFields frameId={frameId} />);
 
     fireEvent.click(screen.getByLabelText("Layout settings for Photos"));
@@ -160,6 +179,27 @@ describe("the Layouts section of a frame's settings", () => {
     expect(sceneNamed(logic, "photos")?.layout).toEqual({ sceneId: "bar", state: { height: 80 } });
     expect(sceneNamed(logic, "clock")?.layout).toEqual({ sceneId: "bar", state: { height: 80 } });
     expect(sceneNamed(logic, "bar")).not.toHaveProperty("layout");
+  });
+
+  it("Activate puts a layout on every scene, and Deactivate takes it off them all", async () => {
+    const logic = await mountedWithThree();
+    const scenes = scenesLogic({ frameId });
+    scenes.mount();
+
+    expect(scenes.values.activeLayoutId).toBeNull();
+    expect(scenes.values.sceneCountWearingLayout("bar")).toBe(1);
+
+    scenes.actions.setLayoutOnEveryScene("bar", true);
+    expect(sceneNamed(logic, "photos")?.layout).toEqual({ sceneId: "bar" });
+    // A scene already wearing it keeps its settings.
+    expect(sceneNamed(logic, "clock")?.layout).toEqual({ sceneId: "bar", state: { height: 60 } });
+    expect(sceneNamed(logic, "bar")).not.toHaveProperty("layout");
+    expect(scenes.values.activeLayoutId).toBe("bar");
+
+    scenes.actions.setLayoutOnEveryScene("bar", false);
+    expect(sceneNamed(logic, "photos")).not.toHaveProperty("layout");
+    expect(sceneNamed(logic, "clock")).not.toHaveProperty("layout");
+    expect(scenes.values.activeLayoutId).toBeNull();
   });
 
   it("is on every surface that saves scenes", () => {

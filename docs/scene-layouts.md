@@ -137,12 +137,17 @@ Any scene becomes a layout, and back, where its settings are: "Use as layout"
 in the frame's scene settings and the embedded editor, Type in the cloud scene
 page's Info column, and "Use as layout" in a backend's saved scene Edit dialog
 (`PATCH /api/templates/{id}` `isLayout`, on the scene the template starts on).
-A small select sits under each scene's picture once the frame has a layout. The same choice is in the frame's
-Settings under Layouts: one select per scene and one for all of them, which
-sets the scenes the frame has now (a scene added later starts with no layout).
+A layout's drawer has Activate: it goes on every scene and what changed is
+pushed (Deactivate takes it off them all). The layout every scene wears is the
+frame's **active layout** (`activeFrameLayout`), marked in the Layouts group even
+while that is collapsed. The same choice is the one Layout select in the frame's
+Settings; each scene's own select is under Advanced. A starter added to a frame
+wearing none goes on every scene, one added next to a layout in use waits for its
+own Activate, and a scene that joins a frame with an active layout wears it
+(`withActiveLayoutOnNewScenes`; on the cloud the assignment row says so too).
 "Layout settings" in the scene's menu edits `layout.state`, and so does the gear
-beside each select in those Settings; the one beside "All scenes" writes it to
-every scene wearing that layout.
+beside each select in those Settings; the one beside the Layout select writes it
+to every scene wearing that layout.
 
 **How often it renders** (`utils/sceneRhythm.ts`, `framePacedByInterval`):
 where a render is free, a worn layout renders when its chrome or its scene is

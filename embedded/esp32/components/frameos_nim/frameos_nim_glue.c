@@ -528,8 +528,11 @@ bool fos_nim_emergency_reserve_used(void)
 static jmp_buf s_nim_oom_jmp;
 static volatile bool s_nim_oom_jmp_armed = false;
 
+static size_t s_nim_oom_request = 0; /* for the memory:oomAbort line */
+
 void fos_nim_fatal_oom(size_t size)
 {
+    s_nim_oom_request = size;
     ESP_LOGE("fos_nim", "unrecoverable allocation failure (%u bytes, internal=%u largest=%u, psram=%u largest=%u)",
              (unsigned)size,
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -615,11 +618,11 @@ static void nim_oom_abort_note(const char *what)
     char line[420];
     snprintf(line, sizeof(line),
              "{\"event\":\"memory:oomAbort\",\"source\":\"esp32\","
-             "\"where\":\"%s\",\"streak\":%u,\"freePsram\":%u,"
+             "\"where\":\"%s\",\"requestBytes\":%u,\"streak\":%u,\"freePsram\":%u,"
              "\"largestPsramBlock\":%u,\"baselinePsram\":%u,"
              "\"jsDropped\":%d,\"jsDroppedBytes\":%u,\"httpReleased\":%d,"
              "\"status\":\"%s\"}",
-             what, s_nim_oom_abort_streak, (unsigned)free_psram, (unsigned)largest,
+             what, (unsigned)s_nim_oom_request, s_nim_oom_abort_streak, (unsigned)free_psram, (unsigned)largest,
              (unsigned)s_psram_free_baseline, js_dropped, (unsigned)js_bytes, http_released,
              restart ? "restarting" : "leaked");
     frameos_nim_log_hook(line);

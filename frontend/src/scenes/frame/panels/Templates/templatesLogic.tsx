@@ -12,7 +12,7 @@ import { assignCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { stripSecretFieldValues } from '../../../../utils/stripSecretFieldValues'
 import { withoutSceneEventMap } from '../../../../utils/sceneEventMap'
-import { withoutSceneLayout } from '../../../../utils/sceneLayouts'
+import { layoutsWornBy, withoutSceneLayout } from '../../../../utils/sceneLayouts'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { longRunningTasksModel, reportTaskOutcome } from '../../../../models/longRunningTasksModel'
 import { framesModel } from '../../../../models/framesModel'
@@ -1297,7 +1297,10 @@ export const templatesLogic = kea<templatesLogicType>([
             const assigned = await assignCloudFrameStoreScene(
               props.frameId,
               storeSceneId,
-              collectSecretSettingsFromScenes(scenes, values.apps)
+              collectSecretSettingsFromScenes(scenes, values.apps),
+              // A frame with an active layout has it on what joins (applyTemplate
+              // put it on these); the server's row has to say so too.
+              layoutsWornBy(scenes, frameLogic({ frameId: props.frameId }).values.frameForm?.scenes)
             )
             longRunningTasksModel.actions.finishTask({
               frameId: props.frameId,

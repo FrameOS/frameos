@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { LAYOUT_STARTERS } from "../../../../../../frontend/src/generated/layoutStarters";
 import {
+  activeFrameLayout,
   currentSceneLayout,
   isLayoutScene,
   layoutScenes,
@@ -12,6 +13,8 @@ import {
   sceneLayoutProblemText,
   sceneLayoutRef,
   scenesWithoutLayouts,
+  layoutsWornBy,
+  withActiveLayoutOnNewScenes,
   withIsLayout,
   withSceneLayout,
   withoutSceneLayout,
@@ -94,5 +97,46 @@ describe("what can be a layout", () => {
       expect(sceneLayoutProblem(starter.scene)).toBeNull();
       expect(starter.image).toMatch(/^data:image\/jpeg;base64,/);
     }
+  });
+});
+
+describe("the frame's active layout", () => {
+  const layout = { id: "bar", settings: { isLayout: true } };
+  const wearing = (id: string, state?: Record<string, unknown>) => ({
+    id,
+    layout: state ? { sceneId: "bar", state } : { sceneId: "bar" },
+  });
+
+  it("is the one every scene wears, with the first scene's settings", () => {
+    expect(activeFrameLayout([wearing("a", { height: 40 }), wearing("b"), layout])).toEqual({
+      sceneId: "bar",
+      state: { height: 40 },
+    });
+  });
+
+  it("is none while the scenes differ, wear none, or there are none", () => {
+    expect(activeFrameLayout([wearing("a"), { id: "b" }, layout])).toBeNull();
+    expect(activeFrameLayout([{ id: "a" }, layout])).toBeNull();
+    expect(activeFrameLayout([layout])).toBeNull();
+    // A layout deleted since is no layout.
+    expect(activeFrameLayout([wearing("a")])).toBeNull();
+  });
+
+  it("goes on a scene that joins, and on nothing else", () => {
+    const joined = withActiveLayoutOnNewScenes(
+      [wearing("a", { height: 40 }), layout],
+      [{ id: "new" }, { id: "another-layout", settings: { isLayout: true } }, { id: "own", layout: { sceneId: "x" } }],
+    );
+    expect(joined[0]?.layout).toEqual({ sceneId: "bar", state: { height: 40 } });
+    expect(joined[1]).not.toHaveProperty("layout");
+    expect(joined[2]?.layout).toEqual({ sceneId: "x" });
+  });
+
+  it("leaves what joins alone on a frame with none active", () => {
+    expect(withActiveLayoutOnNewScenes([{ id: "a" }, layout], [{ id: "new" }])).toEqual([{ id: "new" }]);
+  });
+
+  it("says what a list of scenes wears, for a cloud assignment row", () => {
+    expect(layoutsWornBy([{ id: "a" }, { id: "b" }], [wearing("a"), { id: "b" }])).toEqual({ a: { sceneId: "bar" } });
   });
 });
