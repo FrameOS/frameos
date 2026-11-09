@@ -1810,6 +1810,12 @@ proc fillHits(
         inc dataIndex
 
 var rowsFast*, rowsTrap*, rowsAA*, rowsNoAA*, entriesAA*, pixelsAA*, edgePixels*: int
+when defined(testing):
+  var fillOccupiedPeak* {.threadvar.}: int
+    ## The most memory in use at any fill, with its segments and partitions:
+    ## where a long text's single path peaked. For tests, which cannot ask
+    ## the allocator for a high-water mark of what was live.
+
 proc fillShapes(
   image: Image,
   shapes: seq[Polygon],
@@ -1847,6 +1853,9 @@ proc fillShapes(
     coverages = newSeq[uint8](pathWidth)
     hits = newSeq[(Fixed32, int16)](entryIndices.len)
     numHits: int
+
+  when defined(testing):
+    fillOccupiedPeak = max(fillOccupiedPeak, getOccupiedMem())
 
   var y = startY
   while y < pathHeight:

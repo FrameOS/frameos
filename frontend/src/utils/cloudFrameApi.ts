@@ -692,7 +692,9 @@ export async function assignCloudFrameStoreScene(
    * declare, as the owner saw them when choosing it. Without this the scene
    * is served no keys (cloud/docs/cloud-frames.md, "Service settings").
    */
-  settingsGroups: readonly string[] = []
+  settingsGroups: readonly string[] = [],
+  /** The layout each runtime scene of it wears: the frame's active one, when it has one. */
+  layouts?: Record<string, SceneLayoutRef>
 ): Promise<boolean> {
   const existing = await listCloudFrameScenes(frameId)
   if (existing.some((scene) => scene.scene_id === sceneId)) {
@@ -713,7 +715,11 @@ export async function assignCloudFrameStoreScene(
             settings_groups: scene.granted_settings_groups ?? [],
           })
         ),
-        cloudSceneAssignmentEntry({ scene_id: sceneId, settings_groups: [...settingsGroups] }),
+        cloudSceneAssignmentEntry({
+          scene_id: sceneId,
+          settings_groups: [...settingsGroups],
+          ...(layouts && Object.keys(layouts).length > 0 ? { layouts } : {}),
+        }),
       ],
     }),
   })

@@ -270,8 +270,10 @@ proc fillTextApproxStroke*(
   let available = availableRenderBytes()
   lastApproxStroke.scratchBytes = scratchBytes.int
   lastApproxStroke.availableBytes = available
+  # Nothing available is an answer on an ESP32 (under the reserve, the moment
+  # this check is for). Only a host that cannot tell says 0 and means unknown.
   if w <= 0 or h <= 0 or scratchBytes > ApproxStrokeScratchMaxBytes or
-      (available > 0 and scratchBytes + 64 * 1024 > available):
+      ((available > 0 or runsAsEmbedded()) and scratchBytes + 64 * 1024 > available):
     lastApproxStroke.path = "stamped: no memory for the scratch"
     image.fillTextStamped(arrangement, origin, radius)
     return

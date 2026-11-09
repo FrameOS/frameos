@@ -1,4 +1,11 @@
-import { scenesWithoutLayouts } from '../../../../utils/sceneLayouts'
+import {
+  activeFrameLayout,
+  currentSceneLayout,
+  layoutScenes,
+  scenesWithoutLayouts,
+  sceneLayoutRef,
+  withLayoutOnEveryScene,
+} from '../../../../utils/sceneLayouts'
 import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { FrameScene, SceneNodeData, FrameId } from '../../../../types'
 import { frameCanUseFastDeploy, frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
@@ -64,6 +71,7 @@ export interface scenesLogicValues {
   isFrameAdminMode: boolean // frameLogic
   lastDeploy: Partial<FrameType> | null // frameLogic
   sceneUpdateVersions: Record<string, string> // sceneUpdatesLogic
+  activeLayoutId: string | null
   activeScene: FrameScene | null
   activeSettingsKey: string | null
   activeUploadedScene: FrameScene | null
@@ -136,6 +144,7 @@ export interface scenesLogicValues {
   rawScenes: FrameScene[]
   renameSceneDialog: SceneRenameDialog | null
   sceneAccessFlagsById: Record<string, SceneAccessFlag[]>
+  sceneCountWearingLayout: (layoutSceneId: string) => number
   scenePushIds: (sceneId: string) => string[]
   sceneSecretSettings: Map<string, string[]>
   sceneTitles: {
@@ -327,6 +336,13 @@ export interface scenesLogicActions {
   setAsDefault: (sceneId: string) => {
     sceneId: string
   }
+  setLayoutOnEveryScene: (
+    layoutSceneId: string,
+    active: boolean
+  ) => {
+    active: boolean
+    layoutSceneId: string
+  }
   setNewSceneManualErrors: (errors: Record<string, any>) => {
     errors: Record<string, any>
   }
@@ -414,6 +430,8 @@ export interface scenesLogicMeta {
     frameId: (arg: FrameId) => FrameId
     editingFrame: (frameForm: Partial<FrameType>, frame: FrameType) => Partial<FrameType>
     rawScenes: (editingFrame: Partial<FrameType>) => FrameScene[]
+    activeLayoutId: (rawScenes: FrameScene[]) => string | null
+    sceneCountWearingLayout: (rawScenes: FrameScene[]) => (layoutSceneId: string) => number
     sceneAccessFlagsById: (rawScenes: FrameScene[]) => Record<string, SceneAccessFlag[]>
     undeployedSceneIds: (rawScenes: FrameScene[], frame: FrameType, isFrameAdminMode: boolean) => Set<string>
     unsavedSceneIds: (frame: FrameType, frameForm: Partial<FrameType>) => Set<string>
@@ -484,6 +502,44 @@ export type scenesLogicType = MakeLogicType<scenesLogicValues, scenesLogicAction
 // and Save writes the list into scenes.json.
 function formScenesOf(values: { frameForm: Partial<FrameType>; scenes: FrameScene[] }): FrameScene[] {
   return values.frameForm.scenes ?? values.scenes
+}
+
+/** Saves `toSave` (on the cloud the save is the push), then pushes the frame's saved scenes without changing what it shows. */
+async function pushWithoutActivating(
+  frameId: FrameId,
+  frame: FrameType,
+  toSave: string[],
+  title: string,
+  sceneId: string
+): Promise<void> {
+  const frameLogicInstance = frameLogic({ frameId })
+  try {
+    if (toSave.length) {
+      await frameLogicInstance.asyncActions.saveScenes(toSave)
+    }
+  } catch (error) {
+    reportTaskOutcome('error', {
+      frameId,
+      kind: 'save',
+      title,
+      detail: error instanceof Error ? error.message : 'Failed to save the scene',
+    })
+    return
+  }
+  if (isCloudMode()) {
+    reportTaskOutcome('success', {
+      frameId,
+      kind: 'deploy',
+      title,
+      detail: 'Pushed. The frame has it as soon as it syncs.',
+    })
+  } else {
+    framesModel.actions.deployFrame(
+      frameId,
+      frameCanUseFastDeploy(frame, frameLogicInstance.values.requiresRecompilation),
+      { title, sceneId }
+    )
+  }
 }
 
 export const scenesLogic = kea<scenesLogicType>([
@@ -567,6 +623,9 @@ export const scenesLogic = kea<scenesLogicType>([
       activate,
       state: state ?? null,
     }),
+    // Activate on a layout (docs/ui-vocabulary.md): it goes on every scene, or
+    // comes off them all, and what changed is pushed.
+    setLayoutOnEveryScene: (layoutSceneId: string, active: boolean) => ({ layoutSceneId, active }),
     setAiPrompt: (prompt: string) => ({ prompt }),
     generateAiScene: true,
     generateAiSceneSuccess: true,
@@ -817,6 +876,19 @@ export const scenesLogic = kea<scenesLogicType>([
       (s) => [s.editingFrame],
       (frame: scenesLogicValues['editingFrame']): FrameScene[] => frame?.scenes ?? [],
     ],
+    /** The layout every scene wears; null while they differ or wear none. */
+    activeLayoutId: [
+      (s) => [s.rawScenes],
+      (rawScenes: FrameScene[]): string | null => activeFrameLayout(rawScenes)?.sceneId ?? null,
+    ],
+    sceneCountWearingLayout: [
+      (s) => [s.rawScenes],
+      (rawScenes: FrameScene[]): ((layoutSceneId: string) => number) => {
+        const layouts = layoutScenes(rawScenes)
+        const worn = scenesWithoutLayouts(rawScenes).map((scene) => currentSceneLayout(scene, layouts)?.sceneId)
+        return (layoutSceneId: string) => worn.filter((id) => id === layoutSceneId).length
+      },
+    ],
     // What each scene reaches for on the frame (utils/sceneAccess.ts), from
     // the scene as edited: the chips next to its name follow every save.
     sceneAccessFlagsById: [
@@ -972,7 +1044,7 @@ export const scenesLogic = kea<scenesLogicType>([
         uploadedScenes: scenesLogicValues['uploadedScenes']
       ) =>
         missingActiveSceneId
-          ? uploadedScenes.find((scene) => sceneIdsRefer(scene.id, missingActiveSceneId)) ?? null
+          ? (uploadedScenes.find((scene) => sceneIdsRefer(scene.id, missingActiveSceneId)) ?? null)
           : null,
     ],
     missingActiveMatchesSearch: [
@@ -1342,11 +1414,36 @@ export const scenesLogic = kea<scenesLogicType>([
             error instanceof Error
               ? error.message
               : values.isFrameAdminMode
-              ? 'Failed to activate the scene'
-              : 'Failed to preview the scene',
+                ? 'Failed to activate the scene'
+                : 'Failed to preview the scene',
         })
         actions.previewSceneFailure()
       }
+    },
+    setLayoutOnEveryScene: async ({ layoutSceneId, active }) => {
+      const frameLogicInstance = frameLogic({ frameId: props.frameId })
+      const before = values.rawScenes
+      const after = withLayoutOnEveryScene(before, active ? layoutSceneId : '')
+      const changedIds = after
+        .filter(
+          (scene, index) => sceneLayoutRef(scene.layout)?.sceneId !== sceneLayoutRef(before[index].layout)?.sceneId
+        )
+        .map((scene) => scene.id)
+      frameLogicInstance.actions.setFrameFormValues({ scenes: after })
+      if (isInFrameAdminMode()) {
+        await frameLogicInstance.asyncActions.saveFrame()
+        return
+      }
+      const name = before.find((scene) => scene.id === layoutSceneId)?.name || 'layout'
+      const sceneIds = Array.from(new Set([layoutSceneId, ...values.scenePushIds(layoutSceneId), ...changedIds]))
+      const toSave = isCloudMode() ? sceneIds : sceneIds.filter((id) => values.unsavedSceneIds.has(id))
+      await pushWithoutActivating(
+        props.frameId,
+        values.frame,
+        toSave,
+        active ? `Activating ${name} on every scene` : `Taking ${name} off every scene`,
+        layoutSceneId
+      )
     },
     pushScene: async ({ sceneId, activate, state }) => {
       // The scene itself always: pushing an unchanged copy changes nothing.
@@ -1363,33 +1460,7 @@ export const scenesLogic = kea<scenesLogicType>([
       // other unsaved edit stays in the form.
       const toSave = isCloudMode() ? sceneIds : sceneIds.filter((id) => values.unsavedSceneIds.has(id))
       if (!activate) {
-        try {
-          if (toSave.length) {
-            await frameLogicInstance.asyncActions.saveScenes(toSave)
-          }
-        } catch (error) {
-          reportTaskOutcome('error', {
-            frameId: props.frameId,
-            kind: 'save',
-            title,
-            detail: error instanceof Error ? error.message : 'Failed to save the scene',
-          })
-          return
-        }
-        if (isCloudMode()) {
-          reportTaskOutcome('success', {
-            frameId: props.frameId,
-            kind: 'deploy',
-            title,
-            detail: 'Pushed. The frame has it as soon as it syncs.',
-          })
-        } else {
-          framesModel.actions.deployFrame(
-            props.frameId,
-            frameCanUseFastDeploy(values.frame, frameLogicInstance.values.requiresRecompilation),
-            { title, sceneId }
-          )
-        }
+        await pushWithoutActivating(props.frameId, values.frame, toSave, title, sceneId)
         return
       }
       // Spins until the frame logs this scene's render:done, like Activate.

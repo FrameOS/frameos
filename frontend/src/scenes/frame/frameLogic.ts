@@ -41,6 +41,7 @@ import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
 import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
+import { withActiveLayoutOnNewScenes } from '../../utils/sceneLayouts'
 import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
 import { convertSceneWithFeedback, requestSceneConversion } from '../../utils/sceneConvert'
@@ -3580,7 +3581,11 @@ export const frameLogic = kea<frameLogicType>([
           template,
         }))
         .filter(({ scenes }) => scenes.length > 0)
-      const newScenes = sceneGroups.flatMap(({ scenes }) => scenes)
+      // A frame with an active layout (docs/scene-layouts.md) has it on what joins.
+      const newScenes = withActiveLayoutOnNewScenes(
+        oldScenes,
+        sceneGroups.flatMap(({ scenes }) => scenes)
+      )
       if (!newScenes.length) {
         return
       }
@@ -3838,7 +3843,7 @@ export const frameLogic = kea<frameLogicType>([
       },
       createBlankScene: async ({ name, openEditor, openDrawer }) => {
         const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
-        const scene = buildBlankScene(frameForm, name)
+        const [scene] = withActiveLayoutOnNewScenes(frameForm.scenes, [buildBlankScene(frameForm, name)])
         actions.setFrameFormValues({ scenes: [...(frameForm.scenes ?? []), scene] })
         if (openEditor) {
           router.actions.push(urls.scenes(props.frameId, scene.id))

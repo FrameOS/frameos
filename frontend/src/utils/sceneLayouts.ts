@@ -105,3 +105,46 @@ export function commonSceneLayoutId(
   const ids = new Set(scenes.map((scene) => currentSceneLayout(scene, layouts)?.sceneId ?? ''))
   return ids.size > 1 ? null : [...ids][0] ?? ''
 }
+
+/**
+ * The frame's active layout: the one every scene wears, with the settings the
+ * first of them has. Null while the scenes differ or wear none.
+ */
+export function activeFrameLayout(
+  scenes: readonly Pick<FrameScene, 'id' | 'layout' | 'settings'>[] | null | undefined
+): SceneLayoutRef | null {
+  const contents = scenesWithoutLayouts(scenes)
+  const layouts = layoutScenes(scenes)
+  return contents.length > 0 && commonSceneLayoutId(contents, layouts) ? currentSceneLayout(contents[0], layouts) : null
+}
+
+/** What `scenes` wear in the frame's list, by id: a cloud assignment row's `layouts`. */
+export function layoutsWornBy(
+  scenes: readonly Pick<FrameScene, 'id'>[],
+  frameScenes: readonly Pick<FrameScene, 'id' | 'layout'>[] | null | undefined
+): Record<string, SceneLayoutRef> {
+  const layouts: Record<string, SceneLayoutRef> = {}
+  for (const scene of scenes) {
+    const ref = sceneLayoutRef(frameScenes?.find((candidate) => candidate.id === scene.id)?.layout)
+    if (ref) {
+      layouts[scene.id] = ref
+    }
+  }
+  return layouts
+}
+
+/** Scenes joining a frame that has an active layout wear it too. A layout, or a scene with its own, is left alone. */
+export function withActiveLayoutOnNewScenes<T extends Partial<FrameScene>>(
+  existing: readonly Pick<FrameScene, 'id' | 'layout' | 'settings'>[] | null | undefined,
+  added: readonly T[]
+): T[] {
+  const active = activeFrameLayout(existing)
+  if (!active) {
+    return [...added]
+  }
+  return added.map((scene) =>
+    isLayoutScene(scene as Pick<FrameScene, 'settings'>) || sceneLayoutRef(scene.layout)
+      ? scene
+      : withSceneLayout(scene, active)
+  )
+}

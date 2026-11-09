@@ -48,11 +48,27 @@ function LayoutSettingsButton({
   )
 }
 
-/** Which layout each scene on the frame wears and its settings, and one select for all of them. */
+/** One select for the whole frame. Advanced has each scene's own select and the starters. */
 export function FrameLayoutsFields({ frameId }: { frameId: FrameId }): JSX.Element {
   const logic = frameLayoutsLogic({ frameId })
-  const { layouts, contentScenes, commonLayoutId } = useValues(logic)
-  const { chooseLayoutForEveryScene, addStarterLayout } = useActions(logic)
+  const { layouts, contentScenes, commonLayoutId, advancedOpen } = useValues(logic)
+  const { chooseLayoutForEveryScene, addStarterLayout, setAdvancedOpen } = useActions(logic)
+  const starters = (
+    <div className="flex flex-wrap items-center gap-2" data-layout-starters>
+      <span className="frameos-muted text-xs">Add a layout:</span>
+      {LAYOUT_STARTERS.map((starter) => (
+        <Button
+          key={starter.name}
+          size="tiny"
+          color="secondary"
+          title={starter.description}
+          onClick={() => addStarterLayout(starter.name)}
+        >
+          {starter.name}
+        </Button>
+      ))}
+    </div>
+  )
   return (
     <>
       <H6 id="frame-settings-layouts" className="mt-4">
@@ -60,80 +76,78 @@ export function FrameLayoutsFields({ frameId }: { frameId: FrameId }): JSX.Eleme
       </H6>
       <div className="pl-2 @md:pl-8 space-y-2">
         {layouts.length === 0 ? (
-          <div className="frameos-muted text-xs">
-            This frame has no layouts yet. Add one below to get started, or turn on &quot;Use as layout&quot; for a JSX
-            scene that has a &lt;yield /&gt;.
-          </div>
-        ) : (
           <>
             <div className="frameos-muted text-xs">
-              The layout each scene is drawn inside. Save the frame to push the change.
+              This frame has no layouts yet. Add one below to get started, or turn on &quot;Use as layout&quot; for a
+              JSX scene that has a &lt;yield /&gt;.
             </div>
-            {contentScenes.length > 1 ? (
-              <div className="flex items-center gap-3">
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold">All scenes</span>
-                <select
-                  aria-label="Layout for all scenes"
-                  value={commonLayoutId ?? DIFFERENT}
-                  onChange={(event) => chooseLayoutForEveryScene(event.target.value)}
-                  className="frameos-form-control h-8 w-full max-w-[14rem] min-w-0 truncate rounded border px-1 text-sm outline-none focus:ring-1 focus:ring-blue-400"
-                >
-                  {commonLayoutId === null ? (
-                    <option value={DIFFERENT} disabled>
-                      Different layouts
-                    </option>
-                  ) : null}
-                  <option value="">No layout</option>
-                  {(layouts as FrameScene[]).map((layout) => (
-                    <option key={layout.id} value={layout.id}>
-                      {layout.name || 'Untitled layout'}
-                    </option>
-                  ))}
-                </select>
-                {commonLayoutId ? (
-                  <LayoutSettingsButton
-                    frameId={frameId}
-                    sceneId={contentScenes[0].id}
-                    everyScene
-                    label="Layout settings for all scenes"
-                  />
-                ) : (
-                  <span className="h-8 w-8 shrink-0" />
-                )}
-              </div>
-            ) : null}
-            {(contentScenes as FrameScene[]).map((scene) => (
-              <div key={scene.id} className="flex items-center gap-3">
-                <span className="min-w-0 flex-1 truncate text-sm">{scene.name || 'Untitled scene'}</span>
-                <SceneLayoutPicker
-                  frameId={frameId}
-                  sceneId={scene.id}
-                  ariaLabel={`Layout for ${scene.name || 'Untitled scene'}`}
-                  className="!h-8 max-w-[14rem] !text-sm !font-normal"
-                />
+            {starters}
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-3">
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold">Layout</span>
+              <select
+                aria-label="Layout for all scenes"
+                value={commonLayoutId ?? DIFFERENT}
+                onChange={(event) => chooseLayoutForEveryScene(event.target.value)}
+                className="frameos-form-control h-8 w-full max-w-[14rem] min-w-0 truncate rounded border px-1 text-sm outline-none focus:ring-1 focus:ring-blue-400"
+              >
+                {commonLayoutId === null ? (
+                  <option value={DIFFERENT} disabled>
+                    Different layouts
+                  </option>
+                ) : null}
+                <option value="">No layout</option>
+                {(layouts as FrameScene[]).map((layout) => (
+                  <option key={layout.id} value={layout.id}>
+                    {layout.name || 'Untitled layout'}
+                  </option>
+                ))}
+              </select>
+              {commonLayoutId && contentScenes.length > 0 ? (
                 <LayoutSettingsButton
                   frameId={frameId}
-                  sceneId={scene.id}
-                  label={`Layout settings for ${scene.name || 'Untitled scene'}`}
+                  sceneId={contentScenes[0].id}
+                  everyScene
+                  label="Layout settings for all scenes"
                 />
-              </div>
-            ))}
+              ) : (
+                <span className="h-8 w-8 shrink-0" />
+              )}
+            </div>
+            <div className="frameos-muted text-xs">Drawn around every scene. Save the frame to push the change.</div>
+            <details
+              data-layouts-advanced
+              open={advancedOpen}
+              onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
+            >
+              <summary className="frameos-muted cursor-pointer text-xs font-semibold">Advanced</summary>
+              {/* Mounted only while open: a logic per scene, on a frame with dozens. */}
+              {advancedOpen ? (
+                <div className="mt-2 space-y-2">
+                  {(contentScenes as FrameScene[]).map((scene) => (
+                    <div key={scene.id} className="flex items-center gap-3">
+                      <span className="min-w-0 flex-1 truncate text-sm">{scene.name || 'Untitled scene'}</span>
+                      <SceneLayoutPicker
+                        frameId={frameId}
+                        sceneId={scene.id}
+                        ariaLabel={`Layout for ${scene.name || 'Untitled scene'}`}
+                        className="!h-8 max-w-[14rem] !text-sm !font-normal"
+                      />
+                      <LayoutSettingsButton
+                        frameId={frameId}
+                        sceneId={scene.id}
+                        label={`Layout settings for ${scene.name || 'Untitled scene'}`}
+                      />
+                    </div>
+                  ))}
+                  {starters}
+                </div>
+              ) : null}
+            </details>
           </>
         )}
-        <div className="flex flex-wrap items-center gap-2" data-layout-starters>
-          <span className="frameos-muted text-xs">Add a layout:</span>
-          {LAYOUT_STARTERS.map((starter) => (
-            <Button
-              key={starter.name}
-              size="tiny"
-              color="secondary"
-              title={starter.description}
-              onClick={() => addStarterLayout(starter.name)}
-            >
-              {starter.name}
-            </Button>
-          ))}
-        </div>
       </div>
     </>
   )

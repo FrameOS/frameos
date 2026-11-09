@@ -1,4 +1,4 @@
-import { MakeLogicType, actions, connect, kea, key, listeners, path, props, selectors } from 'kea'
+import { MakeLogicType, actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import type { DeepPartial } from 'kea-forms'
 
 import type { FrameId, FrameScene, FrameType, TemplateType } from '../../../../types'
@@ -13,8 +13,9 @@ import { frameLogic } from '../../frameLogic'
 import { LAYOUTS_GROUP_EXPANSION_PATH, workspaceLogic } from '../../../workspace/workspaceLogic'
 
 // The Layouts section of a frame's Settings (docs/scene-layouts.md): the one
-// select that dresses every scene. A scene's own select is SceneLayoutPicker.
-// Like it, this writes the scenes' `layout` into the frame form; Save pushes it.
+// select that dresses every scene, and Advanced, where each scene has its own
+// (SceneLayoutPicker). Both write the scenes' `layout` into the frame form;
+// Save pushes it.
 
 export interface FrameLayoutsLogicProps {
   frameId: FrameId
@@ -24,6 +25,7 @@ export interface FrameLayoutsLogicProps {
 export interface frameLayoutsLogicValues {
   frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
+  advancedOpen: boolean
   commonLayoutId: string | null
   contentScenes: FrameScene[]
   layouts: FrameScene[]
@@ -58,6 +60,9 @@ export interface frameLayoutsLogicActions {
   }
   chooseLayoutForEveryScene: (layoutSceneId: string) => {
     layoutSceneId: string
+  }
+  setAdvancedOpen: (open: boolean) => {
+    open: boolean
   }
 }
 
@@ -101,6 +106,15 @@ export const frameLayoutsLogic = kea<frameLayoutsLogicType>([
   actions({
     chooseLayoutForEveryScene: (layoutSceneId: string) => ({ layoutSceneId }),
     addStarterLayout: (name: string) => ({ name }),
+    setAdvancedOpen: (open: boolean) => ({ open }),
+  }),
+  reducers({
+    advancedOpen: [
+      false,
+      {
+        setAdvancedOpen: (_, { open }) => open,
+      },
+    ],
   }),
   selectors({
     scenes: [
@@ -125,8 +139,16 @@ export const frameLayoutsLogic = kea<frameLayoutsLogicType>([
     addStarterLayout: ({ name }) => {
       const starter = LAYOUT_STARTERS.find((candidate) => candidate.name === name)
       if (starter) {
+        const knownLayoutIds = new Set(values.layouts.map((layout) => layout.id))
+        const noLayoutInUse = values.commonLayoutId === ''
         actions.applyTemplate({ name: starter.name, scenes: [starter.scene], image: dataUrlBlob(starter.image) }, false)
         actions.setFrameAssetFolderExpanded(props.frameId, LAYOUTS_GROUP_EXPANSION_PATH, true)
+        // Installed on a frame wearing none, it goes on every scene. Next to
+        // one already in use it waits for its own Activate.
+        const added = values.layouts.find((layout) => !knownLayoutIds.has(layout.id))
+        if (added && noLayoutInUse) {
+          actions.chooseLayoutForEveryScene(added.id)
+        }
       }
     },
   })),

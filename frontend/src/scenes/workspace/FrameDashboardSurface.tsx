@@ -1,6 +1,4 @@
-import { layoutScenes, scenesWithoutLayouts } from '../../utils/sceneLayouts'
-import { SceneLayoutPicker } from '../frame/panels/Scenes/SceneLayoutPicker'
-import { sceneLayoutLogic } from '../frame/panels/Scenes/sceneLayoutLogic'
+import { activeFrameLayout, layoutScenes, scenesWithoutLayouts } from '../../utils/sceneLayouts'
 import { useActions, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
@@ -564,9 +562,6 @@ function FrameSceneTile({
   // Also while the update runs: the banner is what spins until it has landed.
   const updateVersion = sceneUpdateVersions[scene.id] || updatingSceneIds[scene.id]
   const hasChildScenes = (childSceneCount ?? 0) > 0
-  // Under the picture, over the summary line: on a frame with layouts.
-  const { pickerVisible } = useValues(sceneLayoutLogic({ frameId: frame.id, sceneId: scene.id }))
-  const layoutPicker = pickerVisible && !multiSelectEnabled
 
   const handleTileClick = (): void => {
     if (multiSelectEnabled) {
@@ -598,9 +593,7 @@ function FrameSceneTile({
         <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
           {scene.name || 'Untitled scene'}
         </div>
-        <div className={clsx('frameos-muted mt-0.5 truncate text-xs text-slate-500', layoutPicker && 'invisible')}>
-          {sceneTileSummaryLabel(scene)}
-        </div>
+        <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">{sceneTileSummaryLabel(scene)}</div>
       </div>
     </>
   )
@@ -622,9 +615,6 @@ function FrameSceneTile({
       <button type="button" onClick={handleTileClick} className="flex h-full w-full flex-col">
         {buttonContent}
       </button>
-      {layoutPicker ? (
-        <SceneLayoutPicker frameId={frame.id} sceneId={scene.id} className="absolute bottom-1.5 left-3 !w-[7.5rem]" />
-      ) : null}
       {multiSelectEnabled ? (
         <div className="pointer-events-none absolute right-2 top-2 z-20">
           <div
@@ -843,6 +833,8 @@ function FrameScenesBlock({
   // converted copy, say) appended at the end is where nobody looks.
   const allScenes = sortScenesAlphabetically(searchIsActive ? scenesWithoutLayouts(liveScenes) : scenes)
   const frameLayouts = sortScenesAlphabetically(layoutScenes(liveScenes))
+  const activeLayoutId = activeFrameLayout(liveScenes)?.sceneId ?? null
+  const activeLayoutName = frameLayouts.find((layout) => layout.id === activeLayoutId)?.name
   const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(allScenes)
   const matchingSceneIds = searchIsActive ? new Set(scenes.map((scene) => scene.id)) : null
   const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frame.id, 'overview')
@@ -1014,6 +1006,11 @@ function FrameScenesBlock({
         >
           <summary className="frameos-muted cursor-pointer text-xs font-semibold uppercase tracking-wide">
             Layouts ({frameLayouts.length})
+            {activeLayoutId ? (
+              <span className="frameos-primary-fill ml-2 rounded-full px-2 py-0.5 text-[11px] font-semibold normal-case tracking-normal text-white">
+                {activeLayoutName || 'Untitled layout'} active
+              </span>
+            ) : null}
           </summary>
           <div className="mt-3 flex flex-wrap gap-4">
             {frameLayouts.map((layout) => (
@@ -1022,7 +1019,7 @@ function FrameScenesBlock({
                 frame={frame}
                 scene={layout}
                 scenes={allScenes}
-                active={false}
+                active={layout.id === activeLayoutId}
                 highlighted={sceneControlSelection?.frameId === frame.id && sceneControlSelection.sceneId === layout.id}
                 showMenu={showSceneMenus}
               />

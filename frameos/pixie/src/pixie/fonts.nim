@@ -536,61 +536,87 @@ proc parseSvgFont*(buf: string): Typeface {.raises: [PixieError].} =
   result = Typeface()
   result.svgFont = svgfont.parseSvgFont(buf)
 
+proc runesPath(
+  arrangement: Arrangement, spanIndex, first, last: int, line: var int
+): Path {.raises: [PixieError].} =
+  ## The outlines of runes `first` .. `last` of a span. `line` is the line the
+  ## first of them is on, moved on past each line they end.
+  result = newPath()
+  let
+    font = arrangement.fonts[spanIndex]
+    underlineThickness = font.typeface.underlineThickness * font.scale
+    underlinePosition = font.typeface.underlinePosition * font.scale
+    strikeoutThickness = font.typeface.strikeoutThickness * font.scale
+    strikeoutPosition = font.typeface.strikeoutPosition * font.scale
+  for runeIndex in first .. last:
+    let
+      rune = arrangement.runes[runeIndex]
+      position = arrangement.positions[runeIndex]
+      runeTypeface = font.typeface.fallbackTypeface(rune)
+      path =
+        if runeTypeface != nil and runeTypeface.hasColorGlyph(rune):
+          # Color glyphs are drawn separately, see drawColorGlyphs.
+          newPath()
+        else:
+          font.typeface.getGlyphPath(rune)
+    path.transform(
+      translate(position) *
+      scale(vec2(font.scale))
+    )
+    var applyDecoration = true
+    if runeIndex == arrangement.lines[line][1]:
+      inc line
+      if arrangement.runes[runeIndex] == SP:
+        # Do not apply decoration to the space at end of lines
+        applyDecoration = false
+
+    if applyDecoration:
+      if font.underline:
+        path.rect(
+          arrangement.selectionRects[runeIndex].x,
+          position.y - underlinePosition + underlineThickness / 2,
+          arrangement.selectionRects[runeIndex].w,
+          underlineThickness,
+          font.typeface.isCCW()
+        )
+      if font.strikethrough:
+        path.rect(
+          arrangement.selectionRects[runeIndex].x,
+          position.y - strikeoutPosition,
+          arrangement.selectionRects[runeIndex].w,
+          strikeoutThickness,
+          font.typeface.isCCW()
+        )
+
+    result.addPath(path)
+
 proc computePaths*(arrangement: Arrangement): seq[Path] {.raises: [PixieError].} =
   ## Takes an Arrangement and computes Paths for drawing.
   ## Returns a seq of paths that match the seq of Spans in the arrangement.
   ## If you only have one Span you will only get one Path.
   var line: int
   for spanIndex, (start, stop) in arrangement.spans:
-    let
-      spanPath = newPath()
-      font = arrangement.fonts[spanIndex]
-      underlineThickness = font.typeface.underlineThickness * font.scale
-      underlinePosition = font.typeface.underlinePosition * font.scale
-      strikeoutThickness = font.typeface.strikeoutThickness * font.scale
-      strikeoutPosition = font.typeface.strikeoutPosition * font.scale
-    for runeIndex in start .. stop:
-      let
-        rune = arrangement.runes[runeIndex]
-        position = arrangement.positions[runeIndex]
-        runeTypeface = font.typeface.fallbackTypeface(rune)
-        path =
-          if runeTypeface != nil and runeTypeface.hasColorGlyph(rune):
-            # Color glyphs are drawn separately, see drawColorGlyphs.
-            newPath()
-          else:
-            font.typeface.getGlyphPath(rune)
-      path.transform(
-        translate(position) *
-        scale(vec2(font.scale))
-      )
-      var applyDecoration = true
-      if runeIndex == arrangement.lines[line][1]:
-        inc line
-        if arrangement.runes[runeIndex] == SP:
-          # Do not apply decoration to the space at end of lines
-          applyDecoration = false
+    result.add(arrangement.runesPath(spanIndex, start, stop, line))
 
-      if applyDecoration:
-        if font.underline:
-          path.rect(
-            arrangement.selectionRects[runeIndex].x,
-            position.y - underlinePosition + underlineThickness / 2,
-            arrangement.selectionRects[runeIndex].w,
-            underlineThickness,
-            font.typeface.isCCW()
-          )
-        if font.strikethrough:
-          path.rect(
-            arrangement.selectionRects[runeIndex].x,
-            position.y - strikeoutPosition,
-            arrangement.selectionRects[runeIndex].w,
-            strikeoutThickness,
-            font.typeface.isCCW()
-          )
-
-      spanPath.addPath(path)
-    result.add(spanPath)
+iterator linePaths(arrangement: Arrangement): tuple[spanIndex: int, path: Path] =
+  ## Each span's outlines a line of text at a time, so what a fill builds (the
+  ## path, its flattened shapes, the segments and their partitions) is one
+  ## line's and is let go before the next. Lines do not overlap, so the pixels
+  ## are the ones a single path over the whole span makes. As one path, a
+  ## 750-character caption asked an ESP32 for several buffers of 300-450 KB at
+  ## once, on top of a 1200x1600 canvas (2026-11-09).
+  var line: int
+  for spanIndex, (start, stop) in arrangement.spans:
+    var first = start
+    while first <= stop:
+      var at = line
+      while at < arrangement.lines.high and arrangement.lines[at][1] < first:
+        inc at
+      let last =
+        if at <= arrangement.lines.high: min(stop, arrangement.lines[at][1])
+        else: stop
+      yield (spanIndex, arrangement.runesPath(spanIndex, first, last, line))
+      first = last + 1
 
 proc computePath*(arrangement: Arrangement): Path {.raises: [PixieError].} =
   ## The glyph outlines of an entire arrangement as one path, in the
@@ -673,11 +699,10 @@ proc textUber(
   dashes: seq[float32] = @[],
   stroke: static[bool] = false
 ) =
-  let spanPaths = arrangement.computePaths()
-  for spanIndex in 0 ..< arrangement.spans.len:
-    let path = spanPaths[spanIndex]
+  var drawing = -1
+  for (spanIndex, path) in arrangement.linePaths():
+    let font = arrangement.fonts[spanIndex]
     when stroke:
-      let font = arrangement.fonts[spanIndex]
       for paint in font.paints:
         target.strokePath(
           path,
@@ -690,20 +715,34 @@ proc textUber(
           dashes
         )
     else:
-      let font = arrangement.fonts[spanIndex]
+      if drawing >= 0 and drawing != spanIndex:
+        target.drawColorGlyphs(arrangement, drawing, transform)
+      drawing = spanIndex
       for paint in font.paints:
         target.fillPath(path, paint, transform)
-      target.drawColorGlyphs(arrangement, spanIndex, transform)
+  when not stroke:
+    if drawing >= 0:
+      target.drawColorGlyphs(arrangement, drawing, transform)
 
 proc computeBounds*(
   arrangement: Arrangement,
   transform = mat3()
 ): Rect {.raises: [PixieError].} =
-  let fullPath = newPath()
-  for path in arrangement.computePaths():
-    fullPath.addPath(path)
-  fullPath.transform(transform)
-  fullPath.computeBounds()
+  # A line at a time, like a fill (linePaths).
+  var
+    left = float32.high
+    top = float32.high
+    right = float32.low
+    bottom = float32.low
+  for (_, path) in arrangement.linePaths():
+    let bounds = path.computeBounds(transform)
+    if bounds.w > 0 or bounds.h > 0:
+      left = min(left, bounds.x)
+      top = min(top, bounds.y)
+      right = max(right, bounds.x + bounds.w)
+      bottom = max(bottom, bounds.y + bounds.h)
+  if right >= left:
+    result = rect(left, top, right - left, bottom - top)
 
 proc fillText*(
   target: Image,
