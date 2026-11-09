@@ -1,5 +1,6 @@
 #include "fos_rtc.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 /* PCF8563 time registers, all BCD: 0x02 VL(7) seconds(6:0), 0x03 minutes,
@@ -10,6 +11,23 @@
 #define RTC_VL_BIT 0x80 /* VL on the PCF8563, OS on the PCF85063 */
 #define PCF8563_REG_TIME 0x02
 #define PCF85063_REG_TIME 0x04
+
+bool fos_rtc_parse_clock(const char *text, struct tm *tm)
+{
+    static const char shape[] = "dddd-dd-dd dd:dd";
+    if (text == NULL || strlen(text) != sizeof(shape) - 1) return false;
+    for (size_t i = 0; i < sizeof(shape) - 1; i++) {
+        if (shape[i] == 'd' ? text[i] < '0' || text[i] > '9' : text[i] != shape[i]) return false;
+    }
+    int year = atoi(text), month = atoi(text + 5), day = atoi(text + 8), hour = atoi(text + 11), minute = atoi(text + 14);
+    if (year < 2024 || year > 2099 || hour > 23 || minute > 59) return false;
+    /* mktime carries a day or a month that does not exist into the next. */
+    struct tm parsed = {.tm_year = year - 1900, .tm_mon = month - 1, .tm_mday = day, .tm_hour = hour, .tm_min = minute, .tm_isdst = -1};
+    struct tm carried = parsed;
+    if (mktime(&carried) == (time_t)-1 || carried.tm_mday != day || carried.tm_mon != month - 1) return false;
+    *tm = parsed;
+    return true;
+}
 
 uint8_t fos_rtc_time_reg(fos_rtc_chip_t chip)
 {

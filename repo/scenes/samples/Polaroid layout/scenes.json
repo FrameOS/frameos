@@ -1,0 +1,124 @@
+[
+  {
+    "id": "layout-polaroid",
+    "name": "Polaroid",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#faf7ef",
+      "isLayout": true
+    },
+    "fields": [
+      {
+        "name": "caption",
+        "type": "string",
+        "label": "Caption (empty: the scene name)",
+        "value": "",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "paperColor",
+        "type": "color",
+        "label": "Paper color",
+        "value": "#faf7ef",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "inkColor",
+        "type": "color",
+        "label": "Ink color",
+        "value": "#2a2a2a",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "showDate",
+        "type": "boolean",
+        "label": "Show the date",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "polaroid": {
+        "name": "Polaroid",
+        "category": "data",
+        "description": "A print with a wide white border: the scene is the photo, and its name is written along the bottom.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Polaroid\",\n  \"category\": \"data\",\n  \"description\": \"A print with a wide white border: the scene is the photo, and its name is written along the bottom.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n",
+          "app.tsx": "// A print with a wide white border: the scene is the photo, and its name is\n// written along the bottom edge.\nconst on = (value) => value === true || value === 'true'\nconst MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']\n\nexport function get(app) {\n  const { caption, paperColor, inkColor, showDate } = app.state\n  const now = new Date()\n  return (\n    <div className={`flex flex-col w-full h-full p-[4vh] bg-[${paperColor}] text-[${inkColor}]`}>\n      <div className=\"flex flex-col flex-1 min-h-0\">\n        <yield />\n      </div>\n      <div className=\"flex items-center h-[12vh] pt-[2vh] gap-[3vw]\">\n        <span className=\"flex-1 text-[5.5vh] font-semibold truncate\">{caption || app.frame.sceneName || ''}</span>\n        {on(showDate) ? (\n          <span className=\"text-[3.4vh] whitespace-nowrap\">{`${now.getDate()} ${MONTHS[now.getMonth()]}`}</span>\n        ) : null}\n      </div>\n    </div>\n  )\n}\n"
+        },
+        "origin": "polaroid"
+      }
+    },
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "chrome",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "polaroid",
+          "config": {}
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-to-draw",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "chrome-to-draw",
+        "type": "codeNodeEdge",
+        "source": "chrome",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  }
+]

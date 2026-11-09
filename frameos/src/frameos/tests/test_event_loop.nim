@@ -4,6 +4,7 @@ import ../event_loop
 import ../events
 import ../input_state
 import ../interpreter
+import ../layout_choice
 import ../types
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
@@ -158,6 +159,7 @@ block dispatcher:
   for c in fixtures["dispatcher"]["cases"]:
     let name = c["name"].getStr()
     let logs = new(seq[JsonNode])
+    chooseLayout("") # safe mode's case writes the frame's own choice
     let host = newRecordingHost(c["scene"].getStr().SceneId, logs)
     for scene in c["scenes"]:
       host.order.add(scene["id"].getStr().SceneId)

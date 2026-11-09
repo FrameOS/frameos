@@ -1,4 +1,6 @@
 import { strToU8, zipSync, zlibSync } from "fflate";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   isProvablyFullyTransparentImage,
@@ -286,6 +288,26 @@ describe("validateSceneZip transparency rejection", () => {
       error: "invalid_layout_scene",
     });
     expect(validateSceneZip(zip({ settings: {} })).ok).toBe(true);
+  });
+
+  it("says when the scene a pack starts on is a layout, for the Layouts shelf", () => {
+    const pack = (scenes: unknown) =>
+      validateSceneZip(
+        Buffer.from(
+          zipSync({
+            "scenes.json": strToU8(JSON.stringify(scenes)),
+            "template.json": strToU8(JSON.stringify({ name: "Scene" })),
+          }),
+        ),
+      );
+    const sample = JSON.parse(
+      readFileSync(join(__dirname, "../../../../../repo/scenes/samples/Polaroid layout/scenes.json"), "utf8"),
+    );
+    const layout = pack(sample);
+    expect(layout.ok && layout.value.isLayout).toBe(true);
+    const plain = pack([{ id: "a", nodes: [], edges: [], settings: {} }]);
+    expect(plain.ok).toBe(true);
+    expect(plain.ok && plain.value.isLayout).toBe(false);
   });
 
   it("rejects a zip whose preview is proven fully transparent", () => {

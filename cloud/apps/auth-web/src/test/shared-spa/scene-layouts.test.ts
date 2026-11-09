@@ -91,7 +91,16 @@ describe("what can be a layout", () => {
   });
 
   it("has starters, and every one of them is a layout", () => {
-    expect(LAYOUT_STARTERS.map((starter) => starter.name)).toEqual(["Windows 98", "Top bar", "Side rail", "Bottom bar"]);
+    expect(LAYOUT_STARTERS.map((starter) => starter.name)).toEqual([
+      "Windows 98",
+      "Top bar",
+      "Terminal",
+      "Side rail",
+      "Polaroid",
+      "Gallery wall",
+      "Front page",
+      "Bottom bar",
+    ]);
     for (const starter of LAYOUT_STARTERS) {
       expect(isLayoutScene(starter.scene)).toBe(true);
       expect(sceneLayoutProblem(starter.scene)).toBeNull();

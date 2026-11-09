@@ -69,6 +69,9 @@ const
   GestureLongPressMs* = 1000
   GestureSwipeMinPx* = 48
   GestureEdgePx* = 24
+  ## The way out of a layout that cannot be used (docs/scene-layouts.md "Safe mode").
+  GestureSafeModePulls* = 10
+  GestureSafeModeGapMs* = 5000
   ## A GPIO button: a short press waits `ButtonDoublePressMs` for a second down; a hold is a `longPress` at every whole `ButtonLongPressMs`.
   ButtonDoublePressMs* = 350
   ButtonLongPressMs* = 1000

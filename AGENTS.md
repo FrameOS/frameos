@@ -8,28 +8,32 @@
 - There are TWO control planes for frames: the self-hosted backend (`backend/` + `frontend/`) and FrameOS Cloud (`cloud/` + `cloud-frontend/`). **Any frame-facing feature or fix must land on both, or explicitly note why it's one-sided** — unless the task says otherwise. When you touch frame panels, frame APIs, device verbs, or provisioning/flashing, check the other control plane before calling the work done. Neither plane builds ESP32 firmware: both flash the signed generic release image, provision over the USB console, and offer the release OTA (`docs/todo.md`, `embedded/esp32/README.md`).
 - The frame workspace UI is SHARED code (`frontend/src`), wrapped for cloud by `cloud-frontend/`. A fix that "doesn't show on cloud" is usually NOT a fork — check the `workspaceSurfaces` gating (`frontend/src/scenes/workspace/`) and remember the cloud serves a PREBUILT bundle: auth-web's predev rebuilds it via turbo (`scripts/build-frames-app.mjs`), but a long-running `pnpm dev` session keeps serving the bundle from its start.
 
-## Cloud tests before you commit (`verify` is the gate)
+## Tests: CI is the gate, and you watch it
 
-- **Before committing anything under `cloud/`, `cloud-frontend/` OR
-  `frontend/src` — including a test file under
-  `cloud/apps/auth-web/src/test/shared-spa/` — run `pnpm verify` from
-  `cloud/` and read its summary.** This is the single most common way a PR
-  goes red: the cloud CI job is failing "all the time" because people run
-  one vitest file, or the frontend's `tsc`, and call it done. `verify` runs
-  lint + **typecheck** + test + build for every cloud package, and the
-  auth-web typecheck covers the shared-spa test files themselves (a fixture
-  that vitest happily executed failed `tsc` in CI on 2026-09-12, PR #485)
-  and the whole shared SPA the cloud bundle is built from. Running the
-  frontend's own `tsc` does NOT cover it: the cloud has its own tsconfig
-  and build. Takes a few minutes; do it once at the end, not never.
+- **You do not have to finish every local suite before opening a PR.** CI runs
+  them all anyway and is often faster than a laptop. Run what is quick and
+  covers what you touched, open the PR, then **watch CI to the end** (`gh pr
+  checks <n> --watch`) and fix what it reports. The work is done when CI is
+  green, not when the PR is open: a PR nobody watched is how the cloud job came
+  to be failing "all the time". This holds for every suite, the Nim shards and
+  the firmware image included.
+- **What to run first under `cloud/`, `cloud-frontend/` OR `frontend/src`** —
+  including a test file under `cloud/apps/auth-web/src/test/shared-spa/` — is
+  `pnpm verify` from `cloud/` when it is quicker than a CI round trip, reading
+  its summary. One vitest file, or the frontend's `tsc`, is not the same check:
+  `verify` runs lint + **typecheck** + test + build for every cloud package, and
+  the auth-web typecheck covers the shared-spa test files themselves (a fixture
+  that vitest happily executed failed `tsc` in CI on 2026-09-12, PR #485) and
+  the whole shared SPA the cloud bundle is built from. The frontend's own `tsc`
+  does NOT cover it: the cloud has its own tsconfig and build.
 - The cloud CI job named **`verify`** (`.github/workflows/cloud-ci.yml`) runs
   `turbo run lint typecheck test build --filter='@frameos-cloud/*' --filter=@frameos/cloud-frontend` and then
   THREE integration suites against a real Postgres: `@frameos-cloud/auth-web`,
   `@frameos-cloud/frame-hub` and `@frameos-cloud/ledger` (the accounting
   kernel — the module whose own todo records a shipped billing bypass, so do
-  not skip it). Run the same four locally from `cloud/` before pushing — a
-  green `pnpm test` alone proves little, because the integration suites are
-  where the interesting failures live (`pnpm verify` is the first line):
+  not skip it). A green `pnpm test` alone proves little, because the integration
+  suites are where the interesting failures live. To run them locally, from
+  `cloud/`:
 
   ```
   pnpm verify

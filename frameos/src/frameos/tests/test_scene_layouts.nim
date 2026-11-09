@@ -1,6 +1,8 @@
-import std/[json, tables, unittest, os, strutils]
+import std/[json, options, tables, unittest, os, strutils]
 import pixie
 import ../channels
+import ../event_loop
+import ../events
 import ../events_gen
 import ../interpreter
 import ../layout_choice
@@ -9,6 +11,7 @@ import ../types
 import ../js_runtime/app_runtime
 from ../ui/events import uiListens
 import system/sceneSwitcher/scene as switcher
+import system/sceneSettings/scene as sceneSettings
 
 # Layouts, <yield /> and <Scene> (docs/scene-layouts.md), and the pass the
 # canvas keeps for free. Each panel counts its runs in its state.
@@ -881,6 +884,66 @@ suite "the layout chosen on the frame":
     discard pass(wears)
     check wears.layoutOf.id.string == "tests/layout"
 
+  test "ten pulls from the top edge open the frame page with no layout, and change nothing":
+    var scene = newScene("tests/content")
+    discard pass(scene)
+    var selected: seq[JsonNode]
+    let loop = newEventLoop(EventHost(
+      requestRender: (proc () = discard),
+      selectScene: (proc (payload: JsonNode): bool = selected.add(payload); true),
+      sceneFor: (proc (target: Option[SceneId]): FrameScene = scene),
+      runScene: (proc (scene: FrameScene, event: string, payload: JsonNode) = discard),
+      sceneListens: (proc (scene: FrameScene, event: string): bool = false),
+      log: (proc (entry: JsonNode) = logged.add(entry))), config)
+    proc pull() =
+      loop.enqueue(eoDriver, evEdgeSwipe, %*{"edge": "top", "direction": "down"})
+      discard loop.drain()
+    for i in 1 .. 9:
+      pull()
+    loop.backdatePullsForTest(GestureSafeModeGapMs + 1000)
+    pull() # too long after the ninth: this is the first again
+    for i in 1 .. 8:
+      pull()
+    check selected.len == 0
+    # Another edge is not a pull, and does not break the count either.
+    loop.enqueue(eoDriver, evEdgeSwipe, %*{"edge": "bottom", "direction": "up"})
+    discard loop.drain()
+    check selected.len == 0
+    pull()
+    check selected.len == 1
+    let state = selected[0]{"state"}
+    check selected[0]{"sceneId"}.getStr() == SceneSettingsId
+    check state{"noLayout"}.getBool()
+    check state{"opened"}.getStr() == "frame"
+    check state{"from"}.getStr() == "tests/content"
+    check state{"layout"}.isNil
+    # What the frame wears is as it was: Cancel has nothing to put back.
+    check chosenLayout() == ""
+    rhythmClockOverride = 1001.0
+    discard pass(scene)
+    check not scene.wornLayout.isNil
+
+  test "the tenth pull with the settings already up takes the layout off where they are":
+    let panel = sceneSettings.exportedScene.init(SceneSettingsId.SceneId, config, logger(), %*{})
+    panel.state["from"] = %"tests/content"
+    var heard: seq[JsonNode]
+    var selected = 0
+    let loop = newEventLoop(EventHost(
+      requestRender: (proc () = discard),
+      selectScene: (proc (payload: JsonNode): bool = selected += 1; true),
+      sceneFor: (proc (target: Option[SceneId]): FrameScene = panel),
+      runScene: (proc (scene: FrameScene, event: string, payload: JsonNode) =
+        if event == evSetCurrentScene: heard.add(payload)),
+      sceneListens: (proc (scene: FrameScene, event: string): bool = false),
+      log: (proc (entry: JsonNode) = discard)), config)
+    for i in 1 .. 10:
+      loop.enqueue(eoDriver, evEdgeSwipe, %*{"edge": "top", "direction": "down"})
+      discard loop.drain()
+    check selected == 0
+    check heard.len == 1
+    check heard[0]{"state", "noLayout"}.getBool()
+    check heard[0]{"state", "from"}.getStr() == "tests/content"
+
   test "what was set on the frame for a layout is what it starts from":
     saveLayoutState("tests/uiLayout", %*{"title": "From the frame"})
     chooseLayout("tests/uiLayout")
@@ -911,6 +974,16 @@ suite "a layout around the built-in scenes":
     check not scene.wornLayout.isNil and scene.wornLayout.holeIn.found
     check scene.wornLayout.holeIn.y == 20
     check canvas.color(20, 30) != colored("#ffffff")
+
+  test "the settings opened by safe mode wear no layout, whatever is chosen":
+    chooseLayout("tests/uiLayout")
+    let panel = sceneSettings.exportedScene.init(SceneSettingsId.SceneId, config, logger(), %*{})
+    let context = ExecutionContext(scene: panel, event: "setCurrentScene", loopIndex: 0, loopKey: ".",
+      payload: %*{"state": {"from": "tests/content", "layout": {"sceneId": "tests/layout"}, "noLayout": true}})
+    sceneSettings.exportedScene.runEvent(panel, context)
+    discard pass(panel)
+    check panel.wornLayout.isNil
+    chooseLayout("")
 
   test "a layout can give a built-in scene the whole panel":
     let scene = opened("tests/escaping")
