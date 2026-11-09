@@ -52,6 +52,7 @@ import {
   storableSceneState,
   virtualFrameSize,
 } from "../../auth-web/src/lib/virtual-frames";
+import { raiseAlert } from "./alerts";
 import { errorField, logError, logWarn } from "./log";
 import { isRecord } from "./protocol";
 
@@ -599,6 +600,10 @@ export class VirtualDevice {
             await this.renderOnce();
           } catch (error) {
             logError("virtual.render_failed", { error: errorField(error), frameId: this.frameId });
+            raiseAlert("hub_render_failed", "A virtual frame's render failed in the frame hub.", {
+              frameId: this.frameId,
+              reason: errorField(error),
+            });
           }
         }
       } finally {
@@ -694,6 +699,10 @@ export class VirtualDevice {
       // reads that on the row, in words that name no bucket or key; the
       // journal keeps the reason.
       logError("virtual.store_failed", { error: errorField(error), frameId: this.frameId });
+      raiseAlert("hub_store_failed", "The frame hub could not save a rendered picture.", {
+        frameId: this.frameId,
+        reason: errorField(error),
+      });
       await this.recordRenderFailure(
         active,
         startedAt,
