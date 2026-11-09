@@ -18,6 +18,7 @@
 
 #include "cJSON.h"
 #include "fos_backend_http.h"
+#include "fos_boot_scene.h"
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_events_gen.h"
@@ -77,7 +78,7 @@ static int s_loaded = 0;
 static char s_etag[ETAG_LEN] = "";
 static char s_pending_scene_id[SCENE_ID_LEN] = "";
 /* When the queued selection was first asked for (a FreeRTOS tick): the wait
- * the LCD's loading mark counts from (fos_display_loading_begin). A newer
+ * the LCD's loading mark counts from (fos_client_loading_begin). A newer
  * selection replacing a queued one keeps it: the wait began with the first. */
 static uint32_t s_pending_since = 0;
 static char s_last_error[SCENE_ERROR_LEN] = "";
@@ -601,10 +602,12 @@ static esp_err_t write_file_replace(const char *path, const char *tmp_path,
 typedef struct {
     char id[SCENE_ID_LEN];
     int slot;
+    bool is_layout;
 } scene_slot_t;
 
 static scene_slot_t s_slots[SCENES_SLOT_MAX];
 static int s_slot_count = 0;
+static char s_default_scene_id[SCENE_ID_LEN] = "";
 
 static void slot_path(int slot, char *out, size_t out_len)
 {
@@ -734,7 +737,9 @@ static esp_err_t split_scenes(const char *json, size_t len)
 
     esp_err_t err = ESP_OK;
     int written = 0;
-    bool has_default = false;
+    /* The scene marked default, else the first that is not a layout. */
+    char default_id[SCENE_ID_LEN] = "";
+    bool default_marked = false;
     for (int i = 0; i < count; i++) {
         size_t item_len = ends[i] - starts[i];
         err = write_slot(i, json + starts[i], item_len);
@@ -767,12 +772,16 @@ static esp_err_t split_scenes(const char *json, size_t len)
         bool is_layout = cJSON_IsTrue(cJSON_GetObjectItem(settings, "isLayout"));
         if (is_layout) {
             cJSON_AddBoolToObject(entry, "isLayout", true);
-        } else if (!has_default) {
-            has_default = true;
-            cJSON_AddStringToObject(index, "default", id->valuestring);
+        } else {
+            bool marked = cJSON_IsTrue(cJSON_GetObjectItem(item, "default"));
+            if (default_id[0] == '\0' || (marked && !default_marked)) {
+                snprintf(default_id, sizeof(default_id), "%s", id->valuestring);
+                default_marked = marked;
+            }
         }
         cJSON_Delete(item);
     }
+    if (default_id[0] != '\0') cJSON_AddStringToObject(index, "default", default_id);
 
     char *index_json = (err == ESP_OK) ? cJSON_PrintUnformatted(index) : NULL;
     cJSON_Delete(index);
@@ -804,6 +813,7 @@ static esp_err_t split_scenes(const char *json, size_t len)
 static int load_scene_index(void)
 {
     s_slot_count = 0;
+    s_default_scene_id[0] = '\0';
     size_t len = 0;
     char *index_json = read_file(SCENES_INDEX_PATH, &len);
     if (index_json == NULL || len == 0) {
@@ -816,6 +826,10 @@ static int load_scene_index(void)
         const cJSON *source = cJSON_GetObjectItem(index, "source");
         s_source = scene_source_from_str(
             cJSON_IsString(source) ? source->valuestring : NULL);
+        const cJSON *fallback = cJSON_GetObjectItem(index, "default");
+        if (cJSON_IsString(fallback) && fallback->valuestring != NULL) {
+            snprintf(s_default_scene_id, sizeof(s_default_scene_id), "%s", fallback->valuestring);
+        }
     }
     const cJSON *scenes = cJSON_GetObjectItem(index, "scenes");
     if (cJSON_IsArray(scenes)) {
@@ -830,6 +844,7 @@ static int load_scene_index(void)
             }
             snprintf(s_slots[s_slot_count].id, SCENE_ID_LEN, "%s", id->valuestring);
             s_slots[s_slot_count].slot = (int)slot->valuedouble;
+            s_slots[s_slot_count].is_layout = cJSON_IsTrue(cJSON_GetObjectItem(entry, "isLayout"));
             s_slot_count++;
         }
     }
@@ -907,10 +922,15 @@ static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
 
 /* Boot/apply on the lazy path: catalog first, then exactly one scene — the
  * one persisted across reboots when it still exists, otherwise the index's
- * default. */
+ * default. Never a layout (fos_boot_scene.h). */
 static bool activate_from_index(const char *origin)
 {
     if (load_scene_index() == 0) return false;
+
+    fos_boot_scene_t scenes[SCENES_SLOT_MAX];
+    for (int i = 0; i < s_slot_count; i++) {
+        scenes[i] = (fos_boot_scene_t){.id = s_slots[i].id, .is_layout = s_slots[i].is_layout};
+    }
 
     char scene_id[SCENE_ID_LEN] = "";
     size_t id_len = sizeof(scene_id);
@@ -926,35 +946,29 @@ static bool activate_from_index(const char *origin)
             nvs_close(nvs);
         }
     }
-    int slot = slot_for_scene(scene_id);
-    if (slot >= 0 && consume_oom_scene_mark(scene_id)) {
+    int pick = fos_boot_scene_pick(scenes, s_slot_count, scene_id, s_default_scene_id);
+    if (pick >= 0 && strcmp(s_slots[pick].id, scene_id) == 0 && consume_oom_scene_mark(scene_id)) {
         /* The scene that drove the last restart out of memory. Rendering it
          * again here — before the cloud session is even up — would loop the
          * board; start on the next scene of the payload instead (a lone
          * scene has no alternative and is retried). */
-        int other = -1;
-        for (int i = 0; i < s_slot_count; i++) {
-            if (strcmp(s_slots[i].id, scene_id) != 0) {
-                other = i;
-                break;
-            }
-        }
+        int other = fos_boot_scene_other(scenes, s_slot_count, scene_id);
         if (other >= 0) {
             ESP_LOGW(TAG, "last scene %s aborted out of memory before the restart; starting on %s",
                      scene_id, s_slots[other].id);
             log_scene_event("scenes:restore", "skipped", "nvs", scene_id, "oom-restart",
                             0, 0, 0, ESP_OK);
-            slot = s_slots[other].slot;
-            snprintf(scene_id, sizeof(scene_id), "%s", s_slots[other].id);
+            pick = other;
         }
     }
-    if (slot < 0) {
-        /* Nothing persisted, or that scene is gone from the new payload. */
-        slot = s_slots[0].slot;
-        snprintf(scene_id, sizeof(scene_id), "%s", s_slots[0].id);
-    }
     s_last_scene_settled = true; /* the index decides; no retry needed */
-    return load_scene_slot(slot, scene_id, origin);
+    if (pick < 0) {
+        /* Layouts alone: a stored set with nothing to show, not a failed one. */
+        log_scene_event("scenes:load", "skipped", origin, "", "only-layouts", 0, 0, 0, ESP_OK);
+        return true;
+    }
+    snprintf(scene_id, sizeof(scene_id), "%s", s_slots[pick].id);
+    return load_scene_slot(s_slots[pick].slot, scene_id, origin);
 }
 
 /* Switch scenes on the lazy path: read that scene's file and make it
@@ -1040,7 +1054,7 @@ bool fos_scenes_apply_pending(void)
         s_payload_stored_since_boot = false;
         s_scene_switched = true;
         /* A new scene set, from here to its first picture: as a switch. */
-        fos_display_loading_begin(xTaskGetTickCount(), fos_config()->rotate);
+        fos_client_loading_begin(xTaskGetTickCount());
     }
     bool ok = false;
     size_t len = 0;
@@ -1089,7 +1103,7 @@ bool fos_scenes_apply_pending(void)
      * the "Updating" screen, with the loading mark over it, until its
      * first picture. One that did not gets the picture from before back. */
     fos_display_updating_end(ok);
-    if (pushed && !ok) fos_display_loading_end();
+    if (pushed && !ok) fos_client_loading_end();
     /* Publish the outcome before the generation, so a poller that sees a new
      * generation always reads the matching result. */
     s_apply_ok = ok;
@@ -1227,11 +1241,11 @@ bool fos_scenes_apply_pending_selection(void)
          * while for the keys that walk it. Nothing loads, but its first
          * picture is a render like any other (drawn whole, 13 tiles take
          * ~2 s on the SenseCAP), so the loading mark counts from here too. */
-        fos_display_loading_begin(asked_at, fos_config()->rotate);
+        fos_client_loading_begin(asked_at);
         if (!frameos_nim_set_scene(scene_id)) {
             log_scene_event("scenes:select", "error", "queued", scene_id,
                             "apply-failed", 0, 0, 0, ESP_FAIL);
-            fos_display_loading_end();
+            fos_client_loading_end();
             return false;
         }
         s_built_in_shown = true;
@@ -1253,7 +1267,7 @@ bool fos_scenes_apply_pending_selection(void)
         s_built_in_shown = false;
         s_settings_shown = false;
         s_scene_switched = true;
-        fos_display_loading_begin(asked_at, fos_config()->rotate);
+        fos_client_loading_begin(asked_at);
     }
     /* Already the resident scene: nothing to load. Re-parsing it would throw
      * away everything the runtime has built for it — the interpreted graph and
@@ -1286,20 +1300,20 @@ bool fos_scenes_apply_pending_selection(void)
     /* Another scene, from here to its first picture: on an LCD the loading
      * mark shows if that takes a while, counted from when it was asked for.
      * Before the load below, which is part of the wait. */
-    fos_display_loading_begin(asked_at, fos_config()->rotate);
+    fos_client_loading_begin(asked_at);
     if (s_slot_count > 0) {
         if (!activate_scene_id(scene_id)) {
             ESP_LOGW(TAG, "scene selection failed: %s", scene_id);
             log_scene_event("scenes:select", "error", "queued", scene_id,
                             "apply-failed", 0, 0, 0, ESP_FAIL);
-            fos_display_loading_end();
+            fos_client_loading_end();
             return false;
         }
     } else if (!frameos_nim_set_scene(scene_id)) {
         ESP_LOGW(TAG, "scene selection failed: %s", scene_id);
         log_scene_event("scenes:select", "error", "queued", scene_id,
                         "apply-failed", 0, 0, 0, ESP_FAIL);
-        fos_display_loading_end();
+        fos_client_loading_end();
         return false;
     }
     persist_last_scene(scene_id);

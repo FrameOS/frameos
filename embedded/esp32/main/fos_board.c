@@ -130,14 +130,16 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
 /* The E1003 has the E1001's keys and microphone, and a touch screen. */
 #define RETERMINAL_TOUCH_EVENT_MAP "[" RETERMINAL_ARROWS "," RETERMINAL_VOICE "," TOUCH_EDGE_SWIPES "]"
 /* The reTerminal Sticky's three keys: UP and DOWN held walk the scene list,
- * the AI key (Seeed's "AI/Power", GPIO4) held talks to the frame. */
+ * the AI key (Seeed's "AI/Power", GPIO4) held talks to the frame. The edges
+ * swipe (TOUCH_EDGE_SWIPES). */
 #define STICKY_EVENT_MAP \
     "[{\"event\":\"button\",\"match\":{\"label\":\"UP\",\"action\":\"longPress\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"DOWN\",\"action\":\"longPress\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"longPress\"}," \
-    "\"emit\":\"voiceChat\",\"as\":{}}]"
+    "\"emit\":\"voiceChat\",\"as\":{}}," \
+    TOUCH_EDGE_SWIPES "]"
 /* The Waveshare boards with a codec microphone (fos_codec.c): the one user
  * key each has, held, talks — KEY1 on the PhotoPainter, BOOT on the 13.3E6. */
 #define ONE_KEY_VOICE_EVENT_MAP(label) \
@@ -364,12 +366,15 @@ static const struct {
 };
 
 /* A glass mounted against its panel. The Indicator's sits upside down: a tap
- * at the top left read as the bottom right (2026-10-25, the touch test). */
+ * at the top left read as the bottom right (2026-10-25, the touch test). The
+ * Sticky's too, once its portrait axes are swapped (four corners held on a
+ * frame rotated 270, 2026-11-09). */
 static const struct {
     const char *preset;
     int mirror; /* FOS_BOARD_TOUCH_MIRROR_* */
 } k_touch_mirror[] = {
     {"seeed_sensecap_indicator_d1", FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y},
+    {"seeed_reterminal_sticky", FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y},
 };
 
 int fos_board_touch_mirror(const char *hardware_preset)

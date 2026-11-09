@@ -184,5 +184,21 @@ esp_err_t fos_display_spi_bus_share(int miso_pin, int *host);
 /* Full update: init panel, push buffer, refresh, put panel to deep sleep.
  * Blocks for the refresh (seconds on e-ink). */
 esp_err_t fos_display_blit(const uint8_t *buf, size_t len);
+/* The panel has a partial waveform (fos_partial_refresh.h). */
+bool fos_display_supports_partial(void);
+/* fos_display_blit, or a partial update of the pixels that changed where
+ * fos_partial_refresh_wanted says so. `same_scene`: the picture on the glass
+ * came from the scene this one does. `input_recent`: someone is tapping, so a
+ * full refresh that only clears ghosts waits. `partial` (may be NULL): which
+ * it was. */
+esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bool input_recent,
+                             bool *partial);
+/* Put a panel left awake after a partial update into deep sleep: before the
+ * chip's own, or (the _if_idle one, from the render task's wait) once nothing
+ * has been drawn for a while, clearing any ghosts it was left with first. */
+void fos_display_park(void);
+void fos_display_park_if_idle(int64_t now_us);
+/* A block of PSRAM kept for good, NULL when there is none to give. */
+void *fos_display_alloc_psram(size_t len);
 /* Clear to white and sleep the panel. */
 esp_err_t fos_display_clear(void);

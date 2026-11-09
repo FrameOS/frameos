@@ -148,8 +148,32 @@ static void test_move_slot(void)
     CHECK(fos_touch_move_slot(q, 4, 3, 3, 1) == 1, "the newest of the same finger");
 }
 
+static void test_touch_beep(void)
+{
+    uint8_t held = 0, beeped = 0;
+    CHECK(fos_touch_beep_step(FOS_TOUCH_DOWN, 0, true, &held, &beeped) == FOS_TOUCH_BEEP_DOWN, "a taken press clicks");
+    CHECK(fos_touch_beep_step(FOS_TOUCH_MOVE, 0, false, &held, &beeped) == FOS_TOUCH_BEEP_NONE, "a move is silent");
+    CHECK(fos_touch_beep_step(FOS_TOUCH_DOWN, 1, true, &held, &beeped) == FOS_TOUCH_BEEP_SECOND_DOWN,
+          "a second finger sounds different");
+    CHECK(fos_touch_beep_step(FOS_TOUCH_UP, 1, false, &held, &beeped) == FOS_TOUCH_BEEP_UP, "its release clicks");
+    CHECK(fos_touch_beep_step(FOS_TOUCH_UP, 0, false, &held, &beeped) == FOS_TOUCH_BEEP_UP, "the first's too");
+    CHECK(held == 0 && beeped == 0, "nothing left held");
+
+    CHECK(fos_touch_beep_step(FOS_TOUCH_DOWN, 0, false, &held, &beeped) == FOS_TOUCH_BEEP_NONE,
+          "a press on nothing is silent");
+    CHECK(fos_touch_beep_step(FOS_TOUCH_UP, 0, false, &held, &beeped) == FOS_TOUCH_BEEP_NONE, "and so is its release");
+
+    fos_touch_beep_step(FOS_TOUCH_DOWN, 0, false, &held, &beeped);
+    CHECK(fos_touch_beep_step(FOS_TOUCH_DOWN, 1, true, &held, &beeped) == FOS_TOUCH_BEEP_SECOND_DOWN,
+          "a taken second finger, the first on nothing");
+    CHECK(fos_touch_beep_step(FOS_TOUCH_UP, 0, false, &held, &beeped) == FOS_TOUCH_BEEP_NONE, "the silent one stays silent");
+    fos_touch_beep_step(FOS_TOUCH_UP, 1, false, &held, &beeped);
+    CHECK(fos_touch_beep_step(FOS_TOUCH_DOWN, 0, true, &held, &beeped) == FOS_TOUCH_BEEP_DOWN, "alone again, the plain click");
+}
+
 int main(void)
 {
+    test_touch_beep();
     test_decode();
     test_decode_ft();
     test_wire();

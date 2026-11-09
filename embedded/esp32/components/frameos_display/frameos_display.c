@@ -7,6 +7,7 @@
 #include "esp_timer.h"
 
 #include "DEV_Config.h"
+#include "fos_partial_refresh.h"
 #include "frameos_panel_table.h"
 #include "it8951.h"
 #include "lcd_st7701s_rgb.h"
@@ -22,6 +23,27 @@ void EPD_13IN3E_SetVariant(int variant) __attribute__((weak));
 static const fos_panel_entry_t *s_panel = NULL;
 static bool s_module_ready = false;
 static void *(*s_lend_i2c_bus)(int sda, int scl) = NULL;
+
+/* What a panel with a partial waveform shows, byte for byte: every picture
+ * that reaches the glass goes through fos_display_blit or fos_display_update
+ * and is copied here, whoever drew it (a status screen, an overlay). */
+static uint8_t *s_glass = NULL;
+static bool s_glass_known = false;
+static uint32_t s_partials_since_full = 0;
+/* The panel is left awake after a partial update, its analog supply on: its
+ * reset and deep sleep are 300 ms of every update, and the next tap is usually
+ * moments away. A few idle seconds turn the supply off and keep the controller
+ * awake, which costs the next tap under 100 ms; minutes put it in deep sleep. */
+static bool s_panel_awake = false;
+static bool s_panel_rested = false;
+static int64_t s_last_partial_us = 0;
+#define FOS_PANEL_ANALOG_US (10 * 1000000LL)
+#define FOS_PANEL_AWAKE_US (300 * 1000000LL)
+/* The ghosts a tapping session left (fos_partial_refresh.h), once it is
+ * clearly over: the refresh is seconds in which a tap would wait. */
+#define FOS_PANEL_CLEAN_US (30 * 1000000LL)
+/* A partial update sends two whole frames: the SSD1677's rated write clock. */
+#define FOS_PARTIAL_SPI_HZ (20 * 1000 * 1000)
 
 static bool is_photo_painter_hardware(const fos_display_config_t *config)
 {
@@ -138,7 +160,7 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
         DEV_SetReadPin(config->dc);
         DEV_SetSpiClock(FOS_IT8951_SPI_HZ);
     } else {
-        DEV_SetSpiClock(0);
+        DEV_SetSpiClock(entry->partial ? FOS_PARTIAL_SPI_HZ : 0);
     }
     s_panel = entry;
     /* An RGB LCD comes up now, not at the first blit: its scan-out starts
@@ -365,6 +387,7 @@ esp_err_t fos_display_blit(const uint8_t *buf, size_t len)
     esp_err_t err = ensure_module();
     if (err != ESP_OK) return err;
 
+    fos_display_park();
     int64_t start = esp_timer_get_time();
     /* The whole sequence under one bus hold: the drivers toggle CS by hand,
      * so a shared card may not get a word in until the panel sleeps. */
@@ -377,8 +400,88 @@ esp_err_t fos_display_blit(const uint8_t *buf, size_t len)
     s_panel->display((uint8_t *)buf);
     s_panel->sleep();
     DEV_SPI_Release();
+    s_panel_awake = false;
     ESP_LOGI(TAG, "blit + refresh took %lld ms", (esp_timer_get_time() - start) / 1000);
+    if (fos_display_supports_partial()) {
+        if (!s_glass) s_glass = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_glass && s_glass != buf) memcpy(s_glass, buf, len);
+        s_glass_known = s_glass != NULL;
+        s_partials_since_full = 0;
+    }
     return ESP_OK;
+}
+
+bool fos_display_supports_partial(void)
+{
+    return s_panel && s_panel->partial && s_panel->partial_init;
+}
+
+esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bool input_recent,
+                             bool *partial)
+{
+    if (partial) *partial = false;
+    if (!s_panel) return ESP_ERR_INVALID_STATE;
+    if (!buf || len != fos_display_buffer_size()) return ESP_ERR_INVALID_SIZE;
+    fos_partial_refresh_input_t input = {
+        .supported = fos_display_supports_partial(),
+        .glass_known = s_glass_known,
+        .same_scene = same_scene,
+        .input_recent = input_recent,
+        .partials_since_full = s_partials_since_full,
+        .changed_bytes = s_glass_known ? fos_partial_changed_bytes(buf, s_glass, len) : len,
+        .total_bytes = len,
+    };
+    if (!fos_partial_refresh_wanted(&input)) return fos_display_blit(buf, len);
+    esp_err_t err = ensure_module();
+    if (err != ESP_OK) return err;
+
+    /* One bus hold, as a full refresh. */
+    DEV_SPI_Acquire();
+    if (!s_panel_awake && s_panel->partial_init() != 0) {
+        DEV_SPI_Release();
+        ESP_LOGE(TAG, "panel partial init failed");
+        return ESP_FAIL;
+    }
+    s_panel->partial((uint8_t *)buf, s_glass);
+    DEV_SPI_Release();
+    s_last_partial_us = esp_timer_get_time();
+    s_panel_awake = true;
+    s_panel_rested = false;
+    memcpy(s_glass, buf, len);
+    s_partials_since_full++;
+    if (partial) *partial = true;
+    return ESP_OK;
+}
+
+void fos_display_park(void)
+{
+    if (!s_panel || !s_panel_awake) return;
+    DEV_SPI_Acquire();
+    s_panel->sleep();
+    DEV_SPI_Release();
+    s_panel_awake = false;
+}
+
+void fos_display_park_if_idle(int64_t now_us)
+{
+    if (!s_panel_awake) return;
+    int64_t idle_us = now_us - s_last_partial_us;
+    if (idle_us >= FOS_PANEL_CLEAN_US && s_glass_known &&
+        s_partials_since_full >= FOS_PARTIAL_MAX_BEFORE_FULL) {
+        fos_display_blit(s_glass, fos_display_buffer_size());
+    } else if (idle_us >= FOS_PANEL_AWAKE_US) {
+        fos_display_park();
+    } else if (idle_us >= FOS_PANEL_ANALOG_US && !s_panel_rested) {
+        DEV_SPI_Acquire();
+        s_panel->partial_rest();
+        DEV_SPI_Release();
+        s_panel_rested = true;
+    }
+}
+
+void *fos_display_alloc_psram(size_t len)
+{
+    return heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
 esp_err_t fos_display_clear(void)
@@ -386,6 +489,7 @@ esp_err_t fos_display_clear(void)
     if (!s_panel) return ESP_ERR_INVALID_STATE;
     esp_err_t err = ensure_module();
     if (err != ESP_OK) return err;
+    fos_display_park();
     DEV_SPI_Acquire();
     if (s_panel->driver_init() != 0) {
         DEV_SPI_Release();
@@ -394,5 +498,7 @@ esp_err_t fos_display_clear(void)
     s_panel->clear();
     s_panel->sleep();
     DEV_SPI_Release();
+    s_panel_awake = false;
+    s_glass_known = false;
     return ESP_OK;
 }

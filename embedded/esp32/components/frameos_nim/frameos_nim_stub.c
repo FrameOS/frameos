@@ -97,6 +97,12 @@ double frameos_nim_scene_interval(void) { return 0; }
 bool frameos_nim_scene_awaited(void) { return true; }
 double frameos_nim_next_sleep(void) { return -1; }
 bool frameos_nim_render_requested(void) { return false; }
+bool frameos_nim_press_taken(int wire_x, int wire_y)
+{
+    (void)wire_x;
+    (void)wire_y;
+    return false;
+}
 bool frameos_nim_tick(void) { return false; }
 bool frameos_nim_send_event(uint32_t origin, const char *event, const char *payload_json)
 {
@@ -119,6 +125,7 @@ size_t frameos_nim_log_recent(frameos_log_entry_t *out, size_t max)
 void frameos_nim_set_log_tap(void (*tap)(const char *line, uint32_t seq)) { (void)tap; }
 void frameos_nim_set_log_upload_enabled(bool enabled) { (void)enabled; }
 void frameos_nim_flush_logs(void) {}
+bool frameos_nim_flush_log_batch(void) { return false; }
 uint8_t *fos_nim_http_request(const char *method, const char *url,
                               const void *body, size_t body_len,
                               const char *headers, size_t headers_len,

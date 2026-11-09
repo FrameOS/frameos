@@ -198,6 +198,8 @@ bool frameos_nim_scene_awaited(void);
 double frameos_nim_next_sleep(void);
 /* True once when a scene event requested a redraw (clears the flag). */
 bool frameos_nim_render_requested(void);
+/* Whether something on the frame takes a press at this glass position (0..32767). */
+bool frameos_nim_press_taken(int wire_x, int wire_y);
 /* Time passing for the dispatcher's input state (a held button is a
  * `longPress` at every whole second, a short press whose double-press window
  * closed a `press`): true when it made an event, in which case the
@@ -249,6 +251,9 @@ void frameos_nim_set_log_tap(void (*tap)(const char *line, uint32_t seq));
 void frameos_nim_set_log_upload_enabled(bool enabled);
 /* Send queued Nim/runtime logs to the FrameOS backend, if enabled. */
 void frameos_nim_flush_logs(void);
+/* One batch of the same queue, each its own HTTP round trip. True when
+ * another may follow. */
+bool frameos_nim_flush_log_batch(void);
 
 /* Outbound HTTP(S) for the Nim side (apps, frameos.fetchText in JS apps):
  * esp_http_client + cert bundle. Returns a malloc'd body (caller frees with

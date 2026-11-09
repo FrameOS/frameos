@@ -364,10 +364,9 @@ Map scene's lines) fetches a quarter of the data.
 - **Which scale.** A field with `role: "renderScale"` whose state holds a
   number, else the scene's `settings.renderScale`, else the frame's
   (frame.json `renderScale`, the control planes' `render_scale`). The
-  frame's 0 is automatic: the panel's shorter edge over 600 px, rounded down
-  to a quarter, never below 1 (800x480 and 720x720 are 1, 1200x1600 is 2,
-  1872x1404 is 2.25), so a scaled layout keeps at least 600 px on its
-  shorter edge.
+  frame's 0 is automatic: 1, and 2 on a 4K or larger screen on HDMI (the
+  `framebuffer` device, a shorter edge of 2160 px or more). Anything else is
+  the owner's to set.
   A scale below 1 (0.25, 0.5 and 0.75 are offered) works the other way: the
   layout gets more room than the panel has and everything is drawn smaller.
   The built-in scenes (the switcher, the settings panel) follow the frame's

@@ -591,6 +591,12 @@ static bool apply_frame_settings(const cJSON *frame)
         config->voice_chat = cJSON_IsTrue(voice_chat);
         changed = true;
     }
+    /* The click of a press on the glass. Live: asked on every press. */
+    const cJSON *touch_beep = cJSON_GetObjectItem(frame, "touchBeep");
+    if (cJSON_IsBool(touch_beep) && config->touch_beep != cJSON_IsTrue(touch_beep)) {
+        config->touch_beep = cJSON_IsTrue(touch_beep);
+        changed = true;
+    }
     /* The PDM microphone's pins (docs/voice-chat.md): clock, data and the
      * power switch, -1 = none. Read at every voice session's start
      * (fos_voice.c), so live; a session already recording keeps its pins. */
@@ -958,6 +964,9 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (before->buzzer_tone_hz != after->buzzer_tone_hz) {
         change_append_int(out, out_len, "buzzer_tone_hz", (long)after->buzzer_tone_hz);
+    }
+    if (before->touch_beep != after->touch_beep) {
+        change_append(out, out_len, "touch_beep", after->touch_beep ? "true" : "false");
     }
     if (before->voice_chat != after->voice_chat) {
         change_append(out, out_len, "voice_chat", after->voice_chat ? "true" : "false");

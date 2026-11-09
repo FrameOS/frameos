@@ -47,6 +47,13 @@ UNSUPPORTED_PANELS = {
     "EPD_7in5b_V2_old",
 }
 
+# Panels with a partial waveform: (init, display(new, previous), rest), the
+# driver's own functions (docs/realtime-rendering.md, "Partial refresh on
+# e-paper"). Rest turns the analog supply off and keeps the controller awake.
+PARTIAL_PANELS = {
+    "EPD_3in97": ("EPD_3in97_Init_Partial", "EPD_3in97_Display_Partial", "EPD_3in97_Rest"),
+}
+
 # Panels without a Waveshare C driver in the panel catalog's ePaper folder:
 # hand-written drivers in this component with the same init/clear/display/
 # sleep shape. `bus` 1 = I2C — the display layer skips the shared SPI module
@@ -172,7 +179,24 @@ def panel_wrappers(panel: str, variant) -> str:
         sleep_body = f"    {variant.sleep_function}();"
     else:
         sleep_body = "    /* driver has no sleep function */"
-    return f"""static int fos_init_{panel}(void)
+    partial = ""
+    if panel in PARTIAL_PANELS:
+        partial_init, partial_display, partial_rest = PARTIAL_PANELS[panel]
+        partial = f"""static int fos_partial_init_{panel}(void)
+{{
+    {partial_init}();
+    return 0;
+}}
+static void fos_partial_{panel}(uint8_t *buf, uint8_t *previous)
+{{
+    {partial_display}((UBYTE *)buf, (UBYTE *)previous);
+}}
+static void fos_partial_rest_{panel}(void)
+{{
+    {partial_rest}();
+}}
+"""
+    return partial + f"""static int fos_init_{panel}(void)
 {{
 {init_body}
 }}
@@ -213,6 +237,9 @@ typedef struct {
     void (*clear)(void);
     void (*display)(uint8_t *buf);
     void (*sleep)(void);
+    int (*partial_init)(void);                       /* NULL: no partial waveform */
+    void (*partial)(uint8_t *buf, uint8_t *previous); /* `previous`: what the glass shows */
+    void (*partial_rest)(void);                      /* the analog supply off, the controller awake */
 } fos_panel_entry_t;
 
 extern const fos_panel_entry_t fos_panel_table[];
@@ -285,7 +312,7 @@ def generate(repo_root: Path, out_dir: Path) -> None:
     for key in keys:
         variant = variants[key]
         parts.append(
-            "    { %s, %d, %d, %d, %d, %d, fos_init_%s, fos_clear_%s, fos_show_%s, fos_sleep_%s },"
+            "    { %s, %d, %d, %d, %d, %d, fos_init_%s, fos_clear_%s, fos_show_%s, fos_sleep_%s, %s, %s, %s },"
             % (
                 c_string(key),
                 int(variant.width),
@@ -294,11 +321,14 @@ def generate(repo_root: Path, out_dir: Path) -> None:
                 1 if key == "EPD_13in3e" else 0,
                 FOS_PANEL_BUS_SPI,
                 key, key, key, key,
+                f"fos_partial_init_{key}" if key in PARTIAL_PANELS else "NULL",
+                f"fos_partial_{key}" if key in PARTIAL_PANELS else "NULL",
+                f"fos_partial_rest_{key}" if key in PARTIAL_PANELS else "NULL",
             )
         )
     for panel in EXTRA_PANELS:
         parts.append(
-            "    { %s, %d, %d, %d, 0, %d, %s, %s, %s, %s },"
+            "    { %s, %d, %d, %d, 0, %d, %s, %s, %s, %s, NULL, NULL, NULL },"
             % (
                 c_string(panel["name"]),
                 int(panel["width"]),

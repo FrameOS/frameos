@@ -539,7 +539,7 @@ static int cmd_set(int argc, char **argv)
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|wake_schedule|"
-               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|mic_pins|voice_chat|"
+               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|touch_beep|mic_pins|voice_chat|"
                "led_pin|led_type|i2c_buses|touch_pins|codec_pins|"
                "pins|gpio_buttons|ap_psk> "
                "<value...>\n");
@@ -1099,6 +1099,7 @@ static int cmd_set(int argc, char **argv)
         printf("%s saved; takes effect at the next boot\n", key);
     }
     else if (strcmp(key, "voice_chat") == 0) config->voice_chat = atoi(value) != 0;
+    else if (strcmp(key, "touch_beep") == 0) config->touch_beep = atoi(value) != 0;
     else if (strcmp(key, "battery_divider") == 0) config->battery_divider = (float)atof(value);
     else if (strcmp(key, "pins") == 0) {
         if (fos_config_parse_pins(value, &config->pins) != ESP_OK) {

@@ -119,7 +119,7 @@
   a rule with `emit` replaces the press (origin `eventMap`), the scene never
   hears it; every reTerminal preset ships LEFT/RIGHT held = previous/next
   scene, the E1001/E1002/E1003 (microphone) REFRESH held = `voiceChat`,
-  and the E1003 and the SenseCAP Indicator the edge swipes
+  and the E1003, the Sticky and the SenseCAP Indicator the edge swipes
   (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset table:
   keep the three alike). A Linux frame never given a map runs its device's:
   every HyperPixel's left/right edge swipe is `back`/`forward` (the scene's
@@ -422,7 +422,7 @@
   laid out at that size, and pixie stretches the root to the full target as
   vectors. The scale is a `role: "renderScale"` field's state, else the
   scene's `settings.renderScale`, else the frame's `render_scale` (0 =
-  automatic: shorter edge / 600 rounded down to a quarter, at least 1; the SPA's copy
+  automatic: 1, and 2 on a 4K or larger screen on HDMI; the SPA's copy
   is `utils/renderScale.ts`). Never scale by rasterizing small and
   stretching: pass the smaller size to the layout and the full one to pixie.
 - Flash is the budget: the layer cost +37.3 KB on the ESP32-S3 image. A new
@@ -473,6 +473,18 @@
   pixie's damage box (`utils/svg_frames.nim`, keyed on the firmware's write
   count per buffer): a new writer into an LCD buffer that is not a render in
   place calls `fos_display_mark_written`.
+- **Partial refresh on e-paper** (doc section of that name): a panel in
+  `PARTIAL_PANELS` updates through `fos_display_update`, which keeps the exact
+  picture on the glass, and `panel_damage.nim` dithers only the runs of the
+  canvas that changed (a whole-frame Floyd-Steinberg would move every grey
+  pixel below a change). A new way to put pixels on the glass goes through
+  `fos_display_blit` or `fos_display_update`, or the copy goes stale; the
+  panel stays awake between updates, so the chip's deep sleep parks it first
+  (`fos_display_park`).
+  While someone taps, slow chores wait (`input_hold_on()` in `fos_client.c`, the
+  rule in `fos_animation.c`): the render task drains the touch queue, so a new
+  network call or flash write on it goes behind the hold too, and a full refresh
+  that only clears ghosts waits for the idle frame.
 - **A slow scene switch shows the loading mark** (`frameos/loading_mark.nim`,
   one drawing for both runtimes; doc section "A switch that takes a while"):
   after 200 ms without the new scene's first frame, a thread (Pi,
@@ -486,6 +498,8 @@
   driver goes through `withLoadingMarkAway`, and on the ESP32 every present
   runs `present_back` (which puts it away): a new push or present path keeps
   that, or the driver's row diff and the damage repaint go wrong. The
+  firmware's e-paper has no mark: a load someone at the frame asked for chirps
+  quietly on the buzzer instead (`fos_client_loading_begin`). The
   firmware builds RGB565 alone, with no flip, round panel or log line
   (`Only565`, `Flips`, `RoundPanels`, for flash): an option added later is
   the Pi's unless the ESP32 needs it, and the PR says what it cost there.

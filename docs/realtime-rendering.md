@@ -490,6 +490,14 @@ scene's own, and only on a pass that will run it (`rhythmAwaited`): a slow map
 inside a clock bar shows the mark when the map renders and not when the bar
 ticks. A switch still shows it.
 
+**E-paper has no mark to draw, so it chirps.** When someone at the frame touched
+it or pressed a key in the last ten seconds, a load that has taken 1.5 seconds
+plays a quiet pair of chirps on the buzzer, a higher one and a lower one close
+together, every 1.3 seconds, until the picture lands (`fos_buzzer_loading_begin`, `fos_client_loading_begin`), 20
+seconds at the most. A schedule or a scene pushed from elsewhere stays silent,
+an ordinary partial update is done before that, and the frame's
+Touch beep switch turns it off.
+
 **An interpreter that holds a UI's handlers is not let go to save memory.** An
 awake ESP32 keeps its JS interpreters between renders while there is room, but
 a UI's `onClick` and friends live only in its interpreter, so one released
@@ -564,6 +572,62 @@ On a Pi a switch slow enough to show the mark logs it once it lands:
 `render:loadingMark` with the scene and `ms`, from the switch being asked
 for to its first frame. A switch that never lands stops showing it after two
 minutes, past every render's own deadline, on both.
+
+## Partial refresh on e-paper
+
+A panel with a partial waveform (`PARTIAL_PANELS` in
+`components/frameos_display/generate_panel_table.py`; the reTerminal Sticky's
+SSD1677 is the first) updates without the full-screen flash. Three layers make
+a small change cost what it should:
+
+- **The glass.** `fos_display_update` (`frameos_display.c`) sends the picture
+  on the glass and the new one to the panel's two RAM planes, and the waveform
+  moves only the pixels that differ. It takes the whole frame each time: the
+  update drives the whole panel whatever the RAM window says. Every picture
+  that reaches the glass goes through it or `fos_display_blit`, so the copy it
+  keeps is exact whoever drew it. `fos_partial_refresh.c` (host-tested) picks
+  a full refresh instead for the first picture after a boot or a deep sleep, a
+  new scene, a picture that mostly changed, and every 20th update, which
+  clears the ghosts. `render:done` says `"refresh":"partial"`. The panel
+  stays awake between updates, its analog supply on and its waveform loaded.
+  After ten idle seconds the supply goes off and the controller stays awake
+  (`fos_display_park_if_idle`); after five minutes, or before the chip's own
+  deep sleep, the panel is parked. A reset and a sleep around every update were
+  300 ms; the supply, the waveform load and an 8 MHz bus 270 ms more. What is
+  left is about 500 ms: some 40 ms for the two frames on the bus, the rest the
+  waveform itself.
+- **The input hold.** The render task drains the touch queue and also does the
+  backend pulls, the log uploads and the image push, 200-1000 ms a round trip
+  on Wi-Fi, and writes the scene state to flash, up to 3 s, so a tap made during
+  one came back late with the ones behind it in one go. On these panels a touch
+  or a key holds all of that back until ten
+  seconds without input, a minute at the most (`fos_input_hold_*` in
+  `fos_animation.c`), and the idle wait then runs it once, a round trip at a
+  time, giving way to the next tap. A backend's command nudge is still served
+  at once, and a frame about to deep sleep runs what it held first. The full
+  refresh that clears the ghosts waits the same way: 120 updates at the most
+  while someone taps, and the frame does it from the idle wait 30 seconds
+  after the last update.
+- **The dither.** Floyd-Steinberg carries its error across the picture, so
+  packing a whole frame after a small change rewrites the dither of every grey
+  below it, and all of those pixels would move on the glass.
+  `utils/panel_damage.nim` compares the gray canvas with a copy of how it was
+  last packed, and dithers only the runs of pixels that changed, per row and
+  from no error at their edge, over the packed picture from before. Everything
+  else stays as it was, bit for bit. Runs and not boxes: a crosshair that
+  moved is two full-height lines. The comparison is of the canvas and not of
+  what the renderer reports, because a scene is more than its SVGs and the
+  copy cannot miss a writer.
+- **The raster.** The canvas is kept between renders, so on these panels it
+  takes the same SVG damage records as an LCD's buffer
+  (`beginKeptCanvasFrame`, `utils/svg_frames.nim`).
+
+Around them, a frame a touch asked for does its picture first, as on an LCD:
+the backend's pulls and the log flushes wait until it is up, three and more
+round trips that used to run in front of the first pixel. Measured on the
+reTerminal Sticky (Touch test in the Windows 98 layout, 2026-11-09): about
+0.2 s from the press to the render starting, 90 ms render, 30 to 80 ms pack,
+500 ms on the panel; 0.85 to 0.95 s in all, down from 2.6 s and more.
 
 ## Measuring
 

@@ -30,6 +30,7 @@
 #include "fos_battery.h"
 #include "fos_buttons.h"
 #include "fos_gauge.h"
+#include "fos_buzzer.h"
 #include "fos_touch.h"
 #include "fos_charger.h"
 #include "fos_rtc.h"
@@ -172,6 +173,8 @@ static int64_t s_keep_awake_until_us = 0;
 static bool s_display_state_loaded = false;
 static bool s_display_state_valid = false;
 static bool s_last_refresh_skipped = false;
+/* The scene whose picture is on the glass: a new one gets a full refresh. */
+static char s_refresh_scene_id[128] = "";
 static fos_display_state_t s_display_state;
 
 static void load_display_state(void);
@@ -599,6 +602,25 @@ static void display_power(bool on)
     if (on && was_dark) fos_client_render_now();
 }
 
+/* Slow chores wait while someone is tapping (fos_animation.h), on a panel that
+ * answers at once. This task drains the touch queue and also does the pulls,
+ * the log uploads and the image push (200-1000 ms a round trip on Wi-Fi) and
+ * writes the scene state to flash (up to 3 s): a tap made during one came back
+ * late, with the ones behind it in one go. */
+static fos_input_hold_t s_input_hold;
+static int64_t s_last_input_us = 0;
+
+static bool input_queued(void)
+{
+    return fos_touch_pending() || fos_buttons_pending();
+}
+
+static bool input_hold_on(void)
+{
+    return fos_display_supports_partial() &&
+           (fos_input_hold_engaged(&s_input_hold) || input_queued());
+}
+
 /* The input queues, then time passing, in that order: the buttons' edges and
  * the glass's reports reach the dispatcher before a tick asks what is still
  * held. A release waiting in the touch queue behind the render its press
@@ -606,6 +628,10 @@ static void display_power(bool on)
  * press. The render task's, like every Nim call. */
 static void process_input_events(void)
 {
+    if (input_queued()) {
+        s_last_input_us = esp_timer_get_time();
+        if (fos_display_supports_partial()) fos_input_hold_note(&s_input_hold, s_last_input_us);
+    }
     fos_buttons_process_events();
     fos_touch_process_events();
     if (frameos_nim_tick()) {
@@ -1408,6 +1434,21 @@ static bool render_held(void)
     return until_us != 0 && esp_timer_get_time() < until_us;
 }
 
+void fos_client_loading_begin(uint32_t since_tick)
+{
+    fos_display_loading_begin(since_tick, fos_config()->rotate);
+    if (fos_loading_taps_wanted(fos_display_is_lcd(), fos_config()->touch_beep, render_held(), s_last_input_us,
+                                esp_timer_get_time())) {
+        fos_buzzer_loading_begin();
+    }
+}
+
+void fos_client_loading_end(void)
+{
+    fos_display_loading_end();
+    fos_buzzer_loading_end();
+}
+
 typedef struct {
     bool drawn;
     fos_panel_surface_t surface;
@@ -1573,7 +1614,7 @@ static esp_err_t render_once(bool quiet)
         log_render_event("render:scene", scene_id, scene_name, "rendering", "start",
                          mode, fos_display_present() ? "pending" : "none", "",
                          render_attempt, 0, width, height, format, buf_len, ESP_OK);
-        frameos_nim_flush_logs();
+        if (!fos_display_supports_partial()) frameos_nim_flush_logs();
     }
 
     uint8_t *buf = NULL;
@@ -1638,9 +1679,10 @@ static esp_err_t render_once(bool quiet)
                          framebuffer_ms, width, height, format, buf_len, err);
         /* On a backend-managed frame a flush is a POST on this task. An
          * e-paper refresh takes seconds, so its lines go out before it; an
-         * LCD shows the frame in a buffer switch, and its lines go with
+         * LCD shows the frame in a buffer switch, and a panel that can take
+         * a partial update has a finger waiting for it: their lines go with
          * render:done, after the picture is up (docs/perf-todo.md). */
-        if (!fos_display_is_lcd()) frameos_nim_flush_logs();
+        if (!fos_display_is_lcd() && !fos_display_supports_partial()) frameos_nim_flush_logs();
     }
 
     /* The hash is an e-paper fact: an unchanged picture skips a refresh that
@@ -1696,10 +1738,16 @@ static esp_err_t render_once(bool quiet)
                                  "display", mode, refresh, "", render_attempt,
                                  (esp_timer_get_time() - start) / 1000, width, height,
                                  format, buf_len, ESP_OK);
-                if (!fos_display_is_lcd()) frameos_nim_flush_logs();
+                if (!fos_display_is_lcd() && !fos_display_supports_partial()) frameos_nim_flush_logs();
             }
-            err = fos_display_blit(buf, buf_len);
-            refresh = err == ESP_OK ? "updated" : "failed";
+            char showing_id[sizeof(s_refresh_scene_id)];
+            char showing_name[8];
+            current_scene_details(showing_id, sizeof(showing_id), showing_name, sizeof(showing_name));
+            bool partial = false;
+            err = fos_display_update(buf, buf_len, strcmp(showing_id, s_refresh_scene_id) == 0,
+                                     fos_input_hold_engaged(&s_input_hold), &partial);
+            refresh = err != ESP_OK ? "failed" : partial ? "partial" : "updated";
+            if (err == ESP_OK) snprintf(s_refresh_scene_id, sizeof(s_refresh_scene_id), "%s", showing_id);
             if (overlay_drawn) {
                 if (in_panel) {
                     lan_overlay_forget(&lan_overlay);
@@ -1764,7 +1812,7 @@ static esp_err_t render_once(bool quiet)
                          mode, refresh, err == ESP_OK ? "" : "render-cycle-failed",
                          err == ESP_OK ? s_render_count : render_attempt, total_ms,
                          width, height, format, buf_len, err);
-        frameos_nim_flush_logs();
+        if (err != ESP_OK || !input_hold_on()) frameos_nim_flush_logs();
     }
     if (err == ESP_OK && !skipped_refresh && !quiet) {
         /* "I drew something new" — the provider decides whether anyone is
@@ -1773,7 +1821,7 @@ static esp_err_t render_once(bool quiet)
     }
     if (err == ESP_OK && !quiet) {
         /* Also on a skipped refresh: the last push may have failed. */
-        push_image_to_backend(scene_id);
+        if (!input_hold_on()) push_image_to_backend(scene_id);
     }
     if (in_panel) {
         /* Shown: fos_display_blit gave the panel back. Not shown (the render
@@ -2063,9 +2111,40 @@ static void finish_burst(void)
         char scene_name[128];
         current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
         fos_cloud_announce_render(scene_id);
-        push_image_to_backend(scene_id);
+        if (!input_hold_on()) push_image_to_backend(scene_id);
     }
-    frameos_nim_flush_logs();
+    if (!input_hold_on()) frameos_nim_flush_logs();
+}
+
+/* A touch or a key while the held work runs: it goes first, and the work
+ * starts over at the next quiet. */
+static bool input_takes_over(void)
+{
+    if (!input_queued()) return false;
+    fos_input_hold_note(&s_input_hold, esp_timer_get_time());
+    return true;
+}
+
+/* What the input hold put off, once. One round trip at a time, so a tap waits
+ * for one at the most. */
+static void run_held_network(const fos_config_t *config)
+{
+    while (frameos_nim_flush_log_batch()) {
+        if (input_takes_over()) return;
+    }
+    if (input_takes_over()) return;
+    fos_scenes_sync(false);
+    if (input_takes_over()) return;
+    fos_settings_sync(false);
+    if (input_takes_over()) return;
+    if (fos_commands_sync() && config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
+        fos_scenes_apply_pending_selection();
+    }
+    if (input_takes_over()) return;
+    char scene_id[128];
+    char scene_name[128];
+    current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+    push_image_to_backend(scene_id);
 }
 
 /* The wait between two frames of an animation. What arrives meanwhile is
@@ -2181,14 +2260,17 @@ static void client_task(void *arg)
          * animation every pass does them. */
         bool housekeeping = fos_animation_housekeeping_due(&s_anim, cycle_start);
         /* A frame the scene asked for after a touch, on a panel that shows it
-         * at once: its picture first, the backend pulls after it (below). On
+         * at once or in a partial update: its picture first, the backend
+         * pulls after it (below). On
          * a backend-managed frame the scenes ETag GET, the settings GET and
          * the commands POST are three round trips on this task, and they ran
          * in front of every isolated tap's render (docs/perf-todo.md). A
          * command that arrives with the tap lands one frame later. */
-        bool pulls_after_render = housekeeping && force_render && s_scene_render && fos_display_is_lcd();
+        bool pulls_after_render = housekeeping && force_render && s_scene_render &&
+                                  (fos_display_is_lcd() || fos_display_supports_partial());
+        bool held_for_input = input_hold_on();
         /* Scene state that has waited its delay (fos_scene_state.h). */
-        if (housekeeping) fos_scene_state_flush(false);
+        if (housekeeping && !held_for_input) fos_scene_state_flush(false);
 
         /* First pass of a boot on a cloud-managed frame: the commands that
          * waited out the sleep (a scene switch, a scenes push, a state) are
@@ -2219,7 +2301,7 @@ static void client_task(void *arg)
          * pushed over HTTP/console since the last pass. Both touch the Nim
          * runtime, so they only ever run here on the render task. */
         if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
-            if (housekeeping && !pulls_after_render) fos_scenes_sync(false);
+            if (housekeeping && !pulls_after_render && !held_for_input) fos_scenes_sync(false);
             fos_scenes_apply_pending();
             /* Scene events from HTTP, the cloud or the console since the last
              * look (fos_events_defer): to the scene now, before this pass
@@ -2244,7 +2326,7 @@ static void client_task(void *arg)
         /* The once-a-second work while animating starts here and ends with
          * the power decision. */
         if (housekeeping) {
-            if (!pulls_after_render) {
+            if (!pulls_after_render && !held_for_input) {
                 /* Live settings: pick up backend-side interval/name/render-mode
                  * changes without a rebuild. ETag'd, so steady state is a 304. */
                 fos_settings_sync(false);
@@ -2449,14 +2531,14 @@ static void client_task(void *arg)
                  * scene the frame's own clock redraws every few seconds (a
                  * layout's clock bar). A switch begins it itself. */
                 if (!s_anim.active && frameos_nim_scene_awaited()) {
-                    fos_display_loading_begin(xTaskGetTickCount(), fos_config()->rotate);
+                    fos_client_loading_begin(xTaskGetTickCount());
                 }
                 s_render_in_flight = true;
                 render_once(quiet);
                 s_render_in_flight = false;
                 /* A picture shown put a switch's loading mark away; a render
                  * that showed none (it failed) ends it here. */
-                fos_display_loading_end();
+                fos_client_loading_end();
                 rendered = true;
                 fos_animation_frame_done(&s_anim, cycle_start, esp_timer_get_time());
                 if (scene_render) {
@@ -2464,7 +2546,7 @@ static void client_task(void *arg)
                 }
             }
         }
-        if (pulls_after_render) {
+        if (pulls_after_render && !input_hold_on()) {
             /* The pulls this pass put after its picture: a switch or a state
              * they bring is applied now and rendered by the next pass. */
             fos_scenes_sync(false);
@@ -2480,7 +2562,7 @@ static void client_task(void *arg)
          * that renders nothing keeps the once-a-second housekeeping. */
         bool sample_metrics = (s_anim.active || scene_render) && rendered ? !frame_quiet : housekeeping;
         if (sample_metrics) log_metrics_sample();
-        frameos_nim_flush_logs(); /* the sample must not wait for next pass */
+        if (!input_hold_on()) frameos_nim_flush_logs(); /* the sample must not wait for next pass */
 
         /* The scene's refreshInterval is authoritative when a scene is
          * loaded and has an opinion (>= 1), matching the Pi runner where
@@ -2603,6 +2685,16 @@ static void client_task(void *arg)
             }
             process_input_events();
             if (frameos_nim_render_requested()) {
+                force_render = true;
+                continue;
+            }
+        }
+        if (deep_sleep_now && fos_input_hold_engaged(&s_input_hold)) {
+            /* Going dark: there is no quiet to wait for. */
+            s_input_hold = (fos_input_hold_t){0};
+            run_held_network(config);
+            if (fos_client_render_pending()) {
+                xEventGroupClearBits(s_events, RENDER_NOW_BIT);
                 force_render = true;
                 continue;
             }
@@ -2745,6 +2837,7 @@ static void client_task(void *arg)
             /* USB console drops in deep sleep; that's the point (battery).
              * What the log ring still holds goes out first. */
             fos_log_ring_flush(FOS_SLEEP_LOG_DRAIN_MS);
+            fos_display_park();
             esp_deep_sleep((uint64_t)chunk * 1000000ULL);
         }
         if (deep_sleep_now && fos_display_present() && keep_awake_s > 0) {
@@ -2769,6 +2862,7 @@ static void client_task(void *arg)
              * the tap and its `longPress`es on each second, and only the
              * process_events below delivers them. */
             uint32_t max_slice = fos_buttons_busy() ? 50 : 1000;
+            fos_display_park_if_idle(esp_timer_get_time());
             EventBits_t bits = xEventGroupWaitBits(
                 s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT,
                 pdTRUE, pdFALSE,
@@ -2796,7 +2890,7 @@ static void client_task(void *arg)
             /* INPUT_EVENTS_BIT ends the slice early and nothing more: the
              * press is delivered just below, and the render-requested check
              * after it decides whether a frame follows. */
-            fos_scene_state_flush(false);
+            if (!input_hold_on()) fos_scene_state_flush(false);
             if (nim) {
                 process_input_events();
                 /* An event from HTTP, the cloud or the console: to the scene
@@ -2810,6 +2904,16 @@ static void client_task(void *arg)
                 /* A burst a second over: its summary, and what its last
                  * frame skipped when that one was quiet. */
                 finish_burst();
+            }
+            /* Nobody has touched it for a while: what the input hold put
+             * off, and whatever that brought is picked up below. */
+            if (fos_input_hold_release(&s_input_hold, esp_timer_get_time())) {
+                run_held_network(config);
+                if (fos_client_render_pending()) {
+                    xEventGroupClearBits(s_events, RENDER_NOW_BIT);
+                    want_render = true;
+                }
+                if (nim && fos_scenes_work_pending()) want_render = true;
             }
             /* A code started (the verb wakes this wait), answered, replaced
              * or expired: within a second, whatever the interval. */

@@ -1173,6 +1173,19 @@ every plane: the backend's settings pull carries `buzzerPin` /
 `buzzer_tone_hz` (firmware 2026.10.12+), and both show them as "Button beep
 GPIO" and "Button beep tone" under the frame's GPIO buttons.
 
+On e-paper the glass clicks too: the picture takes a moment to answer, the
+click does not. When a press lands on something that takes it (an element
+with a handler, a field, a box that scrolls, a scene listening for a press)
+it plays the button's down click, and its up click when it lifts; a finger
+added to one already on the glass plays the higher click of a double press.
+A press on nothing is silent, and so is an LCD, whose picture answers at once.
+What such a press or a key starts, if it takes over 1.5 s to load, chirps
+quietly on the buzzer until the picture lands (`docs/realtime-rendering.md`).
+`set touch_beep 0` turns both off, or "Touch beep" in the frame's settings
+(`touchBeep` on the backend's settings pull, `touch_beep` on the cloud's
+`set_settings`, firmware 2026.11.6+). `fos_touch.c`, host-tested in
+`test_fos_touch.c`.
+
 ### Voice chat
 
 Hold the voice key — the key whose long press the frame's event map binds

@@ -103,6 +103,20 @@ static void EPD_3in97_TurnOnDisplay(void)
     EPD_3in97_ReadBusy();
 }
 
+static UBYTE EPD_3in97_AnalogOn = 0;
+
+static void EPD_3in97_TurnOnDisplay_Partial(void)
+{
+    // The first update after an init reads the temperature, loads the partial
+    // waveform and leaves the analog supply on; the ones after it only drive
+    // the panel. EPD_3in97_Sleep turns the supply off.
+    EPD_3in97_SendCommand(0x22); // Display Update Control
+    EPD_3in97_SendData(EPD_3in97_AnalogOn ? 0x0C : 0xFC);
+    EPD_3in97_SendCommand(0x20); // Activate Display Update Sequence
+    EPD_3in97_ReadBusy();
+    EPD_3in97_AnalogOn = 1;
+}
+
 /******************************************************************************
 function :	Setting the display window
 parameter:
@@ -143,6 +157,7 @@ parameter:
 ******************************************************************************/
 void EPD_3in97_Init(void)
 {
+    EPD_3in97_AnalogOn = 0;
     EPD_3in97_Reset();
     DEV_Delay_ms(100);
 
@@ -229,11 +244,94 @@ void EPD_3in97_Display(UBYTE *Image)
 }
 
 /******************************************************************************
+function :	Initialize the panel for a partial update: no software reset, the
+            partial border waveform, and the RED plane compared, not bypassed
+parameter:
+******************************************************************************/
+void EPD_3in97_Init_Partial(void)
+{
+    EPD_3in97_AnalogOn = 0;
+    EPD_3in97_Reset();
+    EPD_3in97_ReadBusy();
+
+    EPD_3in97_SendCommand(0x18); // use the internal temperature sensor
+    EPD_3in97_SendData(0x80);
+
+    EPD_3in97_SendCommand(0x0C); //set soft start
+    EPD_3in97_SendData(0xAE);
+    EPD_3in97_SendData(0xC7);
+    EPD_3in97_SendData(0xC3);
+    EPD_3in97_SendData(0xC0);
+    EPD_3in97_SendData(0x80);
+
+    EPD_3in97_SendCommand(0x01);   // drive output control
+    EPD_3in97_SendData((EPD_3in97_HEIGHT-1)%256);
+    EPD_3in97_SendData((EPD_3in97_HEIGHT-1)/256);
+    EPD_3in97_SendData(0x02);
+
+    EPD_3in97_SendCommand(0x3C);   // border setting
+    EPD_3in97_SendData(0x80);
+
+    EPD_3in97_SendCommand(0x11);   // data entry mode: X-mode x+ y-
+    EPD_3in97_SendData(0x01);
+
+    EPD_3in97_SetWindows(0, EPD_3in97_HEIGHT-1, EPD_3in97_WIDTH-1, 0);
+
+    EPD_3in97_SendCommand(0x21);   // display update control: compare RED
+    EPD_3in97_SendData(0x00);
+    EPD_3in97_SendData(0x00);
+
+    EPD_3in97_ReadBusy();
+}
+
+/******************************************************************************
+function :	Show a picture, moving only the pixels that differ from what the
+            glass shows. The whole of both planes goes over: the update drives
+            the whole panel whatever the RAM window says
+parameter:
+    Image    : the new picture
+    Previous : the picture on the glass
+******************************************************************************/
+void EPD_3in97_Display_Partial(UBYTE *Image, UBYTE *Previous)
+{
+    UWORD i;
+    UWORD height = EPD_3in97_HEIGHT;
+    UWORD width = EPD_3in97_WIDTH/8;
+
+    EPD_3in97_SetCursor(0, 0);
+    EPD_3in97_SendCommand(0x26);   //write RAM for the previous picture
+    for(i=0; i<height; i++)
+    {
+        EPD_3in97_SendData2((UBYTE *)(Previous+i*width), width);
+    }
+
+    EPD_3in97_SetCursor(0, 0);
+    EPD_3in97_SendCommand(0x24);   //write RAM for black(0)/white (1)
+    for(i=0; i<height; i++)
+    {
+        EPD_3in97_SendData2((UBYTE *)(Image+i*width), width);
+    }
+    EPD_3in97_TurnOnDisplay_Partial();
+}
+
+/******************************************************************************
 function :	Enter sleep mode
 parameter:
 ******************************************************************************/
+void EPD_3in97_Rest(void)
+{
+    if (EPD_3in97_AnalogOn) {
+        EPD_3in97_SendCommand(0x22); // Display Update Control
+        EPD_3in97_SendData(0x03);    // analog and clock off
+        EPD_3in97_SendCommand(0x20);
+        EPD_3in97_ReadBusy();
+        EPD_3in97_AnalogOn = 0;
+    }
+}
+
 void EPD_3in97_Sleep(void)
 {
+    EPD_3in97_Rest();
     EPD_3in97_SendCommand(0x10); //enter deep sleep
     EPD_3in97_SendData(0x03);
     DEV_Delay_ms(100);

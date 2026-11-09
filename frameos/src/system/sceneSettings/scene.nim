@@ -807,7 +807,7 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
   header.children.add look.button("Save", HSave, not edits.isNil and edits.len > 0)
   result.children.add header
-  let body = if frame: self.frameList(look, info, scaleText(autoRenderScale(unit, unit)), unit)
+  let body = if frame: self.frameList(look, info, scaleText(autoRenderScale(unit, unit, self.frameConfig.device)), unit)
     else: self.fieldList(look, look.pad, look.pad)
   result.children.add el("div", "flex-1 overflow-y-auto", body)
 

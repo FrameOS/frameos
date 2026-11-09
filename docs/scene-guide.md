@@ -487,7 +487,7 @@ export function get(app, context) {
   a picture of the content instead. A split with a content panel cannot be a
   layout (see Layouts below).
 - A big frame draws a .tsx app's JSX larger by itself: at render scale 2
-  (automatic on a panel whose shorter edge is about 1200 px) the app is told
+  (automatic on a 4K screen on HDMI, or set on the frame) the app is told
   its canvas is half the size (`context.imageWidth`, `app.frame.width`) and
   what it returns is drawn sharp at full size. Design for the size you are
   told; `app.frame.scale` says the factor. A position from outside the app

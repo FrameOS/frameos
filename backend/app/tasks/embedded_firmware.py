@@ -352,11 +352,13 @@ EMBEDDED_SEEED_STICKY_GPIO_BUTTONS = [
     {"pin": 6, "label": "DOWN"},
 ]
 # UP and DOWN held walk the scene list; the AI key held talks to the frame
-# (docs/voice-chat.md). fos_board.c's STICKY_EVENT_MAP is the device copy.
+# (docs/voice-chat.md); the edges swipe (EMBEDDED_TOUCH_EDGE_SWIPES).
+# fos_board.c's STICKY_EVENT_MAP is the device copy.
 EMBEDDED_SEEED_STICKY_EVENT_MAP = [
     {"event": "button", "match": {"label": "UP", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
     {"event": "button", "match": {"label": "DOWN", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
     {"event": "button", "match": {"label": "AI", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+    *EMBEDDED_TOUCH_EDGE_SWIPES,
 ]
 # The Sticky's MSM261 PDM microphone: PDM_CLK GPIO19, PDM_DATA GPIO20 (the
 # S3's native USB pads; its USB is a CH343 on UART0, and fos_mic.c detaches
@@ -1383,6 +1385,7 @@ EMBEDDED_PRESET_SEED_ONLY_KEYS = (
     ("buzzerPin", "buzzer_pin"),
     ("buzzerToneHz", "buzzer_tone_hz"),
     ("voiceChat", "voice_chat"),
+    ("touchBeep", "touch_beep"),
     ("micClkPin", "mic_clk_pin"),
     ("micDataPin", "mic_data_pin"),
     ("micPwrPin", "mic_pwr_pin"),
@@ -2019,6 +2022,9 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     voice_chat = _embedded_device_config_value(frame, "voiceChat", "voice_chat")
     if isinstance(voice_chat, bool):
         settings.append(_provisioning_setting("voice_chat", 1 if voice_chat else 0))
+    touch_beep = _embedded_device_config_value(frame, "touchBeep", "touch_beep")
+    if isinstance(touch_beep, bool):
+        settings.append(_provisioning_setting("touch_beep", 1 if touch_beep else 0))
     wake_check_seconds = _embedded_device_config_value(frame, "wakeCheckSeconds", "wake_check_seconds")
     if isinstance(wake_check_seconds, int) and not isinstance(wake_check_seconds, bool):
         settings.append(_provisioning_setting("wake_check", max(0, wake_check_seconds)))

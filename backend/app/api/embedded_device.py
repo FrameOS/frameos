@@ -828,6 +828,7 @@ def embedded_frame_settings(frame: Frame) -> dict:
             # Voice chat (docs/voice-chat.md): the microphone switch, and the
             # PDM microphone's pins (-1 = none; unset = the board's own).
             ("voiceChat", ("voiceChat", "voice_chat"), "bool"),
+            ("touchBeep", ("touchBeep", "touch_beep"), "bool"),
             ("micClkPin", ("micClkPin", "mic_clk_pin"), "int"),
             ("micDataPin", ("micDataPin", "mic_data_pin"), "int"),
             ("micPwrPin", ("micPwrPin", "mic_pwr_pin"), "int"),

@@ -298,11 +298,13 @@ const TOUCH_EDGE_SWIPES: EventMapRule[] = [
 // The E1003 has the E1001's keys and microphone, and a touch screen.
 const SEEED_RETERMINAL_E1003_EVENT_MAP: EventMapRule[] = [...SEEED_RETERMINAL_VOICE_EVENT_MAP, ...TOUCH_EDGE_SWIPES]
 // The reTerminal Sticky's three keys: UP and DOWN held walk the scene list,
-// the AI key held talks. Mirrors EMBEDDED_SEEED_STICKY_EVENT_MAP and fos_board.c.
+// the AI key held talks, the edges swipe. Mirrors EMBEDDED_SEEED_STICKY_EVENT_MAP
+// and fos_board.c.
 const SEEED_STICKY_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'UP', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
   { event: 'button', match: { label: 'DOWN', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
   { event: 'button', match: { label: 'AI', action: 'longPress' }, emit: 'voiceChat', as: {} },
+  ...TOUCH_EDGE_SWIPES,
 ]
 // The Waveshare boards with a codec microphone (fos_codec.c): their one user
 // key held talks. Mirrors the backend's _one_key_voice_event_map and fos_board.c.

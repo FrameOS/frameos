@@ -82,6 +82,7 @@ extern double fos_nim_scene_interval_impl(void);
 extern bool fos_nim_scene_awaited_impl(void);
 extern double fos_nim_next_sleep_impl(void);
 extern bool fos_nim_render_requested_impl(void);
+extern bool fos_nim_press_taken_impl(int wire_x, int wire_y);
 extern bool fos_nim_tick_impl(void);
 extern int fos_nim_recover_oom_abort_impl(size_t *js_bytes, int *http_released);
 /* `origin` is the event's FOS_ORIGIN_* bit (main/fos_events_gen.h): who said
@@ -1036,6 +1037,15 @@ double frameos_nim_next_sleep(void)
     return next_sleep;
 }
 
+bool frameos_nim_press_taken(int wire_x, int wire_y)
+{
+    if (!s_nim_ready) return false;
+    if (!nim_lock_take()) return false;
+    bool taken = fos_nim_press_taken_impl(wire_x, wire_y);
+    nim_lock_give();
+    return taken;
+}
+
 bool frameos_nim_render_requested(void)
 {
     if (!s_nim_ready) return false;
@@ -1508,60 +1518,61 @@ static esp_err_t post_log_body(const char *body, size_t body_len)
     return ESP_OK;
 }
 
-void frameos_nim_flush_logs(void)
+bool frameos_nim_flush_log_batch(void)
 {
     if (!s_log_upload_enabled || s_backend_url[0] == '\0' || s_backend_auth[0] == '\0') {
-        return;
+        return false;
     }
     if (!log_upload_heap_ready()) {
-        return;
+        return false;
+    }
+    size_t count = 0;
+    size_t dropped = 0;
+    fos_nim_log_node_t *batch = pop_log_batch(&count, &dropped);
+    if (batch == NULL && dropped == 0) {
+        return false;
     }
 
-    while (true) {
-        if (!log_upload_heap_ready()) {
-            break;
-        }
-        size_t count = 0;
-        size_t dropped = 0;
-        fos_nim_log_node_t *batch = pop_log_batch(&count, &dropped);
-        if (batch == NULL && dropped == 0) {
-            break;
-        }
+    json_buf_t body = {0};
+    bool ok = json_buf_append(&body, "{\"logs\":[");
+    bool first = true;
+    if (ok && dropped > 0) {
+        char dropped_json[128];
+        snprintf(dropped_json, sizeof(dropped_json),
+                 "{\"event\":\"log:dropped\",\"source\":\"esp32\",\"count\":%lu}",
+                 (unsigned long)dropped);
+        ok = json_buf_append(&body, dropped_json);
+        first = false;
+    }
+    for (fos_nim_log_node_t *node = batch; ok && node != NULL; node = node->next) {
+        if (!first) ok = json_buf_append_char(&body, ',');
+        if (ok) ok = append_log_payload(&body, node->line);
+        first = false;
+    }
+    if (ok) ok = json_buf_append(&body, "]}");
 
-        json_buf_t body = {0};
-        bool ok = json_buf_append(&body, "{\"logs\":[");
-        bool first = true;
-        if (ok && dropped > 0) {
-            char dropped_json[128];
-            snprintf(dropped_json, sizeof(dropped_json),
-                     "{\"event\":\"log:dropped\",\"source\":\"esp32\",\"count\":%lu}",
-                     (unsigned long)dropped);
-            ok = json_buf_append(&body, dropped_json);
-            first = false;
-        }
-        for (fos_nim_log_node_t *node = batch; ok && node != NULL; node = node->next) {
-            if (!first) ok = json_buf_append_char(&body, ',');
-            if (ok) ok = append_log_payload(&body, node->line);
-            first = false;
-        }
-        if (ok) ok = json_buf_append(&body, "]}");
+    esp_err_t err = ESP_ERR_INVALID_SIZE;
+    if (ok) {
+        err = post_log_body(body.data, body.len);
+    } else {
+        ESP_LOGW("fos_nim_log", "dropping log batch: JSON body too large or out of memory");
+    }
+    json_buf_free(&body);
+    if (ok && err != ESP_OK && err != ESP_ERR_INVALID_RESPONSE &&
+        err != ESP_ERR_INVALID_STATE && err != ESP_ERR_INVALID_SIZE) {
+        uint32_t wait_ms = requeue_log_batch(batch, count, dropped);
+        ESP_LOGW("fos_nim_log", "backend did not answer (%s); holding %u log lines, next try in %u s",
+                 esp_err_to_name(err), (unsigned)count, (unsigned)(wait_ms / 1000));
+        return false;
+    }
+    if (err == ESP_OK || err == ESP_ERR_INVALID_RESPONSE) note_log_post_answered();
+    free_log_nodes(batch);
+    return true;
+}
 
-        esp_err_t err = ESP_ERR_INVALID_SIZE;
-        if (ok) {
-            err = post_log_body(body.data, body.len);
-        } else {
-            ESP_LOGW("fos_nim_log", "dropping log batch: JSON body too large or out of memory");
-        }
-        json_buf_free(&body);
-        if (ok && err != ESP_OK && err != ESP_ERR_INVALID_RESPONSE &&
-            err != ESP_ERR_INVALID_STATE && err != ESP_ERR_INVALID_SIZE) {
-            uint32_t wait_ms = requeue_log_batch(batch, count, dropped);
-            ESP_LOGW("fos_nim_log", "backend did not answer (%s); holding %u log lines, next try in %u s",
-                     esp_err_to_name(err), (unsigned)count, (unsigned)(wait_ms / 1000));
-            break;
-        }
-        if (err == ESP_OK || err == ESP_ERR_INVALID_RESPONSE) note_log_post_answered();
-        free_log_nodes(batch);
+void frameos_nim_flush_logs(void)
+{
+    while (frameos_nim_flush_log_batch()) {
     }
 }
 

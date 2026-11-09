@@ -285,6 +285,10 @@ const CloudContractSettings* = @[
     Rule(kind: rkBool),
   profiles: @[
     ProfileSpec(profile: "esp32", since: "2026.10.20")]),
+  SettingSpec(key: "touch_beep", rule:
+    Rule(kind: rkBool),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.11.6")]),
   SettingSpec(key: "mic_clk_pin", rule:
     Rule(kind: rkInt, hasMin: true, min: -1.0, hasMax: true, max: 48.0),
   profiles: @[

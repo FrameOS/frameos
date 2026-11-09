@@ -282,6 +282,13 @@ export const esp32BuzzerCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSi
   esp32BuzzerCloudFrameSettingsMinVersion
 )
 
+/** 2026.11.6: the click of a press on the glass (`touch_beep`). */
+export const esp32TouchBeepCloudFrameSettingsMinVersion = '2026.11.6'
+
+export function cloudFrameSupportsEsp32TouchBeep(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32TouchBeepCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 export function cloudFrameSupportsEsp32Buzzer(frameosVersion: string | null | undefined): boolean {
   return cloudFrameSupportsSettingsFrom(esp32BuzzerCloudFrameSettingsMinVersion, frameosVersion)
 }
@@ -520,6 +527,7 @@ export const numericCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = [
   'battery_enable_pin',
   'buzzer_pin',
   'buzzer_tone_hz',
+  'touch_beep',
   'mic_clk_pin',
   'mic_data_pin',
   'mic_pwr_pin',

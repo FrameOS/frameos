@@ -27,6 +27,9 @@
 void EPD_3in97_Init(void);
 void EPD_3in97_Clear(void);
 void EPD_3in97_Display(UBYTE *Image);
+void EPD_3in97_Init_Partial(void);
+void EPD_3in97_Display_Partial(UBYTE *Image, UBYTE *Previous);
+void EPD_3in97_Rest(void);
 void EPD_3in97_Sleep(void);
 
 #endif
