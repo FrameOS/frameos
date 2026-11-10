@@ -1488,6 +1488,12 @@ static void pass_scenes_sync(void)
     portEXIT_CRITICAL(&s_link_mux);
     if (body != NULL) {
         fos_scenes_take_backend_payload(body, len, etag);
+        /* The link task's download, served from the idle wait, where nothing
+         * renders: the new set waited for the next timed pass. A deploy to the
+         * reTerminal E1003 showing Form showcase (it renders hourly) sat at
+         * "first render", and the Sticky's showed two minutes late
+         * (2026-11-10). Before the link task the pull ran inside a pass. */
+        fos_client_render_now();
     } else if (!s_link_on) {
         fos_scenes_sync(false);
     }

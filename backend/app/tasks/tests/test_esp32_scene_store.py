@@ -99,11 +99,16 @@ def test_a_pushed_payload_is_split_on_the_store_task():
     text = re.sub(r"/\*.*?\*/", "", (MAIN_DIR / "fos_scenes.c").read_text(), flags=re.S)
     fns = _functions(text)
     push = fns["fos_scenes_set_json_from"]
-    order = [push.index(s) for s in (
-        "s_store_changing = true", "store_lock()", "write_file_replace(SCENES_PATH",
+    # A per-scene store takes the set as changes first (the next test); the
+    # whole-file write and the split are for a frame without one.
+    whole = push[push.index("write_file_replace(SCENES_PATH"):]
+    order = [push.index("s_store_changing = true"), push.index("store_lock()"),
+             push.index("store_set_as_changes_locked(json, len, source)"), push.index("write_file_replace(SCENES_PATH")]
+    assert order == sorted(order), "fos_scenes_set_json_from: flag, lock, as changes, else whole"
+    order = [whole.index(s) for s in (
         "s_payload_stored_since_boot = true", "if (!store_split_behind()) store_split_stored();")]
-    assert order == sorted(order), "fos_scenes_set_json_from: flag, write, then hand the split over"
-    assert "s_pending = true" not in push, "the payload is pending only once it is split"
+    assert order == sorted(order), "fos_scenes_set_json_from: write whole, then hand the split over"
+    assert "s_pending = true" not in whole, "a payload stored whole is pending only once it is split"
     split = fns["store_split_stored"]
     order = [split.index(s) for s in (
         "store_lock()", "split_scenes_locked(json, len)", "s_pending = true", "s_store_changing = false",
@@ -146,6 +151,54 @@ def test_the_cloud_hears_the_new_sizes_after_a_push():
 
 def _source(name: str) -> str:
     return re.sub(r"/\*.*?\*/", "", (MAIN_DIR / name).read_text(), flags=re.S)
+
+
+def test_a_whole_set_goes_into_a_per_scene_store_as_changes():
+    """A whole set (a cloud push, an upload, a backend pull) written whole
+    beside the set it replaced needed room for both: the reTerminal E1002's
+    415 KB, 20-scene set did not fit its 1 MB /state (ENOSPC, 2026-11-10), and
+    a push that changed one scene wrote all twenty. With a per-scene store the
+    set goes in as changes, one scene at a time (fos_scene_store_apply_set,
+    host-tested in test_fos_scene_store.c): the cloud's is pending for the
+    apply at once, with nothing to split; the backend's keeps the index it
+    wrote. Without one, the set is stored whole as before."""
+    fns = _functions(_source("fos_scenes.c"))
+    helper = fns["store_set_as_changes_locked"]
+    assert helper.index("if (combined_stored()) return ESP_ERR_NOT_FOUND;") < helper.index(
+        "fos_scene_store_apply_set(")
+    assert "forget_dropped_scene" in helper
+    push = fns["fos_scenes_set_json_from"]
+    changes = push[push.index("store_set_as_changes_locked(json, len, source)"):push.index("write_file_replace(SCENES_PATH")]
+    order = [changes.index(s) for s in (
+        "if (err == ESP_OK)", "save_etag(\"local\")", "s_payload_stored_since_boot = true", "s_pending = true",
+        "s_store_changing = false", "store_unlock()", "fos_client_render_now()")]
+    assert order == sorted(order), "stored as changes: pending and done inside the lock, then a render"
+    assert "store_split" not in changes, "a set stored as changes has nothing to split"
+    backend = fns["store_backend_payload"]
+    order = [backend.index(s) for s in (
+        "store_set_as_changes_locked(job->body, job->len, FOS_SCENES_SOURCE_BACKEND)",
+        "if (err == ESP_ERR_NOT_FOUND)", "write_file_replace_locked(SCENES_PATH")]
+    assert order == sorted(order), "store_backend_payload: as changes, else whole"
+    assert "if (!as_changes) fos_scene_store_remove_index();" in backend, "the index it wrote is the new set's"
+    # The render task's read of a scene file meets no file the store task is
+    # emptying: under the store lock.
+    read = fns["read_slot_file"]
+    assert read.index("store_lock()") < read.index("read_file(path, &len)") < read.index("store_unlock()")
+    # And it is not kept waiting for a whole set: the lock goes between two
+    # committed scenes (23 rewritten on the E1003 held the render task 3.5 min).
+    between = fns["store_between_hook"]
+    assert between.index("store_unlock()") < between.index("store_lock()")
+    assert ".between = store_between_hook" in _source("fos_scenes.c")
+
+
+def test_a_backend_set_the_link_task_pulled_renders_at_once():
+    """The link task downloads a backend set and the render task takes it
+    from its idle wait, where nothing renders: the new set showed at the next
+    timed pass, an hour later on a scene that renders hourly (the E1003's
+    deploy sat at "first render", 2026-11-10)."""
+    fns = _functions(_source("fos_client.c"))
+    take = fns["pass_scenes_sync"]
+    assert take.index("fos_scenes_take_backend_payload(body, len, etag);") < take.index("fos_client_render_now();")
 
 
 def test_a_paced_write_gives_way_to_a_render_task_waiting_for_the_store():

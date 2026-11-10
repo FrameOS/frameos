@@ -37,7 +37,7 @@ main/                     boot orchestration + platform modules
   fos_sscanf.c            sscanf for the linker's --wrap: cJSON's "%lg" read-back as strtod, so
                           newlib's floating-point scanf is never linked (host-tested)
   fos_settings.c          backend/cloud settings pull (TLS pair, admin login, service keys, schedule)
-  fos_scenes.c            /state scene store: combined payload, per-scene split, OOM-restart mark, wipe
+  fos_scenes.c            /state scene store: a whole set as changes, combined payload, per-scene split, OOM-restart mark, wipe
   fos_slot_cache.c        the scene files read last, kept in PSRAM so a switch skips the SPIFFS lookup (host-tested)
   fos_scene_state.c       scene state across deep sleep: one JSON file per scene under /state (host-tested)
   fos_commands.c          the backend's command queue: pulled once per pass and on a nudge, acked by id;
@@ -1281,7 +1281,23 @@ paced around renders and taps like every write off the render task
 (`store_pace_hook`); the render task's apply then reads the index and loads
 one scene, and a switch asked for meanwhile waits for that apply
 (`s_store_changing`). A backend sync's set is held whole by the runtime and
-split at the next boot. The
+written by the store task.
+
+**On a frame that has a per-scene store, a whole set goes in as changes to
+it, one scene at a time** (`fos_scene_store_apply_set`, called by
+`store_set_as_changes_locked` for a push, an upload and a backend sync): a
+scene whose bytes are stored already is kept (each index entry has the
+`hash` of its file), the scenes the set drops go first, each new or changed
+scene is written and committed by itself and the file it replaced emptied
+before the next, and the set's order and source come last. `/state` never
+holds more than the stored set and one scene, where the whole file beside
+the old set needed room for both: the reTerminal E1002's 415 KB, 20-scene
+set did not fit its 1 MB `/state` (`ENOSPC`, 2026-11-10). A push that
+changed one scene of twenty writes one. It is not atomic: a failure or a
+power cut leaves a set holding some of the new scenes, each whole, and the
+producer sends the set again, since nothing acknowledged it. The combined
+file and the split below are for a frame with no store yet (a first set, or
+a whole payload a boot has not split). The
 index carries ids, names and refresh intervals, so the frame can list and
 switch scenes without holding them. It also carries a top-level
 `"source": "local" | "backend" | "cloud"` key recording who installed the

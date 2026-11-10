@@ -618,6 +618,157 @@ static void test_every_2_kb_written_is_paced(void)
     CHECK(s_paced == 0);
 }
 
+/* Every file in the directory, in bytes: what /state holds. */
+static long dir_bytes(void)
+{
+    long total = 0;
+    DIR *d = opendir(s_dir);
+    struct dirent *item;
+    while (d != NULL && (item = readdir(d)) != NULL) {
+        if (item->d_name[0] == '.') continue;
+        char path[sizeof(s_dir) + 1 + sizeof(item->d_name)];
+        snprintf(path, sizeof(path), "%s/%s", s_dir, item->d_name);
+        struct stat st;
+        if (stat(path, &st) == 0) total += (long)st.st_size;
+    }
+    if (d != NULL) closedir(d);
+    return total;
+}
+
+/* The most /state held, a write's bytes counted before it starts (the store
+ * asks make_room for them first). */
+static long s_peak = 0;
+static int s_writes = 0;
+static int s_between = 0;
+static void count_between(void) { s_between++; }
+static void track_room(size_t bytes)
+{
+    s_writes++;
+    long now = dir_bytes() + (long)bytes;
+    if (now > s_peak) s_peak = now;
+}
+
+static char *scene_text(const char *id, char fill, size_t size)
+{
+    char *text = malloc(size + 1);
+    int head = snprintf(text, size + 1, "{\"id\":\"%s\",\"pad\":\"", id);
+    memset(text + head, fill, size - (size_t)head - 2);
+    memcpy(text + size - 2, "\"}", 3);
+    return text;
+}
+
+static void test_a_whole_set_one_scene_at_a_time(void)
+{
+    fresh_dir();
+    fos_scene_store_set_result_t set;
+    fos_scene_store_put_t one = {"{\"id\":\"a\"}", 10};
+    /* No index: the caller stores a first set another way. */
+    CHECK(fos_scene_store_apply_set(&one, 1, "cloud", &set, NULL, NULL) == FOS_SCENE_STORE_ERR_NOT_FOUND);
+    CHECK(dir_bytes() == 0);
+
+    /* Five scenes of 3 KB on flash. */
+    enum { SIZE = 3000 };
+    char *v1[5], *v2[5];
+    const char *names[5] = {"a", "b", "c", "d", "e"};
+    fos_scene_store_put_t puts[5];
+    for (int i = 0; i < 5; i++) {
+        v1[i] = scene_text(names[i], 'x', SIZE);
+        v2[i] = scene_text(names[i], 'y', SIZE);
+        puts[i] = (fos_scene_store_put_t){v1[i], SIZE};
+    }
+    fos_scene_store_result_t result;
+    fos_scene_store_change_t all = {.puts = puts, .put_count = 5, .replace_all = true, .source = "cloud"};
+    CHECK(fos_scene_store_apply(&all, &result, NULL, NULL) == FOS_SCENE_STORE_OK);
+    fos_scene_store_sweep();
+
+    /* The same set again: nothing is written, not even the index. */
+    fos_scene_store_hooks_t hooks = {.make_room = track_room, .between = count_between};
+    fos_scene_store_set_hooks(&hooks);
+    s_writes = 0;
+    s_between = 0;
+    CHECK(fos_scene_store_apply_set(puts, 5, "cloud", &set, NULL, NULL) == FOS_SCENE_STORE_OK);
+    CHECK(set.written == 0 && set.kept == 5 && set.dropped == 0 && set.scene_count == 5);
+    CHECK(s_writes == 0 && s_between == 0);
+
+    /* Every scene new: /state never holds more than the set and one scene
+     * (and the index twice); a whole set beside the old one was twice that. */
+    for (int i = 0; i < 5; i++) puts[i].json = v2[i];
+    long before = dir_bytes();
+    s_peak = 0;
+    CHECK(fos_scene_store_apply_set(puts, 5, "cloud", &set, NULL, NULL) == FOS_SCENE_STORE_OK);
+    CHECK(set.written == 5 && set.kept == 0 && set.written_bytes == 5 * SIZE);
+    /* The caller's moment after each committed scene: its lock goes there. */
+    CHECK(s_between == 5);
+    printf("  a whole set one scene at a time: peak %ld bytes over a %ld-byte store\n", s_peak, before);
+    CHECK(s_peak <= before + SIZE + 1024);
+    size_t len = 0;
+    char *body = fos_scene_store_read_scene("c", &len);
+    CHECK(body != NULL && len == SIZE && body[SIZE - 3] == 'y');
+    free(body);
+
+    /* One changed, one new, one dropped, in a new order: only two written. */
+    char *v3 = scene_text("b", 'z', SIZE);
+    char *f = scene_text("f", 'f', 200);
+    fos_scene_store_put_t mixed[5] = {{f, 200}, {v2[0], SIZE}, {v3, SIZE}, {v2[3], SIZE}, {v2[4], SIZE}};
+    char dropped[64] = "";
+    CHECK(fos_scene_store_apply_set(mixed, 5, "backend", &set, dropped_cb, dropped) == FOS_SCENE_STORE_OK);
+    CHECK(set.written == 2 && set.kept == 3 && set.dropped == 1);
+    CHECK(strcmp(dropped, "c;") == 0);
+    entry_t entries[FOS_SCENE_STORE_SLOTS];
+    CHECK(read_entries(entries, FOS_SCENE_STORE_SLOTS) == 5);
+    CHECK(strcmp(entries[0].id, "f") == 0 && strcmp(entries[1].id, "a") == 0 && strcmp(entries[2].id, "b") == 0 &&
+          strcmp(entries[3].id, "d") == 0 && strcmp(entries[4].id, "e") == 0);
+    cJSON *index = fos_scene_store_read_index();
+    CHECK(strcmp(cJSON_GetObjectItem(index, "source")->valuestring, "backend") == 0);
+    cJSON_Delete(index);
+    body = fos_scene_store_read_scene("b", &len);
+    CHECK(body != NULL && body[SIZE - 3] == 'z');
+    free(body);
+    /* What the old b and the dropped c held is emptied, not left beside them. */
+    int full = 0;
+    for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) full += slot_file_size(slot) > 0;
+    CHECK(full == 5);
+
+    /* A set with none of the scenes stored: the new one first, then the old
+     * ones go (a frame keeps a scene throughout). */
+    fos_scene_store_put_t fresh_set[2] = {{"{\"id\":\"p\"}", 10}, {"{\"id\":\"q\"}", 10}};
+    dropped[0] = '\0';
+    CHECK(fos_scene_store_apply_set(fresh_set, 2, NULL, &set, dropped_cb, dropped) == FOS_SCENE_STORE_OK);
+    CHECK(set.written == 2 && set.dropped == 5);
+    CHECK(strcmp(dropped, "f;a;b;d;e;") == 0);
+    CHECK(read_entries(entries, FOS_SCENE_STORE_SLOTS) == 2);
+    CHECK(strcmp(entries[0].id, "p") == 0 && strcmp(entries[1].id, "q") == 0);
+
+    /* A set that is not whole is refused before anything is written. */
+    fos_scene_store_put_t twice[2] = {{"{\"id\":\"p\",\"v\":2}", 16}, {"{\"id\":\"p\"}", 10}};
+    s_writes = 0;
+    CHECK(fos_scene_store_apply_set(twice, 2, NULL, &set, NULL, NULL) == FOS_SCENE_STORE_ERR_INVALID);
+    fos_scene_store_put_t broken = {"{\"id\":\"p\"", 9};
+    CHECK(fos_scene_store_apply_set(&broken, 1, NULL, &set, NULL, NULL) == FOS_SCENE_STORE_ERR_INVALID);
+    CHECK(s_writes == 0);
+
+    /* An index from before the hash: every scene is written once, then kept. */
+    write_text("scene-index.json", "{\"scenes\":[{\"id\":\"p\",\"slot\":0,\"bytes\":10}]}");
+    write_text("scene-0.json", "{\"id\":\"p\"}");
+    fos_scene_store_forget();
+    fos_scene_store_put_t p = {"{\"id\":\"p\"}", 10};
+    CHECK(fos_scene_store_apply_set(&p, 1, NULL, &set, NULL, NULL) == FOS_SCENE_STORE_OK && set.written == 1);
+    CHECK(fos_scene_store_apply_set(&p, 1, NULL, &set, NULL, NULL) == FOS_SCENE_STORE_OK && set.written == 0);
+    /* A scene pointed back at an older file loses its hash: written again. */
+    int slot = slot_of("p");
+    CHECK(fos_scene_store_repoint("p", slot) == FOS_SCENE_STORE_OK);
+    CHECK(fos_scene_store_apply_set(&p, 1, NULL, &set, NULL, NULL) == FOS_SCENE_STORE_OK && set.written == 1);
+
+    fos_scene_store_hooks_t none = {0};
+    fos_scene_store_set_hooks(&none);
+    for (int i = 0; i < 5; i++) {
+        free(v1[i]);
+        free(v2[i]);
+    }
+    free(v3);
+    free(f);
+}
+
 int main(void)
 {
     snprintf(s_dir, sizeof(s_dir), "/tmp/fos_scene_store_%d", (int)getpid());
@@ -639,6 +790,7 @@ int main(void)
     test_layouts_and_the_default();
     test_replace_all();
     test_every_2_kb_written_is_paced();
+    test_a_whole_set_one_scene_at_a_time();
 
     fresh_dir();
     rmdir(s_dir);

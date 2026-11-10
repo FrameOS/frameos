@@ -74,6 +74,7 @@ typedef struct {
     int scene_count;
     size_t put_bytes;
     char first_put_id[FOS_SCENE_STORE_ID_LEN];
+    bool freed[FOS_SCENE_STORE_SLOTS]; /* slots the old index named and the new one does not */
 } fos_scene_store_result_t;
 
 typedef struct {
@@ -81,6 +82,9 @@ typedef struct {
     void *(*big_alloc)(size_t bytes);   /* for file bodies; NULL = malloc */
     void (*pace)(void);                 /* before each 2 KB written; NULL = nothing (fos_scenes.c: the store
                                          * task waits out renders and taps there, a flash write stalls both cores) */
+    void (*between)(void);              /* between two committed steps of fos_scene_store_apply_set, each
+                                         * leaving a whole set on flash; NULL = nothing (fos_scenes.c lets go
+                                         * of its lock there, so a render reads the scene file it waits for) */
 } fos_scene_store_hooks_t;
 
 void fos_scene_store_set_dir(const char *dir);
@@ -105,6 +109,33 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
                                             fos_scene_store_result_t *result,
                                             void (*on_dropped)(const char *id, void *ctx),
                                             void *ctx);
+
+typedef struct {
+    int scene_count; /* in the set now on flash */
+    int written;     /* scenes whose bytes were new */
+    int kept;        /* scenes stored already, byte for byte */
+    int dropped;     /* scenes the set no longer has */
+    size_t written_bytes;
+} fos_scene_store_set_result_t;
+
+/* A whole set (`puts`, in order) stored as changes to the set on flash, one
+ * scene at a time: a scene whose bytes are stored already is kept (the index
+ * keeps each scene's `hash`), the scenes the set drops go first, then each
+ * new or changed scene is written and committed by itself and the file it
+ * replaced emptied before the next, and last the set's order and `source`.
+ * /state never holds more than the stored set and one scene: a 415 KB set
+ * written whole beside the one it replaced did not fit an 8 MB board's 1 MB
+ * /state (the reTerminal E1002, 2026-11-10), and a push that changed one
+ * scene of twenty wrote all twenty. Not atomic: a failure or a power cut
+ * leaves a set holding some of the new scenes, each whole, and the producer
+ * sends the set again (nothing acknowledged it). The set is checked whole
+ * before anything is written. FOS_SCENE_STORE_ERR_NOT_FOUND, with nothing
+ * written, when there is no index to change: the caller stores the set
+ * another way. */
+fos_scene_store_err_t fos_scene_store_apply_set(const fos_scene_store_put_t *puts, int count,
+                                                const char *source, fos_scene_store_set_result_t *result,
+                                                void (*on_dropped)(const char *id, void *ctx),
+                                                void *ctx);
 
 /* The index as a tree, every entry with its `bytes` (an index from before
  * that field gets the files' sizes); its copy when the index is torn. Caller

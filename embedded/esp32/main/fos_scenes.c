@@ -380,7 +380,13 @@ static char *read_slot_file(int slot, const char *path, size_t *out_len)
         return copy;
     }
     size_t len = 0;
+    /* Under the store lock: a whole set stored as changes empties the file a
+     * scene had before (fos_scene_store_apply_set) from the store task, and
+     * this read must not meet it half emptied. Recursive, and the store task
+     * never calls the runtime: the lock order holds. */
+    store_lock();
     char *json = read_file(path, &len);
+    store_unlock();
     if (out_len != NULL) *out_len = len;
     if (json == NULL || !fos_slot_cache_wants(len)) return json;
     char *kept = copy_bytes(json, len);
@@ -1588,6 +1594,19 @@ static void drop_old_scene_pictures(void)
 
 static void store_pace_hook(void);
 
+/* Between two committed steps of a whole set stored as changes (each leaves a
+ * whole set on flash): the lock goes for a moment, so a render waiting to read
+ * a scene file (a layout, read by id on every pass) reads one. Held across a
+ * whole set, 23 scenes rewritten on the reTerminal E1003's 24 MB /state held
+ * its render task 3.5 minutes (2026-11-10). The lock is taken once by every
+ * caller of fos_scene_store_apply_set, so one give lets it go. */
+static void store_between_hook(void)
+{
+    store_unlock();
+    vTaskDelay(1);
+    store_lock();
+}
+
 esp_err_t fos_scenes_init(void)
 {
     if (s_scene_file_lock == NULL) {
@@ -1595,6 +1614,7 @@ esp_err_t fos_scenes_init(void)
     }
     fos_scene_store_hooks_t store_hooks = {
         .make_room = make_room, .big_alloc = fos_big_malloc, .pace = store_pace_hook,
+        .between = store_between_hook,
     };
     fos_scene_store_set_hooks(&store_hooks);
     /* Before the mount: a frame whose /state failed still holds its bundled
@@ -1664,6 +1684,10 @@ esp_err_t fos_scenes_init(void)
 
 /* ------------------------------------------------------------ local push */
 
+static esp_err_t store_set_as_changes_locked(const char *json, size_t len, fos_scenes_source_t source);
+/* What the last set stored as changes wrote, for its log line. */
+static char s_set_summary[64];
+
 esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
                                    fos_scenes_source_t source)
 {
@@ -1687,6 +1711,34 @@ esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
     fos_display_updating_begin();
     s_store_changing = true; /* before the lock: the render task looks first */
     store_lock();
+    /* On a per-scene store, as changes to it, one scene at a time: nothing
+     * to split after, and the apply reads the new index. */
+    err = store_set_as_changes_locked(json, len, source);
+    if (err == ESP_OK) {
+        s_last_error[0] = '\0';
+        if (split_no_room_len() != 0) set_split_no_room_len(0);
+        save_etag("local");
+        s_pending_source = (int)source;
+        persist_scene_source((int)source);
+        s_payload_stored_since_boot = true;
+        s_pending = true;
+        s_store_changing = false;
+        store_unlock();
+        fos_client_render_now();
+        log_scene_event("event:uploadScenes", "stored", origin, "", s_set_summary, len, 0, 0, ESP_OK);
+        return ESP_OK;
+    }
+    if (err != ESP_ERR_NOT_FOUND) {
+        /* Some of the set may be on flash, every scene in it whole: the
+         * apply loads what is there, and the producer sends the set again. */
+        s_pending = true;
+        s_store_changing = false;
+        store_unlock();
+        fos_client_render_now();
+        log_scene_event("event:uploadScenes", "error", origin, "",
+                        s_last_error[0] ? s_last_error : "store-failed", len, 0, 0, err);
+        return err;
+    }
     err = write_file_replace(SCENES_PATH, SCENES_TMP_PATH, json, len);
     if (err == ESP_OK) combined_set(true);
     if (err != ESP_OK) {
@@ -1769,6 +1821,36 @@ static void forget_dropped_scene(const char *scene_id, void *ctx)
     (void)ctx;
     /* The state a deleted scene kept across deep sleep, deleted with it. */
     fos_scene_state_forget(scene_id);
+}
+
+/* A whole set stored as changes to the per-scene store, one scene at a time
+ * (fos_scene_store_apply_set): the scenes stored already are kept, and /state
+ * never holds more than the stored set and one scene. Written whole beside
+ * the set it replaced, a 415 KB set did not fit the reTerminal E1002's 1 MB
+ * /state (ENOSPC, 2026-11-10), and a push that changed one scene of twenty
+ * wrote all twenty. ESP_ERR_NOT_FOUND, nothing written, when there is no
+ * per-scene store to change (a first set, or a whole payload not split yet):
+ * the caller stores the set whole. Under the store lock. */
+static esp_err_t store_set_as_changes_locked(const char *json, size_t len, fos_scenes_source_t source)
+{
+    if (combined_stored()) return ESP_ERR_NOT_FOUND;
+    static fos_scene_store_put_t puts[SCENES_SLOT_MAX];
+    int count = scan_array_elements(json, len, puts, SCENES_SLOT_MAX);
+    if (count <= 0) return ESP_ERR_NOT_FOUND;
+    fos_scene_store_set_result_t result;
+    fos_scene_store_err_t err = fos_scene_store_apply_set(puts, count, scene_source_str((int)source), &result,
+                                                          forget_dropped_scene, NULL);
+    fos_slot_cache_clear(&s_slot_cache);
+    if (err == FOS_SCENE_STORE_ERR_NOT_FOUND) return ESP_ERR_NOT_FOUND;
+    if (err != FOS_SCENE_STORE_OK) {
+        set_scene_simple_error(fos_scene_store_err_str(err), len);
+        return STORE_ERR_TO_ESP[err];
+    }
+    snprintf(s_set_summary, sizeof(s_set_summary), "as-changes: %d written, %d kept, %d dropped", result.written,
+             result.kept, result.dropped);
+    ESP_LOGI(TAG, "%d-scene set stored %s (%u bytes)", result.scene_count, s_set_summary,
+             (unsigned)result.written_bytes);
+    return ESP_OK;
 }
 
 /* A change somebody waits to see (it activates a scene: "Push & activate", a
@@ -2058,20 +2140,26 @@ static void store_backend_payload(const store_job_t *job)
     fos_display_updating_begin();
     store_lock();
     fos_slot_cache_clear(&s_slot_cache);
-    /* Paced through the store's hook (store_pace_hook). */
-    esp_err_t err = write_file_replace_locked(SCENES_PATH, SCENES_TMP_PATH, job->body, job->len);
-    if (err == ESP_OK) combined_set(true);
+    /* Paced through the store's hook (store_pace_hook). On a per-scene store,
+     * as changes to it: only the scenes that changed are written, one at a
+     * time, and the index names the set the runtime runs. */
+    esp_err_t err = store_set_as_changes_locked(job->body, job->len, FOS_SCENES_SOURCE_BACKEND);
+    bool as_changes = err == ESP_OK;
+    if (err == ESP_ERR_NOT_FOUND) {
+        err = write_file_replace_locked(SCENES_PATH, SCENES_TMP_PATH, job->body, job->len);
+        if (err == ESP_OK) combined_set(true);
+    }
     store_unlock();
     fos_display_updating_end(false);
     if (err == ESP_OK) {
         if (split_no_room_len() != 0) set_split_no_room_len(0);
         save_etag_file(job->etag);
         persist_scene_source(FOS_SCENES_SOURCE_BACKEND);
-        /* The per-scene index the boot split wrote describes the PREVIOUS
-         * payload (the render task stopped using it when it took this one);
-         * the next boot splits this one again. */
-        fos_scene_store_remove_index();
-        log_scene_event("scenes:store", "ok", "backend", "", "written",
+        /* Stored whole: the per-scene index the boot split wrote describes
+         * the PREVIOUS payload (the render task stopped using it when it
+         * took this one); the next boot splits this one again. */
+        if (!as_changes) fos_scene_store_remove_index();
+        log_scene_event("scenes:store", "ok", "backend", "", as_changes ? s_set_summary : "written",
                         job->len, 0, 0, ESP_OK);
         return;
     }
@@ -2318,8 +2406,10 @@ esp_err_t fos_scenes_take_backend_payload(char *body, size_t len, const char *et
      * selection went through the slots: a scene new in this payload was "not
      * found" (the voice chat's show_image, E1002 2026-10-24: apply-failed with
      * four scenes live) and a known id reloaded its stale slot file. The
-     * runtime holds the whole new payload from here; the next boot splits it
-     * again (the store task removes the old index once the payload is on
+     * runtime holds the whole new payload from here. The store task writes
+     * it into the per-scene store as changes, the scenes that changed one at
+     * a time (store_set_as_changes_locked); without one, whole, for the next
+     * boot to split (and removes the old index once the payload is on
      * flash). */
     s_slot_count = 0;
     s_resident_scene_id[0] = '\0';
