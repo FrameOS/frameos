@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 //
 // Cloud deploy (cloud/docs/cloud-workspace-gaps.md item 3). The workspace's
-// Deploy used to POST /api/frames/{id}/deploy — a backend-only route, a
-// guaranteed 404 and a "Failed to start deploy" toast on every cloud frame.
-// The cloud's deploy primitive is the uploadScenes event shim
-// (POST /api/frames/{id}/event/uploadScenes → durable, checksummed
-// set_scenes), so framesModel.deployFrame now branches there in cloud mode,
-// never touching /deploy or /fast_deploy.
+// Deploy used to POST /api/frames/{id}/deploy, a backend-only route: a 404 and
+// a "Failed to start deploy" toast on every cloud frame. Then it pushed the
+// form through the uploadScenes shim, which the cloud records as a preview of
+// the whole list, outside the assignment ledger. A cloud frame's scenes are its
+// assignments: framesModel.deployFrame pushes the assigned list again (POST
+// /api/frames/{id}/scenes, one set_scenes), keeping the scene it shows.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initKea } from "../../../../../../frontend/src/initKea";
@@ -61,19 +61,6 @@ function requestedPaths(): string[] {
   );
 }
 
-function uploadScenesCall(): { path: string; body: Record<string, unknown> } | null {
-  const call = fetchMock.mock.calls.find((candidate) =>
-    String(candidate[0]).includes("/event/uploadScenes"),
-  );
-  if (!call) {
-    return null;
-  }
-  return {
-    path: String(call[0]),
-    body: JSON.parse(String((call[1] as RequestInit | undefined)?.body ?? "{}")),
-  };
-}
-
 describe("the cloud deploy path", () => {
   beforeEach(() => {
     testWindow.FRAMEOS_APP_CONFIG = { cloudMode: true, ingress_path: "" };
@@ -122,37 +109,38 @@ describe("the cloud deploy path", () => {
       );
       expect(cloudSceneDeployErrorMessage(undefined, 502)).toContain("502");
     });
-
-    it("deployCloudFrameScenes posts to the uploadScenes shim and surfaces its errors", async () => {
-      const { deployCloudFrameScenes } = await import(
-        "../../../../../../frontend/src/utils/cloudFrameApi"
-      );
-      fetchMock.mockResolvedValueOnce(
-        Response.json({ command_id: "c1", status: "queued" }),
-      );
-      await deployCloudFrameScenes("frame-1", [{ id: "a" }], { sceneId: "a" });
-      const call = uploadScenesCall();
-      expect(call?.path).toContain("/api/frames/frame-1/event/uploadScenes");
-      expect(call?.body).toEqual({ scenes: [{ id: "a" }], sceneId: "a" });
-
-      fetchMock.mockResolvedValueOnce(
-        Response.json({ error: "scenes_payload_too_large" }, { status: 400 }),
-      );
-      await expect(
-        deployCloudFrameScenes("frame-1", [{ id: "a" }]),
-      ).rejects.toThrow(/3 MB/);
-    });
   });
 
   describe("framesModel.deployFrame in cloud mode", () => {
-    async function mountFramesModelWithFrame(frame: FrameType) {
-      fetchMock.mockImplementation(async (input) => {
+    const assigned = [
+      { scene_id: "11111111-1111-4111-8111-111111111111", scene_version: null, granted_settings_groups: [] },
+      { scene_id: "22222222-2222-4222-8222-222222222222", scene_version: 3, granted_settings_groups: ["unsplash"] },
+    ];
+
+    function scenesPost(): Record<string, unknown> | null {
+      const call = fetchMock.mock.calls.find(
+        (candidate) =>
+          String(candidate[0]).split("?")[0]?.endsWith("/api/frames/frame-1/scenes") &&
+          ((candidate[1] as RequestInit | undefined)?.method ?? "GET").toUpperCase() === "POST",
+      );
+      return call ? JSON.parse(String((call[1] as RequestInit).body)) : null;
+    }
+
+    async function mountFramesModelWithFrame(frame: FrameType, post: () => Response) {
+      fetchMock.mockImplementation(async (input, init) => {
         const path = String(input).split("?")[0] ?? "";
+        const method = (init?.method ?? "GET").toUpperCase();
         if (path.endsWith("/api/frames")) {
           return Response.json({ frames: [frame] });
         }
-        if (path.endsWith("/event/uploadScenes")) {
-          return Response.json({ command_id: "c1", status: "queued" });
+        if (path.endsWith("/api/frames/frame-1/scenes")) {
+          return method === "POST" ? post() : Response.json({ scenes: assigned });
+        }
+        // Hydration reads each assignment's runtime scenes: scene-1, scene-2.
+        const pack = path.match(/\/api\/store\/scenes\/([^/]+)\/scenes\.json$/);
+        if (pack) {
+          const index = assigned.findIndex((row) => row.scene_id === pack[1]);
+          return Response.json([{ id: `scene-${index + 1}`, name: `Scene ${index + 1}`, nodes: [], edges: [] }]);
         }
         return Response.json({ error: "not_found" }, { status: 404 });
       });
@@ -166,68 +154,50 @@ describe("the cloud deploy path", () => {
       return { framesModel, unmount };
     }
 
-    it("posts the frame's scenes to event/uploadScenes and never /deploy or /fast_deploy", async () => {
-      const { framesModel, unmount } = await mountFramesModelWithFrame(
-        cloudFrame(),
+    it("pushes the assigned list again, keeping the scene it shows, and never uploadScenes, /deploy or /fast_deploy", async () => {
+      const { framesModel, unmount } = await mountFramesModelWithFrame(cloudFrame(), () =>
+        Response.json({ status: "queued" }),
       );
       try {
-        // fastDeploy: true on purpose — compiled fast-vs-full does not exist
-        // for interpreted-only cloud frames, both flags take the shim.
+        // fastDeploy: true on purpose: fast and full are one thing on the cloud.
         framesModel.actions.deployFrame("frame-1", true);
         await vi.waitFor(() => {
-          expect(uploadScenesCall()).not.toBeNull();
+          expect(scenesPost()).not.toBeNull();
         });
-
-        const call = uploadScenesCall();
-        const scenes = call?.body.scenes as { id: string }[];
-        expect(scenes.map((scene) => scene.id)).toEqual([
-          "scene-1",
-          "scene-2",
+        const body = scenesPost();
+        expect(body?.scenes).toEqual([
+          { scene_id: assigned[0]!.scene_id, settings_groups: [] },
+          { scene_id: assigned[1]!.scene_id, scene_version: 3, settings_groups: ["unsplash"] },
         ]);
-        // active_scene_id "uploaded/scene-1" → payload sceneId "scene-1".
-        expect(call?.body.sceneId).toBe("scene-1");
-
+        // active_scene_id "uploaded/scene-1" → the push names "scene-1".
+        expect(body?.scene_id).toBe("scene-1");
         for (const path of requestedPaths()) {
-          expect(path).not.toMatch(/\/deploy$|\/fast_deploy$/);
+          expect(path).not.toMatch(/\/deploy$|\/fast_deploy$|\/event\/uploadScenes$/);
         }
-
         const { longRunningTasksModel } = await import(
           "../../../../../../frontend/src/models/longRunningTasksModel"
         );
-        const task = longRunningTasksModel.values.tasks.find(
-          (candidate) => candidate.kind === "deploy",
-        );
-        expect(task?.status).toBe("success");
+        await vi.waitFor(() => {
+          const task = longRunningTasksModel.values.tasks.find((candidate) => candidate.kind === "deploy");
+          expect(task?.status).toBe("success");
+        });
       } finally {
         unmount();
       }
     });
 
-    it("surfaces the shim's size/count 400s in the deploy task toast", async () => {
-      const frame = cloudFrame();
-      const { framesModel, unmount } = await mountFramesModelWithFrame(frame);
+    it("says so in the deploy toast when the push fails", async () => {
+      const { framesModel, unmount } = await mountFramesModelWithFrame(cloudFrame(), () =>
+        Response.json({ error: "frame_not_active" }, { status: 409 }),
+      );
       try {
-        fetchMock.mockImplementation(async (input) => {
-          const path = String(input).split("?")[0] ?? "";
-          if (path.endsWith("/event/uploadScenes")) {
-            return Response.json(
-              { error: "scenes_payload_too_large" },
-              { status: 400 },
-            );
-          }
-          return Response.json({ frames: [frame] });
-        });
-
         framesModel.actions.deployFrame("frame-1");
         const { longRunningTasksModel } = await import(
           "../../../../../../frontend/src/models/longRunningTasksModel"
         );
         await vi.waitFor(() => {
-          const task = longRunningTasksModel.values.tasks.find(
-            (candidate) => candidate.kind === "deploy",
-          );
+          const task = longRunningTasksModel.values.tasks.find((candidate) => candidate.kind === "deploy");
           expect(task?.status).toBe("error");
-          expect(task?.detail).toContain("3 MB");
         });
       } finally {
         unmount();

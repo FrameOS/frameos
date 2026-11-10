@@ -275,8 +275,9 @@ export function reportedActiveSceneId(lastState: unknown): string | undefined {
  * aimed at the scene the frame last reported.
  *
  * Two limits, both honest refusals rather than a silent no-op:
- * - esp32: the firmware's `set_current_scene` reads `scene_id` only and drops
- *   `state` (fos_cloud.c), so the command would re-render and change nothing.
+ * - esp32 before 2026.9.21 (the only ESP32 this route serves: newer ones
+ *   take `scene_event`): its `set_current_scene` read `scene_id` only and
+ *   dropped `state`, so the command would re-render and change nothing.
  * - a frame that has not reported an active scene yet: there is nothing to aim
  *   at, and guessing would switch scenes.
  *

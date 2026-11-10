@@ -283,7 +283,7 @@ describe("frameos-cloud MCP server", () => {
     expect(JSON.parse(textOf(result))).toMatchObject({ removed: sceneId, remaining: 1 });
   });
 
-  it("installs a scene from raw JSON by creating a private scene first, then activates it", async () => {
+  it("installs a scene from raw JSON by creating a private scene first, and shows it in the same push", async () => {
     const client = await connect();
     const result = await client.callTool({
       arguments: {
@@ -299,10 +299,11 @@ describe("frameos-cloud MCP server", () => {
     expect(paths).toEqual([
       "POST /api/account/scenes",
       `POST /api/frames/${frameId}/scenes/add`,
-      `POST /api/frames/${frameId}/event/setCurrentScene`,
     ]);
     expect(calls[0]?.body).toMatchObject({ name: "Fresh" });
-    expect(calls[1]?.body).toEqual({ scene_id: "cccccccc-bbbb-cccc-dddd-eeeeeeeeeeee" });
+    // One push that shows it: a setCurrentScene behind the add re-pushed the
+    // set the add had just queued, and the two raced on the frame.
+    expect(calls[1]?.body).toEqual({ scene_id: "cccccccc-bbbb-cccc-dddd-eeeeeeeeeeee", activate: true });
     expect(JSON.parse(textOf(result))).toMatchObject({ created_private_scene: true, command_id: "cmd-2" });
   });
 
@@ -754,7 +755,6 @@ describe("photos tools", () => {
       "POST /api/photos/scene",
       "POST /api/account/scenes",
       `POST /api/frames/${frameId}/scenes/add`,
-      `POST /api/frames/${frameId}/event/setCurrentScene`,
     ]);
     // The frame gets a link of its own to the folder.
     expect(calls[1]?.body).toEqual({ frame_id: frameId, order: "newest", path: "Summer", seconds: 600 });

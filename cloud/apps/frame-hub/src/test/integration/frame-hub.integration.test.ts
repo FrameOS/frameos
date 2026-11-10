@@ -662,7 +662,7 @@ describe("device socket", () => {
 });
 
 describe("scenes_patch", () => {
-  const esp32 = { frameos_version: "2026.11.5", hardware: { platform: "esp32-s3" } };
+  const esp32 = { frameos_version: "2026.11.6", hardware: { platform: "esp32-s3" } };
   const sceneA = { id: "a", name: "A", nodes: [] };
   const sceneB = { id: "b", name: "B", nodes: [] };
 
@@ -759,8 +759,10 @@ describe("scenes_patch", () => {
 
   it("keeps a Linux frame and firmware before the verb on set_scenes", async () => {
     for (const hello of [
-      { frameos_version: "2026.11.5", hardware: { platform: "pi-zero2w" } },
-      { frameos_version: "2026.11.4", hardware: { platform: "esp32-s3" } },
+      { frameos_version: "2026.11.6", hardware: { platform: "pi-zero2w" } },
+      // 2026.11.5 shipped without the verb (the floor said otherwise until
+      // the first push to one went out twice).
+      { frameos_version: "2026.11.5", hardware: { platform: "esp32-s3" } },
     ]) {
       const { frame, privateKey, token } = await createFrameFixture();
       const device = await openDevice(token);

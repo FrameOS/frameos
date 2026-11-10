@@ -9,7 +9,14 @@
 // `unknown_verb`) gets the whole list from that row instead.
 import { createHash } from "node:crypto";
 
-export const scenesPatchMinVersion = "2026.11.5";
+// The first release with the verb: 2026.11.5 shipped without it and answers
+// `unknown_verb`, which cost every push to it twice (the patch, then the list).
+export const scenesPatchMinVersion = "2026.11.6";
+
+// The first ESP32 firmware that opens a pushed scene (set_scenes' or
+// scenes_patch's `scene_id`) with the push's `state`; before it the values
+// travel as a set_current_scene behind the push (frame-scenes.ts).
+export const esp32PushedStateMinVersion = "2026.11.6";
 
 function sceneId(scene: unknown): string | null {
   if (!scene || typeof scene !== "object" || Array.isArray(scene)) {

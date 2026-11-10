@@ -18,6 +18,7 @@ import {
   readServiceSettingGroups,
 } from "../../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import { readLayoutsField } from "../../../../../../src/lib/scene-layouts";
 import { readSession } from "../../../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -85,6 +86,18 @@ export async function POST(
   if (settingsGroups === false) {
     return jsonError("invalid_scene", 400);
   }
+  // The layout each runtime scene of it wears on this frame (the frame's
+  // active one, when it has one); omitted keeps an installed scene's.
+  const layouts = readLayoutsField(body.layouts);
+  if (layouts === false) {
+    return jsonError("invalid_scene", 400);
+  }
+  // "Install & activate": the same push shows it (its first runtime scene),
+  // never a second command racing this one.
+  const activate = body.activate;
+  if (activate !== undefined && typeof activate !== "boolean") {
+    return jsonError("invalid_scene", 400);
+  }
 
   const existing = await currentSceneAssignments(db, frame.id);
   const alreadyAssigned = existing.some((entry) => entry.sceneId === sceneId);
@@ -94,6 +107,7 @@ export async function POST(
     // Installing IS asking for the newest version, also on a re-install.
     latest: true,
     ...(settingsGroups ? { settingsGroups } : {}),
+    ...(layouts !== undefined ? { layouts } : {}),
   };
   const requested = alreadyAssigned
     ? existing.map((entry) =>
@@ -115,6 +129,7 @@ export async function POST(
     frame,
     requested,
     via: "store_install",
+    ...(activate ? { activateStoreSceneId: sceneId } : {}),
   });
   if (!outcome.ok) {
     return jsonError(

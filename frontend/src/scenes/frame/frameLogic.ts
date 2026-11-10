@@ -3670,7 +3670,13 @@ export const frameLogic = kea<frameLogicType>([
       }
       const scenes = values.frameForm?.scenes ?? values.frame?.scenes ?? []
       if (!scenes.length) {
-        framesModel.actions.deployFrame(props.frameId, false)
+        // The settings went out; there is no scene to push.
+        reportTaskOutcome('success', {
+          frameId: props.frameId,
+          kind: 'deploy',
+          title: 'Deploying settings',
+          detail: 'Settings deployed. The frame has no scenes to push.',
+        })
         return
       }
       longRunningTasksModel.actions.startTask({
@@ -3707,16 +3713,16 @@ export const frameLogic = kea<frameLogicType>([
           ].join('. '),
         })
       } catch (error) {
-        // Persistence failed (rate limit, moderation, offline store…) — the
-        // ad-hoc push still deploys the edited scenes to the device, it just
-        // cannot save them; deployFrame reports its own outcome.
+        // Saving the scenes failed (a rate limit, moderation, the store
+        // offline): nothing was pushed, and the edits stay in the form for
+        // another try. Never an ad-hoc push of the form instead: the cloud
+        // records that as a preview of the whole list, outside the ledger.
         const message = error instanceof Error ? error.message : String(error)
         longRunningTasksModel.actions.taskFailed({
           frameId: props.frameId,
           kind: 'deploy',
-          detail: `Could not save the scenes to your cloud account (${message}) — pushing them straight to the frame instead`,
+          detail: `Could not save the scenes to your cloud account, so nothing was pushed: ${message}`,
         })
-        framesModel.actions.deployFrame(props.frameId, false)
       }
     }
 

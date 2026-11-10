@@ -8,7 +8,7 @@ import { repositoriesModel } from '../../../../models/repositoriesModel'
 import { appsModel } from '../../../../models/appsModel'
 import { searchInText } from '../../../../utils/searchInText'
 import { apiFetch } from '../../../../utils/apiFetch'
-import { assignCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
+import { addCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { stripSecretFieldValues } from '../../../../utils/stripSecretFieldValues'
 import { withoutSceneEventMap } from '../../../../utils/sceneEventMap'
@@ -1339,36 +1339,31 @@ export const templatesLogic = kea<templatesLogicType>([
             // Installing is the owner's consent: the scene is granted the
             // service keys its apps declare, and the frame's Service settings
             // section shows the grant per scene for adjusting later.
-            const assigned = await assignCloudFrameStoreScene(
-              props.frameId,
-              storeSceneId,
-              collectSecretSettingsFromScenes(scenes, values.apps),
+            // The server merges it into the assignments and pushes: one push,
+            // which shows it too for "Install & activate". On a scene already
+            // there it is a reinstall at the newest version.
+            const { alreadyAssigned } = await addCloudFrameStoreScene(props.frameId, storeSceneId, {
+              settingsGroups: collectSecretSettingsFromScenes(scenes, values.apps),
               // A frame with an active layout has it on what joins (applyTemplate
               // put it on these); the server's row has to say so too.
-              layoutsWornBy(scenes, frameLogic({ frameId: props.frameId }).values.frameForm?.scenes),
-              activateId ?? undefined
-            )
+              layouts: layoutsWornBy(scenes, frameLogic({ frameId: props.frameId }).values.frameForm?.scenes),
+              activate: Boolean(activateId),
+            })
             longRunningTasksModel.actions.finishTask({
               frameId: props.frameId,
               kind: 'save',
               status: 'success',
-              detail: assigned
-                ? activateId
-                  ? 'Installed and pushed. The frame shows it as soon as it syncs.'
-                  : 'Installed and pushed to the frame'
-                : 'Scene was already on the frame',
+              detail: alreadyAssigned
+                ? 'Already on the frame: pushed again at its newest version'
+                : activateId
+                ? 'Installed and pushed. The frame shows it as soon as it syncs.'
+                : 'Installed and pushed to the frame',
             })
-            if (!assigned && activateId) {
-              // Already on the frame: the drawer's push, which shows it.
-              await pushAndActivateInstalled(props.frameId, activateId)
-            }
-            if (assigned) {
-              // The server now owns this scene; rehydrate frame.scenes from the
-              // assignment list (force skips the poll throttle) so the tiles
-              // show server truth immediately — not just until the next reload.
-              framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
-              framesModel.actions.loadFrame(props.frameId)
-            }
+            // The server now owns this scene; rehydrate frame.scenes from the
+            // assignment list (force skips the poll throttle) so the tiles
+            // show server truth immediately — not just until the next reload.
+            framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
+            framesModel.actions.loadFrame(props.frameId)
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error)
             longRunningTasksModel.actions.taskFailed({

@@ -125,6 +125,9 @@ export async function installSceneOnFrame(
   if ("error" in resolved) {
     return failure(resolved.error);
   }
+  // One push that also shows it (`activate`): a separate setCurrentScene
+  // behind the add re-pushed the set the add had just queued, and the two
+  // raced on the frame.
   const added = await ctx.client.json<Record<string, unknown>>(
     "POST",
     `/api/frames/${frame_id}/scenes/add`,
@@ -133,22 +136,15 @@ export async function installSceneOnFrame(
         scene_id: resolved.sceneId,
         ...(scene_version !== undefined ? { scene_version } : {}),
         ...(settings_groups !== undefined ? { settings_groups } : {}),
+        ...(activate ? { activate: true } : {}),
       },
     },
   );
-  let activated: Record<string, unknown> | undefined;
-  if (activate) {
-    activated = await ctx.client.json<Record<string, unknown>>(
-      "POST",
-      `/api/frames/${frame_id}/event/setCurrentScene`,
-      { body: { sceneId: resolved.sceneId } },
-    );
-  }
   return text({
     ...added,
     scene: resolved.summary ?? { id: resolved.sceneId },
     ...(resolved.created ? { created_private_scene: true } : {}),
-    ...(activated ? { activate: activated } : {}),
+    ...(activate ? { activated: true } : {}),
   });
 }
 
