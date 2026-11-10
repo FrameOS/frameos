@@ -255,11 +255,19 @@ proc keepIdleInterpreters*(holdingPictures = false, answeringPointer = false): b
   decodedSinceSettle = false
   answeringPointer or headroom <= 0 or headroom >= floor
 
+proc decodeWantsRoom*(largestBlock: int): bool =
+  ## Whether a kept interpreter should go for this largest free block: a
+  ## decode ran or is about to, and the block is short. The same question is
+  ## asked by every paint-server fill sizing its strips (pixie's
+  ## paintStripRows), and a fill decodes nothing: a gradient title bar cost a
+  ## 10.3" panel an interpreter every other render, 1.4 s to build again.
+  decodedSinceSettle and largestBlock < RenderMemoryShortBytes
+
 when defined(frameosEmbedded):
   proc largestDecodeBlock(): int {.nimcall, raises: [].} =
-    ## The contiguous decode budget, measured when a decode first asks for it.
+    ## The contiguous decode budget, measured when something first asks for it.
     result = fos_psram_largest_free_block().int
-    if result < RenderMemoryShortBytes and not renderMemoryReleaseHook.isNil and
+    if decodeWantsRoom(result) and not renderMemoryReleaseHook.isNil and
         renderMemoryReleaseHook(false):
       result = fos_psram_largest_free_block().int
 

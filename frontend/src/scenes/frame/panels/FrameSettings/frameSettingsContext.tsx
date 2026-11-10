@@ -547,6 +547,7 @@ export function FrameSettingsProvider({
       ...('deepSleep' in patch ? { deep_sleep: patch.deepSleep } : {}),
       ...('deepSleepOnBattery' in patch ? { deep_sleep_on_battery: patch.deepSleepOnBattery } : {}),
       ...('wakeCheckSeconds' in patch ? { wake_check_seconds: patch.wakeCheckSeconds } : {}),
+      ...('awakeAfterInputSeconds' in patch ? { awake_after_input_seconds: patch.awakeAfterInputSeconds } : {}),
     })
   }
   const setEmbeddedPowerSettings = (patch: Partial<PowerSettingsValues>): void => {
@@ -556,6 +557,7 @@ export function FrameSettingsProvider({
         | 'deepSleep'
         | 'deepSleepOnBattery'
         | 'wakeCheckSeconds'
+        | 'awakeAfterInputSeconds'
         | 'batteryPin'
         | 'batteryDivider'
         | 'batteryEnablePin',
@@ -563,6 +565,7 @@ export function FrameSettingsProvider({
         | 'deep_sleep'
         | 'deep_sleep_on_battery'
         | 'wake_check_seconds'
+        | 'awake_after_input_seconds'
         | 'battery_pin'
         | 'battery_divider'
         | 'battery_enable_pin'
@@ -584,6 +587,7 @@ export function FrameSettingsProvider({
     write('deepSleep', 'deep_sleep')
     write('deepSleepOnBattery', 'deep_sleep_on_battery')
     write('wakeCheckSeconds', 'wake_check_seconds')
+    write('awakeAfterInputSeconds', 'awake_after_input_seconds')
     write('batteryPin', 'battery_pin')
     write('batteryDivider', 'battery_divider')
     write('batteryEnablePin', 'battery_enable_pin')
@@ -993,6 +997,7 @@ export function FrameSettingsProvider({
       deepSleep: frameForm.deep_sleep === true,
       deepSleepOnBattery: frameForm.deep_sleep_on_battery === true,
       wakeCheckSeconds: frameForm.wake_check_seconds,
+      awakeAfterInputSeconds: frameForm.awake_after_input_seconds,
     },
     setCloudPowerSettings,
     embeddedPowerSettings: {
@@ -1002,6 +1007,7 @@ export function FrameSettingsProvider({
       deepSleep: (powerDeviceConfig.deepSleep ?? powerDeviceConfig.deep_sleep) === true,
       deepSleepOnBattery: (powerDeviceConfig.deepSleepOnBattery ?? powerDeviceConfig.deep_sleep_on_battery) === true,
       wakeCheckSeconds: powerDeviceConfig.wakeCheckSeconds ?? powerDeviceConfig.wake_check_seconds,
+      awakeAfterInputSeconds: powerDeviceConfig.awakeAfterInputSeconds ?? powerDeviceConfig.awake_after_input_seconds,
     },
     setEmbeddedPowerSettings,
     // Backend/on-device planes: real hardware only — a virtual frame has no

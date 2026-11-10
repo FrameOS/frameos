@@ -242,6 +242,8 @@ typedef struct {
     bool wake_schedule;            /* align deep-sleep wake to wall-clock interval boundaries */
     uint32_t wake_check_sec;       /* while deep sleeping, wake at least this often to check the
                                     * control plane for commands (0 = only wake to render) */
+    uint32_t awake_after_input_sec; /* a press or a tap keeps a deep-sleeping frame up this long,
+                                     * so the next one finds it awake (0 = sleep as soon as it can) */
     int8_t battery_pin;            /* ADC1 GPIO for battery voltage, -1 = none */
     float battery_divider;         /* Vbat = Vpin * divider (default 2.0) */
     int8_t battery_enable_pin;     /* GPIO driven high to enable the battery

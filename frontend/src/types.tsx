@@ -307,6 +307,8 @@ export interface FrameType {
     deep_sleep_on_battery?: boolean
     wakeCheckSeconds?: number
     wake_check_seconds?: number
+    awakeAfterInputSeconds?: number
+    awake_after_input_seconds?: number
     batteryPin?: number
     battery_pin?: number
     batteryDivider?: number
@@ -415,6 +417,7 @@ export interface FrameType {
   deep_sleep?: boolean
   deep_sleep_on_battery?: boolean
   wake_check_seconds?: number
+  awake_after_input_seconds?: number
   battery_pin?: number
   battery_divider?: number
   battery_enable_pin?: number

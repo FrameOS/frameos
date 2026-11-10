@@ -10,8 +10,8 @@ import pytest
 # Runs embedded/esp32/main/tests/test_fos_it8951.c: the pure half of the
 # IT8951 panel driver (components/frameos_display/it8951.c) — one row of the
 # packed sixteen-grey buffer in big-endian 4-bit wire order, as it is on the
-# Waveshare 10.3" HAT and mirrored on the Seeed reTerminal E1003, and the row
-# digest that decides which rows go to the controller again. Same
+# Waveshare 10.3" HAT and mirrored on the Seeed reTerminal E1003, and the tile
+# digests and rectangles that decide what goes to the controller again. Same
 # arrangement as test_esp32_touch.py next door: the file keeps that half
 # above the ESP_PLATFORM guard, so a laptop compiler is all this needs.
 

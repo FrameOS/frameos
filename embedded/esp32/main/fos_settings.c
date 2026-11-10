@@ -507,6 +507,15 @@ static bool apply_frame_settings(const cJSON *frame)
         changed = true;
     }
 
+    const cJSON *awake_input = cJSON_GetObjectItem(frame, "awakeAfterInputSeconds");
+    if (cJSON_IsNumber(awake_input) && awake_input->valuedouble >= 0 && awake_input->valuedouble <= 3600) {
+        uint32_t seconds = (uint32_t)awake_input->valuedouble;
+        if (config->awake_after_input_sec != seconds) {
+            config->awake_after_input_sec = seconds;
+            changed = true;
+        }
+    }
+
     const cJSON *wake_check = cJSON_GetObjectItem(frame, "wakeCheckSeconds");
     if (cJSON_IsNumber(wake_check) && wake_check->valuedouble >= 0 &&
         wake_check->valuedouble <= 86400) {
@@ -947,6 +956,9 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (before->wake_check_sec != after->wake_check_sec) {
         change_append_int(out, out_len, "wake_check_seconds", (long)after->wake_check_sec);
+    }
+    if (before->awake_after_input_sec != after->awake_after_input_sec) {
+        change_append_int(out, out_len, "awake_after_input_seconds", (long)after->awake_after_input_sec);
     }
     if (before->battery_pin != after->battery_pin) {
         change_append_int(out, out_len, "battery_pin", (long)after->battery_pin);

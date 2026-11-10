@@ -28,7 +28,9 @@ like `setCurrentScene {direction}`:
   the switcher's own Close, a key with the role `back`, and its idle timeout
   all dispatch `sceneSwitcher` to go back. `sceneSettings` (a swipe down
   from the top) goes back the same way, and `sceneSwitcher` over the scene
-  settings closes them unsaved ([scene-settings.md](scene-settings.md)).
+  settings closes them unsaved ([scene-settings.md](scene-settings.md)), or,
+  with `{swap: true}` (a taskbar's Start), goes straight to the list, the
+  scene behind staying behind.
 
 A `setCurrentScene {sceneId: "system/sceneSwitcher"}` opens it by name (the
 HTTP API, a schedule) without `state.from`: it highlights the list's first
@@ -157,6 +159,12 @@ over it, so a presence code never reaches one:
   tile.
 - A scene writes one at most hourly, looked at once a minute, so an animation
   costs nothing per frame and the flash sees a few sectors an hour at most.
+- Taking one is memory only: the file is written later, from the idle wait and
+  never while someone is tapping (`frameos_nim_flush_scene_thumb`), because a
+  write is seconds of SPIFFS on the task the picture and the next tap wait for
+  (3.3 s on a reTerminal E1003). Which scenes have a file is read from the
+  directory once: opening one that is not there walks the whole partition,
+  700 ms a tile on 24 MB.
 - Pictures stop at 60% of the partition in use. Past that all of them go and
   those in use come back as their scenes show, which also clears pictures of
   scenes that were removed.

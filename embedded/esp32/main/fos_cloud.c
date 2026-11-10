@@ -2344,11 +2344,15 @@ static int set_settings_reserved_pin(const cJSON *settings, const char **key, co
 {
     static const char *const pin_keys[] = {"battery_pin", "battery_enable_pin", "buzzer_pin",
                                            "mic_clk_pin", "mic_data_pin", "mic_pwr_pin", "led_pin"};
+    /* What each key holds now is its own driver's claim, not a conflict. */
+    const fos_config_t *config = fos_config();
+    const int held[] = {config->battery_pin,   config->battery_enable_pin, config->buzzer_pin, config->mic_pins.clk,
+                        config->mic_pins.data, config->mic_pins.pwr,       config->led_pin};
     for (size_t i = 0; i < sizeof(pin_keys) / sizeof(pin_keys[0]); i++) {
         const cJSON *value = cJSON_GetObjectItem(settings, pin_keys[i]);
         if (!cJSON_IsNumber(value)) continue;
         int pin = (int)value->valuedouble;
-        if (pin < 0) continue; /* -1: none */
+        if (pin < 0 || pin == held[i]) continue; /* -1: none */
         const char *reason = fos_config_gpio_pin_reserved(pin);
         if (reason != NULL) {
             *key = pin_keys[i];
@@ -2543,6 +2547,8 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     if (sleep_on_battery != NULL) {
         config->deep_sleep_on_battery = cJSON_IsTrue(sleep_on_battery);
     }
+    const cJSON *awake_input = cJSON_GetObjectItem(settings, "awake_after_input_seconds");
+    if (awake_input != NULL) config->awake_after_input_sec = (uint32_t)awake_input->valuedouble;
     const cJSON *wake_check = cJSON_GetObjectItem(settings, "wake_check_seconds");
     if (wake_check != NULL) {
         uint32_t seconds = (uint32_t)wake_check->valuedouble;

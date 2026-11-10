@@ -196,6 +196,9 @@ esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bo
 /* Put a panel left awake after a partial update into deep sleep: before the
  * chip's own, or (the _if_idle one, from the render task's wait) once nothing
  * has been drawn for a while, clearing any ghosts it was left with first. */
+/* Parts of the picture were drawn roughly while someone tapped and nobody has
+ * for a while: pack the canvas and hand it to fos_display_update, not as input. */
+bool fos_display_settle_due(int64_t now_us);
 void fos_display_park(void);
 void fos_display_park_if_idle(int64_t now_us);
 /* A block of PSRAM kept for good, NULL when there is none to give. */

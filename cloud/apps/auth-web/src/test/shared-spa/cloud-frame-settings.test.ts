@@ -344,8 +344,8 @@ describe("cloud settings push", () => {
     });
   });
 
-  it("gates the touch beep on its own floor", () => {
-    expect([...esp32TouchBeepFrameSettingKeys]).toEqual(["touch_beep"]);
+  it("gates the touch beep and the stay-awake time on their floor", () => {
+    expect([...esp32TouchBeepFrameSettingKeys].sort()).toEqual(["awake_after_input_seconds", "touch_beep"]);
     expect(esp32TouchBeepCloudFrameSettingsMinVersion).toBe(esp32TouchBeepFrameSettingsMinVersion);
     expect(cloudFrameSupportsEsp32TouchBeep("2026.11.5")).toBe(false);
     expect(cloudFrameSupportsEsp32TouchBeep("2026.11.6")).toBe(true);

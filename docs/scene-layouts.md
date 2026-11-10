@@ -57,6 +57,9 @@ hands the built-in scene that layout (`state.layout`, `event_loop.nim`), and it
 runs through the same pass as any scene wearing one (`FrameScene.ownRun`,
 `builtInRunner`). `app.frame.systemScene` is true in the layout's app meanwhile:
 `if (app.frame.systemScene) return <yield />` gives them the whole panel.
+Its `app.state.openedOver` then holds the name of the scene the built-in scene
+opened over (a layout is made afresh around it), for a taskbar to keep that
+scene's button.
 
 **On the frame.** Frame settings has a Layout select, with a gear for that
 layout's fields. The choice covers every scene until "As each scene says" is

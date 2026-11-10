@@ -273,6 +273,12 @@
       "profiles": {"esp32": {"since": null}},
       "parity": {"only": "esp32", "why": "ESP32 power management; a Pi has no deep sleep or battery sense."}
     },
+    "awake_after_input_seconds": {
+      "$comment": "A press or a tap keeps a deep-sleeping frame up this long, the next one finds it awake; 0 = sleep as soon as it can. Default 300.",
+      "rule": {"type": "int", "min": 0, "max": 3600},
+      "profiles": {"esp32": {"since": "2026.11.6"}},
+      "parity": {"only": "esp32", "why": "ESP32 deep sleep; a Pi never sleeps."}
+    },
     "wake_check_seconds": {
       "$comment": "0 = only wake to render; the firmware clamps 1..59 up to 60 (sub-minute check-ins drain a battery for nothing).",
       "rule": {"type": "int", "min": 0, "max": 86400},

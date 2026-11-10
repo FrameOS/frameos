@@ -538,7 +538,7 @@ static int cmd_set(int argc, char **argv)
                "allow_local_network|admin_auth|admin_user|admin_pass|tls_enable|tls_port|"
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
-               "deep_sleep|deep_sleep_on_battery|wake_check|wake_schedule|"
+               "deep_sleep|deep_sleep_on_battery|wake_check|awake_input|wake_schedule|"
                "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|touch_beep|mic_pins|voice_chat|"
                "led_pin|led_type|i2c_buses|touch_pins|codec_pins|"
                "pins|gpio_buttons|ap_psk> "
@@ -1007,11 +1007,23 @@ static int cmd_set(int argc, char **argv)
         if (seconds > 0 && seconds < 60) seconds = 60;
         config->wake_check_sec = seconds;
     }
+    /* Seconds a press or a tap keeps a deep-sleeping frame awake (0 = none). */
+    else if (strcmp(key, "awake_input") == 0) {
+        uint32_t seconds = strtoul(value, NULL, 10);
+        config->awake_after_input_sec = seconds > 3600 ? 3600 : seconds;
+    }
     else if (strcmp(key, "wake_schedule") == 0) config->wake_schedule = atoi(value) != 0;
     else if (strcmp(key, "battery_pin") == 0 || strcmp(key, "battery_enable_pin") == 0 ||
              strcmp(key, "buzzer_pin") == 0 || strcmp(key, "led_pin") == 0) {
         int pin = atoi(value);
-        const char *why = pin >= 0 ? fos_config_gpio_pin_reserved(pin) : NULL;
+        int held = strcmp(key, "battery_pin") == 0          ? config->battery_pin
+                   : strcmp(key, "battery_enable_pin") == 0 ? config->battery_enable_pin
+                   : strcmp(key, "buzzer_pin") == 0         ? config->buzzer_pin
+                                                            : config->led_pin;
+        /* The pin this key already holds is claimed by its own driver: asking
+         * for it again is no conflict (a provisioning plan replayed on a
+         * running frame: GPIO45, the reTerminal's buzzer, was refused). */
+        const char *why = pin >= 0 && pin != held ? fos_config_gpio_pin_reserved(pin) : NULL;
         if (why != NULL) {
             printf("refusing %s GPIO %d: %s\n", key, pin, why);
             return 1;

@@ -446,11 +446,22 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
   let current = loop.host.sceneFor(none(SceneId))
   let payload = newJObject()
   var next = sceneId
+  # From the settings straight to the scene list when asked (a taskbar's Start):
+  # the scene behind stays behind, and the layout goes on as it was.
+  let swap = sceneId == SceneSwitcherId and current.isBuiltIn and current.id.string == SceneSettingsId and
+    envelope.payload{"swap"}.getBool()
   # `{page: "safe"}` (safe mode): the frame page with no layout around it,
   # opened or not already. The scene it came from, and its layout, stay as they
   # are, so closing it unsaved changes nothing.
   let safe = envelope.payload{"page"}.getStr() == "safe"
-  if not current.isBuiltIn or safe:
+  if swap:
+    let state = newJObject()
+    state.put("from", newJString(current.state{"from"}.getStr()))
+    let worn = current.state{"layout"}
+    if not worn.isNil:
+      state.put("layout", copy(worn))
+    payload.put("state", state)
+  elif not current.isBuiltIn or safe:
     let state = newJObject()
     state.put("from", newJString(if current.isNil: "" elif current.isBuiltIn: current.state{"from"}.getStr() else: current.id.string))
     # It is drawn in the layout of the scene it was opened from.
@@ -459,8 +470,13 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
     elif current of InterpretedFrameScene and InterpretedFrameScene(current).layoutSceneId.string.len > 0:
       let worn = newJObject()
       worn.put("sceneId", newJString(InterpretedFrameScene(current).layoutSceneId.string))
-      if not InterpretedFrameScene(current).layoutState.isNil:
-        worn.put("state", InterpretedFrameScene(current).layoutState)
+      # The layout is made afresh around the built-in scene: what it has open
+      # goes with it, by name, for a taskbar to keep showing.
+      let layoutState =
+        if InterpretedFrameScene(current).layoutState.isNil: newJObject()
+        else: copy(InterpretedFrameScene(current).layoutState)
+      layoutState.put("openedOver", newJString(current.shownName))
+      worn.put("state", layoutState)
       state.put("layout", worn)
     if sceneId == SceneSettingsId:
       if not current.isBuiltIn:

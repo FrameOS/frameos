@@ -530,6 +530,15 @@ proc button(look: Look, label: string, handler: int, primary: bool): SvgNode =
   else: c.add " bg-zinc-800 active:bg-zinc-600"
   el("div", move c, SvgNode(text: label)).on("on-click", handler)
 
+proc icon(look: Look, path: string): SvgNode =
+  # The hole winds against the teeth: the default fill rule cuts it out.
+  let path = SvgNode(tag: "path", attrs: @[("d", path), ("fill", "currentColor")])
+  var i = ""
+  i.px("w", look.size * 6 div 5)
+  i.px("h", look.size * 6 div 5)
+  result = el("svg", move i, path)
+  result.attrs.add(("viewBox", "0 0 48 48"))
+
 proc iconButton(look: Look, lit: bool, path: string, handler: int): SvgNode =
   ## A round button with a picture on it.
   var c = "shrink-0 flex items-center justify-center rounded-full"
@@ -538,18 +547,21 @@ proc iconButton(look: Look, lit: bool, path: string, handler: int): SvgNode =
   if look.paper: c.add(if lit: " bg-black text-white" else: " border-2 border-black")
   elif lit: c.add " bg-sky-600 active:bg-sky-500"
   else: c.add " bg-zinc-800 active:bg-zinc-600"
-  # The hole winds against the teeth: the default fill rule cuts it out.
-  let path = SvgNode(tag: "path", attrs: @[("d", path), ("fill", "currentColor")])
-  var i = ""
-  i.px("w", look.size * 6 div 5)
-  i.px("h", look.size * 6 div 5)
-  let icon = el("svg", move i, path)
-  icon.attrs.add(("viewBox", "0 0 48 48"))
-  el("div", move c, icon).on("on-click", handler)
+  el("div", move c, look.icon(path)).on("on-click", handler)
 
-proc gear(look: Look, lit: bool): SvgNode =
-  ## The gear that opens the frame page, lit while it shows.
-  look.iconButton(lit, GearPath, HGear)
+proc gear(look: Look, lit, named: bool): SvgNode =
+  ## The gear that opens the frame page, lit while it shows, with its name
+  ## beside it where the header has the room.
+  if not named:
+    return look.iconButton(lit, GearPath, HGear)
+  var c = "shrink-0 flex items-center rounded-full font-bold"
+  c.px("h", look.line * 4 div 5)
+  c.px("px", look.size)
+  c.px("gap", look.size div 2)
+  if look.paper: c.add " border-2 border-black"
+  else: c.add " bg-zinc-800 active:bg-zinc-600"
+  result = el("div", move c, look.icon(GearPath)).on("on-click", HGear)
+  result.children.add el("span", "whitespace-nowrap", SvgNode(text: "Frame settings"))
 
 proc fieldBox(look: Look): string =
   result = "w-full rounded-lg"
@@ -831,7 +843,8 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   header.children.add el("span", "grow truncate text-center font-bold",
     SvgNode(text: if frame: "Frame settings" else: title))
   if not info.isNil and not layoutPage:
-    header.children.add look.gear(frame)
+    # About 30 of the text's size: the two buttons, the title and the name.
+    header.children.add look.gear(frame, named = not frame and width >= look.size * 30)
   # Lit while there is something to save: after a Save it goes quiet, which
   # is how the frame page says it took it.
   let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}

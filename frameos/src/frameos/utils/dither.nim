@@ -351,6 +351,19 @@ template forEachPaletteDithered*(
               push(nextRow, xx + 1, errorR, errorG, errorB, 1)
         swap(curRow, nextRow)
 
+const OrderedThresholds4x4* = [0'u8, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]
+  ## A 4x4 Bayer matrix by `(y and 3) * 4 + (x and 3)`.
+
+proc grayLevel16Ordered*(gray, threshold: uint8): uint8 {.inline.} =
+  ## One of sixteen greys for an 8-bit grey, against its OrderedThresholds4x4
+  ## entry. The sixteen exact levels (multiples of 17, black and white among
+  ## them) stay flat. Integers: an S3 does double-precision floats in software,
+  ## and Floyd-Steinberg over a 10.3" panel's 2.6 Mpx took 49 s. And no error
+  ## to carry: a pixel's level depends on it alone, so a small change to the
+  ## picture is a small change on the wire.
+  let value = gray.uint32 * 15 + threshold.uint32 * 16 + 8
+  uint8(((value + 1) * 257) shr 16) # value / 255, exactly
+
 template forEachGrayDithered*(
   image: Image, maxLevel: int,
   x, y, level: untyped, body: untyped

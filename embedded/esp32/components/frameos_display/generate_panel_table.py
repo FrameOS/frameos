@@ -47,11 +47,21 @@ UNSUPPORTED_PANELS = {
     "EPD_7in5b_V2_old",
 }
 
-# Panels with a partial waveform: (init, display(new, previous), rest), the
-# driver's own functions (docs/realtime-rendering.md, "Partial refresh on
-# e-paper"). Rest turns the analog supply off and keeps the controller awake.
+# Panels with a partial waveform: (init, display(new, previous), rest, changed,
+# clean, owed), the driver's own functions (docs/realtime-rendering.md, "Partial
+# refresh on e-paper"). Rest turns the analog supply off and keeps the
+# controller awake. `changed` and `clean` are for a controller that keeps the
+# picture itself (the IT8951): the display layer then keeps no copy of it.
 PARTIAL_PANELS = {
-    "EPD_3in97": ("EPD_3in97_Init_Partial", "EPD_3in97_Display_Partial", "EPD_3in97_Rest"),
+    "EPD_3in97": ("EPD_3in97_Init_Partial", "EPD_3in97_Display_Partial", "EPD_3in97_Rest", "NULL", "NULL", "NULL"),
+    "EPD_10in3": (
+        "fos_it8951_10in3_partial_init",
+        "fos_it8951_10in3_partial_show",
+        "fos_it8951_10in3_rest",
+        "fos_it8951_10in3_changed",
+        "fos_it8951_10in3_clean",
+        "fos_it8951_10in3_owed",
+    ),
 }
 
 # Panels without a Waveshare C driver in the panel catalog's ePaper folder:
@@ -232,6 +242,10 @@ typedef struct {
     void (*init)(void);
     void (*show)(uint8_t *buf, uint8_t *previous); /* `previous`: what the glass shows */
     void (*rest)(void);                            /* the analog supply off, the controller awake */
+    /* A controller that keeps the picture itself: no copy in memory here. */
+    long (*changed)(const uint8_t *buf);           /* bytes that differ, < 0 when it cannot say */
+    void (*clean)(void);                           /* a full waveform over what it holds */
+    bool (*owed)(void);                            /* parts of the picture only drawn roughly so far */
 } fos_panel_partial_t;
 
 #define FOS_PANEL_PARTIAL_COUNT @PARTIAL_COUNT@
@@ -330,7 +344,10 @@ def generate(repo_root: Path, out_dir: Path) -> None:
     parts.append("};")
     parts.append("const size_t fos_panel_table_count = sizeof(fos_panel_table) / sizeof(fos_panel_table[0]);")
     parts.append("const fos_panel_partial_t fos_panel_partial_table[FOS_PANEL_PARTIAL_COUNT] = {")
-    parts.extend(f"    {{ {c_string(key)}, {init}, {show}, {rest} }}," for key, (init, show, rest) in PARTIAL_PANELS.items())
+    parts.extend(
+        f"    {{ {c_string(key)}, {init}, {show}, {rest}, {changed}, {clean}, {owed} }},"
+        for key, (init, show, rest, changed, clean, owed) in PARTIAL_PANELS.items()
+    )
     parts.append("};")
     parts.append("")
 

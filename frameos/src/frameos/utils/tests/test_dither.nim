@@ -195,6 +195,28 @@ suite "row-streamed dither equals the in-place reference":
           fromRgbx[y * w + x] = level
         check fromGrey == fromRgbx
 
+suite "ordered sixteen greys":
+  test "the sixteen exact levels are flat, black and white among them":
+    for level in 0 .. 15:
+      for threshold in OrderedThresholds4x4:
+        check grayLevel16Ordered(uint8(level * 17), threshold) == level.uint8
+
+  test "every grey averages out to itself over the matrix":
+    for gray in 0 .. 255:
+      var total = 0
+      for threshold in OrderedThresholds4x4:
+        let level = grayLevel16Ordered(gray.uint8, threshold).int
+        check level in 0 .. 15
+        total += level
+      check abs(total.float / 16.0 - gray.float * 15.0 / 255.0) <= 0.5
+
+  test "the thresholds are each used once":
+    var seen: array[16, bool]
+    for threshold in OrderedThresholds4x4:
+      seen[threshold.int] = true
+    for wasSeen in seen:
+      check wasSeen
+
 suite "render palette override":
   test "activePalette is the default until a matching override is set":
     clearRenderPaletteOverride()

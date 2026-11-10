@@ -596,6 +596,30 @@ a small change cost what it should:
   300 ms; the supply, the waveform load and an 8 MHz bus 270 ms more. What is
   left is about 500 ms: some 40 ms for the two frames on the bus, the rest the
   waveform itself.
+- **A controller that keeps the picture** (the IT8951 behind the reTerminal
+  E1003's 10.3" glass). The display layer holds no copy here, 1.25 MiB this
+  8 MB board does not have: the driver hashes the packed picture in tiles of
+  32x8 pixels (the controller's display area snaps X to 32) and loads only the
+  tiles that changed. This panel's waveform file (`LUT M392`) has three modes
+  that draw what they are sent: INIT, GC16 for sixteen greys and DU for pure
+  black and white. GL16, GLR16, GLD16, DU4 and A2 finish in 645 ms and leave
+  the area one flat tone. Waveforms run one at a time and take the same time
+  whatever the area, DU 470 ms and GC16 580 ms, so the count is what matters.
+  While someone taps there is one: **a single DU over everything that changed**,
+  however far apart. DU moves only the pixels that change (16 grey bars stay as
+  they are under one), so the box costs nothing where nothing changed and the
+  rest of the picture does not flash. It draws black and white only, so a
+  changed area with greys goes up as a halftone
+  (`fos_it8951_row_halftone`) and its tiles are owed their greys. 2.5 s after
+  the last tap (`fos_display_settle_due`) the kept canvas is packed again, with
+  the scene not run, and those areas get GC16, three rectangles at the most.
+  With nobody tapping a change goes straight up that way, DU for pure black and
+  white. A new scene is GC16 over the whole panel. A panel picks this path by
+  giving `PARTIAL_PANELS` a `changed`, a `clean` and an `owed`. The controller
+  is not put in standby between updates (its first waveform after one costs 600
+  ms more), only when it is parked. Measured on an E1003 (2026-11-10): five
+  scattered areas in 511 ms of waveform and 15 ms of upload; a tap in about a
+  second from the finger to the picture.
 - **The input hold.** The render task drains the touch queue and also does the
   backend pulls, the log uploads and the image push, 200-1000 ms a round trip
   on Wi-Fi, and writes the scene state to flash, up to 3 s, so a tap made during
@@ -608,7 +632,12 @@ a small change cost what it should:
   refresh that clears the ghosts waits the same way: 120 updates at the most
   while someone taps, and the frame does it from the idle wait 30 seconds
   after the last update.
-- **The dither.** Floyd-Steinberg carries its error across the picture, so
+- **The dither.** On the sixteen-grey panels there is no error to carry:
+  `grayLevel16Ordered` is a 4x4 Bayer matrix, so a pixel's level depends on
+  that pixel alone and a small change is a small change on the wire. It is
+  integer arithmetic and runs on both cores (`fos_rows_run`): 2.6 Mpx in 167 ms,
+  where double-precision Floyd-Steinberg, which an S3 does in software, took 49
+  s. The 1-bit panels are another matter: Floyd-Steinberg carries its error across the picture, so
   packing a whole frame after a small change rewrites the dither of every grey
   below it, and all of those pixels would move on the glass.
   `utils/panel_damage.nim` compares the gray canvas with a copy of how it was

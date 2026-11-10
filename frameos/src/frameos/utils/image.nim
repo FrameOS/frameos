@@ -140,8 +140,10 @@ proc decodeSvgWithFallback*(root: SvgNode, width: int, height: int): Option[Imag
   ## cannot parse it. pixie fills gradient paints through a coverage mask and
   ## a paint image, sized to the decode budget in row strips (paintStripRows),
   ## so the budget is refreshed here: the render tick's value predates the JS
-  ## runtimes and data this SVG was made from.
-  refreshDecodeBudget()
+  ## runtimes and data this SVG was made from. No decode, so kept interpreters
+  ## stay: a fill that does not fit lets them go itself (releaseRenderMemory),
+  ## and a 10.3" panel lost one to a touch cursor every other render, 1.4 s.
+  refreshDecodeBudget(forDecode = false)
   if root.isNil:
     return none(Image)
   try:

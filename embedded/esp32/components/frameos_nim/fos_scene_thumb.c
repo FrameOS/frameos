@@ -27,13 +27,58 @@
 #define LOAD_KEEP_FREE_BYTES (600u * 1024u)
 #define PSRAM (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
-static void thumb_path(const char *scene_id, char *out)
+/* Which scenes have a picture, by the hash in the file's name, read from the
+ * directory once. Opening a file that is not there walks the whole partition,
+ * 700 ms on a 24 MB one, and the scene switcher asks for every tile. */
+#define KNOWN_MAX 64
+static uint32_t s_known[KNOWN_MAX];
+static size_t s_known_count = 0;
+static bool s_known_listed = false;
+static bool s_known_overflow = false;
+
+static uint32_t thumb_hash(const char *scene_id)
 {
     uint32_t hash = 2166136261u;
     for (const unsigned char *p = (const unsigned char *)scene_id; *p; p++) {
         hash = (hash ^ *p) * 16777619u;
     }
-    snprintf(out, PATH_MAX_BYTES, STATE_DIR "/" PREFIX "%08lx.bin", (unsigned long)hash);
+    return hash;
+}
+
+static void thumb_path(const char *scene_id, char *out)
+{
+    snprintf(out, PATH_MAX_BYTES, STATE_DIR "/" PREFIX "%08lx.bin", (unsigned long)thumb_hash(scene_id));
+}
+
+static void note_known(uint32_t hash)
+{
+    for (size_t i = 0; i < s_known_count; i++) {
+        if (s_known[i] == hash) return;
+    }
+    if (s_known_count == KNOWN_MAX) s_known_overflow = true;
+    else s_known[s_known_count++] = hash;
+}
+
+/* False only when there is certainly no picture. */
+static bool maybe_has_picture(uint32_t hash)
+{
+    if (!s_known_listed) {
+        s_known_listed = true;
+        DIR *dir = opendir(STATE_DIR);
+        if (dir != NULL) {
+            for (struct dirent *entry = readdir(dir); entry != NULL; entry = readdir(dir)) {
+                if (strncmp(entry->d_name, PREFIX, strlen(PREFIX)) == 0) {
+                    note_known((uint32_t)strtoul(entry->d_name + strlen(PREFIX), NULL, 16));
+                }
+            }
+            closedir(dir);
+        }
+    }
+    if (s_known_overflow) return true;
+    for (size_t i = 0; i < s_known_count; i++) {
+        if (s_known[i] == hash) return true;
+    }
+    return false;
 }
 
 /* The open picture and its header; NULL for none. */
@@ -66,7 +111,20 @@ static void drop_all(void)
         }
     }
     closedir(dir);
+    s_known_count = 0;
+    s_known_overflow = false;
 }
+
+/* A picture taken and not on flash yet: the newest, one at a time. Writing it
+ * is seconds of SPIFFS, on the task a tap and the picture are waiting for. */
+static struct {
+    char path[PATH_MAX_BYTES];
+    uint32_t hash;
+    uint16_t *pixels;
+    size_t bytes;
+    int w, h;
+    uint32_t now;
+} s_pending;
 
 static bool has_room(size_t bytes)
 {
@@ -79,15 +137,6 @@ void fos_scene_thumb_capture(const char *scene_id, const void *canvas, int width
 {
     size_t total = 0, used = 0;
     if (now < CLOCK_SET_AFTER || esp_spiffs_info("state", &total, &used) != ESP_OK || total == 0) return;
-    char path[PATH_MAX_BYTES];
-    thumb_path(scene_id, path);
-    uint16_t size[2];
-    uint32_t taken = 0;
-    FILE *file = open_thumb(path, size, &taken);
-    if (file != NULL) {
-        fclose(file);
-        if (taken <= now && now - taken <= MAX_AGE_SECONDS) return;
-    }
     int edge = total >= ROOMY_PARTITION_BYTES ? EDGE_ROOMY : EDGE_TIGHT;
     int longest = width > height ? width : height;
     int scale = (longest + edge - 1) / edge;
@@ -122,19 +171,43 @@ void fos_scene_thumb_capture(const char *scene_id, const void *canvas, int width
             *out++ = (uint16_t)((((r / 4) & 0xF8) << 8) | (((g / 4) & 0xFC) << 3) | ((b / 4) >> 3));
         }
     }
-    unlink(path); /* its own old copy is room too */
-    if (!has_room(bytes + HEADER_BYTES)) drop_all();
-    if (has_room(bytes + HEADER_BYTES) && (file = fopen(path, "wb")) != NULL) {
-        uint32_t header[2] = {(uint32_t)w | ((uint32_t)h << 16), now};
-        bool ok = fwrite(header, 1, HEADER_BYTES, file) == HEADER_BYTES && fwrite(pixels, 1, bytes, file) == bytes;
-        fclose(file);
-        if (!ok) unlink(path); /* a torn picture reads as none */
+    free(s_pending.pixels);
+    thumb_path(scene_id, s_pending.path);
+    s_pending.hash = thumb_hash(scene_id);
+    s_pending.pixels = pixels;
+    s_pending.bytes = bytes;
+    s_pending.w = w;
+    s_pending.h = h;
+    s_pending.now = now;
+}
+
+void fos_scene_thumb_flush(void)
+{
+    if (s_pending.pixels == NULL) return;
+    uint16_t size[2];
+    uint32_t taken = 0;
+    uint32_t now = s_pending.now;
+    FILE *file = open_thumb(s_pending.path, size, &taken);
+    if (file != NULL) fclose(file);
+    if (file == NULL || taken > now || now - taken > MAX_AGE_SECONDS) {
+        unlink(s_pending.path); /* its own old copy is room too */
+        if (!has_room(s_pending.bytes + HEADER_BYTES)) drop_all();
+        if (has_room(s_pending.bytes + HEADER_BYTES) && (file = fopen(s_pending.path, "wb")) != NULL) {
+            uint32_t header[2] = {(uint32_t)s_pending.w | ((uint32_t)s_pending.h << 16), now};
+            bool ok = fwrite(header, 1, HEADER_BYTES, file) == HEADER_BYTES &&
+                      fwrite(s_pending.pixels, 1, s_pending.bytes, file) == s_pending.bytes;
+            fclose(file);
+            if (!ok) unlink(s_pending.path); /* a torn picture reads as none */
+            else note_known(s_pending.hash);
+        }
     }
-    free(pixels);
+    free(s_pending.pixels);
+    s_pending.pixels = NULL;
 }
 
 uint16_t *fos_scene_thumb_load(const char *scene_id, int tile_width, int tile_height, int *width, int *height)
 {
+    if (!maybe_has_picture(thumb_hash(scene_id))) return NULL;
     char path[PATH_MAX_BYTES];
     thumb_path(scene_id, path);
     uint16_t size[2];

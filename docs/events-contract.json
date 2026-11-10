@@ -634,10 +634,13 @@
     {
       "name": "sceneSwitcher",
       "class": "scene-command",
+      "$comment": "swap: over the scene settings, go straight to the list instead of back to the scene (a taskbar's Start; the scene behind stays behind).",
       "description": "Show the scene switcher (`scenes.switcher`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. While it or the scene settings show, go back to the scene they were opened from instead. The frame's event map binds it to a swipe in from the bottom edge on a touch screen.",
       "listen": false,
       "dispatch": true,
-      "payload": [],
+      "payload": [
+        {"name": "swap", "label": "Swap", "type": "boolean", "required": false}
+      ],
       "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap"],
       "renderAfter": "always",
       "coalesce": "none",

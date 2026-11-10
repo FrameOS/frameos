@@ -108,4 +108,4 @@ def test_single_plane_settings_carry_a_parity_reason():
     # the ESP32 buzzer's notes, fos_led.c; no Pi preset has one); 16 with
     # `touch_beep` (2026.11.6: the click of a press on the glass, through the
     # same buzzer).
-    assert by_plane.get("esp32", 0) <= 16, by_plane
+    assert by_plane.get("esp32", 0) <= 17, by_plane

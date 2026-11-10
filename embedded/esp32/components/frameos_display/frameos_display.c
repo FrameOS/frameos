@@ -40,9 +40,15 @@ static bool s_panel_rested = false;
 static int64_t s_last_partial_us = 0;
 #define FOS_PANEL_ANALOG_US (10 * 1000000LL)
 #define FOS_PANEL_AWAKE_US (300 * 1000000LL)
+/* The IT8951's standby is not rested: its first waveform after one costs 600
+ * ms more than the next (measured on a reTerminal E1003, 2026-11-09), so it
+ * stays up until the panel is parked. */
 /* The ghosts a tapping session left (fos_partial_refresh.h), once it is
  * clearly over: the refresh is seconds in which a tap would wait. */
 #define FOS_PANEL_CLEAN_US (30 * 1000000LL)
+/* After this long without a tap the greys a tapping session drew as a halftone
+ * go up properly (it8951.c). */
+#define FOS_PANEL_SETTLE_US (2500 * 1000LL)
 /* A partial update sends two whole frames: the SSD1677's rated write clock. */
 #define FOS_PARTIAL_SPI_HZ (20 * 1000 * 1000)
 
@@ -408,9 +414,11 @@ esp_err_t fos_display_blit(const uint8_t *buf, size_t len)
     s_panel_awake = false;
     ESP_LOGI(TAG, "blit + refresh took %lld ms", (esp_timer_get_time() - start) / 1000);
     if (fos_display_supports_partial()) {
-        if (!s_glass) s_glass = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (s_glass && s_glass != buf) memcpy(s_glass, buf, len);
-        s_glass_known = s_glass != NULL;
+        if (!s_partial->changed) {
+            if (!s_glass) s_glass = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (s_glass && s_glass != buf) memcpy(s_glass, buf, len);
+            s_glass_known = s_glass != NULL;
+        }
         s_partials_since_full = 0;
     }
     return ESP_OK;
@@ -427,13 +435,19 @@ esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bo
     if (partial) *partial = false;
     if (!s_panel) return ESP_ERR_INVALID_STATE;
     if (!buf || len != fos_display_buffer_size()) return ESP_ERR_INVALID_SIZE;
+    /* A controller that keeps the picture says what changed itself. */
+    bool controller_keeps = s_partial && s_partial->changed;
+    if (controller_keeps) fos_it8951_10in3_set_interactive(input_recent);
+    long controller_changed = controller_keeps ? s_partial->changed(buf) : -1;
+    bool known = controller_keeps ? controller_changed >= 0 : s_glass_known;
     fos_partial_refresh_input_t input = {
         .supported = fos_display_supports_partial(),
-        .glass_known = s_glass_known,
+        .glass_known = known,
         .same_scene = same_scene,
         .input_recent = input_recent,
         .partials_since_full = s_partials_since_full,
-        .changed_bytes = s_glass_known ? fos_partial_changed_bytes(buf, s_glass, len) : len,
+        .changed_bytes = !known ? len : controller_keeps ? (size_t)controller_changed
+                                                         : fos_partial_changed_bytes(buf, s_glass, len),
         .total_bytes = len,
     };
     if (!fos_partial_refresh_wanted(&input)) return fos_display_blit(buf, len);
@@ -448,10 +462,19 @@ esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bo
     s_last_partial_us = esp_timer_get_time();
     s_panel_awake = true;
     s_panel_rested = false;
-    memcpy(s_glass, buf, len);
+    if (!controller_keeps) memcpy(s_glass, buf, len);
     s_partials_since_full++;
     if (partial) *partial = true;
     return ESP_OK;
+}
+
+bool fos_display_settle_due(int64_t now_us)
+{
+    if (!s_partial || !s_partial->owed || !s_partial->owed()) return false;
+    if (now_us - s_last_partial_us < FOS_PANEL_SETTLE_US) return false;
+    /* Whether or not it works out, not again for a while. */
+    s_last_partial_us = now_us;
+    return true;
 }
 
 void fos_display_park(void)
@@ -467,12 +490,20 @@ void fos_display_park_if_idle(int64_t now_us)
 {
     if (!s_panel_awake) return;
     int64_t idle_us = now_us - s_last_partial_us;
-    if (idle_us >= FOS_PANEL_CLEAN_US && s_glass_known &&
+    if (idle_us >= FOS_PANEL_CLEAN_US && s_partial->clean && s_partials_since_full > 0 &&
         s_partials_since_full >= FOS_PARTIAL_MAX_BEFORE_FULL) {
+        DEV_SPI_Acquire();
+        s_partial->clean();
+        s_partial->rest();
+        DEV_SPI_Release();
+        s_panel_awake = false;
+        s_partials_since_full = 0;
+    } else if (idle_us >= FOS_PANEL_CLEAN_US && s_glass_known &&
+               s_partials_since_full >= FOS_PARTIAL_MAX_BEFORE_FULL) {
         fos_display_blit(s_glass, fos_display_buffer_size());
     } else if (idle_us >= FOS_PANEL_AWAKE_US) {
         fos_display_park();
-    } else if (idle_us >= FOS_PANEL_ANALOG_US && !s_panel_rested) {
+    } else if (idle_us >= FOS_PANEL_ANALOG_US && !s_panel_rested && !s_partial->changed) {
         DEV_SPI_Acquire();
         s_partial->rest();
         DEV_SPI_Release();

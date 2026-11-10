@@ -484,7 +484,12 @@
   pixel below a change). A new way to put pixels on the glass goes through
   `fos_display_blit` or `fos_display_update`, or the copy goes stale; the
   panel stays awake between updates, so the chip's deep sleep parks it first
-  (`fos_display_park`).
+  (`fos_display_park`). The IT8951 (the reTerminal E1003) keeps the picture
+  itself: `it8951.c` hashes tiles of the packed buffer and the table's
+  `changed` / `clean` / `owed` replace the copy, because 1.25 MiB more does
+  not fit an 8 MB board. Only GC16 (greys) and DU (pure black and white) draw
+  on its waveform file: while someone taps it is one DU over all that changed,
+  greys as a halftone, and GC16 once they stop (`fos_display_settle_due`).
   While someone taps, slow chores wait (`input_hold_on()` in `fos_client.c`, the
   rule in `fos_animation.c`): the render task drains the touch queue, so a new
   network call or flash write on it goes behind the hold too, and a full refresh
