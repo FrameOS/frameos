@@ -23,6 +23,8 @@ main/                     boot orchestration + platform modules
   fos_frame_settings.c    the settings panel's frame page (behind its gear): the facts it shows, the Wi-Fi, rotation and scale it sets
   fos_wifi_networks.c     the order a scan's networks are listed in there: by name (host-tested)
   fos_http.c              esp_http_server route layer (portal + /status + actions)
+  setup_page.html         the setup page (GET /), gzipped at build time by tools/gzip_setup_page.py;
+                          its values come from GET /api/setup
   fos_client.c            render loop: Nim local render or thin-client fetch → blit
   fos_ota.c               signed release OTA (manifest + streaming verify) when an OTA partition exists
   fos_cloud.c             cloud-managed frames: claim-token enrollment + management WS

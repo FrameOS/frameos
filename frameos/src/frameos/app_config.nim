@@ -130,3 +130,21 @@ proc cfgInt*(params: JsonNode, key: string, default: int): int =
     elif n.kind == JString:
       try: result = parseInt(n.getStr())
       except CatchableError: discard
+
+proc loaderParams*(node: DiagramNode): JsonNode =
+  ## The node's `config` object, which every generated `init` starts from. One
+  ## copy of the check and its message instead of one per loader (each of the
+  ## firmware's 25 loaders carried its own, docs/esp32-image-size.md).
+  result = node.data["config"]
+  if result.kind != JObject:
+    raise newException(Exception, "Invalid config format")
+
+proc initAppRoot*(app: AppRoot, node: DiagramNode, scene: FrameScene) =
+  ## The AppRoot half of a generated `init`: the fields every app has.
+  app.nodeName = node.data{"name"}.getStr()
+  app.nodeId = node.id
+  app.scene = scene
+  app.frameConfig = scene.frameConfig
+
+proc raiseUnknownField*(field: string) {.noinline, noreturn.} =
+  raise newException(ValueError, "Unknown field: " & field)
