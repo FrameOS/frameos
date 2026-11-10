@@ -74,6 +74,11 @@ proc fill*(image: Image, color: SomeColor) {.inline, raises: [].} =
     image.forEachSpan:
       fillUnsafe8(image.data8, luma, spanStart, spanLen)
     return
+  if image.format == pfGray4:
+    let luma = rgbxToGray8(color.asRgbx())
+    image.forEachSpan:
+      image.fillGray4(luma, spanStart, spanLen)
+    return
   image.forEachSpan:
     fillUnsafe(image.data, color, spanStart, spanLen)
 
@@ -118,11 +123,8 @@ proc pixelsEqual*(a, b: Image): bool {.raises: [].} =
         if a.unsafe[x, y] != b.unsafe[x, y]:
           return false
     return true
-  let rowBytes = a.width * a.bytesPerPixel
   for y in 0 ..< a.height:
-    let same = equalMem(a.pixelAddr(a.dataIndex(0, y)),
-      b.pixelAddr(b.dataIndex(0, y)), rowBytes)
-    if not same:
+    if not a.pixelRowsEqual(a.dataIndex(0, y), b, b.dataIndex(0, y), a.width):
       return false
   true
 
@@ -180,6 +182,13 @@ proc flipHorizontal*(image: Image) {.raises: [].} =
         swap(image.data8[left], image.data8[right])
         inc left
         dec right
+    elif image.format == pfGray4:
+      for x in 0 ..< halfWidth:
+        let level = gray4Level(image.data8, left)
+        gray4Put(image.data8, left, gray4Level(image.data8, right))
+        gray4Put(image.data8, right, level)
+        inc left
+        dec right
     else:
       for x in 0 ..< halfWidth:
         swap(image.data[left], image.data[right])
@@ -199,6 +208,11 @@ proc flipVertical*(image: Image) {.raises: [].} =
     elif image.format == pfGray8:
       for x in 0 ..< image.width:
         swap(image.data8[topStart + x], image.data8[bottomStart + x])
+    elif image.format == pfGray4:
+      for x in 0 ..< image.width:
+        let level = gray4Level(image.data8, topStart + x)
+        gray4Put(image.data8, topStart + x, gray4Level(image.data8, bottomStart + x))
+        gray4Put(image.data8, bottomStart + x, level)
     else:
       for x in 0 ..< image.width:
         swap(image.data[topStart + x], image.data[bottomStart + x])
@@ -218,10 +232,14 @@ proc rotate90*(image: Image) {.raises: [PixieError].} =
   # The pixels are copied back rather than the buffer handed over, because an
   # image's storage belongs to it: rebinding it to the temporary's would leave
   # this image pointing at pixels that die with the temporary. The pixel count
-  # is unchanged, so the existing buffer still fits.
+  # is unchanged, so the existing buffer still fits. (A 4-bit image's rows
+  # are whole bytes, so an odd width can need more once turned.)
+  if rotated.byteSize > image.byteSize:
+    raise newException(PixieError, "Cannot rotate90 this pfGray4 image in place: an odd width needs more bytes")
+  let bytes = rotated.byteSize
   swap(image.width, image.height)
-  image.stride = image.width
-  copyMem(image.pixelAddr(0), rotated.pixelAddr(0), image.dataLen * image.bytesPerPixel)
+  image.stride = rotated.stride
+  copyMem(image.bufferPointer, rotated.bufferPointer, bytes)
 
 proc subImage*(image: Image, x, y, w, h: int): Image {.raises: [PixieError].} =
   ## Gets a sub image from this image.
@@ -239,11 +257,7 @@ proc subImage*(image: Image, x, y, w, h: int): Image {.raises: [PixieError].} =
   result = image.newImageLike(w, h)
   if image.format != pfRgbx:
     for y2 in 0 ..< h:
-      copyMem(
-        result.pixelAddr(result.dataIndex(0, y2)),
-        image.pixelAddr(image.dataIndex(x, y + y2)),
-        w * image.bytesPerPixel
-      )
+      result.copyPixelRow(result.dataIndex(0, y2), image, image.dataIndex(x, y + y2), w)
     return
   for y2 in 0 ..< h:
     copyMem(
@@ -465,7 +479,10 @@ proc blur*(
       let
         src = tmp.dataIndex(0, y)
         dst = image.dataIndex(0, y)
-      if image.format == pfGray8:
+      if image.format == pfGray4:
+        for x in 0 ..< image.width:
+          image.storeGray4(dst + x, rgbxToGray8(tmp.data[src + x]))
+      elif image.format == pfGray8:
         for x in 0 ..< image.width:
           image.data8[dst + x] = rgbxToGray8(tmp.data[src + x])
       else:
@@ -637,12 +654,11 @@ template zeroRows(image: Image, y, h: int) =
   ## whose rows must not be zeroed through, since the gaps belong to the parent.
   ## Zero is "transparent black" for RGBX and "black" for 565 — the same
   ## answer once a driver reads the colour off either.
-  let bpp = image.bytesPerPixel
   if image.isContiguous:
-    zeroMem(image.rowAddr(0, y), h * image.width * bpp)
+    image.zeroPixelRow(image.dataIndex(0, y), h * image.width)
   else:
     for yy in y ..< y + h:
-      zeroMem(image.rowAddr(0, yy), image.width * bpp)
+      image.zeroPixelRow(image.dataIndex(0, yy), image.width)
 
 proc blendLineAny(
   a: Image, ax, ay: int, b: Image, bx, by: int, len: int, blendMode: BlendMode
@@ -717,6 +733,12 @@ proc blendRect(a, b: Image, pos: Ivec2, blendMode: BlendMode) =
     xEnd = min(b.width, a.width - px)
     yEnd = min(b.height, a.height - py)
 
+  if a.format == pfGray4 and b.format == pfGray4 and blendMode in {NormalBlend, OverwriteBlend}:
+    # A 4-bit picture is opaque and dithered already: its levels, as they are.
+    for y in yStart ..< yEnd:
+      a.copyPixelRow(a.dataIndex(xStart + px, y + py), b, b.dataIndex(xStart, y), xEnd - xStart)
+    return
+
   if b.format == pfRgb565 and blendMode in {NormalBlend, OverwriteBlend}:
     # A 565 picture is opaque, so drawn normally it overwrites: onto 565,
     # its rows copied as they are (a canvas a frame shows at its own size);
@@ -737,10 +759,9 @@ proc blendRect(a, b: Image, pos: Ivec2, blendMode: BlendMode) =
     for y in yStart ..< yEnd:
       if blendMode == MaskBlend:
         if xStart + px > 0:
-          zeroMem(a.rowAddr(0, y + py), (xStart + px) * a.bytesPerPixel)
+          a.zeroPixelRow(a.dataIndex(0, y + py), xStart + px)
         if xEnd + px < a.width:
-          zeroMem(a.rowAddr(xEnd + px, y + py),
-            (a.width - (xEnd + px)) * a.bytesPerPixel)
+          a.zeroPixelRow(a.dataIndex(xEnd + px, y + py), a.width - (xEnd + px))
       blendLineAny(a, xStart + px, y + py, b, xStart, y, xEnd - xStart, blendMode)
     if blendMode == MaskBlend and yEnd + py < a.height:
       a.zeroRows(yEnd + py, a.height - (yEnd + py))
@@ -857,14 +878,14 @@ proc drawSmooth(a, b: Image, transform: Mat3, blendMode: BlendMode) =
       # The sample line is RGBX whatever `b` is (getRgbaSmooth reads through
       # the accessors); only the store into `a` needs the format-aware path.
       if blendMode == MaskBlend and xStart > 0:
-        zeroMem(a.rowAddr(0, y), xStart * a.bytesPerPixel)
+        a.zeroPixelRow(a.dataIndex(0, y), xStart)
       blendSampleLineAny(
         a, xStart, y,
         cast[ptr UncheckedArray[ColorRGBX]](sampleLine[xStart].addr),
         xEnd - xStart, blendMode
       )
       if blendMode == MaskBlend and a.width - xEnd > 0:
-        zeroMem(a.rowAddr(xEnd, y), (a.width - xEnd) * a.bytesPerPixel)
+        a.zeroPixelRow(a.dataIndex(xEnd, y), a.width - xEnd)
       continue
 
     case blendMode:

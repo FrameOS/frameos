@@ -27,7 +27,7 @@ the app transpiles — no longer touches the emergency reserve.
 
 ## The canvas is RGBX where it fits, 565 where it must (2026-08-23)
 
-One rule in three places — `fos_render_canvas_bytes_per_pixel`
+One rule in three places — `fos_render_canvas_bits_per_pixel`
 (components/frameos_display), `sceneCanvasFormat` (embedded_runtime.nim),
 `embedded_render_canvas_bytes_per_pixel` (backend embedded_firmware.py):
 **4 B/px when width×height×4 ≤ PSRAM/2, else 2 B/px.** 800×480 on 8 MB →

@@ -65,10 +65,10 @@ describe("the ESP32 canvas format", () => {
     );
   });
 
-  it("is one byte of luma on a grey or black-and-white panel, whatever fits", () => {
+  it("is half a byte on sixteen greys and one of luma on another grey or black-and-white panel", () => {
     expect(esp32CanvasBytesPerPixel(800, 480, PSRAM_8MB, 1)).toBe(1);
     expect(esp32CanvasBytesPerPixel(800, 480, PSRAM_8MB, 4)).toBe(1);
-    expect(esp32CanvasBytesPerPixel(1872, 1404, PSRAM_8MB, 8)).toBe(1);
+    expect(esp32CanvasBytesPerPixel(1872, 1404, PSRAM_8MB, 8)).toBe(0.5);
     // A two-colour panel with red or yellow needs its colour.
     expect(esp32CanvasBytesPerPixel(800, 480, PSRAM_8MB, 2)).toBe(4);
   });

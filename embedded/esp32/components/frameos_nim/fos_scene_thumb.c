@@ -133,7 +133,7 @@ static bool has_room(size_t bytes)
 }
 
 void fos_scene_thumb_capture(const char *scene_id, const void *canvas, int width, int height, int stride,
-                             int bytes_per_pixel, uint32_t now)
+                             int bits_per_pixel, uint32_t now)
 {
     size_t total = 0, used = 0;
     if (now < CLOCK_SET_AFTER || esp_spiffs_info("state", &total, &used) != ESP_OK || total == 0) return;
@@ -156,13 +156,20 @@ void fos_scene_thumb_capture(const char *scene_id, const void *canvas, int width
             for (int s = 0; s < 4; s++) {
                 int px = x * scale + quarter + (s & 1) * step;
                 int py = y * scale + quarter + (s >> 1) * step;
-                const uint8_t *p = base + (size_t)(py * stride + px) * (size_t)bytes_per_pixel;
-                if (bytes_per_pixel == 2) {
+                size_t index = (size_t)py * (size_t)stride + (size_t)px;
+                if (bits_per_pixel == 4) {
+                    /* Two pixels a byte, the left one high; 15 is white. */
+                    int level = (index & 1u) ? base[index / 2u] & 15 : base[index / 2u] >> 4;
+                    r += level * 17, g += level * 17, b += level * 17;
+                    continue;
+                }
+                const uint8_t *p = base + index * (size_t)(bits_per_pixel / 8);
+                if (bits_per_pixel == 16) {
                     uint16_t v = (uint16_t)(p[0] | (p[1] << 8));
                     r += (v >> 8) & 0xF8;
                     g += (v >> 3) & 0xFC;
                     b += (v << 3) & 0xF8;
-                } else if (bytes_per_pixel == 1) {
+                } else if (bits_per_pixel == 8) {
                     r += p[0], g += p[0], b += p[0];
                 } else {
                     r += p[0], g += p[1], b += p[2];

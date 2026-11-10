@@ -55,7 +55,7 @@ proc sceneStateLoad(sceneId: cstring): cstring {.importc: "frameos_nim_scene_sta
   ## JSON this side frees, or nil.
 proc sceneStateSave(sceneId: cstring, json: cstring): bool {.importc: "frameos_nim_scene_state_save", cdecl.}
 proc cFree(p: pointer) {.importc: "free", header: "<stdlib.h>", cdecl.}
-proc sceneThumbCapture(sceneId: cstring, canvas: pointer, width, height, stride, bytesPerPixel: cint, now: uint32) {.
+proc sceneThumbCapture(sceneId: cstring, canvas: pointer, width, height, stride, bitsPerPixel: cint, now: uint32) {.
   importc: "fos_scene_thumb_capture", cdecl.}
 proc sceneThumbLoad(sceneId: cstring, tileWidth, tileHeight: cint, width, height: ptr cint): pointer {.
   importc: "fos_scene_thumb_load", cdecl.}
@@ -806,7 +806,7 @@ proc noteSceneThumbnail(image: Image) =
   thumbSceneId = sceneId
   thumbCheckAt = now + ThumbCheckEverySeconds
   sceneThumbCapture(sceneId.cstring, image.bufferPointer, image.width.cint, image.height.cint,
-    image.stride.cint, image.bytesPerPixel.cint, now.uint32)
+    image.stride.cint, image.bitsPerPixel.cint, now.uint32)
 
 proc embeddedSceneThumbnail(frameConfig: FrameConfig, sceneId: string, width, height: int): Image {.nimcall, gcsafe.} =
   ## The scene's picture off flash in the tile's shape; nil for none yet or no
@@ -910,15 +910,18 @@ proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
 # One scene canvas for the device's uptime, not one per render.
 #
 # Two decisions live here. The format, decided per board by the firmware
-# (`fos_render_canvas_bytes_per_pixel`, components/frameos_display), panel
-# first: pixie's 8-bit luma surface for a greyscale or black-and-white panel
-# and its 16-bit RGB 5/6/5 surface for an RGB565 LCD, whatever the PSRAM;
+# (`fos_render_canvas_bits_per_pixel`, components/frameos_display), panel
+# first: pixie's sixteen-grey surface for a 4-bit grey panel, its 8-bit luma
+# surface for a four-grey or black-and-white panel (whose error diffusion
+# wants the 256 levels) and its 16-bit RGB 5/6/5 surface for an RGB565 LCD,
+# whatever the PSRAM;
 # for a colour e-paper panel RGBX when a full canvas takes at most half the
 # module's PSRAM, else 565. A grey canvas loses nothing a grey panel shows —
 # blending is per channel, so the luma of a composite is the composite of
 # the lumas — and every pass over it (a fill, a blend, the dither) moves a
-# quarter of the bytes; the 1872x1404 sixteen-grey reTerminal E1003 needs it
-# to fit at all (2.5 MiB where 565 was 5.0). An LCD's 565 canvas is its own
+# quarter of the bytes. The 1872x1404 sixteen-grey reTerminal E1003's is
+# 1.3 MiB (2.5 in luma, 5.0 in 565): its stores are dithered as the pack did,
+# and the level a store leaves is the level on the glass. An LCD's 565 canvas is its own
 # back frame buffer (panelCanvas below): drawn in place, nothing to pack or
 # copy. The 800x480 colour boards and a 1200x1600 panel on a 16 MB module
 # render in full colour; 1200x1600 Spectra 6 on an 8 MB module needs 565 —
@@ -930,7 +933,7 @@ proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
 # weather scene. So a 565 canvas stores with pixie's per-pixel dither
 # (`ditherStores`), which brings the gradient back at no memory cost, and
 # RGBX is used wherever it fits. `-d:frameosCanvasRgbx` / `-d:frameosCanvas565`
-# / `-d:frameosCanvasGray8` force a format for A/B measurement; the Pi runtime and the wasm preview are
+# / `-d:frameosCanvasGray8` / `-d:frameosCanvasGray4` force a format for A/B measurement; the Pi runtime and the wasm preview are
 # untouched either way and keep full RGBA.
 #
 # The lifetime: the memory comes from one PSRAM block the firmware claims at
@@ -943,7 +946,7 @@ proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
 # cache never stores the live canvas), so reusing it is safe.
 
 proc canvasBuffer(len: csize_t): pointer {.importc: "frameos_nim_canvas_buffer", cdecl.}
-proc canvasBytesPerPixel(): csize_t {.importc: "fos_display_canvas_bytes_per_pixel", cdecl.}
+proc canvasBitsPerPixel(): csize_t {.importc: "fos_display_canvas_bits_per_pixel", cdecl.}
 
 var sceneCanvas: Image
 
@@ -982,10 +985,12 @@ proc sceneCanvasFormat*(): PixelFormat =
   when defined(frameosCanvasRgbx): pfRgbx
   elif defined(frameosCanvas565): pfRgb565
   elif defined(frameosCanvasGray8): pfGray8
+  elif defined(frameosCanvasGray4): pfGray4
   else:
-    case canvasBytesPerPixel()
-    of 4: pfRgbx
-    of 1: pfGray8
+    case canvasBitsPerPixel()
+    of 32: pfRgbx
+    of 8: pfGray8
+    of 4: pfGray4
     else: pfRgb565
 
 proc sceneCanvasWidth*(): int =
@@ -1034,17 +1039,19 @@ proc renderCanvas*(): Image =
   if not sceneCanvas.isNil and sceneCanvas.width == width and
       sceneCanvas.height == height and sceneCanvas.format == format:
     return sceneCanvas
-  let bytesPerPixel =
+  let canvasBytes =
     case format
-    of pfRgb565: 2
-    of pfGray8: 1
-    of pfRgbx: 4
-  let buffer = canvasBuffer(csize_t(width * height * bytesPerPixel))
+    of pfRgb565: width * height * 2
+    of pfGray8: width * height
+    of pfGray4: ((width + 1) div 2) * height
+    of pfRgbx: width * height * 4
+  let buffer = canvasBuffer(csize_t(canvasBytes))
   if buffer != nil:
     sceneCanvas =
       case format
       of pfRgb565: newImage565Over(width, height, buffer)
       of pfGray8: newImageGray8Over(width, height, buffer)
+      of pfGray4: newImageGray4Over(width, height, buffer)
       of pfRgbx: newImageOver(width, height, buffer)
   else:
     # No firmware block (a host build, or the reservation failed): the Nim
@@ -1054,6 +1061,7 @@ proc renderCanvas*(): Image =
       case format
       of pfRgb565: newImage565(width, height)
       of pfGray8: newImageGray8(width, height)
+      of pfGray4: newImageGray4(width, height)
       of pfRgbx: newImage(width, height)
   if format == pfRgb565:
     sceneCanvas.ditherStores = true
@@ -1061,6 +1069,7 @@ proc renderCanvas*(): Image =
     case format
     of pfRgb565: "rgb565 (dithered stores)"
     of pfGray8: "gray8"
+    of pfGray4: "gray4 (dithered stores)"
     of pfRgbx: "rgbx"
   log(&"canvas: {width}x{height} {described}")
   sceneCanvas

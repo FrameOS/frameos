@@ -351,6 +351,11 @@ block scene_switcher_on_one_scene:
   let drawn = switchHost.renderScene(ExecutionContext(scene: switchHost.scene, event: "render",
     payload: %*{}, image: canvas, hasImage: true, loopIndex: 0, loopKey: "."))
   doAssert not drawn.isNil and SceneSwitcherScene(switchHost.scene).paper, "a luma canvas is e-paper"
+  let sixteen = newImageGray4(320, 240) # the E1003's
+  let drawnInFour = switchHost.renderScene(ExecutionContext(scene: switchHost.scene, event: "render",
+    payload: %*{}, image: sixteen, hasImage: true, loopIndex: 0, loopKey: "."))
+  doAssert not drawnInFour.isNil and SceneSwitcherScene(switchHost.scene).paper, "a 4-bit canvas is e-paper"
+  doAssert not sixteen.isOneColor, "the switcher drew nothing into the 4-bit canvas"
   # A key with the role `next`, then OK: the scene after the one it came from.
   doAssert switchHost.send(eoHttpWrite, "button", %*{"label": "RIGHT", "role": "next", "action": "press"})
   doAssert switchHost.scene.state{"highlight"}.getStr() == order[1].string

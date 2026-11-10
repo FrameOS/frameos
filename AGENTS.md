@@ -448,8 +448,11 @@
   line also goes out on the 115200-baud console.
 - **The canvas is the panel where it can be.** An RGB565 LCD's canvas is its
   back frame buffer (`fos_display_render_target`, `frameos_nim_render_panel`:
-  nothing packed, the blit a buffer switch); a grey or black-and-white panel
-  draws in pixie's luma surface. The canvas rule has five copies
+  nothing packed, the blit a buffer switch); a sixteen-grey panel draws in
+  pixie's `pfGray4`, half a byte a pixel in the panel buffer's own layout, every
+  store dithered through the 4x4 ordered matrix (a new row copy in pixie uses
+  `copyPixelRow`, and never copies a row down into a dithered gradient), and any
+  other grey or black-and-white panel in pixie's luma surface. The canvas rule has five copies
   (`frameos_display.h` lists them, `docs/device-limits-fixtures.json` pins
   two): change them together. A Pi with a 16 bpp RGB565 framebuffer (a
   HyperPixel 4.0) gets the same idea: one kept `pfRgb565` canvas

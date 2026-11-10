@@ -134,6 +134,12 @@ proc newestHeldFrame(target: Image): int =
 
 proc copyFrameIn(target: Image, source: pointer) =
   ## What `source` (another of the panel's buffers) holds where `target` is.
+  if target.format == pfGray4:
+    let raw = cast[ptr UncheckedArray[uint8]](source)
+    for y in 0 ..< target.height:
+      let index = target.dataIndex(0, y)
+      copyGray4Levels(target.data8, index, raw, index, target.width)
+    return
   let
     bpp = target.bytesPerPixel
     d = cast[ptr UncheckedArray[byte]](target.bufferPointer)

@@ -66,7 +66,7 @@ var
   # at 1200x1600 under 8 MB even a blank scene's second render was refused
   # 7.3 MB: an out-of-memory the frame never has.
   deviceCanvas: Image
-  deviceCanvasBytesPerPixel = 4
+  deviceCanvasBitsPerPixel = 32
   # A 565 or luma canvas expanded to RGBA for the page (frameos_wasm_buffer).
   # It stands in for the panel buffer, which the device's heap leaves out, so
   # it comes from plain malloc, outside the simulated ceiling.
@@ -121,9 +121,10 @@ proc previewCanvas(): Image =
     width = if frameConfig.rotate in [90, 270]: frameConfig.height else: frameConfig.width
     height = if frameConfig.rotate in [90, 270]: frameConfig.width else: frameConfig.height
     format =
-      case deviceCanvasBytesPerPixel
-      of 2: pfRgb565
-      of 1: pfGray8
+      case deviceCanvasBitsPerPixel
+      of 16: pfRgb565
+      of 8: pfGray8
+      of 4: pfGray4
       else: pfRgbx
   if not deviceCanvas.isNil and deviceCanvas.width == width and
       deviceCanvas.height == height and deviceCanvas.format == format:
@@ -133,20 +134,17 @@ proc previewCanvas(): Image =
     case format
     of pfRgb565: newImage565(width, height)
     of pfGray8: newImageGray8(width, height)
+    of pfGray4: newImageGray4(width, height)
     of pfRgbx: newImage(width, height)
-  let bytesPerPixel =
-    case format
-    of pfRgb565: 2
-    of pfGray8: 1
-    of pfRgbx: 4
   if format == pfRgb565:
     # The rounding the device's 565 stores do, so a gradient does not step.
     deviceCanvas.ditherStores = true
-  fosWasmMemorySetHeld(csize_t(width * height * (4 - bytesPerPixel)))
+  fosWasmMemorySetHeld(csize_t(width * height * 4 - deviceCanvas.byteSize))
   let described =
     case format
     of pfRgb565: "rgb565 (dithered stores)"
     of pfGray8: "gray8"
+    of pfGray4: "gray4 (dithered stores)"
     of pfRgbx: "rgbx"
   log(&"canvas: {width}x{height} {described}")
   deviceCanvas
@@ -193,7 +191,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     host.renderRequested = false
     lastImage = nil
     dropDeviceCanvas()
-    deviceCanvasBytesPerPixel = 4
+    deviceCanvasBitsPerPixel = 32
     pendingSceneStates = initTable[string, JsonNode]()
 
     var settings = %*{}
@@ -373,11 +371,11 @@ proc frameos_wasm_set_embedded(enabled: bool) {.exportc, cdecl.} =
   setSimulatedEmbedded(enabled)
   host.keepJsRuntimes = enabled
 
-proc frameos_wasm_set_canvas_bytes_per_pixel(bytesPerPixel: cint) {.exportc, cdecl.} =
-  ## The canvas the device keeps, while running as an ESP32
-  ## (devices.ts `canvasBytesPerPixel`): 2 RGB565, 1 luma, 4 RGBX, the
-  ## default every frameos_wasm_init restores. Anything else is RGBX.
-  deviceCanvasBytesPerPixel = if bytesPerPixel in [1.cint, 2.cint]: bytesPerPixel.int else: 4
+proc frameos_wasm_set_canvas_bits_per_pixel(bitsPerPixel: cint) {.exportc, cdecl.} =
+  ## The canvas the device keeps, while running as an ESP32 (eight times
+  ## devices.ts `canvasBytesPerPixel`): 16 RGB565, 8 luma, 4 sixteen greys, 32
+  ## RGBX, the default every frameos_wasm_init restores. Anything else is RGBX.
+  deviceCanvasBitsPerPixel = if bitsPerPixel in [4.cint, 8.cint, 16.cint]: bitsPerPixel.int else: 32
 
 proc frameos_wasm_set_render_scale(scale: cdouble) {.exportc, cdecl.} =
   ## The frame's render scale (frame.json renderScale, render_scale.nim): what

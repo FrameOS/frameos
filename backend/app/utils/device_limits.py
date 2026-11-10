@@ -14,6 +14,7 @@ pins them to the same numbers.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from app.models.frame import Frame
@@ -23,15 +24,22 @@ ESP32_EMERGENCY_RESERVE_BYTES = 1024 * 1024
 # FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE: a colour e-paper canvas is RGBX only
 # while two of it fit the PSRAM heap, RGB565 past that.
 ESP32_RGBX_MAX_PSRAM_SHARE = 2
-# fos_pixel_format_t: the panel formats a luma canvas serves, and the RGB565
-# LCD whose canvas is its own frame buffer.
-ESP32_GREY_PIXEL_FORMATS = frozenset({1, 4, 8})
+# fos_pixel_format_t: the panel formats a luma canvas serves, the sixteen-grey
+# one that has a 4-bit canvas, and the RGB565 LCD whose canvas is its own frame
+# buffer.
+ESP32_GREY_PIXEL_FORMATS = frozenset({1, 4})
+ESP32_PIXEL_4BPP_GRAY = 8
 ESP32_PIXEL_RGB565 = 9
 
 
-def esp32_canvas_bytes_per_pixel(width: int, height: int, psram_bytes: int, pixel_format: int | None = None) -> int:
-    """fos_render_canvas_bytes_per_pixel: luma on a grey panel and 565 on an
-    RGB565 LCD whatever the PSRAM; RGBX while it fits on any other."""
+def esp32_canvas_bytes_per_pixel(
+    width: int, height: int, psram_bytes: int, pixel_format: int | None = None
+) -> float:
+    """fos_render_canvas_bits_per_pixel, in bytes: half a byte on a sixteen-grey
+    panel, luma on another grey panel and 565 on an RGB565 LCD whatever the
+    PSRAM; RGBX while it fits on any other."""
+    if pixel_format == ESP32_PIXEL_4BPP_GRAY:
+        return 0.5
     if pixel_format in ESP32_GREY_PIXEL_FORMATS:
         return 1
     if pixel_format == ESP32_PIXEL_RGB565:
@@ -52,13 +60,13 @@ def esp32_device_limits(width: int, height: int, psram_bytes: int, pixel_format:
     packed_bytes = pixels * 2 * 4 if pixel_format == ESP32_PIXEL_RGB565 else -(-pixels // 2)
     device_heap = max(512 * 1024, psram_bytes - packed_bytes - ESP32_EMERGENCY_RESERVE_BYTES)
     canvas_bytes_per_pixel = esp32_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
-    preview_overhead = pixels * 4 - pixels * canvas_bytes_per_pixel
+    preview_overhead = pixels * 4 - math.ceil(pixels * canvas_bytes_per_pixel)
     return {
         "memoryBytes": device_heap + preview_overhead,
         "memoryReserveBytes": 0,
         "previewOverheadBytes": preview_overhead,
         # The canvas the device keeps, which the renderer draws in too
-        # (frameos_wasm_set_canvas_bytes_per_pixel); the bytes it saves against
+        # (frameos_wasm_set_canvas_bits_per_pixel); the bytes it saves against
         # RGBX stay charged, so the two numbers above read the same either way.
         "canvasBytesPerPixel": canvas_bytes_per_pixel,
         "embedded": True,

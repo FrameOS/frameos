@@ -1284,7 +1284,9 @@ before.
 
 ## The render canvas is 16-bit (2026.8.31)
 
-The canvas format is decided per board (`fos_render_canvas_bytes_per_pixel`
+A sixteen-grey panel has a 4-bit canvas in its own buffer's layout, each
+store dithered (docs/realtime-rendering.md); the other formats follow.
+The canvas format is decided per board (`fos_render_canvas_bits_per_pixel`
 in `components/frameos_display`): **RGBX when a full canvas takes at most
 half the module's PSRAM, else 16-bit RGB 5/6/5.** The 800×480 boards (1.5 MB
 of 8 MB) and a 1200×1600 panel on a 16 MB module (7.3 MB) render in full

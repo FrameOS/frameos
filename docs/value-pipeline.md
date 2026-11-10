@@ -339,8 +339,9 @@ E1004 upgrades to the live canvas and renders.
 It also draws the way the device does (`src/wasm/wasm_main.nim`
 `previewCanvas`): one canvas for every render, kept between them, in the
 format the board keeps it in (`DeviceLimits.canvasBytesPerPixel`, handed to
-`frameos_wasm_set_canvas_bytes_per_pixel`: RGB565 for a 13.3" colour panel
-on 8 MB, luma on a grey panel, RGBX where two of it fit). The bytes a 565 or
+`frameos_wasm_set_canvas_bits_per_pixel`: RGB565 for a 13.3" colour panel
+on 8 MB, 4-bit on a sixteen-grey panel, luma on another grey one, RGBX where
+two of it fit). The bytes a 565 or
 luma canvas saves against RGBX stay charged (`fos_wasm_memory_set_held`), so
 `memoryBytes` and `previewOverheadBytes` read the same with a bundle from
 before it, which draws RGBX. A producer's error frame goes into that canvas

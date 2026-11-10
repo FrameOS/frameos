@@ -6,11 +6,11 @@
 
 #include <stdint.h>
 
-/* After a render: the canvas (`stride` in pixels; 1, 2 or 4 bytes a pixel, as
- * pixie's gray8, rgb565 and rgbx) as this scene's picture, in memory: the
- * render does not wait for the flash. */
+/* After a render: the canvas (`stride` in pixels; 4, 8, 16 or 32 bits a pixel,
+ * as pixie's gray4, gray8, rgb565 and rgbx) as this scene's picture, in memory:
+ * the render does not wait for the flash. */
 void fos_scene_thumb_capture(const char *scene_id, const void *canvas, int width, int height, int stride,
-                             int bytes_per_pixel, uint32_t now);
+                             int bits_per_pixel, uint32_t now);
 /* Writes the picture taken last, unless the scene has one under an hour old
  * or the partition is too full. Seconds of SPIFFS: when nobody is waiting. */
 void fos_scene_thumb_flush(void);

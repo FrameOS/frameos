@@ -131,21 +131,25 @@ const char *fos_display_panel_name(size_t index);
 int fos_display_panel_width(size_t index);
 int fos_display_panel_height(size_t index);
 fos_pixel_format_t fos_display_panel_format(size_t index);
-/* Bytes per pixel of the scene canvas the Nim renderer composites into
+/* Bits per pixel of the scene canvas the Nim renderer composites into
  * (frameos/src/embedded/embedded_runtime.nim, `renderCanvas`), decided by
  * the panel first and the module's PSRAM after:
  *
- * - 1 (pixie's 8-bit luma surface) for a greyscale or black-and-white
- *   panel, always. Grey costs it nothing — blending is per channel, so the
- *   luma of a composite is the composite of the lumas, and 256 levels feed
- *   at most 16 — and every pass over the canvas (a fill, a blend, the
- *   dither) moves a quarter of the bytes RGBX would. The 1872x1404
- *   reTerminal E1003 needs it to fit at all (2.5 MB, where 565 was 5.0).
- * - 2 (its 16-bit RGB 5/6/5 surface) for an RGB565 LCD, always: the canvas
+ * - 4 (pixie's sixteen-grey surface, the panel buffer's own layout) for a
+ *   4-bit grey panel, always. Every store is dithered through the ordered
+ *   matrix the pack used, so a gradient stays smooth and the pack is a copy.
+ *   The 1872x1404 reTerminal E1003 is why: 1.3 MB, where luma was 2.5 and
+ *   565 was 5.0, and a scene like Word clock wants that room.
+ * - 8 (its 8-bit luma surface) for a four-grey or black-and-white panel,
+ *   always: their error diffusion wants the 256 levels. Grey costs it
+ *   nothing — blending is per channel, so the luma of a composite is the
+ *   composite of the lumas — and every pass over the canvas (a fill, a
+ *   blend, the dither) moves a quarter of the bytes RGBX would.
+ * - 16 (its RGB 5/6/5 surface) for an RGB565 LCD, always: the canvas
  *   is then the panel's own frame buffer (fos_display_render_target), drawn
  *   in place, with nothing to pack or copy.
- * - For a colour e-paper panel, 4 (RGBX) when a full canvas takes at most
- *   half the module's PSRAM, else 2. The 800x480 boards (1.5 MB of 8 MB)
+ * - For a colour e-paper panel, 32 (RGBX) when a full canvas takes at most
+ *   half the module's PSRAM, else 16. The 800x480 boards (1.5 MB of 8 MB)
  *   and a 1200x1600 panel on a 16 MB module (7.3 MB) get RGBX; 1200x1600
  *   Spectra 6 on an 8 MB module gets 565, which is what makes it fit at all
  *   (3.7 MB). Rendering into 565 costs colour: the dither keeps its error
@@ -154,20 +158,20 @@ fos_pixel_format_t fos_display_panel_format(size_t index);
  *   visible bands — so 565 canvases store with a per-pixel dither (pixie
  *   `ditherStores`) and RGBX is used wherever it fits.
  *
- * The same rule lives in `embedded_render_canvas_bytes_per_pixel`
+ * The same rule lives, in bytes (0.5 for 4 bits), in
+ * `embedded_render_canvas_bytes_per_pixel`
  * in backend embedded_firmware.py, `esp32_canvas_bytes_per_pixel` in
  * app/utils/device_limits.py, `esp32CanvasBytesPerPixel` in the SPA's
  * utils/deviceLimits.ts and the wasm preview's devices.ts, and
  * `sceneCanvasFormat` in embedded_runtime.nim; keep them in step
  * (docs/device-limits-fixtures.json pins the TS copy and the Python one). */
 #define FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE 2u
-/* The panel formats a luma canvas serves: 1-bit black and white, 2- and
- * 4-bit grey. */
+/* The grey panel formats: 1-bit black and white, 2- and 4-bit grey. */
 bool fos_pixel_format_is_grey(fos_pixel_format_t format);
-size_t fos_render_canvas_bytes_per_pixel(int width, int height, size_t psram_total_bytes,
-                                         fos_pixel_format_t format);
+size_t fos_render_canvas_bits_per_pixel(int width, int height, size_t psram_total_bytes,
+                                        fos_pixel_format_t format);
 /* The above for the selected panel and this module's PSRAM. */
-size_t fos_display_canvas_bytes_per_pixel(void);
+size_t fos_display_canvas_bits_per_pixel(void);
 /* Bytes of the scene canvas for the selected panel (0 when headless). */
 size_t fos_display_canvas_bytes(void);
 /* PSRAM the on-device renderer needs for this panel: the scene canvas

@@ -326,32 +326,34 @@ bool fos_pixel_format_is_grey(fos_pixel_format_t format)
     return format == FOS_PIXEL_1BPP || format == FOS_PIXEL_2BPP_GRAY || format == FOS_PIXEL_4BPP_GRAY;
 }
 
-size_t fos_render_canvas_bytes_per_pixel(int width, int height, size_t psram_total_bytes,
-                                         fos_pixel_format_t format)
+size_t fos_render_canvas_bits_per_pixel(int width, int height, size_t psram_total_bytes,
+                                        fos_pixel_format_t format)
 {
     if (width <= 0 || height <= 0) return 0;
-    if (fos_pixel_format_is_grey(format)) return 1;
-    if (format == FOS_PIXEL_RGB565) return 2;
+    if (format == FOS_PIXEL_4BPP_GRAY) return 4;
+    if (fos_pixel_format_is_grey(format)) return 8;
+    if (format == FOS_PIXEL_RGB565) return 16;
     size_t rgbx = (size_t)width * (size_t)height * 4u;
     if (psram_total_bytes > 0 && rgbx * FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE <= psram_total_bytes) {
-        return 4;
+        return 32;
     }
-    return 2;
+    return 16;
 }
 
-size_t fos_display_canvas_bytes_per_pixel(void)
+size_t fos_display_canvas_bits_per_pixel(void)
 {
     if (!s_panel) return 0;
-    return fos_render_canvas_bytes_per_pixel(fos_display_width(), fos_display_height(),
-                                             heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
-                                             fos_display_format());
+    return fos_render_canvas_bits_per_pixel(fos_display_width(), fos_display_height(),
+                                            heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
+                                            fos_display_format());
 }
 
 size_t fos_display_canvas_bytes(void)
 {
     if (!s_panel) return 0;
-    return (size_t)fos_display_width() * (size_t)fos_display_height() *
-           fos_display_canvas_bytes_per_pixel();
+    /* Rows of whole bytes: a 4-bit canvas of an odd width is padded. */
+    return ((size_t)fos_display_width() * fos_display_canvas_bits_per_pixel() + 7u) / 8u *
+           (size_t)fos_display_height();
 }
 
 size_t fos_display_render_psram_bytes(void)

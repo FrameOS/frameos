@@ -1,5 +1,5 @@
 ## Whole-image operations on the narrow storage formats (`pfRgb565`,
-## `pfGray8`: no alpha, read back opaque), shared by the scalar bodies in
+## `pfGray8`, `pfGray4`: no alpha, read back opaque), shared by the scalar bodies in
 ## `images.nim` and by every SIMD variant in `simd/`.
 ##
 ## The SIMD variants need these too, not just the scalar fallbacks: on amd64
@@ -18,6 +18,15 @@ proc isOneColor565*(image: Image): bool {.raises: [].} =
   if image.isView:
     return false
   result = true
+  if image.format == pfGray4:
+    # Row by row: an odd width leaves half a byte of padding at each row's end.
+    let first = gray4Level(image.data8, image.dataIndex(0, 0))
+    for y in 0 ..< image.height:
+      let row = image.dataIndex(0, y)
+      for x in 0 ..< image.width:
+        if gray4Level(image.data8, row + x) != first:
+          return false
+    return
   if image.format == pfGray8:
     let first = image.data8[0]
     for i in 0 ..< image.dataLen:
@@ -33,6 +42,12 @@ proc applyOpacity565*(image: Image, opacity: uint16) {.raises: [].} =
   ## `opacity` already scaled to 0..255. No alpha to scale, so this scales the
   ## colour — which is what a driver reading RGB off a premultiplied RGBA
   ## canvas would have seen after `applyOpacity` there.
+  if image.format == pfGray4:
+    image.forEachSpan:
+      for i in spanStart ..< spanStart + spanLen:
+        let luma = gray4Level(image.data8, i).uint16 * 17
+        image.storeGray4(i, ((luma * opacity) div 255).uint8)
+    return
   if image.format == pfGray8:
     image.forEachSpan:
       for i in spanStart ..< spanStart + spanLen:
@@ -50,6 +65,11 @@ proc invert565*(image: Image) {.raises: [].} =
   ## Complementing each packed field is the exact complement of the expanded
   ## channel: `expand(31 - r) + expand(r) == 255` for every `r`. A grey
   ## inverts the same way.
+  if image.format == pfGray4:
+    image.forEachSpan:
+      for i in spanStart ..< spanStart + spanLen:
+        gray4Put(image.data8, i, 15 - gray4Level(image.data8, i))
+    return
   if image.format == pfGray8:
     image.forEachSpan:
       for i in spanStart ..< spanStart + spanLen:
@@ -60,6 +80,12 @@ proc invert565*(image: Image) {.raises: [].} =
       image.data16[i] = not image.data16[i]
 
 proc ceil565*(image: Image) {.raises: [].} =
+  if image.format == pfGray4:
+    image.forEachSpan:
+      for i in spanStart ..< spanStart + spanLen:
+        if gray4Level(image.data8, i) != 0:
+          gray4Put(image.data8, i, 15)
+    return
   if image.format == pfGray8:
     image.forEachSpan:
       for i in spanStart ..< spanStart + spanLen:
