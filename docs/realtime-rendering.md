@@ -55,6 +55,14 @@ step measured on the board:
 | No heap walk per frame; the SVG spec read off the JS object; the fast XML reader; flattened shapes kept | ~50 ms | 19.3 |
 | The metrics sample with the frame logged in full, not every second | ~50 ms | 19.6 |
 
+The `-O2` of the third row took effect only in images built with the flox dev
+shell's Nim, which ROT13s the names of the C files it generates, the names
+`components/frameos_nim/CMakeLists.txt` picks the modules by. The official
+Nim of the Docker image, CI and every release writes them plain, so those
+images drew pixie's raster at `-Os`: 17.9 fps instead of 19.4 on the SenseCAP
+(2026-11-10). Both names are listed now, and `ci_build_image.sh` fails a build
+whose hot modules came out without `-O2` (+39 KB of flash).
+
 Where the 50 ms go now, from probes around each phase (not in the tree):
 `get()` ~5 ms, the SVG parse ~10 (half of it the XML), the raster of the
 logo's ~130x85 box ~20, the interpreter around them ~7, the rest the

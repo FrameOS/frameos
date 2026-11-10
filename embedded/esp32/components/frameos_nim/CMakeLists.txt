@@ -30,18 +30,24 @@ if(NIM_GENERATED_SRCS)
         -fno-strict-aliasing -fno-lto)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE FRAMEOS_NIM_ENABLED=1)
     # pixie's raster modules compile at -O2 instead of the image's -Os: an
-    # animated logo's raster went from 31 to 26 ms on the SenseCAP Indicator
-    # for 36 KB of flash. The SVG, XML and string modules gained nothing and
-    # stay -Os (docs/realtime-rendering.md). Nim names a module's C file
-    # after its path, ROT13'd: "@fcvkvr@fcnguf" is "@spixie@spaths".
+    # animated logo's raster went from 31 to 26 ms on the SenseCAP Indicator.
+    # The SVG, XML and string modules gained nothing and stay -Os
+    # (docs/realtime-rendering.md). Nim names a module's C file after its
+    # path, `@m` and `@s` for the separators (`@m..@s..@spixie@ssrc@spixie@spaths`),
+    # and nixpkgs' Nim (the flox dev shell) ROT13s that name (`@z..@f..@fcvkvr@ffep
+    # @fcvkvr@fcnguf`): each module is listed both ways. Until 2026-11-10 only
+    # the ROT13 names were, so a build with the official Nim (the Docker image,
+    # CI, every release) compiled all of these at -Os: DVD Logo Bounce on the
+    # SenseCAP ran ~5 ms a frame slower than on the flox bench builds of #626.
+    # ci_build_image.sh checks the image it builds took -O2 for each.
     set(FRAMEOS_NIM_HOT_MODULES
-        "@fcvkvr@fcnguf.nim.c"     # pixie/paths: flattening, coverage, fills
-        "@fcvkvr@fvzntrf.nim.c"    # pixie/images
-        "@fcvkvr@foyraqf.nim.c"    # pixie/blends
-        "@fcvkvr@fvagreany.nim.c"  # pixie/internal
-        "@fcvkvr@feto565.nim.c"    # pixie/rgb565
-        "@fcvkvr@fpbzzba.nim.c"    # pixie/common
-        "@fsenzrbf@fhgvyf@ferfnzcyr.nim.c") # frameos/utils/resample: zoomPan's frame
+        "@spixie@spaths.nim.c"     "@fcvkvr@fcnguf.nim.c"     # pixie/paths: flattening, coverage, fills
+        "@spixie@simages.nim.c"    "@fcvkvr@fvzntrf.nim.c"    # pixie/images
+        "@spixie@sblends.nim.c"    "@fcvkvr@foyraqf.nim.c"    # pixie/blends
+        "@spixie@sinternal.nim.c"  "@fcvkvr@fvagreany.nim.c"  # pixie/internal
+        "@spixie@srgb565.nim.c"    "@fcvkvr@feto565.nim.c"    # pixie/rgb565
+        "@spixie@scommon.nim.c"    "@fcvkvr@fpbzzba.nim.c"    # pixie/common
+        "@sframeos@sutils@sresample.nim.c" "@fsenzrbf@fhgvyf@ferfnzcyr.nim.c") # frameos/utils/resample: zoomPan's frame
     foreach(src ${NIM_GENERATED_SRCS})
         foreach(hot ${FRAMEOS_NIM_HOT_MODULES})
             string(FIND "${src}" "${hot}" at)
