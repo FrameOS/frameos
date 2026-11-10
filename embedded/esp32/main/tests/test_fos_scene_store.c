@@ -484,6 +484,36 @@ static void test_replace_all(void)
     CHECK(files == 2);
 }
 
+static int s_paced = 0;
+static void count_pace(void) { s_paced++; }
+
+static void test_every_2_kb_written_is_paced(void)
+{
+    /* fos_scenes.c's hook waits out renders and taps there (a flash write
+     * stalls both cores): every write of the store goes through it, a slot,
+     * the index and a whole file alike. */
+    fresh_dir();
+    fos_scene_store_hooks_t hooks = {.pace = count_pace};
+    fos_scene_store_set_hooks(&hooks);
+    static char big[5000];
+    memset(big, 'x', sizeof(big));
+    char path[160], tmp[160];
+    snprintf(path, sizeof(path), "%s/big.json", s_dir);
+    snprintf(tmp, sizeof(tmp), "%s/big.tmp", s_dir);
+    s_paced = 0;
+    CHECK(fos_scene_store_write_file(path, tmp, big, sizeof(big)) == FOS_SCENE_STORE_OK);
+    CHECK(s_paced == 3); /* 2048 + 2048 + 904 */
+    s_paced = 0;
+    fos_scene_store_result_t result;
+    CHECK(put_one("{\"id\":\"paced\"}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(s_paced >= 2); /* the slot, then the index */
+    fos_scene_store_hooks_t none = {0};
+    fos_scene_store_set_hooks(&none);
+    s_paced = 0;
+    CHECK(fos_scene_store_write_file(path, tmp, big, sizeof(big)) == FOS_SCENE_STORE_OK);
+    CHECK(s_paced == 0);
+}
+
 int main(void)
 {
     snprintf(s_dir, sizeof(s_dir), "/tmp/fos_scene_store_%d", (int)getpid());
@@ -503,6 +533,7 @@ int main(void)
     test_old_index_without_bytes();
     test_layouts_and_the_default();
     test_replace_all();
+    test_every_2_kb_written_is_paced();
 
     fresh_dir();
     rmdir(s_dir);

@@ -30,6 +30,7 @@
 #include "fos_scene_state.h"
 #include "fos_scene_store.h"
 #include "fos_slot_cache.h"
+#include "fos_spiffs_footprint.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -65,6 +66,14 @@ static volatile bool s_pending = false;
  * put or deleted), not a combined payload: only the catalog is read again,
  * and the resident scene reloads only if that scene is what changed. */
 static volatile bool s_patch_pending = false;
+/* A producer (the cloud, HTTP or the console task) is writing and splitting a
+ * whole payload under the store lock (fos_scenes_set_json_from): the slots the
+ * render task's index names are being replaced. The render task reads none
+ * meanwhile and does not wait on the lock: a switch waits for the apply that
+ * follows, which reads the new index first. */
+static volatile bool s_store_changing = false;
+static bool store_split_behind(void);
+static void store_split_stored(void);
 /* Who installed the scenes. s_source is the RESIDENT store's source (what the
  * index on flash says, i.e. what the frame is rendering); s_pending_source is
  * the source declared by the producer of a stored-but-not-yet-applied payload,
@@ -900,6 +909,11 @@ static char s_resident_scene_id[SCENE_ID_LEN]; /* forward-declared above */
  * stays on flash as before. */
 char *fos_scenes_read_scene_json(const char *scene_id, size_t *out_len)
 {
+    if (s_store_changing) {
+        log_scene_event("scenes:load", "skipped", "embedded", scene_id ? scene_id : "",
+                        "store-changing", 0, 0, 0, ESP_ERR_INVALID_STATE);
+        return NULL;
+    }
     int slot = slot_for_scene(scene_id);
     if (slot < 0) {
         ESP_LOGW(TAG, "embedded scene %s is not in the payload", scene_id ? scene_id : "?");
@@ -918,6 +932,7 @@ char *fos_scenes_read_scene_json(const char *scene_id, size_t *out_len)
 
 static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
 {
+    if (s_store_changing) return false; /* the apply after it loads the new set */
     char path[SCENES_SLOT_PATH_LEN];
     slot_path(slot, path, sizeof(path));
     size_t len = 0;
@@ -1244,6 +1259,8 @@ bool fos_scenes_apply_pending(void)
 
 uint32_t fos_scenes_apply_generation(void) { return s_apply_generation; }
 bool fos_scenes_apply_succeeded(void) { return s_apply_ok; }
+/* One aligned word, read without the lock: a stale value only delays a report. */
+uint32_t fos_scenes_store_generation(void) { return fos_slot_cache_generation(&s_slot_cache); }
 /* Set only beside s_pending, once /state is mounted, and cleared with it. */
 bool fos_scenes_patch_pending(void) { return s_patch_pending; }
 
@@ -1359,6 +1376,11 @@ bool fos_scenes_apply_pending_selection(void)
     char scene_id[SCENE_ID_LEN];
     bool pending;
     uint32_t asked_at = 0;
+
+    /* A whole payload is being split, or was and waits for its apply: the
+     * index this task holds names slots that are the new set's now. The
+     * selection stays queued; the apply reads the new index first. */
+    if (s_store_changing || (s_pending && !s_patch_pending)) return false;
 
     portENTER_CRITICAL(&s_scene_select_lock);
     pending = s_scene_select_pending;
@@ -1626,12 +1648,15 @@ esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
     }
     esp_err_t err = mount_state();
     if (err != ESP_OK) return err;
-    /* "Updating" on the glass until the apply on the render task has
-     * split it and loaded it: flash writes the whole way
-     * (fos_lcd_st7701s_updating_begin). */
+    /* "Updating" on the glass until the apply on the render task has loaded
+     * it: flash writes the whole way (fos_lcd_st7701s_updating_begin). */
     fos_display_updating_begin();
+    s_store_changing = true; /* before the lock: the render task looks first */
+    store_lock();
     err = write_file_replace(SCENES_PATH, SCENES_TMP_PATH, json, len);
     if (err != ESP_OK) {
+        s_store_changing = false;
+        store_unlock();
         fos_display_updating_end(false);
         log_scene_event("event:uploadScenes", "error", origin, "",
                         s_last_error[0] ? s_last_error : "store-failed",
@@ -1647,8 +1672,11 @@ esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
      * relabel whatever is still resident. */
     s_pending_source = (int)source;
     persist_scene_source((int)source);
-    s_pending = true;
     s_payload_stored_since_boot = true;
+    store_unlock();
+    /* Split by the store task (store_split_stored), which then marks it
+     * pending; s_store_changing stays up until it has. Without the task, here. */
+    if (!store_split_behind()) store_split_stored();
     ESP_LOGI(TAG, "scenes payload stored (%u bytes, source %s), pending apply",
              (unsigned)len, origin);
     log_scene_event("event:uploadScenes", "stored", origin, "", "pending-apply",
@@ -1677,6 +1705,13 @@ _Static_assert(sizeof(STORE_ERR_TO_ESP) / sizeof(STORE_ERR_TO_ESP[0]) == FOS_SCE
  * until its next boot), unless the render task is about to apply it. */
 static esp_err_t ensure_split_locked(void)
 {
+    /* A whole payload stored since boot and split already, waiting for the
+     * render task's apply: a change now would be applied as a patch to an
+     * index the runtime has not loaded, and the payload's own apply skipped. */
+    if (s_pending && s_payload_stored_since_boot && !s_patch_pending) {
+        set_scene_simple_error("a scene upload is waiting to be applied, try again", 0);
+        return ESP_ERR_INVALID_STATE;
+    }
     struct stat st;
     if (stat(SCENES_PATH, &st) != 0 || st.st_size <= 2) return ESP_OK;
     if (s_pending) {
@@ -1786,31 +1821,86 @@ char *fos_scenes_get_json(const char *scene_id, size_t *out_len)
     return json;
 }
 
-void fos_scenes_add_storage_json(cJSON *report)
+/* What a file costs /state, in the partition's own units: the pages it takes,
+ * data and index, at the data a page carries (fos_spiffs_footprint.h), so a
+ * scene's size, the scenes' sum and stateUsedBytes add up. */
+static size_t state_footprint(size_t bytes)
 {
-    if (report == NULL || !s_mounted) return;
-    size_t total = 0, used = 0, scenes_bytes = 0;
-    int count = 0;
-    state_usage(&total, &used);
-    store_lock();
+    return fos_spiffs_footprint(bytes, CONFIG_SPIFFS_PAGE_SIZE, CONFIG_SPIFFS_OBJ_NAME_LEN,
+                                CONFIG_SPIFFS_META_LENGTH);
+}
+
+/* Each scene's footprint by id, worked out once per change of the store (the
+ * slot cache's generation moves with every one): the report goes out with
+ * every check-in and must not read the store each time. Under the store lock. */
+static uint32_t s_sizes_generation = 0;
+static cJSON *s_scene_sizes = NULL; /* {"<id>": bytes} */
+static size_t s_scenes_footprint = 0;
+static int s_scene_sizes_count = 0;
+
+static void scene_sizes_refresh_locked(void)
+{
+    uint32_t generation = fos_slot_cache_generation(&s_slot_cache);
+    if (s_scene_sizes != NULL && generation == s_sizes_generation) return;
+    cJSON_Delete(s_scene_sizes);
+    s_scene_sizes = cJSON_CreateObject();
+    s_scenes_footprint = 0;
+    s_scene_sizes_count = 0;
+    s_sizes_generation = generation;
+    if (s_scene_sizes == NULL) return;
+    struct stat st;
     cJSON *index = fos_scene_store_read_index();
     const cJSON *entry = NULL;
     cJSON_ArrayForEach(entry, cJSON_GetObjectItem(index, "scenes")) {
-        scenes_bytes += (size_t)cJSON_GetObjectItem(entry, "bytes")->valueint;
-        count++;
+        const cJSON *id = cJSON_GetObjectItem(entry, "id");
+        const cJSON *bytes = cJSON_GetObjectItem(entry, "bytes");
+        if (!cJSON_IsString(id) || !cJSON_IsNumber(bytes)) continue;
+        size_t footprint = state_footprint((size_t)bytes->valuedouble);
+        cJSON_AddNumberToObject(s_scene_sizes, id->valuestring, (double)footprint);
+        s_scenes_footprint += footprint;
+        s_scene_sizes_count++;
     }
     cJSON_Delete(index);
-    if (count == 0) {
-        /* Not split (yet): the combined payload's size. */
-        struct stat st;
-        if (stat(SCENES_PATH, &st) == 0) scenes_bytes = (size_t)st.st_size;
-        count = s_loaded;
+    if (s_scene_sizes_count > 0) {
+        if (stat(SCENES_INDEX_PATH, &st) == 0) s_scenes_footprint += state_footprint((size_t)st.st_size);
+        return;
     }
+    if (stat(SCENES_PATH, &st) != 0 || st.st_size <= 2) return;
+    /* Not split (yet): the combined file is what /state holds, and each scene
+     * is reported at what its own file will take once it is. */
+    s_scenes_footprint = state_footprint((size_t)st.st_size);
+    size_t len = 0;
+    char *json = read_file(SCENES_PATH, &len);
+    static fos_scene_store_put_t items[SCENES_SLOT_MAX];
+    int count = json != NULL ? scan_array_elements(json, len, items, SCENES_SLOT_MAX) : -1;
+    for (int i = 0; i < count; i++) {
+        cJSON *scene = cJSON_ParseWithLength(items[i].json, items[i].len);
+        const cJSON *id = cJSON_GetObjectItem(scene, "id");
+        if (cJSON_IsString(id) && id->valuestring != NULL) {
+            cJSON_AddNumberToObject(s_scene_sizes, id->valuestring, (double)state_footprint(items[i].len));
+            s_scene_sizes_count++;
+        }
+        cJSON_Delete(scene);
+    }
+    free(json);
+}
+
+void fos_scenes_add_storage_json(cJSON *report)
+{
+    if (report == NULL || !s_mounted) return;
+    size_t total = 0, used = 0;
+    state_usage(&total, &used);
+    store_lock();
+    scene_sizes_refresh_locked();
+    cJSON *sizes = s_scene_sizes != NULL ? cJSON_Duplicate(s_scene_sizes, true) : NULL;
+    size_t scenes_bytes = s_scenes_footprint;
+    int count = s_scene_sizes_count > 0 ? s_scene_sizes_count : s_loaded;
     store_unlock();
     cJSON_AddNumberToObject(report, "stateTotalBytes", (double)total);
     cJSON_AddNumberToObject(report, "stateUsedBytes", (double)used);
     cJSON_AddNumberToObject(report, "scenesBytes", (double)scenes_bytes);
     cJSON_AddNumberToObject(report, "sceneCount", count);
+    if (sizes != NULL) cJSON_AddItemToObject(report, "sceneBytes", sizes);
 }
 
 char *fos_scenes_list_json(void)
@@ -1869,6 +1959,9 @@ typedef struct {
 #define STORE_TASK_STACK 6144
 static portMUX_TYPE s_store_mux = portMUX_INITIALIZER_UNLOCKED;
 static store_job_t s_store_next;   /* under s_store_mux */
+/* A whole payload a producer stored waits to be split (store_split_stored);
+ * under s_store_mux. */
+static bool s_store_split_wanted = false;
 static volatile bool s_store_busy; /* a job waits or runs; under s_store_mux */
 
 /* Every erase and page program of a flash write turns the cache off, and both
@@ -1897,11 +1990,13 @@ static void store_pace(void)
     }
 }
 
-/* The store module's pace hook: every write goes through it, and only the
- * store task's waits (an RGB LCD's goes as fast as it can, behind "Updating"). */
+/* The store module's pace hook: every write goes through it, and every writer
+ * but the render task waits out renders and taps (the store task, and a
+ * producer splitting the payload it stored); the render task never waits for
+ * itself. An RGB LCD's write goes as fast as it can, behind "Updating". */
 static void store_pace_hook(void)
 {
-    if (xTaskGetCurrentTaskHandle() == s_store_task && !fos_display_is_lcd()) store_pace();
+    if (!fos_client_on_render_task() && !fos_display_is_lcd()) store_pace();
 }
 
 static void store_backend_payload(const store_job_t *job)
@@ -1939,6 +2034,40 @@ static void store_backend_payload(const store_job_t *job)
     if (!newer) load_etag();
 }
 
+/* The whole payload a producer stored (fos_scenes_set_json_from: a cloud
+ * push, an HTTP or USB upload), split into its per-scene files here: not on
+ * the producer's task (the cloud's is its WebSocket's, which must keep
+ * answering) and not in the render task's apply, where a 389 KB set was
+ * seconds of slot writes with no key or tap answered (the reTerminal E1002,
+ * 2026-11-10). Paced like every write off the render task. Pending for the
+ * apply once split, which reads the new index and loads one scene; the
+ * cloud's scene_ack waits for that apply. A split that fails leaves the
+ * combined file for the apply to load whole (split_noroom when it ran out of
+ * room, so no boot tries again). */
+static void store_split_stored(void)
+{
+    store_lock();
+    size_t len = 0;
+    char *json = read_file(SCENES_PATH, &len);
+    if (json != NULL && split_scenes_locked(json, len) != ESP_OK && s_split_out_of_room) {
+        s_split_out_of_room = false;
+        set_split_no_room_len((uint32_t)len);
+        ESP_LOGW(TAG, "%u-byte scene set: no room to split it beside itself; loaded whole until the next push",
+                 (unsigned)len);
+    }
+    free(json);
+    /* Inside the lock: a one-scene change waiting on it must see the payload
+     * waiting for its apply (ensure_split_locked), not a store to patch. */
+    s_pending = true;
+    s_store_changing = false;
+    store_unlock();
+    /* The pass the producer asked for (the cloud's set_scenes renders at once)
+     * ran while this split did, with nothing pending yet: on a frame that next
+     * renders in an hour the payload waited that long and the cloud's
+     * scene_ack timed out (the E1002, 2026-11-10). The new set renders now. */
+    fos_client_render_now();
+}
+
 static void store_task(void *arg)
 {
     (void)arg;
@@ -1948,11 +2077,18 @@ static void store_task(void *arg)
             portENTER_CRITICAL(&s_store_mux);
             store_job_t job = s_store_next;
             s_store_next = (store_job_t){0};
-            if (job.body == NULL) s_store_busy = false;
+            bool split = job.body == NULL && s_store_split_wanted;
+            if (split) s_store_split_wanted = false;
+            if (job.body == NULL && !split) s_store_busy = false;
             portEXIT_CRITICAL(&s_store_mux);
-            if (job.body == NULL) break;
-            store_backend_payload(&job);
-            free(job.body);
+            if (job.body != NULL) {
+                store_backend_payload(&job);
+                free(job.body);
+            } else if (split) {
+                store_split_stored();
+            } else {
+                break;
+            }
         }
     }
 }
@@ -1962,18 +2098,37 @@ static void store_shutdown(void)
     fos_scenes_store_wait(20000);
 }
 
+static bool store_task_ready(void)
+{
+    if (s_store_task != NULL) return true;
+    if (xTaskCreatePinnedToCore(store_task, "fos_store", STORE_TASK_STACK, NULL, tskIDLE_PRIORITY + 2,
+                                &s_store_task, tskNO_AFFINITY) != pdPASS) {
+        s_store_task = NULL;
+        return false;
+    }
+    esp_register_shutdown_handler(store_shutdown);
+    return true;
+}
+
+/* The stored payload to the store task for its split; false when there is no
+ * task (the caller splits). */
+static bool store_split_behind(void)
+{
+    if (!store_task_ready()) return false;
+    portENTER_CRITICAL(&s_store_mux);
+    s_store_split_wanted = true;
+    bool start = !s_store_busy;
+    s_store_busy = true;
+    portEXIT_CRITICAL(&s_store_mux);
+    if (start) xTaskNotifyGive(s_store_task);
+    return true;
+}
+
 /* `body` (malloc'd) to the store task, which frees it; false (and `body`
  * still the caller's) when there is no task. */
 static bool store_behind(char *body, size_t len, const char *etag)
 {
-    if (s_store_task == NULL) {
-        if (xTaskCreatePinnedToCore(store_task, "fos_store", STORE_TASK_STACK, NULL, tskIDLE_PRIORITY + 2,
-                                    &s_store_task, tskNO_AFFINITY) != pdPASS) {
-            s_store_task = NULL;
-            return false;
-        }
-        esp_register_shutdown_handler(store_shutdown);
-    }
+    if (!store_task_ready()) return false;
     portENTER_CRITICAL(&s_store_mux);
     char *dropped = s_store_next.body;
     s_store_next.body = body;

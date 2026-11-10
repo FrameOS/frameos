@@ -452,6 +452,9 @@ static const char *fos_platform_name(void)
 #endif
 }
 
+/* The scene store as of the last hardware report sent (ws_poll_active_scene). */
+static uint32_t s_store_generation_reported = 0;
+
 static void add_hardware_json(cJSON *parent)
 {
     const fos_config_t *config = fos_config();
@@ -590,6 +593,7 @@ static void add_hardware_json(cJSON *parent)
         cJSON_AddNumberToObject(storage, "stateBytes", info.state_bytes);
     }
     /* What is in /state, not its size on the map: the owner sees it fill. */
+    s_store_generation_reported = fos_scenes_store_generation();
     fos_scenes_add_storage_json(storage);
     cJSON *ota = cJSON_AddObjectToObject(hw, "ota");
     if (ota) {
@@ -1343,15 +1347,22 @@ static void add_state_fields(cJSON *msg, nim_snapshot_t *snap, bool with_hardwar
  * cloud's last_state has no active scene until the next reconnect, and the
  * workspace shows "the active scene is not available" for a frame that is
  * happily rendering. Scene changes from set_scenes pushes also ride the
- * scene_ack, so this mostly fires for boot, schedules and button presses. */
+ * scene_ack, so this mostly fires for boot, schedules and button presses.
+ *
+ * It also goes out when the stored scenes changed since the last hardware
+ * report: the hello's storage (each scene's size, what is free) is stale after
+ * a push, and a push that keeps the active scene would otherwise leave the
+ * workspace showing the old sizes until the next reconnect. Not while a
+ * scene_ack waits, so the report is the applied store. */
 static char s_active_scene_reported[128] = "";
 
 static void ws_poll_active_scene(void)
 {
     if (!s_ws_client || !s_ws_ready) return;
+    bool store_moved = !s_scene_ack_pending && fos_scenes_store_generation() != s_store_generation_reported;
     nim_snapshot_t snap;
     nim_snapshot_take(&snap);
-    if (snap.ok && snap.scene_id[0] && strcmp(snap.scene_id, s_active_scene_reported) != 0) {
+    if (snap.ok && snap.scene_id[0] && (store_moved || strcmp(snap.scene_id, s_active_scene_reported) != 0)) {
         cJSON *msg = cJSON_CreateObject();
         if (msg) {
             cJSON_AddStringToObject(msg, "type", "state");

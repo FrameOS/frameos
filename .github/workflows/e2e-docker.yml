@@ -243,7 +243,8 @@ jobs:
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main -Iembedded/esp32/main/tests/spiffs_shim \
                 -I"$IDF_PATH/components/spiffs/include" -I"$IDF_PATH/components/spiffs/spiffs/src" \
                 -D__real_SPIFFS_gc=SPIFFS_gc \
-                embedded/esp32/main/fos_spiffs_gc.c embedded/esp32/main/tests/test_fos_spiffs_gc.c /tmp/spiffs_obj/*.o \
+                embedded/esp32/main/fos_spiffs_gc.c embedded/esp32/main/fos_spiffs_footprint.c \
+                embedded/esp32/main/tests/test_fos_spiffs_gc.c /tmp/spiffs_obj/*.o \
                 -o /tmp/test_fos_spiffs_gc
               /tmp/test_fos_spiffs_gc
               # The JSON depth pre-scan that guards the 8-10 KB parser tasks.

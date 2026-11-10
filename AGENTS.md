@@ -221,7 +221,8 @@
   removed alone over USB (`usb_api scene-*`), HTTP (`/api/frames/<id>/scenes`)
   and from a control plane. `scene-list` / `GET .../scenes` / `hardware.storage`
   / `embedded.storage` report what the partition holds (`stateUsedBytes` of
-  `stateTotalBytes`, `scenesBytes`), and each scene's `bytes`.
+  `stateTotalBytes`, `scenesBytes`, each scene's footprint in `sceneBytes`,
+  all in SPIFFS's page units: `fos_spiffs_footprint.c`), and each scene's `bytes`.
 - A changed scene goes to a NEW slot and the index is switched: the render
   task's copy (`s_slots`) stays valid until it re-reads the index and sweeps.
   A reader that is not the render task reads the index on flash under the store

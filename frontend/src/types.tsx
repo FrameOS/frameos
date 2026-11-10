@@ -199,6 +199,8 @@ export interface FrameType {
       stateUsedBytes?: number | null
       scenesBytes?: number | null
       sceneCount?: number | null
+      /** ESP32: each scene's footprint on the state partition, by scene id. */
+      sceneBytes?: Record<string, number> | null
     } | null
     ota?: {
       supported?: boolean | null
@@ -1692,6 +1694,7 @@ export interface FrameEmbeddedConfig {
     stateUsedBytes?: number | null
     scenesBytes?: number | null
     sceneCount?: number | null
+    sceneBytes?: Record<string, number> | null
   }
   hardwarePreset?: FrameEmbeddedHardwarePreset
   lastBoot?: {

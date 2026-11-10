@@ -152,6 +152,11 @@ bool fos_scenes_settings_shown(void);
 uint32_t fos_scenes_apply_generation(void);
 bool fos_scenes_apply_succeeded(void);
 
+/* Moves with every change of the stored scenes (a push applied, a scene
+ * patched, a sweep): the storage report (fos_scenes_add_storage_json) is
+ * stale once it does, and the cloud client sends a fresh one. Any task. */
+uint32_t fos_scenes_store_generation(void);
+
 /* Number of scenes currently loaded into the Nim runtime. */
 int fos_scenes_loaded(void);
 

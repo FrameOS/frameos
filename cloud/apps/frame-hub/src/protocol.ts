@@ -157,8 +157,10 @@ export const maxMetricsBytes = 16 * 1024;
 export const maxChecksumChars = 128;
 // Same ceiling the enroll route's parseHardware applies (auth-web
 // enroll/route.ts), so a hardware report the hub refreshes on hello can never
-// be larger than one enrollment would have accepted.
-export const maxHardwareBytes = 4 * 1024;
+// be larger than one enrollment would have accepted. 8 KB: an ESP32 reports
+// each scene's size on its state partition (storage.sceneBytes, up to 32
+// ids), and a report over the ceiling is dropped whole.
+export const maxHardwareBytes = 8 * 1024;
 
 export function jsonByteLength(value: unknown) {
   try {

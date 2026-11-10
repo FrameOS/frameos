@@ -132,12 +132,12 @@ def test_a_scene_payload_is_written_off_the_render_task():
     store = scenes["store_backend_payload"]
     write = store.index("write_file_replace_locked(SCENES_PATH")
     # Under the store lock like every other writer, paced on e-paper: the
-    # store module calls the pace hook before each 2 KB, and it waits only on
-    # the store task.
+    # store module calls the pace hook before each 2 KB, and it waits on every
+    # task but the render task.
     assert store.index("store_lock()") < write < store.index("store_unlock()")
     assert ".pace = store_pace_hook" in _strip_comments(SCENES_C.read_text())
     hook = scenes["store_pace_hook"]
-    assert "s_store_task" in hook and "store_pace()" in hook
+    assert "!fos_client_on_render_task()" in hook and "store_pace()" in hook
     pace = scenes["store_pace"]
     assert "fos_client_input_held()" in pace and "fos_client_render_in_flight()" in pace
     store_module = (ESP32_DIR / "main" / "fos_scene_store.c").read_text()
@@ -147,7 +147,8 @@ def test_a_scene_payload_is_written_off_the_render_task():
     take = scenes["fos_scenes_take_backend_payload"]
     assert take.index("load_into_nim(") < take.index("store_behind("), "the write is queued before the parse"
     assert "etag_set(etag)" in take, "the next poll would fetch the payload being written again"
-    assert "esp_register_shutdown_handler(store_shutdown)" in scenes["store_behind"]
+    assert "store_task_ready()" in scenes["store_behind"]
+    assert "esp_register_shutdown_handler(store_shutdown)" in scenes["store_task_ready"]
     sync = scenes["fos_scenes_sync"]
     assert "fos_scenes_backend_fetch(" in sync and "fos_scenes_take_backend_payload(" in sync
     client = _strip_comments(CLIENT_C.read_text())

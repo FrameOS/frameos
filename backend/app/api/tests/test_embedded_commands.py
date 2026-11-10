@@ -637,6 +637,17 @@ async def test_the_device_reports_what_its_state_partition_holds(async_client, n
     db.expire_all()
     assert db.get(Frame, frame.id).embedded["storage"] == storage
 
+    # Each scene's footprint by id, numbers only.
+    sizes = {"clock": 4769, "visited-world-map": 89824}
+    response = await no_auth_client.post(
+        f"/api/frames/{frame.id}/embedded/commands",
+        headers=_device_headers(frame),
+        json={"storage": {**storage, "sceneBytes": {**sizes, "bad": "big", "": 3, "neg": -1}}},
+    )
+    assert response.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).embedded["storage"] == {**storage, "sceneBytes": sizes}
+
 
 # ------------------------------------------------- the frame page's changes
 

@@ -1268,10 +1268,18 @@ not powered), `status` shows the pins and the switch.
 
 Scenes arrive as one combined `scenes.json` — from the USB upload, the
 backend sync or the cloud's `set_scenes` — and that stays the wire format.
-The device does **not** keep them that way. On apply the payload is split
-into `/state/scene-<slot>.json` plus `/state/scene-index.json`, the combined
-file is deleted (the `state` partition is 1M and a payload may be 512K, so
-both do not fit), and only the **active** scene is parsed and resident. The
+The device does **not** keep them that way. The payload is split into
+`/state/scene-<slot>.json` plus `/state/scene-index.json`, the old set's
+slots going first and the combined file last (the `state` partition is 1M
+and a payload may be 512K: the old set, the new one and the combined file do
+not fit together), and only the **active** scene is parsed and resident. A
+push or an upload is stored by the task that received it (the cloud, HTTP or
+the console) and split by the scene store's own task (`store_split_stored`),
+paced around renders and taps like every write off the render task
+(`store_pace_hook`); the render task's apply then reads the index and loads
+one scene, and a switch asked for meanwhile waits for that apply
+(`s_store_changing`). A backend sync's set is held whole by the runtime and
+split at the next boot. The
 index carries ids, names and refresh intervals, so the frame can list and
 switch scenes without holding them. It also carries a top-level
 `"source": "local" | "backend" | "cloud"` key recording who installed the
@@ -1319,9 +1327,17 @@ what the frame holds.
 
 **How much room there is.** `usb_api scene-list` and `GET .../scenes` report
 `storage`: `stateTotalBytes` and `stateUsedBytes` (the SPIFFS partition,
-`esp_spiffs_info`), `scenesBytes` and `sceneCount`, with `bytes` per scene. The
-same four numbers are in the cloud `hardware.storage` and in the backend's
-`embedded.storage`, which is what the workspace draws.
+`esp_spiffs_info`), `scenesBytes` and `sceneCount`, and `sceneBytes`, each
+scene's footprint by id; the index keeps each file's own `bytes`. Every figure
+is in SPIFFS's own units: the pages a file takes, data and index alike, at the
+data a page carries (`fos_spiffs_footprint.c`, checked against IDF's SPIFFS in
+`test_fos_spiffs_gc.c`), so the scenes and the used figure add up. On a 1 MB
+partition (256-byte pages) a 30 KB scene takes about 31 KB; a scene that is
+not split yet is reported at what its own file will take. The same report is
+in the cloud `hardware.storage` (hello, and a `state` message whenever the
+stored scenes changed since the last report: `ws_poll_active_scene`) and in
+the backend's `embedded.storage` (check-in), which is what the workspace
+draws: free space over the scene list, each scene's size on its tile.
 
 ## The render canvas is 16-bit (2026.8.31)
 

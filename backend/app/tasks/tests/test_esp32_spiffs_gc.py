@@ -115,7 +115,7 @@ def test_spiffs_gc_host_tests_pass(tmp_path: Path):
             "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", *includes,
             # macOS's linker has no --wrap: the wrapper calls SPIFFS_gc itself.
             "-D__real_SPIFFS_gc=SPIFFS_gc",
-            str(SOURCE), str(TEST_SOURCE), *objects, "-o", str(binary),
+            str(SOURCE), str(MAIN_DIR / "fos_spiffs_footprint.c"), str(TEST_SOURCE), *objects, "-o", str(binary),
         ],
         capture_output=True,
         text=True,

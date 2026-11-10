@@ -57,6 +57,7 @@ idf_component_register(
         "fos_assets_sd.c"
         "fos_assets_flash.c"
         "fos_spiffs_gc.c"
+        "fos_spiffs_footprint.c"
         "fos_sd_probe.c"
         "fos_sscanf.c"
     PRIV_REQUIRES

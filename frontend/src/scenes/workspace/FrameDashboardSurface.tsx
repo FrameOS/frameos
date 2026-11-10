@@ -596,7 +596,7 @@ function FrameSceneTile({
         </div>
         <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">
           {sceneTileSummaryLabel(scene)}
-          {frameSceneStorage(frame) ? ` · ${sceneSizeLabel(scene)}` : ''}
+          {frameSceneStorage(frame) ? ` · ${sceneSizeLabel(scene, frame)}` : ''}
         </div>
       </div>
     </>

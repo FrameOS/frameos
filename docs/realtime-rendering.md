@@ -729,7 +729,10 @@ a small change cost what it should:
   render, 3.2 s. A flash write turns the cache off for every erase and page
   program and both cores wait it out, so the store task writes 2 KB at a time
   between renders and never while someone taps (`store_pace`); on an RGB LCD,
-  which shows "Updating" for the write, as fast as it goes. A
+  which shows "Updating" for the write, as fast as it goes. A cloud push or an
+  upload is split into its per-scene files by the same task, with the same
+  pacing, and the render task's apply only reads the new index
+  (`store_split_stored`, embedded/esp32/README.md "Scene storage"). A
   backend's nudge is still pulled on the render task, which the voice relay's
   release counts on, and so is everything on a frame about to deep-sleep and on
   a boot's first pass. When the round trips come back to the render task (a

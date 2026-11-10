@@ -118,11 +118,23 @@ async def _remember_device_storage(db: Session, redis: Redis, frame: Frame, body
     reported = body.get("storage")
     if not isinstance(reported, dict):
         return
-    storage = {
+    storage: dict[str, Any] = {
         key: int(reported[key])
         for key in ("stateTotalBytes", "stateUsedBytes", "scenesBytes", "sceneCount")
         if isinstance(reported.get(key), (int, float)) and reported[key] >= 0
     }
+    # Each scene's footprint on the partition, by scene id (the pages its file
+    # takes, in the units of stateUsedBytes: fos_spiffs_footprint.c). Bounded:
+    # a board holds 32 scenes at most.
+    sizes = reported.get("sceneBytes")
+    if isinstance(sizes, dict):
+        kept = {
+            key: int(value)
+            for key, value in list(sizes.items())[:64]
+            if isinstance(key, str) and 0 < len(key) <= 128 and isinstance(value, (int, float)) and value >= 0
+        }
+        if kept:
+            storage["sceneBytes"] = kept
     embedded = dict(frame.embedded or {})
     if not storage or embedded.get("storage") == storage:
         return
