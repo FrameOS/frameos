@@ -640,7 +640,22 @@ a small change cost what it should:
   which would cut it short): `finish_waveforms` in `it8951.c`,
   `EPD_3in97_WaitPending`. The render task handles the taps that came meanwhile
   and draws the next frame while the glass changes. A new driver entry point
-  waits first.
+  waits first. A full refresh goes the same way: on any other SPI panel
+  `fos_display_blit` copies the picture and a task of the display's own
+  (`refresh_task` in `frameos_display.c`) runs init, picture, refresh and
+  sleep, so the E1002's 28.7 s color refresh and the Sticky's 2.2 s after a
+  scene switch no longer hold the render task, which answers keys and
+  commands meanwhile. A picture asked for during one waits as the next (the
+  newest only), every other use of the panel waits for the task first, a deep
+  sleep parks the panel after it and a restart waits for it (a shutdown
+  handler). A timed render waits for the glass too (the idle wait in
+  `fos_client.c`), or a one-second scene on a color panel would draw pictures
+  nobody sees, seconds of the render task each; a render somebody asked for
+  does not. The IT8951 keeps the picture, so it is left awake after a full
+  refresh, like after a partial one, and its waveform is waited for at its
+  next use. Measured on the E1002 (2026-11-10): a scene switch starts drawing
+  in 0.2-0.35 s instead of 6-18 s, and the render task is free 6 s after it
+  began instead of 35-53 s.
 - **Slow chores leave the render task.** The scene state that waited its delay is
   written by a task of its own (`scene_state_writer_task` in `main.c`): a SPIFFS
   write is 0.7 s on the E1003 and 3 s on the Sticky, and the file write runs
@@ -655,8 +670,10 @@ a small change cost what it should:
   backend pulls, the log uploads and the image push, 200-1000 ms a round trip
   on Wi-Fi, and writes the scene state to flash, up to 3 s, so a tap made during
   one came back late with the ones behind it in one go. On these panels, and on
-  any board with a touch screen (the SenseCAP Indicator's LCD held a tap 2.5 to
-  3.5 s behind a settings pull), a touch or a key holds all of that back until ten
+  any board with a touch screen or keys (the SenseCAP Indicator's LCD held a tap
+  2.5 to 3.5 s behind a settings pull, the E1003 the scene switcher's close 2.8
+  s), a touch, a key or an event from HTTP, the cloud or the console (a remote,
+  the editor, Home Assistant) holds all of that back until ten
   seconds without input, a minute at the most (`fos_input_hold_*` in
   `fos_animation.c`), and the idle wait then runs it once, a round trip at a
   time, giving way to the next tap. A backend's command nudge is still served

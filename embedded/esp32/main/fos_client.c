@@ -616,12 +616,12 @@ static bool input_queued(void)
 }
 
 /* Who the input hold is for: a partial-refresh e-paper panel, and any board
- * with a touch screen. On the SenseCAP Indicator's LCD a settings pull of 1.4
- * to 2.6 s ran on the render task between taps and held each one 2.5 to 3.5 s
- * (2026-11-10). */
+ * with a touch screen or keys. On the SenseCAP Indicator's LCD a settings pull
+ * of 1.4 to 2.6 s ran on the render task between taps and held each one 2.5 to
+ * 3.5 s; on the E1003 a 2.8 s one held the scene switcher's close (2026-11-10). */
 static bool hold_applies(void)
 {
-    return fos_display_supports_partial() || fos_touch_present();
+    return fos_display_supports_partial() || fos_touch_present() || fos_buttons_present();
 }
 
 static bool input_hold_on(void)
@@ -633,6 +633,16 @@ static bool input_hold_on(void)
 bool fos_client_input_held(void)
 {
     return input_hold_on();
+}
+
+/* An event from HTTP, the cloud or the console is somebody using the frame as
+ * much as a tap is (a remote, the editor, Home Assistant): the next one is
+ * usually close behind, so it holds the slow chores back the same way. */
+static bool deliver_deferred_events(void)
+{
+    bool delivered = fos_events_deliver_deferred();
+    if (delivered && hold_applies()) fos_input_hold_note(&s_input_hold, esp_timer_get_time());
+    return delivered;
 }
 
 /* The input queues, then time passing, in that order: the buttons' edges and
@@ -2234,7 +2244,7 @@ static void animation_wait(fos_config_t *config, int64_t wait_us)
         }
         if (nim) {
             process_input_events();
-            fos_events_deliver_deferred();
+            deliver_deferred_events();
             fos_schedule_tick();
         }
         if (bits & RENDER_NOW_BIT) s_loud_next = true;
@@ -2368,7 +2378,7 @@ static void client_task(void *arg)
              * when nothing else forced this pass. Before the queued switch
              * is applied: a `setCurrentScene` with state leaves that state
              * pending here, and the switch opens the scene with it. */
-            if (fos_events_deliver_deferred() && !force_render) {
+            if (deliver_deferred_events() && !force_render) {
                 force_render = true;
                 s_scene_render = true;
             }
@@ -2924,6 +2934,15 @@ static void client_task(void *arg)
              * the tap and its `longPress`es on each second, and only the
              * process_events below delivers them. */
             uint32_t max_slice = fos_buttons_busy() ? 50 : 1000;
+            /* The interval ran out while the panel still refreshes on the
+             * display's task (fos_display_blit): the timed render waits for
+             * the glass, in quarter seconds that keep serving keys and
+             * commands, or it would draw pictures nobody can see, seconds of
+             * this task each. A render somebody asks for does not wait. */
+            int64_t slice_until_us = wait_until_us;
+            if (esp_timer_get_time() >= wait_until_us && fos_display_refreshing()) {
+                slice_until_us = esp_timer_get_time() + 250000;
+            }
             if (frameos_nim_available() && fos_display_settle_due(esp_timer_get_time())) settle_panel();
             /* The chrome a tap's frames left as it was (its clock came due while
              * someone tapped): drawn now that they stopped. */
@@ -2932,7 +2951,7 @@ static void client_task(void *arg)
             EventBits_t bits = xEventGroupWaitBits(
                 s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT,
                 pdTRUE, pdFALSE,
-                fos_wake_slice_ticks(wait_until_us - esp_timer_get_time(), max_slice, portTICK_PERIOD_MS));
+                fos_wake_slice_ticks(slice_until_us - esp_timer_get_time(), max_slice, portTICK_PERIOD_MS));
             bool nim = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
             /* Somebody wants a render. Decided below: now, or — while a voice
              * session holds the panel — when it releases, in one pass. */
@@ -2961,7 +2980,7 @@ static void client_task(void *arg)
                 /* An event from HTTP, the cloud or the console: to the scene
                  * now, not at the next pass an interval away. Whether a frame
                  * follows is the scene's to say, read just below. */
-                fos_events_deliver_deferred();
+                deliver_deferred_events();
                 /* Wall-clock schedule (setCurrentScene at 07:00 etc.) —
                  * evaluated on the render task, like every Nim call. */
                 if (fos_schedule_tick()) want_render = true;
@@ -3025,7 +3044,7 @@ static void client_task(void *arg)
                 force_render = true;
                 break;
             }
-        } while (esp_timer_get_time() < wait_until_us);
+        } while (esp_timer_get_time() < wait_until_us || fos_display_refreshing());
         if (!force_render) wait_ended_us = wait_until_us;
     }
 }
