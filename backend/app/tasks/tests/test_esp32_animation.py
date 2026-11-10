@@ -37,6 +37,22 @@ def test_animation_helper_is_pure():
     assert "freertos" not in source
 
 
+def test_the_pass_loop_reads_the_scene_interval_through_the_tested_rules():
+    """A layout's 1 s wait arrives as 0.9999 s. Read raw, `>= 1.0` called it
+    no opinion and the frame's 300 s took over: a reTerminal Sticky's clock
+    stood still for five minutes now and then (2026-11-10). Every reader of
+    the scene's interval in fos_client.c gets the snapped value."""
+    client = (MAIN_DIR / "fos_client.c").read_text()
+    reads = re.findall(r"[^\n]*frameos_nim_scene_interval\(\)[^\n]*", client)
+    assert reads, "fos_client.c no longer reads the scene interval"
+    for line in reads:
+        assert "fos_scene_interval_snap(frameos_nim_scene_interval())" in line, (
+            "fos_client.c reads the scene interval raw: " + line.strip()
+        )
+    assert "fos_pass_interval_seconds(scene_interval, config->interval_sec)" in client
+    assert "scene_interval >= 1.0" not in client
+
+
 @pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler on PATH")
 def test_fos_animation_host_tests_pass(tmp_path: Path):
     binary = tmp_path / "test_fos_animation"

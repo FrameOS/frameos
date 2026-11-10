@@ -270,6 +270,40 @@ static void test_a_timed_render_waits_for_the_glass(void)
     CHECK(!fos_idle_wait_goes_on(89 * S, 60 * S, false), "the refresh ended: render");
 }
 
+static void test_a_layouts_second_is_a_second(void)
+{
+    /* A 1 s clock in a layout: the layout's wait is the clock's due time
+     * minus the pass's start, a hair either side of a second. Read as "under
+     * one", it was no opinion, and the frame's 300 s: the Sticky's clock
+     * stood still for five minutes now and then (2026-11-10). */
+    CHECK(fos_scene_interval_snap(0.99996) == 1.0, "0.99996 s is a second");
+    CHECK(fos_scene_interval_snap(1.00004) == 1.0, "and so is 1.00004 s");
+    CHECK(fos_scene_interval_snap(59.995) == 60.0, "a minute's clock too");
+    CHECK(fos_pass_interval_seconds(fos_scene_interval_snap(0.99996), 300) == 1,
+          "the scene's second, never the frame's 300 s");
+    /* An animation on an LCD stays one (below a second, not near it), and a
+     * second's clock does not start one now and then. */
+    CHECK(fos_scene_interval_snap(0.5) == 0.5, "half a second is half a second");
+    CHECK(fos_scene_interval_snap(0.05) == 0.05, "20 fps stays 20 fps");
+    CHECK(fos_animation_wanted(0.5, true, false), "an animation");
+    CHECK(!fos_animation_wanted(fos_scene_interval_snap(0.9999), true, false),
+          "a layout's second does not animate an LCD");
+    CHECK(fos_scene_interval_snap(1.5) == 1.5, "a second and a half is not snapped");
+    CHECK(fos_scene_interval_snap(299.013) == 299.013, "nor is a wait well between seconds");
+    /* No opinion: the frame's interval. */
+    CHECK(fos_scene_interval_snap(0.0) == 0.0, "zero: none");
+    CHECK(fos_scene_interval_snap(-3.0) == 0.0, "negative: none");
+    CHECK(fos_scene_interval_snap(0.0 / 0.0) == 0.0, "NaN: none");
+    CHECK(fos_pass_interval_seconds(0.0, 300) == 300, "no opinion: the frame's");
+    CHECK(fos_pass_interval_seconds(0.0, 0) == 300, "and 300 s without one");
+    CHECK(fos_pass_interval_seconds(0.0, 60) == 60, "the frame's own");
+    /* Under a second on e-paper: the loop's shortest, a second, not 300 s. */
+    CHECK(fos_pass_interval_seconds(0.25, 300) == 1, "a quarter second: one second");
+    CHECK(fos_pass_interval_seconds(5.0, 300) == 5, "five seconds");
+    CHECK(fos_pass_interval_seconds(1.9, 300) == 1, "whole seconds, rounded down as before");
+    CHECK(fos_pass_interval_seconds(30.0 * 86400.0, 300) == 7 * 86400, "a month: a week");
+}
+
 int main(void)
 {
     test_wanted();
@@ -284,6 +318,7 @@ int main(void)
     test_the_picture_push_gives_way();
     test_the_backend_link();
     test_a_timed_render_waits_for_the_glass();
+    test_a_layouts_second_is_a_second();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

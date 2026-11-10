@@ -79,6 +79,23 @@ typedef struct {
  * going to deep-sleep between them. */
 bool fos_animation_wanted(double scene_interval_s, bool lcd, bool deep_sleep);
 
+/* The scene's interval as the runtime reports it (frameos_nim_scene_interval),
+ * made fit for the rules here. A wait a scene's rhythm works out from a due
+ * time (a layout's, scene_rhythm.nim: due minus now, in seconds since boot)
+ * can land a hair under a whole second: in the second before uptime reaches
+ * a power of two (32, 256, 512 s...), now + 1 rounds onto the coarser grid
+ * above it and the difference is 0.99999999999994. Within 10 ms of a whole
+ * number of seconds it is that number. 0, a negative or a NaN: the scene has
+ * no opinion (0). */
+double fos_scene_interval_snap(double seconds);
+
+/* The pass loop's interval in whole seconds: the scene's, else the frame's
+ * (`frame_interval_s`, 300 s when 0). Under a second is one second: the
+ * scene's still, never the frame's. A 1 s clock in a layout whose wait came
+ * out 0.9999 s stood still for five minutes now and then on a reTerminal
+ * Sticky (2026-11-10). At most a week. */
+uint32_t fos_pass_interval_seconds(double scene_interval_s, uint32_t frame_interval_s);
+
 /* Once per pass, before the render: start, retime or stop. True when the
  * mode changed (the caller logs the start or the stop). Stopping leaves the
  * window's stats for fos_animation_take_stats. */

@@ -2851,16 +2851,13 @@ static void client_task(void *arg)
         if (!s_link_on && !input_hold_on()) frameos_nim_flush_logs(); /* the sample must not wait for next pass */
 
         /* The scene's refreshInterval is authoritative when a scene is
-         * loaded and has an opinion (>= 1), matching the Pi runner where
-         * the frame-level interval is only the no-scene fallback. Clamped
-         * like the settings-pulled interval: a bad value must not park the
-         * frame for months. */
-        uint32_t interval = config->interval_sec ? config->interval_sec : 300;
-        double scene_interval = frameos_nim_scene_interval();
-        if (scene_interval >= 1.0) {
-            if (scene_interval > 7 * 86400.0) scene_interval = 7 * 86400.0;
-            interval = (uint32_t)scene_interval;
-        }
+         * loaded and has an opinion, matching the Pi runner where the
+         * frame-level interval is only the no-scene fallback. Snapped and
+         * clamped (fos_animation.h): a layout's wait of 0.9999 s is the
+         * scene's second, not "no opinion" and the frame's 300 s, and a bad
+         * value must not park the frame for months. */
+        double scene_interval = fos_scene_interval_snap(frameos_nim_scene_interval());
+        uint32_t interval = fos_pass_interval_seconds(scene_interval, config->interval_sec);
         /* A per-render override from logic/nextSleepDuration beats both
          * intervals, like context.nextSleep on the Pi runner. Only valid
          * right after a render actually ran. */
