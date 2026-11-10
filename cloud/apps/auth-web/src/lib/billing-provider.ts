@@ -17,8 +17,10 @@ import {
   noteProviderNextPlan,
   readPlan,
   setProviderSubscriptionState,
+  type BillingPlan,
 } from "@frameos-cloud/ledger";
 import type { PlanGroupKey } from "./plan-catalog";
+import { notifyPlanEvent, type PlanNotice } from "./plan-notifications";
 import { syncPlanRows } from "./plan-rows";
 import {
   accountChecks,
@@ -671,6 +673,63 @@ export async function completePaymentDetails(
   return true;
 }
 
+type StatusNotice =
+  | "cancellation_scheduled"
+  | "cancellation_withdrawn"
+  | "ended_canceled"
+  | "ended_payment_failed"
+  | "ended_scheduled"
+  | "payment_failed";
+
+const failingStatuses = new Set(["past_due", "unpaid"]);
+
+/** What a move of Stripe's status from `from` to `to` is worth reporting as. */
+export function statusNoticeFor(from: string, to: string): StatusNotice | null {
+  if (!liveStatuses.has(from) || from === to) {
+    return null;
+  }
+  if (to === "scheduled_cancel") {
+    return "cancellation_scheduled";
+  }
+  if (from === "scheduled_cancel" && (to === "active" || to === "trialing")) {
+    return "cancellation_withdrawn";
+  }
+  if (failingStatuses.has(to)) {
+    return failingStatuses.has(from) ? null : "payment_failed";
+  }
+  if (!liveStatuses.has(to) && to !== "incomplete") {
+    return from === "scheduled_cancel"
+      ? "ended_scheduled"
+      : failingStatuses.has(from)
+        ? "ended_payment_failed"
+        : "ended_canceled";
+  }
+  return null;
+}
+
+const endReasons = {
+  ended_canceled: "canceled",
+  ended_payment_failed: "payment_failed",
+  ended_scheduled: "scheduled",
+} as const;
+
+/**
+ * The plan the account is on through Stripe, which is not always the price
+ * Stripe holds (a downgrade moves Stripe's price at once and ours at the
+ * renewal); `fallback` when the account has none.
+ */
+async function accountPlanOr(db: Database, accountId: string, fallback: BillingPlan) {
+  const [ours] = await db
+    .select({ planCode: subscriptions.planCode, provider: subscriptions.provider })
+    .from(subscriptions)
+    .where(eq(subscriptions.accountId, accountId))
+    .limit(1);
+  if (!ours || ours.provider !== stripeProvider || ours.planCode === fallback.code) {
+    return fallback;
+  }
+  return (await readPlan(db, ours.planCode)) ?? fallback;
+}
+
 /**
  * Make our side agree with Stripe's subscription as it stands. `invoice` is
  * a paid invoice a notice carried beside the subscription; otherwise the
@@ -733,6 +792,23 @@ export async function applySubscription(
   }
 
   const now = new Date();
+  // Stripe's status as last recorded, moved by compare-and-set: of the
+  // notices that race through here (the checkout return, a burst of
+  // webhooks, the reconcile), one alone sees each change and reports it.
+  let statusFrom: string | null = null;
+  if (known && known.status !== subscription.status) {
+    const [moved] = await db
+      .update(providerSubscriptions)
+      .set({ status: subscription.status, updatedAt: now })
+      .where(
+        and(
+          eq(providerSubscriptions.id, known.id),
+          eq(providerSubscriptions.status, known.status),
+        ),
+      )
+      .returning({ id: providerSubscriptions.id });
+    statusFrom = moved ? known.status : null;
+  }
   await db
     .insert(providerSubscriptions)
     .values({
@@ -765,6 +841,28 @@ export async function applySubscription(
         providerSubscriptions.subscriptionId,
       ],
     });
+
+  // Everything about the account's plan below concerns its CURRENT
+  // subscription. A late notice for one it replaced must not end the plan
+  // the new one pays for, nor report anything.
+  const latest = await latestProviderSubscription(db, mode, accountId);
+  const current = latest?.subscriptionId === subscription.id;
+  const statusKind = statusFrom && current ? statusNoticeFor(statusFrom, subscription.status) : null;
+  if (statusKind) {
+    const base = {
+      accountId,
+      mode,
+      plan: await accountPlanOr(db, accountId, plan),
+      subscriptionId: subscription.id,
+    };
+    void notifyPlanEvent(
+      statusKind === "cancellation_scheduled"
+        ? { ...base, at: subscription.cancelAt ?? subscription.periodEnd, kind: statusKind }
+        : statusKind === "cancellation_withdrawn" || statusKind === "payment_failed"
+          ? { ...base, kind: statusKind }
+          : { ...base, kind: "ended", reason: endReasons[statusKind] },
+    );
+  }
 
   const post = postsToLedger(mode);
   let paymentApplied = false;
@@ -810,6 +908,25 @@ export async function applySubscription(
       transactionId: invoice.id,
     });
     paymentApplied = result.applied;
+    if (result.applied) {
+      const previous =
+        result.previous && result.previous.provider === stripeProvider
+          ? ((await readPlan(db, result.previous.planCode)) ?? null)
+          : null;
+      void notifyPlanEvent({
+        accountId,
+        amountCents: invoice.amountPaidCents,
+        billingReason: invoice.billingReason,
+        currency: invoice.currency,
+        invoiceId: invoice.id,
+        kind: "payment",
+        mode,
+        plan: paidPlanCode === plan.code ? plan : ((await readPlan(db, paidPlanCode)) ?? plan),
+        previous,
+        subscriptionId: subscription.id,
+        taxCents,
+      });
+    }
     const row = await paymentRow(db, mode, invoice.id);
     if (row && (!row.paymentRef || !(await feeRecorded(db, mode, row.paymentRef)))) {
       try {
@@ -821,10 +938,7 @@ export async function applySubscription(
     }
   }
 
-  // Everything below is about the account's CURRENT subscription. A late
-  // notice for one it replaced must not end the plan the new one pays for.
-  const latest = await latestProviderSubscription(db, mode, accountId);
-  if (latest?.subscriptionId !== subscription.id) {
+  if (!current) {
     return { accountId, paymentApplied, planCode };
   }
 
@@ -838,14 +952,14 @@ export async function applySubscription(
       if (ours.planCode === planCode) {
         await noteProviderNextPlan(db, accountId, stripeProvider, null);
       } else {
-        const current = await readPlan(db, ours.planCode);
-        if (plan.priceMicros > (current?.priceMicros ?? 0n)) {
+        const paidFor = await readPlan(db, ours.planCode);
+        if (plan.priceMicros > (paidFor?.priceMicros ?? 0n)) {
           // Dearer, and no paid invoice with it: switch now. Nothing is
           // collected by this step; the unearned rest of the running period
           // carries over, and the prorated charge is booked when its
           // invoice is reported paid.
           const periodStart = subscription.periodStart ?? now;
-          await applyProviderPayment(db, {
+          const switched = await applyProviderPayment(db, {
             accountId,
             amountMicros: 0n,
             mode,
@@ -857,8 +971,28 @@ export async function applySubscription(
             subscriptionId: subscription.id,
             transactionId: `switch:${subscription.id}:${priceId}:${periodStart.toISOString()}`,
           });
-        } else {
-          await noteProviderNextPlan(db, accountId, stripeProvider, planCode);
+          if (switched.applied && paidFor) {
+            void notifyPlanEvent({
+              accountId,
+              kind: "switched",
+              mode,
+              plan,
+              previous: paidFor,
+              subscriptionId: subscription.id,
+            });
+          }
+        } else if (await noteProviderNextPlan(db, accountId, stripeProvider, planCode)) {
+          if (paidFor) {
+            void notifyPlanEvent({
+              accountId,
+              at: subscription.periodEnd,
+              kind: "downgrade_scheduled",
+              mode,
+              plan,
+              previous: paidFor,
+              subscriptionId: subscription.id,
+            });
+          }
         }
       }
     }
@@ -926,7 +1060,7 @@ async function handBack(
     id: string;
   },
   fetchImpl?: StripeFetch,
-): Promise<{ accountId: string }> {
+): Promise<{ accountId: string; applied: boolean; planCode: string | null; taxMicros: bigint }> {
   const { invoiceId, payment } = await paymentForCharge(db, config, input.charge, fetchImpl);
   if (!invoiceId) {
     throw new BillingError("not_ours", 422, `${input.id} is for a charge no plan invoice paid`);
@@ -947,7 +1081,7 @@ async function handBack(
   const capped = paidWithTax > 0n && refundMicros > paidWithTax ? paidWithTax : refundMicros;
   const netMicros = paidWithTax > 0n ? (capped * payment.amountMicros) / paidWithTax : capped;
   const net = netMicros > payment.amountMicros ? payment.amountMicros : netMicros;
-  await applyProviderRefund(db, {
+  const { applied } = await applyProviderRefund(db, {
     accountId: payment.accountId,
     amountMicros: net,
     currency: input.currency,
@@ -959,7 +1093,17 @@ async function handBack(
     refundId: input.id,
     taxMicros: capped - net,
   });
-  return { accountId: payment.accountId };
+  return {
+    accountId: payment.accountId,
+    applied,
+    planCode: payment.planCode,
+    taxMicros: capped - net,
+  };
+}
+
+/** A plan by its code, for a notice; null when it has no row. */
+async function planOrNull(db: Database, code: string | null | undefined) {
+  return code ? ((await readPlan(db, code)) ?? null) : null;
 }
 
 export async function applyRefund(
@@ -985,6 +1129,18 @@ export async function applyRefund(
     },
     fetchImpl,
   );
+  if (result.applied) {
+    void notifyPlanEvent({
+      accountId: result.accountId,
+      amountCents: refund.amountCents,
+      currency: refund.currency,
+      kind: "refunded",
+      mode: config.mode,
+      plan: await planOrNull(db, result.planCode),
+      refundId: refund.id,
+      taxCents: Number(result.taxMicros / 10_000n),
+    });
+  }
   return { accountId: result.accountId, pending: false };
 }
 
@@ -998,7 +1154,7 @@ export async function applyDisputeClosed(
   config: StripeConfig,
   dispute: StripeDisputeFacts,
   fetchImpl?: StripeFetch,
-): Promise<{ accountId: string }> {
+): Promise<{ accountId: string; planCode: string | null }> {
   const charge = { chargeId: dispute.chargeId, paymentIntentId: dispute.paymentIntentId };
   const { invoiceId, payment } = await paymentForCharge(db, config, charge, fetchImpl);
   if (!invoiceId) {
@@ -1059,7 +1215,7 @@ export async function applyDisputeClosed(
       subscriptionId: payment.subscriptionId,
     });
   }
-  return { accountId: payment.accountId };
+  return { accountId: payment.accountId, planCode: payment.planCode };
 }
 
 // ---- Webhooks ----
@@ -1188,6 +1344,9 @@ export async function handleWebhook(
   let accountId: string | null = null;
   let subscriptionId: string | null = null;
   let alert: string | undefined;
+  // Told once this delivery is recorded as applied: a retry of one that
+  // failed tells it then, a duplicate never.
+  let notice: PlanNotice | null = null;
   try {
     if (eventType.startsWith("checkout.session.")) {
       const session = parseCheckoutSession(object);
@@ -1232,13 +1391,48 @@ export async function handleWebhook(
     } else if (eventType === "charge.dispute.created") {
       const dispute = parseDispute(object);
       alert = `Dispute ${dispute?.id ?? "?"} opened (${dispute?.reason ?? "no reason given"}): answer it in Stripe's dashboard before its deadline.`;
+      if (dispute) {
+        // Whose it is, for the notice alone: a lookup that fails must not
+        // make Stripe send the dispute again.
+        const found = await paymentForCharge(
+          db,
+          config,
+          { chargeId: dispute.chargeId, paymentIntentId: dispute.paymentIntentId },
+          fetchImpl,
+        ).catch(() => null);
+        if (found?.payment) {
+          accountId = found.payment.accountId;
+          notice = {
+            accountId,
+            amountCents: dispute.amountCents,
+            currency: dispute.currency,
+            disputeId: dispute.id,
+            kind: "dispute_opened",
+            mode: config.mode,
+            plan: await planOrNull(db, found.payment.planCode),
+            reason: dispute.reason,
+            subscriptionId: found.payment.subscriptionId,
+          };
+        }
+      }
     } else if (eventType === "charge.dispute.closed") {
       const disputeId = typeof object["id"] === "string" ? object["id"] : "";
       const dispute = disputeId ? await retrieveDispute(config, disputeId, fetchImpl) : null;
       if (!dispute) {
         throw new BillingError("invalid_event", 422, "A dispute notice without a dispute");
       }
-      accountId = (await applyDisputeClosed(db, config, dispute, fetchImpl)).accountId;
+      const closed = await applyDisputeClosed(db, config, dispute, fetchImpl);
+      accountId = closed.accountId;
+      notice = {
+        accountId,
+        amountCents: dispute.amountCents,
+        currency: dispute.currency,
+        disputeId: dispute.id,
+        kind: "dispute_closed",
+        mode: config.mode,
+        plan: await planOrNull(db, closed.planCode),
+        status: dispute.status,
+      };
     }
     // Everything else is recorded and read by a person.
   } catch (error) {
@@ -1266,6 +1460,9 @@ export async function handleWebhook(
     .update(providerEvents)
     .set({ accountId, error: null, processedAt: new Date(), subscriptionId })
     .where(and(eq(providerEvents.provider, stripeProvider), eq(providerEvents.eventId, eventId)));
+  if (notice) {
+    void notifyPlanEvent(notice);
+  }
   return { alert, body: { ok: true }, status: 200 };
 }
 
@@ -1573,10 +1770,22 @@ export async function cancelForErasure(
       );
     }
     await cancelSubscriptionNow(setup.config, row.subscriptionId, fetchImpl);
-    await db
+    const [ended] = await db
       .update(providerSubscriptions)
       .set({ canceledAt: new Date(), status: "canceled", updatedAt: new Date() })
-      .where(eq(providerSubscriptions.id, row.id));
+      .where(and(eq(providerSubscriptions.id, row.id), eq(providerSubscriptions.status, row.status)))
+      .returning({ id: providerSubscriptions.id });
+    const plan = ended && liveStatuses.has(row.status) ? await planOrNull(db, row.planCode) : null;
+    if (plan) {
+      void notifyPlanEvent({
+        accountId,
+        kind: "ended",
+        mode: row.mode === "live" ? "live" : "test",
+        plan,
+        reason: "account_deleted",
+        subscriptionId: row.subscriptionId,
+      });
+    }
     canceled += 1;
   }
   return canceled;

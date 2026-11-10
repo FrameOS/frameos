@@ -37,18 +37,31 @@ import { GET as getPlan, PUT as putPlan } from "../../../app/api/account/plan/ro
 import { POST as postWebhook } from "../../../app/api/webhooks/stripe/route";
 import { GET as getPricing } from "../../../app/pricing/route";
 import {
+  applySubscription,
   cancelForErasure,
   checkoutOpenTo,
   priceLookupKey,
   reconcileSubscriptions,
   syncPlans,
 } from "../../lib/billing-provider";
+import { planEvents } from "../../lib/plan-notifications";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
-import { signWebhookForTests, stripeSetup, webhookEvents } from "../../lib/stripe";
+import { retrieveSubscription, signWebhookForTests, stripeSetup, webhookEvents } from "../../lib/stripe";
 import { serveStripeFake, StripeFake, type FakeDelivery, type RunningStripeFake, type StripeFakeOptions } from "../stripe-fake";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
+const captured = vi.hoisted(
+  () => [] as { distinctId: string; event: string; properties: Record<string, unknown> }[],
+);
+
+// What reaches PostHog, and from there the reports channel on Discord.
+vi.mock("../../lib/posthog-capture", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  capturePostHogEvent: async (event: string, distinctId: string, properties: Record<string, unknown>) => {
+    captured.push({ distinctId, event, properties });
+  },
+}));
 
 vi.mock("next/headers", () => ({
   cookies: async () => ({
@@ -131,6 +144,7 @@ function useFake(options: Partial<StripeFakeOptions> = {}) {
 beforeEach(async () => {
   resetRateLimitForTests();
   cookieJar.clear();
+  captured.length = 0;
   const tables = await db.execute<{ tablename: string }>(
     sql`select tablename from pg_tables where schemaname = 'public'`,
   );
@@ -1356,6 +1370,189 @@ describe("the word after a price", () => {
     await signIn();
     vi.stubEnv("STRIPE_TAX_BEHAVIOR", "inclusive");
     expect(await taxLabel("BE")).toBeNull();
+  });
+});
+
+describe("telling the reports channel", () => {
+  // Every plan event once, however many notices, returns and reconciles
+  // apply the change behind it.
+  function told() {
+    return captured
+      .filter((entry) => entry.event.startsWith("cloud plan "))
+      .map((entry) => entry.event);
+  }
+
+  function last(event: string) {
+    return captured.filter((entry) => entry.event === event).at(-1);
+  }
+
+  it("says once that a plan was bought, by the return from checkout and three notices", async () => {
+    const accountId = await signIn();
+    await syncPlans(db, config(), portalUrls);
+    const { sessionId } = await startCheckout("private-5");
+    const returnUrl = fake.completeCheckout(sessionId);
+    await getCheckoutReturn(new NextRequest(returnUrl));
+    expect(await deliver()).toEqual([200, 200, 200]);
+    await reconcileSubscriptions(db, config(), { now: new Date(clock.getTime() + 40 * 24 * 60 * 60 * 1000) });
+
+    expect(told()).toEqual([planEvents.subscribed]);
+    const bought = last(planEvents.subscribed)!;
+    expect(bought.distinctId).toBe(accountId);
+    expect(bought.properties).toMatchObject({
+      amount: 5,
+      mode: "test",
+      plan_code: "private-5",
+      summary: "[test] 🎉 New subscription: Private $5/month, $5 paid",
+    });
+    expect(String(bought.properties["admin_url"])).toContain(`/admin/billing/customers?account=${accountId}`);
+    // Nobody's name or email goes to PostHog with it.
+    expect(JSON.stringify(captured)).not.toContain("@example.com");
+  });
+
+  it("says it once when the return and the notices race each other", async () => {
+    const accountId = await signIn();
+    await syncPlans(db, config(), portalUrls);
+    const { sessionId } = await startCheckout("private-5");
+    const returnUrl = fake.completeCheckout(sessionId);
+    const deliveries = fake.takeDeliveries();
+    await Promise.all([
+      getCheckoutReturn(new NextRequest(returnUrl)),
+      ...deliveries.map((delivery) => send(delivery.body, delivery.signature)),
+    ]);
+    const [row] = await db.select().from(providerSubscriptions).where(eq(providerSubscriptions.accountId, accountId));
+    // A cancellation in Stripe's portal, read back by four requests at once.
+    fake.subscriptions.get(row!.subscriptionId)!.cancel_at_period_end = true;
+    const subscription = await retrieveSubscription(config(), row!.subscriptionId);
+    await Promise.all([1, 2, 3, 4].map(() => applySubscription(db, config(), subscription)));
+    expect(told()).toEqual([planEvents.subscribed, planEvents.cancellationScheduled]);
+  });
+
+  it("says a cancellation, its taking back, and the end it ran to", async () => {
+    const accountId = await signIn();
+    const subscriptionId = await buy("private-5", accountId);
+    await putPlan(jsonRequest("PUT", "/api/account/plan", { plan: "payg" }));
+    await deliver();
+    await putPlan(jsonRequest("PUT", "/api/account/plan", { plan: "private-5" }));
+    await deliver();
+    await putPlan(jsonRequest("PUT", "/api/account/plan", { plan: "payg" }));
+    await deliver();
+    clock = fake.subscriptions.get(subscriptionId)!.periodEnd;
+    fake.renew(subscriptionId);
+    await deliver();
+
+    expect(told()).toEqual([
+      planEvents.subscribed,
+      planEvents.cancellationScheduled,
+      planEvents.cancellationWithdrawn,
+      planEvents.cancellationScheduled,
+      planEvents.ended,
+    ]);
+    expect(last(planEvents.cancellationScheduled)?.properties["at"]).toBe(
+      fake.subscriptions.get(subscriptionId)!.periodEnd.toISOString(),
+    );
+    expect(last(planEvents.ended)?.properties).toMatchObject({ plan_code: "private-5", reason: "scheduled" });
+  });
+
+  it("says a downgrade when it is asked for and when the renewal makes it, and an upgrade", async () => {
+    useFake({ taxPercent: 21 });
+    const accountId = await signIn();
+    const subscriptionId = await buy("private-9", accountId);
+    await putPlan(jsonRequest("PUT", "/api/account/plan", { plan: "private-2" }));
+    await deliver();
+    clock = fake.subscriptions.get(subscriptionId)!.periodEnd;
+    fake.renew(subscriptionId);
+    await deliver();
+    const subscription = fake.subscriptions.get(subscriptionId)!;
+    clock = new Date((subscription.periodStart.getTime() + subscription.periodEnd.getTime()) / 2);
+    await putPlan(jsonRequest("PUT", "/api/account/plan", { plan: "private-29" }));
+    await deliver();
+    clock = fake.subscriptions.get(subscriptionId)!.periodEnd;
+    fake.renew(subscriptionId);
+    await deliver();
+
+    expect(told()).toEqual([
+      planEvents.subscribed,
+      planEvents.downgradeScheduled,
+      planEvents.changed,
+      planEvents.changed,
+      planEvents.renewed,
+    ]);
+    const [down, up] = captured.filter((entry) => entry.event === planEvents.changed);
+    expect(down?.properties).toMatchObject({ from_plan_code: "private-9", plan_code: "private-2", tax: 0.42 });
+    expect(String(down?.properties["summary"])).toContain("⬇️ Downgrade");
+    expect(up?.properties).toMatchObject({ from_plan_code: "private-2", plan_code: "private-29" });
+    expect(String(up?.properties["summary"])).toContain("⬆️ Upgrade");
+  });
+
+  it("says a larger plan set in Stripe's dashboard before its charge, once", async () => {
+    const accountId = await signIn();
+    const subscriptionId = await buy("private-5", accountId);
+    const nine = (await db.select().from(providerProducts)).find((row) => row.planCode === "private-9")!;
+    fake.changePriceInDashboard(subscriptionId, nine.productId);
+    await deliver();
+    await reconcileSubscriptions(db, config(), { now: new Date(clock.getTime() + 8 * 24 * 60 * 60 * 1000) });
+    expect(told()).toEqual([planEvents.subscribed, planEvents.changed]);
+    expect(String(last(planEvents.changed)?.properties["summary"])).toContain("charge to follow");
+  });
+
+  it("says a renewal failed, and that the plan ended when Stripe gave up", async () => {
+    const accountId = await signIn();
+    const subscriptionId = await buy("private-5", accountId);
+    clock = fake.subscriptions.get(subscriptionId)!.periodEnd;
+    fake.renew(subscriptionId, { fail: true });
+    await deliver();
+    fake.cancelNow(subscriptionId);
+    await deliver();
+    expect(told()).toEqual([planEvents.subscribed, planEvents.paymentFailed, planEvents.ended]);
+    expect(last(planEvents.ended)?.properties["reason"]).toBe("payment_failed");
+  });
+
+  it("says a failed renewal paid late as a renewal", async () => {
+    const accountId = await signIn();
+    const subscriptionId = await buy("private-5", accountId);
+    clock = fake.subscriptions.get(subscriptionId)!.periodEnd;
+    fake.renew(subscriptionId, { fail: true });
+    await deliver();
+    fake.payInvoice(latestInvoiceOf(subscriptionId));
+    await deliver();
+    expect(told()).toEqual([planEvents.subscribed, planEvents.paymentFailed, planEvents.renewed]);
+  });
+
+  it("says a refund once it settles, and a dispute when it opens and closes", async () => {
+    useFake({ taxPercent: 21 });
+    const accountId = await signIn();
+    const subscriptionId = await buy("private-5", accountId);
+    const refundId = fake.refund(latestInvoiceOf(subscriptionId), { amount: 300, pending: true });
+    await deliver();
+    expect(told()).toEqual([planEvents.subscribed]);
+    fake.settleRefund(refundId);
+    const settled = fake.takeDeliveries();
+    for (const delivery of [...settled, ...settled]) {
+      await send(delivery.body, delivery.signature);
+    }
+    expect(last(planEvents.refunded)?.properties).toMatchObject({ amount: 3, plan_code: "private-5", refund_id: refundId });
+
+    const disputeId = fake.dispute(latestInvoiceOf(subscriptionId));
+    await deliver();
+    fake.closeDispute(disputeId, "won");
+    await deliver();
+    expect(told()).toEqual([
+      planEvents.subscribed,
+      planEvents.refunded,
+      planEvents.disputeOpened,
+      planEvents.disputeClosed,
+    ]);
+    expect(last(planEvents.disputeOpened)?.distinctId).toBe(accountId);
+    expect(last(planEvents.disputeClosed)?.properties).toMatchObject({ dispute_id: disputeId, status: "won" });
+  });
+
+  it("says a plan ended with the account deleted", async () => {
+    const accountId = await signIn();
+    await buy("private-5", accountId);
+    await cancelForErasure(db, stripeSetup(), accountId);
+    await deliver();
+    expect(told()).toEqual([planEvents.subscribed, planEvents.ended]);
+    expect(last(planEvents.ended)?.properties["reason"]).toBe("account_deleted");
   });
 });
 

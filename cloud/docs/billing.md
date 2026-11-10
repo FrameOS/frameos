@@ -77,6 +77,16 @@ that gives its VAT number is invoiced under the reverse charge.
 - **The account is fixed by our checkout**: `frameos_account_id` in the
   session's and the subscription's metadata. A subscription without it was
   sold some other way and is acknowledged and ignored.
+- **A plan event is told once, by the write that changed something.**
+  `src/lib/plan-notifications.ts` sends the `cloud plan …` PostHog events
+  (the reports channel on Discord, through the "Cloud plans" workflow),
+  and `billing-provider.ts` calls it only where its own write was the one
+  that changed: a payment `applyProviderPayment` applied, Stripe's status
+  moved by compare-and-set on `provider_subscriptions`, a downgrade
+  `noteProviderNextPlan` recorded, a refund applied, a webhook marked
+  processed. A new transition gets its event the same way, never from a
+  before-and-after read: the checkout return and three webhooks arrive
+  together, and each would see the change.
 
 ## What the books get
 
@@ -156,6 +166,18 @@ accounting module; every row names its mode.
   no plan switching). It also reads Stripe Tax's status and the webhook
   endpoint, and says what is missing.
 - Account deletion cancels at Stripe first and refuses when it cannot.
+- `src/lib/plan-notifications.ts`: the plan events. Which one a paid
+  invoice is follows the plan the account was on (`previous` from
+  `applyProviderPayment`): none is `cloud plan subscribed`, another plan
+  `cloud plan changed`, the same plan `cloud plan renewed` (a
+  `subscription_cycle` invoice) or `cloud plan payment received`. Stripe's
+  status gives `cancellation scheduled`, `cancellation withdrawn`,
+  `payment failed` and `ended` (`statusNoticeFor`), the rest come from
+  their own step: `downgrade scheduled`, `refunded`, `dispute opened`,
+  `dispute closed`, and `ended` for an account deleted with its plan.
+  Each carries `summary` (the Discord line, `[test]` first in test mode),
+  `admin_url` (the customer statement) and the money as numbers; nothing
+  names the person.
 
 ## Environment
 
