@@ -297,6 +297,119 @@ static char *read_file(const char *path, size_t *out_len)
     return buf;
 }
 
+/* The scenes read last, as they are on flash. Opening a SPIFFS file walks the
+ * partition until it finds it, up to 0.7 s on the reTerminal E1003's 24 MB, and
+ * every scene switch read its scene that way (2026-11-10): a scene shown before
+ * comes from here. Any write of the scene files clears it, and a read that
+ * raced one does not go in (the generation). Under s_scene_file_lock. */
+#define SLOT_CACHE_ENTRIES 8
+#define SLOT_CACHE_MAX_BYTES (256u * 1024u)
+typedef struct {
+    int slot;
+    char *json;
+    size_t len;
+    uint32_t used;
+} slot_cache_entry_t;
+static slot_cache_entry_t s_slot_cache[SLOT_CACHE_ENTRIES];
+static uint32_t s_slot_cache_generation = 0;
+static uint32_t s_slot_cache_clock = 0;
+
+static void slot_cache_lock(void)
+{
+    if (s_scene_file_lock != NULL) xSemaphoreTake(s_scene_file_lock, portMAX_DELAY);
+}
+
+static void slot_cache_unlock(void)
+{
+    if (s_scene_file_lock != NULL) xSemaphoreGive(s_scene_file_lock);
+}
+
+static void slot_cache_clear_locked(void)
+{
+    for (int i = 0; i < SLOT_CACHE_ENTRIES; i++) {
+        free(s_slot_cache[i].json);
+        s_slot_cache[i] = (slot_cache_entry_t){0};
+    }
+    s_slot_cache_generation++;
+}
+
+static void slot_cache_clear(void)
+{
+    slot_cache_lock();
+    slot_cache_clear_locked();
+    slot_cache_unlock();
+}
+
+static char *copy_bytes(const char *src, size_t len)
+{
+    char *copy = fos_big_malloc(len + 1);
+    if (copy == NULL) copy = malloc(len + 1);
+    if (copy == NULL) return NULL;
+    memcpy(copy, src, len);
+    copy[len] = 0;
+    return copy;
+}
+
+/* A slot file's bytes, malloc'd for the caller to free, from the cache when
+ * it holds them. */
+static char *read_slot_file(int slot, const char *path, size_t *out_len)
+{
+    slot_cache_lock();
+    uint32_t generation = s_slot_cache_generation;
+    for (int i = 0; i < SLOT_CACHE_ENTRIES; i++) {
+        if (s_slot_cache[i].json != NULL && s_slot_cache[i].slot == slot) {
+            char *copy = copy_bytes(s_slot_cache[i].json, s_slot_cache[i].len);
+            if (copy != NULL) {
+                s_slot_cache[i].used = ++s_slot_cache_clock;
+                if (out_len != NULL) *out_len = s_slot_cache[i].len;
+                slot_cache_unlock();
+                return copy;
+            }
+        }
+    }
+    slot_cache_unlock();
+    size_t len = 0;
+    char *json = read_file(path, &len);
+    if (out_len != NULL) *out_len = len;
+    if (json == NULL || len == 0 || len > SLOT_CACHE_MAX_BYTES / 2) return json;
+    char *kept = copy_bytes(json, len);
+    if (kept == NULL) return json;
+    slot_cache_lock();
+    if (generation != s_slot_cache_generation) {
+        /* The scenes were written while this one was read. */
+        slot_cache_unlock();
+        free(kept);
+        return json;
+    }
+    size_t total = len;
+    int free_at = -1;
+    for (int i = 0; i < SLOT_CACHE_ENTRIES; i++) {
+        if (s_slot_cache[i].json == NULL) {
+            if (free_at < 0) free_at = i;
+        } else {
+            total += s_slot_cache[i].len;
+        }
+    }
+    /* Room by bytes and by entries, the least recently used going first. */
+    while (total > SLOT_CACHE_MAX_BYTES || free_at < 0) {
+        int oldest = -1;
+        for (int i = 0; i < SLOT_CACHE_ENTRIES; i++) {
+            if (s_slot_cache[i].json != NULL &&
+                (oldest < 0 || s_slot_cache[i].used < s_slot_cache[oldest].used)) {
+                oldest = i;
+            }
+        }
+        if (oldest < 0) break;
+        total -= s_slot_cache[oldest].len;
+        free(s_slot_cache[oldest].json);
+        s_slot_cache[oldest] = (slot_cache_entry_t){0};
+        free_at = oldest;
+    }
+    s_slot_cache[free_at] = (slot_cache_entry_t){.slot = slot, .json = kept, .len = len, .used = ++s_slot_cache_clock};
+    slot_cache_unlock();
+    return json;
+}
+
 /* Erased pages for `len` more bytes, made now. SPIFFS reuses a deleted
  * file's pages only after a garbage collection, and left to itself it runs
  * one inside the write, by erase age: with 460 KB of photos beside them,
@@ -683,6 +796,7 @@ static esp_err_t write_slot(int slot, const char *data, size_t len)
 
 void fos_scenes_wipe_state(void)
 {
+    slot_cache_clear();
     /* SPIFFS has a flat namespace: readdir("/state") lists every file,
      * whatever slashes its name carries. */
     DIR *dir = opendir("/state");
@@ -704,6 +818,7 @@ void fos_scenes_wipe_state(void)
 
 static void remove_slots_from(int first_slot)
 {
+    slot_cache_clear();
     for (int slot = first_slot; slot < SCENES_SLOT_MAX; slot++) {
         char path[SCENES_SLOT_PATH_LEN];
         slot_path(slot, path, sizeof(path));
@@ -880,7 +995,7 @@ char *fos_scenes_read_scene_json(const char *scene_id, size_t *out_len)
     }
     char path[SCENES_SLOT_PATH_LEN];
     slot_path(slot, path, sizeof(path));
-    char *json = read_file(path, out_len);
+    char *json = read_slot_file(slot, path, out_len);
     log_scene_event("scenes:load", json ? "ok" : "error", "embedded", scene_id,
                     json ? "embedded-scene-read" : "embedded-scene-unreadable",
                     json ? *out_len : 0, json ? 1 : 0, 0, json ? ESP_OK : ESP_FAIL);
@@ -892,7 +1007,7 @@ static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
     char path[SCENES_SLOT_PATH_LEN];
     slot_path(slot, path, sizeof(path));
     size_t len = 0;
-    char *json = read_file(path, &len);
+    char *json = read_slot_file(slot, path, &len);
     if (json == NULL || len == 0) {
         free(json);
         ESP_LOGW(TAG, "scene slot %d unreadable (%s)", slot, scene_id ? scene_id : "?");
@@ -1341,6 +1456,7 @@ static esp_err_t write_file_replace(const char *path, const char *tmp_path,
     if (s_scene_file_lock != NULL) {
         xSemaphoreTake(s_scene_file_lock, portMAX_DELAY);
     }
+    slot_cache_clear_locked();
     esp_err_t err = write_file_replace_locked(path, tmp_path, data, len);
     if (s_scene_file_lock != NULL) {
         xSemaphoreGive(s_scene_file_lock);

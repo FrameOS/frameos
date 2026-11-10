@@ -262,6 +262,39 @@ static void test_flush_outside_the_lock(const char *dir)
     fos_scene_state_set_write_behind(NULL);
 }
 
+/* A scene without state asked for it on every switch, and opening a file that
+ * is not there walks all of SPIFFS: what the store saw missing stays missing
+ * until it writes it. */
+static void test_a_missing_file_is_remembered(const char *dir)
+{
+    fos_scene_state_set_dir(dir);
+    fos_scene_state_set_write_behind(NULL);
+    fos_scene_state_forget("ghost");
+    CHECK(fos_scene_state_load("ghost") == NULL);
+    /* Written behind its back: it knows there is none and does not look. */
+    char path[128];
+    CHECK(fos_scene_state_path("ghost", path, sizeof(path)));
+    FILE *f = fopen(path, "wb");
+    fputs("{\"x\":1}", f);
+    fclose(f);
+    CHECK(fos_scene_state_load("ghost") == NULL);
+    /* Its own write: there is one now, and emptied there is none again. */
+    CHECK(fos_scene_state_save("ghost", "{\"x\":2}"));
+    CHECK(loads_as("ghost", "{\"x\":2}"));
+    CHECK(fos_scene_state_save("ghost", "{}"));
+    CHECK(fos_scene_state_load("ghost") == NULL);
+    /* Written behind, then saved through write-behind and flushed. */
+    s_clock_ms = 5000;
+    fos_scene_state_write_behind_t behind = {.delay_ms = 1000, .now_ms = fake_now_ms};
+    fos_scene_state_set_write_behind(&behind);
+    CHECK(fos_scene_state_save("ghost", "{\"x\":3}"));
+    fos_scene_state_flush(true);
+    fos_scene_state_set_write_behind(NULL);
+    CHECK(loads_as("ghost", "{\"x\":3}"));
+    fos_scene_state_forget("ghost");
+    CHECK(fos_scene_state_load("ghost") == NULL);
+}
+
 int main(void)
 {
     test_path();
@@ -273,6 +306,7 @@ int main(void)
     test_round_trip(dir);
     test_write_behind(dir);
     test_flush_outside_the_lock(dir);
+    test_a_missing_file_is_remembered(dir);
     rmdir(dir);
     printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

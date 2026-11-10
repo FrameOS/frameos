@@ -64,6 +64,39 @@ static uint32_t fnv1a32(const char *text)
     return hash;
 }
 
+/* Scenes known to have no state file. Opening a SPIFFS file that is not there
+ * walks the whole partition (0.7 s on the reTerminal E1003's 24 MB), and a
+ * scene without state asked for it on every switch. This store writes every
+ * one of these files, so what it saw missing stays missing until it writes it.
+ * Under the lock. */
+#define FOS_SCENE_STATE_ABSENT_MAX 64
+static uint32_t s_absent[FOS_SCENE_STATE_ABSENT_MAX];
+static int s_absent_count = 0;
+
+static int absent_index(uint32_t hash)
+{
+    for (int i = 0; i < s_absent_count; i++) {
+        if (s_absent[i] == hash) return i;
+    }
+    return -1;
+}
+
+static void note_absent(const char *scene_id, bool absent)
+{
+    uint32_t hash = fnv1a32(scene_id);
+    int i = absent_index(hash);
+    if (absent && i < 0) {
+        if (s_absent_count == FOS_SCENE_STATE_ABSENT_MAX) {
+            /* Full: the oldest goes, and is opened again next time. */
+            memmove(s_absent, s_absent + 1, sizeof(s_absent[0]) * (FOS_SCENE_STATE_ABSENT_MAX - 1));
+            s_absent_count--;
+        }
+        s_absent[s_absent_count++] = hash;
+    } else if (!absent && i >= 0) {
+        s_absent[i] = s_absent[--s_absent_count];
+    }
+}
+
 bool fos_scene_state_path(const char *scene_id, char *out, size_t out_len)
 {
     if (scene_id == NULL || scene_id[0] == '\0' || out == NULL || out_len == 0) return false;
@@ -82,8 +115,12 @@ static char *read_file(const char *scene_id)
 {
     char path[FOS_SCENE_STATE_DIR_MAX + 32];
     if (!fos_scene_state_path(scene_id, path, sizeof(path))) return NULL;
+    if (absent_index(fnv1a32(scene_id)) >= 0) return NULL;
     FILE *f = fopen(path, "rb");
-    if (f == NULL) return NULL;
+    if (f == NULL) {
+        note_absent(scene_id, true);
+        return NULL;
+    }
     char *buf = malloc(FOS_SCENE_STATE_MAX_BYTES + 1);
     if (buf == NULL) {
         fclose(f);
@@ -178,7 +215,7 @@ static void write_pending(pending_t *entry)
 {
     /* A write that fails is not retried: the next change queues it again,
      * the same as a failed write-through. */
-    write_file(entry->id, entry->json);
+    if (write_file(entry->id, entry->json)) note_absent(entry->id, entry->json == NULL);
     drop_pending(entry);
 }
 
@@ -210,6 +247,7 @@ bool fos_scene_state_save(const char *scene_id, const char *json)
         pending_t *stale = find_pending(scene_id);
         if (stale != NULL) drop_pending(stale);
         ok = write_file(scene_id, json);
+        if (ok) note_absent(scene_id, empty);
         unlock();
         return ok;
     }
@@ -289,8 +327,9 @@ void fos_scene_state_flush(bool all)
         memset(due, 0, sizeof(*due));
         unlock();
         /* A write that fails is not retried: the next change queues it again. */
-        write_file(s_inflight.id, s_inflight.json);
+        bool written = write_file(s_inflight.id, s_inflight.json);
         lock();
+        if (written) note_absent(s_inflight.id, s_inflight.json == NULL || s_inflight_forgotten);
         if (s_inflight_forgotten) {
             char path[FOS_SCENE_STATE_DIR_MAX + 32];
             if (fos_scene_state_path(s_inflight.id, path, sizeof(path))) remove(path);
@@ -330,5 +369,6 @@ void fos_scene_state_forget(const char *scene_id)
     if (entry != NULL) drop_pending(entry);
     if (s_inflight.used && strcmp(s_inflight.id, scene_id) == 0) s_inflight_forgotten = true;
     if (fos_scene_state_path(scene_id, path, sizeof(path))) remove(path);
+    note_absent(scene_id, true);
     unlock();
 }
