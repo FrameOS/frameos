@@ -76,6 +76,10 @@ elif defined(frameosEmbedded):
   patchFile("stdlib", "hashcommon", "src/embedded/patched_hashcommon")
   patchFile("stdlib", "tableimpl", "src/embedded/patched_tableimpl")
 
+  # `$float` (Dragonbox) links a 9.9 KB table of powers of ten; QuickJS's
+  # js_dtoa, linked anyway, finds the same shortest digits.
+  patchFile("stdlib", "dragonbox", "src/embedded/patched_dragonbox")
+
 when defined(testing):
   # Test binaries (testament passes -d:testing) are built without C
   # optimisation. nim.cfg's -d:release means -O3, and for a test that pulls
