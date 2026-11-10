@@ -129,10 +129,11 @@ export function devicePresetFor(key: string | null | undefined): DevicePreset | 
  * Indicator's glass), whose canvas is the panel's own frame buffer. */
 export const ESP32_PIXEL_RGB565 = 9
 
-/** Bytes per canvas pixel on an ESP32 (fos_render_canvas_bytes_per_pixel),
+/** Bytes per canvas pixel on an ESP32 (fos_render_canvas_bits_per_pixel, over 8),
  * decided by the panel's format first (the frame's `hardware.pixelFormat`;
- * null when unknown): one byte of luma on a grey or black-and-white panel,
- * RGB565 on an RGB565 LCD, whatever the PSRAM. A colour e-paper panel gets
+ * null when unknown): half a byte on a sixteen-grey panel, one byte of luma
+ * on another grey or black-and-white panel, RGB565 on an RGB565 LCD, whatever
+ * the PSRAM. A colour e-paper panel gets
  * RGBX while two of it fit PSRAM, RGB565 beyond — which is where a 13.3"
  * panel on an 8 MB board lands, and a 16 MB board does not (verified against
  * a live 16 MB frame: 6,537 KB free PSRAM mid-scene at 1200x1600 is exactly
@@ -143,6 +144,9 @@ export function esp32CanvasBytesPerPixel(
   psramBytes: number = ESP32_PSRAM_BYTES,
   pixelFormat: number | null = null
 ): number {
+  if (pixelFormat === ESP32_PIXEL_4BPP_GRAY) {
+    return 0.5
+  }
   if (esp32PixelFormatIsGrey(pixelFormat)) {
     return 1
   }
@@ -156,7 +160,10 @@ export function esp32CanvasBytesPerPixel(
   return 2
 }
 
-/** The panel formats a luma canvas serves (fos_pixel_format_t, the firmware's
+/** fos_pixel_format_t's sixteen greys, whose canvas is 4-bit. */
+const ESP32_PIXEL_4BPP_GRAY = 8
+
+/** The grey panel formats (fos_pixel_format_t, the firmware's
  * `fos_pixel_format_is_grey`): 1 black and white, 4 and 8 four and sixteen
  * greys. */
 export function esp32PixelFormatIsGrey(pixelFormat: unknown): boolean {
@@ -190,7 +197,7 @@ export function esp32PreviewOverheadBytes(
   pixelFormat: number | null = null
 ): number {
   const pixels = Math.max(1, width) * Math.max(1, height)
-  return pixels * 4 - pixels * esp32CanvasBytesPerPixel(width, height, psramBytes, pixelFormat)
+  return pixels * 4 - Math.ceil(pixels * esp32CanvasBytesPerPixel(width, height, psramBytes, pixelFormat))
 }
 
 /** The ceiling to give the preview so it has the same room the device does:

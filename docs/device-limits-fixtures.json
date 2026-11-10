@@ -1,5 +1,5 @@
 {
-  "description": "esp32DeviceLimits (frameos/wasm/src/devices.ts, its copy frontend/src/utils/deviceLimits.ts) and esp32_device_limits (backend/app/utils/device_limits.py): the wasm renderer ceiling for an ESP32 frame. `pixelFormat` (fos_pixel_format_t, default unknown): the panel's format, which decides its canvas \u2014 one byte of luma on a grey or black-and-white panel (1, 4, 8) and RGB565 on an RGB565 LCD (9) whatever the PSRAM, RGBX while two of it fit PSRAM on any other. `canvasBytesPerPixel` is that canvas, which the wasm runtime draws in while it runs as the ESP32 (src/wasm/wasm_main.nim previewCanvas). Replayed by cloud/apps/auth-web/src/lib/device-limits.test.ts and backend/app/utils/tests/test_device_limits.py.",
+  "description": "esp32DeviceLimits (frameos/wasm/src/devices.ts, its copy frontend/src/utils/deviceLimits.ts) and esp32_device_limits (backend/app/utils/device_limits.py): the wasm renderer ceiling for an ESP32 frame. `pixelFormat` (fos_pixel_format_t, default unknown): the panel's format, which decides its canvas \u2014 half a byte on a sixteen-grey panel (8), one byte of luma on another grey or black-and-white panel (1, 4) and RGB565 on an RGB565 LCD (9) whatever the PSRAM, RGBX while two of it fit PSRAM on any other. `canvasBytesPerPixel` is that canvas, which the wasm runtime draws in while it runs as the ESP32 (src/wasm/wasm_main.nim previewCanvas). Replayed by cloud/apps/auth-web/src/lib/device-limits.test.ts and backend/app/utils/tests/test_device_limits.py.",
   "cases": [
     {
       "name": "7.3 inch on an 8 MB board: RGBX canvas",
@@ -30,14 +30,14 @@
       "canvasBytesPerPixel": 2
     },
     {
-      "name": "10.3 inch sixteen greys on an 8 MB board (the E1003): luma canvas",
+      "name": "10.3 inch sixteen greys on an 8 MB board (the E1003): 4-bit canvas",
       "width": 1872,
       "height": 1404,
       "psramBytes": 8388608,
       "pixelFormat": 8,
-      "memoryBytes": 13910752,
-      "previewOverheadBytes": 7884864,
-      "canvasBytesPerPixel": 1
+      "memoryBytes": 15224896,
+      "previewOverheadBytes": 9199008,
+      "canvasBytesPerPixel": 0.5
     },
     {
       "name": "the same panel size in colour: RGB565 canvas",

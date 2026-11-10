@@ -353,7 +353,7 @@ if (request.deviceLimits) {
   // draw a fresh RGBX canvas, which the ceiling was worked out for.
   if (request.deviceLimits.embedded && request.deviceLimits.canvasBytesPerPixel) {
     try {
-      call('frameos_wasm_set_canvas_bytes_per_pixel', null, ['number'], [request.deviceLimits.canvasBytesPerPixel])
+      call('frameos_wasm_set_canvas_bits_per_pixel', null, ['number'], [request.deviceLimits.canvasBytesPerPixel * 8])
     } catch (error) {
       process.stderr.write(`embedded_wasm_render: device canvas unavailable (${error})\n`)
     }

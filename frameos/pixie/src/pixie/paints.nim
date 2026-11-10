@@ -208,7 +208,16 @@ proc fillGradientLinear(
     to = paint.gradientHandlePositions[1]
 
   if at.y == to.y: # Horizontal gradient: one row of colours, copied down
-    if image.height > 0:
+    if image.height > 0 and image.format == pfGray4:
+      # A 4-bit store is dithered by its row: a copied row would print the
+      # first row's pattern down the whole image as vertical stripes.
+      var colors = newSeq[ColorRGBX](image.width)
+      for x in 0 ..< image.width:
+        colors[x] = paint.gradientColor(toLineSpace(at, to, vec2(x.float32 + origin.x, origin.y)))
+      for y in 0 ..< image.height:
+        for x in 0 ..< image.width:
+          image.unsafe[x, y] = colors[x]
+    elif image.height > 0:
       for x in 0 ..< image.width:
         let t = toLineSpace(at, to, vec2(x.float32 + origin.x, origin.y))
         image.unsafe[x, 0] = paint.gradientColor(t)

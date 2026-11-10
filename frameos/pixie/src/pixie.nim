@@ -118,13 +118,8 @@ proc copyIntoTarget(target, source: Image) {.raises: [PixieError].} =
         inc ti
         inc si
     return
-  let rowBytes = target.width * target.bytesPerPixel
   for y in 0 ..< target.height:
-    copyMem(
-      target.pixelAddr(target.dataIndex(0, y)),
-      source.pixelAddr(source.dataIndex(0, y)),
-      rowBytes
-    )
+    target.copyPixelRow(target.dataIndex(0, y), source, source.dataIndex(0, y), target.width)
 
 template isWebpData(data: string): bool =
   data.len > 12 and data.readStr(0, 4) == WebpRiffSignature and

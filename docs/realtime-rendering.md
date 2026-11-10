@@ -155,15 +155,28 @@ local network access code and the voice notice are drawn into the buffer the
 panel shows next, after a clean copy went to the snapshot (`docs/lan-access.md`:
 the code never leaves the device in an image).
 
-### One byte per pixel on grey and black-and-white panels
+### Half a byte on sixteen greys, one on the other grey panels
 
-A greyscale or black-and-white panel renders in pixie's 8-bit luma surface
-(`pfGray8`) whatever the PSRAM, not only when RGBX does not fit: blending is
+A sixteen-grey panel renders in `pfGray4`: two pixels a byte, in the panel
+buffer's own layout, so the 1872x1404 E1003's canvas is 1.3 MiB (2.5 in luma)
+and the pack is a copy, or a turn of a rotated frame. What is written is still
+8-bit, and every store goes through the 4x4 ordered matrix the pack used to
+apply (`grayLevel16Ordered`), keyed on the pixel's place in the owner's buffer:
+a single layer holds exactly what luma plus the pack gave, a gradient keeps
+some 240 steps per 4x4 cell, the sixteen exact levels stay flat. A blend reads
+the dithered backdrop back, which holds its mean to about a quarter of a level.
+A loop that writes one row and copies it down would print the matrix as
+vertical stripes, so pixie's horizontal gradient computes every row on this
+surface. Colour correction of the whole frame reads the sixteen levels, not
+the 256 they came from.
+
+Any other grey or black-and-white panel renders in pixie's 8-bit luma surface
+(`pfGray8`), because its error diffusion wants the 256 levels, whatever the PSRAM, not only when RGBX does not fit: blending is
 per channel, so the luma of a composite is the composite of the lumas, and
 every pass over the canvas — a fill, a blend, the dither — moves a quarter of
 the bytes. The rule, in every copy (C, Nim, the backend, both device-limits
-ports, `docs/device-limits-fixtures.json`): luma for a grey panel, 565 for an
-RGB565 LCD, and for a colour e-paper panel RGBX while two of it fit PSRAM,
+ports, `docs/device-limits-fixtures.json`): 4-bit for sixteen greys, luma for
+another grey panel, 565 for an RGB565 LCD, and for a colour e-paper panel RGBX while two of it fit PSRAM,
 565 beyond.
 
 ### The background is owed, not painted
@@ -635,7 +648,8 @@ a small change cost what it should:
 - **The dither.** On the sixteen-grey panels there is no error to carry:
   `grayLevel16Ordered` is a 4x4 Bayer matrix, so a pixel's level depends on
   that pixel alone and a small change is a small change on the wire. It is
-  integer arithmetic and runs on both cores (`fos_rows_run`): 2.6 Mpx in 167 ms,
+  integer arithmetic, applied as a 4-bit canvas stores each pixel: the pack
+  that took 167 ms over 2.6 Mpx on both cores is a copy now,
   where double-precision Floyd-Steinberg, which an S3 does in software, took 49
   s. The 1-bit panels are another matter: Floyd-Steinberg carries its error across the picture, so
   packing a whole frame after a small change rewrites the dither of every grey

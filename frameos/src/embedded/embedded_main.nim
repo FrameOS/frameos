@@ -224,6 +224,8 @@ proc packImageGray16(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int):
   if rowBytes * frameHeight != bufLen:
     log(&"pack gray: buffer mismatch, want {rowBytes * frameHeight} bytes, got {bufLen}")
     return false
+  if packGray4Canvas(image, buf, frameWidth, frameHeight, frameRotate):
+    return true
   if image.format == pfGray8 and not image.isView and frameRotate == 0 and
       width == frameWidth and height == frameHeight:
     var job = Gray16Job(

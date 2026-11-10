@@ -195,6 +195,49 @@ suite "row-streamed dither equals the in-place reference":
           fromRgbx[y * w + x] = level
         check fromGrey == fromRgbx
 
+suite "a 4-bit canvas packed for the panel":
+  proc numbered(width, height: int): Image =
+    result = newImageGray4(width, height)
+    for y in 0 ..< height:
+      for x in 0 ..< width:
+        let v = uint8(((x + y * 3) mod 16) * 17)
+        result[x, y] = rgba(v, v, v, 255)
+
+  test "unrotated it is the canvas's bytes":
+    let image = numbered(8, 4)
+    var buf = newSeq[uint8](16)
+    check packGray4Canvas(image, cast[ptr UncheckedArray[uint8]](buf[0].addr), 8, 4, 0)
+    for y in 0 ..< 4:
+      for x in 0 ..< 8:
+        check gray4Level(cast[ptr UncheckedArray[uint8]](buf[0].addr), y * 8 + x).int ==
+          image.unsafe[x, y].r.int div 17
+
+  test "turned, each pixel lands where the panel shows it":
+    # The canvas of a 90 or 270 degree frame has the panel's sides swapped.
+    for rotate in [90, 180, 270]:
+      let
+        (canvasW, canvasH) = if rotate == 180: (40, 36) else: (36, 40)
+        (panelW, panelH) = (40, 36)
+        image = numbered(canvasW, canvasH)
+      var buf = newSeq[uint8](((panelW + 1) div 2) * panelH)
+      let wire = cast[ptr UncheckedArray[uint8]](buf[0].addr)
+      check packGray4Canvas(image, wire, panelW, panelH, rotate)
+      for y in 0 ..< canvasH:
+        for x in 0 ..< canvasW:
+          let (px, py) =
+            case rotate
+            of 90: (canvasH - 1 - y, x)
+            of 180: (canvasW - 1 - x, canvasH - 1 - y)
+            else: (y, canvasW - 1 - x)
+          check gray4Level(wire, py * panelW + px).int == image.unsafe[x, y].r.int div 17
+
+  test "a view or another size is not this path":
+    var buf = newSeq[uint8](64)
+    let wire = cast[ptr UncheckedArray[uint8]](buf[0].addr)
+    check not packGray4Canvas(numbered(8, 8).view(0, 0, 4, 4), wire, 8, 8, 0)
+    check not packGray4Canvas(numbered(4, 4), wire, 8, 8, 0)
+    check not packGray4Canvas(newImageGray8(8, 8), wire, 8, 8, 0)
+
 suite "ordered sixteen greys":
   test "the sixteen exact levels are flat, black and white among them":
     for level in 0 .. 15:

@@ -166,6 +166,15 @@ proc storeRow(job: ptr RowJob, y: int, upper, lower: ptr UncheckedArray[uint32],
     for x in 0 ..< width:
       let value = if weight == 0: upper[x] else: mix(upper[x], lower[x], weight)
       out8[start + x] = rgbxToGray8(cast[ColorRGBX](value))
+  of pfGray4:
+    # Dithered like every 4-bit store, by the pixel's place on the canvas.
+    let out4 = cast[ptr UncheckedArray[uint8]](job.target)
+    let cell = ((start div job.targetStride) and 3) * 4
+    let column = start mod job.targetStride
+    for x in 0 ..< width:
+      let value = if weight == 0: upper[x] else: mix(upper[x], lower[x], weight)
+      gray4Put(out4, start + x, grayLevel16Ordered(rgbxToGray8(cast[ColorRGBX](value)),
+        OrderedThresholds4x4[cell + ((column + x) and 3)]))
 
 proc drawRows(ctx: pointer, worker, first, last: int32) {.cdecl, gcsafe, raises: [].} =
   ## Target rows [first, last) with this worker's two cached source rows.
@@ -241,7 +250,7 @@ proc drawRectBilinear*(target, source: Image, sx, sy, sw, sh: float) =
     case target.format
     of pfRgbx: cast[pointer](target.data)
     of pfRgb565: cast[pointer](target.data16)
-    of pfGray8: cast[pointer](target.data8)
+    of pfGray8, pfGray4: cast[pointer](target.data8)
   runRows(drawRows, job.addr, height.int32, BlockRows)
 
 {.pop.}

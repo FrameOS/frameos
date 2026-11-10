@@ -270,6 +270,7 @@ template forEachPaletteDithered*(
       let
         is565 = image.isRgb565
         isGray = image.isGray8
+        isGray4 = image.format == pfGray4
       template loadRow(row: ptr UncheckedArray[uint8], ry: int) =
         # Rows are contiguous within themselves for owners and views alike
         # (`dataIndex` = origin + stride * y + x), so one base index per row
@@ -286,6 +287,13 @@ template forEachPaletteDithered*(
           let src = image.data8
           for rx in 0 ..< ditherWidth:
             let luma = src[rowStart + rx]
+            row[rx * 3 + 0] = luma
+            row[rx * 3 + 1] = luma
+            row[rx * 3 + 2] = luma
+        elif isGray4:
+          let src = image.data8
+          for rx in 0 ..< ditherWidth:
+            let luma = gray4Level(src, rowStart + rx) * 17
             row[rx * 3 + 0] = luma
             row[rx * 3 + 1] = luma
             row[rx * 3 + 2] = luma
@@ -351,18 +359,44 @@ template forEachPaletteDithered*(
               push(nextRow, xx + 1, errorR, errorG, errorB, 1)
         swap(curRow, nextRow)
 
-const OrderedThresholds4x4* = [0'u8, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]
-  ## A 4x4 Bayer matrix by `(y and 3) * 4 + (x and 3)`.
-
-proc grayLevel16Ordered*(gray, threshold: uint8): uint8 {.inline.} =
-  ## One of sixteen greys for an 8-bit grey, against its OrderedThresholds4x4
-  ## entry. The sixteen exact levels (multiples of 17, black and white among
-  ## them) stay flat. Integers: an S3 does double-precision floats in software,
-  ## and Floyd-Steinberg over a 10.3" panel's 2.6 Mpx took 49 s. And no error
-  ## to carry: a pixel's level depends on it alone, so a small change to the
-  ## picture is a small change on the wire.
-  let value = gray.uint32 * 15 + threshold.uint32 * 16 + 8
-  uint8(((value + 1) * 257) shr 16) # value / 255, exactly
+proc packGray4Canvas*(image: Image; buf: ptr UncheckedArray[uint8];
+    frameWidth, frameHeight, rotate: int): bool =
+  ## A 4-bit canvas into a sixteen-grey panel buffer, which has its layout:
+  ## the levels were dithered as they were stored, so only their places can
+  ## change. Unrotated it is one copy. Turned, in 32 x 32 tiles, for the
+  ## reason the 565 canvas has them: a quarter turn writes down the panel's
+  ## columns, and row by row every pixel would be a cache line of PSRAM of its
+  ## own. False for what this does not cover (a view, another size).
+  let
+    width = image.width
+    height = image.height
+    rowBytes = (frameWidth + 1) div 2
+  if image.format != pfGray4 or image.isView or width * height != frameWidth * frameHeight:
+    return false
+  let src = cast[ptr UncheckedArray[uint8]](image.bufferPointer)
+  if rotate == 0:
+    if width != frameWidth:
+      return false
+    copyMem(buf, src, rowBytes * frameHeight)
+    return true
+  let panelStride = rowBytes * 2
+  const Tile = 32
+  for ty in countup(0, height - 1, Tile):
+    for tx in countup(0, width - 1, Tile):
+      for y in ty ..< min(ty + Tile, height):
+        # The panel's place for (tx, y), then a step per x.
+        var (index, step) =
+          case rotate
+          of 90: (tx * panelStride + height - 1 - y, panelStride)
+          of 180: ((height - 1 - y) * panelStride + width - 1 - tx, -1)
+          of 270: ((width - 1 - tx) * panelStride + y, -panelStride)
+          else: (y * panelStride + tx, 1)
+        var i = y * image.stride + tx
+        for x in tx ..< min(tx + Tile, width):
+          gray4Put(buf, index, gray4Level(src, i))
+          index += step
+          inc i
+  true
 
 template forEachGrayDithered*(
   image: Image, maxLevel: int,

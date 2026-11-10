@@ -702,7 +702,7 @@ async function main() {
     // and draw a fresh RGBX canvas, which the ceiling was worked out for.
     if (limits.embedded && limits.canvasBytesPerPixel) {
       try {
-        call("frameos_wasm_set_canvas_bytes_per_pixel", null, ["number"], [limits.canvasBytesPerPixel]);
+        call("frameos_wasm_set_canvas_bits_per_pixel", null, ["number"], [limits.canvasBytesPerPixel * 8]);
       } catch (error) {
         pushLog("a device canvas is unavailable in this runtime build: " + error);
       }

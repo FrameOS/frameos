@@ -1482,6 +1482,8 @@ proc clearUnsafe(image: Image, startX, startY, toX, toY: int) =
       fillUnsafe16(image.data16, 0, start, len)
     elif image.format == pfGray8:
       fillUnsafe8(image.data8, 0, start, len)
+    elif image.format == pfGray4:
+      image.fillGray4(0, start, len)
     else:
       fillUnsafe(image.data, rgbx(0, 0, 0, 0), start, len)
     return
@@ -1497,6 +1499,8 @@ proc clearUnsafe(image: Image, startX, startY, toX, toY: int) =
         fillUnsafe16(image.data16, 0, start, rowEnd - x)
       elif image.format == pfGray8:
         fillUnsafe8(image.data8, 0, start, rowEnd - x)
+      elif image.format == pfGray4:
+        image.fillGray4(0, start, rowEnd - x)
       else:
         fillUnsafe(image.data, rgbx(0, 0, 0, 0), start, rowEnd - x)
     x = 0
@@ -1570,6 +1574,62 @@ proc fillCoverageGray8(
   let data = image.data8
   image.fillCoverageNarrowBody(rgbx, startX, y, coverages, blendMode, data, rgbxToGray8, gray8ToRgbx)
 
+proc fillCoverageGray4(
+  image: Image, rgbx: ColorRGBX, startX, y: int, coverages: openArray[uint8], blendMode: BlendMode
+) =
+  ## `fillCoverage` for a sixteen-grey destination: the narrow bodies' walk,
+  ## with the place in the row kept beside the index for the dither.
+  let
+    data = image.data8
+    stride = image.stride
+    start = image.dataIndex(startX, y)
+    cell = ((start div stride) and 3) * 4
+    luma = rgbxToGray8(rgbx)
+    opaque = rgbx.a == 255
+  var
+    idx = start
+    column = start mod stride
+  template store(value: uint8) =
+    gray4Put(data, idx, grayLevel16Ordered(value, OrderedThresholds4x4[cell + (column and 3)]))
+  template backdrop(): ColorRGBX =
+    gray4ToRgbx(gray4Level(data, idx))
+  case blendMode:
+  of OverwriteBlend:
+    for i in 0 ..< coverages.len:
+      let coverage = coverages[i]
+      if coverage == 255:
+        store(luma)
+      elif coverage != 0:
+        store(rgbxToGray8(rgbx * coverage))
+      inc idx
+      inc column
+  of NormalBlend:
+    for i in 0 ..< coverages.len:
+      let coverage = coverages[i]
+      if coverage == 255 and opaque:
+        store(luma)
+      elif coverage != 0:
+        store(rgbxToGray8(blendNormal(backdrop(), rgbx * coverage)))
+      inc idx
+      inc column
+  of MaskBlend:
+    for i in 0 ..< coverages.len:
+      let coverage = coverages[i]
+      if coverage != 255:
+        store(rgbxToGray8(blendMask(backdrop(), rgbx * coverage)))
+      inc idx
+      inc column
+    image.clearUnsafe(0, y, startX, y)
+    image.clearUnsafe(startX + coverages.len, y, image.width, y)
+  else:
+    let blender = blendMode.blender()
+    for i in 0 ..< coverages.len:
+      let coverage = coverages[i]
+      if coverage != 0:
+        store(rgbxToGray8(blender(backdrop(), rgbx * coverage)))
+      inc idx
+      inc column
+
 proc blendLineCoverageOverwrite(
   line: ptr UncheckedArray[ColorRGBX],
   coverages: ptr UncheckedArray[uint8],
@@ -1619,6 +1679,9 @@ proc fillCoverage(
     return
   if image.format == pfGray8:
     image.fillCoverageGray8(rgbx, startX, y, coverages, blendMode)
+    return
+  if image.format == pfGray4:
+    image.fillCoverageGray4(rgbx, startX, y, coverages, blendMode)
     return
 
   var
@@ -1747,6 +1810,51 @@ proc fillHitsGray8(
   image.fillHitsNarrowBody(rgbx, startX, y, hits, numHits, windingRule, blendMode, maskClears,
     data, rgbxToGray8, gray8ToRgbx, fillUnsafe8)
 
+proc blendSpanGray4(image: Image, rgbx: ColorRGBX, blender: Blender, x, y, len: int) =
+  ## `len` pixels of `rgbx` blended onto a 4-bit row and dithered back.
+  let
+    data = image.data8
+    stride = image.stride
+    start = image.dataIndex(x, y)
+    cell = ((start div stride) and 3) * 4
+  var column = start mod stride
+  for idx in start ..< start + len:
+    let blended = blender(gray4ToRgbx(gray4Level(data, idx)), rgbx)
+    gray4Put(data, idx, grayLevel16Ordered(rgbxToGray8(blended), OrderedThresholds4x4[cell + (column and 3)]))
+    inc column
+
+proc fillHitsGray4(
+  image: Image, rgbx: ColorRGBX, startX, y: int, hits: seq[(Fixed32, int16)], numHits: int,
+  windingRule: WindingRule, blendMode: BlendMode, maskClears: bool
+) =
+  ## `fillHits` for a sixteen-grey destination: solid spans through
+  ## `fillGray4`, blended ones per pixel at 8 bits.
+  let luma = rgbxToGray8(rgbx)
+  case blendMode:
+  of OverwriteBlend:
+    for (start, len) in hits.walkInteger(numHits, windingRule, y, image.width):
+      image.fillGray4(luma, image.dataIndex(start, y), len)
+  of MaskBlend:
+    var filledTo = startX
+    for (start, len) in hits.walkInteger(numHits, windingRule, y, image.width):
+      if maskClears and start > filledTo:
+        image.fillGray4(0, image.dataIndex(filledTo, y), start - filledTo)
+      if rgbx.a != 255:
+        image.blendSpanGray4(rgbx, MaskBlend.blender(), start, y, len)
+      filledTo = start + len
+    if maskClears:
+      image.clearUnsafe(0, y, startX, y)
+      image.clearUnsafe(filledTo, y, image.width, y)
+  else:
+    let
+      solid = blendMode == NormalBlend and rgbx.a == 255
+      blender = blendMode.blender()
+    for (start, len) in hits.walkInteger(numHits, windingRule, y, image.width):
+      if solid:
+        image.fillGray4(luma, image.dataIndex(start, y), len)
+      else:
+        image.blendSpanGray4(rgbx, blender, start, y, len)
+
 proc fillHits(
   image: Image,
   rgbx: ColorRGBX,
@@ -1763,6 +1871,10 @@ proc fillHits(
     return
   if image.format == pfGray8:
     image.fillHitsGray8(
+      rgbx, startX, y, hits, numHits, windingRule, blendMode, maskClears)
+    return
+  if image.format == pfGray4:
+    image.fillHitsGray4(
       rgbx, startX, y, hits, numHits, windingRule, blendMode, maskClears)
     return
 
@@ -1891,6 +2003,8 @@ proc fillShapes(
               fillUnsafe16(image.data16, rgbxToRgb565(rgbx), start, len)
             elif image.format == pfGray8:
               fillUnsafe8(image.data8, rgbxToGray8(rgbx), start, len)
+            elif image.format == pfGray4:
+              image.fillGray4(rgbxToGray8(rgbx), start, len)
             else:
               fillUnsafe(image.data, rgbx, start, len)
           else:
@@ -1902,6 +2016,8 @@ proc fillShapes(
                 fillUnsafe16(image.data16, rgbxToRgb565(rgbx), start, image.width)
               elif image.format == pfGray8:
                 fillUnsafe8(image.data8, rgbxToGray8(rgbx), start, image.width)
+              elif image.format == pfGray4:
+                image.fillGray4(rgbxToGray8(rgbx), start, image.width)
               else:
                 fillUnsafe(image.data, rgbx, start, image.width)
         else:
@@ -2686,7 +2802,8 @@ proc spanFill(image: Image, rgbx: ColorRGBX, x0, x1, y: int) =
   case image.format
   of pfRgb565: fillUnsafe16(image.data16, rgbxToRgb565(rgbx), start, x1 - x0)
   of pfGray8: fillUnsafe8(image.data8, rgbxToGray8(rgbx), start, x1 - x0)
-  else: fillUnsafe(image.data, rgbx, start, x1 - x0)
+  of pfGray4: image.fillGray4(rgbxToGray8(rgbx), start, x1 - x0)
+  of pfRgbx: fillUnsafe(image.data, rgbx, start, x1 - x0)
 
 proc blitMask(image: Image, mask: CoverageMask, ix, iy: int, rgbx: ColorRGBX, blendMode: BlendMode) =
   let solid = rgbx.a == 255 and blendMode in {NormalBlend, OverwriteBlend}

@@ -620,7 +620,7 @@ function applyEmbedded(enabled) {
   const bytesPerPixel = deviceLimits && deviceLimits.canvasBytesPerPixel
   if (bytesPerPixel) {
     try {
-      call('frameos_wasm_set_canvas_bytes_per_pixel', null, ['number'], [bytesPerPixel])
+      call('frameos_wasm_set_canvas_bits_per_pixel', null, ['number'], [bytesPerPixel * 8])
     } catch (e) {
       // older bundle without the export
     }

@@ -168,11 +168,8 @@ proc followedInterval(scene: FrameScene): float =
 proc copyPixels(dst, src: Image) =
   ## Row by row, in either pixel format: either side may be a view onto a
   ## bigger canvas.
-  let bpp = src.bytesPerPixel
-  let d = cast[ptr UncheckedArray[byte]](dst.bufferPointer)
-  let s = cast[ptr UncheckedArray[byte]](src.bufferPointer)
   for y in 0 ..< src.height:
-    copyMem(d[dst.dataIndex(0, y) * bpp].addr, s[src.dataIndex(0, y) * bpp].addr, src.width * bpp)
+    dst.copyPixelRow(dst.dataIndex(0, y), src, src.dataIndex(0, y), src.width)
 
 proc cellOf(r: SceneRhythm, image: Image): RhythmCell =
   ## The cell of `image`'s rectangle, or nil. A rectangle is its place on the

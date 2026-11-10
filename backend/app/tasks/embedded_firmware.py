@@ -17,6 +17,7 @@ into every image (embedded/esp32/main/fos_ota.c). Doctrine in docs/todo.md,
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -1173,7 +1174,7 @@ def embedded_release_firmware_for_frame(
 # 1200x1600 panel on a 16 MB module render in full colour, 1200x1600 Spectra 6
 # on 8 MB needs 565, and the 1872x1404 sixteen-grey reTerminal E1003 draws in
 # grey. Keep the rule and the reserve in sync with
-# fos_render_canvas_bytes_per_pixel / FOS_RENDER_PSRAM_RESERVE in
+# fos_render_canvas_bits_per_pixel / FOS_RENDER_PSRAM_RESERVE in
 # components/frameos_display (the firmware's boot-time fit check),
 # sceneCanvasFormat in embedded_runtime.nim, and EmbeddedReserveBytes in
 # frameos/src/frameos/utils/memory.nim.
@@ -1578,14 +1579,17 @@ def embedded_pixel_format_is_grey(pixel_format: int | None) -> bool:
 
 def embedded_render_canvas_bytes_per_pixel(
     width: int, height: int, psram_bytes: int, pixel_format: int | None = None
-) -> int:
-    """Bytes per pixel of the scene canvas (fos_render_canvas_bytes_per_pixel):
-    1 (luma) for a grey or black-and-white panel format and 2 (RGB 5/6/5) for
+) -> float:
+    """Bytes per pixel of the scene canvas (fos_render_canvas_bits_per_pixel):
+    0.5 for a sixteen-grey panel, 1 (luma) for another grey or black-and-white
+    panel format and 2 (RGB 5/6/5) for
     an RGB565 LCD, whose canvas is its own frame buffer, whatever the PSRAM;
     for a colour e-paper panel 4 (RGBX) when a full canvas takes at most half
     of ``psram_bytes``, else 2."""
     if width <= 0 or height <= 0:
         return 0
+    if pixel_format == FOS_PIXEL_4BPP_GRAY:
+        return 0.5
     if embedded_pixel_format_is_grey(pixel_format):
         return 1
     if pixel_format == FOS_PIXEL_RGB565:
@@ -1596,12 +1600,20 @@ def embedded_render_canvas_bytes_per_pixel(
     return 2
 
 
+def embedded_render_canvas_bytes(
+    width: int, height: int, psram_bytes: int, pixel_format: int | None = None
+) -> int:
+    """fos_display_canvas_bytes: rows of whole bytes."""
+    bytes_per_pixel = embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
+    return math.ceil(width * bytes_per_pixel) * height
+
+
 def embedded_render_psram_bytes(
     width: int, height: int, pixel_format: int = FOS_PIXEL_1BPP, psram_bytes: int = 8 * 1024 * 1024
 ) -> int:
     """PSRAM the on-device renderer needs for a width×height panel on a module with
     ``psram_bytes`` of PSRAM (the canvas format depends on it)."""
-    canvas = width * height * embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
+    canvas = embedded_render_canvas_bytes(width, height, psram_bytes, pixel_format)
     packed = embedded_buffer_size(width, height, pixel_format)
     # An RGB LCD (the only FOS_PIXEL_RGB565 panel) scans three frame buffers
     # of its own; mirrors fos_display_render_psram_bytes in frameos_display.c.
@@ -1718,7 +1730,7 @@ def embedded_firmware_layout_for_frame(frame: Frame) -> dict[str, Any]:
     pixel_format = embedded_pixel_format_for_panel(panel)
     psram_bytes = embedded_module_psram_bytes(frame)
     canvas_bytes_per_pixel = embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
-    canvas_bytes = width * height * canvas_bytes_per_pixel
+    canvas_bytes = embedded_render_canvas_bytes(width, height, psram_bytes, pixel_format)
     packed_bytes = embedded_buffer_size(width, height, pixel_format) if width > 0 and height > 0 else 0
     render_mode = embedded_render_mode_for_frame(frame)
     render_working_bytes = (
@@ -1744,7 +1756,7 @@ def embedded_firmware_layout_for_frame(frame: Frame) -> dict[str, Any]:
             "pixelFormat": pixel_format,
             "pixelFormatName": _pixel_format_name(pixel_format),
             "renderMode": "local" if render_mode == EMBEDDED_RENDER_LOCAL else "remote",
-            # Historical key name: the canvas is RGBX, 16-bit RGB or luma, never RGBA.
+            # Historical key name: the canvas is RGBX, 16-bit RGB, luma or 4-bit grey, never RGBA.
             "rgbaBufferBytes": canvas_bytes,
             "canvasBufferBytes": canvas_bytes,
             "canvasBytesPerPixel": canvas_bytes_per_pixel,

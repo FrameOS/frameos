@@ -52,7 +52,7 @@ if (!call('frameos_wasm_init', 'boolean', ['number', 'number', 'string', 'string
 }
 call('frameos_wasm_set_memory_limit', null, ['number', 'number'], [limits.memoryBytes, 0])
 call('frameos_wasm_set_embedded', null, ['boolean'], [true])
-call('frameos_wasm_set_canvas_bytes_per_pixel', null, ['number'], [limits.canvasBytesPerPixel])
+call('frameos_wasm_set_canvas_bits_per_pixel', null, ['number'], [limits.canvasBytesPerPixel * 8])
 
 const rawSink = await readJson('e2e', 'scenes', 'jsxSquareKitchenSink.json')
 const sink = Array.isArray(rawSink) ? rawSink[0] : rawSink

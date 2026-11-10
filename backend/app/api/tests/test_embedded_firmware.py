@@ -341,9 +341,9 @@ def test_embedded_render_canvas_bytes_per_pixel():
     # A grey or black-and-white panel draws in luma whatever fits: a quarter
     # of the bytes in every pass (and the reTerminal E1003 fits at all: 2.5 MB
     # where 565 was 5.0). A colour one past RGBX stays 565.
-    assert embedded_render_canvas_bytes_per_pixel(1872, 1404, 8 * mb, FOS_PIXEL_4BPP_GRAY) == 1
+    assert embedded_render_canvas_bytes_per_pixel(1872, 1404, 8 * mb, FOS_PIXEL_4BPP_GRAY) == 0.5
     assert embedded_render_canvas_bytes_per_pixel(1872, 1404, 8 * mb, FOS_PIXEL_4BPP_SPECTRA6) == 2
-    assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb, FOS_PIXEL_4BPP_GRAY) == 1
+    assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb, FOS_PIXEL_4BPP_GRAY) == 0.5
     assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb, FOS_PIXEL_1BPP) == 1
     assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb, FOS_PIXEL_2BPP_GRAY) == 1
     assert embedded_render_canvas_bytes_per_pixel(1200, 1600, 8 * mb, FOS_PIXEL_1BPP) == 1
