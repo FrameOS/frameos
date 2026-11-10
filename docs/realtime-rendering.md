@@ -170,6 +170,18 @@ vertical stripes, so pixie's horizontal gradient computes every row on this
 surface. Colour correction of the whole frame reads the sixteen levels, not
 the 256 they came from.
 
+On the ESP32, unrotated, the canvas and the packed picture are one block:
+the panel-sized buffer `main.c` reserves at boot is handed to the runtime as
+its canvas (`canvas_is_panel_picture`, `frameos_nim_share_canvas`), the pack
+skips the copy onto itself, and the 1.31 MB the E1003 held twice of its 8 MB
+goes to the renders (idle free PSRAM with a scene 3.2 MB -> 4.66 MB,
+2026-11-10). The render borrows the buffer before the scene draws there, so
+a snapshot of the last picture in it lets go first (`snapshot_before_lend`),
+and anything else that borrows it (a status screen, a console `display_test`)
+is counted (`fos_framebuffer_foreign_lends`) and makes the next render draw
+whole (`frameos_nim_canvas_forget`). A rotated frame packs with a turn and
+keeps a canvas of its own; changing the rotation restarts the firmware.
+
 Any other grey or black-and-white panel renders in pixie's 8-bit luma surface
 (`pfGray8`), because its error diffusion wants the 256 levels, whatever the PSRAM, not only when RGBX does not fit: blending is
 per channel, so the luma of a composite is the composite of the lumas, and
@@ -178,6 +190,19 @@ the bytes. The rule, in every copy (C, Nim, the backend, both device-limits
 ports, `docs/device-limits-fixtures.json`): 4-bit for sixteen greys, luma for
 another grey panel, 565 for an RGB565 LCD, and for a colour e-paper panel RGBX while two of it fit PSRAM,
 565 beyond.
+
+### A JPEG decoded into a target draws its lines in one loop
+
+pixie's JPEG sink (`drawLineInto` in `fileformats/jpeg.nim`) works out once
+per decode where each position along a target line samples each channel
+(`prepareLines`), once per line the row half, and writes a line through one
+loop per format with no call in it, `-O2` on the device. Per pixel it was a
+chain of calls and divisions: 11 us a pixel on an ESP32-S3, 24.5 s of a
+30.8 s decode of a gallery photo into a reTerminal E1003's 1848x1179 window;
+now 4 s, the pixels byte for byte the same (every master of pixie's JPEG
+suite into five sizes, three fits and three formats). What is left of a
+gallery photo there is the socket: 4-13 s for 115-180 KB at lwIP's default
+window.
 
 ### The background is owed, not painted
 

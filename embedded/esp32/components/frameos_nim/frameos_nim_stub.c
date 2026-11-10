@@ -21,6 +21,10 @@ bool frameos_nim_scene_state_save(const char *scene_id, const char *json) { (voi
 bool frameos_nim_reserve_canvas(size_t len) { (void)len; return false; }
 void *frameos_nim_canvas_buffer(size_t len) { (void)len; return NULL; }
 size_t frameos_nim_canvas_reserved(void) { return 0; }
+void frameos_nim_share_canvas(void *buffer, size_t len) { (void)buffer; (void)len; }
+bool frameos_nim_canvas_shared(void) { return false; }
+void *frameos_nim_shared_canvas_buffer(void) { return NULL; }
+void frameos_nim_canvas_forget(void) {}
 bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t max_http_response_bytes, const char *backend_url,
                       const char *api_key, bool server_send_logs, int rotate)

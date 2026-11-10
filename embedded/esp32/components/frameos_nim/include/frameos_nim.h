@@ -28,6 +28,14 @@ bool frameos_nim_reserve_canvas(size_t len);
 /* The reserved block, claiming (or growing) it on demand. NULL on failure. */
 void *frameos_nim_canvas_buffer(size_t len);
 size_t frameos_nim_canvas_reserved(void);
+/* The scene canvas IS this buffer (a sixteen-grey panel's packed picture,
+ * main.c): reserved once, never freed, nothing else reserved for it. */
+void frameos_nim_share_canvas(void *buffer, size_t len);
+bool frameos_nim_canvas_shared(void);
+void *frameos_nim_shared_canvas_buffer(void);
+/* Something other than a render drew over the canvas (the shared panel
+ * buffer lent to a status screen): the next render draws it whole. */
+void frameos_nim_canvas_forget(void);
 /* One-time init: panel dimensions + the backend credentials the runtime's own
  * uploads use. Safe to call when unavailable (returns false). Allocates the
  * Nim heap (PSRAM via malloc). */

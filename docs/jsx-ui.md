@@ -237,6 +237,16 @@ export function get(app) {
   size it is decoded at, in the canvas's pixel format: an ESP32 holds a
   480x480 photo in 450 KB of RGB565, and drawing it is a copy. A host decodes
   at the picture's own size.
+- **Only with room for it** (`keptPictureTarget` in `app_runtime.nim`): short
+  of memory the app's older kept pictures go first (their refs then draw
+  nothing, and the app fetches again), then the photo is decoded at its own
+  resolution when that is less than the size asked and more than half of it
+  (smaller, the draw would double it in a copy of its own first); with no
+  room at all `fetchImage` answers an `error` and no `image`. The size the
+  photo has comes from the start of the download (`downloadImageWithDataSizedBy`),
+  so the gallery's random photo is the one decoded. On a reTerminal E1003
+  (8 MB, 1872x1404) a kept full-window photo is 1.09 MB; an unchecked one
+  next to two others aborted the render and restarted the firmware.
 - **A kept picture is never the consumer's target.** A UI draws the canvas
   whole and the photo is one of its elements, so the photo decodes into an
   image of its own.

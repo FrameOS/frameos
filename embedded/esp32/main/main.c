@@ -253,6 +253,19 @@ static void cpu_240(const char *why)
 
 static void log_bootup_event(bool online);
 
+/* A sixteen-grey panel's packed picture is the 4-bit canvas byte for byte
+ * when nothing turns it (dither.nim packGray4Canvas): the buffer reserved for
+ * the panel serves as the canvas too, and the 1.31 MB a reTerminal E1003
+ * held twice of its 8 MB goes back to the renders (2026-11-10). A turned
+ * frame packs with a turn, so it keeps a canvas of its own; changing the
+ * rotation restarts the firmware. */
+static bool canvas_is_panel_picture(const fos_config_t *config)
+{
+    return fos_display_format() == FOS_PIXEL_4BPP_GRAY && fos_display_canvas_bits_per_pixel() == 4 &&
+           config->rotate == 0 && fos_display_canvas_bytes() == fos_display_buffer_size() &&
+           fos_framebuffer_reserved_bytes() == fos_display_buffer_size();
+}
+
 /* The stored Wi-Fi came back while the provisioning portal was serving.
  * fos_wifi has already dropped the open AP; bring the rest up the way the
  * online boot path does, and replace the portal status screen. */
@@ -412,7 +425,7 @@ void app_main(void)
         /* The Nim renderer packs into the same reservation (fos_framebuffer.h).
          * The hooks take/return the buffer through the acquire/release pair
          * that fos_client.c already uses to hand it back after the blit. */
-        frameos_nim_set_render_buffer_hooks((void *(*)(size_t))fos_framebuffer_acquire,
+        frameos_nim_set_render_buffer_hooks((void *(*)(size_t))fos_framebuffer_acquire_render,
                                             (void (*)(void *))fos_framebuffer_release);
         /* An RGB LCD's refill interrupt shares core 1 with the render task;
          * a realloc copying under the heap's spinlock held it off for 1-2 ms
@@ -474,7 +487,11 @@ void app_main(void)
      * client framebuffer was above: it is the one multi-MB contiguous PSRAM
      * run the device needs, and before Wi-Fi/TLS there is always one. */
     if (local_render_ok && frameos_nim_available() && fos_display_present()) {
-        frameos_nim_reserve_canvas(fos_display_canvas_bytes());
+        if (canvas_is_panel_picture(config)) {
+            frameos_nim_share_canvas(fos_framebuffer_reserved_buffer(), fos_framebuffer_reserved_bytes());
+        } else {
+            frameos_nim_reserve_canvas(fos_display_canvas_bytes());
+        }
     }
 
     BOOTMEM("after-sd");

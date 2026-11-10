@@ -1688,6 +1688,14 @@ static esp_err_t render_once(bool quiet)
         }
         /* Someone tapping: a UI's chrome due only by its clock waits (below). */
         frameos_nim_set_interactive(fos_display_supports_partial() && fos_input_hold_engaged(&s_input_hold));
+        /* The canvas is the panel buffer (frameos_nim_share_canvas) and was
+         * lent since (a status screen, a display_test): drawn over, so the
+         * scene's records of what it holds are wrong. */
+        static uint32_t seen_foreign_lends = 0;
+        if (frameos_nim_canvas_shared() && fos_framebuffer_foreign_lends() != seen_foreign_lends) {
+            seen_foreign_lends = fos_framebuffer_foreign_lends();
+            frameos_nim_canvas_forget();
+        }
         size_t target_len = 0;
         uint32_t generation = 0;
         uint8_t *target = fos_display_present() ? fos_display_render_target(&target_len, &generation) : NULL;

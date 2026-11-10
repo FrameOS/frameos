@@ -5,6 +5,7 @@ import frameos/js_runtime/app_runtime
 import frameos/types
 import frameos/values
 import frameos/utils/font # the typeface resolver the layout's text uses
+import frameos/utils/memory # availableRenderBytesOverride
 
 # Pictures a JS app keeps across renders (`fetchImage(url, {keep: true})`,
 # docs/jsx-ui.md "Images"): a JSX gallery shows its photo again after a tap
@@ -129,6 +130,43 @@ suite "kept images":
     # photo did not: it is its own image, decoded where the host decodes it.
     check drawn == canvas
     check canvas[20, 10] == rgbx(255, 0, 0, 255)
+
+  test "short of room, a kept picture steps down to its photo's own resolution first":
+    # A reTerminal E1003's gallery window (1848x1179) and the gallery's own
+    # 1024x653 photo: the shape asked for, at the photo's pixels.
+    check keptDecodeSize(1848, 1179, 1024, 653, fitCover) == (1023, 653)
+    check keptDecodeSize(1848, 1179, 1024, 653, fitContain) == (1024, 653)
+    # A photo with the pixels to fill the box is decoded at the box.
+    check keptDecodeSize(800, 480, 4000, 3000, fitCover) == (800, 480)
+    check keptDecodeSize(800, 480, 4000, 3000, fitContain) == (800, 480)
+    check keptDecodeSize(800, 480, 400, 600, fitStretch) == (400, 480)
+    # Unknown source size, or a 1:1 fit: as asked.
+    check keptDecodeSize(800, 480, 0, 0, fitCover) == (800, 480)
+    check keptDecodeSize(800, 480, 400, 300, fitCenter) == (800, 480)
+
+  test "short of memory the older kept pictures go, then the fetch says so":
+    # An allocation the heap cannot make aborts the render on an ESP32 (and
+    # two in a row restart it), so a kept picture is only made with room
+    # for it; this host is told it has 100 bytes, less than the 12x6 picture.
+    let ui = newUi("""
+      const refs = []
+      export function get() {
+        refs.push(frameos.fetchImage('REDURL', { keep: true, width: 12, height: 6 }))
+        if (refs.length === 2) {
+          frameos.setState('second', refs[1].error ?? 'ok')
+          frameos.setState('firstKept', frameos.releaseImage(refs[0]))
+        }
+        return <div className="bg-white" />
+      }
+    """.replace("REDURL", red), "tests/kept-room")
+    discard ui.render()
+    availableRenderBytesOverride = 100
+    try:
+      discard ui.render()
+    finally:
+      availableRenderBytesOverride = 0
+    check ui.scene.state{"second"}.getStr().contains("no room for the picture")
+    check ui.scene.state{"firstKept"}.getBool() == false
 
   test "at most eight are kept; the oldest goes for a ninth":
     let ui = newUi("""

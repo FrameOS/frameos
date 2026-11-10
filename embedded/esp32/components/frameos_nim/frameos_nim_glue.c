@@ -69,6 +69,7 @@ extern int fos_nim_set_scene_catalog_impl(const char *index_json);
 extern int fos_nim_load_scene_impl(const char *scene_json);
 extern void fos_nim_request_fresh_pass_impl(void);
 extern void fos_nim_set_interactive_impl(int on);
+extern void fos_nim_canvas_forget_impl(void);
 extern int fos_nim_chrome_owed_impl(void);
 extern void fos_nim_apply_service_settings_impl(const char *json);
 extern void fos_nim_set_debug_impl(int enabled);
@@ -167,11 +168,38 @@ static void nim_lock_give(void)
  * newImage565Over and reuses it every render (embedded_runtime.nim). */
 static void *s_canvas = NULL;
 static size_t s_canvas_len = 0;
+static bool s_canvas_shared = false;
+
+void frameos_nim_share_canvas(void *buffer, size_t len)
+{
+    /* A sixteen-grey panel's packed picture is the 4-bit canvas byte for byte
+     * (dither.nim packGray4Canvas): one block serves as both, the panel-sized
+     * buffer main.c reserved, and the 1.31 MB a reTerminal E1003 held twice
+     * goes back to the renders (2026-11-10). Never freed here. */
+    if (buffer == NULL || len == 0 || s_canvas != NULL) return;
+    s_canvas = buffer;
+    s_canvas_len = len;
+    s_canvas_shared = true;
+    ESP_LOGI("fos_nim", "canvas: the panel buffer, %u KB", (unsigned)(len / 1024));
+}
+
+bool frameos_nim_canvas_shared(void)
+{
+    return s_canvas_shared;
+}
+
+void *frameos_nim_shared_canvas_buffer(void)
+{
+    return s_canvas_shared ? s_canvas : NULL;
+}
 
 bool frameos_nim_reserve_canvas(size_t len)
 {
     if (len == 0) return false;
     if (s_canvas != NULL && s_canvas_len >= len) return true;
+    /* The shared block cannot grow; a canvas that does not fit it comes from
+     * the heap (embedded_runtime.renderCanvas). */
+    if (s_canvas_shared) return false;
     void *next = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (next == NULL) {
         ESP_LOGW("fos_nim", "canvas: could not reserve %u KB of PSRAM (largest free block %u KB)",
@@ -946,6 +974,14 @@ void frameos_nim_set_interactive(bool on)
     if (!s_nim_ready) return;
     if (!nim_lock_take()) return;
     fos_nim_set_interactive_impl(on ? 1 : 0);
+    nim_lock_give();
+}
+
+void frameos_nim_canvas_forget(void)
+{
+    if (!s_nim_ready) return;
+    if (!nim_lock_take()) return;
+    fos_nim_canvas_forget_impl();
     nim_lock_give();
 }
 

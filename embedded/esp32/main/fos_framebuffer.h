@@ -35,9 +35,21 @@ void fos_framebuffer_reserve(size_t len);
  * non-NULL return with fos_framebuffer_release(). */
 uint8_t *fos_framebuffer_acquire(size_t len);
 
+/* fos_framebuffer_acquire for the renderer's own pack. Where the reservation
+ * is also the scene canvas (a sixteen-grey panel, frameos_nim_share_canvas)
+ * every other borrower writes over the canvas, and is counted for it
+ * (fos_framebuffer_foreign_lends); the renderer's own borrowing is not. */
+uint8_t *fos_framebuffer_acquire_render(size_t len);
+
 /* Hand a buffer back. Anything that is not the reservation is freed. NULL is
  * accepted and ignored. */
 void fos_framebuffer_release(uint8_t *buf);
+
+/* The reservation itself, NULL when there is none. */
+uint8_t *fos_framebuffer_reserved_buffer(void);
+/* How many times the reservation was lent to anything but the renderer (a
+ * status screen, a console display_test, a remote render). */
+uint32_t fos_framebuffer_foreign_lends(void);
 
 /* Bytes held by the boot-time reservation, 0 when there is none. Reported in
  * the status JSON so "why did this render fail" is answerable from a log. */

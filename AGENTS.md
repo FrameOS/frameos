@@ -451,7 +451,10 @@
   nothing packed, the blit a buffer switch); a sixteen-grey panel draws in
   pixie's `pfGray4`, half a byte a pixel in the panel buffer's own layout, every
   store dithered through the 4x4 ordered matrix (a new row copy in pixie uses
-  `copyPixelRow`, and never copies a row down into a dithered gradient), and any
+  `copyPixelRow`, and never copies a row down into a dithered gradient) and,
+  unrotated on the ESP32, in the reserved panel buffer itself
+  (`frameos_nim_share_canvas`: a new borrower of `fos_framebuffer_acquire`
+  draws over the canvas and is counted for it), and any
   other grey or black-and-white panel in pixie's luma surface. The canvas rule has five copies
   (`frameos_display.h` lists them, `docs/device-limits-fixtures.json` pins
   two): change them together. A Pi with a 16 bpp RGB565 framebuffer (a
