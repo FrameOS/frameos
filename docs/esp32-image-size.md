@@ -563,9 +563,10 @@ sits, so those are arguments of `src/embedded/fos_table_probe.nim`:
 `frameos-esp32-ci-local`. Main at 98b3e0000 builds at 3,292,720 bytes, the
 same as #719's CI comment (91.4% of the slot, 304 KB free).*
 
-**3,292,720 → 3,173,312 bytes (−119,408, 87.9% of the slot) with the four
-cuts applied, no behaviour change.** Two more measured cuts need a decision
-(below); with them the image would be about 2,975,000.
+**3,292,720 → 3,225,328 bytes (−67,392; 89.5% of the slot, 370 KB free)
+with the four cuts applied, no behaviour change.** Two more measured cuts need
+a decision (below): QuickJS's unicode tables would take it to about
+3,176,000, and `--panics:on` on top to about 3,027,000 (84%).
 
 ## Kept: the -O2 hot modules, +38.5 KB
 
@@ -579,6 +580,9 @@ every frame of an animation and most of a render. Find the bytes elsewhere
 before taking a module off the list.
 
 ## The cuts
+
+Per-cut numbers are from the linker map of builds that also carried the
+QuickJS change, so they add up to a little more than the bin's −67,392.
 
 | Cut | Saves | Behaviour |
 |---|---:|---|
