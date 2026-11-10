@@ -70,6 +70,9 @@ static const char *TAG = "fos_client";
  * rendered like RENDER_NOW_BIT, but a run of them is a burst
  * (fos_animation.h), not one loud frame each. */
 #define SCENE_RENDER_BIT BIT5
+/* The backend link task (below) has something for the render task: commands
+ * it pulled, or scenes or settings it saw change. */
+#define LINK_BIT BIT6
 #define START_RENDER_LOOP_BIT BIT1
 #define CLIENT_TASK_STACK_BYTES 40960
 
@@ -1032,6 +1035,11 @@ void fos_client_snapshot_release(void)
     if (s_snapshot_lock) xSemaphoreGive(s_snapshot_lock);
 }
 
+uint32_t fos_client_snapshot_render_count_locked(void)
+{
+    return s_last_frame_render_count;
+}
+
 bool fos_client_render_pending(void)
 {
     /* The first pass of a boot has not run its render yet (a deep-sleep wake
@@ -1177,6 +1185,8 @@ static void image_push_begin(void *ctx, size_t total)
 
 /* The stream writes one panel row at a time; batch them so a TLS record is
  * not spent on every 600 bytes. */
+static TaskHandle_t s_link_task;
+
 static bool image_push_write(void *ctx, const uint8_t *data, size_t len)
 {
     image_push_t *push = (image_push_t *)ctx;
@@ -1184,9 +1194,11 @@ static bool image_push_write(void *ctx, const uint8_t *data, size_t len)
      * task waiting here (the reTerminal E1003, 2026-11-10). Anything that
      * wants the task gets it back, and the push starts over later: a tap or
      * a key, an event from HTTP, the cloud or the console, a render asked for
-     * or the scene's own. A console `event` used to wait out the whole push. */
-    if (input_queued() || fos_events_deferred_pending() ||
-        (xEventGroupGetBits(s_events) & (RENDER_NOW_BIT | SCENE_RENDER_BIT | INPUT_EVENTS_BIT))) {
+     * or the scene's own. A console `event` used to wait out the whole push.
+     * On the backend link task nobody waits for it. */
+    if (xTaskGetCurrentTaskHandle() != s_link_task &&
+        (input_queued() || fos_events_deferred_pending() ||
+         (xEventGroupGetBits(s_events) & (RENDER_NOW_BIT | SCENE_RENDER_BIT | INPUT_EVENTS_BIT)))) {
         push->failed = true;
         s_last_image_push_us = 0;
         return false;
@@ -1234,15 +1246,17 @@ static bool snapshot_display_state(fos_display_state_t *state)
     return ok;
 }
 
-static void push_image_to_backend(const char *scene_id)
+/* `state`: what the panel shows, as the render task recorded it (a copy, on
+ * the backend link task). */
+static void push_image_state(const char *scene_id, const fos_display_state_t *state, bool state_valid)
 {
     fos_config_t *config = fos_config();
     if (!config->backend_url[0] || config->frame_id == 0 || !config->api_key[0]) return;
     if (!fos_display_present()) return;
     bool lcd = fos_display_is_lcd();
-    if (!lcd && !s_display_state_valid) return;
+    if (!lcd && !state_valid) return;
     if (!lcd && s_pushed_image_valid &&
-        memcmp(s_pushed_image_sha, s_display_state.sha256, FOS_DISPLAY_HASH_LEN) == 0) {
+        memcmp(s_pushed_image_sha, state->sha256, FOS_DISPLAY_HASH_LEN) == 0) {
         return;
     }
     if (fos_wifi_state() != FOS_WIFI_CONNECTED) return;
@@ -1252,7 +1266,7 @@ static void push_image_to_backend(const char *scene_id)
     }
     /* No retained snapshot (a hash-only board): nothing to send. */
     if (!fos_client_snapshot_info(NULL, NULL, NULL, NULL, NULL, NULL)) return;
-    fos_display_state_t pushed = s_display_state;
+    fos_display_state_t pushed = *state;
     if (lcd) {
         /* Hashed here, at most once per push interval, instead of per frame. */
         if (!snapshot_display_state(&pushed)) return;
@@ -1311,6 +1325,145 @@ static void push_image_to_backend(const char *scene_id)
         ESP_LOGW(TAG, "image push to the backend failed (%s, HTTP %d, %lld ms)",
                  esp_err_to_name(err), status, ms);
     }
+}
+
+static void push_image_to_backend(const char *scene_id)
+{
+    push_image_state(scene_id, &s_display_state, s_display_state_valid);
+}
+
+/* ------------------------------------------------------ the backend link */
+
+/* A frame that stays awake does its backend round trips on a task of its own:
+ * the log uploads, the picture push, and the scenes, settings and commands
+ * pulls. Between two renders of a one-second clock on a reTerminal Sticky
+ * they were 2-8 s of the render task (a 1-4 s push, two 0.1-1.4 s log
+ * uploads, three 0.1-0.9 s pulls), and the clock stood still for up to ten
+ * seconds (2026-11-10). What applies their results stays on the render task:
+ * the commands this task pulls are handed over and run there (the backend
+ * marks what it hands out `sent`, so a pull is never only a look), and a
+ * change of scenes or settings it sees is fetched and applied there. A frame
+ * that deep-sleeps does all of it on the render task, and so does the first
+ * pass of a boot, whose render waits for what the sleep held. */
+#define LINK_POLL_US (10 * 1000000LL)
+#define LINK_PERIOD_MS 1000
+#define LINK_TASK_STACK 8192
+#define LINK_NOTIFY_PUSH 1u
+static volatile bool s_link_on = false; /* set by the render task, per pass */
+static bool s_link_scenes = false;      /* __atomic */
+static bool s_link_settings = false;    /* __atomic */
+static portMUX_TYPE s_link_mux = portMUX_INITIALIZER_UNLOCKED;
+/* Under s_link_mux. */
+static void *s_link_answer = NULL;
+static bool s_link_push_wanted = false;
+static char s_link_scene_id[128];
+static fos_display_state_t s_link_state;
+static bool s_link_state_valid = false;
+
+static void backend_link_task(void *arg)
+{
+    (void)arg;
+    int64_t next_poll_us = 0;
+    for (;;) {
+        xTaskNotifyWait(0, UINT32_MAX, NULL, pdMS_TO_TICKS(LINK_PERIOD_MS));
+        if (!s_link_on || fos_wifi_state() != FOS_WIFI_CONNECTED) continue;
+        frameos_nim_flush_logs();
+        char scene_id[sizeof(s_link_scene_id)];
+        fos_display_state_t state;
+        bool push = false;
+        bool state_valid = false;
+        portENTER_CRITICAL(&s_link_mux);
+        if (s_link_push_wanted) {
+            push = true;
+            s_link_push_wanted = false;
+            memcpy(scene_id, s_link_scene_id, sizeof(scene_id));
+            state = s_link_state;
+            state_valid = s_link_state_valid;
+        }
+        portEXIT_CRITICAL(&s_link_mux);
+        if (push) push_image_state(scene_id, &state, state_valid);
+        int64_t now = esp_timer_get_time();
+        if (now < next_poll_us) continue;
+        next_poll_us = now + LINK_POLL_US;
+        bool wake = false;
+        if (fos_scenes_backend_changed()) {
+            __atomic_store_n(&s_link_scenes, true, __ATOMIC_SEQ_CST);
+            wake = true;
+        }
+        if (fos_settings_changed()) {
+            __atomic_store_n(&s_link_settings, true, __ATOMIC_SEQ_CST);
+            wake = true;
+        }
+        portENTER_CRITICAL(&s_link_mux);
+        bool slot_free = s_link_answer == NULL;
+        portEXIT_CRITICAL(&s_link_mux);
+        /* One answer at a time: the next pull waits until this one has run. */
+        if (slot_free) {
+            void *answer = fos_commands_fetch();
+            if (answer != NULL) {
+                portENTER_CRITICAL(&s_link_mux);
+                s_link_answer = answer;
+                portEXIT_CRITICAL(&s_link_mux);
+                wake = true;
+            }
+        }
+        if (wake && s_events) xEventGroupSetBits(s_events, LINK_BIT);
+    }
+}
+
+/* The picture just shown, for the link task to push. */
+static void link_publish_picture(const char *scene_id)
+{
+    portENTER_CRITICAL(&s_link_mux);
+    strlcpy(s_link_scene_id, scene_id, sizeof(s_link_scene_id));
+    s_link_state = s_display_state;
+    s_link_state_valid = s_display_state_valid;
+    s_link_push_wanted = true;
+    portEXIT_CRITICAL(&s_link_mux);
+    if (s_link_task) xTaskNotify(s_link_task, LINK_NOTIFY_PUSH, eSetBits);
+}
+
+static void *link_take_answer(void)
+{
+    portENTER_CRITICAL(&s_link_mux);
+    void *answer = s_link_answer;
+    s_link_answer = NULL;
+    portEXIT_CRITICAL(&s_link_mux);
+    return answer;
+}
+
+/* A pass's pulls: on this task, or, while the link task has the round trips,
+ * what it found. An answer it pulled is run whatever the mode. */
+static void pass_scenes_sync(void)
+{
+    if (!s_link_on || __atomic_exchange_n(&s_link_scenes, false, __ATOMIC_SEQ_CST)) {
+        fos_scenes_sync(false);
+    }
+}
+
+static void pass_settings_sync(void)
+{
+    if (!s_link_on || __atomic_exchange_n(&s_link_settings, false, __ATOMIC_SEQ_CST)) {
+        fos_settings_sync(false);
+    }
+}
+
+static bool pass_commands_sync(void)
+{
+    void *answer = link_take_answer();
+    if (answer != NULL) return fos_commands_run(answer);
+    return s_link_on ? false : fos_commands_sync();
+}
+
+/* What the link task found, served from the idle wait: true when a scene
+ * should render for it. */
+static bool serve_link(const fos_config_t *config)
+{
+    bool nim = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
+    pass_scenes_sync();
+    pass_settings_sync();
+    if (pass_commands_sync() && nim) fos_scenes_apply_pending_selection();
+    return nim && fos_scenes_work_pending();
 }
 
 /* ------------------------------------------------------------- the loop */
@@ -1669,7 +1822,7 @@ static esp_err_t render_once(bool quiet)
         log_render_event("render:scene", scene_id, scene_name, "rendering", "start",
                          mode, fos_display_present() ? "pending" : "none", "",
                          render_attempt, 0, width, height, format, buf_len, ESP_OK);
-        if (!fos_display_supports_partial()) frameos_nim_flush_logs();
+        if (!s_link_on && !fos_display_supports_partial()) frameos_nim_flush_logs();
     }
 
     uint8_t *buf = NULL;
@@ -1746,8 +1899,9 @@ static esp_err_t render_once(bool quiet)
          * e-paper refresh takes seconds, so its lines go out before it; an
          * LCD shows the frame in a buffer switch, and a panel that can take
          * a partial update has a finger waiting for it: their lines go with
-         * render:done, after the picture is up (docs/perf-todo.md). */
-        if (!fos_display_is_lcd() && !fos_display_supports_partial()) frameos_nim_flush_logs();
+         * render:done, after the picture is up (docs/perf-todo.md). The link
+         * task uploads them on its own while it has the round trips. */
+        if (!s_link_on && !fos_display_is_lcd() && !fos_display_supports_partial()) frameos_nim_flush_logs();
     }
 
     /* The hash is an e-paper fact: an unchanged picture skips a refresh that
@@ -1794,7 +1948,7 @@ static esp_err_t render_once(bool quiet)
                                  "display", mode, refresh, "unchanged",
                                  render_attempt, (esp_timer_get_time() - start) / 1000,
                                  width, height, format, buf_len, ESP_OK);
-                frameos_nim_flush_logs();
+                if (!s_link_on) frameos_nim_flush_logs();
             }
         } else {
             refresh = "update";
@@ -1803,7 +1957,9 @@ static esp_err_t render_once(bool quiet)
                                  "display", mode, refresh, "", render_attempt,
                                  (esp_timer_get_time() - start) / 1000, width, height,
                                  format, buf_len, ESP_OK);
-                if (!fos_display_is_lcd() && !fos_display_supports_partial()) frameos_nim_flush_logs();
+                if (!s_link_on && !fos_display_is_lcd() && !fos_display_supports_partial()) {
+                    frameos_nim_flush_logs();
+                }
             }
             char showing_id[sizeof(s_refresh_scene_id)];
             char showing_name[8];
@@ -1877,7 +2033,7 @@ static esp_err_t render_once(bool quiet)
                          mode, refresh, err == ESP_OK ? "" : "render-cycle-failed",
                          err == ESP_OK ? s_render_count : render_attempt, total_ms,
                          width, height, format, buf_len, err);
-        if (err != ESP_OK || !input_hold_on()) frameos_nim_flush_logs();
+        if (!s_link_on && (err != ESP_OK || !input_hold_on())) frameos_nim_flush_logs();
     }
     if (err == ESP_OK && !skipped_refresh && !quiet) {
         /* "I drew something new" — the provider decides whether anyone is
@@ -1886,7 +2042,11 @@ static esp_err_t render_once(bool quiet)
     }
     if (err == ESP_OK && !quiet) {
         /* Also on a skipped refresh: the last push may have failed. */
-        if (!input_hold_on()) push_image_to_backend(scene_id);
+        if (s_link_on) {
+            link_publish_picture(scene_id);
+        } else if (!input_hold_on()) {
+            push_image_to_backend(scene_id);
+        }
     }
     if (in_panel) {
         /* Shown: fos_display_blit gave the panel back. Not shown (the render
@@ -2176,9 +2336,13 @@ static void finish_burst(void)
         char scene_name[128];
         current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
         fos_cloud_announce_render(scene_id);
-        if (!input_hold_on()) push_image_to_backend(scene_id);
+        if (s_link_on) {
+            link_publish_picture(scene_id);
+        } else if (!input_hold_on()) {
+            push_image_to_backend(scene_id);
+        }
     }
-    if (!input_hold_on()) frameos_nim_flush_logs();
+    if (!s_link_on && !input_hold_on()) frameos_nim_flush_logs();
 }
 
 /* A touch or a key while the held work runs: it goes first, and the work
@@ -2207,6 +2371,11 @@ static void settle_panel(void)
 
 static void run_held_network(const fos_config_t *config)
 {
+    if (s_link_on) {
+        /* The round trips are the link task's; only what it found is left. */
+        serve_link(config);
+        return;
+    }
     while (frameos_nim_flush_log_batch()) {
         if (input_takes_over()) return;
     }
@@ -2234,7 +2403,8 @@ static void run_held_network(const fos_config_t *config)
  * notice). Returns when the next frame is due. */
 static void animation_wait(fos_config_t *config, int64_t wait_us)
 {
-    const EventBits_t signals = RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT;
+    const EventBits_t signals = RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT |
+                                LINK_BIT;
     bool armed = false;
     if (wait_us > 0 && s_frame_timer) {
         esp_timer_stop(s_frame_timer);
@@ -2247,9 +2417,13 @@ static void animation_wait(fos_config_t *config, int64_t wait_us)
                                   pdMS_TO_TICKS(armed ? 1000 : 100))
             : xEventGroupClearBits(s_events, signals); /* the bits before the clear */
         bool nim = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
+        /* A nudge is pulled here whatever the link task does: somebody just
+         * asked for something, and the voice relay's release expects what it
+         * queued in the very next render. */
         if ((bits & COMMANDS_BIT) && fos_commands_sync() && nim) {
             fos_scenes_apply_pending_selection();
         }
+        if (bits & LINK_BIT) serve_link(config);
         if (nim) {
             process_input_events();
             deliver_deferred_events();
@@ -2378,7 +2552,7 @@ static void client_task(void *arg)
          * pushed over HTTP/console since the last pass. Both touch the Nim
          * runtime, so they only ever run here on the render task. */
         if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
-            if (housekeeping && !pulls_after_render && !held_for_input) fos_scenes_sync(false);
+            if (housekeeping && !pulls_after_render && !held_for_input) pass_scenes_sync();
             fos_scenes_apply_pending();
             /* Scene events from HTTP, the cloud or the console since the last
              * look (fos_events_defer): to the scene now, before this pass
@@ -2406,12 +2580,12 @@ static void client_task(void *arg)
             if (!pulls_after_render && !held_for_input) {
                 /* Live settings: pick up backend-side interval/name/render-mode
                  * changes without a rebuild. ETag'd, so steady state is a 304. */
-                fos_settings_sync(false);
+                pass_settings_sync();
                 /* The backend's command queue — what the workspace asked for while
                  * this frame slept (a scene switch, a state, a render, an update) —
                  * before the render, so a switch lands in THIS pass's render instead
                  * of costing a second panel refresh. */
-                if (fos_commands_sync() && config->render_mode == FOS_RENDER_LOCAL &&
+                if (pass_commands_sync() && config->render_mode == FOS_RENDER_LOCAL &&
                     frameos_nim_available()) {
                     fos_scenes_apply_pending_selection();
                 }
@@ -2526,6 +2700,10 @@ static void client_task(void *arg)
             }
             s_pass_battery_critical = battery_critical;
             s_pass_deep_sleep = deep_sleep_now;
+            /* The backend round trips leave this task while the frame stays
+             * awake; a frame about to sleep, and a boot's first pass, do
+             * them here (the link task, above). */
+            s_link_on = s_link_task != NULL && !deep_sleep_now && s_render_attempts > 0;
             s_pass_battery_pct = battery_pct;
             /* A frame that stays awake keeps its scene's JS interpreters
              * between renders while there is room; a deep sleep ends them
@@ -2629,9 +2807,9 @@ static void client_task(void *arg)
         if (pulls_after_render && !input_hold_on()) {
             /* The pulls this pass put after its picture: a switch or a state
              * they bring is applied now and rendered by the next pass. */
-            fos_scenes_sync(false);
-            fos_settings_sync(false);
-            if (fos_commands_sync() && config->render_mode == FOS_RENDER_LOCAL &&
+            pass_scenes_sync();
+            pass_settings_sync();
+            if (pass_commands_sync() && config->render_mode == FOS_RENDER_LOCAL &&
                 frameos_nim_available()) {
                 fos_scenes_apply_pending_selection();
             }
@@ -2642,7 +2820,7 @@ static void client_task(void *arg)
          * that renders nothing keeps the once-a-second housekeeping. */
         bool sample_metrics = (s_anim.active || scene_render) && rendered ? !frame_quiet : housekeeping;
         if (sample_metrics) log_metrics_sample();
-        if (!input_hold_on()) frameos_nim_flush_logs(); /* the sample must not wait for next pass */
+        if (!s_link_on && !input_hold_on()) frameos_nim_flush_logs(); /* the sample must not wait for next pass */
 
         /* The scene's refreshInterval is authoritative when a scene is
          * loaded and has an opinion (>= 1), matching the Pi runner where
@@ -2957,7 +3135,8 @@ static void client_task(void *arg)
             if (frameos_nim_available() && !input_hold_on() && frameos_nim_chrome_owed()) fos_client_render_now();
             fos_display_park_if_idle(esp_timer_get_time());
             EventBits_t bits = xEventGroupWaitBits(
-                s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT,
+                s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT |
+                    LINK_BIT,
                 pdTRUE, pdFALSE,
                 fos_wake_slice_ticks(slice_until_us - esp_timer_get_time(), max_slice, portTICK_PERIOD_MS));
             bool nim = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
@@ -2975,6 +3154,15 @@ static void client_task(void *arg)
                 if (fos_commands_sync() && nim) {
                     fos_scenes_apply_pending_selection();
                 }
+                if (fos_client_render_pending()) {
+                    xEventGroupClearBits(s_events, RENDER_NOW_BIT);
+                    want_render = true;
+                }
+            }
+            /* What the backend link task found (commands it pulled, scenes or
+             * settings that changed), applied here, on the task that may. */
+            if (bits & LINK_BIT) {
+                if (serve_link(config)) want_render = true;
                 if (fos_client_render_pending()) {
                     xEventGroupClearBits(s_events, RENDER_NOW_BIT);
                     want_render = true;
@@ -3107,6 +3295,15 @@ void fos_client_start(void)
         s_snapshot_lock = NULL;
     } else {
         ESP_LOGI(TAG, "render task allocated");
+        /* The backend's round trips, off the render task (the link task,
+         * above): only a frame with a backend makes them. Low priority: a
+         * render or a tap goes first. */
+        if (fos_config()->backend_url[0] &&
+            xTaskCreatePinnedToCore(backend_link_task, "fos_link", LINK_TASK_STACK, NULL,
+                                    tskIDLE_PRIORITY + 2, &s_link_task, tskNO_AFFINITY) != pdPASS) {
+            s_link_task = NULL;
+            ESP_LOGW(TAG, "backend link task did not start: the render task keeps the round trips");
+        }
     }
 }
 

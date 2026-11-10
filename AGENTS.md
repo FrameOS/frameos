@@ -501,8 +501,10 @@
   network call or flash write on it goes behind the hold too, and a full refresh
   that only clears ghosts waits for the idle frame. Better still, a chore leaves
   the render task: scene state is written by `scene_state_writer_task`
-  (`main.c`), the backend picture push gives way to anything waiting for the
-  task, and an e-paper driver starts its refresh and waits for it only before
+  (`main.c`), a frame that stays awake does its backend round trips (logs,
+  picture push, pulls) on `backend_link_task` in `fos_client.c`, which applies
+  nothing: a new pull hands its result to the render task the same way, and an
+  e-paper driver starts its refresh and waits for it only before
   the panel's next use (`finish_waveforms`, `EPD_3in97_WaitPending`). A full
   refresh of any other SPI panel runs on the display's own task
   (`refresh_task` in `frameos_display.c`, the picture copied, the newest one

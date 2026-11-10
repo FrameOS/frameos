@@ -690,7 +690,24 @@ a small change cost what it should:
   render task. The picture pushed to the backend after a render (1.3 MB on the
   E1003, 8-14 s at the lwIP default window) gives way to a tap, a key, an event
   from HTTP, the cloud or the console, or any render asked for, and starts over
-  later.
+  later. A frame that stays awake does its backend round trips on a task of its
+  own (`backend_link_task` in `fos_client.c`): the log uploads every second, the
+  picture push after a render, and every 10 s the scenes, settings and
+  commands pulls. Between two renders of a one-second clock on the Sticky they
+  were 2-8 s of the render task, and the clock stood still for up to ten
+  seconds. The link task applies nothing: the commands it pulls are handed over
+  and run on the render task (the backend marks what it hands out `sent`, so
+  a pull is never only a look; `fos_commands_fetch` / `fos_commands_run`), and
+  for scenes and settings it asks the status alone and the render task fetches
+  what changed (`fos_scenes_backend_changed`, `fos_settings_changed`). A
+  backend's nudge is still pulled on the render task, which the voice relay's
+  release counts on, and so is everything on a frame about to deep-sleep and on
+  a boot's first pass. The picture stream no longer holds the snapshot for the
+  whole upload: a snapshot up to 256 KB is copied out, a larger one is read a
+  row at a time and a render taking the buffer back ends the stream (it held a
+  one-second clock back 1.3-4.3 s). A batch of logs is 32 lines now, not 8: a
+  backend on a laptop answers a POST in one to two seconds, and a second's
+  renders log about eight lines.
 - **The input hold.** The render task drains the touch queue and also does the
   backend pulls, the log uploads and the image push, 200-1000 ms a round trip
   on Wi-Fi, and writes the scene state to flash, up to 3 s, so a tap made during

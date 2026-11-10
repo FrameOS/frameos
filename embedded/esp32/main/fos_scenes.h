@@ -33,6 +33,10 @@ esp_err_t fos_scenes_init(void);
 /* Pull scenes from the backend if they changed (sha256 ETag); apply on this
  * task. Call from the render task only. `force` refetches unconditionally. */
 esp_err_t fos_scenes_sync(bool force);
+/* Whether fos_scenes_sync would fetch another payload now: the same
+ * conditional GET, its status alone (or a sync asked for). Any task; the
+ * render task then syncs (fos_client.c's backend link). */
+bool fos_scenes_backend_changed(void);
 bool fos_scenes_state_mounted(void);
 
 /* Persist a scenes JSON payload (local push, e.g. POST /api/scenes) and mark

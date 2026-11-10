@@ -1059,6 +1059,34 @@ const char *fos_settings_etag(void)
     return s_etag_source == SETTINGS_SOURCE_BACKEND ? s_etag : "";
 }
 
+bool fos_settings_changed(void)
+{
+    if (s_sync_requested) return true;
+    char url[FOS_URL_LEN + 128];
+    char auth[SETTINGS_AUTH_LEN];
+    settings_source_t source = select_source(url, sizeof(url), auth, sizeof(auth));
+    if (source == SETTINGS_SOURCE_NONE) return false;
+    /* The provider's route keeps its own schedule (fos_settings_sync): due
+     * is reason enough. */
+    if (source == SETTINGS_SOURCE_CLOUD) return esp_timer_get_time() >= s_cloud_next_pull_us;
+    if (fos_wifi_state() != FOS_WIFI_CONNECTED) return false;
+    /* The render task may be writing it: a copy, ended by hand. */
+    char etag[SETTINGS_ETAG_LEN];
+    memcpy(etag, s_etag, sizeof(etag));
+    etag[sizeof(etag) - 1] = '\0';
+    if (s_etag_source != source) etag[0] = '\0';
+    fos_http_request_t request = {
+        .url = url,
+        .auth = auth,
+        .if_none_match = etag[0] ? etag : NULL,
+    };
+    fos_http_response_t response;
+    /* The status alone: no body is read. */
+    if (fos_http_fetch(&request, 0, &response) != ESP_OK) return false;
+    fos_http_response_free(&response);
+    return response.status == 200;
+}
+
 esp_err_t fos_settings_sync(bool force)
 {
     fos_config_t *config = fos_config();

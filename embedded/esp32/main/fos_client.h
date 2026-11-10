@@ -98,6 +98,9 @@ esp_err_t fos_client_snapshot_copy(uint8_t *out, size_t out_len, int *width, int
 bool fos_client_snapshot_acquire(uint32_t timeout_ms, const uint8_t **buf, int *width,
                                  int *height, fos_pixel_format_t *format, size_t *len);
 void fos_client_snapshot_release(void);
+/* Which render the snapshot is, between acquire and release: a stream that
+ * lets go between rows checks it is still reading the same picture. */
+uint32_t fos_client_snapshot_render_count_locked(void);
 /* True while a render is still owed: this boot's first pass has not finished,
  * or a render signal is queued. An image_get arriving now waits for it
  * instead of answering "no image" seconds before there is one. */

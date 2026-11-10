@@ -103,8 +103,12 @@ static bool s_log_upload_enabled = false;
 
 #define FOS_NIM_LOG_MAX_LINE 1536
 #define FOS_NIM_LOG_MAX_PENDING 128
-#define FOS_NIM_LOG_BATCH_MAX 8
-#define FOS_NIM_LOG_BODY_MAX (8 * 1024)
+/* Lines per POST. A one-second clock logs about eight lines a second, and a
+ * backend on a laptop answers a POST in one to two seconds: eight to a batch
+ * fell behind and dropped half of them (reTerminal Sticky, 2026-11-10). The
+ * body holds the batch at the longest lines (32 x 1536), PSRAM, for the POST. */
+#define FOS_NIM_LOG_BATCH_MAX 32
+#define FOS_NIM_LOG_BODY_MAX (64 * 1024)
 /* A backend that is up accepts the connection in milliseconds, so the
  * connect gets a short timeout; the request and its reply keep the long one.
  * A frame whose self-hosted backend runs on a laptop spent 10 s on every

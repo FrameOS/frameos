@@ -1728,6 +1728,35 @@ esp_err_t fos_scenes_sync(bool force)
     return err;
 }
 
+bool fos_scenes_backend_changed(void)
+{
+    if (s_sync_requested) return true;
+    const fos_config_t *config = fos_config();
+    if (!config->backend_url[0] || config->frame_id == 0) return false;
+    if (fos_wifi_state() != FOS_WIFI_CONNECTED || !s_mounted) return false;
+    /* The render task may be writing it: a copy, ended by hand. */
+    char etag[ETAG_LEN];
+    memcpy(etag, s_etag, sizeof(etag));
+    etag[sizeof(etag) - 1] = '\0';
+    if (strcmp(etag, "local") == 0) return false; /* as fos_scenes_sync */
+    char url[FOS_URL_LEN + 64];
+    fos_backend_url("/embedded/scenes", url, sizeof(url));
+    char auth[FOS_STR_LEN + 16];
+    fos_backend_auth(auth, sizeof(auth));
+    fos_http_request_t request = {
+        .url = url,
+        .auth = auth,
+        .if_none_match = etag[0] ? etag : NULL,
+        .timeout_ms = 15000,
+        .buffer_size = 1024,
+    };
+    fos_http_response_t response;
+    /* The status alone: no body is read. */
+    if (fos_http_fetch(&request, 0, &response) != ESP_OK) return false;
+    fos_http_response_free(&response);
+    return response.status == 200;
+}
+
 bool fos_scenes_settings_shown(void)
 {
     return s_settings_shown;
