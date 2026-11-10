@@ -590,6 +590,7 @@ QuickJS change, so they add up to a little more than the bin's −67,392.
 | App loaders share `loaderParams` / `initAppRoot` / `raiseUnknownField` | −17,200 | none |
 | `printf` & co through `fos_printf.c` (no `_vfprintf_r`) | −13,944 | none |
 | `$float` through QuickJS's `js_dtoa` (`patched_dragonbox.nim`) | −12,882 | byte-identical |
+| The setup page as one gzipped file (`main/setup_page.html`) | −4,060 | same form; values from `GET /api/setup` |
 
 - **Log V2**: V1 bakes `"W (%lu) %s: "` into each of the 911 W/E format
   strings; V2 prints the prefix in `esp_log_format`, holding `flockfile(stdout)`
@@ -612,6 +613,15 @@ QuickJS change, so they add up to a little more than the bin's −67,392.
   `src/embedded/tests/test_patched_dragonbox.nim` compares the two (specials,
   subnormals, every power of ten ±1 ulp, random bit patterns); a 9-million
   double run found no difference.
+
+- **Setup page**: `fos_http.c` wrote the page with 7.3 KB of C strings and a
+  `send_input` per field. It is now `main/setup_page.html`, stripped and
+  gzipped at build time (`tools/gzip_setup_page.py`, 3.5 KB) and sent with
+  `Content-Encoding: gzip`; the current values come from `GET /api/setup`
+  (same access check, no secrets: it says only whether a Wi-Fi password is
+  saved). The form stays disabled until they are in, so a failed fetch never
+  posts blank fields. Measured −3,680 before the stripping, which took
+  another 381 off the blob.
 
 ## Measured, needs a decision
 
@@ -668,7 +678,6 @@ small-devices section.
   would take perhaps a third; a `patchFile` of `system/seqs_v2`.
 - **The font to the state partition**: −57.9 KB per slot, but it must be there
   before provisioning (the merged image's SPIFFS image) and survive OTA.
-- `%*{…}` log sites (`runNode` alone has 33 and is 29 KB), the setup page's
-  7.3 KB of HTML (gzip would save ~4.5 KB), `appCapabilities` built at run
+- `%*{…}` log sites (`runNode` alone has 33 and is 29 KB), `appCapabilities` built at run
   time (~3 KB), the float-32 libm copies (~4 KB; double is soft-float on the
   S3, so slower), QuickJS's TS/JSX syntax (~7 KB).

@@ -90,6 +90,19 @@ idf_component_register(
         monocypher
 )
 
+# The setup page (fos_http.c's GET /) is setup_page.html gzipped here and
+# served with Content-Encoding: gzip (tools/gzip_setup_page.py).
+set(FOS_SETUP_PAGE_GZ "${CMAKE_CURRENT_BINARY_DIR}/setup_page.html.gz")
+add_custom_command(
+    OUTPUT "${FOS_SETUP_PAGE_GZ}"
+    COMMAND ${python} "${CMAKE_CURRENT_LIST_DIR}/../tools/gzip_setup_page.py"
+            "${CMAKE_CURRENT_LIST_DIR}/setup_page.html" "${FOS_SETUP_PAGE_GZ}"
+    DEPENDS "${CMAKE_CURRENT_LIST_DIR}/setup_page.html" "${CMAKE_CURRENT_LIST_DIR}/../tools/gzip_setup_page.py"
+    VERBATIM)
+add_custom_target(fos_setup_page_gz DEPENDS "${FOS_SETUP_PAGE_GZ}")
+add_dependencies(${COMPONENT_LIB} fos_setup_page_gz)
+target_add_binary_data(${COMPONENT_LIB} "${FOS_SETUP_PAGE_GZ}" BINARY)
+
 # esp_spiffs_gc's SPIFFS_gc goes through fos_spiffs_gc.c, which erases the
 # blocks holding only deleted pages before SPIFFS collects by erase age. It
 # reads the partition's counters, so it compiles against SPIFFS's own
