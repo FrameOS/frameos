@@ -563,8 +563,8 @@ sits, so those are arguments of `src/embedded/fos_table_probe.nim`:
 `frameos-esp32-ci-local`. Main at 98b3e0000 builds at 3,292,720 bytes, the
 same as #719's CI comment (91.4% of the slot, 304 KB free).*
 
-**3,292,720 → 3,225,328 bytes (−67,392; 89.5% of the slot, 370 KB free)
-with the four cuts applied, no behaviour change.** Two more measured cuts need
+**3,292,720 → 3,225,328 bytes (−67,392; 89.5% of the slot) with the first
+four cuts, and about −71.5 KB with the setup page too, no behaviour change.** Two more measured cuts need
 a decision (below): QuickJS's unicode tables would take it to about
 3,176,000, and `--panics:on` on top to about 3,027,000 (84%).
 
