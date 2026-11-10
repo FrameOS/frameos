@@ -438,7 +438,18 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
   let current = loop.host.sceneFor(none(SceneId))
   let payload = newJObject()
   var next = sceneId
-  if not current.isBuiltIn:
+  # From the settings straight to the scene list when asked (a taskbar's Start):
+  # the scene behind stays behind, and the layout goes on as it was.
+  let swap = sceneId == SceneSwitcherId and current.isBuiltIn and current.id.string == SceneSettingsId and
+    envelope.payload{"swap"}.getBool()
+  if swap:
+    let state = newJObject()
+    state.put("from", newJString(current.state{"from"}.getStr()))
+    let worn = current.state{"layout"}
+    if not worn.isNil:
+      state.put("layout", copy(worn))
+    payload.put("state", state)
+  elif not current.isBuiltIn:
     let state = newJObject()
     state.put("from", newJString(if current.isNil: "" else: current.id.string))
     # It is drawn in the layout of the scene it was opened from.

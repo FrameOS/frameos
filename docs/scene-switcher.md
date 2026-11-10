@@ -28,7 +28,9 @@ like `setCurrentScene {direction}`:
   the switcher's own Close, a key with the role `back`, and its idle timeout
   all dispatch `sceneSwitcher` to go back. `sceneSettings` (a swipe down
   from the top) goes back the same way, and `sceneSwitcher` over the scene
-  settings closes them unsaved ([scene-settings.md](scene-settings.md)).
+  settings closes them unsaved ([scene-settings.md](scene-settings.md)), or,
+  with `{swap: true}` (a taskbar's Start), goes straight to the list, the
+  scene behind staying behind.
 
 A `setCurrentScene {sceneId: "system/sceneSwitcher"}` opens it by name (the
 HTTP API, a schedule) without `state.from`: it highlights the list's first

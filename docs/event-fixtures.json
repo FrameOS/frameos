@@ -4846,6 +4846,79 @@
       "current": ""
      }
     ]
+   },
+   {
+    "name": "the scene list opens straight from the settings when asked to swap, the scene behind staying behind",
+    "why": "A taskbar's Start over the settings means the scene list, not back to the scene: `sceneSwitcher {swap: true}`. Plain `sceneSwitcher` still goes back.",
+    "scene": "fixtures/dispatcher/swapA",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/swapA",
+      "name": "swapA",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [],
+      "edges": []
+     }
+    ],
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings"
+       }
+      ],
+      "current": "system/sceneSettings",
+      "state": {
+       "from": "fixtures/dispatcher/swapA"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSwitcher",
+        "payload": {
+         "swap": true
+        }
+       }
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/swapA"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings"
+       }
+      ],
+      "current": "fixtures/dispatcher/swapA"
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings"
+       }
+      ],
+      "current": "system/sceneSettings"
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "current": "fixtures/dispatcher/swapA"
+     }
+    ]
    }
   ]
  },
