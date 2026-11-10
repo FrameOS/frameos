@@ -871,7 +871,8 @@ suite "a held key's accents":
     target.input.paper = true
     discard relayout()
     let s = keyRegion(target.regions, ord('s'))
-    discard at(s, "pointerDown", buttons = 1) # no press to show on paper
+    check not at(s, "pointerDown", buttons = 1) # no press to show on paper
+    check target.input.pressed.len == 0 and target.input.hovered.len == 0
     check at(s, "longPress")
     discard relayout()
     forms = accentRegions(target.regions)

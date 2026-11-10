@@ -164,6 +164,31 @@ export function get(app, context) {
     check not paper("waveshare.EPD_7in5_V2", newImage565(400, 200))
     check not paper("waveshare.EPD_7in5_V2", newImage565(400, 200), producer = true)
 
+  test "app.frame.color says whether the panel shows colors":
+    const source = """
+      export function get(app) {
+        frameos.setState('color', app.frame.color)
+        return { ok: true }
+      }
+    """
+    proc color(device: string, canvas: Image): bool =
+      let ui = newUi(source, "tests/color", sourceName = "app.js", outputType = "json")
+      ui.owner.frameConfig.device = device
+      let context = ExecutionContext(scene: ui.scene, event: "render", payload: %*{},
+        hasImage: true, image: canvas, loopIndex: 0, loopKey: ".", nextSleep: -1)
+      discard ui.runtime.get(ui.owner, %*{}, context)
+      ui.scene.state["color"].getBool()
+    # Black and white, greys: no color, so the real-time scenes' "auto"
+    # draws in high contrast.
+    check not color("waveshare.EPD_7in5_V2", newImage(400, 200))
+    check not color("waveshare.EPD_10in3", newImage(400, 200))
+    # Color e-paper (Spectra 6, seven inks, four), an HDMI screen, an LCD.
+    check color("waveshare.EPD_13in3e", newImage(400, 200))
+    check color("pimoroni.inky_impression_7_3", newImage(400, 200))
+    check color("waveshare.EPD_2in13g", newImage(400, 200))
+    check color("framebuffer", newImage(400, 200))
+    check color("waveshare.EPD_7in5_V2", newImage565(400, 200))
+
   test "app.frame says nothing of a battery or Wi-Fi where the host cannot tell":
     const source = """
       export function get(app) {

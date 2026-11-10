@@ -228,6 +228,8 @@ block more_scenes_than_fit_page_with_a_swipe:
   scene.send("swipe", %*{"direction": "left", "x": 100, "y": 200, "startX": 300, "startY": 200,
     "pointerId": 1, "pointerType": "touch"})
   doAssert scene.state{"page"}.getInt() == 1
+  # The contract renders nothing after a swipe: the scene asks to be shown.
+  doAssert sent.len == 1 and sent[0][0] == evRender, $sent
   doAssert scene.highlightedId == "scene-" & $(grid.perPage + 1), scene.highlightedId
   # The keys cross pages as they walk.
   scene.send("button", %*{"label": "LEFT", "role": "prev", "action": "press"})
@@ -240,11 +242,13 @@ block more_scenes_than_fit_page_with_a_swipe:
   let page = scene.state{"page"}.getInt()
   var turned = false
   for cx in countup(240, 480 - grid.pad, 3):
+    sent.setLen(0)
     scene.send("tap", %*{"x": cx, "y": grid.headerH div 2, "pointerId": 1, "pointerType": "touch"})
     if scene.state{"page"}.getInt() != page:
       turned = true
       break
   doAssert turned, "a page arrow in the header"
+  doAssert sent.len == 1 and sent[0][0] == evRender, "the turned page is asked for: " & $sent
   # The frame's back and forward (a swipe in from the left or the right
   # edge): the page before and the next, wrapping, and no scene switch.
   sent.setLen(0)
@@ -256,6 +260,57 @@ block more_scenes_than_fit_page_with_a_swipe:
   doAssert scene.state{"page"}.getInt() == (before + grid.pages - 1) mod grid.pages
   for (event, _) in sent:
     doAssert event != evSetCurrentScene and event != evSceneSwitcher, event
+
+block e_paper_turns_the_page_at_the_first_tap:
+  # The reTerminal E1003 (1872x1404, sixteen greys): a tap on the header's
+  # arrow turned the page in the state and nothing showed it, since the
+  # contract renders nothing after a tap (2026-11-10).
+  listed = entries(40)
+  sent.setLen(0)
+  let scene = newSwitcher(config(1872, 1404, "embedded"), opener = "scene-1")
+  discard scene.draw(newImageGray8(1872, 1404))
+  doAssert scene.paper, "an ESP32 e-paper hears taps alone"
+  let grid = switcherGrid(40, 1872, 1404, thumbnails = false)
+  let page = scene.state{"page"}.getInt()
+  var turned = false
+  for cx in countup(900, 1872 - grid.pad, 4):
+    sent.setLen(0)
+    scene.send("tap", %*{"x": cx, "y": grid.headerH div 2, "pointerId": 1, "pointerType": "touch"})
+    if scene.state{"page"}.getInt() != page:
+      turned = true
+      break
+  doAssert turned, "a page arrow in the header"
+  doAssert sent.len == 1 and sent[0][0] == evRender, $sent
+  # One page only: a swipe turns nothing and asks for nothing.
+  listed = entries(3)
+  let few = newSwitcher(config(1872, 1404, "embedded"), opener = "scene-1")
+  discard few.draw(newImageGray8(1872, 1404))
+  sent.setLen(0)
+  few.send("swipe", %*{"direction": "left", "x": 100, "y": 200, "startX": 300, "startY": 200})
+  doAssert sent.len == 0, $sent
+
+block a_layout_hole_pages_by_the_grid_it_drew:
+  # Inside a layout the switcher is drawn in the hole the layout leaves, not
+  # on the whole panel: a page turn lit a tile of the page after the one it
+  # showed, and the last pages could not be reached (the reTerminal E1003 in
+  # a Windows 98 window, 2026-11-10).
+  listed = entries(40)
+  let scene = newSwitcher(config(1872, 1404, "embedded"), opener = "scene-1")
+  discard scene.draw(newImageGray8(900, 600))
+  let (roomW, roomH) = uiRoom(scene.frameConfig, 900, 600)
+  let drawn = switcherGrid(40, roomW, roomH, thumbnails = false, unit = 600)
+  let whole = switcherGrid(40, uiRoom(scene.frameConfig, 1872, 1404)[0], uiRoom(scene.frameConfig, 1872, 1404)[1],
+    thumbnails = false, unit = 1404)
+  doAssert drawn.perPage < whole.perPage, $drawn & " " & $whole
+  scene.send("swipe", %*{"direction": "left", "x": 100, "y": 200, "startX": 300, "startY": 200})
+  doAssert scene.state{"page"}.getInt() == 1
+  doAssert scene.highlightedId == "scene-" & $(drawn.perPage + 1), scene.highlightedId
+  # Every drawn page is reached, and then it wraps.
+  for page in 2 ..< drawn.pages:
+    scene.send("swipe", %*{"direction": "left", "x": 100, "y": 200, "startX": 300, "startY": 200})
+    doAssert scene.state{"page"}.getInt() == page, $page
+  scene.send("swipe", %*{"direction": "left", "x": 100, "y": 200, "startX": 300, "startY": 200})
+  doAssert scene.state{"page"}.getInt() == 0
 
 block an_esp32_lcd_with_a_few_scenes:
   # The SenseCAP Indicator: 480x480 RGB565, names only.

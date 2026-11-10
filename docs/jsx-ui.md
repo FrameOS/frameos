@@ -520,8 +520,9 @@ export const get = () => (
   lifts is over nothing, so on a touch screen `hover:` lasts for the press.
 - **Renders cost what they cost on the panel.** On an LCD, a HyperPixel or
   the browser preview a click answers at once; on e-paper it answers in a
-  refresh, and `hover:` / `active:` are a refresh each: keep them for
-  screens that redraw in a blink. Every handler is a render too, so an app
+  refresh, so e-paper draws no `hover:` or `active:` at all (a press asked
+  for a refresh of its own, and the tap's render waited behind it:
+  `ui/events.nim`). Every handler is a render, so an app
   that follows a finger checks `app.frame.paper` (2026.11.5+) and takes the
   whole drag as one `onSwipe` there, as the Map scene does.
 - **Where the events come from**: the dispatcher's pointer events and

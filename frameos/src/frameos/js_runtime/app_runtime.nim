@@ -1476,6 +1476,12 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     let like = pictureFormatLike(e.context)
     return nimBoolToJS(ctx, panelIsPaper(e.owner.frameConfig.device,
       not like.isNil and like.format == pfRgb565))
+  of "color":
+    # Whether the panel shows colors (utils/asset_colors.panelShowsColor):
+    # a scene draws in high contrast where it does not.
+    let like = pictureFormatLike(e.context)
+    return nimBoolToJS(ctx, panelShowsColor(e.owner.frameConfig.device,
+      if like.isNil: pfRgbx else: like.format))
   of "sceneName":
     # A layout's is the name of the scene it wraps (interpreter.ensureLayoutScene).
     if not e.owner.scene.isNil and e.owner.scene.shownName.len > 0:
@@ -1572,7 +1578,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
         keys.add(key)
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale", "paper",
-      "sceneName", "systemScene", "batteryPercent", "wifiRssi"]
+      "color", "sceneName", "systemScene", "batteryPercent", "wifiRssi"]
   of "context":
     keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep"]
     if e.context.hasImage and not e.context.image.isNil:
