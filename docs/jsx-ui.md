@@ -603,8 +603,10 @@ export function get(app) {
   `…`, `¿ ¡ ° ‰` (`ui/keyboard.nim` `Accents`); under shift the letters are
   capitals. Every letter also holds a symbol, after SwiftKey: the digits
   over `q`–`p`, `@ # & * - + = ( )` over `a`–`l`, `_ $ " ' : ; /` over
-  `z`–`m` (`ui/keyboard.nim` `Hints`), drawn small and dim in the key's top
-  right corner. It is the first form of the letter's row, which starts right
+  `z`–`m` (`ui/keyboard.nim` `Hints`), and the letters page's full stop holds
+  `!`, which that page has no key for (on the symbols page and the number
+  pad `.` holds its `…` alone). The symbol is drawn small and dim in the
+  key's top right corner. It is the first form of the key's row, which starts right
   over the key (pushed left at the screen's edge) with the symbol lit: hold a
   letter and lift, and its symbol is typed. Sliding sideways moves the light
   along the row by how far the finger went (`UiInput.accentFrom`), at any

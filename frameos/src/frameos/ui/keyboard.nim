@@ -19,7 +19,8 @@
 ## capitals by arithmetic (`accentText`), not by a second table.
 ##
 ## Every letter also has a symbol (`Hints`, after SwiftKey: the digits over
-## the top row, `@ # & * - + = ( )` and `_ $ " ' : ; /` over the others),
+## the top row, `@ # & * - + = ( )` and `_ $ " ' : ; /` over the others), and
+## so does the letters page's full stop (`!`, then its `…`),
 ## drawn small and dim in the key's corner and first in its held row
 ## (`formCount` / `formText`), right over the key and lit, so holding a
 ## letter and lifting types its symbol, and sliding along reaches the
@@ -62,8 +63,9 @@ const
     "$€£¥¢-–—•\"“”„«»'‘’‚‹›.…?¿!¡0°%‰"
     ## Each key's accented forms, after the key's own ASCII byte (the one
     ## byte below 0x80 in its entry, so the entries need no separator).
-  Hints = "q1w2e3r4t5y6u7i8o9p0a@s#d&f*g-h+j=k(l)z_x$c\"v'b:n;m/"
-    ## Each letter's symbol, after it.
+  Hints = "q1w2e3r4t5y6u7i8o9p0a@s#d&f*g-h+j=k(l)z_x$c\"v'b:n;m/.!"
+    ## Each letter's symbol, after it, and the full stop's: the letters page
+    ## has no ! key of its own.
   Pages: array[KeyboardPage, string] = [
     "qwertyuiop\nasdfghjkl\n\x01zxcvbnm\x02\n\x05, .\x03",
     "1234567890\n-/:;()$&@\"\n\x06.,?!'\x02\n\x04 \x03",
@@ -153,23 +155,25 @@ proc accentText*(code, index, shift: int): string =
     inc n
     i += runeLenAt(Accents, i)
 
-proc hintOf*(code: int): string =
-  ## The symbol a letter key holds (`Hints`), "" for any other key.
-  if code >= ord('a') and code <= ord('z'):
+proc hintOf*(code: int, page: KeyboardPage): string =
+  ## The symbol a key holds on the letters page (`Hints`: every letter's,
+  ## and ! on the full stop), "" for any other key or page. The number pad's
+  ## full stop is a decimal point, and the symbols page has a ! key.
+  if page == kpLetters:
     var i = 0
     while i + 1 < Hints.len:
       if ord(Hints[i]) == code:
         return $Hints[i + 1]
       i += 2
 
-proc formCount*(code: int): int =
-  ## What key `code`'s held row holds: its symbol, then its accents.
-  accentCount(code) + (if hintOf(code).len > 0: 1 else: 0)
+proc formCount*(code: int, page: KeyboardPage): int =
+  ## What key `code`'s held row holds on `page`: its symbol, then its accents.
+  accentCount(code) + (if hintOf(code, page).len > 0: 1 else: 0)
 
-proc formText*(code, index, shift: int): string =
-  ## Form number `index` of key `code`'s held row: its symbol first (never a
-  ## capital), then its accents; "" past the last.
-  let hint = hintOf(code)
+proc formText*(code, index, shift: int, page: KeyboardPage): string =
+  ## Form number `index` of key `code`'s held row on `page`: its symbol
+  ## first (never a capital), then its accents; "" past the last.
+  let hint = hintOf(code, page)
   if hint.len > 0:
     if index == 0: hint
     else: accentText(code, index - 1, shift)
@@ -285,7 +289,7 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
       label = el("div", move t, SvgNode(text: if code == ord(kSymbols): "123" elif code == ord(kMore): "#+=" else: "ABC"))
     elif ch != ' ':
       label = SvgNode(text: typed(code, shift))
-    let hint = hintOf(code)
+    let hint = hintOf(code, page)
     if hint.len > 0:
       c.add " relative"
     let key = el("div", move c, label)
@@ -303,14 +307,15 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
     if code == ord(kShift):
       # Shift tapped twice: caps lock, until shift again.
       key.attrs.add(("on-double-click", $(KeyBase + ord(kCapsLock))))
-    elif formCount(code) > 0 or code == ord(kBackspace):
+    elif formCount(code, page) > 0 or code == ord(kBackspace):
       # Held: its accents (ui/events.nim opens them, ui/layout.nim draws
       # them), or backspace erasing again and again.
       key.attrs.add(("on-long-press", $(KeyBase + code)))
     row.children.add key
 
-proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool, lit = -1): SvgNode =
-  ## The accents of key `code` as a row of keys, each `keyW` x `keyH` with
+proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool, page: KeyboardPage,
+    lit = -1): SvgNode =
+  ## The accents of key `code` on `page` as a row of keys, each `keyW` x `keyH` with
   ## `gap` between and around them, in the keyboard's look: number `lit` is
   ## the one nearest the finger, which lifting types. ui/layout.nim puts it
   ## above the key.
@@ -321,7 +326,7 @@ proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool, lit = -1): SvgN
   if paper: c.add " bg-white text-black border-black"
   else: c.add " bg-zinc-800 text-white border-zinc-500"
   result = el("div", move c)
-  for i in 0 ..< formCount(code):
+  for i in 0 ..< formCount(code, page):
     c = "flex items-center justify-center rounded-md"
     c.px("w", keyW)
     c.px("h", keyH)
@@ -330,7 +335,7 @@ proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool, lit = -1): SvgN
       if i == lit: c.add " bg-black text-white"
     elif i == lit: c.add " bg-zinc-100 text-zinc-900"
     else: c.add " bg-zinc-600"
-    let key = el("div", move c, SvgNode(text: formText(code, i, shift)))
+    let key = el("div", move c, SvgNode(text: formText(code, i, shift, page)))
     key.attrs.add(("on-click", $(AccentBase + i)))
     result.children.add key
 

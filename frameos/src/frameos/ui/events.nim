@@ -255,7 +255,7 @@ proc accentNear(target: UiTarget, lx, ly: float32): int =
     top = high(float32)
     bottom = 0'f32
     x = lx
-  if hintOf(target.input.accents).len > 0:
+  if hintOf(target.input.accents, target.input.page).len > 0:
     for r in target.regions:
       if r.handlers[ueClick] - 1 == AccentBase:
         x = lx - target.input.accentFrom + r.x + r.w / 2
@@ -477,7 +477,7 @@ proc holdKey(target: UiTarget, code, pointer: int, lx: float32) =
     target.repeats = 0
     target.repeatDue = getMonoTime() + initDuration(milliseconds = RepeatFirstMs)
     return
-  if formCount(code) == 0:
+  if formCount(code, i.page) == 0:
     return
   i.accents = code
   i.accentX = lx
@@ -515,7 +515,7 @@ proc pickAccent(target: UiTarget, index: int) =
   template i: untyped = target.input
   if i.accents == 0:
     return
-  let text = formText(i.accents, index, i.shift)
+  let text = formText(i.accents, index, i.shift, i.page)
   i.accents = 0
   target.inputOnly = true
   if text.len > 0:
