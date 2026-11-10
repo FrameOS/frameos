@@ -106,4 +106,33 @@ proc packRuns1bpp*(pixels: ptr UncheckedArray[uint8]; width, height: int; buf: p
     swap(currentError, nextError)
     zeroMem(nextError, errorBytes)
 
+proc rotateBits1bpp*(natural: ptr UncheckedArray[uint8]; srcW, srcH: int;
+    buf: ptr UncheckedArray[uint8]; rowBytes, rotate: int) =
+  ## A packed 1bpp picture in the canvas's own orientation (`(srcW + 7) div 8`
+  ## bytes a row) turned onto the panel (`rowBytes` a row), as `panelPoint`
+  ## places each pixel. Written in the panel's order, so a whole frame dithered
+  ## in scan order and turned here writes memory front to back: dithering
+  ## straight into a 90 or 270 degree panel moved to another row at every
+  ## pixel, 0.7 s on the reTerminal Sticky's 480x800 (2026-11-10).
+  let
+    naturalRow = (srcW + 7) div 8
+    (panelW, panelH) = if rotate == 90 or rotate == 270: (srcH, srcW) else: (srcW, srcH)
+  for py in 0 ..< panelH:
+    let outRow = py * rowBytes
+    for byteX in 0 ..< rowBytes:
+      var bits = 0'u8
+      for bit in 0 ..< 8:
+        let px = byteX * 8 + bit
+        if px >= panelW:
+          break
+        let (x, y) =
+          case rotate
+          of 90: (py, srcH - 1 - px)
+          of 180: (srcW - 1 - px, srcH - 1 - py)
+          of 270: (srcW - 1 - py, px)
+          else: (px, py)
+        if (natural[y * naturalRow + (x shr 3)] and (0x80'u8 shr (x and 7))) != 0:
+          bits = bits or (0x80'u8 shr bit)
+      buf[outRow + byteX] = bits
+
 {.pop.}

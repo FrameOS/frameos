@@ -304,6 +304,7 @@ proc frameos_wasm_load_scenes(payload: cstring): cint {.exportc, cdecl.} =
       return 0
 
     host.dropScene()
+    dropParkedLayout()
     replaceInterpretedScenesCache(newScenes)
     scenesLoadedCount = newScenes.len
     # A layout is in no scene list (docs/scene-layouts.md).

@@ -145,6 +145,11 @@ int frameos_nim_load_scene(const char *scene_json);
  * those whose own interval has not come round (frameos/scene_rhythm.nim).
  * Call on the render task, right before the render. */
 void frameos_nim_request_fresh_pass(void);
+/* Someone is tapping (the input hold): a UI's chrome due only because its
+ * time came waits (scene_rhythm.nim rhythmInteractive). Told before a render. */
+void frameos_nim_set_interactive(bool on);
+/* A chrome waited for the tapping to stop: render once. Asking clears it. */
+bool frameos_nim_chrome_owed(void);
 /* Install the service settings the settings poll just fetched
  * (docs/cloud-frames.md, "Service settings"). `json` is the `settings` OBJECT
  * — group → field → value — for the six cloud-owned groups (frameOS, github,

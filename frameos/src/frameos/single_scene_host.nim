@@ -108,13 +108,37 @@ proc takeRenderRequested*(host: SingleSceneHost): bool =
 
 # ----------------------------------------------------------------- lifetime
 
+var parkedLayout: FrameScene
+  ## The layout of the scene dropped last, kept for the next scene that wears
+  ## it (interpreter.nim takeParkedLayout): one at a time.
+
+proc cleanupScene*(scene: FrameScene)
+
+proc dropParkedLayout*() =
+  ## New scenes arrived (the layout may be one of them, changed), or memory
+  ## is short: the kept layout goes.
+  if not parkedLayout.isNil:
+    let layout = parkedLayout
+    parkedLayout = nil
+    cleanupScene(layout)
+
+proc takeParked(layoutId: string): FrameScene {.nimcall.} =
+  if not parkedLayout.isNil and parkedLayout.id.string == layoutId:
+    result = parkedLayout
+    parkedLayout = nil
+
+takeParkedLayout = takeParked
+
 proc cleanupScene*(scene: FrameScene) =
   ## Break ORC cycles and close the scene's QuickJS context before dropping
   ## the last reference (mirrors scenes.nim cleanupSceneRuntime, which lives
-  ## outside these builds).
+  ## outside these builds). The layout it wore is kept for the next scene.
   if not scene.isNil and not scene.wornLayout.isNil:
-    cleanupScene(scene.wornLayout)
+    let layout = scene.wornLayout
     scene.wornLayout = nil
+    if layout != parkedLayout:
+      dropParkedLayout()
+      parkedLayout = layout
   if scene.isNil or not (scene of InterpretedFrameScene):
     return
   when defined(memProbe): memProbe("  cleanupScene: entry")
@@ -165,6 +189,7 @@ proc recoverAbortedRun*(host: SingleSceneHost): tuple[jsDropped, jsBytes: int] =
   ## the bytes they still hold. What the aborted run allocated stays leaked;
   ## the glue decides whether that warrants a restart.
   resetRunBudgets()
+  dropParkedLayout()
   if not host.events.isNil:
     host.events.resetAfterAbort()
   clearRunNodeStacks(host.scene)

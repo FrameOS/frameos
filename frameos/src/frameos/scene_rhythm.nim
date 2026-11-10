@@ -102,6 +102,12 @@ var
   canvasMarks {.threadvar.}: array[MaxCanvasMarks, CanvasMark]
   nextCanvasMark {.threadvar.}: int
   rhythmHoldFloor*: bool
+  rhythmInteractive*: bool
+    ## Someone is tapping (the host's input hold). A UI's chrome that is due
+    ## only because its time came (a taskbar's clock) keeps its pixels for the
+    ## frames their taps ask for, and is owed instead (`rhythmChromeOwed`): on
+    ## the reTerminal E1003 the first tap after each minute paid 1.3 s for the
+    ## clock (2026-11-10). The host renders once they stop.
     ## Set by a host whose next wake is expensive whatever its panel (an
     ## ESP32 in deep sleep).
   rhythmCanvasGeneration*: proc(canvas: Image): int64 {.nimcall, raises: [].}
@@ -564,6 +570,14 @@ proc rhythmChromeCanStay*(host: FrameScene): bool =
       return false
   host.slots.len > 0
 
+var chromeOwed {.threadvar.}: bool
+
+proc rhythmChromeOwed*(): bool =
+  ## A chrome waited for someone to stop tapping (`rhythmInteractive`): the host
+  ## renders once they did. Asking clears it.
+  result = chromeOwed
+  chromeOwed = false
+
 proc rhythmVisitChrome*(host: FrameScene): RhythmDecision =
   ## May this pass leave a UI's chrome (all of it but its holes) as it is, and
   ## not run the UI at all? A scene that animates at 20 frames a second inside a
@@ -575,9 +589,12 @@ proc rhythmVisitChrome*(host: FrameScene): RhythmDecision =
   # Not dueBy: its whole-second slack calls a one-second clock bar due on any
   # pass at all, so a tap on the content would pay for the bar as well. A bar
   # a little early waits for the pass its own due time wakes.
+  let timeCame = r.chromeDueAt <= passStart + earlySlack(r.chromeInterval)
   if passFresh or r.chromeDueAt <= 0 or stateKey(host) != r.stateKey or
-      r.chromeDueAt <= passStart + earlySlack(r.chromeInterval):
+      timeCame and not rhythmInteractive:
     return rdRun
+  if timeCame:
+    chromeOwed = true
   # Inside something else, what is under it lasts only if that says so.
   if passGeneration < 0 or (passDepth > 1 and not chromeStays):
     return rdRepaint

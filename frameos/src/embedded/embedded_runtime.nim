@@ -619,8 +619,10 @@ proc loadScenes*(payload: string): int =
     return 0
 
   # Tear down the old scene before swapping the registry so its QuickJS
-  # context and app instances are reclaimed.
+  # context and app instances are reclaimed; the layout it wore may be one of
+  # the new scenes, changed.
   host.dropScene()
+  dropParkedLayout()
   when defined(memProbe): memProbe("  loadScene: old scene dropped")
 
   replaceInterpretedScenesCache(newScenes)
@@ -653,7 +655,9 @@ proc setSceneCatalog*(indexJson: string): int =
   ##
   ## This is what makes lazy loading possible: the frame can list, schedule
   ## and switch scenes knowing only this, and pays for a scene's nodes and
-  ## JavaScript only while it is the active one.
+  ## JavaScript only while it is the active one. A new list may hold a changed
+  ## layout: the one kept between switches goes.
+  dropParkedLayout()
   var parsed: JsonNode
   try:
     parsed = parseJson(indexJson)

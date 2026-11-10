@@ -68,6 +68,8 @@ extern int fos_nim_load_scenes_impl(const char *json);
 extern int fos_nim_set_scene_catalog_impl(const char *index_json);
 extern int fos_nim_load_scene_impl(const char *scene_json);
 extern void fos_nim_request_fresh_pass_impl(void);
+extern void fos_nim_set_interactive_impl(int on);
+extern int fos_nim_chrome_owed_impl(void);
 extern void fos_nim_apply_service_settings_impl(const char *json);
 extern void fos_nim_set_debug_impl(int enabled);
 extern void fos_nim_set_fusion_impl(int enabled);
@@ -937,6 +939,23 @@ int frameos_nim_load_scene(const char *scene_json)
     int result = fos_nim_load_scene_impl(scene_json);
     nim_lock_give();
     return result;
+}
+
+void frameos_nim_set_interactive(bool on)
+{
+    if (!s_nim_ready) return;
+    if (!nim_lock_take()) return;
+    fos_nim_set_interactive_impl(on ? 1 : 0);
+    nim_lock_give();
+}
+
+bool frameos_nim_chrome_owed(void)
+{
+    if (!s_nim_ready) return false;
+    if (!nim_lock_take()) return false;
+    bool owed = fos_nim_chrome_owed_impl() != 0;
+    nim_lock_give();
+    return owed;
 }
 
 void frameos_nim_request_fresh_pass(void)

@@ -418,8 +418,10 @@ for the two Spectra boards most of the bench work runs on:
   are the runtime's `frameos/loading_mark.nim`; `docs/realtime-rendering.md`
   "A switch that takes a while"). An LCD does not wait for the clock: it renders once Wi-Fi is up and again when SNTP answers
   (`fos_wifi_set_late_time_hook`); the boot used to wait up to 10 s for it.
-  An LCD board runs its CPU at 240 MHz (the generic image boots at 160 for
-  the battery frames; `status` prints `cpu:`). The scene canvas is the
+  An LCD board runs its CPU at 240 MHz, and so does any board whose touch
+  controller answers at boot (the reTerminal E1003 and Sticky: someone at the
+  glass waits for every frame); the generic image boots at 160 for the other
+  battery frames, and `status` prints `cpu:`. The scene canvas is the
   panel's own back frame buffer (`fos_display_render_target`, 565 whatever
   the PSRAM): the scene draws straight into it, and the blit is a buffer
   switch — no pack, no copy, no hash. A scene whose `refreshInterval` is

@@ -26,6 +26,9 @@ void fos_client_render_recovery_boot(void);
 bool fos_client_render_paused(void);
 void fos_client_clear_render_pause(void);
 void fos_client_render_now(void);
+/* Someone is tapping or pressing (the input hold, fos_animation.h): slow
+ * chores on any task wait. */
+bool fos_client_input_held(void);
 /* Render now because somebody asked (a render verb, the console, a button,
  * the schedule): unlike fos_client_render_now, the scenes inside a split all
  * run, also those whose own interval has not come round. */

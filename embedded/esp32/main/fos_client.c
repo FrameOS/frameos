@@ -615,10 +615,24 @@ static bool input_queued(void)
     return fos_touch_pending() || fos_buttons_pending();
 }
 
+/* Who the input hold is for: a partial-refresh e-paper panel, and any board
+ * with a touch screen. On the SenseCAP Indicator's LCD a settings pull of 1.4
+ * to 2.6 s ran on the render task between taps and held each one 2.5 to 3.5 s
+ * (2026-11-10). */
+static bool hold_applies(void)
+{
+    return fos_display_supports_partial() || fos_touch_present();
+}
+
 static bool input_hold_on(void)
 {
-    return fos_display_supports_partial() &&
+    return hold_applies() &&
            (fos_input_hold_engaged(&s_input_hold) || input_queued());
+}
+
+bool fos_client_input_held(void)
+{
+    return input_hold_on();
 }
 
 /* The input queues, then time passing, in that order: the buttons' edges and
@@ -646,7 +660,7 @@ static void process_input_events(void)
 {
     if (input_queued()) {
         note_input_awake();
-        if (fos_display_supports_partial()) fos_input_hold_note(&s_input_hold, s_last_input_us);
+        if (hold_applies()) fos_input_hold_note(&s_input_hold, s_last_input_us);
     }
     fos_buttons_process_events();
     fos_touch_process_events();
@@ -1156,9 +1170,13 @@ static void image_push_begin(void *ctx, size_t total)
 static bool image_push_write(void *ctx, const uint8_t *data, size_t len)
 {
     image_push_t *push = (image_push_t *)ctx;
-    /* A big panel's picture is 1.3 MB, 10 s on Wi-Fi with the render task
-     * waiting here: a tap gets the task back, and the push starts over. */
-    if (fos_display_supports_partial() && input_queued()) {
+    /* A big panel's picture is 1.3 MB, 8 to 14 s on Wi-Fi with the render
+     * task waiting here (the reTerminal E1003, 2026-11-10). Anything that
+     * wants the task gets it back, and the push starts over later: a tap or
+     * a key, an event from HTTP, the cloud or the console, a render asked for
+     * or the scene's own. A console `event` used to wait out the whole push. */
+    if (input_queued() || fos_events_deferred_pending() ||
+        (xEventGroupGetBits(s_events) & (RENDER_NOW_BIT | SCENE_RENDER_BIT | INPUT_EVENTS_BIT))) {
         push->failed = true;
         s_last_image_push_us = 0;
         return false;
@@ -1297,27 +1315,31 @@ static void push_status_info(void)
     char name[2 * FOS_STR_LEN];
     char panel[2 * FOS_STR_LEN];
     char ssid[96];
+    char pass[2 * 64 + 1];
     char cloud_url[2 * FOS_URL_LEN];
     char backend_url[2 * FOS_URL_LEN];
     json_escape_value(config->hostname, name, sizeof(name));
     json_escape_value(config->panel, panel, sizeof(panel));
     bool portal = fos_wifi_state() == FOS_WIFI_PORTAL;
     json_escape_value(portal ? fos_wifi_ap_ssid() : "", ssid, sizeof(ssid));
+    /* The hotspot's passphrase, for the QR a phone joins by (embedded_scene.nim):
+     * it is on the panel already, and only while the portal is up. */
+    json_escape_value(portal ? fos_wifi_ap_psk() : "", pass, sizeof(pass));
     json_escape_value(config->cloud_url, cloud_url, sizeof(cloud_url));
     json_escape_value(config->backend_url, backend_url, sizeof(backend_url));
     const esp_app_desc_t *app = esp_app_get_description();
 
     /* Worst case of every %s below plus the fixed JSON: gcc's
      * -Wformat-truncation wants the destination to hold it outright. */
-    char info[sizeof(name) + sizeof(panel) + sizeof(ssid) + sizeof(cloud_url) + sizeof(backend_url) +
+    char info[sizeof(name) + sizeof(panel) + sizeof(ssid) + sizeof(pass) + sizeof(cloud_url) + sizeof(backend_url) +
               4 * 64 + 256];
     snprintf(info, sizeof(info),
              "{\"name\":\"%s\",\"panel\":\"%s\",\"ip\":\"%s\","
-             "\"portal\":%s,\"portal_ssid\":\"%s\",\"portal_ip\":\"%s\","
+             "\"portal\":%s,\"portal_ssid\":\"%s\",\"portal_pass\":\"%s\",\"portal_ip\":\"%s\","
              "\"cloud_url\":\"%s\",\"cloud_state\":\"%s\",\"cloud_connected\":%s,"
              "\"backend_url\":\"%s\",\"version\":\"%s\",\"setup_on_screen\":%s}",
              name, panel, portal ? "" : fos_wifi_ip(),
-             portal ? "true" : "false", ssid, portal ? fos_wifi_ip() : "",
+             portal ? "true" : "false", ssid, pass, portal ? fos_wifi_ip() : "",
              cloud_url, fos_cloud_state_name(), fos_cloud_ws_connected() ? "true" : "false",
              backend_url, app ? app->version : "",
              /* main.c's touch_setup: no portal, the settings panel instead. */
@@ -1654,6 +1676,8 @@ static esp_err_t render_once(bool quiet)
         if (__atomic_exchange_n(&s_render_fresh, false, __ATOMIC_SEQ_CST)) {
             frameos_nim_request_fresh_pass();
         }
+        /* Someone tapping: a UI's chrome due only by its clock waits (below). */
+        frameos_nim_set_interactive(fos_display_supports_partial() && fos_input_hold_engaged(&s_input_hold));
         size_t target_len = 0;
         uint32_t generation = 0;
         uint8_t *target = fos_display_present() ? fos_display_render_target(&target_len, &generation) : NULL;
@@ -2306,8 +2330,6 @@ static void client_task(void *arg)
         bool pulls_after_render = housekeeping && force_render && s_scene_render &&
                                   (fos_display_is_lcd() || fos_display_supports_partial());
         bool held_for_input = input_hold_on();
-        /* Scene state that has waited its delay (fos_scene_state.h). */
-        if (housekeeping && !held_for_input) fos_scene_state_flush(false);
 
         /* First pass of a boot on a cloud-managed frame: the commands that
          * waited out the sleep (a scene switch, a scenes push, a state) are
@@ -2903,6 +2925,9 @@ static void client_task(void *arg)
              * process_events below delivers them. */
             uint32_t max_slice = fos_buttons_busy() ? 50 : 1000;
             if (frameos_nim_available() && fos_display_settle_due(esp_timer_get_time())) settle_panel();
+            /* The chrome a tap's frames left as it was (its clock came due while
+             * someone tapped): drawn now that they stopped. */
+            if (frameos_nim_available() && !input_hold_on() && frameos_nim_chrome_owed()) fos_client_render_now();
             fos_display_park_if_idle(esp_timer_get_time());
             EventBits_t bits = xEventGroupWaitBits(
                 s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT,
@@ -2931,7 +2956,6 @@ static void client_task(void *arg)
             /* INPUT_EVENTS_BIT ends the slice early and nothing more: the
              * press is delivered just below, and the render-requested check
              * after it decides whether a frame follows. */
-            if (!input_hold_on()) fos_scene_state_flush(false);
             if (nim) {
                 process_input_events();
                 /* An event from HTTP, the cloud or the console: to the scene

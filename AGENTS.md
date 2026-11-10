@@ -496,7 +496,12 @@
   While someone taps, slow chores wait (`input_hold_on()` in `fos_client.c`, the
   rule in `fos_animation.c`): the render task drains the touch queue, so a new
   network call or flash write on it goes behind the hold too, and a full refresh
-  that only clears ghosts waits for the idle frame.
+  that only clears ghosts waits for the idle frame. Better still, a chore leaves
+  the render task: scene state is written by `scene_state_writer_task`
+  (`main.c`), the backend picture push gives way to anything waiting for the
+  task, and an e-paper driver starts its refresh and waits for it only before
+  the panel's next use (`finish_waveforms`, `EPD_3in97_WaitPending`). A touch
+  board runs at 240 MHz like an LCD (`cpu_240` in `main.c`).
 - **A slow scene switch shows the loading mark** (`frameos/loading_mark.nim`,
   one drawing for both runtimes; doc section "A switch that takes a while"):
   after 200 ms without the new scene's first frame, a thread (Pi,

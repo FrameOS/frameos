@@ -135,3 +135,31 @@ suite "packRuns1bpp":
     var alone = newSeq[uint8](3)
     packRuns1bpp(pixels(gray), 8, 3, packed(alone), 1, [run(2, 0, 8)], 0)
     check together[2] == alone[2]
+
+suite "rotateBits1bpp":
+  test "a frame dithered upright and turned is the frame dithered onto the panel":
+    # Uneven sizes, so the last byte of a row is partly padding.
+    let (w, h) = (21, 13)
+    var gray = newSeq[uint8](w * h)
+    for y in 0 ..< h:
+      for x in 0 ..< w:
+        gray[y * w + x] = uint8((x * 37 + y * 91 + (x * y) mod 23) mod 256)
+    let g = cast[ptr UncheckedArray[uint8]](gray[0].addr)
+    var rows: seq[ChangedRun]
+    for y in 0 ..< h:
+      rows.add run(y, 0, w)
+    for rotate in [0, 90, 180, 270]:
+      let (pw, ph) = if rotate == 90 or rotate == 270: (h, w) else: (w, h)
+      let rowBytes = (pw + 7) div 8
+      var direct = newSeq[uint8](rowBytes * ph)
+      packRuns1bpp(g, w, h, cast[ptr UncheckedArray[uint8]](direct[0].addr), rowBytes, rows, rotate)
+      var natural = newSeq[uint8](((w + 7) div 8) * h)
+      packRuns1bpp(g, w, h, cast[ptr UncheckedArray[uint8]](natural[0].addr), (w + 7) div 8, rows, 0)
+      var turned = newSeq[uint8](rowBytes * ph)
+      rotateBits1bpp(cast[ptr UncheckedArray[uint8]](natural[0].addr), w, h,
+        cast[ptr UncheckedArray[uint8]](turned[0].addr), rowBytes, rotate)
+      # Padding bits past the panel's width are not pixels.
+      for py in 0 ..< ph:
+        for px in 0 ..< pw:
+          let mask = 0x80'u8 shr (px and 7)
+          check (direct[py * rowBytes + px shr 3] and mask) == (turned[py * rowBytes + px shr 3] and mask)

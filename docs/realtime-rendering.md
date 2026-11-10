@@ -633,11 +633,30 @@ a small change cost what it should:
   ms more), only when it is parked. Measured on an E1003 (2026-11-10): five
   scattered areas in 511 ms of waveform and 15 ms of upload; a tap in about a
   second from the finger to the picture.
+- **A refresh is started, not waited for.** The IT8951 runs its waveform and the
+  Sticky's SSD1677 its update on their own, 0.5-0.9 s; the driver returns once
+  it has started one, and waits for it only before the panel's next use (the
+  next upload, which overwrites what the waveform reads, a clean, a standby,
+  which would cut it short): `finish_waveforms` in `it8951.c`,
+  `EPD_3in97_WaitPending`. The render task handles the taps that came meanwhile
+  and draws the next frame while the glass changes. A new driver entry point
+  waits first.
+- **Slow chores leave the render task.** The scene state that waited its delay is
+  written by a task of its own (`scene_state_writer_task` in `main.c`): a SPIFFS
+  write is 0.7 s on the E1003 and 3 s on the Sticky, and the file write runs
+  outside the store's lock, a load meanwhile getting the state being written.
+  More than half the store's sixteen slots waiting writes them all
+  (`fos_scene_state_crowded`), so a walk through the scenes never writes on the
+  render task. The picture pushed to the backend after a render (1.3 MB on the
+  E1003, 8-14 s at the lwIP default window) gives way to a tap, a key, an event
+  from HTTP, the cloud or the console, or any render asked for, and starts over
+  later.
 - **The input hold.** The render task drains the touch queue and also does the
   backend pulls, the log uploads and the image push, 200-1000 ms a round trip
   on Wi-Fi, and writes the scene state to flash, up to 3 s, so a tap made during
-  one came back late with the ones behind it in one go. On these panels a touch
-  or a key holds all of that back until ten
+  one came back late with the ones behind it in one go. On these panels, and on
+  any board with a touch screen (the SenseCAP Indicator's LCD held a tap 2.5 to
+  3.5 s behind a settings pull), a touch or a key holds all of that back until ten
   seconds without input, a minute at the most (`fos_input_hold_*` in
   `fos_animation.c`), and the idle wait then runs it once, a round trip at a
   time, giving way to the next tap. A backend's command nudge is still served
@@ -660,7 +679,10 @@ a small change cost what it should:
   else stays as it was, bit for bit. Runs and not boxes: a crosshair that
   moved is two full-height lines. The comparison is of the canvas and not of
   what the renderer reports, because a scene is more than its SVGs and the
-  copy cannot miss a writer.
+  copy cannot miss a writer. A whole frame (a new scene, more than half the
+  canvas changed) goes through the same integer runs, one a row
+  (`packCanvas1bpp`), so a switch and the taps after it put down the same
+  pixels: the float pass it replaced took 1.6 to 2.3 s on the Sticky.
 - **The raster.** The canvas is kept between renders, so on these panels it
   takes the same SVG damage records as an LCD's buffer
   (`beginKeptCanvasFrame`, `utils/svg_frames.nim`).

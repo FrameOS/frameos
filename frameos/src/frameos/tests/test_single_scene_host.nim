@@ -450,3 +450,52 @@ block:
   coverHost.makeCurrent("fixtures/dispatcher/switchTo".SceneId, drop = false)
   doAssert coverHost.covered.isNil, "the way back led elsewhere"
   echo "covered scene ok"
+
+# ------------------------------------------- the layout kept between scenes
+#
+# The host holds one scene, so a switch dropped the layout the old scene wore
+# and the next scene read, parsed and started it again: 1.2 s of every switch
+# on a reTerminal E1003 (2026-11-10). The layout the dropped scene wore is kept
+# for the next scene that wears it; new scenes from the plane let it go.
+block:
+  let layoutJsx = "export function get(app) { return <div className=\"flex flex-col w-full h-full bg-[#008080]\"><yield /><div className=\"h-[8px] bg-[#c0c0c0]\" /></div> }"
+  proc jsxLayout(): JsonNode =
+    %*{"id": "tests/keptLayout", "name": "Kept layout", "settings": {"execution": "interpreted",
+      "refreshInterval": 60, "backgroundColor": "#000000", "isLayout": true}, "fields": [],
+      "apps": {"ui": {"name": "ui", "category": "data", "version": "1.0.0", "fields": [],
+        "output": [{"name": "image", "type": "image"}],
+        "sources": {"app.tsx": layoutJsx, "config.json": "{\"name\": \"ui\", \"output\": [{\"name\": \"image\", \"type\": \"image\"}], \"fields\": []}"}}},
+      "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+        {"id": "2", "type": "app", "data": {"keyword": "ui", "config": {}}},
+        {"id": "3", "type": "app", "data": {"keyword": "render/image", "config": {"placement": "stretch"}}}],
+      "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
+        {"id": "2", "source": "2", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/image"}]}
+  proc wearing(id, color: string): JsonNode =
+    %*{"id": id, "name": id, "settings": {"execution": "interpreted", "refreshInterval": 300,
+      "backgroundColor": "#000000"}, "fields": [], "apps": {},
+      "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+        {"id": "2", "type": "app", "data": {"keyword": "render/color", "config": {"color": color}}}],
+      "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "2", "targetHandle": "prev"}],
+      "layout": {"sceneId": "tests/keptLayout", "state": {}}}
+  replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs(
+    $(%*[jsxLayout(), wearing("tests/wearsA", "#ff0000"), wearing("tests/wearsB", "#0000ff")]))))
+  let keepHost = SingleSceneHost(frameConfig: FrameConfig(width: 40, height: 40, rotate: 0,
+    scalingMode: "cover", debug: false, saveAssets: %*false), logger: logger)
+  keepHost.requestSelect = proc (sceneId: string): bool = true
+  keepHost.start()
+  proc show(id: string): FrameScene =
+    keepHost.makeCurrent(id.SceneId)
+    doAssert keepHost.ensureScene()
+    discard keepHost.renderScene(ExecutionContext(scene: keepHost.scene, event: "render",
+      payload: %*{}, image: newImage(40, 40), hasImage: true, loopIndex: 0, loopKey: "."))
+    doAssert not keepHost.scene.wornLayout.isNil, id & " wears the layout"
+    keepHost.scene.wornLayout
+  let first = show("tests/wearsA")
+  let second = show("tests/wearsB")
+  doAssert second == first, "the next scene wearing the layout gets the same instance"
+  doAssert show("tests/wearsA") == first, "and back again"
+  # New scenes from the plane may hold a changed layout: it is made afresh.
+  keepHost.dropScene()
+  dropParkedLayout()
+  doAssert show("tests/wearsB") != first, "after the scenes were replaced, a new instance"
+  echo "kept layout ok"
