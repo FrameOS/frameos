@@ -399,6 +399,13 @@ template bytesPerPixel*(image: Image): int =
    of pfGray8: 1
    of pfGray4: raiseAssert "a pfGray4 pixel is half a byte: use copyPixelRow / zeroPixelRow")
 
+template bitsPerPixel*(image: Image): int =
+  (case image.format
+   of pfRgbx: 32
+   of pfRgb565: 16
+   of pfGray8: 8
+   of pfGray4: 4)
+
 template pixelAddr*(image: Image, index: int): pointer =
   ## The address of the pixel at a `dataIndex`, whatever the storage format:
   ## what a row copy or a row compare starts from.

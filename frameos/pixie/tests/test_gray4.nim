@@ -119,6 +119,7 @@ block odd_width_rows_keep_to_themselves:
   let image = newImageGray4(5, 4)
   doAssert image.stride == 6
   doAssert image.byteSize == 12
+  doAssert image.bitsPerPixel == 4
   image.fill(rgba(255, 255, 255, 255))
   for got in image.levels:
     doAssert got == 15

@@ -55,7 +55,7 @@ proc sceneStateLoad(sceneId: cstring): cstring {.importc: "frameos_nim_scene_sta
   ## JSON this side frees, or nil.
 proc sceneStateSave(sceneId: cstring, json: cstring): bool {.importc: "frameos_nim_scene_state_save", cdecl.}
 proc cFree(p: pointer) {.importc: "free", header: "<stdlib.h>", cdecl.}
-proc sceneThumbCapture(sceneId: cstring, canvas: pointer, width, height, stride, bytesPerPixel: cint, now: uint32) {.
+proc sceneThumbCapture(sceneId: cstring, canvas: pointer, width, height, stride, bitsPerPixel: cint, now: uint32) {.
   importc: "fos_scene_thumb_capture", cdecl.}
 proc sceneThumbLoad(sceneId: cstring, tileWidth, tileHeight: cint, width, height: ptr cint): pointer {.
   importc: "fos_scene_thumb_load", cdecl.}
@@ -806,7 +806,7 @@ proc noteSceneThumbnail(image: Image) =
   thumbSceneId = sceneId
   thumbCheckAt = now + ThumbCheckEverySeconds
   sceneThumbCapture(sceneId.cstring, image.bufferPointer, image.width.cint, image.height.cint,
-    image.stride.cint, image.bytesPerPixel.cint, now.uint32)
+    image.stride.cint, image.bitsPerPixel.cint, now.uint32)
 
 proc embeddedSceneThumbnail(frameConfig: FrameConfig, sceneId: string, width, height: int): Image {.nimcall, gcsafe.} =
   ## The scene's picture off flash in the tile's shape; nil for none yet or no
