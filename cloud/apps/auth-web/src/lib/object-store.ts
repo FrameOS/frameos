@@ -185,6 +185,9 @@ function createFsStore(root: string): ObjectStore {
   };
 }
 
+const S3_RETRIES = 2;
+const S3_INIT_RETRY_MS = 50;
+
 function createS3Store(config: {
   accessKeyId: string;
   bucket: string;
@@ -197,12 +200,13 @@ function createS3Store(config: {
     // aws4fetch retries 5xx/429 ten times by default, with exponential
     // backoff — on a request path a browser is waiting on, that is minutes of
     // held connection for an outage it cannot fix. Two retries covers a blip;
-    // anything worse should surface as an error the caller can log.
-    initRetryMs: 50,
+    // anything worse should surface as an error the caller can log. put()
+    // runs its own loop with the same numbers.
+    initRetryMs: S3_INIT_RETRY_MS,
     // R2 ignores the region but SigV4 does not: "auto" is what Cloudflare
     // documents for the S3 API.
     region: "auto",
-    retries: 2,
+    retries: S3_RETRIES,
     secretAccessKey: config.secretAccessKey,
     service: "s3",
   });
@@ -215,21 +219,46 @@ function createS3Store(config: {
   return {
     driver: "s3",
     async put(key, body, contentType) {
-      // A file streams from disk: the signer sends S3 an unsigned payload
-      // (its default for a body it cannot hash) and a half-duplex request,
-      // and fetch cannot know the length, so it is stated. A buffer's length
-      // is fetch's own to set: npm undici behind the global fetch (see
-      // object-store.test.ts) refuses a second one before a byte leaves.
-      const response = await client.fetch(urlFor(key), {
-        body: Buffer.isBuffer(body)
-          ? new Uint8Array(body)
-          : (Readable.toWeb(createReadStream(body.path)) as unknown as ReadableStream),
-        headers: {
-          ...(Buffer.isBuffer(body) ? {} : { "content-length": String(body.size) }),
-          "content-type": contentType || "application/octet-stream",
-        },
-        method: "PUT",
-      });
+      // fetch gets a URL and the body itself, never a signed Request: inside a
+      // route handler Next's own fetch rebuilds a Request from its body stream,
+      // which has no length, so a buffer went out chunked and R2 refused it
+      // with 411 (object-store.test.ts, "inside a Next route"). S3 signs an
+      // unsigned payload, so only the headers are signed. A buffer's length is
+      // fetch's own to set: npm undici behind the global fetch refuses a second
+      // one before a byte leaves. A file streams from disk, and fetch cannot
+      // know its length, so it is stated.
+      const url = urlFor(key);
+      const headers: Record<string, string> = {
+        "content-type": contentType || "application/octet-stream",
+      };
+      if (!Buffer.isBuffer(body)) {
+        headers["content-length"] = String(body.size);
+      }
+      const send = async () => {
+        const signed = await client.sign(url, { headers, method: "PUT" });
+        return fetch(signed.url, {
+          // A stream is read once, so each attempt opens the file again.
+          body: Buffer.isBuffer(body)
+            ? new Uint8Array(body)
+            : (Readable.toWeb(createReadStream(body.path)) as unknown as ReadableStream),
+          duplex: "half",
+          headers: signed.headers,
+          method: "PUT",
+        } as RequestInit);
+      };
+      // client.fetch's retries, which this request no longer goes through.
+      let response = await send();
+      for (
+        let attempt = 0;
+        attempt < S3_RETRIES && (response.status >= 500 || response.status === 429);
+        attempt++
+      ) {
+        await response.body?.cancel();
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.random() * S3_INIT_RETRY_MS * 2 ** attempt),
+        );
+        response = await send();
+      }
       if (!response.ok) {
         throw new Error(
           `Object store PUT ${key} failed: ${response.status} ${await safeText(response)}`,
