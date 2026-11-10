@@ -1602,25 +1602,42 @@ proc drawSvgImage(target: Image, props: SvgProperties) {.raises: [PixieError].} 
     box = props.imageBox
     m = props.transform
     opacity = props.opacity * props.fillOpacity
-  if opacity < 1:
+    lo = m * vec2(box.x, box.y)
+    hi = m * vec2(box.x + box.w, box.y + box.h)
+    axisAligned = m[0, 1] == 0 and m[1, 0] == 0
+    # What a layout emits (a JSX `<img>`): scaled and moved, not turned or
+    # mirrored. Drawn in fixed point (images.nim drawResampled), its opacity
+    # in the weights: no copy of the picture at any size. Through the general
+    # draw it was 40 s of an ESP32-S3 for a 1848x1179 window (2026-11-10). At
+    # its own size on whole pixels and opaque, the general draw is a row blend.
+    resampled = axisAligned and m[0, 0] > 0 and m[1, 1] > 0 and not props.imagePixelated and
+      not (opacity >= 1 and hi.x - lo.x == image.width.float32 and
+        hi.y - lo.y == image.height.float32 and lo.x == round(lo.x) and lo.y == round(lo.y))
+    transform = m * translate(vec2(box.x, box.y)) *
+      scale(vec2(box.w / image.width.float32, box.h / image.height.float32))
+  if not resampled and opacity < 1:
     image = image.copy()
     image.applyOpacity(opacity)
-  let transform = m * translate(vec2(box.x, box.y)) *
-    scale(vec2(box.w / image.width.float32, box.h / image.height.float32))
-  if not props.imageClip or m[0, 1] != 0 or m[1, 0] != 0:
-    if not (props.imagePixelated and target.drawNearest565(image, transform)):
-      target.draw(image, transform)
-    return
-  let
-    a = m * vec2(props.rectX, props.rectY)
-    b = m * vec2(props.rectX + props.rectW, props.rectY + props.rectH)
+  var
+    area = target
+    x0, y0 = 0
+  if props.imageClip and axisAligned:
+    let
+      a = m * vec2(props.rectX, props.rectY)
+      b = m * vec2(props.rectX + props.rectW, props.rectY + props.rectH)
+      x1 = clamp(round(max(a.x, b.x)).int, 0, target.width)
+      y1 = clamp(round(max(a.y, b.y)).int, 0, target.height)
     x0 = clamp(round(min(a.x, b.x)).int, 0, target.width)
     y0 = clamp(round(min(a.y, b.y)).int, 0, target.height)
-    x1 = clamp(round(max(a.x, b.x)).int, 0, target.width)
-    y1 = clamp(round(max(a.y, b.y)).int, 0, target.height)
-  if x1 > x0 and y1 > y0:
-    target.view(x0, y0, x1 - x0, y1 - y0).draw(
-      image, translate(vec2(-x0.float32, -y0.float32)) * transform)
+    if x1 <= x0 or y1 <= y0:
+      return
+    area = target.view(x0, y0, x1 - x0, y1 - y0)
+  if resampled:
+    area.drawResampled(image, lo.x - x0.float32, lo.y - y0.float32, hi.x - lo.x, hi.y - lo.y, opacity)
+  elif area != target:
+    area.draw(image, translate(vec2(-x0.float32, -y0.float32)) * transform)
+  elif not (props.imagePixelated and target.drawNearest565(image, transform)):
+    target.draw(image, transform)
 
 proc sameElement(a: Svg, i: int, b: Svg, j: int): bool =
   ## Element i of `a` and j of `b` draw the same: one element, handed over

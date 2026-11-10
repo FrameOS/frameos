@@ -64,9 +64,9 @@ const
   CustomEventMaxNameLength* = 63
   ## How the dispatcher makes gestures out of pointerDown / pointerUp (docs/events.md).
   GestureTapSlopPx* = 16
-  GestureTapMs* = 1000
+  GestureTapMs* = 500
   GestureDoubleTapMs* = 350
-  GestureLongPressMs* = 1000
+  GestureLongPressMs* = 500
   GestureSwipeMinPx* = 48
   GestureEdgePx* = 24
   ## The way out of a layout that cannot be used (docs/scene-layouts.md "Safe mode").

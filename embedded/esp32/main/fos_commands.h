@@ -17,7 +17,8 @@
  * The pull runs on the render task, once per pass right after the scenes and
  * settings pulls (so a switch lands in that pass's render) and whenever the
  * backend nudges an awake frame (`POST /api/action/commands` on the local
- * HTTP server). Each command goes through the same verb handlers a cloud
+ * HTTP server). A frame that stays awake pulls from its backend link task
+ * instead, and the render task runs what came back. Each command goes through the same verb handlers a cloud
  * verb takes (fos_cloud_dispatch_backend_command) and is acked by id, so the
  * backend knows applied from waiting. The ETags say what this frame holds of
  * its scenes and settings pulls: a queued deploy is acked by the backend when
@@ -36,3 +37,13 @@
  * applies a pending scene selection before rendering. False (quietly)
  * without a backend, Wi-Fi, or anything queued. */
 bool fos_commands_sync(void);
+
+/* fos_commands_sync in two halves, for a frame that stays awake: the pull on
+ * a task of its own (fos_client.c's backend link), the answer run on the
+ * render task. The backend marks what it hands over `sent`, so an answer
+ * that is fetched must be run. fos_commands_fetch returns the parsed answer
+ * when it holds commands or asks for a sync, NULL otherwise; any task.
+ * fos_commands_run runs and frees it, as fos_commands_sync would have;
+ * render task only. */
+void *fos_commands_fetch(void);
+bool fos_commands_run(void *answer);

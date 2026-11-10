@@ -55,10 +55,6 @@ proc sceneStateLoad(sceneId: cstring): cstring {.importc: "frameos_nim_scene_sta
   ## JSON this side frees, or nil.
 proc sceneStateSave(sceneId: cstring, json: cstring): bool {.importc: "frameos_nim_scene_state_save", cdecl.}
 proc cFree(p: pointer) {.importc: "free", header: "<stdlib.h>", cdecl.}
-proc sceneThumbCapture(sceneId: cstring, canvas: pointer, width, height, stride, bitsPerPixel: cint, now: uint32) {.
-  importc: "fos_scene_thumb_capture", cdecl.}
-proc sceneThumbLoad(sceneId: cstring, tileWidth, tileHeight: cint, width, height: ptr cint): pointer {.
-  importc: "fos_scene_thumb_load", cdecl.}
 proc log*(msg: string) =
   espLog(msg.cstring)
 
@@ -623,8 +619,10 @@ proc loadScenes*(payload: string): int =
     return 0
 
   # Tear down the old scene before swapping the registry so its QuickJS
-  # context and app instances are reclaimed.
+  # context and app instances are reclaimed; the layout it wore may be one of
+  # the new scenes, changed.
   host.dropScene()
+  dropParkedLayout()
   when defined(memProbe): memProbe("  loadScene: old scene dropped")
 
   replaceInterpretedScenesCache(newScenes)
@@ -657,7 +655,9 @@ proc setSceneCatalog*(indexJson: string): int =
   ##
   ## This is what makes lazy loading possible: the frame can list, schedule
   ## and switch scenes knowing only this, and pays for a scene's nodes and
-  ## JavaScript only while it is the active one.
+  ## JavaScript only while it is the active one. A new list may hold a changed
+  ## layout: the one kept between switches goes.
+  dropParkedLayout()
   var parsed: JsonNode
   try:
     parsed = parseJson(indexJson)
@@ -783,43 +783,6 @@ proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
           name: if scenes.hasKey(sceneId): scenes[sceneId].name else: "")
 
 sceneSwitcherListing = switcherListing
-
-# A small picture of each scene for the scene switcher, kept on flash and
-# refreshed at most hourly (components/frameos_nim/fos_scene_thumb.c;
-# docs/scene-switcher.md).
-# From the canvas before the firmware draws anything over it, so a presence
-# code never reaches one.
-const ThumbCheckEverySeconds = 60.0
-
-var
-  thumbSceneId = ""
-  thumbCheckAt = 0.0
-
-proc noteSceneThumbnail(image: Image) =
-  if host.sceneId.isNone or image.isNil:
-    return
-  let
-    sceneId = host.sceneId.get().string
-    now = epochTime()
-  if isBuiltInScene(sceneId) or (sceneId == thumbSceneId and now < thumbCheckAt):
-    return
-  thumbSceneId = sceneId
-  thumbCheckAt = now + ThumbCheckEverySeconds
-  sceneThumbCapture(sceneId.cstring, image.bufferPointer, image.width.cint, image.height.cint,
-    image.stride.cint, image.bitsPerPixel.cint, now.uint32)
-
-proc embeddedSceneThumbnail(frameConfig: FrameConfig, sceneId: string, width, height: int): Image {.nimcall, gcsafe.} =
-  ## The scene's picture off flash in the tile's shape; nil for none yet or no
-  ## memory to spare (the tile is then its name).
-  {.cast(gcsafe).}:
-    var w, h: cint
-    let data = sceneThumbLoad(sceneId.cstring, width.cint, height.cint, addr w, addr h)
-    if not data.isNil:
-      result = newImage565(w.int, h.int)
-      copyMem(result.pixelAddr(0), data, w.int * h.int * 2)
-      cFree(data)
-
-sceneSwitcherThumbnail = embeddedSceneThumbnail
 
 proc embeddedLayouts(): seq[LayoutEntry] {.nimcall, gcsafe.} =
   {.cast(gcsafe).}:
@@ -1167,5 +1130,4 @@ proc renderCurrentScene*(): Option[Image] =
     log("render returned no image")
     return none(Image)
   lastNextSleep = context.nextSleep
-  noteSceneThumbnail(image)
   some(image)

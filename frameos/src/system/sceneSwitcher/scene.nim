@@ -156,10 +156,14 @@ proc ensureCanvas*(self: FrameScene, context: ExecutionContext) =
 proc permille(v, p: int): int {.inline.} = (v * p + 500) div 1000
 
 proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false, unit = 0): SwitcherGrid =
-  ## The tile grid for `count` scenes on a `width` x `height` canvas: every
-  ## scene on one page while the tiles stay big enough to read, else as many
-  ## per page as fit. Among the grids that hold them all, the one whose
-  ## pictures (at the canvas's own aspect) or name cards come out largest.
+  ## The tile grid for `count` scenes on a `width` x `height` canvas: the
+  ## densest one whose tiles stay big enough to read, whatever the count, so
+  ## a tile is the same size with three scenes as with thirty and fewer
+  ## scenes fill fewer of its slots (the owner's rule, 2026-11-10: tiles that
+  ## grew to fill the page looked odd, and on an ESP32 each picture's pixels
+  ## are what the switcher's render costs). Among grids as dense, the one
+  ## whose pictures (at the canvas's own aspect) or name cards come out
+  ## largest. More scenes than a page holds page.
   ## On a round panel the grid is the square inscribed in the circle that
   ## stays `RoundInset` in from the rim, so no tile has a corner off the glass.
   ## `unit`: what the sizes are a share of (the panel's shorter edge, for a
@@ -190,7 +194,7 @@ proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false, u
     minH = min(clamp(permille(unit, 150), 36, 160), gh)
   var
     best = -1.0
-    bestFits = false
+    bestCapacity = 0
   for cols in 1 .. MaxCols:
     for rows in 1 .. MaxRows:
       let
@@ -199,7 +203,6 @@ proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false, u
       if tw < minW or th < minH:
         continue
       let capacity = cols * rows
-      let fits = capacity >= max(count, 1)
       # A card with a name: as large as it gets, not much taller than wide.
       var quality = float(min(tw, th * 11 div 5) * min(th, tw * 6 div 5))
       when not defined(frameosEmbedded):
@@ -210,12 +213,9 @@ proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false, u
             titleH = clamp(th.float * 0.2, 14, 44)
             pw = min(tw.float * 0.9, max(th.float - titleH, 1) * 0.9 * aspect)
           quality = pw * pw / aspect
-      # A grid that holds them all beats one that pages; among those that
-      # page, the one that holds the most.
-      let score = if fits: quality else: capacity.float
-      if (fits and not bestFits) or (fits == bestFits and score > best):
-        best = score
-        bestFits = fits
+      if capacity > bestCapacity or (capacity == bestCapacity and quality > best):
+        best = quality
+        bestCapacity = capacity
         result.cols = cols
         result.rows = rows
         result.tileW = tw
@@ -436,39 +436,31 @@ proc titleRow(look: TileLook, index, size: int, height = 0): SvgNode =
 proc pictureTile(self: SceneSwitcherScene, tile: SvgNode, look: TileLook, index: int,
     grid: SwitcherGrid, title: string): bool =
   ## A tile's picture and the title under it: the scene's last snapshot,
-  ## where the host keeps one. Without one, its number in the picture's place
-  ## on Linux; false on an ESP32, whose tile is then the name card.
+  ## where the host keeps one, else its number in the picture's place. Linux
+  ## only: an ESP32's tiles are name cards (see `tile`).
   let
     titleH = clamp(permille(grid.tileH, 200), 14, 44)
     pw = max(grid.tileW - 2 * look.border - 2 * look.inner, 1)
     ph = max(grid.tileH - 2 * look.border - 2 * look.inner - titleH, 1)
     size = clamp(min(permille(titleH, 620), permille(grid.tileW, 130)), 10, 28)
   var picture: Image
-  when defined(frameosEmbedded):
+  try:
     picture = sceneSwitcherThumbnail(self.frameConfig, self.entries[index].id, pw, ph)
-    if picture.isNil:
-      return false
-  else:
-    try:
-      picture = sceneSwitcherThumbnail(self.frameConfig, self.entries[index].id, pw, ph)
-    except Exception:
-      picture = nil
+  except Exception:
+    picture = nil
   var c = "shrink-0"
   c.px("rounded", max(look.radius - look.inner, 2))
   c.px("w", pw)
   c.px("h", ph)
-  when defined(frameosEmbedded):
+  if not picture.isNil:
     tile.children.add SvgNode(tag: "img", image: picture, attrs: @[("class", c)])
   else:
-    if not picture.isNil:
-      tile.children.add SvgNode(tag: "img", image: picture, attrs: @[("class", c)])
-    else:
-      # No picture yet (a scene not shown since the card was made).
-      c.add " flex items-center justify-center font-bold"
-      c.add(if not look.paper: " bg-zinc-700" elif look.lit: " border-2 border-white" else: " border-2 border-black")
-      c.px("text", clamp(ph div 3, 12, 64))
-      c.mute(look)
-      tile.children.add el("div", c, txt($(index + 1)))
+    # No picture yet (a scene not shown since the card was made).
+    c.add " flex items-center justify-center font-bold"
+    c.add(if not look.paper: " bg-zinc-700" elif look.lit: " border-2 border-white" else: " border-2 border-black")
+    c.px("text", clamp(ph div 3, 12, 64))
+    c.mute(look)
+    tile.children.add el("div", c, txt($(index + 1)))
   let row = look.titleRow(index, size, titleH)
   row.children.add el("span", if look.paper: "truncate font-bold" else: "truncate", txt(title))
   tile.children.add row
@@ -497,9 +489,13 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: Swit
   var title = self.entries[index].name
   if title.len == 0:
     title = self.entries[index].id
-  if not sceneSwitcherThumbnail.isNil and self.pictureTile(result, look, index, grid, title):
-    return
-  # Names only: the preview keeps no picture of a scene it is not showing.
+  # An ESP32 shows names only: loading, scaling and drawing a picture per tile
+  # made the drawer take seconds to open on a 10" e-paper panel (the owner's
+  # call, 2026-11-10), and writing them cost seconds of flash after renders.
+  # The preview keeps no picture of a scene it is not showing either.
+  when not defined(frameosEmbedded):
+    if not sceneSwitcherThumbnail.isNil and self.pictureTile(result, look, index, grid, title):
+      return
   let size = clamp(min(permille(grid.tileH, 180), permille(grid.tileW, 140)), 12, 40)
   result.children.add look.titleRow(index, size)
   var name = "grow flex items-center justify-center text-center font-bold line-clamp-3"

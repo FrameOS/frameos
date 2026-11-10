@@ -30,9 +30,27 @@ typedef enum {
 /* Mount /state and mark any cached scenes.json for loading. */
 esp_err_t fos_scenes_init(void);
 
-/* Pull scenes from the backend if they changed (sha256 ETag); apply on this
- * task. Call from the render task only. `force` refetches unconditionally. */
+/* Pull scenes from the backend if they changed (sha256 ETag) and take them
+ * (fos_scenes_take_backend_payload). Render task only. `force` refetches
+ * unconditionally. */
 esp_err_t fos_scenes_sync(bool force);
+
+#define FOS_SCENES_ETAG_LEN 80
+/* The backend's scenes when they changed since the etag held (or a sync was
+ * asked for, or `force`): the body, malloc'd for the caller, its etag in
+ * `etag_out`; NULL when unchanged or on an error (logged, in `out_err`). Any
+ * task: the backend link task fetches with it, so the download is off the
+ * render task (fos_client.c). */
+char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size_t etag_len,
+                               esp_err_t *out_err);
+/* A payload fetched with fos_scenes_backend_fetch: into the runtime now, and
+ * onto flash by the scene store's own task (the combined file, then the etag
+ * and the source). Takes `body`. Render task only. */
+esp_err_t fos_scenes_take_backend_payload(char *body, size_t len, const char *etag);
+/* The store task still has a payload to write. A deep sleep and a restart wait
+ * for it (fos_scenes_store_wait: false when `timeout_ms` ran out first). */
+bool fos_scenes_store_busy(void);
+bool fos_scenes_store_wait(uint32_t timeout_ms);
 bool fos_scenes_state_mounted(void);
 
 /* Persist a scenes JSON payload (local push, e.g. POST /api/scenes) and mark

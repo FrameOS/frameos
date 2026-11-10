@@ -28,6 +28,14 @@ bool frameos_nim_reserve_canvas(size_t len);
 /* The reserved block, claiming (or growing) it on demand. NULL on failure. */
 void *frameos_nim_canvas_buffer(size_t len);
 size_t frameos_nim_canvas_reserved(void);
+/* The scene canvas IS this buffer (a sixteen-grey panel's packed picture,
+ * main.c): reserved once, never freed, nothing else reserved for it. */
+void frameos_nim_share_canvas(void *buffer, size_t len);
+bool frameos_nim_canvas_shared(void);
+void *frameos_nim_shared_canvas_buffer(void);
+/* Something other than a render drew over the canvas (the shared panel
+ * buffer lent to a status screen): the next render draws it whole. */
+void frameos_nim_canvas_forget(void);
 /* One-time init: panel dimensions + the backend credentials the runtime's own
  * uploads use. Safe to call when unavailable (returns false). Allocates the
  * Nim heap (PSRAM via malloc). */
@@ -46,9 +54,6 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format);
  * -1 when the last render did not leave one. As frameos_nim_render_alloc,
  * the caller owns `*buf`. */
 int frameos_nim_repack_alloc(uint8_t **buf, size_t *len, int pixel_format);
-/* Writes the scene switcher's newest picture to flash: on the render task,
- * when nobody is waiting for it. */
-void frameos_nim_flush_scene_thumb(void);
 /* Render the current scene into the panel's own buffer — an LCD's back frame
  * buffer (fos_display_render_target), shown afterwards with a buffer switch
  * and no copy. Where the scene canvas can be that buffer (a 565 panel,
@@ -148,6 +153,11 @@ int frameos_nim_load_scene(const char *scene_json);
  * those whose own interval has not come round (frameos/scene_rhythm.nim).
  * Call on the render task, right before the render. */
 void frameos_nim_request_fresh_pass(void);
+/* Someone is tapping (the input hold): a UI's chrome due only because its
+ * time came waits (scene_rhythm.nim rhythmInteractive). Told before a render. */
+void frameos_nim_set_interactive(bool on);
+/* A chrome waited for the tapping to stop: render once. Asking clears it. */
+bool frameos_nim_chrome_owed(void);
 /* Install the service settings the settings poll just fetched
  * (docs/cloud-frames.md, "Service settings"). `json` is the `settings` OBJECT
  * — group → field → value — for the six cloud-owned groups (frameOS, github,

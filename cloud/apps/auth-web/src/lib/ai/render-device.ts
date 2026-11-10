@@ -1,4 +1,4 @@
-import { esp32DeviceLimits, type DeviceLimits } from "frameos-wasm";
+import { esp32CanvasRotation, esp32DeviceLimits, type DeviceLimits } from "frameos-wasm";
 import { frameHardwareIsEsp32 } from "../frames";
 
 // The memory a frame renders its scenes in, so the chat's render_scene runs
@@ -10,13 +10,24 @@ import { frameHardwareIsEsp32 } from "../frames";
 
 /** `pixelFormat`: the frame's panel format (`hardware.pixelFormat`), which
  * decides its canvas — one byte of luma a pixel on a grey panel, 565 on an
- * RGB565 LCD (esp32CanvasBytesPerPixel). Null when the frame does not say. */
-export type RenderDevice = { label: string; psramBytes: number; pixelFormat?: number | null };
+ * RGB565 LCD (esp32CanvasBytesPerPixel). Null when the frame does not say.
+ * `rotate`: the rotation the frame reports (`hardware.rotate`) where its
+ * firmware may draw in the panel buffer (esp32CanvasRotation); null keeps a
+ * canvas and a panel buffer apart. */
+export type RenderDevice = {
+  label: string;
+  psramBytes: number;
+  pixelFormat?: number | null;
+  rotate?: number | null;
+};
 
 /** What the 8 MB boards report; the tightest FrameOS renders on. */
 const defaultEsp32PsramBytes = 8 * 1024 * 1024;
 
-export function frameRenderDevice(frame: { hardware: unknown }): RenderDevice | null {
+export function frameRenderDevice(frame: {
+  hardware: unknown;
+  frameosVersion?: string | null;
+}): RenderDevice | null {
   if (!frameHardwareIsEsp32(frame)) {
     return null;
   }
@@ -28,10 +39,11 @@ export function frameRenderDevice(frame: { hardware: unknown }): RenderDevice | 
   if (psramBytes <= 0) {
     return null;
   }
-  const reportedFormat = (frame.hardware as { pixelFormat?: unknown } | null)?.pixelFormat;
-  const pixelFormat = typeof reportedFormat === "number" ? reportedFormat : null;
+  const panel = frame.hardware as { pixelFormat?: unknown; rotate?: unknown } | null;
+  const pixelFormat = typeof panel?.pixelFormat === "number" ? panel.pixelFormat : null;
+  const rotate = esp32CanvasRotation(panel?.rotate, frame.frameosVersion);
   const megabytes = Math.round((psramBytes / (1024 * 1024)) * 10) / 10;
-  return { label: `ESP32 with ${megabytes} MB PSRAM`, psramBytes, pixelFormat };
+  return { label: `ESP32 with ${megabytes} MB PSRAM`, psramBytes, pixelFormat, rotate };
 }
 
 /** The ceiling a render at this size runs under: on an ESP32 the canvas
@@ -41,5 +53,5 @@ export function renderDeviceLimits(
   width: number,
   height: number,
 ): DeviceLimits {
-  return esp32DeviceLimits(width, height, device.psramBytes, device.pixelFormat ?? null);
+  return esp32DeviceLimits(width, height, device.psramBytes, device.pixelFormat ?? null, device.rotate ?? null);
 }

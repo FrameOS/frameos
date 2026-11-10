@@ -89,10 +89,14 @@ proc preview(name: string, image: Image) =
 
 sceneSwitcherListing = testListing
 
-block the_grid_holds_every_scene_while_the_tiles_stay_readable:
+block the_tiles_keep_one_size_whatever_the_count:
   let few = switcherGrid(5, 800, 480, thumbnails = true)
   doAssert few.pages == 1 and few.perPage >= 5, $few
-  doAssert few.cols == 3 and few.rows == 2, "a landscape frame: three across, two down " & $few
+  for count in [1, 2, 12, 24, 40]:
+    let other = switcherGrid(count, 800, 480, thumbnails = true)
+    doAssert (other.cols, other.rows, other.tileW, other.tileH) == (few.cols, few.rows, few.tileW, few.tileH),
+      "the same tiles for " & $count & " scenes as for 5: " & $other & " vs " & $few
+  doAssert few.cols == 6 and few.rows == 4, "as dense as stays readable, six by four on 800x480: " & $few
   let many = switcherGrid(20, 480, 480, thumbnails = false)
   doAssert many.perPage >= 9, $many
   doAssert many.tileW >= 96 and many.tileH >= 72, "names stay readable on a 4\" square " & $many

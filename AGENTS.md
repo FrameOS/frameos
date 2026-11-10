@@ -451,7 +451,10 @@
   nothing packed, the blit a buffer switch); a sixteen-grey panel draws in
   pixie's `pfGray4`, half a byte a pixel in the panel buffer's own layout, every
   store dithered through the 4x4 ordered matrix (a new row copy in pixie uses
-  `copyPixelRow`, and never copies a row down into a dithered gradient), and any
+  `copyPixelRow`, and never copies a row down into a dithered gradient) and,
+  unrotated on the ESP32, in the reserved panel buffer itself
+  (`frameos_nim_share_canvas`: a new borrower of `fos_framebuffer_acquire`
+  draws over the canvas and is counted for it), and any
   other grey or black-and-white panel in pixie's luma surface. The canvas rule has five copies
   (`frameos_display.h` lists them, `docs/device-limits-fixtures.json` pins
   two): change them together. A Pi with a 16 bpp RGB565 framebuffer (a
@@ -496,7 +499,23 @@
   While someone taps, slow chores wait (`input_hold_on()` in `fos_client.c`, the
   rule in `fos_animation.c`): the render task drains the touch queue, so a new
   network call or flash write on it goes behind the hold too, and a full refresh
-  that only clears ghosts waits for the idle frame.
+  that only clears ghosts waits for the idle frame. Better still, a chore leaves
+  the render task: scene state is written by `scene_state_writer_task`
+  (`main.c`), a frame that stays awake does its backend round trips (logs,
+  picture push, pulls) on `backend_link_task` in `fos_client.c`, which applies
+  nothing: a new pull hands its result to the render task the same way (and
+  `link_hand_back` runs it before a deep sleep); a backend scene set is
+  downloaded there, parsed on the render task and written by the scene
+  store's own task (`store_task` in `fos_scenes.c`, paced around renders and
+  taps: a flash write stalls both cores), and an
+  e-paper driver starts its refresh and waits for it only before
+  the panel's next use (`finish_waveforms`, `EPD_3in97_WaitPending`). A full
+  refresh of any other SPI panel runs on the display's own task
+  (`refresh_task` in `frameos_display.c`, the picture copied, the newest one
+  next, `fos_refresh_queue.c`): a new panel entry point calls `refresh_wait`
+  first (`test_esp32_refresh_queue.py` reads every bus taker for it), and a timed
+  render waits while `fos_display_refreshing()`. A touch
+  board runs at 240 MHz like an LCD (`cpu_240` in `main.c`).
 - **A slow scene switch shows the loading mark** (`frameos/loading_mark.nim`,
   one drawing for both runtimes; doc section "A switch that takes a while"):
   after 200 ms without the new scene's first frame, a thread (Pi,

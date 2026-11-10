@@ -164,7 +164,10 @@ fos_pixel_format_t fos_display_panel_format(size_t index);
  * app/utils/device_limits.py, `esp32CanvasBytesPerPixel` in the SPA's
  * utils/deviceLimits.ts and the wasm preview's devices.ts, and
  * `sceneCanvasFormat` in embedded_runtime.nim; keep them in step
- * (docs/device-limits-fixtures.json pins the TS copy and the Python one). */
+ * (docs/device-limits-fixtures.json pins the TS copy and the Python one).
+ * Where the 4-bit canvas is the panel buffer itself (main.c
+ * canvas_is_panel_picture: unturned sixteen greys) both device-limits ports
+ * charge no second buffer (`esp32CanvasIsPanelBuffer`). */
 #define FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE 2u
 /* The grey panel formats: 1-bit black and white, 2- and 4-bit grey. */
 bool fos_pixel_format_is_grey(fos_pixel_format_t format);
@@ -185,9 +188,14 @@ size_t fos_display_render_psram_bytes(void);
  * ESP_ERR_INVALID_STATE when the panel is an I2C one or the bus is already up
  * without that MISO (a restart fixes the second). */
 esp_err_t fos_display_spi_bus_share(int miso_pin, int *host);
-/* Full update: init panel, push buffer, refresh, put panel to deep sleep.
- * Blocks for the refresh (seconds on e-ink). */
+/* Full update: init panel, push buffer, refresh, put panel to deep sleep. On
+ * an SPI panel with no partial waveform the buffer is copied and a task of the
+ * display's own runs all that, so the caller does not wait out the refresh
+ * (tens of seconds on a color panel); a picture asked for meanwhile waits as
+ * the next. Anything else blocks for the refresh. */
 esp_err_t fos_display_blit(const uint8_t *buf, size_t len);
+/* A picture handed to the display's own task is still on its way. */
+bool fos_display_refreshing(void);
 /* The panel has a partial waveform (fos_partial_refresh.h). */
 bool fos_display_supports_partial(void);
 /* fos_display_blit, or a partial update of the pixels that changed where

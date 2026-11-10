@@ -642,6 +642,103 @@ proc fetchImageColorProfile(node: JsonNode): Option[AssetColorProfile] =
   except CatchableError:
     none(AssetColorProfile)
 
+proc keptDecodeSize*(wantWidth, wantHeight, sourceWidth, sourceHeight: int,
+    fit: ScaledDecodeFit): tuple[width, height: int] =
+  ## The shape an app asked for at the source's own resolution, when that is
+  ## less than the size asked: a kept picture's first step down when there
+  ## is no room for the size asked (keptPictureTarget). It loses nothing of
+  ## the photo, only the enlargement, which the draw then does on every
+  ## render instead (a gallery's 1024x653 photo in a reTerminal E1003's
+  ## 1848x1179 window: 334 KB instead of 1.09 MB). An unknown source size
+  ## (0) keeps the request.
+  result = (wantWidth, wantHeight)
+  if sourceWidth <= 0 or sourceHeight <= 0 or wantWidth <= 0 or wantHeight <= 0:
+    return
+  case fit
+  of fitCover, fitContain:
+    # The source's scale into the box: the larger of the two axis ratios for
+    # cover, the smaller for contain; past 1 it is an enlargement.
+    let widthBinds = (wantWidth.int64 * sourceHeight.int64 >=
+      wantHeight.int64 * sourceWidth.int64) == (fit == fitCover)
+    if widthBinds:
+      if wantWidth > sourceWidth:
+        result = (sourceWidth,
+          max(1, (wantHeight.int64 * sourceWidth.int64 div wantWidth.int64).int))
+    elif wantHeight > sourceHeight:
+      result = (max(1, (wantWidth.int64 * sourceHeight.int64 div wantHeight.int64).int),
+        sourceHeight)
+  of fitStretch:
+    result = (min(wantWidth, sourceWidth), min(wantHeight, sourceHeight))
+  else:
+    discard # center and the anchored fits place the source 1:1
+
+proc keptPictureBytes(like: Image, width, height: int): int =
+  let pixels = width.int64 * height.int64
+  int(
+    if like.isNil: pixels * 4
+    else:
+      case like.format
+      of pfRgbx: pixels * 4
+      of pfRgb565: pixels * 2
+      of pfGray8: pixels
+      of pfGray4: ((width.int64 + 1) div 2) * height.int64)
+
+proc keptPictureTarget(runtime: JsAppRuntime, owner: AppRoot, like: Image,
+    width, height: int, atSource: tuple[width, height: int]): Image =
+  ## A kept picture's image, in the canvas's format, when there is room for
+  ## it beside the render's reserve (utils/memory): at the size asked, which
+  ## the draw copies (scaling it on every render took the E1003 40 s); short
+  ## of room the app's older kept pictures go first (a ref to one then draws
+  ## nothing, and an app fetches it again), then the photo's own resolution
+  ## (`atSource`) is tried when that is more than half the size asked; nil
+  ## when nothing fits, and the app is told. Not smaller: blown up more than
+  ## twice it is soft, and pixie's general draw (a turned picture; an `<img>`
+  ## goes through drawResampled, which copies nothing) doubles it first in a
+  ## full-colour copy of its own (a 511x326 photo in the E1003's window asked
+  ## for 2.67 MB). The allocation itself must not fail: on an
+  ## ESP32 a failed one aborts the render and leaks what it held, and two in
+  ## a row restart the firmware (Gallery on a reTerminal E1003, two kept
+  ## 1.09 MB photos and a third on its way, 2026-11-10).
+  var sizes = @[(width, height)]
+  if atSource.width * atSource.height < width * height and
+      atSource.width * 2 > width and atSource.height * 2 > height:
+    sizes.add atSource
+  var dropped = 0
+  for step, (w, h) in sizes:
+    while true:
+      let
+        bytes = keptPictureBytes(like, w, h)
+        contiguous = availableRenderBytes()
+      # 0: unknown, as on a host without the numbers.
+      if contiguous <= 0 or (bytes <= contiguous and bytes <= availableRenderHeadroomBytes()):
+        if dropped > 0 or step > 0:
+          frameos_apps.log(owner, %*{"event": "js:keptImages", "dropped": dropped,
+            "reason": "no room", "width": w, "height": h, "askedWidth": width,
+            "askedHeight": height})
+        result = if like.isNil: newImage(w, h) else: newImageLike(like, w, h)
+        if not like.isNil:
+          result.ditherStores = like.ditherStores # as a decode into the canvas
+        return
+      if runtime.keptImageIds.len == 0:
+        break
+      runtime.images.del(runtime.keptImageIds[0])
+      runtime.keptImageIds.delete(0)
+      inc dropped
+  frameos_apps.log(owner, %*{"event": "js:keptImages", "refused": "no room",
+    "width": width, "height": height, "dropped": dropped,
+    "contiguousBytes": availableRenderBytes(), "headroomBytes": availableRenderHeadroomBytes()})
+  nil
+
+proc keptTargetFor*(runtime: JsAppRuntime, owner: AppRoot, like: Image,
+    width, height: int, fit: ScaledDecodeFit): DecodeTargetProc =
+  ## What a kept picture of `width` x `height` decodes into, once the start
+  ## of the download says the photo's own size (utils/image.nim
+  ## downloadImageWithDataSizedBy): keptPictureTarget at the size asked, or
+  ## at the photo's own resolution when there is no room for that.
+  result = proc(sourceWidth, sourceHeight: int): Image =
+    runtime.keptPictureTarget(owner, like, width, height,
+      keptDecodeSize(width, height, sourceWidth, sourceHeight, fit))
+
 proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## Downloads and decodes an image natively, so the bytes never enter the JS
   ## heap: a JS app gets back an image reference it returns as its output,
@@ -683,8 +780,11 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
   ## MaxKeptImages at most. A kept picture is the app's own image, never the
   ## consumer's target: `width` / `height` (and `fit`, cover or contain) say
   ## the size to decode it at, in the canvas's pixel format, so an ESP32
-  ## holds a 480x480 photo in 450 KB of RGB565; without them it decodes at
-  ## its own size.
+  ## holds a 480x480 photo in 450 KB of RGB565. Short of memory the app's
+  ## older kept pictures go, then the picture is decoded smaller (first at
+  ## the photo's own resolution, if that is less), and with no room at all
+  ## the call answers an error (keptPictureTarget). Without them it decodes
+  ## at its own size.
   let e = env(ctx)
   var response = %*{"image": newJNull()}
   if e == nil:
@@ -732,17 +832,16 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
         keepHeight = options{"height"}.getInt(0)
       if keepWidth > 0 and keepHeight > 0:
         # The canvas's format where one is about (RGB565 on an LCD), so
-        # drawing the picture later is a copy.
-        let like =
-          if not context.isNil and not context.decodeTargetImage.isNil: context.decodeTargetImage
-          else: context.contextImage()
-        let target =
-          if like.isNil: newImage(keepWidth, keepHeight)
-          else: newImageLike(like, keepWidth, keepHeight)
-        if not like.isNil:
-          target.ditherStores = like.ditherStores # as a decode into the canvas
-        downloaded = downloadImageWithDataInto(urlStr, target, maxBytes = maxBytes,
-          headers = headers, fit = scaledDecodeFit(options{"fit"}.getStr("cover")))
+        # drawing the picture later is a copy; only when there is room, and
+        # smaller when there is not (keptPictureTarget).
+        let
+          like =
+            if not context.isNil and not context.decodeTargetImage.isNil: context.decodeTargetImage
+            else: context.contextImage()
+          fit = scaledDecodeFit(options{"fit"}.getStr("cover"))
+        downloaded = downloadImageWithDataSizedBy(urlStr,
+          e.runtime.keptTargetFor(owner, like, keepWidth, keepHeight, fit), keepWidth, keepHeight,
+          maxBytes = maxBytes, headers = headers, fit = fit)
       else:
         downloaded = downloadImageWithData(urlStr, maxBytes = maxBytes, headers = headers)
     elif offeredWidth > 0 and offeredHeight > 0 and

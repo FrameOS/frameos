@@ -1,5 +1,5 @@
 {
-  "description": "esp32DeviceLimits (frameos/wasm/src/devices.ts, its copy frontend/src/utils/deviceLimits.ts) and esp32_device_limits (backend/app/utils/device_limits.py): the wasm renderer ceiling for an ESP32 frame. `pixelFormat` (fos_pixel_format_t, default unknown): the panel's format, which decides its canvas \u2014 half a byte on a sixteen-grey panel (8), one byte of luma on another grey or black-and-white panel (1, 4) and RGB565 on an RGB565 LCD (9) whatever the PSRAM, RGBX while two of it fit PSRAM on any other. `canvasBytesPerPixel` is that canvas, which the wasm runtime draws in while it runs as the ESP32 (src/wasm/wasm_main.nim previewCanvas). Replayed by cloud/apps/auth-web/src/lib/device-limits.test.ts and backend/app/utils/tests/test_device_limits.py.",
+  "description": "esp32DeviceLimits (frameos/wasm/src/devices.ts, its copy frontend/src/utils/deviceLimits.ts) and esp32_device_limits (backend/app/utils/device_limits.py): the wasm renderer ceiling for an ESP32 frame. `pixelFormat` (fos_pixel_format_t, default unknown): the panel's format, which decides its canvas \u2014 half a byte on a sixteen-grey panel (8), one byte of luma on another grey or black-and-white panel (1, 4) and RGB565 on an RGB565 LCD (9) whatever the PSRAM, RGBX while two of it fit PSRAM on any other. `canvasBytesPerPixel` is that canvas, which the wasm runtime draws in while it runs as the ESP32 (src/wasm/wasm_main.nim previewCanvas). `rotate` (default unknown): the frame's rotation, given only where its firmware draws a sixteen-grey scene in the panel buffer (`canvasRotation`: from ESP32_SHARED_CANVAS_FIRMWARE); at 0 on a sixteen-grey panel the canvas IS the panel buffer (the firmware's main.c canvas_is_panel_picture) and no separate packed buffer is charged. Replayed by cloud/apps/auth-web/src/lib/device-limits.test.ts and backend/app/utils/tests/test_device_limits.py.",
   "cases": [
     {
       "name": "7.3 inch on an 8 MB board: RGBX canvas",
@@ -30,11 +30,33 @@
       "canvasBytesPerPixel": 2
     },
     {
-      "name": "10.3 inch sixteen greys on an 8 MB board (the E1003): 4-bit canvas",
+      "name": "10.3 inch sixteen greys on an 8 MB board (the E1003), rotation not known: 4-bit canvas and a panel buffer",
       "width": 1872,
       "height": 1404,
       "psramBytes": 8388608,
       "pixelFormat": 8,
+      "memoryBytes": 15224896,
+      "previewOverheadBytes": 9199008,
+      "canvasBytesPerPixel": 0.5
+    },
+    {
+      "name": "the E1003 unturned on firmware that shares: the panel buffer is the 4-bit canvas",
+      "width": 1872,
+      "height": 1404,
+      "psramBytes": 8388608,
+      "pixelFormat": 8,
+      "rotate": 0,
+      "memoryBytes": 16539040,
+      "previewOverheadBytes": 9199008,
+      "canvasBytesPerPixel": 0.5
+    },
+    {
+      "name": "the E1003 turned 90 degrees: a turned pack, so a canvas and a panel buffer",
+      "width": 1872,
+      "height": 1404,
+      "psramBytes": 8388608,
+      "pixelFormat": 8,
+      "rotate": 90,
       "memoryBytes": 15224896,
       "previewOverheadBytes": 9199008,
       "canvasBytesPerPixel": 0.5
@@ -75,6 +97,73 @@
       "memoryBytes": 5957632,
       "previewOverheadBytes": 460800,
       "canvasBytesPerPixel": 2
+    },
+    {
+      "name": "7.5 inch black and white unturned: a luma canvas is never the panel buffer",
+      "width": 800,
+      "height": 480,
+      "psramBytes": 8388608,
+      "pixelFormat": 1,
+      "rotate": 0,
+      "memoryBytes": 8300032,
+      "previewOverheadBytes": 1152000,
+      "canvasBytesPerPixel": 1
+    },
+    {
+      "name": "the SenseCAP Indicator's LCD unturned: its frame buffers are charged as before",
+      "width": 480,
+      "height": 480,
+      "psramBytes": 8388608,
+      "pixelFormat": 9,
+      "rotate": 0,
+      "memoryBytes": 5957632,
+      "previewOverheadBytes": 460800,
+      "canvasBytesPerPixel": 2
     }
-  ]
+  ],
+  "canvasRotation": {
+    "description": "esp32CanvasRotation / esp32_canvas_rotation: the rotation the limits are given for a frame reporting `rotate` and running `firmwareVersion`; null (two buffers, the safe direction) on firmware older than ESP32_SHARED_CANVAS_FIRMWARE or one that does not say.",
+    "cases": [
+      {
+        "rotate": 0,
+        "firmwareVersion": "2026.11.6",
+        "expected": 0
+      },
+      {
+        "rotate": 0,
+        "firmwareVersion": "v2026.11.6+9dfcb6e1",
+        "expected": 0
+      },
+      {
+        "rotate": 90,
+        "firmwareVersion": "2026.12.1",
+        "expected": 90
+      },
+      {
+        "rotate": 0,
+        "firmwareVersion": "2026.11.5",
+        "expected": null
+      },
+      {
+        "rotate": 0,
+        "firmwareVersion": "2026.11",
+        "expected": null
+      },
+      {
+        "rotate": 0,
+        "firmwareVersion": "dev",
+        "expected": null
+      },
+      {
+        "rotate": 0,
+        "firmwareVersion": null,
+        "expected": null
+      },
+      {
+        "rotate": null,
+        "firmwareVersion": "2026.11.6",
+        "expected": null
+      }
+    ]
+  }
 }

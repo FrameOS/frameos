@@ -56,6 +56,51 @@ def test_panel_table_entry_matches_the_driver():
     assert "EPD_10in3" not in EMBEDDED_UNSUPPORTED_PANELS
 
 
+def _functions(text: str) -> dict[str, str]:
+    """Every C function definition in `text`, by name, with its body."""
+    bodies: dict[str, str] = {}
+    for match in re.finditer(r"^[a-z][^;{}\n]*\b(\w+)\(([^;{}]*)\)\s*\{", text, re.MULTILINE):
+        depth = 0
+        for index in range(match.end() - 1, len(text)):
+            if text[index] == "{":
+                depth += 1
+            elif text[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    bodies[match.group(1)] = text[match.end() - 1 : index + 1]
+                    break
+    return bodies
+
+
+def test_a_started_waveform_is_waited_for_before_the_next_use():
+    """A refresh is started and left running (s_waveform_pending): the render
+    task handles taps and draws the next frame meanwhile, 0.85 s of each of
+    the E1003's scene switches. The waveform reads the controller's image
+    buffer and standby cuts it short, so every entry point that loads a
+    rectangle, starts a waveform or sends the controller to standby waits for
+    it first (finish_waveforms). One that forgets tears the picture."""
+    text = SOURCE.read_text()
+    functions = _functions(text[text.index("#ifdef ESP_PLATFORM") :])
+    assert "finish_waveforms" in functions
+    touches = ("load_rect(", "start_waveform(", "CMD_STANDBY")
+    checked = []
+    for name, body in functions.items():
+        if not name.startswith("fos_it8951_10in3_"):
+            continue
+        uses = [body.find(touch) for touch in touches if body.find(touch) >= 0]
+        if not uses:
+            continue
+        checked.append(name)
+        finish = body.find("finish_waveforms()")
+        assert 0 <= finish < min(uses), f"it8951.c: {name} uses the controller before the last waveform finished"
+    assert {"fos_it8951_10in3_display", "fos_it8951_10in3_partial_show", "fos_it8951_10in3_clean",
+            "fos_it8951_10in3_rest", "fos_it8951_10in3_sleep", "fos_it8951_10in3_clear"} <= set(checked)
+    # The two passes that start one leave it pending rather than waiting.
+    for name in ("fos_it8951_10in3_display", "fos_it8951_10in3_partial_show", "fos_it8951_10in3_clean"):
+        assert "s_waveform_pending = true" in functions[name], f"it8951.c: {name} no longer leaves its waveform running"
+        assert "wait_waveforms()" not in functions[name], f"it8951.c: {name} waits for its own waveform again"
+
+
 @pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler on PATH")
 def test_fos_it8951_host_tests_pass(tmp_path: Path):
     binary = tmp_path / "test_fos_it8951"

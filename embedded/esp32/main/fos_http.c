@@ -1148,6 +1148,9 @@ static void preview_bmp_row(const uint8_t *packed, int width, int height,
     }
 }
 
+/* A snapshot this size or smaller is copied out before it streams. */
+#define PREVIEW_COPY_MAX_BYTES (256u * 1024u)
+
 esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
                                       uint32_t lock_timeout_ms,
                                       char *scene_id, size_t scene_id_len)
@@ -1166,20 +1169,23 @@ esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
                                      &packed_len)) {
         return ESP_ERR_TIMEOUT;
     }
-    /* An LCD's snapshot is the frame buffer the panel scans, and the frames
-     * after it are drawn into the other one in turn: copy it out and let go,
-     * or a slow socket holds the next frame back for as long as it streams.
-     * (On e-paper the next render is minutes away; the stream keeps the lock
-     * and spares the PSRAM.) */
+    /* The snapshot is a buffer the next render draws in: an LCD's frame
+     * buffer, an e-paper panel's packed picture (on a sixteen-grey one the
+     * canvas itself). Holding it for as long as a slow socket streams held
+     * that render back: a one-second clock on a reTerminal Sticky waited 1.3
+     * to 4.3 s for the picture push (2026-11-10). Copied out and let go where
+     * the copy is cheap; otherwise held one row at a time, and a render that
+     * took the buffer back meanwhile ends the stream (the push tries again). */
     uint8_t *own = NULL;
-    if (fos_display_is_lcd()) {
+    if (fos_display_is_lcd() || packed_len <= PREVIEW_COPY_MAX_BYTES) {
         own = fos_big_malloc(packed_len);
         if (own) {
             memcpy(own, packed, packed_len);
-            fos_client_snapshot_release();
             packed = own;
         }
     }
+    const uint32_t taken = fos_client_snapshot_render_count_locked();
+    fos_client_snapshot_release();
 
     /* The packed snapshot is in PANEL orientation (the packers rotate while
      * packing); previews are served in SCENE orientation like the Pi's, so
@@ -1198,8 +1204,7 @@ esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
     size_t pixel_bytes = row_stride * (size_t)out_height;
     size_t palette_bytes = palette_entries * 4u;
     if (pixel_bytes > UINT32_MAX - 54u - palette_bytes) {
-        if (own) free(own);
-        else fos_client_snapshot_release();
+        free(own);
         return ESP_ERR_INVALID_SIZE;
     }
     size_t bmp_len = 54u + palette_bytes + pixel_bytes;
@@ -1236,20 +1241,38 @@ esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
 
     uint8_t *row = malloc(row_stride);
     if (!row) {
-        if (own) free(own);
-        else fos_client_snapshot_release();
+        free(own);
         return ESP_ERR_NO_MEM;
     }
     if (sink->begin) sink->begin(ctx, bmp_len);
     bool ok = sink->write(ctx, header, 54u + palette_bytes);
     for (int y = out_height - 1; ok && y >= 0; y--) {
-        preview_bmp_row(packed, width, height, format, rotate, out_width, out_height, y,
-                        bit_count, row, row_stride);
+        if (own) {
+            preview_bmp_row(packed, width, height, format, rotate, out_width, out_height, y,
+                            bit_count, row, row_stride);
+        } else {
+            const uint8_t *now = NULL;
+            size_t now_len = 0;
+            if (!fos_client_snapshot_acquire(lock_timeout_ms, &now, NULL, NULL, NULL, &now_len)) {
+                ok = false;
+                break;
+            }
+            bool same = now == packed && now_len == packed_len &&
+                        fos_client_snapshot_render_count_locked() == taken;
+            if (same) {
+                preview_bmp_row(packed, width, height, format, rotate, out_width, out_height, y,
+                                bit_count, row, row_stride);
+            }
+            fos_client_snapshot_release();
+            if (!same) {
+                ok = false;
+                break;
+            }
+        }
         ok = sink->write(ctx, row, row_stride);
     }
     free(row);
-    if (own) free(own);
-    else fos_client_snapshot_release();
+    free(own);
     return ok ? ESP_OK : ESP_FAIL;
 }
 

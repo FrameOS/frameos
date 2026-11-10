@@ -26,6 +26,9 @@ void fos_client_render_recovery_boot(void);
 bool fos_client_render_paused(void);
 void fos_client_clear_render_pause(void);
 void fos_client_render_now(void);
+/* Someone is tapping or pressing (the input hold, fos_animation.h): slow
+ * chores on any task wait. */
+bool fos_client_input_held(void);
 /* Render now because somebody asked (a render verb, the console, a button,
  * the schedule): unlike fos_client_render_now, the scenes inside a split all
  * run, also those whose own interval has not come round. */
@@ -95,6 +98,9 @@ esp_err_t fos_client_snapshot_copy(uint8_t *out, size_t out_len, int *width, int
 bool fos_client_snapshot_acquire(uint32_t timeout_ms, const uint8_t **buf, int *width,
                                  int *height, fos_pixel_format_t *format, size_t *len);
 void fos_client_snapshot_release(void);
+/* Which render the snapshot is, between acquire and release: a stream that
+ * lets go between rows checks it is still reading the same picture. */
+uint32_t fos_client_snapshot_render_count_locked(void);
 /* True while a render is still owed: this boot's first pass has not finished,
  * or a render signal is queued. An image_get arriving now waits for it
  * instead of answering "no image" seconds before there is one. */

@@ -93,6 +93,13 @@ type
     ringRows: int           ## rows the ring holds; 0 = the whole channel
     rowsDone: int           ## channel rows finished, counted from the top
     ringNeedFrom: int       ## the lowest channel row the sink still needs
+    # Where each position along a target line samples this channel: the
+    # column and the weight toward the next one (prepareLines). A line reads
+    # one grid row, so the row half is worked out once per line and the
+    # column half once per decode.
+    lineColumn: seq[int32]
+    lineWeight: seq[int32]
+    lineDen: int32
 
   JpegSourceProc* = ImageSourceProc
     ## Pull callback for streaming decodes: fill `dst` with up to `maxBytes`
@@ -2186,32 +2193,6 @@ proc channelAxis(
     let nearest = min((gridCoord * sampleSize) div gridSize, sampleSize - 1)
     (nearest, nearest, 0, 1)
 
-proc channelAt(
-  component: Component,
-  sourceX, sourceY, sourceWidth, sourceHeight: int
-): uint8 {.inline.} =
-  let
-    sampleWidth =
-      if component.sampleWidth > 0: component.sampleWidth
-      else: component.width
-    sampleHeight =
-      if component.sampleHeight > 0: component.sampleHeight
-      else: component.height
-    ax = channelAxis(sourceX, sourceWidth, sampleWidth, component.width)
-    ay = channelAxis(sourceY, sourceHeight, sampleHeight, component.height)
-  if ax.frac == 0 and ay.frac == 0:
-    return component.channel.data[component.channelIndex(ax.lo, ay.lo)]
-  let
-    c00 = component.channel.data[component.channelIndex(ax.lo, ay.lo)].int
-    c10 = component.channel.data[component.channelIndex(ax.hi, ay.lo)].int
-    c01 = component.channel.data[component.channelIndex(ax.lo, ay.hi)].int
-    c11 = component.channel.data[component.channelIndex(ax.hi, ay.hi)].int
-    top = c00 * (ax.den - ax.frac) + c10 * ax.frac
-    bottom = c01 * (ax.den - ax.frac) + c11 * ax.frac
-    total = top * (ay.den - ay.frac) + bottom * ay.frac
-    area = ax.den * ay.den
-  ((total + area div 2) div area).uint8
-
 proc scaledFitRects(
   state: DecoderState, targetWidth, targetHeight: int
 ): tuple[srcX, srcY, srcW, srcH, dstX, dstY, dstW, dstH: int] =
@@ -2302,32 +2283,171 @@ template orientedXFor(g: FillGeometry, x: int): int =
     g.effWidth - 1
   )
 
-proc samplePixel(
-  state: DecoderState, g: FillGeometry, orientedX, orientedY: int
-): ColorRGBX {.inline.} =
-  let source = state.sourceCoords(orientedX, orientedY, g.gridWidth, g.gridHeight)
-  if state.components.len == 3:
-    yCbCrToRgbx(
-      state.components[0].channelAt(source.x, source.y, g.gridWidth, g.gridHeight),
-      state.components[1].channelAt(source.x, source.y, g.gridWidth, g.gridHeight),
-      state.components[2].channelAt(source.x, source.y, g.gridWidth, g.gridHeight)
-    )
-  else:
-    grayScaleToRgbx(
-      state.components[0].channelAt(source.x, source.y, g.gridWidth, g.gridHeight)
-    )
+when defined(frameosEmbedded):
+  # The firmware is built for size; this loop is where a decode into a
+  # target spends its time.
+  {.pragma: jpegHotLoop, codegenDecl: "__attribute__((optimize(\"O2\"))) $# $#$#".}
+else:
+  {.pragma: jpegHotLoop.}
+
+proc prepareLines(state: var DecoderState, g: FillGeometry) =
+  ## The column half of every sample a target line takes, per component: a
+  ## target position maps through the fit (orientedXFor / orientedYFor) and
+  ## the EXIF orientation (sourceCoords) onto a grid column, and channelAxis
+  ## says which channel column (and how far toward the next) that is. Once
+  ## per decode instead of once per pixel. A line is a target row, or a
+  ## target column when the orientation transposes; along it only the grid
+  ## column changes.
+  let lineLen = max(0, if g.transposed: g.rects.dstH else: g.rects.dstW)
+  for c in 0 ..< state.components.len:
+    let
+      width = state.components[c].width
+      sampleWidth =
+        if state.components[c].sampleWidth > 0: state.components[c].sampleWidth
+        else: width
+    state.components[c].lineColumn.setLen(lineLen)
+    state.components[c].lineWeight.setLen(lineLen)
+    state.components[c].lineDen = 1
+    for i in 0 ..< lineLen:
+      let gridColumn =
+        if g.transposed:
+          state.sourceCoords(0, g.orientedYFor(g.rects.dstY + i),
+            g.gridWidth, g.gridHeight).x
+        else:
+          state.sourceCoords(g.orientedXFor(g.rects.dstX + i), 0,
+            g.gridWidth, g.gridHeight).x
+      let ax = channelAxis(gridColumn, g.gridWidth, sampleWidth, width)
+      state.components[c].lineColumn[i] = ax.lo.int32
+      state.components[c].lineWeight[i] = ax.frac.int32
+      state.components[c].lineDen = ax.den.int32
+
+proc drawLineInto(state: var DecoderState, target: Image, g: FillGeometry,
+    line: int) {.jpegHotLoop.} =
+  ## One target line. Each channel gives the nearest sample, or a bilinear
+  ## mix where channelAxis interpolates (a box-downsampled channel); the
+  ## work that does not change along a line is out of the loop: the grid
+  ## row and each channel's row once, the columns from prepareLines, the
+  ## store per format with no call in between. Done per pixel through a
+  ## chain of calls and divisions, this was 11 us a pixel on an ESP32, 24.5 s
+  ## of a 30.8 s decode into a reTerminal E1003's 1848x1179 window
+  ## (2026-11-10).
+  let lineLen = if g.transposed: g.rects.dstH else: g.rects.dstW
+  if lineLen <= 0:
+    return
+  let
+    gridRow =
+      if g.transposed:
+        state.sourceCoords(g.orientedXFor(line), 0, g.gridWidth, g.gridHeight).y
+      else:
+        state.sourceCoords(0, g.orientedYFor(line), g.gridWidth, g.gridHeight).y
+    count = state.components.len
+  var
+    data: array[3, ptr UncheckedArray[uint8]]
+    column: array[3, ptr UncheckedArray[int32]]
+    weight: array[3, ptr UncheckedArray[int32]]
+    rowLo, rowHi: array[3, int]
+    dx, fy, dy: array[3, uint32]
+    wide: array[3, bool]
+  for c in 0 ..< count:
+    let
+      comp = addr state.components[c]
+      sampleHeight = if comp.sampleHeight > 0: comp.sampleHeight else: comp.height
+      ay = channelAxis(gridRow, g.gridHeight, sampleHeight, comp.height)
+    data[c] = cast[ptr UncheckedArray[uint8]](comp.channel.data[0].addr)
+    column[c] = cast[ptr UncheckedArray[int32]](comp.lineColumn[0].addr)
+    weight[c] = cast[ptr UncheckedArray[int32]](comp.lineWeight[0].addr)
+    rowLo[c] = comp.channel.width * comp[].channelRow(ay.lo)
+    rowHi[c] = comp.channel.width * comp[].channelRow(ay.hi)
+    dx[c] = comp.lineDen.uint32
+    fy[c] = ay.frac.uint32
+    dy[c] = ay.den.uint32
+    # 32 bits hold 255 * dx * dy for any panel; a larger interpolated grid
+    # (a host decoding big) takes the 64-bit sum.
+    wide[c] = 255'u64 * dx[c].uint64 * dy[c].uint64 >= (1'u64 shl 32)
+
+  template sample(c: int, i: int): uint8 =
+    let
+      x = column[c][i].int
+      fx = weight[c][i].uint32
+    if fx == 0 and fy[c] == 0:
+      data[c][rowLo[c] + x]
+    else:
+      # channelAt's bilinear step: a zero weight makes the other sample's
+      # index irrelevant, so it stays in range.
+      let
+        hi = if fx > 0: x + 1 else: x
+        c00 = data[c][rowLo[c] + x].uint32
+        c10 = data[c][rowLo[c] + hi].uint32
+        c01 = data[c][rowHi[c] + x].uint32
+        c11 = data[c][rowHi[c] + hi].uint32
+      if wide[c]:
+        let
+          top = c00.uint64 * (dx[c] - fx).uint64 + c10.uint64 * fx.uint64
+          bottom = c01.uint64 * (dx[c] - fx).uint64 + c11.uint64 * fx.uint64
+          total = top * (dy[c] - fy[c]).uint64 + bottom * fy[c].uint64
+          area = dx[c].uint64 * dy[c].uint64
+        ((total + area div 2) div area).uint8
+      else:
+        let
+          top = c00 * (dx[c] - fx) + c10 * fx
+          bottom = c01 * (dx[c] - fx) + c11 * fx
+          total = top * (dy[c] - fy[c]) + bottom * fy[c]
+          area = dx[c] * dy[c]
+        ((total + area div 2) div area).uint8
+
+  template colorAt(i: int): ColorRGBX =
+    if count == 3: yCbCrToRgbx(sample(0, i), sample(1, i), sample(2, i))
+    else: grayScaleToRgbx(sample(0, i))
+
+  # One loop, the format picked per pixel: a branch that always goes the
+  # same way, where a loop per format copied the sampling five times over
+  # (flash is what the ESP32 image is short of).
+  let
+    step = if g.transposed: target.stride else: 1
+    format = target.format
+    dither565 = target.ditherStores
+    pixels = target.data
+    pixels16 = target.data16
+    pixels8 = target.data8
+  var index =
+    if g.transposed: target.dataIndex(line, g.rects.dstY)
+    else: target.dataIndex(g.rects.dstX, line)
+  # storeGray4's ordered dither, keyed on the row and column of the index in
+  # the shared buffer.
+  var
+    row = index div target.stride
+    col = index mod target.stride
+  for i in 0 ..< lineLen:
+    let color = colorAt(i)
+    case format
+    of pfRgbx:
+      pixels[index] = color
+    of pfRgb565:
+      pixels16[index] =
+        if dither565: rgbxToRgb565Dithered(color, index) else: rgbxToRgb565(color)
+    of pfGray8:
+      pixels8[index] = rgbxToGray8(color)
+    of pfGray4:
+      gray4Put(pixels8, index, grayLevel16Ordered(rgbxToGray8(color),
+        OrderedThresholds4x4[(row and 3) * 4 + (col and 3)]))
+    index += step
+    if g.transposed: inc row else: inc col
 
 proc fillImage(state: var DecoderState, result: Image) =
   ## Takes a jpeg image object and fills a target-sized pixie Image from it.
   ## With fitContain, pixels outside the fitted rectangle keep their current
-  ## contents (callers pre-fill the background).
+  ## contents (callers pre-fill the background). Line by line, through the
+  ## sink's own drawing, so a target filled whole and one the sink drew as
+  ## the rows came are the same pixels.
   if state.components.len notin {1, 3}:
     failInvalid()
   let g = state.fillGeometry(result.width, result.height)
-  for y in g.rects.dstY ..< g.rects.dstY + g.rects.dstH:
-    let orientedY = g.orientedYFor(y)
-    for x in g.rects.dstX ..< g.rects.dstX + g.rects.dstW:
-      result.unsafe[x, y] = state.samplePixel(g, g.orientedXFor(x), orientedY)
+  state.prepareLines(g)
+  let
+    first = if g.transposed: g.rects.dstX else: g.rects.dstY
+    count = if g.transposed: g.rects.dstW else: g.rects.dstH
+  for line in first ..< first + count:
+    state.drawLineInto(result, g, line)
 
 # ----------------------------------------------------------------- the sink
 #
@@ -2369,6 +2489,7 @@ proc sinkStart(state: var DecoderState) {.raises: [PixieError].} =
     first = if g.transposed: g.rects.dstX else: g.rects.dstY
     count = if g.transposed: g.rects.dstW else: g.rects.dstH
   state.sinkLinesLeft = count
+  state.prepareLines(g)
   if count > 0 and
       state.gridRowOfLine(first + count - 1) < state.gridRowOfLine(first):
     state.sinkLine = first + count - 1
@@ -2388,16 +2509,8 @@ proc sinkReady(state: DecoderState, gridRow: int): bool =
       return false
   true
 
-proc drawLine(state: DecoderState, line: int) =
-  let g = state.sinkGeometry
-  if g.transposed:
-    let orientedX = g.orientedXFor(line)
-    for y in g.rects.dstY ..< g.rects.dstY + g.rects.dstH:
-      state.sink.unsafe[line, y] = state.samplePixel(g, orientedX, g.orientedYFor(y))
-  else:
-    let orientedY = g.orientedYFor(line)
-    for x in g.rects.dstX ..< g.rects.dstX + g.rects.dstW:
-      state.sink.unsafe[x, line] = state.samplePixel(g, g.orientedXFor(x), orientedY)
+proc drawLine(state: var DecoderState, line: int) =
+  state.drawLineInto(state.sink, state.sinkGeometry, line)
 
 proc sinkDrain(state: var DecoderState) =
   ## Draws every line whose samples are complete.

@@ -6,6 +6,7 @@ import frameos/types
 import frameos/utils/asset_colors
 import frameos/utils/dither
 import frameos/utils/exif
+import frameos/utils/memory
 
 type LogStore = ref object
   items: seq[JsonNode]
@@ -229,6 +230,48 @@ suite "data/localImage app":
     app.appConfig.path = root / "missing"
     app.appConfig.search = ""
     let contextImage = newImage(7, 5)
+    contextImage.fill(rgba(0, 255, 0, 255))
     let emptyFolder = app.get(ExecutionContext(hasImage: true, image: contextImage))
     check emptyFolder.width == 7
     check emptyFolder.height == 5
+    # Off a device the error frame is its own image; the canvas is untouched.
+    check cast[pointer](emptyFolder) != cast[pointer](contextImage)
+    check contextImage[0, 0] == rgba(0, 255, 0, 255)
+
+  test "on a device an empty folder with no target draws its error into the canvas":
+    ## A consumer that pans or zooms the photo (Slideshow with motion) takes
+    ## no decode target. The error frame was then a new RGBX image of the
+    ## window: 8.7 MB on a reTerminal E1003's 1848x1179, an allocation that
+    ## aborted the render (2026-11-10). On a device it is the canvas.
+    setSimulatedEmbedded(true)
+    defer: setSimulatedEmbedded(false)
+    let root = uniqueTempDir("frameos-local-image-empty-device")
+    defer: removeDir(root)
+
+    let logs = LogStore(items: @[])
+    let scene = FrameScene(state: %*{}, logger: newLogger(logs))
+    let app = App(
+      scene: scene,
+      frameConfig: makeFrameConfig(root),
+      appConfig: AppConfig(path: root / "empty")
+    )
+    createDir(root / "empty")
+
+    let canvas = newImage(7, 5)
+    canvas.fill(rgba(0, 255, 0, 255))
+    let context = ExecutionContext(hasImage: true, image: canvas,
+      backgroundPending: true, backgroundColor: color(0, 0, 1, 1))
+    let frame = app.get(context)
+    check cast[pointer](frame) == cast[pointer](canvas)
+    check canvas[0, 0] != rgba(0, 255, 0, 255)     # the error frame went into it
+    check not context.backgroundPending            # the owed background went down first
+    var logged = false
+    for item in logs.items:
+      if "No images found in the folder" in item{"error"}.getStr():
+        logged = true
+    check logged
+
+    # No canvas to draw in: an error frame of the frame's size, as before.
+    let noCanvas = app.get(ExecutionContext(hasImage: false))
+    check noCanvas.width == 8
+    check noCanvas.height == 6

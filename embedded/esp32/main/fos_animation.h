@@ -79,6 +79,23 @@ typedef struct {
  * going to deep-sleep between them. */
 bool fos_animation_wanted(double scene_interval_s, bool lcd, bool deep_sleep);
 
+/* The scene's interval as the runtime reports it (frameos_nim_scene_interval),
+ * made fit for the rules here. A wait a scene's rhythm works out from a due
+ * time (a layout's, scene_rhythm.nim: due minus now, in seconds since boot)
+ * can land a hair under a whole second: in the second before uptime reaches
+ * a power of two (32, 256, 512 s...), now + 1 rounds onto the coarser grid
+ * above it and the difference is 0.99999999999994. Within 10 ms of a whole
+ * number of seconds it is that number. 0, a negative or a NaN: the scene has
+ * no opinion (0). */
+double fos_scene_interval_snap(double seconds);
+
+/* The pass loop's interval in whole seconds: the scene's, else the frame's
+ * (`frame_interval_s`, 300 s when 0). Under a second is one second: the
+ * scene's still, never the frame's. A 1 s clock in a layout whose wait came
+ * out 0.9999 s stood still for five minutes now and then on a reTerminal
+ * Sticky (2026-11-10). At most a week. */
+uint32_t fos_pass_interval_seconds(double scene_interval_s, uint32_t frame_interval_s);
+
 /* Once per pass, before the render: start, retime or stop. True when the
  * mode changed (the caller logs the start or the stop). Stopping leaves the
  * window's stats for fos_animation_take_stats. */
@@ -133,6 +150,41 @@ static inline bool fos_input_hold_engaged(const fos_input_hold_t *h) { return h-
 
 /* True, once, when the hold is over: the caller owes what it held back. */
 bool fos_input_hold_release(fos_input_hold_t *h, int64_t now_us);
+
+/* Who the input hold is for: a partial-refresh e-paper panel, and any board
+ * with a touch screen or keys. On the SenseCAP Indicator's LCD a settings pull
+ * of 1.4 to 2.6 s ran on the render task between taps and held each one 2.5 to
+ * 3.5 s; on the E1003 a 2.8 s one held the scene switcher's close
+ * (2026-11-10). An event from HTTP, the cloud or the console notes the hold
+ * like a tap does, on the same boards. */
+bool fos_input_hold_applies(bool partial_panel, bool touch, bool keys);
+
+/* Whether the picture push to the backend stops and gives the render task
+ * back: a big panel's picture is 1.3 MB, 8 to 14 s on Wi-Fi (the E1003,
+ * 2026-11-10), and a tap or a key, a deferred event, or a render asked for
+ * must not wait it out. On the backend link task nobody is waiting. */
+bool fos_image_push_yields(bool on_link_task, bool input_queued, bool events_deferred, bool render_asked);
+
+/* Whether a frame's picture goes to the backend. While an animation runs,
+ * once per scene: on an LCD a push hashes, copies and uploads the 460 KB
+ * picture, and the frames around it took up to 115 ms instead of 75 (the
+ * SenseCAP's DVD logo, 17.4 fps with a push every 10 s, 18.0 without,
+ * 2026-11-10). `scene_pushed`: this scene's picture is on the backend
+ * already. A preview of an animation is a picture of it, not a stream. */
+bool fos_animation_push_wanted(bool animating, bool scene_pushed);
+
+/* Whether the backend's round trips (logs, picture push, the scenes, settings
+ * and commands pulls) run on the backend link task this pass rather than on
+ * the render task: a 1 s clock stood still for up to 10 s while they ran
+ * there (2026-11-10). Not on a frame about to deep-sleep (the pulls must be
+ * done before it goes) and not on a boot's first pass (its render waits for
+ * what the sleep held). */
+bool fos_backend_link_on(bool link_task, bool deep_sleep_now, uint32_t render_attempts);
+
+/* Whether the idle wait goes on at `now_us`: until `wait_until_us`, and past
+ * it while the display's own task still refreshes the glass (a timed render
+ * waits for it; one somebody asks for leaves the wait by its bit). */
+bool fos_idle_wait_goes_on(int64_t now_us, int64_t wait_until_us, bool panel_refreshing);
 
 /* Whether a load starting now gets the buzzer's quiet taps
  * (fos_buzzer_loading_begin): e-paper has no loading mark to draw, and a

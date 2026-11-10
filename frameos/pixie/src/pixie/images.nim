@@ -717,6 +717,222 @@ proc blendSampleLineAny(
       a.setPixel(ai, blender(a.getPixel(ai), samples[i]))
       inc ai
 
+# A picture stretched into an axis-aligned rectangle, in fixed point. The
+# general `draw` below samples every target pixel through the float accessors
+# (`getRgbaSmooth`, about 11 µs a pixel on an ESP32-S3: 40 s for a 1848x1179
+# window) and, to scale more than twice, first doubles or halves the whole
+# picture into a new image. Here each axis gets a table of source pixels and
+# 16-bit weights once, a source row is resampled across once and kept while
+# the rows below still need it, and nothing the size of the picture is made.
+
+{.push checks: off, stackTrace: off.}
+
+type ScaleTaps = object
+  ## Per output pixel along one axis: `count` source pixels from `first`,
+  ## with weights from `start` in `weights`, 16.16 fractions summing to 65536.
+  first, count, start: seq[int32]
+  weights: seq[uint32]
+  longest: int
+
+proc scaleTaps(origin, size: float64, sourceSize, first, last: int): ScaleTaps =
+  ## Output pixels [first, last) of a picture `sourceSize` pixels long drawn
+  ## over [origin, origin + size). Made smaller, each output pixel is the
+  ## average of the source it covers, a partly covered pixel by its share (a
+  ## box filter: every source pixel counts, so nothing aliases however far it
+  ## shrinks). As large or larger, the two source pixels nearest its centre,
+  ## mixed by distance (bilinear), the outermost pixel held at each edge.
+  let n = max(0, last - first)
+  result.first = newSeq[int32](n)
+  result.count = newSeq[int32](n)
+  result.start = newSeq[int32](n)
+  result.weights = newSeqOfCap[uint32](n * 2)
+  let ratio = sourceSize.float64 / size # source pixels per output pixel
+  for i in 0 ..< n:
+    let t = (first + i).float64
+    result.start[i] = result.weights.len.int32
+    if ratio > 1:
+      let
+        a = max((t - origin) * ratio, 0.0)
+        b = min((t + 1 - origin) * ratio, sourceSize.float64)
+      if b <= a:
+        let at = clamp(floor((t + 0.5 - origin) * ratio).int, 0, sourceSize - 1)
+        result.first[i] = at.int32
+        result.count[i] = 1
+        result.weights.add 65536
+      else:
+        let
+          lo = clamp(floor(a).int, 0, sourceSize - 1)
+          hi = clamp(ceil(b).int, lo + 1, sourceSize)
+          span = b - a
+        var
+          total = 0'i64
+          largest = -1
+        result.first[i] = lo.int32
+        result.count[i] = int32(hi - lo)
+        for k in lo ..< hi:
+          let
+            overlap = min(b, (k + 1).float64) - max(a, k.float64)
+            w = uint32(max(0.0, overlap / span * 65536.0 + 0.5))
+          if largest < 0 or w > result.weights[largest]:
+            largest = result.weights.len
+          result.weights.add w
+          total += w.int64
+        # The rounding's difference goes to the largest share: exactly 65536.
+        result.weights[largest] = uint32(result.weights[largest].int64 + 65536 - total)
+    else:
+      var
+        pos = (t + 0.5 - origin) * ratio - 0.5
+        at = floor(pos).int
+        frac = pos - floor(pos)
+      if at < 0:
+        at = 0
+        frac = 0
+      if at >= sourceSize - 1:
+        at = sourceSize - 1
+        frac = 0
+      let w = uint32(frac * 65536.0 + 0.5)
+      if w == 0:
+        result.first[i] = at.int32
+        result.count[i] = 1
+        result.weights.add 65536
+      elif w >= 65536:
+        result.first[i] = int32(at + 1)
+        result.count[i] = 1
+        result.weights.add 65536
+      else:
+        result.first[i] = at.int32
+        result.count[i] = 2
+        result.weights.add 65536 - w
+        result.weights.add w
+    result.longest = max(result.longest, result.count[i].int)
+
+template packChannels(r, g, b, a: uint32): uint32 =
+  ((r + 32768) shr 16) or (((g + 32768) shr 16) shl 8) or
+    (((b + 32768) shr 16) shl 16) or (((a + 32768) shr 16) shl 24)
+
+proc sourceWord(source: Image, index: int): uint32 {.noinline.} =
+  ## A pixel of a 565 or grey picture as an RGBX word. Out of line: the
+  ## format-aware read is long, and flash is the firmware's budget.
+  cast[uint32](source.getPixel(index))
+
+proc resampleRow(source: Image, row: int, taps: ScaleTaps, dest: ptr UncheckedArray[uint32]) =
+  ## Source row `row` across the output columns: premultiplied RGBX words,
+  ## whatever the source's format.
+  let
+    n = taps.first.len
+    base = source.dataIndex(0, row)
+  template across(read: untyped) =
+    for i in 0 ..< n:
+      let
+        count = taps.count[i].int
+        first = base + taps.first[i].int
+      if count == 1:
+        dest[i] = read(first)
+      else:
+        var r, g, b, a: uint32
+        let at = taps.start[i].int
+        for k in 0 ..< count:
+          let
+            p = read(first + k)
+            w = taps.weights[at + k]
+          r += (p and 0xFF) * w
+          g += ((p shr 8) and 0xFF) * w
+          b += ((p shr 16) and 0xFF) * w
+          a += (p shr 24) * w
+        dest[i] = packChannels(r, g, b, a)
+  if source.format == pfRgbx:
+    let pixels = cast[ptr UncheckedArray[uint32]](source.data)
+    template word(j: int): uint32 = pixels[j]
+    across(word)
+  else:
+    template word(j: int): uint32 = sourceWord(source, j)
+    across(word)
+
+proc drawResampled*(
+  a, b: Image, x, y, width, height: float64, opacity = 1.0
+) {.raises: [].} =
+  ## Draws `b` stretched into the rectangle (`x`, `y`, `width`, `height`) of
+  ## `a`, in `a`'s pixels, over what `a` holds (normal blending), faded by
+  ## `opacity`; any format on either side. A target pixel is drawn when its
+  ## centre falls inside the rectangle, and only the part of the rectangle
+  ## inside `a` is visited: a view of the target draws exactly the pixels a
+  ## whole draw would put there. Larger than the picture it is bilinear,
+  ## smaller a box filter (`scaleTaps`); at its own size on whole pixels, a
+  ## copy. Memory: two tables, a few resampled rows and one output row.
+  if width <= 0 or height <= 0 or b.width <= 0 or b.height <= 0 or opacity <= 0 or
+      width.isNaN or height.isNaN or x.isNaN or y.isNaN:
+    return
+  let
+    x0 = clamp(ceil(x - 0.5), 0.0, a.width.float64).int
+    x1 = clamp(ceil(x + width - 0.5), 0.0, a.width.float64).int
+    y0 = clamp(ceil(y - 0.5), 0.0, a.height.float64).int
+    y1 = clamp(ceil(y + height - 0.5), 0.0, a.height.float64).int
+  if x1 <= x0 or y1 <= y0:
+    return
+  let
+    columns = scaleTaps(x, width, b.width, x0, x1)
+    rows = scaleTaps(y, height, b.height, y0, y1)
+    span = x1 - x0
+    fade = uint64(min(opacity, 1.0) * 65536.0 + 0.5) # 65536: opaque
+    ringSize = max(1, rows.longest)
+  # One seq type for every scratch buffer (each one more is code on a device
+  # whose flash is the budget): the resampled rows, then the output row, then
+  # per ring slot the source row it holds, then this row's weights and where
+  # in the ring each of its source rows is.
+  var scratch = newSeq[uint32]((ringSize + 1) * span + 3 * ringSize)
+  let
+    base = cast[ptr UncheckedArray[uint32]](scratch[0].addr)
+    line = cast[ptr UncheckedArray[uint32]](scratch[ringSize * span].addr)
+    ringRow = cast[ptr UncheckedArray[uint32]](scratch[(ringSize + 1) * span].addr)
+    weights = cast[ptr UncheckedArray[uint32]](scratch[(ringSize + 1) * span + ringSize].addr)
+    offsets = cast[ptr UncheckedArray[uint32]](scratch[(ringSize + 1) * span + 2 * ringSize].addr)
+  for slot in 0 ..< ringSize:
+    ringRow[slot] = high(uint32)
+  for yy in y0 ..< y1:
+    let
+      i = yy - y0
+      count = rows.count[i].int
+      first = rows.first[i].int
+    # The source rows this one mixes, each resampled across once while the
+    # rows after it still use it (a span's rows are consecutive, and no
+    # longer than the ring: no two share a slot).
+    for k in 0 ..< count:
+      let
+        r = first + k
+        slot = r mod ringSize
+      if ringRow[slot] != r.uint32:
+        resampleRow(b, r, columns, cast[ptr UncheckedArray[uint32]](base[slot * span].addr))
+        ringRow[slot] = r.uint32
+      offsets[k] = uint32(slot * span)
+      weights[k] = uint32((rows.weights[rows.start[i].int + k].uint64 * fade + 32768) shr 16)
+    var samples = cast[ptr UncheckedArray[uint32]](base[offsets[0].int].addr)
+    if count > 1 or fade != 65536:
+      for j in 0 ..< span:
+        var r, g, bl, al: uint32
+        for k in 0 ..< count:
+          let
+            p = base[offsets[k].int + j]
+            w = weights[k]
+          r += (p and 0xFF) * w
+          g += ((p shr 8) and 0xFF) * w
+          bl += ((p shr 16) and 0xFF) * w
+          al += (p shr 24) * w
+        line[j] = packChannels(r, g, bl, al)
+      samples = line
+    let colors = cast[ptr UncheckedArray[ColorRGBX]](samples)
+    if a.format == pfRgbx:
+      blendLineNormal(a.getUncheckedArray(x0, yy), colors, span)
+    else:
+      # pixie's own format-aware blend and store, an opaque row stored as is.
+      var opaque = true
+      for j in 0 ..< span:
+        if colors[j].a != 255:
+          opaque = false
+          break
+      blendSampleLineAny(a, x0, yy, colors, span, if opaque: OverwriteBlend else: NormalBlend)
+
+{.pop.}
+
 proc blendRect(a, b: Image, pos: Ivec2, blendMode: BlendMode) =
   let
     px = pos.x.int

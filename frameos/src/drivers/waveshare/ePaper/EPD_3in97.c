@@ -105,6 +105,20 @@ static void EPD_3in97_TurnOnDisplay(void)
 
 static UBYTE EPD_3in97_AnalogOn = 0;
 
+// A partial update was started and nobody has waited for it: the caller does
+// not sit out the controller's ~0.5 s, it handles taps and draws the next
+// frame meanwhile. The controller takes no command while BUSY is high, so
+// every entry point below waits for it first.
+static UBYTE EPD_3in97_UpdatePending = 0;
+
+static void EPD_3in97_WaitPending(void)
+{
+    if (EPD_3in97_UpdatePending) {
+        EPD_3in97_UpdatePending = 0;
+        EPD_3in97_ReadBusy();
+    }
+}
+
 static void EPD_3in97_TurnOnDisplay_Partial(void)
 {
     // The first update after an init reads the temperature, loads the partial
@@ -113,7 +127,7 @@ static void EPD_3in97_TurnOnDisplay_Partial(void)
     EPD_3in97_SendCommand(0x22); // Display Update Control
     EPD_3in97_SendData(EPD_3in97_AnalogOn ? 0x0C : 0xFC);
     EPD_3in97_SendCommand(0x20); // Activate Display Update Sequence
-    EPD_3in97_ReadBusy();
+    EPD_3in97_UpdatePending = 1;
     EPD_3in97_AnalogOn = 1;
 }
 
@@ -197,6 +211,7 @@ parameter:
 ******************************************************************************/
 void EPD_3in97_Init(void)
 {
+    EPD_3in97_WaitPending();
     EPD_3in97_AnalogOn = 0;
     EPD_3in97_Reset();
     DEV_Delay_ms(100);
@@ -214,6 +229,7 @@ parameter:
 ******************************************************************************/
 void EPD_3in97_Clear(void)
 {
+    EPD_3in97_WaitPending();
     UWORD i;
     UWORD height = EPD_3in97_HEIGHT;
     UWORD width = EPD_3in97_WIDTH/8;
@@ -242,6 +258,7 @@ parameter:
 ******************************************************************************/
 void EPD_3in97_Display(UBYTE *Image)
 {
+    EPD_3in97_WaitPending();
     UWORD i;
     UWORD height = EPD_3in97_HEIGHT;
     UWORD width = EPD_3in97_WIDTH/8;
@@ -260,6 +277,7 @@ parameter:
 ******************************************************************************/
 void EPD_3in97_Init_Partial(void)
 {
+    EPD_3in97_WaitPending();
     EPD_3in97_AnalogOn = 0;
     EPD_3in97_Reset();
     EPD_3in97_ReadBusy();
@@ -281,6 +299,7 @@ void EPD_3in97_Display_Partial(UBYTE *Image, UBYTE *Previous)
     UWORD height = EPD_3in97_HEIGHT;
     UWORD width = EPD_3in97_WIDTH/8;
 
+    EPD_3in97_WaitPending();
     EPD_3in97_SetCursor(0, 0);
     EPD_3in97_SendCommand(0x26);   //write RAM for the previous picture
     for(i=0; i<height; i++)
@@ -303,6 +322,7 @@ parameter:
 ******************************************************************************/
 void EPD_3in97_Rest(void)
 {
+    EPD_3in97_WaitPending();
     if (EPD_3in97_AnalogOn) {
         EPD_3in97_SendCommand(0x22); // Display Update Control
         EPD_3in97_SendData(0x03);    // analog and clock off

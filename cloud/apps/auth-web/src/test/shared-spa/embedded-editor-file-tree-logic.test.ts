@@ -82,14 +82,16 @@ describe("sceneFileTreeLogic", () => {
       .FRAMEOS_EMBEDDED_NO_BACKEND;
   });
 
-  it("opens on the diagram, scenes expanded and app folders closed", () => {
+  it("opens on the diagram with every folder expanded, app folders too", () => {
     const logic = sceneFileTreeLogic({ frameId });
     const unmount = logic.mount();
     expect(logic.values.shownSelection).toEqual({ kind: "diagram" });
     expect(logic.values.isExpanded(sceneTreeKey("clock"))).toBe(true);
-    expect(logic.values.isExpanded(appTreeKey("clock", "face"))).toBe(false);
+    expect(logic.values.isExpanded(appTreeKey("clock", "face"))).toBe(true);
     logic.actions.toggleExpanded(sceneTreeKey("clock"));
     expect(logic.values.isExpanded(sceneTreeKey("clock"))).toBe(false);
+    logic.actions.toggleExpanded(appTreeKey("clock", "face"));
+    expect(logic.values.isExpanded(appTreeKey("clock", "face"))).toBe(false);
     unmount();
   });
 
@@ -146,7 +148,8 @@ describe("sceneFileTreeLogic", () => {
 
     editors.actions.openAppModal("clock", "text1", clock.nodes[2]!.data as never);
     expect(logic.values.shownSelection).toEqual({ kind: "diagram" });
-    expect(logic.values.isExpanded(appTreeKey("clock", "text1"))).toBe(false);
+    // A built-in app has no folder in the tree, so none was opened for it.
+    expect(logic.values.collapsed[appTreeKey("clock", "text1")]).toBeUndefined();
     expect(logic.values.builtinAppEditor).toMatchObject({
       kind: "editApp",
       sceneId: "clock",

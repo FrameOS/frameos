@@ -53,6 +53,7 @@ idf_component_register(
         "DEV_Config_esp.c"
         "frameos_display.c"
         "fos_partial_refresh.c"
+        "fos_refresh_queue.c"
         "photo_painter_pmic.c"
         "oled_ssd1306.c"
         "it8951.c"
