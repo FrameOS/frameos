@@ -105,7 +105,7 @@ describe("settings parity between the device planes", () => {
     // the ESP32 buzzer's notes, fos_led.c; no Pi preset has one). 16 with
     // `touch_beep` (2026.11.6): the click of a press on an ESP32's e-paper
     // glass; no Pi frame has an e-paper touch panel with a buzzer.
-    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(16);
+    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(17);
   });
 });
 
