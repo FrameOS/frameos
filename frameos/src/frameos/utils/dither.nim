@@ -380,17 +380,18 @@ proc packGray4Canvas*(image: Image; buf: ptr UncheckedArray[uint8];
     copyMem(buf, src, rowBytes * frameHeight)
     return true
   let panelStride = rowBytes * 2
+  template place(x, y: int): int =
+    ## Where canvas pixel (x, y) is on the panel, as a 4-bit index.
+    (if rotate == 90: x * panelStride + height - 1 - y
+     elif rotate == 180: (height - 1 - y) * panelStride + width - 1 - x
+     else: (width - 1 - x) * panelStride + y)
   const Tile = 32
   for ty in countup(0, height - 1, Tile):
     for tx in countup(0, width - 1, Tile):
       for y in ty ..< min(ty + Tile, height):
         # The panel's place for (tx, y), then a step per x.
-        var (index, step) =
-          case rotate
-          of 90: (tx * panelStride + height - 1 - y, panelStride)
-          of 180: ((height - 1 - y) * panelStride + width - 1 - tx, -1)
-          of 270: ((width - 1 - tx) * panelStride + y, -panelStride)
-          else: (y * panelStride + tx, 1)
+        var index = place(tx, y)
+        let step = place(tx + 1, y) - index
         var i = y * image.stride + tx
         for x in tx ..< min(tx + Tile, width):
           gray4Put(buf, index, gray4Level(src, i))

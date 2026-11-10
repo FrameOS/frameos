@@ -1470,6 +1470,11 @@ proc computeCoverage(
           for j in i ..< fillStart + fillLen:
             coverages[j - startX] += sampleCoverage
 
+proc fillGrey(image: Image, luma: uint8, start, len: int) =
+  ## A solid span of a grey image: one memset in luma, dithered in 4 bits.
+  if image.format == pfGray4: image.fillGray4(luma, start, len)
+  else: fillUnsafe8(image.data8, luma, start, len)
+
 proc clearUnsafe(image: Image, startX, startY, toX, toY: int) =
   ## Clears data from [start, to).
   if startX == image.width or startY == image.height:
@@ -1480,10 +1485,8 @@ proc clearUnsafe(image: Image, startX, startY, toX, toY: int) =
       len = image.dataIndex(toX, toY) - start
     if image.format == pfRgb565:
       fillUnsafe16(image.data16, 0, start, len)
-    elif image.format == pfGray8:
-      fillUnsafe8(image.data8, 0, start, len)
-    elif image.format == pfGray4:
-      image.fillGray4(0, start, len)
+    elif image.format >= pfGray8:
+      image.fillGrey(0, start, len)
     else:
       fillUnsafe(image.data, rgbx(0, 0, 0, 0), start, len)
     return
@@ -1497,10 +1500,8 @@ proc clearUnsafe(image: Image, startX, startY, toX, toY: int) =
       let start = image.dataIndex(x, y)
       if image.format == pfRgb565:
         fillUnsafe16(image.data16, 0, start, rowEnd - x)
-      elif image.format == pfGray8:
-        fillUnsafe8(image.data8, 0, start, rowEnd - x)
-      elif image.format == pfGray4:
-        image.fillGray4(0, start, rowEnd - x)
+      elif image.format >= pfGray8:
+        image.fillGrey(0, start, rowEnd - x)
       else:
         fillUnsafe(image.data, rgbx(0, 0, 0, 0), start, rowEnd - x)
     x = 0
@@ -1568,42 +1569,45 @@ proc fillCoverage565(
   let data = image.data16
   image.fillCoverageNarrowBody(rgbx, startX, y, coverages, blendMode, data, rgbxToRgb565, rgb565ToRgbx)
 
-proc fillCoverageGray8(
-  image: Image, rgbx: ColorRGBX, startX, y: int, coverages: openArray[uint8], blendMode: BlendMode
-) =
-  let data = image.data8
-  image.fillCoverageNarrowBody(rgbx, startX, y, coverages, blendMode, data, rgbxToGray8, gray8ToRgbx)
-
-proc fillCoverageGray4(
-  image: Image, rgbx: ColorRGBX, startX, y: int, coverages: openArray[uint8], blendMode: BlendMode
-) =
-  ## `fillCoverage` for a sixteen-grey destination: the narrow bodies' walk,
-  ## with the place in the row kept beside the index for the dither.
+template greyRowStore(image: Image, start: int, body: untyped) =
+  ## Inside `body`, `store(luma)` and `backdrop()` address the pixel at `idx`,
+  ## which `body` advances with `step()`, for either grey: a 4-bit store is
+  ## dithered by its place in the row.
   let
-    data = image.data8
-    stride = image.stride
-    start = image.dataIndex(startX, y)
-    cell = ((start div stride) and 3) * 4
-    luma = rgbxToGray8(rgbx)
+    data {.inject.} = image.data8
+    four = image.format == pfGray4
+    cell = ((start div image.stride) and 3) * 4
   var
-    idx = start
-    column = start mod stride
-  template store(value: uint8) =
-    gray4Put(data, idx, grayLevel16Ordered(value, OrderedThresholds4x4[cell + (column and 3)]))
-  template backdrop(): ColorRGBX =
-    gray4ToRgbx(gray4Level(data, idx))
+    idx {.inject.} = start
+    column = start mod image.stride
+  template store(value: uint8) {.used.} =
+    if four: gray4Put(data, idx, grayLevel16Ordered(value, OrderedThresholds4x4[cell + (column and 3)]))
+    else: data[idx] = value
+  template backdrop(): ColorRGBX {.used.} =
+    (if four: gray4ToRgbx(gray4Level(data, idx)) else: gray8ToRgbx(data[idx]))
+  template step() {.used.} =
+    inc idx
+    inc column
+  body
+
+proc fillCoverageGrey(
+  image: Image, rgbx: ColorRGBX, startX, y: int, coverages: openArray[uint8], blendMode: BlendMode
+) =
+  ## `fillCoverage` for both grey destinations, 8-bit and 4-bit: one loop,
+  ## the blend through `blender`, a fully covered solid pixel stored at once.
   let
+    luma = rgbxToGray8(rgbx)
     blender = blendMode.blender()
     masking = blendMode == MaskBlend
     solid = blendMode == OverwriteBlend or (blendMode == NormalBlend and rgbx.a == 255)
-  for i in 0 ..< coverages.len:
-    let coverage = coverages[i]
-    if coverage == 255 and (solid or masking):
-      if solid: store(luma) # a full mask leaves the pixel as it is
-    elif coverage != 0 or masking:
-      store(rgbxToGray8(blender(backdrop(), rgbx * coverage)))
-    inc idx
-    inc column
+  image.greyRowStore(image.dataIndex(startX, y)):
+    for i in 0 ..< coverages.len:
+      let coverage = coverages[i]
+      if coverage == 255 and (solid or masking):
+        if solid: store(luma) # a full mask leaves the pixel as it is
+      elif coverage != 0 or masking:
+        store(rgbxToGray8(blender(backdrop(), rgbx * coverage)))
+      step()
   if masking:
     image.clearUnsafe(0, y, startX, y)
     image.clearUnsafe(startX + coverages.len, y, image.width, y)
@@ -1655,11 +1659,8 @@ proc fillCoverage(
   if image.format == pfRgb565:
     image.fillCoverage565(rgbx, startX, y, coverages, blendMode)
     return
-  if image.format == pfGray8:
-    image.fillCoverageGray8(rgbx, startX, y, coverages, blendMode)
-    return
-  if image.format == pfGray4:
-    image.fillCoverageGray4(rgbx, startX, y, coverages, blendMode)
+  if image.format >= pfGray8:
+    image.fillCoverageGrey(rgbx, startX, y, coverages, blendMode)
     return
 
   var
@@ -1780,58 +1781,40 @@ proc fillHits565(
   image.fillHitsNarrowBody(rgbx, startX, y, hits, numHits, windingRule, blendMode, maskClears,
     data, rgbxToRgb565, rgb565ToRgbx, fillUnsafe16)
 
-proc fillHitsGray8(
+proc blendSpanGrey(image: Image, rgbx: ColorRGBX, blender: Blender, x, y, len: int) =
+  ## `len` pixels of `rgbx` blended onto a grey row.
+  image.greyRowStore(image.dataIndex(x, y)):
+    for _ in 0 ..< len:
+      store(rgbxToGray8(blender(backdrop(), rgbx)))
+      step()
+
+proc fillHitsGrey(
   image: Image, rgbx: ColorRGBX, startX, y: int, hits: seq[(Fixed32, int16)], numHits: int,
   windingRule: WindingRule, blendMode: BlendMode, maskClears: bool
 ) =
-  let data = image.data8
-  image.fillHitsNarrowBody(rgbx, startX, y, hits, numHits, windingRule, blendMode, maskClears,
-    data, rgbxToGray8, gray8ToRgbx, fillUnsafe8)
-
-proc blendSpanGray4(image: Image, rgbx: ColorRGBX, blender: Blender, x, y, len: int) =
-  ## `len` pixels of `rgbx` blended onto a 4-bit row and dithered back.
-  let
-    data = image.data8
-    stride = image.stride
-    start = image.dataIndex(x, y)
-    cell = ((start div stride) and 3) * 4
-  var column = start mod stride
-  for idx in start ..< start + len:
-    let blended = blender(gray4ToRgbx(gray4Level(data, idx)), rgbx)
-    gray4Put(data, idx, grayLevel16Ordered(rgbxToGray8(blended), OrderedThresholds4x4[cell + (column and 3)]))
-    inc column
-
-proc fillHitsGray4(
-  image: Image, rgbx: ColorRGBX, startX, y: int, hits: seq[(Fixed32, int16)], numHits: int,
-  windingRule: WindingRule, blendMode: BlendMode, maskClears: bool
-) =
-  ## `fillHits` for a sixteen-grey destination: solid spans through
-  ## `fillGray4`, blended ones per pixel at 8 bits.
+  ## `fillHits` for both grey destinations: solid spans through `fillGrey`,
+  ## blended ones per pixel at 8 bits.
   let luma = rgbxToGray8(rgbx)
-  case blendMode:
-  of OverwriteBlend:
-    for (start, len) in hits.walkInteger(numHits, windingRule, y, image.width):
-      image.fillGray4(luma, image.dataIndex(start, y), len)
-  of MaskBlend:
+  if blendMode == MaskBlend:
     var filledTo = startX
     for (start, len) in hits.walkInteger(numHits, windingRule, y, image.width):
       if maskClears and start > filledTo:
-        image.fillGray4(0, image.dataIndex(filledTo, y), start - filledTo)
+        image.fillGrey(0, image.dataIndex(filledTo, y), start - filledTo)
       if rgbx.a != 255:
-        image.blendSpanGray4(rgbx, MaskBlend.blender(), start, y, len)
+        image.blendSpanGrey(rgbx, MaskBlend.blender(), start, y, len)
       filledTo = start + len
     if maskClears:
       image.clearUnsafe(0, y, startX, y)
       image.clearUnsafe(filledTo, y, image.width, y)
-  else:
-    let
-      solid = blendMode == NormalBlend and rgbx.a == 255
-      blender = blendMode.blender()
-    for (start, len) in hits.walkInteger(numHits, windingRule, y, image.width):
-      if solid:
-        image.fillGray4(luma, image.dataIndex(start, y), len)
-      else:
-        image.blendSpanGray4(rgbx, blender, start, y, len)
+    return
+  let
+    solid = blendMode == OverwriteBlend or (blendMode == NormalBlend and rgbx.a == 255)
+    blender = blendMode.blender()
+  for (start, len) in hits.walkInteger(numHits, windingRule, y, image.width):
+    if solid:
+      image.fillGrey(luma, image.dataIndex(start, y), len)
+    else:
+      image.blendSpanGrey(rgbx, blender, start, y, len)
 
 proc fillHits(
   image: Image,
@@ -1847,12 +1830,8 @@ proc fillHits(
     image.fillHits565(
       rgbx, startX, y, hits, numHits, windingRule, blendMode, maskClears)
     return
-  if image.format == pfGray8:
-    image.fillHitsGray8(
-      rgbx, startX, y, hits, numHits, windingRule, blendMode, maskClears)
-    return
-  if image.format == pfGray4:
-    image.fillHitsGray4(
+  if image.format >= pfGray8:
+    image.fillHitsGrey(
       rgbx, startX, y, hits, numHits, windingRule, blendMode, maskClears)
     return
 
@@ -1979,10 +1958,8 @@ proc fillShapes(
               len = image.dataIndex(0, y + partitionHeight) - start
             if image.format == pfRgb565:
               fillUnsafe16(image.data16, rgbxToRgb565(rgbx), start, len)
-            elif image.format == pfGray8:
-              fillUnsafe8(image.data8, rgbxToGray8(rgbx), start, len)
-            elif image.format == pfGray4:
-              image.fillGray4(rgbxToGray8(rgbx), start, len)
+            elif image.format >= pfGray8:
+              image.fillGrey(rgbxToGray8(rgbx), start, len)
             else:
               fillUnsafe(image.data, rgbx, start, len)
           else:
@@ -1992,10 +1969,8 @@ proc fillShapes(
               let start = image.dataIndex(0, y + r)
               if image.format == pfRgb565:
                 fillUnsafe16(image.data16, rgbxToRgb565(rgbx), start, image.width)
-              elif image.format == pfGray8:
-                fillUnsafe8(image.data8, rgbxToGray8(rgbx), start, image.width)
-              elif image.format == pfGray4:
-                image.fillGray4(rgbxToGray8(rgbx), start, image.width)
+              elif image.format >= pfGray8:
+                image.fillGrey(rgbxToGray8(rgbx), start, image.width)
               else:
                 fillUnsafe(image.data, rgbx, start, image.width)
         else:
@@ -2779,8 +2754,7 @@ proc spanFill(image: Image, rgbx: ColorRGBX, x0, x1, y: int) =
   let start = image.dataIndex(x0, y)
   case image.format
   of pfRgb565: fillUnsafe16(image.data16, rgbxToRgb565(rgbx), start, x1 - x0)
-  of pfGray8: fillUnsafe8(image.data8, rgbxToGray8(rgbx), start, x1 - x0)
-  of pfGray4: image.fillGray4(rgbxToGray8(rgbx), start, x1 - x0)
+  of pfGray8, pfGray4: image.fillGrey(rgbxToGray8(rgbx), start, x1 - x0)
   of pfRgbx: fillUnsafe(image.data, rgbx, start, x1 - x0)
 
 proc blitMask(image: Image, mask: CoverageMask, ix, iy: int, rgbx: ColorRGBX, blendMode: BlendMode) =

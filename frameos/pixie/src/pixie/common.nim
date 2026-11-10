@@ -516,25 +516,16 @@ proc copyPixelRow*(dst: Image, dstIndex: int, src: Image, srcIndex, count: int) 
   elif count > 0:
     copyMem(dst.pixelAddr(dstIndex), src.pixelAddr(srcIndex), count * dst.bytesPerPixel)
 
+proc fillGray4*(image: Image, luma: uint8, start, len: int) {.raises: [].}
+
 proc zeroPixelRow*(image: Image, index, count: int) {.raises: [].} =
   ## Clears `count` pixels from a `dataIndex` (black, or transparent on RGBX).
   if count <= 0:
     return
-  if image.format != pfGray4:
+  if image.format == pfGray4:
+    image.fillGray4(0, index, count) # black is a level the matrix leaves flat
+  else:
     zeroMem(image.pixelAddr(index), count * image.bytesPerPixel)
-    return
-  var
-    i = index
-    left = count
-  if (i and 1) == 1:
-    gray4Put(image.pixels8, i, 0)
-    inc i
-    dec left
-  let bytes = left shr 1
-  if bytes > 0:
-    zeroMem(image.pixels8[i shr 1].addr, bytes)
-  if (left and 1) == 1:
-    gray4Put(image.pixels8, i + bytes * 2, 0)
 
 proc pixelRowsEqual*(a: Image, aIndex: int, b: Image, bIndex, count: int): bool {.raises: [].} =
   ## The same `count` pixels at these `dataIndex`es of two images of one format.
