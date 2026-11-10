@@ -199,3 +199,9 @@ CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=32
 # restarts the DMA only after a frame that was short of refills, so a flash
 # write costs a disturbed frame, and the next blank puts it right.
 # CONFIG_LCD_RGB_RESTART_IN_VSYNC is not set
+
+# Log V2: the "W (%lu) %s: " prefix is formatted once inside esp_log instead
+# of being baked into every format string (911 of them). Same output, under
+# the same stdout lock. −28.5 KB (2026-11-10, docs/esp32-image-size.md); it
+# costs a little stack per log call (a 32-byte timestamp buffer).
+CONFIG_LOG_VERSION_2=y

@@ -58,6 +58,7 @@ idf_component_register(
         "fos_spiffs_gc.c"
         "fos_sd_probe.c"
         "fos_sscanf.c"
+        "fos_printf.c"
     PRIV_REQUIRES
         nvs_flash
         esp_wifi
@@ -89,6 +90,19 @@ idf_component_register(
         monocypher
 )
 
+# The setup page (fos_http.c's GET /) is setup_page.html gzipped here and
+# served with Content-Encoding: gzip (tools/gzip_setup_page.py).
+set(FOS_SETUP_PAGE_GZ "${CMAKE_CURRENT_BINARY_DIR}/setup_page.html.gz")
+add_custom_command(
+    OUTPUT "${FOS_SETUP_PAGE_GZ}"
+    COMMAND ${python} "${CMAKE_CURRENT_LIST_DIR}/../tools/gzip_setup_page.py"
+            "${CMAKE_CURRENT_LIST_DIR}/setup_page.html" "${FOS_SETUP_PAGE_GZ}"
+    DEPENDS "${CMAKE_CURRENT_LIST_DIR}/setup_page.html" "${CMAKE_CURRENT_LIST_DIR}/../tools/gzip_setup_page.py"
+    VERBATIM)
+add_custom_target(fos_setup_page_gz DEPENDS "${FOS_SETUP_PAGE_GZ}")
+add_dependencies(${COMPONENT_LIB} fos_setup_page_gz)
+target_add_binary_data(${COMPONENT_LIB} "${FOS_SETUP_PAGE_GZ}" BINARY)
+
 # esp_spiffs_gc's SPIFFS_gc goes through fos_spiffs_gc.c, which erases the
 # blocks holding only deleted pages before SPIFFS collects by erase age. It
 # reads the partition's counters, so it compiles against SPIFFS's own
@@ -102,6 +116,12 @@ target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=SPIFFS_gc" "-u __wr
 # sscanf goes through fos_sscanf.c: cJSON's "%lg" read-back is strtod there,
 # so newlib's floating-point scanf (9.6 KB) is never linked.
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=sscanf" "-u __wrap_sscanf")
+
+# printf, fprintf, vprintf and vfprintf go through fos_printf.c, which formats
+# with vsnprintf: newlib's FILE formatter (_vfprintf_r, 11.4 KB, a second copy
+# of the one snprintf uses) is never linked.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=printf" "-Wl,--wrap=fprintf"
+    "-Wl,--wrap=vprintf" "-Wl,--wrap=vfprintf" "-u __wrap_vprintf")
 
 # Default panel for a local development build. All panel drivers are
 # compiled in regardless; this only picks the boot-time default before
