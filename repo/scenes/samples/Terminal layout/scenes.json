@@ -1,0 +1,108 @@
+[
+  {
+    "id": "layout-terminal",
+    "name": "Terminal",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 1,
+      "backgroundColor": "#0b0f0c",
+      "isLayout": true
+    },
+    "fields": [
+      {
+        "name": "hostName",
+        "type": "string",
+        "label": "Host name",
+        "value": "frame",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "inkColor",
+        "type": "color",
+        "label": "Text color",
+        "value": "#52f27b",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "terminal": {
+        "name": "Terminal",
+        "category": "data",
+        "description": "A shell prompt above each scene and a status line below it. Tap the prompt for the scene list and the status line for the frame settings.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Terminal\",\n  \"category\": \"data\",\n  \"description\": \"A shell prompt above each scene and a status line below it. Tap the prompt for the scene list and the status line for the frame settings.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n",
+          "app.tsx": "// A terminal around the scene it wraps: a prompt above it and a status line\n// with the time, the Wi-Fi signal and the battery below it. The prompt opens\n// the scene list and the status line the frame's settings.\nconst pad = (n) => String(n).padStart(2, '0')\n\nfunction status(frame, now) {\n  const parts = [`${pad(now.getHours())}:${pad(now.getMinutes())}`]\n  if (typeof frame.wifiRssi === 'number') parts.push(`wifi ${frame.wifiRssi} dBm`)\n  if (typeof frame.batteryPercent === 'number') parts.push(`battery ${frame.batteryPercent}%`)\n  return parts.join('  |  ')\n}\n\nexport function get(app) {\n  const { hostName, inkColor } = app.state\n  const now = new Date()\n  // The status line changes on the minute: nothing to draw until then.\n  frameos.setNextSleep(60 - now.getSeconds())\n  return (\n    <div className={`flex flex-col w-full h-full p-[1.5vh] bg-[#0b0f0c] text-[${inkColor}] text-[3.2vh]`}>\n      <div className=\"flex items-center h-[6vh] min-w-0\" onClick={() => frameos.dispatch('sceneSwitcher')}>\n        <span className=\"truncate\">{`${hostName}:~$ show ${app.frame.sceneName || 'scene'}`}</span>\n      </div>\n      <div className={`flex flex-col flex-1 min-h-0 p-[1vh] border border-[${inkColor}]`}>\n        <yield />\n      </div>\n      <div className=\"flex items-center h-[6vh] min-w-0\" onClick={() => frameos.dispatch('sceneSettings', { page: 'frame' })}>\n        <span className=\"truncate\">{status(app.frame, now)}</span>\n      </div>\n    </div>\n  )\n}\n"
+        },
+        "origin": "terminal"
+      }
+    },
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "chrome",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "terminal",
+          "config": {}
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-to-draw",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "chrome-to-draw",
+        "type": "codeNodeEdge",
+        "source": "chrome",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  }
+]

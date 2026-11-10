@@ -3,6 +3,7 @@
 // "Virtual frames"). The device under test is the one production runs; only
 // what it draws is faked.
 import { generateKeyPairSync, randomBytes } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -419,6 +420,36 @@ describe("a virtual frame's device", () => {
       const rows = await db.select().from(frameLogs).where(eq(frameLogs.frameId, frame.id));
       return rows.some((row) => (row.payload as { event?: string }).event === "render:error") ? true : undefined;
     }, "the error in the frame's log");
+  });
+
+  it("says why when a finished render's picture cannot be saved", async () => {
+    const { frame } = await createVirtualFixture();
+    await startHub();
+    await connected(frame.id);
+    // Below a regular file, where no object can be written.
+    const storeDir = process.env.FRAMEOS_OBJECT_STORE_DIR as string;
+    const notADirectory = path.join(storeDir, "not-a-directory");
+    writeFileSync(notADirectory, "");
+    process.env.FRAMEOS_OBJECT_STORE_DIR = path.join(notADirectory, "store");
+    try {
+      await settled((await push(frame.id, { checksum: "sum-1", scenes })).id);
+      const failed = await waitFor(async () => {
+        const row = await virtualRow(frame.id);
+        return row.renderError ? row : undefined;
+      }, "the failure on the row");
+      expect(failed.renderError).toBe(
+        "store_failed: The picture could not be saved. It will be tried again at the next render.",
+      );
+      // rendered_at moves, so the interval paces the retries.
+      expect(failed.renderedAt).not.toBeNull();
+      expect(failed.imageVersion).toBeNull();
+      await waitFor(async () => {
+        const rows = await db.select().from(frameLogs).where(eq(frameLogs.frameId, frame.id));
+        return rows.some((row) => (row.payload as { event?: string }).event === "render:error") ? true : undefined;
+      }, "the error in the frame's log");
+    } finally {
+      process.env.FRAMEOS_OBJECT_STORE_DIR = storeDir;
+    }
   });
 
   it("draws at a new size, and a render already running does not put the old one back", async () => {

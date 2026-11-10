@@ -1,0 +1,132 @@
+[
+  {
+    "id": "layout-gallery-wall",
+    "name": "Gallery wall",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#d8d2c4",
+      "isLayout": true
+    },
+    "fields": [
+      {
+        "name": "title",
+        "type": "string",
+        "label": "Label title (empty: the scene name)",
+        "value": "",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "note",
+        "type": "string",
+        "label": "Label note",
+        "value": "",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "wallColor",
+        "type": "color",
+        "label": "Wall color",
+        "value": "#d8d2c4",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "frameColor",
+        "type": "color",
+        "label": "Frame color",
+        "value": "#2c2620",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "matColor",
+        "type": "color",
+        "label": "Mat color",
+        "value": "#f6f3ea",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "galleryWall": {
+        "name": "Gallery wall",
+        "category": "data",
+        "description": "The scene hangs on a wall in a thin dark frame with a white mat, with a small museum label beside it.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Gallery wall\",\n  \"category\": \"data\",\n  \"description\": \"The scene hangs on a wall in a thin dark frame with a white mat, with a small museum label beside it.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n",
+          "app.tsx": "// The scene hung on a wall: a thin dark frame, a white mat, and a small museum\n// label below it on the right.\nexport function get(app) {\n  const { title, note, wallColor, frameColor, matColor } = app.state\n  return (\n    <div className={`flex flex-col w-full h-full p-[5vh] bg-[${wallColor}]`}>\n      <div className={`flex flex-col flex-1 min-h-0 p-[1vh] bg-[${frameColor}]`}>\n        <div className={`flex flex-col flex-1 min-h-0 p-[4vh] bg-[${matColor}]`}>\n          <yield />\n        </div>\n      </div>\n      <div className=\"flex justify-end pt-[2.5vh]\">\n        <div className={`flex flex-col w-[36vw] min-w-0 px-[1.4vw] py-[0.9vh] bg-[${matColor}] text-[#222222]`}>\n          <span className=\"text-[3vh] font-bold truncate\">{title || app.frame.sceneName || ''}</span>\n          {note ? <span className=\"text-[2.2vh] truncate\">{note}</span> : null}\n        </div>\n      </div>\n    </div>\n  )\n}\n"
+        },
+        "origin": "galleryWall"
+      }
+    },
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "chrome",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "galleryWall",
+          "config": {}
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-to-draw",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "chrome-to-draw",
+        "type": "codeNodeEdge",
+        "source": "chrome",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  }
+]

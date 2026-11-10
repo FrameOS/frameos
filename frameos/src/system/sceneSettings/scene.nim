@@ -92,6 +92,13 @@ const
   ARestart = 2
   AReboot = 3
   ALayout = 4
+  ACheckUpdate = 5
+  AInstallUpdate = 6
+  # The host's `updateState` (fos_ota_check_t): the words are the page's.
+  UpdateChecking = 1
+  UpdateAvailable = 3
+  UpdateInstalling = 5
+  UpdateWords = ["", "Checking\xe2\x80\xa6", "Up to date", "", "Could not check", "Installing\xe2\x80\xa6"]
   OtherValue = "\1" ## a select box's `other` option; no value of its own is this
   # The types the panel cannot edit: what they hold is not text.
   Unedited = ["node", "scene", "image"]
@@ -342,6 +349,11 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
       options.elems.add option(step, scaleLabel(step))
   scale.put("options", options)
   result.elems.add scale
+  if not info{"clock"}.isNil:
+    # An ESP32's clock, set by hand where no network time reaches it.
+    let clock = field("clock", "Date and time", "string")
+    clock.put("placeholder", newJString("YYYY-MM-DD HH:MM"))
+    result.elems.add clock
 
 proc opener(self: SceneSettingsScene): string =
   self.state{"from"}.getStr()
@@ -418,12 +430,17 @@ proc press(self: SceneSettingsScene, action: int) =
   var asking = -1
   if action == AScan:
     frameAction("scan")
+  elif action == ACheckUpdate:
+    frameAction("checkUpdate")
   elif action == ALayout:
     self.openLayoutPage()
   elif action == ARender:
     sendEvent(evRender, newJObject(), eoPanel)
   elif self.state{"confirm"}.getInt(-1) == action:
-    sendEvent(if action == ARestart: evRestart else: evReboot, newJObject(), eoPanel)
+    if action == AInstallUpdate:
+      frameAction("installUpdate")
+    else:
+      sendEvent(if action == ARestart: evRestart else: evReboot, newJObject(), eoPanel)
   else:
     asking = action
   self.state.put("confirm", newJInt(asking))
@@ -513,6 +530,15 @@ proc button(look: Look, label: string, handler: int, primary: bool): SvgNode =
   else: c.add " bg-zinc-800 active:bg-zinc-600"
   el("div", move c, SvgNode(text: label)).on("on-click", handler)
 
+proc icon(look: Look, path: string): SvgNode =
+  # The hole winds against the teeth: the default fill rule cuts it out.
+  let path = SvgNode(tag: "path", attrs: @[("d", path), ("fill", "currentColor")])
+  var i = ""
+  i.px("w", look.size * 6 div 5)
+  i.px("h", look.size * 6 div 5)
+  result = el("svg", move i, path)
+  result.attrs.add(("viewBox", "0 0 48 48"))
+
 proc iconButton(look: Look, lit: bool, path: string, handler: int): SvgNode =
   ## A round button with a picture on it.
   var c = "shrink-0 flex items-center justify-center rounded-full"
@@ -521,18 +547,21 @@ proc iconButton(look: Look, lit: bool, path: string, handler: int): SvgNode =
   if look.paper: c.add(if lit: " bg-black text-white" else: " border-2 border-black")
   elif lit: c.add " bg-sky-600 active:bg-sky-500"
   else: c.add " bg-zinc-800 active:bg-zinc-600"
-  # The hole winds against the teeth: the default fill rule cuts it out.
-  let path = SvgNode(tag: "path", attrs: @[("d", path), ("fill", "currentColor")])
-  var i = ""
-  i.px("w", look.size * 6 div 5)
-  i.px("h", look.size * 6 div 5)
-  let icon = el("svg", move i, path)
-  icon.attrs.add(("viewBox", "0 0 48 48"))
-  el("div", move c, icon).on("on-click", handler)
+  el("div", move c, look.icon(path)).on("on-click", handler)
 
-proc gear(look: Look, lit: bool): SvgNode =
-  ## The gear that opens the frame page, lit while it shows.
-  look.iconButton(lit, GearPath, HGear)
+proc gear(look: Look, lit, named: bool): SvgNode =
+  ## The gear that opens the frame page, lit while it shows, with its name
+  ## beside it where the header has the room.
+  if not named:
+    return look.iconButton(lit, GearPath, HGear)
+  var c = "shrink-0 flex items-center rounded-full font-bold"
+  c.px("h", look.line * 4 div 5)
+  c.px("px", look.size)
+  c.px("gap", look.size div 2)
+  if look.paper: c.add " border-2 border-black"
+  else: c.add " bg-zinc-800 active:bg-zinc-600"
+  result = el("div", move c, look.icon(GearPath)).on("on-click", HGear)
+  result.children.add el("span", "whitespace-nowrap", SvgNode(text: "Frame settings"))
 
 proc fieldBox(look: Look): string =
   result = "w-full rounded-lg"
@@ -689,6 +718,11 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   card.line(look, "Not saved", info{"note"}.getStr())
   card.line(look, "Managed by", info{"managedBy"}.getStr())
   card.line(look, "Version", info{"version"}.getStr())
+  let update = info{"updateState"}.getInt(-1)
+  if update == UpdateAvailable:
+    card.line(look, "Update", info{"updateVersion"}.getStr() & " available")
+  elif update >= 0:
+    card.line(look, "Update", UpdateWords[update])
   result.children.add card
   let
     fields = self.frameFields(info, autoScale, unit)
@@ -699,16 +733,24 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     let field = fields.elems[i]
     let name = field{"name"}.getStr()
     result.children.add look.row(field, current(edits, info, name), i, typing and name == "wifiSsid")
-    if name == "rotate" and not look.paper:
-      # A turned LCD copies every frame to its place (embedded_main.nim
-      # packImageRgb565, 30 ms at 480x480): there is no drawing it turned.
+    # A turned LCD copies every frame to its place (embedded_main.nim
+    # packImageRgb565, 30 ms at 480x480): there is no drawing it turned.
+    let note =
+      if name == "rotate" and not look.paper: "Any rotation but 0\xc2\xb0 adds a noticeable delay to every frame of an animated scene."
+      elif name == "clock" and info{"wifi", "state"}.getStr() == "connected": "Online, the clock follows network time."
+      else: ""
+    if note.len > 0:
       var c = look.grey
       c.px("text", look.size * 3 div 4)
-      result.children.add el("div", move c, SvgNode(text: "Any rotation but 0\xc2\xb0 adds a noticeable delay to every frame of an animated scene."))
+      result.children.add el("div", move c, SvgNode(text: note))
   c = "flex flex-wrap"
   c.px("gap", look.gap div 2)
   let buttons = el("div", move c)
   buttons.children.add look.pressButton("Render again", ARender)
+  if update == UpdateAvailable:
+    buttons.children.add look.pressButton("Install update", AInstallUpdate, asking)
+  elif update >= 0 and update != UpdateChecking and update != UpdateInstalling:
+    buttons.children.add look.pressButton("Check for updates", ACheckUpdate)
   if %"restart" in arrayOf(info{"actions"}).elems:
     buttons.children.add look.pressButton("Restart FrameOS", ARestart, asking)
   buttons.children.add look.pressButton("Reboot", AReboot, asking)
@@ -801,7 +843,8 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   header.children.add el("span", "grow truncate text-center font-bold",
     SvgNode(text: if frame: "Frame settings" else: title))
   if not info.isNil and not layoutPage:
-    header.children.add look.gear(frame)
+    # About 30 of the text's size: the two buttons, the title and the name.
+    header.children.add look.gear(frame, named = not frame and width >= look.size * 30)
   # Lit while there is something to save: after a Save it goes quiet, which
   # is how the frame page says it took it.
   let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
@@ -871,14 +914,15 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   case context.event
   of "setCurrentScene":
     # What the dispatcher read off the scene it was opened from.
-    for key in ["from", "fields", "values", "opened", "layout"]:
+    for key in ["from", "fields", "values", "opened", "layout", "noLayout"]:
       let value = payload{"state", key}
       if not value.isNil:
         self.state.put(key, value)
     # It opens on the scene's form; with no scene showing there is nothing
     # on that one, and the frame page is what the status screen sent you here
     # for.
-    if self.state{"page"}.isNil and (self.opener().len == 0 or self.openedOnFrame()) and not frameInfo().isNil:
+    if (self.state{"page"}.isNil or not payload{"state", "noLayout"}.isNil) and
+        (self.opener().len == 0 or self.openedOnFrame()) and not frameInfo().isNil:
       self.showPage(true)
   of "open":
     self.touch()

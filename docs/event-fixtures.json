@@ -4848,6 +4848,157 @@
     ]
    },
    {
+    "name": "ten pulls down from the top edge open the frame page with no layout around it",
+    "why": "The way out of a layout nobody can use (docs/scene-layouts.md \"Safe mode\"): counted before any event map. Nine are nothing; the tenth opens the settings without the layout and changes nothing else.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/wearsLayout",
+      "name": "wearsLayout",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "render"
+        }
+       }
+      ],
+      "edges": [],
+      "layout": {
+       "sceneId": "fixtures/dispatcher/badLayout"
+      }
+     },
+     {
+      "id": "fixtures/dispatcher/badLayout",
+      "name": "badLayout",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300,
+       "isLayout": true
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "render"
+        }
+       }
+      ],
+      "edges": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/wearsLayout",
+    "steps": [
+     {
+      "renderPass": true,
+      "trace": [
+       "pass wearsLayout"
+      ]
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "top",
+         "direction": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "top",
+         "direction": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "top",
+         "direction": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "top",
+         "direction": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "top",
+         "direction": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "top",
+         "direction": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "top",
+         "direction": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "top",
+         "direction": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "top",
+         "direction": "down"
+        }
+       }
+      ],
+      "trace": []
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "top",
+         "direction": "down"
+        }
+       }
+      ],
+      "trace": [
+       "select system/sceneSettings",
+       "run wearsLayout close",
+       "run sceneSettings setCurrentScene",
+       "run sceneSettings open",
+       "render"
+      ]
+     }
+    ]
+   },
+   {
     "name": "the scene list opens straight from the settings when asked to swap, the scene behind staying behind",
     "why": "A taskbar's Start over the settings means the scene list, not back to the scene: `sceneSwitcher {swap: true}`. Plain `sceneSwitcher` still goes back.",
     "scene": "fixtures/dispatcher/swapA",

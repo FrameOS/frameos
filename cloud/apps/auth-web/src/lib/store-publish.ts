@@ -119,6 +119,17 @@ export async function preflightStorePublish(
   });
 }
 
+// What the listing says the category is before any model is asked: the
+// manifest's, then the row's, then the Layouts shelf for a layout.
+function listingCategory(
+  validated: { isLayout: boolean; manifestCategory: string | null | undefined },
+  existing: { category: string | null } | undefined,
+): string | null {
+  const stated =
+    validated.manifestCategory !== undefined ? validated.manifestCategory : (existing?.category ?? null);
+  return stated ?? (validated.isLayout ? "layouts" : null);
+}
+
 // Moderation and classification: network calls to a model, up to ~80 s.
 // Never inside a transaction or a lock.
 async function slowPublishWork(
@@ -171,10 +182,7 @@ async function slowPublishWork(
   // category) are classified into the fixed store taxonomy, and get suggested
   // tags when the owner has not set any. Owner-set values are never
   // overwritten, and a classifier outage just leaves the scene uncategorized.
-  const category =
-    validated.manifestCategory !== undefined
-      ? validated.manifestCategory
-      : (existing?.category ?? null);
+  const category = listingCategory(validated, existing);
   const tags = validated.manifestTags ?? existing?.tags ?? [];
   const classified = category
     ? undefined
@@ -379,10 +387,7 @@ export async function publishStoreScene(
 
   // The listing this version records. Manifest values win where present;
   // otherwise the row's stand (a re-publish keeps the tags the owner set).
-  const category =
-    validated.manifestCategory !== undefined
-      ? validated.manifestCategory
-      : (existing?.category ?? null);
+  const category = listingCategory(validated, existing);
   const tags = validated.manifestTags ?? existing?.tags ?? [];
   const listing: SceneListing = {
     category: category ?? classified?.category ?? null,

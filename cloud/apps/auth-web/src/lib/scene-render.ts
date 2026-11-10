@@ -6,7 +6,7 @@ import { deflate } from "node:zlib";
 import { zlibSync } from "fflate";
 import { describeOutOfMemory, type DeviceLimits } from "frameos-wasm";
 import { logWarn } from "./log";
-import { addressIsPrivateSource } from "./ssrf";
+import { addressIsPrivateSource } from "./private-address";
 
 // Headless scene rendering on the server: the same frameos-wasm bundle the
 // browser live preview runs (public/frameos-wasm, built with `node` in its

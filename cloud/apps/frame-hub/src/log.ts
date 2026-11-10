@@ -44,6 +44,20 @@ export function logError(event: string, fields?: LogFields) {
   emit("error", event, fields);
 }
 
+// The message and what caused it: a failed fetch says only "fetch failed" and
+// keeps the reason in `cause`.
 export function errorField(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+  const reasons = [error.message];
+  let cause = error.cause;
+  for (let depth = 0; depth < 3 && cause instanceof Error; depth += 1) {
+    const reason = cause.message || (cause as NodeJS.ErrnoException).code;
+    if (reason) {
+      reasons.push(reason);
+    }
+    cause = cause.cause;
+  }
+  return reasons.join(": ");
 }

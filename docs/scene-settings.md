@@ -65,9 +65,9 @@ hooks in the scene module, set by the host's runtime:
 
 | Hook | What |
 |---|---|
-| `frameSettingsRead` | on every render: nil when the host offers no page (the preview, a round panel) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do) |
-| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale` |
-| `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan` |
+| `frameSettingsRead` | on every render: nil when the host offers no page (the preview, a round panel) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
+| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clock` |
+| `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate` |
 
 | Host | Where | Wi-Fi | Rotation and scale | Restart |
 |---|---|---|---|---|
@@ -99,6 +99,17 @@ What the page holds, top to bottom:
   as it is. Below 1 everything is drawn smaller. The scale is the frame's: a
   scene with its own (`settings.renderScale`, a `renderScale` field) keeps
   it. The settings panel and the scene switcher follow it too (below).
+- **Date and time** (an ESP32): the frame's clock in its own time zone, as
+  YYYY-MM-DD HH:MM. Saved to the system clock and the board's battery clock
+  where it has one. A frame that reaches the internet goes back to network time
+  at its next sync, which the page says. One field and no `strftime`, which
+  alone brings 12 KB of libc into the image.
+- **Update** (an ESP32 with a control plane): the page asks the plane whether a
+  release exists when it opens on Wi-Fi, at most hourly, and on **Check for
+  updates** (`fos_ota_check_start`: the same manifest and signature checks as
+  an install, nothing downloaded). **Install update** asks for a second tap and
+  takes the same path as the plane's own update (`fos_ota_request_for_control_plane`).
+  A frame with no plane shows neither.
 - **Render again**, **Restart FrameOS** (where the host lists it) and
   **Reboot**. Restart and Reboot ask for a second tap ("Tap again", red);
   anything else in between asks again. They send the

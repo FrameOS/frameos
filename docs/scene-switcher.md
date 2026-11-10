@@ -149,9 +149,26 @@ there):
   renders again at once (`sceneSwitcherThumbnailPass`). E-paper waits for
   all of them: every render there is a refresh.
 
-The ESP32 and the preview list names only. The firmware keeps one picture,
-the panel's, and a picture per scene would be a decode and a few hundred KB
-of PSRAM per tile, or flash writes on every switch.
+An ESP32 keeps a small RGB565 picture per scene on the state partition
+(`components/frameos_nim/fos_scene_thumb.c`, `noteSceneThumbnail` in `embedded_runtime.nim`),
+taken from the canvas after a render and before the firmware draws anything
+over it, so a presence code never reaches one:
+
+- The longest side is 200 px on a partition of 8 MB or more and 96 px on a
+  smaller one, about 40 KB and 10 KB on a portrait 13.3". It is stretched to the
+  tile.
+- A scene writes one at most hourly, looked at once a minute, so an animation
+  costs nothing per frame and the flash sees a few sectors an hour at most.
+- Pictures stop at 60% of the partition in use. Past that all of them go and
+  those in use come back as their scenes show, which also clears pictures of
+  scenes that were removed.
+- A tile is read off flash into PSRAM when the switcher draws. It is its name
+  card if that would leave under 600 KB free, or if the scene has not been shown
+  since the picture was last dropped.
+- The firmware's sampling and cropping are C (`fos_scene_thumb.c`), which took
+  the pictures from 2.6 KB of flash to 1.5 KB.
+
+The preview lists names only.
 
 ## Using it
 
@@ -195,8 +212,9 @@ bigger with it than without: the module's code 8.6 KB and its strings
 `fos_scenes.c`) 0.8 KB. The first version was 20.8 KB. What keeps it there:
 
 - No new layout code: the JSX layer it draws with is already in the image.
-- The firmware gets the names alone: no keyboard, no pictures, no round
-  panel (`frameosEmbedded`; no ESP32 board is round), integer arithmetic, and
+- The firmware gets no keyboard and no round panel (`frameosEmbedded`; no
+  ESP32 board is round), its pictures are raw RGB565 with no decoder,
+  integer arithmetic, and
   no Nim checks in the module (every index is guarded by the loop or the test
   that reaches it).
 - Class names are appended in place, one call each, and a class that

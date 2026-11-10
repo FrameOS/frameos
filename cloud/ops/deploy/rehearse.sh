@@ -13,7 +13,8 @@ set -euo pipefail
 # moves nginx, that consecutive deploys alternate ports, that an unhealthy
 # release is refused with traffic left where it was, that a failing migration
 # never reaches the flip, that --rollback returns to the previous release,
-# and that pruning keeps the pinned releases.
+# that pruning keeps the pinned releases, and that a frame hub unable to store
+# a picture stops the deploy before anything moves.
 #
 # The fakes are the point of failure to keep in mind: they model systemd and
 # nginx as this script uses them, not as they are. Anything relying on real
@@ -98,6 +99,21 @@ cat >/usr/local/sbin/psql <<'FAKE'
 cat >/dev/null 2>&1 || true
 exit 0
 FAKE
+
+cat >/usr/local/sbin/systemd-run <<'FAKE'
+#!/usr/bin/env bash
+# Models the one transient unit frameos-cloud-update starts: the new frame
+# hub's object store check. Keeps what it was given, for step 16.
+for arg in "$@"; do
+  case "$arg" in
+    --property=EnvironmentFile=*) cp "${arg#--property=EnvironmentFile=}" /tmp/fake/hub-check-env ;;
+  esac
+done
+echo "$*" >/tmp/fake/hub-check-args
+[ -e /tmp/fake/hub-store-broken ] && exit 1
+exit 0
+FAKE
+chmod +x /usr/local/sbin/systemd-run
 
 # Only ever checked for existence by install.sh; nothing here runs the app.
 printf '#!/bin/sh\nexit 0\n' >/usr/local/sbin/node
@@ -503,6 +519,43 @@ check "the runner did not receive SESSION_SECRET" "no" \
 check "the runner did not receive the URL file's path as a leftover" "no" \
   "$(ls /opt/frameos-cloud.releases/*/.database-url.* 2>/dev/null | grep -q . && echo yes || echo no)"
 check "the runner ran as the service user" "root" "$(tail -1 /tmp/fake/migrate-env)"
+
+# --- 16. a frame hub that cannot store a picture ------------------------------
+
+# Every bundle above is too old to have the check. This one has it: a hub that
+# cannot upload stops the deploy before migrations and before the flip, and
+# the check is handed the R2 keys and no other secret.
+echo "16. a frame hub that cannot store a picture stops before anything moves"
+printf 'SESSION_SECRET=not-for-the-check\nR2_CLOUD_ENDPOINT=https://r2.example\nR2_CLOUD_ACCESS_KEY_ID=key\nR2_CLOUD_SECRET_ACCESS_KEY=secret\n' \
+  >/etc/frameos-cloud/frame-hub.env
+hub_with_check="// frame_hub.object_store_check"
+port_before="$(active_port)"
+sha_before="$(live_sha)"
+rm -f /tmp/fake/migrate-env
+: >/tmp/fake/hub-store-broken
+if deploy aaaa11112222 "$hub_with_check" >/tmp/out16 2>&1; then
+  check "the deploy failed" "yes" "no"
+else
+  check "the deploy failed" "yes" "yes"
+fi
+rm -f /tmp/fake/hub-store-broken
+check "it said why" "yes" \
+  "$(grep -q 'cannot store pictures; production untouched' /tmp/out16 && echo yes || echo no)"
+check "migrations never ran" "no" "$([ -e /tmp/fake/migrate-env ] && echo yes || echo no)"
+check "traffic never moved" "$port_before" "$(active_port)"
+check "the live release is untouched" "$sha_before" "$(live_sha)"
+check "no half-unpacked release was left behind" "0" \
+  "$(find /opt/frameos-cloud.releases -maxdepth 1 -name '.incoming.*' | wc -l | tr -d ' ')"
+deploy aaaa11112222 "$hub_with_check" >/tmp/out16b 2>&1 || { cat /tmp/out16b; exit 1; }
+check "a hub that can store a picture goes live" "aaaa11112222" "$(live_sha)"
+check "the check ran the new bundle" "yes" \
+  "$(grep -q 'dist/index.cjs check-object-store' /tmp/fake/hub-check-args && echo yes || echo no)"
+check "the check got the R2 keys" "yes" \
+  "$(grep -q '^R2_CLOUD_SECRET_ACCESS_KEY=secret$' /tmp/fake/hub-check-env && echo yes || echo no)"
+check "the check got no other secret" "no" \
+  "$(grep -q 'SESSION_SECRET' /tmp/fake/hub-check-env && echo yes || echo no)"
+check "the copy of the keys was removed" "0" \
+  "$(find /run -maxdepth 1 -name 'frameos-cloud-hub-check.*' | wc -l | tr -d ' ')"
 
 echo
 frameos-cloud-update --status

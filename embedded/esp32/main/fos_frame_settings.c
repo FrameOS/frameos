@@ -15,6 +15,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
+#include <time.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -28,6 +30,8 @@
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_mem.h"
+#include "fos_ota.h"
+#include "fos_rtc.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
@@ -36,6 +40,9 @@ static const char *TAG = "fos_frame_settings";
 
 /* A scan when the tab comes up off Wi-Fi, unless one is this fresh. */
 #define SCAN_FRESH_US (30LL * 1000000)
+
+/* The page asks for an update check when it opens, unless one is this fresh. */
+#define UPDATE_CHECK_FRESH_S 3600
 
 /* What the last Save could not do, for the tab's first note; "" = nothing.
  * Render task only. */
@@ -150,6 +157,24 @@ char *fos_frame_settings_json(void)
     }
     if (manager() != NULL) put_pair(&out, "managedBy", manager());
     put_pair(&out, "version", esp_app_get_description()->version);
+    /* The clock in the frame's own time zone; empty while it is not set.
+     * Not strftime, which alone brings 12 KB of libc. */
+    time_t now = time(NULL);
+    struct tm local;
+    localtime_r(&now, &local);
+    if (now > 1000000000) {
+        snprintf(line, sizeof(line), ",\"clock\":\"%04d-%02d-%02d %02d:%02d\"", local.tm_year + 1900, local.tm_mon + 1,
+                 local.tm_mday, local.tm_hour, local.tm_min);
+        put(&out, line);
+    } else {
+        put(&out, ",\"clock\":\"\"");
+    }
+    if (fos_ota_has_control_plane()) {
+        char version[32];
+        snprintf(line, sizeof(line), ",\"updateState\":%d", (int)fos_ota_check_state(version, sizeof(version)));
+        put(&out, line);
+        if (version[0]) put_pair(&out, "updateVersion", version);
+    }
     if (s_refused[0]) put_pair(&out, "note", s_refused);
     /* Restart is a reboot here: the page shows Reboot alone. */
     put(&out, ",\"actions\":[]}");
@@ -237,8 +262,23 @@ void fos_frame_settings_apply(const char *json)
         config->render_scale_milli = value;
         scale = true;
     }
+    /* The clock, in the frame's own time zone, and on the board's battery
+     * clock too so the next cold boot starts right. */
+    const cJSON *clock_text = cJSON_GetObjectItem(root, "clock");
+    bool clock_changed = false;
+    if (cJSON_IsString(clock_text)) {
+        struct tm local;
+        struct timeval set = {0};
+        if (!fos_rtc_parse_clock(clock_text->valuestring, &local)) {
+            strlcpy(s_refused, "Write the time as YYYY-MM-DD HH:MM", sizeof(s_refused));
+        } else if ((set.tv_sec = mktime(&local)), settimeofday(&set, NULL) == 0) {
+            fos_rtc_mark_dirty();
+            clock_changed = true;
+        }
+    }
     cJSON_Delete(root);
 
+    if (clock_changed) strlcat(changes, "clock,", sizeof(changes));
     if (wifi) strlcat(changes, "wifi,", sizeof(changes));
     if (restart) strlcat(changes, "rotate,", sizeof(changes));
     if (scale) strlcat(changes, "renderScale,", sizeof(changes));
@@ -262,6 +302,8 @@ void fos_frame_settings_apply(const char *json)
     if (scale) {
         fos_cloud_request_state();
         fos_client_render_now();
+    } else if (clock_changed) {
+        fos_client_render_now();
     }
     if (wifi) {
         err = fos_wifi_start_background();
@@ -284,9 +326,16 @@ static void on_wifi_change(void)
     }
 }
 
+/* The update check moved on. From its own task: bits set, no more. */
+static void on_update_check(void)
+{
+    if (fos_scenes_settings_shown()) fos_client_render_now();
+}
+
 void fos_frame_settings_init(void)
 {
     fos_wifi_set_change_hook(on_wifi_change);
+    fos_ota_set_check_hook(on_update_check);
 }
 
 void fos_frame_settings_action(const char *action)
@@ -294,10 +343,15 @@ void fos_frame_settings_action(const char *action)
     if (action == NULL) return;
     if (strcmp(action, "scan") == 0) {
         fos_wifi_scan_start();
+    } else if (strcmp(action, "checkUpdate") == 0) {
+        fos_ota_check_start(0);
+    } else if (strcmp(action, "installUpdate") == 0) {
+        if (fos_ota_install_checked() != ESP_OK) ESP_LOGW(TAG, "update refused: nothing to install");
     } else if (strcmp(action, "open") == 0) {
         int64_t age = fos_wifi_scan_age_us();
         if (fos_wifi_state() != FOS_WIFI_CONNECTED && !fos_wifi_scanning() && (age < 0 || age > SCAN_FRESH_US)) {
             fos_wifi_scan_start();
         }
+        if (fos_wifi_state() == FOS_WIFI_CONNECTED) fos_ota_check_start(UPDATE_CHECK_FRESH_S);
     }
 }
