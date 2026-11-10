@@ -16,6 +16,7 @@ import {
   assignedSceneVersion,
   assignScenesToFrame,
   maxScenesPerFrame,
+  readActiveSceneState,
   readSettingsGroupsField,
   type RequestedScene,
 } from "../../../../../src/lib/frame-scenes";
@@ -213,6 +214,13 @@ export async function POST(
     body.scene_id.length <= 256
       ? body.scene_id
       : undefined;
+  // Optional public field values for that scene ("Push & activate" from the
+  // scene drawer): they ride the same push, so the frame opens the scene with
+  // them instead of being asked again by a second command.
+  const activeState = readActiveSceneState(body.state);
+  if (activeState === false || (activeState && !activeSceneId)) {
+    return jsonError("invalid_state", 400);
+  }
   const requested: RequestedScene[] = [];
   for (const entry of body.scenes) {
     if (!entry || typeof entry !== "object") {
@@ -280,6 +288,7 @@ export async function POST(
     frame,
     requested,
     ...(activeSceneId ? { activeSceneId } : {}),
+    ...(activeState ? { activeState } : {}),
   });
   if (!outcome.ok) {
     return jsonError(

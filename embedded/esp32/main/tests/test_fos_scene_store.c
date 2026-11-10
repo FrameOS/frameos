@@ -48,6 +48,33 @@ static void fresh_dir(void)
         }
         closedir(d);
     }
+    /* Removed behind its back, as a wipe does: the store forgets its files. */
+    fos_scene_store_forget();
+}
+
+static long slot_file_size(int slot)
+{
+    char path[160];
+    fos_scene_store_slot_path(slot, path, sizeof(path));
+    struct stat st;
+    return stat(path, &st) == 0 ? (long)st.st_size : -1;
+}
+
+static bool file_exists(const char *name)
+{
+    char path[160];
+    snprintf(path, sizeof(path), "%s/%s", s_dir, name);
+    struct stat st;
+    return stat(path, &st) == 0;
+}
+
+static void write_text(const char *name, const char *text)
+{
+    char path[160];
+    snprintf(path, sizeof(path), "%s/%s", s_dir, name);
+    FILE *f = fopen(path, "wb");
+    fputs(text, f);
+    fclose(f);
 }
 
 static bool slot_file_exists(int slot)
@@ -370,16 +397,93 @@ static void test_recover_index_after_power_cut(void)
     fresh_dir();
     fos_scene_store_result_t result;
     put_one("{\"id\":\"a\"}", &result);
+    /* The copy is written first and stays: it is the change made. */
+    CHECK(file_exists(FOS_SCENE_STORE_INDEX_TMP_NAME));
+    put_one("{\"id\":\"b\"}", &result);
+    /* A power cut while the index was rewritten in place: torn. Readers take
+     * the copy, which holds both scenes. */
+    write_text(FOS_SCENE_STORE_INDEX_NAME, "{\"scenes\":[{\"id\":\"a\",\"sl");
+    CHECK(read_entries((entry_t[2]){0}, 2) == 2);
+    CHECK(slot_of("b") != -1);
+    /* And the boot puts it back in place. */
+    CHECK(fos_scene_store_recover_index());
+    CHECK(file_exists(FOS_SCENE_STORE_INDEX_NAME));
+    CHECK(read_entries((entry_t[2]){0}, 2) == 2);
+    /* Nothing to do when the index is whole. */
+    CHECK(!fos_scene_store_recover_index());
+    /* Gone (firmware before 2026.11.6 removed it, then renamed the tmp): the
+     * copy too. */
     char path[160];
     char tmp[160];
     snprintf(path, sizeof(path), "%s/%s", s_dir, FOS_SCENE_STORE_INDEX_NAME);
     snprintf(tmp, sizeof(tmp), "%s/%s", s_dir, FOS_SCENE_STORE_INDEX_TMP_NAME);
-    rename(path, tmp); /* the moment between remove(index) and rename(tmp, index) */
-    CHECK(read_entries((entry_t[1]){0}, 1) == -1);
+    put_one("{\"id\":\"c\"}", &result);
+    remove(tmp);
+    rename(path, tmp);
+    CHECK(slot_of("c") != -1);
     CHECK(fos_scene_store_recover_index());
-    CHECK(slot_of("a") != -1);
-    /* Nothing to do when the index is there. */
+    CHECK(slot_of("c") != -1);
+    /* No index and no copy: a removed index is gone, not taken from a copy. */
+    fos_scene_store_remove_index();
+    CHECK(read_entries((entry_t[1]){0}, 1) == -1);
     CHECK(!fos_scene_store_recover_index());
+}
+
+static void test_the_store_knows_its_slot_files(void)
+{
+    /* A lookup by name walks every block of a SPIFFS partition (about half a
+     * second on 24 MB), so after the first sweep the store stops asking
+     * flash which slot files exist: it wrote and removed them all. */
+    fresh_dir();
+    fos_scene_store_result_t result;
+    put_one("{\"id\":\"a\"}", &result);
+    /* Not known yet (a boot before its sweep): a file nobody names is kept
+     * out of use, it may be one a reader still holds. */
+    int next = 1;
+    char name[32];
+    snprintf(name, sizeof(name), "scene-%d.json", next);
+    write_text(name, "{\"id\":\"held\"}");
+    CHECK(put_one("{\"id\":\"b\"}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(slot_of("b") != next);
+    /* The boot's sweep removes what nobody names, an old slot tmp included,
+     * and from then on the store knows its files. */
+    write_text(FOS_SCENE_STORE_SLOT_TMP_NAME, "{\"id\":\"half\"");
+    fos_scene_store_sweep();
+    CHECK(!slot_file_exists(next));
+    CHECK(!file_exists(FOS_SCENE_STORE_SLOT_TMP_NAME));
+    CHECK(slot_file_exists(slot_of("a")) && slot_file_exists(slot_of("b")));
+    /* A slot the store retired stays out of use until the sweep, which
+     * empties it and keeps the file: the next put opens a file that is there
+     * (a lookup that finds it) instead of creating one (two that walk the
+     * whole partition). */
+    int retired = slot_of("a");
+    CHECK(put_one("{\"id\":\"a\",\"name\":\"two\"}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(put_one("{\"id\":\"c\"}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(slot_of("a") != retired && slot_of("c") != retired);
+    CHECK(slot_file_size(retired) > 0);
+    fos_scene_store_sweep();
+    CHECK(slot_file_size(retired) == 0);
+    CHECK(put_one("{\"id\":\"d\"}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(slot_of("d") == retired);
+    CHECK(slot_file_size(retired) == (long)strlen("{\"id\":\"d\"}"));
+    size_t len = 0;
+    char *body = fos_scene_store_read_scene("d", &len);
+    CHECK(body != NULL && strcmp(body, "{\"id\":\"d\"}") == 0);
+    free(body);
+    /* A whole set starts over from empty files: no slot holds a scene. */
+    fos_scene_store_remove_slots();
+    int scenes = 0;
+    for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) scenes += slot_file_size(slot) > 0;
+    CHECK(scenes == 0);
+    /* And a whole set written over them uses those files first. */
+    fos_scene_store_put_t two[] = {{"{\"id\":\"x\"}", 10}, {"{\"id\":\"y\"}", 10}};
+    fos_scene_store_change_t all = {.puts = two, .put_count = 2, .replace_all = true};
+    CHECK(fos_scene_store_apply(&all, &result, NULL, NULL) == FOS_SCENE_STORE_OK);
+    CHECK(slot_file_size(slot_of("x")) == 10 && slot_file_size(slot_of("y")) == 10);
+    /* Never two scenes in one file, spare or not. */
+    CHECK(slot_of("x") != slot_of("y"));
+    /* A slot is written straight to its name: no slot tmp. */
+    CHECK(!file_exists(FOS_SCENE_STORE_SLOT_TMP_NAME));
 }
 
 static void test_old_index_without_bytes(void)
@@ -530,6 +634,7 @@ int main(void)
     test_repoint();
     test_sweep_needs_a_good_index();
     test_recover_index_after_power_cut();
+    test_the_store_knows_its_slot_files();
     test_old_index_without_bytes();
     test_layouts_and_the_default();
     test_replace_all();

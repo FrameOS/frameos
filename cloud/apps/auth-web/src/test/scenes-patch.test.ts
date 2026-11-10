@@ -24,6 +24,16 @@ describe("scenes_patch", () => {
     });
   });
 
+  it("carries the scene to show and its field values ('Push & activate'), even with nothing to put", () => {
+    // The install already landed, then "Push & activate": the same set, a
+    // scene to open and its values. The frame switches on it (fos_cloud.c).
+    const message = buildScenesPatchMessage(
+      { id: "cmd", payload: { checksum: "old", scene_id: "a", state: { city: "Brussels" }, scenes: [a, b] } },
+      base,
+    );
+    expect(message).toMatchObject({ put: [], scene_id: "a", state: { city: "Brussels" }, type: "scenes_patch" });
+  });
+
   it("describes a removal and an order change with nothing to put", () => {
     expect(buildScenesPatchMessage({ id: "c", payload: { checksum: "n", scenes: [b] } }, base)).toMatchObject({
       order: ["b"],

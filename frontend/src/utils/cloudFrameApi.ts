@@ -381,12 +381,14 @@ export async function dismissCloudFrameDeviceScenes(frameId: FrameId): Promise<v
  * Replace a cloud frame's assignment list outright and push it to the device
  * (POST /api/frames/{id}/scenes enqueues the checksummed set_scenes). Pass
  * `activeSceneId` (a RUNTIME scene id) to keep the current scene on screen —
- * the device otherwise activates the first scene of the payload.
+ * the device otherwise activates the first scene of the payload. `state`:
+ * public field values that scene opens with, in the same push.
  */
 export async function setCloudFrameScenes(
   frameId: FrameId,
   scenes: readonly CloudSceneAssignmentInput[],
-  activeSceneId?: string
+  activeSceneId?: string,
+  state?: Record<string, any>
 ): Promise<void> {
   const response = await apiFetch(`/api/frames/${frameId}/scenes`, {
     method: 'POST',
@@ -394,6 +396,7 @@ export async function setCloudFrameScenes(
     body: JSON.stringify({
       scenes: scenes.map(cloudSceneAssignmentEntry),
       ...(activeSceneId ? { scene_id: activeSceneId } : {}),
+      ...(activeSceneId && state && Object.keys(state).length ? { state } : {}),
     }),
   })
   await assertOk(response, 'Failed to update the frame scene list')
@@ -698,7 +701,9 @@ export async function assignCloudFrameStoreScene(
    */
   settingsGroups: readonly string[] = [],
   /** The layout each runtime scene of it wears: the frame's active one, when it has one. */
-  layouts?: Record<string, SceneLayoutRef>
+  layouts?: Record<string, SceneLayoutRef>,
+  /** "Install & activate": the RUNTIME scene the same push shows. */
+  activeSceneId?: string
 ): Promise<boolean> {
   const existing = await listCloudFrameScenes(frameId)
   if (existing.some((scene) => scene.scene_id === sceneId)) {
@@ -708,6 +713,7 @@ export async function assignCloudFrameStoreScene(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      ...(activeSceneId ? { scene_id: activeSceneId } : {}),
       scenes: [
         // Existing rows keep their grant explicitly (a row from before the
         // grant existed becomes explicit on this save, as the docs promise).

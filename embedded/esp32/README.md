@@ -1323,7 +1323,32 @@ last scene is refused. The state a removed scene kept across deep sleep goes
 with it. A control plane uses the same store: the cloud's `scenes_patch` verb
 (`docs/cloud-frames.md`), and a backend answering `/embedded/scenes?patch=1`
 with `{"patch":true,"base":"<etag>","order":[...],"put":[...]}` when it knows
-what the frame holds.
+what the frame holds. A forced pull (a deploy, "Push & activate", a preview:
+the commands answer's `sync`) sends the frame's ETag too, unless it holds no
+set, so a push that changed one scene downloads that scene; the backend also
+says `sync` when it hands over a switch while the frame's scenes are behind,
+so the switch never names a scene it has not pulled.
+
+**Push and show.** A change that activates its scene (`scene-put … activate`,
+`?activate=1`, a cloud push with `scene_id`: the workspace's "Push & activate"
+and "Install & activate") is written as fast as flash goes, not paced around
+renders and taps (`s_store_urgent`): somebody is waiting to see it, and paced
+behind an e-paper render a 30 KB scene waited up to half a second for each
+2 KB. A cloud push's `state` opens that scene with those values, through the
+same switch `set_current_scene` makes (`select_pushed_scene`).
+
+**Lookups by name are what a write costs on a big partition.** Every SPIFFS
+`stat`, `open`, `remove` and `rename` walks the lookup page of every block:
+about 25 ms on a 1 MB `/state`, about half a second on the 32 MB boards' 24 MB
+one, where a one-scene put used to take 10 s with 0.3 s of it writing data
+(the reTerminal Sticky, 2026-11-10). So the store asks flash as little as it
+can (`fos_scene_store.h`): it knows its slot files after the boot's sweep
+(which still removes everything the index does not name), a slot is written
+straight to its own name (the index switch is the commit), and the index is
+written as a copy (`scene-index.tmp`, kept) and then in place, readers taking
+the copy when the index is torn; `fos_scenes.c` tracks whether a combined
+payload is there instead of asking. Index and slots are removed only through
+the store: a bare unlink of the index leaves its copy to come back.
 
 **How much room there is.** `usb_api scene-list` and `GET .../scenes` report
 `storage`: `stateTotalBytes` and `stateUsedBytes` (the SPIFFS partition,

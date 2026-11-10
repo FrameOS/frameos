@@ -13,7 +13,15 @@
  * a render task still loading from the previous index reads a whole file.
  * A whole payload is split through the same code (`replace_all`).
  *
- * One writer at a time: the caller holds the store lock (fos_scenes.c).
+ * Lookups by name are what a SPIFFS write costs on a big partition (each one
+ * walks every block's lookup page: ~0.5 s on 24 MB), so the store makes as few
+ * as it can: it knows its slot files after the first sweep, writes a slot
+ * straight to its name (the index switch is the commit), and writes the index
+ * as a copy then in place (scene-index.tmp stays beside it, and a reader takes
+ * it when the index is torn).
+ *
+ * One writer at a time: the caller holds the store lock (fos_scenes.c), and
+ * every slot file and the index are written and removed through here.
  */
 #pragma once
 
@@ -28,7 +36,9 @@
 #define FOS_SCENE_STORE_MAX_BYTES (512 * 1024)
 
 #define FOS_SCENE_STORE_INDEX_NAME "scene-index.json"
+/* The index's copy: written first, kept, read when the index is torn. */
 #define FOS_SCENE_STORE_INDEX_TMP_NAME "scene-index.tmp"
+/* Only removed: where firmware before 2026.11.6 wrote a slot first. */
 #define FOS_SCENE_STORE_SLOT_TMP_NAME "scene-slot.tmp"
 
 typedef enum {
@@ -97,8 +107,9 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
                                             void *ctx);
 
 /* The index as a tree, every entry with its `bytes` (an index from before
- * that field gets the files' sizes). Caller deletes. NULL when there is no
- * usable index. */
+ * that field gets the files' sizes); its copy when the index is torn. Caller
+ * deletes. NULL when there is no usable index. Safe without the lock: the
+ * index and its copy are never both being written. */
 cJSON *fos_scene_store_read_index(void);
 
 /* An index entry's slot; -1 when it has none. */
@@ -112,13 +123,23 @@ char *fos_scene_store_read_scene(const char *scene_id, size_t *out_len);
  * the file that worked). */
 fos_scene_store_err_t fos_scene_store_repoint(const char *scene_id, int slot);
 
-/* Delete every slot file the index does not name. Nothing without a usable
- * index: a damaged index must not cost the scenes. */
+/* Delete every slot file the index does not name: the first one each boot
+ * looks at every slot, after that only the files the store wrote. Nothing
+ * without a usable index: a damaged index must not cost the scenes. */
 void fos_scene_store_sweep(void);
 
-/* The index and its tmp are swapped by remove + rename (SPIFFS has no
- * atomic replace). A power cut in between leaves only the tmp, whole: move
- * it back. True when it did. */
+/* Every slot file (a whole payload's split starts from none). */
+void fos_scene_store_remove_slots(void);
+
+/* The index and its copy: no index, and no copy to take its place. */
+void fos_scene_store_remove_index(void);
+
+/* Files on /state changed outside the store (a wipe, a format): what it
+ * knows of its slot files goes, and the next sweep looks at every slot. */
+void fos_scene_store_forget(void);
+
+/* The index gone or torn and its copy whole (a power cut inside a write):
+ * the copy goes back in its place. True when it did. */
 bool fos_scene_store_recover_index(void);
 
 const char *fos_scene_store_err_str(fos_scene_store_err_t err);

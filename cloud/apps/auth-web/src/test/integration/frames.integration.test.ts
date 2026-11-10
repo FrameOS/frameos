@@ -1268,6 +1268,61 @@ describe("frame re-enrollment (frame-bound claim tokens)", () => {
     expect(push?.payload).toEqual({ settings: { timezone: "Europe/Brussels" } });
   });
 
+  it("a push names the scene to show and carries its field values in the same set_scenes", async () => {
+    // The scene drawer's "Push & activate": one push, never a second command
+    // racing it (the frame opens the scene with these values, fos_cloud.c).
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const scene = await createStoreScene(accountId, { name: "Weather" });
+    const push = (body: Record<string, unknown>) =>
+      assignFrameScenes(
+        postJson(`/api/frames/${frame_id}/scenes`, body, { origin: baseUrl }),
+        routeParams(frame_id),
+      );
+    const latestPush = async () => {
+      const [command] = await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.frameId, frame_id))
+        .orderBy(desc(frameCommands.createdAt))
+        .limit(1);
+      return command;
+    };
+
+    const shown = await push({
+      scenes: [{ scene_id: scene.id }],
+      scene_id: scene.id,
+      state: { city: "Brussels" },
+    });
+    expect(shown.status).toBe(200);
+    const command = await latestPush();
+    expect(command?.type).toBe("set_scenes");
+    expect(command?.payload).toMatchObject({ scene_id: scene.id, state: { city: "Brussels" } });
+
+    // Values without a scene to open, or values that are not an object, or
+    // too big to be form fields, are refused before anything is queued.
+    const before = command?.id;
+    expect((await push({ scenes: [{ scene_id: scene.id }], state: { city: "Ghent" } })).status).toBe(400);
+    expect((await push({ scenes: [{ scene_id: scene.id }], scene_id: scene.id, state: ["x"] })).status).toBe(400);
+    expect(
+      (
+        await push({
+          scenes: [{ scene_id: scene.id }],
+          scene_id: scene.id,
+          state: { text: "x".repeat(17 * 1024) },
+        })
+      ).status,
+    ).toBe(400);
+    expect((await latestPush())?.id).toBe(before);
+
+    // Empty values are no values: the push is the plain one.
+    expect((await push({ scenes: [{ scene_id: scene.id }], scene_id: scene.id, state: {} })).status).toBe(200);
+    expect((await latestPush())?.payload).not.toHaveProperty("state");
+  });
+
   it("re-keys the frame in place, keeping its id, name and scenes", async () => {
     const frame = await enrolledFrame();
     await confirmFrame(

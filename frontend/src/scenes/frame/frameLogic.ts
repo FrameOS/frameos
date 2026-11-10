@@ -2416,9 +2416,11 @@ export interface frameLogicActions {
   }
   saveScenes: (
     sceneIds: string[],
-    activeSceneId?: string | null
+    activeSceneId?: string | null,
+    activeState?: Record<string, any> | null
   ) => {
     activeSceneId: string | null
+    activeState: Record<string, any> | null
     sceneIds: string[]
   }
   sceneConversionFinished: (
@@ -2636,9 +2638,10 @@ export const frameLogic = kea<frameLogicType>([
     sceneConversionFinished: (sceneId: string, ok: boolean) => ({ sceneId, ok }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Partial<NodeData>) => ({ sceneId, nodeId, nodeData }),
     saveFrame: true,
-    saveScenes: (sceneIds: string[], activeSceneId?: string | null) => ({
+    saveScenes: (sceneIds: string[], activeSceneId?: string | null, activeState?: Record<string, any> | null) => ({
       sceneIds,
       activeSceneId: activeSceneId ?? null,
+      activeState: activeState ?? null,
     }),
     saveAndDeployFrame: true,
     saveAndFastDeployFrame: true,
@@ -3856,7 +3859,7 @@ export const frameLogic = kea<frameLogicType>([
           openSceneControlDrawer(props.frameId, scene.id)
         }
       },
-      saveScenes: async ({ sceneIds, activeSceneId }) => {
+      saveScenes: async ({ sceneIds, activeSceneId, activeState }) => {
         // The scene drawer's push (utils/scenePush.ts): the saved frame with
         // these scenes' edited versions in it, and nothing else. Every other
         // unsaved edit stays in the form: the `frame` subscription resets it
@@ -3874,11 +3877,18 @@ export const frameLogic = kea<frameLogicType>([
           // uploadScenes shim: the assignment ledger records this push, so
           // the scene counts as on the frame from now on. No settings push:
           // it is not diffed, and the frame would apply every key again.
+          // Only these scenes are read back and compared: every other
+          // assignment goes out as it is, and the frame gets a patch of what
+          // changed. Field values for the scene it shows ride the same push.
           const outcome = await persistAndPushCloudFrameScenes(
             props.frameId,
             scenes,
             activeSceneId ?? savedFrame.active_scene_id,
-            cloudScenePersistOptions(props.frameId, savedFrame)
+            {
+              ...cloudScenePersistOptions(props.frameId, savedFrame),
+              only: sceneIds,
+              ...(activeSceneId && activeState && Object.keys(activeState).length ? { activeState } : {}),
+            }
           )
           for (const storeSceneId of outcome.changedStoreSceneIds) {
             clearCloudSceneJsonCache(storeSceneId)

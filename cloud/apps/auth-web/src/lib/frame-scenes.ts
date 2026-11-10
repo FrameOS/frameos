@@ -138,6 +138,30 @@ export function resolveGrantedSettingsGroups({
   return kept.filter((group) => declared.includes(group));
 }
 
+// Public scene-state values that ride along with an activation: a handful of
+// form fields, not a data channel (the event route's ceiling).
+export const maxActiveSceneStateBytes = 16 * 1024;
+
+// A push's `state` for the scene it activates: undefined when absent or
+// empty, false when it is not an object or is too big.
+export function readActiveSceneState(
+  value: unknown,
+): Record<string, unknown> | undefined | false {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  if (Object.keys(value).length === 0) {
+    return undefined;
+  }
+  if (Buffer.byteLength(JSON.stringify(value), "utf8") > maxActiveSceneStateBytes) {
+    return false;
+  }
+  return value as Record<string, unknown>;
+}
+
 // Failures carry the wire code and HTTP status the route already returned, so
 // delegating did not change a single response shape. Tools translate the same
 // values into their own JSON.
@@ -377,6 +401,7 @@ export async function assignScenesToFrame(
   {
     accountId,
     activeSceneId,
+    activeState,
     actor,
     frame,
     requested,
@@ -388,6 +413,10 @@ export async function assignScenesToFrame(
     // to another scene. The device ignores an id that is not in the payload
     // (it then activates the first scene).
     activeSceneId?: string | undefined;
+    // Public field values the activated scene opens with ("Push & activate"):
+    // in the same set_scenes, as uploadScenes carries them, never a second
+    // command racing the push. Only with activeSceneId.
+    activeState?: Record<string, unknown> | undefined;
     actor: unknown;
     frame: FrameRow;
     requested: RequestedScene[];
@@ -569,6 +598,7 @@ export async function assignScenesToFrame(
       checksum: payload.checksum,
       scenes: payload.scenes,
       ...(activeSceneId ? { scene_id: activeSceneId } : {}),
+      ...(activeSceneId && activeState ? { state: activeState } : {}),
     },
     type: "set_scenes",
   });

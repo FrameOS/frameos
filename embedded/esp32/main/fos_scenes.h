@@ -71,12 +71,14 @@ esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
  * scene only if it is what changed. A scene already on the frame is never
  * overwritten in place, so a failed write keeps the one it had.
  * `out_id` receives the scene's id. `etag` is what fos_scenes_etag() reports
- * afterwards (NULL: "local", as for a whole-set upload). */
-esp_err_t fos_scenes_put(const char *json, size_t len, fos_scenes_source_t source,
+ * afterwards (NULL: "local", as for a whole-set upload). `urgent`: the change
+ * activates a scene and somebody waits to see it, so it is written as fast as
+ * flash goes instead of paced around renders and taps. */
+esp_err_t fos_scenes_put(const char *json, size_t len, fos_scenes_source_t source, bool urgent,
                          char *out_id, size_t out_id_len);
 esp_err_t fos_scenes_delete(const char *scene_id, fos_scenes_source_t source);
 esp_err_t fos_scenes_apply_patch(const struct cJSON *put, const struct cJSON *order,
-                                 fos_scenes_source_t source, const char *etag);
+                                 fos_scenes_source_t source, const char *etag, bool urgent);
 
 /* One stored scene's JSON; caller frees. NULL when there is no such scene. */
 char *fos_scenes_get_json(const char *scene_id, size_t *out_len);

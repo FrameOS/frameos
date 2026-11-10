@@ -1903,7 +1903,9 @@ static int cmd_usb_api(int argc, char **argv)
         }
         body[len] = '\0';
         char scene_id[FOS_USB_API_MAX_SCENE_ID];
-        esp_err_t err = scene_put ? fos_scenes_put((const char *)body, len, FOS_SCENES_SOURCE_LOCAL,
+        bool activate = scene_put && argc >= 4 && strcmp(argv[3], "activate") == 0;
+        /* Shown at once: written as fast as flash goes, not paced around renders. */
+        esp_err_t err = scene_put ? fos_scenes_put((const char *)body, len, FOS_SCENES_SOURCE_LOCAL, activate,
                                                    scene_id, sizeof(scene_id))
                                   : fos_http_store_uploaded_scenes_payload((const char *)body, len);
         free(body);
@@ -1912,7 +1914,6 @@ static int cmd_usb_api(int argc, char **argv)
             usb_api_error(subcommand, err, (detail && detail[0]) ? detail : "scene upload failed");
             return 1;
         }
-        bool activate = scene_put && argc >= 4 && strcmp(argv[3], "activate") == 0;
         if (activate) fos_scenes_select(scene_id);
         if (activate || !scene_put) fos_client_render_now();
         usb_api_ok(subcommand);

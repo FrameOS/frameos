@@ -142,7 +142,7 @@ def test_a_scene_payload_is_written_off_the_render_task():
     assert "fos_client_input_held()" in pace and "fos_client_render_in_flight()" in pace
     store_module = (ESP32_DIR / "main" / "fos_scene_store.c").read_text()
     assert "if (s_hooks.pace) s_hooks.pace();" in store_module
-    for after in ("save_etag_file(", "persist_scene_source(", "unlink(SCENES_INDEX_PATH)"):
+    for after in ("save_etag_file(", "persist_scene_source(", "fos_scene_store_remove_index()"):
         assert write < store.index(after), f"fos_scenes.c: {after} comes before the payload is on flash"
     take = scenes["fos_scenes_take_backend_payload"]
     assert take.index("load_into_nim(") < take.index("store_behind("), "the write is queued before the parse"

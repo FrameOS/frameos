@@ -2909,13 +2909,16 @@ static esp_err_t scenes_body_post(httpd_req_t *req, bool one)
 
     log_http_command(req, one ? "scenePut" : "uploadScenes", (size_t)total);
     char scene_id[FOS_HTTP_UPLOAD_SCENE_ID_LEN];
-    esp_err_t err = one ? fos_scenes_put(body, total, FOS_SCENES_SOURCE_LOCAL, scene_id, sizeof(scene_id))
+    char activate_arg[4];
+    bool activate = one && asset_query_param(req, "activate", activate_arg, sizeof(activate_arg)) &&
+                    activate_arg[0] == '1';
+    /* Shown at once: written as fast as flash goes, not paced around renders. */
+    esp_err_t err = one ? fos_scenes_put(body, total, FOS_SCENES_SOURCE_LOCAL, activate, scene_id, sizeof(scene_id))
                         : fos_http_store_uploaded_scenes_payload(body, total);
     free(body);
     if (err != ESP_OK) return send_scenes_error(req, err);
     bool render = !one;
-    char activate[4];
-    if (one && asset_query_param(req, "activate", activate, sizeof(activate)) && activate[0] == '1') {
+    if (activate) {
         fos_scenes_select(scene_id);
         render = true;
     }

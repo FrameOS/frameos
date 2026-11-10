@@ -1531,6 +1531,8 @@ static void ws_schedule_reboot(void)
  * to it) leaves the provider showing this frame as out of sync, which is the
  * truth. The command itself was already acked — that ack means "accepted and
  * persisted", scene_ack means "live". */
+static void ws_send_scene_ack(const char *checksum);
+
 static void ws_poll_scene_ack(void)
 {
     if (!s_scene_ack_pending) return;
@@ -1560,12 +1562,17 @@ static void ws_poll_scene_ack(void)
         ESP_LOGI(TAG, "set_scenes: applied while offline; scene_ack deferred to hello");
         return;
     }
+    ws_send_scene_ack(s_scene_ack_checksum);
+}
 
+/* `scene_ack {checksum, active_scene?}`: the set with this checksum is live. */
+static void ws_send_scene_ack(const char *checksum)
+{
     cJSON *msg = cJSON_CreateObject();
     if (!msg) return; /* out of memory: stay silent, provider retries */
     cJSON_AddStringToObject(msg, "type", "scene_ack");
-    if (s_scene_ack_checksum[0]) {
-        cJSON_AddStringToObject(msg, "checksum", s_scene_ack_checksum);
+    if (checksum != NULL && checksum[0]) {
+        cJSON_AddStringToObject(msg, "checksum", checksum);
     }
     /* The render task is often still on the first render of the new payload
      * (holding the runtime lock) when this runs: then active_scene is left
@@ -2180,10 +2187,38 @@ static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const
  * frame holding anything else refuses and the provider sends the whole list.
  * Acked and scene_acked exactly as set_scenes is, so `checksum` is the whole
  * set's. */
-static void ws_handle_set_scenes(const cJSON *root, const cJSON *id, bool patch)
+/* Send a pushed set's `scene_id` / `state` on as the switch the
+ * set_current_scene verb makes: the state rides to the runtime, which holds it
+ * until that scene opens (single_scene_host.nim), so it is in place at the
+ * scene's first render even while the scene's file is still being written. */
+static void select_pushed_scene(const char *scene_id, const cJSON *state, fos_event_origin_t origin)
+{
+    if (!cJSON_IsObject(state)) {
+        fos_scenes_select(scene_id);
+        return;
+    }
+    cJSON *payload = cJSON_CreateObject();
+    char *printed = NULL;
+    if (payload != NULL && cJSON_AddStringToObject(payload, "sceneId", scene_id) != NULL &&
+        cJSON_AddItemReferenceToObject(payload, "state", (cJSON *)state)) {
+        printed = cJSON_PrintUnformatted(payload);
+    }
+    cJSON_Delete(payload);
+    if (printed == NULL || fos_events_dispatch(origin, FOS_EVENT_SET_CURRENT_SCENE, printed) != FOS_EVENT_DONE) {
+        fos_scenes_select(scene_id); /* the switch, at least */
+    }
+    cJSON_free(printed);
+}
+
+static void ws_handle_set_scenes(const cJSON *root, const cJSON *id, bool patch, fos_event_origin_t origin)
 {
     const cJSON *checksum = cJSON_GetObjectItem(root, "checksum");
     uint32_t generation = fos_scenes_apply_generation();
+    /* Optional scene_id names which pushed scene to activate ("Push & activate",
+     * "Install and show", the workspace's "preview on frame"): somebody waits
+     * to see it, so a patch that carries one is written unpaced. */
+    const cJSON *scene_id = cJSON_GetObjectItem(root, "scene_id");
+    bool select = cJSON_IsString(scene_id) && scene_id->valuestring[0];
     esp_err_t err;
     if (patch) {
         const cJSON *base = cJSON_GetObjectItem(root, "base_checksum");
@@ -2192,15 +2227,25 @@ static void ws_handle_set_scenes(const cJSON *root, const cJSON *id, bool patch)
         if (!cJSON_IsString(checksum) || !cJSON_IsString(base)) {
             refused = "invalid_patch";
         } else if (from_cloud && strcmp(checksum->valuestring, s_applied_scenes_checksum) == 0) {
-            /* A redelivered patch this frame already applied. Its scene_ack
-             * went out then, or the hello carried the checksum. */
+            /* A redelivered patch this frame already applied, or a push of the
+             * set it holds that names a scene to show (the install already
+             * landed, then "Push & activate"). Its scene_ack went out then, or
+             * the hello carried the checksum; the switch is still asked for. */
             ws_ack(id, true, NULL);
+            if (select) {
+                select_pushed_scene(scene_id->valuestring, cJSON_GetObjectItem(root, "state"), origin);
+                fos_client_render_now();
+                /* Live already: said at once, so the push's progress moves on
+                 * to the render instead of waiting for an apply that has
+                 * nothing to do. */
+                ws_send_scene_ack(checksum->valuestring);
+            }
             return;
         } else if (!from_cloud || strcmp(base->valuestring, s_applied_scenes_checksum) != 0) {
             refused = "base_mismatch";
         } else {
             err = fos_scenes_apply_patch(cJSON_GetObjectItem(root, "put"), cJSON_GetObjectItem(root, "order"),
-                                         FOS_SCENES_SOURCE_CLOUD, NULL);
+                                         FOS_SCENES_SOURCE_CLOUD, NULL, select);
             if (err != ESP_OK) refused = err == ESP_ERR_NO_MEM ? "no_room" : "patch_refused";
         }
         if (refused != NULL) {
@@ -2229,15 +2274,13 @@ static void ws_handle_set_scenes(const cJSON *root, const cJSON *id, bool patch)
             return;
         }
     }
-    /* Optional scene_id names which pushed scene to activate (the workspace's
-     * "preview on frame" flow). Queued now, applied by the render task AFTER
-     * the payload loads — fos_client.c applies pending scenes before pending
-     * selection, so the id exists by then. Unknown ids are dropped there. A
-     * patch renders only then: a scene that is not on the panel costs no
-     * refresh, and one that is renders when the render task picks it up. */
-    const cJSON *scene_id = cJSON_GetObjectItem(root, "scene_id");
-    bool select = cJSON_IsString(scene_id) && scene_id->valuestring[0];
-    if (select) fos_scenes_select(scene_id->valuestring);
+    /* The switch is queued now and applied by the render task AFTER the
+     * payload loads — fos_client.c applies pending scenes before pending
+     * selection, so the id exists by then. Unknown ids are dropped there. Its
+     * `state` goes with it (select_pushed_scene). A patch renders only then: a
+     * scene that is not on the panel costs no refresh, and one that is renders
+     * when the render task picks it up. */
+    if (select) select_pushed_scene(scene_id->valuestring, cJSON_GetObjectItem(root, "state"), origin);
     if (select || !patch) fos_client_render_now();
     ws_ack(id, true, NULL);
 
@@ -3012,7 +3055,7 @@ static void dispatch_verb(const char *type, cJSON *root, const cJSON *id,
     } else if (strcmp(type, "scene_event") == 0) {
         ws_handle_scene_event(root, id, origin);
     } else if (strcmp(type, "set_scenes") == 0 || strcmp(type, "scenes_patch") == 0) {
-        ws_handle_set_scenes(root, id, type[1] == 'c' /* scenes_patch */);
+        ws_handle_set_scenes(root, id, type[1] == 'c' /* scenes_patch */, origin);
     } else if (strcmp(type, "set_settings") == 0) {
         ws_handle_set_settings(root, id);
     } else if (strcmp(type, "assets_list") == 0) {

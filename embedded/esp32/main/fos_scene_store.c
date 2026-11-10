@@ -59,6 +59,93 @@ static long file_size(const char *path)
     return stat(path, &st) == 0 ? (long)st.st_size : -1;
 }
 
+/* Which slot files exist, as far as the store knows. Every slot file is
+ * written and removed here, under the caller's lock, so after the first
+ * sweep (a boot's, which removes every file the index does not name) the
+ * store asks flash nothing about them. A lookup by name on SPIFFS walks every
+ * block's lookup page, about half a second on a 24 MB partition (2026-11-10,
+ * the reTerminal Sticky): a put that stat'ed every unnamed slot and a sweep
+ * that removed them all cost seconds each, the sweep on the render task.
+ * Unknown until that sweep and after fos_scene_store_forget(); a free slot is
+ * then checked on flash. */
+static bool s_slot_file[FOS_SCENE_STORE_SLOTS];
+/* A slot file the sweep emptied rather than removed, nobody's: the next put
+ * writes it. Opening a file that is there is one lookup that finds it
+ * (~15 ms); creating one walks the whole partition twice, for the name and
+ * for a free id (~1.07 s on 24 MB). An empty file is a page or two. */
+static bool s_slot_spare[FOS_SCENE_STORE_SLOTS];
+static bool s_slot_map_known = false;
+
+void fos_scene_store_forget(void)
+{
+    memset(s_slot_file, 0, sizeof(s_slot_file));
+    memset(s_slot_spare, 0, sizeof(s_slot_spare));
+    s_slot_map_known = false;
+}
+
+/* Emptied and kept for the next put (s_slot_spare); removed if it cannot be. */
+static void retire_slot(int slot)
+{
+    char path[PATH_LEN];
+    fos_scene_store_slot_path(slot, path, sizeof(path));
+    FILE *f = fopen(path, "wb");
+    if (f != NULL && fclose(f) == 0) {
+        s_slot_file[slot] = true;
+        s_slot_spare[slot] = true;
+        return;
+    }
+    remove(path);
+    s_slot_file[slot] = false;
+    s_slot_spare[slot] = false;
+}
+
+static bool slot_has_file(int slot)
+{
+    if (s_slot_map_known) return s_slot_file[slot];
+    char path[PATH_LEN];
+    fos_scene_store_slot_path(slot, path, sizeof(path));
+    return file_size(path) >= 0;
+}
+
+static void remove_slot(int slot)
+{
+    char path[PATH_LEN];
+    fos_scene_store_slot_path(slot, path, sizeof(path));
+    remove(path);
+    s_slot_file[slot] = false;
+    s_slot_spare[slot] = false;
+}
+
+void fos_scene_store_remove_slots(void)
+{
+    if (!s_slot_map_known) {
+        for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) remove_slot(slot);
+        s_slot_map_known = true; /* none now */
+        return;
+    }
+    /* Emptied, so the whole set written next opens files that are there. */
+    for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) {
+        if (s_slot_file[slot] && !s_slot_spare[slot]) retire_slot(slot);
+    }
+}
+
+/* The slot a put writes: a spare first (a file that is there), else the
+ * first slot nobody names and no file sits in. FOS_SCENE_STORE_SLOTS: none. */
+static int pick_slot(bool *used)
+{
+    if (s_slot_map_known) {
+        for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) {
+            if (!used[slot] && s_slot_spare[slot]) return slot;
+        }
+    }
+    int slot = 0;
+    while (slot < FOS_SCENE_STORE_SLOTS && (used[slot] || slot_has_file(slot))) {
+        used[slot] = true;
+        slot++;
+    }
+    return slot;
+}
+
 char *fos_scene_store_read_file(const char *path, size_t *out_len)
 {
     FILE *f = fopen(path, "rb");
@@ -80,14 +167,20 @@ char *fos_scene_store_read_file(const char *path, size_t *out_len)
     return buf;
 }
 
-fos_scene_store_err_t fos_scene_store_write_file(const char *path, const char *tmp,
-                                                 const char *data, size_t len)
+/* `path` written whole, or not there at all (removed on any failure, errno
+ * kept). "wb" truncates a file that is there, so nothing is removed first:
+ * each remove is one more lookup by name. */
+static fos_scene_store_err_t write_plain(const char *path, const char *data, size_t len)
 {
-    remove(tmp);
     if (s_hooks.make_room) s_hooks.make_room(len);
     errno = 0;
-    FILE *f = fopen(tmp, "wb");
-    if (f == NULL) return errno == ENOSPC ? FOS_SCENE_STORE_ERR_NO_SPACE : FOS_SCENE_STORE_ERR_IO;
+    FILE *f = fopen(path, "wb");
+    if (f == NULL) {
+        int err_no = errno;
+        remove(path);
+        errno = err_no;
+        return err_no == ENOSPC ? FOS_SCENE_STORE_ERR_NO_SPACE : FOS_SCENE_STORE_ERR_IO;
+    }
     size_t written = 0;
     while (written < len) {
         size_t chunk = len - written > 2048 ? 2048 : len - written;
@@ -100,10 +193,18 @@ fos_scene_store_err_t fos_scene_store_write_file(const char *path, const char *t
     if (fclose(f) != 0) ok = false;
     if (!ok) {
         int err_no = errno ? errno : ENOSPC;
-        remove(tmp);
+        remove(path);
         errno = err_no;
         return FOS_SCENE_STORE_ERR_NO_SPACE;
     }
+    return FOS_SCENE_STORE_OK;
+}
+
+fos_scene_store_err_t fos_scene_store_write_file(const char *path, const char *tmp,
+                                                 const char *data, size_t len)
+{
+    fos_scene_store_err_t written = write_plain(tmp, data, len);
+    if (written != FOS_SCENE_STORE_OK) return written;
     remove(path);
     /* A failed rename keeps the tmp: for the index it is the only copy, and
      * fos_scene_store_recover_index() puts it back at the next boot. */
@@ -147,20 +248,32 @@ static void mark_slots(const cJSON *index, bool *used)
     }
 }
 
-cJSON *fos_scene_store_read_index(void)
+/* One index file as a tree; NULL when it is missing or not an index. */
+static cJSON *parse_index_file(const char *name)
 {
     char path[PATH_LEN];
-    path_of(FOS_SCENE_STORE_INDEX_NAME, path);
+    path_of(name, path);
     size_t len = 0;
     char *text = fos_scene_store_read_file(path, &len);
     if (text == NULL) return NULL;
     cJSON *index = cJSON_ParseWithLength(text, len);
     free(text);
-    cJSON *scenes = cJSON_GetObjectItem(index, "scenes");
-    if (!cJSON_IsArray(scenes)) {
+    if (!cJSON_IsArray(cJSON_GetObjectItem(index, "scenes"))) {
         cJSON_Delete(index);
         return NULL;
     }
+    return index;
+}
+
+cJSON *fos_scene_store_read_index(void)
+{
+    /* The copy, when the index itself is not whole: a power cut while it was
+     * rewritten in place (write_index). */
+    cJSON *index = parse_index_file(FOS_SCENE_STORE_INDEX_NAME);
+    if (index == NULL) index = parse_index_file(FOS_SCENE_STORE_INDEX_TMP_NAME);
+    if (index == NULL) return NULL;
+    cJSON *scenes = cJSON_GetObjectItem(index, "scenes");
+    char path[PATH_LEN];
     cJSON *entry = NULL;
     cJSON_ArrayForEach(entry, scenes) {
         if (cJSON_GetObjectItem(entry, "bytes") == NULL) {
@@ -173,6 +286,11 @@ cJSON *fos_scene_store_read_index(void)
     return index;
 }
 
+/* The copy first, whole: that is the change made. Then the index in place,
+ * which a power cut can leave torn, and then readers take the copy
+ * (fos_scene_store_read_index). Two lookups by name where a tmp, a remove and
+ * a rename took five (2.7 s on a 24 MB SPIFFS). Both files stay. An index the
+ * rewrite could not finish is removed, so no reader takes the old one. */
 static fos_scene_store_err_t write_index(const cJSON *index)
 {
     char *text = cJSON_PrintUnformatted(index);
@@ -181,9 +299,20 @@ static fos_scene_store_err_t write_index(const cJSON *index)
     char tmp[PATH_LEN];
     path_of(FOS_SCENE_STORE_INDEX_NAME, path);
     path_of(FOS_SCENE_STORE_INDEX_TMP_NAME, tmp);
-    fos_scene_store_err_t err = fos_scene_store_write_file(path, tmp, text, strlen(text));
+    size_t len = strlen(text);
+    fos_scene_store_err_t err = write_plain(tmp, text, len);
+    if (err == FOS_SCENE_STORE_OK) (void)write_plain(path, text, len); /* removed if it failed */
     cJSON_free(text);
     return err;
+}
+
+void fos_scene_store_remove_index(void)
+{
+    char path[PATH_LEN];
+    path_of(FOS_SCENE_STORE_INDEX_NAME, path);
+    remove(path);
+    path_of(FOS_SCENE_STORE_INDEX_TMP_NAME, path);
+    remove(path);
 }
 
 /* What the index keeps of a scene: what the catalog and a boot need. */
@@ -249,22 +378,17 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
 
     /* A slot is free when no entry names it AND no file sits there: a file
      * the index does not name is one a reader may still be holding, until
-     * the sweep. */
+     * the sweep. Asked of flash only while the store does not know its
+     * files (slot_has_file), and only for the slots a put tries. */
     bool used[FOS_SCENE_STORE_SLOTS] = {false};
     mark_slots(old, used);
     char path[PATH_LEN];
-    for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) {
-        fos_scene_store_slot_path(slot, path, sizeof(path));
-        if (!used[slot] && file_size(path) >= 0) used[slot] = true;
-    }
 
     fos_scene_store_err_t err = FOS_SCENE_STORE_OK;
     cJSON *fresh[FOS_SCENE_STORE_SLOTS]; /* the puts' new entries, each until it is placed */
     int fresh_count = 0;
     int written[FOS_SCENE_STORE_SLOTS];
     int written_count = 0;
-    char tmp[PATH_LEN];
-    path_of(FOS_SCENE_STORE_SLOT_TMP_NAME, tmp);
 
     const cJSON *item = change->put_items ? change->put_items->child : NULL;
     int put_count = change->put_items ? cJSON_GetArraySize(change->put_items) : change->put_count;
@@ -298,8 +422,7 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
                   fresh_index(fresh, fresh_count, id) < 0;
         /* Only white space after it: one scene, whole. */
         while (ok && end != NULL && end < json + len) ok = isspace((unsigned char)*end++);
-        int slot = 0;
-        while (slot < FOS_SCENE_STORE_SLOTS && used[slot]) slot++;
+        int slot = pick_slot(used);
         if (json == NULL) {
             err = FOS_SCENE_STORE_ERR_NO_MEMORY;
         } else if (!ok) {
@@ -307,8 +430,14 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
         } else if (slot == FOS_SCENE_STORE_SLOTS) {
             err = FOS_SCENE_STORE_ERR_NO_SLOTS;
         } else {
+            /* Straight to its own name: no index names this slot until the
+             * index is written, so a torn file is nobody's (the sweep's),
+             * and a tmp, a remove and a rename were three more lookups. */
             fos_scene_store_slot_path(slot, path, sizeof(path));
-            err = fos_scene_store_write_file(path, tmp, json, len);
+            s_slot_file[slot] = true;
+            s_slot_spare[slot] = false;
+            err = write_plain(path, json, len);
+            if (err != FOS_SCENE_STORE_OK) s_slot_file[slot] = false; /* removed */
         }
         if (err == FOS_SCENE_STORE_OK) {
             used[slot] = true;
@@ -386,10 +515,7 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
 
     if (err != FOS_SCENE_STORE_OK) {
         /* The index was not switched: this op's files are nobody's. */
-        for (int i = 0; i < written_count; i++) {
-            fos_scene_store_slot_path(written[i], path, sizeof(path));
-            remove(path);
-        }
+        for (int i = 0; i < written_count; i++) remove_slot(written[i]);
     } else {
         result->scene_count = cJSON_GetArraySize(scenes);
         const cJSON *kept = NULL;
@@ -443,21 +569,48 @@ void fos_scene_store_sweep(void)
     if (cJSON_GetArraySize(cJSON_GetObjectItem(index, "scenes")) > 0) {
         bool named[FOS_SCENE_STORE_SLOTS] = {false};
         mark_slots(index, named);
-        char path[PATH_LEN];
-        for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) {
-            if (named[slot]) continue;
-            fos_scene_store_slot_path(slot, path, sizeof(path));
-            remove(path);
+        /* Every unnamed slot while the store does not know its files (a
+         * boot's sweep: what a crash left), then the ones it wrote: a put's
+         * sweep is one remove, not one per slot. */
+        bool known = s_slot_map_known;
+        if (!known) {
+            /* Where firmware before 2026.11.6 wrote a slot first; a crash
+             * there left up to a whole scene's bytes. */
+            char tmp[PATH_LEN];
+            path_of(FOS_SCENE_STORE_SLOT_TMP_NAME, tmp);
+            remove(tmp);
         }
+        for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) {
+            if (named[slot]) {
+                s_slot_file[slot] = true;
+                s_slot_spare[slot] = false;
+            } else if (!known) {
+                remove_slot(slot);
+            } else if (s_slot_file[slot] && !s_slot_spare[slot]) {
+                retire_slot(slot); /* emptied, for the next put */
+            }
+        }
+        s_slot_map_known = true;
     }
     cJSON_Delete(index);
 }
 
 bool fos_scene_store_recover_index(void)
 {
+    /* The index gone or torn and the copy whole: the copy is the change that
+     * was made (write_index), and goes back in its place. */
+    cJSON *index = parse_index_file(FOS_SCENE_STORE_INDEX_NAME);
+    if (index != NULL) {
+        cJSON_Delete(index);
+        return false;
+    }
+    cJSON *copy = parse_index_file(FOS_SCENE_STORE_INDEX_TMP_NAME);
+    if (copy == NULL) return false;
+    cJSON_Delete(copy);
     char path[PATH_LEN];
     char tmp[PATH_LEN];
     path_of(FOS_SCENE_STORE_INDEX_NAME, path);
     path_of(FOS_SCENE_STORE_INDEX_TMP_NAME, tmp);
-    return file_size(path) < 0 && file_size(tmp) >= 0 && rename(tmp, path) == 0;
+    remove(path);
+    return rename(tmp, path) == 0;
 }

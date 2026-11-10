@@ -236,6 +236,18 @@
   `set_scenes`), a backend's `/embedded/scenes?patch=1` (what it last served
   per frame, in Redis). A device refuses a patch that is not against the set it
   holds (`base_mismatch`), and the plane sends the whole list.
+- "Push & activate" and "Install & activate" are ONE push of that scene: the
+  SPA reads back only the assignments that own it (`only` in
+  `cloudFrameScenesSave.ts`) and posts `scene_id` + `state` with the list (the
+  queued `set_scenes` carries them, never a second command); on a backend the
+  switch rides the queue behind a forced pull that still asks for a patch. The
+  device writes a change that activates its scene unpaced (`s_store_urgent`).
+- A SPIFFS lookup by name (stat/open/remove/rename) is ~0.5 s on the 32 MB
+  boards' 24 MB `/state`: the store knows its slot files after the boot sweep,
+  writes slots straight to their names and the index as a kept copy then in
+  place. Remove the index and slots ONLY through the store
+  (`fos_scene_store_remove_index` / `_remove_slots`; a wipe calls
+  `fos_scene_store_forget`), and never add a stat to a per-change path.
 
 ## Voice chat: `docs/voice-chat.md` is the contract
 

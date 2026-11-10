@@ -1468,23 +1468,11 @@ export const scenesLogic = kea<scenesLogicType>([
       control.actions.sceneActivationStarted(sceneId)
       try {
         if (isCloudMode()) {
-          // The push names this scene active; the drawer's field values go
-          // with a select behind it. Until the frame acks the push the cloud
-          // answers that select by re-pushing the set with this scene active
-          // and these values, in place of the pending one.
-          if (toSave.length) {
-            await frameLogicInstance.asyncActions.saveScenes(toSave, sceneId)
-          }
-          if (state && Object.keys(state).length > 0) {
-            const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ sceneId, state }),
-            })
-            if (!response.ok) {
-              throw new Error('Failed to send the scene values')
-            }
-          }
+          // One push: these scenes (only they are read back and compared),
+          // this one named active, the drawer's field values with it. The hub
+          // sends the frame what changed, and an ESP32 writes it at once and
+          // opens the scene with those values (fos_cloud.c).
+          await frameLogicInstance.asyncActions.saveScenes(toSave, sceneId, state ?? null)
           control.actions.sceneActivationSettled(sceneId)
           longRunningTasksModel.actions.finishTask({
             frameId: props.frameId,

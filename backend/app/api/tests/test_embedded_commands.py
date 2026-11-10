@@ -512,6 +512,42 @@ async def test_set_next_scene_queues_the_switch_behind_the_deploy(async_client, 
     assert row.type == 'set_current_scene' and row.payload == {'scene_id': 'clock', 'state': {'size': 5}}
 
 
+@pytest.mark.asyncio
+async def test_a_switch_to_a_scene_the_frame_has_not_pulled_comes_with_a_sync(async_client, no_auth_client, db):
+    """"Push & activate" saves the scene and queues the switch while its deploy
+    job is still queueing the rows, so the switch can be handed over before
+    any deploy row exists. The pull says `sync` all the same when the frame's
+    scenes are behind what the backend serves: the device pulls (the changed
+    scenes alone, `?patch=1`) before it runs the switch (fos_commands.c)."""
+    frame = await _embedded_frame(async_client, db)
+    current = embedded_scenes_etag(db, frame)
+
+    def pull(scenes_etag):
+        return no_auth_client.post(
+            f'/api/frames/{frame.id}/embedded/commands',
+            json={'scenes_etag': scenes_etag},
+            headers=_device_headers(frame),
+        )
+
+    enqueue_frame_command(db, frame, 'set_current_scene', {'scene_id': 'clock'}, detail='Clock')
+    db.commit()
+    body = (await pull('"older"')).json()
+    assert [command['type'] for command in body['commands']] == ['set_current_scene']
+    assert body['sync'] is True
+
+    # Behind but no switch: the frame's own poll is enough.
+    assert (await pull('"older"')).json()['sync'] is False
+    # A switch to a frame that holds what is served: nothing to pull.
+    enqueue_frame_command(db, frame, 'set_current_scene', {'scene_id': 'clock'}, detail='Clock')
+    db.commit()
+    assert (await pull(current)).json()['sync'] is False
+    # A store the frame was handed locally (USB, its own HTTP API) waits for
+    # a deploy, as it always has.
+    enqueue_frame_command(db, frame, 'set_current_scene', {'scene_id': 'clock'}, detail='Clock')
+    db.commit()
+    assert (await pull('local')).json()['sync'] is False
+
+
 # ----------------------------------------------------------- sleep forecast
 
 @pytest.mark.asyncio

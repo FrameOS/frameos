@@ -93,6 +93,17 @@ export interface CloudScenePersistOptions {
    * (cloud/docs/cloud-frames.md, "Service settings").
    */
   settingsGroupsForNewScene?: (scenes: readonly FrameScene[]) => string[]
+  /**
+   * Push only these runtime scenes (the scene drawer's push): an assignment
+   * that owns none of them (by `sources`) goes out as it is, its scenes.json
+   * never read. Reading every assignment back, one request each, was most of
+   * a push's time on a frame with twenty scenes. A scene here that `sources`
+   * does not place (new in the workspace, or a tile that never hydrated) takes
+   * the whole read, so nothing is ever created twice.
+   */
+  only?: readonly string[]
+  /** Public field values for the scene the push activates, in the same push. */
+  activeState?: Record<string, any>
 }
 
 interface AssignmentPlan {
@@ -246,7 +257,30 @@ async function persistAndPushCloudFrameScenesNow(
   const assignments: AssignmentPlan[] = []
   const claimedRuntimeIds = new Set<string>()
 
+  // The store scenes that own the pushed runtime scenes, when every one of
+  // them is placed; null = read every assignment (a full save).
+  const only = options.only ? new Set(options.only) : null
+  const pushedRows =
+    only && [...only].every((id) => sources[id]?.scene_id)
+      ? new Set([...only].map((id) => sources[id]!.scene_id))
+      : null
+
   for (const row of rows) {
+    if (only && pushedRows && !pushedRows.has(row.scene_id)) {
+      // Not part of this push: as it is (omitted maps and layouts = kept),
+      // and its runtime scenes stay claimed.
+      assignments.push({
+        scene_id: row.scene_id,
+        scene_version: row.scene_version ?? null,
+        settings_groups: keptGrant(row),
+      })
+      for (const [runtimeId, source] of Object.entries(sources)) {
+        if (source?.scene_id === row.scene_id) {
+          claimedRuntimeIds.add(runtimeId)
+        }
+      }
+      continue
+    }
     // The version the workspace hydrated the form from — what the frame was
     // sent — not the store's latest. Comparing the form against a NEWER
     // version read every scene with a pending update as edited: an owned one
@@ -364,6 +398,10 @@ async function persistAndPushCloudFrameScenesNow(
     if (!scene?.id || claimedRuntimeIds.has(scene.id)) {
       continue
     }
+    if (only && !only.has(scene.id)) {
+      // Another unsaved scene in the form: not this push's to create.
+      continue
+    }
     const name = sceneName(scene)
     const newSceneId = await createCloudAccountScene(name, [withoutSceneOrigin(scene)], undefined, {
       frameId,
@@ -380,6 +418,12 @@ async function persistAndPushCloudFrameScenesNow(
     })
   }
 
-  await setCloudFrameScenes(frameId, assignments, cloudDeployActiveSceneId(activeSceneId, formScenes) ?? undefined)
+  const pushActiveSceneId = cloudDeployActiveSceneId(activeSceneId, formScenes) ?? undefined
+  await setCloudFrameScenes(
+    frameId,
+    assignments,
+    pushActiveSceneId,
+    pushActiveSceneId ? options.activeState : undefined
+  )
   return { changedStoreSceneIds, notes }
 }

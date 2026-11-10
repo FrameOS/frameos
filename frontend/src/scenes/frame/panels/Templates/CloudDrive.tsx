@@ -113,6 +113,9 @@ export function CloudDrive({ openInstalledSceneDrawer = false }: CloudDriveProps
                   applyTemplate={(template) => {
                     applyRemoteToFrame(driveRepository, template, openInstalledSceneDrawer)
                   }}
+                  installAndActivate={(template) => {
+                    applyRemoteToFrame(driveRepository, template, openInstalledSceneDrawer, true)
+                  }}
                   installedTemplatesByName={installedTemplatesByName}
                   installing={Boolean(installingTemplateIds[templateFavouriteId(template, driveRepository)])}
                   templateDragData={

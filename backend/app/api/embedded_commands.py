@@ -217,14 +217,26 @@ async def api_embedded_device_commands(
     # The cloud hello's name for it, and the older name this route first had.
     scenes_etag = _str_field(body, "scenes_checksum") or _str_field(body, "scenes_etag")
     settings_etag = _str_field(body, "settings_etag")
+    scenes_current = None if scenes_etag is None else scenes_etag == embedded_scenes_etag(db, frame)
     acked = ack_pull_backed_commands(
         db,
         frame,
-        scenes_current=None if scenes_etag is None else scenes_etag == embedded_scenes_etag(db, frame),
+        scenes_current=scenes_current,
         settings_current=None if settings_etag is None else settings_etag == embedded_settings_etag(db, frame),
         now=now,
     )
     handed = drain_frame_commands(db, frame, now)
+    # A switch to a scene saved since the frame's last pull ("Push & activate"
+    # queues the switch while its deploy job is still queueing the rows) names
+    # a scene the frame does not hold yet: it pulls first, and the pull is the
+    # changed scenes alone (`?patch=1` with its ETag). Never over a store the
+    # frame was handed locally (USB, its own HTTP API): that one waits for a
+    # deploy.
+    switch_behind = (
+        scenes_current is False
+        and scenes_etag != "local"
+        and any(command.type == "set_current_scene" for command in handed)
+    )
     db.commit()
     for command in acked:
         await _note_outcome(db, redis, frame, command)
@@ -237,7 +249,8 @@ async def api_embedded_device_commands(
         # A deploy is waiting and the device does not hold it: pull the
         # scenes and settings now, whatever the device's own sync rules say
         # (a USB-pushed scene store skips the backend pull until a deploy).
-        "sync": deploy_rows_pending(db, frame, now),
+        # The device pulls before it runs the commands (fos_commands.c).
+        "sync": deploy_rows_pending(db, frame, now) or switch_behind,
     }
 
 

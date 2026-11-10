@@ -17,6 +17,7 @@ import {
   CheckIcon,
   EyeIcon,
   PhotoIcon,
+  PlayIcon,
   StarIcon as StarOutlineIcon,
 } from '@heroicons/react/24/outline'
 import { Button } from '../../../../components/Button'
@@ -70,6 +71,8 @@ interface TemplateProps {
   frameId?: FrameId
   repository?: RepositoryType
   applyTemplate?: (template: TemplateType) => void
+  /** "Install & activate": installed, pushed (that scene alone) and shown now. */
+  installAndActivate?: (template: TemplateType) => void
   saveRemoteAsLocal?: (template: TemplateType) => void
   exportTemplate?: (id: string, format?: string) => void
   removeTemplate?: (id: string) => void
@@ -128,6 +131,7 @@ export function TemplateRow({
   exportTemplate,
   removeTemplate,
   applyTemplate,
+  installAndActivate,
   editTemplate,
   saveRemoteAsLocal,
   installedTemplatesByName,
@@ -373,6 +377,17 @@ export function TemplateRow({
               <DropdownMenu
                 buttonColor="secondary"
                 items={[
+                  ...(installAndActivate
+                    ? [
+                        {
+                          label: 'Install & activate',
+                          onClick: () => installAndActivate(template),
+                          disabled: !canInstall || installing,
+                          title: unsupported ? unsupportedReason : 'Install it, push it and show it on the frame now',
+                          icon: <PlayIcon className="w-5 h-5" />,
+                        },
+                      ]
+                    : []),
                   ...(applyTemplate
                     ? [
                         {

@@ -42,6 +42,26 @@ export interface TemplateLogicProps {
   frameId: FrameId
 }
 
+/** The scene ids an install just added to the frame's form, in form order. */
+function sceneIdsAdded(before: ReadonlySet<string>, after: readonly Partial<FrameScene>[] | undefined): FrameScene[] {
+  return (after ?? []).filter((scene): scene is FrameScene => Boolean(scene?.id) && !before.has(scene.id as string))
+}
+
+/** Which installed scene "Install & activate" shows: the one its pack marks
+ * the default, else the first. */
+function sceneToActivate(scenes: readonly Partial<FrameScene>[]): string | null {
+  return (scenes.find((scene) => scene?.default)?.id ?? scenes[0]?.id ?? null) as string | null
+}
+
+/** The scene drawer's "Push & activate" for a scene an install just added:
+ * that scene alone (and the scenes it draws or switches to) saved, pushed and
+ * shown, the rest of the form untouched. */
+async function pushAndActivateInstalled(frameId: FrameId, sceneId: string): Promise<void> {
+  const logic = scenesLogic({ frameId })
+  logic.mount()
+  await logic.asyncActions.pushScene(sceneId, true, null)
+}
+
 /** The `detail` of a failed response, so the drawer's toast says what went
  * wrong (a private cloud scene without its owner's link, an unreachable
  * repository) instead of only that something did. */
@@ -257,10 +277,15 @@ export interface templatesLogicActions {
   applyRemoteToFrame: (
     repository: RepositoryType,
     template: TemplateType,
-    openDrawer?: boolean
+    openDrawer?: boolean,
+    activate?: boolean
   ) => {
+    activate: boolean
     openDrawer: boolean
     repository: RepositoryType
+    template: TemplateType
+  }
+  installAndActivateTemplate: (template: TemplateType) => {
     template: TemplateType
   }
   editLocalTemplate: (template: TemplateType) => {
@@ -619,11 +644,21 @@ export const templatesLogic = kea<templatesLogicType>([
     editLocalTemplate: (template: TemplateType) => ({ template }),
     hideModal: true,
     saveRemoteAsLocal: (repository: RepositoryType, template: TemplateType) => ({ repository, template }),
-    applyRemoteToFrame: (repository: RepositoryType, template: TemplateType, openDrawer?: boolean) => ({
+    // `activate`: "Install & activate", the scene pushed and shown now, in
+    // one push of that scene alone (scenesLogic.pushScene).
+    applyRemoteToFrame: (
+      repository: RepositoryType,
+      template: TemplateType,
+      openDrawer?: boolean,
+      activate?: boolean
+    ) => ({
+      activate: activate ?? false,
       openDrawer: openDrawer ?? false,
       repository,
       template,
     }),
+    // The same for a scene saved on this backend (no catalog to load it from).
+    installAndActivateTemplate: (template: TemplateType) => ({ template }),
     showRemoteTemplate: true,
     hideRemoteTemplate: true,
     showUploadTemplate: true,
@@ -1221,7 +1256,7 @@ export const templatesLogic = kea<templatesLogicType>([
         actions.updateTemplate(await response.json())
       }
     },
-    applyRemoteToFrame: async ({ template, repository, openDrawer }) => {
+    applyRemoteToFrame: async ({ template, repository, openDrawer, activate }) => {
       // Cloud store scenes carry risk flags; installing one that can run shell
       // commands on the frame deserves an explicit confirmation. This listener
       // is the funnel for every CATALOG install — buttons, menus and
@@ -1267,6 +1302,9 @@ export const templatesLogic = kea<templatesLogicType>([
         // re-ided local copy therefore showed a permanently blank tile and got
         // saved a second time as a private scene of its own.
         const preserveSceneIds = isCloudMode() && Boolean(storeSceneId)
+        const formBefore = new Set(
+          (values.frameForm?.scenes ?? values.frame?.scenes ?? []).map((scene) => scene.id as string)
+        )
         // Every installed scene records where it came from (`origin`: the
         // store page + uuid + version for store scenes, repository/template
         // otherwise). On the cloud the server stamps the same fields onto
@@ -1277,12 +1315,19 @@ export const templatesLogic = kea<templatesLogicType>([
           openDrawer,
           preserveSceneIds
         )
+        // The form holds them now (frameLogic's install sets it before it
+        // waits on anything): the scene to show is one of these ids.
+        const activateId = activate
+          ? sceneToActivate(sceneIdsAdded(formBefore, frameLogic({ frameId: props.frameId }).values.frameForm?.scenes))
+          : null
 
         // On the cloud control plane the scene list that actually reaches the
         // device is the server-side store-scene assignment (set_scenes over the
         // hub WS) — the client-side applyTemplate above only shapes the
         // workspace view. Both cloud catalogs (the public store and "my cloud
-        // scenes") carry the store scene uuid, so assign it here too.
+        // scenes") carry the store scene uuid, so assign it here too. The
+        // assignment IS the push: the hub sends the frame that scene alone
+        // (a patch), and "Install & activate" names it the one to show.
         if (isCloudMode() && storeSceneId) {
           longRunningTasksModel.actions.startTask({
             frameId: props.frameId,
@@ -1300,19 +1345,23 @@ export const templatesLogic = kea<templatesLogicType>([
               collectSecretSettingsFromScenes(scenes, values.apps),
               // A frame with an active layout has it on what joins (applyTemplate
               // put it on these); the server's row has to say so too.
-              layoutsWornBy(scenes, frameLogic({ frameId: props.frameId }).values.frameForm?.scenes)
+              layoutsWornBy(scenes, frameLogic({ frameId: props.frameId }).values.frameForm?.scenes),
+              activateId ?? undefined
             )
             longRunningTasksModel.actions.finishTask({
               frameId: props.frameId,
               kind: 'save',
               status: 'success',
-              // Say what is left to do: the assignment is stored, but the frame
-              // only picks it up once the workspace pushes — and "queued" on its
-              // own read as "nothing more to do here".
               detail: assigned
-                ? 'Added to this frame — press Save, then Deploy, to send it to the device'
+                ? activateId
+                  ? 'Installed and pushed. The frame shows it as soon as it syncs.'
+                  : 'Installed and pushed to the frame'
                 : 'Scene was already on the frame',
             })
+            if (!assigned && activateId) {
+              // Already on the frame: the drawer's push, which shows it.
+              await pushAndActivateInstalled(props.frameId, activateId)
+            }
             if (assigned) {
               // The server now owns this scene; rehydrate frame.scenes from the
               // assignment list (force skips the poll throttle) so the tiles
@@ -1330,9 +1379,25 @@ export const templatesLogic = kea<templatesLogicType>([
                 : message,
             })
           }
+        } else if (activateId) {
+          // A backend frame, or a catalog scene the cloud holds no store copy
+          // of: the scene drawer's "Push & activate", that scene alone.
+          await pushAndActivateInstalled(props.frameId, activateId)
         }
       } finally {
         actions.remoteInstallFinished(installId)
+      }
+    },
+    installAndActivateTemplate: async ({ template }) => {
+      const formBefore = new Set(
+        (values.frameForm?.scenes ?? values.frame?.scenes ?? []).map((scene) => scene.id as string)
+      )
+      actions.applyTemplate(template, false)
+      const activateId = sceneToActivate(
+        sceneIdsAdded(formBefore, frameLogic({ frameId: props.frameId }).values.frameForm?.scenes)
+      )
+      if (activateId) {
+        await pushAndActivateInstalled(props.frameId, activateId)
       }
     },
     applyFavouriteTemplatesToFrame: async ({ openDrawer }) => {

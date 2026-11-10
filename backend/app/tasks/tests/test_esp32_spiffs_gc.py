@@ -55,7 +55,7 @@ def test_a_split_removes_the_old_slots_before_writing_new_ones():
     body = text[start : text.index("\n}\n", start)]
     scan = body.index("scan_array_elements(")
     first_write = body.index("fos_scene_store_apply(")  # the store writes the slots (replace_all)
-    removal = body.find("remove_slots_from(0);", scan)
+    removal = body.find("remove_slots();", scan)
     assert scan < removal < first_write, (
         "split_scenes_locked must remove the old slots after the payload scanned as an array of scenes "
         "and before the store writes the first new slot"

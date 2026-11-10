@@ -731,6 +731,26 @@ static int scan_array_elements(const char *json, size_t len,
     return depth == 0 ? count : -1;
 }
 
+/* Whether /state holds a combined payload (SCENES_PATH), kept in step with
+ * every write and unlink of it here, so the apply and every change stop
+ * asking flash: a stat is a SPIFFS lookup by name, half a second on a 24 MB
+ * partition. -1: not known, look once. A plain word, read from any task. */
+static volatile int s_combined = -1;
+
+static bool combined_stored(void)
+{
+    if (s_combined < 0) {
+        struct stat st;
+        s_combined = stat(SCENES_PATH, &st) == 0 ? 1 : 0;
+    }
+    return s_combined == 1;
+}
+
+static void combined_set(bool stored)
+{
+    s_combined = stored ? 1 : 0;
+}
+
 void fos_scenes_wipe_state(void)
 {
     slot_cache_clear();
@@ -750,18 +770,16 @@ void fos_scenes_wipe_state(void)
         if (unlink(path) == 0) removed++;
     }
     closedir(dir);
+    fos_scene_store_forget();
+    s_combined = -1;
     ESP_LOGI(TAG, "wipe: removed %d file(s) from /state", removed);
 }
 
-static void remove_slots_from(int first_slot)
+static void remove_slots(void)
 {
-    /* Every slot: one-scene changes leave gaps, so a run can't stop at one. */
+    /* Every slot file there is; the store knows which (fos_scene_store.h). */
     slot_cache_clear();
-    for (int slot = first_slot; slot < SCENES_SLOT_MAX; slot++) {
-        char path[SCENES_SLOT_PATH_LEN];
-        slot_path(slot, path, sizeof(path));
-        unlink(path);
-    }
+    fos_scene_store_remove_slots();
 }
 
 /* A combined payload whose split ran out of room, by its length: the boots
@@ -811,8 +829,8 @@ static esp_err_t split_scenes_locked(const char *json, size_t len)
     if (count <= 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    unlink(SCENES_INDEX_PATH);
-    remove_slots_from(0);
+    fos_scene_store_remove_index();
+    remove_slots();
     /* The producer declared the source when it stored the payload; the index
      * is written at apply time, so the value rode across in s_pending_source. */
     fos_scene_store_change_t change = {
@@ -828,11 +846,12 @@ static esp_err_t split_scenes_locked(const char *json, size_t len)
          * worth another try at the next boot (split_noroom). What it wrote is
          * no set's: the room goes back. */
         s_split_out_of_room = err == FOS_SCENE_STORE_ERR_NO_SPACE;
-        remove_slots_from(0);
+        remove_slots();
         return s_split_out_of_room ? ESP_ERR_NO_MEM : ESP_FAIL;
     }
     /* Only now is the combined file redundant. */
     unlink(SCENES_PATH);
+    combined_set(false);
     ESP_LOGI(TAG, "split %d scene(s) into per-scene files (%u bytes total)",
              count, (unsigned)len);
     return ESP_OK;
@@ -852,14 +871,11 @@ static int load_scene_index(void)
 {
     s_slot_count = 0;
     s_default_scene_id[0] = '\0';
-    size_t len = 0;
-    char *index_json = read_file(SCENES_INDEX_PATH, &len);
-    if (index_json == NULL || len == 0) {
-        free(index_json);
-        return 0;
-    }
-    cJSON *index = cJSON_ParseWithLength(index_json, len);
-    if (index != NULL) {
+    /* The store's reader: the index, or its copy when a power cut tore the
+     * index while it was rewritten in place (fos_scene_store.h). */
+    cJSON *index = fos_scene_store_read_index();
+    if (index == NULL) return 0;
+    {
         /* Missing key = pre-upgrade index = local. */
         const cJSON *source = cJSON_GetObjectItem(index, "source");
         s_source = scene_source_from_str(
@@ -886,12 +902,13 @@ static int load_scene_index(void)
             s_slot_count++;
         }
     }
-    cJSON_Delete(index);
     if (s_slot_count > 0) {
         /* The runtime now knows every scene by name without parsing one. */
-        frameos_nim_set_scene_catalog(index_json);
+        char *catalog = cJSON_PrintUnformatted(index);
+        if (catalog != NULL) frameos_nim_set_scene_catalog(catalog);
+        cJSON_free(catalog);
     }
-    free(index_json);
+    cJSON_Delete(index);
     return s_slot_count;
 }
 
@@ -1178,11 +1195,8 @@ static bool apply_index_change(void)
 bool fos_scenes_apply_pending(void)
 {
     if (!s_pending || !s_mounted) return false;
-    {
-        /* A combined payload stored since wins over a change made before it. */
-        struct stat combined;
-        if (s_patch_pending && stat(SCENES_PATH, &combined) != 0) return apply_index_change();
-    }
+    /* A combined payload stored since wins over a change made before it. */
+    if (s_patch_pending && !combined_stored()) return apply_index_change();
     s_patch_pending = false;
     /* A new payload invalidates whatever is parsed, even if the id matches. */
     s_resident_scene_id[0] = '\0';
@@ -1198,7 +1212,7 @@ bool fos_scenes_apply_pending(void)
     }
     bool ok = false;
     size_t len = 0;
-    char *json = read_file(SCENES_PATH, &len);
+    char *json = combined_stored() ? read_file(SCENES_PATH, &len) : NULL;
     if (json == NULL) {
         /* No combined file: either a previous apply already split it (the
          * normal steady state) or there is genuinely nothing stored. */
@@ -1235,9 +1249,10 @@ bool fos_scenes_apply_pending(void)
         free(json);
         json = NULL;
         if (ok) {
-            unlink(SCENES_INDEX_PATH);
+            fos_scene_store_remove_index();
         } else {
             unlink(SCENES_PATH);
+            combined_set(false);
             s_slot_count = slots_before;
             if (!activate_from_index("restored")) {
                 ESP_LOGW(TAG, "refused payload dropped; no earlier set to come back to");
@@ -1271,7 +1286,7 @@ bool fos_scenes_stored(void)
 {
     if (!s_mounted) return false;
     struct stat st;
-    if (stat(SCENES_PATH, &st) == 0 && st.st_size > 2) return true;
+    if (combined_stored() && stat(SCENES_PATH, &st) == 0 && st.st_size > 2) return true;
     return stat(SCENES_INDEX_PATH, &st) == 0 && st.st_size > 2;
 }
 void fos_scenes_request_sync(void) { s_sync_requested = true; }
@@ -1287,7 +1302,7 @@ char *fos_scenes_json_copy(size_t *out_len)
     esp_err_t err = mount_state();
     if (err != ESP_OK) return NULL;
     store_lock();
-    char *buf = read_file(SCENES_PATH, out_len);
+    char *buf = combined_stored() ? read_file(SCENES_PATH, out_len) : NULL;
     cJSON *index = buf ? NULL : fos_scene_store_read_index();
     const cJSON *scenes = cJSON_GetObjectItem(index, "scenes");
     size_t cap = 3; /* "[", "]" and the NUL */
@@ -1612,7 +1627,9 @@ esp_err_t fos_scenes_init(void)
         }
     }
     struct stat st;
-    if (stat(SCENES_PATH, &st) == 0 && st.st_size > 2) {
+    bool combined = stat(SCENES_PATH, &st) == 0;
+    combined_set(combined);
+    if (combined && st.st_size > 2) {
         ESP_LOGI(TAG, "cached scenes.json (%ld bytes, etag %s)", (long)st.st_size,
                  s_etag[0] ? s_etag : "none");
         s_pending = true;
@@ -1654,6 +1671,7 @@ esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
     s_store_changing = true; /* before the lock: the render task looks first */
     store_lock();
     err = write_file_replace(SCENES_PATH, SCENES_TMP_PATH, json, len);
+    if (err == ESP_OK) combined_set(true);
     if (err != ESP_OK) {
         s_store_changing = false;
         store_unlock();
@@ -1713,7 +1731,7 @@ static esp_err_t ensure_split_locked(void)
         return ESP_ERR_INVALID_STATE;
     }
     struct stat st;
-    if (stat(SCENES_PATH, &st) != 0 || st.st_size <= 2) return ESP_OK;
+    if (!combined_stored() || stat(SCENES_PATH, &st) != 0 || st.st_size <= 2) return ESP_OK;
     if (s_pending) {
         set_scene_simple_error("a scene upload is waiting to be applied, try again", 0);
         return ESP_ERR_INVALID_STATE;
@@ -1736,8 +1754,15 @@ static void forget_dropped_scene(const char *scene_id, void *ctx)
     fos_scene_state_forget(scene_id);
 }
 
+/* A change somebody waits to see (it activates a scene: "Push & activate", a
+ * put with activate) is written as fast as flash goes, not paced around
+ * renders: the panel is about to show it, and a 30 KB scene paced behind an
+ * e-paper render waited up to half a second for each 2 KB. Set under the store
+ * lock by the one writer holding it (store_pace_hook reads it). */
+static volatile bool s_store_urgent = false;
+
 static esp_err_t apply_store_change(fos_scene_store_change_t *change, fos_scenes_source_t source,
-                                    const char *etag, const char *event,
+                                    const char *etag, const char *event, bool urgent,
                                     fos_scene_store_result_t *result)
 {
     memset(result, 0, sizeof(*result));
@@ -1749,6 +1774,7 @@ static esp_err_t apply_store_change(fos_scene_store_change_t *change, fos_scenes
     esp_err_t err = mount_state();
     if (err == ESP_OK) {
         store_lock();
+        s_store_urgent = urgent; /* the split first, if one is owed: it is waited for too */
         err = ensure_split_locked();
         if (err == ESP_OK) {
             fos_scene_store_err_t store_err = fos_scene_store_apply(change, result, forget_dropped_scene, NULL);
@@ -1763,6 +1789,7 @@ static esp_err_t apply_store_change(fos_scene_store_change_t *change, fos_scenes
             s_patch_pending = true;
             s_pending = true;
         }
+        s_store_urgent = false;
         store_unlock();
     }
     if (err == ESP_OK) {
@@ -1781,14 +1808,14 @@ static esp_err_t apply_store_change(fos_scene_store_change_t *change, fos_scenes
     return err;
 }
 
-esp_err_t fos_scenes_put(const char *json, size_t len, fos_scenes_source_t source,
+esp_err_t fos_scenes_put(const char *json, size_t len, fos_scenes_source_t source, bool urgent,
                          char *out_id, size_t out_id_len)
 {
     /* An empty or broken scene is the store's to refuse: it says why. */
     fos_scene_store_put_t put = {.json = json, .len = len};
     fos_scene_store_change_t change = {.puts = &put, .put_count = 1};
     fos_scene_store_result_t result;
-    esp_err_t err = apply_store_change(&change, source, NULL, "scenes:put", &result);
+    esp_err_t err = apply_store_change(&change, source, NULL, "scenes:put", urgent, &result);
     snprintf(out_id, out_id_len, "%s", result.first_put_id);
     return err;
 }
@@ -1797,18 +1824,18 @@ esp_err_t fos_scenes_delete(const char *scene_id, fos_scenes_source_t source)
 {
     fos_scene_store_change_t change = {.remove_id = scene_id};
     fos_scene_store_result_t result;
-    return apply_store_change(&change, source, NULL, "scenes:delete", &result);
+    return apply_store_change(&change, source, NULL, "scenes:delete", false, &result);
 }
 
 esp_err_t fos_scenes_apply_patch(const cJSON *put, const cJSON *order,
-                                 fos_scenes_source_t source, const char *etag)
+                                 fos_scenes_source_t source, const char *etag, bool urgent)
 {
     if (!cJSON_IsArray(order)) return ESP_ERR_INVALID_ARG;
     /* The message's own tree: each scene is printed for its file by the
      * store, one at a time, next to the message it arrived in. */
     fos_scene_store_change_t change = {.put_items = cJSON_IsArray(put) ? put : NULL, .order = order};
     fos_scene_store_result_t result;
-    return apply_store_change(&change, source, etag, "scenes:patch", &result);
+    return apply_store_change(&change, source, etag, "scenes:patch", urgent, &result);
 }
 
 char *fos_scenes_get_json(const char *scene_id, size_t *out_len)
@@ -1862,10 +1889,12 @@ static void scene_sizes_refresh_locked(void)
     }
     cJSON_Delete(index);
     if (s_scene_sizes_count > 0) {
-        if (stat(SCENES_INDEX_PATH, &st) == 0) s_scenes_footprint += state_footprint((size_t)st.st_size);
+        /* The index and its copy beside it (scene-index.tmp, the same bytes:
+         * fos_scene_store.h). */
+        if (stat(SCENES_INDEX_PATH, &st) == 0) s_scenes_footprint += 2 * state_footprint((size_t)st.st_size);
         return;
     }
-    if (stat(SCENES_PATH, &st) != 0 || st.st_size <= 2) return;
+    if (!combined_stored() || stat(SCENES_PATH, &st) != 0 || st.st_size <= 2) return;
     /* Not split (yet): the combined file is what /state holds, and each scene
      * is reported at what its own file will take once it is. */
     s_scenes_footprint = state_footprint((size_t)st.st_size);
@@ -1932,8 +1961,9 @@ static esp_err_t apply_backend_patch(const char *body, size_t len, const char *e
         s_sync_requested = true;
         err = ESP_ERR_INVALID_STATE;
     } else {
+        /* On the render task, which never paces itself. */
         err = fos_scenes_apply_patch(cJSON_GetObjectItem(root, "put"), cJSON_GetObjectItem(root, "order"),
-                                     FOS_SCENES_SOURCE_BACKEND, etag);
+                                     FOS_SCENES_SOURCE_BACKEND, etag, false);
         if (err != ESP_OK) s_sync_requested = true;
     }
     cJSON_Delete(root);
@@ -1996,7 +2026,7 @@ static void store_pace(void)
  * itself. An RGB LCD's write goes as fast as it can, behind "Updating". */
 static void store_pace_hook(void)
 {
-    if (!fos_client_on_render_task() && !fos_display_is_lcd()) store_pace();
+    if (!s_store_urgent && !fos_client_on_render_task() && !fos_display_is_lcd()) store_pace();
 }
 
 static void store_backend_payload(const store_job_t *job)
@@ -2009,6 +2039,7 @@ static void store_backend_payload(const store_job_t *job)
     fos_slot_cache_clear(&s_slot_cache);
     /* Paced through the store's hook (store_pace_hook). */
     esp_err_t err = write_file_replace_locked(SCENES_PATH, SCENES_TMP_PATH, job->body, job->len);
+    if (err == ESP_OK) combined_set(true);
     store_unlock();
     fos_display_updating_end(false);
     if (err == ESP_OK) {
@@ -2018,7 +2049,7 @@ static void store_backend_payload(const store_job_t *job)
         /* The per-scene index the boot split wrote describes the PREVIOUS
          * payload (the render task stopped using it when it took this one);
          * the next boot splits this one again. */
-        unlink(SCENES_INDEX_PATH);
+        fos_scene_store_remove_index();
         log_scene_event("scenes:store", "ok", "backend", "", "written",
                         job->len, 0, 0, ESP_OK);
         return;
@@ -2189,10 +2220,16 @@ char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size
         fos_backend_url("/embedded/scenes?patch=1", url, sizeof(url));
         char auth[FOS_STR_LEN + 16];
         fos_backend_auth(auth, sizeof(auth));
+        /* A forced sync (a deploy, "Push & activate", a preview) says what it
+         * holds too: the backend answers 304 or the scenes that changed
+         * (`?patch=1`), not the whole list, which was every push's full
+         * download, parse and write. Not when the frame holds no set: then it
+         * wants all of it whatever its ETag says. */
+        bool holds_set = s_slot_count > 0 || s_loaded > 0;
         fos_http_request_t request = {
             .url = url,
             .auth = auth,
-            .if_none_match = (!force && etag[0] && strcmp(etag, "local") != 0) ? etag : NULL,
+            .if_none_match = (etag[0] && strcmp(etag, "local") != 0 && (!force || holds_set)) ? etag : NULL,
             .timeout_ms = 30000,
             .buffer_size = 4096,
         };
