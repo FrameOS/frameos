@@ -8,7 +8,6 @@ import std/private/dragonbox as stock
 import ../patched_dragonbox as patched
 
 const frameosDir = currentSourcePath()[0 ..< currentSourcePath().len - "src/embedded/tests/test_patched_dragonbox.nim".len]
-{.passC: "-I" & frameosDir.}
 {.passL: frameosDir & "quickjs/libquickjs.a".}
 {.passL: "-lm".}
 

@@ -19,10 +19,11 @@
 
 const dtoaMinBufferLength*: cint = 64
 
-type JSDTOATempMem {.importc, header: "quickjs/dtoa.h", bycopy.} = object
+type JSDTOATempMem = array[37, uint64] ## quickjs/dtoa.h's, by its size: the
+  ## prebuilt QuickJS the Linux tests link ships no dtoa.h
 
 proc js_dtoa(buf: cstring, d: cdouble, radix, nDigits, flags: cint,
-             tmp: ptr JSDTOATempMem): cint {.importc, header: "quickjs/dtoa.h".}
+             tmp: ptr JSDTOATempMem): cint {.importc: "js_dtoa", cdecl.}
 
 const
   JS_DTOA_FORMAT_FREE = 0.cint
