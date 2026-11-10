@@ -544,6 +544,43 @@ def test_duplicate_scenes_rewrites_references():
     assert scenes[0]["id"] == "a"
 
 
+def test_duplicate_scenes_keeps_an_app_named_like_its_scene():
+    # The store's Form showcase: the scene, its code app and the app node's
+    # keyword are all `formShowcase`. Rewriting every equal string sent the
+    # frame a node keyword no app has ("Unknown app keyword", 2026-11-10).
+    origin = {"storeSceneId": "d847804f-3e73-4dc2-827d-9d2f0f64c474", "version": "5", "sceneId": "formShowcase"}
+    scenes = [
+        {
+            "id": "formShowcase",
+            "name": "Form showcase",
+            "apps": {"formShowcase": {"name": "Form showcase", "sources": {"app.tsx": "export function get() {}"}}},
+            "nodes": [
+                {"id": "render", "type": "event", "data": {"keyword": "render"}},
+                {"id": "ui", "type": "app", "data": {"keyword": "formShowcase", "config": {}}},
+                {"id": "go", "type": "dispatch", "data": {"keyword": "setCurrentScene", "config": {"sceneId": "formShowcase"}}},
+                {"id": "panel", "type": "scene", "data": {"keyword": "formShowcase"}},
+            ],
+            "edges": [{"id": "e", "source": "ui", "target": "render"}],
+            "fields": [
+                {"name": "formShowcase", "type": "string", "value": "formShowcase"},
+                {"name": "next", "type": "scene", "value": "formShowcase"},
+            ],
+            "origin": origin,
+        }
+    ]
+    [copied] = duplicate_scenes(scenes)
+    new_id = copied["id"]
+    assert new_id != "formShowcase"
+    nodes = {node["id"]: node["data"] for node in copied["nodes"]}
+    assert nodes["ui"]["keyword"] == "formShowcase"
+    assert set(copied["apps"]) == {"formShowcase"}
+    assert nodes["go"]["config"]["sceneId"] == new_id
+    assert nodes["panel"]["keyword"] == new_id
+    assert copied["fields"][0] == {"name": "formShowcase", "type": "string", "value": "formShowcase"}
+    assert copied["fields"][1]["value"] == new_id
+    assert copied["origin"] == origin
+
+
 def test_schema_validation_subset():
     schema = {
         "type": "object",
