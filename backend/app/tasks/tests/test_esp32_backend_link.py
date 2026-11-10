@@ -94,6 +94,21 @@ def test_taking_the_round_trips_back_waits_for_the_one_running():
     )
 
 
+def test_what_changed_waits_while_someone_is_at_the_frame():
+    """The render task fetches a change of scenes or settings itself (the
+    link task only asks whether there is one). While someone taps that waits
+    for them to stop: a fetch there held their next tap for the round trip.
+    The commands are already pulled and run at once."""
+    serve = CLIENT["serve_link"]
+    hold = serve.index("if (!input_hold_on()) {")
+    guarded = serve[hold : serve.index("}", hold)]
+    assert "pass_scenes_sync();" in guarded and "pass_settings_sync();" in guarded, (
+        "fos_client.c: serve_link fetches scenes or settings while the input hold is on"
+    )
+    assert serve.index("pass_commands_sync()") > serve.index("}", hold)
+    assert "serve_link(config)" in CLIENT["run_held_network"], "the hold's release no longer serves the link"
+
+
 def test_the_render_task_uses_the_tested_rules():
     """The rules host-tested in test_fos_animation.c are the ones that run."""
     assert "fos_input_hold_applies(" in CLIENT["hold_applies"]

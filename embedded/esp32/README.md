@@ -1375,9 +1375,24 @@ smaller than any floor written down so far. Once a few frames have reported
 both pairs, recalibrate the floors on the malloc-able figures and switch
 `ws_heap_ready()`, `https_heap_ready()`, `log_upload_heap_ready()` and the
 banner over together. Candidate levers if the honest headroom turns out
-thin: `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y` (Wi-Fi/lwIP dynamic buffers
-PSRAM-first, internal fallback), the reserve pool back to IDF's 32 KB
-default, and right-sizing task stacks from the high-water marks.
+thin: the reserve pool back to IDF's 32 KB default, and right-sizing task
+stacks from the high-water marks.
+
+**Wi-Fi and lwIP buffers come from PSRAM first, and TCP has a 64 KB receive
+window** (2026-11-10, `sdkconfig.defaults` "TCP at the speed of the Wi-Fi";
+`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y`). IDF's 5,760-byte windows made the
+network the slow part of a photo once the JPEG sink got fast: on a reTerminal
+E1003 a Gallery photo spent 1.6 to 9.6 s on the socket, now 0.06 to 1.9 s
+(its whole body 7.3 s median, now 5.3 s, of which 4 s is the decode), and
+the 1.3 MB backend picture push went from 14.5 s to 8.8 s (medians). Idle
+internal RAM went from 90 KB free with a 43 KB block to 103 KB with 55 KB.
+The send side stays small on purpose: each frame in flight is a copy in
+DMA-capable internal RAM, and a 64 KB send buffer with 64 TX buffers drained
+the 64 KB DMA pool to 6 KB; 16 KB with IDF's 32 TX buffers kept it at 44 KB.
+The C3 overlay (no PSRAM) keeps IDF's values. `test_esp32_network_buffers.py`
+pins all three. What is left of a photo's network time is opening the
+request: DNS, connect and the TLS handshake, 2.3 to 4 s to
+gallery.frameos.net.
 
 ## Memory guardrails (M4)
 

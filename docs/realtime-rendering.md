@@ -692,7 +692,9 @@ a small change cost what it should:
   More than half the store's sixteen slots waiting writes them all
   (`fos_scene_state_crowded`), so a walk through the scenes never writes on the
   render task. The picture pushed to the backend after a render (1.3 MB on the
-  E1003, 8-14 s at the lwIP default window) gives way to a tap, a key, an event
+  E1003, a median 8.8 s with the 16 KB send buffer, 14.5 s at lwIP's default;
+  `embedded/esp32/README.md` "Wi-Fi and lwIP buffers come from PSRAM first")
+  gives way to a tap, a key, an event
   from HTTP, the cloud or the console, or any render asked for, and starts over
   later. A frame that stays awake does its backend round trips on a task of its
   own (`backend_link_task` in `fos_client.c`): the log uploads every second, the
@@ -703,7 +705,11 @@ a small change cost what it should:
   and run on the render task (the backend marks what it hands out `sent`, so
   a pull is never only a look; `fos_commands_fetch` / `fos_commands_run`), and
   for scenes and settings it asks the status alone and the render task fetches
-  what changed (`fos_scenes_backend_changed`, `fos_settings_changed`). A
+  what changed (`fos_scenes_backend_changed`, `fos_settings_changed`), once
+  nobody is tapping (`serve_link` skips them under the input hold, and its
+  release serves them): a 337 KB scene set is 8 s of the render task on the
+  E1003, most of it the store's flash writes, and touches that arrived during
+  it waited it out. A
   backend's nudge is still pulled on the render task, which the voice relay's
   release counts on, and so is everything on a frame about to deep-sleep and on
   a boot's first pass. When the round trips come back to the render task (a

@@ -1482,12 +1482,19 @@ static void link_hand_back(const fos_config_t *config)
 }
 
 /* What the link task found, served from the idle wait: true when a scene
- * should render for it. */
+ * should render for it. A change of scenes or settings is fetched here, on
+ * this task, so while someone is at the frame (the input hold) it waits for
+ * them to stop, and run_held_network serves it then: fetched now, it held
+ * their next tap for the whole round trip (a 2.8 s settings pull behind a
+ * console event on the E1003, 2026-11-10). The commands the link task pulled
+ * are here already, and run now: the backend marked them sent. */
 static bool serve_link(const fos_config_t *config)
 {
     bool nim = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
-    pass_scenes_sync();
-    pass_settings_sync();
+    if (!input_hold_on()) {
+        pass_scenes_sync();
+        pass_settings_sync();
+    }
     if (pass_commands_sync() && nim) fos_scenes_apply_pending_selection();
     return nim && fos_scenes_work_pending();
 }
