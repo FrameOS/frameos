@@ -961,12 +961,21 @@ NEXT_PUBLIC_POSTHOG_HOST=…                   # optional; defaults to
 | `cloud user signed up` | the new account id   | password signup, first Google sign-in             |
 | `store scene reported` | the reporter account | `POST /api/store/scenes/<id>/report` (new report) |
 | `photo scan matched`   | the uploader account | a photo upload a scanner matched                  |
+| `cloud plan …`         | the paying account   | a paid plan's life (`src/lib/plan-notifications.ts`, `docs/billing.md`) |
+
+The twelve plan events are `cloud plan subscribed`, `renewed`, `changed`,
+`payment received`, `downgrade scheduled`, `cancellation scheduled`,
+`cancellation withdrawn`, `ended`, `payment failed`, `refunded`,
+`dispute opened` and `dispute closed`, each sent once per change.
 
 All go to the `/capture` endpoint using the same public project key as the
 browser SDK (no extra secret required). The Discord messages for these
-("new user", "scene reported", "photo scan match") are PostHog workflows on
-the events, configured in PostHog, not in auth-web: auth-web posts to Discord
-directly nowhere, so an event without a workflow notifies nobody.
+("new user", "scene reported", "photo scan match", and "Cloud plans", which
+posts every plan event's `summary` to the reports channel) are PostHog
+workflows on the events, configured in PostHog, not in auth-web: auth-web
+posts to Discord directly nowhere, so an event without a workflow notifies
+nobody. A new plan event needs its name added to the "Cloud plans"
+workflow's trigger.
 
 **The browser SDK does not read this from the server's env file.**
 `NEXT_PUBLIC_*` values are inlined into the client bundle when `next build`

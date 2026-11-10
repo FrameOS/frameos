@@ -86,6 +86,13 @@ export interface ProviderPaymentResult {
   /** False when this transaction was applied before. */
   applied: boolean;
   periodId: string | null;
+  /**
+   * The plan the account was on when this payment arrived, read under the
+   * subscription lock: null when it had none running (never subscribed, or
+   * ended). A caller tells a first purchase, a renewal and a change apart by
+   * it. Null when the payment was not applied.
+   */
+  previous: { planCode: string; provider: string | null } | null;
   subscription: SubscriptionRecord | null;
 }
 
@@ -156,7 +163,7 @@ export async function applyProviderPayment(
       .onConflictDoNothing()
       .returning({ id: providerPayments.id });
     if (!payment) {
-      return { applied: false, periodId: null, subscription: null };
+      return { applied: false, periodId: null, previous: null, subscription: null };
     }
 
     const [existing] = await tx
@@ -164,6 +171,10 @@ export async function applyProviderPayment(
       .from(subscriptions)
       .where(eq(subscriptions.accountId, input.accountId))
       .limit(1);
+    const previous =
+      existing && !isExpired(existing, now)
+        ? { planCode: existing.planCode, provider: existing.provider }
+        : null;
     const startedAt = input.periodStart < now ? input.periodStart : now;
     const [row] =
       !existing || isExpired(existing, now)
@@ -290,7 +301,7 @@ export async function applyProviderPayment(
       .update(providerPayments)
       .set({ periodId: period.id })
       .where(eq(providerPayments.id, payment.id));
-    return { applied: true, periodId: period.id, subscription: toRecord(row) };
+    return { applied: true, periodId: period.id, previous, subscription: toRecord(row) };
   });
 }
 
@@ -513,30 +524,32 @@ export async function applyProviderFee(
  * The provider will bill a cheaper plan from the next renewal. The account
  * keeps what it paid for until then; this only names where it is going
  * (null: nowhere, the change was withdrawn). The plan itself moves when the
- * renewal's payment arrives.
+ * renewal's payment arrives. True when this call is what moved it.
  */
 export async function noteProviderNextPlan(
   db: LedgerExecutor,
   accountId: string,
   provider: string,
   planCode: string | null,
-): Promise<void> {
-  await withSubscriptionLock(db, accountId, async (tx) => {
+): Promise<boolean> {
+  return withSubscriptionLock(db, accountId, async (tx) => {
     const [row] = await tx
       .select()
       .from(subscriptions)
       .where(eq(subscriptions.accountId, accountId))
       .limit(1);
     if (!row || row.provider !== provider || row.status === "canceled") {
-      return;
+      return false;
     }
     const next = planCode && planCode !== row.planCode ? planCode : null;
-    if (row.nextPlanCode !== next) {
-      await tx
-        .update(subscriptions)
-        .set({ nextPlanCode: next, updatedAt: new Date() })
-        .where(eq(subscriptions.id, row.id));
+    if (row.nextPlanCode === next) {
+      return false;
     }
+    await tx
+      .update(subscriptions)
+      .set({ nextPlanCode: next, updatedAt: new Date() })
+      .where(eq(subscriptions.id, row.id));
+    return true;
   });
 }
 

@@ -733,7 +733,12 @@
   `packages/ledger/src/provider-subscriptions.ts`, where the provider owns
   the clock and the nightly cycle skips `subscriptions.provider` rows.
   Changes are worked out from the plan paid for, never Stripe's current
-  price. Test-mode payments never post to the ledger. A change to the flow
+  price. Test-mode payments never post to the ledger. Every change of plan
+  is a `cloud plan …` PostHog event (`plan-notifications.ts`, posted to the
+  Discord reports channel by the "Cloud plans" workflow), sent by the write
+  that made the change (a payment applied, a status moved by
+  compare-and-set), never from a before-and-after read: the checkout
+  return and the webhooks race. A change to the flow
   is run against Stripe's test mode before it ships (the doc's checklist
   and its last results). Live mode sells to superadmins only until
   `STRIPE_CHECKOUT_OPEN=1` (`checkoutOpenTo`): a real payment is made and
