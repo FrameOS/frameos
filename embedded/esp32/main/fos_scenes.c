@@ -772,9 +772,42 @@ static void remove_slots_from(int first_slot)
     }
 }
 
-/* Split the combined payload. On any failure nothing is deleted and the index
- * is removed, so the caller falls back to loading the combined file whole —
- * a frame never loses its scenes to a failed optimization. */
+/* A combined payload whose split ran out of room, by its length: the boots
+ * after it load it whole without trying again. Each try writes slots until
+ * the partition is full and spends its garbage collections getting there:
+ * 40 s of every boot of a reTerminal E1002 holding a 389,616-byte set
+ * (2026-11-10), on a battery every wake. The next payload stored clears it. */
+#define SPLIT_NO_ROOM_NVS_KEY "split_noroom"
+static bool s_split_out_of_room = false;
+
+static uint32_t split_no_room_len(void)
+{
+    nvs_handle_t nvs;
+    uint32_t len = 0;
+    if (nvs_open("frameos", NVS_READONLY, &nvs) != ESP_OK) return 0;
+    if (nvs_get_u32(nvs, SPLIT_NO_ROOM_NVS_KEY, &len) != ESP_OK) len = 0;
+    nvs_close(nvs);
+    return len;
+}
+
+static void set_split_no_room_len(uint32_t len)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
+    if (len != 0) {
+        nvs_set_u32(nvs, SPLIT_NO_ROOM_NVS_KEY, len);
+    } else {
+        nvs_erase_key(nvs, SPLIT_NO_ROOM_NVS_KEY);
+    }
+    nvs_commit(nvs);
+    nvs_close(nvs);
+}
+
+/* Split the combined payload. A payload that is not an array of scenes leaves
+ * everything as it was (the set from before can come back). Past that, any
+ * failure removes the slots and the index, so the caller falls back to
+ * loading the combined file whole — a frame never loses its scenes to a
+ * failed optimization. */
 static esp_err_t split_scenes(const char *json, size_t len)
 {
     static size_t starts[SCENES_SLOT_MAX];
@@ -796,6 +829,18 @@ static esp_err_t split_scenes(const char *json, size_t len)
      * written at apply time, so the value rode across in s_pending_source. */
     cJSON_AddStringToObject(index, "source", scene_source_str(s_pending_source));
 
+    /* The set on flash goes before the new one is written. The new set is
+     * whole in the combined file and replaces it whatever happens next: a
+     * split that fails loads it whole, and a boot after a power cut finds it
+     * first and splits again (the old slots and index are removed on any
+     * failure below anyway). Replaced one by one instead, the split held the
+     * combined file, the new slots and the old ones still waiting at once: a
+     * 389,616-byte 20-scene push over the same set ran out of room at the
+     * fifth scene on the reTerminal E1002's 1 MB /state, every time
+     * (2026-11-10; tests/test_fos_spiffs_gc.c replays it). */
+    remove_slots_from(0);
+
+    s_split_out_of_room = false;
     esp_err_t err = ESP_OK;
     int written = 0;
     /* The scene marked default, else the first that is not a layout. */
@@ -804,7 +849,10 @@ static esp_err_t split_scenes(const char *json, size_t len)
     for (int i = 0; i < count; i++) {
         size_t item_len = ends[i] - starts[i];
         err = write_slot(i, json + starts[i], item_len);
-        if (err != ESP_OK) break;
+        if (err != ESP_OK) {
+            s_split_out_of_room = err == ESP_ERR_NO_MEM; /* ENOSPC (scene_err_from_errno) */
+            break;
+        }
         written++;
         /* One scene at a time: peak allocation is the largest scene, not the
          * whole payload. Only three fields survive into the index. */
@@ -855,6 +903,7 @@ static esp_err_t split_scenes(const char *json, size_t len)
                              index_json, strlen(index_json));
     cJSON_free(index_json);
     if (err != ESP_OK) {
+        s_split_out_of_room = err == ESP_ERR_NO_MEM;
         remove_slots_from(0);
         unlink(SCENES_INDEX_PATH);
         return err;
@@ -1129,7 +1178,7 @@ bool fos_scenes_apply_pending(void)
             log_scene_event("scenes:load", "error", "stored", "", "read-failed",
                             0, 0, 0, ESP_ERR_NOT_FOUND);
         }
-    } else if (split_scenes(json, len) == ESP_OK) {
+    } else if (split_no_room_len() != (uint32_t)len && split_scenes(json, len) == ESP_OK) {
         /* Split consumed the combined file; hold only the active scene. */
         free(json);
         json = NULL;
@@ -1144,6 +1193,12 @@ bool fos_scenes_apply_pending(void)
          * as well used to take the frame's scenes with it (2026-11-08, an
          * upload stored cut short). Refused, it goes, and the set from before
          * comes back; the apply still reports the failure. */
+        if (s_split_out_of_room) {
+            s_split_out_of_room = false;
+            set_split_no_room_len((uint32_t)len);
+            ESP_LOGW(TAG, "%u-byte scene set: no room to split it beside itself; loaded whole until the next push",
+                     (unsigned)len);
+        }
         int slots_before = s_slot_count;
         s_slot_count = 0;
         ok = load_into_nim(json, len, "stored");
@@ -1546,6 +1601,7 @@ esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
         return err;
     }
     s_last_error[0] = '\0';
+    if (split_no_room_len() != 0) set_split_no_room_len(0);
     /* "local" etag for cloud pushes too: it means "not the backend's payload,
      * do not clobber on the next backend sync pass" (see fos_scenes_sync). */
     save_etag("local");
@@ -1645,6 +1701,7 @@ esp_err_t fos_scenes_sync(bool force)
     err = write_file_replace(SCENES_PATH, SCENES_TMP_PATH, buf, total);
     fos_display_updating_end(false);
     if (err == ESP_OK) {
+        if (split_no_room_len() != 0) set_split_no_room_len(0);
         save_etag(response_etag);
         /* Backend-served payload: declare it before load_into_nim promotes
          * the pending source, and persist it so the boot-time split (this
