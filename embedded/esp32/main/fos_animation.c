@@ -190,6 +190,11 @@ bool fos_image_push_yields(bool on_link_task, bool input_queued, bool events_def
     return !on_link_task && (input_queued || events_deferred || render_asked);
 }
 
+bool fos_animation_push_wanted(bool animating, bool scene_pushed)
+{
+    return !animating || !scene_pushed;
+}
+
 bool fos_backend_link_on(bool link_task, bool deep_sleep_now, uint32_t render_attempts)
 {
     return link_task && !deep_sleep_now && render_attempts > 0;

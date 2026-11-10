@@ -304,6 +304,16 @@ static void test_a_layouts_second_is_a_second(void)
     CHECK(fos_pass_interval_seconds(30.0 * 86400.0, 300) == 7 * 86400, "a month: a week");
 }
 
+static void test_an_animation_is_pictured_once(void)
+{
+    /* Each push on an LCD hashes, copies and uploads 460 KB: the frames
+     * around it took up to 115 ms instead of 75. */
+    CHECK(fos_animation_push_wanted(true, false), "an animation's first picture goes");
+    CHECK(!fos_animation_push_wanted(true, true), "then no more while it runs");
+    CHECK(fos_animation_push_wanted(false, true), "a scene that is not animating pushes as before");
+    CHECK(fos_animation_push_wanted(false, false), "and so does a new one");
+}
+
 int main(void)
 {
     test_wanted();
@@ -319,6 +329,7 @@ int main(void)
     test_the_backend_link();
     test_a_timed_render_waits_for_the_glass();
     test_a_layouts_second_is_a_second();
+    test_an_animation_is_pictured_once();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

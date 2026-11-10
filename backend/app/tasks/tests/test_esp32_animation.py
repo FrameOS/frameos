@@ -53,6 +53,21 @@ def test_the_pass_loop_reads_the_scene_interval_through_the_tested_rules():
     assert "scene_interval >= 1.0" not in client
 
 
+def test_an_animation_goes_to_the_backend_once():
+    """Both places a frame's picture is handed to the backend ask
+    fos_animation_push_wanted first, and a push that reached the backend
+    records its scene: while the SenseCAP's DVD logo ran, a push every 10 s
+    held frames to 115 ms."""
+    client = (MAIN_DIR / "fos_client.c").read_text()
+    publishes = [m.start() for m in re.finditer(r"link_publish_picture\(scene_id\);", client)]
+    assert len(publishes) == 2, "a new place publishes a picture: ask picture_push_wanted there too"
+    for at in publishes:
+        window = client[max(0, at - 400) : at]
+        assert "picture_push_wanted(scene_id)" in window, "a picture is published without picture_push_wanted"
+    assert "fos_animation_push_wanted(" in client
+    assert "__atomic_store_n(&s_pushed_scene_key, scene_key(scene_id)" in client
+
+
 @pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler on PATH")
 def test_fos_animation_host_tests_pass(tmp_path: Path):
     binary = tmp_path / "test_fos_animation"

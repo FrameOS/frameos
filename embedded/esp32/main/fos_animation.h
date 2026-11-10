@@ -165,6 +165,14 @@ bool fos_input_hold_applies(bool partial_panel, bool touch, bool keys);
  * must not wait it out. On the backend link task nobody is waiting. */
 bool fos_image_push_yields(bool on_link_task, bool input_queued, bool events_deferred, bool render_asked);
 
+/* Whether a frame's picture goes to the backend. While an animation runs,
+ * once per scene: on an LCD a push hashes, copies and uploads the 460 KB
+ * picture, and the frames around it took up to 115 ms instead of 75 (the
+ * SenseCAP's DVD logo, 17.4 fps with a push every 10 s, 18.0 without,
+ * 2026-11-10). `scene_pushed`: this scene's picture is on the backend
+ * already. A preview of an animation is a picture of it, not a stream. */
+bool fos_animation_push_wanted(bool animating, bool scene_pushed);
+
 /* Whether the backend's round trips (logs, picture push, the scenes, settings
  * and commands pulls) run on the backend link task this pass rather than on
  * the render task: a 1 s clock stood still for up to 10 s while they ran

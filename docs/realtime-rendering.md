@@ -117,7 +117,10 @@ not deep-sleep, animates:
   the power decision, the Nim settings pushes. The metrics sample goes with
   the frame logged in full (below).
 - One frame in ten seconds is logged in full — `render:scene` …
-  `render:done`, the cloud's render announce, the backend's image push — with
+  `render:done`, the cloud's render announce, the backend's image push (once
+  per scene while it animates, `fos_animation_push_wanted`: on an LCD each
+  push hashes, copies and uploads the whole picture, and held the frames
+  around it to 115 ms instead of 75) — with
   a `render:animation` summary of the frames before it (`frames`, `fps`,
   `avgMs`, `maxMs`, `periodMs`). The frames in between are quiet: no render
   lines, no scene log lines (`frameos_nim_set_quiet`, the logger off, like

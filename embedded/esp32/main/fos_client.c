@@ -1245,6 +1245,18 @@ static bool snapshot_display_state(fos_display_state_t *state)
 
 /* `state`: what the panel shows, as the render task recorded it (a copy, on
  * the backend link task). */
+/* The scene whose picture last reached the backend (scene_key), written by
+ * whoever pushed it, the backend link task as a rule: while an animation runs
+ * its scene's picture goes once (fos_animation_push_wanted). */
+static uint32_t s_pushed_scene_key = 0; /* __atomic; 0: none */
+
+static uint32_t scene_key(const char *scene_id)
+{
+    uint32_t hash = 2166136261u; /* FNV-1a */
+    for (const char *c = scene_id ? scene_id : ""; *c; c++) hash = (hash ^ (uint8_t)*c) * 16777619u;
+    return hash ? hash : 1;
+}
+
 static void push_image_state(const char *scene_id, const fos_display_state_t *state, bool state_valid)
 {
     fos_config_t *config = fos_config();
@@ -1317,6 +1329,7 @@ static void push_image_state(const char *scene_id, const fos_display_state_t *st
     if (status == 200) {
         memcpy(s_pushed_image_sha, pushed.sha256, FOS_DISPLAY_HASH_LEN);
         s_pushed_image_valid = true;
+        __atomic_store_n(&s_pushed_scene_key, scene_key(scene_id), __ATOMIC_RELAXED);
         ESP_LOGI(TAG, "image pushed to the backend in %lld ms", ms);
     } else {
         ESP_LOGW(TAG, "image push to the backend failed (%s, HTTP %d, %lld ms)",
@@ -1832,6 +1845,8 @@ static void notice_overlay_forget(notice_overlay_t *ov)
 
 /* `quiet`: an animation's in-between frame (fos_animation.h) — none of the
  * render:* lines, no render announce, no backend push. */
+static bool picture_push_wanted(const char *scene_id);
+
 static esp_err_t render_once(bool quiet)
 {
     fos_config_t *config = fos_config();
@@ -2073,7 +2088,7 @@ static esp_err_t render_once(bool quiet)
          * looking and fetches the image with image_get if so. */
         fos_cloud_announce_render(scene_id);
     }
-    if (err == ESP_OK && !quiet) {
+    if (err == ESP_OK && !quiet && picture_push_wanted(scene_id)) {
         /* Also on a skipped refresh: the last push may have failed. */
         if (s_link_on) {
             link_publish_picture(scene_id);
@@ -2285,6 +2300,14 @@ static uint32_t compute_sleep_ms(uint32_t interval, int64_t due_at_us)
 
 /* A scene below a one-second interval on an LCD (fos_animation.h). */
 static fos_animation_t s_anim;
+
+/* Whether this frame's picture goes to the backend (fos_animation.h): while
+ * an animation runs, once per scene. */
+static bool picture_push_wanted(const char *scene_id)
+{
+    return fos_animation_push_wanted(
+        s_anim.active, scene_key(scene_id) == __atomic_load_n(&s_pushed_scene_key, __ATOMIC_RELAXED));
+}
 static esp_timer_handle_t s_frame_timer = NULL;
 static bool s_quiet = false;
 /* Somebody asked for a render while an animation ran (a cloud or HTTP
@@ -2369,7 +2392,9 @@ static void finish_burst(void)
         char scene_name[128];
         current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
         fos_cloud_announce_render(scene_id);
-        if (s_link_on) {
+        if (!picture_push_wanted(scene_id)) {
+            /* this animation's picture is on the backend already */
+        } else if (s_link_on) {
             link_publish_picture(scene_id);
         } else if (!input_hold_on()) {
             push_image_to_backend(scene_id);
