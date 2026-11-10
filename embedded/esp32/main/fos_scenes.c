@@ -45,8 +45,6 @@ static const char *TAG = "fos_scenes";
  * scene id is a 36-character uuid: "/<uuid>.json" cannot be opened at all.
  * The id ↔ slot mapping lives in the index. */
 #define SCENES_INDEX_PATH "/state/" FOS_SCENE_STORE_INDEX_NAME
-#define SCENES_INDEX_TMP_PATH "/state/" FOS_SCENE_STORE_INDEX_TMP_NAME
-#define SCENES_SLOT_TMP_PATH "/state/" FOS_SCENE_STORE_SLOT_TMP_NAME
 /* Above this the payload stays in one file and the legacy path runs: the
  * split's bookkeeping is bounded, and a frame with this many scenes is not
  * the case this optimizes for. */
@@ -295,28 +293,10 @@ static esp_err_t mount_state(void)
     return ESP_OK;
 }
 
+/* At most SCENES_MAX_BYTES, in PSRAM when there is some (the store's hooks). */
 static char *read_file(const char *path, size_t *out_len)
 {
-    FILE *f = fopen(path, "rb");
-    if (f == NULL) return NULL;
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (size <= 0 || size > SCENES_MAX_BYTES) {
-        fclose(f);
-        return NULL;
-    }
-    char *buf = fos_big_malloc(size + 1);
-    if (buf == NULL) buf = malloc(size + 1);
-    if (buf == NULL) {
-        fclose(f);
-        return NULL;
-    }
-    size_t read = fread(buf, 1, size, f);
-    fclose(f);
-    buf[read] = 0;
-    if (out_len != NULL) *out_len = read;
-    return buf;
+    return fos_scene_store_read_file(path, out_len);
 }
 
 /* Erased pages for `len` more bytes, made now. SPIFFS reuses a deleted
@@ -342,60 +322,19 @@ static void make_room(size_t len)
              (unsigned)(len + SCENES_WRITE_MARGIN), SCENES_GC_ROUNDS, esp_err_to_name(err));
 }
 
-static esp_err_t write_file_atomic(const char *path, const char *tmp_path,
-                                   const char *data, size_t len)
-{
-    remove(tmp_path);
-    make_room(len);
-    errno = 0;
-    FILE *f = fopen(tmp_path, "wb");
-    if (f == NULL) {
-        int err_no = errno;
-        set_scene_error("open", tmp_path, len, err_no);
-        ESP_LOGE(TAG, "%s", s_last_error);
-        return scene_err_from_errno(err_no, ESP_FAIL);
-    }
-    size_t written = 0;
-    int err_no = 0;
-    while (written < len) {
-        size_t chunk = len - written;
-        if (chunk > 2048) chunk = 2048;
-        errno = 0;
-        size_t chunk_written = fwrite(data + written, 1, chunk, f);
-        if (chunk_written == 0) {
-            err_no = errno;
-            break;
-        }
-        written += chunk_written;
-    }
-    if (ferror(f) && err_no == 0) err_no = errno;
-    fclose(f);
-    if (written != len) {
-        if (err_no == 0) err_no = ENOSPC;
-        set_scene_error("short write", tmp_path, len, err_no);
-        ESP_LOGE(TAG, "%s (written=%u/%u)", s_last_error,
-                 (unsigned)written, (unsigned)len);
-        remove(tmp_path);
-        return scene_err_from_errno(err_no, ESP_ERR_NO_MEM);
-    }
-    remove(path);
-    errno = 0;
-    if (rename(tmp_path, path) != 0) {
-        int err_no = errno;
-        set_scene_error("rename", path, len, err_no);
-        ESP_LOGE(TAG, "%s", s_last_error);
-        return scene_err_from_errno(err_no, ESP_FAIL);
-    }
-    return ESP_OK;
-}
-
 /* The old file stays until the new one is whole: a write that finds no room
  * fails and keeps it. (It used to delete the old file and write again, and
- * a second failure left neither: a frame rebooted with no scenes.) */
+ * a second failure left neither: a frame rebooted with no scenes.) The store
+ * runs make_room() first. */
 static esp_err_t write_file_replace_locked(const char *path, const char *tmp_path,
                                            const char *data, size_t len)
 {
-    return write_file_atomic(path, tmp_path, data, len);
+    fos_scene_store_err_t err = fos_scene_store_write_file(path, tmp_path, data, len);
+    if (err == FOS_SCENE_STORE_OK) return ESP_OK;
+    int err_no = errno; /* the store keeps it for this */
+    set_scene_error("write", path, len, err_no);
+    ESP_LOGE(TAG, "%s", s_last_error);
+    return scene_err_from_errno(err_no, err == FOS_SCENE_STORE_ERR_NO_SPACE ? ESP_ERR_NO_MEM : ESP_FAIL);
 }
 
 static void load_etag(void)
@@ -656,7 +595,7 @@ static int slot_for_scene(const char *scene_id)
  *
  * Returns the element count, or -1 if the payload is not an array. */
 static int scan_array_elements(const char *json, size_t len,
-                               size_t *starts, size_t *ends, int max_items)
+                               fos_scene_store_put_t *out, int max_items)
 {
     size_t i = 0;
     while (i < len && isspace((unsigned char)json[i])) i++;
@@ -685,22 +624,14 @@ static int scan_array_elements(const char *json, size_t len,
             depth--;
             if (depth == 0) {
                 if (count >= max_items) return -1; /* too many scenes */
-                starts[count] = start;
-                ends[count] = i + 1;
+                out[count].json = json + start;
+                out[count].len = i + 1 - start;
                 count++;
             }
             continue;
         }
     }
     return depth == 0 ? count : -1;
-}
-
-/* Write one scene's raw bytes to its slot file. */
-static esp_err_t write_slot(int slot, const char *data, size_t len)
-{
-    char path[SCENES_SLOT_PATH_LEN];
-    slot_path(slot, path, sizeof(path));
-    return write_file_replace(path, SCENES_SLOT_TMP_PATH, data, len);
 }
 
 void fos_scenes_wipe_state(void)
@@ -734,101 +665,36 @@ static void remove_slots_from(int first_slot)
     }
 }
 
-/* Split the combined payload. On any failure nothing is deleted and the index
- * is removed, so the caller falls back to loading the combined file whole —
- * a frame never loses its scenes to a failed optimization. */
+/* Split the combined payload, through the store a one-scene change uses.
+ * The set from before goes first: its files are not this set's, and the room
+ * they take is. On any failure the index is gone and the combined file stays,
+ * so the caller loads that whole: a frame never loses its scenes to a failed
+ * optimization. A payload that is not an array changes nothing. */
 static esp_err_t split_scenes_locked(const char *json, size_t len)
 {
-    static size_t starts[SCENES_SLOT_MAX];
-    static size_t ends[SCENES_SLOT_MAX];
-    int count = scan_array_elements(json, len, starts, ends, SCENES_SLOT_MAX);
+    static fos_scene_store_put_t puts[SCENES_SLOT_MAX];
+    int count = scan_array_elements(json, len, puts, SCENES_SLOT_MAX);
     if (count <= 0) {
         return ESP_ERR_INVALID_ARG;
     }
-
-    cJSON *index = cJSON_CreateObject();
-    cJSON *scenes = cJSON_CreateArray();
-    if (index == NULL || scenes == NULL) {
-        cJSON_Delete(index);
-        cJSON_Delete(scenes);
-        return ESP_ERR_NO_MEM;
+    unlink(SCENES_INDEX_PATH);
+    remove_slots_from(0);
+    /* The producer declared the source when it stored the payload; the index
+     * is written at apply time, so the value rode across in s_pending_source. */
+    fos_scene_store_change_t change = {
+        .puts = puts, .put_count = count, .replace_all = true,
+        .source = scene_source_str(s_pending_source),
+    };
+    fos_scene_store_result_t result;
+    fos_scene_store_err_t err = fos_scene_store_apply(&change, &result, NULL, NULL);
+    if (err != FOS_SCENE_STORE_OK) {
+        ESP_LOGW(TAG, "split failed: %s", fos_scene_store_err_str(err));
+        return ESP_FAIL;
     }
-    cJSON_AddItemToObject(index, "scenes", scenes);
-    /* The producer declared this when it stored the payload; the index is
-     * written at apply time, so the value rode across in s_pending_source. */
-    cJSON_AddStringToObject(index, "source", scene_source_str(s_pending_source));
-
-    esp_err_t err = ESP_OK;
-    int written = 0;
-    /* The scene marked default, else the first that is not a layout. */
-    char default_id[SCENE_ID_LEN] = "";
-    bool default_marked = false;
-    for (int i = 0; i < count; i++) {
-        size_t item_len = ends[i] - starts[i];
-        err = write_slot(i, json + starts[i], item_len);
-        if (err != ESP_OK) break;
-        written++;
-        /* One scene at a time: peak allocation is the largest scene, not the
-         * whole payload. Only three fields survive into the index. */
-        cJSON *item = cJSON_ParseWithLength(json + starts[i], item_len);
-        const cJSON *id = cJSON_GetObjectItem(item, "id");
-        if (!cJSON_IsString(id) || id->valuestring == NULL) {
-            cJSON_Delete(item);
-            err = ESP_ERR_INVALID_ARG;
-            break;
-        }
-        cJSON *entry = cJSON_CreateObject();
-        cJSON_AddStringToObject(entry, "id", id->valuestring);
-        const cJSON *name = cJSON_GetObjectItem(item, "name");
-        if (cJSON_IsString(name) && name->valuestring) {
-            cJSON_AddStringToObject(entry, "name", name->valuestring);
-        }
-        const cJSON *refresh = cJSON_GetObjectItem(item, "refreshInterval");
-        if (cJSON_IsNumber(refresh)) {
-            cJSON_AddNumberToObject(entry, "refreshInterval", refresh->valuedouble);
-        }
-        cJSON_AddNumberToObject(entry, "slot", i);
-        cJSON_AddNumberToObject(entry, "bytes", (double)item_len);
-        cJSON_AddItemToArray(scenes, entry);
-        /* A layout (docs/scene-layouts.md) is read by id when a scene names
-         * it; it is in no list and never what a frame boots to. */
-        const cJSON *settings = cJSON_GetObjectItem(item, "settings");
-        bool is_layout = cJSON_IsTrue(cJSON_GetObjectItem(settings, "isLayout"));
-        if (is_layout) {
-            cJSON_AddBoolToObject(entry, "isLayout", true);
-        } else {
-            bool marked = cJSON_IsTrue(cJSON_GetObjectItem(item, "default"));
-            if (default_id[0] == '\0' || (marked && !default_marked)) {
-                snprintf(default_id, sizeof(default_id), "%s", id->valuestring);
-                default_marked = marked;
-            }
-        }
-        cJSON_Delete(item);
-    }
-    if (default_id[0] != '\0') cJSON_AddStringToObject(index, "default", default_id);
-
-    char *index_json = (err == ESP_OK) ? cJSON_PrintUnformatted(index) : NULL;
-    cJSON_Delete(index);
-    if (index_json == NULL) {
-        remove_slots_from(0);
-        unlink(SCENES_INDEX_PATH);
-        return err == ESP_OK ? ESP_ERR_NO_MEM : err;
-    }
-    err = write_file_replace(SCENES_INDEX_PATH, SCENES_INDEX_TMP_PATH,
-                             index_json, strlen(index_json));
-    cJSON_free(index_json);
-    if (err != ESP_OK) {
-        remove_slots_from(0);
-        unlink(SCENES_INDEX_PATH);
-        return err;
-    }
-    /* Slots left over from a longer previous payload would otherwise linger
-     * and eat the state partition. */
-    remove_slots_from(written);
     /* Only now is the combined file redundant. */
     unlink(SCENES_PATH);
     ESP_LOGI(TAG, "split %d scene(s) into per-scene files (%u bytes total)",
-             written, (unsigned)len);
+             count, (unsigned)len);
     return ESP_OK;
 }
 
@@ -1079,24 +945,19 @@ static bool load_into_nim(const char *json, size_t len, const char *origin)
  * which is how that shows. */
 
 /* A split's panels are other scenes of the set, referred to by id: a slot
- * change for one of those is a change to what the resident scene draws. */
-static bool resident_embeds_changed(const scene_slot_t *before, int before_count,
-                                    const char *resident, int resident_slot)
+ * change for one of those is a change to what the resident scene draws. A
+ * change always lands in a slot the index before it did not name (the old
+ * files stay until the sweep), so a slot outside `before` is a changed scene. */
+static bool resident_embeds_changed(uint32_t before, const char *resident_path)
 {
     char *json = NULL;
     bool found = false;
     for (int i = 0; i < s_slot_count && !found; i++) {
-        if (strcmp(s_slots[i].id, resident) == 0) continue;
-        bool same = false;
-        for (int j = 0; j < before_count && !same; j++) {
-            same = before[j].slot == s_slots[i].slot && strcmp(before[j].id, s_slots[i].id) == 0;
-        }
-        if (same) continue;
+        unsigned slot = (unsigned)s_slots[i].slot;
+        if (slot < SCENES_SLOT_MAX && ((before >> slot) & 1u)) continue;
         if (json == NULL) {
-            char path[SCENES_SLOT_PATH_LEN];
-            slot_path(resident_slot, path, sizeof(path));
             size_t len = 0;
-            json = read_file(path, &len);
+            json = read_file(resident_path, &len);
             if (json == NULL) return true; /* cannot tell: reload */
         }
         found = strstr(json, s_slots[i].id) != NULL;
@@ -1109,11 +970,13 @@ static bool apply_index_change(void)
 {
     s_pending = false;
     s_patch_pending = false;
-    scene_slot_t *before = malloc(sizeof(s_slots));
-    int before_count = s_slot_count;
-    if (before != NULL) memcpy(before, s_slots, sizeof(s_slots));
     char resident[SCENE_ID_LEN];
     snprintf(resident, sizeof(resident), "%s", s_resident_scene_id);
+    int before_slot = slot_for_scene(resident);
+    uint32_t before = 0;
+    for (int i = 0; i < s_slot_count; i++) {
+        if ((unsigned)s_slots[i].slot < SCENES_SLOT_MAX) before |= 1u << s_slots[i].slot;
+    }
 
     /* Under the lock: a put swapping the index would otherwise be read as
      * no index at all. */
@@ -1123,14 +986,10 @@ static bool apply_index_change(void)
 
     bool ok = count > 0;
     if (ok) {
-        int resident_slot = resident[0] ? slot_for_scene(resident) : -1;
-        int before_slot = -1;
-        for (int i = 0; before != NULL && i < before_count; i++) {
-            if (strcmp(before[i].id, resident) == 0) before_slot = before[i].slot;
-        }
-        bool reload = resident_slot < 0 || before == NULL || resident_slot != before_slot ||
-                      resident_embeds_changed(before, before_count, resident, resident_slot);
-        if (reload) {
+        int resident_slot = slot_for_scene(resident);
+        char path[SCENES_SLOT_PATH_LEN];
+        slot_path(resident_slot, path, sizeof(path));
+        if (resident_slot < 0 || resident_slot != before_slot || resident_embeds_changed(before, path)) {
             s_scene_switched = true;
             fos_display_loading_begin(xTaskGetTickCount(), fos_config()->rotate);
             if (resident_slot >= 0) {
@@ -1152,9 +1011,8 @@ static bool apply_index_change(void)
             if (!ok) fos_display_loading_end();
         }
     } else {
-        ESP_LOGW(TAG, "scene index unreadable after a change");
+        ESP_LOGW(TAG, "scene index unreadable");
     }
-    free(before);
     if (count > 0) {
         store_lock();
         /* Not while another change waits for its own apply: s_slots still
@@ -1245,7 +1103,8 @@ bool fos_scenes_apply_pending(void)
 
 uint32_t fos_scenes_apply_generation(void) { return s_apply_generation; }
 bool fos_scenes_apply_succeeded(void) { return s_apply_ok; }
-bool fos_scenes_patch_pending(void) { return s_pending && s_patch_pending && s_mounted; }
+/* Set only beside s_pending, once /state is mounted, and cleared with it. */
+bool fos_scenes_patch_pending(void) { return s_patch_pending; }
 
 int fos_scenes_loaded(void) { return s_loaded; }
 const char *fos_scenes_etag(void) { return s_etag; }
@@ -1270,55 +1129,47 @@ char *fos_scenes_json_copy(size_t *out_len)
     esp_err_t err = mount_state();
     if (err != ESP_OK) return NULL;
     store_lock();
-    char *combined = read_file(SCENES_PATH, out_len);
-    if (combined != NULL) {
-        store_unlock();
-        return combined;
+    char *buf = read_file(SCENES_PATH, out_len);
+    cJSON *index = buf ? NULL : fos_scene_store_read_index();
+    const cJSON *scenes = cJSON_GetObjectItem(index, "scenes");
+    size_t cap = 3; /* "[", "]" and the NUL */
+    const cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, scenes) {
+        cap += (size_t)cJSON_GetObjectItem(entry, "bytes")->valueint + 1; /* + comma */
     }
-    fos_scene_store_entry_t *entries = malloc(sizeof(*entries) * SCENES_SLOT_MAX);
-    int count = entries ? fos_scene_store_read_entries(entries, SCENES_SLOT_MAX) : -1;
-    if (count <= 0) {
-        free(entries);
-        store_unlock();
-        return NULL;
+    if (cJSON_GetArraySize(scenes) > 0) {
+        buf = fos_big_malloc(cap);
+        if (buf == NULL) buf = malloc(cap);
     }
-    size_t cap = 2; /* "[" + "]" */
-    char *buf = NULL;
-    for (int i = 0; i < count; i++) {
-        char path[SCENES_SLOT_PATH_LEN];
-        slot_path(entries[i].slot, path, sizeof(path));
-        struct stat st;
-        if (stat(path, &st) != 0) goto fail;
-        cap += (size_t)st.st_size + 1; /* + comma */
+    if (index != NULL && buf != NULL) {
+        size_t used = 0;
+        buf[used++] = '[';
+        cJSON_ArrayForEach(entry, scenes) {
+            char path[SCENES_SLOT_PATH_LEN];
+            slot_path(fos_scene_store_entry_slot(entry), path, sizeof(path));
+            size_t part_len = 0;
+            char *part = read_file(path, &part_len);
+            /* A comma, the scene, and room left for "]" and the NUL. */
+            if (part == NULL || used + 1 + part_len + 2 > cap) {
+                free(part);
+                free(buf);
+                buf = NULL;
+                break;
+            }
+            if (used > 1) buf[used++] = ',';
+            memcpy(buf + used, part, part_len);
+            used += part_len;
+            free(part);
+        }
+        if (buf != NULL) {
+            buf[used++] = ']';
+            buf[used] = '\0';
+            if (out_len != NULL) *out_len = used;
+        }
     }
-    buf = fos_big_malloc(cap + 1);
-    if (buf == NULL) buf = malloc(cap + 1);
-    if (buf == NULL) goto fail;
-    size_t used = 0;
-    buf[used++] = '[';
-    for (int i = 0; i < count; i++) {
-        char path[SCENES_SLOT_PATH_LEN];
-        slot_path(entries[i].slot, path, sizeof(path));
-        size_t part_len = 0;
-        char *part = read_file(path, &part_len);
-        if (part == NULL) goto fail;
-        if (i > 0 && used < cap) buf[used++] = ',';
-        if (used + part_len > cap) { free(part); goto fail; }
-        memcpy(buf + used, part, part_len);
-        used += part_len;
-        free(part);
-    }
-    buf[used++] = ']';
-    buf[used] = '\0';
-    if (out_len != NULL) *out_len = used;
-    free(entries);
+    cJSON_Delete(index);
     store_unlock();
     return buf;
-fail:
-    free(buf);
-    free(entries);
-    store_unlock();
-    return NULL;
 }
 
 esp_err_t fos_scenes_select(const char *scene_id)
@@ -1524,7 +1375,7 @@ esp_err_t fos_scenes_init(void)
     if (err != ESP_OK) return err;
     /* A power cut inside the store's remove + rename of the index, and the
      * files a change left for a sweep that never came. */
-    if (fos_scene_store_recover_index()) ESP_LOGW(TAG, "scene index recovered from its tmp file");
+    if (fos_scene_store_recover_index()) ESP_LOGW(TAG, "scene index recovered");
     fos_scene_store_sweep();
     load_etag();
     /* Restore the stored scenes' source BEFORE any task can ask: main() calls
@@ -1635,42 +1486,32 @@ esp_err_t fos_scenes_set_json(const char *json, size_t len)
 
 /* ------------------------------------------------------- one scene at a time */
 
-static esp_err_t store_err_to_esp(fos_scene_store_err_t err)
-{
-    switch (err) {
-    case FOS_SCENE_STORE_OK: return ESP_OK;
-    case FOS_SCENE_STORE_ERR_NOT_FOUND: return ESP_ERR_NOT_FOUND;
-    case FOS_SCENE_STORE_ERR_INVALID:
-    case FOS_SCENE_STORE_ERR_MISSING_SCENE: return ESP_ERR_INVALID_ARG;
-    case FOS_SCENE_STORE_ERR_LAST_SCENE: return ESP_ERR_INVALID_STATE;
-    case FOS_SCENE_STORE_ERR_NO_SLOTS:
-    case FOS_SCENE_STORE_ERR_NO_SPACE:
-    case FOS_SCENE_STORE_ERR_NO_MEMORY: return ESP_ERR_NO_MEM;
-    default: return ESP_FAIL;
-    }
-}
+/* By fos_scene_store_err_t: a refused change is the caller's (HTTP 400), a
+ * missing scene a 404, no room the cloud's `no_room`. */
+static const esp_err_t STORE_ERR_TO_ESP[] = {
+    ESP_OK, ESP_ERR_INVALID_ARG, ESP_ERR_NOT_FOUND, ESP_ERR_NO_MEM, ESP_ERR_NO_MEM,
+    ESP_FAIL, ESP_ERR_NO_MEM, ESP_ERR_INVALID_ARG, ESP_ERR_INVALID_ARG,
+};
+_Static_assert(sizeof(STORE_ERR_TO_ESP) / sizeof(STORE_ERR_TO_ESP[0]) == FOS_SCENE_STORE_ERR_MISSING_SCENE + 1,
+               "one esp_err_t per store error");
 
 /* A one-scene change is made on the per-scene store. A combined payload not
  * yet split is split here (a frame that last synced from a backend holds one
  * until its next boot), unless the render task is about to apply it. */
-static esp_err_t ensure_split_locked(size_t bytes)
+static esp_err_t ensure_split_locked(void)
 {
     struct stat st;
     if (stat(SCENES_PATH, &st) != 0 || st.st_size <= 2) return ESP_OK;
     if (s_pending) {
-        set_scene_simple_error("a scene upload is waiting to be applied, try again", bytes);
+        set_scene_simple_error("a scene upload is waiting to be applied, try again", 0);
         return ESP_ERR_INVALID_STATE;
     }
     size_t len = 0;
     char *json = read_file(SCENES_PATH, &len);
-    if (json == NULL) {
-        set_scene_simple_error("the stored scenes cannot be read", bytes);
-        return ESP_FAIL;
-    }
-    esp_err_t err = split_scenes_locked(json, len);
+    esp_err_t err = json ? split_scenes_locked(json, len) : ESP_FAIL;
     free(json);
     if (err != ESP_OK) {
-        set_scene_simple_error("the stored scenes cannot be split per scene, upload them all", bytes);
+        set_scene_simple_error("the stored scenes cannot be split per scene, upload them all", 0);
         return ESP_ERR_INVALID_STATE;
     }
     return ESP_OK;
@@ -1684,124 +1525,76 @@ static void forget_dropped_scene(const char *scene_id, void *ctx)
 }
 
 static esp_err_t apply_store_change(fos_scene_store_change_t *change, fos_scenes_source_t source,
-                                    const char *etag, const char *event, size_t bytes,
+                                    const char *etag, const char *event,
                                     fos_scene_store_result_t *result)
 {
-    const char *origin = scene_source_str((int)source);
+    memset(result, 0, sizeof(*result));
     s_last_error[0] = '\0';
-    esp_err_t err = mount_state();
-    if (err != ESP_OK) return err;
     /* A local edit leaves the set whose it was: scenes the cloud pushed stay
      * fenced off the LAN (fos_cloud.c) however one of them was edited. */
     int effective = source == FOS_SCENES_SOURCE_LOCAL ? (s_pending ? s_pending_source : s_source) : (int)source;
     change->source = scene_source_str(effective);
-
-    store_lock();
-    err = ensure_split_locked(bytes);
+    esp_err_t err = mount_state();
     if (err == ESP_OK) {
-        fos_scene_store_err_t store_err = fos_scene_store_apply(change, result, forget_dropped_scene, NULL);
-        if (store_err != FOS_SCENE_STORE_OK) {
-            err = store_err_to_esp(store_err);
-            set_scene_simple_error(fos_scene_store_err_str(store_err), bytes);
+        store_lock();
+        err = ensure_split_locked();
+        if (err == ESP_OK) {
+            fos_scene_store_err_t store_err = fos_scene_store_apply(change, result, forget_dropped_scene, NULL);
+            err = STORE_ERR_TO_ESP[store_err];
+            if (err != ESP_OK) set_scene_simple_error(fos_scene_store_err_str(store_err), result->put_bytes);
         }
+        if (err == ESP_OK) {
+            /* Inside the lock: the render task's sweep must see the change
+             * coming before it treats a slot the old index named as unused. */
+            s_patch_pending = true;
+            s_pending = true;
+        }
+        store_unlock();
     }
     if (err == ESP_OK) {
-        /* Inside the lock: the render task's sweep must see the change coming
-         * before it treats a slot the old index named as unused. */
-        s_patch_pending = true;
-        s_pending = true;
+        save_etag(etag ? etag : "local");
+        if (source == FOS_SCENES_SOURCE_LOCAL && effective == FOS_SCENES_SOURCE_CLOUD) {
+            /* The cloud's checksum no longer describes what the frame holds. */
+            fos_cloud_forget_applied_scenes();
+        }
+        s_pending_source = effective;
+        persist_scene_source(effective);
+        fos_client_wake_for_events();
     }
-    store_unlock();
-    if (err != ESP_OK) {
-        log_scene_event(event, "error", origin, "", s_last_error, bytes, 0, 0, err);
-        return err;
-    }
-    save_etag(etag ? etag : "local");
-    if (source == FOS_SCENES_SOURCE_LOCAL && effective == FOS_SCENES_SOURCE_CLOUD) {
-        /* The cloud's checksum no longer describes what the frame holds. */
-        fos_cloud_forget_applied_scenes();
-    }
-    s_pending_source = effective;
-    persist_scene_source(effective);
-    log_scene_event(event, "stored", origin, result->first_put_id, "pending-apply",
-                    bytes, result->scene_count, 0, ESP_OK);
-    return ESP_OK;
+    log_scene_event(event, err == ESP_OK ? "stored" : "error", scene_source_str((int)source),
+                    result->first_put_id, err == ESP_OK ? "pending-apply" : s_last_error,
+                    result->put_bytes, result->scene_count, 0, err);
+    return err;
 }
 
 esp_err_t fos_scenes_put(const char *json, size_t len, fos_scenes_source_t source,
                          char *out_id, size_t out_id_len)
 {
-    if (json == NULL || len == 0) return ESP_ERR_INVALID_ARG;
+    /* An empty or broken scene is the store's to refuse: it says why. */
     fos_scene_store_put_t put = {.json = json, .len = len};
     fos_scene_store_change_t change = {.puts = &put, .put_count = 1};
     fos_scene_store_result_t result;
-    esp_err_t err = apply_store_change(&change, source, NULL, "scenes:put", len, &result);
-    if (err != ESP_OK) return err;
-    if (out_id != NULL && out_id_len > 0) snprintf(out_id, out_id_len, "%s", result.first_put_id);
-    fos_client_wake_for_events();
-    return ESP_OK;
+    esp_err_t err = apply_store_change(&change, source, NULL, "scenes:put", &result);
+    snprintf(out_id, out_id_len, "%s", result.first_put_id);
+    return err;
 }
 
 esp_err_t fos_scenes_delete(const char *scene_id, fos_scenes_source_t source)
 {
-    if (scene_id == NULL || scene_id[0] == '\0') return ESP_ERR_INVALID_ARG;
     fos_scene_store_change_t change = {.remove_id = scene_id};
     fos_scene_store_result_t result;
-    esp_err_t err = apply_store_change(&change, source, NULL, "scenes:delete", 0, &result);
-    if (err != ESP_OK) return err;
-    fos_client_wake_for_events();
-    return ESP_OK;
+    return apply_store_change(&change, source, NULL, "scenes:delete", &result);
 }
 
 esp_err_t fos_scenes_apply_patch(const cJSON *put, const cJSON *order,
                                  fos_scenes_source_t source, const char *etag)
 {
-    int put_count = cJSON_IsArray(put) ? cJSON_GetArraySize(put) : 0;
-    int order_count = cJSON_IsArray(order) ? cJSON_GetArraySize(order) : 0;
-    if (order_count <= 0 || order_count > SCENES_SLOT_MAX || put_count > SCENES_SLOT_MAX) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    fos_scene_store_put_t *puts = calloc((size_t)(put_count ? put_count : 1), sizeof(*puts));
-    const char **ids = calloc((size_t)order_count, sizeof(*ids));
-    if (puts == NULL || ids == NULL) {
-        free(puts);
-        free(ids);
-        return ESP_ERR_NO_MEM;
-    }
-    esp_err_t err = ESP_OK;
-    int printed = 0;
-    size_t bytes = 0;
-    const cJSON *item = NULL;
-    cJSON_ArrayForEach(item, put) {
-        /* One scene printed at a time, next to the message it arrived in. */
-        char *json = cJSON_PrintUnformatted(item);
-        if (json == NULL) {
-            err = ESP_ERR_NO_MEM;
-            break;
-        }
-        puts[printed].json = json;
-        puts[printed].len = strlen(json);
-        bytes += puts[printed].len;
-        printed++;
-    }
-    int id_count = 0;
-    cJSON_ArrayForEach(item, order) {
-        if (!cJSON_IsString(item) || item->valuestring == NULL) {
-            err = ESP_ERR_INVALID_ARG;
-            break;
-        }
-        ids[id_count++] = item->valuestring;
-    }
-    if (err == ESP_OK) {
-        fos_scene_store_change_t change = {.puts = puts, .put_count = printed, .order = ids, .order_count = id_count};
-        fos_scene_store_result_t result;
-        err = apply_store_change(&change, source, etag, "scenes:patch", bytes, &result);
-        if (err == ESP_OK) fos_client_wake_for_events();
-    }
-    for (int i = 0; i < printed; i++) cJSON_free((void *)puts[i].json);
-    free(puts);
-    free(ids);
-    return err;
+    if (!cJSON_IsArray(order)) return ESP_ERR_INVALID_ARG;
+    /* The message's own tree: each scene is printed for its file by the
+     * store, one at a time, next to the message it arrived in. */
+    fos_scene_store_change_t change = {.put_items = cJSON_IsArray(put) ? put : NULL, .order = order};
+    fos_scene_store_result_t result;
+    return apply_store_change(&change, source, etag, "scenes:patch", &result);
 }
 
 char *fos_scenes_get_json(const char *scene_id, size_t *out_len)
@@ -1814,43 +1607,41 @@ char *fos_scenes_get_json(const char *scene_id, size_t *out_len)
     return json;
 }
 
-void fos_scenes_storage_summary(fos_scenes_storage_t *out)
+void fos_scenes_add_storage_json(cJSON *report)
 {
-    memset(out, 0, sizeof(*out));
-    if (!s_mounted) return;
-    state_usage(&out->state_total_bytes, &out->state_used_bytes);
+    if (report == NULL || !s_mounted) return;
+    size_t total = 0, used = 0, scenes_bytes = 0;
+    int count = 0;
+    state_usage(&total, &used);
     store_lock();
-    fos_scene_store_entry_t *entries = malloc(sizeof(*entries) * SCENES_SLOT_MAX);
-    int count = entries ? fos_scene_store_read_entries(entries, SCENES_SLOT_MAX) : -1;
-    if (count > 0) {
-        out->scene_count = count;
-        for (int i = 0; i < count; i++) out->scenes_bytes += entries[i].bytes;
-    } else {
+    cJSON *index = fos_scene_store_read_index();
+    const cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, cJSON_GetObjectItem(index, "scenes")) {
+        scenes_bytes += (size_t)cJSON_GetObjectItem(entry, "bytes")->valueint;
+        count++;
+    }
+    cJSON_Delete(index);
+    if (count == 0) {
         /* Not split (yet): the combined payload's size. */
         struct stat st;
-        if (stat(SCENES_PATH, &st) == 0) out->scenes_bytes = (size_t)st.st_size;
-        out->scene_count = s_loaded;
+        if (stat(SCENES_PATH, &st) == 0) scenes_bytes = (size_t)st.st_size;
+        count = s_loaded;
     }
-    free(entries);
     store_unlock();
+    cJSON_AddNumberToObject(report, "stateTotalBytes", (double)total);
+    cJSON_AddNumberToObject(report, "stateUsedBytes", (double)used);
+    cJSON_AddNumberToObject(report, "scenesBytes", (double)scenes_bytes);
+    cJSON_AddNumberToObject(report, "sceneCount", count);
 }
 
 char *fos_scenes_list_json(void)
 {
     if (mount_state() != ESP_OK) return NULL;
     store_lock();
-    cJSON *tree = fos_scene_store_list_tree();
+    cJSON *tree = fos_scene_store_read_index();
     store_unlock();
-    if (tree == NULL) return NULL;
-    fos_scenes_storage_t storage;
-    fos_scenes_storage_summary(&storage);
-    cJSON *report = cJSON_AddObjectToObject(tree, "storage");
-    if (report != NULL) {
-        cJSON_AddNumberToObject(report, "stateTotalBytes", (double)storage.state_total_bytes);
-        cJSON_AddNumberToObject(report, "stateUsedBytes", (double)storage.state_used_bytes);
-        cJSON_AddNumberToObject(report, "scenesBytes", (double)storage.scenes_bytes);
-        cJSON_AddNumberToObject(report, "sceneCount", storage.scene_count);
-    }
+    if (tree == NULL) tree = cJSON_CreateObject(); /* not split: the storage alone */
+    fos_scenes_add_storage_json(cJSON_AddObjectToObject(tree, "storage"));
     char *json = cJSON_PrintUnformatted(tree);
     cJSON_Delete(tree);
     return json;

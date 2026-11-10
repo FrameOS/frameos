@@ -63,18 +63,14 @@ esp_err_t fos_scenes_apply_patch(const struct cJSON *put, const struct cJSON *or
 /* One stored scene's JSON; caller frees. NULL when there is no such scene. */
 char *fos_scenes_get_json(const char *scene_id, size_t *out_len);
 
-/* What /state holds, in bytes: the partition (`esp_spiffs_info`) and the
- * scenes in it. */
-typedef struct {
-    size_t state_total_bytes;
-    size_t state_used_bytes;
-    size_t scenes_bytes;
-    int scene_count;
-} fos_scenes_storage_t;
-void fos_scenes_storage_summary(fos_scenes_storage_t *out);
+/* What /state holds, added to `report` (nothing when NULL):
+ * stateTotalBytes / stateUsedBytes (the partition, `esp_spiffs_info`),
+ * scenesBytes and sceneCount. The cloud's hardware.storage, the backend
+ * hello's storage and the scene list's all come from here. */
+void fos_scenes_add_storage_json(struct cJSON *report);
 
-/* {"scenes":[{"id","name","refreshInterval","slot","bytes"}],"default","source",
- *  "sceneCount","scenesBytes","storage":{...}}. Caller cJSON_free()s. */
+/* The index ({"scenes":[{"id","name","refreshInterval","slot","bytes",...}],
+ * "default","source"}) and "storage" as above. Caller cJSON_free()s. */
 char *fos_scenes_list_json(void);
 
 /* Source of the stored scenes. Safe to read from any task (plain volatile

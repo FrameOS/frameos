@@ -132,15 +132,7 @@ static bool sync_pass(bool after_forced_pull)
     const char *settings_etag = fos_settings_etag();
     if (settings_etag[0]) cJSON_AddStringToObject(hello, "settings_etag", settings_etag);
     /* What /state holds (fos_cloud.c reports the same in `hardware.storage`). */
-    fos_scenes_storage_t storage;
-    fos_scenes_storage_summary(&storage);
-    cJSON *report = cJSON_AddObjectToObject(hello, "storage");
-    if (report != NULL) {
-        cJSON_AddNumberToObject(report, "stateTotalBytes", (double)storage.state_total_bytes);
-        cJSON_AddNumberToObject(report, "stateUsedBytes", (double)storage.state_used_bytes);
-        cJSON_AddNumberToObject(report, "scenesBytes", (double)storage.scenes_bytes);
-        cJSON_AddNumberToObject(report, "sceneCount", storage.scene_count);
-    }
+    fos_scenes_add_storage_json(cJSON_AddObjectToObject(hello, "storage"));
     char *body = cJSON_PrintUnformatted(hello);
     cJSON_Delete(hello);
     if (body == NULL) return false;

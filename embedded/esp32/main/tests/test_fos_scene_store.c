@@ -58,6 +58,30 @@ static bool slot_file_exists(int slot)
     return stat(path, &st) == 0;
 }
 
+/* The index's entries, as fos_scenes.c reads them. */
+typedef struct {
+    char id[FOS_SCENE_STORE_ID_LEN];
+    int slot;
+    size_t bytes;
+} entry_t;
+
+static int read_entries(entry_t *out, int max)
+{
+    cJSON *index = fos_scene_store_read_index();
+    if (index == NULL) return -1;
+    int count = 0;
+    const cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, cJSON_GetObjectItem(index, "scenes")) {
+        if (count >= max) break;
+        snprintf(out[count].id, sizeof(out[count].id), "%s", cJSON_GetObjectItem(entry, "id")->valuestring);
+        out[count].slot = fos_scene_store_entry_slot(entry);
+        out[count].bytes = (size_t)cJSON_GetObjectItem(entry, "bytes")->valueint;
+        count++;
+    }
+    cJSON_Delete(index);
+    return count;
+}
+
 static fos_scene_store_err_t put_one(const char *json, fos_scene_store_result_t *result)
 {
     fos_scene_store_put_t put = {json, strlen(json)};
@@ -67,8 +91,8 @@ static fos_scene_store_err_t put_one(const char *json, fos_scene_store_result_t 
 
 static int slot_of(const char *id)
 {
-    fos_scene_store_entry_t entries[FOS_SCENE_STORE_SLOTS];
-    int count = fos_scene_store_read_entries(entries, FOS_SCENE_STORE_SLOTS);
+    entry_t entries[FOS_SCENE_STORE_SLOTS];
+    int count = read_entries(entries, FOS_SCENE_STORE_SLOTS);
     for (int i = 0; i < count; i++) {
         if (strcmp(entries[i].id, id) == 0) return entries[i].slot;
     }
@@ -84,8 +108,8 @@ static void test_add_list_read(void)
     CHECK(strcmp(result.first_put_id, "a") == 0);
     CHECK(put_one("{\"name\":\"Beta\",\"id\":\"b\"}", &result) == FOS_SCENE_STORE_OK);
     CHECK(result.scene_count == 2);
-    fos_scene_store_entry_t entries[FOS_SCENE_STORE_SLOTS];
-    int count = fos_scene_store_read_entries(entries, FOS_SCENE_STORE_SLOTS);
+    entry_t entries[FOS_SCENE_STORE_SLOTS];
+    int count = read_entries(entries, FOS_SCENE_STORE_SLOTS);
     CHECK(count == 2);
     CHECK(strcmp(entries[0].id, "a") == 0 && strcmp(entries[1].id, "b") == 0);
     size_t len = 0;
@@ -94,8 +118,8 @@ static void test_add_list_read(void)
     free(body);
     CHECK(fos_scene_store_read_scene("c", &len) == NULL);
 
-    cJSON *tree = fos_scene_store_list_tree();
-    CHECK(cJSON_GetObjectItem(tree, "sceneCount")->valueint == 2);
+    cJSON *tree = fos_scene_store_read_index();
+    CHECK(cJSON_GetArraySize(cJSON_GetObjectItem(tree, "scenes")) == 2);
     const cJSON *first = cJSON_GetArrayItem(cJSON_GetObjectItem(tree, "scenes"), 0);
     CHECK(strcmp(cJSON_GetObjectItem(first, "name")->valuestring, "Alpha \"x\"") == 0);
     CHECK(cJSON_GetObjectItem(first, "refreshInterval")->valuedouble == 30);
@@ -152,7 +176,7 @@ static void test_delete(void)
     CHECK(strcmp(dropped, "a;") == 0);
     CHECK(slot_of("a") == -1);
     CHECK(result.scene_count == 1);
-    cJSON *tree = fos_scene_store_list_tree();
+    cJSON *tree = fos_scene_store_read_index();
     CHECK(strcmp(cJSON_GetObjectItem(tree, "default")->valuestring, "b") == 0);
     cJSON_Delete(tree);
     /* Nothing by that name, and never the last scene. */
@@ -172,15 +196,14 @@ static void test_patch_order_membership_source(void)
     put_one("{\"id\":\"c\"}", &result);
     fos_scene_store_put_t puts[] = {{"{\"id\":\"b\",\"name\":\"new b\"}", strlen("{\"id\":\"b\",\"name\":\"new b\"}")},
                                     {"{\"id\":\"d\"}", strlen("{\"id\":\"d\"}")}};
-    const char *order[] = {"d", "b", "a"};
+    const char *order_ids[] = {"d", "b", "a"};
+    cJSON *order = cJSON_CreateStringArray(order_ids, 3);
     char dropped[64] = "";
-    fos_scene_store_change_t patch = {
-        .puts = puts, .put_count = 2, .order = order, .order_count = 3, .source = "cloud",
-    };
+    fos_scene_store_change_t patch = {.puts = puts, .put_count = 2, .order = order, .source = "cloud"};
     CHECK(fos_scene_store_apply(&patch, &result, dropped_cb, dropped) == FOS_SCENE_STORE_OK);
     CHECK(strcmp(dropped, "c;") == 0);
     CHECK(result.scene_count == 3);
-    cJSON *tree = fos_scene_store_list_tree();
+    cJSON *tree = fos_scene_store_read_index();
     const cJSON *scenes = cJSON_GetObjectItem(tree, "scenes");
     CHECK(strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(scenes, 0), "id")->valuestring, "d") == 0);
     CHECK(strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(scenes, 2), "id")->valuestring, "a") == 0);
@@ -190,8 +213,9 @@ static void test_patch_order_membership_source(void)
     /* An order naming a scene neither stored nor put changes nothing. */
     int b_slot = slot_of("b");
     fos_scene_store_put_t put_e = {"{\"id\":\"e\"}", strlen("{\"id\":\"e\"}")};
-    const char *bad_order[] = {"e", "ghost"};
-    fos_scene_store_change_t bad = {.puts = &put_e, .put_count = 1, .order = bad_order, .order_count = 2};
+    const char *bad_ids[] = {"e", "ghost"};
+    cJSON *bad_order = cJSON_CreateStringArray(bad_ids, 2);
+    fos_scene_store_change_t bad = {.puts = &put_e, .put_count = 1, .order = bad_order};
     CHECK(fos_scene_store_apply(&bad, &result, NULL, NULL) == FOS_SCENE_STORE_ERR_MISSING_SCENE);
     CHECK(slot_of("e") == -1);
     CHECK(slot_of("b") == b_slot);
@@ -200,12 +224,61 @@ static void test_patch_order_membership_source(void)
     for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) files += slot_file_exists(slot);
     CHECK(files == 5); /* a, b, d, and until the sweep the old b and the dropped c */
     /* The same order twice is a missing scene too. */
-    const char *dup_order[] = {"a", "a"};
-    fos_scene_store_change_t dup = {.order = dup_order, .order_count = 2};
+    const char *dup_ids[] = {"a", "a"};
+    cJSON *dup_order = cJSON_CreateStringArray(dup_ids, 2);
+    fos_scene_store_change_t dup = {.order = dup_order};
     CHECK(fos_scene_store_apply(&dup, &result, NULL, NULL) == FOS_SCENE_STORE_ERR_MISSING_SCENE);
-    /* An empty order is no scenes at all. */
-    fos_scene_store_change_t empty = {.order = order, .order_count = 0};
+    /* An empty order is no scenes at all, and an id that is not a string is
+     * no scene. */
+    cJSON *empty_order = cJSON_CreateArray();
+    fos_scene_store_change_t empty = {.order = empty_order};
     CHECK(fos_scene_store_apply(&empty, &result, NULL, NULL) == FOS_SCENE_STORE_ERR_LAST_SCENE);
+    cJSON *odd_order = cJSON_Parse("[\"a\", 7]");
+    fos_scene_store_change_t odd = {.order = odd_order};
+    CHECK(fos_scene_store_apply(&odd, &result, NULL, NULL) == FOS_SCENE_STORE_ERR_MISSING_SCENE);
+    cJSON_Delete(order);
+    cJSON_Delete(bad_order);
+    cJSON_Delete(dup_order);
+    cJSON_Delete(empty_order);
+    cJSON_Delete(odd_order);
+}
+
+static void test_patch_from_a_tree(void)
+{
+    fresh_dir();
+    fos_scene_store_result_t result;
+    put_one("{\"id\":\"a\"}", &result);
+    put_one("{\"id\":\"b\"}", &result);
+    /* A control plane's message is a tree already: its scenes are printed for
+     * their files, and the order is its array of ids. */
+    cJSON *message = cJSON_Parse("{\"put\":[{\"id\":\"b\",\"name\":\"B\"},{\"id\":\"c\"}],"
+                                 "\"order\":[\"c\",\"b\",\"a\"]}");
+    char dropped[64] = "";
+    fos_scene_store_change_t patch = {
+        .put_items = cJSON_GetObjectItem(message, "put"),
+        .order = cJSON_GetObjectItem(message, "order"),
+    };
+    CHECK(fos_scene_store_apply(&patch, &result, dropped_cb, dropped) == FOS_SCENE_STORE_OK);
+    CHECK(dropped[0] == '\0');
+    CHECK(result.scene_count == 3);
+    CHECK(result.put_bytes == strlen("{\"id\":\"b\",\"name\":\"B\"}") + strlen("{\"id\":\"c\"}"));
+    CHECK(strcmp(result.first_put_id, "b") == 0);
+    entry_t entries[4];
+    CHECK(read_entries(entries, 4) == 3);
+    CHECK(strcmp(entries[0].id, "c") == 0 && strcmp(entries[1].id, "b") == 0 && strcmp(entries[2].id, "a") == 0);
+    size_t len = 0;
+    char *body = fos_scene_store_read_scene("b", &len);
+    CHECK(body != NULL && strcmp(body, "{\"id\":\"b\",\"name\":\"B\"}") == 0);
+    free(body);
+    /* A scene that is not an object is refused like a broken one. */
+    cJSON *bad = cJSON_Parse("{\"put\":[\"nope\"],\"order\":[\"a\"]}");
+    fos_scene_store_change_t refused = {
+        .put_items = cJSON_GetObjectItem(bad, "put"),
+        .order = cJSON_GetObjectItem(bad, "order"),
+    };
+    CHECK(fos_scene_store_apply(&refused, &result, NULL, NULL) == FOS_SCENE_STORE_ERR_INVALID);
+    cJSON_Delete(bad);
+    cJSON_Delete(message);
 }
 
 static void test_invalid_scenes(void)
@@ -224,7 +297,7 @@ static void test_invalid_scenes(void)
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         CHECK(put_one(bad[i], &result) == FOS_SCENE_STORE_ERR_INVALID);
     }
-    CHECK(fos_scene_store_read_entries((fos_scene_store_entry_t[1]){0}, 1) == -1);
+    CHECK(read_entries((entry_t[1]){0}, 1) == -1);
     /* An id that would not fit is refused, not cut short. */
     char long_id[FOS_SCENE_STORE_ID_LEN + 32];
     memset(long_id, 'x', sizeof(long_id) - 1);
@@ -266,8 +339,8 @@ static void test_repoint(void)
     char *body = fos_scene_store_read_scene("a", &len);
     CHECK(body != NULL && strstr(body, "good") != NULL);
     free(body);
-    fos_scene_store_entry_t entries[2];
-    CHECK(fos_scene_store_read_entries(entries, 2) == 1);
+    entry_t entries[2];
+    CHECK(read_entries(entries, 2) == 1);
     CHECK(entries[0].bytes == strlen("{\"id\":\"a\",\"name\":\"good\"}"));
     CHECK(fos_scene_store_repoint("zzz", good_slot) == FOS_SCENE_STORE_ERR_NOT_FOUND);
 }
@@ -302,7 +375,7 @@ static void test_recover_index_after_power_cut(void)
     snprintf(path, sizeof(path), "%s/%s", s_dir, FOS_SCENE_STORE_INDEX_NAME);
     snprintf(tmp, sizeof(tmp), "%s/%s", s_dir, FOS_SCENE_STORE_INDEX_TMP_NAME);
     rename(path, tmp); /* the moment between remove(index) and rename(tmp, index) */
-    CHECK(fos_scene_store_read_entries((fos_scene_store_entry_t[1]){0}, 1) == -1);
+    CHECK(read_entries((entry_t[1]){0}, 1) == -1);
     CHECK(fos_scene_store_recover_index());
     CHECK(slot_of("a") != -1);
     /* Nothing to do when the index is there. */
@@ -321,14 +394,94 @@ static void test_old_index_without_bytes(void)
     f = fopen(path, "wb");
     fputs("{\"id\":\"a\"}", f);
     fclose(f);
-    cJSON *tree = fos_scene_store_list_tree();
-    CHECK(cJSON_GetObjectItem(tree, "scenesBytes")->valueint == (int)strlen("{\"id\":\"a\"}"));
+    cJSON *tree = fos_scene_store_read_index();
+    const cJSON *entry = cJSON_GetArrayItem(cJSON_GetObjectItem(tree, "scenes"), 0);
+    CHECK(cJSON_GetObjectItem(entry, "bytes")->valueint == (int)strlen("{\"id\":\"a\"}"));
     cJSON_Delete(tree);
     fos_scene_store_result_t result;
     /* A put keeps the old entry's slot out of use. */
     CHECK(put_one("{\"id\":\"b\"}", &result) == FOS_SCENE_STORE_OK);
     CHECK(slot_of("b") != 4);
     CHECK(result.scene_count == 2);
+}
+
+static const char *default_id(void)
+{
+    static char out[FOS_SCENE_STORE_ID_LEN];
+    cJSON *tree = fos_scene_store_read_index();
+    const cJSON *value = cJSON_GetObjectItem(tree, "default");
+    snprintf(out, sizeof(out), "%s", cJSON_IsString(value) ? value->valuestring : "");
+    cJSON_Delete(tree);
+    return out;
+}
+
+static bool entry_has(const char *id, const char *flag)
+{
+    cJSON *tree = fos_scene_store_read_index();
+    const cJSON *entry = NULL;
+    bool found = false;
+    cJSON_ArrayForEach(entry, cJSON_GetObjectItem(tree, "scenes")) {
+        if (strcmp(cJSON_GetObjectItem(entry, "id")->valuestring, id) == 0) {
+            found = cJSON_IsTrue(cJSON_GetObjectItem(entry, flag));
+        }
+    }
+    cJSON_Delete(tree);
+    return found;
+}
+
+static void test_layouts_and_the_default(void)
+{
+    fresh_dir();
+    fos_scene_store_result_t result;
+    /* A layout is never what a frame boots to, even first in the list. */
+    CHECK(put_one("{\"id\":\"wrap\",\"settings\":{\"isLayout\":true}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_has("wrap", "isLayout"));
+    CHECK(default_id()[0] == '\0');
+    CHECK(put_one("{\"id\":\"a\"}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(strcmp(default_id(), "a") == 0);
+    /* The scene marked default wins, and keeps winning while others change. */
+    CHECK(put_one("{\"id\":\"b\",\"default\":true}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_has("b", "default") && !entry_has("a", "default"));
+    CHECK(strcmp(default_id(), "b") == 0);
+    CHECK(put_one("{\"id\":\"a\",\"name\":\"again\"}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(strcmp(default_id(), "b") == 0);
+    fos_scene_store_change_t remove_b = {.remove_id = "b"};
+    CHECK(fos_scene_store_apply(&remove_b, &result, NULL, NULL) == FOS_SCENE_STORE_OK);
+    CHECK(strcmp(default_id(), "a") == 0);
+    /* Two puts of one id in one change are not one scene. */
+    fos_scene_store_put_t twice[] = {{"{\"id\":\"c\"}", 10}, {"{\"id\":\"c\"}", 10}};
+    fos_scene_store_change_t dup = {.puts = twice, .put_count = 2};
+    CHECK(fos_scene_store_apply(&dup, &result, NULL, NULL) == FOS_SCENE_STORE_ERR_INVALID);
+    CHECK(slot_of("c") == -1);
+}
+
+static void test_replace_all(void)
+{
+    fresh_dir();
+    fos_scene_store_result_t result;
+    put_one("{\"id\":\"a\"}", &result);
+    put_one("{\"id\":\"b\"}", &result);
+    /* A whole set, straight from the payload's bytes: no NUL after each. */
+    const char *payload = "[{\"id\":\"x\",\"name\":\"X\"},{\"id\":\"y\",\"default\":true}]";
+    fos_scene_store_put_t puts[] = {{payload + 1, 21}, {payload + 23, 25}};
+    char dropped[64] = "";
+    fos_scene_store_change_t all = {.puts = puts, .put_count = 2, .replace_all = true, .source = "backend"};
+    CHECK(fos_scene_store_apply(&all, &result, dropped_cb, dropped) == FOS_SCENE_STORE_OK);
+    CHECK(strcmp(dropped, "a;b;") == 0);
+    CHECK(result.scene_count == 2);
+    entry_t entries[FOS_SCENE_STORE_SLOTS];
+    CHECK(read_entries(entries, FOS_SCENE_STORE_SLOTS) == 2);
+    CHECK(strcmp(entries[0].id, "x") == 0 && strcmp(entries[1].id, "y") == 0);
+    CHECK(entries[0].bytes == 21);
+    CHECK(strcmp(default_id(), "y") == 0);
+    size_t len = 0;
+    char *body = fos_scene_store_read_scene("x", &len);
+    CHECK(body != NULL && strcmp(body, "{\"id\":\"x\",\"name\":\"X\"}") == 0);
+    free(body);
+    fos_scene_store_sweep();
+    int files = 0;
+    for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) files += slot_file_exists(slot);
+    CHECK(files == 2);
 }
 
 int main(void)
@@ -341,12 +494,15 @@ int main(void)
     test_replace_writes_new_slot_keeps_old_until_sweep();
     test_delete();
     test_patch_order_membership_source();
+    test_patch_from_a_tree();
     test_invalid_scenes();
     test_slots_run_out();
     test_repoint();
     test_sweep_needs_a_good_index();
     test_recover_index_after_power_cut();
     test_old_index_without_bytes();
+    test_layouts_and_the_default();
+    test_replace_all();
 
     fresh_dir();
     rmdir(s_dir);

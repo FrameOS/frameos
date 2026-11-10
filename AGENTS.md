@@ -226,6 +226,9 @@
   task's copy (`s_slots`) stays valid until it re-reads the index and sweeps.
   A reader that is not the render task reads the index on flash under the store
   lock. Never overwrite a slot in place, never unlink one from another task.
+  A whole payload is split by the same `fos_scene_store_apply` (`replace_all`),
+  so what the index keeps of a scene (`isLayout`, the `default` mark) is decided
+  in one place, `make_entry`.
 - Both planes send only what changed when they can, and always fall back to
   the whole list: the cloud's `scenes_patch` (the hub decides at send time from
   the row's `scene_hashes`, `lib/scenes-patch.ts`; the queue row stays

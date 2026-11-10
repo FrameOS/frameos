@@ -73,6 +73,7 @@ static fos_action_cb s_render_cb = NULL;
 static fos_action_cb s_ota_cb = NULL;
 
 static esp_err_t scenes_post_handler(httpd_req_t *req);
+static esp_err_t scenes_body_post(httpd_req_t *req, bool one);
 static void log_http_command(httpd_req_t *req, const char *event_name, size_t body_len);
 static void log_http_command_from_path(httpd_req_t *req, size_t body_len);
 
@@ -833,8 +834,6 @@ char *fos_http_status_json(void)
     char *i2c_json = json_escape_dup(i2c_summary);
     fos_storage_info_t storage;
     fos_http_collect_storage_info(&storage);
-    fos_scenes_storage_t scene_storage;
-    fos_scenes_storage_summary(&scene_storage);
 
     char *cloud_url = json_escape_dup(config->cloud_url);
     char *cloud_frame_id = json_escape_dup(fos_cloud_frame_id());
@@ -880,8 +879,7 @@ char *fos_http_status_json(void)
         "\"internalLargestBlock\":%u,\"framebufferReserved\":%u},"
         "\"storage\":{\"flashBytes\":%u,\"nvsBytes\":%u,\"otadataBytes\":%u,\"phyBytes\":%u,"
         "\"factorySlotBytes\":%u,\"otaSlots\":%u,\"otaSlotBytes\":%u,\"otaBytes\":%u,"
-        "\"stateBytes\":%u,\"stateTotalBytes\":%u,\"stateUsedBytes\":%u,\"scenesBytes\":%u,"
-        "\"sceneCount\":%d},"
+        "\"stateBytes\":%u},"
         "\"assets\":{\"path\":\"%s\",\"sdEnabled\":%s,\"sdMounted\":%s,\"sdPins\":\"%s\","
         "\"sdMaxFrequencyKHz\":%lu,\"sdCapacityBytes\":%llu,\"sdAutoformat\":%s,"
         "\"sdErrorCode\":\"%s\",\"sdError\":\"%s\"},"
@@ -917,8 +915,6 @@ char *fos_http_status_json(void)
         (unsigned)storage.factory_slot_bytes, (unsigned)storage.ota_slots,
         (unsigned)storage.ota_slot_bytes, (unsigned)storage.ota_bytes,
         (unsigned)storage.state_bytes,
-        (unsigned)scene_storage.state_total_bytes, (unsigned)scene_storage.state_used_bytes,
-        (unsigned)scene_storage.scenes_bytes, scene_storage.scene_count,
         assets_path, config->assets_sd.enabled ? "true" : "false",
         fos_assets_sd_mounted() ? "true" : "false", sd_pins_json,
         (unsigned long)config->assets_sd.max_freq_khz,
@@ -2720,41 +2716,31 @@ static bool frame_api_suffix(httpd_req_t *req, char *suffix, size_t suffix_len)
 
 /* One scene at a time: GET /scenes (the list, sizes and storage), GET
  * /scenes/<id> (one scene), POST /scenes (add or replace one, ?activate=1 to
- * show it), POST /scenes/delete {"id"}. */
-static esp_err_t send_scene_op_error(httpd_req_t *req, esp_err_t err)
+ * show it; scenes_body_post), POST /scenes/delete?id=<id>. */
+static esp_err_t send_scenes_error(httpd_req_t *req, esp_err_t err)
 {
-    const char *status = "500 Internal Server Error";
-    if (err == ESP_ERR_INVALID_ARG) status = "400 Bad Request";
-    else if (err == ESP_ERR_NOT_FOUND) status = "404 Not Found";
-    else if (err == ESP_ERR_INVALID_STATE) status = "409 Conflict";
-    else if (err == ESP_ERR_NO_MEM) status = "507 Insufficient Storage";
     const char *detail = fos_scenes_last_error();
-    char *escaped = json_escape_dup((detail && detail[0]) ? detail : esp_err_to_name(err));
-    char body[640];
-    snprintf(body, sizeof(body), "{\"error\":\"%s\"}", escaped ? escaped : "scene change failed");
-    free(escaped);
-    httpd_resp_set_status(req, status);
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_sendstr(req, body);
+    return httpd_resp_send_err(req,
+                               err == ESP_ERR_INVALID_ARG ? HTTPD_400_BAD_REQUEST
+                               : err == ESP_ERR_NOT_FOUND ? HTTPD_404_NOT_FOUND
+                                                          : HTTPD_500_INTERNAL_SERVER_ERROR,
+                               (detail && detail[0]) ? detail : esp_err_to_name(err));
 }
 
-static esp_err_t scenes_list_get_handler(httpd_req_t *req)
+/* The list (`encoded_id` NULL) or one scene. */
+static esp_err_t scene_store_get_handler(httpd_req_t *req, const char *encoded_id)
 {
-    char *json = fos_scenes_list_json();
-    if (!json) return httpd_resp_send_500(req);
-    httpd_resp_set_type(req, "application/json");
-    esp_err_t err = httpd_resp_sendstr(req, json);
-    cJSON_free(json);
-    return err;
-}
-
-static esp_err_t scene_one_get_handler(httpd_req_t *req, const char *encoded_id)
-{
-    char scene_id[FOS_HTTP_UPLOAD_SCENE_ID_LEN];
-    strlcpy(scene_id, encoded_id, sizeof(scene_id));
-    url_decode(scene_id);
     size_t len = 0;
-    char *json = fos_scenes_get_json(scene_id, &len);
+    char *json;
+    if (encoded_id == NULL) {
+        json = fos_scenes_list_json();
+        if (json) len = strlen(json);
+    } else {
+        char scene_id[FOS_HTTP_UPLOAD_SCENE_ID_LEN];
+        strlcpy(scene_id, encoded_id, sizeof(scene_id));
+        url_decode(scene_id);
+        json = fos_scenes_get_json(scene_id, &len);
+    }
     if (!json) return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no such scene");
     httpd_resp_set_type(req, "application/json");
     esp_err_t err = httpd_resp_send(req, json, (ssize_t)len);
@@ -2762,74 +2748,16 @@ static esp_err_t scene_one_get_handler(httpd_req_t *req, const char *encoded_id)
     return err;
 }
 
-static esp_err_t scene_put_post_handler(httpd_req_t *req)
-{
-    keep_awake_for_http_mutation();
-    int total = req->content_len;
-    if (total <= 0 || total > 512 * 1024) {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
-    }
-    char *body = fos_big_malloc((size_t)total + 1);
-    if (!body) body = malloc((size_t)total + 1);
-    if (!body) return httpd_resp_send_500(req);
-    int received = 0;
-    while (received < total) {
-        int r = httpd_req_recv(req, body + received, total - received);
-        if (r <= 0) {
-            free(body);
-            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "recv failed");
-        }
-        received += r;
-    }
-    body[total] = '\0';
-    log_http_command(req, "scenePut", (size_t)total);
-    char scene_id[FOS_HTTP_UPLOAD_SCENE_ID_LEN];
-    esp_err_t err = fos_scenes_put(body, (size_t)total, FOS_SCENES_SOURCE_LOCAL, scene_id, sizeof(scene_id));
-    free(body);
-    if (err != ESP_OK) return send_scene_op_error(req, err);
-    char activate[8] = "";
-    if (asset_query_param(req, "activate", activate, sizeof(activate)) && strcmp(activate, "1") == 0) {
-        fos_scenes_select(scene_id);
-        if (s_render_cb) s_render_cb();
-    }
-    char *escaped = json_escape_dup(scene_id);
-    char reply[FOS_HTTP_UPLOAD_SCENE_ID_LEN + 32];
-    snprintf(reply, sizeof(reply), "{\"ok\":true,\"id\":\"%s\"}", escaped ? escaped : "");
-    free(escaped);
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_sendstr(req, reply);
-}
-
 static esp_err_t scene_delete_post_handler(httpd_req_t *req)
 {
     keep_awake_for_http_mutation();
-    int total = req->content_len;
-    if (total <= 0 || total > 1024) {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
-    }
-    char *body = malloc((size_t)total + 1);
-    if (!body) return httpd_resp_send_500(req);
-    int received = 0;
-    while (received < total) {
-        int r = httpd_req_recv(req, body + received, total - received);
-        if (r <= 0) {
-            free(body);
-            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "recv failed");
-        }
-        received += r;
-    }
-    body[total] = '\0';
-    cJSON *root = cJSON_ParseWithLength(body, (size_t)total);
-    free(body);
-    const cJSON *id = cJSON_GetObjectItem(root, "id");
-    esp_err_t err = cJSON_IsString(id) && id->valuestring
-                        ? fos_scenes_delete(id->valuestring, FOS_SCENES_SOURCE_LOCAL)
-                        : ESP_ERR_INVALID_ARG;
-    log_http_command(req, "sceneDelete", (size_t)total);
-    cJSON_Delete(root);
-    if (err != ESP_OK) return send_scene_op_error(req, err);
+    char scene_id[FOS_HTTP_UPLOAD_SCENE_ID_LEN] = "";
+    asset_query_param(req, "id", scene_id, sizeof(scene_id));
+    log_http_command(req, "sceneDelete", 0);
+    esp_err_t err = fos_scenes_delete(scene_id, FOS_SCENES_SOURCE_LOCAL);
+    if (err != ESP_OK) return send_scenes_error(req, err);
     httpd_resp_set_type(req, "application/json");
-    return httpd_resp_sendstr(req, "{\"ok\":true}");
+    return httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
 }
 
 static esp_err_t frame_api_get_handler(httpd_req_t *req)
@@ -2845,8 +2773,9 @@ static esp_err_t frame_api_get_handler(httpd_req_t *req)
     if (strcmp(suffix, "/state") == 0) return state_alias_get_handler(req);
     if (strcmp(suffix, "/states") == 0) return states_alias_get_handler(req);
     if (strcmp(suffix, "/uploaded_scenes") == 0) return uploaded_scenes_get_handler(req);
-    if (strcmp(suffix, "/scenes") == 0) return scenes_list_get_handler(req);
-    if (strncmp(suffix, "/scenes/", 8) == 0) return scene_one_get_handler(req, suffix + 8);
+    if (strncmp(suffix, "/scenes", 7) == 0 && (suffix[7] == '\0' || suffix[7] == '/')) {
+        return scene_store_get_handler(req, suffix[7] ? suffix + 8 : NULL);
+    }
     if (strcmp(suffix, "/image") == 0 || strncmp(suffix, "/scene_images/", 14) == 0) {
         return preview_bmp_handler(req);
     }
@@ -2872,7 +2801,7 @@ static esp_err_t frame_api_post_handler(httpd_req_t *req)
         strcmp(suffix, "/uploaded_scenes") == 0) {
         return scenes_post_handler(req);
     }
-    if (strcmp(suffix, "/scenes") == 0) return scene_put_post_handler(req);
+    if (strcmp(suffix, "/scenes") == 0) return scenes_body_post(req, true);
     if (strcmp(suffix, "/scenes/delete") == 0) return scene_delete_post_handler(req);
     if (strcmp(suffix, "/assets/upload") == 0) return asset_upload_post_handler(req);
     if (strcmp(suffix, "/assets/mkdir") == 0) return asset_mutate_post_handler(req, "mkdir");
@@ -2930,8 +2859,9 @@ static esp_err_t scene_select_handler(httpd_req_t *req)
 
 /* Local scene push: accept a scenes.json array, persist it to /state
  * and apply it on the next render — hot scene update over the LAN without
- * touching the backend. */
-static esp_err_t scenes_post_handler(httpd_req_t *req)
+ * touching the backend. `one`: a single scene added or replaced, the rest
+ * untouched, rendered only when it shows (?activate=1 shows it). */
+static esp_err_t scenes_body_post(httpd_req_t *req, bool one)
 {
     REQUIRE_PROTECTED_ACCESS();
     keep_awake_for_http_mutation();
@@ -2954,19 +2884,26 @@ static esp_err_t scenes_post_handler(httpd_req_t *req)
     }
     body[total] = '\0';
 
-    log_http_command(req, "uploadScenes", (size_t)total);
-    esp_err_t err = fos_http_store_uploaded_scenes_payload(body, total);
+    log_http_command(req, one ? "scenePut" : "uploadScenes", (size_t)total);
+    char scene_id[FOS_HTTP_UPLOAD_SCENE_ID_LEN];
+    esp_err_t err = one ? fos_scenes_put(body, total, FOS_SCENES_SOURCE_LOCAL, scene_id, sizeof(scene_id))
+                        : fos_http_store_uploaded_scenes_payload(body, total);
     free(body);
-    if (err != ESP_OK) {
-        const char *detail = fos_scenes_last_error();
-        return httpd_resp_send_err(
-            req,
-            HTTPD_500_INTERNAL_SERVER_ERROR,
-            (detail && detail[0]) ? detail : esp_err_to_name(err));
+    if (err != ESP_OK) return send_scenes_error(req, err);
+    bool render = !one;
+    char activate[4];
+    if (one && asset_query_param(req, "activate", activate, sizeof(activate)) && activate[0] == '1') {
+        fos_scenes_select(scene_id);
+        render = true;
     }
-    if (s_render_cb) s_render_cb();
+    if (render && s_render_cb) s_render_cb();
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t scenes_post_handler(httpd_req_t *req)
+{
+    return scenes_body_post(req, false);
 }
 
 /* Force a backend scenes sync on the next render pass. */
