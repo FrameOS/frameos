@@ -109,9 +109,14 @@ block: # against the oracle: shrunk, grown, both, off every edge, faded, transpa
   checkAgainstOracle(tiny, 110, 70, 0, 0, 97, 61)              # 32x up
   checkAgainstOracle(small, 90, 90, 5, 5, 20, 80)              # down in x, up in y
   checkAgainstOracle(big, 60, 50, -37.5, -20.25, 140, 95)      # hanging off every side
-  checkAgainstOracle(small, 60, 50, 10, 8, 33.3, 25.1, opacity = 0.5, tolerance = 2)
-  checkAgainstOracle(clear, 70, 60, 6.5, 4, 41, 51, tolerance = 2) # alpha over the backdrop
-  checkAgainstOracle(clear, 70, 60, 6.5, 4, 41, 51, opacity = 0.3, tolerance = 2)
+  # Over the backdrop three roundings add up: the resampled colour, its alpha
+  # (which sets how much of the backdrop shows through), and the row blend's
+  # own (blendLineNormal, about one level on every platform). Each is within
+  # one level; how they fall differs between an arm64 and an x86-64 build (the
+  # weights' float arithmetic is contracted differently), 2.17 seen on x86-64.
+  checkAgainstOracle(small, 60, 50, 10, 8, 33.3, 25.1, opacity = 0.5, tolerance = 3)
+  checkAgainstOracle(clear, 70, 60, 6.5, 4, 41, 51, tolerance = 3) # alpha over the backdrop
+  checkAgainstOracle(clear, 70, 60, 6.5, 4, 41, 51, opacity = 0.3, tolerance = 3)
 
 block: # nothing outside the rectangle changes, however it is placed
   let picture = photo(30, 20)
