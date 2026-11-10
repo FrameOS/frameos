@@ -44,6 +44,7 @@ import {
   reconcileSubscriptions,
   syncPlans,
 } from "../../lib/billing-provider";
+import { listAccountsForAdmin } from "../../lib/admin";
 import { planEvents } from "../../lib/plan-notifications";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
@@ -1553,6 +1554,59 @@ describe("telling the reports channel", () => {
     await deliver();
     expect(told()).toEqual([planEvents.subscribed, planEvents.ended]);
     expect(last(planEvents.ended)?.properties["reason"]).toBe("account_deleted");
+  });
+});
+
+describe("the admin users list", () => {
+  async function tagOf(accountId: string) {
+    const rows = await listAccountsForAdmin(db);
+    return rows.find((row) => row.id === accountId)?.paidPlan;
+  }
+
+  it("tags a paying account with its plan until the plan ends", async () => {
+    const free = await signIn();
+    // Signed in last: the one who buys.
+    const accountId = await signIn();
+    expect(await tagOf(accountId)).toBeNull();
+
+    const subscriptionId = await buy("private-9", accountId);
+    expect(await tagOf(accountId)).toEqual({
+      cancelAt: null,
+      code: "private-9",
+      name: "Private",
+      priceMicros: "9000000",
+      provider: "stripe",
+    });
+    expect(await tagOf(free)).toBeNull();
+
+    // A downgrade keeps the plan paid for until the renewal.
+    await putPlan(jsonRequest("PUT", "/api/account/plan", { plan: "private-2" }));
+    expect((await tagOf(accountId))?.code).toBe("private-9");
+
+    await putPlan(jsonRequest("PUT", "/api/account/plan", { plan: "payg" }));
+    const periodEnd = fake.subscriptions.get(subscriptionId)!.periodEnd;
+    expect((await tagOf(accountId))?.cancelAt?.toISOString()).toBe(periodEnd.toISOString());
+
+    fake.takeDeliveries();
+    clock = periodEnd;
+    fake.renew(subscriptionId);
+    await deliver();
+    expect(await tagOf(accountId)).toBeNull();
+  });
+
+  it("tags a plan an operator set by hand", async () => {
+    const accountId = await signIn();
+    await syncPlans(db, config(), portalUrls);
+    await signIn({ superadmin: true });
+    const response = await putCustomerPlan(
+      jsonRequest("PUT", `/api/admin/billing/customers/${accountId}/plan`, {
+        plan: "business-49",
+        reason: "invoiced by hand",
+      }),
+      { params: Promise.resolve({ accountId }) },
+    );
+    expect(response.status).toBe(200);
+    expect(await tagOf(accountId)).toMatchObject({ code: "business-49", name: "Business", provider: null });
   });
 });
 
