@@ -663,11 +663,20 @@ a small change cost what it should:
   they are under one), so the box costs nothing where nothing changed and the
   rest of the picture does not flash. It draws black and white only, so a
   changed area with greys goes up as a halftone
-  (`fos_it8951_row_halftone`) and its tiles are owed their greys. 2.5 s after
-  the last tap (`fos_display_settle_due`) the kept canvas is packed again, with
-  the scene not run, and those areas get GC16, three rectangles at the most.
-  With nobody tapping a change goes straight up that way, DU for pure black and
-  white. A new scene is GC16 over the whole panel. A panel picks this path by
+  (`fos_it8951_row_halftone`) and its tiles are owed their greys; a tile drawn
+  in pure black and white again owes nothing. 2.5 s after the last of these
+  updates (`fos_display_settle_due`) the kept canvas is packed again, with the
+  scene not run, and those areas get GC16, three rectangles at the most.
+  **Quick pictures go up the same way** (`fos_pictures_fast`): a scene whose
+  own interval is under 2.5 s (an animation, a clock's seconds) from its first
+  frame, and any picture within 2.5 s of the one before. Before, an animation
+  nobody touched put a GC16 over every changed rectangle with a grey in it,
+  every frame: the Kitchen sink's balls flashed sections of the E1003 (their
+  anti-aliased edges are grey). Like a tapping session they take a full
+  refresh after 120 partial updates, not 20, and go on with DU after it. Slow
+  pictures, and the settle's own, go up rectangle by rectangle, DU for pure
+  black and white and GC16 for the rest. A new scene is GC16 over the whole
+  panel. A panel picks this path by
   giving `PARTIAL_PANELS` a `changed`, a `clean` and an `owed`. The controller
   is not put in standby between updates (its first waveform after one costs 600
   ms more), only when it is parked. Measured on an E1003 (2026-11-10): five

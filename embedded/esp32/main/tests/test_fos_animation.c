@@ -236,6 +236,26 @@ static void test_who_the_input_hold_is_for(void)
     CHECK(!fos_input_hold_applies(false, false, false), "nobody can tap a bare panel");
 }
 
+static void test_quick_pictures_go_up_fast(void)
+{
+    const int64_t s = 1000000;
+    /* The Kitchen sink's Motion page asks for 0.05 s: fast from its first
+     * frame, however long the frame before it took to go up. */
+    CHECK(fos_pictures_fast(0.05, 0, 100 * s), "an animation, its first frame");
+    CHECK(fos_pictures_fast(0.05, 10 * s, 100 * s), "an animation after a long refresh");
+    /* A clock's second hand. */
+    CHECK(fos_pictures_fast(1.0, 0, 100 * s), "a scene that asks every second");
+    CHECK(!fos_pictures_fast(2.5, 0, 100 * s), "2.5 s is the settle's own wait: not quick");
+    CHECK(!fos_pictures_fast(60.0, 0, 100 * s), "a minute's scene, alone");
+    CHECK(!fos_pictures_fast(0.0, 0, 100 * s), "a scene with no interval, alone");
+    /* Pictures somebody else asked for, close together (an editor's slider):
+     * fast while they keep coming, slow again after a pause. */
+    CHECK(fos_pictures_fast(60.0, 99 * s, 100 * s), "a second after the last picture");
+    CHECK(fos_pictures_fast(0.0, 98 * s, 100 * s - 1), "just under 2.5 s after it");
+    CHECK(!fos_pictures_fast(60.0, 97 * s, 100 * s), "3 s after it");
+    CHECK(!fos_pictures_fast(60.0, 0, 1 * s), "no picture yet");
+}
+
 static void test_the_picture_push_gives_way(void)
 {
     /* On the render task: each thing that wants it back stops the push. */
@@ -325,6 +345,7 @@ int main(void)
     test_input_hold();
     test_loading_taps();
     test_who_the_input_hold_is_for();
+    test_quick_pictures_go_up_fast();
     test_the_picture_push_gives_way();
     test_the_backend_link();
     test_a_timed_render_waits_for_the_glass();
