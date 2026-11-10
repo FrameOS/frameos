@@ -317,11 +317,17 @@ proc rgb565ToRgbx*(p: uint16): ColorRGBX {.inline, raises: [].} =
   result.b = ((b shl 3) or (b shr 2)).uint8
   result.a = 255
 
+proc readGray*(image: Image, index: int): ColorRGBX {.noinline, raises: [].} =
+  ## A grey image's pixel. Out of line on purpose, with `storeGray`: getPixel
+  ## and setPixel are templates, and a grey image's slow paths (a decode, a
+  ## blend through the accessors) are not worth their code at every call site.
+  if image.format == pfGray8: gray8ToRgbx(image.pixels8[index])
+  else: gray4ToRgbx(gray4Level(image.pixels8, index))
+
 template getPixel*(image: Image, index: int): ColorRGBX =
   ## The pixel at a `dataIndex`, whatever the storage format.
   (if image.format == pfRgbx: image.pixels[index]
-   elif image.format == pfGray8: gray8ToRgbx(image.pixels8[index])
-   elif image.format == pfGray4: gray4ToRgbx(gray4Level(image.pixels8, index))
+   elif image.format >= pfGray8: image.readGray(index)
    else: rgb565ToRgbx(image.pixels16[index]))
 
 proc rgbxToRgb565Dithered*(c: ColorRGBX, index: int): uint16 {.inline, raises: [].} =
@@ -370,7 +376,7 @@ proc rgbxToRgb565Dithered*(c: ColorRGBX, index: int): uint16 {.inline, raises: [
     b = pack5(c.b, off5)
   uint16((r shl 11) or (g shl 5) or b)
 
-proc storeGray4*(image: Image, index: int, luma: uint8) {.inline, raises: [].} =
+proc storeGray4*(image: Image, index: int, luma: uint8) {.noinline, raises: [].} =
   ## An 8-bit grey dithered into a `pfGray4` image at a `dataIndex`. A loop
   ## over a row knows its place and calls `grayLevel16Ordered` itself.
   let
@@ -379,14 +385,17 @@ proc storeGray4*(image: Image, index: int, luma: uint8) {.inline, raises: [].} =
   gray4Put(image.pixels8, index,
     grayLevel16Ordered(luma, OrderedThresholds4x4[(row and 3) * 4 + (column and 3)]))
 
+proc storeGray*(image: Image, index: int, color: ColorRGBX) {.noinline, raises: [].} =
+  ## A premultiplied pixel into a grey image, `readGray`'s other half.
+  if image.format == pfGray8: image.pixels8[index] = rgbxToGray8(color)
+  else: image.storeGray4(index, rgbxToGray8(color))
+
 template setPixel*(image: Image, index: int, color: ColorRGBX) =
   ## Stores a premultiplied pixel at a `dataIndex`, whatever the storage format.
   if image.format == pfRgbx:
     image.pixels[index] = color
-  elif image.format == pfGray8:
-    image.pixels8[index] = rgbxToGray8(color)
-  elif image.format == pfGray4:
-    image.storeGray4(index, rgbxToGray8(color))
+  elif image.format >= pfGray8:
+    image.storeGray(index, color)
   elif image.ditherStores:
     image.pixels16[index] = rgbxToRgb565Dithered(color, index)
   else:
@@ -774,20 +783,6 @@ proc newImageGray8Over*(
   result.format = pfGray8
   result.pixels8 = cast[ptr UncheckedArray[uint8]](buffer)
 
-proc newImageGray4*(width, height: int): Image {.raises: [PixieError].} =
-  ## Creates a new sixteen-grey image, half the memory of `newImageGray8`.
-  ## Starts black. See the notes on `Image`.
-  if width <= 0 or height <= 0:
-    raise newException(PixieError, "Image width and height must be > 0")
-  result = Image()
-  result.width = width
-  result.height = height
-  result.stride = (width + 1) and not 1
-  result.origin = 0
-  result.format = pfGray4
-  result.storage8 = newSeq[uint8](((width + 1) div 2) * height)
-  result.pixels8 = cast[ptr UncheckedArray[uint8]](result.storage8[0].addr)
-
 proc newImageGray4Over*(
   width, height: int, buffer: pointer
 ): Image {.raises: [PixieError].} =
@@ -803,6 +798,15 @@ proc newImageGray4Over*(
   result.origin = 0
   result.format = pfGray4
   result.pixels8 = cast[ptr UncheckedArray[uint8]](buffer)
+
+proc newImageGray4*(width, height: int): Image {.raises: [PixieError].} =
+  ## Creates a new sixteen-grey image, half the memory of `newImageGray8`.
+  ## Starts black. See the notes on `Image`.
+  if width <= 0 or height <= 0:
+    raise newException(PixieError, "Image width and height must be > 0")
+  var storage = newSeq[uint8](((width + 1) div 2) * height)
+  result = newImageGray4Over(width, height, storage[0].addr)
+  result.storage8 = move storage
 
 proc newImage565Over*(
   width, height: int, buffer: pointer
@@ -889,21 +893,13 @@ proc toContiguousSeq*(image: Image): seq[ColorRGBX] {.raises: [].} =
         for x in 0 ..< image.width:
           result[dst + x] = rgb565ToRgbx(image.pixels16[src + x])
       return
-    if image.format == pfGray8:
+    if image.format >= pfGray8:
       for y in 0 ..< image.height:
         let
           src = image.dataIndex(0, y)
           dst = y * image.width
         for x in 0 ..< image.width:
-          result[dst + x] = gray8ToRgbx(image.pixels8[src + x])
-      return
-    if image.format == pfGray4:
-      for y in 0 ..< image.height:
-        let
-          src = image.dataIndex(0, y)
-          dst = y * image.width
-        for x in 0 ..< image.width:
-          result[dst + x] = gray4ToRgbx(gray4Level(image.pixels8, src + x))
+          result[dst + x] = image.readGray(src + x)
       return
     for y in 0 ..< image.height:
       copyMem(
@@ -929,20 +925,13 @@ proc toRgbxImage*(image: Image): Image {.raises: [].} =
         dst = y * image.width
       for x in 0 ..< image.width:
         result.pixels[dst + x] = rgb565ToRgbx(image.pixels16[src + x])
-  elif image.format == pfGray8:
+  elif image.format >= pfGray8:
     for y in 0 ..< image.height:
       let
         src = image.dataIndex(0, y)
         dst = y * image.width
       for x in 0 ..< image.width:
-        result.pixels[dst + x] = gray8ToRgbx(image.pixels8[src + x])
-  elif image.format == pfGray4:
-    for y in 0 ..< image.height:
-      let
-        src = image.dataIndex(0, y)
-        dst = y * image.width
-      for x in 0 ..< image.width:
-        result.pixels[dst + x] = gray4ToRgbx(gray4Level(image.pixels8, src + x))
+        result.pixels[dst + x] = image.readGray(src + x)
   else:
     for y in 0 ..< image.height:
       copyMem(

@@ -1585,7 +1585,6 @@ proc fillCoverageGray4(
     start = image.dataIndex(startX, y)
     cell = ((start div stride) and 3) * 4
     luma = rgbxToGray8(rgbx)
-    opaque = rgbx.a == 255
   var
     idx = start
     column = start mod stride
@@ -1593,42 +1592,21 @@ proc fillCoverageGray4(
     gray4Put(data, idx, grayLevel16Ordered(value, OrderedThresholds4x4[cell + (column and 3)]))
   template backdrop(): ColorRGBX =
     gray4ToRgbx(gray4Level(data, idx))
-  case blendMode:
-  of OverwriteBlend:
-    for i in 0 ..< coverages.len:
-      let coverage = coverages[i]
-      if coverage == 255:
-        store(luma)
-      elif coverage != 0:
-        store(rgbxToGray8(rgbx * coverage))
-      inc idx
-      inc column
-  of NormalBlend:
-    for i in 0 ..< coverages.len:
-      let coverage = coverages[i]
-      if coverage == 255 and opaque:
-        store(luma)
-      elif coverage != 0:
-        store(rgbxToGray8(blendNormal(backdrop(), rgbx * coverage)))
-      inc idx
-      inc column
-  of MaskBlend:
-    for i in 0 ..< coverages.len:
-      let coverage = coverages[i]
-      if coverage != 255:
-        store(rgbxToGray8(blendMask(backdrop(), rgbx * coverage)))
-      inc idx
-      inc column
+  let
+    blender = blendMode.blender()
+    masking = blendMode == MaskBlend
+    solid = blendMode == OverwriteBlend or (blendMode == NormalBlend and rgbx.a == 255)
+  for i in 0 ..< coverages.len:
+    let coverage = coverages[i]
+    if coverage == 255 and (solid or masking):
+      if solid: store(luma) # a full mask leaves the pixel as it is
+    elif coverage != 0 or masking:
+      store(rgbxToGray8(blender(backdrop(), rgbx * coverage)))
+    inc idx
+    inc column
+  if masking:
     image.clearUnsafe(0, y, startX, y)
     image.clearUnsafe(startX + coverages.len, y, image.width, y)
-  else:
-    let blender = blendMode.blender()
-    for i in 0 ..< coverages.len:
-      let coverage = coverages[i]
-      if coverage != 0:
-        store(rgbxToGray8(blender(backdrop(), rgbx * coverage)))
-      inc idx
-      inc column
 
 proc blendLineCoverageOverwrite(
   line: ptr UncheckedArray[ColorRGBX],

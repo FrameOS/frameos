@@ -208,24 +208,27 @@ proc fillGradientLinear(
     to = paint.gradientHandlePositions[1]
 
   if at.y == to.y: # Horizontal gradient: one row of colours, copied down
-    if image.height > 0 and image.format == pfGray4:
-      # A 4-bit store is dithered by its row: a copied row would print the
-      # first row's pattern down the whole image as vertical stripes.
-      var colors = newSeq[ColorRGBX](image.width)
+    if image.height > 0:
+      let dithered = image.format == pfGray4
+      var colors = newSeq[ColorRGBX](if dithered: image.width else: 0)
       for x in 0 ..< image.width:
-        colors[x] = paint.gradientColor(toLineSpace(at, to, vec2(x.float32 + origin.x, origin.y)))
-      for y in 0 ..< image.height:
-        for x in 0 ..< image.width:
-          image.unsafe[x, y] = colors[x]
-    elif image.height > 0:
-      for x in 0 ..< image.width:
-        let t = toLineSpace(at, to, vec2(x.float32 + origin.x, origin.y))
-        image.unsafe[x, 0] = paint.gradientColor(t)
-      let
-        rowBytes = image.width * image.bytesPerPixel
-        first = image.pixelAddr(image.dataIndex(0, 0))
-      for y in 1 ..< image.height:
-        copyMem(image.pixelAddr(image.dataIndex(0, y)), first, rowBytes)
+        let
+          t = toLineSpace(at, to, vec2(x.float32 + origin.x, origin.y))
+          c = paint.gradientColor(t)
+        image.unsafe[x, 0] = c
+        if dithered: colors[x] = c
+      if dithered:
+        # A 4-bit store is dithered by its row: a copied row would print the
+        # first row's pattern down the image as vertical stripes.
+        for y in 1 ..< image.height:
+          for x in 0 ..< image.width:
+            image.unsafe[x, y] = colors[x]
+      else:
+        let
+          rowBytes = image.width * image.bytesPerPixel
+          first = image.pixelAddr(image.dataIndex(0, 0))
+        for y in 1 ..< image.height:
+          copyMem(image.pixelAddr(image.dataIndex(0, y)), first, rowBytes)
 
   elif at.x == to.x: # Vertical gradient
     for y in 0 ..< image.height:
