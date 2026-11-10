@@ -140,9 +140,26 @@ static bool is_built_in_scene(const char *scene_id)
  * lock is only ever taken first. */
 static SemaphoreHandle_t s_scene_file_lock = NULL;
 
+/* The render task is waiting for the store lock. Whoever holds it then
+ * writes as fast as flash goes (store_pace): pacing exists to leave the
+ * render task free, and it is not free while it waits here. Worse, the
+ * input hold that pacing waits out is released by the render task alone:
+ * a tap, then a scene pull, and the store task waited for the hold while
+ * holding this lock, and the render task waited for the lock (the reTerminal
+ * E1003 rendered nothing more, 2026-11-10). */
+static volatile bool s_render_waits_for_store = false;
+
 static void store_lock(void)
 {
-    if (s_scene_file_lock != NULL) xSemaphoreTakeRecursive(s_scene_file_lock, portMAX_DELAY);
+    if (s_scene_file_lock == NULL) return;
+    if (fos_client_on_render_task()) {
+        if (xSemaphoreTakeRecursive(s_scene_file_lock, 0) == pdTRUE) return;
+        s_render_waits_for_store = true;
+        xSemaphoreTakeRecursive(s_scene_file_lock, portMAX_DELAY);
+        s_render_waits_for_store = false;
+        return;
+    }
+    xSemaphoreTakeRecursive(s_scene_file_lock, portMAX_DELAY);
 }
 
 static void store_unlock(void)
@@ -1998,9 +2015,11 @@ static volatile bool s_store_busy; /* a job waits or runs; under s_store_mux */
  * cores wait it out: a render running beside the store task's 337 KB took
  * 5.6 s instead of 2, and the events behind it waited up to 6.9 s
  * (2026-11-10, the E1003). So the write goes in the time between: before
- * each 2 KB it waits while someone taps (the input hold ends by itself, within
- * a minute) and, up to half a second, while a render runs (a scene that never
- * stops rendering still gets stored). */
+ * each 2 KB it waits while someone taps (the render task releases the input
+ * hold within a minute of the last tap) and, up to half a second, while a
+ * render runs (a scene that never stops rendering still gets stored). Never
+ * while the render task waits for the store lock: it can release no hold
+ * then, and every wait is one more for it (s_render_waits_for_store). */
 #define STORE_PACE_RENDER_MAX_US (500 * 1000)
 
 static TaskHandle_t s_store_task;
@@ -2009,7 +2028,9 @@ static void store_pace(void)
 {
     int64_t render_until = esp_timer_get_time() + STORE_PACE_RENDER_MAX_US;
     for (;;) {
-        if (fos_client_input_held()) {
+        if (s_render_waits_for_store) {
+            return;
+        } else if (fos_client_input_held()) {
             vTaskDelay(pdMS_TO_TICKS(50));
             render_until = esp_timer_get_time() + STORE_PACE_RENDER_MAX_US;
         } else if (fos_client_render_in_flight() && esp_timer_get_time() < render_until) {

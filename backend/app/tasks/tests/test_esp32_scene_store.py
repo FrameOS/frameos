@@ -148,6 +148,28 @@ def _source(name: str) -> str:
     return re.sub(r"/\*.*?\*/", "", (MAIN_DIR / name).read_text(), flags=re.S)
 
 
+def test_a_paced_write_gives_way_to_a_render_task_waiting_for_the_store():
+    """Pacing waits out taps and renders while holding the store lock, and the
+    input hold it waits for is released by the render task alone. A tap, then
+    a scene pull: the store task waited for the hold, the render task waited
+    for the lock, and the reTerminal E1003 rendered nothing more (2026-11-10).
+    The render task says when it waits for the lock, and pacing stops then."""
+    fns = _functions(_source("fos_scenes.c"))
+    lock = fns["store_lock"]
+    order = [lock.index(s) for s in (
+        "fos_client_on_render_task()", "xSemaphoreTakeRecursive(s_scene_file_lock, 0)",
+        "s_render_waits_for_store = true", "xSemaphoreTakeRecursive(s_scene_file_lock, portMAX_DELAY)",
+        "s_render_waits_for_store = false")]
+    assert order == sorted(order), "store_lock: try first, say it waits, wait, then stop saying so"
+    pace = fns["store_pace"]
+    assert pace.index("if (s_render_waits_for_store)") < pace.index("fos_client_input_held()"), (
+        "the render task waiting comes before every wait in the pace, the input hold's first"
+    )
+    # Every pacing wait goes through store_pace: nothing else in the store
+    # waits for the input hold while it may hold the lock.
+    assert sum(body.count("fos_client_input_held()") for body in fns.values()) == 1
+
+
 def test_a_change_that_shows_its_scene_is_written_unpaced():
     """"Push & activate", "Install & activate", a put with activate: somebody
     waits to see the scene, so its write is not paced around renders (up to
