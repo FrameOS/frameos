@@ -40,6 +40,10 @@ if(NIM_GENERATED_SRCS)
     # CI, every release) compiled all of these at -Os: DVD Logo Bounce on the
     # SenseCAP ran ~5 ms a frame slower than on the flox bench builds of #626.
     # ci_build_image.sh checks the image it builds took -O2 for each.
+    # The price, measured 2026-11-10: +38.5 KB of flash (images +14.0 K, paths
+    # +12.7 K, blends +6.8 K, common +2.9 K). Worth it: these loops are every
+    # frame of an animation and most of a render. Find bytes elsewhere before
+    # taking a module off this list (docs/esp32-image-size.md).
     set(FRAMEOS_NIM_HOT_MODULES
         "@spixie@spaths.nim.c"     "@fcvkvr@fcnguf.nim.c"     # pixie/paths: flattening, coverage, fills
         "@spixie@simages.nim.c"    "@fcvkvr@fvzntrf.nim.c"    # pixie/images
