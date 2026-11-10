@@ -162,6 +162,26 @@ bool fos_input_hold_release(fos_input_hold_t *h, int64_t now_us)
     return true;
 }
 
+bool fos_input_hold_applies(bool partial_panel, bool touch, bool keys)
+{
+    return partial_panel || touch || keys;
+}
+
+bool fos_image_push_yields(bool on_link_task, bool input_queued, bool events_deferred, bool render_asked)
+{
+    return !on_link_task && (input_queued || events_deferred || render_asked);
+}
+
+bool fos_backend_link_on(bool link_task, bool deep_sleep_now, uint32_t render_attempts)
+{
+    return link_task && !deep_sleep_now && render_attempts > 0;
+}
+
+bool fos_idle_wait_goes_on(int64_t now_us, int64_t wait_until_us, bool panel_refreshing)
+{
+    return now_us < wait_until_us || panel_refreshing;
+}
+
 bool fos_loading_taps_wanted(bool lcd, bool sounds_on, bool render_held, int64_t last_input_us, int64_t now_us)
 {
     if (lcd || !sounds_on || render_held || last_input_us == 0) return false;

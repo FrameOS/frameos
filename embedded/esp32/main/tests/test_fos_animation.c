@@ -224,6 +224,52 @@ static void test_loading_taps(void)
     CHECK(!fos_loading_taps_wanted(false, true, true, 100 * S, 105 * S), "a voice session has the buzzer");
 }
 
+static void test_who_the_input_hold_is_for(void)
+{
+    /* The SenseCAP Indicator: an LCD with a touch screen and no partial
+     * refresh. A settings pull between taps held each one 2.5 to 3.5 s. */
+    CHECK(fos_input_hold_applies(false, true, false), "a touch LCD");
+    /* The E1002 and the PhotoPainter: keys, a full-refresh panel. */
+    CHECK(fos_input_hold_applies(false, false, true), "a board with keys");
+    CHECK(fos_input_hold_applies(true, false, false), "a partial-refresh panel");
+    CHECK(fos_input_hold_applies(true, true, true), "the Sticky and the E1003: all three");
+    CHECK(!fos_input_hold_applies(false, false, false), "nobody can tap a bare panel");
+}
+
+static void test_the_picture_push_gives_way(void)
+{
+    /* On the render task: each thing that wants it back stops the push. */
+    CHECK(fos_image_push_yields(false, true, false, false), "a tap or a key");
+    CHECK(fos_image_push_yields(false, false, true, false), "an event from HTTP, the cloud or the console");
+    CHECK(fos_image_push_yields(false, false, false, true), "a render asked for");
+    CHECK(!fos_image_push_yields(false, false, false, false), "nothing waits: the push goes on");
+    /* On the backend link task nobody waits for it: it never stops there,
+     * or a frame tapped every few seconds would never push a picture. */
+    CHECK(!fos_image_push_yields(true, true, true, true), "the link task pushes on");
+}
+
+static void test_the_backend_link(void)
+{
+    CHECK(fos_backend_link_on(true, false, 1), "a frame that stays awake");
+    CHECK(fos_backend_link_on(true, false, 500), "and goes on doing so");
+    /* A boot's first pass: its render waits for the commands and scenes the
+     * sleep held, so they are pulled on the render task first. */
+    CHECK(!fos_backend_link_on(true, false, 0), "not on a boot's first pass");
+    /* A frame about to deep-sleep: whatever is pulled must run before it
+     * goes, and the link task would not get its turn. */
+    CHECK(!fos_backend_link_on(true, true, 7), "not before a deep sleep");
+    CHECK(!fos_backend_link_on(false, false, 7), "not without the task");
+}
+
+static void test_a_timed_render_waits_for_the_glass(void)
+{
+    /* The E1002's color refresh is 28.7 s on the display's own task. */
+    CHECK(fos_idle_wait_goes_on(10 * S, 60 * S, false), "inside the interval");
+    CHECK(!fos_idle_wait_goes_on(60 * S, 60 * S, false), "the interval is over");
+    CHECK(fos_idle_wait_goes_on(61 * S, 60 * S, true), "over, but the glass still refreshes");
+    CHECK(!fos_idle_wait_goes_on(89 * S, 60 * S, false), "the refresh ended: render");
+}
+
 int main(void)
 {
     test_wanted();
@@ -234,6 +280,10 @@ int main(void)
     test_bursts();
     test_input_hold();
     test_loading_taps();
+    test_who_the_input_hold_is_for();
+    test_the_picture_push_gives_way();
+    test_the_backend_link();
+    test_a_timed_render_waits_for_the_glass();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

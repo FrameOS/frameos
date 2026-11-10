@@ -24,6 +24,7 @@
 #include "fos_events_gen.h"
 #include "fos_json_guard.h"
 #include "fos_mem.h"
+#include "fos_slot_cache.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -297,22 +298,10 @@ static char *read_file(const char *path, size_t *out_len)
     return buf;
 }
 
-/* The scenes read last, as they are on flash. Opening a SPIFFS file walks the
- * partition until it finds it, up to 0.7 s on the reTerminal E1003's 24 MB, and
- * every scene switch read its scene that way (2026-11-10): a scene shown before
- * comes from here. Any write of the scene files clears it, and a read that
- * raced one does not go in (the generation). Under s_scene_file_lock. */
-#define SLOT_CACHE_ENTRIES 8
-#define SLOT_CACHE_MAX_BYTES (256u * 1024u)
-typedef struct {
-    int slot;
-    char *json;
-    size_t len;
-    uint32_t used;
-} slot_cache_entry_t;
-static slot_cache_entry_t s_slot_cache[SLOT_CACHE_ENTRIES];
-static uint32_t s_slot_cache_generation = 0;
-static uint32_t s_slot_cache_clock = 0;
+/* The scenes read last (fos_slot_cache.h: a scene shown before is not looked
+ * up on flash again). Under s_scene_file_lock; the file read and the copies
+ * outside it. */
+static fos_slot_cache_t s_slot_cache;
 
 static void slot_cache_lock(void)
 {
@@ -324,19 +313,10 @@ static void slot_cache_unlock(void)
     if (s_scene_file_lock != NULL) xSemaphoreGive(s_scene_file_lock);
 }
 
-static void slot_cache_clear_locked(void)
-{
-    for (int i = 0; i < SLOT_CACHE_ENTRIES; i++) {
-        free(s_slot_cache[i].json);
-        s_slot_cache[i] = (slot_cache_entry_t){0};
-    }
-    s_slot_cache_generation++;
-}
-
 static void slot_cache_clear(void)
 {
     slot_cache_lock();
-    slot_cache_clear_locked();
+    fos_slot_cache_clear(&s_slot_cache);
     slot_cache_unlock();
 }
 
@@ -355,57 +335,23 @@ static char *copy_bytes(const char *src, size_t len)
 static char *read_slot_file(int slot, const char *path, size_t *out_len)
 {
     slot_cache_lock();
-    uint32_t generation = s_slot_cache_generation;
-    for (int i = 0; i < SLOT_CACHE_ENTRIES; i++) {
-        if (s_slot_cache[i].json != NULL && s_slot_cache[i].slot == slot) {
-            char *copy = copy_bytes(s_slot_cache[i].json, s_slot_cache[i].len);
-            if (copy != NULL) {
-                s_slot_cache[i].used = ++s_slot_cache_clock;
-                if (out_len != NULL) *out_len = s_slot_cache[i].len;
-                slot_cache_unlock();
-                return copy;
-            }
-        }
-    }
+    uint32_t generation = fos_slot_cache_generation(&s_slot_cache);
+    size_t held_len = 0;
+    const char *held = fos_slot_cache_find(&s_slot_cache, slot, &held_len);
+    char *copy = held != NULL ? copy_bytes(held, held_len) : NULL;
     slot_cache_unlock();
+    if (copy != NULL) {
+        if (out_len != NULL) *out_len = held_len;
+        return copy;
+    }
     size_t len = 0;
     char *json = read_file(path, &len);
     if (out_len != NULL) *out_len = len;
-    if (json == NULL || len == 0 || len > SLOT_CACHE_MAX_BYTES / 2) return json;
+    if (json == NULL || !fos_slot_cache_wants(len)) return json;
     char *kept = copy_bytes(json, len);
     if (kept == NULL) return json;
     slot_cache_lock();
-    if (generation != s_slot_cache_generation) {
-        /* The scenes were written while this one was read. */
-        slot_cache_unlock();
-        free(kept);
-        return json;
-    }
-    size_t total = len;
-    int free_at = -1;
-    for (int i = 0; i < SLOT_CACHE_ENTRIES; i++) {
-        if (s_slot_cache[i].json == NULL) {
-            if (free_at < 0) free_at = i;
-        } else {
-            total += s_slot_cache[i].len;
-        }
-    }
-    /* Room by bytes and by entries, the least recently used going first. */
-    while (total > SLOT_CACHE_MAX_BYTES || free_at < 0) {
-        int oldest = -1;
-        for (int i = 0; i < SLOT_CACHE_ENTRIES; i++) {
-            if (s_slot_cache[i].json != NULL &&
-                (oldest < 0 || s_slot_cache[i].used < s_slot_cache[oldest].used)) {
-                oldest = i;
-            }
-        }
-        if (oldest < 0) break;
-        total -= s_slot_cache[oldest].len;
-        free(s_slot_cache[oldest].json);
-        s_slot_cache[oldest] = (slot_cache_entry_t){0};
-        free_at = oldest;
-    }
-    s_slot_cache[free_at] = (slot_cache_entry_t){.slot = slot, .json = kept, .len = len, .used = ++s_slot_cache_clock};
+    fos_slot_cache_keep(&s_slot_cache, slot, kept, len, generation);
     slot_cache_unlock();
     return json;
 }
@@ -1456,7 +1402,7 @@ static esp_err_t write_file_replace(const char *path, const char *tmp_path,
     if (s_scene_file_lock != NULL) {
         xSemaphoreTake(s_scene_file_lock, portMAX_DELAY);
     }
-    slot_cache_clear_locked();
+    fos_slot_cache_clear(&s_slot_cache);
     esp_err_t err = write_file_replace_locked(path, tmp_path, data, len);
     if (s_scene_file_lock != NULL) {
         xSemaphoreGive(s_scene_file_lock);

@@ -12,6 +12,7 @@
 
 #include "DEV_Config.h"
 #include "fos_partial_refresh.h"
+#include "fos_refresh_queue.h"
 #include "frameos_panel_table.h"
 #include "it8951.h"
 #include "lcd_st7701s_rgb.h"
@@ -457,13 +458,15 @@ static void note_full_refresh(const uint8_t *buf, size_t len)
  * waits for its waveform at the next use anyway (and whose 1.25 MiB copy an
  * 8 MB board cannot spare); and a copy that does not fit refreshes in place. */
 #define REFRESH_TASK_STACK_BYTES 5120
+static void *refresh_alloc(size_t len)
+{
+    return heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
 static TaskHandle_t s_refresh_task = NULL;
-static SemaphoreHandle_t s_refresh_lock = NULL; /* the four below */
+static SemaphoreHandle_t s_refresh_lock = NULL; /* s_refresh_queue's */
 static SemaphoreHandle_t s_refresh_idle = NULL; /* taken while a picture is owed */
-static uint8_t *s_refresh_now = NULL;           /* on its way to the glass */
-static uint8_t *s_refresh_next = NULL;          /* the one after it */
-static size_t s_refresh_len = 0;
-static volatile bool s_refresh_busy = false;
+static fos_refresh_queue_t s_refresh_queue = {.alloc = refresh_alloc, .release = heap_caps_free};
 
 static void refresh_task(void *arg)
 {
@@ -472,18 +475,12 @@ static void refresh_task(void *arg)
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         for (;;) {
             xSemaphoreTake(s_refresh_lock, portMAX_DELAY);
-            uint8_t *picture = s_refresh_now;
+            const uint8_t *picture = fos_refresh_queue_current(&s_refresh_queue);
             xSemaphoreGive(s_refresh_lock);
             if (picture != NULL) refresh_in_place(picture);
             xSemaphoreTake(s_refresh_lock, portMAX_DELAY);
-            heap_caps_free(picture);
-            s_refresh_now = s_refresh_next;
-            s_refresh_next = NULL;
-            bool more = s_refresh_now != NULL;
-            if (!more) {
-                s_refresh_busy = false;
-                xSemaphoreGive(s_refresh_idle);
-            }
+            bool more = fos_refresh_queue_done(&s_refresh_queue);
+            if (!more) xSemaphoreGive(s_refresh_idle);
             xSemaphoreGive(s_refresh_lock);
             if (!more) break;
         }
@@ -537,30 +534,23 @@ static bool refresh_hand_over(const uint8_t *buf, size_t len)
     }
     if (!refresh_task_ready()) return false;
     xSemaphoreTake(s_refresh_lock, portMAX_DELAY);
-    uint8_t **slot = s_refresh_busy ? &s_refresh_next : &s_refresh_now;
-    if (*slot == NULL) *slot = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (*slot == NULL) {
-        xSemaphoreGive(s_refresh_lock);
-        return false;
-    }
-    memcpy(*slot, buf, len);
-    s_refresh_len = len;
-    bool start = !s_refresh_busy;
-    if (start) {
+    fos_refresh_put_t put = fos_refresh_queue_put(&s_refresh_queue, buf, len);
+    if (put == FOS_REFRESH_STARTED) {
         /* Free unless a waiter holds it for the moment between its take and
          * its give: blocking, or that waiter's give would leave it free with
          * a refresh running. */
-        s_refresh_busy = true;
         xSemaphoreTake(s_refresh_idle, portMAX_DELAY);
     }
     xSemaphoreGive(s_refresh_lock);
-    if (start) xTaskNotifyGive(s_refresh_task);
-    return true;
+    if (put == FOS_REFRESH_STARTED) xTaskNotifyGive(s_refresh_task);
+    return put != FOS_REFRESH_NO_MEMORY;
 }
 
 bool fos_display_refreshing(void)
 {
-    return s_refresh_busy;
+    /* Read without the lock: a stale answer only moves a timed render by one
+     * slice of its wait. */
+    return fos_refresh_queue_busy(&s_refresh_queue);
 }
 
 esp_err_t fos_display_blit(const uint8_t *buf, size_t len)
@@ -648,7 +638,7 @@ void fos_display_park_if_idle(int64_t now_us)
 {
     /* The refresh task has the panel: nothing is idle, and waiting for it here
      * would hold the render task for the refresh after all. */
-    if (!s_panel_awake || s_refresh_busy) return;
+    if (!s_panel_awake || fos_refresh_queue_busy(&s_refresh_queue)) return;
     int64_t idle_us = now_us - s_last_partial_us;
     if (idle_us >= FOS_PANEL_CLEAN_US && s_partial->clean && s_partials_since_full > 0 &&
         s_partials_since_full >= FOS_PARTIAL_MAX_BEFORE_FULL) {

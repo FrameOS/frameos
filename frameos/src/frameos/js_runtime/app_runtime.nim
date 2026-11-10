@@ -728,6 +728,16 @@ proc keptPictureTarget(runtime: JsAppRuntime, owner: AppRoot, like: Image,
     "contiguousBytes": availableRenderBytes(), "headroomBytes": availableRenderHeadroomBytes()})
   nil
 
+proc keptTargetFor*(runtime: JsAppRuntime, owner: AppRoot, like: Image,
+    width, height: int, fit: ScaledDecodeFit): DecodeTargetProc =
+  ## What a kept picture of `width` x `height` decodes into, once the start
+  ## of the download says the photo's own size (utils/image.nim
+  ## downloadImageWithDataSizedBy): keptPictureTarget at the size asked, or
+  ## at the photo's own resolution when there is no room for that.
+  result = proc(sourceWidth, sourceHeight: int): Image =
+    runtime.keptPictureTarget(owner, like, width, height,
+      keptDecodeSize(width, height, sourceWidth, sourceHeight, fit))
+
 proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## Downloads and decodes an image natively, so the bytes never enter the JS
   ## heap: a JS app gets back an image reference it returns as its output,
@@ -828,11 +838,8 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
             if not context.isNil and not context.decodeTargetImage.isNil: context.decodeTargetImage
             else: context.contextImage()
           fit = scaledDecodeFit(options{"fit"}.getStr("cover"))
-          runtime = e.runtime
-        let targetFor: DecodeTargetProc = proc(sourceWidth, sourceHeight: int): Image =
-          runtime.keptPictureTarget(owner, like, keepWidth, keepHeight,
-            keptDecodeSize(keepWidth, keepHeight, sourceWidth, sourceHeight, fit))
-        downloaded = downloadImageWithDataSizedBy(urlStr, targetFor, keepWidth, keepHeight,
+        downloaded = downloadImageWithDataSizedBy(urlStr,
+          e.runtime.keptTargetFor(owner, like, keepWidth, keepHeight, fit), keepWidth, keepHeight,
           maxBytes = maxBytes, headers = headers, fit = fit)
       else:
         downloaded = downloadImageWithData(urlStr, maxBytes = maxBytes, headers = headers)

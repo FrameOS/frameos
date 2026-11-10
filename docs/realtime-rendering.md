@@ -702,7 +702,13 @@ a small change cost what it should:
   what changed (`fos_scenes_backend_changed`, `fos_settings_changed`). A
   backend's nudge is still pulled on the render task, which the voice relay's
   release counts on, and so is everything on a frame about to deep-sleep and on
-  a boot's first pass. The picture stream no longer holds the snapshot for the
+  a boot's first pass. When the round trips come back to the render task (a
+  deep sleep comes) it waits for the round the link task is in, which runs
+  under `s_link_round`, and runs the commands it pulled: they would otherwise
+  still be in memory as the chip sleeps (`link_hand_back`). The rules are
+  host-tested in `fos_animation.c` (`fos_backend_link_on`,
+  `fos_image_push_yields`, `fos_input_hold_applies`) and the threading read
+  off the source by `test_esp32_backend_link.py`. The picture stream no longer holds the snapshot for the
   whole upload: a snapshot up to 256 KB is copied out, a larger one is read a
   row at a time and a render taking the buffer back ends the stream (it held a
   one-second clock back 1.3-4.3 s). A batch of logs is 32 lines now, not 8: a

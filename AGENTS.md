@@ -503,12 +503,14 @@
   the render task: scene state is written by `scene_state_writer_task`
   (`main.c`), a frame that stays awake does its backend round trips (logs,
   picture push, pulls) on `backend_link_task` in `fos_client.c`, which applies
-  nothing: a new pull hands its result to the render task the same way, and an
+  nothing: a new pull hands its result to the render task the same way (and
+  `link_hand_back` runs it before a deep sleep), and an
   e-paper driver starts its refresh and waits for it only before
   the panel's next use (`finish_waveforms`, `EPD_3in97_WaitPending`). A full
   refresh of any other SPI panel runs on the display's own task
   (`refresh_task` in `frameos_display.c`, the picture copied, the newest one
-  next): a new panel entry point calls `refresh_wait` first, and a timed
+  next, `fos_refresh_queue.c`): a new panel entry point calls `refresh_wait`
+  first (`test_esp32_refresh_queue.py` reads every bus taker for it), and a timed
   render waits while `fos_display_refreshing()`. A touch
   board runs at 240 MHz like an LCD (`cpu_240` in `main.c`).
 - **A slow scene switch shows the loading mark** (`frameos/loading_mark.nim`,

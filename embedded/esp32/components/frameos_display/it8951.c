@@ -664,6 +664,7 @@ static void mark_owed(const fos_it8951_rect_t *rect)
 
 void fos_it8951_10in3_clear(void)
 {
+    finish_waveforms();
     uint8_t *chunk = chunk_buffer();
     if (!chunk) return;
     memset(chunk, 0xFF, CHUNK_BYTES);

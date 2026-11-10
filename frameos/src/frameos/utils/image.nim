@@ -987,9 +987,26 @@ const NoRoomForPicture* = "no room for the picture within the memory budget"
   ## What a DecodeTargetProc's nil becomes. "memory budget" in it: the
   ## streamed download hands that on instead of retrying buffered.
 
-const SourceProbeBytes = 16 * 1024
+const SourceProbeBytes* = 16 * 1024
   ## How much of a body is read for its dimensions before a decode: the
   ## stream replays this much (http_client's HttpBodyStreamReplayBytes).
+
+proc probeSourceTarget*(head: string, targetFor: DecodeTargetProc): Image =
+  ## The target for a body whose first bytes are `head`: sized by the
+  ## caller from the source's dimensions, when those bytes say them (a
+  ## JPEG's frame header can sit behind a large EXIF block). Raises when
+  ## the caller has no room for it. The device's sized downloads call it
+  ## (downloadImageWithDataSizedBy); out here for its tests.
+  var width, height = 0
+  try:
+    let dims = decodeImageDimensions(head)
+    width = dims.width
+    height = dims.height
+  except PixieError:
+    discard
+  result = targetFor(width, height)
+  if result.isNil:
+    raise newException(PixieError, NoRoomForPicture)
 
 proc embeddedSizedRemoteImageUrl*(url: string, width, height: int): string
 
@@ -1155,22 +1172,6 @@ when defined(frameosEmbedded):
   var lastStreamCut = false
     ## The last downloadImageStreamingInto handed over because the network
     ## cut its body short (HttpBodyStream.interrupted in http_client.nim).
-
-  proc probeSourceTarget(head: string, targetFor: DecodeTargetProc): Image =
-    ## The target for a body whose first bytes are `head`: sized by the
-    ## caller from the source's dimensions, when those bytes say them (a
-    ## JPEG's frame header can sit behind a large EXIF block). Raises when
-    ## the caller has no room for it.
-    var width, height = 0
-    try:
-      let dims = decodeImageDimensions(head)
-      width = dims.width
-      height = dims.height
-    except PixieError:
-      discard
-    result = targetFor(width, height)
-    if result.isNil:
-      raise newException(PixieError, NoRoomForPicture)
 
   proc downloadImageStreamingInto(url: string, maxBytes: int, target: var Image,
       headers: seq[SimpleHttpHeader], fit: ScaledDecodeFit,

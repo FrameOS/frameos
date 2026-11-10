@@ -134,6 +134,33 @@ static inline bool fos_input_hold_engaged(const fos_input_hold_t *h) { return h-
 /* True, once, when the hold is over: the caller owes what it held back. */
 bool fos_input_hold_release(fos_input_hold_t *h, int64_t now_us);
 
+/* Who the input hold is for: a partial-refresh e-paper panel, and any board
+ * with a touch screen or keys. On the SenseCAP Indicator's LCD a settings pull
+ * of 1.4 to 2.6 s ran on the render task between taps and held each one 2.5 to
+ * 3.5 s; on the E1003 a 2.8 s one held the scene switcher's close
+ * (2026-11-10). An event from HTTP, the cloud or the console notes the hold
+ * like a tap does, on the same boards. */
+bool fos_input_hold_applies(bool partial_panel, bool touch, bool keys);
+
+/* Whether the picture push to the backend stops and gives the render task
+ * back: a big panel's picture is 1.3 MB, 8 to 14 s on Wi-Fi (the E1003,
+ * 2026-11-10), and a tap or a key, a deferred event, or a render asked for
+ * must not wait it out. On the backend link task nobody is waiting. */
+bool fos_image_push_yields(bool on_link_task, bool input_queued, bool events_deferred, bool render_asked);
+
+/* Whether the backend's round trips (logs, picture push, the scenes, settings
+ * and commands pulls) run on the backend link task this pass rather than on
+ * the render task: a 1 s clock stood still for up to 10 s while they ran
+ * there (2026-11-10). Not on a frame about to deep-sleep (the pulls must be
+ * done before it goes) and not on a boot's first pass (its render waits for
+ * what the sleep held). */
+bool fos_backend_link_on(bool link_task, bool deep_sleep_now, uint32_t render_attempts);
+
+/* Whether the idle wait goes on at `now_us`: until `wait_until_us`, and past
+ * it while the display's own task still refreshes the glass (a timed render
+ * waits for it; one somebody asks for leaves the wait by its bit). */
+bool fos_idle_wait_goes_on(int64_t now_us, int64_t wait_until_us, bool panel_refreshing);
+
 /* Whether a load starting now gets the buzzer's quiet taps
  * (fos_buzzer_loading_begin): e-paper has no loading mark to draw, and a
  * frame must not tap at a room nobody is in, so only when someone at the frame
