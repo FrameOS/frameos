@@ -149,13 +149,21 @@ def compact_scene(scene: dict[str, Any]) -> dict[str, Any]:
 
 def duplicate_scenes(scenes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Fresh ids for scenes copied onto a frame, with every reference to an
-    old id (scene links in nodes, edges) rewritten — what the editor does
-    when a template is applied (frameLogic.ts duplicateScenes)."""
+    old id rewritten: what the editor does when a template is applied
+    (frontend/src/utils/duplicateScenes.ts remapSceneIds).
+
+    Only the places that hold a scene id are rewritten: a scene node's
+    keyword, node configs, scene-typed field values, the install's layout and
+    event map. A store scene's id is often a word that is also the name of
+    its own code app (`formShowcase`), so rewriting every equal string turned
+    the app node's keyword into a uuid no app has, and the frame failed with
+    "Unknown app keyword" (2026-11-10). `origin` is left alone: its `sceneId`
+    is the template's id, which updates match on."""
     mapping = {str(scene.get("id")): str(uuid.uuid4()) for scene in scenes if scene.get("id")}
 
     def rewrite(value: Any) -> Any:
-        # Exact string values only: a reference is a whole id (a scene node's
-        # keyword, a `sceneId` config), never part of a longer string.
+        # Exact string values only: a reference is a whole id, never part of a
+        # longer string.
         if isinstance(value, str):
             return mapping.get(value, value)
         if isinstance(value, list):
@@ -164,11 +172,47 @@ def duplicate_scenes(scenes: list[dict[str, Any]]) -> list[dict[str, Any]]:
             return {key: rewrite(item) for key, item in value.items()}
         return value
 
-    copied = [rewrite(scene) for scene in scenes]
-    for scene in copied:
-        scene.pop("default", None)
-        if not scene.get("id"):
+    def rewrite_fields(fields: Any) -> Any:
+        if not isinstance(fields, list):
+            return fields
+        return [
+            {**field, "value": rewrite(field["value"])}
+            if isinstance(field, dict) and field.get("type") == "scene" and "value" in field
+            else field
+            for field in fields
+        ]
+
+    def rewrite_node(node: Any) -> Any:
+        if not isinstance(node, dict) or not isinstance(node.get("data"), dict):
+            return node
+        data = dict(node["data"])
+        if node.get("type") == "scene" and isinstance(data.get("keyword"), str):
+            data["keyword"] = rewrite(data["keyword"])
+        if isinstance(data.get("config"), dict):
+            data["config"] = rewrite(data["config"])
+        return {**node, "data": data}
+
+    copied = []
+    for source in scenes:
+        scene = copy.deepcopy(source)
+        if scene.get("id"):
+            scene["id"] = mapping[str(scene["id"])]
+        else:
             scene["id"] = str(uuid.uuid4())
+        scene.pop("default", None)
+        if isinstance(scene.get("nodes"), list):
+            scene["nodes"] = [rewrite_node(node) for node in scene["nodes"]]
+        if "fields" in scene:
+            scene["fields"] = rewrite_fields(scene["fields"])
+        if isinstance(scene.get("customEvents"), list):
+            scene["customEvents"] = [
+                {**event, "fields": rewrite_fields(event.get("fields"))} if isinstance(event, dict) else event
+                for event in scene["customEvents"]
+            ]
+        for key in ("layout", "eventMap"):
+            if key in scene:
+                scene[key] = rewrite(scene[key])
+        copied.append(scene)
     return copied
 
 
