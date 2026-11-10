@@ -58,6 +58,7 @@ idf_component_register(
         "fos_spiffs_gc.c"
         "fos_sd_probe.c"
         "fos_sscanf.c"
+        "fos_printf.c"
     PRIV_REQUIRES
         nvs_flash
         esp_wifi
@@ -102,6 +103,12 @@ target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=SPIFFS_gc" "-u __wr
 # sscanf goes through fos_sscanf.c: cJSON's "%lg" read-back is strtod there,
 # so newlib's floating-point scanf (9.6 KB) is never linked.
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=sscanf" "-u __wrap_sscanf")
+
+# printf, fprintf, vprintf and vfprintf go through fos_printf.c, which formats
+# with vsnprintf: newlib's FILE formatter (_vfprintf_r, 11.4 KB, a second copy
+# of the one snprintf uses) is never linked.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=printf" "-Wl,--wrap=fprintf"
+    "-Wl,--wrap=vprintf" "-Wl,--wrap=vfprintf" "-u __wrap_vprintf")
 
 # Default panel for a local development build. All panel drivers are
 # compiled in regardless; this only picks the boot-time default before
