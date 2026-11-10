@@ -594,9 +594,12 @@ function FrameSceneTile({
         <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
           {scene.name || 'Untitled scene'}
         </div>
-        <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">
-          {sceneTileSummaryLabel(scene)}
-          {frameSceneStorage(frame) ? ` · ${sceneSizeLabel(scene, frame)}` : ''}
+        <div className="frameos-muted mt-0.5 flex min-w-0 gap-2 text-xs text-slate-500">
+          <span className="min-w-0 truncate">{sceneTileSummaryLabel(scene)}</span>
+          {/* Its own slot: a long summary truncates, the size never does. */}
+          {frameSceneStorage(frame) ? (
+            <span className="ml-auto shrink-0 tabular-nums">{sceneSizeLabel(scene, frame)}</span>
+          ) : null}
         </div>
       </div>
     </>
