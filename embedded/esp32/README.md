@@ -36,8 +36,10 @@ main/                     boot orchestration + platform modules
                           newlib's floating-point scanf is never linked (host-tested)
   fos_settings.c          backend/cloud settings pull (TLS pair, admin login, service keys, schedule)
   fos_scenes.c            /state scene store: combined payload, per-scene split, OOM-restart mark, wipe
+  fos_slot_cache.c        the scene files read last, kept in PSRAM so a switch skips the SPIFFS lookup (host-tested)
   fos_scene_state.c       scene state across deep sleep: one JSON file per scene under /state (host-tested)
-  fos_commands.c          the backend's command queue: pulled once per pass and on a nudge, acked by id
+  fos_commands.c          the backend's command queue: pulled once per pass and on a nudge, acked by id;
+                          fetched on the backend link task and run on the render task (fos_client.c)
   fos_backend_http.c      the one HTTP client for the small pulls and posts (settings, scenes, commands, tz, OTA manifest)
   fos_schedule.c          schedule evaluation; fos_schedule_catchup.h its catch-up window (host-tested)
   fos_events.c            the ONE routing function for scene events (fos_events_dispatch): every
@@ -61,7 +63,8 @@ main/                     boot orchestration + platform modules
   fos_buttons.c           GPIO button map → `gpio` edges (origin `driver`, via fos_events.c)
   fos_battery.c           battery ADC sampling; fos_battery_filter.c its outlier filter
   fos_power.c             deep sleep, wake-check render skip, VBUS truth
-  fos_animation.c         animation mode: a scene below a 1 s interval on an LCD, paced in µs (host-tested)
+  fos_animation.c         animation mode: a scene below a 1 s interval on an LCD, paced in µs; the
+                          render task's small rules (input hold, push gives way, backend link) (host-tested)
   fos_wake.c              wake scheduling (next render / schedule event)
   fos_tz.c                IANA zone → POSIX TZ rule
   fos_defaults.h          compile-time defaults of the generic image (NVS wins)
@@ -70,7 +73,9 @@ components/
                           every root Waveshare EPD_*.c compiled in, with a
                           runtime table from generate_panel_table.py picking
                           the configured panel (see "Every supported panel
-                          driver is compiled into each firmware image")
+                          driver is compiled into each firmware image");
+                          fos_refresh_queue.c the pictures owed to the full
+                          refresh task (host-tested)
   frameos_nim/            the FrameOS Nim runtime compiled to C (see build_nim.sh);
                           builds a stub when nimcache/ is absent. fos_rows.c shares a
                           pixel loop's rows with a helper on the other core (resample.nim)
@@ -84,7 +89,8 @@ build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcac
 main/tests/               host tests for the IDF-free modules (plain `cc`, no IDF; each file's
                           header carries its command line). The netguard, local network access code
                           (test_esp32_lan_access.py: fos_lan_access + fos_panel_draw), SD probe, board,
-                          power, wake, battery-filter, version, Wi-Fi network order, OTA download, LCD splash and loading mark
+                          power, wake, battery-filter, version, Wi-Fi network order, OTA download, LCD splash and loading mark,
+                          slot cache, refresh queue
                           (lcd_loading.c) and scene-event (contract table +
                           fos_events.c dispatch) tests run from the backend's
                           pytest suite (backend/app/tasks/tests/test_esp32_*.py, which also
@@ -418,8 +424,10 @@ for the two Spectra boards most of the bench work runs on:
   are the runtime's `frameos/loading_mark.nim`; `docs/realtime-rendering.md`
   "A switch that takes a while"). An LCD does not wait for the clock: it renders once Wi-Fi is up and again when SNTP answers
   (`fos_wifi_set_late_time_hook`); the boot used to wait up to 10 s for it.
-  An LCD board runs its CPU at 240 MHz (the generic image boots at 160 for
-  the battery frames; `status` prints `cpu:`). The scene canvas is the
+  An LCD board runs its CPU at 240 MHz, and so does any board whose touch
+  controller answers at boot (the reTerminal E1003 and Sticky: someone at the
+  glass waits for every frame); the generic image boots at 160 for the other
+  battery frames, and `status` prints `cpu:`. The scene canvas is the
   panel's own back frame buffer (`fos_display_render_target`, 565 whatever
   the PSRAM): the scene draws straight into it, and the blit is a buffer
   switch — no pack, no copy, no hash. A scene whose `refreshInterval` is
@@ -1400,9 +1408,24 @@ smaller than any floor written down so far. Once a few frames have reported
 both pairs, recalibrate the floors on the malloc-able figures and switch
 `ws_heap_ready()`, `https_heap_ready()`, `log_upload_heap_ready()` and the
 banner over together. Candidate levers if the honest headroom turns out
-thin: `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y` (Wi-Fi/lwIP dynamic buffers
-PSRAM-first, internal fallback), the reserve pool back to IDF's 32 KB
-default, and right-sizing task stacks from the high-water marks.
+thin: the reserve pool back to IDF's 32 KB default, and right-sizing task
+stacks from the high-water marks.
+
+**Wi-Fi and lwIP buffers come from PSRAM first, and TCP has a 64 KB receive
+window** (2026-11-10, `sdkconfig.defaults` "TCP at the speed of the Wi-Fi";
+`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y`). IDF's 5,760-byte windows made the
+network the slow part of a photo once the JPEG sink got fast: on a reTerminal
+E1003 a Gallery photo spent 1.6 to 9.6 s on the socket, now 0.06 to 1.9 s
+(its whole body 7.3 s median, now 5.3 s, of which 4 s is the decode), and
+the 1.3 MB backend picture push went from 14.5 s to 8.8 s (medians). Idle
+internal RAM went from 90 KB free with a 43 KB block to 103 KB with 55 KB.
+The send side stays small on purpose: each frame in flight is a copy in
+DMA-capable internal RAM, and a 64 KB send buffer with 64 TX buffers drained
+the 64 KB DMA pool to 6 KB; 16 KB with IDF's 32 TX buffers kept it at 44 KB.
+The C3 overlay (no PSRAM) keeps IDF's values. `test_esp32_network_buffers.py`
+pins all three. What is left of a photo's network time is opening the
+request: DNS, connect and the TLS handshake, 2.3 to 4 s to
+gallery.frameos.net.
 
 ## Memory guardrails (M4)
 

@@ -609,19 +609,35 @@ proc dropLayout(layout: FrameScene) =
     for app in InterpretedFrameScene(layout).appsByNodeId.values:
       releaseJsAppRuntime(app)
 
+var takeParkedLayout*: proc(layoutId: string): FrameScene {.nimcall.}
+  ## A host that drops one scene for the next (single_scene_host.nim) keeps the
+  ## layout the dropped one wore and hands it back here: the next scene wearing
+  ## it skips reading, parsing and starting it again, and keeps its warm caches
+  ## (1.2 s of each scene switch on a reTerminal E1003, 2026-11-10).
+
 proc startLayout(owner: FrameScene, layoutId: string, ownId: string, ownState: JsonNode): FrameScene =
   ## The layout `owner` wears, made: what the install set for it, under what
   ## was set on the frame. One that is not on the frame or cannot start leaves
   ## the scene as it is, and says so.
   var named = layoutId
+  proc wornState(): JsonNode =
+    result = if layoutId == ownId and not ownState.isNil: copy(ownState) else: newJObject()
+    let kept = savedLayoutState(layoutId)
+    if not kept.isNil and kept.kind == JObject:
+      for key, value in kept.pairs:
+        result[key] = value
+  if layoutId != owner.id.string and not takeParkedLayout.isNil:
+    let parked = takeParkedLayout(layoutId)
+    if not parked.isNil:
+      for key, value in wornState().pairs:
+        parked.state[key] = value
+      parked.shownName = owner.shownName
+      parked.systemScene = false
+      return parked
   let exported = if layoutId != owner.id.string: resolveSceneExport(layoutId.SceneId) else: nil
   if exported of ExportedInterpretedScene:
     try:
-      let state = if layoutId == ownId and not ownState.isNil: copy(ownState) else: newJObject()
-      let kept = savedLayoutState(layoutId)
-      if not kept.isNil and kept.kind == JObject:
-        for key, value in kept.pairs:
-          state[key] = value
+      let state = wornState()
       result = exported.init(layoutId.SceneId, owner.frameConfig, owner.logger, state)
       result.shownName = owner.shownName
       return

@@ -377,7 +377,10 @@ proc packGray4Canvas*(image: Image; buf: ptr UncheckedArray[uint8];
   if rotate == 0:
     if width != frameWidth:
       return false
-    copyMem(buf, src, rowBytes * frameHeight)
+    # The canvas can be the panel buffer itself (an ESP32's sixteen-grey
+    # panel, frameos_nim_share_canvas): then it is packed already.
+    if cast[pointer](buf) != cast[pointer](src):
+      copyMem(buf, src, rowBytes * frameHeight)
     return true
   let panelStride = rowBytes * 2
   template place(x, y: int): int =

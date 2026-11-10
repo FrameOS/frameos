@@ -4,10 +4,15 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "DEV_Config.h"
 #include "fos_partial_refresh.h"
+#include "fos_refresh_queue.h"
 #include "frameos_panel_table.h"
 #include "it8951.h"
 #include "lcd_st7701s_rgb.h"
@@ -393,6 +398,161 @@ esp_err_t fos_display_spi_bus_share(int miso_pin, int *host)
     return ESP_OK;
 }
 
+/* init, picture, refresh and sleep: the whole of a full refresh. Under one bus
+ * hold: the drivers toggle CS by hand, so a shared card may not get a word in
+ * until the panel sleeps. */
+static esp_err_t refresh_in_place(const uint8_t *buf)
+{
+    int64_t start = esp_timer_get_time();
+    /* A controller that keeps the picture (the IT8951) waits for a waveform at
+     * its next use (it8951.c): put to sleep here, it was waited for here, 1.7 s
+     * of each of the E1003's scene switches. It stays up as after a partial
+     * update, and is parked like one (fos_display_park_if_idle). */
+    bool keep_awake = s_partial != NULL && s_partial->changed != NULL;
+    DEV_SPI_Acquire();
+    if (s_panel_awake && !keep_awake) {
+        /* Left up by partial updates: down first, the full init starts cold.
+         * Not the IT8951: its init only wakes it, its display waits for the
+         * waveform running, and a standby costs its next waveform 600 ms. */
+        s_panel->sleep();
+        s_panel_awake = false;
+    }
+    if (s_panel->driver_init() != 0) {
+        DEV_SPI_Release();
+        ESP_LOGE(TAG, "panel init failed");
+        return ESP_FAIL;
+    }
+    s_panel->display((uint8_t *)buf);
+    if (!keep_awake) s_panel->sleep();
+    DEV_SPI_Release();
+    if (keep_awake) {
+        s_last_partial_us = esp_timer_get_time();
+        s_panel_rested = false;
+    }
+    s_panel_awake = keep_awake;
+    ESP_LOGI(TAG, "blit + refresh took %lld ms", (esp_timer_get_time() - start) / 1000);
+    return ESP_OK;
+}
+
+/* What the glass shows after a full refresh, for the partial updates after it. */
+static void note_full_refresh(const uint8_t *buf, size_t len)
+{
+    if (!fos_display_supports_partial()) return;
+    if (!s_partial->changed) {
+        if (!s_glass) s_glass = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_glass && s_glass != buf) memcpy(s_glass, buf, len);
+        s_glass_known = s_glass != NULL;
+    }
+    s_partials_since_full = 0;
+}
+
+/* A full refresh held whoever asked for the whole of it: the reTerminal
+ * E1002's color refresh is 28.7 s, and its render task answered no button and
+ * no command all along; the Sticky's 2.2 s came after every scene switch
+ * (2026-11-10). An SPI panel refreshes on a task of its own. The picture is
+ * copied and the caller goes on; one asked for while a refresh runs waits as
+ * the next (the newest only: the glass catches up with what the frame shows
+ * now, not with every frame between). Every other use of the panel waits for
+ * both first (refresh_wait), and so do a deep sleep (fos_display_park) and a
+ * restart (the shutdown handler). Not the IT8951, which keeps the picture and
+ * waits for its waveform at the next use anyway (and whose 1.25 MiB copy an
+ * 8 MB board cannot spare); and a copy that does not fit refreshes in place. */
+#define REFRESH_TASK_STACK_BYTES 5120
+static void *refresh_alloc(size_t len)
+{
+    return heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
+static TaskHandle_t s_refresh_task = NULL;
+static SemaphoreHandle_t s_refresh_lock = NULL; /* s_refresh_queue's */
+static SemaphoreHandle_t s_refresh_idle = NULL; /* taken while a picture is owed */
+static fos_refresh_queue_t s_refresh_queue = {.alloc = refresh_alloc, .release = heap_caps_free};
+
+static void refresh_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        for (;;) {
+            xSemaphoreTake(s_refresh_lock, portMAX_DELAY);
+            const uint8_t *picture = fos_refresh_queue_current(&s_refresh_queue);
+            xSemaphoreGive(s_refresh_lock);
+            if (picture != NULL) refresh_in_place(picture);
+            xSemaphoreTake(s_refresh_lock, portMAX_DELAY);
+            bool more = fos_refresh_queue_done(&s_refresh_queue);
+            if (!more) xSemaphoreGive(s_refresh_idle);
+            xSemaphoreGive(s_refresh_lock);
+            if (!more) break;
+        }
+    }
+}
+
+/* Until no picture is owed. The refresh task itself never waits for itself. */
+static void refresh_wait(void)
+{
+    if (s_refresh_idle == NULL || xTaskGetCurrentTaskHandle() == s_refresh_task) return;
+    xSemaphoreTake(s_refresh_idle, portMAX_DELAY);
+    xSemaphoreGive(s_refresh_idle);
+}
+
+/* A restart cuts the panel off mid-waveform otherwise, its high voltage on. */
+static void refresh_shutdown(void)
+{
+    if (s_refresh_idle == NULL || xTaskGetCurrentTaskHandle() == s_refresh_task) return;
+    if (xSemaphoreTake(s_refresh_idle, pdMS_TO_TICKS(60000)) == pdTRUE) {
+        xSemaphoreGive(s_refresh_idle);
+    }
+}
+
+static bool refresh_task_ready(void)
+{
+    if (s_refresh_task != NULL) return true;
+    s_refresh_lock = xSemaphoreCreateMutex();
+    s_refresh_idle = xSemaphoreCreateBinary();
+    if (s_refresh_lock == NULL || s_refresh_idle == NULL) goto fail;
+    xSemaphoreGive(s_refresh_idle);
+    if (xTaskCreatePinnedToCore(refresh_task, "fos_refresh", REFRESH_TASK_STACK_BYTES, NULL, 5,
+                                &s_refresh_task, tskNO_AFFINITY) != pdPASS) {
+        s_refresh_task = NULL;
+        goto fail;
+    }
+    esp_register_shutdown_handler(refresh_shutdown);
+    return true;
+fail:
+    if (s_refresh_lock) vSemaphoreDelete(s_refresh_lock);
+    if (s_refresh_idle) vSemaphoreDelete(s_refresh_idle);
+    s_refresh_lock = NULL;
+    s_refresh_idle = NULL;
+    return false;
+}
+
+/* The picture handed to the refresh task, or false: refresh in place. */
+static bool refresh_hand_over(const uint8_t *buf, size_t len)
+{
+    if (s_panel->bus != FOS_PANEL_BUS_SPI || (s_partial != NULL && s_partial->changed != NULL)) {
+        return false;
+    }
+    if (!refresh_task_ready()) return false;
+    xSemaphoreTake(s_refresh_lock, portMAX_DELAY);
+    fos_refresh_put_t put = fos_refresh_queue_put(&s_refresh_queue, buf, len);
+    if (put == FOS_REFRESH_STARTED) {
+        /* Free unless a waiter holds it for the moment between its take and
+         * its give: blocking, or that waiter's give would leave it free with
+         * a refresh running. */
+        xSemaphoreTake(s_refresh_idle, portMAX_DELAY);
+    }
+    xSemaphoreGive(s_refresh_lock);
+    if (put == FOS_REFRESH_STARTED) xTaskNotifyGive(s_refresh_task);
+    return put != FOS_REFRESH_NO_MEMORY;
+}
+
+bool fos_display_refreshing(void)
+{
+    /* Read without the lock: a stale answer only moves a timed render by one
+     * slice of its wait. */
+    return fos_refresh_queue_busy(&s_refresh_queue);
+}
+
 esp_err_t fos_display_blit(const uint8_t *buf, size_t len)
 {
     if (!s_panel) return ESP_ERR_INVALID_STATE;
@@ -400,29 +560,12 @@ esp_err_t fos_display_blit(const uint8_t *buf, size_t len)
     esp_err_t err = ensure_module();
     if (err != ESP_OK) return err;
 
-    fos_display_park();
-    int64_t start = esp_timer_get_time();
-    /* The whole sequence under one bus hold: the drivers toggle CS by hand,
-     * so a shared card may not get a word in until the panel sleeps. */
-    DEV_SPI_Acquire();
-    if (s_panel->driver_init() != 0) {
-        DEV_SPI_Release();
-        ESP_LOGE(TAG, "panel init failed");
-        return ESP_FAIL;
+    if (!refresh_hand_over(buf, len)) {
+        refresh_wait();
+        err = refresh_in_place(buf);
+        if (err != ESP_OK) return err;
     }
-    s_panel->display((uint8_t *)buf);
-    s_panel->sleep();
-    DEV_SPI_Release();
-    s_panel_awake = false;
-    ESP_LOGI(TAG, "blit + refresh took %lld ms", (esp_timer_get_time() - start) / 1000);
-    if (fos_display_supports_partial()) {
-        if (!s_partial->changed) {
-            if (!s_glass) s_glass = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            if (s_glass && s_glass != buf) memcpy(s_glass, buf, len);
-            s_glass_known = s_glass != NULL;
-        }
-        s_partials_since_full = 0;
-    }
+    note_full_refresh(buf, len);
     return ESP_OK;
 }
 
@@ -457,6 +600,7 @@ esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bo
     if (err != ESP_OK) return err;
 
     /* One bus hold, as a full refresh. */
+    refresh_wait();
     DEV_SPI_Acquire();
     if (!s_panel_awake) s_partial->init();
     s_partial->show((uint8_t *)buf, s_glass);
@@ -481,6 +625,8 @@ bool fos_display_settle_due(int64_t now_us)
 
 void fos_display_park(void)
 {
+    /* Before a deep sleep too: a refresh still running finishes first. */
+    refresh_wait();
     if (!s_panel || !s_panel_awake) return;
     DEV_SPI_Acquire();
     s_panel->sleep();
@@ -490,7 +636,9 @@ void fos_display_park(void)
 
 void fos_display_park_if_idle(int64_t now_us)
 {
-    if (!s_panel_awake) return;
+    /* The refresh task has the panel: nothing is idle, and waiting for it here
+     * would hold the render task for the refresh after all. */
+    if (!s_panel_awake || fos_refresh_queue_busy(&s_refresh_queue)) return;
     int64_t idle_us = now_us - s_last_partial_us;
     if (idle_us >= FOS_PANEL_CLEAN_US && s_partial->clean && s_partials_since_full > 0 &&
         s_partials_since_full >= FOS_PARTIAL_MAX_BEFORE_FULL) {

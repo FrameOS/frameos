@@ -69,6 +69,8 @@ typedef struct {
 typedef struct {
     void (*make_room)(size_t bytes);    /* before a write (SPIFFS GC); NULL = nothing */
     void *(*big_alloc)(size_t bytes);   /* for file bodies; NULL = malloc */
+    void (*pace)(void);                 /* before each 2 KB written; NULL = nothing (fos_scenes.c: the store
+                                         * task waits out renders and taps there, a flash write stalls both cores) */
 } fos_scene_store_hooks_t;
 
 void fos_scene_store_set_dir(const char *dir);

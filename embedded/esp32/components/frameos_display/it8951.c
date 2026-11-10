@@ -328,6 +328,12 @@ static bool s_owed_any = false;
 static int s_temperature = -1;
 /* In standby: the next pass wakes it first. */
 static bool s_standby = true;
+/* A waveform was started and nobody waited for it yet. The render task does
+ * not sit out the 0.5-0.9 s the controller takes: it handles taps and draws
+ * the next frame meanwhile, and waits here only before the next upload (the
+ * waveform reads the image buffer it would overwrite), a clean, or standby
+ * (which cuts a running refresh short). */
+static bool s_waveform_pending = false;
 /* A step timed out: the rest of the pass is skipped rather than talking to
  * a controller that stopped listening, and the next one starts over. */
 static bool s_failed = false;
@@ -618,6 +624,16 @@ static void wait_waveforms(void)
     }
 }
 
+static void finish_waveforms(void)
+{
+    if (!s_waveform_pending) return;
+    s_waveform_pending = false;
+    int64_t start = now_ms();
+    wait_waveforms();
+    int64_t waited = now_ms() - start;
+    if (waited > 20) printf("it8951: waited %lld ms for the last waveform\n", (long long)waited);
+}
+
 static uint8_t *chunk_buffer(void)
 {
     uint8_t *chunk = heap_caps_malloc(CHUNK_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
@@ -648,6 +664,7 @@ static void mark_owed(const fos_it8951_rect_t *rect)
 
 void fos_it8951_10in3_clear(void)
 {
+    finish_waveforms();
     uint8_t *chunk = chunk_buffer();
     if (!chunk) return;
     memset(chunk, 0xFF, CHUNK_BYTES);
@@ -714,6 +731,7 @@ void fos_it8951_10in3_display(uint8_t *buf)
         printf("it8951: nothing changed, refresh skipped\n");
         return;
     }
+    finish_waveforms();
     uint8_t *chunk = chunk_buffer();
     if (!chunk) return;
     for (size_t i = 0; i < count && !s_failed; i++) load_rect(buf, &rects[i], chunk, false, NULL);
@@ -722,12 +740,11 @@ void fos_it8951_10in3_display(uint8_t *buf)
     /* The whole panel, whatever went up: this is the path a new scene and
      * the periodic ghost clearing take. */
     start_waveform(MODE_GC16, &k_whole);
-    wait_waveforms();
     if (s_failed) return;
+    s_waveform_pending = true;
     s_rows_valid = s_tiles != NULL;
     forget_owed();
-    printf("it8951: %u rect(s) up in %lld ms, GC16 in %lld ms", (unsigned)count, (long long)(loaded - start),
-           (long long)(now_ms() - loaded));
+    printf("it8951: %u rect(s) up in %lld ms, GC16 started", (unsigned)count, (long long)(loaded - start));
     if (s_variant.set_temperature) printf(" at %d C", s_temperature);
     printf("\n");
 }
@@ -747,6 +764,7 @@ void fos_it8951_10in3_partial_show(uint8_t *buf, uint8_t *previous)
     fos_it8951_rect_t rects[FOS_IT8951_MAX_RECTS_INTERACTIVE];
     size_t count = damaged_rects(buf, rects);
     if (count == 0) return;
+    finish_waveforms();
     uint8_t *chunk = chunk_buffer();
     if (!chunk) return;
     bool plain[FOS_IT8951_MAX_RECTS_INTERACTIVE];
@@ -778,11 +796,11 @@ void fos_it8951_10in3_partial_show(uint8_t *buf, uint8_t *previous)
         }
         forget_owed();
     }
-    wait_waveforms();
     if (s_failed) return;
-    printf("it8951: partial%s, %u rect(s) (%d grey) up in %lld ms, waveform %lld ms, %ux%u@%u,%u first\n",
+    s_waveform_pending = true;
+    printf("it8951: partial%s, %u rect(s) (%d grey) up in %lld ms, waveform started, %ux%u@%u,%u first\n",
            s_interactive ? " fast" : "", (unsigned)count, grey, (long long)(loaded - start),
-           (long long)(now_ms() - loaded), rects[0].w, rects[0].h, rects[0].x, rects[0].y);
+           rects[0].w, rects[0].h, rects[0].x, rects[0].y);
 }
 
 void fos_it8951_10in3_set_interactive(bool interactive)
@@ -797,6 +815,7 @@ bool fos_it8951_10in3_owed(void)
 
 void fos_it8951_10in3_rest(void)
 {
+    finish_waveforms();
     write_command(CMD_STANDBY);
     s_standby = true;
 }
@@ -804,17 +823,18 @@ void fos_it8951_10in3_rest(void)
 void fos_it8951_10in3_clean(void)
 {
     if (s_failed || !s_rows_valid) return;
-    int64_t start = now_ms();
+    finish_waveforms();
     start_waveform(MODE_GC16, &k_whole);
-    wait_waveforms();
-    printf("it8951: clean, GC16 in %lld ms\n", (long long)(now_ms() - start));
+    if (!s_failed) s_waveform_pending = true;
+    printf("it8951: clean, GC16 started\n");
 }
 
 void fos_it8951_10in3_sleep(void)
 {
     /* Standby, not sleep: the controller keeps its picture, which is what
-     * lets the next pass send only what changed. The refresh has already
-     * finished (wait_waveforms waited for it). */
+     * lets the next pass send only what changed. A refresh still running
+     * finishes first. */
+    finish_waveforms();
     write_command(CMD_STANDBY);
     s_standby = true;
 }

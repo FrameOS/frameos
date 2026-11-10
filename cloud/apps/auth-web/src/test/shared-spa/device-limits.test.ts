@@ -58,6 +58,39 @@ describe("frameRenderDevice", () => {
     expect(frameRenderDevice(silent)?.label).toBe("ESP32 with 8 MB PSRAM at 800x480");
   });
 
+  it("draws an unturned E1003 in its panel buffer on firmware that does", () => {
+    // main.c canvas_is_panel_picture: the 4-bit canvas IS the panel buffer, so
+    // the frame has the 1.31 MB a second buffer would take. A backend frame
+    // says its rotation in the row and its firmware in its last bootup line.
+    const backend = (rotate: number, frameosVersion: string) =>
+      ({
+        embedded: {
+          lastBoot: { frameosVersion },
+          layout: { ram: { pixelFormat: 8, psramBytes: 8 * MB, renderMode: "local" } },
+          platform: "esp32-s3",
+        },
+        height: 1404,
+        rotate,
+        width: 1872,
+      }) as Partial<FrameType>;
+    expect(frameRenderDevice(backend(0, "2026.11.6"))?.limits.memoryBytes).toBe(16_539_040);
+    expect(frameRenderDevice(backend(90, "2026.11.6"))?.limits.memoryBytes).toBe(15_224_896);
+    expect(frameRenderDevice(backend(0, "2026.11.5"))?.limits.memoryBytes).toBe(15_224_896);
+
+    // A cloud frame reports both: the rotation it has now, the firmware it runs.
+    testWindow.window = { FRAMEOS_APP_CONFIG: { cloudMode: true } };
+    const cloud = (rotate: number | undefined, version: string | null) =>
+      ({
+        frameos_version: version,
+        hardware: { memory: { psramBytes: 8 * MB }, pixelFormat: 8, platform: "esp32-s3", rotate },
+        height: 1404,
+        width: 1872,
+      }) as Partial<FrameType>;
+    expect(frameRenderDevice(cloud(0, "v2026.11.6"))?.limits).toEqual(esp32DeviceLimits(1872, 1404, 8 * MB, 8, 0));
+    expect(frameRenderDevice(cloud(180, "v2026.11.6"))?.limits.memoryBytes).toBe(15_224_896);
+    expect(frameRenderDevice(cloud(0, null))?.limits.memoryBytes).toBe(15_224_896);
+  });
+
   it("leaves Pis and thin clients to the browser's memory", () => {
     expect(frameRenderDevice({ height: 480, mode: "rpios", width: 800 } as Partial<FrameType>)).toBeNull();
     const thinClient = {

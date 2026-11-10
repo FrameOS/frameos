@@ -29,7 +29,11 @@
  * waits in RAM and is written once it has waited the delay (later changes
  * ride along, so a scene that never settles is still written once a delay),
  * before a deep sleep and before a restart (main.c, fos_client.c). Losing
- * power loses at most one delay of changes.
+ * power loses at most one delay of changes. The delayed writes run on a task
+ * of their own (main.c `scene_state_writer_task`), not the render task: a
+ * write is seconds on a full partition, and the render task also drains the
+ * touch queue. The file write runs outside the lock; a load meanwhile gets
+ * the state being written.
  *
  * IDF-free on purpose (stdio only), so it has a host test:
  * main/tests/test_fos_scene_state.c, run by
@@ -73,6 +77,11 @@ typedef struct {
     uint32_t (*now_ms)(void); /* a millisecond clock (wraps are fine) */
     void (*lock)(void);       /* around every call; NULL on one task */
     void (*unlock)(void);
+    /* Held by a flush from start to end, so two flushers take turns; the file
+     * writes themselves run outside `lock` (a load sees what is being
+     * written). NULL on one task. */
+    void (*flush_lock)(void);
+    void (*flush_unlock)(void);
 } fos_scene_state_write_behind_t;
 
 /* Turn write-behind on (NULL: off). Whatever waits is written first. */
@@ -80,6 +89,10 @@ void fos_scene_state_set_write_behind(const fos_scene_state_write_behind_t *conf
 
 /* Write the changes that have waited the delay; with `all`, every one. */
 void fos_scene_state_flush(bool all);
+
+/* Half the changes that may wait are waiting: write them all now, before a
+ * full table makes a save write on the caller's task. */
+bool fos_scene_state_crowded(void);
 
 /* Something is waiting to be written. */
 bool fos_scene_state_pending(void);

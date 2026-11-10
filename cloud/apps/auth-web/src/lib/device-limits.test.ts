@@ -9,6 +9,7 @@ import {
   devicePresets,
   ESP32_PIXEL_RGB565,
   esp32CanvasBytesPerPixel,
+  esp32CanvasRotation,
   esp32DeviceHeapBytes,
   esp32DeviceLimits,
   esp32PreviewMemoryBytes,
@@ -219,22 +220,39 @@ const deviceLimitsFixtures = JSON.parse(
     memoryBytes: number;
     name: string;
     pixelFormat?: number;
+    rotate?: number;
     previewOverheadBytes: number;
     canvasBytesPerPixel: number;
     psramBytes: number;
     width: number;
   }[];
+  canvasRotation: {
+    cases: { rotate: number | null; firmwareVersion: string | null; expected: number | null }[];
+  };
 };
 
 describe("esp32DeviceLimits", () => {
   it.each(deviceLimitsFixtures.cases.map((entry) => [entry.name, entry] as const))("%s", (_name, entry) => {
-    const limits = esp32DeviceLimits(entry.width, entry.height, entry.psramBytes, entry.pixelFormat ?? null);
+    const limits = esp32DeviceLimits(
+      entry.width,
+      entry.height,
+      entry.psramBytes,
+      entry.pixelFormat ?? null,
+      entry.rotate ?? null,
+    );
     expect(limits.memoryBytes).toBe(entry.memoryBytes);
     expect(limits.previewOverheadBytes).toBe(entry.previewOverheadBytes);
     expect(limits.canvasBytesPerPixel).toBe(entry.canvasBytesPerPixel);
     expect(limits.memoryReserveBytes).toBe(0);
     expect(limits.embedded).toBe(true);
   });
+
+  it.each(deviceLimitsFixtures.canvasRotation.cases.map((entry) => [entry.rotate, entry.firmwareVersion, entry] as const))(
+    "gives the limits rotation %s on firmware %s",
+    (_rotate, _version, entry) => {
+      expect(esp32CanvasRotation(entry.rotate, entry.firmwareVersion)).toBe(entry.expected);
+    },
+  );
 
   it("is what the ESP32 presets use", () => {
     expect(deviceLimitsFor("esp32", 1200, 1600)).toEqual(esp32DeviceLimits(1200, 1600, PSRAM_8MB));

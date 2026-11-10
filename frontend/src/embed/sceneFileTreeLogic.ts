@@ -166,8 +166,9 @@ export const sceneFileTreeLogic = kea<sceneFileTreeLogicType>([
         closeBuiltinApp: () => null,
       },
     ],
-    // Scene folders start expanded (their diagram and apps are what the
-    // tree is for); app folders start closed — opening one loads its files.
+    // Every folder starts expanded, app folders too: the tree is for seeing
+    // a scene's files, and a scene app's files are in the scene already
+    // (built-in apps get no folder), so opening them costs no request.
     collapsed: [
       {} as Record<string, boolean>,
       {
@@ -262,6 +263,6 @@ export const sceneFileTreeLogic = kea<sceneFileTreeLogicType>([
   })),
 ])
 
-function defaultCollapsed(treeKey: string): boolean {
-  return treeKey.startsWith('app:')
+function defaultCollapsed(_treeKey: string): boolean {
+  return false
 }

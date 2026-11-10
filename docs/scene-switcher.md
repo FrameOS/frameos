@@ -98,14 +98,16 @@ which hit-tests the taps as it does a JS app's UI. It is laid out at the
 frame's render scale, sized from the panel, within the bounds the settings
 panel keeps (docs/scene-settings.md, "At the frame's scale").
 
-`switcherGrid` puts every scene on one page while the tiles stay big enough
-to read (at least a fifth of the shorter side across, up to six by six), and
-picks, among the grids that hold them all, the one whose pictures (at the
-frame's aspect) or name cards come out largest. More scenes than that fit
-page, with the page and two arrows in the header.
+`switcherGrid` picks the densest grid whose tiles stay big enough to read (at
+least a fifth of the shorter side across, up to six by six), and among grids
+as dense the one whose pictures (at the frame's aspect) or name cards come
+out largest. The tiles keep that size whatever the number of scenes: three
+scenes fill three slots of the same grid that thirty would page through,
+rather than growing to fill the page. More scenes than a page holds page,
+with the page and two arrows in the header.
 
 - **A fast panel** (an LCD: an RGB565 canvas, the framebuffer, a HyperPixel)
-  gets a dark grid: each tile its picture when the host has one, its number
+  gets a dark grid: each tile its picture when the host has one (Linux), its number
   and title under it, the highlighted tile ringed, and a tile lighter while a
   finger is on it (`active:`).
 - **E-paper** (an ESP32 that is not an LCD, `waveshare.*`, `inky*`,
@@ -149,30 +151,15 @@ there):
   renders again at once (`sceneSwitcherThumbnailPass`). E-paper waits for
   all of them: every render there is a refresh.
 
-An ESP32 keeps a small RGB565 picture per scene on the state partition
-(`components/frameos_nim/fos_scene_thumb.c`, `noteSceneThumbnail` in `embedded_runtime.nim`),
-taken from the canvas after a render and before the firmware draws anything
-over it, so a presence code never reaches one:
-
-- The longest side is 200 px on a partition of 8 MB or more and 96 px on a
-  smaller one, about 40 KB and 10 KB on a portrait 13.3". It is stretched to the
-  tile.
-- A scene writes one at most hourly, looked at once a minute, so an animation
-  costs nothing per frame and the flash sees a few sectors an hour at most.
-- Taking one is memory only: the file is written later, from the idle wait and
-  never while someone is tapping (`frameos_nim_flush_scene_thumb`), because a
-  write is seconds of SPIFFS on the task the picture and the next tap wait for
-  (3.3 s on a reTerminal E1003). Which scenes have a file is read from the
-  directory once: opening one that is not there walks the whole partition,
-  700 ms a tile on 24 MB.
-- Pictures stop at 60% of the partition in use. Past that all of them go and
-  those in use come back as their scenes show, which also clears pictures of
-  scenes that were removed.
-- A tile is read off flash into PSRAM when the switcher draws. It is its name
-  card if that would leave under 600 KB free, or if the scene has not been shown
-  since the picture was last dropped.
-- The firmware's sampling and cropping are C (`fos_scene_thumb.c`), which took
-  the pictures from 2.6 KB of flash to 1.5 KB.
+An ESP32 shows name cards only. #709 gave it a small RGB565 picture per scene
+on the state partition, and on a reTerminal E1003 (a 10.3" e-paper panel, 23
+scenes) the drawer then took 8 to 14 s to open: each picture was a SPIFFS open
+(up to 1.4 s, a walk of the partition), a stretch onto the grey canvas through
+pixie's float sampler (0.86 s a tile), and a write of seconds after renders.
+The owner's call (2026-11-10): no pictures on an ESP32. The first boot of a
+firmware without them deletes the old `th-*.bin` files once
+(`drop_old_scene_pictures` in `fos_scenes.c`, remembered in NVS as
+`th_swept`).
 
 The preview lists names only.
 
@@ -219,8 +206,7 @@ bigger with it than without: the module's code 8.6 KB and its strings
 
 - No new layout code: the JSX layer it draws with is already in the image.
 - The firmware gets no keyboard and no round panel (`frameosEmbedded`; no
-  ESP32 board is round), its pictures are raw RGB565 with no decoder,
-  integer arithmetic, and
+  ESP32 board is round) and no pictures, integer arithmetic, and
   no Nim checks in the module (every index is guarded by the loop or the test
   that reaches it).
 - Class names are appended in place, one call each, and a class that

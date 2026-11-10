@@ -18,6 +18,7 @@ import math
 from dataclasses import dataclass
 
 from app.models.frame import Frame
+from app.utils.versions import version_tuple
 
 # FOS_NIM_EMERGENCY_RESERVE_BYTES: armed at boot, outside the render budget.
 ESP32_EMERGENCY_RESERVE_BYTES = 1024 * 1024
@@ -30,6 +31,32 @@ ESP32_RGBX_MAX_PSRAM_SHARE = 2
 ESP32_GREY_PIXEL_FORMATS = frozenset({1, 4})
 ESP32_PIXEL_4BPP_GRAY = 8
 ESP32_PIXEL_RGB565 = 9
+# The first firmware whose sixteen-grey canvas is the panel buffer itself
+# (esp32_canvas_is_panel_buffer). Older firmware keeps the two apart.
+ESP32_SHARED_CANVAS_FIRMWARE = "2026.11.6"
+
+
+def esp32_canvas_is_panel_buffer(pixel_format: int | None, rotate: int | None) -> bool:
+    """Whether the scene canvas is the panel buffer itself (the firmware's
+    main.c canvas_is_panel_picture): a sixteen-grey panel's 4-bit canvas is its
+    packed picture byte for byte while nothing turns it, so a reTerminal E1003
+    holds one 1.31 MB buffer, not two. `rotate` None: not known, or firmware
+    that keeps two (esp32_canvas_rotation)."""
+    return pixel_format == ESP32_PIXEL_4BPP_GRAY and rotate == 0
+
+
+def esp32_canvas_rotation(rotate: object, firmware_version: object) -> int | None:
+    """The rotation to give the limits for a frame at `rotate` running
+    `firmware_version`: its own on firmware that draws a sixteen-grey scene in
+    the panel buffer, None on older or unknown firmware (two buffers: the safe
+    direction)."""
+    if isinstance(rotate, bool) or not isinstance(rotate, (int, float)):
+        return None
+    version = version_tuple(firmware_version) if isinstance(firmware_version, str) else None
+    minimum = version_tuple(ESP32_SHARED_CANVAS_FIRMWARE)
+    if version is None or minimum is None or version < minimum:
+        return None
+    return int(rotate)
 
 
 def esp32_canvas_bytes_per_pixel(
@@ -50,14 +77,22 @@ def esp32_canvas_bytes_per_pixel(
     return 2
 
 
-def esp32_device_limits(width: int, height: int, psram_bytes: int, pixel_format: int | None = None) -> dict:
+def esp32_device_limits(
+    width: int, height: int, psram_bytes: int, pixel_format: int | None = None, rotate: int | None = None
+) -> dict:
     """The wasm renderer's ceiling for an ESP32 with this PSRAM at this panel
     size: the device's heap (PSRAM less the panel buffers — an e-paper panel's
-    packed 4 bpp buffer, an RGB565 LCD's packed buffer and its three frame
-    buffers — and the emergency reserve), plus what the renderer spends on its
-    RGBX canvas that a 565- or luma-canvas device does not."""
+    packed 4 bpp buffer, none of its own where the canvas is that buffer
+    (esp32_canvas_is_panel_buffer), an RGB565 LCD's packed buffer and its three
+    frame buffers — and the emergency reserve), plus what the renderer spends
+    on its RGBX canvas that a 565- or luma-canvas device does not."""
     pixels = max(1, width) * max(1, height)
-    packed_bytes = pixels * 2 * 4 if pixel_format == ESP32_PIXEL_RGB565 else -(-pixels // 2)
+    if esp32_canvas_is_panel_buffer(pixel_format, rotate):
+        packed_bytes = 0
+    elif pixel_format == ESP32_PIXEL_RGB565:
+        packed_bytes = pixels * 2 * 4
+    else:
+        packed_bytes = -(-pixels // 2)
     device_heap = max(512 * 1024, psram_bytes - packed_bytes - ESP32_EMERGENCY_RESERVE_BYTES)
     canvas_bytes_per_pixel = esp32_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
     preview_overhead = pixels * 4 - math.ceil(pixels * canvas_bytes_per_pixel)
@@ -93,9 +128,12 @@ class RenderDevice:
     # The panel's fos_pixel_format_t, which decides its canvas (luma on a grey
     # panel, 565 on an RGB565 LCD); None when not known.
     pixel_format: int | None = None
+    # The frame's rotation where its firmware may draw in the panel buffer
+    # (esp32_canvas_rotation); None keeps the two buffers.
+    rotate: int | None = None
 
     def limits(self, width: int, height: int) -> dict:
-        return esp32_device_limits(width, height, self.psram_bytes, self.pixel_format)
+        return esp32_device_limits(width, height, self.psram_bytes, self.pixel_format, self.rotate)
 
 
 def frame_render_device(frame: Frame | None) -> RenderDevice | None:
@@ -123,4 +161,24 @@ def frame_render_device(frame: Frame | None) -> RenderDevice | None:
     if psram_bytes <= 0:
         return None
     megabytes = round(psram_bytes / (1024 * 1024), 1)
-    return RenderDevice(label=f"ESP32 with {megabytes:g} MB PSRAM", psram_bytes=psram_bytes, pixel_format=pixel_format)
+    return RenderDevice(
+        label=f"ESP32 with {megabytes:g} MB PSRAM",
+        psram_bytes=psram_bytes,
+        pixel_format=pixel_format,
+        rotate=esp32_canvas_rotation(frame.rotate or 0, frame_firmware_version(frame)),
+    )
+
+
+def frame_firmware_version(frame: Frame) -> str | None:
+    """The FrameOS an embedded frame said it runs on its last boot
+    (embedded.lastBoot, app/models/log.py), else the deploy baseline's."""
+    embedded = frame.embedded if isinstance(frame.embedded, dict) else {}
+    last_boot = embedded.get("lastBoot")
+    if isinstance(last_boot, dict):
+        for key in ("frameosVersion", "version"):
+            version = last_boot.get(key)
+            if isinstance(version, str) and version_tuple(version) is not None:
+                return version
+    snapshot = frame.last_successful_deploy if isinstance(frame.last_successful_deploy, dict) else {}
+    version = snapshot.get("frameos_version")
+    return version if isinstance(version, str) else None

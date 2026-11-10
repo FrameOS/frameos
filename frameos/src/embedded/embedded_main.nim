@@ -499,8 +499,24 @@ proc packCanvas1bpp(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): 
         copyMem(packedCanvas[at].addr, pixels[at].addr, int(run.right - run.left))
       copyMem(packedPicture, buf, bufLen)
       return true
-  if not packImage1bpp(image, buf, bufLen):
-    return false
+  # The whole frame: the runs' integer dither over every row, the arithmetic a
+  # partial update uses on its runs, so a switch and the taps after it put
+  # down the same pixels. The float packImage1bpp, through pixie's accessor
+  # and a rotation call per pixel, took 1.6 to 2.3 s for the Sticky's 800x480
+  # on every scene switch (2026-11-10).
+  var rows = newSeq[ChangedRun](height)
+  for y in 0 ..< height:
+    rows[y] = (y.uint16, 0'u16, width.uint16)
+  if frameRotate == 0:
+    packRuns1bpp(pixels, width, height, buf, rowBytes, rows, 0, packedErrors)
+  else:
+    # Turned: dithered upright first, then turned onto the panel in its own
+    # order (rotateBits1bpp), so neither pass jumps a row at every pixel.
+    let naturalRow = (width + 7) div 8
+    var natural = newSeq[uint8](naturalRow * height)
+    let upright = cast[ptr UncheckedArray[uint8]](natural[0].addr)
+    packRuns1bpp(pixels, width, height, upright, naturalRow, rows, 0, packedErrors)
+    rotateBits1bpp(upright, width, height, buf, rowBytes, frameRotate)
   copyMem(packedCanvas, pixels, width * height)
   copyMem(packedPicture, buf, bufLen)
   packedWidth = width
@@ -650,6 +666,21 @@ proc fos_nim_set_scene_catalog_impl(indexJson: cstring): cint {.exportc, cdecl.}
   except Exception as e:
     log("setSceneCatalog failed: " & e.msg)
     result = 0
+
+proc fos_nim_set_interactive_impl(on: cint) {.exportc, cdecl.} =
+  ## Someone is tapping (fos_client.c's input hold), told before each render.
+  rhythmInteractive = on != 0
+
+proc fos_nim_chrome_owed_impl(): cint {.exportc, cdecl.} =
+  ## A UI's chrome waited for the tapping to stop: render it now.
+  (if rhythmChromeOwed(): 1 else: 0).cint
+
+proc sharedCanvasBuffer(): pointer {.importc: "frameos_nim_shared_canvas_buffer", cdecl.}
+
+proc fos_nim_canvas_forget_impl() {.exportc, cdecl.} =
+  ## The canvas, shared with the panel buffer, was drawn over by something
+  ## that is not a render (frameos_nim_canvas_forget).
+  rhythmForgetCanvases()
 
 proc fos_nim_request_fresh_pass_impl() {.exportc, cdecl.} =
   ## Somebody asked for this render (a cloud or HTTP render verb, the console,
@@ -833,19 +864,42 @@ proc fos_nim_render_alloc_impl(
     # decode lets kept interpreters go (utils/memory.refreshDecodeBudget).
     refreshDecodeBudget(forDecode = false)
     setAssetColorsPanelPalette(panelPaletteForFormat(pixelFormat.int))
+    # Where the canvas is the panel buffer (a sixteen-grey panel, main.c
+    # frameos_nim_share_canvas) the buffer is borrowed before the scene draws
+    # there: nothing else writes it meanwhile, and a snapshot of the last
+    # picture in it lets go (fos_client.c snapshot_before_lend).
+    let
+      sharedCanvas = sharedCanvasBuffer()
+      canvas = renderCanvas()
+      drawsInPanel = sharedCanvas != nil and not canvas.isNil and canvas.bufferPointer == sharedCanvas
+    if drawsInPanel:
+      let borrowed = renderBufferAlloc(
+        packedLenForFormat(canvas.width, canvas.height, pixelFormat.int).csize_t)
+      if borrowed != sharedCanvas:
+        # Lent to something else (a console display_test): it would draw
+        # where the scene draws. The next pass tries again.
+        if borrowed != nil:
+          renderBufferFree(borrowed)
+        log("render skipped: the panel buffer, which is the canvas, is in use")
+        return 1
+      outBuf = borrowed # the error paths below hand it back
     let start = getMonoTime()
     let rendered = renderKeptFrameImage()
     var image = rendered.image
     let source = rendered.source
     let renderedAt = getMonoTime()
-    lastPackedFromCanvas = cast[pointer](image) == cast[pointer](renderCanvas())
+    lastPackedFromCanvas = cast[pointer](image) == cast[pointer](canvas)
     let packedLen = packedLenForFormat(image.width, image.height, pixelFormat.int)
     if packedLen <= 0:
       log(&"pack: unsupported pixel format {pixelFormat}")
       image = nil
+      if outBuf != nil:
+        renderBufferFree(outBuf)
+        outBuf = nil
       GC_fullCollect()
       return 1
-    let raw = renderBufferAlloc(packedLen.csize_t)
+    let raw = if outBuf != nil: outBuf else: renderBufferAlloc(packedLen.csize_t)
+    outBuf = raw # the error paths below hand it back
     if raw == nil:
       log(&"render failed: out of memory for {packedLen} byte packed framebuffer")
       image = nil
@@ -854,9 +908,13 @@ proc fos_nim_render_alloc_impl(
     let packedBuf = cast[ptr UncheckedArray[uint8]](raw)
     if not packImageForFormat(image, packedBuf, packedLen, pixelFormat.int):
       renderBufferFree(raw)
+      outBuf = nil
       image = nil
       GC_fullCollect()
       return 1
+    if drawsInPanel and not lastPackedFromCanvas:
+      # Another image was packed over the canvas's own bytes.
+      rhythmForgetCanvases()
     image = nil
     GC_fullCollect()
     let packed = getMonoTime()

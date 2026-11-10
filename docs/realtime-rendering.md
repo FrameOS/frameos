@@ -55,6 +55,14 @@ step measured on the board:
 | No heap walk per frame; the SVG spec read off the JS object; the fast XML reader; flattened shapes kept | ~50 ms | 19.3 |
 | The metrics sample with the frame logged in full, not every second | ~50 ms | 19.6 |
 
+The `-O2` of the third row took effect only in images built with the flox dev
+shell's Nim, which ROT13s the names of the C files it generates, the names
+`components/frameos_nim/CMakeLists.txt` picks the modules by. The official
+Nim of the Docker image, CI and every release writes them plain, so those
+images drew pixie's raster at `-Os`: 17.9 fps instead of 19.4 on the SenseCAP
+(2026-11-10). Both names are listed now, and `ci_build_image.sh` fails a build
+whose hot modules came out without `-O2` (+39 KB of flash).
+
 Where the 50 ms go now, from probes around each phase (not in the tree):
 `get()` ~5 ms, the SVG parse ~10 (half of it the XML), the raster of the
 logo's ~130x85 box ~20, the interpreter around them ~7, the rest the
@@ -117,7 +125,10 @@ not deep-sleep, animates:
   the power decision, the Nim settings pushes. The metrics sample goes with
   the frame logged in full (below).
 - One frame in ten seconds is logged in full — `render:scene` …
-  `render:done`, the cloud's render announce, the backend's image push — with
+  `render:done`, the cloud's render announce, the backend's image push (once
+  per scene while it animates, `fos_animation_push_wanted`: on an LCD each
+  push hashes, copies and uploads the whole picture, and held the frames
+  around it to 115 ms instead of 75) — with
   a `render:animation` summary of the frames before it (`frames`, `fps`,
   `avgMs`, `maxMs`, `periodMs`). The frames in between are quiet: no render
   lines, no scene log lines (`frameos_nim_set_quiet`, the logger off, like
@@ -170,6 +181,22 @@ vertical stripes, so pixie's horizontal gradient computes every row on this
 surface. Colour correction of the whole frame reads the sixteen levels, not
 the 256 they came from.
 
+On the ESP32, unrotated, the canvas and the packed picture are one block:
+the panel-sized buffer `main.c` reserves at boot is handed to the runtime as
+its canvas (`canvas_is_panel_picture`, `frameos_nim_share_canvas`), the pack
+skips the copy onto itself, and the 1.31 MB the E1003 held twice of its 8 MB
+goes to the renders (idle free PSRAM with a scene 3.2 MB -> 4.66 MB,
+2026-11-10). The render borrows the buffer before the scene draws there, so
+a snapshot of the last picture in it lets go first (`snapshot_before_lend`),
+and anything else that borrows it (a status screen, a console `display_test`)
+is counted (`fos_framebuffer_foreign_lends`) and makes the next render draw
+whole (`frameos_nim_canvas_forget`). A rotated frame packs with a turn and
+keeps a canvas of its own; changing the rotation restarts the firmware. The
+AI chat's memory simulation counts one buffer too (`esp32CanvasIsPanelBuffer`
+in both device-limits ports): it is told the frame's rotation, and only on
+firmware from `ESP32_SHARED_CANVAS_FIRMWARE` on (`esp32CanvasRotation`);
+older or unknown firmware keeps the two.
+
 Any other grey or black-and-white panel renders in pixie's 8-bit luma surface
 (`pfGray8`), because its error diffusion wants the 256 levels, whatever the PSRAM, not only when RGBX does not fit: blending is
 per channel, so the luma of a composite is the composite of the lumas, and
@@ -178,6 +205,19 @@ the bytes. The rule, in every copy (C, Nim, the backend, both device-limits
 ports, `docs/device-limits-fixtures.json`): 4-bit for sixteen greys, luma for
 another grey panel, 565 for an RGB565 LCD, and for a colour e-paper panel RGBX while two of it fit PSRAM,
 565 beyond.
+
+### A JPEG decoded into a target draws its lines in one loop
+
+pixie's JPEG sink (`drawLineInto` in `fileformats/jpeg.nim`) works out once
+per decode where each position along a target line samples each channel
+(`prepareLines`), once per line the row half, and writes a line through one
+loop per format with no call in it, `-O2` on the device. Per pixel it was a
+chain of calls and divisions: 11 us a pixel on an ESP32-S3, 24.5 s of a
+30.8 s decode of a gallery photo into a reTerminal E1003's 1848x1179 window;
+now 4 s, the pixels byte for byte the same (every master of pixie's JPEG
+suite into five sizes, three fits and three formats). What is left of a
+gallery photo there is the socket: 4-13 s for 115-180 KB at lwIP's default
+window.
 
 ### The background is owed, not painted
 
@@ -633,11 +673,85 @@ a small change cost what it should:
   ms more), only when it is parked. Measured on an E1003 (2026-11-10): five
   scattered areas in 511 ms of waveform and 15 ms of upload; a tap in about a
   second from the finger to the picture.
+- **A refresh is started, not waited for.** The IT8951 runs its waveform and the
+  Sticky's SSD1677 its update on their own, 0.5-0.9 s; the driver returns once
+  it has started one, and waits for it only before the panel's next use (the
+  next upload, which overwrites what the waveform reads, a clean, a standby,
+  which would cut it short): `finish_waveforms` in `it8951.c`,
+  `EPD_3in97_WaitPending`. The render task handles the taps that came meanwhile
+  and draws the next frame while the glass changes. A new driver entry point
+  waits first. A full refresh goes the same way: on any other SPI panel
+  `fos_display_blit` copies the picture and a task of the display's own
+  (`refresh_task` in `frameos_display.c`) runs init, picture, refresh and
+  sleep, so the E1002's 28.7 s color refresh and the Sticky's 2.2 s after a
+  scene switch no longer hold the render task, which answers keys and
+  commands meanwhile. A picture asked for during one waits as the next (the
+  newest only), every other use of the panel waits for the task first, a deep
+  sleep parks the panel after it and a restart waits for it (a shutdown
+  handler). A timed render waits for the glass too (the idle wait in
+  `fos_client.c`), or a one-second scene on a color panel would draw pictures
+  nobody sees, seconds of the render task each; a render somebody asked for
+  does not. The IT8951 keeps the picture, so it is left awake after a full
+  refresh, like after a partial one, and its waveform is waited for at its
+  next use. Measured on the E1002 (2026-11-10): a scene switch starts drawing
+  in 0.2-0.35 s instead of 6-18 s, and the render task is free 6 s after it
+  began instead of 35-53 s.
+- **Slow chores leave the render task.** The scene state that waited its delay is
+  written by a task of its own (`scene_state_writer_task` in `main.c`): a SPIFFS
+  write is 0.7 s on the E1003 and 3 s on the Sticky, and the file write runs
+  outside the store's lock, a load meanwhile getting the state being written.
+  More than half the store's sixteen slots waiting writes them all
+  (`fos_scene_state_crowded`), so a walk through the scenes never writes on the
+  render task. The picture pushed to the backend after a render (1.3 MB on the
+  E1003, a median 8.8 s with the 16 KB send buffer, 14.5 s at lwIP's default;
+  `embedded/esp32/README.md` "Wi-Fi and lwIP buffers come from PSRAM first")
+  gives way to a tap, a key, an event
+  from HTTP, the cloud or the console, or any render asked for, and starts over
+  later. A frame that stays awake does its backend round trips on a task of its
+  own (`backend_link_task` in `fos_client.c`): the log uploads every second, the
+  picture push after a render, and every 10 s the scenes, settings and
+  commands pulls. Between two renders of a one-second clock on the Sticky they
+  were 2-8 s of the render task, and the clock stood still for up to ten
+  seconds. The link task applies nothing: the commands it pulls are handed over
+  and run on the render task (the backend marks what it hands out `sent`, so
+  a pull is never only a look; `fos_commands_fetch` / `fos_commands_run`), and
+  for settings it asks the status alone and the render task fetches what
+  changed (`fos_settings_changed`). A changed scene set the link task
+  downloads itself (`fos_scenes_backend_fetch`); the render task only parses
+  it into the runtime (`fos_scenes_take_backend_payload`, 0.3 s for 337 KB),
+  once nobody is tapping (`serve_link` skips it under the input hold, and its
+  release serves it), and the scene store's own task writes it to flash
+  (`store_task` in `fos_scenes.c`: the combined file, then the etag and the
+  source, so a crash never claims a set that is not on flash; a deep sleep
+  and a restart wait for it). On the E1003 a forced sync held the render task
+  13-20 s (the download 6-13 s, the write 6-7 s) and an event sent as it
+  began waited up to 11.7 s; now the worst wait is the new set's first
+  render, 3.2 s. A flash write turns the cache off for every erase and page
+  program and both cores wait it out, so the store task writes 2 KB at a time
+  between renders and never while someone taps (`store_pace`); on an RGB LCD,
+  which shows "Updating" for the write, as fast as it goes. A
+  backend's nudge is still pulled on the render task, which the voice relay's
+  release counts on, and so is everything on a frame about to deep-sleep and on
+  a boot's first pass. When the round trips come back to the render task (a
+  deep sleep comes) it waits for the round the link task is in, which runs
+  under `s_link_round`, and runs the commands it pulled: they would otherwise
+  still be in memory as the chip sleeps (`link_hand_back`). The rules are
+  host-tested in `fos_animation.c` (`fos_backend_link_on`,
+  `fos_image_push_yields`, `fos_input_hold_applies`) and the threading read
+  off the source by `test_esp32_backend_link.py`. The picture stream no longer holds the snapshot for the
+  whole upload: a snapshot up to 256 KB is copied out, a larger one is read a
+  row at a time and a render taking the buffer back ends the stream (it held a
+  one-second clock back 1.3-4.3 s). A batch of logs is 32 lines now, not 8: a
+  backend on a laptop answers a POST in one to two seconds, and a second's
+  renders log about eight lines.
 - **The input hold.** The render task drains the touch queue and also does the
   backend pulls, the log uploads and the image push, 200-1000 ms a round trip
   on Wi-Fi, and writes the scene state to flash, up to 3 s, so a tap made during
-  one came back late with the ones behind it in one go. On these panels a touch
-  or a key holds all of that back until ten
+  one came back late with the ones behind it in one go. On these panels, and on
+  any board with a touch screen or keys (the SenseCAP Indicator's LCD held a tap
+  2.5 to 3.5 s behind a settings pull, the E1003 the scene switcher's close 2.8
+  s), a touch, a key or an event from HTTP, the cloud or the console (a remote,
+  the editor, Home Assistant) holds all of that back until ten
   seconds without input, a minute at the most (`fos_input_hold_*` in
   `fos_animation.c`), and the idle wait then runs it once, a round trip at a
   time, giving way to the next tap. A backend's command nudge is still served
@@ -660,7 +774,10 @@ a small change cost what it should:
   else stays as it was, bit for bit. Runs and not boxes: a crosshair that
   moved is two full-height lines. The comparison is of the canvas and not of
   what the renderer reports, because a scene is more than its SVGs and the
-  copy cannot miss a writer.
+  copy cannot miss a writer. A whole frame (a new scene, more than half the
+  canvas changed) goes through the same integer runs, one a row
+  (`packCanvas1bpp`), so a switch and the taps after it put down the same
+  pixels: the float pass it replaced took 1.6 to 2.3 s on the Sticky.
 - **The raster.** The canvas is kept between renders, so on these panels it
   takes the same SVG damage records as an LCD's buffer
   (`beginKeptCanvasFrame`, `utils/svg_frames.nim`).

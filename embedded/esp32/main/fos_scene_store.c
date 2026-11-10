@@ -91,6 +91,7 @@ fos_scene_store_err_t fos_scene_store_write_file(const char *path, const char *t
     size_t written = 0;
     while (written < len) {
         size_t chunk = len - written > 2048 ? 2048 : len - written;
+        if (s_hooks.pace) s_hooks.pace();
         size_t wrote = fwrite(data + written, 1, chunk, f);
         if (wrote == 0) break;
         written += wrote;

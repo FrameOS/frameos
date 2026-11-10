@@ -231,6 +231,21 @@ jobs:
                 embedded/esp32/main/tests/test_fos_scene_store.c \
                 -lm -o /tmp/test_fos_scene_store
               /tmp/test_fos_scene_store
+              # The SPIFFS garbage collection order and the scene store split,
+              # replayed on the SPIFFS that ESP-IDF ships (fos_spiffs_gc.c, a
+              # 20-scene set pushed over itself on a 1 MB /state). The backend
+              # pytest runner skips it where no IDF checkout is around.
+              mkdir -p /tmp/spiffs_obj
+              for f in spiffs_cache spiffs_check spiffs_gc spiffs_hydrogen spiffs_nucleus; do \
+                cc -std=c11 -O2 -w -Iembedded/esp32/main -Iembedded/esp32/main/tests/spiffs_shim \
+                  -I"$IDF_PATH/components/spiffs/include" -I"$IDF_PATH/components/spiffs/spiffs/src" \
+                  -c "$IDF_PATH/components/spiffs/spiffs/src/$f.c" -o /tmp/spiffs_obj/$f.o || exit 1; done
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main -Iembedded/esp32/main/tests/spiffs_shim \
+                -I"$IDF_PATH/components/spiffs/include" -I"$IDF_PATH/components/spiffs/spiffs/src" \
+                -D__real_SPIFFS_gc=SPIFFS_gc \
+                embedded/esp32/main/fos_spiffs_gc.c embedded/esp32/main/tests/test_fos_spiffs_gc.c /tmp/spiffs_obj/*.o \
+                -o /tmp/test_fos_spiffs_gc
+              /tmp/test_fos_spiffs_gc
               # The JSON depth pre-scan that guards the 8-10 KB parser tasks.
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
                 embedded/esp32/main/fos_json_guard.c embedded/esp32/main/tests/test_fos_json_guard.c \

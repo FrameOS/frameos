@@ -108,23 +108,25 @@ static bool run_command(cJSON *command)
 }
 
 static bool sync_pass(bool after_forced_pull);
+static bool run_answer(cJSON *root, bool after_forced_pull);
 
 bool fos_commands_sync(void)
 {
     return sync_pass(false);
 }
 
-/* One pull of the queue. `after_forced_pull`: this is the second pull of a
- * pass, right after the backend asked for the scenes and settings to be
- * fetched — never a third. */
-static bool sync_pass(bool after_forced_pull)
+/* The hello and the queue's answer, parsed; NULL without a backend, Wi-Fi or
+ * an answer. The backend marks what it hands over `sent`, and hands it over
+ * again only after a while (an at-most-once verb never), so whoever pulls
+ * runs what came back. */
+static cJSON *pull(void)
 {
     const fos_config_t *config = fos_config();
-    if (!config->backend_url[0] || config->frame_id == 0 || !config->api_key[0]) return false;
-    if (fos_wifi_state() != FOS_WIFI_CONNECTED) return false;
+    if (!config->backend_url[0] || config->frame_id == 0 || !config->api_key[0]) return NULL;
+    if (fos_wifi_state() != FOS_WIFI_CONNECTED) return NULL;
 
     cJSON *hello = cJSON_CreateObject();
-    if (hello == NULL) return false;
+    if (hello == NULL) return NULL;
     fos_cloud_add_state_fields(hello);
     /* Where it is now, for a frame that joined another network on its own
      * screen and so said no bootup (app/utils/embedded_report.py). */
@@ -135,7 +137,7 @@ static bool sync_pass(bool after_forced_pull)
     fos_scenes_add_storage_json(cJSON_AddObjectToObject(hello, "storage"));
     char *body = cJSON_PrintUnformatted(hello);
     cJSON_Delete(hello);
-    if (body == NULL) return false;
+    if (body == NULL) return NULL;
 
     char *answer = NULL;
     int status = post_json("", body, FOS_COMMANDS_MAX_BYTES, &answer);
@@ -149,8 +151,46 @@ static bool sync_pass(bool after_forced_pull)
         ESP_LOGW(TAG, "commands pull failed (HTTP %d)", status);
     }
     free(answer);
-    if (root == NULL) return false;
+    return root;
+}
 
+/* Whether an answer holds anything to run: commands, or a sync to make. */
+static bool answer_has_work(const cJSON *root)
+{
+    const cJSON *commands = cJSON_GetObjectItem(root, "commands");
+    return cJSON_IsTrue(cJSON_GetObjectItem(root, "sync")) ||
+           (cJSON_IsArray(commands) && cJSON_GetArraySize(commands) > 0);
+}
+
+void *fos_commands_fetch(void)
+{
+    cJSON *root = pull();
+    if (root != NULL && !answer_has_work(root)) {
+        cJSON_Delete(root);
+        root = NULL;
+    }
+    return root;
+}
+
+bool fos_commands_run(void *answer)
+{
+    if (answer == NULL) return false;
+    return run_answer((cJSON *)answer, false);
+}
+
+/* One pull of the queue. `after_forced_pull`: this is the second pull of a
+ * pass, right after the backend asked for the scenes and settings to be
+ * fetched — never a third. */
+static bool sync_pass(bool after_forced_pull)
+{
+    cJSON *root = pull();
+    if (root == NULL) return false;
+    return run_answer(root, after_forced_pull);
+}
+
+/* What a pull answered, run on the render task; frees `root`. */
+static bool run_answer(cJSON *root, bool after_forced_pull)
+{
     cJSON *commands = cJSON_GetObjectItem(root, "commands");
     /* A deploy is waiting that this frame's pulls do not hold yet: fetch
      * them now, whatever the store's own rule (a USB-pushed payload skips the

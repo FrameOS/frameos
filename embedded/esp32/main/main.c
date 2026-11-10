@@ -164,6 +164,7 @@ static void action_render_now(void)
 #define SCENE_STATE_LCD_WRITE_DELAY_MS (10 * 60 * 1000)
 
 static SemaphoreHandle_t s_scene_state_mutex = NULL;
+static SemaphoreHandle_t s_scene_state_flush_mutex = NULL;
 
 static uint32_t scene_state_now_ms(void)
 {
@@ -178,6 +179,30 @@ static void scene_state_lock(void)
 static void scene_state_unlock(void)
 {
     xSemaphoreGive(s_scene_state_mutex);
+}
+
+static void scene_state_flush_lock(void)
+{
+    xSemaphoreTake(s_scene_state_flush_mutex, portMAX_DELAY);
+}
+
+static void scene_state_flush_unlock(void)
+{
+    xSemaphoreGive(s_scene_state_flush_mutex);
+}
+
+/* Writes the scene state that has waited its delay, on a task of its own: a
+ * SPIFFS write is 0.7 s on the reTerminal E1003 and 3 s on the Sticky
+ * (2026-11-10), and on the render task, which also drains the touch queue,
+ * it held a tap that long. Not while someone taps: a write still stalls a
+ * scene load waiting on the same partition. */
+static void scene_state_writer_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (!fos_client_input_held()) fos_scene_state_flush(fos_scene_state_crowded());
+    }
 }
 
 static void log_ring_flush_on_restart(void)
@@ -195,18 +220,51 @@ static void scene_state_flush_on_restart(void)
 static void scene_state_write_behind(void)
 {
     s_scene_state_mutex = xSemaphoreCreateMutex();
-    if (s_scene_state_mutex == NULL) return; /* writes through, as before */
+    s_scene_state_flush_mutex = xSemaphoreCreateMutex();
+    if (s_scene_state_mutex == NULL || s_scene_state_flush_mutex == NULL) return; /* writes through, as before */
     const fos_scene_state_write_behind_t behind = {
         .delay_ms = fos_display_is_lcd() ? SCENE_STATE_LCD_WRITE_DELAY_MS : SCENE_STATE_WRITE_DELAY_MS,
         .now_ms = scene_state_now_ms,
         .lock = scene_state_lock,
         .unlock = scene_state_unlock,
+        .flush_lock = scene_state_flush_lock,
+        .flush_unlock = scene_state_flush_unlock,
     };
     fos_scene_state_set_write_behind(&behind);
+    xTaskCreatePinnedToCore(scene_state_writer_task, "state_wr", 4096, NULL, tskIDLE_PRIORITY + 1, NULL, 0);
     esp_register_shutdown_handler(scene_state_flush_on_restart);
 }
 
+/* The CPU at 240 MHz. On the S3 both clocks divide the same 480 MHz PLL,
+ * so the PSRAM and flash clocks do not move; the switch is the one ESP-IDF's
+ * power management makes, core voltage first. */
+static void cpu_240(const char *why)
+{
+#if CONFIG_IDF_TARGET_ESP32S3
+    rtc_cpu_freq_config_t cpu;
+    if (rtc_clk_cpu_freq_mhz_to_config(240, &cpu)) {
+        rtc_clk_cpu_freq_set_config(&cpu);
+        printf("cpu: 240 MHz (%s)\n", why);
+    }
+#else
+    (void)why;
+#endif
+}
+
 static void log_bootup_event(bool online);
+
+/* A sixteen-grey panel's packed picture is the 4-bit canvas byte for byte
+ * when nothing turns it (dither.nim packGray4Canvas): the buffer reserved for
+ * the panel serves as the canvas too, and the 1.31 MB a reTerminal E1003
+ * held twice of its 8 MB goes back to the renders (2026-11-10). A turned
+ * frame packs with a turn, so it keeps a canvas of its own; changing the
+ * rotation restarts the firmware. */
+static bool canvas_is_panel_picture(const fos_config_t *config)
+{
+    return fos_display_format() == FOS_PIXEL_4BPP_GRAY && fos_display_canvas_bits_per_pixel() == 4 &&
+           config->rotate == 0 && fos_display_canvas_bytes() == fos_display_buffer_size() &&
+           fos_framebuffer_reserved_bytes() == fos_display_buffer_size();
+}
 
 /* The stored Wi-Fi came back while the provisioning portal was serving.
  * fos_wifi has already dropped the open AP; bring the rest up the way the
@@ -346,18 +404,9 @@ void app_main(void)
     /* An RGB LCD board renders at 240 MHz. The generic image boots every
      * board at 160 for the battery frames; an LCD is lit and mains-powered
      * anyway, and its renders are watched (the SenseCAP Indicator's took
-     * ~3.8 s at 160, 2026-10-25). On the S3 both clocks divide the same
-     * 480 MHz PLL, so the PSRAM and flash clocks do not move; the switch is
-     * the one ESP-IDF's power management makes, core voltage first. */
-#if CONFIG_IDF_TARGET_ESP32S3
-    if (fos_display_is_lcd()) {
-        rtc_cpu_freq_config_t cpu;
-        if (rtc_clk_cpu_freq_mhz_to_config(240, &cpu)) {
-            rtc_clk_cpu_freq_set_config(&cpu);
-            printf("cpu: 240 MHz (RGB LCD)\n");
-        }
-    }
-#endif
+     * ~3.8 s at 160, 2026-10-25). A touch board goes to 240 too, below, once
+     * its controller answers. */
+    if (fos_display_is_lcd()) cpu_240("RGB LCD");
 
     /* Not where the pin is wired to something else (heartbeat_pin_free), nor
      * on an RGB LCD, whose pixel clock is GPIO21 (the SenseCAP Indicator):
@@ -376,7 +425,7 @@ void app_main(void)
         /* The Nim renderer packs into the same reservation (fos_framebuffer.h).
          * The hooks take/return the buffer through the acquire/release pair
          * that fos_client.c already uses to hand it back after the blit. */
-        frameos_nim_set_render_buffer_hooks((void *(*)(size_t))fos_framebuffer_acquire,
+        frameos_nim_set_render_buffer_hooks((void *(*)(size_t))fos_framebuffer_acquire_render,
                                             (void (*)(void *))fos_framebuffer_release);
         /* An RGB LCD's refill interrupt shares core 1 with the render task;
          * a realloc copying under the heap's spinlock held it off for 1-2 ms
@@ -395,6 +444,12 @@ void app_main(void)
     if (fos_touch_start() == ESP_ERR_NOT_FOUND && config->touch_pins.sda >= 0) {
         ESP_LOGW(TAG, "touch panel configured but not found");
     }
+    /* Someone touching the glass is waiting for every frame: a touch e-paper
+     * board renders at 240 MHz as an LCD does. A third off each render's
+     * CPU time on the reTerminal E1003 and the Sticky, whose renders took
+     * 1.5 to 5 s at 160 (2026-11-10); a battery pays for it only while awake,
+     * and a render that ends sooner sleeps sooner. */
+    if (fos_touch_present() && !fos_display_is_lcd()) cpu_240("touch");
     if (fos_assets_sd_mount(config) != ESP_OK) {
         ESP_LOGW(TAG, "SD assets unavailable, continuing without %s: %s",
                  config->assets_path[0] ? config->assets_path : "/srv/assets",
@@ -432,7 +487,11 @@ void app_main(void)
      * client framebuffer was above: it is the one multi-MB contiguous PSRAM
      * run the device needs, and before Wi-Fi/TLS there is always one. */
     if (local_render_ok && frameos_nim_available() && fos_display_present()) {
-        frameos_nim_reserve_canvas(fos_display_canvas_bytes());
+        if (canvas_is_panel_picture(config)) {
+            frameos_nim_share_canvas(fos_framebuffer_reserved_buffer(), fos_framebuffer_reserved_bytes());
+        } else {
+            frameos_nim_reserve_canvas(fos_display_canvas_bytes());
+        }
     }
 
     BOOTMEM("after-sd");

@@ -237,6 +237,16 @@ export function get(app) {
   size it is decoded at, in the canvas's pixel format: an ESP32 holds a
   480x480 photo in 450 KB of RGB565, and drawing it is a copy. A host decodes
   at the picture's own size.
+- **Only with room for it** (`keptPictureTarget` in `app_runtime.nim`): short
+  of memory the app's older kept pictures go first (their refs then draw
+  nothing, and the app fetches again), then the photo is decoded at its own
+  resolution when that is less than the size asked and more than half of it
+  (smaller, it would be more than twice blown up on the panel); with no
+  room at all `fetchImage` answers an `error` and no `image`. The size the
+  photo has comes from the start of the download (`downloadImageWithDataSizedBy`),
+  so the gallery's random photo is the one decoded. On a reTerminal E1003
+  (8 MB, 1872x1404) a kept full-window photo is 1.09 MB; an unchecked one
+  next to two others aborted the render and restarted the firmware.
 - **A kept picture is never the consumer's target.** A UI draws the canvas
   whole and the photo is one of its elements, so the photo decodes into an
   image of its own.
@@ -251,6 +261,24 @@ export function get(app) {
     is left, after a decode too: letting it go would only decode them again.
   - An interpreter without pictures needs 2 MB after a decode
     (`utils/memory.nim`).
+
+### A picture at another size
+
+An `<img>` drawn larger or smaller than its picture (any picture: a kept one,
+a fetch of the render's own, a canvas) is stretched into its box by
+`drawResampled` (pixie `images.nim`, from `drawSvgImage` in `svg.nim`) when
+the layout only scales and moves it, which is all a layout does. Fixed point:
+a table of source pixels and weights per axis, each source row resampled
+across once, and the opacity in the weights. Larger than the picture it is
+bilinear with the edge pixels held, smaller every target pixel is the average
+of the source it covers, and a target pixel is drawn when its centre is in
+the box. Nothing the size of the picture is allocated: the general draw (for a
+turned or mirrored picture, and `image-rendering="pixelated"`) doubles or
+halves the whole picture into a copy to scale it more than twice, copies it
+again for an opacity, and samples each pixel through floats (11 µs a pixel on
+an ESP32-S3, 40 s for a reTerminal E1003's 1848x1179 window). On a laptop a
+2400x1600 photo into that window went from 45 to 12 ms, and a 3x enlargement
+from 42 to 4 ms.
 
 ### Canvases
 

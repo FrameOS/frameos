@@ -795,9 +795,9 @@
   "gestures": {
     "$comment": "How the dispatcher makes tap, doubleTap, longPress and swipe out of pointerDown / pointerUp, in scene pixels and milliseconds. The same numbers on every host.",
     "tapSlopPx": 16,
-    "tapMs": 1000,
+    "tapMs": 500,
     "doubleTapMs": 350,
-    "longPressMs": 1000,
+    "longPressMs": 500,
     "swipeMinPx": 48,
     "directions": ["left", "right", "up", "down"],
     "$edgeComment": "edgeSwipe: a touch or pen press this close to an edge, in scene pixels, is held back from the scene until it is a swipe away from that edge (then the frame's) or not (then the scene's, delivered as it happened).",

@@ -63,8 +63,12 @@ block: # <image> fits its picture the way preserveAspectRatio says
   doAssert meet[5, 2].a == 0 and meet[5, 9].a == 0
 
   let slice = drawImage("xMidYMid slice") # 16x8 centred on the box, clipped to it
-  doAssert slice[5, 5] == rgbx(255, 0, 0, 255)
-  doAssert slice[6, 5] == rgbx(0, 0, 255, 255)
+  # Four times larger, smooth: red up to column 3, blue from 8, the four
+  # columns around the split (source column 2, at x = 6) a mix of the two.
+  doAssert slice[3, 5] == rgbx(255, 0, 0, 255)
+  doAssert slice[8, 5] == rgbx(0, 0, 255, 255)
+  doAssert slice[5, 5].r > slice[5, 5].b and slice[5, 5].b > 0
+  doAssert slice[6, 5].b > slice[6, 5].r and slice[6, 5].r > 0
   doAssert slice[2, 2].a == 255 and slice[9, 9].a == 255
   doAssert slice[1, 5].a == 0 and slice[10, 5].a == 0 # nothing outside the box
 

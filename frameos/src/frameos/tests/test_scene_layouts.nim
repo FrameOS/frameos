@@ -740,6 +740,24 @@ suite "a <yield /> that is a hole":
     discard pass(scene, canvas)
     check scene.uiRuns == 2
 
+  test "a clock that comes due while someone taps waits for them to stop":
+    let scene = newScene("tests/inTaskbar")
+    let canvas = newImage(W, H)
+    discard pass(scene, canvas)
+    check scene.uiRuns == 1
+    discard rhythmChromeOwed()
+    # Its time came during the taps: their frames leave it as it is, and it is owed.
+    rhythmInteractive = true
+    rhythmClockOverride = 1031.0
+    discard pass(scene, canvas)
+    check scene.uiRuns == 1
+    check rhythmChromeOwed()
+    check not rhythmChromeOwed()
+    # They stopped: the next pass draws it.
+    rhythmInteractive = false
+    discard pass(scene, canvas)
+    check scene.uiRuns == 2
+
   test "chrome that ticks leaves the content's pixels":
     let scene = newScene("tests/inHole")
     let canvas = newImage(W, H)
