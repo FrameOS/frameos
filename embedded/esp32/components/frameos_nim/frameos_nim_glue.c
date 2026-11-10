@@ -801,11 +801,6 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
     return result;
 }
 
-void frameos_nim_flush_scene_thumb(void)
-{
-    fos_scene_thumb_flush();
-}
-
 int frameos_nim_repack_alloc(uint8_t **buf, size_t *len, int pixel_format)
 {
     if (!s_nim_ready || !buf || !len) return -1;

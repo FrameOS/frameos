@@ -2819,7 +2819,6 @@ static void client_task(void *arg)
         if (deep_sleep_now && fos_display_present() && keep_awake_s == 0) {
             /* What the scene changed is all the next wake has of it. */
             fos_scene_state_flush(true);
-            frameos_nim_flush_scene_thumb();
             /* Wake early to check the control plane for commands when asked
              * to — the render schedule itself survives in s_next_render_due
              * (RTC memory), so the check-in wake does not refresh the panel. */
@@ -2932,10 +2931,7 @@ static void client_task(void *arg)
             /* INPUT_EVENTS_BIT ends the slice early and nothing more: the
              * press is delivered just below, and the render-requested check
              * after it decides whether a frame follows. */
-            if (!input_hold_on()) {
-                fos_scene_state_flush(false);
-                frameos_nim_flush_scene_thumb();
-            }
+            if (!input_hold_on()) fos_scene_state_flush(false);
             if (nim) {
                 process_input_events();
                 /* An event from HTTP, the cloud or the console: to the scene

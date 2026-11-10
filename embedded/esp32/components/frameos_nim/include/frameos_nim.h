@@ -46,9 +46,6 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format);
  * -1 when the last render did not leave one. As frameos_nim_render_alloc,
  * the caller owns `*buf`. */
 int frameos_nim_repack_alloc(uint8_t **buf, size_t *len, int pixel_format);
-/* Writes the scene switcher's newest picture to flash: on the render task,
- * when nobody is waiting for it. */
-void frameos_nim_flush_scene_thumb(void);
 /* Render the current scene into the panel's own buffer — an LCD's back frame
  * buffer (fos_display_render_target), shown afterwards with a buffer switch
  * and no copy. Where the scene canvas can be that buffer (a 565 panel,

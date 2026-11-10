@@ -1358,6 +1358,35 @@ static bool select_scene_from_runtime(const char *scene_id)
     return fos_scenes_select(scene_id) == ESP_OK;
 }
 
+/* The firmware from #709 kept a picture of each scene for the scene switcher
+ * in /state (th-<hash>.bin). The switcher shows names only on an ESP32 now
+ * (docs/scene-switcher.md), so those files go, once: listing the partition
+ * takes seconds on a large one, and NVS remembers it was done. */
+static void drop_old_scene_pictures(void)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
+    uint8_t done = 0;
+    if (nvs_get_u8(nvs, "th_swept", &done) != ESP_OK || !done) {
+        DIR *dir = opendir("/state");
+        if (dir != NULL) {
+            int removed = 0;
+            struct dirent *entry;
+            while ((entry = readdir(dir)) != NULL) {
+                if (strncmp(entry->d_name, "th-", 3) != 0) continue;
+                char path[sizeof("/state/") + sizeof(entry->d_name)];
+                snprintf(path, sizeof(path), "/state/%s", entry->d_name);
+                if (unlink(path) == 0) removed++;
+            }
+            closedir(dir);
+            if (removed > 0) ESP_LOGI(TAG, "removed %d old scene picture(s) from /state", removed);
+        }
+        nvs_set_u8(nvs, "th_swept", 1);
+        nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+}
+
 esp_err_t fos_scenes_init(void)
 {
     if (s_scene_file_lock == NULL) {
@@ -1368,6 +1397,7 @@ esp_err_t fos_scenes_init(void)
     frameos_nim_set_scene_select_hook(select_scene_from_runtime);
     esp_err_t err = mount_state();
     if (err != ESP_OK) return err;
+    drop_old_scene_pictures();
     load_etag();
     /* Restore the stored scenes' source BEFORE any task can ask: main() calls
      * fos_cloud_start() after this, and its boot-time apply_network_policy()

@@ -8,7 +8,7 @@ file(GLOB NIM_GENERATED_SRCS "${CMAKE_CURRENT_LIST_DIR}/nimcache/*.c")
 
 if(NIM_GENERATED_SRCS)
     idf_component_register(
-        SRCS ${NIM_GENERATED_SRCS} "frameos_nim_glue.c" "fos_scene_thumb.c" "fos_log_backoff.c" "fos_netguard.c" "fos_version.c" "fos_rows.c"
+        SRCS ${NIM_GENERATED_SRCS} "frameos_nim_glue.c" "fos_log_backoff.c" "fos_netguard.c" "fos_version.c" "fos_rows.c"
              "fos_heap_walk.c" "fos_log_ring.c"
         INCLUDE_DIRS "include"
         PRIV_INCLUDE_DIRS "nimcache"
