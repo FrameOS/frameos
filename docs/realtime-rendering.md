@@ -180,7 +180,11 @@ a snapshot of the last picture in it lets go first (`snapshot_before_lend`),
 and anything else that borrows it (a status screen, a console `display_test`)
 is counted (`fos_framebuffer_foreign_lends`) and makes the next render draw
 whole (`frameos_nim_canvas_forget`). A rotated frame packs with a turn and
-keeps a canvas of its own; changing the rotation restarts the firmware.
+keeps a canvas of its own; changing the rotation restarts the firmware. The
+AI chat's memory simulation counts one buffer too (`esp32CanvasIsPanelBuffer`
+in both device-limits ports): it is told the frame's rotation, and only on
+firmware from `ESP32_SHARED_CANVAS_FIRMWARE` on (`esp32CanvasRotation`);
+older or unknown firmware keeps the two.
 
 Any other grey or black-and-white panel renders in pixie's 8-bit luma surface
 (`pfGray8`), because its error diffusion wants the 256 levels, whatever the PSRAM, not only when RGBX does not fit: blending is

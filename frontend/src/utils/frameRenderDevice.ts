@@ -1,4 +1,4 @@
-import { esp32DeviceLimits, type DeviceLimits } from './deviceLimits'
+import { esp32CanvasRotation, esp32DeviceLimits, type DeviceLimits } from './deviceLimits'
 import { isEsp32Frame } from '../scenes/workspace/workspaceSurfaces'
 import type { FrameType } from '../types'
 
@@ -23,7 +23,11 @@ export interface FrameRenderDevice {
  * (`embedded.layout.ram`); a cloud frame reports them
  * (`hardware.memory.psramBytes`, `hardware.pixelFormat`: a grey panel draws
  * in a one-byte luma canvas, an RGB565 LCD in 565). A frame that reports
- * nothing is taken to be an 8 MB board with a colour canvas.
+ * nothing is taken to be an 8 MB board with a colour canvas. On a
+ * sixteen-grey panel the canvas is the panel buffer itself while nothing
+ * turns it, from the firmware that does that on (esp32CanvasRotation): the
+ * rotation is the device's report on a cloud frame, the row's on a backend
+ * frame, and the firmware what the frame last said it runs.
  */
 export function frameRenderDevice(frame: Partial<FrameType> | null | undefined): FrameRenderDevice | null {
   if (!frame || !isEsp32Frame(frame)) {
@@ -41,9 +45,13 @@ export function frameRenderDevice(frame: Partial<FrameType> | null | undefined):
   }
   const reportedFormat = ram?.pixelFormat ?? frame.hardware?.pixelFormat
   const pixelFormat = typeof reportedFormat === 'number' ? reportedFormat : null
+  const rotate = esp32CanvasRotation(
+    frame.hardware?.rotate ?? frame.rotate ?? 0,
+    frame.frameos_version ?? frame.embedded?.lastBoot?.frameosVersion ?? frame.last_successful_deploy?.frameos_version
+  )
   const megabytes = Math.round((psramBytes / (1024 * 1024)) * 10) / 10
   return {
     label: `ESP32 with ${megabytes} MB PSRAM at ${width}x${height}`,
-    limits: esp32DeviceLimits(width, height, psramBytes, pixelFormat),
+    limits: esp32DeviceLimits(width, height, psramBytes, pixelFormat, rotate),
   }
 }

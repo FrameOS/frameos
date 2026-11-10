@@ -57,7 +57,12 @@ and as an ESP32: `esp32DeviceLimits(width, height, psramBytes)` in
 ported to `backend/app/utils/device_limits.py`, all three pinned by
 `docs/device-limits-fixtures.json`). The PSRAM is what the backend derives
 for the board (`embedded.layout.ram`) or what a cloud frame reports
-(`hardware.memory.psramBytes`), 8 MB when it reports nothing. A Pi, a thin
+(`hardware.memory.psramBytes`), 8 MB when it reports nothing. An unturned
+sixteen-grey panel (the reTerminal E1003) draws in its panel buffer and is not
+charged a second one, given the frame's rotation (the row's on a backend, the
+reported `hardware.rotate` on the cloud) and firmware that does that
+(`esp32CanvasRotation`: the version the frame last said it runs, from
+`ESP32_SHARED_CANVAS_FIRMWARE`). A Pi, a thin
 client (the control plane renders it) and a chat about no frame render
 unlimited. Which device: `frameRenderDevice` in the SPA and the cloud
 (`frontend/src/utils/frameRenderDevice.ts`, `src/lib/ai/render-device.ts`),

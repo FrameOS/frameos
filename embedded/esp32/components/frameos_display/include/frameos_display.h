@@ -164,7 +164,10 @@ fos_pixel_format_t fos_display_panel_format(size_t index);
  * app/utils/device_limits.py, `esp32CanvasBytesPerPixel` in the SPA's
  * utils/deviceLimits.ts and the wasm preview's devices.ts, and
  * `sceneCanvasFormat` in embedded_runtime.nim; keep them in step
- * (docs/device-limits-fixtures.json pins the TS copy and the Python one). */
+ * (docs/device-limits-fixtures.json pins the TS copy and the Python one).
+ * Where the 4-bit canvas is the panel buffer itself (main.c
+ * canvas_is_panel_picture: unturned sixteen greys) both device-limits ports
+ * charge no second buffer (`esp32CanvasIsPanelBuffer`). */
 #define FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE 2u
 /* The grey panel formats: 1-bit black and white, 2- and 4-bit grey. */
 bool fos_pixel_format_is_grey(fos_pixel_format_t format);
