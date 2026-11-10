@@ -1360,11 +1360,16 @@ static void push_image_to_backend(const char *scene_id)
 #define LINK_TASK_STACK 8192
 #define LINK_NOTIFY_PUSH 1u
 static volatile bool s_link_on = false; /* set by the render task, per pass */
-static bool s_link_scenes = false;      /* __atomic */
 static bool s_link_settings = false;    /* __atomic */
 static portMUX_TYPE s_link_mux = portMUX_INITIALIZER_UNLOCKED;
 /* Under s_link_mux. */
 static void *s_link_answer = NULL;
+/* A scene payload the link task downloaded (fos_scenes_backend_fetch): the
+ * render task only takes it into the runtime, and the scene store's task
+ * writes it. */
+static char *s_link_payload = NULL;
+static size_t s_link_payload_len = 0;
+static char s_link_payload_etag[FOS_SCENES_ETAG_LEN];
 static bool s_link_push_wanted = false;
 static char s_link_scene_id[128];
 static fos_display_state_t s_link_state;
@@ -1397,9 +1402,23 @@ static void link_round(int64_t *next_poll_us)
     if (now < *next_poll_us) return;
     *next_poll_us = now + LINK_POLL_US;
     bool wake = false;
-    if (fos_scenes_backend_changed()) {
-        __atomic_store_n(&s_link_scenes, true, __ATOMIC_SEQ_CST);
-        wake = true;
+    portENTER_CRITICAL(&s_link_mux);
+    bool payload_free = s_link_payload == NULL;
+    portEXIT_CRITICAL(&s_link_mux);
+    /* One payload at a time, like the commands: the next download waits until
+     * the render task has taken this one. */
+    if (payload_free) {
+        size_t len = 0;
+        char etag[FOS_SCENES_ETAG_LEN];
+        char *body = fos_scenes_backend_fetch(false, &len, etag, sizeof(etag), NULL);
+        if (body != NULL) {
+            portENTER_CRITICAL(&s_link_mux);
+            s_link_payload = body;
+            s_link_payload_len = len;
+            memcpy(s_link_payload_etag, etag, sizeof(s_link_payload_etag));
+            portEXIT_CRITICAL(&s_link_mux);
+            wake = true;
+        }
     }
     if (fos_settings_changed()) {
         __atomic_store_n(&s_link_settings, true, __ATOMIC_SEQ_CST);
@@ -1458,7 +1477,16 @@ static void *link_take_answer(void)
  * what it found. An answer it pulled is run whatever the mode. */
 static void pass_scenes_sync(void)
 {
-    if (!s_link_on || __atomic_exchange_n(&s_link_scenes, false, __ATOMIC_SEQ_CST)) {
+    char etag[FOS_SCENES_ETAG_LEN];
+    portENTER_CRITICAL(&s_link_mux);
+    char *body = s_link_payload;
+    size_t len = s_link_payload_len;
+    memcpy(etag, s_link_payload_etag, sizeof(etag));
+    s_link_payload = NULL;
+    portEXIT_CRITICAL(&s_link_mux);
+    if (body != NULL) {
+        fos_scenes_take_backend_payload(body, len, etag);
+    } else if (!s_link_on) {
         fos_scenes_sync(false);
     }
 }
@@ -1489,6 +1517,9 @@ static void link_hand_back(const fos_config_t *config)
     } else {
         ESP_LOGW(TAG, "backend link: its round trip is still running after 30 s");
     }
+    /* A scene payload it downloaded is taken too: the sleep waits for the
+     * store task to write it (fos_scenes_store_wait, before the sleep). */
+    pass_scenes_sync();
     if (pass_commands_sync() && config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
         fos_scenes_apply_pending_selection();
     }
@@ -3153,6 +3184,9 @@ static void client_task(void *arg)
              * What the log ring still holds goes out first. */
             fos_log_ring_flush(FOS_SLEEP_LOG_DRAIN_MS);
             fos_display_park();
+            /* A scene payload the store task is still writing goes to flash
+             * first: the next boot loads what is on flash. */
+            fos_scenes_store_wait(30000);
             esp_deep_sleep((uint64_t)chunk * 1000000ULL);
         }
         if (deep_sleep_now && fos_display_present() && keep_awake_s > 0) {

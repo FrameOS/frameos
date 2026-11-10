@@ -715,12 +715,21 @@ a small change cost what it should:
   seconds. The link task applies nothing: the commands it pulls are handed over
   and run on the render task (the backend marks what it hands out `sent`, so
   a pull is never only a look; `fos_commands_fetch` / `fos_commands_run`), and
-  for scenes and settings it asks the status alone and the render task fetches
-  what changed (`fos_scenes_backend_changed`, `fos_settings_changed`), once
-  nobody is tapping (`serve_link` skips them under the input hold, and its
-  release serves them): a 337 KB scene set is 8 s of the render task on the
-  E1003, most of it the store's flash writes, and touches that arrived during
-  it waited it out. A
+  for settings it asks the status alone and the render task fetches what
+  changed (`fos_settings_changed`). A changed scene set the link task
+  downloads itself (`fos_scenes_backend_fetch`); the render task only parses
+  it into the runtime (`fos_scenes_take_backend_payload`, 0.3 s for 337 KB),
+  once nobody is tapping (`serve_link` skips it under the input hold, and its
+  release serves it), and the scene store's own task writes it to flash
+  (`store_task` in `fos_scenes.c`: the combined file, then the etag and the
+  source, so a crash never claims a set that is not on flash; a deep sleep
+  and a restart wait for it). On the E1003 a forced sync held the render task
+  13-20 s (the download 6-13 s, the write 6-7 s) and an event sent as it
+  began waited up to 11.7 s; now the worst wait is the new set's first
+  render, 3.2 s. A flash write turns the cache off for every erase and page
+  program and both cores wait it out, so the store task writes 2 KB at a time
+  between renders and never while someone taps (`store_pace`); on an RGB LCD,
+  which shows "Updating" for the write, as fast as it goes. A
   backend's nudge is still pulled on the render task, which the voice relay's
   release counts on, and so is everything on a frame about to deep-sleep and on
   a boot's first pass. When the round trips come back to the render task (a

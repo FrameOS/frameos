@@ -55,7 +55,7 @@ def test_the_link_task_only_fetches():
     for applies in ("fos_scenes_sync(", "fos_settings_sync(", "fos_commands_run(", "fos_commands_sync(",
                     "fos_scenes_apply_pending_selection(", "frameos_nim_render"):
         assert applies not in body, f"fos_client.c: the backend link task calls {applies}"
-    for fetches in ("fos_scenes_backend_changed()", "fos_settings_changed()", "fos_commands_fetch()",
+    for fetches in ("fos_scenes_backend_fetch(", "fos_settings_changed()", "fos_commands_fetch()",
                     "push_image_state(", "frameos_nim_flush_logs()"):
         assert fetches in body, f"fos_client.c: the backend link task no longer does {fetches}"
     # Starts nothing unless the render task left the round trips to it.
@@ -107,6 +107,40 @@ def test_what_changed_waits_while_someone_is_at_the_frame():
     )
     assert serve.index("pass_commands_sync()") > serve.index("}", hold)
     assert "serve_link(config)" in CLIENT["run_held_network"], "the hold's release no longer serves the link"
+
+
+SCENES_C = ESP32_DIR / "main" / "fos_scenes.c"
+
+
+def test_a_scene_payload_is_written_off_the_render_task():
+    """A backend sync held the render task for ~8 s on the E1003 (337 KB): the
+    download, the write of the combined file, the parse. The link task
+    downloads it, the render task only parses it, and the scene store's task
+    writes it. What must hold: the etag on flash and the source are written
+    only after the payload is (a crash may not claim a set that is not on
+    flash), the runtime has the set before the write starts, and a deep sleep
+    waits for the write."""
+    scenes = _functions(_strip_comments(SCENES_C.read_text()))
+    store = scenes["store_backend_payload"]
+    write = store.index("write_file_atomic_paced(SCENES_PATH")
+    # Under the scene file lock like every other writer, paced on e-paper.
+    assert store.index("xSemaphoreTake(s_scene_file_lock") < write < store.index("xSemaphoreGive(s_scene_file_lock")
+    assert "store_pace" in store
+    pace = scenes["store_pace"]
+    assert "fos_client_input_held()" in pace and "fos_client_render_in_flight()" in pace
+    for after in ("save_etag_file(", "persist_scene_source(", "unlink(SCENES_INDEX_PATH)"):
+        assert write < store.index(after), f"fos_scenes.c: {after} comes before the payload is on flash"
+    take = scenes["fos_scenes_take_backend_payload"]
+    assert take.index("load_into_nim(") < take.index("store_behind("), "the write is queued before the parse"
+    assert "etag_set(etag)" in take, "the next poll would fetch the payload being written again"
+    assert "esp_register_shutdown_handler(store_shutdown)" in scenes["store_behind"]
+    sync = scenes["fos_scenes_sync"]
+    assert "fos_scenes_backend_fetch(" in sync and "fos_scenes_take_backend_payload(" in sync
+    client = _strip_comments(CLIENT_C.read_text())
+    sleep = client.index("esp_deep_sleep((uint64_t)")
+    assert "fos_scenes_store_wait(" in client[sleep - 400 : sleep], "a deep sleep does not wait for the scene store"
+    assert "fos_scenes_take_backend_payload(" in CLIENT["pass_scenes_sync"]
+    assert "pass_scenes_sync();" in CLIENT["link_hand_back"]
 
 
 def test_the_render_task_uses_the_tested_rules():

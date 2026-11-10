@@ -81,7 +81,8 @@ def test_a_split_that_found_no_room_is_not_tried_again_until_the_next_payload():
     split = split[: split.index("\n}\n")]
     assert split.count("s_split_out_of_room = err == ESP_ERR_NO_MEM") == 2
     # Every write of the combined file is a new payload and clears the mark.
-    writes = [m.start() for m in re.finditer(r"write_file_replace\(SCENES_PATH,", text)]
+    # (the store task's is the paced one: fos_scenes_take_backend_payload)
+    writes = [m.start() for m in re.finditer(r"write_file_(?:replace|atomic_paced)\(SCENES_PATH,", text)]
     assert len(writes) == 2
     for start in writes:
         window = text[start : start + 900]
