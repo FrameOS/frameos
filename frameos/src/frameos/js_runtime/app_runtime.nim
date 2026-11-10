@@ -691,10 +691,11 @@ proc keptPictureTarget(runtime: JsAppRuntime, owner: AppRoot, like: Image,
   ## of room the app's older kept pictures go first (a ref to one then draws
   ## nothing, and an app fetches it again), then the photo's own resolution
   ## (`atSource`) is tried when that is more than half the size asked; nil
-  ## when nothing fits, and the app is told. Not smaller: a picture drawn at
-  ## over twice its size is doubled first, in a full-colour copy of its own
-  ## the size of the one saved (pixie's draw; a 511x326 photo in the E1003's
-  ## window asked for 2.67 MB). The allocation itself must not fail: on an
+  ## when nothing fits, and the app is told. Not smaller: blown up more than
+  ## twice it is soft, and pixie's general draw (a turned picture; an `<img>`
+  ## goes through drawResampled, which copies nothing) doubles it first in a
+  ## full-colour copy of its own (a 511x326 photo in the E1003's window asked
+  ## for 2.67 MB). The allocation itself must not fail: on an
   ## ESP32 a failed one aborts the render and leaks what it held, and two in
   ## a row restart the firmware (Gallery on a reTerminal E1003, two kept
   ## 1.09 MB photos and a third on its way, 2026-11-10).

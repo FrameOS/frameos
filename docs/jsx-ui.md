@@ -241,7 +241,7 @@ export function get(app) {
   of memory the app's older kept pictures go first (their refs then draw
   nothing, and the app fetches again), then the photo is decoded at its own
   resolution when that is less than the size asked and more than half of it
-  (smaller, the draw would double it in a copy of its own first); with no
+  (smaller, it would be more than twice blown up on the panel); with no
   room at all `fetchImage` answers an `error` and no `image`. The size the
   photo has comes from the start of the download (`downloadImageWithDataSizedBy`),
   so the gallery's random photo is the one decoded. On a reTerminal E1003
@@ -261,6 +261,24 @@ export function get(app) {
     is left, after a decode too: letting it go would only decode them again.
   - An interpreter without pictures needs 2 MB after a decode
     (`utils/memory.nim`).
+
+### A picture at another size
+
+An `<img>` drawn larger or smaller than its picture (any picture: a kept one,
+a fetch of the render's own, a canvas) is stretched into its box by
+`drawResampled` (pixie `images.nim`, from `drawSvgImage` in `svg.nim`) when
+the layout only scales and moves it, which is all a layout does. Fixed point:
+a table of source pixels and weights per axis, each source row resampled
+across once, and the opacity in the weights. Larger than the picture it is
+bilinear with the edge pixels held, smaller every target pixel is the average
+of the source it covers, and a target pixel is drawn when its centre is in
+the box. Nothing the size of the picture is allocated: the general draw (for a
+turned or mirrored picture, and `image-rendering="pixelated"`) doubles or
+halves the whole picture into a copy to scale it more than twice, copies it
+again for an opacity, and samples each pixel through floats (11 µs a pixel on
+an ESP32-S3, 40 s for a reTerminal E1003's 1848x1179 window). On a laptop a
+2400x1600 photo into that window went from 45 to 12 ms, and a 3x enlargement
+from 42 to 4 ms.
 
 ### Canvases
 
