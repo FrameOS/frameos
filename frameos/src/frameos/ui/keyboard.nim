@@ -20,7 +20,7 @@
 ##
 ## Every letter also has a symbol (`Hints`, after SwiftKey: the digits over
 ## the top row, `@ # & * - + = ( )` and `_ $ " ' : ; /` over the others), and
-## so does the letters page's full stop (`!`, then its `…`),
+## so does the letters page's full stop (`!` and `?`, then its `…`),
 ## drawn small and dim in the key's corner and first in its held row
 ## (`formCount` / `formText`), right over the key and lit, so holding a
 ## letter and lifting types its symbol, and sliding along reaches the
@@ -63,9 +63,10 @@ const
     "$€£¥¢-–—•\"“”„«»'‘’‚‹›.…?¿!¡0°%‰"
     ## Each key's accented forms, after the key's own ASCII byte (the one
     ## byte below 0x80 in its entry, so the entries need no separator).
-  Hints = "q1w2e3r4t5y6u7i8o9p0a@s#d&f*g-h+j=k(l)z_x$c\"v'b:n;m/.!"
-    ## Each letter's symbol, after it, and the full stop's: the letters page
-    ## has no ! key of its own.
+  Hints = "q1w2e3r4t5y6u7i8o9p0a@s#d&f*g-h+j=k(l)z_x$c\"v'b:n;m/.!.?"
+    ## Each letter's symbol, after it, and the full stop's two: the letters
+    ## page has no ! or ? key of its own. A key named twice holds both, in
+    ## that order.
   Pages: array[KeyboardPage, string] = [
     "qwertyuiop\nasdfghjkl\n\x01zxcvbnm\x02\n\x05, .\x03",
     "1234567890\n-/:;()$&@\"\n\x06.,?!'\x02\n\x04 \x03",
@@ -155,30 +156,33 @@ proc accentText*(code, index, shift: int): string =
     inc n
     i += runeLenAt(Accents, i)
 
-proc hintOf*(code: int, page: KeyboardPage): string =
-  ## The symbol a key holds on the letters page (`Hints`: every letter's,
-  ## and ! on the full stop), "" for any other key or page. The number pad's
-  ## full stop is a decimal point, and the symbols page has a ! key.
+proc heldSymbols(code: int, page: KeyboardPage): string =
+  ## Every symbol a key holds on the letters page, in order (`Hints`: a
+  ## letter's one, the full stop's ! and ?); "" for any other key or page.
+  ## The number pad's full stop is a decimal point, and the symbols page has
+  ## a ! and a ? key.
   if page == kpLetters:
     var i = 0
     while i + 1 < Hints.len:
       if ord(Hints[i]) == code:
-        return $Hints[i + 1]
+        result.add Hints[i + 1]
       i += 2
 
+proc hintOf*(code: int, page: KeyboardPage): string =
+  ## The symbol drawn in the key's corner: the first it holds, "" for none.
+  let held = heldSymbols(code, page)
+  if held.len > 0: $held[0] else: ""
+
 proc formCount*(code: int, page: KeyboardPage): int =
-  ## What key `code`'s held row holds on `page`: its symbol, then its accents.
-  accentCount(code) + (if hintOf(code, page).len > 0: 1 else: 0)
+  ## What key `code`'s held row holds on `page`: its symbols, then its accents.
+  accentCount(code) + heldSymbols(code, page).len
 
 proc formText*(code, index, shift: int, page: KeyboardPage): string =
-  ## Form number `index` of key `code`'s held row on `page`: its symbol
-  ## first (never a capital), then its accents; "" past the last.
-  let hint = hintOf(code, page)
-  if hint.len > 0:
-    if index == 0: hint
-    else: accentText(code, index - 1, shift)
-  else:
-    accentText(code, index, shift)
+  ## Form number `index` of key `code`'s held row on `page`: its symbols
+  ## first (never capitals), then its accents; "" past the last.
+  let held = heldSymbols(code, page)
+  if index < held.len: $held[index]
+  else: accentText(code, index - held.len, shift)
 
 proc typed*(code: int, shift: int): string =
   ## What a character key types: its own byte, a letter in capitals under
