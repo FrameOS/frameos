@@ -37,6 +37,24 @@ import Testing
             } else {
                 #expect(firmware == nil, "\(name): no firmware word")
             }
+            #expect(FrameStatus.isActive(frame, now: now) == expect["active"]?.boolValue, "\(name): active")
+        }
+    }
+
+    /// The frames list's order (the SPA's groupFramesByStatus).
+    @Test func frameGroupsCorpus() throws {
+        let fixtures = try RepoFixtures.json("docs/frame-status-fixtures.json")
+        let now = try #require(FrameTime.parse(fixtures["now"]?.stringValue))
+        let cases = try #require(fixtures["groups"]?.arrayValue)
+        #expect(cases.count >= 2)
+        for kase in cases {
+            let frames = (kase["frames"]?.arrayValue ?? []).map { Frame(raw: $0.objectValue ?? [:]) }
+            let groups = FrameGroups.byStatus(frames, now: now)
+            let expected = (kase["expect"]?.arrayValue ?? []).map { group in
+                (group["key"]?.stringValue ?? "", (group["ids"]?.arrayValue ?? []).map { $0.stringValue ?? "" })
+            }
+            #expect(groups.map(\.key) == expected.map(\.0), "\(kase["name"]?.stringValue ?? ""): groups")
+            #expect(groups.map { $0.frames.map(\.id) } == expected.map(\.1), "\(kase["name"]?.stringValue ?? ""): order")
         }
     }
 

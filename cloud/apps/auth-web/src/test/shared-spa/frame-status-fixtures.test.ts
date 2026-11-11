@@ -19,8 +19,10 @@ import {
   frameActivityDescription,
   frameDeployProgress,
   frameFirmwareUpdateProgress,
+  frameIsActive,
   frameStatusLabel,
 } from "../../../../../../frontend/src/decorators/frame";
+import { groupFramesByStatus } from "../../../../../../frontend/src/scenes/workspace/frameStatusGroups";
 import type { FrameType } from "../../../../../../frontend/src/types";
 
 type Case = {
@@ -32,12 +34,20 @@ type Case = {
     activity: string;
     deploy: { status: string; label: string; caption: string; percent: number } | null;
     firmware: { kind: string; label: string; percent: number | null } | null;
+    active: boolean;
   };
+};
+
+type GroupCase = {
+  name: string;
+  plane: "cloud" | "backend";
+  frames: Record<string, unknown>[];
+  expect: { key: string; ids: (string | number)[] }[];
 };
 
 const fixtures = JSON.parse(
   readFileSync(join(__dirname, "../../../../../../docs/frame-status-fixtures.json"), "utf8"),
-) as { now: string; cases: Case[] };
+) as { now: string; cases: Case[]; groups: GroupCase[] };
 const now = Date.parse(fixtures.now);
 
 describe("docs/frame-status-fixtures.json", () => {
@@ -58,7 +68,16 @@ describe("docs/frame-status-fixtures.json", () => {
         activity: frameActivityDescription(frame),
         deploy: deploy && { status: deploy.status, label: deploy.label, caption: deploy.caption, percent: deploy.percent },
         firmware: firmware && { kind: firmware.kind, label: firmware.label, percent: firmware.percent },
+        active: frameIsActive(frame),
       }).toEqual(kase.expect);
+    });
+  }
+
+  for (const group of fixtures.groups) {
+    it(`groups: ${group.name}`, () => {
+      mode.cloud = group.plane === "cloud";
+      const groups = groupFramesByStatus(group.frames as unknown as FrameType[]);
+      expect(groups.map((g) => ({ key: g.key, ids: g.frames.map((f) => f.id) }))).toEqual(group.expect);
     });
   }
 });

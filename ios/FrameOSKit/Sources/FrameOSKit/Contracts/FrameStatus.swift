@@ -90,6 +90,15 @@ public enum FrameStatus {
         FrameTime.parse(frame.activityTimestamp) != nil
     }
 
+    /// The SPA's frameIsActive: what puts a frame in "Active" on the list.
+    public static func isActive(_ frame: Frame, now: Double = FrameTime.nowMs()) -> Bool {
+        if frame.activeConnections > 0 { return true }
+        if frame.connected == true { return true }
+        if isStale(frame, now: now) { return false }
+        if hasActivityLog(frame) { return true }
+        return frame.status == "ready" || statusesWithSpinner.contains(frame.status)
+    }
+
     /// "online" / "offline" / "stale" on the cloud, the backend's status word
     /// ("ready", "deploying", "connected") on a backend.
     public static func label(_ frame: Frame, now: Double = FrameTime.nowMs()) -> String {
