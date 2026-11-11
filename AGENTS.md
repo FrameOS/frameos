@@ -197,6 +197,25 @@
   the last word (a Pi's `frameos-settings-unlock` file on the boot partition,
   an ESP32's `set settings_unlock 1`).
 
+## The scene store on the frame: `docs/scene-store-on-frame.md`
+
+- The switcher's last tile is the cloud store, browsed on the frame (a
+  search, the shelves, Preview / Install, Show / Update once installed), and
+  a long press on a tile is the scene's page (Show, Update, Delete; Install
+  and Discard for a preview). The pages are `system/sceneSwitcher/store.nim`
+  and have the words; the facts and the work are the host's
+  (`sceneStoreRead` / `sceneStoreAction`: `main/fos_store.c` on its own task,
+  `frameos/scene_store_linux.nim` on a worker thread), never the render
+  task's. A new action is a host's on both, and a word is the page's.
+- Browsing is the store's short listing for frames (`/api/store/device/
+  scenes`, twelve five-key entries a page): keep it small, an ESP32 parses it
+  beside its scene. A change is asked of the frame's plane
+  (`POST /api/frames/{id}/panel/scenes`, cloud `panel-scenes.ts`, backend
+  `panel_scenes.py`, which a Pi reaches at `/api/panel/scenes`): public
+  store scenes only, no service key ever granted, refused while the settings
+  on the screen are off. Only a frame with no plane installs by itself. Keep
+  the two routes alike.
+
 ## Scene previews on a frame: `docs/scene-previews.md`
 
 - A scene a frame shows for now without holding it in its saved or assigned

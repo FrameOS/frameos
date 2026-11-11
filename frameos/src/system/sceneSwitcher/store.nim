@@ -4,7 +4,7 @@
 ## scenes a page at a time with a search field and the shelves, each with
 ## Preview and Install (Show or Update once installed). The scene's page, a
 ## long press on a tile, says where the scene came from and offers Show,
-## Update and Remove (Install and Discard for a preview).
+## Update and Delete (Install and Discard for a preview).
 ##
 ## The page has the words; the host has the facts and does the work, off the
 ## render task (`sceneStoreRead` / `sceneStoreAction`: the Pi's
@@ -77,15 +77,15 @@ const
   HInfoDiscard* = 15_004
   Ellipsis = "\xe2\x80\xa6"
   Busy = ["browse", "Loading", "install", "Installing", "preview", "Opening the preview",
-    "update", "Updating", "remove", "Removing", "discard", "Discarding"]
+    "update", "Updating", "remove", "Deleting", "discard", "Discarding"]
   Done = ["install", "Installed. The frame shows it in a moment.",
     "preview", "The frame shows the preview in a moment.",
     "update", "Updated. The frame shows the new version in a moment.",
     "uptodate", "This is the newest version.",
-    "remove", "Removed.", "discard", "Discarded."]
+    "remove", "Deleted.", "discard", "Discarded."]
   Errors = ["offline", "The frame is not online.",
     "store_unavailable", "The scene store did not answer. Try again later.",
-    "too_many_scenes", "The frame holds as many scenes as it can. Remove one first.",
+    "too_many_scenes", "The frame holds as many scenes as it can. Delete one first.",
     "last_scene", "A frame keeps one scene at least.",
     "panel_locked", "Changes on the frame's screen are turned off for this frame.",
     "frame_update_required", "This scene needs a newer FrameOS. Update the frame first.",
@@ -414,7 +414,7 @@ proc infoTree*(state, facts: JsonNode, look: StoreLook, sceneId, name: string, s
     if latest > version and version > 0:
       buttons.children.add look.button("Update", HInfoUpdate, true, focus, lit)
     if not installed.isNil or facts{"removeAny"}.getBool():
-      let remove = look.button(if asking == HInfoRemove: "Tap again to remove" else: "Remove from frame",
+      let remove = look.button(if asking == HInfoRemove: "Tap again to delete" else: "Delete",
         HInfoRemove, false, focus, lit)
       if asking == HInfoRemove and not look.paper:
         remove.attrs[0][1].add " bg-red-600 active:bg-red-500"

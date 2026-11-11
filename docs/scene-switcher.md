@@ -163,16 +163,29 @@ firmware without them deletes the old `th-*.bin` files once
 
 The preview lists names only.
 
+### The scene store
+
+When the frame's host has one (`sceneStoreRead`: a Pi and an ESP32 while
+the settings on the screen are on; never the preview), the last tile is
+**Scene store**, the cloud store browsed on the frame, and a long press on a
+scene's tile opens that scene's page (where it came from; Show, Update,
+Delete). Both are pages of the switcher, in its state (`view`), so a swipe
+up still closes it from either. [scene-store-on-frame.md](scene-store-on-frame.md)
+is the spec.
+
 ## Using it
 
-- **Touch:** tap a tile to show that scene, swipe left or right across the
+- **Touch:** tap a tile to show that scene (hold it for the scene's page),
+  swipe left or right across the
   tiles (or in from the right or the left edge: the frame's `forward` and
   `back`) for the next or the previous page, tap Close (or swipe up from the
   bottom again) to go back.
 - **Keys**, by role (`buttons.roles`, `roleByLabel`): `next` / `down` move the
   highlight one tile on, `prev` / `up` one back (wrapping, across pages);
   `primary`, `refresh` and `menu` (OK, REFRESH, BOOT, HOME) show the
-  highlighted scene; `back` goes back. A press is one step and a double press
+  highlighted scene (or open the store from its tile); OK pressed twice, or
+  held where the frame's own map does not claim it, opens the highlighted
+  scene's page; `back` goes back. A press is one step and a double press
   two, so pressing NEXT three times moves three tiles whatever the button
   layer made of the taps, and presses made during an e-paper refresh land
   together with their timing, so the next refresh shows where they got to.
