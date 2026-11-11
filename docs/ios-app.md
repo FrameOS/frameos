@@ -59,6 +59,7 @@ way the SPA does, and the comment there names the SPA file.
 | Values of the scenes' fields | `GET /api/frames/{id}/states` | the same |
 | Activate / Apply | `POST /api/frames/{id}/event/setCurrentScene {sceneId, state?}` | the same |
 | Remove a scene | save `scenes` without it, then deploy | `POST /api/frames/{id}/scenes` without its row |
+| Start on boot | `default` on that scene alone, saved, then deploy | (none: not offered for a cloud frame) |
 | Update a scene | (on the web: the backend has no route for it) | `POST /api/frames/{id}/scenes/update` |
 | Install a scene | MCP `frame_scene_install` (saved scene, catalog entry, or scenes; `settings_groups` grants a store scene the keys it declares) | `POST /api/frames/{id}/scenes/add` (`settings_groups` the same way) |
 | Catalog | `GET /api/templates`, `GET /api/repositories` | `GET /api/store/browse`, `GET /api/account/scenes` |

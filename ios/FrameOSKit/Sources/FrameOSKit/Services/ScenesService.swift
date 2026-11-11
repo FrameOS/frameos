@@ -214,6 +214,18 @@ extension FrameOSService {
         }
     }
 
+    /// Backend: the scene the frame starts with ("Start on boot", the SPA's
+    /// scene menu): `default` on that scene alone, saved, deployed.
+    public func setBootScene(_ frame: Frame, sceneId: String) async throws -> ActionOutcome {
+        let scenes: [JSONValue] = (frame["scenes"]?.arrayValue ?? []).map { scene in
+            guard var object = scene.objectValue else { return scene }
+            if object["id"]?.stringValue == sceneId { object["default"] = true } else { object["default"] = nil }
+            return .object(object)
+        }
+        try await client.call("POST", Self.framePath(frame.id), body: .json(["scenes": .array(scenes)]))
+        return try await deploy(frame)
+    }
+
     /// The cloud's whole-list push (`POST …/scenes`), every row kept as the
     /// frame holds it (the SPA's pushCloudFrameSceneList).
     func pushCloudRows(_ frame: Frame, _ rows: [JSONValue], activeSceneId: String? = nil) async throws {

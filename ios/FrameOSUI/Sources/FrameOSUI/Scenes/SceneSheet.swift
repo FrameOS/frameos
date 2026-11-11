@@ -94,6 +94,18 @@ struct SceneSheet: View {
                     }
                 }
 
+                if app.current?.kind == .backend && !scene.isDefault {
+                    Section {
+                        AsyncButton {
+                            guard let service = app.service, let frame = app.frame(frameId) else { return }
+                            await app.perform("Start on boot") { try await service.setBootScene(frame, sceneId: scene.id) }
+                            await model.load(app)
+                        } label: { Label("Start on boot", systemImage: "power.circle") }
+                    } footer: {
+                        Text("The frame shows this scene when it starts. Saved and deployed.")
+                    }
+                }
+
                 Section {
                     Button(role: .destructive) {
                         confirmRemove = true
