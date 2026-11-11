@@ -180,7 +180,12 @@ block a_long_press_opens_the_scene_and_remove_asks_twice:
   preview("store-info-remove", scene.draw())
   scene.press(HInfoRemove)
   doAssert lastAsked() == ("remove", %*{"id": "scene-1", "store": Radar})
+  doAssert scene.state{"view"}.getStr() == "info", "the page stays until the scene is gone"
+  # Gone from the frame: the tiles again.
+  listed.delete(0)
+  discard scene.draw()
   doAssert scene.state{"view"}.getStr() == ""
+  listed.insert(SwitcherEntry(id: "scene-1", name: "Rain radar"), 0)
 
   # A scene not from the store: nothing to update, and on a frame with a
   # control plane nothing to remove either.

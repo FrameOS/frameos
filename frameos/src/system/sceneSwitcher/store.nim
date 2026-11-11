@@ -392,10 +392,13 @@ proc infoTree*(state, facts: JsonNode, look: StoreLook, sceneId, name: string, s
         card.line(look, "This is the newest version.", quiet = true)
     elif facts{"busy"}.getStr() == "info":
       card.line(look, "Asking the store about it" & Ellipsis, quiet = true)
-    elif known and facts{"error"}.getStr().len > 0:
-      card.line(look, "The store did not answer.", quiet = true)
+    elif known and facts{"error"}.getStr() == "invalid_scene":
+      card.line(look, "Not in the public store.", quiet = true)
   body.children.add card
-  let note = if facts{"busy"}.getStr() == "info": "" else: facts.note()
+  # What runs, went wrong or just worked; not the store's "no such scene",
+  # which the card says.
+  let asked = facts{"busy"}.getStr() == "info" or (known and facts{"error"}.getStr() == "invalid_scene")
+  let note = if asked: "" else: facts.note()
   if note.len > 0:
     c = ""
     look.grey(c)
@@ -467,14 +470,14 @@ proc storeHandle*(state, facts: JsonNode, handler: int, text, key, opener: strin
     let preview = facts{"preview"}
     storeAct("install", args({"store": preview{"store"}.getStr(), "name": preview{"name"}.getStr()}))
   of HInfoRemove, HInfoDiscard:
+    # Asked twice. The page stays until the scene is gone from the frame (the
+    # switcher goes back to the tiles then), so a refusal shows here.
     if confirm != handler:
       state.put("confirm", newJInt(handler))
     elif handler == HInfoDiscard:
       storeAct("discard")
-      result = smTiles
     else:
       storeAct("remove", args({"id": info, "store": if installed.isNil: "" else: installed{"store"}.getStr()}))
-      result = smTiles
   else:
     if row >= 0:
       let base = handler - row
