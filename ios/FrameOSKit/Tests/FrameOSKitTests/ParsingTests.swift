@@ -102,4 +102,15 @@ import Testing
         #expect(contract.maxItems("event_map", profile: "esp32") == 8)
         #expect(contract.maxItems("event_map", profile: "linux") == 32)
     }
+
+    /// `Origin` as a browser writes it: the cloud compares it as text.
+    @Test func originIsWrittenLikeABrowsers() {
+        func origin(_ url: String) -> String { Account(kind: .cloud, baseURL: URL(string: url)!, email: "").origin }
+        #expect(origin("https://cloud.frameos.net") == "https://cloud.frameos.net")
+        #expect(origin("https://Cloud.FrameOS.net") == "https://cloud.frameos.net")
+        #expect(origin("HTTPS://cloud.frameos.net:443/") == "https://cloud.frameos.net")
+        #expect(origin("http://Frames.local:8989") == "http://frames.local:8989")
+        #expect(origin("http://localhost:80") == "http://localhost")
+        #expect(origin("http://[::1]:3003") == "http://[::1]:3003")
+    }
 }

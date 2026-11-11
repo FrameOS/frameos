@@ -36,10 +36,17 @@ public struct Account: Codable, Identifiable, Hashable, Sendable {
         }
     }
 
-    /// `scheme://host[:port]`, the value the cloud wants in `Origin`.
+    /// `scheme://host[:port]`, the value the cloud wants in `Origin`, written
+    /// the way a browser writes it (the cloud compares it with its own
+    /// origins as text, `src/lib/csrf.ts`): lowercase, the default port left
+    /// out, an IPv6 address in brackets. A cloud address typed with a capital
+    /// letter was refused as `invalid_origin` before.
     public var origin: String {
-        var text = "\(baseURL.scheme ?? "https")://\(baseURL.host ?? "")"
-        if let port = baseURL.port { text += ":\(port)" }
+        let scheme = (baseURL.scheme ?? "https").lowercased()
+        var host = (baseURL.host ?? "").lowercased()
+        if host.contains(":") && !host.hasPrefix("[") { host = "[\(host)]" }
+        var text = "\(scheme)://\(host)"
+        if let port = baseURL.port, port != (scheme == "https" ? 443 : 80) { text += ":\(port)" }
         return text
     }
 

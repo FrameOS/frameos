@@ -75,6 +75,21 @@ struct CloudIntegrationTests {
             }
         }
 
+        // The live socket: the hub's /api/frames/updates, on the app's origin
+        // in production (nginx). A dev server runs the hub on a port of its
+        // own, so this is asked for: FRAMEOS_IT_CLOUD_LIVE=1.
+        if Self.environment["FRAMEOS_IT_CLOUD_LIVE"] == "1" {
+            final class Seen: @unchecked Sendable { var connected = false }
+            let seen = Seen()
+            let live = LiveUpdates(client: client) { event in
+                if case .connected = event { seen.connected = true }
+            }
+            live.start()
+            for _ in 0..<50 where !seen.connected { try await Task.sleep(nanoseconds: 100_000_000) }
+            live.stop()
+            #expect(seen.connected, "the live socket did not open")
+        }
+
         // Photos: the contract both planes serve.
         let status = try await service.photosStatus()
         if status.ready {
