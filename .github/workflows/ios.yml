@@ -71,6 +71,36 @@ jobs:
             | tee ios/xcodebuild.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "BUILD SUCCEEDED" ios/xcodebuild.log
 
+      # A smoke test: the app starts on a simulator and is still running a
+      # few seconds later (no crash at launch, e.g. a generated table that
+      # does not decode). The screenshot is the sign-in screen.
+      - name: Launch on a simulator
+        run: |
+          set -euo pipefail
+          udid="$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          phones = [d for runtime in sorted(devices) if "iOS" in runtime for d in devices[runtime] if d["name"].startswith("iPhone")]
+          print(phones[-1]["udid"])
+          ')"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b >/dev/null
+          app="ios/DerivedData/Build/Products/Debug-iphonesimulator/FrameOS.app"
+          xcrun simctl install "$udid" "$app"
+          pid="$(xcrun simctl launch "$udid" net.frameos.app | awk '{print $NF}')"
+          sleep 10
+          kill -0 "$pid"
+          xcrun simctl io "$udid" screenshot ios/launch.png
+          echo "running as $pid after 10 s"
+
+      - name: Upload the launch screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-launch-screenshot
+          path: ios/launch.png
+          if-no-files-found: ignore
+
       - name: Upload the build log
         if: failure()
         uses: actions/upload-artifact@v4

@@ -143,6 +143,16 @@ and ESP32 columns from the route registrations (`server/routes/*.nim`,
 `fos_http.c`) rather than editing cells one at a time — the four-plane drift
 found in the 2026-09 review was all in hand-edited cells.
 
+## Clients: the SPA and the iOS app
+
+The shared SPA is not the only client of this table. The iOS app (`ios/`,
+`docs/ios-app.md`) calls the same canonical routes on the backend and on
+FrameOS Cloud through its own `apiFetch` (`APIClient`: the same project
+scoping, pinned to `isProjectScopedApiPath` by
+`docs/api-path-fixtures.json`). A route that moves, or a cell that changes
+from Full to N/A, is a change for both clients: `docs/ios-app.md` "Every
+action and its route" is the app's column of this table.
+
 ## Canonical Payloads
 
 Frame list/detail:

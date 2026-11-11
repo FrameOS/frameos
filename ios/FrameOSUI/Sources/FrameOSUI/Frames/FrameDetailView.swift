@@ -48,6 +48,30 @@ struct FrameDetailView: View {
                 actionsRow(frame)
             }
 
+            if kind == .cloud && frame.status == "pending" {
+                Section {
+                    Text("This frame joined with a claim code and waits for you to confirm it is yours.")
+                    AsyncButton { await model.confirm(app) } label: { Text("Confirm frame").fontWeight(.semibold) }
+                } header: {
+                    Text("Waiting for you")
+                }
+            }
+
+            if let brought = model.deviceScenes {
+                Section {
+                    Text("The frame has \(brought.count) scene\(brought.count == 1 ? "" : "s") of its own\(brought.names.isEmpty ? "" : ": " + brought.names.prefix(5).joined(separator: ", ")). Import them to keep them on its list.")
+                        .font(.callout)
+                    HStack {
+                        AsyncButton { await model.resolveDeviceScenes(app, importThem: true) } label: { Text("Import") }
+                            .buttonStyle(.borderedProminent)
+                        AsyncButton { await model.resolveDeviceScenes(app, importThem: false) } label: { Text("Leave them") }
+                            .buttonStyle(.bordered)
+                    }
+                } header: {
+                    Text("Scenes on the frame")
+                }
+            }
+
             if let preview = ScenePreview(frame.scenePreview) {
                 Section {
                     VStack(alignment: .leading, spacing: 6) {

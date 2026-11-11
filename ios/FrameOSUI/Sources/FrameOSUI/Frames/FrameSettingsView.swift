@@ -111,6 +111,30 @@ struct FrameSettingsView: View {
                     }
                 }
 
+                if app.current?.kind == .cloud {
+                    Section {
+                        NavigationLink {
+                            LanAccessView(frameId: frameId)
+                        } label: {
+                            LabeledContent("Local network access", value: service.lanAccess(frame).map { $0 ? "on" : "off" } ?? "not reported")
+                        }
+                        if case .bool(let enabled)? = frame["service_settings_enabled"] {
+                            Toggle("Scenes may use your API keys", isOn: Binding { enabled } set: { value in
+                                Task { await setSwitch(frame, telemetry: false, value) }
+                            })
+                        }
+                        if case .bool(let enabled)? = frame["telemetry_enabled"] {
+                            Toggle("Send logs and metrics", isOn: Binding { enabled } set: { value in
+                                Task { await setSwitch(frame, telemetry: true, value) }
+                            })
+                        }
+                    } header: {
+                        Text("Link to FrameOS Cloud")
+                    } footer: {
+                        Text("Changing what the frame sends restarts FrameOS on it.")
+                    }
+                }
+
                 Section {
                     AsyncButton {
                         let changes = edits
@@ -130,6 +154,15 @@ struct FrameSettingsView: View {
             }
             .navigationTitle("Settings")
             .inlineTitle()
+        }
+    }
+
+    func setSwitch(_ frame: Frame, telemetry: Bool, _ value: Bool) async {
+        guard let service = app.service else { return }
+        await app.perform(telemetry ? "Logs and metrics" : "API keys") {
+            try await service.setLinkSwitch(frame, telemetry: telemetry, enabled: value)
+            await app.reloadFrame(frameId)
+            return ActionOutcome(kind: .done, message: "Saved.")
         }
     }
 
@@ -458,6 +491,69 @@ struct VoicePermissionsView: View {
             } catch {
                 app.show("Could not save: \(error.localizedDescription)", tone: .failure)
             }
+        }
+    }
+}
+
+/// Local network access on a cloud frame (docs/lan-access.md): on needs the
+/// code the frame draws on its panel, off is free.
+struct LanAccessView: View {
+    @Environment(AppModel.self) private var app
+    let frameId: String
+    @State private var codeShown = false
+    @State private var queued = false
+    @State private var code = ""
+
+    var body: some View {
+        if let frame = app.frame(frameId), let service = app.service {
+            let enabled = service.lanAccess(frame)
+            Form {
+                Section {
+                    LabeledContent("Now", value: enabled.map { $0 ? "on" : "off" } ?? "not reported by this frame")
+                } footer: {
+                    Text("When it is on, scenes may reach your home network: Home Assistant, a NAS, anything at 192.168.x.x. Keep it off unless a scene needs it.")
+                }
+                if enabled == true {
+                    Section {
+                        AsyncButton(role: .destructive) {
+                            await app.perform("Local network access") {
+                                let outcome = try await service.setLanAccess(frame, enabled: false, code: nil)
+                                await app.reloadFrame(frameId)
+                                return outcome
+                            }
+                        } label: { Text("Turn off") }
+                    }
+                } else {
+                    Section {
+                        if !codeShown {
+                            AsyncButton {
+                                do {
+                                    let shown = try await service.showLanAccessCode(frame)
+                                    codeShown = true
+                                    queued = !shown
+                                } catch {
+                                    app.show(error.localizedDescription, tone: .failure)
+                                }
+                            } label: { Text("Turn on") }
+                        } else {
+                            Text(queued ? "The frame shows a code when it next checks in." : "The frame shows a six-digit code now.")
+                            TextField("Code from the frame", text: $code).codeInput().font(.title3.monospacedDigit())
+                            AsyncButton {
+                                await app.perform("Local network access") {
+                                    let outcome = try await service.setLanAccess(frame, enabled: true, code: code)
+                                    await app.reloadFrame(frameId)
+                                    return outcome
+                                }
+                            } label: { Text("Confirm") }
+                            .disabled(code.count < 6)
+                        }
+                    } footer: {
+                        Text("Turning it on needs someone at the frame: it draws a code on its screen.")
+                    }
+                }
+            }
+            .navigationTitle("Local network access")
+            .inlineTitle()
         }
     }
 }

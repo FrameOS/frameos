@@ -15,6 +15,8 @@ final class FrameDetailModel {
     var commands: [PendingCommand] = []
     var latestRelease: String?
     var imageNonce = 0
+    /// Cloud: scenes the frame ran before it joined, waiting to be imported.
+    var deviceScenes: (count: Int, names: [String])?
 
     init(frameId: String) { self.frameId = frameId }
 
@@ -26,7 +28,27 @@ final class FrameDetailModel {
         async let states: Void = loadStates(service, frame)
         async let commands: Void = loadCommands(service, frame)
         async let release: Void = loadRelease(service)
-        _ = await (scenes, states, commands, release)
+        async let brought: Void = loadDeviceScenes(service, frame)
+        _ = await (scenes, states, commands, release, brought)
+    }
+
+    func loadDeviceScenes(_ service: FrameOSService, _ frame: Frame) async {
+        deviceScenes = try? await service.deviceScenes(frame)
+    }
+
+    func resolveDeviceScenes(_ app: AppModel, importThem: Bool) async {
+        guard let service = app.service, let frame = app.frame(frameId) else { return }
+        await app.perform(importThem ? "Import" : "Dismiss") { try await service.resolveDeviceScenes(frame, importThem: importThem) }
+        await load(app)
+    }
+
+    func confirm(_ app: AppModel) async {
+        guard let service = app.service, let frame = app.frame(frameId) else { return }
+        await app.perform("Confirm") {
+            try await service.confirmFrame(frame)
+            return ActionOutcome(kind: .done, message: "Confirmed. The frame is yours.")
+        }
+        await load(app)
     }
 
     func loadScenes(_ service: FrameOSService, _ frame: Frame) async {

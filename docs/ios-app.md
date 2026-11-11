@@ -73,6 +73,10 @@ way the SPA does, and the comment there names the SPA file.
 | Play an album | MCP `photo_album_install` | `POST /api/photos/scene`, `POST /api/account/scenes`, `POST …/scenes/add` |
 | AI chat | `POST /api/ai/chat` (NDJSON, `editor: false`), `GET /api/ai/chats` | the same; a `proposal` is approved with `…/scenes/add` |
 | API keys for scenes | `GET`/`POST /api/settings` | the same |
+| Confirm a claimed frame | (none) | `POST /api/frames/{id}/confirm` |
+| Scenes a frame brought with it | (none) | `GET`/`POST /api/frames/{id}/device-scenes` (`import` / `dismiss`) |
+| Local network access | (none: a backend's frames have no block) | `POST …/lan_access/challenge`, then `POST …/lan_access {enabled, code}` |
+| API keys and telemetry switches | (none) | `POST …/service-settings/enabled`, `POST …/telemetry/enabled` |
 
 ## What the app leaves to the web
 
