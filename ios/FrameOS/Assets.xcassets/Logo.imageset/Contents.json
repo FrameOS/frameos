@@ -1,5 +1,12 @@
 {
-  "images" : [ { "filename" : "Logo.png", "idiom" : "universal" } ],
+  "images" : [
+    { "filename" : "Logo.png", "idiom" : "universal" },
+    {
+      "appearances" : [ { "appearance" : "luminosity", "value" : "dark" } ],
+      "filename" : "LogoDark.png",
+      "idiom" : "universal"
+    }
+  ],
   "info" : { "author" : "xcode", "version" : 1 },
   "properties" : { "preserves-vector-representation" : false }
 }

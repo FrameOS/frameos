@@ -117,6 +117,9 @@ struct FrameDetailView: View {
                 } label: {
                     Label("Add scene", systemImage: "plus.circle.fill")
                 }
+                NavigationLink {
+                    ChatView(frameId: frameId, chatId: nil, generating: true)
+                } label: { GenerateSceneLabel() }
             } header: {
                 Text("Scenes")
             }
@@ -202,8 +205,10 @@ struct FrameDetailView: View {
         .sheet(item: $openScene) { scene in
             SceneSheet(frameId: frameId, scene: scene, model: model)
         }
-        .sheet(isPresented: $addingScene) {
-            CatalogView(installTarget: frame, onInstalled: { Task { await model.load(app) } })
+        // Reloaded on close: a scene can also come in through Generate scene's
+        // chat inside the sheet, which is no catalog install.
+        .sheet(isPresented: $addingScene, onDismiss: { Task { await model.load(app) } }) {
+            CatalogView(installTarget: frame)
         }
         .alert("Rename frame", isPresented: $renaming) {
             TextField("Name", text: $newName)

@@ -65,6 +65,15 @@ struct CatalogView: View {
     var body: some View {
         NavigationStack {
             List {
+                // From a frame page, the web drawer's first actions: here
+                // only Generate scene (no editor in the app).
+                if let target = installTarget {
+                    Section {
+                        NavigationLink {
+                            ChatView(frameId: target.id, chatId: nil, generating: true)
+                        } label: { GenerateSceneLabel() }
+                    }
+                }
                 // Both planes: the store (its shelves) or the account's own
                 // saved scenes (the cloud's My scenes, a backend's templates).
                 Picker("Scenes", selection: $model.mine) {
