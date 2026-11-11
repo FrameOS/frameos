@@ -1382,6 +1382,19 @@ stored scenes changed since the last report: `ws_poll_active_scene`) and in
 the backend's `embedded.storage` (check-in), which is what the workspace
 draws: free space over the scene list, each scene's size on its tile.
 
+### The scene store on the screen
+
+The scene switcher's last tile is the cloud store, browsed on the frame
+(`docs/scene-store-on-frame.md`). `main/fos_store.c` hands the switcher's
+pages their facts and does their work on a task it makes for it (8 KB stack,
+gone when idle), its state in one PSRAM block: the store's short listing as
+it came, a change asked of the frame's plane (`POST …/panel/scenes`, a
+backend first, then `fos_client_request_commands_sync`), or, on a frame with
+no plane, the store's `scenes.json` split into one slot file a scene by
+`main/fos_store_scan.c` (pure C, host-tested: no JSON tree of the payload).
+What came from the store is each slot's `origin`, read off the file by its
+keys and kept by the index's content hash.
+
 ## The render canvas is 16-bit (2026.8.31)
 
 A sixteen-grey panel has a 4-bit canvas in its own buffer's layout, each
