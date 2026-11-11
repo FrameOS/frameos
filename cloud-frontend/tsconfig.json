@@ -14,7 +14,11 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    // The SPA bundles the frameos-wasm package from its source (the scene
+    // workspace's preview, frontend/src/sceneWorkspace): no build of the
+    // package has to run first. The cloud's auth-web resolves the built one.
+    "paths": { "frameos-wasm": ["../frameos/wasm/src/index.ts"] }
   },
   // node-forge ships no types; frontend/ declares the module itself, and the
   // TLS helpers this bundle imports need that declaration here too.
