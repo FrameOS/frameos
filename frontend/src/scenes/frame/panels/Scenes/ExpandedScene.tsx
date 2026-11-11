@@ -8,7 +8,6 @@ import { Field } from '../../../../components/Field'
 import { Button } from '../../../../components/Button'
 import { controlLogic } from './controlLogic'
 import { sceneIsActivating } from '../../../../utils/sceneActivation'
-import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { StateFieldEdit } from './StateFieldEdit'
 import { FrameScene, FrameId } from '../../../../types'
 import { scenesLogic } from './scenesLogic'
@@ -23,13 +22,11 @@ import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { livePreviewLogic, LIVE_PREVIEW_HASH_KEY } from './livePreviewLogic'
 import { LivePreviewModal } from './LivePreviewModal'
 import { Spinner } from '../../../../components/Spinner'
-import { confirmDialog } from '../../../../utils/confirmDialogLogic'
 
 export interface ExpandedSceneProps {
   sceneId: string
   frameId: FrameId
   scene?: FrameScene | null
-  showEditButton?: boolean
   isUnsaved?: boolean
   isUndeployed?: boolean
   /** Where to render the action buttons (Activate, Reset) instead of under the
@@ -42,7 +39,6 @@ export function ExpandedScene({
   frameId,
   sceneId,
   scene,
-  showEditButton = true,
   isUnsaved,
   isUndeployed,
   actionsContainer,
@@ -55,10 +51,9 @@ export function ExpandedScene({
   const { submitStateChanges, resetStateChanges, setLocation } = useActions(
     expandedSceneLogic({ frameId, sceneId, scene })
   )
-  const { previewScene, deleteScene, pushScene, setLayoutOnEveryScene } = useActions(scenesLogic({ frameId }))
+  const { previewScene, pushScene, setLayoutOnEveryScene } = useActions(scenesLogic({ frameId }))
   const { openLivePreview } = useActions(livePreviewLogic({ frameId }))
   const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
-  const { editScene } = useActions(frameEditorsLogic)
   const fieldCount = visibleFields.length
   const frameAdminMode = isInFrameAdminMode()
 
@@ -153,19 +148,6 @@ export function ExpandedScene({
     }
   }
 
-  const handleDelete = () => {
-    void confirmDialog({
-      title: 'Delete this scene?',
-      message: 'The scene is removed from this frame on the next save. This cannot be undone.',
-      confirmLabel: 'Delete scene',
-      danger: true,
-    }).then((confirmed) => {
-      if (confirmed) {
-        deleteScene(sceneId)
-      }
-    })
-  }
-
   // Three buttons and no menu, on one line: put it on the frame, preview it
   // in the browser with these values, reset the values. The drawer is 390px
   // wide, so they are tighter than the default button and only the main one
@@ -249,16 +231,6 @@ export function ExpandedScene({
 
   return (
     <div className="space-y-3">
-      {showEditButton ? (
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button onClick={() => editScene(sceneId)} color="secondary">
-            Open editor
-          </Button>
-          <Button onClick={handleDelete} color="red">
-            Delete
-          </Button>
-        </div>
-      ) : null}
       {fieldCount === 0 ? (
         placeActions(
           <div className="flex w-full min-w-0 items-center gap-2">

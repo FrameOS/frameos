@@ -442,7 +442,7 @@ export function TemplateRow({
                   ...(editTemplate
                     ? [
                         {
-                          label: 'Edit metadata',
+                          label: 'Edit',
                           onClick: () => editTemplate(template),
                           icon: <PencilSquareIcon className="w-5 h-5" />,
                         },

@@ -32,33 +32,14 @@ import { AppNode } from './AppNode'
 import { CodeNode } from './CodeNode'
 import { EventNode } from './EventNode'
 import { StateNode } from './StateNode'
-import { Button } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { NodeType, EdgeType, CodeNodeData } from '../../../../types'
-import {
-  ArrowUturnLeftIcon,
-  ArrowUturnRightIcon,
-  ArrowsPointingInIcon,
-  EyeIcon,
-  WindowIcon,
-} from '@heroicons/react/24/outline'
-import { ZoomOutArea } from '../../../../icons/ZoomOutArea'
 import { CodeNodeEdge } from './CodeNodeEdge'
-import { SceneDropDown } from '../Scenes/SceneDropDown'
 import { AppNodeEdge } from './AppNodeEdge'
 import { NewNodePicker } from './NewNodePicker'
 import { CANVAS_NODE_ID, getNewFieldName, newNodePickerLogic } from './newNodePickerLogic'
-import { scenesLogic } from '../Scenes/scenesLogic'
 import { CompiledSceneTag } from '../Scenes/CompiledSceneTag'
-import { controlLogic } from '../Scenes/controlLogic'
-import { livePreviewLogic } from '../Scenes/livePreviewLogic'
-import { LivePreviewModal } from '../Scenes/LivePreviewModal'
-import { SceneActionsButton, SceneActionOption } from '../Scenes/SceneActionsButton'
-import { SceneActionKey } from '../Scenes/sceneActionsLogic'
-import { PlayIcon } from '@heroicons/react/24/solid'
-import { Spinner } from '../../../../components/Spinner'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
-import clsx from 'clsx'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -77,10 +58,7 @@ const edgeTypes: Record<EdgeType, (props: EdgeProps) => JSX.Element> = {
 
 interface DiagramProps {
   sceneId: string
-  showToolbar?: boolean
 }
-
-type DiagramToolbarVariant = 'inline' | 'floating'
 
 interface ConnectingNode {
   nodeId: string | null
@@ -88,8 +66,6 @@ interface ConnectingNode {
   handleId: string | null
 }
 
-const floatingToolbarButtonClassName =
-  'frameos-icon-button scene-diagram-floating-button pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
 const diagramSelectionDragClassName = 'frameos-diagram-selection-dragging'
 const diagramSelectionDragIgnoredSelector =
   'a, button, input, select, textarea, [contenteditable="true"], [contenteditable=""], .monaco-editor'
@@ -112,176 +88,7 @@ function shouldGuardDiagramSelectionDrag(target: HTMLElement | null): boolean {
   return Boolean(target.closest('.react-flow'))
 }
 
-function FloatingDiagramButton({
-  active,
-  children,
-  disabled,
-  onClick,
-  title,
-}: {
-  active?: boolean
-  children: JSX.Element
-  disabled?: boolean
-  onClick: () => void
-  title: string
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      disabled={disabled}
-      className={clsx(
-        floatingToolbarButtonClassName,
-        active ? 'frameos-primary-active text-white' : 'bg-white/90 text-slate-500',
-        disabled && 'opacity-30'
-      )}
-    >
-      {children}
-    </button>
-  )
-}
-
-export function DiagramToolbar({
-  sceneId,
-  showSceneAction = true,
-  variant = 'inline',
-}: {
-  sceneId: string
-  showSceneAction?: boolean
-  variant?: DiagramToolbarVariant
-}) {
-  const { frameId } = useValues(frameLogic)
-  const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
-  const { fitDiagramView, rearrangeCurrentScene, requestUndo, requestRedo } = useActions(
-    diagramLogic(diagramLogicProps)
-  )
-  const { canUndo, canRedo } = useValues(diagramLogic(diagramLogicProps))
-  const { previewScene } = useActions(scenesLogic({ frameId }))
-  const { setCurrentScene } = useActions(controlLogic({ frameId }))
-  const { sceneChanging } = useValues(controlLogic({ frameId }))
-  const { unsavedSceneIds, undeployedSceneIds, previewingSceneId, linkedActiveSceneId } = useValues(
-    scenesLogic({ frameId })
-  )
-  const { openLivePreview } = useActions(livePreviewLogic({ frameId }))
-  const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
-  const sceneHasChanges = unsavedSceneIds.has(sceneId) || undeployedSceneIds.has(sceneId)
-  const isPreviewing = previewingSceneId === sceneId
-  const isActiveScene = linkedActiveSceneId === sceneId
-  const isActivatingScene = sceneChanging === sceneId
-  const previewTitle = isPreviewing
-    ? 'Previewing scene on the frame'
-    : sceneHasChanges
-    ? 'Preview unsaved changes on the frame'
-    : 'No unsaved changes to preview'
-  const floating = variant === 'floating'
-
-  const actionOptions: SceneActionOption[] = [
-    {
-      key: 'activate',
-      label: isActivatingScene ? 'Activating…' : 'Activate scene',
-      description: 'Make this the active scene on the frame',
-      icon: isActivatingScene ? <Spinner className="h-4 w-4 shrink-0" /> : <PlayIcon className="h-4 w-4 shrink-0" />,
-      disabled: isActiveScene || isActivatingScene,
-      title: isActiveScene ? 'This scene is already active' : undefined,
-      onRun: () => setCurrentScene(sceneId),
-    },
-    {
-      key: 'preview-frame',
-      label: 'Preview on frame',
-      description: 'Temporarily show this scene on the frame, without saving or deploying',
-      icon: <EyeIcon className="h-4 w-4 shrink-0" />,
-      disabled: isPreviewing,
-      title: previewTitle,
-      onRun: () => previewScene(sceneId),
-    },
-    {
-      key: 'preview-browser',
-      label: 'Preview in browser',
-      description: 'Run this scene in your browser via WebAssembly',
-      icon: <WindowIcon className="h-4 w-4 shrink-0" />,
-      onRun: () => openLivePreview(sceneId),
-    },
-  ]
-  // Matches the old standalone buttons: preview while there are changes,
-  // activate otherwise.
-  const defaultActionKey: SceneActionKey = sceneHasChanges ? 'preview-frame' : 'activate'
-
-  return (
-    <div className={clsx('flex items-center gap-2', floating && 'scene-diagram-floating-toolbar pointer-events-none')}>
-      {showSceneAction ? (
-        floating ? (
-          sceneHasChanges ? (
-            <FloatingDiagramButton
-              onClick={() => previewScene(sceneId)}
-              title={previewTitle}
-              disabled={isPreviewing}
-              active={isPreviewing}
-            >
-              <EyeIcon className="h-5 w-5" />
-            </FloatingDiagramButton>
-          ) : (
-            <FloatingDiagramButton
-              onClick={() => setCurrentScene(sceneId)}
-              title={isActiveScene ? 'This scene is already active' : 'Activate'}
-              disabled={isActiveScene || isActivatingScene}
-              active={isActiveScene || isActivatingScene}
-            >
-              {isActivatingScene ? (
-                <Spinner color="white" className="flex h-5 w-5 items-center justify-center" />
-              ) : (
-                <PlayIcon className="h-5 w-5" />
-              )}
-            </FloatingDiagramButton>
-          )
-        ) : (
-          <SceneActionsButton size="tiny" options={actionOptions} defaultKey={defaultActionKey} />
-        )
-      ) : null}
-      {floating ? (
-        <>
-          <FloatingDiagramButton onClick={requestUndo} disabled={!canUndo} title="Undo (⌘Z / Ctrl+Z)">
-            <ArrowUturnLeftIcon className="h-5 w-5" />
-          </FloatingDiagramButton>
-          <FloatingDiagramButton onClick={requestRedo} disabled={!canRedo} title="Redo (⌘⇧Z / Ctrl+Y)">
-            <ArrowUturnRightIcon className="h-5 w-5" />
-          </FloatingDiagramButton>
-          <FloatingDiagramButton onClick={fitDiagramView} title="Fit to View">
-            <ZoomOutArea className="h-5 w-5" />
-          </FloatingDiagramButton>
-          <FloatingDiagramButton onClick={rearrangeCurrentScene} title="Realign nodes">
-            <ArrowsPointingInIcon className="h-5 w-5" />
-          </FloatingDiagramButton>
-          <SceneDropDown
-            sceneId={sceneId}
-            context="editDiagram"
-            className={floatingToolbarButtonClassName}
-            buttonColor="secondary"
-          />
-        </>
-      ) : (
-        <>
-          <Button size="tiny" onClick={requestUndo} disabled={!canUndo} title="Undo (⌘Z / Ctrl+Z)" color="secondary">
-            <ArrowUturnLeftIcon className="w-5 h-5" />
-          </Button>
-          <Button size="tiny" onClick={requestRedo} disabled={!canRedo} title="Redo (⌘⇧Z / Ctrl+Y)" color="secondary">
-            <ArrowUturnRightIcon className="w-5 h-5" />
-          </Button>
-          <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
-            <ZoomOutArea className="w-5 h-5" />
-          </Button>
-          <Button size="tiny" onClick={rearrangeCurrentScene} title="Realign nodes" color="secondary">
-            <ArrowsPointingInIcon className="w-5 h-5" />
-          </Button>
-          <SceneDropDown sceneId={sceneId} context="editDiagram" />
-        </>
-      )}
-      {livePreviewSceneId === sceneId ? <LivePreviewModal frameId={frameId} /> : null}
-    </div>
-  )
-}
-
-function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
+function Diagram_({ sceneId }: DiagramProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const selectionDragGuardActive = useRef(false)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
@@ -596,11 +403,6 @@ function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
               <CompiledSceneTag frameId={frameId} sceneId={sceneId} />
             </div>
           ) : null}
-          {showToolbar ? (
-            <div className="absolute top-1 right-1 z-10">
-              <DiagramToolbar sceneId={sceneId} />
-            </div>
-          ) : null}
         </ReactFlow>
       </div>
       {newNodePicker && <NewNodePicker />}
@@ -608,10 +410,10 @@ function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
   )
 }
 
-export function Diagram({ sceneId, showToolbar }: DiagramProps) {
+export function Diagram({ sceneId }: DiagramProps) {
   return (
     <ReactFlowProvider>
-      <Diagram_ sceneId={sceneId} showToolbar={showToolbar} />
+      <Diagram_ sceneId={sceneId} />
     </ReactFlowProvider>
   )
 }

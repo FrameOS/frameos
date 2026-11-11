@@ -207,8 +207,8 @@ function BackendHomeHeader(): JSX.Element {
   )
 }
 
-// A backend's own saved scenes ("Save to My scenes", uploaded zips). They
-// have no page of their own, so a tile opens the library page that lists them.
+// A backend's own saved scenes ("Save to My scenes", uploaded zips). A tile
+// opens the scene in the scene editor.
 function LocalScenesSection(): JSX.Element {
   const { templates, templatesLoading, recentLocalScenes } = useValues(backendHomeLogic)
   return (
@@ -230,7 +230,7 @@ function LocalScenesSection(): JSX.Element {
               key={template.id ?? template.name}
               template={template}
               showAuthor={false}
-              appHref={urls.scenesHome('local')}
+              appHref={template.id ? urls.localScene(template.id) : urls.scenesHome('local')}
             />
           ))}
         </OneRowGrid>

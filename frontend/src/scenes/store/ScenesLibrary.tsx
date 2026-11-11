@@ -705,6 +705,7 @@ function LocalScenesPage(): JSX.Element {
                 key={template.id ?? template.name}
                 template={template}
                 showAuthor={false}
+                appHref={template.id ? urls.localScene(template.id) : undefined}
                 actions={
                   template.id ? (
                     <>

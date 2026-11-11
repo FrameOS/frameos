@@ -200,26 +200,9 @@ function isFrameRoutePathForFrame(pathname: string, frameId: FrameId): boolean {
   return pathname === urls.frame(frameId) || frameToolFromPathname(pathname, frameId) !== null
 }
 
-function isFrameOverviewRoutePathForFrame(
-  pathname: string,
-  search: Record<string, unknown>,
-  frameId: FrameId
-): boolean {
-  return (
-    isFrameRoutePathForFrame(pathname, frameId) &&
-    frameToolFromRoute(frameToolFromPathname(pathname, frameId), search) === 'overview'
-  )
-}
-
-function isWorkspaceRoutePathForFrame(pathname: string, frameId: FrameId): boolean {
-  const scenePath = urls.scenes(frameId)
+function isAppsRoutePathForFrame(pathname: string, frameId: FrameId): boolean {
   const appPath = urls.apps(frameId)
-  return (
-    pathname === scenePath ||
-    pathname.startsWith(`${scenePath}/`) ||
-    pathname === appPath ||
-    pathname.startsWith(`${appPath}/`)
-  )
+  return pathname === appPath || pathname.startsWith(`${appPath}/`)
 }
 
 // The frame id a pathname carries at `token`'s place in `tokenizedPath`,
@@ -278,26 +261,20 @@ function frameIdFromWorkspacePath(pathname: string): FrameId | null {
   )
 }
 
+// Where a frame's drawer (scene control, Add scene, schedule, chat) opens:
+// the page showing, when it draws them (the frames list, the frame's pages,
+// its apps page), else the frame's page. A scene's page is the scene editor,
+// full screen, with no drawers of its own.
 function drawerPathForFrame(frameId: FrameId): string {
   const pathname = router.values.location.pathname
   if (
     isFramesRoutePath(pathname) ||
     isFrameRoutePathForFrame(pathname, frameId) ||
-    isWorkspaceRoutePathForFrame(pathname, frameId)
+    isAppsRoutePathForFrame(pathname, frameId)
   ) {
     return pathname
   }
   return urls.frame(frameId)
-}
-
-function shouldOpenScenePreviewInDrawer(frameId: FrameId): boolean {
-  const pathname = router.values.location.pathname
-  const search = router.values.searchParams
-  return (
-    isFramesRoutePath(pathname) ||
-    isFrameOverviewRoutePathForFrame(pathname, search, frameId) ||
-    (isInFrameAdminMode() && isWorkspaceRoutePathForFrame(pathname, frameId))
-  )
 }
 
 // Route payloads arrive as `Record<string, any>`, which loses the FrameId type.
@@ -2030,18 +2007,10 @@ export const workspaceLogic = kea<workspaceLogicType>([
         actions.setRouteSelection(frameId, sceneId)
         router.actions.push(urls.scenes(frameId, sceneId), undefined, workspaceContentNavigationHash())
       },
+      // The scene's control drawer (its values, Activate, the previews), on
+      // the page showing when it draws drawers, else on the frame's page.
       openScenePreview: ({ frameId, sceneId }) => {
-        if (shouldOpenScenePreviewInDrawer(frameId)) {
-          actions.openSceneControl(frameId, sceneId)
-          return
-        }
-        actions.setRouteSelection(frameId, sceneId)
-        reloadFrameStates(frameId)
-        router.actions.push(
-          urls.scenes(frameId, sceneId),
-          {},
-          utilityDrawerOpenHash('state', workspaceContentNavigationHash())
-        )
+        actions.openSceneControl(frameId, sceneId)
       },
       snapshotFrameOrder: () => {
         const rankedFrames = rankFramesForSnapshot(values.framesList)

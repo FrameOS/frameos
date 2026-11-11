@@ -75,8 +75,8 @@ export function SceneTile({
   template: TemplateType
   showAuthor?: boolean
   actions?: ReactNode
-  /** A page of this app the tile opens, for a scene with no page of its own
-   * (a backend's saved scenes have no `url`). */
+  /** A page of this app the tile opens, for a scene with no `url` of its
+   * own (a backend's saved scene opens in the scene editor). */
   appHref?: string
 }): JSX.Element {
   const href = typeof template.url === 'string' && template.url ? template.url : null

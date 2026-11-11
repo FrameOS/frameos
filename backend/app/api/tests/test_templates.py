@@ -118,6 +118,28 @@ async def test_update_template_refuses_a_scene_that_cannot_be_a_layout(async_cli
 
 
 @pytest.mark.asyncio
+async def test_update_template_scenes_refuses_a_layout_that_cannot_be_one(async_client, db):
+    # The scene editor saves the whole set; a scene it marked a layout passes
+    # the same rule as the isLayout switch (docs/scene-layouts.md).
+    main = {"id": "main", "name": "Main", "settings": {"refreshInterval": 1}}
+    t = Template(project_id=async_client.project_id, name="Bar", scenes=[main], config={})
+    db.add(t)
+    db.commit()
+
+    bad = {**main, "settings": {"refreshInterval": 1, "isLayout": True}}
+    response = await async_client.patch(f"/api/templates/{t.id}", json={"scenes": [bad]})
+    assert response.status_code == 400
+    assert "can't be a layout" in response.json()["detail"]
+    db.refresh(t)
+    assert t.scenes[0]["settings"] == {"refreshInterval": 1}
+
+    good = {**main, **JSX_LAYOUT, "settings": {"refreshInterval": 1, "isLayout": True}}
+    response = await async_client.patch(f"/api/templates/{t.id}", json={"scenes": [good]})
+    assert response.status_code == 200
+    assert response.json()["scenes"][0]["settings"]["isLayout"] is True
+
+
+@pytest.mark.asyncio
 async def test_update_template_makes_its_main_scene_a_layout_and_back(async_client, db):
     helper = {"id": "helper", "name": "Helper", "settings": {"refreshInterval": 60}}
     main = {"id": "main", "name": "Main", "default": True, "settings": {"refreshInterval": 1}, **JSX_LAYOUT}
