@@ -100,6 +100,9 @@ extension FrameOSService {
         }
     }
 
+    /// The account's service-key groups (`/api/settings`, cloud/docs: frames' "Service settings").
+    public static let serviceSettingGroups = ["unsplash", "openAI", "homeAssistant", "immich", "github", "frameOS"]
+
     /// `./x` in a repository index is relative to the index (the SPA's resolveRepositoryUrl).
     static func resolveRepositoryURL(_ value: String, _ repositoryURL: String) -> String {
         guard value.hasPrefix("./"), let base = URL(string: repositoryURL) else { return value }
@@ -112,8 +115,15 @@ extension FrameOSService {
     public func install(_ item: CatalogItem, on frame: Frame, activate: Bool, grantSettings: [String]? = nil) async throws -> ActionOutcome {
         switch item.source {
         case .cloudStore(let storeId):
-            var body: [String: JSONValue] = ["scene_id": .string(storeId), "activate": .bool(activate)]
-            if let grantSettings { body["settings_groups"] = .array(grantSettings.map { .string($0) }) }
+            // Installing is the owner's consent (the SPA's templatesLogic): the
+            // scene gets the API keys it declares. The route grants only what
+            // the scene declares (`settings_groups` ∩ declared), so naming
+            // every group grants exactly that.
+            let groups = grantSettings ?? Self.serviceSettingGroups
+            let body: [String: JSONValue] = [
+                "scene_id": .string(storeId), "activate": .bool(activate),
+                "settings_groups": .array(groups.map { .string($0) }),
+            ]
             let answer = try await client.call("POST", Self.framePath(frame.id, "/scenes/add"), body: .json(.object(body)))
             let declared = answer["declared_settings_groups"]?.arrayValue?.compactMap(\.stringValue) ?? []
             let granted = answer["granted_settings_groups"]?.arrayValue?.compactMap(\.stringValue) ?? []
@@ -157,6 +167,9 @@ extension FrameOSService {
 
     func backendInstall(_ frame: Frame, _ source: [String: JSONValue], activate: Bool) async throws -> ActionOutcome {
         var arguments = source
+        // As on the cloud: a store scene is granted the keys it declares
+        // (the tool grants only what the scenes declare among these).
+        arguments["settings_groups"] = .array(Self.serviceSettingGroups.map { .string($0) })
         arguments["confirm"] = true
         arguments["frame_id"] = .number(Double(Int(frame.id) ?? 0))
         arguments["activate"] = .bool(activate)

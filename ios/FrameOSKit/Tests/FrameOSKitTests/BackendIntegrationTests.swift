@@ -53,6 +53,20 @@ struct BackendIntegrationTests {
         #expect(installed.first?.id != "ios-test-scene", "ids are made fresh")
         #expect(installed.first?.fields.map(\.name) == ["title", "refreshInterval"])
 
+        // A store scene is granted the keys it declares, as on the cloud.
+        let storeScene: JSONValue = [
+            "id": "ios-store-scene", "name": "Store photos", "edges": [],
+            "origin": ["storeSceneId": "0b3f7c1e-1111-4222-8333-944455556666"],
+            "nodes": [["id": "n1", "type": "app", "position": ["x": 0, "y": 0],
+                       "data": ["keyword": "photos", "sources": ["config.json": #"{"name":"Photos","settings":["unsplash"]}"#]]]],
+        ]
+        _ = try await service.backendInstall(frame, ["scenes": [storeScene], "name": "Store photos"], activate: false)
+        frame = try await service.frame(frameId)
+        #expect(frame["service_setting_groups"]?.arrayValue?.compactMap(\.stringValue) == ["unsplash"])
+        let storeInstalled = try #require(try await service.installedScenes(frame).first { $0.name == "Store photos" })
+        _ = try await service.removeScene(frame, storeInstalled)
+        frame = try await service.frame(frameId)
+
         // Settings, schedule, button actions and voice switches save on the backend.
         _ = try await service.saveSettings(frame, ["interval": 600, "rotate": 90])
         frame = try await service.frame(frameId)

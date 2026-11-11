@@ -123,7 +123,11 @@ save on the backend for a `frame_deploy` later).
   per scene), `frame_scene_get`, `frame_scene_install` (from scene JSON, a
   saved scene, a catalog slug pair, or a URL — a scenes.json, a zip or a
   scene store page; ids are regenerated unless `preserve_ids`;
-  `activate=true` makes it the boot default and shows it),
+  `activate=true` makes it the boot default and shows it;
+  `settings_groups` grants store scenes the service keys they declare among
+  those named, as the cloud tool of the same name does — without it a store
+  scene gets none, and the answer's `declared_settings_groups` /
+  `granted_settings_groups` say what it asked for and has),
   `frame_scene_update`, `frame_scene_remove`, `frame_scene_activate`,
   `frame_scene_state_set`, `frame_render`, `frame_event`,
   `frame_screenshot`, `frame_scene_preview`, `frame_logs` (search and
