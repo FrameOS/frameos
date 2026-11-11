@@ -67,7 +67,9 @@ extension FrameOSService {
             func matches(_ name: String, _ description: String) -> Bool {
                 needle.isEmpty || name.lowercased().contains(needle) || description.lowercased().contains(needle)
             }
-            if let templates = try? await client.get("/api/templates") {
+            // Saved: the project's own scenes. Store: every repository's,
+            // on the store's shelves (the SPA's Add scene drawer).
+            if mine, let templates = try? await client.get("/api/templates") {
                 for template in templates.arrayValue ?? [] {
                     guard let id = template["id"]?.stringValue else { continue }
                     let name = template["name"]?.stringValue ?? "Untitled scene"
@@ -78,10 +80,10 @@ extension FrameOSService {
                                              image: template["image"]?.stringValue, flags: [], group: "Saved scenes"))
                 }
             }
+            if mine { return (items, false) }
             let repositories = try await client.get("/api/repositories")
             for repository in repositories.arrayValue ?? [] {
-                let repoName = repository["name"]?.stringValue ?? "Repository"
-                let repoURL = repository["url"]?.stringValue ?? ""
+                                let repoURL = repository["url"]?.stringValue ?? ""
                 for template in repository["templates"]?.arrayValue ?? [] {
                     let name = template["name"]?.stringValue ?? "Untitled scene"
                     let description = template["description"]?.stringValue ?? ""
@@ -92,7 +94,8 @@ extension FrameOSService {
                         name: name, description: description, category: template["category"]?.stringValue,
                         author: template["author"]?.stringValue,
                         image: template["image"]?.stringValue.map { Self.resolveRepositoryURL($0, repoURL) },
-                        flags: template["flags"]?.arrayValue?.compactMap(\.stringValue) ?? [], group: repoName
+                        flags: template["flags"]?.arrayValue?.compactMap(\.stringValue) ?? [],
+                        group: StoreCategories.shelf(for: template["category"]?.stringValue).title
                     ))
                 }
             }

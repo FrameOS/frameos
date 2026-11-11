@@ -65,15 +65,15 @@ struct CatalogView: View {
     var body: some View {
         NavigationStack {
             List {
-                if app.current?.kind == .cloud {
-                    Picker("Source", selection: $model.mine) {
-                        Text("Store").tag(false)
-                        Text("My scenes").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets())
+                // Both planes: the store (its shelves) or the account's own
+                // saved scenes (the cloud's My scenes, a backend's templates).
+                Picker("Scenes", selection: $model.mine) {
+                    Text("Store").tag(false)
+                    Text("Saved").tag(true)
                 }
+                .pickerStyle(.segmented)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
                 if let error = model.error {
                     Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                 }
@@ -94,7 +94,9 @@ struct CatalogView: View {
                     ProgressView().frame(maxWidth: .infinity).task { await model.loadMore(app) }
                 }
                 if model.items.isEmpty && !model.loading && model.error == nil {
-                    Text(model.query.isEmpty ? "Nothing here yet." : "No scenes match \"\(model.query)\".")
+                    Text(model.query.isEmpty
+                        ? (model.mine ? "No saved scenes yet. Save one in the web editor and it shows here." : "Nothing here yet.")
+                        : "No scenes match \"\(model.query)\".")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -185,6 +187,8 @@ struct InstallSheet: View {
     let onInstalled: () -> Void
     @State private var frameId: String?
     @State private var activate = true
+    @State private var reporting = false
+    @State private var reportReason = ""
 
     var body: some View {
         NavigationStack {
@@ -209,8 +213,13 @@ struct InstallSheet: View {
                     if target == nil {
                         Picker("Frame", selection: $frameId) {
                             Text("Choose a frame").tag(String?.none)
-                            ForEach(app.frames) { frame in
-                                Text(frame.displayName).tag(Optional(frame.id))
+                            // The frames list's order: Active, Inactive, Archived.
+                            ForEach(FrameGroups.byStatus(app.frames)) { group in
+                                Section(group.label) {
+                                    ForEach(group.frames) { frame in
+                                        Text(frame.displayName).tag(Optional(frame.id))
+                                    }
+                                }
                             }
                         }
                     }
@@ -228,6 +237,22 @@ struct InstallSheet: View {
                     }
                     .disabled(selectedFrame == nil)
                 }
+                if case .cloudStore(let storeSceneId) = item.source {
+                    // Other people's scenes (App Store guideline 1.2): the
+                    // store's report queue, as on the web.
+                    Section {
+                        Button(role: .destructive) { reporting = true } label: {
+                            Label("Report this scene", systemImage: "flag")
+                        }
+                    }
+                    .alert("Report this scene", isPresented: $reporting) {
+                        TextField("What is wrong with it?", text: $reportReason)
+                        Button("Cancel", role: .cancel) { reportReason = "" }
+                        Button("Report") { report(storeSceneId) }
+                    } message: {
+                        Text("Reports go to the FrameOS team, who remove scenes that break the store's rules.")
+                    }
+                }
             }
             .navigationTitle(item.name)
             .inlineTitle()
@@ -238,6 +263,18 @@ struct InstallSheet: View {
 
     var selectedFrame: Frame? {
         target ?? frameId.flatMap { app.frame($0) }
+    }
+
+    func report(_ storeSceneId: String) {
+        let reason = reportReason.trimmingCharacters(in: .whitespacesAndNewlines)
+        reportReason = ""
+        guard let service = app.service else { return }
+        Task {
+            await app.perform("Report") {
+                try await service.reportStoreScene(storeSceneId, reason: reason.isEmpty ? "Reported from the iOS app." : reason)
+                return ActionOutcome(kind: .done, message: "Reported. Thank you.")
+            }
+        }
     }
 
     func install() async {

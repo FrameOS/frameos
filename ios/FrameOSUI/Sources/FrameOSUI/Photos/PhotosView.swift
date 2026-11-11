@@ -401,7 +401,11 @@ struct PlayAlbumSheet: View {
                 Section {
                     Picker("Frame", selection: $frameId) {
                         Text("Choose a frame").tag(String?.none)
-                        ForEach(app.frames) { Text($0.displayName).tag(Optional($0.id)) }
+                        ForEach(FrameGroups.byStatus(app.frames)) { group in
+                            Section(group.label) {
+                                ForEach(group.frames) { Text($0.displayName).tag(Optional($0.id)) }
+                            }
+                        }
                     }
                     Toggle("Show it now", isOn: $activate)
                 }

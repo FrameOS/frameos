@@ -79,6 +79,9 @@ final class ChatModel {
 struct ChatView: View {
     @Environment(AppModel.self) private var app
     @State private var model: ChatModel
+    /// Asked once before the first message (App Store guideline 5.1.2(i)):
+    /// the chat's words go to OpenAI.
+    @AppStorage("ai.sharing.allowed") private var sharingAllowed = false
     let frameId: String?
 
     init(frameId: String?, chatId: String?) {
@@ -126,6 +129,9 @@ struct ChatView: View {
                 }
             }
             Divider()
+            if !sharingAllowed {
+                AISharingConsent(plane: app.current?.kind ?? .cloud) { sharingAllowed = true }
+            } else {
             HStack(alignment: .bottom, spacing: 8) {
                 TextField("Message", text: $model.draft, axis: .vertical)
                     .lineLimit(1...6)
@@ -141,6 +147,7 @@ struct ChatView: View {
                 }
             }
             .padding(10)
+            }
         }
         .navigationTitle(frameId.flatMap { app.frame($0)?.displayName } ?? "AI")
         .inlineTitle()
@@ -249,5 +256,29 @@ struct ChatListView: View {
         loading = true
         defer { loading = false }
         chats = (try? await app.service?.chats(frame: nil)) ?? []
+    }
+}
+
+/// What the AI chat shares, asked before its first message.
+struct AISharingConsent: View {
+    @Environment(\.openURL) private var openURL
+    let plane: PlaneKind
+    let allow: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Before you chat", systemImage: "sparkles").font(.headline)
+            Text(plane == .cloud
+                ? "To answer, FrameOS Cloud sends your messages and the details of the frames and scenes you ask about to OpenAI. OpenAI processes them to write the answer."
+                : "To answer, your backend sends your messages and the details of the frames and scenes you ask about to OpenAI, with the OpenAI key set on the backend.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            HStack {
+                Button("Allow and chat", action: allow).buttonStyle(.borderedProminent)
+                Button("Privacy policy") { openURL(Legal.privacy) }.buttonStyle(.bordered)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

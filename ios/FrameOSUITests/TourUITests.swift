@@ -125,6 +125,17 @@ final class TourUITests: XCTestCase {
         waitForText(app, frame)
         sleep(3) // the pictures
         snapshot(app, "\(prefix)11 frames")
+        // The same frames as a compact list, then back to cards.
+        let asList = app.buttons["Show as a list"]
+        if asList.waitForExistence(timeout: 5) {
+            asList.tap()
+            sleep(2)
+            snapshot(app, "\(prefix)11b frames list")
+            app.buttons["Show as cards"].tap()
+            sleep(1)
+        } else {
+            XCTFail("no list or cards toggle")
+        }
 
         // One frame.
         button(app, containing: frame).tap()
@@ -201,6 +212,12 @@ final class TourUITests: XCTestCase {
             tab(app, name).tap()
             sleep(3)
             snapshot(app, "\(prefix)\(shot)")
+            if name == "Scenes" {
+                app.buttons["Saved"].firstMatch.tap()
+                sleep(3)
+                snapshot(app, "\(prefix)30b saved scenes")
+                app.buttons["Store"].firstMatch.tap()
+            }
         }
         photos(app, prefix: prefix, frame: frame)
         tab(app, "Frames").tap()

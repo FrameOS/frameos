@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var addingBackend = false
     @State private var summary: JSONValue?
     @State private var confirmSignOut: Account?
+    @State private var deleting: Account?
 
     var body: some View {
         NavigationStack {
@@ -61,10 +62,12 @@ struct SettingsView: View {
                         Button {
                             openURL(current.baseURL.appendingPathComponent(current.kind == .cloud ? "frames" : ""))
                         } label: { Label("Open the web workspace", systemImage: "safari") }
+                        // No plan or billing link: a free companion to a paid web
+                        // service shows no calls to buy (App Store guideline 3.1.3(f)).
                         if current.kind == .cloud {
-                            Button {
-                                openURL(current.baseURL.appendingPathComponent("account/usage"))
-                            } label: { Label("Plan and billing", systemImage: "creditcard") }
+                            Button(role: .destructive) {
+                                deleting = current
+                            } label: { Label("Delete account", systemImage: "trash") }
                         }
                     }
                 }
@@ -75,6 +78,8 @@ struct SettingsView: View {
                     Button { openURL(URL(string: "https://github.com/FrameOS/frameos")!) } label: {
                         Label("Source code", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
+                    Button { openURL(Legal.privacy) } label: { Label("Privacy policy", systemImage: "hand.raised") }
+                    Button { openURL(Legal.terms) } label: { Label("Terms", systemImage: "doc.text") }
                 }
             }
             .groupedList()
@@ -84,6 +89,7 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $adding) { SignInView(isSheet: true) }
             .sheet(isPresented: $addingBackend) { SignInView(isSheet: true, startWithBackend: true) }
+            .sheet(item: $deleting) { account in DeleteAccountView(account: account) }
             .confirmationDialog("Sign out of \(confirmSignOut?.planeLabel ?? "")?",
                                 isPresented: Binding { confirmSignOut != nil } set: { if !$0 { confirmSignOut = nil } },
                                 titleVisibility: .visible) {
@@ -164,5 +170,73 @@ struct ServiceKeysView: View {
         }
         edits[group] = nil
         await load()
+    }
+}
+
+/// The app's own legal pages: FrameOS Cloud's (also for a self-hosted
+/// backend, whose data never reaches FrameOS).
+enum Legal {
+    static let privacy = URL(string: "https://cloud.frameos.net/legal/privacy")!
+    static let terms = URL(string: "https://cloud.frameos.net/legal/terms")!
+}
+
+/// Deleting the FrameOS Cloud account (App Store guideline 5.1.1(v)): the
+/// cloud's own route, the password or, for an account without one, a fresh
+/// check of who you are and the typed email.
+struct DeleteAccountView: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    let account: Account
+    @State private var hasPassword: Bool?
+    @State private var password = ""
+    @State private var email = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("This deletes your FrameOS Cloud account for good: your frames' link to the cloud, your scenes, photos, share links and API keys. Frames stop taking orders from FrameOS Cloud. A paid plan is cancelled first.")
+                }
+                Section {
+                    TextField("Your email: \(account.email)", text: $email).emailInput()
+                    if hasPassword == true {
+                        SecureField("Password", text: $password).passwordInput()
+                    }
+                } footer: {
+                    Text(hasPassword == false
+                        ? "Your account has no password: you confirm it is you with Google or a passkey next."
+                        : "Type your email to confirm.")
+                }
+                Section {
+                    AsyncButton(role: .destructive) {
+                        await delete()
+                    } label: {
+                        Text("Delete my account").frame(maxWidth: .infinity)
+                    }
+                    .disabled(email.trimmingCharacters(in: .whitespaces).lowercased() != account.email.lowercased()
+                              || hasPassword == nil || (hasPassword == true && password.isEmpty))
+                }
+            }
+            .navigationTitle("Delete account")
+            .inlineTitle()
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .task { hasPassword = (try? await app.service?.cloudAccountHasPassword()) ?? true }
+        }
+    }
+
+    func delete() async {
+        guard let service = app.service else { return }
+        let password = hasPassword == true ? password : nil
+        let email = email.trimmingCharacters(in: .whitespaces)
+        var deleted = false
+        await app.perform("Delete account") {
+            try await service.deleteCloudAccount(password: password, confirmEmail: email)
+            deleted = true
+            return ActionOutcome(kind: .done, message: "Your FrameOS Cloud account is deleted.")
+        }
+        if deleted {
+            app.accountDeleted(account)
+            dismiss()
+        }
     }
 }

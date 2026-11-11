@@ -227,3 +227,27 @@ extension FrameOSService {
         }
     }
 }
+
+extension FrameOSService {
+    /// Whether the cloud account has a password: deleting it asks for that;
+    /// one without (Google, passkeys) confirms it is you and types its email.
+    public func cloudAccountHasPassword() async throws -> Bool {
+        try await client.get("/api/account/security")["has_password"]?.boolValue ?? false
+    }
+
+    /// `POST /api/account/delete`: the cloud erases the account with its
+    /// frames' links, scenes, photos and keys (a paid plan is cancelled
+    /// first). App Store guideline 5.1.1(v): deletion is in the app.
+    public func deleteCloudAccount(password: String?, confirmEmail: String) async throws {
+        var body: [String: JSONValue] = ["confirmEmail": .string(confirmEmail)]
+        if let password, !password.isEmpty { body["password"] = .string(password) }
+        try await client.call("POST", "/api/account/delete", body: .json(.object(body)))
+    }
+
+    /// `POST /api/store/scenes/{id}/report {reason}`: the store's report
+    /// queue (App Store guideline 1.2, content other people made).
+    public func reportStoreScene(_ storeSceneId: String, reason: String) async throws {
+        try await client.call("POST", "/api/store/scenes/\(ApiPaths.segment(storeSceneId))/report",
+                              body: .json(["reason": .string(reason)]))
+    }
+}

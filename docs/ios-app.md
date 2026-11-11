@@ -21,6 +21,8 @@ follow turns a test red, on the side that did not follow.
 | Which paths a backend scopes to a project | `isProjectScopedApiPath` (`frontend/src/utils/projectApi.ts`) | `ApiPaths.isProjectScoped` (`ios/FrameOSKit/.../Core/APIClient.swift`) | `docs/api-path-fixtures.json` |
 | The deploy bar (stages, labels, stale rules) | `docs/deploy-progress-contract.json` | generated `DeployProgressContract.gen.swift`, read by `Contracts/DeployProgress.swift` (the SPA's `frameDeployProgress`) | `generate_deploy_progress_contract.py --check` (backend suite); the `stale` and `percent` sections of `docs/deploy-progress-fixtures.json`; `docs/frame-status-fixtures.json` |
 | A frame's status word, the line under its name, the firmware word | `frontend/src/decorators/frame.tsx` | `Contracts/FrameStatus.swift`, `FrameTime.swift` | `docs/frame-status-fixtures.json` |
+| The frames list's order: Active, Inactive, Archived, each by name (also the frame pickers) | `groupFramesByStatus` (`scenes/workspace/frameStatusGroups.ts`), `frameIsActive` | `Contracts/FrameGroups.swift`, `FrameStatus.isActive` | the `groups` section and `expect.active` of `docs/frame-status-fixtures.json` |
+| The store's shelves and their order | `frontend/src/utils/storeCategories.ts` (checked against the cloud's `categories.ts`) | `Contracts/StoreCategories.swift` | `StoreCategoryTests` reads the SPA's file |
 | Which settings a cloud frame takes | `docs/cloud-frames-contract.json` | generated `CloudFramesContract.gen.swift`, read by `Contracts/CloudSettingsContract.swift` (the SPA's `cloudFrameSettings.ts`) | `generate_cloud_contract.py --check` |
 | A scene's settings form (the implicit refresh interval, `showIf`) | `frontend/src/utils/refreshInterval.ts`, `showIf.ts` | `Contracts/SceneFields.swift` | `docs/scene-form-fixtures.json` |
 | "Button actions" rows and the rules they write | `frontend/src/utils/frameEventMap.ts` | `Contracts/ButtonBindings.swift` | `docs/button-map-fixtures.json` |
@@ -94,6 +96,8 @@ way the SPA does, and the comment there names the SPA file.
 | Scenes a frame brought with it | (none) | `GET`/`POST /api/frames/{id}/device-scenes` (`import` / `dismiss`) |
 | Local network access | (none: a backend's frames have no block) | `POST …/lan_access/challenge`, then `POST …/lan_access {enabled, code}` |
 | API keys and telemetry switches | (none) | `POST …/service-settings/enabled`, `POST …/telemetry/enabled` |
+
+App Store submission, TestFlight and the guidelines: `docs/ios-app-store.md`.
 
 ## What the app leaves to the web
 

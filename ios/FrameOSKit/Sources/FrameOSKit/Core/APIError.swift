@@ -70,6 +70,8 @@ public struct APIError: Error, LocalizedError, Sendable, Equatable {
         case "invalid_code": return "That code is not right. Try the newest one."
         case "sign_in_expired": return "The sign-in took too long. Start again."
         case "invalid_grant": return "That sign-in took too long or was already used. Try again."
+        case "invalid_confirmation": return "Type the account's email address exactly as it is."
+        case "superadmin_cannot_self_delete": return "An administrator account cannot delete itself. Hand the role over first."
         case "email_unverified": return "Confirm your email address first: we sent you a link."
         case "rate_limited": return "Too many requests. Wait a moment and try again."
         case "frame_not_active": return "This frame is not active."

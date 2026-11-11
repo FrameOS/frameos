@@ -126,6 +126,13 @@ final class AppModel {
         forget(account)
     }
 
+    /// The cloud deleted the account (Settings → Delete account): its
+    /// session went with it, so only the app's copy is left to forget.
+    func accountDeleted(_ account: Account) {
+        if current?.id == account.id { stopLive() }
+        forget(account)
+    }
+
     private func forget(_ account: Account) {
         accounts.removeAll { $0.id == account.id }
         clients[account.id] = nil
