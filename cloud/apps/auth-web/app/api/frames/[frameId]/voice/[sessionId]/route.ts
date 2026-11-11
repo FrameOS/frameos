@@ -83,6 +83,7 @@ import { photoBasename } from "../../../../../../src/lib/photos/paths";
 import { identityRateLimitResponse, rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { scenesForRuntime } from "../../../../../../src/lib/retired-apps";
 import { deviceSceneIdForFrame, resolveStoreSceneForFrameScene } from "../../../../../../src/lib/scene-images";
+import { sceneListWithPreview } from "../../../../../../src/lib/scene-preview-list";
 
 export const runtime = "nodejs";
 // The closing chunk waits for the transcription and the chat turn.
@@ -374,12 +375,14 @@ export async function POST(
   const imageSources = imageSourcesForSettings(buildServiceSettingsPayload(grantedGroups, stored).settings);
 
   // The editor's "Preview on frame" (the event route's uploadScenes): a
-  // set_scenes push of the picture alone. A later activate_scene finds the
-  // assigned scenes gone from the device and re-pushes them, as the queue
-  // above does — and that push carries the picture along, so it stays
+  // set_scenes push of the assigned scenes with the picture in them
+  // (sceneListWithPreview), so an ESP32 is sent the picture alone as a patch
+  // and keeps its list. A later push carries the picture along, so it stays
   // selectable until installed or discarded (docs/scene-previews.md).
   const previewScenes: VoicePreview = async (previewed, sceneId) => {
-    const delivered = scenesForRuntime(previewed, frame.frameosVersion);
+    const bundle = scenesForRuntime(previewed, frame.frameosVersion);
+    const assigned = await buildScenesPayloadForFrame(db, frame.id);
+    const delivered = "scenes" in assigned ? sceneListWithPreview(assigned.scenes, bundle) : bundle;
     const checksum = createHash("sha256").update(JSON.stringify(delivered)).digest("hex");
     await supersedePendingCommands(db, frame.id, "set_scenes");
     // `preview` outlives the bundle (spentCommandPayload keeps it): the
