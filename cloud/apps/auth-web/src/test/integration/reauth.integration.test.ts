@@ -248,7 +248,7 @@ describe("sensitive routes require a recent credential check", () => {
       error: "reauth_required",
       reauth: {
         max_age_seconds: recentAuthMaxAgeSeconds,
-        methods: { code: false, passkey: false, password: true, sign_in: false },
+        methods: { code: false, passkey: false, password: true, providers: [], sign_in: false },
         path: "/login/reauth",
       },
     });
@@ -352,6 +352,7 @@ describe("sensitive routes require a recent credential check", () => {
       code: true,
       passkey: false,
       password: false,
+      providers: [],
       sign_in: false,
     });
 
@@ -395,6 +396,7 @@ describe("sensitive routes require a recent credential check", () => {
       code: true,
       passkey: false,
       password: false,
+      providers: [],
       sign_in: false,
     });
     // …and no longer accepted, even when correct.
@@ -431,6 +433,7 @@ describe("sensitive routes require a recent credential check", () => {
       code: false,
       passkey: false,
       password: false,
+      providers: ["google"],
       sign_in: true,
     });
     const response = await reauth(request("/api/auth/reauth", { body: { code: "123456" } }));

@@ -1,10 +1,12 @@
-// Connects a Google identity to an existing password account, once the
-// visitor proves the account's password. Body: {"password": "..."}.
+// Connects a Google or Apple identity to an existing password account, once
+// the visitor proves the account's password. Body: {"password": "..."}.
+// The web's /login/link posts here, and so does the iOS app after a native
+// Sign in with Apple that matched a password account.
 //
-// The Google half of the proof is the pending-link cookie the callback set
-// (src/lib/google-link.ts): verified claims, ten minutes old at most. The
+// The provider half of the proof is the pending-link cookie the callback set
+// (src/lib/provider-link.ts): verified claims, ten minutes old at most. The
 // password half is checked here. Only with both does the identity get
-// written — Google attesting an email address is not the same as holding
+// written: a provider attesting an email address is not the same as holding
 // the account behind it.
 //
 // Linking is a credential change on the account, so it gets the same
@@ -16,42 +18,42 @@ import {
   accounts,
   createDb,
   findIdentity,
-  googleProviderKey,
   linkIdentityToAccount,
   revokeSessionsForAccount,
+  setIdentityProviderToken,
 } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
-import { recordAuditEvent } from "../../../../../src/lib/audit";
-import { csrfResponse } from "../../../../../src/lib/csrf";
-import { sendSecurityNotificationEmail } from "../../../../../src/lib/email";
-import { assertDatabaseUrlConfigured } from "../../../../../src/lib/env";
+import { recordAuditEvent } from "../../../../src/lib/audit";
+import { csrfResponse } from "../../../../src/lib/csrf";
+import { sendSecurityNotificationEmail } from "../../../../src/lib/email";
+import { assertDatabaseUrlConfigured } from "../../../../src/lib/env";
 import {
-  pendingGoogleLinkCookieName,
-  pendingGoogleLinkCookieOptions,
-  readPendingGoogleLinkToken,
-} from "../../../../../src/lib/google-link";
-import { reportError } from "../../../../../src/lib/log";
-import { verifyPasswordWithDummyFallback } from "../../../../../src/lib/passwords";
+  pendingLinkCookieName,
+  pendingLinkCookieOptions,
+  readPendingLinkToken,
+} from "../../../../src/lib/provider-link";
+import { reportError } from "../../../../src/lib/log";
+import { verifyPasswordWithDummyFallback } from "../../../../src/lib/passwords";
 import {
   identityRateLimitResponse,
   rateLimitResponse,
-} from "../../../../../src/lib/rate-limit";
+} from "../../../../src/lib/rate-limit";
 import {
   sessionCookieName,
   sessionCookieOptions,
-} from "../../../../../src/lib/session";
-import { completeFirstFactor } from "../../../../../src/lib/sign-in";
-import { defaultSignInRedirect } from "../../../../../src/lib/sign-in-redirect";
+} from "../../../../src/lib/session";
+import { completeFirstFactor } from "../../../../src/lib/sign-in";
+import { defaultSignInRedirect } from "../../../../src/lib/sign-in-redirect";
 import {
   pendingSignInCookieName,
   pendingSignInCookieOptions,
-} from "../../../../../src/lib/two-factor";
+} from "../../../../src/lib/two-factor";
 
 export const runtime = "nodejs";
 
 function clearPendingCookie(response: NextResponse) {
-  response.cookies.set(pendingGoogleLinkCookieName, "", {
-    ...pendingGoogleLinkCookieOptions(),
+  response.cookies.set(pendingLinkCookieName, "", {
+    ...pendingLinkCookieOptions(),
     maxAge: 0,
   });
   return response;
@@ -63,7 +65,7 @@ export async function POST(request: NextRequest) {
     return csrf;
   }
   // Same budget as the password login: this IS a password check.
-  const limited = await rateLimitResponse(request, "auth:google-link", {
+  const limited = await rateLimitResponse(request, "auth:link", {
     limit: 20,
     windowMs: 15 * 60 * 1000,
   });
@@ -71,8 +73,8 @@ export async function POST(request: NextRequest) {
     return limited;
   }
 
-  const pending = await readPendingGoogleLinkToken(
-    request.cookies.get(pendingGoogleLinkCookieName)?.value,
+  const pending = await readPendingLinkToken(
+    request.cookies.get(pendingLinkCookieName)?.value,
   );
   if (!pending) {
     return NextResponse.json({ error: "link_expired" }, { status: 400 });
@@ -90,7 +92,7 @@ export async function POST(request: NextRequest) {
   // many addresses is bounded the way /api/auth/login bounds it by email.
   const accountLimited = await identityRateLimitResponse(
     pending.accountId,
-    "auth:google-link-account",
+    "auth:link-account",
     { limit: 20, windowMs: 15 * 60 * 1000 },
   );
   if (accountLimited) {
@@ -115,14 +117,14 @@ export async function POST(request: NextRequest) {
   if (!account || !valid) {
     await recordAuditEvent(db, {
       accountId: pending.accountId,
-      actor: { kind: "google_link", providerSubject: pending.providerSubject },
-      eventType: "account.google_link_failed",
+      actor: { kind: `${pending.providerKey}_link`, providerSubject: pending.providerSubject },
+      eventType: `account.${pending.providerKey}_link_failed`,
       metadata: { email: pending.email },
     });
     return NextResponse.json({ error: "invalid_password" }, { status: 403 });
   }
 
-  // The cookie is ten minutes old at most, but the Google identity may have
+  // The cookie is ten minutes old at most, but the identity may have
   // been linked elsewhere in the meantime (a second tab, another account).
   // The identities table has one row per (issuer, subject); refuse rather
   // than throw on the unique index.
@@ -142,9 +144,17 @@ export async function POST(request: NextRequest) {
       email: pending.email,
       emailVerified: true,
       providerIssuer: pending.providerIssuer,
-      providerKey: googleProviderKey,
+      providerKey: pending.providerKey,
       providerSubject: pending.providerSubject,
     });
+  }
+  if (pending.providerToken) {
+    await setIdentityProviderToken(
+      db,
+      pending.providerIssuer,
+      pending.providerSubject,
+      pending.providerToken,
+    );
   }
 
   // A new way into the account: every session that predates it goes. The
@@ -154,7 +164,7 @@ export async function POST(request: NextRequest) {
   await recordAuditEvent(db, {
     accountId: pending.accountId,
     actor: { accountId: pending.accountId, providerSubject: pending.providerSubject },
-    eventType: "account.google_linked",
+    eventType: `account.${pending.providerKey}_linked`,
     metadata: { email: pending.email },
     target: { providerIssuer: pending.providerIssuer },
   });
@@ -164,19 +174,19 @@ export async function POST(request: NextRequest) {
   try {
     await sendSecurityNotificationEmail(account.primaryEmail ?? pending.email, {
       detail: pending.email,
-      what: "google_linked",
+      what: `${pending.providerKey}_linked`,
       when: new Date(),
     });
   } catch (error) {
     reportError("email.security_notification_send_failed", error, {
       accountId: pending.accountId,
-      what: "google_linked",
+      what: `${pending.providerKey}_linked`,
     });
   }
 
   const outcome = await completeFirstFactor(db, {
     auditMetadata: { email: pending.email, emailVerified: true, linked: true },
-    method: "google",
+    method: pending.providerKey,
     profile: {
       accountId: pending.accountId,
       email: pending.email,

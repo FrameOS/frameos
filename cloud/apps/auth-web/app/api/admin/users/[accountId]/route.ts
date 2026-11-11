@@ -8,6 +8,7 @@ import {
   accountPrivateObjectKeys,
   deleteErasedObjects,
 } from "../../../../../src/lib/account-erasure";
+import { revokeAccountAppleTokens } from "../../../../../src/lib/apple-sign-in";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { cancelForErasure } from "../../../../../src/lib/billing-provider";
 import { stripeSetup } from "../../../../../src/lib/stripe";
@@ -133,6 +134,8 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   // in progress returns its unearned remainder to the receivable and ends,
   // so deleting the account cannot strand deferred revenue.
   await closeOutSubscriptionForDeletedAccount(db, accountId);
+  // Apple's tokens are revoked as on a self-delete (src/lib/apple-sign-in.ts).
+  await revokeAccountAppleTokens(db, accountId);
   // The account's photos and frame snapshots leave the bucket with it
   // (src/lib/account-erasure.ts).
   const objectKeys = await accountPrivateObjectKeys(db, accountId);

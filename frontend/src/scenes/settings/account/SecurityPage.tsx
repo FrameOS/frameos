@@ -17,7 +17,7 @@ function PasswordCard(): JSX.Element {
   if (!security?.has_password) {
     return (
       <Box className="p-4 text-sm leading-relaxed">
-        This account signs in without a password (e.g. with Google). To add one, use the{' '}
+        This account signs in without a password (with Google or Apple). To add one, use the{' '}
         <a className="frameos-link hover:underline" href="/reset">
           password reset flow
         </a>
@@ -171,7 +171,7 @@ export function SecurityPage(): JSX.Element {
       </AccountSection>
       <AccountSection
         title="Two-factor authentication"
-        description="Optional, and recommended for an account that controls physical frames: add an authenticator app or a passkey and sign-in asks for it after your password or Google."
+        description="Optional, and recommended for an account that controls physical frames: add an authenticator app or a passkey and sign-in asks for it after your password, Google or Apple."
       >
         <Box className="p-4">
           <TwoFactorSettings />

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   appSignInCallbackUrl,
+  appSignInProvider,
   createAppSignInRequestToken,
   validChallenge,
   validState,
@@ -14,7 +15,11 @@ import {
   readJsonObject,
   requireDatabase,
 } from "../../../../../src/lib/device-flow";
-import { getPublicOrigin, hasGoogleOAuth } from "../../../../../src/lib/env";
+import {
+  getPublicOrigin,
+  hasAppleWebSignIn,
+  hasGoogleOAuth,
+} from "../../../../../src/lib/env";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { reauthPath } from "../../../../../src/lib/recent-auth";
 
@@ -23,7 +28,7 @@ export const runtime = "nodejs";
 // The app's sign-in sheet opens this (src/lib/app-sign-in.ts):
 //
 //   GET /api/auth/app/authorize?code_challenge=<S256>&code_challenge_method=S256
-//       &state=<app's>[&provider=google][&reauth=1]
+//       &state=<app's>[&provider=google|apple][&reauth=1]
 //
 // It comes back here with ?request=<signed token> after each detour (sign-in,
 // Google, sudo mode), and ends in a redirect to frameos://sign-in with a code
@@ -52,7 +57,7 @@ export async function GET(request: NextRequest) {
     }
     token = await createAppSignInRequestToken({
       challenge,
-      provider: params.get("provider") === "google" ? "google" : undefined,
+      provider: appSignInProvider(params.get("provider")),
       reauth: params.get("reauth") === "1",
       state,
     });
@@ -133,6 +138,9 @@ export async function POST(request: NextRequest) {
 function signInPath(signInRequest: AppSignInRequest, returnTo: string) {
   if (signInRequest.provider === "google" && hasGoogleOAuth()) {
     return `/api/auth/google/start?return_to=${encodeURIComponent(returnTo)}`;
+  }
+  if (signInRequest.provider === "apple" && hasAppleWebSignIn()) {
+    return `/api/auth/apple/start?return_to=${encodeURIComponent(returnTo)}`;
   }
   return `/login?return_to=${encodeURIComponent(returnTo)}`;
 }

@@ -96,6 +96,9 @@ export const accountIdentities = pgTable(
     providerIssuer: text("provider_issuer").notNull(),
     providerKey: text("provider_key").notNull(),
     providerSubject: text("provider_subject").notNull(),
+    // Apple's refresh token for this identity, sealed (migration 0077): what
+    // account deletion revokes. NULL for every other provider.
+    providerTokenEncrypted: text("provider_token_encrypted"),
     ...timestamps,
   },
   (table) => ({

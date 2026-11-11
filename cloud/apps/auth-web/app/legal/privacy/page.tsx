@@ -13,7 +13,7 @@ export const metadata = { title: "Privacy Policy" };
 // actually requires ("concise, transparent, intelligible... clear and plain
 // language", art. 12(1)) — the dense version is not the compliant one.
 
-const lastUpdated = "5 November 2026";
+const lastUpdated = "11 November 2026";
 
 export default function PrivacyPage() {
   const entity = getLegalEntity();
@@ -59,8 +59,9 @@ export default function PrivacyPage() {
       <h3>Your account</h3>
       <p className="copy">
         Your email address, an optional display name, and a hash of your
-        password (or, if you sign in with Google, your Google account
-        identifier instead). We need this to have an account at all, so the
+        password (or, if you sign in with Google or Apple, that account's
+        identifier instead; with Apple, the email address may be a private
+        relay address Apple forwards to you). We need this to have an account at all, so the
         legal basis is <strong>performance of a contract</strong> (art. 6(1)(b)
         GDPR). Without it there is no service. We verify the email address
         because password resets and security notices have to reach the real

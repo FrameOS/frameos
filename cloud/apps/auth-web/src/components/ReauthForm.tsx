@@ -11,11 +11,13 @@ type Mode = "code" | "password" | "recovery";
 // request, so the form only sends the proof; on success the server has
 // stamped the session and the browser goes back to `returnTo`.
 export function ReauthForm({
+  appleEnabled,
   email,
   googleEnabled,
   methods,
   returnTo,
 }: {
+  appleEnabled: boolean;
   email?: string | undefined;
   googleEnabled: boolean;
   methods: ReauthMethods;
@@ -29,6 +31,12 @@ export function ReauthForm({
   const [busy, setBusy] = useState(false);
 
   const googleHref = `/api/auth/google/start?reauth=1&return_to=${encodeURIComponent(returnTo)}`;
+  const appleHref = `/api/auth/apple/start?reauth=1&return_to=${encodeURIComponent(returnTo)}`;
+  // The providers this account signs in with that this cloud can offer.
+  const signInWith = [
+    ...(googleEnabled && methods.providers.includes("google") ? [{ href: googleHref, label: "Google" }] : []),
+    ...(appleEnabled && methods.providers.includes("apple") ? [{ href: appleHref, label: "Apple" }] : []),
+  ];
 
   function finish(payload: { redirect?: string }) {
     window.location.assign(payload.redirect ?? returnTo);
@@ -223,13 +231,16 @@ export function ReauthForm({
         <div className="stack-lg">
           <p className="copy">
             This account has no password or second factor to check, so sign in
-            with Google once more to continue.
+            with {signInWith.length > 0 ? signInWith.map((way) => way.label).join(" or ") : "it"} once
+            more to continue.
           </p>
           <div className="actions">
-            {googleEnabled ? (
-              <a className="button button-primary" href={googleHref}>
-                Continue with Google
-              </a>
+            {signInWith.length > 0 ? (
+              signInWith.map((way) => (
+                <a className="button button-primary" href={way.href} key={way.label}>
+                  Continue with {way.label}
+                </a>
+              ))
             ) : (
               <a className="button button-primary" href="/reset">
                 Set a password first

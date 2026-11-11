@@ -293,6 +293,54 @@ export function hasGoogleOAuth() {
   return Boolean(getGoogleOAuthConfig());
 }
 
+// Sign in with Apple (docs/auth.md "Sign in with Apple"). One key signs the
+// client secret for both clients: the web's Services ID and the iOS app's
+// bundle id. Apple's user id (`sub`) is per team, so both clients name the
+// same person the same way. Optional like Google: without the key the login
+// page hides the Apple button and the app's native route answers
+// `apple_unavailable`.
+export type AppleSignInConfig = {
+  // The app's bundle id: the audience of the iOS app's identity tokens.
+  appBundleId: string;
+  // https://appleid.apple.com: the issuer, the token and revoke endpoints'
+  // host, and the client secret's audience. A test points it at a stand-in.
+  authUrl: string;
+  keyId: string;
+  // The .p8 key's PEM (newlines may arrive as "\n").
+  privateKey: string;
+  // The web's client id; without it only the app can sign in with Apple.
+  servicesId?: string | undefined;
+  teamId: string;
+};
+
+export const appleIssuerUrl = "https://appleid.apple.com";
+
+export function getAppleSignInConfig(): AppleSignInConfig | undefined {
+  const teamId = optionalEnv("APPLE_TEAM_ID");
+  const keyId = optionalEnv("APPLE_SIGN_IN_KEY_ID");
+  const privateKey = optionalEnv("APPLE_SIGN_IN_PRIVATE_KEY")?.replace(/\\n/g, "\n");
+  if (!teamId || !keyId || !privateKey) {
+    return undefined;
+  }
+  return {
+    appBundleId: optionalEnv("APPLE_APP_BUNDLE_ID") ?? "net.frameos.app",
+    authUrl: (optionalEnv("APPLE_AUTH_URL") ?? appleIssuerUrl).replace(/\/+$/, ""),
+    keyId,
+    privateKey,
+    servicesId: optionalEnv("APPLE_SERVICES_ID"),
+    teamId,
+  };
+}
+
+// The web flow needs the Services ID as well; the app's needs only the key.
+export function hasAppleWebSignIn() {
+  return Boolean(getAppleSignInConfig()?.servicesId);
+}
+
+export function getAppleCallbackUrl() {
+  return new URL("/api/auth/apple/callback", getCloudBaseUrl()).toString();
+}
+
 export function getSessionSecret() {
   return requireEnv("SESSION_SECRET");
 }

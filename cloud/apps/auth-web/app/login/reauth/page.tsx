@@ -4,7 +4,12 @@ import { isAppSignInReturn } from "../../../src/lib/app-sign-in";
 import { AuthCard } from "../../../src/components/AuthCard";
 import { ReauthForm } from "../../../src/components/ReauthForm";
 import { safeAuthReturnPath } from "../../../src/lib/auth-cookies";
-import { getFramesUrl, hasDatabaseUrl, hasGoogleOAuth } from "../../../src/lib/env";
+import {
+  getFramesUrl,
+  hasAppleWebSignIn,
+  hasDatabaseUrl,
+  hasGoogleOAuth,
+} from "../../../src/lib/env";
 import { hasRecentAuth, reauthMethods } from "../../../src/lib/recent-auth";
 import { readSession } from "../../../src/lib/session";
 
@@ -43,6 +48,7 @@ export default async function ReauthPage({ searchParams }: ReauthPageProps) {
     >
       <ReauthForm
         email={session.email}
+        appleEnabled={hasAppleWebSignIn()}
         googleEnabled={hasGoogleOAuth()}
         methods={methods}
         returnTo={returnTo}

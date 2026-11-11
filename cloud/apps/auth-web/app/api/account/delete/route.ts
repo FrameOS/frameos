@@ -6,6 +6,7 @@ import {
   accountPrivateObjectKeys,
   deleteErasedObjects,
 } from "../../../../src/lib/account-erasure";
+import { revokeAccountAppleTokens } from "../../../../src/lib/apple-sign-in";
 import { recordAuditEvent } from "../../../../src/lib/audit";
 import { cancelForErasure } from "../../../../src/lib/billing-provider";
 import { reportError } from "../../../../src/lib/log";
@@ -172,6 +173,10 @@ export async function POST(request: NextRequest) {
   // receivable and end the subscription. The receivable that remains is a
   // write-off decision for a human, not something erasure may silently drop.
   await closeOutSubscriptionForDeletedAccount(db, accountId);
+
+  // Apple requires an app offering its sign-in to revoke the person's
+  // tokens on deletion (src/lib/apple-sign-in.ts). Never blocks the delete.
+  await revokeAccountAppleTokens(db, accountId);
 
   const objectKeys = await accountPrivateObjectKeys(db, accountId);
   await db.delete(accounts).where(eq(accounts.id, accountId));

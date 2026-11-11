@@ -44,7 +44,10 @@ public enum AuthService {
         if let email = security["email"]?.stringValue, !email.isEmpty { account.email = email }
         client.persistCookiesIfChanged()
         var credentials = client.currentCredentials
-        credentials.cookies = client.cookies().filter { $0.name != "frameos_signin_pending" }.map(StoredCookie.init)
+        // The sign-in's own short-lived cookies stay behind; the session goes along.
+        credentials.cookies = client.cookies()
+            .filter { $0.name != "frameos_signin_pending" && $0.name != "frameos_link_pending" }
+            .map(StoredCookie.init)
         credentials.save(accountId: account.id)
         return account
     }

@@ -14,7 +14,13 @@
 // it, and the proof routes must be able to address the row by its token.
 
 import { and, eq, gt, isNull } from "drizzle-orm";
-import { accounts, type createDb, sessions } from "@frameos-cloud/db";
+import {
+  accountSocialProviders,
+  accounts,
+  type createDb,
+  sessions,
+  type SocialProviderKey,
+} from "@frameos-cloud/db";
 import { NextResponse } from "next/server";
 import { readSessionToken } from "./session";
 import { hashSecret } from "./secrets";
@@ -40,12 +46,14 @@ export const reauthPath = "/login/reauth";
 // thing sign-in asks for, so a password alone (the one credential a phished
 // or reused secret gives an attacker) can no longer revoke frames, mint
 // tokens or turn two-factor itself off. An account with none of them
-// (Google-only, no second factor) can only sign in again through Google,
-// which mints a fresh session (`sign_in`).
+// (Google or Apple only, no second factor) can only sign in again through
+// its provider, which mints a fresh session (`sign_in`); `providers` says
+// which ones the account has.
 export type ReauthMethods = {
   code: boolean;
   passkey: boolean;
   password: boolean;
+  providers: SocialProviderKey[];
   sign_in: boolean;
 };
 
@@ -62,7 +70,9 @@ export async function reauthMethods(
   const code = status.totpEnabled || status.recoveryCodesRemaining > 0;
   const passkey = status.passkeys.length > 0;
   const password = Boolean(account?.passwordHash) && !secondFactorEnrolled(status);
-  return { code, passkey, password, sign_in: !password && !code && !passkey };
+  const sign_in = !password && !code && !passkey;
+  const providers = sign_in ? await accountSocialProviders(db, accountId) : [];
+  return { code, passkey, password, providers, sign_in };
 }
 
 // Two-factor is ON exactly when a confirmed authenticator or a passkey

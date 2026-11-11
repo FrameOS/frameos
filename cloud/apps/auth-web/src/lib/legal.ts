@@ -159,4 +159,13 @@ export const processors: Processor[] = [
     purpose:
       "Sign-in with Google — only if you choose that button instead of a password.",
   },
+  {
+    data: "Your Apple ID's identifier for FrameOS, your email address (or the private relay address Apple makes for you), and your name the first time.",
+    location: "United States",
+    name: "Apple",
+    optional: true,
+    privacyUrl: "https://www.apple.com/legal/privacy/",
+    purpose:
+      "Sign in with Apple, only if you choose that button instead of a password.",
+  },
 ];
