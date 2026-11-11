@@ -311,6 +311,8 @@ function SceneSelector({
                 title={
                   scenePreview.source === 'voice'
                     ? 'A picture the voice chat put on the frame for now. It is not in the scene list, and stays on the frame until it is installed or discarded.'
+                    : scenePreview.source === 'panel'
+                    ? 'A store scene previewed from the frame\'s own screen. It is not in the scene list, and stays on the frame until it is installed or discarded.'
                     : 'A scene previewed on the frame for now. It is not in the scene list, and stays on the frame until it is installed or discarded.'
                 }
               >
@@ -333,7 +335,12 @@ function SceneSelector({
                       {scenePreview.name || 'Preview'}
                     </span>
                     <span className="frameos-muted mt-0.5 block truncate text-xs text-slate-400">
-                      {scenePreview.source === 'voice' ? 'from the voice chat' : 'from the editor'} · not in the list
+                      {scenePreview.source === 'voice'
+                        ? 'from the voice chat'
+                        : scenePreview.source === 'panel'
+                        ? 'from the frame\'s store'
+                        : 'from the editor'}{' '}
+                      · not in the list
                     </span>
                   </span>
                 </div>

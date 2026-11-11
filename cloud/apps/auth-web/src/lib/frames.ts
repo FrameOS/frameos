@@ -1227,7 +1227,9 @@ function pendingCommandView(
 export type ScenePreview = {
   scene_id: string | null;
   name: string;
-  source: "editor" | "voice";
+  // Who pushed it: the editor, the voice chat, or the frame's own store page
+  // (panel-scenes.ts).
+  source: "editor" | "voice" | "panel";
   at: string;
 };
 
@@ -1277,6 +1279,10 @@ function isSceneBundlePayload(
   );
 }
 
+function previewSource(source: unknown): ScenePreview["source"] {
+  return source === "voice" || source === "panel" ? source : "editor";
+}
+
 /** The preview the next scene push carries, with the scene to append to its
  * bundle: the newest scene push's kept preview scene (the row may already be
  * superseded by the caller's push — only a cancelled or failed one is not
@@ -1322,7 +1328,7 @@ export async function carriedScenePreview(
       name: typeof record.name === "string" && record.name ? record.name : "Preview",
       scene,
       scene_id: sceneId,
-      source: record.source === "voice" ? "voice" : "editor",
+      source: previewSource(record.source),
     },
     scene: scene as Record<string, unknown>,
   };
@@ -1407,7 +1413,7 @@ export async function scenePreviewsByFrame(
       at: row.createdAt.toISOString(),
       name: typeof record.name === "string" && record.name ? record.name : "Preview",
       scene_id: typeof record.scene_id === "string" ? record.scene_id : null,
-      source: record.source === "voice" ? "voice" : "editor",
+      source: previewSource(record.source),
     });
   }
   return byFrame;
@@ -2052,6 +2058,74 @@ export async function buildScenesPayloadForFrame(
     sceneStates,
     scenes,
   };
+}
+
+// A PUBLIC store scene's newest version as a push to this frame carries it:
+// stamped with its origin, in the frame's runtime form, refused where
+// buildScenesPayloadForFrame refuses an assignment (pulled, shell, compiled,
+// too big) and where checkScenesAssignable would (a version newer than the
+// frame's FrameOS). For a store scene the frame previews from its own screen
+// (panel-scenes.ts), which has no assignment row and no maps of its own.
+export async function publicStoreSceneForFrame(
+  db: FramesDatabase,
+  frame: { frameosVersion: string | null; hardware: unknown },
+  storeSceneId: string,
+): Promise<{ name: string; scenes: Record<string, unknown>[]; version: number } | { error: string }> {
+  const [scene] = await db
+    .select({ name: storeScenes.name, slug: storeScenes.slug, status: storeScenes.status, visibility: storeScenes.visibility })
+    .from(storeScenes)
+    .where(eq(storeScenes.id, storeSceneId))
+    .limit(1);
+  if (!scene || scene.status !== "active" || scene.visibility !== "public") {
+    return { error: "invalid_scene" };
+  }
+  const [versionRow] = await db
+    .select({
+      content: storeSceneVersions.content,
+      frameosVersion: storeSceneVersions.frameosVersion,
+      objectKey: storeSceneVersions.objectKey,
+      riskFlags: storeSceneVersions.riskFlags,
+      version: storeSceneVersions.version,
+    })
+    .from(storeSceneVersions)
+    .where(and(eq(storeSceneVersions.sceneId, storeSceneId), isNull(storeSceneVersions.yankedAt)))
+    .orderBy(desc(storeSceneVersions.version))
+    .limit(1);
+  if (!versionRow) {
+    return { error: "scene_version_missing" };
+  }
+  if (versionRow.riskFlags?.includes("shell")) {
+    return { error: "scene_not_allowed" };
+  }
+  if (!frameosVersionSatisfies(versionRow.frameosVersion, frame.frameosVersion)) {
+    return { error: "frame_update_required" };
+  }
+  const content = await readBlob(versionRow);
+  const extracted = content ? extractScenesJson(content) : undefined;
+  if (!extracted) {
+    return { error: "invalid_scene_payload" };
+  }
+  if (compiledSceneNames(extracted.scenes).length > 0) {
+    return { error: "scene_requires_compilation" };
+  }
+  if (extracted.bytes > maxScenesPayloadBytes) {
+    return { error: "scenes_payload_too_large" };
+  }
+  const scenes = (frameHardwareIsEsp32(frame) ? scenesForEmbeddedRuntime : scenesForRuntime)(
+    withStoreSceneOrigin(
+      extracted.scenes,
+      { id: storeSceneId, slug: scene.slug, version: versionRow.version },
+      { appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, frame.frameosVersion) },
+    ),
+    frame.frameosVersion,
+  ).filter(
+    (entry): entry is Record<string, unknown> =>
+      !!entry && typeof entry === "object" && !Array.isArray(entry) && typeof (entry as { id?: unknown }).id === "string",
+  );
+  if (scenes.length === 0) {
+    return { error: "invalid_scene_payload" };
+  }
+  return { name: scene.name, scenes, version: versionRow.version };
 }
 
 // Store one batch of shipped logs, enforcing the per-frame retention cap in

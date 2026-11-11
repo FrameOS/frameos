@@ -78,7 +78,9 @@ export interface ScenePreviewInfo {
   /** The previewed scene's RUNTIME id (null when the push named none). */
   scene_id: string | null
   name: string
-  source: 'editor' | 'voice'
+  /** Who pushed it: the editor, the voice chat, or the frame's own scene
+   * store page (`panel`, docs/scene-store-on-frame.md). */
+  source: 'editor' | 'voice' | 'panel'
   at: string
 }
 
@@ -473,8 +475,9 @@ export interface FrameType {
   secret_fingerprints?: Record<string, string>
   active_scene_id?: string
   /** The scene the frame shows for now without holding it in its saved list:
-   * the editor's "Preview on frame" (docs/scene-previews.md) or the voice
-   * chat's picture (docs/voice-chat.md `show_image`). Both planes report the
+   * the editor's "Preview on frame" (docs/scene-previews.md), the voice
+   * chat's picture (docs/voice-chat.md `show_image`) or a store scene
+   * previewed on the frame's own screen (docs/scene-store-on-frame.md). Both planes report the
    * newest scene push when it was a preview; null once a push of the saved
    * list is newer. The scene list draws it as a preview row. */
   scene_preview?: ScenePreviewInfo | null
