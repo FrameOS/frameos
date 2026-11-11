@@ -326,6 +326,12 @@
       "profiles": {"esp32": {"since": "2026.11.6"}},
       "parity": {"only": "esp32", "why": "The touch panel's feedback lives in the ESP32 firmware's buzzer path (fos_touch.c, fos_buzzer.c); a Pi frame has no buzzer."}
     },
+    "cpu_mode": {
+      "$comment": "The chip's clock: `battery` runs it at 160 MHz, `performance` at 240 MHz, `auto` (the default) at 240 on an RGB LCD or a touch panel and 160 on any other board. An e-paper refresh is a long wait (about 20 s on a reTerminal E1002's Spectra 6 panel) that the chip spends idling at whatever clock it runs, so on a battery e-paper frame 240 costs more than the faster render saves (embedded/esp32/README.md \"Processor speed\"). Applied at the next boot: the device reboots to take it. Reported as hardware.cpuMode and hardware.cpuMhz.",
+      "rule": {"type": "string", "enum": ["auto", "battery", "performance"]},
+      "profiles": {"esp32": {"since": "2026.11.7", "restart": true}},
+      "parity": {"only": "esp32", "why": "The ESP32's CPU clock switch (rtc_clk_cpu_freq_set_config at boot, main.c); a Pi's clock is the kernel governor's, which FrameOS does not set."}
+    },
     "mic_clk_pin": {
       "$comment": "The PDM microphone's clock GPIO (reTerminal E1001/E1002: 42; the E1004 has no microphone, and a PDM mic on its J2 header is the pins named here), with mic_data_pin and mic_pwr_pin; -1 = no microphone. The firmware opens the microphone at every voice session (docs/voice-chat.md, fos_mic.c), so the three apply live; no stored value leaves the board preset's own. Same reserved-pin refusal as battery_pin. Reported as hardware.micClkPin.",
       "rule": {"type": "int", "min": -1, "max": 48},

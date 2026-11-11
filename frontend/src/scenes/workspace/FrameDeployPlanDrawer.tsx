@@ -125,6 +125,8 @@ import {
 } from './workspaceSurfaces'
 import { timezoneOptions } from '../../decorators/timezones'
 import { downloadJson } from '../../utils/objectUrl'
+import { sceneUpdatesLogic, type PendingSceneUpdate } from '../frame/panels/Scenes/sceneUpdatesLogic'
+import { SceneUpdatesSection } from './SceneUpdatesSection'
 
 interface DeployPlanProgressStep {
   label: string
@@ -3042,6 +3044,10 @@ function CloudDeployStatus({
   )
 }
 
+function sceneUpdatesLabel(updates: readonly PendingSceneUpdate[]): string {
+  return `${updates.length} scene update${updates.length === 1 ? '' : 's'}`
+}
+
 function CloudDeployChoiceButton({
   icon,
   title,
@@ -3080,24 +3086,26 @@ function CloudDeployChoiceButton({
  */
 function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: () => void }): JSX.Element {
   const { unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
-  const { saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
+  const { selectedSceneUpdates: sceneUpdates } = useValues(sceneUpdatesLogic({ frameId: frame.id }))
+  const { deployWithSceneUpdates } = useActions(sceneUpdatesLogic({ frameId: frame.id }))
   const offline = frame.connected === false
   const checkin = frameCheckin(frame)
+  // The ticked "Scene updates": this deploy updates them.
+  const nothingNew = unsavedChangeDetails.length === 0 && sceneUpdates.length === 0
   // Nothing to send and the device already acked the last push: the button
   // still works (a re-send is idempotent) but it is not what this screen is
   // asking you to do, so it stops competing with the firmware upgrade next
   // to it for the one primary-colored slot.
-  const inSync =
-    unsavedChangeDetails.length === 0 &&
-    Boolean(frame.assigned_checksum) &&
-    frame.assigned_checksum === frame.scenes_checksum
+  const inSync = nothingNew && Boolean(frame.assigned_checksum) && frame.assigned_checksum === frame.scenes_checksum
   // Nothing unsaved and the last push is still queued for the device: a
   // click would only re-send what is already on its way, so the button
   // waits (hourglass, not primary) like the tile and the status line.
   const awaitingAck =
-    unsavedChangeDetails.length === 0 &&
-    Boolean(frame.assigned_checksum) &&
-    frame.assigned_checksum !== frame.scenes_checksum
+    nothingNew && Boolean(frame.assigned_checksum) && frame.assigned_checksum !== frame.scenes_checksum
+  const sends = [
+    ...unsavedChangeDetails.map((change) => change.label),
+    ...(sceneUpdates.length > 0 ? [`newer versions of ${sceneUpdates.map((update) => update.name).join(', ')}`] : []),
+  ]
 
   return (
     <section className="space-y-2">
@@ -3124,8 +3132,8 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
             {
               label: 'This deploy sends',
               value:
-                unsavedChangeDetails.length > 0
-                  ? unsavedChangeDetails.map((change) => change.label).join(', ')
+                sends.length > 0
+                  ? capitalizeFirst(sends.join(', '))
                   : awaitingAck
                   ? 'Nothing new. The last push is still on its way; this would send it again.'
                   : 'No unsaved changes. This re-sends the current scenes.',
@@ -3140,7 +3148,7 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
               : "Save this frame's settings and push its scenes to the device"
           }
           onClick={() => {
-            saveAndDeployFrame()
+            deployWithSceneUpdates('deploy')
             onPushed()
           }}
           className={clsx(
@@ -3168,7 +3176,8 @@ function CloudOtaDeployView({
   onPushed: () => void
 }): JSX.Element {
   const { updateFrameFirmware } = useActions(framesModel)
-  const { saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
+  const { deployWithSceneUpdates } = useActions(sceneUpdatesLogic({ frameId: frame.id }))
+  const { selectedSceneUpdates: sceneUpdates } = useValues(sceneUpdatesLogic({ frameId: frame.id }))
   const { frameForm, unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
   // Mirrors CloudPiUpdateCard: one press converges firmware + scenes +
   // settings — but "converge" means "make equal", so when there is nothing
@@ -3177,8 +3186,10 @@ function CloudOtaDeployView({
   // reloaded and re-rendered for it: an e-ink flash and a page of log lines
   // per upgrade click.
   const [alsoPushScenes, setAlsoPushScenes] = useState(true)
+  // A ticked scene update is not in sync either: the resend updates it.
   const scenesInSync =
     unsavedChangeDetails.length === 0 &&
+    sceneUpdates.length === 0 &&
     Boolean(frame.assigned_checksum) &&
     frame.assigned_checksum === frame.scenes_checksum
   // Nothing assigned → nothing to resend; the tick is not offered.
@@ -3238,7 +3249,7 @@ function CloudOtaDeployView({
                     if (alsoPushScenes && offerResend) {
                       // Scenes first: the OTA reboot redelivers a queued push
                       // when the frame reconnects.
-                      saveAndDeployFrame()
+                      deployWithSceneUpdates('deploy')
                     }
                     updateFrameFirmware(frame.id)
                   }}
@@ -3270,7 +3281,15 @@ function CloudOtaDeployView({
                   a tick that sends nothing only invites the question of why
                   it is there, so the sentence stands alone. */}
                 {offerResend ? (
-                  <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
+                  <Checkbox
+                    label={
+                      sceneUpdates.length > 0
+                        ? `Deploy scenes & settings (${sceneUpdatesLabel(sceneUpdates)})`
+                        : 'Resend scenes & settings'
+                    }
+                    value={alsoPushScenes}
+                    onChange={setAlsoPushScenes}
+                  />
                 ) : hasScenes ? (
                   <div className="frame-tool-muted text-xs leading-4">
                     Scenes &amp; settings are already in sync — nothing extra is sent.
@@ -3616,7 +3635,8 @@ function CloudPiUpdateCard({
   releaseInfo: CloudFirmwareReleaseInfo
 }): JSX.Element | null {
   const { updateFrameFirmware } = useActions(framesModel)
-  const { saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
+  const { deployWithSceneUpdates } = useActions(sceneUpdatesLogic({ frameId: frame.id }))
+  const { selectedSceneUpdates: sceneUpdates } = useValues(sceneUpdatesLogic({ frameId: frame.id }))
   const { frameForm, unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
   // "One big button": converge the whole frame — firmware, scenes and
   // settings — in one press. Converge means "make equal": with nothing
@@ -3627,6 +3647,7 @@ function CloudPiUpdateCard({
   const [alsoPushScenes, setAlsoPushScenes] = useState(true)
   const scenesInSync =
     unsavedChangeDetails.length === 0 &&
+    sceneUpdates.length === 0 &&
     Boolean(frame.assigned_checksum) &&
     frame.assigned_checksum === frame.scenes_checksum
   // A frame with nothing assigned has nothing to resend either: the tick
@@ -3677,7 +3698,7 @@ function CloudPiUpdateCard({
               if (alsoPushScenes && offerResend) {
                 // Scenes first: the firmware update reboots the frame, and a
                 // queued push simply redelivers after it reconnects.
-                saveAndDeployFrame()
+                deployWithSceneUpdates('deploy')
               }
               updateFrameFirmware(frame.id)
             }}
@@ -3706,7 +3727,15 @@ function CloudPiUpdateCard({
               : 'Update FrameOS'}
           </button>
           {offerResend ? (
-            <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
+            <Checkbox
+              label={
+                sceneUpdates.length > 0
+                  ? `Deploy scenes & settings (${sceneUpdatesLabel(sceneUpdates)})`
+                  : 'Resend scenes & settings'
+              }
+              value={alsoPushScenes}
+              onChange={setAlsoPushScenes}
+            />
           ) : hasScenes ? (
             <div className="frame-tool-muted text-xs leading-4">
               Scenes &amp; settings are already in sync — nothing extra is sent.
@@ -3784,6 +3813,7 @@ function CloudDeploySection({
       {/* Directly under the status rows: "Offline — pushes queue on the
           account" is the sentence this section answers. */}
       <PendingActionsSection frame={frame} />
+      {activeView !== 'cloudUsb' ? <SceneUpdatesSection frame={frame} /> : null}
       {!isEsp32 ? (
         <>
           {/* Same order as the esp32 views: the release upgrade first (the
@@ -3856,11 +3886,13 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     loadDeployPlans,
     loadFrameSyncStatus,
     restartRemote,
-    saveAndFastDeployFrame,
-    saveAndFullDeployFrame,
     setFrameSyncItemChoice,
     setDeployWithAgent,
   } = useActions(frameLogic({ frameId: frame.id }))
+  // Every deploy here takes the ticked "Scene updates" along (both planes).
+  const { deployWithSceneUpdates } = useActions(sceneUpdatesLogic({ frameId: frame.id }))
+  const saveAndFastDeployFrame = (): void => deployWithSceneUpdates('fast')
+  const saveAndFullDeployFrame = (): void => deployWithSceneUpdates('full')
   const { closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const { applyEmbeddedFirmwareOta, cancelDeploy, downloadSdCardImage, loadFrame } = useActions(framesModel)
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
@@ -4063,6 +4095,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   this is normally empty. The exception is an ESP32 OTA
                   request recorded while its firmware is still building. */}
               <PendingActionsSection frame={frame} className="mb-4" />
+              <SceneUpdatesSection frame={frame} className="mb-4" />
               {!isEmbeddedFrame && !shellLess ? <AlternativesSection onSelect={showDeployDrawerView} /> : null}
               {canBootstrapFrameOS ? (
                 <div className="mb-4">

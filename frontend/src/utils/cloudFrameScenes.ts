@@ -1,4 +1,4 @@
-import type { EventMapRule, FrameScene, SceneLayoutRef } from '../types'
+import type { CloudSceneSource, EventMapRule, FrameScene, SceneLayoutRef } from '../types'
 
 // The cloud control plane stores a frame's scene list as store-scene
 // assignments (frame_scene_assignments rows), not as scene JSON on the frame
@@ -83,6 +83,35 @@ export function cloudSceneUpdateVersion(row: CloudFrameSceneRow): number | null 
     return null
   }
   return latest
+}
+
+/** A store scene on the frame with a newer version the account can install. */
+export interface CloudSceneUpdate {
+  storeSceneId: string
+  /** The first runtime scene's name: what the tiles call it. */
+  name: string
+  version: number
+}
+
+/**
+ * The store scenes the drawer's deploys move to their newest version, once
+ * each (a pack of several runtime scenes is one update), in scene order.
+ */
+export function pendingCloudSceneUpdates(frame: {
+  scenes?: readonly Partial<FrameScene>[] | null
+  cloud_scene_sources?: Record<string, CloudSceneSource> | null
+}): CloudSceneUpdate[] {
+  const sources = frame.cloud_scene_sources ?? {}
+  const updates: CloudSceneUpdate[] = []
+  for (const scene of frame.scenes ?? []) {
+    const source = scene?.id ? sources[scene.id] : undefined
+    const version = source?.update_version
+    if (!source?.scene_id || !version || updates.some((update) => update.storeSceneId === source.scene_id)) {
+      continue
+    }
+    updates.push({ storeSceneId: source.scene_id, name: scene.name || 'Untitled scene', version })
+  }
+  return updates
 }
 
 /** Cache key for a store scene's scenes.json fetch. */

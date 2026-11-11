@@ -47,6 +47,8 @@ import {
   esp32LedCloudFrameSettingKeys,
   esp32TouchBeepCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32TouchBeep,
+  esp32CpuModeCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32CpuMode,
   cloudFrameSupportsEsp32Led,
   esp32BuzzerCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Buzzer,
@@ -77,6 +79,8 @@ import {
   esp32LedFrameSettingKeys,
   esp32TouchBeepFrameSettingKeys,
   esp32TouchBeepFrameSettingsMinVersion,
+  esp32CpuModeFrameSettingKeys,
+  esp32CpuModeFrameSettingsMinVersion,
   esp32VoiceChatFrameSettingsMinVersion,
   esp32ExtendedFrameSettingKeys,
   esp32ExtendedFrameSettingsMinVersion,
@@ -180,7 +184,8 @@ describe("cloud settings push", () => {
         !esp32VoiceChatFrameSettingKeys.has(key) &&
         !esp32MicrophoneFrameSettingKeys.has(key) &&
         !esp32LedFrameSettingKeys.has(key) &&
-        !esp32TouchBeepFrameSettingKeys.has(key),
+        !esp32TouchBeepFrameSettingKeys.has(key) &&
+        !esp32CpuModeFrameSettingKeys.has(key),
     );
     expect(new Set(esp32CloudFrameSettingKeys)).toEqual(new Set(ungated));
     expect(new Set(esp32ExtendedCloudFrameSettingKeys)).toEqual(esp32ExtendedFrameSettingKeys);
@@ -349,6 +354,17 @@ describe("cloud settings push", () => {
     expect(esp32TouchBeepCloudFrameSettingsMinVersion).toBe(esp32TouchBeepFrameSettingsMinVersion);
     expect(cloudFrameSupportsEsp32TouchBeep("2026.11.5")).toBe(false);
     expect(cloudFrameSupportsEsp32TouchBeep("2026.11.6")).toBe(true);
+  });
+
+  it("gates the processor speed on its floor, a power key no older push carries", () => {
+    expect([...esp32CpuModeFrameSettingKeys]).toEqual(["cpu_mode"]);
+    expect(esp32CpuModeCloudFrameSettingsMinVersion).toBe(esp32CpuModeFrameSettingsMinVersion);
+    expect(cloudFrameSupportsEsp32CpuMode("2026.11.6")).toBe(false);
+    expect(cloudFrameSupportsEsp32CpuMode("2026.11.7")).toBe(true);
+    expect((esp32PowerSettingKeys as readonly string[]).includes("cpu_mode")).toBe(true);
+    expect(esp32CloudFrameSettingKeysForVersion("2026.11.6")).not.toContain("cpu_mode");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.11.7")).toContain("cpu_mode");
+    expect(esp32OnlySettableKeys.has("cpu_mode")).toBe(true);
   });
 
   it("gates the ESP32 status LED on the voice chat floor, as its own list", () => {

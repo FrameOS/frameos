@@ -899,6 +899,22 @@ export const cloudFramesContract = {
         }
       }
     },
+    "cpu_mode": {
+      "rule": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "battery",
+          "performance"
+        ]
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.11.7",
+          "restart": true
+        }
+      }
+    },
     "mic_clk_pin": {
       "rule": {
         "type": "int",

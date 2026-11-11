@@ -258,6 +258,84 @@ describe("cloud scene persistence", () => {
     ]);
   });
 
+  it("moves the named unedited scenes that have a newer version, a pin re-pinned, and no other", async () => {
+    // The deploy drawer's deploys: the store has v5 of a public install the
+    // frame holds at v3 and v2 of a pinned scene of the account's own. Both
+    // go out at their newest, the up-to-date scene stays, and nothing is
+    // published or forked for it.
+    const store = fakeStore();
+    store.scenes.set("public-1", {
+      history: { 3: [storedScene("rt-1", "Abstract Architecture")] },
+      owned: false,
+      scenes: [storedScene("rt-1", "Abstract Architecture v5")],
+      version: 5,
+    });
+    store.scenes.set("mine-1", {
+      history: { 1: [storedScene("rt-2", "Clock")] },
+      owned: true,
+      scenes: [storedScene("rt-2", "Clock v2")],
+      version: 2,
+    });
+    store.scenes.set("mine-2", { scenes: [storedScene("rt-3", "Weather")], owned: true, version: 4 });
+    // Has an update too, but the owner unticked it in the drawer.
+    store.scenes.set("public-2", {
+      history: { 1: [storedScene("rt-4", "Moon")] },
+      owned: false,
+      scenes: [storedScene("rt-4", "Moon v2")],
+      version: 2,
+    });
+    store.assignments = [
+      { assigned_version: 3, latest_version: 5, scene_id: "public-1" },
+      { assigned_version: 1, latest_version: 2, scene_id: "mine-1", scene_version: 1 },
+      { assigned_version: 4, latest_version: 4, scene_id: "mine-2" },
+      { assigned_version: 1, latest_version: 2, scene_id: "public-2" },
+    ];
+    installFetch(store);
+
+    const form = [
+      sanitizedCopy(storedScene("rt-1", "Abstract Architecture")),
+      sanitizedCopy(storedScene("rt-2", "Clock")),
+      sanitizedCopy(storedScene("rt-3", "Weather")),
+      sanitizedCopy(storedScene("rt-4", "Moon")),
+    ];
+    const outcome = await persistAndPushCloudFrameScenes(frameId, form, null, {
+      sceneUnchanged: workspaceEquality,
+      updateStoreSceneIds: ["public-1", "mine-1", "mine-2"],
+    });
+
+    expect(store.created).toEqual([]);
+    expect(store.updated).toEqual([]);
+    expect(outcome.updatedToLatest).toEqual({ "mine-1": 2, "public-1": 5 });
+    expect((store.pushes.at(-1) as { scenes: unknown[] }).scenes).toEqual([
+      { latest: true, scene_id: "public-1" },
+      { scene_id: "mine-1", scene_version: 2 },
+      { scene_id: "mine-2" },
+      { scene_id: "public-2" },
+    ]);
+  });
+
+  it("without updateStoreSceneIds a save reports no updates and moves nothing", async () => {
+    const store = fakeStore();
+    store.scenes.set("public-1", {
+      history: { 3: [storedScene("rt-1", "Abstract Architecture")] },
+      owned: false,
+      scenes: [storedScene("rt-1", "Abstract Architecture v5")],
+      version: 5,
+    });
+    store.assignments = [{ assigned_version: 3, latest_version: 5, scene_id: "public-1" }];
+    installFetch(store);
+
+    const outcome = await persistAndPushCloudFrameScenes(
+      frameId,
+      [sanitizedCopy(storedScene("rt-1", "Abstract Architecture"))],
+      null,
+      { sceneUnchanged: workspaceEquality },
+    );
+
+    expect(outcome.updatedToLatest).toEqual({});
+    expect((store.pushes.at(-1) as { scenes: unknown[] }).scenes).toEqual([{ scene_id: "public-1" }]);
+  });
+
   it("posts the install's button map beside the scene and never as scene content", async () => {
     // docs/events.md "Event map": the map is the install's, so a form scene
     // that only gained one is not an edit (no new version, no fork), the
