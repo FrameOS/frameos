@@ -11,8 +11,8 @@
 #
 # ios/bin/test-backend starts a throwaway backend for the tour. Extra
 # arguments go to xcodebuild (-only-testing:FrameOSUITests/SignInUITests).
-# FRAMEOS_UITEST_DEVICE picks the simulator by name (default: the newest
-# iPhone); the app is uninstalled first, so each run starts signed out.
+# FRAMEOS_UITEST_DEVICE picks the simulator by name, an iPad too (default:
+# the newest iPhone Pro); the app is uninstalled first, so each run starts signed out.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 command -v xcodegen >/dev/null || { echo "Install XcodeGen first: brew install xcodegen" >&2; exit 1; }
@@ -23,7 +23,7 @@ import json, os, re, sys
 wanted = os.environ.get("FRAMEOS_UITEST_DEVICE", "")
 devices = json.load(sys.stdin)["devices"]
 phones = [d for runtime in sorted(devices) if "iOS" in runtime for d in devices[runtime]
-          if d["name"].startswith("iPhone") and (not wanted or d["name"] == wanted)]
+          if ((d["name"] == wanted) if wanted else d["name"].startswith("iPhone"))]
 # The newest "iPhone N Pro" when there is one: a phone people have, not the SE.
 pro = sorted((d for d in phones if re.fullmatch(r"iPhone \d+ Pro", d["name"])), key=lambda d: int(d["name"].split()[1]))
 print((pro or phones)[-1]["udid"] if phones else "")

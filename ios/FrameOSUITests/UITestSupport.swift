@@ -49,6 +49,15 @@ extension XCTestCase {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
+    /// A tab: a tab bar at the bottom of an iPhone, a bar at the top of an
+    /// iPad (not a TabBar there). Both are buttons named by the tab's symbol.
+    @MainActor
+    func tab(_ app: XCUIApplication, _ name: String) -> XCUIElement {
+        let symbols = ["Frames": "photo.on.rectangle", "Scenes": "square.grid.2x2", "Photos": "photo.stack",
+                       "AI": "sparkles", "Settings": "gearshape"]
+        return app.buttons.matching(NSPredicate(format: "label == %@ AND identifier == %@", name, symbols[name] ?? name)).firstMatch
+    }
+
     @MainActor
     func type(_ field: XCUIElement, _ text: String) {
         XCTAssertTrue(field.waitForExistence(timeout: 10), "no field \(field)")

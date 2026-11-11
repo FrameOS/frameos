@@ -142,13 +142,13 @@ final class TourUITests: XCTestCase {
         }
 
         // The other tabs.
-        for (tab, shot) in [("Scenes", "30 scenes"), ("Photos", "31 photos"), ("AI", "32 ai"), ("Settings", "33 settings")] {
-            app.tabBars.buttons[tab].tap()
+        for (name, shot) in [("Scenes", "30 scenes"), ("Photos", "31 photos"), ("AI", "32 ai"), ("Settings", "33 settings")] {
+            tab(app, name).tap()
             sleep(3)
             snapshot(app, "\(prefix)\(shot)")
         }
         photos(app, prefix: prefix, frame: frame)
-        app.tabBars.buttons["Frames"].tap()
+        tab(app, "Frames").tap()
     }
 
     /// An album: made, a photo uploaded through the system picker (ios/bin/ui-test
@@ -156,7 +156,7 @@ final class TourUITests: XCTestCase {
     @MainActor
     func photos(_ app: XCUIApplication, prefix: String, frame: String) {
         let album = "Tour \(Int(Date().timeIntervalSince1970) % 100_000)"
-        app.tabBars.buttons["Photos"].tap()
+        tab(app, "Photos").tap()
         app.navigationBars.buttons["Add"].tap()
         button(app, containing: "New album").tap()
         let name = app.alerts.textFields.firstMatch
@@ -237,7 +237,7 @@ final class TourUITests: XCTestCase {
         app.navigationBars.buttons.element(boundBy: 0).tap()
 
         // The frame, showing the photo the phone uploaded.
-        app.tabBars.buttons["Frames"].tap()
+        tab(app, "Frames").tap()
         sleep(20) // the frame renders the album
         app.swipeDown()
         sleep(5)
