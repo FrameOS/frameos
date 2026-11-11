@@ -234,5 +234,5 @@ bigger with it than without: the module's code 8.6 KB and its strings
   pass), and opened by name the switcher knows no scene it came from, so the
   dispatcher has nothing to add to a `setCurrentScene`.
 
-The scene store's pages and its host are 27 KB more
+The scene store's pages and its host are 27.6 KB more
 ([scene-store-on-frame.md](scene-store-on-frame.md), "Flash and memory").

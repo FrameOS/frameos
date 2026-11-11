@@ -141,15 +141,15 @@ disk. That is what "installed" and Update are measured against.
 
 ## Flash and memory
 
-The generic ESP32-S3 image is **27,040 bytes** bigger with it than without
-(3,230,800 → 3,257,840 B, 90.4% of the 3520K app slot; measured 2026-11-11
-against #702's head, both built in the CI image at the same path):
+The generic ESP32-S3 image is **27,568 bytes** bigger with it than without
+(3,230,800 → 3,258,368 B, 90.4% of the 3520K app slot; measured 2026-11-11
+against main with #702 in it, both built in the CI image at the same path):
 
 | Part | Bytes |
 |---|---|
 | The two pages (`store.nim`: the trees, the rows, the handler) | 12.2 K |
 | The switcher's side (the tile, a long press, the pages' keys, `pageTree`) | 3.7 K |
-| `fos_store.c` + `fos_store_scan.c` | 5.1 K |
+| `fos_store.c` + `fos_store_scan.c` | 5.6 K |
 | Their strings and type info | 6.0 K |
 
 The first build was 30.9 K. What took it down and keeps it there:
