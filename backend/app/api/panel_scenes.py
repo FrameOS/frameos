@@ -172,6 +172,21 @@ def _remap_scene_ids(scene: dict[str, Any], ids: dict[str, str]) -> dict[str, An
     return {**scene, "nodes": nodes}
 
 
+def _carried(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    """`new` in place of `old`: the frame's name for it, its default flag,
+    button map, layout and the values set on it stay."""
+    return {
+        **old,
+        "nodes": new.get("nodes"),
+        "edges": new.get("edges"),
+        "apps": new.get("apps"),
+        "fields": _merge_field_values(old.get("fields"), new.get("fields")),
+        "customEvents": new.get("customEvents"),
+        "settings": new.get("settings"),
+        "origin": new.get("origin"),
+    }
+
+
 def updated_scenes(saved: list[Any], store_scene_id: str, new_scenes: list[dict[str, Any]]) -> list[Any]:
     """The saved list with the installed copies of a store scene moved to the
     new version, as the workspace's "Update" does (sceneUpdatesLogic
@@ -196,18 +211,7 @@ def updated_scenes(saved: list[Any], store_scene_id: str, new_scenes: list[dict[
         if new is None or _store_scene_of(scene) != store_scene_id:
             result.append(scene)
             continue
-        result.append(
-            {
-                **scene,
-                "nodes": new.get("nodes"),
-                "edges": new.get("edges"),
-                "apps": new.get("apps"),
-                "fields": _merge_field_values(scene.get("fields"), new.get("fields")),
-                "customEvents": new.get("customEvents"),
-                "settings": new.get("settings"),
-                "origin": new.get("origin"),
-            }
-        )
+        result.append(_carried(scene, new))
     return result
 
 
@@ -326,6 +330,10 @@ async def _panel_scenes(request: Request, id: int | None, authorization: str | N
                 await _show(db, redis, frame, str(installed[0]["id"]))
                 return {"ok": True, "status": "queued", "already_assigned": True}
             scenes = await fetch_store_scenes(provider, store_scene_id)
+            # A saved scene of the same id (an older copy from elsewhere) is
+            # replaced as an update replaces it: its values, map and layout stay.
+            by_id = {scene.get("id"): scene for scene in saved}
+            scenes = [_carried(by_id[scene["id"]], scene) if scene["id"] in by_id else scene for scene in scenes]
             new_ids = {scene["id"] for scene in scenes}
             kept = [scene for scene in saved if scene.get("id") not in new_ids]
             await _save(db, redis, frame, [*kept, *scenes], f"Installed on the frame's screen: {scenes[0].get('name') or scenes[0]['id']}")
@@ -355,7 +363,11 @@ async def _panel_scenes(request: Request, id: int | None, authorization: str | N
             return _refused("already_assigned", HTTPStatus.CONFLICT)
         scenes = await fetch_store_scenes(provider, store_scene_id)
         held = {scene.get("id") for scene in saved}
-        previewed = [scene for scene in scenes if scene["id"] not in held] or scenes
+        previewed = [scene for scene in scenes if scene["id"] not in held]
+        if not previewed:
+            # Its scenes go by the ids of scenes the frame holds: a preview
+            # would push two of one id. Installing it is what replaces them.
+            return _refused("already_assigned", HTTPStatus.CONFLICT)
         shown = str(previewed[0]["id"])
         outcome = await queue_embedded_scene_preview(
             db, redis, frame, [*saved, *previewed], shown, source="panel"

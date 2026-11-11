@@ -19,3 +19,9 @@ int fos_store_split_scenes(const char *json, size_t len, const char **starts, si
  * keys (no app's `origin` has a storeSceneId). `store` gets the uuid ("" for
  * none), `*version` the version (0 for none). */
 void fos_store_read_origin(const char *json, char *store, size_t store_len, int *version);
+
+/* A scene object's own `"default": true` (the scene a frame boots to) made
+ * `"default": null` in place, the same length: a scene installed from the
+ * store does not take the frame's default from the owner. Keys of nested
+ * objects are left alone. */
+void fos_store_clear_default(char *scene, size_t len);

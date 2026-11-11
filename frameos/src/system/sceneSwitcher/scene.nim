@@ -423,9 +423,11 @@ proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
   let action = payload{"action"}.getStr()
   let steps = if action == "press": 1 elif action == "doublePress": 2 else: 0
   let role = payload{"role"}.getStr()
-  if steps > 0 and self.view().len > 0:
-    self.pressedOnPage(role, if role in ["primary", "refresh", "menu"]: 1 else: steps)
-    self.touch()
+  if self.view().len > 0:
+    # The store's pages: a key held is a press there (the tiles are hidden).
+    if steps > 0 or action == "longPress":
+      self.pressedOnPage(role, if steps == 0 or role in ["primary", "refresh", "menu"]: 1 else: steps)
+      self.touch()
   elif steps > 0 or (action == "longPress" and role == "primary"):
     if self.entries.len == 0:
       self.entries = listEntries()

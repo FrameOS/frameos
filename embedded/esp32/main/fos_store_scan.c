@@ -60,3 +60,34 @@ void fos_store_read_origin(const char *json, char *store, size_t store_len, int 
     const char *next = at + n + 1;
     if (strncmp(next, ",\"version\":\"", 12) == 0) *version = atoi(next + 12);
 }
+
+void fos_store_clear_default(char *scene, size_t len)
+{
+    static const char key[] = "\"default\"";
+    int depth = 0;
+    bool in_string = false, escaped = false;
+    for (size_t i = 0; scene != NULL && i < len; i++) {
+        char c = scene[i];
+        if (in_string) {
+            if (escaped) escaped = false;
+            else if (c == '\\') escaped = true;
+            else if (c == '"') in_string = false;
+        } else if (c == '{' || c == '[') {
+            depth++;
+        } else if (c == '}' || c == ']') {
+            depth--;
+        } else if (c == '"') {
+            /* A key of the scene object itself, followed by `: true`. */
+            if (depth == 1 && i + sizeof(key) - 1 <= len && memcmp(scene + i, key, sizeof(key) - 1) == 0) {
+                size_t j = i + sizeof(key) - 1;
+                while (j < len && (scene[j] == ' ' || scene[j] == '\n' || scene[j] == '\r' || scene[j] == '\t')) j++;
+                if (j < len && scene[j] == ':') {
+                    j++;
+                    while (j < len && (scene[j] == ' ' || scene[j] == '\n' || scene[j] == '\r' || scene[j] == '\t')) j++;
+                    if (j + 4 <= len && memcmp(scene + j, "true", 4) == 0) memcpy(scene + j, "null", 4);
+                }
+            }
+            in_string = true;
+        }
+    }
+}

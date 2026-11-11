@@ -170,11 +170,12 @@ proc storeScenes(store: string): tuple[scenes: seq[JsonNode], error: string] =
 
 proc saveHere(scenes: JsonNode, show: string) =
   ## The frame's own scenes, as its admin page saves them, and the runtime
-  ## reloads them; then `show`.
+  ## reloads them; then `show`. From the runtime itself (`system`), as the
+  ## frame page's reload is: the contract lets no panel ask either.
   persistScenesPayload(scenes)
-  sendEvent(evReload, newJObject(), eoPanel)
+  sendEvent(evReload, newJObject(), eoSystem)
   if show.len > 0:
-    sendEvent(evSetCurrentScene, %*{"sceneId": show}, eoPanel)
+    sendEvent(evSetCurrentScene, %*{"sceneId": show}, eoSystem)
 
 proc installHere(store: string, show: bool): tuple[error, first: string] =
   let (scenes, error) = storeScenes(store)
@@ -191,14 +192,18 @@ proc installHere(store: string, show: bool): tuple[error, first: string] =
     else:
       # Installed again (an update): the values set on the frame stay.
       for fresh in scenes:
-        if fresh{"id"}.getStr() == id and not scene{"fields"}.isNil and fresh{"fields"}.kind == JArray:
+        if fresh{"id"}.getStr() == id and scene{"fields"}.getElems().len > 0 and
+            fresh{"fields"}.getElems().len > 0:
           for field in fresh["fields"].getElems():
             for old in scene["fields"].getElems():
               if old{"name"}.getStr() == field{"name"}.getStr() and old{"type"} == field{"type"} and
                   old.hasKey("value"):
                 field["value"] = old["value"]
   for scene in scenes:
-    scene.delete("default")
+    # The frame's default stays the owner's (json's `delete` raises on a
+    # missing key).
+    if scene.hasKey("default"):
+      scene.delete("default")
     saved.add scene
   saveHere(saved, if show: ids[0] else: "")
   ("", ids[0])
@@ -220,68 +225,96 @@ proc removeHere(store, id, show: string): string =
 
 # ----------------------------------------------------------------- the work
 
+proc work(job: var Job, error, done: var string) =
+  ## The job's work. `error` gets a code for the page, `done` what worked.
+  var status, previewId: string
+  if job.store.len == 0 and job.id.len > 0:
+    # A scene on the frame names its store scene by its id: read off the
+    # scenes as they are now (a push may have landed since the last read).
+    for origin in readOrigins():
+      if origin.id == job.id:
+        job.store = origin.store
+  case job.action
+  of "browse":
+    let url = storeBase() & "/api/store/device/scenes?categories=1&page=" & $job.page & "&version=" &
+      encodeUrl(installedFrameOSVersion()) & "&q=" & encodeUrl(job.query) & "&category=" & encodeUrl(job.category)
+    let (body, failed) = get(url, ListingMaxBytes)
+    error = failed
+    done = ""
+    if failed.len == 0:
+      # What the listing is for changes with it, so a failed page turn
+      # stays on the page that shows.
+      withLock factsLock:
+        facts.listing = body
+        facts.query = job.query
+        facts.category = job.category
+        facts.page = job.page
+  of "info":
+    done = ""
+    if job.store.len > 0:
+      let (body, failed) = get(storeBase() & "/api/store/device/scenes/" & encodeUrl(job.store), InfoMaxBytes)
+      error = failed
+      if failed.len == 0:
+        withLock factsLock:
+          if facts.infoId == job.id:
+            facts.info = body
+  of "scan":
+    done = ""
+  else:
+    var previewFrom, previewStore: string
+    withLock factsLock:
+      previewFrom = facts.previewFrom
+      previewStore = facts.previewStore
+    let
+      cloud = cloudPlane()
+      local = job.action in ["preview", "discard"]
+    if cloud.url.len > 0:
+      let answer = askPlane(cloud.url, cloud.token, job.action,
+        if job.action == "discard": previewFrom else: job.store)
+      (error, status, previewId) = answer
+    elif job.backendUrl.len > 0 and not local:
+      let answer = askPlane(job.backendUrl & "/api/panel/scenes", job.backendKey, job.action, job.store)
+      (error, status, previewId) = answer
+    else:
+      # This frame's own: a frame with no plane, or a backend's preview.
+      case job.action
+      of "install", "preview", "update":
+        (error, previewId) = installHere(job.store, job.action != "update")
+      of "remove":
+        error = removeHere(job.store, job.id, "")
+      of "discard":
+        error = removeHere(previewStore, "", previewFrom)
+      else: discard
+    if status == "up_to_date":
+      done = "uptodate"
+    if error.len == 0:
+      withLock factsLock:
+        if job.action == "preview":
+          facts.previewStore = job.store
+          facts.previewId = previewId
+          facts.previewName = job.name
+          facts.previewFrom = job.origin
+        elif job.action == "discard" or facts.previewStore == job.store:
+          facts.previewStore = ""
+
 proc run(job: Job) {.gcsafe.} =
   {.cast(gcsafe).}:
     var
+      job = job
       error = ""
       done = job.action
-      status, previewId: string
-    case job.action
-    of "browse":
-      var url = storeBase() & "/api/store/device/scenes?categories=1&page=" & $job.page & "&version=" &
-        encodeUrl(installedFrameOSVersion()) & "&q=" & encodeUrl(job.query) & "&category=" & encodeUrl(job.category)
-      let (body, failed) = get(url, ListingMaxBytes)
-      error = failed
-      done = ""
-      if failed.len == 0:
-        withLock factsLock:
-          facts.listing = body
-    of "info":
-      let (body, failed) = get(storeBase() & "/api/store/device/scenes/" & encodeUrl(job.store), InfoMaxBytes)
-      error = failed
-      done = ""
-      if failed.len == 0:
-        withLock factsLock:
-          facts.info = body
-    of "scan":
-      done = ""
-    else:
-      var previewFrom, previewStore: string
-      withLock factsLock:
-        previewFrom = facts.previewFrom
-        previewStore = facts.previewStore
-      let
-        cloud = cloudPlane()
-        local = job.action in ["preview", "discard"]
-      if cloud.url.len > 0:
-        let answer = askPlane(cloud.url, cloud.token, job.action,
-          if job.action == "discard": previewFrom else: job.store)
-        (error, status, previewId) = answer
-      elif job.backendUrl.len > 0 and not local:
-        let answer = askPlane(job.backendUrl & "/api/panel/scenes", job.backendKey, job.action, job.store)
-        (error, status, previewId) = answer
-      else:
-        # This frame's own: a frame with no plane, or a backend's preview.
-        case job.action
-        of "install", "preview", "update":
-          (error, previewId) = installHere(job.store, job.action != "update")
-        of "remove":
-          error = removeHere(job.store, job.id, "")
-        of "discard":
-          error = removeHere(previewStore, "", previewFrom)
-        else: discard
-      if status == "up_to_date":
-        done = "uptodate"
-      if error.len == 0:
-        withLock factsLock:
-          if job.action == "preview":
-            facts.previewStore = job.store
-            facts.previewId = previewId
-            facts.previewName = job.name
-            facts.previewFrom = job.origin
-          elif job.action == "discard" or facts.previewStore == job.store:
-            facts.previewStore = ""
-    let origins = readOrigins()
+    try:
+      work(job, error, done)
+    except Exception as e:
+      # Nothing that goes wrong here may end the thread (and with it the
+      # runtime): the page says it did not work.
+      log(%*{"event": "sceneStore:error", "action": job.action, "error": e.msg})
+      error = "failed"
+    var origins: seq[Origin]
+    try:
+      origins = readOrigins()
+    except Exception:
+      discard
     withLock factsLock:
       facts.origins = origins
       # A re-read is nobody's: what the page says, and a tap waiting behind
@@ -334,10 +367,17 @@ proc linuxSceneStoreRead*(): JsonNode {.nimcall, gcsafe, raises: [].} =
       let config = runnerConfig()
       if config == nil or not framePageOffered(config):
         return nil
-      var f: StoreFacts
+      var
+        f: StoreFacts
+        opened = false
       withLock factsLock:
+        # Opened again: what came from the store is read again (a push may
+        # have changed the scenes since), off this thread.
+        opened = not shown and facts.busy.len == 0
         shown = true
         f = facts
+      if opened:
+        queue(Job(action: "scan"))
       let installed = newJArray()
       for origin in f.origins:
         installed.add %*{"id": origin.id, "store": origin.store, "v": origin.version}
@@ -366,11 +406,9 @@ proc linuxSceneStoreAction*(action: string, args: JsonNode) {.nimcall, gcsafe, r
         # One thing at a time: the page says what is running.
         if facts.busy.len > 0:
           return
-        # A scene on the frame names its store scene by its id.
-        if job.store.len == 0 and job.id.len > 0:
-          for origin in facts.origins:
-            if origin.id == job.id:
-              job.store = origin.store
+        job.query = facts.query
+        job.category = facts.category
+        job.page = facts.page
         case action
         of "open":
           if facts.listing.len > 0:
@@ -378,21 +416,17 @@ proc linuxSceneStoreAction*(action: string, args: JsonNode) {.nimcall, gcsafe, r
           else:
             job.action = "browse"
         of "browse":
-          if args.hasKey("q"): facts.query = args{"q"}.getStr()
-          if args.hasKey("category"): facts.category = args{"category"}.getStr()
+          # What it asks for; the facts follow once the store answered.
+          if args.hasKey("q"): job.query = args{"q"}.getStr()
+          if args.hasKey("category"): job.category = args{"category"}.getStr()
           if args.hasKey("page"):
-            try: facts.page = max(1, parseInt(args{"page"}.getStr()))
-            except ValueError: facts.page = 1
+            try: job.page = max(1, parseInt(args{"page"}.getStr()))
+            except ValueError: job.page = 1
         of "info":
           facts.infoId = job.id
           facts.info = ""
-          if job.store.len == 0:
-            return # not from the store: nothing to ask
         of "preview", "install", "update", "remove", "discard": discard
         else: return
-        job.query = facts.query
-        job.category = facts.category
-        job.page = facts.page
         if job.action != "scan":
           facts.busy = job.action
           facts.error = ""

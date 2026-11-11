@@ -66,6 +66,17 @@ int main(void)
     fos_store_read_origin("{\"origin\":{\"storeSceneId\":\"abc\"}}", store, sizeof(store), &version);
     assert(strcmp(store, "abc") == 0 && version == 0);
 
+    /* The scene's own default goes; a nested one, a string, stay. */
+    char scene[] = "{\"id\":\"a\",\"settings\":{\"default\":true},\"name\":\"\\\"default\\\": true\","
+                   "\"default\" : true,\"fields\":[{\"default\":true}]}";
+    fos_store_clear_default(scene, strlen(scene));
+    assert(strcmp(scene, "{\"id\":\"a\",\"settings\":{\"default\":true},\"name\":\"\\\"default\\\": true\","
+                         "\"default\" : null,\"fields\":[{\"default\":true}]}") == 0);
+    char plain[] = "{\"id\":\"a\",\"default\":false}";
+    fos_store_clear_default(plain, strlen(plain));
+    assert(strcmp(plain, "{\"id\":\"a\",\"default\":false}") == 0);
+    fos_store_clear_default(NULL, 0);
+
     puts("fos_store_scan: ok");
     return 0;
 }

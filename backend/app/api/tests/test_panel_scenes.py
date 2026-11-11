@@ -224,3 +224,24 @@ async def test_a_pi_asks_without_its_id(async_client, no_auth_client, db, store)
     assert [scene["id"] for scene in frame.scenes] == ["clock-1", "radar-rt"]
     wrong = await no_auth_client.post("/api/panel/scenes", json={"action": "install", "scene_id": RADAR})
     assert wrong.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_a_scene_of_the_same_id_is_replaced_keeping_its_values(async_client, no_auth_client, db, store):
+    frame = await panel_frame(async_client, db)
+    # An older copy, from before the store stamped its origin.
+    frame.scenes = [*frame.scenes, {"id": "radar-rt", "name": "My radar", "nodes": [], "edges": [],
+                                    "fields": [{"name": "city", "type": "string", "value": "Ghent"}]}]
+    db.add(frame)
+    db.commit()
+    store[RADAR] = store_scene(RADAR, 3)
+    # A preview would push two scenes of one id.
+    preview = await ask(no_auth_client, frame, {"action": "preview", "scene_id": RADAR})
+    assert preview.status_code == 409
+    response = await ask(no_auth_client, frame, {"action": "install", "scene_id": RADAR})
+    assert response.status_code == 200, response.text
+    db.refresh(frame)
+    assert [scene["id"] for scene in frame.scenes] == ["clock-1", "radar-rt"]
+    radar = frame.scenes[1]
+    assert radar["name"] == "My radar" and radar["fields"][0]["value"] == "Ghent"
+    assert radar["origin"]["storeSceneId"] == RADAR and radar["origin"]["version"] == "3"

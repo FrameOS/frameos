@@ -2,7 +2,18 @@ import std/[json, os, times]
 import ../scene_store_linux
 import ../server/api
 import ../config
+import ../channels
 import system/sceneSwitcher/scene as sceneSwitcher
+
+# What the worker asks of the runtime (the runner's channel), with who asks:
+# the contract lets no panel reload or switch, so a local change goes out as
+# the runtime's own.
+proc sentEvents(): seq[(string, EventOrigin)] =
+  while true:
+    let (ok, message) = eventChannel.tryRecv()
+    if not ok:
+      break
+    result.add((message[1], message[3]))
 
 # The scene store on a Linux frame's own screen (docs/scene-store-on-frame.md),
 # for a frame with no control plane: what came from the store is read off its
@@ -56,6 +67,8 @@ block a_store_scene_is_removed_from_the_frames_own_scenes:
   doAssert facts{"installed"}.len == 0
   let left = loadScenePayload()
   doAssert left.len == 1 and left[0]{"id"}.getStr() == "clock", $left
+  let sent = sentEvents()
+  doAssert ("reload", eoSystem) in sent, "the runtime reloads what was saved: " & $sent
   # The last one stays.
   linuxSceneStoreAction("remove", %*{"id": "clock", "store": ""})
   doAssert waitIdle(){"error"}.getStr() == "last_scene"

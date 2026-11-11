@@ -238,6 +238,16 @@ block the_keys_walk_the_buttons_of_a_page:
   # The first button is Back.
   scene.send("button", %*{"action": "press", "role": "primary"})
   doAssert scene.state{"view"}.getStr() == ""
+  # Held on the store's page: the lit button, never the hidden tiles.
+  scene.send("button", %*{"action": "press", "role": "primary"})
+  doAssert scene.state{"view"}.getStr() == "store"
+  discard scene.draw()
+  scene.send("button", %*{"action": "longPress", "role": "primary"})
+  doAssert scene.state{"view"}.getStr() == "store", "nothing lit: held, nothing happens"
+  scene.send("button", %*{"action": "press", "role": "next"})
+  discard scene.draw()
+  scene.send("button", %*{"action": "longPress", "role": "primary"})
+  doAssert scene.state{"view"}.getStr() == "", "Back was lit: held, it goes back"
   # Pressed twice on a scene's tile: its page.
   scene.send("button", %*{"action": "press", "role": "prev"})
   scene.send("button", %*{"action": "doublePress", "role": "primary"})

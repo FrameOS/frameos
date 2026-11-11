@@ -95,6 +95,9 @@ typedef struct {
     char job_id[SCENE_ID_LEN];
     char job_name[NAME_LEN];
     char job_from[SCENE_ID_LEN];
+    char job_query[104]; /* a browse's: what the listing becomes once it came */
+    char job_category[WORD_LEN];
+    int job_page;
 } store_t;
 
 static SemaphoreHandle_t s_lock;
@@ -244,29 +247,28 @@ void fos_store_action(const char *action, const char *args_json)
             job = S->listing == NULL ? "browse" : NULL;
         } else if (!ok) {
             job = NULL; /* "close": the switcher's own news, fos_scenes_switcher_shown */
-        } else if (strcmp(action, "browse") == 0) {
-            copy_arg(args, "q", S->query, sizeof(S->query));
-            copy_arg(args, "category", S->category, sizeof(S->category));
+        }
+        /* What a browse asks for; the page shows it once the store answered,
+         * so a failed page turn stays on the page that shows. */
+        snprintf(S->job_query, sizeof(S->job_query), "%s", S->query);
+        snprintf(S->job_category, sizeof(S->job_category), "%s", S->category);
+        S->job_page = S->page;
+        if (job != NULL && strcmp(job, "browse") == 0) {
+            copy_arg(args, "q", S->job_query, sizeof(S->job_query));
+            copy_arg(args, "category", S->job_category, sizeof(S->job_category));
             char page[8] = "";
             copy_arg(args, "page", page, sizeof(page));
-            if (page[0]) S->page = atoi(page) > 0 ? atoi(page) : 1;
+            if (page[0]) S->job_page = atoi(page) > 0 ? atoi(page) : 1;
         }
         S->job_store[0] = S->job_id[0] = S->job_name[0] = S->job_from[0] = '\0';
         copy_arg(args, "store", S->job_store, sizeof(S->job_store));
         copy_arg(args, "id", S->job_id, sizeof(S->job_id));
         copy_arg(args, "name", S->job_name, sizeof(S->job_name));
         copy_arg(args, "from", S->job_from, sizeof(S->job_from));
-        /* A scene on the frame names its store scene by its id. */
-        for (int i = 0; !S->job_store[0] && S->job_id[0] && i < S->origin_count; i++) {
-            if (strcmp(S->origins[i].id, S->job_id) == 0) {
-                snprintf(S->job_store, sizeof(S->job_store), "%s", S->origins[i].store);
-            }
-        }
         if (job != NULL && strcmp(job, "info") == 0) {
             snprintf(S->info_id, sizeof(S->info_id), "%s", S->job_id);
             free(S->info);
             S->info = NULL;
-            if (!S->job_store[0]) job = NULL; /* not from the store: nothing to ask */
         }
         if (job != NULL) {
             snprintf(S->busy, sizeof(S->busy), "%s", job);
@@ -387,11 +389,14 @@ static const char *ask_plane(const char *url, const char *auth, bool backend, co
 
 /* The scenes on the frame that came from the store, read again. A scene whose
  * content is what was read last time is not opened. */
-static void scan_origins(void)
+static bool scan_origins(void)
 {
+    bool changed = false;
     uint32_t generation = fos_scenes_store_generation();
     cJSON *index = fos_scenes_read_index();
     origin_t *found = fos_big_malloc(sizeof(origin_t) * FOS_SCENE_STORE_SLOTS);
+    /* Zeroed: the rows are compared whole with the last read's. */
+    if (found != NULL) memset(found, 0, sizeof(origin_t) * FOS_SCENE_STORE_SLOTS);
     int count = 0;
     const cJSON *entry = NULL;
     cJSON_ArrayForEach(entry, cJSON_GetObjectItem(index, "scenes")) {
@@ -419,12 +424,14 @@ static void scan_origins(void)
     cJSON_Delete(index);
     lock();
     if (found != NULL) {
+        changed = count != S->origin_count || memcmp(S->origins, found, sizeof(origin_t) * (size_t)count) != 0;
         memcpy(S->origins, found, sizeof(origin_t) * (size_t)count);
         S->origin_count = count;
     }
     S->origins_generation = generation;
     unlock();
     free(found);
+    return changed;
 }
 
 /* A frame with no control plane installs a store scene itself: its
@@ -444,6 +451,8 @@ static const char *install_here(const char *store, bool show, char *first, size_
     first[0] = '\0';
     for (int i = 0; i < count && error == NULL; i++) {
         char id[SCENE_ID_LEN];
+        /* The frame's default stays the owner's. */
+        fos_store_clear_default((char *)starts[i], lens[i]);
         esp_err_t err = fos_scenes_put(starts[i], lens[i], FOS_SCENES_SOURCE_LOCAL, show, id, sizeof(id));
         if (err != ESP_OK) error = err == ESP_ERR_NO_MEM ? "no_room" : "store_unavailable";
         else if (!first[0]) snprintf(first, first_len, "%s", id);
@@ -491,13 +500,27 @@ static void run(const char *job)
     snprintf(name, sizeof(name), "%s", S->job_name);
     snprintf(from, sizeof(from), "%s", S->job_from);
     char query[sizeof(S->query)], category[WORD_LEN];
-    snprintf(query, sizeof(query), "%s", S->query);
-    snprintf(category, sizeof(category), "%s", S->category);
-    int page = S->page;
+    snprintf(query, sizeof(query), "%s", S->job_query);
+    snprintf(category, sizeof(category), "%s", S->job_category);
+    int page = S->job_page;
     if (strcmp(job, "discard") == 0) snprintf(from, sizeof(from), "%s", S->preview_from);
+    bool stale = S->origins_generation != fos_scenes_store_generation();
     unlock();
+    /* A scene on the frame names its store scene by its id: read off the
+     * scenes as they are now (a push may have landed since the last read). */
+    bool changed = false;
+    if (!store[0] && id[0]) {
+        if (stale) changed = scan_origins();
+        lock();
+        for (int i = 0; !store[0] && i < S->origin_count; i++) {
+            if (strcmp(S->origins[i].id, id) == 0) snprintf(store, sizeof(store), "%s", S->origins[i].store);
+        }
+        unlock();
+    }
 
-    if (strcmp(job, "browse") == 0 || strcmp(job, "info") == 0) {
+    if (strcmp(job, "info") == 0 && !store[0]) {
+        done = ""; /* not from the store: nothing to ask */
+    } else if (strcmp(job, "browse") == 0 || strcmp(job, "info") == 0) {
         char *body = NULL;
         store_base(url, sizeof(url));
         size_t n = strlen(url);
@@ -513,11 +536,18 @@ static void run(const char *job)
         error = fetch(url, job[0] == 'b' ? LISTING_MAX : INFO_MAX, true, &body, NULL);
         lock();
         char **slot = job[0] == 'b' ? &S->listing : &S->info;
-        if (body != NULL) {
+        if (body != NULL && (job[0] == 'b' || strcmp(S->info_id, id) == 0)) {
             free(*slot);
             *slot = body;
+            body = NULL;
+            if (job[0] == 'b') {
+                snprintf(S->query, sizeof(S->query), "%s", query);
+                snprintf(S->category, sizeof(S->category), "%s", category);
+                S->page = page;
+            }
         }
         unlock();
+        free(body);
         done = "";
     } else if (strcmp(job, "scan") != 0) {
         bool backend = false, pending = false;
@@ -555,7 +585,7 @@ static void run(const char *job)
         unlock();
     }
     bool scan = strcmp(job, "scan") == 0;
-    if (scan || fos_scenes_store_generation() != S->origins_generation) scan_origins();
+    if (scan || fos_scenes_store_generation() != S->origins_generation) changed = scan_origins() || changed;
     lock();
     /* A re-read is nobody's: what the page says, and a tap waiting behind
      * it, stay as they are. */
@@ -565,7 +595,8 @@ static void run(const char *job)
         snprintf(S->done, sizeof(S->done), "%s", error ? "" : done);
     }
     unlock();
-    if (fos_scenes_switcher_shown()) fos_client_render_now();
+    /* A re-read that found what the page shows already draws nothing. */
+    if ((!scan || changed) && fos_scenes_switcher_shown()) fos_client_render_now();
 }
 
 static void store_task(void *arg)
