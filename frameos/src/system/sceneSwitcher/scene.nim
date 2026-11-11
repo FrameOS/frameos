@@ -41,6 +41,9 @@ import frameos/ui/tree
 import frameos/utils/font
 import frameos/utils/image
 import frameos/utils/svg_frames
+import ./store
+
+export store
 
 {.push overflowChecks: off, rangeChecks: off, boundChecks: off, fieldChecks: off, stackTrace: off,
   lineTrace: off.}
@@ -73,6 +76,7 @@ type
     entries*: seq[SwitcherEntry] ## what the last render or key listed
     paper*: bool ## drawn for e-paper last time (paperPanel)
     roomW, roomH, unit: int ## what the last render laid out in (tree): 0 before one
+    storeTile*: bool ## the last tile is the scene store's (store.nim): the host offers one
 
 const
   SwitcherNode = 1 ## the ui/events target its tiles live in
@@ -80,6 +84,15 @@ const
   IdleSecondsPaper* = 300.0
   MaxCols = 6
   MaxRows = 6
+  # What a handler number means: a tile's index below HStoreTile, then the
+  # store's tile, Close and the page arrows, a tile held (HInfo + its index:
+  # the scene's page), and from store.HBack on the store's two pages.
+  HStoreTile* = 1000
+  HClose* = 1001
+  HPrevArrow* = 1002
+  HNextArrow* = 1003
+  HInfo* = 2000
+  StoreSlot = "+store" ## the store tile's place in `highlight`
   # The page arrows, drawn (no font has to have the glyph): one markup, its
   # path's points either way.
   ChevronHead = "<svg viewBox=\"0 0 24 24\"><path d=\"M"
@@ -89,10 +102,15 @@ var
   sceneSwitcherListing*: SwitcherListing
   sceneSwitcherThumbnail*: SwitcherThumbnail
   sceneSwitcherThumbnailPass*: SwitcherThumbnailPass
-  # What the last hit test ran: a tile's index, Close (the tile count), an
-  # arrow (count + 1, + 2), or -1. Read by runEvent once the hit test is
-  # done, so the handler holds nothing of the scene's.
+  # What the last hit test ran (a handler number, -1 for none), with the text
+  # and the key a field heard. Read by runEvent once the hit test is done, so
+  # the handler holds nothing of the scene's.
   tapped {.threadvar.}: int
+  tappedText {.threadvar.}: string
+  tappedKey {.threadvar.}: string
+  # The buttons of the store's pages in order, as the last render drew them:
+  # what the keys walk there.
+  pageButtons {.threadvar.}: seq[int]
 
 proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
   ## `node[key] = value` for an object node, without json's assert.
@@ -235,11 +253,15 @@ proc isRound*(frameConfig: FrameConfig): bool =
   when defined(frameosEmbedded): false
   else: not frameConfig.isNil and panelIsRound(frameConfig.device)
 
+proc tileCount(self: SceneSwitcherScene): int =
+  ## The tiles: a scene's each, and the store's last when the host has one.
+  self.entries.len + ord(self.storeTile)
+
 proc grid(self: SceneSwitcherScene, width, height: int, unit = 0): SwitcherGrid =
   when defined(frameosEmbedded):
-    switcherGrid(self.entries.len, width, height, false, unit = unit)
+    switcherGrid(self.tileCount, width, height, false, unit = unit)
   else:
-    switcherGrid(self.entries.len, width, height, not sceneSwitcherThumbnail.isNil,
+    switcherGrid(self.tileCount, width, height, not sceneSwitcherThumbnail.isNil,
       round = isRound(self.frameConfig), unit = unit)
 
 proc grid(self: SceneSwitcherScene): SwitcherGrid =
@@ -258,6 +280,8 @@ proc indexOf(self: SceneSwitcherScene, sceneId: string): int =
   for i in 0 ..< self.entries.len:
     if self.entries[i].id == sceneId:
       return i
+  if self.storeTile and sceneId == StoreSlot:
+    return self.entries.len
   -1
 
 proc opener(self: SceneSwitcherScene): string =
@@ -271,7 +295,7 @@ proc forget(self: SceneSwitcherScene) =
 proc highlighted*(self: SceneSwitcherScene): int =
   ## The highlighted tile, the first when the highlight names no scene on the
   ## list; -1 for an empty list.
-  if self.entries.len == 0:
+  if self.tileCount == 0:
     return -1
   max(self.indexOf(self.state{"highlight"}.getStr()), 0)
 
@@ -282,11 +306,11 @@ proc touch*(self: FrameScene) =
 
 proc highlight(self: SceneSwitcherScene, index: int) =
   ## The tile at `index` (wrapping around) highlighted, and its page shown.
-  let count = self.entries.len
+  let count = self.tileCount
   if count == 0:
     return
   let i = ((index mod count) + count) mod count
-  self.state.put("highlight", newJString(self.entries[i].id))
+  self.state.put("highlight", newJString(if i < self.entries.len: self.entries[i].id else: StoreSlot))
   self.state.put("page", newJInt(i div max(self.grid().perPage, 1)))
 
 proc turnPage(self: SceneSwitcherScene, delta: int): bool {.discardable.} =
@@ -307,12 +331,47 @@ proc showTurnedPage() =
   ## to refresh (2026-11-10).
   sendEvent(evRender, newJObject(), eoScene)
 
-proc choose(self: SceneSwitcherScene, index: int) =
-  ## Show the scene at `index`.
+proc show(sceneId: string) =
+  let payload = newJObject()
+  payload.put("sceneId", newJString(sceneId))
+  sendEvent(evSetCurrentScene, payload, eoScene)
+
+proc view(self: SceneSwitcherScene): string =
+  ## "" for the tiles, "store" for the store's page, "info" for a scene's.
+  self.state{"view"}.getStr()
+
+proc showView(self: SceneSwitcherScene, view: string) =
+  ## Another page: nothing typed or focused carried over, the keys on its
+  ## first button, and a picture of it.
+  forgetUiTarget(SceneSwitcherId, SwitcherNode)
+  self.state.put("view", newJString(view))
+  self.state.put("focus", newJInt(-1))
+  self.state.put("confirm", newJInt(-1))
+  sendEvent(evRender, newJObject(), eoScene)
+
+proc openStore(self: SceneSwitcherScene) =
+  self.showView("store")
+  storeAct("open")
+
+proc openInfo(self: SceneSwitcherScene, index: int) =
+  ## A scene's page: the host asks the store about it when it came from there.
   if index >= 0 and index < self.entries.len:
-    let payload = newJObject()
-    payload.put("sceneId", newJString(self.entries[index].id))
-    sendEvent(evSetCurrentScene, payload, eoScene)
+    let id = self.entries[index].id
+    self.state.put("info", newJString(id))
+    self.showView("info")
+    let installed = storeFacts().installedAs(id)
+    if not installed.isNil:
+      let args = newJObject()
+      args.put("id", newJString(id))
+      args.put("store", newJString(installed{"store"}.getStr()))
+      storeAct("info", args)
+
+proc choose(self: SceneSwitcherScene, index: int) =
+  ## Show the scene at `index`, or the store's page for its tile.
+  if index >= 0 and index < self.entries.len:
+    show(self.entries[index].id)
+  elif index == self.entries.len and self.storeTile:
+    self.openStore()
 
 proc leave() =
   ## Back to the scene it was opened from: the dispatcher knows which.
@@ -321,14 +380,43 @@ proc leave() =
 proc opened(self: SceneSwitcherScene) =
   ## Shown: the scene it was opened from is the highlighted one, the list's
   ## first when there is none or it is gone (then Close goes to the first).
+  ## Opened over a store scene the frame previews, it opens on the store's
+  ## page, where Install and Discard are.
   self.entries = listEntries()
+  let facts = storeFacts()
+  self.storeTile = not facts.isNil
   let index = self.indexOf(self.opener())
   if index < 0:
     self.forget()
   self.highlight(max(index, 0))
+  forgetUiTarget(SceneSwitcherId, SwitcherNode)
+  self.state.put("view", newJString(if self.storeTile and facts.previewing(sceneId = self.opener()): "store" else: ""))
+  self.state.put("draft", newJNull())
   self.touch()
 
 # ---------------------------------------------------------------- input
+
+proc storeAction(self: SceneSwitcherScene, handler: int, text, key: string)
+
+proc pressedOnPage(self: SceneSwitcherScene, role: string, steps: int) =
+  ## A key on the store's pages: next / down and prev / up walk the buttons
+  ## (`pageButtons`, as the last render drew them), primary, refresh and menu press
+  ## the one lit, back goes back to the tiles.
+  let count = pageButtons.len
+  var focus = self.state{"focus"}.getInt(-1)
+  case role
+  of "next", "down", "prev", "up":
+    if count > 0:
+      let delta = if role in ["next", "down"]: steps else: -steps
+      focus = if focus < 0: (if delta > 0: delta - 1 else: count + delta) else: focus + delta
+      self.state.put("focus", newJInt(((focus mod count) + count) mod count))
+      sendEvent(evRender, newJObject(), eoScene)
+  of "primary", "refresh", "menu":
+    if focus >= 0 and focus < count:
+      self.storeAction(pageButtons[focus], "", "")
+  of "back":
+    self.showView("")
+  else: discard
 
 proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
   ## A key, by its role (the input state gives every `button` one): next /
@@ -340,14 +428,21 @@ proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
   # was read so far.
   let action = payload{"action"}.getStr()
   let steps = if action == "press": 1 elif action == "doublePress": 2 else: 0
-  if steps > 0:
+  let role = payload{"role"}.getStr()
+  if steps > 0 and self.view().len > 0:
+    self.pressedOnPage(role, if role in ["primary", "refresh", "menu"]: 1 else: steps)
+    self.touch()
+  elif steps > 0 or (action == "longPress" and role == "primary"):
     if self.entries.len == 0:
       self.entries = listEntries()
     var acted = true
-    case payload{"role"}.getStr()
+    case role
     of "next", "down": self.highlight(self.highlighted() + steps)
     of "prev", "up": self.highlight(self.highlighted() - steps)
-    of "primary", "refresh", "menu": self.choose(self.highlighted())
+    of "primary", "refresh", "menu":
+      # Held, or pressed twice: the scene's own page (its long press).
+      if steps == 1 or self.highlighted() >= self.entries.len: self.choose(self.highlighted())
+      else: self.openInfo(self.highlighted())
     of "back": leave()
     else: acted = false
     if acted:
@@ -359,6 +454,18 @@ when not defined(frameosEmbedded):
     ## Escape goes back.
     if self.entries.len == 0:
       self.entries = listEntries()
+    if self.view().len > 0:
+      # The store's pages: a field takes the keys while it has the focus,
+      # Escape goes back to the tiles.
+      tapped = -1
+      if dispatchUiEvent(SceneSwitcherId, "keyDown", payload):
+        if tapped >= 0:
+          self.storeAction(tapped, tappedText, tappedKey)
+        sendEvent(evRender, newJObject(), eoScene)
+      elif payload{"code"}.getStr() == "Escape":
+        self.showView("")
+      self.touch()
+      return
     let cols = self.grid().cols
     case payload{"code"}.getStr()
     of "ArrowRight": self.highlight(self.highlighted() + 1)
@@ -504,6 +611,7 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: Swit
     if look.lit: c.add " border-sky-400"
     else: c.add " border-zinc-800"
   result = el("div", c).onClick(index)
+  result.attrs.add(("on-long-press", $(HInfo + index)))
   var title = self.entries[index].name
   if title.len == 0:
     title = self.entries[index].id
@@ -535,17 +643,17 @@ proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: i
   header.children.add el("span", c, txt("Scenes"))
   if grid.pages > 1:
     let arrow = clamp(grid.headerH * 6 div 10, 14, 40)
-    header.children.add arrowButton(arrow, true, button).onClick(self.entries.len + 1)
+    header.children.add arrowButton(arrow, true, button).onClick(HPrevArrow)
     c = "shrink-0"
     c.px("text", small)
     header.children.add el("span", c, txt(pageText(page, grid.pages)))
-    header.children.add arrowButton(arrow, false, button).onClick(self.entries.len + 2)
+    header.children.add arrowButton(arrow, false, button).onClick(HNextArrow)
   c = "shrink-0 rounded-full"
   c.px("px", max(6, small))
   c.px("py", max(2, small div 4))
   c.px("text", small)
   c.add button
-  header.children.add el("div", c, txt("Close")).onClick(self.entries.len)
+  header.children.add el("div", c, txt("Close")).onClick(HClose)
   root.children.add header
 
 when not defined(frameosEmbedded):
@@ -584,7 +692,7 @@ when not defined(frameosEmbedded):
     c.add " flex items-center justify-center rounded-full"
     c.px("text", small)
     c.add button
-    root.children.add el("div", c, txt("Close")).onClick(self.entries.len)
+    root.children.add el("div", c, txt("Close")).onClick(HClose)
     if grid.pages > 1:
       let room = grid.x0 - (grid.cx - grid.radius) - grid.gap div 2
       var a = min(clamp(grid.radius * 19 div 100, 20, 48), room - 2)
@@ -593,8 +701,8 @@ when not defined(frameosEmbedded):
         dec a
       let
         y = grid.cy - a div 2
-        left = arrowButton(a, true, button).onClick(self.entries.len + 1)
-        right = arrowButton(a, false, button).onClick(self.entries.len + 2)
+        left = arrowButton(a, true, button).onClick(HPrevArrow)
+        right = arrowButton(a, false, button).onClick(HNextArrow)
       # Placed where the circle has room for them, beside the tiles.
       left.attrs[0][1].add " absolute"
       left.attrs[0][1].px("left", grid.x0 - grid.gap div 2 - a)
@@ -605,6 +713,55 @@ when not defined(frameosEmbedded):
       root.children.add left
       root.children.add right
 
+proc storeCard(look: TileLook, slot: int, grid: SwitcherGrid, button: string): SvgNode =
+  ## The last tile: the scene store's page.
+  var c: string
+  c.at(grid.x0 + (slot mod grid.cols) * (grid.tileW + grid.gap),
+    grid.y0 + (slot div grid.cols) * (grid.tileH + grid.gap), grid.tileW, grid.tileH)
+  c.px("border", look.border)
+  c.px("rounded", look.radius)
+  c.px("p", look.inner)
+  c.add " flex flex-col items-center justify-center text-center font-bold"
+  if look.paper:
+    c.add " border-black"
+    if look.lit: c.add " bg-black text-white"
+  else:
+    c.add button
+    c.add(if look.lit: " border-sky-400" else: " border-zinc-800")
+  result = el("div", c).onClick(HStoreTile)
+  let size = clamp(min(permille(grid.tileH, 180), permille(grid.tileW, 140)), 12, 40)
+  var plus = "leading-none"
+  plus.px("text", size * 2)
+  plus.mute(look)
+  result.children.add el("span", plus, txt("+"))
+  var name = "line-clamp-2"
+  name.px("text", size)
+  result.children.add el("span", name, txt("Scene store"))
+
+proc storeLook(paper: bool, unit: int): StoreLook =
+  ## The store's pages at the sizes the scene settings use (sceneSettings's Look).
+  result = StoreLook(paper: paper, size: clamp(unit * 4 div 100, 14, 28))
+  result.small = max(result.size * 4 div 5, 11)
+  result.pad = clamp(unit * 4 div 100, 8, 32)
+  result.gap = result.size
+  result.line = result.size * 23 div 10
+
+proc pageTree(self: SceneSwitcherScene, width, height: int, paper: bool, unit: int): SvgNode =
+  ## The store's page or a scene's, from what the host knows now (nil when it
+  ## has no store any more: then the tiles).
+  let facts = storeFacts()
+  if facts.isNil:
+    return nil
+  pageButtons.setLen(0)
+  let look = storeLook(paper, if unit > 0: unit else: min(width, height))
+  if self.view() == "store":
+    return storeTree(self.state, facts, look, width, pageButtons)
+  let id = self.state{"info"}.getStr()
+  let index = self.indexOf(id)
+  if index < 0 or index >= self.entries.len:
+    return nil
+  infoTree(self.state, facts, look, id, self.entries[index].name, id == self.opener(), pageButtons)
+
 proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0): SvgNode =
   ## The switcher as a UI tree: the header (its title, the page and its
   ## arrows, Close), or on a round panel the same around the circle, and one
@@ -614,6 +771,11 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
   self.roomW = width
   self.roomH = height
   self.unit = unit
+  if self.view().len > 0:
+    result = self.pageTree(width, height, paper, unit)
+    if not result.isNil:
+      return
+    self.state.put("view", newJString(""))
   let
     grid = self.grid(width, height, unit)
     page = clamp(self.state{"page"}.getInt(0), 0, grid.pages - 1)
@@ -632,7 +794,7 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
       self.roundChrome(result, grid, page, paper, size, small, button)
     else:
       self.header(result, grid, page, paper, width, size, small, button)
-  if self.entries.len == 0:
+  if self.tileCount == 0:
     var c: string
     if grid.round: c.at(grid.x0, grid.y0, grid.side, grid.side)
     else: c.at(0, grid.y0, width, max(height - grid.y0, 1))
@@ -648,11 +810,15 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
   let opener = self.opener()
   for slot in 0 ..< grid.perPage:
     let index = page * grid.perPage + slot
-    if index >= self.entries.len:
+    if index >= self.tileCount:
       break
     look.lit = index == lit
-    look.showing = self.entries[index].id == opener
-    result.children.add self.tile(look, index, slot, grid, button)
+    if index == self.entries.len:
+      look.showing = false
+      result.children.add storeCard(look, slot, grid, button)
+    else:
+      look.showing = self.entries[index].id == opener
+      result.children.add self.tile(look, index, slot, grid, button)
 
 const
   PaperWhite = color(1, 1, 1, 1)
@@ -698,13 +864,17 @@ proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, pap
 
 proc onTap(handler: int, name: string, event: JsonNode, hit: UiHit) {.raises: [].} =
   ## The tiles' one handler, run by the hit test (ui/events.nim): what it
-  ## hit, for `pointer` to act on once the hit test is done.
+  ## hit, with a field's text or key, for `pointer` to act on once the hit
+  ## test is done.
   tapped = handler
+  tappedText = event{"value"}.getStr()
+  tappedKey = event{"key"}.getStr()
 
 proc draw*(self: SceneSwitcherScene, image: Image) =
   ## One render: the list read again, laid out, drawn into `image`, and the
   ## tiles left behind for the pointer.
   self.entries = listEntries()
+  self.storeTile = not storeFacts().isNil
   if self.indexOf(self.opener()) < 0:
     # Gone from the list since it opened: Close goes to the list's first.
     self.forget()
@@ -734,25 +904,47 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
 
 # ------------------------------------------------------------ the scene
 
+proc storeAction(self: SceneSwitcherScene, handler: int, text, key: string) =
+  ## A button or a field of the store's pages (store.nim does the store's).
+  if handler >= HInfo and handler < HBack:
+    self.openInfo(handler - HInfo)
+    return
+  var sceneId = ""
+  case storeHandle(self.state, storeFacts(), handler, text, key, self.opener(), sceneId)
+  of smTiles: self.showView("")
+  of smShow: show(sceneId)
+  of smNone:
+    # A field's typing shows by itself; a button's work by the host's render
+    # when it is done, and at once on an LCD.
+    if handler != HQuery and not self.paper:
+      sendEvent(evRender, newJObject(), eoScene)
+
 proc pointer(self: SceneSwitcherScene, event: string, payload: JsonNode) =
   ## A pointer event over the tiles (ui/events.nim hit-tests it). E-paper
-  ## hears the tap alone: the rest only moves what is pressed.
-  let tap = event == "tap"
+  ## hears the tap and the long press alone: the rest only moves what is
+  ## pressed.
+  let tap = event == "tap" or event == "longPress"
   if not tap and self.paper:
     return
   tapped = -1
   let changed = dispatchUiEvent(SceneSwitcherId, event, payload)
-  let count = self.entries.len
-  if tapped >= 0:
-    # A tile, Close or an arrow: what it did is the next picture (a switch,
-    # or the page in the state). A tap on nothing is nothing.
-    if tapped < count: self.choose(tapped)
-    elif tapped == count: leave()
-    elif self.turnPage(if tapped == count + 1: -1 else: 1): showTurnedPage()
-    tapped = -1
+  let handler = tapped
+  tapped = -1
+  if handler >= 0:
+    # A tile, Close, an arrow, a held tile or a button of the store's pages:
+    # what it did is the next picture (a switch, or the page in the state). A
+    # tap on nothing is nothing.
+    if handler < HStoreTile: self.choose(handler)
+    elif handler == HStoreTile: self.openStore()
+    elif handler == HClose: leave()
+    elif handler == HPrevArrow or handler == HNextArrow:
+      if self.turnPage(if handler == HPrevArrow: -1 else: 1): showTurnedPage()
+    else: self.storeAction(handler, tappedText, tappedKey)
     self.touch()
-  elif changed and not tap:
-    # What is pressed moved: an LCD shows it.
+  elif changed and (not tap or self.view().len > 0):
+    # What is pressed moved, or a field changed under the finger (the
+    # keyboard, a list that scrolled): an LCD shows it, and e-paper what a
+    # tap did on the store's pages.
     sendEvent(evRender, newJObject(), eoScene)
 
 proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
@@ -782,12 +974,21 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   of evBack, evForward:
     # The frame's back and forward (a swipe in from the left or the right
     # edge): the page before or the next one, as a swipe across the tiles.
-    self.turnPage(if context.event == evForward: 1 else: -1)
+    # On the store's pages back closes the keyboard, then goes to the tiles.
+    if self.view().len > 0:
+      if context.event == evBack:
+        if dismissKeyboard(SceneSwitcherId, SwitcherNode): sendEvent(evRender, newJObject(), eoScene)
+        else: self.showView("")
+    else:
+      self.turnPage(if context.event == evForward: 1 else: -1)
     self.touch()
   of "swipe":
-    # Across the tiles, as on a phone: the next page or the one before.
+    # Across the tiles, as on a phone: the next page or the one before. The
+    # store's pages scroll instead (the hit test moves the list).
     let direction = payload{"direction"}.getStr()
-    if direction == "left" or direction == "right":
+    if self.view().len > 0:
+      self.pointer(context.event, payload)
+    elif direction == "left" or direction == "right":
       if self.turnPage(if direction == "left": 1 else: -1): showTurnedPage()
       self.touch()
   else:
