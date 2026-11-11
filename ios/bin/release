@@ -40,19 +40,20 @@ if [[ -n "${ASC_KEY_ID:-}" ]]; then
         -authenticationKeyIssuerID "${ASC_ISSUER_ID:?ASC_ISSUER_ID}")
 fi
 
+# The archive is unsigned and the export signs it (Apple Distribution and an
+# App Store profile, both made by Xcode the first time). Archiving with
+# automatic signing would want a development profile first, and that needs a
+# registered device: "Your team has no devices from which to generate a
+# provisioning profile".
+xcodebuild archive -project FrameOS.xcodeproj -scheme FrameOS -configuration Release \
+  -destination "generic/platform=iOS" -archivePath "$archive" \
+  CURRENT_PROJECT_VERSION="$build" CODE_SIGNING_ALLOWED=NO -quiet
 if [[ $signed == 0 ]]; then
-  xcodebuild archive -project FrameOS.xcodeproj -scheme FrameOS -configuration Release \
-    -destination "generic/platform=iOS" -archivePath "$archive" \
-    CURRENT_PROJECT_VERSION="$build" CODE_SIGNING_ALLOWED=NO -quiet
   echo "Archived (unsigned): ios/$archive, build $build"
   exit 0
 fi
 
 team="${FRAMEOS_IOS_TEAM:?Set FRAMEOS_IOS_TEAM to your Apple Developer team id}"
-xcodebuild archive -project FrameOS.xcodeproj -scheme FrameOS -configuration Release \
-  -destination "generic/platform=iOS" -archivePath "$archive" \
-  DEVELOPMENT_TEAM="$team" CURRENT_PROJECT_VERSION="$build" \
-  -allowProvisioningUpdates "${auth[@]}" -quiet
 
 options="DerivedData/ExportOptions.plist"
 cat >"$options" <<PLIST
@@ -71,7 +72,7 @@ cat >"$options" <<PLIST
 PLIST
 
 xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$options" \
-  -exportPath DerivedData/export -allowProvisioningUpdates "${auth[@]}"
+  -exportPath DerivedData/export -allowProvisioningUpdates ${auth[@]+"${auth[@]}"}
 if [[ $upload == 1 ]]; then
   echo "Uploaded build $build. It appears in App Store Connect → TestFlight once processed (a few minutes)."
 else

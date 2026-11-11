@@ -65,8 +65,11 @@ FRAMEOS_IOS_TEAM=<team id> ASC_KEY_ID=<key id> ASC_ISSUER_ID=<issuer id> \
   ASC_KEY_PATH=~/.appstoreconnect/AuthKey_<key id>.p8 ios/bin/release
 ```
 
-`ios/bin/release` archives for devices (automatic signing creates the
-certificate and profile), sets the build number to the UTC time, and uploads.
+`ios/bin/release` archives for devices unsigned, signs at export (Xcode makes
+the Apple Distribution certificate and the App Store profile the first time;
+no registered device is needed), sets the build number to the UTC time, and
+uploads. Without an API key it uses the account signed in to Xcode → Settings
+→ Accounts.
 The build appears in App Store Connect → TestFlight after processing (a few
 minutes). Add yourself under Internal Testing, install TestFlight on the
 iPhone, and accept the invite. Internal testers need no review.
