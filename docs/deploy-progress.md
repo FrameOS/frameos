@@ -97,6 +97,7 @@ ESP32's `ota:<plane> progress` lines every 512 KB keep a long download fresh.
 | `command:<state>:<type>` | the command queue: `sent` (hub wrote it), `acked`, `failed` | backend `api/embedded_commands.py`; hub `drainCommands`, `handleAck` |
 | `commands:settled` | backend: every row of an ESP32 deploy is acked (the pull reported the ETags the backend serves) | backend `_record_deploy_if_settled` |
 | `scene_ack` | cloud: the device says the set the record's own `set_scenes` pushed is live (matched by that command's checksum) | hub `handleSceneAck` |
+| `scene_ack:unshown` | cloud: the same, for a push the hub sent as a `scenes_patch` that leaves the panel as it was (names no scene to show, keeps the scene showing and does not put it: an install without activate). The firmware renders a patch only when it touches the scene showing, so nothing else comes: the record ends here | hub `outgoingCommandMessage` (`patchLeavesPanel`, `session.unshownPatches`), `foldSceneAckIntoDeployProgress` |
 
 ## Per frame type
 
@@ -198,7 +199,7 @@ the fleet update all get a bar.
 
 | Verb | Kind |
 | --- | --- |
-| `set_scenes` (assign, install, update, preview push) | `cloud_scenes`: queued → sending ([command:sent]) → loading ([command:acked]) → rendering ([scene_ack] of this push's checksum) → done ([render:done] / the `render` announce) |
+| `set_scenes` (assign, install, update, preview push) | `cloud_scenes`: queued → sending ([command:sent]) → loading ([command:acked]) → rendering ([scene_ack] of this push's checksum) → done ([render:done] / the `render` announce); a patch that leaves the panel as it was → done at its [scene_ack:unshown] |
 | `notify_update_available` on an ESP32 | `firmware` (as on the backend, with `ota:cloud` lines and the hello as [bootup]) |
 | `notify_update_available` on a Linux frame | `upgrade` (`cloud:upgrade` lines, then the hello) |
 | `restart_runtime`, `reboot` | `restart`, `reboot` |

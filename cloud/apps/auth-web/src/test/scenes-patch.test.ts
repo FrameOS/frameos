@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildScenesPatchMessage, sceneHashes } from "../lib/scenes-patch";
+import { buildScenesPatchMessage, patchLeavesPanel, sceneHashes } from "../lib/scenes-patch";
 
 const a = { id: "a", name: "A" };
 const b = { id: "b", name: "B" };
@@ -56,5 +56,20 @@ describe("scenes_patch", () => {
     expect(buildScenesPatchMessage({ id: "c", payload: { checksum: "n", scenes: [a, a] } }, base)).toBeNull();
     expect(buildScenesPatchMessage({ id: "c", payload: { scenes: [a] } }, base)).toBeNull();
     expect(sceneHashes([a, { id: "a" }])).toBeNull();
+  });
+
+  it("knows a patch that leaves the panel as it was: nothing renders for it", () => {
+    // An install without activate on a frame showing a: b goes on the list.
+    const install = { order: ["a", "b"], put: [b], type: "scenes_patch" };
+    expect(patchLeavesPanel(install, "a")).toBe(true);
+    // A removal of another scene, an order change: the same.
+    expect(patchLeavesPanel({ order: ["b", "a"], put: [] }, "a")).toBe(true);
+    // The scene showing changed, or it went, or a scene is named to show: a render follows.
+    expect(patchLeavesPanel({ order: ["a", "b"], put: [{ ...a, name: "A2" }] }, "a")).toBe(false);
+    expect(patchLeavesPanel({ order: ["b"], put: [] }, "a")).toBe(false);
+    expect(patchLeavesPanel({ ...install, scene_id: "b" }, "a")).toBe(false);
+    // Not knowing what the frame shows: a render is expected, as before.
+    expect(patchLeavesPanel(install, undefined)).toBe(false);
+    expect(patchLeavesPanel(install, "")).toBe(false);
   });
 });
