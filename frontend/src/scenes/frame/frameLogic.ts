@@ -2404,8 +2404,8 @@ export interface frameLogicActions {
   restartRemote: (transport?: RemoteTaskTransport) => {
     transport: RemoteTaskTransport
   }
-  saveAndDeployFrame: () => {
-    value: true
+  saveAndDeployFrame: (options?: { updateStoreSceneIds?: string[] }) => {
+    updateStoreSceneIds: string[]
   }
   saveAndFastDeployFrame: () => {
     value: true
@@ -2645,7 +2645,12 @@ export const frameLogic = kea<frameLogicType>([
       activeSceneId: activeSceneId ?? null,
       activeState: activeState ?? null,
     }),
-    saveAndDeployFrame: true,
+    // `updateStoreSceneIds`: on the cloud, the store scenes this deploy moves
+    // to their newest version (the drawer's ticked "Scene updates"); none
+    // when omitted. A backend's updates are in the form before it deploys.
+    saveAndDeployFrame: (options?: { updateStoreSceneIds?: string[] }) => ({
+      updateStoreSceneIds: options?.updateStoreSceneIds ?? [],
+    }),
     saveAndFastDeployFrame: true,
     saveAndFullDeployFrame: true,
     renderFrame: true,
@@ -3654,7 +3659,7 @@ export const frameLogic = kea<frameLogicType>([
       await asyncActions.submitFrameFormRequest(values.frameForm as FrameType)
       return !values.frameFormSaveError
     }
-    const cloudSaveAndDeploy = async (): Promise<void> => {
+    const cloudSaveAndDeploy = async (updateStoreSceneIds: readonly string[] = []): Promise<void> => {
       try {
         const normalized = normalizeFrameForSubmit(values.frameForm)
         await pushCloudFrameSettings(props.frameId, normalized)
@@ -3689,11 +3694,11 @@ export const frameLogic = kea<frameLogicType>([
       })
       const formAtDeploy = values.frameForm
       try {
-        // Only the deploy drawer gets here, and a deploy from it takes every
-        // scene with a newer version in the store along.
+        // The deploy drawer names the scenes with a newer version it takes
+        // along; they move in this same push.
         const outcome = await persistAndPushCloudFrameScenes(props.frameId, scenes, values.frame?.active_scene_id, {
           ...cloudScenePersistOptions(props.frameId, values.frameForm ?? values.frame ?? {}),
-          updateToLatest: true,
+          updateStoreSceneIds,
         })
         for (const storeSceneId of [...outcome.changedStoreSceneIds, ...Object.keys(outcome.updatedToLatest)]) {
           clearCloudSceneJsonCache(storeSceneId)
@@ -3780,9 +3785,9 @@ export const frameLogic = kea<frameLogicType>([
             : error?.message || 'Failed to save the frame'
         reportTaskOutcome('error', { frameId: props.frameId, kind: 'save', title: 'Saving frame', detail })
       },
-      saveAndDeployFrame: async () => {
+      saveAndDeployFrame: async ({ updateStoreSceneIds }) => {
         if (isCloudMode()) {
-          await cloudSaveAndDeploy()
+          await cloudSaveAndDeploy(updateStoreSceneIds)
           return
         }
         // No transport rewriting here: the backend resolves "auto" against the

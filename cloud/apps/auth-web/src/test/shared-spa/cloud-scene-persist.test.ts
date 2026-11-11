@@ -258,7 +258,7 @@ describe("cloud scene persistence", () => {
     ]);
   });
 
-  it("with updateToLatest moves every unedited scene that has a newer version, a pin re-pinned", async () => {
+  it("moves the named unedited scenes that have a newer version, a pin re-pinned, and no other", async () => {
     // The deploy drawer's deploys: the store has v5 of a public install the
     // frame holds at v3 and v2 of a pinned scene of the account's own. Both
     // go out at their newest, the up-to-date scene stays, and nothing is
@@ -277,10 +277,18 @@ describe("cloud scene persistence", () => {
       version: 2,
     });
     store.scenes.set("mine-2", { scenes: [storedScene("rt-3", "Weather")], owned: true, version: 4 });
+    // Has an update too, but the owner unticked it in the drawer.
+    store.scenes.set("public-2", {
+      history: { 1: [storedScene("rt-4", "Moon")] },
+      owned: false,
+      scenes: [storedScene("rt-4", "Moon v2")],
+      version: 2,
+    });
     store.assignments = [
       { assigned_version: 3, latest_version: 5, scene_id: "public-1" },
       { assigned_version: 1, latest_version: 2, scene_id: "mine-1", scene_version: 1 },
       { assigned_version: 4, latest_version: 4, scene_id: "mine-2" },
+      { assigned_version: 1, latest_version: 2, scene_id: "public-2" },
     ];
     installFetch(store);
 
@@ -288,10 +296,11 @@ describe("cloud scene persistence", () => {
       sanitizedCopy(storedScene("rt-1", "Abstract Architecture")),
       sanitizedCopy(storedScene("rt-2", "Clock")),
       sanitizedCopy(storedScene("rt-3", "Weather")),
+      sanitizedCopy(storedScene("rt-4", "Moon")),
     ];
     const outcome = await persistAndPushCloudFrameScenes(frameId, form, null, {
       sceneUnchanged: workspaceEquality,
-      updateToLatest: true,
+      updateStoreSceneIds: ["public-1", "mine-1", "mine-2"],
     });
 
     expect(store.created).toEqual([]);
@@ -301,10 +310,11 @@ describe("cloud scene persistence", () => {
       { latest: true, scene_id: "public-1" },
       { scene_id: "mine-1", scene_version: 2 },
       { scene_id: "mine-2" },
+      { scene_id: "public-2" },
     ]);
   });
 
-  it("without updateToLatest a save reports no updates and moves nothing", async () => {
+  it("without updateStoreSceneIds a save reports no updates and moves nothing", async () => {
     const store = fakeStore();
     store.scenes.set("public-1", {
       history: { 3: [storedScene("rt-1", "Abstract Architecture")] },

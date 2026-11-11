@@ -16,11 +16,14 @@
 // belongs to. These tests pin the chooser, both views, the USB-only landing
 // for a frame no board has enrolled as, and that the backend-only build/flash
 // controls never render here.
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initKea } from "../../../../../../frontend/src/initKea";
+import { framesModel } from "../../../../../../frontend/src/models/framesModel";
 import { FrameDeployPlanDrawer } from "../../../../../../frontend/src/scenes/workspace/FrameDeployPlanDrawer";
-import type { FrameType } from "../../../../../../frontend/src/types";
+import { sceneUpdatesLogic } from "../../../../../../frontend/src/scenes/frame/panels/Scenes/sceneUpdatesLogic";
+import type { FrameScene, FrameType } from "../../../../../../frontend/src/types";
+import { diffSceneFiles } from "../../../../../../frontend/src/utils/sceneDiff";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -48,6 +51,14 @@ function cloudFrame(
     scenes: [],
     ...overrides,
   } as unknown as FrameType;
+}
+
+// The drawer's scene updates come from sceneUpdatesLogic, which reads the
+// frame the way the workspace holds it (framesModel), not from the prop.
+function renderWithFrame(frame: FrameType) {
+  framesModel.mount();
+  framesModel.actions.loadFramesSuccess({ [String(frame.id)]: frame } as Record<string, FrameType>);
+  return render(<FrameDeployPlanDrawer frame={frame} />);
 }
 
 const oneScene = {
@@ -177,10 +188,10 @@ describe("the deploy dialog in cloud mode", () => {
     }
   });
 
-  it("takes scene updates along: the tick comes back and the summary names them", () => {
+  it("lists scene updates, ticked, and the deploy takes them along", async () => {
     // In sync with the device, but the store has a newer version of the
-    // scene: a deploy from here updates it, so the drawer says so and the
-    // firmware cards offer the scenes again.
+    // scene: the drawer lists it, the firmware cards offer the scenes again,
+    // and unticking it takes it back out of the deploy.
     const behind = {
       ...oneScene,
       assigned_checksum: "abc123",
@@ -191,9 +202,10 @@ describe("the deploy dialog in cloud mode", () => {
     } as Partial<FrameType>;
     for (const platform of ["esp32", "pi-zero2w"] as const) {
       cleanup();
-      render(<FrameDeployPlanDrawer frame={cloudFrame(platform, behind)} />);
+      initKea();
+      renderWithFrame(cloudFrame(platform, behind));
       expect(screen.getByText("Scene updates")).toBeTruthy();
-      expect(screen.getByText(/Clock\. Deploying updates them\./)).toBeTruthy();
+      expect(screen.getByText("v3 → v5")).toBeTruthy();
       if (platform === "esp32") {
         fireEvent.click(screen.getByRole("button", { name: /Over the air/ }));
       }
@@ -202,8 +214,46 @@ describe("the deploy dialog in cloud mode", () => {
           name: /Deploy scenes & settings \(1 scene update\)/,
         }),
       ).toBeTruthy();
-      expect(screen.getByText("Newer versions of Clock")).toBeTruthy();
+      expect(screen.getByText(/newer versions of Clock/)).toBeTruthy();
+      fireEvent.click(screen.getByRole("checkbox", { name: "Update Clock" }));
+      expect(screen.queryByText(/newer versions of Clock/)).toBeNull();
+      expect(
+        screen.queryByRole("checkbox", { name: /scene update/ }),
+      ).toBeNull();
     }
+  });
+
+  it("shows what an update changes, its app as lines of code", async () => {
+    const behind = {
+      scenes: [
+        {
+          id: "scene-1",
+          name: "Clock",
+          nodes: [{ id: "app-1", type: "app", position: { x: 0, y: 0 }, data: { keyword: "clock", config: {} } }],
+          edges: [],
+          apps: { clock: { sources: { "app.tsx": "export function get() {\n  return 1\n}\n" } } },
+        },
+      ] as unknown as FrameType["scenes"],
+      cloud_scene_sources: {
+        "scene-1": { scene_id: "store-1", held_version: 3, update_version: 5 },
+      },
+    } as Partial<FrameType>;
+    renderWithFrame(cloudFrame("pi-zero2w", behind));
+    fireEvent.click(screen.getByRole("button", { name: /Clock/ }));
+    // No store in this harness: the load fails, and the logic is handed the
+    // diff instead (its loading is pinned in scene-update-deploy.test.ts).
+    expect(await screen.findByText(/Could not load version 5/)).toBeTruthy();
+    const after = structuredClone(behind.scenes!) as FrameScene[];
+    after[0]!.apps!.clock!.sources["app.tsx"] = "export function get() {\n  return 2\n}\n";
+    act(() => {
+      sceneUpdatesLogic({ frameId: "frame-pi-zero2w" as unknown as FrameType["id"] }).actions.sceneUpdateDiffLoaded(
+        "store-1",
+        diffSceneFiles(behind.scenes as FrameScene[], after),
+      );
+    });
+    expect(await screen.findByText("apps/clock/app.tsx")).toBeTruthy();
+    expect(screen.getByText("return 1", { exact: false })).toBeTruthy();
+    expect(screen.getByText("return 2", { exact: false })).toBeTruthy();
   });
 
   it("orders the USB path: one connect action, then the scene push", () => {

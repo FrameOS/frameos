@@ -68,7 +68,7 @@ export interface CloudScenePersistOutcome {
   changedStoreSceneIds: string[]
   /** Human-readable notes for non-fatal fallbacks (shown in the deploy toast). */
   notes: string[]
-  /** Store scene id → the newer version `updateToLatest` moved it to. */
+  /** Store scene id → the newer version `updateStoreSceneIds` moved it to. */
   updatedToLatest: Record<string, number>
 }
 
@@ -107,11 +107,12 @@ export interface CloudScenePersistOptions {
   /** Public field values for the scene the push activates, in the same push. */
   activeState?: Record<string, any>
   /**
-   * Move every scene the owner did not edit and that has a newer installable
-   * version to it in this push (a pin is re-pinned there): the deploy
-   * drawer's deploys. Without it a save moves only what it edited.
+   * Store scenes to move to their newer installable version in this push,
+   * when the owner did not edit them (a pin is re-pinned there): the deploy
+   * drawer's ticked "Scene updates". Without it a save moves only what it
+   * edited.
    */
-  updateToLatest?: boolean
+  updateStoreSceneIds?: readonly string[]
 }
 
 interface AssignmentPlan {
@@ -175,10 +176,10 @@ function keptGrant(row: CloudFrameSceneRow): string[] | undefined {
 // when the push takes updates along, the newer one (recorded in `updated`).
 function keptVersion(
   row: CloudFrameSceneRow,
-  updateToLatest: boolean | undefined,
+  updateStoreSceneIds: readonly string[] | undefined,
   updated: Record<string, number>
 ): Pick<AssignmentPlan, 'scene_version' | 'latest'> {
-  const update = updateToLatest ? cloudSceneUpdateVersion(row) : null
+  const update = updateStoreSceneIds?.includes(row.scene_id) ? cloudSceneUpdateVersion(row) : null
   if (update === null) {
     return { scene_version: row.scene_version ?? null }
   }
@@ -318,7 +319,7 @@ async function persistAndPushCloudFrameScenesNow(
       // store id), or they would be created again as new private scenes.
       assignments.push({
         scene_id: row.scene_id,
-        ...keptVersion(row, options.updateToLatest, updatedToLatest),
+        ...keptVersion(row, options.updateStoreSceneIds, updatedToLatest),
         settings_groups: keptGrant(row),
       })
       if (formById.has(row.scene_id)) {
@@ -363,7 +364,7 @@ async function persistAndPushCloudFrameScenesNow(
     if (!edited) {
       assignments.push({
         scene_id: row.scene_id,
-        ...keptVersion(row, options.updateToLatest, updatedToLatest),
+        ...keptVersion(row, options.updateStoreSceneIds, updatedToLatest),
         settings_groups: keptGrant(row),
         event_maps,
         layouts,
