@@ -1,4 +1,4 @@
-import std/[json, options, tables, sequtils, asyncdispatch, unittest, os, strutils]
+import std/[json, options, tables, sequtils, asyncdispatch, unittest, os, strutils, monotimes, times]
 import pixie
 import ../boot_guard
 import ../config
@@ -14,6 +14,9 @@ import ../loading_mark_panel
 
 type LogStore = ref object
   entries: seq[JsonNode]
+  ## When each entry arrived, for a test that asks WHEN, not how long: a
+  ## duration measured inside the runner shrinks on a loaded machine.
+  at: seq[MonoTime]
 
 type SavedBootGuardState = object
   hadState: bool
@@ -43,6 +46,7 @@ proc testLogger(config: FrameConfig, store: LogStore): Logger =
   logger.log = proc(payload: JsonNode) =
     if logger.enabled:
       store.entries.add(payload)
+      store.at.add(getMonoTime())
   logger.enable = proc() =
     logger.enabled = true
   logger.disable = proc() =
@@ -260,15 +264,24 @@ suite "runner loop safety":
     requestEarlierRender(0.25)
     # Two cycles: the first sleeps (and is where the callback happens), the
     # second breaks out before sleeping again.
+    let loopStarted = getMonoTime()
     waitFor runnerThread.startRenderLoop(maxCycles = 2)
 
-    # The scene keeps its own schedule — the whole point of the fix. (The
-    # sleep is the interval minus the render that just happened, so it lands
-    # just under a second; what matters is that it is nowhere near the 250 ms
-    # the driver asked for.)
-    for entry in store.entries:
+    # The scene keeps its own schedule — the whole point of the fix. The sleep
+    # is the interval minus however long the pass took, so its length alone
+    # depends on the machine (a loaded CI runner took over 100 ms and failed
+    # "ms > 900"). Where it ENDS does not: logged at `at`, it runs out one
+    # interval after the pass began, which is after `loopStarted`. Sleeping
+    # only the 250 ms the driver asked for would end long before that.
+    var sleeps = 0
+    for i, entry in store.entries:
       if entry{"event"}.getStr() == "render:sleep":
-        check entry{"ms"}.getFloat() > 900.0
+        inc sleeps
+        let loggedAfter = (store.at[i] - loopStarted).inNanoseconds.float / 1e9
+        let sleepEndsAfter = loggedAfter + entry{"ms"}.getFloat() / 1000
+        # The log rounds the sleep to a microsecond.
+        check sleepEndsAfter >= 1.0 - 1e-5
+    check sleeps == 1
     # Exactly one scene render per cycle, not one per driver callback.
     check countEvent(store, "render:done") == 2
     # Consumed, not left standing for the next pass.
