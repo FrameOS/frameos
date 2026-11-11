@@ -127,10 +127,12 @@ public enum AuthService {
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             _ = try? await client.session.data(for: request)
         case .backend:
+            // The login session first (the socket's cookie), while the token
+            // still opens the route; then the token itself.
+            _ = try? await client.call("POST", "/api/logout")
             if let tokenId = client.currentCredentials.apiTokenId {
                 _ = try? await client.call("DELETE", "/api/user/api_tokens/\(ApiPaths.segment(tokenId))")
             }
-            _ = try? await client.call("POST", "/api/logout")
         }
         client.clearCookies()
         AccountCredentials.delete(accountId: client.account.id)

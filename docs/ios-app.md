@@ -33,7 +33,13 @@ The SPA runs the corpora in `cloud/apps/auth-web/src/test/shared-spa/`
 files in `docs/` directly). The **iOS app** workflow
 (`.github/workflows/ios.yml`) runs the app's side whenever a corpus, a
 contract, the SPA's command labels or `ios/` changes, and builds the app for
-the simulator.
+the simulator, then launches it on one.
+
+Against real planes, `BackendIntegrationTests` walks the backend path end
+to end on an empty backend (sign-up, the token, a frame, an install through
+the MCP, settings, photos, the socket, sign-out), and `CloudProbeTests`
+checks a cloud read-only (the sign-in's Origin and error shapes, the public
+store). Both are skipped unless an address is given (`ios/README.md`).
 
 ## Every action and its route
 

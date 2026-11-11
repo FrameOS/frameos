@@ -60,10 +60,12 @@ public final class LiveUpdates: @unchecked Sendable {
         task = socket
         socket.resume()
         var received = false
+        // Both planes answer "ping" with a pong: the first one says the
+        // socket is open (a backend sends nothing else until something happens).
         let pinger = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 25_000_000_000)
                 try? await socket.send(.string("ping"))
+                try? await Task.sleep(nanoseconds: 25_000_000_000)
             }
         }
         defer {

@@ -40,6 +40,20 @@ ios/bin/test        # FrameOSKit's tests: the corpora, the contracts, the client
 ios/bin/check-ui    # type-checks every screen for macOS
 ```
 
+Against real planes (skipped unless asked for):
+
+```sh
+# An EMPTY self-hosted backend (it creates an account and a frame there):
+FRAMEOS_IT_BACKEND=http://127.0.0.1:8997 ios/bin/test --filter BackendIntegrationTests
+# A cloud, read-only (a wrong-password sign-in, the public store):
+FRAMEOS_IT_CLOUD=http://localhost:3000 ios/bin/test --filter CloudProbeTests
+```
+
+A throwaway backend for the first: from `backend/`, with its own SQLite
+(`DATABASE_URL=sqlite:////tmp/fos.db python -m alembic upgrade head`) and
+Redis (`redis-server --port 6391`, `REDIS_URL=redis://localhost:6391/0`),
+`uvicorn app.fastapi:app --port 8997` with `PYTHONPATH=.` and a `SECRET_KEY`.
+
 The screens are written to compile for macOS too (`Common/Platform.swift`
 wraps what is iOS-only), which is what makes `check-ui` possible. The iOS
 build itself needs Xcode: CI's **iOS app** job (`.github/workflows/ios.yml`)
