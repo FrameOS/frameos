@@ -818,6 +818,28 @@ sceneSettings.frameSettingsRead = frameSettingsJson
 sceneSettings.frameSettingsApply = frameSettingsSet
 sceneSettings.frameSettingsAction = frameSettingsDo
 
+# The scene switcher's store pages (docs/scene-store-on-frame.md): the facts
+# and the work, from main/fos_store.c, which does the work on a task of its
+# own. Every call comes from the scene, on the render task.
+proc fos_store_json(): cstring {.importc, cdecl.}
+proc fos_store_action(action, args: cstring) {.importc, cdecl.}
+
+proc sceneStoreJson(): JsonNode {.nimcall, gcsafe, raises: [].} =
+  let raw = fos_store_json()
+  if raw.isNil:
+    return nil
+  try:
+    result = parseJson($raw)
+  except Exception:
+    result = nil
+  cFree(raw)
+
+proc sceneStoreDo(action: string, args: JsonNode) {.nimcall, gcsafe, raises: [].} =
+  fos_store_action(action.cstring, ($args).cstring)
+
+sceneStoreRead = sceneStoreJson
+sceneStoreAction = sceneStoreDo
+
 proc selectScene*(sceneIdText: string): bool =
   when defined(memProbe): memProbe("  >>> selectScene " & sceneIdText)
   let sceneId = SceneId(sceneIdText)

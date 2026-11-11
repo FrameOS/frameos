@@ -6,7 +6,8 @@ saved scenes, and never installs on its own: a scene the device added by
 itself would be gone at the next deploy.
 
 The frame's bearer is its `server_api_key`, as on `/api/log` and the
-`/embedded` routes. Body: {"action": "install" | "preview" | "update" |
+`/embedded` routes; a Pi, which does not know its id here, posts to
+`/api/panel/scenes` and the key says which frame it is. Body: {"action": "install" | "preview" | "update" |
 "remove" | "discard", "scene_id": "<store scene uuid>"} (for "discard", the
 runtime id of the scene to go back to). Each action is what the workspace's
 button does: the saved list changes and the frame gets it the way a
@@ -43,7 +44,7 @@ from app.utils.network import guarded_transport
 from app.utils.rate_limit import hit_rate_limit
 from . import api_public
 
-__all__ = ["api_frame_panel_scenes"]
+__all__ = ["api_frame_panel_scenes", "api_panel_scenes"]
 
 PANEL_ACTIONS = ("install", "update", "remove", "preview", "discard")
 STORE_SCENE_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -52,12 +53,14 @@ MAX_RUNTIME_ID_CHARS = 128
 PANEL_ACTIONS_PER_15_MIN = 60
 
 
-def _frame_from_bearer(db: Session, frame_id: int, authorization: str | None) -> Frame:
+def _frame_from_bearer(db: Session, frame_id: int | None, authorization: str | None) -> Frame:
+    """The frame whose server_api_key this is (and whose id the path names,
+    when it names one: a Pi does not know its id here, an ESP32 does)."""
     parts = (authorization or "").split(" ")
     if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1]:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
     frame = db.query(Frame).filter_by(server_api_key=parts[1]).first()
-    if frame is None or int(frame.id) != frame_id:
+    if frame is None or (frame_id is not None and int(frame.id) != frame_id):
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
     return frame
 
@@ -237,6 +240,18 @@ async def _save(db: Session, redis: Redis, frame: Frame, scenes: list[Any], line
     await new_log(db, redis, int(frame.id), "stdinfo", line)
 
 
+@api_public.post("/panel/scenes")
+async def api_panel_scenes(
+    request: Request,
+    authorization: str | None = Header(None),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """The same for a frame that does not know its id here (a Pi): the key
+    says which frame it is, as on /api/log."""
+    return await _panel_scenes(request, None, authorization, db, redis)
+
+
 @api_public.post("/frames/{id:int}/panel/scenes")
 async def api_frame_panel_scenes(
     request: Request,
@@ -245,6 +260,10 @@ async def api_frame_panel_scenes(
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    return await _panel_scenes(request, id, authorization, db, redis)
+
+
+async def _panel_scenes(request: Request, id: int | None, authorization: str | None, db: Session, redis: Redis):
     frame = _frame_from_bearer(db, id, authorization)
     if await hit_rate_limit(
         redis, "panel-scenes", str(frame.id), limit=PANEL_ACTIONS_PER_15_MIN, window_seconds=15 * 60

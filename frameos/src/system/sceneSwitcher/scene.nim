@@ -964,8 +964,11 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
     self.opened()
   of "close":
     # Opened again by name (a `setCurrentScene` to it), it was opened from
-    # nowhere it knows: no stale scene to go back to.
+    # nowhere it knows: no stale scene to go back to. The store's host draws
+    # nothing more for it.
     self.forget()
+    if self.storeTile:
+      storeAct("close")
   of "render":
     if context.hasImage and not context.image.isNil:
       self.draw(context.image)

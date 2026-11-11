@@ -32,8 +32,8 @@ type
     ## nil: no store on this frame. Else what the host knows now:
     ## {busy, error, done: an action's name or "" (`error` a code: the
     ## words are here), query, category, page, listing: the store's page
-    ## ({page, more, scenes: [{id, name, category, version, by}]}) or null,
-    ## categories: [{slug, title}], installed: [{id, store, v}] (every scene
+    ## ({page, more, scenes: [{id, name, category, version, by}],
+    ## categories: [{slug, title}]}) or null, installed: [{id, store, v}] (every scene
     ## on the frame that came from the store: its runtime id, store scene id
     ## and version), preview: {store, id, name} or null, info: {id, store,
     ## scene: the store's answer for it or null}, removeAny: a scene not
@@ -212,8 +212,14 @@ proc fieldBox(look: StoreLook): string =
   if look.paper: result.add " border-2 border-black"
   else: result.add " bg-zinc-800 focus:bg-zinc-700 placeholder:text-zinc-500"
 
+proc categories(facts: JsonNode): seq[JsonNode] =
+  ## The shelves: the host's, else the ones the store's last answer carried.
+  result = arrayOf(facts{"categories"})
+  if result.len == 0:
+    result = arrayOf(facts{"listing", "categories"})
+
 proc categoryTitle(facts: JsonNode, slug: string): string =
-  for category in arrayOf(facts{"categories"}):
+  for category in facts.categories:
     if category{"slug"}.getStr() == slug:
       return category{"title"}.getStr()
   slug
@@ -227,7 +233,7 @@ proc categorySelect(look: StoreLook, facts: JsonNode): SvgNode =
   var all = el("option", "rounded-lg", txt("All scenes"))
   all.attrs.add(("value", ""))
   result.children.add all
-  for category in arrayOf(facts{"categories"}):
+  for category in facts.categories:
     let option = el("option", "rounded-lg", txt(category{"title"}.getStr()))
     option.attrs.add(("value", category{"slug"}.getStr()))
     result.children.add option
@@ -308,7 +314,7 @@ proc storeTree*(state, facts: JsonNode, look: StoreLook, width: int, focus: var 
   search.children.add input
   search.children.add look.button("Search", HSearch, true, focus, lit)
   tools.children.add search
-  if arrayOf(facts{"categories"}).len > 0:
+  if facts.categories.len > 0:
     tools.children.add look.categorySelect(facts)
   let note = facts.note()
   if note.len > 0:

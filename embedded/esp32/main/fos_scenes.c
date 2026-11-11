@@ -2031,12 +2031,23 @@ void fos_scenes_add_storage_json(cJSON *report)
     if (sizes != NULL) cJSON_AddItemToObject(report, "sceneBytes", sizes);
 }
 
-char *fos_scenes_list_json(void)
+cJSON *fos_scenes_read_index(void)
 {
     if (mount_state() != ESP_OK) return NULL;
     store_lock();
     cJSON *tree = fos_scene_store_read_index();
     store_unlock();
+    return tree;
+}
+
+bool fos_scenes_switcher_shown(void)
+{
+    return s_built_in_shown && !s_settings_shown;
+}
+
+char *fos_scenes_list_json(void)
+{
+    cJSON *tree = fos_scenes_read_index();
     if (tree == NULL) tree = cJSON_CreateObject(); /* not split: the storage alone */
     fos_scenes_add_storage_json(cJSON_AddObjectToObject(tree, "storage"));
     char *json = cJSON_PrintUnformatted(tree);

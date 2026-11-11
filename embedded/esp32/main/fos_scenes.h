@@ -89,6 +89,10 @@ char *fos_scenes_get_json(const char *scene_id, size_t *out_len);
  * hello's storage and the scene list's all come from here. */
 void fos_scenes_add_storage_json(struct cJSON *report);
 
+/* The index alone, as a tree the caller cJSON_Delete()s (NULL without one):
+ * no storage report, which stats every slot file. */
+struct cJSON *fos_scenes_read_index(void);
+
 /* The index ({"scenes":[{"id","name","refreshInterval","slot","bytes",...}],
  * "default","source"}) and "storage" as above. Caller cJSON_free()s. */
 char *fos_scenes_list_json(void);
@@ -145,6 +149,9 @@ bool fos_scenes_take_switched(void);
 /* The scene settings (system/sceneSettings) are on the panel: what they show
  * of the frame (fos_frame_settings.c) changed, so render them again. */
 bool fos_scenes_settings_shown(void);
+/* The scene switcher (system/sceneSwitcher) is on the panel: what its store
+ * pages show (fos_store.c) changed, so render it again. */
+bool fos_scenes_switcher_shown(void);
 
 /* Monotonic count of apply attempts made by the render task, and whether the
  * most recent one loaded into the runtime. A producer records the generation
