@@ -2,7 +2,7 @@ import Foundation
 
 /// The self-hosted backend's MCP server (`POST /api/mcp`, docs/mcp.md), used
 /// for the few actions whose work is not one route: installing scenes (fresh
-/// ids for every scene and node, references rewritten — the backend's
+/// ids for every scene and node, references rewritten: the backend's
 /// `duplicate_scenes`, the SPA's duplicateScenes.ts) and installing a photo
 /// album. Calling the backend's own tool keeps that logic in one place
 /// instead of adding a Swift copy of it. The MCP takes the same sign-in as

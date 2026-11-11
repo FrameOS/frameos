@@ -44,7 +44,8 @@ jobs:
 
       - name: Xcode
         run: |
-          latest="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          # The newest released Xcode on the image (betas left out).
+          latest="$(find /Applications -maxdepth 1 -name 'Xcode_*.app' ! -iname '*beta*' | sort -V | tail -1)"
           sudo xcode-select -s "$latest/Contents/Developer"
           xcodebuild -version
           swift --version

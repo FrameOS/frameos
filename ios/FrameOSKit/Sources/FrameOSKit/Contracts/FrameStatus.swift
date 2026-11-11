@@ -121,7 +121,7 @@ public enum FrameStatus {
         return "no logs yet"
     }
 
-    /// The healthy / busy / trouble colour of the status dot.
+    /// The healthy / busy / trouble color of the status dot.
     public enum Tone: String, Sendable { case good, busy, warn, bad, idle }
 
     public static func tone(_ frame: Frame, now: Double = FrameTime.nowMs()) -> Tone {

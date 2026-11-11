@@ -1,8 +1,8 @@
 import Foundation
 
 /// The frame's "Button actions" (docs/events.md "Event map"): the rows the
-/// section shows — one press of one button, or one swipe in from an edge,
-/// and its action — read from and written to the frame's `event_map` rules.
+/// section shows (one press of one button, or one swipe in from an edge,
+/// and its action), read from and written to the frame's `event_map` rules.
 /// A port of frontend/src/utils/frameEventMap.ts (bindingRule,
 /// bindingOfRule, the titles), pinned to it by docs/button-map-fixtures.json.
 /// Rules the section did not write are kept as they are.

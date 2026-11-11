@@ -25,9 +25,9 @@ const fixtures = JSON.parse(
 describe("docs/scene-form-fixtures.json", () => {
   for (const kase of fixtures.cases) {
     it(kase.name, () => {
-      const fields = sceneStateFields(kase.scene as any);
+      const fields = sceneStateFields(kase.scene as Parameters<typeof sceneStateFields>[0]);
       expect(
-        fields.map((f: any) => ({
+        fields.map((f) => ({
           name: f.name,
           label: f.label ?? null,
           type: f.type,
@@ -36,7 +36,7 @@ describe("docs/scene-form-fixtures.json", () => {
           role: f.role ?? null,
         })),
       ).toEqual(kase.expect.fields);
-      expect(visiblePublicStateFields(fields as any, ...(kase.values as any[])).map((f: any) => f.name)).toEqual(
+      expect(visiblePublicStateFields(fields, ...kase.values).map((f) => f.name)).toEqual(
         kase.expect.visible,
       );
     });

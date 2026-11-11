@@ -8,7 +8,7 @@ import Foundation
 public enum FrameTime {
     /// An ISO timestamp with or without a zone (a backend row written by
     /// Python's isoformat() has none: it is UTC), or epoch milliseconds.
-    /// nil when it does not parse — the SPA's NaN.
+    /// nil when it does not parse (the SPA's NaN).
     public static func parse(_ value: JSONValue?) -> Double? {
         guard let value else { return nil }
         switch value {

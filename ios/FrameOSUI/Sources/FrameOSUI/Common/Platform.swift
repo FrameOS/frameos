@@ -118,7 +118,7 @@ enum Haptics {
     }
 }
 
-/// The FrameOS colours (the logo's three squares).
+/// The FrameOS colors (the logo's three squares).
 enum Brand {
     static let teal = Color(red: 0.12, green: 0.49, blue: 0.42)
     static let green = Color(red: 0.55, green: 0.67, blue: 0.23)
