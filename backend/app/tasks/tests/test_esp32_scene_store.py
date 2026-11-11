@@ -191,14 +191,15 @@ def test_a_whole_set_goes_into_a_per_scene_store_as_changes():
     assert ".between = store_between_hook" in _source("fos_scenes.c")
 
 
-def test_a_backend_set_the_link_task_pulled_renders_at_once():
-    """The link task downloads a backend set and the render task takes it
-    from its idle wait, where nothing renders: the new set showed at the next
-    timed pass, an hour later on a scene that renders hourly (the E1003's
-    deploy sat at "first render", 2026-11-10)."""
-    fns = _functions(_source("fos_client.c"))
-    take = fns["pass_scenes_sync"]
-    assert take.index("fos_scenes_take_backend_payload(body, len, etag);") < take.index("fos_client_render_now();")
+def test_a_backend_set_renders_at_once():
+    """A backend set is taken from the idle wait (the link task's download,
+    or a deploy's poke pulling it on the render task), where nothing renders:
+    the new set showed at the next timed pass, an hour later on a scene that
+    renders hourly (the E1003's deploy sat at "first render", 2026-11-10).
+    Both ways go through fos_scenes_take_backend_payload, which asks."""
+    take = _functions(_source("fos_scenes.c"))["fos_scenes_take_backend_payload"]
+    assert take.index("load_into_nim(body, len, \"backend\");") < take.index("fos_client_render_now();") < take.index(
+        "store_behind(body, len, etag)")
 
 
 def test_a_paced_write_gives_way_to_a_render_task_waiting_for_the_store():

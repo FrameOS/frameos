@@ -115,8 +115,8 @@ confirm. Still open:
   "What the voice chat may do"): with **Use installed scenes** off, "switch
   to the calendar" is declined in a sentence and nothing is queued
   (`voice:reply` names no tool, `commands:sync received 0`); with **Create
-  new scenes** left off (the default) "show me a banana" is declined the same
-  way, and turned on it previews the picture; with **Change settings** off
+  new scenes** turned off "show me a banana" is declined the same way, and
+  on (the default) it previews the picture; with **Change settings** off
   "rotate the frame" leaves it unturned; with **Access photo albums** off
   "show the summer photos" is declined, and on (the default) it installs the
   album scene next to the frame's scenes and shows it (`docs/photos.md`: the

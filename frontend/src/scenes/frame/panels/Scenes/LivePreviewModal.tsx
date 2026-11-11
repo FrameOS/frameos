@@ -20,7 +20,6 @@ import { Spinner } from '../../../../components/Spinner'
 import { insertBreaks } from '../../../../utils/insertBreaks'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
 import { locatedValues, locationFieldPair } from '../../../../utils/geolocation'
-import { frameLogic } from '../../frameLogic'
 import { templatesLogic } from '../Templates/templatesLogic'
 import { BrowserAssetsModal } from './BrowserAssetsModal'
 import { livePreviewLogic, type LivePreviewLogLine } from './livePreviewLogic'
@@ -177,8 +176,7 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
   } = useActions(livePreviewLogic({ frameId }))
   const { scenes: frameScenes, previewingSceneId } = useValues(scenesLogic({ frameId }))
   const { previewScene } = useActions(scenesLogic({ frameId }))
-  const { applyTemplate } = useActions(frameLogic({ frameId }))
-  const { applyRemoteToFrame } = useActions(templatesLogic({ frameId }))
+  const { applyRemoteToFrame, installTemplate } = useActions(templatesLogic({ frameId }))
 
   const [showPublicState, setShowPublicState] = useState(true)
   const [showPrivateState, setShowPrivateState] = useState(false)
@@ -262,7 +260,7 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
         if (livePreviewSourceTemplate.repository) {
           applyRemoteToFrame(livePreviewSourceTemplate.repository, livePreviewSourceTemplate.template)
         } else {
-          applyTemplate(livePreviewSourceTemplate.template)
+          installTemplate(livePreviewSourceTemplate.template)
         }
       }}
       title={

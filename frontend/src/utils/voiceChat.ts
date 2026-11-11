@@ -16,11 +16,11 @@ export const VOICE_PERMISSION_KEYS = ['change_settings', 'use_scenes', 'create_s
 export type VoicePermissionKey = (typeof VOICE_PERMISSION_KEYS)[number]
 export type VoicePermissions = Record<VoicePermissionKey, boolean>
 
-/** Settings, the installed scenes and the photo albums are allowed; new scenes on the frame are opted into. */
+/** Every switch starts on: settings, the installed scenes, new scenes on the frame and the photo albums. */
 export const DEFAULT_VOICE_PERMISSIONS: VoicePermissions = {
   change_settings: true,
   use_scenes: true,
-  create_scenes: false,
+  create_scenes: true,
   use_albums: true,
 }
 

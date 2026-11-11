@@ -3249,6 +3249,58 @@ describe("deploy progress", () => {
     device.ws.close();
   });
 
+  it("ends an ESP32 install that leaves the panel as it was at its scene_ack, and waits for a render otherwise", async () => {
+    // The firmware renders a scenes_patch only when it touches the scene
+    // showing: an install without activate rendered nothing, and the bar
+    // waited at "rendering" until it went stale.
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey, { frameos_version: "2026.11.6", hardware: { platform: "esp32-s3" } });
+    const a = { id: "a", name: "A", nodes: [] };
+    const b = { id: "b", name: "B", nodes: [] };
+    const first = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-1", scenes: [a] },
+      type: "set_scenes",
+    });
+    const whole = await device.next((msg) => msg.id === first?.id, "the first push, whole");
+    device.send({ id: whole.id, ok: true, type: "ack" });
+    device.send({ active_scene: "a", checksum: "set-1", type: "scene_ack" });
+    await waitFor(async () => {
+      const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      const showing = (row?.lastState as Record<string, unknown> | null)?.active_scene;
+      return row?.scenesChecksum === "set-1" && showing === "a" ? row : undefined;
+    }, "the frame holds set-1, showing a");
+
+    // Install b: a patch that puts b and leaves a on the panel.
+    const install = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-2", scenes: [a, b] },
+      type: "set_scenes",
+    });
+    const patch = await device.next((msg) => msg.id === install?.id, "the install's patch");
+    expect(patch.type).toBe("scenes_patch");
+    expect(patch.put).toEqual([b]);
+    device.send({ id: patch.id, ok: true, type: "ack" });
+    await waitForStage(frame.id, "loading");
+    device.send({ active_scene: "a", checksum: "set-2", type: "scene_ack" });
+    await waitForStage(frame.id, "done", "done");
+
+    // Install & activate c: shown now, so the bar waits for its render.
+    const c = { id: "c", name: "C", nodes: [] };
+    const shown = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-3", scene_id: "c", scenes: [a, b, c] },
+      type: "set_scenes",
+    });
+    const activate = await device.next((msg) => msg.id === shown?.id, "the activating patch");
+    expect(activate.type).toBe("scenes_patch");
+    device.send({ id: activate.id, ok: true, type: "ack" });
+    device.send({ active_scene: "c", checksum: "set-3", type: "scene_ack" });
+    await waitForStage(frame.id, "rendering");
+    device.ws.close();
+  });
+
   it("waits for the hello after a restart before it waits for the render", async () => {
     const { frame, privateKey, token } = await createFrameFixture();
     const device = await openDevice(token);

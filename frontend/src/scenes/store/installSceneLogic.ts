@@ -214,12 +214,12 @@ export const installSceneLogic = kea<installSceneLogicType>([
         for (const frameId of frameIds) {
           const logic = templatesLogic({ frameId })
           logic.mount()
+          // On the frame's list and on the frame: the frame's page is not
+          // open here, so nothing would save an edit of its form.
           if (target.repository) {
             logic.actions.applyRemoteToFrame(target.repository, target.template, false, activate)
-          } else if (activate) {
-            logic.actions.installAndActivateTemplate(target.template)
           } else {
-            logic.actions.applyTemplate(target.template, false)
+            logic.actions.installTemplate(target.template, false, activate)
           }
         }
         const where = frameIds.length === 1 ? 'the frame' : `${frameIds.length} frames`

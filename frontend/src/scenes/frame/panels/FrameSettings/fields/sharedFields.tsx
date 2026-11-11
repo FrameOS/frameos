@@ -579,8 +579,7 @@ function VoiceChatField(): JSX.Element | null {
  * thing a spoken request can change. A switch that is off takes its tools out
  * of the AI's hands for the next sentence (the plane builds the turn's tools
  * from these, nothing is sent to the device), and the AI says so when asked.
- * Settings, the installed scenes and the photo albums are on by default; new
- * scenes on the frame are opted into. Drawn wherever the voice chat switch is.
+ * All four are on by default. Drawn wherever the voice chat switch is.
  */
 const VOICE_PERMISSION_ROWS: {
   key: 'change_settings' | 'use_scenes' | 'create_scenes' | 'use_albums'

@@ -705,8 +705,7 @@ function FrameScenesSurface({
 }): JSX.Element {
   const { search } = useValues(workspaceLogic)
   const { openScheduleDrawer, openSceneControl } = useActions(workspaceLogic)
-  const { applyTemplate } = useActions(frameLogic({ frameId: frame.id }))
-  const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
+  const { applyRemoteToFrame, installTemplate } = useActions(templatesLogic({ frameId: frame.id }))
   const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
 
   const handleScenesDragOver = (event: DragEvent<HTMLDivElement>) => {
@@ -724,7 +723,7 @@ function FrameScenesSurface({
       if (templateDragData.repository) {
         applyRemoteToFrame(templateDragData.repository, templateDragData.template)
       } else {
-        applyTemplate(templateDragData.template)
+        installTemplate(templateDragData.template)
       }
       return
     }

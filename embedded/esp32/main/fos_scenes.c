@@ -2428,6 +2428,12 @@ esp_err_t fos_scenes_take_backend_payload(char *body, size_t len, const char *et
              etag && etag[0] ? etag : "none");
     log_scene_event("scenes:sync", "updated", "backend", "", "taken", len, 0, 200, ESP_OK);
     load_into_nim(body, len, "backend");
+    /* The new set on the panel now. Taken from the idle wait (the link
+     * task's download, or a deploy's poke pulling it itself), nothing else
+     * rendered it until the next timed pass: a deploy to the reTerminal E1003
+     * showing Form showcase (hourly) sat at "first render", the Sticky's
+     * showed minutes late (2026-11-10). Inside a pass it costs one render. */
+    fos_client_render_now();
     if (store_behind(body, len, etag)) return ESP_OK;
     /* No store task: written here, as it always was. */
     store_job_t job = {.body = body, .len = len};

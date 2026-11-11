@@ -271,6 +271,16 @@
       ]
     },
     {
+      "name": "cloud_scenes: an install that leaves the panel as it was ends at its scene_ack",
+      "kind": "cloud_scenes",
+      "steps": [
+        { "command": { "type": "set_scenes", "state": "sent" }, "expect": { "stage": "sending" } },
+        { "command": { "type": "set_scenes", "state": "acked" }, "expect": { "stage": "loading" } },
+        { "signal": "scene_ack:unshown", "expect": { "stage": "done", "status": "done" } },
+        { "signal": "render:done", "expect": { "changed": false } }
+      ]
+    },
+    {
       "name": "restart: a Linux frame over SSH",
       "kind": "restart",
       "steps": [

@@ -94,13 +94,15 @@ describe("voiceTools", () => {
       },
       scenes,
     });
-    // The defaults: everything but putting new scenes on the frame, which the
-    // owner opts into (docs/voice-chat.md "What the voice chat may do").
+    // The defaults: every switch on (docs/voice-chat.md "What the voice chat may do").
     expect(tools.definitions.map((tool) => tool.name)).toEqual([
       "list_scenes",
       "activate_scene",
       "set_scene_state",
       "render_now",
+      "show_image",
+      "create_scene",
+      "change_scene",
       "rotate_frame",
       "list_albums",
       "show_album",
@@ -250,7 +252,8 @@ describe("voiceTools", () => {
     );
     const defaults = voiceContextBlock("frame", null, 0, []);
     expect(defaults).toContain("- Voice chat may: change the frame's settings (rotate_frame); use the installed scenes");
-    expect(defaults).toContain("- Voice chat may not: put new scenes on the frame (show_image, create_scene, change_scene)");
+    expect(defaults).toContain("put new scenes on the frame (show_image, create_scene, change_scene)");
+    expect(defaults).toContain("- Voice chat may not: nothing is switched off");
   });
 
   it("builds and changes scenes through the route's scene AI and pushes the result as a preview", async () => {
@@ -390,13 +393,13 @@ describe("voiceTools", () => {
   it("reads the stored column with the defaults for what is missing or malformed", () => {
     expect(readVoicePermissions(null)).toEqual({
       change_settings: true,
-      create_scenes: false,
+      create_scenes: true,
       use_albums: true,
       use_scenes: true,
     });
-    expect(readVoicePermissions({ create_scenes: true, use_scenes: "no" })).toEqual({
+    expect(readVoicePermissions({ create_scenes: false, use_scenes: "no" })).toEqual({
       change_settings: true,
-      create_scenes: true,
+      create_scenes: false,
       use_albums: true,
       use_scenes: true,
     });

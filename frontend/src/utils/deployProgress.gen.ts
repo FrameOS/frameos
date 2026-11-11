@@ -483,7 +483,8 @@ export const deployProgressContract: DeployProgressContract = {
           "on": {
             "command:sent:set_scenes": "sending",
             "command:acked:set_scenes": "loading",
-            "scene_ack": "rendering"
+            "scene_ack": "rendering",
+            "scene_ack:unshown": "done"
           }
         },
         {
@@ -491,13 +492,15 @@ export const deployProgressContract: DeployProgressContract = {
           "on": {
             "command:acked:set_scenes": "loading",
             "command:failed:set_scenes": "error",
-            "scene_ack": "rendering"
+            "scene_ack": "rendering",
+            "scene_ack:unshown": "done"
           }
         },
         {
           "stage": "loading",
           "on": {
             "scene_ack": "rendering",
+            "scene_ack:unshown": "done",
             "command:failed:set_scenes": "error"
           }
         },

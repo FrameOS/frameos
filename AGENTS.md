@@ -290,8 +290,8 @@
   age and actions (`voice_history_for_model` / `voiceHistoryForModel`), so a
   follow-up has the scene the previous sentence built to refer to. **What the voice
   chat may do** is the owner's four switches per frame (change settings /
-  use installed scenes / create new scenes / access photo albums — the third
-  off by default and the home of `show_image`; the fourth gates
+  use installed scenes / create new scenes / access photo albums — all four
+  on by default, the third the home of `show_image`; the fourth gates
   `list_albums` and `show_album`, the voice turn's `photo_album_install`):
   plane-side policy, never a firmware key (backend `device_config`
   `voiceChangeSettings` / `voiceUseScenes` / `voiceCreateScenes` /

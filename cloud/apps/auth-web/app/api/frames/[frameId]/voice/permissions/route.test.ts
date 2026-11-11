@@ -73,25 +73,25 @@ beforeEach(() => {
 
 describe("POST /api/frames/[frameId]/voice/permissions", () => {
   it("writes the whole set with the defaults filled in, and audits the change", async () => {
-    const response = await post({ create_scenes: true });
+    const response = await post({ create_scenes: false });
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       status: "updated",
-      voice_permissions: { change_settings: true, create_scenes: true, use_albums: true, use_scenes: true },
+      voice_permissions: { change_settings: true, create_scenes: false, use_albums: true, use_scenes: true },
     });
     expect(updates).toHaveLength(1);
     expect(updates[0]?.voicePermissions).toEqual({
       change_settings: true,
-      create_scenes: true,
+      create_scenes: false,
       use_albums: true,
       use_scenes: true,
     });
     expect(auditMock.mock.calls[0]?.[1]).toMatchObject({
       eventType: "frame.voice_permissions_changed",
       metadata: {
-        from: { change_settings: true, create_scenes: false, use_albums: true, use_scenes: true },
-        to: { change_settings: true, create_scenes: true, use_albums: true, use_scenes: true },
+        from: { change_settings: true, create_scenes: true, use_albums: true, use_scenes: true },
+        to: { change_settings: true, create_scenes: false, use_albums: true, use_scenes: true },
       },
       target: { frameId },
     });
