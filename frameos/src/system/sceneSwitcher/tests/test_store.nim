@@ -96,6 +96,9 @@ proc press(scene: SceneSwitcherScene, handler: int, event = "tap") =
     y = (region.y + region.h / 2) * scale + target.offsetY
   scene.send(event, %*{"x": x.int, "y": y.int, "pointerId": 1, "pointerType": "touch", "durationMs": 600})
 
+proc args(store = "", id = "", name = "", origin = ""): JsonNode =
+  %*{"store": store, "id": id, "name": name, "from": origin}
+
 proc lastAsked(): (string, JsonNode) =
   doAssert asked.len > 0, "the host was asked nothing"
   asked[^1]
@@ -133,11 +136,11 @@ block the_store_tile_comes_last_and_opens_the_store:
   doAssert has(HNextPage) and not has(HPrevPage), "a first page with more after it"
 
   scene.press(HInstall + 2)
-  doAssert lastAsked() == ("install", %*{"store": Comic, "name": "Daily comic"})
+  doAssert lastAsked() == ("install", args(Comic, name = "Daily comic", origin = "scene-3"))
   scene.press(HPreview + 2)
-  doAssert lastAsked() == ("preview", %*{"store": Comic, "name": "Daily comic", "from": "scene-3"})
+  doAssert lastAsked() == ("preview", args(Comic, name = "Daily comic", origin = "scene-3"))
   scene.press(HUpdate + 0)
-  doAssert lastAsked() == ("update", %*{"id": "scene-1", "store": Radar})
+  doAssert lastAsked() == ("update", args(Radar))
   scene.press(HNextPage)
   doAssert lastAsked() == ("browse", %*{"page": "2"})
   sent.setLen(0)
@@ -167,19 +170,19 @@ block a_long_press_opens_the_scene_and_remove_asks_twice:
   discard scene.draw()
   scene.press(HInfo + 0, "longPress")
   doAssert scene.state{"view"}.getStr() == "info"
-  doAssert lastAsked() == ("info", %*{"id": "scene-1", "store": Radar})
+  doAssert lastAsked() == ("info", args(id = "scene-1"))
   facts["info"] = %*{"id": "scene-1", "store": Radar, "scene": {"id": Radar, "name": "Rain radar",
     "category": "weather", "version": 2, "by": "Ana", "description": "Rain in the next two hours."}}
   preview("store-info", scene.draw())
   doAssert has(HInfoShow) and has(HInfoUpdate) and has(HInfoRemove)
   scene.press(HInfoUpdate)
-  doAssert lastAsked() == ("update", %*{"id": "scene-1", "store": Radar})
+  doAssert lastAsked() == ("update", args(id = "scene-1"))
   let before = asked.len
   scene.press(HInfoRemove)
   doAssert asked.len == before, "the first tap only asks"
   preview("store-info-remove", scene.draw())
   scene.press(HInfoRemove)
-  doAssert lastAsked() == ("remove", %*{"id": "scene-1", "store": Radar})
+  doAssert lastAsked() == ("remove", args(id = "scene-1"))
   doAssert scene.state{"view"}.getStr() == "info", "the page stays until the scene is gone"
   # Gone from the frame: the tiles again.
   listed.delete(0)
@@ -210,7 +213,7 @@ block a_preview_opens_on_the_store_with_install_and_discard:
   discard scene.draw()
   doAssert has(HInfoInstall) and has(HInfoDiscard) and not has(HInfoRemove)
   scene.press(HInfoInstall)
-  doAssert lastAsked() == ("install", %*{"store": Comic, "name": "Daily comic"})
+  doAssert lastAsked() == ("install", args(Comic, name = "Daily comic"))
   discard scene.draw()
   scene.press(HInfoDiscard)
   discard scene.draw()

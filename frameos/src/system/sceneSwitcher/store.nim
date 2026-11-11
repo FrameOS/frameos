@@ -105,37 +105,44 @@ proc storeFacts*(): JsonNode =
     if not result.isNil and result.kind != JObject:
       result = nil
 
-proc storeAct*(action: string, args: JsonNode = nil) =
+let noItems = newJArray()
+
+proc items(node: JsonNode): JsonNode =
+  ## `node` when it is an array, else an empty one: read through `elems`.
+  if not node.isNil and node.kind == JArray: node else: noItems
+
+proc storeAct*(action: string, store = "", id = "", name = "", origin = "") =
+  ## One shape for every action, its unused keys empty: the store scene, the
+  ## scene on the frame (the host finds its store scene), the name a preview
+  ## shows, the scene it covers.
   if not sceneStoreAction.isNil:
-    sceneStoreAction(action, if args.isNil: newJObject() else: args)
+    let args = newJObject()
+    args.put("store", newJString(store))
+    args.put("id", newJString(id))
+    args.put("name", newJString(name))
+    args.put("from", newJString(origin))
+    sceneStoreAction(action, args)
 
-proc arrayOf(node: JsonNode): seq[JsonNode] =
-  if not node.isNil and node.kind == JArray: node.elems else: @[]
+proc browse(key, value: string, page: int) =
+  ## The store's page `page`, with `key` (q, category) set to `value`.
+  if not sceneStoreAction.isNil:
+    let args = newJObject()
+    if key.len > 0:
+      args.put(key, newJString(value))
+    args.put("page", newJString($page))
+    sceneStoreAction("browse", args)
 
-proc args(pairs: openArray[(string, string)]): JsonNode =
-  result = newJObject()
-  for (key, value) in pairs:
-    result.put(key, newJString(value))
+proc found*(facts: JsonNode, key, value: string): JsonNode =
+  ## The first `installed` row whose `key` (id, store) is `value`, or nil.
+  let rows = items(facts{"installed"})
+  for i in 0 ..< rows.elems.len:
+    if rows.elems[i]{key}.getStr() == value:
+      return rows.elems[i]
 
-proc installedAs*(facts: JsonNode, sceneId: string): JsonNode =
-  ## The `installed` row of the scene with runtime id `sceneId`, or nil.
-  for row in arrayOf(facts{"installed"}):
-    if row{"id"}.getStr() == sceneId:
-      return row
-
-proc installedFrom(facts: JsonNode, store: string): JsonNode =
-  ## The first scene on the frame from store scene `store`, or nil.
-  for row in arrayOf(facts{"installed"}):
-    if row{"store"}.getStr() == store:
-      return row
-
-proc previewing*(facts: JsonNode, store = "", sceneId = ""): bool =
-  ## Whether the frame previews this store scene, or the scene `sceneId`.
+proc previewing*(facts: JsonNode, key, value: string): bool =
+  ## Whether the frame's preview has `key` (store, id) `value`.
   let preview = facts{"preview"}
-  if preview.isNil or preview.kind != JObject:
-    return false
-  (store.len > 0 and preview{"store"}.getStr() == store) or
-    (sceneId.len > 0 and preview{"id"}.getStr() == sceneId)
+  not preview.isNil and preview.kind == JObject and preview{key}.getStr() == value
 
 proc lookup(table: openArray[string], key: string): string =
   var i = 0
@@ -147,19 +154,19 @@ proc lookup(table: openArray[string], key: string): string =
 proc note(facts: JsonNode): string =
   ## What the page says under the search: what is running, what went wrong,
   ## what just worked.
-  let busy = facts{"busy"}.getStr()
-  if busy.len > 0 and busy != "info":
-    result = lookup(Busy, busy)
-    if result.len > 0:
+  let
+    busy = facts{"busy"}.getStr()
+    error = facts{"error"}.getStr()
+  if busy.len > 0:
+    if busy != "info":
+      result = lookup(Busy, busy)
       result.add Ellipsis
-    return
-  let error = facts{"error"}.getStr()
-  if error.len > 0:
+  elif error.len > 0:
     result = lookup(Errors, error)
     if result.len == 0:
       result = "That did not work (" & error & ")."
-    return
-  lookup(Done, facts{"done"}.getStr())
+  else:
+    result = lookup(Done, facts{"done"}.getStr())
 
 # --------------------------------------------------------------- the picture
 
@@ -212,38 +219,45 @@ proc fieldBox(look: StoreLook): string =
   if look.paper: result.add " border-2 border-black"
   else: result.add " bg-zinc-800 focus:bg-zinc-700 placeholder:text-zinc-500"
 
-proc categories(facts: JsonNode): seq[JsonNode] =
+proc categories(facts: JsonNode): JsonNode =
   ## The shelves: the host's, else the ones the store's last answer carried.
-  result = arrayOf(facts{"categories"})
-  if result.len == 0:
-    result = arrayOf(facts{"listing", "categories"})
+  result = items(facts{"categories"})
+  if result.elems.len == 0:
+    result = items(facts{"listing", "categories"})
 
-proc categoryTitle(facts: JsonNode, slug: string): string =
-  for category in facts.categories:
-    if category{"slug"}.getStr() == slug:
-      return category{"title"}.getStr()
-  slug
+proc about(facts, scene: JsonNode): string =
+  ## "Weather · by Ana": a store scene's shelf and publisher.
+  let
+    slug = scene{"category"}.getStr()
+    shelves = facts.categories
+    by = scene{"by"}.getStr()
+  result = slug
+  for i in 0 ..< shelves.elems.len:
+    if shelves.elems[i]{"slug"}.getStr() == slug:
+      result = shelves.elems[i]{"title"}.getStr()
+  if by.len > 0:
+    if result.len > 0: result.add " \xc2\xb7 "
+    result.add "by "
+    result.add by
 
 proc categorySelect(look: StoreLook, facts: JsonNode): SvgNode =
   var c = fieldBox(look)
   c.add " w-full"
-  result = el("select", move c)
+  result = el("select", move c).on("on-change", HCategory)
   result.attrs.add(("value", facts{"category"}.getStr()))
-  discard result.on("on-change", HCategory)
-  var all = el("option", "rounded-lg", txt("All scenes"))
-  all.attrs.add(("value", ""))
-  result.children.add all
-  for category in facts.categories:
-    let option = el("option", "rounded-lg", txt(category{"title"}.getStr()))
-    option.attrs.add(("value", category{"slug"}.getStr()))
+  let shelves = facts.categories
+  for i in -1 ..< shelves.elems.len:
+    let option = el("option", "rounded-lg",
+      txt(if i < 0: "All scenes" else: shelves.elems[i]{"title"}.getStr()))
+    option.attrs.add(("value", if i < 0: "" else: shelves.elems[i]{"slug"}.getStr()))
     result.children.add option
 
-proc pageArrows(look: StoreLook, header: SvgNode, page: int, more: bool, focus: var seq[int], lit: int) =
-  ## "Previous" and "More" for the store's pages, by the title.
-  if page > 1:
-    header.children.add look.button("Previous", HPrevPage, false, focus, lit)
-  if more:
-    header.children.add look.button("More", HNextPage, false, focus, lit)
+proc small(look: StoreLook, text: sink string): SvgNode =
+  ## A quieter line in the page's small size.
+  var c = "truncate"
+  look.grey(c)
+  c.px("text", look.small)
+  el("span", move c, txt(text))
 
 proc sceneRow(look: StoreLook, facts, scene: JsonNode, row: int, focus: var seq[int], lit: int): SvgNode =
   ## One store scene: its name, its shelf and publisher, and what can be
@@ -251,177 +265,146 @@ proc sceneRow(look: StoreLook, facts, scene: JsonNode, row: int, focus: var seq[
   var c = "flex items-center"
   c.px("gap", look.gap div 2)
   c.px("py", look.gap div 3)
-  if look.paper: c.add " border-b border-black"
-  else: c.add " border-b border-zinc-800"
+  c.add(if look.paper: " border-b border-black" else: " border-b border-zinc-800")
   result = el("div", move c)
   let
     store = scene{"id"}.getStr()
-    installed = facts.installedFrom(store)
-    latest = scene{"version"}.getInt(0)
-  var about = categoryTitle(facts, scene{"category"}.getStr())
-  let by = scene{"by"}.getStr()
-  if by.len > 0:
-    if about.len > 0: about.add " \xc2\xb7 "
-    about.add "by "
-    about.add by
-  if not installed.isNil:
-    about.add " \xc2\xb7 installed"
-  elif facts.previewing(store = store):
-    about.add " \xc2\xb7 previewing"
-  let text = el("div", "grow min-w-0 flex flex-col")
-  text.children.add el("span", "truncate font-bold", txt(scene{"name"}.getStr()))
-  c = "truncate"
-  look.grey(c)
-  c.px("text", look.small)
-  text.children.add el("span", move c, txt(about))
+    installed = facts.found("store", store)
+    previewed = facts.previewing("store", store)
+    version = if installed.isNil: 0 else: installed{"v"}.getInt(0)
+  var line = facts.about(scene)
+  if not installed.isNil: line.add " \xc2\xb7 installed"
+  elif previewed: line.add " \xc2\xb7 previewing"
+  let text = el("div", "grow min-w-0 flex flex-col", el("span", "truncate font-bold", txt(scene{"name"}.getStr())))
+  text.children.add look.small(line)
   result.children.add text
-  if not installed.isNil:
-    if latest > installed{"v"}.getInt(0) and installed{"v"}.getInt(0) > 0:
-      result.children.add look.button("Update", HUpdate + row, true, focus, lit)
-    result.children.add look.button("Show", HShow + row, false, focus, lit)
-  else:
-    if not facts.previewing(store = store):
+  if installed.isNil:
+    if not previewed:
       result.children.add look.button("Preview", HPreview + row, false, focus, lit)
     result.children.add look.button("Install", HInstall + row, true, focus, lit)
+  else:
+    if version > 0 and scene{"version"}.getInt(0) > version:
+      result.children.add look.button("Update", HUpdate + row, true, focus, lit)
+    result.children.add look.button("Show", HShow + row, false, focus, lit)
 
 proc storeTree*(state, facts: JsonNode, look: StoreLook, width: int, focus: var seq[int]): SvgNode =
   ## The store page: Back and the pages' arrows, the search and the shelves,
   ## what is running or went wrong, and a page of scenes that scrolls.
   ## `focus` gets the buttons in order, for the keys; the one at
   ## `state.focus` is lit.
-  let lit = state{"focus"}.getInt(-1)
-  result = look.frame()
   let
+    lit = state{"focus"}.getInt(-1)
     listing = facts{"listing"}
     page = facts{"page"}.getInt(1)
     header = look.header("Scene store", focus, lit)
-  look.pageArrows(header, page, listing{"more"}.getBool(), focus, lit)
+    draft = state{"draft"}
+  result = look.frame()
+  if page > 1:
+    header.children.add look.button("Previous", HPrevPage, false, focus, lit)
+  if listing{"more"}.getBool():
+    header.children.add look.button("More", HNextPage, false, focus, lit)
   result.children.add header
   var c = "shrink-0 flex flex-col"
   c.px("px", look.pad)
   c.px("pt", look.gap div 2)
   c.px("gap", look.gap div 2)
   let tools = el("div", move c)
-  c = "flex items-center"
-  c.px("gap", look.gap div 2)
-  let search = el("div", move c)
   var field = fieldBox(look)
   field.add " flex-1 min-w-0"
   let input = el("input", move field).on("on-change", HQuery).on("on-key-down", HSearch)
-  var draft = state{"draft"}
   input.attrs.add(("value", if draft.isNil: facts{"query"}.getStr() else: draft.getStr()))
   input.attrs.add(("placeholder", "Search scenes"))
-  search.children.add input
+  c = "flex items-center"
+  c.px("gap", look.gap div 2)
+  let search = el("div", move c, input)
   search.children.add look.button("Search", HSearch, true, focus, lit)
   tools.children.add search
-  if facts.categories.len > 0:
+  if facts.categories.elems.len > 0:
     tools.children.add look.categorySelect(facts)
   let note = facts.note()
   if note.len > 0:
-    c = "truncate"
-    look.grey(c)
-    c.px("text", look.small)
-    tools.children.add el("span", move c, txt(note))
+    tools.children.add look.small(note)
   result.children.add tools
   c = "flex flex-col"
   c.px("px", look.pad)
   c.px("pb", look.pad)
   let list = el("div", move c)
-  let scenes = arrayOf(listing{"scenes"})
-  for i in 0 ..< scenes.len:
-    list.children.add look.sceneRow(facts, scenes[i], i, focus, lit)
-  if scenes.len == 0 and facts{"busy"}.getStr().len == 0:
-    c = "text-center"
-    look.grey(c)
-    c.px("pt", look.gap)
-    list.children.add el("div", move c, txt(
-      if listing.isNil or listing.kind != JObject: "The store's scenes show here once the frame is online."
-      else: "No scenes found."))
+  let scenes = items(listing{"scenes"})
+  for i in 0 ..< scenes.elems.len:
+    list.children.add look.sceneRow(facts, scenes.elems[i], i, focus, lit)
+  if scenes.elems.len == 0 and facts{"busy"}.getStr().len == 0:
+    list.children.add look.small(if listing.isNil or listing.kind != JObject:
+      "The store's scenes show here once the frame is online." else: "No scenes found.")
   result.children.add el("div", "flex-1 overflow-y-auto", list)
-
-proc line(card: SvgNode, look: StoreLook, text: string, quiet = false) =
-  if text.len > 0:
-    var c = ""
-    if quiet: look.grey(c)
-    card.children.add el("div", move c, txt(text))
 
 proc infoTree*(state, facts: JsonNode, look: StoreLook, sceneId, name: string, showing: bool,
     focus: var seq[int]): SvgNode =
   ## A scene's page: where it came from and what can be done with it.
-  let lit = state{"focus"}.getInt(-1)
+  let
+    lit = state{"focus"}.getInt(-1)
+    asking = state{"confirm"}.getInt(-1)
+    installed = facts.found("id", sceneId)
+    preview = facts.previewing("id", sceneId)
+    known = facts{"info", "id"}.getStr() == sceneId
+    scene = if known: facts{"info", "scene"} else: nil
+    told = not scene.isNil and scene.kind == JObject
+    version = if installed.isNil: 0 else: installed{"v"}.getInt(0)
+    latest = if told: scene{"version"}.getInt(0) else: 0
+    error = facts{"error"}.getStr()
+    busy = facts{"busy"}.getStr()
   result = look.frame()
   result.children.add look.header(if name.len > 0: name else: sceneId, focus, lit)
   var c = "flex flex-col"
   c.px("p", look.pad)
-  c.px("gap", look.gap)
+  c.px("gap", look.gap div 2)
   let body = el("div", move c)
-  let card = el("div", if look.paper: "flex flex-col gap-1 p-3 rounded-lg border-2 border-black"
-    else: "flex flex-col gap-1 p-3 rounded-lg bg-zinc-900")
-  let
-    installed = facts.installedAs(sceneId)
-    preview = facts.previewing(sceneId = sceneId)
-    info = facts{"info"}
-    known = not info.isNil and info{"id"}.getStr() == sceneId
-    scene = if known: info{"scene"} else: nil
-    version = if installed.isNil: 0 else: installed{"v"}.getInt(0)
-    latest = if scene.isNil: 0 else: scene{"version"}.getInt(0)
-  if preview:
-    card.line(look, "A preview: not in the frame's scene list until it is installed.")
-  if installed.isNil:
-    card.line(look, "Not from the scene store.", quiet = true)
-  else:
-    var text = "From the scene store"
-    if version > 0:
-      text.add ", version "
-      text.addInt version
-    card.line(look, text)
-    if not scene.isNil and scene.kind == JObject:
-      var about = categoryTitle(facts, scene{"category"}.getStr())
-      if scene{"by"}.getStr().len > 0:
-        if about.len > 0: about.add " \xc2\xb7 "
-        about.add "by "
-        about.add scene{"by"}.getStr()
-      card.line(look, about, quiet = true)
-      card.line(look, scene{"description"}.getStr(), quiet = true)
+  # Where it came from, and what the store says of it now.
+  var text = if preview: "A preview, not in the frame's scene list until it is installed. "
+    elif installed.isNil: "Not from the scene store."
+    else: ""
+  if not installed.isNil:
+    text.add "From the scene store, version "
+    text.addInt version
+    text.add '.'
+  # `move`: Nim 2.2.4 hands a plain string to a sink without clearing it, and
+  # the assignment below would free what the node holds.
+  body.children.add el("div", "font-bold", txt(move text))
+  if not installed.isNil:
+    if told:
+      body.children.add look.small(facts.about(scene))
+      body.children.add el("div", if look.paper: "" else: "text-zinc-400", txt(scene{"description"}.getStr()))
       if latest > version and version > 0:
-        var newer = "Version "
-        newer.addInt latest
-        newer.add " is available."
-        card.line(look, newer)
-      elif not preview:
-        card.line(look, "This is the newest version.", quiet = true)
-    elif facts{"busy"}.getStr() == "info":
-      card.line(look, "Asking the store about it" & Ellipsis, quiet = true)
-    elif known and facts{"error"}.getStr() == "invalid_scene":
-      card.line(look, "Not in the public store.", quiet = true)
-  body.children.add card
-  # What runs, went wrong or just worked; not the store's "no such scene",
-  # which the card says.
-  let asked = facts{"busy"}.getStr() == "info" or (known and facts{"error"}.getStr() == "invalid_scene")
-  let note = if asked: "" else: facts.note()
-  if note.len > 0:
-    c = ""
-    look.grey(c)
-    body.children.add el("div", move c, txt(note))
+        text = "Version "
+        text.addInt latest
+        text.add " is available."
+        body.children.add el("div", "", txt(move text))
+    elif busy == "info":
+      body.children.add look.small("Asking the store about it" & Ellipsis)
+    elif known and error == "invalid_scene":
+      body.children.add look.small("Not in the public store.")
+  # What runs, went wrong or just worked; not the store's answer about the
+  # scene, which is above.
+  if busy != "info" and not (known and error == "invalid_scene"):
+    let note = facts.note()
+    if note.len > 0:
+      body.children.add look.small(note)
   c = "flex flex-wrap"
   c.px("gap", look.gap div 2)
+  c.px("pt", look.gap div 2)
   let buttons = el("div", move c)
-  let asking = state{"confirm"}.getInt(-1)
   if not showing:
     buttons.children.add look.button("Show", HInfoShow, false, focus, lit)
   if preview:
     buttons.children.add look.button("Install", HInfoInstall, true, focus, lit)
-    buttons.children.add look.button(if asking == HInfoDiscard: "Tap again to discard" else: "Discard",
-      HInfoDiscard, false, focus, lit)
-  else:
-    if latest > version and version > 0:
-      buttons.children.add look.button("Update", HInfoUpdate, true, focus, lit)
-    if not installed.isNil or facts{"removeAny"}.getBool():
-      let remove = look.button(if asking == HInfoRemove: "Tap again to delete" else: "Delete",
-        HInfoRemove, false, focus, lit)
-      if asking == HInfoRemove and not look.paper:
-        remove.attrs[0][1].add " bg-red-600 active:bg-red-500"
-      buttons.children.add remove
+  elif latest > version and version > 0:
+    buttons.children.add look.button("Update", HInfoUpdate, true, focus, lit)
+  if preview or not installed.isNil or facts{"removeAny"}.getBool():
+    let handler = if preview: HInfoDiscard else: HInfoRemove
+    let button = look.button(if asking == handler: "Tap again" elif preview: "Discard" else: "Delete",
+      handler, false, focus, lit)
+    if asking == handler and not look.paper:
+      button.attrs[0][1].add " bg-red-600 active:bg-red-500"
+    buttons.children.add button
   body.children.add buttons
   result.children.add el("div", "flex-1 overflow-y-auto", body)
 
@@ -435,63 +418,48 @@ proc storeHandle*(state, facts: JsonNode, handler: int, text, key, opener: strin
   ## show for `smShow`.
   let
     confirm = state{"confirm"}.getInt(-1)
-    scenes = arrayOf(facts{"listing", "scenes"})
     info = state{"info"}.getStr()
-    installed = facts.installedAs(info)
+    scenes = items(facts{"listing", "scenes"})
+    row = if handler >= HPreview and handler < HInfoShow: handler mod 1000 else: -1
+    base = handler - max(row, 0)
   state.put("confirm", newJInt(-1))
-  var row = -1
-  if handler >= HPreview and handler < HInfoShow:
-    row = handler mod 1000
-    if row >= scenes.len:
-      return smNone
-  let store = if row >= 0: scenes[row]{"id"}.getStr() else: ""
-  case handler
-  of HBack:
+  if row >= scenes.elems.len:
+    return smNone
+  let
+    scene = if row >= 0: scenes.elems[row] else: nil
+    store = if row >= 0: scene{"id"}.getStr() else: ""
+    held = if row >= 0: facts.found("store", store) else: nil
+  if handler == HBack:
     state.put("draft", newJNull())
     result = smTiles
-  of HQuery:
+  elif handler == HQuery:
     state.put("draft", newJString(text))
-  of HSearch:
+  elif handler == HSearch:
     if key.len == 0 or key == "Enter":
       let draft = state{"draft"}
-      storeAct("browse", args({"q": if draft.isNil: facts{"query"}.getStr() else: draft.getStr(), "page": "1"}))
-  of HCategory:
-    storeAct("browse", args({"category": text, "page": "1"}))
-  of HPrevPage, HNextPage:
-    let page = max(1, facts{"page"}.getInt(1) + (if handler == HNextPage: 1 else: -1))
-    storeAct("browse", args({"page": $page}))
-  of HInfoShow:
-    sceneId = info
+      browse("q", if draft.isNil: facts{"query"}.getStr() else: draft.getStr(), 1)
+  elif handler == HCategory:
+    browse("category", text, 1)
+  elif handler == HPrevPage or handler == HNextPage:
+    browse("", "", max(1, facts{"page"}.getInt(1) + (if handler == HNextPage: 1 else: -1)))
+  elif handler == HInfoShow or (base == HShow and not held.isNil):
+    sceneId = if row >= 0: held{"id"}.getStr() else: info
     result = smShow
-  of HInfoUpdate:
-    if not installed.isNil:
-      storeAct("update", args({"id": info, "store": installed{"store"}.getStr()}))
-  of HInfoInstall:
+  elif handler == HInfoUpdate:
+    storeAct("update", id = info)
+  elif handler == HInfoInstall:
     let preview = facts{"preview"}
-    storeAct("install", args({"store": preview{"store"}.getStr(), "name": preview{"name"}.getStr()}))
-  of HInfoRemove, HInfoDiscard:
+    storeAct("install", preview{"store"}.getStr(), name = preview{"name"}.getStr())
+  elif handler == HInfoRemove or handler == HInfoDiscard:
     # Asked twice. The page stays until the scene is gone from the frame (the
     # switcher goes back to the tiles then), so a refusal shows here.
     if confirm != handler:
       state.put("confirm", newJInt(handler))
-    elif handler == HInfoDiscard:
-      storeAct("discard")
     else:
-      storeAct("remove", args({"id": info, "store": if installed.isNil: "" else: installed{"store"}.getStr()}))
-  else:
-    if row >= 0:
-      let base = handler - row
-      if base == HPreview:
-        storeAct("preview", args({"store": store, "name": scenes[row]{"name"}.getStr(), "from": opener}))
-      elif base == HInstall:
-        storeAct("install", args({"store": store, "name": scenes[row]{"name"}.getStr()}))
-      else:
-        let held = facts.installedFrom(store)
-        if not held.isNil:
-          if base == HShow:
-            sceneId = held{"id"}.getStr()
-            result = smShow
-          elif base == HUpdate:
-            storeAct("update", args({"id": held{"id"}.getStr(), "store": store}))
+      storeAct(if handler == HInfoDiscard: "discard" else: "remove", id = info)
+  elif base == HPreview or base == HInstall:
+    storeAct(if base == HPreview: "preview" else: "install", store, name = scene{"name"}.getStr(), origin = opener)
+  elif base == HUpdate:
+    storeAct("update", store)
 
 {.pop.}

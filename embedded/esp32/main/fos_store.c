@@ -43,6 +43,7 @@
 #include "fos_mem.h"
 #include "fos_scene_store.h"
 #include "fos_scenes.h"
+#include "fos_store_scan.h"
 #include "fos_wifi.h"
 
 static const char *TAG = "fos_store";
@@ -67,40 +68,49 @@ typedef struct {
     int v;
 } origin_t;
 
-/* Everything below is under s_lock. */
+/* What the pages show and the work asked for: one block in PSRAM (made at
+ * init), not internal RAM, which TLS needs. Everything in it is under s_lock. */
+typedef struct {
+    char busy[WORD_LEN];
+    char error[WORD_LEN];
+    char done[WORD_LEN];
+    char query[104];
+    char category[WORD_LEN];
+    int page;
+    char *listing; /* the store's answer as it came, or NULL */
+    char *info;    /* the store's answer for `info_id`'s scene, or NULL */
+    char info_id[SCENE_ID_LEN];
+    char preview_store[STORE_ID_LEN]; /* "" when nothing is previewed */
+    char preview_id[SCENE_ID_LEN];
+    char preview_name[NAME_LEN];
+    char preview_from[SCENE_ID_LEN];
+    origin_t origins[FOS_SCENE_STORE_SLOTS];
+    int origin_count;
+    uint32_t origins_generation;
+    /* The work asked for, until the task takes it. */
+    char job[WORD_LEN];
+    char job_store[STORE_ID_LEN];
+    char job_id[SCENE_ID_LEN];
+    char job_name[NAME_LEN];
+    char job_from[SCENE_ID_LEN];
+} store_t;
+
 static SemaphoreHandle_t s_lock;
 static bool s_running;
-/* What the pages show. */
-static char s_busy[WORD_LEN];
-static char s_error[WORD_LEN];
-static char s_done[WORD_LEN];
-static char s_query[104];
-static char s_category[WORD_LEN];
-static int s_page = 1;
-static char *s_listing; /* the store's answer as it came, or NULL */
-static char *s_info;    /* the store's answer for `s_info_id`'s scene, or NULL */
-static char s_info_id[SCENE_ID_LEN];
-static char s_info_store[STORE_ID_LEN];
-static char s_preview_store[STORE_ID_LEN]; /* "" when nothing is previewed */
-static char s_preview_id[SCENE_ID_LEN];
-static char s_preview_name[NAME_LEN];
-static char s_preview_from[SCENE_ID_LEN];
-static origin_t s_origins[FOS_SCENE_STORE_SLOTS];
-static int s_origin_count;
-static uint32_t s_origins_generation = UINT32_MAX;
-/* The work asked for, until the task takes it. */
-static char s_job[WORD_LEN];
-static char s_job_store[STORE_ID_LEN];
-static char s_job_id[SCENE_ID_LEN];
-static char s_job_name[NAME_LEN];
-static char s_job_from[SCENE_ID_LEN];
+static store_t *S;
 
 static void lock(void) { xSemaphoreTake(s_lock, portMAX_DELAY); }
 static void unlock(void) { xSemaphoreGive(s_lock); }
 
 void fos_store_init(void)
 {
-    if (s_lock == NULL) s_lock = xSemaphoreCreateMutex();
+    if (S != NULL) return;
+    S = fos_big_malloc(sizeof(store_t));
+    if (S == NULL) return;
+    memset(S, 0, sizeof(store_t));
+    S->page = 1;
+    S->origins_generation = UINT32_MAX;
+    s_lock = xSemaphoreCreateMutex();
 }
 
 /* ------------------------------------------------------------------ facts */
@@ -150,48 +160,47 @@ char *fos_store_json(void)
     lock();
     /* What came from the store is read again once the scenes changed, off
      * this task. */
-    if (s_origins_generation != fos_scenes_store_generation() && !s_running && !s_job[0]) start_job("scan");
-    out_t out = {.cap = 1024 + (s_listing ? strlen(s_listing) : 0) + (s_info ? strlen(s_info) : 0) +
-                        (size_t)s_origin_count * (SCENE_ID_LEN + STORE_ID_LEN + 32)};
+    if (S->origins_generation != fos_scenes_store_generation() && !s_running && !S->job[0]) start_job("scan");
+    out_t out = {.cap = 1024 + (S->listing ? strlen(S->listing) : 0) + (S->info ? strlen(S->info) : 0) +
+                        (size_t)S->origin_count * (SCENE_ID_LEN + STORE_ID_LEN + 32)};
     out.buf = fos_big_malloc(out.cap);
     if (out.buf != NULL) {
         out.buf[0] = '\0';
         char line[48];
         put(&out, "{");
-        put_pair(&out, "busy", s_busy);
-        put_pair(&out, "error", s_error);
-        put_pair(&out, "done", s_done);
-        put_pair(&out, "query", s_query);
-        put_pair(&out, "category", s_category);
+        put_pair(&out, "busy", S->busy);
+        put_pair(&out, "error", S->error);
+        put_pair(&out, "done", S->done);
+        put_pair(&out, "query", S->query);
+        put_pair(&out, "category", S->category);
         const fos_config_t *config = fos_config();
-        snprintf(line, sizeof(line), "\"page\":%d,\"removeAny\":%s,\"listing\":", s_page,
+        snprintf(line, sizeof(line), "\"page\":%d,\"removeAny\":%s,\"listing\":", S->page,
                  config->backend_url[0] || fos_cloud_state() != FOS_CLOUD_NONE ? "false" : "true");
         put(&out, line);
-        put(&out, s_listing ? s_listing : "null");
+        put(&out, S->listing ? S->listing : "null");
         put(&out, ",\"installed\":[");
-        for (int i = 0; i < s_origin_count; i++) {
+        for (int i = 0; i < S->origin_count; i++) {
             put(&out, i ? ",{" : "{");
-            put_pair(&out, "id", s_origins[i].id);
-            put_pair(&out, "store", s_origins[i].store);
-            snprintf(line, sizeof(line), "\"v\":%d}", s_origins[i].v);
+            put_pair(&out, "id", S->origins[i].id);
+            put_pair(&out, "store", S->origins[i].store);
+            snprintf(line, sizeof(line), "\"v\":%d}", S->origins[i].v);
             put(&out, line);
         }
         put(&out, "],\"preview\":");
-        if (s_preview_store[0]) {
+        if (S->preview_store[0]) {
             put(&out, "{");
-            put_pair(&out, "store", s_preview_store);
-            put_pair(&out, "id", s_preview_id);
+            put_pair(&out, "store", S->preview_store);
+            put_pair(&out, "id", S->preview_id);
             put(&out, "\"name\":");
-            put_string(&out, s_preview_name);
+            put_string(&out, S->preview_name);
             put(&out, "}");
         } else {
             put(&out, "null");
         }
         put(&out, ",\"info\":{");
-        put_pair(&out, "id", s_info_id);
-        put_pair(&out, "store", s_info_store);
+        put_pair(&out, "id", S->info_id);
         put(&out, "\"scene\":");
-        put(&out, s_info ? s_info : "null");
+        put(&out, S->info ? S->info : "null");
         put(&out, "}}");
     }
     unlock();
@@ -213,35 +222,42 @@ void fos_store_action(const char *action, const char *args_json)
     lock();
     /* One thing at a time: the page says what is running. (A re-read of
      * what came from the store does not count: it runs after.) */
-    if (!s_busy[0]) {
+    if (!S->busy[0]) {
         const char *job = action;
         static const char *const known[] = {"browse", "info", "preview", "install", "update", "remove", "discard"};
         bool ok = false;
         for (size_t i = 0; i < sizeof(known) / sizeof(known[0]); i++) ok = ok || strcmp(action, known[i]) == 0;
         if (strcmp(action, "open") == 0) {
-            job = s_listing == NULL ? "browse" : NULL;
+            job = S->listing == NULL ? "browse" : NULL;
         } else if (!ok) {
             job = NULL; /* "close": the switcher's own news, fos_scenes_switcher_shown */
         } else if (strcmp(action, "browse") == 0) {
-            copy_arg(args, "q", s_query, sizeof(s_query));
-            copy_arg(args, "category", s_category, sizeof(s_category));
+            copy_arg(args, "q", S->query, sizeof(S->query));
+            copy_arg(args, "category", S->category, sizeof(S->category));
             char page[8] = "";
             copy_arg(args, "page", page, sizeof(page));
-            if (page[0]) s_page = atoi(page) > 0 ? atoi(page) : 1;
-        } else if (strcmp(action, "info") == 0) {
-            copy_arg(args, "id", s_info_id, sizeof(s_info_id));
-            copy_arg(args, "store", s_info_store, sizeof(s_info_store));
-            free(s_info);
-            s_info = NULL;
+            if (page[0]) S->page = atoi(page) > 0 ? atoi(page) : 1;
+        }
+        S->job_store[0] = S->job_id[0] = S->job_name[0] = S->job_from[0] = '\0';
+        copy_arg(args, "store", S->job_store, sizeof(S->job_store));
+        copy_arg(args, "id", S->job_id, sizeof(S->job_id));
+        copy_arg(args, "name", S->job_name, sizeof(S->job_name));
+        copy_arg(args, "from", S->job_from, sizeof(S->job_from));
+        /* A scene on the frame names its store scene by its id. */
+        for (int i = 0; !S->job_store[0] && S->job_id[0] && i < S->origin_count; i++) {
+            if (strcmp(S->origins[i].id, S->job_id) == 0) {
+                snprintf(S->job_store, sizeof(S->job_store), "%s", S->origins[i].store);
+            }
+        }
+        if (job != NULL && strcmp(job, "info") == 0) {
+            snprintf(S->info_id, sizeof(S->info_id), "%s", S->job_id);
+            free(S->info);
+            S->info = NULL;
+            if (!S->job_store[0]) job = NULL; /* not from the store: nothing to ask */
         }
         if (job != NULL) {
-            s_job_store[0] = s_job_id[0] = s_job_name[0] = s_job_from[0] = '\0';
-            copy_arg(args, "store", s_job_store, sizeof(s_job_store));
-            copy_arg(args, "id", s_job_id, sizeof(s_job_id));
-            copy_arg(args, "name", s_job_name, sizeof(s_job_name));
-            copy_arg(args, "from", s_job_from, sizeof(s_job_from));
-            snprintf(s_busy, sizeof(s_busy), "%s", job);
-            s_error[0] = s_done[0] = '\0';
+            snprintf(S->busy, sizeof(S->busy), "%s", job);
+            S->error[0] = S->done[0] = '\0';
             start_job(job);
         }
     }
@@ -356,57 +372,6 @@ static const char *ask_plane(const char *url, const char *auth, bool backend, co
     return error;
 }
 
-/* The scene objects of a JSON array, by where they start and how long they
- * are: a store scene's scenes.json split without building its tree. -1 when
- * it is not an array of whole objects. */
-static int split_scenes(const char *json, size_t len, const char **starts, size_t *lens, int max)
-{
-    int depth = 0, count = 0;
-    bool in_string = false, escaped = false;
-    const char *start = NULL;
-    for (size_t i = 0; i < len; i++) {
-        char c = json[i];
-        if (in_string) {
-            if (escaped) escaped = false;
-            else if (c == '\\') escaped = true;
-            else if (c == '"') in_string = false;
-        } else if (c == '"') {
-            in_string = true;
-        } else if (c == '{' || c == '[') {
-            if (depth == 1 && c == '{') start = json + i;
-            if (depth == 0 && c != '[') return -1;
-            depth++;
-        } else if (c == '}' || c == ']') {
-            depth--;
-            if (depth == 1 && c == '}' && start != NULL && count < max) {
-                starts[count] = start;
-                lens[count++] = (size_t)(json + i + 1 - start);
-                start = NULL;
-            }
-        }
-    }
-    return depth == 0 ? count : -1;
-}
-
-/* What a scene file says of where it came from: the `origin` the store
- * stamps on every scene it serves, {href, storeSceneId, version, sceneId},
- * found by its keys (no app's `origin` has a storeSceneId). */
-static void read_origin(const char *json, char *store, size_t store_len, int *v)
-{
-    static const char key[] = "\"storeSceneId\":\"";
-    store[0] = '\0';
-    *v = 0;
-    const char *at = json ? strstr(json, key) : NULL;
-    if (at == NULL) return;
-    at += sizeof(key) - 1;
-    size_t n = 0;
-    while (at[n] && at[n] != '"' && n + 1 < store_len) n++;
-    memcpy(store, at, n);
-    store[n] = '\0';
-    const char *version = strstr(at + n, "\"version\":\"");
-    if (version != NULL && version - (at + n) < 16) *v = atoi(version + 11);
-}
-
 /* The scenes on the frame that came from the store, read again. A scene whose
  * content is what was read last time is not opened. */
 static void scan_origins(void)
@@ -425,15 +390,15 @@ static void scan_origins(void)
         row->hash = cJSON_IsNumber(hash) ? hash->valuedouble : -1;
         row->store[0] = '\0';
         lock();
-        for (int i = 0; i < s_origin_count; i++) {
-            if (row->hash >= 0 && s_origins[i].hash == row->hash && strcmp(s_origins[i].id, row->id) == 0) {
-                *row = s_origins[i];
+        for (int i = 0; i < S->origin_count; i++) {
+            if (row->hash >= 0 && S->origins[i].hash == row->hash && strcmp(S->origins[i].id, row->id) == 0) {
+                *row = S->origins[i];
             }
         }
         unlock();
         if (!row->store[0]) {
             char *json = fos_scenes_get_json(row->id, NULL);
-            read_origin(json, row->store, sizeof(row->store), &row->v);
+            fos_store_read_origin(json, row->store, sizeof(row->store), &row->v);
             free(json);
         }
         if (row->store[0]) count++;
@@ -441,10 +406,10 @@ static void scan_origins(void)
     cJSON_Delete(index);
     lock();
     if (found != NULL) {
-        memcpy(s_origins, found, sizeof(origin_t) * (size_t)count);
-        s_origin_count = count;
+        memcpy(S->origins, found, sizeof(origin_t) * (size_t)count);
+        S->origin_count = count;
     }
-    s_origins_generation = generation;
+    S->origins_generation = generation;
     unlock();
     free(found);
 }
@@ -461,7 +426,7 @@ static const char *install_here(const char *store, bool show, char *first, size_
     const char *error = fetch(url, SCENES_MAX, false, &body, &len);
     const char *starts[SPLIT_MAX];
     size_t lens[SPLIT_MAX];
-    int count = error ? 0 : split_scenes(body, len, starts, lens, SPLIT_MAX);
+    int count = error ? 0 : fos_store_split_scenes(body, len, starts, lens, SPLIT_MAX);
     if (error == NULL && count <= 0) error = "store_unavailable";
     first[0] = '\0';
     for (int i = 0; i < count && error == NULL; i++) {
@@ -480,9 +445,9 @@ static const char *remove_here(const char *store, const char *id)
 {
     const char *error = NULL;
     lock();
-    int count = s_origin_count;
+    int count = S->origin_count;
     origin_t *rows = fos_big_malloc(sizeof(origin_t) * (size_t)(count + 1));
-    if (rows != NULL) memcpy(rows, s_origins, sizeof(origin_t) * (size_t)count);
+    if (rows != NULL) memcpy(rows, S->origins, sizeof(origin_t) * (size_t)count);
     unlock();
     if (rows == NULL) return "no_room";
     int removed = 0;
@@ -508,15 +473,15 @@ static void run(const char *job)
     const char *done = job;
     lock();
     char store[STORE_ID_LEN], id[SCENE_ID_LEN], name[NAME_LEN], from[SCENE_ID_LEN];
-    snprintf(store, sizeof(store), "%s", s_job_store);
-    snprintf(id, sizeof(id), "%s", s_job_id);
-    snprintf(name, sizeof(name), "%s", s_job_name);
-    snprintf(from, sizeof(from), "%s", s_job_from);
-    char query[sizeof(s_query)], category[WORD_LEN];
-    snprintf(query, sizeof(query), "%s", s_query);
-    snprintf(category, sizeof(category), "%s", s_category);
-    int page = s_page;
-    if (strcmp(job, "discard") == 0) snprintf(from, sizeof(from), "%s", s_preview_from);
+    snprintf(store, sizeof(store), "%s", S->job_store);
+    snprintf(id, sizeof(id), "%s", S->job_id);
+    snprintf(name, sizeof(name), "%s", S->job_name);
+    snprintf(from, sizeof(from), "%s", S->job_from);
+    char query[sizeof(S->query)], category[WORD_LEN];
+    snprintf(query, sizeof(query), "%s", S->query);
+    snprintf(category, sizeof(category), "%s", S->category);
+    int page = S->page;
+    if (strcmp(job, "discard") == 0) snprintf(from, sizeof(from), "%s", S->preview_from);
     unlock();
 
     if (strcmp(job, "browse") == 0 || strcmp(job, "info") == 0) {
@@ -534,7 +499,7 @@ static void run(const char *job)
         }
         error = fetch(url, job[0] == 'b' ? LISTING_MAX : INFO_MAX, true, &body, NULL);
         lock();
-        char **slot = job[0] == 'b' ? &s_listing : &s_info;
+        char **slot = job[0] == 'b' ? &S->listing : &S->info;
         if (body != NULL) {
             free(*slot);
             *slot = body;
@@ -555,7 +520,7 @@ static void run(const char *job)
             error = remove_here(store, id);
         } else if (strcmp(job, "discard") == 0) {
             lock();
-            snprintf(store, sizeof(store), "%s", s_preview_store);
+            snprintf(store, sizeof(store), "%s", S->preview_store);
             unlock();
             error = remove_here(store, "");
             if (error == NULL && from[0]) fos_scenes_select(from);
@@ -566,21 +531,21 @@ static void run(const char *job)
         lock();
         if (error == NULL) {
             if (strcmp(job, "preview") == 0) {
-                snprintf(s_preview_store, sizeof(s_preview_store), "%s", store);
-                snprintf(s_preview_id, sizeof(s_preview_id), "%s", shown);
-                snprintf(s_preview_name, sizeof(s_preview_name), "%s", name);
-                snprintf(s_preview_from, sizeof(s_preview_from), "%s", from);
-            } else if (strcmp(job, "discard") == 0 || strcmp(s_preview_store, store) == 0) {
-                s_preview_store[0] = '\0';
+                snprintf(S->preview_store, sizeof(S->preview_store), "%s", store);
+                snprintf(S->preview_id, sizeof(S->preview_id), "%s", shown);
+                snprintf(S->preview_name, sizeof(S->preview_name), "%s", name);
+                snprintf(S->preview_from, sizeof(S->preview_from), "%s", from);
+            } else if (strcmp(job, "discard") == 0 || strcmp(S->preview_store, store) == 0) {
+                S->preview_store[0] = '\0';
             }
         }
         unlock();
     }
-    if (strcmp(job, "scan") == 0 || fos_scenes_store_generation() != s_origins_generation) scan_origins();
+    if (strcmp(job, "scan") == 0 || fos_scenes_store_generation() != S->origins_generation) scan_origins();
     lock();
-    s_busy[0] = '\0';
-    snprintf(s_error, sizeof(s_error), "%s", error ? error : "");
-    snprintf(s_done, sizeof(s_done), "%s", error || strcmp(job, "scan") == 0 ? "" : done);
+    S->busy[0] = '\0';
+    snprintf(S->error, sizeof(S->error), "%s", error ? error : "");
+    snprintf(S->done, sizeof(S->done), "%s", error || strcmp(job, "scan") == 0 ? "" : done);
     unlock();
     if (fos_scenes_switcher_shown()) fos_client_render_now();
 }
@@ -591,8 +556,8 @@ static void store_task(void *arg)
     for (;;) {
         char job[WORD_LEN];
         lock();
-        snprintf(job, sizeof(job), "%s", s_job);
-        s_job[0] = '\0';
+        snprintf(job, sizeof(job), "%s", S->job);
+        S->job[0] = '\0';
         if (!job[0]) s_running = false;
         unlock();
         if (!job[0]) break;
@@ -604,14 +569,14 @@ static void store_task(void *arg)
 /* Under s_lock. */
 static void start_job(const char *job)
 {
-    snprintf(s_job, sizeof(s_job), "%s", job);
+    snprintf(S->job, sizeof(S->job), "%s", job);
     if (s_running) return;
     s_running = true;
     if (xTaskCreate(store_task, "fos_store", TASK_STACK, NULL, 4, NULL) != pdPASS) {
         ESP_LOGE(TAG, "no memory for the store task");
         s_running = false;
-        s_job[0] = '\0';
-        s_busy[0] = '\0';
-        snprintf(s_error, sizeof(s_error), "no_room");
+        S->job[0] = '\0';
+        S->busy[0] = '\0';
+        snprintf(S->error, sizeof(S->error), "no_room");
     }
 }

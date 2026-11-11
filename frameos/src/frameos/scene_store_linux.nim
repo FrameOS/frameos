@@ -59,7 +59,7 @@ type
     query, category: string
     page: int
     listing, info: string ## the store's answers as they came ("" for none)
-    infoId, infoStore: string
+    infoId: string
     previewStore, previewId, previewName, previewFrom: string
     origins: seq[Origin]
     standalone: bool
@@ -342,8 +342,7 @@ proc linuxSceneStoreRead*(): JsonNode {.nimcall, gcsafe, raises: [].} =
         "category": f.category, "page": f.page, "installed": installed,
         "removeAny": cloudPlane().url.len == 0 and backendOf(config).url.len == 0,
         "listing": (if f.listing.len > 0: parseJson(f.listing) else: newJNull()),
-        "info": {"id": f.infoId, "store": f.infoStore,
-          "scene": (if f.info.len > 0: parseJson(f.info) else: newJNull())}}
+        "info": {"id": f.infoId, "scene": (if f.info.len > 0: parseJson(f.info) else: newJNull())}}
       result["preview"] = if f.previewStore.len > 0:
         %*{"store": f.previewStore, "id": f.previewId, "name": f.previewName} else: newJNull()
     except Exception:
@@ -364,6 +363,11 @@ proc linuxSceneStoreAction*(action: string, args: JsonNode) {.nimcall, gcsafe, r
         # One thing at a time: the page says what is running.
         if facts.busy.len > 0:
           return
+        # A scene on the frame names its store scene by its id.
+        if job.store.len == 0 and job.id.len > 0:
+          for origin in facts.origins:
+            if origin.id == job.id:
+              job.store = origin.store
         case action
         of "open":
           if facts.listing.len > 0:
@@ -378,8 +382,9 @@ proc linuxSceneStoreAction*(action: string, args: JsonNode) {.nimcall, gcsafe, r
             except ValueError: facts.page = 1
         of "info":
           facts.infoId = job.id
-          facts.infoStore = job.store
           facts.info = ""
+          if job.store.len == 0:
+            return # not from the store: nothing to ask
         of "preview", "install", "update", "remove", "discard": discard
         else: return
         job.query = facts.query

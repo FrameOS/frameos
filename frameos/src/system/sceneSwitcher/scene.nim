@@ -356,15 +356,9 @@ proc openStore(self: SceneSwitcherScene) =
 proc openInfo(self: SceneSwitcherScene, index: int) =
   ## A scene's page: the host asks the store about it when it came from there.
   if index >= 0 and index < self.entries.len:
-    let id = self.entries[index].id
-    self.state.put("info", newJString(id))
+    self.state.put("info", newJString(self.entries[index].id))
     self.showView("info")
-    let installed = storeFacts().installedAs(id)
-    if not installed.isNil:
-      let args = newJObject()
-      args.put("id", newJString(id))
-      args.put("store", newJString(installed{"store"}.getStr()))
-      storeAct("info", args)
+    storeAct("info", id = self.entries[index].id)
 
 proc choose(self: SceneSwitcherScene, index: int) =
   ## Show the scene at `index`, or the store's page for its tile.
@@ -390,7 +384,7 @@ proc opened(self: SceneSwitcherScene) =
     self.forget()
   self.highlight(max(index, 0))
   forgetUiTarget(SceneSwitcherId, SwitcherNode)
-  self.state.put("view", newJString(if self.storeTile and facts.previewing(sceneId = self.opener()): "store" else: ""))
+  self.state.put("view", newJString(if self.storeTile and facts.previewing("id", self.opener()): "store" else: ""))
   self.state.put("draft", newJNull())
   self.touch()
 
@@ -547,8 +541,10 @@ proc titleRow(look: TileLook, index, size: int, height = 0): SvgNode =
     c.px("h", height)
   var n = "shrink-0 font-bold"
   n.mute(look)
-  var number: string
-  number.addInt(index + 1)
+  var number = "+"
+  if index >= 0:
+    number.setLen(0)
+    number.addInt(index + 1)
   result = el("div", c, el("span", n, txt(number)))
   if look.showing:
     var d = "shrink-0 rounded-full"
@@ -593,7 +589,8 @@ proc pictureTile(self: SceneSwitcherScene, tile: SvgNode, look: TileLook, index:
 
 proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: SwitcherGrid,
     button: string): SvgNode =
-  ## The scene at `index`, in the page's `slot`.
+  ## The scene at `index`, in the page's `slot`; past the scenes, the store's
+  ## tile ("+" for its number).
   var c: string
   c.at(grid.x0 + (slot mod grid.cols) * (grid.tileW + grid.gap),
     grid.y0 + (slot div grid.cols) * (grid.tileH + grid.gap), grid.tileW, grid.tileH)
@@ -610,20 +607,23 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: Swit
     c.add button
     if look.lit: c.add " border-sky-400"
     else: c.add " border-zinc-800"
-  result = el("div", c).onClick(index)
-  result.attrs.add(("on-long-press", $(HInfo + index)))
-  var title = self.entries[index].name
-  if title.len == 0:
-    title = self.entries[index].id
+  let store = index >= self.entries.len
+  result = el("div", c).onClick(if store: HStoreTile else: index)
+  var title = "Scene store"
+  if not store:
+    result.attrs.add(("on-long-press", $(HInfo + index)))
+    title = self.entries[index].name
+    if title.len == 0:
+      title = self.entries[index].id
   # An ESP32 shows names only: loading, scaling and drawing a picture per tile
   # made the drawer take seconds to open on a 10" e-paper panel (the owner's
   # call, 2026-11-10), and writing them cost seconds of flash after renders.
   # The preview keeps no picture of a scene it is not showing either.
   when not defined(frameosEmbedded):
-    if not sceneSwitcherThumbnail.isNil and self.pictureTile(result, look, index, grid, title):
+    if not store and not sceneSwitcherThumbnail.isNil and self.pictureTile(result, look, index, grid, title):
       return
   let size = clamp(min(permille(grid.tileH, 180), permille(grid.tileW, 140)), 12, 40)
-  result.children.add look.titleRow(index, size)
+  result.children.add look.titleRow(if store: -1 else: index, size)
   var name = "grow flex items-center justify-center text-center font-bold line-clamp-3"
   name.px("text", size)
   result.children.add el("div", name, txt(title))
@@ -713,31 +713,6 @@ when not defined(frameosEmbedded):
       root.children.add left
       root.children.add right
 
-proc storeCard(look: TileLook, slot: int, grid: SwitcherGrid, button: string): SvgNode =
-  ## The last tile: the scene store's page.
-  var c: string
-  c.at(grid.x0 + (slot mod grid.cols) * (grid.tileW + grid.gap),
-    grid.y0 + (slot div grid.cols) * (grid.tileH + grid.gap), grid.tileW, grid.tileH)
-  c.px("border", look.border)
-  c.px("rounded", look.radius)
-  c.px("p", look.inner)
-  c.add " flex flex-col items-center justify-center text-center font-bold"
-  if look.paper:
-    c.add " border-black"
-    if look.lit: c.add " bg-black text-white"
-  else:
-    c.add button
-    c.add(if look.lit: " border-sky-400" else: " border-zinc-800")
-  result = el("div", c).onClick(HStoreTile)
-  let size = clamp(min(permille(grid.tileH, 180), permille(grid.tileW, 140)), 12, 40)
-  var plus = "leading-none"
-  plus.px("text", size * 2)
-  plus.mute(look)
-  result.children.add el("span", plus, txt("+"))
-  var name = "line-clamp-2"
-  name.px("text", size)
-  result.children.add el("span", name, txt("Scene store"))
-
 proc storeLook(paper: bool, unit: int): StoreLook =
   ## The store's pages at the sizes the scene settings use (sceneSettings's Look).
   result = StoreLook(paper: paper, size: clamp(unit * 4 div 100, 14, 28))
@@ -821,12 +796,8 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
     if index >= self.tileCount:
       break
     look.lit = index == lit
-    if index == self.entries.len:
-      look.showing = false
-      result.children.add storeCard(look, slot, grid, button)
-    else:
-      look.showing = self.entries[index].id == opener
-      result.children.add self.tile(look, index, slot, grid, button)
+    look.showing = index < self.entries.len and self.entries[index].id == opener
+    result.children.add self.tile(look, index, slot, grid, button)
 
 const
   PaperWhite = color(1, 1, 1, 1)
