@@ -661,6 +661,125 @@ describe("device socket", () => {
   });
 });
 
+describe("scenes_patch", () => {
+  const esp32 = { frameos_version: "2026.11.6", hardware: { platform: "esp32-s3" } };
+  const sceneA = { id: "a", name: "A", nodes: [] };
+  const sceneB = { id: "b", name: "B", nodes: [] };
+
+  async function settle(device: TestSocket, commandId: string | undefined, checksum: string) {
+    device.send({ id: commandId, ok: true, type: "ack" });
+    device.send({ checksum, type: "scene_ack" });
+    await waitFor(async () => {
+      const [row] = await db.select().from(frameCommands).where(eq(frameCommands.id, String(commandId)));
+      return row?.status === "acked" ? row : undefined;
+    }, "command acked");
+  }
+
+  async function pushOne(frameId: string, device: TestSocket) {
+    const first = await enqueueFrameCommand(db, {
+      frameId,
+      payload: { checksum: "set-1", scenes: [sceneA, sceneB] },
+      type: "set_scenes",
+    });
+    const full = await device.next((msg) => msg.id === first?.id, "the first push, whole");
+    expect(full.type).toBe("set_scenes");
+    expect(full.scene_hashes).toBeUndefined();
+    await settle(device, first?.id, "set-1");
+    await waitFor(async () => {
+      const [row] = await db.select().from(frames).where(eq(frames.id, frameId));
+      return row?.scenesChecksum === "set-1" ? row : undefined;
+    }, "the set is what the frame holds");
+  }
+
+  it("sends a push that changes one scene as only that scene", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey, esp32);
+    await pushOne(frame.id, device);
+
+    const changedB = { ...sceneB, name: "B2" };
+    const second = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-2", scenes: [sceneA, changedB], scene_id: "b" },
+      type: "set_scenes",
+    });
+    const patch = await device.next((msg) => msg.id === second?.id, "the patch");
+    expect(patch.type).toBe("scenes_patch");
+    expect(patch.base_checksum).toBe("set-1");
+    expect(patch.checksum).toBe("set-2");
+    expect(patch.order).toEqual(["a", "b"]);
+    expect(patch.put).toEqual([changedB]);
+    expect(patch.scene_id).toBe("b");
+    expect(patch.scenes).toBeUndefined();
+    expect(patch.scene_hashes).toBeUndefined();
+
+    await settle(device, second?.id, "set-2");
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.scenesChecksum).toBe("set-2");
+
+    // A removal is a patch too, with nothing to put.
+    const third = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-3", scenes: [changedB] },
+      type: "set_scenes",
+    });
+    const removal = await device.next((msg) => msg.id === third?.id, "the removal");
+    expect(removal.type).toBe("scenes_patch");
+    expect(removal.base_checksum).toBe("set-2");
+    expect(removal.order).toEqual(["b"]);
+    expect(removal.put).toEqual([]);
+    device.ws.close();
+  });
+
+  it("sends the whole list when the frame refuses the patch", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey, esp32);
+    await pushOne(frame.id, device);
+
+    const changedA = { ...sceneA, name: "A2" };
+    const second = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-2", scenes: [changedA, sceneB] },
+      type: "set_scenes",
+    });
+    const patch = await device.next((msg) => msg.id === second?.id, "the patch");
+    expect(patch.type).toBe("scenes_patch");
+    device.send({ error: "base_mismatch", id: second?.id, ok: false, type: "ack" });
+
+    const full = await device.next(
+      (msg) => msg.id === second?.id && msg.type === "set_scenes",
+      "the same row, as the whole list",
+    );
+    expect(full.scenes).toEqual([changedA, sceneB]);
+    expect(full.no_patch).toBeUndefined();
+    await settle(device, second?.id, "set-2");
+    device.ws.close();
+  });
+
+  it("keeps a Linux frame and firmware before the verb on set_scenes", async () => {
+    for (const hello of [
+      { frameos_version: "2026.11.6", hardware: { platform: "pi-zero2w" } },
+      // 2026.11.5 shipped without the verb (the floor said otherwise until
+      // the first push to one went out twice).
+      { frameos_version: "2026.11.5", hardware: { platform: "esp32-s3" } },
+    ]) {
+      const { frame, privateKey, token } = await createFrameFixture();
+      const device = await openDevice(token);
+      await handshake(device, privateKey, hello);
+      await pushOne(frame.id, device);
+      const second = await enqueueFrameCommand(db, {
+        frameId: frame.id,
+        payload: { checksum: "set-2", scenes: [sceneA, { ...sceneB, name: "B2" }] },
+        type: "set_scenes",
+      });
+      const message = await device.next((msg) => msg.id === second?.id, "the second push");
+      expect(message.type).toBe("set_scenes");
+      device.ws.close();
+    }
+  });
+});
+
 describe("command redelivery", () => {
   it("redelivers a command whose socket died before the ack", async () => {
     const { frame, privateKey, token } = await createFrameFixture();

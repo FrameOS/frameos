@@ -36,11 +36,13 @@ type Store = {
   created: string[];
   updated: string[];
   pushes: unknown[];
+  // Every store scene whose scenes.json the save read back, in order.
+  read: string[];
   nextId: number;
 };
 
 function fakeStore(): Store {
-  return { assignments: [], scenes: new Map(), created: [], updated: [], pushes: [], nextId: 1 };
+  return { assignments: [], scenes: new Map(), created: [], updated: [], pushes: [], read: [], nextId: 1 };
 }
 
 function installFetch(store: Store, options: { scenesJsonStatus?: (storeSceneId: string) => number } = {}) {
@@ -66,6 +68,7 @@ function installFetch(store: Store, options: { scenesJsonStatus?: (storeSceneId:
       return Response.json({ ok: true });
     }
     if ((match = url.pathname.match(/^\/api\/store\/scenes\/([^/]+)\/scenes\.json$/))) {
+      store.read.push(match[1]!);
       const status = options.scenesJsonStatus?.(match[1]!) ?? 200;
       if (status !== 200) {
         return new Response("{}", { status });
@@ -398,5 +401,73 @@ describe("cloud scene persistence", () => {
     expect(store.created).toEqual(["My scene"]);
     expect(store.assignments.map((row) => row.scene_id)).toEqual(["new-1"]);
     expect(store.pushes).toHaveLength(2);
+  });
+
+  // The scene drawer's "Push & activate" (frameLogic.saveScenes): reading
+  // every assignment's scenes.json back, one request each, was most of a
+  // push's time on a frame with twenty scenes.
+  it("pushes one scene: reads its own pack alone, posts the rest as they are, shows it with its values", async () => {
+    const store = fakeStore();
+    store.scenes.set("public-1", { scenes: [storedScene("rt-1", "Weather")], owned: false, version: 3 });
+    store.scenes.set("mine-1", { scenes: [storedScene("rt-2", "Clock")], owned: true, version: 1 });
+    store.scenes.set("mine-2", { scenes: [storedScene("rt-3", "Steps")], owned: true, version: 2 });
+    store.assignments = [{ scene_id: "public-1" }, { scene_id: "mine-1" }, { scene_id: "mine-2", scene_version: 2 }];
+    installFetch(store);
+    const sources: Record<string, CloudSceneSource> = {
+      "rt-1": { scene_id: "public-1", scene_version: null },
+      "rt-2": { scene_id: "mine-1", scene_version: null },
+      "rt-3": { scene_id: "mine-2", scene_version: 2 },
+    };
+    const edited = {
+      ...sanitizedCopy(storedScene("rt-2", "Clock")),
+      nodes: [{ id: "rt-2-new", type: "event", data: { keyword: "render" } }],
+    } as unknown as FrameScene;
+    // Another unsaved scene in the form is not this push's to create.
+    const other = { id: "rt-other", name: "Draft", nodes: [], edges: [] } as unknown as FrameScene;
+    const form = [
+      sanitizedCopy(storedScene("rt-1", "Weather")),
+      edited,
+      sanitizedCopy(storedScene("rt-3", "Steps")),
+      other,
+    ];
+
+    await persistAndPushCloudFrameScenes(frameId, form, "rt-2", {
+      sceneUnchanged: workspaceEquality,
+      sources,
+      only: ["rt-2"],
+      activeState: { city: "Brussels" },
+    });
+
+    expect(store.read).toEqual(["mine-1"]);
+    expect(store.updated).toEqual(["mine-1"]);
+    expect(store.created).toEqual([]);
+    const push = store.pushes.at(-1) as { scenes: Record<string, unknown>[]; scene_id?: string; state?: unknown };
+    expect(push.scene_id).toBe("rt-2");
+    expect(push.state).toEqual({ city: "Brussels" });
+    // Order kept; the untouched rows go out as they were (pin and all), with
+    // no maps or layouts said, which keeps the ones they have.
+    expect(push.scenes.map((row) => row.scene_id)).toEqual(["public-1", "mine-1", "mine-2"]);
+    expect(push.scenes[0]).toEqual({ scene_id: "public-1" });
+    expect(push.scenes[2]).toEqual({ scene_id: "mine-2", scene_version: 2 });
+  });
+
+  it("a pushed scene the hydration did not place reads every pack, so it is created once", async () => {
+    const store = fakeStore();
+    store.scenes.set("mine-1", { scenes: [storedScene("rt-2", "Clock")], owned: true, version: 1 });
+    store.assignments = [{ scene_id: "mine-1" }];
+    installFetch(store);
+    const fresh = { id: "rt-new", name: "My scene", nodes: [], edges: [] } as unknown as FrameScene;
+    const other = { id: "rt-other", name: "Draft", nodes: [], edges: [] } as unknown as FrameScene;
+
+    await persistAndPushCloudFrameScenes(frameId, [sanitizedCopy(storedScene("rt-2", "Clock")), fresh, other], "rt-new", {
+      sceneUnchanged: workspaceEquality,
+      sources: {},
+      only: ["rt-new"],
+    });
+
+    expect(store.read).toEqual(["mine-1"]);
+    expect(store.created).toEqual(["My scene"]);
+    expect(store.assignments.map((row) => row.scene_id)).toEqual(["mine-1", "new-1"]);
+    expect((store.pushes.at(-1) as { scene_id?: string }).scene_id).toBe("rt-new");
   });
 });

@@ -452,6 +452,9 @@ static const char *fos_platform_name(void)
 #endif
 }
 
+/* The scene store as of the last hardware report sent (ws_poll_active_scene). */
+static uint32_t s_store_generation_reported = 0;
+
 static void add_hardware_json(cJSON *parent)
 {
     const fos_config_t *config = fos_config();
@@ -589,6 +592,9 @@ static void add_hardware_json(cJSON *parent)
         cJSON_AddNumberToObject(storage, "otaBytes", info.ota_bytes);
         cJSON_AddNumberToObject(storage, "stateBytes", info.state_bytes);
     }
+    /* What is in /state, not its size on the map: the owner sees it fill. */
+    s_store_generation_reported = fos_scenes_store_generation();
+    fos_scenes_add_storage_json(storage);
     cJSON *ota = cJSON_AddObjectToObject(hw, "ota");
     if (ota) {
         cJSON_AddBoolToObject(ota, "supported", info.ota_slots > 0);
@@ -1341,15 +1347,22 @@ static void add_state_fields(cJSON *msg, nim_snapshot_t *snap, bool with_hardwar
  * cloud's last_state has no active scene until the next reconnect, and the
  * workspace shows "the active scene is not available" for a frame that is
  * happily rendering. Scene changes from set_scenes pushes also ride the
- * scene_ack, so this mostly fires for boot, schedules and button presses. */
+ * scene_ack, so this mostly fires for boot, schedules and button presses.
+ *
+ * It also goes out when the stored scenes changed since the last hardware
+ * report: the hello's storage (each scene's size, what is free) is stale after
+ * a push, and a push that keeps the active scene would otherwise leave the
+ * workspace showing the old sizes until the next reconnect. Not while a
+ * scene_ack waits, so the report is the applied store. */
 static char s_active_scene_reported[128] = "";
 
 static void ws_poll_active_scene(void)
 {
     if (!s_ws_client || !s_ws_ready) return;
+    bool store_moved = !s_scene_ack_pending && fos_scenes_store_generation() != s_store_generation_reported;
     nim_snapshot_t snap;
     nim_snapshot_take(&snap);
-    if (snap.ok && snap.scene_id[0] && strcmp(snap.scene_id, s_active_scene_reported) != 0) {
+    if (snap.ok && snap.scene_id[0] && (store_moved || strcmp(snap.scene_id, s_active_scene_reported) != 0)) {
         cJSON *msg = cJSON_CreateObject();
         if (msg) {
             cJSON_AddStringToObject(msg, "type", "state");
@@ -1518,6 +1531,8 @@ static void ws_schedule_reboot(void)
  * to it) leaves the provider showing this frame as out of sync, which is the
  * truth. The command itself was already acked — that ack means "accepted and
  * persisted", scene_ack means "live". */
+static void ws_send_scene_ack(const char *checksum);
+
 static void ws_poll_scene_ack(void)
 {
     if (!s_scene_ack_pending) return;
@@ -1547,12 +1562,17 @@ static void ws_poll_scene_ack(void)
         ESP_LOGI(TAG, "set_scenes: applied while offline; scene_ack deferred to hello");
         return;
     }
+    ws_send_scene_ack(s_scene_ack_checksum);
+}
 
+/* `scene_ack {checksum, active_scene?}`: the set with this checksum is live. */
+static void ws_send_scene_ack(const char *checksum)
+{
     cJSON *msg = cJSON_CreateObject();
     if (!msg) return; /* out of memory: stay silent, provider retries */
     cJSON_AddStringToObject(msg, "type", "scene_ack");
-    if (s_scene_ack_checksum[0]) {
-        cJSON_AddStringToObject(msg, "checksum", s_scene_ack_checksum);
+    if (checksum != NULL && checksum[0]) {
+        cJSON_AddStringToObject(msg, "checksum", checksum);
     }
     /* The render task is often still on the first render of the new payload
      * (holding the runtime lock) when this runs: then active_scene is left
@@ -2160,46 +2180,113 @@ static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const
  * straight to the storage layer. Going through
  * fos_http_store_uploaded_scenes_payload() would reprint the whole envelope,
  * then parse and print it a second time inside that function — four to five
- * copies live at once on a device whose scene store tops out at 512 KiB. */
-static void ws_handle_set_scenes(const cJSON *root, const cJSON *id)
+ * copies live at once on a device whose scene store tops out at 512 KiB.
+ *
+ * scenes_patch (`patch`): the same set the full push would have sent, as the
+ * difference from the one this frame holds. `base_checksum` names that set; a
+ * frame holding anything else refuses and the provider sends the whole list.
+ * Acked and scene_acked exactly as set_scenes is, so `checksum` is the whole
+ * set's. */
+/* Send a pushed set's `scene_id` / `state` on as the switch the
+ * set_current_scene verb makes: the state rides to the runtime, which holds it
+ * until that scene opens (single_scene_host.nim), so it is in place at the
+ * scene's first render even while the scene's file is still being written. */
+static void select_pushed_scene(const char *scene_id, const cJSON *state, fos_event_origin_t origin)
 {
-    const cJSON *scenes = cJSON_GetObjectItem(root, "scenes");
-    if (!cJSON_IsArray(scenes)) {
-        ws_ack(id, false, "not_interpreted");
+    if (!cJSON_IsObject(state)) {
+        fos_scenes_select(scene_id);
         return;
     }
-    char *payload = cJSON_PrintUnformatted((cJSON *)scenes);
-    if (!payload) {
-        ws_ack(id, false, "no_memory");
-        return;
+    cJSON *payload = cJSON_CreateObject();
+    char *printed = NULL;
+    if (payload != NULL && cJSON_AddStringToObject(payload, "sceneId", scene_id) != NULL &&
+        cJSON_AddItemReferenceToObject(payload, "state", (cJSON *)state)) {
+        printed = cJSON_PrintUnformatted(payload);
     }
+    cJSON_Delete(payload);
+    if (printed == NULL || fos_events_dispatch(origin, FOS_EVENT_SET_CURRENT_SCENE, printed) != FOS_EVENT_DONE) {
+        fos_scenes_select(scene_id); /* the switch, at least */
+    }
+    cJSON_free(printed);
+}
+
+static void ws_handle_set_scenes(const cJSON *root, const cJSON *id, bool patch, fos_event_origin_t origin)
+{
+    const cJSON *checksum = cJSON_GetObjectItem(root, "checksum");
     uint32_t generation = fos_scenes_apply_generation();
-    /* Declared CLOUD so the store remembers who installed these scenes:
-     * apply_network_policy() keeps the RFC1918 deny alive on that flag even
-     * after a demotion drops FOS_CLOUD_ENROLLED. */
-    esp_err_t err = fos_scenes_set_json_from(payload, strlen(payload),
-                                             FOS_SCENES_SOURCE_CLOUD);
-    cJSON_free(payload);
-    if (err != ESP_OK) {
-        const char *detail = fos_scenes_last_error();
-        ws_ack(id, false, (detail && detail[0]) ? detail : "scene_store_failed");
-        return;
-    }
-    /* Optional scene_id names which pushed scene to activate (the workspace's
-     * "preview on frame" flow). Queued now, applied by the render task AFTER
-     * the payload loads — fos_client.c applies pending scenes before pending
-     * selection, so the id exists by then. Unknown ids are dropped there. */
+    /* Optional scene_id names which pushed scene to activate ("Push & activate",
+     * "Install and show", the workspace's "preview on frame"): somebody waits
+     * to see it, so a patch that carries one is written unpaced. */
     const cJSON *scene_id = cJSON_GetObjectItem(root, "scene_id");
-    if (cJSON_IsString(scene_id) && scene_id->valuestring && scene_id->valuestring[0]) {
-        fos_scenes_select(scene_id->valuestring);
+    bool select = cJSON_IsString(scene_id) && scene_id->valuestring[0];
+    esp_err_t err;
+    if (patch) {
+        const cJSON *base = cJSON_GetObjectItem(root, "base_checksum");
+        bool from_cloud = fos_scenes_from_cloud();
+        const char *refused = NULL;
+        if (!cJSON_IsString(checksum) || !cJSON_IsString(base)) {
+            refused = "invalid_patch";
+        } else if (from_cloud && strcmp(checksum->valuestring, s_applied_scenes_checksum) == 0) {
+            /* A redelivered patch this frame already applied, or a push of the
+             * set it holds that names a scene to show (the install already
+             * landed, then "Push & activate"). Its scene_ack went out then, or
+             * the hello carried the checksum; the switch is still asked for. */
+            ws_ack(id, true, NULL);
+            if (select) {
+                select_pushed_scene(scene_id->valuestring, cJSON_GetObjectItem(root, "state"), origin);
+                fos_client_render_now();
+                /* Live already: said at once, so the push's progress moves on
+                 * to the render instead of waiting for an apply that has
+                 * nothing to do. */
+                ws_send_scene_ack(checksum->valuestring);
+            }
+            return;
+        } else if (!from_cloud || strcmp(base->valuestring, s_applied_scenes_checksum) != 0) {
+            refused = "base_mismatch";
+        } else {
+            err = fos_scenes_apply_patch(cJSON_GetObjectItem(root, "put"), cJSON_GetObjectItem(root, "order"),
+                                         FOS_SCENES_SOURCE_CLOUD, NULL, select);
+            if (err != ESP_OK) refused = err == ESP_ERR_NO_MEM ? "no_room" : "patch_refused";
+        }
+        if (refused != NULL) {
+            ws_ack(id, false, refused);
+            return;
+        }
+    } else {
+        const cJSON *scenes = cJSON_GetObjectItem(root, "scenes");
+        if (!cJSON_IsArray(scenes)) {
+            ws_ack(id, false, "not_interpreted");
+            return;
+        }
+        char *payload = cJSON_PrintUnformatted((cJSON *)scenes);
+        if (!payload) {
+            ws_ack(id, false, "no_memory");
+            return;
+        }
+        /* Declared CLOUD so the store remembers who installed these scenes:
+         * apply_network_policy() keeps the RFC1918 deny alive on that flag
+         * even after a demotion drops FOS_CLOUD_ENROLLED. */
+        err = fos_scenes_set_json_from(payload, strlen(payload), FOS_SCENES_SOURCE_CLOUD);
+        cJSON_free(payload);
+        if (err != ESP_OK) {
+            const char *detail = fos_scenes_last_error();
+            ws_ack(id, false, (detail && detail[0]) ? detail : "scene_store_failed");
+            return;
+        }
     }
-    fos_client_render_now();
+    /* The switch is queued now and applied by the render task AFTER the
+     * payload loads — fos_client.c applies pending scenes before pending
+     * selection, so the id exists by then. Unknown ids are dropped there. Its
+     * `state` goes with it (select_pushed_scene). A patch renders only then: a
+     * scene that is not on the panel costs no refresh, and one that is renders
+     * when the render task picks it up. */
+    if (select) select_pushed_scene(scene_id->valuestring, cJSON_GetObjectItem(root, "state"), origin);
+    if (select || !patch) fos_client_render_now();
     ws_ack(id, true, NULL);
 
     /* scene_ack waits for the render task; see ws_poll_scene_ack(). */
-    const cJSON *checksum = cJSON_GetObjectItem(root, "checksum");
     s_scene_ack_checksum[0] = '\0';
-    if (cJSON_IsString(checksum) && checksum->valuestring) {
+    if (cJSON_IsString(checksum)) {
         strlcpy(s_scene_ack_checksum, checksum->valuestring, sizeof(s_scene_ack_checksum));
     }
     s_scene_ack_generation = generation;
@@ -2967,8 +3054,8 @@ static void dispatch_verb(const char *type, cJSON *root, const cJSON *id,
         ws_handle_set_current_scene(root, id, origin);
     } else if (strcmp(type, "scene_event") == 0) {
         ws_handle_scene_event(root, id, origin);
-    } else if (strcmp(type, "set_scenes") == 0) {
-        ws_handle_set_scenes(root, id);
+    } else if (strcmp(type, "set_scenes") == 0 || strcmp(type, "scenes_patch") == 0) {
+        ws_handle_set_scenes(root, id, type[1] == 'c' /* scenes_patch */, origin);
     } else if (strcmp(type, "set_settings") == 0) {
         ws_handle_set_settings(root, id);
     } else if (strcmp(type, "assets_list") == 0) {
@@ -3075,6 +3162,13 @@ static void dispatch_verb(const char *type, cJSON *root, const cJSON *id,
         ESP_LOGW(TAG, "ws: refusing verb \"%s\"", type[0] ? type : "(none)");
         ws_ack(id, false, "unknown_verb");
     }
+}
+
+void fos_cloud_forget_applied_scenes(void)
+{
+    if (!s_applied_scenes_checksum[0]) return;
+    s_applied_scenes_checksum[0] = '\0';
+    nvs_erase_key_quiet("cloud_scn_sum");
 }
 
 void fos_cloud_request_state(void)

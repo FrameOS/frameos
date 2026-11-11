@@ -224,6 +224,13 @@ jobs:
                 embedded/esp32/main/fos_voice_binding.c embedded/esp32/main/tests/test_fos_voice_binding.c \
                 -lm -o /tmp/test_fos_voice_binding
               /tmp/test_fos_voice_binding
+              # The per-scene store on the state partition: pure C and cJSON.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                -I"$IDF_PATH/components/json/cJSON" "$IDF_PATH/components/json/cJSON/cJSON.c" \
+                embedded/esp32/main/fos_json_guard.c embedded/esp32/main/fos_scene_store.c \
+                embedded/esp32/main/tests/test_fos_scene_store.c \
+                -lm -o /tmp/test_fos_scene_store
+              /tmp/test_fos_scene_store
               # The SPIFFS garbage collection order and the scene store split,
               # replayed on the SPIFFS that ESP-IDF ships (fos_spiffs_gc.c, a
               # 20-scene set pushed over itself on a 1 MB /state). The backend
@@ -236,7 +243,8 @@ jobs:
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main -Iembedded/esp32/main/tests/spiffs_shim \
                 -I"$IDF_PATH/components/spiffs/include" -I"$IDF_PATH/components/spiffs/spiffs/src" \
                 -D__real_SPIFFS_gc=SPIFFS_gc \
-                embedded/esp32/main/fos_spiffs_gc.c embedded/esp32/main/tests/test_fos_spiffs_gc.c /tmp/spiffs_obj/*.o \
+                embedded/esp32/main/fos_spiffs_gc.c embedded/esp32/main/fos_spiffs_footprint.c \
+                embedded/esp32/main/tests/test_fos_spiffs_gc.c /tmp/spiffs_obj/*.o \
                 -o /tmp/test_fos_spiffs_gc
               /tmp/test_fos_spiffs_gc
               # The JSON depth pre-scan that guards the 8-10 KB parser tasks.

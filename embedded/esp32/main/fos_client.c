@@ -612,6 +612,8 @@ static void display_power(bool on)
  * late, with the ones behind it in one go. */
 static fos_input_hold_t s_input_hold;
 static int64_t s_last_input_us = 0;
+/* When the last rendered picture went to the panel (fos_pictures_fast). */
+static int64_t s_last_picture_us = 0;
 
 static bool input_queued(void)
 {
@@ -2044,8 +2046,17 @@ static esp_err_t render_once(bool quiet)
             char showing_name[8];
             current_scene_details(showing_id, sizeof(showing_id), showing_name, sizeof(showing_name));
             bool partial = false;
-            err = fos_display_update(buf, buf_len, strcmp(showing_id, s_refresh_scene_id) == 0,
-                                     fos_input_hold_engaged(&s_input_hold), &partial);
+            /* Someone tapping, or pictures coming quickly (an animation, a
+             * clock's seconds): the fast waveform, the greys settled once
+             * they pause (fos_pictures_fast). The settle's own picture goes
+             * up the slow way (settle_panel). */
+            int64_t picture_us = esp_timer_get_time();
+            bool fast = fos_input_hold_engaged(&s_input_hold) ||
+                        fos_pictures_fast(fos_scene_interval_snap(frameos_nim_scene_interval()),
+                                          s_last_picture_us, picture_us);
+            err = fos_display_update(buf, buf_len, strcmp(showing_id, s_refresh_scene_id) == 0, fast,
+                                     &partial);
+            s_last_picture_us = picture_us;
             refresh = err != ESP_OK ? "failed" : partial ? "partial" : "updated";
             if (err == ESP_OK) snprintf(s_refresh_scene_id, sizeof(s_refresh_scene_id), "%s", showing_id);
             if (overlay_drawn) {
@@ -3262,6 +3273,13 @@ static void client_task(void *arg)
             /* INPUT_EVENTS_BIT ends the slice early and nothing more: the
              * press is delivered just below, and the render-requested check
              * after it decides whether a frame follows. */
+            if (nim && !input_hold_on() && fos_scenes_patch_pending()) {
+                /* One scene stored or removed (USB, HTTP, the cloud): the
+                 * catalog now, and a render only if it is the scene showing.
+                 * Flash reads, so it waits out a tap too. */
+                fos_scenes_apply_pending();
+                if (fos_scenes_switched_pending()) want_render = true;
+            }
             if (nim) {
                 process_input_events();
                 /* An event from HTTP, the cloud or the console: to the scene

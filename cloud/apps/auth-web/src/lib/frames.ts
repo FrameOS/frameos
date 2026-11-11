@@ -40,6 +40,7 @@ import { sceneLayoutsOf, versionIsLayout, withSceneLayouts } from "./scene-layou
 import { compiledSceneNames } from "./store";
 import { maxSceneZipUncompressedBytes } from "./store";
 import { unzipBounded } from "./zip-bounded";
+import { sceneHashes } from "./scenes-patch";
 import { frameosVersionSatisfies } from "./store-versions";
 import {
   allContractSettingKeys,
@@ -1044,6 +1045,14 @@ export async function enqueueFrameCommand(
     const carried = await carriedScenePreview(db, input.frameId, payload.scenes);
     if (carried) {
       payload = { ...payload, preview: carried.preview, scenes: [...payload.scenes, carried.scene] };
+    }
+  }
+  // What this set holds, per scene, kept on the row after its scenes are
+  // spent: the next push to this frame is a difference from it (scenes-patch.ts).
+  if (input.type === "set_scenes" && isSceneBundlePayload(payload)) {
+    const hashes = sceneHashes(payload.scenes);
+    if (hashes) {
+      payload = { ...payload, scene_hashes: hashes };
     }
   }
   const [command] = await db

@@ -53,10 +53,10 @@ def _definition_body(text: str, name: str) -> str:
 
 def test_every_write_of_the_scene_files_clears_the_cache():
     """A scene push writes slot files through write_file_replace and removes
-    them through remove_slots_from / fos_scenes_wipe_state. Each must clear
+    them through remove_slots / fos_scenes_wipe_state. Each must clear
     the cache, or a switch after the push shows the scene from before it."""
     text = SCENES.read_text()
-    for name in ("write_file_replace", "remove_slots_from", "fos_scenes_wipe_state"):
+    for name in ("write_file_replace", "remove_slots", "fos_scenes_wipe_state"):
         body = _definition_body(text, name)
         assert "slot_cache_clear" in body, f"fos_scenes.c: {name} no longer clears the slot cache"
     # Slot files are read through the cache, and written nowhere else.

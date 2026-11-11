@@ -39,7 +39,24 @@ import { copySceneCoversIntoFrameCache } from "./scene-images";
 import { sceneEventMapsOf, type SceneEventMaps } from "./scene-event-map";
 import { sceneLayoutsOf, type SceneLayouts } from "./scene-layouts";
 import { reportError } from "./log";
+import { esp32PushedStateMinVersion } from "./scenes-patch";
 import { frameosVersionSatisfies } from "./store-versions";
+
+// A switch waits this long for its frame, as the event route's do.
+const switchCommandTtlMs = 5 * 60 * 1000;
+
+// The first runtime scene a store scene put in this payload: every pushed
+// scene is stamped with the store scene it came from (withStoreSceneOrigin).
+function firstRuntimeSceneOf(scenes: readonly unknown[], storeSceneId: string): string | undefined {
+  const lowered = storeSceneId.toLowerCase();
+  for (const scene of scenes) {
+    const { id, origin } = (scene ?? {}) as { id?: unknown; origin?: { storeSceneId?: unknown } };
+    if (typeof id === "string" && typeof origin?.storeSceneId === "string" && origin.storeSceneId.toLowerCase() === lowered) {
+      return id;
+    }
+  }
+  return undefined;
+}
 
 export const maxScenesPerFrame = 20;
 
@@ -136,6 +153,30 @@ export function resolveGrantedSettingsGroups({
     return null;
   }
   return kept.filter((group) => declared.includes(group));
+}
+
+// Public scene-state values that ride along with an activation: a handful of
+// form fields, not a data channel (the event route's ceiling).
+export const maxActiveSceneStateBytes = 16 * 1024;
+
+// A push's `state` for the scene it activates: undefined when absent or
+// empty, false when it is not an object or is too big.
+export function readActiveSceneState(
+  value: unknown,
+): Record<string, unknown> | undefined | false {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  if (Object.keys(value).length === 0) {
+    return undefined;
+  }
+  if (Buffer.byteLength(JSON.stringify(value), "utf8") > maxActiveSceneStateBytes) {
+    return false;
+  }
+  return value as Record<string, unknown>;
 }
 
 // Failures carry the wire code and HTTP status the route already returned, so
@@ -377,6 +418,8 @@ export async function assignScenesToFrame(
   {
     accountId,
     activeSceneId,
+    activeState,
+    activateStoreSceneId,
     actor,
     frame,
     requested,
@@ -388,6 +431,14 @@ export async function assignScenesToFrame(
     // to another scene. The device ignores an id that is not in the payload
     // (it then activates the first scene).
     activeSceneId?: string | undefined;
+    // Public field values the activated scene opens with ("Push & activate"):
+    // in the same set_scenes, as uploadScenes carries them, never a second
+    // command racing the push. Only with activeSceneId.
+    activeState?: Record<string, unknown> | undefined;
+    // Or the STORE scene to show, its first runtime scene in this push
+    // ("Install & activate", the MCP install with activate): resolved from
+    // the payload, so a scene installed by this very push can be named.
+    activateStoreSceneId?: string | undefined;
     actor: unknown;
     frame: FrameRow;
     requested: RequestedScene[];
@@ -561,6 +612,21 @@ export async function assignScenesToFrame(
     previous.length !== serviceSettingGroups.length ||
     !serviceSettingGroups.every((group) => previous.includes(group));
 
+  // A Linux frame shows the FIRST scene of a push that names none (its
+  // runner's rule), so a push nobody meant as a switch (an install, a
+  // reorder, a Discard) names the scene the frame says it shows, when the
+  // push still holds it. An ESP32 keeps its scene, and there a scene_id costs
+  // a render: nothing is added.
+  const profile = frameContractProfile(frame);
+  const shown = reportedActiveSceneId(frame.lastState);
+  const showSceneId =
+    activeSceneId ??
+    (activateStoreSceneId ? firstRuntimeSceneOf(payload.scenes, activateStoreSceneId) : undefined);
+  const pushSceneId =
+    showSceneId ??
+    (profile === "linux" && shown && payload.scenes.some((scene) => (scene as { id?: unknown })?.id === shown)
+      ? shown
+      : undefined);
   await supersedePendingCommands(db, frame.id, "set_scenes");
   const command = await enqueueFrameCommand(db, {
     createdByAccountId: accountId,
@@ -568,10 +634,28 @@ export async function assignScenesToFrame(
     payload: {
       checksum: payload.checksum,
       scenes: payload.scenes,
-      ...(activeSceneId ? { scene_id: activeSceneId } : {}),
+      ...(pushSceneId ? { scene_id: pushSceneId } : {}),
+      ...(showSceneId && activeState ? { state: activeState } : {}),
     },
     type: "set_scenes",
   });
+  // An ESP32 before the firmware that opens a pushed scene with its field
+  // values reads set_scenes' scene_id and drops its state: the values follow
+  // as the switch they always were, right behind the push.
+  if (
+    showSceneId &&
+    activeState &&
+    profile === "esp32" &&
+    !(frame.frameosVersion && frameosVersionSatisfies(esp32PushedStateMinVersion, frame.frameosVersion))
+  ) {
+    await enqueueFrameCommand(db, {
+      createdByAccountId: accountId,
+      frameId: frame.id,
+      payload: { scene_id: showSceneId, state: activeState },
+      ttlMs: switchCommandTtlMs,
+      type: "set_current_scene",
+    });
+  }
 
   if (groupsChanged) {
     await enqueueServiceSettingsRefreshIfScoped(db, frame.id);

@@ -62,6 +62,7 @@ import {
   setFrameosSceneDragData,
 } from './sceneDrag'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
+import { frameSceneStorage, frameStorageLabel, sceneSizeLabel } from '../../utils/frameSceneStorage'
 import { SceneDependencyConnector } from './SceneDependencyConnector'
 import { SceneDependencyFormatMenu } from './SceneDependencyFormatMenu'
 import {
@@ -593,7 +594,13 @@ function FrameSceneTile({
         <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
           {scene.name || 'Untitled scene'}
         </div>
-        <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">{sceneTileSummaryLabel(scene)}</div>
+        <div className="frameos-muted mt-0.5 flex min-w-0 gap-2 text-xs text-slate-500">
+          <span className="min-w-0 truncate">{sceneTileSummaryLabel(scene)}</span>
+          {/* Its own slot: a long summary truncates, the size never does. */}
+          {frameSceneStorage(frame) ? (
+            <span className="ml-auto shrink-0 tabular-nums">{sceneSizeLabel(scene, frame)}</span>
+          ) : null}
+        </div>
       </div>
     </>
   )
@@ -827,6 +834,7 @@ function FrameScenesBlock({
     setMultiSelect(false)
   }
   const searchIsActive = search.trim().length > 0
+  const storageLabel = frameStorageLabel(frame)
   // While searching, `scenes` is only the matching subset; dependency grouping
   // needs the full (live) list so parents of a match still render.
   // Alphabetical: this list is how you find a scene, and a new one (a
@@ -942,6 +950,7 @@ function FrameScenesBlock({
           </>
         ) : null}
       </div>
+      {storageLabel ? <div className="frameos-muted mb-2 text-xs text-slate-500">{storageLabel}</div> : null}
       {sceneOverviewEntries.length > 0 ? (
         <div className="flex flex-wrap gap-4">
           {sceneOverviewEntries.map(({ scene, key, nested }) => {

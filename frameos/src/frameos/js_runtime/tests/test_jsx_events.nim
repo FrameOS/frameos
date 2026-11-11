@@ -197,6 +197,25 @@ suite "jsx events":
     check dispatchUiEvent("tests/jsx-hover", "pointerUp", at(10, 10, "touch"))
     check ui.render()[10, 10] == rgbx(0xef, 0x44, 0x44, 255)
 
+  test "e-paper draws no press: a press renders nothing, the tap renders once":
+    # The reTerminal E1003 (2026-11-10): a press through a layout cost a whole
+    # render and refresh to draw `active:`, and the tap's own render waited
+    # behind it.
+    let ui = newUi("""
+      export const get = () => (
+        <div className="flex bg-white">
+          <div className="w-20 h-20 bg-red-500 hover:bg-blue-500 active:bg-black" onClick={() => {}} />
+        </div>
+      )
+    """, "tests/jsx-paper-press")
+    ui.owner.frameConfig.device = "waveshare.EPD_7in5_V2"
+    check ui.render()[10, 10] == rgbx(0xef, 0x44, 0x44, 255)
+    check not dispatchUiEvent("tests/jsx-paper-press", "pointerDown", at(12, 12, "touch"))
+    check ui.render()[10, 10] == rgbx(0xef, 0x44, 0x44, 255) # not drawn pressed
+    check not dispatchUiEvent("tests/jsx-paper-press", "pointerUp", at(12, 12, "touch"))
+    check dispatchUiEvent("tests/jsx-paper-press", "tap", at(12, 12, "touch"))
+    check not dispatchUiEvent("tests/jsx-paper-press", "pointerMove", at(14, 14))
+
   test "a hovered group lights its children's group-hover: classes":
     let ui = newUi("""
       export const get = () => (

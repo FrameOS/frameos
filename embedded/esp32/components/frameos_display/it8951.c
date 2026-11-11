@@ -652,14 +652,22 @@ static void forget_owed(void)
     s_owed_any = false;
 }
 
-static void mark_owed(const fos_it8951_rect_t *rect)
+/* The tiles under `rect` owe a GC16 (`owed`: its greys went up as a halftone)
+ * or no longer do (pure black and white, which DU draws exactly). A ball that
+ * crossed the panel left owed tiles behind it, all white again, and their
+ * settle flashed a trail. */
+static void set_owed(const fos_it8951_rect_t *rect, bool owed)
 {
     for (int row = rect->y / FOS_IT8951_TILE_HEIGHT; row <= (rect->y + rect->h - 1) / FOS_IT8951_TILE_HEIGHT; row++) {
         for (int col = rect->x / FOS_IT8951_TILE_WIDTH; col <= (rect->x + rect->w - 1) / FOS_IT8951_TILE_WIDTH; col++) {
-            s_tiles->owed[(size_t)row * FOS_IT8951_TILE_COLS + (size_t)col] = 1;
+            s_tiles->owed[(size_t)row * FOS_IT8951_TILE_COLS + (size_t)col] = owed ? 1 : 0;
         }
     }
-    s_owed_any = true;
+    if (owed) {
+        s_owed_any = true;
+    } else if (s_owed_any) {
+        s_owed_any = memchr(s_tiles->owed, 1, sizeof(s_tiles->owed)) != NULL;
+    }
 }
 
 void fos_it8951_10in3_clear(void)
@@ -785,9 +793,7 @@ void fos_it8951_10in3_partial_show(uint8_t *buf, uint8_t *previous)
         fos_it8951_rect_t all = rects[0];
         for (size_t i = 1; i < count; i++) rect_union(&all, &rects[i]);
         start_waveform(MODE_DU, &all);
-        for (size_t i = 0; i < count; i++) {
-            if (!plain[i]) mark_owed(&rects[i]);
-        }
+        for (size_t i = 0; i < count; i++) set_owed(&rects[i], !plain[i]);
     } else {
         for (size_t i = 0; i < count && !s_failed; i++) {
             /* The controller takes the next area when it can: HRDY holds the

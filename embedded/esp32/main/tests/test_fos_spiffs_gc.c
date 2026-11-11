@@ -30,6 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "fos_spiffs_footprint.h"
 #include "spiffs.h"
 #include "spiffs_nucleus.h"
 
@@ -344,12 +345,70 @@ static void test_too_big_is_still_full(void)
     SPIFFS_unmount(&g_fs);
 }
 
+/* fos_spiffs_footprint.c, against this SPIFFS: what each file adds to the
+ * partition's own `used`, at both page sizes the firmware uses (256 on the
+ * 8 MB layout's 1 MB /state, 512 on the 32 MB one's). */
+#define FOOTPRINT_MAX_PAGE 512
+static u8_t g_fp_work[2 * FOOTPRINT_MAX_PAGE];
+static u8_t g_fp_fds[4 * sizeof(spiffs_fd)];
+static u8_t g_fp_cache[sizeof(spiffs_cache) + 4 * (sizeof(spiffs_cache_page) + FOOTPRINT_MAX_PAGE)];
+
+static void footprint_at(u32_t page)
+{
+    static const size_t sizes[] = {0, 1, 250, 251, 252, 502, 503, 1000, 5000, 25000, 25853, 25854,
+                                   26000, 60000, 59000, 117000, 120000, 200000};
+    memset(g_flash, 0xff, sizeof(g_flash));
+    spiffs fs;
+    spiffs_config cfg = {0};
+    cfg.phys_size = FLASH_SIZE;
+    cfg.phys_erase_block = BLOCK_SIZE;
+    cfg.log_block_size = BLOCK_SIZE;
+    cfg.log_page_size = page;
+    cfg.hal_read_f = hal_read;
+    cfg.hal_write_f = hal_write;
+    cfg.hal_erase_f = hal_erase;
+    SPIFFS_mount(&fs, &cfg, g_fp_work, g_fp_fds, sizeof(g_fp_fds), g_fp_cache, sizeof(g_fp_cache), NULL);
+    SPIFFS_unmount(&fs);
+    CHECK(SPIFFS_format(&fs) == SPIFFS_OK, "format at %u", (unsigned)page);
+    CHECK(SPIFFS_mount(&fs, &cfg, g_fp_work, g_fp_fds, sizeof(g_fp_fds), g_fp_cache, sizeof(g_fp_cache),
+                       NULL) == SPIFFS_OK, "mount at %u", (unsigned)page);
+    static u8_t body[200000];
+    memset(body, 'x', sizeof(body));
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+        char name[32];
+        snprintf(name, sizeof(name), "scene-%u.json", (unsigned)i);
+        u32_t total = 0, before = 0, after = 0;
+        SPIFFS_info(&fs, &total, &before);
+        spiffs_file f = SPIFFS_open(&fs, name, SPIFFS_O_CREAT | SPIFFS_O_TRUNC | SPIFFS_O_WRONLY, 0);
+        CHECK(f >= 0, "open %s", name);
+        for (size_t done = 0; done < sizes[i];) {
+            size_t chunk = sizes[i] - done > 2048 ? 2048 : sizes[i] - done;
+            SPIFFS_write(&fs, f, body + done, (s32_t)chunk);
+            done += chunk;
+        }
+        SPIFFS_close(&fs, f);
+        SPIFFS_info(&fs, &total, &after);
+        size_t expected = fos_spiffs_footprint(sizes[i], page, SPIFFS_OBJ_NAME_LEN, SPIFFS_OBJ_META_LEN);
+        CHECK(after - before == expected, "%u-byte file at %u-byte pages: SPIFFS used +%u, footprint %u",
+              (unsigned)sizes[i], (unsigned)page, (unsigned)(after - before), (unsigned)expected);
+        SPIFFS_remove(&fs, name);
+    }
+    SPIFFS_unmount(&fs);
+}
+
+static void test_footprint_is_what_spiffs_counts(void)
+{
+    footprint_at(256);
+    footprint_at(512);
+}
+
 int main(void)
 {
     test_nothing_erased_when_the_write_fits();
     test_too_big_is_still_full();
     test_scene_uploads_beside_photos();
     test_a_big_set_pushed_over_itself_splits();
+    test_footprint_is_what_spiffs_counts();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

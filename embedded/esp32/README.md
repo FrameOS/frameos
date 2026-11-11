@@ -37,7 +37,7 @@ main/                     boot orchestration + platform modules
   fos_sscanf.c            sscanf for the linker's --wrap: cJSON's "%lg" read-back as strtod, so
                           newlib's floating-point scanf is never linked (host-tested)
   fos_settings.c          backend/cloud settings pull (TLS pair, admin login, service keys, schedule)
-  fos_scenes.c            /state scene store: combined payload, per-scene split, OOM-restart mark, wipe
+  fos_scenes.c            /state scene store: a whole set as changes, combined payload, per-scene split, OOM-restart mark, wipe
   fos_slot_cache.c        the scene files read last, kept in PSRAM so a switch skips the SPIFFS lookup (host-tested)
   fos_scene_state.c       scene state across deep sleep: one JSON file per scene under /state (host-tested)
   fos_commands.c          the backend's command queue: pulled once per pass and on a nudge, acked by id;
@@ -1270,10 +1270,34 @@ not powered), `status` shows the pins and the switch.
 
 Scenes arrive as one combined `scenes.json` — from the USB upload, the
 backend sync or the cloud's `set_scenes` — and that stays the wire format.
-The device does **not** keep them that way. On apply the payload is split
-into `/state/scene-<slot>.json` plus `/state/scene-index.json`, the combined
-file is deleted (the `state` partition is 1M and a payload may be 512K, so
-both do not fit), and only the **active** scene is parsed and resident. The
+The device does **not** keep them that way. The payload is split into
+`/state/scene-<slot>.json` plus `/state/scene-index.json`, the old set's
+slots going first and the combined file last (the `state` partition is 1M
+and a payload may be 512K: the old set, the new one and the combined file do
+not fit together), and only the **active** scene is parsed and resident. A
+push or an upload is stored by the task that received it (the cloud, HTTP or
+the console) and split by the scene store's own task (`store_split_stored`),
+paced around renders and taps like every write off the render task
+(`store_pace_hook`); the render task's apply then reads the index and loads
+one scene, and a switch asked for meanwhile waits for that apply
+(`s_store_changing`). A backend sync's set is held whole by the runtime and
+written by the store task.
+
+**On a frame that has a per-scene store, a whole set goes in as changes to
+it, one scene at a time** (`fos_scene_store_apply_set`, called by
+`store_set_as_changes_locked` for a push, an upload and a backend sync): a
+scene whose bytes are stored already is kept (each index entry has the
+`hash` of its file), the scenes the set drops go first, each new or changed
+scene is written and committed by itself and the file it replaced emptied
+before the next, and the set's order and source come last. `/state` never
+holds more than the stored set and one scene, where the whole file beside
+the old set needed room for both: the reTerminal E1002's 415 KB, 20-scene
+set did not fit its 1 MB `/state` (`ENOSPC`, 2026-11-10). A push that
+changed one scene of twenty writes one. It is not atomic: a failure or a
+power cut leaves a set holding some of the new scenes, each whole, and the
+producer sends the set again, since nothing acknowledged it. The combined
+file and the split below are for a frame with no store yet (a first set, or
+a whole payload a boot has not split). The
 index carries ids, names and refresh intervals, so the frame can list and
 switch scenes without holding them. It also carries a top-level
 `"source": "local" | "backend" | "cloud"` key recording who installed the
@@ -1291,6 +1315,72 @@ loading the combined file whole, so a frame cannot lose its scenes to a
 failed optimization; the index of the set it had stays until that payload
 has loaded, and one the runtime refuses too is dropped for the set from
 before.
+
+### One scene at a time
+
+A scene can be read, added, replaced or removed on its own (`main/fos_scene_store.c`,
+pure C, host-tested), without touching the others:
+
+| Over | Read one | List, sizes, free space | Add or replace | Remove |
+| --- | --- | --- | --- | --- |
+| USB | `usb_api scene-get <id>` | `usb_api scene-list` | `usb_api scene-put <bytes> [activate]`, then the scene's JSON | `usb_api scene-delete <id>` |
+| HTTP (admin login or the server key) | `GET /api/frames/<id>/scenes/<sceneId>` | `GET /api/frames/<id>/scenes` | `POST /api/frames/<id>/scenes`, the scene's JSON as the body (`?activate=1` shows it) | `POST /api/frames/<id>/scenes/delete?id=<sceneId>` |
+
+A refused change answers 400 (not one scene with an id, the last scene, an
+order naming a scene the frame does not hold), 404 (no such scene) or 500 (no
+room, a file error), with the reason as the body.
+
+A changed scene is written to a new slot file and the index is switched to it;
+the old file goes at the next sweep. A whole payload is split by the same code,
+so the index keeps `isLayout` and a scene's `default` mark however a scene
+arrived. A power cut, a full partition, or a scene
+the runtime refuses (when it is the one on the panel) leaves the scene that
+worked. Only the scene on the panel, or one it embeds as a split panel, is
+reloaded; adding any other scene costs one file and no render. Deleting the
+last scene is refused. The state a removed scene kept across deep sleep goes
+with it. A control plane uses the same store: the cloud's `scenes_patch` verb
+(`docs/cloud-frames.md`), and a backend answering `/embedded/scenes?patch=1`
+with `{"patch":true,"base":"<etag>","order":[...],"put":[...]}` when it knows
+what the frame holds. A forced pull (a deploy, "Push & activate", a preview:
+the commands answer's `sync`) sends the frame's ETag too, unless it holds no
+set, so a push that changed one scene downloads that scene; the backend also
+says `sync` when it hands over a switch while the frame's scenes are behind,
+so the switch never names a scene it has not pulled.
+
+**Push and show.** A change that activates its scene (`scene-put … activate`,
+`?activate=1`, a cloud push with `scene_id`: the workspace's "Push & activate"
+and "Install & activate") is written as fast as flash goes, not paced around
+renders and taps (`s_store_urgent`): somebody is waiting to see it, and paced
+behind an e-paper render a 30 KB scene waited up to half a second for each
+2 KB. A cloud push's `state` opens that scene with those values, through the
+same switch `set_current_scene` makes (`select_pushed_scene`).
+
+**Lookups by name are what a write costs on a big partition.** Every SPIFFS
+`stat`, `open`, `remove` and `rename` walks the lookup page of every block:
+about 25 ms on a 1 MB `/state`, about half a second on the 32 MB boards' 24 MB
+one, where a one-scene put used to take 10 s with 0.3 s of it writing data
+(the reTerminal Sticky, 2026-11-10). So the store asks flash as little as it
+can (`fos_scene_store.h`): it knows its slot files after the boot's sweep
+(which still removes everything the index does not name), a slot is written
+straight to its own name (the index switch is the commit), and the index is
+written as a copy (`scene-index.tmp`, kept) and then in place, readers taking
+the copy when the index is torn; `fos_scenes.c` tracks whether a combined
+payload is there instead of asking. Index and slots are removed only through
+the store: a bare unlink of the index leaves its copy to come back.
+
+**How much room there is.** `usb_api scene-list` and `GET .../scenes` report
+`storage`: `stateTotalBytes` and `stateUsedBytes` (the SPIFFS partition,
+`esp_spiffs_info`), `scenesBytes` and `sceneCount`, and `sceneBytes`, each
+scene's footprint by id; the index keeps each file's own `bytes`. Every figure
+is in SPIFFS's own units: the pages a file takes, data and index alike, at the
+data a page carries (`fos_spiffs_footprint.c`, checked against IDF's SPIFFS in
+`test_fos_spiffs_gc.c`), so the scenes and the used figure add up. On a 1 MB
+partition (256-byte pages) a 30 KB scene takes about 31 KB; a scene that is
+not split yet is reported at what its own file will take. The same report is
+in the cloud `hardware.storage` (hello, and a `state` message whenever the
+stored scenes changed since the last report: `ws_poll_active_scene`) and in
+the backend's `embedded.storage` (check-in), which is what the workspace
+draws: free space over the scene list, each scene's size on its tile.
 
 ## The render canvas is 16-bit (2026.8.31)
 

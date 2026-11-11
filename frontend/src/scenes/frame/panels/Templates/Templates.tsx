@@ -110,6 +110,7 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
   const {
     applyRemoteToFrame,
+    installAndActivateTemplate,
     editLocalTemplate,
     saveRemoteAsLocal,
     showRemoteTemplate,
@@ -261,6 +262,9 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
           saveRemoteAsLocal={!inFrameAdminMode ? (template) => saveRemoteAsLocal(repository, template) : undefined}
           applyTemplate={(template) => {
             applyRemoteToFrame(repository, template, openInstalledSceneDrawer)
+          }}
+          installAndActivate={(template) => {
+            applyRemoteToFrame(repository, template, openInstalledSceneDrawer, true)
           }}
           installedTemplatesByName={installedTemplatesByName}
           installing={Boolean(installingTemplateIds[favouriteId])}
@@ -497,6 +501,7 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
                       applyTemplate={(template: TemplateType) => {
                         applyTemplate(template, openInstalledSceneDrawer)
                       }}
+                      installAndActivate={installAndActivateTemplate}
                       editTemplate={editLocalTemplate}
                       installedTemplatesByName={installedTemplatesByName}
                       templateDragData={compatibility.supported ? { template } : undefined}

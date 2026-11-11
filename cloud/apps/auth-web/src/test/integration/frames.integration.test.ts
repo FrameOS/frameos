@@ -1268,6 +1268,142 @@ describe("frame re-enrollment (frame-bound claim tokens)", () => {
     expect(push?.payload).toEqual({ settings: { timezone: "Europe/Brussels" } });
   });
 
+  it("a push names the scene to show and carries its field values in the same set_scenes", async () => {
+    // The scene drawer's "Push & activate": one push, never a second command
+    // racing it (the frame opens the scene with these values, fos_cloud.c).
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const scene = await createStoreScene(accountId, { name: "Weather" });
+    const push = (body: Record<string, unknown>) =>
+      assignFrameScenes(
+        postJson(`/api/frames/${frame_id}/scenes`, body, { origin: baseUrl }),
+        routeParams(frame_id),
+      );
+    const latestPush = async () => {
+      const [command] = await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.frameId, frame_id))
+        .orderBy(desc(frameCommands.createdAt))
+        .limit(1);
+      return command;
+    };
+
+    const shown = await push({
+      scenes: [{ scene_id: scene.id }],
+      scene_id: scene.id,
+      state: { city: "Brussels" },
+    });
+    expect(shown.status).toBe(200);
+    const command = await latestPush();
+    expect(command?.type).toBe("set_scenes");
+    expect(command?.payload).toMatchObject({ scene_id: scene.id, state: { city: "Brussels" } });
+
+    // Values without a scene to open, or values that are not an object, or
+    // too big to be form fields, are refused before anything is queued.
+    const before = command?.id;
+    expect((await push({ scenes: [{ scene_id: scene.id }], state: { city: "Ghent" } })).status).toBe(400);
+    expect((await push({ scenes: [{ scene_id: scene.id }], scene_id: scene.id, state: ["x"] })).status).toBe(400);
+    expect(
+      (
+        await push({
+          scenes: [{ scene_id: scene.id }],
+          scene_id: scene.id,
+          state: { text: "x".repeat(17 * 1024) },
+        })
+      ).status,
+    ).toBe(400);
+    expect((await latestPush())?.id).toBe(before);
+
+    // Empty values are no values: the push is the plain one.
+    expect((await push({ scenes: [{ scene_id: scene.id }], scene_id: scene.id, state: {} })).status).toBe(200);
+    expect((await latestPush())?.payload).not.toHaveProperty("state");
+  });
+
+  it("a push keeps a Linux frame on its scene; older ESP32 firmware gets the values as a switch", async () => {
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const first = await createStoreScene(accountId, { name: "First" });
+    const shown = await createStoreScene(accountId, { name: "Shown" });
+    const push = (body: Record<string, unknown>) =>
+      assignFrameScenes(
+        postJson(`/api/frames/${frame_id}/scenes`, body, { origin: baseUrl }),
+        routeParams(frame_id),
+      );
+    const queued = async () =>
+      db.select().from(frameCommands).where(eq(frameCommands.frameId, frame_id)).orderBy(asc(frameCommands.createdAt));
+    const both = [{ scene_id: first.id }, { scene_id: shown.id }];
+
+    // A Linux frame shows the first scene of a push that names none: the push
+    // names the one it says it shows (an install, a reorder, a Discard).
+    await db
+      .update(frames)
+      .set({ hardware: { platform: "pi-zero2w" }, lastState: { active_scene: shown.id } })
+      .where(eq(frames.id, frame_id));
+    expect((await push({ scenes: both })).status).toBe(200);
+    expect((await queued()).at(-1)?.payload).toMatchObject({ scene_id: shown.id });
+    expect((await queued()).at(-1)?.payload).not.toHaveProperty("state");
+
+    // An ESP32 keeps its scene by itself, and a scene_id costs it a render.
+    await db
+      .update(frames)
+      .set({ hardware: { platform: "esp32-s3" }, frameosVersion: "2026.11.5" })
+      .where(eq(frames.id, frame_id));
+    expect((await push({ scenes: both })).status).toBe(200);
+    expect((await queued()).at(-1)?.payload).not.toHaveProperty("scene_id");
+
+    // Firmware that drops a push's state: the values follow as a switch.
+    const before = (await queued()).length;
+    expect((await push({ scenes: both, scene_id: first.id, state: { city: "Ghent" } })).status).toBe(200);
+    const older = (await queued()).slice(before);
+    expect(older.map((command) => command.type)).toEqual(["set_scenes", "set_current_scene"]);
+    expect(older[1]?.payload).toEqual({ scene_id: first.id, state: { city: "Ghent" } });
+
+    // Firmware that opens the pushed scene with them: the push alone.
+    await db.update(frames).set({ frameosVersion: "2026.11.6" }).where(eq(frames.id, frame_id));
+    const count = (await queued()).length;
+    expect((await push({ scenes: both, scene_id: first.id, state: { city: "Ghent" } })).status).toBe(200);
+    expect((await queued()).slice(count).map((command) => command.type)).toEqual(["set_scenes"]);
+  });
+
+  it("installs a store scene and shows it in the same push (Install & activate)", async () => {
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const kept = await createStoreScene(accountId, { name: "Kept" });
+    const added = await createStoreScene(accountId, { name: "Added" });
+    const add = (body: Record<string, unknown>) =>
+      addFrameScene(postJson(`/api/frames/${frame_id}/scenes/add`, body, { origin: baseUrl }), routeParams(frame_id));
+    const latest = async () =>
+      (
+        await db
+          .select()
+          .from(frameCommands)
+          .where(eq(frameCommands.frameId, frame_id))
+          .orderBy(desc(frameCommands.createdAt))
+          .limit(1)
+      )[0];
+
+    expect((await add({ scene_id: kept.id })).status).toBe(200);
+    expect((await add({ scene_id: added.id, activate: true })).status).toBe(200);
+    const command = await latest();
+    expect(command?.type).toBe("set_scenes");
+    // The store scene's runtime scene, resolved from this very push (the
+    // fixture's runtime id is the store id), and both scenes in it.
+    expect(command?.payload).toMatchObject({ scene_id: added.id });
+    const ids = ((command?.payload as { scenes: { id: string }[] }).scenes ?? []).map((scene) => scene.id);
+    expect(ids).toEqual([kept.id, added.id]);
+    expect((await add({ scene_id: added.id, activate: "yes" })).status).toBe(400);
+  });
+
   it("re-keys the frame in place, keeping its id, name and scenes", async () => {
     const frame = await enrolledFrame();
     await confirmFrame(

@@ -690,7 +690,7 @@ suite "a held key's accents":
     # The row's keys read as capitals (the layout outlines the text, so ask
     # the tree it was built from).
     var texts: seq[string]
-    for key in accentTree(ord('a'), 1, 40, 40, 4, false).children:
+    for key in accentTree(ord('a'), 1, 40, 40, 4, false, kpLetters).children:
       texts.add key.children[0].text
     check texts == @["@", "À", "Á", "Â", "Ä", "Æ", "Ã", "Å", "Ā"] # a symbol has no capital
     # A 240 px round panel: the row stays inside the circle (RoundInset in
@@ -762,12 +762,23 @@ suite "a held key's accents":
     check state.accentLit in [1, 2] # the middle of four
 
   test "the letters carry their symbols, SwiftKey's":
-    check hintOf(ord('q')) == "1" and hintOf(ord('p')) == "0" and hintOf(ord('a')) == "@"
-    check hintOf(ord('l')) == ")" and hintOf(ord('z')) == "_" and hintOf(ord('c')) == "\"" and hintOf(ord('m')) == "/"
-    check hintOf(ord('1')) == "" and hintOf(ord(',')) == "" and hintOf(ord(kShift)) == ""
-    check formCount(ord('a')) == 9 and formCount(ord('b')) == 1 and formCount(ord('$')) == 4 and formCount(ord(',')) == 0
-    check formText(ord('a'), 0, 1) == "@" and formText(ord('a'), 1, 1) == "À" and formText(ord('$'), 0, 0) == "€"
-    check formText(ord('b'), 1, 0) == ""
+    const L = kpLetters
+    check hintOf(ord('q'), L) == "1" and hintOf(ord('p'), L) == "0" and hintOf(ord('a'), L) == "@"
+    check hintOf(ord('l'), L) == ")" and hintOf(ord('z'), L) == "_" and hintOf(ord('c'), L) == "\"" and hintOf(ord('m'), L) == "/"
+    check hintOf(ord('1'), L) == "" and hintOf(ord(','), L) == "" and hintOf(ord(kShift), L) == ""
+    check formCount(ord('a'), L) == 9 and formCount(ord('b'), L) == 1 and formCount(ord(','), L) == 0
+    check formCount(ord('$'), kpSymbols) == 4
+    check formText(ord('a'), 0, 1, L) == "@" and formText(ord('a'), 1, 1, L) == "À"
+    check formText(ord('$'), 0, 0, kpSymbols) == "€" and formText(ord('b'), 1, 0, L) == ""
+    # The letters page's full stop holds ! and ?, which that page has no keys
+    # for, then its …; its corner shows the !. The symbols page has ! and ?
+    # keys, and the number pad's full stop is a decimal point: there it holds
+    # the … alone.
+    check hintOf(ord('.'), L) == "!" and formCount(ord('.'), L) == 3
+    check formText(ord('.'), 0, 1, L) == "!" and formText(ord('.'), 1, 1, L) == "?"
+    check formText(ord('.'), 2, 0, L) == "…" and formText(ord('.'), 3, 0, L) == ""
+    check hintOf(ord('.'), kpSymbols) == "" and hintOf(ord('.'), kpNumbers) == ""
+    check formCount(ord('.'), kpNumbers) == 1 and formText(ord('.'), 0, 0, kpNumbers) == "…"
     # Drawn small in the key's corner: a text node in the key's top right.
     var
       regions: seq[UiRegion]
@@ -859,6 +870,28 @@ suite "a held key's accents":
     check accentRegions(target.regions).len == 9
     check at(keyRegion(target.regions, ord('q')), "tap")
     check target.input.text == "éäq" and target.input.accents == 0
+    # Hold the full stop, lift on it: its first symbol, !, is typed, and the
+    # row held ? and … next to it. Held again and slid one key along: ?.
+    discard relayout()
+    let stop = keyRegion(target.regions, ord('.'))
+    check at(stop, "pointerDown", buttons = 1)
+    check at(stop, "longPress")
+    discard relayout()
+    let stopForms = accentRegions(target.regions)
+    check stopForms.len == 3
+    check target.input.accentLit == 0
+    check at(stop, "pointerUp")
+    check target.input.text == "éäq!" and target.input.accents == 0
+    discard relayout()
+    check at(stop, "pointerDown", buttons = 1)
+    check at(stop, "longPress")
+    discard relayout()
+    let along = stop.x + stop.w / 2 + (stopForms[1].x - stopForms[0].x)
+    check atXY(along, stop.y + stop.h / 2, "pointerMove", buttons = 1)
+    discard relayout()
+    check target.input.accentLit == 1
+    check atXY(along, stop.y + stop.h / 2, "pointerUp")
+    check target.input.text == "éäq!?" and target.input.accents == 0
     # Hold the comma: nothing comes up. Hold u, then back: the row goes, the keyboard stays.
     discard relayout()
     check not at(keyRegion(target.regions, ord(',')), "longPress")
@@ -871,13 +904,14 @@ suite "a held key's accents":
     target.input.paper = true
     discard relayout()
     let s = keyRegion(target.regions, ord('s'))
-    discard at(s, "pointerDown", buttons = 1) # no press to show on paper
+    check not at(s, "pointerDown", buttons = 1) # no press to show on paper
+    check target.input.pressed.len == 0 and target.input.hovered.len == 0
     check at(s, "longPress")
     discard relayout()
     forms = accentRegions(target.regions)
     check not at(forms[1], "pointerMove", buttons = 1)
     check at(forms[1], "pointerUp") # # ß ś š
-    check target.input.text == "éäqß"
+    check target.input.text == "éäq!?ß"
     forgetUiTarget("scene", 7)
 
 suite "the keyboard in time":

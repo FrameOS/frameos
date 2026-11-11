@@ -701,6 +701,70 @@ def embedded_scenes_payload(db: Session, frame: Frame) -> bytes:
     return json.dumps(scenes, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
+# One-scene-at-a-time on the pull: what the frame was last served, per scene,
+# so its next pull can be answered with only what changed. Redis, not a
+# column: losing it costs one whole-set pull (a patch is only ever a saving).
+SERVED_SCENES_KEY = "frame:{}:embedded_served_scenes"
+SERVED_SCENES_TTL_SECONDS = 30 * 24 * 3600
+
+
+def _scene_hash(scene: dict) -> str:
+    return hashlib.sha256(json.dumps(scene, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
+
+
+async def _embedded_scenes_patch(redis, frame: Frame, payload: bytes, if_none_match: str) -> bytes | None:
+    """The body of `/embedded/scenes?patch=1` when the frame holds a set this
+    backend served: only the scenes that changed since it, and the id of every
+    scene it should hold in order (the rest are dropped). None = send it all
+    (firmware side: ``apply_backend_patch`` in fos_scenes.c)."""
+    if redis is None:
+        return None
+    try:
+        raw = await redis.get(SERVED_SCENES_KEY.format(int(frame.id)))
+        served = json.loads(raw) if raw else None
+    except Exception:
+        return None
+    if not isinstance(served, dict) or served.get("etag") != if_none_match:
+        return None
+    hashes = served.get("hashes")
+    if not isinstance(hashes, dict):
+        return None
+    scenes = json.loads(payload)
+    ids = [scene.get("id") for scene in scenes if isinstance(scene, dict)]
+    if len(ids) != len(scenes) or not all(isinstance(scene_id, str) and scene_id for scene_id in ids):
+        return None
+    if len(set(ids)) != len(ids):
+        return None
+    put = [scene for scene in scenes if hashes.get(scene["id"]) != _scene_hash(scene)]
+    if len(put) == len(scenes):
+        # Every scene changed: the whole list is the same message.
+        return None
+    return json.dumps(
+        {"patch": True, "base": if_none_match, "order": ids, "put": put},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+async def _remember_served_scenes(redis, frame: Frame, payload: bytes, etag: str) -> None:
+    if redis is None:
+        return
+    try:
+        scenes = json.loads(payload)
+        hashes = {
+            scene["id"]: _scene_hash(scene)
+            for scene in scenes
+            if isinstance(scene, dict) and isinstance(scene.get("id"), str)
+        }
+        await redis.set(
+            SERVED_SCENES_KEY.format(int(frame.id)),
+            json.dumps({"etag": etag, "hashes": hashes}, separators=(",", ":")),
+            ex=SERVED_SCENES_TTL_SECONDS,
+        )
+    except Exception:
+        return
+
+
 def embedded_settings_payload(db: Session, frame: Frame) -> dict:
     """The service-settings groups this frame is granted, as frame.json
     carries them: what the owner's scenes declare plus what store-origin
@@ -736,7 +800,9 @@ def embedded_settings_payload(db: Session, frame: Frame) -> dict:
 @api_public.get("/frames/{id:int}/embedded/scenes")
 async def api_embedded_device_scenes(
     id: int,
+    patch: bool = Query(False),
     db: Session = Depends(get_db),
+    redis=Depends(get_redis),
     authorization: str = Header(None),
     if_none_match: str = Header(None),
 ):
@@ -745,7 +811,11 @@ async def api_embedded_device_scenes(
     etag = embedded_payload_etag(payload)
     if if_none_match and if_none_match.strip() == etag:
         return Response(status_code=HTTPStatus.NOT_MODIFIED, headers={"ETag": etag})
-    return Response(content=payload, media_type="application/json",
+    body = payload
+    if patch and if_none_match:
+        body = await _embedded_scenes_patch(redis, frame, payload, if_none_match.strip()) or payload
+    await _remember_served_scenes(redis, frame, payload, etag)
+    return Response(content=body, media_type="application/json",
                     headers={"ETag": etag})
 
 

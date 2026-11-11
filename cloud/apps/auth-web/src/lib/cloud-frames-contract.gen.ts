@@ -980,6 +980,14 @@ export const cloudFramesContract = {
       ]
     },
     {
+      "type": "scenes_patch",
+      "scope": null,
+      "content": true,
+      "profiles": [
+        "esp32"
+      ]
+    },
+    {
       "type": "set_current_scene",
       "scope": null,
       "content": true,
@@ -1206,6 +1214,12 @@ export const cloudFramesContract = {
       "invalid_settings",
       "setting_not_allowed",
       "persist_failed"
+    ],
+    "scenes_patch": [
+      "invalid_patch",
+      "base_mismatch",
+      "no_room",
+      "patch_refused"
     ],
     "lan_access_challenge": [
       "no_panel",

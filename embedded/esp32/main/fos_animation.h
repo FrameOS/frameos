@@ -151,6 +151,22 @@ static inline bool fos_input_hold_engaged(const fos_input_hold_t *h) { return h-
 /* True, once, when the hold is over: the caller owes what it held back. */
 bool fos_input_hold_release(fos_input_hold_t *h, int64_t now_us);
 
+/* Pictures that follow each other quickly are drawn on a partial-refresh
+ * e-paper the way a tapping session's are (fos_display_update's
+ * `input_recent`): on the reTerminal E1003 one DU waveform over all that
+ * changed, greys as a halftone settled with GC16 once they pause, and a full
+ * refresh after FOS_PARTIAL_MAX_WHILE_INPUT of them, not 20; after it they go
+ * on the same way. Outside a tap's hold the balls of the Kitchen sink's Motion
+ * page flashed a GC16 over each changed rectangle with a grey (an
+ * anti-aliased edge) every frame (2026-11-10). Quick: a scene whose own
+ * interval is under FOS_PICTURES_FAST_US (it says so from its first frame, as
+ * the GC16s in front of a frame can space the frames out further), or a
+ * picture within that long of the one before (an editor's slider, a remote).
+ * It is the time the halftone waits to settle (frameos_display.c). */
+#define FOS_PICTURES_FAST_US (2500 * 1000LL)
+
+bool fos_pictures_fast(double scene_interval_s, int64_t last_picture_us, int64_t now_us);
+
 /* Who the input hold is for: a partial-refresh e-paper panel, and any board
  * with a touch screen or keys. On the SenseCAP Indicator's LCD a settings pull
  * of 1.4 to 2.6 s ran on the render task between taps and held each one 2.5 to

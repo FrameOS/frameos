@@ -72,6 +72,7 @@ type
   SceneSwitcherScene* = ref object of FrameScene
     entries*: seq[SwitcherEntry] ## what the last render or key listed
     paper*: bool ## drawn for e-paper last time (paperPanel)
+    roomW, roomH, unit: int ## what the last render laid out in (tree): 0 before one
 
 const
   SwitcherNode = 1 ## the ui/events target its tiles live in
@@ -242,7 +243,13 @@ proc grid(self: SceneSwitcherScene, width, height: int, unit = 0): SwitcherGrid 
       round = isRound(self.frameConfig), unit = unit)
 
 proc grid(self: SceneSwitcherScene): SwitcherGrid =
-  ## The grid the last render drew: at the UI's scale (uiRoom).
+  ## The grid the last render drew: at the UI's scale (uiRoom), in the room
+  ## it had. Inside a layout that is the hole the layout left, not the panel:
+  ## measured on the whole panel, a page held more tiles than the drawn one,
+  ## so a page turn lit a tile of the page after and the last pages could not
+  ## be reached (the reTerminal E1003 in a Windows 98 window, 2026-11-10).
+  if self.roomW > 0 and self.roomH > 0:
+    return self.grid(self.roomW, self.roomH, self.unit)
   let (width, height) = canvasSize(self.frameConfig)
   let (roomW, roomH) = uiRoom(self.frameConfig, width, height)
   self.grid(roomW, roomH, min(width, height))
@@ -282,12 +289,23 @@ proc highlight(self: SceneSwitcherScene, index: int) =
   self.state.put("highlight", newJString(self.entries[i].id))
   self.state.put("page", newJInt(i div max(self.grid().perPage, 1)))
 
-proc turnPage(self: SceneSwitcherScene, delta: int) =
-  ## Another page (wrapping around), its first tile highlighted.
+proc turnPage(self: SceneSwitcherScene, delta: int): bool {.discardable.} =
+  ## Another page (wrapping around), its first tile highlighted. False when
+  ## there is only the one.
   let grid = self.grid()
   if grid.pages > 1:
     let page = ((self.state{"page"}.getInt(0) + delta) mod grid.pages + grid.pages) mod grid.pages
     self.highlight(page * grid.perPage)
+    result = true
+
+proc showTurnedPage() =
+  ## A tap or a swipe changes nothing the dispatcher watches for them (the
+  ## contract's `tap` and `swipe` render `never`, unlike a key's or `back`'s
+  ## `if-state-changed`), so the page they turned is asked for here. Without
+  ## it the next page showed only when something else rendered: on the
+  ## reTerminal E1003 a tap on the arrow did nothing until the panel happened
+  ## to refresh (2026-11-10).
+  sendEvent(evRender, newJObject(), eoScene)
 
 proc choose(self: SceneSwitcherScene, index: int) =
   ## Show the scene at `index`.
@@ -593,6 +611,9 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
   ## page of tiles, each where switcherGrid put it. The outermost element
   ## fills the canvas by itself (ui/layout.nim), its children placed on it.
   ## `unit`: what its sizes are a share of (uiRoom).
+  self.roomW = width
+  self.roomH = height
+  self.unit = unit
   let
     grid = self.grid(width, height, unit)
     page = clamp(self.state{"page"}.getInt(0), 0, grid.pages - 1)
@@ -727,7 +748,7 @@ proc pointer(self: SceneSwitcherScene, event: string, payload: JsonNode) =
     # or the page in the state). A tap on nothing is nothing.
     if tapped < count: self.choose(tapped)
     elif tapped == count: leave()
-    else: self.turnPage(if tapped == count + 1: -1 else: 1)
+    elif self.turnPage(if tapped == count + 1: -1 else: 1): showTurnedPage()
     tapped = -1
     self.touch()
   elif changed and not tap:
@@ -767,7 +788,7 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
     # Across the tiles, as on a phone: the next page or the one before.
     let direction = payload{"direction"}.getStr()
     if direction == "left" or direction == "right":
-      self.turnPage(if direction == "left": 1 else: -1)
+      if self.turnPage(if direction == "left": 1 else: -1): showTurnedPage()
       self.touch()
   else:
     when not defined(frameosEmbedded):

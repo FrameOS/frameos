@@ -255,7 +255,7 @@ proc accentNear(target: UiTarget, lx, ly: float32): int =
     top = high(float32)
     bottom = 0'f32
     x = lx
-  if hintOf(target.input.accents).len > 0:
+  if hintOf(target.input.accents, target.input.page).len > 0:
     for r in target.regions:
       if r.handlers[ueClick] - 1 == AccentBase:
         x = lx - target.input.accentFrom + r.x + r.w / 2
@@ -477,7 +477,7 @@ proc holdKey(target: UiTarget, code, pointer: int, lx: float32) =
     target.repeats = 0
     target.repeatDue = getMonoTime() + initDuration(milliseconds = RepeatFirstMs)
     return
-  if formCount(code) == 0:
+  if formCount(code, i.page) == 0:
     return
   i.accents = code
   i.accentX = lx
@@ -515,7 +515,7 @@ proc pickAccent(target: UiTarget, index: int) =
   template i: untyped = target.input
   if i.accents == 0:
     return
-  let text = formText(i.accents, index, i.shift)
+  let text = formText(i.accents, index, i.shift, i.page)
   i.accents = 0
   target.inputOnly = true
   if text.len > 0:
@@ -751,6 +751,13 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         if target.spaceDragging:
           target.swallowTap = pointer # its tap types no space
         target.spacePointer = -1
+    # What the pointer is over or pressing is drawn (`hover:`, `active:`),
+    # but not on e-paper, as the scene switcher's and the keyboard's presses
+    # are not: a render to show one is a refresh of seconds, and the tap's
+    # own render waited behind it. On the reTerminal E1003 every tap through
+    # a layout cost two renders, the page it turned showing only with the
+    # second (2026-11-10). The two lists are for drawing alone.
+    let showsPress = not target.input.paper
     if released:
       target.release(pointer)
       if target.input.pressed.len > 0:
@@ -762,12 +769,12 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         moved = true
     if placed and (down or kind == ord(uePointerMove)):
       let hovered = target.keysOver(lx, ly, false)
-      if hovered != target.input.hovered:
+      if showsPress and hovered != target.input.hovered:
         target.input.hovered = hovered
         moved = true
       if down:
         let pressed = target.keysOver(lx, ly, true)
-        if pressed != target.input.pressed:
+        if showsPress and pressed != target.input.pressed:
           target.input.pressed = pressed
           moved = true
         # The space bar: held, the finger may drag the caret.

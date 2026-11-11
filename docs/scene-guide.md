@@ -910,6 +910,10 @@ interface FrameOSApp {
     /** A panel that shows a change only in a refresh, as e-paper and a monochrome OLED do. An app that follows
      * a finger waits for it to lift there (FrameOS 2026.11.5+; undefined before). */
     paper?: boolean;
+    /** Whether the panel shows colors (an LCD, an HDMI screen, a four-, six- or seven-ink e-paper). False on
+     * a black-and-white or grey panel, where a scene reads better drawn in high contrast (FrameOS 2026.11.6+;
+     * undefined before, so treat undefined as color). */
+    color?: boolean;
     /** The name of the scene showing. A layout's app gets the name of the scene it wraps (FrameOS 2026.11.5+;
      * undefined before). */
     sceneName?: string;

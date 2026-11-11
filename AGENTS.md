@@ -214,6 +214,41 @@
   the bundle. A new pusher sets `source` and goes through the same two
   routes, never a store of its own.
 
+## One scene at a time on the ESP32: `embedded/esp32/README.md` "Scene storage"
+
+- The firmware keeps one file per scene (`main/fos_scene_store.c`, pure, host
+  test `test_fos_scene_store.c`), and a scene can be read, added, replaced or
+  removed alone over USB (`usb_api scene-*`), HTTP (`/api/frames/<id>/scenes`)
+  and from a control plane. `scene-list` / `GET .../scenes` / `hardware.storage`
+  / `embedded.storage` report what the partition holds (`stateUsedBytes` of
+  `stateTotalBytes`, `scenesBytes`, each scene's footprint in `sceneBytes`,
+  all in SPIFFS's page units: `fos_spiffs_footprint.c`), and each scene's `bytes`.
+- A changed scene goes to a NEW slot and the index is switched: the render
+  task's copy (`s_slots`) stays valid until it re-reads the index and sweeps.
+  A reader that is not the render task reads the index on flash under the store
+  lock. Never overwrite a slot in place, never unlink one from another task.
+  A whole payload is split by the same `fos_scene_store_apply` (`replace_all`),
+  so what the index keeps of a scene (`isLayout`, the `default` mark) is decided
+  in one place, `make_entry`.
+- Both planes send only what changed when they can, and always fall back to
+  the whole list: the cloud's `scenes_patch` (the hub decides at send time from
+  the row's `scene_hashes`, `lib/scenes-patch.ts`; the queue row stays
+  `set_scenes`), a backend's `/embedded/scenes?patch=1` (what it last served
+  per frame, in Redis). A device refuses a patch that is not against the set it
+  holds (`base_mismatch`), and the plane sends the whole list.
+- "Push & activate" and "Install & activate" are ONE push of that scene: the
+  SPA reads back only the assignments that own it (`only` in
+  `cloudFrameScenesSave.ts`) and posts `scene_id` + `state` with the list (the
+  queued `set_scenes` carries them, never a second command); on a backend the
+  switch rides the queue behind a forced pull that still asks for a patch. The
+  device writes a change that activates its scene unpaced (`s_store_urgent`).
+- A SPIFFS lookup by name (stat/open/remove/rename) is ~0.5 s on the 32 MB
+  boards' 24 MB `/state`: the store knows its slot files after the boot sweep,
+  writes slots straight to their names and the index as a kept copy then in
+  place. Remove the index and slots ONLY through the store
+  (`fos_scene_store_remove_index` / `_remove_slots`; a wipe calls
+  `fos_scene_store_forget`), and never add a stat to a per-change path.
+
 ## Voice chat: `docs/voice-chat.md` is the contract
 
 - Holding the voice key — the key whose long press the frame's event map
@@ -494,8 +529,10 @@
   itself: `it8951.c` hashes tiles of the packed buffer and the table's
   `changed` / `clean` / `owed` replace the copy, because 1.25 MiB more does
   not fit an 8 MB board. Only GC16 (greys) and DU (pure black and white) draw
-  on its waveform file: while someone taps it is one DU over all that changed,
-  greys as a halftone, and GC16 once they stop (`fos_display_settle_due`).
+  on its waveform file: while someone taps, and for pictures coming quickly
+  (`fos_pictures_fast`: an animation, a clock's seconds), it is one DU over
+  all that changed, greys as a halftone, and GC16 once they stop
+  (`fos_display_settle_due`).
   While someone taps, slow chores wait (`input_hold_on()` in `fos_client.c`, the
   rule in `fos_animation.c`): the render task drains the touch queue, so a new
   network call or flash write on it goes behind the hold too, and a full refresh

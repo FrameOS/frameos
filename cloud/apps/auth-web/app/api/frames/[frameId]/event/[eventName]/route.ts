@@ -136,9 +136,10 @@ export async function POST(
   // Which events this route takes, and the hub verb each becomes, is the
   // event contract's (docs/events-contract.json, the `cloud` origin): an event
   // that is not there, or whose verb the frame's device plane cannot carry
-  // (`set_display_power` and a `set_current_scene` with state are Linux only
-  // — the esp32 profile would let the command wait out its TTL to refuse it),
-  // is a 404. A name the contract does not have is a custom scene event: the
+  // (`set_display_power` is Linux only, and so is `setSceneState`'s stand-in
+  // for firmware without `scene_event` — the esp32 profile would let the
+  // command wait out its TTL to refuse it), is a 404. A `setCurrentScene`
+  // with state goes to every frame: an ESP32 applies it from 2026.9.21. A name the contract does not have is a custom scene event: the
   // device delivers one from the cloud only to a scene that declares it with
   // the `cloud` origin, so that is asked of the frame's scenes here. What is
   // left below is each verb's payload.

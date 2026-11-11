@@ -12,7 +12,8 @@
  * that mostly changed starts from a clean panel.
  *
  * That refresh is seconds in which a tap goes unanswered, so while someone is
- * tapping the ghosts wait, FOS_PARTIAL_MAX_WHILE_INPUT updates at the most,
+ * tapping, or pictures come quickly (fos_pictures_fast: `input_recent` says
+ * either), the ghosts wait, FOS_PARTIAL_MAX_WHILE_INPUT updates at the most,
  * and the idle frame clears them (fos_display_park_if_idle).
  *
  * Pure: no IDF, so main/tests/test_fos_partial_refresh.c runs it on the host.

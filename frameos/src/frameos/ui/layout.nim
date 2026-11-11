@@ -1825,8 +1825,8 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
   ## the keyboard stays there to touch (a tap on it puts the row away and
   ## types, ui/events.nim). False for a key without accents.
   let
-    count = formCount(input.accents)
-    hinted = hintOf(input.accents).len > 0
+    count = formCount(input.accents, input.page)
+    hinted = hintOf(input.accents, input.page).len > 0
   if count == 0:
     return false
   let
@@ -1866,7 +1866,8 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
     # As ui/events.nim's `accentNear`.
     let at = if hinted: input.accentX - input.accentFrom + first else: input.accentX
     input.accentLit = clamp(int(round((at - first) / float32(keyW + gap))), 0, count - 1)
-  let shown = accentTree(input.accents, input.shift, keyW, keyH, gap, input.paper, input.accentLit)
+  let shown = accentTree(input.accents, input.shift, keyW, keyH, gap, input.paper, input.page,
+    input.accentLit)
     .build(initText(), width.float32, height.float32, 0, AccentKey, input, false,
       if memo.isNil: nil else: memo.accents)
   shown.size = shown.layout(popW.float32, popH.float32, true, true)

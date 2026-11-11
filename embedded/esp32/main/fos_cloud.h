@@ -150,4 +150,8 @@ void fos_cloud_add_device_report(cJSON *msg);
  * task's frame page included (it runs under the runtime lock, and a state
  * takes a runtime snapshot, so the cloud task sends it). */
 void fos_cloud_request_state(void);
+
+/* A scene changed here (USB, HTTP): the checksum the cloud knows no longer
+ * says what this frame holds, so the next hello must not report it. */
+void fos_cloud_forget_applied_scenes(void);
 void fos_cloud_add_state_fields(cJSON *msg);

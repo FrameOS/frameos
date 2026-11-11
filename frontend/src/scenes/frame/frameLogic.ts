@@ -1169,11 +1169,12 @@ function normalizeBuildrootForComparison(value: unknown): Record<string, unknown
  * rewritten from every bootup line, and `layout` is computed on every read.
  * Compared whole, a sleeping ESP32 put "Embedded settings" in the pending
  * changes after every wake, the deploy's own boot included (frame 70,
- * 2026-10-13: only `lastBoot.at` differed).
+ * 2026-10-13: only `lastBoot.at` differed). `storage` is what the state
+ * partition holds at the frame's last check-in, reported the same way.
  */
 function normalizeEmbeddedForComparison(value: unknown): Record<string, unknown> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-  const { lastBoot: _lastBoot, layout: _layout, firmware: _firmware, ...rest } = source
+  const { lastBoot: _lastBoot, layout: _layout, firmware: _firmware, storage: _storage, ...rest } = source
   return rest
 }
 
@@ -2415,9 +2416,11 @@ export interface frameLogicActions {
   }
   saveScenes: (
     sceneIds: string[],
-    activeSceneId?: string | null
+    activeSceneId?: string | null,
+    activeState?: Record<string, any> | null
   ) => {
     activeSceneId: string | null
+    activeState: Record<string, any> | null
     sceneIds: string[]
   }
   sceneConversionFinished: (
@@ -2635,9 +2638,10 @@ export const frameLogic = kea<frameLogicType>([
     sceneConversionFinished: (sceneId: string, ok: boolean) => ({ sceneId, ok }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Partial<NodeData>) => ({ sceneId, nodeId, nodeData }),
     saveFrame: true,
-    saveScenes: (sceneIds: string[], activeSceneId?: string | null) => ({
+    saveScenes: (sceneIds: string[], activeSceneId?: string | null, activeState?: Record<string, any> | null) => ({
       sceneIds,
       activeSceneId: activeSceneId ?? null,
+      activeState: activeState ?? null,
     }),
     saveAndDeployFrame: true,
     saveAndFastDeployFrame: true,
@@ -3666,7 +3670,13 @@ export const frameLogic = kea<frameLogicType>([
       }
       const scenes = values.frameForm?.scenes ?? values.frame?.scenes ?? []
       if (!scenes.length) {
-        framesModel.actions.deployFrame(props.frameId, false)
+        // The settings went out; there is no scene to push.
+        reportTaskOutcome('success', {
+          frameId: props.frameId,
+          kind: 'deploy',
+          title: 'Deploying settings',
+          detail: 'Settings deployed. The frame has no scenes to push.',
+        })
         return
       }
       longRunningTasksModel.actions.startTask({
@@ -3703,16 +3713,16 @@ export const frameLogic = kea<frameLogicType>([
           ].join('. '),
         })
       } catch (error) {
-        // Persistence failed (rate limit, moderation, offline store…) — the
-        // ad-hoc push still deploys the edited scenes to the device, it just
-        // cannot save them; deployFrame reports its own outcome.
+        // Saving the scenes failed (a rate limit, moderation, the store
+        // offline): nothing was pushed, and the edits stay in the form for
+        // another try. Never an ad-hoc push of the form instead: the cloud
+        // records that as a preview of the whole list, outside the ledger.
         const message = error instanceof Error ? error.message : String(error)
         longRunningTasksModel.actions.taskFailed({
           frameId: props.frameId,
           kind: 'deploy',
-          detail: `Could not save the scenes to your cloud account (${message}) — pushing them straight to the frame instead`,
+          detail: `Could not save the scenes to your cloud account, so nothing was pushed: ${message}`,
         })
-        framesModel.actions.deployFrame(props.frameId, false)
       }
     }
 
@@ -3855,7 +3865,7 @@ export const frameLogic = kea<frameLogicType>([
           openSceneControlDrawer(props.frameId, scene.id)
         }
       },
-      saveScenes: async ({ sceneIds, activeSceneId }) => {
+      saveScenes: async ({ sceneIds, activeSceneId, activeState }) => {
         // The scene drawer's push (utils/scenePush.ts): the saved frame with
         // these scenes' edited versions in it, and nothing else. Every other
         // unsaved edit stays in the form: the `frame` subscription resets it
@@ -3873,11 +3883,18 @@ export const frameLogic = kea<frameLogicType>([
           // uploadScenes shim: the assignment ledger records this push, so
           // the scene counts as on the frame from now on. No settings push:
           // it is not diffed, and the frame would apply every key again.
+          // Only these scenes are read back and compared: every other
+          // assignment goes out as it is, and the frame gets a patch of what
+          // changed. Field values for the scene it shows ride the same push.
           const outcome = await persistAndPushCloudFrameScenes(
             props.frameId,
             scenes,
             activeSceneId ?? savedFrame.active_scene_id,
-            cloudScenePersistOptions(props.frameId, savedFrame)
+            {
+              ...cloudScenePersistOptions(props.frameId, savedFrame),
+              only: sceneIds,
+              ...(activeSceneId && activeState && Object.keys(activeState).length ? { activeState } : {}),
+            }
           )
           for (const storeSceneId of outcome.changedStoreSceneIds) {
             clearCloudSceneJsonCache(storeSceneId)

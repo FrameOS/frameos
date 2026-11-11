@@ -180,6 +180,12 @@ bool fos_input_hold_release(fos_input_hold_t *h, int64_t now_us)
     return true;
 }
 
+bool fos_pictures_fast(double scene_interval_s, int64_t last_picture_us, int64_t now_us)
+{
+    if (scene_interval_s > 0 && scene_interval_s * 1000000.0 < (double)FOS_PICTURES_FAST_US) return true;
+    return last_picture_us != 0 && now_us - last_picture_us < FOS_PICTURES_FAST_US;
+}
+
 bool fos_input_hold_applies(bool partial_panel, bool touch, bool keys)
 {
     return partial_panel || touch || keys;

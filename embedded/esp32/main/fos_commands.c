@@ -133,6 +133,8 @@ static cJSON *pull(void)
     if (fos_wifi_ip()[0]) cJSON_AddStringToObject(hello, "ip", fos_wifi_ip());
     const char *settings_etag = fos_settings_etag();
     if (settings_etag[0]) cJSON_AddStringToObject(hello, "settings_etag", settings_etag);
+    /* What /state holds (fos_cloud.c reports the same in `hardware.storage`). */
+    fos_scenes_add_storage_json(cJSON_AddObjectToObject(hello, "storage"));
     char *body = cJSON_PrintUnformatted(hello);
     cJSON_Delete(hello);
     if (body == NULL) return NULL;

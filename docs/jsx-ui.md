@@ -520,8 +520,9 @@ export const get = () => (
   lifts is over nothing, so on a touch screen `hover:` lasts for the press.
 - **Renders cost what they cost on the panel.** On an LCD, a HyperPixel or
   the browser preview a click answers at once; on e-paper it answers in a
-  refresh, and `hover:` / `active:` are a refresh each: keep them for
-  screens that redraw in a blink. Every handler is a render too, so an app
+  refresh, so e-paper draws no `hover:` or `active:` at all (a press asked
+  for a refresh of its own, and the tap's render waited behind it:
+  `ui/events.nim`). Every handler is a render, so an app
   that follows a finger checks `app.frame.paper` (2026.11.5+) and takes the
   whole drag as one `onSwipe` there, as the Map scene does.
 - **Where the events come from**: the dispatcher's pointer events and
@@ -602,8 +603,10 @@ export function get(app) {
   `…`, `¿ ¡ ° ‰` (`ui/keyboard.nim` `Accents`); under shift the letters are
   capitals. Every letter also holds a symbol, after SwiftKey: the digits
   over `q`–`p`, `@ # & * - + = ( )` over `a`–`l`, `_ $ " ' : ; /` over
-  `z`–`m` (`ui/keyboard.nim` `Hints`), drawn small and dim in the key's top
-  right corner. It is the first form of the letter's row, which starts right
+  `z`–`m` (`ui/keyboard.nim` `Hints`), and the letters page's full stop holds
+  `!` and `?`, which that page has no keys for (on the symbols page and the
+  number pad `.` holds its `…` alone). The first symbol is drawn small and dim in the
+  key's top right corner. It is the first form of the key's row, which starts right
   over the key (pushed left at the screen's edge) with the symbol lit: hold a
   letter and lift, and its symbol is typed. Sliding sideways moves the light
   along the row by how far the finger went (`UiInput.accentFrom`), at any

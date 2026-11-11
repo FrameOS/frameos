@@ -23,15 +23,23 @@ COMMANDS_C = ESP32_DIR / "main" / "fos_commands.c"
 GLUE_C = ESP32_DIR / "components" / "frameos_nim" / "frameos_nim_glue.c"
 
 
+def _blank_literals(text: str) -> str:
+    """`text` with what is inside its string and character literals blanked,
+    same length: a `'{'` must not count as a brace."""
+    return re.sub(r"\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])'",
+                  lambda m: m.group(0)[0] + " " * (len(m.group(0)) - 2) + m.group(0)[-1], text)
+
+
 def _functions(text: str) -> dict[str, str]:
     """Every C function definition in `text`, by name, with its body."""
     bodies: dict[str, str] = {}
-    for match in re.finditer(r"^[a-z][^;{}\n]*\b(\w+)\(([^;{}]*)\)\s*\{", text, re.MULTILINE):
+    masked = _blank_literals(text)
+    for match in re.finditer(r"^[a-z][^;{}\n]*\b(\w+)\(([^;{}]*)\)\s*\{", masked, re.MULTILINE):
         depth = 0
-        for index in range(match.end() - 1, len(text)):
-            if text[index] == "{":
+        for index in range(match.end() - 1, len(masked)):
+            if masked[index] == "{":
                 depth += 1
-            elif text[index] == "}":
+            elif masked[index] == "}":
                 depth -= 1
                 if depth == 0:
                     bodies[match.group(1)] = text[match.end() - 1 : index + 1]
@@ -122,18 +130,25 @@ def test_a_scene_payload_is_written_off_the_render_task():
     waits for the write."""
     scenes = _functions(_strip_comments(SCENES_C.read_text()))
     store = scenes["store_backend_payload"]
-    write = store.index("write_file_atomic_paced(SCENES_PATH")
-    # Under the scene file lock like every other writer, paced on e-paper.
-    assert store.index("xSemaphoreTake(s_scene_file_lock") < write < store.index("xSemaphoreGive(s_scene_file_lock")
-    assert "store_pace" in store
+    write = store.index("write_file_replace_locked(SCENES_PATH")
+    # Under the store lock like every other writer, paced on e-paper: the
+    # store module calls the pace hook before each 2 KB, and it waits on every
+    # task but the render task.
+    assert store.index("store_lock()") < write < store.index("store_unlock()")
+    assert ".pace = store_pace_hook" in _strip_comments(SCENES_C.read_text())
+    hook = scenes["store_pace_hook"]
+    assert "!fos_client_on_render_task()" in hook and "store_pace()" in hook
     pace = scenes["store_pace"]
     assert "fos_client_input_held()" in pace and "fos_client_render_in_flight()" in pace
-    for after in ("save_etag_file(", "persist_scene_source(", "unlink(SCENES_INDEX_PATH)"):
+    store_module = (ESP32_DIR / "main" / "fos_scene_store.c").read_text()
+    assert "if (s_hooks.pace) s_hooks.pace();" in store_module
+    for after in ("save_etag_file(", "persist_scene_source(", "fos_scene_store_remove_index()"):
         assert write < store.index(after), f"fos_scenes.c: {after} comes before the payload is on flash"
     take = scenes["fos_scenes_take_backend_payload"]
     assert take.index("load_into_nim(") < take.index("store_behind("), "the write is queued before the parse"
     assert "etag_set(etag)" in take, "the next poll would fetch the payload being written again"
-    assert "esp_register_shutdown_handler(store_shutdown)" in scenes["store_behind"]
+    assert "store_task_ready()" in scenes["store_behind"]
+    assert "esp_register_shutdown_handler(store_shutdown)" in scenes["store_task_ready"]
     sync = scenes["fos_scenes_sync"]
     assert "fos_scenes_backend_fetch(" in sync and "fos_scenes_take_backend_payload(" in sync
     client = _strip_comments(CLIENT_C.read_text())

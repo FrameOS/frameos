@@ -51,14 +51,14 @@ def test_a_split_removes_the_old_slots_before_writing_new_ones():
     and a 20-scene push of 389,616 bytes over itself never split on the
     reTerminal E1002's 1 MB /state (2026-11-10)."""
     text = (MAIN_DIR / "fos_scenes.c").read_text()
-    start = text.index("static esp_err_t split_scenes(")
+    start = text.index("static esp_err_t split_scenes_locked(")
     body = text[start : text.index("\n}\n", start)]
     scan = body.index("scan_array_elements(")
-    first_write = body.index("write_slot(")
-    removal = body.find("remove_slots_from(0);", scan)
+    first_write = body.index("fos_scene_store_apply(")  # the store writes the slots (replace_all)
+    removal = body.find("remove_slots();", scan)
     assert scan < removal < first_write, (
-        "split_scenes must remove the old slots after the payload scanned as an array of scenes "
-        "and before it writes the first new slot"
+        "split_scenes_locked must remove the old slots after the payload scanned as an array of scenes "
+        "and before the store writes the first new slot"
     )
 
 
@@ -77,12 +77,13 @@ def test_a_split_that_found_no_room_is_not_tried_again_until_the_next_payload():
     assert mark < whole and "if (s_split_out_of_room)" in apply[:mark]
     # Running out of room, not any failure: a cJSON allocation that failed is
     # worth another try at the next boot.
-    split = text[text.index("static esp_err_t split_scenes(") :]
+    split = text[text.index("static esp_err_t split_scenes_locked(") :]
     split = split[: split.index("\n}\n")]
-    assert split.count("s_split_out_of_room = err == ESP_ERR_NO_MEM") == 2
+    assert "s_split_out_of_room = err == FOS_SCENE_STORE_ERR_NO_SPACE" in split
+    assert split.index("s_split_out_of_room = false") < split.index("fos_scene_store_apply(")
     # Every write of the combined file is a new payload and clears the mark.
-    # (the store task's is the paced one: fos_scenes_take_backend_payload)
-    writes = [m.start() for m in re.finditer(r"write_file_(?:replace|atomic_paced)\(SCENES_PATH,", text)]
+    # (the store task's under the store lock: fos_scenes_take_backend_payload)
+    writes = [m.start() for m in re.finditer(r"write_file_replace(?:_locked)?\(SCENES_PATH,", text)]
     assert len(writes) == 2
     for start in writes:
         window = text[start : start + 900]
@@ -114,7 +115,7 @@ def test_spiffs_gc_host_tests_pass(tmp_path: Path):
             "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", *includes,
             # macOS's linker has no --wrap: the wrapper calls SPIFFS_gc itself.
             "-D__real_SPIFFS_gc=SPIFFS_gc",
-            str(SOURCE), str(TEST_SOURCE), *objects, "-o", str(binary),
+            str(SOURCE), str(MAIN_DIR / "fos_spiffs_footprint.c"), str(TEST_SOURCE), *objects, "-o", str(binary),
         ],
         capture_output=True,
         text=True,
