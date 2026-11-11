@@ -6,6 +6,7 @@ import {
   mockCloudBackupsApi,
   mockScenePreviewOnFrame,
   openDiscardPreviewDialog,
+  showSceneWorkspaceEditor,
   waitForAssetColorsPreview,
 } from './visual-helpers'
 
@@ -59,6 +60,8 @@ async function openSceneWorkspaceUtilityDrawer(page: Page, label: string): Promi
     return
   }
 
+  // A narrow page shows one panel at a time, Preview first.
+  await showSceneWorkspaceEditor(page)
   await page
     .locator('.scene-diagram-utility-buttons')
     .getByRole('button', { name: new RegExp(`^${escapeRegex(label)}$`, 'i') })
