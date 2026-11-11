@@ -73,7 +73,21 @@ static const char *TAG = "fos_client";
 /* The backend link task (below) has something for the render task: commands
  * it pulled, or scenes or settings it saw change. */
 #define LINK_BIT BIT6
-#define START_RENDER_LOOP_BIT BIT1
+/* app_main is done booting (fos_client_resume): the scenes are queued, the
+ * cloud and the HTTP server are up, and the render task may begin. Its own
+ * bit since 2026-11-11; from #509 it was INPUT_EVENTS_BIT's. A key pressed or
+ * the glass touched while the frame booted (a button wake, mostly) started
+ * the render task before fos_scenes_init: its first pass found no scene and
+ * put the "No scenes installed yet" status screen on the panel, the pass
+ * after it the scene (E1002, E1003). And left set, it was a key to
+ * image_push_write, so every boot's first picture push to a backend gave up. */
+#define START_RENDER_LOOP_BIT BIT7
+/* One bit each: the sum of distinct powers of two is their OR. */
+_Static_assert((RENDER_NOW_BIT + INPUT_EVENTS_BIT + COMMANDS_BIT + RELEASE_BIT + FRAME_DUE_BIT +
+                SCENE_RENDER_BIT + LINK_BIT + START_RENDER_LOOP_BIT) ==
+                   (RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | FRAME_DUE_BIT |
+                    SCENE_RENDER_BIT | LINK_BIT | START_RENDER_LOOP_BIT),
+               "fos_client event group bits must be distinct");
 #define CLIENT_TASK_STACK_BYTES 40960
 
 /* Below FOS_POWER_CRITICAL_MV (fos_power.h) for two passes running we stop
