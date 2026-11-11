@@ -45,6 +45,12 @@ final class AppModel {
     // MARK: accounts
 
     func restore() async {
+        if ProcessInfo.processInfo.arguments.contains("-FrameOSUITesting") {
+            // The UI tests (ios/FrameOSUITests) start signed out every time.
+            for account in AccountList.load() { AccountCredentials.delete(accountId: account.id) }
+            AccountList.save([])
+            AccountList.setCurrentId(nil)
+        }
         accounts = AccountList.load()
         let currentId = AccountList.currentId()
         let account = accounts.first { $0.id == currentId } ?? accounts.first

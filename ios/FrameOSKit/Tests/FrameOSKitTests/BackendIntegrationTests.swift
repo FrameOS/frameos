@@ -2,16 +2,18 @@ import Foundation
 import Testing
 @testable import FrameOSKit
 
-/// The app's backend path against a real, EMPTY self-hosted backend: sign-up
-/// and sign-in, the API token, frames, scenes through the backend's MCP,
-/// settings, photos, the live socket, sign-out. Skipped unless
-/// FRAMEOS_IT_BACKEND names one (e.g. http://127.0.0.1:8997) — it creates an
-/// account and a frame there. ios/README.md "Without Xcode" has the recipe.
+/// The app's backend path against a real self-hosted backend: sign-up (an
+/// empty backend) or sign-in (ios/bin/test-backend's user), the API token,
+/// frames, scenes through the backend's MCP, settings, photos, the live
+/// socket, sign-out. Skipped unless FRAMEOS_IT_BACKEND names one (e.g.
+/// http://127.0.0.1:8997): it creates a frame there and deletes it.
+/// ios/README.md "Tests" has the recipe.
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["FRAMEOS_IT_BACKEND"] != nil))
 struct BackendIntegrationTests {
     static var baseURL: URL { URL(string: ProcessInfo.processInfo.environment["FRAMEOS_IT_BACKEND"] ?? "http://127.0.0.1:8997")! }
-    static let email = "ios-it@example.com"
-    static let password = "ios-integration-password"
+    // ios/bin/test-backend's first user; an empty backend gets it too.
+    static let email = ProcessInfo.processInfo.environment["FRAMEOS_IT_EMAIL"] ?? "tester@example.com"
+    static let password = ProcessInfo.processInfo.environment["FRAMEOS_IT_PASSWORD"] ?? "frameos-test-1"
 
     func signedIn() async throws -> FrameOSService {
         let signUp = try await !AuthService.backendHasFirstUser(baseURL: Self.baseURL)

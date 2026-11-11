@@ -29,36 +29,52 @@ the `.xcodeproj`.
 | `FrameOSKit/Tests/` | the runners of the repo's shared corpora (`docs/*-fixtures.json`) and the client's own tests |
 | `FrameOSUI/` | a Swift package with the screens, one folder per tab; each screen's state is an `@Observable` model next to it |
 | `project.yml` | the XcodeGen spec |
-| `bin/` | `open`, `test`, `check-ui` |
+| `FrameOSUITests/` | the UI tests: the sign-in screen, and a tour of the whole app against a backend |
+| `project.yml` | the XcodeGen spec |
+| `bin/` | `open`, `test`, `check-ui`, `ui-test`, `test-backend` |
 
-## Without Xcode
-
-Most of the app builds with only the Command Line Tools:
+## Tests
 
 ```sh
 ios/bin/test        # FrameOSKit's tests: the corpora, the contracts, the client
 ios/bin/check-ui    # type-checks every screen for macOS
+ios/bin/ui-test     # the UI tests on an iPhone simulator (needs Xcode)
 ```
 
-Against real planes (skipped unless asked for):
+`ios/bin/test` and `ios/bin/check-ui` need only the Command Line Tools. The
+screens are written to compile for macOS too (`Common/Platform.swift` wraps
+what is iOS-only), which is what makes `check-ui` possible.
+
+Against a real backend, `ios/bin/test-backend` starts a throwaway one from
+this checkout (its own SQLite and Redis, port 8997, a first user and two
+virtual frames; Ctrl-C removes it all). Then, in another shell:
 
 ```sh
-# An EMPTY self-hosted backend (it creates an account and a frame there):
+# The whole app, tapped through on a simulator, with a screenshot of every
+# screen in ios/ui-test-shots/ (it installs a scene from the cloud store):
+FRAMEOS_UITEST_BACKEND=http://127.0.0.1:8997 ios/bin/ui-test
+# The services, without the screens:
 FRAMEOS_IT_BACKEND=http://127.0.0.1:8997 ios/bin/test --filter BackendIntegrationTests
 # A cloud, read-only (a wrong-password sign-in, the public store):
 FRAMEOS_IT_CLOUD=http://localhost:3000 ios/bin/test --filter CloudProbeTests
 ```
 
-A throwaway backend for the first: from `backend/`, with its own SQLite
-(`DATABASE_URL=sqlite:////tmp/fos.db python -m alembic upgrade head`) and
-Redis (`redis-server --port 6391`, `REDIS_URL=redis://localhost:6391/0`),
-`uvicorn app.fastapi:app --port 8997` with `PYTHONPATH=.` and a `SECRET_KEY`.
+Signed in to a cloud, on a cloud you may write to (a local dev server, never
+production) and an account without two-factor sign-in that has a frame (a
+virtual frame works when the hub runs; the install wants a store scene,
+`scripts/import-store-scenes.mjs` fills a local store):
 
-The screens are written to compile for macOS too (`Common/Platform.swift`
-wraps what is iOS-only), which is what makes `check-ui` possible. The iOS
-build itself needs Xcode: CI's **iOS app** job (`.github/workflows/ios.yml`)
-builds the app for the simulator on every change under `ios/` and to the
-corpora and contracts it reads.
+```sh
+FRAMEOS_IT_CLOUD=http://localhost:3000 FRAMEOS_IT_CLOUD_EMAIL=… FRAMEOS_IT_CLOUD_PASSWORD=… \
+  ios/bin/test --filter CloudIntegrationTests
+FRAMEOS_UITEST_CLOUD=http://localhost:3000 FRAMEOS_UITEST_CLOUD_EMAIL=… FRAMEOS_UITEST_CLOUD_PASSWORD=… \
+  ios/bin/ui-test
+```
+
+CI's **iOS app** job (`.github/workflows/ios.yml`) runs FrameOSKit's tests,
+builds the app for the simulator and runs the UI tests without a backend
+(the sign-in screen), on every change under `ios/` and to the corpora and
+contracts it reads.
 
 ## Signing in
 

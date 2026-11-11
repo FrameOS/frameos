@@ -63,6 +63,20 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
         ENABLE_PREVIEWS: YES
+  # The UI tests (ios/bin/ui-test): the sign-in screen on every build, and
+  # a tour of the whole app when a backend is named.
+  FrameOSUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: FrameOSUITests
+    dependencies:
+      - target: FrameOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.frameos.app.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
 schemes:
   FrameOS:
     build:
@@ -71,3 +85,4 @@ schemes:
     test:
       targets:
         - package: FrameOSKit/FrameOSKitTests
+        - FrameOSUITests

@@ -6,3 +6,4 @@ FrameOS/Info.plist
 .swiftpm/
 DerivedData/
 xcuserdata/
+ui-test-shots/

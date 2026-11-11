@@ -71,40 +71,28 @@ jobs:
             | tee ios/xcodebuild.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "BUILD SUCCEEDED" ios/xcodebuild.log
 
-      # A smoke test: the app starts on a simulator and is still running a
-      # few seconds later (no crash at launch, e.g. a generated table that
-      # does not decode). The screenshot is the sign-in screen.
-      - name: Launch on a simulator
-        run: |
-          set -euo pipefail
-          udid="$(xcrun simctl list devices available -j | python3 -c '
-          import json, sys
-          devices = json.load(sys.stdin)["devices"]
-          phones = [d for runtime in sorted(devices) if "iOS" in runtime for d in devices[runtime] if d["name"].startswith("iPhone")]
-          print(phones[-1]["udid"])
-          ')"
-          xcrun simctl boot "$udid"
-          xcrun simctl bootstatus "$udid" -b >/dev/null
-          app="ios/DerivedData/Build/Products/Debug-iphonesimulator/FrameOS.app"
-          xcrun simctl install "$udid" "$app"
-          pid="$(xcrun simctl launch "$udid" net.frameos.app | awk '{print $NF}')"
-          sleep 10
-          kill -0 "$pid"
-          xcrun simctl io "$udid" screenshot ios/launch.png
-          echo "running as $pid after 10 s"
+      # The UI tests (ios/FrameOSUITests) on a simulator: the app starts (no
+      # crash at launch, e.g. a generated table that does not decode) and
+      # the sign-in screen works, the cloud first and the backend below. The
+      # tour of the whole app needs a backend and is skipped here; run it
+      # with ios/bin/test-backend + ios/bin/ui-test (ios/README.md).
+      - name: UI tests on a simulator
+        run: ios/bin/ui-test
 
-      - name: Upload the launch screenshot
+      - name: Upload the screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-launch-screenshot
-          path: ios/launch.png
+          name: ios-ui-test-screenshots
+          path: ios/ui-test-shots/*.png
           if-no-files-found: ignore
 
-      - name: Upload the build log
+      - name: Upload the logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-xcodebuild-log
-          path: ios/xcodebuild.log
+          name: ios-xcodebuild-logs
+          path: |
+            ios/xcodebuild.log
+            ios/DerivedData/ui-test.log
           if-no-files-found: ignore
