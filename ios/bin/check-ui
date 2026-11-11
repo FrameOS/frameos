@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Type-checks the screens (FrameOSUI) for macOS without Xcode. The iOS build
+# itself needs Xcode (CI's "iOS app" job). The macOS 27 SDK's SwiftUI expands
+# @State with a macro the Command Line Tools do not ship, so an older SDK is
+# used when one is installed.
+set -euo pipefail
+cd "$(dirname "$0")/../FrameOSUI"
+developer_dir="$(xcode-select -p 2>/dev/null || true)"
+if [[ "$developer_dir" == *CommandLineTools* ]]; then
+  sdk="$(ls -d "$developer_dir"/SDKs/MacOSX26*.sdk 2>/dev/null | head -1 || true)"
+  if [[ -n "$sdk" ]]; then
+    export SDKROOT="$sdk"
+  fi
+fi
+exec swift build "$@"

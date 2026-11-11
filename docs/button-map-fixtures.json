@@ -1,0 +1,422 @@
+{
+  "description": "The frame's \"Button actions\" rows read out of its event map, and written back (docs/events.md \"Event map\"). Each case is one rule of frame.json `eventMap` (`event_map` on the wire); `expect` is the row it means \u2014 its gesture, its action, the two titles the section shows (a scene named by id is called by its name: the scene `weather` is \"Weather\"), and the rule the row writes back \u2014 or null for a rule the section does not write, which it keeps as it is. Replayed by the SPA (frontend/src/utils/frameEventMap.ts bindingOfRule / bindingRule / frameGestureTitle / frameActionTitle; cloud/apps/auth-web/src/test/shared-spa/button-map-fixtures.test.ts) and the iOS app (ios/FrameOSKit/Sources/FrameOSKit/Contracts/ButtonBindings.swift; ButtonMapFixtureTests.swift).",
+  "cases": [
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "label": "LEFT",
+          "action": "longPress"
+        },
+        "emit": "setCurrentScene",
+        "as": {
+          "direction": "prev"
+        }
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "label": "LEFT",
+            "action": "longPress"
+          },
+          "action": {
+            "kind": "prevScene"
+          }
+        },
+        "gestureTitle": "LEFT \u00b7 long press",
+        "actionTitle": "Previous scene",
+        "rule": {
+          "event": "button",
+          "match": {
+            "label": "LEFT",
+            "action": "longPress"
+          },
+          "emit": "setCurrentScene",
+          "as": {
+            "direction": "prev"
+          }
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "label": "RIGHT",
+          "action": "longPress"
+        },
+        "emit": "setCurrentScene",
+        "as": {
+          "direction": "next"
+        }
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "label": "RIGHT",
+            "action": "longPress"
+          },
+          "action": {
+            "kind": "nextScene"
+          }
+        },
+        "gestureTitle": "RIGHT \u00b7 long press",
+        "actionTitle": "Next scene",
+        "rule": {
+          "event": "button",
+          "match": {
+            "label": "RIGHT",
+            "action": "longPress"
+          },
+          "emit": "setCurrentScene",
+          "as": {
+            "direction": "next"
+          }
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "label": "KEY1",
+          "action": "press"
+        },
+        "emit": "setCurrentScene",
+        "as": {
+          "sceneId": "weather"
+        }
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "label": "KEY1",
+            "action": "press"
+          },
+          "action": {
+            "kind": "showScene",
+            "sceneId": "weather"
+          }
+        },
+        "gestureTitle": "KEY1 \u00b7 press",
+        "actionTitle": "Show scene: Weather",
+        "rule": {
+          "event": "button",
+          "match": {
+            "label": "KEY1",
+            "action": "press"
+          },
+          "emit": "setCurrentScene",
+          "as": {
+            "sceneId": "weather"
+          }
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "label": "REFRESH",
+          "action": "longPress"
+        },
+        "emit": "voiceChat",
+        "as": {}
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "label": "REFRESH",
+            "action": "longPress"
+          },
+          "action": {
+            "kind": "voiceChat"
+          }
+        },
+        "gestureTitle": "REFRESH \u00b7 long press",
+        "actionTitle": "Voice chat",
+        "rule": {
+          "event": "button",
+          "match": {
+            "label": "REFRESH",
+            "action": "longPress"
+          },
+          "emit": "voiceChat",
+          "as": {}
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "label": "A",
+          "action": "doublePress"
+        },
+        "emit": "render",
+        "as": {}
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "label": "A",
+            "action": "doublePress"
+          },
+          "action": {
+            "kind": "render"
+          }
+        },
+        "gestureTitle": "A \u00b7 double press",
+        "actionTitle": "Refresh",
+        "rule": {
+          "event": "button",
+          "match": {
+            "label": "A",
+            "action": "doublePress"
+          },
+          "emit": "render",
+          "as": {}
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "edgeSwipe",
+        "match": {
+          "edge": "left"
+        },
+        "emit": "back",
+        "as": {}
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "edge": "left"
+          },
+          "action": {
+            "kind": "back"
+          }
+        },
+        "gestureTitle": "Swipe in from the left",
+        "actionTitle": "Back",
+        "rule": {
+          "event": "edgeSwipe",
+          "match": {
+            "edge": "left"
+          },
+          "emit": "back",
+          "as": {}
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "edgeSwipe",
+        "match": {
+          "edge": "bottom"
+        },
+        "emit": "sceneSwitcher",
+        "as": {}
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "edge": "bottom"
+          },
+          "action": {
+            "kind": "sceneSwitcher"
+          }
+        },
+        "gestureTitle": "Swipe up from the bottom",
+        "actionTitle": "Scene switcher",
+        "rule": {
+          "event": "edgeSwipe",
+          "match": {
+            "edge": "bottom"
+          },
+          "emit": "sceneSwitcher",
+          "as": {}
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "edgeSwipe",
+        "match": {
+          "edge": "top"
+        },
+        "emit": "sceneSettings",
+        "as": {}
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "edge": "top"
+          },
+          "action": {
+            "kind": "sceneSettings"
+          }
+        },
+        "gestureTitle": "Swipe down from the top",
+        "actionTitle": "Scene settings",
+        "rule": {
+          "event": "edgeSwipe",
+          "match": {
+            "edge": "top"
+          },
+          "emit": "sceneSettings",
+          "as": {}
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "edgeSwipe",
+        "match": {
+          "edge": "middle"
+        },
+        "emit": "back",
+        "as": {}
+      },
+      "expect": null
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "label": "REFRESH",
+          "action": "press"
+        },
+        "as": {
+          "label": "A",
+          "role": "primary"
+        }
+      },
+      "expect": null
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "label": "LEFT"
+        },
+        "emit": "render",
+        "as": {}
+      },
+      "expect": null
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "label": "LEFT",
+          "action": "press",
+          "pin": 3
+        },
+        "emit": "render",
+        "as": {}
+      },
+      "expect": null
+    },
+    {
+      "rule": {
+        "event": "keyDown",
+        "match": {
+          "key": "ArrowRight"
+        },
+        "emit": "setCurrentScene",
+        "as": {
+          "direction": "next"
+        }
+      },
+      "expect": null
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "label": "B",
+          "action": "press"
+        },
+        "emit": "setCurrentScene",
+        "as": {
+          "direction": "next",
+          "state": {}
+        }
+      },
+      "expect": null
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "label": "B",
+          "action": "press"
+        },
+        "emit": "setCurrentScene",
+        "as": {
+          "direction": "sideways"
+        }
+      },
+      "expect": null
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "label": "C",
+          "action": "press"
+        },
+        "emit": "turnOff",
+        "as": {
+          "x": 1
+        }
+      },
+      "expect": null
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "label": "C",
+          "action": "press"
+        },
+        "emit": "setSceneState",
+        "as": {}
+      },
+      "expect": null
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "label": "D",
+          "action": "press"
+        },
+        "emit": "toggleScreen"
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "label": "D",
+            "action": "press"
+          },
+          "action": {
+            "kind": "toggleScreen"
+          }
+        },
+        "gestureTitle": "D \u00b7 press",
+        "actionTitle": "Display on/off",
+        "rule": {
+          "event": "button",
+          "match": {
+            "label": "D",
+            "action": "press"
+          },
+          "emit": "toggleScreen",
+          "as": {}
+        }
+      }
+    }
+  ]
+}

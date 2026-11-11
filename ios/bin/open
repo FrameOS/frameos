@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Generates the Xcode project from project.yml and opens it.
+# Needs Xcode and XcodeGen (`brew install xcodegen`).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+command -v xcodegen >/dev/null || { echo "Install XcodeGen first: brew install xcodegen" >&2; exit 1; }
+xcodegen generate --quiet
+open FrameOS.xcodeproj

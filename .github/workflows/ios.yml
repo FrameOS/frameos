@@ -1,0 +1,79 @@
+name: iOS app
+
+# The native iOS app (ios/, docs/ios-app.md). Two checks:
+#
+# - FrameOSKit's tests replay the repo's shared corpora (docs/*-fixtures.json)
+#   and read the generated contract tables, so a change to a corpus, a
+#   contract or a decorator the app ports has to keep the app agreeing.
+#   Those inputs are in the paths below for that reason.
+# - The app itself is built for the iOS simulator from the XcodeGen spec,
+#   unsigned. Nothing is published: there is no App Store upload here.
+#
+# GitHub's macOS runners are free for this public repository; they are the
+# only ones with Xcode (the self-hosted pool is Linux).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - "docs/*-fixtures.json"
+      - "docs/deploy-progress-contract.json"
+      - "docs/cloud-frames-contract.json"
+      - "frontend/src/scenes/workspace/framePendingCommandsLogic.ts"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - "docs/*-fixtures.json"
+      - "docs/deploy-progress-contract.json"
+      - "docs/cloud-frames-contract.json"
+      - "frontend/src/scenes/workspace/framePendingCommandsLogic.ts"
+      - ".github/workflows/ios.yml"
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    name: iOS app
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          sudo xcode-select -s "$latest/Contents/Developer"
+          xcodebuild -version
+          swift --version
+
+      - name: FrameOSKit tests (the shared corpora)
+        run: swift test --package-path ios/FrameOSKit
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+
+      - name: Build for the iOS simulator
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project ios/FrameOS.xcodeproj \
+            -scheme FrameOS \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            -derivedDataPath ios/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee ios/xcodebuild.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" ios/xcodebuild.log
+
+      - name: Upload the build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcodebuild-log
+          path: ios/xcodebuild.log
+          if-no-files-found: ignore

@@ -1,0 +1,137 @@
+{
+  "description": "Which canonical `/api/...` paths a self-hosted backend serves under `/api/projects/{project_id}/...` (the rest are the backend's own: login, the user, the system, the cloud link). The SPA's isProjectScopedApiPath (frontend/src/utils/projectApi.ts) and the iOS app's ApiPaths.isProjectScoped (ios/FrameOSKit/Sources/FrameOSKit/Core/APIClient.swift) both replay this corpus (cloud/apps/auth-web/src/test/shared-spa/api-path-fixtures.test.ts, ios/FrameOSKit/Tests/FrameOSKitTests/ApiPathTests.swift). The cloud serves every path as written. Note `/api/repositories/system`: scoped by this rule, though the backend also serves the bundled system repositories unscoped (its MCP calls them that way).",
+  "cases": [
+    {
+      "path": "/api/frames",
+      "scoped": true
+    },
+    {
+      "path": "/api/frames/12",
+      "scoped": true
+    },
+    {
+      "path": "/api/frames/12/event/render",
+      "scoped": true
+    },
+    {
+      "path": "/api/frames?x=1",
+      "scoped": true
+    },
+    {
+      "path": "/api/framesx",
+      "scoped": false
+    },
+    {
+      "path": "/api/photos/files",
+      "scoped": true
+    },
+    {
+      "path": "/api/ai/chat",
+      "scoped": true
+    },
+    {
+      "path": "/api/apps",
+      "scoped": true
+    },
+    {
+      "path": "/api/assets",
+      "scoped": true
+    },
+    {
+      "path": "/api/fonts",
+      "scoped": true
+    },
+    {
+      "path": "/api/frame-bootstrap/1",
+      "scoped": true
+    },
+    {
+      "path": "/api/repositories",
+      "scoped": true
+    },
+    {
+      "path": "/api/repositories/system",
+      "scoped": true
+    },
+    {
+      "path": "/api/settings",
+      "scoped": true
+    },
+    {
+      "path": "/api/templates/3/image",
+      "scoped": true
+    },
+    {
+      "path": "/api/login",
+      "scoped": false
+    },
+    {
+      "path": "/api/logout",
+      "scoped": false
+    },
+    {
+      "path": "/api/signup",
+      "scoped": false
+    },
+    {
+      "path": "/api/has_first_user",
+      "scoped": false
+    },
+    {
+      "path": "/api/user",
+      "scoped": false
+    },
+    {
+      "path": "/api/user/api_tokens",
+      "scoped": false
+    },
+    {
+      "path": "/api/system/info",
+      "scoped": false
+    },
+    {
+      "path": "/api/cloud",
+      "scoped": false
+    },
+    {
+      "path": "/api/cloud/status",
+      "scoped": false
+    },
+    {
+      "path": "/api/generate_ssh_keys",
+      "scoped": false
+    },
+    {
+      "path": "/api/log",
+      "scoped": false
+    },
+    {
+      "path": "/api/projects",
+      "scoped": false
+    },
+    {
+      "path": "/api/projects/1/frames",
+      "scoped": false
+    },
+    {
+      "path": "/api/mcp",
+      "scoped": false
+    },
+    {
+      "path": "/api/scene_guide",
+      "scoped": false
+    },
+    {
+      "path": "/api/store/browse",
+      "scoped": false
+    },
+    {
+      "path": "/ws",
+      "scoped": false
+    },
+    {
+      "path": "/api/account/usage",
+      "scoped": false
+    }
+  ]
+}
