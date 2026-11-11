@@ -276,6 +276,49 @@ async def test_frames_tools_against_the_real_routes(async_client, db: Session, r
 
 
 @pytest.mark.asyncio
+async def test_installing_a_store_scene_grants_what_it_declares(async_client, db: Session, redis):
+    """`settings_groups` on frame_scene_install grants a store scene the
+    service keys it declares among them (the cloud tool's argument, and the
+    SPA's "installing is consent"); without it a store scene gets none."""
+    frame = await new_frame(db, redis, "Kitchen", "localhost", "localhost")
+    store_scene = {
+        "id": "store-a",
+        "name": "Photos",
+        "origin": {"storeSceneId": "0b3f7c1e-1111-4222-8333-944455556666", "version": "3"},
+        "nodes": [{
+            "id": "n1", "type": "app", "position": {"x": 0, "y": 0},
+            "data": {"keyword": "photos", "sources": {"config.json": json.dumps({"name": "Photos", "settings": ["unsplash"]})}},
+        }],
+        "edges": [],
+    }
+    plain = result_json(await call(async_client, "frame_scene_install", {
+        "confirm": True, "frame_id": frame.id, "scenes": store_scene, "deploy": "none",
+    }))
+    assert plain["declared_settings_groups"] == ["unsplash"]
+    assert plain["granted_settings_groups"] == []
+    db.expire_all()
+    assert not frame_row(db, frame.id).service_setting_groups
+
+    granted = result_json(await call(async_client, "frame_scene_install", {
+        "confirm": True, "frame_id": frame.id, "scenes": store_scene, "deploy": "none",
+        "settings_groups": ["unsplash", "openAI"],
+    }))
+    assert granted["declared_settings_groups"] == ["unsplash"]
+    assert granted["granted_settings_groups"] == ["unsplash"]
+    db.expire_all()
+    assert frame_row(db, frame.id).service_setting_groups == ["unsplash"]
+
+    # The owner's own scene declares too, but it needs no grant.
+    own = result_json(await call(async_client, "frame_scene_install", {
+        "confirm": True, "frame_id": frame.id, "scenes": {**store_scene, "origin": None}, "deploy": "none",
+        "settings_groups": ["openAI"],
+    }))
+    assert own["declared_settings_groups"] == []
+    db.expire_all()
+    assert frame_row(db, frame.id).service_setting_groups == ["unsplash"]
+
+
+@pytest.mark.asyncio
 async def test_saved_scenes_catalog_and_settings(async_client, db: Session, redis):
     frame = await new_frame(db, redis, "Kitchen", "localhost", "localhost")
     frame.scenes = [SCENE]

@@ -1,0 +1,99 @@
+name: iOS app
+
+# The native iOS app (ios/, docs/ios-app.md). Two checks:
+#
+# - FrameOSKit's tests replay the repo's shared corpora (docs/*-fixtures.json)
+#   and read the generated contract tables, so a change to a corpus, a
+#   contract or a decorator the app ports has to keep the app agreeing.
+#   Those inputs are in the paths below for that reason.
+# - The app itself is built for the iOS simulator from the XcodeGen spec,
+#   unsigned. Nothing is published: there is no App Store upload here.
+#
+# GitHub's macOS runners are free for this public repository; they are the
+# only ones with Xcode (the self-hosted pool is Linux).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - "docs/*-fixtures.json"
+      - "docs/deploy-progress-contract.json"
+      - "docs/cloud-frames-contract.json"
+      - "frontend/src/scenes/workspace/framePendingCommandsLogic.ts"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - "docs/*-fixtures.json"
+      - "docs/deploy-progress-contract.json"
+      - "docs/cloud-frames-contract.json"
+      - "frontend/src/scenes/workspace/framePendingCommandsLogic.ts"
+      - ".github/workflows/ios.yml"
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    name: iOS app
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode
+        run: |
+          # The newest released Xcode on the image (betas left out).
+          latest="$(find /Applications -maxdepth 1 -name 'Xcode_*.app' ! -iname '*beta*' | sort -V | tail -1)"
+          sudo xcode-select -s "$latest/Contents/Developer"
+          xcodebuild -version
+          swift --version
+
+      - name: FrameOSKit tests (the shared corpora)
+        run: swift test --package-path ios/FrameOSKit
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+
+      - name: Build for the iOS simulator
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project ios/FrameOS.xcodeproj \
+            -scheme FrameOS \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            -derivedDataPath ios/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee ios/xcodebuild.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" ios/xcodebuild.log
+
+      # The UI tests (ios/FrameOSUITests) on a simulator: the app starts (no
+      # crash at launch, e.g. a generated table that does not decode) and
+      # the sign-in screen works, the cloud first and the backend below. The
+      # tour of the whole app needs a backend and is skipped here; run it
+      # with ios/bin/test-backend + ios/bin/ui-test (ios/README.md).
+      - name: UI tests on a simulator
+        timeout-minutes: 20
+        run: ios/bin/ui-test
+
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui-test-screenshots
+          path: ios/ui-test-shots/*.png
+          if-no-files-found: ignore
+
+      - name: Upload the logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcodebuild-logs
+          path: |
+            ios/xcodebuild.log
+            ios/DerivedData/ui-test.log
+          if-no-files-found: ignore

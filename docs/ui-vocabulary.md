@@ -43,3 +43,6 @@ that ("Installed; the push lands when the frame reconnects").
   vocabulary") opens the self-hosted deploy drawer from the sidebar's Deploy
   button; `visual-cloud-frames-workspace.spec.ts` does the same for a cloud
   Pi frame. Both fail on any "upgrade" wording inside the drawer.
+- The iOS app (`ios/`, `docs/ios-app.md` "Words") uses the same verbs; its
+  pending-command labels are the SPA's table, read from
+  `framePendingCommandsLogic.ts` by `PendingCommandLabelTests`.

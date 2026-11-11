@@ -90,8 +90,6 @@ app/models/frame.py: Argument 2 to "_positive_number" has incompatible type "obj
 app/models/frame.py: Item "None" of "Any | dict[Any, Any] | None" has no attribute "get"  [union-attr]
 app/models/frame.py: Item "None" of "Any | dict[Any, Any] | None" has no attribute "get"  [union-attr]
 app/models/frame.py: Item "None" of "Any | list[Any] | None" has no attribute "__iter__" (not iterable)  [union-attr]
-app/models/frame.py: Need type annotation for "setting_keys" (hint: "setting_keys: set[<type>] = ...")  [var-annotated]
-app/models/frame.py: Need type annotation for "store_scene_setting_keys" (hint: "store_scene_setting_keys: set[<type>] = ...")  [var-annotated]
 app/models/log.py: Item "None" of "Any | dict[Any, Any] | None" has no attribute "get"  [union-attr]
 app/schemas/repositories.py: Incompatible types in assignment (expression has type "str | None", base class "RepositoryCreateRequest" defined the type as "str")  [assignment]
 app/tasks/buildroot_image.py: Argument 1 to "get_frame_json" has incompatible type "Session | None"; expected "Session"  [arg-type]

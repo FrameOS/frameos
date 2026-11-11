@@ -46,6 +46,55 @@ is no external identity provider in the login path.
   Authorization Code + PKCE flow against Google using the shared helpers in
   `@frameos-cloud/auth-client`; `GET /api/auth/google/callback` verifies the
   `id_token` (issuer, audience, nonce, JWKS) and signs the user in.
+- **Signing in to the app** — see the next section.
+
+## Signing in to the app
+
+The FrameOS iOS app (`ios/`, `docs/ios-app.md`) signs in with email and
+password through `/api/auth/login` like the web. For everything else the web
+can do (Google, a passkey, a password with two-factor), it borrows the web's
+sign-in through the system's sign-in sheet (`ASWebAuthenticationSession`) and
+is handed a session of its own (`src/lib/app-sign-in.ts`):
+
+1. The app opens `GET /api/auth/app/authorize?code_challenge=<S256>&state=…`
+   (`&provider=google` to go straight to Google, `&reauth=1` to confirm it is
+   you, below). The route wraps the request in a signed ten-minute token and,
+   when the browser is not signed in, sends it through `/login` (or
+   `/api/auth/google/start`) with a `return_to` back to itself.
+2. Signed in, the route redirects to `frameos://sign-in?code=…&state=…`. The
+   code is a two-minute HS256 token (its own derived key) naming the account
+   and identity by id and carrying the browser session's `authenticated_at`;
+   no email rides in the URL.
+3. The app posts `{code, code_verifier}` to `POST /api/auth/app/token`. The
+   verifier must hash to the challenge (PKCE S256), the code is spent once
+   (`claimSingleUse`, the store the pending second-factor token uses), the
+   profile is read fresh from the identity, and the answer sets a new session
+   cookie, exactly what `/api/auth/login` sets. Every failure is
+   `invalid_grant`. The sign-in is audited as `account.signed_in` with
+   method `app_handoff`.
+
+What keeps it safe:
+
+- **The code only goes to `frameos://sign-in`**, and only the app that holds
+  the verifier can spend it. A code read off a screen or a log is useless
+  without the verifier.
+- **A browser session from before the request is not handed on silently.**
+  Another app could open the same URL in its own sign-in sheet; when the
+  browser is already signed in, the route stops at `/login/app` ("Sign in to
+  the app?", with "Use another account" and "Cancel") until the person
+  presses Continue. Signing in, or re-proving, during the request is the
+  consent itself. Continue is a `fetch` that then follows the redirect: a
+  form post could not, the CSP's `form-action` refuses a `frameos:` target.
+- **A handoff is never a fresh sign-in for sudo mode.** The app's session
+  inherits the browser session's `authenticated_at` (`createSession`'s
+  `authenticatedAt`), so an old browser session cannot become a recent one by
+  passing through the app.
+- **Confirming it is you in the app** (`reauth_required` on an account with no
+  password and no second factor, a Google-only account, or one that confirms
+  with a passkey) runs the same flow with `reauth=1`: a browser session older
+  than `recentAuthMaxAgeSeconds` is sent through `/login/reauth` first, and the
+  new app session carries that fresh proof. The app replaces its session with
+  it and signs the old one out.
 
 ## Account Merging
 

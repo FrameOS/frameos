@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createDb } from "@frameos-cloud/db";
+import { isAppSignInReturn } from "../../../src/lib/app-sign-in";
 import { AuthCard } from "../../../src/components/AuthCard";
 import { ReauthForm } from "../../../src/components/ReauthForm";
 import { safeAuthReturnPath } from "../../../src/lib/auth-cookies";
@@ -35,6 +36,7 @@ export default async function ReauthPage({ searchParams }: ReauthPageProps) {
 
   return (
     <AuthCard
+      inApp={isAppSignInReturn(returnTo)}
       copy="You are signed in, but this action needs a fresh check of your credentials."
       eyebrow="Confirm it's you"
       title="Verify to continue"

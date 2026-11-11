@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { isAppSignInReturn } from "../../src/lib/app-sign-in";
 import { AuthCard } from "../../src/components/AuthCard";
 import { LoginForm } from "../../src/components/LoginForm";
 import {
@@ -46,6 +47,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
     return (
       <AuthCard
+        inApp={isAppSignInReturn(returnTo)}
         copy={`A FrameOS Cloud account already exists for ${
           mergeEmail ?? "this email"
         }, but its address was never verified. To keep that account safe, reset its password first — the emailed link proves the address is yours — then sign in with Google and confirm that password once to connect the two.`}
@@ -66,6 +68,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <AuthCard
+      inApp={isAppSignInReturn(returnTo)}
       copy={
         status
           ? statusMessage(status)

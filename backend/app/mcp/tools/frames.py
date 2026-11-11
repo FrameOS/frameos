@@ -16,6 +16,8 @@ import json
 import uuid
 from typing import Any
 
+from app.models.frame import cached_app_configs, scene_declared_setting_groups, scene_is_from_store
+
 from ..client import ToolContext
 from ..protocol import McpServer
 from ..registry import Tool, confirmed
@@ -558,6 +560,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
         deploy: str = "fast",
         project_id: int | None = None,
         layout: dict[str, Any] | None = None,
+        settings_groups: list[str] | None = None,
     ):
         async def go():
             new_scenes, origin = await resolve_scene_source(scenes, template_id, repository, template, url, project_id)
@@ -581,10 +584,25 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
                         scene["layout"] = layout
             if not new_scenes:
                 raise McpInputError(f"Nothing to install: these scene ids are already on the frame ({', '.join(map(str, skipped))}).")
-            await save_scenes(frame_id, existing + new_scenes, project_id)
+            # A store scene gets only the service keys the owner granted on
+            # the frame (shipped_frame_settings); `settings_groups` grants it
+            # what it declares among them, as the cloud's tool of the same
+            # name does and the SPA's install does ("installing is consent").
+            app_configs = cached_app_configs()
+            declared = sorted(set().union(*(
+                scene_declared_setting_groups(scene, app_configs) for scene in new_scenes if scene_is_from_store(scene)
+            )))
+            frame_groups = [str(group) for group in (frame.get("service_setting_groups") or []) if isinstance(group, str)]
+            granting = [group for group in declared if settings_groups and group in settings_groups and group not in frame_groups]
+            body: dict[str, Any] = {"scenes": existing + new_scenes}
+            if granting:
+                body["service_setting_groups"] = frame_groups + granting
+            await api.json("POST", f"/api/frames/{frame_id}", project_id=project_id, json=body)
             result: dict[str, Any] = {
                 "installed": [{"id": scene.get("id"), "name": scene.get("name")} for scene in new_scenes],
                 "skipped_existing": skipped,
+                "declared_settings_groups": declared,
+                "granted_settings_groups": [group for group in declared if group in frame_groups or group in granting],
                 **origin,
             }
             if activate:
@@ -627,6 +645,16 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
             "layout": {
                 "type": "object",
                 "description": "The layout these scenes wear: {sceneId, state?}, a scene on the frame with settings.isLayout.",
+            },
+            "settings_groups": {
+                "type": "array",
+                "items": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
+                "maxItems": 16,
+                "description": (
+                    "Service-settings groups to GRANT store scenes (unsplash, openAI, homeAssistant, immich, github, "
+                    "frameOS); only groups the scenes declare take effect. A store scene gets no key without a grant; "
+                    "the answer's declared_settings_groups / granted_settings_groups say what it asked for and has."
+                ),
             },
             "deploy": DEPLOY,
         },

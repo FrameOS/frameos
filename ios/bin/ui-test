@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Runs the UI tests (ios/FrameOSUITests) on an iPhone simulator and copies
+# every screenshot they keep into ios/ui-test-shots/.
+#
+#   ios/bin/ui-test                       # the sign-in screen only
+#   FRAMEOS_UITEST_BACKEND=http://127.0.0.1:8997 ios/bin/ui-test
+#                                         # + the tour of the whole app
+#   FRAMEOS_UITEST_CLOUD=http://localhost:3000 FRAMEOS_UITEST_CLOUD_EMAIL=…
+#   FRAMEOS_UITEST_CLOUD_PASSWORD=… ios/bin/ui-test
+#                                         # + the tour on a cloud you may write to
+#
+# ios/bin/test-backend starts a throwaway backend for the tour. Extra
+# arguments go to xcodebuild (-only-testing:FrameOSUITests/SignInUITests).
+# FRAMEOS_UITEST_DEVICE picks the simulator by name, an iPad too (default:
+# the newest iPhone Pro); the app is uninstalled first, so each run starts signed out.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+command -v xcodegen >/dev/null || { echo "Install XcodeGen first: brew install xcodegen" >&2; exit 1; }
+xcodegen generate --quiet
+
+udid="$(xcrun simctl list devices available -j | python3 -c '
+import json, os, re, sys
+wanted = os.environ.get("FRAMEOS_UITEST_DEVICE", "")
+devices = json.load(sys.stdin)["devices"]
+phones = [d for runtime in sorted(devices) if "iOS" in runtime for d in devices[runtime]
+          if ((d["name"] == wanted) if wanted else d["name"].startswith("iPhone"))]
+# The newest "iPhone N Pro" when there is one: a phone people have, not the SE.
+pro = sorted((d for d in phones if re.fullmatch(r"iPhone \d+ Pro", d["name"])), key=lambda d: int(d["name"].split()[1]))
+print((pro or phones)[-1]["udid"] if phones else "")
+')"
+[[ -n "$udid" ]] || { echo "No iPhone simulator: Xcode → Settings → Components, or xcodebuild -downloadPlatform iOS" >&2; exit 1; }
+echo "Simulator $udid: booting"
+xcrun simctl boot "$udid" 2>/dev/null || true
+xcrun simctl bootstatus "$udid" -b >/dev/null
+xcrun simctl uninstall "$udid" net.frameos.app 2>/dev/null || true
+if [[ -n "${FRAMEOS_UITEST_BACKEND:-}${FRAMEOS_UITEST_CLOUD:-}" ]]; then
+  # A photo with a location in the library, for the tour's upload (the
+  # metadata corpus's own: the album then shows the location pin). addmedia
+  # can hang on a simulator whose library is still being made: 60 s at most.
+  echo "Adding a photo to the simulator's library"
+  xcrun simctl addmedia "$udid" ../docs/photo-metadata-fixtures/exif-gps.jpg 2>/dev/null &
+  media=$!
+  for _ in $(seq 60); do kill -0 "$media" 2>/dev/null || break; sleep 1; done
+  kill "$media" 2>/dev/null || true
+fi
+echo "Building and running the UI tests"
+
+results="DerivedData/ui-test.xcresult"
+rm -rf "$results" ui-test-shots
+mkdir -p DerivedData
+status=0
+# TEST_RUNNER_ variables reach the test process without the prefix.
+TEST_RUNNER_FRAMEOS_UITEST_BACKEND="${FRAMEOS_UITEST_BACKEND:-}" \
+TEST_RUNNER_FRAMEOS_UITEST_EMAIL="${FRAMEOS_UITEST_EMAIL:-}" \
+TEST_RUNNER_FRAMEOS_UITEST_PASSWORD="${FRAMEOS_UITEST_PASSWORD:-}" \
+TEST_RUNNER_FRAMEOS_UITEST_FRAME="${FRAMEOS_UITEST_FRAME:-}" \
+TEST_RUNNER_FRAMEOS_UITEST_SCENE="${FRAMEOS_UITEST_SCENE:-}" \
+TEST_RUNNER_FRAMEOS_UITEST_CLOUD="${FRAMEOS_UITEST_CLOUD:-}" \
+TEST_RUNNER_FRAMEOS_UITEST_CLOUD_EMAIL="${FRAMEOS_UITEST_CLOUD_EMAIL:-}" \
+TEST_RUNNER_FRAMEOS_UITEST_CLOUD_PASSWORD="${FRAMEOS_UITEST_CLOUD_PASSWORD:-}" \
+TEST_RUNNER_FRAMEOS_UITEST_CLOUD_SCENE="${FRAMEOS_UITEST_CLOUD_SCENE:-}" \
+xcodebuild test \
+  -project FrameOS.xcodeproj \
+  -scheme FrameOS \
+  -destination "id=$udid" \
+  -derivedDataPath DerivedData \
+  -resultBundlePath "$results" \
+  -only-testing:FrameOSUITests \
+  CODE_SIGNING_ALLOWED=NO \
+  "$@" 2>&1 | tee DerivedData/ui-test.log | grep -E "error:|Test Case .*(passed|failed|skipped)|\*\* TEST" || true
+grep -q "\*\* TEST SUCCEEDED \*\*" DerivedData/ui-test.log || status=1
+
+# The screenshots and the accessibility trees beside them.
+mkdir -p ui-test-shots
+xcrun xcresulttool export attachments --path "$results" --output-path ui-test-shots >/dev/null 2>&1 || true
+if [[ -f ui-test-shots/manifest.json ]]; then
+  python3 - <<'EOF'
+import json, os, re
+root = "ui-test-shots"
+for test in json.load(open(os.path.join(root, "manifest.json"))):
+    for item in test.get("attachments", []):
+        name = item.get("suggestedHumanReadableName") or item["exportedFileName"]
+        name = re.sub(r"_\d+_[0-9A-F-]{36}", "", name)
+        src = os.path.join(root, item["exportedFileName"])
+        if os.path.exists(src):
+            os.replace(src, os.path.join(root, name))
+EOF
+fi
+echo "Screenshots: ios/ui-test-shots/ ($(find ui-test-shots -name '*.png' | wc -l | tr -d ' '))"
+exit $status

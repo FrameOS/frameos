@@ -104,6 +104,8 @@
     // Same story: the deploy-progress bar reads decorators/frame.tsx (bare
     // JSX namespace). Vitest still runs it; only tsc leaves it out.
     "src/test/shared-spa/deploy-progress.test.tsx",
+    // Same story: docs/frame-status-fixtures.json replays decorators/frame.tsx.
+    "src/test/shared-spa/frame-status-fixtures.test.ts",
     // Same story: mounts FrameImage, whose sleep badge reads decorators/frame.tsx.
     "src/test/shared-spa/frame-image-sleep-badge.test.tsx",
     // Same story: renders the workspace chat drawer from FrameosShell.

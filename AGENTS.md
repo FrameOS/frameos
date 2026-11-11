@@ -8,6 +8,29 @@
 - There are TWO control planes for frames: the self-hosted backend (`backend/` + `frontend/`) and FrameOS Cloud (`cloud/` + `cloud-frontend/`). **Any frame-facing feature or fix must land on both, or explicitly note why it's one-sided** — unless the task says otherwise. When you touch frame panels, frame APIs, device verbs, or provisioning/flashing, check the other control plane before calling the work done. Neither plane builds ESP32 firmware: both flash the signed generic release image, provision over the USB console, and offer the release OTA (`docs/todo.md`, `embedded/esp32/README.md`).
 - The frame workspace UI is SHARED code (`frontend/src`), wrapped for cloud by `cloud-frontend/`. A fix that "doesn't show on cloud" is usually NOT a fork — check the `workspaceSurfaces` gating (`frontend/src/scenes/workspace/`) and remember the cloud serves a PREBUILT bundle: auth-web's predev rebuilds it via turbo (`scripts/build-frames-app.mjs`), but a long-running `pnpm dev` session keeps serving the bundle from its start.
 
+## The iOS app: `docs/ios-app.md`
+
+- `ios/` is a native SwiftUI client of BOTH planes (`FrameOSKit`: the
+  transport, the contract readers, one service per workspace area;
+  `FrameOSUI`: the screens). It calls the routes the SPA calls, through
+  `APIClient` (its `apiFetch`: project scoping on a backend, `Origin` on the
+  cloud), and never gets a route of its own. A change to a frame-facing
+  route or payload checks `ios/FrameOSKit/Sources/FrameOSKit/Services/` too.
+- What the SPA decides in shared code the app never hand-copies: it is
+  generated (`generate_deploy_progress_contract.py` and
+  `generate_cloud_contract.py` write Swift tables, under the backend suite's
+  `--check`) or pinned by a corpus both replay —
+  `docs/frame-status-fixtures.json` (`decorators/frame.tsx`),
+  `scene-form-fixtures.json` (`refreshInterval.ts`, `showIf.ts`),
+  `button-map-fixtures.json` (`frameEventMap.ts`), `api-path-fixtures.json`
+  (`projectApi.ts`), `server-address-fixtures.json`. Change the SPA
+  function, its Swift port and the corpus together; the SPA's runners are
+  `cloud/apps/auth-web/src/test/shared-spa/*-fixtures.test.ts`.
+- A backend's scene and album installs are its own MCP tools
+  (`frame_scene_install`, `photo_album_install`): keep their arguments.
+- `ios/bin/test` and `ios/bin/check-ui` run without Xcode; the **iOS app**
+  workflow (`.github/workflows/ios.yml`) builds for the simulator.
+
 ## Tests: CI is the gate, and you watch it
 
 - **You do not have to finish every local suite before opening a PR.** CI runs
@@ -797,6 +820,7 @@
 - `frameos/` – Nim-based runtime for devices, containing system drivers, Nim app definitions, and assets compiled into the on-device application. Nim apps live in `src/apps`; repo-provided JavaScript app templates live outside the runtime under `repo/apps/<folder>/<app>`, the folder naming what the app returns (`image`, `text`, `json`, `logic`). Entry point `src/frameos.nim` is a small CLI (see "Device runtime" below); `make build` writes the binary to the gitignored `frameos/build/frameos`.
 - `e2e/` – The end-to-end suites: the scene-renderer snapshot harness (`e2e/run`, `e2e/snapshots`), the Playwright frontend suite (`e2e/frontend-visual`, incl. the cloud `/frames` specs) and the opt-in real-SSH deploy test (`e2e/deploy`). `e2e/README.md` describes each, how CI runs them and which snapshots CI commits itself.
 - `embedded/` – The ESP32 firmware (`embedded/esp32`, ESP-IDF + the Nim runtime compiled to C) and the Pico W / Pico 2 W thin client (`embedded/pico`, pico-sdk C; Pimoroni Inky Frames). Neither control plane builds firmware: both flash signed release images (a Pico's is a `.uf2` dragged onto the BOOTSEL drive, then provisioned over the same `usb_api` console as an ESP32). The Pico is a thin client by hardware — its PSRAM cannot be memory-mapped — so the self-hosted backend renders for it and it has no cloud link until the hub renders for thin clients; that one-sidedness is deliberate (`embedded/pico/README.md`). The IDF-free ESP32 modules have host tests (`embedded/esp32/main/tests`, see that README's Layout); the Pico's SDK-free modules have theirs in `embedded/pico/tests` (`make -C embedded/pico/tests`).
+- `ios/` – The native iOS app (SwiftUI) for both control planes; `docs/ios-app.md` is how it stays in step with the SPA, `ios/README.md` how to build it.
 - `cloud/` – FrameOS Cloud: the hosted service (Next.js + Drizzle/Postgres) behind `cloud.frameos.net` and `scenes.frameos.net` (legacy `account.frameos.net` redirects) — accounts, device/backend linking, and the scene store. Part of the monorepo's single pnpm workspace (one root lockfile, Turborepo builds); run pnpm commands from `cloud/`, see `cloud/README.md` and `cloud/docs/cloud-frames.md`. CI runs via `.github/workflows/cloud-ci.yml`.
 - Supporting files at the root include the Docker configuration (`Dockerfile`, `docker-compose.yml`, `docker-entrypoint.sh`), the install/setup scripts under `scripts/`, and the version metadata (`versions.json`, `project-folders.json`, `buildroot-images.json`, `cross-toolchain-images.json`) for packaging and deployment. There is no Procfile any more.
 

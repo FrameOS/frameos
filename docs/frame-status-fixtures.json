@@ -1,0 +1,775 @@
+{
+  "description": "The frames list's words for a frame, read the same way by every client that draws a frame row: the shared SPA's decorators (frontend/src/decorators/frame.tsx: frameStatusLabel, frameActivityDescription, frameDeployProgress, frameFirmwareUpdateProgress) and the iOS app's ports (ios/FrameOSKit/Sources/FrameOSKit/Contracts/FrameStatus.swift, DeployProgress.swift). Each case is a frame as a control plane serves it, read at `now` on `plane` (the cloud and a backend decide 'waiting for first deploy' differently). `expect.label` is frameStatusLabel, `expect.activity` frameActivityDescription, `expect.deploy` the fields of frameDeployProgress the row draws (null: no bar), `expect.firmware` those of frameFirmwareUpdateProgress (null: nothing in flight). Replayed by cloud/apps/auth-web/src/test/shared-spa/frame-status-fixtures.test.ts and ios/FrameOSKit/Tests/FrameOSKitTests/FrameStatusFixtureTests.swift; change a decorator, its port and this corpus together. `expect.active` is frameIsActive; `groups` is the frames list's order (groupFramesByStatus in frontend/src/scenes/workspace/frameStatusGroups.ts): Active, Inactive, Archived, each by name.",
+  "now": "2026-10-12T12:00:00Z",
+  "cases": [
+    {
+      "name": "cloud frame online",
+      "plane": "cloud",
+      "frame": {
+        "id": "c1",
+        "status": "active",
+        "connected": true,
+        "last_seen_at": "2026-10-12T11:59:50Z",
+        "scenes_checksum": "abc"
+      },
+      "expect": {
+        "label": "online",
+        "activity": "last seen just now",
+        "deploy": null,
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "cloud frame offline for half an hour",
+      "plane": "cloud",
+      "frame": {
+        "id": "c2",
+        "status": "active",
+        "connected": false,
+        "last_seen_at": "2026-10-12T11:30:00Z",
+        "scenes_checksum": "abc"
+      },
+      "expect": {
+        "label": "offline",
+        "activity": "last seen 30 minutes ago",
+        "deploy": null,
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "cloud frame stale after three hours",
+      "plane": "cloud",
+      "frame": {
+        "id": "c3",
+        "status": "active",
+        "connected": false,
+        "last_seen_at": "2026-10-12T09:00:00.000Z",
+        "scenes_checksum": "abc"
+      },
+      "expect": {
+        "label": "stale",
+        "activity": "last seen 3 hours ago",
+        "deploy": null,
+        "firmware": null,
+        "active": false
+      }
+    },
+    {
+      "name": "cloud frame asleep, wake announced",
+      "plane": "cloud",
+      "frame": {
+        "id": "c4",
+        "status": "active",
+        "connected": false,
+        "last_seen_at": "2026-10-12T11:40:00Z",
+        "next_wake_at": "2026-10-12T12:05:00Z",
+        "next_render_at": "2026-10-12T14:00:00Z",
+        "scenes_checksum": "abc"
+      },
+      "expect": {
+        "label": "offline",
+        "activity": "asleep · wakes in 5 min · renders in 2 h",
+        "deploy": null,
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "cloud frame overdue",
+      "plane": "cloud",
+      "frame": {
+        "id": "c5",
+        "status": "active",
+        "connected": false,
+        "last_seen_at": "2026-10-12T11:20:00Z",
+        "next_wake_at": "2026-10-12T11:50:00Z",
+        "scenes_checksum": "abc"
+      },
+      "expect": {
+        "label": "offline",
+        "activity": "overdue · expected 10 minutes ago · last seen 40 minutes ago",
+        "deploy": null,
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "cloud frame asleep, wake estimated from its power settings",
+      "plane": "cloud",
+      "frame": {
+        "id": "c6",
+        "status": "active",
+        "connected": false,
+        "last_seen_at": "2026-10-12T11:57:00Z",
+        "interval": 600,
+        "device_config": {
+          "deepSleep": true
+        },
+        "scenes_checksum": "abc"
+      },
+      "expect": {
+        "label": "offline",
+        "activity": "asleep · wakes in ~7 min",
+        "deploy": null,
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "cloud frame on battery sleeps only on battery",
+      "plane": "cloud",
+      "frame": {
+        "id": "c7",
+        "status": "active",
+        "connected": false,
+        "last_seen_at": "2026-10-12T11:57:00Z",
+        "interval": 600,
+        "device_config": {
+          "deep_sleep_on_battery": true
+        },
+        "last_metrics": {
+          "batteryMillivolts": 3900
+        },
+        "scenes_checksum": "abc"
+      },
+      "expect": {
+        "label": "offline",
+        "activity": "asleep · wakes in ~7 min",
+        "deploy": null,
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "cloud frame never seen and never pushed",
+      "plane": "cloud",
+      "frame": {
+        "id": "c8",
+        "status": "pending"
+      },
+      "expect": {
+        "label": "pending",
+        "activity": "waiting for first deploy",
+        "deploy": null,
+        "firmware": null,
+        "active": false
+      }
+    },
+    {
+      "name": "cloud frame pushing scenes",
+      "plane": "cloud",
+      "frame": {
+        "id": "c9",
+        "status": "active",
+        "connected": true,
+        "last_seen_at": "2026-10-12T11:59:00Z",
+        "scenes_checksum": "abc",
+        "deploy_progress": {
+          "id": "cmd:1",
+          "kind": "cloud_scenes",
+          "stage": "sending",
+          "status": "running",
+          "detail": null,
+          "progress": null,
+          "started_at": "2026-10-12T11:59:40Z",
+          "at": "2026-10-12T11:59:55Z"
+        }
+      },
+      "expect": {
+        "label": "online",
+        "activity": "sending",
+        "deploy": {
+          "status": "running",
+          "label": "sending",
+          "caption": "sending",
+          "percent": 33
+        },
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "cloud frame queued an update while asleep",
+      "plane": "cloud",
+      "frame": {
+        "id": "c10",
+        "status": "active",
+        "connected": false,
+        "last_seen_at": "2026-10-12T11:50:00Z",
+        "next_wake_at": "2026-10-12T12:30:00Z",
+        "pending_command_types": [
+          "notify_update_available"
+        ],
+        "scenes_checksum": "abc",
+        "deploy_progress": {
+          "id": "cmd:2",
+          "kind": "firmware",
+          "stage": "waiting",
+          "status": "running",
+          "started_at": "2026-10-12T10:00:00Z",
+          "at": "2026-10-12T10:00:00Z"
+        }
+      },
+      "expect": {
+        "label": "offline",
+        "activity": "waiting for the frame",
+        "deploy": {
+          "status": "running",
+          "label": "waiting for the frame",
+          "caption": "waiting for the frame",
+          "percent": 26
+        },
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "backend frame ready with a live connection",
+      "plane": "backend",
+      "frame": {
+        "id": 1,
+        "status": "ready",
+        "active_connections": 1,
+        "last_log_at": "2026-10-12T11:58:00.123456",
+        "last_successful_deploy_at": "2026-10-01T10:00:00"
+      },
+      "expect": {
+        "label": "connected",
+        "activity": "last seen 2 minutes ago",
+        "deploy": null,
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "backend frame ready, quiet for five minutes",
+      "plane": "backend",
+      "frame": {
+        "id": 2,
+        "status": "ready",
+        "last_log_at": "2026-10-12T11:55:00+00:00",
+        "last_successful_deploy_at": "2026-10-01T10:00:00"
+      },
+      "expect": {
+        "label": "ready",
+        "activity": "last seen 5 minutes ago",
+        "deploy": null,
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "backend frame never deployed",
+      "plane": "backend",
+      "frame": {
+        "id": 3,
+        "status": "uninitialized"
+      },
+      "expect": {
+        "label": "uninitialized",
+        "activity": "waiting for first deploy",
+        "deploy": null,
+        "firmware": null,
+        "active": false
+      }
+    },
+    {
+      "name": "backend ESP32 with logs needs no first deploy",
+      "plane": "backend",
+      "frame": {
+        "id": 4,
+        "status": "ready",
+        "mode": "embedded",
+        "last_log_at": "2026-10-12T11:55:00"
+      },
+      "expect": {
+        "label": "ready",
+        "activity": "last seen 5 minutes ago",
+        "deploy": null,
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "backend frame quiet for two days is stale",
+      "plane": "backend",
+      "frame": {
+        "id": 5,
+        "status": "ready",
+        "last_log_at": "2026-10-10T12:00:00",
+        "last_successful_deploy_at": "2026-10-01T10:00:00"
+      },
+      "expect": {
+        "label": "stale",
+        "activity": "last seen 2 days ago",
+        "deploy": null,
+        "firmware": null,
+        "active": false
+      }
+    },
+    {
+      "name": "backend deploy installing",
+      "plane": "backend",
+      "frame": {
+        "id": 6,
+        "status": "deploying",
+        "last_log_at": "2026-10-12T11:59:00",
+        "last_successful_deploy_at": "2026-10-01T10:00:00",
+        "deploy_progress": {
+          "id": "d:1",
+          "kind": "linux_full",
+          "stage": "installing",
+          "status": "running",
+          "detail": "frameos setup",
+          "progress": null,
+          "started_at": "2026-10-12T11:55:00Z",
+          "at": "2026-10-12T11:59:55Z"
+        }
+      },
+      "expect": {
+        "label": "deploying",
+        "activity": "installing · frameos setup",
+        "deploy": {
+          "status": "running",
+          "label": "installing",
+          "caption": "installing · frameos setup",
+          "percent": 54
+        },
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "backend deploy uploading with byte counts",
+      "plane": "backend",
+      "frame": {
+        "id": 7,
+        "status": "deploying",
+        "last_log_at": "2026-10-12T11:59:00",
+        "last_successful_deploy_at": "2026-10-01T10:00:00",
+        "deploy_progress": {
+          "id": "d:2",
+          "kind": "linux_full",
+          "stage": "uploading",
+          "status": "running",
+          "detail": "release",
+          "progress": {
+            "current": 50,
+            "total": 200
+          },
+          "started_at": "2026-10-12T11:55:00Z",
+          "at": "2026-10-12T11:59:55Z"
+        }
+      },
+      "expect": {
+        "label": "deploying",
+        "activity": "uploading · 25%",
+        "deploy": {
+          "status": "running",
+          "label": "uploading",
+          "caption": "uploading · 25%",
+          "percent": 41
+        },
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "backend deploy stuck building past the stage's limit",
+      "plane": "backend",
+      "frame": {
+        "id": 8,
+        "status": "deploying",
+        "last_log_at": "2026-10-12T10:59:00",
+        "last_successful_deploy_at": "2026-10-01T10:00:00",
+        "deploy_progress": {
+          "id": "d:3",
+          "kind": "linux_full",
+          "stage": "building",
+          "status": "running",
+          "started_at": "2026-10-12T10:58:00Z",
+          "at": "2026-10-12T10:58:20Z"
+        }
+      },
+      "expect": {
+        "label": "stale",
+        "activity": "last seen 1 hour ago",
+        "deploy": null,
+        "firmware": null,
+        "active": false
+      }
+    },
+    {
+      "name": "restart just finished",
+      "plane": "backend",
+      "frame": {
+        "id": 9,
+        "status": "ready",
+        "last_log_at": "2026-10-12T11:59:58",
+        "last_successful_deploy_at": "2026-10-01T10:00:00",
+        "deploy_progress": {
+          "id": "d:4",
+          "kind": "restart",
+          "stage": "done",
+          "status": "done",
+          "started_at": "2026-10-12T11:59:00Z",
+          "at": "2026-10-12T11:59:55Z"
+        }
+      },
+      "expect": {
+        "label": "ready",
+        "activity": "last seen just now",
+        "deploy": {
+          "status": "done",
+          "label": "restarted",
+          "caption": "restarted",
+          "percent": 100
+        },
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "deploy refused by the device",
+      "plane": "cloud",
+      "frame": {
+        "id": "c11",
+        "status": "active",
+        "connected": true,
+        "last_seen_at": "2026-10-12T11:59:00Z",
+        "scenes_checksum": "abc",
+        "deploy_progress": {
+          "id": "cmd:3",
+          "kind": "cloud_scenes",
+          "stage": "sending",
+          "status": "error",
+          "error": "backend_managed",
+          "started_at": "2026-10-12T11:58:00Z",
+          "at": "2026-10-12T11:59:00Z"
+        }
+      },
+      "expect": {
+        "label": "online",
+        "activity": "last seen 1 minute ago",
+        "deploy": {
+          "status": "error",
+          "label": "failed",
+          "caption": "failed: a self-hosted backend controls this frame",
+          "percent": 33
+        },
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "firmware download at 16%",
+      "plane": "cloud",
+      "frame": {
+        "id": "c12",
+        "status": "active",
+        "connected": true,
+        "last_seen_at": "2026-10-12T11:59:50Z",
+        "scenes_checksum": "abc",
+        "firmware_update": {
+          "status": "progress",
+          "detail": "524288/3224928",
+          "version": "2026.10.3",
+          "at": "2026-10-12T11:59:50Z"
+        }
+      },
+      "expect": {
+        "label": "online",
+        "activity": "last seen just now",
+        "deploy": null,
+        "firmware": {
+          "kind": "running",
+          "label": "updating firmware 16%",
+          "percent": 16
+        },
+        "active": true
+      }
+    },
+    {
+      "name": "Pi release download without byte counts",
+      "plane": "cloud",
+      "frame": {
+        "id": "c13",
+        "status": "active",
+        "connected": true,
+        "last_seen_at": "2026-10-12T11:59:50Z",
+        "scenes_checksum": "abc",
+        "firmware_update": {
+          "status": "downloading",
+          "detail": "FrameOS upgrade is running.",
+          "version": "2026.10.3",
+          "at": "2026-10-12T11:50:00Z"
+        }
+      },
+      "expect": {
+        "label": "online",
+        "activity": "last seen just now",
+        "deploy": null,
+        "firmware": {
+          "kind": "running",
+          "label": "updating firmware",
+          "percent": null
+        },
+        "active": true
+      }
+    },
+    {
+      "name": "firmware download that stopped reporting",
+      "plane": "cloud",
+      "frame": {
+        "id": "c14",
+        "status": "active",
+        "connected": false,
+        "last_seen_at": "2026-10-12T11:40:00Z",
+        "scenes_checksum": "abc",
+        "firmware_update": {
+          "status": "progress",
+          "detail": "100/400",
+          "version": "2026.10.3",
+          "at": "2026-10-12T11:40:00Z"
+        }
+      },
+      "expect": {
+        "label": "offline",
+        "activity": "last seen 20 minutes ago",
+        "deploy": null,
+        "firmware": {
+          "kind": "failed",
+          "label": "update stalled",
+          "percent": 25
+        },
+        "active": true
+      }
+    },
+    {
+      "name": "firmware update failed",
+      "plane": "backend",
+      "frame": {
+        "id": 10,
+        "status": "ready",
+        "mode": "embedded",
+        "last_log_at": "2026-10-12T11:59:00",
+        "firmware_update": {
+          "status": "error",
+          "detail": "signature mismatch",
+          "version": "2026.10.3",
+          "at": "2026-10-12T11:30:00Z"
+        }
+      },
+      "expect": {
+        "label": "ready",
+        "activity": "last seen 1 minute ago",
+        "deploy": null,
+        "firmware": {
+          "kind": "failed",
+          "label": "update failed",
+          "percent": null
+        },
+        "active": true
+      }
+    },
+    {
+      "name": "firmware verified, frame already back on it",
+      "plane": "cloud",
+      "frame": {
+        "id": "c15",
+        "status": "active",
+        "connected": true,
+        "frameos_version": "2026.10.3",
+        "last_seen_at": "2026-10-12T11:59:50Z",
+        "scenes_checksum": "abc",
+        "firmware_update": {
+          "status": "verified",
+          "version": "2026.10.3",
+          "at": "2026-10-12T11:58:00Z"
+        }
+      },
+      "expect": {
+        "label": "online",
+        "activity": "last seen just now",
+        "deploy": null,
+        "firmware": null,
+        "active": true
+      }
+    },
+    {
+      "name": "firmware verified, rebooting into it",
+      "plane": "cloud",
+      "frame": {
+        "id": "c16",
+        "status": "active",
+        "connected": false,
+        "frameos_version": "2026.10.2",
+        "last_seen_at": "2026-10-12T11:59:00Z",
+        "scenes_checksum": "abc",
+        "firmware_update": {
+          "status": "verified",
+          "version": "2026.10.3",
+          "at": "2026-10-12T11:59:00Z"
+        }
+      },
+      "expect": {
+        "label": "offline",
+        "activity": "last seen 1 minute ago",
+        "deploy": null,
+        "firmware": {
+          "kind": "running",
+          "label": "rebooting into 2026.10.3",
+          "percent": 100
+        },
+        "active": true
+      }
+    }
+  ],
+  "groups": [
+    {
+      "name": "cloud: online and recently seen first, then stale and never seen, archived last; each by name",
+      "plane": "cloud",
+      "frames": [
+        {
+          "id": "c-b",
+          "name": "kitchen",
+          "status": "active",
+          "connected": true,
+          "last_seen_at": "2026-10-12T11:59:50Z"
+        },
+        {
+          "id": "c-a",
+          "name": "Hallway",
+          "status": "active",
+          "connected": false,
+          "last_seen_at": "2026-10-12T11:55:00Z"
+        },
+        {
+          "id": "c-c",
+          "name": "Frame 10",
+          "status": "active",
+          "connected": false,
+          "last_seen_at": "2026-10-12T10:00:00Z"
+        },
+        {
+          "id": "c-d",
+          "name": "Frame 9",
+          "status": "active",
+          "connected": false,
+          "last_seen_at": "2026-10-12T09:00:00Z"
+        },
+        {
+          "id": "c-e",
+          "name": "Attic",
+          "status": "active",
+          "connected": true,
+          "archived": true
+        },
+        {
+          "id": "c-f",
+          "status": "active",
+          "connected": false
+        },
+        {
+          "id": "c-g",
+          "name": "Été",
+          "status": "active",
+          "connected": true
+        }
+      ],
+      "expect": [
+        {
+          "key": "active",
+          "ids": [
+            "c-g",
+            "c-a",
+            "c-b"
+          ]
+        },
+        {
+          "key": "inactive",
+          "ids": [
+            "c-f",
+            "c-d",
+            "c-c"
+          ]
+        },
+        {
+          "key": "archived",
+          "ids": [
+            "c-e"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "backend: connections, recent logs and busy statuses are active; ties by id",
+      "plane": "backend",
+      "frames": [
+        {
+          "id": 3,
+          "name": "Studio",
+          "status": "ready",
+          "active_connections": 2,
+          "last_log_at": "2026-10-12T10:00:00Z"
+        },
+        {
+          "id": 1,
+          "name": "Lobby",
+          "status": "ready",
+          "last_log_at": "2026-10-12T11:50:00Z"
+        },
+        {
+          "id": 2,
+          "name": "Garage",
+          "status": "ready",
+          "last_log_at": "2026-10-12T10:00:00Z"
+        },
+        {
+          "id": 4,
+          "name": "Porch",
+          "status": "deploying"
+        },
+        {
+          "id": 5,
+          "name": "Shed",
+          "status": "uninitialized"
+        },
+        {
+          "id": 6,
+          "name": "lobby",
+          "status": "ready",
+          "last_log_at": "2026-10-12T11:59:00Z"
+        },
+        {
+          "id": 7,
+          "name": null,
+          "frame_host": "10.0.0.7",
+          "ssh_user": "admin",
+          "status": "ready"
+        }
+      ],
+      "expect": [
+        {
+          "key": "active",
+          "ids": [
+            7,
+            1,
+            6,
+            4,
+            3
+          ]
+        },
+        {
+          "key": "inactive",
+          "ids": [
+            2,
+            5
+          ]
+        }
+      ]
+    }
+  ]
+}

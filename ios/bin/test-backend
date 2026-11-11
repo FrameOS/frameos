@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# A throwaway self-hosted backend for the app's tests, from this checkout:
+# its own SQLite and Redis in a temp folder, the API on :8997 with its
+# worker, a first user and two virtual frames ("Kitchen", "Hallway"; the
+# backend renders their scenes). Ctrl-C stops it and removes everything.
+#
+#   ios/bin/test-backend
+#   FRAMEOS_UITEST_BACKEND=http://127.0.0.1:8997 ios/bin/ui-test     # in another shell
+#   FRAMEOS_IT_BACKEND=http://127.0.0.1:8997 ios/bin/test --filter BackendIntegrationTests
+#
+# Needs the backend's Python packages (FRAMEOS_PYTHON, default the repo's
+# .venv) and redis-server. A virtual frame's pictures need the wasm runtime
+# (frameos/tools/build_wasm.sh → frontend/public/frameos-wasm).
+set -euo pipefail
+repo="$(cd "$(dirname "$0")/../.." && pwd)"
+python="${FRAMEOS_PYTHON:-$repo/.venv/bin/python}"
+[[ -x "$python" ]] || python="$(command -v python3)"
+port="${FRAMEOS_TEST_BACKEND_PORT:-8997}"
+redis_port="${FRAMEOS_TEST_REDIS_PORT:-6391}"
+work="$(mktemp -d "${TMPDIR:-/tmp}/frameos-test-backend.XXXXXX")"
+pids=()
+cleanup() {
+  for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
+  rm -rf "$work"
+}
+trap cleanup EXIT INT TERM
+
+export DATABASE_URL="sqlite:///$work/frameos.db" REDIS_URL="redis://localhost:$redis_port/0"
+export SECRET_KEY="test-backend-$RANDOM$RANDOM" FRAMEOS_PHOTOS_DIR="$work/photos"
+export FRAMEOS_VIRTUAL_ASSETS_DIR="$work/virtual-assets" PYTHONPATH="$repo/backend" TEST=1
+
+redis-server --port "$redis_port" --save "" --appendonly no >"$work/redis.log" 2>&1 &
+pids+=($!)
+cd "$repo/backend"
+"$python" -m alembic upgrade head >"$work/migrate.log" 2>&1 || { cat "$work/migrate.log"; exit 1; }
+"$python" -m uvicorn app.fastapi:app --host 0.0.0.0 --port "$port" >"$work/backend.log" 2>&1 &
+pids+=($!)
+"$python" -m arq app.tasks.worker.WorkerSettings >"$work/worker.log" 2>&1 &
+pids+=($!)
+
+base="http://127.0.0.1:$port"
+for _ in $(seq 60); do curl -sf "$base/api/has_first_user" >/dev/null && break; sleep 0.5; done
+curl -sf "$base/api/has_first_user" >/dev/null || { tail -20 "$work/backend.log"; exit 1; }
+
+email="${FRAMEOS_UITEST_EMAIL:-tester@example.com}"
+password="${FRAMEOS_UITEST_PASSWORD:-frameos-test-1}"
+token="$(curl -sf -X POST "$base/api/signup" -H 'content-type: application/json' \
+  -d "{\"email\":\"$email\",\"password\":\"$password\",\"password2\":\"$password\",\"newsletter\":false}" |
+  "$python" -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')"
+for name in Kitchen Hallway; do
+  curl -sf -X POST "$base/api/projects/1/frames/new" -H "authorization: Bearer $token" \
+    -H 'content-type: application/json' \
+    -d "{\"name\":\"$name\",\"frame_host\":\"\",\"server_host\":\"127.0.0.1:$port\",\"mode\":\"embedded\",\"platform\":\"virtual\"}" >/dev/null
+done
+
+[[ -d "$repo/frontend/public/frameos-wasm" ]] || echo "No wasm runtime in frontend/public/frameos-wasm: the virtual frames' pictures will be blank."
+cat <<EOF
+A test backend is running at $base (logs in $work).
+  email: $email
+  password: $password
+  frames: Kitchen, Hallway (virtual)
+Ctrl-C stops it.
+EOF
+wait

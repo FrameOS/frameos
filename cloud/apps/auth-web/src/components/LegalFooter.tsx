@@ -13,7 +13,12 @@ import { getSupportEmail } from "../lib/legal";
 // Absolute URLs: these pages live on the cloud origin, and the footer also
 // renders on account.frameos.net and scenes.frameos.net, where a bare
 // "/legal/terms" would 404 in production.
-export function LegalFooter() {
+//
+// `hidePricing`: the sign-in pages the iOS app opens in its sign-in sheet
+// (src/lib/app-sign-in.ts) leave the price list out. App Store guideline
+// 3.1.3(f) lets a free companion to a paid web service skip in-app purchase
+// only without calls to action to buy outside the app.
+export function LegalFooter({ hidePricing = false }: { hidePricing?: boolean } = {}) {
   const cloudBaseUrl = getCloudBaseUrl();
   const legalUrl = (path: string) => new URL(path, cloudBaseUrl).toString();
   const supportEmail = getSupportEmail();
@@ -21,7 +26,7 @@ export function LegalFooter() {
   return (
     <footer className="legal-footer">
       <nav aria-label="Legal">
-        <a href={getPricingUrl()}>Pricing</a>
+        {hidePricing ? null : <a href={getPricingUrl()}>Pricing</a>}
         <a href={legalUrl("/legal/terms")}>Terms</a>
         <a href={legalUrl("/legal/privacy")}>Privacy</a>
         <a href={legalUrl("/legal/refunds")}>Refunds</a>
