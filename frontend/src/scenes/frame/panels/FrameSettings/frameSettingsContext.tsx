@@ -11,6 +11,7 @@ import {
   cloudFrameSupportsEsp32BatteryEnablePin,
   cloudFrameSupportsEsp32Buzzer,
   cloudFrameSupportsEsp32TouchBeep,
+  cloudFrameSupportsEsp32CpuMode,
   cloudFrameSupportsEsp32VoiceChat,
   cloudFrameSupportsEsp32Led,
   cloudFrameSupportsEsp32ExtendedSettings,
@@ -21,6 +22,7 @@ import {
   esp32BatteryEnablePinCloudFrameSettingsMinVersion,
   esp32BuzzerCloudFrameSettingsMinVersion,
   esp32TouchBeepCloudFrameSettingsMinVersion,
+  esp32CpuModeCloudFrameSettingsMinVersion,
   esp32VoiceChatCloudFrameSettingsMinVersion,
   esp32LedCloudFrameSettingsMinVersion,
 } from '../../../../utils/cloudFrameApi'
@@ -139,6 +141,8 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
   cloudEsp32ExtendedSettingsSupported: boolean
   cloudEsp32TimeZoneSupported: boolean
   cloudBatteryEnablePinDisabledReason: string | undefined
+  /** Why a cloud frame cannot take the processor speed yet (older firmware); undefined when it can. */
+  cloudCpuModeDisabledReason: string | undefined
   /** Why a cloud frame cannot take the render scale yet (older firmware); undefined when it can. */
   renderScaleDisabledReason: string | undefined
   /** The Scale select: "Automatic (N× on this panel)" and the steps (utils/renderScale.ts). */
@@ -408,6 +412,10 @@ export function FrameSettingsProvider({
     : frame.frameos_version
     ? `The battery enable GPIO needs FrameOS ${esp32BatteryEnablePinCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
     : `The battery enable GPIO needs FrameOS ${esp32BatteryEnablePinCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
+  const cloudCpuModeDisabledReason =
+    esp32CloudProfile && cloudFrameSupportsEsp32CpuMode(frame.frameos_version)
+      ? undefined
+      : `The processor speed needs FrameOS ${esp32CpuModeCloudFrameSettingsMinVersion} or newer on the frame.`
 
   // 2026.10.22: the render scale, both cloud profiles. A backend frame takes
   // it with its next deploy whatever it runs (an older runtime ignores it).
@@ -548,6 +556,7 @@ export function FrameSettingsProvider({
       ...('deepSleepOnBattery' in patch ? { deep_sleep_on_battery: patch.deepSleepOnBattery } : {}),
       ...('wakeCheckSeconds' in patch ? { wake_check_seconds: patch.wakeCheckSeconds } : {}),
       ...('awakeAfterInputSeconds' in patch ? { awake_after_input_seconds: patch.awakeAfterInputSeconds } : {}),
+      ...('cpuMode' in patch ? { cpu_mode: patch.cpuMode } : {}),
     })
   }
   const setEmbeddedPowerSettings = (patch: Partial<PowerSettingsValues>): void => {
@@ -560,7 +569,8 @@ export function FrameSettingsProvider({
         | 'awakeAfterInputSeconds'
         | 'batteryPin'
         | 'batteryDivider'
-        | 'batteryEnablePin',
+        | 'batteryEnablePin'
+        | 'cpuMode',
       snakeKey:
         | 'deep_sleep'
         | 'deep_sleep_on_battery'
@@ -569,6 +579,7 @@ export function FrameSettingsProvider({
         | 'battery_pin'
         | 'battery_divider'
         | 'battery_enable_pin'
+        | 'cpu_mode'
     ): void => {
       if (!(key in patch)) {
         return
@@ -591,6 +602,7 @@ export function FrameSettingsProvider({
     write('batteryPin', 'battery_pin')
     write('batteryDivider', 'battery_divider')
     write('batteryEnablePin', 'battery_enable_pin')
+    write('cpuMode', 'cpu_mode')
     setFrameFormValues({ device_config: next })
   }
 
@@ -948,6 +960,7 @@ export function FrameSettingsProvider({
     cloudEsp32ExtendedSettingsSupported,
     cloudEsp32TimeZoneSupported,
     cloudBatteryEnablePinDisabledReason,
+    cloudCpuModeDisabledReason,
     renderScaleDisabledReason,
     renderScaleOptions,
     showFrameSettingsOnScreen,
@@ -998,6 +1011,8 @@ export function FrameSettingsProvider({
       deepSleepOnBattery: frameForm.deep_sleep_on_battery === true,
       wakeCheckSeconds: frameForm.wake_check_seconds,
       awakeAfterInputSeconds: frameForm.awake_after_input_seconds,
+      // What the frame runs with until the owner picks one here.
+      cpuMode: frameForm.cpu_mode ?? frame.hardware?.cpuMode ?? undefined,
     },
     setCloudPowerSettings,
     embeddedPowerSettings: {
@@ -1008,6 +1023,7 @@ export function FrameSettingsProvider({
       deepSleepOnBattery: (powerDeviceConfig.deepSleepOnBattery ?? powerDeviceConfig.deep_sleep_on_battery) === true,
       wakeCheckSeconds: powerDeviceConfig.wakeCheckSeconds ?? powerDeviceConfig.wake_check_seconds,
       awakeAfterInputSeconds: powerDeviceConfig.awakeAfterInputSeconds ?? powerDeviceConfig.awake_after_input_seconds,
+      cpuMode: powerDeviceConfig.cpuMode ?? powerDeviceConfig.cpu_mode,
     },
     setEmbeddedPowerSettings,
     // Backend/on-device planes: real hardware only — a virtual frame has no

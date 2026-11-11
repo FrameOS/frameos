@@ -510,6 +510,12 @@ def test_embedded_hardware_preset_for_waveshare_13in3e6():
     frame.render_scale = 2
     assert _provisioned(embedded_provisioning_plan(frame))["render_scale"] == "2"
     frame.render_scale = None
+    # The chip's clock: unset is the board's own rule and is not sent.
+    assert "cpu_mode" not in settings
+    frame.device_config = {**frame.device_config, "cpuMode": "performance"}
+    assert _provisioned(embedded_provisioning_plan(frame))["cpu_mode"] == "performance"
+    frame.device_config = {**frame.device_config, "cpuMode": "turbo"}
+    assert "cpu_mode" not in _provisioned(embedded_provisioning_plan(frame))
 
 
 def test_embedded_hardware_preset_for_waveshare_photopainter():

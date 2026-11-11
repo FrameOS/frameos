@@ -282,6 +282,13 @@ export const esp32BuzzerCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSi
   esp32BuzzerCloudFrameSettingsMinVersion
 )
 
+/** 2026.11.7: the chip's clock (`cpu_mode`), read at boot. */
+export const esp32CpuModeCloudFrameSettingsMinVersion = '2026.11.7'
+
+export function cloudFrameSupportsEsp32CpuMode(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32CpuModeCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 /** 2026.11.6: the click of a press on the glass (`touch_beep`). */
 export const esp32TouchBeepCloudFrameSettingsMinVersion = '2026.11.6'
 

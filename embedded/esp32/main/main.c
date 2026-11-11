@@ -251,6 +251,19 @@ static void cpu_240(const char *why)
 #endif
 }
 
+/* The generic image boots at 160 MHz. `cpu_mode` (the frame's "Processor
+ * speed") decides whether this board goes to 240: auto does for a screen
+ * someone watches, an RGB LCD or a touch panel, and leaves an e-paper frame
+ * at 160. There a render is a few seconds of work and the refresh a long
+ * wait (about 20 s on a reTerminal E1002), and the chip idles through the
+ * wait at whatever clock it runs (README "Processor speed"). */
+static void cpu_for_mode(const fos_config_t *config, bool touch)
+{
+    bool lcd = fos_display_is_lcd();
+    if (fos_config_cpu_mhz(config->cpu_mode, lcd, touch) != 240) return;
+    cpu_240(config->cpu_mode == FOS_CPU_PERFORMANCE ? "performance" : lcd ? "RGB LCD" : "touch");
+}
+
 static void log_bootup_event(bool online);
 
 /* A sixteen-grey panel's packed picture is the 4-bit canvas byte for byte
@@ -401,12 +414,11 @@ void app_main(void)
     }
     fos_display_set_temperature_hook(panel_temperature);
 
-    /* An RGB LCD board renders at 240 MHz. The generic image boots every
-     * board at 160 for the battery frames; an LCD is lit and mains-powered
-     * anyway, and its renders are watched (the SenseCAP Indicator's took
-     * ~3.8 s at 160, 2026-10-25). A touch board goes to 240 too, below, once
-     * its controller answers. */
-    if (fos_display_is_lcd()) cpu_240("RGB LCD");
+    /* An RGB LCD board renders at 240 MHz unless its cpu_mode says battery:
+     * an LCD is lit and mains-powered anyway, and its renders are watched
+     * (the SenseCAP Indicator's took ~3.8 s at 160, 2026-10-25). A touch
+     * board goes to 240 too, below, once its controller answers. */
+    if (fos_display_is_lcd() || config->cpu_mode == FOS_CPU_PERFORMANCE) cpu_for_mode(config, false);
 
     /* Not where the pin is wired to something else (heartbeat_pin_free), nor
      * on an RGB LCD, whose pixel clock is GPIO21 (the SenseCAP Indicator):
@@ -449,7 +461,7 @@ void app_main(void)
      * CPU time on the reTerminal E1003 and the Sticky, whose renders took
      * 1.5 to 5 s at 160 (2026-11-10); a battery pays for it only while awake,
      * and a render that ends sooner sleeps sooner. */
-    if (fos_touch_present() && !fos_display_is_lcd()) cpu_240("touch");
+    if (fos_touch_present() && !fos_display_is_lcd() && config->cpu_mode == FOS_CPU_AUTO) cpu_for_mode(config, true);
     if (fos_assets_sd_mount(config) != ESP_OK) {
         ESP_LOGW(TAG, "SD assets unavailable, continuing without %s: %s",
                  config->assets_path[0] ? config->assets_path : "/srv/assets",

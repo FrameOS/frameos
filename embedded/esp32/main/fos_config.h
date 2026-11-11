@@ -134,6 +134,14 @@ typedef enum {
     FOS_LED_WS2812 = 2,        /* one addressable RGB pixel, data on the pin */
 } fos_led_type_t;
 
+/* The chip's clock (the contract's `cpu_mode`, main.c applies it at boot):
+ * 160 MHz saves battery, 240 MHz renders about a third faster. */
+typedef enum {
+    FOS_CPU_AUTO = 0,        /* 240 on an RGB LCD or a touch panel, else 160 */
+    FOS_CPU_BATTERY = 1,     /* 160 MHz */
+    FOS_CPU_PERFORMANCE = 2, /* 240 MHz */
+} fos_cpu_mode_t;
+
 /* The board's I2C peripheral buses (fos_i2c.c): the firmware probes each for
  * the chips it knows (a PCF8563 clock, a SHT4x climate sensor, a SY6974B
  * charger) and uses what answers. The reTerminal E1001/E1002 carry two
@@ -275,6 +283,7 @@ typedef struct {
     bool touch_beep;               /* e-paper: a click when something takes a
                                     * press on the glass, and when it lifts.
                                     * Default on. */
+    uint8_t cpu_mode;              /* fos_cpu_mode_t, read at boot */
     size_t gpio_button_count;
     fos_gpio_button_t gpio_buttons[FOS_GPIO_BUTTONS_MAX];
     fos_pins_t pins;
@@ -334,6 +343,12 @@ void fos_config_format_i2c_buses(const fos_i2c_bus_t *buses, uint8_t count, char
 /* `gpio` | `gpio_inverted` | `ws2812` (the contract's `led_type` enum). */
 bool fos_config_parse_led_type(const char *name, uint8_t *type);
 const char *fos_config_led_type_name(uint8_t type);
+/* `auto` | `battery` | `performance` (the contract's `cpu_mode` enum). */
+bool fos_config_parse_cpu_mode(const char *name, uint8_t *mode);
+const char *fos_config_cpu_mode_name(uint8_t mode);
+/* The clock `mode` runs the chip at, in MHz: auto picks 240 for a board
+ * whose screen is watched (an RGB LCD, a touch panel) and 160 otherwise. */
+int fos_config_cpu_mhz(uint8_t mode, bool lcd, bool touch);
 /* Pins the firmware refuses to hand to a button, the battery ADC read or the
  * divider's enable switch: outside the chip's GPIO range, an SPI flash /
  * PSRAM pad (an input pull-up or an output level on one of those wedges the

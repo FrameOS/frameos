@@ -1,6 +1,8 @@
 import clsx from 'clsx'
 import type { ReactNode } from 'react'
 
+import type { CpuMode } from '../types'
+
 import { Label } from './Label'
 import { NumberTextInput } from './NumberTextInput'
 import { Select } from './Select'
@@ -39,6 +41,8 @@ export interface PowerSettingsValues {
   batteryDivider: number | undefined
   /** GPIO held high to switch the divider on while sampling; -1 = none (always on). */
   batteryEnablePin: number | undefined
+  /** The chip's clock; undefined = auto (240 MHz on an LCD or touch panel, else 160). */
+  cpuMode?: CpuMode | undefined
 }
 
 export interface PowerSettingsFieldsProps {
@@ -62,6 +66,10 @@ export interface PowerSettingsFieldsProps {
    * with this as its tooltip — never hidden, so the value is still visible.
    */
   batteryEnablePinDisabledReason?: string
+  /** Why the processor speed cannot be set here (cloud: firmware before 2026.11.7). */
+  cpuModeDisabledReason?: string
+  /** The clock the frame reports running at, in MHz (cloud only). */
+  reportedCpuMhz?: number | undefined
   className?: string
 }
 
@@ -71,6 +79,12 @@ const awakeAfterInputChoices = [
   { value: '300', label: '5 minutes' },
   { value: '600', label: '10 minutes' },
   { value: '1800', label: '30 minutes' },
+]
+
+const cpuModeChoices: { value: CpuMode; label: string }[] = [
+  { value: 'auto', label: 'Automatic (default)' },
+  { value: 'battery', label: 'Battery: 160 MHz' },
+  { value: 'performance', label: 'Performance: 240 MHz' },
 ]
 
 const wakeCheckChoices = [
@@ -90,6 +104,8 @@ export function PowerSettingsFields({
   profile = 'esp32',
   footnote,
   batteryEnablePinDisabledReason,
+  cpuModeDisabledReason,
+  reportedCpuMhz,
   className,
 }: PowerSettingsFieldsProps): JSX.Element {
   const wakeCheckValue = String(value.wakeCheckSeconds ?? 0)
@@ -203,6 +219,28 @@ export function PowerSettingsFields({
           />
         </PowerField>
       ) : null}
+      <PowerField
+        label="Processor speed"
+        tooltip={
+          cpuModeDisabledReason ?? (
+            <>
+              Battery runs the chip at 160 MHz, performance at 240 MHz. Performance renders about a third faster, but
+              the chip also waits out the screen refresh at the higher speed, about 20 seconds on a reTerminal E1002. On
+              a battery e-paper frame that costs roughly 5 to 10% of battery life. Automatic is battery on e-paper and
+              performance on LCD and touch screens. Saving a change reboots the frame.
+            </>
+          )
+        }
+      >
+        <fieldset disabled={cpuModeDisabledReason !== undefined} className="min-w-0 space-y-1">
+          <Select
+            value={value.cpuMode ?? 'auto'}
+            onChange={(mode) => onChange({ cpuMode: mode as CpuMode })}
+            options={cpuModeChoices}
+          />
+          {reportedCpuMhz ? <p className="frameos-muted text-xs">Running at {reportedCpuMhz} MHz now.</p> : null}
+        </fieldset>
+      </PowerField>
       <PowerField
         label="Battery sense GPIO"
         tooltip={

@@ -82,6 +82,9 @@ export interface ScenePreviewInfo {
   at: string
 }
 
+/** The ESP32's clock (the contract's `cpu_mode`): auto is 240 MHz on an LCD or touch panel, else 160. */
+export type CpuMode = 'auto' | 'battery' | 'performance'
+
 export interface FrameType {
   id: FrameId
   project_id: number
@@ -155,6 +158,9 @@ export interface FrameType {
     microphone?: boolean | null
     voiceChat?: boolean | null
     touchBeep?: boolean | null
+    /** ESP32 only: the clock setting (`cpu_mode`) and the clock it gave, in MHz (2026.11.7+). */
+    cpuMode?: CpuMode | null
+    cpuMhz?: number | null
     /** ESP32 only: the status LED that follows the buzzer's notes (fos_led.c),
      * -1 = none, and how it is lit (2026.10.20+). */
     ledPin?: number | null
@@ -341,6 +347,9 @@ export interface FrameType {
     voice_chat?: boolean
     touchBeep?: boolean
     touch_beep?: boolean
+    /** ESP32: the chip's clock (main.c, at boot); unset = auto. */
+    cpuMode?: CpuMode
+    cpu_mode?: CpuMode
     /** What the voice chat may do (docs/voice-chat.md "What the voice chat may
      * do"): the backend's spelling of the three switches; plane-side, never
      * polled by the device. Unset = the default (settings and installed
@@ -435,6 +444,8 @@ export interface FrameType {
   /** ESP32: voice chat, the microphone switch of the voice key's hold (docs/voice-chat.md). */
   voice_chat?: boolean
   touch_beep?: boolean
+  /** ESP32: the chip's clock, 160 MHz (battery) or 240 (performance); unset = auto. */
+  cpu_mode?: CpuMode
   /** ESP32: the PDM microphone's clock, data and power GPIO; -1 = none. */
   mic_clk_pin?: number
   mic_data_pin?: number

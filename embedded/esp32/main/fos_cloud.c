@@ -19,6 +19,7 @@
 #include "esp_app_desc.h"
 #include "esp_ota_ops.h"
 #include "esp_chip_info.h"
+#include "esp_private/esp_clk.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
@@ -516,6 +517,9 @@ static void add_hardware_json(cJSON *parent)
     cJSON_AddNumberToObject(hw, "micPwrPin", config->mic_pins.pwr);
     cJSON_AddBoolToObject(hw, "voiceChat", config->voice_chat);
     cJSON_AddBoolToObject(hw, "touchBeep", config->touch_beep);
+    /* The clock setting and the clock it gave (main.c, at boot). */
+    cJSON_AddStringToObject(hw, "cpuMode", fos_config_cpu_mode_name(config->cpu_mode));
+    cJSON_AddNumberToObject(hw, "cpuMhz", (double)(esp_clk_cpu_freq() / 1000000));
     /* The status LED the buzzer's notes light (fos_led.c; -1 = none) and how
      * it is lit, the preset's when no push set them. */
     cJSON_AddNumberToObject(hw, "ledPin", config->led_pin);
@@ -2725,6 +2729,15 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
      * floor as the local admin API; the ceiling is the Pi runtime's default
      * (a provider can lower a device's bound, never raise it past that). */
     bool restart_for_init = false;
+    /* The chip's clock is set once at boot (main.c). */
+    const cJSON *cpu_mode = cJSON_GetObjectItem(settings, "cpu_mode");
+    if (cJSON_IsString(cpu_mode)) {
+        uint8_t mode = config->cpu_mode;
+        if (fos_config_parse_cpu_mode(cpu_mode->valuestring, &mode)) {
+            restart_for_init = restart_for_init || config->cpu_mode != mode;
+            config->cpu_mode = mode;
+        }
+    }
     const cJSON *max_http = cJSON_GetObjectItem(settings, "max_http_response_bytes");
     if (max_http != NULL) {
         uint32_t bytes = (uint32_t)max_http->valuedouble;
@@ -2781,8 +2794,9 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     }
     ws_ack(id, true, NULL);
     if (restart_for_init && !battery_changed && !rotate_changed) {
-        ESP_LOGW(TAG, "ws: boot-time setting changed (http ceiling %lu, %u buttons); restarting",
-                 (unsigned long)config->max_http_response_bytes, (unsigned)config->gpio_button_count);
+        ESP_LOGW(TAG, "ws: boot-time setting changed (http ceiling %lu, %u buttons, cpu %s); restarting",
+                 (unsigned long)config->max_http_response_bytes, (unsigned)config->gpio_button_count,
+                 fos_config_cpu_mode_name(config->cpu_mode));
         ws_schedule_reboot();
     }
     if (battery_changed && !rotate_changed) {

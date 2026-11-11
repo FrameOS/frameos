@@ -1379,6 +1379,38 @@ async def test_settings_carry_the_status_led_only_when_set(async_client, no_auth
 
 
 @pytest.mark.asyncio
+async def test_settings_carry_the_cpu_mode_only_when_set(async_client, no_auth_client, db):
+    """The chip's clock (cpu_mode) is present-only: unset, the board runs its
+    own rule (160 MHz on e-paper, 240 on an LCD or touch panel), and a value
+    travels only as one of the contract's three names."""
+    frame = await device_frame(async_client, db)
+    base_config = {
+        key: value for key, value in (frame.device_config or {}).items() if key not in ('cpuMode', 'cpu_mode')
+    }
+    frame.device_config = base_config
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert 'cpuMode' not in response.json()['frame']
+
+    frame.device_config = {**base_config, 'cpu_mode': 'performance'}
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.json()['frame']['cpuMode'] == 'performance'
+
+    frame.device_config = {**base_config, 'cpuMode': 'turbo'}
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert 'cpuMode' not in response.json()['frame']
+
+
+@pytest.mark.asyncio
 async def test_settings_carry_what_a_console_line_cannot(async_client, no_auth_client, db):
     """The three settings a stock release image can only learn from this poll:
     the HTTP response cap (kilobyte-scale integer, but read once at boot), the

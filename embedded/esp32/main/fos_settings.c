@@ -606,6 +606,16 @@ static bool apply_frame_settings(const cJSON *frame)
         config->touch_beep = cJSON_IsTrue(touch_beep);
         changed = true;
     }
+    /* The chip's clock: set once at boot (main.c), hence the restart. */
+    const cJSON *cpu_mode = cJSON_GetObjectItem(frame, "cpuMode");
+    if (cJSON_IsString(cpu_mode)) {
+        uint8_t mode = config->cpu_mode;
+        if (fos_config_parse_cpu_mode(cpu_mode->valuestring, &mode) && mode != config->cpu_mode) {
+            config->cpu_mode = mode;
+            changed = true;
+            s_restart_after_apply = true;
+        }
+    }
     /* The PDM microphone's pins (docs/voice-chat.md): clock, data and the
      * power switch, -1 = none. Read at every voice session's start
      * (fos_voice.c), so live; a session already recording keeps its pins. */
@@ -979,6 +989,9 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (before->touch_beep != after->touch_beep) {
         change_append(out, out_len, "touch_beep", after->touch_beep ? "true" : "false");
+    }
+    if (before->cpu_mode != after->cpu_mode) {
+        change_append(out, out_len, "cpu_mode", fos_config_cpu_mode_name(after->cpu_mode));
     }
     if (before->voice_chat != after->voice_chat) {
         change_append(out, out_len, "voice_chat", after->voice_chat ? "true" : "false");
