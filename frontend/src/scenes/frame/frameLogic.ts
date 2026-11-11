@@ -57,7 +57,7 @@ import {
   numericCloudFrameSettingKeys,
 } from '../../utils/cloudFrameSettings'
 import { persistAndPushCloudFrameScenes, type CloudScenePersistOptions } from '../../utils/cloudFrameScenesSave'
-import { clearCloudSceneJsonCache } from '../../models/framesModel'
+import { clearCloudSceneJsonCache, rehydrateCloudFrameScenes } from '../../models/framesModel'
 import { appsModel } from '../../models/appsModel'
 import { collectSecretSettingsFromScenes, settingsDetails } from './panels/secretSettings'
 import { withAppPermissions } from '../../utils/sceneAccess'
@@ -3685,17 +3685,32 @@ export const frameLogic = kea<frameLogicType>([
         title: 'Deploying scenes & settings',
         detail: 'Saving scenes to your cloud account',
       })
+      const formAtDeploy = values.frameForm
       try {
-        const outcome = await persistAndPushCloudFrameScenes(
-          props.frameId,
-          scenes,
-          values.frame?.active_scene_id,
-          cloudScenePersistOptions(props.frameId, values.frameForm ?? values.frame ?? {})
-        )
-        for (const storeSceneId of outcome.changedStoreSceneIds) {
+        // Only the deploy drawer gets here, and a deploy from it takes every
+        // scene with a newer version in the store along.
+        const outcome = await persistAndPushCloudFrameScenes(props.frameId, scenes, values.frame?.active_scene_id, {
+          ...cloudScenePersistOptions(props.frameId, values.frameForm ?? values.frame ?? {}),
+          updateToLatest: true,
+        })
+        for (const storeSceneId of [...outcome.changedStoreSceneIds, ...Object.keys(outcome.updatedToLatest)]) {
           clearCloudSceneJsonCache(storeSceneId)
         }
-        framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
+        const updatedCount = Object.keys(outcome.updatedToLatest).length
+        if (updatedCount > 0) {
+          // Wait for the new versions to hydrate, then give the form them: it
+          // still holds the old ones, and a later save would publish those
+          // again. Everything else in it was just saved.
+          await Promise.race([
+            rehydrateCloudFrameScenes(props.frameId),
+            new Promise<void>((resolve) => window.setTimeout(resolve, 20_000)),
+          ])
+          if (values.frameForm === formAtDeploy && values.frame) {
+            actions.resetFrameForm(sanitizeFrame(values.frame) as FrameType)
+          }
+        } else {
+          framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
+        }
         framesModel.actions.loadFrame(props.frameId)
         longRunningTasksModel.actions.finishTask({
           frameId: props.frameId,
@@ -3709,6 +3724,9 @@ export const frameLogic = kea<frameLogicType>([
             // library (that IS the storage for cloud frames), mentioned so
             // the library entries this creates are not a mystery.
             'Also saved to your cloud scenes',
+            ...(updatedCount > 0
+              ? [`Updated ${updatedCount} scene${updatedCount === 1 ? '' : 's'} to the latest version`]
+              : []),
             ...outcome.notes,
           ].join('. '),
         })

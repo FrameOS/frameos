@@ -177,6 +177,35 @@ describe("the deploy dialog in cloud mode", () => {
     }
   });
 
+  it("takes scene updates along: the tick comes back and the summary names them", () => {
+    // In sync with the device, but the store has a newer version of the
+    // scene: a deploy from here updates it, so the drawer says so and the
+    // firmware cards offer the scenes again.
+    const behind = {
+      ...oneScene,
+      assigned_checksum: "abc123",
+      scenes_checksum: "abc123",
+      cloud_scene_sources: {
+        "scene-1": { scene_id: "store-1", held_version: 3, update_version: 5 },
+      },
+    } as Partial<FrameType>;
+    for (const platform of ["esp32", "pi-zero2w"] as const) {
+      cleanup();
+      render(<FrameDeployPlanDrawer frame={cloudFrame(platform, behind)} />);
+      expect(screen.getByText("Scene updates")).toBeTruthy();
+      expect(screen.getByText(/Clock\. Deploying updates them\./)).toBeTruthy();
+      if (platform === "esp32") {
+        fireEvent.click(screen.getByRole("button", { name: /Over the air/ }));
+      }
+      expect(
+        screen.getByRole("checkbox", {
+          name: /Deploy scenes & settings \(1 scene update\)/,
+        }),
+      ).toBeTruthy();
+      expect(screen.getByText("Newer versions of Clock")).toBeTruthy();
+    }
+  });
+
   it("orders the USB path: one connect action, then the scene push", () => {
     render(<FrameDeployPlanDrawer frame={cloudFrame("esp32")} />);
     fireEvent.click(screen.getByRole("button", { name: /Over USB/ }));
