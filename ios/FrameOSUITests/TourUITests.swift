@@ -82,9 +82,17 @@ final class TourUITests: XCTestCase {
             let add = button(app, containing: "Add scene")
             while !add.isHittable { app.swipeUp() }
             add.tap()
+            XCTAssertTrue(app.navigationBars["Add scene"].waitForExistence(timeout: 15))
+            sleep(3)
+            snapshot(app, "\(prefix)13 add scene")
+            // A list makes only the rows on screen: search, as a person would.
+            let search = app.searchFields.firstMatch
+            XCTAssertTrue(search.waitForExistence(timeout: 10))
+            search.tap()
+            search.typeText(scene)
             waitForText(app, scene, timeout: 40)
             sleep(2)
-            snapshot(app, "\(prefix)13 add scene")
+            snapshot(app, "\(prefix)13b search")
             button(app, containing: scene).tap()
             let install = button(app, containing: "Install & activate")
             XCTAssertTrue(install.waitForExistence(timeout: 10))
@@ -117,7 +125,8 @@ final class TourUITests: XCTestCase {
             ("Ask AI about this frame", "26 frame chat"),
         ]
         for (title, shot) in pages {
-            let link = button(app, containing: title)
+            // In the frame's list, not the tab bar (which has a Settings too).
+            let link = app.collectionViews.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
             var tries = 0
             while !link.isHittable && tries < 8 { app.swipeUp(); tries += 1 }
             guard link.isHittable else {
@@ -138,6 +147,100 @@ final class TourUITests: XCTestCase {
             sleep(3)
             snapshot(app, "\(prefix)\(shot)")
         }
+        photos(app, prefix: prefix, frame: frame)
         app.tabBars.buttons["Frames"].tap()
+    }
+
+    /// An album: made, a photo uploaded through the system picker (ios/bin/ui-test
+    /// adds one with a location to the simulator), its info, then played on a frame.
+    @MainActor
+    func photos(_ app: XCUIApplication, prefix: String, frame: String) {
+        let album = "Tour \(Int(Date().timeIntervalSince1970) % 100_000)"
+        app.tabBars.buttons["Photos"].tap()
+        app.navigationBars.buttons["Add"].tap()
+        button(app, containing: "New album").tap()
+        let name = app.alerts.textFields.firstMatch
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.typeText(album)
+        app.alerts.buttons["Create"].tap()
+        let albumCell = button(app, containing: album)
+        XCTAssertTrue(albumCell.waitForExistence(timeout: 15), "the album did not show")
+        // New albums go last; a lazy grid says "hittable" for a cell under the tab bar.
+        app.swipeUp()
+        app.swipeUp()
+        albumCell.tap()
+        XCTAssertTrue(app.navigationBars[album].waitForExistence(timeout: 10))
+
+        // The system picker runs in its own process; its grid is the app's to tap.
+        app.navigationBars.buttons["Add"].tap()
+        button(app, containing: "Add photos").tap()
+        // The picker's cells read "Photo, <date>" (the tab bar's "Photos" has no comma).
+        let picked = app.images.matching(NSPredicate(format: "label BEGINSWITH 'Photo,'")).firstMatch
+        let pickerShown = picked.waitForExistence(timeout: 20)
+        sleep(1)
+        snapshot(app, "\(prefix)40 photo picker")
+        if pickerShown {
+            picked.tap()
+            // The picker's confirm button ("Done"), not the album's own Add behind it.
+            let done = app.buttons.matching(NSPredicate(format: "identifier == 'Add' AND label == 'Done'")).firstMatch
+            if done.waitForExistence(timeout: 5) { done.tap() }
+            sleep(6) // the upload
+        } else {
+            XCTFail("no photo in the picker")
+            app.buttons["Cancel"].firstMatch.tap()
+        }
+        snapshot(app, "\(prefix)41 album")
+
+        // One photo: the viewer, then its info (the location the upload kept).
+        let photo = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] '.jp'")).firstMatch
+        if photo.waitForExistence(timeout: 10) {
+            XCTAssertEqual(photo.value as? String, "has a location", "the location pin is not told")
+            photo.tap()
+            sleep(2)
+            snapshot(app, "\(prefix)42 photo")
+            if app.buttons["Info"].waitForExistence(timeout: 5) {
+                app.buttons["Info"].tap()
+                sleep(2)
+                snapshot(app, "\(prefix)43 photo info")
+                app.buttons["Done"].firstMatch.tap()
+                sleep(1)
+            }
+            app.buttons["Done"].firstMatch.tap()
+            sleep(1)
+        } else {
+            XCTFail("the uploaded photo did not show")
+        }
+
+        // Play the album on the frame.
+        app.navigationBars.buttons["Add"].tap()
+        button(app, containing: "Play on a frame").tap()
+        XCTAssertTrue(app.navigationBars["Play \(album)"].waitForExistence(timeout: 10))
+        // The sheet's own Frame picker (the tab bar has a "Frames").
+        let picker = app.collectionViews.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Frame'")).firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 5), "no frame picker")
+        picker.tap()
+        let choice = app.buttons.matching(NSPredicate(format: "label == %@", frame)).firstMatch
+        let menuChoice = app.menuItems[frame].firstMatch
+        if menuChoice.waitForExistence(timeout: 3) { menuChoice.tap() } else if choice.waitForExistence(timeout: 3) { choice.tap() }
+        sleep(1)
+        snapshot(app, "\(prefix)44 play album")
+        let play = button(app, containing: "Play on frame")
+        XCTAssertTrue(play.isEnabled, "no frame chosen")
+        play.tap()
+        // The sheet closes when the frame has it (the cloud saves a scene first).
+        let sheet = app.navigationBars["Play \(album)"]
+        let closed = NSPredicate(format: "exists == false")
+        XCTAssertEqual(XCTWaiter().wait(for: [expectation(for: closed, evaluatedWith: sheet)], timeout: 150), .completed,
+                       "the album was not played")
+        sleep(2)
+        snapshot(app, "\(prefix)45 album played")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // The frame, showing the photo the phone uploaded.
+        app.tabBars.buttons["Frames"].tap()
+        sleep(20) // the frame renders the album
+        app.swipeDown()
+        sleep(5)
+        snapshot(app, "\(prefix)46 frame with album")
     }
 }

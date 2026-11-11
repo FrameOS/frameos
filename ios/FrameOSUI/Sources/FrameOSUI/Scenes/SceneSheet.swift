@@ -180,10 +180,14 @@ struct SceneFieldEditor: View {
                     }
                 }
             case "integer", "float":
-                LabeledContent(field.label) {
+                LabeledContent {
+                    // A number is short: the label gets the room.
                     TextField(field.placeholder ?? "", text: text)
                         .multilineTextAlignment(.trailing)
                         .numberInput(decimal: field.type == "float")
+                        .frame(maxWidth: 110)
+                } label: {
+                    Text(field.label).lineLimit(2)
                 }
             case "color":
                 ColorPicker(field.label, selection: Binding {

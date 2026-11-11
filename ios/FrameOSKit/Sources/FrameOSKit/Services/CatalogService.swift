@@ -57,7 +57,7 @@ extension FrameOSService {
                     author: scene["publisher"]?["name"]?.stringValue ?? scene["publisher"]?.stringValue,
                     image: scene["hasPreview"]?.boolValue == false ? nil : "/api/store/scenes/\(id)/image",
                     flags: scene["riskFlags"]?.arrayValue?.compactMap(\.stringValue) ?? [],
-                    group: scene["category"]?.stringValue ?? "Store"
+                    group: StoreCategories.shelf(for: scene["category"]?.stringValue).title
                 )
             }
             return (items, answer["hasMore"]?.boolValue ?? false)

@@ -21,6 +21,8 @@ struct RemoteImage<Placeholder: View>: View {
     let key: String
     let load: () async throws -> Data
     var contentMode: ContentMode = .fit
+    /// Told the picture's width over height whenever one shows.
+    var onAspect: ((Double) -> Void)? = nil
     @ViewBuilder var placeholder: () -> Placeholder
 
     @State private var image: PlatformImage?
@@ -38,17 +40,22 @@ struct RemoteImage<Placeholder: View>: View {
             }
         }
         .task(id: key) {
-            if let cached = ImageCache.shared.get(key) { image = cached }
+            if let cached = ImageCache.shared.get(key) { show(cached) }
             do {
                 let data = try await load()
                 if let decoded = PlatformImage(data: data) {
                     ImageCache.shared.set(key, decoded)
-                    image = decoded
+                    show(decoded)
                 }
             } catch {
                 failed = true
             }
         }
+    }
+
+    private func show(_ picture: PlatformImage) {
+        image = picture
+        if picture.size.height > 0 { onAspect?(Double(picture.size.width / picture.size.height)) }
     }
 }
 
@@ -57,23 +64,33 @@ struct FrameImageView: View {
     @Environment(AppModel.self) private var app
     let frame: Frame
     var fresh = false
+    /// The shape of the picture that came back: a frame that does not say
+    /// its size (a new virtual frame) is drawn at it rather than at 4:3.
+    @State private var pictureAspect: Double?
 
     var body: some View {
         let service = app.service
         let version = app.imageVersions[frame.id] ?? 0
-        RemoteImage(key: "frame:\(app.current?.id ?? ""):\(frame.id)#\(version)\(fresh ? "!" : "")",
-                    load: {
-                        guard let service else { throw CancellationError() }
-                        return try await service.frameImage(frame, fresh: fresh)
-                    },
-                    placeholder: {
-                        ZStack {
-                            Rectangle().fill(.quaternary)
-                            Image(systemName: "photo").font(.title).foregroundStyle(.secondary)
-                        }
-                    })
-            .aspectRatio(frame.aspectRatio, contentMode: .fit)
-            .background(Color.black.opacity(0.04))
+        // The box is the panel's shape at the full width it is given; the
+        // picture fits inside it (a picture alone sizes to itself).
+        Color.black.opacity(0.04)
+            .aspectRatio(frame.width != nil && frame.height != nil ? frame.aspectRatio : (pictureAspect ?? frame.aspectRatio),
+                         contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay {
+                RemoteImage(key: "frame:\(app.current?.id ?? ""):\(frame.id)#\(version)\(fresh ? "!" : "")",
+                            load: {
+                                guard let service else { throw CancellationError() }
+                                return try await service.frameImage(frame, fresh: fresh)
+                            },
+                            onAspect: { pictureAspect = $0 },
+                            placeholder: {
+                                ZStack {
+                                    Rectangle().fill(.quaternary)
+                                    Image(systemName: "photo").font(.title).foregroundStyle(.secondary)
+                                }
+                            })
+            }
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.quaternary))
     }
@@ -294,5 +311,8 @@ func relativeWords(_ timestamp: String?) -> String? {
 }
 
 func byteWords(_ bytes: Int) -> String {
-    ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    formatter.allowsNonnumericFormatting = false // "0 KB", not "Zero KB"
+    return formatter.string(fromByteCount: Int64(bytes))
 }

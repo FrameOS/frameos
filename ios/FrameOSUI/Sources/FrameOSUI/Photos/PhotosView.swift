@@ -79,6 +79,7 @@ struct PhotoFolderView: View {
     let path: String
     @State private var model: PhotoFolderModel
     @State private var pickerItems: [PhotosPickerItem] = []
+    @State private var pickingPhotos = false
     @State private var newAlbum = false
     @State private var albumName = ""
     @State private var renaming: PhotoEntry?
@@ -112,6 +113,8 @@ struct PhotoFolderView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) { addMenu }
         }
+        .photosPicker(isPresented: $pickingPhotos, selection: $pickerItems, maxSelectionCount: 50,
+                      matching: .images, preferredItemEncoding: .compatible)
         .onChange(of: pickerItems) { _, items in
             guard !items.isEmpty else { return }
             Task {
@@ -187,9 +190,8 @@ struct PhotoFolderView: View {
 
     var addMenu: some View {
         Menu {
-            PhotosPicker(selection: $pickerItems, maxSelectionCount: 50, matching: .images, preferredItemEncoding: .compatible) {
-                Label("Add photos", systemImage: "photo.badge.plus")
-            }
+            // A plain button: a PhotosPicker inside a Menu did not open on iOS 27 (the UI tour found it).
+            Button { pickingPhotos = true } label: { Label("Add photos", systemImage: "photo.badge.plus") }
             Button { newAlbum = true } label: { Label("New album", systemImage: "folder.badge.plus") }
             if !path.isEmpty {
                 Divider()
@@ -299,6 +301,11 @@ struct PhotoThumb: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            // One element: the photo's name, and whether it carries a location.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(entry.name)
+            .accessibilityValue(entry.hasLocation ? "has a location" : "")
+            .accessibilityAddTraits(.isImage)
     }
 }
 
@@ -319,6 +326,7 @@ struct AlbumTile: View {
             }
             .aspectRatio(1, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .accessibilityHidden(true) // the cover: the album's name says it
             Text(entry.name).font(.subheadline.weight(.medium)).lineLimit(1)
             Text("\(entry.files) photo\(entry.files == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
         }

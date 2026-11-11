@@ -72,6 +72,7 @@ struct FrameCard: View {
             }
             .padding(.horizontal, 4)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.quaternary))

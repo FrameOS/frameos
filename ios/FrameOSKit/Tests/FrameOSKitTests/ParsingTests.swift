@@ -113,4 +113,16 @@ import Testing
         #expect(origin("http://localhost:80") == "http://localhost")
         #expect(origin("http://[::1]:3003") == "http://[::1]:3003")
     }
+
+    /// JSONValue takes `nil` as a literal: a "no value" must not turn into JSON null.
+    @Test func noValueIsNotJSONNull() {
+        #expect(PhotoEntry(raw: ["path": "a.jpg", "colors": .null]).colors == nil)
+        #expect(PhotoEntry(raw: ["path": "a.jpg"]).colors == nil)
+        #expect(PhotoEntry(raw: ["path": "a.jpg", "colors": ["exposure": 1]]).colors != nil)
+        var event = ScheduleEvent.new(sceneId: "s", hour: 7, minute: 0, weekday: 0)
+        event.disabled = true
+        #expect(event.raw["disabled"] == .bool(true))
+        event.disabled = false
+        #expect(event.raw.keys.contains("disabled") == false)
+    }
 }

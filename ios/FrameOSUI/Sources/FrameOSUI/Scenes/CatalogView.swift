@@ -42,7 +42,13 @@ final class CatalogModel {
             if byGroup[item.group] == nil { order.append(item.group) }
             byGroup[item.group, default: []].append(item)
         }
-        return order.map { ($0, byGroup[$0]!) }
+        // The store's shelves in shelf order (the SPA's Add scene drawer),
+        // anything else (a repository, My scenes) as it came.
+        let ranked = order.enumerated().sorted { a, b in
+            let (rankA, rankB) = (StoreCategories.rank(ofTitle: a.element), StoreCategories.rank(ofTitle: b.element))
+            return rankA != rankB ? rankA < rankB : a.offset < b.offset
+        }
+        return ranked.map { ($0.element, byGroup[$0.element]!) }
     }
 }
 
@@ -75,6 +81,7 @@ struct CatalogView: View {
                     Section(group) {
                         ForEach(items) { item in
                             Button {
+                                hideKeyboard()
                                 chosen = item
                             } label: {
                                 CatalogRow(item: item)
@@ -93,6 +100,7 @@ struct CatalogView: View {
             }
             .overlay { if model.loading && model.items.isEmpty { ProgressView() } }
             .searchable(text: $model.query, prompt: "Search scenes")
+            .scrollDismissesKeyboard(.immediately)
             .onSubmit(of: .search) { Task { await model.load(app) } }
             .task(id: model.mine) { await model.load(app) }
             .task(id: model.query) {

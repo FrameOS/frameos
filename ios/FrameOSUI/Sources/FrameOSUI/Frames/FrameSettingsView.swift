@@ -63,15 +63,24 @@ struct FrameSettingsView: View {
 
                 Section {
                     if keys.contains("interval") {
-                        LabeledContent("Render every (seconds)") {
-                            TextField("300", value: doubleBinding("interval", frame, fallback: 300), format: .number)
-                                .multilineTextAlignment(.trailing)
-                                .numberInput()
+                        LabeledContent("Render every") {
+                            HStack(spacing: 4) {
+                                TextField("300", value: doubleBinding("interval", frame, fallback: 300), format: .number)
+                                    .multilineTextAlignment(.trailing)
+                                    .numberInput()
+                                    .frame(maxWidth: 90)
+                                Text("seconds").foregroundStyle(.secondary)
+                            }
                         }
                     }
                     if keys.contains("timezone") {
-                        Picker("Time zone", selection: stringBinding("timezone", frame, fallback: "")) {
+                        let zone = stringBinding("timezone", frame, fallback: "")
+                        Picker("Time zone", selection: zone) {
                             Text("Not set").tag("")
+                            // The frame's own zone even when this phone does not list it ("UTC").
+                            if !zone.wrappedValue.isEmpty && !TimeZone.knownTimeZoneIdentifiers.contains(zone.wrappedValue) {
+                                Text(zone.wrappedValue).tag(zone.wrappedValue)
+                            }
                             ForEach(TimeZone.knownTimeZoneIdentifiers, id: \.self) { Text($0).tag($0) }
                         }
                     }
@@ -82,7 +91,7 @@ struct FrameSettingsView: View {
                         Toggle("Debug logging", isOn: boolBinding("debug", frame, fallback: false))
                     }
                 } header: {
-                    Text("Behaviour")
+                    Text("Behavior")
                 } footer: {
                     if keys.contains("interval") {
                         Text("A scene's own refresh interval can make the frame render more often.")

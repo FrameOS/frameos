@@ -41,8 +41,7 @@ final class SignInUITests: XCTestCase {
         type(app.textFields["Email"], "someone@example.com")
         type(app.secureTextFields["Password"], "not-a-real-password")
         app.buttons["Sign in"].tap()
-        let error = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'could not' OR label CONTAINS[c] 'connect' OR label CONTAINS[c] 'not answer'")).firstMatch
-        XCTAssertTrue(error.waitForExistence(timeout: 30), "no error shown for a backend that does not answer")
+        waitForText(app, "Cannot reach that backend", timeout: 30)
         snapshot(app, "03 backend unreachable")
     }
 }

@@ -101,7 +101,8 @@ public struct ScheduleEvent: Identifiable, Hashable, Sendable {
     public var sceneId: String? { raw["payload"]?["sceneId"]?.stringValue }
     public var disabled: Bool {
         get { raw["disabled"]?.boolValue ?? false }
-        set { raw["disabled"] = newValue ? .bool(true) : nil }
+        // removeValue, not `= nil`: JSONValue takes `nil` as a literal (JSON null).
+        set { if newValue { raw["disabled"] = .bool(true) } else { raw.removeValue(forKey: "disabled") } }
     }
 
     public static let weekdayNames = ["Every day", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",

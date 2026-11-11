@@ -18,6 +18,14 @@ extension Image {
     }
 }
 
+/// Put the keyboard away (a search field keeps it up over a sheet it opens).
+@MainActor
+func hideKeyboard() {
+    #if os(iOS)
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    #endif
+}
+
 /// iOS-only modifiers, so the screens also type-check on macOS (`ios/bin/check-ui`).
 extension View {
     func inlineTitle() -> some View {

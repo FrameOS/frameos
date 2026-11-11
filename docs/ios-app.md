@@ -32,14 +32,23 @@ The SPA runs the corpora in `cloud/apps/auth-web/src/test/shared-spa/`
 (`*-fixtures.test.ts`), the app in `ios/FrameOSKit/Tests/` (both read the
 files in `docs/` directly). The **iOS app** workflow
 (`.github/workflows/ios.yml`) runs the app's side whenever a corpus, a
-contract, the SPA's command labels or `ios/` changes, and builds the app for
-the simulator, then launches it on one.
+contract, the SPA's command labels or `ios/` changes, builds the app for
+the simulator and runs its UI tests there (the sign-in screen).
 
-Against real planes, `BackendIntegrationTests` walks the backend path end
-to end on an empty backend (sign-up, the token, a frame, an install through
-the MCP, settings, photos, the socket, sign-out), and `CloudProbeTests`
-checks a cloud read-only (the sign-in's Origin and error shapes, the public
-store). Both are skipped unless an address is given (`ios/README.md`).
+Against real planes (skipped unless an address is given, `ios/README.md`):
+
+- `BackendIntegrationTests` walks the backend path end to end (sign-up or
+  sign-in, the token, a frame, an install through the MCP, settings, photos,
+  the socket, sign-out); `ios/bin/test-backend` starts a throwaway backend
+  with a user and two virtual frames for it.
+- `CloudIntegrationTests` does the same signed in to a cloud you may write
+  to (a local dev server): a store scene installed, activated and removed
+  on a frame, settings, schedule, photos, the live socket, sign-out.
+  `CloudProbeTests` checks a cloud read-only (the sign-in's Origin and error
+  shapes, the public store).
+- The UI tests' tour (`TourUITests`, `ios/bin/ui-test`) taps through the
+  whole app on a simulator against either plane and keeps a screenshot of
+  every screen.
 
 ## Every action and its route
 

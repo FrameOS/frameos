@@ -50,7 +50,7 @@ token="$(curl -sf -X POST "$base/api/signup" -H 'content-type: application/json'
 for name in Kitchen Hallway; do
   curl -sf -X POST "$base/api/projects/1/frames/new" -H "authorization: Bearer $token" \
     -H 'content-type: application/json' \
-    -d "{\"name\":\"$name\",\"frame_host\":\"\",\"server_host\":\"localhost\",\"mode\":\"embedded\",\"platform\":\"virtual\"}" >/dev/null
+    -d "{\"name\":\"$name\",\"frame_host\":\"\",\"server_host\":\"127.0.0.1:$port\",\"mode\":\"embedded\",\"platform\":\"virtual\"}" >/dev/null
 done
 
 [[ -d "$repo/frontend/public/frameos-wasm" ]] || echo "No wasm runtime in frontend/public/frameos-wasm: the virtual frames' pictures will be blank."

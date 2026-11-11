@@ -18,7 +18,13 @@ public struct PhotoEntry: Identifiable, Hashable, Sendable {
     public var items: Int { raw["items"]?.intValue ?? 0 }
     public var files: Int { raw["files"]?.intValue ?? 0 }
     public var cover: String? { raw["cover"]?.stringValue }
-    public var colors: JSONValue? { raw["colors"].flatMap { $0.isNull ? nil : $0 } }
+    /// The color profile, nil when there is none. (Spelled out: JSONValue
+    /// takes `nil` as a literal, so `{ $0.isNull ? nil : $0 }` made JSON null
+    /// of it and every photo read as having a profile.)
+    public var colors: JSONValue? {
+        guard let value = raw["colors"], !value.isNull else { return nil }
+        return value
+    }
     public var hasLocation: Bool { raw["location"].map { !$0.isNull } ?? false }
     public var isBlocked: Bool { raw["status"]?.stringValue == "blocked" }
     /// The SPA's thumbnail cache key (`v=<mtime>-<size>`).

@@ -97,6 +97,7 @@ struct AssetsView: View {
     @State private var model: AssetsModel
     @State private var importing = false
     @State private var photoItems: [PhotosPickerItem] = []
+    @State private var pickingPhotos = false
     @State private var newFolder = false
     @State private var folderName = ""
     @State private var renaming: AssetEntry?
@@ -163,15 +164,16 @@ struct AssetsView: View {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button { importing = true } label: { Label("Upload a file", systemImage: "doc.badge.plus") }
-                    PhotosPicker(selection: $photoItems, matching: .images, preferredItemEncoding: .compatible) {
-                        Label("Upload photos", systemImage: "photo.badge.plus")
-                    }
+                    // A plain button: a PhotosPicker inside a Menu did not open on iOS 27 (the UI tour found it).
+                    Button { pickingPhotos = true } label: { Label("Upload photos", systemImage: "photo.badge.plus") }
                     Button { newFolder = true } label: { Label("New folder", systemImage: "folder.badge.plus") }
                 } label: {
                     Image(systemName: "plus").accessibilityLabel("Add")
                 }
             }
         }
+        .photosPicker(isPresented: $pickingPhotos, selection: $photoItems, maxSelectionCount: nil,
+                      matching: .images, preferredItemEncoding: .compatible)
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
             Task {
