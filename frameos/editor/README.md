@@ -12,7 +12,7 @@ a modal. The
 React component's `template` / `onTemplateChanged` / `templateCategories` props drive
 `template.json` (`templateContent` replaces its form with the host's own view, `initialFile:
 'template'` opens on it); without them it is read only. `initialAppFile: 'app.tsx'` opens on that
-file of the shown scene's first app that has it.
+file of the shown scene's first app that has it, and `initialTreeOpen: false` starts with the tree folded.
 When the [`frameos-wasm`](https://www.npmjs.com/package/frameos-wasm) package's assets are served
 next to the bundle (at `./frameos-wasm/` relative to `dist/`), the Preview panel runs the edited
 scenes live through the FrameOS WebAssembly runtime — canvas, scene state and runtime logs included.

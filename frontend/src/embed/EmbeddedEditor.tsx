@@ -134,6 +134,9 @@ export interface EmbeddedSceneEditorProps {
    * (`app.tsx`, say) instead of `initialFile`, when one does. Read once, on
    * the first init. */
   initialAppFile?: string
+  /** Whether the file tree starts shown (default) or folded away. Read once,
+   * on mount. */
+  initialTreeOpen?: boolean
 }
 
 // The scene editor as a plain React component: render it inside any React
@@ -148,7 +151,9 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
   useMountedLogic(embedFrameLogic(logicProps))
   // The tree's logic takes the file to open on as a prop (its reducer's
   // default), so a remount — StrictMode's, a host's — opens on it again.
-  useMountedLogic(sceneFileTreeLogic({ ...logicProps, initialFile: props.initialFile }))
+  useMountedLogic(
+    sceneFileTreeLogic({ ...logicProps, initialFile: props.initialFile, initialTreeOpen: props.initialTreeOpen })
+  )
   const { initEmbedFrame, updateScene } = useActions(embedFrameLogic(logicProps))
   const { scenes } = useValues(embedFrameLogic(logicProps))
   const { setTheme } = useActions(workspaceLogic)

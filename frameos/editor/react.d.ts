@@ -94,6 +94,9 @@ export interface EmbeddedSceneEditorProps {
    * (`app.tsx`, say) instead of `initialFile`, when one does. Read once, on
    * the first init. */
   initialAppFile?: string | undefined
+  /** Whether the file tree starts shown (default) or folded away. Read once,
+   * on mount. */
+  initialTreeOpen?: boolean | undefined
 }
 
 export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Element

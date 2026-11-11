@@ -95,6 +95,17 @@ describe("sceneFileTreeLogic", () => {
     unmount();
   });
 
+  it("starts with the tree folded when the host asks", () => {
+    const unmount = sceneFileTreeLogic({ frameId, initialTreeOpen: false }).mount();
+    expect(sceneFileTreeLogic({ frameId }).values.treeOpen).toBe(false);
+    sceneFileTreeLogic({ frameId }).actions.setTreeOpen(true);
+    expect(sceneFileTreeLogic({ frameId }).values.treeOpen).toBe(true);
+    unmount();
+    const again = sceneFileTreeLogic({ frameId }).mount();
+    expect(sceneFileTreeLogic({ frameId }).values.treeOpen).toBe(true);
+    again();
+  });
+
   it("opens on template.json when the host asks, again after a remount", () => {
     const first = sceneFileTreeLogic({ frameId, initialFile: "template" }).mount();
     expect(sceneFileTreeLogic({ frameId }).values.shownSelection).toEqual({ kind: "template" });

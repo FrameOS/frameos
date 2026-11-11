@@ -645,6 +645,9 @@ type SceneEditorWorkspaceProps = {
   /** The editor opens on this file of the shown scene's first app that has
    * it (`app.tsx`), instead of template.json or the diagram. */
   initialAppFile?: string | undefined;
+  /** False: the editor's file tree starts folded away (the embed's narrow
+   * column). */
+  initialTreeOpen?: boolean | undefined;
 };
 
 /** The store's categories as template.json's Category field offers them. */
@@ -1134,6 +1137,7 @@ export function SceneEditorWorkspace({
   template,
   onTemplateChanged,
   initialAppFile,
+  initialTreeOpen,
 }: SceneEditorWorkspaceProps) {
   const resizes: Record<SceneEditorPanelName, Resize> = {
     ai: useResizableWidth(panelWidths.ai),
@@ -1285,6 +1289,7 @@ export function SceneEditorWorkspace({
             }
             initialFile={info === undefined ? "diagram" : "template"}
             initialAppFile={initialAppFile}
+            initialTreeOpen={initialTreeOpen}
           />
         ) : null}
       </div>
@@ -2511,6 +2516,7 @@ export function SceneEditorModal({
           rememberSettings: !embed,
         }}
         initialAppFile={embed?.file}
+        initialTreeOpen={embed ? false : undefined}
         sceneId={selectedSceneId}
         scenes={scenes}
         theme={theme}

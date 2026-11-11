@@ -32,6 +32,7 @@ type StubEditorProps = {
   templateContent?: ReactNode;
   initialFile?: "template" | "diagram" | undefined;
   initialAppFile?: string | undefined;
+  initialTreeOpen?: boolean | undefined;
 };
 const renameCalls: Array<[string, string]> = [];
 const isLayoutCalls: Array<[string, boolean]> = [];
@@ -84,6 +85,7 @@ function StubEditor(props: StubEditorProps) {
   return (
     <div
       data-initial-app-file={props.initialAppFile}
+      data-initial-tree-open={String(props.initialTreeOpen ?? true)}
       data-initial-file={props.initialFile}
       data-scenes={JSON.stringify(props.scenes)}
       data-show-preview={String(props.showPreviewButton)}
@@ -393,6 +395,8 @@ describe("SceneEditorModal embedded", () => {
     expect(pressed()).toEqual({ AI: false, Editor: true, Preview: true });
     const editor = await screen.findByTestId("editor");
     expect(editor.dataset.initialAppFile).toBe("app.tsx");
+    // The embed's column is narrow: the file tree starts folded away.
+    expect(editor.dataset.initialTreeOpen).toBe("false");
     // The published scene, not the draft.
     expect(editor.dataset.scenes).toBe(JSON.stringify(loadedScenes));
     expect(screen.queryByText("Restored unsaved edits")).toBeNull();
