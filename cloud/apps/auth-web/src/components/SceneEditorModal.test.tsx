@@ -388,9 +388,9 @@ describe("SceneEditorModal embedded", () => {
       scenes: [{ id: "s1", name: "A visitor's old edit" }],
     });
     render(<SceneEditorModal embed={embed} sceneId="scene-1" versions={versions} />);
-    // No AI (it needs an account), and the remembered set and the hash are ignored.
-    expect(toggleOrder()).toEqual(["Editor", "Preview"]);
-    expect(pressed()).toEqual({ AI: null, Editor: true, Preview: true });
+    // The remembered set and the hash are ignored.
+    expect(toggleOrder()).toEqual(["Editor", "AI", "Preview"]);
+    expect(pressed()).toEqual({ AI: false, Editor: true, Preview: true });
     const editor = await screen.findByTestId("editor");
     expect(editor.dataset.initialAppFile).toBe("app.tsx");
     // The published scene, not the draft.
@@ -415,16 +415,55 @@ describe("SceneEditorModal embedded", () => {
     expect(window.location.hash).toBe("#scene-ai");
   });
 
-  it("has one way out, the scene's page in a new tab, and nothing to save, fork or go back to", async () => {
-    render(<SceneEditorModal canFork={false} canSave={false} embed={embed} sceneId="scene-1" versions={versions} />);
+  it("opens the scene's page in the whole window for what needs it, with the visitor's edits", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    render(
+      <SceneEditorModal
+        canFork={false}
+        canSave={false}
+        downloadUrl="/api/store/scenes/scene-1/download"
+        embed={embed}
+        loginUrl="https://cloud.frameos.net/login"
+        sceneId="scene-1"
+        versions={versions}
+      />,
+    );
+    const editor = await screen.findByTestId("editor");
+    // The store's own bar: each link leaves the frame for the whole window.
+    const signIn = screen.getByRole("link", { name: /Sign in to edit/ });
+    expect(signIn.getAttribute("target")).toBe("_top");
+    expect(signIn.getAttribute("href")).toBe(
+      `https://cloud.frameos.net/login?return_to=${encodeURIComponent(embed.pageUrl)}`,
+    );
+    const install = screen.getByRole("link", { name: /Install/ });
+    expect([install.getAttribute("href"), install.getAttribute("target")]).toEqual([embed.pageUrl, "_top"]);
+    expect(screen.getByRole("link", { name: /Download/ }).getAttribute("target")).toBe("_top");
+
+    // An edit goes along, as the draft the page restores (on the version it loads).
+    fireEvent.click(within(editor).getByRole("button", { name: "emit echo" }));
+    fireEvent.click(within(editor).getByRole("button", { name: "emit edit" }));
+    fireEvent.click(signIn);
+    expect(JSON.parse(window.localStorage.getItem(sceneDraftKey("scene-1"))!)).toMatchObject({
+      baseVersion: 2,
+      scenes: [{ id: "s1", name: "Edited" }],
+    });
+
+    // Back, the AI and another version: the page, in the whole window.
+    fireEvent.click(screen.getByRole("button", { name: "Open the scene's page" }));
+    expect(open).toHaveBeenLastCalledWith(embed.pageUrl, "_top");
+    fireEvent.click(panelToggle("AI"));
+    expect(open).toHaveBeenLastCalledWith(`${embed.pageUrl}#scene-editor-preview-ai`, "_top");
+    expect(screen.queryByTestId("ai-panel")).toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: "Version" }), { target: { value: "1" } });
+    expect(open).toHaveBeenLastCalledWith(`${embed.pageUrl}?version=1`, "_top");
+  });
+
+  it("offers a signed-in visitor Fork, which opens the scene's page with the edits", async () => {
+    render(<SceneEditorModal canFork={false} embed={embed} sceneId="scene-1" signedIn versions={versions} />);
     await screen.findByTestId("editor");
-    const open = screen.getByRole("link", { name: /Open in the store/ });
-    expect(open.getAttribute("href")).toBe(embed.pageUrl);
-    expect(open.getAttribute("target")).toBe("_blank");
-    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
-    expect(screen.queryByRole("combobox", { name: "Version" })).toBeNull();
+    const fork = screen.getByRole("link", { name: /Fork & save copy/ });
+    expect([fork.getAttribute("href"), fork.getAttribute("target")]).toEqual([embed.pageUrl, "_top"]);
     expect(screen.queryByRole("link", { name: /Sign in to edit/ })).toBeNull();
-    expect(screen.queryByRole("link", { name: /Download/ })).toBeNull();
   });
 
   it("tells the page framing it once the scene is in", async () => {

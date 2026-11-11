@@ -8,7 +8,6 @@ import type {
 } from "frameos-editor/react";
 import {
   ArrowLeft,
-  ExternalLink,
   FileArchive,
   GitFork,
   LogIn,
@@ -139,10 +138,12 @@ type SceneEditorModalProps = {
   embed?: SceneEditorEmbed | undefined;
 };
 
-/** An embedded workspace: Editor and Preview only, opened on `file` with the
- * preview on `device` and `memory`; nothing is read from or left in this
- * browser (panels, drafts, preview settings), so every visitor starts on the
- * same view; and one way out, the scene's own page in a new tab. */
+/** An embedded workspace: Editor and Preview, opened on `file` with the
+ * preview on `device` and `memory`, nothing read from this browser (panels,
+ * drafts, preview settings), so every visitor starts on the same view. The
+ * bar is the store's own, but what needs the whole page (Back, AI, another
+ * version, Sign in, Fork, Install, Download) opens the scene's page in the
+ * whole window, out of the frame, with the visitor's edits as a draft there. */
 export type SceneEditorEmbed = {
   /** The scene's page on the store. */
   pageUrl: string;
@@ -741,8 +742,9 @@ export type SceneEditorAction = {
   Icon: LucideIcon;
   /** A link (the zip download) rather than a button. */
   href?: string | undefined;
-  /** The link opens in a new tab (the embedded workspace's way out). */
-  newTab?: boolean | undefined;
+  /** Where a link opens: `_top` leaves the frame the embedded workspace is
+   * in for the whole window. A link's onSelect runs first. */
+  target?: "_blank" | "_top" | undefined;
   onSelect?: (() => void) | undefined;
   disabled?: boolean | undefined;
   title?: string | undefined;
@@ -765,8 +767,9 @@ function SceneEditorActionButton({ action }: { action: SceneEditorAction }) {
       <a
         className={className}
         href={action.href}
+        onClick={action.onSelect}
         title={action.title}
-        {...(action.newTab ? { rel: "noopener", target: "_blank" } : {})}
+        {...linkTarget(action.target)}
       >
         {content}
       </a>
@@ -777,6 +780,10 @@ function SceneEditorActionButton({ action }: { action: SceneEditorAction }) {
       {content}
     </button>
   );
+}
+
+function linkTarget(target: SceneEditorAction["target"]) {
+  return target === "_blank" ? { rel: "noopener", target } : target ? { target } : {};
 }
 
 /** The actions in menu order: the primary one first, the rest as in the bar. */
@@ -891,10 +898,13 @@ function SceneEditorActionsMenu({ actions }: { actions: readonly SceneEditorActi
                   className={className}
                   href={action.href}
                   key={action.key}
-                  onClick={() => close(false)}
+                  onClick={() => {
+                    action.onSelect?.();
+                    close(false);
+                  }}
                   role="menuitem"
                   title={action.title}
-                  {...(action.newTab ? { rel: "noopener", target: "_blank" } : {})}
+                  {...linkTarget(action.target)}
                 >
                   {content}
                 </a>
@@ -1542,10 +1552,8 @@ export function SceneEditorModal({
   selectedVersionRef.current = selectedVersion;
   const latestVersionRef = useRef(latestVersion);
   latestVersionRef.current = latestVersion;
-  // Embedded, the AI is left out: it needs an account, and its turns are
-  // the visitor's to spend on the store itself.
   const available: SceneEditorPanelAvailability = {
-    ai: canRemix && !embed,
+    ai: canRemix,
     preview: canPreview,
   };
   const embedRef = useRef(embed);
@@ -1588,9 +1596,11 @@ export function SceneEditorModal({
   // it on the next visit. Editing back to the published state (or saving)
   // clears the draft instead.
   const draftTimerRef = useRef<number | null>(null);
-  function persistDraftNow() {
+  function persistDraftNow(force = false) {
     draftTimerRef.current = null;
-    if (embedRef.current) {
+    // Embedded, an edit is kept only when the visitor takes it to the
+    // scene's page (breakOut).
+    if (embedRef.current && !force) {
       return;
     }
     const latest = latestScenesRef.current;
@@ -1932,6 +1942,31 @@ export function SceneEditorModal({
     };
   }, []);
 
+  // Embedded: leave the frame for the scene's page in the whole window,
+  // taking the visitor's edits along as the draft that page restores. Runs on
+  // a click, so the frame may navigate the window
+  // (allow-top-navigation-by-user-activation).
+  function carryEditsOut() {
+    if (draftTimerRef.current !== null) {
+      window.clearTimeout(draftTimerRef.current);
+    }
+    persistDraftNow(true);
+  }
+  function breakOut(url: string) {
+    carryEditsOut();
+    window.open(url, "_top");
+  }
+  /** The scene's page (the embed's own pageUrl), on another version or
+   * with other panels open. */
+  function fullPageUrl(options: { version?: number; hash?: string } = {}): string {
+    const url = new URL(embed?.pageUrl ?? window.location.href);
+    if (options.version !== undefined) {
+      url.searchParams.set("version", String(options.version));
+    }
+    url.hash = options.hash ?? "";
+    return url.toString();
+  }
+
   function commitPanels(next: SceneEditorPanels) {
     setPanels(next);
     if (embedRef.current) {
@@ -1960,6 +1995,11 @@ export function SceneEditorModal({
 
   function togglePanel(panel: SceneEditorPanelName) {
     if (!panels) {
+      return;
+    }
+    if (embed && panel === "ai") {
+      // The AI needs an account and the store's page: it opens there.
+      breakOut(fullPageUrl({ hash: sceneEditorHashFor({ ...panels, ai: true }) }));
       return;
     }
     if (narrow) {
@@ -2248,26 +2288,62 @@ export function SceneEditorModal({
     });
   }
 
+  // Embedded, the bar offers what the store's page does, but each opens that
+  // page in the whole window (with the visitor's edits), where it can be done.
+  const embedActions: SceneEditorAction[] = [];
+  if (embed) {
+    const pageUrl = fullPageUrl();
+    embedActions.push(
+      signedIn
+        ? {
+            Icon: GitFork,
+            emphasized: true,
+            href: pageUrl,
+            key: "fork",
+            label: "Fork & save copy",
+            onSelect: carryEditsOut,
+            primary: true,
+            target: "_top",
+            title: "Opens the scene's page, with your edits, to save them as a scene of your own",
+          }
+        : {
+            Icon: LogIn,
+            emphasized: true,
+            href: `${loginUrl}${loginUrl.includes("?") ? "&" : "?"}return_to=${encodeURIComponent(pageUrl)}`,
+            key: "signin",
+            label: "Sign in to edit",
+            onSelect: carryEditsOut,
+            primary: true,
+            target: "_top",
+            title: "Sign in, then keep your edits as a scene of your own on the scene's page",
+          },
+    );
+    if (downloadHref) {
+      embedActions.push({
+        Icon: FileArchive,
+        href: downloadHref,
+        key: "download",
+        label: "Download .zip",
+        target: "_top",
+        title: "Download the scene as a zip (the published version, not your edits)",
+      });
+    }
+    embedActions.push({
+      Icon: MonitorDown,
+      href: pageUrl,
+      key: "install",
+      label: "Install",
+      onSelect: carryEditsOut,
+      target: "_top",
+      title: "Opens the scene's page, to install it on a frame",
+    });
+  }
+
   return (
     // ph-no-capture: the scene's own diagram, node labels and settings.
     <div className="editor-modal ph-no-capture">
       <SceneEditorBar
-        actions={
-          embed
-            ? [
-                {
-                  Icon: ExternalLink,
-                  emphasized: true,
-                  href: embed.pageUrl,
-                  key: "open",
-                  label: "Open in the store",
-                  newTab: true,
-                  primary: true,
-                  title: "The scene's own page: install it on a frame, fork it, or ask the AI to change it",
-                },
-              ]
-            : actions
-        }
+        actions={embed ? embedActions : actions}
         leading={
           restoredDraft ? (
             <span
@@ -2285,14 +2361,26 @@ export function SceneEditorModal({
           ) : null
         }
       >
-        {embed ? null : <SceneEditorBackButton label="Back" onClick={goBack} />}
+        {embed ? (
+          <SceneEditorBackButton label="Open the scene's page" onClick={() => breakOut(fullPageUrl())} />
+        ) : (
+          <SceneEditorBackButton label="Back" onClick={goBack} />
+        )}
         <SceneEditorPanelToggles active={single} available={available} onToggle={togglePanel} panels={panels} />
-        {!embed && versionOptions.length > 0 && selectedVersion !== null ? (
+        {versionOptions.length > 0 && selectedVersion !== null ? (
           <select
             aria-label="Version"
             className="input editor-modal__version-select"
             onChange={(event) => {
-              if (event.target.value === manageVersionsValue) {
+              if (embed) {
+                // Another version, or its details: on the scene's page.
+                const version = Number(event.target.value);
+                breakOut(
+                  event.target.value === manageVersionsValue || !Number.isFinite(version)
+                    ? fullPageUrl()
+                    : fullPageUrl({ version }),
+                );
+              } else if (event.target.value === manageVersionsValue) {
                 setVersionsOpen(true);
               } else {
                 selectVersion(Number(event.target.value));
@@ -2306,10 +2394,10 @@ export function SceneEditorModal({
                 {versionOptionLabel(option, latestVersion)}
               </option>
             ))}
-            {info ? (
+            {info || embed ? (
               <>
                 <option disabled>──────</option>
-                <option value={manageVersionsValue}>{info.isOwner ? "Manage versions…" : "Version details…"}</option>
+                <option value={manageVersionsValue}>{info?.isOwner ? "Manage versions…" : "Version details…"}</option>
               </>
             ) : null}
           </select>
@@ -2320,7 +2408,7 @@ export function SceneEditorModal({
             className="pill"
             title={
               embed
-                ? "Explore and tweak freely; nothing you change here is kept"
+                ? "Explore and tweak freely; Sign in or Fork takes your edits to the scene's page"
                 : signedIn
                   ? "Explore and tweak freely; “Fork & save copy” is how an edit becomes yours"
                   : "Explore and tweak freely; sign in to keep an edit"

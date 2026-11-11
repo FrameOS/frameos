@@ -332,9 +332,9 @@ export default async function ScenePage({
   // Everything the workspace's Info panel shows, as plain JSON (the
   // workspace is a client component).
   // Embedded on another page: the workspace alone, for a public scene only
-  // (next.config.ts lets frameos.net frame `?embed=1`), nothing the visitor
-  // could keep or spend (no Save, Fork or AI), and the scene's page one
-  // click away in a new tab.
+  // (next.config.ts lets frameos.net frame `?embed=1`). Nothing is saved or
+  // spent in the frame: Sign in, Fork, Install and the AI open this page in
+  // the whole window, with the visitor's edits.
   if (embed) {
     if (isPrivate || scene.status !== "active" || pinnedVersion) {
       notFound();
@@ -345,14 +345,23 @@ export default async function ScenePage({
         <SceneEditorModal
           canFork={false}
           canPreview
-          canRemix={false}
+          canRemix
           canSave={false}
           description={shownListing.description}
+          downloadUrl={downloadHref}
           embed={{ ...embed, pageUrl }}
           height={device?.height ?? latestImages[0]?.height ?? null}
           loginUrl={new URL("/login", getCloudBaseUrl()).toString()}
           sceneId={scene.id}
           signedIn={Boolean(session?.accountId)}
+          // The bar's version list (each opens on the scene's page), and what
+          // a draft taken there is based on, as on the page itself.
+          versions={versions.map((version) => ({
+            createdAt: version.createdAt.toISOString(),
+            message: version.message,
+            version: version.version,
+            yankedAt: version.yankedAt ? version.yankedAt.toISOString() : null,
+          }))}
           width={device?.width ?? latestImages[0]?.width ?? null}
         />
       </main>
