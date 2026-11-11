@@ -541,11 +541,16 @@ static void run(const char *job)
         }
         unlock();
     }
-    if (strcmp(job, "scan") == 0 || fos_scenes_store_generation() != S->origins_generation) scan_origins();
+    bool scan = strcmp(job, "scan") == 0;
+    if (scan || fos_scenes_store_generation() != S->origins_generation) scan_origins();
     lock();
-    S->busy[0] = '\0';
-    snprintf(S->error, sizeof(S->error), "%s", error ? error : "");
-    snprintf(S->done, sizeof(S->done), "%s", error || strcmp(job, "scan") == 0 ? "" : done);
+    /* A re-read is nobody's: what the page says, and a tap waiting behind
+     * it, stay as they are. */
+    if (!scan) {
+        S->busy[0] = '\0';
+        snprintf(S->error, sizeof(S->error), "%s", error ? error : "");
+        snprintf(S->done, sizeof(S->done), "%s", error ? "" : done);
+    }
     unlock();
     if (fos_scenes_switcher_shown()) fos_client_render_now();
 }

@@ -284,9 +284,12 @@ proc run(job: Job) {.gcsafe.} =
     let origins = readOrigins()
     withLock factsLock:
       facts.origins = origins
-      facts.busy = ""
-      facts.error = error
-      facts.done = if error.len > 0: "" else: done
+      # A re-read is nobody's: what the page says, and a tap waiting behind
+      # it, stay as they are.
+      if job.action != "scan":
+        facts.busy = ""
+        facts.error = error
+        facts.done = if error.len > 0: "" else: done
 
 proc workerLoop() {.thread.} =
   while true:

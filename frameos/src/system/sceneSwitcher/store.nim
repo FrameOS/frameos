@@ -80,18 +80,17 @@ const
     "update", "Updating", "remove", "Deleting", "discard", "Discarding"]
   Done = ["install", "Installed. The frame shows it in a moment.",
     "preview", "The frame shows the preview in a moment.",
-    "update", "Updated. The frame shows the new version in a moment.",
-    "uptodate", "This is the newest version.",
+    "update", "Updated.", "uptodate", "This is the newest version.",
     "remove", "Deleted.", "discard", "Discarded."]
-  Errors = ["offline", "The frame is not online.",
-    "store_unavailable", "The scene store did not answer. Try again later.",
-    "too_many_scenes", "The frame holds as many scenes as it can. Delete one first.",
+  Errors = ["offline", "The frame is offline.",
+    "store_unavailable", "The store did not answer. Try again later.",
+    "too_many_scenes", "No room for another scene. Delete one first.",
     "last_scene", "A frame keeps one scene at least.",
-    "panel_locked", "Changes on the frame's screen are turned off for this frame.",
-    "frame_update_required", "This scene needs a newer FrameOS. Update the frame first.",
-    "no_room", "There is no room on the frame for this scene.",
-    "scene_not_allowed", "This scene cannot be installed on a frame.",
-    "rate_limited", "Too many changes at once. Try again in a few minutes.",
+    "panel_locked", "Changes on the screen are turned off for this frame.",
+    "frame_update_required", "This scene needs a newer FrameOS.",
+    "no_room", "Not enough room on the frame.",
+    "scene_not_allowed", "This scene cannot run on a frame.",
+    "rate_limited", "Too many changes. Try again in a few minutes.",
     "invalid_scene", "The store no longer offers this scene."]
 
 proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
@@ -164,7 +163,7 @@ proc note(facts: JsonNode): string =
   elif error.len > 0:
     result = lookup(Errors, error)
     if result.len == 0:
-      result = "That did not work (" & error & ")."
+      result = "That did not work."
   else:
     result = lookup(Done, facts{"done"}.getStr())
 
@@ -240,17 +239,19 @@ proc about(facts, scene: JsonNode): string =
     result.add "by "
     result.add by
 
+proc option(value, label: string): SvgNode =
+  result = el("option", "rounded-lg", txt(label))
+  result.attrs.add(("value", value))
+
 proc categorySelect(look: StoreLook, facts: JsonNode): SvgNode =
   var c = fieldBox(look)
   c.add " w-full"
   result = el("select", move c).on("on-change", HCategory)
   result.attrs.add(("value", facts{"category"}.getStr()))
+  result.children.add option("", "All scenes")
   let shelves = facts.categories
-  for i in -1 ..< shelves.elems.len:
-    let option = el("option", "rounded-lg",
-      txt(if i < 0: "All scenes" else: shelves.elems[i]{"title"}.getStr()))
-    option.attrs.add(("value", if i < 0: "" else: shelves.elems[i]{"slug"}.getStr()))
-    result.children.add option
+  for i in 0 ..< shelves.elems.len:
+    result.children.add option(shelves.elems[i]{"slug"}.getStr(), shelves.elems[i]{"title"}.getStr())
 
 proc small(look: StoreLook, text: sink string): SvgNode =
   ## A quieter line in the page's small size.
@@ -378,8 +379,6 @@ proc infoTree*(state, facts: JsonNode, look: StoreLook, sceneId, name: string, s
         text.addInt latest
         text.add " is available."
         body.children.add el("div", "", txt(move text))
-    elif busy == "info":
-      body.children.add look.small("Asking the store about it" & Ellipsis)
     elif known and error == "invalid_scene":
       body.children.add look.small("Not in the public store.")
   # What runs, went wrong or just worked; not the store's answer about the
@@ -416,20 +415,31 @@ proc storeHandle*(state, facts: JsonNode, handler: int, text, key, opener: strin
   ## the key a field heard; `opener` the scene the switcher was opened from
   ## (where a preview's Discard goes back to). `sceneId` gets the scene to
   ## show for `smShow`.
+  # One way out (no early `return`): each repeats the clean-up of everything
+  # live.
   let
     confirm = state{"confirm"}.getInt(-1)
     info = state{"info"}.getStr()
-    scenes = items(facts{"listing", "scenes"})
     row = if handler >= HPreview and handler < HInfoShow: handler mod 1000 else: -1
-    base = handler - max(row, 0)
   state.put("confirm", newJInt(-1))
-  if row >= scenes.elems.len:
-    return smNone
-  let
-    scene = if row >= 0: scenes.elems[row] else: nil
-    store = if row >= 0: scene{"id"}.getStr() else: ""
-    held = if row >= 0: facts.found("store", store) else: nil
-  if handler == HBack:
+  if row >= 0:
+    # A store scene's row: the scene, and its copy on the frame.
+    let scenes = items(facts{"listing", "scenes"})
+    if row < scenes.elems.len:
+      let
+        scene = scenes.elems[row]
+        store = scene{"id"}.getStr()
+        base = handler - row
+      if base == HPreview or base == HInstall:
+        storeAct(if base == HPreview: "preview" else: "install", store, name = scene{"name"}.getStr(), origin = opener)
+      elif base == HUpdate:
+        storeAct("update", store)
+      else:
+        let held = facts.found("store", store)
+        if not held.isNil:
+          sceneId = held{"id"}.getStr()
+          result = smShow
+  elif handler == HBack:
     state.put("draft", newJNull())
     result = smTiles
   elif handler == HQuery:
@@ -442,8 +452,8 @@ proc storeHandle*(state, facts: JsonNode, handler: int, text, key, opener: strin
     browse("category", text, 1)
   elif handler == HPrevPage or handler == HNextPage:
     browse("", "", max(1, facts{"page"}.getInt(1) + (if handler == HNextPage: 1 else: -1)))
-  elif handler == HInfoShow or (base == HShow and not held.isNil):
-    sceneId = if row >= 0: held{"id"}.getStr() else: info
+  elif handler == HInfoShow:
+    sceneId = info
     result = smShow
   elif handler == HInfoUpdate:
     storeAct("update", id = info)
@@ -457,9 +467,5 @@ proc storeHandle*(state, facts: JsonNode, handler: int, text, key, opener: strin
       state.put("confirm", newJInt(handler))
     else:
       storeAct(if handler == HInfoDiscard: "discard" else: "remove", id = info)
-  elif base == HPreview or base == HInstall:
-    storeAct(if base == HPreview: "preview" else: "install", store, name = scene{"name"}.getStr(), origin = opener)
-  elif base == HUpdate:
-    storeAct("update", store)
 
 {.pop.}
