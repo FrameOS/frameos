@@ -381,7 +381,7 @@ export function SceneEditorBody({
             />
           </div>
         ) : (
-          <div className="scene-editor-canvas scene-editor-canvas-full @container relative min-h-0 flex-1 overflow-hidden">
+          <div className="scene-editor-canvas @container relative min-h-0 flex-1 overflow-hidden">
             {selectedSceneId ? <Diagram sceneId={selectedSceneId} /> : null}
             {selectedSceneId ? (
               <div className="scene-diagram-overlay pointer-events-none absolute inset-0 z-50">

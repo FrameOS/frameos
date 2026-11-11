@@ -2591,11 +2591,6 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
   padding-right: calc(430px + 1.25rem);
 }
 
-.scene-editor-canvas.scene-editor-canvas-full {
-  height: 100vh;
-  min-height: 100vh;
-}
-
 .scene-diagram-corner-toolbar,
 .scene-diagram-node-toolbar {
   max-width: calc(100% - 1rem);
