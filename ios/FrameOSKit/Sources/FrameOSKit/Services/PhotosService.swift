@@ -95,9 +95,11 @@ extension FrameOSService {
         var attempt = 0
         while true {
             do {
-                try await uploadChunks(path: "/api/photos/upload", base: ["path": folder, "filename": filename],
-                                       data: data, chunkSize: 4 * 1024 * 1024, idLength: 32, chunkIndex: false, progress: progress)
-                return filename
+                let last = try await uploadChunks(path: "/api/photos/upload", base: ["path": folder, "filename": filename],
+                                                  data: data, chunkSize: 4 * 1024 * 1024, idLength: 32, chunkIndex: false,
+                                                  progress: progress)
+                // A taken name is stored as "name (2).jpg": the entry says.
+                return last["entry"]?["path"]?.stringValue ?? (folder.isEmpty ? filename : "\(folder)/\(filename)")
             } catch let error as APIError where error.status == 409 && error.code != "exists" && attempt == 0 {
                 attempt += 1
             }
@@ -177,9 +179,10 @@ extension FrameOSService {
             if let name = options.name, !name.isEmpty { body["name"] = .string(name) }
             let built = try await client.call("POST", "/api/photos/scene", body: .json(.object(body)))
             guard let scene = built["scene"] else { throw APIError(status: 0, message: "The album scene was not built.") }
+            // The store's moderation runs first: this can take over a minute.
             let created = try await client.call("POST", "/api/account/scenes", body: .json([
                 "name": scene["name"] ?? .string(options.name ?? path), "scenes": .array([scene]),
-            ]))
+            ]), timeout: 120)
             guard let storeId = created["scene"]?["id"]?.stringValue else {
                 throw APIError(status: 0, message: "The album scene could not be saved.")
             }

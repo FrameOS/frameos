@@ -48,7 +48,12 @@ public struct APIError: Error, LocalizedError, Sendable, Equatable {
         if retryAfter == nil, let header = headers["Retry-After"] as? String ?? headers["retry-after"] as? String {
             retryAfter = Double(header)
         }
-        if message.isEmpty, let text = String(data: data, encoding: .utf8), !text.isEmpty, text.count < 300,
+        if message.isEmpty, !code.isEmpty {
+            // A code without words of our own: the code, in words.
+            let spaced = code.replacingOccurrences(of: "_", with: " ")
+            message = spaced.prefix(1).uppercased() + spaced.dropFirst() + "."
+        }
+        if message.isEmpty, body == nil, let text = String(data: data, encoding: .utf8), !text.isEmpty, text.count < 300,
            !text.hasPrefix("<")
         {
             message = text
@@ -85,6 +90,15 @@ public struct APIError: Error, LocalizedError, Sendable, Equatable {
         case "missing_api_key": return "Add an OpenAI key in Settings to use AI."
         case "turn_in_progress": return "The AI is still answering the last message."
         case "invalid_frame": return "That frame is not on this account."
+        case "invalid_password": return "That password is not right."
+        case "second_factor_required": return "Type the code from your authenticator instead of the password."
+        case "interval_below_plan_floor": return "Your plan does not render this often. Choose a longer interval."
+        case "settings_not_supported_by_device": return "This frame does not take these settings."
+        case "invalid_settings": return "The frame did not take these values. Check them and try again."
+        case "scene_name_taken": return "You already have a scene with that name."
+        case "too_many_turns": return "The AI is busy with other messages. Try again in a moment."
+        case "no_preview": return "The frame shows no preview."
+        case "chunk_too_large", "too_large": return "That file is too large."
         default: return ""
         }
     }

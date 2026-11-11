@@ -327,6 +327,11 @@ struct ButtonMapView: View {
     @State private var changed = false
     @State private var adding = false
 
+    var limit: Int {
+        guard let service = app.service, let frame = app.frame(frameId) else { return 32 }
+        return service.eventMapLimit(frame)
+    }
+
     var body: some View {
         Form {
             Section {
@@ -344,10 +349,15 @@ struct ButtonMapView: View {
                     Text(ButtonBindings.describe(rule)).font(.callout).foregroundStyle(.secondary)
                 }
                 Button { adding = true } label: { Label("Add", systemImage: "plus") }
+                    .disabled(bindings.count + others.count >= limit)
             } header: {
                 Text("Buttons and swipes")
             } footer: {
-                Text("A bound press does its action whatever scene shows; the scene never hears it.")
+                if bindings.count + others.count >= limit {
+                    Text("This frame holds at most \(limit) rules.")
+                } else {
+                    Text("A bound press does its action whatever scene shows; the scene never hears it.")
+                }
             }
             Section {
                 AsyncButton {

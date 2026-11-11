@@ -76,7 +76,7 @@ public final class APIClient: @unchecked Sendable {
         let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
         // Paths may carry their own query (`/api/x?y=1`): split it off first.
         let pieces = wire.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
-        components.percentEncodedPath = basePath + ApiPaths.encodePath(String(pieces[0]))
+        components.percentEncodedPath = basePath + ApiPaths.encodeWirePath(String(pieces[0]))
         var items: [URLQueryItem] = []
         if pieces.count == 2 {
             items += URLComponents(string: "?" + pieces[1])?.queryItems ?? []
@@ -301,14 +301,23 @@ public enum ApiPaths {
     /// ids like `system/index` are a path on both planes' scene-image routes).
     public static func encodePath(_ path: String) -> String {
         var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "?#;%")
+        return path.addingPercentEncoding(withAllowedCharacters: allowed) ?? path
+    }
+
+    /// The last step before the wire: what a caller left raw is encoded,
+    /// what it already encoded (`segment`, `encodePath`) is kept as it is.
+    static func encodeWirePath(_ path: String) -> String {
+        var allowed = CharacterSet.urlPathAllowed
         allowed.remove(charactersIn: "?#;")
+        allowed.insert(charactersIn: "%")
         return path.addingPercentEncoding(withAllowedCharacters: allowed) ?? path
     }
 
     /// One path segment, slashes encoded too.
     public static func segment(_ value: String) -> String {
         var allowed = CharacterSet.urlPathAllowed
-        allowed.remove(charactersIn: "/?#;")
+        allowed.remove(charactersIn: "/?#;%")
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 

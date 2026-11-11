@@ -11,6 +11,8 @@ public struct CloudSettingsContract: Decodable, Sendable {
         public var since: String?
         public var restart: Bool?
         public var companion: String?
+        /// A profile's own rule, where it differs (the ESP32's 8-rule button map).
+        public var rule: JSONValue?
     }
 
     public var profiles: [String: [String: Entry]]
@@ -76,6 +78,11 @@ public struct CloudSettingsContract: Decodable, Sendable {
     /// The enum a key takes (`rotate`: 0/90/180/270, `scaling_mode`: ...).
     public func options(_ key: String) -> [JSONValue] {
         rules[key]?["enum"]?.arrayValue ?? []
+    }
+
+    /// The most items a list setting takes on this profile.
+    public func maxItems(_ key: String, profile: String) -> Int? {
+        (profiles[profile]?[key]?.rule ?? rules[key])?["maxItems"]?.intValue
     }
 
     public func range(_ key: String) -> ClosedRange<Double>? {

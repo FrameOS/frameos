@@ -80,6 +80,33 @@ public struct FrameStates: Sendable, Equatable {
     }
 }
 
+/// The frame's active layout (frontend/src/utils/sceneLayouts.ts
+/// activeFrameLayout): the one every scene on the list wears, with the
+/// settings the first of them has; nil while they differ or wear none.
+/// Scenes that join the frame wear it too (withActiveLayoutOnNewScenes).
+public enum SceneLayouts {
+    public static func ref(_ value: JSONValue?) -> JSONValue? {
+        guard let object = value?.objectValue, let sceneId = object["sceneId"]?.stringValueIfString, !sceneId.isEmpty else { return nil }
+        var ref: [String: JSONValue] = ["sceneId": .string(sceneId)]
+        if let state = object["state"]?.objectValue { ref["state"] = .object(state) }
+        return .object(ref)
+    }
+
+    public static func active(_ scenes: [JSONValue]) -> JSONValue? {
+        let isLayout: (JSONValue) -> Bool = { $0["settings"]?["isLayout"]?.boolValue == true }
+        let layoutIds = Set(scenes.filter(isLayout).compactMap { $0["id"]?.stringValue })
+        let contents = scenes.filter { !isLayout($0) }
+        guard !contents.isEmpty else { return nil }
+        let worn: [JSONValue?] = contents.map { scene in
+            guard let ref = ref(scene["layout"]), let id = ref["sceneId"]?.stringValue, layoutIds.contains(id) else { return nil }
+            return ref
+        }
+        let ids = Set(worn.map { $0?["sceneId"]?.stringValue ?? "" })
+        guard ids.count == 1, let only = ids.first, !only.isEmpty else { return nil }
+        return worn[0]
+    }
+}
+
 /// Legacy runtimes report a handed scene as `uploaded/<id>` (the SPA's
 /// publicSceneId, frontend/src/utils/systemScenes.ts).
 public enum SceneIds {
@@ -233,6 +260,11 @@ extension FrameOSService {
             var entry: [String: JSONValue] = ["scene_id": row["scene_id"] ?? .null]
             if let version = row["scene_version"], !version.isNull { entry["scene_version"] = version }
             entry["settings_groups"] = row["granted_settings_groups"] ?? []
+            // Omitted, the cloud keeps a row's button maps and layouts; a new row brings its own.
+            if row["position"] == nil {
+                if let maps = row["event_maps"] { entry["event_maps"] = maps }
+                if let layouts = row["layouts"] { entry["layouts"] = layouts }
+            }
             return .object(entry)
         }
         var body: [String: JSONValue] = ["scenes": .array(list)]
@@ -303,16 +335,31 @@ extension FrameOSService {
             try await client.call("POST", Self.framePath(frame.id), body: .json(["scenes": .array(scenes)]))
             return try await deploy(frame)
         case .cloud:
-            let name = scene["name"]?.stringValue ?? "Preview"
+            // As the SPA's cloudFrameScenesSave: the scene goes to the store
+            // without what belongs to the install (origin, button map,
+            // layout), those ride the row, the frame's snapshot becomes its
+            // cover, and installing grants it the keys it declares.
+            var content = scene.objectValue ?? [:]
+            let eventMap = content.removeValue(forKey: "eventMap")
+            let layout = content.removeValue(forKey: "layout")
+            content["origin"] = nil
+            let name = content["name"]?.stringValue ?? "Preview"
             let created = try await client.call("POST", "/api/account/scenes", body: .json([
-                "name": .string(name), "scenes": .array([scene]),
-            ]))
+                "name": .string(name), "scenes": .array([.object(content)]),
+                "preview_from_frame": ["frame_id": .string(frame.id), "scene_id": .string(sceneId)],
+            ]), timeout: 120)
             guard let storeId = created["scene"]?["id"]?.stringValue else {
                 throw APIError(status: 0, message: "The scene could not be saved to your scenes.")
             }
             let list = try await client.get(Self.framePath(frame.id, "/scenes"))
             var rows = list["scenes"]?.arrayValue ?? []
-            rows.append(["scene_id": .string(storeId)])
+            var row: [String: JSONValue] = [
+                "scene_id": .string(storeId),
+                "granted_settings_groups": .array(Self.serviceSettingGroups.map { .string($0) }),
+            ]
+            if let eventMap, !eventMap.isNull { row["event_maps"] = .object([sceneId: eventMap]) }
+            if let layout, !layout.isNull { row["layouts"] = .object([sceneId: layout]) }
+            rows.append(.object(row))
             try await pushCloudRows(frame, rows, activeSceneId: sceneId)
             return ActionOutcome(kind: .queued, message: "Installed. It stays on the frame's list.")
         }

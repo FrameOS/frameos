@@ -40,6 +40,47 @@ enum CloudFramesContractSource {
         "since": null
       },
       "event_map": {
+        "rule": {
+          "items": {
+            "keys": {
+              "as": {
+                "open": true,
+                "type": "object"
+              },
+              "emit": {
+                "enum": [
+                  "render",
+                  "setCurrentScene",
+                  "setSceneState",
+                  "turnOn",
+                  "turnOff",
+                  "toggleScreen",
+                  "sceneSwitcher",
+                  "sceneSettings",
+                  "back",
+                  "forward",
+                  "voiceChat"
+                ],
+                "type": "string"
+              },
+              "event": {
+                "maxLen": 63,
+                "minLen": 1,
+                "type": "string"
+              },
+              "match": {
+                "open": true,
+                "type": "object"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "type": "object"
+          },
+          "maxItems": 8,
+          "type": "array"
+        },
         "since": "2026.10.20"
       },
       "frame_settings_on_screen": {
@@ -47,6 +88,28 @@ enum CloudFramesContractSource {
       },
       "gpio_buttons": {
         "restart": true,
+        "rule": {
+          "items": {
+            "keys": {
+              "label": {
+                "format": "gpio_label",
+                "type": "string"
+              },
+              "pin": {
+                "max": 48,
+                "min": 0,
+                "type": "int"
+              }
+            },
+            "required": [
+              "pin",
+              "label"
+            ],
+            "type": "object"
+          },
+          "maxItems": 8,
+          "type": "array"
+        },
         "since": "2026.8.31"
       },
       "interval": {
@@ -60,6 +123,11 @@ enum CloudFramesContractSource {
       },
       "max_http_response_bytes": {
         "restart": true,
+        "rule": {
+          "max": 67108864,
+          "min": 1024,
+          "type": "int"
+        },
         "since": "2026.8.31"
       },
       "mic_clk_pin": {

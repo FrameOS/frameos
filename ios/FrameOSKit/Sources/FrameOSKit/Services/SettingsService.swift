@@ -130,6 +130,11 @@ extension FrameOSService {
     /// (queued as `set_settings`). Backend: `POST /api/frames/{id}` then a
     /// deploy ("Deploy settings").
     public func saveSettings(_ frame: Frame, _ changes: [String: JSONValue]) async throws -> ActionOutcome {
+        var changes = changes
+        if kind == .cloud, changes["timezone"] == .string("") {
+            // The contract wants a zone (minLen 1): no zone is not a setting.
+            changes["timezone"] = nil
+        }
         if changes.isEmpty { return ActionOutcome(kind: .done, message: "Nothing changed.") }
         switch kind {
         case .cloud:
@@ -168,6 +173,13 @@ extension FrameOSService {
     /// (read with ButtonBindings.split).
     public func eventMap(_ frame: Frame) -> [JSONValue]? {
         frame["event_map"]?.arrayValue
+    }
+
+    /// How many rules the frame's button map holds: an ESP32 keeps it in a
+    /// 1 KB slot (the contract's esp32 rule, maxItems 8), the rest 32.
+    public func eventMapLimit(_ frame: Frame) -> Int {
+        let contract = CloudSettingsContract.shared
+        return contract.maxItems("event_map", profile: CloudSettingsContract.profile(for: frame)) ?? 32
     }
 
     /// Replace the frame's button map. An empty list is a choice and stays

@@ -68,4 +68,38 @@ import Testing
         #expect(!SceneIds.refer(nil, "abc"))
         #expect(SceneIds.isBuiltIn("system/sceneSwitcher"))
     }
+
+    @Test func pathsAreEncodedOnce() {
+        let client = APIClient(account: Account(kind: .cloud, baseURL: Account.defaultCloudURL, email: ""), credentials: AccountCredentials())
+        let service = FrameOSService(client: client)
+        _ = service
+        let path = FrameOSService.framePath("f 1", "/scene_images/\(ApiPaths.encodePath("my scene/ä"))")
+        #expect(client.url(path).absoluteString == "https://cloud.frameos.net/api/frames/f%201/scene_images/my%20scene/%C3%A4")
+        #expect(client.url("/api/frames/x/scene_images/system/index").path == "/api/frames/x/scene_images/system/index")
+        #expect(client.url("/api/ai/chats/\(ApiPaths.segment("a%b"))").absoluteString.hasSuffix("/api/ai/chats/a%25b"))
+    }
+
+    @Test func unknownErrorCodesReadAsWords() {
+        let error = APIError.from(status: 400, data: Data(#"{"error":"weird_thing_happened"}"#.utf8), headers: [:])
+        #expect(error.message == "Weird thing happened.")
+        let known = APIError.from(status: 403, data: Data(#"{"error":"second_factor_required"}"#.utf8), headers: [:])
+        #expect(known.message.contains("code"))
+    }
+
+    @Test func activeLayout() {
+        let layout: JSONValue = ["id": "chrome", "settings": ["isLayout": true]]
+        let a: JSONValue = ["id": "a", "layout": ["sceneId": "chrome", "state": ["h": 40]]]
+        let b: JSONValue = ["id": "b", "layout": ["sceneId": "chrome"]]
+        let bare: JSONValue = ["id": "c"]
+        #expect(SceneLayouts.active([layout, a, b]) == ["sceneId": "chrome", "state": ["h": 40]])
+        #expect(SceneLayouts.active([layout, a, bare]) == nil, "the scenes differ")
+        #expect(SceneLayouts.active([a, b]) == nil, "a layout the frame no longer has")
+        #expect(SceneLayouts.active([layout]) == nil)
+    }
+
+    @Test func eventMapLimits() {
+        let contract = CloudSettingsContract.shared
+        #expect(contract.maxItems("event_map", profile: "esp32") == 8)
+        #expect(contract.maxItems("event_map", profile: "linux") == 32)
+    }
 }

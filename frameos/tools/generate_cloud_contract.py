@@ -431,6 +431,8 @@ def gen_swift(doc):
                     entry["restart"] = True
                 if spec.get("companion"):
                     entry["companion"] = spec["companion"]
+                if "rule" in pspec:
+                    entry["rule"] = pspec["rule"]
                 keys[name] = entry
         per_profile[profile] = keys
     rules = {name: spec["rule"] for name, spec in doc["settings"].items()}

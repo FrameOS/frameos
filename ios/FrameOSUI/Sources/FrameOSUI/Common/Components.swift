@@ -245,19 +245,20 @@ struct ReauthSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    if request.acceptsCode && !request.acceptsPassword {
+                    if request.acceptsCode {
+                        // With two-factor sign-in on, the cloud takes the code
+                        // (or a recovery code), never the password.
                         TextField("Code from your authenticator", text: $secret).codeInput()
-                    } else {
+                    } else if request.acceptsPassword {
                         SecureField("Password", text: $secret).passwordInput()
-                        if request.acceptsCode {
-                            Text("With two-factor sign-in on, type the 6-digit code instead.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }
+                    } else {
+                        Text("This account confirms with a passkey, which the app cannot use yet. Do this on the web.")
                     }
                 } header: {
                     Text("Confirm it is you")
                 } footer: {
                     if let error { Text(error).foregroundStyle(.red) }
+                    else if request.acceptsCode { Text("A recovery code works too.") }
                 }
             }
             .navigationTitle("Confirm")
@@ -268,7 +269,7 @@ struct ReauthSheet: View {
                     AsyncButton {
                         await confirm()
                     } label: { Text("Confirm") }
-                    .disabled(secret.isEmpty)
+                    .disabled(secret.isEmpty || (!request.acceptsCode && !request.acceptsPassword))
                 }
             }
         }
@@ -276,9 +277,9 @@ struct ReauthSheet: View {
 
     func confirm() async {
         guard let client = app.service?.client else { return }
-        let looksLikeCode = secret.count <= 12 && secret.allSatisfy { $0.isNumber || $0 == "-" }
+        let code = request.acceptsCode ? secret.trimmingCharacters(in: .whitespaces) : nil
         do {
-            try await AuthService.cloudReauth(client, password: looksLikeCode ? nil : secret, code: looksLikeCode ? secret : nil)
+            try await AuthService.cloudReauth(client, password: code == nil ? secret : nil, code: code)
             dismiss()
             await request.retry()
         } catch {

@@ -120,10 +120,21 @@ extension FrameOSService {
             // the scene declares (`settings_groups` ∩ declared), so naming
             // every group grants exactly that.
             let groups = grantSettings ?? Self.serviceSettingGroups
-            let body: [String: JSONValue] = [
+            var body: [String: JSONValue] = [
                 "scene_id": .string(storeId), "activate": .bool(activate),
                 "settings_groups": .array(groups.map { .string($0) }),
             ]
+            // A frame with an active layout has it on what joins (the SPA's layoutsWornBy).
+            let installed = (try? await installedScenes(frame).map(\.scene)) ?? []
+            if let active = SceneLayouts.active(installed),
+               let added = try? await client.get("/api/store/scenes/\(ApiPaths.segment(storeId))/scenes.json")
+            {
+                var layouts: [String: JSONValue] = [:]
+                for scene in added.arrayValue ?? [] where scene["settings"]?["isLayout"]?.boolValue != true {
+                    if let id = scene["id"]?.stringValue, SceneLayouts.ref(scene["layout"]) == nil { layouts[id] = active }
+                }
+                if !layouts.isEmpty { body["layouts"] = .object(layouts) }
+            }
             let answer = try await client.call("POST", Self.framePath(frame.id, "/scenes/add"), body: .json(.object(body)))
             let declared = answer["declared_settings_groups"]?.arrayValue?.compactMap(\.stringValue) ?? []
             let granted = answer["granted_settings_groups"]?.arrayValue?.compactMap(\.stringValue) ?? []
@@ -170,6 +181,8 @@ extension FrameOSService {
         // As on the cloud: a store scene is granted the keys it declares
         // (the tool grants only what the scenes declare among these).
         arguments["settings_groups"] = .array(Self.serviceSettingGroups.map { .string($0) })
+        // A frame with an active layout has it on what joins.
+        if let active = SceneLayouts.active(frame["scenes"]?.arrayValue ?? []) { arguments["layout"] = active }
         arguments["confirm"] = true
         arguments["frame_id"] = .number(Double(Int(frame.id) ?? 0))
         arguments["activate"] = .bool(activate)

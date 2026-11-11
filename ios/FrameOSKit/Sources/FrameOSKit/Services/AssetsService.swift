@@ -101,9 +101,12 @@ extension FrameOSService {
 
     /// The chunked upload both planes speak (assets and photos): raw bytes,
     /// `upload_id`, `offset`, `complete`. A failed chunk is retried twice.
+    /// Returns the plane's answer to the last chunk (the stored entry).
+    @discardableResult
     func uploadChunks(path: String, base: [String: String?], data: Data, chunkSize: Int, idLength: Int,
-                      chunkIndex: Bool, progress: (@Sendable (Double) -> Void)?) async throws
+                      chunkIndex: Bool, progress: (@Sendable (Double) -> Void)?) async throws -> JSONValue
     {
+        var last: JSONValue = .null
         let uploadId = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(idLength))
         var offset = 0
         var index = 0
@@ -118,8 +121,8 @@ extension FrameOSService {
             var tries = 0
             while true {
                 do {
-                    try await client.call("POST", path, query: query,
-                                          body: .data(chunk, contentType: "application/octet-stream"), timeout: 120)
+                    last = try await client.call("POST", path, query: query,
+                                                 body: .data(chunk, contentType: "application/octet-stream"), timeout: 120)
                     break
                 } catch let error as APIError where error.status != 409 && error.status < 500 && error.status != 0 {
                     throw error
@@ -132,6 +135,7 @@ extension FrameOSService {
             index += 1
             progress?(data.isEmpty ? 1 : Double(offset) / Double(data.count))
         } while offset < data.count
+        return last
     }
 
     public func createAssetFolder(_ frame: Frame, path: String) async throws {
