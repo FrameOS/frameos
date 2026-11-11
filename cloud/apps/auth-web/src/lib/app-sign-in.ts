@@ -180,6 +180,12 @@ export async function verifyAppSignInCode(
   }
 }
 
+// True for a sign-in page on its way back to the app (the return_to the
+// authorize route sends it with): the page is in the app's sign-in sheet.
+export function isAppSignInReturn(returnTo: string | null | undefined) {
+  return typeof returnTo === "string" && returnTo.startsWith("/api/auth/app/authorize?");
+}
+
 // The single-use key a code is spent under (rate-limit.ts claimSingleUse).
 export function appSignInCodeClaimKey(codeId: string) {
   return `app-sign-in-code:${codeId}`;

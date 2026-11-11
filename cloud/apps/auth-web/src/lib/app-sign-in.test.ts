@@ -4,6 +4,7 @@ import {
   appSignInCallbackUrl,
   createAppSignInCode,
   createAppSignInRequestToken,
+  isAppSignInReturn,
   pkceChallenge,
   pkceMatches,
   validChallenge,
@@ -154,5 +155,14 @@ describe("tokens", () => {
       .setExpirationTime("10m")
       .sign(derivedSigningKey("frameos-login-request"));
     expect(await verifyAppSignInRequestToken(forged)).toBeUndefined();
+  });
+});
+
+describe("isAppSignInReturn", () => {
+  it("is the authorize route's own return_to and nothing else", () => {
+    expect(isAppSignInReturn("/api/auth/app/authorize?request=abc")).toBe(true);
+    expect(isAppSignInReturn("/api/auth/app/authorize")).toBe(false);
+    expect(isAppSignInReturn("/frames")).toBe(false);
+    expect(isAppSignInReturn(undefined)).toBe(false);
   });
 });

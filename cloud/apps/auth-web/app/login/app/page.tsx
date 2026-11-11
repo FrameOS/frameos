@@ -22,6 +22,7 @@ export default async function AppSignInPage({ searchParams }: AppSignInPageProps
   if (!valid) {
     return (
       <AuthCard
+        inApp
         copy="This sign-in took too long. Go back to the app and start again."
         eyebrow="FrameOS app"
         title="Start again in the app"
@@ -38,6 +39,7 @@ export default async function AppSignInPage({ searchParams }: AppSignInPageProps
 
   return (
     <AuthCard
+      inApp
       copy="The FrameOS app on this device asks to sign in with the account this browser is signed in to. Continue only if you started this from the app."
       eyebrow="FrameOS app"
       title="Sign in to the app?"
