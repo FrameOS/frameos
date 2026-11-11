@@ -141,12 +141,16 @@ type SceneEditorModalProps = {
 /** An embedded workspace: Editor and Preview, opened on `file` with the
  * preview on `device` and `memory`, nothing read from this browser (panels,
  * drafts, preview settings), so every visitor starts on the same view. The
- * bar is the store's own, but what needs the whole page (Back, AI, another
- * version, Sign in, Fork, Install, Download) opens the scene's page in the
- * whole window, out of the frame, with the visitor's edits as a draft there. */
+ * bar is the store's own, but what needs the whole page (AI, another version,
+ * Sign in, Fork, Install, Download) opens the scene's page in the whole
+ * window, out of the frame, with the visitor's edits as a draft there; Back
+ * goes to the store's front page. */
 export type SceneEditorEmbed = {
   /** The scene's page on the store. */
   pageUrl: string;
+  /** The store's front page: where Back goes, as it does from the scene's
+   * page. */
+  storeUrl?: string | undefined;
   /** An app file to open on (`app.tsx`). */
   file?: string | undefined;
   /** The preview's Device menu entry (`sensecap-indicator`). */
@@ -2375,7 +2379,12 @@ export function SceneEditorModal({
         }
       >
         {embed ? (
-          <SceneEditorBackButton label="Open the scene's page" onClick={() => breakOut(fullPageUrl())} />
+          // Back, as from the scene's page: the store's front page, in the
+          // whole window. Leaving the scene, the edits stay behind.
+          <SceneEditorBackButton
+            label="Back to the scene store"
+            onClick={() => window.open(embed.storeUrl ?? fullPageUrl(), "_top")}
+          />
         ) : (
           <SceneEditorBackButton label="Back" onClick={goBack} />
         )}

@@ -379,6 +379,7 @@ describe("SceneEditorModal embedded", () => {
     file: "app.tsx",
     memory: "esp32",
     pageUrl: "https://scenes.frameos.net/s/clock",
+    storeUrl: "https://scenes.frameos.net/",
   };
 
   it("is Editor and Preview on the asked file and device, whatever this browser remembers", async () => {
@@ -454,9 +455,10 @@ describe("SceneEditorModal embedded", () => {
       scenes: [{ id: "s1", name: "Edited" }],
     });
 
-    // Back, the AI and another version: the page, in the whole window.
-    fireEvent.click(screen.getByRole("button", { name: "Open the scene's page" }));
-    expect(open).toHaveBeenLastCalledWith(embed.pageUrl, "_top");
+    // Back: the store's front page, as from the scene's own page.
+    fireEvent.click(screen.getByRole("button", { name: "Back to the scene store" }));
+    expect(open).toHaveBeenLastCalledWith(embed.storeUrl, "_top");
+    // The AI and another version: the scene's page, in the whole window.
     fireEvent.click(panelToggle("AI"));
     expect(open).toHaveBeenLastCalledWith(`${embed.pageUrl}#scene-editor-preview-ai`, "_top");
     expect(screen.queryByTestId("ai-panel")).toBeNull();

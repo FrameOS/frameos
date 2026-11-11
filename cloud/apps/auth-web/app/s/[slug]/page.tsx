@@ -22,6 +22,7 @@ import {
   getFramesUrl,
   getScenesBaseUrl,
   getStorePath,
+  getStoreUrl,
   hasDatabaseUrl,
 } from "../../../src/lib/env";
 import { formatDate, formatDateTime } from "../../../src/lib/format";
@@ -349,7 +350,7 @@ export default async function ScenePage({
           canSave={false}
           description={shownListing.description}
           downloadUrl={downloadHref}
-          embed={{ ...embed, pageUrl }}
+          embed={{ ...embed, pageUrl, storeUrl: getStoreUrl() }}
           height={device?.height ?? latestImages[0]?.height ?? null}
           loginUrl={new URL("/login", getCloudBaseUrl()).toString()}
           sceneId={scene.id}
