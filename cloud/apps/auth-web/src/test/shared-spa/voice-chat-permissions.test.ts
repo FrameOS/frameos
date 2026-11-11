@@ -109,11 +109,11 @@ describe("which frames have a microphone", () => {
 });
 
 describe("the three switches", () => {
-  it("default to settings, installed scenes and albums on, new scenes off, on both planes", () => {
+  it("default to every switch on, on both planes", () => {
     expect(DEFAULT_VOICE_PERMISSIONS).toEqual({
       change_settings: true,
       use_scenes: true,
-      create_scenes: false,
+      create_scenes: true,
       use_albums: true,
     });
     expect(defaultVoicePermissions).toEqual(DEFAULT_VOICE_PERMISSIONS);
@@ -122,22 +122,22 @@ describe("the three switches", () => {
 
   it("read the cloud's object with the defaults for what is missing", () => {
     expect(voicePermissionsOf(undefined)).toEqual(DEFAULT_VOICE_PERMISSIONS);
-    expect(voicePermissionsOf({ create_scenes: true })).toEqual({
+    expect(voicePermissionsOf({ create_scenes: false })).toEqual({
       change_settings: true,
       use_scenes: true,
-      create_scenes: true,
+      create_scenes: false,
       use_albums: true,
     });
     expect(voicePermissionsOf({ use_scenes: "no" })).toEqual(DEFAULT_VOICE_PERMISSIONS);
-    expect(readVoicePermissions({ create_scenes: true })).toEqual(voicePermissionsOf({ create_scenes: true }));
+    expect(readVoicePermissions({ create_scenes: false })).toEqual(voicePermissionsOf({ create_scenes: false }));
   });
 
   it("read the backend's device_config in either spelling, camelCase first", () => {
     expect(voicePermissionsFromDeviceConfig(undefined)).toEqual(DEFAULT_VOICE_PERMISSIONS);
-    expect(voicePermissionsFromDeviceConfig({ voiceUseScenes: false, voice_create_scenes: true })).toEqual({
+    expect(voicePermissionsFromDeviceConfig({ voiceUseScenes: false, voice_create_scenes: false })).toEqual({
       change_settings: true,
       use_scenes: false,
-      create_scenes: true,
+      create_scenes: false,
       use_albums: true,
     });
     expect(voicePermissionsFromDeviceConfig({ voice_use_albums: false }).use_albums).toBe(false);

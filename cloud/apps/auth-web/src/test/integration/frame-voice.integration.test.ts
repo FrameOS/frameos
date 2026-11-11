@@ -321,9 +321,8 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
     expect(heard.calls).toEqual([{ prompt: "Clock, Calendar", wavBytes: 44 + 2 * SECOND + 8000 }]);
 
     // The model saw the voice prompt, the frame's context, and ONLY the
-    // voice tools the owner's switches allow: a frame's token must not drive
-    // the account's tools, and new scenes on the frame (show_image) are off
-    // until the owner opts in.
+    // voice tools the owner's switches allow (all four on by default): a
+    // frame's token must not drive the account's tools.
     const first = script.requests[0]!;
     expect(first.instructions).toContain("You are the FrameOS voice assistant for one smart frame.");
     expect(first.tools.map((tool) => tool.name)).toEqual([
@@ -331,6 +330,9 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
       "activate_scene",
       "set_scene_state",
       "render_now",
+      "show_image",
+      "create_scene",
+      "change_scene",
       "rotate_frame",
       "list_albums",
       "show_album",
@@ -339,7 +341,7 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
     // No service-setting group granted to this frame's scenes: no picture source.
     expect(context).toContain("- Picture sources for show_image: none");
     expect(context).toContain("- Voice chat may: change the frame's settings (rotate_frame); use the installed scenes");
-    expect(context).toContain("- Voice chat may not: put new scenes on the frame (show_image, create_scene, change_scene)");
+    expect(context).toContain("- Voice chat may not: nothing is switched off");
     expect(context).toContain(`Calendar (${calendar.id})`);
     expect(context).toContain("spoke this into the frame's microphone");
     const outputs = Object.fromEntries(

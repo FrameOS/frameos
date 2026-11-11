@@ -106,7 +106,7 @@ def voice_chat_id(frame_id: int) -> str:
 # The cloud's copy is voice-permissions.ts (voiceToolPermissions,
 # defaultVoicePermissions): keep both alike.
 VOICE_PERMISSION_KEYS = ("change_settings", "use_scenes", "create_scenes", "use_albums")
-DEFAULT_VOICE_PERMISSIONS = {"change_settings": True, "use_scenes": True, "create_scenes": False, "use_albums": True}
+DEFAULT_VOICE_PERMISSIONS = {"change_settings": True, "use_scenes": True, "create_scenes": True, "use_albums": True}
 VOICE_PERMISSION_DEVICE_CONFIG_KEYS = {
     "change_settings": ("voiceChangeSettings", "voice_change_settings"),
     "use_scenes": ("voiceUseScenes", "voice_use_scenes"),
@@ -154,7 +154,7 @@ VOICE_PERMISSION_DESCRIPTIONS = {
 class VoicePermissions:
     change_settings: bool = True
     use_scenes: bool = True
-    create_scenes: bool = False
+    create_scenes: bool = True
     use_albums: bool = True
 
     def allows(self, tool: str) -> bool:
