@@ -69,6 +69,7 @@ export default tseslint.config(
       "**/src/test/shared-spa/frame-checkin.test.ts",
       "**/src/test/shared-spa/frame-firmware-update.test.ts",
       "**/src/test/shared-spa/deploy-progress.test.tsx",
+      "**/src/test/shared-spa/frame-status-fixtures.test.ts",
       "**/src/test/shared-spa/frame-image-sleep-badge.test.tsx",
       "**/src/test/shared-spa/frame-admin-ai-drawer.test.tsx",
       "**/src/test/shared-spa/ai-chat-drawer-url.test.tsx",
