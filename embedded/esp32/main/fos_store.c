@@ -68,8 +68,10 @@ typedef struct {
     int v;
 } origin_t;
 
-/* What the pages show and the work asked for: one block in PSRAM (made at
- * init), not internal RAM, which TLS needs. Everything in it is under s_lock. */
+/* What the pages show and the work asked for: one block in PSRAM, made when
+ * the switcher first asks (a board that never draws one, the C3's thin client,
+ * spends nothing), not internal RAM, which TLS needs. Everything in it is under
+ * s_lock. */
 typedef struct {
     char busy[WORD_LEN];
     char error[WORD_LEN];
@@ -104,13 +106,20 @@ static void unlock(void) { xSemaphoreGive(s_lock); }
 
 void fos_store_init(void)
 {
-    if (S != NULL) return;
-    S = fos_big_malloc(sizeof(store_t));
-    if (S == NULL) return;
-    memset(S, 0, sizeof(store_t));
-    S->page = 1;
-    S->origins_generation = UINT32_MAX;
-    s_lock = xSemaphoreCreateMutex();
+    if (s_lock == NULL) s_lock = xSemaphoreCreateMutex();
+}
+
+/* Under s_lock: the state, made the first time; false without memory. */
+static bool ready(void)
+{
+    if (S == NULL) {
+        S = fos_big_malloc(sizeof(store_t));
+        if (S == NULL) return false;
+        memset(S, 0, sizeof(store_t));
+        S->page = 1;
+        S->origins_generation = UINT32_MAX;
+    }
+    return true;
 }
 
 /* ------------------------------------------------------------------ facts */
@@ -158,6 +167,10 @@ char *fos_store_json(void)
 {
     if (!fos_config_frame_page_offered() || s_lock == NULL) return NULL;
     lock();
+    if (!ready()) {
+        unlock();
+        return NULL;
+    }
     /* What came from the store is read again once the scenes changed, off
      * this task. */
     if (S->origins_generation != fos_scenes_store_generation() && !s_running && !S->job[0]) start_job("scan");
@@ -222,7 +235,7 @@ void fos_store_action(const char *action, const char *args_json)
     lock();
     /* One thing at a time: the page says what is running. (A re-read of
      * what came from the store does not count: it runs after.) */
-    if (!S->busy[0]) {
+    if (ready() && !S->busy[0]) {
         const char *job = action;
         static const char *const known[] = {"browse", "info", "preview", "install", "update", "remove", "discard"};
         bool ok = false;

@@ -139,18 +139,34 @@ disk. That is what "installed" and Update are measured against.
   the page says what runs. On e-paper the page is drawn when the work is
   done, not when it starts: a refresh to say "Loading" costs seconds.
 
-## Flash
+## Flash and memory
 
-The ESP32-S3 image grows by the pages (`store.nim`, in the JSX layer the
-switcher already draws with), the switcher's tile and page handling, and
-`fos_store.c` (the facts as text, the scanner, the plane and the store
-calls through the HTTP client the firmware has). What keeps it small:
+The generic ESP32-S3 image is **27,040 bytes** bigger with it than without
+(3,230,800 → 3,257,840 B, 90.4% of the 3520K app slot; measured 2026-11-11
+against #702's head, both built in the CI image at the same path):
 
+| Part | Bytes |
+|---|---|
+| The two pages (`store.nim`: the trees, the rows, the handler) | 12.2 K |
+| The switcher's side (the tile, a long press, the pages' keys, `pageTree`) | 3.7 K |
+| `fos_store.c` + `fos_store_scan.c` | 5.1 K |
+| Their strings and type info | 6.0 K |
+
+The first build was 30.9 K. What took it down and keeps it there:
+
+- One shape of arguments for every action (`storeAct`), one finder for the
+  scenes from the store (`found`), the store's tile drawn by the scene tile's
+  own code, a scene's page naming the scene (the host finds its store scene).
 - No JSON tree in C for anything the store answers: its answers are handed
   to the page as they came, checked once by parsing, and the scenes of a
-  standalone install are split by a scanner.
-- What came from the store is read off each file by its keys, no parse.
-- No new layout code, no Nim checks in `store.nim`, numbered handlers, and
-  the same button, field and select shapes as the settings' page.
+  standalone install are split by a scanner. What came from the store is
+  read off each file by its keys.
+- No new layout code, no Nim checks in `store.nim`, numbered handlers, one
+  way out of a proc (an early `return` repeats every clean-up), and the
+  same button, field and select shapes as the settings' page.
 
-The PR states the measured cost (the firmware size comment).
+Internal RAM: 9 bytes of statics. The host's state (about 7 KB: the store's
+answers, the scenes from the store, the work asked for) is one PSRAM block,
+made when the switcher first asks, so a board that never draws the switcher
+(the C3's thin client) spends nothing. The task that does the work has an
+8 KB stack while it runs and is gone after.
