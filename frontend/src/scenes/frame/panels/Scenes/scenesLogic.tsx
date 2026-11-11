@@ -505,7 +505,7 @@ function formScenesOf(values: { frameForm: Partial<FrameType>; scenes: FrameScen
 }
 
 /** Saves `toSave` (on the cloud the save is the push), then pushes the frame's saved scenes without changing what it shows. */
-async function pushWithoutActivating(
+export async function pushWithoutActivating(
   frameId: FrameId,
   frame: FrameType,
   toSave: string[],

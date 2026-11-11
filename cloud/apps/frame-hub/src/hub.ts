@@ -83,7 +83,7 @@ import {
 import { previewWatchGraceMs } from "../../auth-web/src/lib/frame-sleep";
 import { keywordsRuntimeLacks } from "../../auth-web/src/lib/retired-apps";
 import { safeLocalOrigin } from "../../auth-web/src/lib/local-origin";
-import { buildScenesPatchMessage, scenesPatchMinVersion } from "../../auth-web/src/lib/scenes-patch";
+import { buildScenesPatchMessage, patchLeavesPanel, scenesPatchMinVersion } from "../../auth-web/src/lib/scenes-patch";
 import { frameosVersionSatisfies } from "../../auth-web/src/lib/store-versions";
 import { frameOwningBackend } from "../../auth-web/src/lib/frame-backend-owner";
 import { cloudRenderedMinIntervalSeconds } from "../../auth-web/src/lib/cloud-rendered";
@@ -329,6 +329,10 @@ interface DeviceSession {
   // set_scenes rows that went out as a scenes_patch and are waiting for the
   // device's answer: a refusal sends the row again as the whole list.
   patchedCommands: Set<string>;
+  // Those of them that leave the panel as it was (no scene to show, the scene
+  // showing not among the scenes put): the device renders nothing for them,
+  // so their scene_ack ends the deploy's bar (`scene_ack:unshown`).
+  unshownPatches: Set<string>;
   draining: boolean;
   frame: FrameRow;
   hello: Record<string, unknown> | undefined;
@@ -855,6 +859,7 @@ export async function startFrameHub(
         .select({
           frameosVersion: frames.frameosVersion,
           hardware: frames.hardware,
+          lastState: frames.lastState,
           scenesChecksum: frames.scenesChecksum,
         })
         .from(frames)
@@ -887,6 +892,10 @@ export async function startFrameHub(
           });
           if (patch) {
             session.patchedCommands.add(command.id);
+            const showing = isRecord(frame.lastState) ? frame.lastState.active_scene : undefined;
+            if (patchLeavesPanel(patch, showing)) {
+              session.unshownPatches.add(command.id);
+            }
             return patch;
           }
         }
@@ -1548,6 +1557,8 @@ export async function startFrameHub(
       return;
     }
     const ok = msg.ok === true;
+    // Sent again as the whole list, it renders after all.
+    if (!ok) session.unshownPatches.delete(commandId);
     // A patch the frame refused (its set is not the one the patch was worked
     // out from, or it does not know the verb): the same row, as the whole list.
     if (session.patchedCommands.delete(commandId) && !ok) {
@@ -1693,7 +1704,7 @@ export async function startFrameHub(
       .returning({ assignedChecksum: frames.assignedChecksum });
     await broadcastFrameUpdate(session.frame.id);
     if (checksum !== undefined) {
-      await foldSceneAckIntoDeployProgress(session.frame.id, checksum);
+      await foldSceneAckIntoDeployProgress(session, checksum);
     }
     // The device confirming the ASSIGNED set (not a preview push, not a
     // stale set) is the cloud's deploy-succeeded moment — the counterpart of
@@ -1711,10 +1722,13 @@ export async function startFrameHub(
   // The device says a scene set is live. It ends the `loading` stage of the
   // deploy's bar only when it is the set THAT deploy pushed: the record's id
   // is the set_scenes command that started it, and a preview push or a late
-  // ack of an older set must not move a newer push's bar.
-  async function foldSceneAckIntoDeployProgress(frameId: string, checksum: string) {
+  // ack of an older set must not move a newer push's bar. A patch that left
+  // the panel as it was renders nothing: its ack is the end of the bar, which
+  // otherwise waited at "rendering" until it went stale.
+  async function foldSceneAckIntoDeployProgress(session: DeviceSession, checksum: string) {
+    const frameId = session.frame.id;
     const [row] = await db
-      .select({ payload: frameCommands.payload })
+      .select({ id: frameCommands.id, payload: frameCommands.payload })
       .from(frameCommands)
       .innerJoin(frames, eq(frames.id, frameCommands.frameId))
       .where(
@@ -1729,9 +1743,8 @@ export async function startFrameHub(
     if (pushed !== checksum) {
       return;
     }
-    await moveDeployProgress(frameId, (record) =>
-      foldDeployProgress(record, "scene_ack", { now: new Date() }),
-    );
+    const signal = row && session.unshownPatches.delete(row.id) ? "scene_ack:unshown" : "scene_ack";
+    await moveDeployProgress(frameId, (record) => foldDeployProgress(record, signal, { now: new Date() }));
   }
 
   // What the frame reports it has (hello and `state` `hardware`: its
@@ -2462,6 +2475,7 @@ export async function startFrameHub(
       disconnecting: undefined,
       drainQueued: false,
       patchedCommands: new Set(),
+      unshownPatches: new Set(),
       draining: false,
       frame,
       handling: Promise.resolve(),
@@ -2685,6 +2699,7 @@ export async function startFrameHub(
         disconnecting: undefined,
         drainQueued: false,
         patchedCommands: new Set(),
+        unshownPatches: new Set(),
         draining: false,
         frame: row.frame,
         handling: Promise.resolve(),

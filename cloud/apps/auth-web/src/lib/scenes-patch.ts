@@ -26,6 +26,26 @@ function sceneId(scene: unknown): string | null {
   return typeof id === "string" && id ? id : null;
 }
 
+/**
+ * Whether a scenes_patch leaves the panel as it was: it names no scene to show,
+ * the scene showing stays in the set and is not among the scenes put. The
+ * firmware renders a patch only when it touches the scene showing, so for this
+ * one nothing renders and its scene_ack ends the deploy's bar
+ * (docs/deploy-progress-contract.json `scene_ack:unshown`). An install without
+ * activate is one. Not knowing the scene showing, a render is expected.
+ */
+export function patchLeavesPanel(patch: Record<string, unknown>, activeSceneId: unknown): boolean {
+  if (typeof patch.scene_id === "string" && patch.scene_id) {
+    return false;
+  }
+  if (typeof activeSceneId !== "string" || !activeSceneId) {
+    return false;
+  }
+  const order = Array.isArray(patch.order) ? patch.order : [];
+  const put = Array.isArray(patch.put) ? patch.put : [];
+  return order.includes(activeSceneId) && !put.some((scene) => sceneId(scene) === activeSceneId);
+}
+
 /** Each scene's digest by id, or null when the list is not one patches can describe. */
 export function sceneHashes(scenes: readonly unknown[]): Record<string, string> | null {
   const hashes: Record<string, string> = {};

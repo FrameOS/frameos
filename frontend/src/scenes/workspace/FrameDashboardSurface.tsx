@@ -791,8 +791,8 @@ function FrameScenesBlock({
   // an empty/absent form never blanks the list.
   const { scenes: liveScenes } = useValues(frameLogic({ frameId: frame.id }))
   const { cloudFrameScenesLoaded } = useValues(framesModel)
-  const { applyTemplate, setFrameFormValues } = useActions(frameLogic({ frameId: frame.id }))
-  const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
+  const { setFrameFormValues } = useActions(frameLogic({ frameId: frame.id }))
+  const { applyRemoteToFrame, installTemplate } = useActions(templatesLogic({ frameId: frame.id }))
   const [multiSelectEnabled, setMultiSelectEnabled] = useState(false)
   const [selectedSceneIds, setSelectedSceneIds] = useState<Set<string>>(() => new Set())
 
@@ -885,7 +885,7 @@ function FrameScenesBlock({
       if (templateDragData.repository) {
         applyRemoteToFrame(templateDragData.repository, templateDragData.template)
       } else {
-        applyTemplate(templateDragData.template)
+        installTemplate(templateDragData.template)
       }
       return
     }
@@ -1090,8 +1090,7 @@ export function FrameDashboardSurface({
   showSceneMenus = false,
   showAiBox = false,
 }: FrameDashboardSurfaceProps): JSX.Element {
-  const { applyTemplate } = useActions(frameLogic({ frameId: frame.id }))
-  const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
+  const { applyRemoteToFrame, installTemplate } = useActions(templatesLogic({ frameId: frame.id }))
 
   const handleFrameDragOver = (event: DragEvent<HTMLElement>) => {
     if (!Array.from(event.dataTransfer.types).includes(FRAMEOS_TEMPLATE_DRAG_TYPE)) {
@@ -1112,7 +1111,7 @@ export function FrameDashboardSurface({
     if (templateDragData.repository) {
       applyRemoteToFrame(templateDragData.repository, templateDragData.template)
     } else {
-      applyTemplate(templateDragData.template)
+      installTemplate(templateDragData.template)
     }
   }
 

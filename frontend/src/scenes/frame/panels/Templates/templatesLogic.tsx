@@ -29,7 +29,7 @@ import { isEsp32Frame } from '../../../workspace/workspaceSurfaces'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { templateWithSceneOrigins } from '../../../../utils/sceneOrigin'
 import { parseSceneUpload, sceneNeedsAutoArrange } from '../../../../utils/sceneUpload'
-import { scenesLogic } from '../Scenes/scenesLogic'
+import { pushWithoutActivating, scenesLogic } from '../Scenes/scenesLogic'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
 import { templateFavouriteId, type TemplateWithFavouriteId } from './templateFavourites'
 import { cloudDriveLogic } from './cloudDriveLogic'
@@ -60,6 +60,29 @@ async function pushAndActivateInstalled(frameId: FrameId, sceneId: string): Prom
   const logic = scenesLogic({ frameId })
   logic.mount()
   await logic.asyncActions.pushScene(sceneId, true, null)
+}
+
+/** What an install did besides the form: the scenes it added saved and
+ * pushed, and shown with `activateId` ("Install & activate"). Installed is on
+ * the frame's list and on the frame, as the cloud's assignment is. The form
+ * edit alone sat unsaved on a frame whose page was usually not open (the
+ * Scenes page's Install, a drop on a frame's tile), so the scene never got
+ * there. */
+async function pushInstalled(
+  frameId: FrameId,
+  formBefore: ReadonlySet<string>,
+  name: string | undefined,
+  activateId: string | null
+): Promise<void> {
+  if (activateId) {
+    await pushAndActivateInstalled(frameId, activateId)
+    return
+  }
+  const store = frameLogic({ frameId })
+  const added = sceneIdsAdded(formBefore, store.values.frameForm?.scenes).map((scene) => scene.id)
+  if (added.length && store.values.frame) {
+    await pushWithoutActivating(frameId, store.values.frame, added, `Installing ${name || 'the scene'}`, added[0])
+  }
 }
 
 /** The `detail` of a failed response, so the drawer's toast says what went
@@ -285,8 +308,14 @@ export interface templatesLogicActions {
     repository: RepositoryType
     template: TemplateType
   }
-  installAndActivateTemplate: (template: TemplateType) => {
-    template: TemplateType
+  installTemplate: (
+    template: Partial<TemplateType>,
+    openDrawer?: boolean,
+    activate?: boolean
+  ) => {
+    activate: boolean
+    openDrawer: boolean
+    template: Partial<TemplateType>
   }
   editLocalTemplate: (template: TemplateType) => {
     template: TemplateType
@@ -644,8 +673,9 @@ export const templatesLogic = kea<templatesLogicType>([
     editLocalTemplate: (template: TemplateType) => ({ template }),
     hideModal: true,
     saveRemoteAsLocal: (repository: RepositoryType, template: TemplateType) => ({ repository, template }),
-    // `activate`: "Install & activate", the scene pushed and shown now, in
-    // one push of that scene alone (scenesLogic.pushScene).
+    // An install puts the scene on the frame's list and pushes it, on both
+    // planes; `activate`: "Install & activate", shown now too, in one push of
+    // that scene alone (scenesLogic.pushScene).
     applyRemoteToFrame: (
       repository: RepositoryType,
       template: TemplateType,
@@ -658,7 +688,11 @@ export const templatesLogic = kea<templatesLogicType>([
       template,
     }),
     // The same for a scene saved on this backend (no catalog to load it from).
-    installAndActivateTemplate: (template: TemplateType) => ({ template }),
+    installTemplate: (template: Partial<TemplateType>, openDrawer?: boolean, activate?: boolean) => ({
+      template,
+      openDrawer: openDrawer ?? false,
+      activate: activate ?? false,
+    }),
     showRemoteTemplate: true,
     hideRemoteTemplate: true,
     showUploadTemplate: true,
@@ -1374,26 +1408,25 @@ export const templatesLogic = kea<templatesLogicType>([
                 : message,
             })
           }
-        } else if (activateId) {
+        } else {
           // A backend frame, or a catalog scene the cloud holds no store copy
-          // of: the scene drawer's "Push & activate", that scene alone.
-          await pushAndActivateInstalled(props.frameId, activateId)
+          // of: on the list and pushed, and with activate the scene drawer's
+          // "Push & activate", that scene alone.
+          await pushInstalled(props.frameId, formBefore, template.name, activateId)
         }
       } finally {
         actions.remoteInstallFinished(installId)
       }
     },
-    installAndActivateTemplate: async ({ template }) => {
+    installTemplate: async ({ template, openDrawer, activate }) => {
       const formBefore = new Set(
         (values.frameForm?.scenes ?? values.frame?.scenes ?? []).map((scene) => scene.id as string)
       )
-      actions.applyTemplate(template, false)
-      const activateId = sceneToActivate(
-        sceneIdsAdded(formBefore, frameLogic({ frameId: props.frameId }).values.frameForm?.scenes)
-      )
-      if (activateId) {
-        await pushAndActivateInstalled(props.frameId, activateId)
-      }
+      actions.applyTemplate(template, openDrawer)
+      const activateId = activate
+        ? sceneToActivate(sceneIdsAdded(formBefore, frameLogic({ frameId: props.frameId }).values.frameForm?.scenes))
+        : null
+      await pushInstalled(props.frameId, formBefore, template.name, activateId)
     },
     applyFavouriteTemplatesToFrame: async ({ openDrawer }) => {
       const templates: Partial<TemplateType>[] = []
