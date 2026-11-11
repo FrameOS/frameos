@@ -10,6 +10,7 @@ import {
   SCENE_DIAGRAM_FILE,
   isSceneApp,
   sceneAppEntries,
+  sceneAppWithFile,
   sceneFolderName,
   shownSelection,
   templateChangesFromJson,
@@ -99,6 +100,16 @@ describe("what the tree lists", () => {
     expect(shownSelection({ ...open, nodeId: "text1" }, [clock])).toEqual({ kind: "diagram" });
     expect(shownSelection(open, [photos])).toEqual({ kind: "diagram" });
     expect(shownSelection({ kind: "template" }, [])).toEqual({ kind: "template" });
+  });
+
+  it("finds the first of a scene's own apps that has a file, inline or shared", () => {
+    expect(sceneAppWithFile(clock, "app.tsx")).toBe("face");
+    expect(sceneAppWithFile(clock, "app.ts")).toBe("inline");
+    expect(sceneAppWithFile(clock, "config.json")).toBe("inline");
+    expect(sceneAppWithFile(clock, "nope.ts")).toBeNull();
+    // A built-in app's files are not the scene's, and a prototype key is no file.
+    expect(sceneAppWithFile(clock, "toString")).toBeNull();
+    expect(sceneAppWithFile(null, "app.tsx")).toBeNull();
   });
 });
 

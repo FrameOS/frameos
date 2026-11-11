@@ -8,6 +8,7 @@ import type {
 } from "frameos-editor/react";
 import {
   ArrowLeft,
+  ExternalLink,
   FileArchive,
   GitFork,
   LogIn,
@@ -39,6 +40,7 @@ import { applyAiScenes, type AiScenesEvent, type SceneJson } from "../lib/ai-sce
 import type { AiListingChanges } from "../lib/ai-chat-client";
 import { requiredSettingsForScenes } from "../lib/preview-settings";
 import { clearSceneDraft, readSceneDraft, writeSceneDraft } from "../lib/scene-draft";
+import { storeEmbedReadyMessage } from "../lib/store-embed";
 import { ownerActionErrorMessage } from "./ownerActionError";
 import {
   defaultSceneEditorPanels,
@@ -132,6 +134,24 @@ type SceneEditorModalProps = {
   /** Where Back goes when there is no same-origin page to go back to: the
    * store front. */
   backUrl?: string | undefined;
+  /** The workspace inside another site's page (`/s/<slug>?embed=1`, on
+   * frameos.net's front page). */
+  embed?: SceneEditorEmbed | undefined;
+};
+
+/** An embedded workspace: Editor and Preview only, opened on `file` with the
+ * preview on `device` and `memory`; nothing is read from or left in this
+ * browser (panels, drafts, preview settings), so every visitor starts on the
+ * same view; and one way out, the scene's own page in a new tab. */
+export type SceneEditorEmbed = {
+  /** The scene's page on the store. */
+  pageUrl: string;
+  /** An app file to open on (`app.tsx`). */
+  file?: string | undefined;
+  /** The preview's Device menu entry (`sensecap-indicator`). */
+  device?: string | undefined;
+  /** The preview's Memory limit board (`esp32`). */
+  memory?: string | undefined;
 };
 
 export type { EmbeddedSceneEditorApi, SceneJson };
@@ -585,6 +605,11 @@ export type SceneEditorPreviewOptions = {
   onImageRegistered?: ((sha256: string) => void) | undefined;
   /** The account settings page, linked from the panel's credentials hint. */
   settingsUrl?: string | undefined;
+  /** What the panel starts on, and whether it uses this browser's
+   * remembered settings (SceneLivePreviewPanel's props of those names). */
+  initialDevice?: string | undefined;
+  initialMemoryDevice?: string | undefined;
+  rememberSettings?: boolean | undefined;
 };
 
 type SceneEditorWorkspaceProps = {
@@ -616,6 +641,9 @@ type SceneEditorWorkspaceProps = {
   template?: SceneTemplateMetadata | undefined;
   /** Edits to template.json; absent: read only (a visitor's playground). */
   onTemplateChanged?: ((changes: Partial<SceneTemplateMetadata>) => void) | undefined;
+  /** The editor opens on this file of the shown scene's first app that has
+   * it (`app.tsx`), instead of template.json or the diagram. */
+  initialAppFile?: string | undefined;
 };
 
 /** The store's categories as template.json's Category field offers them. */
@@ -713,6 +741,8 @@ export type SceneEditorAction = {
   Icon: LucideIcon;
   /** A link (the zip download) rather than a button. */
   href?: string | undefined;
+  /** The link opens in a new tab (the embedded workspace's way out). */
+  newTab?: boolean | undefined;
   onSelect?: (() => void) | undefined;
   disabled?: boolean | undefined;
   title?: string | undefined;
@@ -732,7 +762,12 @@ function SceneEditorActionButton({ action }: { action: SceneEditorAction }) {
   );
   if (action.href !== undefined) {
     return (
-      <a className={className} href={action.href} title={action.title}>
+      <a
+        className={className}
+        href={action.href}
+        title={action.title}
+        {...(action.newTab ? { rel: "noopener", target: "_blank" } : {})}
+      >
         {content}
       </a>
     );
@@ -859,6 +894,7 @@ function SceneEditorActionsMenu({ actions }: { actions: readonly SceneEditorActi
                   onClick={() => close(false)}
                   role="menuitem"
                   title={action.title}
+                  {...(action.newTab ? { rel: "noopener", target: "_blank" } : {})}
                 >
                   {content}
                 </a>
@@ -1087,6 +1123,7 @@ export function SceneEditorWorkspace({
   onClosePanel,
   template,
   onTemplateChanged,
+  initialAppFile,
 }: SceneEditorWorkspaceProps) {
   const resizes: Record<SceneEditorPanelName, Resize> = {
     ai: useResizableWidth(panelWidths.ai),
@@ -1237,6 +1274,7 @@ export function SceneEditorWorkspace({
               info === undefined ? undefined : <div className="editor-modal__template-info">{info}</div>
             }
             initialFile={info === undefined ? "diagram" : "template"}
+            initialAppFile={initialAppFile}
           />
         ) : null}
       </div>
@@ -1292,6 +1330,11 @@ export function SceneEditorWorkspace({
                 scenes={preview.scenes}
                 settingsUrl={preview.settingsUrl}
                 width={width}
+                {...(preview.initialDevice !== undefined ? { initialDevice: preview.initialDevice } : {})}
+                {...(preview.initialMemoryDevice !== undefined
+                  ? { initialMemoryDevice: preview.initialMemoryDevice }
+                  : {})}
+                {...(preview.rememberSettings === false ? { rememberSettings: false } : {})}
               />
             ) : null}
           </aside>
@@ -1414,6 +1457,7 @@ export function SceneEditorModal({
   pinnedVersion = null,
   info,
   backUrl = "/",
+  embed,
 }: SceneEditorModalProps) {
   const router = useRouter();
   // null until mounted: the URL hash and the browser's memory decide the
@@ -1498,10 +1542,22 @@ export function SceneEditorModal({
   selectedVersionRef.current = selectedVersion;
   const latestVersionRef = useRef(latestVersion);
   latestVersionRef.current = latestVersion;
+  // Embedded, the AI is left out: it needs an account, and its turns are
+  // the visitor's to spend on the store itself.
   const available: SceneEditorPanelAvailability = {
-    ai: canRemix,
+    ai: canRemix && !embed,
     preview: canPreview,
   };
+  const embedRef = useRef(embed);
+  embedRef.current = embed;
+  // Embedded: tell the page framing the workspace that its scene is in, so
+  // it can swap its stand-in for it (nothing secret: the message is a type).
+  const embedded = embed !== undefined;
+  useEffect(() => {
+    if (embedded && scenes && window.parent !== window) {
+      window.parent.postMessage({ type: storeEmbedReadyMessage }, "*");
+    }
+  }, [embedded, scenes]);
   const availableRef = useRef(available);
   availableRef.current = available;
   useEditorStylesheet(true);
@@ -1534,6 +1590,9 @@ export function SceneEditorModal({
   const draftTimerRef = useRef<number | null>(null);
   function persistDraftNow() {
     draftTimerRef.current = null;
+    if (embedRef.current) {
+      return;
+    }
     const latest = latestScenesRef.current;
     if (!latest || latest.length === 0) {
       return;
@@ -1682,7 +1741,7 @@ export function SceneEditorModal({
       // picks up where the edits stopped — but only on the version it was
       // made on; a version published since (or another one picked from the
       // dropdown) loads clean, with the draft kept for its own version.
-      const draft = readSceneDraft(sceneId);
+      const draft = embedRef.current ? null : readSceneDraft(sceneId);
       if (draft && draft.baseVersion === (version ?? latestVersionRef.current)) {
         latestScenesRef.current = draft.scenes;
         setPreviewScenes(draft.scenes);
@@ -1831,6 +1890,15 @@ export function SceneEditorModal({
   const promptReadRef = useRef(false);
   useEffect(() => {
     const sync = () => {
+      if (embedRef.current) {
+        // The same view for everyone: no hash, no remembered set.
+        const next = constrainPanels(defaultSceneEditorPanels, availableRef.current);
+        if (next.preview) {
+          setPreviewScenes(latestScenesRef.current);
+        }
+        setPanels(next);
+        return;
+      }
       const hash = window.location.hash;
       const fromHash = sceneEditorPanelsForHash(hash);
       let next = constrainPanels(
@@ -1866,6 +1934,9 @@ export function SceneEditorModal({
 
   function commitPanels(next: SceneEditorPanels) {
     setPanels(next);
+    if (embedRef.current) {
+      return;
+    }
     storePanels(next);
     // Keep the URL truthful (a reload or a shared link reopens the same
     // view) without adding a history entry Back would have to step through.
@@ -2181,7 +2252,22 @@ export function SceneEditorModal({
     // ph-no-capture: the scene's own diagram, node labels and settings.
     <div className="editor-modal ph-no-capture">
       <SceneEditorBar
-        actions={actions}
+        actions={
+          embed
+            ? [
+                {
+                  Icon: ExternalLink,
+                  emphasized: true,
+                  href: embed.pageUrl,
+                  key: "open",
+                  label: "Open in the store",
+                  newTab: true,
+                  primary: true,
+                  title: "The scene's own page: install it on a frame, fork it, or ask the AI to change it",
+                },
+              ]
+            : actions
+        }
         leading={
           restoredDraft ? (
             <span
@@ -2199,9 +2285,9 @@ export function SceneEditorModal({
           ) : null
         }
       >
-        <SceneEditorBackButton label="Back" onClick={goBack} />
+        {embed ? null : <SceneEditorBackButton label="Back" onClick={goBack} />}
         <SceneEditorPanelToggles active={single} available={available} onToggle={togglePanel} panels={panels} />
-        {versionOptions.length > 0 && selectedVersion !== null ? (
+        {!embed && versionOptions.length > 0 && selectedVersion !== null ? (
           <select
             aria-label="Version"
             className="input editor-modal__version-select"
@@ -2233,9 +2319,11 @@ export function SceneEditorModal({
           <span
             className="pill"
             title={
-              signedIn
-                ? "Explore and tweak freely; “Fork & save copy” is how an edit becomes yours"
-                : "Explore and tweak freely; sign in to keep an edit"
+              embed
+                ? "Explore and tweak freely; nothing you change here is kept"
+                : signedIn
+                  ? "Explore and tweak freely; “Fork & save copy” is how an edit becomes yours"
+                  : "Explore and tweak freely; sign in to keep an edit"
             }
           >
             Playground — changes are not saved
@@ -2330,7 +2418,11 @@ export function SceneEditorModal({
           sceneId,
           scenes: previewScenes,
           settingsUrl,
+          initialDevice: embed?.device,
+          initialMemoryDevice: embed?.memory,
+          rememberSettings: !embed,
         }}
+        initialAppFile={embed?.file}
         sceneId={selectedSceneId}
         scenes={scenes}
         theme={theme}

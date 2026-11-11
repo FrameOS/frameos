@@ -51,7 +51,13 @@ import { ensurePortalRoots } from './portalRoots'
 import { frameLogic } from '../scenes/frame/frameLogic'
 import { sanitizeIncomingScenes } from './sanitizeIncomingScenes'
 import { SceneFileTree } from './SceneFileTree'
-import { SCENE_DIAGRAM_FILE, sceneAppEntries, sceneFolderName, type SceneTemplateMetadata } from './sceneFiles'
+import {
+  SCENE_DIAGRAM_FILE,
+  sceneAppEntries,
+  sceneAppWithFile,
+  sceneFolderName,
+  type SceneTemplateMetadata,
+} from './sceneFiles'
 import { sceneFileTreeLogic } from './sceneFileTreeLogic'
 import { TemplateFile, type TemplateCategoryOption } from './TemplateFile'
 
@@ -124,6 +130,10 @@ export interface EmbeddedSceneEditorProps {
   /** The file the editor opens on: the first scene's diagram (default) or
    * template.json. Read once, on the first init. */
   initialFile?: 'template' | 'diagram'
+  /** Opens on this file of the shown scene's first app that has it
+   * (`app.tsx`, say) instead of `initialFile`, when one does. Read once, on
+   * the first init. */
+  initialAppFile?: string
 }
 
 // The scene editor as a plain React component: render it inside any React
@@ -195,7 +205,24 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
   onSelectedSceneChangedRef.current = props.onSelectedSceneChanged
   const selectedSceneIdRef = useRef(selectedSceneId)
   selectedSceneIdRef.current = selectedSceneId
-  const { syncScene } = useActions(sceneFileTreeLogic(logicProps))
+  const { syncScene, openAppFile } = useActions(sceneFileTreeLogic(logicProps))
+  // initialAppFile: once, when the first scene is shown. The pane shows the
+  // file once the app's files have loaded (sceneFileTreeLogic's
+  // pendingAppFile, AppFileHeader).
+  const initialAppFileDoneRef = useRef(false)
+  useEffect(() => {
+    const file = props.initialAppFile
+    if (!file || !initialized || !selectedSceneId || initialAppFileDoneRef.current) {
+      return
+    }
+    initialAppFileDoneRef.current = true
+    const scene = embedFrameLogic(logicProps).values.scenes?.find((candidate) => candidate.id === selectedSceneId)
+    const nodeId = sceneAppWithFile(scene, file)
+    if (nodeId) {
+      openAppFile(selectedSceneId, nodeId, file)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialized, selectedSceneId])
   useEffect(() => {
     onSelectedSceneChangedRef.current?.(selectedSceneId)
     if (selectedSceneId) {
@@ -623,8 +650,27 @@ function FilePath({ parts, suffix }: { parts: string[]; suffix?: JSX.Element | n
  * (once a second row above the code, EditApp's toolbar). */
 function AppFileHeader({ scene, nodeId, label }: { scene: FrameScene; nodeId: string; label: string }): JSX.Element {
   const logic = editAppLogic({ frameId: EMBED_FRAME_ID, sceneId: scene.id, nodeId })
-  const { activeFile, hasChanges, requiresCompiledOnSave } = useValues(logic)
-  const { saveChanges, discardChanges } = useActions(logic)
+  const { activeFile, hasChanges, requiresCompiledOnSave, sourcesLoading, filenames } = useValues(logic)
+  const { saveChanges, discardChanges, setActiveFile } = useActions(logic)
+  // A file asked for before the app had its files (sceneFileTreeLogic's
+  // pendingAppFile, a host's initialAppFile): shown once they are in, over
+  // the load's own pick. Here, in the pane that shows the app, because the
+  // tree's folders are not drawn while a narrow editor folds the tree away.
+  const { pendingAppFile } = useValues(sceneFileTreeLogic({ frameId: EMBED_FRAME_ID }))
+  const { appFileOpened } = useActions(sceneFileTreeLogic({ frameId: EMBED_FRAME_ID }))
+  useEffect(() => {
+    if (
+      !sourcesLoading &&
+      pendingAppFile &&
+      pendingAppFile.sceneId === scene.id &&
+      pendingAppFile.nodeId === nodeId &&
+      filenames.includes(pendingAppFile.file)
+    ) {
+      setActiveFile(pendingAppFile.file)
+      appFileOpened()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourcesLoading, pendingAppFile, filenames, scene.id, nodeId])
   return (
     <>
       <FilePath

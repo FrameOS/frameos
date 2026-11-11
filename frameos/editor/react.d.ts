@@ -90,6 +90,10 @@ export interface EmbeddedSceneEditorProps {
   /** The file the editor opens on: the first scene's diagram (default) or
    * template.json. Read once, on the first init. */
   initialFile?: 'template' | 'diagram' | undefined
+  /** Opens on this file of the shown scene's first app that has it
+   * (`app.tsx`, say) instead of `initialFile`, when one does. Read once, on
+   * the first init. */
+  initialAppFile?: string | undefined
 }
 
 export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Element

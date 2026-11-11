@@ -177,3 +177,33 @@ describe("Next.js security headers", () => {
     }
   });
 });
+
+describe("the store's embed mode", () => {
+  async function embedRule(phase: string) {
+    const rules = (await createNextConfig(phase).headers?.()) ?? [];
+    const catchAllIndex = rules.findIndex((rule) => rule.source === "/(.*)");
+    const index = rules.findIndex((rule) => rule.source === "/s/:slug");
+    return { catchAllIndex, index, rule: rules[index] };
+  }
+
+  it("lets frameos.net, and nothing else, frame a scene page asked for with ?embed=1", async () => {
+    const { catchAllIndex, index, rule } = await embedRule(PHASE_PRODUCTION_SERVER);
+    // After the catch-all, whose frame-ancestors 'none' it replaces: a later rule wins.
+    expect(index).toBeGreaterThan(catchAllIndex);
+    expect(rule!.has).toEqual([{ key: "embed", type: "query", value: "1" }]);
+    const headers = Object.fromEntries(rule!.headers.map((header) => [header.key, header.value]));
+    expect(headers["Content-Security-Policy"]).toContain(
+      "frame-ancestors https://frameos.net https://www.frameos.net;",
+    );
+    expect(headers["Content-Security-Policy"]).not.toContain("localhost");
+    expect(headers["X-Frame-Options"]).toBe("SAMEORIGIN");
+    // Every other page keeps refusing to be framed.
+    expect(await contentSecurityPolicy(PHASE_PRODUCTION_SERVER)).toContain("frame-ancestors 'none'");
+  });
+
+  it("lets a localhost page frame it on the dev server, for the docs site's own", async () => {
+    const { rule } = await embedRule(PHASE_DEVELOPMENT_SERVER);
+    const policy = rule!.headers.find((header) => header.key === "Content-Security-Policy")!.value;
+    expect(policy).toContain("frame-ancestors https://frameos.net https://www.frameos.net http://localhost:* http://127.0.0.1:*;");
+  });
+});

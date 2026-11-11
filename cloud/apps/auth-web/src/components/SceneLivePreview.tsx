@@ -106,6 +106,16 @@ type SceneLivePreviewPanelProps = {
   /** The size the preview draws at, on mount and after every Resize or
    * rotate: the workspace's AI panel renders at it. */
   onViewportChange?: ((size: { width: number; height: number }) => void) | undefined;
+  /** The Device menu's panel to start on (`sensecap-indicator`), with its
+   * inks; `width` and `height` should be its size. */
+  initialDevice?: string | undefined;
+  /** The Memory limit's board to start on (`esp32`). */
+  initialMemoryDevice?: string | undefined;
+  /** False: the panel neither reads nor writes this browser's remembered
+   * preview settings (Dither, Auto apply, the device, Fit photos), so it
+   * starts the same for everyone — a workspace embedded in another site's
+   * page. */
+  rememberSettings?: boolean | undefined;
 };
 
 type SceneJsonLike = { id: string } & Record<string, unknown>;
@@ -281,6 +291,9 @@ export function SceneLivePreviewPanel({
   onImageRegistered,
   settingsUrl,
   onViewportChange,
+  initialDevice,
+  initialMemoryDevice,
+  rememberSettings = true,
 }: SceneLivePreviewPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -427,6 +440,9 @@ export function SceneLivePreviewPanel({
   // scene — there every render is a deliberate click. Remembered per browser.
   const [autoApply, setAutoApply] = useState(false);
   useEffect(() => {
+    if (!rememberSettings) {
+      return;
+    }
     try {
       setAutoApply(window.localStorage.getItem(AUTO_APPLY_STORAGE_KEY) === "1");
     } catch {
@@ -435,6 +451,9 @@ export function SceneLivePreviewPanel({
   }, []);
   function toggleAutoApply(checked: boolean) {
     setAutoApply(checked);
+    if (!rememberSettings) {
+      return;
+    }
     try {
       window.localStorage.setItem(AUTO_APPLY_STORAGE_KEY, checked ? "1" : "0");
     } catch {
@@ -446,8 +465,11 @@ export function SceneLivePreviewPanel({
   // device's own Floyd-Steinberg, to that panel's measured inks or greys.
   // A full-colour preview flatters a scene; six inks is what the frame has.
   // Null is off. Remembered per browser, like Auto apply.
-  const [panel, setPanel] = useState<PanelPaletteKey | null>(null);
+  const [panel, setPanel] = useState<PanelPaletteKey | null>(() => previewDeviceFor(initialDevice)?.panel ?? null);
   useEffect(() => {
+    if (!rememberSettings) {
+      return;
+    }
     try {
       const stored = window.localStorage.getItem(PANEL_STORAGE_KEY);
       if (stored && panelPalettes.some((entry) => entry.key === stored)) {
@@ -466,6 +488,9 @@ export function SceneLivePreviewPanel({
     // The frame on screen is repainted through the new palette; no re-render
     // is needed, it is the same picture.
     previewRef.current?.setPanelPalette(next);
+    if (!rememberSettings) {
+      return;
+    }
     try {
       window.localStorage.setItem(PANEL_STORAGE_KEY, next ?? "");
     } catch {
@@ -478,6 +503,9 @@ export function SceneLivePreviewPanel({
   const [correction, setCorrection] = useState<AssetColorProfile>(() => defaultAssetColorProfile());
   const [showCorrection, setShowCorrection] = useState(false);
   useEffect(() => {
+    if (!rememberSettings) {
+      return;
+    }
     try {
       const fit = window.localStorage.getItem(FIT_STORAGE_KEY);
       if (fit !== null) {
@@ -497,6 +525,9 @@ export function SceneLivePreviewPanel({
     const hook = beforeDitherFor(fitPhotos, correction);
     beforeDitherRef.current = hook;
     previewRef.current?.setBeforeDither(hook);
+    if (!rememberSettings) {
+      return;
+    }
     try {
       window.localStorage.setItem(FIT_STORAGE_KEY, fitPhotos ? "1" : "0");
       window.localStorage.setItem(CORRECTION_STORAGE_KEY, serializeAssetColorProfile(correction));
@@ -509,8 +540,15 @@ export function SceneLivePreviewPanel({
   // scene too heavy for that frame fails here instead of on hardware. The
   // ceiling is applied when the runtime boots, so changing it restarts the
   // runtime the way Resize does. Remembered per browser, like Dither.
-  const [device, setDevice] = useState<string | null>(null);
+  const [device, setDevice] = useState<string | null>(() =>
+    initialMemoryDevice && devicePresets.some((entry) => entry.key === initialMemoryDevice)
+      ? initialMemoryDevice
+      : null,
+  );
   useEffect(() => {
+    if (!rememberSettings) {
+      return;
+    }
     try {
       const stored = window.localStorage.getItem(DEVICE_STORAGE_KEY);
       if (stored && devicePresets.some((entry) => entry.key === stored)) {
@@ -536,10 +574,12 @@ export function SceneLivePreviewPanel({
     setDevice(next);
     setDeviceMemory(null);
     setOutOfMemory(null);
-    try {
-      window.localStorage.setItem(DEVICE_STORAGE_KEY, next ?? "");
-    } catch {
-      // See above.
+    if (rememberSettings) {
+      try {
+        window.localStorage.setItem(DEVICE_STORAGE_KEY, next ?? "");
+      } catch {
+        // See above.
+      }
     }
     // The ceiling can only be set on a fresh heap; reboot the runtime.
     setRestartCount((count) => count + 1);
@@ -999,7 +1039,7 @@ export function SceneLivePreviewPanel({
   // shows it while the preview stays at its size, Rotate included.
   // (Not the memory limit's `device`: that one is a board's memory, this
   // one a panel.)
-  const [panelDeviceKey, setPanelDeviceKey] = useState<string | null>(null);
+  const [panelDeviceKey, setPanelDeviceKey] = useState<string | null>(() => previewDeviceFor(initialDevice)?.key ?? null);
   const panelDevice = previewDeviceFor(panelDeviceKey);
   const shownDeviceKey =
     panelDevice && previewShowsDevice(panelDevice, viewport) ? panelDevice.key : "";

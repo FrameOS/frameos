@@ -36,13 +36,25 @@ import {
   socialDescription,
 } from "../../../src/lib/social-description";
 import { listingForVersion } from "../../../src/lib/store-listing";
+import { previewDeviceFor } from "../../../src/lib/preview-devices";
+import { storeEmbedFor } from "../../../src/lib/store-embed";
 import { imageSetForVersion, imageSetForVersionId } from "../../../src/lib/store-images";
 
 export const dynamic = "force-dynamic";
 
 type ScenePageProps = {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ version?: string; share?: string }>;
+  searchParams: Promise<{
+    version?: string;
+    share?: string;
+    // ?embed=1: the workspace alone, for frameos.net's front page
+    // (src/lib/store-embed.ts), with the file, device and memory limit
+    // it opens on.
+    embed?: string;
+    file?: string;
+    device?: string;
+    memory?: string;
+  }>;
 };
 
 // Discord paints a link embed's left edge in the page's theme-color; the
@@ -138,7 +150,9 @@ export default async function ScenePage({
   searchParams,
 }: ScenePageProps) {
   const { slug } = await params;
-  const { version: versionParam, share: shareParam } = await searchParams;
+  const query = await searchParams;
+  const { version: versionParam, share: shareParam } = query;
+  const embed = storeEmbedFor(query);
   if (!hasDatabaseUrl()) {
     redirect("/");
   }
@@ -317,6 +331,34 @@ export default async function ScenePage({
 
   // Everything the workspace's Info panel shows, as plain JSON (the
   // workspace is a client component).
+  // Embedded on another page: the workspace alone, for a public scene only
+  // (next.config.ts lets frameos.net frame `?embed=1`), nothing the visitor
+  // could keep or spend (no Save, Fork or AI), and the scene's page one
+  // click away in a new tab.
+  if (embed) {
+    if (isPrivate || scene.status !== "active" || pinnedVersion) {
+      notFound();
+    }
+    const device = previewDeviceFor(embed.device);
+    return (
+      <main className="content ph-no-capture">
+        <SceneEditorModal
+          canFork={false}
+          canPreview
+          canRemix={false}
+          canSave={false}
+          description={shownListing.description}
+          embed={{ ...embed, pageUrl }}
+          height={device?.height ?? latestImages[0]?.height ?? null}
+          loginUrl={new URL("/login", getCloudBaseUrl()).toString()}
+          sceneId={scene.id}
+          signedIn={Boolean(session?.accountId)}
+          width={device?.width ?? latestImages[0]?.width ?? null}
+        />
+      </main>
+    );
+  }
+
   const info: SceneInfoData = {
     framesUrl,
     images: latestImages.map((image) => image.sha256),

@@ -31,6 +31,7 @@ type StubEditorProps = {
   /** What the real editor shows as template.json's form (the info panel). */
   templateContent?: ReactNode;
   initialFile?: "template" | "diagram" | undefined;
+  initialAppFile?: string | undefined;
 };
 const renameCalls: Array<[string, string]> = [];
 const isLayoutCalls: Array<[string, boolean]> = [];
@@ -82,6 +83,7 @@ function StubEditor(props: StubEditorProps) {
   });
   return (
     <div
+      data-initial-app-file={props.initialAppFile}
       data-initial-file={props.initialFile}
       data-scenes={JSON.stringify(props.scenes)}
       data-show-preview={String(props.showPreviewButton)}
@@ -111,11 +113,17 @@ type PanelProps = {
   scenes: readonly unknown[];
   editorSceneId?: string | null | undefined;
   onViewportChange?: ((size: { width: number; height: number }) => void) | undefined;
+  initialDevice?: string | undefined;
+  initialMemoryDevice?: string | undefined;
+  rememberSettings?: boolean | undefined;
 };
 vi.mock("./SceneLivePreview", () => ({
   SceneLivePreviewPanel: (props: PanelProps) => (
     <div
+      data-device={props.initialDevice ?? ""}
       data-editor-scene={props.editorSceneId ?? ""}
+      data-memory={props.initialMemoryDevice ?? ""}
+      data-remember={String(props.rememberSettings ?? true)}
       data-props={JSON.stringify(Object.keys(props).sort())}
       data-scenes={JSON.stringify(props.scenes)}
       data-testid="preview-panel"
@@ -359,6 +367,73 @@ afterEach(() => {
   fetchMock.mockClear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("SceneEditorModal embedded", () => {
+  const embed = {
+    device: "sensecap-indicator",
+    file: "app.tsx",
+    memory: "esp32",
+    pageUrl: "https://scenes.frameos.net/s/clock",
+  };
+
+  it("is Editor and Preview on the asked file and device, whatever this browser remembers", async () => {
+    remember({ ai: true, editor: false, preview: false });
+    window.history.replaceState(null, "", "/s/clock?embed=1#scene-ai");
+    writeSceneDraft("scene-1", {
+      baseVersion: 2,
+      images: [],
+      listing: { category: null, description: null, frameosVersion: null, tags: [] },
+      savedAt: new Date().toISOString(),
+      scenes: [{ id: "s1", name: "A visitor's old edit" }],
+    });
+    render(<SceneEditorModal embed={embed} sceneId="scene-1" versions={versions} />);
+    // No AI (it needs an account), and the remembered set and the hash are ignored.
+    expect(toggleOrder()).toEqual(["Editor", "Preview"]);
+    expect(pressed()).toEqual({ AI: null, Editor: true, Preview: true });
+    const editor = await screen.findByTestId("editor");
+    expect(editor.dataset.initialAppFile).toBe("app.tsx");
+    // The published scene, not the draft.
+    expect(editor.dataset.scenes).toBe(JSON.stringify(loadedScenes));
+    expect(screen.queryByText("Restored unsaved edits")).toBeNull();
+    const panel = await screen.findByTestId("preview-panel");
+    expect(panel.dataset.device).toBe("sensecap-indicator");
+    expect(panel.dataset.memory).toBe("esp32");
+    expect(panel.dataset.remember).toBe("false");
+
+    // An edit is kept nowhere, and a panel change is written nowhere.
+    fireEvent.click(within(editor).getByRole("button", { name: "emit edit" }));
+    fireEvent.click(panelToggle("Preview"));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    // The old draft is left as it was for the store's own page.
+    expect(JSON.parse(window.localStorage.getItem(sceneDraftKey("scene-1")) ?? "null")?.scenes).toEqual([
+      { id: "s1", name: "A visitor's old edit" },
+    ]);
+    expect(storedPanels()).toEqual({ ai: true, editor: false, preview: false });
+    expect(window.location.hash).toBe("#scene-ai");
+  });
+
+  it("has one way out, the scene's page in a new tab, and nothing to save, fork or go back to", async () => {
+    render(<SceneEditorModal canFork={false} canSave={false} embed={embed} sceneId="scene-1" versions={versions} />);
+    await screen.findByTestId("editor");
+    const open = screen.getByRole("link", { name: /Open in the store/ });
+    expect(open.getAttribute("href")).toBe(embed.pageUrl);
+    expect(open.getAttribute("target")).toBe("_blank");
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Version" })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Sign in to edit/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Download/ })).toBeNull();
+  });
+
+  it("tells the page framing it once the scene is in", async () => {
+    const postMessage = vi.fn();
+    vi.spyOn(window, "parent", "get").mockReturnValue({ postMessage } as unknown as Window);
+    render(<SceneEditorModal embed={embed} sceneId="scene-1" versions={versions} />);
+    await screen.findByTestId("editor");
+    await waitFor(() => expect(postMessage).toHaveBeenCalledWith({ type: "frameos-store:embed-ready" }, "*"));
+  });
 });
 
 describe("SceneEditorModal landing", () => {

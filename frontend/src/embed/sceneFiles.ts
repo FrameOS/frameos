@@ -98,6 +98,21 @@ export function sceneAppEntries(scene: FrameScene | null | undefined): SceneAppE
   )
 }
 
+/** The first of the scene's own apps, in diagram order, that has `file`
+ * among its files (`app.tsx`, say): the app a host's "open on this file"
+ * means. Null when no app of the scene has it. */
+export function sceneAppWithFile(scene: FrameScene | null | undefined, file: string): string | null {
+  for (const entry of sceneAppEntries(scene)) {
+    const node = scene?.nodes?.find((candidate) => candidate.id === entry.nodeId)
+    const data = (node?.data ?? {}) as Partial<AppNodeData>
+    const sources = data.sources ?? (entry.keyword ? scene?.apps?.[entry.keyword]?.sources : undefined)
+    if (sources && Object.prototype.hasOwnProperty.call(sources, file)) {
+      return entry.nodeId
+    }
+  }
+  return null
+}
+
 /** The selection the pane can actually show: an app whose node is gone
  * (deleted on the diagram, or a re-init swapped the scenes) or is no app of
  * the scene's own any more falls back to its scene's diagram. */

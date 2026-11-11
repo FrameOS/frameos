@@ -183,6 +183,27 @@ describe("sceneFileTreeLogic", () => {
     unmount();
   });
 
+  it("keeps a file asked for until its app's folder has shown it", () => {
+    const logic = sceneFileTreeLogic({ frameId });
+    const unmount = logic.mount();
+    // Before the folder has loaded its files (a host's initialAppFile on the
+    // first render), the file waits; selecting its own app keeps it.
+    logic.actions.openAppFile("clock", "face", "app.tsx");
+    expect(logic.values.pendingAppFile).toEqual({ sceneId: "clock", nodeId: "face", file: "app.tsx" });
+    expect(logic.values.shownSelection).toEqual({ kind: "app", sceneId: "clock", nodeId: "face" });
+    logic.actions.appFileOpened();
+    expect(logic.values.pendingAppFile).toBeNull();
+
+    // Anything else picked meanwhile drops it: the visitor has moved on.
+    logic.actions.openAppFile("clock", "face", "app.tsx");
+    logic.actions.selectApp("clock", "inline");
+    expect(logic.values.pendingAppFile).toBeNull();
+    logic.actions.openAppFile("clock", "face", "app.tsx");
+    logic.actions.showDiagram("clock");
+    expect(logic.values.pendingAppFile).toBeNull();
+    unmount();
+  });
+
   it("drops a template source error when the view changes", () => {
     const logic = sceneFileTreeLogic({ frameId });
     const unmount = logic.mount();

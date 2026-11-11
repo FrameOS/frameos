@@ -24,6 +24,11 @@ export interface sceneFileTreeLogicValues {
   builtinAppEditor: FrameEditor | null
   collapsed: Record<string, boolean>
   isExpanded: (treeKey: string) => boolean
+  pendingAppFile: {
+    file: string
+    nodeId: string
+    sceneId: string
+  } | null
   selection: SceneFileSelection
   shownSelection: SceneFileSelection
   templateSourceError: string | null
@@ -42,6 +47,9 @@ export interface sceneFileTreeLogicActions {
     nodeId: string
     sceneId: string
   } // frameEditorsLogic
+  appFileOpened: () => {
+    value: true
+  }
   closeBuiltinApp: (
     sceneId: string,
     nodeId: string
@@ -144,6 +152,8 @@ export const sceneFileTreeLogic = kea<sceneFileTreeLogicType>([
     /** Opens one file of an app: its folder must be expanded (the folder
      * mounts the app's editAppLogic, which holds the files). */
     openAppFile: (sceneId: string, nodeId: string, file: string) => ({ sceneId, nodeId, file }),
+    /** The app's folder showed the file openAppFile asked for. */
+    appFileOpened: true,
     toggleExpanded: (treeKey: string) => ({ treeKey }),
     setTreeOpen: (open: boolean) => ({ open }),
     setTemplateSourceView: (source: boolean) => ({ source }),
@@ -157,6 +167,22 @@ export const sceneFileTreeLogic = kea<sceneFileTreeLogicType>([
         showDiagram: () => ({ kind: 'diagram' }),
         selectApp: (_, { sceneId, nodeId }) => ({ kind: 'app', sceneId, nodeId }),
         openAppFile: (_, { sceneId, nodeId }) => ({ kind: 'app', sceneId, nodeId }),
+      },
+    ],
+    // The file openAppFile asked for, until its app's folder has loaded the
+    // files and shown it: an app's files load after its folder mounts (and
+    // the load opens the first file), so a file asked for before then — a
+    // host's initialAppFile, on the editor's first render — waits here.
+    pendingAppFile: [
+      null as { sceneId: string; nodeId: string; file: string } | null,
+      {
+        openAppFile: (_, { sceneId, nodeId, file }) => ({ sceneId, nodeId, file }),
+        appFileOpened: () => null,
+        selectTemplate: () => null,
+        showDiagram: () => null,
+        // openAppFile selects its own app (through editApp): that keeps it.
+        selectApp: (state, { sceneId, nodeId }) =>
+          state && state.sceneId === sceneId && state.nodeId === nodeId ? state : null,
       },
     ],
     builtinApp: [

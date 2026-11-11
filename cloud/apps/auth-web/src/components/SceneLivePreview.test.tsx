@@ -129,6 +129,45 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
+describe("SceneLivePreviewPanel embedded", () => {
+  it("starts on the device and board it is given, ignoring and keeping this browser's settings", async () => {
+    window.localStorage.setItem("frameos.preview.device", "esp32_16mb");
+    window.localStorage.setItem("frameos.preview.panel", "spectra6");
+    render(
+      <SceneLivePreviewPanel
+        height={480}
+        initialDevice="sensecap-indicator"
+        initialMemoryDevice="esp32"
+        rememberSettings={false}
+        sceneId="scene-1"
+        scenes={[clockScene]}
+        width={480}
+      />,
+    );
+    await waitFor(() => expect(previews).toHaveLength(1));
+    // Booted once, straight into the board's ceiling and the LCD's full colour.
+    const options = previews[0]!.options as unknown as {
+      deviceLimits: unknown;
+      panelPalette: string | null;
+      width: number;
+      height: number;
+    };
+    expect(options).toMatchObject({ height: 480, panelPalette: null, width: 480 });
+    expect(options.deviceLimits).not.toBeNull();
+    expect((screen.getByLabelText("Device") as HTMLSelectElement).value).toBe("sensecap-indicator");
+    expect((screen.getByLabelText("Memory limit") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Device to simulate") as HTMLSelectElement).value).toBe("esp32");
+
+    // A change here is not written over what the store's own pages remember.
+    act(() => {
+      fireEvent.click(screen.getByLabelText("Memory limit"));
+    });
+    await waitFor(() => expect(previews).toHaveLength(2));
+    expect(window.localStorage.getItem("frameos.preview.device")).toBe("esp32_16mb");
+    expect(window.localStorage.getItem("frameos.preview.panel")).toBe("spectra6");
+  });
+});
+
 describe("SceneLivePreviewPanel memory limit", () => {
   it("is off by default, and the device picker waits behind its checkbox", async () => {
     render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
