@@ -666,13 +666,25 @@ describe("scenes_patch", () => {
   const sceneA = { id: "a", name: "A", nodes: [] };
   const sceneB = { id: "b", name: "B", nodes: [] };
 
-  async function settle(device: TestSocket, commandId: string | undefined, checksum: string) {
+  // Settled means both messages were handled. The hub handles a session's
+  // messages in order, so the command row reads `acked` while the scene_ack
+  // behind it may not have written the frame's checksum yet: wait for that.
+  async function settle(
+    device: TestSocket,
+    frameId: string,
+    commandId: string | undefined,
+    checksum: string,
+  ) {
     device.send({ id: commandId, ok: true, type: "ack" });
     device.send({ checksum, type: "scene_ack" });
     await waitFor(async () => {
       const [row] = await db.select().from(frameCommands).where(eq(frameCommands.id, String(commandId)));
       return row?.status === "acked" ? row : undefined;
     }, "command acked");
+    await waitFor(async () => {
+      const [row] = await db.select().from(frames).where(eq(frames.id, frameId));
+      return row?.scenesChecksum === checksum ? row : undefined;
+    }, `the frame holds ${checksum}`);
   }
 
   async function pushOne(frameId: string, device: TestSocket) {
@@ -684,11 +696,7 @@ describe("scenes_patch", () => {
     const full = await device.next((msg) => msg.id === first?.id, "the first push, whole");
     expect(full.type).toBe("set_scenes");
     expect(full.scene_hashes).toBeUndefined();
-    await settle(device, first?.id, "set-1");
-    await waitFor(async () => {
-      const [row] = await db.select().from(frames).where(eq(frames.id, frameId));
-      return row?.scenesChecksum === "set-1" ? row : undefined;
-    }, "the set is what the frame holds");
+    await settle(device, frameId, first?.id, "set-1");
   }
 
   it("sends a push that changes one scene as only that scene", async () => {
@@ -713,7 +721,7 @@ describe("scenes_patch", () => {
     expect(patch.scenes).toBeUndefined();
     expect(patch.scene_hashes).toBeUndefined();
 
-    await settle(device, second?.id, "set-2");
+    await settle(device, frame.id, second?.id, "set-2");
     const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
     expect(row?.scenesChecksum).toBe("set-2");
 
@@ -753,7 +761,7 @@ describe("scenes_patch", () => {
     );
     expect(full.scenes).toEqual([changedA, sceneB]);
     expect(full.no_patch).toBeUndefined();
-    await settle(device, second?.id, "set-2");
+    await settle(device, frame.id, second?.id, "set-2");
     device.ws.close();
   });
 
