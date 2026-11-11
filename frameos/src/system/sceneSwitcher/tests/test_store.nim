@@ -250,4 +250,21 @@ block the_words_for_what_went_wrong_are_the_pages:
   facts["busy"] = %"install"
   discard scene.draw()
 
+block a_round_panel_keeps_the_pages_on_the_glass:
+  facts = baseFacts()
+  let scene = newSwitcher(FrameConfig(width: 480, height: 480, device: "pimoroni.hyperpixel2r", rotate: 0,
+    scalingMode: "cover", saveAssets: %*false))
+  scene.state["view"] = %"store"
+  preview("store-page-round", scene.draw(newImage(480, 480)))
+  # Every button inside the circle the bezel leaves.
+  let target = uiTarget(SceneSwitcherId, 1, create = false)
+  for region in target.regions:
+    # What can be touched: the part a scrolling list does not cut off.
+    let v = region.visible
+    if region.handlers[ueClick] > 0 and v[2] > v[0] and v[3] > v[1]:
+      for (x, y) in [(v[0], v[1]), (v[2], v[1]), (v[0], v[3]), (v[2], v[3])]:
+        let dx = x - 240
+        let dy = y - 240
+        doAssert dx * dx + dy * dy <= 228 * 228, "a button corner off the glass at " & $(x, y)
+
 echo "scene store: ok"

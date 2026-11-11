@@ -748,19 +748,27 @@ proc storeLook(paper: bool, unit: int): StoreLook =
 
 proc pageTree(self: SceneSwitcherScene, width, height: int, paper: bool, unit: int): SvgNode =
   ## The store's page or a scene's, from what the host knows now (nil when it
-  ## has no store any more: then the tiles).
+  ## has no store any more: then the tiles). On a round panel, in the square
+  ## inside its circle, as the tiles are.
   let facts = storeFacts()
   if facts.isNil:
     return nil
   pageButtons.setLen(0)
   let look = storeLook(paper, if unit > 0: unit else: min(width, height))
   if self.view() == "store":
-    return storeTree(self.state, facts, look, width, pageButtons)
-  let id = self.state{"info"}.getStr()
-  let index = self.indexOf(id)
-  if index < 0 or index >= self.entries.len:
-    return nil
-  infoTree(self.state, facts, look, id, self.entries[index].name, id == self.opener(), pageButtons)
+    result = storeTree(self.state, facts, look, width, pageButtons)
+  else:
+    let id = self.state{"info"}.getStr()
+    let index = self.indexOf(id)
+    if index < 0 or index >= self.entries.len:
+      return nil
+    result = infoTree(self.state, facts, look, id, self.entries[index].name, id == self.opener(), pageButtons)
+  when not defined(frameosEmbedded):
+    let grid = self.grid(width, height, unit)
+    if grid.round:
+      var c: string
+      c.at(grid.x0, grid.y0, grid.side, grid.side)
+      result = el("div", if paper: "" else: "bg-zinc-950", el("div", c, result))
 
 proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0): SvgNode =
   ## The switcher as a UI tree: the header (its title, the page and its
