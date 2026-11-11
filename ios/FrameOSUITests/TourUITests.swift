@@ -151,6 +151,15 @@ final class TourUITests: XCTestCase {
             XCTAssertTrue(app.navigationBars["Add scene"].waitForExistence(timeout: 15))
             sleep(3)
             snapshot(app, "\(prefix)13 add scene")
+            // Generate scene heads the sheet, as in the web's drawer.
+            let generate = button(app, containing: "Generate scene")
+            XCTAssertTrue(generate.exists, "no Generate scene in Add scene")
+            generate.tap()
+            XCTAssertTrue(app.navigationBars["Generate scene"].waitForExistence(timeout: 10), "Generate scene opened no chat")
+            sleep(1)
+            snapshot(app, "\(prefix)13a generate scene")
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+            XCTAssertTrue(app.navigationBars["Add scene"].waitForExistence(timeout: 10))
             // A list makes only the rows on screen: search, as a person would.
             let search = app.searchFields.firstMatch
             XCTAssertTrue(search.waitForExistence(timeout: 10))
@@ -188,7 +197,7 @@ final class TourUITests: XCTestCase {
         let pages = [
             ("Settings", "20 frame settings"), ("Schedule", "21 schedule"), ("Button actions", "22 button actions"),
             ("Assets", "23 assets"), ("Logs", "24 logs"), ("Metrics", "25 metrics"),
-            ("Ask AI about this frame", "26 frame chat"),
+            ("Generate scene", "26a generate scene"), ("Ask AI about this frame", "26 frame chat"),
         ]
         for (title, shot) in pages {
             // In the frame's list, not the tab bar (which has a Settings too).

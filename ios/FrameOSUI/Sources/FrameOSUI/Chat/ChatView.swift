@@ -82,11 +82,22 @@ struct ChatView: View {
     /// Asked once before the first message (App Store guideline 5.1.2(i)):
     /// the chat's words go to OpenAI.
     @AppStorage("ai.sharing.allowed") private var sharingAllowed = false
+    @FocusState private var typing: Bool
     let frameId: String?
+    /// Opened from "Generate scene" (the web's Add scene drawer has the same
+    /// entry): the empty chat asks for a scene and the field takes focus.
+    let generating: Bool
 
-    init(frameId: String?, chatId: String?) {
+    init(frameId: String?, chatId: String?, generating: Bool = false) {
         self.frameId = frameId
+        self.generating = generating
         _model = State(initialValue: ChatModel(chatId: chatId, frameId: frameId))
+    }
+
+    var intro: String {
+        if generating { return "Describe the scene you want, and the AI makes it for this frame." }
+        return frameId == nil ? "Ask about your frames, or have a scene made."
+            : "Ask about this frame, change what it shows, or have a scene made for it."
     }
 
     var body: some View {
@@ -97,8 +108,7 @@ struct ChatView: View {
                         if model.messages.isEmpty {
                             VStack(spacing: 8) {
                                 Image(systemName: "sparkles").font(.largeTitle).foregroundStyle(Brand.teal)
-                                Text(frameId == nil ? "Ask about your frames, or have a scene made."
-                                    : "Ask about this frame, change what it shows, or have a scene made for it.")
+                                Text(intro)
                                     .multilineTextAlignment(.center)
                                     .foregroundStyle(.secondary)
                             }
@@ -133,9 +143,10 @@ struct ChatView: View {
                 AISharingConsent(plane: app.current?.kind ?? .cloud) { sharingAllowed = true }
             } else {
             HStack(alignment: .bottom, spacing: 8) {
-                TextField("Message", text: $model.draft, axis: .vertical)
+                TextField(generating ? "Describe a scene" : "Message", text: $model.draft, axis: .vertical)
                     .lineLimit(1...6)
                     .textFieldStyle(.roundedBorder)
+                    .focused($typing)
                     .onSubmit { model.send(app) }
                 if model.running {
                     Button { model.stop() } label: { Image(systemName: "stop.circle.fill").font(.title2) }
@@ -149,9 +160,26 @@ struct ChatView: View {
             .padding(10)
             }
         }
-        .navigationTitle(frameId.flatMap { app.frame($0)?.displayName } ?? "AI")
+        .navigationTitle(generating ? "Generate scene" : frameId.flatMap { app.frame($0)?.displayName } ?? "AI")
         .inlineTitle()
         .task { await model.load(app) }
+        .onAppear { if generating && sharingAllowed { typing = true } }
+        .onChange(of: sharingAllowed) { _, allowed in if generating && allowed { typing = true } }
+    }
+}
+
+/// "Generate scene" as a row: the frame page beside Add scene, and the top of
+/// the Add scene sheet (the web's drawer).
+struct GenerateSceneLabel: View {
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Generate scene")
+                Text("Open AI chat for this frame").font(.caption).foregroundStyle(.secondary)
+            }
+        } icon: {
+            Image(systemName: "sparkles")
+        }
     }
 }
 
