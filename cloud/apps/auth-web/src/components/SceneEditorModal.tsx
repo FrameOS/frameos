@@ -1782,6 +1782,14 @@ export function SceneEditorModal({
     }
   }
 
+  // The editor and the preview wear the page's theme, and follow it when it
+  // changes (the embed's parent page switching between light and dark).
+  useEffect(() => {
+    const observer = new MutationObserver(() => setTheme(readDocumentTheme()));
+    observer.observe(document.documentElement, { attributeFilter: ["class"], attributes: true });
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     setTheme(readDocumentTheme());
     void loadVersion(pinnedVersion);

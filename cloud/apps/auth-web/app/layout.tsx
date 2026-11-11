@@ -51,6 +51,8 @@ const themeScript = `(function(){try{
 var c=document.cookie.split(";").map(function(p){return p.trim()}).filter(function(p){return p.indexOf("${themeCookieName}=")===0})[0];
 var v=c?c.slice(${themeCookieName.length + 1}):null;
 var t=(v==="dark"||v==="light")?v:null;
+var q=window.self!==window.top?new URLSearchParams(window.location.search).get("theme"):null;
+if(q==="dark"||q==="light")t=q;
 if(!t){var s=window.localStorage.getItem("${themeStorageKey}");
 t=(s==="dark"||s==="light")?s:(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")}
 document.documentElement.classList.toggle("theme-dark",t==="dark");

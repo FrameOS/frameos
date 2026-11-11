@@ -12,6 +12,10 @@ export const storeEmbedAncestors: readonly string[] = ["https://frameos.net", "h
  * so that page can keep its own stand-in (a screenshot) up until then. */
 export const storeEmbedReadyMessage = "frameos-store:embed-ready";
 
+/** What the page framing the embed posts it when its own light/dark mode
+ * changes: `{type, theme: "light" | "dark"}`. The embed starts on `?theme=`. */
+export const storeEmbedThemeMessage = "frameos-store:theme";
+
 /** The embed's query, as the page receives it. */
 export type StoreEmbedQuery = {
   embed?: string | string[] | undefined;

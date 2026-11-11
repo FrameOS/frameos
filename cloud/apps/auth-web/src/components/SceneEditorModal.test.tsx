@@ -33,6 +33,7 @@ type StubEditorProps = {
   initialFile?: "template" | "diagram" | undefined;
   initialAppFile?: string | undefined;
   initialTreeOpen?: boolean | undefined;
+  theme?: "light" | "dark" | undefined;
 };
 const renameCalls: Array<[string, string]> = [];
 const isLayoutCalls: Array<[string, boolean]> = [];
@@ -86,6 +87,7 @@ function StubEditor(props: StubEditorProps) {
     <div
       data-initial-app-file={props.initialAppFile}
       data-initial-tree-open={String(props.initialTreeOpen ?? true)}
+      data-theme={props.theme}
       data-initial-file={props.initialFile}
       data-scenes={JSON.stringify(props.scenes)}
       data-show-preview={String(props.showPreviewButton)}
@@ -468,6 +470,20 @@ describe("SceneEditorModal embedded", () => {
     const fork = screen.getByRole("link", { name: /Fork & save copy/ });
     expect([fork.getAttribute("href"), fork.getAttribute("target")]).toEqual([embed.pageUrl, "_top"]);
     expect(screen.queryByRole("link", { name: /Sign in to edit/ })).toBeNull();
+  });
+
+  it("wears the page's theme and follows it when it changes", async () => {
+    render(<SceneEditorModal embed={embed} sceneId="scene-1" versions={versions} />);
+    const editor = await screen.findByTestId("editor");
+    expect(editor.dataset.theme).toBe("light");
+    act(() => {
+      document.documentElement.classList.add("theme-dark");
+    });
+    await waitFor(() => expect(screen.getByTestId("editor").dataset.theme).toBe("dark"));
+    act(() => {
+      document.documentElement.classList.remove("theme-dark");
+    });
+    await waitFor(() => expect(screen.getByTestId("editor").dataset.theme).toBe("light"));
   });
 
   it("tells the page framing it once the scene is in", async () => {

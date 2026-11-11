@@ -2,6 +2,7 @@
 
 import { Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
+import { storeEmbedThemeMessage } from "../lib/store-embed";
 
 type Theme = "light" | "dark";
 const themeCookieName = "frameos_theme";
@@ -82,6 +83,31 @@ export function ThemeToggle({
   const [theme, setTheme] = useState<Theme>("light");
 
   useEffect(() => {
+    // Framed, the store is the embed on frameos.net's front page
+    // (src/lib/store-embed.ts): it wears that page's light or dark, from
+    // ?theme= and then from its messages, and never touches the visitor's own
+    // choice. Only frameos.net may frame it (next.config.ts), so the parent
+    // window is the one to listen to.
+    if (window.self !== window.top) {
+      const asked = new URLSearchParams(window.location.search).get("theme");
+      if (asked === "dark" || asked === "light") {
+        setTheme(asked);
+        applyTheme(asked);
+      }
+      const onMessage = (event: MessageEvent) => {
+        const data = event.data as { type?: unknown; theme?: unknown } | null;
+        if (
+          event.source === window.parent &&
+          data?.type === storeEmbedThemeMessage &&
+          (data.theme === "dark" || data.theme === "light")
+        ) {
+          setTheme(data.theme);
+          applyTheme(data.theme);
+        }
+      };
+      window.addEventListener("message", onMessage);
+      return () => window.removeEventListener("message", onMessage);
+    }
     const shared = readThemeCookie();
     const stored = window.localStorage.getItem(localStorageKey);
     const nextTheme =
