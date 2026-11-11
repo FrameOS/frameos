@@ -101,6 +101,24 @@ final class AppModel {
         activate(account)
     }
 
+    /// A fresher session for an account the app already holds (confirmed
+    /// through the web, CloudWebSignIn with reauth): it replaces the old one,
+    /// which is signed out on the cloud.
+    func adoptSession(_ client: APIClient, for account: Account) async {
+        let old = clients[account.id]
+        let accountId = account.id
+        client.onUnauthorized = { [weak self] in
+            Task { @MainActor in self?.handleUnauthorized(accountId) }
+        }
+        clients[account.id] = client
+        if current?.id == account.id {
+            stopLive()
+            service = FrameOSService(client: client)
+            startLive()
+        }
+        if let old, old !== client { await AuthService.endCloudSession(old) }
+    }
+
     func signOut(_ account: Account) async {
         let client = client(for: account)
         if current?.id == account.id { stopLive() }
@@ -255,6 +273,10 @@ struct ReauthRequest: Identifiable {
 
     var acceptsCode: Bool { error.body?["reauth"]?["methods"]?["code"]?.boolValue ?? true }
     var acceptsPassword: Bool { error.body?["reauth"]?["methods"]?["password"]?.boolValue ?? true }
+    var acceptsPasskey: Bool { error.body?["reauth"]?["methods"]?["passkey"]?.boolValue ?? false }
+    /// No password and no second factor (a Google-only account): only a new
+    /// sign-in proves it, through the web.
+    var acceptsSignIn: Bool { error.body?["reauth"]?["methods"]?["sign_in"]?.boolValue ?? false }
 }
 
 /// Fans the socket's log lines and metrics out to whichever screen listens.

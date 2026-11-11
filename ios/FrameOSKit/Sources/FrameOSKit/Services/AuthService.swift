@@ -123,9 +123,7 @@ public enum AuthService {
     public static func signOut(_ client: APIClient) async {
         switch client.kind {
         case .cloud:
-            var request = client.request("POST", "/api/auth/logout")
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            _ = try? await client.session.data(for: request)
+            await endCloudSession(client)
         case .backend:
             // The login session first (the socket's cookie), while the token
             // still opens the route; then the token itself.

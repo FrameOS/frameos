@@ -120,4 +120,43 @@ struct CloudIntegrationTests {
             #expect(error.isUnauthorized)
         }
     }
+
+    /// The web sign-in handoff (Google, passkeys) without a browser: a password
+    /// session plays the browser's, already signed in, so the cloud asks first;
+    /// "Continue" yields the code the app trades for a session of its own, once.
+    @Test func webSignInHandoff() async throws {
+        let browser = try await signedIn().client
+        let request = CloudWebSignIn(baseURL: Self.baseURL)
+        let cookieHeader = browser.cookies().map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+
+        final class NoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+            func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                            newRequest request: URLRequest) async -> URLRequest? { nil }
+        }
+        // Older than the request by more than the cloud's second of slack.
+        try await Task.sleep(nanoseconds: 2_500_000_000)
+        let visitor = URLSession(configuration: .ephemeral, delegate: NoRedirects(), delegateQueue: nil)
+        var visit = URLRequest(url: request.url)
+        visit.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
+        let (_, response) = try await visitor.data(for: visit)
+        let location = try #require((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Location"))
+        let ask = try #require(URLComponents(url: URL(string: location, relativeTo: request.url)!.absoluteURL, resolvingAgainstBaseURL: false))
+        #expect(ask.path == "/login/app", "a session from before the request is asked about, not handed on")
+        let token = try #require(ask.queryItems?.first { $0.name == "request" }?.value)
+
+        // "Continue as …"
+        let pressed = try await browser.call("POST", "/api/auth/app/authorize", body: .json(["request": .string(token)]))
+        let callback = try #require(URL(string: pressed["redirect"]?.stringValue ?? ""))
+        #expect(callback.scheme == "frameos")
+
+        let (account, app) = try await AuthService.cloudFinishWebSignIn(request, callback: callback, expecting: browser.account)
+        #expect(account.email.lowercased() == browser.account.email.lowercased())
+        #expect(account.id == browser.account.id, "kept under the account it confirmed")
+        _ = try await FrameOSService(client: app).frames()
+        #expect(app.cookies().map(\.value) != browser.cookies().map(\.value), "a session of the app's own")
+
+        // A code is spent once.
+        await #expect(throws: APIError.self) { try await AuthService.cloudFinishWebSignIn(request, callback: callback) }
+        await AuthService.endCloudSession(app)
+    }
 }

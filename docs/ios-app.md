@@ -60,6 +60,7 @@ way the SPA does, and the comment there names the SPA file.
 | Action | B | C |
 | --- | --- | --- |
 | Sign in | `POST /api/login` (form), then a year-long API token (`POST /api/user/api_tokens`, revoked at sign-out) | `POST /api/auth/login`, `POST /api/auth/second-factor/code`; the session cookie; `Origin` on every write |
+| Google, passkeys (the web's sign-in) | (none: a backend signs in with its own password) | the system sign-in sheet on `GET /api/auth/app/authorize` (PKCE), then `POST /api/auth/app/token {code, code_verifier}`: a session of the app's own (`cloud/docs/auth.md` "Signing in to the app") |
 | Sign out | `DELETE /api/user/api_tokens/{id}`, `POST /api/logout` | `POST /api/auth/logout` |
 | Frames | `GET /api/frames`, `GET /api/frames/{id}` | the same |
 | Live updates | `/ws` (the `frameos_session` cookie from the login) | `/api/frames/updates` on the hub (the session cookie) |
@@ -83,7 +84,7 @@ way the SPA does, and the comment there names the SPA file.
 | Schedule | `schedule` in the same save | `POST …/schedule` |
 | Button actions | `event_map` in the same save | the `event_map` setting |
 | Voice chat switches | `device_config` (`voiceChangeSettings`, …) | `POST …/voice/permissions` |
-| Rename, delete | `POST /api/frames/{id} {name}`, `DELETE /api/frames/{id}` | the same (delete asks for a recent sign-in: `reauth_required` → `POST /api/auth/reauth`) |
+| Rename, delete | `POST /api/frames/{id} {name}`, `DELETE /api/frames/{id}` | the same (delete asks for a recent sign-in: `reauth_required` → `POST /api/auth/reauth`, or the sheet with `reauth=1` for an account without a password or code) |
 | Assets | `GET …/assets?folder=`, `GET …/asset?path=`, chunked `POST …/assets/upload`, form `POST …/assets/{mkdir,rename,delete}` | the same |
 | Photos | `/api/photos/...` (`docs/photos.md`) | the same |
 | Play an album | MCP `photo_album_install` | `POST /api/photos/scene`, `POST /api/account/scenes`, `POST …/scenes/add` |

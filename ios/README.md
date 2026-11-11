@@ -79,12 +79,15 @@ contracts it reads.
 ## Signing in
 
 - **FrameOS Cloud**: email and password, then the code from your
-  authenticator when the account has two-factor sign-in. The session cookie
-  is kept in the Keychain and slides like the web's (30 days idle). An action
-  the cloud keeps for a recent sign-in (deleting a frame) asks for the
-  password or code again. Signing up, a password reset and Google sign-in
-  open the web (a Google account can add a password through "Forgot your
-  password?").
+  authenticator when the account has two-factor sign-in. **Continue with
+  Google** and **Use a passkey or another way** open the cloud's own sign-in
+  page in the system's sign-in sheet; the cloud hands the app a session of
+  its own through a one-time code bound to a secret only the app holds (PKCE),
+  `cloud/docs/auth.md` "Signing in to the app". The session cookie is kept in
+  the Keychain and slides like the web's (30 days idle). An action the cloud
+  keeps for a recent sign-in (deleting a frame) asks for the password or code
+  again, or, for an account without either (Google, passkeys), goes through
+  the same sheet. Signing up and a password reset open the web.
 - **Self-hosted backend**: its address (`frames.local:8989`,
   `https://frames.example.com`; read like every plane reads a typed address,
   `docs/server-address-fixtures.json`), email and password. A backend

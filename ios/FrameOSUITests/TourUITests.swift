@@ -63,6 +63,61 @@ final class TourUITests: XCTestCase {
              scene: value("FRAMEOS_UITEST_CLOUD_SCENE", "Word clock"))
     }
 
+    /// The web sign-in (Google, passkeys) through the real system sheet: the
+    /// cloud's own sign-in page inside it, then back in the app, signed in.
+    /// Google itself cannot be driven here; the sheet, the page, the code and
+    /// the exchange are the same for it.
+    @MainActor
+    func testCloudWebSignIn() throws {
+        let cloud = value("FRAMEOS_UITEST_CLOUD")
+        try XCTSkipIf(cloud.isEmpty, "FRAMEOS_UITEST_CLOUD is not set")
+        let app = launchClean()
+        waitForText(app, "Control your frames")
+        let other = button(app, containing: "Use another cloud address")
+        while !other.isHittable { app.swipeUp() }
+        other.tap()
+        let address = app.textFields["Cloud address"]
+        XCTAssertTrue(address.waitForExistence(timeout: 5))
+        address.tap()
+        address.press(forDuration: 1.2)
+        if app.menuItems["Select All"].waitForExistence(timeout: 2) { app.menuItems["Select All"].tap() }
+        address.typeText(cloud)
+        let web = button(app, containing: "Use a passkey or another way")
+        var tries = 0
+        while !web.isHittable && tries < 6 { app.swipeUp(); tries += 1 }
+        snapshot(app, "w10 sign in")
+        web.tap()
+
+        // iOS asks before an app opens a sign-in sheet.
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = springboard.buttons["Continue"]
+        if allow.waitForExistence(timeout: 10) { allow.tap() }
+
+        // The cloud's page, in the sheet (Safari's process).
+        let sheet = XCUIApplication(bundleIdentifier: "com.apple.SafariViewService")
+        let email = sheet.textFields.firstMatch
+        let continueAs = sheet.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Continue as'")).firstMatch
+        if continueAs.waitForExistence(timeout: 10) {
+            // Safari is still signed in from a run before: the cloud asks first.
+            snapshot(app, "w11 continue as")
+            continueAs.tap()
+        } else {
+            XCTAssertTrue(email.waitForExistence(timeout: 20), "the cloud's sign-in page did not open")
+            snapshot(app, "w11 web sign in")
+            email.tap()
+            email.typeText(value("FRAMEOS_UITEST_CLOUD_EMAIL"))
+            let password = sheet.secureTextFields.firstMatch
+            password.tap()
+            password.typeText(value("FRAMEOS_UITEST_CLOUD_PASSWORD"))
+            snapshot(app, "w11b web sign in filled")
+            sheet.buttons.matching(NSPredicate(format: "label == 'Sign in'")).firstMatch.tap()
+        }
+
+        XCTAssertTrue(app.navigationBars["Frames"].waitForExistence(timeout: 60), "not signed in after the web sign-in")
+        waitForText(app, value("FRAMEOS_UITEST_FRAME", "Kitchen"))
+        snapshot(app, "w12 signed in")
+    }
+
     @MainActor
     func tour(_ app: XCUIApplication, prefix: String, frame: String, scene: String) {
         // The frames.

@@ -5,6 +5,7 @@ struct SignInView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     @State private var model = SignInModel()
     /// Shown from Settings → Add account (dismissable), or as the first screen.
     var isSheet = false
@@ -30,6 +31,7 @@ struct SignInView: View {
                     }
                     .disabled(!model.canSubmit)
                 }
+                if model.step == .cloud { webSignIn }
                 alternatives
             }
             .navigationTitle(isSheet ? "Add account" : "")
@@ -129,6 +131,27 @@ struct SignInView: View {
         }
     }
 
+    /// Google and the rest of the web's sign-in (passkeys), through the
+    /// system's sign-in sheet (CloudWebSignIn).
+    @ViewBuilder var webSignIn: some View {
+        Section {
+            AsyncButton {
+                await model.signInOnWeb(app: app, provider: .google) { try await WebSignIn.open(webAuthenticationSession, $0) }
+            } label: {
+                Label("Continue with Google", systemImage: "person.crop.circle.badge.checkmark")
+                    .frame(maxWidth: .infinity)
+            }
+            AsyncButton {
+                await model.signInOnWeb(app: app, provider: nil) { try await WebSignIn.open(webAuthenticationSession, $0) }
+            } label: {
+                Label("Use a passkey or another way", systemImage: "person.badge.key")
+                    .frame(maxWidth: .infinity)
+            }
+        } footer: {
+            Text("Opens the FrameOS Cloud sign-in page. The app gets a sign-in of its own; your password never passes through it.")
+        }
+    }
+
     @ViewBuilder var alternatives: some View {
         switch model.step {
         case .cloud:
@@ -139,8 +162,6 @@ struct SignInView: View {
                     model.showCloudAddress.toggle()
                     if !model.showCloudAddress { model.cloudAddress = Account.defaultCloudURL.absoluteString }
                 }
-            } footer: {
-                Text("Signed up with Google? Choose \"Forgot your password?\" to add a password, then sign in here.")
             }
             Section {
                 Button {

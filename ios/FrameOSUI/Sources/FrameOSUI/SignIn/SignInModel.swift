@@ -77,6 +77,31 @@ final class SignInModel {
         }
     }
 
+    /// Google, a passkey, or any sign-in the web has, through the system's
+    /// sign-in sheet (`open` runs it and returns where the cloud sent it back).
+    func signInOnWeb(app: AppModel, provider: CloudWebSignIn.Provider?,
+                     open: (URL) async throws -> URL) async
+    {
+        guard let url = cloudURL, !busy else { return }
+        busy = true
+        error = nil
+        defer { busy = false }
+        let request = CloudWebSignIn(baseURL: url, provider: provider)
+        do {
+            let callback = try await open(request.url)
+            let (account, client) = try await AuthService.cloudFinishWebSignIn(request, callback: callback)
+            finish(app, account, client)
+        } catch let failure where WebSignIn.wasCancelled(failure) {
+            // The sheet's Cancel, or "Cancel" on the cloud's page: nothing to say.
+        } catch let failure as URLError {
+            error = failure.code == .cannotFindHost || failure.code == .cannotConnectToHost
+                ? "Cannot reach FrameOS Cloud. Check the address and your network."
+                : failure.localizedDescription
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
     /// A backend with no account yet offers to create the first one.
     func checkBackend() async {
         guard let url = ServerAddress.backendBaseURL(backendAddress) else { return }

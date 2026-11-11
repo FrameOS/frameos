@@ -49,11 +49,13 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         NSPhotoLibraryUsageDescription: FrameOS uploads the photos you pick to your photo albums and to your frames.
         NSLocalNetworkUsageDescription: FrameOS talks to the self-hosted FrameOS backend you sign in to on your network.
-        # A self-hosted backend is often plain http on the local network (or a
-        # bare IP); the cloud is https.
+        # A self-hosted backend is often plain http, on a bare IP, a .local
+        # name or an ordinary hostname; the cloud is https. Arbitrary loads
+        # alone: with NSAllowsLocalNetworking beside it iOS ignores
+        # NSAllowsArbitraryLoads, and http to a hostname that is not "local"
+        # (frames.example.com, frameos.home.arpa) was refused.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-          NSAllowsLocalNetworking: true
         ITSAppUsesNonExemptEncryption: false
     settings:
       base:

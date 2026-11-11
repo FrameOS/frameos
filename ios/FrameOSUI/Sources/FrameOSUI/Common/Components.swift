@@ -254,28 +254,46 @@ struct AsyncButton<Label: View>: View {
 struct ReauthSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     let request: ReauthRequest
     @State private var secret = ""
     @State private var error: String?
 
+    var typesSecret: Bool { request.acceptsCode || request.acceptsPassword }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    if request.acceptsCode {
-                        // With two-factor sign-in on, the cloud takes the code
-                        // (or a recovery code), never the password.
-                        TextField("Code from your authenticator", text: $secret).codeInput()
-                    } else if request.acceptsPassword {
-                        SecureField("Password", text: $secret).passwordInput()
-                    } else {
-                        Text("This account confirms with a passkey, which the app cannot use yet. Do this on the web.")
+                if typesSecret {
+                    Section {
+                        if request.acceptsCode {
+                            // With two-factor sign-in on, the cloud takes the code
+                            // (or a recovery code), never the password.
+                            TextField("Code from your authenticator", text: $secret).codeInput()
+                        } else {
+                            SecureField("Password", text: $secret).passwordInput()
+                        }
+                    } header: {
+                        Text("Confirm it is you")
+                    } footer: {
+                        if let error { Text(error).foregroundStyle(.red) }
+                        else if request.acceptsCode { Text("A recovery code works too.") }
                     }
-                } header: {
-                    Text("Confirm it is you")
-                } footer: {
-                    if let error { Text(error).foregroundStyle(.red) }
-                    else if request.acceptsCode { Text("A recovery code works too.") }
+                }
+                if request.acceptsSignIn || request.acceptsPasskey || !typesSecret {
+                    Section {
+                        AsyncButton {
+                            await confirmOnWeb()
+                        } label: {
+                            Label(request.acceptsSignIn ? "Continue with Google" : "Use a passkey or another way",
+                                  systemImage: request.acceptsSignIn ? "person.crop.circle.badge.checkmark" : "person.badge.key")
+                        }
+                    } header: {
+                        if !typesSecret { Text("Confirm it is you") }
+                    } footer: {
+                        if let error, !typesSecret { Text(error).foregroundStyle(.red) }
+                        else { Text("Opens the FrameOS Cloud sign-in page to check it is you.") }
+                    }
                 }
             }
             .navigationTitle("Confirm")
@@ -286,9 +304,26 @@ struct ReauthSheet: View {
                     AsyncButton {
                         await confirm()
                     } label: { Text("Confirm") }
-                    .disabled(secret.isEmpty || (!request.acceptsCode && !request.acceptsPassword))
+                    .disabled(secret.isEmpty || !typesSecret)
                 }
             }
+        }
+    }
+
+    /// Through the web (Google, a passkey): a new session with a fresh proof
+    /// replaces the app's (cloud/docs/auth.md "Signing in to the app").
+    func confirmOnWeb() async {
+        guard let account = app.current, account.kind == .cloud else { return }
+        let signIn = CloudWebSignIn(baseURL: account.baseURL, provider: request.acceptsSignIn ? .google : nil, reauth: true)
+        do {
+            let callback = try await WebSignIn.open(webAuthenticationSession, signIn.url)
+            let (_, client) = try await AuthService.cloudFinishWebSignIn(signIn, callback: callback, expecting: account)
+            await app.adoptSession(client, for: account)
+            dismiss()
+            await request.retry()
+        } catch where WebSignIn.wasCancelled(error) {
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 
