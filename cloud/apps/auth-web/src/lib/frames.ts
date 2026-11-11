@@ -32,7 +32,7 @@ import { frameOwningBackend } from "./frame-backend-owner";
 import { readVoicePermissions } from "./voice-permissions";
 import { commandTtlForFrame } from "./frame-sleep";
 import { deployProgressKindForCommand, startDeployProgress } from "./deploy-progress";
-import { requiredSettingsForScenes } from "./preview-settings";
+import { requiredSettingsForScenes } from "../../../../../frontend/src/sceneWorkspace/lib/preview-settings";
 import { scenesForEmbeddedRuntime, scenesForRuntime } from "./retired-apps";
 import { withStoreSceneOrigin } from "./scene-origin";
 import { sceneEventMapsOf, withSceneEventMaps } from "./scene-event-map";

@@ -2,7 +2,7 @@
 
 import { Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { applyAiScenes, blankScene, prepareForEditor, type AiScenesEvent, type SceneJson } from "../lib/ai-scenes-apply";
+import { applyAiScenes, blankScene, prepareForEditor, type AiScenesEvent, type SceneJson } from "../../../../../frontend/src/sceneWorkspace/lib/ai-scenes-apply";
 import { ownerActionErrorMessage } from "./ownerActionError";
 import {
   clearNewSceneDraft,
@@ -15,8 +15,8 @@ import {
   type NewSceneDraftChat,
 } from "../lib/new-scene-draft";
 import { takeHandoffScenes } from "../lib/scene-handoff";
-import { singlePanelFor, type SceneEditorPanelName, type SceneEditorPanels } from "../lib/scene-views";
-import type { RenderedScenes } from "./SceneAiPanel";
+import { singlePanelFor, type SceneEditorPanelName, type SceneEditorPanels } from "../../../../../frontend/src/sceneWorkspace/lib/scene-views";
+import type { RenderedScenes } from "../../../../../frontend/src/sceneWorkspace/SceneAiPanel";
 import {
   readDocumentTheme,
   SceneEditorBackButton,

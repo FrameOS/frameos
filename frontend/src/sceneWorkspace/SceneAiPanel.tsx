@@ -19,10 +19,9 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
-import posthog from "posthog-js";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { chatLinkPath, parseChatLink } from "../../../../../frontend/src/utils/chatLinks";
+import { chatLinkPath, parseChatLink } from "../utils/chatLinks";
 import {
   AiChatRequestError,
   AiChatTransportError,
@@ -31,16 +30,17 @@ import {
   streamAiChat,
   type AiChatHistoryItem,
   type AiListingChanges,
-} from "../lib/ai-chat-client";
+} from "./lib/ai-chat-client";
 import {
   approveAiInstallProposal,
   isAiInstallProposal,
   settingsGroupLabel,
   type AiInstallProposal,
   type AiInstallProposalStatus,
-} from "../lib/ai-install-proposal";
-import type { AiScenesEvent, SceneJson } from "../lib/ai-scenes-apply";
-import { renderSceneCheck } from "../lib/scene-render-check";
+} from "./lib/ai-install-proposal";
+import type { AiScenesEvent, SceneJson } from "./lib/ai-scenes-apply";
+import { renderSceneCheck } from "./lib/scene-render-check";
+import { sceneWorkspaceHost } from "./lib/host";
 
 export const RENDER_CHECK_PREFIX = "[Automatic render check]";
 export const MAX_RENDER_CHECK_ROUNDS = 2;
@@ -234,7 +234,7 @@ function recoverFromHistory({
       return;
     }
     try {
-      const response = await fetch(`/api/ai/chats/${encodeURIComponent(chatId)}`);
+      const response = await sceneWorkspaceHost().fetch(`${sceneWorkspaceHost().aiChatsUrl}/${encodeURIComponent(chatId)}`);
       if (response.ok) {
         const payload = (await response.json()) as {
           messages?: {
@@ -411,7 +411,7 @@ function InstallProposalCard({
     <div className="ai-panel__proposal" role="group" aria-label="Proposed frame install">
       <strong className="ai-panel__proposal-title">
         <MonitorUp aria-hidden size={14} />
-        {proposal.already_assigned ? "Re-deploy" : "Install"} “{proposal.scene.name}”{version} on{" "}
+        {proposal.already_assigned ? "Reinstall" : "Install"} “{proposal.scene.name}”{version} on{" "}
         {proposal.frame.name}
       </strong>
       <p className="copy ai-panel__proposal-copy">
@@ -670,6 +670,7 @@ export function SceneAiPanel({
       try {
         await streamAiChat(
           {
+            ...sceneWorkspaceHost().aiChatContext(),
             chatId: chatIdRef.current,
             history,
             prompt,
@@ -789,7 +790,7 @@ export function SceneAiPanel({
           aborted = true;
         } else if (error instanceof AiChatTransportError) {
           streamError = error.message;
-          posthog.capture("ai_chat_stream_lost", {
+          sceneWorkspaceHost().track("ai_chat_stream_lost", {
             attempts: error.attempts,
             chat_id: chatIdRef.current,
             elapsed_ms: error.elapsedMs,

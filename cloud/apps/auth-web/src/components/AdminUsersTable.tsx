@@ -3,7 +3,7 @@
 import { ShieldCheck, ShieldOff, Trash2, Unplug } from "lucide-react";
 import { useState } from "react";
 import { formatBytes, formatDate, formatMicrosUsd } from "../lib/format";
-import { redirectToReauthIfRequired } from "../lib/reauth-client";
+import { redirectToReauthIfRequired } from "../../../../../frontend/src/sceneWorkspace/lib/reauth-client";
 import { Ratio } from "./Ratio";
 import { RowMenu } from "./RowMenu";
 import { SortableTable } from "./SortableTable";

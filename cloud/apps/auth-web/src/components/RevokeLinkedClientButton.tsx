@@ -6,7 +6,7 @@ import {
   isReauthRequired,
   redirectToReauthIfRequired,
   takePendingReauthAction,
-} from "../lib/reauth-client";
+} from "../../../../../frontend/src/sceneWorkspace/lib/reauth-client";
 
 export function RevokeLinkedClientButton({ linkedClientId }: { linkedClientId: string }) {
   const [status, setStatus] = useState<"idle" | "revoking" | "revoked" | "error">("idle");

@@ -423,6 +423,7 @@ COPY repo/apps repo/apps
 COPY repo/scenes repo/scenes
 COPY tools/prebuilt-deps/manifest.json tools/prebuilt-deps/manifest.json
 COPY --from=app-builder /app/frontend/dist frontend/dist
+COPY --from=app-builder /app/frontend/dist-editor frontend/dist-editor
 COPY --from=app-builder /app/frontend/schema frontend/schema
 COPY --from=app-builder /app/frameos frameos
 # Last, so a release bump does not invalidate (and force a re-push of) every

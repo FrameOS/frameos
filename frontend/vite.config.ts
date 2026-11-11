@@ -9,6 +9,13 @@ export default defineConfig({
     host: true,
     port: 8616,
     proxy: {
+      // The embedded scene editor bundle (frontend/dist-editor, served by
+      // the backend): the local scenes page edits in it. Rebuild it with
+      // `pnpm --dir frontend run build:esbuild` after changing the editor.
+      '/frameos-editor': {
+        target: backendTarget,
+        changeOrigin: true,
+      },
       '/api': {
         target: backendTarget,
         changeOrigin: true,

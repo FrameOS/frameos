@@ -48,6 +48,31 @@ async def test_create_template_stamps_scene_execution(async_client, db):
 
 
 @pytest.mark.asyncio
+async def test_update_template_scenes(async_client, db):
+    t = Template(project_id=async_client.project_id, name="Editable", description="old", scenes=[], config={})
+    db.add(t)
+    db.commit()
+
+    # The scene editor's save: name, description and the whole scene set.
+    response = await async_client.patch(
+        f"/api/templates/{t.id}",
+        json={"name": "Edited", "description": "new", "scenes": [{"id": "a", "name": "A", "nodes": [], "edges": []}]},
+    )
+    assert response.status_code == 200
+    db.refresh(t)
+    assert (t.name, t.description) == ("Edited", "new")
+    assert [scene["id"] for scene in t.scenes] == ["a"]
+    # Normalised like a create.
+    assert t.scenes[0]["settings"]["execution"] == "interpreted"
+
+    # A rename alone leaves the scenes as they are.
+    response = await async_client.patch(f"/api/templates/{t.id}", json={"name": "Renamed"})
+    assert response.status_code == 200
+    db.refresh(t)
+    assert t.name == "Renamed" and t.description == "new" and [scene["id"] for scene in t.scenes] == ["a"]
+
+
+@pytest.mark.asyncio
 async def test_get_templates(async_client, db):
     # Insert a couple
     t1 = Template(project_id=async_client.project_id, name="Template1")

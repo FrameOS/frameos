@@ -1079,9 +1079,6 @@ export interface workspaceLogicActions {
     frameId: FrameId
     sceneId: string
   }
-  navigateToSceneFrame: (frameId: FrameId) => {
-    frameId: FrameId
-  }
   openChatDrawer: (
     frameId: FrameId | null,
     sceneId?: string | null,
@@ -1320,7 +1317,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
     navigateToFrame: (frameId: FrameId) => ({ frameId }),
     openFrameTool: (frameId: FrameId, panel: WorkspaceUtilityPanel) => ({ frameId, panel }),
     openFrameToolBehindDrawer: (frameId: FrameId, panel: WorkspaceUtilityPanel) => ({ frameId, panel }),
-    navigateToSceneFrame: (frameId: FrameId) => ({ frameId }),
     navigateToScene: (frameId: FrameId, sceneId: string) => ({ frameId, sceneId }),
     openScenePreview: (frameId: FrameId, sceneId: string) => ({ frameId, sceneId }),
     openSceneControl: (frameId: FrameId, sceneId: string) => ({
@@ -1458,7 +1454,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
         setSearch: () => null,
         navigateToFrame: () => null,
         openFrameTool: () => null,
-        navigateToSceneFrame: () => null,
         navigateToScene: () => null,
         openScenePreview: () => null,
         openChatDrawer: () => null,
@@ -1484,7 +1479,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
         setSearch: () => null,
         navigateToFrame: () => null,
         openFrameTool: () => null,
-        navigateToSceneFrame: () => null,
         navigateToScene: () => null,
         openScenePreview: () => null,
         openSceneControl: () => null,
@@ -1504,7 +1498,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
         setSearch: () => null,
         navigateToFrame: () => null,
         openFrameTool: () => null,
-        navigateToSceneFrame: () => null,
         navigateToScene: () => null,
         openScenePreview: () => null,
         openTemplateDrawer: () => null,
@@ -1529,7 +1522,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
         setSearch: () => null,
         navigateToFrame: () => null,
         openFrameTool: () => null,
-        navigateToSceneFrame: () => null,
         navigateToScene: () => null,
         openScenePreview: () => null,
         openSceneControl: () => null,
@@ -1554,7 +1546,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
         setSearch: () => null,
         navigateToFrame: () => null,
         openFrameTool: () => null,
-        navigateToSceneFrame: () => null,
         navigateToScene: () => null,
         openScenePreview: () => null,
         openSceneControl: () => null,
@@ -2034,10 +2025,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
           search,
           utilityDrawerClosedHash(workspaceContentNavigationHash())
         )
-      },
-      navigateToSceneFrame: ({ frameId }) => {
-        actions.selectFrame(frameId)
-        router.actions.push(urls.scenes(frameId), undefined, workspaceContentNavigationHash())
       },
       navigateToScene: ({ frameId, sceneId }) => {
         actions.setRouteSelection(frameId, sceneId)

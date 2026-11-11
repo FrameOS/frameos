@@ -6,7 +6,7 @@
 // onto one published since. Every access is guarded: storage can be
 // missing or full (private windows, quotas) and the page must still work.
 
-import type { SceneJson } from "./ai-scenes-apply";
+import type { SceneJson } from "../../../../../frontend/src/sceneWorkspace/lib/ai-scenes-apply";
 import type { SceneListingData } from "../components/SceneInfoPanel";
 
 export type SceneEditorDraft = {

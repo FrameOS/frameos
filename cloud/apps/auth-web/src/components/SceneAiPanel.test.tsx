@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MAX_RENDER_PREVIEWS, RENDER_CHECK_PREFIX, SceneAiPanel } from "./SceneAiPanel";
+import { MAX_RENDER_PREVIEWS, RENDER_CHECK_PREFIX, SceneAiPanel } from "../../../../../frontend/src/sceneWorkspace/SceneAiPanel";
 
 // The render check spins up the wasm preview worker — not something jsdom
 // can do. Stub it and script its verdicts per test.
 const renderCheckMock = vi.fn();
-vi.mock("../lib/scene-render-check", () => ({
+vi.mock("../../../../../frontend/src/sceneWorkspace/lib/scene-render-check", () => ({
   renderSceneCheck: (options: unknown) => renderCheckMock(options),
 }));
 

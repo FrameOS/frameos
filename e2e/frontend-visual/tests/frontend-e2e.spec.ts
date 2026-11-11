@@ -23,7 +23,8 @@ const frameTools = [
   { label: 'Schedule redirect', path: '/frames/1/schedule', text: /Schedule/i },
 ] as const
 
-const sceneUtilityDrawers = ['Preview', 'State variables', 'Apps', 'Events', 'JSON'] as const
+// The diagram's side drawers; Preview and AI are the workspace's columns.
+const sceneUtilityDrawers = ['Scene settings', 'State variables', 'Apps', 'Events', 'JSON'] as const
 
 const frameSettingsSections = [
   ['Info', 'frame-settings-info'],
@@ -122,8 +123,10 @@ test.describe('backend frontend e2e coverage @e2e', () => {
       { path: '/frames', text: /Kitchen dashboard/i },
       { path: '/frames/1', text: /Kitchen dashboard/i },
       { path: '/scenes', text: /Scenes/i },
-      { path: '/scenes/1', text: /Scenes/i },
-      { path: '/scenes/1/scene-dashboard', text: /Dashboard/i },
+      // A frame's scenes open in the scene editor (no shell, no "Scenes"
+      // title): the frame's name in its bar, the scene's diagram file.
+      { path: '/scenes/1', text: /Kitchen dashboard[\s\S]*scene\.json/ },
+      { path: '/scenes/1/scene-dashboard', text: /Dashboard\/scene\.json/ },
       { path: '/apps', text: /Apps/i },
       { path: '/apps/1', text: /Apps/i },
       { path: '/apps/1/scene-dashboard', text: /Apps/i },

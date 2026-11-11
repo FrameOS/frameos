@@ -1,3 +1,5 @@
+import { sceneWorkspaceHost } from "./host";
+
 // Headless render check for AI-delivered scenes, in the browser: run the
 // scene once through the frameos-wasm preview worker (the same runtime the
 // device runs) and collect what it logs instead of what it draws. The AI
@@ -8,7 +10,7 @@
 // account (GET /api/settings) and CORS-blocked fetches go through the
 // store's preview proxy.
 
-import { sceneYieldId } from "./events-contract.gen";
+import { SCENE_YIELD_ID as sceneYieldId } from "../../utils/eventsContract.gen";
 
 export const RENDER_CHECK_SETTLE_MS = 2000;
 export const RENDER_CHECK_TIMEOUT_MS = 30_000;
@@ -16,7 +18,10 @@ const MAX_COLLECTED_LOGS = 100;
 const MAX_COLLECTED_ERRORS = 20;
 
 export const RENDER_CHECK_WORKER_URL = "/frameos-wasm/preview-worker.js";
-export const RENDER_CHECK_PROXY_URL = "/api/store/preview-proxy";
+/** The plane's preview proxy (the store's on the cloud). */
+export function renderCheckProxyUrl(): string | undefined {
+  return sceneWorkspaceHost().previewProxyUrl ?? undefined;
+}
 
 export type RenderCheckScene = { id: string } & Record<string, unknown>;
 
@@ -217,7 +222,7 @@ export async function fetchPreviewSettings(): Promise<
 > {
   const groups: Record<string, Record<string, string>> = {};
   try {
-    const response = await fetch("/api/settings");
+    const response = await sceneWorkspaceHost().fetch(sceneWorkspaceHost().settingsUrl);
     if (!response.ok) {
       return groups;
     }
@@ -360,7 +365,7 @@ export async function renderSceneCheck({
         timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
       scenesJson: JSON.stringify(payloadScenes),
       settingsJson,
-      proxyUrl: RENDER_CHECK_PROXY_URL,
+      proxyUrl: renderCheckProxyUrl(),
       sceneId: scene.id,
     });
   });

@@ -478,12 +478,19 @@ async def update_template(template_id: str, data: UpdateTemplateRequest, db: Ses
         template.name = data.name
     if data.description is not None:
         template.description = data.description
+    scenes = template.scenes
+    if data.scenes is not None:
+        # The scene editor's save: the same normalisation as a create.
+        scenes = data.scenes
+        migrate_legacy_apps_in_scenes(scenes)
+        retire_apps_in_scenes(scenes)
+        normalize_scenes_execution(scenes)
     if data.isLayout is not None:
-        scenes = with_main_scene_layout(template.scenes, data.isLayout)
-        if data.isLayout:
-            bad_layouts = bad_layouts_message(scenes)
-            if bad_layouts:
-                raise HTTPException(status_code=400, detail=bad_layouts)
+        scenes = with_main_scene_layout(scenes, data.isLayout)
+    if data.scenes is not None or data.isLayout is not None:
+        bad_layouts = bad_layouts_message(scenes) if data.scenes is not None or data.isLayout else None
+        if bad_layouts:
+            raise HTTPException(status_code=400, detail=bad_layouts)
         template.scenes = scenes
     db.commit()
     db.refresh(template)

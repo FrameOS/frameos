@@ -1,9 +1,10 @@
 // Parent-side helper for embedding the FrameOS scene editor. Creates an
 // iframe pointing at the editor bundle (this package's dist/index.html,
 // served from your own host) and speaks its postMessage protocol:
-//   in:  {type: 'frameos-editor:init', scenes, sceneId?, mode?, width?, height?, interval?, theme?, previewProxyUrl?, description?}
+//   in:  {type: 'frameos-editor:init', scenes, sceneId?, mode?, width?, height?, interval?, theme?, previewProxyUrl?, description?, template?, templateFields?}
 //        {type: 'frameos-editor:get-scenes'} · {type: 'frameos-editor:select-scene', sceneId}
 //   out: {type: 'frameos-editor:ready'} · {type: 'frameos-editor:scenes', scenes}
+//        {type: 'frameos-editor:template', template} (only after an init with a template)
 //        {type: 'frameos-editor:save-screenshot', dataUrl, sceneId} (ack with 'frameos-editor:screenshot-saved')
 //
 // The editor bundle is AGPL-licensed FrameOS code running at arm's length in
@@ -21,7 +22,10 @@ export function createFrameOSEditor({
   theme,
   previewProxyUrl,
   description,
+  template,
+  templateFields,
   onScenesChanged,
+  onTemplateChanged,
   onReady,
 }) {
   const iframe = document.createElement('iframe')
@@ -63,6 +67,8 @@ export function createFrameOSEditor({
         theme,
         previewProxyUrl,
         description,
+        template,
+        templateFields,
       })
       onReady?.()
     } else if (message.type === 'frameos-editor:scenes' && Array.isArray(message.scenes)) {
@@ -71,6 +77,8 @@ export function createFrameOSEditor({
         sceneWaiters.shift()(message.scenes)
       }
       onScenesChanged?.(message.scenes)
+    } else if (message.type === 'frameos-editor:template' && message.template && typeof message.template === 'object') {
+      onTemplateChanged?.(message.template)
     }
   }
 
@@ -109,6 +117,8 @@ export function createFrameOSEditor({
         theme,
         previewProxyUrl,
         description,
+        template,
+        templateFields,
       })
     },
     selectScene: (nextSceneId) => {

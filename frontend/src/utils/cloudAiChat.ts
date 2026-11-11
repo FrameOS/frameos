@@ -8,7 +8,7 @@ import { apiFetch } from './apiFetch'
 // Turns run detached on the cloud: if this stream drops mid-turn (a proxy
 // idle cut, a flaky link) the turn keeps going and we reopen the stream at
 // GET /api/ai/chat/turns/<turnId>?after=<events seen>. Mirrors the store
-// panel's client (cloud/apps/auth-web/src/lib/ai-chat-client.ts). The
+// panel's client (frontend/src/sceneWorkspace/lib/ai-chat-client.ts). The
 // backend sends no turnId (its turn also outlives the stream, and its reply
 // lands on the chat), so a dropped backend stream is reported, not resumed.
 

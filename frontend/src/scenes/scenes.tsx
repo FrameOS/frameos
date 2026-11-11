@@ -20,6 +20,7 @@ const sceneLoaders = {
   frames: () => import('./frames/Frames'),
   frame: () => import('./frame/Frame'),
   sceneWorkspace: () => import('./workspace/SceneWorkspace'),
+  localSceneEditor: () => import('./workspace/LocalSceneEditor'),
   appsWorkspace: () => import('./workspace/AppsWorkspace'),
   photosWorkspace: () => import('./photos/PhotosWorkspace'),
   settings: () => import('./settings/Settings'),
@@ -109,6 +110,8 @@ export const getRoutes = () =>
     [urls.scenes()]: 'sceneWorkspace',
     // Signed out, the cloud's /scenes is the public store, not the workspace.
     ...(isCloudMode() && !cloudSignedIn() ? { [urls.scenes()]: 'storeFront' } : {}),
+    // A backend's saved scenes (templates) in the scene editor.
+    ...(isBackendShell() ? { [urls.localScene(':templateId')]: 'localSceneEditor' } : {}),
     [urls.scenes(':frameId')]: 'sceneWorkspace',
     [urls.scenes(':frameId', ':sceneId')]: 'sceneWorkspace',
     [urls.apps()]: 'appsWorkspace',

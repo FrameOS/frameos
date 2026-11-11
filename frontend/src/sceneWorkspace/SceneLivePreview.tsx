@@ -19,14 +19,14 @@ import {
   type SceneInfo,
   type StateField,
 } from "frameos-wasm";
-import { ColorAdjustmentControls } from "../../../../../frontend/src/scenes/frame/panels/Assets/ColorAdjustmentControls";
-import { applyAssetColors, autoEndPoints } from "../../../../../frontend/src/utils/assetColors/adjust";
+import { ColorAdjustmentControls } from "../scenes/frame/panels/Assets/ColorAdjustmentControls";
+import { applyAssetColors, autoEndPoints } from "../utils/assetColors/adjust";
 import {
   currentLocation,
   locatedValues,
   locationFieldPair,
   type GeoLocation,
-} from "../../../../../frontend/src/utils/geolocation";
+} from "../utils/geolocation";
 import {
   defaultAssetColorProfile,
   parseAssetColorProfile,
@@ -34,7 +34,7 @@ import {
   serializeAssetColorProfile,
   type AssetColorProfile,
   type RgbTriplet,
-} from "../../../../../frontend/src/utils/assetColors/profile";
+} from "../utils/assetColors/profile";
 import {
   Camera,
   CircleDollarSign,
@@ -67,20 +67,21 @@ import {
   paidServicesForScenes,
   requiredSettingsForScenes,
   type PreviewSettingsGroup,
-} from "../lib/preview-settings";
-import type { PreviewLogLine } from "../lib/preview-log";
+} from "./lib/preview-settings";
+import type { PreviewLogLine } from "./lib/preview-log";
 import {
   previewDeviceFor,
   previewDevices,
   previewDeviceSize,
   previewShowsDevice,
-} from "../lib/preview-devices";
-import { isReauthRequired, reauthHref } from "../lib/reauth-client";
-import { selectFieldOptions } from "../lib/select-options";
+} from "./lib/preview-devices";
+import { isReauthRequired, reauthHref } from "./lib/reauth-client";
+import { selectFieldOptions } from "./lib/select-options";
 import { ImageLightbox } from "./ImageLightbox";
 import { PreviewAssetsDialog } from "./PreviewAssetsDialog";
 import { PreviewLog } from "./PreviewLog";
 import { useDragHeight } from "./useDragHeight";
+import { sceneWorkspaceHost } from "./lib/host";
 
 type SceneLivePreviewPanelProps = {
   /** The store scene, or null for a scene that is not saved yet (then
@@ -636,7 +637,7 @@ export function SceneLivePreviewPanel({
         // reveal=1: the preview runs the scene in THIS browser, so it needs the
         // bytes, not the masked hint GET answers by default. Only a signed-in
         // browser session gets them (app/api/settings/route.ts).
-        const response = await fetch("/api/settings?reveal=1");
+        const response = await sceneWorkspaceHost().fetch(`${sceneWorkspaceHost().settingsUrl}?reveal=1`);
         if (response.status === 403) {
           const payload = (await response.json().catch(() => undefined)) as
             | { error?: string }
@@ -777,7 +778,7 @@ export function SceneLivePreviewPanel({
         settings: previewSettings,
         // Fallback only: the runtime fetches URLs client-side first and
         // routes just CORS-blocked hosts through this endpoint.
-        proxyUrl: "/api/store/preview-proxy",
+        ...(sceneWorkspaceHost().previewProxyUrl ? { proxyUrl: sceneWorkspaceHost().previewProxyUrl! } : {}),
         fastMode,
         panelPalette: panelRef.current,
         beforeDither: beforeDitherRef.current,
@@ -1186,7 +1187,7 @@ export function SceneLivePreviewPanel({
       for (let i = 0; i < bytes.length; i += 0x8000) {
         binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
       }
-      const response = await fetch(`/api/account/scenes/${sceneId}/images`, {
+      const response = await sceneWorkspaceHost().fetch(`/api/account/scenes/${sceneId}/images`, {
         body: JSON.stringify({ content_base64: btoa(binary) }),
         headers: { "content-type": "application/json" },
         method: "POST",

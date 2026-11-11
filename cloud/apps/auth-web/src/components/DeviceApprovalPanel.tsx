@@ -17,7 +17,7 @@ import {
   deviceScopeDescriptions,
   deviceScopeLabels,
 } from "../lib/device-scopes";
-import { redirectToReauthIfRequired } from "../lib/reauth-client";
+import { redirectToReauthIfRequired } from "../../../../../frontend/src/sceneWorkspace/lib/reauth-client";
 
 type DeviceRequest = {
   client_kind?: "backend" | "frame";

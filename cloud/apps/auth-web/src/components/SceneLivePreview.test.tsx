@@ -9,7 +9,7 @@ import {
   normalizeHexColor,
   NOTICE_HIDE_MS,
   SceneLivePreviewPanel,
-} from "./SceneLivePreview";
+} from "../../../../../frontend/src/sceneWorkspace/SceneLivePreview";
 
 type PreviewMemoryUsage = {
   limitBytes: number;

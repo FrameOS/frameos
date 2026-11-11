@@ -11,6 +11,13 @@ import { workspaceLogic } from '../scenes/workspace/workspaceLogic'
 import { inmemoryModelPath } from '../utils/monacoPaths'
 import { templateChangesFromJson, templateJsonText, type SceneTemplateMetadata } from './sceneFiles'
 import { sceneFileTreeLogic } from './sceneFileTreeLogic'
+import type { FrameId } from '../types'
+
+/** A field of template.json a host keeps. */
+export type TemplateField = 'name' | 'description' | 'category' | 'frameosVersion' | 'tags'
+
+/** The store's: everything but the name, which its scene page renames. */
+export const STORE_TEMPLATE_FIELDS: TemplateField[] = ['description', 'category', 'frameosVersion', 'tags']
 
 export interface TemplateCategoryOption {
   value: string
@@ -18,7 +25,7 @@ export interface TemplateCategoryOption {
 }
 
 interface TemplateFileProps {
-  frameId: number
+  frameId: FrameId
   template: SceneTemplateMetadata
   /** Absent: the template is shown read only (a visitor's playground). */
   onChange?: (changes: Partial<SceneTemplateMetadata>) => void
@@ -28,6 +35,9 @@ interface TemplateFileProps {
    * view of the template (the store's scene page — gallery, description,
    * versions, listing). The Source view is template.json either way. */
   content?: ReactNode
+  /** The fields the form edits; the others are left out of it (the name is
+   * shown read only). The store's by default. */
+  fields?: TemplateField[]
 }
 
 function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }): JSX.Element {
@@ -63,6 +73,7 @@ export function TemplateFile({
   categories,
   sceneCount,
   content,
+  fields = STORE_TEMPLATE_FIELDS,
 }: TemplateFileProps): JSX.Element {
   const { templateSourceView, templateSourceError } = useValues(sceneFileTreeLogic({ frameId }))
   const { setTemplateSourceView, setTemplateSourceError } = useActions(sceneFileTreeLogic({ frameId }))
@@ -150,10 +161,27 @@ export function TemplateFile({
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="frame-tool-card max-w-2xl space-y-4 rounded-2xl p-4">
-            <Field label="Name" hint="The name the store lists the template under.">
-              <TextInput value={template.name} disabled readOnly />
-            </Field>
-            <Field label="Description" hint="Markdown. Shown on the store page and in the install dialog.">
+            {fields.includes('name') ? (
+              <Field label="Name">
+                <TextInput
+                  value={template.name}
+                  disabled={readOnly}
+                  onChange={(value) => onChange?.({ name: value })}
+                />
+              </Field>
+            ) : (
+              <Field label="Name" hint="The name the store lists the template under.">
+                <TextInput value={template.name} disabled readOnly />
+              </Field>
+            )}
+            <Field
+              label="Description"
+              hint={
+                fields.includes('category')
+                  ? 'Markdown. Shown on the store page and in the install dialog.'
+                  : 'Shown with the scene in the list.'
+              }
+            >
               <TextArea
                 value={template.description ?? ''}
                 rows={8}
@@ -162,41 +190,49 @@ export function TemplateFile({
                 onChange={(value) => onChange?.({ description: value === '' ? null : value })}
               />
             </Field>
-            <div className="grid gap-4 @2xl:grid-cols-2">
-              <Field label="Category">
-                <Select
-                  value={template.category ?? ''}
-                  disabled={readOnly}
-                  options={categoryOptions}
-                  onChange={(value) => onChange?.({ category: value || null })}
-                />
-              </Field>
-              <Field label="Minimum FrameOS version" hint="The oldest FrameOS that runs these scenes.">
+            {fields.includes('category') || fields.includes('frameosVersion') ? (
+              <div className="grid gap-4 @2xl:grid-cols-2">
+                {fields.includes('category') ? (
+                  <Field label="Category">
+                    <Select
+                      value={template.category ?? ''}
+                      disabled={readOnly}
+                      options={categoryOptions}
+                      onChange={(value) => onChange?.({ category: value || null })}
+                    />
+                  </Field>
+                ) : null}
+                {fields.includes('frameosVersion') ? (
+                  <Field label="Minimum FrameOS version" hint="The oldest FrameOS that runs these scenes.">
+                    <TextInput
+                      value={template.frameosVersion ?? ''}
+                      disabled={readOnly}
+                      placeholder="e.g. 2026.11.3"
+                      onChange={(value) => onChange?.({ frameosVersion: value.trim() || null })}
+                    />
+                  </Field>
+                ) : null}
+              </div>
+            ) : null}
+            {fields.includes('tags') ? (
+              <Field label="Tags" hint="Separated by commas.">
                 <TextInput
-                  value={template.frameosVersion ?? ''}
+                  // Uncontrolled while typing (a trailing comma must survive a
+                  // keystroke); committed on blur, and reset when the tags
+                  // change elsewhere (the Info column, the AI).
+                  key={template.tags.join(',')}
+                  defaultValue={template.tags.join(', ')}
                   disabled={readOnly}
-                  placeholder="e.g. 2026.11.3"
-                  onChange={(value) => onChange?.({ frameosVersion: value.trim() || null })}
+                  placeholder="clock, weather, photos"
+                  onBlur={(event) => {
+                    const next = tagsFromText(event.currentTarget.value)
+                    if (next.join(',') !== template.tags.join(',')) {
+                      onChange?.({ tags: next })
+                    }
+                  }}
                 />
               </Field>
-            </div>
-            <Field label="Tags" hint="Separated by commas.">
-              <TextInput
-                // Uncontrolled while typing (a trailing comma must survive a
-                // keystroke); committed on blur, and reset when the tags
-                // change elsewhere (the Info column, the AI).
-                key={template.tags.join(',')}
-                defaultValue={template.tags.join(', ')}
-                disabled={readOnly}
-                placeholder="clock, weather, photos"
-                onBlur={(event) => {
-                  const next = tagsFromText(event.currentTarget.value)
-                  if (next.join(',') !== template.tags.join(',')) {
-                    onChange?.({ tags: next })
-                  }
-                }}
-              />
-            </Field>
+            ) : null}
           </div>
         </div>
       )}

@@ -114,7 +114,7 @@ Both planes report `scene_preview` on the frame (`GET /api/frames`,
 
 while a preview is the newest scene push, `null` otherwise (backend
 `frame_commands.scene_preview_info`, cloud `frames.ts scenePreviewsByFrame`).
-The scene list (`frontend/src/scenes/workspace/SceneWorkspace.tsx`) draws a
+The frame page's scene list (`frontend/src/scenes/workspace/ScenePreviewRow.tsx`) draws a
 dashed **preview** row above the saved scenes: the name, where it came from,
 "active" when the device reports showing it, and two actions:
 

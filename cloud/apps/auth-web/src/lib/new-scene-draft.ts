@@ -11,7 +11,7 @@
 // budget. Every access is guarded — storage can be missing or full (private
 // windows, quotas) and the page still has to work.
 
-import type { SceneJson } from "./ai-scenes-apply";
+import type { SceneJson } from "../../../../../frontend/src/sceneWorkspace/lib/ai-scenes-apply";
 
 export type NewSceneDraftMessage = {
   role: "user" | "assistant";

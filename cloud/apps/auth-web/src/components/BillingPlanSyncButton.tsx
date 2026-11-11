@@ -7,7 +7,7 @@ import {
   isReauthRequired,
   redirectToReauthIfRequired,
   takePendingReauthAction,
-} from "../lib/reauth-client";
+} from "../../../../../frontend/src/sceneWorkspace/lib/reauth-client";
 
 const resumeAction = "billing-sync-plans";
 

@@ -54,7 +54,36 @@ test('setScenes keeps its selected scene until the iframe is ready', () => {
     theme: undefined,
     previewProxyUrl: undefined,
     description: undefined,
+    template: undefined,
+    templateFields: undefined,
   })
+  editor.destroy()
+})
+
+test('sends the template with init and reports template.json edits', () => {
+  const { messages, contentWindow, dispatch, url } = setup()
+  const edits = []
+  const template = { name: 'Clock', description: null, category: null, tags: [], frameosVersion: null }
+  const editor = createFrameOSEditor({
+    container: { appendChild: () => {} },
+    url,
+    scenes: [],
+    template,
+    templateFields: ['name', 'description'],
+    onTemplateChanged: (next) => edits.push(next),
+  })
+
+  dispatch({ source: contentWindow, origin: 'https://host.example', data: { type: 'frameos-editor:ready' } })
+  assert.deepEqual(messages.at(-1).message.template, template)
+  assert.deepEqual(messages.at(-1).message.templateFields, ['name', 'description'])
+
+  const renamed = { ...template, name: 'Big clock' }
+  dispatch({
+    source: contentWindow,
+    origin: 'https://host.example',
+    data: { type: 'frameos-editor:template', template: renamed },
+  })
+  assert.deepEqual(edits, [renamed])
   editor.destroy()
 })
 
