@@ -12,7 +12,8 @@ let package = Package(
         .library(name: "FrameOSKit", targets: ["FrameOSKit"]),
     ],
     targets: [
-        .target(name: "FrameOSKit"),
+        // LayoutStarters.json: written by frontend/scripts/generateLayoutStarters.mjs.
+        .target(name: "FrameOSKit", resources: [.copy("Generated/LayoutStarters.json")]),
         .testTarget(name: "FrameOSKitTests", dependencies: ["FrameOSKit"]),
     ],
     swiftLanguageModes: [.v5]

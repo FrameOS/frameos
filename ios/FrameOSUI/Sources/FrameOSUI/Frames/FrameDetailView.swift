@@ -8,6 +8,7 @@ struct FrameDetailView: View {
     @State private var model: FrameDetailModel
     @State private var openScene: InstalledScene?
     @State private var addingScene = false
+    @State private var addingLayout = false
     @State private var renaming = false
     @State private var newName = ""
     @State private var confirmReboot = false
@@ -124,6 +125,10 @@ struct FrameDetailView: View {
                 Text("Scenes")
             }
 
+            if !model.layouts.isEmpty {
+                FrameLayoutsSection(frameId: frameId, model: model, addingLayout: $addingLayout)
+            }
+
             if !model.commands.isEmpty {
                 Section {
                     ForEach(model.commands) { command in
@@ -208,7 +213,18 @@ struct FrameDetailView: View {
         // Reloaded on close: a scene can also come in through Generate scene's
         // chat inside the sheet, which is no catalog install.
         .sheet(isPresented: $addingScene, onDismiss: { Task { await model.load(app) } }) {
-            CatalogView(installTarget: frame)
+            // A frame with no layout yet has "Add layout" there (the SPA's
+            // drawer); one with a layout has New layout under Layouts.
+            CatalogView(installTarget: frame,
+                        addLayout: model.layouts.isEmpty ? { starter in await model.addLayout(app, starter) } : nil)
+        }
+        .sheet(isPresented: $addingLayout) {
+            NavigationStack {
+                LayoutStartersView { starter in await model.addLayout(app, starter) }
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("Close") { addingLayout = false } }
+                    }
+            }
         }
         .alert("Rename frame", isPresented: $renaming) {
             TextField("Name", text: $newName)

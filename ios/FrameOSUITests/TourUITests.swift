@@ -216,6 +216,60 @@ final class TourUITests: XCTestCase {
             sleep(1)
         }
 
+        // Layouts: the frame has none, so Add scene offers one, and the first
+        // goes on every scene.
+        let addScene = button(app, containing: "Add scene")
+        var scrolls = 0
+        while !addScene.isHittable && scrolls < 10 { app.swipeDown(); scrolls += 1 }
+        addScene.tap()
+        XCTAssertTrue(app.navigationBars["Add scene"].waitForExistence(timeout: 15))
+        let addLayout = button(app, containing: "Add layout")
+        XCTAssertTrue(addLayout.waitForExistence(timeout: 10), "no Add layout in Add scene")
+        addLayout.tap()
+        XCTAssertTrue(app.navigationBars["New layout"].waitForExistence(timeout: 10))
+        sleep(1)
+        snapshot(app, "\(prefix)27 new layout")
+        button(app, containing: "Top bar").tap()
+        // "On the scene" on a frame with one, "On every scene" on one with more.
+        let layoutRow = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "On the scene", "On every scene")).firstMatch
+        XCTAssertTrue(layoutRow.waitForExistence(timeout: 90), "the new layout is not under Layouts")
+        while !layoutRow.isHittable { app.swipeUp() }
+        sleep(2)
+        snapshot(app, "\(prefix)27b layouts")
+        layoutRow.tap()
+        XCTAssertTrue(app.navigationBars["Top bar"].waitForExistence(timeout: 10), "the layout did not open")
+        snapshot(app, "\(prefix)27c layout")
+        // In the layout's list, not the tab bar's Settings.
+        app.collectionViews.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Settings")).firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Top bar settings"].waitForExistence(timeout: 10))
+        let title = app.textFields.firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        title.tap()
+        title.typeText("UI tour bar")
+        snapshot(app, "\(prefix)27d layout settings")
+        button(app, containing: "Save").tap()
+        XCTAssertTrue(app.navigationBars["Top bar"].waitForExistence(timeout: 30), "Save did not come back")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        sleep(2)
+        // A scene's own Layout picker.
+        // To the top: a row half under the navigation bar counts as hittable,
+        // and a tap there lands on the bar.
+        for _ in 0..<4 { app.swipeDown() }
+        sleep(1)
+        let sceneRow = button(app, containing: scene)
+        sceneRow.tap()
+        if !app.buttons["Done"].waitForExistence(timeout: 15) {
+            snapshot(app, "\(prefix)27e scene did not open")
+            XCTFail("the scene's sheet did not open")
+        }
+        let layoutPicker = button(app, containing: "Layout settings")
+        scrolls = 0
+        while !layoutPicker.isHittable && scrolls < 6 { app.swipeUp(); scrolls += 1 }
+        XCTAssertTrue(layoutPicker.exists, "no Layout in the scene's sheet")
+        snapshot(app, "\(prefix)27e scene layout")
+        app.buttons["Done"].tap()
+
         // The other tabs.
         for (name, shot) in [("Scenes", "30 scenes"), ("Photos", "31 photos"), ("AI", "32 ai"), ("Settings", "33 settings")] {
             tab(app, name).tap()

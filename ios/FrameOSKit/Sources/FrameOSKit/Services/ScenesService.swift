@@ -88,7 +88,8 @@ public enum SceneLayouts {
     public static func ref(_ value: JSONValue?) -> JSONValue? {
         guard let object = value?.objectValue, let sceneId = object["sceneId"]?.stringValueIfString, !sceneId.isEmpty else { return nil }
         var ref: [String: JSONValue] = ["sceneId": .string(sceneId)]
-        if let state = object["state"]?.objectValue { ref["state"] = .object(state) }
+        // Empty settings are no settings (the SPA's sceneLayoutRef).
+        if let state = object["state"]?.objectValue, !state.isEmpty { ref["state"] = .object(state) }
         return .object(ref)
     }
 
@@ -254,8 +255,11 @@ extension FrameOSService {
     }
 
     /// The cloud's whole-list push (`POST …/scenes`), every row kept as the
-    /// frame holds it (the SPA's pushCloudFrameSceneList).
-    func pushCloudRows(_ frame: Frame, _ rows: [JSONValue], activeSceneId: String? = nil) async throws {
+    /// frame holds it (the SPA's pushCloudFrameSceneList). `layouts`: new
+    /// `layouts` for the rows it names by store scene id (`.null` clears).
+    func pushCloudRows(_ frame: Frame, _ rows: [JSONValue], activeSceneId: String? = nil,
+                       layouts: [String: JSONValue] = [:]) async throws
+    {
         let list: [JSONValue] = rows.map { row in
             var entry: [String: JSONValue] = ["scene_id": row["scene_id"] ?? .null]
             if let version = row["scene_version"], !version.isNull { entry["scene_version"] = version }
@@ -264,6 +268,9 @@ extension FrameOSService {
             if row["position"] == nil {
                 if let maps = row["event_maps"] { entry["event_maps"] = maps }
                 if let layouts = row["layouts"] { entry["layouts"] = layouts }
+            }
+            if let storeId = row["scene_id"]?.stringValue, let changed = layouts[storeId] {
+                entry["layouts"] = changed
             }
             return .object(entry)
         }

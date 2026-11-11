@@ -28,6 +28,13 @@ struct CloudIntegrationTests {
         return FrameOSService(client: restored)
     }
 
+    /// Layouts on the account's first frame (LayoutRoundTrip).
+    @Test func layouts() async throws {
+        let service = try await signedIn()
+        let frame = try #require(try await service.frames().first, "the account has no frame")
+        try await LayoutRoundTrip.run(service, frameId: frame.id)
+    }
+
     @Test func endToEnd() async throws {
         let service = try await signedIn()
         let client = service.client

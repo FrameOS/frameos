@@ -31,7 +31,9 @@ to the AI. The runtime does not check: a layout with no yield shows no content.
 `repo/scenes/samples`) is also one click away on both planes
 (`frontend/scripts/generateLayoutStarters.mjs`): "New layout" in the frame's
 Layouts group, "Add layout" at the end of the Add scene drawer while it has none,
-and "Add a layout" in its Settings under Layouts. Each sample's `thumb.jpg` is
+and "Add a layout" in its Settings under Layouts. The iOS app offers the same
+list (the script also writes `ios/FrameOSKit/.../LayoutStarters.json`): "New
+layout" under a frame's Layouts, "Add layout" in Add scene while it has none. Each sample's `thumb.jpg` is
 shown in those lists and saved as the added layout's picture.
 
 **In the store.** Layouts have their own shelf (`layouts` in

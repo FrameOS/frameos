@@ -27,6 +27,19 @@ struct BackendIntegrationTests {
         return FrameOSService(client: restored)
     }
 
+    /// Layouts on a frame of its own (LayoutRoundTrip), deleted after.
+    @Test func layouts() async throws {
+        let service = try await signedIn()
+        let created = try await service.client.call("POST", "/api/frames/new", body: .json([
+            "name": "iOS layouts frame", "frame_host": "127.0.0.1", "server_host": "127.0.0.1:8997", "mode": "rpios",
+        ]))
+        let frameId = try #require(created["frame"]?["id"]?.stringValue)
+        var failure: Error?
+        do { try await LayoutRoundTrip.run(service, frameId: frameId) } catch { failure = error }
+        try await service.delete(try await service.frame(frameId))
+        if let failure { throw failure }
+    }
+
     @Test func endToEnd() async throws {
         let service = try await signedIn()
         let client = service.client
