@@ -732,8 +732,13 @@ proc pageTree(self: SceneSwitcherScene, width, height: int, paper: bool, unit: i
     return nil
   pageButtons.setLen(0)
   let look = storeLook(paper, if unit > 0: unit else: min(width, height))
+  var room = width
+  when not defined(frameosEmbedded):
+    let grid = self.grid(width, height, unit)
+    if grid.round:
+      room = grid.side
   if self.view() == "store":
-    result = storeTree(self.state, facts, look, width, pageButtons)
+    result = storeTree(self.state, facts, look, room, pageButtons)
   else:
     let id = self.state{"info"}.getStr()
     let index = self.indexOf(id)
@@ -741,7 +746,6 @@ proc pageTree(self: SceneSwitcherScene, width, height: int, paper: bool, unit: i
       return nil
     result = infoTree(self.state, facts, look, id, self.entries[index].name, id == self.opener(), pageButtons)
   when not defined(frameosEmbedded):
-    let grid = self.grid(width, height, unit)
     if grid.round:
       var c: string
       c.at(grid.x0, grid.y0, grid.side, grid.side)

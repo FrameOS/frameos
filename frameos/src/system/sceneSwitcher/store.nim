@@ -48,6 +48,7 @@ type
     ## What every element on the two pages shares: e-paper or an LCD, the
     ## text size and the room around things.
     paper*: bool
+    narrow*: bool ## too narrow for a name and two buttons on one line
     size*, small*, pad*, gap*, line*: int
 
   StoreMove* = enum
@@ -263,15 +264,20 @@ proc small(look: StoreLook, text: sink string): SvgNode =
 proc sceneRow(look: StoreLook, facts, scene: JsonNode, row: int, focus: var seq[int], lit: int): SvgNode =
   ## One store scene: its name, its shelf and publisher, and what can be
   ## done with it here.
-  var c = "flex items-center"
+  var c = if look.narrow: "flex flex-col" else: "flex items-center"
   c.px("gap", look.gap div 2)
   c.px("py", look.gap div 3)
   c.add(if look.paper: " border-b border-black" else: " border-b border-zinc-800")
   result = el("div", move c)
+  # Narrow (a round panel's square), the buttons go under the name.
+  var a = "flex justify-end"
+  a.px("gap", look.gap div 2)
+  let actions = if look.narrow: el("div", move a) else: result
   let
     store = scene{"id"}.getStr()
-    installed = facts.found("store", store)
     previewed = facts.previewing("store", store)
+    # A preview is on the frame too (its push holds it): it is a preview.
+    installed = if previewed: nil else: facts.found("store", store)
     version = if installed.isNil: 0 else: installed{"v"}.getInt(0)
   var line = facts.about(scene)
   if not installed.isNil: line.add " \xc2\xb7 installed"
@@ -281,14 +287,18 @@ proc sceneRow(look: StoreLook, facts, scene: JsonNode, row: int, focus: var seq[
   result.children.add text
   if installed.isNil:
     if not previewed:
-      result.children.add look.button("Preview", HPreview + row, false, focus, lit)
-    result.children.add look.button("Install", HInstall + row, true, focus, lit)
+      actions.children.add look.button("Preview", HPreview + row, false, focus, lit)
+    actions.children.add look.button("Install", HInstall + row, true, focus, lit)
   else:
     if version > 0 and scene{"version"}.getInt(0) > version:
-      result.children.add look.button("Update", HUpdate + row, true, focus, lit)
-    result.children.add look.button("Show", HShow + row, false, focus, lit)
+      actions.children.add look.button("Update", HUpdate + row, true, focus, lit)
+    actions.children.add look.button("Show", HShow + row, false, focus, lit)
+  if look.narrow:
+    result.children.add actions
 
 proc storeTree*(state, facts: JsonNode, look: StoreLook, width: int, focus: var seq[int]): SvgNode =
+  var look = look
+  look.narrow = width < look.size * 20
   ## The store page: Back and the pages' arrows, the search and the shelves,
   ## what is running or went wrong, and a page of scenes that scrolls.
   ## `focus` gets the buttons in order, for the keys; the one at

@@ -201,6 +201,8 @@ block a_long_press_opens_the_scene_and_remove_asks_twice:
 block a_preview_opens_on_the_store_with_install_and_discard:
   facts = baseFacts()
   facts["preview"] = %*{"store": Comic, "id": "comic-rt", "name": "Daily comic"}
+  # The preview's push holds it, so the frame reads it as from the store too.
+  facts["installed"].add %*{"id": "comic-rt", "store": Comic, "v": 4}
   listed.add SwitcherEntry(id: "comic-rt", name: "Daily comic")
   asked.setLen(0)
   let scene = newSwitcher(config(), opener = "comic-rt")
