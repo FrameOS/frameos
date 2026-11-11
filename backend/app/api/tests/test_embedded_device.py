@@ -1017,6 +1017,49 @@ async def test_scenes_patch_sends_only_what_changed(async_client, no_auth_client
 
 
 @pytest.mark.asyncio
+async def test_a_preview_patches_in_one_scene_and_keeps_the_list(async_client, no_auth_client, db, redis):
+    """The editor's preview goes to an ESP32 as its saved scenes with the
+    previewed one in them: one scene put, the list kept. Served alone, the
+    bundle's patch named only its own scenes, so the frame dropped every other
+    one, and an Activate of a saved scene while the preview stood found
+    nothing. Its Discard takes the one scene out again."""
+    frame = await device_frame(async_client, db)
+    a = {'id': 'a', 'name': 'A', 'nodes': [], 'edges': []}
+    b = {'id': 'b', 'name': 'B', 'nodes': [], 'edges': []}
+    frame.scenes = [a, b]
+    db.commit()
+    url = f'/api/frames/{frame.id}/embedded/scenes?patch=1'
+    first = await no_auth_client.get(url, headers=auth(frame))
+    etag = first.headers['etag']
+
+    preview = {'id': 'p', 'name': 'Preview me', 'nodes': [], 'edges': []}
+    with patch('app.utils.embedded_commands.nudge_embedded_frame', new_callable=AsyncMock, return_value=False):
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/uploadScenes', json={'scenes': [preview], 'sceneId': 'p'}
+        )
+    assert response.status_code == 200, response.text
+    pulled = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': etag})
+    body = pulled.json()
+    assert body['patch'] is True
+    assert body['order'] == ['a', 'b', 'p']
+    assert body['put'] == [preview]
+
+    # An edited saved scene previewed: the edit in its place, nothing else.
+    edited = {**b, 'name': 'B edited'}
+    with patch('app.utils.embedded_commands.nudge_embedded_frame', new_callable=AsyncMock, return_value=False):
+        await async_client.post(f'/api/frames/{frame.id}/event/uploadScenes', json={'scenes': [edited], 'sceneId': 'b'})
+    again = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': pulled.headers['etag']})
+    body = again.json()
+    assert body['order'] == ['a', 'b']
+    assert body['put'] == [edited]
+
+    # Discard: the saved list again, the saved b back in place.
+    assert (await async_client.delete(f'/api/frames/{frame.id}/scene_preview')).status_code == 200
+    discarded = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': again.headers['etag']})
+    assert discarded.json() == {'patch': True, 'base': again.headers['etag'], 'order': ['a', 'b'], 'put': [b]}
+
+
+@pytest.mark.asyncio
 async def test_scenes_patch_never_sends_every_scene_as_one(async_client, no_auth_client, db, redis):
     frame = await device_frame(async_client, db)
     frame.scenes = [{'id': 'a', 'name': 'A', 'nodes': [], 'edges': []}]

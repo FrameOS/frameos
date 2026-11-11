@@ -3731,6 +3731,48 @@ describe("frame management API", () => {
     });
   });
 
+  it("keeps the assigned scenes in a preview's push, the preview in them", async () => {
+    // docs/scene-previews.md: sent alone, the preview replaced the frame's
+    // set (an ESP32's patch named only it, so every other scene went, and an
+    // Activate while it stood had to send the list again).
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }), routeParams(frame_id));
+    const stars = await createStoreScene(accountId, { name: "GitHub stars" });
+    const clock = await createStoreScene(accountId, { name: "Word clock" });
+    const assign = await assignFrameScenes(
+      postJson(`/api/frames/${frame_id}/scenes`, { scenes: [{ scene_id: stars.id }, { scene_id: clock.id }] }, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    expect(assign.status).toBe(200);
+    const pushes = () =>
+      db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.frameId, frame_id))
+        .orderBy(asc(frameCommands.createdAt));
+    const assignedScenes = ((await pushes()).at(-1)?.payload as { scenes: { id: string; name?: string }[] }).scenes;
+    expect(assignedScenes).toHaveLength(2);
+    const preview = (scenes: unknown[], sceneId: string) =>
+      postFrameEvent(
+        postJson(`/api/frames/${frame_id}/event/uploadScenes`, { scenes, sceneId }, { origin: baseUrl }),
+        { params: Promise.resolve({ eventName: "uploadScenes", frameId: frame_id }) },
+      );
+
+    // A new scene: after the assigned ones.
+    const newScene = { id: "preview-me", name: "Preview me", nodes: [], edges: [] };
+    expect((await preview([newScene], "preview-me")).status).toBe(200);
+    let payload = (await pushes()).at(-1)?.payload as { scenes: unknown[]; scene_id: string; preview: { scene_id: string } };
+    expect(payload.scenes).toEqual([...assignedScenes, newScene]);
+    expect(payload.scene_id).toBe("preview-me");
+    expect(payload.preview.scene_id).toBe("preview-me");
+
+    // An assigned scene edited in the editor: the edit in its place.
+    const edited = { ...assignedScenes[1], name: "Word clock, edited" };
+    expect((await preview([edited], assignedScenes[1]!.id)).status).toBe(200);
+    payload = (await pushes()).at(-1)?.payload as typeof payload;
+    expect(payload.scenes).toEqual([assignedScenes[0], edited]);
+  });
+
   it("persists the schedule, round-trips it, and enqueues a durable set_schedule", async () => {
     const { frame_id } = await enrolledFrame();
     await confirmFrame(

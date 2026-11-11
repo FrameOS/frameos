@@ -66,3 +66,23 @@ export function collectScenePreviewPayloadScenes(
   visit(rootScene, true)
   return result
 }
+
+/**
+ * A preview sent over USB, which no control plane builds: the frame's own
+ * scene list with the preview's scenes in it, a preview scene in place of the
+ * listed scene of its id and the others after the list, as both planes send
+ * it (backend frame_commands.previewed_scenes, cloud scene-preview-list.ts).
+ * Sent alone, the bundle replaced the frame's whole set.
+ */
+export function sceneListWithPreview(list: readonly FrameScene[], preview: readonly FrameScene[]): FrameScene[] {
+  const previewById = new Map(preview.filter((scene) => scene?.id).map((scene) => [scene.id, scene]))
+  const merged = list.map((scene) => {
+    const replaced = scene?.id ? previewById.get(scene.id) : undefined
+    if (!replaced) {
+      return scene
+    }
+    previewById.delete(scene.id)
+    return replaced
+  })
+  return [...merged, ...preview.filter((scene) => scene?.id && previewById.has(scene.id))]
+}

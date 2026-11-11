@@ -601,6 +601,12 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
     const pushes = await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.frame_id));
     expect(pushes.map((row) => row.type)).toEqual(["set_scenes"]);
     expect(pushes[0]!.payload).toMatchObject({ preview: { name: "Big clock", scene_id: built.id, source: "voice" }, scene_id: built.id });
+    // With the frame's list kept (docs/scene-previews.md): the assigned clock,
+    // the preview after it, so an ESP32 is sent the new scene alone.
+    expect((pushes[0]!.payload as { scenes: { name: string }[] }).scenes.map((scene) => scene.name)).toEqual([
+      "Clock",
+      "Big clock",
+    ]);
     const shown = await getFrame(new NextRequest(new URL(`/api/frames/${frame.frame_id}`, baseUrl)), routeParams(frame.frame_id));
     expect(((await shown.json()) as { frame: { scene_preview: unknown } }).frame.scene_preview).toMatchObject({
       name: "Big clock",

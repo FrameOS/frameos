@@ -187,12 +187,14 @@ async def test_a_preview_is_pulled_like_a_deploy_and_holds_until_the_next_one(as
     assert response.status_code == 200, response.text
     preview_row_id = response.json()['command']['id']
 
-    # The wake's scenes pull gets the preview, not the saved scenes.
+    # The wake's scenes pull gets the saved scenes with the preview after
+    # them: the frame keeps its list (an Activate of a saved scene finds it),
+    # and an ESP32's patch carries the previewed scene alone.
     pulled = await no_auth_client.get(
         f'/api/frames/{frame.id}/embedded/scenes', headers={**headers, 'If-None-Match': saved_etag}
     )
     assert pulled.status_code == 200
-    assert pulled.json() == [preview]
+    assert pulled.json() == [*saved.json(), preview]
     preview_etag = pulled.headers['etag']
     assert preview_etag != saved_etag
 
@@ -221,15 +223,14 @@ async def test_a_preview_is_pulled_like_a_deploy_and_holds_until_the_next_one(as
     assert again.status_code == 304
 
     # A deploy is a newer scene set, and it carries the preview along: the
-    # saved scenes with the previewed one after them (the frame keeps showing
-    # the id it holds). Discard, and the saved scenes alone are served again.
+    # saved scenes with the previewed one after them, the set the frame holds
+    # already, so it has nothing to pull. Discard, and the saved scenes alone
+    # are served again: one scene less.
     enqueue_frame_command(db, frame, 'set_scenes', {'_deploy': {'id': 'd1', 'snapshot': {}}}, detail='1 scene')
     deployed = await no_auth_client.get(
         f'/api/frames/{frame.id}/embedded/scenes', headers={**headers, 'If-None-Match': preview_etag}
     )
-    assert deployed.status_code == 200
-    assert deployed.headers['etag'] not in (saved_etag, preview_etag)
-    assert deployed.json() == [*saved.json(), preview]
+    assert deployed.status_code == 304
     assert (await async_client.delete(f'/api/frames/{frame.id}/scene_preview')).status_code == 200
     discarded = await no_auth_client.get(
         f'/api/frames/{frame.id}/embedded/scenes', headers={**headers, 'If-None-Match': preview_etag}
