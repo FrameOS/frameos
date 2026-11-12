@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createContext, runInContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import {
   bwyrPalette,
@@ -11,6 +12,7 @@ import {
   PanelPixelFormat,
   panelBufferBytes,
   panelFosb,
+  panelPackerSource,
   panelPalette,
   readHexColors,
   rotateRgbaClockwise,
@@ -316,5 +318,57 @@ describe("the palette a panel is dithered to", () => {
     expect([...packForPanel(blue, 4, 1, PanelPixelFormat.fourBitSpectra6, measured)]).toEqual([0x66, 0x66]);
     const body = panelFosb(blue, { height: 1, width: 4 }, { format: PanelPixelFormat.fourBitSpectra6, height: 1, rotate: 0, width: 4 }, measured);
     expect([...body.subarray(fosbHeaderBytes)]).toEqual([0x66, 0x66]);
+  });
+});
+
+// The render worker builds its packer from `panelPackerSource`
+// (scene-render.ts): the text of one function, which must need nothing from
+// outside itself. Built here in an empty context, with no Node and no module
+// scope (a helper a compiler slipped in, esbuild's `__name` say, is a
+// ReferenceError here), it must pack byte for byte what the main thread does.
+describe("the packer the render worker builds from its text", () => {
+  const isolated = runInContext(`(${panelPackerSource})()`, createContext({})) as {
+    panelFosb: (
+      rgba: Uint8Array,
+      canvas: { height: number; width: number },
+      panel: { format: number; height: number; rotate: number; width: number },
+      palette?: unknown,
+    ) => Uint8Array;
+    panelPalette: (format: number, palettes?: { frame?: unknown; photo?: unknown }) => unknown;
+  };
+
+  function gradient(width: number, height: number): Uint8Array {
+    const out = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const i = (y * width + x) * 4;
+        out[i] = Math.round((x * 255) / Math.max(1, width - 1));
+        out[i + 1] = Math.round((y * 255) / Math.max(1, height - 1));
+        out[i + 2] = (x * 37 + y * 91) % 256;
+        out[i + 3] = 255;
+      }
+    }
+    return out;
+  }
+
+  const frame = ["#101010", "#f0f0f0", "#e0d000", "#c00000", "#2040c0", "#20a040"];
+  const photo = ["#000000", "#ffffff", "#ffff00", "#ff0000", "#0000ff", "#00ff00"];
+  const cases = ([1, 2, 3, 4, 5, 6, 7, 8, 9] as PanelPixelFormatCode[]).flatMap((format) =>
+    [0, 90, 180, 270].flatMap((rotate) =>
+      [{}, { frame }, { frame, photo }, { frame: frame.slice(0, 4) }, { frame: ["#zzzzzz"] }].map((palettes) => ({
+        format,
+        palettes,
+        rotate,
+      })),
+    ),
+  );
+
+  it.each(cases)("packs format $format at $rotate degrees with $palettes like the main thread", ({ format, palettes, rotate }) => {
+    const panel = { format, height: 7, rotate, width: 13 };
+    const canvas = sceneCanvasSize(panel.width, panel.height, rotate);
+    const rgba = gradient(canvas.width, canvas.height);
+    const main = panelFosb(rgba, canvas, panel, panelPalette(format, palettes));
+    const worker = isolated.panelFosb(rgba, canvas, panel, isolated.panelPalette(format, palettes));
+    expect(Buffer.from(worker).equals(main)).toBe(true);
   });
 });

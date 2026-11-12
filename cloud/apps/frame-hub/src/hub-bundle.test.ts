@@ -6,8 +6,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { createRequire } from "node:module";
+import { createContext, runInContext } from "node:vm";
 import { build } from "esbuild";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { panelFosb, panelPalette, sceneCanvasSize } from "../../auth-web/src/lib/panel-pack";
 
 // Asked of the bundle, built as package.json builds it, because in a test the
 // order of a process's first uses is not the production one: npm undici,
@@ -113,5 +116,40 @@ describe("the frame hub's bundle", () => {
     }
     expect(requests).toEqual(["HEAD", "PUT", "GET", "DELETE"]);
     expect(objects.size).toBe(0);
+  });
+
+  // The pre-render packs in its render worker from panel-pack.ts's own text
+  // (scene-render.ts): that text is what this build makes of the function,
+  // and it must need nothing from outside itself.
+  it("carries a panel packer whose text builds alone", async () => {
+    const entry = join(directory, "packer.cjs");
+    await build({
+      absWorkingDir: hubDirectory,
+      bundle: true,
+      format: "cjs",
+      logLevel: "silent",
+      outfile: entry,
+      platform: "node",
+      stdin: {
+        contents: 'export { panelPackerSource } from "../../auth-web/src/lib/panel-pack";',
+        loader: "ts",
+        resolveDir: join(hubDirectory, "src"),
+      },
+      target: "node22",
+    });
+    const { panelPackerSource } = createRequire(import.meta.url)(entry) as { panelPackerSource: string };
+    expect(panelPackerSource).not.toContain("__name");
+    const isolated = runInContext(`(${panelPackerSource})()`, createContext({})) as {
+      panelFosb: typeof panelFosb;
+      panelPalette: typeof panelPalette;
+    };
+    const frame = ["#101010", "#f0f0f0", "#e0d000", "#c00000", "#2040c0", "#20a040"];
+    for (const format of [1, 5, 7, 9] as const) {
+      const panel = { format, height: 9, rotate: 90, width: 14 };
+      const canvas = sceneCanvasSize(panel.width, panel.height, panel.rotate);
+      const rgba = Uint8Array.from({ length: canvas.width * canvas.height * 4 }, (_, index) => (index * 53) % 256);
+      const built = isolated.panelFosb(rgba, canvas, panel, isolated.panelPalette(format, { frame }));
+      expect(Buffer.from(built).equals(panelFosb(rgba, canvas, panel, panelPalette(format, { frame })))).toBe(true);
+    }
   });
 });

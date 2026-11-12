@@ -40,6 +40,7 @@ whose ``If-None-Match`` names it with 304: the panel already shows it
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -282,7 +283,7 @@ def render_embedded_diagnostic_bitmap(frame: Frame, width: int, height: int, pix
     return pack_image_for_panel(embedded_diagnostic_image(frame, width, height), pixel_format)
 
 
-def embedded_diagnostic_image(frame: Frame, width: int, height: int):
+def embedded_diagnostic_image(frame: Frame | _PanelFrame, width: int, height: int):
     """The diagnostic card as a PIL RGB image (also used by virtual frames)."""
     from PIL import Image, ImageDraw
 
@@ -956,8 +957,39 @@ async def _keep_rendered_state(redis, frame: Frame, rendered_state: dict | None)
             pass
 
 
-def _fosb_from_rgba(
+@dataclass(frozen=True)
+class _PanelFrame:
+    """What packing reads of a frame (the diagnostic card's name and id, the
+    rotation, the palette), read on the event loop: the packing runs on a
+    worker thread, where an ORM row expired by a commit would lazy-load on
+    the request's session from the wrong thread."""
+
+    id: int
+    name: str | None
+    rotate: int
+    palette: object
+
+    @classmethod
+    def of(cls, frame: Frame) -> "_PanelFrame":
+        return cls(int(frame.id), frame.name, int(frame.rotate or 0), getattr(frame, "palette", None))
+
+
+async def _fosb_off_the_loop(
     frame: Frame, plan: _ThinClientPlan, rgba: bytes | None, photo_palette: list[str] | None = None
+) -> bytes:
+    """_fosb_from_rgba on a worker thread. Dithering a 13.3" Spectra 6 panel
+    is ~0.2 s of CPU, which on the event loop stalls every other request and
+    every device's pull meanwhile (Pillow lets go of the GIL in its convert,
+    and the Python part is preempted). The cloud packs in its render worker
+    for the same reason (docs/server-rendering.md "Packing")."""
+    return await asyncio.to_thread(_fosb_from_rgba, _PanelFrame.of(frame), plan, rgba, photo_palette)
+
+
+def _fosb_from_rgba(
+    frame: Frame | _PanelFrame,
+    plan: _ThinClientPlan,
+    rgba: bytes | None,
+    photo_palette: list[str] | None = None,
 ) -> bytes:
     """The panel's bitmap: the render turned and packed, or, without one, the
     diagnostic card, drawn upright for the viewer and turned like a scene.
@@ -1037,7 +1069,7 @@ async def _render_thin_client_now(
         except Exception:
             # Nor may a log line that could not be written.
             pass
-    return _fosb_from_rgba(frame, plan, rgba, photo_palette)
+    return await _fosb_off_the_loop(frame, plan, rgba, photo_palette)
 
 
 async def _embedded_render_response(
@@ -1121,7 +1153,7 @@ async def prerender_thin_client(db: Session, redis, frame: Frame, as_of_ms: int)
         # The pull at the wake renders (and falls back to the card) itself.
         return False
     await remember_render_ms(redis, int(frame.id), int((time.monotonic() - started) * 1000))
-    body = _fosb_from_rgba(frame, plan, rgba, photo_palette)
+    body = await _fosb_off_the_loop(frame, plan, rgba, photo_palette)
     # Still asleep for the same wake, and nothing written or held meanwhile?
     # The frame row is read again outside the transaction the plan read in.
     db.rollback()

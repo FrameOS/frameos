@@ -989,3 +989,27 @@ async def test_a_render_reports_the_photo_palette_to_the_packer(async_client, no
     monkeypatch.setattr('app.api.embedded_device._fosb_from_rgba', fosb)
     await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
     assert seen == [['#202020', '#fafafa']]
+
+
+@pytest.mark.asyncio
+async def test_the_pull_packs_off_the_event_loop(async_client, no_auth_client, db, redis, monkeypatch):
+    """Dithering a 13.3" panel is ~0.2 s of CPU: the pull packs on a worker
+    thread, handed the frame's packing facts, never the ORM row."""
+    import threading
+
+    from app.api.embedded_device import _PanelFrame
+
+    frame = await server_rendered_frame(async_client, db)
+    seen: list = []
+
+    async def render(frame_arg, width, height, **kwargs):
+        return bytes((0, 0, 0, 255)) * (width * height), None, None
+
+    def fosb(frame_arg, plan, rgba, photo_palette=None):
+        seen.append((threading.current_thread() is threading.main_thread(), type(frame_arg)))
+        return b'FOSB' + bytes(8)
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', render)
+    monkeypatch.setattr('app.api.embedded_device._fosb_from_rgba', fosb)
+    await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert seen == [(False, _PanelFrame)]

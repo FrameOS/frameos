@@ -6,6 +6,7 @@ import { deflate } from "node:zlib";
 import { zlibSync } from "fflate";
 import { describeOutOfMemory, type DeviceLimits } from "frameos-wasm";
 import { logWarn } from "./log";
+import { panelPackerSource } from "./panel-pack";
 import { addressIsPrivateSource } from "./private-address";
 
 // Headless scene rendering on the server: the same frameos-wasm bundle the
@@ -63,6 +64,18 @@ export type SceneRenderOptions = {
    */
   nowMs?: number | undefined;
   /**
+   * Pack the picture for a panel in the worker, where the pixels are, and
+   * hand back the FOSB (`fosb` in the result) instead of the pixels: on a
+   * 13.3" Spectra 6 panel the dither is a hundred milliseconds that would
+   * otherwise be the event loop's (docs/server-rendering.md "Packing"). The
+   * panel's native size, `fos_pixel_format_t` and rotation, and the frame's
+   * `palette` colour list; the photo palette is the render's own. The
+   * worker builds its packer from panel-pack.ts's text; when it cannot, the
+   * result carries the RGBA instead, as `rawRgba` does, with `packError`.
+   * Implies no PNG.
+   */
+  pack?: RenderPanelPack | undefined;
+  /**
    * Hand back the raw RGBA (`rgba` in the result) and skip the PNG: a panel
    * is packed from the pixels (panel-pack.ts), and a full-size deflate it
    * never reads is a few hundred milliseconds of the event loop. `png` is
@@ -119,6 +132,16 @@ export type RelayedDeviceInput = {
   nowMs: number;
 };
 
+/** SceneRenderOptions.pack. */
+export type RenderPanelPack = {
+  format: number;
+  height: number;
+  /** The frame's `palette` colours, `["#rrggbb", …]` (panel-pack.ts panelPalette). */
+  palette?: unknown;
+  rotate: number;
+  width: number;
+};
+
 /**
  * SceneRenderOptions.frame: what `frameos_wasm_set_frame` takes (every key
  * optional). `pixelFormat` is the panel's `fos_pixel_format_t`, which the
@@ -135,8 +158,12 @@ export type RenderFrameConfig = {
 
 export type SceneRenderResult = {
   errors: string[];
+  /** The panel's FOSB, packed in the worker, when the render asked for `pack` (and `rgba` is then absent). */
+  fosb?: Buffer;
   height: number;
   logs: string[];
+  /** Why a render that asked for `pack` came back with the RGBA instead. */
+  packError?: string;
   /**
    * The photo palette the render drew with last (a colour profile's
    * `palette`, `["#rrggbb", …]`), which the panel's packer dithers to
@@ -370,10 +397,13 @@ export async function renderScenes(
 
 type WorkerResult =
   | {
+      // The RGBA, or the FOSB when `packed`.
       buffer: ArrayBuffer;
       height: number;
       logs: string[];
       ok: true;
+      packError?: string;
+      packed?: boolean;
       palette: string[] | null;
       renderMs: number;
       sceneId: string;
@@ -403,6 +433,8 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
         height: options.height,
         maxLogs: maxCollectedLogs,
         nowMs: typeof options.nowMs === "number" && Number.isFinite(options.nowMs) ? options.nowMs : null,
+        pack: options.pack ?? null,
+        packerSource: options.pack ? panelPackerSource : "",
         renderScale: options.renderScale && options.renderScale > 0 ? options.renderScale : 0,
         sceneId: options.sceneId ?? "",
         scenesJson: JSON.stringify(options.scenes),
@@ -455,16 +487,31 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
               result.logs,
             ),
           );
-        const rgba = new Uint8Array(result.buffer);
         const reported = {
           ...(result.palette && result.palette.length > 0 ? { palette: result.palette } : {}),
           ...(result.sceneId ? { sceneId: result.sceneId } : {}),
         };
-        if (options.rawRgba) {
+        if (result.packed) {
+          resolve({
+            errors: result.logs.filter(isRenderErrorLine),
+            fosb: Buffer.from(result.buffer),
+            height: result.height,
+            logs: result.logs,
+            png: Buffer.alloc(0),
+            renderMs: result.renderMs,
+            ...reported,
+            state: result.state,
+            width: result.width,
+          });
+          return;
+        }
+        const rgba = new Uint8Array(result.buffer);
+        if (options.rawRgba || options.pack) {
           resolve({
             errors: result.logs.filter(isRenderErrorLine),
             height: result.height,
             logs: result.logs,
+            ...(result.packError ? { packError: result.packError } : {}),
             png: Buffer.alloc(0),
             renderMs: result.renderMs,
             rgba,
@@ -959,7 +1006,6 @@ async function main() {
   if (!ptr || !len || len !== width * height * 4) {
     return fail("unexpected frame buffer: " + lastError());
   }
-  const buffer = Module.HEAPU8.buffer.slice(ptr, ptr + len);
   let state = null;
   try {
     state = JSON.parse(call("frameos_wasm_scene_state", "string", [], []));
@@ -982,8 +1028,40 @@ async function main() {
   } catch {
     palette = null;
   }
+  // Packed for the panel here, where the pixels are (SceneRenderOptions.pack):
+  // the packer is panel-pack.ts's own, built from its text, and only the
+  // FOSB crosses to the main thread. Anything that goes wrong hands the
+  // pixels over instead, and the main thread packs them as it always did.
+  let packError = "";
+  if (workerData.pack) {
+    try {
+      // __name is the one helper a compiler is known to put into the text:
+      // esbuild's keepNames (tsx, the hub's dev runner) wraps functions to
+      // keep their names. Names do not matter here, so it hands the function
+      // back. Anything else the text needs is a ReferenceError, and the
+      // pixels go to the main thread.
+      const packer = new Function("__name", "return (" + workerData.packerSource + ")")((fn) => fn)();
+      const pack = workerData.pack;
+      const pixels = new Uint8Array(Module.HEAPU8.buffer, ptr, len);
+      const fosb = packer.panelFosb(
+        pixels,
+        { width, height },
+        { format: pack.format, height: pack.height, rotate: pack.rotate, width: pack.width },
+        packer.panelPalette(pack.format, { frame: pack.palette, photo: palette }),
+      );
+      const body = fosb.byteOffset === 0 && fosb.byteLength === fosb.buffer.byteLength ? fosb.buffer : fosb.slice().buffer;
+      parentPort.postMessage(
+        { ok: true, packed: true, buffer: body, width, height, logs, palette, renderMs: Date.now() - started, sceneId, state },
+        [body],
+      );
+      return;
+    } catch (error) {
+      packError = String((error && error.stack) || error).slice(0, 2000);
+    }
+  }
+  const buffer = Module.HEAPU8.buffer.slice(ptr, ptr + len);
   parentPort.postMessage(
-    { ok: true, buffer, width, height, logs, palette, renderMs: Date.now() - started, sceneId, state },
+    { ok: true, buffer, width, height, logs, palette, renderMs: Date.now() - started, sceneId, state, ...(packError ? { packError } : {}) },
     [buffer],
   );
 }

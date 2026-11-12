@@ -27,7 +27,9 @@ import {
 } from "./frames";
 import { logError, logWarn } from "./log";
 import {
+  fosbHeaderBytes,
   isPanelPixelFormat,
+  panelBufferBytes,
   panelFosb,
   panelPalette,
   sceneCanvasSize,
@@ -520,6 +522,17 @@ type Drawn = {
 
 type DrawFailure = { code: string; message: string; retryAfterSeconds?: number };
 
+// Said once per process: a pull's picture packed on the event loop is ~100 ms
+// of it on a 13.3" Spectra 6 panel, which the worker should have spent.
+let mainThreadPackNoted = false;
+function noteMainThreadPack(reason: string | undefined) {
+  if (mainThreadPackNoted) {
+    return;
+  }
+  mainThreadPackNoted = true;
+  logWarn("server_render.pack_on_main_thread", { reason: reason ?? "the renderer handed over pixels" });
+}
+
 /** Run the scene and pack it. Writes nothing. */
 async function draw(
   db: Database,
@@ -564,6 +577,8 @@ async function draw(
       height: canvas.height,
       ...(typeof input.nowMs === "number" ? { nowMs: input.nowMs } : {}),
       owner: frame.accountId,
+      // Packed in the render's worker, off the event loop (scene-render.ts).
+      pack: { ...input.panel, palette: renderFrameConfig(frame).palette },
       rawRgba: true,
       renderScale: frameRenderScale(frame),
       sceneId: active,
@@ -586,18 +601,32 @@ async function draw(
     }
     return { failure: { code: "render_failed", message: error instanceof Error ? error.message : String(error) } };
   }
-  if (!result.rgba || result.width !== canvas.width || result.height !== canvas.height) {
+  if ((!result.rgba && !result.fosb) || result.width !== canvas.width || result.height !== canvas.height) {
     return {
       failure: { code: "render_failed", message: `The renderer drew ${result.width}x${result.height}, not ${canvas.width}x${canvas.height}.` },
       logs: result.logs,
     };
   }
-  const body = panelFosb(
-    result.rgba,
-    canvas,
-    input.panel,
-    panelPalette(input.panel.format, { frame: renderFrameConfig(frame).palette, photo: result.palette }),
-  );
+  let body: Buffer;
+  if (result.fosb) {
+    body = result.fosb;
+  } else {
+    // The worker handed the pixels over (it could not build its packer, or a
+    // renderer that is not the worker drew them): packed here, as before.
+    noteMainThreadPack(result.packError);
+    body = panelFosb(
+      result.rgba!,
+      canvas,
+      input.panel,
+      panelPalette(input.panel.format, { frame: renderFrameConfig(frame).palette, photo: result.palette }),
+    );
+  }
+  if (body.length !== fosbHeaderBytes + panelBufferBytes(input.panel.width, input.panel.height, input.panel.format)) {
+    return {
+      failure: { code: "render_failed", message: `The packed picture is ${body.length} bytes, not a ${serverRenderPanelKey(input.panel)} panel's.` },
+      logs: result.logs,
+    };
+  }
   // The scene it ended on (a key, a tap or the schedule may have switched
   // it), and what that scene kept, beside the others' (a copy: the renderer
   // was handed `states`).

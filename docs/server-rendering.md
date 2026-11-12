@@ -219,6 +219,18 @@ the panel's palette, greys from luma 0.21 / 0.72 / 0.07, Spectra 6's unused
 index 4 skipped. A frame hung at 90 or 270 degrees renders on the swapped
 canvas and is turned clockwise by its rotation into the panel's orientation.
 
+Neither plane packs on its event loop: a 13.3" Spectra 6 panel is 0.1 to
+0.2 s of dithering, which would stall every other request and every other
+frame's pull meanwhile. The backend packs on a worker thread
+(`_fosb_off_the_loop`, handed the frame's packing facts, `_PanelFrame`, never
+the ORM row). On the cloud the packing runs in the render's own worker
+thread, where the pixels are, and only the packed picture comes back, for
+the auth-web route and the hub's pre-render alike. The worker
+builds its packer from `panel-pack.ts`'s text (`createPanelPacker`, one
+self-contained function, which the main thread calls too); if it cannot,
+it hands the pixels over and the main thread packs them, logged once as
+`server_render.pack_on_main_thread`.
+
 The palette it dithers against is the one the device's own packer would
 use (`activePalette(framePalette(stock))` in `embedded_main.nim`):
 
