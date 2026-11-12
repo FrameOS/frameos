@@ -46,10 +46,13 @@ struct FrameDetailView: View {
 
     /// The picture's height at most: about half the page in one column (a
     /// portrait panel at an iPad's width was twice the screen), most of the
-    /// column's height beside the list.
+    /// column's height beside the list, leaving the status and the actions
+    /// room under it (a phone on its side has 340 points: the tab bar
+    /// covered the actions).
     var pictureMaxHeight: CGFloat {
         guard size.height > 0 else { return .infinity }
-        return (size.height * (twoColumns ? 0.62 : 0.55)).rounded()
+        guard twoColumns else { return (size.height * 0.55).rounded() }
+        return max(120, min(size.height * 0.62, size.height - 250)).rounded()
     }
 
     @ViewBuilder func picture(_ frame: Frame) -> some View {
