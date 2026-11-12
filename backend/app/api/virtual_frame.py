@@ -39,6 +39,7 @@ from app.redis import get_redis
 from app.tasks.embedded_firmware import embedded_platform_spec_for_frame
 from app.utils import virtual_assets
 from app.utils.embedded_render import RenderQueueFull, render_scene_rgba_and_state
+from app.utils.events_contract_gen import BUILT_IN_SCENE_IDS
 from app.utils.refresh_interval import resolve_refresh_interval
 from app.utils.server_render import bump_render_revision
 
@@ -165,10 +166,12 @@ async def _save_virtual_scene_states(redis, frame: Frame, states: dict[str, dict
 
 async def resolve_virtual_scene_id(redis, frame: Frame, scene_id: str | None = None) -> str | None:
     """The scene an event or render targets: explicit id, else the
-    workspace-activated scene, else the frame's first scene."""
+    workspace-activated scene (the scene switcher or the scene settings
+    included, which a frame rendered here keeps while it shows them), else
+    the frame's first scene."""
     if scene_id:
         return scene_id
-    active = await _active_scene_id(redis, frame)
+    active = await _active_scene_id(redis, frame, built_in=True)
     if active:
         return active
     for scene in frame.scenes or []:
@@ -204,14 +207,29 @@ async def apply_virtual_scene_state(redis, frame: Frame, scene_id: str | None, s
     await _save_virtual_scene_states(redis, frame, states)
 
 
+async def replace_virtual_scene_states(redis, frame: Frame, states: dict[str, dict]) -> None:
+    """Write the whole state store (a scene's state dropped from it)."""
+    await _save_virtual_scene_states(redis, frame, states)
+
+
 async def store_rendered_scene_state(redis, frame: Frame, scene_id: str | None, state: dict) -> None:
     """Persist the state the renderer reported after a pass (defaults now
-    evaluated, plus anything the scene's own logic changed)."""
-    scene = _scene_by_id(frame, scene_id)
-    if scene is None or not isinstance(state, dict):
+    evaluated, plus anything the scene's own logic changed). A built-in
+    scene (the switcher, the settings) a frame rendered on the backend ended
+    on keeps all of it: it has no fields, its state is the runtime's own
+    (what it was opened from, the highlight), and the next pull opens it
+    again from that (docs/server-rendering.md "Keys, touch and the
+    schedule")."""
+    if not isinstance(state, dict) or not isinstance(scene_id, str) or not scene_id:
         return
-    storable = _storable_field_names(scene)
-    filtered = {key: value for key, value in state.items() if key in storable}
+    if scene_id in BUILT_IN_SCENE_IDS:
+        filtered = dict(state)
+    else:
+        scene = _scene_by_id(frame, scene_id)
+        if scene is None:
+            return
+        storable = _storable_field_names(scene)
+        filtered = {key: value for key, value in state.items() if key in storable}
     states = await get_virtual_scene_states(redis, frame)
     if states.get(scene_id) == filtered:
         return

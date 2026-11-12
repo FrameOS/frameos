@@ -93,9 +93,16 @@ def _str_field(body: dict[str, Any], key: str) -> str | None:
 
 async def _remember_device_state(redis: Redis, frame: Frame, body: dict[str, Any]) -> None:
     """What the device says it shows, into the states cache the workspace
-    reads (frames.py `/states`), marked fresh: the device just said so."""
+    reads (frames.py `/states`), marked fresh: the device just said so. Not
+    for a frame rendered here: what its own runtime holds is left from
+    before, the backend is its memory (docs/server-rendering.md), and its
+    word would undo the scene a relayed key switched to."""
+    from app.tasks.embedded_firmware import is_thin_client_frame
+
     from .frames import _frame_states_cache_key, _write_frame_states_cache
 
+    if is_thin_client_frame(frame):
+        return
     active_scene = _str_field(body, "active_scene")
     states = body.get("states")
     if active_scene:

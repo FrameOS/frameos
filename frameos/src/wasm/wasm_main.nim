@@ -17,11 +17,14 @@ import frameos/channels
 import frameos/single_scene_host
 import system/sceneSwitcher/scene as sceneSwitcher
 import frameos/relayed_input
+from frameos/input_state import initInputState
 from frameos/ui/events as uiEvents import uiTimersPending
 import frameos/interpreter
 import frameos/planner
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
+import frameos/utils/dither
+import frameos/utils/asset_colors
 import frameos/js_runtime/runtime as jsRuntime
 import frameos/js_runtime/app_tests
 import lib/tz
@@ -58,6 +61,11 @@ var
   # Backend-persisted scene state, seeded via frameos_wasm_set_scene_state
   # before the scene's first render and merged into scene.state at init.
   pendingSceneStates = initTable[string, JsonNode]()
+  # A built-in scene (the switcher, the settings) a control plane selected
+  # for a frame it renders for: opened again as it was left, from its
+  # seeded state, before anything uses it (restoreBuiltIn).
+  builtInToRestore = ""
+  renderPaletteBuffer: string
   # Running as an ESP32, every render draws into one canvas kept for the
   # runtime's life, in the format that frame keeps it in (embedded_runtime
   # `renderCanvas`): RGB565 on a 13.3" colour panel with 8 MB of PSRAM, luma
@@ -154,8 +162,25 @@ proc selectSceneById(sceneIdText: string): bool =
   if not getInterpretedScenes().hasKey(sceneId) and not isBuiltInScene(sceneIdText):
     setLastError("scene not found: " & sceneIdText)
     return false
+  # A switch the scene made (or the dispatcher) is a fresh opening.
+  builtInToRestore = ""
   host.makeCurrent(sceneId)
   true
+
+proc restoreBuiltIn() =
+  ## A built-in scene the plane kept for a frame it renders for
+  ## (docs/server-rendering.md, "Keys, touch and the schedule"): opened again
+  ## with the state it had, once that state is seeded, before the first event
+  ## or render uses it. Without a seeded state it opens as one opened by name.
+  if builtInToRestore.len == 0:
+    return
+  let sceneId = builtInToRestore
+  builtInToRestore = ""
+  let stored = pendingSceneStates.getOrDefault(sceneId)
+  if stored.isNil or stored.kind != JObject or stored.len == 0:
+    return
+  if not host.reopenBuiltIn(stored):
+    log("built-in scene " & sceneId & " could not be opened again as it was left")
 
 # ------------------------------------------------------------------- setup
 
@@ -193,6 +218,8 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     dropDeviceCanvas()
     deviceCanvasBitsPerPixel = 32
     pendingSceneStates = initTable[string, JsonNode]()
+    builtInToRestore = ""
+    clearRenderPaletteOverride()
 
     var settings = %*{}
     let settingsText = $settingsJson
@@ -385,12 +412,121 @@ proc frameos_wasm_set_render_scale(scale: cdouble) {.exportc, cdecl.} =
   if not frameConfig.isNil:
     frameConfig.renderScale = if scale > 0.0 and scale <= 4.0: scale.float else: 0.0
 
+proc panelTable(pixelFormat: int): seq[(int, int, int)] =
+  ## The stock table of a palette panel, by the firmware's
+  ## `fos_pixel_format_t` (embedded_main.nim `panelPaletteForFormat`); empty
+  ## for the grey, two-colour and RGB formats.
+  case pixelFormat
+  of 5: saturated4ColorPalette
+  of 6: saturated7ColorPalette
+  of 7: spectra6ColorPalette
+  else: @[]
+
+proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
+  ## What else of frame.json the frame's own runtime keeps, for a control
+  ## plane rendering for a frame (docs/server-rendering.md):
+  ## `{"eventMap": [rules] | null, "palette": ["#rrggbb", …] | {"colors":
+  ## […]}, "colors": {autoFit, global}, "pixelFormat": n, "gpioButtons":
+  ## [{pin, label, role?}], "rotate": 0 | 90 | 180 | 270}`, every key
+  ## optional; call it before the scenes are loaded. The event map is the
+  ## frame's (docs/events.md "Event map"), read by the dispatcher off this
+  ## config; `palette` and `colors` are what the ESP32's settings hand its
+  ## runtime (fos_nim_set_palette_impl / _colors_impl), and `pixelFormat` the
+  ## panel, so the automatic fit of drawn images aims at the colours the
+  ## panel shows, as embedded_main's render does; `rotate` is the frame's,
+  ## for the relayed pointers' panel positions.
+  try:
+    if frameConfig.isNil:
+      setLastError("setFrame: init not called")
+      return false
+    let node = parseJson($frameJson)
+    if node.kind != JObject:
+      setLastError("setFrame: expected an object")
+      return false
+    if node.hasKey("eventMap"):
+      let rules = node["eventMap"]
+      frameConfig.eventMap = if rules.kind == JArray: rules else: nil
+    if node.hasKey("palette"):
+      var list = node["palette"]
+      if list.kind == JObject:
+        list = list{"colors"}
+      var colors: seq[(int, int, int)] = @[]
+      if not list.isNil and list.kind == JArray:
+        try:
+          for entry in list.items:
+            let color = parseHtmlColor(entry.getStr())
+            colors.add((int(color.r * 255 + 0.5), int(color.g * 255 + 0.5), int(color.b * 255 + 0.5)))
+        except CatchableError:
+          # One unreadable colour empties the list, as on the device.
+          colors = @[]
+      frameConfig.palette.colors = colors
+    if node.hasKey("colors"):
+      let colors = if node["colors"].kind == JObject: node["colors"] else: newJObject()
+      frameConfig.colors = colors
+      setFrameColorSettings(parseFrameColorSettings(colors))
+    var rebuildInput = false
+    if node.hasKey("gpioButtons") and node["gpioButtons"].kind == JArray:
+      var buttons: seq[GPIOButton] = @[]
+      for entry in node["gpioButtons"].items:
+        if entry.kind != JObject or entry{"pin"}.isNil or entry{"pin"}.kind != JInt:
+          continue
+        buttons.add GPIOButton(pin: entry["pin"].getInt(), label: entry{"label"}.getStr(),
+          role: entry{"role"}.getStr())
+      frameConfig.gpioButtons = buttons
+      rebuildInput = true
+    var rotate = 0
+    let rotateNode = node{"rotate"}
+    if not rotateNode.isNil and rotateNode.kind == JInt and rotateNode.getInt() in [0, 90, 180, 270]:
+      rotate = rotateNode.getInt()
+      rebuildInput = true
+    if rebuildInput:
+      # The dispatcher's input state copies the buttons' roles when it is
+      # made. And a touch frame's glass reports where it was touched on the
+      # panel (fos_touch.c, the wire position), which input_state turns into
+      # the scene's point by the frame's rotation: this runtime draws the
+      # scene's canvas, already turned (width x height here), so the input
+      # state is given the panel the frame has.
+      host.start()
+      let geometry = FrameConfig(
+        width: if rotate in [90, 270]: frameConfig.height else: frameConfig.width,
+        height: if rotate in [90, 270]: frameConfig.width else: frameConfig.height,
+        rotate: rotate, flip: "", device: frameConfig.device,
+        gpioButtons: frameConfig.gpioButtons, inputSettings: frameConfig.inputSettings)
+      let keyboardAt = host.events.inputState.keyboardAt
+      host.events.inputState = initInputState(geometry)
+      host.events.inputState.keyboardAt = keyboardAt
+    let format = node{"pixelFormat"}
+    if not format.isNil and format.kind == JInt:
+      let stock = panelTable(format.getInt())
+      setAssetColorsPanelPalette(if stock.len == 0: stock
+        else: fitPaletteOverride(frameConfig.palette.colors, stock))
+    true
+  except Exception as e:
+    setLastError("setFrame failed: " & e.msg)
+    false
+
+proc frameos_wasm_render_palette(): cstring {.exportc, cdecl.} =
+  ## A photo's own dither palette in effect after the last render (its
+  ## colour profile's `palette`, utils/dither `renderPaletteOverride`), as
+  ## `["#rrggbb", …]`; `[]` when none. A plane packing the picture for a
+  ## panel dithers to it before the frame's own palette, as the device's
+  ## packer does (`activePalette(framePalette(stock))`).
+  let colors = newJArray()
+  for (r, g, b) in renderPaletteOverride:
+    colors.add(%(&"#{clamp(r, 0, 255):02x}{clamp(g, 0, 255):02x}{clamp(b, 0, 255):02x}"))
+  renderPaletteBuffer = $colors
+  renderPaletteBuffer.cstring
+
 proc frameos_wasm_select_scene(sceneId: cstring): bool {.exportc, cdecl.} =
   try:
-    selectSceneById($sceneId)
+    result = selectSceneById($sceneId)
+    # Selected by name from outside: a built-in one is where the plane left
+    # it (frameos_wasm_set_scene_state may come before or after this).
+    if result and isBuiltInScene($sceneId):
+      builtInToRestore = $sceneId
   except Exception as e:
     setLastError("selectScene failed: " & e.msg)
-    false
+    result = false
 
 # ---------------------------------------------------------------- rendering
 
@@ -405,6 +541,7 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
   host.renderRequested = false
   try:
     refreshDecodeBudget()
+    restoreBuiltIn()
     if not host.ensureScene():
       setLastError("no scene selected")
       return 2
@@ -506,23 +643,30 @@ proc frameos_wasm_event(eventName: cstring, payloadJson: cstring): bool {.export
     # the contract's (docs/events-contract.json).
     if eventPolicy($eventName).device notin {edPointer, edKeyboard}:
       jsEventHook(eventName, ($payload).cstring)
+    restoreBuiltIn()
     host.send(eoPreview, $eventName, payload)
   except Exception as e:
     setLastError("event " & $eventName & " failed: " & e.msg)
     false
 
 proc frameos_wasm_device_input(inputJson: cstring): cint {.exportc, cdecl.} =
-  ## Button edges a thin client saw, relayed with the render pull they asked
-  ## for (frameos/relayed_input.nim): delivered as the board's own driver's,
-  ## `gpio` from `driver`, then time passes to now, so a tap whose
-  ## double-press window closed on the board is a `press` before the render.
-  ## Returns how many edges were delivered, -1 when the input was unreadable.
+  ## What a thin client's scene would have heard since its last pull, relayed
+  ## with the render pull it asked for (frameos/relayed_input.nim): the
+  ## Pico's button edges, as its own driver's `gpio`, then an ESP32's events
+  ## (`gpio` and pointer events from its driver, its schedule's entries, its
+  ## HTTP API's), each from the origin it came from, so the dispatcher's
+  ## origin rules and event maps decide as on the board
+  ## (docs/server-rendering.md, "Keys, touch and the schedule"). Then time
+  ## passes to now, so a tap whose double-press window closed on the board
+  ## is a `press` before the render. Returns how many were delivered, -1 when
+  ## the input was unreadable.
   try:
-    let edges = relayedButtonEdges(parseJson($inputJson), getMonoTime().ticks div 1_000_000)
-    for payload in edges:
-      discard host.send(eoDriver, "gpio", payload)
+    let events = relayedEvents(parseJson($inputJson), getMonoTime().ticks div 1_000_000)
+    restoreBuiltIn()
+    for event in events:
+      discard host.send(event.origin, event.name, event.payload)
     discard host.tick()
-    edges.len.cint
+    events.len.cint
   except Exception as e:
     setLastError("device input failed: " & e.msg)
     -1
@@ -547,6 +691,7 @@ proc frameos_wasm_control_event(origin: cstring, eventName: cstring, payloadJson
         %*{}
       else:
         parseJson($payloadJson)
+    restoreBuiltIn()
     host.send(source, $eventName, payload)
   except Exception as e:
     setLastError("control event " & $eventName & " failed: " & e.msg)
@@ -557,6 +702,7 @@ proc frameos_wasm_tick(): bool {.exportc, cdecl.} =
   ## a button is held or a button press waits for a possible second one, so a
   ## long press is delivered while the finger is still down, as on a frame. True when it made an event; ask frameos_wasm_render_requested.
   try:
+    restoreBuiltIn()
     host.tick()
   except Exception as e:
     setLastError("tick failed: " & e.msg)

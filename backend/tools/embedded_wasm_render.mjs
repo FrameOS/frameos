@@ -8,7 +8,7 @@
 // Protocol: a single JSON object on stdin
 //   {assetsDir, width, height, name, timeZone, settingsJson, scenesJson,
 //    sceneId, statesJson, frameAssetsRoot, saveAssetsJson, assetsWriteBudget,
-//    controlEventsJson, deviceInputJson, nowMs}
+//    controlEventsJson, deviceInputJson, nowMs, frameJson}
 // and exactly width*height*4 bytes of RGBA on stdout on success (exit 0).
 // All logs go to stderr; any failure exits non-zero with a message there.
 // statesJson ({sceneId: stateObject}) seeds backend-persisted scene state;
@@ -25,9 +25,15 @@
 // `__FRAMEOS_SAVED_ASSETS__{"files":[...],"skippedOverBudget":n}` line.
 // controlEventsJson ([{name, payload, origin}]) is the events a control plane
 // sent a thin client since its last pull, and deviceInputJson ({nowMs,
-// edges}) the button edges it saw; the scene hears both before the render.
-// nowMs (epoch milliseconds) is the time the scene is told it is: a picture
-// drawn ahead of a sleeping frame's wake (docs/server-rendering.md).
+// edges?, events?}) what it relayed: the Pico's button edges, an ESP32's
+// events from its own producers, each with its origin; the scene hears both
+// before the render. nowMs (epoch milliseconds) is the time the scene is told
+// it is: a picture drawn ahead of a sleeping frame's wake
+// (docs/server-rendering.md). frameJson ({eventMap?, palette?, colors?,
+// pixelFormat?, gpioButtons?, rotate?}) is what else of frame.json the
+// frame's own runtime keeps (frameos_wasm_set_frame). The state line also
+// carries `palette`: a photo's own dither palette in effect after the render
+// (["#rrggbb", …], [] for none), which the packer dithers to first.
 //
 // Sandbox posture: user scene code (QuickJS) runs inside the wasm module,
 // never natively in Node. Its host hooks are logging and the synchronous
@@ -421,6 +427,19 @@ if (typeof request.renderScale === 'number' && request.renderScale > 0) {
     process.stderr.write(`embedded_wasm_render: render scale unavailable (${error})\n`)
   }
 }
+// What else of frame.json the frame's own runtime keeps: its event map, its
+// palette and colours (so the automatic fit aims at what the panel shows),
+// its buttons and its rotation (where a relayed touch landed). Before the
+// scenes load. Old bundles predate the export and render without them.
+if (request.frameJson) {
+  try {
+    if (!call('frameos_wasm_set_frame', 'boolean', ['string'], [request.frameJson])) {
+      process.stderr.write(`embedded_wasm_render: frame settings refused: ${lastError()}\n`)
+    }
+  } catch (error) {
+    process.stderr.write(`embedded_wasm_render: frame settings unavailable (${error})\n`)
+  }
+}
 const memoryStat = (name) => {
   try {
     return call(name, 'number', [], [])
@@ -620,9 +639,11 @@ if (request.controlEventsJson) {
   }
 }
 
-// The button edges a thin client saw since its last pull: the scene hears
-// them as the board's driver before this render (frameos/relayed_input.nim).
-// Bundles from before the export cannot; the press then only re-renders.
+// What a thin client relayed since its last pull: the Pico's button edges as
+// its driver's, an ESP32's events each from its own origin, heard before this
+// render (frameos/relayed_input.nim). Bundles from before the export cannot;
+// the press then only re-renders, and a bundle from before `events` delivers
+// the edges alone.
 if (request.deviceInputJson) {
   try {
     if (call('frameos_wasm_device_input', 'number', ['string'], [request.deviceInputJson]) < 0) {
@@ -659,10 +680,19 @@ writeBackSavedAssets()
 try {
   const info = JSON.parse(call('frameos_wasm_scene_info', 'string', [], []))
   const state = JSON.parse(call('frameos_wasm_scene_state', 'string', [], []))
+  // The scene the render ended on (a relayed key may have switched it) and
+  // a photo's own dither palette, from bundles that have the export.
+  let palette
+  try {
+    palette = JSON.parse(call('frameos_wasm_render_palette', 'string', [], []))
+  } catch {
+    palette = undefined
+  }
   process.stderr.write('__FRAMEOS_SCENE_STATE__' + JSON.stringify({
     sceneId: info.currentSceneId || request.sceneId || '',
     state,
     seeded: stateSeeded,
+    ...(Array.isArray(palette) ? { palette } : {}),
   }) + '\n')
 } catch (error) {
   process.stderr.write(`embedded_wasm_render: state readback failed: ${error}\n`)

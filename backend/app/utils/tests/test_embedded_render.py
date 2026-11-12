@@ -382,3 +382,127 @@ async def test_a_held_custom_event_reaches_the_scene_in_the_real_runtime():
     assert result.state["state"]["page"] == 6
     heard = [json.loads(line) for line in result.scene_logs if line.startswith('{"event":"event:nextPage"')]
     assert [entry.get("origin") for entry in heard] == ["http:admin"]
+
+
+def _renderer_takes_relayed_events() -> bool:
+    from app.utils.embedded_render import thin_client_renderer_available, wasm_assets_dir
+
+    assets = wasm_assets_dir()
+    return (
+        thin_client_renderer_available()
+        and assets is not None
+        and "frameos_wasm_set_frame" in (assets / "frameos.js").read_text(errors="replace")
+    )
+
+
+def _plain_scene(scene_id: str, color: str, default: bool = False) -> dict:
+    return {
+        "id": scene_id,
+        "name": scene_id.title(),
+        **({"default": True} if default else {}),
+        "settings": {"execution": "interpreted"},
+        "fields": [],
+        "nodes": [
+            {"id": "render", "type": "event", "position": {"x": 0, "y": 0}, "data": {"keyword": "render"}},
+            {"id": "color", "type": "app", "position": {"x": 0, "y": 0},
+             "data": {"keyword": "render/color", "config": {"color": color}}},
+        ],
+        "edges": [{"id": "e1", "source": "render", "sourceHandle": "next", "target": "color", "targetHandle": "prev"}],
+    }
+
+
+RELAY_SCENES = [_plain_scene("clock", "#ffffff", default=True), _plain_scene("photos", "#000000")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
+async def test_a_held_key_switches_scenes_through_the_frames_event_map_in_the_real_runtime():
+    """docs/server-rendering.md "Keys, touch and the schedule": an ESP32's
+    RIGHT held a second, relayed as its driver's two `gpio` edges, is the
+    `longPress` the frame's event map makes the next scene, in the render
+    the pull asked for. What the plane sent it itself is not delivered."""
+    from types import SimpleNamespace
+
+    from app.tasks.embedded_firmware import EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP
+    from app.utils.embedded_render import render_scene
+
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
+    held = {"nowMs": 20_000, "events": [
+        {"origin": "driver", "name": "gpio",
+         "payload": {"pin": 3, "label": "RIGHT", "level": 0, "action": "down", "atMs": 18_000}},
+        {"origin": "driver", "name": "gpio",
+         "payload": {"pin": 3, "label": "RIGHT", "level": 1, "action": "up", "atMs": 19_200}},
+    ]}
+    frame_json = {"eventMap": EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP, "palette": [], "colors": {}}
+
+    switched = await render_scene(frame, 16, 16, scene_id="clock", device_input=held, frame_json=frame_json)
+    assert switched.rgba is not None, switched.error
+    assert switched.state["sceneId"] == "photos"
+    assert switched.rgba[:4] == bytes((0, 0, 0, 255))
+    assert switched.palette == []
+
+    # Without the map the same hold is a long press nobody maps.
+    unmapped = await render_scene(frame, 16, 16, scene_id="clock", device_input=held)
+    assert unmapped.state["sceneId"] == "clock"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
+async def test_a_relayed_schedule_entry_switches_and_the_planes_own_origin_does_not():
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
+    scheduled = await render_scene(frame, 16, 16, scene_id="clock", device_input={"nowMs": 5, "events": [
+        {"origin": "schedule", "name": "setCurrentScene", "payload": {"sceneId": "photos"}}]})
+    assert scheduled.state["sceneId"] == "photos"
+    claimed = await render_scene(frame, 16, 16, scene_id="clock", device_input={"nowMs": 5, "events": [
+        {"origin": "cloud", "name": "setCurrentScene", "payload": {"sceneId": "photos"}}]})
+    assert claimed.state["sceneId"] == "clock"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
+async def test_the_scene_switcher_opens_again_where_the_plane_left_it_in_the_real_runtime():
+    """A fresh process per pull: the switcher a swipe opened comes back with
+    what it was opened from and its highlight, and a key walks on from there."""
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
+    kept = {"system/sceneSwitcher": {"from": "clock", "highlight": "photos", "page": 0}}
+
+    reopened = await render_scene(frame, 64, 64, scene_id="system/sceneSwitcher", scene_states=kept)
+    assert reopened.rgba is not None, reopened.error
+    assert reopened.state["sceneId"] == "system/sceneSwitcher"
+    assert reopened.state["state"]["from"] == "clock"
+    assert reopened.state["state"]["highlight"] == "photos"
+
+    # `B` is a `next` key (buttons.roleByLabel): one step on, wrapping round.
+    tap = {"nowMs": 10_600, "edges": [
+        {"label": "B", "action": "down", "atMs": 10_000}, {"label": "B", "action": "up", "atMs": 10_080}]}
+    walked = await render_scene(frame, 64, 64, scene_id="system/sceneSwitcher", scene_states=kept, device_input=tap)
+    assert walked.state["sceneId"] == "system/sceneSwitcher"
+    assert walked.state["state"]["highlight"] == "clock"
+    assert walked.state["state"]["from"] == "clock"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
+async def test_the_scene_settings_open_again_and_the_frame_page_has_nothing_to_show_on_a_plane():
+    """The settings' frame page is built from the device's facts; the plane
+    has none, so the gear is not offered and asking for the page draws the
+    scene's form instead of failing."""
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
+    kept = {"system/sceneSettings": {"from": "clock", "fields": [], "values": {}, "opened": "frame"}}
+    result = await render_scene(frame, 64, 64, scene_id="system/sceneSettings", scene_states=kept)
+    assert result.rgba is not None, result.error
+    assert result.state["sceneId"] == "system/sceneSettings"
+    assert result.state["state"]["from"] == "clock"
+    assert result.state["state"].get("page") != "frame"

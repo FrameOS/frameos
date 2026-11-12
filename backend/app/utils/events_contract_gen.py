@@ -4,6 +4,11 @@ EVENTS_CONTRACT_VERSION = 1
 
 # What a layout's scene node names for the scene it wraps: no scene of the frame.
 SCENE_YIELD_ID = "system/yield"
+# The scenes built into every runtime (the scene switcher, the scene
+# settings): in no scene list, never persisted by a device.
+SCENE_SWITCHER_ID = "system/sceneSwitcher"
+SCENE_SETTINGS_ID = "system/sceneSettings"
+BUILT_IN_SCENE_IDS: frozenset[str] = frozenset({SCENE_SWITCHER_ID, SCENE_SETTINGS_ID})
 
 # origin -> contract events it may not emit. `http:write` is the frame access
 # key: what it is refused needs an admin session or the serverApiKey instead.

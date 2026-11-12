@@ -88,3 +88,77 @@ block test_a_flood_is_capped:
   for i in 0 ..< 40:
     edges.add(edge("A", if i mod 2 == 0: "down" else: "up", i * 10))
   doAssert relayedButtonEdges(%*{"nowMs": 1_000, "edges": edges}, 5_000).len == MaxRelayedEdges
+
+block test_a_voice_hold_stays_claimed:
+  let edges = relayedButtonEdges(%*{"nowMs": 1_000, "edges": [
+    %*{"label": "REFRESH", "action": "up", "atMs": 900, "claimed": true}]}, 5_000)
+  doAssert edges.len == 1 and edges[0]["claimed"].getBool()
+
+# --------------------------------------------------- an ESP32's own producers
+
+proc relayed(origin, name: string, payload: JsonNode = nil): JsonNode =
+  result = %*{"origin": origin, "name": name}
+  if not payload.isNil:
+    result["payload"] = payload
+
+block test_events_keep_their_origin_and_their_time:
+  let now = at(20)
+  let events = relayedEvents(%*{"nowMs": 81_234, "events": [
+    relayed("driver", "gpio", %*{"pin": 3, "label": "RIGHT", "level": 0, "action": "down", "atMs": 80_410}),
+    relayed("schedule", "setCurrentScene", %*{"sceneId": "news"}),
+    relayed("http:write", "setSceneState", %*{"state": {"n": 1}}),
+    relayed("http:admin", "refreshNews")]}, now.ms)
+  doAssert events.len == 4
+  doAssert events[0].origin == eoDriver and events[0].name == "gpio"
+  doAssert events[0].payload["atMs"].getBiggestInt() == now.ms - 824
+  doAssert events[0].payload["label"].getStr() == "RIGHT"
+  doAssert events[1].origin == eoSchedule and events[1].payload["sceneId"].getStr() == "news"
+  doAssert events[1].payload{"atMs"}.isNil
+  doAssert events[2].origin == eoHttpWrite
+  doAssert events[3].origin == eoHttpAdmin and events[3].payload.kind == JObject and events[3].payload.len == 0
+
+block test_the_payload_given_is_not_changed:
+  let input = %*{"nowMs": 1_000, "events": [relayed("driver", "pointerDown", %*{"x": 1, "y": 2, "atMs": 900})]}
+  discard relayedEvents(input, 5_000)
+  doAssert input["events"][0]["payload"]["atMs"].getInt() == 900
+
+block test_only_the_boards_own_origins_are_relayed:
+  let events = relayedEvents(%*{"nowMs": 1_000, "events": [
+    relayed("cloud", "setSceneState", %*{}), relayed("system", "render"), relayed("scene", "next"),
+    relayed("eventMap", "setCurrentScene", %*{"direction": "next"}), relayed("panel", "reboot"),
+    relayed("preview", "button"), relayed("schedule", "render")]}, 5_000)
+  doAssert events.len == 1 and events[0].origin == eoSchedule and events[0].name == "render"
+
+block test_an_event_that_says_nothing_is_skipped:
+  var long = ""
+  for i in 0 .. MaxRelayedEventName:
+    long.add "x"
+  let events = relayedEvents(%*{"nowMs": 1_000, "events": [
+    %*{"name": "render"}, relayed("schedule", ""), %*{"origin": "schedule", "name": 7},
+    relayed("schedule", long), relayed("schedule", "render", %*[1]), relayed("schedule", "render", %"x"),
+    %"render", relayed("schedule", "render", %*{"atMs": "5"})]}, 5_000)
+  doAssert events.len == 1 and events[0].payload["atMs"].getStr() == "5"
+  doAssert relayedEvents(%*{"events": [relayed("schedule", "render")]}, 5_000).len == 0 # no board clock
+  doAssert relayedEvents(%*{"nowMs": 1, "events": "render"}, 5_000).len == 0
+
+block test_edges_go_first_and_the_flood_is_capped_in_all:
+  var events = newJArray()
+  for i in 0 ..< 40:
+    events.add relayed("schedule", "render")
+  let both = relayedEvents(%*{"nowMs": 1_000, "edges": [edge("A", "down", 900), edge("A", "up", 950)],
+    "events": events}, 5_000)
+  doAssert both.len == MaxRelayedEdges
+  doAssert both[0].name == "gpio" and both[0].payload["label"].getStr() == "A"
+  doAssert both[1].name == "gpio" and both[2].name == "render"
+
+block test_a_tap_relayed_as_events_is_a_press:
+  var state = initInputState(config())
+  var output: seq[InputDelivery]
+  let now = at(5)
+  for event in relayedEvents(%*{"nowMs": 1_500, "events": [
+      relayed("driver", "gpio", %*{"pin": 3, "label": "B", "level": 0, "action": "down", "atMs": 1_000}),
+      relayed("driver", "gpio", %*{"pin": 3, "label": "B", "level": 1, "action": "up", "atMs": 1_080})]}, now.ms):
+    discard state.applyNamedInput(event.name, event.payload, event.origin, now, output)
+  state.tick(now, output)
+  doAssert output.kinds == @["gpio:down", "gpio:up", "button:press"]
+  doAssert output[2].payload["durationMs"].getInt() == 80

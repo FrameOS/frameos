@@ -488,8 +488,13 @@ async def process_log(
     # drawn before it wakes, so the wake is a download, not a render
     # (docs/server-rendering.md "Deep sleep").
     if event == 'sleep' and changes.get('next_wake_at') is not None:
+        from app.api.embedded_device import leave_built_in_scene
         from app.utils.server_render import schedule_prerender
 
+        # The scene switcher or the scene settings a key opened do not
+        # outlive the sleep, on the frame or here: the picture for the wake
+        # is the scene they were opened from (docs/server-rendering.md).
+        await leave_built_in_scene(redis, frame)
         await schedule_prerender(redis, frame)
 
     if event == 'metrics':

@@ -134,6 +134,9 @@ class SceneRender:
     error: str | None = None
     out_of_memory: dict | None = None
     scene_logs: list[str] = field(default_factory=list)
+    # A photo's own dither palette in effect after the render (["#rrggbb",
+    # …]); None from a bundle without frameos_wasm_render_palette.
+    palette: list[str] | None = None
 
 
 def _parse_marker(stderr_text: str, marker: str) -> dict | None:
@@ -164,6 +167,7 @@ async def render_scene(
     control_events: list[dict] | None = None,
     device_input: dict | None = None,
     now_ms: int | None = None,
+    frame_json: dict | None = None,
     timeout: float = RENDER_TIMEOUT_SECONDS,
 ) -> SceneRender:
     """One frame of the scene, with its post-render state and saved assets.
@@ -185,9 +189,12 @@ async def render_scene(
     device's memory ceiling and as that device. ``control_events``
     ([{"name", "payload", "origin"}]) are the events a control plane sent a
     thin client since its last pull, and ``device_input`` ({"nowMs",
-    "edges"}, embedded_device.embedded_device_input) the button edges it saw;
-    the scene hears both before the render, the edges as its driver's
-    (frameos/relayed_input.nim).
+    "edges", "events"?}, embedded_device.embedded_device_input) what it
+    relayed: button edges, and an ESP32's events from its own producers; the
+    scene hears both before the render, each relayed one from its own origin
+    (frameos/relayed_input.nim). ``frame_json`` ({"eventMap"?, "palette"?,
+    "colors"?, "pixelFormat"?, "gpioButtons"?, "rotate"?}) is what else of
+    frame.json a frame's own runtime keeps (frameos_wasm_set_frame).
     """
     source = scenes_override if scenes_override is not None else frame.scenes
     scenes = [scene for scene in (source or []) if isinstance(scene, dict)]
@@ -234,7 +241,7 @@ async def render_scene(
         request["renderScale"] = render_scale
     if control_events:
         request["controlEventsJson"] = json.dumps(control_events, separators=(",", ":"))
-    if device_input and device_input.get("edges"):
+    if device_input and (device_input.get("edges") or device_input.get("events")):
         request["deviceInputJson"] = json.dumps(device_input, separators=(",", ":"))
     # The scene's clock (docs/server-rendering.md "Deep sleep"): a picture
     # drawn ahead of a sleeping frame's wake renders as of the wake, so a
@@ -243,6 +250,8 @@ async def render_scene(
     # processes on the real clock).
     if now_ms is not None:
         request["nowMs"] = int(now_ms)
+    if frame_json:
+        request["frameJson"] = json.dumps(frame_json, separators=(",", ":"))
 
     expected = int(width) * int(height) * 4
     global _render_waiters
@@ -289,11 +298,14 @@ async def render_scene(
             out_of_memory=_parse_marker(stderr_text, _OUT_OF_MEMORY_MARKER),
             scene_logs=scene_logs,
         )
+    state = _parse_marker(stderr_text, _STATE_MARKER)
+    palette = state.pop("palette", None) if isinstance(state, dict) else None
     return SceneRender(
         stdout,
-        state=_parse_marker(stderr_text, _STATE_MARKER),
+        state=state,
         saved_assets=_parse_marker(stderr_text, _SAVED_ASSETS_MARKER),
         scene_logs=scene_logs,
+        palette=[color for color in palette if isinstance(color, str)] if isinstance(palette, list) else None,
     )
 
 
@@ -313,10 +325,13 @@ async def render_scene_rgba_and_state(
     device_input: dict | None = None,
     scene_logs: list[str] | None = None,
     now_ms: int | None = None,
+    frame_json: dict | None = None,
+    render_palette: list[str] | None = None,
     timeout: float = RENDER_TIMEOUT_SECONDS,
 ) -> tuple[bytes | None, dict | None, dict | None]:
     """render_scene as (RGBA bytes, post-render state, saved assets). The
-    scene's own log lines are appended to ``scene_logs`` when one is given."""
+    scene's own log lines are appended to ``scene_logs`` when one is given,
+    and a photo's own dither palette to ``render_palette``."""
     result = await render_scene(
         frame,
         width,
@@ -331,10 +346,13 @@ async def render_scene_rgba_and_state(
         control_events=control_events,
         device_input=device_input,
         now_ms=now_ms,
+        frame_json=frame_json,
         timeout=timeout,
     )
     if scene_logs is not None:
         scene_logs.extend(result.scene_logs)
+    if render_palette is not None and result.palette:
+        render_palette.extend(result.palette)
     return result.rgba, result.state, result.saved_assets
 
 

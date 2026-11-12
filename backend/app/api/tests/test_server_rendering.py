@@ -654,3 +654,338 @@ def test_a_name_that_resolves_to_the_hosts_own_address_is_refused_in_the_lookup(
     if shutil.which('node') is None:
         pytest.skip('node not available')
     assert _fetch_outcomes([(PRIVATE, 'http://localhost:9/'), (ALL, 'http://localhost:9/')]) == ['host', 'allowed']
+
+
+# ------------------------------------------- keys, touch and the schedule
+
+
+def relayed(origin: str, name: str, payload=None) -> dict:
+    event: dict = {'origin': origin, 'name': name}
+    if payload is not None:
+        event['payload'] = payload
+    return event
+
+
+GPIO_DOWN = {'pin': 3, 'label': 'RIGHT', 'level': 0, 'action': 'down', 'atMs': 8_000}
+GPIO_UP = {'pin': 3, 'label': 'RIGHT', 'level': 1, 'action': 'up', 'atMs': 8_900, 'claimed': True}
+
+
+@pytest.mark.asyncio
+async def test_an_esp32s_pull_relays_its_producers_events_with_their_origins(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    """docs/server-rendering.md "Keys, touch and the schedule": the body is
+    what fos_events_dispatch would have handed the board's own scene, each
+    event from its own origin. What the plane sent it, the console's and
+    whatever says nothing usable stays out."""
+    frame = await server_rendered_frame(async_client, db)
+    calls: list = []
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', recording_renderer(calls))
+    body = {'nowMs': 9_000, 'events': [
+        relayed('driver', 'gpio', GPIO_DOWN),
+        relayed('driver', 'gpio', GPIO_UP),
+        relayed('driver', 'pointerDown', {'x': 10, 'y': 20, 'pointerId': 1, 'atMs': 8_950}),
+        relayed('schedule', 'setCurrentScene', {'sceneId': 'photos'}),
+        relayed('http:write', 'setSceneState', {'state': {'label': 'yo'}}),
+        relayed('http:admin', 'refreshNews'),
+        relayed('cloud', 'setSceneState', {'state': {}}),
+        relayed('system', 'render'),
+        relayed('scene', 'next'),
+        relayed('schedule', 'render', ['not', 'an', 'object']),
+        relayed('schedule', ''),
+        relayed('schedule', 'x' * 65),
+        'render',
+    ]}
+
+    response = await no_auth_client.post(f'/api/frames/{frame.id}/embedded/render', json=body, headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert calls[-1]['device_input'] == {'nowMs': 9_000, 'edges': [], 'events': [
+        relayed('driver', 'gpio', GPIO_DOWN),
+        relayed('driver', 'gpio', GPIO_UP),
+        relayed('driver', 'pointerDown', {'x': 10, 'y': 20, 'pointerId': 1, 'atMs': 8_950}),
+        relayed('schedule', 'setCurrentScene', {'sceneId': 'photos'}),
+        relayed('http:write', 'setSceneState', {'state': {'label': 'yo'}}),
+        relayed('http:admin', 'refreshNews', {}),
+    ]}
+
+
+@pytest.mark.asyncio
+async def test_a_body_with_neither_edges_nor_events_is_refused(async_client, no_auth_client, db, redis, monkeypatch):
+    frame = await server_rendered_frame(async_client, db)
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', recording_renderer([]))
+    url = f'/api/frames/{frame.id}/embedded/render'
+    for body in ({'nowMs': 1}, {'nowMs': 1, 'events': 'render'}, {'nowMs': 1, 'edges': [], 'events': {}},
+                 {'events': [relayed('schedule', 'render')]}):
+        response = await no_auth_client.post(url, json=body, headers=auth(frame))
+        assert response.status_code == 400, body
+
+
+def test_edges_and_events_share_one_cap_and_a_voice_hold_stays_claimed():
+    from app.api.embedded_device import MAX_DEVICE_INPUT_EDGES, embedded_device_input
+
+    edges = [{'label': 'A', 'action': 'down', 'atMs': 1}, {'label': 'A', 'action': 'up', 'atMs': 2, 'claimed': True}]
+    kept = embedded_device_input({'nowMs': 10, 'edges': edges, 'events': [relayed('schedule', 'render')] * 40})
+    assert kept['edges'][1] == {'label': 'A', 'action': 'up', 'atMs': 2, 'claimed': True}
+    assert len(kept['edges']) + len(kept['events']) == MAX_DEVICE_INPUT_EDGES
+    # The Pico's body is what it always was: no `events` key.
+    assert embedded_device_input({'nowMs': 10, 'edges': edges[:1]}) == {'nowMs': 10, 'edges': edges[:1]}
+
+
+@pytest.mark.asyncio
+async def test_the_scene_the_render_ended_on_is_the_frames_now(async_client, no_auth_client, db, redis, monkeypatch):
+    """A relayed key that switched scenes (the event map's next, a scene's own
+    setCurrentScene) is a switch on the plane: the next pull draws that scene."""
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    calls: list = []
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state',
+                        recording_renderer(calls, state={'sceneId': 'photos', 'state': {}}))
+    url = f'/api/frames/{frame.id}/embedded/render'
+    pressed = await no_auth_client.post(url, json={'nowMs': 9_000, 'events': [
+        relayed('driver', 'gpio', GPIO_DOWN), relayed('driver', 'gpio', {**GPIO_UP, 'claimed': False})]},
+        headers=auth(frame))
+    assert pressed.status_code == 200
+    assert calls[-1]['scene_id'] == 'clock'
+    assert await redis.get(f'frame:{frame.id}:active_scene') == b'photos'
+
+    await no_auth_client.get(url, headers=auth(frame))
+    assert calls[-1]['scene_id'] == 'photos'
+
+
+@pytest.mark.asyncio
+async def test_a_scene_the_render_names_that_the_frame_lacks_is_not_kept(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state',
+                        recording_renderer([], state={'sceneId': 'gone', 'state': {}}))
+    await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert await redis.get(f'frame:{frame.id}:active_scene') == b'clock'
+
+
+@pytest.mark.asyncio
+async def test_a_render_from_an_old_bundle_that_seeded_nothing_keeps_the_scene(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state',
+                        recording_renderer([], state={'sceneId': 'photos', 'state': {}, 'seeded': False}))
+    await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert await redis.get(f'frame:{frame.id}:active_scene') == b'clock'
+
+
+SWITCHER = 'system/sceneSwitcher'
+
+
+@pytest.mark.asyncio
+async def test_the_scene_switcher_is_kept_while_the_frame_is_awake_and_left_when_it_sleeps(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    """The event map's swipe opened the switcher: the plane keeps it, with all
+    of its state (what it was opened from, the highlight), so the next pull's
+    tap lands in it. Going to sleep, the frame goes back to the scene it was
+    opened from, as its own runtime would."""
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    switcher_state = {'from': 'clock', 'highlight': 'photos', 'page': 0, 'touchedAt': 1.5}
+    calls: list = []
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state',
+                        recording_renderer(calls, state={'sceneId': SWITCHER, 'state': switcher_state}))
+    url = f'/api/frames/{frame.id}/embedded/render'
+    await no_auth_client.post(url, json={'nowMs': 9_000, 'events': [
+        relayed('driver', 'pointerDown', {'x': 400, 'y': 470, 'atMs': 8_000}),
+        relayed('driver', 'pointerUp', {'x': 400, 'y': 200, 'atMs': 8_200})]}, headers=auth(frame))
+    assert await redis.get(f'frame:{frame.id}:active_scene') == SWITCHER.encode()
+    assert (await get_virtual_scene_states(redis, frame))[SWITCHER] == switcher_state
+
+    await no_auth_client.get(url, headers=auth(frame))
+    assert calls[-1]['scene_id'] == SWITCHER
+    assert calls[-1]['scene_states'][SWITCHER] == switcher_state
+    # The workspace reads the plane's memory too.
+    from app.api.virtual_frame import virtual_frame_states_payload
+    assert (await virtual_frame_states_payload(redis, frame))['sceneId'] == SWITCHER
+
+    queued: list = []
+
+    async def fake_enqueue(function, **kwargs):
+        queued.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(redis, 'enqueue_job', fake_enqueue, raising=False)
+    await process_log(db, redis, frame, {'event': 'sleep', 'wakeInSeconds': 900})
+    assert await redis.get(f'frame:{frame.id}:active_scene') == b'clock'
+    assert SWITCHER not in await get_virtual_scene_states(redis, frame)
+    assert len(queued) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_switcher_opened_from_nothing_it_knows_leaves_no_scene_at_the_sleep(async_client, db, redis, monkeypatch):
+    from app.api.embedded_device import leave_built_in_scene
+    from app.api.virtual_frame import replace_virtual_scene_states
+
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', SWITCHER)
+    await replace_virtual_scene_states(redis, frame, {SWITCHER: {'from': 'gone'}, 'clock': {'label': 'x'}})
+    await leave_built_in_scene(redis, frame)
+    assert await redis.get(f'frame:{frame.id}:active_scene') is None
+    assert await get_virtual_scene_states(redis, frame) == {'clock': {'label': 'x'}}
+
+    # A frame that renders itself is left alone.
+    local = await device_frame(async_client, db)
+    await redis.set(f'frame:{local.id}:active_scene', SWITCHER)
+    await leave_built_in_scene(redis, local)
+    assert await redis.get(f'frame:{local.id}:active_scene') == SWITCHER.encode()
+
+
+@pytest.mark.asyncio
+async def test_the_boards_own_word_on_its_scene_does_not_undo_the_planes(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    """The commands pull carries what the board's own runtime holds: for a
+    frame rendered here that is left from before, and the plane is its memory."""
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'photos')
+    response = await no_auth_client.post(
+        f'/api/frames/{frame.id}/embedded/commands',
+        json={'active_scene': 'clock', 'states': {'label': 'old'}}, headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert await redis.get(f'frame:{frame.id}:active_scene') == b'photos'
+
+
+@pytest.mark.asyncio
+async def test_the_render_is_told_the_frames_event_map_palette_colours_buttons_and_rotation(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    from app.tasks.embedded_firmware import EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP
+
+    frame = await server_rendered_frame(async_client, db)
+    frame.event_map = EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP
+    frame.palette = {'name': 'Measured', 'colors': ['#101010', '#F0F0F0', '#d0c040', '#a03030']}
+    frame.colors = {'autoFit': 'off'}
+    frame.gpio_buttons = [{'pin': 3, 'label': 'RIGHT'}]
+    frame.rotate = 90
+    db.add(frame)
+    db.commit()
+    calls: list = []
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', recording_renderer(calls))
+    await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    sent = calls[-1]['frame_json']
+    assert sent['eventMap'] == EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP
+    assert sent['palette'] == ['#101010', '#f0f0f0', '#d0c040', '#a03030']
+    assert sent['colors'] == {'autoFit': 'off'}
+    assert sent['gpioButtons'] == [{'pin': 3, 'label': 'RIGHT'}]
+    assert sent['rotate'] == 90
+    assert isinstance(sent['pixelFormat'], int)
+
+    # A frame never given a map leaves the key out (the board's own applies).
+    frame.event_map = None
+    db.add(frame)
+    db.commit()
+    await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert 'eventMap' not in calls[-1]['frame_json']
+
+
+# ------------------------------------------------------------------ palette
+
+
+def nim_palette(name: str) -> list[tuple[int, int, int]]:
+    """A stock table as frameos/src/frameos/utils/dither.nim spells it."""
+    import re
+
+    source = open(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..',
+                               'frameos', 'src', 'frameos', 'utils', 'dither.nim')).read()
+    body = source[source.index(f'const {name}* = @['):]
+    body = body[:body.index(']')]
+    return [(int(r), int(g), int(b)) for r, g, b in re.findall(r'\((\d+),\s*(\d+),\s*(\d+)\)', body)]
+
+
+def test_the_stock_tables_are_the_runtimes():
+    from app.api.embedded_device import BWYR_PALETTE, SEVEN_COLOR_PALETTE, SPECTRA6_PALETTE
+
+    assert BWYR_PALETTE == nim_palette('saturated4ColorPalette')
+    assert SEVEN_COLOR_PALETTE == nim_palette('saturated7ColorPalette')
+    assert SPECTRA6_PALETTE == nim_palette('spectra6ColorPalette')
+
+
+def test_the_palette_is_fitted_as_the_device_fits_it():
+    from app.api.embedded_device import BWYR_PALETTE, SPECTRA6_PALETTE, panel_palette
+    from app.tasks.embedded_firmware import FOS_PIXEL_1BPP, FOS_PIXEL_2BPP_BWYR, FOS_PIXEL_4BPP_SPECTRA6
+
+    four = ['#000000', '#ffffff', '#ffff00', '#ff0000']
+    assert panel_palette(FOS_PIXEL_2BPP_BWYR) == BWYR_PALETTE
+    assert panel_palette(FOS_PIXEL_2BPP_BWYR, {'colors': four}) == [(0, 0, 0), (255, 255, 255), (255, 255, 0), (255, 0, 0)]
+    # Any other length is not this panel's: the stock table.
+    assert panel_palette(FOS_PIXEL_2BPP_BWYR, {'colors': four[:3]}) == BWYR_PALETTE
+    # One unreadable colour empties the list.
+    assert panel_palette(FOS_PIXEL_2BPP_BWYR, {'colors': [*four[:3], 'red']}) == BWYR_PALETTE
+    # Spectra 6: six colours, the hole at index 4 put back.
+    six = ['#000000', '#ffffff', '#ffff00', '#ff0000', '#0000ff', '#00ff00']
+    fitted = panel_palette(FOS_PIXEL_4BPP_SPECTRA6, {'colors': six})
+    assert fitted == [(0, 0, 0), (255, 255, 255), (255, 255, 0), (255, 0, 0), SPECTRA6_PALETTE[4], (0, 0, 255), (0, 255, 0)]
+    # A photo's own palette wins over the frame's, fitted the same way.
+    photo = ['#111111', '#eeeeee', '#eeee11', '#ee1111', '#1111ee', '#11ee11']
+    assert panel_palette(FOS_PIXEL_4BPP_SPECTRA6, {'colors': six}, photo)[0] == (17, 17, 17)
+    assert panel_palette(FOS_PIXEL_4BPP_SPECTRA6, {'colors': six}, photo[:2]) == fitted
+    assert panel_palette(FOS_PIXEL_1BPP, {'colors': four}) is None
+
+
+def test_the_packer_dithers_to_the_palette_and_writes_the_panels_indexes():
+    from app.api.embedded_device import pack_image_for_panel, panel_palette
+    from app.tasks.embedded_firmware import FOS_PIXEL_4BPP_SPECTRA6
+
+    # A teal the stock table puts on its blue (24, 83, 154), index 5. On a
+    # panel whose green the owner measured as (0, 160, 160) it is that green,
+    # index 6: the colours move what a pixel is dithered to, not which index
+    # each colour is written as.
+    teal = Image.new('RGB', (2, 1), (0, 140, 120))
+    six = ['#000000', '#ffffff', '#ffff00', '#ff0000', '#0000ff', '#00a0a0']
+    measured = panel_palette(FOS_PIXEL_4BPP_SPECTRA6, {'colors': six})
+    assert pack_image_for_panel(teal, FOS_PIXEL_4BPP_SPECTRA6) == bytes([0x55])
+    assert pack_image_for_panel(teal, FOS_PIXEL_4BPP_SPECTRA6, measured) == bytes([0x66])
+    # Index 4, the hole, is never written.
+    grey = Image.new('RGB', (16, 4), (120, 120, 120))
+    for palette in (None, measured):
+        packed = pack_image_for_panel(grey, FOS_PIXEL_4BPP_SPECTRA6, palette)
+        assert all(nibble != 4 for byte in packed for nibble in (byte >> 4, byte & 0x0F))
+
+
+@pytest.mark.asyncio
+async def test_the_pull_packs_with_the_frames_palette_and_the_photos(async_client, db, redis, monkeypatch):
+    """_fosb_from_rgba, as the pull and the pre-render call it: the frame's
+    palette, and a photo's own when the render reports one."""
+    from types import SimpleNamespace
+
+    from app.api.embedded_device import _fosb_from_rgba, pack_image_for_panel, panel_palette
+    from app.tasks.embedded_firmware import FOS_PIXEL_2BPP_BWYR
+
+    four = ['#000000', '#ffffff', '#ffff00', '#ff0000']
+    photo = ['#202020', '#fafafa', '#c0c000', '#c00000']
+    frame = SimpleNamespace(id=1, name='f', rotate=0, palette={'colors': four})
+    plan = SimpleNamespace(scene_width=8, scene_height=2, width=8, height=2, pixel_format=FOS_PIXEL_2BPP_BWYR)
+    rgba = bytes((200, 30, 30, 255)) * 16
+    image = Image.frombytes('RGBA', (8, 2), rgba).convert('RGB')
+    framed = _fosb_from_rgba(frame, plan, rgba)
+    assert framed[12:] == pack_image_for_panel(image, FOS_PIXEL_2BPP_BWYR, panel_palette(FOS_PIXEL_2BPP_BWYR, {'colors': four}))
+    photographed = _fosb_from_rgba(frame, plan, rgba, photo)
+    assert photographed[12:] == pack_image_for_panel(image, FOS_PIXEL_2BPP_BWYR, panel_palette(FOS_PIXEL_2BPP_BWYR, None, photo))
+
+
+@pytest.mark.asyncio
+async def test_a_render_reports_the_photo_palette_to_the_packer(async_client, no_auth_client, db, redis, monkeypatch):
+    frame = await server_rendered_frame(async_client, db)
+    seen: list = []
+
+    async def photo_render(frame_arg, width, height, **kwargs):
+        kwargs['render_palette'].extend(['#202020', '#fafafa'])
+        return bytes((0, 0, 0, 255)) * (width * height), None, None
+
+    def fosb(frame_arg, plan, rgba, photo_palette=None):
+        seen.append(photo_palette)
+        return b'FOSB' + bytes(8)
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', photo_render)
+    monkeypatch.setattr('app.api.embedded_device._fosb_from_rgba', fosb)
+    await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert seen == [['#202020', '#fafafa']]

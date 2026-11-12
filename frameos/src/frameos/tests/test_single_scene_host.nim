@@ -411,6 +411,44 @@ block scene_settings_with_no_scene:
   doAssert noneHost.sceneId.get().string == "fixtures/dispatcher/switchFrom"
   noneHost.dropScene()
   localEventSink = nil
+
+# A control plane rendering for a frame (the wasm runtime, a fresh process per
+# pull, docs/server-rendering.md) opens the switcher a key opened again where
+# it left it: the switch replayed with what it was opened from, then the
+# highlight put back over what opening it set.
+block switcher_opened_again_as_it_was_left:
+  let againConfig = FrameConfig(width: 320, height: 240, rotate: 0, scalingMode: "cover",
+    device: "embedded", debug: false, saveAssets: %*false)
+  let order = @["fixtures/dispatcher/switchFrom".SceneId, "fixtures/dispatcher/switchTo".SceneId]
+  let againHost = SingleSceneHost(frameConfig: againConfig, logger: logger)
+  againHost.requestSelect = proc (sceneId: string): bool =
+    againHost.makeCurrent(SceneId(sceneId))
+    true
+  againHost.sceneOrder = proc (): seq[SceneId] = order
+  againHost.start()
+  sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+    @[SwitcherEntry(id: "fixtures/dispatcher/switchFrom", name: "From"),
+      SwitcherEntry(id: "fixtures/dispatcher/switchTo", name: "To")]
+  localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
+    {.cast(gcsafe).}:
+      againHost.queue(origin, event, payload, scene)
+  let kept = %*{"from": order[0].string, "highlight": order[1].string, "page": 0}
+  doAssert not againHost.reopenBuiltIn(kept), "no scene is current"
+  againHost.makeCurrent(order[0])
+  doAssert not againHost.reopenBuiltIn(kept), "not a built-in scene"
+  againHost.makeCurrent(SceneId(SceneSwitcherId))
+  doAssert not againHost.reopenBuiltIn(%*[]), "a state that is not an object"
+  doAssert againHost.reopenBuiltIn(kept)
+  doAssert againHost.scene of SceneSwitcherScene
+  doAssert againHost.scene.state{"from"}.getStr() == order[0].string
+  doAssert againHost.scene.state{"highlight"}.getStr() == order[1].string, $againHost.scene.state
+  doAssert not againHost.reopenBuiltIn(kept), "resident already"
+  # OK picks the tile it left highlighted.
+  doAssert againHost.send(eoHttpWrite, "button", %*{"label": "OK", "role": "primary", "action": "press"})
+  doAssert againHost.sceneId.get() == order[1]
+  againHost.dropScene()
+  sceneSwitcherListing = nil
+  localEventSink = nil
 echo "ok"
 
 # ------------------------------------------- the scene a switcher covers
