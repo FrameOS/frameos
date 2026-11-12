@@ -297,6 +297,10 @@ const CloudContractSettings* = @[
     Rule(kind: rkString, strEnum: @["auto", "battery", "performance"]),
   profiles: @[
     ProfileSpec(profile: "esp32", since: "2026.11.7", restart: true)]),
+  SettingSpec(key: "render_mode", rule:
+    Rule(kind: rkString, strEnum: @["local", "remote"]),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.11.7")]),
   SettingSpec(key: "mic_clk_pin", rule:
     Rule(kind: rkInt, hasMin: true, min: -1.0, hasMax: true, max: 48.0),
   profiles: @[

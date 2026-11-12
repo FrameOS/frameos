@@ -167,6 +167,9 @@ export const cloudFramesContractSettings = {
       "since": "2026.11.7",
       "restart": true
     },
+    "render_mode": {
+      "since": "2026.11.7"
+    },
     "mic_clk_pin": {
       "since": "2026.10.20"
     },

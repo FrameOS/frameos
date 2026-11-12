@@ -149,6 +149,9 @@ enum CloudFramesContractSource {
       "palette": {
         "since": "2026.10.4"
       },
+      "render_mode": {
+        "since": "2026.11.7"
+      },
       "render_scale": {
         "since": "2026.10.22"
       },
@@ -733,6 +736,13 @@ enum CloudFramesContractSource {
         "colors"
       ],
       "type": "object"
+    },
+    "render_mode": {
+      "enum": [
+        "local",
+        "remote"
+      ],
+      "type": "string"
     },
     "render_scale": {
       "max": 4,
