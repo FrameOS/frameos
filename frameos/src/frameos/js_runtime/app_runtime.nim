@@ -2109,11 +2109,11 @@ proc writePaletteCells(image: Image, cells, known: Cells; x0, y0, width, height,
       cast[ptr UncheckedArray[uint8]](addr levels[0]), palette.len)
 
 proc jsPalette(ctx: ptr JSContext, owner: AppRoot, value: JSValueConst, palette: var seq[ColorRGBX]): bool =
-  ## A palette off a JS array: CSS colours or 0xRRGGBB numbers, 256 at most.
+  ## A palette off a JS array: CSS colors or 0xRRGGBB numbers, 256 at most.
   ## No JSON: an animation hands one over every frame.
   let colors = jsOptionInt(ctx, value, "length", 0)
   if colors > 256:
-    frameos_apps.logError(owner, "frameos.putPixels: a palette holds 256 colours at most")
+    frameos_apps.logError(owner, "frameos.putPixels: a palette holds 256 colors at most")
     return false
   for i in 0 ..< colors:
     let entry = JS_GetPropertyUint32(ctx, value, i.uint32)
@@ -2122,7 +2122,7 @@ proc jsPalette(ctx: ptr JSContext, owner: AppRoot, value: JSValueConst, palette:
       try:
         palette.add parseHtmlColor(toNimString(ctx, entry)).rgbx
       except CatchableError as err:
-        frameos_apps.logError(owner, "frameos.putPixels: bad palette colour: " & err.msg)
+        frameos_apps.logError(owner, "frameos.putPixels: bad palette color: " & err.msg)
         return false
     else:
       let v = if jsIsNumber(entry): toNimFloat(ctx, entry).int else: 0
@@ -2133,7 +2133,7 @@ proc putPaletteCells(runtime: JsAppRuntime, canvasId: int, image: Image, cells: 
     x0, y0, width, height, ps: int; palette: seq[ColorRGBX]) =
   ## A palette's indices, all of them inside the canvas. The palette is packed
   ## once for the canvas's format, so a 565 canvas goes without `setPixel`'s
-  ## per-pixel dither (237 ms of a 480x480 frame on an ESP32, for colours the
+  ## per-pixel dither (237 ms of a 480x480 frame on an ESP32, for colors the
   ## palette picked anyway). A frame that fills the canvas keeps a copy of its
   ## cells and the next writes only what differs, and notes only those rows in
   ## the canvas's log: what a frame showing the canvas repaints too.
@@ -2168,7 +2168,7 @@ proc jsCanvasPutPixels(ctx: ptr JSContext, id: JSValue, pixels: JSValue, options
   ## `frameos.putPixels(canvas, bytes, options)`: pixels written straight
   ## into the canvas, no SVG between. `bytes` is a Uint8Array (or any typed
   ## array, or an ArrayBuffer) of RGBA, four per pixel, rows top to bottom;
-  ## with `options.palette` (CSS colours or 0xRRGGBB numbers, 256 at most)
+  ## with `options.palette` (CSS colors or 0xRRGGBB numbers, 256 at most)
   ## it is one index per pixel. Each source pixel lands as a `pixelSize`
   ## square at `x`, `y` (a 120x120 fire fills a 480x480 canvas at 4), the
   ## grid being `width` x `height` source pixels (the canvas's size over

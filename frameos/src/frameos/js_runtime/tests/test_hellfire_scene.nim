@@ -254,7 +254,7 @@ suite "Hellfire":
       if dark(frame[x, 0]): inc outTop
     check hotBottom == 64
     check outTop == 64
-    # A square: the four pixels of a bottom cell are one colour.
+    # A square: the four pixels of a bottom cell are one color.
     check frame[0, 254] == frame[1, 255]
     check frame[40, 254] == frame[41, 255]
     # Not a glowing line: by the warm-up something burns 40 px up.

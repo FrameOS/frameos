@@ -33,6 +33,11 @@
 ## every record goes when the buffers stop showing what they were showing
 ## (`forgetPanelFrames`, called on a scene switch and when something draws over
 ## the canvas).
+##
+## A `frameos.pixels` frame (js_runtime/app_runtime.nim) keeps a record of the
+## same kind per buffer, the cells it wrote (`PixelFrame`): off the shelf when
+## a render begins, back only after a pixel frame, so the next one into that
+## buffer writes only the cells that differ.
 
 import std/options
 import pixie

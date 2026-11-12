@@ -336,7 +336,7 @@ lasts as long as the interpreter: when `canvas.fresh` is true, draw the
 record you keep in `frameos.remember` into it again.
 A raster the app computes itself (a fire, a plasma, a sprite) goes in with
 `frameos.putPixels(canvas, bytes, { width, height, pixelSize, palette })`
-(FrameOS 2026.11.1+): a `Uint8Array` of RGBA, or with `palette` one index per
+(FrameOS 2026.11.7+): a `Uint8Array` of RGBA, or with `palette` one index per
 pixel, each source pixel a `pixelSize` square. Simulate at the canvas's size
 over `pixelSize` and hand the buffer over as it is, every frame. When that
 raster is the whole picture, `return frameos.pixels(cells, { width, height,
@@ -1104,7 +1104,7 @@ declare const frameos: {
   /** Fills a canvas with color (white by default). */
   clear(canvas: FrameOSCanvasRef, color?: string): boolean;
   /**
-   * Writes pixels straight into a canvas (FrameOS 2026.11.1+): RGBA bytes, four per pixel, rows top to bottom; with
+   * Writes pixels straight into a canvas (FrameOS 2026.11.7+): RGBA bytes, four per pixel, rows top to bottom; with
    * palette (CSS colors or 0xRRGGBB numbers, 256 at most) one index per pixel. Each source pixel is a pixelSize
    * square, the grid width x height source pixels (the canvas over pixelSize by default) at x, y. Alpha 0, or an
    * index past the palette, leaves the pixel as it was; what falls outside the canvas is clipped.
@@ -1115,7 +1115,7 @@ declare const frameos: {
     options?: { x?: number; y?: number; width?: number; height?: number; pixelSize?: number; palette?: (string | number)[] }
   ): boolean;
   /**
-   * A whole frame of palette cells, to return from get() (FrameOS 2026.11.1+): written straight into an LCD's
+   * A whole frame of palette cells, to return from get() (FrameOS 2026.11.7+): written straight into an LCD's
    * buffer, with no canvas and no JSX, each cell a pixelSize square. An index past the palette, or a grid that stops
    * short of the frame, shows the scene's background.
    */

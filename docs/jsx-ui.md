@@ -323,7 +323,7 @@ export function get(app) {
   in, for a raster the app computes itself (a fire, a plasma, a sprite, a
   cellular automaton): a `Uint8Array` (any typed array, or an `ArrayBuffer`)
   of RGBA, four bytes per pixel, rows top to bottom, or with
-  `options.palette` (CSS colours or `0xRRGGBB` numbers, 256 at most) one
+  `options.palette` (CSS colors or `0xRRGGBB` numbers, 256 at most) one
   index per pixel, so the app's own buffer goes over as it is. Each source
   pixel lands as a `pixelSize` square at `x`, `y`, the grid being `width` x
   `height` source pixels (the canvas over `pixelSize` by default): a

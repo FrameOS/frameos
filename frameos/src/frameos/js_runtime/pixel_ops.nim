@@ -17,7 +17,7 @@ proc maxCell*(cells: Cells; count: int): uint8 {.raises: [].} =
       result = cells[i]
 
 template blitLoop(T: typedesc) =
-  ## Each cell a `size` square of its packed colour, rows top to bottom. With
+  ## Each cell a `size` square of its packed color, rows top to bottom. With
   ## `shadow` (the cells this canvas holds already, kept up to date here) a
   ## row and a cell that did not change are not written: a cold cell costs no
   ## trip over the PSRAM bus. An index past the palette leaves the canvas.
