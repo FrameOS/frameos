@@ -45,44 +45,47 @@ static void test_outcome(void)
 static void test_url(void)
 {
     char url[256];
-    CHECK(fos_render_pull_url(url, sizeof(url), "https://cloud.frameos.net/", "4b1c-uuid", 800, 480, 1, 0, NULL),
+    CHECK(fos_render_pull_url(url, sizeof(url), "https://cloud.frameos.net/", "4b1c-uuid", 800, 480, 1, 0),
           "a cloud URL fits");
     CHECK(strcmp(url, "https://cloud.frameos.net/api/frames/4b1c-uuid/embedded/render"
                       "?width=800&height=480&format=1&rotate=0") == 0,
           "cloud URL: got %s", url);
 
-    CHECK(fos_render_pull_url(url, sizeof(url), "http://10.0.0.2:8989", "12", 1200, 1600, 7, 90,
-                              "weather/today ü&x"),
-          "a backend URL with a scene fits");
+    CHECK(fos_render_pull_url(url, sizeof(url), "http://10.0.0.2:8989", "12", 1200, 1600, 7, 90),
+          "a backend URL fits");
     CHECK(strcmp(url, "http://10.0.0.2:8989/api/frames/12/embedded/render"
-                      "?width=1200&height=1600&format=7&rotate=90&scene=weather%2Ftoday%20%C3%BC%26x") == 0,
-          "scene percent-encoded: got %s", url);
-
-    CHECK(fos_render_pull_url(url, sizeof(url), "http://h", "1", 1, 1, 1, 0, ""), "an empty scene is no scene");
-    CHECK(strstr(url, "scene=") == NULL, "no scene parameter: got %s", url);
+                      "?width=1200&height=1600&format=7&rotate=90") == 0,
+          "backend URL: got %s", url);
 
     char tiny[40];
-    CHECK(!fos_render_pull_url(tiny, sizeof(tiny), "https://cloud.frameos.net", "uuid", 800, 480, 1, 0, NULL),
+    CHECK(!fos_render_pull_url(tiny, sizeof(tiny), "https://cloud.frameos.net", "uuid", 800, 480, 1, 0),
           "a URL that does not fit is refused");
     CHECK(tiny[0] == '\0', "and leaves nothing behind");
-    CHECK(!fos_render_pull_url(url, sizeof(url), "", "1", 1, 1, 1, 0, NULL), "no base, no URL");
-    CHECK(!fos_render_pull_url(url, sizeof(url), "http://h", "", 1, 1, 1, 0, NULL), "no frame, no URL");
+    CHECK(!fos_render_pull_url(url, sizeof(url), "", "1", 1, 1, 1, 0), "no base, no URL");
+    CHECK(!fos_render_pull_url(url, sizeof(url), "//", "1", 1, 1, 1, 0), "slashes alone are no base");
+    CHECK(!fos_render_pull_url(url, sizeof(url), "http://h", "", 1, 1, 1, 0), "no frame, no URL");
 }
 
-static void test_etag_keep(void)
+static void test_remember(void)
 {
-    char etag[FOS_RENDER_PULL_ETAG_LEN];
-    CHECK(fos_render_pull_etag_keep("  \"0123abcd\" ", etag, sizeof(etag)), "a quoted ETag is kept");
-    CHECK(strcmp(etag, "\"0123abcd\"") == 0, "trimmed: got [%s]", etag);
-    CHECK(fos_render_pull_etag_keep("W/\"x\"", etag, sizeof(etag)), "a weak ETag is kept as sent");
-    CHECK(!fos_render_pull_etag_keep("\"a\r\nX-Injected: 1\"", etag, sizeof(etag)), "no CR/LF");
-    CHECK(etag[0] == '\0', "a refused ETag leaves nothing");
-    CHECK(!fos_render_pull_etag_keep("", etag, sizeof(etag)), "empty is not an ETag");
-    CHECK(!fos_render_pull_etag_keep(NULL, etag, sizeof(etag)), "absent is not an ETag");
+    uint8_t sha[FOS_RENDER_PULL_SHA_LEN];
+    memset(sha, 0xAB, sizeof(sha));
+    fos_render_pull_shown_t kept;
+    fos_render_pull_remember(&kept, FOS_RENDER_PULL_CLOUD, "\"0123abcd\"", sha);
+    CHECK(kept.valid && strcmp(kept.etag, "\"0123abcd\"") == 0, "a quoted ETag is kept");
+    fos_render_pull_remember(&kept, FOS_RENDER_PULL_CLOUD, "W/\"x\"", sha);
+    CHECK(kept.valid && strcmp(kept.etag, "W/\"x\"") == 0, "a weak ETag is kept as sent");
+    fos_render_pull_remember(&kept, FOS_RENDER_PULL_CLOUD, "\"a\r\nX-Injected: 1\"", sha);
+    CHECK(!kept.valid && kept.etag[0] == '\0', "no CR/LF, and a refused ETag leaves nothing");
+    fos_render_pull_remember(&kept, FOS_RENDER_PULL_CLOUD, "\"caf\xc3\xa9\"", sha);
+    CHECK(!kept.valid, "printable ASCII only");
+    fos_render_pull_remember(&kept, FOS_RENDER_PULL_CLOUD, "", sha);
+    CHECK(!kept.valid, "empty is not an ETag");
     char long_tag[200];
     memset(long_tag, 'a', sizeof(long_tag) - 1);
     long_tag[sizeof(long_tag) - 1] = '\0';
-    CHECK(!fos_render_pull_etag_keep(long_tag, etag, sizeof(etag)), "too long to keep");
+    fos_render_pull_remember(&kept, FOS_RENDER_PULL_CLOUD, long_tag, sha);
+    CHECK(!kept.valid, "too long to keep");
 }
 
 static void test_if_none_match(void)
@@ -116,24 +119,6 @@ static void test_if_none_match(void)
     CHECK(fos_render_pull_if_none_match(&kept, FOS_RENDER_PULL_BACKEND, sha, false) == NULL, "forgotten");
 }
 
-static void test_error_code(void)
-{
-    char code[48];
-    fos_render_pull_error_code("{\"error\":\"not_server_rendered\"}", code, sizeof(code));
-    CHECK(strcmp(code, "not_server_rendered") == 0, "got [%s]", code);
-    fos_render_pull_error_code("{\"max_cloud_rendered_frames\":0, \"error\" : \"cloud_rendered_frame_quota_exceeded\"}",
-                               code, sizeof(code));
-    CHECK(strcmp(code, "cloud_rendered_frame_quota_exceeded") == 0, "got [%s]", code);
-    fos_render_pull_error_code("<html>Forbidden</html>", code, sizeof(code));
-    CHECK(code[0] == '\0', "no JSON, no code");
-    fos_render_pull_error_code("{\"error\":\"<script>\"}", code, sizeof(code));
-    CHECK(code[0] == '\0', "only plain codes reach the log");
-    fos_render_pull_error_code("{\"error\":\"cut", code, sizeof(code));
-    CHECK(code[0] == '\0', "an unterminated value is none");
-    fos_render_pull_error_code(NULL, code, sizeof(code));
-    CHECK(code[0] == '\0', "no body");
-}
-
 static void test_refused_now(void)
 {
     const int64_t now = 1800000000; /* 2027 */
@@ -147,9 +132,8 @@ int main(void)
 {
     test_outcome();
     test_url();
-    test_etag_keep();
+    test_remember();
     test_if_none_match();
-    test_error_code();
     test_refused_now();
     if (g_failures) {
         printf("%d of %d checks failed\n", g_failures, g_checks);

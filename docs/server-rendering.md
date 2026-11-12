@@ -113,9 +113,11 @@ on them, and the scene may listen for them, so they are relayed too.
 The relay (`fos_render_relay.c`, pure, host-tested) holds them in order,
 each as the dispatcher would have been handed it: origin, name and payload,
 the payload's `atMs` on the board's monotonic clock as the button task and
-the touch driver stamp it. Consecutive events of one name whose contract
-says `coalesce: latest` (a moving finger) keep the newest. At most 32 events
-and 16 KiB of body; past that the oldest go, logged `event:dropped`.
+the touch driver stamp it, kept as it goes on the wire. A finger on the
+glass keeps its gesture in the touch queue until it lifts, its moves folded
+to the newest there, so the plane gets the down, the last move and the up.
+At most 32 events and 16 KiB of body; past that the oldest go, logged
+`event:dropped`.
 
 The frame sends them **once the input is decided**: no key down, no tap
 inside its double-press window (`fos_button_timing.c`, the rule the Pico
@@ -136,18 +138,18 @@ most 10 s), so a press never goes in two halves. Then the next pull is a
 an HTTP event asks for the pull at once; a pull that is due anyway takes
 whatever is waiting. A battery frame does not go to sleep while the relay
 holds anything (`sleep:held`, reason `input`), within bounds: not on a
-critical battery, and after three failed pulls or five holds in a row it
-sleeps and the input is lost with its RAM. The key that woke it (`wake:
+critical battery, and three holds in a row at most without a pull the
+plane answered; then it sleeps and the input is lost with its RAM. The key that woke it (`wake:
 true`) is relayed with the first pull of the wake. The relay is emptied by
 a `200` or a `304`, and by a `400` or `413` (a body the plane cannot read
 would otherwise be sent for ever); after a network error, a `503` or a
 `429` the same events go with the next pull. (A plane that ran them and
 whose answer was lost runs them twice; a press is not worth a delivery
-protocol.) A board the cloud refuses (`403`) and that can render hands the
-held input to its own scene in the pass it renders itself; a C3 drops it
-(`event:dropped`, reason `refused`). Each pull that carried input logs one
-`render:relay` line: the count, the status and whether the input was
-`delivered`, `dropped` or `kept`.
+protocol.) A pull the cloud refuses (`403`) drops what it carried
+(`event:dropped`, reason `refused`); a board that can render then renders
+that pass itself, from then on with its own scene hearing its input. Each
+pull that carried input logs one `render:relay` line: the count and the
+status.
 
 The Pico sends its button edges the older way, `{"nowMs", "edges": [{label,
 action, atMs, pin?, wake?}]}` (`embedded_device_input`), and both planes

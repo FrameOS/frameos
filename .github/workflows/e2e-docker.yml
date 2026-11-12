@@ -341,7 +341,8 @@ jobs:
               /tmp/test_fos_render_pull
               # What a frame rendered on the server relays to its plane with the pull, pure.
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/fos_render_relay.c embedded/esp32/main/tests/test_fos_render_relay.c \
+                embedded/esp32/main/fos_render_relay.c embedded/esp32/main/fos_json_guard.c \
+                embedded/esp32/main/tests/test_fos_render_relay.c \
                 -o /tmp/test_fos_render_relay
               /tmp/test_fos_render_relay
               ccache --show-stats || true

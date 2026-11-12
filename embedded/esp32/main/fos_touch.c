@@ -219,6 +219,11 @@ bool fos_touch_pending(void)
     return s_count > 0;
 }
 
+bool fos_touch_finger_down(void)
+{
+    return s_down_mask != 0;
+}
+
 /* The click of a press something takes, on e-paper, where the picture takes
  * its moment to answer. Asked before the event runs, of what the last render
  * drew. The render task's, so a press during a panel update is heard when
@@ -412,11 +417,13 @@ static void touch_task(void *arg)
             s_last_x[p->id] = wx;
             s_last_y[p->id] = wy;
         }
+        /* Off the glass before the lift is queued: a frame rendered on the
+         * server drains the queue once no finger is down (fos_client.c). */
         uint8_t lifted = s_down_mask & (uint8_t)~seen;
+        s_down_mask = seen;
         for (int id = 0; id < FOS_TOUCH_POINTS_MAX; id++) {
             if (lifted & (1u << id)) enqueue(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
         }
-        s_down_mask = seen;
     }
 }
 

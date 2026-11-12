@@ -47,6 +47,7 @@
 #include "fos_power.h"
 #include "fos_render_pull.h"
 #include "fos_render_relay.h"
+#include "cJSON.h"
 #include "fos_scenes.h"
 #include "fos_scene_state.h"
 #include "fos_schedule.h"
@@ -155,10 +156,9 @@ RTC_DATA_ATTR static fos_power_state_t s_power_state;
  * skips the refresh then). */
 RTC_DATA_ATTR static fos_render_pull_shown_t s_pull_shown;
 /* The cloud refused to render for this frame (403): a board with a runtime
- * renders itself until then (wall-clock seconds), and the refusal's code,
- * logged once per change. */
+ * renders itself until then (wall-clock seconds); 0 when it has not, which
+ * is also what says a refusal was logged (note_pull_refused). */
 RTC_DATA_ATTR static uint32_t s_pull_refused_until;
-RTC_DATA_ATTR static char s_pull_refused_code[48];
 /* Whether this board can run its scenes (main.c, at boot). */
 static bool s_local_render_capable = false;
 /* Something other than a render drew the panel (fos_client_note_panel_drawn). */
@@ -747,10 +747,13 @@ static void process_input_events(void)
         if (hold_applies()) fos_input_hold_note(&s_input_hold, s_last_input_us);
     }
     fos_buttons_process_events();
-    fos_touch_process_events();
-    /* Rendered on the server the edges went to the relay (fos_events.c), and
-     * the plane's dispatcher times them. */
-    if (renders_locally(fos_config()) && frameos_nim_tick()) {
+    /* Rendered on the server the edges go to the relay (fos_events.c) and the
+     * plane's dispatcher times them. A finger on the glass leaves its gesture
+     * in the touch queue until it lifts (its moves folded to the newest
+     * there), so the plane gets it whole. */
+    bool local = renders_locally(fos_config());
+    if (local || !fos_touch_finger_down()) fos_touch_process_events();
+    if (local && frameos_nim_tick()) {
         fos_client_wake_for_events();
     }
 }
@@ -1140,28 +1143,23 @@ bool fos_client_render_pending(void)
  * task sends it with a pull. */
 static fos_render_relay_t s_relay;
 static SemaphoreHandle_t s_relay_lock;
+static StaticSemaphore_t s_relay_lock_buf;
 /* Something was added since the last pull took the relay: worth a pull of its
  * own once it is decided. What a failed pull gave back waits for the next
  * pull anyway, and asking again at once would spin on a plane that is down. */
 static bool s_relay_unsent = false;
-/* When the relay last took an event: a finger it believes is down and that
- * has said nothing for FOS_RELAY_SETTLE_MAX_US (a lost lift) is not waited for. */
-static int64_t s_relay_last_add_us = 0;
-/* Pulls in a row that carried events and got no answer. A battery frame holds
- * its sleep for them this many times, then sleeps with them (they go when it
- * is up again, or are lost with RAM if it is not). */
-static uint8_t s_relay_failed_pulls = 0;
-#define FOS_RELAY_SLEEP_HOLD_FAILURES 3
-/* Sleeps held for the relay in a row, whatever kept the passes between them
- * from sending it (a flat cell, an OTA, a dark screen): bounded too. */
-static uint8_t s_relay_sleep_holds = 0;
-#define FOS_RELAY_SLEEP_HOLDS_MAX 5
+/* Sleeps held for the relay in a row with no pull the plane answered: a
+ * plane that does not answer, or passes that cannot pull (a flat cell, an
+ * OTA, a dark screen), are not waited for longer. The input is then lost
+ * with the RAM. */
+static uint8_t s_relay_holds = 0;
+#define FOS_RELAY_HOLDS_MAX 3
 /* The longest a pull waits for a key or a finger to be decided. */
 #define FOS_RELAY_SETTLE_MAX_US (10LL * 1000000LL)
 
-static bool relay_lock(void)
+static void relay_lock(void)
 {
-    return s_relay_lock != NULL && xSemaphoreTake(s_relay_lock, portMAX_DELAY) == pdTRUE;
+    xSemaphoreTake(s_relay_lock, portMAX_DELAY);
 }
 
 static void relay_unlock(void)
@@ -1169,120 +1167,41 @@ static void relay_unlock(void)
     xSemaphoreGive(s_relay_lock);
 }
 
-bool fos_client_relay_event(fos_event_origin_t origin, const char *name, const char *payload_json)
+static void log_relay_dropped(unsigned count, const char *reason)
 {
-    if (!relay_lock()) return false;
-    size_t dropped = 0;
-    fos_render_relay_result_t result = fos_render_relay_add(&s_relay, origin, name, payload_json, &dropped);
-    if (result != FOS_RENDER_RELAY_REFUSED) {
-        s_relay_unsent = true;
-        s_relay_last_add_us = esp_timer_get_time();
-    }
-    relay_unlock();
-    char line[160];
-    if (dropped > 0) {
-        snprintf(line, sizeof(line),
-                 "{\"event\":\"event:dropped\",\"source\":\"esp32\",\"count\":%u,\"reason\":\"relay full\"}",
-                 (unsigned)dropped);
-        frameos_nim_log_hook(line);
-    }
-    if (result == FOS_RENDER_RELAY_REFUSED) {
-        /* A payload that is not one JSON object, or bigger than a pull may
-         * carry: the producer hears it (an HTTP 400, a console error). */
-        snprintf(line, sizeof(line),
-                 "{\"event\":\"event:dropped\",\"source\":\"esp32\",\"origin\":\"%s\",\"reason\":\"not relayable\"}",
-                 fos_event_origin_name(origin));
-        frameos_nim_log_hook(line);
-        return false;
-    }
-    return true;
-}
-
-static size_t relay_count(void)
-{
-    if (!relay_lock()) return 0;
-    size_t count = fos_render_relay_count(&s_relay);
-    relay_unlock();
-    return count;
-}
-
-/* A finger the relay saw go down and not lift, still saying something. */
-static bool relay_finger_down(void)
-{
-    if (!relay_lock()) return false;
-    bool down = fos_render_relay_pointer_down(&s_relay) &&
-                esp_timer_get_time() - s_relay_last_add_us < FOS_RELAY_SETTLE_MAX_US;
-    relay_unlock();
-    return down;
-}
-
-/* A key or a finger still being timed, or its report waiting in a queue: what
- * the relay holds is not decided yet. A press split across two pulls would be
- * two halves in two fresh runtimes on the plane, neither of them a press. */
-static bool remote_input_undecided(void)
-{
-    return fos_buttons_busy() || input_queued() || relay_finger_down();
-}
-
-/* Something was added since the last pull took the relay. */
-static bool relay_unsent(void)
-{
-    bool unsent = false;
-    if (relay_lock()) {
-        unsent = s_relay_unsent && fos_render_relay_count(&s_relay) > 0;
-        relay_unlock();
-    }
-    return unsent;
-}
-
-/* ... and all of it is decided: a pull now. */
-static bool relay_wants_pull(void)
-{
-    return relay_unsent() && !remote_input_undecided();
-}
-
-static void relay_drop(const char *reason)
-{
-    size_t dropped = 0;
-    if (relay_lock()) {
-        dropped = fos_render_relay_clear(&s_relay);
-        s_relay_unsent = false;
-        s_relay_sleep_holds = 0;
-        relay_unlock();
-    }
-    if (dropped == 0) return;
-    char line[160];
-    snprintf(line, sizeof(line),
-             "{\"event\":\"event:dropped\",\"source\":\"esp32\",\"count\":%u,\"reason\":\"%s\"}",
-             (unsigned)dropped, reason);
+    char line[112];
+    snprintf(line, sizeof(line), "{\"event\":\"event:dropped\",\"source\":\"esp32\",\"count\":%u,\"reason\":\"%s\"}",
+             count, reason);
     frameos_nim_log_hook(line);
 }
 
-/* The plane refused this frame and the pass renders here after all
- * (note_pull_refused): what was held for the plane goes to the scene here.
- * The render task's. */
-static void relay_deliver_locally(void)
+bool fos_client_relay_event(const char *origin, const char *name, const char *payload_json)
 {
-    if (!renders_locally(fos_config())) {
-        /* A refusal with no clock to time its hour by is not a local render
-         * for fos_events.c: it would relay them again. */
-        relay_drop("refused");
-        return;
-    }
-    while (true) {
-        fos_event_origin_t origin = FOS_ORIGIN_DRIVER;
-        char name[FOS_CUSTOM_EVENT_MAX_NAME_LENGTH + 1];
-        char *payload = NULL;
-        bool have = false;
-        if (relay_lock()) {
-            have = fos_render_relay_pop(&s_relay, &origin, name, sizeof(name), &payload);
-            if (!have) s_relay_unsent = false;
-            relay_unlock();
-        }
-        if (!have) break;
-        fos_events_dispatch(origin, name, payload);
-        free(payload);
-    }
+    if (s_relay_lock == NULL) return false; /* before the render task: nobody to send it */
+    unsigned dropped;
+    relay_lock();
+    bool kept = fos_render_relay_add(&s_relay, origin, name, payload_json, &dropped);
+    s_relay_unsent |= kept;
+    relay_unlock();
+    if (dropped) log_relay_dropped(dropped, "relay full");
+    return kept;
+}
+
+/* Something was added since the last pull took the relay. A hint, read
+ * without the lock: the adder wakes the render task after it. */
+static bool relay_unsent(void)
+{
+    return s_relay_unsent && s_relay.count > 0;
+}
+
+/* A key still being timed, or a report waiting in a queue (a finger on the
+ * glass keeps its gesture in the touch queue until it lifts,
+ * process_input_events): what the relay holds is not decided yet. A press
+ * split across two pulls would be two halves in two fresh runtimes on the
+ * plane, neither of them a press. */
+static bool remote_input_undecided(void)
+{
+    return fos_buttons_busy() || input_queued();
 }
 
 /* ------------------------------------------------------------ remote mode */
@@ -1293,7 +1212,7 @@ typedef struct {
     int source;                          /* FOS_RENDER_PULL_*; NONE: nowhere to pull from */
     int status;                          /* the HTTP status; 0 when no answer came */
     fos_render_pull_outcome_t outcome;
-    char etag[FOS_RENDER_PULL_ETAG_LEN]; /* the answer's ETag, "" when none was usable */
+    char etag[FOS_RENDER_PULL_ETAG_LEN]; /* the answer's ETag, "" when none fit */
     char code[48];                       /* a refusal's `error` */
 } remote_pull_t;
 
@@ -1304,52 +1223,33 @@ static esp_err_t remote_pull_header(esp_http_client_event_t *evt)
     if (evt->event_id == HTTP_EVENT_ON_HEADER && evt->header_key && evt->header_value &&
         strcasecmp(evt->header_key, "ETag") == 0) {
         remote_pull_t *pull = (remote_pull_t *)evt->user_data;
-        fos_render_pull_etag_keep(evt->header_value, pull->etag, sizeof(pull->etag));
+        /* Checked before it is kept (fos_render_pull_remember). */
+        if (strlcpy(pull->etag, evt->header_value, sizeof(pull->etag)) >= sizeof(pull->etag)) pull->etag[0] = '\0';
     }
     return ESP_OK;
 }
 
 /* Where the picture comes from, with the URL and the Authorization for it: a
  * backend set here, else the cloud this frame is enrolled with — the order
- * of the settings pull (fos_settings.c select_source).
- *
- * No `scene`: in remote mode this firmware runs no scene choice of its own
- * (the store's apply waits on a local render, renders_locally, and keys,
- * touch and the schedule go to the plane through the relay), so its runtime
- * holds no scene, or one left from before a switch to remote that the plane
- * has moved on from since. The plane's own choice is the one to draw. */
+ * of the settings pull (fos_settings.c select_source). */
 static int remote_pull_target(char *url, size_t url_len, char *auth, size_t auth_len,
                               int width, int height, int format)
 {
     const fos_config_t *config = fos_config();
-    if (config->backend_url[0] && config->frame_id != 0) {
-        char frame[16];
-        snprintf(frame, sizeof(frame), "%lu", (unsigned long)config->frame_id);
-        if (!fos_render_pull_url(url, url_len, config->backend_url, frame, width, height, format,
-                                 config->rotate, NULL)) {
-            return FOS_RENDER_PULL_NONE;
-        }
-        snprintf(auth, auth_len, "Bearer %s", config->api_key);
-        return FOS_RENDER_PULL_BACKEND;
-    }
     char base[FOS_URL_LEN];
-    char frame_id[64];
-    if (fos_cloud_api_access(base, sizeof(base), frame_id, sizeof(frame_id), auth, auth_len) &&
-        fos_render_pull_url(url, url_len, base, frame_id, width, height, format, config->rotate, NULL)) {
-        return FOS_RENDER_PULL_CLOUD;
+    char frame[64];
+    const char *from = base;
+    int source = FOS_RENDER_PULL_CLOUD;
+    if (config->backend_url[0] && config->frame_id != 0) {
+        from = config->backend_url;
+        snprintf(frame, sizeof(frame), "%lu", (unsigned long)config->frame_id);
+        snprintf(auth, auth_len, "Bearer %s", config->api_key);
+        source = FOS_RENDER_PULL_BACKEND;
+    } else if (!fos_cloud_api_access(base, sizeof(base), frame, sizeof(frame), auth, auth_len)) {
+        return FOS_RENDER_PULL_NONE;
     }
-    return FOS_RENDER_PULL_NONE;
-}
-
-static bool write_all(esp_http_client_handle_t client, const char *data, size_t len)
-{
-    while (len > 0) {
-        int written = esp_http_client_write(client, data, (int)len);
-        if (written <= 0) return false;
-        data += written;
-        len -= (size_t)written;
-    }
-    return true;
+    return fos_render_pull_url(url, url_len, from, frame, width, height, format, config->rotate)
+               ? source : FOS_RENDER_PULL_NONE;
 }
 
 /* One request of a pull, `body` (the relay's, NULL for none) as a POST. See
@@ -1365,7 +1265,7 @@ static esp_err_t pull_remote_bitmap(uint8_t *buf, size_t buf_len, remote_pull_t 
     char auth[FOS_CLOUD_TOKEN_LEN + 16];
     pull->source = remote_pull_target(url, sizeof(url), auth, sizeof(auth), width, height, want_format);
     if (pull->source == FOS_RENDER_PULL_NONE) {
-        ESP_LOGW(TAG, "remote render: no backend configured and not enrolled with a cloud");
+        ESP_LOGW(TAG, "pull: no plane");
         return ESP_ERR_INVALID_STATE;
     }
     if (fos_wifi_state() != FOS_WIFI_CONNECTED) {
@@ -1399,55 +1299,39 @@ static esp_err_t pull_remote_bitmap(uint8_t *buf, size_t buf_len, remote_pull_t 
 
     esp_err_t err = esp_http_client_open(client, body ? (int)body_len : 0);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "remote render: connect failed: %s", fos_http_err_name(err));
+        ESP_LOGE(TAG, "pull: connect %s", fos_http_err_name(err));
         esp_http_client_cleanup(client);
         return err;
     }
-    if (body && !write_all(client, body, body_len)) {
-        ESP_LOGE(TAG, "remote render: sending the input failed");
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        return ESP_FAIL;
-    }
-    int64_t content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-    pull->status = status;
-    pull->outcome = fos_render_pull_outcome(status, pull->source);
+    err = ESP_FAIL;
+    /* A body is 16 KiB at most: one write, or the request failed. */
+    if (body && esp_http_client_write(client, body, (int)body_len) != (int)body_len) goto done;
+    esp_http_client_fetch_headers(client);
+    pull->status = esp_http_client_get_status_code(client);
+    pull->outcome = fos_render_pull_outcome(pull->status, pull->source);
     if (pull->outcome == FOS_RENDER_PULL_UNCHANGED) {
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        ESP_LOGI(TAG, "remote render: unchanged (304), the panel keeps its picture");
-        return ESP_OK;
+        err = ESP_OK;
+        goto done;
     }
     if (pull->outcome == FOS_RENDER_PULL_REFUSED) {
-        char body[192];
-        int read = esp_http_client_read(client, body, sizeof(body) - 1);
-        body[read > 0 ? read : 0] = '\0';
-        fos_render_pull_error_code(body, pull->code, sizeof(pull->code));
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        ESP_LOGW(TAG, "remote render: the cloud does not render for this frame (%s)",
-                 pull->code[0] ? pull->code : "403");
-        return ESP_FAIL;
+        /* `{"error": "not_server_rendered" | "cloud_rendered_frame_quota_exceeded", …}` */
+        char text[192];
+        int read = esp_http_client_read(client, text, sizeof(text) - 1);
+        text[read > 0 ? read : 0] = '\0';
+        cJSON *answer = cJSON_Parse(text);
+        const char *code = cJSON_GetStringValue(cJSON_GetObjectItem(answer, "error"));
+        strlcpy(pull->code, code ? code : "forbidden", sizeof(pull->code));
+        cJSON_Delete(answer);
+        goto done;
     }
-    if (status != 200) {
-        /* The host only: the query names the scene's panel, nothing secret,
-         * but a log line has no use for it. */
-        ESP_LOGE(TAG, "remote render: HTTP %d", status);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        return ESP_FAIL;
+    if (pull->status != 200) {
+        ESP_LOGE(TAG, "pull: HTTP %d", pull->status);
+        goto done;
     }
 
+    pull->outcome = FOS_RENDER_PULL_FAILED;
     uint8_t header[FOSB_HEADER_LEN];
     int read = esp_http_client_read(client, (char *)header, sizeof(header));
-    if (read != FOSB_HEADER_LEN || memcmp(header, "FOSB", 4) != 0 || header[4] != 1) {
-        ESP_LOGE(TAG, "remote render: bad header (read=%d)", read);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        pull->outcome = FOS_RENDER_PULL_FAILED;
-        return ESP_FAIL;
-    }
     int got_width = header[6] | (header[7] << 8);
     int got_height = header[8] | (header[9] << 8);
     size_t expected = fos_display_present()
@@ -1455,13 +1339,10 @@ static esp_err_t pull_remote_bitmap(uint8_t *buf, size_t buf_len, remote_pull_t 
         : (((size_t)got_width + 7u) / 8u) * (size_t)got_height;
     bool dims_ok = !fos_display_present()
         || (got_width == fos_display_width() && got_height == fos_display_height());
-    if (header[5] != want_format || expected != buf_len || !dims_ok) {
-        ESP_LOGE(TAG, "remote render: format mismatch (%dx%d fmt=%d, want %u bytes, have %u)",
-                 got_width, got_height, header[5], (unsigned)expected, (unsigned)buf_len);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        pull->outcome = FOS_RENDER_PULL_FAILED;
-        return ESP_FAIL;
+    if (read != FOSB_HEADER_LEN || memcmp(header, "FOSB\x01", 5) != 0 || header[5] != want_format ||
+        expected != buf_len || !dims_ok) {
+        ESP_LOGE(TAG, "pull: not this panel's (%d, %dx%d fmt %d)", read, got_width, got_height, header[5]);
+        goto done;
     }
 
     size_t received = 0;
@@ -1470,48 +1351,16 @@ static esp_err_t pull_remote_bitmap(uint8_t *buf, size_t buf_len, remote_pull_t 
         if (r <= 0) break;
         received += r;
     }
+    if (received != buf_len) {
+        ESP_LOGE(TAG, "pull: short %u/%u", (unsigned)received, (unsigned)buf_len);
+        goto done;
+    }
+    pull->outcome = FOS_RENDER_PULL_PICTURE;
+    err = ESP_OK;
+done:
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
-    if (received != buf_len) {
-        ESP_LOGE(TAG, "remote render: short read %u/%u", (unsigned)received, (unsigned)buf_len);
-        pull->outcome = FOS_RENDER_PULL_FAILED;
-        return ESP_FAIL;
-    }
-    ESP_LOGI(TAG, "remote render: fetched %u bytes (%dx%d, content-length %lld) from the %s",
-             (unsigned)received, got_width, got_height, content_length,
-             pull->source == FOS_RENDER_PULL_CLOUD ? "cloud" : "backend");
-    return ESP_OK;
-}
-
-/* What became of the events a pull carried: a 200 or a 304 is a plane that
- * ran them; a 400 or a 413 one that never will (a body it cannot read), so
- * they go too; anything else, no answer included, gives them back for the
- * next pull. One line per pull that carried any. */
-static void settle_relay(const remote_pull_t *pull, size_t events)
-{
-    const char *outcome;
-    if (!relay_lock()) return;
-    if (pull->status == 200 || pull->status == 304) {
-        fos_render_relay_commit(&s_relay);
-        s_relay_failed_pulls = 0;
-        s_relay_sleep_holds = 0;
-        outcome = "delivered";
-    } else if (pull->status == 400 || pull->status == 413) {
-        fos_render_relay_commit(&s_relay);
-        s_relay_failed_pulls = 0;
-        s_relay_sleep_holds = 0;
-        outcome = "dropped";
-    } else {
-        fos_render_relay_release(&s_relay);
-        if (s_relay_failed_pulls < UINT8_MAX) s_relay_failed_pulls++;
-        outcome = "kept";
-    }
-    relay_unlock();
-    char line[160];
-    snprintf(line, sizeof(line),
-             "{\"event\":\"render:relay\",\"source\":\"esp32\",\"events\":%u,\"status\":%d,\"outcome\":\"%s\"}",
-             (unsigned)events, pull->status, outcome);
-    frameos_nim_log_hook(line);
+    return err;
 }
 
 /* Pull the picture into `buf`. ESP_OK with outcome PICTURE: `buf` holds it.
@@ -1519,57 +1368,67 @@ static void settle_relay(const remote_pull_t *pull, size_t events)
  * untouched. Anything else is an error, a refusal (outcome REFUSED, the
  * cloud's 403) among them. `buf` is not cleared first: until a picture
  * arrives it still holds what it held, which a 304 may want back
- * (render_once). Whatever the relay holds goes with it (a POST), and stays
- * held unless the plane answered (settle_relay). */
+ * (render_once).
+ *
+ * Whatever the relay holds goes with it, as a POST. A 200 or a 304 is a plane
+ * that ran it, and it goes; so does what a 400 or a 413 answered (a body the
+ * plane cannot read would be sent for ever); anything else, no answer
+ * included, gives it back for the next pull. One line per pull that carried
+ * any. */
 static esp_err_t fetch_remote_bitmap(uint8_t *buf, size_t buf_len, remote_pull_t *pull)
 {
     memset(pull, 0, sizeof(*pull));
     pull->outcome = FOS_RENDER_PULL_FAILED;
     size_t body_len = 0;
-    size_t events = 0;
-    char *body = NULL;
-    if (relay_lock()) {
-        body = fos_render_relay_take(&s_relay, esp_timer_get_time() / 1000, &body_len);
-        if (body) {
-            events = s_relay.in_flight;
-            s_relay_unsent = false;
-        }
-        relay_unlock();
-    }
+    relay_lock();
+    char *body = fos_render_relay_take(&s_relay, esp_timer_get_time() / 1000, &body_len);
+    unsigned events = s_relay.in_flight;
+    if (body) s_relay_unsent = false;
+    relay_unlock();
     esp_err_t err = pull_remote_bitmap(buf, buf_len, pull, body, body_len);
     if (body) {
         free(body);
-        settle_relay(pull, events);
+        int status = pull->status;
+        bool answered = status == 200 || status == 304 || status == 400 || status == 413;
+        relay_lock();
+        if (answered) {
+            fos_render_relay_drop(&s_relay, s_relay.in_flight);
+            s_relay_holds = 0;
+        }
+        s_relay.in_flight = 0;
+        relay_unlock();
+        char line[96];
+        snprintf(line, sizeof(line), "{\"event\":\"render:relay\",\"source\":\"esp32\",\"events\":%u,\"status\":%d}",
+                 events, status);
+        frameos_nim_log_hook(line);
     }
     return err;
 }
 
 /* The cloud refused to render for this frame: a board with its own runtime
  * renders itself for the next hour, then asks again (docs/server-rendering.md
- * "The switch"). Said once per change, not on every pass. */
-static void note_pull_refused(const remote_pull_t *pull)
+ * "The switch"). Said once per refusal, not on every pass: the refusal's
+ * hour (RTC memory) says whether it was. Without a clock the hour is 1, which
+ * is over at once and still says so. */
+static void log_pull_refused(const char *reason)
+{
+    char line[112];
+    snprintf(line, sizeof(line), "{\"event\":\"render:remote_refused\",\"source\":\"esp32\",\"reason\":\"%s\"}",
+             reason);
+    frameos_nim_log_hook(line);
+}
+
+static void note_pull_refused(const char *code)
 {
     int64_t now = (int64_t)time(NULL);
-    uint32_t until = now > 1000000000 ? (uint32_t)(now + FOS_RENDER_PULL_REFUSED_RETRY_S) : 0;
-    __atomic_store_n(&s_pull_refused_until, until, __ATOMIC_RELAXED);
-    const char *code = pull->code[0] ? pull->code : "forbidden";
-    if (strcmp(code, s_pull_refused_code) == 0) return;
-    strlcpy(s_pull_refused_code, code, sizeof(s_pull_refused_code));
-    char line[200];
-    snprintf(line, sizeof(line),
-             "{\"event\":\"render:remote_refused\",\"source\":\"esp32\",\"reason\":\"%s\","
-             "\"fallback\":\"local\",\"retrySeconds\":%d}",
-             code, FOS_RENDER_PULL_REFUSED_RETRY_S);
-    frameos_nim_log_hook(line);
+    uint32_t until = now > 1000000000 ? (uint32_t)(now + FOS_RENDER_PULL_REFUSED_RETRY_S) : 1;
+    if (__atomic_exchange_n(&s_pull_refused_until, until, __ATOMIC_RELAXED) == 0) log_pull_refused(code);
 }
 
 /* A picture came from the plane again after a refusal. */
 static void note_pull_accepted(void)
 {
-    if (s_pull_refused_code[0] == '\0') return;
-    s_pull_refused_code[0] = '\0';
-    __atomic_store_n(&s_pull_refused_until, 0u, __ATOMIC_RELAXED);
-    frameos_nim_log_hook("{\"event\":\"render:remote_refused\",\"source\":\"esp32\",\"status\":\"ended\"}");
+    if (__atomic_exchange_n(&s_pull_refused_until, 0u, __ATOMIC_RELAXED) != 0) log_pull_refused("ended");
 }
 
 /* ------------------------------------------------------------ image push */
@@ -2386,23 +2245,25 @@ static esp_err_t render_once(bool quiet)
             ESP_LOGW(TAG, "local render requested but nim runtime unavailable; trying remote");
         }
         err = fetch_remote_bitmap(buf, buf_len, &pull);
+        if (pull.outcome == FOS_RENDER_PULL_REFUSED) {
+            /* What was held for the plane goes: it will not take it. */
+            relay_lock();
+            unsigned held = s_relay.count;
+            fos_render_relay_drop(&s_relay, held);
+            relay_unlock();
+            if (held) log_relay_dropped(held, "refused");
+        }
         if (pull.outcome == FOS_RENDER_PULL_REFUSED && s_local_render_capable && frameos_nim_available()) {
-            note_pull_refused(&pull);
+            note_pull_refused(pull.code);
             fos_framebuffer_release(buf);
             buf = NULL;
             /* The scene store and a queued switch wait on a local render
-             * (renders_locally): this pass is one now, so they go first, and
-             * what was held for the plane (a key, a scheduled switch) is the
-             * scene's here. */
+             * (renders_locally): this pass is one now, so they go first. */
             fos_scenes_apply_pending();
-            relay_deliver_locally();
             fos_scenes_apply_pending_selection();
             local_render = true;
             mode = "local";
             err = ESP_OK;
-        } else if (pull.outcome == FOS_RENDER_PULL_REFUSED) {
-            /* No runtime to hand them to, and a plane that will not take them. */
-            relay_drop("refused");
         } else if (err == ESP_OK && pull.outcome == FOS_RENDER_PULL_UNCHANGED) {
             pulled_unchanged = true;
         }
@@ -3048,7 +2909,7 @@ static void remote_input_pass(void)
     fos_events_deliver_deferred();
     process_input_events();
     fos_schedule_tick();
-    if (relay_count() == 0) return;
+    if (s_relay.count == 0) return;
     int64_t start = esp_timer_get_time();
     while (remote_input_undecided() && esp_timer_get_time() - start < FOS_RELAY_SETTLE_MAX_US) {
         vTaskDelay(pdMS_TO_TICKS(20));
@@ -3578,10 +3439,16 @@ static void client_task(void *arg)
             }
         }
         uint32_t keep_awake_s = keep_awake_remaining_seconds();
-        bool button_pending = renders_locally(config) &&
-                              (fos_buttons_pending() || fos_touch_pending());
-        if (deep_sleep_now && fos_display_present() && renders_locally(config) && !render_held() &&
-            (fos_scenes_work_pending() || fos_events_deferred_pending() || button_pending)) {
+        bool local = renders_locally(config);
+        bool button_pending = local && (fos_buttons_pending() || fos_touch_pending());
+        /* Rendered on the server: a key, a touch or a scheduled event waits
+         * for the plane (the relay), or arrived since the pull. Held a few
+         * times at most (s_relay_holds), and not on a flat cell. */
+        bool input_pending = !local && !battery_critical && s_relay_holds < FOS_RELAY_HOLDS_MAX &&
+                             (input_queued() || s_relay.count > 0);
+        if (deep_sleep_now && fos_display_present() && !render_held() &&
+            ((local && (fos_scenes_work_pending() || fos_events_deferred_pending() || button_pending)) ||
+             input_pending)) {
             /* A scene payload or a scene switch arrived while this pass was
              * rendering (the cloud delivers them the moment the session is
              * up, and a 13.3" render takes a minute). Sleeping now would
@@ -3595,25 +3462,12 @@ static void client_task(void *arg)
              * battery frame reaches between its render and its sleep, so the
              * press vanished without a log line (E1004, 2026-10-12: two
              * right-arrow presses during a refresh, nothing in the log). */
+            if (input_pending) s_relay_holds++;
             char held[96];
             snprintf(held, sizeof(held),
                      "{\"event\":\"sleep:held\",\"source\":\"esp32\",\"reason\":\"%s\"}",
-                     button_pending ? "button" : "scenes");
+                     input_pending ? "input" : button_pending ? "button" : "scenes");
             frameos_nim_log_hook(held);
-            force_render = true;
-            continue;
-        }
-        if (deep_sleep_now && fos_display_present() && !renders_locally(config) && !render_held() &&
-            !battery_critical && s_relay_sleep_holds < FOS_RELAY_SLEEP_HOLDS_MAX &&
-            (input_queued() ||
-             (relay_count() > 0 && s_relay_failed_pulls < FOS_RELAY_SLEEP_HOLD_FAILURES))) {
-            /* Rendered on the server: a key, a touch or a scheduled event
-             * waits for the plane (the relay), or arrived since the pull.
-             * Sleeping now loses it with the RAM; one more pass sends it.
-             * A plane that did not answer a few pulls in a row is not
-             * waited for, nor a run of passes that sent nothing. */
-            s_relay_sleep_holds++;
-            frameos_nim_log_hook("{\"event\":\"sleep:held\",\"source\":\"esp32\",\"reason\":\"input\"}");
             force_render = true;
             continue;
         }
@@ -3833,8 +3687,7 @@ static void client_task(void *arg)
                  * themselves), and a key or a touch is sent once decided. */
                 process_input_events();
                 deliver_deferred_events();
-                if (fos_schedule_tick()) want_render = true;
-                if (relay_wants_pull()) want_render = true;
+                if (fos_schedule_tick() || (relay_unsent() && !remote_input_undecided())) want_render = true;
             }
             /* Nobody has touched it for a while: what the input hold put
              * off, and whatever that brought is picked up below. */
@@ -3902,7 +3755,7 @@ void fos_client_start(void)
     s_events = xEventGroupCreate();
     s_snapshot_lock = xSemaphoreCreateMutex();
     /* Before any producer: HTTP, the cloud and the console start later. */
-    if (!s_relay_lock) s_relay_lock = xSemaphoreCreateMutex();
+    s_relay_lock = xSemaphoreCreateMutexStatic(&s_relay_lock_buf);
     frameos_nim_set_display_power_hook(display_power);
     fos_framebuffer_set_lend_hook(snapshot_before_lend);
     fos_display_set_before_write_hook(snapshot_before_panel_write);

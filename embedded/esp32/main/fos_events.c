@@ -431,11 +431,7 @@ bool fos_events_deliver_deferred(void)
  * plane said itself (a cloud verb, a backend command) is the plane's already:
  * it asks for the pull and nothing more. The console speaks for the runtime
  * here (`system`), which the plane does not take from a frame. */
-static bool relayed_origin(fos_event_origin_t origin)
-{
-    return origin == FOS_ORIGIN_DRIVER || origin == FOS_ORIGIN_SCHEDULE ||
-           origin == FOS_ORIGIN_HTTP_WRITE || origin == FOS_ORIGIN_HTTP_ADMIN;
-}
+#define RELAYED_ORIGINS (FOS_ORIGIN_DRIVER | FOS_ORIGIN_SCHEDULE | FOS_ORIGIN_HTTP_WRITE | FOS_ORIGIN_HTTP_ADMIN)
 
 static fos_event_result_t dispatch_remote(fos_event_origin_t origin, const char *name,
                                           const char *payload, bool from_plane)
@@ -450,11 +446,16 @@ static fos_event_result_t dispatch_remote(fos_event_origin_t origin, const char 
         fos_client_render_now();
         return FOS_EVENT_DONE;
     }
-    if (!relayed_origin(origin)) {
-        log_event_line("event:unsupported", origin, name, "rendered on the server");
+    if ((origin & RELAYED_ORIGINS) == 0) {
+        log_event_line("event:unsupported", origin, name, "not on this host");
         return FOS_EVENT_FAILED;
     }
-    if (!fos_client_relay_event(origin, name, payload)) return FOS_EVENT_FAILED;
+    if (!fos_client_relay_event(fos_event_origin_name(origin), name, payload)) {
+        /* A payload that is not one JSON object, or bigger than a pull may
+         * carry: the producer hears it (an HTTP 400, a console error). */
+        log_event_line("event:dropped", origin, name, "not relayable");
+        return FOS_EVENT_FAILED;
+    }
     /* A key or a finger goes once the gesture is decided (the render task
      * waits out a double-press window, a hold, a finger on the glass); a
      * schedule entry or an HTTP event is somebody asking now. */

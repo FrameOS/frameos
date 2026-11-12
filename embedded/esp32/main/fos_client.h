@@ -12,7 +12,6 @@
 #include <stdint.h>
 
 #include "esp_err.h"
-#include "fos_events_gen.h"
 #include "frameos_display.h"
 
 void fos_client_start(void);
@@ -138,10 +137,10 @@ void fos_client_render_mode_changed(void);
 bool fos_client_renders_locally(void);
 /* Rendered on the server: hold one event a scene here would have heard for
  * the next render pull (fos_render_relay.h, docs/server-rendering.md "Keys,
- * touch and the schedule"). Asks for no pull itself: fos_events.c wakes the
- * render task, which sends what is held once the input is decided. False
- * when it was not held (logged). Any task. */
-bool fos_client_relay_event(fos_event_origin_t origin, const char *name, const char *payload_json);
+ * touch and the schedule"), `origin` as the contract names it. Asks for no
+ * pull itself: fos_events.c wakes the render task, which sends what is held
+ * once the input is decided. False when it was not held. Any task. */
+bool fos_client_relay_event(const char *origin, const char *name, const char *payload_json);
 /* turnOn (1), turnOff (0), toggleScreen (-1) for a frame whose dispatcher is
  * not here (rendered on the server): the backlight is the board's. Any task. */
 void fos_client_set_display_power(int on);

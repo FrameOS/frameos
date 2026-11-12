@@ -123,6 +123,8 @@ esp_err_t fos_touch_start(void);
 bool fos_touch_process_events(void);
 /* A report sits in the queue unprocessed. */
 bool fos_touch_pending(void);
+/* A finger is on the glass now (the touch task's last report). */
+bool fos_touch_finger_down(void);
 /* The touch panel is configured and answered at boot. */
 bool fos_touch_present(void);
 /* The interrupt line (-1 = none), for the wake log. */

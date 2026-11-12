@@ -1344,10 +1344,11 @@ applying the scene store and any queued switch, and keeps rendering itself for
 an hour (`FOS_RENDER_PULL_REFUSED_RETRY_S`, wall clock in RTC memory, so a
 deep sleeper does not pay a refused handshake every wake) before it asks
 again; any `render_mode` from the cloud clears it at once. Logged once per
-change: `render:remote_refused` with the reason, and `status: ended` when a
-picture comes again. A backend never refuses (it serves its diagnostic card),
-and a C3 has nothing to fall back to: it logs `render:error` and keeps its
-picture.
+refusal: `render:remote_refused` with the reason (the answer's `error`), and
+reason `ended` when a picture comes again. Input held for the plane goes
+(`event:dropped`, reason `refused`). A backend never refuses (it serves its
+diagnostic card), and a C3 has nothing to fall back to: it logs
+`render:error` and keeps its picture.
 
 **What a remote frame does not run.** Everything that only a local render
 needs waits on one test, `renders_locally` in `fos_client.c` (the frame's
@@ -1377,27 +1378,29 @@ relayed (`event:unsupported`). This works on a C3 too: the relay needs no
 runtime.
 
 The relay (`fos_render_relay.c`, pure, `tests/test_fos_render_relay.c`) keeps
-them in order behind a mutex in `fos_client.c` (`fos_client_relay_event`):
-each as origin, name and payload, a run of moves of one finger folded to the
-newest, at most 32 events and 16 KiB of body (the oldest go first,
-`event:dropped`); a payload that is not one JSON object is refused and its
-producer told (an HTTP 400). Keys and the glass are sent once the input is
-decided: no key down, no tap inside its double-press window
-(`fos_buttons_busy`), no finger on the glass, nothing left in the queues; a
+them in order behind a mutex in `fos_client.c` (`fos_client_relay_event`),
+each kept as it goes on the wire, at most 32 events and 16 KiB of body (the
+oldest go first, `event:dropped`); a payload that is not one JSON object
+(`fos_json_whole`) is refused and its producer told (an HTTP 400). A finger
+on the glass leaves its gesture in the touch queue until it lifts, its moves
+folded to the newest there (`fos_touch_finger_down`), so the relay gets it
+whole. Keys and the glass are sent once the input is decided: no key down,
+no tap inside its double-press window (`fos_buttons_busy`), nothing left in
+the queues; a
 schedule entry or an HTTP event asks for the pull at once, and a pull that
 is due anyway takes whatever is waiting, after waiting out a key or a finger
 still being timed (10 s at the most), so a press never goes in two halves.
 Then the pull is a `POST` with `Content-Type: application/json` and
 `{"nowMs": <esp_timer ms>, "events": [{"origin", "name", "payload"}, …]}`,
-the ETag rules unchanged. A `200` or a `304` empties what it carried (one
-`render:relay` line per such pull: the count, the status, `delivered`); a
-`400` or a `413` too (`dropped`: a body the plane cannot read is not sent
-again); anything else, no answer included, keeps it for the next pull
-(`kept`). The cloud's `403` on a board that can render hands the events to
-the scene here, in this same pass; on a C3 they go. A battery frame holds its
-sleep while the relay holds anything or a report waits in a queue
-(`sleep:held`, reason `input`), three unanswered pulls in a row at the most,
-and the key that woke it goes with the wake's first pull.
+the ETag rules unchanged. A `200` or a `304` empties what it carried; a
+`400` or a `413` too (a body the plane cannot read is not sent again);
+anything else, no answer included, keeps it for the next pull. One
+`render:relay` line per pull that carried any: the count and the status. The
+cloud's `403` drops it (above). A battery frame holds its sleep while the
+relay holds anything or a report waits in a queue (`sleep:held`, reason
+`input`): not on a critical battery, and three holds in a row at most
+without a pull the plane answered; and the key that woke it goes with the
+wake's first pull.
 
 **`renderSceneMs`.** Every metrics sample carries how long the last good pass
 took to produce its picture, without the panel refresh: the scene on the

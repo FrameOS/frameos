@@ -93,11 +93,11 @@ void fos_client_wake_for_events(void) { n.wakes++; }
 bool fos_client_on_render_task(void) { return n.on_render_task; }
 bool fos_client_renders_locally(void) { return !n.remote; }
 
-bool fos_client_relay_event(fos_event_origin_t origin, const char *name, const char *payload_json)
+bool fos_client_relay_event(const char *origin, const char *name, const char *payload_json)
 {
     n.relays++;
     size_t used = strlen(n.relayed);
-    snprintf(n.relayed + used, sizeof(n.relayed) - used, "%s %s %s\n", fos_event_origin_name(origin), name,
+    snprintf(n.relayed + used, sizeof(n.relayed) - used, "%s %s %s\n", origin, name,
              payload_json ? payload_json : "(null)");
     return n.relay_result;
 }
@@ -591,7 +591,7 @@ static void test_rendered_on_the_server(void)
     reset();
     n.remote = true;
     CHECK(fos_events_dispatch(FOS_ORIGIN_SYSTEM, "button", "{}") == FOS_EVENT_FAILED);
-    CHECK(n.relays == 0 && strstr(n.log, "event:unsupported") && strstr(n.log, "rendered on the server"));
+    CHECK(n.relays == 0 && strstr(n.log, "event:unsupported") && strstr(n.log, "not on this host"));
 
     /* A full relay or a payload it will not carry: the producer hears it. */
     reset();
