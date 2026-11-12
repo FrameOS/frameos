@@ -117,6 +117,7 @@ struct LayoutDetailView: View {
                     }
                 }
             }
+            .readableWidth()
             .navigationTitle(layout.name)
             .inlineTitle()
             .confirmationDialog("Remove \(layout.name)?", isPresented: $confirmRemove, titleVisibility: .visible) {
@@ -176,6 +177,7 @@ struct LayoutSettingsView: View {
                 Text(app.current?.kind == .backend ? "Saved and deployed." : "The frame gets them when it next checks in.")
             }
         }
+        .readableWidth()
         .navigationTitle("\(layout.name) settings")
         .inlineTitle()
         .onAppear {
@@ -219,6 +221,7 @@ struct LayoutStartersView: View {
                 Text("Added to this frame. You can change its settings, or which scenes wear it, afterwards.")
             }
         }
+        .readableWidth()
         .navigationTitle("New layout")
         .inlineTitle()
     }

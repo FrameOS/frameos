@@ -65,19 +65,33 @@ struct FrameImageView: View {
     @Environment(AppModel.self) private var app
     let frame: Frame
     var fresh = false
+    /// The box's shape when it is not the picture's (every card of a grid
+    /// has one); the picture fits inside it.
+    var boxAspect: Double? = nil
+    /// The tallest the picture may be: a portrait panel at the full width
+    /// of an iPad is taller than its screen.
+    var maxHeight: CGFloat = .infinity
+    var cornerRadius: CGFloat = 10
     /// The shape of the picture that came back: a frame that does not say
     /// its size (a new virtual frame) is drawn at it rather than at 4:3.
     @State private var pictureAspect: Double?
 
+    var aspect: Double {
+        frame.width != nil && frame.height != nil ? frame.aspectRatio : (pictureAspect ?? frame.aspectRatio)
+    }
+
     var body: some View {
+        // The box takes the width it is given; the picture, at the panel's
+        // shape, fits inside it (a picture alone sizes to itself).
+        FittedBox(aspect: aspect, boxAspect: boxAspect, maxHeight: maxHeight) {
+            picture
+        }
+    }
+
+    var picture: some View {
         let service = app.service
         let version = app.imageVersions[frame.id] ?? 0
-        // The box is the panel's shape at the full width it is given; the
-        // picture fits inside it (a picture alone sizes to itself).
-        Color.black.opacity(0.04)
-            .aspectRatio(frame.width != nil && frame.height != nil ? frame.aspectRatio : (pictureAspect ?? frame.aspectRatio),
-                         contentMode: .fit)
-            .frame(maxWidth: .infinity)
+        return Color.black.opacity(0.04)
             .overlay {
                 RemoteImage(key: "frame:\(app.current?.id ?? ""):\(frame.id)#\(version)\(fresh ? "!" : "")",
                             load: {
@@ -92,8 +106,8 @@ struct FrameImageView: View {
                                 }
                             })
             }
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.quaternary))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).strokeBorder(.quaternary))
     }
 }
 
@@ -206,6 +220,8 @@ struct NoticeBanner: View {
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+        // A phone's width on an iPad, not a bar across the screen.
+        .frame(maxWidth: 520)
         .padding(.horizontal, 16)
     }
 

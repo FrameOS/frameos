@@ -11,6 +11,7 @@ struct SceneSheet: View {
     let model: FrameDetailModel
     @State private var values: [String: JSONValue] = [:]
     @State private var confirmRemove = false
+    @State private var pictureAspect: Double?
 
     var active: Bool { model.isActive(scene) }
 
@@ -24,14 +25,19 @@ struct SceneSheet: View {
                 if let frame = app.frame(frameId) {
                     Section {
                         let service = app.service
-                        RemoteImage(key: "scene-large:\(frameId):\(scene.id):\(app.imageVersions[frameId] ?? 0)",
-                                    load: {
-                                        guard let service else { throw CancellationError() }
-                                        return try await service.sceneImage(frame, sceneId: scene.id, thumb: false)
-                                    },
-                                    placeholder: { Rectangle().fill(.quaternary).aspectRatio(frame.aspectRatio, contentMode: .fit) })
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                        // At most 320 points tall: a portrait panel's picture
+                        // at the sheet's width pushed its settings off the sheet.
+                        FittedBox(aspect: pictureAspect ?? frame.aspectRatio, maxHeight: 320) {
+                            RemoteImage(key: "scene-large:\(frameId):\(scene.id):\(app.imageVersions[frameId] ?? 0)",
+                                        load: {
+                                            guard let service else { throw CancellationError() }
+                                            return try await service.sceneImage(frame, sceneId: scene.id, thumb: false)
+                                        },
+                                        onAspect: { pictureAspect = $0 },
+                                        placeholder: { Rectangle().fill(.quaternary) })
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                        .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
                     }
                 }
 

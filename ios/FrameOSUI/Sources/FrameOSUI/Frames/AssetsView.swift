@@ -156,6 +156,7 @@ struct AssetsView: View {
             }
         }
         .overlay { if model.loading && model.entries.isEmpty { ProgressView() } }
+        .readableWidth()
         .navigationTitle(folder.isEmpty ? "Assets" : (folder.split(separator: "/").last.map(String.init) ?? folder))
         .inlineTitle()
         .task { await model.load(app) }

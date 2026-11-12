@@ -151,6 +151,7 @@ struct MetricsView: View {
         }
         .groupedList()
         .overlay { if loading && samples.isEmpty { ProgressView() } }
+        .readableWidth()
         .navigationTitle("Metrics")
         .inlineTitle()
         .toolbar {

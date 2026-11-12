@@ -15,6 +15,9 @@ struct FrameDetailView: View {
     @State private var confirmDelete = false
     @State private var confirmDiscard = false
     @State private var freshImage = false
+    /// The page's size: an iPad in landscape puts the picture beside the
+    /// list, and the picture is never taller than about half the screen.
+    @State private var size: CGSize = .zero
 
     init(frameId: String) {
         self.frameId = frameId
@@ -29,24 +32,81 @@ struct FrameDetailView: View {
                 ContentUnavailableView("This frame is gone", systemImage: "photo.on.rectangle")
             }
         }
+        .measureSize($size)
         .task { await model.load(app) }
         .refreshable { await model.load(app) }
     }
 
+    /// Two columns: the picture, its status and the actions on the left, the
+    /// rest beside them, whenever the page is wider than tall and wide
+    /// enough (an iPad or the iPhone Duo's inner screen on its side, a phone
+    /// on its side): one column there put the scenes under a picture the
+    /// screen's height.
+    var twoColumns: Bool { size.width >= ReadableWidth.wide && size.width > size.height }
+
+    /// The picture's height at most: about half the page in one column (a
+    /// portrait panel at an iPad's width was twice the screen), most of the
+    /// column's height beside the list, leaving the status and the actions
+    /// room under it (a phone on its side has 340 points: the tab bar
+    /// covered the actions).
+    var pictureMaxHeight: CGFloat {
+        guard size.height > 0 else { return .infinity }
+        guard twoColumns else { return (size.height * 0.55).rounded() }
+        return max(120, min(size.height * 0.62, size.height - 250)).rounded()
+    }
+
+    @ViewBuilder func picture(_ frame: Frame) -> some View {
+        FrameImageView(frame: frame, fresh: freshImage, maxHeight: pictureMaxHeight)
+            .id(model.imageNonce)
+            .onTapGesture {
+                freshImage = true
+                model.refreshImage(app)
+            }
+            .accessibilityHint("Tap to fetch the picture the frame shows now")
+    }
+
+    /// The title, the menu, the sheets and the questions outside the
+    /// columns: turning the iPad keeps an open sheet open.
     @ViewBuilder func content(_ frame: Frame) -> some View {
+        chrome(columns(frame), frame)
+    }
+
+    @ViewBuilder func columns(_ frame: Frame) -> some View {
+        if twoColumns {
+            HStack(alignment: .top, spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        picture(frame)
+                        FrameStatusLine(frame: frame)
+                        actionsRow(frame)
+                    }
+                    .padding(14)
+                    .background(Color.groupedCell, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding([.leading, .vertical], 20)
+                    // The list's sections keep their own inset: the two
+                    // columns 20 points apart, like the edges.
+                    .padding(.trailing, 4)
+                }
+                .frame(width: min(size.width * 0.48, 680))
+                list(frame, withPicture: false)
+            }
+            .background(Color.groupedBackground)
+        } else {
+            list(frame, withPicture: true)
+                .readableWidth()
+        }
+    }
+
+    @ViewBuilder func list(_ frame: Frame, withPicture: Bool) -> some View {
         let kind = app.current?.kind ?? .cloud
         List {
-            Section {
-                FrameImageView(frame: frame, fresh: freshImage)
-                    .id(model.imageNonce)
-                    .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 8, trailing: 12))
-                    .onTapGesture {
-                        freshImage = true
-                        model.refreshImage(app)
-                    }
-                    .accessibilityHint("Tap to fetch the picture the frame shows now")
-                FrameStatusLine(frame: frame)
-                actionsRow(frame)
+            if withPicture {
+                Section {
+                    picture(frame)
+                        .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 8, trailing: 12))
+                    FrameStatusLine(frame: frame)
+                    actionsRow(frame)
+                }
             }
 
             if kind == .cloud && frame.status == "pending" {
@@ -202,73 +262,79 @@ struct FrameDetailView: View {
             }
         }
         .groupedList()
-        .navigationTitle(frame.displayName)
-        .inlineTitle()
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) { moreMenu(frame) }
-        }
-        .sheet(item: $openScene) { scene in
-            SceneSheet(frameId: frameId, scene: scene, model: model)
-        }
-        // Reloaded on close: a scene can also come in through Generate scene's
-        // chat inside the sheet, which is no catalog install.
-        .sheet(isPresented: $addingScene, onDismiss: { Task { await model.load(app) } }) {
-            // A frame with no layout yet has "Add layout" there (the SPA's
-            // drawer); one with a layout has New layout under Layouts.
-            CatalogView(installTarget: frame,
-                        addLayout: model.layouts.isEmpty ? { starter in await model.addLayout(app, starter) } : nil)
-        }
-        .sheet(isPresented: $addingLayout) {
-            NavigationStack {
-                LayoutStartersView { starter in await model.addLayout(app, starter) }
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("Close") { addingLayout = false } }
-                    }
+    }
+
+    @ViewBuilder func chrome<Page: View>(_ content: Page, _ frame: Frame) -> some View {
+        let kind = app.current?.kind ?? .cloud
+        content
+            .navigationTitle(frame.displayName)
+            .inlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) { moreMenu(frame) }
             }
-        }
-        .alert("Rename frame", isPresented: $renaming) {
-            TextField("Name", text: $newName)
-            Button("Cancel", role: .cancel) {}
-            Button("Rename") {
-                let name = newName.trimmingCharacters(in: .whitespaces)
-                Task {
-                    await model.run(app, "Rename") { service, frame in
-                        try await service.rename(frame, to: name)
-                        return ActionOutcome(kind: .done, message: "Renamed.")
-                    }
-                }
+            .sheet(item: $openScene) { scene in
+                SceneSheet(frameId: frameId, scene: scene, model: model)
             }
-        }
-        .confirmationDialog("Reboot \(frame.displayName)?", isPresented: $confirmReboot, titleVisibility: .visible) {
-            Button("Reboot", role: .destructive) {
-                Task { await model.run(app, "Reboot") { try await $0.reboot($1) } }
+            // Reloaded on close: a scene can also come in through Generate scene's
+            // chat inside the sheet, which is no catalog install.
+            .sheet(isPresented: $addingScene, onDismiss: { Task { await model.load(app) } }) {
+                // A frame with no layout yet has "Add layout" there (the SPA's
+                // drawer); one with a layout has New layout under Layouts.
+                CatalogView(installTarget: frame,
+                            addLayout: model.layouts.isEmpty ? { starter in await model.addLayout(app, starter) } : nil)
+                    .pageSizedSheet()
             }
-        } message: {
-            Text("The whole device restarts. It is back in a minute or two.")
-        }
-        .confirmationDialog("Discard the preview?", isPresented: $confirmDiscard, titleVisibility: .visible) {
-            Button("Discard", role: .destructive) { Task { await model.discardPreview(app) } }
-        } message: {
-            Text("A discarded preview is gone for good: no list holds it.")
-        }
-        .confirmationDialog("Delete \(frame.displayName)?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Delete frame", role: .destructive) {
-                Task {
-                    await app.perform("Delete") {
-                        try await app.service?.delete(frame)
-                        await MainActor.run {
-                            app.frames.removeAll { $0.id == frame.id }
-                            dismiss()
+            .sheet(isPresented: $addingLayout) {
+                NavigationStack {
+                    LayoutStartersView { starter in await model.addLayout(app, starter) }
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) { Button("Close") { addingLayout = false } }
                         }
-                        return ActionOutcome(kind: .done, message: "Deleted \(frame.displayName).")
+                }
+            }
+            .alert("Rename frame", isPresented: $renaming) {
+                TextField("Name", text: $newName)
+                Button("Cancel", role: .cancel) {}
+                Button("Rename") {
+                    let name = newName.trimmingCharacters(in: .whitespaces)
+                    Task {
+                        await model.run(app, "Rename") { service, frame in
+                            try await service.rename(frame, to: name)
+                            return ActionOutcome(kind: .done, message: "Renamed.")
+                        }
                     }
                 }
             }
-        } message: {
-            Text(kind == .cloud
-                ? "The frame is removed from your account and stops talking to FrameOS Cloud."
-                : "The frame, its logs and images are removed from this backend. The device keeps running what it has.")
-        }
+            .confirmationDialog("Reboot \(frame.displayName)?", isPresented: $confirmReboot, titleVisibility: .visible) {
+                Button("Reboot", role: .destructive) {
+                    Task { await model.run(app, "Reboot") { try await $0.reboot($1) } }
+                }
+            } message: {
+                Text("The whole device restarts. It is back in a minute or two.")
+            }
+            .confirmationDialog("Discard the preview?", isPresented: $confirmDiscard, titleVisibility: .visible) {
+                Button("Discard", role: .destructive) { Task { await model.discardPreview(app) } }
+            } message: {
+                Text("A discarded preview is gone for good: no list holds it.")
+            }
+            .confirmationDialog("Delete \(frame.displayName)?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("Delete frame", role: .destructive) {
+                    Task {
+                        await app.perform("Delete") {
+                            try await app.service?.delete(frame)
+                            await MainActor.run {
+                                app.frames.removeAll { $0.id == frame.id }
+                                dismiss()
+                            }
+                            return ActionOutcome(kind: .done, message: "Deleted \(frame.displayName).")
+                        }
+                    }
+                }
+            } message: {
+                Text(kind == .cloud
+                    ? "The frame is removed from your account and stops talking to FrameOS Cloud."
+                    : "The frame, its logs and images are removed from this backend. The device keeps running what it has.")
+            }
     }
 
     @ViewBuilder func actionsRow(_ frame: Frame) -> some View {

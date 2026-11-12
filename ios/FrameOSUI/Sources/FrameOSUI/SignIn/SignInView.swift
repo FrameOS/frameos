@@ -40,6 +40,7 @@ struct SignInView: View {
                 if model.step == .cloudLink { linkOnWeb }
                 alternatives
             }
+            .readableWidth(ReadableWidth.signIn)
             .navigationTitle(isSheet ? "Add account" : "")
             .inlineTitle()
             .toolbar {
