@@ -584,17 +584,79 @@ async def _keep_rendered_scene(redis, frame: Frame, plan: "_ThinClientPlan", ren
         pass
 
 
+# What the last render process of a frame rendered here kept for the next
+# (frameos_wasm_kept_state): its UIs' input (the field with the keyboard, its
+# text, how far a list scrolled) and what each app kept with
+# frameos.remember, as the runtime wrote it. Past this it is not kept, and the
+# UIs and apps start afresh: an ESP32's own budget for one node's remembered
+# values.
+MAX_KEPT_STATE_BYTES = 512 * 1024
+
+
+def _thin_client_kept_state_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:kept_state"
+
+
+def _thin_client_kept_state_keys(frame_id: int) -> tuple[str, str]:
+    """The key, and the one the first version of this kept the UIs alone
+    under, dropped with it on a box that ran that version."""
+    return _thin_client_kept_state_key(frame_id), f"frame:{frame_id}:ui_state"
+
+
+async def _thin_client_kept_state(redis, frame: Frame) -> str | None:
+    """What the frame's last render process kept, for the next render
+    (docs/server-rendering.md "Kept between pulls"); None when nothing."""
+    if redis is None:
+        return None
+    try:
+        raw = await redis.get(_thin_client_kept_state_key(int(frame.id)))
+    except Exception:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    return raw if isinstance(raw, str) and raw else None
+
+
+async def _keep_kept_state(redis, frame: Frame, rendered_state: dict | None) -> None:
+    """What this render keeps for the next pull: the keyboard a tap brought up
+    must still be there when the tap on one of its keys arrives, which the
+    next process otherwise never saw, and an app's remembered values must
+    outlast the process as they outlast an interpreter on a board. Opaque
+    here, as the runtime wrote it; "{}" (nothing kept) or one too big drops
+    it. A render whose bundle reports none leaves it be."""
+    if redis is None or not isinstance(rendered_state, dict):
+        return
+    kept_state = rendered_state.get("keptState")
+    if not isinstance(kept_state, str):
+        return
+    try:
+        if kept_state.strip() in ("", "{}") or len(kept_state.encode("utf-8")) > MAX_KEPT_STATE_BYTES:
+            await redis.delete(*_thin_client_kept_state_keys(int(frame.id)))
+        else:
+            await redis.set(_thin_client_kept_state_key(int(frame.id)), kept_state)
+    except Exception:
+        # What could not be kept must not cost the device its frame.
+        pass
+
+
 async def leave_built_in_scene(redis, frame: Frame) -> None:
     """A frame rendered here that is going to sleep while the scene switcher
     or the scene settings show goes back to the scene they were opened from
     (their `state.from`), as its own runtime would: a device never keeps a
     built-in scene through a sleep. Before the picture for the wake is drawn
-    (models/log.py). The built-in scene's kept state goes too."""
+    (models/log.py). The built-in scene's kept state goes too, and so does
+    what the frame's last render process kept (a field's keyboard, a list's
+    scroll, the apps' remembered values): a board loses its memory in a deep
+    sleep."""
     from app.tasks.embedded_firmware import is_thin_client_frame
     from .virtual_frame import get_virtual_scene_states, replace_virtual_scene_states
 
     if redis is None or not is_thin_client_frame(frame):
         return
+    try:
+        await redis.delete(*_thin_client_kept_state_keys(int(frame.id)))
+    except Exception:
+        pass
     key = f"frame:{frame.id}:active_scene"
     try:
         current = await redis.get(key)
@@ -1115,6 +1177,7 @@ async def _render_thin_client_now(
     the device always gets a valid frame."""
     scene_logs: list[str] = []
     photo_palette: list[str] = []
+    kept_state = await _thin_client_kept_state(redis, frame)
     started = time.monotonic()
     try:
         rgba, rendered_state, _saved_assets = await render_scene_rgba_and_state(
@@ -1130,6 +1193,7 @@ async def _render_thin_client_now(
             scene_logs=scene_logs,
             frame_json=plan.frame_json,
             render_palette=photo_palette,
+            kept_state=kept_state,
         )
     except RenderQueueFull as exc:
         await _give_back_thin_client_events(redis, frame, control_events)
@@ -1148,6 +1212,8 @@ async def _render_thin_client_now(
     await _keep_rendered_state(redis, frame, rendered_state)
     if rgba is not None and rendered_state is not None and rendered_state.get("seeded", True):
         await _keep_rendered_scene(redis, frame, plan, rendered_state)
+    if rgba is not None:
+        await _keep_kept_state(redis, frame, rendered_state)
     if relayed or control_events:
         try:
             await _log_scene_heard(db, redis, frame, scene_logs)

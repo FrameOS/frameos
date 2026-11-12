@@ -839,6 +839,94 @@ async def test_a_switcher_opened_from_nothing_it_knows_leaves_no_scene_at_the_sl
     assert await redis.get(f'frame:{local.id}:active_scene') == SWITCHER.encode()
 
 
+KEPT = ('{"targets":[{"sceneId":"clock","nodeId":1,"focus":1,"caret":0,"text":"","keyboard":true,"page":0,"shift":0}],'
+        '"apps":[{"sceneId":"clock","nodeId":2,"memory":{"count":"3"}}]}')
+
+
+@pytest.mark.asyncio
+async def test_what_the_process_kept_is_handed_to_the_next_pull_and_dropped_at_the_sleep(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    """docs/server-rendering.md "Kept between pulls": the keyboard a tap
+    brought up is still up when the tap on one of its keys arrives, and an
+    app's remembered values are still there, though each pull renders in a
+    new process. The plane keeps what the runtime wrote, hands it to the next
+    render, and forgets it when the frame sleeps."""
+    frame = await server_rendered_frame(async_client, db)
+    key = f'frame:{frame.id}:kept_state'
+    first_version_key = f'frame:{frame.id}:ui_state'
+    url = f'/api/frames/{frame.id}/embedded/render'
+    calls: list = []
+
+    def renders(kept_state):
+        state = {'sceneId': 'clock', 'state': {}}
+        if kept_state is not None:
+            state['keptState'] = kept_state
+        monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', recording_renderer(calls, state=state))
+
+    renders(KEPT)
+    tap = {'nowMs': 9_000, 'events': [relayed('driver', 'pointerDown', {'x': 10, 'y': 20, 'pointerId': 1, 'atMs': 8_000}),
+                                      relayed('driver', 'pointerUp', {'x': 10, 'y': 20, 'pointerId': 1, 'atMs': 8_050})]}
+    assert (await no_auth_client.post(url, json=tap, headers=auth(frame))).status_code == 200
+    assert calls[-1].get('kept_state') is None
+    assert await redis.get(key) == KEPT.encode()
+
+    typed = KEPT.replace('"text":""', '"text":"q"')
+    renders(typed)
+    assert (await no_auth_client.post(url, json=tap, headers=auth(frame))).status_code == 200
+    assert calls[-1]['kept_state'] == KEPT
+    assert await redis.get(key) == typed.encode()
+
+    # A bundle without the export says nothing of what it keeps: what was kept stays.
+    renders(None)
+    await no_auth_client.get(url, headers=auth(frame))
+    assert calls[-1]['kept_state'] == typed
+    assert await redis.get(key) == typed.encode()
+
+    # A render that failed (the diagnostic card) leaves it too.
+    async def failing(frame_arg, width, height, **kwargs):
+        calls.append(kwargs)
+        return None, None, None
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', failing)
+    await no_auth_client.get(url, headers=auth(frame))
+    assert await redis.get(key) == typed.encode()
+
+    # Nothing kept, or more than a node's remember budget on a board: gone,
+    # and so is the key the first version kept the UIs alone under.
+    await redis.set(first_version_key, '{"targets":[]}')
+    renders('{}')
+    await no_auth_client.get(url, headers=auth(frame))
+    assert await redis.get(key) is None
+    assert await redis.get(first_version_key) is None
+    from app.api.embedded_device import MAX_KEPT_STATE_BYTES
+
+    renders('{"apps":[{"sceneId":"clock","nodeId":2,"memory":{"list":"\\"' + 'x' * MAX_KEPT_STATE_BYTES + '\\""}}]}')
+    await no_auth_client.get(url, headers=auth(frame))
+    assert await redis.get(key) is None
+
+    # A board loses its memory in a deep sleep: its UIs and apps start afresh,
+    # and the picture drawn ahead of the wake is drawn without them.
+    renders(KEPT)
+    await no_auth_client.post(url, json=tap, headers=auth(frame))
+    assert await redis.get(key) == KEPT.encode()
+
+    async def fake_enqueue(function, **kwargs):
+        return object()
+
+    monkeypatch.setattr(redis, 'enqueue_job', fake_enqueue, raising=False)
+    await redis.set(first_version_key, '{"targets":[]}')
+    await process_log(db, redis, frame, {'event': 'sleep', 'wakeInSeconds': 900})
+    assert await redis.get(key) is None
+    assert await redis.get(first_version_key) is None
+    db.refresh(frame)
+    calls.clear()
+    as_of = server_render.prerender_as_of(frame)
+    assert as_of is not None
+    assert await prerender_thin_client(db, redis, frame, epoch_ms(as_of)) is True
+    assert calls and calls[-1].get('kept_state') is None
+
+
 @pytest.mark.asyncio
 async def test_the_boards_own_word_on_its_scene_does_not_undo_the_planes(
     async_client, no_auth_client, db, redis, monkeypatch

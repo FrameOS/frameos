@@ -8,7 +8,7 @@
 // Protocol: a single JSON object on stdin
 //   {assetsDir, width, height, name, timeZone, settingsJson, scenesJson,
 //    sceneId, statesJson, frameAssetsRoot, saveAssetsJson, assetsWriteBudget,
-//    controlEventsJson, deviceInputJson, nowMs, frameJson}
+//    controlEventsJson, deviceInputJson, nowMs, frameJson, keptStateJson}
 // and exactly width*height*4 bytes of RGBA on stdout on success (exit 0).
 // All logs go to stderr; any failure exits non-zero with a message there.
 // statesJson ({sceneId: stateObject}) seeds backend-persisted scene state;
@@ -35,6 +35,13 @@
 // frame's own runtime keeps (frameos_wasm_set_frame). The state line also
 // carries `palette`: a photo's own dither palette in effect after the render
 // (["#rrggbb", …], [] for none), which the packer dithers to first.
+// keptStateJson is what the frame's last render process kept for the next
+// (frameos_wasm_kept_state): the UIs on the glass (the field with the
+// keyboard, its text, how far a list scrolled), put back before anything lays
+// them out, and what each app kept with frameos.remember. The state line
+// carries what this render keeps as `keptState` (a JSON string, "{}" for
+// nothing), from bundles that have the exports (docs/server-rendering.md
+// "Kept between pulls").
 //
 // Sandbox posture: user scene code (QuickJS) runs inside the wasm module,
 // never natively in Node. Its host hooks are logging and the synchronous
@@ -492,6 +499,21 @@ if (request.statesJson) {
   }
 }
 
+// What the frame's last render process kept, put back before the events and
+// the render below: the UIs on the glass (without it the keyboard a tap
+// brought up is gone by the next pull, and the tap on one of its keys lands
+// on the form under it) and the apps' remembered values. Bundles from before
+// the export cannot; their UIs and apps start afresh every pull, as they did.
+if (request.keptStateJson && typeof Module._frameos_wasm_set_kept_state === 'function') {
+  try {
+    if (!call('frameos_wasm_set_kept_state', 'boolean', ['string'], [String(request.keptStateJson)])) {
+      process.stderr.write(`embedded_wasm_render: kept state refused: ${lastError()}\n`)
+    }
+  } catch (error) {
+    process.stderr.write(`embedded_wasm_render: kept state unavailable (${error})\n`)
+  }
+}
+
 // The frame's saveAssets config, so apps' "auto" save mode matches the
 // device. Old bundles predate the export; they keep saveAssets=false.
 if (request.saveAssetsJson) {
@@ -701,12 +723,23 @@ try {
       // An older bundle: the scene's wish does not reach the board.
     }
   }
+  // What this process keeps for the next pull (the UIs on the glass, the
+  // apps' remembered values), as the runtime wrote it.
+  let keptState
+  if (typeof Module._frameos_wasm_kept_state === 'function') {
+    try {
+      keptState = call('frameos_wasm_kept_state', 'string', [], [])
+    } catch {
+      keptState = undefined
+    }
+  }
   process.stderr.write('__FRAMEOS_SCENE_STATE__' + JSON.stringify({
     sceneId: info.currentSceneId || request.sceneId || '',
     state,
     seeded: stateSeeded,
     ...(Array.isArray(palette) ? { palette } : {}),
     ...timing,
+    ...(typeof keptState === 'string' ? { keptState } : {}),
   }) + '\n')
 } catch (error) {
   process.stderr.write(`embedded_wasm_render: state readback failed: ${error}\n`)

@@ -168,6 +168,7 @@ async def render_scene(
     device_input: dict | None = None,
     now_ms: int | None = None,
     frame_json: dict | None = None,
+    kept_state: str | None = None,
     timeout: float = RENDER_TIMEOUT_SECONDS,
 ) -> SceneRender:
     """One frame of the scene, with its post-render state and saved assets.
@@ -195,6 +196,11 @@ async def render_scene(
     (frameos/relayed_input.nim). ``frame_json`` ({"eventMap"?, "palette"?,
     "colors"?, "pixelFormat"?, "gpioButtons"?, "rotate"?}) is what else of
     frame.json a frame's own runtime keeps (frameos_wasm_set_frame).
+    ``kept_state`` is what the frame's last render process kept for the next
+    (a JSON string the runtime wrote, handed back as it came: the UIs on the
+    glass, the field with the keyboard, its text, how far a list scrolled, and
+    what each app kept with ``frameos.remember``); the returned state's
+    ``keptState`` is what this one keeps.
     """
     source = scenes_override if scenes_override is not None else frame.scenes
     scenes = [scene for scene in (source or []) if isinstance(scene, dict)]
@@ -252,6 +258,8 @@ async def render_scene(
         request["nowMs"] = int(now_ms)
     if frame_json:
         request["frameJson"] = json.dumps(frame_json, separators=(",", ":"))
+    if kept_state:
+        request["keptStateJson"] = kept_state
 
     expected = int(width) * int(height) * 4
     global _render_waiters
@@ -331,6 +339,7 @@ async def render_scene_rgba_and_state(
     now_ms: int | None = None,
     frame_json: dict | None = None,
     render_palette: list[str] | None = None,
+    kept_state: str | None = None,
     timeout: float = RENDER_TIMEOUT_SECONDS,
 ) -> tuple[bytes | None, dict | None, dict | None]:
     """render_scene as (RGBA bytes, post-render state, saved assets). The
@@ -351,6 +360,7 @@ async def render_scene_rgba_and_state(
         device_input=device_input,
         now_ms=now_ms,
         frame_json=frame_json,
+        kept_state=kept_state,
         timeout=timeout,
     )
     if scene_logs is not None:
