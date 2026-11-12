@@ -1351,6 +1351,50 @@ export const virtualFrames = pgTable(
   }),
 );
 
+// What the cloud keeps for a hardware frame it renders for (migration 0078,
+// docs/server-rendering.md): an ESP32-C3, or a board set to render on the
+// server (`render_mode: "remote"`). The device keeps Wi-Fi, its keys, its
+// schedule and its panel; the scene's memory and the picture live here.
+export const frameServerRenders = pgTable("frame_server_renders", {
+  frameId: uuid("frame_id")
+    .primaryKey()
+    .references(() => frames.id, { onDelete: "cascade" }),
+  // The scene the cloud drew last, or was told to show.
+  activeScene: text("active_scene"),
+  // {sceneId: {field: value}}: what each scene kept after its last render.
+  states: jsonb("states").default(sql`'{}'::jsonb`).notNull(),
+  // {sceneId: {field: value}}: state a verb sent (a switch's state,
+  // setSceneState), kept apart until a render filters it to the scene's
+  // public fields and folds it into `states`.
+  pendingStates: jsonb("pending_states").default(sql`'{}'::jsonb`).notNull(),
+  // [{name, origin, payload}]: scene events waiting for the next render.
+  pendingEvents: jsonb("pending_events").default(sql`'[]'::jsonb`).notNull(),
+  // Moved by every change a picture depends on that the device cannot name
+  // (state, events, a scene push). A kept picture is only good at its own.
+  revision: integer("revision").default(0).notNull(),
+  // The last picture handed to the device (FOSB), and what it was drawn for.
+  picture: bytea("picture"),
+  pictureEtag: text("picture_etag"),
+  pictureScene: text("picture_scene"),
+  pictureRevision: integer("picture_revision"),
+  picturePanel: text("picture_panel"),
+  pictureScenesChecksum: text("picture_scenes_checksum"),
+  renderedAt: timestamp("rendered_at", { withTimezone: true }),
+  renderMs: integer("render_ms"),
+  renderError: text("render_error"),
+  // A picture drawn before a sleeping frame's wake, as of `prerender_as_of`;
+  // taken once by the pull at the wake if nothing changed since.
+  prerender: bytea("prerender"),
+  prerenderEtag: text("prerender_etag"),
+  prerenderScene: text("prerender_scene"),
+  prerenderRevision: integer("prerender_revision"),
+  prerenderPanel: text("prerender_panel"),
+  prerenderAsOf: timestamp("prerender_as_of", { withTimezone: true }),
+  prerenderState: jsonb("prerender_state"),
+  prerenderMs: integer("prerender_ms"),
+  ...timestamps,
+});
+
 // The import dedupe ledger (migration 0055): one row per (account, scene
 // content) a device scene was imported as, so a re-enrolled frame is given
 // the drafts it already has instead of a second copy of each.

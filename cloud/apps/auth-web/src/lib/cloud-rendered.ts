@@ -25,6 +25,27 @@ export function hardwareIsCloudRendered(hardware: unknown): boolean {
   return cloudRenderedPlatformPrefixes.some((prefix) => platform.startsWith(prefix));
 }
 
+// A board with its own runtime (every ESP32-S3) whose owner set `render_mode`
+// to "remote" (docs/server-rendering.md): the cloud runs its scenes and hands
+// it the packed picture at every pull. The setting the plane keeps decides,
+// never the device's word: a board set to remote over its USB console but not
+// here is refused at the pull. The SQL in countCloudRenderedFramesForAccount
+// reads the same key.
+export function settingsRenderOnServer(settings: unknown): boolean {
+  return (
+    !!settings &&
+    typeof settings === "object" &&
+    !Array.isArray(settings) &&
+    (settings as { render_mode?: unknown }).render_mode === "remote"
+  );
+}
+
+// Every frame the cloud renders for: a virtual frame, a board without a
+// runtime, or a board with one that was set to render on the server.
+export function frameIsCloudRendered(frame: { hardware: unknown; settings: unknown }): boolean {
+  return hardwareIsCloudRendered(frame.hardware) || settingsRenderOnServer(frame.settings);
+}
+
 // The refresh-interval floor for a cloud-rendered frame (§0.2: 5 minutes).
 // Displayed nowhere as a headline number — the plan sells "N frames" — but
 // enforced on every settings push to such a frame and by the hub's render

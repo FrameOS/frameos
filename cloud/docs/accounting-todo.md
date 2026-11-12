@@ -175,10 +175,18 @@ above came to in code:
 - Not metered: there is still no per-frame attribution (§8.9), so a render
   posts nothing to the ledger. The plan's number is the whole price.
 
-Still open: the thin clients the entitlement was first meant for. An
-ESP32-C3 or a Pico cannot link to the cloud at all (no hub client in either
-firmware, `docs/convergence-todo.md` §3), so the plan's line says "virtual
-frames" and nothing about boards.
+**Built, 2026-11: hardware the cloud renders for** (`docs/server-rendering.md`,
+`docs/cloud-frames.md` "Hardware the cloud renders for"). An ESP32-C3, and
+any ESP32 whose owner sets `render_mode: "remote"`, pulls its picture from
+the cloud (firmware 2026.11.7 on). Such a frame counts in both pools: it is
+hardware (`frames`) the cloud draws for (`cloud_rendered_frames`, the count
+reads `frames.settings->>'render_mode'`). The switch is the count check
+(the settings route, behind the same account lock as virtual frames), the
+floor holds on every later push, and a pull reuses the last picture inside
+the floor unless something changed. Same as virtual frames: not metered.
+
+Still open: the Pico, which cannot link to the cloud at all (no hub client in
+its firmware, `docs/convergence-todo.md` §3).
 
 Direction comes from Airbnb's "Tracking the money" post
 (medium.com/airbnb-engineering/tracking-the-money-scaling-financial-reporting-at-airbnb-6d742b80f040).

@@ -1108,10 +1108,10 @@ the frame's scenes inside the same emscripten wasm runtime the live preview
 uses (QuickJS sandboxed in wasm, no outbound network, bounded Node
 subprocess — `backend/app/utils/embedded_render.py`), falling back to a
 diagnostic card when scenes or the toolchain are missing. Cloud-managed C3
-frames can enroll, report state, and take settings/logs verbs today, but
-cloud-side scene rendering (the same wasm approach, or a push-image verb)
-is not yet implemented; until then a C3 frame linked to the cloud shows its
-provisioning/status screen only.
+frames pull from the cloud the same way, `GET {provider}/api/frames/{uuid}/
+embedded/render` with the device's access token: see "Hardware the cloud
+renders for" below (firmware 2026.11.7 on; older C3 firmware has no cloud
+pull and shows its provisioning/status screen).
 
 Concretely, the firmware exposes these as allowlisted keys on the
 existing USB serial console (`set cloud_url …`, `set claim_token …`,
@@ -1257,10 +1257,75 @@ active (its owner is the one creating it) and is deleted like any other
 cloud-rendered frames and not against its frames: those are for hardware
 the account owns.
 
-Not there yet: assets (a scene that reads the frame's own files finds none),
-a palette to quantize the picture to, and the thin clients the same
-entitlement is meant to cover (ESP32-C3, Pico), which cannot link to a
+Not there yet: assets (a scene that reads the frame's own files finds none)
+and a palette to quantize the picture to. The same entitlement covers the
+hardware the cloud renders for (below); the Pico still cannot link to a
 provider at all.
+
+## Hardware the cloud renders for
+
+`docs/server-rendering.md` is the spec, shared with the self-hosted backend.
+On the cloud it covers an ESP32-C3 (no runtime of its own) and any ESP32 whose
+owner set `render_mode` to `"remote"` in Settings → Power ("Render scenes"),
+firmware 2026.11.7 on. The device keeps Wi-Fi, its panel and its deep sleep;
+the cloud runs the scene and hands over the panel's bytes. Its keys, touch
+and own schedule do not switch scenes yet (`docs/server-rendering.md` "Not
+yet").
+
+```http
+GET {provider}/api/frames/{uuid}/embedded/render?scene=…&width=…&height=…&format=…&rotate=…
+Authorization: Bearer <the device's access token>
+If-None-Match: "<etag of the picture the panel shows>"
+  -> 200 FOSB, ETag, Cache-Control: no-store
+  -> 304 when the panel already shows it
+  -> 400 invalid_panel                       (width/height/format missing or not a panel)
+  -> 403 not_server_rendered                 (the plane has the frame rendering itself)
+  -> 403 cloud_rendered_frame_quota_exceeded {max_cloud_rendered_frames}  (account over its plan)
+  -> 409 no_scenes, 429 render_rate_limited, 502 render_failed {message},
+     503 renderer_unavailable / renderer_busy (Retry-After)
+```
+
+- **The plan.** Such a frame counts against `cloud_rendered_frames`, like a
+  virtual frame (`frameIsCloudRendered` in `src/lib/cloud-rendered.ts`; the
+  count's SQL reads `frames.settings->>'render_mode'`), and against the
+  account's frames, since it is hardware the account owns. `POST
+  …/settings {render_mode: "remote"}` is refused past the plan's number with
+  `403 cloud_rendered_frame_quota_exceeded {max_cloud_rendered_frames}`,
+  counted behind the same per-account lock virtual frames are created under,
+  and with `interval_below_plan_floor {min_interval}` while the frame's
+  interval is under the floor; the floor applies to every later push. Only
+  the plane's setting makes a frame one of these: a board set to remote over
+  its own console is refused at the pull and renders that pass itself. An
+  account over its plan (a downgrade) keeps its frames and gets `403` at the
+  pull: the frame keeps the picture it shows.
+- **What a pull costs.** The pull reuses the last picture while the scene,
+  the revision and the panel are the same and the plan's floor has not
+  passed since it was drawn; takes the picture the hub drew before the wake
+  (below); and only then renders, at most 30 renders per frame per 15
+  minutes. A render runs under the account's render queue (one in flight)
+  with the account's granted service keys, like a virtual frame's.
+- **`frame_server_renders`** (migration 0078) is one row per such frame: the
+  active scene, each scene's state, the state verbs sent (`pending_states`,
+  folded in at the next render, public fields only), the scene events
+  waiting (`pending_events`, at most 32), a `revision` every one of those
+  moves, the last picture handed out and the kept pre-render.
+- **Verbs.** `enqueueFrameCommand` writes them into that row before they are
+  queued (`src/lib/server-render-state.ts`): a `set_current_scene` (or a
+  `set_scenes` naming a scene) sets the active scene and holds its state; a
+  `scene_event` is held and the device is sent `render` instead
+  (`setSceneState` is held as state for the scene drawn last); a
+  `set_scenes` moves the revision. Which scene a pull draws follows the
+  spec: a scene switch still pending or sent on the queue wins, then the
+  device's `scene`, then the row's.
+- **Drawn before the wake.** When such a frame sends `sleep`, the hub sets a
+  timer for `lead` before `next_render_at` (else the wake), with `lead` from
+  the frame's last render (`prerenderLeadMs`), and draws the picture as of
+  that time (the renderer's `nowMs`). The pull within 120 s of it, for the
+  same scene, panel and revision, takes it and commits its state. A hub
+  restart forgets the timers; the pull renders then.
+- **Logs.** A render puts `render:server` (or `render:error`) and the
+  scene's error lines on the frame's log, `source: "cloud"`, where the frame
+  has `telemetry:logs`.
 
 ## Provider-side HTTP API (account-authenticated)
 

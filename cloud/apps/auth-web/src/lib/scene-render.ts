@@ -46,6 +46,21 @@ export type SceneRenderOptions = {
   events?: { name: string; origin: string; payload?: unknown }[] | undefined;
   height: number;
   /**
+   * The time the scene should believe it is, epoch ms: a picture drawn
+   * ahead of a sleeping frame's wake shows the minute it wakes into
+   * (docs/server-rendering.md). Shifts `Date.now` inside the worker, which is
+   * the wasm runtime's only clock; the scene's HTTP (a child process each)
+   * keeps the real one. Omitted renders at the real time.
+   */
+  nowMs?: number | undefined;
+  /**
+   * Hand back the raw RGBA (`rgba` in the result) and skip the PNG: a panel
+   * is packed from the pixels (panel-pack.ts), and a full-size deflate it
+   * never reads is a few hundred milliseconds of the event loop. `png` is
+   * then empty.
+   */
+  rawRgba?: boolean | undefined;
+  /**
    * The frame's own render scale (its `render_scale` setting, docs/jsx-ui.md
    * "Scale"): what a UI from a .tsx/.jsx app is laid out for. Omitted, null
    * or 0 leaves the runtime on automatic, worked out from width and height:
@@ -81,8 +96,11 @@ export type SceneRenderResult = {
   errors: string[];
   height: number;
   logs: string[];
+  /** Empty when the render asked for `rawRgba`. */
   png: Buffer;
   renderMs: number;
+  /** The pixels, when the render asked for `rawRgba`. */
+  rgba?: Uint8Array;
   /** The selected scene's state after the render (what it changed). */
   state: unknown;
   /** PNG of the small copy, when `thumbnailMaxDimension` asked for one. */
@@ -327,6 +345,7 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
         eventsJson: JSON.stringify(options.events ?? []),
         height: options.height,
         maxLogs: maxCollectedLogs,
+        nowMs: typeof options.nowMs === "number" && Number.isFinite(options.nowMs) ? options.nowMs : null,
         renderScale: options.renderScale && options.renderScale > 0 ? options.renderScale : 0,
         sceneId: options.sceneId ?? "",
         scenesJson: JSON.stringify(options.scenes),
@@ -380,6 +399,19 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
             ),
           );
         const rgba = new Uint8Array(result.buffer);
+        if (options.rawRgba) {
+          resolve({
+            errors: result.logs.filter(isRenderErrorLine),
+            height: result.height,
+            logs: result.logs,
+            png: Buffer.alloc(0),
+            renderMs: result.renderMs,
+            rgba,
+            state: result.state,
+            width: result.width,
+          });
+          return;
+        }
         const done = (png: Buffer) => {
           const small =
             options.thumbnailMaxDimension && options.thumbnailMaxDimension > 0
@@ -648,6 +680,16 @@ class SyncXMLHttpRequest {
 globalThis.XMLHttpRequest = SyncXMLHttpRequest;
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+// A render "as of" another time (SceneRenderOptions.nowMs): the runtime reads
+// the wall clock through Date.now (emscripten_date_now), so moving that moves
+// the scene's clock and nothing outside this worker. Set before the module
+// loads; the clock still runs from there.
+if (typeof workerData.nowMs === "number") {
+  const realNow = Date.now.bind(Date);
+  const offset = workerData.nowMs - realNow();
+  Date.now = () => realNow() + offset;
+}
 
 async function main() {
   const wasmBinary = readFileSync(join(workerData.assetsDir, "frameos.wasm"));
