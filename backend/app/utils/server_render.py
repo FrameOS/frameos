@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -54,6 +55,10 @@ def _prerender_meta_key(frame_id: int) -> str:
 
 def _prerender_body_key(frame_id: int) -> str:
     return f"frame:{frame_id}:prerender:body"
+
+
+def _prerender_preview_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:prerender:preview"
 
 
 def fosb_etag(body: bytes) -> str:
@@ -196,26 +201,45 @@ async def schedule_prerender(redis, frame: Frame, now: datetime | None = None) -
     return job is not None
 
 
-async def keep_prerender(redis, frame_id: int, record: dict, body: bytes, as_of_ms: int) -> None:
-    """Keep a picture drawn ahead of the wake, with what it was drawn from."""
+async def keep_prerender(
+    redis, frame_id: int, record: dict, body: bytes, as_of_ms: int, preview: bytes | None = None
+) -> None:
+    """Keep a picture drawn ahead of the wake, with what it was drawn from
+    and its PNG for the workspace (published when a pull takes it, never
+    while the frame still shows the picture before)."""
     ttl = max(60, int((as_of_ms / 1000) - datetime.now(timezone.utc).timestamp()) + PRERENDER_KEEP_AFTER_SECONDS)
     async with redis.pipeline(transaction=True) as pipe:
         pipe.set(_prerender_meta_key(int(frame_id)), json.dumps(record, separators=(",", ":")), ex=ttl)
         pipe.set(_prerender_body_key(int(frame_id)), body, ex=ttl)
+        if preview:
+            pipe.set(_prerender_preview_key(int(frame_id)), preview, ex=ttl)
+        else:
+            pipe.delete(_prerender_preview_key(int(frame_id)))
         await pipe.execute()
 
 
-async def take_prerender(redis, frame_id: int) -> tuple[dict, bytes] | None:
+@dataclass
+class KeptPicture:
+    """A picture drawn ahead of the wake (keep_prerender): its record, the
+    panel bitmap and its PNG for the workspace (None when none was kept)."""
+
+    record: dict
+    body: bytes
+    preview: bytes | None = None
+
+
+async def take_prerender(redis, frame_id: int) -> KeptPicture | None:
     """The kept picture and its record, gone from the store: it is used once
     (or found stale) by the pull that takes it."""
     if redis is None:
         return None
+    keys = (_prerender_meta_key(int(frame_id)), _prerender_body_key(int(frame_id)), _prerender_preview_key(int(frame_id)))
     try:
         async with redis.pipeline(transaction=True) as pipe:
-            pipe.get(_prerender_meta_key(int(frame_id)))
-            pipe.get(_prerender_body_key(int(frame_id)))
-            pipe.delete(_prerender_meta_key(int(frame_id)), _prerender_body_key(int(frame_id)))
-            raw_meta, body, _deleted = await pipe.execute()
+            for key in keys:
+                pipe.get(key)
+            pipe.delete(*keys)
+            raw_meta, body, preview, _deleted = await pipe.execute()
     except Exception:
         return None
     if not raw_meta or not body:
@@ -226,7 +250,7 @@ async def take_prerender(redis, frame_id: int) -> tuple[dict, bytes] | None:
         return None
     if not isinstance(record, dict):
         return None
-    return record, bytes(body)
+    return KeptPicture(record, bytes(body), bytes(preview) if preview else None)
 
 
 def prerender_usable(record: dict, *, fingerprint: str, revision: int, now_ms: int) -> bool:

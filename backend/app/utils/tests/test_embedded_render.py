@@ -506,3 +506,141 @@ async def test_the_scene_settings_open_again_and_the_frame_page_has_nothing_to_s
     assert result.state["sceneId"] == "system/sceneSettings"
     assert result.state["state"]["from"] == "clock"
     assert result.state["state"].get("page") != "frame"
+
+
+# A tap relayed to the plane lands on what the glass shows: a UI's clickable
+# regions and its handlers are the last render's (frameos/ui/events.nim), and
+# a plane renders in a fresh process, so a pull carrying pointer events draws
+# the scene once first (wasm_main.nim frameos_wasm_device_input, found on the
+# bench 2026-11-12: a tap on the E1003 did nothing). Pointer positions travel
+# as the touch driver sends them: 0..32767 across the picture (fos_touch_wire).
+WIRE_MAX = 32767
+_relayed_taps_land: bool | None = None
+
+
+def _wire(pixel: float, size: int) -> int:
+    return round(pixel * WIRE_MAX / (size - 1))
+
+
+def _relayed_tap(x: int, y: int) -> dict:
+    """A tap decided on the board a second before it sent it."""
+    def edge(name: str, buttons: int, at_ms: int) -> dict:
+        return {"origin": "driver", "name": name, "payload": {
+            "x": x, "y": y, "pointerId": 1, "pointerType": "touch", "button": 0, "buttons": buttons, "atMs": at_ms}}
+    return {"nowMs": 31_000, "events": [edge("pointerDown", 1, 29_900), edge("pointerUp", 0, 29_980)]}
+
+
+async def _skip_unless_relayed_taps_land() -> None:
+    """A bundle from before the fix renders once per pull, however much
+    pointer input it carries: there the taps below cannot land, and the test
+    is skipped, not failed. A pull carrying one pointer event renders twice in
+    a bundle with the fix (asked once per session)."""
+    global _relayed_taps_land
+    if _relayed_taps_land is None:
+        from types import SimpleNamespace
+        from typing import Any
+
+        from app.utils.embedded_render import render_scene
+
+        frame: Any = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
+        probe = await render_scene(frame, 16, 16, scene_id="clock", device_input={"nowMs": 5, "events": [
+            {"origin": "driver", "name": "pointerMove", "payload": {"x": 1, "y": 1, "pointerId": 1}}]})
+        renders = sum('"event":"render:scene"' in line for line in probe.scene_logs)
+        _relayed_taps_land = renders >= 2
+    if not _relayed_taps_land:
+        pytest.skip("wasm bundle from before relayed taps drew the scene first (rebuild frameos/tools/build_wasm.sh)")
+
+
+TAP_UI_SOURCE = """
+let tapped = false
+export function get(app) {
+  return (
+    <div className={tapped ? "flex w-full h-full bg-white" : "flex w-full h-full bg-black"}>
+      <div className="w-1/2 h-full" />
+      <div className="w-1/2 h-full bg-red-500" onClick={() => { tapped = true }} />
+    </div>
+  )
+}
+"""
+
+TAP_UI_SCENE = {
+    "id": "tap-ui",
+    "name": "Tap UI",
+    "default": True,
+    "settings": {"execution": "interpreted"},
+    "fields": [],
+    "nodes": [
+        {"id": "render", "type": "event", "position": {"x": 0, "y": 0}, "data": {"keyword": "render"}},
+        {"id": "ui", "type": "app", "position": {"x": 0, "y": 200}, "data": {"keyword": "jsxUi", "config": {}}},
+        {"id": "image", "type": "app", "position": {"x": 300, "y": 0},
+         "data": {"keyword": "render/image", "config": {"placement": "stretch"}}},
+    ],
+    "edges": [
+        {"id": "render-image", "type": "appNodeEdge", "source": "render", "target": "image",
+         "sourceHandle": "next", "targetHandle": "prev"},
+        {"id": "ui-image", "type": "codeNodeEdge", "source": "ui", "target": "image",
+         "sourceHandle": "fieldOutput", "targetHandle": "fieldInput/image"},
+    ],
+    "apps": {"jsxUi": {
+        "origin": "jsxUi", "name": "Tap UI", "category": "data", "description": "", "version": "1.0.0",
+        "fields": [], "output": [{"name": "image", "type": "image"}],
+        "sources": {
+            "config.json": json.dumps({"name": "Tap UI", "category": "data", "description": "", "version": "1.0.0",
+                                       "fields": [], "output": [{"name": "image", "type": "image"}],
+                                       "permissions": []}),
+            "app.tsx": TAP_UI_SOURCE,
+        },
+    }},
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
+async def test_a_relayed_tap_lands_on_a_ui_in_the_real_runtime():
+    """The board's two touch reports over the UI's right half run its
+    onClick in the render the pull asked for; the same tap on the left half,
+    and no tap at all, leave it as it was."""
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    await _skip_unless_relayed_taps_land()
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=[TAP_UI_SCENE])
+    width, height = 80, 60
+
+    untouched = await render_scene(frame, width, height)
+    assert untouched.rgba is not None, untouched.error
+    assert untouched.rgba[:3] == bytes((0, 0, 0))
+
+    right = await render_scene(frame, width, height, device_input=_relayed_tap(
+        _wire(width * 0.75, width), _wire(height / 2, height)))
+    assert right.rgba is not None, right.error
+    assert right.rgba[:3] == bytes((255, 255, 255))
+
+    left = await render_scene(frame, width, height, device_input=_relayed_tap(
+        _wire(width * 0.25, width), _wire(height / 2, height)))
+    assert left.rgba[:3] == bytes((0, 0, 0))
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
+async def test_a_relayed_tap_on_a_switcher_tile_shows_that_scene_in_the_real_runtime():
+    """The switcher the plane kept (opened over `clock` a moment ago): a tap
+    on the second tile is the switch to `photos`, drawn in the same pull."""
+    import time
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    await _skip_unless_relayed_taps_land()
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
+    width, height = 400, 300
+    kept = {"system/sceneSwitcher": {"from": "clock", "highlight": "clock", "page": 0, "touchedAt": time.time()}}
+
+    # At 400x300 the two tiles sit top left: `clock` round (45, 70), `photos` round (122, 70).
+    result = await render_scene(frame, width, height, scene_id="system/sceneSwitcher", scene_states=kept,
+                                device_input=_relayed_tap(_wire(122, width), _wire(70, height)))
+
+    assert result.rgba is not None, result.error
+    assert result.state["sceneId"] == "photos"
+    assert result.rgba[:4] == bytes((0, 0, 0, 255))

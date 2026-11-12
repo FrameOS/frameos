@@ -345,6 +345,16 @@ def _bootup_display_value(key: str, value: Any) -> Any:
     return None
 
 
+def _rendered_by_the_backend(frame: Frame) -> bool:
+    """A board the backend renders for (docs/server-rendering.md): the scene
+    its own render lines name is its idle runtime's, left from before, and
+    the backend's pull is what decides the scene shown. Taking the board's
+    word undid every switch the pull had just drawn (E1003, 2026-11-12)."""
+    from app.tasks.embedded_firmware import is_thin_client_frame
+
+    return is_thin_client_frame(frame)
+
+
 async def process_log(
     db: Session,
     redis: Redis,
@@ -366,7 +376,7 @@ async def process_log(
 
     event = log.get('event', 'log')
 
-    if event in SCENE_CHANGED_LOG_EVENTS:
+    if event in SCENE_CHANGED_LOG_EVENTS and not _rendered_by_the_backend(frame):
         scene_id = log.get("sceneId") or log.get("scene") or log.get("id")
         if scene_id:
             # No TTL: a frame that renders once an hour (or sleeps for a day)

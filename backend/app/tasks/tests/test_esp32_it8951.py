@@ -112,7 +112,9 @@ def test_quick_pictures_go_up_the_fast_way_and_a_white_tile_owes_nothing():
     client = (ESP32_DIR / "main" / "fos_client.c").read_text()
     functions = _functions(client)
     render = next(body for body in functions.values() if "fos_display_update(buf, buf_len, strcmp(" in body)
-    assert "fos_pictures_fast(fos_scene_interval_snap(frameos_nim_scene_interval())," in render
+    # The scene's own cadence when the board renders it; a frame rendered on
+    # the server has none here (docs/server-rendering.md).
+    assert "fos_pictures_fast(local_render ? fos_scene_interval_snap(frameos_nim_scene_interval()) : 0.0," in render
     assert "fos_input_hold_engaged(&s_input_hold) ||" in render
     update = render.index("fos_display_update(buf, buf_len, strcmp(")
     assert render.index("bool fast =") < update < render.index("s_last_picture_us = picture_us")

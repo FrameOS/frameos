@@ -1221,17 +1221,44 @@ typedef struct {
     fos_render_pull_outcome_t outcome;
     char etag[FOS_RENDER_PULL_ETAG_LEN]; /* the answer's ETag, "" when none fit */
     char code[48];                       /* a refusal's `error` */
+    char scene[128];                     /* X-FrameOS-Scene: what the plane drew, "" when not said */
 } remote_pull_t;
+
+/* The scene the plane drew last (X-FrameOS-Scene): what the render lines of a
+ * frame rendered on the server name, never its own idle runtime's scene. */
+static char s_remote_scene[128] = "";
 
 static bool panel_overlay_pending(void);
 
+static int hex_digit(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    c = (char)(c | 0x20);
+    return c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+}
+
 static esp_err_t remote_pull_header(esp_http_client_event_t *evt)
 {
-    if (evt->event_id == HTTP_EVENT_ON_HEADER && evt->header_key && evt->header_value &&
-        strcasecmp(evt->header_key, "ETag") == 0) {
-        remote_pull_t *pull = (remote_pull_t *)evt->user_data;
+    if (evt->event_id != HTTP_EVENT_ON_HEADER || !evt->header_key || !evt->header_value) return ESP_OK;
+    remote_pull_t *pull = (remote_pull_t *)evt->user_data;
+    if (strcasecmp(evt->header_key, "ETag") == 0) {
         /* Checked before it is kept (fos_render_pull_remember). */
         if (strlcpy(pull->etag, evt->header_value, sizeof(pull->etag)) >= sizeof(pull->etag)) pull->etag[0] = '\0';
+    } else if (strcasecmp(evt->header_key, "X-FrameOS-Scene") == 0) {
+        /* Percent-encoded on the wire (a built-in scene's id has a '/'). */
+        const char *in = evt->header_value;
+        size_t used = 0;
+        while (*in && used + 1 < sizeof(pull->scene)) {
+            int hi = in[0] == '%' ? hex_digit(in[1]) : -1;
+            int lo = hi >= 0 ? hex_digit(in[2]) : -1;
+            if (lo >= 0 && (hi << 4 | lo) >= 0x20) {
+                pull->scene[used++] = (char)(hi << 4 | lo);
+                in += 3;
+            } else {
+                pull->scene[used++] = *in++;
+            }
+        }
+        pull->scene[*in ? 0 : used] = '\0';
     }
     return ESP_OK;
 }
@@ -1568,6 +1595,10 @@ static void push_image_state(const char *scene_id, const fos_display_state_t *st
 {
     fos_config_t *config = fos_config();
     if (!config->backend_url[0] || config->frame_id == 0 || !config->api_key[0]) return;
+    /* Rendered on the server: the backend drew this picture and keeps it, so
+     * sending it back is a megabyte of Wi-Fi for nothing (and its scene id
+     * would be this board's idle runtime's). */
+    if (!renders_locally(config)) return;
     if (!fos_display_present()) return;
     bool lcd = fos_display_is_lcd();
     if (!lcd && !state_valid) return;
@@ -2211,7 +2242,13 @@ static esp_err_t render_once(bool quiet)
         scene_id[0] = '\0';
         scene_name[0] = '\0';
     } else {
-        current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+        if (local_render) {
+            current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+        } else {
+            /* Rendered on the server: the plane's scene, not the idle runtime's. */
+            strlcpy(scene_id, s_remote_scene, sizeof(scene_id));
+            scene_name[0] = '\0';
+        }
         log_render_event("render:scene", scene_id, scene_name, "rendering", "start",
                          mode, fos_display_present() ? "pending" : "none", "",
                          render_attempt, 0, width, height, format, buf_len, ESP_OK);
@@ -2252,6 +2289,13 @@ static esp_err_t render_once(bool quiet)
             ESP_LOGW(TAG, "local render requested but nim runtime unavailable; trying remote");
         }
         err = fetch_remote_bitmap(buf, buf_len, &pull);
+        if (pull.scene[0]) {
+            strlcpy(s_remote_scene, pull.scene, sizeof(s_remote_scene));
+            if (!quiet) {
+                strlcpy(scene_id, pull.scene, sizeof(scene_id));
+                scene_name[0] = '\0';
+            }
+        }
         if (pull.outcome == FOS_RENDER_PULL_REFUSED) {
             /* What was held for the plane goes: it will not take it. */
             relay_lock();
@@ -2388,7 +2432,13 @@ static esp_err_t render_once(bool quiet)
             }
             char showing_id[sizeof(s_refresh_scene_id)];
             char showing_name[8];
-            current_scene_details(showing_id, sizeof(showing_id), showing_name, sizeof(showing_name));
+            /* A new scene gets a full refresh, not a partial one: the scene the
+             * plane drew when it drew it, the idle runtime's is never new. */
+            if (local_render) {
+                current_scene_details(showing_id, sizeof(showing_id), showing_name, sizeof(showing_name));
+            } else {
+                strlcpy(showing_id, s_remote_scene, sizeof(showing_id));
+            }
             bool partial = false;
             /* Someone tapping, or pictures coming quickly (an animation, a
              * clock's seconds): the fast waveform, the greys settled once
@@ -2396,7 +2446,7 @@ static esp_err_t render_once(bool quiet)
              * up the slow way (settle_panel). */
             int64_t picture_us = esp_timer_get_time();
             bool fast = fos_input_hold_engaged(&s_input_hold) ||
-                        fos_pictures_fast(fos_scene_interval_snap(frameos_nim_scene_interval()),
+                        fos_pictures_fast(local_render ? fos_scene_interval_snap(frameos_nim_scene_interval()) : 0.0,
                                           s_last_picture_us, picture_us);
             err = fos_display_update(buf, buf_len, strcmp(showing_id, s_refresh_scene_id) == 0, fast,
                                      &partial);
@@ -2484,7 +2534,9 @@ static esp_err_t render_once(bool quiet)
     /* A quiet frame that failed is logged anyway: a broken animation must say
      * why at once, not ten seconds later. */
     if (!quiet || err != ESP_OK) {
-        current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+        /* A local render may have switched scenes on the way (a handler's
+         * setCurrentScene); a pulled one is the scene the plane named. */
+        if (local_render) current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
         log_render_event(err == ESP_OK ? "render:done" : "render:error", scene_id,
                          scene_name, err == ESP_OK ? "ok" : "error", "complete",
                          mode, refresh, err == ESP_OK ? "" : "render-cycle-failed",
@@ -3345,12 +3397,16 @@ static void client_task(void *arg)
          * clamped (fos_animation.h): a layout's wait of 0.9999 s is the
          * scene's second, not "no opinion" and the frame's 300 s, and a bad
          * value must not park the frame for months. */
-        double scene_interval = fos_scene_interval_snap(frameos_nim_scene_interval());
+        /* Rendered on the server, the runtime here holds no scene (or one
+         * left from before, whose interval is not the drawn scene's): the
+         * frame's interval, as on a board with no runtime at all. */
+        bool own_scene = renders_locally(config);
+        double scene_interval = own_scene ? fos_scene_interval_snap(frameos_nim_scene_interval()) : 0.0;
         uint32_t interval = fos_pass_interval_seconds(scene_interval, config->interval_sec);
         /* A per-render override from logic/nextSleepDuration beats both
          * intervals, like context.nextSleep on the Pi runner. Only valid
          * right after a render actually ran. */
-        if (rendered) {
+        if (rendered && own_scene) {
             double next_sleep = frameos_nim_next_sleep();
             if (next_sleep >= 0.0) {
                 if (next_sleep > 7 * 86400.0) next_sleep = 7 * 86400.0;

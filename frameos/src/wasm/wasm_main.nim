@@ -530,6 +530,11 @@ proc frameos_wasm_select_scene(sceneId: cstring): bool {.exportc, cdecl.} =
 
 # ---------------------------------------------------------------- rendering
 
+var renderedThisProcess = false
+
+proc frameos_wasm_render_guarded(): cint {.importc: "frameos_wasm_render", cdecl.}
+  ## The render behind tools/wasm/fos_wasm_mem.c's out-of-memory guard.
+
 proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
   ## Render the current scene into an RGBA buffer owned by Nim; read it via
   ## frameos_wasm_buffer/_buffer_len/_width/_height. Returns 0 on success,
@@ -539,6 +544,7 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
   ## wraps it in the setjmp guard that catches a simulated out-of-memory and
   ## returns 3. Without a simulated memory limit the guard is a direct call.
   host.renderRequested = false
+  renderedThisProcess = true
   try:
     refreshDecodeBudget()
     restoreBuiltIn()
@@ -663,6 +669,16 @@ proc frameos_wasm_device_input(inputJson: cstring): cint {.exportc, cdecl.} =
   try:
     let events = relayedEvents(parseJson($inputJson), getMonoTime().ticks div 1_000_000)
     restoreBuiltIn()
+    # A tap lands on what the glass shows: a UI's clickable regions and its
+    # handlers are the last render's (ui/events.nim), and a plane renders in
+    # a fresh process that has drawn nothing yet. So a pull carrying pointer
+    # events draws the scene once first and throws that picture away (found
+    # on the bench: a tap on the scene switcher's tile did nothing).
+    if not renderedThisProcess:
+      for event in events:
+        if event.name.startsWith("pointer"):
+          discard frameos_wasm_render_guarded()
+          break
     for event in events:
       discard host.send(event.origin, event.name, event.payload)
     discard host.tick()

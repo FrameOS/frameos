@@ -81,7 +81,8 @@ input as a JSON body (see "Keys, touch and the schedule").
   dropped whenever anything else draws the panel.
 - **200**: the FOSB bitmap (`FOSB`, version 1, format, width u16le, height
   u16le, reserved u16, then the packed panel bytes), `ETag: "<first 32 hex of
-  sha256(body)>"`, `Cache-Control: no-store`.
+  sha256(body)>"`, `Cache-Control: no-store`, and `X-FrameOS-Scene: <the
+  scene drawn, URI-encoded>` (on a 304 too), so the device can name it.
 - **304**: the picture is the one the panel shows. No body; the device
   leaves the panel alone and logs `render:device skipped unchanged`.
 - **Errors**: the backend answers a diagnostic card instead of failing. The
@@ -170,6 +171,16 @@ rotated frame and the automatic fit aims at the panel's colours. An event whose 
 not delivered. The scene's log lines about what it heard go to the frame's
 log, as for the Pico.
 
+A pull carrying pointer events draws the scene once before it delivers
+them, and throws that picture away: a UI's clickable regions and its
+handlers are the last render's (`ui/events.nim`), and the plane's process
+has drawn nothing yet, so without it a tap lands on nothing
+(`frameos_wasm_device_input`; on the bench, 2026-11-12, a tap on the E1003
+did nothing). That costs a render more for a pull with a tap, and a scene
+whose state moves on with every render moves on twice. A pointer's position
+travels as the touch driver sends it, 0..32767 across the picture
+(`fos_touch_wire`), never in pixels.
+
 **The plane keeps the scene the render ended on** as its active scene, with
 that scene's state: a `setCurrentScene` or a `previous` / `next` from the
 event map is a switch on the plane. The scene switcher and the scene
@@ -182,9 +193,22 @@ the wake. The frame page behind the gear has nothing to show on a plane (its
 facts are the device's): with no host behind it the gear is not offered.
 
 The plane's record is also what the workspace shows: the scene showing and
-its state come from the plane's store (the backend's `_load_frame_states`,
-the cloud's `frames.last_state` written at each committed render), never
-from what the device reports of its own idle runtime.
+its state come from the plane's store (the backend's `_load_frame_states`
+and `/state`, the cloud's `frames.last_state` written at each committed
+render), never from what the device reports of its own idle runtime: not its
+commands pull, not its render log lines, not the `scene_id` of a picture it
+pushes, not its own `/image`. A backend that took those undid every switch
+the pull had just drawn (E1003, 2026-11-12). The picture is the plane's too:
+the backend keeps what a pull served (the upright scene image, as PNG, after
+the answer has gone, one scene at most every 10 s) as the frame's image, and
+a picture drawn ahead of a wake is published when a pull takes it.
+
+The board names that scene too: the pull's `X-FrameOS-Scene`
+(percent-decoded) is the scene in its `render:*` lines (the start line
+names the one drawn last), and the panel's refresh chooser takes it as the
+scene shown, so a switch on the plane gets a full refresh, not the partial
+one that ghosted when the board compared its idle runtime's scene with
+itself. A board rendered on the server does not push its picture back.
 
 A pull with input never takes a picture drawn ahead of a wake.
 
@@ -295,6 +319,18 @@ that is at least 10% longer.
 - A tap answers in a pull's time (a second or three on e-paper; on an LCD
   it shows), since the scene runs on the plane: no animation, no
   `hover:` / `active:` light while the finger is down.
+- A frame rendered on the server wakes on the frame's interval, as a board
+  with no runtime always has: a scene's own `refreshInterval` and its
+  `nextSleep` do not reach it (a clock that wants every minute gets the
+  frame's five). The way there: the plane sends them with the pull (both
+  planes' renderers would report `frameos_wasm_scene_interval` /
+  `frameos_wasm_next_sleep`, the cloud's held to its floor) and the board
+  takes its next wake from it.
+- A press sent through the backend's event route to a frame it renders
+  (`POST …/event/pointerDown`, a tap in the workspace) is forwarded to the
+  board's own HTTP API, not held on the plane like a custom event, so its
+  down and its up can go with two pulls and make no tap. A tap on the glass
+  is one gesture, sent once the finger lifts.
 - The ETag is an e-paper fact: an LCD keeps no hash of its panel, so it
   downloads every picture.
 - A board that refused once (the cloud's `403`) renders itself for an hour

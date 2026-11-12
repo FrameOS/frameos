@@ -1358,7 +1358,9 @@ async def api_frame_get_state(
     id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
 ):
     frame = _project_frame(db, id) or _not_found()
-    if is_virtual_frame(frame):
+    # A virtual frame and a frame the backend renders for answer from the
+    # backend's own store: the board's runtime holds what is left from before.
+    if is_virtual_frame(frame) or is_thin_client_frame(frame):
         from .virtual_frame import virtual_frame_states_payload
 
         payload = await virtual_frame_states_payload(redis, frame)
@@ -1383,9 +1385,10 @@ async def api_frame_get_states(
     redis: Redis = Depends(get_redis),
 ):
     frame = _project_frame(db, id) or _not_found()
-    # Virtual frames answer from the backend's own state store — nothing to
-    # poll, so no cache/background-refresh dance.
-    if is_virtual_frame(frame):
+    # Virtual frames and frames the backend renders for answer from the
+    # backend's own state store — nothing to poll, so no cache/background-
+    # refresh dance.
+    if is_virtual_frame(frame) or is_thin_client_frame(frame):
         state_record = await _load_frame_states(redis, frame)
         return {
             **state_record,
@@ -1458,7 +1461,7 @@ async def api_frame_get_uploaded_scenes(
         path="/getUploadedScenes",
         cache_key=_frame_uploaded_scenes_cache_key(frame.id),
     )
-    if isinstance(payload, dict) and payload.get("sceneId"):
+    if isinstance(payload, dict) and payload.get("sceneId") and not is_thin_client_frame(frame):
         await redis.set(f"frame:{frame.id}:active_scene", payload["sceneId"])
     return payload
 
@@ -2776,7 +2779,12 @@ async def api_embedded_device_image(
     except Exception as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=f"Not an image: {exc}")
 
-    if scene_id:
+    if is_thin_client_frame(frame):
+        # A frame the backend renders for: the scene it names is its idle
+        # runtime's, left from before; the picture is the backend's last
+        # pull, and so is its scene (docs/server-rendering.md).
+        scene_id = await _active_scene_id_from_cache(redis, frame.id) or None
+    elif scene_id:
         # The frame says which scene drew this image, as on a pull.
         await redis.set(f"frame:{frame.id}:active_scene", scene_id)
     await redis.set(_frame_image_pushed_key(frame.id), b"1", ex=FRAME_IMAGE_PUSHED_TTL_SECONDS)
@@ -2953,8 +2961,9 @@ async def current_frame_image(db: Session, redis: Redis, frame: Frame) -> FrameI
                 None, _coerce_frame_image_to_png, body, headers
             )
             scene_id = headers.get("x-scene-id")
-            if scene_id:
-                # The frame says which scene drew this image.
+            if scene_id and not is_thin_client_frame(frame):
+                # The frame says which scene drew this image (one the backend
+                # renders for names its idle runtime's: the backend decides).
                 await redis.set(f"frame:{frame.id}:active_scene", scene_id)
             else:
                 scene_id = await _active_scene_id_from_cache(redis, frame.id) or None
