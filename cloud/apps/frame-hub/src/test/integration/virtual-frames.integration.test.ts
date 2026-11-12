@@ -280,10 +280,13 @@ describe("a virtual frame's device", () => {
     expect(await imageBytes(frame.id, sceneSnapshotAssetPath("clock"))).toEqual(expected);
     expect((await imageBytes(frame.id, sceneSnapshotAssetPath("clock"), true))!.length).toBeLessThan(expected.length);
 
-    // And the hub heard it the way it hears hardware.
+    // And the hub heard it the way it hears hardware. The scene_ack alone
+    // already makes lastState non-null (it merges `active_scene` in), so wait
+    // for what the post-render `state` adds, not for any lastState at all.
     const row = await waitFor(async () => {
       const current = await frameRow(frame.id);
-      return current.scenesChecksum === "sum-1" && current.lastState ? current : undefined;
+      const state = current.lastState as Record<string, unknown> | null;
+      return current.scenesChecksum === "sum-1" && state?.clock !== undefined ? current : undefined;
     }, "the scene_ack and the state");
     expect(row.lastState).toMatchObject({ active_scene: "clock", clock: { count: 1 } });
     const logs = await waitFor(async () => {
