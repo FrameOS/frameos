@@ -17,4 +17,26 @@ import Testing
         #expect(nonce.allSatisfy { $0.isLetter || $0.isNumber || "._~-".contains($0) })
         #expect(AppleSignIn.makeNonce() != nonce)
     }
+
+    /// `409 link_required` (apple/native/route.ts): an account without a
+    /// password is proved on the web, and the button says with what.
+    @Test func linkRequiredReadsHowToProveTheAccount() {
+        let account = Account(kind: .cloud, baseURL: URL(string: "http://localhost:3000")!, email: "me@example.com")
+        let client = APIClient(account: account, credentials: AccountCredentials())
+        let answer: JSONValue = [
+            "email": "me@example.com",
+            "error": "link_required",
+            "methods": ["passkey": true, "password": false, "providers": ["google"]],
+            "other_ways": "Google or a passkey",
+        ]
+        let link = AuthService.PendingLink(answer: answer, message: "Sign in once", account: account, client: client)
+        #expect(link.email == "me@example.com")
+        #expect(!link.hasPassword)
+        #expect(link.otherWays == "Google or a passkey")
+
+        // A cloud from before `methods`: a password, and nothing else offered.
+        let older = AuthService.PendingLink(answer: ["error": "link_required"], message: "", account: account, client: client)
+        #expect(older.hasPassword)
+        #expect(older.otherWays == nil)
+    }
 }

@@ -14,12 +14,18 @@
 //   200 {ok, second_factor_required: true}   the pending cookie is set; the
 //                                            app asks for the code, as after
 //                                            a password (/api/auth/second-factor/code)
-//   409 link_required {email}                a verified password account has
-//                                            this address: the pending-link
-//                                            cookie is set, and the app asks
-//                                            for the password (POST /api/auth/link)
-//   409 verify_before_link {email}           the same, unverified: reset first
-//   409 use_google                           the address signs in with Google
+//   409 link_required {email, methods,       an account has this address (a
+//        other_ways}
+//                                            verified password account, or a
+//                                            Google one): the pending-link
+//                                            cookie is set, and the app proves
+//                                            the account with its password or
+//                                            a sign-in through the web's sheet
+//                                            (`methods`: provider-link.ts
+//                                            linkConfirmMethods), then POSTs
+//                                            /api/auth/link
+//   409 verify_before_link {email}           an unverified password account
+//                                            has it: reset first
 //   403 apple_email_unverified, 400 apple_email_missing, 400 invalid_grant,
 //   503 apple_unavailable (no key on this cloud)
 import {
@@ -42,6 +48,9 @@ import { logWarn } from "../../../../../src/lib/log";
 import { resolveProviderSignIn } from "../../../../../src/lib/provider-account";
 import {
   createPendingLinkToken,
+  linkConfirmMethods,
+  linkConfirmSentence,
+  otherSignInWays,
   pendingLinkCookieName,
   pendingLinkCookieOptions,
 } from "../../../../../src/lib/provider-link";
@@ -128,11 +137,13 @@ export async function POST(request: NextRequest) {
   });
 
   if (resolution.status === "requires_link_confirmation") {
+    const methods = await linkConfirmMethods(db, resolution.accountId, appleProviderKey);
     const response = refuse(
       409,
       "link_required",
-      `A FrameOS Cloud account with ${resolution.email} already exists. Enter its password to connect Sign in with Apple to it.`,
-      { email: resolution.email },
+      linkConfirmSentence(resolution.email, "Sign in with Apple", methods),
+      // `other_ways`: the words for the app's "Sign in with …" button.
+      { email: resolution.email, methods, other_ways: otherSignInWays(methods) },
     );
     response.cookies.set(
       pendingLinkCookieName,
@@ -155,13 +166,6 @@ export async function POST(request: NextRequest) {
       "verify_before_link",
       `A FrameOS Cloud account with ${resolution.email} exists, but its address was never verified. Reset its password first ("Forgot your password?"), then sign in with Apple again.`,
       { email: resolution.email },
-    );
-  }
-  if (resolution.status === "other_provider") {
-    return refuse(
-      409,
-      `use_${resolution.providerKey}`,
-      "This email already signs in with Google. Use Continue with Google instead.",
     );
   }
   if (resolution.status === "email_unverified") {

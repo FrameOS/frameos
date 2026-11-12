@@ -31,23 +31,22 @@ export type ProviderSignInResolution =
   // password first: the emailed link proves address ownership and evicts any
   // squatter.
   | { status: "requires_password_reset"; email: string }
-  // A verified password account exists for this email. The provider attesting
-  // the address is not the same as holding the account: an attacker who signs
-  // up for Gmail under a recycled or look-alike address, or who has simply
-  // phished the provider side, must not walk into the password account's
-  // frames and keys. The visitor proves the password on /login/link (POST
-  // /api/auth/link does the linking) before the identity is attached.
+  // An account already has this email: a verified password account, or one
+  // that signs in through the other provider. The provider attesting the
+  // address is not the same as holding the account: an attacker who signs up
+  // for Gmail under a recycled or look-alike address, or who has simply
+  // phished the provider side, must not walk into the account's frames and
+  // keys. And a second, empty account under the same address would look like
+  // lost frames. So the visitor proves the account once (its password, or a
+  // fresh sign-in to it any way it has: provider-link.ts) on /login/link or
+  // in the app, and POST /api/auth/link attaches the identity.
   | { status: "requires_link_confirmation"; accountId: string; email: string }
   // The provider did not attest this email, so the visitor has not proven
   // they own it. Password sign-in is the way in.
   | { status: "email_unverified" }
   // A new identity without an address: an account needs one (resets,
   // notices, the deletion check). Apple and Google both send it when asked.
-  | { status: "email_missing" }
-  // The address already signs in through the other provider. A second,
-  // empty account under the same address would look like lost frames, so
-  // the visitor is pointed at the way in that account has.
-  | { status: "other_provider"; providerKey: SocialProviderKey };
+  | { status: "email_missing" };
 
 export async function resolveProviderSignIn(
   db: ReturnType<typeof createDb>,
@@ -88,7 +87,11 @@ export async function resolveProviderSignIn(
       socialProviderKeys.filter((key) => key !== providerKey),
     );
     if (other) {
-      return { providerKey: other.providerKey, status: "other_provider" };
+      return {
+        accountId: other.accountId,
+        email: claims.email,
+        status: "requires_link_confirmation",
+      };
     }
   }
 

@@ -7,8 +7,9 @@ import SwiftUI
 /// code when the account has a second factor), a self-hosted backend below.
 @Observable @MainActor
 final class SignInModel {
-    /// `cloudLink`: Sign in with Apple matched an account with a password,
-    /// which is asked for once to connect the two.
+    /// `cloudLink`: Sign in with Apple matched an existing account, which is
+    /// proved once to connect the two: its password, or a sign-in to it on
+    /// the web (`linkOnWeb`).
     enum Step: Equatable { case cloud, cloudCode, cloudLink, backend }
 
     var step: Step = .cloud
@@ -37,7 +38,7 @@ final class SignInModel {
         switch step {
         case .cloud: return !email.isEmpty && !password.isEmpty && cloudURL != nil
         case .cloudCode: return code.trimmingCharacters(in: .whitespaces).count >= 6
-        case .cloudLink: return !password.isEmpty && link != nil
+        case .cloudLink: return !password.isEmpty && link?.hasPassword == true
         case .backend: return !email.isEmpty && password.count >= (backendNeedsSignUp ? 8 : 1)
             && ServerAddress.backendBaseURL(backendAddress) != nil
         }
@@ -111,6 +112,36 @@ final class SignInModel {
             finish(app, account, client)
         } catch let failure where WebSignIn.wasCancelled(failure) {
             // The sheet's Cancel, or "Cancel" on the cloud's page: nothing to say.
+        } catch let failure as URLError {
+            error = failure.code == .cannotFindHost || failure.code == .cannotConnectToHost
+                ? "Cannot reach FrameOS Cloud. Check the address and your network."
+                : failure.localizedDescription
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// Connects the Apple ID by signing in to the matched account through the
+    /// system's sign-in sheet (`AuthService.cloudLinkOnWeb`): the way for an
+    /// account without a password, and an alternative to typing it.
+    func linkOnWeb(app: AppModel, open: (URL) async throws -> URL) async {
+        guard let link, let url = cloudURL, !busy else { return }
+        busy = true
+        error = nil
+        defer { busy = false }
+        let request = CloudWebSignIn(baseURL: url, reauth: true)
+        do {
+            let callback = try await open(request.url)
+            let (account, client) = try await AuthService.cloudLinkOnWeb(link, request: request, callback: callback)
+            finish(app, account, client)
+        } catch let failure where WebSignIn.wasCancelled(failure) {
+            // The sheet's Cancel, or "Cancel" on the cloud's page: nothing to say.
+        } catch let failure as APIError {
+            if failure.code == "link_expired" {
+                step = .cloud
+                self.link = nil
+            }
+            error = failure.message
         } catch let failure as URLError {
             error = failure.code == .cannotFindHost || failure.code == .cannotConnectToHost
                 ? "Cannot reach FrameOS Cloud. Check the address and your network."

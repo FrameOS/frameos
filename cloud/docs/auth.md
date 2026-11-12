@@ -111,33 +111,46 @@ email ownership to block pre-hijacking:
 Google and Apple follow the same rules (`src/lib/provider-account.ts`, and
 `src/lib/provider-callback.ts` for both web callbacks); Google is the example.
 
-- **Password first, then Google** — if the password account's email is
-  verified and Google attests the same email, the callback does _not_ link
-  on Google's word alone: the verified claims are parked in a signed,
-  ten-minute `frameos_link_pending` cookie and the visitor is sent to
-  `/login/link`, which asks for the account's password.
-  `POST /api/auth/link` checks it, links the identity, revokes every
-  existing session (a fresh one is minted), emails the owner
-  (`google_linked` / `apple_linked`) and writes `account.google_linked` to
-  the audit log; a wrong password is `403 invalid_password` and
-  `account.google_link_failed`. The iOS app does the same after a native
-  Apple sign-in: the route answers `409 link_required` with the cookie, and
-  the app posts the password to `/api/auth/link` itself.
-  From then on both methods sign into the same account. If the password
-  account is _unverified_, the Google user is shown a warning and sent
+- **An account already has the address** (a verified password account, or
+  one that signs in through the other provider: Google first, then Apple,
+  or the reverse) — the callback does _not_ link on the provider's word
+  alone, and makes no second, empty account either: the verified claims are
+  parked in a signed, ten-minute `frameos_link_pending` cookie and the
+  visitor is sent to `/login/link` to prove the account once. Two proofs
+  (`POST /api/auth/link`, `src/lib/provider-link.ts`):
+  - **its password** (`{password}`), when it has one; the second factor is
+    asked next, as after a password sign-in. A wrong one is
+    `403 invalid_password` and `account.google_link_failed`.
+  - **a fresh sign-in to it** (`{}` with the session cookie): the page
+    sends the visitor to `/login?return_to=/login/link` (Google, a passkey,
+    Apple, the password) or, for a session of that account older than
+    `recentAuthMaxAgeSeconds`, through `/login/reauth`, and then offers one
+    "Connect" button. The session must be that account's
+    (`409 wrong_account`) and recent (`403 reauth_required`); it already
+    passed the second factor, so none is asked again, and the new session
+    keeps its `authenticated_at`. With neither proof the route answers
+    `400 confirm_required` with `methods` (`linkConfirmMethods`: password,
+    passkey, the providers on the account).
+
+  Either way the route links the identity, revokes every existing session
+  (the one that proved it too; a fresh one is minted), emails the owner
+  (`google_linked` / `apple_linked`) and writes `account.google_linked`
+  (`proof`: password or session) to the audit log. The iOS app does the same
+  after a native Apple sign-in: the route answers `409 link_required` with
+  the cookie, `methods` and `other_ways` ("Google or a passkey"), and the app
+  posts the password to `/api/auth/link`, or signs in to the account through
+  the web's sign-in sheet (`/api/auth/app/authorize?reauth=1`, the code
+  traded on the client holding the cookie) and posts `{}`.
+  From then on both methods sign into the same account. If a password
+  account is _unverified_, the provider user is shown a warning and sent
   through the password reset flow first: the emailed link proves the address
   is theirs and evicts any password a squatter may have set. After the reset,
-  the same password confirmation connects Google.
-- **Google first, then password** — signup with that email is refused
-  (`email_taken_google`) so a stranger can never plant a password on the
-  account; instead, "Forgot password?" works for Google-first accounts and
-  completing it creates a verified password identity on the same account.
-- **Google first, then Apple (or the reverse)** — a new identity whose
-  verified email already signs in through the other provider makes no second
-  account: the visitor is told to use that provider (`use_google`,
-  `use_apple`), and signup answers `email_taken_apple` as it answers
-  `email_taken_google`. Connecting the second provider to the same account
-  is a follow-up (a "connect" button under account settings).
+  the same confirmation connects the provider.
+- **Google (or Apple) first, then password** — signup with that email is
+  refused (`email_taken_google`, `email_taken_apple`) so a stranger can never
+  plant a password on the account; instead, "Forgot password?" works for
+  provider-first accounts and completing it creates a verified password
+  identity on the same account.
 - An Apple "Hide My Email" address is a private relay
   (`…@privaterelay.appleid.com`) and matches no existing account, so it
   always starts a new one.
@@ -348,8 +361,9 @@ the iOS app has it natively and the web has it beside Google
   (which spends it, so a token and code taken off a device cannot be played
   again); the exchange's id_token must name the same person. Answers: a
   session (`{ok, email}`), `second_factor_required` (the app asks for the code
-  as after a password), `409 link_required` (above), `409 use_google`,
-  `verify_before_link`, `apple_email_missing`, `invalid_grant`,
+  as after a password), `409 link_required` (above: the account's password,
+  or a sign-in to it through the web's sheet), `verify_before_link`,
+  `apple_email_missing`, `invalid_grant`,
   `503 apple_unavailable`. The app could also go through the web handoff
   (`/api/auth/app/authorize?provider=apple`), which works, but App Review
   expects the native button.
