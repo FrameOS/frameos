@@ -50,3 +50,8 @@ void fos_codec_rx_end(void);
  * quantized to the DMA ring's period (31.25 Hz steps, so a 2000 Hz click
  * is exact and a 70 Hz "no" lands on 62.5). Safe from any task. */
 void fos_codec_tone(uint32_t freq_hz);
+
+/* The last word to the chips before a deep sleep: both powered down and the
+ * speaker amplifier held off. Nothing plays or records after it; the next
+ * boot's fos_codec_init sets everything up again. */
+void fos_codec_sleep(void);

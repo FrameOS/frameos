@@ -68,6 +68,11 @@ bool fos_display_is_lcd(void);
  * backlight. ESP_ERR_NOT_SUPPORTED where there is nothing to switch (e-paper
  * holds its image unpowered). */
 esp_err_t fos_display_power(bool on);
+/* The panel's step before a deep sleep, after the last refresh: on the
+ * PhotoPainter, release the panel's lines and switch its supply (the
+ * AXP2101's ALDO4) off. ESP_ERR_NOT_SUPPORTED on boards whose panel supply
+ * the firmware does not own. */
+esp_err_t fos_display_prepare_deep_sleep(void);
 /* What the boot is waiting for, on an LCD's boot splash (lcd_splash.h): a
  * line under the FrameOS mark once the wait has lasted a second. Nothing on
  * any other panel, and nothing once a picture is up. */

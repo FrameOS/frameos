@@ -1102,7 +1102,20 @@ The backend can bake them in per-frame via `device_config`: `deepSleep`,
 `batteryDivider`, `batteryEnablePin` — and the cloud can set the same live
 over `set_settings` (`deep_sleep`, `deep_sleep_on_battery`,
 `wake_check_seconds`, `battery_pin`, `battery_divider`, `battery_enable_pin`),
-surfaced as the frame's "Power" settings section. The GPIO button map
+surfaced as the frame's "Power" settings section.
+
+Each deep sleep (firmware 2026.11.7+) also powers down what the sleep does
+not need: right before `esp_deep_sleep` the firmware powers the ES8311 /
+ES7210 down by register (analog sections, references, microphone bias),
+holds the speaker amplifier's enable low, and on the Waveshare PhotoPainter
+releases the panel's lines and switches its supply (the AXP2101's ALDO4,
+EPD_VCC) off — the PMIC otherwise keeps every rail up through the ESP32's
+sleep. It also stops the fast deep-sleep timer (~1%: a two-hour sleep woke
+60-90 s early and booted twice) from costing a second boot: a wake up to 60 s
+before the render renders, and a render wake sleeps 1/64 longer (at most
+300 s). The next boot's normal init undoes all of it. A PhotoPainter running
+a 2-hour scene went from ~40% of its cell a day (about 57 h from full) to
+~3.6% a day. The GPIO button map
 travels the same two ways since 2026-10-12: the backend's settings pull
 carries `gpioButtons` (`[{pin, label}]`, present only when the backend holds
 a map) and the cloud's `set_settings` carries `gpio_buttons`; the device
