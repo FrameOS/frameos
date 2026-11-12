@@ -280,7 +280,10 @@ void fos_events_init(void)
  * applies a queued switch: the pending state is in place when the scene
  * opens. A `direction` is the dispatcher's to resolve, on the render task
  * too. */
-static fos_event_result_t set_current_scene(fos_event_origin_t origin, const char *payload)
+static bool defer_event(fos_event_origin_t origin, const char *name, const char *payload_json,
+                        bool from_plane);
+
+static fos_event_result_t set_current_scene(fos_event_origin_t origin, const char *payload, bool from_plane)
 {
     char scene_id[FOS_EVENT_SCENE_ID_LEN];
     if (!copy_string_value(top_level_value(payload, "sceneId"), scene_id, sizeof(scene_id)) &&
@@ -298,7 +301,8 @@ static fos_event_result_t set_current_scene(fos_event_origin_t origin, const cha
             return FOS_EVENT_FAILED;
         }
         if (!fos_client_on_render_task()) {
-            return fos_events_defer(origin, FOS_EVENT_SET_CURRENT_SCENE, payload) ? FOS_EVENT_DONE : FOS_EVENT_BUSY;
+            return defer_event(origin, FOS_EVENT_SET_CURRENT_SCENE, payload, from_plane) ? FOS_EVENT_DONE
+                                                                                          : FOS_EVENT_BUSY;
         }
         if (!frameos_nim_send_event(origin, FOS_EVENT_SET_CURRENT_SCENE, payload)) return FOS_EVENT_FAILED;
         fos_client_render_now();
@@ -310,7 +314,7 @@ static fos_event_result_t set_current_scene(fos_event_origin_t origin, const cha
     if (state != NULL && *state == '{' && frameos_nim_available()) {
         if (fos_client_on_render_task()) {
             frameos_nim_send_event(origin, FOS_EVENT_SET_CURRENT_SCENE, payload);
-        } else if (!fos_events_defer(origin, FOS_EVENT_SET_CURRENT_SCENE, payload)) {
+        } else if (!defer_event(origin, FOS_EVENT_SET_CURRENT_SCENE, payload, from_plane)) {
             frameos_nim_log_hook("{\"event\":\"event:setCurrentScene:stateDropped\","
                                  "\"source\":\"esp32\",\"reason\":\"render task queue full\"}");
         }
@@ -325,6 +329,7 @@ static fos_event_result_t set_current_scene(fos_event_origin_t origin, const cha
 
 typedef struct {
     fos_event_origin_t origin;
+    bool from_plane; /* a verb of the frame's control plane (dispatch_event) */
     char name[FOS_CUSTOM_EVENT_MAX_NAME_LENGTH + 1];
     char *payload; /* malloc'd copy, NULL = {} */
 } deferred_event_t;
@@ -333,7 +338,8 @@ static deferred_event_t s_deferred[FOS_EVENTS_DEFERRED_MAX];
 static size_t s_deferred_count = 0;
 static portMUX_TYPE s_deferred_lock = portMUX_INITIALIZER_UNLOCKED;
 
-bool fos_events_defer(fos_event_origin_t origin, const char *name, const char *payload_json)
+static bool defer_event(fos_event_origin_t origin, const char *name, const char *payload_json,
+                        bool from_plane)
 {
     if (name == NULL || name[0] == '\0' || strlen(name) > FOS_CUSTOM_EVENT_MAX_NAME_LENGTH) {
         return false;
@@ -351,7 +357,7 @@ bool fos_events_defer(fos_event_origin_t origin, const char *name, const char *p
     portENTER_CRITICAL(&s_deferred_lock);
     for (size_t i = 0; coalesce && i < s_deferred_count; i++) {
         deferred_event_t *slot = &s_deferred[i];
-        if (slot->origin == origin && strcmp(slot->name, name) == 0) {
+        if (slot->origin == origin && slot->from_plane == from_plane && strcmp(slot->name, name) == 0) {
             replaced = slot->payload;
             slot->payload = payload;
             queued = true;
@@ -361,6 +367,7 @@ bool fos_events_defer(fos_event_origin_t origin, const char *name, const char *p
     if (!queued && s_deferred_count < FOS_EVENTS_DEFERRED_MAX) {
         deferred_event_t *slot = &s_deferred[s_deferred_count++];
         slot->origin = origin;
+        slot->from_plane = from_plane;
         snprintf(slot->name, sizeof(slot->name), "%s", name);
         slot->payload = payload;
         queued = true;
@@ -375,6 +382,14 @@ bool fos_events_defer(fos_event_origin_t origin, const char *name, const char *p
     fos_client_wake_for_events();
     return true;
 }
+
+bool fos_events_defer(fos_event_origin_t origin, const char *name, const char *payload_json)
+{
+    return defer_event(origin, name, payload_json, false);
+}
+
+static fos_event_result_t dispatch_event(fos_event_origin_t origin, const char *name,
+                                         const char *payload_json, bool from_plane);
 
 bool fos_events_deferred_pending(void)
 {
@@ -399,44 +414,74 @@ bool fos_events_deliver_deferred(void)
         }
         portEXIT_CRITICAL(&s_deferred_lock);
         if (!have) break;
-        fos_event_result_t result = fos_events_dispatch(event.origin, event.name, event.payload);
+        /* Rendered on the server since it was queued, this relays it. */
+        fos_event_result_t result = dispatch_event(event.origin, event.name, event.payload, event.from_plane);
         free(event.payload);
         if (result == FOS_EVENT_DONE) delivered_any = true;
     }
     return delivered_any;
 }
 
-void fos_events_discard_deferred(void)
+/* ------------------------------------------------- rendered on the server */
+
+/* A frame rendered on its control plane (docs/server-rendering.md "Keys,
+ * touch and the schedule") runs no scene, so what a scene here would have
+ * heard goes to the plane with the next render pull, from the frame's own
+ * producers: its keys and its glass, its schedule, its HTTP API. What the
+ * plane said itself (a cloud verb, a backend command) is the plane's already:
+ * it asks for the pull and nothing more. The console speaks for the runtime
+ * here (`system`), which the plane does not take from a frame. */
+static bool relayed_origin(fos_event_origin_t origin)
 {
-    size_t dropped = 0;
-    while (true) {
-        deferred_event_t event;
-        bool have = false;
-        portENTER_CRITICAL(&s_deferred_lock);
-        if (s_deferred_count > 0) {
-            event = s_deferred[0];
-            memmove(&s_deferred[0], &s_deferred[1], (s_deferred_count - 1) * sizeof(s_deferred[0]));
-            s_deferred_count--;
-            have = true;
-        }
-        portEXIT_CRITICAL(&s_deferred_lock);
-        if (!have) break;
-        free(event.payload);
-        dropped++;
+    return origin == FOS_ORIGIN_DRIVER || origin == FOS_ORIGIN_SCHEDULE ||
+           origin == FOS_ORIGIN_HTTP_WRITE || origin == FOS_ORIGIN_HTTP_ADMIN;
+}
+
+static fos_event_result_t dispatch_remote(fos_event_origin_t origin, const char *name,
+                                          const char *payload, bool from_plane)
+{
+    /* The backlight is the board's, whoever runs the scene: an LCD goes
+     * dark here, and the scene on the plane still hears it. */
+    if (strcmp(name, FOS_EVENT_TURN_ON) == 0) fos_client_set_display_power(1);
+    else if (strcmp(name, FOS_EVENT_TURN_OFF) == 0) fos_client_set_display_power(0);
+    else if (strcmp(name, FOS_EVENT_TOGGLE_SCREEN) == 0) fos_client_set_display_power(-1);
+
+    if (from_plane || origin == FOS_ORIGIN_CLOUD) {
+        fos_client_render_now();
+        return FOS_EVENT_DONE;
     }
-    if (dropped == 0) return;
-    char line[160];
-    snprintf(line, sizeof(line),
-             "{\"event\":\"event:discarded\",\"source\":\"esp32\",\"count\":%u,"
-             "\"reason\":\"rendered on the server\"}",
-             (unsigned)dropped);
-    frameos_nim_log_hook(line);
+    if (!relayed_origin(origin)) {
+        log_event_line("event:unsupported", origin, name, "rendered on the server");
+        return FOS_EVENT_FAILED;
+    }
+    if (!fos_client_relay_event(origin, name, payload)) return FOS_EVENT_FAILED;
+    /* A key or a finger goes once the gesture is decided (the render task
+     * waits out a double-press window, a hold, a finger on the glass); a
+     * schedule entry or an HTTP event is somebody asking now. */
+    if (origin == FOS_ORIGIN_DRIVER) {
+        fos_client_wake_for_events();
+    } else {
+        fos_client_render_now();
+    }
+    return FOS_EVENT_DONE;
 }
 
 /* ---------------------------------------------------------------- dispatch */
 
 fos_event_result_t fos_events_dispatch(fos_event_origin_t origin, const char *name,
                                        const char *payload_json)
+{
+    return dispatch_event(origin, name, payload_json, false);
+}
+
+fos_event_result_t fos_events_dispatch_from_plane(fos_event_origin_t origin, const char *name,
+                                                  const char *payload_json)
+{
+    return dispatch_event(origin, name, payload_json, true);
+}
+
+static fos_event_result_t dispatch_event(fos_event_origin_t origin, const char *name,
+                                         const char *payload_json, bool from_plane)
 {
     if (name == NULL || name[0] == '\0') return FOS_EVENT_FAILED;
     const char *payload = payload_json && payload_json[0] ? payload_json : "{}";
@@ -462,8 +507,13 @@ fos_event_result_t fos_events_dispatch(fos_event_origin_t origin, const char *na
         }
         return FOS_EVENT_DONE;
     }
+    /* Everything below that is not the firmware's own command is a scene's
+     * to hear, and the scene is on the plane. */
+    if (!fos_event_is_device_command(name) && !fos_client_renders_locally()) {
+        return dispatch_remote(origin, name, payload, from_plane);
+    }
     if (strcmp(name, FOS_EVENT_SET_CURRENT_SCENE) == 0) {
-        return set_current_scene(origin, payload);
+        return set_current_scene(origin, payload, from_plane);
     }
     if (fos_event_is_device_command(name)) {
         /* Of the producers only the schedule runs on the render task AND may
@@ -479,7 +529,7 @@ fos_event_result_t fos_events_dispatch(fos_event_origin_t origin, const char *na
      * do here is pass the render request on. */
     if (!frameos_nim_available()) return FOS_EVENT_FAILED;
     if (!fos_client_on_render_task()) {
-        return fos_events_defer(origin, name, payload) ? FOS_EVENT_DONE : FOS_EVENT_BUSY;
+        return defer_event(origin, name, payload, from_plane) ? FOS_EVENT_DONE : FOS_EVENT_BUSY;
     }
     bool delivered = frameos_nim_send_event(origin, name, payload);
     if (frameos_nim_render_requested()) fos_client_render_for_scene();

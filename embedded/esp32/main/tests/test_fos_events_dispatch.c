@@ -61,6 +61,12 @@ static struct {
     char log[512];
     char all_logs[2048];
     bool (*hook)(const char *command, const char *payload_json);
+    bool remote;       /* rendered on the server: fos_client_renders_locally() is false */
+    bool relay_result;
+    int relays;
+    char relayed[1024]; /* every relayed event, "origin name payload" a line */
+    int display_power_calls;
+    int display_power;
 } n;
 
 static void reset(void)
@@ -77,6 +83,7 @@ static void reset(void)
     n.on_render_task = true;
     n.task_result = pdPASS;
     n.store_result = ESP_OK;
+    n.relay_result = true;
 }
 
 void fos_client_render_now(void) { n.renders++; }
@@ -84,6 +91,22 @@ void fos_client_render_fresh(void) { n.renders++; n.fresh_renders++; }
 void fos_client_render_for_scene(void) { n.renders++; n.scene_renders++; }
 void fos_client_wake_for_events(void) { n.wakes++; }
 bool fos_client_on_render_task(void) { return n.on_render_task; }
+bool fos_client_renders_locally(void) { return !n.remote; }
+
+bool fos_client_relay_event(fos_event_origin_t origin, const char *name, const char *payload_json)
+{
+    n.relays++;
+    size_t used = strlen(n.relayed);
+    snprintf(n.relayed + used, sizeof(n.relayed) - used, "%s %s %s\n", fos_event_origin_name(origin), name,
+             payload_json ? payload_json : "(null)");
+    return n.relay_result;
+}
+
+void fos_client_set_display_power(int on)
+{
+    n.display_power_calls++;
+    n.display_power = on;
+}
 void fos_scenes_request_sync(void) { n.syncs++; }
 
 esp_err_t fos_scenes_select(const char *scene_id)
@@ -454,17 +477,16 @@ static void test_scene_events(void)
     CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "button", "{}") == FOS_EVENT_BUSY);
     CHECK(strstr(n.log, "event:dropped") != NULL);
 
-    /* Rendered on the server (docs/server-rendering.md): the plane hears the
-     * scene's events, so what waited here is let go, said once, and the
+    /* Rendered on the server since they were queued (docs/server-rendering.md
+     * "Keys, touch and the schedule"): delivering them relays them, and the
      * queue takes events again. */
     CHECK(fos_events_deferred_pending());
-    n.logs = 0;
-    fos_events_discard_deferred();
-    CHECK(!fos_events_deferred_pending() && n.nim_sends == 0 && n.logs == 1);
-    CHECK(strstr(n.log, "event:discarded") != NULL && strstr(n.log, "\"count\":16") != NULL);
-    fos_events_discard_deferred();
-    CHECK(n.logs == 1);
+    n.remote = true;
+    n.on_render_task = true;
+    CHECK(fos_events_deliver_deferred());
+    CHECK(!fos_events_deferred_pending() && n.nim_sends == 0 && n.relays == 16);
     CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "button", "{}") == FOS_EVENT_DONE);
+    n.remote = false;
 
     /* The firmware's own part answers from any task, as before. */
     reset();
@@ -477,6 +499,116 @@ static void test_scene_events(void)
     n.nim_available = false;
     CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_ADMIN, "button", "{}") == FOS_EVENT_FAILED);
     CHECK(n.nim_sends == 0);
+}
+
+static void test_rendered_on_the_server(void)
+{
+    /* A key edge goes to the relay, not the runtime, and only wakes the
+     * render task: the press is sent once it is decided. */
+    reset();
+    n.remote = true;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_DRIVER, "gpio", "{\"label\":\"A\",\"action\":\"down\",\"atMs\":5}") ==
+          FOS_EVENT_DONE);
+    CHECK(n.nim_sends == 0 && n.relays == 1 && n.wakes == 1 && n.renders == 0);
+    CHECK(strcmp(n.relayed, "driver gpio {\"label\":\"A\",\"action\":\"down\",\"atMs\":5}\n") == 0);
+
+    /* So do a finger, from any task (nothing is deferred: the relay is not
+     * the runtime). */
+    reset();
+    n.remote = true;
+    n.on_render_task = false;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_DRIVER, "pointerDown", "{\"x\":1}") == FOS_EVENT_DONE);
+    CHECK(n.relays == 1 && n.wakes == 1 && !fos_events_deferred_pending());
+
+    /* A schedule entry and the frame's HTTP API: relayed, and a pull now.
+     * The switch is the plane's: no slot is selected here, with or without
+     * a direction, and a runtime is not needed (a C3 has none). */
+    reset();
+    n.remote = true;
+    n.nim_available = false;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_SCHEDULE, "setCurrentScene", "{\"sceneId\":\"news\"}") == FOS_EVENT_DONE);
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "setCurrentScene", "{\"direction\":\"next\"}") == FOS_EVENT_DONE);
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_ADMIN, "setSceneState", "{\"state\":{\"a\":1}}") == FOS_EVENT_DONE);
+    CHECK(fos_events_dispatch(FOS_ORIGIN_SCHEDULE, "myEvent", NULL) == FOS_EVENT_DONE);
+    CHECK(n.selects == 0 && n.nim_sends == 0 && n.relays == 4 && n.renders == 4 && n.wakes == 0);
+    CHECK(strcmp(n.relayed,
+                 "schedule setCurrentScene {\"sceneId\":\"news\"}\n"
+                 "http:write setCurrentScene {\"direction\":\"next\"}\n"
+                 "http:admin setSceneState {\"state\":{\"a\":1}}\n"
+                 "schedule myEvent {}\n") == 0);
+
+    /* The allow-list still decides first: a key may not say setSceneState. */
+    reset();
+    n.remote = true;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_DRIVER, "setSceneState", "{}") == FOS_EVENT_REFUSED);
+    CHECK(n.relays == 0);
+
+    /* `render` and the device commands are the firmware's, as always. */
+    reset();
+    n.remote = true;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_SCHEDULE, "render", NULL) == FOS_EVENT_DONE);
+    CHECK(n.fresh_renders == 1 && n.relays == 0);
+    reset();
+    n.remote = true;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_ADMIN, "reload", NULL) == FOS_EVENT_DONE);
+    CHECK(n.syncs == 1 && n.relays == 0);
+    reset();
+    n.remote = true;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_SCHEDULE, "reboot", "{}") == FOS_EVENT_DONE);
+    CHECK(n.restarts == 1 && n.relays == 0);
+
+    /* What the plane said itself is the plane's already: a pull, nothing
+     * relayed back. A cloud verb, and a backend command (http:admin, the
+     * frame's HTTP API's origin too) through the plane's door. */
+    reset();
+    n.remote = true;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_CLOUD, "setCurrentScene", "{\"sceneId\":\"x\"}") == FOS_EVENT_DONE);
+    CHECK(fos_events_dispatch_from_plane(FOS_ORIGIN_CLOUD, "button", "{}") == FOS_EVENT_DONE);
+    CHECK(fos_events_dispatch_from_plane(FOS_ORIGIN_HTTP_ADMIN, "setSceneState", "{}") == FOS_EVENT_DONE);
+    CHECK(fos_events_dispatch_from_plane(FOS_ORIGIN_HTTP_ADMIN, "setCurrentScene", "{\"sceneId\":\"y\"}") ==
+          FOS_EVENT_DONE);
+    CHECK(n.relays == 0 && n.renders == 4 && n.selects == 0 && n.nim_sends == 0);
+    /* Its allow-list too. */
+    CHECK(fos_events_dispatch_from_plane(FOS_ORIGIN_CLOUD, "open", "{}") == FOS_EVENT_REFUSED);
+    /* Rendered here, the plane's door is the ordinary one. */
+    reset();
+    CHECK(fos_events_dispatch_from_plane(FOS_ORIGIN_HTTP_ADMIN, "setCurrentScene", "{\"sceneId\":\"y\"}") ==
+          FOS_EVENT_DONE);
+    CHECK(n.selects == 1 && strcmp(n.selected, "y") == 0 && n.relays == 0);
+
+    /* A plane's event queued for the render task while it rendered locally
+     * and delivered after a switch to remote: still not relayed back. */
+    reset();
+    n.on_render_task = false;
+    CHECK(fos_events_dispatch_from_plane(FOS_ORIGIN_HTTP_ADMIN, "button", "{}") == FOS_EVENT_DONE);
+    CHECK(fos_events_deferred_pending());
+    n.remote = true;
+    n.on_render_task = true;
+    fos_events_deliver_deferred();
+    CHECK(n.relays == 0 && n.nim_sends == 0 && !fos_events_deferred_pending());
+
+    /* The console speaks for the runtime here: not the plane's to take. */
+    reset();
+    n.remote = true;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_SYSTEM, "button", "{}") == FOS_EVENT_FAILED);
+    CHECK(n.relays == 0 && strstr(n.log, "event:unsupported") && strstr(n.log, "rendered on the server"));
+
+    /* A full relay or a payload it will not carry: the producer hears it. */
+    reset();
+    n.remote = true;
+    n.relay_result = false;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "setSceneState", "[1]") == FOS_EVENT_FAILED);
+    CHECK(n.renders == 0);
+
+    /* The backlight is the board's: switched here, and the scene still hears it. */
+    reset();
+    n.remote = true;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_SCHEDULE, "turnOff", NULL) == FOS_EVENT_DONE);
+    CHECK(n.display_power_calls == 1 && n.display_power == 0 && n.relays == 1);
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_ADMIN, "toggleScreen", NULL) == FOS_EVENT_DONE);
+    CHECK(n.display_power_calls == 2 && n.display_power == -1);
+    CHECK(fos_events_dispatch_from_plane(FOS_ORIGIN_CLOUD, "turnOn", NULL) == FOS_EVENT_DONE);
+    CHECK(n.display_power_calls == 3 && n.display_power == 1 && n.relays == 2);
 }
 
 static void test_runtime_hook(void)
@@ -513,6 +645,7 @@ int main(void)
     test_restart();
     test_other_commands();
     test_scene_events();
+    test_rendered_on_the_server();
     test_runtime_hook();
     printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

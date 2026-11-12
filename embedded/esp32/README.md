@@ -1309,7 +1309,8 @@ next pass pulls, and a change asks for that pass now. The cloud's `hardware`
 reports `renderMode` (`local` / `remote`, what the frame runs by its setting)
 and `localRenderSupported` (whether it could run its scenes itself).
 
-**The pull.** `GET {plane}/api/frames/{id}/embedded/render?width=&height=&format=&rotate=`:
+**The pull.** `GET {plane}/api/frames/{id}/embedded/render?width=&height=&format=&rotate=`
+(a `POST` when the relay holds input, below):
 a backend set on the frame (`backend_url`, its API key), else the cloud it is
 enrolled with (`fos_cloud_api_access`: the provider URL, the frame's uuid,
 its access token) — the order of the settings pull. The query is the panel
@@ -1350,16 +1351,53 @@ picture.
 
 **What a remote frame does not run.** Everything that only a local render
 needs waits on one test, `renders_locally` in `fos_client.c` (the frame's
-setting, or a refusal on a board that can): the scene store's apply and the
-backend scenes pull, the scene events (those that arrive are let go,
-`event:discarded`, since the plane holds the scene's state and events), keys
-and touch, the schedule, animation, the first pass's wait for the cloud's
+setting, or a refusal on a board that can; `fos_client_renders_locally` for
+other tasks): the scene store's apply and the backend scenes pull, the Nim
+dispatcher and its tick, animation, the first pass's wait for the cloud's
 queued commands. That keeps a wake to Wi-Fi, the cloud link, one request and
-the refresh. It also means a remote frame's keys do not switch scenes (the
-event map runs in the Nim dispatcher, which needs the scene list applied) and
-its own schedule does not run: the plane's scene choice is the only one.
-The Nim runtime itself still starts at boot where it fits, so a refusal or a
-switch back to local renders without a restart.
+the refresh. The Nim runtime itself still starts at boot where it fits, so a
+refusal or a switch back to local renders without a restart.
+
+**Keys, touch and the schedule go to the plane** (`docs/server-rendering.md`
+"Keys, touch and the schedule"). The producers keep running: the button task,
+the touch glass, the schedule (ticked on the render task as before, and at
+the start of every pass) and the frame's HTTP API. In remote mode
+`fos_events_dispatch` does with the firmware's own events what it always did
+(`render` asks for the pull; `reload`, `restart`, `reboot`, `uploadScenes`;
+`turnOn` / `turnOff` / `toggleScreen` switch the backlight here as well) and
+**relays** what a scene would have heard instead of handing it to the Nim
+dispatcher: `gpio` edges (`wake`, `claimed` and `atMs` as the button task
+stamps them), `pointerDown` / `pointerMove` / `pointerUp`, `setCurrentScene`
+(with or without a `direction`), `setSceneState`, `button`, custom events,
+from `driver`, `schedule`, `http:write` and `http:admin`. What the plane said
+itself goes through `fos_events_dispatch_from_plane` (`fos_cloud.c`: a cloud
+verb, or a backend command, whose origin is `http:admin` like the frame's
+HTTP API's) and only asks for the pull; the console (`system`) is not
+relayed (`event:unsupported`). This works on a C3 too: the relay needs no
+runtime.
+
+The relay (`fos_render_relay.c`, pure, `tests/test_fos_render_relay.c`) keeps
+them in order behind a mutex in `fos_client.c` (`fos_client_relay_event`):
+each as origin, name and payload, a run of moves of one finger folded to the
+newest, at most 32 events and 16 KiB of body (the oldest go first,
+`event:dropped`); a payload that is not one JSON object is refused and its
+producer told (an HTTP 400). Keys and the glass are sent once the input is
+decided: no key down, no tap inside its double-press window
+(`fos_buttons_busy`), no finger on the glass, nothing left in the queues; a
+schedule entry or an HTTP event asks for the pull at once, and a pull that
+is due anyway takes whatever is waiting, after waiting out a key or a finger
+still being timed (10 s at the most), so a press never goes in two halves.
+Then the pull is a `POST` with `Content-Type: application/json` and
+`{"nowMs": <esp_timer ms>, "events": [{"origin", "name", "payload"}, …]}`,
+the ETag rules unchanged. A `200` or a `304` empties what it carried (one
+`render:relay` line per such pull: the count, the status, `delivered`); a
+`400` or a `413` too (`dropped`: a body the plane cannot read is not sent
+again); anything else, no answer included, keeps it for the next pull
+(`kept`). The cloud's `403` on a board that can render hands the events to
+the scene here, in this same pass; on a C3 they go. A battery frame holds its
+sleep while the relay holds anything or a report waits in a queue
+(`sleep:held`, reason `input`), three unanswered pulls in a row at the most,
+and the key that woke it goes with the wake's first pull.
 
 **`renderSceneMs`.** Every metrics sample carries how long the last good pass
 took to produce its picture, without the panel refresh: the scene on the

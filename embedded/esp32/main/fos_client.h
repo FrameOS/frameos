@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "fos_events_gen.h"
 #include "frameos_display.h"
 
 void fos_client_start(void);
@@ -131,6 +132,19 @@ const char *fos_client_render_mode_name(void);
 /* A plane changed the frame's render mode: a refusal it gave before is
  * forgotten and the next pass renders the new way, now. Any task. */
 void fos_client_render_mode_changed(void);
+/* Whether this pass runs the scene here (the frame's setting, a board able
+ * to, and no refusal from the plane in force), else its plane renders it.
+ * Any task. */
+bool fos_client_renders_locally(void);
+/* Rendered on the server: hold one event a scene here would have heard for
+ * the next render pull (fos_render_relay.h, docs/server-rendering.md "Keys,
+ * touch and the schedule"). Asks for no pull itself: fos_events.c wakes the
+ * render task, which sends what is held once the input is decided. False
+ * when it was not held (logged). Any task. */
+bool fos_client_relay_event(fos_event_origin_t origin, const char *name, const char *payload_json);
+/* turnOn (1), turnOff (0), toggleScreen (-1) for a frame whose dispatcher is
+ * not here (rendered on the server): the backlight is the board's. Any task. */
+void fos_client_set_display_power(int on);
 /* Something other than a render drew the panel (the portal's screen, a
  * console display_test): what the panel shows is no longer the last render,
  * so the next one refreshes and asks the plane for its picture whole. Any

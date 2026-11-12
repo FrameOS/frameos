@@ -2212,7 +2212,8 @@ static void select_pushed_scene(const char *scene_id, const cJSON *state, fos_ev
         printed = cJSON_PrintUnformatted(payload);
     }
     cJSON_Delete(payload);
-    if (printed == NULL || fos_events_dispatch(origin, FOS_EVENT_SET_CURRENT_SCENE, printed) != FOS_EVENT_DONE) {
+    if (printed == NULL ||
+        fos_events_dispatch_from_plane(origin, FOS_EVENT_SET_CURRENT_SCENE, printed) != FOS_EVENT_DONE) {
         fos_scenes_select(scene_id); /* the switch, at least */
     }
     cJSON_free(printed);
@@ -2853,10 +2854,12 @@ static void ws_ack_unparseable(const char *data, size_t len)
  *
  * `render`, `set_current_scene`, `reboot` / `restart_runtime` and
  * `scene_event` are scene events said by the provider: each goes through
- * fos_events_dispatch with the `cloud` origin, the one routing function the
- * HTTP route, the schedule, the console and the buttons use, so what the
- * provider may say is the contract's answer (docs/events-contract.json) and
- * not a list kept here. The verbs keep their own ack tokens. */
+ * the one routing function the HTTP route, the schedule, the console and the
+ * buttons use (fos_events_dispatch_from_plane: the same, except that a frame
+ * rendered on the server does not relay what its plane said back to it), so
+ * what the provider may say is the contract's answer
+ * (docs/events-contract.json) and not a list kept here. The verbs keep their
+ * own ack tokens. */
 
 /* A verb with no payload of its own: render, reboot, restart_runtime. Acked
  * BEFORE the dispatch — a restart does not come back to send one, and the
@@ -2869,7 +2872,7 @@ static void ws_handle_event_verb(const char *event, const cJSON *id, fos_event_o
         return;
     }
     ws_ack(id, true, NULL);
-    fos_events_dispatch(origin, event, NULL);
+    fos_events_dispatch_from_plane(origin, event, NULL);
 }
 
 /* `set_current_scene {scene_id, state?}` → setCurrentScene {sceneId, state?},
@@ -2898,7 +2901,7 @@ static void ws_handle_set_current_scene(const cJSON *root, const cJSON *id, fos_
         ws_ack(id, false, "no_memory");
         return;
     }
-    fos_event_result_t result = fos_events_dispatch(origin, FOS_EVENT_SET_CURRENT_SCENE, printed);
+    fos_event_result_t result = fos_events_dispatch_from_plane(origin, FOS_EVENT_SET_CURRENT_SCENE, printed);
     cJSON_free(printed);
     if (result == FOS_EVENT_DONE) {
         ws_ack(id, true, NULL);
@@ -2942,7 +2945,7 @@ static void ws_handle_scene_event(const cJSON *root, const cJSON *id, fos_event_
         ws_ack(id, false, "no_memory");
         return;
     }
-    fos_event_result_t result = fos_events_dispatch(origin, name, printed);
+    fos_event_result_t result = fos_events_dispatch_from_plane(origin, name, printed);
     if (printed != NULL) cJSON_free(printed);
     switch (result) {
         case FOS_EVENT_BUSY:
