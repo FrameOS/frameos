@@ -538,10 +538,11 @@ async def _skip_unless_relayed_taps_land() -> None:
     global _relayed_taps_land
     if _relayed_taps_land is None:
         from types import SimpleNamespace
+        from typing import Any
 
         from app.utils.embedded_render import render_scene
 
-        frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
+        frame: Any = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
         probe = await render_scene(frame, 16, 16, scene_id="clock", device_input={"nowMs": 5, "events": [
             {"origin": "driver", "name": "pointerMove", "payload": {"x": 1, "y": 1, "pointerId": 1}}]})
         renders = sum('"event":"render:scene"' in line for line in probe.scene_logs)
