@@ -308,6 +308,35 @@ export function prerenderLeadMs(lastRenderMs: number | null | undefined): number
  * that is not a layout counts, and, for the plane's own, a built-in scene
  * (the switcher, the scene settings) a render ended on.
  */
+/** The longest a scene may ask the board to wait for its next picture. */
+export const maxNextRenderSeconds = 7 * 86400;
+
+/**
+ * When the scene wants its next picture, in seconds from the pull that hands
+ * this one out (docs/server-rendering.md "When the next picture is due"): the
+ * render's own `nextSleep` when it set one, else the scene's
+ * `refreshInterval`, held between `floorSeconds` (the plan's floor for
+ * cloud-rendered frames, the floor the frame's own interval has) and seven
+ * days. Null when the scene has no opinion: the board keeps the frame's
+ * interval.
+ */
+export function serverNextRenderSeconds(
+  report: { nextSleep?: number | null | undefined; refreshInterval?: number | null | undefined },
+  floorSeconds: number = cloudRenderedMinIntervalSeconds,
+): number | null {
+  const { nextSleep, refreshInterval } = report;
+  const wanted =
+    typeof nextSleep === "number" && Number.isFinite(nextSleep) && nextSleep >= 0
+      ? nextSleep
+      : typeof refreshInterval === "number" && Number.isFinite(refreshInterval) && refreshInterval > 0
+        ? refreshInterval
+        : null;
+  if (wanted === null) {
+    return null;
+  }
+  return Math.min(maxNextRenderSeconds, Math.max(Math.ceil(floorSeconds), Math.round(wanted)));
+}
+
 export function chooseServerRenderScene(input: {
   activeScene: string | null | undefined;
   deviceScene: string | null | undefined;
@@ -515,6 +544,7 @@ function heldEvents(row: RenderRow): { name: string; origin: string; payload?: u
 type Drawn = {
   body: Buffer;
   etag: string;
+  nextRenderSeconds: number | null;
   renderMs: number;
   scene: string;
   states: Record<string, Record<string, unknown>>;
@@ -642,7 +672,14 @@ async function draw(
   const after = rendered !== undefined ? { ...states, [ended]: rendered } : states;
   return {
     checksum,
-    drawn: { body, etag: serverRenderEtag(body), renderMs: result.renderMs, scene: ended, states: after },
+    drawn: {
+      body,
+      etag: serverRenderEtag(body),
+      nextRenderSeconds: serverNextRenderSeconds(result),
+      renderMs: result.renderMs,
+      scene: ended,
+      states: after,
+    },
     logs: result.logs,
   };
 }
@@ -709,8 +746,16 @@ function sceneLogPayloads(logs: readonly string[] | undefined, heard = false): u
 }
 
 export type ServerRenderPull =
-  | { etag: string; status: 304 }
-  | { body: Buffer; etag: string; from: "picture" | "prerender" | "render"; scene: string; status: 200 }
+  | { etag: string; nextRenderSeconds: number | null; scene: string; status: 304 }
+  | {
+      body: Buffer;
+      etag: string;
+      from: "picture" | "prerender" | "render";
+      /** When the scene wants the picture after this one (serverNextRenderSeconds); null: no opinion. */
+      nextRenderSeconds: number | null;
+      scene: string;
+      status: 200;
+    }
   | { error: string; message: string; retryAfterSeconds?: number; status: 409 | 429 | 502 | 503 };
 
 /**
@@ -748,8 +793,16 @@ export async function pullServerRender(
   const pendingSwitch = await hasPendingSceneSwitch(db, frameId, now);
   const candidate = candidateServerRenderScene({ activeScene: row.activeScene, deviceScene, pendingSwitch });
 
-  const answer = (body: Buffer, etag: string, from: "picture" | "prerender" | "render", scene: string): ServerRenderPull =>
-    ifNoneMatchHas(input.ifNoneMatch, etag) ? { etag, status: 304 } : { body, etag, from, scene, status: 200 };
+  const answer = (
+    body: Buffer,
+    etag: string,
+    from: "picture" | "prerender" | "render",
+    scene: string,
+    nextRenderSeconds: number | null,
+  ): ServerRenderPull =>
+    ifNoneMatchHas(input.ifNoneMatch, etag)
+      ? { etag, nextRenderSeconds, scene, status: 304 }
+      : { body, etag, from, nextRenderSeconds, scene, status: 200 };
 
   // The last picture again: nothing it depends on moved, and the plan's
   // floor has not passed since it was drawn. Never for a pull with input:
@@ -760,7 +813,7 @@ export async function pullServerRender(
     row.picture &&
     row.pictureEtag
   ) {
-    return answer(row.picture, row.pictureEtag, "picture", row.pictureScene as string);
+    return answer(row.picture, row.pictureEtag, "picture", row.pictureScene as string, row.pictureNextRenderSeconds);
   }
 
   // The picture drawn before this wake: taken once, its state committed now.
@@ -773,6 +826,7 @@ export async function pullServerRender(
         pendingStates: {},
         picture: row.prerender,
         pictureEtag: row.prerenderEtag,
+        pictureNextRenderSeconds: row.prerenderNextRenderSeconds,
         picturePanel: row.prerenderPanel,
         pictureRevision: row.revision,
         pictureScene: row.prerenderScene,
@@ -781,6 +835,7 @@ export async function pullServerRender(
         prerenderAsOf: null,
         prerenderEtag: null,
         prerenderMs: null,
+        prerenderNextRenderSeconds: null,
         prerenderPanel: null,
         prerenderRevision: null,
         prerenderScene: null,
@@ -800,7 +855,13 @@ export async function pullServerRender(
         row.prerenderScene,
         isRecord(row.prerenderState) ? statesRecord(row.prerenderState) : statesRecord(row.states),
       );
-      return answer(row.prerender, row.prerenderEtag, "prerender", row.prerenderScene as string);
+      return answer(
+        row.prerender,
+        row.prerenderEtag,
+        "prerender",
+        row.prerenderScene as string,
+        row.prerenderNextRenderSeconds,
+      );
     }
   }
 
@@ -845,6 +906,7 @@ export async function pullServerRender(
     activeScene: drawn.scene,
     picture: drawn.body,
     pictureEtag: drawn.etag,
+    pictureNextRenderSeconds: drawn.nextRenderSeconds,
     picturePanel: panelKey,
     pictureScene: drawn.scene,
     pictureScenesChecksum: checksum,
@@ -896,7 +958,7 @@ export async function pullServerRender(
     },
     ...sceneLogPayloads(outcome.logs, !!deviceInput || heldEvents(row).length > 0),
   ]);
-  return answer(drawn.body, drawn.etag, "render", drawn.scene);
+  return answer(drawn.body, drawn.etag, "render", drawn.scene, drawn.nextRenderSeconds);
 }
 
 // A kept pre-render's columns, emptied.
@@ -905,6 +967,7 @@ const noPrerender = {
   prerenderAsOf: null,
   prerenderEtag: null,
   prerenderMs: null,
+  prerenderNextRenderSeconds: null,
   prerenderPanel: null,
   prerenderRevision: null,
   prerenderScene: null,
@@ -1006,6 +1069,7 @@ export async function prerenderFrame(
       prerenderAsOf: input.asOf,
       prerenderEtag: outcome.drawn.etag,
       prerenderMs: outcome.drawn.renderMs,
+      prerenderNextRenderSeconds: outcome.drawn.nextRenderSeconds,
       prerenderPanel: row.picturePanel,
       prerenderRevision: row.revision,
       prerenderScene: outcome.drawn.scene,

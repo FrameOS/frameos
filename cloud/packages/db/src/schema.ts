@@ -1382,6 +1382,9 @@ export const frameServerRenders = pgTable("frame_server_renders", {
   renderedAt: timestamp("rendered_at", { withTimezone: true }),
   renderMs: integer("render_ms"),
   renderError: text("render_error"),
+  // When the scene wants the picture after this one, in seconds from the
+  // pull, held to the plan's floor (migration 0079); null: no opinion.
+  pictureNextRenderSeconds: integer("picture_next_render_seconds"),
   // A picture drawn before a sleeping frame's wake, as of `prerender_as_of`;
   // taken once by the pull at the wake if nothing changed since.
   prerender: bytea("prerender"),
@@ -1392,6 +1395,7 @@ export const frameServerRenders = pgTable("frame_server_renders", {
   prerenderAsOf: timestamp("prerender_as_of", { withTimezone: true }),
   prerenderState: jsonb("prerender_state"),
   prerenderMs: integer("prerender_ms"),
+  prerenderNextRenderSeconds: integer("prerender_next_render_seconds"),
   ...timestamps,
 });
 

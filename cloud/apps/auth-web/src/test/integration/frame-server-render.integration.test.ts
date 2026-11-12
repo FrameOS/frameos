@@ -28,6 +28,7 @@ import {
   frameManagedScope,
   frameTelemetryLogsScope,
 } from "../../lib/frames";
+import { cloudRenderedMinIntervalSeconds } from "../../lib/cloud-rendered";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import type { SceneRenderOptions, SceneRenderResult } from "../../lib/scene-render";
 import { hashSecret } from "../../lib/secrets";
@@ -411,6 +412,65 @@ describe("the render pull", () => {
     row = await renderRow(frame.id);
     expect(row?.prerender).toBeNull();
     expect(row?.states).toEqual({ clock: { count: 2 } });
+  });
+
+  it("says when the scene wants its next picture, on every answer for the picture", async () => {
+    const accountId = await signIn();
+    await subscribe(accountId, 1);
+    const { frame, token } = await createFrame(accountId);
+
+    // The scene's own interval, held to the plan's floor.
+    reports = { refreshInterval: 900 };
+    const first = await pull(frame.id, token, panel);
+    expect(first.status).toBe(200);
+    expect(first.headers.get("x-frameos-next-render")).toBe("900");
+    expect((await renderRow(frame.id))?.pictureNextRenderSeconds).toBe(900);
+    const etag = first.headers.get("etag")!;
+    // A 304 and a reused picture answer for the picture they stand for.
+    const unchanged = await pull(frame.id, token, panel, { "if-none-match": etag });
+    expect(unchanged.status).toBe(304);
+    expect(unchanged.headers.get("x-frameos-next-render")).toBe("900");
+    expect(unchanged.headers.get("x-frameos-scene")).toBe("clock");
+    const reused = await pull(frame.id, token, panel);
+    expect(reused.status).toBe(200);
+    expect(renders).toHaveLength(1);
+    expect(reused.headers.get("x-frameos-next-render")).toBe("900");
+
+    // A picture drawn before a wake keeps its own: here the render's nextSleep.
+    reports = { nextSleep: 3600, refreshInterval: 900 };
+    shade = 255;
+    expect(await prerenderFrame(db, frame.id, { asOf: new Date(Date.now() + 30_000), render: standIn })).toBe("kept");
+    expect((await renderRow(frame.id))?.prerenderNextRenderSeconds).toBe(3600);
+    await db
+      .update(frameServerRenders)
+      .set({ renderedAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(frameServerRenders.frameId, frame.id));
+    const woke = await pull(frame.id, token, panel);
+    expect(woke.status).toBe(200);
+    expect(renders).toHaveLength(2);
+    expect(woke.headers.get("x-frameos-next-render")).toBe("3600");
+    const taken = await renderRow(frame.id);
+    expect(taken?.prerenderNextRenderSeconds).toBeNull();
+    expect(taken?.pictureNextRenderSeconds).toBe(3600);
+
+    // A clock that wants every second waits the plan's floor; a scene with
+    // no opinion says nothing, and the board keeps the frame's interval.
+    await db
+      .update(frameServerRenders)
+      .set({ renderedAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(frameServerRenders.frameId, frame.id));
+    reports = { refreshInterval: 1 };
+    const fast = await pull(frame.id, token, panel);
+    expect(fast.headers.get("x-frameos-next-render")).toBe(String(cloudRenderedMinIntervalSeconds));
+    await db
+      .update(frameServerRenders)
+      .set({ renderedAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(frameServerRenders.frameId, frame.id));
+    reports = {};
+    const silent = await pull(frame.id, token, panel);
+    expect(silent.status).toBe(200);
+    expect(silent.headers.get("x-frameos-next-render")).toBeNull();
+    expect((await renderRow(frame.id))?.pictureNextRenderSeconds).toBeNull();
   });
 
   it("keeps no pre-render past a change, and draws none while an event waits", async () => {

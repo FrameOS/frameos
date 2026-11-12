@@ -36,6 +36,8 @@ async function standIn(options: SceneRenderOptions): Promise<SceneRenderResult> 
     height: options.height,
     logs: [],
     png: Buffer.alloc(0),
+    // The scene wants its next picture in half an hour (docs/server-rendering.md).
+    refreshInterval: 1800,
     renderMs: 5,
     rgba: new Uint8Array(options.width * options.height * 4).fill(255),
     state: { count: 7 },
@@ -209,6 +211,8 @@ describe("a sleeping frame the cloud renders for", () => {
     expect(row?.prerenderScene).toBe("clock");
     expect(row?.prerenderAsOf?.getTime()).toBe(renderAt * 1000);
     expect(row?.prerenderState).toEqual({ clock: { count: 7 } });
+    // When the scene wants the picture after it, for the pull that takes it.
+    expect(row?.prerenderNextRenderSeconds).toBe(1800);
     expect(row?.prerender?.subarray(0, 4).toString("latin1")).toBe("FOSB");
     // Kept, not committed: the pull at the wake does that.
     expect(row?.states).toEqual({});

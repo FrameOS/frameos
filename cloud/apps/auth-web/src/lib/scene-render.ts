@@ -185,6 +185,15 @@ export type SceneRenderResult = {
   state: unknown;
   /** PNG of the small copy, when `thumbnailMaxDimension` asked for one. */
   thumbnail?: Buffer;
+  /**
+   * When the scene wants its next render, in seconds: this render's own
+   * `nextSleep` (logic/nextSleepDuration), absent when it set none, and the
+   * scene's `refreshInterval`, absent when it has none. Absent too when the
+   * runtime predates the report (docs/server-rendering.md "When the next
+   * picture is due").
+   */
+  nextSleep?: number;
+  refreshInterval?: number;
   width: number;
 };
 
@@ -403,8 +412,10 @@ type WorkerResult =
       logs: string[];
       ok: true;
       packError?: string;
+      nextSleep: number | null;
       packed?: boolean;
       palette: string[] | null;
+      refreshInterval: number | null;
       renderMs: number;
       sceneId: string;
       state: unknown;
@@ -488,7 +499,13 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
             ),
           );
         const reported = {
+          ...(typeof result.nextSleep === "number" && Number.isFinite(result.nextSleep) && result.nextSleep >= 0
+            ? { nextSleep: result.nextSleep }
+            : {}),
           ...(result.palette && result.palette.length > 0 ? { palette: result.palette } : {}),
+          ...(typeof result.refreshInterval === "number" && Number.isFinite(result.refreshInterval) && result.refreshInterval > 0
+            ? { refreshInterval: result.refreshInterval }
+            : {}),
           ...(result.sceneId ? { sceneId: result.sceneId } : {}),
         };
         if (result.packed) {
@@ -1028,6 +1045,19 @@ async function main() {
   } catch {
     palette = null;
   }
+  // When the scene wants its next render: this render's nextSleep (-1: none)
+  // and the scene's refreshInterval (0: none). A runtime without the exports
+  // says nothing (docs/server-rendering.md "When the next picture is due").
+  const reportedSeconds = (name) => {
+    try {
+      const value = call(name, "number", [], []);
+      return typeof value === "number" && Number.isFinite(value) ? value : null;
+    } catch {
+      return null;
+    }
+  };
+  const nextSleep = reportedSeconds("frameos_wasm_next_sleep");
+  const refreshInterval = reportedSeconds("frameos_wasm_scene_interval");
   // Packed for the panel here, where the pixels are (SceneRenderOptions.pack):
   // the packer is panel-pack.ts's own, built from its text, and only the
   // FOSB crosses to the main thread. Anything that goes wrong hands the
@@ -1051,7 +1081,7 @@ async function main() {
       );
       const body = fosb.byteOffset === 0 && fosb.byteLength === fosb.buffer.byteLength ? fosb.buffer : fosb.slice().buffer;
       parentPort.postMessage(
-        { ok: true, packed: true, buffer: body, width, height, logs, palette, renderMs: Date.now() - started, sceneId, state },
+        { ok: true, packed: true, buffer: body, width, height, logs, nextSleep, palette, refreshInterval, renderMs: Date.now() - started, sceneId, state },
         [body],
       );
       return;
@@ -1061,7 +1091,7 @@ async function main() {
   }
   const buffer = Module.HEAPU8.buffer.slice(ptr, ptr + len);
   parentPort.postMessage(
-    { ok: true, buffer, width, height, logs, palette, renderMs: Date.now() - started, sceneId, state, ...(packError ? { packError } : {}) },
+    { ok: true, buffer, width, height, logs, nextSleep, palette, refreshInterval, renderMs: Date.now() - started, sceneId, state, ...(packError ? { packError } : {}) },
     [buffer],
   );
 }

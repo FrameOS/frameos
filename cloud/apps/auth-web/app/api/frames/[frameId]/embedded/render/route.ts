@@ -171,17 +171,24 @@ async function pull(
     return jsonError("render_failed", 502);
   }
   const headers = { "Cache-Control": "no-store" };
-  if (pulled.status === 304) {
-    return new NextResponse(null, { headers: { ...headers, ETag: `"${pulled.etag}"` }, status: 304 });
-  }
-  if (pulled.status === 200) {
+  if (pulled.status === 304 || pulled.status === 200) {
+    // What the picture is and when the scene wants the next one, on a 304 as
+    // on a 200: the board names the scene and takes its next wake from them
+    // (docs/server-rendering.md "When the next picture is due").
+    const about: Record<string, string> = {
+      ETag: `"${pulled.etag}"`,
+      "X-FrameOS-Scene": encodeURIComponent(pulled.scene),
+      ...(pulled.nextRenderSeconds !== null ? { "X-FrameOS-Next-Render": String(pulled.nextRenderSeconds) } : {}),
+    };
+    if (pulled.status === 304) {
+      return new NextResponse(null, { headers: { ...headers, ...about }, status: 304 });
+    }
     return new NextResponse(new Uint8Array(pulled.body), {
       headers: {
         ...headers,
+        ...about,
         "Content-Length": String(pulled.body.length),
         "Content-Type": "application/octet-stream",
-        ETag: `"${pulled.etag}"`,
-        "X-FrameOS-Scene": encodeURIComponent(pulled.scene),
       },
       status: 200,
     });

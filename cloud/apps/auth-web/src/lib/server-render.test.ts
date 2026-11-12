@@ -9,6 +9,7 @@ import {
   deviceInputHasAny,
   ifNoneMatchHas,
   lastPictureUsable,
+  maxNextRenderSeconds,
   parseServerRenderPanel,
   planeLastState,
   prerenderLeadMs,
@@ -16,6 +17,7 @@ import {
   readDeviceInput,
   relayedEventOrigins,
   renderFrameConfig,
+  serverNextRenderSeconds,
   serverRenderEtag,
   serverRenderPanelKey,
 } from "./server-render";
@@ -315,5 +317,34 @@ describe("the frame's reported scene, for hardware the cloud renders for", () =>
       planeLastState("system/sceneSwitcher", { clock: { count: 1 }, "system/sceneSwitcher": { from: "clock" } }),
     ).toEqual({ active_scene: "clock", clock: { count: 1 } });
     expect(planeLastState(null, { clock: { count: 1 } })).toEqual({ clock: { count: 1 } });
+  });
+});
+
+describe("when the next picture is due (docs/server-rendering.md)", () => {
+  it("is the render's nextSleep before the scene's interval", () => {
+    expect(serverNextRenderSeconds({ nextSleep: 900, refreshInterval: 600 }, 300)).toBe(900);
+    expect(serverNextRenderSeconds({ refreshInterval: 600 }, 300)).toBe(600);
+    expect(serverNextRenderSeconds({ nextSleep: -1, refreshInterval: 600 }, 300)).toBe(600);
+  });
+
+  it("is nothing when the scene has no opinion", () => {
+    expect(serverNextRenderSeconds({}, 300)).toBeNull();
+    expect(serverNextRenderSeconds({ nextSleep: -1, refreshInterval: 0 }, 300)).toBeNull();
+    expect(serverNextRenderSeconds({ nextSleep: null, refreshInterval: Number.NaN }, 300)).toBeNull();
+  });
+
+  it("is never under the plan's floor, nor over seven days", () => {
+    // A clock that wants every second, and a nextSleep of 0, wait the floor.
+    expect(serverNextRenderSeconds({ refreshInterval: 1 }, 300)).toBe(300);
+    expect(serverNextRenderSeconds({ nextSleep: 0, refreshInterval: 60 }, 300)).toBe(300);
+    expect(serverNextRenderSeconds({ refreshInterval: 30 * 86400 }, 300)).toBe(maxNextRenderSeconds);
+    expect(maxNextRenderSeconds).toBe(7 * 86400);
+    // Whole seconds on the wire.
+    expect(serverNextRenderSeconds({ refreshInterval: 450.4 }, 300)).toBe(450);
+  });
+
+  it("takes the plan's floor for cloud-rendered frames by default", () => {
+    expect(serverNextRenderSeconds({ refreshInterval: 1 })).toBeGreaterThanOrEqual(1);
+    expect(serverNextRenderSeconds({ refreshInterval: 1 })).toBe(serverNextRenderSeconds({ refreshInterval: 0.5 }));
   });
 });
