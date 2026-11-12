@@ -42,16 +42,20 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
+import logging
 import re
 import struct
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
+from urllib.parse import quote
 
 from fastapi import Depends, Header, HTTPException, Query, Request
 from fastapi.responses import Response
+from starlette.background import BackgroundTask
 from sqlalchemy.orm import Session
 
 from app.utils.tz_slice import tz_slice
@@ -871,11 +875,27 @@ class _ThinClientPlan:
     fingerprint: str
 
 
+def _hardware_preset(frame: Frame) -> dict:
+    """The frame's board preset (EMBEDDED_HARDWARE_PRESETS), {} for none or
+    one this backend does not know."""
+    from app.tasks.embedded_firmware import EMBEDDED_HARDWARE_PRESETS, embedded_hardware_preset_for_frame
+
+    try:
+        key = embedded_hardware_preset_for_frame(frame)
+    except ValueError:
+        return {}
+    preset = EMBEDDED_HARDWARE_PRESETS.get(key) if key else None
+    return preset if isinstance(preset, dict) else {}
+
+
 def thin_client_frame_json(frame: Frame, pixel_format: int) -> dict:
     """What else of frame.json the frame's own runtime keeps, for its render
-    here (frameos_wasm_set_frame): its event map (only when the backend holds
-    one, as `/embedded/settings` sends it), its palette and colours, its
-    buttons, its panel's format and its rotation."""
+    here (frameos_wasm_set_frame): its event map, its palette and colours,
+    its buttons, its panel's format and its rotation. A board the backend
+    holds no event map or buttons for runs its preset's (fos_board.c), so the
+    render does too; `/embedded/settings` still sends them only when the
+    backend holds them, the board having the preset itself. A stored empty
+    map stays empty: the owner cleared it."""
     colors = getattr(frame, "colors", None)
     frame_json: dict = {
         "palette": [f"#{r:02x}{g:02x}{b:02x}" for r, g, b in palette_colors(getattr(frame, "palette", None))],
@@ -883,10 +903,15 @@ def thin_client_frame_json(frame: Frame, pixel_format: int) -> dict:
         "pixelFormat": int(pixel_format),
         "rotate": int(getattr(frame, "rotate", 0) or 0) % 360,
     }
+    preset = _hardware_preset(frame)
     event_map = getattr(frame, "event_map", None)
+    if not isinstance(event_map, list):
+        event_map = preset.get("eventMap")
     if isinstance(event_map, list):
         frame_json["eventMap"] = normalize_event_map(event_map)
     buttons = getattr(frame, "gpio_buttons", None)
+    if not isinstance(buttons, list):
+        buttons = preset.get("gpioButtons")
     if isinstance(buttons, list):
         frame_json["gpioButtons"] = [dict(button) for button in buttons if isinstance(button, dict)]
     return frame_json
@@ -1012,6 +1037,17 @@ def _fosb_from_rgba(
     return fosb_payload(plan.width, plan.height, plan.pixel_format, packed)
 
 
+@dataclass
+class _Drawn:
+    """A picture for the pull: the panel bitmap, the scene it shows (None:
+    the diagnostic card, or a scene the renderer did not name) and the RGBA
+    it was packed from (None for the card), for the workspace's copy."""
+
+    body: bytes
+    scene_id: str | None
+    rgba: bytes | None
+
+
 async def _render_thin_client_now(
     db: Session,
     redis,
@@ -1020,7 +1056,7 @@ async def _render_thin_client_now(
     *,
     control_events: list[dict],
     relayed: dict | None,
-) -> bytes:
+) -> _Drawn:
     """One render for the pull, the held events and the board's presses
     heard first.
 
@@ -1069,7 +1105,8 @@ async def _render_thin_client_now(
         except Exception:
             # Nor may a log line that could not be written.
             pass
-    return await _fosb_off_the_loop(frame, plan, rgba, photo_palette)
+    body = await _fosb_off_the_loop(frame, plan, rgba, photo_palette)
+    return _Drawn(body, _drawn_scene(plan, rendered_state) if rgba is not None else None, rgba)
 
 
 async def _embedded_render_response(
@@ -1090,27 +1127,109 @@ async def _embedded_render_response(
     # that does not fit this pull will not fit a later one either.
     kept = await take_prerender(redis, int(frame.id))
     control_events = await _take_thin_client_events(redis, frame)
-    body: bytes | None = None
+    drawn: _Drawn | None = None
+    preview: bytes | None = None
     if kept is not None and relayed is None and not control_events:
-        record, kept_body = kept
         if prerender_usable(
-            record,
+            kept.record,
             fingerprint=plan.fingerprint,
             revision=await render_revision(redis, int(frame.id)),
             now_ms=int(time.time() * 1000),
         ):
-            body = kept_body
+            scene_id = kept.record.get("sceneId")
+            drawn = _Drawn(kept.body, scene_id if isinstance(scene_id, str) and scene_id else None, None)
+            preview = kept.preview
             # Its state is the scene's now: committed when shown, not drawn.
-            await _keep_rendered_state(redis, frame, record.get("state"))
-    if body is None:
-        body = await _render_thin_client_now(
+            await _keep_rendered_state(redis, frame, kept.record.get("state"))
+    if drawn is None:
+        drawn = await _render_thin_client_now(
             db, redis, frame, plan, control_events=control_events, relayed=relayed
         )
-    etag = fosb_etag(body)
+    etag = fosb_etag(drawn.body)
     headers = {"ETag": etag, "Cache-Control": "no-store"}
+    if drawn.scene_id:
+        # The scene the picture shows, as the cloud's route says it: the
+        # board names it in its logs, its own runtime knowing none.
+        headers[SERVER_RENDER_SCENE_HEADER] = quote(drawn.scene_id, safe="-_.!~*'()")
     if etag_matches(if_none_match, etag):
         return Response(status_code=HTTPStatus.NOT_MODIFIED, headers=headers)
-    return Response(content=body, media_type="application/octet-stream", headers=headers)
+    keep = None
+    if drawn.scene_id and (preview is not None or drawn.rgba is not None):
+        # After the answer has gone: the board is waiting for its picture.
+        keep = BackgroundTask(_store_served_picture, int(frame.id), drawn.scene_id, plan, png=preview, rgba=drawn.rgba)
+    return Response(content=drawn.body, media_type="application/octet-stream", headers=headers, background=keep)
+
+
+# The header a render pull's answer names the scene it shows in (the cloud's
+# route sends the same, URI-encoded).
+SERVER_RENDER_SCENE_HEADER = "X-FrameOS-Scene"
+# The workspace's copy of what a pull served is written at most this often
+# for one scene (a board pulling every second for an animation, say); a new
+# scene is written at once.
+SERVED_PICTURE_MIN_INTERVAL_SECONDS = 10
+
+
+def _drawn_scene(plan: _ThinClientPlan, rendered_state: dict | None) -> str | None:
+    """The scene a render ended on (a relayed key may have switched it),
+    else the one it was asked for."""
+    if isinstance(rendered_state, dict):
+        scene_id = rendered_state.get("sceneId")
+        if isinstance(scene_id, str) and scene_id:
+            return scene_id
+    return plan.scene_id
+
+
+def _scene_png(plan: _ThinClientPlan, rgba: bytes) -> bytes:
+    """The upright scene image a picture was packed from, as PNG: what the
+    workspace shows of a frame rendered here, as of a virtual frame."""
+    from PIL import Image
+
+    image = Image.frombytes("RGBA", (plan.scene_width, plan.scene_height), rgba).convert("RGB")
+    out = io.BytesIO()
+    image.save(out, format="PNG", compress_level=3)
+    return out.getvalue()
+
+
+async def _store_served_picture(
+    frame_id: int, scene_id: str, plan: _ThinClientPlan, *, png: bytes | None, rgba: bytes | None
+) -> None:
+    """Keep what a pull served as the frame's image, once the answer has
+    gone: the board renders nothing itself, so the backend is where its
+    picture is (the board stopped pushing it back in remote mode). One scene
+    at most every SERVED_PICTURE_MIN_INTERVAL_SECONDS, a new scene at once;
+    the PNG is encoded on a worker thread, the row written with a session of
+    its own (the request's is closed by then)."""
+    from app.database import SessionLocal
+    from app.redis import get_shared_redis
+
+    from .frames import FRAME_IMAGE_PUSHED_TTL_SECONDS, _frame_image_pushed_key, _store_frame_image
+
+    redis = get_shared_redis()
+    key = f"frame:{frame_id}:image:served"
+    try:
+        raw = await redis.get(key)
+        previous = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+        if previous == scene_id:
+            return
+        await redis.set(key, scene_id, ex=SERVED_PICTURE_MIN_INTERVAL_SECONDS)
+        if png is None and rgba is not None:
+            png = await asyncio.to_thread(_scene_png, plan, rgba)
+        if png is None:
+            return
+        db = SessionLocal()
+        try:
+            frame = db.get(Frame, frame_id)
+            if frame is None:
+                return
+            # The image route serves this instead of asking a board that
+            # sleeps between pulls (current_frame_image).
+            await redis.set(_frame_image_pushed_key(frame_id), b"1", ex=FRAME_IMAGE_PUSHED_TTL_SECONDS)
+            await _store_frame_image(db, redis, frame, png, scene_id=scene_id)
+        finally:
+            db.close()
+    except Exception:
+        # The workspace's copy must never cost anything else.
+        logging.getLogger(__name__).warning("could not keep frame %s's served picture", frame_id, exc_info=True)
 
 
 async def prerender_thin_client(db: Session, redis, frame: Frame, as_of_ms: int) -> bool:
@@ -1154,6 +1273,8 @@ async def prerender_thin_client(db: Session, redis, frame: Frame, as_of_ms: int)
         return False
     await remember_render_ms(redis, int(frame.id), int((time.monotonic() - started) * 1000))
     body = await _fosb_off_the_loop(frame, plan, rgba, photo_palette)
+    # The workspace's copy, published by the pull that takes it.
+    preview = await asyncio.to_thread(_scene_png, plan, rgba)
     # Still asleep for the same wake, and nothing written or held meanwhile?
     # The frame row is read again outside the transaction the plan read in.
     db.rollback()
@@ -1170,7 +1291,7 @@ async def prerender_thin_client(db: Session, redis, frame: Frame, as_of_ms: int)
         int(frame.id),
         {
             "asOfMs": int(as_of_ms),
-            "sceneId": plan.scene_id,
+            "sceneId": _drawn_scene(plan, rendered_state),
             "revision": revision,
             "fingerprint": plan.fingerprint,
             "state": rendered_state,
@@ -1178,6 +1299,7 @@ async def prerender_thin_client(db: Session, redis, frame: Frame, as_of_ms: int)
         },
         body,
         int(as_of_ms),
+        preview=preview,
     )
     return True
 

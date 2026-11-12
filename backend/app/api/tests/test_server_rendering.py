@@ -1013,3 +1013,226 @@ async def test_the_pull_packs_off_the_event_loop(async_client, no_auth_client, d
     monkeypatch.setattr('app.api.embedded_device._fosb_from_rgba', fosb)
     await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
     assert seen == [(False, _PanelFrame)]
+
+
+# ------------------------------------------- the plane's scene, the plane's picture
+#
+# Found on an E1003 rendered on the dev backend (2026-11-12): a workspace
+# switch was drawn by the pull and undone within a second, because the
+# board's render lines, its picture push and its own /image named the scene
+# its idle runtime had before. The backend is the memory for a frame it
+# renders: it names the scene it drew, and it keeps the picture it served.
+
+
+@pytest.mark.asyncio
+async def test_the_boards_render_lines_do_not_name_the_scene(async_client, db, redis):
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'photos')
+    await process_log(db, redis, frame, {'event': 'render:scene', 'sceneId': 'clock', 'mode': 'remote'})
+    assert await redis.get(f'frame:{frame.id}:active_scene') == b'photos'
+
+    # A board that renders itself still says which scene it drew.
+    frame.device_config = {**(frame.device_config or {}), 'renderMode': 'local'}
+    db.add(frame)
+    db.commit()
+    await process_log(db, redis, frame, {'event': 'render:scene', 'sceneId': 'clock', 'mode': 'local'})
+    assert await redis.get(f'frame:{frame.id}:active_scene') == b'clock'
+
+
+@pytest.mark.asyncio
+async def test_a_pushed_picture_does_not_name_the_scene(async_client, no_auth_client, db, redis):
+    """An older board still pushes its picture after a pull, with its idle
+    runtime's scene: kept as the frame's image, under the backend's scene."""
+    from app.api import frames as frames_api
+
+    from .test_embedded_device import bmp_bytes
+
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'photos')
+    response = await no_auth_client.post(
+        f'/api/frames/{frame.id}/embedded/image?scene_id=clock',
+        content=bmp_bytes((4, 2), 'red'),
+        headers={**auth(frame), 'Content-Type': 'image/bmp'},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()['sceneId'] == 'photos'
+    assert await redis.get(f'frame:{frame.id}:active_scene') == b'photos'
+    assert (await redis.get(frames_api._frame_image_cache_key(frame.id))).startswith(b'\x89PNG')
+
+
+@pytest.mark.asyncio
+async def test_a_picture_fetched_from_the_board_does_not_name_the_scene(async_client, db, redis):
+    import io
+    from unittest.mock import patch
+
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'photos')
+    bmp = io.BytesIO()
+    Image.new('RGB', (2, 1), 'white').save(bmp, format='BMP')
+
+    async def fetch(frame_obj, redis_obj, *, path, method='GET'):
+        return 200, bmp.getvalue(), {'content-type': 'image/bmp', 'x-scene-id': 'clock'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', side_effect=fetch):
+        response = await async_client.get(f'/api/frames/{frame.id}/image?t=1')
+    assert response.status_code == 200
+    assert await redis.get(f'frame:{frame.id}:active_scene') == b'photos'
+
+
+@pytest.mark.asyncio
+async def test_the_state_routes_answer_from_the_backends_store(async_client, db, redis):
+    """Not from the board, whose runtime holds what is left from before."""
+    from unittest.mock import patch
+
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    await apply_virtual_scene_state(redis, frame, 'clock', {'label': 'from the plane'})
+
+    async def board(*args, **kwargs):
+        raise AssertionError('asked the board')
+
+    with patch('app.api.frames._forward_frame_request', side_effect=board):
+        state = await async_client.get(f'/api/frames/{frame.id}/state')
+        states = await async_client.get(f'/api/frames/{frame.id}/states')
+    assert state.status_code == 200, state.text
+    assert state.json()['sceneId'] == 'clock'
+    assert state.json()['state'] == {'label': 'from the plane'}
+    assert states.status_code == 200, states.text
+    assert states.json()['sceneId'] == 'clock'
+
+
+@pytest.mark.asyncio
+async def test_the_pull_names_the_scene_it_drew(async_client, no_auth_client, db, redis, monkeypatch):
+    """`X-FrameOS-Scene`, URI-encoded as the cloud's route sends it: the
+    scene the render ended on, on the picture and on the 304 alike."""
+    from urllib.parse import unquote
+
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state',
+                        recording_renderer([], state={'sceneId': 'photos', 'state': {}}))
+    url = f'/api/frames/{frame.id}/embedded/render'
+    first = await no_auth_client.get(url, headers=auth(frame))
+    assert first.status_code == 200
+    assert first.headers['x-frameos-scene'] == 'photos'
+    same = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': first.headers['etag']})
+    assert same.status_code == 304
+    assert same.headers['x-frameos-scene'] == 'photos'
+
+    from app.api.embedded_device import SERVER_RENDER_SCENE_HEADER, quote
+
+    assert SERVER_RENDER_SCENE_HEADER == 'X-FrameOS-Scene'
+    # encodeURIComponent's set: what the cloud's route sends for the same id.
+    assert quote("Kitchen: d'été", safe="-_.!~*'()") == "Kitchen%3A%20d'%C3%A9t%C3%A9"
+    assert unquote(quote('a/b c', safe="-_.!~*'()")) == 'a/b c'
+
+
+@pytest.mark.asyncio
+async def test_the_picture_a_pull_served_is_the_frames_image(async_client, no_auth_client, db, redis, monkeypatch):
+    """The board stopped pushing its picture back in remote mode: the backend
+    keeps what it served, upright as the scene drew it, under that scene."""
+    import io
+
+    from app.api import frames as frames_api
+    from app.models.scene_image import SceneImage
+
+    frame = await server_rendered_frame(async_client, db)
+    frame.rotate = 90
+    db.add(frame)
+    db.commit()
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state',
+                        recording_renderer([], rgba_pixel=(255, 0, 0, 255), state={'sceneId': 'clock', 'state': {}}))
+    url = f'/api/frames/{frame.id}/embedded/render'
+    first = await no_auth_client.get(url, headers=auth(frame))
+    assert first.status_code == 200
+
+    cached = await redis.get(frames_api._frame_image_cache_key(frame.id))
+    assert cached and cached.startswith(b'\x89PNG')
+    with Image.open(io.BytesIO(cached)) as image:
+        # Upright: the scene's canvas, before the panel's turn.
+        plan_w, plan_h = image.size
+        assert plan_w < plan_h
+        assert image.convert('RGB').getpixel((0, 0)) == (255, 0, 0)
+    assert await redis.get(frames_api._frame_image_pushed_key(frame.id)) == b'1'
+    db.expire_all()
+    assert db.query(SceneImage).filter_by(frame_id=frame.id, scene_id='clock').count() == 1
+    # And it is what the image route serves, without asking the board.
+    served = await async_client.get(f'/api/frames/{frame.id}/image?t=2')
+    assert served.status_code == 200
+    assert served.content == cached
+
+    # A 304 is the board's picture already: nothing is written again, and
+    # another picture of the same scene within the interval waits.
+    await redis.delete(frames_api._frame_image_cache_key(frame.id))
+    same = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': first.headers['etag']})
+    assert same.status_code == 304
+    assert await redis.get(frames_api._frame_image_cache_key(frame.id)) is None
+
+    # A new scene is written at once.
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state',
+                        recording_renderer([], rgba_pixel=(0, 0, 255, 255), state={'sceneId': 'photos', 'state': {}}))
+    other = await no_auth_client.get(url, headers=auth(frame))
+    assert other.status_code == 200
+    cached = await redis.get(frames_api._frame_image_cache_key(frame.id))
+    with Image.open(io.BytesIO(cached)) as image:
+        assert image.convert('RGB').getpixel((0, 0)) == (0, 0, 255)
+    db.expire_all()
+    assert db.query(SceneImage).filter_by(frame_id=frame.id, scene_id='photos').count() == 1
+
+
+@pytest.mark.asyncio
+async def test_a_picture_drawn_before_the_wake_is_published_when_taken_not_when_drawn(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    from app.api import frames as frames_api
+
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    as_of_ms = asleep_until(db, frame, 30)
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state',
+                        recording_renderer([], state={'sceneId': 'clock', 'state': {'label': 'ahead'}}))
+    assert await prerender_thin_client(db, redis, frame, as_of_ms) is True
+    # The board still shows the picture before: nothing published yet.
+    assert await redis.get(frames_api._frame_image_cache_key(frame.id)) is None
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', refusing_render)
+    taken = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert taken.status_code == 200
+    assert taken.headers['x-frameos-scene'] == 'clock'
+    assert (await redis.get(frames_api._frame_image_cache_key(frame.id))).startswith(b'\x89PNG')
+
+
+@pytest.mark.asyncio
+async def test_a_frame_without_a_map_or_buttons_of_its_own_renders_with_its_presets(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    """The board runs its preset's map and buttons when the backend holds
+    none (fos_board.c), so its render here does too; a map the owner cleared
+    stays clear. `/embedded/settings` still sends only what the backend holds."""
+    from app.tasks.embedded_firmware import EMBEDDED_HARDWARE_PRESETS
+    from app.models.frame import normalize_event_map
+
+    frame = await server_rendered_frame(async_client, db, hardwarePreset='seeed_reterminal_e1003')
+    frame.event_map = None
+    frame.gpio_buttons = None
+    db.add(frame)
+    db.commit()
+    preset = EMBEDDED_HARDWARE_PRESETS['seeed_reterminal_e1003']
+    calls: list = []
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', recording_renderer(calls))
+    url = f'/api/frames/{frame.id}/embedded/render'
+    await no_auth_client.get(url, headers=auth(frame))
+    sent = calls[-1]['frame_json']
+    assert sent['eventMap'] == normalize_event_map(preset['eventMap'])
+    assert any(rule.get('emit') == 'setCurrentScene' for rule in sent['eventMap'])
+    assert sent['gpioButtons'] == preset['gpioButtons']
+    settings = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert 'eventMap' not in settings.json()['frame']
+    assert 'gpioButtons' not in settings.json()['frame']
+
+    frame.event_map = []
+    db.add(frame)
+    db.commit()
+    await no_auth_client.get(url, headers=auth(frame))
+    assert calls[-1]['frame_json']['eventMap'] == []

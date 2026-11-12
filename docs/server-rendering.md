@@ -81,7 +81,8 @@ input as a JSON body (see "Keys, touch and the schedule").
   dropped whenever anything else draws the panel.
 - **200**: the FOSB bitmap (`FOSB`, version 1, format, width u16le, height
   u16le, reserved u16, then the packed panel bytes), `ETag: "<first 32 hex of
-  sha256(body)>"`, `Cache-Control: no-store`.
+  sha256(body)>"`, `Cache-Control: no-store`, and `X-FrameOS-Scene: <the
+  scene drawn, URI-encoded>` (on a 304 too), so the device can name it.
 - **304**: the picture is the one the panel shows. No body; the device
   leaves the panel alone and logs `render:device skipped unchanged`.
 - **Errors**: the backend answers a diagnostic card instead of failing. The
@@ -182,9 +183,15 @@ the wake. The frame page behind the gear has nothing to show on a plane (its
 facts are the device's): with no host behind it the gear is not offered.
 
 The plane's record is also what the workspace shows: the scene showing and
-its state come from the plane's store (the backend's `_load_frame_states`,
-the cloud's `frames.last_state` written at each committed render), never
-from what the device reports of its own idle runtime.
+its state come from the plane's store (the backend's `_load_frame_states`
+and `/state`, the cloud's `frames.last_state` written at each committed
+render), never from what the device reports of its own idle runtime: not its
+commands pull, not its render log lines, not the `scene_id` of a picture it
+pushes, not its own `/image`. A backend that took those undid every switch
+the pull had just drawn (E1003, 2026-11-12). The picture is the plane's too:
+the backend keeps what a pull served (the upright scene image, as PNG, after
+the answer has gone, one scene at most every 10 s) as the frame's image, and
+a picture drawn ahead of a wake is published when a pull takes it.
 
 A pull with input never takes a picture drawn ahead of a wake.
 
