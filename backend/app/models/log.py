@@ -484,6 +484,14 @@ async def process_log(
             record_successful_deploy(frame, _embedded_boot_deploy_snapshot(frame, embedded_boot_metadata), timestamp)
         await update_frame(db, redis, frame)
 
+    # A frame rendered on the backend that goes to sleep has its next picture
+    # drawn before it wakes, so the wake is a download, not a render
+    # (docs/server-rendering.md "Deep sleep").
+    if event == 'sleep' and changes.get('next_wake_at') is not None:
+        from app.utils.server_render import schedule_prerender
+
+        await schedule_prerender(redis, frame)
+
     if event == 'metrics':
         metrics_dict = deepcopy(log)
         if 'event' in metrics_dict:

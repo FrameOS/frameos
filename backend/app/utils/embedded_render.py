@@ -72,6 +72,39 @@ def wasm_assets_dir() -> Path | None:
     return None
 
 
+# What scene HTTP may reach from the renderer (embedded_wasm_render.mjs
+# addressClass): public addresses; those and the LAN / VPN ranges (10/8,
+# 172.16/12, 192.168/16, 100.64/10, fc00::/7); or everything but the cloud
+# metadata address.
+NETWORK_POLICY_PUBLIC = "public"
+NETWORK_POLICY_PRIVATE = "private"
+NETWORK_POLICY_ALL = "all"
+
+
+def scene_network_policy(frame: Frame) -> str:
+    """What a scene rendered here for ``frame`` may reach over HTTP.
+
+    ``network.allowLocalNetworkAccess`` decides when it is set: true is
+    everything (the backend host's own loopback and link-local included),
+    false public addresses only. Unset, a physical frame rendered here (a
+    thin client: an ESP32-C3, or an S3 rendered on the server) reaches the
+    LAN and VPN ranges, as the device itself would: a frame managed by a
+    self-hosted backend has no local-network block (docs/lan-access.md), and
+    moving its scene onto the backend must not take its NAS or its VPN hosts
+    away. The backend host's own addresses stay refused: they are not the
+    frame's network. Anything else (a virtual frame, a preview) keeps the
+    opt-in rule."""
+    from app.tasks.embedded_firmware import is_thin_client_frame
+
+    network = getattr(frame, "network", None)
+    allowed = network.get("allowLocalNetworkAccess") if isinstance(network, dict) else None
+    if allowed is True:
+        return NETWORK_POLICY_ALL
+    if allowed is False or getattr(frame, "mode", None) != "embedded":
+        return NETWORK_POLICY_PUBLIC
+    return NETWORK_POLICY_PRIVATE if is_thin_client_frame(frame) else NETWORK_POLICY_PUBLIC
+
+
 def thin_client_renderer_available() -> bool:
     return shutil.which("node") is not None and wasm_assets_dir() is not None and RENDER_HARNESS.is_file()
 
@@ -130,6 +163,7 @@ async def render_scene(
     device_limits: dict | None = None,
     control_events: list[dict] | None = None,
     device_input: dict | None = None,
+    now_ms: int | None = None,
     timeout: float = RENDER_TIMEOUT_SECONDS,
 ) -> SceneRender:
     """One frame of the scene, with its post-render state and saved assets.
@@ -164,7 +198,7 @@ async def render_scene(
     if node is None or assets is None or not RENDER_HARNESS.is_file():
         return SceneRender(None, error="The scene renderer is not available (Node.js or the wasm runtime is missing).")
 
-    network = frame.network if isinstance(frame.network, dict) else {}
+    network_policy = scene_network_policy(frame)
     request = {
         "assetsDir": str(assets),
         "width": int(width),
@@ -173,11 +207,12 @@ async def render_scene(
         "timeZone": frame_timezone(frame.timezone),
         "settingsJson": json.dumps(settings or {}),
         "scenesJson": json.dumps(scenes, separators=(",", ":")),
-        # Scene HTTP on this frame may reach the LAN only if the owner said so —
-        # the same knob the device runtime reads (network.allowLocalNetworkAccess).
-        # The renderer runs on the backend's network, so this is what keeps a
-        # published scene away from the router, HA and the NAS.
-        "allowLocalNetwork": network.get("allowLocalNetworkAccess") is True,
+        # What the scene's HTTP may reach (scene_network_policy). The renderer
+        # runs on the backend's network, so this is what keeps a published
+        # scene away from the router, HA and the NAS where the frame itself
+        # would not reach them. allowLocalNetwork is the older harness's word.
+        "networkPolicy": network_policy,
+        "allowLocalNetwork": network_policy == "all",
     }
     if scene_id:
         request["sceneId"] = scene_id
@@ -201,6 +236,13 @@ async def render_scene(
         request["controlEventsJson"] = json.dumps(control_events, separators=(",", ":"))
     if device_input and device_input.get("edges"):
         request["deviceInputJson"] = json.dumps(device_input, separators=(",", ":"))
+    # The scene's clock (docs/server-rendering.md "Deep sleep"): a picture
+    # drawn ahead of a sleeping frame's wake renders as of the wake, so a
+    # clock face shows the minute the frame wakes into. The harness shifts
+    # Date.now inside its own process only (the scene's HTTP runs in child
+    # processes on the real clock).
+    if now_ms is not None:
+        request["nowMs"] = int(now_ms)
 
     expected = int(width) * int(height) * 4
     global _render_waiters
@@ -270,6 +312,7 @@ async def render_scene_rgba_and_state(
     control_events: list[dict] | None = None,
     device_input: dict | None = None,
     scene_logs: list[str] | None = None,
+    now_ms: int | None = None,
     timeout: float = RENDER_TIMEOUT_SECONDS,
 ) -> tuple[bytes | None, dict | None, dict | None]:
     """render_scene as (RGBA bytes, post-render state, saved assets). The
@@ -287,6 +330,7 @@ async def render_scene_rgba_and_state(
         assets_write_budget=assets_write_budget,
         control_events=control_events,
         device_input=device_input,
+        now_ms=now_ms,
         timeout=timeout,
     )
     if scene_logs is not None:

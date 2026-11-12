@@ -40,6 +40,7 @@ from app.tasks.embedded_firmware import embedded_platform_spec_for_frame
 from app.utils import virtual_assets
 from app.utils.embedded_render import RenderQueueFull, render_scene_rgba_and_state
 from app.utils.refresh_interval import resolve_refresh_interval
+from app.utils.server_render import bump_render_revision
 
 from . import api_public
 from .embedded_device import (
@@ -157,6 +158,9 @@ async def _save_virtual_scene_states(redis, frame: Frame, states: dict[str, dict
             detail=f"Scene state exceeds {VIRTUAL_STATE_QUOTA_BYTES} bytes",
         )
     await redis.set(_virtual_states_key(frame.id), serialized)
+    # A thin client's picture drawn ahead of its wake was drawn from the
+    # state before this write (docs/server-rendering.md "Deep sleep").
+    await bump_render_revision(redis, int(frame.id))
 
 
 async def resolve_virtual_scene_id(redis, frame: Frame, scene_id: str | None = None) -> str | None:

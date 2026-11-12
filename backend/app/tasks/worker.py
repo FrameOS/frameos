@@ -22,6 +22,7 @@ from app.tasks.deploy_remote import deploy_remote_task
 from app.tasks.restart_remote import restart_remote_task
 from app.tasks.buildroot_image import buildroot_sd_image_task
 from app.tasks.prune_build_artifacts import prune_build_artifacts_task
+from app.tasks.prerender_thin_client import prerender_thin_client_task
 from app.config import config
 from app.redis import close_redis_connection, create_redis_connection
 from app.database import SessionLocal
@@ -96,6 +97,10 @@ class WorkerSettings:
         func(with_db_session(deploy_remote_task),     name="deploy_remote"),
         func(with_db_session(restart_remote_task),    name="restart_remote"),
         func(with_db_session(buildroot_sd_image_task), name="buildroot_sd_image"),
+        # A sleeping thin client's next picture, drawn before it wakes
+        # (docs/server-rendering.md): one render, bounded like a pull's.
+        func(cast(WorkerCoroutine, with_db_session(prerender_thin_client_task)), name="prerender_thin_client",
+             timeout=120, max_tries=1),
     ]
     # Housekeeping: SD images no frame points at any more, and cached release
     # images for other releases (app/tasks/prune_build_artifacts.py).
