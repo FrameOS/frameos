@@ -37,7 +37,7 @@ import {
   socialDescription,
 } from "../../../src/lib/social-description";
 import { listingForVersion } from "../../../src/lib/store-listing";
-import { previewDeviceFor } from "../../../src/lib/preview-devices";
+import { previewDeviceFor } from "../../../../../../frontend/src/sceneWorkspace/lib/preview-devices";
 import { storeEmbedFor } from "../../../src/lib/store-embed";
 import { imageSetForVersion, imageSetForVersionId } from "../../../src/lib/store-images";
 
