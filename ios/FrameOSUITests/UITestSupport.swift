@@ -58,6 +58,74 @@ extension XCTestCase {
         return app.buttons.matching(NSPredicate(format: "label == %@ AND identifier == %@", name, symbols[name] ?? name)).firstMatch
     }
 
+    /// A button of the navigation bar's ("More", "Add"). The iPhone Duo's
+    /// cover screen draws them in a rail beside the content, outside the bar.
+    @MainActor
+    func barButton(_ app: XCUIApplication, _ name: String) -> XCUIElement {
+        let inBar = app.navigationBars.buttons[name]
+        return inBar.exists ? inBar : app.buttons[name].firstMatch
+    }
+
+    /// Whether an element is on screen to tap. isHittable alone says yes for
+    /// a row scrolled up under the iPhone Duo's cover screen's bar, whose
+    /// tap then lands above the screen.
+    @MainActor
+    func onScreen(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
+        guard element.exists, element.isHittable else { return false }
+        let screen = app.windows.firstMatch.frame
+        let middle = element.frame.midY
+        return middle > screen.minY + 90 && middle < screen.maxY - 40
+    }
+
+    /// A short scroll with no fling (a third of the screen), so a row near
+    /// an edge comes on screen; a swipe flings past it on a short screen.
+    /// `up` moves the content up, as swipeUp does. Left of the middle: the
+    /// iPhone Duo's cover screen has its bar buttons down the right edge.
+    @MainActor
+    func nudge(_ app: XCUIApplication, up: Bool) {
+        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: up ? 0.7 : 0.35))
+        let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: up ? 0.35 : 0.7))
+        from.press(forDuration: 0.1, thenDragTo: to)
+    }
+
+    /// The screen's search field. Where it is folded into a Search button
+    /// (the iPhone Duo's cover screen), the button opens it first.
+    @MainActor
+    func searchField(_ app: XCUIApplication) -> XCUIElement {
+        let field = app.searchFields.firstMatch
+        if !field.waitForExistence(timeout: 5) {
+            let open = app.buttons["Search"].firstMatch
+            if open.exists { open.tap() }
+        }
+        return field
+    }
+
+    /// Done on a sheet that was scrolled. The iPhone Duo's cover screen
+    /// scrolls a sheet's bar away with its content: back up first (a swipe
+    /// at the top closes the sheet, which is what Done does).
+    @MainActor
+    func tapDone(_ app: XCUIApplication) {
+        let done = app.buttons["Done"].firstMatch
+        var tries = 0
+        while !done.exists && tries < 3 {
+            app.swipeDown()
+            tries += 1
+        }
+        if done.exists { done.tap() }
+    }
+
+    /// Back to the screen before: the bar's first button, or the Duo's
+    /// rail's.
+    @MainActor
+    func goBack(_ app: XCUIApplication) {
+        let inBar = app.navigationBars.buttons.element(boundBy: 0)
+        if inBar.exists {
+            inBar.tap()
+        } else {
+            app.buttons["BackButton"].firstMatch.tap()
+        }
+    }
+
     @MainActor
     func type(_ field: XCUIElement, _ text: String) {
         XCTAssertTrue(field.waitForExistence(timeout: 10), "no field \(field)")

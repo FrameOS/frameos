@@ -38,9 +38,11 @@ struct FrameDetailView: View {
     }
 
     /// Two columns: the picture, its status and the actions on the left, the
-    /// rest beside them. An iPad in landscape (or a large phone on its side):
-    /// one column there put the scenes under a picture the screen's height.
-    var twoColumns: Bool { size.width >= 900 && size.width > size.height }
+    /// rest beside them, whenever the page is wider than tall and wide
+    /// enough (an iPad or the iPhone Duo's inner screen on its side, a phone
+    /// on its side): one column there put the scenes under a picture the
+    /// screen's height.
+    var twoColumns: Bool { size.width >= ReadableWidth.wide && size.width > size.height }
 
     /// The picture's height at most: about half the page in one column (a
     /// portrait panel at an iPad's width was twice the screen), most of the

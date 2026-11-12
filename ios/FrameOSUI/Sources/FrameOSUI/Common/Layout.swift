@@ -13,9 +13,10 @@ enum ReadableWidth {
     static let signIn: CGFloat = 540
     /// The AI chat's messages and its field.
     static let chat: CGFloat = 760
-    /// From this width a screen has room for columns or a grid (an iPad,
-    /// full screen or two thirds of it; not a phone, nor an iPad's sheet).
-    static let wide: CGFloat = 700
+    /// From this width a screen has room for columns or a grid: an iPad (not
+    /// its form sheets, about 580), the iPhone Duo's inner screen (669), a
+    /// phone on its side. Never a phone held upright (440 at most).
+    static let wide: CGFloat = 600
 }
 
 extension View {

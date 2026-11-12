@@ -29,7 +29,8 @@ final class TourUITests: XCTestCase {
         let app = launchClean()
         waitForText(app, "Control your frames")
         let backendButton = button(app, containing: "Sign in to a self-hosted backend")
-        while !backendButton.isHittable { app.swipeUp() }
+        while !onScreen(app, backendButton) { app.swipeUp() }
+        sleep(1)
         backendButton.tap()
         type(app.textFields["frameos.local:8989"], backend)
         type(app.textFields["Email"], value("FRAMEOS_UITEST_EMAIL", "tester@example.com"))
@@ -47,7 +48,8 @@ final class TourUITests: XCTestCase {
         let app = launchClean()
         waitForText(app, "Control your frames")
         let other = button(app, containing: "Use another cloud address")
-        while !other.isHittable { app.swipeUp() }
+        while !onScreen(app, other) { app.swipeUp() }
+        sleep(1)
         other.tap()
         let address = app.textFields["Cloud address"]
         XCTAssertTrue(address.waitForExistence(timeout: 5))
@@ -74,7 +76,8 @@ final class TourUITests: XCTestCase {
         let app = launchClean()
         waitForText(app, "Control your frames")
         let other = button(app, containing: "Use another cloud address")
-        while !other.isHittable { app.swipeUp() }
+        while !onScreen(app, other) { app.swipeUp() }
+        sleep(1)
         other.tap()
         let address = app.textFields["Cloud address"]
         XCTAssertTrue(address.waitForExistence(timeout: 5))
@@ -84,7 +87,8 @@ final class TourUITests: XCTestCase {
         address.typeText(cloud)
         let web = button(app, containing: "Use a passkey or another way")
         var tries = 0
-        while !web.isHittable && tries < 6 { app.swipeUp(); tries += 1 }
+        while !onScreen(app, web) && tries < 6 { app.swipeUp(); tries += 1 }
+        sleep(1)
         snapshot(app, "w10 sign in")
         web.tap()
 
@@ -142,20 +146,23 @@ final class TourUITests: XCTestCase {
         waitForText(app, "Add scene")
         sleep(2)
         snapshot(app, "\(prefix)12 frame")
-        // An iPad on its side: the picture beside the list (docs/ios-app.md
-        // "On an iPad").
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            XCUIDevice.shared.orientation = .landscapeLeft
-            sleep(2)
-            snapshot(app, "\(prefix)12l frame, landscape")
-            XCUIDevice.shared.orientation = .portrait
-            sleep(2)
-        }
+        // On its side: the picture beside the list (docs/ios-app.md "On an
+        // iPad"). The whole screen: the app's own screenshot of a turned
+        // screen comes back cut and turned.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        sleep(3)
+        let turned = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        turned.name = "\(prefix)12l frame, landscape"
+        turned.lifetime = .keepAlways
+        add(turned)
+        XCUIDevice.shared.orientation = .portrait
+        sleep(2)
 
         // A scene from the catalog, installed and shown.
         if !button(app, containing: scene).exists {
             let add = button(app, containing: "Add scene")
-            while !add.isHittable { app.swipeUp() }
+            while !onScreen(app, add) { app.swipeUp() }
+            sleep(1)
             add.tap()
             XCTAssertTrue(app.navigationBars["Add scene"].waitForExistence(timeout: 15))
             sleep(3)
@@ -167,13 +174,15 @@ final class TourUITests: XCTestCase {
             XCTAssertTrue(app.navigationBars["Generate scene"].waitForExistence(timeout: 10), "Generate scene opened no chat")
             sleep(1)
             snapshot(app, "\(prefix)13a generate scene")
-            app.navigationBars.buttons.element(boundBy: 0).tap()
+            goBack(app)
             XCTAssertTrue(app.navigationBars["Add scene"].waitForExistence(timeout: 10))
             // A list makes only the rows on screen: search, as a person would.
-            let search = app.searchFields.firstMatch
+            let search = searchField(app)
             XCTAssertTrue(search.waitForExistence(timeout: 10))
             search.tap()
-            search.typeText(scene)
+            // Search on the keyboard puts it away: on the iPhone Duo's cover
+            // screen it covered the result.
+            search.typeText(scene + "\n")
             waitForText(app, scene, timeout: 40)
             sleep(2)
             snapshot(app, "\(prefix)13b search")
@@ -182,7 +191,7 @@ final class TourUITests: XCTestCase {
             XCTAssertTrue(install.waitForExistence(timeout: 10))
             snapshot(app, "\(prefix)14 install")
             install.tap()
-            XCTAssertTrue(app.navigationBars.buttons["More"].waitForExistence(timeout: 120) || button(app, containing: "Add scene").waitForExistence(timeout: 5),
+            XCTAssertTrue(app.buttons["More"].firstMatch.waitForExistence(timeout: 120) || button(app, containing: "Add scene").waitForExistence(timeout: 5),
                           "the install did not come back to the frame")
             waitForText(app, scene, timeout: 60)
         }
@@ -193,14 +202,15 @@ final class TourUITests: XCTestCase {
 
         // The scene's own sheet.
         let row = button(app, containing: scene)
-        while !row.isHittable { app.swipeUp() }
+        while !onScreen(app, row) { app.swipeUp() }
+        sleep(1)
         row.tap()
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 15), "the scene did not open")
         sleep(2)
         snapshot(app, "\(prefix)16 scene")
         app.swipeUp()
         snapshot(app, "\(prefix)17 scene, lower")
-        app.buttons["Done"].tap()
+        tapDone(app)
 
         // Every page linked from the frame, then back.
         let pages = [
@@ -211,9 +221,13 @@ final class TourUITests: XCTestCase {
         for (title, shot) in pages {
             // In the frame's list, not the tab bar (which has a Settings too).
             let link = app.collectionViews.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+            // Down the page, then back up: Generate scene is above Settings.
             var tries = 0
-            while !link.isHittable && tries < 8 { app.swipeUp(); tries += 1 }
-            guard link.isHittable else {
+            while !onScreen(app, link) && tries < 12 { nudge(app, up: true); tries += 1 }
+            tries = 0
+            while !onScreen(app, link) && tries < 12 { nudge(app, up: false); tries += 1 }
+            sleep(1)
+            guard onScreen(app, link) else {
                 snapshot(app, "\(prefix)\(shot) missing")
                 XCTFail("no \(title) on the frame page")
                 continue
@@ -221,7 +235,7 @@ final class TourUITests: XCTestCase {
             link.tap()
             sleep(3)
             snapshot(app, "\(prefix)\(shot)")
-            app.navigationBars.buttons.element(boundBy: 0).tap()
+            goBack(app)
             sleep(1)
         }
 
@@ -229,7 +243,8 @@ final class TourUITests: XCTestCase {
         // goes on every scene.
         let addScene = button(app, containing: "Add scene")
         var scrolls = 0
-        while !addScene.isHittable && scrolls < 10 { app.swipeDown(); scrolls += 1 }
+        while !onScreen(app, addScene) && scrolls < 12 { nudge(app, up: false); scrolls += 1 }
+        sleep(1) // a tap while the list still coasts only stops it (the Duo's short cover screen)
         addScene.tap()
         XCTAssertTrue(app.navigationBars["Add scene"].waitForExistence(timeout: 15))
         let addLayout = button(app, containing: "Add layout")
@@ -243,7 +258,7 @@ final class TourUITests: XCTestCase {
         let layoutRow = app.buttons.matching(
             NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "On the scene", "On every scene")).firstMatch
         XCTAssertTrue(layoutRow.waitForExistence(timeout: 90), "the new layout is not under Layouts")
-        while !layoutRow.isHittable { app.swipeUp() }
+        while !onScreen(app, layoutRow) { app.swipeUp() }
         sleep(2)
         snapshot(app, "\(prefix)27b layouts")
         layoutRow.tap()
@@ -259,7 +274,7 @@ final class TourUITests: XCTestCase {
         snapshot(app, "\(prefix)27d layout settings")
         button(app, containing: "Save").tap()
         XCTAssertTrue(app.navigationBars["Top bar"].waitForExistence(timeout: 30), "Save did not come back")
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        goBack(app)
         sleep(2)
         // A scene's own Layout picker.
         // To the top: a row half under the navigation bar counts as hittable,
@@ -274,10 +289,11 @@ final class TourUITests: XCTestCase {
         }
         let layoutPicker = button(app, containing: "Layout settings")
         scrolls = 0
-        while !layoutPicker.isHittable && scrolls < 6 { app.swipeUp(); scrolls += 1 }
+        while !onScreen(app, layoutPicker) && scrolls < 6 { app.swipeUp(); scrolls += 1 }
+        sleep(1)
         XCTAssertTrue(layoutPicker.exists, "no Layout in the scene's sheet")
         snapshot(app, "\(prefix)27e scene layout")
-        app.buttons["Done"].tap()
+        tapDone(app)
 
         // The other tabs.
         for (name, shot) in [("Scenes", "30 scenes"), ("Photos", "31 photos"), ("AI", "32 ai"), ("Settings", "33 settings")] {
@@ -301,7 +317,7 @@ final class TourUITests: XCTestCase {
     func photos(_ app: XCUIApplication, prefix: String, frame: String) {
         let album = "Tour \(Int(Date().timeIntervalSince1970) % 100_000)"
         tab(app, "Photos").tap()
-        app.navigationBars.buttons["Add"].tap()
+        barButton(app, "Add").tap()
         button(app, containing: "New album").tap()
         let name = app.alerts.textFields.firstMatch
         XCTAssertTrue(name.waitForExistence(timeout: 5))
@@ -316,7 +332,7 @@ final class TourUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars[album].waitForExistence(timeout: 10))
 
         // The system picker runs in its own process; its grid is the app's to tap.
-        app.navigationBars.buttons["Add"].tap()
+        barButton(app, "Add").tap()
         button(app, containing: "Add photos").tap()
         // The picker's cells read "Photo, <date>" (the tab bar's "Photos" has no comma).
         let picked = app.images.matching(NSPredicate(format: "label BEGINSWITH 'Photo,'")).firstMatch
@@ -356,7 +372,7 @@ final class TourUITests: XCTestCase {
         }
 
         // Play the album on the frame.
-        app.navigationBars.buttons["Add"].tap()
+        barButton(app, "Add").tap()
         button(app, containing: "Play on a frame").tap()
         XCTAssertTrue(app.navigationBars["Play \(album)"].waitForExistence(timeout: 10))
         // The sheet's own Frame picker (the tab bar has a "Frames").
@@ -378,7 +394,7 @@ final class TourUITests: XCTestCase {
                        "the album was not played")
         sleep(2)
         snapshot(app, "\(prefix)45 album played")
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        goBack(app)
 
         // The frame, showing the photo the phone uploaded.
         tab(app, "Frames").tap()

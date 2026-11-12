@@ -121,8 +121,9 @@ Settings → "Open the web workspace" goes there.
 
 One app for both, laid out by the width a screen gets
 (`ios/FrameOSUI/Sources/FrameOSUI/Common/Layout.swift`), never by asking
-what the device is: an iPad's Split View or sheet is a phone's width, and a
-large phone on its side is an iPad's.
+what the device is: an iPad's Split View or sheet is a phone's width, a
+phone on its side is a small iPad's, and the iPhone Duo is a phone folded
+(its cover screen, 466 points) and a small iPad open (669 by 951).
 
 - **Pictures** (a frame's, a scene's) go in a `FittedBox`: the box takes the
   width it is offered, the picture fits inside at its panel's shape, and a
@@ -132,19 +133,26 @@ large phone on its side is an iPad's.
 - **Lists and forms** are `.readableWidth()`: rows at most 720 points wide,
   in the middle (the sign-in screen 540, the AI chat's messages 760). Logs
   keep the full width for their long lines.
-- **From 700 points** (`ReadableWidth.wide`) the store is a grid of covers
-  and the photo tiles are larger; the Add scene sheet is the larger "page"
-  sheet where iOS has one.
+- **From 600 points** (`ReadableWidth.wide`: an iPad but not its form
+  sheets, the iPhone Duo open, a phone on its side, never a phone upright)
+  the store is a grid of covers and the photo tiles are larger; the Add
+  scene sheet is the larger "page" sheet where iOS has one.
 - **The frame page** puts the picture, its status and the actions beside
-  the list when it is wider than tall and at least 900 points (an iPad in
-  landscape); in one column the picture is at most 55% of the page's height.
+  the list when it is that wide and wider than tall (any screen on its
+  side); in one column the picture is at most 55% of the page's height.
 - A photo opens over the whole screen.
 - A sheet's one action stays on screen: an iPad's sheet is shorter than a
   phone's, and the store's install sheet had its Install button below the
   bottom (now pinned to it, the cover at most 220 points tall).
 
-After changing a screen's layout, run the tour on an iPad too
-(`FRAMEOS_UITEST_DEVICE="iPad Pro 13-inch (M5)"`, `ios/README.md`).
+After changing a screen's layout, run the tour on an iPad and the iPhone
+Duo too (`FRAMEOS_UITEST_DEVICE="iPad Pro 13-inch (M5)"`, `"iPhone Duo"`;
+`ios/README.md`). The Duo simulator boots folded, on its cover screen, and
+`simctl` cannot unfold it (powering a screen off or on does not). Its
+cover screen draws the bar buttons, Back and the tabs in a rail down the
+right edge, outside the navigation bar, and scrolls a sheet's bar away
+with its content: the tour's `barButton`, `goBack`, `tapDone` and
+`onScreen` (UITestSupport.swift) are for that.
 
 ## Words
 
