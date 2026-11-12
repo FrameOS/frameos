@@ -30,6 +30,10 @@ enum CloudFramesContractSource {
       "colors": {
         "since": "2026.10.2"
       },
+      "cpu_mode": {
+        "restart": true,
+        "since": "2026.11.7"
+      },
       "debug": {
         "since": "2026.8.31"
       },
@@ -464,6 +468,14 @@ enum CloudFramesContractSource {
         }
       },
       "type": "object"
+    },
+    "cpu_mode": {
+      "enum": [
+        "auto",
+        "battery",
+        "performance"
+      ],
+      "type": "string"
     },
     "debug": {
       "type": "bool"
