@@ -87,6 +87,77 @@ final class FrameDetailModel {
         scenes.filter { !$0.isLayout && !SceneIds.isBuiltIn($0.id) }
     }
 
+    // MARK: layouts (docs/scene-layouts.md)
+
+    /// The frame's layouts: never on the scene list, listed under Layouts.
+    var layouts: [InstalledScene] { scenes.filter(\.isLayout) }
+
+    var layoutIds: Set<String> { Set(layouts.map(\.id)) }
+
+    /// What every scene wears: "" none, nil while they differ.
+    var commonLayoutId: String? {
+        SceneLayouts.commonId(listedScenes.map(\.scene), layoutIds: layoutIds)
+    }
+
+    /// The layout a scene wears (`{sceneId, state?}`), by what the frame has.
+    func wornLayout(_ scene: InstalledScene) -> JSONValue? {
+        SceneLayouts.current(scene.scene, layoutIds: layoutIds)
+    }
+
+    func scenesWearing(_ layout: InstalledScene) -> [InstalledScene] {
+        listedScenes.filter { wornLayout($0)?["sceneId"]?.stringValue == layout.id }
+    }
+
+    /// One layout ("" for none) on every scene; a scene already wearing it
+    /// keeps its settings.
+    func setLayoutForEveryScene(_ app: AppModel, _ layoutId: String) async {
+        var changes: [String: JSONValue] = [:]
+        for scene in listedScenes {
+            let worn = wornLayout(scene)
+            if layoutId.isEmpty {
+                if worn != nil || scene.scene["layout"] != nil { changes[scene.id] = .null }
+            } else if worn?["sceneId"]?.stringValue != layoutId {
+                changes[scene.id] = ["sceneId": .string(layoutId)]
+            }
+        }
+        await saveLayouts(app, changes)
+    }
+
+    /// One scene's layout ("" for none); its settings stay while it is the same one.
+    func setLayout(_ app: AppModel, for scene: InstalledScene, _ layoutId: String) async {
+        let worn = wornLayout(scene)
+        guard worn?["sceneId"]?.stringValue ?? "" != layoutId else { return }
+        await saveLayouts(app, [scene.id: layoutId.isEmpty ? .null : ["sceneId": .string(layoutId)]])
+    }
+
+    /// A layout's settings for these scenes (layout.state on each install).
+    func saveLayoutSettings(_ app: AppModel, layout: InstalledScene, scenes: [InstalledScene], state: [String: JSONValue]) async {
+        var changes: [String: JSONValue] = [:]
+        for scene in scenes { changes[scene.id] = SceneLayouts.ref(layoutId: layout.id, state: state) }
+        await saveLayouts(app, changes)
+    }
+
+    func addLayout(_ app: AppModel, _ starter: LayoutStarter) async {
+        guard let service = app.service, let frame = app.frame(frameId) else { return }
+        let installed = scenes
+        await app.perform("Add layout") { try await service.addLayout(frame, starter: starter, installed: installed) }
+        await load(app)
+    }
+
+    private func saveLayouts(_ app: AppModel, _ changes: [String: JSONValue]) async {
+        guard !changes.isEmpty, let service = app.service, let frame = app.frame(frameId) else { return }
+        let installed = scenes
+        // Shown at once; the reload below brings what the plane kept.
+        scenes = scenes.map { scene in
+            guard let change = changes[scene.id] else { return scene }
+            var updated = scene
+            updated.scene = SceneLayouts.with(scene.scene, layout: change)
+            return updated
+        }
+        await app.perform("Layout") { try await service.setSceneLayouts(frame, installed: installed, changes: changes) }
+        await load(app)
+    }
+
     func isActive(_ scene: InstalledScene) -> Bool {
         SceneIds.refer(states.activeSceneId, scene.id)
     }

@@ -68,6 +68,10 @@ struct SceneSheet: View {
                     .disabled(active && changedValues.isEmpty)
                 }
 
+                if !scene.isLayout && !model.layouts.isEmpty {
+                    SceneLayoutSection(scene: scene, model: model)
+                }
+
                 if scene.updateAvailable, let latest = scene.latestVersion {
                     Section {
                         AsyncButton {

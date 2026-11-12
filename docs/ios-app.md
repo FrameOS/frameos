@@ -26,6 +26,8 @@ follow turns a test red, on the side that did not follow.
 | Which settings a cloud frame takes | `docs/cloud-frames-contract.json` | generated `CloudFramesContract.gen.swift`, read by `Contracts/CloudSettingsContract.swift` (the SPA's `cloudFrameSettings.ts`) | `generate_cloud_contract.py --check` |
 | A scene's settings form (the implicit refresh interval, `showIf`) | `frontend/src/utils/refreshInterval.ts`, `showIf.ts` | `Contracts/SceneFields.swift` | `docs/scene-form-fixtures.json` |
 | "Button actions" rows and the rules they write | `frontend/src/utils/frameEventMap.ts` | `Contracts/ButtonBindings.swift` | `docs/button-map-fixtures.json` |
+| Layout starters | `frontend/src/generated/layoutStarters.ts` | `Generated/LayoutStarters.json`, the same script writes both (`frontend/scripts/generateLayoutStarters.mjs`) | `LayoutTests` checks it against `repo/scenes/samples` |
+| What scenes wear (`layout: {sceneId, state?}`), one for every scene | `frontend/src/utils/sceneLayouts.ts` | `Contracts/LayoutStarters.swift` (`SceneLayouts`) | `LayoutTests`; `LayoutRoundTrip` on both planes |
 | A typed backend address | `docs/server-address-fixtures.json` | `Contracts/ServerAddress.swift` | the same corpus (its fourth runner) |
 | The words for queued commands | `commandLabels` in `framePendingCommandsLogic.ts` | `PendingCommand.labels` | `PendingCommandLabelTests` reads the SPA's file |
 | Installing scenes and albums on a backend (fresh ids, references rewritten) | the backend's `duplicate_scenes` and its MCP tools | `frame_scene_install`, `photo_album_install` over `POST /api/mcp` | the backend's own tests: the app adds no copy |
@@ -86,6 +88,7 @@ way the SPA does, and the comment there names the SPA file.
 | Settings | `POST /api/frames/{id} {key: value}` then deploy | `POST …/settings {settings}`, keys from the contract |
 | Schedule | `schedule` in the same save | `POST …/schedule` |
 | Button actions | `event_map` in the same save | the `event_map` setting |
+| Layouts (docs/scene-layouts.md) | `layout` on each `frame.scenes` entry, a starter appended with a new id, saved, then deployed | the row's `layouts` by runtime scene id in `POST …/scenes` (left out = kept, `null` clears); a starter is a private scene first (`POST /api/account/scenes`), then a row |
 | Voice chat switches | `device_config` (`voiceChangeSettings`, …) | `POST …/voice/permissions` |
 | Rename, delete | `POST /api/frames/{id} {name}`, `DELETE /api/frames/{id}` | the same (delete asks for a recent sign-in: `reauth_required` → `POST /api/auth/reauth`, or the sheet with `reauth=1` for an account without a password or code) |
 | Assets | `GET …/assets?folder=`, `GET …/asset?path=`, chunked `POST …/assets/upload`, form `POST …/assets/{mkdir,rename,delete}` | the same |

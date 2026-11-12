@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // The layout starters the frame's Settings offers (docs/scene-layouts.md): every
 // repo sample whose scene is a layout, embedded so they work on both control
-// planes with no repository to reach.
+// planes with no repository to reach. The iOS app gets the same list as JSON
+// (ios/FrameOSKit, LayoutStarters.swift).
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,6 +11,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const frontendRoot = path.resolve(__dirname, '..')
 const samplesRoot = path.resolve(frontendRoot, '..', 'repo', 'scenes', 'samples')
 const outputPath = path.join(frontendRoot, 'src', 'generated', 'layoutStarters.ts')
+const iosOutputPath = path.resolve(
+  frontendRoot,
+  '..',
+  'ios',
+  'FrameOSKit',
+  'Sources',
+  'FrameOSKit',
+  'Generated',
+  'LayoutStarters.json'
+)
 
 const starters = []
 for (const entry of (await fs.readdir(samplesRoot, { withFileTypes: true })).sort((a, b) =>
@@ -48,4 +59,17 @@ export interface LayoutStarter {
 export const LAYOUT_STARTERS: LayoutStarter[] = ${JSON.stringify(starters, null, 2)} as unknown as LayoutStarter[]
 `
 )
-console.log(`Wrote ${starters.length} layout starters to ${path.relative(frontendRoot, outputPath)}`)
+// Only where the app is checked out: a build that copies frontend/ and repo/
+// alone (the Docker image) has no ios/.
+const iosDirExists = await fs
+  .stat(path.dirname(iosOutputPath))
+  .then((stat) => stat.isDirectory())
+  .catch(() => false)
+if (iosDirExists) {
+  await fs.writeFile(iosOutputPath, `${JSON.stringify(starters, null, 2)}\n`)
+}
+console.log(
+  `Wrote ${starters.length} layout starters to ${path.relative(frontendRoot, outputPath)}${
+    iosDirExists ? ` and ${path.relative(frontendRoot, iosOutputPath)}` : ''
+  }`
+)

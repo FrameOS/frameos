@@ -59,6 +59,9 @@ struct CatalogView: View {
     @Environment(\.dismiss) private var dismiss
     var installTarget: Frame?
     var onInstalled: (() -> Void)?
+    /// From a frame with no layout yet: "Add layout" (the SPA's drawer has it
+    /// while the frame has none).
+    var addLayout: ((LayoutStarter) async -> Void)?
     @State private var model = CatalogModel()
     @State private var chosen: CatalogItem?
 
@@ -72,6 +75,23 @@ struct CatalogView: View {
                         NavigationLink {
                             ChatView(frameId: target.id, chatId: nil, generating: true)
                         } label: { GenerateSceneLabel() }
+                        if let addLayout {
+                            NavigationLink {
+                                LayoutStartersView { starter in
+                                    await addLayout(starter)
+                                    dismiss()
+                                }
+                            } label: {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Add layout")
+                                        Text("Drawn around your scenes, like a bar with the clock").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                } icon: {
+                                    Image(systemName: "rectangle.inset.topleft.filled")
+                                }
+                            }
+                        }
                     }
                 }
                 // Both planes: the store (its shelves) or the account's own
