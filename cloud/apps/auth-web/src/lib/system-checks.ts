@@ -134,6 +134,17 @@ export function runSystemChecks(): SystemCheck[] {
     },
     {
       configured:
+        isSet("APPLE_TEAM_ID") &&
+        isSet("APPLE_SIGN_IN_KEY_ID") &&
+        isSet("APPLE_SIGN_IN_PRIVATE_KEY") &&
+        isSet("APPLE_SERVICES_ID"),
+      detail:
+        "Sign in with Apple, on the web (APPLE_SERVICES_ID) and in the iOS app (the key alone). The App Store requires it while the app offers Google.",
+      name: "APPLE_TEAM_ID + APPLE_SIGN_IN_KEY_ID + APPLE_SIGN_IN_PRIVATE_KEY + APPLE_SERVICES_ID",
+      required: false,
+    },
+    {
+      configured:
         isSet("POSTMARK_SERVER_TOKEN") && isSet("POSTMARK_FROM_EMAIL"),
       detail:
         "Outgoing email (verification, password resets); unsent mail is logged to the console instead.",

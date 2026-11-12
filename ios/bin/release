@@ -48,6 +48,15 @@ fi
 xcodebuild archive -project FrameOS.xcodeproj -scheme FrameOS -configuration Release \
   -destination "generic/platform=iOS" -archivePath "$archive" \
   CURRENT_PROJECT_VERSION="$build" CODE_SIGNING_ALLOWED=NO -quiet
+# The export takes the app's entitlements from its signature, and an unsigned
+# app has none: Sign in with Apple's would be lost. An ad hoc signature
+# carries them over (iOS refuses an ad hoc signature at build time once there
+# are entitlements, so it goes on here).
+app="$archive/Products/Applications/FrameOS.app"
+for nested in "$app"/Frameworks/* "$app"/PlugIns/*; do
+  [[ -e "$nested" ]] && codesign --force --sign - --timestamp=none "$nested"
+done
+codesign --force --sign - --timestamp=none --entitlements FrameOS/FrameOS.entitlements "$app"
 if [[ $signed == 0 ]]; then
   echo "Archived (unsigned): ios/$archive, build $build"
   exit 0

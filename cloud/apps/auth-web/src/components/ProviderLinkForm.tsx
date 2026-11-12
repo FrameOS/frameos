@@ -3,11 +3,19 @@
 import { Link2 } from "lucide-react";
 import { useState } from "react";
 
-// Client half of /login/link-google. The pending-link cookie rides along
-// with the request, so the form only sends the password; on success the
-// server has linked the identity and minted a session (or parked a pending
-// sign-in for the second factor) and the browser follows the redirect.
-export function GoogleLinkForm() {
+// Client half of /login/link. The pending-link cookie rides along with the
+// request, so the form only sends the password; on success the server has
+// linked the identity and minted a session (or parked a pending sign-in for
+// the second factor) and the browser follows the redirect.
+export function ProviderLinkForm({
+  method,
+  provider,
+}: {
+  // "Google sign-in", "Sign in with Apple".
+  method: string;
+  // "Google", "Apple".
+  provider: string;
+}) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -17,10 +25,10 @@ export function GoogleLinkForm() {
       return "That password is not correct.";
     }
     if (payload?.error === "link_expired") {
-      return "This Google sign-in has expired. Start again from the sign-in page.";
+      return `This ${provider} sign-in has expired. Start again from the sign-in page.`;
     }
     if (payload?.error === "link_conflict") {
-      return "This Google account is already connected to a different FrameOS Cloud account.";
+      return `This ${provider} account is already connected to a different FrameOS Cloud account.`;
     }
     if (response.status === 429) {
       return "Too many attempts. Wait a few minutes and try again.";
@@ -33,7 +41,7 @@ export function GoogleLinkForm() {
     setBusy(true);
     setError(undefined);
     try {
-      const response = await fetch("/api/auth/google/link", {
+      const response = await fetch("/api/auth/link", {
         body: JSON.stringify({ password }),
         headers: { "content-type": "application/json" },
         method: "POST",
@@ -60,12 +68,12 @@ export function GoogleLinkForm() {
         </p>
       ) : null}
       <div className="field">
-        <label htmlFor="google-link-password">Password</label>
+        <label htmlFor="link-password">Password</label>
         <input
           autoComplete="current-password"
           autoFocus
           className="input"
-          id="google-link-password"
+          id="link-password"
           onChange={(event) => setPassword(event.target.value)}
           required
           type="password"
@@ -75,7 +83,7 @@ export function GoogleLinkForm() {
       <div className="actions">
         <button className="button button-primary" disabled={busy} type="submit">
           <Link2 aria-hidden size={18} />
-          {busy ? "Connecting…" : "Connect Google sign-in"}
+          {busy ? "Connecting…" : `Connect ${method}`}
         </button>
       </div>
       <div className="footer-links">

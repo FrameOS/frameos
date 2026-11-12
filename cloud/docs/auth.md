@@ -1,7 +1,7 @@
 # First-Party Auth
 
 FrameOS Cloud owns authentication end to end: email/password credentials,
-optional Google SSO, sessions, password resets, and the superadmin panel. There
+optional Google and Apple sign-in, sessions, password resets, and the superadmin panel. There
 is no external identity provider in the login path.
 
 ## Account Model
@@ -15,6 +15,10 @@ is no external identity provider in the login path.
     login; `accounts.primary_email` stays a non-authoritative snapshot.
   - Google: issuer `https://accounts.google.com`, key `google`, subject =
     Google `sub` claim.
+  - Apple: issuer `https://appleid.apple.com`, key `apple`, subject = Apple's
+    `sub` (one per team, so the web and the iOS app name a person alike).
+    `provider_token_encrypted` keeps Apple's newest refresh token, sealed,
+    for the revoke at account deletion (migration 0077).
 - Passwords are hashed with scrypt (`N=2^16, r=8, p=1`, per-hash salt); the
   parameters are stored inside each hash so they can be raised later without
   invalidating existing credentials.
@@ -46,12 +50,15 @@ is no external identity provider in the login path.
   Authorization Code + PKCE flow against Google using the shared helpers in
   `@frameos-cloud/auth-client`; `GET /api/auth/google/callback` verifies the
   `id_token` (issuer, audience, nonce, JWKS) and signs the user in.
+- **Sign in with Apple** — the web's round trip and the iOS app's native
+  sheet, both ending in a code exchange at Apple: "Sign in with Apple" below.
 - **Signing in to the app** — see the next section.
 
 ## Signing in to the app
 
 The FrameOS iOS app (`ios/`, `docs/ios-app.md`) signs in with email and
-password through `/api/auth/login` like the web. For everything else the web
+password through `/api/auth/login` like the web, and with Apple through its
+own native route ("Sign in with Apple" below). For everything else the web
 can do (Google, a passkey, a password with two-factor), it borrows the web's
 sign-in through the system's sign-in sheet (`ASWebAuthenticationSession`) and
 is handed a session of its own (`src/lib/app-sign-in.ts`):
@@ -101,15 +108,21 @@ What keeps it safe:
 One account can carry both sign-in methods; merges are gated on proof of
 email ownership to block pre-hijacking:
 
+Google and Apple follow the same rules (`src/lib/provider-account.ts`, and
+`src/lib/provider-callback.ts` for both web callbacks); Google is the example.
+
 - **Password first, then Google** — if the password account's email is
   verified and Google attests the same email, the callback does _not_ link
   on Google's word alone: the verified claims are parked in a signed,
-  ten-minute `frameos_google_link_pending` cookie and the visitor is sent to
-  `/login/link-google`, which asks for the account's password.
-  `POST /api/auth/google/link` checks it, links the identity, revokes every
+  ten-minute `frameos_link_pending` cookie and the visitor is sent to
+  `/login/link`, which asks for the account's password.
+  `POST /api/auth/link` checks it, links the identity, revokes every
   existing session (a fresh one is minted), emails the owner
-  (`google_linked`) and writes `account.google_linked` to the audit log; a
-  wrong password is `403 invalid_password` and `account.google_link_failed`.
+  (`google_linked` / `apple_linked`) and writes `account.google_linked` to
+  the audit log; a wrong password is `403 invalid_password` and
+  `account.google_link_failed`. The iOS app does the same after a native
+  Apple sign-in: the route answers `409 link_required` with the cookie, and
+  the app posts the password to `/api/auth/link` itself.
   From then on both methods sign into the same account. If the password
   account is _unverified_, the Google user is shown a warning and sent
   through the password reset flow first: the emailed link proves the address
@@ -119,8 +132,17 @@ email ownership to block pre-hijacking:
   (`email_taken_google`) so a stranger can never plant a password on the
   account; instead, "Forgot password?" works for Google-first accounts and
   completing it creates a verified password identity on the same account.
-- Google identities with a Google-unverified email never participate in
-  merging.
+- **Google first, then Apple (or the reverse)** — a new identity whose
+  verified email already signs in through the other provider makes no second
+  account: the visitor is told to use that provider (`use_google`,
+  `use_apple`), and signup answers `email_taken_apple` as it answers
+  `email_taken_google`. Connecting the second provider to the same account
+  is a follow-up (a "connect" button under account settings).
+- An Apple "Hide My Email" address is a private relay
+  (`…@privaterelay.appleid.com`) and matches no existing account, so it
+  always starts a new one.
+- Identities with a provider-unverified email never participate in merging,
+  and a new identity without an email gets no account (`*_email_missing`).
 
 Sessions use an HS256 JWT (key derived from `SESSION_SECRET`) in an `httpOnly`
 cookie, backed by a revocable `sessions` row keyed on the token hash. In split
@@ -275,10 +297,11 @@ and returns. The proof routes (`POST /api/auth/reauth` with `{password}` or
 `{code}`, `POST /api/auth/reauth/passkey/{options,verify}`) stamp the current
 session row in place: the token and cookie never change, so in-flight
 requests and the frame hub's browser sockets are unaffected. An account with
-nothing local to check (Google sign-in, no password, no second factor) is
-sent back through Google with `prompt=login`
-(`/api/auth/google/start?reauth=1`); the callback mints a fresh session, which
-counts as recent. Checks are rate-limited per IP (30 / 15 min) and per
+nothing local to check (Google or Apple sign-in, no password, no second
+factor) is sent back through its provider (`methods.providers` says which):
+Google with `prompt=login` (`/api/auth/google/start?reauth=1`), Apple as is
+(its web sign-in asks for the Apple ID's password or Face ID / Touch ID every
+time). The callback mints a fresh session, which counts as recent. Checks are rate-limited per IP (30 / 15 min) and per
 account (10 / 15 min); every attempt is audited
 (`account.reauthenticated` with `method: password|totp|recovery_code|passkey`,
 `account.reauthentication_failed`).
@@ -300,6 +323,68 @@ Console and register the redirect URI for each environment:
 
 Then set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. When unset, the login
 page hides the Google button and password sign-in keeps working.
+
+## Sign in with Apple
+
+The App Store requires it of an app that offers Google (guideline 4.8), so
+the iOS app has it natively and the web has it beside Google
+(`src/lib/apple-sign-in.ts`).
+
+- **Web**: `GET /api/auth/apple/start` sends the browser to Apple with
+  `response_mode=form_post` (Apple's only way to hand over the person's name),
+  and Apple posts back to `POST /api/auth/apple/callback`. That POST is
+  cross-site, so it carries no `SameSite=Lax` cookie: the state, the nonce and
+  `return_to` ride their own signed `frameos_apple_flow` cookie, `SameSite=None`
+  and `Secure` in production, scoped to `/api/auth/apple`. The form's state
+  must match it (the route's CSRF check: Apple's Origin is never ours). The
+  code is exchanged with the Services ID, the id_token verified (Apple's keys,
+  issuer, the Services ID as audience, the nonce), the name read from the
+  `user` field, and the rest is Google's callback (`provider-callback.ts`),
+  with 303 redirects so the browser does not post again.
+- **The iOS app**: the system sheet hands over an identity token and an
+  authorization code; the app posts them with its nonce to
+  `POST /api/auth/apple/native`. The token must verify with the bundle id as
+  audience and SHA-256(nonce) as its nonce, and the code is exchanged at Apple
+  (which spends it, so a token and code taken off a device cannot be played
+  again); the exchange's id_token must name the same person. Answers: a
+  session (`{ok, email}`), `second_factor_required` (the app asks for the code
+  as after a password), `409 link_required` (above), `409 use_google`,
+  `verify_before_link`, `apple_email_missing`, `invalid_grant`,
+  `503 apple_unavailable`. The app could also go through the web handoff
+  (`/api/auth/app/authorize?provider=apple`), which works, but App Review
+  expects the native button.
+- **The client secret** is a five-minute ES256 JWT signed with the team's
+  Sign in with Apple key, naming the client (Services ID or bundle id).
+- **Account deletion** (`/api/account/delete`, the admin delete) revokes
+  every Apple refresh token the account holds at `/auth/revoke`, with the
+  client it was issued to, before the rows go (Apple requires it). A failed
+  revoke is logged and never keeps the account.
+- Not done yet: Apple's server-to-server notifications (consent revoked, Apple
+  ID deleted, relay email turned off).
+
+Setup, in the Apple Developer account (Certificates, Identifiers &
+Profiles):
+
+1. The App ID `net.frameos.app`: tick **Sign in with Apple** (as primary App
+   ID).
+2. **Identifiers → Services IDs**: a new one (e.g. `net.frameos.cloud`), Sign
+   in with Apple on, grouped with `net.frameos.app`, domain
+   `cloud.frameos.net`, return URL
+   `{FRAMEOS_CLOUD_APP_URL}/api/auth/apple/callback`.
+3. **Keys**: a new key with Sign in with Apple (primary App ID
+   `net.frameos.app`). Download the `.p8` once.
+4. **Sign in with Apple for Email Communication**: register the domain and
+   address the cloud's mail comes from (Postmark's `POSTMARK_FROM_EMAIL`),
+   with SPF/DKIM passing. Without it, mail to a private relay address
+   (verification is not needed, but password resets and security notices
+   are) is dropped by Apple.
+
+Then set `APPLE_TEAM_ID`, `APPLE_SIGN_IN_KEY_ID`, `APPLE_SIGN_IN_PRIVATE_KEY`
+(the `.p8`'s PEM; `\n` for newlines is fine) and `APPLE_SERVICES_ID`;
+`APPLE_APP_BUNDLE_ID` defaults to `net.frameos.app`. With the key but no
+Services ID only the app signs in with Apple; with neither the web hides the
+button and the app's route answers `apple_unavailable`. `APPLE_AUTH_URL`
+points everything at a stand-in (the integration tests' `src/test/apple-fake.ts`).
 
 ## Superadmins and the Admin Panel
 

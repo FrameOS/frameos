@@ -7,6 +7,7 @@ struct SignInView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+    @Environment(\.colorScheme) private var colorScheme
     @State private var model = SignInModel()
     /// Shown from Settings → Add account (dismissable), or as the first screen.
     var isSheet = false
@@ -19,6 +20,7 @@ struct SignInView: View {
                 switch model.step {
                 case .cloud: cloudFields
                 case .cloudCode: codeFields
+                case .cloudLink: linkFields
                 case .backend: backendFields
                 }
                 if let error = model.error {
@@ -51,6 +53,7 @@ struct SignInView: View {
         switch model.step {
         case .cloud: return "Sign in"
         case .cloudCode: return "Verify"
+        case .cloudLink: return "Connect and sign in"
         case .backend: return model.backendNeedsSignUp ? "Create account" : "Sign in"
         }
     }
@@ -104,6 +107,17 @@ struct SignInView: View {
         }
     }
 
+    @ViewBuilder var linkFields: some View {
+        Section {
+            SecureField("Password", text: $model.password).passwordInput()
+                .onSubmit { Task { await model.submit(app: app) } }
+        } header: {
+            Text("Connect Sign in with Apple")
+        } footer: {
+            Text(model.link?.message ?? "")
+        }
+    }
+
     @ViewBuilder var backendFields: some View {
         Section {
             TextField("frameos.local:8989", text: $model.backendAddress).urlInput()
@@ -132,9 +146,25 @@ struct SignInView: View {
         }
     }
 
-    /// Google and the rest of the web's sign-in (passkeys), through the
-    /// system's sign-in sheet (CloudWebSignIn).
+    /// Apple through the system's own sheet, then Google and the rest of the
+    /// web's sign-in (passkeys) through the system's sign-in sheet
+    /// (CloudWebSignIn).
     @ViewBuilder var webSignIn: some View {
+        Section {
+            SignInWithAppleButton(.continue) { request in
+                model.prepareApple(request)
+            } onCompletion: { result in
+                Task { await model.signInWithApple(app: app, result: result) }
+            }
+            .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+            .frame(height: 50)
+            // A capsule like the form's other buttons; the section's own
+            // rounded clip otherwise bites into its corners.
+            .clipShape(Capsule())
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .disabled(model.busy)
+        }
         Section {
             AsyncButton {
                 await model.signInOnWeb(app: app, provider: .google) { try await WebSignIn.open(webAuthenticationSession, $0) }
@@ -171,7 +201,7 @@ struct SignInView: View {
                     Label("Sign in to a self-hosted backend", systemImage: "server.rack")
                 }
             }
-        case .cloudCode:
+        case .cloudCode, .cloudLink:
             Section { Button("Start again") { model.useCloud() } }
         case .backend:
             Section {

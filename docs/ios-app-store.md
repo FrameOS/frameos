@@ -7,7 +7,7 @@ Review, and where it stands against the App Review Guidelines.
 
 | Guideline | What it asks | Where the app stands |
 | --- | --- | --- |
-| 4.8 Login Services | An app offering a third-party login (Google) must also offer an equivalent login that keeps the email private: in practice **Sign in with Apple** | **Open: the one decision left**, below |
+| 4.8 Login Services | An app offering a third-party login (Google) must also offer an equivalent login that keeps the email private: in practice **Sign in with Apple** | The native "Continue with Apple" button above Google (`POST /api/auth/apple/native`), and on the cloud's web pages; needs the cloud's Apple key, below |
 | 5.1.1(v) Account deletion | An app where accounts can be made (Google sign-in creates one) deletes them in the app | Settings → Delete account (`POST /api/account/delete`: the password, or a fresh check of who you are plus the typed email) |
 | 5.1.1(i) Privacy policy | A link in the app and in App Store Connect | Settings → About → Privacy policy, Terms (`cloud.frameos.net/legal/…`) |
 | 5.1.2(i) Data shared with third-party AI | Say so and ask before sharing | The AI chat asks once before the first message ("Before you chat"): messages and frame details go to OpenAI |
@@ -20,30 +20,22 @@ Review, and where it stands against the App Review Guidelines.
 | 4.2 Minimum functionality | More than a website | Native screens for frames, scenes, photos, assets, logs, AI |
 | App icon, launch screen | 1024 px icon without transparency; a launch screen | Both in `ios/FrameOS` |
 
-### Sign in with Apple: decide one
+### Sign in with Apple
 
-The app offers "Continue with Google" (through FrameOS Cloud's own sign-in
-page, `cloud/docs/auth.md` "Signing in to the app"). Guideline 4.8 then wants
-an equivalent login with private email, and App Review reads that as Sign in
-with Apple. Two ways:
+The app's sign-in screen has the system's "Continue with Apple" button first,
+then Google and the web's other ways. The cloud side (both the app's native
+route and "Continue with Apple" on the web) is `cloud/docs/auth.md` "Sign in
+with Apple"; the App ID `net.frameos.app` has the capability (Xcode's
+automatic signing switched it on with the first export that carried the
+entitlement), and `ios/bin/release` keeps the entitlement through its
+unsigned archive (an ad hoc signature carries it to the export).
 
-1. **Add Sign in with Apple to FrameOS Cloud**, on the web and in the app
-   (recommended: Google stays). Cloud work: Apple as a second OIDC provider
-   beside Google (the web's form-post callback, and a route that takes the
-   app's native Apple identity token), account linking as Google's does it,
-   the private relay addresses (register the sending domain with Apple so
-   verification and reset mail reaches them), and revoking Apple's tokens when
-   an account is deleted (Apple requires it). Apple setup on your side: the
-   app's Sign in with Apple capability, a Services ID for the web, a key
-   (`.p8`).
-2. **Ship 1.0 without Google in the app**: drop "Continue with Google" and hide
-   Google on the cloud's pages in the app's sheet. The app then uses FrameOS
-   Cloud's own accounts only (4.8's exception); someone who signed up with
-   Google adds a password through "Forgot your password?" and signs in with
-   it. Add Google and Apple together in a later version.
-
-TestFlight's internal testing is not reviewed against this; App Review (and
-an external TestFlight beta review) is.
+Before App Review, FrameOS Cloud needs its Apple setup (`cloud/docs/auth.md`
+"Sign in with Apple", steps 2 to 4): a Services ID for the web, a Sign in
+with Apple key (`APPLE_TEAM_ID`, `APPLE_SIGN_IN_KEY_ID`,
+`APPLE_SIGN_IN_PRIVATE_KEY`, `APPLE_SERVICES_ID` on the server), and the
+mail domain registered for Apple's private relay. Without the key the app's
+button answers "Sign in with Apple is not set up on this FrameOS Cloud".
 
 ## Before the first upload (yours)
 
@@ -54,8 +46,9 @@ an external TestFlight beta review) is.
    if it is not offered), a SKU.
 3. An App Store Connect API key for uploads: Users and Access → Integrations →
    App Store Connect API, role App Manager. Download the `.p8` once.
-4. Deploy FrameOS Cloud with this branch before anyone reviews the app: the
-   sign-in sheet's `/api/auth/app/*` and the in-app pages need it.
+4. Deploy FrameOS Cloud with the app's routes before anyone reviews the app:
+   the sign-in sheet's `/api/auth/app/*`, `/api/auth/apple/native` and the
+   in-app pages need it, and the Apple key above.
 
 ## TestFlight on your phone
 

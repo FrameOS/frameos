@@ -7,9 +7,11 @@ import { useState } from "react";
 import { defaultSignInRedirect } from "../lib/sign-in-redirect";
 
 export function LoginForm({
+  appleEnabled,
   googleEnabled,
   returnTo,
 }: {
+  appleEnabled: boolean;
   googleEnabled: boolean;
   returnTo?: string | undefined;
 }) {
@@ -18,9 +20,9 @@ export function LoginForm({
   const [error, setError] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
 
-  const googleHref = `/api/auth/google/start${
-    returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : ""
-  }`;
+  const returnQuery = returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : "";
+  const googleHref = `/api/auth/google/start${returnQuery}`;
+  const appleHref = `/api/auth/apple/start${returnQuery}`;
 
   // Passwordless: a discoverable passkey with user verification is the whole
   // sign-in. The browser lists the matching passkeys; the server learns the
@@ -180,6 +182,15 @@ export function LoginForm({
             onClick={() => posthog.capture("google_sign_in_started")}
           >
             Continue with Google
+          </a>
+        ) : null}
+        {appleEnabled ? (
+          <a
+            className="button"
+            href={appleHref}
+            onClick={() => posthog.capture("apple_sign_in_started")}
+          >
+            Continue with Apple
           </a>
         ) : null}
       </div>

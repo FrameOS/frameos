@@ -6,7 +6,7 @@
 //   1. The app opens GET /api/auth/app/authorize?code_challenge=…&state=…
 //      in the system's sign-in sheet (ASWebAuthenticationSession). The route
 //      wraps the request in a signed token and sends the person through the
-//      usual /login (or straight to Google, provider=google).
+//      usual /login (or straight to Google or Apple, provider=google|apple).
 //   2. Signed in, the route redirects to frameos://sign-in with a code: a
 //      two-minute signed token naming the account and identity by id (no
 //      email in the URL) and the browser session's `authenticated_at`.
@@ -33,12 +33,18 @@ const requestType = "app_sign_in_request";
 const codeType = "app_sign_in_code";
 export const maxAppSignInStateChars = 512;
 
+export type AppSignInProvider = "apple" | "google";
+
+export function appSignInProvider(value: unknown): AppSignInProvider | undefined {
+  return value === "google" || value === "apple" ? value : undefined;
+}
+
 export type AppSignInRequest = {
   challenge: string;
   // Seconds, from the token's iat: a browser session authenticated before
   // this is asked about (/login/app), not used silently.
   issuedAt: number;
-  provider?: "google" | undefined;
+  provider?: AppSignInProvider | undefined;
   reauth: boolean;
   state: string;
 };
@@ -127,7 +133,7 @@ export async function verifyAppSignInRequestToken(
     return {
       challenge: payload.challenge,
       issuedAt: payload.iat,
-      provider: payload.provider === "google" ? "google" : undefined,
+      provider: appSignInProvider(payload.provider),
       reauth: payload.reauth === true,
       state: payload.state,
     };

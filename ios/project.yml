@@ -57,6 +57,13 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         ITSAppUsesNonExemptEncryption: false
+    # Sign in with Apple (cloud/docs/auth.md): the App ID net.frameos.app has
+    # the capability ticked, so the App Store profile carries it.
+    entitlements:
+      path: FrameOS/FrameOS.entitlements
+      properties:
+        com.apple.developer.applesignin:
+          - Default
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: net.frameos.app

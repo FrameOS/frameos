@@ -484,7 +484,7 @@ export async function verifySecondFactorCode(
 export type PendingSignIn = {
   // Extra facts for the account.signed_in audit row (e.g. the Google email).
   auditMetadata?: Record<string, unknown> | undefined;
-  method: "google" | "password";
+  method: "apple" | "google" | "password";
   profile: SessionProfile & { accountId: string };
   returnTo?: string | undefined;
 };
