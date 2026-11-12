@@ -2425,7 +2425,13 @@ static esp_err_t render_once(bool quiet)
             }
             char showing_id[sizeof(s_refresh_scene_id)];
             char showing_name[8];
-            current_scene_details(showing_id, sizeof(showing_id), showing_name, sizeof(showing_name));
+            /* A new scene gets a full refresh, not a partial one: the scene the
+             * plane drew when it drew it, the idle runtime's is never new. */
+            if (local_render) {
+                current_scene_details(showing_id, sizeof(showing_id), showing_name, sizeof(showing_name));
+            } else {
+                strlcpy(showing_id, s_remote_scene, sizeof(showing_id));
+            }
             bool partial = false;
             /* Someone tapping, or pictures coming quickly (an animation, a
              * clock's seconds): the fast waveform, the greys settled once
@@ -2433,7 +2439,7 @@ static esp_err_t render_once(bool quiet)
              * up the slow way (settle_panel). */
             int64_t picture_us = esp_timer_get_time();
             bool fast = fos_input_hold_engaged(&s_input_hold) ||
-                        fos_pictures_fast(fos_scene_interval_snap(frameos_nim_scene_interval()),
+                        fos_pictures_fast(local_render ? fos_scene_interval_snap(frameos_nim_scene_interval()) : 0.0,
                                           s_last_picture_us, picture_us);
             err = fos_display_update(buf, buf_len, strcmp(showing_id, s_refresh_scene_id) == 0, fast,
                                      &partial);
@@ -2521,7 +2527,9 @@ static esp_err_t render_once(bool quiet)
     /* A quiet frame that failed is logged anyway: a broken animation must say
      * why at once, not ten seconds later. */
     if (!quiet || err != ESP_OK) {
-        current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+        /* A local render may have switched scenes on the way (a handler's
+         * setCurrentScene); a pulled one is the scene the plane named. */
+        if (local_render) current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
         log_render_event(err == ESP_OK ? "render:done" : "render:error", scene_id,
                          scene_name, err == ESP_OK ? "ok" : "error", "complete",
                          mode, refresh, err == ESP_OK ? "" : "render-cycle-failed",
@@ -3357,12 +3365,16 @@ static void client_task(void *arg)
          * clamped (fos_animation.h): a layout's wait of 0.9999 s is the
          * scene's second, not "no opinion" and the frame's 300 s, and a bad
          * value must not park the frame for months. */
-        double scene_interval = fos_scene_interval_snap(frameos_nim_scene_interval());
+        /* Rendered on the server, the runtime here holds no scene (or one
+         * left from before, whose interval is not the drawn scene's): the
+         * frame's interval, as on a board with no runtime at all. */
+        bool own_scene = renders_locally(config);
+        double scene_interval = own_scene ? fos_scene_interval_snap(frameos_nim_scene_interval()) : 0.0;
         uint32_t interval = fos_pass_interval_seconds(scene_interval, config->interval_sec);
         /* A per-render override from logic/nextSleepDuration beats both
          * intervals, like context.nextSleep on the Pi runner. Only valid
          * right after a render actually ran. */
-        if (rendered) {
+        if (rendered && own_scene) {
             double next_sleep = frameos_nim_next_sleep();
             if (next_sleep >= 0.0) {
                 if (next_sleep > 7 * 86400.0) next_sleep = 7 * 86400.0;
