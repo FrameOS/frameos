@@ -21,6 +21,7 @@ export {
 export {
   accountMarginBasisPoints,
   fallbackPaygPlan,
+  grantedPlanProvider,
   listPlans,
   paygPlanCode,
   readAccountMargin,
@@ -53,6 +54,7 @@ export {
   closeOutSubscriptionForDeletedAccount,
   deferredMicros,
   earnedToDateMicros,
+  grantAccountPlan,
   recognizePeriod,
   refundUnearnedPeriod,
   runSubscriptionCycle,

@@ -10,6 +10,7 @@ import {
   closeOutSubscriptionForDeletedAccount,
   customerReceivableCode,
   customerStatement,
+  grantAccountPlan,
   readAccountPlan,
   runSubscriptionCycle,
   setAccountPlan,
@@ -466,5 +467,38 @@ describe("a provider that leaves the tax and its fee with us", () => {
     const [row] = await db.select().from(providerPayments);
     expect(row?.kind).toBe("fee");
     expect(row?.posted).toBe(false);
+  });
+});
+
+describe("a plan given without a payment, next to a provider", () => {
+  it("is replaced by a plan bought at checkout, end date and all", async () => {
+    const accountId = await createAccount();
+    await grantAccountPlan(db, accountId, "studio", {
+      now: start,
+      until: new Date(start.getTime() + 90 * day),
+    });
+    const bought = new Date(start.getTime() + day);
+    await applyProviderPayment(
+      db,
+      payment(accountId, { periodEnd: new Date(nextMonth.getTime() + day), periodStart: bought }),
+      { now: bought },
+    );
+
+    const [row] = await db.select().from(subscriptions).where(eq(subscriptions.accountId, accountId));
+    expect(row).toMatchObject({ cancelAt: null, planCode: "maker", provider: "psp", status: "active" });
+    expect(row?.startedAt).toEqual(bought);
+    expect(await readAccountPlan(db, accountId)).toMatchObject({ granted: false, subscribed: true });
+    expect(await periodsOf(accountId)).toHaveLength(1);
+    expect((await balances(accountId)).deferred).toBe(maker);
+    await expectBooksToHold();
+  });
+
+  it("is refused over a plan the provider bills", async () => {
+    const accountId = await createAccount();
+    await applyProviderPayment(db, payment(accountId), { now: start });
+    await expect(
+      grantAccountPlan(db, accountId, "studio", { now: new Date(start.getTime() + day) }),
+    ).rejects.toThrow(/billed through psp/);
+    expect(await readAccountPlan(db, accountId)).toMatchObject({ granted: false });
   });
 });

@@ -253,13 +253,20 @@ export function AdminUsersTable({
 // out; the title says who bills it and when it ends.
 function PaidPlanPill({ plan }: { plan: NonNullable<AdminUser["paidPlan"]> }) {
   const ends = plan.cancelAt ? formatDate(new Date(plan.cancelAt)) : null;
-  const billedBy = plan.provider
-    ? `Paid through ${plan.provider === "stripe" ? "Stripe" : plan.provider}`
-    : "Set by an operator";
+  const billedBy =
+    plan.provider === "grant"
+      ? "Given for free by an operator"
+      : plan.provider
+        ? `Paid through ${plan.provider === "stripe" ? "Stripe" : plan.provider}`
+        : "Set by an operator";
   return (
     <span
       className={ends ? "pill pill-warning" : "pill pill-ok"}
-      title={ends ? `${billedBy}. Cancelled, ends ${ends}.` : `${billedBy}.`}
+      title={
+        ends
+          ? `${billedBy}. ${plan.provider === "grant" ? "Ends" : "Cancelled, ends"} ${ends}.`
+          : `${billedBy}.`
+      }
     >
       {plan.name} {formatMicrosUsd(plan.priceMicros)}
       {ends ? ` · ends ${ends}` : null}

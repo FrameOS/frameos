@@ -46,23 +46,34 @@ const stop = (code: string, usd: number, current = false) => ({
   purchasable: true,
 });
 
-function planPayload(options: { manage?: boolean; nextPlan?: string | null; taxLabel?: string | null } = {}) {
+function planPayload(
+  options: {
+    grantedUntil?: string | null;
+    manage?: boolean;
+    nextPlan?: string | null;
+    taxLabel?: string | null;
+  } = {},
+) {
+  // A plan given without a payment has no subscription at Stripe.
+  const granted = options.grantedUntil !== undefined;
   return {
     billing: {
       checkout: true,
       manage: options.manage ?? true,
       mode: "live",
       prices_exclude_tax: true,
-      subscription: {
-        cancel_at: null,
-        past_due: false,
-        plan_code: "private-9",
-        renews_at: "2026-12-07T17:15:00.000Z",
-        status: "active",
-      },
+      subscription: granted
+        ? null
+        : {
+            cancel_at: null,
+            past_due: false,
+            plan_code: "private-9",
+            renews_at: "2026-12-07T17:15:00.000Z",
+            status: "active",
+          },
       tax_label: options.taxLabel === undefined ? "VAT" : options.taxLabel,
     },
-    cancel_at: null,
+    cancel_at: options.grantedUntil ?? null,
     catalog: {
       groups: [
         { available: true, key: "free", name: "Free", stops: [stop("free", 0)] },
@@ -74,6 +85,7 @@ function planPayload(options: { manage?: boolean; nextPlan?: string | null; taxL
         },
       ],
     },
+    granted,
     links: null,
     next_plan_code: options.nextPlan ?? null,
   };
@@ -148,6 +160,25 @@ describe("the plan at the top of the usage page", () => {
     logic.actions.loadPlan();
     await settle();
     expect(logic.values.taxSuffix).toBe("");
+  });
+
+  it("tells a plan given without a payment apart, with the day it ends", async () => {
+    serve(planPayload({ grantedUntil: "2027-01-01T00:00:00.000Z", manage: false }));
+    const logic = plansLogic();
+    logic.mount();
+    await settle();
+    expect(logic.values.currentPlan).toEqual({ code: "private-9", name: "Private", priceMicros: "9000000" });
+    expect(logic.values.grant).toEqual({ endsAt: "2027-01-01T00:00:00.000Z" });
+
+    serve(planPayload({ grantedUntil: null, manage: false }));
+    logic.actions.loadPlan();
+    await settle();
+    expect(logic.values.grant).toEqual({ endsAt: null });
+
+    serve(planPayload());
+    logic.actions.loadPlan();
+    await settle();
+    expect(logic.values.grant).toBeNull();
   });
 
   it("loads the invoices once there is a billing account, and not before", async () => {

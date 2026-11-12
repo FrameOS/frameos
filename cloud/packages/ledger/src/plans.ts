@@ -50,9 +50,20 @@ export interface BillingPlan {
   sortOrder: number;
 }
 
+/**
+ * The `subscriptions.provider` of a plan an operator gave without a payment
+ * (`grantAccountPlan`). Nobody bills it: the nightly cycle skips it like a
+ * provider-billed row, and the books hold nothing for it.
+ */
+export const grantedPlanProvider = "grant";
+
 export interface AccountPlan {
   // Set when the account cancelled: the plan runs to here and then stops.
   cancelAt: Date | null;
+  // True when an operator gave the plan without a payment
+  // (`grantAccountPlan`): nothing bills it, and `cancelAt` is where the
+  // grant ends, if it does.
+  granted: boolean;
   // Set when the account downgraded: `plan` runs to the end of the current
   // period and this one takes over at the rollover.
   nextPlanCode: string | null;
@@ -168,6 +179,7 @@ export async function readAccountPlan(
       cancelAt: subscriptions.cancelAt,
       nextPlanCode: subscriptions.nextPlanCode,
       plan: billingPlans,
+      provider: subscriptions.provider,
       status: subscriptions.status,
     })
     .from(subscriptions)
@@ -186,6 +198,7 @@ export async function readAccountPlan(
   if (expired) {
     return {
       cancelAt: null,
+      granted: false,
       nextPlanCode: null,
       plan: (await readPlan(db, paygPlanCode)) ?? fallbackPaygPlan,
       status: "active",
@@ -194,6 +207,7 @@ export async function readAccountPlan(
   }
   return {
     cancelAt: row.cancelAt,
+    granted: row.provider === grantedPlanProvider,
     nextPlanCode: row.nextPlanCode,
     plan: toPlan(row.plan),
     status: row.status,

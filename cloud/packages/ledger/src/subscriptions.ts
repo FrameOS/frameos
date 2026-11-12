@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { subscriptionPeriods, subscriptions } from "@frameos-cloud/db";
 import { postEvent, type PostEventOptions } from "./kernel";
-import { readPlan, type BillingPlan } from "./plans";
+import { grantedPlanProvider, readPlan, type BillingPlan } from "./plans";
 import { divideRoundHalfUp } from "./pricing";
 import {
   subscriptionChargeEventType,
@@ -133,8 +133,8 @@ export function isExpired(row: SubscriptionRow, now: Date): boolean {
  * Moving to a free plan is a cancellation, not a subscription: PAYG costs
  * nothing, so there is nothing to bill and no period to open. Otherwise:
  *
- *  - no live subscription: a fresh one from now, with its first period
- *    opened and charged before this returns;
+ *  - no live subscription, or a granted one: a fresh one from now, with its
+ *    first period opened and charged before this returns;
  *  - the same plan (perhaps mid-cancellation): the cancellation and any
  *    pending downgrade are withdrawn, nothing else moves;
  *  - a dearer plan: the unearned rest of the current period is returned to
@@ -195,7 +195,9 @@ async function setAccountPlanLocked(
     .where(eq(subscriptions.accountId, accountId))
     .limit(1);
 
-  if (!existing || isExpired(existing, now)) {
+  // A granted plan was never paid for: there is no period to prorate, and
+  // the plan set here starts a billed run of its own.
+  if (!existing || isExpired(existing, now) || existing.provider === grantedPlanProvider) {
     const [row] = await db
       .insert(subscriptions)
       .values({ accountId, planCode: plan.code, startedAt: now, status: "active" })
@@ -281,6 +283,99 @@ async function setAccountPlanLocked(
     throw new LedgerError("invalid_draft", "Failed to write the subscription");
   }
   await openAndChargePeriodsFor(db, row, now, options);
+  return toRecord(row);
+}
+
+/**
+ * Give an account a paid plan without a payment: an operator's grant (App
+ * Review's demo account, a partner, a friend). The plan applies at once,
+ * entitlements and all, and nothing is billed or booked: no period opens,
+ * the nightly cycle skips the row, and the journal gets no entry, because
+ * nothing was sold. `until` ends it (`cancel_at`, the way a cancellation
+ * runs out); without it the grant lasts until an operator changes it or the
+ * account buys a plan at checkout, which takes the row over.
+ *
+ * A plan a payment provider bills is refused: the card would go on being
+ * charged for a plan the account no longer has. A plan the nightly cycle
+ * bills (set by hand) is closed out like an upgrade first, its unearned
+ * rest returned to the receivable, so the grant does not charge for the
+ * days it gives away. Granting again replaces the plan and the end date.
+ */
+export async function grantAccountPlan(
+  db: LedgerExecutor,
+  accountId: string,
+  planCode: string,
+  options: PostEventOptions & { now?: Date | undefined; until?: Date | null | undefined } = {},
+): Promise<SubscriptionRecord> {
+  return withSubscriptionLock(db, accountId, (tx) =>
+    grantAccountPlanLocked(tx, accountId, planCode, options),
+  );
+}
+
+async function grantAccountPlanLocked(
+  db: LedgerExecutor,
+  accountId: string,
+  planCode: string,
+  options: PostEventOptions & { now?: Date | undefined; until?: Date | null | undefined },
+): Promise<SubscriptionRecord> {
+  const plan = await readPlan(db, planCode);
+  if (!plan) {
+    throw new LedgerError("invalid_draft", `Unknown plan ${planCode}`);
+  }
+  if (plan.priceMicros === 0n) {
+    throw new LedgerError("invalid_draft", "Only a paid plan can be given; the free plan needs no grant");
+  }
+  const now = options.now ?? new Date();
+  const until = options.until ?? null;
+  if (until && until.getTime() <= now.getTime()) {
+    throw new LedgerError("invalid_draft", "A grant has to end in the future");
+  }
+
+  const [existing] = await db
+    .select()
+    .from(subscriptions)
+    .where(eq(subscriptions.accountId, accountId))
+    .limit(1);
+  const live = existing && !isExpired(existing, now) ? existing : undefined;
+  if (live?.provider && live.provider !== grantedPlanProvider) {
+    throw new LedgerError(
+      "invalid_draft",
+      `This subscription is billed through ${live.provider}; cancel it there before giving a plan`,
+    );
+  }
+  if (live && !live.provider) {
+    const open = await currentPeriod(db, live.id, now);
+    if (open && open.chargedAt) {
+      const unearned = unearnedMicros(open, now);
+      if (unearned > 0n) {
+        await refundUnearnedPeriod(db, open, unearned, options);
+      }
+      await closePeriodAt(db, open, now);
+    } else if (open) {
+      await db.delete(subscriptionPeriods).where(eq(subscriptionPeriods.id, open.id));
+    }
+  }
+
+  const values = {
+    cancelAt: until,
+    canceledAt: null,
+    nextPlanCode: null,
+    planCode: plan.code,
+    provider: grantedPlanProvider,
+    startedAt: now,
+    // A grant with an end runs out the way a cancellation does: the nightly
+    // job marks it canceled at cancel_at, and readAccountPlan stops
+    // honouring it at that instant whether the job ran or not.
+    status: until ? "canceling" : "active",
+  };
+  const [row] = await db
+    .insert(subscriptions)
+    .values({ accountId, ...values })
+    .onConflictDoUpdate({ set: { ...values, updatedAt: now }, target: subscriptions.accountId })
+    .returning();
+  if (!row) {
+    throw new LedgerError("invalid_draft", "Failed to write the subscription");
+  }
   return toRecord(row);
 }
 

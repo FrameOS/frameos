@@ -1918,6 +1918,8 @@ export const subscriptions = pgTable(
     // Who drives the periods (migration 0073). Null: the nightly cycle,
     // charging the receivable. A provider's name ("stripe"): a period opens
     // when that payment provider reports a payment, with its bounds.
+    // "grant": nobody, an operator gave the plan without a payment
+    // (grantAccountPlan), and no period ever opens.
     provider: text("provider"),
     ...timestamps,
   },

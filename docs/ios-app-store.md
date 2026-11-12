@@ -100,7 +100,9 @@ the destination, then Run.
   good-looking scenes and photos.
 - **Review notes**: a demo FrameOS Cloud account (email and password; no
   two-factor) with one or two virtual frames that have scenes and an album, so
-  every screen has something on it. Say that a self-hosted backend is the
+  every screen has something on it. Virtual frames need a paid plan: give
+  the account one on `/admin/billing/customers` ("Give it for free",
+  `cloud/docs/billing.md`), with no end date while the app is in review. Say that a self-hosted backend is the
   owner's own server (often plain http on their network: the reason for the
   ATS exception), that the AI chat sends text to OpenAI after asking, that
   store scenes can be reported from the install sheet, and where account

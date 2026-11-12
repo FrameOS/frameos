@@ -770,6 +770,63 @@ describe("admin billing routes", () => {
     expect(audit[1]?.metadata).toMatchObject({ from: "partner", immediately: false, plan: "payg" });
   });
 
+  it("lets an operator give a plan without a payment, with an end date", async () => {
+    const customer = await signIn();
+    await signIn({ superadmin: true });
+    await db.execute(sql`
+      INSERT INTO billing_plans ("code", "name", "price_micros", "margin_basis_points", "sort_order", "public") VALUES
+        ('payg', 'Pay as you go', 0, 10000, 0, true),
+        ('maker', 'Maker', 1990000, 5000, 10, true)
+      ON CONFLICT ("code") DO NOTHING
+    `);
+    const put = (body: Record<string, unknown>) =>
+      putCustomerPlan(putJson(`/api/admin/billing/customers/${customer}/plan`, body), params(customer));
+
+    expect((await put({ grant: true, plan: "payg", reason: "x" })).status).toBe(400);
+    const badDate = await put({ grant: true, plan: "maker", reason: "x", until: "soon" });
+    expect(badDate.status).toBe(400);
+    expect((await badDate.json()).error).toBe("invalid_request");
+    expect((await put({ grant: true, plan: "maker", reason: "x", until: "2020-01-01" })).status).toBe(400);
+
+    const given = await put({ grant: true, plan: "maker", reason: "App Review demo", until: "2099-12-31" });
+    expect(given.status).toBe(200);
+    // The last day runs to its end: the grant stops at the next midnight, UTC.
+    expect(await given.json()).toMatchObject({
+      cancel_at: "2100-01-01T00:00:00.000Z",
+      granted: true,
+      plan: { code: "maker" },
+      subscribed: true,
+    });
+    expect(await accountBalanceMicros(db, customerReceivableCode(customer))).toBe(0n);
+
+    // Giving it again with no date takes the end away.
+    const forever = await put({ grant: true, plan: "maker", reason: "Partner" });
+    expect(await forever.json()).toMatchObject({ cancel_at: null, granted: true });
+
+    // The plain move replaces the grant with a billed plan.
+    const billed = await put({ plan: "maker", reason: "Pays by invoice now" });
+    expect(await billed.json()).toMatchObject({ granted: false, plan: { code: "maker" } });
+    expect(await accountBalanceMicros(db, customerReceivableCode(customer))).toBe(1_990_000n);
+
+    const audit = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.accountId, customer))
+      .orderBy(auditEvents.createdAt);
+    expect(audit.map((event) => event.eventType)).toEqual([
+      "admin.plan_granted",
+      "admin.plan_granted",
+      "admin.plan_changed",
+    ]);
+    expect(audit[0]?.metadata).toMatchObject({
+      from: null,
+      plan: "maker",
+      reason: "App Review demo",
+      until: "2100-01-01T00:00:00.000Z",
+    });
+    expect(audit[1]?.metadata).toMatchObject({ from: "maker", until: null });
+  });
+
   it("keeps the operator surfaces superadmin only", async () => {
     const customer = await signIn();
     const ai = await putCustomerAi(

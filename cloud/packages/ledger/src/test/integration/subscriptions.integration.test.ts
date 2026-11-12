@@ -11,6 +11,7 @@ import {
   closeOutSubscriptionForDeletedAccount,
   customerReceivableCode,
   formatMicros,
+  grantAccountPlan,
   listJournalEntries,
   readAccountPlan,
   recognizePeriod,
@@ -464,5 +465,91 @@ describe("a subscriber's life through the books", () => {
       usage: turnUsage,
     });
     expect(metered.record.priceMicros).toBe(884_800n);
+  });
+});
+
+// An operator's grant (the admin plan route's `grant`): the plan without a
+// payment, for App Review's demo account, a partner, a friend.
+describe("a plan given without a payment", () => {
+  it("applies the plan at once and bills and books nothing, night after night", async () => {
+    const accountId = await createAccount();
+    await grantAccountPlan(db, accountId, "studio", { now: t0 });
+
+    const plan = await readAccountPlan(db, accountId);
+    expect(plan).toMatchObject({ cancelAt: null, granted: true, subscribed: true });
+    expect(plan.plan.code).toBe("studio");
+    expect(await periodsFor(accountId)).toEqual([]);
+
+    for (const at of [t0, halfway, new Date(t0.getTime() + 45 * day), new Date(t0.getTime() + 400 * day)]) {
+      expect(await runSubscriptionCycle(db, { now: at })).toMatchObject({ charged: 0, opened: 0 });
+    }
+    expect(await periodsFor(accountId)).toEqual([]);
+    expect(await accountBalanceMicros(db, customerReceivableCode(accountId))).toBe(0n);
+    expect(await listJournalEntries(db, { limit: 10 })).toEqual([]);
+    expect(await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 })).toEqual([]);
+  });
+
+  it("ends on its date, as a cancellation runs out", async () => {
+    const accountId = await createAccount();
+    const now = new Date();
+    const until = new Date(now.getTime() + 10 * day);
+    await grantAccountPlan(db, accountId, "maker", { now, until });
+
+    expect(await readAccountPlan(db, accountId)).toMatchObject({ cancelAt: until, granted: true });
+    await runSubscriptionCycle(db, { now: new Date(until.getTime() - 1) });
+    const [running] = await db.select().from(subscriptions).where(eq(subscriptions.accountId, accountId));
+    expect(running?.status).toBe("canceling");
+
+    await runSubscriptionCycle(db, { now: until });
+    const [ended] = await db.select().from(subscriptions).where(eq(subscriptions.accountId, accountId));
+    expect(ended?.status).toBe("canceled");
+    expect(await readAccountPlan(db, accountId)).toMatchObject({ granted: false, subscribed: false });
+    expect(await periodsFor(accountId)).toEqual([]);
+  });
+
+  it("gives paid plans only, and only into the future", async () => {
+    const accountId = await createAccount();
+    await expect(grantAccountPlan(db, accountId, "payg", { now: t0 })).rejects.toThrow(/Only a paid plan/);
+    await expect(grantAccountPlan(db, accountId, "gold", { now: t0 })).rejects.toThrow(/Unknown plan/);
+    await expect(grantAccountPlan(db, accountId, "maker", { now: t0, until: t0 })).rejects.toThrow(
+      /end in the future/,
+    );
+    expect(await readAccountPlan(db, accountId)).toMatchObject({ subscribed: false });
+  });
+
+  it("hands back the unearned rest of a plan set by hand, and charges nothing after", async () => {
+    const accountId = await createAccount();
+    const receivable = customerReceivableCode(accountId);
+    await setAccountPlan(db, accountId, "maker", { now: t0 });
+    await grantAccountPlan(db, accountId, "studio", { now: halfway });
+
+    expect(await readAccountPlan(db, accountId)).toMatchObject({ granted: true });
+    const periods = await periodsFor(accountId);
+    expect(periods).toHaveLength(1);
+    expect(periods[0]).toMatchObject({ planCode: "maker", refundedMicros: 995_000n });
+    expect(periods[0]?.periodEnd).toEqual(halfway);
+    // Owed: the half of Maker that was served, and nothing for Studio.
+    expect(await accountBalanceMicros(db, receivable)).toBe(995_000n);
+
+    await runSubscriptionCycle(db, { now: new Date(t0.getTime() + 62 * day) });
+    expect(await periodsFor(accountId)).toHaveLength(1);
+    expect(await accountBalanceMicros(db, receivable)).toBe(995_000n);
+    expect(await deferred()).toBe(0n);
+    expect(await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 })).toEqual([]);
+  });
+
+  it("gives way to a plan set by hand, which starts a billed run of its own", async () => {
+    const accountId = await createAccount();
+    await grantAccountPlan(db, accountId, "studio", { now: t0, until: new Date(t0.getTime() + 90 * day) });
+    await setAccountPlan(db, accountId, "maker", { now: halfway });
+
+    const plan = await readAccountPlan(db, accountId);
+    expect(plan).toMatchObject({ cancelAt: null, granted: false });
+    expect(plan.plan.code).toBe("maker");
+    const periods = await periodsFor(accountId);
+    expect(periods).toHaveLength(1);
+    expect(periods[0]).toMatchObject({ planCode: "maker", priceMicros: 1_990_000n });
+    expect(periods[0]?.periodStart).toEqual(halfway);
+    expect(await accountBalanceMicros(db, customerReceivableCode(accountId))).toBe(1_990_000n);
   });
 });
