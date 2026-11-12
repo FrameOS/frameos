@@ -320,7 +320,8 @@ function PlanCardBox({ card, plannedLimits }: { card: PlanCard; plannedLimits: s
 // at Stripe, and cancelling. Cancelling asks once, says that the time left
 // is not refunded, and runs the plan to the end of the month paid for.
 function PlanSummary(): JSX.Element | null {
-  const { currentPlan, nextPlan, billing, busy, checkoutOutcome, taxSuffix, catalogLoading } = useValues(plansLogic)
+  const { currentPlan, nextPlan, billing, busy, checkoutOutcome, taxSuffix, catalogLoading, grant } =
+    useValues(plansLogic)
   const { openBilling, cancelPlan, keepPlan, showPlans } = useActions(plansLogic)
   if (!currentPlan) {
     return catalogLoading ? <Spinner /> : null
@@ -359,6 +360,10 @@ function PlanSummary(): JSX.Element | null {
           nextPlan.priceMicros
         )}/month.`
       : `Renews on ${formatDate(subscription.renews_at)}.`
+    : paid && grant
+    ? grant.endsAt
+      ? `Given to you for free until ${formatDate(grant.endsAt)}, then the account moves to Free.`
+      : 'Given to you for free. Nothing is charged.'
     : paid
     ? 'Set up for you by support. Write to us to change it.'
     : 'Everything a household needs. A paid plan holds more frames and more files.'

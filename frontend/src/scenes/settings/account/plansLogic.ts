@@ -121,8 +121,15 @@ export interface PlanResponse {
   billing: PlanBilling | null
   cancel_at: string | null
   catalog: PlanCatalog | null
+  /** Given by an operator without a payment; `cancel_at` is where it ends. */
+  granted: boolean
   links: PlanLinks | null
   next_plan_code: string | null
+}
+
+/** A plan given without a payment, and when it ends (null: it does not). */
+export interface PlanGrant {
+  endsAt: string | null
 }
 
 /** What a card's button does. */
@@ -289,6 +296,7 @@ export interface plansLogicValues {
   catalogLoading: boolean
   checkoutOutcome: CheckoutOutcome | null
   currentPlan: NamedPlan | null
+  grant: PlanGrant | null
   invoices: AccountInvoice[] | null
   invoicesError: string | null
   invoicesLoading: boolean
@@ -342,6 +350,7 @@ export interface plansLogicActions {
       billing: PlanBilling | null
       cancel_at: string | null
       catalog: PlanCatalog | null
+      granted: boolean
       links: PlanLinks | null
       next_plan_code: string | null
     },
@@ -351,6 +360,7 @@ export interface plansLogicActions {
       billing: PlanBilling | null
       cancel_at: string | null
       catalog: PlanCatalog | null
+      granted: boolean
       links: PlanLinks | null
       next_plan_code: string | null
     }
@@ -401,6 +411,7 @@ export interface plansLogicMeta {
     ) => PlanCard[]
     currentPlan: (catalog: PlanCatalog | null) => NamedPlan | null
     nextPlan: (catalog: PlanCatalog | null, planResponse: PlanResponse | null) => NamedPlan | null
+    grant: (planResponse: PlanResponse | null) => PlanGrant | null
     taxSuffix: (billing: PlanBilling | null) => string
   }
 }
@@ -438,6 +449,7 @@ export const plansLogic = kea<plansLogicType>([
             billing: payload.billing ?? null,
             cancel_at: payload.cancel_at ?? null,
             catalog: payload.catalog ?? null,
+            granted: payload.granted === true,
             links: payload.links ?? null,
             next_plan_code: payload.next_plan_code ?? null,
           }
@@ -527,6 +539,12 @@ export const plansLogic = kea<plansLogicType>([
       (s) => [s.catalog, s.planResponse],
       (catalog: PlanCatalog | null, planResponse: PlanResponse | null): NamedPlan | null =>
         planResponse?.next_plan_code ? namedPlan(catalog, planResponse.next_plan_code) : null,
+    ],
+    // A plan support gave without a payment.
+    grant: [
+      (s) => [s.planResponse],
+      (planResponse: PlanResponse | null): PlanGrant | null =>
+        planResponse?.granted ? { endsAt: planResponse.cancel_at } : null,
     ],
     taxSuffix: [
       (s) => [s.billing],

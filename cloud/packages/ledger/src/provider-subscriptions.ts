@@ -5,7 +5,7 @@ import {
   subscriptions,
 } from "@frameos-cloud/db";
 import { postEvent, type PostEventOptions } from "./kernel";
-import { readPlan } from "./plans";
+import { grantedPlanProvider, readPlan } from "./plans";
 import {
   paymentFeeEventType,
   paymentReceivedEventType,
@@ -208,6 +208,11 @@ export async function applyProviderPayment(
               planCode: plan.code,
               provider: input.provider,
               updatedAt: now,
+              // A plan bought while a grant runs replaces it: the grant's
+              // end date is not the paid plan's.
+              ...(existing.provider === grantedPlanProvider
+                ? { cancelAt: null, canceledAt: null, startedAt, status: "active" }
+                : {}),
             })
             .where(eq(subscriptions.id, existing.id))
             .returning();

@@ -77,6 +77,9 @@ export async function GET(request: NextRequest) {
       // Free, Private and Business as the usage page draws them (plan-catalog.ts).
       // `plans` below is the billing_plans rows.
       catalog: planCatalog(limitsForPlan(free), current.plan.code, purchasable),
+      // Given by an operator without a payment: nothing bills it, and
+      // `cancel_at` is the last moment it runs, if it ends.
+      granted: current.granted,
       // Where the plan cards send someone who wants the long version.
       links: {
         pricing: getPricingUrl(),

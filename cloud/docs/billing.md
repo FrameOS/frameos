@@ -26,6 +26,22 @@ so does every paid card with Stripe not set up; an operator then moves the
 account by hand (`/admin/billing/customers`, after **Sync plans** has
 written the `billing_plans` rows).
 
+An operator can also **give** a plan without a payment (App Review's demo
+account, a partner, a friend): on `/admin/billing/customers`, find the
+account by its email or uuid, pick the plan, tick "Give it for free" and,
+if it should end, the last day. `grantAccountPlan`
+(`packages/ledger/src/subscriptions.ts`) writes the subscription with
+`provider = 'grant'`: the plan's limits apply at once, no period opens, the
+nightly cycle skips the row and the journal gets nothing, because nothing
+was sold. The last day becomes `cancel_at` (the next midnight, UTC) and runs
+out the way a cancellation does. Buying a plan at checkout replaces a grant
+(the payment takes the row over and drops the end date); a plan set by hand
+replaces it with a billed run; a grant over a plan the nightly cycle bills
+hands back that period's unearned rest first; a plan Stripe bills is
+refused (cancel it there first). A grant is audited (`admin.plan_granted`,
+with the reason) and sends no `cloud plan …` event. The account's usage
+page says "Given to you for free".
+
 A plan lists only what exists. `plannedFeatures` and `plannedLimits` in
 the catalog name what is not built yet; every page marks those "planned"
 and a plan's row does not grant them. Take a name off those lists in the
