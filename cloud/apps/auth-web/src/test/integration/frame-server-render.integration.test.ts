@@ -21,7 +21,7 @@ import {
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GET as pullRender } from "../../../app/api/frames/[frameId]/embedded/render/route";
+import { GET as pullRender, POST as pullRenderWithInput } from "../../../app/api/frames/[frameId]/embedded/render/route";
 import { POST as postSettings } from "../../../app/api/frames/[frameId]/settings/route";
 import {
   enqueueFrameCommand,
@@ -31,7 +31,7 @@ import {
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import type { SceneRenderOptions, SceneRenderResult } from "../../lib/scene-render";
 import { hashSecret } from "../../lib/secrets";
-import { prerenderFrame, setServerRendererForTests } from "../../lib/server-render";
+import { leaveBuiltInSceneForSleep, prerenderFrame, setServerRendererForTests } from "../../lib/server-render";
 import { createSession, sessionCookieName } from "../../lib/session";
 import { accountUsage, countCloudRenderedFramesForAccount } from "../../lib/usage";
 
@@ -52,13 +52,22 @@ const issuer = "https://accounts.google.com";
 const db = createDb();
 let userCounter = 0;
 
-// Every render the stand-in was asked for, and the shade it paints next.
+// Every render the stand-in was asked for, the shade it paints next, and
+// what it says of the render besides (the scene it ended on, the photo
+// palette, the logs), as the runtime would.
 let renders: SceneRenderOptions[] = [];
 let shade = 0;
+let painted: [number, number, number] | null = null;
+let reports: Partial<SceneRenderResult> = {};
 
 function standIn(options: SceneRenderOptions): Promise<SceneRenderResult> {
   renders.push(options);
   const rgba = new Uint8Array(options.width * options.height * 4).fill(shade);
+  if (painted) {
+    for (let i = 0; i < options.width * options.height; i += 1) {
+      rgba.set(painted, i * 4);
+    }
+  }
   return Promise.resolve({
     errors: [],
     height: options.height,
@@ -68,6 +77,7 @@ function standIn(options: SceneRenderOptions): Promise<SceneRenderResult> {
     rgba,
     state: { count: (renders.length as number) * 1, secret: "kept out" },
     width: options.width,
+    ...reports,
   });
 }
 
@@ -76,6 +86,8 @@ beforeEach(async () => {
   cookieJar.clear();
   renders = [];
   shade = 0;
+  painted = null;
+  reports = {};
   setServerRendererForTests(standIn);
   const tables = await db.execute<{ tablename: string }>(
     sql`select tablename from pg_tables where schemaname = 'public'`,
@@ -207,6 +219,17 @@ function pull(frameId: string, token: string, query: string, headers: Record<str
     new NextRequest(new URL(`/api/frames/${frameId}/embedded/render?${query}`, baseUrl), {
       headers: { authorization: `Bearer ${token}`, ...headers },
       method: "GET",
+    }),
+    { params: Promise.resolve({ frameId }) },
+  );
+}
+
+function pullWithInput(frameId: string, token: string, query: string, body: string, headers: Record<string, string> = {}) {
+  return pullRenderWithInput(
+    new NextRequest(new URL(`/api/frames/${frameId}/embedded/render?${query}`, baseUrl), {
+      body,
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...headers },
+      method: "POST",
     }),
     { params: Promise.resolve({ frameId }) },
   );
@@ -409,6 +432,152 @@ describe("the render pull", () => {
 
     await enqueueFrameCommand(db, { frameId: frame.id, payload: { name: "tap" }, type: "scene_event" });
     expect(await prerenderFrame(db, frame.id, { asOf, render: standIn })).toBe("events_pending");
+  });
+});
+
+describe("keys, touch and the schedule", () => {
+  const press = {
+    events: [
+      { name: "gpio", origin: "driver", payload: { action: "down", atMs: 80_410, label: "RIGHT", level: 0, pin: 3 } },
+      { name: "gpio", origin: "driver", payload: { action: "up", atMs: 81_020, label: "RIGHT", level: 1, pin: 3 } },
+      { name: "setCurrentScene", origin: "schedule", payload: { sceneId: "weather" } },
+      // The plane's own: never relayed, never delivered.
+      { name: "nextPhoto", origin: "cloud", payload: {} },
+    ],
+    nowMs: 81_234,
+  };
+
+  it("go into the render, after the events the plane held, and never reuse a picture", async () => {
+    const accountId = await signIn();
+    await subscribe(accountId, 1);
+    const { frame, token } = await createFrame(accountId);
+    const first = await pull(frame.id, token, panel);
+    expect(first.status).toBe(200);
+    const etag = first.headers.get("etag")!;
+    await enqueueFrameCommand(db, { frameId: frame.id, payload: { name: "tap" }, type: "scene_event" });
+
+    // Inside the floor with the same picture: still drawn, for the input.
+    const pressed = await pullWithInput(frame.id, token, panel, JSON.stringify(press), { "if-none-match": etag });
+    expect(pressed.status).toBe(304);
+    expect(renders).toHaveLength(2);
+    expect(renders[1]?.events).toEqual([{ name: "tap", origin: "cloud", payload: {} }]);
+    expect(renders[1]?.deviceInput).toEqual({ edges: [], events: press.events.slice(0, 3), nowMs: 81_234 });
+
+    // An empty body is a pull like a GET: the last picture again.
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify({ edges: [], nowMs: 5 }))).status).toBe(200);
+    expect(renders).toHaveLength(2);
+
+    // The Pico's edges are taken too.
+    const pico = { edges: [{ action: "down", atMs: 10, label: "A", pin: -1 }, { action: "up", atMs: 90, label: "A", pin: -1 }], nowMs: 100 };
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(pico))).status).toBe(200);
+    expect(renders[2]?.deviceInput).toEqual({ ...pico, events: [] });
+  });
+
+  it("refuses a body that is not input", async () => {
+    const accountId = await signIn();
+    await subscribe(accountId, 1);
+    const { frame, token } = await createFrame(accountId);
+    for (const body of ["{", "[]", JSON.stringify({ events: [] }), JSON.stringify({ events: {}, nowMs: 1 })]) {
+      const refused = await pullWithInput(frame.id, token, panel, body);
+      expect(refused.status).toBe(400);
+      expect(await refused.json()).toMatchObject({ error: "invalid_input" });
+    }
+    const huge = JSON.stringify({ events: [{ name: "x", origin: "driver", payload: { pad: "y".repeat(17_000) } }], nowMs: 1 });
+    expect((await pullWithInput(frame.id, token, panel, huge)).status).toBe(413);
+    // Who is asking is checked before the body is read.
+    expect((await pullWithInput(frame.id, "fc_link_nope", panel, "{")).status).toBe(401);
+    expect(renders).toHaveLength(0);
+  });
+
+  it("leave the plane on the scene the render ended on, with its state", async () => {
+    const accountId = await signIn();
+    await subscribe(accountId, 1);
+    const { frame, token } = await createFrame(accountId);
+    expect((await pull(frame.id, token, panel)).status).toBe(200);
+
+    reports = { sceneId: "weather", state: { secret: "kept out", title: "Switched" } };
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    let row = await renderRow(frame.id);
+    expect(row?.activeScene).toBe("weather");
+    expect(row?.pictureScene).toBe("weather");
+    expect(row?.states).toEqual({ clock: { count: 1 }, weather: { title: "Switched" } });
+    // The frame's row says so too, as a device's report would: what the
+    // workspace shows and what custom events are routed against.
+    const [shown] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(shown?.lastState).toEqual({ active_scene: "weather", clock: { count: 1 }, weather: { title: "Switched" } });
+
+    // The next timed pull draws it.
+    reports = {};
+    await db
+      .update(frameServerRenders)
+      .set({ renderedAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(frameServerRenders.frameId, frame.id));
+    expect((await pull(frame.id, token, panel)).status).toBe(200);
+    expect(renders.at(-1)?.sceneId).toBe("weather");
+    // An id the frame has no scene for is not one to keep.
+    reports = { sceneId: "gone" };
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    row = await renderRow(frame.id);
+    expect(row?.activeScene).toBe("weather");
+  });
+
+  it("keep the switcher a swipe opened while the frame is awake, and leave it when it sleeps", async () => {
+    const accountId = await signIn();
+    await subscribe(accountId, 1);
+    const { frame, token } = await createFrame(accountId);
+    expect((await pull(frame.id, token, panel)).status).toBe(200);
+
+    reports = { sceneId: "system/sceneSwitcher", state: { from: "clock", highlight: 1 } };
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    let row = await renderRow(frame.id);
+    expect(row?.activeScene).toBe("system/sceneSwitcher");
+    expect(row?.states).toMatchObject({ "system/sceneSwitcher": { from: "clock", highlight: 1 } });
+    // The frame's scene, as the row reports it, is the one the switcher was opened over.
+    const lastState = async () => (await db.select().from(frames).where(eq(frames.id, frame.id)))[0]?.lastState;
+    expect(await lastState()).toEqual({ active_scene: "clock", clock: { count: 1 } });
+
+    // A tap on a tile lands in the switcher it opened, with its state.
+    reports = { sceneId: "weather", state: { title: "Picked" } };
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    expect(renders.at(-1)?.sceneId).toBe("system/sceneSwitcher");
+    expect(renders.at(-1)?.states).toMatchObject({ "system/sceneSwitcher": { from: "clock", highlight: 1 } });
+    expect((await renderRow(frame.id))?.activeScene).toBe("weather");
+
+    // Open again, then the frame goes to sleep: back to where it was opened from.
+    reports = { sceneId: "system/sceneSwitcher", state: { from: "weather" } };
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    expect(await leaveBuiltInSceneForSleep(db, frame.id)).toBe(true);
+    row = await renderRow(frame.id);
+    expect(row?.activeScene).toBe("weather");
+    expect(await lastState()).toMatchObject({ active_scene: "weather", weather: { title: "Picked" } });
+    expect(row?.states).not.toHaveProperty("system/sceneSwitcher");
+    expect(await leaveBuiltInSceneForSleep(db, frame.id)).toBe(false);
+  });
+
+  it("render with the frame's event map, palette and panel, and dither to its palette", async () => {
+    const accountId = await signIn();
+    await subscribe(accountId, 1);
+    const eventMap = [{ as: { direction: "next", event: "setCurrentScene" }, event: "longPress", match: { label: "RIGHT" } }];
+    // A Spectra 6 panel whose measured "green" (index 6) is the bluest colour it shows.
+    const colors = ["#000000", "#ffffff", "#ffff00", "#ff0000", "#808080", "#0000ff"];
+    const { frame, token } = await createFrame(accountId, {
+      event_map: eventMap,
+      interval: 900,
+      palette: { colors, name: "Measured" },
+      render_mode: "remote",
+    });
+    painted = [0, 0, 255];
+    const spectra = "width=800&height=480&format=7&rotate=180";
+    const drawn = await pull(frame.id, token, spectra);
+    expect(drawn.status).toBe(200);
+    expect(renders[0]?.frame).toEqual({ eventMap, palette: colors, pixelFormat: 7, rotate: 180 });
+    let body = Buffer.from(await drawn.arrayBuffer());
+    expect(body[12]).toBe(0x66);
+
+    // A photo's own palette, as the render reports it, wins for that picture.
+    reports = { palette: ["#000000", "#ffffff", "#ffff00", "#ff0000", "#0000ff", "#00ff00"] };
+    body = Buffer.from(await (await pullWithInput(frame.id, token, spectra, JSON.stringify(press))).arrayBuffer());
+    expect(body[12]).toBe(0x55);
   });
 });
 

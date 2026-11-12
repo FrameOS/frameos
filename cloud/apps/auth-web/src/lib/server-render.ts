@@ -29,6 +29,7 @@ import { logError, logWarn } from "./log";
 import {
   isPanelPixelFormat,
   panelFosb,
+  panelPalette,
   sceneCanvasSize,
   type PanelPixelFormatCode,
 } from "./panel-pack";
@@ -40,6 +41,8 @@ import {
   rendererVersion,
   renderScenes,
   SceneRenderError,
+  type RelayedDeviceInput,
+  type RenderFrameConfig,
   type SceneRenderOptions,
   type SceneRenderResult,
 } from "./scene-render";
@@ -67,6 +70,147 @@ export const prerenderMinLeadMs = 20_000;
 export const prerenderMaxLeadMs = 90_000;
 const maxSceneIdChars = 256;
 const maxStoredLogLines = 20;
+
+// The scenes built into every runtime (docs/events-contract.json
+// `scenes.switcher`, `scenes.settings`; server-render.test.ts reads the
+// contract): in no scene list, yet the scene a render can end on when a key,
+// a swipe or a tap opened one (docs/server-rendering.md "Keys, touch and the
+// schedule"). The plane keeps one as its active scene while the frame is
+// awake, as the device's RAM would.
+export const builtInSceneIds: readonly string[] = ["system/sceneSwitcher", "system/sceneSettings"];
+// What of a built-in scene's state is kept between two pulls, at most: its
+// `from`, its layout, the fields and values of the scene it shows.
+const maxBuiltInStateBytes = 32 * 1024;
+
+export function isBuiltInSceneId(id: unknown): id is string {
+  return typeof id === "string" && builtInSceneIds.includes(id);
+}
+
+// ---------------------------------------------------------------------------
+// Relayed input (docs/server-rendering.md "Keys, touch and the schedule")
+// ---------------------------------------------------------------------------
+
+/** A pull's body at most: 32 edges and 32 events of a few hundred bytes each. */
+export const maxDeviceInputBytes = 16 * 1024;
+/** Edges and events kept of one body, each (frameos/relayed_input.nim takes 32). */
+export const maxDeviceInputItems = 32;
+/** The origins a device relays its own producers' events from; others are not delivered. */
+export const relayedEventOrigins: readonly string[] = ["driver", "schedule", "http:write", "http:admin"];
+const maxRelayedEventNameChars = 64;
+const relayedEdgeLabel = /^[A-Za-z0-9_.-]{1,16}$/;
+
+function isWholeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
+/**
+ * The input a device sent with its pull, as the runtime takes it:
+ * `{nowMs, edges?: [{label, action: "down" | "up", atMs, pin?, wake?,
+ * claimed?}], events?: [{origin, name, payload}]}`, oldest first. Null for a
+ * body of another shape (the route answers 400); an edge or an event that
+ * says nothing usable is dropped, one from another origin is not delivered,
+ * and past maxDeviceInputItems of each the rest are. The same rules as the
+ * backend's `embedded_device_input`.
+ */
+export function readDeviceInput(body: unknown): RelayedDeviceInput | null {
+  if (!isRecord(body) || !isWholeNumber(body.nowMs)) {
+    return null;
+  }
+  if (body.edges !== undefined && !Array.isArray(body.edges)) {
+    return null;
+  }
+  if (body.events !== undefined && !Array.isArray(body.events)) {
+    return null;
+  }
+  const nowMs = body.nowMs;
+  const edges: Record<string, unknown>[] = [];
+  for (const edge of (body.edges as unknown[] | undefined) ?? []) {
+    if (edges.length >= maxDeviceInputItems) {
+      break;
+    }
+    if (!isRecord(edge)) {
+      continue;
+    }
+    const { action, atMs, label } = edge;
+    if (typeof label !== "string" || !relayedEdgeLabel.test(label)) {
+      continue;
+    }
+    if ((action !== "down" && action !== "up") || !isWholeNumber(atMs) || atMs < 0 || atMs > nowMs) {
+      continue;
+    }
+    edges.push({
+      action,
+      atMs,
+      label,
+      ...(isWholeNumber(edge.pin) ? { pin: edge.pin } : {}),
+      ...(edge.wake === true ? { wake: true } : {}),
+      ...(edge.claimed === true ? { claimed: true } : {}),
+    });
+  }
+  const events: RelayedDeviceInput["events"] = [];
+  for (const event of (body.events as unknown[] | undefined) ?? []) {
+    if (events.length >= maxDeviceInputItems) {
+      break;
+    }
+    if (!isRecord(event)) {
+      continue;
+    }
+    const { name, origin } = event;
+    if (typeof origin !== "string" || !relayedEventOrigins.includes(origin)) {
+      continue;
+    }
+    if (typeof name !== "string" || name.length === 0 || name.length > maxRelayedEventNameChars) {
+      continue;
+    }
+    if (event.payload !== undefined && !isRecord(event.payload)) {
+      continue;
+    }
+    events.push({ name, origin, payload: isRecord(event.payload) ? event.payload : {} });
+  }
+  return { edges, events, nowMs };
+}
+
+/**
+ * frames.last_state as the device would report it (hello `states` plus
+ * `active_scene`), from the plane's own memory: what the workspace shows as
+ * the frame's scene, and what custom events are routed against
+ * (reportedActiveSceneId). Only the frame's scenes: a built-in scene's
+ * state is the plane's business, and while one shows the frame's scene is
+ * the one it was opened from.
+ */
+export function planeLastState(
+  activeScene: string | null | undefined,
+  states: Record<string, Record<string, unknown>>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [id, state] of Object.entries(states)) {
+    if (!isBuiltInSceneId(id) && id !== "active_scene") {
+      out[id] = state;
+    }
+  }
+  const from = isBuiltInSceneId(activeScene) ? states[activeScene]?.from : activeScene;
+  if (typeof from === "string" && from.length > 0 && !builtInSceneIds.includes(from)) {
+    out.active_scene = from.slice(0, maxSceneIdChars);
+  }
+  return out;
+}
+
+async function writePlaneLastState(
+  db: Database,
+  frameId: string,
+  activeScene: string | null | undefined,
+  states: Record<string, Record<string, unknown>>,
+): Promise<void> {
+  await db
+    .update(frames)
+    .set({ lastState: planeLastState(activeScene, states) })
+    .where(eq(frames.id, frameId));
+}
+
+/** Whether a pull's input holds anything for the scene. */
+export function deviceInputHasAny(input: RelayedDeviceInput | null | undefined): input is RelayedDeviceInput {
+  return !!input && (input.edges.length > 0 || input.events.length > 0);
+}
 
 let rendererOverride: ServerRenderer | undefined;
 /** Test seam: what renders instead of the wasm runtime. */
@@ -159,7 +303,8 @@ export function prerenderLeadMs(lastRenderMs: number | null | undefined): number
  * "Which scene" (docs/server-rendering.md): a switch the plane sent that the
  * device has not taken yet wins, then the scene the device says it is on,
  * then the plane's own, then the frame's default. Only a scene of the frame
- * that is not a layout counts.
+ * that is not a layout counts, and, for the plane's own, a built-in scene
+ * (the switcher, the scene settings) a render ended on.
  */
 export function chooseServerRenderScene(input: {
   activeScene: string | null | undefined;
@@ -169,15 +314,13 @@ export function chooseServerRenderScene(input: {
 }): string | undefined {
   const usable = new Set(input.scenes.filter((scene) => !sceneIsLayout(scene)).map(sceneIdOf).filter(Boolean));
   const pick = (id: string | null | undefined) => (id && usable.has(id) ? id : undefined);
-  if (input.pendingSwitch) {
-    const planes = pick(input.activeScene);
-    if (planes) {
-      return planes;
-    }
+  const planes = pick(input.activeScene) ?? (isBuiltInSceneId(input.activeScene) ? input.activeScene : undefined);
+  if (input.pendingSwitch && planes) {
+    return planes;
   }
   return (
     pick(input.deviceScene) ??
-    pick(input.activeScene) ??
+    planes ??
     pick(
       sceneIdOf(input.scenes.find((scene) => isRecord(scene) && scene.default === true && !sceneIsLayout(scene))),
     ) ??
@@ -285,6 +428,42 @@ async function serviceSettings(db: Database, frame: FrameRow, linkedClient: Link
   }
 }
 
+/**
+ * What the device's runtime is told of its frame besides its scenes
+ * (scene-render.ts RenderFrameConfig): the frame's event map (the one the
+ * plane set, else the one the device reports running: its board's preset),
+ * its palette's colour list and its colours block.
+ */
+export function renderFrameConfig(frame: Pick<FrameRow, "hardware" | "settings">): RenderFrameConfig {
+  const settings = readFrameSettings(frame.settings);
+  const hardware = isRecord(frame.hardware) ? frame.hardware : {};
+  const eventMap = Array.isArray(settings.event_map)
+    ? settings.event_map
+    : Array.isArray(hardware.eventMap)
+      ? hardware.eventMap
+      : undefined;
+  const palette = isRecord(settings.palette) && Array.isArray(settings.palette.colors) ? settings.palette.colors : undefined;
+  return {
+    ...(isRecord(settings.colors) ? { colors: settings.colors } : {}),
+    ...(eventMap ? { eventMap } : {}),
+    ...(palette ? { palette } : {}),
+  };
+}
+
+/** The scene's state as the plane keeps it: a scene's storable fields, a built-in scene's state if it is small. */
+function keptSceneState(scene: Record<string, unknown> | undefined, sceneId: string, state: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(state)) {
+    return undefined;
+  }
+  if (scene) {
+    return storableSceneState(scene, state);
+  }
+  if (isBuiltInSceneId(sceneId)) {
+    return JSON.stringify(state).length <= maxBuiltInStateBytes ? state : typeof state.from === "string" ? { from: state.from } : {};
+  }
+  return undefined;
+}
+
 /** The frame's scenes as a render runs them: the assigned set, and the standing preview. */
 async function frameScenes(
   db: Database,
@@ -307,7 +486,7 @@ function foldedStates(row: RenderRow, scenes: readonly Record<string, unknown>[]
   const ids = new Set(scenes.map(sceneIdOf));
   const states: Record<string, Record<string, unknown>> = {};
   for (const [id, state] of Object.entries(statesRecord(row.states))) {
-    if (ids.has(id)) {
+    if (ids.has(id) || isBuiltInSceneId(id)) {
       states[id] = state;
     }
   }
@@ -348,6 +527,7 @@ async function draw(
   linkedClient: LinkedClientRow,
   row: RenderRow,
   input: {
+    deviceInput?: RelayedDeviceInput | undefined;
     deviceScene?: string | undefined;
     nowMs?: number | undefined;
     panel: ServerRenderPanel;
@@ -368,7 +548,7 @@ async function draw(
     scenes,
   });
   const scene = scenes.find((entry) => sceneIdOf(entry) === active);
-  if (!active || !scene) {
+  if (!active || (!scene && !isBuiltInSceneId(active))) {
     return { failure: { code: "no_scenes", message: "The frame has no scene to render." } };
   }
   const states = foldedStates(row, scenes);
@@ -378,7 +558,9 @@ async function draw(
   let result: SceneRenderResult;
   try {
     result = await render({
+      ...(input.deviceInput ? { deviceInput: input.deviceInput } : {}),
       events: input.withEvents ? heldEvents(row) : [],
+      frame: { ...renderFrameConfig(frame), pixelFormat: input.panel.format, rotate: input.panel.rotate },
       height: canvas.height,
       ...(typeof input.nowMs === "number" ? { nowMs: input.nowMs } : {}),
       owner: frame.accountId,
@@ -410,13 +592,28 @@ async function draw(
       logs: result.logs,
     };
   }
-  const body = panelFosb(result.rgba, canvas, input.panel);
-  // What the scene kept, beside the others' (a copy: the renderer was handed `states`).
-  const rendered = isRecord(result.state) ? storableSceneState(scene, result.state) : undefined;
-  const after = rendered !== undefined ? { ...states, [active]: rendered } : states;
+  const body = panelFosb(
+    result.rgba,
+    canvas,
+    input.panel,
+    panelPalette(input.panel.format, { frame: renderFrameConfig(frame).palette, photo: result.palette }),
+  );
+  // The scene it ended on (a key, a tap or the schedule may have switched
+  // it), and what that scene kept, beside the others' (a copy: the renderer
+  // was handed `states`).
+  const ended =
+    result.sceneId && (isBuiltInSceneId(result.sceneId) || scenes.some((entry) => sceneIdOf(entry) === result.sceneId && !sceneIsLayout(entry)))
+      ? result.sceneId
+      : active;
+  const rendered = keptSceneState(
+    scenes.find((entry) => sceneIdOf(entry) === ended),
+    ended,
+    result.state,
+  );
+  const after = rendered !== undefined ? { ...states, [ended]: rendered } : states;
   return {
     checksum,
-    drawn: { body, etag: serverRenderEtag(body), renderMs: result.renderMs, scene: active, states: after },
+    drawn: { body, etag: serverRenderEtag(body), renderMs: result.renderMs, scene: ended, states: after },
     logs: result.logs,
   };
 }
@@ -446,9 +643,28 @@ async function storeRenderLogs(
   }
 }
 
-function sceneLogPayloads(logs: readonly string[] | undefined): unknown[] {
+// What the scene heard of the frame's input and of the events held for it:
+// the dispatcher's `event:*` lines (the `gpio` edges, the `button` they made,
+// a custom event, what the scene dispatched in turn), as the device's own
+// runtime logs them, and as the backend writes them for a thin client. Not
+// the runtime's own (`origin: system`, the fresh worker opening its scene).
+function isHeardLine(line: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(line);
+    return (
+      isRecord(parsed) &&
+      typeof parsed.event === "string" &&
+      parsed.event.startsWith("event:") &&
+      parsed.origin !== "system"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function sceneLogPayloads(logs: readonly string[] | undefined, heard = false): unknown[] {
   return (logs ?? [])
-    .filter(isRenderErrorLine)
+    .filter((line) => isRenderErrorLine(line) || (heard && isHeardLine(line)))
     .slice(0, maxStoredLogLines - 1)
     .map((line) => {
       try {
@@ -476,12 +692,18 @@ export type ServerRenderPull =
 export async function pullServerRender(
   db: Database,
   input: {
+    /** What the device relayed with this pull (readDeviceInput); a pull with any never takes a kept picture. */
+    deviceInput?: RelayedDeviceInput | null | undefined;
     deviceScene?: string | undefined;
     frame: FrameRow;
     ifNoneMatch?: string | null | undefined;
     linkedClient: LinkedClientRow;
-    /** Asked before a render that is not a kept picture: false refuses it (the caller's rate limit). */
-    mayRender?: () => Promise<boolean>;
+    /**
+     * Asked before a render that is not a kept picture: false refuses it (the
+     * caller's rate limit). `input` when the render is for the device's
+     * relayed input, which a frame being used asks for often.
+     */
+    mayRender?: (reason: "input" | "pull") => Promise<boolean>;
     now?: Date;
     panel: ServerRenderPanel;
     render?: ServerRenderer;
@@ -492,6 +714,7 @@ export async function pullServerRender(
   const deviceScene =
     input.deviceScene && input.deviceScene.length <= maxSceneIdChars ? input.deviceScene : undefined;
   const panelKey = serverRenderPanelKey(input.panel);
+  const deviceInput = deviceInputHasAny(input.deviceInput) ? input.deviceInput : undefined;
   const row = await loadRenderRow(db, frameId);
   const pendingSwitch = await hasPendingSceneSwitch(db, frameId, now);
   const candidate = candidateServerRenderScene({ activeScene: row.activeScene, deviceScene, pendingSwitch });
@@ -500,8 +723,10 @@ export async function pullServerRender(
     ifNoneMatchHas(input.ifNoneMatch, etag) ? { etag, status: 304 } : { body, etag, from, scene, status: 200 };
 
   // The last picture again: nothing it depends on moved, and the plan's
-  // floor has not passed since it was drawn.
+  // floor has not passed since it was drawn. Never for a pull with input:
+  // the scene has not heard it.
   if (
+    !deviceInput &&
     lastPictureUsable(row, { floorSeconds: cloudRenderedMinIntervalSeconds, now, panelKey, scene: candidate }) &&
     row.picture &&
     row.pictureEtag
@@ -510,7 +735,8 @@ export async function pullServerRender(
   }
 
   // The picture drawn before this wake: taken once, its state committed now.
-  if (prerenderUsable(row, { now, panelKey, scene: candidate }) && row.prerender && row.prerenderEtag) {
+  // Not for a pull with input: drawn before the input, it never heard it.
+  if (!deviceInput && prerenderUsable(row, { now, panelKey, scene: candidate }) && row.prerender && row.prerenderEtag) {
     const taken = await db
       .update(frameServerRenders)
       .set({
@@ -539,16 +765,23 @@ export async function pullServerRender(
       .where(and(eq(frameServerRenders.frameId, frameId), eq(frameServerRenders.revision, row.revision)))
       .returning({ frameId: frameServerRenders.frameId });
     if (taken.length > 0) {
+      await writePlaneLastState(
+        db,
+        frameId,
+        row.prerenderScene,
+        isRecord(row.prerenderState) ? statesRecord(row.prerenderState) : statesRecord(row.states),
+      );
       return answer(row.prerender, row.prerenderEtag, "prerender", row.prerenderScene as string);
     }
   }
 
-  if (input.mayRender && !(await input.mayRender())) {
+  if (input.mayRender && !(await input.mayRender(deviceInput ? "input" : "pull"))) {
     return { error: "render_rate_limited", message: "This frame asked for too many renders; try again later.", retryAfterSeconds: 60, status: 429 };
   }
 
   const startedAt = Date.now();
   const outcome = await draw(db, input.frame, input.linkedClient, row, {
+    deviceInput,
     deviceScene,
     panel: input.panel,
     pendingSwitch,
@@ -563,7 +796,7 @@ export async function pullServerRender(
       .where(eq(frameServerRenders.frameId, frameId));
     await storeRenderLogs(db, input.frame, input.linkedClient, [
       { code: failure.code, error: failure.message, event: "render:error", source: "cloud" },
-      ...sceneLogPayloads(outcome.logs),
+      ...sceneLogPayloads(outcome.logs, !!deviceInput || heldEvents(row).length > 0),
     ]);
     if (failure.code === "no_scenes") {
       return { error: "no_scenes", message: failure.message, status: 409 };
@@ -593,11 +826,14 @@ export async function pullServerRender(
   };
   // Its state, and the events and verb state it used up, only if no verb
   // moved the revision meanwhile: then they are kept for the next render,
-  // and this picture is marked as drawn at the old revision.
+  // and this picture is marked as drawn at the old revision. A picture kept
+  // for a wake is older than this one (and never heard this pull's input):
+  // it goes.
   const committed = await db
     .update(frameServerRenders)
     .set({
       ...picture,
+      ...noPrerender,
       pendingEvents: [],
       pendingStates: {},
       pictureRevision: row.revision,
@@ -608,9 +844,18 @@ export async function pullServerRender(
   if (committed.length === 0) {
     await db
       .update(frameServerRenders)
-      .set({ ...picture, pictureRevision: row.revision })
+      .set({ ...picture, ...noPrerender, pictureRevision: row.revision })
       .where(eq(frameServerRenders.frameId, frameId));
   }
+  // What the frame shows now, for the workspace and the event routing: the
+  // device's own report is stale in remote mode (planeKeepsSceneState). The
+  // states as they stand when this render's were not committed.
+  await writePlaneLastState(
+    db,
+    frameId,
+    drawn.scene,
+    committed.length > 0 ? drawn.states : statesRecord((await loadRenderRow(db, frameId)).states),
+  );
   await storeRenderLogs(db, input.frame, input.linkedClient, [
     {
       event: "render:server",
@@ -618,10 +863,55 @@ export async function pullServerRender(
       renderMs: drawn.renderMs,
       sceneId: drawn.scene,
       source: "cloud",
+      ...(deviceInput ? { input: deviceInput.edges.length + deviceInput.events.length } : {}),
     },
-    ...sceneLogPayloads(outcome.logs),
+    ...sceneLogPayloads(outcome.logs, !!deviceInput || heldEvents(row).length > 0),
   ]);
   return answer(drawn.body, drawn.etag, "render", drawn.scene);
+}
+
+// A kept pre-render's columns, emptied.
+const noPrerender = {
+  prerender: null,
+  prerenderAsOf: null,
+  prerenderEtag: null,
+  prerenderMs: null,
+  prerenderPanel: null,
+  prerenderRevision: null,
+  prerenderScene: null,
+  prerenderState: null,
+} as const;
+
+/**
+ * A frame going to sleep leaves a built-in scene (the switcher, the scene
+ * settings) for the scene it was opened from (its state's `from`), as the
+ * device's own runtime does, which never keeps one past a sleep
+ * (docs/server-rendering.md "Keys, touch and the schedule"). Called before
+ * the picture for the wake is drawn. True when it went back.
+ */
+export async function leaveBuiltInSceneForSleep(db: Database, frameId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ activeScene: frameServerRenders.activeScene, states: frameServerRenders.states })
+    .from(frameServerRenders)
+    .where(eq(frameServerRenders.frameId, frameId))
+    .limit(1);
+  if (!row || !isBuiltInSceneId(row.activeScene)) {
+    return false;
+  }
+  const builtIn = row.activeScene;
+  const states = statesRecord(row.states);
+  const from = states[builtIn]?.from;
+  const { [builtIn]: _left, ...kept } = states;
+  const next = typeof from === "string" && from.length > 0 && !builtInSceneIds.includes(from) ? from : null;
+  const left = await db
+    .update(frameServerRenders)
+    .set({ activeScene: next, states: kept, updatedAt: new Date() })
+    .where(and(eq(frameServerRenders.frameId, frameId), eq(frameServerRenders.activeScene, builtIn)))
+    .returning({ frameId: frameServerRenders.frameId });
+  if (left.length > 0) {
+    await writePlaneLastState(db, frameId, next, kept);
+  }
+  return left.length > 0;
 }
 
 export type PrerenderOutcome =

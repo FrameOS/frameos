@@ -7,6 +7,13 @@
 // the backend agree in kind, not byte for byte.
 //
 // Pure: RGBA in, packed bytes out, nothing allocated past the error rows.
+//
+// The palette is the device packer's (activePalette(framePalette(stock)) in
+// frameos/src/embedded/embedded_main.nim): a photo's own dither palette, else
+// the frame's `palette` colours, each fitted onto the table the way
+// fitPaletteOverride (frameos/src/frameos/utils/dither.nim) fits it, else the
+// stock table. `panelPalette` works it out; `packForPanel` and `panelFosb`
+// take it.
 
 /** `fos_pixel_format_t` (embedded/esp32/main/frameos_display.h). */
 export const PanelPixelFormat = {
@@ -29,9 +36,15 @@ export function isPanelPixelFormat(value: unknown): value is PanelPixelFormatCod
 
 type Rgb = readonly [number, number, number];
 
-// The colours each panel shows, by its wire index (embedded_device.py). A
-// Spectra 6 panel has no colour at index 4: null there keeps the index out
-// of the dither while the others keep their wire numbers.
+/** A panel's table by wire index; null is an index the panel has no colour for. */
+export type PanelPalette = readonly (Rgb | null)[];
+
+// The colours each panel shows, by its wire index (embedded_device.py, and
+// the Nim tables saturated4ColorPalette, saturated7ColorPalette and
+// spectra6ColorPalette in utils/dither.nim, which panel-pack.test.ts reads).
+// A Spectra 6 panel has no colour at index 4 (Nim's 999 placeholder): null
+// there keeps the index out of the dither while the others keep their wire
+// numbers.
 export const bwyrPalette: readonly Rgb[] = [
   [57, 48, 57],
   [255, 255, 255],
@@ -56,6 +69,78 @@ export const sevenColorPalette: readonly Rgb[] = [
   [208, 190, 71],
   [177, 106, 73],
 ];
+
+/** The stock table of a palette format; null for the grey, two-colour and RGB formats. */
+export function stockPanelPalette(format: PanelPixelFormatCode): PanelPalette | null {
+  switch (format) {
+    case PanelPixelFormat.twoBitBwyr:
+      return bwyrPalette;
+    case PanelPixelFormat.fourBitSevenColor:
+      return sevenColorPalette;
+    case PanelPixelFormat.fourBitSpectra6:
+      return spectra6Palette;
+    default:
+      return null;
+  }
+}
+
+/**
+ * `["#rrggbb", …]` as colours: frame.json's `palette.colors`, or the photo
+ * palette a render reports. One unreadable colour empties the list, as the
+ * device's parser does (fos_nim_set_palette_impl); anything that is not a
+ * list is no list.
+ */
+export function readHexColors(value: unknown): Rgb[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out: Rgb[] = [];
+  for (const entry of value) {
+    const match = typeof entry === "string" ? /^#?([0-9a-f]{6})$/i.exec(entry.trim()) : null;
+    if (!match) {
+      return [];
+    }
+    const hex = Number.parseInt(match[1]!, 16);
+    out.push([(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff]);
+  }
+  return out;
+}
+
+/**
+ * `override` fitted onto `table` (fitPaletteOverride, utils/dither.nim): the
+ * override when it names as many colours as the table; one fewer when the
+ * table has its hole at index 4 (Spectra 6), the hole put back; the table
+ * for any other length, an empty override included.
+ */
+export function fitPaletteOverride(override: readonly Rgb[], table: PanelPalette): PanelPalette {
+  if (override.length === 0) {
+    return table;
+  }
+  if (override.length === table.length) {
+    return override;
+  }
+  if (table.length === override.length + 1 && table.length > 4 && table[4] === null) {
+    return [...override.slice(0, 4), null, ...override.slice(4)];
+  }
+  return table;
+}
+
+/**
+ * The table a panel of `format` is dithered to: the photo's palette (what
+ * the render reports it drew last) fitted onto the frame's `palette` colours
+ * fitted onto the stock table, as the device's packer does. Null for a
+ * format without one.
+ */
+export function panelPalette(
+  format: PanelPixelFormatCode,
+  palettes: { frame?: unknown; photo?: unknown } = {},
+): PanelPalette | null {
+  const stock = stockPanelPalette(format);
+  if (!stock) {
+    return null;
+  }
+  return fitPaletteOverride(readHexColors(palettes.photo), fitPaletteOverride(readHexColors(palettes.frame), stock));
+}
 
 /** Bytes the panel's buffer holds (embedded_buffer_size in embedded_firmware.py). */
 export function panelBufferBytes(width: number, height: number, format: PanelPixelFormatCode): number {
@@ -279,7 +364,7 @@ function packPalette(
   rgba: Uint8Array,
   width: number,
   height: number,
-  palette: readonly (Rgb | null)[],
+  palette: PanelPalette,
   bits: 2 | 4,
 ): Uint8Array {
   // Dither against the colours the panel has, then write each pixel's wire
@@ -318,12 +403,17 @@ function packRgb565(rgba: Uint8Array, width: number, height: number): Uint8Array
   return out;
 }
 
-/** Pack an RGBA picture (alpha ignored, as the backend's RGB convert does) into the panel's format. */
+/**
+ * Pack an RGBA picture (alpha ignored, as the backend's RGB convert does)
+ * into the panel's format. `palette` (panelPalette) replaces the stock table
+ * of a palette format; the other formats ignore it.
+ */
 export function packForPanel(
   rgba: Uint8Array,
   width: number,
   height: number,
   format: PanelPixelFormatCode,
+  palette?: PanelPalette | null,
 ): Uint8Array {
   if (rgba.length !== width * height * 4) {
     throw new Error(`packForPanel: ${rgba.length} bytes is not ${width}x${height} RGBA`);
@@ -338,11 +428,11 @@ export function packForPanel(
     case PanelPixelFormat.twoBitGray:
       return packTwoBitGray(rgba, width, height);
     case PanelPixelFormat.twoBitBwyr:
-      return packPalette(rgba, width, height, bwyrPalette, 2);
+      return packPalette(rgba, width, height, palette ?? bwyrPalette, 2);
     case PanelPixelFormat.fourBitSevenColor:
-      return packPalette(rgba, width, height, sevenColorPalette, 4);
+      return packPalette(rgba, width, height, palette ?? sevenColorPalette, 4);
     case PanelPixelFormat.fourBitSpectra6:
-      return packPalette(rgba, width, height, spectra6Palette, 4);
+      return packPalette(rgba, width, height, palette ?? spectra6Palette, 4);
     case PanelPixelFormat.fourBitGray:
       return packFourBitGray(rgba, width, height);
     case PanelPixelFormat.rgb565:
@@ -372,12 +462,14 @@ export function fosbPayload(
 
 /**
  * The scene's RGBA, rendered on the canvas `sceneCanvasSize` gave, as the
- * FOSB a panel of `width` x `height` in `format` hung at `rotate` takes.
+ * FOSB a panel of `width` x `height` in `format` hung at `rotate` takes,
+ * dithered to `palette` (panelPalette) where the format has one.
  */
 export function panelFosb(
   rgba: Uint8Array,
   canvas: { height: number; width: number },
   panel: { format: PanelPixelFormatCode; height: number; rotate: number; width: number },
+  palette?: PanelPalette | null,
 ): Buffer {
   const turned = rotateRgbaClockwise(rgba, canvas.width, canvas.height, panel.rotate);
   if (turned.width !== panel.width || turned.height !== panel.height) {
@@ -385,5 +477,10 @@ export function panelFosb(
       `panelFosb: a ${canvas.width}x${canvas.height} canvas at ${panel.rotate} degrees is not a ${panel.width}x${panel.height} panel`,
     );
   }
-  return fosbPayload(panel.width, panel.height, panel.format, packForPanel(turned.rgba, turned.width, turned.height, panel.format));
+  return fosbPayload(
+    panel.width,
+    panel.height,
+    panel.format,
+    packForPanel(turned.rgba, turned.width, turned.height, panel.format, palette),
+  );
 }

@@ -21,7 +21,7 @@ import {
 import { frameManagedScope } from "../../../../auth-web/src/lib/frames";
 import type { SceneRenderOptions, SceneRenderResult } from "../../../../auth-web/src/lib/scene-render";
 import { hashSecret } from "../../../../auth-web/src/lib/secrets";
-import type { PrerenderOutcome } from "../../../../auth-web/src/lib/server-render";
+import { pullServerRender, type PrerenderOutcome } from "../../../../auth-web/src/lib/server-render";
 import { startFrameHub, type FrameHub } from "../../hub";
 
 const db = createDb();
@@ -134,7 +134,10 @@ async function createFrame(settings: Record<string, unknown>) {
     content: Buffer.from(
       zipSync({
         "scene/scenes.json": new TextEncoder().encode(
-          JSON.stringify([{ edges: [], fields: [{ access: "public", name: "count", type: "integer" }], id: "clock", name: "Clock", nodes: [] }]),
+          JSON.stringify([
+            { edges: [], fields: [{ access: "public", name: "count", type: "integer" }], id: "clock", name: "Clock", nodes: [] },
+            { edges: [], fields: [{ access: "public", name: "count", type: "integer" }], id: "weather", name: "Weather", nodes: [] },
+          ]),
         ),
         "scene/template.json": new TextEncoder().encode(JSON.stringify({ name: "Clock" })),
       }),
@@ -149,7 +152,7 @@ async function createFrame(settings: Record<string, unknown>) {
   await db.insert(frameSceneAssignments).values({ frameId: frame!.id, position: 0, sceneId: scene!.id });
   // The panel an earlier pull named.
   await db.insert(frameServerRenders).values({ activeScene: "clock", frameId: frame!.id, picturePanel: "800x480/1/0" });
-  return { frame: frame!, privateKey, token };
+  return { frame: frame!, linkedClient: linkedClient!, privateKey, token };
 }
 
 // Connect as the device, say hello, and go to sleep for `wakeInSeconds`.
@@ -209,6 +212,60 @@ describe("a sleeping frame the cloud renders for", () => {
     expect(row?.prerender?.subarray(0, 4).toString("latin1")).toBe("FOSB");
     // Kept, not committed: the pull at the wake does that.
     expect(row?.states).toEqual({});
+  });
+
+  it("leaves the switcher a key opened for the scene it was opened from, as a device's sleep does", async () => {
+    const hub = await startHub();
+    const { frame, privateKey, token } = await createFrame({ render_mode: "remote" });
+    await db
+      .update(frameServerRenders)
+      .set({ activeScene: "system/sceneSwitcher", states: { "system/sceneSwitcher": { from: "clock" } } })
+      .where(eq(frameServerRenders.frameId, frame.id));
+    const renderAt = Math.floor(Date.now() / 1000) + 2;
+    await sleepFor(hub.port, token, privateKey, 2, renderAt);
+
+    const outcome = await waitFor(() => outcomes.find((entry) => entry.frameId === frame.id), "pre-render");
+    expect(outcome.outcome).toBe("kept");
+    expect(renders[0]).toMatchObject({ frame: { pixelFormat: 1, rotate: 0 }, sceneId: "clock" });
+    const [row] = await db.select().from(frameServerRenders).where(eq(frameServerRenders.frameId, frame.id));
+    expect(row?.activeScene).toBe("clock");
+    expect(row?.states).toEqual({});
+    expect(row?.prerenderScene).toBe("clock");
+  });
+
+  it("shows the scene a key switched to on the plane, which the device's stale hello does not undo", async () => {
+    const hub = await startHub();
+    const { frame, linkedClient, privateKey, token } = await createFrame({ render_mode: "remote" });
+    // RIGHT held: the plane's dispatcher ran it and the render ended on the
+    // next scene.
+    const pulled = await pullServerRender(db, {
+      deviceInput: {
+        edges: [],
+        events: [
+          { name: "gpio", origin: "driver", payload: { action: "down", atMs: 100, label: "RIGHT", level: 0, pin: 3 } },
+          { name: "gpio", origin: "driver", payload: { action: "up", atMs: 900, label: "RIGHT", level: 1, pin: 3 } },
+        ],
+        nowMs: 1_000,
+      },
+      frame,
+      linkedClient,
+      panel: { format: 1, height: 480, rotate: 0, width: 800 },
+      render: async (options) => ({ ...(await standIn(options)), sceneId: "weather" }),
+    });
+    expect(pulled.status).toBe(200);
+    const lastState = async (frameId: string) =>
+      (await db.select({ lastState: frames.lastState }).from(frames).where(eq(frames.id, frameId)))[0]?.lastState;
+    expect(await lastState(frame.id)).toEqual({ active_scene: "weather", weather: { count: 7 } });
+
+    // The device wakes and says hello with the scene its own runtime held
+    // before it was switched to remote: the plane's word stands.
+    await sleepFor(hub.port, token, privateKey, 600);
+    expect(await lastState(frame.id)).toEqual({ active_scene: "weather", weather: { count: 7 } });
+
+    // A frame that renders itself is the one to say.
+    const local = await createFrame({});
+    await sleepFor(hub.port, local.token, local.privateKey, 600);
+    expect(await lastState(local.frame.id)).toEqual({ active_scene: "clock" });
   });
 
   it("is not drawn ahead when the frame renders itself", async () => {

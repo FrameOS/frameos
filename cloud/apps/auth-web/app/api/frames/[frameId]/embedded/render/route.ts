@@ -7,9 +7,12 @@ import {
 } from "../../../../../../src/lib/rate-limit";
 import { reportError } from "../../../../../../src/lib/log";
 import {
+  maxDeviceInputBytes,
   parseServerRenderPanel,
   pullServerRender,
+  readDeviceInput,
 } from "../../../../../../src/lib/server-render";
+import type { RelayedDeviceInput } from "../../../../../../src/lib/scene-render";
 import {
   accountLimits,
   countCloudRenderedFramesForAccount,
@@ -26,6 +29,13 @@ export const runtime = "nodejs";
 //   If-None-Match: "<etag of the picture the panel shows>"
 //   -> 200 FOSB (the packed panel bytes), ETag, Cache-Control: no-store
 //   -> 304 when the panel already shows it
+//
+//   POST, the same, when the frame has input for its scene: its key edges
+//   and what its own producers (keys, touch, schedule, HTTP API) would have
+//   handed its scene, as JSON (docs/server-rendering.md "Keys, touch and the
+//   schedule"); delivered before the render, which never reuses a picture.
+//   -> 400 invalid_input, 413 input_too_large
+//
 //   -> 400 invalid_panel, 403 not_server_rendered /
 //      cloud_rendered_frame_quota_exceeded, 409 no_scenes,
 //      429 render_rate_limited, 502 render_failed, 503 renderer_unavailable /
@@ -36,18 +46,59 @@ export const runtime = "nodejs";
 // takes the picture the hub drew before a sleeping frame's wake, and only
 // then renders, under a per-frame budget.
 
-// Renders (not pulls) one frame may start per window: a key pressed again
-// and again switches scenes on the device, and each switch is a render.
+// Renders (not pulls) one frame may start per window for its own timing:
+// the plan's floor allows one per five minutes, so this is a lot.
 const frameRenderRateLimit = { limit: 30, windowMs: 15 * 60 * 1000 };
+// And for input: every key press, tap and scheduled switch is a render, and
+// a person at the frame (the switcher, a scene's own buttons, the settings
+// keyboard) taps a few times a minute, each tap one pull of a second or
+// three. Its own bucket, so using the frame never starves its schedule, and
+// big enough for a quarter hour of steady tapping: one every five seconds.
+// The renderer's per-account queue (one in flight, two waiting) bounds the
+// cost of a burst.
+const frameInputRenderRateLimit = { limit: 180, windowMs: 15 * 60 * 1000 };
+// Pulls per address, before the device is even known: input pulls come in
+// bursts, and several frames can share an address.
+const pullRateLimit = { limit: 480, windowMs: 15 * 60 * 1000 };
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string }> },
 ) {
-  const limited = await rateLimitResponse(request, "frames:server-render", {
-    limit: 240,
-    windowMs: 15 * 60 * 1000,
+  return pull(request, params, undefined);
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ frameId: string }> },
+) {
+  return pull(request, params, async () => {
+    const declared = Number(request.headers.get("content-length") ?? "0");
+    if (Number.isFinite(declared) && declared > maxDeviceInputBytes) {
+      return jsonError("input_too_large", 413);
+    }
+    const raw = await request.arrayBuffer();
+    if (raw.byteLength > maxDeviceInputBytes) {
+      return jsonError("input_too_large", 413);
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(new TextDecoder().decode(raw));
+    } catch {
+      return jsonError("invalid_input", 400);
+    }
+    return readDeviceInput(body) ?? jsonError("invalid_input", 400);
   });
+}
+
+async function pull(
+  request: NextRequest,
+  params: Promise<{ frameId: string }>,
+  // The POST's body, read once the device is known: its input, or the answer
+  // that refuses it.
+  readInput: (() => Promise<RelayedDeviceInput | NextResponse>) | undefined,
+) {
+  const limited = await rateLimitResponse(request, "frames:server-render", pullRateLimit);
   if (limited) {
     return limited;
   }
@@ -84,16 +135,35 @@ export async function GET(
     });
   }
 
+  let deviceInput: RelayedDeviceInput | undefined;
+  if (readInput) {
+    const input = await readInput();
+    if (input instanceof NextResponse) {
+      return input;
+    }
+    deviceInput = input;
+  }
+
   const scene = request.nextUrl.searchParams.get("scene");
   let pulled;
   try {
     pulled = await pullServerRender(db, {
+      deviceInput,
       deviceScene: scene && scene.length > 0 ? scene : undefined,
       frame: auth.frame,
       ifNoneMatch: request.headers.get("if-none-match"),
       linkedClient: auth.linkedClient,
-      mayRender: async () =>
-        (await checkIdentityRateLimit(`frame:${auth.frame.id}`, "frames:server-render", frameRenderRateLimit)).allowed,
+      mayRender: async (reason) =>
+        reason === "input"
+          ? (
+              await checkIdentityRateLimit(
+                `frame:${auth.frame.id}`,
+                "frames:server-render-input",
+                frameInputRenderRateLimit,
+              )
+            ).allowed
+          : (await checkIdentityRateLimit(`frame:${auth.frame.id}`, "frames:server-render", frameRenderRateLimit))
+              .allowed,
       panel,
     });
   } catch (error) {

@@ -1,16 +1,28 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { frameIsCloudRendered, settingsRenderOnServer } from "./cloud-rendered";
+import { frameIsCloudRendered, planeKeepsSceneState, settingsRenderOnServer } from "./cloud-rendered";
 import {
+  builtInSceneIds,
   candidateServerRenderScene,
   chooseServerRenderScene,
+  deviceInputHasAny,
   ifNoneMatchHas,
   lastPictureUsable,
   parseServerRenderPanel,
+  planeLastState,
   prerenderLeadMs,
   prerenderUsable,
+  readDeviceInput,
+  relayedEventOrigins,
+  renderFrameConfig,
   serverRenderEtag,
   serverRenderPanelKey,
 } from "./server-render";
+
+const eventsContract = JSON.parse(
+  readFileSync(join(__dirname, "../../../../../docs/events-contract.json"), "utf8"),
+) as { origins: Record<string, string>; scenes: { settings: string; switcher: string } };
 
 const scenes = [
   { id: "layout", settings: { isLayout: true } },
@@ -162,5 +174,146 @@ describe("kept pictures", () => {
     expect(prerenderLeadMs(2_000)).toBe(20_000);
     expect(prerenderLeadMs(15_000)).toBe(40_000);
     expect(prerenderLeadMs(60_000)).toBe(90_000);
+  });
+});
+
+describe("a built-in scene a render ended on", () => {
+  it("names the contract's switcher and scene settings", () => {
+    expect([...builtInSceneIds].sort()).toEqual([eventsContract.scenes.settings, eventsContract.scenes.switcher].sort());
+  });
+
+  it("is the plane's scene until something else is", () => {
+    expect(
+      chooseServerRenderScene({ activeScene: "system/sceneSwitcher", deviceScene: undefined, pendingSwitch: false, scenes }),
+    ).toBe("system/sceneSwitcher");
+    // A switch the plane sent the device still wins over it.
+    expect(
+      chooseServerRenderScene({ activeScene: "system/sceneSettings", deviceScene: undefined, pendingSwitch: true, scenes }),
+    ).toBe("system/sceneSettings");
+    // Any other id outside the list is not.
+    expect(chooseServerRenderScene({ activeScene: "system/yield", deviceScene: undefined, pendingSwitch: false, scenes })).toBe(
+      "photos",
+    );
+  });
+});
+
+describe("the input a device relays with its pull", () => {
+  const edge = { action: "down", atMs: 900, label: "RIGHT", pin: 3 };
+  const event = { name: "setCurrentScene", origin: "schedule", payload: { sceneId: "news" } };
+
+  it("relays from the device's own origins only", () => {
+    for (const origin of relayedEventOrigins) {
+      expect(eventsContract.origins[origin]).toBeDefined();
+    }
+    expect([...relayedEventOrigins].sort()).toEqual(["driver", "http:admin", "http:write", "schedule"]);
+  });
+
+  it("keeps edges and events that say something, oldest first", () => {
+    const input = readDeviceInput({
+      edges: [edge, { ...edge, action: "up", atMs: 950, claimed: true, wake: true }],
+      events: [
+        event,
+        { name: "gpio", origin: "driver", payload: { action: "down", atMs: 10, label: "LEFT", level: 0, pin: 2 } },
+        { name: "pointerDown", origin: "driver" },
+      ],
+      nowMs: 1000,
+    });
+    expect(input).toEqual({
+      edges: [
+        { action: "down", atMs: 900, label: "RIGHT", pin: 3 },
+        { action: "up", atMs: 950, claimed: true, label: "RIGHT", pin: 3, wake: true },
+      ],
+      events: [
+        event,
+        { name: "gpio", origin: "driver", payload: { action: "down", atMs: 10, label: "LEFT", level: 0, pin: 2 } },
+        { name: "pointerDown", origin: "driver", payload: {} },
+      ],
+      nowMs: 1000,
+    });
+    expect(deviceInputHasAny(input)).toBe(true);
+    expect(deviceInputHasAny(readDeviceInput({ nowMs: 5 }))).toBe(false);
+  });
+
+  it("drops what it cannot use, and what came from another origin", () => {
+    const input = readDeviceInput({
+      edges: [
+        { ...edge, label: "with space" },
+        { ...edge, action: "held" },
+        { ...edge, atMs: 2000 },
+        { ...edge, atMs: -1 },
+        "RIGHT",
+      ],
+      events: [
+        { ...event, origin: "cloud" },
+        { ...event, origin: "system" },
+        { ...event, name: "" },
+        { ...event, name: "x".repeat(65) },
+        { ...event, payload: "news" },
+        { ...event, payload: [] },
+      ],
+      nowMs: 1000,
+    });
+    expect(input).toEqual({ edges: [], events: [], nowMs: 1000 });
+  });
+
+  it("keeps 32 of each", () => {
+    const input = readDeviceInput({
+      edges: Array.from({ length: 40 }, () => edge),
+      events: Array.from({ length: 40 }, () => event),
+      nowMs: 1000,
+    });
+    expect(input?.edges).toHaveLength(32);
+    expect(input?.events).toHaveLength(32);
+  });
+
+  it("refuses a body of another shape", () => {
+    expect(readDeviceInput(null)).toBeNull();
+    expect(readDeviceInput([])).toBeNull();
+    expect(readDeviceInput({ edges: [] })).toBeNull();
+    expect(readDeviceInput({ nowMs: 1.5 })).toBeNull();
+    expect(readDeviceInput({ nowMs: "1000" })).toBeNull();
+    expect(readDeviceInput({ edges: {}, nowMs: 1000 })).toBeNull();
+    expect(readDeviceInput({ events: "gpio", nowMs: 1000 })).toBeNull();
+  });
+});
+
+describe("what the render is told of its frame", () => {
+  it("the plane's event map, else the one the device runs; the palette's colours; the colours block", () => {
+    const rules = [{ as: { direction: "prev", event: "setCurrentScene" }, event: "longPress", match: { label: "LEFT" } }];
+    const preset = [{ as: { direction: "next", event: "setCurrentScene" }, event: "longPress", match: { label: "RIGHT" } }];
+    expect(
+      renderFrameConfig({
+        hardware: { eventMap: preset },
+        settings: {
+          colors: { autoFit: "on" },
+          event_map: rules,
+          palette: { colors: ["#000000", "#ffffff"], name: "Mine" },
+        },
+      }),
+    ).toEqual({ colors: { autoFit: "on" }, eventMap: rules, palette: ["#000000", "#ffffff"] });
+    expect(renderFrameConfig({ hardware: { eventMap: preset }, settings: {} })).toEqual({ eventMap: preset });
+    expect(renderFrameConfig({ hardware: null, settings: null })).toEqual({});
+  });
+});
+
+describe("the frame's reported scene, for hardware the cloud renders for", () => {
+  it("is the plane's, not the device's; a virtual frame's device is its runtime", () => {
+    expect(planeKeepsSceneState({ hardware: { platform: "esp32-s3" }, settings: { render_mode: "remote" } })).toBe(true);
+    expect(planeKeepsSceneState({ hardware: { platform: "esp32-c3" }, settings: {} })).toBe(true);
+    expect(planeKeepsSceneState({ hardware: { platform: "esp32-s3" }, settings: {} })).toBe(false);
+    expect(planeKeepsSceneState({ hardware: { platform: "virtual" }, settings: {} })).toBe(false);
+  });
+
+  it("is written as a device reports it: the frame's scenes' states and active_scene", () => {
+    expect(planeLastState("weather", { clock: { count: 1 }, weather: { title: "Hi" } })).toEqual({
+      active_scene: "weather",
+      clock: { count: 1 },
+      weather: { title: "Hi" },
+    });
+    // While the switcher shows, the frame's scene is the one it was opened over.
+    expect(
+      planeLastState("system/sceneSwitcher", { clock: { count: 1 }, "system/sceneSwitcher": { from: "clock" } }),
+    ).toEqual({ active_scene: "clock", clock: { count: 1 } });
+    expect(planeLastState(null, { clock: { count: 1 } })).toEqual({ clock: { count: 1 } });
   });
 });

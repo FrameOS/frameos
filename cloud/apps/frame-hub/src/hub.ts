@@ -86,9 +86,14 @@ import { safeLocalOrigin } from "../../auth-web/src/lib/local-origin";
 import { buildScenesPatchMessage, patchLeavesPanel, scenesPatchMinVersion } from "../../auth-web/src/lib/scenes-patch";
 import { frameosVersionSatisfies } from "../../auth-web/src/lib/store-versions";
 import { frameOwningBackend } from "../../auth-web/src/lib/frame-backend-owner";
-import { cloudRenderedMinIntervalSeconds, frameIsCloudRendered } from "../../auth-web/src/lib/cloud-rendered";
+import {
+  cloudRenderedMinIntervalSeconds,
+  frameIsCloudRendered,
+  planeKeepsSceneState,
+} from "../../auth-web/src/lib/cloud-rendered";
 import {
   lastServerRenderMs,
+  leaveBuiltInSceneForSleep,
   prerenderFrame,
   prerenderLeadMs,
   type PrerenderOutcome,
@@ -1090,9 +1095,10 @@ export async function startFrameHub(
 
     const hello = session.hello ?? {};
     const now = new Date();
-    const helloState = isRecord(hello.states)
-      ? stateWithActiveScene(hello.states, hello.active_scene)
-      : undefined;
+    const helloState =
+      isRecord(hello.states) && (await deviceReportsItsScene(frameId, hello.hardware))
+        ? stateWithActiveScene(hello.states, hello.active_scene)
+        : undefined;
     // An unconfirmed frame (see isConfirmedFrame) gets its connectivity and
     // its own hardware facts recorded — the confirm page shows both — and
     // nothing else: no state, no scene checksum, no store resync, no audit
@@ -1662,6 +1668,29 @@ export async function startFrameHub(
     return false;
   }
 
+  // Whether the scene the device says it shows (and its states) is its own
+  // to say. Not for hardware the cloud renders for: its scenes run on the
+  // plane, which writes last_state when a render commits (server-render.ts),
+  // and the device's report is the runtime it is not running
+  // (docs/server-rendering.md). Read fresh: a settings push may have
+  // switched the frame since the socket opened. `reported` is hardware the
+  // message itself carries (a hello's). The hub's own virtual device is the
+  // runtime of its frame, so its word stands.
+  async function deviceReportsItsScene(frameId: string, reported?: unknown): Promise<boolean> {
+    if (virtualDevices.has(frameId)) {
+      return true;
+    }
+    const [row] = await db
+      .select({ hardware: frames.hardware, settings: frames.settings })
+      .from(frames)
+      .where(eq(frames.id, frameId))
+      .limit(1);
+    if (!row) {
+      return true;
+    }
+    return !planeKeepsSceneState({ hardware: isRecord(reported) ? reported : row.hardware, settings: row.settings });
+  }
+
   // Promote the last assignment push's per-scene ledger to "deployed" the
   // moment the device reports the matching set checksum. Any other reported
   // checksum — an ad-hoc preview push, a stale set — leaves the ledger
@@ -1696,7 +1725,7 @@ export async function startFrameHub(
     // scene id gets everywhere else (256 chars, as in auth-web's
     // set_current_scene validation).
     const activeScene =
-      typeof msg.active_scene === "string"
+      typeof msg.active_scene === "string" && (await deviceReportsItsScene(session.frame.id))
         ? msg.active_scene.slice(0, maxSceneIdChars)
         : undefined;
     const now = new Date();
@@ -1808,6 +1837,7 @@ export async function startFrameHub(
     const lastState = isRecord(rest.states)
       ? stateWithActiveScene(rest.states, rest.active_scene)
       : rest;
+    const ownScene = await deviceReportsItsScene(session.frame.id, rest.hardware);
     const checksum = acceptChecksum(session.frame.id, rest.scenes_checksum);
     const now = new Date();
     await db
@@ -1815,7 +1845,7 @@ export async function startFrameHub(
       .set({
         lastSeenAt: now,
         updatedAt: now,
-        ...(acceptState(session.frame.id, lastState) ? { lastState } : {}),
+        ...(ownScene && acceptState(session.frame.id, lastState) ? { lastState } : {}),
         ...(typeof rest.frameos_version === "string"
           ? { frameosVersion: rest.frameos_version.slice(0, 64) }
           : {}),
@@ -1945,6 +1975,10 @@ export async function startFrameHub(
     if (!row || !frameIsCloudRendered(row)) {
       return;
     }
+    // The switcher or the scene settings a key or a tap opened end with the
+    // wake, as on a device, which keeps neither past a sleep: the picture for
+    // the wake is the scene they were opened from.
+    await leaveBuiltInSceneForSleep(db, frameId);
     if (asOf.getTime() <= now.getTime() || closed) {
       return;
     }

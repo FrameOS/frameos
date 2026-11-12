@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  bwyrPalette,
+  fitPaletteOverride,
   fosbHeaderBytes,
   fosbPayload,
   isPanelPixelFormat,
@@ -7,8 +11,12 @@ import {
   PanelPixelFormat,
   panelBufferBytes,
   panelFosb,
+  panelPalette,
+  readHexColors,
   rotateRgbaClockwise,
   sceneCanvasSize,
+  sevenColorPalette,
+  spectra6Palette,
   type PanelPixelFormatCode,
 } from "./panel-pack";
 
@@ -223,5 +231,90 @@ describe("FOSB", () => {
     expect(() =>
       panelFosb(solid(16, 8, [0, 0, 0]), { height: 8, width: 16 }, { format: 1, height: 8, rotate: 90, width: 16 }),
     ).toThrow(/not a 16x8 panel/);
+  });
+});
+
+// The Nim tables the device's packer dithers to (frameos/src/frameos/utils/dither.nim),
+// read from the file: `(999, 999, 999)` is Spectra 6's hole, null here.
+function nimTable(name: string): ([number, number, number] | null)[] {
+  const source = readFileSync(join(__dirname, "../../../../../frameos/src/frameos/utils/dither.nim"), "utf8");
+  const block = new RegExp(`const ${name}\\* = @\\[([^\\]]*)\\]`).exec(source);
+  if (!block) {
+    throw new Error(`${name} not found in dither.nim`);
+  }
+  return [...block[1]!.matchAll(/\((\d+),\s*(\d+),\s*(\d+)\)/g)].map((match) => {
+    const rgb = [Number(match[1]), Number(match[2]), Number(match[3])] as [number, number, number];
+    return rgb[0] >= 999 ? null : rgb;
+  });
+}
+
+describe("the palette a panel is dithered to", () => {
+  it("starts from the device's stock tables", () => {
+    expect(bwyrPalette).toEqual(nimTable("saturated4ColorPalette"));
+    expect(sevenColorPalette).toEqual(nimTable("saturated7ColorPalette"));
+    expect(spectra6Palette).toEqual(nimTable("spectra6ColorPalette"));
+  });
+
+  it("reads #rrggbb lists, and one unreadable colour empties the list", () => {
+    expect(readHexColors(["#000000", "#FFfF00", "ff0000"])).toEqual([
+      [0, 0, 0],
+      [255, 255, 0],
+      [255, 0, 0],
+    ]);
+    expect(readHexColors(["#000000", "nope"])).toEqual([]);
+    expect(readHexColors("#000000")).toEqual([]);
+    expect(readHexColors(undefined)).toEqual([]);
+  });
+
+  it("fits an override as fitPaletteOverride does: same length, or one fewer with Spectra 6's hole put back", () => {
+    const four: [number, number, number][] = [
+      [1, 1, 1],
+      [2, 2, 2],
+      [3, 3, 3],
+      [4, 4, 4],
+    ];
+    expect(fitPaletteOverride(four, bwyrPalette)).toEqual(four);
+    expect(fitPaletteOverride([], bwyrPalette)).toBe(bwyrPalette);
+    expect(fitPaletteOverride(four.slice(0, 3), bwyrPalette)).toBe(bwyrPalette);
+    const six: [number, number, number][] = [...four, [5, 5, 5], [6, 6, 6]];
+    expect(fitPaletteOverride(six, spectra6Palette)).toEqual([...four, null, [5, 5, 5], [6, 6, 6]]);
+    // Seven for Spectra 6 replaces the table whole, index 4 included, as on the device.
+    const seven: [number, number, number][] = [...six, [7, 7, 7]];
+    expect(fitPaletteOverride(seven, spectra6Palette)).toEqual(seven);
+    // A six-colour list is no 7-colour panel's.
+    expect(fitPaletteOverride(six, sevenColorPalette)).toBe(sevenColorPalette);
+  });
+
+  it("takes the photo's palette, else the frame's, else the stock one", () => {
+    const frame = ["#000000", "#ffffff", "#ffff00", "#ff0000", "#0000ff", "#00ff00"];
+    const photo = ["#101010", "#f0f0f0", "#f0f000", "#f00000", "#0000f0", "#00f000"];
+    expect(panelPalette(PanelPixelFormat.fourBitSpectra6)).toBe(spectra6Palette);
+    expect(panelPalette(PanelPixelFormat.fourBitSpectra6, { frame })).toEqual([
+      [0, 0, 0],
+      [255, 255, 255],
+      [255, 255, 0],
+      [255, 0, 0],
+      null,
+      [0, 0, 255],
+      [0, 255, 0],
+    ]);
+    expect(panelPalette(PanelPixelFormat.fourBitSpectra6, { frame, photo })?.[0]).toEqual([16, 16, 16]);
+    // A photo palette meant for another panel leaves the frame's.
+    expect(panelPalette(PanelPixelFormat.fourBitSpectra6, { frame, photo: ["#101010"] })?.[0]).toEqual([0, 0, 0]);
+    expect(panelPalette(PanelPixelFormat.oneBit, { frame })).toBeNull();
+    expect(panelPalette(PanelPixelFormat.fourBitGray, { frame })).toBeNull();
+  });
+
+  it("changes which colour a pixel is dithered to, never the wire index it is written as", () => {
+    // Pure blue on a Spectra 6 panel: blue (index 5) with the stock table.
+    const blue = solid(4, 1, [0, 0, 255]);
+    expect([...packForPanel(blue, 4, 1, PanelPixelFormat.fourBitSpectra6)]).toEqual([0x55, 0x55]);
+    // A frame whose measured "green" (index 6) is the bluest colour it shows.
+    const measured = panelPalette(PanelPixelFormat.fourBitSpectra6, {
+      frame: ["#000000", "#ffffff", "#ffff00", "#ff0000", "#808080", "#0000ff"],
+    });
+    expect([...packForPanel(blue, 4, 1, PanelPixelFormat.fourBitSpectra6, measured)]).toEqual([0x66, 0x66]);
+    const body = panelFosb(blue, { height: 1, width: 4 }, { format: PanelPixelFormat.fourBitSpectra6, height: 1, rotate: 0, width: 4 }, measured);
+    expect([...body.subarray(fosbHeaderBytes)]).toEqual([0x66, 0x66]);
   });
 });

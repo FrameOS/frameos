@@ -1268,17 +1268,20 @@ provider at all.
 On the cloud it covers an ESP32-C3 (no runtime of its own) and any ESP32 whose
 owner set `render_mode` to `"remote"` in Settings → Power ("Render scenes"),
 firmware 2026.11.7 on. The device keeps Wi-Fi, its panel and its deep sleep;
-the cloud runs the scene and hands over the panel's bytes. Its keys, touch
-and own schedule do not switch scenes yet (`docs/server-rendering.md` "Not
-yet").
+the cloud runs the scene and hands over the panel's bytes. What its keys,
+touch, own schedule and own HTTP API would have told its scene comes with the
+pull as a `POST` body, and the cloud runs it in the same render
+(`docs/server-rendering.md` "Keys, touch and the schedule").
 
 ```http
 GET {provider}/api/frames/{uuid}/embedded/render?scene=…&width=…&height=…&format=…&rotate=…
 Authorization: Bearer <the device's access token>
 If-None-Match: "<etag of the picture the panel shows>"
+POST, the same, with {nowMs, edges?, events?} (at most 16 KiB) when the device has input
   -> 200 FOSB, ETag, Cache-Control: no-store
   -> 304 when the panel already shows it
   -> 400 invalid_panel                       (width/height/format missing or not a panel)
+  -> 400 invalid_input, 413 input_too_large  (a POST body that is not that shape, or too big)
   -> 403 not_server_rendered                 (the plane has the frame rendering itself)
   -> 403 cloud_rendered_frame_quota_exceeded {max_cloud_rendered_frames}  (account over its plan)
   -> 409 no_scenes, 429 render_rate_limited, 502 render_failed {message},
@@ -1302,7 +1305,10 @@ If-None-Match: "<etag of the picture the panel shows>"
   the revision and the panel are the same and the plan's floor has not
   passed since it was drawn; takes the picture the hub drew before the wake
   (below); and only then renders, at most 30 renders per frame per 15
-  minutes. A render runs under the account's render queue (one in flight)
+  minutes. A pull with input always renders, from its own bucket (180 per
+  frame per 15 minutes, `frames:server-render-input`), so pressing keys
+  never spends the timed renders; the device keeps its input through a
+  `429` and sends it with the next pull. A render runs under the account's render queue (one in flight)
   with the account's granted service keys, like a virtual frame's.
 - **`frame_server_renders`** (migration 0078) is one row per such frame: the
   active scene, each scene's state, the state verbs sent (`pending_states`,
