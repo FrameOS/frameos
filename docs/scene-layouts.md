@@ -36,6 +36,16 @@ list (the script also writes `ios/FrameOSKit/.../LayoutStarters.json`): "New
 layout" under a frame's Layouts, "Add layout" in Add scene while it has none. Each sample's `thumb.jpg` is
 shown in those lists and saved as the added layout's picture.
 
+**In the preview.** The live preview of every scene workspace (a store scene's
+page, a frame's scene, a saved scene) has a Layout select under Device: "No
+layout", the layouts among the scenes it runs, then every starter not already
+among them (by id or name). Picking one makes every scene wear it, as a frame's
+active layout does, and runs a starter's scene beside them
+(`sceneWorkspace/lib/preview-layouts.ts`); nothing the editor holds changes. It
+starts on the layout the shown scene wears (a frame's scene keeps its own), is
+not offered while the scene shown is a layout itself, and the starters load with
+the panel rather than the page.
+
 **In the store.** Layouts have their own shelf (`layouts` in
 `cloud/apps/auth-web/src/lib/categories.ts`). A scene published with a layout as
 the one it starts on goes there without asking the classifier, and an owner can

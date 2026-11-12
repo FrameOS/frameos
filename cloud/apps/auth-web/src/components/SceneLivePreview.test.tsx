@@ -653,6 +653,106 @@ describe("SceneLivePreviewPanel source", () => {
   });
 });
 
+describe("SceneLivePreviewPanel layout", () => {
+  type RunScene = { id: string; layout?: { sceneId: string; state?: Record<string, unknown> }; settings?: { isLayout?: boolean } };
+  const ranScenes = (index: number) => previews[index]!.options.scenes as RunScene[];
+
+  it("wraps the scene in a layout starter picked from the Layout select, and takes it off again", async () => {
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    // Nothing worn until asked for: the store's scenes carry no layout.
+    const select = (await screen.findByLabelText("Layout")) as HTMLSelectElement;
+    expect(select.value).toBe("");
+    const names = [...select.options].map((option) => option.textContent);
+    expect(names[0]).toBe("No layout");
+    expect(names).toContain("Windows 98");
+    expect(names).toContain("Top bar");
+
+    fireEvent.change(select, { target: { value: "layout-windows-98" } });
+    // A different scene set: the runtime boots again, the starter beside the scene.
+    await waitFor(() => expect(previews).toHaveLength(2));
+    const scenes = ranScenes(1);
+    expect(scenes.map((scene) => scene.id)).toEqual(["scene-runtime-1", "layout-windows-98"]);
+    expect(scenes[0]!.layout).toEqual({ sceneId: "layout-windows-98" });
+    expect(scenes[1]!.settings?.isLayout).toBe(true);
+    expect(select.value).toBe("layout-windows-98");
+
+    // The starter is no scene to switch to.
+    act(() =>
+      previews[1]!.options.onReady!({
+        currentSceneId: "scene-runtime-1",
+        scenes: [
+          { id: "scene-runtime-1", name: "Clock", refreshInterval: 60 },
+          { id: "layout-windows-98", name: "Windows 98", refreshInterval: 1 },
+        ],
+      }),
+    );
+    expect(screen.queryByRole("combobox", { name: "Scene" })).toBeNull();
+
+    fireEvent.change(select, { target: { value: "" } });
+    await waitFor(() => expect(previews).toHaveLength(3));
+    expect(ranScenes(2).map((scene) => scene.id)).toEqual(["scene-runtime-1"]);
+    expect(ranScenes(2)[0]!.layout).toBeUndefined();
+  });
+
+  it("starts on the layout a frame's scene wears, lists the frame's own before the starters, and can take it off", async () => {
+    const frameLayout = {
+      fields: [],
+      id: "frame-chrome",
+      name: "Windows 98",
+      nodes: [],
+      settings: { isLayout: true },
+    };
+    const worn = { ...clockScene, layout: { sceneId: "frame-chrome", state: { twentyFourHour: true } } };
+    const scenes = [worn, frameLayout];
+    render(<SceneLivePreviewPanel editorSceneId="scene-runtime-1" sceneId={null} scenes={scenes} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    // Run as the frame holds them.
+    expect(previews[0]!.options.scenes).toBe(scenes);
+    const select = (await screen.findByLabelText("Layout")) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBeGreaterThan(2));
+    expect(select.value).toBe("frame-chrome");
+    const values = [...select.options].map((option) => option.value);
+    // The frame's "Windows 98" stands for the starter of that name.
+    expect(values.slice(0, 2)).toEqual(["", "frame-chrome"]);
+    expect(values).not.toContain("layout-windows-98");
+    expect(values).toContain("layout-top-bar");
+
+    fireEvent.change(select, { target: { value: "layout-top-bar" } });
+    await waitFor(() => expect(previews).toHaveLength(2));
+    expect(ranScenes(1).map((scene) => scene.id)).toEqual([
+      "scene-runtime-1",
+      "frame-chrome",
+      "layout-top-bar",
+    ]);
+    expect(ranScenes(1)[0]!.layout).toEqual({ sceneId: "layout-top-bar" });
+    // A layout wears none.
+    expect(ranScenes(1)[1]!.layout).toBeUndefined();
+
+    // Back on the frame's own: the settings the scene gave it come along.
+    fireEvent.change(select, { target: { value: "frame-chrome" } });
+    await waitFor(() => expect(previews).toHaveLength(3));
+    expect(ranScenes(2).map((scene) => scene.id)).toEqual(["scene-runtime-1", "frame-chrome"]);
+    expect(ranScenes(2)[0]!.layout).toEqual({ sceneId: "frame-chrome", state: { twentyFourHour: true } });
+  });
+
+  it("has nothing to offer while the scene shown is a layout itself", async () => {
+    const layout = { fields: [], id: "my-chrome", name: "My chrome", nodes: [], settings: { isLayout: true } };
+    render(<SceneLivePreviewPanel editorSceneId="my-chrome" sceneId="scene-1" scenes={[layout]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    act(() =>
+      previews[0]!.options.onReady!({
+        currentSceneId: "my-chrome",
+        scenes: [{ id: "my-chrome", name: "My chrome", refreshInterval: 1 }],
+      }),
+    );
+    // The starters load with the panel; still no select.
+    await screen.findByText(/Runs in your browser/);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByLabelText("Layout")).toBeNull();
+  });
+});
+
 describe("SceneLivePreviewPanel editor reloads", () => {
   it("reboots the runtime after a quiet period when the editor's scenes change, not on identical payloads", async () => {
     const { rerender } = render(

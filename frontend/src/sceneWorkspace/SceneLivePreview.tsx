@@ -75,6 +75,14 @@ import {
   previewDeviceSize,
   previewShowsDevice,
 } from "./lib/preview-devices";
+import {
+  isPreviewLayout,
+  loadLayoutStarters,
+  previewLayouts,
+  scenesWithPreviewLayout,
+  wornPreviewLayout,
+} from "./lib/preview-layouts";
+import type { LayoutStarter } from "../generated/layoutStarters";
 import { isReauthRequired, reauthHref } from "./lib/reauth-client";
 import { selectFieldOptions } from "./lib/select-options";
 import { ImageLightbox } from "./ImageLightbox";
@@ -341,7 +349,45 @@ export function SceneLivePreviewPanel({
     return () => clearTimeout(timer);
   }, [editorScenesProp]);
 
-  const scenes = editorScenes;
+  // "Layout": the scene inside any layout before a frame wears it. Null
+  // follows the scenes (a frame's scene keeps the layout it wears there);
+  // "" is none; an id is that layout on every scene. The starters load with
+  // the panel.
+  const [layoutStarters, setLayoutStarters] = useState<readonly LayoutStarter[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void loadLayoutStarters().then((starters) => {
+      if (!cancelled) {
+        setLayoutStarters(starters);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const layouts = useMemo(
+    () => (editorScenes ? previewLayouts(editorScenes, layoutStarters) : []),
+    [editorScenes, layoutStarters],
+  );
+  const [layoutChoice, setLayoutChoice] = useState<string | null>(null);
+  // What the runtime runs: the editor's scenes, each wearing the chosen layout.
+  const scenes = useMemo(
+    () =>
+      editorScenes && layoutChoice !== null
+        ? scenesWithPreviewLayout(editorScenes, layouts, layoutChoice)
+        : editorScenes,
+    [editorScenes, layouts, layoutChoice],
+  );
+  // A starter runs beside the scenes; it is no scene to pick.
+  const addedLayoutIds = useMemo(
+    () =>
+      new Set(
+        layouts
+          .filter((layout) => layout.starter !== null && layout.id === layoutChoice)
+          .map((layout) => layout.id),
+      ),
+    [layouts, layoutChoice],
+  );
 
   // The viewport applied to the running preview, and the form values being
   // typed (applied on "Resize").
@@ -1204,7 +1250,12 @@ export function SceneLivePreviewPanel({
     }
   }
 
-  const runtimeScenes = sceneInfo?.scenes ?? [];
+  const runtimeScenes = (sceneInfo?.scenes ?? []).filter((item) => !addedLayoutIds.has(item.id));
+  // The Layout select shows the choice made here, else what the scene wears.
+  const wantedLayoutId =
+    layoutChoice ?? (editorScenes ? wornPreviewLayout(editorScenes, currentScene?.id) : "");
+  const shownLayoutId = layouts.some((layout) => layout.id === wantedLayoutId) ? wantedLayoutId : "";
+  const layoutSelectShown = layouts.length > 0 && !isPreviewLayout(currentScene);
 
   // A settings group whose every field is saved on the account is shown as
   // "from your account" until "Use another key"; a group with a missing
@@ -1570,6 +1621,27 @@ export function SceneLivePreviewPanel({
           ))}
         </select>
       </div>
+      {layoutSelectShown ? (
+        <div className="viewport-controls viewport-controls--device">
+          <label className="viewport-controls__label" htmlFor={`${fieldIdPrefix}-layout`}>
+            Layout
+          </label>
+          <select
+            className="viewport-controls__select viewport-controls__select--device"
+            id={`${fieldIdPrefix}-layout`}
+            onChange={(event) => setLayoutChoice(event.target.value)}
+            title="Show the scene inside a layout, as a frame wearing one draws it"
+            value={shownLayoutId}
+          >
+            <option value="">No layout</option>
+            {layouts.map((layout) => (
+              <option key={layout.id} value={layout.id}>
+                {layout.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
       <div className="viewport-controls">
         <label className="viewport-controls__label" htmlFor={`${fieldIdPrefix}-width`}>
           Resolution
