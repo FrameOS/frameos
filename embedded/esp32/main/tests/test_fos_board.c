@@ -44,6 +44,16 @@ static void expect_target(const char *idf, const char *want)
     CHECK(strcmp(got, want) == 0, "target(%s) = %s, want %s", idf, got, want);
 }
 
+/* A preset's map, in a buffer that stays put for the length of the test. */
+static const char *event_map(const char *preset)
+{
+    static char maps[16][1024];
+    static int next = 0;
+    char *out = maps[next++ % 16];
+    fos_board_event_map(preset, out, sizeof(maps[0]));
+    return out;
+}
+
 static void test_target_names(void)
 {
     /* The two chips FrameOS actually ships: the whole point of the change is
@@ -121,9 +131,9 @@ static void test_event_maps(void)
 {
     /* Every reTerminal E-series model: the arrows held walk the scene list
      * (docs/events.md "Event map"), by label — the E1004's pins are swapped. */
-    const char *e1004 = fos_board_event_map("seeed_reterminal_e1004");
-    const char *e1001 = fos_board_event_map("seeed_reterminal_e1001");
-    CHECK(strcmp(e1001, fos_board_event_map("seeed_reterminal_e1002")) == 0, "e1001 = e1002 event map");
+    const char *e1004 = event_map("seeed_reterminal_e1004");
+    const char *e1001 = event_map("seeed_reterminal_e1001");
+    CHECK(strcmp(e1001, event_map("seeed_reterminal_e1002")) == 0, "e1001 = e1002 event map");
     CHECK(strstr(e1004, "\"label\":\"LEFT\",\"action\":\"longPress\"") != NULL, "LEFT held");
     CHECK(strstr(e1004, "\"direction\":\"prev\"") != NULL, "LEFT is prev");
     CHECK(strstr(e1004, "\"label\":\"RIGHT\",\"action\":\"longPress\"") != NULL, "RIGHT held");
@@ -140,7 +150,7 @@ static void test_event_maps(void)
     CHECK(strlen(e1001) < 1024, "fits the config slot");
     /* The E1003 has the E1001's keys and microphone, and a touch screen: the
      * E1001's map, then the edge swipes (docs/scene-switcher.md). */
-    const char *e1003 = fos_board_event_map("seeed_reterminal_e1003");
+    const char *e1003 = event_map("seeed_reterminal_e1003");
     CHECK(strncmp(e1003, e1001, strlen(e1001) - 1) == 0, "e1003 starts with the e1001 map");
     CHECK(strstr(e1003, "\"edge\":\"right\"},\"emit\":\"forward\"") != NULL, "e1003 right edge is forward");
     CHECK(strstr(e1003, "\"edge\":\"left\"},\"emit\":\"back\"") != NULL, "e1003 left edge is back");
@@ -150,7 +160,7 @@ static void test_event_maps(void)
     CHECK(e1003[strlen(e1003) - 1] == ']' && strlen(e1003) < 1024, "a JSON list that fits");
     /* The Indicator's key: pressed the screen, twice the switcher, held
      * nothing. Its edges swipe the same way. */
-    const char *indicator = fos_board_event_map("seeed_sensecap_indicator_d1");
+    const char *indicator = event_map("seeed_sensecap_indicator_d1");
     CHECK(strstr(indicator, "\"action\":\"press\"},\"emit\":\"toggleScreen\"") != NULL,
           "indicator press toggles the screen");
     CHECK(strstr(indicator, "\"action\":\"doublePress\"},\"emit\":\"sceneSwitcher\"") != NULL,
@@ -160,8 +170,13 @@ static void test_event_maps(void)
           "indicator bottom edge is the switcher");
     CHECK(strstr(indicator, "\"edge\":\"top\"},\"emit\":\"sceneSettings\",\"as\":{}}]") != NULL,
           "indicator top edge is the settings");
-    /* The Sticky: UP and DOWN held walk the scenes, the AI key held talks. */
-    const char *sticky = fos_board_event_map("seeed_reterminal_sticky");
+    /* The Sticky: UP and DOWN held walk the scenes, the AI key held talks, and
+     * the edges swipe as on every touch preset. */
+    const char *sticky = event_map("seeed_reterminal_sticky");
+    CHECK(strstr(sticky, "\"edge\":\"bottom\"},\"emit\":\"sceneSwitcher\"") != NULL, "sticky bottom edge");
+    CHECK(strstr(sticky, "\"edge\":\"top\"},\"emit\":\"sceneSettings\"") != NULL, "sticky top edge");
+    CHECK(strstr(sticky, "\"edge\":\"left\"},\"emit\":\"back\"") != NULL, "sticky left edge");
+    CHECK(strstr(sticky, "\"edge\":\"right\"},\"emit\":\"forward\"") != NULL, "sticky right edge");
     CHECK(strstr(sticky, "\"label\":\"UP\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}") != NULL,
           "UP held is prev");
     CHECK(strstr(sticky, "\"label\":\"DOWN\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}") != NULL,
@@ -169,19 +184,19 @@ static void test_event_maps(void)
     CHECK(strstr(sticky, "\"label\":\"AI\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL, "AI held talks");
     CHECK(sticky[0] == '[' && sticky[strlen(sticky) - 1] == ']' && strlen(sticky) < 1024, "a JSON list that fits");
     /* The Waveshare codec boards: their one user key held talks. */
-    CHECK(strstr(fos_board_event_map("waveshare_esp32_s3_photopainter"),
+    CHECK(strstr(event_map("waveshare_esp32_s3_photopainter"),
                  "\"label\":\"KEY1\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL,
           "PhotoPainter KEY1 held talks");
-    CHECK(strstr(fos_board_event_map("waveshare_esp32_s3_epaper_13_3e6"),
+    CHECK(strstr(event_map("waveshare_esp32_s3_epaper_13_3e6"),
                  "\"label\":\"BOOT\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL,
           "13.3E6 BOOT held talks");
-    CHECK(strstr(fos_board_event_map("waveshare_esp32_s3_photopainter"), "setCurrentScene") == NULL,
+    CHECK(strstr(event_map("waveshare_esp32_s3_photopainter"), "setCurrentScene") == NULL,
           "one key: no scene walking");
     /* A board without bindings, and no board at all: none. */
-    CHECK(strcmp(fos_board_event_map("trmnl_og"), "") == 0, "trmnl has no map");
-    CHECK(strcmp(fos_board_event_map("elecrow_crowpanel_5in79"), "") == 0, "crowpanel has no map");
-    CHECK(strcmp(fos_board_event_map(""), "") == 0, "no preset");
-    CHECK(strcmp(fos_board_event_map(NULL), "") == 0, "NULL preset");
+    CHECK(strcmp(event_map("trmnl_og"), "") == 0, "trmnl has no map");
+    CHECK(strcmp(event_map("elecrow_crowpanel_5in79"), "") == 0, "crowpanel has no map");
+    CHECK(strcmp(event_map(""), "") == 0, "no preset");
+    CHECK(strcmp(event_map(NULL), "") == 0, "NULL preset");
 }
 
 static void test_buzzer_pins(void)
@@ -278,6 +293,20 @@ static void test_i2c_buses(void)
     CHECK(strcmp(fos_board_i2c_buses(NULL), "") == 0, "NULL preset");
 }
 
+static void test_rtc_chip(void)
+{
+    /* The PhotoPainter's PCF85063; the E-series and the Sticky keep their
+     * PCF8563, and so does a board without a preset. */
+    CHECK(strcmp(fos_board_rtc_chip("waveshare_esp32_s3_photopainter"), "pcf85063") == 0, "photopainter clock");
+    CHECK(strcmp(fos_board_rtc_chip("seeed_reterminal_e1001"), "pcf8563") == 0, "e1001 clock");
+    CHECK(strcmp(fos_board_rtc_chip("seeed_reterminal_e1002"), "pcf8563") == 0, "e1002 clock");
+    CHECK(strcmp(fos_board_rtc_chip("seeed_reterminal_e1003"), "pcf8563") == 0, "e1003 clock");
+    CHECK(strcmp(fos_board_rtc_chip("seeed_reterminal_e1004"), "pcf8563") == 0, "e1004 clock");
+    CHECK(strcmp(fos_board_rtc_chip("seeed_reterminal_sticky"), "pcf8563") == 0, "sticky clock");
+    CHECK(strcmp(fos_board_rtc_chip(""), "pcf8563") == 0, "no preset");
+    CHECK(strcmp(fos_board_rtc_chip(NULL), "pcf8563") == 0, "NULL preset");
+}
+
 static void test_sd_pins(void)
 {
     /* The Waveshare boards' own SPI3 sockets, as the console preset table
@@ -319,11 +348,13 @@ static void test_touch_pins(void)
     CHECK(strcmp(fos_board_touch_pins("seeed_reterminal_e1004"), "") == 0, "e1004: no touch");
     CHECK(strcmp(fos_board_touch_pins("waveshare_esp32_s3_photopainter"), "") == 0, "photopainter: no touch");
     CHECK(strcmp(fos_board_touch_pins(""), "") == 0, "no preset");
-    /* The Indicator's glass reads both axes the other way; the others match. */
+    /* The Indicator's and the Sticky's glass read both axes the other way; the others match. */
     CHECK(fos_board_touch_mirror("seeed_sensecap_indicator_d1") ==
               (FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y),
           "indicator touch mirrored");
-    CHECK(fos_board_touch_mirror("seeed_reterminal_sticky") == 0, "sticky touch not mirrored");
+    CHECK(fos_board_touch_mirror("seeed_reterminal_sticky") ==
+              (FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y),
+          "sticky touch mirrored");
     CHECK(fos_board_touch_mirror("seeed_reterminal_e1003") == 0, "e1003 touch not mirrored");
     CHECK(fos_board_touch_mirror("") == 0 && fos_board_touch_mirror(NULL) == 0, "no preset: not mirrored");
     CHECK(strcmp(fos_board_touch_pins(NULL), "") == 0, "NULL preset");
@@ -355,6 +386,7 @@ int main(void)
     test_mic_pins();
     test_leds();
     test_i2c_buses();
+    test_rtc_chip();
     test_sd_pins();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok",
            g_checks, g_failures);

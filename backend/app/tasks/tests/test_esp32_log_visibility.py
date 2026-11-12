@@ -63,19 +63,34 @@ def test_sdkconfig_profiles_compile_out_info_logs():
 
 
 def test_nim_log_hook_writes_to_the_console():
-    """Every FrameOS log line goes through this hook. It must reach stdout
-    directly — the console is the sink that works when nothing else does."""
+    """Every FrameOS log line goes through this hook. It must reach stdout —
+    the console is the sink that works when nothing else does. Since
+    2026-11-07 it does so through the log ring (fos_log_ring.c): a task of
+    its own writes the line, so the render task does not wait out 115200
+    baud for it."""
     body = _function_body(
         _strip_comments(GLUE_C.read_text()), "void frameos_nim_log_hook("
     )
-    assert re.search(r"\bprintf\s*\(", body), (
-        "frameos_nim_log_hook must printf the line: at "
-        "CONFIG_LOG_MAXIMUM_LEVEL=WARN an ESP_LOG* macro compiles to nothing "
-        "and the USB serial console shows no device logs at all"
+    assert re.search(r"\bfos_log_ring_puts\s*\(", body) or re.search(r"\bprintf\s*\(", body), (
+        "frameos_nim_log_hook must hand the line to the console (fos_log_ring_puts, "
+        "or printf): at CONFIG_LOG_MAXIMUM_LEVEL=WARN an ESP_LOG* macro compiles "
+        "to nothing and the USB serial console shows no device logs at all"
     )
     assert "ESP_LOGI" not in body and "ESP_LOGD" not in body, (
         "ESP_LOGI/ESP_LOGD in the log hook is compiled out — use printf"
     )
+
+
+def test_log_ring_writes_to_stdout():
+    """The ring's lines reach the console: the drain writes stdout, and a
+    ring that could not start prints on the logging task as before."""
+    ring = (GLUE_C.parent / "fos_log_ring.c").read_text()
+    source = _strip_comments(ring)
+    write_line = _function_body(source, "static void write_line_now(")
+    assert "write(fileno(stdout)" in write_line
+    puts = _function_body(source, "void fos_log_ring_puts(")
+    assert "write_line_now(" in puts, "without the ring, a line must still print"
+    assert "ESP_LOGI" not in source and "ESP_LOGD" not in source
 
 
 def test_cloud_session_scopes_are_logged_through_the_hook():

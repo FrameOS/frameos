@@ -18,8 +18,11 @@ import {
   linkedClients,
   storeScenes,
   storeSceneVersions,
+  virtualFrames,
 } from "@frameos-cloud/db";
 import { linkedClientScopes } from "./backend-auth";
+import { frameIsCloudRendered } from "./cloud-rendered";
+import { holdServerRenderVerb } from "./server-render-state";
 import {
   deleteBlobIfUnreferenced,
   frameCacheNamespace,
@@ -32,13 +35,15 @@ import { frameOwningBackend } from "./frame-backend-owner";
 import { readVoicePermissions } from "./voice-permissions";
 import { commandTtlForFrame } from "./frame-sleep";
 import { deployProgressKindForCommand, startDeployProgress } from "./deploy-progress";
-import { requiredSettingsForScenes } from "./preview-settings";
+import { requiredSettingsForScenes } from "../../../../../frontend/src/sceneWorkspace/lib/preview-settings";
 import { scenesForEmbeddedRuntime, scenesForRuntime } from "./retired-apps";
 import { withStoreSceneOrigin } from "./scene-origin";
 import { sceneEventMapsOf, withSceneEventMaps } from "./scene-event-map";
+import { sceneLayoutsOf, versionIsLayout, withSceneLayouts } from "./scene-layouts";
 import { compiledSceneNames } from "./store";
 import { maxSceneZipUncompressedBytes } from "./store";
 import { unzipBounded } from "./zip-bounded";
+import { sceneHashes } from "./scenes-patch";
 import { frameosVersionSatisfies } from "./store-versions";
 import {
   allContractSettingKeys,
@@ -253,6 +258,28 @@ export function frameSupportsRenderScaleSettings(
   frameosVersion: string | null | undefined,
 ): boolean {
   return frameSupportsSettingsFrom(renderScaleFrameSettingsMinVersion, frameosVersion);
+}
+
+// 2026.11.5: `frame_settings_on_screen`, whether the settings on the frame's
+// own screen offer the frame page behind the gear (docs/scene-settings.md
+// "The frame page"). Both profiles learned it in the same release; the SPA's
+// floor is frameSettingsOnScreenCloudFrameSettingsMinVersion.
+export const frameSettingsOnScreenFrameSettingsMinVersion = "2026.11.5";
+export const frameSettingsOnScreenFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("linux", frameSettingsOnScreenFrameSettingsMinVersion)].filter(
+    (key) => key === "frame_settings_on_screen",
+  ),
+);
+export const esp32FrameSettingsOnScreenFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("esp32", frameSettingsOnScreenFrameSettingsMinVersion)].filter(
+    (key) => key === "frame_settings_on_screen",
+  ),
+);
+
+export function frameSupportsFrameSettingsOnScreen(
+  frameosVersion: string | null | undefined,
+): boolean {
+  return frameSupportsSettingsFrom(frameSettingsOnScreenFrameSettingsMinVersion, frameosVersion);
 }
 
 export function frameSupportsColorsSettings(
@@ -477,6 +504,24 @@ export const esp32MicrophoneFrameSettingKeys = new Set<string>(
 export const esp32LedFrameSettingKeys = new Set<string>(
   [...contractSettingKeysSince("esp32", esp32VoiceChatFrameSettingsMinVersion)].filter((key) => key.startsWith("led_")),
 );
+// 2026.11.6: `touch_beep`, the click of a press on the glass and the chirps of
+// a load someone asked for on e-paper. Live, no reboot.
+export const esp32TouchBeepFrameSettingsMinVersion = "2026.11.6";
+export const esp32TouchBeepFrameSettingKeys = new Set(
+  contractSettingKeysSince("esp32", esp32TouchBeepFrameSettingsMinVersion),
+);
+// 2026.11.7: `cpu_mode`, the chip's clock (160 MHz battery, 240 performance,
+// auto by the board). Read at boot: the device reboots to take it.
+export const esp32CpuModeFrameSettingsMinVersion = "2026.11.7";
+export const esp32CpuModeFrameSettingKeys = new Set(
+  contractSettingKeysSince("esp32", esp32CpuModeFrameSettingsMinVersion),
+);
+// 2026.11.7 too: `render_mode`, where the scenes run (docs/server-rendering.md).
+// Live: the next render pass pulls its picture from the cloud, or renders.
+export const esp32RenderModeFrameSettingsMinVersion = "2026.11.7";
+export const esp32RenderModeFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("esp32", esp32RenderModeFrameSettingsMinVersion)].filter((key) => key === "render_mode"),
+);
 
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata
@@ -576,6 +621,45 @@ export function mergeFrameSettings(
     return undefined;
   }
   return { ...readFrameSettings(stored), ...incoming };
+}
+
+// The settings a frame reports in its hello and `state` `hardware` (what it
+// has now: changed on its own screen, docs/scene-settings.md "What a control
+// plane learns", or set before it was linked), by the mirror's key. A plane
+// that leaves the page on adopts what the person at the frame chose.
+const reportedFrameSettings: ReadonlyArray<readonly [string, string]> = [
+  ["rotate", "rotate"],
+  ["renderScale", "render_scale"],
+];
+
+// The stored settings with what the frame reports, or undefined when there is
+// nothing to change. The mirror follows the device: without this the Settings
+// panel showed a rotation the frame no longer had, and the next save pushed it
+// back. A key the mirror never had is the device's default (0) and stays
+// unwritten while the device reports 0. The hub leaves the mirror alone while
+// a push is on its way.
+export function settingsWithReported(
+  stored: unknown,
+  hardware: unknown,
+): Record<string, unknown> | undefined {
+  if (!hardware || typeof hardware !== "object") {
+    return undefined;
+  }
+  const settings = readFrameSettings(stored);
+  const next: Record<string, unknown> = { ...settings };
+  let changed = false;
+  for (const [reported, key] of reportedFrameSettings) {
+    const value = (hardware as Record<string, unknown>)[reported];
+    if (value === undefined || !allowedFrameSettings.get(key)!(value)) {
+      continue;
+    }
+    if (settings[key] === value || (settings[key] === undefined && value === 0)) {
+      continue;
+    }
+    next[key] = value;
+    changed = true;
+  }
+  return changed ? next : undefined;
 }
 
 // Read the stored jsonb back through the allowlist. It is written through
@@ -955,10 +1039,37 @@ export async function enqueueFrameCommand(
   let expiresAt: Date | null = null;
   const now = new Date();
   const [row] = await db
-    .select({ hardware: frames.hardware, nextWakeAt: frames.nextWakeAt })
+    .select({ hardware: frames.hardware, nextWakeAt: frames.nextWakeAt, settings: frames.settings })
     .from(frames)
     .where(eq(frames.id, input.frameId))
     .limit(1);
+  // A hardware frame the cloud renders for (docs/server-rendering.md "State
+  // and events"): the plane is its scenes' memory, so what a verb says to the
+  // scene is kept here before the device hears of it, and a scene event waits
+  // for the pull that runs it while the device is only asked to pull. A
+  // virtual frame's device (the hub's) keeps its own.
+  if (row && frameIsCloudRendered(row) && !(await frameIsVirtual(db, input.frameId))) {
+    const held = await holdServerRenderVerb(db, input.frameId, input.type, input.payload);
+    if (held.type === "refused") {
+      // A frame that cannot render must not collect events forever: the
+      // command is answered as the virtual device answers it, never queued.
+      const [refused] = await db
+        .insert(frameCommands)
+        .values({
+          createdByAccountId: input.createdByAccountId ?? null,
+          error: held.error,
+          frameId: input.frameId,
+          payload: input.payload ?? null,
+          status: "failed",
+          type: input.type,
+        })
+        .returning();
+      return refused;
+    }
+    if (held.type === "render_instead") {
+      input = { ...input, payload: {}, type: "render" };
+    }
+  }
   if (input.ttlMs) {
     expiresAt = new Date(
       now.getTime() +
@@ -976,6 +1087,14 @@ export async function enqueueFrameCommand(
     const carried = await carriedScenePreview(db, input.frameId, payload.scenes);
     if (carried) {
       payload = { ...payload, preview: carried.preview, scenes: [...payload.scenes, carried.scene] };
+    }
+  }
+  // What this set holds, per scene, kept on the row after its scenes are
+  // spent: the next push to this frame is a difference from it (scenes-patch.ts).
+  if (input.type === "set_scenes" && isSceneBundlePayload(payload)) {
+    const hashes = sceneHashes(payload.scenes);
+    if (hashes) {
+      payload = { ...payload, scene_hashes: hashes };
     }
   }
   const [command] = await db
@@ -1030,6 +1149,15 @@ export async function enqueueFrameCommand(
     sql`select pg_notify(${frameCommandsNotifyChannel}, ${input.frameId})`,
   );
   return command;
+}
+
+async function frameIsVirtual(db: FramesDatabase, frameId: string): Promise<boolean> {
+  const [virtual] = await db
+    .select({ frameId: virtualFrames.frameId })
+    .from(virtualFrames)
+    .where(eq(virtualFrames.frameId, frameId))
+    .limit(1);
+  return virtual !== undefined;
 }
 
 /** The release a notify_update_available payload names, when it names one. */
@@ -1672,6 +1800,10 @@ export async function pinnedSceneVersion(
 ) {
   const [row] = await db
     .select({
+      // The version's declared minimum FrameOS (its template.json's
+      // frameosVersion): checkScenesAssignable refuses to send it to a frame
+      // that reports an older one.
+      frameosVersion: storeSceneVersions.frameosVersion,
       riskFlags: storeSceneVersions.riskFlags,
       version: storeSceneVersions.version,
     })
@@ -1743,6 +1875,7 @@ export type AssignmentSettingsGroups = {
   id: string;
   sceneId: string;
   declaredSettingsGroups: string[];
+  isLayout: boolean;
   grantedSettingsGroups: unknown;
 };
 
@@ -1798,6 +1931,7 @@ export async function buildScenesPayloadForFrame(
       eventMaps: frameSceneAssignments.eventMaps,
       grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
       id: frameSceneAssignments.id,
+      layouts: frameSceneAssignments.layouts,
       sceneAccountId: storeScenes.accountId,
       sceneId: frameSceneAssignments.sceneId,
       sceneName: storeScenes.name,
@@ -1917,18 +2051,23 @@ export async function buildScenesPayloadForFrame(
     // ...and with the owner's button maps for THIS install written on as
     // `eventMap` (scene-event-map.ts): the installed copy's, kept on the
     // assignment row across versions, never part of the published bytes.
+    // ...and the layout that install wears, written on as `layout` the same
+    // way (scene-layouts.ts).
     const stamped = (frameHardwareIsEsp32(frameRow) ? scenesForEmbeddedRuntime : scenesForRuntime)(
-      withSceneEventMaps(
-        withStoreSceneOrigin(
-          extracted.scenes,
-          {
-            id: assignment.sceneId,
-            slug: assignment.sceneSlug,
-            version: versionRow.version,
-          },
-          { appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, targetVersion) },
+      withSceneLayouts(
+        withSceneEventMaps(
+          withStoreSceneOrigin(
+            extracted.scenes,
+            {
+              id: assignment.sceneId,
+              slug: assignment.sceneSlug,
+              version: versionRow.version,
+            },
+            { appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, targetVersion) },
+          ),
+          sceneEventMapsOf(assignment.eventMaps),
         ),
-        sceneEventMapsOf(assignment.eventMaps),
+        sceneLayoutsOf(assignment.layouts),
       ),
       targetVersion,
     );
@@ -1938,6 +2077,7 @@ export async function buildScenesPayloadForFrame(
       declaredSettingsGroups: declaredServiceSettingGroups(stamped),
       grantedSettingsGroups: assignment.grantedSettingsGroups,
       id: assignment.id,
+      isLayout: versionIsLayout(stamped),
       sceneId: assignment.sceneId,
     });
     // The digest of just this assignment's slice of the payload. Comparing

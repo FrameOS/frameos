@@ -26,7 +26,7 @@ import {
 // against the nav list in workspaceSurfaces.ts, in both directions.
 
 const modes: WorkspaceMode[] = ["backend", "frameAdmin", "cloud"];
-const surfaces: FrameSettingsSurface[] = ["backend", "frameAdmin", "cloudLinux", "cloudEsp32"];
+const surfaces: FrameSettingsSurface[] = ["backend", "frameAdmin", "cloudLinux", "cloudEsp32", "cloudVirtual"];
 
 describe("the settings nav and the settings panel agree", () => {
   for (const mode of modes) {
@@ -100,6 +100,14 @@ describe("surfaces", () => {
     expect(frameSettingsSurfaceFor("frameAdmin", null)).toBe("frameAdmin");
   });
 
+  it("resolves a cloud virtual frame to its own short panel", () => {
+    const virtual = { hardware: { platform: "virtual" } };
+    expect(frameSettingsSurfaceFor("cloud", virtual as never)).toBe("cloudVirtual");
+    // The same report on another plane means nothing: a backend's virtual
+    // frame is embedded mode, and draws the backend's own section.
+    expect(frameSettingsSurfaceFor("backend", virtual as never)).toBe("backend");
+  });
+
   it("covers every surface with the mode that reaches it", () => {
     const reachable = new Set(modes.flatMap((mode) => surfacesForWorkspaceMode[mode]));
     expect([...reachable].sort()).toEqual([...surfaces].sort());
@@ -107,6 +115,20 @@ describe("surfaces", () => {
 });
 
 describe("what each surface may render", () => {
+  it("gives a cloud virtual frame its link and size, and nothing a panel or a board has", () => {
+    const rendered = frameSettingsSections
+      .filter((section) => frameSettingsSectionRenders(section.key, "cloudVirtual"))
+      .map((section) => section.key);
+    expect(rendered).toEqual(["cloud-base", "cloud-service-settings", "layouts", "cloud-telemetry", "cloud-virtual"]);
+    // The cloud's section is the cloud's alone; the backend keeps its own
+    // under the same heading.
+    expect(frameSettingsSectionRenders("cloud-virtual", "cloudLinux")).toBe(false);
+    expect(frameSettingsSectionRenders("cloud-virtual", "cloudEsp32")).toBe(false);
+    expect(frameSettingsSectionRenders("cloud-virtual", "backend")).toBe(false);
+    expect(frameSettingsSectionRenders("virtual-frame", "backend")).toBe(true);
+    expect(frameSettingsSectionRenders("virtual-frame", "cloudVirtual")).toBe(false);
+  });
+
   it("keeps SSH keys on a cloud Linux frame and off a cloud ESP32", () => {
     // The regression above: the account's SSH keys are written into SD cards
     // built for a cloud Linux frame, so the section belongs there. An ESP32 is

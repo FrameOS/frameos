@@ -461,3 +461,50 @@ jobs:
             --data @discord-payload.json \
             "$WEBHOOK_URL"
           rm -f discord-payload.json
+
+  # A verify that fails on main stops the deploy job before its first step, so
+  # the report above never runs and the merge just quietly does not ship
+  # (2026-11-09: #712 merged, and production stayed on the commit before it).
+  # This goes to PostHog, whose `cloud ops alert` workflow posts to Discord.
+  report-undeployed:
+    name: Report a main that was not deployed
+    needs: verify
+    if: >-
+      failure() &&
+      (github.event_name == 'push' || github.event_name == 'workflow_run')
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Tell PostHog
+        env:
+          POSTHOG_KEY: ${{ vars.NEXT_PUBLIC_POSTHOG_KEY }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${POSTHOG_KEY:-}" ]; then
+            echo "No NEXT_PUBLIC_POSTHOG_KEY variable; not notifying."
+            exit 0
+          fi
+          python3 - <<'PY'
+          import json, os
+
+          payload = {
+              "api_key": os.environ["POSTHOG_KEY"],
+              "distinct_id": "frameos-cloud-ci",
+              "event": "cloud ops alert",
+              "properties": {
+                  "$lib": "frameos-cloud-ci",
+                  "kind": "main_not_deployed",
+                  "sha": os.environ["GITHUB_SHA"][:12],
+                  "source": "ci",
+                  "summary": "Cloud CI failed on main, so this merge was not deployed.",
+                  "url": os.environ["RUN_URL"],
+              },
+          }
+          with open("posthog-payload.json", "w", encoding="utf-8") as payload_file:
+              json.dump(payload, payload_file)
+          PY
+          curl --fail-with-body --show-error --silent \
+            -H "Content-Type: application/json" \
+            --data @posthog-payload.json \
+            https://eu.i.posthog.com/capture/

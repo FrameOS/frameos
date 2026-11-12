@@ -3,6 +3,7 @@ import { actionToUrl, router, urlToAction } from 'kea-router'
 import { framesModel } from '../../models/framesModel'
 import { frameHost, frameIsActive } from '../../decorators/frame'
 import { FrameScene, FrameType, FrameId } from '../../types'
+import { scenesWithoutLayouts } from '../../utils/sceneLayouts'
 import { frameIdsEqual, parseRouteFrameId } from '../../utils/frameId'
 import { urls } from '../../urls'
 import { applyFrameosTheme } from '../../utils/frameosTheme'
@@ -95,6 +96,13 @@ export function frameAssetFolderExpansionKey(frameId: FrameId, path: string): st
 
 export function sceneChildExpansionKey(frameId: FrameId, sceneId: string): string {
   return frameAssetFolderExpansionKey(frameId, sceneChildExpansionPath(sceneId))
+}
+
+/** A frame's collapsed Layouts group, remembered like an expanded folder. */
+export const LAYOUTS_GROUP_EXPANSION_PATH = 'layouts-group'
+
+export function layoutsGroupExpansionKey(frameId: FrameId): string {
+  return frameAssetFolderExpansionKey(frameId, LAYOUTS_GROUP_EXPANSION_PATH)
 }
 
 export function sceneChildExpansionPath(sceneId: string): string {
@@ -192,26 +200,9 @@ function isFrameRoutePathForFrame(pathname: string, frameId: FrameId): boolean {
   return pathname === urls.frame(frameId) || frameToolFromPathname(pathname, frameId) !== null
 }
 
-function isFrameOverviewRoutePathForFrame(
-  pathname: string,
-  search: Record<string, unknown>,
-  frameId: FrameId
-): boolean {
-  return (
-    isFrameRoutePathForFrame(pathname, frameId) &&
-    frameToolFromRoute(frameToolFromPathname(pathname, frameId), search) === 'overview'
-  )
-}
-
-function isWorkspaceRoutePathForFrame(pathname: string, frameId: FrameId): boolean {
-  const scenePath = urls.scenes(frameId)
+function isAppsRoutePathForFrame(pathname: string, frameId: FrameId): boolean {
   const appPath = urls.apps(frameId)
-  return (
-    pathname === scenePath ||
-    pathname.startsWith(`${scenePath}/`) ||
-    pathname === appPath ||
-    pathname.startsWith(`${appPath}/`)
-  )
+  return pathname === appPath || pathname.startsWith(`${appPath}/`)
 }
 
 // The frame id a pathname carries at `token`'s place in `tokenizedPath`,
@@ -270,26 +261,20 @@ function frameIdFromWorkspacePath(pathname: string): FrameId | null {
   )
 }
 
+// Where a frame's drawer (scene control, Add scene, schedule, chat) opens:
+// the page showing, when it draws them (the frames list, the frame's pages,
+// its apps page), else the frame's page. A scene's page is the scene editor,
+// full screen, with no drawers of its own.
 function drawerPathForFrame(frameId: FrameId): string {
   const pathname = router.values.location.pathname
   if (
     isFramesRoutePath(pathname) ||
     isFrameRoutePathForFrame(pathname, frameId) ||
-    isWorkspaceRoutePathForFrame(pathname, frameId)
+    isAppsRoutePathForFrame(pathname, frameId)
   ) {
     return pathname
   }
   return urls.frame(frameId)
-}
-
-function shouldOpenScenePreviewInDrawer(frameId: FrameId): boolean {
-  const pathname = router.values.location.pathname
-  const search = router.values.searchParams
-  return (
-    isFramesRoutePath(pathname) ||
-    isFrameOverviewRoutePathForFrame(pathname, search, frameId) ||
-    (isInFrameAdminMode() && isWorkspaceRoutePathForFrame(pathname, frameId))
-  )
 }
 
 // Route payloads arrive as `Record<string, any>`, which loses the FrameId type.
@@ -344,11 +329,11 @@ export interface ChatDrawerSelection {
 
 /** The Add scene drawer's pages: the actions, its two scene lists, or the
  * photo album installer. Kept in the URL (`drawerPage`). */
-export type AddScenePage = 'actions' | 'store' | 'saved' | 'photos'
+export type AddScenePage = 'actions' | 'store' | 'saved' | 'photos' | 'layouts'
 
 function templateDrawerPageFromSearch(search: Record<string, unknown>): AddScenePage {
   const page = searchValue(search, 'drawerPage')
-  return page === 'store' || page === 'saved' || page === 'photos' ? page : 'actions'
+  return page === 'store' || page === 'saved' || page === 'photos' || page === 'layouts' ? page : 'actions'
 }
 
 /** The `q` (scene search) of the Add scene drawer, if the URL carries one. */
@@ -1071,9 +1056,6 @@ export interface workspaceLogicActions {
     frameId: FrameId
     sceneId: string
   }
-  navigateToSceneFrame: (frameId: FrameId) => {
-    frameId: FrameId
-  }
   openChatDrawer: (
     frameId: FrameId | null,
     sceneId?: string | null,
@@ -1312,7 +1294,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
     navigateToFrame: (frameId: FrameId) => ({ frameId }),
     openFrameTool: (frameId: FrameId, panel: WorkspaceUtilityPanel) => ({ frameId, panel }),
     openFrameToolBehindDrawer: (frameId: FrameId, panel: WorkspaceUtilityPanel) => ({ frameId, panel }),
-    navigateToSceneFrame: (frameId: FrameId) => ({ frameId }),
     navigateToScene: (frameId: FrameId, sceneId: string) => ({ frameId, sceneId }),
     openScenePreview: (frameId: FrameId, sceneId: string) => ({ frameId, sceneId }),
     openSceneControl: (frameId: FrameId, sceneId: string) => ({
@@ -1450,7 +1431,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
         setSearch: () => null,
         navigateToFrame: () => null,
         openFrameTool: () => null,
-        navigateToSceneFrame: () => null,
         navigateToScene: () => null,
         openScenePreview: () => null,
         openChatDrawer: () => null,
@@ -1476,7 +1456,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
         setSearch: () => null,
         navigateToFrame: () => null,
         openFrameTool: () => null,
-        navigateToSceneFrame: () => null,
         navigateToScene: () => null,
         openScenePreview: () => null,
         openSceneControl: () => null,
@@ -1496,7 +1475,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
         setSearch: () => null,
         navigateToFrame: () => null,
         openFrameTool: () => null,
-        navigateToSceneFrame: () => null,
         navigateToScene: () => null,
         openScenePreview: () => null,
         openTemplateDrawer: () => null,
@@ -1521,7 +1499,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
         setSearch: () => null,
         navigateToFrame: () => null,
         openFrameTool: () => null,
-        navigateToSceneFrame: () => null,
         navigateToScene: () => null,
         openScenePreview: () => null,
         openSceneControl: () => null,
@@ -1546,7 +1523,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
         setSearch: () => null,
         navigateToFrame: () => null,
         openFrameTool: () => null,
-        navigateToSceneFrame: () => null,
         navigateToScene: () => null,
         openScenePreview: () => null,
         openSceneControl: () => null,
@@ -1758,8 +1734,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
           .map(({ frame, archived }) => {
             const matchesFrame = frameMatchesSearch(frame, normalizedSearch)
             const scenes = normalizedSearch
-              ? (frame.scenes ?? []).filter((scene) => sceneMatchesSearch(scene, normalizedSearch))
-              : frame.scenes ?? []
+              ? scenesWithoutLayouts(frame.scenes).filter((scene) => sceneMatchesSearch(scene, normalizedSearch))
+              : scenesWithoutLayouts(frame.scenes)
             return { frame, scenes, archived, frameMatchesSearch: matchesFrame }
           })
           .filter(({ scenes, frameMatchesSearch }) => !normalizedSearch || frameMatchesSearch || scenes.length > 0)
@@ -1798,14 +1774,16 @@ export const workspaceLogic = kea<workspaceLogicType>([
       (s) => [s.selectedFrame, s.search],
       (selectedFrame: workspaceLogicValues['selectedFrame'], search: workspaceLogicValues['search']): FrameScene[] => {
         const normalizedSearch = search.trim().toLowerCase()
-        return (selectedFrame?.scenes ?? []).filter((scene) => sceneMatchesSearch(scene, normalizedSearch))
+        return scenesWithoutLayouts(selectedFrame?.scenes).filter((scene) =>
+          sceneMatchesSearch(scene, normalizedSearch)
+        )
       },
     ],
     allSceneOptions: [
       (s) => [s.framesList],
       (framesList: workspaceLogicValues['framesList']): WorkspaceSceneOption[] =>
         framesList.flatMap((frame) =>
-          (frame.scenes ?? []).map((scene) => ({
+          scenesWithoutLayouts(frame.scenes).map((scene) => ({
             frameId: frame.id,
             sceneId: scene.id,
             frameName: frame.name || frameHost(frame),
@@ -2025,26 +2003,14 @@ export const workspaceLogic = kea<workspaceLogicType>([
           utilityDrawerClosedHash(workspaceContentNavigationHash())
         )
       },
-      navigateToSceneFrame: ({ frameId }) => {
-        actions.selectFrame(frameId)
-        router.actions.push(urls.scenes(frameId), undefined, workspaceContentNavigationHash())
-      },
       navigateToScene: ({ frameId, sceneId }) => {
         actions.setRouteSelection(frameId, sceneId)
         router.actions.push(urls.scenes(frameId, sceneId), undefined, workspaceContentNavigationHash())
       },
+      // The scene's control drawer (its values, Activate, the previews), on
+      // the page showing when it draws drawers, else on the frame's page.
       openScenePreview: ({ frameId, sceneId }) => {
-        if (shouldOpenScenePreviewInDrawer(frameId)) {
-          actions.openSceneControl(frameId, sceneId)
-          return
-        }
-        actions.setRouteSelection(frameId, sceneId)
-        reloadFrameStates(frameId)
-        router.actions.push(
-          urls.scenes(frameId, sceneId),
-          {},
-          utilityDrawerOpenHash('state', workspaceContentNavigationHash())
-        )
+        actions.openSceneControl(frameId, sceneId)
       },
       snapshotFrameOrder: () => {
         const rankedFrames = rankFramesForSnapshot(values.framesList)

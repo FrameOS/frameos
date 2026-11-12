@@ -3,12 +3,10 @@
 Status: the ledger, AI metering (**live** — every turn is measured, priced
 and posted to the customer's receivable), the admin/ops surfaces, the
 account's own usage view with its AI switch, the daily cap, and plans with
-their subscription lifecycle are built. **Phase 3b — the payment provider —
-is the only thing left, and it is paused on purpose (2026-09-03): no
-provider until there are users to invoice.** Nothing is *collected*: no
-invoice is cut and self-serve plan purchase stays gated off
-(`FRAMEOS_CLOUD_PLANS_SELF_SERVE`), because until 3b there is no way to
-settle a receivable. The open work is §7; §9 is the
+their subscription lifecycle are built, and so is collecting for plans
+through **Stripe** ([`billing.md`](billing.md), 2026-11-07), with the VAT
+it adds booked as owed and its fees as a cost. Nothing collects metered AI
+yet: no invoice is cut for usage and no turn is billable. The open work is §7; §9 is the
 2026-09-01 review and what its fixes did, kept because the code cites its
 item numbers.
 
@@ -82,7 +80,7 @@ Three cards on `/account/usage`, built from one module,
 |---|---|---|---|
 | People | 1 | N | N |
 | Frames (your own hardware) | 20 | 40, 60, 80, 160 | 199, 299, 499, 999 |
-| Virtual frames, thin clients (§0.2) | 0 | N | N |
+| Virtual frames (§0.2; thin clients when they can link) | 0 | N | N |
 | Photos | 250 MB | 250 MB × N | 250 MB × N |
 | Private scenes, backups, frame logs | 100 MB each | 100 MB × N each | 100 MB × N each |
 | Features | | sharing frames, virtual frames | Private's, SSO (SAML), priority support; dedicated support at $499 |
@@ -97,11 +95,14 @@ cannot disagree with the meters above them.
 Higher stops buy capacity, never features; Business picks up where Private
 ends, with the same rules and its own features on top.
 
-- **Only Free is live.** The paid cards say "Contact support to activate".
-  Activating one means a `billing_plans` row with the stop's code
-  (`private-9`, `business-499`) and the stop's limits as entitlements, then
-  the operator plan route. No paid row is seeded yet: subscribing accrues a
-  receivable and Phase 3b has no way to settle it.
+- **Private and Business are both bought at checkout** (Business since
+  2026-11-07, with single sign-on marked planned). A self-serve group
+  (`selfServe` in the catalog) gets its `billing_plans` rows (`private-9`,
+  `business-49`, the stop's limits as entitlements) from "Sync plans" on
+  `/admin/billing/customers`; a provider adapter adds its products to that
+  step ([`billing.md`](billing.md)). Without one every paid card says
+  "Contact support to activate" and an operator uses the operator plan
+  route.
 - **Photo storage is a plan number now** (`photo_bytes`, optional on a row).
   Free's is `FRAMEOS_CLOUD_MAX_PHOTO_MB`, 250 MB by default (was 1 GB); an
   unverified account stays capped at `FRAMEOS_CLOUD_MAX_UNVERIFIED_PHOTO_MB`
@@ -111,9 +112,14 @@ ends, with the same rules and its own features on top.
   margin instead (Maker $1.99 at 50%, Studio $6.99 at 20%); migration 0069
   took those two rows off every listing and renamed `payg` to Free. The
   rows stay for the ledger tests and any hand-made subscription.
-- **Sharing frames, SSO and dedicated support do not exist yet.** They are
-  on the cards as what the plan will include; build them before activating
-  a plan that promises them.
+- **Sharing frames and SSO do not exist yet.** The catalog names them in
+  `plannedFeatures` / `plannedLimits`: every page marks them "planned", and
+  a plan's row does not grant them. Take a name off those lists in the
+  change that ships the feature. What a paid plan sells today is frames,
+  storage and, since 2026-11, virtual frames (§0.2): `virtual_frames` and
+  `cloud_rendered_frames` are off the lists, and a plan's row grants its N.
+  Rows synced before that hold zero, so "Sync plans" runs once after the
+  deploy ([`billing.md`](billing.md)).
 
 Open: a yearly price, and what happens to an account that moves below what
 it already uses (proposal: nothing breaks, nothing new can be added).
@@ -148,10 +154,39 @@ arithmetic:
   gives. Until then the entitlement is a *count check* at frame creation and
   costs the ledger nothing.
 
-Not designed here: whether a cloud-rendered frame counts against the
-50-frame cloud-managed limit (proposal: it is a separate pool, because the
-two have entirely different cost profiles — your own Pi costs us a WebSocket
-and a row).
+**Built, 2026-11: virtual frames** (`docs/cloud-frames.md` "Virtual
+frames"). The first thing the entitlement buys: a frame with no hardware,
+rendered by the frame hub and shown at a private link. What the two points
+above came to in code:
+
+- The count check is `createVirtualFrame` (one transaction, behind an
+  advisory lock on the account). **A virtual frame is its own pool**: it
+  counts against `cloud_rendered_frames` and not against `frames`
+  (`countFramesForAccount` leaves virtual frames out), because the two have
+  entirely different cost profiles — your own Pi costs us a WebSocket and a
+  row. A thin client's enrollment still passes both checks; it is hardware.
+- The floor is `FRAMEOS_CLOUD_RENDERED_MIN_INTERVAL_SECONDS` (300), enforced
+  twice: the settings route refuses an interval below it, and the hub's
+  render tick never paces under it whatever a scene asks for.
+- Renders are also bounded by attention, which the arithmetic above did not
+  assume: the interval runs only while the view link or a workspace page was
+  read in the last three minutes. A kiosk that is always on does cost the
+  288 renders a day; a dashboard opened twice a day costs two.
+- Not metered: there is still no per-frame attribution (§8.9), so a render
+  posts nothing to the ledger. The plan's number is the whole price.
+
+**Built, 2026-11: hardware the cloud renders for** (`docs/server-rendering.md`,
+`docs/cloud-frames.md` "Hardware the cloud renders for"). An ESP32-C3, and
+any ESP32 whose owner sets `render_mode: "remote"`, pulls its picture from
+the cloud (firmware 2026.11.7 on). Such a frame counts in both pools: it is
+hardware (`frames`) the cloud draws for (`cloud_rendered_frames`, the count
+reads `frames.settings->>'render_mode'`). The switch is the count check
+(the settings route, behind the same account lock as virtual frames), the
+floor holds on every later push, and a pull reuses the last picture inside
+the floor unless something changed. Same as virtual frames: not metered.
+
+Still open: the Pico, which cannot link to the cloud at all (no hub client in
+its firmware, `docs/convergence-todo.md` §3).
 
 Direction comes from Airbnb's "Tracking the money" post
 (medium.com/airbnb-engineering/tracking-the-money-scaling-financial-reporting-at-airbnb-6d742b80f040).
@@ -1168,9 +1203,12 @@ Standing decisions from building them, which the open work must respect:
   ignores them.
 - **The nightly job reports and never repairs.** Books that disagree with
   themselves need a human.
-- **Self-serve plan purchase is gated off** (`FRAMEOS_CLOUD_PLANS_SELF_SERVE`,
-  default false) until 3b: subscribing accrues a receivable nobody can
-  settle. Downgrading to the free plan is never gated.
+- **A plan bought at checkout is billed by the provider, not by the nightly
+  cycle** (`subscriptions.provider`). Its period opens when the provider
+  reports the payment, at what was collected net of tax, and the charge and
+  the payment post together, so nothing waits on the receivable. A plan an
+  operator sets by hand still accrues a receivable nobody can settle; that
+  is why there is no self-serve path onto one. Cancelling is never gated.
 - **Entitlements take the larger of the plan and the deployment's env
   floor**, so an operator's raised limit is never lowered by a plan row.
 - **`credential_source: "platform"` has no producer yet**, so nothing is
@@ -1193,41 +1231,41 @@ Standing decisions from building them, which the open work must respect:
 
 ### Phase 3b — the provider half
 
-**Paused 2026-09-03 until there are users to invoice.** Then: §8.15
-(entity), §8.7 (provider — Stripe and one merchant-of-record alternative
-are the candidates), and this list in order. The requirement stands: postpay
-needs a payment method stored and chargeable later, not a one-off hosted
-checkout (§3.2).
+**Plans, the provider-neutral half: built 2026-11-05** ([`billing.md`](billing.md),
+migration 0073): the `provider_*` tables, `subscriptions.provider`, the
+ledger's provider-billed periods (`provider-subscriptions.ts`), the
+`payment.received` / `payment.refunded` recipes (`rules/payment.ts`), the
+plan cards' buy/switch/cancel actions, the legal pages and the public price
+list. A Creem adapter was built and run against Creem's test mode, then
+removed on 2026-11-07: Creem's review demanded its moderation API on every
+prompt that reaches the on-device image app, which is not ours to police.
+**The Stripe adapter: built 2026-11-07** ([`billing.md`](billing.md),
+migration 0075) and run end to end against Stripe's test mode. Stripe Tax
+adds the VAT and we remit it: `payment.received` / `payment.refunded` v2
+carry a `taxMicros` leg to `liability:sales_tax` when
+`provider_payments.tax_remitted_by = 'us'`. Each charge's fee posts as
+`payment.fee` (`Dr expense:psp_fees / Cr asset:psp:main`) from its balance
+transaction, converted from the euro balance at Stripe's own rate; a lost
+dispute posts as a refund plus its fee.
 
-- [ ] **Which legal entity invoices, and from where** (§8.15): the entity on
-      the invoice, its VAT registration, whether invoices must be numbered
-      gaplessly by law (`invoices.number` is designed for that but nothing
-      assigns it), and whether B2C sales to other EU countries trigger OSS.
-- [ ] Choose the provider; SDK + env plumbing; webhook endpoint
-      `app/api/webhooks/<provider>/route.ts` (signature check, provider
-      event id as idempotency key, raw-body handling).
-- [ ] Migration `0048`: `invoices` (period bounds, sequential number,
-      status, provider payment ref) and the stored-payment-method reference.
-      The invoice holds no amount the ledger does not — §3.2 says why.
-- [ ] `source: "platform"` in `resolveAiCredentials` — the thing that makes
-      any of this billable at all, and still gated by §5.1 and §5.3 before
-      it is reached. The scene converter stays out of it: it is an absorbed
-      surface (§5), so it books pure cost when the billable key reaches it,
-      and neither the cap nor the switch may turn a free surface into a 402.
-- [ ] Month-close run in the nightly job: cut invoices over the period's
-      receivable, skip balances under the minimum threshold (§3.2), charge
-      the stored method.
-- [ ] Recipes: `invoice_payment`, `psp_fee`, `receivable_writeoff`, and
-      `promo_grant` against the receivable (§3.4).
-- [ ] Dunning: retry schedule, the age at which AI switches off for an
-      unpaid balance, the emails. Reads the receivable, writes none of it.
-- [ ] Golden-file test: turns → cap refusal → month close → invoice →
-      payment → fee → an unpaid month → write-off.
-- [ ] Legal/pricing page copy: that AI is billed monthly in arrears, that
-      a plan is billed in advance for the coming period (§0), what the
-      margin is, what the cap is, and how to turn it off. Plus §8.8's
-      billing-records retention line, which must land before the first
-      invoice, not after — and §8.15's answer (which entity invoices).
+**Metered AI: still open**, and still paused until there are users to
+invoice. A hosted checkout sells a subscription; charging a month of usage
+in arrears needs a stored payment method (§3.2), which Stripe has.
+
+- [x] The Stripe adapter (2026-11-07).
+- [ ] Decide how metered AI is collected, then: `source: "platform"` in
+      `resolveAiCredentials` (the thing that makes a turn billable, still
+      gated by §5.1 and §5.3; the scene converter stays an absorbed
+      surface), the month-close run, and dunning.
+- [x] `psp_fee` per payment, from the charge's balance transaction.
+- [ ] The payout reconciliation: what Stripe paid out against
+      `asset:psp:main` (conversion differences, Stripe Billing's and Stripe
+      Tax's monthly fees, which come on Stripe's own invoice).
+- [ ] `receivable_writeoff` and `promo_grant` against the receivable
+      (§3.4), for the receivables an operator-set plan or metered AI leave.
+- [x] Disputes: recorded, an alert on opening; a lost one is booked as a
+      refund, and the dispute fee as a cost.
+- [ ] A yearly price (§0.1).
 
 ### Phase 6 — later, enabled by the above, not designed in detail here
 - [ ] Bank/PSP reconciliation: import the provider's payout reports + bank
@@ -1422,9 +1460,13 @@ question that will be asked again.
     - **B2B reverse charge.** A customer with a valid VAT number in
       another member state is invoiced net with the reverse-charge
       wording; needs a VAT-number field and a VIES check.
-    Until these are answered 3b's invoice has no header, and the recipes
-    in §3.2 have no tax leg. Parked with §8.7 (2026-09-03) until there are
-    users to invoice; decide then, and write the answers into this item.
+    For plans these are answered by Stripe (2026-11-07): Stripe Tax places
+    the buyer by the billing address checkout collects, applies OSS once it
+    is registered, and takes a VAT number at checkout for the reverse
+    charge (Stripe validates its format; VIES is not checked); Stripe issues
+    the invoice in Raaven BV's name, and the payment recipes have the tax
+    leg. Still open for metered AI's own invoice, if it is ever cut outside
+    Stripe.
 
 ---
 

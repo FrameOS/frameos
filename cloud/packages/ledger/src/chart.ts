@@ -10,7 +10,7 @@ import {
 // The chart of accounts, as codes. Codes — not ids — are what posting rules
 // name, what reports group by and what survives in the books after the
 // customer behind a subaccount is erased. The system accounts below are
-// seeded by migration 0042; the per-customer ones are created on first touch
+// seeded by migrations 0042 and 0075; the per-customer ones are created on first touch
 // by ensureLedgerAccount.
 export const systemAccountCodes = {
   accruedOpenai: "liability:accrued:openai",
@@ -25,6 +25,10 @@ export const systemAccountCodes = {
   refundsPayable: "liability:refunds_payable",
   revenueAiUsage: "revenue:ai_usage",
   revenueSubscriptions: "revenue:subscriptions",
+  // Sales tax (VAT) collected from customers and owed to a tax authority.
+  // Only a provider that is not a merchant of record leaves it with us
+  // (Stripe, migration 0075); a merchant of record remits it itself.
+  salesTax: "liability:sales_tax",
 } as const;
 
 // A customer's prepaid credit balance is not a separate commodity: it is the
@@ -68,6 +72,7 @@ const systemDefinitions: Record<string, LedgerAccountDefinition> = {
   [systemAccountCodes.refundsPayable]: definition("liability", "liabilities"),
   [systemAccountCodes.revenueAiUsage]: definition("revenue", "revenue"),
   [systemAccountCodes.revenueSubscriptions]: definition("revenue", "revenue"),
+  [systemAccountCodes.salesTax]: definition("liability", "liabilities"),
 };
 
 const customerPrefixes: Record<string, Omit<LedgerAccountDefinition, "ownerAccountId">> =

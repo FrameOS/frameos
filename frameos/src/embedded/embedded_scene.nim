@@ -7,6 +7,7 @@
 
 import std/[json, strformat, strutils]
 import pixie
+import frameos/utils/qr
 import frameos/utils/status_screen
 
 # Fallback-scene parameters: the backend firmware build extracts these from
@@ -52,10 +53,42 @@ proc str(key: string): string =
 proc flag(key: string): bool =
   if statusInfo.isNil: false else: statusInfo{key}.getBool(false)
 
+# The setup hotspot's join code, as the Pi's hotspot scene draws it
+# (system/wifiHotspot): a phone's camera joins the network from it, with no
+# password to type. Made once per network and size.
+var
+  hotspotQr: Image = nil
+  hotspotQrKey = ""
+
+proc wifiJoinCode(ssid, pass: string): string =
+  ## `WIFI:T:WPA;S:…;P:…;;`, with `\ ; , : "` escaped.
+  proc esc(text: string): string =
+    for c in text:
+      if c in {'\\', ';', ',', ':', '"'}: result.add '\\'
+      result.add c
+  "WIFI:T:WPA;S:" & esc(ssid) & ";P:" & esc(pass) & ";;"
+
+proc hotspotQrImage(canvas: Image; code: string): Image =
+  ## A third of the shorter edge in whole modules, as the index scene's link
+  ## code: sharp, and never resized by the status screen.
+  let target = max(96, int(min(canvas.width, canvas.height).float * 0.34))
+  let key = code & ":" & $target
+  if hotspotQr.isNil or hotspotQrKey != key:
+    try:
+      let qr = qrEncode(code)
+      let modules = qr.size + 4
+      hotspotQr = qr.qrImage(max(2, target div modules) * modules, padding = 2)
+      hotspotQrKey = key
+    except CatchableError:
+      hotspotQr = nil
+      hotspotQrKey = ""
+  hotspotQr
+
 proc buildStatusScreen*(canvas: Image; frameName: string): StatusScreen =
   ## Keys read from the pushed status: name, panel, ip, portal (bool),
   ## portal_ssid, portal_ip, cloud_url, cloud_state (none|pending|enrolled|
-  ## error), cloud_connected (bool), backend_url, version.
+  ## error), cloud_connected (bool), backend_url, version, setup_on_screen
+  ## (bool: a touch LCD, set up from the settings panel, no portal).
   let name = if str("name").len > 0: str("name") elif frameName.len > 0: frameName else: "Unnamed frame"
   let panel = if str("panel").len > 0: str("panel") else: "unknown panel"
   let ip = str("ip")
@@ -65,6 +98,7 @@ proc buildStatusScreen*(canvas: Image; frameName: string): StatusScreen =
   let cloudConnected = flag("cloud_connected")
   let backendUrl = str("backend_url")
   let version = str("version")
+  let onScreen = flag("setup_on_screen")
 
   var cloudHost = cloudUrl
   for prefix in ["https://", "http://"]:
@@ -95,8 +129,12 @@ proc buildStatusScreen*(canvas: Image; frameName: string): StatusScreen =
     result.rows.add(("Frame", &"http://{ip}/"))
   result.footer = if version.len > 0: "FrameOS v" & version else: "FrameOS"
   result.status =
-    if portal:
-      "Not on Wi-Fi. Join the setup hotspot and open http://" &
+    if onScreen and ip.len == 0:
+      "Not on Wi-Fi. Swipe down from the top of the screen to connect."
+    elif portal and str("portal_pass").len > 0:
+      "Not on Wi-Fi. Scan the code with a phone to join its setup hotspot."
+    elif portal:
+      "Not on Wi-Fi. Join the setup hotspot and open http://"  &
         (if str("portal_ip").len > 0: str("portal_ip") else: "192.168.4.1") & "/ to set up."
     elif cloudUrl.len > 0 and cloudState == "enrolled" and cloudConnected:
       "Connected to FrameOS Cloud. Add a scene from the workspace to get started."
@@ -106,7 +144,19 @@ proc buildStatusScreen*(canvas: Image; frameName: string): StatusScreen =
       "FrameOS Cloud enrollment failed. Provision a new claim token."
     elif backendUrl.len > 0: "Waiting for the backend to deploy a scene."
     else: "No scenes installed yet."
+  if portal and str("portal_ssid").len > 0:
+    let pass = str("portal_pass")
+    let ip = if str("portal_ip").len > 0: str("portal_ip") else: "192.168.4.1"
+    # The network in the title: the aside's large code font is for a six-letter
+    # link code, and a network's name in it wraps in a landscape column.
+    result.aside.title = "Join the Wi-Fi “" & str("portal_ssid") & "”"
+    # Short: a long hint takes the room the code needs on a landscape panel.
+    result.aside.hint = (if pass.len > 0: "Password " & pass & " · then " else: "Then ") & "http://" & ip & "/"
+    if pass.len > 0:
+      result.aside.qr = hotspotQrImage(canvas, wifiJoinCode(str("portal_ssid"), pass))
   result.notes = @["No scenes installed yet."]
+  if onScreen:
+    result.notes.add("Swipe down from the top for the frame's settings.")
   if frameosSceneName.len > 0 and frameosSceneName != "default":
     result.notes.add("Built-in scene: " & frameosSceneName)
 

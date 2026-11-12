@@ -148,24 +148,6 @@
       "checksums": {
         "sha1": "7c431abc28bbc3e411c385000d7dadf3549af240"
       }
-    },
-    "pixie": {
-      "version": "6.1.0",
-      "vcsRevision": "930bee304df0bfd73849f73a64c4d5c20ef2e3c5",
-      "url": "https://github.com/FrameOS/pixie",
-      "downloadMethod": "git",
-      "dependencies": [
-        "vmath",
-        "chroma",
-        "zippy",
-        "flatty",
-        "nimsimd",
-        "bumpy",
-        "crunchy"
-      ],
-      "checksums": {
-        "sha1": "e64efd9c306e5144b67e2e80981ce57cf3db03ec"
-      }
     }
   },
   "tasks": {}

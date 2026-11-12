@@ -74,51 +74,92 @@ jobs:
             echo "Signup request succeeded with status code $HTTP_CODE"
           fi
 
-  esp32_firmware_image:
-    name: Build and boot ESP32 firmware image
+  # The ONLY writer of the esp32-ci layer cache, and it runs on pushes to
+  # main alone. A pull request runs the workflow file from its own branch,
+  # so any job a pull request can reach must not hold `packages: write`:
+  # with it, a same-repo PR could rewrite a step and push layers that the
+  # next main build — and from there the release firmware and runtime image
+  # — would silently reuse. Keeping the write here, behind the event, closes
+  # that; the package can stay private, nothing needs it public. The build
+  # itself is the one the firmware job below runs, minus loading the image:
+  # on a main push both run side by side, this one refreshing the cache for
+  # the next run, the firmware job reading the previous one.
+  seed_esp32_cache:
+    name: Refresh the esp32-ci layer cache
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      # Token auth, same as the release workflow: OIDC would spare us the
-      # secret, but it needs a trust relationship configured in the Depot
-      # project first (until then the exchange dies with permission_denied).
-      # Secrets are absent on forked PRs, so those fall back to a plain
-      # docker build below.
-      DEPOT_AVAILABLE: ${{ secrets.DEPOT_TOKEN != '' && 'true' || 'false' }}
+      packages: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Depot CLI
-        if: env.DEPOT_AVAILABLE == 'true'
-        uses: depot/setup-action@v1
+      - uses: docker/setup-buildx-action@v3
 
-      # Depot keeps a persistent layer cache per project, so the esp32-ci
-      # target (ESP-IDF toolchain + Nim) only rebuilds layers that changed.
-      # load: true pulls the image into the local Docker daemon for the
-      # `docker run` below.
-      #
-      # Keep the cache-relevant inputs (project, context, target, build-args,
-      # platforms) identical to the esp32-ci build in docker-publish-multi.yml
-      # — this job runs on every push to main and is what warms the release
-      # build's cache.
-      - name: Build ESP32 CI Docker image (Depot)
-        if: env.DEPOT_AVAILABLE == 'true'
-        uses: depot/build-push-action@v1
+      - name: Login to GHCR
+        uses: docker/login-action@v3
         with:
-          project: rsbh2wrlkj
-          token: ${{ secrets.DEPOT_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same context and target as every reader of this tag (the firmware
+      # job below, the release's three esp32-ci builds), so what is written
+      # here is what they hit. mode=max keeps every stage's layers, the
+      # toolchain ones included; a run with no cache yet builds cold and
+      # seeds it.
+      - name: Build ESP32 CI Docker image and export its layers
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: esp32-ci
+          push: false
+          load: false
+          cache-from: type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci
+          cache-to: type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci,mode=max
+
+  esp32_firmware_image:
+    name: Build and boot ESP32 firmware image
+    runs-on: ubuntu-latest
+    # Read-only on the package, on every event: this job is reachable from
+    # a pull request (see seed_esp32_cache for why that rules out write).
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Reads a private package: a same-repo pull request's token can, a
+      # fork's read-only token can too once the package is linked to the
+      # repository, and a login that gets nothing simply means a cold build.
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The esp32-ci target (ESP-IDF for both chips, QEMU, Nim, the nimble
+      # packages, emsdk, the pnpm store) comes out of the registry layer
+      # cache seed_esp32_cache keeps on GHCR; the release's three esp32-ci
+      # builds read the same tag. The per-commit tail (the source COPYs and
+      # the steps after them) is built here and stored nowhere. A missing or
+      # unreadable cache tag is a warning and a cold build, not a failure.
+      # load: true puts the image into the local Docker daemon for the
+      # `docker run` below.
+      - name: Build ESP32 CI Docker image
+        uses: docker/build-push-action@v6
+        with:
           context: .
           target: esp32-ci
           tags: frameos-esp32-ci
           load: true
           push: false
-
-      - name: Build ESP32 CI Docker image (forked PR fallback)
-        if: env.DEPOT_AVAILABLE != 'true'
-        run: |
-          docker build --target esp32-ci -t frameos-esp32-ci .
+          cache-from: type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci
 
       # The step below builds the firmware three times (8 MB, QEMU, 32 MB).
       # They share a nimcache but not a single object file, and ESP-IDF ships
@@ -183,6 +224,29 @@ jobs:
                 embedded/esp32/main/fos_voice_binding.c embedded/esp32/main/tests/test_fos_voice_binding.c \
                 -lm -o /tmp/test_fos_voice_binding
               /tmp/test_fos_voice_binding
+              # The per-scene store on the state partition: pure C and cJSON.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                -I"$IDF_PATH/components/json/cJSON" "$IDF_PATH/components/json/cJSON/cJSON.c" \
+                embedded/esp32/main/fos_json_guard.c embedded/esp32/main/fos_scene_store.c \
+                embedded/esp32/main/tests/test_fos_scene_store.c \
+                -lm -o /tmp/test_fos_scene_store
+              /tmp/test_fos_scene_store
+              # The SPIFFS garbage collection order and the scene store split,
+              # replayed on the SPIFFS that ESP-IDF ships (fos_spiffs_gc.c, a
+              # 20-scene set pushed over itself on a 1 MB /state). The backend
+              # pytest runner skips it where no IDF checkout is around.
+              mkdir -p /tmp/spiffs_obj
+              for f in spiffs_cache spiffs_check spiffs_gc spiffs_hydrogen spiffs_nucleus; do \
+                cc -std=c11 -O2 -w -Iembedded/esp32/main -Iembedded/esp32/main/tests/spiffs_shim \
+                  -I"$IDF_PATH/components/spiffs/include" -I"$IDF_PATH/components/spiffs/spiffs/src" \
+                  -c "$IDF_PATH/components/spiffs/spiffs/src/$f.c" -o /tmp/spiffs_obj/$f.o || exit 1; done
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main -Iembedded/esp32/main/tests/spiffs_shim \
+                -I"$IDF_PATH/components/spiffs/include" -I"$IDF_PATH/components/spiffs/spiffs/src" \
+                -D__real_SPIFFS_gc=SPIFFS_gc \
+                embedded/esp32/main/fos_spiffs_gc.c embedded/esp32/main/fos_spiffs_footprint.c \
+                embedded/esp32/main/tests/test_fos_spiffs_gc.c /tmp/spiffs_obj/*.o \
+                -o /tmp/test_fos_spiffs_gc
+              /tmp/test_fos_spiffs_gc
               # The JSON depth pre-scan that guards the 8-10 KB parser tasks.
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
                 embedded/esp32/main/fos_json_guard.c embedded/esp32/main/tests/test_fos_json_guard.c \
@@ -243,6 +307,16 @@ jobs:
                 embedded/esp32/main/fos_animation.c embedded/esp32/main/tests/test_fos_animation.c \
                 -o /tmp/test_fos_animation
               /tmp/test_fos_animation
+              # Which scene a frame starts on: never a layout, pure.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/fos_boot_scene.c embedded/esp32/main/tests/test_fos_boot_scene.c \
+                -o /tmp/test_fos_boot_scene
+              /tmp/test_fos_boot_scene
+              # When an e-paper panel takes a partial update, pure.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/components/frameos_display/include \
+                embedded/esp32/components/frameos_display/fos_partial_refresh.c embedded/esp32/main/tests/test_fos_partial_refresh.c \
+                -o /tmp/test_fos_partial_refresh
+              /tmp/test_fos_partial_refresh
               # The charger register decode, the RTC conversions, the fuel gauge decode
               # and the climate sensor decode, pure.
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
@@ -260,6 +334,17 @@ jobs:
                 embedded/esp32/main/fos_touch.c embedded/esp32/main/tests/test_fos_touch.c \
                 -o /tmp/test_fos_touch
               /tmp/test_fos_touch
+              # The render pull of a frame rendered on the server (docs/server-rendering.md), pure.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/fos_render_pull.c embedded/esp32/main/tests/test_fos_render_pull.c \
+                -o /tmp/test_fos_render_pull
+              /tmp/test_fos_render_pull
+              # What a frame rendered on the server relays to its plane with the pull, pure.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/fos_render_relay.c embedded/esp32/main/fos_json_guard.c \
+                embedded/esp32/main/tests/test_fos_render_relay.c \
+                -o /tmp/test_fos_render_relay
+              /tmp/test_fos_render_relay
               ccache --show-stats || true
             '
           # The container writes as root; actions/cache runs as the runner user.

@@ -271,6 +271,19 @@ the same `pnpm deploy:prod` a person runs — there is no second deploy path to
 keep in sync — so everything above still applies, including that a release
 which never answers `/healthz` is a failed deploy rather than an outage.
 
+Before migrations and before anything is switched, `frameos-cloud-update` asks
+the new frame hub bundle to write, read and delete a test object in R2
+(`dist/index.cjs check-object-store`), with the R2 keys from `frame-hub.env`
+and under the hub unit's sandbox. If that fails three times the deploy stops
+and production is untouched. `--rollback` skips it, because a rollback must
+work while R2 is down.
+
+A merge that `verify` refuses never reaches this job, so its own report cannot
+run; the separate `report-undeployed` job sends a `cloud ops alert` event to
+PostHog instead. The frame hub raises the same event when it cannot save a
+picture or handle a frame's message (at most once per kind per 15 minutes),
+and the PostHog workflow listening for it posts to Discord.
+
 Which merges count is the workflow's `paths:` filter, and it mirrors the
 input closure of `turbo run build --filter=@frameos-cloud/auth-web` — the
 shared `frontend/`, the frames SPA in `cloud-frontend/`, `repo/`, and
@@ -493,9 +506,28 @@ SESSION_SECRET=…         # MUST equal auth-web's, or browser sockets get 401
 FRAME_HUB_PORT=3100
 ```
 
-Optional, both with working defaults:
+Optional, all with working defaults:
 
 ```text
+NEXT_PUBLIC_POSTHOG_KEY=…    # auth-web's, and public. Without it the hub raises
+                             # no `cloud ops alert` events (src/alerts.ts).
+FRAMEOS_CLOUD_ENCRYPTION_KEY=…  # auth-web's. Only for virtual frames: the hub
+                             # renders their scenes, and with the key it can
+                             # hand them the service keys their owner granted
+                             # (the account's sealed OpenAI / Unsplash / Home
+                             # Assistant settings). Without it they render
+                             # keyless and the hub logs
+                             # virtual.service_settings_unavailable.
+FRAMEOS_WASM_DIR=…           # where the wasm runtime is. Found next to
+                             # auth-web by default
+                             # (…/cloud/apps/auth-web/public/frameos-wasm,
+                             # resolved through the /opt/frameos-cloud
+                             # symlink, so a hub that outlives a deploy
+                             # renders with the new release's runtime).
+FRAMEOS_CLOUD_RENDERED_MIN_INTERVAL_SECONDS=300  # a virtual frame's refresh
+                             # floor. Set it to the same value as auth-web's
+                             # when you change it: auth-web refuses settings
+                             # below it, the hub paces renders by it.
 FRAME_HUB_ALLOWED_ORIGINS=…  # browser WS upgrades; defaults to the three app
                              # origins (FRAMEOS_CLOUD/ACCOUNT/SCENES_APP_URL).
                              # WebSocket handshakes bypass CORS, so this is
@@ -511,9 +543,17 @@ Behind nginx that must count the proxy hops, otherwise every upgrade in the
 fleet collapses onto the proxy's own address and the whole fleet shares one
 budget.
 
-(`FRAMEOS_CLOUD_ENCRYPTION_KEY` is not needed — the hub only ever compares
-hashed tokens.) Then `systemctl daemon-reload && systemctl enable --now
-frameos-cloud-frame-hub.service`.
+(`FRAMEOS_CLOUD_ENCRYPTION_KEY` is not needed for hardware — the hub only
+ever compares hashed tokens.) Then `systemctl daemon-reload && systemctl
+enable --now frameos-cloud-frame-hub.service`.
+
+The hub is also where **virtual frames** render (`docs/cloud-frames.md`
+"Virtual frames"): one worker thread per render, two at a time, each with a
+64 MB wasm heap, plus a short-lived child `node` per HTTP request a scene
+makes. That fits the unit above as it is (`ProtectSystem=strict` and
+`PrivateTmp` do not get in the way: a render writes no files). Size the box
+for it once there are many: a render is about a CPU-second, and a frame
+somebody is watching renders at most once per five minutes.
 
 Like auth-web, the hub is **single instance only**: on boot it resets the
 `connected` flag of every frame, because a lone hub owns all device sockets.
@@ -773,6 +813,27 @@ keeps working. Set `POSTMARK_SERVER_TOKEN` and `POSTMARK_FROM_EMAIL` so
 password reset emails are delivered; without them reset links are only written
 to the server log.
 
+## Paid plans
+
+Paid plans are sold through Stripe. Without its settings nothing can be
+bought: the plan cards say "Contact support" and an operator activates a
+plan by hand. [`billing.md`](billing.md) "Going live" has the Stripe side
+(tax registrations, the webhook endpoint and its API version, the
+restricted key, the retry and email settings); then:
+
+```text
+STRIPE_SECRET_KEY=rk_live_…         # a restricted key, permissions in billing.md
+STRIPE_WEBHOOK_SECRET=whsec_…       # the endpoint's signing secret
+STRIPE_MODE=live                    # must agree with the key's prefix
+FRAMEOS_SUPPORT_EMAIL=support@…     # shown in the footer and on the usage page
+FRAMEOS_PRICING_URL=…               # the public price list; defaults to https://frameos.net/pricing/
+```
+
+Then press **Sync plans** on `/admin/billing/payments`: it makes the
+prices and the portal settings at Stripe and says what is still missing.
+The nightly accounting job also asks Stripe about every subscription whose
+period has run out, in case a webhook never arrived.
+
 ## Object Storage
 
 Blobs — store scene zips, scene previews and gallery images, and the per-frame
@@ -900,12 +961,21 @@ NEXT_PUBLIC_POSTHOG_HOST=…                   # optional; defaults to
 | `cloud user signed up` | the new account id   | password signup, first Google sign-in             |
 | `store scene reported` | the reporter account | `POST /api/store/scenes/<id>/report` (new report) |
 | `photo scan matched`   | the uploader account | a photo upload a scanner matched                  |
+| `cloud plan …`         | the paying account   | a paid plan's life (`src/lib/plan-notifications.ts`, `docs/billing.md`) |
+
+The twelve plan events are `cloud plan subscribed`, `renewed`, `changed`,
+`payment received`, `downgrade scheduled`, `cancellation scheduled`,
+`cancellation withdrawn`, `ended`, `payment failed`, `refunded`,
+`dispute opened` and `dispute closed`, each sent once per change.
 
 All go to the `/capture` endpoint using the same public project key as the
 browser SDK (no extra secret required). The Discord messages for these
-("new user", "scene reported", "photo scan match") are PostHog workflows on
-the events, configured in PostHog, not in auth-web: auth-web posts to Discord
-directly nowhere, so an event without a workflow notifies nobody.
+("new user", "scene reported", "photo scan match", and "Cloud plans", which
+posts every plan event's `summary` to the reports channel) are PostHog
+workflows on the events, configured in PostHog, not in auth-web: auth-web
+posts to Discord directly nowhere, so an event without a workflow notifies
+nobody. A new plan event needs its name added to the "Cloud plans"
+workflow's trigger.
 
 **The browser SDK does not read this from the server's env file.**
 `NEXT_PUBLIC_*` values are inlined into the client bundle when `next build`

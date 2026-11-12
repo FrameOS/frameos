@@ -140,7 +140,11 @@ def load():
                 fail(f"{where}: `{flag}` must be true or false")
         if event["class"] == "device-command" and (event["listen"] or event["dispatch"]):
             fail(f"{where}: a device command is never delivered to a scene nor offered to one")
-        if event["class"] != "device-command" and not (event["listen"] or event["dispatch"]):
+        if "internal" in event and (event["internal"] is not True or event["listen"] or event["dispatch"]
+                                    or event["origins"] != ["system"]):
+            fail(f"{where}: `internal` marks the runtime's own event (a UI's timer): from `system` alone, "
+                 "neither listenable nor dispatchable")
+        if event["class"] != "device-command" and not (event["listen"] or event["dispatch"] or event.get("internal")):
             fail(f"{where}: neither listenable nor dispatchable — what is it for?")
         check_policy(where, event)
         if event.get("sceneState") is not None and event["sceneState"] not in SCENE_STATE:
@@ -165,6 +169,8 @@ def load():
                 fail(f"{where}.{fname}: filter: \"more\" folds a catalog field of a listenable event until a filter is set")
         if "synthesized" in event and (not isinstance(event["synthesized"], bool) or "driver" not in event["origins"]):
             fail(f"{where}: `synthesized` marks an event the dispatcher makes out of others; it keeps the driver origin")
+        if "wildcard" in event and (event["wildcard"] is not False or not event["listen"]):
+            fail(f"{where}: `wildcard: false` keeps a listenable event out of an app's \"*\"; there is no other value")
         alias_of = event.get("aliasOf")
         if alias_of is not None:
             target = by_name.get(alias_of)
@@ -191,7 +197,7 @@ def load():
             if "since" in schedule and not VERSION_RE.fullmatch(schedule["since"]):
                 fail(f"{where}: schedule.since must be a FrameOS version")
 
-    for section, keys in (("gestures", ("tapSlopPx", "tapMs", "doubleTapMs", "longPressMs", "swipeMinPx", "edgePx")),
+    for section, keys in (("gestures", ("tapSlopPx", "tapMs", "doubleTapMs", "longPressMs", "swipeMinPx", "edgePx", "safeModePulls", "safeModeGapMs")),
                           ("buttons", ("doublePressMs", "longPressMs"))):
         for key in keys:
             if not isinstance(doc[section].get(key), int) or doc[section][key] <= 0:
@@ -199,6 +205,8 @@ def load():
     for key, event in (("switcher", "sceneSwitcher"), ("settings", "sceneSettings")):
         if not re.fullmatch(r"system/[a-zA-Z]+", doc["scenes"].get(key, "")):
             fail(f"scenes.{key}: the built-in scene `{event}` shows, `system/<name>`")
+    if not re.fullmatch(r"system/[a-zA-Z]+", doc["scenes"].get("yield", "")):
+        fail("scenes.yield: the id a layout's scene node yields through, `system/<name>`")
     if doc["gestures"].get("directions") != ["left", "right", "up", "down"]:
         fail("gestures.directions: left, right, up, down")
     if doc["gestures"].get("edges") != ["left", "right", "top", "bottom"]:
@@ -376,6 +384,7 @@ def gen_nim(doc):
         "    endsRuntime*: bool ## the runtime does not survive it (a schedule must remember it fired)",
         "    synthesized*: bool ## made by the dispatcher out of other events (a tap, a textInput)",
         "    aliasOfIndex*: int ## the contract index of the event this one is an old name for, -1 for none",
+        "    heardByAll*: bool ## a JS app whose config.json `events` holds \"*\" hears it",
         "    linux*, esp32*, wasm*: bool",
         "",
         "const",
@@ -389,6 +398,9 @@ def gen_nim(doc):
         f"  GestureLongPressMs* = {int(doc['gestures']['longPressMs'])}",
         f"  GestureSwipeMinPx* = {int(doc['gestures']['swipeMinPx'])}",
         f"  GestureEdgePx* = {int(doc['gestures']['edgePx'])}",
+        "  ## The way out of a layout that cannot be used (docs/scene-layouts.md \"Safe mode\").",
+        f"  GestureSafeModePulls* = {int(doc['gestures']['safeModePulls'])}",
+        f"  GestureSafeModeGapMs* = {int(doc['gestures']['safeModeGapMs'])}",
         "  ## A GPIO button: a short press waits `ButtonDoublePressMs` for a second down; a hold is a `longPress` at every whole `ButtonLongPressMs`.",
         f"  ButtonDoublePressMs* = {int(doc['buttons']['doublePressMs'])}",
         f"  ButtonLongPressMs* = {int(doc['buttons']['longPressMs'])}",
@@ -402,6 +414,8 @@ def gen_nim(doc):
         f"  SceneSwitcherId* = {nim_str(doc['scenes']['switcher'])}",
         "  ## The built-in scene `sceneSettings` shows (docs/scene-settings.md).",
         f"  SceneSettingsId* = {nim_str(doc['scenes']['settings'])}",
+        "  ## The scene a layout's <yield /> stands for (docs/scene-layouts.md).",
+        f"  SceneYieldId* = {nim_str(doc['scenes']['yield'])}",
         "  ## Origins a scene opts into per custom event (`origins` on its declaration).",
         f"  CustomEventDeclarableOrigins*: set[EventOrigin] = {{{', '.join(nim_origin(o) for o in doc['customEvents'].get('declarableOrigins', []))}}}",
         "",
@@ -427,13 +441,15 @@ def gen_nim(doc):
             out.append("      synthesized: true,")
         alias_index = index_of(events, event["aliasOf"]) if event.get("aliasOf") else -1
         out.append(f"      aliasOfIndex: {alias_index},")
+        if event["listen"] and event["coalesce"] != "latest" and alias_index < 0 and event.get("wildcard", True):
+            out.append("      heardByAll: true,")
         out.append(f"      {hosts}),")
     out.append("  ]")
     out.append("")
     out.append("  CustomEventPolicy* = EventPolicy(")
     out.append("    class: ecCustom, device: edNone, listen: true, dispatch: true,")
     out.append(nim_policy(doc["customEvents"]) + ",")
-    out.append("    aliasOfIndex: -1,")
+    out.append("    aliasOfIndex: -1, heardByAll: true,")
     out.append("    " + ", ".join(f"{host}: true" for host in doc["hosts"]) + ")")
     out.append("")
     for name, lines in log_events(doc).items():
@@ -787,6 +803,8 @@ def gen_ts_frontend(doc):
     out.append(f"export const SCENE_SWITCHER_ID = '{doc['scenes']['switcher']}'")
     out.append("/** The built-in scene `sceneSettings` shows (docs/scene-settings.md). */")
     out.append(f"export const SCENE_SETTINGS_ID = '{doc['scenes']['settings']}'")
+    out.append("/** What a layout's scene node names for the scene it wraps (docs/scene-layouts.md). */")
+    out.append(f"export const SCENE_YIELD_ID = '{doc['scenes']['yield']}'")
     out.append("")
     out.append("export type EventOrigin = " + " | ".join(f"'{o}'" for o in origins))
     out.append("export type EventClass = " + " | ".join(f"'{c}'" for c in CLASSES))
@@ -916,6 +934,9 @@ def gen_ts_cloud(doc):
         "",
         f"export const customEventMaxNameLength = {int(doc['customEvents']['maxNameLength'])};",
         "",
+        "/** What a layout's scene node names for the scene it wraps: no scene of the frame. */",
+        f"export const sceneYieldId = {json.dumps(doc['scenes']['yield'])};",
+        "",
         "/** Every built-in event name. Any other name is a custom scene event. */",
         f"export const contractEventNames: readonly string[] = {ts_json([e['name'] for e in doc['events']], None)};",
         "",
@@ -948,6 +969,14 @@ def gen_ts_cloud(doc):
 def gen_py(doc):
     refused = refused_by_origin(doc)
     out = [f'"""{BANNER}"""', "", f"EVENTS_CONTRACT_VERSION = {int(doc['version'])}", ""]
+    out.append(f"# What a layout's scene node names for the scene it wraps: no scene of the frame.")
+    out.append(f"SCENE_YIELD_ID = {json.dumps(doc['scenes']['yield'])}")
+    out.append("# The scenes built into every runtime (the scene switcher, the scene")
+    out.append("# settings): in no scene list, never persisted by a device.")
+    out.append(f"SCENE_SWITCHER_ID = {json.dumps(doc['scenes']['switcher'])}")
+    out.append(f"SCENE_SETTINGS_ID = {json.dumps(doc['scenes']['settings'])}")
+    out.append("BUILT_IN_SCENE_IDS: frozenset[str] = frozenset({SCENE_SWITCHER_ID, SCENE_SETTINGS_ID})")
+    out.append("")
     out.append("# origin -> contract events it may not emit. `http:write` is the frame access")
     out.append("# key: what it is refused needs an admin session or the serverApiKey instead.")
     out.append("REFUSED_BY_ORIGIN: dict[str, frozenset[str]] = {")

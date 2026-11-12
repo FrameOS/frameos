@@ -4,7 +4,8 @@ FrameOS for ESP32-S3 microcontrollers. The firmware provisions Wi-Fi over a
 captive portal or the serial console, renders scenes **on-device** with the Nim
 runtime (pixie in PSRAM), drives Waveshare SPI e-ink panels through the same
 vendor drivers the Raspberry Pi build uses, and can alternatively run as a thin
-client fetching backend-rendered bitmaps.
+client fetching bitmaps its backend or the cloud rendered ("Rendering on the
+server" below).
 
 Reference hardware: ESP32-S3 module with 8MB flash and 8MB+ octal PSRAM.
 The default 8MB profile supports OTA updates with two 3520K app slots and a
@@ -19,9 +20,14 @@ main/                     boot orchestration + platform modules
   main.c                  app_main: config → display → wifi/portal → http → render loop
   fos_config.c            NVS config store (wifi, backend, panel, pins, intervals)
   fos_config_parse.c      the setting parsers/normalisers behind every writer (host-tested)
-  fos_wifi.c              STA connect, SoftAP portal, DNS hijack, SNTP
+  fos_wifi.c              STA connect (waited for, or in the background), SoftAP portal, DNS hijack, scan, SNTP
+  fos_frame_settings.c    the settings panel's frame page (behind its gear): the facts it shows, the Wi-Fi, rotation and scale it sets
+  fos_wifi_networks.c     the order a scan's networks are listed in there: by name (host-tested)
   fos_http.c              esp_http_server route layer (portal + /status + actions)
+  setup_page.html         the setup page (GET /), gzipped at build time by tools/gzip_setup_page.py;
+                          its values come from GET /api/setup
   fos_client.c            render loop: Nim local render or thin-client fetch → blit
+  fos_render_pull.c       the thin-client pull's URL, ETag and answers: backend or cloud (host-tested)
   fos_ota.c               signed release OTA (manifest + streaming verify) when an OTA partition exists
   fos_cloud.c             cloud-managed frames: claim-token enrollment + management WS
   fos_url_guard.c         provider URL rules: local-host exception for plain http/ws, ws_url
@@ -33,9 +39,11 @@ main/                     boot orchestration + platform modules
   fos_sscanf.c            sscanf for the linker's --wrap: cJSON's "%lg" read-back as strtod, so
                           newlib's floating-point scanf is never linked (host-tested)
   fos_settings.c          backend/cloud settings pull (TLS pair, admin login, service keys, schedule)
-  fos_scenes.c            /state scene store: combined payload, per-scene split, OOM-restart mark, wipe
+  fos_scenes.c            /state scene store: a whole set as changes, combined payload, per-scene split, OOM-restart mark, wipe
+  fos_slot_cache.c        the scene files read last, kept in PSRAM so a switch skips the SPIFFS lookup (host-tested)
   fos_scene_state.c       scene state across deep sleep: one JSON file per scene under /state (host-tested)
-  fos_commands.c          the backend's command queue: pulled once per pass and on a nudge, acked by id
+  fos_commands.c          the backend's command queue: pulled once per pass and on a nudge, acked by id;
+                          fetched on the backend link task and run on the render task (fos_client.c)
   fos_backend_http.c      the one HTTP client for the small pulls and posts (settings, scenes, commands, tz, OTA manifest)
   fos_schedule.c          schedule evaluation; fos_schedule_catchup.h its catch-up window (host-tested)
   fos_events.c            the ONE routing function for scene events (fos_events_dispatch): every
@@ -59,7 +67,8 @@ main/                     boot orchestration + platform modules
   fos_buttons.c           GPIO button map → `gpio` edges (origin `driver`, via fos_events.c)
   fos_battery.c           battery ADC sampling; fos_battery_filter.c its outlier filter
   fos_power.c             deep sleep, wake-check render skip, VBUS truth
-  fos_animation.c         animation mode: a scene below a 1 s interval on an LCD, paced in µs (host-tested)
+  fos_animation.c         animation mode: a scene below a 1 s interval on an LCD, paced in µs; the
+                          render task's small rules (input hold, push gives way, backend link) (host-tested)
   fos_wake.c              wake scheduling (next render / schedule event)
   fos_tz.c                IANA zone → POSIX TZ rule
   fos_defaults.h          compile-time defaults of the generic image (NVS wins)
@@ -68,7 +77,9 @@ components/
                           every root Waveshare EPD_*.c compiled in, with a
                           runtime table from generate_panel_table.py picking
                           the configured panel (see "Every supported panel
-                          driver is compiled into each firmware image")
+                          driver is compiled into each firmware image");
+                          fos_refresh_queue.c the pictures owed to the full
+                          refresh task (host-tested)
   frameos_nim/            the FrameOS Nim runtime compiled to C (see build_nim.sh);
                           builds a stub when nimcache/ is absent. fos_rows.c shares a
                           pixel loop's rows with a helper on the other core (resample.nim)
@@ -82,7 +93,8 @@ build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcac
 main/tests/               host tests for the IDF-free modules (plain `cc`, no IDF; each file's
                           header carries its command line). The netguard, local network access code
                           (test_esp32_lan_access.py: fos_lan_access + fos_panel_draw), SD probe, board,
-                          power, wake, battery-filter, version, OTA download, LCD splash and loading mark
+                          power, wake, battery-filter, version, Wi-Fi network order, OTA download, LCD splash and loading mark,
+                          slot cache, refresh queue
                           (lcd_loading.c) and scene-event (contract table +
                           fos_events.c dispatch) tests run from the backend's
                           pytest suite (backend/app/tasks/tests/test_esp32_*.py, which also
@@ -90,7 +102,7 @@ main/tests/               host tests for the IDF-free modules (plain `cc`, no ID
                           twin: the C3 thin client links the stub, and only a release builds
                           it); the contract
                           walker, JSON guard, sscanf, upload limits, assets-path, URL guard, minisig,
-                          config-parse, schedule catch-up and console-line tests run in the ESP32 job of
+                          config-parse, schedule catch-up, console-line and render-pull tests run in the ESP32 job of
                           .github/workflows/e2e-docker.yml. Nothing else runs them, so a new
                           host test is not a test until it is wired into one of the two.
 ```
@@ -211,6 +223,19 @@ for the two Spectra boards most of the bench work runs on:
   key (the console's empty-value convention covers it now).
 - **PhotoPainter 7.3"** — 8 MB PSRAM, PMIC power-up, TF socket, and a KEY
   button next to BOOT (`0:BOOT`, `4:KEY1` in the preset's `gpio_buttons`).
+  The cell has no divider to an ADC pin: the AXP2101 PMIC (0x34 on the
+  SDA47/SCL48 bus, the one that switches EPD_VCC) is also its fuel gauge.
+  `fos_gauge.c` reads it as it reads the Sticky's BQ27220 — VBAT (REG34/35),
+  the gauge's state of charge (REG A4), VBUS-good and the charge state
+  (REG00/01) — so the metrics carry `batteryMillivolts` / `batteryPercent`
+  and `usbPower` / `charging`, and the frame deep-sleeps on the cell and
+  stays awake on USB. The chip can boot with its gauge, battery detection
+  and VBAT ADC off; the first read switches the three on (REG18 bit 3,
+  REG68 bit 0, REG30 bit 0), after checking the chip id (0x4A) so nothing
+  else at 0x34 gets the writes. The console's `i2c` prints the registers
+  raw (`axp2101: reg00=… regA4=…`). The gauge learns
+  the cell over its first few charge cycles, so the percentage is rough
+  until then; it reports no current (`current_ma` 0).
 - **Seeed reTerminal E-series (E1001/E1002/E1003/E1004)** — the TF socket shares
   the panel's SPI bus: `assets_sd_pins` names the panel's SCK7/MOSI9, so
   `fos_assets_sd.c` joins the display's bus instead of opening SPI3
@@ -246,6 +271,11 @@ for the two Spectra boards most of the bench work runs on:
 | `seeed_reterminal_e1003` | S3 | EPD_10in3 10.3" sixteen greys (IT8951, E1003 tuning) | reTerminal E1003, 32MB flash, 8MB PSRAM — renders on-device on an 8-bit luma canvas (2.5 MiB); the IT8951 answers on MISO GPIO8 (`dc` slot), panel power GPIO11 (`pwr`), controller power GPIO21 (`cs2`); battery GPIO1 ÷2, switch GPIO40; TF socket on the panel bus (power 39); green LED GPIO16 (lit low); I2C 19/20 with the clock, the SHT40, the charger and the GT911 touch panel (INT 2, reset 48); PDM mic 42/41/38; deep-sleeps on battery |
 | `seeed_reterminal_e1004` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | reTerminal E1004, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas; TF socket as the E1001/E1002; green LED GPIO48 (lit high); I2C 19/20 carries the clock, the sensor AND the charger (39/40 is its J2 header); no microphone |
 | `elecrow_crowpanel_5in79` | S3 | EPD_5in79 5.79" 4-gray | CrowPanel, dual SSD1683 |
+| `seeed_xiao_ee02` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | XIAO ePaper Display Board EE02, a XIAO ESP32-S3 Plus (16MB flash, 8MB PSRAM); SCK7/MOSI9, CS44, second CS41, DC10, RST38, BUSY4, panel power GPIO43; keys GPIO2/3/5; battery GPIO1 ÷2, switch GPIO6. Unverified on hardware |
+| `seeed_xiao_ee03` | S3 | EPD_10in3 10.3" sixteen greys (IT8951, E1003 tuning) | XIAO ePaper Display Board EE03; the EE02's bus with MISO GPIO8 in the `dc` slot and no second CS; SHT40 on I2C 42/41 for the panel temperature. Unverified on hardware |
+| `seeed_xiao_ee04` | S3 | EPD_7in5_V2 by default | XIAO ePaper Display Board EE04, a carrier for 24-pin panels and the 7.3" Spectra on its 50-pin socket: the panel is yours to choose (`set panel` after `set hardware`). Unverified on hardware |
+| `seeed_xiao_ee05` | S3 | EPD_7in5_V2 by default | XIAO ePaper Display Board EE05, 24-pin panels only, chosen as on the EE04; KEY3 GPIO8, battery switch GPIO39. Unverified on hardware |
+| `seeed_xiao_epaper_7in5` | C3 | EPD_7in5_V2 7.5" mono | XIAO 7.5" ePaper Panel, thin client; SCK8/MOSI10, CS3, DC5, RST2, BUSY4; BOOT GPIO9; no battery sense |
 | `seeed_sensecap_indicator_d1` | S3 | LCD_ST7701S_480x480 4" IPS LCD (RGB, 16-bit colour) | SenseCAP Indicator D1/D1S/D1L/D1Pro, 8MB flash, 8MB PSRAM (renders on-device); the LCD's wiring is the driver's board table, no EPD pins; top button GPIO38 (pressed: the screen off or on, twice: the scene switcher; a swipe in from the left or right edge: `back` or `forward`, up from the bottom: the scene switcher, down from the top: the scene's settings); FT6336U touch on the LCD's I2C 39/40, polled; the TF socket, buzzer and sensors are the RP2040's |
 
 - **Seeed reTerminal Sticky** — an ESP32-S3R8 (8 MB PSRAM, 32 MB flash), so
@@ -305,22 +335,27 @@ for the two Spectra boards most of the bench work runs on:
   the `dc` pin slot is its **MISO** (`FOS_PANEL_BUS_SPI_READ`; the E1003's
   is GPIO8, the TF socket's line), `pwr` the panel's power switch (GPIO11)
   and `cs2` the controller's (GPIO21, which keeps the S3 heartbeat LED off
-  it); HRDY is the busy pin, and the bus runs at 20 MHz for this panel
-  (FastEPD's clock for the E1003; the write-only panels keep 8 MHz). The
+  it); HRDY is the busy pin, and the bus writes at 20 MHz for this panel
+  (FastEPD's clock for the E1003; the write-only panels keep 8 MHz) and reads
+  at 4 MHz, because MISO comes through the GPIO matrix and at 20 MHz the words
+  came back scrambled. The
   first refresh of a boot resets the controller, reads its info (a panel
   that is not 1872×1404 fails the init with the size it reported) and
   writes VCOM only when the controller holds another value (it tries the
   setter Waveshare's examples use, then Seeed's, and reads back). Between
   refreshes the controller waits in **standby, which keeps its picture**,
-  so a refresh wakes it, sends only the rows whose 64-bit digest changed
-  (4-bit big-endian loads straight from the packed buffer, four rows to a
-  DMA transfer, runs of changed rows merged over gaps of two), runs GC16
-  over the band they span and waits for `LUTAFSR` to clear before standby;
-  a frame with no changed row is no refresh at all. A whole frame is 1.25 MiB
-  on the wire, about half a second; a clock's digits, a few milliseconds. A
-  failed step, a clear (the INIT waveform) or a boot sends the next picture
-  whole. The console prints `it8951: N of 1404 rows up in … ms, GC16 over
-  rows a-b in … ms` per refresh. The
+  so a refresh wakes it, sends only the tiles (32x8 pixels) whose digest
+  changed, as up to three rectangles (4-bit big-endian loads straight from
+  the packed buffer, a few rows to a DMA transfer), and waits for `LUTAFSR`
+  to clear before standby; a frame with nothing changed is no refresh at all.
+  A whole frame is 1.25 MiB on the wire, about 0.65 s; a clock's digits, a few
+  milliseconds. A failed step, a clear (the INIT waveform) or a boot sends the
+  next picture whole. A new scene runs GC16 over the whole panel and a change
+  in the same scene goes as a partial update, while someone taps one DU over
+  all of it with greys as a halftone and their real greys 2.5 s later
+  (docs/realtime-rendering.md, "Partial refresh on e-paper"). The console
+  prints `it8951: N rect(s) up in … ms, GC16 in … ms` or `it8951: partial[
+  fast], N rect(s) (G grey) up in … ms, waveform … ms` per refresh. The
   preset picks the E1003's variant: VCOM -1.40 V, columns that run right to
   left (rows go out mirrored, as Seeed's GxEPD2 and Gray16 examples, FastEPD
   and Zephyr's board file have it), and a temperature the controller must be
@@ -369,8 +404,16 @@ for the two Spectra boards most of the bench work runs on:
   ahead, the top of the next frame on the bottom rows), and
   the "skip an unchanged picture" hash is not written to flash (a flash
   write switches the cache off and stalls the refill; an LCD comes up blank
-  after a reboot anyway). Any other flash write (a settings save, a scene
-  download, an OTA) still costs one disturbed frame. `lcd` on the console
+  after a reboot anyway). Any other flash write (a settings save, an OTA) still
+  costs one disturbed frame. A scene store is hundreds of them, so from the
+  first write of a push to the new set's first picture the glass shows the
+  FrameOS mark on black with "Updating" under it, the boot splash's drawing
+  with the word clipped out of its "Updating firmware" line, so it costs no
+  bytes of its own (`fos_lcd_st7701s_updating_begin`): where a write tears it the
+  bands are black, no picture is presented over it, the picture from before
+  stays in its buffer and comes back if the store fails (or after a backend
+  sync's write, whose scenes show at the next render as before), and a timer
+  ends it after two minutes whatever happens. `lcd` on the console
   counts dropped frames and late refills and sets the pixel clock live.
   From the moment the panel is up until the first picture it shows the
   FrameOS mark on black, its three squares walking the brand colors
@@ -385,8 +428,10 @@ for the two Spectra boards most of the bench work runs on:
   are the runtime's `frameos/loading_mark.nim`; `docs/realtime-rendering.md`
   "A switch that takes a while"). An LCD does not wait for the clock: it renders once Wi-Fi is up and again when SNTP answers
   (`fos_wifi_set_late_time_hook`); the boot used to wait up to 10 s for it.
-  An LCD board runs its CPU at 240 MHz (the generic image boots at 160 for
-  the battery frames; `status` prints `cpu:`). The scene canvas is the
+  An LCD board runs its CPU at 240 MHz, and so does any board whose touch
+  controller answers at boot (the reTerminal E1003 and Sticky: someone at the
+  glass waits for every frame); the generic image boots at 160 for the other
+  battery frames, and `status` prints `cpu:`. The scene canvas is the
   panel's own back frame buffer (`fos_display_render_target`, 565 whatever
   the PSRAM): the scene draws straight into it, and the blit is a buffer
   switch — no pack, no copy, no hash. A scene whose `refreshInterval` is
@@ -436,6 +481,22 @@ provisioned over the USB console instead (below) and never sees the portal;
 the frame's HTTPS certificate — the same per-frame material the Linux
 runtime serves with OpenSSL — arrives with its first `/embedded/settings` pull.
 
+A **touch LCD** (the SenseCAP Indicator: a touch panel found at boot on an
+RGB LCD, `touch_setup` in `main.c`) has no portal and does not wait for
+Wi-Fi: it starts its scenes at once and joins the stored network in the
+background (`fos_wifi_start_background`), retrying quickly and then every
+30 s for as long as it takes. What a boot that waited does once online (SNTP,
+log upload, the `bootup` line, the OTA check) runs the first time the station
+gets an address. The network is set on the screen: a swipe down from the top
+opens the settings panel, whose gear opens the frame page with the Wi-Fi
+status, the networks in range by name and a password field, the rotation, the
+scale, and Render again and Reboot (`fos_frame_settings.c`,
+docs/scene-settings.md "The frame page"). The frame's control plane can turn
+the page off (`frame_settings_on_screen`); `set settings_unlock 1` on this
+console turns it back on whatever the plane says. The status screen of a frame
+with no scene says to swipe. Every other board keeps the 45 s wait and the
+portal.
+
 The serial console (115200) is always available and quicker for development.
 It answers on whichever USB port the board brings out: the chip's own
 USB-Serial/JTAG device ("USB JTAG/serial debug unit" — XIAO ESP32-S3) and
@@ -459,16 +520,26 @@ being a fixed wait. A host that floods faster than 115200 baud sustained is
 not a case this can cover; the USB-Serial/JTAG channel has its own flow
 control at the USB layer and does not need either.
 
+A `usb_api` command may end in LF or in CR LF (a terminal, most serial
+scripts). The console runs a line at either, so a CR-ended command's LF is
+drained before `READY` (`usb_api_ready`): it used to be read as the payload's
+first byte, leaving the last one on the wire, and an upload stored cut short
+replaced the frame's scenes with one the runtime refused. The store now
+refuses a payload that does not open and close as one JSON array or object
+(`fos_json_whole`).
+
 ```
 frameos> status
 frameos> wifi MySSID MyPassword          # saves and reboots
 frameos> set panel EPD_7in5_V2
 frameos> set pins rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1
-frameos> set render_mode local           # or: remote (thin client)
+frameos> set render_mode local           # or: remote (rendered on the server)
 frameos> set deep_sleep 1                # battery mode: deep sleep between refreshes
 frameos> set wake_schedule 1             # align wake to wall-clock interval boundaries
 frameos> set battery_pin 2               # ADC1 GPIO tapping VBAT (-1 = none)
 frameos> set battery_divider 2.0         # Vbat = Vpin * divider
+frameos> set frame_settings_on_screen 0 # hide the settings panel's frame page (the plane's switch)
+frameos> set settings_unlock 1           # show it whatever the plane says, until set back to 0
 frameos> render                          # render immediately
 frameos> ota                             # check for an OTA update now
 frameos> factory-reset
@@ -798,6 +869,11 @@ plugged-in-and-charging frame counts as "on battery" too, which just means it
 sleeps while charging). Without a configured battery pin the flag never fires
 and the frame stays connected.
 
+`awake_input` (`awake_after_input_seconds` on the control planes, seconds, default
+300, 0 = off) keeps a deep-sleeping frame up after a press or a tap, as an awake
+frame with its interpreters and partial updates, so the next one is answered at
+once; a nearly flat cell still sleeps.
+
 `wake_check` (seconds, 0 = off, floored to 60) makes a deep-sleeping frame
 wake at least this often to check the control plane for queued commands. The
 scheduled render's due time survives the reboot in RTC memory, so a check-in
@@ -1026,12 +1102,51 @@ The backend can bake them in per-frame via `device_config`: `deepSleep`,
 `batteryDivider`, `batteryEnablePin` — and the cloud can set the same live
 over `set_settings` (`deep_sleep`, `deep_sleep_on_battery`,
 `wake_check_seconds`, `battery_pin`, `battery_divider`, `battery_enable_pin`),
-surfaced as the frame's "Power" settings section. The GPIO button map
+surfaced as the frame's "Power" settings section.
+
+Each deep sleep (firmware 2026.11.7+) also powers down what the sleep does
+not need: right before `esp_deep_sleep` the firmware powers the ES8311 /
+ES7210 down by register (analog sections, references, microphone bias),
+holds the speaker amplifier's enable low, and on the Waveshare PhotoPainter
+releases the panel's lines and switches its supply (the AXP2101's ALDO4,
+EPD_VCC) off — the PMIC otherwise keeps every rail up through the ESP32's
+sleep. It also stops the fast deep-sleep timer (~1%: a two-hour sleep woke
+60-90 s early and booted twice) from costing a second boot: a wake up to 60 s
+before the render renders, and a render wake sleeps 1/64 longer (at most
+300 s). The next boot's normal init undoes all of it. A PhotoPainter running
+a 2-hour scene went from ~40% of its cell a day (about 57 h from full) to
+~3.6% a day. The GPIO button map
 travels the same two ways since 2026-10-12: the backend's settings pull
 carries `gpioButtons` (`[{pin, label}]`, present only when the backend holds
 a map) and the cloud's `set_settings` carries `gpio_buttons`; the device
 rebinds its buttons with a restart. Before that, a provisioned board's map
 could only be changed over the console.
+
+### Processor speed
+
+The generic image boots every board at 160 MHz. `cpu_mode` decides whether
+`main.c` moves it to 240 at boot: `battery` keeps 160, `performance` goes to
+240, and `auto` (the default) goes to 240 on an RGB LCD or once a touch panel
+answers, and stays at 160 on any other board. Set it with `set cpu_mode
+battery|performance|auto` (next boot), "Processor speed" under the frame's
+Power settings (`cpuMode` on the backend's settings pull, `cpu_mode` on the
+cloud's `set_settings`, firmware 2026.11.7+; the device reboots to take it).
+The console's `status` and the cloud's `hardware` (`cpuMode`, `cpuMhz`) say
+what the chip runs at.
+
+Why battery is the default on e-paper, the reTerminal E1002 being the case
+that decided it: a wake is mostly waiting, not computing. The Spectra 6
+refresh takes about 20 s, and Wi-Fi, the cloud round trips and the settle
+before sleep add more, while the render and dither are a few seconds of real
+work. The S3 idles through those waits at whatever clock it runs, and idling
+at 240 MHz draws roughly 5 mA more than at 160 (the datasheet's modem-sleep
+figures, about 33 against 28 mA with both cores waiting). At 240 the render
+work itself is about a third shorter and costs a little less energy, which
+wins back part of it. Put together, an estimate, not a measurement: a frame
+that deep-sleeps and refreshes every 15 minutes loses roughly 5 to 10% of its
+battery life at 240, and one that stays awake on battery more, closer to
+15%. An LCD or a touch panel is a screen someone is looking at, where a
+third off every render matters more, so `auto` gives those 240.
 
 ### Button beep
 
@@ -1119,6 +1234,19 @@ every plane: the backend's settings pull carries `buzzerPin` /
 `buzzer_tone_hz` (firmware 2026.10.12+), and both show them as "Button beep
 GPIO" and "Button beep tone" under the frame's GPIO buttons.
 
+On e-paper the glass clicks too: the picture takes a moment to answer, the
+click does not. When a press lands on something that takes it (an element
+with a handler, a field, a box that scrolls, a scene listening for a press)
+it plays the button's down click, and its up click when it lifts; a finger
+added to one already on the glass plays the higher click of a double press.
+A press on nothing is silent, and so is an LCD, whose picture answers at once.
+What such a press or a key starts, if it takes over 1.5 s to load, chirps
+quietly on the buzzer until the picture lands (`docs/realtime-rendering.md`).
+`set touch_beep 0` turns both off, or "Touch beep" in the frame's settings
+(`touchBeep` on the backend's settings pull, `touch_beep` on the cloud's
+`set_settings`, firmware 2026.11.6+). `fos_touch.c`, host-tested in
+`test_fos_touch.c`.
+
 ### Voice chat
 
 Hold the voice key — the key whose long press the frame's event map binds
@@ -1179,14 +1307,163 @@ with `set mic_pins clk=42,data=41,pwr=-1`. Console: `mic [seconds]` records
 and prints the peak and mean level (a flat 0 is a microphone that is not wired or
 not powered), `status` shows the pins and the switch.
 
+## Rendering on the server
+
+`render_mode remote` hands the frame's scenes to its control plane
+(`docs/server-rendering.md` is the spec): the plane runs the scene in its wasm
+runtime and the frame pulls the finished picture, packed in its panel's
+format, at every render pass (`fetch_remote_bitmap` in `fos_client.c`, the
+rules in `fos_render_pull.c`). A board without a runtime that fits its panel
+(every ESP32-C3, an S3 whose panel outgrows its PSRAM) is always remote; on an
+S3 it is the owner's choice: "Render scenes" under Power, `renderMode` in the
+backend's settings pull, `render_mode` on the cloud's `set_settings` (firmware
+2026.11.7+), `set render_mode remote` on the console. It applies live: the
+next pass pulls, and a change asks for that pass now. The cloud's `hardware`
+reports `renderMode` (`local` / `remote`, what the frame runs by its setting)
+and `localRenderSupported` (whether it could run its scenes itself).
+
+**The pull.** `GET {plane}/api/frames/{id}/embedded/render?width=&height=&format=&rotate=`
+(a `POST` when the relay holds input, below):
+a backend set on the frame (`backend_url`, its API key), else the cloud it is
+enrolled with (`fos_cloud_api_access`: the provider URL, the frame's uuid,
+its access token) — the order of the settings pull. The query is the panel
+the picture is for (native size, `fos_pixel_format_t`, rotation); the backend
+reads its own copy of the frame, the cloud draws to what it is told. No
+`scene`: a frame in remote mode runs no scene choice of its own (below), so
+the plane's active scene is the one drawn. The FOSB answer is checked against
+the panel (size, format, length) before it goes up, as before.
+
+**Unchanged pictures cost nothing.** A 200 carries an ETag. Once the panel
+took that picture, the ETag is kept in RTC memory beside the hash of the
+packed bytes it delivered (`fos_render_pull_shown_t`), so it survives a deep
+sleep, and the next pull sends it as `If-None-Match` while the panel's stored
+display hash still equals it — whoever drew those bytes, the ETag names them.
+An e-paper fact, like the hash: an LCD keeps none, so it always downloads.
+Anything else on the glass (a local render, an overlay, a refresh that
+failed, the portal's screen or a console `display_test`, which now say so
+through `fos_client_note_panel_drawn`) and it is not sent. A **304** downloads
+nothing and refreshes nothing: the pass logs `render:device` `skipped` /
+`unchanged` like an unchanged local render and counts as a good render. The
+panel buffer is no longer cleared before the pull, so on a frame that stays
+awake the preview snapshot is put back from the reservation after a 304 when
+its bytes still hash to the picture shown. A reset forgets the ETag (RTC
+memory); the stored display hash still skips the refresh then.
+
+**When the next picture is due.** The scene runs on the plane, so the
+plane says when it wants its next picture: `X-FrameOS-Next-Render: <seconds>`
+on the 200 and the 304 (its `nextSleep`, else its `refreshInterval`; at least
+10 s on a backend and the plan's floor on the cloud, at most 7 days;
+`fos_render_pull_next_render_seconds`). The board takes it where its own
+runtime's interval would go, so its next pass, its deep sleep and the
+`nextRenderAt` it reports follow the scene; with no header (a scene with no
+opinion, a pull nobody answered) the frame's interval. The idle runtime's
+own interval and `nextSleep` are never read in remote mode: they belong to a
+scene left from before.
+
+**The cloud says no.** A cloud answers `403` when it does not render for the
+frame (`not_server_rendered`: the plane's setting is not remote;
+`cloud_rendered_frame_quota_exceeded`: the plan's cloud-rendered frames are
+used up). A board with its own runtime then renders that pass itself, after
+applying the scene store and any queued switch, and keeps rendering itself for
+an hour (`FOS_RENDER_PULL_REFUSED_RETRY_S`, wall clock in RTC memory, so a
+deep sleeper does not pay a refused handshake every wake) before it asks
+again; any `render_mode` from the cloud clears it at once. Logged once per
+refusal: `render:remote_refused` with the reason (the answer's `error`), and
+reason `ended` when a picture comes again. Input held for the plane goes
+(`event:dropped`, reason `refused`). A backend never refuses (it serves its
+diagnostic card), and a C3 has nothing to fall back to: it logs
+`render:error` and keeps its picture.
+
+**What a remote frame does not run.** Everything that only a local render
+needs waits on one test, `renders_locally` in `fos_client.c` (the frame's
+setting, or a refusal on a board that can; `fos_client_renders_locally` for
+other tasks): the scene store's apply and the backend scenes pull, the Nim
+dispatcher and its tick, animation, the first pass's wait for the cloud's
+queued commands. That keeps a wake to Wi-Fi, the cloud link, one request and
+the refresh. The Nim runtime itself still starts at boot where it fits, so a
+refusal or a switch back to local renders without a restart.
+
+**Keys, touch and the schedule go to the plane** (`docs/server-rendering.md`
+"Keys, touch and the schedule"). The producers keep running: the button task,
+the touch glass, the schedule (ticked on the render task as before, and at
+the start of every pass) and the frame's HTTP API. In remote mode
+`fos_events_dispatch` does with the firmware's own events what it always did
+(`render` asks for the pull; `reload`, `restart`, `reboot`, `uploadScenes`;
+`turnOn` / `turnOff` / `toggleScreen` switch the backlight here as well) and
+**relays** what a scene would have heard instead of handing it to the Nim
+dispatcher: `gpio` edges (`wake`, `claimed` and `atMs` as the button task
+stamps them), `pointerDown` / `pointerMove` / `pointerUp`, `setCurrentScene`
+(with or without a `direction`), `setSceneState`, `button`, custom events,
+from `driver`, `schedule`, `http:write` and `http:admin`. What the plane said
+itself goes through `fos_events_dispatch_from_plane` (`fos_cloud.c`: a cloud
+verb, or a backend command, whose origin is `http:admin` like the frame's
+HTTP API's) and only asks for the pull; the console (`system`) is not
+relayed (`event:unsupported`). This works on a C3 too: the relay needs no
+runtime.
+
+The relay (`fos_render_relay.c`, pure, `tests/test_fos_render_relay.c`) keeps
+them in order behind a mutex in `fos_client.c` (`fos_client_relay_event`),
+each kept as it goes on the wire, at most 32 events and 16 KiB of body (the
+oldest go first, `event:dropped`); a payload that is not one JSON object
+(`fos_json_whole`) is refused and its producer told (an HTTP 400). A finger
+on the glass leaves its gesture in the touch queue until it lifts, its moves
+folded to the newest there (`fos_touch_finger_down`), so the relay gets it
+whole. Keys and the glass are sent once the input is decided: no key down,
+no tap inside its double-press window (`fos_buttons_busy`), nothing left in
+the queues; a
+schedule entry or an HTTP event asks for the pull at once, and a pull that
+is due anyway takes whatever is waiting, after waiting out a key or a finger
+still being timed (10 s at the most), so a press never goes in two halves.
+Then the pull is a `POST` with `Content-Type: application/json` and
+`{"nowMs": <esp_timer ms>, "events": [{"origin", "name", "payload"}, …]}`,
+the ETag rules unchanged. A `200` or a `304` empties what it carried; a
+`400` or a `413` too (a body the plane cannot read is not sent again);
+anything else, no answer included, keeps it for the next pull. One
+`render:relay` line per pull that carried any: the count and the status. The
+cloud's `403` drops it (above). A battery frame holds its sleep while the
+relay holds anything or a report waits in a queue (`sleep:held`, reason
+`input`): not on a critical battery, and three holds in a row at most
+without a pull the plane answered; and the key that woke it goes with the
+wake's first pull.
+
+**`renderSceneMs`.** Every metrics sample carries how long the last good pass
+took to produce its picture, without the panel refresh: the scene on the
+frame, or the pull (a 304's included). Next to `renderLastMs` (the whole pass)
+it is what the battery popover reads to say what rendering on the server
+would take off a wake.
+
 ## Scene storage and memory (2026.8.13)
 
 Scenes arrive as one combined `scenes.json` — from the USB upload, the
 backend sync or the cloud's `set_scenes` — and that stays the wire format.
-The device does **not** keep them that way. On apply the payload is split
-into `/state/scene-<slot>.json` plus `/state/scene-index.json`, the combined
-file is deleted (the `state` partition is 1M and a payload may be 512K, so
-both do not fit), and only the **active** scene is parsed and resident. The
+The device does **not** keep them that way. The payload is split into
+`/state/scene-<slot>.json` plus `/state/scene-index.json`, the old set's
+slots going first and the combined file last (the `state` partition is 1M
+and a payload may be 512K: the old set, the new one and the combined file do
+not fit together), and only the **active** scene is parsed and resident. A
+push or an upload is stored by the task that received it (the cloud, HTTP or
+the console) and split by the scene store's own task (`store_split_stored`),
+paced around renders and taps like every write off the render task
+(`store_pace_hook`); the render task's apply then reads the index and loads
+one scene, and a switch asked for meanwhile waits for that apply
+(`s_store_changing`). A backend sync's set is held whole by the runtime and
+written by the store task.
+
+**On a frame that has a per-scene store, a whole set goes in as changes to
+it, one scene at a time** (`fos_scene_store_apply_set`, called by
+`store_set_as_changes_locked` for a push, an upload and a backend sync): a
+scene whose bytes are stored already is kept (each index entry has the
+`hash` of its file), the scenes the set drops go first, each new or changed
+scene is written and committed by itself and the file it replaced emptied
+before the next, and the set's order and source come last. `/state` never
+holds more than the stored set and one scene, where the whole file beside
+the old set needed room for both: the reTerminal E1002's 415 KB, 20-scene
+set did not fit its 1 MB `/state` (`ENOSPC`, 2026-11-10). A push that
+changed one scene of twenty writes one. It is not atomic: a failure or a
+power cut leaves a set holding some of the new scenes, each whole, and the
+producer sends the set again, since nothing acknowledged it. The combined
+file and the split below are for a frame with no store yet (a first set, or
+a whole payload a boot has not split). The
 index carries ids, names and refresh intervals, so the frame can list and
 switch scenes without holding them. It also carries a top-level
 `"source": "local" | "backend" | "cloud"` key recording who installed the
@@ -1201,11 +1478,81 @@ Slot numbers rather than scene ids, because `CONFIG_SPIFFS_OBJ_NAME_LEN` is
 all. The id ↔ slot mapping lives in the index. Every failure path (an
 unsplittable payload, more than 32 scenes, a full partition) falls back to
 loading the combined file whole, so a frame cannot lose its scenes to a
-failed optimization.
+failed optimization; the index of the set it had stays until that payload
+has loaded, and one the runtime refuses too is dropped for the set from
+before.
+
+### One scene at a time
+
+A scene can be read, added, replaced or removed on its own (`main/fos_scene_store.c`,
+pure C, host-tested), without touching the others:
+
+| Over | Read one | List, sizes, free space | Add or replace | Remove |
+| --- | --- | --- | --- | --- |
+| USB | `usb_api scene-get <id>` | `usb_api scene-list` | `usb_api scene-put <bytes> [activate]`, then the scene's JSON | `usb_api scene-delete <id>` |
+| HTTP (admin login or the server key) | `GET /api/frames/<id>/scenes/<sceneId>` | `GET /api/frames/<id>/scenes` | `POST /api/frames/<id>/scenes`, the scene's JSON as the body (`?activate=1` shows it) | `POST /api/frames/<id>/scenes/delete?id=<sceneId>` |
+
+A refused change answers 400 (not one scene with an id, the last scene, an
+order naming a scene the frame does not hold), 404 (no such scene) or 500 (no
+room, a file error), with the reason as the body.
+
+A changed scene is written to a new slot file and the index is switched to it;
+the old file goes at the next sweep. A whole payload is split by the same code,
+so the index keeps `isLayout` and a scene's `default` mark however a scene
+arrived. A power cut, a full partition, or a scene
+the runtime refuses (when it is the one on the panel) leaves the scene that
+worked. Only the scene on the panel, or one it embeds as a split panel, is
+reloaded; adding any other scene costs one file and no render. Deleting the
+last scene is refused. The state a removed scene kept across deep sleep goes
+with it. A control plane uses the same store: the cloud's `scenes_patch` verb
+(`docs/cloud-frames.md`), and a backend answering `/embedded/scenes?patch=1`
+with `{"patch":true,"base":"<etag>","order":[...],"put":[...]}` when it knows
+what the frame holds. A forced pull (a deploy, "Push & activate", a preview:
+the commands answer's `sync`) sends the frame's ETag too, unless it holds no
+set, so a push that changed one scene downloads that scene; the backend also
+says `sync` when it hands over a switch while the frame's scenes are behind,
+so the switch never names a scene it has not pulled.
+
+**Push and show.** A change that activates its scene (`scene-put … activate`,
+`?activate=1`, a cloud push with `scene_id`: the workspace's "Push & activate"
+and "Install & activate") is written as fast as flash goes, not paced around
+renders and taps (`s_store_urgent`): somebody is waiting to see it, and paced
+behind an e-paper render a 30 KB scene waited up to half a second for each
+2 KB. A cloud push's `state` opens that scene with those values, through the
+same switch `set_current_scene` makes (`select_pushed_scene`).
+
+**Lookups by name are what a write costs on a big partition.** Every SPIFFS
+`stat`, `open`, `remove` and `rename` walks the lookup page of every block:
+about 25 ms on a 1 MB `/state`, about half a second on the 32 MB boards' 24 MB
+one, where a one-scene put used to take 10 s with 0.3 s of it writing data
+(the reTerminal Sticky, 2026-11-10). So the store asks flash as little as it
+can (`fos_scene_store.h`): it knows its slot files after the boot's sweep
+(which still removes everything the index does not name), a slot is written
+straight to its own name (the index switch is the commit), and the index is
+written as a copy (`scene-index.tmp`, kept) and then in place, readers taking
+the copy when the index is torn; `fos_scenes.c` tracks whether a combined
+payload is there instead of asking. Index and slots are removed only through
+the store: a bare unlink of the index leaves its copy to come back.
+
+**How much room there is.** `usb_api scene-list` and `GET .../scenes` report
+`storage`: `stateTotalBytes` and `stateUsedBytes` (the SPIFFS partition,
+`esp_spiffs_info`), `scenesBytes` and `sceneCount`, and `sceneBytes`, each
+scene's footprint by id; the index keeps each file's own `bytes`. Every figure
+is in SPIFFS's own units: the pages a file takes, data and index alike, at the
+data a page carries (`fos_spiffs_footprint.c`, checked against IDF's SPIFFS in
+`test_fos_spiffs_gc.c`), so the scenes and the used figure add up. On a 1 MB
+partition (256-byte pages) a 30 KB scene takes about 31 KB; a scene that is
+not split yet is reported at what its own file will take. The same report is
+in the cloud `hardware.storage` (hello, and a `state` message whenever the
+stored scenes changed since the last report: `ws_poll_active_scene`) and in
+the backend's `embedded.storage` (check-in), which is what the workspace
+draws: free space over the scene list, each scene's size on its tile.
 
 ## The render canvas is 16-bit (2026.8.31)
 
-The canvas format is decided per board (`fos_render_canvas_bytes_per_pixel`
+A sixteen-grey panel has a 4-bit canvas in its own buffer's layout, each
+store dithered (docs/realtime-rendering.md); the other formats follow.
+The canvas format is decided per board (`fos_render_canvas_bits_per_pixel`
 in `components/frameos_display`): **RGBX when a full canvas takes at most
 half the module's PSRAM, else 16-bit RGB 5/6/5.** The 800×480 boards (1.5 MB
 of 8 MB) and a 1200×1600 panel on a 16 MB module (7.3 MB) render in full
@@ -1286,9 +1633,24 @@ smaller than any floor written down so far. Once a few frames have reported
 both pairs, recalibrate the floors on the malloc-able figures and switch
 `ws_heap_ready()`, `https_heap_ready()`, `log_upload_heap_ready()` and the
 banner over together. Candidate levers if the honest headroom turns out
-thin: `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y` (Wi-Fi/lwIP dynamic buffers
-PSRAM-first, internal fallback), the reserve pool back to IDF's 32 KB
-default, and right-sizing task stacks from the high-water marks.
+thin: the reserve pool back to IDF's 32 KB default, and right-sizing task
+stacks from the high-water marks.
+
+**Wi-Fi and lwIP buffers come from PSRAM first, and TCP has a 64 KB receive
+window** (2026-11-10, `sdkconfig.defaults` "TCP at the speed of the Wi-Fi";
+`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y`). IDF's 5,760-byte windows made the
+network the slow part of a photo once the JPEG sink got fast: on a reTerminal
+E1003 a Gallery photo spent 1.6 to 9.6 s on the socket, now 0.06 to 1.9 s
+(its whole body 7.3 s median, now 5.3 s, of which 4 s is the decode), and
+the 1.3 MB backend picture push went from 14.5 s to 8.8 s (medians). Idle
+internal RAM went from 90 KB free with a 43 KB block to 103 KB with 55 KB.
+The send side stays small on purpose: each frame in flight is a copy in
+DMA-capable internal RAM, and a 64 KB send buffer with 64 TX buffers drained
+the 64 KB DMA pool to 6 KB; 16 KB with IDF's 32 TX buffers kept it at 44 KB.
+The C3 overlay (no PSRAM) keeps IDF's values. `test_esp32_network_buffers.py`
+pins all three. What is left of a photo's network time is opening the
+request: DNS, connect and the TLS handshake, 2.3 to 4 s to
+gallery.frameos.net.
 
 ## Memory guardrails (M4)
 

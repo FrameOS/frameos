@@ -48,6 +48,31 @@ async def test_create_template_stamps_scene_execution(async_client, db):
 
 
 @pytest.mark.asyncio
+async def test_update_template_scenes(async_client, db):
+    t = Template(project_id=async_client.project_id, name="Editable", description="old", scenes=[], config={})
+    db.add(t)
+    db.commit()
+
+    # The scene editor's save: name, description and the whole scene set.
+    response = await async_client.patch(
+        f"/api/templates/{t.id}",
+        json={"name": "Edited", "description": "new", "scenes": [{"id": "a", "name": "A", "nodes": [], "edges": []}]},
+    )
+    assert response.status_code == 200
+    db.refresh(t)
+    assert (t.name, t.description) == ("Edited", "new")
+    assert [scene["id"] for scene in t.scenes] == ["a"]
+    # Normalised like a create.
+    assert t.scenes[0]["settings"]["execution"] == "interpreted"
+
+    # A rename alone leaves the scenes as they are.
+    response = await async_client.patch(f"/api/templates/{t.id}", json={"name": "Renamed"})
+    assert response.status_code == 200
+    db.refresh(t)
+    assert t.name == "Renamed" and t.description == "new" and [scene["id"] for scene in t.scenes] == ["a"]
+
+
+@pytest.mark.asyncio
 async def test_get_templates(async_client, db):
     # Insert a couple
     t1 = Template(project_id=async_client.project_id, name="Template1")
@@ -60,6 +85,85 @@ async def test_get_templates(async_client, db):
     templates = response.json()
     assert isinstance(templates, list)
     assert len(templates) >= 2  # We added at least 2
+
+
+JSX_LAYOUT = {
+    "nodes": [
+        {"id": "e", "type": "event", "data": {"keyword": "render"}},
+        {"id": "a", "type": "app", "data": {"keyword": "ui"}},
+        {"id": "d", "type": "app", "data": {"keyword": "render/image"}},
+    ],
+    "edges": [
+        {"id": "1", "source": "e", "sourceHandle": "next", "target": "d", "targetHandle": "prev"},
+        {"id": "2", "source": "a", "sourceHandle": "fieldOutput", "target": "d", "targetHandle": "fieldInput/image"},
+    ],
+    "apps": {"ui": {"sources": {"app.tsx": "export function get() { return <yield /> }"}}},
+}
+
+
+@pytest.mark.asyncio
+async def test_update_template_refuses_a_scene_that_cannot_be_a_layout(async_client, db):
+    main = {"id": "main", "name": "Main", "default": True, "settings": {"refreshInterval": 1}}
+    t = Template(project_id=async_client.project_id, name="Bar", scenes=[main], config={})
+    db.add(t)
+    db.commit()
+
+    response = await async_client.patch(
+        f"/api/templates/{t.id}", json={"name": "Bar", "description": None, "isLayout": True}
+    )
+    assert response.status_code == 400
+    assert "can't be a layout" in response.json()["detail"]
+    db.refresh(t)
+    assert t.scenes[0]["settings"] == {"refreshInterval": 1}
+
+
+@pytest.mark.asyncio
+async def test_update_template_scenes_refuses_a_layout_that_cannot_be_one(async_client, db):
+    # The scene editor saves the whole set; a scene it marked a layout passes
+    # the same rule as the isLayout switch (docs/scene-layouts.md).
+    main = {"id": "main", "name": "Main", "settings": {"refreshInterval": 1}}
+    t = Template(project_id=async_client.project_id, name="Bar", scenes=[main], config={})
+    db.add(t)
+    db.commit()
+
+    bad = {**main, "settings": {"refreshInterval": 1, "isLayout": True}}
+    response = await async_client.patch(f"/api/templates/{t.id}", json={"scenes": [bad]})
+    assert response.status_code == 400
+    assert "can't be a layout" in response.json()["detail"]
+    db.refresh(t)
+    assert t.scenes[0]["settings"] == {"refreshInterval": 1}
+
+    good = {**main, **JSX_LAYOUT, "settings": {"refreshInterval": 1, "isLayout": True}}
+    response = await async_client.patch(f"/api/templates/{t.id}", json={"scenes": [good]})
+    assert response.status_code == 200
+    assert response.json()["scenes"][0]["settings"]["isLayout"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_template_makes_its_main_scene_a_layout_and_back(async_client, db):
+    helper = {"id": "helper", "name": "Helper", "settings": {"refreshInterval": 60}}
+    main = {"id": "main", "name": "Main", "default": True, "settings": {"refreshInterval": 1}, **JSX_LAYOUT}
+    t = Template(project_id=async_client.project_id, name="Bar", scenes=[helper, main], config={})
+    db.add(t)
+    db.commit()
+
+    response = await async_client.patch(
+        f"/api/templates/{t.id}", json={"name": "Bar", "description": None, "isLayout": True}
+    )
+    assert response.status_code == 200
+    scenes = response.json()["scenes"]
+    assert scenes[1]["settings"] == {"refreshInterval": 1, "isLayout": True}
+    assert scenes[0]["settings"] == {"refreshInterval": 60}
+
+    response = await async_client.patch(
+        f"/api/templates/{t.id}", json={"name": "Bar", "description": None, "isLayout": False}
+    )
+    assert response.json()["scenes"][1]["settings"] == {"refreshInterval": 1}
+
+    # A rename leaves the scenes alone.
+    response = await async_client.patch(f"/api/templates/{t.id}", json={"name": "Clock bar", "description": None})
+    assert response.json()["name"] == "Clock bar"
+    assert response.json()["scenes"][1]["settings"] == {"refreshInterval": 1}
 
 
 @pytest.mark.asyncio

@@ -24,7 +24,7 @@
           "y": 0
         },
         "data": {
-          "keyword": "render/svg",
+          "keyword": "render/image",
           "config": {
             "placement": "cover"
           }
@@ -34,21 +34,14 @@
       },
       {
         "id": "fdf5996c-b3b4-52e5-b34a-d029abd09ad4",
-        "type": "code",
+        "type": "app",
         "position": {
           "x": 340,
           "y": -140
         },
         "data": {
-          "code": "",
-          "codeJS": "`<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${context.imageWidth}\" height=\"${context.imageHeight}\" viewBox=\"0 0 ${context.imageWidth} ${context.imageHeight}\"><rect x=\"0\" y=\"0\" width=\"${context.imageWidth}\" height=\"${context.imageHeight}\" fill=\"#ffffff\"/><line x1=\"${state.x}\" y1=\"0\" x2=\"${state.x}\" y2=\"${context.imageHeight}\" stroke=\"#c8c8c8\" stroke-width=\"1\"/><line x1=\"0\" y1=\"${state.y}\" x2=\"${context.imageWidth}\" y2=\"${state.y}\" stroke=\"#c8c8c8\" stroke-width=\"1\"/><circle cx=\"${state.x}\" cy=\"${state.y}\" r=\"${Math.max(6, Math.round(Math.min(context.imageWidth, context.imageHeight) / 24))}\" fill=\"${state.down ? '#d13c3c' : '#2f6fe0'}\"/></svg>`",
-          "codeArgs": [],
-          "codeOutputs": [
-            {
-              "name": "svg",
-              "type": "string"
-            }
-          ]
+          "keyword": "touchCursor",
+          "config": {}
         },
         "width": 300,
         "height": 110
@@ -1178,7 +1171,7 @@
         "source": "fdf5996c-b3b4-52e5-b34a-d029abd09ad4",
         "sourceHandle": "fieldOutput",
         "target": "c514f821-ae7e-5f11-8ad1-0aecf05f07a0",
-        "targetHandle": "fieldInput/svg",
+        "targetHandle": "fieldInput/image",
         "type": "codeNodeEdge"
       },
       {
@@ -1676,6 +1669,24 @@
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#ffffff"
+    },
+    "apps": {
+      "touchCursor": {
+        "name": "Touch cursor",
+        "category": "data",
+        "description": "Draws the last pointer position as a cross and a dot, red while the pointer is down.",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Touch cursor\",\n  \"category\": \"data\",\n  \"description\": \"Draws the last pointer position as a cross and a dot, red while the pointer is down.\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n",
+          "app.tsx": "// The pointer as the scene last saw it: a hairline cross through the point\n// and a dot there, red while the pointer is down. x, y and down are the\n// scene's state, set by the pointer event flows.\n//\n// The pointer position is in panel pixels, while a big panel runs this app at\n// a render scale (app.frame.scale, e.g. 2 at 1600x1200): the canvas it is\n// told about is the panel divided by the scale and the drawing is stretched\n// back. So positions and the pixel sizes that should stay as they are (the\n// hairlines, the dot) are worked out in panel pixels and divided by it.\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const scale = app.frame.scale || 1\n  const width = context.imageWidth ?? app.frame.width\n  const height = context.imageHeight ?? app.frame.height\n  const x = (Number(app.state.x) || 0) / scale\n  const y = (Number(app.state.y) || 0) / scale\n  const radius = Math.max(6, Math.round(Math.min(width * scale, height * scale) / 24)) / scale\n  const hairline = 1 / scale\n  return (\n    <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height}>\n      <rect x=\"0\" y=\"0\" width={width} height={height} fill=\"#ffffff\" />\n      <line x1={x} y1=\"0\" x2={x} y2={height} stroke=\"#c8c8c8\" strokeWidth={hairline} />\n      <line x1=\"0\" y1={y} x2={width} y2={y} stroke=\"#c8c8c8\" strokeWidth={hairline} />\n      <circle cx={x} cy={y} r={radius} fill={app.state.down ? '#d13c3c' : '#2f6fe0'} />\n    </svg>\n  )\n}\n"
+        }
+      }
     }
   }
 ]

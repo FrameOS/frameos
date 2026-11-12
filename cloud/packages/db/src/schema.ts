@@ -96,6 +96,9 @@ export const accountIdentities = pgTable(
     providerIssuer: text("provider_issuer").notNull(),
     providerKey: text("provider_key").notNull(),
     providerSubject: text("provider_subject").notNull(),
+    // Apple's refresh token for this identity, sealed (migration 0077): what
+    // account deletion revokes. NULL for every other provider.
+    providerTokenEncrypted: text("provider_token_encrypted"),
     ...timestamps,
   },
   (table) => ({
@@ -1015,7 +1018,9 @@ export const frames = pgTable(
     // Last-pushed declarative settings (allowedFrameSettings in
     // auth-web's src/lib/frames.ts — interval/rotate/…). Devices own their
     // own copy; this is the control plane's mirror so the Settings panel
-    // renders what was pushed instead of blanks after a reload. `name` is
+    // renders what was pushed instead of blanks after a reload. `rotate` and
+    // `render_scale` also follow what the frame reports in hello and state
+    // (changed on its own screen). `name` is
     // NOT stored here: frames.name is authoritative for the display name.
     settings: jsonb("settings"),
     // Which service-settings GROUPS ("unsplash", "openAI", …) this frame's
@@ -1161,6 +1166,14 @@ export const frameSceneAssignments = pgTable(
     // onto each pushed scene as `eventMap`. Kept across every assignment
     // write that omits it, so a scene update leaves it alone. NULL = none.
     eventMaps: jsonb("event_maps"),
+    // The owner's per-install layouts (migration 0076, docs/scene-layouts.md):
+    // { [runtime scene id]: {sceneId, state?} }, written onto each pushed
+    // scene as `layout`. Kept like event_maps. NULL = none.
+    layouts: jsonb("layouts"),
+    // Every runtime scene of the assigned version is a layout (settings.
+    // isLayout), so a voice turn does not offer it as a scene. Settled with
+    // the grants, while the push has the version open.
+    isLayout: boolean("is_layout").default(false).notNull(),
     ...timestamps,
   },
   (table) => ({
@@ -1296,6 +1309,100 @@ export const frameDeviceScenes = pgTable("frame_device_scenes", {
   statusAt: timestamp("status_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
+});
+
+// A virtual frame's device half (migration 0074, docs/cloud-frames.md
+// "Virtual frames"): what hardware would keep on its own disk. The frame hub
+// runs the device (apps/frame-hub/src/virtual-device.ts), renders its scenes
+// with the wasm runtime and serves the picture through the view link. A
+// frames row with no row here is hardware, whatever it reports about itself.
+export const virtualFrames = pgTable(
+  "virtual_frames",
+  {
+    frameId: uuid("frame_id")
+      .primaryKey()
+      .references(() => frames.id, { onDelete: "cascade" }),
+    // The view link's secret (`vf_…`). Text, not a hash: the owner copies the
+    // link again from Settings. Whoever holds it sees the picture only.
+    viewToken: text("view_token").notNull(),
+    // The last scene bundle pushed (`set_scenes`), previews included.
+    scenes: jsonb("scenes"),
+    scenesChecksum: text("scenes_checksum"),
+    activeScene: text("active_scene"),
+    // {sceneId: {field: value}}: a render is a fresh runtime each time, so
+    // this is the memory between two of them.
+    states: jsonb("states").default(sql`'{}'::jsonb`).notNull(),
+    // The shown scene's own refresh interval; NULL = the frame's interval.
+    refreshSeconds: integer("refresh_seconds"),
+    renderedAt: timestamp("rendered_at", { withTimezone: true }),
+    renderMs: integer("render_ms"),
+    renderError: text("render_error"),
+    // A digest of the picture: the view link's ETag.
+    imageVersion: text("image_version"),
+    // When the view link was last read. A frame nobody looks at (this and
+    // frames.preview_watched_at) is not rendered on its interval.
+    viewedAt: timestamp("viewed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => ({
+    viewTokenUnique: uniqueIndex("virtual_frames_view_token_unique").on(
+      table.viewToken,
+    ),
+  }),
+);
+
+// What the cloud keeps for a hardware frame it renders for (migration 0078,
+// docs/server-rendering.md): an ESP32-C3, or a board set to render on the
+// server (`render_mode: "remote"`). The device keeps Wi-Fi, its keys, its
+// schedule and its panel; the scene's memory and the picture live here.
+export const frameServerRenders = pgTable("frame_server_renders", {
+  frameId: uuid("frame_id")
+    .primaryKey()
+    .references(() => frames.id, { onDelete: "cascade" }),
+  // The scene the cloud drew last, or was told to show.
+  activeScene: text("active_scene"),
+  // {sceneId: {field: value}}: what each scene kept after its last render.
+  states: jsonb("states").default(sql`'{}'::jsonb`).notNull(),
+  // {sceneId: {field: value}}: state a verb sent (a switch's state,
+  // setSceneState), kept apart until a render filters it to the scene's
+  // public fields and folds it into `states`.
+  pendingStates: jsonb("pending_states").default(sql`'{}'::jsonb`).notNull(),
+  // [{name, origin, payload}]: scene events waiting for the next render.
+  pendingEvents: jsonb("pending_events").default(sql`'[]'::jsonb`).notNull(),
+  // Moved by every change a picture depends on that the device cannot name
+  // (state, events, a scene push). A kept picture is only good at its own.
+  revision: integer("revision").default(0).notNull(),
+  // The last picture handed to the device (FOSB), and what it was drawn for.
+  picture: bytea("picture"),
+  pictureEtag: text("picture_etag"),
+  pictureScene: text("picture_scene"),
+  pictureRevision: integer("picture_revision"),
+  picturePanel: text("picture_panel"),
+  pictureScenesChecksum: text("picture_scenes_checksum"),
+  renderedAt: timestamp("rendered_at", { withTimezone: true }),
+  renderMs: integer("render_ms"),
+  renderError: text("render_error"),
+  // When the scene wants the picture after this one, in seconds from the
+  // pull, held to the plan's floor (migration 0079); null: no opinion.
+  pictureNextRenderSeconds: integer("picture_next_render_seconds"),
+  // What the frame's render process keeps between two pulls that no scene
+  // state holds (migration 0080): its UIs' focus, caret, open keyboard and
+  // scrolls, its apps' `frameos.remember` values. The runtime's own JSON
+  // (frameos_wasm_kept_state), handed to the next render of a pull as it
+  // was; null when nothing lasts, and after a sleep.
+  keptState: text("kept_state"),
+  // A picture drawn before a sleeping frame's wake, as of `prerender_as_of`;
+  // taken once by the pull at the wake if nothing changed since.
+  prerender: bytea("prerender"),
+  prerenderEtag: text("prerender_etag"),
+  prerenderScene: text("prerender_scene"),
+  prerenderRevision: integer("prerender_revision"),
+  prerenderPanel: text("prerender_panel"),
+  prerenderAsOf: timestamp("prerender_as_of", { withTimezone: true }),
+  prerenderState: jsonb("prerender_state"),
+  prerenderMs: integer("prerender_ms"),
+  prerenderNextRenderSeconds: integer("prerender_next_render_seconds"),
+  ...timestamps,
 });
 
 // The import dedupe ledger (migration 0055): one row per (account, scene
@@ -1818,6 +1925,12 @@ export const subscriptions = pgTable(
     // and stops. Nothing is refunded by default.
     cancelAt: timestamp("cancel_at", { withTimezone: true }),
     canceledAt: timestamp("canceled_at", { withTimezone: true }),
+    // Who drives the periods (migration 0073). Null: the nightly cycle,
+    // charging the receivable. A provider's name ("stripe"): a period opens
+    // when that payment provider reports a payment, with its bounds.
+    // "grant": nobody, an operator gave the plan without a payment
+    // (grantAccountPlan), and no period ever opens.
+    provider: text("provider"),
     ...timestamps,
   },
   (table) => ({
@@ -1874,6 +1987,152 @@ export const subscriptionPeriods = pgTable(
     unrecognizedIdx: index("subscription_periods_unrecognized_idx")
       .on(table.periodEnd)
       .where(sql`${table.recognizedAt} is null`),
+  }),
+);
+
+// The payment provider's side of the plans (migration 0073,
+// cloud/docs/billing.md): the products a plan is sold as (Stripe: prices),
+// the provider's subscriptions, its webhook deliveries and the money it
+// collected. Account ids are plain uuids here, like every billing table, and
+// every row names its mode: a test-mode purchase is recorded and never
+// posted to the ledger.
+export const providerProducts = pgTable(
+  "provider_products",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    provider: text("provider").notNull(),
+    mode: text("mode").notNull(),
+    planCode: text("plan_code").notNull(),
+    productId: text("product_id").notNull(),
+    priceMicros: bigint("price_micros", { mode: "bigint" }).notNull(),
+    currency: text("currency").default("USD").notNull(),
+    // The product a new checkout uses. A price change makes a new product;
+    // subscriptions on an older one still resolve through its row.
+    active: boolean("active").default(true).notNull(),
+    ...timestamps,
+  },
+  (table) => ({
+    planIdx: index("provider_products_plan_idx").on(
+      table.provider,
+      table.mode,
+      table.planCode,
+    ),
+    productUnique: uniqueIndex("provider_products_product_unique").on(
+      table.provider,
+      table.mode,
+      table.productId,
+    ),
+  }),
+);
+
+// The provider's subscription as last seen. What an account is entitled to
+// is still `subscriptions`; this is the collector's view of it.
+export const providerSubscriptions = pgTable(
+  "provider_subscriptions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    provider: text("provider").notNull(),
+    mode: text("mode").notNull(),
+    accountId: uuid("account_id").notNull(),
+    customerId: text("customer_id"),
+    subscriptionId: text("subscription_id").notNull(),
+    productId: text("product_id"),
+    planCode: text("plan_code"),
+    status: text("status").notNull(),
+    currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+    canceledAt: timestamp("canceled_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => ({
+    accountIdx: index("provider_subscriptions_account_idx").on(table.accountId),
+    subscriptionUnique: uniqueIndex(
+      "provider_subscriptions_subscription_unique",
+    ).on(table.provider, table.mode, table.subscriptionId),
+  }),
+);
+
+// Every webhook delivery, once, keyed by the provider's event id.
+export const providerEvents = pgTable(
+  "provider_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    provider: text("provider").notNull(),
+    mode: text("mode").notNull(),
+    eventId: text("event_id").notNull(),
+    eventType: text("event_type").notNull(),
+    accountId: uuid("account_id"),
+    subscriptionId: text("subscription_id"),
+    // Without the customer's name and email.
+    payload: jsonb("payload").default({}).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    error: text("error"),
+  },
+  (table) => ({
+    eventUnique: uniqueIndex("provider_events_event_unique").on(
+      table.provider,
+      table.eventId,
+    ),
+    receivedIdx: index("provider_events_received_idx").on(table.receivedAt),
+  }),
+);
+
+// Money the provider collected or handed back, once per transaction, net
+// of tax.
+export const providerPayments = pgTable(
+  "provider_payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    provider: text("provider").notNull(),
+    mode: text("mode").notNull(),
+    kind: text("kind").notNull(),
+    transactionId: text("transaction_id").notNull(),
+    accountId: uuid("account_id").notNull(),
+    subscriptionId: text("subscription_id"),
+    planCode: text("plan_code"),
+    amountMicros: bigint("amount_micros", { mode: "bigint" }).notNull(),
+    taxMicros: bigint("tax_micros", { mode: "bigint" }).default(0n).notNull(),
+    // Who pays `tax_micros` over to the tax authority (migration 0075):
+    // "provider" for a merchant of record, "us" for Stripe.
+    taxRemittedBy: text("tax_remitted_by").default("provider").notNull(),
+    currency: text("currency").default("USD").notNull(),
+    // The provider's handle on the money (Stripe: the charge), which a
+    // refund, a dispute and a fee name (migration 0075).
+    paymentRef: text("payment_ref"),
+    // Provider facts kept for a person: an invoice number, the currency a
+    // fee settled in. Never the customer's details.
+    details: jsonb("details").$type<Record<string, unknown>>().default({}).notNull(),
+    // The subscription period this payment bought.
+    periodId: uuid("period_id"),
+    // False for a test-mode payment: recorded, never posted.
+    posted: boolean("posted").default(true).notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    accountIdx: index("provider_payments_account_idx").on(
+      table.accountId,
+      table.occurredAt,
+    ),
+    // Partial (payment_ref IS NOT NULL) in migration 0075.
+    paymentRefIdx: index("provider_payments_payment_ref_idx").on(
+      table.provider,
+      table.mode,
+      table.paymentRef,
+    ),
+    transactionUnique: uniqueIndex("provider_payments_transaction_unique").on(
+      table.provider,
+      table.mode,
+      table.kind,
+      table.transactionId,
+    ),
   }),
 );
 

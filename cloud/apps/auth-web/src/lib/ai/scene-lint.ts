@@ -11,6 +11,7 @@
 // warnings are delivered with the scene so the model can choose to fix them.
 // Mirrors frameos/src/frameos/interpreter.nim (edge pass) — keep in step.
 
+import { sceneYieldId } from "../events-contract.gen";
 import { appCatalog, sceneEvents, type AiAppConfig } from "./context";
 import type { JsonObject } from "./scene-utils";
 import {
@@ -19,6 +20,7 @@ import {
   isScenePermission,
   sceneAccess,
 } from "../../../../../../frontend/src/utils/sceneAccess";
+import { isBrokenLayout, sceneLayoutProblemText } from "../../../../../../frontend/src/utils/sceneLayoutRule";
 
 export type LintLevel = "error" | "warning";
 
@@ -314,7 +316,7 @@ export function lintCodeNodeJs(code: string, argNames: string[] = []): string[] 
   }
   if (/\bframeos\s*\./.test(code)) {
     problems.push(
-      "Code nodes have no `frameos` object (no fetchJson/fetchText/svg/image there). Fetch with a data app (data/downloadUrl + data/parseJson) wired into a codeArg, and build SVG/text as a plain string.",
+      "Code nodes have no `frameos` object (no fetchJson/fetchText/svg/image there). Fetch with a data app (data/downloadUrl + data/parseJson) wired into a codeArg. A drawing is a scene-local app.tsx whose get() returns JSX, not a code node.",
     );
   }
   if (/\bfetch\s*\(/.test(code) || /\bXMLHttpRequest\b/.test(code)) {
@@ -438,7 +440,7 @@ export function lintJsAppSource(source: string, category?: string): string[] {
   // wired into a render/image node — the Weather sample's weatherPanel.
   if (category === "render") {
     problems.push(
-      'scene-local apps with category "render" draw nothing in the runtime. Make it category "data" with `export function get(app, context)` returning frameos.svg(...) (output [{name:"image", type:"image"}]) and wire its fieldOutput into a render/image node\'s "image" field.',
+      'scene-local apps with category "render" draw nothing in the runtime. Make it category "data" with an app.tsx whose `export function get(app, context)` returns JSX (an <svg> or a UI; output [{name:"image", type:"image"}]) and wire its fieldOutput into a render/image node\'s "image" field.',
     );
   } else if (exported && category === "logic" && !exported.has("run")) {
     problems.push(
@@ -481,6 +483,22 @@ function mainAppSource(sources: JsonObject | undefined): { file: string; source:
 // the whole document; <defs> is read for its gradients only, so the tags
 // below fail inside it too. Gradients must be userSpaceOnUse.
 const SVG_UNSUPPORTED_TAGS = /<\s*(use|image|filter|mask|clipPath|pattern|style|foreignObject|symbol|marker|switch)\b/;
+
+// A drawing the scene makes is JSX (docs/scene-guide.md "Drawing with JSX"):
+// the frame reads it straight into the drawing, where markup built in a
+// string is built, parsed and escaped on every render.
+const SVG_MARKUP_OPENING = /<\s*svg\b/i;
+const DRAW_WITH_JSX =
+  'Draw it with a scene-local app.tsx whose get() returns JSX (an <svg viewBox> sized from context.imageWidth/imageHeight, or a UI) wired into render/image\'s "image" field: nothing to build or escape, and faster on the frame.';
+
+// JavaScript source without its comments, for the markup scans: a comment
+// that mentions "<svg>" ("returns an <svg> sized to the canvas") is not
+// markup, and read as one it failed the viewBox rule. Block comments, and
+// line comments that start a line; a `//` after code on the same line may be
+// a URL inside a string, so it stays.
+export function withoutJsComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^[ \t]*\/\/.*$/gm, "");
+}
 
 export function lintSvgMarkup(markup: string): string[] {
   const problems: string[] = [];
@@ -557,6 +575,10 @@ export function lintScene(
   const edges = Array.isArray(scene.edges) ? scene.edges.map(obj).filter(Boolean) as JsonObject[] : [];
   const sceneApps = obj(scene.apps);
   const settings = obj(scene.settings) ?? {};
+
+  if (isBrokenLayout(scene)) {
+    push("error", `settings.isLayout is set, but this scene cannot be a layout. ${sceneLayoutProblemText(scene)}`);
+  }
 
   // --- scene fields -------------------------------------------------------
   const declaredFields = new Map<string, JsonObject>();
@@ -701,8 +723,14 @@ export function lintScene(
         // Only the main module is held to the get()/run() contract; helpers
         // export whatever app.ts imports from them.
         const contract = mainAppSourceFile.test(file) ? lintJsAppSource(content, sceneAppCategory(obj(raw))) : [];
-        for (const problem of [...contract, ...lintAppImports(file, content, fileNames), ...lintSvgMarkup(content)]) {
+        const code = withoutJsComments(content);
+        for (const problem of [...contract, ...lintAppImports(file, content, fileNames), ...lintSvgMarkup(code)]) {
           push("error", `Scene app "${keyword}" (${file}): ${problem}`);
+        }
+        // A catalog template (it has an origin) is the catalog's to convert.
+        const markupInFile = /\bframeos\.svg\s*\(/.test(code) || (!/\.(tsx|jsx)$/.test(file) && SVG_MARKUP_OPENING.test(code));
+        if (markupInFile && !str(obj(raw)?.origin)) {
+          push("warning", `Scene app "${keyword}" (${file}) builds SVG markup as a string. ${DRAW_WITH_JSX}`);
         }
         const fixed = hardcodedCanvasSize(content);
         if (fixed) {
@@ -841,8 +869,12 @@ export function lintScene(
         const argNames = (Array.isArray(data.codeArgs) ? data.codeArgs : [])
           .map((arg) => str(obj(arg)?.name))
           .filter((name): name is string => Boolean(name));
-        for (const problem of [...lintCodeNodeJs(code, argNames), ...lintSvgMarkup(code)]) {
+        const codeOnly = withoutJsComments(code);
+        for (const problem of [...lintCodeNodeJs(code, argNames), ...lintSvgMarkup(codeOnly)]) {
           push("error", problem, id);
+        }
+        if (SVG_MARKUP_OPENING.test(codeOnly)) {
+          push("warning", `Code node builds SVG markup as a string. ${DRAW_WITH_JSX}`, id);
         }
         const fixed = hardcodedCanvasSize(code);
         if (fixed) {
@@ -860,7 +892,7 @@ export function lintScene(
       if (IMAGE_LIKE.has(str(obj(outputs[0])?.type) ?? "")) {
         push(
           "error",
-          'Code nodes cannot output images (codeOutputs type "image"). To draw generated SVG, output a "string" and feed it into a render/svg node\'s "svg" field; for a scene-local JS app, return frameos.svg(...) from get().',
+          'Code nodes cannot output images (codeOutputs type "image"). To draw, write a scene-local JS app whose app.tsx get() returns JSX (an <svg> or a UI; category "data", output [{name:"image", type:"image"}]) and wire its fieldOutput into a render/image node\'s "image" field.',
           id,
         );
       }
@@ -875,7 +907,7 @@ export function lintScene(
       const keyword = str(data.keyword);
       if (!keyword) {
         push("error", "Scene node has no keyword (the id of the scene to embed).", id);
-      } else if (options.allSceneIds && !options.allSceneIds.has(keyword)) {
+      } else if (keyword !== sceneYieldId && options.allSceneIds && !options.allSceneIds.has(keyword)) {
         push("warning", `Scene node embeds scene "${keyword}", which is not among the scenes provided.`, id);
       }
     } else if (type === "app") {

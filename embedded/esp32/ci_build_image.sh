@@ -225,6 +225,47 @@ fi
 require_line "^CONFIG_IDF_TARGET=\"$IDF_TARGET_NAME\"\$" "$SDKCONFIG_PATH"
 require_line "^CONFIG_ESPTOOLPY_FLASHSIZE=\"$FLASH_SIZE\"\$" "$SDKCONFIG_PATH"
 require_line "^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"$PARTITION_TABLE\"\$" "$SDKCONFIG_PATH"
+
+# pixie's raster modules, frameos/utils/resample and js_runtime/pixel_ops compile at -O2
+# (components/frameos_nim/CMakeLists.txt FRAMEOS_NIM_HOT_MODULES, matched by
+# the generated C file's name). A name the list does not match is silently -Os:
+# the list once held only the ROT13'd names nixpkgs' Nim writes, and every
+# image built with the official Nim (this one) drew DVD Logo Bounce on the
+# SenseCAP Indicator ~5 ms a frame slower, unnoticed (2026-11-10).
+if [[ "$CHIP" == "esp32-s3" ]]; then
+    python3 - "$BUILD_DIR/compile_commands.json" <<'PY'
+import json
+import sys
+
+commands = json.load(open(sys.argv[1]))
+hot = {
+    "pixie/paths": ("@spixie@spaths.nim.c", "@fcvkvr@fcnguf.nim.c"),
+    "pixie/images": ("@spixie@simages.nim.c", "@fcvkvr@fvzntrf.nim.c"),
+    "pixie/blends": ("@spixie@sblends.nim.c", "@fcvkvr@foyraqf.nim.c"),
+    "pixie/internal": ("@spixie@sinternal.nim.c", "@fcvkvr@fvagreany.nim.c"),
+    "pixie/rgb565": ("@spixie@srgb565.nim.c", "@fcvkvr@feto565.nim.c"),
+    "pixie/common": ("@spixie@scommon.nim.c", "@fcvkvr@fpbzzba.nim.c"),
+    "frameos/utils/resample": ("@sframeos@sutils@sresample.nim.c", "@fsenzrbf@fhgvyf@ferfnzcyr.nim.c"),
+    "frameos/js_runtime/pixel_ops": ("@sframeos@sjs_runtime@spixel_ops.nim.c", "@fsenzrbf@fwf_ehagvzr@fcvkry_bcf.nim.c"),
+}
+problems = []
+for module, names in hot.items():
+    entries = [c for c in commands if c["file"].endswith(names)]
+    if not entries:
+        problems.append(f"{module}: no generated C file in the build")
+        continue
+    for entry in entries:
+        command = entry.get("command") or " ".join(entry.get("arguments", []))
+        if " -O2" not in f" {command} ":
+            problems.append(f"{module}: {entry['file'].rsplit('/', 1)[-1]} built without -O2")
+if problems:
+    print("Hot Nim modules not at -O2 (components/frameos_nim/CMakeLists.txt):", file=sys.stderr)
+    for problem in problems:
+        print("  " + problem, file=sys.stderr)
+    sys.exit(1)
+print(f"hot Nim modules at -O2: {len(hot)}")
+PY
+fi
 if [[ "$OTA_SUPPORTED" == "1" ]]; then
     require_line '^CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y$' "$SDKCONFIG_PATH"
 elif grep -Eq '^CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y$' "$SDKCONFIG_PATH"; then

@@ -5,7 +5,7 @@ import {
   parseAiChatLine,
   streamAiChat,
   type AiChatEvent,
-} from "./ai-chat-client";
+} from "../../../../../frontend/src/sceneWorkspace/lib/ai-chat-client";
 
 function ndjsonResponse(chunks: string[], init: ResponseInit = {}) {
   const encoder = new TextEncoder();

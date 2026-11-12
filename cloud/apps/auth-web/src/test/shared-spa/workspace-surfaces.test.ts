@@ -28,6 +28,7 @@ import {
   isEmbeddedHardwareFrame,
   isEsp32CloudFrame,
   isPicoFrame,
+  isVirtualCloudFrame,
   isVirtualFrame,
   photosLibraryIsAvailable,
   scenesLibraryPageIsAvailable,
@@ -332,6 +333,7 @@ describe("the esp32 cloud device profile", () => {
     // Button actions (the frame's event map, 2026.10.20) renders on every
     // surface from the shared list below the cloud blocks.
     const esp32Sections = [
+      "frame-settings-layouts",
       "frame-settings-power",
       "frame-settings-palette",
       "frame-settings-colors",
@@ -348,9 +350,12 @@ describe("the esp32 cloud device profile", () => {
     // A cloud Pi still gets the full form, so its nav is untouched — except
     // Power, which only the esp32 profile renders, and Palette, which a Pi
     // edits inside the Panel fieldset (no heading of its own to link).
+    // And the Virtual frame section, which only a frame with no hardware has.
     for (const section of allowedFrameSettingsSections.cloud) {
       expect(frameSettingsSectionIsAllowed("cloud", section, piFrame), section).toBe(
-        section !== "frame-settings-power" && section !== "frame-settings-palette",
+        section !== "frame-settings-power" &&
+          section !== "frame-settings-palette" &&
+          section !== "frame-settings-virtual",
       );
     }
   });
@@ -550,12 +555,14 @@ describe("embedded-hardware frames on the backend control plane", () => {
       expect(frameSettingsSectionIsAllowed("backend", "frame-http-api-section", frame)).toBe(true);
     }
     // A Pi on the same control plane keeps all of them — except Power,
-    // which only the esp32 cloud profile renders, and the store-scene
-    // service keys, which the panel draws only while a store scene is
-    // installed.
+    // which only the esp32 cloud profile renders, the store-scene service
+    // keys, which the panel draws only while a store scene is installed, and
+    // the Virtual frame section, which only a virtual frame has.
     for (const section of allowedFrameSettingsSections.backend) {
       expect(frameSettingsSectionIsAllowed("backend", section, {})).toBe(
-        section !== "frame-settings-power" && section !== "frame-settings-store-scene-services",
+        section !== "frame-settings-power" &&
+          section !== "frame-settings-store-scene-services" &&
+          section !== "frame-settings-virtual",
       );
     }
     const withStoreScene = { scenes: [{ origin: { storeSceneId: "abc" } }] };
@@ -720,7 +727,9 @@ describe("frames the backend reaches only over their admin API", () => {
         continue;
       }
       expect(frameSettingsSectionIsAllowed("backend", section, adoptedCard)).toBe(
-        section !== "frame-settings-power" && section !== "frame-settings-store-scene-services",
+        section !== "frame-settings-power" &&
+          section !== "frame-settings-store-scene-services" &&
+          section !== "frame-settings-virtual",
       );
     }
   });
@@ -768,7 +777,7 @@ describe("the Add scene drawer's action stack", () => {
   // surfaces have is easier to explain than one that is missing.
   it("offers every add-scene action on the on-device panel", () => {
     expect(addSceneActionIsAllowed("frameAdmin", "generate")).toBe(true);
-    for (const action of ["blank", "splitScreen", "upload", "starred"] as const) {
+    for (const action of ["blank", "splitScreen", "layout", "upload", "starred"] as const) {
       expect(addSceneActionIsAllowed("frameAdmin", action)).toBe(true);
     }
   });
@@ -776,6 +785,73 @@ describe("the Add scene drawer's action stack", () => {
   it("keeps AI generation where an AI is reachable", () => {
     expect(addSceneActionIsAllowed("backend", "generate")).toBe(true);
     expect(addSceneActionIsAllowed("cloud", "generate")).toBe(true);
+  });
+});
+
+// A virtual frame on FrameOS Cloud (docs/cloud-frames.md "Virtual frames"):
+// no hardware, drawn by the cloud, shown through a link. Its device runs in
+// the frame hub and reports `platform: "virtual"`, so the workspace knows it
+// the way it knows an ESP32: by the hardware report.
+describe("virtual frames on the cloud", () => {
+  const virtualFrame = { hardware: { device: "virtual", platform: "virtual" } };
+  const piFrame = { hardware: { device: "framebuffer", platform: "rpios" } };
+
+  it("is told from hardware by its report, on the cloud only", () => {
+    expect(isVirtualCloudFrame(virtualFrame, "cloud")).toBe(true);
+    expect(isVirtualCloudFrame(piFrame, "cloud")).toBe(false);
+    expect(isVirtualCloudFrame(virtualFrame, "backend")).toBe(false);
+    expect(isVirtualCloudFrame(virtualFrame, "frameAdmin")).toBe(false);
+    // The backend's own virtual frame is embedded mode, and stays that.
+    expect(isVirtualFrame(virtualFrame)).toBe(false);
+    expect(isVirtualCloudFrame({ embedded: { platform: "virtual" } }, "cloud")).toBe(false);
+    for (const frame of [undefined, null, {}, { hardware: null }]) {
+      expect(isVirtualCloudFrame(frame, "cloud")).toBe(false);
+    }
+  });
+
+  it("keeps the panels its device answers and hides the ones it has no body for", () => {
+    for (const panel of ["overview", "settings", "preview", "schedule", "logs", "activity"] as const) {
+      expect(frameToolPanelIsAllowed("cloud", panel, virtualFrame), panel).toBe(true);
+    }
+    // No host to chart, and no assets directory: its device answers the
+    // asset write verbs `unsupported_verb`.
+    for (const panel of ["metrics", "assets", "terminal", "ping"] as const) {
+      expect(frameToolPanelIsAllowed("cloud", panel, virtualFrame), panel).toBe(false);
+    }
+    expect(sceneToolPanelIsAllowed("cloud", "assets", virtualFrame)).toBe(false);
+    expect(sceneToolPanelIsAllowed("cloud", "metrics", virtualFrame)).toBe(false);
+    expect(sceneToolPanelIsAllowed("cloud", "schedule", virtualFrame)).toBe(true);
+    // Hardware on the cloud is untouched.
+    expect(frameToolPanelIsAllowed("cloud", "assets", piFrame)).toBe(true);
+    expect(frameToolPanelIsAllowed("cloud", "metrics", piFrame)).toBe(true);
+  });
+
+  it("offers no reboot, restart, firmware update or display power", () => {
+    for (const action of ["reboot", "restart", "updateFirmware", "displayOff", "displayOn"] as const) {
+      expect(frameMenuActionIsAllowed("cloud", action, virtualFrame), action).toBe(false);
+    }
+    for (const action of ["delete", "deploy", "rename", "render"] as const) {
+      expect(frameMenuActionIsAllowed("cloud", action, virtualFrame), action).toBe(true);
+    }
+    expect(frameMenuActionIsAllowed("cloud", "reboot", piFrame)).toBe(true);
+    expect(frameMenuActionIsAllowed("cloud", "updateFirmware", piFrame)).toBe(true);
+  });
+
+  it("links the settings sections it has headings for", () => {
+    const linked = allowedFrameSettingsSections.cloud.filter((section) =>
+      frameSettingsSectionIsAllowed("cloud", section, virtualFrame),
+    );
+    expect([...linked].sort()).toEqual(["frame-settings-layouts", "frame-settings-telemetry", "frame-settings-virtual"]);
+  });
+
+  it("links the Virtual frame section on the backend for a virtual frame alone", () => {
+    const backendVirtual = { embedded: { platform: "virtual" } };
+    expect(frameSettingsSectionIsAllowed("backend", "frame-settings-virtual", backendVirtual)).toBe(true);
+    expect(frameSettingsSectionIsAllowed("backend", "frame-settings-virtual", { embedded: { platform: "esp32-s3" } })).toBe(false);
+    expect(frameSettingsSectionIsAllowed("backend", "frame-settings-virtual", { mode: "rpios" })).toBe(false);
+    // Without a frame in hand nobody can say it is virtual.
+    expect(frameSettingsSectionIsAllowed("backend", "frame-settings-virtual")).toBe(false);
+    expect(frameSettingsSectionIsAllowed("frameAdmin", "frame-settings-virtual", backendVirtual)).toBe(false);
   });
 });
 

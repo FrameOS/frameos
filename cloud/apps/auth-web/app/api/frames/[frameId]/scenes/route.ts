@@ -16,6 +16,7 @@ import {
   assignedSceneVersion,
   assignScenesToFrame,
   maxScenesPerFrame,
+  readActiveSceneState,
   readSettingsGroupsField,
   type RequestedScene,
 } from "../../../../../src/lib/frame-scenes";
@@ -26,7 +27,9 @@ import {
 } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readEventMapsField, sceneEventMapsOf } from "../../../../../src/lib/scene-event-map";
+import { readLayoutsField, sceneLayoutsOf } from "../../../../../src/lib/scene-layouts";
 import { readSession } from "../../../../../src/lib/session";
+import { frameosVersionSatisfies } from "../../../../../src/lib/store-versions";
 
 export const runtime = "nodejs";
 
@@ -59,6 +62,10 @@ export async function GET(
       declaredSettingsGroups: frameSceneAssignments.declaredSettingsGroups,
       eventMaps: frameSceneAssignments.eventMaps,
       grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
+      layouts: frameSceneAssignments.layouts,
+      // The newest version's declared minimum FrameOS (the row is the
+      // latest version's listing).
+      latestFrameosVersion: storeScenes.frameosVersion,
       latestVersion: storeScenes.latestVersion,
       position: frameSceneAssignments.position,
       sceneAccountId: storeScenes.accountId,
@@ -99,6 +106,14 @@ export async function GET(
         row.sceneStatus === "active" &&
         (row.visibility === "public" ||
           row.sceneAccountId === session.accountId);
+      const newer = assignedVersion !== null && row.latestVersion > assignedVersion;
+      // A newer version that needs a newer FrameOS than the frame reports is
+      // not offered: POST /scenes/update would refuse it
+      // (frame_update_required). The field says what the frame needs.
+      const runsOnFrame = frameosVersionSatisfies(
+        row.latestFrameosVersion,
+        frame.frameosVersion,
+      );
       return {
         assigned_version: assignedVersion,
         latest_version: row.latestVersion,
@@ -119,12 +134,15 @@ export async function GET(
         // (docs/events.md "Event map"); the workspace hydrates each scene's
         // `eventMap` from it. Absent when there is none.
         ...(sceneEventMapsOf(row.eventMaps) ? { event_maps: sceneEventMapsOf(row.eventMaps) } : {}),
+        // The layout each runtime scene wears (docs/scene-layouts.md), the
+        // same way: each scene's `layout`. Absent when there is none.
+        ...(sceneLayoutsOf(row.layouts) ? { layouts: sceneLayoutsOf(row.layouts) } : {}),
         slug: row.sceneSlug,
         // POST /scenes/update takes the frame there.
-        update_available:
-          installable &&
-          assignedVersion !== null &&
-          row.latestVersion > assignedVersion,
+        update_available: installable && newer && runsOnFrame,
+        ...(installable && newer && !runsOnFrame
+          ? { update_requires_frameos_version: row.latestFrameosVersion }
+          : {}),
         visibility: row.visibility,
       };
     }),
@@ -196,6 +214,13 @@ export async function POST(
     body.scene_id.length <= 256
       ? body.scene_id
       : undefined;
+  // Optional public field values for that scene ("Push & activate" from the
+  // scene drawer): they ride the same push, so the frame opens the scene with
+  // them instead of being asked again by a second command.
+  const activeState = readActiveSceneState(body.state);
+  if (activeState === false || (activeState && !activeSceneId)) {
+    return jsonError("invalid_state", 400);
+  }
   const requested: RequestedScene[] = [];
   for (const entry of body.scenes) {
     if (!entry || typeof entry !== "object") {
@@ -236,12 +261,18 @@ export async function POST(
     if (eventMaps === false) {
       return jsonError("invalid_scenes", 400);
     }
+    // Per-install layouts, the same way.
+    const layouts = readLayoutsField((entry as Record<string, unknown>).layouts);
+    if (layouts === false) {
+      return jsonError("invalid_scenes", 400);
+    }
     requested.push({
       sceneId,
       sceneVersion: typeof sceneVersion === "number" ? sceneVersion : null,
       ...(latest === true ? { latest } : {}),
       ...(settingsGroups ? { settingsGroups } : {}),
       ...(eventMaps !== undefined ? { eventMaps } : {}),
+      ...(layouts !== undefined ? { layouts } : {}),
     });
   }
 
@@ -257,6 +288,7 @@ export async function POST(
     frame,
     requested,
     ...(activeSceneId ? { activeSceneId } : {}),
+    ...(activeState ? { activeState } : {}),
   });
   if (!outcome.ok) {
     return jsonError(

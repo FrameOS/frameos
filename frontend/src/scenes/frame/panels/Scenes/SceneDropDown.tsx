@@ -3,8 +3,8 @@ import { frameLogic } from '../../frameLogic'
 import { scenesLogic } from './scenesLogic'
 import { DropdownMenu, DropdownMenuProps } from '../../../../components/DropdownMenu'
 import { PencilSquareIcon, TrashIcon, FlagIcon, PlayIcon } from '@heroicons/react/24/solid'
-import { frameEditorsLogic } from '../../frameEditorsLogic'
 import {
+  AdjustmentsHorizontalIcon,
   ArrowPathIcon,
   ClipboardDocumentIcon,
   CloudArrowDownIcon,
@@ -12,7 +12,6 @@ import {
   Cog6ToothIcon,
   CursorArrowRippleIcon,
   DocumentDuplicateIcon,
-  DocumentMagnifyingGlassIcon,
   FolderPlusIcon,
   TagIcon,
 } from '@heroicons/react/24/outline'
@@ -23,14 +22,14 @@ import { findConnectedScenes } from './utils'
 import { openWorkspaceSceneUtility, workspaceLogic } from '../../../workspace/workspaceLogic'
 import { ButtonMapModal } from './ButtonMapModal'
 import { buttonMapLogic } from './buttonMapLogic'
+import { sceneLayoutLogic } from './sceneLayoutLogic'
+import { SceneLayoutSettingsModal } from './SceneLayoutSettingsModal'
 
 interface SceneDropDownProps {
   sceneId: string
-  context: 'scenes' | 'editDiagram'
   className?: string
   horizontal?: boolean
   buttonColor?: DropdownMenuProps['buttonColor']
-  navigation?: 'panels' | 'workspace'
 }
 
 function isNotNull<T>(value: T | null): value is T {
@@ -42,24 +41,18 @@ export function SceneDropDown(props: SceneDropDownProps) {
   // dialog's state is the scene's, buttonMapLogic).
   const { frameId } = useValues(frameLogic)
   const { isOpen: buttonMapOpen } = useValues(buttonMapLogic({ frameId, sceneId: props.sceneId }))
+  const { settingsOpen: layoutSettingsOpen } = useValues(sceneLayoutLogic({ frameId, sceneId: props.sceneId }))
   return (
     <>
       <SceneDropDownMenu {...props} />
       {buttonMapOpen ? <ButtonMapModal frameId={frameId} sceneId={props.sceneId} /> : null}
+      {layoutSettingsOpen ? <SceneLayoutSettingsModal frameId={frameId} sceneId={props.sceneId} /> : null}
     </>
   )
 }
 
-function SceneDropDownMenu({
-  sceneId,
-  context,
-  className,
-  horizontal,
-  buttonColor,
-  navigation = 'panels',
-}: SceneDropDownProps) {
+function SceneDropDownMenu({ sceneId, className, horizontal, buttonColor }: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
-  const { editScene, editSceneJSON } = useActions(frameEditorsLogic)
   const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
   const { scenes, sceneUpdateVersions } = useValues(scenesLogic({ frameId }))
   const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON, confirmSceneUpdate } =
@@ -67,28 +60,11 @@ function SceneDropDownMenu({
   const { saveAsTemplate, saveAsZip, saveAsCloudTemplate } = useActions(templatesLogic({ frameId }))
   const { hasDriveScope } = useValues(cloudDriveLogic)
   const { openButtonMap } = useActions(buttonMapLogic({ frameId, sceneId }))
+  const { current: currentLayout } = useValues(sceneLayoutLogic({ frameId, sceneId }))
+  const { openLayoutSettings } = useActions(sceneLayoutLogic({ frameId, sceneId }))
   const scene = scenes.find((s) => s.id === sceneId)
   if (!scene) {
     return null
-  }
-  const openSceneEditor = () => {
-    if (navigation === 'workspace') {
-      navigateToScene(frameId, scene.id)
-    } else {
-      editScene(scene.id)
-    }
-  }
-  const openSceneJSON = () => {
-    if (navigation === 'workspace') {
-      openWorkspaceSceneUtility(frameId, scene.id, 'json')
-    } else {
-      editSceneJSON(scene.id)
-    }
-  }
-  const openSceneSettings = () => {
-    if (navigation === 'workspace') {
-      openWorkspaceSceneUtility(frameId, scene.id, 'info')
-    }
   }
 
   return (
@@ -105,40 +81,33 @@ function SceneDropDownMenu({
               icon: <ArrowPathIcon className="w-5 h-5" />,
             }
           : null,
-        context === 'scenes'
+        {
+          label: 'Preview',
+          onClick: () => openScenePreview(frameId, scene.id),
+          icon: <PlayIcon className="w-5 h-5" />,
+        },
+        {
+          label: 'Scene settings',
+          onClick: () => openWorkspaceSceneUtility(frameId, scene.id, 'info'),
+          icon: <Cog6ToothIcon className="w-5 h-5" />,
+        },
+        {
+          label: 'Edit scene',
+          onClick: () => navigateToScene(frameId, scene.id),
+          icon: <PencilSquareIcon className="w-5 h-5" />,
+        },
+        {
+          // The install's button map (docs/events.md "Event map").
+          label: 'Map buttons',
+          onClick: () => openButtonMap(),
+          icon: <CursorArrowRippleIcon className="w-5 h-5" />,
+        },
+        currentLayout
           ? {
-              label: 'Preview',
-              onClick: () => openScenePreview(frameId, scene.id),
-              icon: <PlayIcon className="w-5 h-5" />,
-            }
-          : null,
-        context === 'scenes' && navigation === 'workspace'
-          ? {
-              label: 'Scene settings',
-              onClick: openSceneSettings,
-              icon: <Cog6ToothIcon className="w-5 h-5" />,
-            }
-          : null,
-        context === 'scenes'
-          ? {
-              label: 'Edit scene',
-              onClick: openSceneEditor,
-              icon: <PencilSquareIcon className="w-5 h-5" />,
-            }
-          : null,
-        context === 'scenes'
-          ? {
-              label: 'Edit scene JSON',
-              onClick: openSceneJSON,
-              icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
-            }
-          : null,
-        context === 'scenes'
-          ? {
-              // The install's button map (docs/events.md "Event map").
-              label: 'Map buttons',
-              onClick: () => openButtonMap(),
-              icon: <CursorArrowRippleIcon className="w-5 h-5" />,
+              // The chosen layout's fields, for this install (docs/scene-layouts.md).
+              label: 'Layout settings',
+              onClick: () => openLayoutSettings(),
+              icon: <AdjustmentsHorizontalIcon className="w-5 h-5" />,
             }
           : null,
         {
@@ -174,13 +143,11 @@ function SceneDropDownMenu({
           onClick: () => saveAsZip({ name: scene.name ?? '', exportScenes: findConnectedScenes(scenes, scene.id) }),
           icon: <CloudArrowDownIcon className="w-5 h-5" />,
         },
-        context === 'scenes'
-          ? {
-              label: 'Duplicate',
-              onClick: () => duplicateScene(scene.id),
-              icon: <DocumentDuplicateIcon className="w-5 h-5" />,
-            }
-          : null,
+        {
+          label: 'Duplicate',
+          onClick: () => duplicateScene(scene.id),
+          icon: <DocumentDuplicateIcon className="w-5 h-5" />,
+        },
         {
           label: 'Rename',
           onClick: () => renameScene(scene.id),

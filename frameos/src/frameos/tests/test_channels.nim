@@ -1,6 +1,7 @@
-import std/[atomics, json, options, times, unittest]
+import std/[asyncdispatch, atomics, json, options, times, unittest]
 
 import ../channels
+import ../driver_abi
 import ../types
 
 proc drainEventChannel() =
@@ -159,3 +160,23 @@ suite "frameos channels":
     check okFirst
     check first
     check not okSecond
+
+  test "a producer on another thread wakes the runner":
+    # The runner's loops sleep on this event (runner.nim sleepOrWake); an
+    # input or an event queued from any thread ends the sleep.
+    let event = initRunnerWake()
+    var woken = false
+    addEvent(event, proc (fd: AsyncFD): bool =
+      woken = true
+      true)
+    var producer: Thread[void]
+    createThread(producer, proc () {.thread.} =
+      sendInputEvent(DriverInputEvent(kind: ord(dikPointerAbs).cint, x: 1, y: 2)))
+    joinThread(producer)
+    let deadline = epochTime() + 2.0
+    while not woken and epochTime() < deadline:
+      poll(50)
+    check woken
+    let (received, input) = inputChannel.tryRecv()
+    check received
+    check input.x == 1 and input.y == 2

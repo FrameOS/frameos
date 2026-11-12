@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { catalogLimits, planCatalog, planGroups } from "./plan-catalog";
+import {
+  catalogLimits,
+  planCatalog,
+  planGroups,
+  plannedFeatures,
+  plannedLimits,
+  planRowFor,
+  selfServeStops,
+} from "./plan-catalog";
 import type { PlanLimits } from "./usage";
 
 const megabyte = 1024 * 1024;
@@ -83,5 +91,66 @@ describe("the plan catalog", () => {
     const moved = planCatalog(free, "private-9").groups.flatMap((group) => group.stops);
     expect(moved.filter((stop) => stop.current).map((stop) => stop.code)).toEqual(["private-9"]);
     expect(moved.find((stop) => stop.code === "private-9")?.price_micros).toBe("9000000");
+  });
+
+  it("sells every paid stop at checkout, Private and Business", () => {
+    expect(selfServeStops().map((entry) => entry.code)).toEqual([
+      "private-2",
+      "private-5",
+      "private-9",
+      "private-29",
+      "business-49",
+      "business-99",
+      "business-199",
+      "business-499",
+    ]);
+    // Nothing is buyable until the provider has a product for it.
+    const closed = planCatalog(free, "payg").groups.flatMap((group) => group.stops);
+    expect(closed.some((stop) => stop.purchasable)).toBe(false);
+
+    const open = planCatalog(free, "payg", new Set(["private-5", "business-49"]));
+    expect(open.groups.map((group) => group.available)).toEqual([true, true, true]);
+    const buyable = open.groups.flatMap((group) => group.stops).filter((stop) => stop.purchasable);
+    expect(buyable.map((stop) => stop.code)).toEqual(["private-5", "business-49"]);
+    // The free plan is never sold.
+    expect(planCatalog(free, "payg", new Set(["payg"])).groups[0]?.stops[0]?.purchasable).toBe(false);
+  });
+
+  it("says what is planned, and does not grant it", () => {
+    const catalog = planCatalog(free, "payg");
+    expect(catalog.planned_limits).toEqual([...plannedLimits]);
+    const [, privatePlan, business] = catalog.groups;
+    expect(privatePlan?.stops[0]?.planned_features).toEqual(["share_frames"]);
+    expect(business?.stops.at(-1)?.planned_features).toEqual(["share_frames", "sso"]);
+    // Support is a promise we can keep today, and so are virtual frames.
+    expect(plannedFeatures).not.toContain("priority_support");
+    expect(plannedFeatures).not.toContain("virtual_frames");
+    expect(plannedLimits).not.toContain("cloud_rendered_frames");
+
+    const stop = selfServeStops().find((entry) => entry.code === "private-9")!;
+    const row = planRowFor(free, stop, 10_000);
+    expect(row).toMatchObject({
+      code: "private-9",
+      marginBasisPoints: 10_000,
+      name: "Private",
+      priceMicros: 9_000_000n,
+      public: true,
+    });
+    expect(row.entitlements).toEqual({
+      backup_bytes: 900 * megabyte,
+      // Virtual frames exist: the row grants the stop's own number.
+      cloud_rendered_frames: 9,
+      frame_log_bytes: 900 * megabyte,
+      frames: 80,
+      photo_bytes: 2250 * megabyte,
+      private_scene_bytes: 900 * megabyte,
+    });
+
+    const top = selfServeStops().find((entry) => entry.code === "business-499")!;
+    expect(planRowFor(free, top, 10_000)).toMatchObject({
+      entitlements: { cloud_rendered_frames: 499, frames: 999, photo_bytes: 499 * free.photoBytes },
+      name: "Business",
+      priceMicros: 499_000_000n,
+    });
   });
 });

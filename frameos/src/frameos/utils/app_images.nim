@@ -5,6 +5,7 @@ import frameos/apps
 import frameos/types
 import frameos/utils/http_client
 import frameos/utils/image
+from frameos/utils/memory import runsAsEmbedded
 
 proc contextImage*(context: ExecutionContext): Image {.inline.} =
   if context != nil and context.hasImage and not context.image.isNil:
@@ -64,8 +65,8 @@ proc renderErrorForContext*(self: AppRoot, context: ExecutionContext, message: s
   ## Error frame for image producers. On embedded the producer's success path
   ## decodes straight into the context canvas, so the error path must reuse
   ## that canvas too — a second full-frame allocation next to the live canvas
-  ## is exactly what OOMs a 16MB module.
-  when defined(frameosEmbedded):
+  ## is exactly what OOMs a 16MB module (and the preview running as one).
+  if runsAsEmbedded():
     let target = context.contextImage()
     if not target.isNil:
       # Painted before the error, or the consumer would pay the owed

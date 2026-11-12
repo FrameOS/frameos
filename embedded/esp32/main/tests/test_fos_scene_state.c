@@ -190,25 +190,109 @@ static void test_write_behind(const char *dir)
     fos_scene_state_flush(true);
     CHECK(!file_exists(UUID));
 
-    /* A fifth waiting scene writes the one that waited longest. */
-    const char *ids[5] = {"s1", "s2", "s3", "s4", "s5"};
-    for (int i = 0; i < 5; i++) {
+    /* Half the table waiting is crowded (the writer task then writes them
+     * all); a seventeenth waiting scene writes the one that waited longest. */
+    const char *ids[17] = {"s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9",
+                           "s10", "s11", "s12", "s13", "s14", "s15", "s16", "s17"};
+    for (int i = 0; i < 17; i++) {
         s_clock_ms += 1000;
+        CHECK(fos_scene_state_crowded() == (i >= 8));
         CHECK(fos_scene_state_save(ids[i], "{\"n\":1}"));
     }
     CHECK(file_exists("s1"));
     CHECK(!file_exists("s2"));
-    CHECK(!file_exists("s5"));
-    for (int i = 0; i < 5; i++) CHECK(loads_as(ids[i], "{\"n\":1}"));
+    CHECK(!file_exists("s17"));
+    for (int i = 0; i < 17; i++) CHECK(loads_as(ids[i], "{\"n\":1}"));
 
     /* Turning it off writes what waits, and later saves go straight through. */
     fos_scene_state_set_write_behind(NULL);
-    for (int i = 0; i < 5; i++) CHECK(file_exists(ids[i]));
+    for (int i = 0; i < 17; i++) CHECK(file_exists(ids[i]));
     CHECK(!fos_scene_state_pending());
+    CHECK(!fos_scene_state_crowded());
     CHECK(fos_scene_state_save(UUID, "{\"b\":2}"));
     CHECK(file_exists(UUID));
-    for (int i = 0; i < 5; i++) fos_scene_state_forget(ids[i]);
+    for (int i = 0; i < 17; i++) fos_scene_state_forget(ids[i]);
     fos_scene_state_forget(UUID);
+}
+
+/* What a load sees while a flush writes: the unlock right after the flush
+ * takes a change out is where its file write starts, outside the lock. */
+static bool s_probe = false;
+static int s_probe_seen = -1; /* 1: the change, 0: nothing, 2: the old file */
+static const char *s_probe_id = NULL;
+
+static void probe_unlock(void)
+{
+    if (!s_probe) return;
+    s_probe = false;
+    char *seen = fos_scene_state_load(s_probe_id);
+    s_probe_seen = seen == NULL ? 0 : strcmp(seen, "{\"taps\":9}") == 0 ? 1 : 2;
+    free(seen);
+}
+
+static void test_flush_outside_the_lock(const char *dir)
+{
+    fos_scene_state_set_dir(dir);
+    fos_scene_state_forget(UUID);
+    s_clock_ms = 1000;
+    fos_scene_state_write_behind_t behind = {.delay_ms = 60000, .now_ms = fake_now_ms, .unlock = probe_unlock};
+    fos_scene_state_set_write_behind(&behind);
+
+    /* The old state is on flash, the new one waits. */
+    fos_scene_state_set_write_behind(NULL);
+    CHECK(fos_scene_state_save(UUID, "{\"taps\":1}"));
+    fos_scene_state_set_write_behind(&behind);
+    CHECK(fos_scene_state_save(UUID, "{\"taps\":9}"));
+
+    /* Mid-write, a load gets the change being written, never the old file. */
+    s_probe_id = UUID;
+    s_probe = true;
+    fos_scene_state_flush(true);
+    CHECK(s_probe_seen == 1);
+    CHECK(!fos_scene_state_pending());
+    CHECK(loads_as(UUID, "{\"taps\":9}"));
+
+    /* Forgotten while it was written: the file goes anyway. */
+    CHECK(fos_scene_state_save(UUID, "{\"taps\":3}"));
+    s_probe = false;
+    behind.unlock = NULL;
+    fos_scene_state_set_write_behind(&behind);
+    fos_scene_state_forget(UUID);
+    CHECK(!file_exists(UUID));
+    fos_scene_state_set_write_behind(NULL);
+}
+
+/* A scene without state asked for it on every switch, and opening a file that
+ * is not there walks all of SPIFFS: what the store saw missing stays missing
+ * until it writes it. */
+static void test_a_missing_file_is_remembered(const char *dir)
+{
+    fos_scene_state_set_dir(dir);
+    fos_scene_state_set_write_behind(NULL);
+    fos_scene_state_forget("ghost");
+    CHECK(fos_scene_state_load("ghost") == NULL);
+    /* Written behind its back: it knows there is none and does not look. */
+    char path[128];
+    CHECK(fos_scene_state_path("ghost", path, sizeof(path)));
+    FILE *f = fopen(path, "wb");
+    fputs("{\"x\":1}", f);
+    fclose(f);
+    CHECK(fos_scene_state_load("ghost") == NULL);
+    /* Its own write: there is one now, and emptied there is none again. */
+    CHECK(fos_scene_state_save("ghost", "{\"x\":2}"));
+    CHECK(loads_as("ghost", "{\"x\":2}"));
+    CHECK(fos_scene_state_save("ghost", "{}"));
+    CHECK(fos_scene_state_load("ghost") == NULL);
+    /* Written behind, then saved through write-behind and flushed. */
+    s_clock_ms = 5000;
+    fos_scene_state_write_behind_t behind = {.delay_ms = 1000, .now_ms = fake_now_ms};
+    fos_scene_state_set_write_behind(&behind);
+    CHECK(fos_scene_state_save("ghost", "{\"x\":3}"));
+    fos_scene_state_flush(true);
+    fos_scene_state_set_write_behind(NULL);
+    CHECK(loads_as("ghost", "{\"x\":3}"));
+    fos_scene_state_forget("ghost");
+    CHECK(fos_scene_state_load("ghost") == NULL);
 }
 
 int main(void)
@@ -221,6 +305,8 @@ int main(void)
     }
     test_round_trip(dir);
     test_write_behind(dir);
+    test_flush_outside_the_lock(dir);
+    test_a_missing_file_is_remembered(dir);
     rmdir(dir);
     printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

@@ -3,6 +3,9 @@
 #   alias gha-runner-noble  — Ubuntu 24.04 cloud + docker + actions-runner.
 # Re-run any time to pick up a newer runner/toolchain; running slots keep
 # using the image they were launched from, new launches get the new one.
+# gha-image-refresh.sh (weekly, from its timer) runs this under a staging
+# alias and swaps the alias only after a smoke test — prefer that to a bare
+# run of this script on the live alias.
 set -euo pipefail
 
 POOL=${GHA_POOL:-parallaize-lvm}
@@ -85,7 +88,8 @@ incus stop "$BUILD"
 # Replace the alias atomically-ish: publish new, then point the alias at it.
 OLD=$(incus image list "$ALIAS" --format csv -c f 2>/dev/null | head -1 || true)
 incus publish "$BUILD" --alias "$ALIAS" --reuse \
-  description="GitHub Actions runner base (Ubuntu 24.04, runner $RUNNER_VERSION, $(date -u +%F))"
+  description="GitHub Actions runner base (Ubuntu 24.04, runner $RUNNER_VERSION, $(date -u +%F))" \
+  runner_version="$RUNNER_VERSION"
 if [ -n "$OLD" ]; then
   NEW=$(incus image list "$ALIAS" --format csv -c f | head -1)
   [ "$OLD" != "$NEW" ] && incus image delete "$OLD" || true

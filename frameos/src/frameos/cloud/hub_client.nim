@@ -1539,6 +1539,9 @@ proc copyHubConfigValues(target: FrameConfig) =
     target.device = live.device
     target.width = live.width
     target.height = live.height
+    # The hello's report of what the frame has (enrollment.nim hardwarePayload).
+    target.rotate = live.rotate
+    target.renderScale = live.renderScale
     target.serverHost = live.serverHost
     target.frameHost = live.frameHost
     target.framePort = live.framePort
@@ -1973,6 +1976,7 @@ proc runHubSession(link: HubLinkSnapshot): Future[SessionEndReason] {.async.} =
   # changes it — the `lan_access_set` verb, the frame's admin page — the
   # provider learns it from the next `state` message.
   var lastReportedLanAccess = lanAccessEnabled(frameConfig)
+  var lastReportedLooks = $frameConfig.rotate & "/" & $frameConfig.renderScale
   # Starts at the current value, so a reconnect does not announce a render that
   # happened while the link was down: the provider's own staleness check covers
   # that, and a fleet reconnecting after a hub restart must not all ask to be
@@ -2150,10 +2154,14 @@ proc runHubSession(link: HubLinkSnapshot): Future[SessionEndReason] {.async.} =
         let (sceneId, _) = getAllPublicStates()
         let display = $frameConfig.width & "x" & $frameConfig.height
         let lanAccess = lanAccessEnabled(frameConfig)
+        # A rotation or scale set on the frame's own screen: the provider's
+        # mirror follows the report (hardwarePayload).
+        let looks = $frameConfig.rotate & "/" & $frameConfig.renderScale
         if sceneId.string != lastActiveScene or display != lastReportedDisplay or
-            lanAccess != lastReportedLanAccess:
+            lanAccess != lastReportedLanAccess or looks != lastReportedLooks:
           lastActiveScene = sceneId.string
           lastReportedLanAccess = lanAccess
+          lastReportedLooks = looks
           if display != lastReportedDisplay:
             log(%*{"event": "cloud:hardware:changed", "display": display,
                    "previous": lastReportedDisplay})

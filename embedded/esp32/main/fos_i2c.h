@@ -23,13 +23,14 @@
 #include "esp_err.h"
 
 typedef enum {
-    FOS_I2C_PCF8563 = 0, /* real-time clock, 0x51 */
+    FOS_I2C_PCF8563 = 0, /* real-time clock, 0x51 (or a PCF85063 there: fos_rtc.c) */
     FOS_I2C_SHT4X = 1,   /* temperature / humidity, 0x44 */
     FOS_I2C_SY6974B = 2, /* battery charger, 0x6b */
     FOS_I2C_BQ27220 = 3, /* battery fuel gauge, 0x55 (fos_gauge.c; the reTerminal Sticky) */
     FOS_I2C_LSM6DS3 = 4, /* six-axis IMU, 0x6a (the Sticky; presence only) */
     FOS_I2C_ES8311 = 5,  /* audio DAC, 0x18 (fos_codec.c; the Waveshare PhotoPainter and 13.3E6) */
     FOS_I2C_ES7210 = 6,  /* audio ADC, 0x40 (fos_codec.c; the same two) */
+    FOS_I2C_AXP2101 = 7, /* PMIC with a fuel gauge, 0x34 (fos_gauge.c; the Waveshare PhotoPainter) */
     FOS_I2C_CHIP_COUNT
 } fos_i2c_chip_t;
 

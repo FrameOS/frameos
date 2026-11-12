@@ -57,9 +57,20 @@ export function InstallSceneModal(): JSX.Element | null {
           >
             Cancel
           </button>
+          {target.kind === 'install' ? (
+            // Installed, pushed (that scene alone) and shown on each frame now.
+            <button
+              type="button"
+              onClick={() => install(true)}
+              disabled={installing || selectedFrameIds.length === 0}
+              className="frameos-form-control h-10 rounded-xl border px-4 text-sm font-semibold transition hover:bg-slate-50 disabled:opacity-50"
+            >
+              Install & activate
+            </button>
+          ) : null}
           <button
             type="button"
-            onClick={install}
+            onClick={() => install()}
             disabled={installing || selectedFrameIds.length === 0}
             className="frameos-primary-action flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white disabled:opacity-50"
           >

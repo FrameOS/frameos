@@ -1,3 +1,4 @@
+import { scenesWithoutLayouts } from '../../utils/sceneLayouts'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
@@ -285,11 +286,13 @@ const allFrameSettingsSections = [
   // store-scene service keys sit above Info.
   { id: 'frame-settings-cloud', label: 'Cloud' },
   { id: 'frame-settings-store-scene-services', label: 'Service keys' },
+  { id: 'frame-settings-layouts', label: 'Layouts' },
   { id: 'frame-settings-telemetry', label: 'Log shipping' },
   { id: 'frame-settings-info', label: 'Info' },
   { id: 'frame-settings-upgrade', label: 'Update' },
   { id: 'frame-settings-power', label: 'Power' },
   { id: 'frame-settings-device', label: 'Device' },
+  { id: 'frame-settings-virtual', label: 'Virtual frame' },
   { id: 'frame-settings-ssh', label: 'SSH' },
   { id: 'frame-settings-agent', label: 'Remote' },
   { id: 'frame-settings-backend', label: 'Backend' },
@@ -319,7 +322,11 @@ function frameSettingsSectionsForFrame(
   return allFrameSettingsSections.filter((section) => frameSettingsSectionIsAllowed(mode, section.id, frame))
 }
 
-const linkableFrameSettingsSections = new Set(['frame-settings-agent', 'frame-settings-lan-access'])
+const linkableFrameSettingsSections = new Set([
+  'frame-settings-agent',
+  'frame-settings-lan-access',
+  'frame-settings-power',
+])
 
 function frameSettingsSectionFromHash(hash: string): string | null {
   const sectionId = hash.replace(/^#/, '')
@@ -680,9 +687,7 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
         </div>
       </button>
       <SceneDropDown
-        context="scenes"
         sceneId={scene.id}
-        navigation="workspace"
         horizontal
         buttonColor="none"
         className="absolute right-0 top-0 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500/80 shadow-sm backdrop-blur-sm transition hover:bg-white/95 hover:text-slate-700"
@@ -702,8 +707,7 @@ function FrameScenesSurface({
 }): JSX.Element {
   const { search } = useValues(workspaceLogic)
   const { openScheduleDrawer, openSceneControl } = useActions(workspaceLogic)
-  const { applyTemplate } = useActions(frameLogic({ frameId: frame.id }))
-  const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
+  const { applyRemoteToFrame, installTemplate } = useActions(templatesLogic({ frameId: frame.id }))
   const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
 
   const handleScenesDragOver = (event: DragEvent<HTMLDivElement>) => {
@@ -721,7 +725,7 @@ function FrameScenesSurface({
       if (templateDragData.repository) {
         applyRemoteToFrame(templateDragData.repository, templateDragData.template)
       } else {
-        applyTemplate(templateDragData.template)
+        installTemplate(templateDragData.template)
       }
       return
     }
@@ -1446,7 +1450,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
   const activeToolScrollKey = frameToolScrollKey(frameId, activeToolPanel)
   const frameToolScrollPositionsRef = useRef(frameToolScrollPositions)
   const lastObservedFrameToolScrollTopRef = useRef(0)
-  const visibleScenes = scenes
+  const visibleScenes = scenesWithoutLayouts(scenes)
   const frameLoaded = !!frame
   const toolUsesSearch = false
   const toolUsesPageScroll = toolRoute.kind === 'panel' ? frameToolUsesPageScroll(activeToolPanel) : true
@@ -1599,7 +1603,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
                   activeTool={activeToolPanel}
                   frame={frame}
                   scenes={visibleScenes}
-                  totalScenes={scenes.length}
+                  totalScenes={visibleScenes.length}
                   pageScroll={toolUsesPageScroll}
                 />
               )}

@@ -1,7 +1,7 @@
 import { AuthCard } from "../../src/components/AuthCard";
 import { SignupForm } from "../../src/components/SignupForm";
 import { safeAuthReturnPath } from "../../src/lib/auth-cookies";
-import { hasGoogleOAuth } from "../../src/lib/env";
+import { hasAppleWebSignIn, hasGoogleOAuth } from "../../src/lib/env";
 import { getTurnstileSiteKey } from "../../src/lib/turnstile";
 
 export const metadata = { title: "Create your account" };
@@ -20,6 +20,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
   return (
     <AuthCard eyebrow="Sign up" title="Create your account">
       <SignupForm
+        appleEnabled={hasAppleWebSignIn()}
         googleEnabled={hasGoogleOAuth()}
         returnTo={returnTo}
         turnstileSiteKey={getTurnstileSiteKey()}

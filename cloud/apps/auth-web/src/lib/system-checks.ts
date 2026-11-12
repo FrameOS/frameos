@@ -16,6 +16,8 @@ import { and, gt, isNotNull, sql } from "drizzle-orm";
 import { createDb, frameAssetFiles } from "@frameos-cloud/db";
 import { checkEmailDelivery } from "./email";
 import { hasDatabaseUrl } from "./env";
+import { getSupportEmail } from "./legal";
+import { stripeSetup } from "./stripe";
 import { objectStore } from "./object-store";
 import { activePhotoScanners } from "./photos/scan";
 import { getTurnstileSiteKey } from "./turnstile";
@@ -132,6 +134,17 @@ export function runSystemChecks(): SystemCheck[] {
     },
     {
       configured:
+        isSet("APPLE_TEAM_ID") &&
+        isSet("APPLE_SIGN_IN_KEY_ID") &&
+        isSet("APPLE_SIGN_IN_PRIVATE_KEY") &&
+        isSet("APPLE_SERVICES_ID"),
+      detail:
+        "Sign in with Apple, on the web (APPLE_SERVICES_ID) and in the iOS app (the key alone). The App Store requires it while the app offers Google.",
+      name: "APPLE_TEAM_ID + APPLE_SIGN_IN_KEY_ID + APPLE_SIGN_IN_PRIVATE_KEY + APPLE_SERVICES_ID",
+      required: false,
+    },
+    {
+      configured:
         isSet("POSTMARK_SERVER_TOKEN") && isSet("POSTMARK_FROM_EMAIL"),
       detail:
         "Outgoing email (verification, password resets); unsent mail is logged to the console instead.",
@@ -184,6 +197,25 @@ export function runSystemChecks(): SystemCheck[] {
       name: "FRAMEOS_LEGAL_ENTITY_* (see legal.ts)",
       required: true,
     },
+    {
+      configured: Boolean(getSupportEmail()),
+      detail:
+        "The support address in the footer and beside the plan cards. The payment provider requires one, and it must be the address in its Business Details.",
+      name: "FRAMEOS_SUPPORT_EMAIL",
+      required: false,
+    },
+    (() => {
+      const stripe = stripeSetup();
+      return {
+        configured: Boolean(stripe.config),
+        detail: stripe.config
+          ? `Paid plans are sold through Stripe in ${stripe.config.mode} mode${stripe.config.automaticTax ? ", with Stripe Tax" : ", WITHOUT Stripe Tax: no VAT is charged"} (docs/billing.md). /admin/billing/payments checks the webhook and the tax settings.`
+          : (stripe.problem ??
+            "Paid plans cannot be bought: the plan cards say “Contact support”. Set both with STRIPE_MODE to sell them (docs/billing.md)."),
+        name: "STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET",
+        required: false,
+      };
+    })(),
   ];
 }
 

@@ -8,13 +8,14 @@
 // Protocol: a single JSON object on stdin
 //   {assetsDir, width, height, name, timeZone, settingsJson, scenesJson,
 //    sceneId, statesJson, frameAssetsRoot, saveAssetsJson, assetsWriteBudget,
-//    controlEventsJson, deviceInputJson}
+//    controlEventsJson, deviceInputJson, nowMs, frameJson, keptStateJson}
 // and exactly width*height*4 bytes of RGBA on stdout on success (exit 0).
 // All logs go to stderr; any failure exits non-zero with a message there.
 // statesJson ({sceneId: stateObject}) seeds backend-persisted scene state;
 // after a successful render the post-render state is reported on stderr as
 // one `__FRAMEOS_SCENE_STATE__{"sceneId":...,"state":...}` line, which the
-// Python caller parses. frameAssetsRoot is a host directory whose files are
+// Python caller parses (with `palette`, `nextSleep` and `refreshInterval`
+// from bundles that report them). frameAssetsRoot is a host directory whose files are
 // preloaded into the wasm MEMFS under /srv/assets, so scene apps that read
 // frame assets (photo folders etc.) see them like on-device files.
 // saveAssetsJson carries the frame's saveAssets config into the runtime;
@@ -25,18 +26,35 @@
 // `__FRAMEOS_SAVED_ASSETS__{"files":[...],"skippedOverBudget":n}` line.
 // controlEventsJson ([{name, payload, origin}]) is the events a control plane
 // sent a thin client since its last pull, and deviceInputJson ({nowMs,
-// edges}) the button edges it saw; the scene hears both before the render.
+// edges?, events?}) what it relayed: the Pico's button edges, an ESP32's
+// events from its own producers, each with its origin; the scene hears both
+// before the render. nowMs (epoch milliseconds) is the time the scene is told
+// it is: a picture drawn ahead of a sleeping frame's wake
+// (docs/server-rendering.md). frameJson ({eventMap?, palette?, colors?,
+// pixelFormat?, gpioButtons?, rotate?}) is what else of frame.json the
+// frame's own runtime keeps (frameos_wasm_set_frame). The state line also
+// carries `palette`: a photo's own dither palette in effect after the render
+// (["#rrggbb", …], [] for none), which the packer dithers to first.
+// keptStateJson is what the frame's last render process kept for the next
+// (frameos_wasm_kept_state): the UIs on the glass (the field with the
+// keyboard, its text, how far a list scrolled), put back before anything lays
+// them out, and what each app kept with frameos.remember. The state line
+// carries what this render keeps as `keptState` (a JSON string, "{}" for
+// nothing), from bundles that have the exports (docs/server-rendering.md
+// "Kept between pulls").
 //
 // Sandbox posture: user scene code (QuickJS) runs inside the wasm module,
 // never natively in Node. Its host hooks are logging and the synchronous
 // XHR bridge (tools/wasm/frameos_library.js); the shim below implements
 // that bridge so scene apps' HTTP works exactly like on a physical frame —
-// the device fetches xkcd/weather/etc directly, and so does this. Like on
-// the device, scene HTTP is kept off the local network unless the frame's
-// `network.allowLocalNetworkAccess` says otherwise (`allowLocalNetwork` in
-// the request): every hop of a redirect chain is resolved and classified
-// before it is connected, credentials are dropped when a redirect leaves the
-// origin, and the cloud metadata address is always refused. This is the
+// the device fetches xkcd/weather/etc directly, and so does this. What scene
+// HTTP may reach is the request's `networkPolicy` (the Python caller's
+// scene_network_policy): public addresses only; those and the LAN and VPN
+// ranges a physical frame rendered here could reach itself; or everything
+// (`network.allowLocalNetworkAccess` on). Every hop of a redirect chain is
+// resolved and classified before it is connected, credentials are dropped
+// when a redirect leaves the origin, and the cloud metadata address is always
+// refused. This is the
 // third runtime scene code runs in (after the Pi and the ESP32) and it sits
 // on the backend's own network — the HA add-on network or the host LAN — so
 // it needs the same guard the other two have. The wasm module has no
@@ -60,55 +78,87 @@ const zlib = require('node:zlib');
 const chunks = [];
 process.stdin.on('data', (c) => chunks.push(c));
 
-// The address classes scene HTTP may not reach unless the frame allows local
-// network access: everything that is not a public unicast address. Same
-// families the device runtimes refuse (frameos/src/frameos/utils/http_client.nim
+// Where an address is, for the frame's network policy
+// (docs/server-rendering.md, "The scene's network"):
+//   'private' — a LAN or VPN a frame itself could reach: 10/8, 172.16/12,
+//               192.168/16, 100.64/10 (carrier NAT, Tailscale's range) and
+//               fc00::/7;
+//   'host'    — the backend host's own, never the frame's network: unspecified,
+//               loopback, link-local (the cloud metadata service), 192.0.0/24,
+//               benchmarking, multicast and reserved, and the IPv6 forms that
+//               embed an IPv4 address (6to4, NAT64);
+//   'public'  — every other address.
+// 'private' and 'host' together are what the device runtimes refuse without
+// local network access (frameos/src/frameos/utils/http_client.nim
 // isLocalNetworkAddress, embedded fos_netguard.c).
-function isLocalAddress(address) {
+function addressClass(address) {
   if (net.isIPv4(address)) {
     const [a, b, c] = address.split('.').map(Number);
-    return (
-      a === 0 || a === 10 || a === 127 ||
-      (a === 100 && b >= 64 && b <= 127) ||          // 100.64/10 carrier NAT
-      (a === 169 && b === 254) ||                    // link-local, cloud metadata
+    if (
+      a === 10 ||
       (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 0 && c === 0) ||           // 192.0.0/24
       (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127)             // 100.64/10 carrier NAT
+    ) {
+      return 'private';
+    }
+    if (
+      a === 0 || a === 127 ||
+      (a === 169 && b === 254) ||                    // link-local, cloud metadata
+      (a === 192 && b === 0 && c === 0) ||           // 192.0.0/24
       (a === 198 && (b === 18 || b === 19)) ||       // benchmarking
       a >= 224                                       // multicast, reserved, broadcast
-    );
+    ) {
+      return 'host';
+    }
+    return 'public';
   }
-  if (!net.isIPv6(address)) return true;
+  if (!net.isIPv6(address)) return 'host';
   const lower = address.toLowerCase();
   const mapped = lower.match(/^(?:0*:)*ffff:(\\d+\\.\\d+\\.\\d+\\.\\d+)$/) || lower.match(/^::ffff:([0-9a-f]+):([0-9a-f]+)$/);
   if (mapped) {
     if (mapped[2] !== undefined) {
       const hi = parseInt(mapped[1], 16);
       const lo = parseInt(mapped[2], 16);
-      return isLocalAddress([hi >> 8, hi & 255, lo >> 8, lo & 255].join('.'));
+      return addressClass([hi >> 8, hi & 255, lo >> 8, lo & 255].join('.'));
     }
-    return isLocalAddress(mapped[1]);
+    return addressClass(mapped[1]);
   }
-  if (lower === '::' || lower === '::1') return true;
+  if (lower === '::' || lower === '::1') return 'host';
+  if (lower.startsWith('fd00:ec2::')) return 'host';      // AWS metadata, inside fc00::/7
   const firstWord = parseInt(lower.split(':')[0] || '0', 16);
-  if ((firstWord & 0xfe00) === 0xfc00) return true;     // fc00::/7 unique local
-  if ((firstWord & 0xffc0) === 0xfe80) return true;     // fe80::/10 link-local
-  if ((firstWord & 0xff00) === 0xff00) return true;     // multicast
-  if (firstWord === 0x2002) return true;                // 6to4 (embeds an IPv4)
-  if (lower.startsWith('64:ff9b:')) return true;        // NAT64
-  if (lower.startsWith('fd00:ec2::')) return true;      // AWS metadata
-  return false;
+  if ((firstWord & 0xfe00) === 0xfc00) return 'private';  // fc00::/7 unique local
+  if ((firstWord & 0xffc0) === 0xfe80) return 'host';     // fe80::/10 link-local
+  if ((firstWord & 0xff00) === 0xff00) return 'host';     // multicast
+  if (firstWord === 0x2002) return 'host';                // 6to4 (embeds an IPv4)
+  if (lower.startsWith('64:ff9b:')) return 'host';        // NAT64
+  return 'public';
+}
+
+// What scene HTTP may reach (the Python caller decides, embedded_render.py
+// scene_network_policy): 'public' only public addresses, 'private' the LAN
+// and VPN ranges as well (a physical frame rendered on the server, which
+// could reach them itself), 'all' everything but the cloud metadata address
+// (network.allowLocalNetworkAccess on). A request from an older caller says
+// allowLocalNetwork instead.
+const NETWORK_POLICIES = ['public', 'private', 'all'];
+function networkPolicyOf(request) {
+  if (NETWORK_POLICIES.includes(request.networkPolicy)) return request.networkPolicy;
+  return request.allowLocalNetwork === true ? 'all' : 'public';
 }
 
 const METADATA_HOSTS = new Set(['169.254.169.254', 'fd00:ec2::254', 'metadata.google.internal', 'metadata']);
 const CROSS_ORIGIN_HEADERS = ['authorization', 'proxy-authorization', 'cookie', 'x-api-key'];
 
-function refusal(address, allowLocal) {
+function refusal(address, policy) {
   if (METADATA_HOSTS.has(address)) return 'blocked: cloud metadata address';
-  if (!allowLocal && isLocalAddress(address)) {
-    return 'blocked: local network access is off for this frame (network.allowLocalNetworkAccess)';
+  const where = addressClass(address);
+  if (where === 'public' || policy === 'all') return null;
+  if (where === 'private' && policy === 'private') return null;
+  if (where === 'host' && policy === 'private') {
+    return "blocked: the backend's own addresses (loopback, link-local, reserved) are off for this frame (network.allowLocalNetworkAccess)";
   }
-  return null;
+  return 'blocked: local network access is off for this frame (network.allowLocalNetworkAccess)';
 }
 
 // The check sits in the socket's own lookup (node:http, not fetch): the
@@ -116,13 +166,13 @@ function refusal(address, allowLocal) {
 // answer a first lookup with a public address and the connect's with a
 // private one (DNS rebinding). A name with any refused address is refused as
 // a whole.
-function guardedLookup(allowLocal) {
+function guardedLookup(policy) {
   return (hostname, options, callback) => {
     dns.lookup(hostname, { ...options, all: true, verbatim: true }, (error, records) => {
       if (error) return callback(error);
       if (records.length === 0) return callback(new Error('host did not resolve'));
       for (const record of records) {
-        const reason = refusal(record.address, allowLocal);
+        const reason = refusal(record.address, policy);
         if (reason) return callback(new Error(reason));
       }
       if (options && options.all) return callback(null, records);
@@ -133,7 +183,7 @@ function guardedLookup(allowLocal) {
 
 // What the lookup never sees: the scheme, a metadata host name, and a literal
 // address, which the connect uses as is.
-function checkTarget(url, allowLocal) {
+function checkTarget(url, policy) {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error('blocked: only http(s) URLs');
   }
@@ -142,7 +192,7 @@ function checkTarget(url, allowLocal) {
     throw new Error('blocked: cloud metadata address');
   }
   if (net.isIP(host)) {
-    const reason = refusal(host, allowLocal);
+    const reason = refusal(host, policy);
     if (reason) throw new Error(reason);
   }
 }
@@ -181,15 +231,15 @@ process.stdin.on('end', async () => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), req.timeoutMs || 30000);
   try {
-    const allowLocal = req.allowLocalNetwork === true;
-    const lookup = guardedLookup(allowLocal);
+    const policy = networkPolicyOf(req);
+    const lookup = guardedLookup(policy);
     let url = new URL(req.url);
     let method = req.method;
     let headers = { ...(req.headers || {}) };
     let body = req.bodyBase64 ? Buffer.from(req.bodyBase64, 'base64') : undefined;
     let response;
     for (let hop = 0; ; hop++) {
-      checkTarget(url, allowLocal);
+      checkTarget(url, policy);
       response = await requestOnce(url, method, headers, body, lookup, controller.signal);
       if (![301, 302, 303, 307, 308].includes(response.statusCode)) break;
       const location = response.headers.location;
@@ -222,7 +272,7 @@ process.stdin.on('end', async () => {
 `
 
 // Set once the request has been read; the XHR shim is installed before that.
-let ALLOW_LOCAL_NETWORK = false
+let NETWORK_POLICY = 'public'
 
 class SyncXMLHttpRequest {
   open(method, url) {
@@ -246,7 +296,7 @@ class SyncXMLHttpRequest {
       headers: this._headers,
       timeoutMs: this.timeout || 30000,
       bodyBase64: body ? Buffer.from(body).toString('base64') : '',
-      allowLocalNetwork: ALLOW_LOCAL_NETWORK,
+      networkPolicy: NETWORK_POLICY,
     }
     const child = spawnSync(process.execPath, ['-e', FETCH_CHILD_SCRIPT], {
       input: JSON.stringify(request),
@@ -296,9 +346,24 @@ async function readStdin() {
 
 const request = JSON.parse(await readStdin())
 const { assetsDir, width, height } = request
-// The frame's network.allowLocalNetworkAccess, decided by the Python caller.
-// Off by default, exactly like on the device.
-ALLOW_LOCAL_NETWORK = request.allowLocalNetwork === true
+// The scene's clock (docs/server-rendering.md "Deep sleep"): a picture drawn
+// ahead of a sleeping frame's wake renders as of the wake's render time, so a
+// clock face shows the minute the frame wakes into. Emscripten reads the wall
+// clock through Date.now (`_emscripten_date_now`, behind clock_gettime and so
+// QuickJS's Date and Nim's times), so shifting it here, before the module is
+// made, shifts the scene's time and nothing else: the scene's HTTP runs in
+// child processes (FETCH_CHILD_SCRIPT) on their own, real clock, and the
+// timers above are not read from Date.
+if (Number.isFinite(request.nowMs)) {
+  const realNow = Date.now
+  const offsetMs = request.nowMs - realNow()
+  Date.now = () => realNow() + offsetMs
+}
+// What the scene's HTTP may reach, decided by the Python caller
+// (embedded_render.py scene_network_policy); public only when it says nothing.
+NETWORK_POLICY = ['public', 'private', 'all'].includes(request.networkPolicy)
+  ? request.networkPolicy
+  : request.allowLocalNetwork === true ? 'all' : 'public'
 if (!assetsDir || !Number.isInteger(width) || !Number.isInteger(height)) {
   fail('assetsDir, width and height are required')
 }
@@ -348,6 +413,16 @@ if (request.deviceLimits) {
   } catch (error) {
     process.stderr.write(`embedded_wasm_render: device simulation unavailable (${error})\n`)
   }
+  // The canvas the device keeps (565 on a 13.3" colour panel with 8 MB): one
+  // for every render, as the frame draws. Old bundles predate the export and
+  // draw a fresh RGBX canvas, which the ceiling was worked out for.
+  if (request.deviceLimits.embedded && request.deviceLimits.canvasBytesPerPixel) {
+    try {
+      call('frameos_wasm_set_canvas_bits_per_pixel', null, ['number'], [request.deviceLimits.canvasBytesPerPixel * 8])
+    } catch (error) {
+      process.stderr.write(`embedded_wasm_render: device canvas unavailable (${error})\n`)
+    }
+  }
 }
 // The frame's render scale (frame.json `renderScale`): what a UI from a
 // .tsx/.jsx app is laid out for. Sent only when the frame set one; without
@@ -358,6 +433,19 @@ if (typeof request.renderScale === 'number' && request.renderScale > 0) {
     call('frameos_wasm_set_render_scale', null, ['number'], [request.renderScale])
   } catch (error) {
     process.stderr.write(`embedded_wasm_render: render scale unavailable (${error})\n`)
+  }
+}
+// What else of frame.json the frame's own runtime keeps: its event map, its
+// palette and colours (so the automatic fit aims at what the panel shows),
+// its buttons and its rotation (where a relayed touch landed). Before the
+// scenes load. Old bundles predate the export and render without them.
+if (request.frameJson) {
+  try {
+    if (!call('frameos_wasm_set_frame', 'boolean', ['string'], [request.frameJson])) {
+      process.stderr.write(`embedded_wasm_render: frame settings refused: ${lastError()}\n`)
+    }
+  } catch (error) {
+    process.stderr.write(`embedded_wasm_render: frame settings unavailable (${error})\n`)
   }
 }
 const memoryStat = (name) => {
@@ -408,6 +496,21 @@ if (request.statesJson) {
         break
       }
     }
+  }
+}
+
+// What the frame's last render process kept, put back before the events and
+// the render below: the UIs on the glass (without it the keyboard a tap
+// brought up is gone by the next pull, and the tap on one of its keys lands
+// on the form under it) and the apps' remembered values. Bundles from before
+// the export cannot; their UIs and apps start afresh every pull, as they did.
+if (request.keptStateJson && typeof Module._frameos_wasm_set_kept_state === 'function') {
+  try {
+    if (!call('frameos_wasm_set_kept_state', 'boolean', ['string'], [String(request.keptStateJson)])) {
+      process.stderr.write(`embedded_wasm_render: kept state refused: ${lastError()}\n`)
+    }
+  } catch (error) {
+    process.stderr.write(`embedded_wasm_render: kept state unavailable (${error})\n`)
   }
 }
 
@@ -559,9 +662,11 @@ if (request.controlEventsJson) {
   }
 }
 
-// The button edges a thin client saw since its last pull: the scene hears
-// them as the board's driver before this render (frameos/relayed_input.nim).
-// Bundles from before the export cannot; the press then only re-renders.
+// What a thin client relayed since its last pull: the Pico's button edges as
+// its driver's, an ESP32's events each from its own origin, heard before this
+// render (frameos/relayed_input.nim). Bundles from before the export cannot;
+// the press then only re-renders, and a bundle from before `events` delivers
+// the edges alone.
 if (request.deviceInputJson) {
   try {
     if (call('frameos_wasm_device_input', 'number', ['string'], [request.deviceInputJson]) < 0) {
@@ -598,10 +703,43 @@ writeBackSavedAssets()
 try {
   const info = JSON.parse(call('frameos_wasm_scene_info', 'string', [], []))
   const state = JSON.parse(call('frameos_wasm_scene_state', 'string', [], []))
+  // The scene the render ended on (a relayed key may have switched it) and
+  // a photo's own dither palette, from bundles that have the export.
+  let palette
+  try {
+    palette = JSON.parse(call('frameos_wasm_render_palette', 'string', [], []))
+  } catch {
+    palette = undefined
+  }
+  // When the scene wants its next picture (docs/server-rendering.md "When
+  // the next picture is due"): this render's nextSleep (-1: it set none) and
+  // the scene's refresh interval (0: none), from bundles that have them.
+  const timing = {}
+  for (const [key, name] of [['nextSleep', 'frameos_wasm_next_sleep'], ['refreshInterval', 'frameos_wasm_scene_interval']]) {
+    try {
+      const value = call(name, 'number', [], [])
+      if (Number.isFinite(value)) timing[key] = value
+    } catch {
+      // An older bundle: the scene's wish does not reach the board.
+    }
+  }
+  // What this process keeps for the next pull (the UIs on the glass, the
+  // apps' remembered values), as the runtime wrote it.
+  let keptState
+  if (typeof Module._frameos_wasm_kept_state === 'function') {
+    try {
+      keptState = call('frameos_wasm_kept_state', 'string', [], [])
+    } catch {
+      keptState = undefined
+    }
+  }
   process.stderr.write('__FRAMEOS_SCENE_STATE__' + JSON.stringify({
     sceneId: info.currentSceneId || request.sceneId || '',
     state,
     seeded: stateSeeded,
+    ...(Array.isArray(palette) ? { palette } : {}),
+    ...timing,
+    ...(typeof keptState === 'string' ? { keptState } : {}),
   }) + '\n')
 } catch (error) {
   process.stderr.write(`embedded_wasm_render: state readback failed: ${error}\n`)

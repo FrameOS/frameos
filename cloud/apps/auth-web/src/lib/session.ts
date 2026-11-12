@@ -55,6 +55,12 @@ function secretKey() {
 export async function createSession(
   db: ReturnType<typeof createDb>,
   profile: SessionProfile & { accountId: string },
+  options: {
+    // When the credentials were last proven, if not now: a session handed to
+    // the app keeps its browser session's (app-sign-in.ts), so a handoff
+    // never counts as a fresh sign-in for sudo mode.
+    authenticatedAt?: Date | undefined;
+  } = {},
 ) {
   // The jti makes every token unique even when the same account signs in
   // twice within one second; without it the deterministic HS256 payload
@@ -72,7 +78,10 @@ export async function createSession(
     accountId: profile.accountId,
     // A fresh sign-in is the strongest proof there is; sensitive routes
     // accept it for recentAuthMaxAgeSeconds before asking again (recent-auth.ts).
-    authenticatedAt: new Date(now),
+    authenticatedAt:
+      options.authenticatedAt && options.authenticatedAt.getTime() < now
+        ? options.authenticatedAt
+        : new Date(now),
     expiresAt: new Date(now + sessionIdleMaxAgeSeconds * 1000),
     lastUsedAt: new Date(now),
     tokenHash: hashSecret(token),

@@ -1,0 +1,865 @@
+import bumpy, chroma, common, os, fileformats/png, fontformats/opentype,
+    fontformats/svgfont, images, paints, paths,
+    strutils, unicode, vmath
+
+const
+  autoLineHeight*: float32 = -1 ## Use default line height for the font size
+  LF = Rune(10)
+  SP = Rune(32)
+
+type
+  Typeface* = ref object
+    opentype: OpenType
+    svgFont: SvgFont
+    filePath*: string
+    fallbacks*: seq[Typeface]
+    bitmapGlyphCache: Table[(Rune, int), Image] ## (rune, ppem) -> decoded PNG
+
+  Font* = ref object
+    typeface*: Typeface
+    size*: float32              ## Font size in pixels.
+    lineHeight*: float32 ## The line height in pixels or autoLineHeight for the font's default line height.
+    paints*: seq[Paint]
+    textCase*: TextCase
+    underline*: bool            ## Apply an underline.
+    strikethrough*: bool        ## Apply a strikethrough.
+    noKerningAdjustments*: bool ## Optionally disable kerning pair adjustments
+
+  Span* = ref object
+    text*: string
+    font*: Font
+
+  Arrangement* = ref object
+    lines*: seq[(int, int)]    ## The (start, stop) of the lines of text.
+    spans*: seq[(int, int)]    ## The (start, stop) of the spans in the text.
+    fonts*: seq[Font]          ## The font for each span.
+    runes*: seq[Rune]          ## The runes of the text.
+    positions*: seq[Vec2]      ## The positions of the glyphs for each rune.
+    selectionRects*: seq[Rect] ## The selection rects for each glyph.
+
+  HorizontalAlignment* = enum
+    LeftAlign
+    CenterAlign
+    RightAlign
+
+  VerticalAlignment* = enum
+    TopAlign
+    MiddleAlign
+    BottomAlign
+
+  TextCase* = enum
+    NormalCase
+    UpperCase
+    LowerCase
+    TitleCase
+    # tcSmallCaps
+    # tcSmallCapsForced
+
+proc scale*(typeface: Typeface): float32 {.inline, raises: [].} =
+  ## The scale factor to transform font units into pixels.
+  if typeface.opentype != nil:
+    typeface.opentype.head.unitsPerEm.float32
+  else:
+    typeface.svgFont.unitsPerEm
+
+proc ascent*(typeface: Typeface): float32 {.raises: [].} =
+  ## The font ascender value in font units.
+  if typeface.opentype != nil:
+    typeface.opentype.hhea.ascender.float32
+  else:
+    typeface.svgFont.ascent
+
+proc descent*(typeface: Typeface): float32 {.raises: [].} =
+  ## The font descender value in font units.
+  if typeface.opentype != nil:
+    typeface.opentype.hhea.descender.float32
+  else:
+    typeface.svgFont.descent
+
+proc lineGap*(typeface: Typeface): float32 {.raises: [].} =
+  ## The font line gap value in font units.
+  if typeface.opentype != nil:
+    result = typeface.opentype.hhea.lineGap.float32
+
+proc lineHeight*(typeface: Typeface): float32 {.inline, raises: [].} =
+  ## The default line height in font units.
+  # The descent is negative number, so this is really ascent + descent + lineGap.
+  typeface.ascent - typeface.descent + typeface.lineGap
+
+proc capHeight*(typeface: Typeface): float32 {.raises: [].} =
+  ## The font cap height value in font units.
+  if typeface.opentype != nil:
+    result = typeface.opentype.os2.sCapHeight.float32
+
+proc underlinePosition(typeface: Typeface): float32 =
+  if typeface.opentype != nil:
+    result = typeface.opentype.post.underlinePosition.float32
+
+proc underlineThickness(typeface: Typeface): float32 =
+  if typeface.opentype != nil:
+    result = typeface.opentype.post.underlineThickness.float32
+
+proc strikeoutPosition(typeface: Typeface): float32 =
+  if typeface.opentype != nil:
+    result = typeface.opentype.os2.yStrikeoutPosition.float32
+
+proc strikeoutThickness(typeface: Typeface): float32 =
+  if typeface.opentype != nil:
+    result = typeface.opentype.os2.yStrikeoutSize.float32
+
+proc isCCW(typeface: Typeface): bool {.inline.} =
+  ## Returns the expected winding order of a font.
+  if typeface.opentype != nil:
+    return typeface.opentype.isCCW()
+
+proc hasGlyph*(typeface: Typeface, rune: Rune): bool {.inline.} =
+  ## Returns if there is a glyph for this rune.
+  if typeface.opentype != nil:
+    typeface.opentype.hasGlyph(rune)
+  else:
+    typeface.svgFont.hasGlyph(rune)
+
+proc hasColorGlyph*(typeface: Typeface, rune: Rune): bool {.inline, raises: [].} =
+  ## Returns if there is a color (emoji) glyph for this rune.
+  typeface.opentype != nil and typeface.opentype.hasColorGlyph(rune)
+
+proc fallbackTypeface*(typeface: Typeface, rune: Rune): Typeface =
+  ## Looks through fallback typefaces to find one that has the glyph.
+  if typeface.hasGlyph(rune):
+    return typeface
+  for fallback in typeface.fallbacks:
+    let typeface = fallback.fallbackTypeface(rune)
+    if typeface != nil:
+      return typeface
+
+proc getGlyphPath*(
+  typeface: Typeface, rune: Rune
+): Path {.inline, raises: [PixieError].} =
+  ## The glyph path for the rune.
+  result = newPath()
+
+  let typeface2 = typeface.fallbackTypeface(rune)
+  if typeface2 == nil:
+    return
+
+  if typeface2.opentype != nil:
+    result.addPath(typeface2.opentype.getGlyphPath(rune))
+  else:
+    result.addPath(typeface2.svgFont.getGlyphPath(rune))
+
+  # Apply typeface ratio.
+  let ratio = typeface.scale / typeface2.scale
+  if ratio != 1.0:
+    result.transform(scale(vec2(ratio, ratio)))
+
+proc getAdvance*(typeface: Typeface, rune: Rune): float32 {.inline, raises: [].} =
+  ## The advance for the rune in pixels.
+  var typeface2 = typeface.fallbackTypeface(rune)
+  if typeface2 == nil:
+    # Get tofu advance, see tofu_advance test.
+    typeface2 = typeface
+
+  if typeface2.opentype != nil:
+    result = typeface2.opentype.getAdvance(rune)
+  else:
+    result = typeface2.svgFont.getAdvance(rune)
+
+  # Apply typeface ratio.
+  result *= typeface.scale / typeface2.scale
+
+proc getKerningAdjustment*(
+  typeface: Typeface, left, right: Rune
+): float32 {.inline, raises: [].} =
+  ## The kerning adjustment for the rune pair, in pixels.
+  let
+    typefaceRight = typeface.fallbackTypeface(right)
+    typefaceLeft = typeface.fallbackTypeface(left)
+  # Is there a type face that matches?
+  if typefaceRight == nil or typefaceLeft == nil:
+    return
+  # Only do kerning if both typefaces are the same.
+  if typefaceRight == typefaceLeft:
+    if typefaceRight.opentype != nil:
+      result = typefaceRight.opentype.getKerningAdjustment(left, right)
+    else:
+      result = typefaceRight.svgfont.getKerningAdjustment(left, right)
+
+    # Apply typeface ratio.
+    result *= typeface.scale / typefaceRight.scale
+
+proc scale*(font: Font): float32 {.inline, raises: [].} =
+  ## The scale factor to transform font units into pixels.
+  font.size / font.typeface.scale
+
+proc defaultLineHeight*(font: Font): float32 {.inline, raises: [].} =
+  ## The default line height in pixels for the current font size.
+  let fontUnits =
+    font.typeface.ascent - font.typeface.descent + font.typeface.lineGap
+  round(fontUnits * font.scale)
+
+proc lineGap(font: Font): float32 =
+  ## The line gap in font units for the current font size and line-height.
+  let lineHeight =
+    if font.lineHeight >= 0:
+      font.lineHeight
+    else:
+      font.defaultLineHeight
+  if lineHeight == font.defaultLineHeight:
+    font.typeface.lineGap
+  else:
+    (lineHeight / font.scale) - font.typeface.ascent + font.typeface.descent
+
+proc baselineOffset*(font: Font): float32 {.raises: [].} =
+  ## The distance in pixels from the top of a typeset block down to the
+  ## baseline of its first line. `typeset` starts the first baseline here, so
+  ## a caller that is given a baseline (SVG's `<text y=…>`, for one) positions
+  ## the arrangement at `y - font.baselineOffset`.
+  round((font.typeface.ascent + font.lineGap / 2) * font.scale)
+
+proc paint*(font: Font): Paint {.inline, raises: [].} =
+  font.paints[0]
+
+proc `paint=`*(font: Font, paint: Paint) {.inline, raises: [].} =
+  font.paints = @[paint]
+
+proc newFont*(typeface: Typeface): Font {.raises: [].} =
+  result = Font()
+  result.typeface = typeface
+  result.size = 12
+  result.lineHeight = autoLineHeight
+  result.paint = newPaint(SolidPaint)
+  result.paint.color = color(0, 0, 0, 1)
+
+proc copy*(font: Font): Font {.raises: [].} =
+  result = Font()
+  result.typeface = font.typeface
+  result.size = font.size
+  result.lineHeight = font.lineHeight
+  result.paints = font.paints
+  result.textCase = font.textCase
+  result.underline = font.underline
+  result.strikethrough = font.strikethrough
+  result.noKerningAdjustments = font.noKerningAdjustments
+
+proc newSpan*(text: sink string, font: Font): Span {.raises: [].} =
+  ## Creates a span, associating a font with the text.
+  result = Span(text: text, font: font)
+
+proc convertTextCase(runes: var seq[Rune], textCase: TextCase) =
+  case textCase:
+  of NormalCase:
+    discard
+  of UpperCase:
+    for rune in runes.mitems:
+      rune = rune.toUpper()
+  of LowerCase:
+    for rune in runes.mitems:
+      rune = rune.toLower()
+  of TitleCase:
+    var prevRune = SP
+    for rune in runes.mitems:
+      if prevRune.isWhiteSpace:
+        rune = rune.toUpper()
+      prevRune = rune
+
+proc canWrap(rune: Rune): bool {.inline.} =
+  rune == Rune(32) or rune.isWhiteSpace()
+
+proc isFormatRune(rune: Rune): bool {.inline.} =
+  ## Zero-width format runes that should not produce a glyph: zero-width
+  ## joiner and variation selectors (commonly used in emoji sequences).
+  rune.uint32 == 0x200D or
+  rune.uint32 in 0xFE00.uint32 .. 0xFE0F.uint32 or
+  rune.uint32 in 0xE0100.uint32 .. 0xE01EF.uint32
+
+proc typeset*(
+  spans: openarray[Span],
+  bounds = vec2(0, 0),
+  hAlign = LeftAlign,
+  vAlign = TopAlign,
+  wrap = true
+): Arrangement {.raises: [].} =
+  ## Lays out the character glyphs and returns the arrangement.
+  ## Optional parameters:
+  ## bounds: width determines wrapping and hAlign, height for vAlign
+  ## hAlign: horizontal alignment of the text
+  ## vAlign: vertical alignment of the text
+  ## wrap: enable/disable text wrapping
+
+  result = Arrangement()
+
+  block: # Walk and filter the spans
+    var start: int
+    for span in spans:
+      var
+        i = 0
+        rune: Rune
+        runes: seq[Rune]
+      while i < span.text.len:
+        fastRuneAt(span.text, i, rune, true)
+        # Ignore control runes (0 - 31) except LF for now.
+        # Also ignore zero-width format runes (ZWJ, variation selectors) so
+        # emoji sequences degrade gracefully into their individual emoji.
+        if (rune.uint32 >= SP.uint32 or rune.uint32 == LF.uint32) and
+          not rune.isFormatRune():
+          runes.add(rune)
+
+      if runes.len > 0:
+        runes.convertTextCase(span.font.textCase)
+        result.runes.add(runes)
+        result.spans.add((start, start + runes.len - 1))
+        result.fonts.add(span.font)
+        start += runes.len
+
+  if result.runes.len == 0:
+    return
+
+  result.positions.setLen(result.runes.len)
+  result.selectionRects.setLen(result.runes.len)
+
+  result.lines = @[(0, 0)] # (start, stop)
+
+  block: # Arrange the glyphs horizontally first (handling line breaks)
+    proc advance(font: Font, runes: seq[Rune], i: int): float32 {.inline.} =
+      if not font.noKerningAdjustments and i + 1 < runes.len:
+        result += font.typeface.getKerningAdjustment(runes[i], runes[i + 1])
+      result += font.typeface.getAdvance(runes[i])
+      result *= font.scale
+
+    var
+      at: Vec2
+      prevCanWrap: int
+    for spanIndex, (start, stop) in result.spans:
+      let font = result.fonts[spanIndex]
+      for runeIndex in start .. stop:
+        let rune = result.runes[runeIndex]
+        if rune == LF:
+          let advance = font.typeface.getAdvance(SP) * font.scale
+          result.positions[runeIndex] = at
+          result.selectionRects[runeIndex] = rect(at.x, at.y, advance, 0)
+          at.x = 0
+          at.y += 1
+          prevCanWrap = 0
+          result.lines[^1][1] = runeIndex
+          # Start a new line if we are not at the end
+          if runeIndex + 1 < result.runes.len:
+            result.lines.add((runeIndex + 1, 0))
+        else:
+          let advance = advance(font, result.runes, runeIndex)
+          if wrap and rune != SP and bounds.x > 0 and at.x + advance > bounds.x:
+            # Wrap to new line
+            at.x = 0
+            at.y += 1
+
+            var lineStart = runeIndex
+
+            # Go back and wrap glyphs after the wrap index down to the next line
+            if prevCanWrap > 0 and prevCanWrap != runeIndex:
+              for i in prevCanWrap + 1 ..< runeIndex:
+                result.positions[i] = at
+                result.selectionRects[i].xy = vec2(at.x, at.y)
+                at.x += advance(font, result.runes, i)
+                dec lineStart
+              prevCanWrap = 0
+
+            result.lines[^1][1] = lineStart - 1
+            result.lines.add((lineStart, 0))
+
+          if rune.canWrap():
+            prevCanWrap = runeIndex
+
+          result.positions[runeIndex] = at
+          result.selectionRects[runeIndex] = rect(at.x, at.y, advance, 0)
+          at.x += advance
+
+    result.lines[^1][1] = result.runes.len - 1
+
+    if hAlign != LeftAlign:
+      # Since horizontal alignment adjustments are different for each line,
+      # find the start and stop of each line of text.
+      for (start, stop) in result.lines:
+        var furthestX: float32
+        for i in countdown(stop, start):
+          if result.runes[i] != SP and result.runes[i] != LF:
+            furthestX = result.selectionRects[i].x + result.selectionRects[i].w
+            break
+
+        var xAdjustment: float32
+        case hAlign:
+          of LeftAlign:
+            discard
+          of CenterAlign:
+            xAdjustment = (bounds.x - furthestX) / 2
+          of RightAlign:
+            xAdjustment = bounds.x - furthestX
+
+        if xAdjustment != 0:
+          for i in start .. stop:
+            result.positions[i].x += xAdjustment
+            result.selectionRects[i].x += xAdjustment
+
+  block: # Arrange the lines vertically
+    let initialY = block:
+      var maxInitialY: float32
+      block outer:
+        for spanIndex, (start, stop) in result.spans:
+          let
+            font = result.fonts[spanIndex]
+            fontUnitInitialY = font.typeface.ascent + font.lineGap / 2
+          maxInitialY = max(maxInitialY, round(fontUnitInitialY * font.scale))
+          if stop >= result.lines[0][1]:
+            break outer
+      maxInitialY
+
+    var lineHeights = newSeq[float32](result.lines.len)
+    block: # Compute each line's line height
+      var line: int
+      for spanIndex, (start, stop) in result.spans:
+        let
+          font = result.fonts[spanIndex]
+          fontLineHeight =
+            if font.lineHeight >= 0:
+              font.lineHeight
+            else:
+              font.defaultLineHeight
+        lineHeights[line] = max(lineHeights[line], fontLineHeight)
+        for runeIndex in start .. stop:
+          # This span could be many lines. This check can be made faster by
+          # hopping based on line endings instead of checking each index.
+          if line + 1 < result.lines.len and
+            runeIndex == result.lines[line + 1][0]:
+            inc line
+            lineHeights[line] = max(lineHeights[line], fontLineHeight)
+        # Handle when span and line endings coincide
+        if line + 1 < result.lines.len and stop == result.lines[line][1]:
+          inc line
+
+    block: # Vertically position the glyphs
+      var
+        line: int
+        baseline = initialY
+      for spanIndex, (start, stop) in result.spans:
+        let
+          font = result.fonts[spanIndex]
+          lineHeight =
+            if font.lineHeight >= 0:
+              font.lineHeight
+            else:
+              font.defaultLineHeight
+        for runeIndex in start .. stop:
+          if line + 1 < result.lines.len and
+            runeIndex == result.lines[line + 1][0]:
+            inc line
+            baseline += lineHeights[line]
+          result.positions[runeIndex].y = baseline
+          result.selectionRects[runeIndex].y = baseline -
+            round((font.typeface.ascent + font.lineGap / 2) * font.scale)
+          result.selectionRects[runeIndex].h = lineHeight
+
+    if vAlign != TopAlign:
+      let
+        finalSelectionRect = result.selectionRects[^1]
+        furthestY = finalSelectionRect.y + finalSelectionRect.h
+
+      var yAdjustment: float32
+      case vAlign:
+        of TopAlign:
+          discard
+        of MiddleAlign:
+          yAdjustment = round((bounds.y - furthestY) / 2)
+        of BottomAlign:
+          yAdjustment = bounds.y - furthestY
+
+      if yAdjustment != 0:
+        for i in 0 ..< result.positions.len:
+          result.positions[i].y += yAdjustment
+          result.selectionRects[i].y += yAdjustment
+
+  block: # Nudge selection rects to pixel grid
+    for rect in result.selectionRects.mitems:
+      let
+        minX = round(rect.x)
+        maxX = round(rect.x + rect.w)
+        minY = round(rect.y)
+        maxY = round(rect.y + rect.h)
+      rect.x = minX
+      rect.w = maxX - minX
+      rect.y = minY
+      rect.h = maxY - minY
+
+proc typeset*(
+  font: Font,
+  text: sink string,
+  bounds = vec2(0, 0),
+  hAlign = LeftAlign,
+  vAlign = TopAlign,
+  wrap = true
+): Arrangement {.inline, raises: [].} =
+  ## Lays out the character glyphs and returns the arrangement.
+  ## Optional parameters:
+  ## bounds: width determines wrapping and hAlign, height for vAlign
+  ## hAlign: horizontal alignment of the text
+  ## vAlign: vertical alignment of the text
+  ## wrap: enable/disable text wrapping
+  typeset([newSpan(text, font)], bounds, hAlign, vAlign, wrap)
+
+proc layoutBounds*(arrangement: Arrangement): Vec2 {.raises: [].} =
+  ## Computes the width and height of the arrangement in pixels.
+  if arrangement.runes.len > 0:
+    for i in 0 ..< arrangement.runes.len:
+      if arrangement.runes[i] != LF:
+        # Don't add width of a new line rune.
+        let rect = arrangement.selectionRects[i]
+        result.x = max(result.x, rect.x + rect.w)
+    let finalRect = arrangement.selectionRects[^1]
+    result.y = finalRect.y + finalRect.h
+    if arrangement.runes[^1] == LF:
+      # If the text ends with a new line, we need add another line height.
+      result.y += finalRect.h
+
+proc layoutBounds*(font: Font, text: string): Vec2 {.inline, raises: [].} =
+  ## Computes the width and height of the text in pixels.
+  font.typeset(text).layoutBounds()
+
+proc layoutBounds*(spans: seq[Span]): Vec2 {.inline, raises: [].} =
+  ## Computes the width and height of the spans in pixels.
+  typeset(spans).layoutBounds()
+
+proc parseOtf*(buf: string): Typeface {.raises: [PixieError].} =
+  result = Typeface()
+  result.opentype = parseOpenType(buf)
+
+proc parseTtf*(buf: string): Typeface {.raises: [PixieError].} =
+  parseOtf(buf)
+
+proc parseSvgFont*(buf: string): Typeface {.raises: [PixieError].} =
+  result = Typeface()
+  result.svgFont = svgfont.parseSvgFont(buf)
+
+proc runesPath(
+  arrangement: Arrangement, spanIndex, first, last: int, line: var int
+): Path {.raises: [PixieError].} =
+  ## The outlines of runes `first` .. `last` of a span. `line` is the line the
+  ## first of them is on, moved on past each line they end.
+  result = newPath()
+  let
+    font = arrangement.fonts[spanIndex]
+    underlineThickness = font.typeface.underlineThickness * font.scale
+    underlinePosition = font.typeface.underlinePosition * font.scale
+    strikeoutThickness = font.typeface.strikeoutThickness * font.scale
+    strikeoutPosition = font.typeface.strikeoutPosition * font.scale
+  for runeIndex in first .. last:
+    let
+      rune = arrangement.runes[runeIndex]
+      position = arrangement.positions[runeIndex]
+      runeTypeface = font.typeface.fallbackTypeface(rune)
+      path =
+        if runeTypeface != nil and runeTypeface.hasColorGlyph(rune):
+          # Color glyphs are drawn separately, see drawColorGlyphs.
+          newPath()
+        else:
+          font.typeface.getGlyphPath(rune)
+    path.transform(
+      translate(position) *
+      scale(vec2(font.scale))
+    )
+    var applyDecoration = true
+    if runeIndex == arrangement.lines[line][1]:
+      inc line
+      if arrangement.runes[runeIndex] == SP:
+        # Do not apply decoration to the space at end of lines
+        applyDecoration = false
+
+    if applyDecoration:
+      if font.underline:
+        path.rect(
+          arrangement.selectionRects[runeIndex].x,
+          position.y - underlinePosition + underlineThickness / 2,
+          arrangement.selectionRects[runeIndex].w,
+          underlineThickness,
+          font.typeface.isCCW()
+        )
+      if font.strikethrough:
+        path.rect(
+          arrangement.selectionRects[runeIndex].x,
+          position.y - strikeoutPosition,
+          arrangement.selectionRects[runeIndex].w,
+          strikeoutThickness,
+          font.typeface.isCCW()
+        )
+
+    result.addPath(path)
+
+proc computePaths*(arrangement: Arrangement): seq[Path] {.raises: [PixieError].} =
+  ## Takes an Arrangement and computes Paths for drawing.
+  ## Returns a seq of paths that match the seq of Spans in the arrangement.
+  ## If you only have one Span you will only get one Path.
+  var line: int
+  for spanIndex, (start, stop) in arrangement.spans:
+    result.add(arrangement.runesPath(spanIndex, start, stop, line))
+
+iterator linePaths(arrangement: Arrangement): tuple[spanIndex: int, path: Path] =
+  ## Each span's outlines a line of text at a time, so what a fill builds (the
+  ## path, its flattened shapes, the segments and their partitions) is one
+  ## line's and is let go before the next. Lines do not overlap, so the pixels
+  ## are the ones a single path over the whole span makes. As one path, a
+  ## 750-character caption asked an ESP32 for several buffers of 300-450 KB at
+  ## once, on top of a 1200x1600 canvas (2026-11-09).
+  var line: int
+  for spanIndex, (start, stop) in arrangement.spans:
+    var first = start
+    while first <= stop:
+      var at = line
+      while at < arrangement.lines.high and arrangement.lines[at][1] < first:
+        inc at
+      let last =
+        if at <= arrangement.lines.high: min(stop, arrangement.lines[at][1])
+        else: stop
+      yield (spanIndex, arrangement.runesPath(spanIndex, first, last, line))
+      first = last + 1
+
+proc computePath*(arrangement: Arrangement): Path {.raises: [PixieError].} =
+  ## The glyph outlines of an entire arrangement as one path, in the
+  ## arrangement's own space (y = 0 is the top of the first line). Callers that
+  ## want the outlines rather than a rasterization — vector output, or an SVG
+  ## `<text>` element that has to take the same fill, stroke, gradient and
+  ## transform treatment as any other path — start here.
+  ##
+  ## Color (bitmap) glyphs have no outline and contribute nothing; see
+  ## `fillText` for the path that draws those.
+  result = newPath()
+  for path in arrangement.computePaths():
+    result.addPath(path)
+
+proc drawColorGlyphs(
+  target: Image,
+  arrangement: Arrangement,
+  spanIndex: int,
+  transform: Mat3
+) {.raises: [PixieError].} =
+  ## Draws the color (emoji) glyphs of a span onto the target image.
+  let
+    font = arrangement.fonts[spanIndex]
+    (start, stop) = arrangement.spans[spanIndex]
+  for runeIndex in start .. stop:
+    let
+      rune = arrangement.runes[runeIndex]
+      typeface = font.typeface.fallbackTypeface(rune)
+    if typeface == nil or not typeface.hasColorGlyph(rune):
+      continue
+
+    let
+      position = arrangement.positions[runeIndex]
+      opentype = typeface.opentype
+
+    let layers = opentype.getColorGlyphLayers(rune)
+    if layers.len > 0:
+      # COLR layered vector glyph.
+      let layerScale = font.size / typeface.scale
+      for layer in layers:
+        let path = newPath()
+        path.addPath(layer.path)
+        path.transform(translate(position) * scale(vec2(layerScale)))
+        let paint = newPaint(SolidPaint)
+        paint.color =
+          if layer.useTextColor:
+            font.paint.color
+          else:
+            layer.color.color
+        target.fillPath(path, paint, transform)
+      continue
+
+    # Embedded PNG bitmap glyph (CBDT or sbix).
+    var bitmap: BitmapGlyph
+    if opentype.getBitmapGlyph(rune, font.size, bitmap):
+      let key = (rune, bitmap.ppem.int)
+      if key notin typeface.bitmapGlyphCache:
+        typeface.bitmapGlyphCache[key] = newImage(decodePng(bitmap.png))
+      let
+        image = typeface.bitmapGlyphCache.getOrDefault(key, nil)
+        bitmapScale = font.size / bitmap.ppem
+        top =
+          if bitmap.yOffsetIsBottom:
+            bitmap.yOffset + image.height.float32
+          else:
+            bitmap.yOffset
+        offset = position + vec2(bitmap.xOffset, -top) * bitmapScale
+      target.draw(
+        image, transform * translate(offset) * scale(vec2(bitmapScale))
+      )
+
+proc textUber(
+  target: Image,
+  arrangement: Arrangement,
+  transform = mat3(),
+  strokeWidth: float32 = 1.0,
+  lineCap = ButtCap,
+  lineJoin = MiterJoin,
+  miterLimit = defaultMiterLimit,
+  dashes: seq[float32] = @[],
+  stroke: static[bool] = false
+) =
+  var drawing = -1
+  for (spanIndex, path) in arrangement.linePaths():
+    let font = arrangement.fonts[spanIndex]
+    when stroke:
+      for paint in font.paints:
+        target.strokePath(
+          path,
+          paint,
+          transform,
+          strokeWidth,
+          lineCap,
+          lineJoin,
+          miterLimit,
+          dashes
+        )
+    else:
+      if drawing >= 0 and drawing != spanIndex:
+        target.drawColorGlyphs(arrangement, drawing, transform)
+      drawing = spanIndex
+      for paint in font.paints:
+        target.fillPath(path, paint, transform)
+  when not stroke:
+    if drawing >= 0:
+      target.drawColorGlyphs(arrangement, drawing, transform)
+
+proc computeBounds*(
+  arrangement: Arrangement,
+  transform = mat3()
+): Rect {.raises: [PixieError].} =
+  # A line at a time, like a fill (linePaths).
+  var
+    left = float32.high
+    top = float32.high
+    right = float32.low
+    bottom = float32.low
+  for (_, path) in arrangement.linePaths():
+    let bounds = path.computeBounds(transform)
+    if bounds.w > 0 or bounds.h > 0:
+      left = min(left, bounds.x)
+      top = min(top, bounds.y)
+      right = max(right, bounds.x + bounds.w)
+      bottom = max(bottom, bounds.y + bounds.h)
+  if right >= left:
+    result = rect(left, top, right - left, bottom - top)
+
+proc fillText*(
+  target: Image,
+  arrangement: Arrangement,
+  transform = mat3()
+) {.inline, raises: [PixieError].} =
+  ## Fills the text arrangement.
+  textUber(
+    target,
+    arrangement,
+    transform
+  )
+
+proc fillText*(
+  target: Image,
+  font: Font,
+  text: sink string,
+  transform = mat3(),
+  bounds = vec2(0, 0),
+  hAlign = LeftAlign,
+  vAlign = TopAlign
+) {.inline, raises: [PixieError].} =
+  ## Typesets and fills the text. Optional parameters:
+  ## transform: translation or matrix to apply
+  ## bounds: width determines wrapping and hAlign, height for vAlign
+  ## hAlign: horizontal alignment of the text
+  ## vAlign: vertical alignment of the text
+  fillText(target, font.typeset(text, bounds, hAlign, vAlign), transform)
+
+proc strokeText*(
+  target: Image,
+  arrangement: Arrangement,
+  transform = mat3(),
+  strokeWidth: float32 = 1.0,
+  lineCap = ButtCap,
+  lineJoin = MiterJoin,
+  miterLimit = defaultMiterLimit,
+  dashes: seq[float32] = @[]
+) {.inline, raises: [PixieError].} =
+  ## Strokes the text arrangement.
+  textUber(
+    target,
+    arrangement,
+    transform,
+    strokeWidth,
+    lineCap,
+    lineJoin,
+    miterLimit,
+    dashes,
+    true
+  )
+
+proc strokeText*(
+  target: Image,
+  font: Font,
+  text: sink string,
+  transform = mat3(),
+  strokeWidth: float32 = 1.0,
+  bounds = vec2(0, 0),
+  hAlign = LeftAlign,
+  vAlign = TopAlign,
+  lineCap = ButtCap,
+  lineJoin = MiterJoin,
+  miterLimit = defaultMiterLimit,
+  dashes: seq[float32] = @[]
+) {.inline, raises: [PixieError].} =
+  ## Typesets and strokes the text. Optional parameters:
+  ## transform: translation or matrix to apply
+  ## bounds: width determines wrapping and hAlign, height for vAlign
+  ## hAlign: horizontal alignment of the text
+  ## vAlign: vertical alignment of the text
+  ## lineCap: stroke line cap shape
+  ## lineJoin: stroke line join shape
+  strokeText(
+    target,
+    font.typeset(text, bounds, hAlign, vAlign),
+    transform,
+    strokeWidth,
+    lineCap,
+    lineJoin,
+    miterLimit,
+    dashes
+  )
+
+proc readTypeface*(filePath: string): Typeface {.raises: [PixieError].} =
+  ## Loads a typeface from a file.
+  try:
+    result =
+      case splitFile(filePath).ext.toLowerAscii():
+        of ".ttf":
+          parseTtf(readFile(filePath))
+        of ".otf":
+          parseOtf(readFile(filePath))
+        of ".svg":
+          parseSvgFont(readFile(filePath))
+        else:
+          raise newException(PixieError, "Unsupported font format")
+  except IOError as e:
+    raise newException(PixieError, e.msg, e)
+
+  result.filePath = filePath
+
+proc readTypefaces*(filePath: string): seq[Typeface] {.raises: [PixieError].} =
+  ## Loads a OpenType Collection (.ttc).
+  try:
+    for opentype in parseOpenTypeCollection(readFile(filePath)):
+      let typeface = Typeface()
+      typeface.opentype = opentype
+      result.add(typeface)
+  except IOError as e:
+    raise newException(PixieError, e.msg, e)
+
+proc name*(typeface: Typeface): string =
+  ## Returns the name of the font.
+  if typeface.opentype != nil:
+    return typeface.opentype.fullName
+
+proc readFont*(filePath: string): Font {.raises: [PixieError].} =
+  ## Loads a font from a file.
+  newFont(readTypeface(filePath))

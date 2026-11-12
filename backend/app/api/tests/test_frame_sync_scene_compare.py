@@ -26,3 +26,11 @@ def test_the_installed_copys_event_map_is_part_of_the_scene_on_the_device():
     mapped = {**device_copy, "eventMap": [{"event": "button", "match": {"label": "REFRESH"}, "as": {"label": "A"}}]}
     assert not _scene_sync_values_equal(device_copy, mapped)
     assert _scene_sync_values_equal({**device_copy, "eventMap": []}, device_copy)
+
+
+def test_the_layout_an_install_wears_is_part_of_the_scene_on_the_device():
+    # docs/scene-layouts.md: like the button map, beside the scene.
+    device_copy = {"id": "s1", "name": "Scene", "nodes": [], "edges": []}
+    wearing = {**device_copy, "layout": {"sceneId": "bar", "state": {"height": 40}}}
+    assert not _scene_sync_values_equal(device_copy, wearing)
+    assert _scene_sync_values_equal({**device_copy, "layout": {}}, device_copy)

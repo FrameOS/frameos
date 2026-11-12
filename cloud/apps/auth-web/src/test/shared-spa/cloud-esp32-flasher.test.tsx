@@ -672,6 +672,34 @@ describe("Esp32CloudFlasher", () => {
     expect(pinsSpecError("rst=99")).toMatch(/between -1/);
   });
 
+  it("asks a carrier board which panel it holds and sets it after the board", async () => {
+    mockCloudApi();
+    const port = createHealthyPort();
+    stubSerial(port);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+
+    await fillRequiredFields("hw:seeed_xiao_ee04");
+    fireEvent.change(screen.getByLabelText("Panel on this board"), {
+      target: { value: "EPD_7in3e" },
+    });
+    clickFlash();
+    await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
+
+    const hardwareIndex = port.writes.indexOf('set hardware "seeed_xiao_ee04"');
+    const panelIndex = port.writes.indexOf('set panel "EPD_7in3e"');
+    expect(hardwareIndex).toBeGreaterThanOrEqual(0);
+    expect(panelIndex).toBeGreaterThan(hardwareIndex);
+  });
+
+  it("does not ask an integrated board which panel it holds", async () => {
+    mockCloudApi();
+    stubSerial(createHealthyPort());
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+
+    await fillRequiredFields("hw:seeed_xiao_ee02");
+    expect(screen.queryByLabelText("Panel on this board")).toBeNull();
+  });
+
   it("provisions integrated boards as hardware bundles, not bare panels", async () => {
     // A PhotoPainter needs its PMIC handling, EPD wiring, buttons and SD
     // pins — `set hardware` makes the firmware apply the whole bundle.
@@ -715,12 +743,17 @@ describe("Esp32CloudFlasher", () => {
         "hw:seeed_reterminal_e1002",
         "hw:seeed_reterminal_e1003",
         "hw:seeed_reterminal_e1004",
+        "hw:seeed_xiao_ee02",
+        "hw:seeed_xiao_ee03",
+        "hw:seeed_xiao_ee04",
+        "hw:seeed_xiao_ee05",
         "hw:elecrow_crowpanel_5in79",
       ]),
     );
     expect(values).not.toContain("hw:trmnl_og");
     expect(values).not.toContain("hw:trmnl_bwry");
     expect(values).not.toContain("hw:xteink_x4");
+    expect(values).not.toContain("hw:seeed_xiao_epaper_7in5");
   });
 
   it("hides the panel picker for releases without the all-panels firmware", async () => {

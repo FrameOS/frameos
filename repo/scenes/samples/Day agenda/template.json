@@ -1,0 +1,10 @@
+{
+  "name": "Day agenda",
+  "description": "The day from an iCal feed: the date on the left, its events on the right. After the last event of the day, the next day is shown.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.0"
+}

@@ -418,10 +418,22 @@ def _wire_payload(command: FrameCommand) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if not str(key).startswith("_")}
 
 
-def frame_command_wire(command: FrameCommand) -> dict[str, Any]:
+def frame_command_wire(command: FrameCommand, *, rendered_on_server: bool = False) -> dict[str, Any]:
     """The verb as the device receives it: `{id, type, ...payload}`, the
-    cloud socket's command frame."""
-    return {**_wire_payload(command), "id": command.id, "type": command.type}
+    cloud socket's command frame.
+
+    A board rendered here (`rendered_on_server`) runs no scene: a switch or a
+    scene event only makes it pull, and the backend holds the switch's state
+    and the event already (frames.py, before the queue). So neither goes to
+    the board (docs/server-rendering.md "Nothing to keep on the board"): a
+    scene's state can hold a key typed into a field."""
+    payload = _wire_payload(command)
+    if rendered_on_server:
+        if command.type == "set_current_scene":
+            payload.pop("state", None)
+        elif command.type == "scene_event":
+            payload["payload"] = {}
+    return {**payload, "id": command.id, "type": command.type}
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -590,21 +602,27 @@ def previewed_scenes(db: Session, frame: Frame) -> list[Any] | None:
     saved list while a preview stands; None when none does.
 
     A preview is a set_scenes row carrying `_preview`: the editor's bundle
-    (its saved and unsaved scenes, app/utils/embedded_commands.py
-    queue_embedded_scene_preview), served as it is; or a push that carried
-    the previous preview along (`carried_preview`), served as the saved list
-    plus the carried scenes the list does not hold. The frame pulls either
-    like a deploy. A cancelled, superseded or discarded preview is not
-    served."""
+    (the previewed scene and the scenes it draws or switches to,
+    app/utils/embedded_commands.py queue_embedded_scene_preview), or a push
+    that carried the previous preview along (`carried_preview`). Either is
+    served as the saved list with the preview in it: a bundle scene in place
+    of the saved scene of its id, the others after the list. The frame keeps
+    its list: served alone, the bundle replaced it, so an ESP32 dropped every
+    other scene and an Activate of a saved scene found nothing; with it, a
+    patch (`?patch=1`) carries only the previewed scenes, and the Install or
+    Discard after it changes one. The frame pulls it like a deploy. A
+    cancelled, superseded or discarded preview is not served."""
     _row, preview = _standing_preview(db, frame)
     if preview is None or not isinstance(preview.get("scenes"), list):
         return None
-    scenes = _preview_scenes(preview)
-    if not preview.get("carried"):
-        return scenes
+    scenes = [s for s in _preview_scenes(preview) if isinstance(s, dict)]
     saved = [s for s in (frame.scenes or []) if isinstance(s, dict)]
-    saved_ids = {s.get("id") for s in saved}
-    return saved + [s for s in scenes if isinstance(s, dict) and s.get("id") not in saved_ids]
+    if preview.get("carried"):
+        saved_ids = {s.get("id") for s in saved}
+        return saved + [s for s in scenes if s.get("id") not in saved_ids]
+    bundle = {s.get("id"): s for s in scenes}
+    merged = [bundle.pop(s.get("id"), s) for s in saved]
+    return merged + [s for s in scenes if s.get("id") in bundle]
 
 
 def scene_preview_info(db: Session, frame: Frame) -> dict[str, Any] | None:

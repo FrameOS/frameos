@@ -25,15 +25,15 @@ import { POST as resetConfirm } from "../../../app/api/auth/reset/confirm/route"
 import { POST as resetRequest } from "../../../app/api/auth/reset/request/route";
 import { POST as signup } from "../../../app/api/auth/signup/route";
 import { POST as verifyEmail } from "../../../app/api/auth/verify-email/route";
-import { POST as googleLink } from "../../../app/api/auth/google/link/route";
+import { POST as googleLink } from "../../../app/api/auth/link/route";
 import LoginPage from "../../../app/login/page";
 import { confirmEmailVerification } from "../../lib/email-verification";
-import { resolveGoogleSignIn } from "../../lib/google-account";
+import { resolveGoogleSignIn } from "../../lib/provider-account";
 import {
-  createPendingGoogleLinkToken,
-  pendingGoogleLinkCookieName,
-  readPendingGoogleLinkToken,
-} from "../../lib/google-link";
+  createPendingLinkToken as createPendingGoogleLinkToken,
+  pendingLinkCookieName as pendingGoogleLinkCookieName,
+  readPendingLinkToken as readPendingGoogleLinkToken,
+} from "../../lib/provider-link";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSecretToken, hashSecret } from "../../lib/secrets";
 import {
@@ -815,7 +815,7 @@ describe("google sign-in merging", () => {
     body: Record<string, unknown>,
   ) {
     const cookie = pending ? await createPendingGoogleLinkToken(pending) : undefined;
-    return new NextRequest(new URL("/api/auth/google/link", baseUrl), {
+    return new NextRequest(new URL("/api/auth/link", baseUrl), {
       body: JSON.stringify(body),
       headers: {
         "content-type": "application/json",
@@ -849,6 +849,7 @@ describe("google sign-in merging", () => {
       email,
       name: "Google Name",
       providerIssuer: googleIssuer,
+      providerKey: "google" as const,
       providerSubject: sub,
       returnTo: "/frames",
     };
@@ -939,6 +940,7 @@ describe("google sign-in merging", () => {
           accountId,
           email,
           providerIssuer: googleIssuer,
+          providerKey: "google",
           providerSubject: "google-sub-moved",
         },
         { password: "a long enough password" },
@@ -992,7 +994,7 @@ describe("google sign-in merging", () => {
       email_verified: false,
       sub: `google-sub-${email}`,
     });
-    expect(resolution).toEqual({ status: "google_email_unverified" });
+    expect(resolution).toEqual({ status: "email_unverified" });
   });
 
   it("mints no account for a google identity whose email google did not verify", async () => {
@@ -1001,7 +1003,7 @@ describe("google sign-in merging", () => {
       email_verified: false,
       sub: "google-sub-unverified",
     });
-    expect(resolution).toEqual({ status: "google_email_unverified" });
+    expect(resolution).toEqual({ status: "email_unverified" });
     const rows = await db
       .select({ id: accountIdentities.id })
       .from(accountIdentities)

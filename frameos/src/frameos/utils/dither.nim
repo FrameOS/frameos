@@ -270,6 +270,7 @@ template forEachPaletteDithered*(
       let
         is565 = image.isRgb565
         isGray = image.isGray8
+        isGray4 = image.format == pfGray4
       template loadRow(row: ptr UncheckedArray[uint8], ry: int) =
         # Rows are contiguous within themselves for owners and views alike
         # (`dataIndex` = origin + stride * y + x), so one base index per row
@@ -286,6 +287,13 @@ template forEachPaletteDithered*(
           let src = image.data8
           for rx in 0 ..< ditherWidth:
             let luma = src[rowStart + rx]
+            row[rx * 3 + 0] = luma
+            row[rx * 3 + 1] = luma
+            row[rx * 3 + 2] = luma
+        elif isGray4:
+          let src = image.data8
+          for rx in 0 ..< ditherWidth:
+            let luma = gray4Level(src, rowStart + rx) * 17
             row[rx * 3 + 0] = luma
             row[rx * 3 + 1] = luma
             row[rx * 3 + 2] = luma
@@ -350,6 +358,49 @@ template forEachPaletteDithered*(
             if xx + 1 < ditherWidth:
               push(nextRow, xx + 1, errorR, errorG, errorB, 1)
         swap(curRow, nextRow)
+
+proc packGray4Canvas*(image: Image; buf: ptr UncheckedArray[uint8];
+    frameWidth, frameHeight, rotate: int): bool =
+  ## A 4-bit canvas into a sixteen-grey panel buffer, which has its layout:
+  ## the levels were dithered as they were stored, so only their places can
+  ## change. Unrotated it is one copy. Turned, in 32 x 32 tiles, for the
+  ## reason the 565 canvas has them: a quarter turn writes down the panel's
+  ## columns, and row by row every pixel would be a cache line of PSRAM of its
+  ## own. False for what this does not cover (a view, another size).
+  let
+    width = image.width
+    height = image.height
+    rowBytes = (frameWidth + 1) div 2
+  if image.format != pfGray4 or image.isView or width * height != frameWidth * frameHeight:
+    return false
+  let src = cast[ptr UncheckedArray[uint8]](image.bufferPointer)
+  if rotate == 0:
+    if width != frameWidth:
+      return false
+    # The canvas can be the panel buffer itself (an ESP32's sixteen-grey
+    # panel, frameos_nim_share_canvas): then it is packed already.
+    if cast[pointer](buf) != cast[pointer](src):
+      copyMem(buf, src, rowBytes * frameHeight)
+    return true
+  let panelStride = rowBytes * 2
+  template place(x, y: int): int =
+    ## Where canvas pixel (x, y) is on the panel, as a 4-bit index.
+    (if rotate == 90: x * panelStride + height - 1 - y
+     elif rotate == 180: (height - 1 - y) * panelStride + width - 1 - x
+     else: (width - 1 - x) * panelStride + y)
+  const Tile = 32
+  for ty in countup(0, height - 1, Tile):
+    for tx in countup(0, width - 1, Tile):
+      for y in ty ..< min(ty + Tile, height):
+        # The panel's place for (tx, y), then a step per x.
+        var index = place(tx, y)
+        let step = place(tx + 1, y) - index
+        var i = y * image.stride + tx
+        for x in tx ..< min(tx + Tile, width):
+          gray4Put(buf, index, gray4Level(src, i))
+          index += step
+          inc i
+  true
 
 template forEachGrayDithered*(
   image: Image, maxLevel: int,

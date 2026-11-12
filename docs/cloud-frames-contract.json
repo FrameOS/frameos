@@ -71,6 +71,11 @@
       "rule": {"type": "number", "min": 0, "max": 4},
       "profiles": {"linux": {"since": "2026.10.22"}, "esp32": {"since": "2026.10.22"}}
     },
+    "frame_settings_on_screen": {
+      "$comment": "frame.json `frameSettingsOnScreen`: whether the settings panel on the frame's own screen offers the frame page behind its gear (Wi-Fi, rotation, scale, Render again, Restart FrameOS, Reboot; docs/scene-settings.md \"The frame page\"). Never hides the scene's settings form. Absent = true. An unlock on the device wins over false: a file `frameos-settings-unlock` on a Pi's boot partition, `set settings_unlock 1` on an ESP32's USB console.",
+      "rule": {"type": "bool"},
+      "profiles": {"linux": {"since": "2026.11.5"}, "esp32": {"since": "2026.11.5"}}
+    },
     "timezone": {
       "rule": {"type": "string", "minLen": 1, "maxLen": 64, "format": "iana_zone"},
       "profiles": {"linux": {"since": null}, "esp32": {"since": "2026.8.34"}}
@@ -268,6 +273,12 @@
       "profiles": {"esp32": {"since": null}},
       "parity": {"only": "esp32", "why": "ESP32 power management; a Pi has no deep sleep or battery sense."}
     },
+    "awake_after_input_seconds": {
+      "$comment": "A press or a tap keeps a deep-sleeping frame up this long, the next one finds it awake; 0 = sleep as soon as it can. Default 300.",
+      "rule": {"type": "int", "min": 0, "max": 3600},
+      "profiles": {"esp32": {"since": "2026.11.6"}},
+      "parity": {"only": "esp32", "why": "ESP32 deep sleep; a Pi never sleeps."}
+    },
     "wake_check_seconds": {
       "$comment": "0 = only wake to render; the firmware clamps 1..59 up to 60 (sub-minute check-ins drain a battery for nothing).",
       "rule": {"type": "int", "min": 0, "max": 86400},
@@ -309,6 +320,24 @@
       "profiles": {"esp32": {"since": "2026.10.20"}},
       "parity": {"only": "esp32", "why": "The key hold, the PDM microphone and the relay live in the ESP32 firmware (fos_voice.c); no Pi frame has a microphone path."}
     },
+    "touch_beep": {
+      "$comment": "E-paper: a click when something on the screen takes a press (an onClick, a field, a scene's own listener) and when it lifts, a different one for a second finger (fos_touch.c, docs/events.md \"Input\"). Default on; an LCD answers on the glass and stays silent. Live, no reboot.",
+      "rule": {"type": "bool"},
+      "profiles": {"esp32": {"since": "2026.11.6"}},
+      "parity": {"only": "esp32", "why": "The touch panel's feedback lives in the ESP32 firmware's buzzer path (fos_touch.c, fos_buzzer.c); a Pi frame has no buzzer."}
+    },
+    "cpu_mode": {
+      "$comment": "The chip's clock: `battery` runs it at 160 MHz, `performance` at 240 MHz, `auto` (the default) at 240 on an RGB LCD or a touch panel and 160 on any other board. An e-paper refresh is a long wait (about 20 s on a reTerminal E1002's Spectra 6 panel) that the chip spends idling at whatever clock it runs, so on a battery e-paper frame 240 costs more than the faster render saves (embedded/esp32/README.md \"Processor speed\"). Applied at the next boot: the device reboots to take it. Reported as hardware.cpuMode and hardware.cpuMhz.",
+      "rule": {"type": "string", "enum": ["auto", "battery", "performance"]},
+      "profiles": {"esp32": {"since": "2026.11.7", "restart": true}},
+      "parity": {"only": "esp32", "why": "The ESP32's CPU clock switch (rtc_clk_cpu_freq_set_config at boot, main.c); a Pi's clock is the kernel governor's, which FrameOS does not set."}
+    },
+    "render_mode": {
+      "$comment": "Where the frame's scenes run: `local` on the frame's own runtime (the default wherever the board has one), `remote` on the frame's control plane, which renders the scene in the wasm runtime and hands the frame the finished picture in its panel's format at every render pull (`GET .../embedded/render`, docs/server-rendering.md). A battery frame then spends its wake on Wi-Fi, one download and the panel refresh instead of the scene's own work, and the plane draws a sleeping frame's next picture before it wakes. On the cloud a frame set to `remote` counts against the plan's cloud-rendered frames and the refresh floor that comes with them. Applied live: the next render pass pulls. A PSRAM-less board (ESP32-C3) is always remote whatever this says. Reported as hardware.renderMode.",
+      "rule": {"type": "string", "enum": ["local", "remote"]},
+      "profiles": {"esp32": {"since": "2026.11.7"}},
+      "parity": {"only": "esp32", "why": "A Pi always renders on its own runtime; the thin-client pull (fos_client.c fetch_remote_bitmap) is the ESP32 firmware's."}
+    },
     "mic_clk_pin": {
       "$comment": "The PDM microphone's clock GPIO (reTerminal E1001/E1002: 42; the E1004 has no microphone, and a PDM mic on its J2 header is the pins named here), with mic_data_pin and mic_pwr_pin; -1 = no microphone. The firmware opens the microphone at every voice session (docs/voice-chat.md, fos_mic.c), so the three apply live; no stored value leaves the board preset's own. Same reserved-pin refusal as battery_pin. Reported as hardware.micClkPin.",
       "rule": {"type": "int", "min": -1, "max": 48},
@@ -348,6 +377,9 @@
   },
   "verbs": [
     {"type": "set_scenes", "scope": null, "content": true, "profiles": ["linux", "esp32"]},
+    {"type": "scenes_patch", "scope": null, "content": true, "profiles": ["esp32"],
+     "parity": {"only": "esp32",
+                "why": "A set_scenes sent as only what changed. The ESP32 keeps one file per scene on a small flash partition, so a one-scene change is one file written instead of the whole set again (embedded/esp32/README.md, Scene storage). The Linux runtime keeps one scenes.json.gz and has the memory to take the whole list; a provider sends it set_scenes."}},
     {"type": "set_current_scene", "scope": null, "content": true, "profiles": ["linux", "esp32"]},
     {"type": "set_settings", "scope": null, "content": true, "profiles": ["linux", "esp32"]},
     {"type": "set_schedule", "scope": null, "content": true, "profiles": ["linux", "esp32"]},
@@ -381,6 +413,7 @@
     "$comment": "The tokens every implementation answers with. Per-verb tokens beyond these are in docs/cloud-frames.md.",
     "common": ["unknown_verb", "unsupported_verb", "message_too_large", "invalid_json", "no_memory"],
     "set_settings": ["invalid_settings", "setting_not_allowed", "persist_failed"],
+    "scenes_patch": ["invalid_patch", "base_mismatch", "no_room", "patch_refused"],
     "lan_access_challenge": ["no_panel", "rate_limited", "challenge_failed"],
     "lan_access_set": ["invalid_lan_access", "code_required", "invalid_code", "code_expired", "too_many_attempts", "rate_limited", "persist_failed"],
     "backend_managed": "a device whose content a self-hosted backend owns refuses every `content` verb with this"

@@ -20,3 +20,8 @@ delete process.env.R2_CLOUD_ENDPOINT;
 delete process.env.R2_CLOUD_ACCESS_KEY_ID;
 delete process.env.R2_CLOUD_SECRET_ACCESS_KEY;
 delete process.env.R2_CLOUD_PUBLIC_BASE_URL;
+
+// cloud-ci.yml exports the key to every step, and this suite runs outside
+// turbo's env filter: an alert raised here would be a real event.
+delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
+delete process.env.NEXT_PUBLIC_POSTHOG_HOST;

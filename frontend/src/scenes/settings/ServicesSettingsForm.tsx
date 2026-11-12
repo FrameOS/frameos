@@ -242,9 +242,11 @@ export function ServicesSettingsForm({ divider = true }: { divider?: boolean }):
                     label="Share frames with Home Assistant"
                     tooltip={
                       <>
-                        Each frame becomes a device with a live image and status/scene sensors (via MQTT discovery), and
-                        frame events are forwarded to the Home Assistant event bus as <code>frameos_event</code> for use
-                        in automations. Archived frames are not shared.
+                        Each frame becomes a device (via MQTT discovery) with a live image, status and scene sensors (the
+                        scene sensor carries the showing scene's settings as attributes), a scene selector, a display
+                        switch and refresh / next / previous / restart / reboot buttons, and frame events are forwarded
+                        to the Home Assistant event bus as <code>frameos_event</code> for use in automations. Archived
+                        frames are not shared.
                       </>
                     }
                   >

@@ -3,27 +3,30 @@ import {
   allowedFrameSettingsSections,
   isEsp32CloudFrame,
   isPicoPlatform,
+  isVirtualCloudFrame,
   workspaceMode,
   type WorkspaceMode,
 } from '../../../workspace/workspaceSurfaces'
 
 /**
- * The four surfaces the per-frame Settings panel is rendered on.
+ * The five surfaces the per-frame Settings panel is rendered on.
  *
- * `workspaceMode()` knows three planes; the cloud plane splits in two because
- * a cloud-managed ESP32 accepts a strictly narrower set of pushed settings
+ * `workspaceMode()` knows three planes; the cloud plane splits in three. A
+ * cloud-managed ESP32 accepts a strictly narrower set of pushed settings
  * than a cloud-managed Linux frame, and `set_settings` refuses the WHOLE push
  * on the first key the device does not know. Rendering a field the device
  * cannot apply is therefore not a cosmetic slip: it takes the rest of the save
- * down with it.
+ * down with it. A cloud virtual frame (no hardware, drawn by the cloud) takes
+ * the Linux keys and has nothing most of them could act on — no panel, no
+ * buttons, no board — so it draws its own short panel.
  */
-export type FrameSettingsSurface = 'backend' | 'frameAdmin' | 'cloudLinux' | 'cloudEsp32'
+export type FrameSettingsSurface = 'backend' | 'frameAdmin' | 'cloudLinux' | 'cloudEsp32' | 'cloudVirtual'
 
 /** The surfaces a workspace mode can resolve to. */
 export const surfacesForWorkspaceMode: Record<WorkspaceMode, readonly FrameSettingsSurface[]> = {
   backend: ['backend'],
   frameAdmin: ['frameAdmin'],
-  cloud: ['cloudLinux', 'cloudEsp32'],
+  cloud: ['cloudLinux', 'cloudEsp32', 'cloudVirtual'],
 }
 
 export function frameSettingsSurfaceFor(
@@ -31,6 +34,9 @@ export function frameSettingsSurfaceFor(
   frame?: Parameters<typeof isEsp32CloudFrame>[0]
 ): FrameSettingsSurface {
   if (mode === 'cloud') {
+    if (isVirtualCloudFrame(frame, mode)) {
+      return 'cloudVirtual'
+    }
     return isEsp32CloudFrame(frame, mode) ? 'cloudEsp32' : 'cloudLinux'
   }
   return mode
@@ -92,9 +98,11 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     key: 'cloud-base',
     title: 'Frame settings (the pushable set)',
     anchor: 'frame-settings-info',
-    surfaces: ['cloudLinux', 'cloudEsp32'],
+    surfaces: ['cloudLinux', 'cloudEsp32', 'cloudVirtual'],
     nav: [],
     navNote: 'The first thing the cloud panel renders, so a link to it scrolls nowhere.',
+    conditions:
+      "A virtual frame gets name, interval, scale and time zone only: rotation, scaling mode and debug logging are a panel's and a device's.",
   },
   {
     key: 'cloud-defaults',
@@ -174,7 +182,7 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     key: 'cloud-service-settings',
     title: 'Service settings',
     anchor: 'frame-settings-service-settings',
-    surfaces: ['cloudLinux', 'cloudEsp32'],
+    surfaces: ['cloudLinux', 'cloudEsp32', 'cloudVirtual'],
     nav: [],
     navNote: 'Account-level keys and per-scene grants, not a frame setting the nav indexes.',
   },
@@ -187,12 +195,28 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
       'Renders only when a store scene is installed; the nav link is gated the same way (storeSceneOnlyFrameSettingsSections).',
   },
   {
+    key: 'layouts',
+    title: 'Layouts',
+    anchor: 'frame-settings-layouts',
+    surfaces: ['backend', 'frameAdmin', 'cloudLinux', 'cloudEsp32', 'cloudVirtual'],
+    conditions:
+      "Which layout each scene wears; saved with the form as the scenes' `layout`, so every surface that saves scenes has it.",
+  },
+  {
     key: 'cloud-telemetry',
     title: 'Log shipping',
     anchor: 'frame-settings-telemetry',
-    surfaces: ['cloudLinux', 'cloudEsp32'],
+    surfaces: ['cloudLinux', 'cloudEsp32', 'cloudVirtual'],
     conditions:
       'Renders only when the frame row carries the telemetry flag (every row the link endpoint builds does; a broadcast-only row does not).',
+  },
+  {
+    key: 'cloud-virtual',
+    title: 'Virtual frame',
+    anchor: 'frame-settings-virtual',
+    surfaces: ['cloudVirtual'],
+    conditions:
+      'Size and view link, saved at once through /api/frames/{id}/virtual (cloudVirtualFrameLogic), not with the form.',
   },
   {
     key: 'frame-info',
@@ -226,8 +250,8 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     title: 'Virtual frame',
     anchor: 'frame-settings-virtual',
     surfaces: ['backend'],
-    nav: [],
-    navNote: 'Virtual frames only, and they are a small minority of the backend fleet.',
+    conditions:
+      'Virtual frames only; the nav link is gated the same way (frameSettingsSectionIsAllowed). The cloud draws its own section under the same heading (cloud-virtual).',
   },
   {
     key: 'embedded-power',
@@ -375,7 +399,7 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     anchor: 'frame-settings-button-actions',
     surfaces: ['backend', 'frameAdmin', 'cloudLinux', 'cloudEsp32'],
     conditions:
-      "The frame's event map (docs/events.md \"Event map\"): what a press does whatever scene shows. A cloud frame needs 2026.10.20 or newer on either profile, older ones render disabled with a note; one that reported its board preset's map and was never pushed one shows it read-only until Edit actions. The actions on offer follow the frame (frameActionKindsFor): Display on / off only where the driver powers the panel (displayPowerDevices), Voice chat only on a frame with a microphone and then for a long press alone.",
+      'The frame\'s event map (docs/events.md "Event map"): what a press does whatever scene shows. A cloud frame needs 2026.10.20 or newer on either profile, older ones render disabled with a note; one that reported its board preset\'s map and was never pushed one shows it read-only until Edit actions. The actions on offer follow the frame (frameActionKindsFor): Display on / off only where the driver powers the panel (displayPowerDevices), Voice chat only on a frame with a microphone and then for a long press alone.',
   },
   {
     key: 'input',

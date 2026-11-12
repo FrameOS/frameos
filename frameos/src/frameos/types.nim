@@ -15,10 +15,15 @@ import frameos/events_gen
 
 const DefaultMaxHttpResponseBytes* = 64 * 1024 * 1024
 
+# The address a frame reaches its backend on: three fields (serverHost, a bare
+# host; serverPort; serverScheme), one reading on every plane —
+# docs/server-address-fixtures.json is the contract, replayed by
+# tests/test_server_address.nim, the backend and the SPA.
+
 proc serverSchemeFromPort*(port: int): string =
-  ## The pre-2026.9.13 guess, kept only for a frame.json written before
-  ## `serverScheme` existed: a port ending in 443 meant TLS. Every current
-  ## writer (the backend, frameos-setup.sh, the local admin page) states it.
+  ## The seed for a frame.json written before `serverScheme` existed
+  ## (2026.9.13): a port ending in 443 meant TLS. Every current writer (the
+  ## backend, frameos-setup.sh, the portal, the local admin page) states it.
   if port mod 1000 == 443: "https" else: "http"
 
 proc normalizeServerScheme*(scheme: string, port: int): string =
@@ -26,6 +31,68 @@ proc normalizeServerScheme*(scheme: string, port: int): string =
   ## from the port otherwise (absent key, legacy config, a typo).
   let cleaned = scheme.strip().toLowerAscii().strip(leading = false, chars = {':', '/'})
   if cleaned in ["http", "https"]: cleaned else: serverSchemeFromPort(port)
+
+type
+  ServerAddress* = object
+    ## A typed address ("host", "host:8989", "https://host:8443/"), split.
+    ## `scheme` is "" and `port` 0 when the text did not say; the consumer
+    ## fills them. A non-numeric port and a scheme other than http(s) stay
+    ## in `host`, so a host check refuses the whole thing instead of half.
+    scheme*: string
+    host*: string
+    port*: int
+
+proc splitServerAddress*(value: string): ServerAddress =
+  var text = value.strip()
+  let schemeEnd = text.find("://")
+  if schemeEnd > 0:
+    let scheme = text[0 ..< schemeEnd].toLowerAscii()
+    var isScheme = scheme[0] in {'a'..'z'}
+    for ch in scheme:
+      if ch notin {'a'..'z', '0'..'9', '+', '.', '-'}: isScheme = false
+    if isScheme:
+      if scheme notin ["http", "https"]:
+        return ServerAddress(scheme: "", host: text, port: 0)
+      result.scheme = scheme
+      text = text[schemeEnd + 3 .. ^1]
+  let slash = text.find('/')
+  if slash >= 0: text = text[0 ..< slash]
+  text = text.strip()
+  if text.startsWith("["):
+    let closing = text.find(']')
+    if closing > 0:
+      let rest = text[closing + 1 .. ^1]
+      if rest.len == 0:
+        result.host = text
+        return
+      if rest.len > 1 and rest[0] == ':' and rest[1 .. ^1].allCharsInSet({'0'..'9'}):
+        result.host = text[0 .. closing]
+        result.port = parseInt(rest[1 .. ^1])
+        return
+    result.host = text
+    return
+  if text.count(':') == 1:
+    let colon = text.find(':')
+    let portText = text[colon + 1 .. ^1]
+    if portText.len == 0:
+      result.host = text[0 ..< colon]
+      return
+    if portText.allCharsInSet({'0'..'9'}):
+      result.host = text[0 ..< colon]
+      result.port = parseInt(portText)
+      return
+  result.host = text
+
+proc normalizeServerAddressFields*(host: var string, port: var int, scheme: var string) =
+  ## A typed address stored where the bare host belongs ("https://host:8443"
+  ## in serverHost — an older portal, a hand-edited frame.json, another
+  ## writer): what it says moves to the scheme and port fields and wins.
+  let typed = splitServerAddress(host)
+  if typed.host == host.strip() and typed.port == 0 and typed.scheme.len == 0:
+    return
+  host = typed.host
+  if typed.port > 0: port = typed.port
+  if typed.scheme.len > 0: scheme = typed.scheme
 
 type
   # Parsed from config.json
@@ -57,6 +124,11 @@ type
     ## times smaller, drawn sharp at full size (render_scale.nim). 0 =
     ## automatic from the panel's size; a scene's own setting wins.
     renderScale*: float
+    ## The settings on the frame's own screen offer the frame page behind
+    ## their gear (docs/scene-settings.md "The frame page"). On unless the
+    ## control plane turned it off; frame_settings_lock.nim adds the device's
+    ## own unlock.
+    frameSettingsOnScreen*: bool
     settings*: JsonNode
     assetsPath*: string
     saveAssets*: JsonNode
@@ -356,6 +428,15 @@ type
     ## The installed copy's event map (event_map.nim): the rule list as the
     ## control plane wrote it (`[{event, match, as}]`), nil for most scenes.
     eventMap*: JsonNode
+    ## What `app.frame.sceneName` says: the scene's name, and for a layout the
+    ## name of the scene it wraps.
+    shownName*: string
+    ## A built-in scene (system/): what runs it, and the layout of the scene it
+    ## was opened from, around it. `systemScene` is on that layout.
+    ownRun*: proc (self: FrameScene, context: ExecutionContext) {.nimcall.}
+    wornLayout*: FrameScene
+    wornLayoutFailedFor*: string
+    systemScene*: bool
     ## When this scene renders next, if it is drawn through a scene node
     ## (frameos/scene_rhythm.nim); nil until the first such render.
     rhythm*: SceneRhythm
@@ -365,11 +446,47 @@ type
     ## interval (refresh_interval.syncRefreshInterval).
     refreshFollowsChildren*: bool
     followInterval*: float
+    ## A scene with embedded scenes that pace it without being a split (a JSX
+    ## `<Scene>`): `followInterval` brings its own interval forward.
+    embedPaced*: bool
+    ## This pass's display cannot show frames back to back (e-paper, a deep
+    ## sleeper): a split's own interval stays the fastest it renders.
+    holdsIntervalFloor*: bool
+    ## The scene runs inside a layout (docs/scene-layouts.md): what every
+    ## host reads is the time until the layout or the scene is due next.
+    layoutPaced*: bool
+    layoutInterval*: float
+    ## Where this scene's rectangle starts on the canvas it was last drawn
+    ## on, and what it holds in its own coordinates: a pointer event goes to
+    ## the embedded scene under it, in that scene's coordinates.
+    canvasX*, canvasY*: int32
+    slots*: seq[SceneSlot]
+    ## A UI with holes (its `slots` that are): their rectangles, as one number,
+    ## and whether this run found them moved.
+    holesKey*: int
+    holesMoved*: bool
     ## True while this scene runs although it is not due: the device kept no
     ## copy of what it drew last time, so it draws again only to put that
     ## picture back. Whatever can answer from what it fetched or computed last
     ## time (a node cache) should, rather than fetch or advance anew.
     repainting*: bool
+
+  # An embedded scene in the scene that draws it, in canvas pixels: where its
+  # coordinates start, and the left, top, right and bottom of the part that shows.
+  SceneSlot* = object
+    child*: FrameScene
+    x*, y*: float32
+    visible*: array[4, float32]
+    hole*: bool ## drawn straight into the canvas of the scene that holds it
+
+  # One rectangle a scene drew on the canvas. `copy` is its picture as it left
+  # it, when one was kept; nil when the canvas itself holds it.
+  RhythmCell* {.acyclic.} = ref object
+    origin*, stride*, width*, height*: int
+    format*: PixelFormat
+    drawnPass*: int ## the pass that last ran the scene here
+    copy*: Image
+    next*: RhythmCell ## a list and not a seq: a seq of these cost over a KB of ESP32 image in hooks
 
   # The schedule of one scene drawn through a scene node, and the picture it
   # left there (frameos/scene_rhythm.nim).
@@ -381,8 +498,12 @@ type
     scheduledPass*: int   ## the pass whose run set `dueAt`
     runsThisPass*: bool   ## that pass found it due: it runs in every cell it draws
     copyRefused*: bool    ## the last copy did not fit the budget (logged once)
-    copies*: seq[Image]   ## each cell it drew, as it left it, in the canvas's format
-    copyAt*: seq[int]     ## per copy, three: its canvas origin, stride, and the pass that wrote it
+    cells*: RhythmCell    ## each rectangle it drew
+    embedImage*: Image    ## a `<Scene>`'s own picture (the UI draws it as an image)
+    embedProps*: string   ## the props last written into its state, as JSON
+    chromePass*: int      ## a UI with holes: the pass that last drew around them
+    chromeDueAt*: float   ## and its own schedule, which its embedded scenes do not move
+    chromeInterval*: float
 
   FontStyle* = ref object
     typeface*: Typeface
@@ -435,6 +556,9 @@ type
     customEventOrigins*: Table[string, set[EventOrigin]] ## see FrameScene.customEventOrigins
     eventMap*: JsonNode ## see FrameScene.eventMap
     refreshFollowsChildren*: bool ## see FrameScene.refreshFollowsChildren
+    isLayout*: bool ## `settings.isLayout`: in no scene list (docs/scene-layouts.md)
+    layoutSceneId*: SceneId ## the layout this install is wrapped in, "" for none
+    layoutState*: JsonNode ## its parameters, as a scene node's config
     renderScaleKey*: string ## see FrameScene.renderScaleKey
     renderScaleSetting*: float ## see FrameScene.renderScaleSetting
 
@@ -465,6 +589,8 @@ type
     ## only asks whether it is there, so the value is skipped, not parsed
     ## (interpreter.nim's parseHook).
     splitScreenLayout*: SplitLayoutMarker
+    ## The scene is a layout: it wraps other scenes and is in no scene list.
+    isLayout*: bool
 
   SplitLayoutMarker* = object
     present*: bool
@@ -485,6 +611,8 @@ type
     ## The installed copy's event map ([{event, match, as}], docs/events.md
     ## "Event map"), written by the control plane beside the scene; nil when absent.
     eventMap*: JsonNode
+    ## The installed copy's layout ({sceneId, state}), docs/scene-layouts.md.
+    layout*: JsonNode
 
   # Runtime state while running the scene (for interpreted frames), adds cached nodes/edges
   InterpretedFrameScene* = ref object of FrameScene
@@ -493,12 +621,18 @@ type
     apps*: JsonNode
     nextNodeIds*: Table[NodeId, NodeId] # mapping from current node id to next node id for quick lookup
     eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
+    eventApps*: seq[NodeId]                                                    # JS app nodes with `events` in their config.json
     appsByNodeId*: Table[NodeId, AppRoot] # mapping from node id to instantiated app for quick lookup
     appInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from node id to app input name to connected node id
     appInlineInputsForNodeId*: Table[NodeId, Table[string, string]]            # mapping from node id to app input name to inline code
     codeInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from code node id to code arg name to connected node id
     codeInlineInputsForNodeId*: Table[NodeId, Table[string, string]] # mapping from code node id to code arg name to inline code
     sceneNodes*: Table[NodeId, FrameScene]                                     # cache of instantiated child scenes
+    layoutSceneId*: SceneId
+    layoutState*: JsonNode
+    layoutFailedFor*: string                                                   # logged once; the scene shows without it
+    capturedChild*: FrameScene                                                 # the embedded scene a pointer pressed on, until it lifts
+    capturedPointer*: int
     sceneExportByNodeId*: Table[NodeId, ExportedScene]                         # exported metadata for cached child scenes
     publicStateFields*: seq[StateField]
     js*: QuickJS

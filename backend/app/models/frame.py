@@ -36,6 +36,7 @@ from app.utils.ssh_host_keys import host_key_fingerprint
 from app.utils.token import secure_token
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.versions import get_versions
+from app.utils.server_address import default_port_for, join_address, normalize_scheme, scheme_from_port, split_address
 from app.websockets import publish_message
 
 DEFAULT_MAX_HTTP_RESPONSE_BYTES = 64 * 1024 * 1024
@@ -449,6 +450,11 @@ class Frame(Base):
     # a panel this many times smaller, drawn sharp at full size. 0 = automatic
     # from the panel's size (app/utils/render_scale.py).
     render_scale = mapped_column(Double, nullable=False, default=0)
+    # frame.json `frameSettingsOnScreen`: the settings panel on the frame's
+    # own screen offers the frame page behind its gear (Wi-Fi, rotation,
+    # scale, Restart, Reboot; docs/scene-settings.md "The frame page"). Off
+    # leaves the scene's form; an unlock on the device wins over it.
+    frame_settings_on_screen = mapped_column(Boolean, nullable=False, default=True)
     rotate = mapped_column(Integer, nullable=True)
     flip = mapped_column(String(32), nullable=True)
     log_to_file = mapped_column(Text, nullable=True)
@@ -559,6 +565,7 @@ class Frame(Base):
             'max_http_response_bytes': self.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
             'scaling_mode': self.scaling_mode,
             'render_scale': normalize_render_scale(self.render_scale),
+            'frame_settings_on_screen': self.frame_settings_on_screen is not False,
             'rotate': self.rotate,
             'flip': self.flip,
             'background_color': self.background_color,
@@ -619,20 +626,29 @@ class Frame(Base):
         return result
 
 def server_scheme_from_port(port: Optional[int]) -> str:
-    """The pre-2026.9.13 guess, kept only to seed rows and frame.json files
-    that predate the explicit setting: 443 meant https, everything else http."""
-    return "https" if int(port or 0) == 443 else "http"
+    """The seed for a row or frame.json that predates `server_scheme`
+    (2026.9.13): a port ending in 443 meant TLS (the frame's rule,
+    docs/server-address-fixtures.json). Never consulted once a scheme is
+    stated."""
+    return scheme_from_port(port)
 
 
 def normalize_server_scheme(value: Any, port: Optional[int] = None) -> str:
-    scheme = str(value or "").strip().lower().rstrip(":/")
-    if scheme in ("http", "https"):
-        return scheme
-    return server_scheme_from_port(port)
+    return normalize_scheme(value, port)
 
 
 def server_scheme_for_frame(frame: "Frame") -> str:
     return normalize_server_scheme(getattr(frame, "server_scheme", None), frame.server_port)
+
+
+def server_base_url(frame: "Frame") -> Optional[str]:
+    """`scheme://host[:port]` as the frame dials this backend (the ESP32's
+    `set backend`, the bootstrap script, a share link's origin), the port
+    left off when it is the scheme's own. None when the row names no host."""
+    host = str(frame.server_host or "").strip()
+    if not host:
+        return None
+    return join_address(server_scheme_for_frame(frame), host, int(frame.server_port or 0))
 
 
 def served_deploy_baseline(snapshot: Any) -> Any:
@@ -649,22 +665,13 @@ def served_deploy_baseline(snapshot: Any) -> Any:
 
 
 def split_server_address(server_host: str) -> tuple[str, int, Optional[str]]:
-    """'https://host:8443' / 'host:8989' / 'host' → (host, port, scheme or None).
-    A scheme prefix decides the scheme; a bare address leaves it to the caller."""
-    scheme: Optional[str] = None
-    server_host = str(server_host or "").strip()
-    for prefix in ("http://", "https://"):
-        if server_host.lower().startswith(prefix):
-            scheme = prefix[:-3]
-            server_host = server_host[len(prefix):]
-            break
-    server_host = server_host.rstrip("/")
-    if ':' in server_host:
-        server_host, server_port_initial = server_host.rsplit(':', 1)
-        server_port = int(server_port_initial or '8989')
-    else:
-        server_port = {"https": 443, "http": 80}.get(scheme or "", 8989)
-    return server_host, server_port, scheme
+    """'https://host:8443' / 'host:8989' / 'host' → (host, port, scheme or None),
+    app.utils.server_address.split_address with the port filled in: the
+    scheme's own when one was said without a port, 8989 otherwise. A scheme
+    prefix decides the scheme; a bare address leaves it to the caller."""
+    address = split_address(server_host)
+    port = address.port if address.port is not None else default_port_for(address.scheme)
+    return address.host, port, (address.scheme or None)
 
 
 async def new_frame(
@@ -676,7 +683,12 @@ async def new_frame(
     device: Optional[str] = None,
     interval: Optional[float] = None,
     project_id: Optional[int] = None,
+    server_port: Optional[int] = None,
+    server_scheme: Optional[str] = None,
 ) -> Frame:
+    """`server_host` is the typed address: what it says (`https://host:8443`)
+    wins, then the explicit `server_port` / `server_scheme`, then 8989 and
+    the port seed."""
     if '@' in frame_host:
         # rsplit: passwords may contain '@'
         user_pass, frame_host = frame_host.rsplit('@', 1)
@@ -697,7 +709,14 @@ async def new_frame(
     else:
         user, password = user_pass, None
 
-    server_host, server_port, server_scheme = split_server_address(server_host)
+    typed = split_address(server_host)
+    server_host = typed.host
+    if typed.port is not None:
+        server_port = typed.port
+    elif not server_port:
+        server_port = default_port_for(typed.scheme)
+    if typed.said_scheme:
+        server_scheme = typed.scheme
 
     tls_material = generate_frame_tls_material(frame_host)
     dimensions = device_dimensions(device)
@@ -742,6 +761,7 @@ async def new_frame(
         apps=[],
         scaling_mode="contain",
         render_scale=0,
+        frame_settings_on_screen=True,
         rotate=0,
         device=device or "web_only",
         timezone=None,
@@ -914,6 +934,48 @@ def cached_app_configs() -> dict[str, dict]:
     return _APP_CONFIGS_CACHE["configs"]
 
 
+def scene_is_from_store(scene: Any) -> bool:
+    """A scene read from the public store (origin.storeSceneId, stamped by the
+    cloud on every scenes.json and zip it serves): it gets only the service
+    keys the owner granted on the frame (``service_setting_groups``)."""
+    origin = scene.get('origin') if isinstance(scene, dict) else None
+    return isinstance(origin, dict) and bool(origin.get('storeSceneId'))
+
+
+def scene_declared_setting_groups(scene: Any, app_configs: dict) -> set[str]:
+    """The service settings groups a scene's apps declare (`settings` in each
+    app's config.json; a built-in or retired keyword's from its config). The
+    walk the deploy ships keys by, and the MCP install grants by."""
+    declared: set[str] = set()
+    if not isinstance(scene, dict):
+        return declared
+    scene_apps = scene.get('apps', {}) if isinstance(scene.get('apps', {}), dict) else {}
+    for node in scene.get('nodes', []) or []:
+        if not isinstance(node, dict) or node.get('type', None) != 'app':
+            continue
+        data = node.get('data', {}) or {}
+        sources = data.get('sources', None)
+        keyword = data.get('keyword', None)
+        scene_app = scene_apps.get(keyword)
+        if not sources and isinstance(scene_app, dict):
+            sources = scene_app.get('sources', None)
+        if sources and len(sources) > 0:
+            try:
+                config = json.loads(sources.get('config.json', '{}'))
+                for key in config.get('settings', []):
+                    declared.add(key)
+            except:  # noqa: E722
+                pass
+        elif keyword:
+            # A retired Nim keyword (utils/retired_apps.py) still
+            # declares what its JS replacement does.
+            app_config = app_configs.get(keyword, None) or retired_app_config(keyword)
+            if app_config:
+                for key in app_config.get('settings', []):
+                    declared.add(key)
+    return declared
+
+
 def shipped_frame_settings(frame: "Frame", all_settings: dict, app_configs: Optional[dict] = None) -> dict:
     """The service settings groups frame.json carries for this frame, by
     provenance: what the owner's scenes declare, plus what store-origin
@@ -936,34 +998,11 @@ def shipped_frame_settings(frame: "Frame", all_settings: dict, app_configs: Opti
     }
     app_configs = app_configs if app_configs is not None else get_app_configs()
     for scene in list(frame.scenes):
-        origin = scene.get('origin') if isinstance(scene, dict) else None
-        scene_from_store = isinstance(origin, dict) and bool(origin.get('storeSceneId'))
-        declared_here = store_scene_setting_keys if scene_from_store else setting_keys
-        for node in scene.get('nodes', []):
-            if node.get('type', None) == 'app':
-                sources = node.get('data', {}).get('sources', None)
-                keyword = node.get('data', {}).get('keyword', None)
-                scene_app = scene.get('apps', {}).get(keyword) if isinstance(scene.get('apps', {}), dict) else None
-                if not sources and isinstance(scene_app, dict):
-                    sources = scene_app.get('sources', None)
-                if sources and len(sources) > 0:
-                    try:
-                        config = sources.get('config.json', '{}')
-                        config = json.loads(config)
-                        settings = config.get('settings', [])
-                        for key in settings:
-                            declared_here.add(key)
-                    except:  # noqa: E722
-                        pass
-                else:
-                    if keyword:
-                        # A retired Nim keyword (utils/retired_apps.py) still
-                        # declares what its JS replacement does.
-                        app_config = app_configs.get(keyword, None) or retired_app_config(keyword)
-                        if app_config:
-                            settings = app_config.get('settings', [])
-                            for key in settings:
-                                declared_here.add(key)
+        declared = scene_declared_setting_groups(scene, app_configs)
+        if scene_is_from_store(scene):
+            store_scene_setting_keys |= declared
+        else:
+            setting_keys |= declared
 
     for key in store_scene_setting_keys:
         if key in granted_to_store_scenes:
@@ -1050,6 +1089,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "scalingMode": frame.scaling_mode or "contain",
         # 0 = automatic from the panel's size; a scene's own setting wins.
         "renderScale": normalize_render_scale(frame.render_scale),
+        "frameSettingsOnScreen": frame.frame_settings_on_screen is not False,
         "rotate": frame.rotate or 0,
         "flip": frame.flip,
         "logToFile": frame.log_to_file,

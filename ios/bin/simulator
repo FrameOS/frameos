@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Prints the udid of the simulator the UI tests run on: FRAMEOS_UITEST_DEVICE
+# by name (an iPad too), else the newest "iPhone N Pro", else the newest iPhone.
+#
+#   ios/bin/simulator          # the udid
+#   ios/bin/simulator --boot   # the udid, and the simulator starts booting
+#
+# --boot does not wait: a simulator's first boot on a fresh CI runner takes
+# minutes, and ios/bin/ui-test builds meanwhile and waits for it after
+# (`simctl bootstatus -b`). Booting one that is already up is not an error.
+set -euo pipefail
+
+udid="$(xcrun simctl list devices available -j | python3 -c '
+import json, os, re, sys
+wanted = os.environ.get("FRAMEOS_UITEST_DEVICE", "")
+devices = json.load(sys.stdin)["devices"]
+phones = [d for runtime in sorted(devices) if "iOS" in runtime for d in devices[runtime]
+          if ((d["name"] == wanted) if wanted else d["name"].startswith("iPhone"))]
+# The newest "iPhone N Pro" when there is one: a phone people have, not the SE.
+pro = sorted((d for d in phones if re.fullmatch(r"iPhone \d+ Pro", d["name"])), key=lambda d: int(d["name"].split()[1]))
+print((pro or phones)[-1]["udid"] if phones else "")
+')"
+[[ -n "$udid" ]] || { echo "No iPhone simulator: Xcode → Settings → Components, or xcodebuild -downloadPlatform iOS" >&2; exit 1; }
+
+if [[ "${1:-}" == "--boot" ]]; then
+  # Detached from this script's output, so a CI step that runs it does not
+  # wait for the boot to finish.
+  nohup xcrun simctl boot "$udid" >/dev/null 2>&1 &
+fi
+echo "$udid"

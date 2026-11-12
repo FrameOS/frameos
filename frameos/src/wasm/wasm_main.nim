@@ -17,10 +17,15 @@ import frameos/channels
 import frameos/single_scene_host
 import system/sceneSwitcher/scene as sceneSwitcher
 import frameos/relayed_input
+from frameos/input_state import initInputState
+from frameos/ui/events as uiEvents import uiTimersPending, lastingUiInput, restoreLastingUiInput
+from frameos/js_runtime/app_runtime import keepAppMemoryAcrossProcesses, keptAppMemory, restoreKeptAppMemory
 import frameos/interpreter
 import frameos/planner
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
+import frameos/utils/dither
+import frameos/utils/asset_colors
 import frameos/js_runtime/runtime as jsRuntime
 import frameos/js_runtime/app_tests
 import lib/tz
@@ -57,6 +62,35 @@ var
   # Backend-persisted scene state, seeded via frameos_wasm_set_scene_state
   # before the scene's first render and merged into scene.state at init.
   pendingSceneStates = initTable[string, JsonNode]()
+  # A built-in scene (the switcher, the settings) a control plane selected
+  # for a frame it renders for: opened again as it was left, from its
+  # seeded state, before anything uses it (restoreBuiltIn).
+  builtInToRestore = ""
+  # What the UIs on the glass kept when the plane's last process drew them
+  # (frameos_wasm_set_kept_state): put back once the scene is open, before
+  # anything lays them out or takes a tap (restoreAsLeft).
+  uiStateToRestore: JsonNode
+  keptStateBuffer: string
+  renderPaletteBuffer: string
+  # Running as an ESP32, every render draws into one canvas kept for the
+  # runtime's life, in the format that frame keeps it in (embedded_runtime
+  # `renderCanvas`): RGB565 on a 13.3" colour panel with 8 MB of PSRAM, luma
+  # on a grey one, RGBX where two of it fit. Before this the preview made a
+  # fresh RGBX canvas every render while the page still held the last one, so
+  # at 1200x1600 under 8 MB even a blank scene's second render was refused
+  # 7.3 MB: an out-of-memory the frame never has.
+  deviceCanvas: Image
+  deviceCanvasBitsPerPixel = 32
+  # A 565 or luma canvas expanded to RGBA for the page (frameos_wasm_buffer).
+  # It stands in for the panel buffer, which the device's heap leaves out, so
+  # it comes from plain malloc, outside the simulated ceiling.
+  rgbaOut: ptr UncheckedArray[ColorRGBX]
+  rgbaOutPixels = 0
+
+proc fosWasmMemorySetHeld(bytes: csize_t) {.
+  importc: "fos_wasm_memory_set_held", header: "<fos_wasm_mem.h>", cdecl.}
+proc cMalloc(size: csize_t): pointer {.importc: "malloc", header: "<stdlib.h>", cdecl.}
+proc cFree(p: pointer) {.importc: "free", header: "<stdlib.h>", cdecl.}
 
 proc currentSceneName(): string =
   host.sceneName
@@ -78,13 +112,93 @@ proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
 
 sceneSwitcherListing = switcherListing
 
+# ------------------------------------------------------------------- canvas
+
+proc dropDeviceCanvas() =
+  if not deviceCanvas.isNil and lastImage == deviceCanvas:
+    lastImage = nil
+  deviceCanvas = nil
+  fosWasmMemorySetHeld(0)
+
+proc previewCanvas(): Image =
+  ## The canvas the next render draws into, or nil for a fresh RGBX one per
+  ## render, which is what a Pi's runner does. Made on first use, reused
+  ## after, like the device's. The bytes a 565 or luma canvas saves against
+  ## the RGBX one the simulated ceiling was worked out for
+  ## (devices.ts `previewOverheadBytes`) stay charged, so the ceiling and every
+  ## reading of it mean the same as with a bundle that drew RGBX.
+  if not runsAsEmbedded() or frameConfig.isNil:
+    if not deviceCanvas.isNil:
+      dropDeviceCanvas()
+    return nil
+  let
+    width = if frameConfig.rotate in [90, 270]: frameConfig.height else: frameConfig.width
+    height = if frameConfig.rotate in [90, 270]: frameConfig.width else: frameConfig.height
+    format =
+      case deviceCanvasBitsPerPixel
+      of 16: pfRgb565
+      of 8: pfGray8
+      of 4: pfGray4
+      else: pfRgbx
+  if not deviceCanvas.isNil and deviceCanvas.width == width and
+      deviceCanvas.height == height and deviceCanvas.format == format:
+    return deviceCanvas
+  dropDeviceCanvas()
+  deviceCanvas =
+    case format
+    of pfRgb565: newImage565(width, height)
+    of pfGray8: newImageGray8(width, height)
+    of pfGray4: newImageGray4(width, height)
+    of pfRgbx: newImage(width, height)
+  if format == pfRgb565:
+    # The rounding the device's 565 stores do, so a gradient does not step.
+    deviceCanvas.ditherStores = true
+  fosWasmMemorySetHeld(csize_t(width * height * 4 - deviceCanvas.byteSize))
+  let described =
+    case format
+    of pfRgb565: "rgb565 (dithered stores)"
+    of pfGray8: "gray8"
+    of pfGray4: "gray4 (dithered stores)"
+    of pfRgbx: "rgbx"
+  log(&"canvas: {width}x{height} {described}")
+  deviceCanvas
+
 proc selectSceneById(sceneIdText: string): bool =
   let sceneId = SceneId(sceneIdText)
   if not getInterpretedScenes().hasKey(sceneId) and not isBuiltInScene(sceneIdText):
     setLastError("scene not found: " & sceneIdText)
     return false
+  # A switch the scene made (or the dispatcher) is a fresh opening.
+  builtInToRestore = ""
   host.makeCurrent(sceneId)
   true
+
+proc restoreBuiltIn() =
+  ## A built-in scene the plane kept for a frame it renders for
+  ## (docs/server-rendering.md, "Keys, touch and the schedule"): opened again
+  ## with the state it had, once that state is seeded, before the first event
+  ## or render uses it. Without a seeded state it opens as one opened by name.
+  if builtInToRestore.len == 0:
+    return
+  let sceneId = builtInToRestore
+  builtInToRestore = ""
+  let stored = pendingSceneStates.getOrDefault(sceneId)
+  if stored.isNil or stored.kind != JObject or stored.len == 0:
+    return
+  if not host.reopenBuiltIn(stored):
+    log("built-in scene " & sceneId & " could not be opened again as it was left")
+
+proc restoreAsLeft() =
+  ## Everything a plane hands back of the last process before the first event
+  ## or render uses it: the built-in scene showing (restoreBuiltIn), then the
+  ## UIs' input (frameos_wasm_set_kept_state). After the built-in scene: opening
+  ## the settings starts its form afresh (forgetUiTarget), which would throw
+  ## away the field the keyboard was typing into.
+  restoreBuiltIn()
+  if not uiStateToRestore.isNil:
+    let state = uiStateToRestore
+    uiStateToRestore = nil
+    discard restoreLastingUiInput(state)
 
 # ------------------------------------------------------------------- setup
 
@@ -103,6 +217,7 @@ proc frameZoneOffset(time: int64): cint {.cdecl.} =
 
 proc frameos_wasm_init(width, height: cint, name: cstring,
     timeZone: cstring, settingsJson: cstring): bool {.exportc, cdecl.} =
+  coverageCacheBudget = 2 * 1024 * 1024 # pixie keeps shared paths' coverage, as the devices do
   ## Build the minimal FrameConfig + Logger the interpreter and apps expect.
   ## Safe to call repeatedly; every call resets scenes and state.
   ##
@@ -112,13 +227,18 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
   try:
     host.dropScene()
     resetInterpretedScenes()
+    keepAppMemoryAcrossProcesses()
     setSimulatedEmbedded(false)
     host.sceneId = none(SceneId)
     defaultSceneId = none(SceneId)
     scenesLoadedCount = 0
     host.renderRequested = false
     lastImage = nil
+    dropDeviceCanvas()
+    deviceCanvasBitsPerPixel = 32
     pendingSceneStates = initTable[string, JsonNode]()
+    builtInToRestore = ""
+    clearRenderPaletteOverride()
 
     var settings = %*{}
     let settingsText = $settingsJson
@@ -230,9 +350,11 @@ proc frameos_wasm_load_scenes(payload: cstring): cint {.exportc, cdecl.} =
       return 0
 
     host.dropScene()
+    dropParkedLayout()
     replaceInterpretedScenesCache(newScenes)
     scenesLoadedCount = newScenes.len
-    loadedSceneOrder = inputs.mapIt(it.id).filterIt(newScenes.hasKey(it))
+    # A layout is in no scene list (docs/scene-layouts.md).
+    loadedSceneOrder = inputs.mapIt(it.id).filterIt(newScenes.hasKey(it) and not newScenes[it].isLayout)
 
     if host.sceneId.isSome and not newScenes.hasKey(host.sceneId.get()):
       host.sceneId = none(SceneId)
@@ -284,10 +406,23 @@ proc frameos_wasm_set_fusion(enabled: bool) {.exportc, cdecl.} =
   imageFusionEnabled = enabled
 
 proc frameos_wasm_set_embedded(enabled: bool) {.exportc, cdecl.} =
-  ## Run as an ESP32 (memory.runsAsEmbedded): a JS app's interpreter lasts
-  ## one render, `app.frame.embedded` is true, downloads decode into the
-  ## canvas. Off by default, as a Pi; every frameos_wasm_init turns it off.
+  ## Run as an ESP32 (memory.runsAsEmbedded): `app.frame.embedded` is true,
+  ## downloads decode into the canvas, and a JS app's interpreter is kept
+  ## between renders while the simulated memory has room, as on an ESP32 that
+  ## stays awake (fos_client.c `frameos_nim_set_keep_js`), which is every
+  ## frame anybody taps. Releasing them after each render, as a deep-sleeping
+  ## frame does, lost an interactive scene's module state and the handlers
+  ## of the picture on screen with every render: clicks did nothing and
+  ## `active:` never held (jsx-now-playing, 2026-11-08). Off by default, as
+  ## a Pi; every frameos_wasm_init turns it off.
   setSimulatedEmbedded(enabled)
+  host.keepJsRuntimes = enabled
+
+proc frameos_wasm_set_canvas_bits_per_pixel(bitsPerPixel: cint) {.exportc, cdecl.} =
+  ## The canvas the device keeps, while running as an ESP32 (eight times
+  ## devices.ts `canvasBytesPerPixel`): 16 RGB565, 8 luma, 4 sixteen greys, 32
+  ## RGBX, the default every frameos_wasm_init restores. Anything else is RGBX.
+  deviceCanvasBitsPerPixel = if bitsPerPixel in [4.cint, 8.cint, 16.cint]: bitsPerPixel.int else: 32
 
 proc frameos_wasm_set_render_scale(scale: cdouble) {.exportc, cdecl.} =
   ## The frame's render scale (frame.json renderScale, render_scale.nim): what
@@ -296,14 +431,169 @@ proc frameos_wasm_set_render_scale(scale: cdouble) {.exportc, cdecl.} =
   if not frameConfig.isNil:
     frameConfig.renderScale = if scale > 0.0 and scale <= 4.0: scale.float else: 0.0
 
-proc frameos_wasm_select_scene(sceneId: cstring): bool {.exportc, cdecl.} =
+proc panelTable(pixelFormat: int): seq[(int, int, int)] =
+  ## The stock table of a palette panel, by the firmware's
+  ## `fos_pixel_format_t` (embedded_main.nim `panelPaletteForFormat`); empty
+  ## for the grey, two-colour and RGB formats.
+  case pixelFormat
+  of 5: saturated4ColorPalette
+  of 6: saturated7ColorPalette
+  of 7: spectra6ColorPalette
+  else: @[]
+
+proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
+  ## What else of frame.json the frame's own runtime keeps, for a control
+  ## plane rendering for a frame (docs/server-rendering.md):
+  ## `{"eventMap": [rules] | null, "palette": ["#rrggbb", …] | {"colors":
+  ## […]}, "colors": {autoFit, global}, "pixelFormat": n, "gpioButtons":
+  ## [{pin, label, role?}], "rotate": 0 | 90 | 180 | 270}`, every key
+  ## optional; call it before the scenes are loaded. The event map is the
+  ## frame's (docs/events.md "Event map"), read by the dispatcher off this
+  ## config; `palette` and `colors` are what the ESP32's settings hand its
+  ## runtime (fos_nim_set_palette_impl / _colors_impl), and `pixelFormat` the
+  ## panel, so the automatic fit of drawn images aims at the colours the
+  ## panel shows, as embedded_main's render does; `rotate` is the frame's,
+  ## for the relayed pointers' panel positions.
   try:
-    selectSceneById($sceneId)
+    if frameConfig.isNil:
+      setLastError("setFrame: init not called")
+      return false
+    let node = parseJson($frameJson)
+    if node.kind != JObject:
+      setLastError("setFrame: expected an object")
+      return false
+    if node.hasKey("eventMap"):
+      let rules = node["eventMap"]
+      frameConfig.eventMap = if rules.kind == JArray: rules else: nil
+    if node.hasKey("palette"):
+      var list = node["palette"]
+      if list.kind == JObject:
+        list = list{"colors"}
+      var colors: seq[(int, int, int)] = @[]
+      if not list.isNil and list.kind == JArray:
+        try:
+          for entry in list.items:
+            let color = parseHtmlColor(entry.getStr())
+            colors.add((int(color.r * 255 + 0.5), int(color.g * 255 + 0.5), int(color.b * 255 + 0.5)))
+        except CatchableError:
+          # One unreadable colour empties the list, as on the device.
+          colors = @[]
+      frameConfig.palette.colors = colors
+    if node.hasKey("colors"):
+      let colors = if node["colors"].kind == JObject: node["colors"] else: newJObject()
+      frameConfig.colors = colors
+      setFrameColorSettings(parseFrameColorSettings(colors))
+    var rebuildInput = false
+    if node.hasKey("gpioButtons") and node["gpioButtons"].kind == JArray:
+      var buttons: seq[GPIOButton] = @[]
+      for entry in node["gpioButtons"].items:
+        if entry.kind != JObject or entry{"pin"}.isNil or entry{"pin"}.kind != JInt:
+          continue
+        buttons.add GPIOButton(pin: entry["pin"].getInt(), label: entry{"label"}.getStr(),
+          role: entry{"role"}.getStr())
+      frameConfig.gpioButtons = buttons
+      rebuildInput = true
+    var rotate = 0
+    let rotateNode = node{"rotate"}
+    if not rotateNode.isNil and rotateNode.kind == JInt and rotateNode.getInt() in [0, 90, 180, 270]:
+      rotate = rotateNode.getInt()
+      rebuildInput = true
+    if rebuildInput:
+      # The dispatcher's input state copies the buttons' roles when it is
+      # made. And a touch frame's glass reports where it was touched on the
+      # panel (fos_touch.c, the wire position), which input_state turns into
+      # the scene's point by the frame's rotation: this runtime draws the
+      # scene's canvas, already turned (width x height here), so the input
+      # state is given the panel the frame has.
+      host.start()
+      let geometry = FrameConfig(
+        width: if rotate in [90, 270]: frameConfig.height else: frameConfig.width,
+        height: if rotate in [90, 270]: frameConfig.width else: frameConfig.height,
+        rotate: rotate, flip: "", device: frameConfig.device,
+        gpioButtons: frameConfig.gpioButtons, inputSettings: frameConfig.inputSettings)
+      let keyboardAt = host.events.inputState.keyboardAt
+      host.events.inputState = initInputState(geometry)
+      host.events.inputState.keyboardAt = keyboardAt
+    let format = node{"pixelFormat"}
+    if not format.isNil and format.kind == JInt:
+      let stock = panelTable(format.getInt())
+      setAssetColorsPanelPalette(if stock.len == 0: stock
+        else: fitPaletteOverride(frameConfig.palette.colors, stock))
+    true
   except Exception as e:
-    setLastError("selectScene failed: " & e.msg)
+    setLastError("setFrame failed: " & e.msg)
     false
 
+proc frameos_wasm_render_palette(): cstring {.exportc, cdecl.} =
+  ## A photo's own dither palette in effect after the last render (its
+  ## colour profile's `palette`, utils/dither `renderPaletteOverride`), as
+  ## `["#rrggbb", …]`; `[]` when none. A plane packing the picture for a
+  ## panel dithers to it before the frame's own palette, as the device's
+  ## packer does (`activePalette(framePalette(stock))`).
+  let colors = newJArray()
+  for (r, g, b) in renderPaletteOverride:
+    colors.add(%(&"#{clamp(r, 0, 255):02x}{clamp(g, 0, 255):02x}{clamp(b, 0, 255):02x}"))
+  renderPaletteBuffer = $colors
+  renderPaletteBuffer.cstring
+
+proc frameos_wasm_set_kept_state(stateJson: cstring): bool {.exportc, cdecl.} =
+  ## What the frame's last render process kept for the next one
+  ## (frameos_wasm_kept_state, from the plane's previous process;
+  ## docs/server-rendering.md, "Kept between pulls"). `targets`: the UIs on
+  ## the glass, a field's keyboard, its text and caret, an open <select>, how
+  ## far a list scrolled, put back before the next event or render, after the
+  ## scene is open (restoreAsLeft). Without it a tap on the keyboard lands on
+  ## the form under it: the pull carrying the tap draws the UI first, in a
+  ## process that never saw the keyboard come up. `apps`: what each app kept
+  ## with `frameos.remember`, put back on that app now or when it is built
+  ## (app_runtime `restoreKeptAppMemory`).
+  try:
+    let state = parseJson($stateJson)
+    if state.kind != JObject:
+      setLastError("kept state is not an object")
+      return false
+    uiStateToRestore = state
+    discard restoreKeptAppMemory(state{"apps"})
+    true
+  except Exception as e:
+    setLastError("setKeptState failed: " & e.msg)
+    false
+
+proc frameos_wasm_kept_state(): cstring {.exportc, cdecl.} =
+  ## What this process keeps for the next picture, after the last render:
+  ## `{"targets": [{sceneId, nodeId, focus?, caret?, text?, keyboard?, page?,
+  ## shift?, open?, scrolls?}], "apps": [{sceneId, nodeId, memory: {key:
+  ## <JSON text>}}]}`, the UIs' lasting input (ui/events.nim
+  ## `lastingUiInput`) and the apps' remembered values (app_runtime
+  ## `keptAppMemory`), each key left out when empty: `{}` when nothing is
+  ## kept. A plane hands it to the next process (frameos_wasm_set_kept_state).
+  try:
+    var kept = lastingUiInput()
+    let apps = keptAppMemory()
+    if apps.len > 0:
+      kept["apps"] = apps
+    keptStateBuffer = $kept
+  except Exception:
+    keptStateBuffer = "{}"
+  keptStateBuffer.cstring
+
+proc frameos_wasm_select_scene(sceneId: cstring): bool {.exportc, cdecl.} =
+  try:
+    result = selectSceneById($sceneId)
+    # Selected by name from outside: a built-in one is where the plane left
+    # it (frameos_wasm_set_scene_state may come before or after this).
+    if result and isBuiltInScene($sceneId):
+      builtInToRestore = $sceneId
+  except Exception as e:
+    setLastError("selectScene failed: " & e.msg)
+    result = false
+
 # ---------------------------------------------------------------- rendering
+
+var renderedThisProcess = false
+
+proc frameos_wasm_render_guarded(): cint {.importc: "frameos_wasm_render", cdecl.}
+  ## The render behind tools/wasm/fos_wasm_mem.c's out-of-memory guard.
 
 proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
   ## Render the current scene into an RGBA buffer owned by Nim; read it via
@@ -314,8 +604,10 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
   ## wraps it in the setjmp guard that catches a simulated out-of-memory and
   ## returns 3. Without a simulated memory limit the guard is a direct call.
   host.renderRequested = false
+  renderedThisProcess = true
   try:
     refreshDecodeBudget()
+    restoreAsLeft()
     if not host.ensureScene():
       setLastError("no scene selected")
       return 2
@@ -323,11 +615,15 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
     # each render happening even when cached apps return an identical image.
     log($(%*{"event": "render:scene", "width": frameConfig.width, "height": frameConfig.height}))
     let renderStarted = epochTime()
+    # Running as an ESP32: the persistent canvas goes in with the event, as on
+    # the device; the interpreter's "render" handler owes it the background.
+    let canvas = previewCanvas()
     let context = ExecutionContext(
       scene: host.scene,
       event: "render",
       payload: %*{},
-      hasImage: false,
+      image: canvas,
+      hasImage: not canvas.isNil,
       loopIndex: 0,
       loopKey: ".",
       nextSleep: -1
@@ -351,20 +647,46 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
   except Exception as e:
     setLastError("render failed: " & e.msg)
     try:
-      lastImage = renderError(frameConfig.width, frameConfig.height, "Render failed: " & e.msg)
+      if not deviceCanvas.isNil:
+        # Into the persistent canvas, as the device does: a fresh full-frame
+        # image is the allocation a frame with its canvas held cannot afford.
+        deviceCanvas.renderErrorInto(deviceCanvas.width, deviceCanvas.height,
+          "Render failed: " & e.msg)
+        lastImage = deviceCanvas
+      else:
+        lastImage = renderError(frameConfig.width, frameConfig.height, "Render failed: " & e.msg)
       1
     except CatchableError:
       lastImage = nil
       2
 
 proc frameos_wasm_buffer(): pointer {.exportc, cdecl.} =
-  if lastImage.isNil or lastImage.dataLen == 0 or not lastImage.isContiguous:
+  ## The last frame as RGBA, width * height * 4 bytes: an RGBX image's own
+  ## pixels, a 565 or luma canvas expanded into `rgbaOut` (opaque).
+  if lastImage.isNil or lastImage.width <= 0 or lastImage.height <= 0:
     return nil
-  addr lastImage.data[0]
+  if lastImage.format == pfRgbx:
+    if lastImage.dataLen == 0 or not lastImage.isContiguous:
+      return nil
+    return addr lastImage.data[0]
+  let pixels = lastImage.width * lastImage.height
+  if rgbaOut.isNil or rgbaOutPixels != pixels:
+    if not rgbaOut.isNil:
+      cFree(rgbaOut)
+    rgbaOut = cast[ptr UncheckedArray[ColorRGBX]](cMalloc(csize_t(pixels * 4)))
+    rgbaOutPixels = if rgbaOut.isNil: 0 else: pixels
+    if rgbaOut.isNil:
+      return nil
+  for y in 0 ..< lastImage.height:
+    let row = y * lastImage.width
+    for x in 0 ..< lastImage.width:
+      rgbaOut[row + x] = lastImage.unsafe[x, y]
+  rgbaOut
 
 proc frameos_wasm_buffer_len(): cint {.exportc, cdecl.} =
   if lastImage.isNil: 0.cint
-  else: (lastImage.dataLen * 4).cint
+  elif lastImage.format == pfRgbx: (lastImage.dataLen * 4).cint
+  else: (lastImage.width * lastImage.height * 4).cint
 
 proc frameos_wasm_width(): cint {.exportc, cdecl.} =
   if lastImage.isNil: 0.cint else: lastImage.width.cint
@@ -387,23 +709,40 @@ proc frameos_wasm_event(eventName: cstring, payloadJson: cstring): bool {.export
     # the contract's (docs/events-contract.json).
     if eventPolicy($eventName).device notin {edPointer, edKeyboard}:
       jsEventHook(eventName, ($payload).cstring)
+    restoreAsLeft()
     host.send(eoPreview, $eventName, payload)
   except Exception as e:
     setLastError("event " & $eventName & " failed: " & e.msg)
     false
 
 proc frameos_wasm_device_input(inputJson: cstring): cint {.exportc, cdecl.} =
-  ## Button edges a thin client saw, relayed with the render pull they asked
-  ## for (frameos/relayed_input.nim): delivered as the board's own driver's,
-  ## `gpio` from `driver`, then time passes to now, so a tap whose
-  ## double-press window closed on the board is a `press` before the render.
-  ## Returns how many edges were delivered, -1 when the input was unreadable.
+  ## What a thin client's scene would have heard since its last pull, relayed
+  ## with the render pull it asked for (frameos/relayed_input.nim): the
+  ## Pico's button edges, as its own driver's `gpio`, then an ESP32's events
+  ## (`gpio` and pointer events from its driver, its schedule's entries, its
+  ## HTTP API's), each from the origin it came from, so the dispatcher's
+  ## origin rules and event maps decide as on the board
+  ## (docs/server-rendering.md, "Keys, touch and the schedule"). Then time
+  ## passes to now, so a tap whose double-press window closed on the board
+  ## is a `press` before the render. Returns how many were delivered, -1 when
+  ## the input was unreadable.
   try:
-    let edges = relayedButtonEdges(parseJson($inputJson), getMonoTime().ticks div 1_000_000)
-    for payload in edges:
-      discard host.send(eoDriver, "gpio", payload)
+    let events = relayedEvents(parseJson($inputJson), getMonoTime().ticks div 1_000_000)
+    restoreAsLeft()
+    # A tap lands on what the glass shows: a UI's clickable regions and its
+    # handlers are the last render's (ui/events.nim), and a plane renders in
+    # a fresh process that has drawn nothing yet. So a pull carrying pointer
+    # events draws the scene once first and throws that picture away (found
+    # on the bench: a tap on the scene switcher's tile did nothing).
+    if not renderedThisProcess:
+      for event in events:
+        if event.name.startsWith("pointer"):
+          discard frameos_wasm_render_guarded()
+          break
+    for event in events:
+      discard host.send(event.origin, event.name, event.payload)
     discard host.tick()
-    edges.len.cint
+    events.len.cint
   except Exception as e:
     setLastError("device input failed: " & e.msg)
     -1
@@ -428,6 +767,7 @@ proc frameos_wasm_control_event(origin: cstring, eventName: cstring, payloadJson
         %*{}
       else:
         parseJson($payloadJson)
+    restoreAsLeft()
     host.send(source, $eventName, payload)
   except Exception as e:
     setLastError("control event " & $eventName & " failed: " & e.msg)
@@ -438,6 +778,7 @@ proc frameos_wasm_tick(): bool {.exportc, cdecl.} =
   ## a button is held or a button press waits for a possible second one, so a
   ## long press is delivered while the finger is still down, as on a frame. True when it made an event; ask frameos_wasm_render_requested.
   try:
+    restoreAsLeft()
     host.tick()
   except Exception as e:
     setLastError("tick failed: " & e.msg)
@@ -445,11 +786,13 @@ proc frameos_wasm_tick(): bool {.exportc, cdecl.} =
 
 proc frameos_wasm_pointers_down(): cint {.exportc, cdecl.} =
   ## How much input the runtime is still timing: pointers held, GPIO buttons
-  ## held, and button presses waiting out their double-press window. The
+  ## held, button presses waiting out their double-press window, and a UI's
+  ## timer (a key's light, a held key: ui/events.nim). The
   ## worker ticks while any is, so a long press lands while the finger is
   ## down and a `press` once its window closes.
   if host.events.isNil: 0.cint
-  else: (host.events.inputState.pointersDown + host.events.inputState.buttonsBusy).cint
+  else: (host.events.inputState.pointersDown + host.events.inputState.buttonsBusy +
+    (if uiTimersPending(): 1 else: 0)).cint
 
 proc frameos_wasm_render_requested(): bool {.exportc, cdecl.} =
   host.renderRequested

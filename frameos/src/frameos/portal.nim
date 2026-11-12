@@ -62,6 +62,8 @@ type
     claimToken*: string
     serverHost*: string
     serverPort*: string
+    # "http" | "https"; empty keeps the scheme the frame already has.
+    serverScheme*: string
     hostname*: string
     # IANA zone; empty keeps the frame's current zone.
     timeZone*: string
@@ -969,6 +971,7 @@ proc parseSetupOptions*(params: Table[string, string], frameConfig: FrameConfig)
     claimToken: params.getOrDefault("claimToken", "").strip(),
     serverHost: params.getOrDefault("serverHost", frameConfig.serverHost),
     serverPort: params.getOrDefault("serverPort", $(if frameConfig.serverPort > 0: frameConfig.serverPort else: 8989)),
+    serverScheme: params.getOrDefault("serverScheme", "").strip().toLowerAscii(),
     hostname: params.getOrDefault("hostname", setupHostnameValue(frameConfig)),
     timeZone: (block:
       # Only an IANA-shaped name is ever written or handed to the root side;
@@ -1066,6 +1069,14 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
   var serverPort = parseIntParam(options.serverPort, frameConfig.serverPort)
   if serverPort <= 0 or serverPort > 65535:
     serverPort = if frameConfig.serverPort > 0: frameConfig.serverPort else: 8989
+  # The scheme is stated, never left to the port: the form's choice, else
+  # the one the frame already runs with (which setConfigDefaults seeded from
+  # the port for a frame.json from before the key). A scheme or port typed
+  # into the host ("https://backend:8443") wins over both fields.
+  var serverScheme = if options.serverScheme in ["http", "https"]: options.serverScheme else: frameConfig.serverScheme
+  let typedServer = splitServerAddress(options.serverHost)
+  if typedServer.port > 0: serverPort = typedServer.port
+  if typedServer.scheme.len > 0: serverScheme = typedServer.scheme
 
   try:
     var data =
@@ -1082,8 +1093,8 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
       # claim and the panel link code all stay as they are.
       discard
     elif options.controlMode == "backend":
-      if options.serverHost.strip().len > 0:
-        serverHost = options.serverHost.strip()
+      if typedServer.host.len > 0:
+        serverHost = typedServer.host
         data["serverHost"] = %serverHost
     else:
       # Cloud-enrolled and standalone frames must not carry a serverHost: a
@@ -1092,6 +1103,7 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
       serverHost = ""
       data["serverHost"] = %""
     data["serverPort"] = %serverPort
+    data["serverScheme"] = %normalizeServerScheme(serverScheme, serverPort)
 
     data["frameHost"] = %frameHost
     if options.timeZone.strip().len > 0 and isIanaZone(options.timeZone.strip()):
@@ -1180,6 +1192,7 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
       "controlMode": options.controlMode,
       "serverHost": serverHost,
       "serverPort": serverPort,
+      "serverScheme": data["serverScheme"].getStr(""),
       "frameHost": frameHost,
       "device": data{"device"}.getStr(""),
       "width": data{"width"}.getInt(0),
@@ -1575,15 +1588,19 @@ proc attemptConnectSupplicant(frameConfig: FrameConfig, ssid, password: string):
     rememberError(res.message)
   res.ok
 
-proc attemptConnect*(frameOS: FrameOS, frameConfig: FrameConfig, ssid, password: string): bool {.gcsafe.} =
+proc attemptConnect*(frameOS: FrameOS, frameConfig: FrameConfig, ssid, password: string,
+    showFirstScene = true): bool {.gcsafe.} =
   ## Joins `ssid`. `frameConfig` is the calling thread's own (startAp says
   ## why); only the supplicant backend reads it, for the Wi-Fi country.
+  ## `showFirstScene`: the frame goes to its first scene after, as the setup
+  ## portal wants; the settings panel's frame page stays up instead.
   frameOS.network.status = NetworkStatus.connecting
 
   if activeNetworkBackend() == nbSupplicant:
     result = attemptConnectSupplicant(frameConfig, ssid, password)
     frameOS.network.status = if result: NetworkStatus.connected else: NetworkStatus.error
-    sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
+    if showFirstScene:
+      sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
     return
 
   if privilegedDoorAvailable():
@@ -1595,7 +1612,8 @@ proc attemptConnect*(frameOS: FrameOS, frameConfig: FrameConfig, ssid, password:
     frameOS.network.status = if result: NetworkStatus.connected else: NetworkStatus.error
     if frameOS.network.status == NetworkStatus.connected:
       portalSleepHook(5000) # give DHCP etc a moment
-    sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
+    if showFirstScene:
+      sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
     return
 
   discard run(fmt"sudo -n nmcli connection delete '{nmConnectionName}' 2>/dev/null || true")
@@ -1637,7 +1655,8 @@ proc attemptConnect*(frameOS: FrameOS, frameConfig: FrameConfig, ssid, password:
   if frameOS.network.status == NetworkStatus.connected:
     portalSleepHook(5000) # give DHCP etc a moment
 
-  sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
+  if showFirstScene:
+    sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
 
 # Immediately sync the clock so HTTPS certificates validate
 const clockSyncMarkerPath = "/run/systemd/timesync/synchronized"
@@ -2096,6 +2115,9 @@ proc setupHtml*(frameOS: FrameOS): string =
   let framePort = if frameConfig.framePort > 0: frameConfig.framePort else: 8787
   let serverHost = frameConfig.serverHost
   let serverPort = if frameConfig.serverPort > 0: frameConfig.serverPort else: 8989
+  let serverScheme = normalizeServerScheme(frameConfig.serverScheme, serverPort)
+  let serverHttpSelected = if serverScheme == "https": "" else: " selected"
+  let serverHttpsSelected = if serverScheme == "https": " selected" else: ""
 
   let pending = pendingCloudEnrollment()
   let hasPendingClaim = pending != nil
@@ -2261,6 +2283,13 @@ proc setupHtml*(frameOS: FrameOS): string =
         <input type="number" min="1" max="65535"
               name="serverPort"
               value="{serverPort}">
+      </label>
+
+      <label>Server Scheme
+        <select name="serverScheme">
+          <option value="http"{serverHttpSelected}>http (plain)</option>
+          <option value="https"{serverHttpsSelected}>https (TLS)</option>
+        </select>
       </label>
     </div>
   </details>

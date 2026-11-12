@@ -30,6 +30,10 @@ fi
 command -v nim >/dev/null || { echo "nim not found on PATH" >&2; exit 1; }
 command -v emcc >/dev/null || { echo "emcc not found on PATH (install emscripten)" >&2; exit 1; }
 command -v emar >/dev/null || { echo "emar not found on PATH (install emscripten)" >&2; exit 1; }
+# The node emscripten was configured with can stop starting (a Homebrew upgrade
+# that left it without a library), and a failed build here leaves the preview on
+# its last bundle with nothing on screen to say so. Use the one that runs the rest.
+export EM_NODE_JS="${EM_NODE_JS:-$(command -v node)}"
 
 cd "$FRAMEOS_DIR"
 
@@ -126,7 +130,7 @@ FRAMEOS_VERSION="$(python3 tools/frameos_version.py ../versions.json)"
 # _main keeps Nim's generated main() alive: emscripten calls it on module
 # startup and that runs NimMain (all Nim module initializers, e.g. the
 # baked-in font asset tables).
-EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_embedded,_frameos_wasm_set_render_scale,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_device_input,_frameos_wasm_control_event,_frameos_wasm_tick,_frameos_wasm_pointers_down,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error,_frameos_wasm_version,_frameos_wasm_run_app_tests,_frameos_wasm_set_memory_limit,_frameos_wasm_memory_limit,_frameos_wasm_memory_used,_frameos_wasm_memory_peak,_frameos_wasm_memory_failed,_frameos_wasm_memory_reset_peak,_frameos_wasm_memory_render_headroom
+EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_embedded,_frameos_wasm_set_canvas_bits_per_pixel,_frameos_wasm_set_render_scale,_frameos_wasm_set_frame,_frameos_wasm_render_palette,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_device_input,_frameos_wasm_control_event,_frameos_wasm_tick,_frameos_wasm_pointers_down,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_kept_state,_frameos_wasm_set_kept_state,_frameos_wasm_last_error,_frameos_wasm_version,_frameos_wasm_run_app_tests,_frameos_wasm_set_memory_limit,_frameos_wasm_memory_limit,_frameos_wasm_memory_used,_frameos_wasm_memory_peak,_frameos_wasm_memory_failed,_frameos_wasm_memory_reset_peak,_frameos_wasm_memory_render_headroom
 # FS lets the render harness preload a virtual frame's assets into MEMFS;
 # IDBFS (linked below with -lidbfs.js) backs the browser preview's
 # /srv/assets folder with IndexedDB (see tools/wasm/preview-worker.js).

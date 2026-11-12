@@ -19,6 +19,7 @@
 #include "esp_app_desc.h"
 #include "esp_ota_ops.h"
 #include "esp_chip_info.h"
+#include "esp_private/esp_clk.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
@@ -452,6 +453,9 @@ static const char *fos_platform_name(void)
 #endif
 }
 
+/* The scene store as of the last hardware report sent (ws_poll_active_scene). */
+static uint32_t s_store_generation_reported = 0;
+
 static void add_hardware_json(cJSON *parent)
 {
     const fos_config_t *config = fos_config();
@@ -512,6 +516,14 @@ static void add_hardware_json(cJSON *parent)
     cJSON_AddNumberToObject(hw, "micDataPin", config->mic_pins.data);
     cJSON_AddNumberToObject(hw, "micPwrPin", config->mic_pins.pwr);
     cJSON_AddBoolToObject(hw, "voiceChat", config->voice_chat);
+    cJSON_AddBoolToObject(hw, "touchBeep", config->touch_beep);
+    /* The clock setting and the clock it gave (main.c, at boot). */
+    cJSON_AddStringToObject(hw, "cpuMode", fos_config_cpu_mode_name(config->cpu_mode));
+    cJSON_AddNumberToObject(hw, "cpuMhz", (double)(esp_clk_cpu_freq() / 1000000));
+    /* Where the scenes run (docs/server-rendering.md): this board's runtime,
+     * when it has one that fits the panel, or the cloud's. */
+    cJSON_AddBoolToObject(hw, "localRenderSupported", fos_client_local_render_capable());
+    cJSON_AddStringToObject(hw, "renderMode", fos_client_render_mode_name());
     /* The status LED the buzzer's notes light (fos_led.c; -1 = none) and how
      * it is lit, the preset's when no push set them. */
     cJSON_AddNumberToObject(hw, "ledPin", config->led_pin);
@@ -534,6 +546,7 @@ static void add_hardware_json(cJSON *parent)
      * its own and shows what the frame reports here, on every hello and
      * every `state` (one follows each lan_access_set). */
     cJSON_AddBoolToObject(hw, "lanAccess", config->allow_local_network);
+    fos_cloud_add_device_report(hw);
     /* A self-hosted backend set here owns the content: every content verb is
      * refused `backend_managed` (ws_handle_message). Its origin tells the
      * cloud why, and its absence on a later hello that the cloud may replay
@@ -587,6 +600,9 @@ static void add_hardware_json(cJSON *parent)
         cJSON_AddNumberToObject(storage, "otaBytes", info.ota_bytes);
         cJSON_AddNumberToObject(storage, "stateBytes", info.state_bytes);
     }
+    /* What is in /state, not its size on the map: the owner sees it fill. */
+    s_store_generation_reported = fos_scenes_store_generation();
+    fos_scenes_add_storage_json(storage);
     cJSON *ota = cJSON_AddObjectToObject(hw, "ota");
     if (ota) {
         cJSON_AddBoolToObject(ota, "supported", info.ota_slots > 0);
@@ -862,6 +878,9 @@ static char s_scene_ack_checksum[96] = "";
 static uint32_t s_scene_ack_generation = 0;
 static int64_t s_scene_ack_deadline_us = 0;
 static volatile bool s_scene_ack_pending = false;
+/* A `state` wanted from somewhere that may not send it (fos_cloud_request_state):
+ * sent by the cloud task, which takes the runtime snapshot it needs. */
+static volatile bool s_state_wanted = false;
 /* The checksum of the last cloud set_scenes payload the render task actually
  * applied, persisted so a reboot does not amnesia it: fos_scenes stores every
  * pushed payload with etag "local" (a backend-sync guard, not a checksum), so
@@ -1336,15 +1355,22 @@ static void add_state_fields(cJSON *msg, nim_snapshot_t *snap, bool with_hardwar
  * cloud's last_state has no active scene until the next reconnect, and the
  * workspace shows "the active scene is not available" for a frame that is
  * happily rendering. Scene changes from set_scenes pushes also ride the
- * scene_ack, so this mostly fires for boot, schedules and button presses. */
+ * scene_ack, so this mostly fires for boot, schedules and button presses.
+ *
+ * It also goes out when the stored scenes changed since the last hardware
+ * report: the hello's storage (each scene's size, what is free) is stale after
+ * a push, and a push that keeps the active scene would otherwise leave the
+ * workspace showing the old sizes until the next reconnect. Not while a
+ * scene_ack waits, so the report is the applied store. */
 static char s_active_scene_reported[128] = "";
 
 static void ws_poll_active_scene(void)
 {
     if (!s_ws_client || !s_ws_ready) return;
+    bool store_moved = !s_scene_ack_pending && fos_scenes_store_generation() != s_store_generation_reported;
     nim_snapshot_t snap;
     nim_snapshot_take(&snap);
-    if (snap.ok && snap.scene_id[0] && strcmp(snap.scene_id, s_active_scene_reported) != 0) {
+    if (snap.ok && snap.scene_id[0] && (store_moved || strcmp(snap.scene_id, s_active_scene_reported) != 0)) {
         cJSON *msg = cJSON_CreateObject();
         if (msg) {
             cJSON_AddStringToObject(msg, "type", "state");
@@ -1513,6 +1539,8 @@ static void ws_schedule_reboot(void)
  * to it) leaves the provider showing this frame as out of sync, which is the
  * truth. The command itself was already acked — that ack means "accepted and
  * persisted", scene_ack means "live". */
+static void ws_send_scene_ack(const char *checksum);
+
 static void ws_poll_scene_ack(void)
 {
     if (!s_scene_ack_pending) return;
@@ -1542,12 +1570,17 @@ static void ws_poll_scene_ack(void)
         ESP_LOGI(TAG, "set_scenes: applied while offline; scene_ack deferred to hello");
         return;
     }
+    ws_send_scene_ack(s_scene_ack_checksum);
+}
 
+/* `scene_ack {checksum, active_scene?}`: the set with this checksum is live. */
+static void ws_send_scene_ack(const char *checksum)
+{
     cJSON *msg = cJSON_CreateObject();
     if (!msg) return; /* out of memory: stay silent, provider retries */
     cJSON_AddStringToObject(msg, "type", "scene_ack");
-    if (s_scene_ack_checksum[0]) {
-        cJSON_AddStringToObject(msg, "checksum", s_scene_ack_checksum);
+    if (checksum != NULL && checksum[0]) {
+        cJSON_AddStringToObject(msg, "checksum", checksum);
     }
     /* The render task is often still on the first render of the new payload
      * (holding the runtime lock) when this runs: then active_scene is left
@@ -2155,46 +2188,114 @@ static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const
  * straight to the storage layer. Going through
  * fos_http_store_uploaded_scenes_payload() would reprint the whole envelope,
  * then parse and print it a second time inside that function — four to five
- * copies live at once on a device whose scene store tops out at 512 KiB. */
-static void ws_handle_set_scenes(const cJSON *root, const cJSON *id)
+ * copies live at once on a device whose scene store tops out at 512 KiB.
+ *
+ * scenes_patch (`patch`): the same set the full push would have sent, as the
+ * difference from the one this frame holds. `base_checksum` names that set; a
+ * frame holding anything else refuses and the provider sends the whole list.
+ * Acked and scene_acked exactly as set_scenes is, so `checksum` is the whole
+ * set's. */
+/* Send a pushed set's `scene_id` / `state` on as the switch the
+ * set_current_scene verb makes: the state rides to the runtime, which holds it
+ * until that scene opens (single_scene_host.nim), so it is in place at the
+ * scene's first render even while the scene's file is still being written. */
+static void select_pushed_scene(const char *scene_id, const cJSON *state, fos_event_origin_t origin)
 {
-    const cJSON *scenes = cJSON_GetObjectItem(root, "scenes");
-    if (!cJSON_IsArray(scenes)) {
-        ws_ack(id, false, "not_interpreted");
+    if (!cJSON_IsObject(state)) {
+        fos_scenes_select(scene_id);
         return;
     }
-    char *payload = cJSON_PrintUnformatted((cJSON *)scenes);
-    if (!payload) {
-        ws_ack(id, false, "no_memory");
-        return;
+    cJSON *payload = cJSON_CreateObject();
+    char *printed = NULL;
+    if (payload != NULL && cJSON_AddStringToObject(payload, "sceneId", scene_id) != NULL &&
+        cJSON_AddItemReferenceToObject(payload, "state", (cJSON *)state)) {
+        printed = cJSON_PrintUnformatted(payload);
     }
+    cJSON_Delete(payload);
+    if (printed == NULL ||
+        fos_events_dispatch_from_plane(origin, FOS_EVENT_SET_CURRENT_SCENE, printed) != FOS_EVENT_DONE) {
+        fos_scenes_select(scene_id); /* the switch, at least */
+    }
+    cJSON_free(printed);
+}
+
+static void ws_handle_set_scenes(const cJSON *root, const cJSON *id, bool patch, fos_event_origin_t origin)
+{
+    const cJSON *checksum = cJSON_GetObjectItem(root, "checksum");
     uint32_t generation = fos_scenes_apply_generation();
-    /* Declared CLOUD so the store remembers who installed these scenes:
-     * apply_network_policy() keeps the RFC1918 deny alive on that flag even
-     * after a demotion drops FOS_CLOUD_ENROLLED. */
-    esp_err_t err = fos_scenes_set_json_from(payload, strlen(payload),
-                                             FOS_SCENES_SOURCE_CLOUD);
-    cJSON_free(payload);
-    if (err != ESP_OK) {
-        const char *detail = fos_scenes_last_error();
-        ws_ack(id, false, (detail && detail[0]) ? detail : "scene_store_failed");
-        return;
-    }
-    /* Optional scene_id names which pushed scene to activate (the workspace's
-     * "preview on frame" flow). Queued now, applied by the render task AFTER
-     * the payload loads — fos_client.c applies pending scenes before pending
-     * selection, so the id exists by then. Unknown ids are dropped there. */
+    /* Optional scene_id names which pushed scene to activate ("Push & activate",
+     * "Install and show", the workspace's "preview on frame"): somebody waits
+     * to see it, so a patch that carries one is written unpaced. */
     const cJSON *scene_id = cJSON_GetObjectItem(root, "scene_id");
-    if (cJSON_IsString(scene_id) && scene_id->valuestring && scene_id->valuestring[0]) {
-        fos_scenes_select(scene_id->valuestring);
+    bool select = cJSON_IsString(scene_id) && scene_id->valuestring[0];
+    esp_err_t err;
+    if (patch) {
+        const cJSON *base = cJSON_GetObjectItem(root, "base_checksum");
+        bool from_cloud = fos_scenes_from_cloud();
+        const char *refused = NULL;
+        if (!cJSON_IsString(checksum) || !cJSON_IsString(base)) {
+            refused = "invalid_patch";
+        } else if (from_cloud && strcmp(checksum->valuestring, s_applied_scenes_checksum) == 0) {
+            /* A redelivered patch this frame already applied, or a push of the
+             * set it holds that names a scene to show (the install already
+             * landed, then "Push & activate"). Its scene_ack went out then, or
+             * the hello carried the checksum; the switch is still asked for. */
+            ws_ack(id, true, NULL);
+            if (select) {
+                select_pushed_scene(scene_id->valuestring, cJSON_GetObjectItem(root, "state"), origin);
+                fos_client_render_now();
+                /* Live already: said at once, so the push's progress moves on
+                 * to the render instead of waiting for an apply that has
+                 * nothing to do. */
+                ws_send_scene_ack(checksum->valuestring);
+            }
+            return;
+        } else if (!from_cloud || strcmp(base->valuestring, s_applied_scenes_checksum) != 0) {
+            refused = "base_mismatch";
+        } else {
+            err = fos_scenes_apply_patch(cJSON_GetObjectItem(root, "put"), cJSON_GetObjectItem(root, "order"),
+                                         FOS_SCENES_SOURCE_CLOUD, NULL, select);
+            if (err != ESP_OK) refused = err == ESP_ERR_NO_MEM ? "no_room" : "patch_refused";
+        }
+        if (refused != NULL) {
+            ws_ack(id, false, refused);
+            return;
+        }
+    } else {
+        const cJSON *scenes = cJSON_GetObjectItem(root, "scenes");
+        if (!cJSON_IsArray(scenes)) {
+            ws_ack(id, false, "not_interpreted");
+            return;
+        }
+        char *payload = cJSON_PrintUnformatted((cJSON *)scenes);
+        if (!payload) {
+            ws_ack(id, false, "no_memory");
+            return;
+        }
+        /* Declared CLOUD so the store remembers who installed these scenes:
+         * apply_network_policy() keeps the RFC1918 deny alive on that flag
+         * even after a demotion drops FOS_CLOUD_ENROLLED. */
+        err = fos_scenes_set_json_from(payload, strlen(payload), FOS_SCENES_SOURCE_CLOUD);
+        cJSON_free(payload);
+        if (err != ESP_OK) {
+            const char *detail = fos_scenes_last_error();
+            ws_ack(id, false, (detail && detail[0]) ? detail : "scene_store_failed");
+            return;
+        }
     }
-    fos_client_render_now();
+    /* The switch is queued now and applied by the render task AFTER the
+     * payload loads — fos_client.c applies pending scenes before pending
+     * selection, so the id exists by then. Unknown ids are dropped there. Its
+     * `state` goes with it (select_pushed_scene). A patch renders only then: a
+     * scene that is not on the panel costs no refresh, and one that is renders
+     * when the render task picks it up. */
+    if (select) select_pushed_scene(scene_id->valuestring, cJSON_GetObjectItem(root, "state"), origin);
+    if (select || !patch) fos_client_render_now();
     ws_ack(id, true, NULL);
 
     /* scene_ack waits for the render task; see ws_poll_scene_ack(). */
-    const cJSON *checksum = cJSON_GetObjectItem(root, "checksum");
     s_scene_ack_checksum[0] = '\0';
-    if (cJSON_IsString(checksum) && checksum->valuestring) {
+    if (cJSON_IsString(checksum)) {
         strlcpy(s_scene_ack_checksum, checksum->valuestring, sizeof(s_scene_ack_checksum));
     }
     s_scene_ack_generation = generation;
@@ -2317,7 +2418,9 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * authoritative on the provider), `rotate` (the renderer sizes its canvas
  * once at init, so this one costs a reboot), `scaling_mode` (a per-decode
  * fallback fit, applied live on the next render pass), `render_scale` (what
- * JSX from .tsx/.jsx apps is laid out for, live the same way), `colors` (the
+ * JSX from .tsx/.jsx apps is laid out for, live the same way),
+ * `frame_settings_on_screen` (the frame page of the settings on the screen,
+ * read when the panel draws), `colors` (the
  * automatic fit switch and the frame-wide correction, applied live the same
  * way) and `palette` (the colour list the packer dithers to, live the same
  * way; the names ride along in the cloud only). The power keys —
@@ -2337,11 +2440,15 @@ static int set_settings_reserved_pin(const cJSON *settings, const char **key, co
 {
     static const char *const pin_keys[] = {"battery_pin", "battery_enable_pin", "buzzer_pin",
                                            "mic_clk_pin", "mic_data_pin", "mic_pwr_pin", "led_pin"};
+    /* What each key holds now is its own driver's claim, not a conflict. */
+    const fos_config_t *config = fos_config();
+    const int held[] = {config->battery_pin,   config->battery_enable_pin, config->buzzer_pin, config->mic_pins.clk,
+                        config->mic_pins.data, config->mic_pins.pwr,       config->led_pin};
     for (size_t i = 0; i < sizeof(pin_keys) / sizeof(pin_keys[0]); i++) {
         const cJSON *value = cJSON_GetObjectItem(settings, pin_keys[i]);
         if (!cJSON_IsNumber(value)) continue;
         int pin = (int)value->valuedouble;
-        if (pin < 0) continue; /* -1: none */
+        if (pin < 0 || pin == held[i]) continue; /* -1: none */
         const char *reason = fos_config_gpio_pin_reserved(pin);
         if (reason != NULL) {
             *key = pin_keys[i];
@@ -2460,6 +2567,14 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         }
         config->render_scale_milli = milli;
     }
+    /* The frame page behind the gear of the settings on the screen
+     * (docs/scene-settings.md "The frame page"): read when the panel draws,
+     * live. The console's settings_unlock wins over false, and no plane
+     * sets that one. */
+    const cJSON *on_screen = cJSON_GetObjectItem(settings, "frame_settings_on_screen");
+    if (on_screen != NULL) {
+        config->frame_settings_on_screen = cJSON_IsTrue(on_screen);
+    }
     const cJSON *colors = cJSON_GetObjectItem(settings, "colors");
     if (colors != NULL) {
         /* The contract already validated the shape; what is left is the slot.
@@ -2528,6 +2643,8 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     if (sleep_on_battery != NULL) {
         config->deep_sleep_on_battery = cJSON_IsTrue(sleep_on_battery);
     }
+    const cJSON *awake_input = cJSON_GetObjectItem(settings, "awake_after_input_seconds");
+    if (awake_input != NULL) config->awake_after_input_sec = (uint32_t)awake_input->valuedouble;
     const cJSON *wake_check = cJSON_GetObjectItem(settings, "wake_check_seconds");
     if (wake_check != NULL) {
         uint32_t seconds = (uint32_t)wake_check->valuedouble;
@@ -2584,6 +2701,10 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     }
     /* Voice chat (docs/voice-chat.md): whether the voice key's hold opens
      * the microphone. Live: the hold asks on every press. */
+    const cJSON *touch_beep = cJSON_GetObjectItem(settings, "touch_beep");
+    if (touch_beep != NULL) {
+        config->touch_beep = cJSON_IsTrue(touch_beep);
+    }
     const cJSON *voice_chat = cJSON_GetObjectItem(settings, "voice_chat");
     if (voice_chat != NULL) {
         config->voice_chat = cJSON_IsTrue(voice_chat);
@@ -2608,11 +2729,31 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     if (debug != NULL) {
         config->debug_logging = cJSON_IsTrue(debug);
     }
+    /* Where the scenes run (docs/server-rendering.md): `remote` hands them to
+     * the cloud, which answers this frame's render pulls. Live: the next
+     * pass pulls, or renders, the other way. A board without a runtime
+     * stays remote whatever it is told. */
+    const cJSON *render_mode = cJSON_GetObjectItem(settings, "render_mode");
+    bool render_mode_said = cJSON_IsString(render_mode);
+    if (render_mode_said) {
+        config->render_mode = strcmp(render_mode->valuestring, "remote") == 0 || !fos_client_local_render_capable()
+                                  ? FOS_RENDER_REMOTE
+                                  : FOS_RENDER_LOCAL;
+    }
     /* Per-request HTTP body ceiling: handed to frameos_nim_init once at boot
      * (main.c), so a change takes the same deferred reboot as rotate. Same
      * floor as the local admin API; the ceiling is the Pi runtime's default
      * (a provider can lower a device's bound, never raise it past that). */
     bool restart_for_init = false;
+    /* The chip's clock is set once at boot (main.c). */
+    const cJSON *cpu_mode = cJSON_GetObjectItem(settings, "cpu_mode");
+    if (cJSON_IsString(cpu_mode)) {
+        uint8_t mode = config->cpu_mode;
+        if (fos_config_parse_cpu_mode(cpu_mode->valuestring, &mode)) {
+            restart_for_init = restart_for_init || config->cpu_mode != mode;
+            config->cpu_mode = mode;
+        }
+    }
     const cJSON *max_http = cJSON_GetObjectItem(settings, "max_http_response_bytes");
     if (max_http != NULL) {
         uint32_t bytes = (uint32_t)max_http->valuedouble;
@@ -2668,9 +2809,13 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         frameos_nim_log_hook(line);
     }
     ws_ack(id, true, NULL);
+    /* Said again or changed, a refusal the cloud gave before is forgotten:
+     * it is the one that just answered for this frame. */
+    if (render_mode_said) fos_client_render_mode_changed();
     if (restart_for_init && !battery_changed && !rotate_changed) {
-        ESP_LOGW(TAG, "ws: boot-time setting changed (http ceiling %lu, %u buttons); restarting",
-                 (unsigned long)config->max_http_response_bytes, (unsigned)config->gpio_button_count);
+        ESP_LOGW(TAG, "ws: boot-time setting changed (http ceiling %lu, %u buttons, cpu %s); restarting",
+                 (unsigned long)config->max_http_response_bytes, (unsigned)config->gpio_button_count,
+                 fos_config_cpu_mode_name(config->cpu_mode));
         ws_schedule_reboot();
     }
     if (battery_changed && !rotate_changed) {
@@ -2709,10 +2854,12 @@ static void ws_ack_unparseable(const char *data, size_t len)
  *
  * `render`, `set_current_scene`, `reboot` / `restart_runtime` and
  * `scene_event` are scene events said by the provider: each goes through
- * fos_events_dispatch with the `cloud` origin, the one routing function the
- * HTTP route, the schedule, the console and the buttons use, so what the
- * provider may say is the contract's answer (docs/events-contract.json) and
- * not a list kept here. The verbs keep their own ack tokens. */
+ * the one routing function the HTTP route, the schedule, the console and the
+ * buttons use (fos_events_dispatch_from_plane: the same, except that a frame
+ * rendered on the server does not relay what its plane said back to it), so
+ * what the provider may say is the contract's answer
+ * (docs/events-contract.json) and not a list kept here. The verbs keep their
+ * own ack tokens. */
 
 /* A verb with no payload of its own: render, reboot, restart_runtime. Acked
  * BEFORE the dispatch — a restart does not come back to send one, and the
@@ -2725,7 +2872,7 @@ static void ws_handle_event_verb(const char *event, const cJSON *id, fos_event_o
         return;
     }
     ws_ack(id, true, NULL);
-    fos_events_dispatch(origin, event, NULL);
+    fos_events_dispatch_from_plane(origin, event, NULL);
 }
 
 /* `set_current_scene {scene_id, state?}` → setCurrentScene {sceneId, state?},
@@ -2754,7 +2901,7 @@ static void ws_handle_set_current_scene(const cJSON *root, const cJSON *id, fos_
         ws_ack(id, false, "no_memory");
         return;
     }
-    fos_event_result_t result = fos_events_dispatch(origin, FOS_EVENT_SET_CURRENT_SCENE, printed);
+    fos_event_result_t result = fos_events_dispatch_from_plane(origin, FOS_EVENT_SET_CURRENT_SCENE, printed);
     cJSON_free(printed);
     if (result == FOS_EVENT_DONE) {
         ws_ack(id, true, NULL);
@@ -2798,7 +2945,7 @@ static void ws_handle_scene_event(const cJSON *root, const cJSON *id, fos_event_
         ws_ack(id, false, "no_memory");
         return;
     }
-    fos_event_result_t result = fos_events_dispatch(origin, name, printed);
+    fos_event_result_t result = fos_events_dispatch_from_plane(origin, name, printed);
     if (printed != NULL) cJSON_free(printed);
     switch (result) {
         case FOS_EVENT_BUSY:
@@ -2942,8 +3089,8 @@ static void dispatch_verb(const char *type, cJSON *root, const cJSON *id,
         ws_handle_set_current_scene(root, id, origin);
     } else if (strcmp(type, "scene_event") == 0) {
         ws_handle_scene_event(root, id, origin);
-    } else if (strcmp(type, "set_scenes") == 0) {
-        ws_handle_set_scenes(root, id);
+    } else if (strcmp(type, "set_scenes") == 0 || strcmp(type, "scenes_patch") == 0) {
+        ws_handle_set_scenes(root, id, type[1] == 'c' /* scenes_patch */, origin);
     } else if (strcmp(type, "set_settings") == 0) {
         ws_handle_set_settings(root, id);
     } else if (strcmp(type, "assets_list") == 0) {
@@ -3050,6 +3197,25 @@ static void dispatch_verb(const char *type, cJSON *root, const cJSON *id,
         ESP_LOGW(TAG, "ws: refusing verb \"%s\"", type[0] ? type : "(none)");
         ws_ack(id, false, "unknown_verb");
     }
+}
+
+void fos_cloud_forget_applied_scenes(void)
+{
+    if (!s_applied_scenes_checksum[0]) return;
+    s_applied_scenes_checksum[0] = '\0';
+    nvs_erase_key_quiet("cloud_scn_sum");
+}
+
+void fos_cloud_request_state(void)
+{
+    s_state_wanted = true;
+}
+
+void fos_cloud_add_device_report(cJSON *msg)
+{
+    const fos_config_t *config = fos_config();
+    cJSON_AddNumberToObject(msg, "rotate", config->rotate);
+    cJSON_AddNumberToObject(msg, "renderScale", config->render_scale_milli / 1000.0);
 }
 
 void fos_cloud_add_state_fields(cJSON *msg)
@@ -3745,6 +3911,10 @@ static void cloud_task(void *arg)
             }
 #endif
             ws_poll_scene_ack();
+            if (s_state_wanted && s_ws_ready) {
+                s_state_wanted = false;
+                ws_send_state(NULL);
+            }
             ws_poll_logs();
             ws_poll_metrics();
             ws_poll_active_scene();

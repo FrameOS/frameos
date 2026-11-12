@@ -1,5 +1,7 @@
 import { MakeLogicType, actions, kea, reducers, path, key, props, connect, listeners, selectors } from 'kea'
 import { forms } from 'kea-forms'
+import { router } from 'kea-router'
+import { urls } from '../../../../urls'
 
 import { FrameScene, RepositoryType, TemplateForm, TemplateType, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
@@ -8,10 +10,11 @@ import { repositoriesModel } from '../../../../models/repositoriesModel'
 import { appsModel } from '../../../../models/appsModel'
 import { searchInText } from '../../../../utils/searchInText'
 import { apiFetch } from '../../../../utils/apiFetch'
-import { assignCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
+import { addCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { stripSecretFieldValues } from '../../../../utils/stripSecretFieldValues'
 import { withoutSceneEventMap } from '../../../../utils/sceneEventMap'
+import { layoutsWornBy, withoutSceneLayout } from '../../../../utils/sceneLayouts'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { longRunningTasksModel, reportTaskOutcome } from '../../../../models/longRunningTasksModel'
 import { framesModel } from '../../../../models/framesModel'
@@ -28,7 +31,7 @@ import { isEsp32Frame } from '../../../workspace/workspaceSurfaces'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { templateWithSceneOrigins } from '../../../../utils/sceneOrigin'
 import { parseSceneUpload, sceneNeedsAutoArrange } from '../../../../utils/sceneUpload'
-import { scenesLogic } from '../Scenes/scenesLogic'
+import { pushWithoutActivating, scenesLogic } from '../Scenes/scenesLogic'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
 import { templateFavouriteId, type TemplateWithFavouriteId } from './templateFavourites'
 import { cloudDriveLogic } from './cloudDriveLogic'
@@ -39,6 +42,49 @@ import { downloadBlob } from '../../../../utils/objectUrl'
 
 export interface TemplateLogicProps {
   frameId: FrameId
+}
+
+/** The scene ids an install just added to the frame's form, in form order. */
+function sceneIdsAdded(before: ReadonlySet<string>, after: readonly Partial<FrameScene>[] | undefined): FrameScene[] {
+  return (after ?? []).filter((scene): scene is FrameScene => Boolean(scene?.id) && !before.has(scene.id as string))
+}
+
+/** Which installed scene "Install & activate" shows: the one its pack marks
+ * the default, else the first. */
+function sceneToActivate(scenes: readonly Partial<FrameScene>[]): string | null {
+  return (scenes.find((scene) => scene?.default)?.id ?? scenes[0]?.id ?? null) as string | null
+}
+
+/** The scene drawer's "Push & activate" for a scene an install just added:
+ * that scene alone (and the scenes it draws or switches to) saved, pushed and
+ * shown, the rest of the form untouched. */
+async function pushAndActivateInstalled(frameId: FrameId, sceneId: string): Promise<void> {
+  const logic = scenesLogic({ frameId })
+  logic.mount()
+  await logic.asyncActions.pushScene(sceneId, true, null)
+}
+
+/** What an install did besides the form: the scenes it added saved and
+ * pushed, and shown with `activateId` ("Install & activate"). Installed is on
+ * the frame's list and on the frame, as the cloud's assignment is. The form
+ * edit alone sat unsaved on a frame whose page was usually not open (the
+ * Scenes page's Install, a drop on a frame's tile), so the scene never got
+ * there. */
+async function pushInstalled(
+  frameId: FrameId,
+  formBefore: ReadonlySet<string>,
+  name: string | undefined,
+  activateId: string | null
+): Promise<void> {
+  if (activateId) {
+    await pushAndActivateInstalled(frameId, activateId)
+    return
+  }
+  const store = frameLogic({ frameId })
+  const added = sceneIdsAdded(formBefore, store.values.frameForm?.scenes).map((scene) => scene.id)
+  if (added.length && store.values.frame) {
+    await pushWithoutActivating(frameId, store.values.frame, added, `Installing ${name || 'the scene'}`, added[0])
+  }
 }
 
 /** The `detail` of a failed response, so the drawer's toast says what went
@@ -256,8 +302,10 @@ export interface templatesLogicActions {
   applyRemoteToFrame: (
     repository: RepositoryType,
     template: TemplateType,
-    openDrawer?: boolean
+    openDrawer?: boolean,
+    activate?: boolean
   ) => {
+    activate: boolean
     openDrawer: boolean
     repository: RepositoryType
     template: TemplateType
@@ -276,6 +324,15 @@ export interface templatesLogicActions {
   }
   hideUploadTemplate: () => {
     value: true
+  }
+  installTemplate: (
+    template: Partial<TemplateType>,
+    openDrawer?: boolean,
+    activate?: boolean
+  ) => {
+    activate: boolean
+    openDrawer: boolean
+    template: Partial<TemplateType>
   }
   remoteInstallFinished: (installId: string) => {
     installId: string
@@ -618,10 +675,25 @@ export const templatesLogic = kea<templatesLogicType>([
     editLocalTemplate: (template: TemplateType) => ({ template }),
     hideModal: true,
     saveRemoteAsLocal: (repository: RepositoryType, template: TemplateType) => ({ repository, template }),
-    applyRemoteToFrame: (repository: RepositoryType, template: TemplateType, openDrawer?: boolean) => ({
+    // An install puts the scene on the frame's list and pushes it, on both
+    // planes; `activate`: "Install & activate", shown now too, in one push of
+    // that scene alone (scenesLogic.pushScene).
+    applyRemoteToFrame: (
+      repository: RepositoryType,
+      template: TemplateType,
+      openDrawer?: boolean,
+      activate?: boolean
+    ) => ({
+      activate: activate ?? false,
       openDrawer: openDrawer ?? false,
       repository,
       template,
+    }),
+    // The same for a scene saved on this backend (no catalog to load it from).
+    installTemplate: (template: Partial<TemplateType>, openDrawer?: boolean, activate?: boolean) => ({
+      template,
+      openDrawer: openDrawer ?? false,
+      activate: activate ?? false,
     }),
     showRemoteTemplate: true,
     hideRemoteTemplate: true,
@@ -648,103 +720,85 @@ export const templatesLogic = kea<templatesLogicType>([
         name: !templateForm.name ? 'Name is required' : null,
       }),
       submit: async (formValues) => {
-        if (formValues.id) {
-          // update
-          const request = {
-            name: formValues.name,
-            description: formValues.description,
-          }
-          const response = await apiFetch(`/api/templates/${formValues.id}`, {
-            method: 'PATCH',
-            body: JSON.stringify(request),
-            headers: {
-              'Content-Type': 'application/json',
-            },
-          })
-          if (!response.ok) {
-            throw new Error('Failed to update template')
-          }
-          actions.updateTemplate(await response.json())
-        } else {
-          // create
-          const target = values.modalTarget
-          const exportScenes = formValues.exportScenes ?? []
-          // The preview image should show one of the scenes being saved: use
-          // the frame's snapshot only when the active scene is included,
-          // otherwise the first selected scene's cached snapshot.
-          const activeSceneId = values.frame?.active_scene_id
-          const imageSceneId = activeSceneId && exportScenes.includes(activeSceneId) ? undefined : exportScenes[0]
-          // Never ship a `secret: true` field value in a template or a store zip,
-          // nor this install's button map (docs/events.md "Event map"): the
-          // map is the installed copy's, another frame has other buttons.
-          const exportedScenes = (values.frameForm.scenes || [])
-            .filter((scene) => exportScenes.includes(scene.id))
-            // Saved the way a save leaves them: each JS app's permissions
-            // filled from its code (utils/sceneAccess.ts).
-            .map((scene) => withAppPermissions(stripSecretFieldValues(withoutSceneEventMap(scene), values.apps)))
+        const target = values.modalTarget
+        const exportScenes = formValues.exportScenes ?? []
+        // The preview image should show one of the scenes being saved: use
+        // the frame's snapshot only when the active scene is included,
+        // otherwise the first selected scene's cached snapshot.
+        const activeSceneId = values.frame?.active_scene_id
+        const imageSceneId = activeSceneId && exportScenes.includes(activeSceneId) ? undefined : exportScenes[0]
+        // Never ship a `secret: true` field value in a template or a store zip,
+        // nor this install's button map (docs/events.md "Event map"): the
+        // map is the installed copy's, another frame has other buttons.
+        const exportedScenes = (values.frameForm.scenes || [])
+          .filter((scene) => exportScenes.includes(scene.id))
+          // Saved the way a save leaves them: each JS app's permissions
+          // filled from its code (utils/sceneAccess.ts).
+          .map((scene) =>
+            withAppPermissions(stripSecretFieldValues(withoutSceneLayout(withoutSceneEventMap(scene)), values.apps))
+          )
 
-          if (target === 'cloud') {
-            const response = await apiFetch('/api/cloud/store/publish', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                name: formValues.name,
-                description: formValues.description,
-                scenes: exportedScenes,
-                from_frame_id: props.frameId,
-                ...(imageSceneId ? { image_scene_id: imageSceneId } : {}),
-                ...(formValues.visibility === 'private' || formValues.visibility === 'public'
-                  ? { visibility: formValues.visibility }
-                  : {}),
-              }),
-            })
-            if (!response.ok) {
-              let detail = `unexpected status ${response.status}`
-              try {
-                detail = (await response.json())?.detail ?? detail
-              } catch {
-                // keep fallback detail
-              }
-              window.alert(`Could not save to your private cloud: ${detail}`)
-              throw new Error('Failed to save to private cloud scenes')
-            }
-            const payload = await response.json()
-            const scene = payload?.scene
-            cloudDriveLogic.findMounted()?.actions.loadDrive()
-            actions.hideModal()
-            actions.resetTemplateForm()
-            if (
-              scene?.url &&
-              window.confirm(
-                `Saved "${formValues.name}" to your private cloud scenes (v${scene?.version ?? '?'}). Open it?`
-              )
-            ) {
-              window.open(scene.url, '_blank', 'noopener')
-            }
-            return
-          }
-
-          const request: TemplateType & Record<string, any> = {
-            name: formValues.name,
-            description: formValues.description,
-            scenes: exportedScenes,
-            from_frame_id: props.frameId,
-            ...(imageSceneId ? { image_scene_id: imageSceneId } : {}),
-            format: target === 'zip' ? 'zip' : 'json',
-          }
-          const response = await apiFetch('/api/templates', {
+        if (target === 'cloud') {
+          const response = await apiFetch('/api/cloud/store/publish', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(request),
+            body: JSON.stringify({
+              name: formValues.name,
+              description: formValues.description,
+              scenes: exportedScenes,
+              from_frame_id: props.frameId,
+              ...(imageSceneId ? { image_scene_id: imageSceneId } : {}),
+              ...(formValues.visibility === 'private' || formValues.visibility === 'public'
+                ? { visibility: formValues.visibility }
+                : {}),
+            }),
           })
           if (!response.ok) {
-            throw new Error('Failed to create template')
+            let detail = `unexpected status ${response.status}`
+            try {
+              detail = (await response.json())?.detail ?? detail
+            } catch {
+              // keep fallback detail
+            }
+            window.alert(`Could not save to your private cloud: ${detail}`)
+            throw new Error('Failed to save to private cloud scenes')
           }
-          if (target === 'zip') {
-            downloadBlob(await response.blob(), `${formValues.name}.zip`)
-          } else {
-            actions.updateTemplate(await response.json())
+          const payload = await response.json()
+          const scene = payload?.scene
+          cloudDriveLogic.findMounted()?.actions.loadDrive()
+          actions.hideModal()
+          actions.resetTemplateForm()
+          if (
+            scene?.url &&
+            window.confirm(
+              `Saved "${formValues.name}" to your private cloud scenes (v${scene?.version ?? '?'}). Open it?`
+            )
+          ) {
+            window.open(scene.url, '_blank', 'noopener')
           }
+          return
+        }
+
+        const request: TemplateType & Record<string, any> = {
+          name: formValues.name,
+          description: formValues.description,
+          scenes: exportedScenes,
+          from_frame_id: props.frameId,
+          ...(imageSceneId ? { image_scene_id: imageSceneId } : {}),
+          format: target === 'zip' ? 'zip' : 'json',
+        }
+        const response = await apiFetch('/api/templates', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to create template')
+        }
+        if (target === 'zip') {
+          downloadBlob(await response.blob(), `${formValues.name}.zip`)
+        } else {
+          actions.updateTemplate(await response.json())
         }
         actions.hideModal()
         actions.resetTemplateForm()
@@ -855,7 +909,6 @@ export const templatesLogic = kea<templatesLogicType>([
         saveAsZip: () => true,
         saveAsTemplate: () => true,
         saveAsCloudTemplate: () => true,
-        editLocalTemplate: () => true,
         hideModal: () => false,
       },
     ],
@@ -865,7 +918,6 @@ export const templatesLogic = kea<templatesLogicType>([
         saveAsZip: () => 'zip',
         saveAsTemplate: () => 'localTemplate',
         saveAsCloudTemplate: () => 'cloud',
-        editLocalTemplate: () => 'localTemplate',
       },
     ],
     templateForm: {
@@ -885,11 +937,6 @@ export const templatesLogic = kea<templatesLogicType>([
         // '' = keep current visibility (new scenes start private)
         visibility: '',
         ...template,
-      }),
-      editLocalTemplate: (_, { template }) => ({
-        id: template.id,
-        name: template.name,
-        description: template.description,
       }),
     },
     showingUploadTemplate: [
@@ -1084,6 +1131,12 @@ export const templatesLogic = kea<templatesLogicType>([
     ],
   }),
   listeners(({ actions, props, values }) => ({
+    // A saved scene is edited in the scene editor, its own page.
+    editLocalTemplate: ({ template }) => {
+      if (template.id) {
+        router.actions.push(urls.localScene(template.id))
+      }
+    },
     // "Upload scene" in the Add scene drawer: a template .zip or a scenes
     // .json picked from disk. Parsed in the browser (utils/sceneUpload) so the
     // same button works on the backend, on-device and cloud control planes —
@@ -1169,8 +1222,8 @@ export const templatesLogic = kea<templatesLogicType>([
             title: accessFlags.includes('shell')
               ? 'These scenes run shell commands'
               : accessFlags.some((flag) => !flag.startsWith('key:'))
-              ? 'These scenes use files on the frame'
-              : 'These scenes use your API keys',
+                ? 'These scenes use files on the frame'
+                : 'These scenes use your API keys',
             message:
               `What the scenes at this URL do on the frame: ${accessFlags
                 .map((flag) => sceneAccessFlagLabel(flag))
@@ -1218,7 +1271,7 @@ export const templatesLogic = kea<templatesLogicType>([
         actions.updateTemplate(await response.json())
       }
     },
-    applyRemoteToFrame: async ({ template, repository, openDrawer }) => {
+    applyRemoteToFrame: async ({ template, repository, openDrawer, activate }) => {
       // Cloud store scenes carry risk flags; installing one that can run shell
       // commands on the frame deserves an explicit confirmation. This listener
       // is the funnel for every CATALOG install — buttons, menus and
@@ -1264,6 +1317,9 @@ export const templatesLogic = kea<templatesLogicType>([
         // re-ided local copy therefore showed a permanently blank tile and got
         // saved a second time as a private scene of its own.
         const preserveSceneIds = isCloudMode() && Boolean(storeSceneId)
+        const formBefore = new Set(
+          (values.frameForm?.scenes ?? values.frame?.scenes ?? []).map((scene) => scene.id as string)
+        )
         // Every installed scene records where it came from (`origin`: the
         // store page + uuid + version for store scenes, repository/template
         // otherwise). On the cloud the server stamps the same fields onto
@@ -1274,12 +1330,19 @@ export const templatesLogic = kea<templatesLogicType>([
           openDrawer,
           preserveSceneIds
         )
+        // The form holds them now (frameLogic's install sets it before it
+        // waits on anything): the scene to show is one of these ids.
+        const activateId = activate
+          ? sceneToActivate(sceneIdsAdded(formBefore, frameLogic({ frameId: props.frameId }).values.frameForm?.scenes))
+          : null
 
         // On the cloud control plane the scene list that actually reaches the
         // device is the server-side store-scene assignment (set_scenes over the
         // hub WS) — the client-side applyTemplate above only shapes the
         // workspace view. Both cloud catalogs (the public store and "my cloud
-        // scenes") carry the store scene uuid, so assign it here too.
+        // scenes") carry the store scene uuid, so assign it here too. The
+        // assignment IS the push: the hub sends the frame that scene alone
+        // (a patch), and "Install & activate" names it the one to show.
         if (isCloudMode() && storeSceneId) {
           longRunningTasksModel.actions.startTask({
             frameId: props.frameId,
@@ -1291,29 +1354,31 @@ export const templatesLogic = kea<templatesLogicType>([
             // Installing is the owner's consent: the scene is granted the
             // service keys its apps declare, and the frame's Service settings
             // section shows the grant per scene for adjusting later.
-            const assigned = await assignCloudFrameStoreScene(
-              props.frameId,
-              storeSceneId,
-              collectSecretSettingsFromScenes(scenes, values.apps)
-            )
+            // The server merges it into the assignments and pushes: one push,
+            // which shows it too for "Install & activate". On a scene already
+            // there it is a reinstall at the newest version.
+            const { alreadyAssigned } = await addCloudFrameStoreScene(props.frameId, storeSceneId, {
+              settingsGroups: collectSecretSettingsFromScenes(scenes, values.apps),
+              // A frame with an active layout has it on what joins (applyTemplate
+              // put it on these); the server's row has to say so too.
+              layouts: layoutsWornBy(scenes, frameLogic({ frameId: props.frameId }).values.frameForm?.scenes),
+              activate: Boolean(activateId),
+            })
             longRunningTasksModel.actions.finishTask({
               frameId: props.frameId,
               kind: 'save',
               status: 'success',
-              // Say what is left to do: the assignment is stored, but the frame
-              // only picks it up once the workspace pushes — and "queued" on its
-              // own read as "nothing more to do here".
-              detail: assigned
-                ? 'Added to this frame — press Save, then Deploy, to send it to the device'
-                : 'Scene was already on the frame',
+              detail: alreadyAssigned
+                ? 'Already on the frame: pushed again at its newest version'
+                : activateId
+                  ? 'Installed and pushed. The frame shows it as soon as it syncs.'
+                  : 'Installed and pushed to the frame',
             })
-            if (assigned) {
-              // The server now owns this scene; rehydrate frame.scenes from the
-              // assignment list (force skips the poll throttle) so the tiles
-              // show server truth immediately — not just until the next reload.
-              framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
-              framesModel.actions.loadFrame(props.frameId)
-            }
+            // The server now owns this scene; rehydrate frame.scenes from the
+            // assignment list (force skips the poll throttle) so the tiles
+            // show server truth immediately — not just until the next reload.
+            framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
+            framesModel.actions.loadFrame(props.frameId)
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error)
             longRunningTasksModel.actions.taskFailed({
@@ -1324,10 +1389,25 @@ export const templatesLogic = kea<templatesLogicType>([
                 : message,
             })
           }
+        } else {
+          // A backend frame, or a catalog scene the cloud holds no store copy
+          // of: on the list and pushed, and with activate the scene drawer's
+          // "Push & activate", that scene alone.
+          await pushInstalled(props.frameId, formBefore, template.name, activateId)
         }
       } finally {
         actions.remoteInstallFinished(installId)
       }
+    },
+    installTemplate: async ({ template, openDrawer, activate }) => {
+      const formBefore = new Set(
+        (values.frameForm?.scenes ?? values.frame?.scenes ?? []).map((scene) => scene.id as string)
+      )
+      actions.applyTemplate(template, openDrawer)
+      const activateId = activate
+        ? sceneToActivate(sceneIdsAdded(formBefore, frameLogic({ frameId: props.frameId }).values.frameForm?.scenes))
+        : null
+      await pushInstalled(props.frameId, formBefore, template.name, activateId)
     },
     applyFavouriteTemplatesToFrame: async ({ openDrawer }) => {
       const templates: Partial<TemplateType>[] = []

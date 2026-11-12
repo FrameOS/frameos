@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Archives the app for devices and uploads it to App Store Connect, where it
+# shows up in TestFlight (docs/ios-app-store.md).
+#
+#   FRAMEOS_IOS_TEAM=ABCDE12345 \
+#   ASC_KEY_ID=… ASC_ISSUER_ID=… ASC_KEY_PATH=~/.appstoreconnect/AuthKey_….p8 \
+#   ios/bin/release
+#
+# FRAMEOS_IOS_TEAM: your Apple Developer team id (Membership details).
+# ASC_*: an App Store Connect API key (Users and Access → Integrations →
+# App Store Connect API, role App Manager); without one, Xcode's own signed-in
+# account is used (Xcode → Settings → Accounts).
+# The build number is the UTC time (yyyymmddHHMM), so every upload is higher
+# than the last; the version is MARKETING_VERSION in project.yml.
+# --no-upload archives and exports an .ipa into ios/DerivedData/export only.
+# --unsigned only checks that the device build archives (no team needed).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+command -v xcodegen >/dev/null || { echo "Install XcodeGen first: brew install xcodegen" >&2; exit 1; }
+
+upload=1
+signed=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-upload) upload=0 ;;
+    --unsigned) signed=0; upload=0 ;;
+    *) echo "unknown argument: $arg" >&2; exit 2 ;;
+  esac
+done
+
+xcodegen generate --quiet
+build="$(date -u +%Y%m%d%H%M)"
+archive="DerivedData/FrameOS.xcarchive"
+rm -rf "$archive" DerivedData/export
+mkdir -p DerivedData
+
+auth=()
+if [[ -n "${ASC_KEY_ID:-}" ]]; then
+  auth=(-authenticationKeyPath "${ASC_KEY_PATH:?ASC_KEY_PATH}" -authenticationKeyID "$ASC_KEY_ID"
+        -authenticationKeyIssuerID "${ASC_ISSUER_ID:?ASC_ISSUER_ID}")
+fi
+
+# The archive is unsigned and the export signs it (Apple Distribution and an
+# App Store profile, both made by Xcode the first time). Archiving with
+# automatic signing would want a development profile first, and that needs a
+# registered device: "Your team has no devices from which to generate a
+# provisioning profile".
+xcodebuild archive -project FrameOS.xcodeproj -scheme FrameOS -configuration Release \
+  -destination "generic/platform=iOS" -archivePath "$archive" \
+  CURRENT_PROJECT_VERSION="$build" CODE_SIGNING_ALLOWED=NO -quiet
+# The export takes the app's entitlements from its signature, and an unsigned
+# app has none: Sign in with Apple's would be lost. An ad hoc signature
+# carries them over (iOS refuses an ad hoc signature at build time once there
+# are entitlements, so it goes on here).
+app="$archive/Products/Applications/FrameOS.app"
+for nested in "$app"/Frameworks/* "$app"/PlugIns/*; do
+  [[ -e "$nested" ]] && codesign --force --sign - --timestamp=none "$nested"
+done
+codesign --force --sign - --timestamp=none --entitlements FrameOS/FrameOS.entitlements "$app"
+if [[ $signed == 0 ]]; then
+  echo "Archived (unsigned): ios/$archive, build $build"
+  exit 0
+fi
+
+team="${FRAMEOS_IOS_TEAM:?Set FRAMEOS_IOS_TEAM to your Apple Developer team id}"
+
+options="DerivedData/ExportOptions.plist"
+cat >"$options" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key><string>app-store-connect</string>
+  <key>destination</key><string>$([[ $upload == 1 ]] && echo upload || echo export)</string>
+  <key>teamID</key><string>$team</string>
+  <key>signingStyle</key><string>automatic</string>
+  <key>manageAppVersionAndBuildNumber</key><false/>
+  <key>uploadSymbols</key><true/>
+</dict>
+</plist>
+PLIST
+
+xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$options" \
+  -exportPath DerivedData/export -allowProvisioningUpdates ${auth[@]+"${auth[@]}"}
+if [[ $upload == 1 ]]; then
+  echo "Uploaded build $build. It appears in App Store Connect → TestFlight once processed (a few minutes)."
+else
+  echo "Exported: ios/DerivedData/export (build $build)"
+fi

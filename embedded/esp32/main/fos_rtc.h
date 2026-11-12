@@ -1,6 +1,7 @@
 /*
  * The board's real-time clock: an NXP PCF8563 (I2C 0x51) with a backup cell,
- * on every Seeed reTerminal E-series model. The ESP32's own clock survives
+ * on every Seeed reTerminal E-series model, or the NXP PCF85063 at the same
+ * address on the Waveshare PhotoPainter (fos_board_rtc_chip says which). The ESP32's own clock survives
  * deep sleep but not a power cut or the rear switch; this one does, so a
  * frame that boots cold knows the time before Wi-Fi — the schedule and the
  * wake arithmetic run at once, and SNTP corrects the clock in the
@@ -8,8 +9,8 @@
  *
  * At boot the clock is read and, when its integrity flag says the time is
  * good, set as the system time; every SNTP sync writes the system time back.
- * The BCD conversions are pure (main/tests/test_fos_rtc.c); the I2C goes
- * through fos_i2c.c.
+ * The BCD conversions are pure (main/tests/test_fos_i2c_devices.c); the I2C
+ * goes through fos_i2c.c.
  */
 #pragma once
 
@@ -17,23 +18,51 @@
 #include <stdint.h>
 #include <time.h>
 
-/* The seven time registers from 0x02 (VL_seconds … years), as the chip
- * holds them. */
-#define FOS_RTC_REG_TIME 0x02
-#define FOS_RTC_TIME_LEN 7
+typedef enum {
+    FOS_RTC_PCF8563 = 0,
+    FOS_RTC_PCF85063 = 1,
+} fos_rtc_chip_t;
 
-/* Decode the seven registers to a UTC epoch second. False when the VL bit
- * (clock integrity lost: first power-up, backup cell flat) is set or a field
- * is out of range. Years are 2000-2099. */
+/* The seven time registers (seconds … years), as the chip holds them: from
+ * 0x02 on the PCF8563, from 0x04 on the PCF85063, whose 0x02 is its Offset
+ * (clock calibration) register and 0x03 a RAM byte. From there on the two
+ * have the same shape — bit 7 of the seconds is the integrity flag (VL on
+ * the PCF8563, OS on the PCF85063), the PCF8563's month carries a century
+ * bit the PCF85063's leaves unused — so one decode serves both. */
+#define FOS_RTC_TIME_LEN 7
+#define FOS_RTC_PCF85063_REG_OFFSET 0x02
+
+/* What a person typed on the frame's settings page, YYYY-MM-DD HH:MM (2024 to
+ * 2099, a day that exists), into `tm` as a local time for mktime. False, and
+ * `tm` untouched, for anything else. Pure. */
+bool fos_rtc_parse_clock(const char *text, struct tm *tm);
+
+/* The register the time block starts at on that chip. */
+uint8_t fos_rtc_time_reg(fos_rtc_chip_t chip);
+/* The chip for fos_board_rtc_chip's spelling ("pcf85063"); anything else is
+ * the PCF8563. */
+fos_rtc_chip_t fos_rtc_chip_from_name(const char *name);
+/* "pcf8563" or "pcf85063", as the console spells the chips. */
+const char *fos_rtc_chip_name(fos_rtc_chip_t chip);
+
+/* Decode the seven registers to a UTC epoch second. False when the
+ * integrity flag (clock integrity lost: first power-up, backup cell flat) is
+ * set or a field is out of range. Years are 2000-2099. */
 bool fos_rtc_decode(const uint8_t regs[FOS_RTC_TIME_LEN], time_t *out);
-/* Encode a UTC epoch second into the seven registers (century bit clear). */
+/* Encode a UTC epoch second into the seven registers (integrity flag and
+ * century bit clear). */
 void fos_rtc_encode(time_t now, uint8_t regs[FOS_RTC_TIME_LEN]);
 
 #ifdef ESP_PLATFORM
 #include "esp_err.h"
 bool fos_rtc_present(void);
+/* Which clock the board's preset declares (fos_board_rtc_chip). */
+fos_rtc_chip_t fos_rtc_chip(void);
 /* Read the clock and set the system time from it. True when the time was
- * taken; false without a clock, with an unset one, or on an I2C error. */
+ * taken; false without a clock, with an unset one, or on an I2C error. On a
+ * PCF85063 the first read also puts back a non-zero Offset register: firmware
+ * that took the chip for a PCF8563 wrote its seconds there, and the time it
+ * left one register off is not taken either. */
 bool fos_rtc_load_time(void);
 /* Whether fos_rtc_load_time set the clock this boot. */
 bool fos_rtc_time_loaded(void);

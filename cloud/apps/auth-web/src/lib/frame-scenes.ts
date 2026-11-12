@@ -37,7 +37,26 @@ import {
 } from "./frame-events";
 import { copySceneCoversIntoFrameCache } from "./scene-images";
 import { sceneEventMapsOf, type SceneEventMaps } from "./scene-event-map";
+import { sceneLayoutsOf, type SceneLayouts } from "./scene-layouts";
 import { reportError } from "./log";
+import { esp32PushedStateMinVersion } from "./scenes-patch";
+import { frameosVersionSatisfies } from "./store-versions";
+
+// A switch waits this long for its frame, as the event route's do.
+const switchCommandTtlMs = 5 * 60 * 1000;
+
+// The first runtime scene a store scene put in this payload: every pushed
+// scene is stamped with the store scene it came from (withStoreSceneOrigin).
+function firstRuntimeSceneOf(scenes: readonly unknown[], storeSceneId: string): string | undefined {
+  const lowered = storeSceneId.toLowerCase();
+  for (const scene of scenes) {
+    const { id, origin } = (scene ?? {}) as { id?: unknown; origin?: { storeSceneId?: unknown } };
+    if (typeof id === "string" && typeof origin?.storeSceneId === "string" && origin.storeSceneId.toLowerCase() === lowered) {
+      return id;
+    }
+  }
+  return undefined;
+}
 
 export const maxScenesPerFrame = 20;
 
@@ -64,6 +83,9 @@ export type RequestedScene = {
   // assigned scene keeps its maps (a scene update, a reorder, a grant never
   // touch them); null clears them.
   eventMaps?: SceneEventMaps | null | undefined;
+  // The layout each runtime scene of this install wears (scene-layouts.ts;
+  // docs/scene-layouts.md), the same way: omitted keeps, null clears.
+  layouts?: SceneLayouts | null | undefined;
 };
 
 // The most groups one assignment may name. Six are deliverable today; the
@@ -131,6 +153,30 @@ export function resolveGrantedSettingsGroups({
     return null;
   }
   return kept.filter((group) => declared.includes(group));
+}
+
+// Public scene-state values that ride along with an activation: a handful of
+// form fields, not a data channel (the event route's ceiling).
+export const maxActiveSceneStateBytes = 16 * 1024;
+
+// A push's `state` for the scene it activates: undefined when absent or
+// empty, false when it is not an object or is too big.
+export function readActiveSceneState(
+  value: unknown,
+): Record<string, unknown> | undefined | false {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  if (Object.keys(value).length === 0) {
+    return undefined;
+  }
+  if (Buffer.byteLength(JSON.stringify(value), "utf8") > maxActiveSceneStateBytes) {
+    return false;
+  }
+  return value as Record<string, unknown>;
 }
 
 // Failures carry the wire code and HTTP status the route already returned, so
@@ -201,6 +247,7 @@ export async function currentSceneAssignments(
       declaredSettingsGroups: frameSceneAssignments.declaredSettingsGroups,
       eventMaps: frameSceneAssignments.eventMaps,
       grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
+      layouts: frameSceneAssignments.layouts,
       sceneId: frameSceneAssignments.sceneId,
       sceneVersion: frameSceneAssignments.sceneVersion,
     })
@@ -214,6 +261,7 @@ export async function currentSceneAssignments(
     // onto another frame keeps them); an assignment without any stays
     // "omitted", which re-assignment keeps as-is.
     ...(row.eventMaps === null ? {} : { eventMaps: sceneEventMapsOf(row.eventMaps) }),
+    ...(row.layouts === null ? {} : { layouts: sceneLayoutsOf(row.layouts) }),
     // The effective grant, so a caller that feeds this list back in (the
     // add route, a provisioning copy onto another frame) carries it. A row
     // from before grants existed with nothing computed yet stays "omitted",
@@ -258,10 +306,20 @@ export async function customEventRoutingForFrame(
 // class is refused outright — a cloud push may never carry it (the device
 // refuses them independently). The risk flags checked are the PINNED
 // version's, not store_scenes.risk_flags, which only mirrors the latest.
+//
+// A version that declares a minimum FrameOS newer than the frame reports
+// (store_scene_versions.frameos_version, from its template.json) is refused
+// with frame_update_required: the frame would show nothing (a JSX scene on a
+// runtime before 2026.10.21). Only a version the push MOVES the frame to is
+// checked — one the frame was already sent keeps going out with every other
+// push, so an old install never blocks a reorder or a grant. A frame that
+// reports no version, or a version without a minimum, passes
+// (frameosVersionSatisfies). Self-hosted backends get the same rule from the
+// versioned store index, which lists only what their version runs.
 async function checkScenesAssignable(
   db: Database,
   accountId: string,
-  frame: { assignedSceneState: unknown },
+  frame: { assignedSceneState: unknown; frameosVersion?: string | null | undefined },
   requested: RequestedScene[],
   latestSceneIds: ReadonlySet<string>,
 ): Promise<AssignScenesFailure | null> {
@@ -272,6 +330,7 @@ async function checkScenesAssignable(
     .select({
       accountId: storeScenes.accountId,
       id: storeScenes.id,
+      name: storeScenes.name,
       status: storeScenes.status,
       visibility: storeScenes.visibility,
     })
@@ -326,6 +385,24 @@ async function checkScenesAssignable(
         status: 403,
       };
     }
+    const alreadySent = assignedSceneVersion(frame, sceneId) === version.version;
+    if (
+      !alreadySent &&
+      !frameosVersionSatisfies(version.frameosVersion, frame.frameosVersion)
+    ) {
+      return {
+        code: "frame_update_required",
+        detail: {
+          // The sentence the workspace and the chat show as it is.
+          detail: `${scene.name} needs FrameOS ${version.frameosVersion} or later, and this frame runs ${frame.frameosVersion}. Update FrameOS on the frame first.`,
+          frameos_version: frame.frameosVersion,
+          min_frameos_version: version.frameosVersion,
+          scene_id: sceneId,
+          scene_version: version.version,
+        },
+        status: 409,
+      };
+    }
   }
   return null;
 }
@@ -341,6 +418,8 @@ export async function assignScenesToFrame(
   {
     accountId,
     activeSceneId,
+    activeState,
+    activateStoreSceneId,
     actor,
     frame,
     requested,
@@ -352,6 +431,14 @@ export async function assignScenesToFrame(
     // to another scene. The device ignores an id that is not in the payload
     // (it then activates the first scene).
     activeSceneId?: string | undefined;
+    // Public field values the activated scene opens with ("Push & activate"):
+    // in the same set_scenes, as uploadScenes carries them, never a second
+    // command racing the push. Only with activeSceneId.
+    activeState?: Record<string, unknown> | undefined;
+    // Or the STORE scene to show, its first runtime scene in this push
+    // ("Install & activate", the MCP install with activate): resolved from
+    // the payload, so a scene installed by this very push can be named.
+    activateStoreSceneId?: string | undefined;
     actor: unknown;
     frame: FrameRow;
     requested: RequestedScene[];
@@ -407,6 +494,7 @@ export async function assignScenesToFrame(
         .select({
           eventMaps: frameSceneAssignments.eventMaps,
           grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
+          layouts: frameSceneAssignments.layouts,
           sceneId: frameSceneAssignments.sceneId,
         })
         .from(frameSceneAssignments)
@@ -432,6 +520,11 @@ export async function assignScenesToFrame(
               entry.eventMaps !== undefined
                 ? entry.eventMaps
                 : sceneEventMapsOf(existingByScene.get(entry.sceneId)?.eventMaps),
+            // The layouts, by the same rule.
+            layouts:
+              entry.layouts !== undefined
+                ? entry.layouts
+                : sceneLayoutsOf(existingByScene.get(entry.sceneId)?.layouts),
           })),
         );
       }
@@ -460,6 +553,7 @@ export async function assignScenesToFrame(
           .set({
             declaredSettingsGroups: assignment.declaredSettingsGroups,
             grantedSettingsGroups: granted,
+            isLayout: assignment.isLayout,
           })
           .where(eq(frameSceneAssignments.id, assignment.id));
         const row = {
@@ -518,6 +612,21 @@ export async function assignScenesToFrame(
     previous.length !== serviceSettingGroups.length ||
     !serviceSettingGroups.every((group) => previous.includes(group));
 
+  // A Linux frame shows the FIRST scene of a push that names none (its
+  // runner's rule), so a push nobody meant as a switch (an install, a
+  // reorder, a Discard) names the scene the frame says it shows, when the
+  // push still holds it. An ESP32 keeps its scene, and there a scene_id costs
+  // a render: nothing is added.
+  const profile = frameContractProfile(frame);
+  const shown = reportedActiveSceneId(frame.lastState);
+  const showSceneId =
+    activeSceneId ??
+    (activateStoreSceneId ? firstRuntimeSceneOf(payload.scenes, activateStoreSceneId) : undefined);
+  const pushSceneId =
+    showSceneId ??
+    (profile === "linux" && shown && payload.scenes.some((scene) => (scene as { id?: unknown })?.id === shown)
+      ? shown
+      : undefined);
   await supersedePendingCommands(db, frame.id, "set_scenes");
   const command = await enqueueFrameCommand(db, {
     createdByAccountId: accountId,
@@ -525,10 +634,28 @@ export async function assignScenesToFrame(
     payload: {
       checksum: payload.checksum,
       scenes: payload.scenes,
-      ...(activeSceneId ? { scene_id: activeSceneId } : {}),
+      ...(pushSceneId ? { scene_id: pushSceneId } : {}),
+      ...(showSceneId && activeState ? { state: activeState } : {}),
     },
     type: "set_scenes",
   });
+  // An ESP32 before the firmware that opens a pushed scene with its field
+  // values reads set_scenes' scene_id and drops its state: the values follow
+  // as the switch they always were, right behind the push.
+  if (
+    showSceneId &&
+    activeState &&
+    profile === "esp32" &&
+    !(frame.frameosVersion && frameosVersionSatisfies(esp32PushedStateMinVersion, frame.frameosVersion))
+  ) {
+    await enqueueFrameCommand(db, {
+      createdByAccountId: accountId,
+      frameId: frame.id,
+      payload: { scene_id: showSceneId, state: activeState },
+      ttlMs: switchCommandTtlMs,
+      type: "set_current_scene",
+    });
+  }
 
   if (groupsChanged) {
     await enqueueServiceSettingsRefreshIfScoped(db, frame.id);

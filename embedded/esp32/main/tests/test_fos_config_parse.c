@@ -164,6 +164,26 @@ static void test_led_type_names(void)
     CHECK(strcmp(fos_config_led_type_name(200), "gpio") == 0, "a stray stored value reads as gpio");
 }
 
+static void test_cpu_mode(void)
+{
+    uint8_t mode = 7;
+    CHECK(fos_config_parse_cpu_mode("auto", &mode) && mode == FOS_CPU_AUTO, "auto");
+    CHECK(fos_config_parse_cpu_mode("battery", &mode) && mode == FOS_CPU_BATTERY, "battery");
+    CHECK(fos_config_parse_cpu_mode("Performance", &mode) && mode == FOS_CPU_PERFORMANCE, "performance, any case");
+    CHECK(!fos_config_parse_cpu_mode("turbo", &mode) && mode == FOS_CPU_PERFORMANCE, "unknown name refused, mode kept");
+    CHECK(!fos_config_parse_cpu_mode(NULL, &mode), "NULL refused");
+    CHECK(strcmp(fos_config_cpu_mode_name(FOS_CPU_BATTERY), "battery") == 0, "name of 1");
+    CHECK(strcmp(fos_config_cpu_mode_name(200), "auto") == 0, "a stray stored value reads as auto");
+    /* auto: the e-paper reTerminal E1002 (no touch) stays at 160, an LCD or
+     * a touch panel goes to 240; an explicit mode wins either way. */
+    CHECK(fos_config_cpu_mhz(FOS_CPU_AUTO, false, false) == 160, "auto e-paper");
+    CHECK(fos_config_cpu_mhz(FOS_CPU_AUTO, true, false) == 240, "auto LCD");
+    CHECK(fos_config_cpu_mhz(FOS_CPU_AUTO, false, true) == 240, "auto touch");
+    CHECK(fos_config_cpu_mhz(FOS_CPU_BATTERY, true, true) == 160, "battery on an LCD");
+    CHECK(fos_config_cpu_mhz(FOS_CPU_PERFORMANCE, false, false) == 240, "performance on e-paper");
+    CHECK(fos_config_cpu_mhz(200, false, false) == 160, "a stray stored value reads as auto");
+}
+
 static void test_normalize_rotate(void)
 {
     uint16_t r = 999;
@@ -429,6 +449,7 @@ int main(void)
     test_parse_i2c_buses();
     test_parse_touch_and_codec_pins();
     test_led_type_names();
+    test_cpu_mode();
     test_normalize_rotate();
     test_normalize_scaling_mode();
     test_normalize_render_scale();

@@ -34,6 +34,18 @@ int main(void)
     check(fos_json_depth_ok(bomb, 2000, FOS_JSON_MAX_DEPTH), false, "a 2000-bracket bomb is refused");
     free(bomb);
 
+    /* fos_json_whole: one whole array or object, white space aside. */
+    check(fos_json_whole("[{\"id\":\"a\"}]", strlen("[{\"id\":\"a\"}]")), true, "an array of scenes is whole");
+    check(fos_json_whole(" \n{\"scenes\":[]}\r\n", strlen(" \n{\"scenes\":[]}\r\n")), true, "an object, space around it, is whole");
+    /* What a "\r\n"-ended upload command stored (2026-11-08): the LF in
+     * front, the last byte left on the wire. */
+    check(fos_json_whole("\n{\"scenes\":[{}],\"sceneId\":\"jsx-counter\"", strlen("\n{\"scenes\":[{}],\"sceneId\":\"jsx-counter\"")), false,
+          "an object without its closing brace is not");
+    check(fos_json_whole("\n[{\"id\":\"a\"}", strlen("\n[{\"id\":\"a\"}")), false, "an array without its closing bracket is not");
+    check(fos_json_whole("[{}}", strlen("[{}}")), false, "a bracket closed by a brace is not");
+    check(fos_json_whole("  ", strlen("  ")), false, "space alone is not");
+    check(fos_json_whole(NULL, 0), false, "NULL is not");
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

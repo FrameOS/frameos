@@ -83,7 +83,9 @@ void fos_framebuffer_reserve(size_t len)
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
 
-uint8_t *fos_framebuffer_acquire(size_t len)
+static uint32_t s_foreign_lends;
+
+static uint8_t *acquire(size_t len, bool render)
 {
     if (len == 0) return NULL;
     /* Non-blocking on purpose: a console `display_test` asking for the buffer
@@ -91,12 +93,33 @@ uint8_t *fos_framebuffer_acquire(size_t len)
      * the twenty seconds an e-paper refresh takes. */
     if (s_reserved && len == s_reserved_len && s_lock &&
         xSemaphoreTake(s_lock, 0) == pdTRUE) {
+        if (!render) s_foreign_lends++;
         if (s_lend_hook) s_lend_hook();
         return s_reserved;
     }
     uint8_t *buf = fos_big_malloc(len);
     if (!buf) buf = malloc(len);
     return buf;
+}
+
+uint8_t *fos_framebuffer_acquire(size_t len)
+{
+    return acquire(len, false);
+}
+
+uint8_t *fos_framebuffer_acquire_render(size_t len)
+{
+    return acquire(len, true);
+}
+
+uint8_t *fos_framebuffer_reserved_buffer(void)
+{
+    return s_reserved;
+}
+
+uint32_t fos_framebuffer_foreign_lends(void)
+{
+    return s_foreign_lends;
 }
 
 void fos_framebuffer_release(uint8_t *buf)

@@ -105,7 +105,7 @@ interface FrameOSColorRef {
   __frameosType: "color";
   color: string;
 }
-interface FrameOSStreamRef { __frameosType: "streamRef"; id: number; }
+interface FrameOSStreamRef { __frameosType: "streamRef"; id?: number; spool?: string; }
 
 /**
  * What JSX makes in an app (.tsx): get() can return it as its image. An <svg>
@@ -161,6 +161,16 @@ interface FrameOSElementProps {
   onKeyDown?: (event: FrameOSUiEvent) => void;
   [attribute: string]: any;
 }
+/**
+ * <Scene id="..." /> draws another scene of this frame, at the place and size the UI
+ * gives it (flex-1 unless the classes say). Other props are that scene's state. It renders on its
+ * own schedule. FrameOS 2026.11.5+.
+ */
+declare const Scene: string;
+/**
+ * <yield />: where a layout shows the scene it wraps (docs/scene-layouts.md).
+ * FrameOS 2026.11.5+.
+ */
 declare namespace JSX {
   type Element = FrameOSElement;
   interface ElementChildrenAttribute { children: {}; }
@@ -196,6 +206,25 @@ interface FrameOSApp {
     /** The render scale that applies to the scene. A .tsx or .jsx app's sizes are the panel's
      * divided by it, and its JSX is drawn that many times larger (FrameOS 2026.10.22+; undefined before). */
     scale?: number;
+    /** A panel that shows a change only in a refresh, as e-paper and a monochrome OLED do. An app that follows
+     * a finger waits for it to lift there (FrameOS 2026.11.5+; undefined before). */
+    paper?: boolean;
+    /** Whether the panel shows colors (an LCD, an HDMI screen, a four-, six- or seven-ink e-paper). False on
+     * a black-and-white or grey panel, where a scene reads better drawn in high contrast (FrameOS 2026.11.6+;
+     * undefined before, so treat undefined as color). */
+    color?: boolean;
+    /** The name of the scene showing. A layout's app gets the name of the scene it wraps (FrameOS 2026.11.5+;
+     * undefined before). */
+    sceneName?: string;
+    /** True in a layout's app while it wraps a built-in scene (the scene list, the settings). Returning a bare <yield />
+     * then gives that scene the whole panel (FrameOS 2026.11.5+; undefined before). */
+    systemScene?: boolean;
+    /** The battery's charge from 0 to 100, on an ESP32 frame with a battery. Undefined elsewhere, so check
+     * before drawing it (FrameOS 2026.11.5+; undefined before). */
+    batteryPercent?: number;
+    /** The Wi-Fi signal in dBm, about -50 strong and -85 weak, on an ESP32 frame that is connected. Undefined
+     * elsewhere, so check before drawing it (FrameOS 2026.11.5+; undefined before). */
+    wifiRssi?: number;
   };
   initialized?: boolean;
   log(...args: any[]): void;
@@ -210,6 +239,7 @@ ${appContextMembers}  [key: string]: any;
 
 declare const frameos: {
   image(spec?: FrameOSImageSpec): FrameOSImageSpec & { __frameosType: "image" };
+  /** SVG markup that came from elsewhere (a download, an asset) as an image. A drawing the app makes is JSX returned from a .tsx app's get(), never markup built as a string. */
   svg(svg: string, spec?: FrameOSImageSpec): FrameOSImageSpec & { __frameosType: "image"; svg: string };
   node(nodeId: number): FrameOSNodeRef;
   scene(sceneId: string): FrameOSSceneRef;
@@ -217,6 +247,9 @@ declare const frameos: {
   log(...args: any[]): void;
   error(...args: any[]): void;
   setNextSleep(seconds: number): void;
+  /** Sends an event as a dispatch node does: render, setCurrentScene, setSceneState, sceneSwitcher, sceneSettings or a
+   * custom event of the scene's. An event a scene may not send is logged and dropped (FrameOS 2026.11.5+). */
+  dispatch(event: string, payload?: Record<string, any>): void;
   fetchText(url: string): string;
   fetchJson(url: string): any;
   httpRequest(
@@ -305,6 +338,33 @@ declare const frameos: {
   streamAtEnd(stream: FrameOSStreamRef | number): boolean;
   streamRewind(stream: FrameOSStreamRef | number): boolean;
   streamClose(stream: FrameOSStreamRef | number): boolean;
+  /**
+   * Reads text a line at a time without ever holding it whole (FrameOS 2026.11.6+): a string, a stream, or a
+   * field whose config.json entry has "capabilities": { "byteIter": {} }, which gets a downloaded body as a stream
+   * however large it is. Lines not starting with one of \`only\` are read past natively and cost nothing. Closed when
+   * the call that opened it returns.
+   */
+  openLines(
+    source: FrameOSStreamRef | string,
+    options?: {
+      /** A line starting with a space or tab continues the one before (iCal, vCard, mail headers). */
+      unfold?: boolean;
+      /** Strip whitespace off both ends. */
+      trim?: boolean;
+      /** Keep only the lines starting with one of these. */
+      only?: string[];
+      /** Bytes; a longer line is cut. 65536 by default. */
+      maxLength?: number;
+    }
+  ): FrameOSStreamRef | null;
+  /** The next line of an openLines reader, or null at the end. */
+  nextLine(stream: FrameOSStreamRef | number): string | null;
+  /** The lines up to the next one starting with stop (which only must keep), joined with newlines, stop left out;
+   * null when the text ends first. One call for a whole record, the cheap way through a long feed. */
+  nextBlock(stream: FrameOSStreamRef | number, stop: string): string | null;
+  /** A time zone's canonical name and its UTC offsets: changes is [start, offset, start, offset, ...] in seconds,
+   * empty on a frame without that zone's data (FrameOS 2026.11.6+). */
+  timeZone(name: string): { name: string; changes: number[] };
   getSetting(...path: string[]): any;
   setState(key: string, value: FrameOSJson): void;
   /** Keep a value for this node between renders (FrameOS 2026.10.13+). null forgets it. */
@@ -441,6 +501,7 @@ declare const mock: {
   remember(impl?: (typeof frameos)["remember"]): FrameOSMockFn<(typeof frameos)["remember"]>;
   recall(impl?: (typeof frameos)["recall"]): FrameOSMockFn<(typeof frameos)["recall"]>;
   setNextSleep(impl?: (typeof frameos)["setNextSleep"]): FrameOSMockFn<(typeof frameos)["setNextSleep"]>;
+  dispatch(impl?: (typeof frameos)["dispatch"]): FrameOSMockFn<(typeof frameos)["dispatch"]>;
   listAssets(impl?: (typeof frameos)["listAssets"]): FrameOSMockFn<(typeof frameos)["listAssets"]>;
   assetExists(impl?: (typeof frameos)["assetExists"]): FrameOSMockFn<(typeof frameos)["assetExists"]>;
   assetSize(impl?: (typeof frameos)["assetSize"]): FrameOSMockFn<(typeof frameos)["assetSize"]>;
@@ -456,6 +517,10 @@ declare const mock: {
   streamAtEnd(impl?: (typeof frameos)["streamAtEnd"]): FrameOSMockFn<(typeof frameos)["streamAtEnd"]>;
   streamRewind(impl?: (typeof frameos)["streamRewind"]): FrameOSMockFn<(typeof frameos)["streamRewind"]>;
   streamClose(impl?: (typeof frameos)["streamClose"]): FrameOSMockFn<(typeof frameos)["streamClose"]>;
+  openLines(impl?: (typeof frameos)["openLines"]): FrameOSMockFn<(typeof frameos)["openLines"]>;
+  nextLine(impl?: (typeof frameos)["nextLine"]): FrameOSMockFn<(typeof frameos)["nextLine"]>;
+  nextBlock(impl?: (typeof frameos)["nextBlock"]): FrameOSMockFn<(typeof frameos)["nextBlock"]>;
+  timeZone(impl?: (typeof frameos)["timeZone"]): FrameOSMockFn<(typeof frameos)["timeZone"]>;
   log(impl?: (typeof frameos)["log"]): FrameOSMockFn<(typeof frameos)["log"]>;
   error(impl?: (typeof frameos)["error"]): FrameOSMockFn<(typeof frameos)["error"]>;
 };

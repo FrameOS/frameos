@@ -5,11 +5,14 @@ import { frameAdminLoginIsOnlyAccess } from '../../frameDeployUtils'
 import { framesModel } from '../../../../models/framesModel'
 import { DEFAULT_FRAME_ERROR_BEHAVIOR, frameLogic, normalizeFrameErrorBehavior } from '../../frameLogic'
 import { frameAdminUrl, frameControlUrl, frameImageUrl, frameUrl } from '../../../../decorators/frame'
-import { EMBEDDED_VIRTUAL, withCustomPalette } from '../../../../devices'
+import { EMBEDDED_VIRTUAL, isThinClientEmbeddedPlatform, withCustomPalette } from '../../../../devices'
 import { paletteDeviceOf } from '../../../../utils/assetColors/devicePalette'
 import {
   cloudFrameSupportsEsp32BatteryEnablePin,
   cloudFrameSupportsEsp32Buzzer,
+  cloudFrameSupportsEsp32TouchBeep,
+  cloudFrameSupportsEsp32CpuMode,
+  cloudFrameSupportsEsp32RenderMode,
   cloudFrameSupportsEsp32VoiceChat,
   cloudFrameSupportsEsp32Led,
   cloudFrameSupportsEsp32ExtendedSettings,
@@ -19,11 +22,16 @@ import {
   cloudFrameSupportsDisplayDriverSetting,
   esp32BatteryEnablePinCloudFrameSettingsMinVersion,
   esp32BuzzerCloudFrameSettingsMinVersion,
+  esp32TouchBeepCloudFrameSettingsMinVersion,
+  esp32CpuModeCloudFrameSettingsMinVersion,
+  esp32RenderModeCloudFrameSettingsMinVersion,
   esp32VoiceChatCloudFrameSettingsMinVersion,
   esp32LedCloudFrameSettingsMinVersion,
 } from '../../../../utils/cloudFrameApi'
 import {
+  cloudFrameSupportsFrameSettingsOnScreen,
   cloudFrameSupportsRenderScale,
+  frameSettingsOnScreenCloudFrameSettingsMinVersion,
   renderScaleCloudFrameSettingsMinVersion,
 } from '../../../../utils/cloudFrameSettings'
 import { frameRenderScaleOptions, type RenderScaleOption } from '../../../../utils/renderScale'
@@ -35,7 +43,8 @@ import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { frameSettingsSectionIsAllowed, workspaceMode, type WorkspaceMode } from '../../../workspace/workspaceSurfaces'
 import { timezoneOptions } from '../../../../decorators/timezones'
 import type { DeepPartial } from 'kea-forms'
-import type { PowerSettingsValues } from '../../../../components/PowerSettingsFields'
+import type { PowerSettingsValues, RenderOnServerChoice } from '../../../../components/PowerSettingsFields'
+import { backendFrameRenderMode, cloudFrameRenderMode, frameCanRenderItself } from '../../../../utils/renderOnServer'
 import type {
   FrameEmbeddedHardwarePreset,
   FrameErrorBehaviorMode,
@@ -135,10 +144,16 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
   cloudEsp32ExtendedSettingsSupported: boolean
   cloudEsp32TimeZoneSupported: boolean
   cloudBatteryEnablePinDisabledReason: string | undefined
+  /** Why a cloud frame cannot take the processor speed yet (older firmware); undefined when it can. */
+  cloudCpuModeDisabledReason: string | undefined
   /** Why a cloud frame cannot take the render scale yet (older firmware); undefined when it can. */
   renderScaleDisabledReason: string | undefined
   /** The Scale select: "Automatic (N× on this panel)" and the steps (utils/renderScale.ts). */
   renderScaleOptions: RenderScaleOption[]
+  /** The frame page on the frame's own screen is a frame's with a screen: not a virtual frame's, not a Pico's. */
+  showFrameSettingsOnScreen: boolean
+  /** Why a cloud frame cannot take `frame_settings_on_screen` yet (older firmware); undefined when it can. */
+  frameSettingsOnScreenDisabledReason: string | undefined
 
   /** The panel this frame drives: the device reported it on the cloud, the form holds it elsewhere. */
   paletteDevice: string
@@ -165,8 +180,11 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
     reportedPin: number | undefined
     reportedToneHz: number | undefined
     disabledReason: string | undefined
+    /** Whether a press on the glass clicks: on unless the owner turned it off. */
+    touchBeep: boolean
+    touchBeepDisabledReason: string | undefined
   } | null
-  setButtonBeep: (patch: { pin?: number; toneHz?: number }) => void
+  setButtonBeep: (patch: { pin?: number; toneHz?: number; touchBeep?: boolean }) => void
   /**
    * ESP32 only, null elsewhere: the PDM microphone's clock, data and power
    * GPIO (docs/voice-chat.md; fos_mic.c), -1 = none, undefined = the board's
@@ -255,8 +273,12 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
 
   cloudPowerSettings: PowerSettingsValues
   setCloudPowerSettings: (patch: Partial<PowerSettingsValues>) => void
+  /** "Render scenes" on a cloud ESP32 with its own runtime; undefined hides it. */
+  cloudRenderOnServer: RenderOnServerChoice | undefined
   embeddedPowerSettings: PowerSettingsValues
   setEmbeddedPowerSettings: (patch: Partial<PowerSettingsValues>) => void
+  /** The same on a backend ESP32-S3; undefined hides it. */
+  embeddedRenderOnServer: RenderOnServerChoice | undefined
   /** Real ESP32 hardware on the backend plane: not virtual, not a pico. */
   /** Which Power controls this board's firmware implements; null = none. */
   embeddedPowerProfile: EmbeddedPowerProfile | null
@@ -365,7 +387,7 @@ export function FrameSettingsProvider({
   const inFrameAdminMode = isInFrameAdminMode()
   const workspaceSurfaceMode = workspaceMode()
   const surface = frameSettingsSurfaceFor(workspaceSurfaceMode, frame)
-  const cloudProfile = surface === 'cloudLinux' || surface === 'cloudEsp32'
+  const cloudProfile = surface === 'cloudLinux' || surface === 'cloudEsp32' || surface === 'cloudVirtual'
   const esp32CloudProfile = surface === 'cloudEsp32'
 
   // The 2026.8.30 batch (flip, error handling, control code, …) needs firmware
@@ -397,6 +419,24 @@ export function FrameSettingsProvider({
     : frame.frameos_version
     ? `The battery enable GPIO needs FrameOS ${esp32BatteryEnablePinCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
     : `The battery enable GPIO needs FrameOS ${esp32BatteryEnablePinCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
+  const cloudCpuModeDisabledReason =
+    esp32CloudProfile && cloudFrameSupportsEsp32CpuMode(frame.frameos_version)
+      ? undefined
+      : `The processor speed needs FrameOS ${esp32CpuModeCloudFrameSettingsMinVersion} or newer on the frame.`
+  // 2026.11.7: where the scenes run (docs/server-rendering.md). Offered only
+  // to a board that can render itself: a C3 is rendered by the cloud anyway.
+  const cloudRenderOnServer: RenderOnServerChoice | undefined =
+    esp32CloudProfile && frameCanRenderItself(frame.hardware)
+      ? {
+          serverName: 'FrameOS Cloud',
+          reach:
+            'Scenes then fetch their data from FrameOS Cloud, which reaches public addresses only, not your network.',
+          disabledReason: cloudFrameSupportsEsp32RenderMode(frame.frameos_version)
+            ? undefined
+            : `Rendering on the server needs FrameOS ${esp32RenderModeCloudFrameSettingsMinVersion} or newer on the frame.`,
+          note: "Counts as one of your plan's cloud-rendered frames (Settings, Usage), and its refresh interval cannot go below the plan's minimum.",
+        }
+      : undefined
 
   // 2026.10.22: the render scale, both cloud profiles. A backend frame takes
   // it with its next deploy whatever it runs (an older runtime ignores it).
@@ -411,6 +451,7 @@ export function FrameSettingsProvider({
   const renderScaleOptions = frameRenderScaleOptions(
     frameForm.width ?? frame.width ?? frame.hardware?.width,
     frameForm.height ?? frame.height ?? frame.hardware?.height,
+    frameForm.device ?? frame.device ?? frame.hardware?.device,
     frameForm.render_scale
   )
 
@@ -535,6 +576,9 @@ export function FrameSettingsProvider({
       ...('deepSleep' in patch ? { deep_sleep: patch.deepSleep } : {}),
       ...('deepSleepOnBattery' in patch ? { deep_sleep_on_battery: patch.deepSleepOnBattery } : {}),
       ...('wakeCheckSeconds' in patch ? { wake_check_seconds: patch.wakeCheckSeconds } : {}),
+      ...('awakeAfterInputSeconds' in patch ? { awake_after_input_seconds: patch.awakeAfterInputSeconds } : {}),
+      ...('cpuMode' in patch ? { cpu_mode: patch.cpuMode } : {}),
+      ...('renderMode' in patch ? { render_mode: patch.renderMode } : {}),
     })
   }
   const setEmbeddedPowerSettings = (patch: Partial<PowerSettingsValues>): void => {
@@ -544,16 +588,22 @@ export function FrameSettingsProvider({
         | 'deepSleep'
         | 'deepSleepOnBattery'
         | 'wakeCheckSeconds'
+        | 'awakeAfterInputSeconds'
         | 'batteryPin'
         | 'batteryDivider'
-        | 'batteryEnablePin',
+        | 'batteryEnablePin'
+        | 'cpuMode'
+        | 'renderMode',
       snakeKey:
         | 'deep_sleep'
         | 'deep_sleep_on_battery'
         | 'wake_check_seconds'
+        | 'awake_after_input_seconds'
         | 'battery_pin'
         | 'battery_divider'
         | 'battery_enable_pin'
+        | 'cpu_mode'
+        | 'render_mode'
     ): void => {
       if (!(key in patch)) {
         return
@@ -572,16 +622,42 @@ export function FrameSettingsProvider({
     write('deepSleep', 'deep_sleep')
     write('deepSleepOnBattery', 'deep_sleep_on_battery')
     write('wakeCheckSeconds', 'wake_check_seconds')
+    write('awakeAfterInputSeconds', 'awake_after_input_seconds')
     write('batteryPin', 'battery_pin')
     write('batteryDivider', 'battery_divider')
     write('batteryEnablePin', 'battery_enable_pin')
+    write('cpuMode', 'cpu_mode')
+    write('renderMode', 'render_mode')
     setFrameFormValues({ device_config: next })
   }
+  // A backend ESP32-S3 (a C3 and the Pico are thin clients already, a
+  // virtual frame has no device): device_config.renderMode, which the
+  // settings poll hands the board as frame.renderMode.
+  const embeddedPlatform = frameForm.embedded?.platform ?? frame.embedded?.platform
+  const embeddedRenderOnServer: RenderOnServerChoice | undefined =
+    embeddedPowerProfile === 'esp32' && !isThinClientEmbeddedPlatform(embeddedPlatform)
+      ? {
+          serverName: 'the backend',
+          reach: 'Scenes then fetch their data from the backend, so they reach what it reaches: your network, a VPN.',
+        }
+      : undefined
 
   // The button-press chirp's buzzer, on the same two routes as the power
   // keys above. Real ESP32 boards only: a virtual frame has no buttons to
   // press, and the Pico firmware has no buzzer support.
   const isPicoPlatform = (frameForm.embedded?.platform ?? frame.embedded?.platform ?? '').startsWith('pico')
+
+  // The frame page on the frame's own screen (docs/scene-settings.md "The
+  // frame page"): a frame with a screen of its own, both planes. A backend
+  // frame takes it with its next deploy whatever it runs (an older runtime
+  // ignores it); a cloud frame from the release that learned the key.
+  const showFrameSettingsOnScreen = surface !== 'cloudVirtual' && !isVirtualPlatform && !isPicoPlatform
+  const frameSettingsOnScreenDisabledReason =
+    !cloudProfile || cloudFrameSupportsFrameSettingsOnScreen(frame.frameos_version)
+      ? undefined
+      : frame.frameos_version
+      ? `This needs FrameOS ${frameSettingsOnScreenCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+      : `This needs FrameOS ${frameSettingsOnScreenCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
   const buttonBeep: FrameSettingsContextValue['buttonBeep'] = esp32CloudProfile
     ? {
         pin: frameForm.buzzer_pin,
@@ -593,6 +669,10 @@ export function FrameSettingsProvider({
           : frame.frameos_version
           ? `The button beep needs FrameOS ${esp32BuzzerCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
           : `The button beep needs FrameOS ${esp32BuzzerCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`,
+        touchBeep: (frameForm.touch_beep ?? frame.hardware?.touchBeep) !== false,
+        touchBeepDisabledReason: cloudFrameSupportsEsp32TouchBeep(frame.frameos_version)
+          ? undefined
+          : `The touch beep needs FrameOS ${esp32TouchBeepCloudFrameSettingsMinVersion} or newer on the frame.`,
       }
     : !cloudProfile && isEmbeddedMode && !isVirtualPlatform && !isPicoPlatform
     ? {
@@ -601,13 +681,16 @@ export function FrameSettingsProvider({
         reportedPin: undefined,
         reportedToneHz: undefined,
         disabledReason: undefined,
+        touchBeep: (powerDeviceConfig.touchBeep ?? powerDeviceConfig.touch_beep) !== false,
+        touchBeepDisabledReason: undefined,
       }
     : null
-  const setButtonBeep = (patch: { pin?: number; toneHz?: number }): void => {
+  const setButtonBeep = (patch: { pin?: number; toneHz?: number; touchBeep?: boolean }): void => {
     if (esp32CloudProfile) {
       setFrameFormValues({
         ...('pin' in patch ? { buzzer_pin: patch.pin } : {}),
         ...('toneHz' in patch ? { buzzer_tone_hz: patch.toneHz } : {}),
+        ...('touchBeep' in patch ? { touch_beep: patch.touchBeep } : {}),
       })
       return
     }
@@ -631,6 +714,10 @@ export function FrameSettingsProvider({
     }
     if ('toneHz' in patch) {
       write('buzzerToneHz', 'buzzer_tone_hz', patch.toneHz)
+    }
+    if ('touchBeep' in patch) {
+      delete next.touch_beep
+      next.touchBeep = patch.touchBeep
     }
     setFrameFormValues({ device_config: next })
   }
@@ -909,8 +996,11 @@ export function FrameSettingsProvider({
     cloudEsp32ExtendedSettingsSupported,
     cloudEsp32TimeZoneSupported,
     cloudBatteryEnablePinDisabledReason,
+    cloudCpuModeDisabledReason,
     renderScaleDisabledReason,
     renderScaleOptions,
+    showFrameSettingsOnScreen,
+    frameSettingsOnScreenDisabledReason,
 
     paletteDevice,
     palette: withCustomPalette[paletteDevice],
@@ -956,8 +1046,17 @@ export function FrameSettingsProvider({
       deepSleep: frameForm.deep_sleep === true,
       deepSleepOnBattery: frameForm.deep_sleep_on_battery === true,
       wakeCheckSeconds: frameForm.wake_check_seconds,
+      awakeAfterInputSeconds: frameForm.awake_after_input_seconds,
+      // What the frame runs with until the owner picks one here.
+      cpuMode: frameForm.cpu_mode ?? frame.hardware?.cpuMode ?? undefined,
+      // The owner's setting, else what the frame reports running with.
+      renderMode: cloudFrameRenderMode({
+        render_mode: frameForm.render_mode ?? frame.render_mode,
+        hardware: frame.hardware,
+      }),
     },
     setCloudPowerSettings,
+    cloudRenderOnServer,
     embeddedPowerSettings: {
       batteryDivider: powerDeviceConfig.batteryDivider ?? powerDeviceConfig.battery_divider,
       batteryEnablePin: powerDeviceConfig.batteryEnablePin ?? powerDeviceConfig.battery_enable_pin,
@@ -965,8 +1064,15 @@ export function FrameSettingsProvider({
       deepSleep: (powerDeviceConfig.deepSleep ?? powerDeviceConfig.deep_sleep) === true,
       deepSleepOnBattery: (powerDeviceConfig.deepSleepOnBattery ?? powerDeviceConfig.deep_sleep_on_battery) === true,
       wakeCheckSeconds: powerDeviceConfig.wakeCheckSeconds ?? powerDeviceConfig.wake_check_seconds,
+      awakeAfterInputSeconds: powerDeviceConfig.awakeAfterInputSeconds ?? powerDeviceConfig.awake_after_input_seconds,
+      cpuMode: powerDeviceConfig.cpuMode ?? powerDeviceConfig.cpu_mode,
+      renderMode: backendFrameRenderMode({
+        device_config: powerDeviceConfig,
+        embedded: (frameForm.embedded ?? frame.embedded) as FrameType['embedded'],
+      }),
     },
     setEmbeddedPowerSettings,
+    embeddedRenderOnServer,
     // Backend/on-device planes: real hardware only — a virtual frame has no
     // battery and never sleeps. The profile picks the controls: every knob on
     // an ESP32, deep sleep alone on a Pico (all its firmware implements).

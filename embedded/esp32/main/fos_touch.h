@@ -80,6 +80,35 @@ int fos_touch_wire(int value, int max);
  * portrait-mounted glass reporting 480x800 under an 800x480 panel. Pure. */
 bool fos_touch_axes_swapped(int touch_x_max, int touch_y_max, int panel_width, int panel_height);
 
+/* One edge or move on its way from the touch task to the render task. */
+enum { FOS_TOUCH_DOWN = 0, FOS_TOUCH_MOVE = 1, FOS_TOUCH_UP = 2 };
+
+typedef struct {
+    uint8_t kind;
+    uint8_t id;
+    uint16_t x; /* wire units */
+    uint16_t y;
+    int64_t at_ms; /* esp_timer, when the controller reported it */
+} fos_touch_event_t;
+
+/* The queue slot a new move of finger `id` replaces: that finger's newest
+ * event, when it is a move. -1 for none: its newest event is a press or a
+ * release (a move must not jump over those), or it has none queued. Looks past
+ * the other fingers' events, or two fingers moving at once would never merge
+ * and would fill the queue during a slow render. Pure. */
+int fos_touch_move_slot(const fos_touch_event_t *queue, size_t capacity, size_t head, size_t count, uint8_t id);
+
+/* What a finger on the glass sounds like: its down and its up click when
+ * something took the press, a different down for a finger added to one already
+ * there. `held` and `beeped` are finger masks kept between calls. */
+typedef enum {
+    FOS_TOUCH_BEEP_NONE,
+    FOS_TOUCH_BEEP_DOWN,
+    FOS_TOUCH_BEEP_SECOND_DOWN,
+    FOS_TOUCH_BEEP_UP,
+} fos_touch_beep_t;
+fos_touch_beep_t fos_touch_beep_step(uint8_t kind, uint8_t id, bool captured, uint8_t *held, uint8_t *beeped);
+
 #ifdef ESP_PLATFORM
 #include "esp_err.h"
 /* Once at boot, after fos_config_init and the display (the panel's size
@@ -94,6 +123,8 @@ esp_err_t fos_touch_start(void);
 bool fos_touch_process_events(void);
 /* A report sits in the queue unprocessed. */
 bool fos_touch_pending(void);
+/* A finger is on the glass now (the touch task's last report). */
+bool fos_touch_finger_down(void);
 /* The touch panel is configured and answered at boot. */
 bool fos_touch_present(void);
 /* The interrupt line (-1 = none), for the wake log. */

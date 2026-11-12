@@ -229,7 +229,8 @@ async def test_frames_tools_against_the_real_routes(async_client, db: Session, r
     # The installed copy's button map (docs/events.md "Event map") is beside
     # the scene, so replacing the scene keeps it, and the summary shows it.
     event_map = [{"event": "button", "match": {"label": "REFRESH"}, "as": {"label": "A"}}]
-    frame_row(db, frame.id).scenes = [{**SCENE, "eventMap": event_map}, frame_row(db, frame.id).scenes[1]]
+    layout = {"sceneId": "chrome", "state": {"height": 40}}
+    frame_row(db, frame.id).scenes = [{**SCENE, "eventMap": event_map, "layout": layout}, frame_row(db, frame.id).scenes[1]]
     db.commit()
     replaced = result_json(await call(async_client, "frame_scene_update", {
         "confirm": True, "frame_id": frame.id, "scene": {**SCENE, "name": "Hello v2"}, "deploy": "none",
@@ -237,8 +238,10 @@ async def test_frames_tools_against_the_real_routes(async_client, db: Session, r
     assert replaced["updated"]["name"] == "Hello v2"
     db.expire_all()
     assert frame_row(db, frame.id).scenes[0]["eventMap"] == event_map
+    assert frame_row(db, frame.id).scenes[0]["layout"] == layout
     scenes = result_json(await call(async_client, "frame_scenes_list", {"frame_id": frame.id}))
     assert scenes["scenes"][0]["eventMap"] == event_map
+    assert scenes["scenes"][0]["layout"] == layout
     assert "eventMap" not in scenes["scenes"][1]
 
     removed = result_json(await call(async_client, "frame_scene_remove", {
@@ -270,6 +273,49 @@ async def test_frames_tools_against_the_real_routes(async_client, db: Session, r
     image = next(item for item in preview["content"] if item["type"] == "image")
     assert image["mimeType"].startswith("image/")
     assert base64.b64decode(image["data"])[:4] == b"\x89PNG"
+
+
+@pytest.mark.asyncio
+async def test_installing_a_store_scene_grants_what_it_declares(async_client, db: Session, redis):
+    """`settings_groups` on frame_scene_install grants a store scene the
+    service keys it declares among them (the cloud tool's argument, and the
+    SPA's "installing is consent"); without it a store scene gets none."""
+    frame = await new_frame(db, redis, "Kitchen", "localhost", "localhost")
+    store_scene = {
+        "id": "store-a",
+        "name": "Photos",
+        "origin": {"storeSceneId": "0b3f7c1e-1111-4222-8333-944455556666", "version": "3"},
+        "nodes": [{
+            "id": "n1", "type": "app", "position": {"x": 0, "y": 0},
+            "data": {"keyword": "photos", "sources": {"config.json": json.dumps({"name": "Photos", "settings": ["unsplash"]})}},
+        }],
+        "edges": [],
+    }
+    plain = result_json(await call(async_client, "frame_scene_install", {
+        "confirm": True, "frame_id": frame.id, "scenes": store_scene, "deploy": "none",
+    }))
+    assert plain["declared_settings_groups"] == ["unsplash"]
+    assert plain["granted_settings_groups"] == []
+    db.expire_all()
+    assert not frame_row(db, frame.id).service_setting_groups
+
+    granted = result_json(await call(async_client, "frame_scene_install", {
+        "confirm": True, "frame_id": frame.id, "scenes": store_scene, "deploy": "none",
+        "settings_groups": ["unsplash", "openAI"],
+    }))
+    assert granted["declared_settings_groups"] == ["unsplash"]
+    assert granted["granted_settings_groups"] == ["unsplash"]
+    db.expire_all()
+    assert frame_row(db, frame.id).service_setting_groups == ["unsplash"]
+
+    # The owner's own scene declares too, but it needs no grant.
+    own = result_json(await call(async_client, "frame_scene_install", {
+        "confirm": True, "frame_id": frame.id, "scenes": {**store_scene, "origin": None}, "deploy": "none",
+        "settings_groups": ["openAI"],
+    }))
+    assert own["declared_settings_groups"] == []
+    db.expire_all()
+    assert frame_row(db, frame.id).service_setting_groups == ["unsplash"]
 
 
 @pytest.mark.asyncio
@@ -539,6 +585,43 @@ def test_duplicate_scenes_rewrites_references():
     assert "default" not in copied[0]
     # The input is untouched.
     assert scenes[0]["id"] == "a"
+
+
+def test_duplicate_scenes_keeps_an_app_named_like_its_scene():
+    # The store's Form showcase: the scene, its code app and the app node's
+    # keyword are all `formShowcase`. Rewriting every equal string sent the
+    # frame a node keyword no app has ("Unknown app keyword", 2026-11-10).
+    origin = {"storeSceneId": "d847804f-3e73-4dc2-827d-9d2f0f64c474", "version": "5", "sceneId": "formShowcase"}
+    scenes = [
+        {
+            "id": "formShowcase",
+            "name": "Form showcase",
+            "apps": {"formShowcase": {"name": "Form showcase", "sources": {"app.tsx": "export function get() {}"}}},
+            "nodes": [
+                {"id": "render", "type": "event", "data": {"keyword": "render"}},
+                {"id": "ui", "type": "app", "data": {"keyword": "formShowcase", "config": {}}},
+                {"id": "go", "type": "dispatch", "data": {"keyword": "setCurrentScene", "config": {"sceneId": "formShowcase"}}},
+                {"id": "panel", "type": "scene", "data": {"keyword": "formShowcase"}},
+            ],
+            "edges": [{"id": "e", "source": "ui", "target": "render"}],
+            "fields": [
+                {"name": "formShowcase", "type": "string", "value": "formShowcase"},
+                {"name": "next", "type": "scene", "value": "formShowcase"},
+            ],
+            "origin": origin,
+        }
+    ]
+    [copied] = duplicate_scenes(scenes)
+    new_id = copied["id"]
+    assert new_id != "formShowcase"
+    nodes = {node["id"]: node["data"] for node in copied["nodes"]}
+    assert nodes["ui"]["keyword"] == "formShowcase"
+    assert set(copied["apps"]) == {"formShowcase"}
+    assert nodes["go"]["config"]["sceneId"] == new_id
+    assert nodes["panel"]["keyword"] == new_id
+    assert copied["fields"][0] == {"name": "formShowcase", "type": "string", "value": "formShowcase"}
+    assert copied["fields"][1]["value"] == new_id
+    assert copied["origin"] == origin
 
 
 def test_schema_validation_subset():

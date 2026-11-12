@@ -1,11 +1,48 @@
 #include "fos_rtc.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 /* PCF8563 time registers, all BCD: 0x02 VL(7) seconds(6:0), 0x03 minutes,
  * 0x04 hours(5:0), 0x05 days(5:0), 0x06 weekdays(2:0), 0x07 century(7)
- * months(4:0), 0x08 years. */
-#define RTC_VL_BIT 0x80
+ * months(4:0), 0x08 years. The PCF85063 holds the same seven from 0x04:
+ * OS(7) seconds(6:0) … months(4:0) with no century bit, years at 0x0A; its
+ * hours are 5:0 in the 24-hour mode it powers up in (Control_1 12_24 = 0). */
+#define RTC_VL_BIT 0x80 /* VL on the PCF8563, OS on the PCF85063 */
+#define PCF8563_REG_TIME 0x02
+#define PCF85063_REG_TIME 0x04
+
+bool fos_rtc_parse_clock(const char *text, struct tm *tm)
+{
+    static const char shape[] = "dddd-dd-dd dd:dd";
+    if (text == NULL || strlen(text) != sizeof(shape) - 1) return false;
+    for (size_t i = 0; i < sizeof(shape) - 1; i++) {
+        if (shape[i] == 'd' ? text[i] < '0' || text[i] > '9' : text[i] != shape[i]) return false;
+    }
+    int year = atoi(text), month = atoi(text + 5), day = atoi(text + 8), hour = atoi(text + 11), minute = atoi(text + 14);
+    if (year < 2024 || year > 2099 || hour > 23 || minute > 59) return false;
+    /* mktime carries a day or a month that does not exist into the next. */
+    struct tm parsed = {.tm_year = year - 1900, .tm_mon = month - 1, .tm_mday = day, .tm_hour = hour, .tm_min = minute, .tm_isdst = -1};
+    struct tm carried = parsed;
+    if (mktime(&carried) == (time_t)-1 || carried.tm_mday != day || carried.tm_mon != month - 1) return false;
+    *tm = parsed;
+    return true;
+}
+
+uint8_t fos_rtc_time_reg(fos_rtc_chip_t chip)
+{
+    return chip == FOS_RTC_PCF85063 ? PCF85063_REG_TIME : PCF8563_REG_TIME;
+}
+
+fos_rtc_chip_t fos_rtc_chip_from_name(const char *name)
+{
+    return name && strcmp(name, "pcf85063") == 0 ? FOS_RTC_PCF85063 : FOS_RTC_PCF8563;
+}
+
+const char *fos_rtc_chip_name(fos_rtc_chip_t chip)
+{
+    return chip == FOS_RTC_PCF85063 ? "pcf85063" : "pcf8563";
+}
 
 static int bcd_to_int(uint8_t v)
 {
@@ -78,12 +115,12 @@ void fos_rtc_encode(time_t now, uint8_t regs[FOS_RTC_TIME_LEN])
     if (y > 2099) y = 2099;
     /* 1970-01-01 was a Thursday (4); the chip counts Sunday as 0. */
     int weekday = (int)(((days % 7) + 11) % 7);
-    regs[0] = int_to_bcd((int)(rem % 60));          /* VL clear: the time is good */
+    regs[0] = int_to_bcd((int)(rem % 60));          /* VL / OS clear: the time is good */
     regs[1] = int_to_bcd((int)((rem / 60) % 60));
     regs[2] = int_to_bcd((int)(rem / 3600));
     regs[3] = int_to_bcd(d);
     regs[4] = (uint8_t)weekday;
-    regs[5] = int_to_bcd(m);                         /* century bit clear = 20xx */
+    regs[5] = int_to_bcd(m);                         /* century bit clear = 20xx (unused on the PCF85063) */
     regs[6] = int_to_bcd(y - 2000);
 }
 
@@ -94,6 +131,8 @@ void fos_rtc_encode(time_t now, uint8_t regs[FOS_RTC_TIME_LEN])
 
 #include "esp_log.h"
 
+#include "fos_board.h"
+#include "fos_config.h"
 #include "fos_i2c.h"
 #include "frameos_nim.h"
 
@@ -102,16 +141,62 @@ static bool s_loaded = false;
 static uint8_t s_store_pending = 0; /* failed writes left to retry */
 /* The boot's outcome, replayed by fos_rtc_log_status once upload is on. */
 static char s_boot_line[160] = "";
+static bool s_offset_checked = false;
+
+/* Earlier than any time this firmware could have written: a clock that
+ * reads before it holds something else (a PCF85063 written as a PCF8563
+ * reads as 2000 or 2006) and is not taken. */
+#define RTC_MIN_EPOCH 1767225600 /* 2026-01-01 00:00:00 UTC */
 
 bool fos_rtc_present(void)
 {
     return fos_i2c_present(FOS_I2C_PCF8563);
 }
 
+fos_rtc_chip_t fos_rtc_chip(void)
+{
+    return fos_rtc_chip_from_name(fos_board_rtc_chip(fos_config()->hardware_preset));
+}
+
+static void set_boot_not_set(const char *reason)
+{
+    snprintf(s_boot_line, sizeof(s_boot_line),
+             "{\"event\":\"rtc\",\"source\":\"esp32\",\"action\":\"boot\",\"loaded\":false,\"reason\":\"%s\"}",
+             reason);
+}
+
+/* A PCF85063's Offset register is 0x00 unless something calibrated it, and
+ * nothing in FrameOS does: anything else is a PCF8563 write's seconds byte,
+ * which runs the clock up to ±0.1 % fast or slow. Put it back once, and say
+ * whether it was off (the time block was then written one register off too). */
+static bool restore_offset(void)
+{
+    if (s_offset_checked) return false;
+    uint8_t offset;
+    if (fos_i2c_read(FOS_I2C_PCF8563, FOS_RTC_PCF85063_REG_OFFSET, &offset, 1) != ESP_OK) return false;
+    s_offset_checked = true;
+    if (offset == 0x00) return false;
+    const uint8_t zero = 0x00;
+    esp_err_t err = fos_i2c_write(FOS_I2C_PCF8563, FOS_RTC_PCF85063_REG_OFFSET, &zero, 1);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "offset restore failed (0x%x), retrying next read", (unsigned)err);
+        s_offset_checked = false;
+    } else {
+        printf("rtc: pcf85063 offset register was 0x%02x, restored to 0x00\n", offset);
+    }
+    return true;
+}
+
 bool fos_rtc_load_time(void)
 {
+    fos_rtc_chip_t chip = fos_rtc_chip();
+    if (chip == FOS_RTC_PCF85063 && fos_rtc_present() && restore_offset()) {
+        printf("rtc: clock written by an older firmware, waiting for SNTP\n");
+        set_boot_not_set("repaired");
+        return false;
+    }
     uint8_t regs[FOS_RTC_TIME_LEN];
-    esp_err_t err = fos_i2c_read(FOS_I2C_PCF8563, FOS_RTC_REG_TIME, regs, sizeof(regs));
+    esp_err_t err = fos_i2c_read(FOS_I2C_PCF8563, fos_rtc_time_reg(chip), regs, sizeof(regs));
     if (err != ESP_OK) {
         if (err != ESP_ERR_NOT_FOUND) ESP_LOGW(TAG, "read failed: %s (0x%x)", esp_err_to_name(err), (unsigned)err);
         return false;
@@ -119,8 +204,12 @@ bool fos_rtc_load_time(void)
     time_t now;
     if (!fos_rtc_decode(regs, &now)) {
         printf("rtc: clock not set (integrity flag), waiting for SNTP\n");
-        snprintf(s_boot_line, sizeof(s_boot_line),
-                 "{\"event\":\"rtc\",\"source\":\"esp32\",\"action\":\"boot\",\"loaded\":false,\"reason\":\"not_set\"}");
+        set_boot_not_set("not_set");
+        return false;
+    }
+    if (now < RTC_MIN_EPOCH) {
+        printf("rtc: clock reads before 2026, waiting for SNTP\n");
+        set_boot_not_set("stale");
         return false;
     }
     struct timeval tv = {.tv_sec = now, .tv_usec = 0};
@@ -128,7 +217,8 @@ bool fos_rtc_load_time(void)
     s_loaded = true;
     struct tm tm_utc;
     gmtime_r(&now, &tm_utc);
-    printf("rtc: clock set from the PCF8563: %04d-%02d-%02d %02d:%02d:%02d UTC\n", tm_utc.tm_year + 1900,
+    printf("rtc: clock set from the %s: %04d-%02d-%02d %02d:%02d:%02d UTC\n",
+           chip == FOS_RTC_PCF85063 ? "PCF85063" : "PCF8563", tm_utc.tm_year + 1900,
            tm_utc.tm_mon + 1, tm_utc.tm_mday, tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec);
     snprintf(s_boot_line, sizeof(s_boot_line),
              "{\"event\":\"rtc\",\"source\":\"esp32\",\"action\":\"boot\",\"loaded\":true,"
@@ -154,7 +244,9 @@ esp_err_t fos_rtc_store_time(void)
     if (now < 1000000000) return ESP_ERR_INVALID_STATE;
     uint8_t regs[FOS_RTC_TIME_LEN];
     fos_rtc_encode(now, regs);
-    esp_err_t err = fos_i2c_write(FOS_I2C_PCF8563, FOS_RTC_REG_TIME, regs, sizeof(regs));
+    fos_rtc_chip_t chip = fos_rtc_chip();
+    if (chip == FOS_RTC_PCF85063) restore_offset();
+    esp_err_t err = fos_i2c_write(FOS_I2C_PCF8563, fos_rtc_time_reg(chip), regs, sizeof(regs));
     if (err != ESP_OK) {
         /* The code as a number too: the WARN-only builds carry no error-name
          * table. The write is tried again on the next passes. */

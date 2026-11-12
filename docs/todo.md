@@ -48,6 +48,12 @@ line in the map).
    went from one frame per 300 s to 19.6 fps). **Next up:** the LCD refill
    off the CPU (GDMA), then the SVG parse and a retained compositor. The
    model is `docs/realtime-rendering.md`.
+   **`docs/perf-todo.md`** — interactive UI speed (2026-11-07): a JSX tap on
+   the SenseCAP Indicator went from ~330 to ~85 ms (the console off the
+   render task, a coverage cache and glyph runs in pixie, the layout's memos,
+   prelude bytecode); pixie is in the tree as `frameos/pixie`. **Next up:**
+   the DVD bounce's last frame a second, the interpreter's ~7 ms, a kept
+   canvas in the wasm preview.
 8. **`docs/scenes-todo.md`** — 49 store scene ideas, which
    `build-todo-scenes.ts` builds from. Lower priority for now, not parked.
 9. **`cloud/STORE-TODO.md`** — the store's design record (decisions, threat
@@ -168,12 +174,15 @@ deep-sleep wake), the panel runs again: a *repaint*. Open:
   stored last time whatever its age, so an album does not move on and a random
   photo app does not fetch a new photo between its due runs. Until then a
   repaint is an ordinary run.
-- **Bench it.** A Pi on HDMI with a 24 fps clock beside an Unsplash panel
-  (split on 0.04 s): one fetch per photo interval, the clock smooth. An E1002
-  split of a 60 s clock and a 15 min weather panel: the lazy loader reads
-  both panels in (`scenes:load` `embedded-scene-read`), the weather panel is
-  kept (its renders take the clock's time, not the weather fetch's). An E1004 1600x1200 split: the copy is refused once
-  (`render:rhythm:copyRefused`) and the big panel repaints.
+- **Bench it.** A Pi on HDMI with a 24 fps clock beside an Unsplash panel:
+  one fetch per photo interval, the clock smooth, whatever the split's own
+  interval says. An E1002 split of a 60 s clock and a 15 min weather panel (the
+  split set to 60 s): the lazy loader reads both panels in (`scenes:load`
+  `embedded-scene-read`), the weather panel is left on the canvas. An E1004
+  1600x1200 three-way split: no copy is taken and a panel not due is not
+  touched. A SenseCAP Indicator (480x480) with a real-time panel, a 1 s panel
+  and an hourly one, and a task-bar layout around a touch scene: the slow panels
+  stay put through the panel's frame buffers, taps reach the scene under them.
 
 ---
 

@@ -71,6 +71,8 @@ proxies, ever" rule in `AGENTS.md` at the repo root:
 - **No image proxies for frame content** (inherited rule). Frames fetch and
   render images directly from source. Fleet previews are rendered in the
   browser via `frameos-wasm`, not screenshotted through the cloud.
+  A **virtual frame** is not a proxy and not an exception to this: it has no
+  hardware at all, and the cloud is its device (see "Virtual frames" below).
 - **Frames must keep working when the cloud is down.** Rendering, schedules,
   and the local admin page never depend on cloud reachability. Cloud is
   additive.
@@ -109,6 +111,47 @@ proxies, ever" rule in `AGENTS.md` at the repo root:
   existing link (`connected_backends`); cloud-managed frames bypass backends
   entirely. A frame is managed by exactly one control plane at a time
   (backend or cloud); switching is an explicit local action on the device.
+
+### Virtual frames
+
+A frame with no hardware (`docs/cloud-frames.md` "Virtual frames" is the
+contract; this is why it is built the way it is). The paid plans sell it as
+`cloud_rendered_frames` (`docs/accounting-todo.md` §0.2).
+
+- **A device, not a special case.** The hub runs one `VirtualDevice` per
+  virtual frame (`apps/frame-hub/src/virtual-device.ts`) behind an in-process
+  socket, and from `hello` on it is a session like any other: the same
+  activation, the same drain, the same handlers for what it sends back.
+  The alternative was an `is this frame virtual` branch in every route, the
+  way the self-hosted backend does it (`is_virtual_frame`, fifteen call
+  sites): each new frame feature would then have to remember the branch.
+  Here a route that works on a frame works on a virtual one.
+- **The hub renders**, with the wasm runtime auth-web ships
+  (`src/lib/scene-render.ts`, the server-side renderer of the AI chat's
+  `render_scene`): a worker thread per render, two at a time and one per
+  account (`createVirtualRenderQueue`), the PNG compressed off the event
+  loop that holds every device socket. The hub is the one long-lived single
+  instance; a render loop in auth-web would run twice during a blue/green
+  deploy.
+- **`virtual_frames` is the device's disk**: the pushed scene bundle
+  (previews included — the queue spends a `set_scenes` payload on ack), the
+  scene showing, scene state between two renders, the view link's secret.
+  The picture is the frame's ordinary image (`frame_asset_files`,
+  `.frame/image`), so the workspace's preview, the scene tiles and the view
+  link all read one object.
+- **Cost is bounded by attention and by the floor.** Verbs render at once;
+  the interval only runs while somebody looked in the last three minutes
+  (`viewed_at`, stamped by the view link; `preview_watched_at`, by the
+  workspace), and never under `FRAMEOS_CLOUD_RENDERED_MIN_INTERVAL_SECONDS`.
+  One statement per tick finds every frame that is due.
+- **Trust.** The view link's token is the only thing that leaves the
+  account, and it shows the picture alone. `hardware.platform` is
+  self-asserted and never consulted: a frame is virtual because the create
+  route wrote its row. Scene code runs under the same socket-level SSRF
+  guard as every server-side render. Service keys reach a virtual frame's
+  scenes only with the frame's `settings:services` grant, and only when the
+  hub was given `FRAMEOS_CLOUD_ENCRYPTION_KEY` — without it they render
+  keyless and the log says so.
 
 ### Single-host constraint
 
@@ -276,7 +319,7 @@ JSON; they are re-sealed in place the first time they are read.
 **Narrowed by what the owner granted, not by what the scenes declare.** A
 scene's apps declare the groups they want (`settings` in `config.json`,
 derived the same way the live preview derives them —
-`src/lib/preview-settings.ts`), but a published scene is anyone's code, so
+`frontend/src/sceneWorkspace/lib/preview-settings.ts`), but a published scene is anyone's code, so
 that declaration is a *request*. The 2026-09 security review found the old
 model — ship every declared group — let a store scene decide for itself
 which of the account's keys it received. Now each assignment
@@ -679,6 +722,9 @@ New tables, hanging off existing machinery:
   `set_scenes` push; the device's ack updates sync state.
 - `frame_commands` — durable queue of pending pushes per frame (survives
   restarts; drained on reconnect), with TTL and audit linkage.
+- `virtual_frames` — a virtual frame's device half, one row per virtual
+  frame (migration 0074): view token, pushed scenes, active scene, scene
+  state, last render. Cascades with its frame.
 - `frame_device_scenes` — the latest `scenes_get` reply of a frame that
   joined with scenes of its own, one row per frame: the bytes as sent until
   the owner imports or dismisses, then only the verdict (which is what stops

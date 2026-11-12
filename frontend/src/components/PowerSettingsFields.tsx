@@ -1,6 +1,8 @@
 import clsx from 'clsx'
 import type { ReactNode } from 'react'
 
+import type { CpuMode, RenderMode } from '../types'
+
 import { Label } from './Label'
 import { NumberTextInput } from './NumberTextInput'
 import { Select } from './Select'
@@ -33,10 +35,32 @@ export interface PowerSettingsValues {
   deepSleep: boolean
   deepSleepOnBattery: boolean
   wakeCheckSeconds: number | undefined
+  /** How long a press or a tap keeps a deep-sleeping frame awake; undefined = the firmware's 5 minutes. */
+  awakeAfterInputSeconds?: number | undefined
   batteryPin: number | undefined
   batteryDivider: number | undefined
   /** GPIO held high to switch the divider on while sampling; -1 = none (always on). */
   batteryEnablePin: number | undefined
+  /** The chip's clock; undefined = auto (240 MHz on an LCD or touch panel, else 160). */
+  cpuMode?: CpuMode | undefined
+  /** Where the scenes run (docs/server-rendering.md); undefined = on the frame. */
+  renderMode?: RenderMode | undefined
+}
+
+/**
+ * "Render scenes": whether this frame may hand its scenes to its control
+ * plane. Only for a board with a runtime of its own (an ESP32-S3); a board
+ * without one is rendered by the plane whatever the setting says.
+ */
+export interface RenderOnServerChoice {
+  /** The plane, as the select names it: "FrameOS Cloud", "the backend". */
+  serverName: string
+  /** Why it cannot be set here (cloud: firmware before 2026.11.7). */
+  disabledReason?: string
+  /** What a scene can reach from there, one sentence for the tooltip. */
+  reach: string
+  /** What it costs on this plane, shown under the select while it is on. */
+  note?: ReactNode
 }
 
 export interface PowerSettingsFieldsProps {
@@ -60,8 +84,28 @@ export interface PowerSettingsFieldsProps {
    * with this as its tooltip — never hidden, so the value is still visible.
    */
   batteryEnablePinDisabledReason?: string
+  /** Why the processor speed cannot be set here (cloud: firmware before 2026.11.7). */
+  cpuModeDisabledReason?: string
+  /** The clock the frame reports running at, in MHz (cloud only). */
+  reportedCpuMhz?: number | undefined
+  /** Offer "Render scenes"; omitted on a board that cannot render itself. */
+  renderOnServer?: RenderOnServerChoice
   className?: string
 }
+
+const awakeAfterInputChoices = [
+  { value: '0', label: 'Sleep as soon as it can' },
+  { value: '60', label: '1 minute' },
+  { value: '300', label: '5 minutes' },
+  { value: '600', label: '10 minutes' },
+  { value: '1800', label: '30 minutes' },
+]
+
+const cpuModeChoices: { value: CpuMode; label: string }[] = [
+  { value: 'auto', label: 'Automatic (default)' },
+  { value: 'battery', label: 'Battery: 160 MHz' },
+  { value: 'performance', label: 'Performance: 240 MHz' },
+]
 
 const wakeCheckChoices = [
   { value: '0', label: 'Only wake to render' },
@@ -80,6 +124,9 @@ export function PowerSettingsFields({
   profile = 'esp32',
   footnote,
   batteryEnablePinDisabledReason,
+  cpuModeDisabledReason,
+  reportedCpuMhz,
+  renderOnServer,
   className,
 }: PowerSettingsFieldsProps): JSX.Element {
   const wakeCheckValue = String(value.wakeCheckSeconds ?? 0)
@@ -146,6 +193,29 @@ export function PowerSettingsFields({
       </PowerField>
       {sleeps ? (
         <PowerField
+          label="Stay awake after a press or tap"
+          tooltip={
+            <>
+              How long the frame stays up after a button press or a tap on the screen, so the next one is answered at
+              once instead of waking it again. Staying awake costs battery.
+            </>
+          }
+        >
+          <Select
+            value={String(value.awakeAfterInputSeconds ?? 300)}
+            onChange={(seconds) => onChange({ awakeAfterInputSeconds: parseInt(seconds) })}
+            options={[
+              ...awakeAfterInputChoices,
+              ...(value.awakeAfterInputSeconds !== undefined &&
+              !awakeAfterInputChoices.some((choice) => choice.value === String(value.awakeAfterInputSeconds))
+                ? [{ value: String(value.awakeAfterInputSeconds), label: `${value.awakeAfterInputSeconds} seconds` }]
+                : []),
+            ]}
+          />
+        </PowerField>
+      ) : null}
+      {sleeps ? (
+        <PowerField
           label="Check for commands while sleeping"
           tooltip={
             <>
@@ -170,6 +240,29 @@ export function PowerSettingsFields({
           />
         </PowerField>
       ) : null}
+      {renderOnServer ? <RenderScenesField choice={renderOnServer} value={value} onChange={onChange} /> : null}
+      <PowerField
+        label="Processor speed"
+        tooltip={
+          cpuModeDisabledReason ?? (
+            <>
+              Battery runs the chip at 160 MHz, performance at 240 MHz. Performance renders about a third faster, but
+              the chip also waits out the screen refresh at the higher speed, about 20 seconds on a reTerminal E1002. On
+              a battery e-paper frame that costs roughly 5 to 10% of battery life. Automatic is battery on e-paper and
+              performance on LCD and touch screens. Saving a change reboots the frame.
+            </>
+          )
+        }
+      >
+        <fieldset disabled={cpuModeDisabledReason !== undefined} className="min-w-0 space-y-1">
+          <Select
+            value={value.cpuMode ?? 'auto'}
+            onChange={(mode) => onChange({ cpuMode: mode as CpuMode })}
+            options={cpuModeChoices}
+          />
+          {reportedCpuMhz ? <p className="frameos-muted text-xs">Running at {reportedCpuMhz} MHz now.</p> : null}
+        </fieldset>
+      </PowerField>
       <PowerField
         label="Battery sense GPIO"
         tooltip={
@@ -219,6 +312,52 @@ export function PowerSettingsFields({
       </PowerField>
       {footnote ? <p className="frameos-muted text-sm">{footnote}</p> : null}
     </div>
+  )
+}
+
+function RenderScenesField({
+  choice,
+  value,
+  onChange,
+}: {
+  choice: RenderOnServerChoice
+  value: PowerSettingsValues
+  onChange: (patch: Partial<PowerSettingsValues>) => void
+}): JSX.Element {
+  const remote = value.renderMode === 'remote'
+  return (
+    <PowerField
+      label="Render scenes"
+      tooltip={
+        choice.disabledReason ?? (
+          <>
+            On the server, {choice.serverName} runs this frame&apos;s scenes and sends it the finished picture. The
+            frame only wakes, downloads the picture and refreshes the screen: no scene code, no image decoding and no
+            data fetching on the frame, so a battery lasts longer. When nothing changed, the frame skips the download
+            and the refresh. A sleeping frame&apos;s next picture is drawn just before it wakes. {choice.reach} The
+            frame&apos;s keys, touch and schedule keep working: what they do goes to {choice.serverName} with the next
+            download, so a press answers in a second or three. The frame changes over at its next render.
+          </>
+        )
+      }
+    >
+      <fieldset disabled={choice.disabledReason !== undefined} className="min-w-0 space-y-1">
+        <Select
+          value={remote ? 'remote' : 'local'}
+          onChange={(mode) => onChange({ renderMode: mode === 'remote' ? 'remote' : 'local' })}
+          options={[
+            { value: 'local', label: 'On the frame (default)' },
+            { value: 'remote', label: `On ${choice.serverName}` },
+          ]}
+        />
+        {remote ? (
+          <p className="frameos-muted text-xs">
+            A press or a tap reaches the scene with the frame&apos;s next download, so it answers in a second or three.
+            {choice.note ? <> {choice.note}</> : null}
+          </p>
+        ) : null}
+      </fieldset>
+    </PowerField>
   )
 }
 

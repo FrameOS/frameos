@@ -36,3 +36,20 @@ bool fos_json_depth_ok(const char *text, size_t len, int max_depth)
     }
     return true;
 }
+
+static bool json_space(char c)
+{
+    return c == ' ' || c == '\n' || c == '\r' || c == '\t';
+}
+
+bool fos_json_whole(const char *text, size_t len)
+{
+    if (text == NULL) return false;
+    size_t first = 0;
+    while (first < len && json_space(text[first])) first++;
+    size_t last = len;
+    while (last > first && json_space(text[last - 1])) last--;
+    if (last - first < 2) return false;
+    char open = text[first], close = text[last - 1];
+    return (open == '[' && close == ']') || (open == '{' && close == '}');
+}

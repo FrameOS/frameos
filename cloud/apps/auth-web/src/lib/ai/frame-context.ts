@@ -35,9 +35,13 @@ function renderSizeFrom(width: unknown, height: unknown): { width: number; heigh
 export async function assignedScenes(
   db: ReturnType<typeof createDb>,
   frameId: string,
-): Promise<{ sceneId: string; name: string }[]> {
+): Promise<{ isLayout: boolean; sceneId: string; name: string }[]> {
   return db
-    .select({ name: storeScenes.name, sceneId: frameSceneAssignments.sceneId })
+    .select({
+      isLayout: frameSceneAssignments.isLayout,
+      name: storeScenes.name,
+      sceneId: frameSceneAssignments.sceneId,
+    })
     .from(frameSceneAssignments)
     .innerJoin(storeScenes, eq(storeScenes.id, frameSceneAssignments.sceneId))
     .where(eq(frameSceneAssignments.frameId, frameId))

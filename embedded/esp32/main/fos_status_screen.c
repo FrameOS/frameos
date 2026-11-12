@@ -1,4 +1,5 @@
 #include "fos_status_screen.h"
+#include "fos_client.h"
 #include "fos_framebuffer.h"
 #include "fos_logo_bitmap.h"
 #include "fos_panel_draw.h"
@@ -97,6 +98,8 @@ esp_err_t fos_status_screen_show_portal(const char *ssid, const char *psk, const
 
     esp_err_t err = fos_display_blit(buf, len);
     fos_framebuffer_release(buf);
+    /* The panel no longer shows the last render: the next one refreshes. */
+    fos_client_note_panel_drawn();
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "portal status screen rendered: ssid=%s ip=%s",
                  ssid_line, ip && ip[0] ? ip : "192.168.4.1");

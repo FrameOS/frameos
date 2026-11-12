@@ -6,6 +6,7 @@ import {
   mockCloudBackupsApi,
   mockScenePreviewOnFrame,
   openDiscardPreviewDialog,
+  showSceneWorkspaceEditor,
   waitForAssetColorsPreview,
 } from './visual-helpers'
 
@@ -59,6 +60,8 @@ async function openSceneWorkspaceUtilityDrawer(page: Page, label: string): Promi
     return
   }
 
+  // A narrow page shows one panel at a time, Preview first.
+  await showSceneWorkspaceEditor(page)
   await page
     .locator('.scene-diagram-utility-buttons')
     .getByRole('button', { name: new RegExp(`^${escapeRegex(label)}$`, 'i') })
@@ -67,8 +70,18 @@ async function openSceneWorkspaceUtilityDrawer(page: Page, label: string): Promi
   await heading.waitFor()
 }
 
-async function openSceneWorkspacePreviewDrawer(page: Page): Promise<void> {
-  await openSceneWorkspaceUtilityDrawer(page, 'Preview')
+// The workspace's AI column (the Preview column is open by default), from
+// the bar's Editor · AI · Preview toggles.
+async function openSceneWorkspaceAiPanel(page: Page): Promise<void> {
+  // Toggles on a wide page, tabs (one panel at a time) on a narrow one.
+  const toggle = page.locator('.editor-modal__panels button').filter({ hasText: /^AI$/ })
+  if (
+    (await toggle.getAttribute('aria-pressed')) !== 'true' &&
+    (await toggle.getAttribute('aria-selected')) !== 'true'
+  ) {
+    await toggle.click()
+  }
+  await page.locator('.ai-panel').first().waitFor()
 }
 
 async function openSceneWorkspaceAppsDrawer(page: Page): Promise<void> {
@@ -348,7 +361,7 @@ export const visualCases: VisualCase[] = [
     fullPage: true,
     variants: [
       { id: 'diagram' },
-      { id: 'preview-drawer', prepare: openSceneWorkspacePreviewDrawer },
+      { id: 'ai-panel', prepare: openSceneWorkspaceAiPanel },
       { id: 'apps-drawer', prepare: openSceneWorkspaceAppsDrawer },
       { id: 'events-drawer', prepare: openSceneWorkspaceEventsDrawer },
       { id: 'json-drawer', prepare: openSceneWorkspaceJsonDrawer },
@@ -356,13 +369,12 @@ export const visualCases: VisualCase[] = [
   },
   {
     // A scene the frame shows for now without holding it in its list
-    // (docs/scene-previews.md): the scene workspace's sidebar list draws it
-    // as a dashed preview row with Install and Discard above the saved
-    // scenes, and Discard asks first. The sidebar is only open at full
-    // width; the narrower layouts fold it away.
+    // (docs/scene-previews.md): the frame page's scene list draws it as a
+    // dashed preview row with Install and Discard above the saved scenes,
+    // and Discard asks first.
     id: 'scene-workspace-preview',
     title: 'Scene workspace preview row',
-    path: '/scenes/1/scene-dashboard',
+    path: '/frames/1',
     fullPage: true,
     viewports: ['full'],
     setup: mockScenePreviewOnFrame,

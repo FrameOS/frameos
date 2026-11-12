@@ -1,6 +1,7 @@
 #include "fos_board.h"
 
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #ifdef ESP_PLATFORM
@@ -125,56 +126,61 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
     "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
     "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"top\"}," \
     "\"emit\":\"sceneSettings\",\"as\":{}}"
-#define RETERMINAL_EVENT_MAP "[" RETERMINAL_ARROWS "]"
-#define RETERMINAL_VOICE_EVENT_MAP "[" RETERMINAL_ARROWS "," RETERMINAL_VOICE "]"
-/* The E1003 has the E1001's keys and microphone, and a touch screen. */
-#define RETERMINAL_TOUCH_EVENT_MAP "[" RETERMINAL_ARROWS "," RETERMINAL_VOICE "," TOUCH_EDGE_SWIPES "]"
 /* The reTerminal Sticky's three keys: UP and DOWN held walk the scene list,
- * the AI key (Seeed's "AI/Power", GPIO4) held talks to the frame. */
-#define STICKY_EVENT_MAP \
-    "[{\"event\":\"button\",\"match\":{\"label\":\"UP\",\"action\":\"longPress\"}," \
+ * the AI key (Seeed's "AI/Power", GPIO4) held talks to the frame. The edges
+ * swipe (TOUCH_EDGE_SWIPES). */
+#define STICKY_KEYS \
+    "{\"event\":\"button\",\"match\":{\"label\":\"UP\",\"action\":\"longPress\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"DOWN\",\"action\":\"longPress\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"longPress\"}," \
-    "\"emit\":\"voiceChat\",\"as\":{}}]"
+    "\"emit\":\"voiceChat\",\"as\":{}}"
 /* The Waveshare boards with a codec microphone (fos_codec.c): the one user
  * key each has, held, talks — KEY1 on the PhotoPainter, BOOT on the 13.3E6. */
-#define ONE_KEY_VOICE_EVENT_MAP(label) \
-    "[{\"event\":\"button\",\"match\":{\"label\":\"" label "\",\"action\":\"longPress\"}," \
-    "\"emit\":\"voiceChat\",\"as\":{}}]"
+#define ONE_KEY_VOICE(label) \
+    "{\"event\":\"button\",\"match\":{\"label\":\"" label "\",\"action\":\"longPress\"}," \
+    "\"emit\":\"voiceChat\",\"as\":{}}"
 /* The SenseCAP Indicator: one key and a touch screen, no microphone. The key
  * pressed switches the screen off and on, and pressed twice opens the scene
  * switcher; held it does nothing (on a board with a microphone that is the
  * voice key). The edges swipe (TOUCH_EDGE_SWIPES). */
-#define INDICATOR_EVENT_MAP \
-    "[{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"press\"}," \
+#define INDICATOR_KEY \
+    "{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"press\"}," \
     "\"emit\":\"toggleScreen\",\"as\":{}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"doublePress\"}," \
-    "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
-    TOUCH_EDGE_SWIPES "]"
+    "\"emit\":\"sceneSwitcher\",\"as\":{}}"
 
+/* Each group of rules once, joined when a frame needs its map: whole maps
+ * spelled out per preset held the arrows three times and the swipes three. */
 static const struct {
     const char *preset;
-    const char *event_map;
+    const char *keys;
+    const char *voice;
+    bool edge_swipes;
 } k_event_maps[] = {
-    {"waveshare_esp32_s3_photopainter", ONE_KEY_VOICE_EVENT_MAP("KEY1")},
-    {"waveshare_esp32_s3_epaper_13_3e6", ONE_KEY_VOICE_EVENT_MAP("BOOT")},
-    {"seeed_reterminal_sticky", STICKY_EVENT_MAP},
-    {"seeed_reterminal_e1001", RETERMINAL_VOICE_EVENT_MAP},
-    {"seeed_reterminal_e1002", RETERMINAL_VOICE_EVENT_MAP},
-    {"seeed_reterminal_e1003", RETERMINAL_TOUCH_EVENT_MAP},
-    {"seeed_reterminal_e1004", RETERMINAL_EVENT_MAP},
-    {"seeed_sensecap_indicator_d1", INDICATOR_EVENT_MAP},
+    {"waveshare_esp32_s3_photopainter", ONE_KEY_VOICE("KEY1"), NULL, false},
+    {"waveshare_esp32_s3_epaper_13_3e6", ONE_KEY_VOICE("BOOT"), NULL, false},
+    {"seeed_reterminal_sticky", STICKY_KEYS, NULL, true},
+    {"seeed_reterminal_e1001", RETERMINAL_ARROWS, RETERMINAL_VOICE, false},
+    {"seeed_reterminal_e1002", RETERMINAL_ARROWS, RETERMINAL_VOICE, false},
+    /* The E1003 has the E1001's keys and microphone, and a touch screen. */
+    {"seeed_reterminal_e1003", RETERMINAL_ARROWS, RETERMINAL_VOICE, true},
+    {"seeed_reterminal_e1004", RETERMINAL_ARROWS, NULL, false},
+    {"seeed_sensecap_indicator_d1", INDICATOR_KEY, NULL, true},
 };
 
-const char *fos_board_event_map(const char *hardware_preset)
+void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len)
 {
-    if (!hardware_preset || !hardware_preset[0]) return "";
+    out[0] = '\0';
+    if (hardware_preset == NULL) return;
     for (size_t i = 0; i < sizeof(k_event_maps) / sizeof(k_event_maps[0]); i++) {
-        if (strcmp(hardware_preset, k_event_maps[i].preset) == 0) return k_event_maps[i].event_map;
+        if (strcmp(hardware_preset, k_event_maps[i].preset) != 0) continue;
+        snprintf(out, out_len, "[%s%s%s%s%s]", k_event_maps[i].keys, k_event_maps[i].voice ? "," : "",
+                 k_event_maps[i].voice ? k_event_maps[i].voice : "", k_event_maps[i].edge_swipes ? "," : "",
+                 k_event_maps[i].edge_swipes ? TOUCH_EDGE_SWIPES : "");
+        return;
     }
-    return "";
 }
 
 /* Boards with a PDM microphone: the reTerminal E1001/E1002/E1003 share one
@@ -264,8 +270,8 @@ static const struct {
 } k_i2c_buses[] = {
     /* The Waveshare boards' codec chips (fos_codec.c): the ES8311 and the
      * ES7210 on SDA47/SCL48 on the PhotoPainter — the bus its AXP2101 PMIC
-     * is on too (components/frameos_display/photo_painter_pmic.c shares the
-     * port) — and on SDA41/SCL42 on the 13.3E6 (Waveshare's examples). */
+     * is on too (components/frameos_display/photo_painter_pmic.c borrows
+     * the bus, fos_display_set_i2c_lender) — and on SDA41/SCL42 on the 13.3E6 (Waveshare's examples). */
     {"waveshare_esp32_s3_photopainter", "sda=47,scl=48"},
     {"waveshare_esp32_s3_epaper_13_3e6", "sda=41,scl=42"},
     /* The reTerminal Sticky's MISC/BFG bus (Seeed's porting specification):
@@ -277,6 +283,9 @@ static const struct {
     {"seeed_reterminal_e1002", "sda=19,scl=20;sda=39,scl=40"},
     {"seeed_reterminal_e1003", "sda=19,scl=20"},
     {"seeed_reterminal_e1004", "sda=19,scl=20"},
+    /* The XIAO EE03's SHT40 (0x44), which its IT8951 needs for the panel
+     * temperature: SDA GPIO42 / SCL GPIO41 (Seeed's schematic). */
+    {"seeed_xiao_ee03", "sda=42,scl=41"},
 };
 
 const char *fos_board_i2c_buses(const char *hardware_preset)
@@ -286,6 +295,22 @@ const char *fos_board_i2c_buses(const char *hardware_preset)
         if (strcmp(hardware_preset, k_i2c_buses[i].preset) == 0) return k_i2c_buses[i].buses;
     }
     return "";
+}
+
+/* The clock at 0x51: an NXP PCF85063 on the PhotoPainter (Waveshare's
+ * docs), a PCF8563 everywhere else FrameOS knows one. */
+static const char *const k_pcf85063_presets[] = {
+    "waveshare_esp32_s3_photopainter",
+};
+
+const char *fos_board_rtc_chip(const char *hardware_preset)
+{
+    if (hardware_preset) {
+        for (size_t i = 0; i < sizeof(k_pcf85063_presets) / sizeof(k_pcf85063_presets[0]); i++) {
+            if (strcmp(hardware_preset, k_pcf85063_presets[i]) == 0) return "pcf85063";
+        }
+    }
+    return "pcf8563";
 }
 
 /* TF sockets. The Waveshare boards give the card a bus of its own (SPI3);
@@ -345,12 +370,15 @@ static const struct {
 };
 
 /* A glass mounted against its panel. The Indicator's sits upside down: a tap
- * at the top left read as the bottom right (2026-10-25, the touch test). */
+ * at the top left read as the bottom right (2026-10-25, the touch test). The
+ * Sticky's too, once its portrait axes are swapped (four corners held on a
+ * frame rotated 270, 2026-11-09). */
 static const struct {
     const char *preset;
     int mirror; /* FOS_BOARD_TOUCH_MIRROR_* */
 } k_touch_mirror[] = {
     {"seeed_sensecap_indicator_d1", FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y},
+    {"seeed_reterminal_sticky", FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y},
 };
 
 int fos_board_touch_mirror(const char *hardware_preset)

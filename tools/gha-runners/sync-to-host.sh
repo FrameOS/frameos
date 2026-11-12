@@ -2,7 +2,8 @@
 # Push this directory to the runner host and make the pool match it.
 #   tools/gha-runners/sync-to-host.sh [user@host]      (default: marius@monster)
 # Copies bin/, slots/ and README.md into /srv/gha-runners (slot env files
-# removed here are removed there), installs the unit, then runs
+# removed here are removed there), installs the units (the slot template and
+# the weekly image-refresh timer), then runs
 # gha-reload-slots.sh, which restarts every idle slot so it picks the new
 # settings up and lists the busy ones to rerun for later. Everything on the
 # host is root-owned, so the copy goes through a staging directory and sudo.
@@ -20,6 +21,8 @@ ssh "$HOST" "sudo -n sh -c '
   cp $STAGE/README.md /srv/gha-runners/README.md
   chmod 0755 /srv/gha-runners/bin/*.sh
   cp $STAGE/gha-runner@.service /etc/systemd/system/gha-runner@.service
+  cp $STAGE/gha-image-refresh.service $STAGE/gha-image-refresh.timer /etc/systemd/system/
   systemctl daemon-reload
+  systemctl enable --now gha-image-refresh.timer
   /srv/gha-runners/bin/gha-reload-slots.sh
 '"

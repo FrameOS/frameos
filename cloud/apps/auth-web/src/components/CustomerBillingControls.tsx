@@ -99,13 +99,23 @@ export function CustomerPlanForm({
   const [code, setCode] = useState(currentCode);
   const [reason, setReason] = useState("");
   const [immediately, setImmediately] = useState(false);
+  const [grant, setGrant] = useState(false);
+  const [until, setUntil] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const target = plans.find((plan) => plan.code === code);
   const toFree = target ? BigInt(target.priceMicros) === 0n : false;
+  const giving = grant && !toFree;
 
   async function apply() {
-    if (!toFree && code !== currentCode) {
+    if (giving) {
+      const ok = window.confirm(
+        `Give this account ${target?.name ?? code} for free${until ? ` until the end of ${until}` : " with no end date"}? Nothing is charged or booked.`,
+      );
+      if (!ok) {
+        return;
+      }
+    } else if (!toFree && code !== currentCode) {
       const ok = window.confirm(
         `Put this account on ${target?.name ?? code}? The first period is charged to their balance now — a receivable Phase 3b has no way to collect yet.`,
       );
@@ -116,7 +126,11 @@ export function CustomerPlanForm({
     setBusy(true);
     setMessage(null);
     const response = await fetch(`/api/admin/billing/customers/${accountId}/plan`, {
-      body: JSON.stringify({ immediately: toFree && immediately, plan: code, reason }),
+      body: JSON.stringify(
+        giving
+          ? { grant: true, plan: code, reason, until: until || null }
+          : { immediately: toFree && immediately, plan: code, reason },
+      ),
       headers: { "content-type": "application/json" },
       method: "PUT",
     });
@@ -124,6 +138,8 @@ export function CustomerPlanForm({
     setBusy(false);
     if (response.ok) {
       setReason("");
+      setGrant(false);
+      setUntil("");
       router.refresh();
     } else {
       setMessage(payload.detail ?? `Failed: ${payload.error ?? response.status}`);
@@ -155,13 +171,38 @@ export function CustomerPlanForm({
         />
         <button
           className="button"
-          disabled={busy || reason.trim() === "" || (code === currentCode && !(toFree && subscribed))}
+          disabled={
+            busy ||
+            reason.trim() === "" ||
+            (!giving && code === currentCode && !(toFree && subscribed))
+          }
           onClick={() => void apply()}
           type="button"
         >
           Apply
         </button>
       </div>
+      {!toFree ? (
+        <label className="copy">
+          <input checked={grant} onChange={(event) => setGrant(event.target.checked)} type="checkbox" />{" "}
+          Give it for free: nothing is charged or booked, and buying a plan at
+          checkout replaces it.
+        </label>
+      ) : null}
+      {giving ? (
+        <label className="copy">
+          Last day{" "}
+          <input
+            aria-label="Last day of the free plan"
+            className="input"
+            min={new Date().toISOString().slice(0, 10)}
+            onChange={(event) => setUntil(event.target.value)}
+            type="date"
+            value={until}
+          />{" "}
+          (empty: no end date)
+        </label>
+      ) : null}
       {toFree && subscribed ? (
         <label className="copy">
           <input
@@ -175,8 +216,8 @@ export function CustomerPlanForm({
         </label>
       ) : null}
       <p className="copy">
-        A dearer plan starts now, prorated; a cheaper one takes over at the
-        rollover. Plans not shown on the public ladder are listed here too —
+        Without the free box, a dearer plan starts now, prorated, and a cheaper
+        one takes over at the rollover. Plans not shown on the public ladder are listed here too —
         that is what they are for.
       </p>
       {message ? <p className="copy error">{message}</p> : null}

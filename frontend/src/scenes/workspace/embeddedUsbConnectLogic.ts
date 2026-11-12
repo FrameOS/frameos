@@ -158,6 +158,9 @@ export interface embeddedUsbConnectLogicActions {
   factoryReset: () => {
     value: true
   }
+  handBackToCloud: () => {
+    value: true
+  }
   loadLatestRelease: () => {
     value: true
   }
@@ -177,9 +180,6 @@ export interface embeddedUsbConnectLogicActions {
     identity: UsbBoardIdentity
   }
   rebootIntoBootsel: () => {
-    value: true
-  }
-  handBackToCloud: () => {
     value: true
   }
   recheck: () => {

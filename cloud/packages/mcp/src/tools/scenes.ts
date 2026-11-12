@@ -36,6 +36,7 @@ const storeCategories = [
   "dashboards",
   "fun",
   "realtime",
+  "layouts",
   "utilities",
   "demos",
 ] as const;
@@ -191,7 +192,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     "scene_update",
     {
       description:
-        "Edit a scene's listing — description, tags (max 5, lowercase a-z0-9-), category (photos|art|calendar|weather|ai|dashboards|fun|realtime|utilities|demos, null to clear), frameos_version (minimum FrameOS version, null to clear). The listing is part of a version: this publishes a new version carrying the edit with the scene's current content and images. For the name use scene_rename; for publishing use scene_publish.",
+        "Edit a scene's listing — description, tags (max 5, lowercase a-z0-9-), category (photos|art|calendar|weather|ai|dashboards|fun|realtime|layouts|utilities|demos, null to clear), frameos_version (minimum FrameOS version, null to clear). The listing is part of a version: this publishes a new version carrying the edit with the scene's current content and images. For the name use scene_rename; for publishing use scene_publish.",
       inputSchema: {
         category: z.enum(storeCategories).nullable().optional(),
         description: z.string().max(2000).nullable().optional(),
@@ -643,7 +644,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "Browse the public scene store: full-text q (name, description, publisher, tags), one tag, a category (photos|art|calendar|weather|ai|dashboards|fun|realtime|utilities|demos), frameos_version (only scenes that run on that version), page (48 per page). Featured and popular scenes come first. Install a result on a frame with frame_scene_install(scene_id).",
+        "Browse the public scene store: full-text q (name, description, publisher, tags), one tag, a category (photos|art|calendar|weather|ai|dashboards|fun|realtime|layouts|utilities|demos), frameos_version (only scenes that run on that version), page (48 per page). Featured and popular scenes come first. Install a result on a frame with frame_scene_install(scene_id).",
       inputSchema: {
         category: z.enum(storeCategories).optional(),
         frameos_version: z.string().max(40).optional(),

@@ -316,6 +316,7 @@ const frameApiKeyMap* = [
   ("flip", "flip"),
   ("scaling_mode", "scalingMode"),
   ("render_scale", "renderScale"),
+  ("frame_settings_on_screen", "frameSettingsOnScreen"),
   ("settings", "settings"),
   ("assets_path", "assetsPath"),
   ("save_assets", "saveAssets"),
@@ -395,6 +396,18 @@ proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode)
         result[configKey] = mergeDeviceConfig(result{configKey}, payload[apiKey])
       continue
     putJsonIfPresent(result, payload, apiKey, configKey)
+
+  # A scheme or port typed into the host field ("https://backend:8443") goes
+  # to serverScheme / serverPort and wins over the payload's own; the host
+  # stays bare, which is what the log shipper dials.
+  if payload.hasKey("server_host") and result{"serverHost"} != nil and result["serverHost"].kind == JString:
+    var host = result["serverHost"].getStr()
+    var port = result{"serverPort"}.getInt(0)
+    var scheme = result{"serverScheme"}.getStr("")
+    normalizeServerAddressFields(host, port, scheme)
+    result["serverHost"] = %host
+    if port > 0: result["serverPort"] = %port
+    if scheme.len > 0: result["serverScheme"] = %scheme
 
   # The private-network elevation never rides along with a bulk config save.
   # The cloud is already blocked from it by CLOUD_SETTINGS_ALLOWLIST, but the

@@ -4,7 +4,6 @@ export app_capabilities
 import apps/data/clock/app_loader as data_clock_loader
 import apps/data/downloadImage/app_loader as data_downloadImage_loader
 import apps/data/downloadUrl/app_loader as data_downloadUrl_loader
-import apps/data/icalJson/app_loader as data_icalJson_loader
 import apps/data/localImage/app_loader as data_localImage_loader
 import apps/data/log/app_loader as data_log_loader
 import apps/data/newImage/app_loader as data_newImage_loader
@@ -18,7 +17,6 @@ import apps/logic/breakIfRendering/app_loader as logic_breakIfRendering_loader
 import apps/logic/ifElse/app_loader as logic_ifElse_loader
 import apps/logic/nextSleepDuration/app_loader as logic_nextSleepDuration_loader
 import apps/logic/setAsState/app_loader as logic_setAsState_loader
-import apps/render/calendar/app_loader as render_calendar_loader
 import apps/render/color/app_loader as render_color_loader
 import apps/render/gradient/app_loader as render_gradient_loader
 import apps/render/image/app_loader as render_image_loader
@@ -47,7 +45,6 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     AppEntry(keyword: "data/clock", initProc: data_clock_loader.init, setFieldProc: data_clock_loader.setField, getProc: data_clock_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadImage", initProc: data_downloadImage_loader.init, setFieldProc: data_downloadImage_loader.setField, getProc: data_downloadImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadUrl", initProc: data_downloadUrl_loader.init, setFieldProc: data_downloadUrl_loader.setField, getProc: data_downloadUrl_loader.get, runProc: nil),
-    AppEntry(keyword: "data/icalJson", initProc: data_icalJson_loader.init, setFieldProc: data_icalJson_loader.setField, getProc: data_icalJson_loader.get, runProc: nil),
     AppEntry(keyword: "data/localImage", initProc: data_localImage_loader.init, setFieldProc: data_localImage_loader.setField, getProc: data_localImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/log", initProc: data_log_loader.init, setFieldProc: data_log_loader.setField, getProc: data_log_loader.get, runProc: nil),
     AppEntry(keyword: "data/newImage", initProc: data_newImage_loader.init, setFieldProc: data_newImage_loader.setField, getProc: data_newImage_loader.get, runProc: nil),
@@ -61,7 +58,6 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     AppEntry(keyword: "logic/ifElse", initProc: logic_ifElse_loader.init, setFieldProc: logic_ifElse_loader.setField, getProc: nil, runProc: logic_ifElse_loader.run),
     AppEntry(keyword: "logic/nextSleepDuration", initProc: logic_nextSleepDuration_loader.init, setFieldProc: logic_nextSleepDuration_loader.setField, getProc: nil, runProc: logic_nextSleepDuration_loader.run),
     AppEntry(keyword: "logic/setAsState", initProc: logic_setAsState_loader.init, setFieldProc: logic_setAsState_loader.setField, getProc: nil, runProc: logic_setAsState_loader.run),
-    AppEntry(keyword: "render/calendar", initProc: render_calendar_loader.init, setFieldProc: render_calendar_loader.setField, getProc: render_calendar_loader.get, runProc: render_calendar_loader.run),
     AppEntry(keyword: "render/color", initProc: render_color_loader.init, setFieldProc: render_color_loader.setField, getProc: render_color_loader.get, runProc: render_color_loader.run),
     AppEntry(keyword: "render/gradient", initProc: render_gradient_loader.init, setFieldProc: render_gradient_loader.setField, getProc: render_gradient_loader.get, runProc: render_gradient_loader.run),
     AppEntry(keyword: "render/image", initProc: render_image_loader.init, setFieldProc: render_image_loader.setField, getProc: render_image_loader.get, runProc: render_image_loader.run),
@@ -77,7 +73,6 @@ else:
     AppEntry(keyword: "data/clock", initProc: data_clock_loader.init, setFieldProc: data_clock_loader.setField, getProc: data_clock_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadImage", initProc: data_downloadImage_loader.init, setFieldProc: data_downloadImage_loader.setField, getProc: data_downloadImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadUrl", initProc: data_downloadUrl_loader.init, setFieldProc: data_downloadUrl_loader.setField, getProc: data_downloadUrl_loader.get, runProc: nil),
-    AppEntry(keyword: "data/icalJson", initProc: data_icalJson_loader.init, setFieldProc: data_icalJson_loader.setField, getProc: data_icalJson_loader.get, runProc: nil),
     AppEntry(keyword: "data/localImage", initProc: data_localImage_loader.init, setFieldProc: data_localImage_loader.setField, getProc: data_localImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/log", initProc: data_log_loader.init, setFieldProc: data_log_loader.setField, getProc: data_log_loader.get, runProc: nil),
     AppEntry(keyword: "data/newImage", initProc: data_newImage_loader.init, setFieldProc: data_newImage_loader.setField, getProc: data_newImage_loader.get, runProc: nil),
@@ -92,7 +87,6 @@ else:
     AppEntry(keyword: "logic/ifElse", initProc: logic_ifElse_loader.init, setFieldProc: logic_ifElse_loader.setField, getProc: nil, runProc: logic_ifElse_loader.run),
     AppEntry(keyword: "logic/nextSleepDuration", initProc: logic_nextSleepDuration_loader.init, setFieldProc: logic_nextSleepDuration_loader.setField, getProc: nil, runProc: logic_nextSleepDuration_loader.run),
     AppEntry(keyword: "logic/setAsState", initProc: logic_setAsState_loader.init, setFieldProc: logic_setAsState_loader.setField, getProc: nil, runProc: logic_setAsState_loader.run),
-    AppEntry(keyword: "render/calendar", initProc: render_calendar_loader.init, setFieldProc: render_calendar_loader.setField, getProc: render_calendar_loader.get, runProc: render_calendar_loader.run),
     AppEntry(keyword: "render/color", initProc: render_color_loader.init, setFieldProc: render_color_loader.setField, getProc: render_color_loader.get, runProc: render_color_loader.run),
     AppEntry(keyword: "render/gradient", initProc: render_gradient_loader.init, setFieldProc: render_gradient_loader.setField, getProc: render_gradient_loader.get, runProc: render_gradient_loader.run),
     AppEntry(keyword: "render/image", initProc: render_image_loader.init, setFieldProc: render_image_loader.setField, getProc: render_image_loader.get, runProc: render_image_loader.run),
@@ -176,13 +170,6 @@ const capabilities_data_rotateImage = AppCapabilities(
       forwardsBounds: @[ForwardsBoundsSpec(output: "image", input: "image", boundsField: "rotationDegree", swapValues: @["90", "90.0", "270", "270.0", "-90", "-90.0", "-270", "-270.0", "450", "450.0"], keepValues: @["0", "0.0", "180", "180.0", "-180", "-180.0", "360", "360.0", "540", "540.0"], widthFrom: "", heightFrom: "", multiplyFrom: @[])],
       requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "rotationDegree", value: "0")])
-const capabilities_render_calendar = AppCapabilities(
-      providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @[])],
-      forwardsTarget: @[],
-      forwardsBounds: @[],
-      requestsBounds: @[],
-      fieldDefaults: @[FieldMatch(field: "inputImage", value: "")])
 const capabilities_render_color = AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["natural"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @["color"])],
@@ -227,7 +214,6 @@ proc appCapabilities*(keyword: string): AppCapabilities =
   of "data/localImage": capabilities_data_localImage
   of "data/resizeImage": capabilities_data_resizeImage
   of "data/rotateImage": capabilities_data_rotateImage
-  of "render/calendar": capabilities_render_calendar
   of "render/color": capabilities_render_color
   of "render/gradient": capabilities_render_gradient
   of "render/image": capabilities_render_image

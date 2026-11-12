@@ -8,13 +8,13 @@ import { Field } from '../../../../components/Field'
 import { Button } from '../../../../components/Button'
 import { controlLogic } from './controlLogic'
 import { sceneIsActivating } from '../../../../utils/sceneActivation'
-import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { StateFieldEdit } from './StateFieldEdit'
 import { FrameScene, FrameId } from '../../../../types'
 import { scenesLogic } from './scenesLogic'
 import { frameLogic } from '../../frameLogic'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { scenePushActionCopy } from '../../../../utils/scenePush'
+import { isLayoutScene, scenesWithoutLayouts } from '../../../../utils/sceneLayouts'
 import { sceneIdsRefer } from '../../../../utils/systemScenes'
 import { PlayIcon } from '@heroicons/react/24/solid'
 import { WindowIcon } from '@heroicons/react/24/outline'
@@ -22,13 +22,11 @@ import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { livePreviewLogic, LIVE_PREVIEW_HASH_KEY } from './livePreviewLogic'
 import { LivePreviewModal } from './LivePreviewModal'
 import { Spinner } from '../../../../components/Spinner'
-import { confirmDialog } from '../../../../utils/confirmDialogLogic'
 
 export interface ExpandedSceneProps {
   sceneId: string
   frameId: FrameId
   scene?: FrameScene | null
-  showEditButton?: boolean
   isUnsaved?: boolean
   isUndeployed?: boolean
   /** Where to render the action buttons (Activate, Reset) instead of under the
@@ -41,7 +39,6 @@ export function ExpandedScene({
   frameId,
   sceneId,
   scene,
-  showEditButton = true,
   isUnsaved,
   isUndeployed,
   actionsContainer,
@@ -49,14 +46,14 @@ export function ExpandedScene({
   const { stateChanges, visibleFields, locationFields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
   const { states, sceneId: currentSceneId, activatingSceneId } = useValues(controlLogic({ frameId }))
   const { changedScenes } = useValues(frameLogic({ frameId }))
-  const { undeployedSceneIds, unsavedSceneIds, scenePushIds } = useValues(scenesLogic({ frameId }))
+  const { undeployedSceneIds, unsavedSceneIds, scenePushIds, activeLayoutId, sceneCountWearingLayout, rawScenes } =
+    useValues(scenesLogic({ frameId }))
   const { submitStateChanges, resetStateChanges, setLocation } = useActions(
     expandedSceneLogic({ frameId, sceneId, scene })
   )
-  const { previewScene, deleteScene, pushScene } = useActions(scenesLogic({ frameId }))
+  const { previewScene, pushScene, setLayoutOnEveryScene } = useActions(scenesLogic({ frameId }))
   const { openLivePreview } = useActions(livePreviewLogic({ frameId }))
   const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
-  const { editScene } = useActions(frameEditorsLogic)
   const fieldCount = visibleFields.length
   const frameAdminMode = isInFrameAdminMode()
 
@@ -87,7 +84,9 @@ export function ExpandedScene({
   const sceneIsCurrent = sceneIdsRefer(sceneId, currentSceneId)
   const pushSceneIds = scenePushIds(sceneId)
   const needsPush = !frameAdminMode && (sceneHasChanges || pushSceneIds.length > 0)
+  const sceneIsALayout = isLayoutScene(scene)
   const pushCopy = scenePushActionCopy({
+    noun: sceneIsALayout ? 'layout' : 'scene',
     active: sceneIsCurrent,
     connected: pushSceneIds.filter((id) => id !== sceneId).length,
     saves: !isCloudMode() && (sceneIsUnsaved || pushSceneIds.some((id) => unsavedSceneIds.has(id))),
@@ -139,23 +138,14 @@ export function ExpandedScene({
     }
 
     if (needsPush) {
+      if (sceneIsALayout) {
+        pushScene(sceneId, false) // never shown on its own: nothing to activate
+        return
+      }
       pushScene(sceneId, true, buildNextState())
     } else {
       submitStateChanges()
     }
-  }
-
-  const handleDelete = () => {
-    void confirmDialog({
-      title: 'Delete this scene?',
-      message: 'The scene is removed from this frame on the next save. This cannot be undone.',
-      confirmLabel: 'Delete scene',
-      danger: true,
-    }).then((confirmed) => {
-      if (confirmed) {
-        deleteScene(sceneId)
-      }
-    })
   }
 
   // Three buttons and no menu, on one line: put it on the frame, preview it
@@ -195,18 +185,52 @@ export function ExpandedScene({
     </Button>
   )
 
+  if (sceneIsALayout) {
+    // Its values are each scene's to set (Layout settings in that scene's
+    // menu): nothing typed here would reach the frame, since it never runs
+    // as the frame's own scene.
+    const layoutActive = activeLayoutId === sceneId
+    const sceneTotal = scenesWithoutLayouts(rawScenes).length
+    const wearing = sceneCountWearingLayout(sceneId)
+    const layoutActions = (
+      <div className="flex w-full min-w-0 items-center gap-2">
+        {needsPush ? activateButton : null}
+        <Button
+          onClick={() => setLayoutOnEveryScene(sceneId, !layoutActive)}
+          color={layoutActive ? 'secondary' : 'primary'}
+          title={layoutActive ? 'Take this layout off every scene' : 'Draw this layout around every scene'}
+          className="flex min-w-0 items-center gap-2 !px-3"
+        >
+          {layoutActive ? null : <PlayIcon className="h-4 w-4 shrink-0" />}
+          <span className="truncate">{layoutActive ? 'Deactivate' : 'Activate'}</span>
+        </Button>
+        {previewButton}
+      </div>
+    )
+    return (
+      <div className="space-y-3">
+        <p className="text-sm" data-layout-status={layoutActive ? 'active' : 'inactive'}>
+          {layoutActive ? (
+            <span className="frameos-primary-fill rounded-full px-2 py-0.5 text-[11px] font-semibold text-white">
+              Active on every scene
+            </span>
+          ) : wearing > 0 ? (
+            `On ${wearing} of ${sceneTotal} scenes. Activate draws it around all of them.`
+          ) : (
+            'Not on any scene yet. Activate draws it around all of them.'
+          )}
+        </p>
+        <p className="frameos-muted text-sm">
+          Each scene wearing this layout sets its own values: open the scene&apos;s menu and choose Layout settings.
+        </p>
+        {placeActions(layoutActions, layoutActions)}
+        {livePreviewSceneId === sceneId ? <LivePreviewModal frameId={frameId} /> : null}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-3">
-      {showEditButton ? (
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button onClick={() => editScene(sceneId)} color="secondary">
-            Open editor
-          </Button>
-          <Button onClick={handleDelete} color="red">
-            Delete
-          </Button>
-        </div>
-      ) : null}
       {fieldCount === 0 ? (
         placeActions(
           <div className="flex w-full min-w-0 items-center gap-2">

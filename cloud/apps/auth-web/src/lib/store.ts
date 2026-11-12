@@ -1,5 +1,8 @@
 import { sceneRequiresCompilation } from "@frameos-cloud/scene-convert";
 import { sceneAccessFlags } from "../../../../../frontend/src/utils/sceneAccess";
+import { isBrokenLayout } from "../../../../../frontend/src/utils/sceneLayoutRule";
+import { isLayoutScene, mainScene } from "../../../../../frontend/src/utils/sceneLayouts";
+import type { FrameScene } from "../../../../../frontend/src/types";
 import { randomBytes } from "node:crypto";
 import { strToU8, unzlibSync, zipSync } from "fflate";
 import { unzipBounded } from "./zip-bounded";
@@ -433,6 +436,9 @@ export type ValidatedSceneZip = {
   // and a description; tags and category joined them when the listing
   // became part of the version). Malformed values read as absent.
   manifestCategory: string | null | undefined;
+  // The scene a pack starts on is a layout (docs/scene-layouts.md): it goes on
+  // the Layouts shelf without asking the classifier.
+  isLayout: boolean;
   manifestDescription: string | undefined;
   manifestName: string | undefined;
   manifestTags: string[] | undefined;
@@ -490,6 +496,10 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
   if (!Array.isArray(scenes) || scenes.length === 0) {
     return { ok: false, error: "missing_scenes" };
   }
+  // docs/scene-layouts.md: every way a scene reaches the store comes through here.
+  if (scenes.some(isBrokenLayout)) {
+    return { ok: false, error: "invalid_layout_scene" };
+  }
 
   const record = manifest as Record<string, unknown>;
   const imageRaw = files[`${folder}image.jpg`];
@@ -518,6 +528,7 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
       frameosVersion: normalizeFrameosVersion(record.frameosVersion),
       imageHeight: dimension(record.imageHeight),
       imageWidth: dimension(record.imageWidth),
+      isLayout: isLayoutScene(mainScene(scenes as Pick<FrameScene, "default" | "settings">[])),
       manifestCategory:
         record.category === undefined ? undefined : normalizeCategory(record.category),
       manifestDescription:

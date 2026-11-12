@@ -53,6 +53,8 @@ static void load_defaults(void)
      * with every image edge materialized and the two panels compared. */
     s_config.image_fusion = true;
     s_config.allow_local_network = FRAMEOS_DEFAULT_ALLOW_LOCAL_NETWORK;
+    s_config.frame_settings_on_screen = true;
+    s_config.settings_unlock = false;
     s_config.tls_enable = FRAMEOS_DEFAULT_TLS_ENABLE;
     s_config.tls_port = FRAMEOS_DEFAULT_TLS_PORT;
     strlcpy(s_config.tls_server_cert, FRAMEOS_DEFAULT_TLS_SERVER_CERT, sizeof(s_config.tls_server_cert));
@@ -74,6 +76,7 @@ static void load_defaults(void)
     s_config.deep_sleep_on_battery = FRAMEOS_DEFAULT_DEEP_SLEEP_ON_BATTERY;
     s_config.wake_schedule = FRAMEOS_DEFAULT_WAKE_SCHEDULE;
     s_config.wake_check_sec = FRAMEOS_DEFAULT_WAKE_CHECK_SEC;
+    s_config.awake_after_input_sec = FRAMEOS_DEFAULT_AWAKE_AFTER_INPUT_SEC;
     s_config.battery_pin = FRAMEOS_DEFAULT_BATTERY_PIN;
     s_config.battery_divider = FRAMEOS_DEFAULT_BATTERY_DIVIDER;
     s_config.battery_enable_pin = FRAMEOS_DEFAULT_BATTERY_ENABLE_PIN;
@@ -85,6 +88,8 @@ static void load_defaults(void)
     memset(&s_config.touch_pins, -1, sizeof(s_config.touch_pins));
     memset(&s_config.codec_pins, -1, sizeof(s_config.codec_pins));
     s_config.voice_chat = true;
+    s_config.touch_beep = true;
+    s_config.cpu_mode = FOS_CPU_AUTO;
     s_config.led_pin = -1;
     s_config.led_type = FOS_LED_GPIO;
     s_config.i2c_bus_count = 0;
@@ -220,7 +225,7 @@ esp_err_t fos_config_init(void)
      * after `hardware`, which the board default keys on. */
     size_t event_map_len = sizeof(s_config.event_map);
     if (nvs_get_str(nvs, "event_map", s_config.event_map, &event_map_len) != ESP_OK) {
-        strlcpy(s_config.event_map, fos_board_event_map(s_config.hardware_preset), sizeof(s_config.event_map));
+        fos_board_event_map(s_config.hardware_preset, s_config.event_map, sizeof(s_config.event_map));
     }
     if (nvs_get_u32(nvs, "max_http", &u32) == ESP_OK) s_config.max_http_response_bytes = u32;
     uint8_t u8;
@@ -229,6 +234,8 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u8(nvs, "debug", &u8) == ESP_OK) s_config.debug_logging = u8 != 0;
     if (nvs_get_u8(nvs, "fusion", &u8) == ESP_OK) s_config.image_fusion = u8 != 0;
     if (nvs_get_u8(nvs, "allow_lan", &u8) == ESP_OK) s_config.allow_local_network = u8 != 0;
+    if (nvs_get_u8(nvs, "fs_on_screen", &u8) == ESP_OK) s_config.frame_settings_on_screen = u8 != 0;
+    if (nvs_get_u8(nvs, "settings_unlock", &u8) == ESP_OK) s_config.settings_unlock = u8 != 0;
     if (nvs_get_u8(nvs, "tls_enable", &u8) == ESP_OK) s_config.tls_enable = u8 != 0;
     if (nvs_get_u8(nvs, "admin_auth", &u8) == ESP_OK) s_config.admin_auth_enabled = u8 != 0;
     if (nvs_get_u32(nvs, "tls_port", &u32) == ESP_OK) s_config.tls_port = (uint16_t)u32;
@@ -261,6 +268,7 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u8(nvs, "sleep_batt", &u8) == ESP_OK) s_config.deep_sleep_on_battery = u8 != 0;
     if (nvs_get_u8(nvs, "wake_sched", &u8) == ESP_OK) s_config.wake_schedule = u8 != 0;
     if (nvs_get_u32(nvs, "wake_check", &u32) == ESP_OK) s_config.wake_check_sec = u32;
+    if (nvs_get_u32(nvs, "awake_input", &u32) == ESP_OK) s_config.awake_after_input_sec = u32;
     if (nvs_get_i8(nvs, "batt_pin", &i8) == ESP_OK) s_config.battery_pin = i8;
     if (nvs_get_u32(nvs, "batt_div_m", &u32) == ESP_OK) s_config.battery_divider = (float)u32 / 1000.0f;
     if (nvs_get_i8(nvs, "batt_en", &i8) == ESP_OK) s_config.battery_enable_pin = i8;
@@ -294,6 +302,8 @@ esp_err_t fos_config_init(void)
         s_config.mic_pins.pwr = (int8_t)pwr;
     }
     if (nvs_get_u8(nvs, "voice", &u8) == ESP_OK) s_config.voice_chat = u8 != 0;
+    if (nvs_get_u8(nvs, "touch_beep", &u8) == ESP_OK) s_config.touch_beep = u8 != 0;
+    if (nvs_get_u8(nvs, "cpu_mode", &u8) == ESP_OK && u8 <= FOS_CPU_PERFORMANCE) s_config.cpu_mode = u8;
     /* The touch panel and the audio codec the same way: stored, else the
      * board's own (fos_board_touch_pins / fos_board_codec_pins), so a Sticky
      * or a PhotoPainter provisioned before the keys existed gets them with
@@ -408,6 +418,8 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u8(nvs, "debug", s_config.debug_logging ? 1 : 0), "debug");
     FOS_NVS_SET(nvs_set_u8(nvs, "fusion", s_config.image_fusion ? 1 : 0), "fusion");
     FOS_NVS_SET(nvs_set_u8(nvs, "allow_lan", s_config.allow_local_network ? 1 : 0), "allow_lan");
+    FOS_NVS_SET(nvs_set_u8(nvs, "fs_on_screen", s_config.frame_settings_on_screen ? 1 : 0), "fs_on_screen");
+    FOS_NVS_SET(nvs_set_u8(nvs, "settings_unlock", s_config.settings_unlock ? 1 : 0), "settings_unlock");
     FOS_NVS_SET(nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0), "tls_enable");
     FOS_NVS_SET(nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0), "admin_auth");
     FOS_NVS_SET(nvs_set_u32(nvs, "tls_port", s_config.tls_port), "tls_port");
@@ -426,6 +438,7 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u8(nvs, "sleep_batt", s_config.deep_sleep_on_battery ? 1 : 0), "sleep_batt");
     FOS_NVS_SET(nvs_set_u8(nvs, "wake_sched", s_config.wake_schedule ? 1 : 0), "wake_sched");
     FOS_NVS_SET(nvs_set_u32(nvs, "wake_check", s_config.wake_check_sec), "wake_check");
+    FOS_NVS_SET(nvs_set_u32(nvs, "awake_input", s_config.awake_after_input_sec), "awake_input");
     FOS_NVS_SET(nvs_set_i8(nvs, "batt_pin", s_config.battery_pin), "batt_pin");
     FOS_NVS_SET(nvs_set_u32(nvs, "batt_div_m", (uint32_t)(s_config.battery_divider * 1000.0f)), "batt_div_m");
     FOS_NVS_SET(nvs_set_i8(nvs, "batt_en", s_config.battery_enable_pin), "batt_en");
@@ -435,6 +448,8 @@ esp_err_t fos_config_save(void)
     fos_config_format_mic_pins(&s_config.mic_pins, mic_pins, sizeof(mic_pins));
     FOS_NVS_SET(nvs_set_str(nvs, "mic_pins", mic_pins), "mic_pins");
     FOS_NVS_SET(nvs_set_u8(nvs, "voice", s_config.voice_chat ? 1 : 0), "voice");
+    FOS_NVS_SET(nvs_set_u8(nvs, "touch_beep", s_config.touch_beep ? 1 : 0), "touch_beep");
+    FOS_NVS_SET(nvs_set_u8(nvs, "cpu_mode", s_config.cpu_mode), "cpu_mode");
     char touch_pins[FOS_STR_LEN];
     fos_config_format_touch_pins(&s_config.touch_pins, touch_pins, sizeof(touch_pins));
     FOS_NVS_SET(nvs_set_str(nvs, "touch_pins", touch_pins), "touch_pins");
@@ -495,6 +510,11 @@ esp_err_t fos_config_erase(void)
 bool fos_config_wifi_ready(void)
 {
     return s_config.wifi_ssid[0] != '\0';
+}
+
+bool fos_config_frame_page_offered(void)
+{
+    return s_config.frame_settings_on_screen || s_config.settings_unlock;
 }
 
 /* The chip's SPI flash / PSRAM pads, by target. esp_gpio_is_reserved below

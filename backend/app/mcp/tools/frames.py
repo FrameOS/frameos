@@ -16,6 +16,8 @@ import json
 import uuid
 from typing import Any
 
+from app.models.frame import cached_app_configs, scene_declared_setting_groups, scene_is_from_store
+
 from ..client import ToolContext
 from ..protocol import McpServer
 from ..registry import Tool, confirmed
@@ -40,7 +42,8 @@ DEPLOY = {
 FRAME_SETTING_KEYS = (
     "name", "archived", "width", "height", "rotate", "flip", "color", "timezone", "timezone_updater",
     "interval", "metrics_interval", "max_http_response_bytes", "log_to_file", "assets_path", "save_assets",
-    "upload_fonts", "scaling_mode", "render_scale", "device", "device_config", "debug", "reboot", "control_code", "schedule",
+    "upload_fonts", "scaling_mode", "render_scale", "frame_settings_on_screen", "device", "device_config", "debug",
+    "reboot", "control_code", "schedule",
     "gpio_buttons", "event_map", "error_behavior", "input_settings", "palette", "colors", "service_setting_groups",
     "frame_host", "frame_port", "ssh_user", "ssh_port", "server_host", "server_port", "server_scheme",
     "server_send_logs", "mountpoints",
@@ -142,18 +145,27 @@ def compact_scene(scene: dict[str, Any]) -> dict[str, Any]:
         "settings": scene.get("settings") or {},
         "origin": scene.get("origin"),
         **({"eventMap": scene["eventMap"]} if scene.get("eventMap") else {}),
+        **({"layout": scene["layout"]} if scene.get("layout") else {}),
     }
 
 
 def duplicate_scenes(scenes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Fresh ids for scenes copied onto a frame, with every reference to an
-    old id (scene links in nodes, edges) rewritten — what the editor does
-    when a template is applied (frameLogic.ts duplicateScenes)."""
+    old id rewritten: what the editor does when a template is applied
+    (frontend/src/utils/duplicateScenes.ts remapSceneIds).
+
+    Only the places that hold a scene id are rewritten: a scene node's
+    keyword, node configs, scene-typed field values, the install's layout and
+    event map. A store scene's id is often a word that is also the name of
+    its own code app (`formShowcase`), so rewriting every equal string turned
+    the app node's keyword into a uuid no app has, and the frame failed with
+    "Unknown app keyword" (2026-11-10). `origin` is left alone: its `sceneId`
+    is the template's id, which updates match on."""
     mapping = {str(scene.get("id")): str(uuid.uuid4()) for scene in scenes if scene.get("id")}
 
     def rewrite(value: Any) -> Any:
-        # Exact string values only: a reference is a whole id (a scene node's
-        # keyword, a `sceneId` config), never part of a longer string.
+        # Exact string values only: a reference is a whole id, never part of a
+        # longer string.
         if isinstance(value, str):
             return mapping.get(value, value)
         if isinstance(value, list):
@@ -162,11 +174,47 @@ def duplicate_scenes(scenes: list[dict[str, Any]]) -> list[dict[str, Any]]:
             return {key: rewrite(item) for key, item in value.items()}
         return value
 
-    copied = [rewrite(scene) for scene in scenes]
-    for scene in copied:
-        scene.pop("default", None)
-        if not scene.get("id"):
+    def rewrite_fields(fields: Any) -> Any:
+        if not isinstance(fields, list):
+            return fields
+        return [
+            {**field, "value": rewrite(field["value"])}
+            if isinstance(field, dict) and field.get("type") == "scene" and "value" in field
+            else field
+            for field in fields
+        ]
+
+    def rewrite_node(node: Any) -> Any:
+        if not isinstance(node, dict) or not isinstance(node.get("data"), dict):
+            return node
+        data = dict(node["data"])
+        if node.get("type") == "scene" and isinstance(data.get("keyword"), str):
+            data["keyword"] = rewrite(data["keyword"])
+        if isinstance(data.get("config"), dict):
+            data["config"] = rewrite(data["config"])
+        return {**node, "data": data}
+
+    copied = []
+    for source in scenes:
+        scene = copy.deepcopy(source)
+        if scene.get("id"):
+            scene["id"] = mapping[str(scene["id"])]
+        else:
             scene["id"] = str(uuid.uuid4())
+        scene.pop("default", None)
+        if isinstance(scene.get("nodes"), list):
+            scene["nodes"] = [rewrite_node(node) for node in scene["nodes"]]
+        if "fields" in scene:
+            scene["fields"] = rewrite_fields(scene["fields"])
+        if isinstance(scene.get("customEvents"), list):
+            scene["customEvents"] = [
+                {**event, "fields": rewrite_fields(event.get("fields"))} if isinstance(event, dict) else event
+                for event in scene["customEvents"]
+            ]
+        for key in ("layout", "eventMap"):
+            if key in scene:
+                scene[key] = rewrite(scene[key])
+        copied.append(scene)
     return copied
 
 
@@ -511,6 +559,8 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
         preserve_ids: bool = False,
         deploy: str = "fast",
         project_id: int | None = None,
+        layout: dict[str, Any] | None = None,
+        settings_groups: list[str] | None = None,
     ):
         async def go():
             new_scenes, origin = await resolve_scene_source(scenes, template_id, repository, template, url, project_id)
@@ -527,12 +577,32 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
                 new_scenes[:] = duplicate_scenes(new_scenes)
             if name and len(new_scenes) == 1:
                 new_scenes[0]["name"] = name
+            if layout and layout.get("sceneId"):
+                # What these scenes wear is the install's (docs/scene-layouts.md); a layout wears none.
+                for scene in new_scenes:
+                    if not (scene.get("settings") or {}).get("isLayout"):
+                        scene["layout"] = layout
             if not new_scenes:
                 raise McpInputError(f"Nothing to install: these scene ids are already on the frame ({', '.join(map(str, skipped))}).")
-            await save_scenes(frame_id, existing + new_scenes, project_id)
+            # A store scene gets only the service keys the owner granted on
+            # the frame (shipped_frame_settings); `settings_groups` grants it
+            # what it declares among them, as the cloud's tool of the same
+            # name does and the SPA's install does ("installing is consent").
+            app_configs = cached_app_configs()
+            declared = sorted(set().union(*(
+                scene_declared_setting_groups(scene, app_configs) for scene in new_scenes if scene_is_from_store(scene)
+            )))
+            frame_groups = [str(group) for group in (frame.get("service_setting_groups") or []) if isinstance(group, str)]
+            granting = [group for group in declared if settings_groups and group in settings_groups and group not in frame_groups]
+            body: dict[str, Any] = {"scenes": existing + new_scenes}
+            if granting:
+                body["service_setting_groups"] = frame_groups + granting
+            await api.json("POST", f"/api/frames/{frame_id}", project_id=project_id, json=body)
             result: dict[str, Any] = {
                 "installed": [{"id": scene.get("id"), "name": scene.get("name")} for scene in new_scenes],
                 "skipped_existing": skipped,
+                "declared_settings_groups": declared,
+                "granted_settings_groups": [group for group in declared if group in frame_groups or group in granting],
                 **origin,
             }
             if activate:
@@ -572,6 +642,20 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
             "name": {"type": "string", "description": "Name for the scene when exactly one is installed."},
             "activate": {"type": "boolean"},
             "preserve_ids": {"type": "boolean"},
+            "layout": {
+                "type": "object",
+                "description": "The layout these scenes wear: {sceneId, state?}, a scene on the frame with settings.isLayout.",
+            },
+            "settings_groups": {
+                "type": "array",
+                "items": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
+                "maxItems": 16,
+                "description": (
+                    "Service-settings groups to GRANT store scenes (unsplash, openAI, homeAssistant, immich, github, "
+                    "frameOS); only groups the scenes declare take effect. A store scene gets no key without a grant; "
+                    "the answer's declared_settings_groups / granted_settings_groups say what it asked for and has."
+                ),
+            },
             "deploy": DEPLOY,
         },
         required=["confirm", "frame_id"],
@@ -597,6 +681,9 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
             # (docs/events.md "Event map"): a new version keeps it.
             if "eventMap" not in new_scene and scenes[index].get("eventMap"):
                 new_scene["eventMap"] = scenes[index]["eventMap"]
+            # So is the layout it wears (docs/scene-layouts.md).
+            if "layout" not in new_scene and scenes[index].get("layout"):
+                new_scene["layout"] = scenes[index]["layout"]
             scenes[index] = new_scene
             await save_scenes(frame_id, scenes, project_id)
             return text({"updated": {"id": new_scene.get("id"), "name": new_scene.get("name")}, **(await deploy_after(frame_id, deploy, project_id))})

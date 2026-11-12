@@ -1,5 +1,5 @@
 {
-  "$comment": "The scene event contract: every built-in event name, what it carries, who may emit it and what a host does with it. Source of truth for frameos/tools/generate_events_contract.py, which writes the Nim, C, TypeScript and Python tables and the editor catalog (frontend/schema/events.json). The prose is docs/events.md; the conformance corpus every runner must pass is docs/event-fixtures.json. Add an event HERE, regenerate, add a fixture — never to one of the generated files.",
+  "$comment": "The scene event contract: every built-in event name, what it carries, who may emit it and what a host does with it. Source of truth for frameos/tools/generate_events_contract.py, which writes the Nim, C, TypeScript and Python tables and the editor catalog (frontend/schema/events.json). The prose is docs/events.md; the conformance corpus every runner must pass is docs/event-fixtures.json. Add an event HERE, regenerate, add a fixture — never to one of the generated files. A JS app's `\"events\": [\"*\"]` hears every event a scene can listen for, except what is reported at the rate of a moving finger (`coalesce: latest`), an old name for another event (`aliasOf`) and an event marked `wildcard: false` (the app's own init and render).",
   "version": 1,
   "hosts": ["linux", "esp32", "wasm"],
   "origins": {
@@ -11,7 +11,8 @@
     "http:admin": "The frame's HTTP API with an admin session or the serverApiKey bearer — the self-hosted backend.",
     "cloud": "FrameOS Cloud, through a hub verb.",
     "system": "The runtime itself: boot, the portal, settings apply, device flow.",
-    "eventMap": "The frame's or an installed scene's event map (docs/events.md, \"Event map\") replacing an event it matched with the one its rule names: the owner's configuration speaking, never a key or a request itself. What it emits is never mapped again."
+    "eventMap": "The frame's or an installed scene's event map (docs/events.md, \"Event map\") replacing an event it matched with the one its rule names: the owner's configuration speaking, never a key or a request itself. What it emits is never mapped again.",
+    "panel": "The frame page of the settings on the frame's own screen (docs/scene-settings.md, \"The frame page\"): a person at the frame pressing Render again, Restart FrameOS or Reboot. Only when the frame's control plane leaves that page on."
   },
   "classes": {
     "lifecycle": "Sent by the host to a scene as it is loaded, shown, rendered and left.",
@@ -94,6 +95,7 @@
       "description": "Once per scene, when it is first loaded and its apps are ready — before its first open and render.",
       "listen": true,
       "dispatch": false,
+      "wildcard": false,
       "payload": [],
       "sceneState": "read",
       "origins": ["system", "http:admin"],
@@ -109,9 +111,10 @@
       "description": "Render the scene. Triggered according to the frame's refresh interval, or when explicitly requested.",
       "listen": true,
       "dispatch": true,
+      "wildcard": false,
       "payload": [],
       "sceneState": "read",
-      "origins": ["system", "driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud", "eventMap"],
+      "origins": ["system", "driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud", "eventMap", "panel"],
       "cloud": {"verb": "render"},
       "renderAfter": "always",
       "coalesce": "none",
@@ -295,6 +298,22 @@
       "log": "none",
       "hosts": {"linux": true, "esp32": true, "wasm": true},
       "since": "2026.9.23"
+    },
+    {
+      "name": "uiTimer",
+      "class": "input",
+      "device": "pointer",
+      "description": "Time passing for a JSX UI (docs/jsx-ui.md): a key of the on-screen keyboard held down types again, and a key just typed stops being lit. The dispatcher's tick makes it for the scene whose UI asked for one, and the UI layer handles it: the runtime's own, never offered to a scene.",
+      "listen": false,
+      "dispatch": false,
+      "internal": true,
+      "payload": [],
+      "origins": ["system"],
+      "renderAfter": "never",
+      "coalesce": "latest",
+      "log": "none",
+      "hosts": {"linux": true, "esp32": true, "wasm": true},
+      "since": "2026.11.5"
     },
     {
       "name": "mouseMove",
@@ -615,10 +634,13 @@
     {
       "name": "sceneSwitcher",
       "class": "scene-command",
+      "$comment": "swap: over the scene settings, go straight to the list instead of back to the scene (a taskbar's Start; the scene behind stays behind).",
       "description": "Show the scene switcher (`scenes.switcher`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. While it or the scene settings show, go back to the scene they were opened from instead. The frame's event map binds it to a swipe in from the bottom edge on a touch screen.",
       "listen": false,
       "dispatch": true,
-      "payload": [],
+      "payload": [
+        {"name": "swap", "label": "Swap", "type": "boolean", "required": false}
+      ],
       "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap"],
       "renderAfter": "always",
       "coalesce": "none",
@@ -632,7 +654,9 @@
       "description": "Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen.",
       "listen": false,
       "dispatch": true,
-      "payload": [],
+      "payload": [
+        {"name": "page", "label": "Page", "type": "string", "required": false}
+      ],
       "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap"],
       "renderAfter": "always",
       "coalesce": "none",
@@ -702,7 +726,7 @@
       "listen": false,
       "dispatch": false,
       "payload": [],
-      "origins": ["schedule", "http:admin", "cloud", "system"],
+      "origins": ["schedule", "http:admin", "cloud", "system", "panel"],
       "cloud": {"verb": "restart_runtime", "eventRoute": false},
       "schedule": {"label": "Restart FrameOS", "description": "Exit and relaunch the FrameOS runtime. A few seconds of downtime; the device stays up.", "since": "2026.8.32", "endsRuntime": true},
       "renderAfter": "never",
@@ -717,7 +741,7 @@
       "listen": false,
       "dispatch": false,
       "payload": [],
-      "origins": ["schedule", "http:admin", "cloud", "system"],
+      "origins": ["schedule", "http:admin", "cloud", "system", "panel"],
       "cloud": {"verb": "reboot", "eventRoute": false},
       "schedule": {"label": "Reboot device", "description": "Reboot the whole device. Use this for the nightly reboot some panels and Wi-Fi chips like.", "since": "2026.8.32", "endsRuntime": true},
       "renderAfter": "never",
@@ -764,18 +788,23 @@
     "$switcherComment": "The scene `sceneSwitcher` shows: built into every runtime (docs/scene-switcher.md), never in a scene list, never the scene a reboot comes back to. `sceneSwitcher` hands it `state.from` (the scene it was opened from); opened by name with `setCurrentScene` it has none and goes back to the list's first. While it shows, `direction` walks the list from `state.from`.",
     "switcher": "system/sceneSwitcher",
     "$settingsComment": "The scene `sceneSettings` shows: built into every runtime (docs/scene-settings.md), like the switcher in no scene list and never the scene a reboot comes back to. `sceneSettings` hands it `state.from` (the scene it was opened from), `state.fields` (that scene's public fields) and `state.values` (theirs as it opened); Save is a `setCurrentScene` back to `from` with the values as its state.",
-    "settings": "system/sceneSettings"
+    "settings": "system/sceneSettings",
+    "$yieldComment": "Not a scene: the id a scene node names to mean \"the scene this layout is wrapped around\" (docs/scene-layouts.md), `<yield />` in JSX. In no scene list; a layout shown on its own has nothing to yield and leaves the panel empty.",
+    "yield": "system/yield"
   },
   "gestures": {
     "$comment": "How the dispatcher makes tap, doubleTap, longPress and swipe out of pointerDown / pointerUp, in scene pixels and milliseconds. The same numbers on every host.",
     "tapSlopPx": 16,
-    "tapMs": 1000,
+    "tapMs": 500,
     "doubleTapMs": 350,
-    "longPressMs": 1000,
+    "longPressMs": 500,
     "swipeMinPx": 48,
     "directions": ["left", "right", "up", "down"],
     "$edgeComment": "edgeSwipe: a touch or pen press this close to an edge, in scene pixels, is held back from the scene until it is a swipe away from that edge (then the frame's) or not (then the scene's, delivered as it happened).",
     "edgePx": 24,
+    "$safeModeComment": "The way out of a layout that cannot be used: this many edgeSwipes from the top edge, each within safeModeGapMs of the last, open the frame's settings page with no layout around it (docs/scene-layouts.md \"Safe mode\"), whatever the frame's event map says those swipes do. Nothing is changed unless that page is saved.",
+    "safeModePulls": 10,
+    "safeModeGapMs": 5000,
     "edges": ["left", "right", "top", "bottom"]
   },
   "buttons": {

@@ -42,7 +42,8 @@ export function commandMessage(command: {
   type: string;
   payload: unknown;
 }): Record<string, unknown> {
-  const payload = isRecord(command.payload) ? command.payload : {};
+  // scene_hashes and no_patch are the hub's own bookkeeping (scenes-patch.ts).
+  const { scene_hashes: _hashes, no_patch: _noPatch, ...payload } = isRecord(command.payload) ? command.payload : {};
   return { ...payload, id: command.id, type: command.type };
 }
 
@@ -156,8 +157,10 @@ export const maxMetricsBytes = 16 * 1024;
 export const maxChecksumChars = 128;
 // Same ceiling the enroll route's parseHardware applies (auth-web
 // enroll/route.ts), so a hardware report the hub refreshes on hello can never
-// be larger than one enrollment would have accepted.
-export const maxHardwareBytes = 4 * 1024;
+// be larger than one enrollment would have accepted. 8 KB: an ESP32 reports
+// each scene's size on its state partition (storage.sceneBytes, up to 32
+// ids), and a report over the ceiling is dropped whole.
+export const maxHardwareBytes = 8 * 1024;
 
 export function jsonByteLength(value: unknown) {
   try {

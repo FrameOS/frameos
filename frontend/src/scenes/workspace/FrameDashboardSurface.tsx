@@ -1,3 +1,4 @@
+import { activeFrameLayout, layoutScenes, scenesWithoutLayouts } from '../../utils/sceneLayouts'
 import { useActions, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
@@ -53,6 +54,7 @@ import { DeployToFrameIcon, FrameChangeStatusIcon } from './FrameChangeStatusIco
 import { FrameLocalDeployMenu } from './FrameLocalDeployMenu'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
+import { ScenePreviewRow } from './ScenePreviewRow'
 import {
   FRAMEOS_TEMPLATE_DRAG_TYPE,
   getFrameosSceneDragData,
@@ -61,9 +63,12 @@ import {
   setFrameosSceneDragData,
 } from './sceneDrag'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
+import { frameSceneStorage, frameStorageLabel, sceneSizeLabel } from '../../utils/frameSceneStorage'
 import { SceneDependencyConnector } from './SceneDependencyConnector'
 import { SceneDependencyFormatMenu } from './SceneDependencyFormatMenu'
 import {
+  LAYOUTS_GROUP_EXPANSION_PATH,
+  layoutsGroupExpansionKey,
   sceneChildExpansionKey,
   sceneChildExpansionPath,
   sceneDependencyGroupingIsEnabled,
@@ -590,7 +595,13 @@ function FrameSceneTile({
         <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
           {scene.name || 'Untitled scene'}
         </div>
-        <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">{sceneTileSummaryLabel(scene)}</div>
+        <div className="frameos-muted mt-0.5 flex min-w-0 gap-2 text-xs text-slate-500">
+          <span className="min-w-0 truncate">{sceneTileSummaryLabel(scene)}</span>
+          {/* Its own slot: a long summary truncates, the size never does. */}
+          {frameSceneStorage(frame) ? (
+            <span className="ml-auto shrink-0 tabular-nums">{sceneSizeLabel(scene, frame)}</span>
+          ) : null}
+        </div>
       </div>
     </>
   )
@@ -693,22 +704,32 @@ function FrameSceneTile({
   )
 }
 
-export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType; compact?: boolean }): JSX.Element {
-  const { templateDrawerFrameId } = useValues(workspaceLogic)
+export function FrameAddSceneTile({
+  frame,
+  compact = false,
+  newLayout = false,
+}: {
+  frame: FrameType
+  compact?: boolean
+  /** The Layouts group's tile: straight to the starters. */
+  newLayout?: boolean
+}): JSX.Element {
+  const { templateDrawerFrameId, templateDrawerPage } = useValues(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
   const { closeSceneControl, openTemplateDrawer } = useActions(workspaceLogic)
-  const active = templateDrawerFrameId === frame.id
+  const active = templateDrawerFrameId === frame.id && newLayout === (templateDrawerPage === 'layouts')
 
   return (
     <button
       type="button"
-      data-workspace-add-scene-tile={frame.id}
-      data-workspace-add-scene-tile-frame={frame.id}
+      {...(newLayout
+        ? { 'data-workspace-new-layout-tile': frame.id }
+        : { 'data-workspace-add-scene-tile': frame.id, 'data-workspace-add-scene-tile-frame': frame.id })}
       onClick={() => {
         hideForm()
         closeSceneControl()
         closeSplitGenerator(frame.id)
-        openTemplateDrawer(frame.id)
+        openTemplateDrawer(frame.id, newLayout ? 'layouts' : 'actions')
       }}
       className={clsx(
         'frameos-primary-hover-text frameos-add-scene-hover frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-dashed bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
@@ -720,7 +741,9 @@ export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType
       <span className="frameos-primary-hover-text frameos-icon-tile flex h-12 w-12 items-center justify-center rounded-full bg-white/80 text-slate-400 shadow-sm transition">
         <PlusIcon className="h-7 w-7" />
       </span>
-      <span className="frameos-strong text-sm font-semibold text-slate-700">Add scene</span>
+      <span className="frameos-strong text-center text-sm font-semibold text-slate-700">
+        {newLayout ? 'New layout' : 'Add scene'}
+      </span>
     </button>
   )
 }
@@ -769,8 +792,8 @@ function FrameScenesBlock({
   // an empty/absent form never blanks the list.
   const { scenes: liveScenes } = useValues(frameLogic({ frameId: frame.id }))
   const { cloudFrameScenesLoaded } = useValues(framesModel)
-  const { applyTemplate, setFrameFormValues } = useActions(frameLogic({ frameId: frame.id }))
-  const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
+  const { setFrameFormValues } = useActions(frameLogic({ frameId: frame.id }))
+  const { applyRemoteToFrame, installTemplate } = useActions(templatesLogic({ frameId: frame.id }))
   const [multiSelectEnabled, setMultiSelectEnabled] = useState(false)
   const [selectedSceneIds, setSelectedSceneIds] = useState<Set<string>>(() => new Set())
 
@@ -812,11 +835,15 @@ function FrameScenesBlock({
     setMultiSelect(false)
   }
   const searchIsActive = search.trim().length > 0
+  const storageLabel = frameStorageLabel(frame)
   // While searching, `scenes` is only the matching subset; dependency grouping
   // needs the full (live) list so parents of a match still render.
   // Alphabetical: this list is how you find a scene, and a new one (a
   // converted copy, say) appended at the end is where nobody looks.
-  const allScenes = sortScenesAlphabetically(searchIsActive ? liveScenes : scenes)
+  const allScenes = sortScenesAlphabetically(searchIsActive ? scenesWithoutLayouts(liveScenes) : scenes)
+  const frameLayouts = sortScenesAlphabetically(layoutScenes(liveScenes))
+  const activeLayoutId = activeFrameLayout(liveScenes)?.sceneId ?? null
+  const activeLayoutName = frameLayouts.find((layout) => layout.id === activeLayoutId)?.name
   const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(allScenes)
   const matchingSceneIds = searchIsActive ? new Set(scenes.map((scene) => scene.id)) : null
   const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frame.id, 'overview')
@@ -859,7 +886,7 @@ function FrameScenesBlock({
       if (templateDragData.repository) {
         applyRemoteToFrame(templateDragData.repository, templateDragData.template)
       } else {
-        applyTemplate(templateDragData.template)
+        installTemplate(templateDragData.template)
       }
       return
     }
@@ -924,6 +951,8 @@ function FrameScenesBlock({
           </>
         ) : null}
       </div>
+      {storageLabel ? <div className="frameos-muted mb-2 text-xs text-slate-500">{storageLabel}</div> : null}
+      <ScenePreviewRow frame={frame} />
       {sceneOverviewEntries.length > 0 ? (
         <div className="flex flex-wrap gap-4">
           {sceneOverviewEntries.map(({ scene, key, nested }) => {
@@ -975,6 +1004,41 @@ function FrameScenesBlock({
           </div>
         </div>
       )}
+      {frameLayouts.length > 0 ? (
+        // Out of the way, not out of reach: a layout is edited like any scene
+        // (docs/scene-layouts.md).
+        <details
+          className="mt-4"
+          data-workspace-layouts={frame.id}
+          open={!!frameAssetFolderExpansion[layoutsGroupExpansionKey(frame.id)]}
+          onToggle={(event) =>
+            setFrameAssetFolderExpanded(frame.id, LAYOUTS_GROUP_EXPANSION_PATH, event.currentTarget.open)
+          }
+        >
+          <summary className="frameos-muted cursor-pointer text-xs font-semibold uppercase tracking-wide">
+            Layouts ({frameLayouts.length})
+            {activeLayoutId ? (
+              <span className="frameos-primary-fill ml-2 rounded-full px-2 py-0.5 text-[11px] font-semibold normal-case tracking-normal text-white">
+                {activeLayoutName || 'Untitled layout'} active
+              </span>
+            ) : null}
+          </summary>
+          <div className="mt-3 flex flex-wrap gap-4">
+            {frameLayouts.map((layout) => (
+              <FrameSceneTile
+                key={layout.id}
+                frame={frame}
+                scene={layout}
+                scenes={allScenes}
+                active={layout.id === activeLayoutId}
+                highlighted={sceneControlSelection?.frameId === frame.id && sceneControlSelection.sceneId === layout.id}
+                showMenu={showSceneMenus}
+              />
+            ))}
+            <FrameAddSceneTile frame={frame} compact newLayout />
+          </div>
+        </details>
+      ) : null}
     </div>
   )
 }
@@ -1028,8 +1092,7 @@ export function FrameDashboardSurface({
   showSceneMenus = false,
   showAiBox = false,
 }: FrameDashboardSurfaceProps): JSX.Element {
-  const { applyTemplate } = useActions(frameLogic({ frameId: frame.id }))
-  const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
+  const { applyRemoteToFrame, installTemplate } = useActions(templatesLogic({ frameId: frame.id }))
 
   const handleFrameDragOver = (event: DragEvent<HTMLElement>) => {
     if (!Array.from(event.dataTransfer.types).includes(FRAMEOS_TEMPLATE_DRAG_TYPE)) {
@@ -1050,7 +1113,7 @@ export function FrameDashboardSurface({
     if (templateDragData.repository) {
       applyRemoteToFrame(templateDragData.repository, templateDragData.template)
     } else {
-      applyTemplate(templateDragData.template)
+      installTemplate(templateDragData.template)
     }
   }
 

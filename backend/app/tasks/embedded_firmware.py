@@ -17,6 +17,7 @@ into every image (embedded/esp32/main/fos_ota.c). Doctrine in docs/todo.md,
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -30,7 +31,7 @@ from app.models.frame import (
     Frame,
     normalize_frame_admin_auth,
     normalize_https_proxy,
-    server_scheme_for_frame,
+    server_base_url,
 )
 from app.models.log import new_log as log
 from app.tasks.utils import get_fresh_frame
@@ -352,11 +353,13 @@ EMBEDDED_SEEED_STICKY_GPIO_BUTTONS = [
     {"pin": 6, "label": "DOWN"},
 ]
 # UP and DOWN held walk the scene list; the AI key held talks to the frame
-# (docs/voice-chat.md). fos_board.c's STICKY_EVENT_MAP is the device copy.
+# (docs/voice-chat.md); the edges swipe (EMBEDDED_TOUCH_EDGE_SWIPES).
+# fos_board.c's STICKY_EVENT_MAP is the device copy.
 EMBEDDED_SEEED_STICKY_EVENT_MAP = [
     {"event": "button", "match": {"label": "UP", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
     {"event": "button", "match": {"label": "DOWN", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
     {"event": "button", "match": {"label": "AI", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+    *EMBEDDED_TOUCH_EDGE_SWIPES,
 ]
 # The Sticky's MSM261 PDM microphone: PDM_CLK GPIO19, PDM_DATA GPIO20 (the
 # S3's native USB pads; its USB is a CH343 on UART0, and fos_mic.c detaches
@@ -499,6 +502,9 @@ EMBEDDED_SEEED_RETERMINAL_E10XX_I2C = {"i2cBuses": "sda=19,scl=20;sda=39,scl=40"
 EMBEDDED_SEEED_RETERMINAL_E1004_I2C = {"i2cBuses": "sda=19,scl=20"}
 # The contract's `led_type` enum (docs/cloud-frames-contract.json).
 EMBEDDED_LED_TYPES = ("gpio", "gpio_inverted", "ws2812")
+# The contract's `cpu_mode` enum: the chip's clock, set at boot (main.c).
+# Unset = auto, 160 MHz on e-paper and 240 on an LCD or a touch panel.
+EMBEDDED_CPU_MODES = ("auto", "battery", "performance")
 EMBEDDED_SEEED_RETERMINAL_E10XX_LED = {
     "ledPin": 6,
     "ledType": "gpio_inverted",
@@ -624,6 +630,59 @@ EMBEDDED_INKY_FRAME_PINS = {
 # Buttons A-E live behind the shift register (bits 0-4), not GPIOs; the list
 # stays empty so nothing tries to configure GPIO interrupts for them.
 EMBEDDED_INKY_FRAME_GPIO_BUTTONS: list[dict[str, Any]] = []
+# Seeed XIAO ePaper Display Boards: a XIAO ESP32-S3 Plus (16MB flash, 8MB
+# octal PSRAM) soldered to a panel carrier. From Seeed's schematics and
+# Seeed_GFX2: the panel on SCK7/MOSI9, CS44, RST38, BUSY4, its power switch
+# on GPIO43, three keys, and VBAT through a 2:1 divider on GPIO1 behind a
+# switch. Hardware-unverified in FrameOS. GPIO43/44 are the XIAO's UART0: the
+# panel takes them over and the console is the USB-Serial/JTAG one.
+EMBEDDED_SEEED_XIAO_EE_PINS = {
+    "rst": 38,
+    "dc": 10,
+    "cs": 44,
+    "cs2": -1,
+    "busy": 4,
+    "sck": 7,
+    "mosi": 9,
+    "pwr": 43,
+}
+# EE02: the dual-controller T133A01 needs the second chip select.
+EMBEDDED_SEEED_XIAO_EE02_PINS = {**EMBEDDED_SEEED_XIAO_EE_PINS, "cs2": 41}
+# EE03: an IT8951 has no D/C and answers on MISO GPIO8, which the dc slot
+# carries (as on the E1003).
+EMBEDDED_SEEED_XIAO_EE03_PINS = {**EMBEDDED_SEEED_XIAO_EE_PINS, "dc": 8}
+EMBEDDED_SEEED_XIAO_EE_GPIO_BUTTONS = [
+    {"pin": 2, "label": "KEY1"},
+    {"pin": 3, "label": "KEY2"},
+    {"pin": 5, "label": "KEY3"},
+]
+EMBEDDED_SEEED_XIAO_EE_BATTERY = {
+    "batteryPin": 1,
+    "batteryDivider": 2.0,
+    "batteryEnablePin": 6,
+}
+# The EE05 keeps GPIO5/6 for its extension header: KEY3 is GPIO8 and the
+# divider's switch GPIO39 (Seeed's EE05 schematic and wiki).
+EMBEDDED_SEEED_XIAO_EE05_GPIO_BUTTONS = [
+    {"pin": 2, "label": "KEY1"},
+    {"pin": 3, "label": "KEY2"},
+    {"pin": 8, "label": "KEY3"},
+]
+EMBEDDED_SEEED_XIAO_EE05_BATTERY = {**EMBEDDED_SEEED_XIAO_EE_BATTERY, "batteryEnablePin": 39}
+# The EE03's SHT40 sits on SDA42/SCL41; its IT8951 needs the temperature.
+EMBEDDED_SEEED_XIAO_EE03_I2C = {"i2cBuses": "sda=42,scl=41"}
+# Seeed XIAO 7.5" ePaper Panel: a XIAO ESP32-C3 (4MB, no PSRAM: thin client)
+# with a UC8179 800x480 panel. Seeed's ESPHome page; no battery sense wired.
+EMBEDDED_SEEED_XIAO_EPAPER_7IN5_PINS = {
+    "rst": 2,
+    "dc": 5,
+    "cs": 3,
+    "cs2": -1,
+    "busy": 4,
+    "sck": 8,
+    "mosi": 10,
+    "pwr": -1,
+}
 EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
     "waveshare_esp32_s3_photopainter": {
         "device": "waveshare.EPD_7in3e",
@@ -821,6 +880,53 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         # every 15 min for control-plane commands; stays connected on USB.
         "deepSleepOnBattery": True,
         "wakeCheckSeconds": 900,
+    },
+    "seeed_xiao_ee02": {
+        # The E1004's panel on half the flash; same 16-bit canvas on 8MB.
+        "device": "waveshare.EPD_13in3e",
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_XIAO_EE02_PINS,
+        "gpioButtons": EMBEDDED_SEEED_XIAO_EE_GPIO_BUTTONS,
+        **EMBEDDED_SEEED_XIAO_EE_BATTERY,
+    },
+    "seeed_xiao_ee03": {
+        # The E1003's panel: an 8-bit luma canvas on the 8MB module.
+        "device": "waveshare.EPD_10in3",
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_XIAO_EE03_PINS,
+        "gpioButtons": EMBEDDED_SEEED_XIAO_EE_GPIO_BUTTONS,
+        **EMBEDDED_SEEED_XIAO_EE_BATTERY,
+        **EMBEDDED_SEEED_XIAO_EE03_I2C,
+    },
+    "seeed_xiao_ee04": {
+        # A carrier for many panels (24-pin, or the 7.3" Spectra on the 50-pin
+        # socket): `device` is only the default.
+        "device": "waveshare.EPD_7in5_V2",
+        "panelSelectable": True,
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_XIAO_EE_PINS,
+        "gpioButtons": EMBEDDED_SEEED_XIAO_EE_GPIO_BUTTONS,
+        **EMBEDDED_SEEED_XIAO_EE_BATTERY,
+    },
+    "seeed_xiao_ee05": {
+        "device": "waveshare.EPD_7in5_V2",
+        "panelSelectable": True,
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_XIAO_EE_PINS,
+        "gpioButtons": EMBEDDED_SEEED_XIAO_EE05_GPIO_BUTTONS,
+        **EMBEDDED_SEEED_XIAO_EE05_BATTERY,
+    },
+    "seeed_xiao_epaper_7in5": {
+        "device": "waveshare.EPD_7in5_V2",
+        "platform": "esp32-c3",
+        "flashSize": "4MB",
+        "psramMB": 0,
+        "pins": EMBEDDED_SEEED_XIAO_EPAPER_7IN5_PINS,
+        "gpioButtons": [{"pin": 9, "label": "BOOT"}],
     },
     "elecrow_crowpanel_5in79": {
         "device": "waveshare.EPD_5in79",
@@ -1071,7 +1177,7 @@ def embedded_release_firmware_for_frame(
 # 1200x1600 panel on a 16 MB module render in full colour, 1200x1600 Spectra 6
 # on 8 MB needs 565, and the 1872x1404 sixteen-grey reTerminal E1003 draws in
 # grey. Keep the rule and the reserve in sync with
-# fos_render_canvas_bytes_per_pixel / FOS_RENDER_PSRAM_RESERVE in
+# fos_render_canvas_bits_per_pixel / FOS_RENDER_PSRAM_RESERVE in
 # components/frameos_display (the firmware's boot-time fit check),
 # sceneCanvasFormat in embedded_runtime.nim, and EmbeddedReserveBytes in
 # frameos/src/frameos/utils/memory.nim.
@@ -1283,6 +1389,7 @@ EMBEDDED_PRESET_SEED_ONLY_KEYS = (
     ("buzzerPin", "buzzer_pin"),
     ("buzzerToneHz", "buzzer_tone_hz"),
     ("voiceChat", "voice_chat"),
+    ("touchBeep", "touch_beep"),
     ("micClkPin", "mic_clk_pin"),
     ("micDataPin", "mic_data_pin"),
     ("micPwrPin", "mic_pwr_pin"),
@@ -1290,6 +1397,7 @@ EMBEDDED_PRESET_SEED_ONLY_KEYS = (
     ("ledType", "led_type"),
     ("deepSleepOnBattery", "deep_sleep_on_battery"),
     ("wakeCheckSeconds", "wake_check_seconds"),
+    ("awakeAfterInputSeconds", "awake_after_input_seconds"),
 )
 
 
@@ -1299,7 +1407,10 @@ def apply_embedded_hardware_preset(frame: Frame) -> str:
         return ""
     preset = EMBEDDED_HARDWARE_PRESETS[preset_key]
 
-    frame.device = preset["device"]
+    # A carrier board (`panelSelectable`) keeps the panel the frame names; on
+    # every other board the preset is the whole hardware.
+    if not (preset.get("panelSelectable") and embedded_panel_for_device(frame.device)):
+        frame.device = preset["device"]
     preset_gpio_buttons = preset.get("gpioButtons")
     if frame.gpio_buttons is None and isinstance(preset_gpio_buttons, list):
         frame.gpio_buttons = [dict(button) for button in preset_gpio_buttons]
@@ -1471,14 +1582,17 @@ def embedded_pixel_format_is_grey(pixel_format: int | None) -> bool:
 
 def embedded_render_canvas_bytes_per_pixel(
     width: int, height: int, psram_bytes: int, pixel_format: int | None = None
-) -> int:
-    """Bytes per pixel of the scene canvas (fos_render_canvas_bytes_per_pixel):
-    1 (luma) for a grey or black-and-white panel format and 2 (RGB 5/6/5) for
+) -> float:
+    """Bytes per pixel of the scene canvas (fos_render_canvas_bits_per_pixel):
+    0.5 for a sixteen-grey panel, 1 (luma) for another grey or black-and-white
+    panel format and 2 (RGB 5/6/5) for
     an RGB565 LCD, whose canvas is its own frame buffer, whatever the PSRAM;
     for a colour e-paper panel 4 (RGBX) when a full canvas takes at most half
     of ``psram_bytes``, else 2."""
     if width <= 0 or height <= 0:
         return 0
+    if pixel_format == FOS_PIXEL_4BPP_GRAY:
+        return 0.5
     if embedded_pixel_format_is_grey(pixel_format):
         return 1
     if pixel_format == FOS_PIXEL_RGB565:
@@ -1489,12 +1603,20 @@ def embedded_render_canvas_bytes_per_pixel(
     return 2
 
 
+def embedded_render_canvas_bytes(
+    width: int, height: int, psram_bytes: int, pixel_format: int | None = None
+) -> int:
+    """fos_display_canvas_bytes: rows of whole bytes."""
+    bytes_per_pixel = embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
+    return math.ceil(width * bytes_per_pixel) * height
+
+
 def embedded_render_psram_bytes(
     width: int, height: int, pixel_format: int = FOS_PIXEL_1BPP, psram_bytes: int = 8 * 1024 * 1024
 ) -> int:
     """PSRAM the on-device renderer needs for a width×height panel on a module with
     ``psram_bytes`` of PSRAM (the canvas format depends on it)."""
-    canvas = width * height * embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
+    canvas = embedded_render_canvas_bytes(width, height, psram_bytes, pixel_format)
     packed = embedded_buffer_size(width, height, pixel_format)
     # An RGB LCD (the only FOS_PIXEL_RGB565 panel) scans three frame buffers
     # of its own; mirrors fos_display_render_psram_bytes in frameos_display.c.
@@ -1611,7 +1733,7 @@ def embedded_firmware_layout_for_frame(frame: Frame) -> dict[str, Any]:
     pixel_format = embedded_pixel_format_for_panel(panel)
     psram_bytes = embedded_module_psram_bytes(frame)
     canvas_bytes_per_pixel = embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
-    canvas_bytes = width * height * canvas_bytes_per_pixel
+    canvas_bytes = embedded_render_canvas_bytes(width, height, psram_bytes, pixel_format)
     packed_bytes = embedded_buffer_size(width, height, pixel_format) if width > 0 and height > 0 else 0
     render_mode = embedded_render_mode_for_frame(frame)
     render_working_bytes = (
@@ -1637,7 +1759,7 @@ def embedded_firmware_layout_for_frame(frame: Frame) -> dict[str, Any]:
             "pixelFormat": pixel_format,
             "pixelFormatName": _pixel_format_name(pixel_format),
             "renderMode": "local" if render_mode == EMBEDDED_RENDER_LOCAL else "remote",
-            # Historical key name: the canvas is RGBX, 16-bit RGB or luma, never RGBA.
+            # Historical key name: the canvas is RGBX, 16-bit RGB, luma or 4-bit grey, never RGBA.
             "rgbaBufferBytes": canvas_bytes,
             "canvasBufferBytes": canvas_bytes,
             "canvasBytesPerPixel": canvas_bytes_per_pixel,
@@ -1753,14 +1875,7 @@ def embedded_gpio_buttons_config(frame: Frame) -> str:
 def embedded_backend_url_for_frame(frame: Frame) -> str:
     """Where the device reaches this backend: what console provisioning sends
     as `set backend`. Empty when the frame has no server host yet."""
-    server_host = str(frame.server_host or "")
-    if not server_host:
-        return ""
-    server_port = int(frame.server_port or 8989)
-    scheme = server_scheme_for_frame(frame)
-    if (scheme == "http" and server_port == 80) or (scheme == "https" and server_port == 443):
-        return f"{scheme}://{server_host}"
-    return f"{scheme}://{server_host}:{server_port}"
+    return server_base_url(frame) or ""
 
 
 def _embedded_device_config_value(frame: Frame, *keys: str) -> object:
@@ -1872,6 +1987,10 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     render_scale = embedded_render_scale_for_frame(frame)
     if render_scale > 0:
         settings.append(_provisioning_setting("render_scale", f"{render_scale:g}"))
+    # Only when turned off: on is the firmware's default, and a release image
+    # from before the key would refuse it (the settings poll carries it).
+    if frame.frame_settings_on_screen is False:
+        settings.append(_provisioning_setting("frame_settings_on_screen", 0))
     settings.append(_provisioning_setting("server_send_logs", 1 if frame.server_send_logs is not False else 0))
     max_http = embedded_max_http_response_bytes_for_frame(frame)
     if max_http != EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES:
@@ -1919,9 +2038,18 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     voice_chat = _embedded_device_config_value(frame, "voiceChat", "voice_chat")
     if isinstance(voice_chat, bool):
         settings.append(_provisioning_setting("voice_chat", 1 if voice_chat else 0))
+    touch_beep = _embedded_device_config_value(frame, "touchBeep", "touch_beep")
+    if isinstance(touch_beep, bool):
+        settings.append(_provisioning_setting("touch_beep", 1 if touch_beep else 0))
+    cpu_mode = _embedded_device_config_value(frame, "cpuMode", "cpu_mode")
+    if isinstance(cpu_mode, str) and cpu_mode in EMBEDDED_CPU_MODES:
+        settings.append(_provisioning_setting("cpu_mode", cpu_mode))
     wake_check_seconds = _embedded_device_config_value(frame, "wakeCheckSeconds", "wake_check_seconds")
     if isinstance(wake_check_seconds, int) and not isinstance(wake_check_seconds, bool):
         settings.append(_provisioning_setting("wake_check", max(0, wake_check_seconds)))
+    awake_after_input = _embedded_device_config_value(frame, "awakeAfterInputSeconds", "awake_after_input_seconds")
+    if isinstance(awake_after_input, int) and not isinstance(awake_after_input, bool):
+        settings.append(_provisioning_setting("awake_input", max(0, awake_after_input)))
     battery_pin = _embedded_device_config_value(frame, "batteryPin", "battery_pin")
     if isinstance(battery_pin, int) and not isinstance(battery_pin, bool):
         settings.append(_provisioning_setting("battery_pin", battery_pin))

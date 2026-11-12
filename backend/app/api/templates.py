@@ -40,6 +40,7 @@ from app.utils.upload_limits import (
     reject_oversized_content_length,
 )
 from app.utils.scene_execution import normalize_scenes_execution
+from app.utils.scene_layouts import bad_layouts_message
 from app.utils.versions import current_frameos_version
 from app.api.auth import get_current_user_from_request
 
@@ -453,6 +454,22 @@ async def export_template(template_id: str, db: Session = Depends(get_db)):
     return respond_with_template(template)
 
 
+def with_main_scene_layout(scenes: list | None, is_layout: bool) -> list | None:
+    """The scenes with the one the template starts on (else the first) made a
+    layout or a normal scene (docs/scene-layouts.md). A new list, so the JSON
+    column sees the change."""
+    if not scenes:
+        return scenes
+    updated = copy.deepcopy(scenes)
+    main = next((scene for scene in updated if isinstance(scene, dict) and scene.get("default")), updated[0])
+    if isinstance(main, dict):
+        settings = {key: value for key, value in (main.get("settings") or {}).items() if key != "isLayout"}
+        if is_layout:
+            settings["isLayout"] = True
+        main["settings"] = settings
+    return updated
+
+
 @api_project.patch("/templates/{template_id}", response_model=TemplateResponse)
 async def update_template(template_id: str, data: UpdateTemplateRequest, db: Session = Depends(get_db)):
     template = project_get_or_404(db, Template, template_id, detail="Template not found")
@@ -461,6 +478,20 @@ async def update_template(template_id: str, data: UpdateTemplateRequest, db: Ses
         template.name = data.name
     if data.description is not None:
         template.description = data.description
+    scenes = template.scenes
+    if data.scenes is not None:
+        # The scene editor's save: the same normalisation as a create.
+        scenes = data.scenes
+        migrate_legacy_apps_in_scenes(scenes)
+        retire_apps_in_scenes(scenes)
+        normalize_scenes_execution(scenes)
+    if data.isLayout is not None:
+        scenes = with_main_scene_layout(scenes, data.isLayout)
+    if data.scenes is not None or data.isLayout is not None:
+        bad_layouts = bad_layouts_message(scenes) if data.scenes is not None or data.isLayout else None
+        if bad_layouts:
+            raise HTTPException(status_code=400, detail=bad_layouts)
+        template.scenes = scenes
     db.commit()
     db.refresh(template)
 

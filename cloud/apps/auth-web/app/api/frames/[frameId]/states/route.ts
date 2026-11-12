@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { planeKeepsSceneState } from "../../../../../src/lib/cloud-rendered";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import { frameForAccount, frameStatesRecord } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
@@ -11,7 +12,10 @@ export const runtime = "nodejs";
 // control drawer needs no cloud branch. The states are the device's own
 // report (hello / `state`, mirrored onto frames.last_state by the hub); a
 // connected frame is asked to refresh it with the `get_state` verb, deduped
-// on the queue, and `cache.refreshing` tells the drawer to sync again.
+// on the queue, and `cache.refreshing` tells the drawer to sync again. A
+// frame the cloud renders for is not asked: its states are the plane's,
+// written onto last_state when a render commits (server-render.ts), and the
+// device's answer would not be taken.
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string }> },
@@ -36,7 +40,8 @@ export async function GET(
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
-  return NextResponse.json(await frameStatesRecord(db, frame), {
+  const asked = { ...frame, connected: frame.connected && !planeKeepsSceneState(frame) };
+  return NextResponse.json(await frameStatesRecord(db, asked), {
     headers: { "cache-control": "no-store" },
   });
 }

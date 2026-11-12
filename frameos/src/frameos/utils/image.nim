@@ -140,8 +140,10 @@ proc decodeSvgWithFallback*(root: SvgNode, width: int, height: int): Option[Imag
   ## cannot parse it. pixie fills gradient paints through a coverage mask and
   ## a paint image, sized to the decode budget in row strips (paintStripRows),
   ## so the budget is refreshed here: the render tick's value predates the JS
-  ## runtimes and data this SVG was made from.
-  refreshDecodeBudget()
+  ## runtimes and data this SVG was made from. No decode, so kept interpreters
+  ## stay: a fill that does not fit lets them go itself (releaseRenderMemory),
+  ## and a 10.3" panel lost one to a touch cursor every other render, 1.4 s.
+  refreshDecodeBudget(forDecode = false)
   if root.isNil:
     return none(Image)
   try:
@@ -976,8 +978,47 @@ proc hasQueryParam(query, key: string): bool =
 # multi-MB PNG needs its compressed body plus a few rows — not a full-size
 # RGBA buffer). Proxies are for in-browser previews only. The unsplash
 # rewrite below predates this rule and stays as-is.
+type DecodeTargetProc* = proc(sourceWidth, sourceHeight: int): Image
+  ## Makes the image a download decodes into once the source's size is
+  ## known: its dimensions as shown (EXIF orientation applied), or 0 x 0 when
+  ## the start of the body did not say. nil when there is no room for it.
+
+const NoRoomForPicture* = "no room for the picture within the memory budget"
+  ## What a DecodeTargetProc's nil becomes. "memory budget" in it: the
+  ## streamed download hands that on instead of retrying buffered.
+
+const SourceProbeBytes* = 16 * 1024
+  ## How much of a body is read for its dimensions before a decode: the
+  ## stream replays this much (http_client's HttpBodyStreamReplayBytes).
+
+proc probeSourceTarget*(head: string, targetFor: DecodeTargetProc): Image =
+  ## The target for a body whose first bytes are `head`: sized by the
+  ## caller from the source's dimensions, when those bytes say them (a
+  ## JPEG's frame header can sit behind a large EXIF block). Raises when
+  ## the caller has no room for it. The device's sized downloads call it
+  ## (downloadImageWithDataSizedBy); out here for its tests.
+  var width, height = 0
+  try:
+    let dims = decodeImageDimensions(head)
+    width = dims.width
+    height = dims.height
+  except PixieError:
+    discard
+  result = targetFor(width, height)
+  if result.isNil:
+    raise newException(PixieError, NoRoomForPicture)
+
+proc embeddedSizedRemoteImageUrl*(url: string, width, height: int): string
+
 proc embeddedSizedRemoteImageUrl*(url: string, target: Image): string =
-  if target.isNil or target.width <= 0 or target.height <= 0:
+  if target.isNil:
+    return url
+  embeddedSizedRemoteImageUrl(url, target.width, target.height)
+
+proc embeddedSizedRemoteImageUrl*(url: string, width, height: int): string =
+  ## A remote image service that resizes on request (Unsplash's imgix) asked
+  ## for the size the frame will show: `width` x `height`.
+  if width <= 0 or height <= 0:
     return url
   var parsed: Uri
   try:
@@ -989,8 +1030,8 @@ proc embeddedSizedRemoteImageUrl*(url: string, target: Image): string =
 
   case parsed.hostname.toLowerAscii()
   of "images.unsplash.com":
-    let requestedWidth = min(target.width, EmbeddedMaxRemoteSourceWidth)
-    let requestedHeight = min(target.height, EmbeddedMaxRemoteSourceWidth)
+    let requestedWidth = min(width, EmbeddedMaxRemoteSourceWidth)
+    let requestedHeight = min(height, EmbeddedMaxRemoteSourceWidth)
     parsed.query = upsertQueryParam(parsed.query, "w", $requestedWidth)
     parsed.query = upsertQueryParam(parsed.query, "h", $requestedHeight)
     parsed.query = upsertQueryParam(parsed.query, "fit", "crop")
@@ -1132,8 +1173,9 @@ when defined(frameosEmbedded):
     ## The last downloadImageStreamingInto handed over because the network
     ## cut its body short (HttpBodyStream.interrupted in http_client.nim).
 
-  proc downloadImageStreamingInto(url: string, maxBytes: int, target: Image,
-      headers: seq[SimpleHttpHeader], fit: ScaledDecodeFit): bool =
+  proc downloadImageStreamingInto(url: string, maxBytes: int, target: var Image,
+      headers: seq[SimpleHttpHeader], fit: ScaledDecodeFit,
+      targetFor: DecodeTargetProc = nil): bool =
     ## Decodes a remote JPEG/PNG (BMP/PPM/WebP too) straight off the socket
     ## into `target` — no copy of the compressed body ever lives in PSRAM or
     ## on flash. Returns false when this fetch should go through the
@@ -1152,7 +1194,10 @@ when defined(frameosEmbedded):
     ## retries rewind the stream, which replays the retained start of the
     ## body when the refusal came from the header (the usual case) and
     ## reopens the request otherwise.
-    if target.isNil or target.width <= 0 or target.height <= 0:
+    ##
+    ## Without a target, `targetFor` makes one once the start of the body has
+    ## said how big the picture is (fetchImage's kept pictures).
+    if targetFor.isNil and (target.isNil or target.width <= 0 or target.height <= 0):
       return false
     lastStreamCut = false
     var stream: HttpBodyStream
@@ -1181,6 +1226,9 @@ when defined(frameosEmbedded):
       let header = stream.peekHttpBodyStream(64)
       format = embeddedImageFormat(header.cstring, header.len)
       totalLen = if stream.contentLength > 0: stream.contentLength.int else: 0
+      if target.isNil:
+        # Still unread, so the decode below starts from byte 0.
+        target = probeSourceTarget(stream.peekHttpBodyStream(SourceProbeBytes), targetFor)
       refreshDecodeBudgetInto()
       # A large body announces itself before the decode and reports as it
       # goes (utils/decode_progress.nim), and while it keeps consuming the
@@ -1251,10 +1299,11 @@ when defined(frameosEmbedded):
 
   proc downloadImageFromResolvedBuffer(url: string, maxBytes: int, target: Image = nil,
       headers: seq[SimpleHttpHeader] = @[], fit = fitCover,
-      boundWidth = 0, boundHeight = 0):
+      boundWidth = 0, boundHeight = 0, targetFor: DecodeTargetProc = nil):
       tuple[image: Image, data: string] =
+    var target = target
     if boundWidth <= 0 and boundHeight <= 0:
-      if downloadImageStreamingInto(url, maxBytes, target, headers, fit):
+      if downloadImageStreamingInto(url, maxBytes, target, headers, fit, targetFor):
         return (target, "")
       # The socket stays open for the whole decode (30 s for a gallery JPEG
       # on the E1004), so a Wi-Fi drop in that window cut the body and failed
@@ -1262,9 +1311,24 @@ when defined(frameosEmbedded):
       # was back (frame 70, 2026-10-17..21). Stream it once more instead; the
       # open waits for the station (frameos_nim_glue.c, http_wait_for_wifi)
       # within what is left of the render deadline.
-      if lastStreamCut and downloadImageStreamingInto(url, maxBytes, target, headers, fit):
+      if lastStreamCut and downloadImageStreamingInto(url, maxBytes, target, headers, fit, targetFor):
         return (target, "")
     var response = boundedRequestBuffer(url, maxBytes = maxBytes, headers = headers)
+    if target.isNil and not targetFor.isNil and response.code < 400:
+      # Sized by the source, as on the streamed path; a spilled body's start
+      # is on the card, and the requested size stands for it.
+      try:
+        var head = ""
+        let first =
+          if response.chunks.len > 0: (response.chunks[0].data, response.chunks[0].len)
+          else: (response.body, response.bodyLen)
+        if response.spillPath.len == 0 and not first[0].isNil and first[1] > 0:
+          head = newString(min(first[1], SourceProbeBytes))
+          copyMem(addr head[0], first[0], head.len)
+        target = probeSourceTarget(head, targetFor)
+      except CatchableError:
+        response.freeHttpBufferResponse()
+        raise
     # The budget must reflect the heap the decode is about to run on, not the
     # one some earlier render saw. This path never went through the
     # display-bounds helpers that refresh it, so a decoder's "over the memory
@@ -1316,6 +1380,14 @@ when defined(frameosEmbedded):
       tuple[image: Image, data: string] =
     let directUrl = embeddedSizedRemoteImageUrl(url, target)
     downloadImageFromResolvedBuffer(directUrl, maxBytes, target, headers, fit)
+
+  proc downloadImageFromBufferSizedBy(url: string, maxBytes: int,
+      targetFor: DecodeTargetProc, hintWidth, hintHeight: int,
+      headers: seq[SimpleHttpHeader], fit: ScaledDecodeFit):
+      tuple[image: Image, data: string] =
+    let directUrl = embeddedSizedRemoteImageUrl(url, hintWidth, hintHeight)
+    downloadImageFromResolvedBuffer(directUrl, maxBytes, nil, headers, fit,
+      targetFor = targetFor)
 
 when defined(frameosWasm):
   proc decodesIntoTarget(target: Image): bool =
@@ -1451,6 +1523,30 @@ proc downloadImageWithDataInto*(url: string, target: Image, maxBytes = MaxImageD
       return (decodeImageWithFallback(content), content)
     var decodeContent = content
     return (decodeImageWithDisplayBounds(decodeContent, maxEdge = 0, maxPixels = 0), content)
+
+proc downloadImageWithDataSizedBy*(url: string, targetFor: DecodeTargetProc,
+    hintWidth, hintHeight: int, maxBytes = MaxImageDownloadBytes,
+    headers: seq[SimpleHttpHeader] = @[], fit = fitCover): tuple[image: Image, data: string] =
+  ## downloadImageWithDataInto, with the target made by `targetFor` once the
+  ## start of the body says how big the source is: a picture an app keeps is
+  ## never decoded larger than the photo it came from, and the app decides
+  ## whether there is room for it. `hintWidth` x `hintHeight` is the size it
+  ## asked for, which a resizing image service is asked for in turn. Raises
+  ## NoRoomForPicture when `targetFor` has no room.
+  proc requested(): Image =
+    result = targetFor(0, 0)
+    if result.isNil:
+      raise newException(PixieError, NoRoomForPicture)
+  when defined(frameosEmbedded):
+    if url.startsWith("data:"):
+      return (decodeDataUrlInto(url, requested(), fit), "")
+    return downloadImageFromBufferSizedBy(url, maxBytes, targetFor, hintWidth, hintHeight,
+      headers, fit)
+  else:
+    # A host decodes at the source's own size whatever the target (see
+    # downloadImageWithDataInto); the preview running as a device decodes into
+    # the size asked for.
+    downloadImageWithDataInto(url, requested(), maxBytes, headers, fit)
 
 proc parseExifJson(output: string): Option[JsonNode] =
   try:

@@ -64,6 +64,14 @@ void fos_buzzer_reject_up(void);
  * sounds replaces it. */
 void fos_buzzer_tone(uint32_t freq_hz, uint32_t duration_ms);
 
+/* A load someone is waiting for: from 1.5 s after `begin`, so an ordinary
+ * partial update stays silent (the first after a long idle takes 1.4 s), a
+ * quiet higher chirp and a lower one close together, every 1.3 s,
+ * until `end` or 20 seconds. A press's click goes first. Safe from any task;
+ * a `begin` while it runs changes nothing. */
+void fos_buzzer_loading_begin(void);
+void fos_buzzer_loading_end(void);
+
 /* The voice chat's four outcomes (docs/voice-chat.md), pitched from the
  * press pitch like the clicks. Listening: four rising notes and a held top,
  * ~305 ms (the recording drops that long, so the microphone does not hear

@@ -40,6 +40,7 @@ import {
   MetricsIntervalField,
   PaletteField,
   RenderScaleField,
+  FrameSettingsOnScreenField,
   SaveAssetsField,
   TimezoneUpdaterFields,
 } from '../fields/sharedFields'
@@ -70,6 +71,9 @@ import {
 export function CloudBaseSettingsSection(): JSX.Element {
   const { surface, frame, frameTimezoneOptions, cloudEsp32TimeZoneSupported } = useFrameSettings()
   const esp32 = surface === 'cloudEsp32'
+  // No hardware: nothing to rotate, no panel an image must be fitted to, no
+  // device log to make verbose.
+  const virtual = surface === 'cloudVirtual'
   return (
     <>
       <SectionHeading id="frame-settings-info" action={<FrameActionsMenu />}>
@@ -82,49 +86,58 @@ export function CloudBaseSettingsSection(): JSX.Element {
         <Field
           name="interval"
           label="Refresh interval in seconds"
-          tooltip="How often the frame re-renders its active scene. E-paper panels want large values (300 or more); the firmware enforces a 5 second minimum."
+          tooltip={
+            virtual
+              ? 'How often the frame is drawn again while someone is looking at it, unless its scene has an interval of its own. A frame the cloud draws refreshes at most every five minutes (300).'
+              : 'How often the frame re-renders its active scene. E-paper panels want large values (300 or more); the firmware enforces a 5 second minimum.'
+          }
         >
           <TextInput name="interval" placeholder="300" />
         </Field>
-        <Field
-          name="rotate"
-          label="Rotation"
-          tooltip="How the scene is rotated onto the panel. The firmware sizes its canvas once at boot, so saving a new rotation reboots the frame."
-        >
-          {({ value, onChange }) => (
-            <Select
-              value={value || '0'}
-              onChange={(v) => onChange(parseInt(v))}
+        {virtual ? null : (
+          <>
+            <Field
               name="rotate"
-              options={[
-                { value: 0, label: '0 degrees' },
-                { value: 90, label: '90 degrees' },
-                { value: 180, label: '180 degrees' },
-                { value: 270, label: '270 degrees' },
-              ]}
-            />
-          )}
-        </Field>
-        <Field
-          name="scaling_mode"
-          label="Scaling mode"
-          tooltip="The fallback fit for images whose scene node does not choose its own placement. Applied on the next render — no reboot."
-        >
-          {({ value, onChange }) => (
-            <Select
-              value={value || 'cover'}
-              onChange={onChange}
+              label="Rotation"
+              tooltip="How the scene is rotated onto the panel. The firmware sizes its canvas once at boot, so saving a new rotation reboots the frame."
+            >
+              {({ value, onChange }) => (
+                <Select
+                  value={value || '0'}
+                  onChange={(v) => onChange(parseInt(v))}
+                  name="rotate"
+                  options={[
+                    { value: 0, label: '0 degrees' },
+                    { value: 90, label: '90 degrees' },
+                    { value: 180, label: '180 degrees' },
+                    { value: 270, label: '270 degrees' },
+                  ]}
+                />
+              )}
+            </Field>
+            <Field
               name="scaling_mode"
-              options={[
-                { value: 'cover', label: 'Cover (fill the panel, crop the overflow)' },
-                { value: 'contain', label: 'Contain (fit inside, letterbox)' },
-                { value: 'stretch', label: 'Stretch' },
-                { value: 'center', label: 'Center (no scaling)' },
-              ]}
-            />
-          )}
-        </Field>
+              label="Scaling mode"
+              tooltip="The fallback fit for images whose scene node does not choose its own placement. Applied on the next render — no reboot."
+            >
+              {({ value, onChange }) => (
+                <Select
+                  value={value || 'cover'}
+                  onChange={onChange}
+                  name="scaling_mode"
+                  options={[
+                    { value: 'cover', label: 'Cover (fill the panel, crop the overflow)' },
+                    { value: 'contain', label: 'Contain (fit inside, letterbox)' },
+                    { value: 'stretch', label: 'Stretch' },
+                    { value: 'center', label: 'Center (no scaling)' },
+                  ]}
+                />
+              )}
+            </Field>
+          </>
+        )}
         <RenderScaleField />
+        <FrameSettingsOnScreenField />
         {esp32 ? (
           <fieldset disabled={!cloudEsp32TimeZoneSupported} className="min-w-0">
             <Field
@@ -150,17 +163,21 @@ export function CloudBaseSettingsSection(): JSX.Element {
             >
               <Select name="timezone" options={frameTimezoneOptions} />
             </Field>
-            <Field
-              name="debug"
-              label="Debug logging"
-              tooltip="Verbose per-render logging on the device. Useful while a scene misbehaves; noisy otherwise."
-            >
-              <Switch name="debug" fullWidth />
-            </Field>
+            {virtual ? null : (
+              <Field
+                name="debug"
+                label="Debug logging"
+                tooltip="Verbose per-render logging on the device. Useful while a scene misbehaves; noisy otherwise."
+              >
+                <Switch name="debug" fullWidth />
+              </Field>
+            )}
           </>
         )}
         <p className="frameos-muted text-sm">
-          {esp32
+          {virtual
+            ? 'This frame has no hardware: FrameOS Cloud draws its scenes and shows the picture at the link under Virtual frame below. Its size and that link are set there.'
+            : esp32
             ? 'This ESP32 frame accepts its name, refresh interval, rotation, scaling mode, scale, time zone and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or its FrameOS-XXXX setup hotspot.'
             : 'These are the settings a cloud-managed frame accepts; the display driver, palette and GPIO buttons are under Panel below. Everything else this frame runs on — network and WiFi, mount points, driver wiring and log settings — is owned by the device and configured on the frame itself, through its own admin panel or the card it was flashed from.'}
         </p>
@@ -351,6 +368,8 @@ export function CloudEsp32Sections(): JSX.Element | null {
     cloudPowerSettings,
     setCloudPowerSettings,
     cloudBatteryEnablePinDisabledReason,
+    cloudCpuModeDisabledReason,
+    cloudRenderOnServer,
     cloudEsp32ExtendedSettingsSupported,
   } = useFrameSettings()
   const renders = useFrameSettingsSectionRenders('cloud-esp32-power')
@@ -367,6 +386,9 @@ export function CloudEsp32Sections(): JSX.Element | null {
           value={cloudPowerSettings}
           onChange={setCloudPowerSettings}
           batteryEnablePinDisabledReason={cloudBatteryEnablePinDisabledReason}
+          cpuModeDisabledReason={cloudCpuModeDisabledReason}
+          reportedCpuMhz={frame.hardware?.cpuMhz ?? undefined}
+          renderOnServer={cloudRenderOnServer}
           footnote="Power settings need a FrameOS firmware from 2026.8.21 on — older firmware refuses the whole settings push. Update the frame first if saving fails."
         />
       </SectionBody>

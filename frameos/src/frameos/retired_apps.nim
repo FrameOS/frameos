@@ -30,7 +30,7 @@ when not defined(frameosEmbedded) and not defined(frameosWasm):
       result = nil
 
   proc isRetiredRenderApp*(keyword: string): bool =
-    ## A retired render app (render/chart), whose replacement returns the
+    ## A retired render app (render/chart, render/calendar), whose replacement returns the
     ## image the old app drew. The control planes rewrite such a node in the
     ## render flow into render/image fed by the replacement; a scene still on
     ## disk is not rewritten, so the interpreter draws the image itself.

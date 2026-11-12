@@ -1521,6 +1521,7 @@ async def test_api_frame_update_keeps_the_boards_last_boot_and_drops_layout(asyn
         'platform': 'esp32-s3',
         'flashSize': '32MB',
         'lastBoot': {'at': '2026-10-12T22:22:31+00:00', 'ip': '10.8.0.9', 'frameosVersion': '2026.10.11'},
+        'storage': {'stateTotalBytes': 957314, 'stateUsedBytes': 418000, 'scenesBytes': 318000, 'sceneCount': 19},
     }
     db.add(frame)
     db.commit()
@@ -1530,12 +1531,14 @@ async def test_api_frame_update_keeps_the_boards_last_boot_and_drops_layout(asyn
         'flashSize': '16MB',
         'lastBoot': {'at': '2026-10-12T22:17:48+00:00', 'ip': '10.8.0.3', 'frameosVersion': '2026.10.10'},
         'layout': {'ram': {'panel': 'EPD_13in3e'}},
+        'storage': {'stateTotalBytes': 957314, 'stateUsedBytes': 1, 'scenesBytes': 1, 'sceneCount': 1},
     }})
     assert resp.status_code == 200
     db.expire_all()
     stored = db.get(Frame, frame.id).embedded
     assert stored['flashSize'] == '16MB'
     assert stored['lastBoot'] == {'at': '2026-10-12T22:22:31+00:00', 'ip': '10.8.0.9', 'frameosVersion': '2026.10.11'}
+    assert stored['storage']['stateUsedBytes'] == 418000
     assert 'layout' not in stored
 
 
@@ -3955,7 +3958,6 @@ async def test_api_frame_server_host_is_policy_checked_on_update_create_and_impo
         ('169.254.169.254', 'link-local'),
         ('224.0.0.1', 'multicast'),
         ('0.0.0.0', 'unspecified'),
-        ('backend.local/api', 'not a valid host'),
         ('backend.local\r\nHost: evil', 'not a valid host'),
         ('user:pw@backend.local', 'not a valid host'),
     ):
@@ -3975,11 +3977,29 @@ async def test_api_frame_server_host_is_policy_checked_on_update_create_and_impo
         })
         assert response.status_code == 400, (value, response.text)
 
-    # The update column is the bare host frame.json ships verbatim: a port or
-    # scheme typed into it would reach the device as "host:8443:8989".
-    for value in ('backend.local:8443', 'https://backend.local'):
-        response = await async_client.post(f'/api/frames/{frame.id}', json={'server_host': value})
-        assert response.status_code == 400, (value, response.text)
+    # The column is the bare host frame.json ships verbatim: a port or scheme
+    # typed into the field moves to its own column (it used to reach the
+    # device as "host:8443:8989", then to be refused) and wins over the
+    # form's sibling fields, which only fill in what the text left out.
+    response = await async_client.post(
+        f'/api/frames/{frame.id}', json={'server_host': 'https://backend.local:8443', 'server_scheme': 'http'}
+    )
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    stored = db.get(Frame, frame.id)
+    assert (stored.server_host, stored.server_port, stored.server_scheme) == ('backend.local', 8443, 'https')
+    response = await async_client.post(f'/api/frames/{frame.id}', json={'server_host': 'backend.local:9000'})
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    stored = db.get(Frame, frame.id)
+    assert (stored.server_host, stored.server_port, stored.server_scheme) == ('backend.local', 9000, 'https')
+    # A path is dropped, as the SPA's prefill drops the browser's: a frame
+    # dials a host, never a path.
+    response = await async_client.post(f'/api/frames/{frame.id}', json={'server_host': 'http://backend.local/api'})
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    stored = db.get(Frame, frame.id)
+    assert (stored.server_host, stored.server_port, stored.server_scheme) == ('backend.local', 9000, 'http')
 
     for value in ('backend.local', '10.0.0.5', 'localhost', ''):
         response = await async_client.post(f'/api/frames/{frame.id}', json={'server_host': value})

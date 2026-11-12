@@ -60,6 +60,21 @@ const eventMaps = z
     "Per-install button maps, { [runtime scene id]: [{event, match, as}] }: an event of that name whose payload has every `match` value reaches the scene with `as` written over it, e.g. [{\"event\": \"button\", \"match\": {\"label\": \"REFRESH\", \"action\": \"longPress\"}, \"as\": {\"label\": \"B\", \"role\": \"next\", \"action\": \"press\"}}]. Kept across scene updates. Omit to keep the installed scene's maps; null clears them.",
   );
 
+// The layout each runtime scene of an install wears (docs/scene-layouts.md).
+const sceneLayouts = z
+  .record(
+    z.string().min(1).max(256),
+    z.object({
+      sceneId: z.string().min(1).max(256),
+      state: z.record(z.string().min(1).max(64), z.unknown()).optional(),
+    }),
+  )
+  .nullable()
+  .optional()
+  .describe(
+    "Per-install layouts, { [runtime scene id]: {sceneId, state?} }: the layout scene (settings.isLayout) that wraps this scene on this frame, with its settings. Kept across scene updates. Omit to keep the installed scene's; null clears them.",
+  );
+
 function compactFrame(frame: FrameSummary) {
   return {
     connected: frame.connected ?? false,
@@ -110,6 +125,9 @@ export async function installSceneOnFrame(
   if ("error" in resolved) {
     return failure(resolved.error);
   }
+  // One push that also shows it (`activate`): a separate setCurrentScene
+  // behind the add re-pushed the set the add had just queued, and the two
+  // raced on the frame.
   const added = await ctx.client.json<Record<string, unknown>>(
     "POST",
     `/api/frames/${frame_id}/scenes/add`,
@@ -118,22 +136,15 @@ export async function installSceneOnFrame(
         scene_id: resolved.sceneId,
         ...(scene_version !== undefined ? { scene_version } : {}),
         ...(settings_groups !== undefined ? { settings_groups } : {}),
+        ...(activate ? { activate: true } : {}),
       },
     },
   );
-  let activated: Record<string, unknown> | undefined;
-  if (activate) {
-    activated = await ctx.client.json<Record<string, unknown>>(
-      "POST",
-      `/api/frames/${frame_id}/event/setCurrentScene`,
-      { body: { sceneId: resolved.sceneId } },
-    );
-  }
   return text({
     ...added,
     scene: resolved.summary ?? { id: resolved.sceneId },
     ...(resolved.created ? { created_private_scene: true } : {}),
-    ...(activated ? { activate: activated } : {}),
+    ...(activate ? { activated: true } : {}),
   });
 }
 
@@ -268,7 +279,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { idempotentHint: true },
       description:
-        "Push device settings to a frame. Requires confirm=true (it changes the device). Allowed keys: debug, interval (seconds 1–86400), name, rotate (0/90/180/270), scaling_mode (contain/cover/stretch/center), render_scale (what a UI from a .tsx/.jsx app is laid out for: a panel this many times smaller, drawn sharp at full size; 0 = automatic from the panel, else up to 4, fractions allowed), timezone (IANA), flip, error_behavior, control_code, metrics_interval, max_http_response_bytes, save_assets, timezone_updater, palette, device_config, gpio_buttons, event_map (what the frame's buttons do whatever scene shows: [{event, match, as, emit}] rules, docs/events.md \"Event map\"; a long press of LEFT is {event: 'button', match: {label: 'LEFT', action: 'longPress'}, emit: 'setCurrentScene', as: {direction: 'prev'}}), and on ESP32 the power keys deep_sleep, deep_sleep_on_battery, wake_check_seconds, battery_pin, battery_divider, battery_enable_pin, plus buzzer_pin (the GPIO of the buzzer that beeps while a button is held, -1 = off) and buzzer_tone_hz (its pitch, 100–10000). Unknown keys or values are refused as a whole (setting_not_allowed); old firmware is refused with settings_need_newer_firmware. Returns a command_id.",
+        "Push device settings to a frame. Requires confirm=true (it changes the device). Allowed keys: debug, interval (seconds 1–86400), name, rotate (0/90/180/270), scaling_mode (contain/cover/stretch/center), render_scale (what a UI from a .tsx/.jsx app is laid out for: a panel this many times smaller, drawn sharp at full size; 0 = automatic from the panel, else up to 4, fractions allowed), frame_settings_on_screen (false takes the frame page, Wi-Fi/rotation/scale/restart, out of the settings on the frame's own screen; the device's unlock wins), timezone (IANA), flip, error_behavior, control_code, metrics_interval, max_http_response_bytes, save_assets, timezone_updater, palette, device_config, gpio_buttons, event_map (what the frame's buttons do whatever scene shows: [{event, match, as, emit}] rules, docs/events.md \"Event map\"; a long press of LEFT is {event: 'button', match: {label: 'LEFT', action: 'longPress'}, emit: 'setCurrentScene', as: {direction: 'prev'}}), and on ESP32 the power keys deep_sleep, deep_sleep_on_battery, wake_check_seconds, awake_after_input_seconds, battery_pin, battery_divider, battery_enable_pin, plus buzzer_pin (the GPIO of the buzzer that beeps while a button is held, -1 = off), buzzer_tone_hz (its pitch, 100–10000), cpu_mode (auto/battery/performance: the chip's clock, applied at the next boot) and render_mode (local/remote: \"remote\" has the cloud run the frame's scenes and send it the finished picture; it counts as one of the plan's cloud-rendered frames, refused with cloud_rendered_frame_quota_exceeded past the plan, firmware 2026.11.7+). Unknown keys or values are refused as a whole (setting_not_allowed); old firmware is refused with settings_need_newer_firmware. Returns a command_id.",
       inputSchema: {
         confirm: z
           .literal(true)
@@ -328,6 +339,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
                 ),
               settings_groups: settingsGroups,
               event_maps: eventMaps,
+              layouts: sceneLayouts,
             }),
           )
           .max(20),

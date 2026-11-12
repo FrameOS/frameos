@@ -9,6 +9,7 @@ import {
   assertSharedSessionConfigured,
   getCloudBaseUrl,
 } from "./src/lib/env";
+import { storeEmbedAncestors } from "./src/lib/store-embed";
 
 function assertRuntimeConfig(phase: string) {
   if (phase !== PHASE_DEVELOPMENT_SERVER && phase !== PHASE_PRODUCTION_SERVER) {
@@ -78,6 +79,13 @@ function createNextConfig(phase: string): NextConfig {
       ? " https://challenges.cloudflare.com"
       : " https://static.cloudflareinsights.com https://challenges.cloudflare.com";
 
+  // Who may frame the store's embed mode (src/lib/store-embed.ts):
+  // frameos.net's front page, and on the dev server any localhost port, so
+  // the docs site's own dev server can show the cloud's.
+  const embedAncestors = [
+    ...storeEmbedAncestors,
+    ...(phase === PHASE_DEVELOPMENT_SERVER ? ["http://localhost:*", "http://127.0.0.1:*"] : []),
+  ].join(" ");
   const contentSecurityPolicy = (frameAncestors: string) =>
     [
       "default-src 'self'",
@@ -187,6 +195,45 @@ function createNextConfig(phase: string): NextConfig {
             },
           ],
           source: "/frameos-editor/:path*",
+        },
+        {
+          // The store's embed mode (src/lib/store-embed.ts): a public
+          // scene's workspace on frameos.net's front page. Only a scene page
+          // asked for with ?embed=1 may be framed, and only by those pages;
+          // the page refuses the mode for anything but a public, active
+          // scene. X-Frame-Options cannot name another origin; browsers
+          // ignore it when the CSP has frame-ancestors, so the catch-all's
+          // DENY becomes SAMEORIGIN only to stop saying what is not so.
+          has: [{ key: "embed", type: "query", value: "1" }],
+          headers: [
+            {
+              key: "Content-Security-Policy",
+              value: contentSecurityPolicy(embedAncestors),
+            },
+            {
+              key: "X-Frame-Options",
+              value: "SAMEORIGIN",
+            },
+          ],
+          source: "/s/:slug",
+        },
+        {
+          // A virtual frame's view link (docs/cloud-frames.md "Virtual
+          // frames"): the address is the credential, so it must never ride a
+          // Referer anywhere, and nothing should index it. A rule here
+          // because a headers() rule overrides what the handler set, and the
+          // catch-all above says strict-origin-when-cross-origin.
+          headers: [
+            {
+              key: "Referrer-Policy",
+              value: "no-referrer",
+            },
+            {
+              key: "X-Robots-Tag",
+              value: "noindex, nofollow",
+            },
+          ],
+          source: "/v/:path*",
         },
         {
           // The editor html references hashed assets; keeping the html itself

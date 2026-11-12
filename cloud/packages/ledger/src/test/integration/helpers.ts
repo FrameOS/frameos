@@ -16,6 +16,7 @@ export async function resetLedger() {
   // have to go explicitly — and a test that never made an account must not
   // inherit the last one's periods either way.
   await db.execute(sql`TRUNCATE TABLE subscription_periods, subscriptions`);
+  await db.execute(sql`TRUNCATE TABLE provider_payments`);
   await db.execute(
     sql`DELETE FROM ledger_accounts WHERE owner_account_id IS NOT NULL`,
   );

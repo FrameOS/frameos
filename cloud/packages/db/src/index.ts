@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
@@ -18,6 +18,11 @@ export * from "./schema";
 export const passwordProviderIssuer = "frameos-cloud";
 export const passwordProviderKey = "password";
 export const googleProviderKey = "google";
+export const appleProviderKey = "apple";
+// The sign-in providers that vouch for an email address: an account that
+// joined through one of them has no password until a reset adds one.
+export const socialProviderKeys = [googleProviderKey, appleProviderKey] as const;
+export type SocialProviderKey = (typeof socialProviderKeys)[number];
 
 export function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
@@ -271,25 +276,44 @@ export async function createPasswordAccount(
   });
 }
 
-// Finds the account behind a Google identity whose Google-attested email
-// matches, for attaching a password to a Google-first account at signup.
-// Only Google-verified emails count: an unverified snapshot proves nothing.
+// Finds the account behind a Google or Apple identity whose
+// provider-attested email matches: signup refuses to plant a password on it,
+// the reset flow adds its first one, and a sign-in through the other provider
+// is pointed at it instead of making a second account. Only verified emails
+// count: an unverified snapshot proves nothing. The snapshot is compared
+// case-insensitively, since providers keep the case people typed.
+export async function findVerifiedSocialAccountByEmail(
+  db: ReturnType<typeof createDb>,
+  email: string,
+  providers: readonly SocialProviderKey[] = socialProviderKeys,
+) {
+  const [row] = await db
+    .select({
+      accountId: accountIdentities.accountId,
+      providerKey: accountIdentities.providerKey,
+    })
+    .from(accountIdentities)
+    .where(
+      and(
+        inArray(accountIdentities.providerKey, [...providers]),
+        eq(accountIdentities.emailVerified, true),
+        sql`lower(${accountIdentities.emailSnapshot}) = ${normalizeEmail(email)}`,
+      ),
+    )
+    .limit(1);
+  return row
+    ? {
+        accountId: row.accountId,
+        providerKey: row.providerKey as SocialProviderKey,
+      }
+    : undefined;
+}
+
 export async function findVerifiedGoogleAccountByEmail(
   db: ReturnType<typeof createDb>,
   email: string,
 ) {
-  const [row] = await db
-    .select({ accountId: accountIdentities.accountId })
-    .from(accountIdentities)
-    .where(
-      and(
-        eq(accountIdentities.providerKey, googleProviderKey),
-        eq(accountIdentities.emailSnapshot, normalizeEmail(email)),
-        eq(accountIdentities.emailVerified, true),
-      ),
-    )
-    .limit(1);
-  return row;
+  return findVerifiedSocialAccountByEmail(db, email, [googleProviderKey]);
 }
 
 // Called when a password reset completes: the emailed link was followed, so
@@ -319,23 +343,23 @@ export async function ensurePasswordIdentityForAccount(
     return;
   }
 
-  const [googleIdentity] = await db
+  const [socialIdentity] = await db
     .select({ emailSnapshot: accountIdentities.emailSnapshot })
     .from(accountIdentities)
     .where(
       and(
         eq(accountIdentities.accountId, accountId),
-        eq(accountIdentities.providerKey, googleProviderKey),
+        inArray(accountIdentities.providerKey, [...socialProviderKeys]),
         eq(accountIdentities.emailVerified, true),
       ),
     )
     .limit(1);
 
-  if (!googleIdentity?.emailSnapshot) {
+  if (!socialIdentity?.emailSnapshot) {
     return;
   }
 
-  const email = normalizeEmail(googleIdentity.emailSnapshot);
+  const email = normalizeEmail(socialIdentity.emailSnapshot);
   await db.insert(accountIdentities).values({
     accountId,
     emailSnapshot: email,
@@ -365,6 +389,65 @@ export async function linkIdentityToAccount(
     providerKey: identity.providerKey,
     providerSubject: identity.providerSubject,
   });
+}
+
+// Apple's refresh token for an identity, already sealed by the caller
+// (migration 0077): the newest one replaces the last.
+export async function setIdentityProviderToken(
+  db: ReturnType<typeof createDb>,
+  providerIssuer: string,
+  providerSubject: string,
+  providerTokenEncrypted: string,
+) {
+  await db
+    .update(accountIdentities)
+    .set({ providerTokenEncrypted, updatedAt: new Date() })
+    .where(
+      and(
+        eq(accountIdentities.providerIssuer, providerIssuer),
+        eq(accountIdentities.providerSubject, providerSubject),
+      ),
+    );
+}
+
+// Every sealed provider token an account holds, for revoking them before the
+// account is deleted.
+export async function accountProviderTokens(
+  db: ReturnType<typeof createDb>,
+  accountId: string,
+) {
+  return db
+    .select({
+      providerKey: accountIdentities.providerKey,
+      providerTokenEncrypted: accountIdentities.providerTokenEncrypted,
+    })
+    .from(accountIdentities)
+    .where(
+      and(
+        eq(accountIdentities.accountId, accountId),
+        isNotNull(accountIdentities.providerTokenEncrypted),
+      ),
+    );
+}
+
+// The social providers an account signs in with (Google, Apple): what
+// /login/reauth offers an account that has nothing local to check.
+export async function accountSocialProviders(
+  db: ReturnType<typeof createDb>,
+  accountId: string,
+): Promise<SocialProviderKey[]> {
+  const rows = await db
+    .select({ providerKey: accountIdentities.providerKey })
+    .from(accountIdentities)
+    .where(
+      and(
+        eq(accountIdentities.accountId, accountId),
+        inArray(accountIdentities.providerKey, [...socialProviderKeys]),
+      ),
+    );
+  return socialProviderKeys.filter((key) =>
+    rows.some((row) => row.providerKey === key),
+  );
 }
 
 export async function setAccountPassword(

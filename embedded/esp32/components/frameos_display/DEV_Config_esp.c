@@ -211,6 +211,7 @@ void DEV_SPI_Write_nByte(uint8_t *pData, uint32_t Len)
         spi_transaction_t t = {
             .length = chunk * 8,
             .tx_buffer = pData,
+            .override_freq_hz = (uint32_t)s_spi_hz, /* after a DEV_SPI_Read16 */
         };
         spi_device_polling_transmit(s_spi, &t);
         pData += chunk;
@@ -224,6 +225,18 @@ UWORD DEV_SPI_Transfer16(UWORD Value)
         .flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA,
         .length = 16,
         .tx_data = {(uint8_t)(Value >> 8), (uint8_t)(Value & 0xFF)},
+        .override_freq_hz = (uint32_t)s_spi_hz, /* after a DEV_SPI_Read16 */
+    };
+    if (spi_device_polling_transmit(s_spi, &t) != ESP_OK) return 0;
+    return (UWORD)((t.rx_data[0] << 8) | t.rx_data[1]);
+}
+
+UWORD DEV_SPI_Read16(int hz)
+{
+    spi_transaction_t t = {
+        .flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA,
+        .length = 16,
+        .override_freq_hz = (uint32_t)hz,
     };
     if (spi_device_polling_transmit(s_spi, &t) != ESP_OK) return 0;
     return (UWORD)((t.rx_data[0] << 8) | t.rx_data[1]);

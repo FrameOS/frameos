@@ -9,7 +9,7 @@ import {
   paidServicesForScenes,
   previewSettingsGroups,
   requiredSettingsForScenes,
-} from "./preview-settings";
+} from "../../../../../frontend/src/sceneWorkspace/lib/preview-settings";
 
 const repoRoot = join(__dirname, "..", "..", "..", "..", "..");
 

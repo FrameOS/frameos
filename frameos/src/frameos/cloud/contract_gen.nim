@@ -28,6 +28,11 @@ const CloudContractSettings* = @[
   profiles: @[
     ProfileSpec(profile: "linux", since: "2026.10.22"),
     ProfileSpec(profile: "esp32", since: "2026.10.22")]),
+  SettingSpec(key: "frame_settings_on_screen", rule:
+    Rule(kind: rkBool),
+  profiles: @[
+    ProfileSpec(profile: "linux", since: "2026.11.5"),
+    ProfileSpec(profile: "esp32", since: "2026.11.5")]),
   SettingSpec(key: "timezone", rule:
     Rule(kind: rkString, minLen: 1, maxLen: 64, format: sfIanaZone),
   profiles: @[
@@ -252,6 +257,10 @@ const CloudContractSettings* = @[
     Rule(kind: rkBool),
   profiles: @[
     ProfileSpec(profile: "esp32")]),
+  SettingSpec(key: "awake_after_input_seconds", rule:
+    Rule(kind: rkInt, hasMin: true, min: 0.0, hasMax: true, max: 3600.0),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.11.6")]),
   SettingSpec(key: "wake_check_seconds", rule:
     Rule(kind: rkInt, hasMin: true, min: 0.0, hasMax: true, max: 86400.0),
   profiles: @[
@@ -280,6 +289,18 @@ const CloudContractSettings* = @[
     Rule(kind: rkBool),
   profiles: @[
     ProfileSpec(profile: "esp32", since: "2026.10.20")]),
+  SettingSpec(key: "touch_beep", rule:
+    Rule(kind: rkBool),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.11.6")]),
+  SettingSpec(key: "cpu_mode", rule:
+    Rule(kind: rkString, strEnum: @["auto", "battery", "performance"]),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.11.7", restart: true)]),
+  SettingSpec(key: "render_mode", rule:
+    Rule(kind: rkString, strEnum: @["local", "remote"]),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.11.7")]),
   SettingSpec(key: "mic_clk_pin", rule:
     Rule(kind: rkInt, hasMin: true, min: -1.0, hasMax: true, max: 48.0),
   profiles: @[

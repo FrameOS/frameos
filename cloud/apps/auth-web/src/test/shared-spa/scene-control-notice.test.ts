@@ -11,6 +11,18 @@ import { sceneControlNoticeContent } from "../../../../../../frontend/src/scenes
 const inactive = { sceneIsActive: false };
 
 describe("sceneControlNoticeContent", () => {
+  it("calls a layout a layout", () => {
+    expect(
+      sceneControlNoticeContent({
+        mode: "backend",
+        sceneIsUnsaved: true,
+        sceneIsUndeployed: true,
+        sceneIsActive: false,
+        noun: "layout",
+      })?.statusText,
+    ).toBe("This layout has unsaved changes that are not on the frame yet.");
+  });
+
   it("renders nothing when the scene is in sync", () => {
     for (const mode of ["backend", "cloud", "frameAdmin"] as const) {
       expect(

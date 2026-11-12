@@ -22,7 +22,16 @@ it never enters a VM), then build the image:
 
     sudo bin/gha-image-build.sh
 
-Rebuild the image whenever you want a newer actions-runner / toolchain.
+The image is kept current by `gha-image-refresh.timer` (Sunday 03:00 UTC,
+installed and enabled by `sync-to-host.sh`): `bin/gha-image-refresh.sh`
+rebuilds when actions/runner has a newer release than the one in the image
+(GitHub refuses jobs to a runner a month behind — the job logs warn first)
+or when the image is 30 days old, under a staging alias, boots a VM from it
+to check the runner version and docker, and only then re-points
+`gha-runner-noble`. New VM launches use it at once; nothing needs a
+restart. `journalctl -u gha-image-refresh` says what it did;
+`sudo bin/gha-image-refresh.sh --force` rebuilds now, and a bare
+`bin/gha-image-build.sh` still works but swaps the live alias untested.
 `/srv/gha-runners/cache` is mounted into every VM at `/mnt/cache` — point
 BR2_DL_DIR / ccache / buildx `type=local` caches there from the workflows.
 It is **read-only unless a slot's `GHA_CACHE_WRITABLE` says otherwise**
@@ -36,10 +45,12 @@ workflow that wants a writable cache gets its own subdirectory on the slots
 it runs on, never a slot-wide `all` on a label pull requests reach.
 Concurrent jobs share it, so a cache whose files must agree with each other
 (the Nim tests' nimcache, whose `.o` is trusted when its `.c` matches) goes
-through immutable snapshots, not one directory everyone copies into:
-`frameos/tools/ci_nimcache.sh`, under `nimcache/frameos-tests-snapshots`.
-The old `nimcache/frameos-tests/shard-{1..8}` dirs (~31 G) serve only
-branches older than that change (5–8 nothing at all) and can be deleted.
+through one archive per shard, not one directory everyone copies into:
+`frameos/tools/ci_nimcache.sh`, under `nimcache/frameos-tests-archives`. Many
+small files are what is slow over virtiofs, about 2 ms each: keep a large
+cache here as one file. The older `nimcache/frameos-tests-snapshots` and
+`nimcache/frameos-tests/shard-{1..8}` dirs serve only branches from before
+these changes and can be deleted.
 Runners carry labels `self-hosted,monster,epyc-32|epyc-8|epyc-4,linux,x64`.
 
 ## Pool (since 2026-09-11)

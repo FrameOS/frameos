@@ -1,39 +1,23 @@
-import clsx from 'clsx'
 import {
   allowedParentOrigins,
   replyTargetOrigin,
   sameOriginPreviewProxyUrl,
   setLockedParentOrigin,
 } from './embedOrigins'
-import copy from 'copy-to-clipboard'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
-import { useEffect, useRef, useState } from 'react'
-import {
-  ArrowsPointingInIcon,
-  BoltIcon,
-  ClipboardDocumentIcon,
-  Cog6ToothIcon,
-  PuzzlePieceIcon,
-  ServerStackIcon,
-  VariableIcon,
-  XMarkIcon,
-} from '@heroicons/react/24/outline'
-import { PencilSquareIcon, PlayIcon } from '@heroicons/react/24/solid'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { BoltIcon, Cog6ToothIcon, PuzzlePieceIcon, ServerStackIcon, VariableIcon } from '@heroicons/react/24/outline'
+import { PlayIcon } from '@heroicons/react/24/solid'
 
 import { FrameosTheme } from '../utils/frameosTheme'
-import { ZoomOutArea } from '../icons/ZoomOutArea'
 
 import { frameEditorsLogic } from '../scenes/frame/frameEditorsLogic'
-import { Diagram } from '../scenes/frame/panels/Diagram/Diagram'
 import { diagramLogic } from '../scenes/frame/panels/Diagram/diagramLogic'
-import { EditAppModal } from '../scenes/frame/panels/EditApp/EditAppModal'
 import { Apps } from '../scenes/frame/panels/Apps/Apps'
 import { Events } from '../scenes/frame/panels/Events/Events'
 import { SceneJSON } from '../scenes/frame/panels/SceneJSON/SceneJSON'
 import { SceneState } from '../scenes/frame/panels/SceneState/SceneState'
-import { SceneSettings } from '../scenes/frame/panels/Scenes/SceneSettings'
-import { RenameSceneModal } from '../scenes/frame/panels/Scenes/RenameSceneModal'
-import { scenesLogic } from '../scenes/frame/panels/Scenes/scenesLogic'
+import { withIsLayout } from '../utils/sceneLayouts'
 import { livePreviewLogic } from '../scenes/frame/panels/Scenes/livePreviewLogic'
 import { workspaceLogic } from '../scenes/workspace/workspaceLogic'
 import { FrameScene, FrameType } from '../types'
@@ -45,6 +29,12 @@ import { ensurePortalRoots } from './portalRoots'
 // dependency graph connects to.
 import { frameLogic } from '../scenes/frame/frameLogic'
 import { sanitizeIncomingScenes } from './sanitizeIncomingScenes'
+import { SceneEditorBody, SceneEditorInfoPanel, type SceneEditorPanel } from './SceneEditorBody'
+import { sceneAppWithFile, type SceneTemplateMetadata } from './sceneFiles'
+import { sceneFileTreeLogic } from './sceneFileTreeLogic'
+import { type TemplateCategoryOption, type TemplateField } from './TemplateFile'
+
+export type { SceneTemplateMetadata, TemplateCategoryOption, TemplateField }
 
 const EMBED_FRAME_ID = 1
 
@@ -60,6 +50,9 @@ export interface EmbeddedSceneEditorApi {
   /** Renames a scene through the editor's own form: the diagram keeps its
    * layout and the change streams out through onScenesChanged. */
   renameScene: (sceneId: string, name: string) => void
+  /** Makes a scene a layout or a normal one through the editor's own form, so
+   * the change streams out through onScenesChanged like a rename. */
+  setSceneIsLayout: (sceneId: string, isLayout: boolean) => void
   /** Shifts the shown scene's diagram by (dx, dy) screen pixels — what a host
    * calls with half its column's width change to keep the diagram centred. */
   panBy: (dx: number, dy: number) => void
@@ -92,10 +85,35 @@ export interface EmbeddedSceneEditorProps {
    * with their own live preview next to the diagram pass false. */
   showPreviewButton?: boolean
   /** Fires with the scene the editor shows whenever the user switches scene
-   * tabs (and once on init), so a host can follow the selection. */
+   * in the file tree (and once on init), so a host can follow the selection. */
   onSelectedSceneChanged?: (sceneId: string | null) => void
   /** Filled with the editor's imperative API while it is mounted. */
   apiRef?: { current: EmbeddedSceneEditorApi | null }
+  /** The template's listing, the file tree's template.json. Without one the
+   * tree shows a read-only template.json made of the first scene's name and
+   * `description`. */
+  template?: SceneTemplateMetadata
+  /** Edits to template.json (its form, or its source). Absent: read only. */
+  onTemplateChanged?: (changes: Partial<SceneTemplateMetadata>) => void
+  /** The choices the template's Category field offers. */
+  templateCategories?: TemplateCategoryOption[]
+  /** template.json's Form view, in place of the built-in form: the host's
+   * own view of the template (the store shows its scene page there). */
+  templateContent?: ReactNode
+  /** The file the editor opens on: the first scene's diagram (default) or
+   * template.json. Read once, on the first init. */
+  initialFile?: 'template' | 'diagram'
+  /** Opens on this file of the shown scene's first app that has it
+   * (`app.tsx`, say) instead of `initialFile`, when one does. Read once, on
+   * the first init. */
+  initialAppFile?: string
+  /** Whether the file tree starts shown (default) or folded away. Read once,
+   * on mount. */
+  initialTreeOpen?: boolean
+  /** The template.json fields the host keeps and the form edits: the store
+   * keeps all but the name (default); a backend's saved scene the name and
+   * description. */
+  templateFields?: TemplateField[]
 }
 
 // The scene editor as a plain React component: render it inside any React
@@ -108,6 +126,11 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
   useState(ensurePortalRoots)
   const logicProps = { frameId: EMBED_FRAME_ID }
   useMountedLogic(embedFrameLogic(logicProps))
+  // The tree's logic takes the file to open on as a prop (its reducer's
+  // default), so a remount — StrictMode's, a host's — opens on it again.
+  useMountedLogic(
+    sceneFileTreeLogic({ ...logicProps, initialFile: props.initialFile, initialTreeOpen: props.initialTreeOpen })
+  )
   const { initEmbedFrame, updateScene } = useActions(embedFrameLogic(logicProps))
   const { scenes } = useValues(embedFrameLogic(logicProps))
   const { setTheme } = useActions(workspaceLogic)
@@ -164,8 +187,30 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
   onSelectedSceneChangedRef.current = props.onSelectedSceneChanged
   const selectedSceneIdRef = useRef(selectedSceneId)
   selectedSceneIdRef.current = selectedSceneId
+  const { syncScene, openAppFile } = useActions(sceneFileTreeLogic(logicProps))
+  // initialAppFile: once, when the first scene is shown. The pane shows the
+  // file once the app's files have loaded (sceneFileTreeLogic's
+  // pendingAppFile, AppFileHeader).
+  const initialAppFileDoneRef = useRef(false)
+  useEffect(() => {
+    const file = props.initialAppFile
+    if (!file || !initialized || !selectedSceneId || initialAppFileDoneRef.current) {
+      return
+    }
+    initialAppFileDoneRef.current = true
+    const scene = embedFrameLogic(logicProps).values.scenes?.find((candidate) => candidate.id === selectedSceneId)
+    const nodeId = sceneAppWithFile(scene, file)
+    if (nodeId) {
+      openAppFile(selectedSceneId, nodeId, file)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialized, selectedSceneId])
   useEffect(() => {
     onSelectedSceneChangedRef.current?.(selectedSceneId)
+    if (selectedSceneId) {
+      syncScene(selectedSceneId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSceneId])
 
   useEffect(() => {
@@ -180,6 +225,10 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
     }
     apiRef.current = {
       renameScene: (sceneId, name) => updateScene(sceneId, { name }),
+      setSceneIsLayout: (sceneId, isLayout) => {
+        const scene = embedFrameLogic(logicProps).values.scenes?.find((candidate) => candidate.id === sceneId)
+        updateScene(sceneId, { settings: withIsLayout(scene?.settings, isLayout) })
+      },
       panBy: (dx, dy) => shownDiagram()?.actions.panDiagramView(dx, dy),
       fitView: () => shownDiagram()?.actions.fitDiagramView(),
     }
@@ -243,6 +292,19 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
           theme={theme}
           sceneDescription={props.description?.trim() ? props.description : null}
           showPreviewButton={props.showPreviewButton ?? true}
+          template={
+            props.template ?? {
+              name: (scenes[0]?.name || 'Untitled scene').trim(),
+              description: props.description?.trim() ? props.description : null,
+              category: null,
+              tags: [],
+              frameosVersion: null,
+            }
+          }
+          onTemplateChanged={props.onTemplateChanged}
+          templateCategories={props.templateCategories}
+          templateContent={props.templateContent}
+          templateFields={props.templateFields}
         />
       </BindLogic>
     </BindLogic>
@@ -252,13 +314,16 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
 // The postMessage protocol (all messages are objects with a `type`):
 //   parent -> editor:
 //     {type: 'frameos-editor:init', scenes, sceneId?, mode?, width?, height?,
-//      interval?, theme?, previewProxyUrl?, description?}
+//      interval?, theme?, previewProxyUrl?, description?, template?,
+//      templateFields?}
 //     {type: 'frameos-editor:get-scenes'}          -> replies with :scenes
 //     {type: 'frameos-editor:select-scene', sceneId}
 //   editor -> parent:
 //     {type: 'frameos-editor:ready'}               once listening
 //     {type: 'frameos-editor:scenes', scenes}      after every edit (debounced)
 //                                                  and as the :get-scenes reply
+//     {type: 'frameos-editor:template', template}  after an edit to template.json
+//                                                  (only when init sent a template)
 //     {type: 'frameos-editor:save-screenshot', dataUrl, sceneId}
 //                                                  Preview panel screenshot; reply with
 //                                                  {type: 'frameos-editor:screenshot-saved', ok,
@@ -272,7 +337,10 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
 // `previewProxyUrl` is an optional same-origin endpoint the wasm live preview
 // routes CORS-blocked HTTP requests through. `description` is the embedding
 // page's description of the scene (scenes.json doesn't carry one), shown in
-// the Scene settings panel.
+// the Scene settings panel. `template` ({name, description, category, tags,
+// frameosVersion}) makes template.json editable: the editor opens on it and
+// reports every change; `templateFields` names the fields the host keeps
+// (the form edits those alone).
 //
 // This wrapper drives EmbeddedSceneEditor from that protocol; it is what the
 // iframe bundle (editor.tsx) and the direct mount (mount.tsx) render.
@@ -281,6 +349,7 @@ export function EmbeddedEditor(): JSX.Element {
   const logic = useMountedLogic(embedFrameLogic(logicProps))
   const [init, setInit] = useState<Omit<EmbeddedSceneEditorProps, 'onScenesChanged'> | null>(null)
   const [selectedSceneId, setSelectedSceneId] = useState<string | undefined>(undefined)
+  const [template, setTemplate] = useState<SceneTemplateMetadata | null>(null)
   // The parent origin every reply goes to, locked on the first accepted
   // message from the parent. Stays null for the direct mount.
   const [parentOrigin, setParentOrigin] = useState<string | null>(null)
@@ -343,7 +412,12 @@ export function EmbeddedEditor(): JSX.Element {
           // Only a same-origin proxy: it sees every URL scene code fetches.
           previewProxyUrl: sameOriginPreviewProxyUrl(message.previewProxyUrl, window.location.origin),
           description: typeof message.description === 'string' ? message.description : undefined,
+          initialFile: message.template ? 'template' : undefined,
+          templateFields: templateFieldsFromMessage(message.templateFields),
         })
+        setTemplate(
+          message.template && typeof message.template === 'object' ? templateFromMessage(message.template) : null
+        )
         setSelectedSceneId(typeof message.sceneId === 'string' ? message.sceneId : undefined)
       } else if (message.type === 'frameos-editor:get-scenes') {
         window.parent?.postMessage(
@@ -381,6 +455,19 @@ export function EmbeddedEditor(): JSX.Element {
     <EmbeddedSceneEditor
       {...init}
       sceneId={selectedSceneId}
+      template={template ?? undefined}
+      onTemplateChanged={
+        template
+          ? (changes) => {
+              const next = { ...template, ...changes }
+              setTemplate(next)
+              window.parent?.postMessage(
+                { type: 'frameos-editor:template', template: next },
+                replyTargetOrigin(parentOrigin)
+              )
+            }
+          : undefined
+      }
       onScenesChanged={(nextScenes) => {
         window.parent?.postMessage(
           { type: 'frameos-editor:scenes', scenes: nextScenes },
@@ -391,167 +478,73 @@ export function EmbeddedEditor(): JSX.Element {
   )
 }
 
-type EmbedPanel = 'info' | 'preview' | 'stateVariables' | 'apps' | 'events' | 'json'
+const TEMPLATE_FIELDS: TemplateField[] = ['name', 'description', 'category', 'frameosVersion', 'tags']
 
-interface EmbedPanelDefinition {
-  panel: EmbedPanel
-  label: string
-  icon: JSX.Element
+function templateFieldsFromMessage(raw: unknown): TemplateField[] | undefined {
+  return Array.isArray(raw)
+    ? raw.filter((field): field is TemplateField => TEMPLATE_FIELDS.includes(field as TemplateField))
+    : undefined
 }
 
-// The same panel set the main app's scene workspace offers, minus the ones
-// that need a backend (compiled source, AI chat) or a frame (frame preview).
-const panelDefinitions: EmbedPanelDefinition[] = [
-  { panel: 'info', label: 'Scene settings', icon: <Cog6ToothIcon className="h-5 w-5" /> },
-  { panel: 'preview', label: 'Preview', icon: <PlayIcon className="h-5 w-5" /> },
-  { panel: 'stateVariables', label: 'State variables', icon: <VariableIcon className="h-5 w-5" /> },
-  { panel: 'apps', label: 'Apps', icon: <PuzzlePieceIcon className="h-5 w-5" /> },
-  { panel: 'events', label: 'Events', icon: <BoltIcon className="h-5 w-5" /> },
-  { panel: 'json', label: 'JSON', icon: <ServerStackIcon className="h-5 w-5" /> },
-]
-
-const utilityButtonClassName =
-  'frameos-icon-button pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
-
-function EmbedDiagramButtons({ sceneId }: { sceneId: string }): JSX.Element {
-  const { fitDiagramView, rearrangeCurrentScene } = useActions(diagramLogic({ frameId: EMBED_FRAME_ID, sceneId }))
-  return (
-    <>
-      <button type="button" title="Fit to view" onClick={fitDiagramView} className={utilityButtonClassName}>
-        <ZoomOutArea className="h-5 w-5" />
-      </button>
-      <button type="button" title="Realign nodes" onClick={rearrangeCurrentScene} className={utilityButtonClassName}>
-        <ArrowsPointingInIcon className="h-5 w-5" />
-      </button>
-    </>
-  )
-}
-
-function EmbedSceneInfoPanel({ scene, description }: { scene: FrameScene; description: string | null }): JSX.Element {
-  const { renameScene } = useActions(scenesLogic({ frameId: EMBED_FRAME_ID }))
-  const nodes = scene.nodes ?? []
-  const edges = scene.edges ?? []
-  const connectedNodeIds = new Set<string>()
-  edges.forEach((edge) => {
-    if (edge.source) {
-      connectedNodeIds.add(edge.source)
-    }
-    if (edge.target) {
-      connectedNodeIds.add(edge.target)
-    }
-  })
-  const stats = [
-    { label: 'Nodes', value: nodes.length },
-    { label: 'Edges', value: edges.length },
-    { label: 'Scene apps', value: Object.keys(scene.apps ?? {}).length },
-    { label: 'Fields', value: scene.fields?.length ?? 0 },
-    { label: 'Disconnected', value: nodes.filter((node) => !connectedNodeIds.has(node.id)).length },
-  ]
-
-  return (
-    <div className="frame-tool-panel space-y-5 @container">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="frameos-strong truncate text-lg font-bold">{scene.name || 'Untitled scene'}</div>
-          <div className="mt-1 flex min-w-0 items-center gap-1.5">
-            <div className="frameos-muted truncate font-mono text-xs text-slate-400">{scene.id}</div>
-            <button
-              type="button"
-              title="Copy scene id"
-              onClick={() => copy(scene.id)}
-              className="frameos-icon-button flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              <ClipboardDocumentIcon className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => renameScene(scene.id)}
-          className="frameos-secondary-button inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          <PencilSquareIcon className="h-4 w-4" />
-          <span>Rename</span>
-        </button>
-      </div>
-      {description ? <div className="frameos-muted text-sm">{description}</div> : null}
-      <div className="grid grid-cols-3 gap-2">
-        {stats.map((stat) => (
-          <div key={stat.label} className="frame-tool-row rounded-xl px-3 py-2">
-            <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">{stat.label}</div>
-            <div className="frameos-strong mt-0.5 truncate text-sm font-semibold">{stat.value}</div>
-          </div>
-        ))}
-      </div>
-      <SceneSettings sceneId={scene.id} embedded />
-      <RenameSceneModal frameId={EMBED_FRAME_ID} />
-    </div>
-  )
-}
-
-function EmbedUtilityDrawer({
-  panel,
-  scene,
-  sceneDescription,
-  onClose,
-}: {
-  panel: EmbedPanel
-  scene: FrameScene
-  sceneDescription: string | null
-  onClose: () => void
-}): JSX.Element {
-  const definition = panelDefinitions.find((candidate) => candidate.panel === panel)
-
-  const renderPanel = (): JSX.Element | null => {
-    switch (panel) {
-      case 'info':
-        return <EmbedSceneInfoPanel scene={scene} description={sceneDescription} />
-      case 'preview':
-        return <EmbedScenePreview frameId={EMBED_FRAME_ID} sceneId={scene.id} />
-      case 'stateVariables':
-        return <SceneState sceneId={scene.id} />
-      case 'apps':
-        return <Apps />
-      case 'events':
-        return <Events frameId={EMBED_FRAME_ID} sceneId={scene.id} />
-      case 'json':
-        return <SceneJSON sceneId={scene.id} />
-      default:
-        return null
-    }
+/** template.json as the host sent it, with every field in its type. */
+function templateFromMessage(raw: Record<string, unknown>): SceneTemplateMetadata {
+  const text = (value: unknown): string | null => (typeof value === 'string' ? value : null)
+  return {
+    name: text(raw.name) ?? '',
+    description: text(raw.description),
+    category: text(raw.category),
+    tags: Array.isArray(raw.tags) ? raw.tags.filter((tag): tag is string => typeof tag === 'string') : [],
+    frameosVersion: text(raw.frameosVersion),
   }
+}
 
-  return (
-    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-[4.5rem] top-5 z-40 flex w-[430px] max-w-[calc(100vw-6rem)] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 text-slate-900 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="frameos-divider flex items-center justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
-          <div className="min-w-0">
-            <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
-              {definition?.label}
-            </h2>
-          </div>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            <XMarkIcon className="h-6 w-6" />
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">{renderPanel()}</div>
-      </div>
-    </div>
-  )
+// The same panel set a frame's scene page offers, minus the ones that need a
+// backend (compiled source) or a frame (the frame's own preview): the
+// Preview here runs the scene in the browser.
+function embedPanels(sceneDescription: string | null, showPreviewButton: boolean): SceneEditorPanel[] {
+  return [
+    {
+      panel: 'info',
+      label: 'Scene settings',
+      icon: <Cog6ToothIcon className="h-5 w-5" />,
+      render: (scene) => <SceneEditorInfoPanel frameId={EMBED_FRAME_ID} scene={scene} description={sceneDescription} />,
+    },
+    ...(showPreviewButton
+      ? [
+          {
+            panel: 'preview',
+            label: 'Preview',
+            icon: <PlayIcon className="h-5 w-5" />,
+            render: (scene: FrameScene) => <EmbedScenePreview frameId={EMBED_FRAME_ID} sceneId={scene.id} />,
+          },
+        ]
+      : []),
+    {
+      panel: 'stateVariables',
+      label: 'State variables',
+      icon: <VariableIcon className="h-5 w-5" />,
+      render: (scene) => <SceneState sceneId={scene.id} />,
+    },
+    { panel: 'apps', label: 'Apps', icon: <PuzzlePieceIcon className="h-5 w-5" />, render: () => <Apps /> },
+    {
+      panel: 'events',
+      label: 'Events',
+      icon: <BoltIcon className="h-5 w-5" />,
+      render: (scene) => <Events frameId={EMBED_FRAME_ID} sceneId={scene.id} />,
+    },
+    {
+      panel: 'json',
+      label: 'JSON',
+      icon: <ServerStackIcon className="h-5 w-5" />,
+      render: (scene) => <SceneJSON sceneId={scene.id} />,
+    },
+  ]
 }
 
 function EmbeddedEditorBody({
-  selectedSceneId,
-  setSelectedSceneId,
-  scenes,
-  theme,
   sceneDescription,
   showPreviewButton,
+  ...props
 }: {
   selectedSceneId: string | null
   setSelectedSceneId: (sceneId: string) => void
@@ -559,89 +552,16 @@ function EmbeddedEditorBody({
   theme: FrameosTheme
   sceneDescription: string | null
   showPreviewButton: boolean
+  template: SceneTemplateMetadata
+  onTemplateChanged?: (changes: Partial<SceneTemplateMetadata>) => void
+  templateCategories?: TemplateCategoryOption[]
+  templateContent?: ReactNode
+  templateFields?: TemplateField[]
 }): JSX.Element {
-  const { activeEditor } = useValues(frameEditorsLogic({ frameId: EMBED_FRAME_ID }))
-  const { closeEditor } = useActions(frameEditorsLogic({ frameId: EMBED_FRAME_ID }))
   // Keep the preview logic (and the API keys applied to it) alive across
   // panel open/close cycles.
   useMountedLogic(livePreviewLogic({ frameId: EMBED_FRAME_ID }))
-  const [activePanel, setActivePanel] = useState<EmbedPanel | null>(null)
-  const appEditor = activeEditor?.kind === 'editApp' ? activeEditor : null
-  const visiblePanels = showPreviewButton
-    ? panelDefinitions
-    : panelDefinitions.filter((definition) => definition.panel !== 'preview')
-
-  const dark = theme === 'dark'
-  const surface = dark ? 'bg-[#16181c] text-slate-100' : 'bg-white text-slate-900'
-  const divider = dark ? 'border-slate-700' : 'border-slate-200'
-  const mutedButton = dark
-    ? 'rounded px-3 py-1 text-sm text-slate-400 hover:bg-slate-800'
-    : 'rounded px-3 py-1 text-sm text-slate-500 hover:bg-slate-100'
-
-  const selectedScene = scenes.find((scene) => scene.id === selectedSceneId) ?? null
-
   return (
-    <div className={clsx('frameos-app-shell flex h-full flex-col overflow-hidden', `frameos-theme-${theme}`, surface)}>
-      {scenes.length > 1 ? (
-        <div className={clsx('flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1', divider)}>
-          {scenes.map((scene) => (
-            <button
-              key={scene.id}
-              type="button"
-              onClick={() => setSelectedSceneId(scene.id)}
-              className={
-                scene.id === selectedSceneId
-                  ? clsx('rounded px-3 py-1 text-sm font-semibold', dark ? 'bg-slate-700' : 'bg-slate-200')
-                  : mutedButton
-              }
-            >
-              {scene.name || scene.id}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      <div className="scene-editor-canvas scene-editor-canvas-full @container relative min-h-0 flex-1 overflow-hidden">
-        {selectedSceneId ? <Diagram sceneId={selectedSceneId} showToolbar={false} /> : null}
-        {selectedSceneId ? (
-          <div className="scene-diagram-overlay pointer-events-none absolute inset-0 z-50">
-            {/* One vertical column at the right edge: the drawer opens to its
-                left (right-[4.5rem]), so the buttons stay clickable. */}
-            <div className="scene-diagram-corner-toolbar pointer-events-none absolute flex min-w-0 items-start gap-2">
-              <div className="scene-diagram-utility-buttons scene-diagram-utility-toolbar pointer-events-none flex shrink-0 flex-col items-center gap-2">
-                <EmbedDiagramButtons sceneId={selectedSceneId} />
-                <div className="h-2" />
-                {visiblePanels.map((definition) => (
-                  <button
-                    key={definition.panel}
-                    type="button"
-                    title={definition.label}
-                    onClick={() =>
-                      setActivePanel((current) => (current === definition.panel ? null : definition.panel))
-                    }
-                    className={clsx(
-                      utilityButtonClassName,
-                      activePanel === definition.panel
-                        ? 'frameos-primary-active text-white'
-                        : 'bg-white/90 text-slate-500'
-                    )}
-                  >
-                    {definition.icon}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : null}
-        {activePanel && selectedScene && (showPreviewButton || activePanel !== 'preview') ? (
-          <EmbedUtilityDrawer
-            panel={activePanel}
-            scene={selectedScene}
-            sceneDescription={sceneDescription}
-            onClose={() => setActivePanel(null)}
-          />
-        ) : null}
-      </div>
-      {appEditor ? <EditAppModal editor={appEditor} onClose={() => closeEditor(appEditor.key)} /> : null}
-    </div>
+    <SceneEditorBody frameId={EMBED_FRAME_ID} panels={embedPanels(sceneDescription, showPreviewButton)} {...props} />
   )
 }

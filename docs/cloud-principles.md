@@ -58,7 +58,11 @@ table, and the protocol summary.
    below the capability line (ESP32-C3, Pico — the thin-client design) is
    not a proxy: it is a paid-plan entitlement, N frames and a minimum
    refresh interval, none on the free tier (`cloud/docs/accounting-todo.md`
-   §0.2). It is not enforced yet (`docs/convergence-todo.md` item 3).
+   §0.2). The same entitlement covers a **virtual frame**, which has no
+   hardware at all and exists since 2026-11 (`docs/cloud-frames.md` "Virtual
+   frames"): there the cloud is the device by the owner's choice, which the
+   form says before the frame is made. The boards themselves still cannot
+   link (`docs/convergence-todo.md` item 3).
 
 ## Permission scopes
 

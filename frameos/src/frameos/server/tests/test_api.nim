@@ -122,6 +122,24 @@ suite "Server API helpers":
     }, %*{})
     check fresh["frameAdminAuth"]["pass"].getStr() == ""
 
+  test "a scheme or port typed into server_host lands in serverScheme and serverPort":
+    let existing = %*{"serverHost": "10.0.0.5", "serverPort": 8989, "serverScheme": "http"}
+    let typed = frontendFramePayloadToRuntimeConfig(
+      %*{"server_host": "https://backend.local:8443/", "server_port": 8989, "server_scheme": "http"}, existing)
+    check typed["serverHost"].getStr() == "backend.local"
+    check typed["serverPort"].getInt() == 8443
+    check typed["serverScheme"].getStr() == "https"
+    # A bare host keeps the payload's own scheme and port.
+    let bare = frontendFramePayloadToRuntimeConfig(
+      %*{"server_host": "backend.local", "server_port": 9000, "server_scheme": "https"}, existing)
+    check bare["serverHost"].getStr() == "backend.local"
+    check bare["serverPort"].getInt() == 9000
+    check bare["serverScheme"].getStr() == "https"
+    # A save that does not mention the host does not touch it.
+    let untouched = frontendFramePayloadToRuntimeConfig(%*{"server_port": 9000}, existing)
+    check untouched["serverHost"].getStr() == "10.0.0.5"
+    check untouched["serverPort"].getInt() == 9000
+
   test "url encoded parser decodes values":
     let parsed = parseUrlEncoded("name=Frame%20One&flag=true&empty=")
     check parsed["name"] == "Frame One"

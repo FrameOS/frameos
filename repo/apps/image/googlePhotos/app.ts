@@ -22,8 +22,10 @@ export function extractPhotoPaths(texts) {
   return [...paths]
 }
 
-export const sizedPhotoUrl = (base, width, height, fitMode) =>
-  `${base}=w${width}-h${height}-${fitMode === 'contain' ? 'no' : 'c'}`
+// Cropped to exactly width x height for cover; every other fit shows the whole
+// photo, so it gets all of it, at most width x height.
+export const sizedPhotoUrl = (base, width, height, fit) =>
+  `${base}=w${width}-h${height}-${fit === 'cover' ? 'c' : 'no'}`
 
 export const wrapIndex = (counter, count) => (count > 0 ? ((counter % count) + count) % count : 0)
 
@@ -93,7 +95,12 @@ export function get(app, context) {
     if (counterKey) frameos.setState(counterKey, next)
   } else index = Math.floor(Math.random() * count)
 
-  const imageUrl = sizedPhotoUrl(HOST + album.paths[index], width, height, c.fitMode)
+  // The image node draws the photo with its own placement, so that is the fit
+  // to ask Google for: a contained photo drawn with cover is cropped again, and
+  // blurry. fitMode stands in where the frame does not say (FrameOS before
+  // 2026.10.24); the sample scene wires both to its Fit field.
+  const fit = context.targetFit || c.fitMode
+  const imageUrl = sizedPhotoUrl(HOST + album.paths[index], width, height, fit)
   if (f.debug) frameos.log(`Downloading image: ${imageUrl}`)
   const name = `google-photos ${index} ${width}x${height}`
   const photo = frameos.fetchImage(imageUrl, { saveAsset: { name, extension: 'jpg', mode: c.saveAssets } })

@@ -555,6 +555,15 @@ static void backlight_set(bool on)
     gpio_set_level((gpio_num_t)s_board->backlight, on ? 1 : 0);
 }
 
+/* A scene store's "Updating" screen (fos_lcd_st7701s_updating_begin)
+ * holds the glass: while it is up no picture is presented. */
+static volatile bool s_updating = false;
+static int s_updating_shown = -1; /* the buffer it was presented from, -1 for none */
+static int64_t s_updating_since_us = 0;
+static uint32_t s_updating_count = 0;
+static uint32_t s_updating_ms = 0;
+static esp_timer_handle_t s_updating_timer = NULL;
+
 #define LCD_FB_BYTES ((size_t)FOS_LCD_ST7701S_WIDTH * FOS_LCD_ST7701S_HEIGHT * 2u)
 
 /* The buffer last presented is being scanned: wait for the frame boundary
@@ -611,11 +620,21 @@ static uint8_t *writable_back(void)
  * at the next frame boundary, and it is the front buffer from then on. */
 static void present_back(void)
 {
+    int back = s_drawing;
+    if (s_updating) {
+        /* The updating screen holds the glass (it is s_pending_front) and
+         * the picture from before stays in s_front, to come back if no new
+         * one follows: this one stays where it was drawn, for the next
+         * render to draw over. A scene still animating through a store
+         * renders into this one buffer the whole way. */
+        s_last_drawn = back;
+        s_drawing = -1;
+        return;
+    }
     settle_front();
     /* A picture after a switch began is that switch's: the loading mark
      * goes, from whichever buffer holds it, before this one is on the way. */
     fos_lcd_st7701s_loading_end();
-    int back = s_drawing;
     esp_lcd_panel_draw_bitmap(s_panel, 0, 0, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, s_fbs[back]);
     /* A frame that ended before the call above may have given already:
      * clear it, so the wait in settle_front is for one that ends after it. */
@@ -911,6 +930,104 @@ esp_err_t fos_lcd_st7701s_backlight(bool on)
     return ESP_OK;
 }
 
+/* ------------------------------------------------- the updating screen */
+
+/* A flash write switches the cache off, which holds off the interrupt that
+ * refills the bounce buffers from PSRAM, and a page program outlasts the
+ * 0.9 ms those buffers last: the DMA scans the two stale buffers over and
+ * over until the write ends and the next blank restarts it. One write is one
+ * disturbed frame; a scene store is hundreds of them with erases of 70 ms to
+ * 1.5 s between, and the glass shows the picture torn into repeating bands
+ * the whole way through. No refill can run from PSRAM while the cache is
+ * off, so the picture cannot be kept whole: for the store the glass shows the
+ * FrameOS mark on black with "Updating" under it (the boot splash's drawing,
+ * the word clipped out of its firmware line: no bytes of its own). Where
+ * that tears, the bands are black, and the mark and the word
+ * are back at every blank. The screen is presented like a picture, so the one
+ * from before stays in its buffer and comes back if no new picture follows
+ * (a store that failed); until the end, nothing else is presented. The timer
+ * is what ends a store that never reaches its end. */
+#define LCD_UPDATING_MAX_MS 120000u
+
+static void draw_updating(uint8_t *fb)
+{
+    memset(fb, 0, LCD_FB_BYTES);
+    fos_lcd_splash_draw((uint16_t *)fb, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, 0, false);
+    fos_lcd_splash_draw_status((uint16_t *)fb, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT,
+                               FOS_LCD_SPLASH_UPDATING);
+}
+
+/* The esp_timer task: a store that never ended. The picture from before
+ * comes back if nobody is drawing; a writer holding the lock is about to
+ * present a picture of its own now that the screen lets it. */
+static void updating_timed_out(void *arg)
+{
+    (void)arg;
+    if (!s_updating) return;
+    bool locked = xSemaphoreTake(s_write_lock, 0) == pdTRUE;
+    fos_lcd_st7701s_updating_end(!locked);
+    if (locked) xSemaphoreGive(s_write_lock);
+}
+
+void fos_lcd_st7701s_updating_begin(void)
+{
+    if (!s_ready) return;
+    if (!s_updating_timer) {
+        const esp_timer_create_args_t args = {.callback = updating_timed_out, .name = "fos_lcd_upd"};
+        if (esp_timer_create(&args, &s_updating_timer) != ESP_OK) s_updating_timer = NULL;
+    }
+    if (s_updating_timer) {
+        esp_timer_stop(s_updating_timer);
+        esp_timer_start_once(s_updating_timer, (uint64_t)LCD_UPDATING_MAX_MS * 1000u);
+    }
+    if (s_updating) return;
+    s_updating_since_us = esp_timer_get_time();
+    s_updating_count++;
+    s_updating_shown = -1;
+    if (s_splash_on) {
+        /* Still booting: the splash is up, and takes the line. */
+        fos_lcd_st7701s_splash_status(FOS_LCD_SPLASH_UPDATING);
+        s_updating = true;
+        return;
+    }
+    /* From whichever task stores (USB, HTTP, the cloud, the backend sync on
+     * the render task): the writer's lock, unless this task holds it. */
+    bool held = xSemaphoreGetMutexHolder(s_write_lock) == xTaskGetCurrentTaskHandle();
+    if (!held) xSemaphoreTake(s_write_lock, portMAX_DELAY);
+    if (s_drawing < 0) {
+        uint8_t *back = writable_back();
+        draw_updating(back);
+        s_generation[buffer_index(back)]++;
+        present_back();
+        s_updating_shown = s_pending_front;
+    }
+    /* Else a render of this task's is half drawn: the store runs over the
+     * picture showing, as it did before the screen existed. */
+    s_updating = true;
+    if (!held) xSemaphoreGive(s_write_lock);
+}
+
+void fos_lcd_st7701s_updating_end(bool picture_follows)
+{
+    if (!s_ready || !s_updating) return;
+    if (s_updating_timer) esp_timer_stop(s_updating_timer);
+    s_updating_ms = (uint32_t)((esp_timer_get_time() - s_updating_since_us) / 1000);
+    s_updating = false;
+    if (picture_follows || s_updating_shown < 0) return;
+    /* No new picture is coming: the one from before, still in s_front, goes
+     * back on the glass at the next frame boundary. */
+    bool held = xSemaphoreGetMutexHolder(s_write_lock) == xTaskGetCurrentTaskHandle();
+    if (!held) xSemaphoreTake(s_write_lock, portMAX_DELAY);
+    if (s_pending_front == s_updating_shown) {
+        esp_lcd_panel_draw_bitmap(s_panel, 0, 0, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, s_fbs[s_front]);
+        xSemaphoreTake(s_frame_done, 0);
+        s_presented_at = s_frames;
+        s_pending_front = -1;
+    }
+    s_updating_shown = -1;
+    if (!held) xSemaphoreGive(s_write_lock);
+}
+
 bool fos_lcd_st7701s_stats(fos_lcd_st7701s_stats_t *out, bool reset)
 {
     if (!s_ready) return false;
@@ -921,6 +1038,10 @@ bool fos_lcd_st7701s_stats(fos_lcd_st7701s_stats_t *out, bool reset)
         out->glitches = s_glitches;
         out->max_deviation_us = s_max_deviation_us;
         out->late_refills = s_late_refills;
+        out->updating_count = s_updating_count;
+        out->updating_now = s_updating;
+        out->updating_ms = s_updating ? (uint32_t)((esp_timer_get_time() - s_updating_since_us) / 1000)
+                                      : s_updating_ms;
         out->slack_us = s_slack_us;
         out->now_us = esp_timer_get_time();
         uint32_t next = s_recent_next;
@@ -1001,6 +1122,8 @@ esp_err_t fos_lcd_st7701s_backlight(bool on)
     (void)on;
     return ESP_ERR_NOT_SUPPORTED;
 }
+void fos_lcd_st7701s_updating_begin(void) {}
+void fos_lcd_st7701s_updating_end(bool picture_follows) { (void)picture_follows; }
 bool fos_lcd_st7701s_stats(fos_lcd_st7701s_stats_t *out, bool reset)
 {
     (void)out;

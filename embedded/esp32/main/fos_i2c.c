@@ -42,6 +42,7 @@ static const struct {
     [FOS_I2C_LSM6DS3] = {"lsm6ds3", 0x6a},
     [FOS_I2C_ES8311] = {"es8311", 0x18},
     [FOS_I2C_ES7210] = {"es7210", 0x40},
+    [FOS_I2C_AXP2101] = {"axp2101", 0x34},
 };
 
 static SemaphoreHandle_t s_lock = NULL;
@@ -163,7 +164,7 @@ esp_err_t fos_i2c_init(void)
         }
         release_usb_pads_if_needed(&config->i2c_buses[i]);
         i2c_master_bus_config_t bus_config = {
-            .i2c_port = -1, /* any free port: the PhotoPainter PMIC and the OLED take port 0 by name */
+            .i2c_port = -1, /* any free port: the OLED takes port 0 by name */
             .sda_io_num = (gpio_num_t)config->i2c_buses[i].sda,
             .scl_io_num = (gpio_num_t)config->i2c_buses[i].scl,
             .clk_source = I2C_CLK_SRC_DEFAULT,

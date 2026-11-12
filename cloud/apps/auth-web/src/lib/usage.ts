@@ -14,6 +14,7 @@
 // Defaults are deliberately generous; paid tiers can raise them later (the
 // limits ride along in every usage payload so UIs never hardcode them).
 
+import { cloudRenderedMinIntervalSeconds, cloudRenderedPlatformPrefixes } from "./cloud-rendered";
 import { and, eq, gt, or, sql } from "drizzle-orm";
 import {
   accountAiUsage,
@@ -38,6 +39,7 @@ import {
   storeScenes,
   storeSceneVersions,
   type createDb,
+  virtualFrames,
 } from "@frameos-cloud/db";
 import { dailyCapFor, resolveAiCredentials } from "./ai/api-key";
 import { logWarn } from "./log";
@@ -79,43 +81,15 @@ export const maxFramesPerAccount = (() => {
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : 20;
 })();
 
-// Boards below the capability line — no PSRAM, so no on-device renderer:
-// ESP32-C3 and the Pico family (embedded_firmware.py: localRenderSupported
-// false). Serving one means the control plane renders every frame for it,
-// which is the paid entitlement of cloud/docs/accounting-todo.md §0.2 —
-// `cloud_rendered_frames` on the plan, zero on the free tier — enforced as N
-// frames AND a minimum refresh interval, because renders per day is the cost.
-// The SQL in countCloudRenderedFramesForAccount mirrors this list; keep both
-// in step.
-export const cloudRenderedPlatformPrefixes = ["esp32-c3", "pico"] as const;
-
-export function hardwareIsCloudRendered(hardware: unknown): boolean {
-  if (!hardware || typeof hardware !== "object") {
-    return false;
-  }
-  const record = hardware as { localRenderSupported?: unknown; platform?: unknown };
-  if (record.localRenderSupported === false) {
-    return true;
-  }
-  const platform = typeof record.platform === "string" ? record.platform.toLowerCase() : "";
-  return cloudRenderedPlatformPrefixes.some((prefix) => platform.startsWith(prefix));
-}
-
-// The refresh-interval floor for a cloud-rendered frame (§0.2: proposal 5
-// minutes). Displayed nowhere as a headline number — the plan sells "N
-// frames" — but enforced on every settings push to such a frame.
-export const cloudRenderedMinIntervalSeconds = (() => {
-  const raw = process.env.FRAMEOS_CLOUD_RENDERED_MIN_INTERVAL_SECONDS?.trim();
-  const parsed = raw ? Number(raw) : Number.NaN;
-  if (raw && (!Number.isInteger(parsed) || parsed < 1)) {
-    logWarn("usage.invalid_limit_env", {
-      fallback: 300,
-      name: "FRAMEOS_CLOUD_RENDERED_MIN_INTERVAL_SECONDS",
-      value: raw,
-    });
-  }
-  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 300;
-})();
+// Which frames the cloud renders for, and their refresh floor: its own file
+// so the frame hub can read it without the plan tables (cloud-rendered.ts).
+export {
+  cloudRenderedMinIntervalSeconds,
+  cloudRenderedPlatformPrefixes,
+  frameIsCloudRendered,
+  hardwareIsCloudRendered,
+  settingsRenderOnServer,
+} from "./cloud-rendered";
 
 export const maxPrivateSceneBytesPerAccount = megabyteLimitFromEnv(
   "FRAMEOS_CLOUD_MAX_PRIVATE_SCENE_MB",
@@ -406,7 +380,10 @@ export async function backupBytesForAccount(
 export const revokedFrameQuotaGraceMs = 24 * 60 * 60 * 1000;
 
 /** Frames counting against the quota — the number enrollment refuses on, and
- *  therefore the only number the account page may display. */
+ *  therefore the only number the account page may display. Frames of the
+ *  account's own hardware: a virtual frame (a virtual_frames row, not what a
+ *  device says of itself) is the cloud's, and has its own pool below — the
+ *  plan card sells "40 frames" and "2 virtual frames" as two numbers. */
 export async function countFramesForAccount(
   db: FramesDatabase,
   accountId: string,
@@ -419,6 +396,7 @@ export async function countFramesForAccount(
       and(
         eq(frames.accountId, accountId),
         or(sql`${frames.status} <> 'revoked'`, gt(frames.updatedAt, graceCutoff)),
+        sql`not exists (select 1 from ${virtualFrames} where ${virtualFrames.frameId} = ${frames.id})`,
       ),
     );
   return row?.count ?? 0;
@@ -443,6 +421,9 @@ export async function countCloudRenderedFramesForAccount(
         or(
           sql`${frames.hardware} ->> 'localRenderSupported' = 'false'`,
           ...cloudRenderedPlatformPrefixes.map((prefix) => sql`${platform} like ${prefix + "%"}`),
+          // A board with a runtime set to render on the server
+          // (settingsRenderOnServer, docs/server-rendering.md).
+          sql`${frames.settings} ->> 'render_mode' = 'remote'`,
         ),
       ),
     );
@@ -508,9 +489,9 @@ export async function accountUsage(
       count: frameCount,
       max_count: limits.frames,
     },
-    // §0.2: boards the cloud renders for. A separate pool from `frames` — a
-    // self-hosted Pi costs a WebSocket and a row, a thin client costs a
-    // render per refresh.
+    // §0.2: frames the cloud renders for — virtual frames, and boards with
+    // no renderer of their own. A separate pool from `frames`: your own Pi
+    // costs a WebSocket and a row, one of these costs a render per refresh.
     cloud_rendered_frames: {
       count: cloudRenderedCount,
       max_count: limits.cloudRenderedFrames,

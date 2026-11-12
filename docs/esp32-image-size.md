@@ -301,6 +301,9 @@ planner, the JS runtime and the font cache. Not a good trade. Two pairs
 byte-identical C because a `distinct int` key makes a distinct table type;
 merging those is worth ~1.4 KB each and needs the two declarations found first.
 
+**Update (2026-11-08): the copies are shared now, without touching a call
+site.** See "One probe loop for all the tables" at the end.
+
 ## Constant data
 
 - **String literals cost about twice their text.** 4,709 payloads and 6,443
@@ -510,3 +513,171 @@ Almost all of it is feature code; the Nim traps above (seq hooks per type,
   2026-10-26 audit, skipped then.
 - pixie's QOI (2.4 KB), GIF (5.7 KB) and BMP (7.7 KB) decoders: formats a URL
   might still serve.
+
+---
+
+# One probe loop for all the tables (2026-11-08)
+
+*`esp32-s3`, 8 MB layout, `EPD_7in5_V2`, fresh `ci_build_image.sh` builds of
+main at 34349f181 and the branch.*
+
+**3,257,360 → 3,235,408 bytes (−21,952). OTA slot 90.4% → 89.8% full.**
+
+`patchFile` swaps two of std/tables' include files on `frameosEmbedded` builds
+(`src/embedded/patched_hashcommon.nim`, `patched_tableimpl.nim`). What differs
+per `Table[K, V]` pair turned out to be only a slot's size and where its key
+sits, so those are arguments of `src/embedded/fos_table_probe.nim`:
+
+| Change | Saves |
+|---|---:|
+| `enlarge`: one `fosTableRehash` loop, 45 thin `fosEnlarge` wrappers | −12,320 (first build, with the next row) |
+| `rawGet`: one probe per key shape (string, machine word) | |
+| One init block in `[]=` at a constant size, `mustRehash` shared, no bounds/overflow checks on masked indices, `raises: []` on the lookups | −9,632 |
+
+- The rehash moves slots with `copyMem` and zeroes the old ones, what `move`
+  did slot by slot; a zeroed slot is `wasMoved`'s state, so the old seq's
+  destructor frees its block and nothing else. OrderedTable keeps its `enlarge`
+  (it walks `next`), and so do `SharedTable` and `CountTable`.
+- Keys that stay generic: anything not a string, a machine word or a pointer
+  (`uint16` glyph ids, tuples). A distinct key must compare like its base.
+- `fosEnlarge` still propagates a failed `newSeq`, before any slot has moved.
+  `rawInsert` too: copying a string key can allocate.
+- Compile-time tables (`when nimvm`) run the stock code. Both files refuse a
+  Nim other than 2.2, to be re-derived from its `lib/pure/collections`.
+- Checked: `tests/test_patched_tables.nim` (a `.nims` beside it patches the
+  same two files; it refuses to build against the stock ones) churns five key
+  types against a model, on the host and under AddressSanitizer. The event
+  loop, dispatcher fixtures, interpreter and calendar JS app suites also pass
+  built through the patch.
+- Looked at and left: `nuctoUpper` / `nuctoLower` (9.9 KB of case tables) are
+  live for pixie's text case. `setLen` ×144 (14.7 KB), `add` ×114 (9.6 KB) and
+  `shrink` ×96 (5.9 KB) are the same shape of problem in `system/seqs_v2`; a
+  third of `shrink`'s instances are plain data, the place to start, but that
+  patches `system` and was not a quick change.
+
+---
+
+# After the ical retirement (2026-11-10)
+
+*`esp32-s3`, 8 MB layout, `EPD_7in5_V2`, fresh `ci_build_image.sh` builds in
+`frameos-esp32-ci-local`. Main at 98b3e0000 builds at 3,292,720 bytes, the
+same as #719's CI comment (91.4% of the slot, 304 KB free).*
+
+**3,292,720 → 3,225,328 bytes (−67,392; 89.5% of the slot) with the first
+four cuts, and about −71.5 KB with the setup page too, no behaviour change.** Two more measured cuts need
+a decision (below): QuickJS's unicode tables would take it to about
+3,176,000, and `--panics:on` on top to about 3,027,000 (84%).
+
+## Kept: the -O2 hot modules, +38.5 KB
+
+#719 put pixie's raster modules and `resample` at -O2 in the official-Nim
+builds too (until then only the ROT13 names were listed, so CI and every
+release compiled them at -Os). Measured against the same tree at -Os:
++38,512 B (`images` +14,036, `paths` +12,665, `blends` +6,819, `common`
++2,924, the rest under 1 KB). **The speedups are worth it**: DVD Logo Bounce
+on the SenseCAP ran ~5 ms a frame slower without them, and these loops are
+every frame of an animation and most of a render. Find the bytes elsewhere
+before taking a module off the list.
+
+## The cuts
+
+Per-cut numbers are from the linker map of builds that also carried the
+QuickJS change, so they add up to a little more than the bin's −67,392.
+
+| Cut | Saves | Behaviour |
+|---|---:|---|
+| ESP-IDF Log V2 (`CONFIG_LOG_VERSION_2`) | −28,471 | same lines; a little more stack per log call |
+| App loaders share `loaderParams` / `initAppRoot` / `raiseUnknownField` | −17,200 | none |
+| `printf` & co through `fos_printf.c` (no `_vfprintf_r`) | −13,944 | none |
+| `$float` through QuickJS's `js_dtoa` (`patched_dragonbox.nim`) | −12,882 | byte-identical |
+| The setup page as one gzipped file (`main/setup_page.html`) | −4,060 | same form; values from `GET /api/setup` |
+
+- **Log V2**: V1 bakes `"W (%lu) %s: "` into each of the 911 W/E format
+  strings; V2 prints the prefix in `esp_log_format`, holding `flockfile(stdout)`
+  across prefix, message and newline, so lines still come out whole. −12,955
+  of the C string pool, the rest at the call sites. Check the task stack
+  high-water marks on a bench before a release.
+- **App loaders**: each of the 25 generated loaders carried its own config
+  check, its own "Invalid config format" / "Unknown field: " literals and
+  exception code, and the four AppRoot field writes: ~760 B per app.
+  `backend/app/codegen/app_loader_nim.py` now calls the shared procs in
+  `frameos/app_config.nim`. Loaders went from 39 KB to 22 KB.
+- **printf**: newlib links two copies of its float-capable formatter, one for
+  strings (`_svfprintf_r`) and one for `FILE`s (`_vfprintf_r`, what ESP-IDF's
+  log `vprintf` uses). `--wrap` sends printf/fprintf/vprintf/vfprintf to
+  `vsnprintf` into a 128-byte stack buffer (a longer line is formatted again
+  into a heap block, or cut at 127 bytes with no heap).
+- **dtoa**: Dragonbox's 9.9 KB power-of-ten table goes; `js_dtoa` (free
+  format, what `Number#toString` uses) gives the shortest round-trip digits
+  and the patch lays them out exactly as Dragonbox's `formatDigits`.
+  `src/embedded/tests/test_patched_dragonbox.nim` compares the two (specials,
+  subnormals, every power of ten ±1 ulp, random bit patterns); a 9-million
+  double run found no difference.
+
+- **Setup page**: `fos_http.c` wrote the page with 7.3 KB of C strings and a
+  `send_input` per field. It is now `main/setup_page.html`, stripped and
+  gzipped at build time (`tools/gzip_setup_page.py`, 3.5 KB) and sent with
+  `Content-Encoding: gzip`; the current values come from `GET /api/setup`
+  (same access check, no secrets: it says only whether a Wi-Fi password is
+  saved). The form stays disabled until they are in, so a failed fetch never
+  posts blank fields. Measured −3,680 before the stripping, which took
+  another 381 off the blob.
+
+## Measured, needs a decision
+
+| Lever | Saves | Cost |
+|---|---:|---|
+| `--panics:on` | −149,168 | see below |
+| QuickJS without `CONFIG_ALL_UNICODE` / `CONFIG_ATOMICS` | −49,054 | no `String#normalize`, no `\p{…}` on the ESP32; needs a quickts release |
+
+**`--panics:on`, re-measured.** Spread over all Nim code (app_runtime −19.9 K,
+interpreter −19.0 K, svg −6.3 K, sceneSettings −6.1 K, …): it is the
+error-propagation branch after every call that can raise a Defect. The
+longjmp barrier the doc of 2026-09-01 asked for exists now: every render
+entry in `frameos_nim_glue.c` arms `s_nim_oom_jmp`, and
+`fos_nim_recover_oom_abort_impl` puts back what the skipped `finally`s owned.
+Under panics a Defect goes `raiseExceptionAux` → `reportUnhandledError`,
+which calls `unhandledExceptionHook` first, so a hook that longjmps to the
+armed guard (and returns, to the reboot, when none is armed) needs no
+patched system file. What changes:
+
+- A Defect in a node fails the whole render (and leaks what that render held,
+  as an OOM abort does) instead of failing the node: the interpreter's
+  per-node `except Exception` no longer sees Defects. Four in a row restart
+  the frame (`FOS_NIM_OOM_ABORT_RESTART_STREAK`).
+- A Defect in a Nim bridge function called from JS no longer becomes a JS
+  `RangeError` / `Error` (`burrito.nim`'s `except RangeDefect`); it aborts the
+  render. The bridge's number conversions would want clamping first.
+- Entry points that are not guarded today (scene load, catalog, events, the
+  tick, settings) reboot on a Defect unless the guard is armed in every
+  glue entry, which is mechanical.
+
+**QuickJS unicode/atomics, re-measured**: libunicode −43,958, quickjs −3,808,
+libregexp −736, `pthread_cond_var` −552. The quickts change is three guards
+(`CONFIG_NO_ALL_UNICODE` around the define in `libunicode.h` and around the
+emoji-sequence code at the end of `libunicode.c`, `CONFIG_NO_ATOMICS` in
+`quickjs.c`); then the two defines go into
+`components/frameos_quickjs/CMakeLists.txt` and a line into the scene guide's
+small-devices section.
+
+## Looked at, not done
+
+- **Apps in one file, or as JS.** After the loader change the 24 Nim apps are
+  22 KB of loaders (4.3 KB of it `split`'s seq fields) and 49 KB of app code,
+  most of it in the renderers (localImage 9.2 K, zoomPan 6.2 K, split 5.3 K,
+  xmlToJson 4.1 K, text 3.6 K, svg 3.4 K). One file would only merge a few
+  hundred bytes of module literals. A JS port moves no bytes worth having:
+  the small ones (ifElse, clock, parseJson, log) are 0.5–1.5 KB each, and as
+  JS apps every scene using them would start an interpreter.
+- **jsony for scenes**: `parseInterpretedSceneInputs` instantiates ~25 KB of
+  `parseHook` / `parseObjectInner` for five types. Reading `std/json`'s tree
+  (linked anyway) by hand would be ~5–7 KB: about −18 KB, not measured, and
+  it is the scene loader, so it wants care (rename and post hooks, defaults).
+- **Seq hooks**: `setLen` ×136 (14.1 KB), `add` ×108 (9.2 KB), `shrink` ×91
+  (5.6 KB). One implementation per element size for plain-data element types
+  would take perhaps a third; a `patchFile` of `system/seqs_v2`.
+- **The font to the state partition**: −57.9 KB per slot, but it must be there
+  before provisioning (the merged image's SPIFFS image) and survive OTA.
+- `%*{…}` log sites (`runNode` alone has 33 and is 29 KB), `appCapabilities` built at run
+  time (~3 KB), the float-32 libm copies (~4 KB; double is soft-float on the
+  S3, so slower), QuickJS's TS/JSX syntax (~7 KB).

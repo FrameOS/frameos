@@ -18,6 +18,7 @@ import {
   type SceneEventCommand,
 } from "../../../../../../src/lib/frame-events";
 import {
+  buildScenesPayloadForFrame,
   enqueueFrameCommand,
   frameContractProfile,
   frameForAccount,
@@ -33,6 +34,7 @@ import {
 import { deviceSceneIdForFrame } from "../../../../../../src/lib/scene-images";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { scenesForRuntime } from "../../../../../../src/lib/retired-apps";
+import { sceneListWithPreview } from "../../../../../../src/lib/scene-preview-list";
 import { readSession } from "../../../../../../src/lib/session";
 import {
   compiledSceneHint,
@@ -136,9 +138,10 @@ export async function POST(
   // Which events this route takes, and the hub verb each becomes, is the
   // event contract's (docs/events-contract.json, the `cloud` origin): an event
   // that is not there, or whose verb the frame's device plane cannot carry
-  // (`set_display_power` and a `set_current_scene` with state are Linux only
-  // — the esp32 profile would let the command wait out its TTL to refuse it),
-  // is a 404. A name the contract does not have is a custom scene event: the
+  // (`set_display_power` is Linux only, and so is `setSceneState`'s stand-in
+  // for firmware without `scene_event` — the esp32 profile would let the
+  // command wait out its TTL to refuse it), is a 404. A `setCurrentScene`
+  // with state goes to every frame: an ESP32 applies it from 2026.9.21. A name the contract does not have is a custom scene event: the
   // device delivers one from the cloud only to a scene that declares it with
   // the `cloud` origin, so that is asked of the frame's scenes here. What is
   // left below is each verb's payload.
@@ -298,7 +301,12 @@ export async function POST(
       }
       // In the form this frame's firmware reads: an older one gets a retired
       // Nim app's keyword back (data/immich), as the assignment push does.
-      const delivered = scenesForRuntime(scenes, frame.frameosVersion);
+      const bundle = scenesForRuntime(scenes, frame.frameosVersion);
+      // The frame keeps its assigned scenes, with the preview in them
+      // (lib/scene-preview-list.ts): an ESP32 is sent the previewed scenes
+      // alone, and the Install or Discard after it changes one.
+      const assigned = await buildScenesPayloadForFrame(db, frame.id);
+      const delivered = "scenes" in assigned ? sceneListWithPreview(assigned.scenes, bundle) : bundle;
       // The same digest the assignment push uses (buildScenesPayloadForFrame):
       // the device stores it opaquely and echoes it in scene_ack, which is
       // how the workspace can tell this ad-hoc set apart from the assigned one.

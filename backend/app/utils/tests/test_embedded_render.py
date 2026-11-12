@@ -382,3 +382,466 @@ async def test_a_held_custom_event_reaches_the_scene_in_the_real_runtime():
     assert result.state["state"]["page"] == 6
     heard = [json.loads(line) for line in result.scene_logs if line.startswith('{"event":"event:nextPage"')]
     assert [entry.get("origin") for entry in heard] == ["http:admin"]
+
+
+def _renderer_takes_relayed_events() -> bool:
+    from app.utils.embedded_render import thin_client_renderer_available, wasm_assets_dir
+
+    assets = wasm_assets_dir()
+    return (
+        thin_client_renderer_available()
+        and assets is not None
+        and "frameos_wasm_set_frame" in (assets / "frameos.js").read_text(errors="replace")
+    )
+
+
+def _plain_scene(scene_id: str, color: str, default: bool = False) -> dict:
+    return {
+        "id": scene_id,
+        "name": scene_id.title(),
+        **({"default": True} if default else {}),
+        "settings": {"execution": "interpreted"},
+        "fields": [],
+        "nodes": [
+            {"id": "render", "type": "event", "position": {"x": 0, "y": 0}, "data": {"keyword": "render"}},
+            {"id": "color", "type": "app", "position": {"x": 0, "y": 0},
+             "data": {"keyword": "render/color", "config": {"color": color}}},
+        ],
+        "edges": [{"id": "e1", "source": "render", "sourceHandle": "next", "target": "color", "targetHandle": "prev"}],
+    }
+
+
+RELAY_SCENES = [_plain_scene("clock", "#ffffff", default=True), _plain_scene("photos", "#000000")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
+async def test_a_held_key_switches_scenes_through_the_frames_event_map_in_the_real_runtime():
+    """docs/server-rendering.md "Keys, touch and the schedule": an ESP32's
+    RIGHT held a second, relayed as its driver's two `gpio` edges, is the
+    `longPress` the frame's event map makes the next scene, in the render
+    the pull asked for. What the plane sent it itself is not delivered."""
+    from types import SimpleNamespace
+
+    from app.tasks.embedded_firmware import EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP
+    from app.utils.embedded_render import render_scene
+
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
+    held = {"nowMs": 20_000, "events": [
+        {"origin": "driver", "name": "gpio",
+         "payload": {"pin": 3, "label": "RIGHT", "level": 0, "action": "down", "atMs": 18_000}},
+        {"origin": "driver", "name": "gpio",
+         "payload": {"pin": 3, "label": "RIGHT", "level": 1, "action": "up", "atMs": 19_200}},
+    ]}
+    frame_json = {"eventMap": EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP, "palette": [], "colors": {}}
+
+    switched = await render_scene(frame, 16, 16, scene_id="clock", device_input=held, frame_json=frame_json)
+    assert switched.rgba is not None, switched.error
+    assert switched.state["sceneId"] == "photos"
+    assert switched.rgba[:4] == bytes((0, 0, 0, 255))
+    assert switched.palette == []
+
+    # Without the map the same hold is a long press nobody maps.
+    unmapped = await render_scene(frame, 16, 16, scene_id="clock", device_input=held)
+    assert unmapped.state["sceneId"] == "clock"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
+async def test_a_relayed_schedule_entry_switches_and_the_planes_own_origin_does_not():
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
+    scheduled = await render_scene(frame, 16, 16, scene_id="clock", device_input={"nowMs": 5, "events": [
+        {"origin": "schedule", "name": "setCurrentScene", "payload": {"sceneId": "photos"}}]})
+    assert scheduled.state["sceneId"] == "photos"
+    claimed = await render_scene(frame, 16, 16, scene_id="clock", device_input={"nowMs": 5, "events": [
+        {"origin": "cloud", "name": "setCurrentScene", "payload": {"sceneId": "photos"}}]})
+    assert claimed.state["sceneId"] == "clock"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
+async def test_the_scene_switcher_opens_again_where_the_plane_left_it_in_the_real_runtime():
+    """A fresh process per pull: the switcher a swipe opened comes back with
+    what it was opened from and its highlight, and a key walks on from there."""
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
+    kept = {"system/sceneSwitcher": {"from": "clock", "highlight": "photos", "page": 0}}
+
+    reopened = await render_scene(frame, 64, 64, scene_id="system/sceneSwitcher", scene_states=kept)
+    assert reopened.rgba is not None, reopened.error
+    assert reopened.state["sceneId"] == "system/sceneSwitcher"
+    assert reopened.state["state"]["from"] == "clock"
+    assert reopened.state["state"]["highlight"] == "photos"
+
+    # `B` is a `next` key (buttons.roleByLabel): one step on, wrapping round.
+    tap = {"nowMs": 10_600, "edges": [
+        {"label": "B", "action": "down", "atMs": 10_000}, {"label": "B", "action": "up", "atMs": 10_080}]}
+    walked = await render_scene(frame, 64, 64, scene_id="system/sceneSwitcher", scene_states=kept, device_input=tap)
+    assert walked.state["sceneId"] == "system/sceneSwitcher"
+    assert walked.state["state"]["highlight"] == "clock"
+    assert walked.state["state"]["from"] == "clock"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
+async def test_the_scene_settings_open_again_and_the_frame_page_has_nothing_to_show_on_a_plane():
+    """The settings' frame page is built from the device's facts; the plane
+    has none, so the gear is not offered and asking for the page draws the
+    scene's form instead of failing."""
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
+    kept = {"system/sceneSettings": {"from": "clock", "fields": [], "values": {}, "opened": "frame"}}
+    result = await render_scene(frame, 64, 64, scene_id="system/sceneSettings", scene_states=kept)
+    assert result.rgba is not None, result.error
+    assert result.state["sceneId"] == "system/sceneSettings"
+    assert result.state["state"]["from"] == "clock"
+    assert result.state["state"].get("page") != "frame"
+
+
+# A tap relayed to the plane lands on what the glass shows: a UI's clickable
+# regions and its handlers are the last render's (frameos/ui/events.nim), and
+# a plane renders in a fresh process, so a pull carrying pointer events draws
+# the scene once first (wasm_main.nim frameos_wasm_device_input, found on the
+# bench 2026-11-12: a tap on the E1003 did nothing). Pointer positions travel
+# as the touch driver sends them: 0..32767 across the picture (fos_touch_wire).
+WIRE_MAX = 32767
+_relayed_taps_land: bool | None = None
+
+
+def _wire(pixel: float, size: int) -> int:
+    return round(pixel * WIRE_MAX / (size - 1))
+
+
+def _relayed_tap(x: int, y: int) -> dict:
+    """A tap decided on the board a second before it sent it."""
+    def edge(name: str, buttons: int, at_ms: int) -> dict:
+        return {"origin": "driver", "name": name, "payload": {
+            "x": x, "y": y, "pointerId": 1, "pointerType": "touch", "button": 0, "buttons": buttons, "atMs": at_ms}}
+    return {"nowMs": 31_000, "events": [edge("pointerDown", 1, 29_900), edge("pointerUp", 0, 29_980)]}
+
+
+async def _skip_unless_relayed_taps_land() -> None:
+    """A bundle from before the fix renders once per pull, however much
+    pointer input it carries: there the taps below cannot land, and the test
+    is skipped, not failed. A pull carrying one pointer event renders twice in
+    a bundle with the fix (asked once per session)."""
+    global _relayed_taps_land
+    if _relayed_taps_land is None:
+        from types import SimpleNamespace
+        from typing import Any
+
+        from app.utils.embedded_render import render_scene
+
+        frame: Any = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
+        probe = await render_scene(frame, 16, 16, scene_id="clock", device_input={"nowMs": 5, "events": [
+            {"origin": "driver", "name": "pointerMove", "payload": {"x": 1, "y": 1, "pointerId": 1}}]})
+        renders = sum('"event":"render:scene"' in line for line in probe.scene_logs)
+        _relayed_taps_land = renders >= 2
+    if not _relayed_taps_land:
+        pytest.skip("wasm bundle from before relayed taps drew the scene first (rebuild frameos/tools/build_wasm.sh)")
+
+
+TAP_UI_SOURCE = """
+let tapped = false
+export function get(app) {
+  return (
+    <div className={tapped ? "flex w-full h-full bg-white" : "flex w-full h-full bg-black"}>
+      <div className="w-1/2 h-full" />
+      <div className="w-1/2 h-full bg-red-500" onClick={() => { tapped = true }} />
+    </div>
+  )
+}
+"""
+
+TAP_UI_SCENE = {
+    "id": "tap-ui",
+    "name": "Tap UI",
+    "default": True,
+    "settings": {"execution": "interpreted"},
+    "fields": [],
+    "nodes": [
+        {"id": "render", "type": "event", "position": {"x": 0, "y": 0}, "data": {"keyword": "render"}},
+        {"id": "ui", "type": "app", "position": {"x": 0, "y": 200}, "data": {"keyword": "jsxUi", "config": {}}},
+        {"id": "image", "type": "app", "position": {"x": 300, "y": 0},
+         "data": {"keyword": "render/image", "config": {"placement": "stretch"}}},
+    ],
+    "edges": [
+        {"id": "render-image", "type": "appNodeEdge", "source": "render", "target": "image",
+         "sourceHandle": "next", "targetHandle": "prev"},
+        {"id": "ui-image", "type": "codeNodeEdge", "source": "ui", "target": "image",
+         "sourceHandle": "fieldOutput", "targetHandle": "fieldInput/image"},
+    ],
+    "apps": {"jsxUi": {
+        "origin": "jsxUi", "name": "Tap UI", "category": "data", "description": "", "version": "1.0.0",
+        "fields": [], "output": [{"name": "image", "type": "image"}],
+        "sources": {
+            "config.json": json.dumps({"name": "Tap UI", "category": "data", "description": "", "version": "1.0.0",
+                                       "fields": [], "output": [{"name": "image", "type": "image"}],
+                                       "permissions": []}),
+            "app.tsx": TAP_UI_SOURCE,
+        },
+    }},
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
+async def test_a_relayed_tap_lands_on_a_ui_in_the_real_runtime():
+    """The board's two touch reports over the UI's right half run its
+    onClick in the render the pull asked for; the same tap on the left half,
+    and no tap at all, leave it as it was."""
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    await _skip_unless_relayed_taps_land()
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=[TAP_UI_SCENE])
+    width, height = 80, 60
+
+    untouched = await render_scene(frame, width, height)
+    assert untouched.rgba is not None, untouched.error
+    assert untouched.rgba[:3] == bytes((0, 0, 0))
+
+    right = await render_scene(frame, width, height, device_input=_relayed_tap(
+        _wire(width * 0.75, width), _wire(height / 2, height)))
+    assert right.rgba is not None, right.error
+    assert right.rgba[:3] == bytes((255, 255, 255))
+
+    left = await render_scene(frame, width, height, device_input=_relayed_tap(
+        _wire(width * 0.25, width), _wire(height / 2, height)))
+    assert left.rgba[:3] == bytes((0, 0, 0))
+
+
+FIELD_UI_SOURCE = """
+let name = ''
+export function get(app) {
+  return (
+    <div className="flex flex-col w-full h-full bg-white">
+      <input className="h-10 px-2 shrink-0 bg-slate-100 text-black" value={name}
+        onChange={(e) => { name = e.target.value; frameos.setState('name', name) }} />
+    </div>
+  )
+}
+"""
+
+FIELD_UI_SCENE = {
+    **TAP_UI_SCENE,
+    "id": "field-ui",
+    "name": "Field UI",
+    "apps": {"jsxUi": {
+        **TAP_UI_SCENE["apps"]["jsxUi"],  # type: ignore[index]
+        "sources": {**TAP_UI_SCENE["apps"]["jsxUi"]["sources"], "app.tsx": FIELD_UI_SOURCE},  # type: ignore[index]
+    }},
+}
+
+
+def _renderer_keeps_state() -> bool:
+    from app.utils.embedded_render import wasm_assets_dir
+
+    assets = wasm_assets_dir()
+    return (
+        _renderer_takes_relayed_events()
+        and assets is not None
+        and "frameos_wasm_set_kept_state" in (assets / "frameos.js").read_text(errors="replace")
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_keeps_state(), reason="no wasm bundle with frameos_wasm_set_kept_state")
+async def test_a_key_on_the_keyboard_a_tap_brought_up_types_in_the_next_pull():
+    """docs/server-rendering.md "Kept between pulls", on the bench as the
+    E1003's forms: a tap on the field brings the keyboard up, and the next
+    pull's tap on a key types into the field, though each pull is a new
+    process. Without what the first pull's UI kept, the same tap lands on the
+    form under where the keyboard was, and types nothing."""
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    await _skip_unless_relayed_taps_land()
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=[FIELD_UI_SCENE])
+    width, height = 320, 240
+
+    focused = await render_scene(frame, width, height, device_input=_relayed_tap(
+        _wire(width / 2, width), _wire(20, height)))
+    assert focused.rgba is not None, focused.error
+    assert focused.state is not None
+    kept = json.loads(focused.state["keptState"])
+    assert kept["targets"][0]["keyboard"] is True and kept["targets"][0]["focus"] > 0
+    # The keyboard is on the picture: its bottom half, zinc-900 at the left edge.
+    assert focused.rgba[(236 * width + 2) * 4:(236 * width + 2) * 4 + 3] == bytes((0x18, 0x18, 0x1B))
+
+    # The top left key of the letters, a keyboard's height (half of 240) from the bottom.
+    key_tap = _relayed_tap(_wire(2, width), _wire(122, height))
+    typed = await render_scene(frame, width, height, device_input=key_tap, kept_state=focused.state["keptState"])
+    assert typed.rgba is not None, typed.error
+    assert typed.state is not None
+    assert typed.state["state"].get("name") == "q"
+    assert json.loads(typed.state["keptState"])["targets"][0]["text"] == "q"
+
+    forgotten = await render_scene(frame, width, height, device_input=key_tap)
+    assert forgotten.state is not None
+    assert "name" not in forgotten.state["state"]
+    assert json.loads(forgotten.state["keptState"]) == {}
+
+
+REMEMBER_UI_SOURCE = """
+export function get(app) {
+  return (
+    <div className="w-full h-full bg-white" onClick={() => {
+      const taps = (frameos.recall('taps') ?? 0) + 1
+      frameos.remember('taps', taps)
+      frameos.setState('taps', taps)
+    }} />
+  )
+}
+"""
+
+REMEMBER_UI_SCENE = {
+    **TAP_UI_SCENE,
+    "id": "remember-ui",
+    "name": "Remember UI",
+    "apps": {"jsxUi": {
+        **TAP_UI_SCENE["apps"]["jsxUi"],  # type: ignore[index]
+        "sources": {**TAP_UI_SCENE["apps"]["jsxUi"]["sources"], "app.tsx": REMEMBER_UI_SOURCE},  # type: ignore[index]
+    }},
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_keeps_state(), reason="no wasm bundle with frameos_wasm_set_kept_state")
+async def test_what_an_app_remembers_lasts_into_the_next_pull():
+    """docs/server-rendering.md "Kept between pulls": an app's
+    frameos.remember values last on a board until the scene unloads or the
+    chip sleeps, and on a plane from one pull's process to the next. The
+    second tap counts 2 with what the first pull kept, and 1 without it."""
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    await _skip_unless_relayed_taps_land()
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=[REMEMBER_UI_SCENE])
+    width, height = 320, 240
+    tap = _relayed_tap(_wire(width / 2, width), _wire(height / 2, height))
+
+    first = await render_scene(frame, width, height, device_input=tap)
+    assert first.state is not None, first.error
+    assert first.state["state"].get("taps") == 1
+    kept = json.loads(first.state["keptState"])
+    assert [(app["sceneId"], app["memory"]) for app in kept["apps"]] == [("remember-ui", {"taps": "1"})]
+
+    second = await render_scene(frame, width, height, device_input=tap, kept_state=first.state["keptState"])
+    assert second.state is not None, second.error
+    assert second.state["state"].get("taps") == 2
+    assert json.loads(second.state["keptState"])["apps"][0]["memory"] == {"taps": "2"}
+
+    afresh = await render_scene(frame, width, height, device_input=tap)
+    assert afresh.state is not None, afresh.error
+    assert afresh.state["state"].get("taps") == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
+async def test_a_relayed_tap_on_a_switcher_tile_shows_that_scene_in_the_real_runtime():
+    """The switcher the plane kept (opened over `clock` a moment ago): a tap
+    on the second tile is the switch to `photos`, drawn in the same pull."""
+    import time
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    await _skip_unless_relayed_taps_land()
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
+    width, height = 400, 300
+    kept = {"system/sceneSwitcher": {"from": "clock", "highlight": "clock", "page": 0, "touchedAt": time.time()}}
+
+    # At 400x300 the two tiles sit top left: `clock` round (45, 70), `photos` round (122, 70).
+    result = await render_scene(frame, width, height, scene_id="system/sceneSwitcher", scene_states=kept,
+                                device_input=_relayed_tap(_wire(122, width), _wire(70, height)))
+
+    assert result.rgba is not None, result.error
+    assert result.state["sceneId"] == "photos"
+    assert result.rgba[:4] == bytes((0, 0, 0, 255))
+
+
+@pytest.mark.asyncio
+async def test_a_render_reports_when_the_scene_wants_its_next_picture(monkeypatch, tmp_path):
+    """The harness reports this render's `nextSleep` and the scene's
+    `refreshInterval` with the state (docs/server-rendering.md "When the next
+    picture is due"); the render pull reads them from it."""
+    from types import SimpleNamespace
+
+    from app.utils import embedded_render
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self, _request):
+            marker = '{"sceneId":"s","state":{},"seeded":true,"nextSleep":-1,"refreshInterval":60}'
+            return b"\x00" * 16, f"{_STATE_MARKER}{marker}\n".encode()
+
+    async def fake_exec(*_args, **_kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(embedded_render.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(embedded_render.shutil, "which", lambda _name: "/usr/bin/node")
+    monkeypatch.setattr(embedded_render, "wasm_assets_dir", lambda: tmp_path)
+    monkeypatch.setattr(embedded_render, "RENDER_HARNESS", Path(embedded_render.__file__))
+    monkeypatch.setattr(embedded_render, "_render_semaphore", asyncio.Semaphore(embedded_render.RENDER_CONCURRENCY))
+    monkeypatch.setattr(embedded_render, "_render_waiters", 0)
+
+    frame = SimpleNamespace(id=1, name="f", timezone=None, network={}, scenes=[{"id": "s", "nodes": [], "edges": []}])
+    _rgba, state, _assets = await embedded_render.render_scene_rgba_and_state(frame, 2, 2)  # type: ignore[arg-type]
+    assert state == {"sceneId": "s", "state": {}, "seeded": True, "nextSleep": -1, "refreshInterval": 60}
+
+    harness = (Path(embedded_render.__file__).parents[2] / "tools" / "embedded_wasm_render.mjs").read_text()
+    assert "frameos_wasm_next_sleep" in harness and "frameos_wasm_scene_interval" in harness
+
+
+def _renderer_reports_scene_timing() -> bool:
+    from app.utils.embedded_render import thin_client_renderer_available, wasm_assets_dir
+
+    assets = wasm_assets_dir()
+    script = (assets / "frameos.js").read_text(errors="replace") if assets is not None else ""
+    return thin_client_renderer_available() and "frameos_wasm_scene_interval" in script and "frameos_wasm_next_sleep" in script
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_reports_scene_timing(), reason="no wasm bundle with the timing exports")
+async def test_the_real_runtime_reports_the_scenes_interval():
+    """Through the harness and the wasm runtime: a scene whose setting asks
+    for a picture a minute reports 60, and no nextSleep of its own."""
+    from types import SimpleNamespace
+    from typing import Any
+
+    from app.utils.embedded_render import render_scene
+
+    scene = {
+        "id": "minute",
+        "name": "Minute",
+        "default": True,
+        "settings": {"execution": "interpreted", "refreshInterval": 60},
+        "fields": [],
+        "nodes": [
+            {"id": "render", "type": "event", "position": {"x": 0, "y": 0}, "data": {"keyword": "render"}},
+            {"id": "color", "type": "app", "position": {"x": 0, "y": 0},
+             "data": {"keyword": "render/color", "config": {"color": "#ffffff"}}},
+        ],
+        "edges": [{"id": "e1", "source": "render", "sourceHandle": "next", "target": "color", "targetHandle": "prev"}],
+    }
+    frame: Any = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=[scene])
+    result = await render_scene(frame, 16, 16)
+    assert result.rgba is not None, result.error
+    assert result.state is not None
+    assert result.state["refreshInterval"] == 60
+    assert result.state["nextSleep"] == -1

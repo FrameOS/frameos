@@ -145,6 +145,44 @@ static esp_err_t es7210_setup(void)
     return ESP_OK;
 }
 
+/* Both chips back to their lowest draw, as esp-bsp's es8311 suspend and
+ * es7210 stop leave them: the analog sections, references and microphone
+ * bias that es8311_setup / es7210_setup power up stay up through a deep
+ * sleep otherwise (the PMIC never switches the chips' supply off). The next
+ * boot resets and reconfigures both. */
+static esp_err_t es8311_power_down(void)
+{
+    static const uint8_t sequence[][2] = {
+        {0x32, 0x00}, {0x17, 0x00},               /* DAC and ADC volume to 0 */
+        {0x0E, 0xFF}, {0x12, 0x02}, {0x14, 0x00}, /* PGA, ADC modulator, DAC off */
+        {0x0D, 0xFA}, {0x15, 0x00},               /* analog off */
+        {0x02, 0x10}, {0x00, 0x00}, {0x00, 0x1F}, /* clocks to idle, chip in reset */
+        {0x01, 0x30}, {0x01, 0x00}, {0x45, 0x00}, /* clocks off */
+        {0x0D, 0xFC}, {0x02, 0x00},               /* analog references off */
+    };
+    for (size_t i = 0; i < sizeof(sequence) / sizeof(sequence[0]); i++) {
+        esp_err_t err = w8(FOS_I2C_ES8311, sequence[i][0], sequence[i][1]);
+        if (err != ESP_OK) return err;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t es7210_power_down(void)
+{
+    static const uint8_t sequence[][2] = {
+        {0x47, 0xFF}, {0x48, 0xFF}, {0x49, 0xFF}, {0x4A, 0xFF}, /* mic power off */
+        {0x4B, 0xFF}, {0x4C, 0xFF},                             /* bias, ADC, PGA off */
+        {0x40, 0x80},                                           /* analog power, VMID off */
+        {0x01, 0x7F},                                           /* clocks off */
+        {0x06, 0x07},                                           /* power down */
+    };
+    for (size_t i = 0; i < sizeof(sequence) / sizeof(sequence[0]); i++) {
+        esp_err_t err = w8(FOS_I2C_ES7210, sequence[i][0], sequence[i][1]);
+        if (err != ESP_OK) return err;
+    }
+    return ESP_OK;
+}
+
 /* ------------------------------------------------------------- the I2S */
 
 #if FOS_CODEC_I2S
@@ -323,6 +361,9 @@ bool fos_codec_init(void)
             .pull_down_en = GPIO_PULLDOWN_DISABLE,
             .intr_type = GPIO_INTR_DISABLE,
         };
+        /* A deep sleep held the amplifier off (fos_codec_sleep);
+         * a held pad ignores the configuration below. */
+        gpio_hold_dis((gpio_num_t)pins->pa);
         if (gpio_config(&io) == ESP_OK) {
             gpio_set_level((gpio_num_t)pins->pa, 0);
             s_pa_pin = pins->pa;
@@ -386,4 +427,18 @@ void fos_codec_tone(uint32_t freq_hz)
     tx_run_locked(s_tone_on || s_rx_on);
     xSemaphoreGive(s_lock);
 #endif
+}
+
+void fos_codec_sleep(void)
+{
+    if (!s_ready) return;
+    if (s_has_speaker && es8311_power_down() != ESP_OK) ESP_LOGW(TAG, "ES8311 did not power down");
+    if (s_has_mic && es7210_power_down() != ESP_OK) ESP_LOGW(TAG, "ES7210 did not power down");
+    /* The amplifier's enable floats once the chip sleeps, and an amplifier
+     * that drifts on idles at milliamps: hold it low until the next boot. */
+    if (s_pa_pin >= 0) {
+        gpio_set_level((gpio_num_t)s_pa_pin, 0);
+        gpio_hold_en((gpio_num_t)s_pa_pin);
+        gpio_deep_sleep_hold_en();
+    }
 }

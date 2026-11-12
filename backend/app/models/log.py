@@ -345,6 +345,16 @@ def _bootup_display_value(key: str, value: Any) -> Any:
     return None
 
 
+def _rendered_by_the_backend(frame: Frame) -> bool:
+    """A board the backend renders for (docs/server-rendering.md): the scene
+    its own render lines name is its idle runtime's, left from before, and
+    the backend's pull is what decides the scene shown. Taking the board's
+    word undid every switch the pull had just drawn (E1003, 2026-11-12)."""
+    from app.tasks.embedded_firmware import is_thin_client_frame
+
+    return is_thin_client_frame(frame)
+
+
 async def process_log(
     db: Session,
     redis: Redis,
@@ -366,7 +376,7 @@ async def process_log(
 
     event = log.get('event', 'log')
 
-    if event in SCENE_CHANGED_LOG_EVENTS:
+    if event in SCENE_CHANGED_LOG_EVENTS and not _rendered_by_the_backend(frame):
         scene_id = log.get("sceneId") or log.get("scene") or log.get("id")
         if scene_id:
             # No TTL: a frame that renders once an hour (or sleeps for a day)
@@ -375,6 +385,11 @@ async def process_log(
 
     changes: dict[str, Any] = {}
     changes.update(_sleep_forecast_changes(frame, event, log, timestamp))
+    # The rotation and scale a person set on the frame's own screen
+    # (docs/scene-settings.md "What a control plane learns").
+    from app.utils.frame_settings_adopt import panel_settings_changes
+
+    changes.update(panel_settings_changes(frame, log))
     # The device narrating its firmware update (`ota:<plane>` from an ESP32,
     # `cloud:upgrade` from a Pi) lands on the row as the cloud hub lands it,
     # so the workspace shows the download instead of a frame that reads
@@ -478,6 +493,19 @@ async def process_log(
         if mark_embedded_boot_deployed and embedded_boot_metadata is not None:
             record_successful_deploy(frame, _embedded_boot_deploy_snapshot(frame, embedded_boot_metadata), timestamp)
         await update_frame(db, redis, frame)
+
+    # A frame rendered on the backend that goes to sleep has its next picture
+    # drawn before it wakes, so the wake is a download, not a render
+    # (docs/server-rendering.md "Deep sleep").
+    if event == 'sleep' and changes.get('next_wake_at') is not None:
+        from app.api.embedded_device import leave_built_in_scene
+        from app.utils.server_render import schedule_prerender
+
+        # The scene switcher or the scene settings a key opened do not
+        # outlive the sleep, on the frame or here: the picture for the wake
+        # is the scene they were opened from (docs/server-rendering.md).
+        await leave_built_in_scene(redis, frame)
+        await schedule_prerender(redis, frame)
 
     if event == 'metrics':
         metrics_dict = deepcopy(log)

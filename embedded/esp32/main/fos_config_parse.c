@@ -324,6 +324,33 @@ const char *fos_config_led_type_name(uint8_t type)
     return k_led_type_names[type];
 }
 
+static const char *const k_cpu_mode_names[] = {"auto", "battery", "performance"};
+
+bool fos_config_parse_cpu_mode(const char *name, uint8_t *mode)
+{
+    if (!name) return false;
+    for (size_t i = 0; i < sizeof(k_cpu_mode_names) / sizeof(k_cpu_mode_names[0]); i++) {
+        if (strcasecmp(name, k_cpu_mode_names[i]) == 0) {
+            *mode = (uint8_t)i;
+            return true;
+        }
+    }
+    return false;
+}
+
+const char *fos_config_cpu_mode_name(uint8_t mode)
+{
+    if (mode >= sizeof(k_cpu_mode_names) / sizeof(k_cpu_mode_names[0])) return k_cpu_mode_names[0];
+    return k_cpu_mode_names[mode];
+}
+
+int fos_config_cpu_mhz(uint8_t mode, bool lcd, bool touch)
+{
+    if (mode == FOS_CPU_PERFORMANCE) return 240;
+    if (mode == FOS_CPU_BATTERY) return 160;
+    return lcd || touch ? 240 : 160;
+}
+
 esp_err_t fos_config_parse_gpio_buttons(const char *spec, fos_config_t *config)
 {
     if (!spec || !spec[0]) {

@@ -1,3 +1,4 @@
+import { scenesWithoutLayouts } from '../../../../utils/sceneLayouts'
 import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
 import { frameLogic } from '../../frameLogic'
@@ -121,8 +122,12 @@ export interface controlLogicActions {
   sceneActivationStarted: (sceneId: string) => {
     sceneId: string
   }
-  setCurrentScene: (sceneId: string) => {
+  setCurrentScene: (
+    sceneId: string,
+    state?: Record<string, any> | null
+  ) => {
     sceneId: string
+    state: Record<string, any> | null
   }
   sync: () => {
     value: true
@@ -207,7 +212,9 @@ export const controlLogic = kea<controlLogicType>([
   })),
   actions({
     sync: true,
-    setCurrentScene: (sceneId: string) => ({ sceneId }),
+    /** The one "Activate" (the scene drawer's Activate and Apply, the
+     * editor's): `state`, the drawer's field values, rides along. */
+    setCurrentScene: (sceneId: string, state?: Record<string, any> | null) => ({ sceneId, state: state ?? null }),
     currentSceneChanged: (sceneId: string) => ({ sceneId }),
     // The Activate button's own state: armed when an activation request
     // leaves the browser, released when the frame logs that scene's
@@ -348,7 +355,7 @@ export const controlLogic = kea<controlLogicType>([
     scenesAsOptions: [
       (s) => [s.scenes],
       (scenes: controlLogicValues['scenes']): { label: string; value: string }[] =>
-        (scenes ?? []).map((scene) => ({
+        scenesWithoutLayouts(scenes).map((scene) => ({
           label: scene.name || 'Unnamed Scene',
           value: scene.id || '',
         })),
@@ -392,7 +399,7 @@ export const controlLogic = kea<controlLogicType>([
       await breakpoint(SCENE_ACTIVATION_TIMEOUT_MS)
       actions.sceneActivationSettled(sceneId)
     },
-    setCurrentScene: async ({ sceneId }) => {
+    setCurrentScene: async ({ sceneId, state }) => {
       const scene =
         values.frameForm.scenes?.find((item) => item.id === sceneId) ??
         values.frame?.scenes?.find((item) => item.id === sceneId)
@@ -405,43 +412,49 @@ export const controlLogic = kea<controlLogicType>([
       })
       actions.sceneActivationStarted(sceneId)
       try {
-        let usbSucceeded = false
-        if (
-          (values.frame?.mode ?? 'rpios') === 'embedded' &&
-          frameUsbConsoleHasRendererVerbs(values.frame) &&
-          embeddedUsbApiCanUse(props.frameId)
-        ) {
-          try {
-            await runEmbeddedUsbApiCommand(props.frameId, 'scene-payload', { payload: sceneId, timeoutMs: 10000 })
-            usbSucceeded = true
-          } catch (error) {
-            // A stale or busy USB port must not strand a network-reachable
-            // frame — fall through to the HTTP event below.
-          }
-        }
         let detail = scene?.name || sceneId
         // A frame asleep between renders takes the switch on its next
         // check-in: its render:done is hours away, so the button settles now.
         let queued = false
-        if (!usbSucceeded) {
+        // The plane first: it knows whether the frame holds the scene (the
+        // cloud pushes the assigned set when it does not, a backend has the
+        // frame pull first) and keeps its own record in step. USB only when
+        // the plane cannot be reached: a USB select queues any id and answers
+        // ok, and leaves the plane out of the change.
+        let planeError: unknown = null
+        let body = ''
+        try {
           const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sceneId }),
+            body: JSON.stringify(state && Object.keys(state).length ? { sceneId, state } : { sceneId }),
           })
           if (!response.ok) {
             throw new Error('Failed to send scene activation event')
           }
-          // The cloud answers `type: "set_scenes"` when the frame did not hold
-          // the scene and got the assigned set re-pushed instead of a plain
-          // select — a deploy, so say so rather than "activated".
-          const body = await response.text()
-          if (activationWasRedeploy(body)) {
-            detail = `${detail}: pushed, the frame shows it as soon as it syncs`
-          } else if (activationWasQueued(body)) {
-            queued = true
-            detail = `${detail}: ${ACTIVATION_QUEUED_DETAIL}`
+          body = await response.text()
+        } catch (error) {
+          planeError = error
+        }
+        if (planeError) {
+          const usb =
+            !(state && Object.keys(state).length) &&
+            (values.frame?.mode ?? 'rpios') === 'embedded' &&
+            frameUsbConsoleHasRendererVerbs(values.frame) &&
+            embeddedUsbApiCanUse(props.frameId)
+          if (!usb) {
+            throw planeError
           }
+          await runEmbeddedUsbApiCommand(props.frameId, 'scene-payload', { payload: sceneId, timeoutMs: 10000 })
+          detail = `${detail}: over USB`
+        } else if (activationWasRedeploy(body)) {
+          // The cloud answers `type: "set_scenes"` when the frame did not
+          // hold the scene and got the assigned set re-pushed instead of a
+          // plain select: a push, so say so rather than "activated".
+          detail = `${detail}: pushed, the frame shows it as soon as it syncs`
+        } else if (activationWasQueued(body)) {
+          queued = true
+          detail = `${detail}: ${ACTIVATION_QUEUED_DETAIL}`
         }
         actions.currentSceneChanged(sceneId)
         socketLogic.actions.updateFrame({ id: props.frameId, active_scene_id: sceneId } as FrameType)

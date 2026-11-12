@@ -238,7 +238,63 @@ static void test_a_status_line_sits_under_the_mark(void)
     CHECK(ink_in_rows(fb, 0, mark_bottom) == mark_ink, "and leaves the mark");
     fos_lcd_splash_draw_status(fb, PANEL, PANEL, (fos_lcd_splash_status_t)99); /* not a line: cleared, no crash */
     CHECK(ink_in_rows(fb, mark_bottom, PANEL) == 0, "an unknown status draws nothing");
-    CHECK(FOS_SPLASH_TEXT_COUNT == FOS_LCD_SPLASH_STARTING, "a line for every status");
+    CHECK(FOS_SPLASH_TEXT_COUNT == FOS_LCD_SPLASH_STARTING, "a line for every status but the word");
+
+    /* "Updating" is the firmware line's first word: exactly the ink of its
+     * first FOS_SPLASH_TEXT_UPDATING_W columns, centered on its own width. */
+    fos_lcd_splash_draw_status(fb, PANEL, PANEL, FOS_LCD_SPLASH_UPDATE);
+    int firmware_x0 = (PANEL - FOS_SPLASH_TEXT_W[FOS_SPLASH_TEXT_UPDATING_LINE]) / 2;
+    int word_in_line = 0;
+    for (int y = mark_bottom; y < PANEL; y++) {
+        for (int x = firmware_x0; x < firmware_x0 + FOS_SPLASH_TEXT_UPDATING_W; x++) word_in_line += fb[y * PANEL + x] != 0;
+    }
+    int firmware = ink_in_rows(fb, mark_bottom, PANEL);
+    fos_lcd_splash_draw_status(fb, PANEL, PANEL, FOS_LCD_SPLASH_UPDATING);
+    int word = ink_in_rows(fb, mark_bottom, PANEL);
+    CHECK(word > 100 && word < firmware, "\"Updating\" alone: %d (firmware line %d)", word, firmware);
+    CHECK(word == word_in_line, "the word is the line's first columns: %d vs %d", word, word_in_line);
+    int word_x0 = (PANEL - FOS_SPLASH_TEXT_UPDATING_W) / 2;
+    int outside = 0;
+    for (int y = mark_bottom; y < PANEL; y++) {
+        for (int x = 0; x < PANEL; x++) {
+            if ((x < word_x0 || x >= word_x0 + FOS_SPLASH_TEXT_UPDATING_W) && fb[y * PANEL + x] != 0) outside++;
+        }
+    }
+    CHECK(outside == 0, "%d pixels of the word outside its centered box", outside);
+}
+
+/* A rotated frame's mark and line: each pixel the unrotated one's, turned as
+ * the packers turn a picture (embedded_main.nim panelCoords), on a square
+ * panel and on a wide one. */
+static void test_a_rotated_frame_turns_the_mark(void)
+{
+    static const int sizes[2][2] = {{480, 480}, {800, 480}};
+    for (int s = 0; s < 2; s++) {
+        int pw = sizes[s][0], ph = sizes[s][1];
+        for (int rotation = 90; rotation < 360; rotation += 90) {
+            int sw = rotation == 180 ? pw : ph, sh = rotation == 180 ? ph : pw;
+            uint16_t *flat = calloc((size_t)sw * sh, sizeof(uint16_t));
+            uint16_t *panel = calloc((size_t)pw * ph, sizeof(uint16_t));
+            fos_lcd_splash_set_rotation(0);
+            fos_lcd_splash_draw(flat, sw, sh, 1234, false);
+            fos_lcd_splash_draw_status(flat, sw, sh, FOS_LCD_SPLASH_STARTING);
+            fos_lcd_splash_set_rotation(rotation);
+            fos_lcd_splash_draw(panel, pw, ph, 1234, false);
+            fos_lcd_splash_draw_status(panel, pw, ph, FOS_LCD_SPLASH_STARTING);
+            int wrong = 0;
+            for (int y = 0; y < sh; y++) {
+                for (int x = 0; x < sw; x++) {
+                    int px = rotation == 90 ? sh - 1 - y : rotation == 180 ? sw - 1 - x : y;
+                    int py = rotation == 90 ? x : rotation == 180 ? sh - 1 - y : sw - 1 - x;
+                    if (panel[py * pw + px] != flat[y * sw + x]) wrong++;
+                }
+            }
+            CHECK(wrong == 0, "%dx%d at %d: %d pixels not where the turn puts them", pw, ph, rotation, wrong);
+            free(flat);
+            free(panel);
+        }
+    }
+    fos_lcd_splash_set_rotation(0);
 }
 
 int main(void)
@@ -250,6 +306,7 @@ int main(void)
     test_a_frame_redraws_the_squares_alone();
     test_a_panel_smaller_than_the_mark_gets_nothing();
     test_a_status_line_sits_under_the_mark();
+    test_a_rotated_frame_turns_the_mark();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

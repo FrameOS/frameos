@@ -1,0 +1,24 @@
+name: Pico toolchain
+description: >-
+  Installs the Pico firmware's compiler from cached .debs. The packages are about
+  590 MB, and on a slow Ubuntu mirror the download has taken over 50 minutes.
+runs:
+  using: composite
+  steps:
+    - name: Name the package cache
+      id: plan
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/install.sh" plan
+
+    # A new package version misses the key and restores the nearest older set,
+    # so only the package that changed is downloaded.
+    - name: Cache the packages
+      uses: actions/cache@v4
+      with:
+        path: ~/pico-apt
+        key: ${{ steps.plan.outputs.key }}
+        restore-keys: ${{ steps.plan.outputs.restore-key }}
+
+    - name: Install the packages
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/install.sh" install

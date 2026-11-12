@@ -13,7 +13,7 @@ export const metadata = { title: "Privacy Policy" };
 // actually requires ("concise, transparent, intelligible... clear and plain
 // language", art. 12(1)) — the dense version is not the compliant one.
 
-const lastUpdated = "12 September 2026";
+const lastUpdated = "11 November 2026";
 
 export default function PrivacyPage() {
   const entity = getLegalEntity();
@@ -59,12 +59,34 @@ export default function PrivacyPage() {
       <h3>Your account</h3>
       <p className="copy">
         Your email address, an optional display name, and a hash of your
-        password (or, if you sign in with Google, your Google account
-        identifier instead). We need this to have an account at all, so the
+        password (or, if you sign in with Google or Apple, that account's
+        identifier instead; with Apple, the email address may be a private
+        relay address Apple forwards to you). We need this to have an account at all, so the
         legal basis is <strong>performance of a contract</strong> (art. 6(1)(b)
         GDPR). Without it there is no service. We verify the email address
         because password resets and security notices have to reach the real
         owner of the account.
+      </p>
+
+      <h3>Paying for a plan</h3>
+      <p className="copy">
+        Payments are taken by Stripe. When you buy a paid plan, Stripe
+        receives your email address, the plan you chose and an identifier for
+        your account, so the payment can be matched to it. You give your
+        name, card, billing address and, for a business, your VAT number to
+        Stripe directly: we never see or store your card details. Stripe tells
+        us whether you paid, how much, the VAT and your country, and when a
+        plan renews, fails or ends. We keep that to know which plan your
+        account is on, to keep our books and to file VAT returns. The legal
+        basis is <strong>performance of a contract</strong> and, for the
+        accounting and tax records, a <strong>legal obligation</strong> (art.
+        6(1)(c) GDPR). Stripe works for us as a processor, and also uses
+        payment data as a controller in its own right to prevent fraud and to
+        meet its own legal duties, as{" "}
+        <a href="https://stripe.com/privacy" rel="noreferrer" target="_blank">
+          its privacy policy
+        </a>{" "}
+        explains. If you never buy a plan, Stripe never hears of you.
       </p>
 
       <h3>Your frames, scenes and files</h3>
@@ -225,6 +247,13 @@ export default function PrivacyPage() {
           forgets who acted cannot show that an account was abused. We keep
           these entries for up to two years, then remove them. Nothing else
           about you survives deletion.
+        </li>
+        <li>
+          <strong>Payment records</strong> — which plan an account bought,
+          what was paid and when. Kept for as long as accounting and tax law
+          requires, up to ten years, also after the account is deleted. They
+          hold an account identifier, the amounts and your country, not your
+          name, email address or card.
         </li>
         <li>
           <strong>Backups</strong> — the off-site backups roll over on a

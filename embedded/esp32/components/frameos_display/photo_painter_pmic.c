@@ -11,7 +11,13 @@
 
 #include "esp_err.h"
 
-esp_err_t fos_photo_painter_enable_epd_power(void)
+esp_err_t fos_photo_painter_enable_epd_power(void *(*lend_bus)(int sda, int scl))
+{
+    (void)lend_bus;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t fos_photo_painter_disable_epd_power(void)
 {
     return ESP_ERR_NOT_SUPPORTED;
 }
@@ -46,27 +52,35 @@ static i2c_master_bus_handle_t s_bus = NULL;
 static i2c_master_dev_handle_t s_dev = NULL;
 static bool s_ready = false;
 
-static esp_err_t pmic_bus_init(void)
+static esp_err_t pmic_bus_init(void *(*lend_bus)(int sda, int scl))
 {
     if (s_ready) return ESP_OK;
 
-    i2c_master_bus_config_t bus_config = {
-        .i2c_port = I2C_NUM_0,
-        .sda_io_num = PHOTO_PAINTER_I2C_SDA,
-        .scl_io_num = PHOTO_PAINTER_I2C_SCL,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7,
-        .flags = {
-            .enable_internal_pullup = true,
-        },
-    };
-    esp_err_t err = i2c_new_master_bus(&bus_config, &s_bus);
-    if (err == ESP_ERR_INVALID_STATE) {
-        err = i2c_master_get_bus_handle(I2C_NUM_0, &s_bus);
-    }
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "i2c bus init failed: %s", esp_err_to_name(err));
-        return err;
+    /* The clock and the codec chips sit on these pins too, and fos_i2c.c
+     * opens their bus before the display comes up: join it. Never a second
+     * i2c_new_master_bus on a port already taken — ESP-IDF 5.5 hands that
+     * call's error path the live bus, and its cleanup detaches GPIO47/48
+     * from it: every chip on the bus went silent, the AXP2101 read timed
+     * out, EPD_VCC stayed off and each refresh waited out BUSY (2026-11-06). */
+    s_bus = lend_bus ? (i2c_master_bus_handle_t)lend_bus(PHOTO_PAINTER_I2C_SDA, PHOTO_PAINTER_I2C_SCL)
+                     : NULL;
+    if (!s_bus) {
+        i2c_master_bus_config_t bus_config = {
+            .i2c_port = -1, /* any free port, as fos_i2c.c takes them */
+            .sda_io_num = PHOTO_PAINTER_I2C_SDA,
+            .scl_io_num = PHOTO_PAINTER_I2C_SCL,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .flags = {
+                .enable_internal_pullup = true,
+            },
+        };
+        esp_err_t err = i2c_new_master_bus(&bus_config, &s_bus);
+        if (err != ESP_OK) {
+            s_bus = NULL;
+            ESP_LOGW(TAG, "i2c bus init failed: %s", esp_err_to_name(err));
+            return err;
+        }
     }
 
     i2c_device_config_t dev_config = {
@@ -74,7 +88,7 @@ static esp_err_t pmic_bus_init(void)
         .device_address = AXP2101_ADDR,
         .scl_speed_hz = 100000,
     };
-    err = i2c_master_bus_add_device(s_bus, &dev_config, &s_dev);
+    esp_err_t err = i2c_master_bus_add_device(s_bus, &dev_config, &s_dev);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "AXP2101 device init failed: %s", esp_err_to_name(err));
         return err;
@@ -107,9 +121,9 @@ static esp_err_t pmic_write_u8(uint8_t reg, uint8_t value)
     return ESP_FAIL;
 }
 
-esp_err_t fos_photo_painter_enable_epd_power(void)
+esp_err_t fos_photo_painter_enable_epd_power(void *(*lend_bus)(int sda, int scl))
 {
-    esp_err_t err = pmic_bus_init();
+    esp_err_t err = pmic_bus_init(lend_bus);
     if (err != ESP_OK) return err;
 
     uint8_t chip_id = 0;
@@ -160,6 +174,18 @@ esp_err_t fos_photo_painter_enable_epd_power(void)
              ldo_on_before, ldo_on_after, ldo_on_readback,
              input_before, input_after, input_readback);
     return ESP_OK;
+}
+
+/* The panel keeps its picture unpowered, and a frame that deep-sleeps with
+ * EPD_VCC on feeds the controller through the whole sleep: the PMIC holds
+ * its rails, the ESP32's sleep does not reach them. */
+esp_err_t fos_photo_painter_disable_epd_power(void)
+{
+    if (!s_ready) return ESP_ERR_INVALID_STATE;
+    uint8_t ldo_on = 0;
+    ESP_RETURN_ON_ERROR(pmic_read_u8(AXP2101_REG_LDO_ONOFF_CTRL0, &ldo_on), TAG, "read LDO enable");
+    if ((ldo_on & (1u << AXP2101_ALDO4_ENABLE_BIT)) == 0) return ESP_OK;
+    return pmic_write_u8(AXP2101_REG_LDO_ONOFF_CTRL0, (uint8_t)(ldo_on & ~(1u << AXP2101_ALDO4_ENABLE_BIT)));
 }
 
 #endif /* CONFIG_IDF_TARGET_ESP32S3 */

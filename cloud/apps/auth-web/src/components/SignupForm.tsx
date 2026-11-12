@@ -6,10 +6,12 @@ import { useState } from "react";
 import { TurnstileWidget } from "./TurnstileWidget";
 
 export function SignupForm({
+  appleEnabled,
   googleEnabled,
   returnTo,
   turnstileSiteKey,
 }: {
+  appleEnabled: boolean;
   googleEnabled: boolean;
   returnTo?: string | undefined;
   /** Undefined when Turnstile is not configured; the widget is then omitted. */
@@ -33,6 +35,7 @@ export function SignupForm({
     ? `?return_to=${encodeURIComponent(returnTo)}`
     : "";
   const googleHref = `/api/auth/google/start${returnQuery}`;
+  const appleHref = `/api/auth/apple/start${returnQuery}`;
   const loginHref = `/login${returnQuery}`;
 
   async function submit(event: React.FormEvent) {
@@ -70,7 +73,11 @@ export function SignupForm({
         setError("An account with this email already exists. Sign in instead.");
       } else if (payload?.error === "email_taken_google") {
         setError(
-          "This email already signs in with Google. Use the Google button to sign in — or, to add a password to that account, use “Forgot password?” on the sign-in page.",
+          "This email already signs in with Google. Use the Google button to sign in, or, to add a password to that account, use “Forgot password?” on the sign-in page.",
+        );
+      } else if (payload?.error === "email_taken_apple") {
+        setError(
+          "This email already signs in with Apple. Use the Apple button to sign in, or, to add a password to that account, use “Forgot password?” on the sign-in page.",
         );
       } else if (payload?.error === "weak_password" && payload.message) {
         setError(payload.message);
@@ -173,6 +180,11 @@ export function SignupForm({
         {googleEnabled ? (
           <a className="button" href={googleHref}>
             Continue with Google
+          </a>
+        ) : null}
+        {appleEnabled ? (
+          <a className="button" href={appleHref}>
+            Continue with Apple
           </a>
         ) : null}
       </div>

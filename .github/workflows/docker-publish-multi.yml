@@ -21,11 +21,12 @@ jobs:
   # host, see tools/gha-runners/README.md): Buildroot release image on
   # the 32-core slot, ESP32 firmware on an 8-core slot. Cross builds split
   # per-arch — amd64/armv6 on epyc-8, arm64+armhf on GitHub's free ARM
-  # runners — see backend/bin/cross for the mapping and measurements. Depot
-  # is still used, deliberately, for the container image builds themselves
-  # (depot/build-push-action: the esp32-ci layer cache shared with
-  # e2e-docker.yml, and push-multiarch's remote amd64+arm64 builders) — only
-  # the billed runner minutes moved off Depot.
+  # runners — see backend/bin/cross for the mapping and measurements. The
+  # container images build with buildx against a registry layer cache on
+  # GHCR: the esp32-ci cache that e2e-docker.yml writes
+  # on every push to main, and one cache per platform for the runtime image
+  # that build-runtime-image writes per release. Nothing paid is left in
+  # the workflow (Depot, 2026-11).
   #
   # GitHub-hosted jobs are pinned to ubuntu-24.04, not ubuntu-latest (26.04
   # since 2026-10-22). On 26.04 the signing steps fail: the system Python is
@@ -409,39 +410,41 @@ jobs:
   build-esp32-generic-firmware:
     name: Build ESP32 firmware (generic, all panels)
     needs: [update-versions]
-    # Self-hosted 8-core slot; the esp32-ci image itself still comes from
-    # Depot's builders below (warm layer cache), only idf.py runs here.
+    # Self-hosted 8-core slot; the esp32-ci image is rebuilt from the GHCR
+    # layer cache that e2e-docker.yml keeps warm, idf.py runs here.
     runs-on: epyc-8
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
-      - name: Set up Depot CLI
-        uses: depot/setup-action@v1
+      - uses: docker/setup-buildx-action@v3
 
-      # Depot keeps a persistent layer cache per project, so the esp32-ci
-      # target (ESP-IDF toolchain + Nim) is only rebuilt when its layers
-      # actually change. load: true pulls the image into the local Docker
-      # daemon for the `docker run` below.
-      #
-      # This step must stay byte-identical in its cache-relevant inputs
-      # (project, context, target, build-args, platforms) to the esp32-ci
-      # build in e2e-docker.yml, which runs on every push to main. esp32-ci
-      # pulls in the whole app-builder stage, so that job is what keeps the
-      # release build's toolchain layers warm — diverge them and every
-      # release pays for a cold ESP-IDF/Nim/pnpm/emsdk build again.
-      - name: Build ESP32 CI Docker image
-        uses: depot/build-push-action@v1
+      - name: Login to GHCR
+        uses: docker/login-action@v3
         with:
-          project: rsbh2wrlkj
-          token: ${{ secrets.DEPOT_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Read-only against the esp32-ci layer cache (the comment on the same
+      # step in e2e-docker.yml): the toolchain layers are cache hits, the
+      # per-commit tail builds here. Same target and context as that job,
+      # so the cache it writes is the cache this reads. load: true puts the
+      # image into the local Docker daemon for the `docker run` below.
+      - name: Build ESP32 CI Docker image
+        uses: docker/build-push-action@v6
+        with:
           context: .
           target: esp32-ci
           tags: frameos-esp32-ci
           load: true
           push: false
+          cache-from: type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci
 
       - name: Build firmware
         timeout-minutes: 60
@@ -526,11 +529,14 @@ jobs:
   # GitHub-hosted runners (the three layouts share one build tree and, on the
   # S3, one Nim compile) so nothing here queues behind the epyc pool; the
   # generic job above stays exactly as it was — the cloud flasher depends on
-  # its assets and its Depot layer cache.
+  # its assets.
   build-esp32-layout-firmware:
     name: Build ESP32 firmware per flash layout
     needs: [update-versions]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -545,22 +551,25 @@ jobs:
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
-      - name: Set up Depot CLI
-        uses: depot/setup-action@v1
+      - uses: docker/setup-buildx-action@v3
 
-      # Byte-identical in its cache-relevant inputs to the esp32-ci builds in
-      # this workflow's generic job and in e2e-docker.yml, so it only ever
-      # pulls the warm image (see the generic job's comment).
-      - name: Build ESP32 CI Docker image
-        uses: depot/build-push-action@v1
+      - name: Login to GHCR
+        uses: docker/login-action@v3
         with:
-          project: rsbh2wrlkj
-          token: ${{ secrets.DEPOT_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same target, context and cache as the generic job's build: read-only.
+      - name: Build ESP32 CI Docker image
+        uses: docker/build-push-action@v6
+        with:
           context: .
           target: esp32-ci
           tags: frameos-esp32-ci
           load: true
           push: false
+          cache-from: type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci
 
       - name: Build firmware
         timeout-minutes: 60
@@ -775,11 +784,7 @@ jobs:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
       - name: Install pico toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi \
-            libstdc++-arm-none-eabi-newlib
+        uses: ./.github/actions/pico-toolchain
 
       - name: Cache pico-sdk
         id: pico-sdk-cache
@@ -825,37 +830,111 @@ jobs:
             release-assets/*-pico-2w.uf2
           if-no-files-found: error
 
-  # Depot builds both platforms remotely with its own persistent layer cache,
-  # so there is no separate warm-up build job: push-multiarch is the only
-  # image build and pushes the multi-arch manifest directly.
-  push-multiarch:
-    needs: [update-versions, build-prebuilt-cross, build-buildroot-release-image]
-    # The image itself is built on Depot's remote builders, so this runner
-    # only orchestrates: a free GitHub-hosted runner is plenty.
-    runs-on: ubuntu-24.04
+  # The runtime image, one native build per platform:
+  # amd64 on an epyc-8 slot, arm64 on GitHub's free Ampere runners, where the
+  # cross legs already build. Never under QEMU: the image compiles QuickJS,
+  # Nim programs, the wasm bundle and the frontend per platform, and an
+  # emulated build lost to four native cores the last time that was measured
+  # (backend/app/utils/release_targets.py). Each leg pushes its image to
+  # Docker Hub by digest only — no tag — with a per-platform layer cache on
+  # GHCR, so a release rebuilds only what its commit changed; push-multiarch
+  # then stitches the two digests into the tagged manifest list. The legs
+  # need nothing but the release commit (the Dockerfile copies no release
+  # asset), so they run beside the cross matrix instead of after it; the
+  # rule that the tags appear only once the binaries exist is kept by
+  # push-multiarch's needs.
+  build-runtime-image:
+    name: Build runtime image (${{ matrix.platform }})
+    needs: [update-versions]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: epyc-8
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
-      # No QEMU or local buildx setup: depot/build-push-action runs the build
-      # on Depot's remote amd64 and arm64 builders, so nothing is emulated or
-      # built on this runner. Only the registry login is still needed, because
-      # Depot pushes with this runner's Docker credentials.
+      - uses: docker/setup-buildx-action@v3
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract branch name
-        shell: bash
-        run: echo "BRANCH_NAME=${GITHUB_REF##*/}" >> "$GITHUB_ENV"
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Short SHA
-        shell: bash
-        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=frameos/frameos,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=registry,ref=ghcr.io/frameos/frameos-build-cache:runtime-${{ matrix.arch }}
+          cache-to: type=registry,ref=ghcr.io/frameos/frameos-build-cache:runtime-${{ matrix.arch }},mode=max
+
+      # One empty file named by the digest; push-multiarch globs them.
+      - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          case "$DIGEST" in sha256:*) ;; *) echo "no digest from the build: '$DIGEST'" >&2; exit 1 ;; esac
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-image-digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  push-multiarch:
+    needs: [update-versions, build-prebuilt-cross, build-buildroot-release-image, build-runtime-image]
+    # Nothing is built here. The two platform images are already on Docker
+    # Hub by digest; this job writes the tagged manifest list that points at
+    # them, so a free GitHub-hosted runner is plenty.
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+
+      - name: Download image digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: runtime-image-digest-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Read Docker version tags
         shell: bash
@@ -867,23 +946,30 @@ jobs:
             echo "DOCKER_VERSION_MAJOR=${DOCKER_VERSION%%.*}"
           } >> "$GITHUB_ENV"
 
-      - name: Set up Depot CLI
-        uses: depot/setup-action@v1
+      - uses: docker/setup-buildx-action@v3
 
-      # Push all built platforms as a multi-arch image
-      - name: Push multi-arch image
-        uses: depot/build-push-action@v1
-        with:
-          project: rsbh2wrlkj
-          token: ${{ secrets.DEPOT_TOKEN }}
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64/v8
-          tags: |
-            frameos/frameos:latest
-            frameos/frameos:${{ env.DOCKER_VERSION_MAJOR }}
-            frameos/frameos:${{ env.DOCKER_VERSION_MINOR }}
-            frameos/frameos:${{ env.DOCKER_VERSION }}
+      - name: Push multi-arch manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          cd /tmp/digests
+          # Exactly the two platform legs, each a file named by its digest.
+          sources=()
+          for digest in *; do
+            sources+=("frameos/frameos@sha256:${digest}")
+          done
+          if [ "${#sources[@]}" -ne 2 ]; then
+            echo "expected 2 image digests, found ${#sources[@]}: ${sources[*]}" >&2
+            exit 1
+          fi
+          docker buildx imagetools create \
+            -t frameos/frameos:latest \
+            -t "frameos/frameos:${DOCKER_VERSION_MAJOR}" \
+            -t "frameos/frameos:${DOCKER_VERSION_MINOR}" \
+            -t "frameos/frameos:${DOCKER_VERSION}" \
+            "${sources[@]}"
+          docker buildx imagetools inspect "frameos/frameos:${DOCKER_VERSION}"
 
   update-addon-repo:
     name: Update Home Assistant Addon

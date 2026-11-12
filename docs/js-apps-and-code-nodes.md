@@ -93,13 +93,15 @@ timeoutMs, find, findLength, findLimit})` (see [Big pages](#big-pages)), `frameo
 [Photos from the network](#photos-from-the-network)), `frameos.svg(svg,
 spec)`, `frameos.image(spec)`,
 `frameos.log()`, `frameos.error()`, `frameos.setState()`,
-`frameos.setNextSleep()`, `frameos.getSetting("namespace", "key")` (only
+`frameos.setNextSleep()`, `frameos.dispatch(event, payload)` (what a `dispatch`
+node sends), `frameos.getSetting("namespace", "key")` (only
 namespaces the app's `config.json` declares under `settings`),
 `frameos.remember(key, value)` / `frameos.recall(key)` (see below), the asset
 calls `listAssets`, `assetExists`, `assetSize`, `readAsset`, `writeAsset`,
 `appendAsset`, `deleteAsset`, `loadAssetImage`, and the stream calls
 `openAssetStream`, `createStream`, `streamRead`, `streamWrite`,
-`streamAtEnd`, `streamRewind`, `streamClose` (base64 in and out). Asset
+`streamAtEnd`, `streamRewind`, `streamClose` (base64 in and out; see "Big
+text" below for text a line at a time). Asset
 paths are relative to the frame's assets folder; nothing outside it
 resolves, and a symlink inside it is not a way out. What the app may do
 there is its `config.json` `"permissions"` list: `"assets"` to read,
@@ -340,8 +342,12 @@ called. A `get()`-only app in a button flow does nothing at all; from FrameOS
 
 | category | export the runtime calls | how the node is wired |
 |---|---|---|
-| `data` | `export function get(app, context)` → returns the `output` value (string, json, or `frameos.svg`/`frameos.image` or JSX for an image: `docs/jsx-ui.md`) | `codeNodeEdge` from `fieldOutput` into another node's `fieldInput/<field>` (e.g. `render/image`'s `image`) |
+| `data` | `export function get(app, context)` → returns the `output` value (string, json, or for an image JSX from an `app.tsx`, `docs/jsx-ui.md`, or `frameos.fetchImage`'s image) | `codeNodeEdge` from `fieldOutput` into another node's `fieldInput/<field>` (e.g. `render/image`'s `image`) |
 | `logic` | `export function run(app, context)` → returns nothing; acts with `frameos.setState`, `frameos.setNextSleep`, … | in a flow: `appNodeEdge` from an event node's `next` (or the node before it) into its `prev`, e.g. `button` → the app → a `render` dispatch |
+
+`export function onEvent(app, context)` is optional and hears the events the
+app's `config.json` names in `events` (`["button"]`, or `["*"]`), wired to
+nothing; `true` draws its scene again. `docs/events.md` "Apps that subscribe".
 
 `export function init(app)` is optional and runs each time the app's
 interpreter starts: once per scene on a Pi, before every render on an ESP32
@@ -349,8 +355,36 @@ and in a preview running as one (see [Where an app keeps its values](#where-an-a
 Do **not** give a
 scene-local app `category: "render"`: as of Aug 2026 such an app placed in the
 prev/next chain draws nothing and logs nothing. The pattern that works is a
-**data app whose `get()` returns `frameos.svg(...)`**, wired into a
-`render/image` node — that is how the Weather sample's `weatherPanel` works.
+**data app whose `get()` returns the image**, wired into a `render/image`
+node. For anything the app draws itself, that image is JSX from an `app.tsx`:
+an `<svg>` or a UI (`docs/jsx-ui.md`), never SVG markup built as a string for
+`frameos.svg(...)` (see [SVG that the frame can draw](#svg-that-the-frame-can-draw)).
+
+
+### Big text
+
+A field with `"capabilities": { "byteIter": {} }` in `config.json` gets a
+downloaded body as a stream however large it is (a plain string stays a
+string). Read either with `frameos.openLines(source, options)`:
+
+```ts
+const lines = frameos.openLines(app.config.feed, { unfold: true, trim: true, only: ['BEGIN:VEVENT', 'SUMMARY'] })
+let line
+while ((line = frameos.nextLine(lines)) !== null) {
+  if (line.startsWith('BEGIN:VEVENT')) {
+    const record = frameos.nextBlock(lines, 'END:VEVENT') // the record's kept lines, joined with newlines
+  }
+}
+```
+
+The file stays on disk and only one 8 KB window plus the line in hand is ever
+held. Everything happens before JavaScript sees it: `only` keeps lines by
+prefix and reads past the rest (folded continuations included), `unfold` joins
+continuation lines, `maxLength` cuts one (64 KB by default) on a character.
+`nextBlock` reads a whole record up to a line starting with its argument, which
+`only` must keep. A reader lives for the call that opened it, and closes with
+`frameos.streamClose`. Keep what you take: in a long feed, decide from the fewest lines you
+can, and do not hold what is outside what you will return (`repo/apps/json/icalJson`).
 
 ## The refresh interval is a state field
 
@@ -406,9 +440,16 @@ The rules live in `frameos/src/frameos/refresh_interval.nim` (runtime),
 
 ## SVG that the frame can draw
 
-`render/svg` (and `frameos.svg(...)` in JS apps, and `<svg>` JSX returned
-from a `.tsx` app's `get()`, which skips the markup: `docs/jsx-ui.md`) go
-through a strict renderer.
+A drawing an app makes is `<svg>` JSX returned from an `app.tsx`'s `get()`
+(`docs/jsx-ui.md`, FrameOS 2026.10.21 and later). The runtime reads the JSX
+objects straight into pixie's node tree: no markup is built in JS, none is
+parsed, nothing is escaped, and an LCD repaints only what changed. Building
+the same drawing as a string (template literals, `join("")`, an escape
+helper) for `frameos.svg(...)` or a code node feeding `render/svg` is the old
+route: slower every render, and one raw `&` blanks it. Keep `frameos.svg` and
+`render/svg` for markup that came from elsewhere (a download, an asset).
+
+All three go through a strict renderer.
 Any unsupported tag fails the **whole** document — `render/svg` prints
 "Failed to render SVG", a JS app's image comes back empty ("No image
 provided"). Supported: `svg` (with a `viewBox`), `g`, `path`, `rect`,
@@ -482,12 +523,12 @@ render allocates — not terse code:
   payload straight away, slice lists to what fits on screen *before* mapping
   over them, ask the API for fewer rows and fields when it lets you, and do
   not park whole responses in module-level variables or `app.state`.
-- **Build output once.** Collect parts in one array and `join("")` at the end
-  rather than growing strings in nested loops or chaining
-  `map`/`filter`/`concat` copies of a large array. Keep generated SVG small:
-  round coordinates to one decimal, thin polylines to what the pixel grid can
-  show, scale a shape with one `<g transform="translate(x y) scale(s)">`
-  instead of recomputing its points, and stay in the hundreds of elements.
+- **Build a drawing as JSX**, with one `.map()` over the data, not as a
+  string, and not with chained `map`/`filter`/`concat` copies of a large
+  array. Keep it small: round coordinates to one decimal, thin polylines to
+  what the pixel grid can show, scale a shape with one
+  ``<g transform={`translate(${x} ${y}) scale(${s})`}>`` instead of
+  recomputing its points, and stay in the hundreds of elements.
 - **Scenes that re-render every second or faster** set their buffers up in
   `init()` and update them in place: flat arrays of numbers and fixed-size
   pools, no new objects, closures or big strings per frame, no fetch or
@@ -504,7 +545,7 @@ render allocates — not terse code:
 - Every code node argument is both declared in `codeArgs` and fed by an edge.
 - Images flow only into image fields; text/json only into non-image fields.
 - Time formatting uses `{hour/2}`-style tokens.
-- Scene-local JS apps are data apps exporting `get`, wired into `render/image`.
+- Scene-local JS apps are data apps exporting `get`, wired into `render/image`; one that draws is an `app.tsx` returning JSX, never SVG markup built as a string.
 - SVG uses only the supported tags; gradients are top-level `linearGradient` with `userSpaceOnUse`.
 - Nothing big is embedded as an object literal or kept alive between renders (see "Write for the smallest frame").
 - A JS app keeps what must outlast a render with `frameos.remember` (private) or `frameos.setState` (shared), never in a module variable.

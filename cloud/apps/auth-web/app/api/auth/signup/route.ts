@@ -2,7 +2,7 @@ import {
   createDb,
   createPasswordAccount,
   findAccountByPasswordEmail,
-  findVerifiedGoogleAccountByEmail,
+  findVerifiedSocialAccountByEmail,
   normalizeEmail,
   passwordProviderIssuer,
 } from "@frameos-cloud/db";
@@ -98,12 +98,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "email_taken" }, { status: 409 });
   }
 
-  // A Google-first account with this email: never let a signup plant a
-  // password on it (the "verify" email could trick the real owner into
-  // activating a stranger's password). The owner adds a password through the
-  // reset flow instead, where only the inbox owner picks the password.
-  if (await findVerifiedGoogleAccountByEmail(db, email)) {
-    return NextResponse.json({ error: "email_taken_google" }, { status: 409 });
+  // A Google- or Apple-first account with this email: never let a signup
+  // plant a password on it (the "verify" email could trick the real owner
+  // into activating a stranger's password). The owner adds a password
+  // through the reset flow instead, where only the inbox owner picks the
+  // password.
+  const social = await findVerifiedSocialAccountByEmail(db, email);
+  if (social) {
+    return NextResponse.json({ error: `email_taken_${social.providerKey}` }, { status: 409 });
   }
 
   const passwordHash = await hashPassword(password);

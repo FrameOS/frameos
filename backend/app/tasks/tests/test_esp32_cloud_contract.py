@@ -105,5 +105,10 @@ def test_single_plane_settings_carry_a_parity_reason():
     # has a microphone path); 13 with that microphone's three pins
     # (`mic_clk_pin`, `mic_data_pin`, `mic_pwr_pin`, the same release); 15
     # with the status LED (`led_pin`, `led_type`: the board LED that follows
-    # the ESP32 buzzer's notes, fos_led.c; no Pi preset has one).
-    assert by_plane.get("esp32", 0) <= 15, by_plane
+    # the ESP32 buzzer's notes, fos_led.c; no Pi preset has one); 16 with
+    # `touch_beep` (2026.11.6: the click of a press on the glass, through the
+    # same buzzer); 18 with `cpu_mode` (2026.11.7: the chip's clock, set at
+    # boot; a Pi's is the kernel governor's); 19 with `render_mode` (the same
+    # release: where an ESP32's scenes run, docs/server-rendering.md; a Pi
+    # always renders on its own runtime).
+    assert by_plane.get("esp32", 0) <= 19, by_plane

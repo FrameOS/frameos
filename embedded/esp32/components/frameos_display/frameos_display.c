@@ -2,11 +2,18 @@
 
 #include <string.h>
 
+#include "driver/gpio.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "DEV_Config.h"
+#include "fos_partial_refresh.h"
+#include "fos_refresh_queue.h"
 #include "frameos_panel_table.h"
 #include "it8951.h"
 #include "lcd_st7701s_rgb.h"
@@ -21,6 +28,37 @@ void EPD_13IN3E_SetVariant(int variant) __attribute__((weak));
 
 static const fos_panel_entry_t *s_panel = NULL;
 static bool s_module_ready = false;
+static void *(*s_lend_i2c_bus)(int sda, int scl) = NULL;
+static bool s_photo_painter = false;
+static int8_t s_panel_pins[7] = {-1, -1, -1, -1, -1, -1, -1};
+
+/* What a panel with a partial waveform shows, byte for byte: every picture
+ * that reaches the glass goes through fos_display_blit or fos_display_update
+ * and is copied here, whoever drew it (a status screen, an overlay). */
+static const fos_panel_partial_t *s_partial = NULL;
+static uint8_t *s_glass = NULL;
+static bool s_glass_known = false;
+static uint32_t s_partials_since_full = 0;
+/* The panel is left awake after a partial update, its analog supply on: its
+ * reset and deep sleep are 300 ms of every update, and the next tap is usually
+ * moments away. A few idle seconds turn the supply off and keep the controller
+ * awake, which costs the next tap under 100 ms; minutes put it in deep sleep. */
+static bool s_panel_awake = false;
+static bool s_panel_rested = false;
+static int64_t s_last_partial_us = 0;
+#define FOS_PANEL_ANALOG_US (10 * 1000000LL)
+#define FOS_PANEL_AWAKE_US (300 * 1000000LL)
+/* The IT8951's standby is not rested: its first waveform after one costs 600
+ * ms more than the next (measured on a reTerminal E1003, 2026-11-09), so it
+ * stays up until the panel is parked. */
+/* The ghosts a tapping session left (fos_partial_refresh.h), once it is
+ * clearly over: the refresh is seconds in which a tap would wait. */
+#define FOS_PANEL_CLEAN_US (30 * 1000000LL)
+/* After this long without a tap the greys a tapping session drew as a halftone
+ * go up properly (it8951.c). */
+#define FOS_PANEL_SETTLE_US (2500 * 1000LL)
+/* A partial update sends two whole frames: the SSD1677's rated write clock. */
+#define FOS_PARTIAL_SPI_HZ (20 * 1000 * 1000)
 
 static bool is_photo_painter_hardware(const fos_display_config_t *config)
 {
@@ -28,25 +66,28 @@ static bool is_photo_painter_hardware(const fos_display_config_t *config)
            strcmp(config->hardware_preset, "waveshare_esp32_s3_photopainter") == 0;
 }
 
-/* Seeed reTerminal E1004: the same 1200x1600 Spectra 6 panel class as the
- * Waveshare 13.3" E6 and driven by the same EPD_13in3e code, but its T133A01
- * panel wants the vendor's own analogue tuning in the init sequence. Like the
- * PhotoPainter PMIC, that is a fact about the board, so the preset selects
- * it; the panel key stays EPD_13in3e everywhere else. */
-static bool is_reterminal_e1004_hardware(const fos_display_config_t *config)
+/* Seeed reTerminal E1004 and XIAO EE02: the same 1200x1600 Spectra 6 panel
+ * class as the Waveshare 13.3" E6 and driven by the same EPD_13in3e code, but
+ * their T133A01 panel wants the vendor's own analogue tuning in the init
+ * sequence. Like the PhotoPainter PMIC, that is a fact about the board, so
+ * the preset selects it; the panel key stays EPD_13in3e everywhere else. */
+static bool has_t133a01_panel(const fos_display_config_t *config)
 {
     return config && config->hardware_preset &&
-           strcmp(config->hardware_preset, "seeed_reterminal_e1004") == 0;
+           (strcmp(config->hardware_preset, "seeed_reterminal_e1004") == 0 ||
+            strcmp(config->hardware_preset, "seeed_xiao_ee02") == 0);
 }
 
-/* Seeed reTerminal E1003: the Waveshare 10.3" HAT's ED103TC2 behind the same
- * IT8951, panel key EPD_10in3, but a board of its own: its own VCOM, columns
- * that run right to left and a controller that must be told the temperature
- * (it8951.c). Selected by the preset, like the E1004's T133A01 tuning. */
-static bool is_reterminal_e1003_hardware(const fos_display_config_t *config)
+/* Seeed reTerminal E1003 and XIAO EE03: the Waveshare 10.3" HAT's ED103TC2
+ * behind the same IT8951, panel key EPD_10in3, but Seeed's own build of it:
+ * its own VCOM, columns that run right to left and a controller that must be
+ * told the temperature (it8951.c; Seeed_GFX2 drives both boards the same).
+ * Selected by the preset, like the T133A01 tuning. */
+static bool has_seeed_it8951_panel(const fos_display_config_t *config)
 {
     return config && config->hardware_preset &&
-           strcmp(config->hardware_preset, "seeed_reterminal_e1003") == 0;
+           (strcmp(config->hardware_preset, "seeed_reterminal_e1003") == 0 ||
+            strcmp(config->hardware_preset, "seeed_xiao_ee03") == 0);
 }
 
 static size_t panel_buffer_size(int width, int height, fos_pixel_format_t format)
@@ -104,16 +145,17 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
     }
 
     bool photo_painter = is_photo_painter_hardware(config);
+    s_photo_painter = photo_painter;
     if (EPD_7IN3E_SetPhotoPainterMode) {
         EPD_7IN3E_SetPhotoPainterMode(photo_painter ? 1 : 0);
     }
     if (EPD_13IN3E_SetVariant) {
-        EPD_13IN3E_SetVariant(is_reterminal_e1004_hardware(config)
+        EPD_13IN3E_SetVariant(has_t133a01_panel(config)
                                   ? FOS_EPD_13IN3E_VARIANT_T133A01
                                   : FOS_EPD_13IN3E_VARIANT_WAVESHARE);
     }
-    fos_it8951_set_variant(is_reterminal_e1003_hardware(config) ? FOS_IT8951_VARIANT_SEEED_E1003
-                                                                : FOS_IT8951_VARIANT_WAVESHARE);
+    fos_it8951_set_variant(has_seeed_it8951_panel(config) ? FOS_IT8951_VARIANT_SEEED_E1003
+                                                          : FOS_IT8951_VARIANT_WAVESHARE);
 
     /* The RGB LCD's control wiring (its IO expander, its 3-wire SPI, its
      * backlight) is the board's, not the panel's: the preset picks the
@@ -121,7 +163,7 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
     fos_lcd_st7701s_select_board(config->hardware_preset);
 
     if (photo_painter) {
-        esp_err_t pmic_err = fos_photo_painter_enable_epd_power();
+        esp_err_t pmic_err = fos_photo_painter_enable_epd_power(s_lend_i2c_bus);
         if (pmic_err != ESP_OK) {
             ESP_LOGW(TAG, "PhotoPainter PMIC EPD power init failed: %s",
                      esp_err_to_name(pmic_err));
@@ -130,11 +172,18 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
 
     DEV_SetPinConfig(config->rst, config->dc, config->cs, config->cs2, config->busy,
                      config->sck, config->mosi, config->pwr);
+    s_partial = NULL;
+    for (size_t i = 0; i < FOS_PANEL_PARTIAL_COUNT; i++) {
+        if (strcmp(fos_panel_partial_table[i].name, entry->name) == 0) s_partial = &fos_panel_partial_table[i];
+    }
+    const int8_t panel_pins[] = {config->rst, config->dc, config->cs, config->cs2,
+                                 config->busy, config->sck, config->mosi};
+    memcpy(s_panel_pins, panel_pins, sizeof(s_panel_pins));
     if (entry->bus == FOS_PANEL_BUS_SPI_READ) {
         DEV_SetReadPin(config->dc);
         DEV_SetSpiClock(FOS_IT8951_SPI_HZ);
     } else {
-        DEV_SetSpiClock(0);
+        DEV_SetSpiClock(s_partial ? FOS_PARTIAL_SPI_HZ : 0);
     }
     s_panel = entry;
     /* An RGB LCD comes up now, not at the first blit: its scan-out starts
@@ -159,6 +208,11 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
 void fos_display_set_temperature_hook(bool (*read_celsius)(int *celsius))
 {
     fos_it8951_set_temperature_source(read_celsius);
+}
+
+void fos_display_set_i2c_lender(void *(*lend_bus)(int sda, int scl))
+{
+    s_lend_i2c_bus = lend_bus;
 }
 
 bool fos_display_present(void) { return s_panel != NULL; }
@@ -284,32 +338,34 @@ bool fos_pixel_format_is_grey(fos_pixel_format_t format)
     return format == FOS_PIXEL_1BPP || format == FOS_PIXEL_2BPP_GRAY || format == FOS_PIXEL_4BPP_GRAY;
 }
 
-size_t fos_render_canvas_bytes_per_pixel(int width, int height, size_t psram_total_bytes,
-                                         fos_pixel_format_t format)
+size_t fos_render_canvas_bits_per_pixel(int width, int height, size_t psram_total_bytes,
+                                        fos_pixel_format_t format)
 {
     if (width <= 0 || height <= 0) return 0;
-    if (fos_pixel_format_is_grey(format)) return 1;
-    if (format == FOS_PIXEL_RGB565) return 2;
+    if (format == FOS_PIXEL_4BPP_GRAY) return 4;
+    if (fos_pixel_format_is_grey(format)) return 8;
+    if (format == FOS_PIXEL_RGB565) return 16;
     size_t rgbx = (size_t)width * (size_t)height * 4u;
     if (psram_total_bytes > 0 && rgbx * FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE <= psram_total_bytes) {
-        return 4;
+        return 32;
     }
-    return 2;
+    return 16;
 }
 
-size_t fos_display_canvas_bytes_per_pixel(void)
+size_t fos_display_canvas_bits_per_pixel(void)
 {
     if (!s_panel) return 0;
-    return fos_render_canvas_bytes_per_pixel(fos_display_width(), fos_display_height(),
-                                             heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
-                                             fos_display_format());
+    return fos_render_canvas_bits_per_pixel(fos_display_width(), fos_display_height(),
+                                            heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
+                                            fos_display_format());
 }
 
 size_t fos_display_canvas_bytes(void)
 {
     if (!s_panel) return 0;
-    return (size_t)fos_display_width() * (size_t)fos_display_height() *
-           fos_display_canvas_bytes_per_pixel();
+    /* Rows of whole bytes: a 4-bit canvas of an odd width is padded. */
+    return ((size_t)fos_display_width() * fos_display_canvas_bits_per_pixel() + 7u) / 8u *
+           (size_t)fos_display_height();
 }
 
 size_t fos_display_render_psram_bytes(void)
@@ -349,6 +405,161 @@ esp_err_t fos_display_spi_bus_share(int miso_pin, int *host)
     return ESP_OK;
 }
 
+/* init, picture, refresh and sleep: the whole of a full refresh. Under one bus
+ * hold: the drivers toggle CS by hand, so a shared card may not get a word in
+ * until the panel sleeps. */
+static esp_err_t refresh_in_place(const uint8_t *buf)
+{
+    int64_t start = esp_timer_get_time();
+    /* A controller that keeps the picture (the IT8951) waits for a waveform at
+     * its next use (it8951.c): put to sleep here, it was waited for here, 1.7 s
+     * of each of the E1003's scene switches. It stays up as after a partial
+     * update, and is parked like one (fos_display_park_if_idle). */
+    bool keep_awake = s_partial != NULL && s_partial->changed != NULL;
+    DEV_SPI_Acquire();
+    if (s_panel_awake && !keep_awake) {
+        /* Left up by partial updates: down first, the full init starts cold.
+         * Not the IT8951: its init only wakes it, its display waits for the
+         * waveform running, and a standby costs its next waveform 600 ms. */
+        s_panel->sleep();
+        s_panel_awake = false;
+    }
+    if (s_panel->driver_init() != 0) {
+        DEV_SPI_Release();
+        ESP_LOGE(TAG, "panel init failed");
+        return ESP_FAIL;
+    }
+    s_panel->display((uint8_t *)buf);
+    if (!keep_awake) s_panel->sleep();
+    DEV_SPI_Release();
+    if (keep_awake) {
+        s_last_partial_us = esp_timer_get_time();
+        s_panel_rested = false;
+    }
+    s_panel_awake = keep_awake;
+    ESP_LOGI(TAG, "blit + refresh took %lld ms", (esp_timer_get_time() - start) / 1000);
+    return ESP_OK;
+}
+
+/* What the glass shows after a full refresh, for the partial updates after it. */
+static void note_full_refresh(const uint8_t *buf, size_t len)
+{
+    if (!fos_display_supports_partial()) return;
+    if (!s_partial->changed) {
+        if (!s_glass) s_glass = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_glass && s_glass != buf) memcpy(s_glass, buf, len);
+        s_glass_known = s_glass != NULL;
+    }
+    s_partials_since_full = 0;
+}
+
+/* A full refresh held whoever asked for the whole of it: the reTerminal
+ * E1002's color refresh is 28.7 s, and its render task answered no button and
+ * no command all along; the Sticky's 2.2 s came after every scene switch
+ * (2026-11-10). An SPI panel refreshes on a task of its own. The picture is
+ * copied and the caller goes on; one asked for while a refresh runs waits as
+ * the next (the newest only: the glass catches up with what the frame shows
+ * now, not with every frame between). Every other use of the panel waits for
+ * both first (refresh_wait), and so do a deep sleep (fos_display_park) and a
+ * restart (the shutdown handler). Not the IT8951, which keeps the picture and
+ * waits for its waveform at the next use anyway (and whose 1.25 MiB copy an
+ * 8 MB board cannot spare); and a copy that does not fit refreshes in place. */
+#define REFRESH_TASK_STACK_BYTES 5120
+static void *refresh_alloc(size_t len)
+{
+    return heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
+static TaskHandle_t s_refresh_task = NULL;
+static SemaphoreHandle_t s_refresh_lock = NULL; /* s_refresh_queue's */
+static SemaphoreHandle_t s_refresh_idle = NULL; /* taken while a picture is owed */
+static fos_refresh_queue_t s_refresh_queue = {.alloc = refresh_alloc, .release = heap_caps_free};
+
+static void refresh_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        for (;;) {
+            xSemaphoreTake(s_refresh_lock, portMAX_DELAY);
+            const uint8_t *picture = fos_refresh_queue_current(&s_refresh_queue);
+            xSemaphoreGive(s_refresh_lock);
+            if (picture != NULL) refresh_in_place(picture);
+            xSemaphoreTake(s_refresh_lock, portMAX_DELAY);
+            bool more = fos_refresh_queue_done(&s_refresh_queue);
+            if (!more) xSemaphoreGive(s_refresh_idle);
+            xSemaphoreGive(s_refresh_lock);
+            if (!more) break;
+        }
+    }
+}
+
+/* Until no picture is owed. The refresh task itself never waits for itself. */
+static void refresh_wait(void)
+{
+    if (s_refresh_idle == NULL || xTaskGetCurrentTaskHandle() == s_refresh_task) return;
+    xSemaphoreTake(s_refresh_idle, portMAX_DELAY);
+    xSemaphoreGive(s_refresh_idle);
+}
+
+/* A restart cuts the panel off mid-waveform otherwise, its high voltage on. */
+static void refresh_shutdown(void)
+{
+    if (s_refresh_idle == NULL || xTaskGetCurrentTaskHandle() == s_refresh_task) return;
+    if (xSemaphoreTake(s_refresh_idle, pdMS_TO_TICKS(60000)) == pdTRUE) {
+        xSemaphoreGive(s_refresh_idle);
+    }
+}
+
+static bool refresh_task_ready(void)
+{
+    if (s_refresh_task != NULL) return true;
+    s_refresh_lock = xSemaphoreCreateMutex();
+    s_refresh_idle = xSemaphoreCreateBinary();
+    if (s_refresh_lock == NULL || s_refresh_idle == NULL) goto fail;
+    xSemaphoreGive(s_refresh_idle);
+    if (xTaskCreatePinnedToCore(refresh_task, "fos_refresh", REFRESH_TASK_STACK_BYTES, NULL, 5,
+                                &s_refresh_task, tskNO_AFFINITY) != pdPASS) {
+        s_refresh_task = NULL;
+        goto fail;
+    }
+    esp_register_shutdown_handler(refresh_shutdown);
+    return true;
+fail:
+    if (s_refresh_lock) vSemaphoreDelete(s_refresh_lock);
+    if (s_refresh_idle) vSemaphoreDelete(s_refresh_idle);
+    s_refresh_lock = NULL;
+    s_refresh_idle = NULL;
+    return false;
+}
+
+/* The picture handed to the refresh task, or false: refresh in place. */
+static bool refresh_hand_over(const uint8_t *buf, size_t len)
+{
+    if (s_panel->bus != FOS_PANEL_BUS_SPI || (s_partial != NULL && s_partial->changed != NULL)) {
+        return false;
+    }
+    if (!refresh_task_ready()) return false;
+    xSemaphoreTake(s_refresh_lock, portMAX_DELAY);
+    fos_refresh_put_t put = fos_refresh_queue_put(&s_refresh_queue, buf, len);
+    if (put == FOS_REFRESH_STARTED) {
+        /* Free unless a waiter holds it for the moment between its take and
+         * its give: blocking, or that waiter's give would leave it free with
+         * a refresh running. */
+        xSemaphoreTake(s_refresh_idle, portMAX_DELAY);
+    }
+    xSemaphoreGive(s_refresh_lock);
+    if (put == FOS_REFRESH_STARTED) xTaskNotifyGive(s_refresh_task);
+    return put != FOS_REFRESH_NO_MEMORY;
+}
+
+bool fos_display_refreshing(void)
+{
+    /* Read without the lock: a stale answer only moves a timed render by one
+     * slice of its wait. */
+    return fos_refresh_queue_busy(&s_refresh_queue);
+}
+
 esp_err_t fos_display_blit(const uint8_t *buf, size_t len)
 {
     if (!s_panel) return ESP_ERR_INVALID_STATE;
@@ -356,20 +567,135 @@ esp_err_t fos_display_blit(const uint8_t *buf, size_t len)
     esp_err_t err = ensure_module();
     if (err != ESP_OK) return err;
 
-    int64_t start = esp_timer_get_time();
-    /* The whole sequence under one bus hold: the drivers toggle CS by hand,
-     * so a shared card may not get a word in until the panel sleeps. */
-    DEV_SPI_Acquire();
-    if (s_panel->driver_init() != 0) {
-        DEV_SPI_Release();
-        ESP_LOGE(TAG, "panel init failed");
-        return ESP_FAIL;
+    if (!refresh_hand_over(buf, len)) {
+        refresh_wait();
+        err = refresh_in_place(buf);
+        if (err != ESP_OK) return err;
     }
-    s_panel->display((uint8_t *)buf);
+    note_full_refresh(buf, len);
+    return ESP_OK;
+}
+
+bool fos_display_supports_partial(void)
+{
+    return s_partial != NULL;
+}
+
+esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bool input_recent,
+                             bool *partial)
+{
+    if (partial) *partial = false;
+    if (!s_panel) return ESP_ERR_INVALID_STATE;
+    if (!buf || len != fos_display_buffer_size()) return ESP_ERR_INVALID_SIZE;
+    /* A controller that keeps the picture says what changed itself. */
+    bool controller_keeps = s_partial && s_partial->changed;
+    if (controller_keeps) fos_it8951_10in3_set_interactive(input_recent);
+    long controller_changed = controller_keeps ? s_partial->changed(buf) : -1;
+    bool known = controller_keeps ? controller_changed >= 0 : s_glass_known;
+    fos_partial_refresh_input_t input = {
+        .supported = fos_display_supports_partial(),
+        .glass_known = known,
+        .same_scene = same_scene,
+        .input_recent = input_recent,
+        .partials_since_full = s_partials_since_full,
+        .changed_bytes = !known ? len : controller_keeps ? (size_t)controller_changed
+                                                         : fos_partial_changed_bytes(buf, s_glass, len),
+        .total_bytes = len,
+    };
+    if (!fos_partial_refresh_wanted(&input)) return fos_display_blit(buf, len);
+    esp_err_t err = ensure_module();
+    if (err != ESP_OK) return err;
+
+    /* One bus hold, as a full refresh. */
+    refresh_wait();
+    DEV_SPI_Acquire();
+    if (!s_panel_awake) s_partial->init();
+    s_partial->show((uint8_t *)buf, s_glass);
+    DEV_SPI_Release();
+    s_last_partial_us = esp_timer_get_time();
+    s_panel_awake = true;
+    s_panel_rested = false;
+    if (!controller_keeps) memcpy(s_glass, buf, len);
+    s_partials_since_full++;
+    if (partial) *partial = true;
+    return ESP_OK;
+}
+
+bool fos_display_settle_due(int64_t now_us)
+{
+    if (!s_partial || !s_partial->owed || !s_partial->owed()) return false;
+    if (now_us - s_last_partial_us < FOS_PANEL_SETTLE_US) return false;
+    /* Whether or not it works out, not again for a while. */
+    s_last_partial_us = now_us;
+    return true;
+}
+
+void fos_display_park(void)
+{
+    /* Before a deep sleep too: a refresh still running finishes first. */
+    refresh_wait();
+    if (!s_panel || !s_panel_awake) return;
+    DEV_SPI_Acquire();
     s_panel->sleep();
     DEV_SPI_Release();
-    ESP_LOGI(TAG, "blit + refresh took %lld ms", (esp_timer_get_time() - start) / 1000);
-    return ESP_OK;
+    s_panel_awake = false;
+}
+
+esp_err_t fos_display_prepare_deep_sleep(void)
+{
+    if (!s_photo_painter) return ESP_ERR_NOT_SUPPORTED;
+    /* Never under a waveform: a refresh still running finishes first, or its
+     * supply goes with the high voltage on. */
+    refresh_wait();
+    /* The panel's lines let go first: a driven-high CS or RST would feed the
+     * controller through its I/O protection once its supply is off. */
+    DEV_SPI_Acquire();
+    for (size_t i = 0; i < sizeof(s_panel_pins) / sizeof(s_panel_pins[0]); i++) {
+        if (s_panel_pins[i] < 0) continue;
+        gpio_config_t io = {
+            .pin_bit_mask = 1ULL << s_panel_pins[i],
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        gpio_config(&io);
+    }
+    esp_err_t err = fos_photo_painter_disable_epd_power();
+    DEV_SPI_Release();
+    return err;
+}
+
+void fos_display_park_if_idle(int64_t now_us)
+{
+    /* The refresh task has the panel: nothing is idle, and waiting for it here
+     * would hold the render task for the refresh after all. */
+    if (!s_panel_awake || fos_refresh_queue_busy(&s_refresh_queue)) return;
+    int64_t idle_us = now_us - s_last_partial_us;
+    if (idle_us >= FOS_PANEL_CLEAN_US && s_partial->clean && s_partials_since_full > 0 &&
+        s_partials_since_full >= FOS_PARTIAL_MAX_BEFORE_FULL) {
+        DEV_SPI_Acquire();
+        s_partial->clean();
+        s_partial->rest();
+        DEV_SPI_Release();
+        s_panel_awake = false;
+        s_partials_since_full = 0;
+    } else if (idle_us >= FOS_PANEL_CLEAN_US && s_glass_known &&
+               s_partials_since_full >= FOS_PARTIAL_MAX_BEFORE_FULL) {
+        fos_display_blit(s_glass, fos_display_buffer_size());
+    } else if (idle_us >= FOS_PANEL_AWAKE_US) {
+        fos_display_park();
+    } else if (idle_us >= FOS_PANEL_ANALOG_US && !s_panel_rested && !s_partial->changed) {
+        DEV_SPI_Acquire();
+        s_partial->rest();
+        DEV_SPI_Release();
+        s_panel_rested = true;
+    }
+}
+
+void *fos_display_alloc_psram(size_t len)
+{
+    return heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
 esp_err_t fos_display_clear(void)
@@ -377,6 +703,7 @@ esp_err_t fos_display_clear(void)
     if (!s_panel) return ESP_ERR_INVALID_STATE;
     esp_err_t err = ensure_module();
     if (err != ESP_OK) return err;
+    fos_display_park();
     DEV_SPI_Acquire();
     if (s_panel->driver_init() != 0) {
         DEV_SPI_Release();
@@ -385,5 +712,7 @@ esp_err_t fos_display_clear(void)
     s_panel->clear();
     s_panel->sleep();
     DEV_SPI_Release();
+    s_panel_awake = false;
+    s_glass_known = false;
     return ESP_OK;
 }

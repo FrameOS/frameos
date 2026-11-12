@@ -39,8 +39,11 @@ class CreateTemplateRequest(BaseModel):
     imageHeight: Optional[int] = None
 
 class UpdateTemplateRequest(BaseModel):
-    name: Optional[str]
-    description: Optional[str]
+    name: Optional[str] = None
+    description: Optional[str] = None
+    isLayout: Optional[bool] = None
+    # The whole scene set, as the scene editor saves it (replaces the old one).
+    scenes: Optional[List[Any]] = None
 
 class TemplateImageTokenResponse(ImageTokenResponse):
     pass

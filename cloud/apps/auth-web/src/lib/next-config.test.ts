@@ -59,6 +59,30 @@ describe("API cache headers", () => {
   });
 });
 
+describe("a virtual frame's view link", () => {
+  it("never rides a Referer and is not indexed", async () => {
+    // The address holds the link's secret (/v/vf_…). The catch-all's
+    // strict-origin-when-cross-origin would still send it to our own origin;
+    // this rule comes after it, and a later rule wins.
+    const config = createNextConfig(PHASE_PRODUCTION_SERVER);
+    const rules = (await config.headers?.()) ?? [];
+    const catchAllIndex = rules.findIndex((rule) => rule.source === "/(.*)");
+    const viewIndex = rules.findIndex((rule) => rule.source === "/v/:path*");
+    expect(viewIndex).toBeGreaterThan(catchAllIndex);
+    const headers = Object.fromEntries(rules[viewIndex]!.headers.map((header) => [header.key, header.value]));
+    expect(headers).toEqual({ "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex, nofollow" });
+    // @ts-expect-error -- Next ships this vendored dependency without types.
+    const { pathToRegexp } = (await import("next/dist/compiled/path-to-regexp")) as {
+      pathToRegexp: (source: string) => RegExp;
+    };
+    const matcher = pathToRegexp(rules[viewIndex]!.source);
+    for (const covered of ["/v/vf_abc", "/v/vf_abc/image", "/v/vf_abc/status"]) {
+      expect(matcher.test(covered), covered).toBe(true);
+    }
+    expect(matcher.test("/verify-email")).toBe(false);
+  });
+});
+
 describe("frames SPA asset rewrites", () => {
   it("serves the release wasm runtime under the SPA's assets base path", async () => {
     // cloud-frontend asks for /frames-app/frameos-wasm/preview-worker.js
@@ -151,5 +175,35 @@ describe("Next.js security headers", () => {
       const policy = await contentSecurityPolicy(phase);
       expect(policy).toContain("https://challenges.cloudflare.com");
     }
+  });
+});
+
+describe("the store's embed mode", () => {
+  async function embedRule(phase: string) {
+    const rules = (await createNextConfig(phase).headers?.()) ?? [];
+    const catchAllIndex = rules.findIndex((rule) => rule.source === "/(.*)");
+    const index = rules.findIndex((rule) => rule.source === "/s/:slug");
+    return { catchAllIndex, index, rule: rules[index] };
+  }
+
+  it("lets frameos.net, and nothing else, frame a scene page asked for with ?embed=1", async () => {
+    const { catchAllIndex, index, rule } = await embedRule(PHASE_PRODUCTION_SERVER);
+    // After the catch-all, whose frame-ancestors 'none' it replaces: a later rule wins.
+    expect(index).toBeGreaterThan(catchAllIndex);
+    expect(rule!.has).toEqual([{ key: "embed", type: "query", value: "1" }]);
+    const headers = Object.fromEntries(rule!.headers.map((header) => [header.key, header.value]));
+    expect(headers["Content-Security-Policy"]).toContain(
+      "frame-ancestors https://frameos.net https://www.frameos.net;",
+    );
+    expect(headers["Content-Security-Policy"]).not.toContain("localhost");
+    expect(headers["X-Frame-Options"]).toBe("SAMEORIGIN");
+    // Every other page keeps refusing to be framed.
+    expect(await contentSecurityPolicy(PHASE_PRODUCTION_SERVER)).toContain("frame-ancestors 'none'");
+  });
+
+  it("lets a localhost page frame it on the dev server, for the docs site's own", async () => {
+    const { rule } = await embedRule(PHASE_DEVELOPMENT_SERVER);
+    const policy = rule!.headers.find((header) => header.key === "Content-Security-Policy")!.value;
+    expect(policy).toContain("frame-ancestors https://frameos.net https://www.frameos.net http://localhost:* http://127.0.0.1:*;");
   });
 });

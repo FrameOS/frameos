@@ -133,9 +133,9 @@ DEPLOY_PROGRESS_KINDS: dict[str, dict] = {
         "label": "Push scenes",
         "planes": ["cloud"],
         "stages": [
-            {'on': {'command:acked:set_scenes': 'loading', 'command:sent:set_scenes': 'sending', 'scene_ack': 'rendering'}, 'stage': 'queued'},
-            {'on': {'command:acked:set_scenes': 'loading', 'command:failed:set_scenes': 'error', 'scene_ack': 'rendering'}, 'stage': 'sending'},
-            {'on': {'command:failed:set_scenes': 'error', 'scene_ack': 'rendering'}, 'stage': 'loading'},
+            {'on': {'command:acked:set_scenes': 'loading', 'command:sent:set_scenes': 'sending', 'scene_ack': 'rendering', 'scene_ack:unshown': 'done'}, 'stage': 'queued'},
+            {'on': {'command:acked:set_scenes': 'loading', 'command:failed:set_scenes': 'error', 'scene_ack': 'rendering', 'scene_ack:unshown': 'done'}, 'stage': 'sending'},
+            {'on': {'command:failed:set_scenes': 'error', 'scene_ack': 'rendering', 'scene_ack:unshown': 'done'}, 'stage': 'loading'},
             {'on': {'render:done': 'done'}, 'stage': 'rendering'},
         ],
     },

@@ -42,7 +42,8 @@
       "command:acked:<type>": "the device acked the verb (set_scenes and set_settings on the backend: the pull reported the ETags the backend serves)",
       "command:failed:<type>": "the device refused the verb",
       "commands:settled": "every row of this deploy is acked (the backend's deploy_commands_settled)",
-      "scene_ack": "cloud: the device reports the assigned scene set is live (`scene_ack` with the assigned checksum)"
+      "scene_ack": "cloud: the device reports the assigned scene set is live (`scene_ack` with the assigned checksum)",
+      "scene_ack:unshown": "cloud: the same, for a push that leaves the scene on the panel as it was (a scenes_patch that names no scene to show and does not hold the scene showing): nothing renders for it, so the set being live is the end"
     }
   },
   "stages": {
@@ -178,11 +179,11 @@
     "cloud_scenes": {
       "label": "Push scenes",
       "planes": ["cloud"],
-      "frames": "Every cloud frame: the set_scenes verb from queued through the device's scene_ack to its first render announce.",
+      "frames": "Every cloud frame: the set_scenes verb from queued through the device's scene_ack to its first render announce, or to the scene_ack alone for a push that changes nothing on the panel (an install without activate on an ESP32).",
       "stages": [
-        { "stage": "queued", "on": { "command:sent:set_scenes": "sending", "command:acked:set_scenes": "loading", "scene_ack": "rendering" } },
-        { "stage": "sending", "on": { "command:acked:set_scenes": "loading", "command:failed:set_scenes": "error", "scene_ack": "rendering" } },
-        { "stage": "loading", "on": { "scene_ack": "rendering", "command:failed:set_scenes": "error" } },
+        { "stage": "queued", "on": { "command:sent:set_scenes": "sending", "command:acked:set_scenes": "loading", "scene_ack": "rendering", "scene_ack:unshown": "done" } },
+        { "stage": "sending", "on": { "command:acked:set_scenes": "loading", "command:failed:set_scenes": "error", "scene_ack": "rendering", "scene_ack:unshown": "done" } },
+        { "stage": "loading", "on": { "scene_ack": "rendering", "scene_ack:unshown": "done", "command:failed:set_scenes": "error" } },
         { "stage": "rendering", "on": { "render:done": "done" } }
       ]
     },

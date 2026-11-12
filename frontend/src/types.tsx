@@ -28,6 +28,11 @@ export type FrameEmbeddedHardwarePreset =
   | 'seeed_reterminal_e1002'
   | 'seeed_reterminal_e1003'
   | 'seeed_reterminal_e1004'
+  | 'seeed_xiao_ee02'
+  | 'seeed_xiao_ee03'
+  | 'seeed_xiao_ee04'
+  | 'seeed_xiao_ee05'
+  | 'seeed_xiao_epaper_7in5'
   | 'elecrow_crowpanel_5in79'
   | 'pimoroni_inky_frame_4'
   | 'pimoroni_inky_frame_5_7'
@@ -77,6 +82,13 @@ export interface ScenePreviewInfo {
   at: string
 }
 
+/** The ESP32's clock (the contract's `cpu_mode`): auto is 240 MHz on an LCD or touch panel, else 160. */
+export type CpuMode = 'auto' | 'battery' | 'performance'
+
+/** Where an ESP32's scenes run (the contract's `render_mode`, docs/server-rendering.md):
+ * on the frame's own runtime, or on its control plane, which hands it the finished picture. */
+export type RenderMode = 'local' | 'remote'
+
 export interface FrameType {
   id: FrameId
   project_id: number
@@ -109,6 +121,10 @@ export interface FrameType {
    * with 2026.8 firmware (fos_cloud.c add_hardware_json) — older devices
    * report only the first six fields, so all of it stays optional. */
   hardware?: {
+    /** What the frame has now, changed on its own screen or not (docs/scene-settings.md
+     * "What a control plane learns"): the cloud's settings mirror follows them. */
+    rotate?: number
+    renderScale?: number
     platform?: string | null
     /** Linux/Pi frames only: the Buildroot platform key of the board the
      * device detected itself to be (`raspberry-pi-5` / `raspberry-pi-64` /
@@ -145,6 +161,14 @@ export interface FrameType {
      * (docs/voice-chat.md), and whether voice chat is on (2026.10.20+). */
     microphone?: boolean | null
     voiceChat?: boolean | null
+    touchBeep?: boolean | null
+    /** ESP32 only: the clock setting (`cpu_mode`) and the clock it gave, in MHz (2026.11.7+). */
+    cpuMode?: CpuMode | null
+    cpuMhz?: number | null
+    /** ESP32 only: where its scenes run now (`render_mode`, 2026.11.7+); a board
+     * without a runtime of its own (`localRenderSupported: false`) is always remote. */
+    renderMode?: RenderMode | null
+    localRenderSupported?: boolean | null
     /** ESP32 only: the status LED that follows the buzzer's notes (fos_led.c),
      * -1 = none, and how it is lit (2026.10.20+). */
     ledPin?: number | null
@@ -184,6 +208,13 @@ export interface FrameType {
       otaSlotBytes?: number | null
       otaBytes?: number | null
       stateBytes?: number | null
+      /** ESP32: what the state partition holds right now (see `frameSceneStorage`). */
+      stateTotalBytes?: number | null
+      stateUsedBytes?: number | null
+      scenesBytes?: number | null
+      sceneCount?: number | null
+      /** ESP32: each scene's footprint on the state partition, by scene id. */
+      sceneBytes?: Record<string, number> | null
     } | null
     ota?: {
       supported?: boolean | null
@@ -297,6 +328,8 @@ export interface FrameType {
     deep_sleep_on_battery?: boolean
     wakeCheckSeconds?: number
     wake_check_seconds?: number
+    awakeAfterInputSeconds?: number
+    awake_after_input_seconds?: number
     batteryPin?: number
     battery_pin?: number
     batteryDivider?: number
@@ -320,6 +353,11 @@ export interface FrameType {
     /** Voice chat: holding the voice key opens the microphone (docs/voice-chat.md). Default on. */
     voiceChat?: boolean
     voice_chat?: boolean
+    touchBeep?: boolean
+    touch_beep?: boolean
+    /** ESP32: the chip's clock (main.c, at boot); unset = auto. */
+    cpuMode?: CpuMode
+    cpu_mode?: CpuMode
     /** What the voice chat may do (docs/voice-chat.md "What the voice chat may
      * do"): the backend's spelling of the three switches; plane-side, never
      * polled by the device. Unset = the default (settings and installed
@@ -338,7 +376,11 @@ export interface FrameType {
     /** How that LED is lit: gpio (high; the reTerminal E1004), gpio_inverted (low; the E1001/E1002), ws2812 (one pixel). */
     ledType?: 'gpio' | 'gpio_inverted' | 'ws2812'
     led_type?: 'gpio' | 'gpio_inverted' | 'ws2812'
+    /** Where the scenes run (docs/server-rendering.md): `remote` hands them to
+     * the backend, which renders each picture. The other spellings are old
+     * aliases the backend still reads (embedded_render_mode_for_frame). */
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
+    render_mode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
     hardwarePreset?: FrameEmbeddedHardwarePreset
     /** Virtual frames only: how the backend quantizes the rendered image.
      * Mirrors VIRTUAL_COLOR_MODES in backend/app/api/virtual_frame.py. */
@@ -395,11 +437,15 @@ export interface FrameType {
   scaling_mode: string
   /** What a UI from a .tsx/.jsx app is laid out for (utils/renderScale.ts); 0 or unset = automatic. */
   render_scale?: number
+  /** The frame page behind the gear of the settings on the frame's own screen
+   * (docs/scene-settings.md "The frame page"); unset = on. */
+  frame_settings_on_screen?: boolean
   rotate?: number
   /** ESP32 power management (cloud set_settings mirror, frames.settings). */
   deep_sleep?: boolean
   deep_sleep_on_battery?: boolean
   wake_check_seconds?: number
+  awake_after_input_seconds?: number
   battery_pin?: number
   battery_divider?: number
   battery_enable_pin?: number
@@ -409,6 +455,11 @@ export interface FrameType {
   buzzer_tone_hz?: number
   /** ESP32: voice chat, the microphone switch of the voice key's hold (docs/voice-chat.md). */
   voice_chat?: boolean
+  touch_beep?: boolean
+  /** ESP32: the chip's clock, 160 MHz (battery) or 240 (performance); unset = auto. */
+  cpu_mode?: CpuMode
+  /** ESP32: where its scenes run (docs/server-rendering.md); unset = on the frame. */
+  render_mode?: RenderMode
   /** ESP32: the PDM microphone's clock, data and power GPIO; -1 = none. */
   mic_clk_pin?: number
   mic_data_pin?: number
@@ -983,6 +1034,8 @@ export interface ForwardsTargetCapability {
 }
 
 export interface InputPortCapabilities {
+  /** Consumes the string a window at a time: the value can be bigger than memory. A JS app reads it with frameos.openLines. */
+  byteIter?: Record<string, never>
   /** This input can hand its producer an image to write into */
   providesTarget?: ProvidesTargetCapability
 }
@@ -1039,6 +1092,11 @@ export interface AppConfig {
    * on every save; the frame gives the app exactly this list (FrameOS 2026.10.16+).
    */
   permissions?: ('shell' | 'files' | 'assets' | 'assets-write')[]
+  /**
+   * The events a JS app's onEvent hears, without an event node: contract names, the scene's
+   * custom events, or "*" (docs/events.md "Apps that subscribe"; FrameOS 2026.11+).
+   */
+  events?: string[]
   /** List of apt packages to install (mode=rpios) */
   apt?: string[]
   /** Fields for app in diagram editor */
@@ -1250,6 +1308,14 @@ export interface FrameSceneSettings {
   execution?: 'compiled' | 'interpreted'
   autoArrangeOnLoad?: boolean
   splitScreenLayout?: Record<string, any>
+  /** This scene is a layout: it wraps other scenes and stays out of the scene lists (docs/scene-layouts.md). */
+  isLayout?: boolean
+}
+
+/** The layout an installed scene wears, and the layout's settings for it. */
+export interface SceneLayoutRef {
+  sceneId: string
+  state?: Record<string, any>
 }
 
 /**
@@ -1315,6 +1381,9 @@ export interface FrameScene {
    * assignment row (`event_maps`, hydrated in here per runtime scene).
    */
   eventMap?: EventMapRule[]
+  /** The layout this installed copy wears, beside the scene like `eventMap`
+   * (docs/scene-layouts.md): the cloud's assignment row keeps it as `layouts`. */
+  layout?: SceneLayoutRef | null
 }
 
 export interface FrameSceneIndexed {
@@ -1644,6 +1713,14 @@ export interface FrameRpiOSConfig {
 export interface FrameEmbeddedConfig {
   platform?: string
   flashSize?: FrameEmbeddedFlashSize
+  /** What the state partition holds, from the frame's last check-in. */
+  storage?: {
+    stateTotalBytes?: number | null
+    stateUsedBytes?: number | null
+    scenesBytes?: number | null
+    sceneCount?: number | null
+    sceneBytes?: Record<string, number> | null
+  }
   hardwarePreset?: FrameEmbeddedHardwarePreset
   lastBoot?: {
     at?: string

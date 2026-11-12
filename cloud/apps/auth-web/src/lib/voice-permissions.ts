@@ -14,7 +14,7 @@ export type VoicePermissions = Record<VoicePermissionKey, boolean>;
 
 export const defaultVoicePermissions: VoicePermissions = {
   change_settings: true,
-  create_scenes: false,
+  create_scenes: true,
   use_albums: true,
   use_scenes: true,
 };

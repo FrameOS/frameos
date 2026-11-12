@@ -598,7 +598,7 @@ function AnchoredSettings(): JSX.Element {
                         <Field
                           name="backendHost"
                           label="Default backend host"
-                          tooltip="Prefilled when adding frames. Leave blank to use the host detected from this browser."
+                          tooltip="Prefilled when adding frames. Leave blank to use the host detected from this browser. Start it with https:// when frames reach this backend over TLS."
                         >
                           <TextInput autoComplete="off" placeholder={detectedBackendAddress.host} />
                         </Field>

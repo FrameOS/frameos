@@ -5,6 +5,7 @@ import frameos/apps
 import frameos/types
 import frameos/utils/asset_colors
 import frameos/utils/image
+from frameos/utils/memory import runsAsEmbedded
 
 type
   AppConfig* = object
@@ -65,7 +66,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
   except Exception as e:
     let message = &"Error rendering image: {e.msg}"
     self.logError(message)
-    when defined(frameosEmbedded):
+    if runsAsEmbedded():
       renderErrorInto(image, image.width, image.height, message)
     else:
       let errorImage = renderError(image.width, image.height, message)

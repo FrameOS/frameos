@@ -1,7 +1,7 @@
-import { type createDb } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
-import { storedAccountSettings } from "../../../../../src/lib/account-settings";
+import { revealedServiceSettings } from "../../../../../src/lib/account-settings";
 import { linkedClientHasScope } from "../../../../../src/lib/backend-auth";
+import { planeKeepsSceneState } from "../../../../../src/lib/cloud-rendered";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import { authenticateFrameDevice } from "../../../../../src/lib/frame-device-auth";
 import {
@@ -44,35 +44,6 @@ export const runtime = "nodejs";
 // instead of re-shipping the keys.
 //
 // Never log the body. Failures log `{frameId, status}` and nothing else.
-
-// The account's stored service settings, narrowed to {group: {field: string}}.
-// buildServiceSettingsPayload filters again against the deliverable list; this
-// only makes the jsonb safe to hand it.
-//
-// This is one of the two readers that OPEN the sealed secrets
-// (account-settings.ts): the device is what the keys are for.
-async function storedServiceSettings(
-  db: ReturnType<typeof createDb>,
-  accountId: string,
-): Promise<Record<string, Record<string, string>>> {
-  const revealed = await storedAccountSettings(db, accountId, { reveal: true });
-  const stored: Record<string, Record<string, string>> = {};
-  for (const [group, value] of Object.entries(revealed)) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      continue;
-    }
-    const fields: Record<string, string> = {};
-    for (const [field, fieldValue] of Object.entries(
-      value as Record<string, unknown>,
-    )) {
-      if (typeof fieldValue === "string") {
-        fields[field] = fieldValue;
-      }
-    }
-    stored[group] = fields;
-  }
-  return stored;
-}
 
 export async function GET(
   request: NextRequest,
@@ -144,9 +115,13 @@ export async function GET(
     }
   }
 
+  // A board the cloud renders for runs no scene, so it holds no key
+  // (docs/server-rendering.md "Nothing to keep on the board"); the render
+  // here is given them (server-render.ts). Its granted groups still listed
+  // and none filled in, the board deletes the copies it held (fos_settings.c).
   const payload = buildServiceSettingsPayload(
     groups,
-    await storedServiceSettings(db, auth.frame.accountId),
+    planeKeepsSceneState(auth.frame) ? {} : await revealedServiceSettings(db, auth.frame.accountId),
   );
   const { body, etag } = serviceSettingsResponseBody(payload);
 

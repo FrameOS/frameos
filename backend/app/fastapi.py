@@ -74,7 +74,7 @@ else:
 # and answering those with `200 text/html` turns a plain "that file is gone"
 # into "Failed to fetch dynamically imported module" at whatever import
 # happened to need it first.
-STATIC_ASSET_PREFIXES = ("/static/", "/assets/", "/img/", "/frameos-wasm/")
+STATIC_ASSET_PREFIXES = ("/static/", "/assets/", "/img/", "/frameos-wasm/", "/frameos-editor/")
 
 
 def is_static_asset_path(path: str) -> bool:
@@ -89,6 +89,26 @@ INDEX_HTML_HEADERS = {"Cache-Control": "no-store, must-revalidate"}
 # Serve HTML and static files in all cases except for public HASSIO_RUN_MODE
 serve_html = config.HASSIO_RUN_MODE != "public"
 if serve_html:
+    # The embedded scene editor (frontend/dist-editor, the store's editor
+    # without a backend): the local scenes page edits a saved scene in it,
+    # in an iframe. Its live preview loads ./frameos-wasm/ next to it — the
+    # built copy, else the one the dev wasm build keeps in public/. Mounted
+    # whether or not they exist yet (check_dir=False): in development the
+    # editor pane and the wasm pane build them after the backend starts.
+    editor_wasm_dir = next(
+        (d for d in ("../frontend/dist/frameos-wasm", "../frontend/public/frameos-wasm") if os.path.exists(d)),
+        "../frontend/public/frameos-wasm",
+    )
+    app.mount(
+        "/frameos-editor/frameos-wasm",
+        StaticFiles(directory=editor_wasm_dir, check_dir=False),
+        name="frameos-editor-wasm",
+    )
+    app.mount(
+        "/frameos-editor",
+        StaticFiles(directory="../frontend/dist-editor", html=True, check_dir=False),
+        name="frameos-editor",
+    )
     # only if frontend/dist exists, might not if we're using vite
     if os.path.exists("../frontend/dist"):
         app.mount("/assets", StaticFiles(directory="../frontend/dist/assets"), name="assets")
@@ -112,6 +132,10 @@ if serve_html:
             app_config = {}
             if config.HASSIO_RUN_MODE:
                 app_config["HASSIO_RUN_MODE"] = config.HASSIO_RUN_MODE
+            if config.FRAMEOS_PUBLIC_SCHEME == "https":
+                # The frames' port serves TLS (the add-on's ssl option or
+                # FRAMEOS_SSL_CERTFILE): a new frame's server address is https://.
+                app_config["public_scheme"] = "https"
             header_ingress_path = (
                 normalize_ingress_path(request.headers.get("x-ingress-path"))
                 if request is not None and config.HASSIO_RUN_MODE == "ingress"

@@ -6,10 +6,14 @@ import {
   accountPrivateObjectKeys,
   deleteErasedObjects,
 } from "../../../../src/lib/account-erasure";
+import { revokeAccountAppleTokens } from "../../../../src/lib/apple-sign-in";
 import { recordAuditEvent } from "../../../../src/lib/audit";
+import { cancelForErasure } from "../../../../src/lib/billing-provider";
+import { reportError } from "../../../../src/lib/log";
 import { csrfResponse } from "../../../../src/lib/csrf";
 import { assertDatabaseUrlConfigured } from "../../../../src/lib/env";
 import { verifyPasswordWithDummyFallback } from "../../../../src/lib/passwords";
+import { stripeSetup } from "../../../../src/lib/stripe";
 import {
   identityRateLimitResponse,
   rateLimitResponse,
@@ -138,6 +142,23 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // A paid plan ends at Stripe first. If that cannot be done
+  // the account stays: deleting it would leave a card being charged every
+  // month for an account nobody can sign in to.
+  try {
+    await cancelForErasure(db, stripeSetup(), accountId);
+  } catch (error) {
+    reportError("billing.erasure_cancel_failed", error, { accountId });
+    return NextResponse.json(
+      {
+        detail:
+          "Your paid plan could not be cancelled just now, so the account was not deleted. Try again in a moment.",
+        error: "subscription_cancel_failed",
+      },
+      { status: 502 },
+    );
+  }
+
   // Recorded BEFORE the delete: recordAuditEvent writes account_id, and after
   // the row is gone the foreign key would reject it. The event survives the
   // cascade because audit_events.account_id is SET NULL, not CASCADE.
@@ -152,6 +173,10 @@ export async function POST(request: NextRequest) {
   // receivable and end the subscription. The receivable that remains is a
   // write-off decision for a human, not something erasure may silently drop.
   await closeOutSubscriptionForDeletedAccount(db, accountId);
+
+  // Apple requires an app offering its sign-in to revoke the person's
+  // tokens on deletion (src/lib/apple-sign-in.ts). Never blocks the delete.
+  await revokeAccountAppleTokens(db, accountId);
 
   const objectKeys = await accountPrivateObjectKeys(db, accountId);
   await db.delete(accounts).where(eq(accounts.id, accountId));

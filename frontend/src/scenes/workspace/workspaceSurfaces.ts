@@ -81,14 +81,14 @@ export const allowedFrameToolPanels: Record<WorkspaceMode, readonly WorkspaceUti
  * (GenerateElsewhereModal in FramesHome): hiding it left people hunting for a
  * button the other two surfaces have, which was the worse of the two answers.
  */
-export type AddSceneAction = 'blank' | 'splitScreen' | 'generate' | 'upload' | 'starred' | 'photos'
+export type AddSceneAction = 'blank' | 'splitScreen' | 'layout' | 'generate' | 'upload' | 'starred' | 'photos'
 
 // 'photos' installs scenes that play albums from the Photos library, which
 // only the two control planes keep.
 export const allowedAddSceneActions: Record<WorkspaceMode, readonly AddSceneAction[]> = {
-  backend: ['blank', 'splitScreen', 'generate', 'upload', 'starred', 'photos'],
-  frameAdmin: ['blank', 'splitScreen', 'generate', 'upload', 'starred'],
-  cloud: ['blank', 'splitScreen', 'generate', 'upload', 'starred', 'photos'],
+  backend: ['blank', 'splitScreen', 'layout', 'generate', 'upload', 'starred', 'photos'],
+  frameAdmin: ['blank', 'splitScreen', 'layout', 'generate', 'upload', 'starred'],
+  cloud: ['blank', 'splitScreen', 'layout', 'generate', 'upload', 'starred', 'photos'],
 }
 
 export function addSceneActionIsAllowed(mode: WorkspaceMode, action: AddSceneAction): boolean {
@@ -243,12 +243,16 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     // per-frame gate (storeSceneOnlyFrameSettingsSections) hides the link
     // otherwise, so it never scrolls nowhere.
     'frame-settings-store-scene-services',
+    'frame-settings-layouts',
     'frame-settings-info',
     // ESP32 frames only; the per-frame gate (esp32OnlyFrameSettingsSections)
     // refuses it for every other device. Backend-managed ESP32s render the
     // same fields as the cloud profile, stored in `device_config`.
     'frame-settings-power',
     'frame-settings-device',
+    // Virtual frames only (the per-frame gate): the links the backend serves
+    // the frame at, its size and its color mode.
+    'frame-settings-virtual',
     'frame-settings-ssh',
     'frame-settings-agent',
     'frame-settings-backend',
@@ -279,6 +283,7 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     // page are not the only ones it cannot jump to.
     'frame-settings-cloud',
     'frame-settings-store-scene-services',
+    'frame-settings-layouts',
     'frame-settings-info',
     'frame-settings-upgrade',
     'frame-settings-device',
@@ -313,6 +318,8 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
   // handling; QR control code — disabled with a note on firmware older than
   // 2026.8.30, but always present), and Power on an ESP32.
   cloud: [
+    // Which layout each scene wears (saved with the form as the scenes').
+    'frame-settings-layouts',
     // The owner's log-shipping switch (the telemetry scopes on the link);
     // renders above Defaults, after the service keys.
     'frame-settings-telemetry',
@@ -337,6 +344,9 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-ssh',
     // The device-verified local network access switch (lan_access_challenge/_set).
     'frame-settings-lan-access',
+    // A virtual frame's size and view link (virtual frames only: the
+    // per-frame gate refuses it for everything with hardware).
+    'frame-settings-virtual',
   ],
 }
 
@@ -550,6 +560,24 @@ export function isVirtualFrame(frame?: FrameCapabilityInput | null): boolean {
 }
 
 /**
+ * A virtual frame on FrameOS Cloud: no hardware, drawn by the cloud itself
+ * and shown through a view link (docs/cloud-frames.md "Virtual frames"). The
+ * cloud's own flavour of the frame above: its device runs in the frame hub
+ * and reports `platform: "virtual"` like any hello does.
+ */
+export function isVirtualCloudFrame(
+  frame?: FrameCapabilityInput | null,
+  mode: WorkspaceMode = workspaceMode()
+): boolean {
+  return mode === 'cloud' && frame?.hardware?.platform === 'virtual'
+}
+
+/** A frame with no hardware, under either control plane. */
+function isHardwarelessFrame(frame: FrameCapabilityInput | null | undefined, mode: WorkspaceMode): boolean {
+  return isVirtualFrame(frame) || isVirtualCloudFrame(frame, mode)
+}
+
+/**
  * Unlike the esp32 cloud profile above — which DISABLES controls, because the
  * verbs exist and the firmware merely doesn't answer them yet — a virtual
  * frame HIDES these surfaces: the concepts themselves don't exist. There is
@@ -568,6 +596,29 @@ const virtualFrameHiddenMenuActions: readonly FrameMenuAction[] = [
   'restart',
   'restartRemote',
   'stop',
+]
+
+/**
+ * What a cloud virtual frame hides on top of that. The cloud keeps no assets
+ * for it (the runtime draws with its own fonts, and its device answers the
+ * asset write verbs `unsupported_verb`), and there is no firmware to update:
+ * it runs whatever runtime the cloud runs.
+ */
+const virtualCloudFrameHiddenPanels: readonly WorkspaceUtilityPanel[] = ['assets']
+
+const virtualCloudFrameHiddenMenuActions: readonly FrameMenuAction[] = ['updateFirmware']
+
+/**
+ * The settings a cloud virtual frame has headings for: its own section (size
+ * and view link) and the log switch. The rest of the cloud's list is a
+ * panel's or a board's (flip, palette, buttons, power, SSH keys, local
+ * network access); the frame's name, interval and time zone are the block
+ * the panel opens on, which has no link.
+ */
+const virtualCloudFrameSettingsSections: readonly string[] = [
+  'frame-settings-layouts',
+  'frame-settings-telemetry',
+  'frame-settings-virtual',
 ]
 
 /**
@@ -779,7 +830,10 @@ export function frameToolPanelIsAllowed(
   panel: WorkspaceUtilityPanel,
   frame?: FrameCapabilityInput | null
 ): boolean {
-  if (isVirtualFrame(frame) && virtualFrameHiddenPanels.includes(panel)) {
+  if (isHardwarelessFrame(frame, mode) && virtualFrameHiddenPanels.includes(panel)) {
+    return false
+  }
+  if (isVirtualCloudFrame(frame, mode) && virtualCloudFrameHiddenPanels.includes(panel)) {
     return false
   }
   if (isEmbeddedHardwareFrame(frame) && embeddedHardwareHiddenPanels.includes(panel)) {
@@ -805,7 +859,10 @@ export function sceneToolPanelIsAllowed(
   panel: WorkspaceUtilityPanel,
   frame?: FrameCapabilityInput | null
 ): boolean {
-  if (isVirtualFrame(frame) && virtualFrameHiddenPanels.includes(panel)) {
+  if (isHardwarelessFrame(frame, mode) && virtualFrameHiddenPanels.includes(panel)) {
+    return false
+  }
+  if (isVirtualCloudFrame(frame, mode) && virtualCloudFrameHiddenPanels.includes(panel)) {
     return false
   }
   if (isEmbeddedHardwareFrame(frame) && embeddedHardwareHiddenPanels.includes(panel)) {
@@ -834,7 +891,10 @@ export function frameMenuActionIsAllowed(
   action: FrameMenuAction,
   frame?: FrameCapabilityInput | null
 ): boolean {
-  if (isVirtualFrame(frame) && virtualFrameHiddenMenuActions.includes(action)) {
+  if (isHardwarelessFrame(frame, mode) && virtualFrameHiddenMenuActions.includes(action)) {
+    return false
+  }
+  if (isVirtualCloudFrame(frame, mode) && virtualCloudFrameHiddenMenuActions.includes(action)) {
     return false
   }
   if (isEmbeddedHardwareFrame(frame) && embeddedHardwareHiddenMenuActions.includes(action)) {
@@ -889,6 +949,7 @@ export function frameSupportsUsbSerialConsole(
  * pure noise.
  */
 const esp32CloudFrameSettingsSections: readonly string[] = [
+  'frame-settings-layouts',
   'frame-settings-power',
   'frame-settings-palette',
   'frame-settings-colors',
@@ -957,6 +1018,13 @@ export function frameSettingsSectionIsAllowed(
   sectionId: string,
   frame?: FrameCapabilityInput | null
 ): boolean {
+  if (sectionId === 'frame-settings-virtual' && !isHardwarelessFrame(frame, mode)) {
+    // Only a virtual frame draws the heading, on either plane.
+    return false
+  }
+  if (isVirtualCloudFrame(frame, mode)) {
+    return virtualCloudFrameSettingsSections.includes(sectionId)
+  }
   if (isEsp32CloudFrame(frame, mode)) {
     if (!esp32CloudFrameSettingsSections.includes(sectionId)) {
       return false

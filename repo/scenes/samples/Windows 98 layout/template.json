@@ -1,0 +1,10 @@
+{
+  "name": "Windows 98 layout",
+  "description": "A gray taskbar below each scene: Start opens the scene list, the gear its settings, and the tray with the signal, the battery and the clock the frame's.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.5"
+}

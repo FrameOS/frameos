@@ -7,6 +7,7 @@
 ## exhausting the device.
 
 import pixie/decodebudget
+from pixie/paths import clearCoverageCache
 
 export decodebudget
 
@@ -59,8 +60,12 @@ elif defined(linux) and not defined(frameosWasm):
 
 when defined(testing):
   # Lets tests simulate a memory-constrained device (e.g. ESP32 PSRAM
-  # headroom) on a development host. 0 disables the override.
+  # headroom) on a development host. 0 disables the override; negative is a
+  # device with nothing left under its reserve.
   var availableRenderBytesOverride* = 0
+  var contiguousBudgetOverride* = 0
+    ## The largest free block a test's device has: what an ESP32's budget
+    ## measures. 0 is a host's, unlimited.
 
 when defined(frameosWasm) or defined(testing):
   var simulatingEmbedded = false
@@ -125,8 +130,8 @@ proc availableRenderBytes*(): int =
   ## Best-effort estimate of memory currently available for image-sized
   ## render allocations. 0 means "unknown"; callers treat that as unlimited.
   when defined(testing):
-    if availableRenderBytesOverride > 0:
-      return availableRenderBytesOverride
+    if availableRenderBytesOverride != 0:
+      return max(0, availableRenderBytesOverride)
   when defined(frameosEmbedded):
     let largest = fos_psram_largest_free_block().int
     let free = fos_psram_free_bytes().int
@@ -154,8 +159,8 @@ proc availableRenderHeadroomBytes*(): int =
   ## contiguous block sits near 1.7MB while over 5MB is free, and a headroom
   ## question asked against the block answer refuses everything.
   when defined(testing):
-    if availableRenderBytesOverride > 0:
-      return availableRenderBytesOverride
+    if availableRenderBytesOverride != 0:
+      return max(0, availableRenderBytesOverride)
   when defined(frameosEmbedded):
     max(0, fos_psram_free_bytes().int - EmbeddedReserveBytes)
   elif defined(frameosWasm):
@@ -198,7 +203,7 @@ const
     ## paint strips), on top of the reserve that headroom already leaves.
 
 var
-  renderMemoryReleaseHook*: proc(): bool {.nimcall, raises: [].}
+  renderMemoryReleaseHook*: proc(refused: bool): bool {.nimcall, raises: [].}
     ## Lets go of what a render can rebuild: the idle JS interpreters an ESP32
     ## that does not deep-sleep keeps between renders (js_runtime/app_runtime.nim).
     ## Whether anything went. Called for a decode when render memory is short,
@@ -207,21 +212,26 @@ var
     ## first time a decode asks for it); and by a fill pixie refused
     ## (releaseRenderMemory). Not before every render: a JSX UI just over the
     ## line lost its interpreter, its memo and its laid-out tree every frame.
+    ## `refused`: an allocation actually failed. Only then may an interpreter
+    ## holding a UI's handlers go (keepIdleInterpreters).
   decodedSinceSettle: bool
     ## A decode ran since the interpreters were last settled.
 
 proc releaseRenderMemoryIfShort() =
   if not renderMemoryReleaseHook.isNil:
     let headroom = availableRenderHeadroomBytes()
-    if headroom > 0 and headroom < RenderMemoryShortBytes:
-      discard renderMemoryReleaseHook()
+    # 0 on an ESP32 is under the reserve: as short as it gets.
+    if (headroom > 0 or runsAsEmbedded()) and headroom < RenderMemoryShortBytes:
+      clearCoverageCache() # pixie's kept masks: rebuilt by the fills that need them
+      discard renderMemoryReleaseHook(false)
 
 proc releaseRenderMemory*(): bool =
   ## Lets go of what a render can rebuild, whatever the headroom: a fill or a
   ## decode was just refused. Whether anything went (then try it again).
-  not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook()
+  clearCoverageCache()
+  not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook(true)
 
-proc keepIdleInterpreters*(holdingPictures = false): bool =
+proc keepIdleInterpreters*(holdingPictures = false, answeringPointer = false): bool =
   ## Whether the idle JS interpreters may stay for the next render: while the
   ## headroom holds RenderMemoryShortBytes after a render that decoded
   ## something (the next may decode again, at full resolution), and
@@ -232,18 +242,33 @@ proc keepIdleInterpreters*(holdingPictures = false): bool =
   ## JSX gallery's photo), which go with it. Letting it go would not spare
   ## the next decode, it would cause one, so it stays down to
   ## KeepInterpretersBytes after a decode too.
+  ##
+  ## `answeringPointer`: one of them holds a UI's handlers. Those live nowhere
+  ## else, so letting it go here leaves a picture nobody can press, and the
+  ## next render builds it again only to lose it again (the SenseCAP Indicator's
+  ## Kitchen sink at 1.0 MB of headroom, 2026-11-08). It stays whatever the
+  ## headroom, until an allocation that did not fit asks for the room
+  ## (releaseRenderMemory).
   let headroom = availableRenderHeadroomBytes()
   let floor = if decodedSinceSettle and not holdingPictures: RenderMemoryShortBytes
               else: KeepInterpretersBytes
   decodedSinceSettle = false
-  headroom <= 0 or headroom >= floor
+  answeringPointer or headroom <= 0 or headroom >= floor
+
+proc decodeWantsRoom*(largestBlock: int): bool =
+  ## Whether a kept interpreter should go for this largest free block: a
+  ## decode ran or is about to, and the block is short. The same question is
+  ## asked by every paint-server fill sizing its strips (pixie's
+  ## paintStripRows), and a fill decodes nothing: a gradient title bar cost a
+  ## 10.3" panel an interpreter every other render, 1.4 s to build again.
+  decodedSinceSettle and largestBlock < RenderMemoryShortBytes
 
 when defined(frameosEmbedded):
   proc largestDecodeBlock(): int {.nimcall, raises: [].} =
-    ## The contiguous decode budget, measured when a decode first asks for it.
+    ## The contiguous decode budget, measured when something first asks for it.
     result = fos_psram_largest_free_block().int
-    if result < RenderMemoryShortBytes and not renderMemoryReleaseHook.isNil and
-        renderMemoryReleaseHook():
+    if decodeWantsRoom(result) and not renderMemoryReleaseHook.isNil and
+        renderMemoryReleaseHook(false):
       result = fos_psram_largest_free_block().int
 
 proc refreshDecodeContiguousBudget() =
@@ -259,6 +284,8 @@ proc refreshDecodeContiguousBudget() =
   ## report "plenty" and effectively leave it unlimited.
   when defined(frameosEmbedded):
     setDecodeContiguousBudgetProvider(largestDecodeBlock)
+  elif defined(testing):
+    setDecodeContiguousBudgetBytes(contiguousBudgetOverride)
   else:
     setDecodeContiguousBudgetBytes(0)
 

@@ -156,6 +156,12 @@ proc child(scene: FrameScene, nodeId: int): FrameScene =
 proc runs(scene: FrameScene): int =
   scene.state{"runs"}.getInt()
 
+proc copies(r: SceneRhythm): seq[Image] =
+  var cell = r.cells
+  while not cell.isNil:
+    if not cell.copy.isNil: result.add cell.copy
+    cell = cell.next
+
 proc pixel(image: Image, x, y: int): ColorRGBX =
   image.getPixel(image.dataIndex(x, y))
 
@@ -206,7 +212,18 @@ suite "scene rhythm":
     discard scene.pass()
     check photo.runs == 2
 
-  test "a split's own interval is the fastest it renders":
+  test "on a real-time display a split wakes for its first panel, whatever its own interval":
+    let scene = newScene(slowSplitId)
+    discard scene.pass()
+    check abs(scene.refreshInterval - 1.0) < 0.001 # the clock, not the split's 300 s
+    rhythmClockOverride = 1001.0
+    discard scene.pass()
+    check scene.child(3).runs == 2
+    check scene.child(4).runs == 1
+
+  test "e-paper keeps a split's own interval as the fastest it renders":
+    rhythmHoldFloor = true
+    defer: rhythmHoldFloor = false
     # A 1 s clock in a split left on 300 s (an e-ink frame, a battery ESP32)
     # does not make the frame refresh every second.
     let scene = newScene(slowSplitId)
@@ -369,8 +386,7 @@ suite "scene rhythm":
     let photo = scene.child(4)
     # A copy from a rectangle that is not on the canvas any more (an older
     # layout), written before the photo's last due run.
-    photo.rhythm.copies.add(newImage(3, 3))
-    photo.rhythm.copyAt.add(@[0, 3, photo.rhythm.scheduledPass - 1])
+    photo.rhythm.cells = RhythmCell(origin: 0, stride: 3, width: 3, height: 3, format: pfRgbx, copy: newImage(3, 3), drawnPass: 0, next: photo.rhythm.cells)
     rhythmClockOverride = 1001.0
     discard scene.pass()
     check photo.rhythm.copies.len == 1

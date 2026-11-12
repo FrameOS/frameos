@@ -25,11 +25,14 @@ export function sceneControlNoticeContent({
   sceneIsUnsaved,
   sceneIsUndeployed,
   sceneIsActive,
+  noun = 'scene',
 }: {
   mode: WorkspaceMode
   sceneIsUnsaved: boolean
   sceneIsUndeployed: boolean
   sceneIsActive: boolean
+  /** What the drawer is about: a layout is pushed like a scene, and called what it is. */
+  noun?: 'scene' | 'layout'
 }): SceneControlNoticeContent | null {
   if (!sceneIsUnsaved && !sceneIsUndeployed) {
     return null
@@ -37,7 +40,7 @@ export function sceneControlNoticeContent({
 
   if (mode === 'cloud') {
     return {
-      statusText: 'This scene has changes that are not on the frame yet.',
+      statusText: `This ${noun} has changes that are not on the frame yet.`,
       showSaveButton: false,
       pushLabel: sceneIsActive ? null : 'Push to frame',
     }
@@ -45,7 +48,7 @@ export function sceneControlNoticeContent({
 
   if (mode === 'frameAdmin') {
     return {
-      statusText: 'This scene has unsaved changes.',
+      statusText: `This ${noun} has unsaved changes.`,
       showSaveButton: true,
       pushLabel: null,
     }
@@ -54,9 +57,9 @@ export function sceneControlNoticeContent({
   return {
     statusText: sceneIsUnsaved
       ? sceneIsUndeployed
-        ? 'This scene has unsaved changes that are not on the frame yet.'
-        : 'This scene has unsaved changes.'
-      : 'This scene is saved but not on the frame yet.',
+        ? `This ${noun} has unsaved changes that are not on the frame yet.`
+        : `This ${noun} has unsaved changes.`
+      : `This ${noun} is saved but not on the frame yet.`,
     showSaveButton: sceneIsUnsaved,
     pushLabel: sceneIsActive ? null : sceneIsUnsaved ? 'Save & push' : 'Push to frame',
   }

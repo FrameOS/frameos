@@ -25,6 +25,14 @@
 ## generation (`panelBufferGeneration`): its pixels are copied in, ~25 ms
 ## for a 480x480 RGB565 buffer, and only the damage against that frame is
 ## drawn. A tap right after a scene comes up costs what any other tap does.
+##
+## A scene drawn into a rectangle of the panel's buffer (a layout's hole, a
+## split's panel) keeps a record of its own, for that rectangle. Taken off the
+## shelf when the scene is about to draw there (`takePanelRegion`); a rectangle
+## whose pixels came from elsewhere takes its record off the same way, and
+## every record goes when the buffers stop showing what they were showing
+## (`forgetPanelFrames`, called on a scene switch and when something draws over
+## the canvas).
 
 import std/options
 import pixie
@@ -32,15 +40,23 @@ import pixie/fileformats/svg
 import frameos/utils/canvas_log
 import frameos/utils/image
 import frameos/utils/memory
+import frameos/render_probe
 
-const MaxRepaints = 6
-  ## Boxes a frame repaints at most (pixie's damageRects joins the rest):
-  ## each costs a look at every element's bounds, and those over it.
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
+
+const
+  MaxRepaints = 6
+    ## Boxes a frame repaints at most (pixie's damageRects joins the rest):
+    ## each costs a look at every element's bounds, and those over it.
+  MaxHeldFrames = 6
+    ## Records kept (a parse is 16-45 KB of PSRAM on an ESP32): three frame
+    ## buffers, each with a whole frame or a hole's picture and a bar's.
 
 type HeldFrame = object
   buffer: pointer
   generation: uint32
-  width, height: int
+  isRegion: bool ## a rectangle of the buffer (a view), not the whole of it
+  origin, width, height: int
   svg: Svg
   canvases: seq[tuple[image: Image, version: int]]
     ## the version of each canvas the frame showed (utils/canvas_log.nim)
@@ -50,6 +66,7 @@ var
   panelBuffer: pointer
   panelGeneration: uint32
   panelHeld: Option[HeldFrame]
+  regionHeld: Option[HeldFrame]
   panelBufferGeneration*: proc(buffer: pointer): int64 {.nimcall, raises: [].}
     ## The firmware's write generation of any of the panel's buffers, -1 for
     ## one it does not know (embedded_runtime: fos_display_buffer_generation).
@@ -83,7 +100,7 @@ proc beginPanelFrame*(buffer: pointer, generation: uint32) =
   panelGeneration = generation
   panelHeld = none(HeldFrame)
   for i in 0 ..< heldFrames.len:
-    if heldFrames[i].buffer == buffer:
+    if heldFrames[i].buffer == buffer and not heldFrames[i].isRegion:
       panelHeld = some(heldFrames[i])
       heldFrames.delete(i)
       break
@@ -101,8 +118,30 @@ proc beginPanelFrame*(buffer: pointer, generation: uint32) =
 proc endPanelFrame*() =
   panelBuffer = nil
   panelHeld = none(HeldFrame)
+  regionHeld = none(HeldFrame)
   panelHasPixelFrame = false
   panelPixelFrame = PixelFrame()
+
+proc regionRecord(view: Image): int =
+  ## This rectangle's record for the panel's current buffer, -1 for none.
+  for i in 0 ..< heldFrames.len:
+    template frame: untyped = heldFrames[i]
+    if frame.buffer == panelBuffer and frame.isRegion and frame.origin == view.origin and
+        frame.width == view.width and frame.height == view.height:
+      return i
+  -1
+
+proc takePanelRegion*(view: Image) =
+  ## A scene is about to draw into this rectangle, or its pixels are about to
+  ## come from another buffer: its record leaves the shelf, and only a render
+  ## that draws the rectangle whole puts one back.
+  regionHeld = none(HeldFrame)
+  if panelBuffer.isNil or view.isNil or view.bufferPointer != panelBuffer or not view.isView:
+    return
+  let i = view.regionRecord
+  if i >= 0:
+    regionHeld = some(heldFrames[i])
+    heldFrames.delete(i)
 
 proc takePanelPixelFrame*(target: Image, wholeFrame: bool): tuple[panel: bool, frame: PixelFrame] =
   ## For a frame of cells going into `target`: `panel` when it is the buffer
@@ -139,10 +178,27 @@ proc newestHeldFrame(target: Image): int =
   for i in countdown(heldFrames.high, 0):
     let frame = heldFrames[i]
     if frame.buffer != panelBuffer and frame.width == target.width and
-        frame.height == target.height and
+        frame.height == target.height and frame.isRegion == target.isView and
+        (not target.isView or frame.origin == target.origin) and
         panelBufferGeneration(frame.buffer) == frame.generation.int64:
       return i
   -1
+
+proc copyFrameIn(target: Image, source: pointer) =
+  ## What `source` (another of the panel's buffers) holds where `target` is.
+  if target.format == pfGray4:
+    let raw = cast[ptr UncheckedArray[uint8]](source)
+    for y in 0 ..< target.height:
+      let index = target.dataIndex(0, y)
+      copyGray4Levels(target.data8, index, raw, index, target.width)
+    return
+  let
+    bpp = target.bytesPerPixel
+    d = cast[ptr UncheckedArray[byte]](target.bufferPointer)
+    s = cast[ptr UncheckedArray[byte]](source)
+  for y in 0 ..< target.height:
+    let offset = target.dataIndex(0, y) * bpp
+    copyMem(d[offset].addr, s[offset].addr, target.width * bpp)
 
 proc canvasesShown(svg: Svg): seq[tuple[image: Image, version: int]] =
   for p in svg.pictures:
@@ -210,6 +266,69 @@ proc forgetPanelFrames*() =
   heldPixelFrames.setLen(0)
   endPanelFrame()
 
+proc forgetPanelRegions*() =
+  ## What the rectangles of the panel's buffers held is not known any more (a
+  ## scene switch, a hole that moved, something drawn over the canvas). Whole
+  ## frames' records go too: the next frame is drawn whole anyway. The frame
+  ## being drawn is left alone.
+  heldFrames.setLen(0)
+  regionHeld = none(HeldFrame)
+
+type PixelBox* = tuple[x, y, w, h: int]
+
+proc aroundHoles*(width, height: int, holes: openArray[PixelBox]): seq[PixelBox] =
+  ## A rectangle less `holes`, which do not overlap, as boxes: a band for each
+  ## run of rows where the same holes are, cut at their sides.
+  var top = 0
+  while top < height:
+    var bottom = height
+    for h in holes:
+      if h.y > top and h.y < bottom: bottom = h.y
+      if h.y + h.h > top and h.y + h.h < bottom: bottom = h.y + h.h
+    var x = 0
+    while true:
+      var next = -1
+      for i in 0 ..< holes.len:
+        if holes[i].w > 0 and holes[i].y <= top and holes[i].y + holes[i].h >= bottom and holes[i].x >= x and
+            (next < 0 or holes[i].x < holes[next].x):
+          next = i
+      if next < 0:
+        break
+      if holes[next].x > x:
+        result.add((x, top, holes[next].x - x, bottom - top))
+      x = holes[next].x + holes[next].w
+    if x < width:
+      result.add((x, top, width - x, bottom - top))
+    top = bottom
+
+proc renderSvgAround*(root: SvgNode, target: Image, holes: openArray[PixelBox], owed: var Option[Color],
+    reuse = false): bool =
+  ## A UI's chrome: `root` drawn everywhere on `target` but its holes, whose
+  ## pixels are the embedded scenes' (docs/scene-layouts.md). The scene
+  ## background still owed is settled the same way, around them.
+  ##
+  ## No damage boxes: the chrome is a strip of the panel, drawn when it is due,
+  ## and most of what a damage record would save is its own parse.
+  if root.isNil or target.isNil:
+    return false
+  refreshDecodeBudgetInto(forDecode = false)
+  try:
+    var parsed: Svg
+    probe(phParse):
+      parsed = parseSvg(root, target.width, target.height, reuse)
+    let pay = owed.isSome and not parsed.coversOpaque(target.width, target.height)
+    probe(phRaster):
+      for r in aroundHoles(target.width, target.height, holes):
+        if r.w > 0 and r.h > 0:
+          let window = target.view(r.x, r.y, r.w, r.h)
+          if pay:
+            payBackground(window, owed.get())
+          parsed.renderInto(window, r.x, r.y)
+    owed = none(Color)
+    result = true
+  except CatchableError:
+    result = false
+
 proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], wholeFrame: bool,
     reuse = false): bool =
   ## renderSvgIntoTarget, repainting only the damage when `target` is the
@@ -221,15 +340,23 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
   ## layout), for pixie to keep their parse (parseSvg's `reuse`).
   if root.isNil:
     return false
-  if panelBuffer.isNil or target.isNil or target.isView or not wholeFrame or
-      target.bufferPointer != panelBuffer:
-    return renderSvgIntoTarget(root, target, owed)
-  let held = panelHeld
+  if panelBuffer.isNil or target.isNil or not wholeFrame or target.bufferPointer != panelBuffer:
+    # Not the panel's own buffer (or not the whole frame): parsed and drawn
+    # in one go, so the probe's raster carries its parse too.
+    probe(phRaster):
+      result = renderSvgIntoTarget(root, target, owed)
+    return result
+  let held =
+    if not target.isView: panelHeld
+    elif regionHeld.isSome and regionHeld.get().origin == target.origin: regionHeld
+    else: none(HeldFrame)
   panelHeld = none(HeldFrame)
+  regionHeld = none(HeldFrame)
   refreshDecodeBudgetInto(forDecode = false) # a frame decodes nothing: kept interpreters stay
   var parsed: Svg
   try:
-    parsed = parseSvg(root, target.width, target.height, reuse)
+    probe(phParse):
+      parsed = parseSvg(root, target.width, target.height, reuse)
   except CatchableError:
     return false
   if not parsed.coversOpaque(target.width, target.height):
@@ -238,7 +365,8 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
       if owed.isSome:
         payBackground(target, owed.get())
         owed = none(Color)
-      parsed.renderInto(target)
+      probe(phRaster):
+        parsed.renderInto(target)
     except CatchableError:
       return false
     return true
@@ -247,39 +375,60 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
   var
     rects = @[(x: 0, y: 0, w: target.width, h: target.height)]
     base: Option[HeldFrame] # the frame the buffer holds after any copy
-  if held.isSome and held.get().generation == panelGeneration and
-      held.get().width == target.width and held.get().height == target.height:
-    rects = damageRects(held.get().svg, parsed, target.width, target.height, MaxRepaints).rects
-    base = held
-  if rects.area >= whole:
-    # Its own frame is no help (none, written over, another scene's): the
-    # newest frame another buffer holds, copied in, unless the damage
-    # against that is the whole frame too.
-    let source = newestHeldFrame(target)
-    if source >= 0:
-      let found = damageRects(heldFrames[source].svg, parsed, target.width, target.height, MaxRepaints)
-      if not found.full and found.rects.area < whole:
-        copyMem(target.bufferPointer, heldFrames[source].buffer, target.byteSize)
-        rects = found.rects
-        base = some(heldFrames[source])
-  if base.isSome and rects.area < whole:
-    # Canvases drawn into since: pixie sees the same picture in them.
-    rects.add canvasRects(base.get(), parsed, target)
+  probe(phDamage):
+    if held.isSome and held.get().generation == panelGeneration and
+        held.get().width == target.width and held.get().height == target.height:
+      rects = damageRects(held.get().svg, parsed, target.width, target.height, MaxRepaints).rects
+      # Its own frame is the base only when it saves a repaint. Assigned
+      # here unconditionally, the copy below assigned `base` a second time,
+      # and Nim 2.2.4 builds that `base = some(...)` into `base` without
+      # destroying what it held: every frame given up for another buffer's
+      # (a scene switch, a scene coming back) leaked its whole parse, 16-45 KB
+      # of PSRAM a switch on a SenseCAP Indicator, until the JSX UIs' idle
+      # interpreters went for want of room and took their onClick with them
+      # (2026-11-07). `base` is assigned once on any path now.
+      if rects.area < whole:
+        base = held
+    if rects.area >= whole:
+      # Its own frame is no help (none, written over, another scene's): the
+      # newest frame another buffer holds, copied in, unless the damage
+      # against that is the whole frame too.
+      let source = newestHeldFrame(target)
+      if source >= 0:
+        let found = damageRects(heldFrames[source].svg, parsed, target.width, target.height, MaxRepaints)
+        if not found.full and found.rects.area < whole:
+          copyFrameIn(target, heldFrames[source].buffer)
+          rects = found.rects
+          base = some(heldFrames[source])
+    if base.isSome and rects.area < whole:
+      # Canvases drawn into since: pixie sees the same picture in them.
+      rects.add canvasRects(base.get(), parsed, target)
   when defined(testing):
     svgFramePixelsForTest = 0
   try:
-    for r in rects:
-      if r.w == target.width and r.h == target.height:
-        parsed.renderInto(target)
-      else:
-        parsed.renderInto(target.view(r.x, r.y, r.w, r.h), r.x, r.y)
-      when defined(testing):
-        svgFramePixelsForTest += r.w * r.h
+    probe(phRaster):
+      for r in rects:
+        if r.w == target.width and r.h == target.height:
+          parsed.renderInto(target)
+        else:
+          parsed.renderInto(target.view(r.x, r.y, r.w, r.h), r.x, r.y)
+        when defined(testing):
+          svgFramePixelsForTest += r.w * r.h
   except CatchableError:
     return false
-  heldFrames.add(HeldFrame(buffer: panelBuffer, generation: panelGeneration,
-    width: target.width, height: target.height, svg: parsed, canvases: parsed.canvasesShown))
+  if target.isView:
+    # One record per rectangle, whoever left the last one.
+    let stale = target.regionRecord
+    if stale >= 0:
+      heldFrames.delete(stale)
+  if heldFrames.len >= MaxHeldFrames:
+    heldFrames.delete(0)
+  heldFrames.add(HeldFrame(buffer: panelBuffer, generation: panelGeneration, isRegion: target.isView,
+    origin: target.origin, width: target.width, height: target.height, svg: parsed,
+    canvases: parsed.canvasesShown))
   true
 
 proc renderSvgFrame*(svg: string, target: Image, owed: var Option[Color], wholeFrame: bool): bool =
   renderSvgFrame(svgRoot(svg), target, owed, wholeFrame)
+
+{.pop.}

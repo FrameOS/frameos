@@ -483,6 +483,9 @@ static bool apply_frame_settings(const cJSON *frame)
         if (config->render_mode != mode) {
             config->render_mode = mode;
             changed = true;
+            /* The next pass renders the other way, now rather than an
+             * interval from now (docs/server-rendering.md). */
+            fos_client_render_mode_changed();
         }
     }
 
@@ -505,6 +508,15 @@ static bool apply_frame_settings(const cJSON *frame)
         config->deep_sleep_on_battery != (bool)cJSON_IsTrue(sleep_on_battery)) {
         config->deep_sleep_on_battery = cJSON_IsTrue(sleep_on_battery);
         changed = true;
+    }
+
+    const cJSON *awake_input = cJSON_GetObjectItem(frame, "awakeAfterInputSeconds");
+    if (cJSON_IsNumber(awake_input) && awake_input->valuedouble >= 0 && awake_input->valuedouble <= 3600) {
+        uint32_t seconds = (uint32_t)awake_input->valuedouble;
+        if (config->awake_after_input_sec != seconds) {
+            config->awake_after_input_sec = seconds;
+            changed = true;
+        }
     }
 
     const cJSON *wake_check = cJSON_GetObjectItem(frame, "wakeCheckSeconds");
@@ -590,6 +602,22 @@ static bool apply_frame_settings(const cJSON *frame)
     if (cJSON_IsBool(voice_chat) && config->voice_chat != cJSON_IsTrue(voice_chat)) {
         config->voice_chat = cJSON_IsTrue(voice_chat);
         changed = true;
+    }
+    /* The click of a press on the glass. Live: asked on every press. */
+    const cJSON *touch_beep = cJSON_GetObjectItem(frame, "touchBeep");
+    if (cJSON_IsBool(touch_beep) && config->touch_beep != cJSON_IsTrue(touch_beep)) {
+        config->touch_beep = cJSON_IsTrue(touch_beep);
+        changed = true;
+    }
+    /* The chip's clock: set once at boot (main.c), hence the restart. */
+    const cJSON *cpu_mode = cJSON_GetObjectItem(frame, "cpuMode");
+    if (cJSON_IsString(cpu_mode)) {
+        uint8_t mode = config->cpu_mode;
+        if (fos_config_parse_cpu_mode(cpu_mode->valuestring, &mode) && mode != config->cpu_mode) {
+            config->cpu_mode = mode;
+            changed = true;
+            s_restart_after_apply = true;
+        }
     }
     /* The PDM microphone's pins (docs/voice-chat.md): clock, data and the
      * power switch, -1 = none. Read at every voice session's start
@@ -720,6 +748,15 @@ static bool apply_frame_settings(const cJSON *frame)
           fos_config_normalize_render_scale(render_scale->valuedouble, &normalized_render_scale))) &&
         config->render_scale_milli != normalized_render_scale) {
         config->render_scale_milli = normalized_render_scale;
+        changed = true;
+    }
+
+    /* `frameSettingsOnScreen` (docs/scene-settings.md "The frame page"): the
+     * frame page behind the gear of the settings on the screen, read when the
+     * panel draws, so no restart. Absent leaves it as it is. */
+    const cJSON *on_screen = cJSON_GetObjectItem(frame, "frameSettingsOnScreen");
+    if (cJSON_IsBool(on_screen) && config->frame_settings_on_screen != cJSON_IsTrue(on_screen)) {
+        config->frame_settings_on_screen = cJSON_IsTrue(on_screen);
         changed = true;
     }
 
@@ -905,6 +942,9 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
         snprintf(buf, sizeof(buf), "%g", after->render_scale_milli / 1000.0);
         change_append(out, out_len, "render_scale", buf);
     }
+    if (before->frame_settings_on_screen != after->frame_settings_on_screen) {
+        change_append(out, out_len, "frame_settings_on_screen", after->frame_settings_on_screen ? "on" : "off");
+    }
     if (strcmp(before->colors, after->colors) != 0) {
         change_append(out, out_len, "colors", after->colors[0] ? "set" : "default");
     }
@@ -930,6 +970,9 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     if (before->wake_check_sec != after->wake_check_sec) {
         change_append_int(out, out_len, "wake_check_seconds", (long)after->wake_check_sec);
     }
+    if (before->awake_after_input_sec != after->awake_after_input_sec) {
+        change_append_int(out, out_len, "awake_after_input_seconds", (long)after->awake_after_input_sec);
+    }
     if (before->battery_pin != after->battery_pin) {
         change_append_int(out, out_len, "battery_pin", (long)after->battery_pin);
     }
@@ -946,6 +989,12 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (before->buzzer_tone_hz != after->buzzer_tone_hz) {
         change_append_int(out, out_len, "buzzer_tone_hz", (long)after->buzzer_tone_hz);
+    }
+    if (before->touch_beep != after->touch_beep) {
+        change_append(out, out_len, "touch_beep", after->touch_beep ? "true" : "false");
+    }
+    if (before->cpu_mode != after->cpu_mode) {
+        change_append(out, out_len, "cpu_mode", fos_config_cpu_mode_name(after->cpu_mode));
     }
     if (before->voice_chat != after->voice_chat) {
         change_append(out, out_len, "voice_chat", after->voice_chat ? "true" : "false");
@@ -1024,6 +1073,34 @@ static settings_source_t select_source(char *url, size_t url_len,
 const char *fos_settings_etag(void)
 {
     return s_etag_source == SETTINGS_SOURCE_BACKEND ? s_etag : "";
+}
+
+bool fos_settings_changed(void)
+{
+    if (s_sync_requested) return true;
+    char url[FOS_URL_LEN + 128];
+    char auth[SETTINGS_AUTH_LEN];
+    settings_source_t source = select_source(url, sizeof(url), auth, sizeof(auth));
+    if (source == SETTINGS_SOURCE_NONE) return false;
+    /* The provider's route keeps its own schedule (fos_settings_sync): due
+     * is reason enough. */
+    if (source == SETTINGS_SOURCE_CLOUD) return esp_timer_get_time() >= s_cloud_next_pull_us;
+    if (fos_wifi_state() != FOS_WIFI_CONNECTED) return false;
+    /* The render task may be writing it: a copy, ended by hand. */
+    char etag[SETTINGS_ETAG_LEN];
+    memcpy(etag, s_etag, sizeof(etag));
+    etag[sizeof(etag) - 1] = '\0';
+    if (s_etag_source != source) etag[0] = '\0';
+    fos_http_request_t request = {
+        .url = url,
+        .auth = auth,
+        .if_none_match = etag[0] ? etag : NULL,
+    };
+    fos_http_response_t response;
+    /* The status alone: no body is read. */
+    if (fos_http_fetch(&request, 0, &response) != ESP_OK) return false;
+    fos_http_response_free(&response);
+    return response.status == 200;
 }
 
 esp_err_t fos_settings_sync(bool force)

@@ -118,6 +118,10 @@ const OPTIONAL_ON_OLDER_FIRMWARE: ReadonlySet<EmbeddedUsbConfigKey> = new Set<Em
   // E-series pin from the stored preset anyway.
   'buzzer_pin',
   'buzzer_tone_hz',
+  // 2026.11.6: rides the settings pull too.
+  'touch_beep',
+  // 2026.11.7: the chip's clock, on the settings pull too (`cpuMode`).
+  'cpu_mode',
   // 2026.10.20: the PDM microphone's pins (docs/voice-chat.md), one console
   // spec; they ride the settings pull too, and the reTerminal presets carry
   // their own.

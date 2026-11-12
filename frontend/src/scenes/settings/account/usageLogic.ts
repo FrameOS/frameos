@@ -83,6 +83,13 @@ export interface AiUsage {
   turns: AiTurn[]
 }
 
+/** The account's books as the page shows them: what is owed and the latest lines. */
+export interface AccountStatement {
+  lines: AiBalanceLine[]
+  /** Positive: owed. Negative: a credit in the account's favour. */
+  owedMicros: string
+}
+
 export interface UsageAccount {
   created_at: string
   email: string
@@ -104,6 +111,7 @@ export interface usageLogicValues {
   ai: AiUsage | null
   aiLoading: boolean
   contactEmail: string | null
+  statement: AccountStatement | null
   togglingAi: boolean
   usage: AccountUsage | null
   usageLoading: boolean
@@ -165,6 +173,7 @@ export interface usageLogicMeta {
     usage: (usageResponse: UsageResponse | null) => AccountUsage | null
     contactEmail: (usageResponse: UsageResponse | null) => string | null
     usageLoading: (usageResponseLoading: boolean) => boolean
+    statement: (ai: AiUsage | null) => AccountStatement | null
   }
 }
 
@@ -229,6 +238,16 @@ export const usageLogic = kea<usageLogicType>([
       (usageResponse: UsageResponse | null): string | null => usageResponse?.support_email ?? null,
     ],
     usageLoading: [(s) => [s.usageResponseLoading], (usageResponseLoading: boolean): boolean => usageResponseLoading],
+    // Shown only when there is something on the books: an account that
+    // never bought anything and owes nothing has no statement to read.
+    statement: [
+      (s) => [s.ai],
+      (ai: AiUsage | null): AccountStatement | null => {
+        const lines = ai?.balance.recent_lines ?? []
+        const owedMicros = ai?.balance.receivable_micros || '0'
+        return lines.length > 0 || BigInt(owedMicros) !== 0n ? { lines, owedMicros } : null
+      },
+    ],
   }),
   listeners(({ actions }) => ({
     setAiEnabled: async ({ enabled }) => {

@@ -28,15 +28,18 @@ like `setCurrentScene {direction}`:
   the switcher's own Close, a key with the role `back`, and its idle timeout
   all dispatch `sceneSwitcher` to go back. `sceneSettings` (a swipe down
   from the top) goes back the same way, and `sceneSwitcher` over the scene
-  settings closes them unsaved ([scene-settings.md](scene-settings.md)).
+  settings closes them unsaved ([scene-settings.md](scene-settings.md)), or,
+  with `{swap: true}` (a taskbar's Start), goes straight to the list, the
+  scene behind staying behind.
 
 A `setCurrentScene {sceneId: "system/sceneSwitcher"}` opens it by name (the
 HTTP API, a schedule) without `state.from`: it highlights the list's first
 scene and goes back there, and so does a switcher whose `from` has left the
 list (it forgets `from` then, and when it is left). While it shows,
-`setCurrentScene {direction}` walks the list from `state.from`: on a
-reTerminal, RIGHT held in the switcher is the scene after the one it was
-opened from.
+`setCurrentScene {direction}` turns its page instead (`next` is `forward`,
+`prev` is `back`): the swipe or the key the frame's event map walks the
+scenes with walks the tiles in the switcher, and the frame stays on it. On a
+reTerminal, RIGHT held in the switcher is the next page.
 
 Who may say it (`origins`): the frame's event map, a scene (a "Scenes" button
 in a scene's own UI), a schedule, the HTTP API with the frame access key or
@@ -91,16 +94,20 @@ It builds a UI tree in Nim (`SvgNode`s with Tailwind classes) and lays it out
 with the JSX layer (`ui/layout.nim`), so it needs no QuickJS and draws
 through the one rasterizer (`utils/svg_frames.nim`): on an LCD only the
 tile that changed is repainted. Its tiles are regions for `ui/events.nim`,
-which hit-tests the taps as it does a JS app's UI.
+which hit-tests the taps as it does a JS app's UI. It is laid out at the
+frame's render scale, sized from the panel, within the bounds the settings
+panel keeps (docs/scene-settings.md, "At the frame's scale").
 
-`switcherGrid` puts every scene on one page while the tiles stay big enough
-to read (at least a fifth of the shorter side across, up to six by six), and
-picks, among the grids that hold them all, the one whose pictures (at the
-frame's aspect) or name cards come out largest. More scenes than that fit
-page, with the page and two arrows in the header.
+`switcherGrid` picks the densest grid whose tiles stay big enough to read (at
+least a fifth of the shorter side across, up to six by six), and among grids
+as dense the one whose pictures (at the frame's aspect) or name cards come
+out largest. The tiles keep that size whatever the number of scenes: three
+scenes fill three slots of the same grid that thirty would page through,
+rather than growing to fill the page. More scenes than a page holds page,
+with the page and two arrows in the header.
 
 - **A fast panel** (an LCD: an RGB565 canvas, the framebuffer, a HyperPixel)
-  gets a dark grid: each tile its picture when the host has one, its number
+  gets a dark grid: each tile its picture when the host has one (Linux), its number
   and title under it, the highlighted tile ringed, and a tile lighter while a
   finger is on it (`active:`).
 - **E-paper** (an ESP32 that is not an LCD, `waveshare.*`, `inky*`,
@@ -121,14 +128,40 @@ page, with the page and two arrows in the header.
 
 On Linux each tile shows the scene's last snapshot: the PNG the runner writes
 under `<assets>/.frameos/scene_images/` on every switch and at most once a
-minute after (`render:sceneImage:saved`). `scene_switcher_linux.nim` fits it
-to the tile (halved by pixie's box filter, then drawn), and keeps it until
-the file changes, so the decode is paid once per scene and snapshot. A scene
-not shown since the card was made has its number in the picture's place.
+minute after (`render:sceneImage:saved`), once the panel has the picture
+(the encode is most of a second on a Pi Zero, and it used to hold every
+switch back), and never for the switcher or the settings themselves.
+`scene_switcher_linux.nim` fits it to the tile (halved by pixie's box
+filter, then drawn), and keeps it until the file changes. A scene not shown
+since the card was made has its number in the picture's place.
 
-The ESP32 and the preview list names only. The firmware keeps one picture,
-the panel's, and a picture per scene would be a decode and a few hundred KB
-of PSRAM per tile, or flash writes on every switch.
+Opening it is fast on a Pi Zero (a 720x720 PNG is a few hundred ms to decode
+there):
+
+- The runner hands the switcher the snapshot it just wrote while it still
+  has the pixels (`noteSceneSnapshot`): kept halved down to a shorter side
+  of 320 to 639 px (360x360 on a HyperPixel 4.0 Square), with no decode.
+- It writes that small copy beside the snapshots
+  (`.frameos/scene_thumbs/<snapshot>.qoi`; QOI is a few ms to write and to
+  read), and after a restart the switcher reads the copy, unless the
+  snapshot is newer (one from an older runtime, or put there by a control
+  plane), which it decodes.
+- A render on a fast panel decodes for 120 ms at most; the tiles it did not
+  get to show their older picture, or their number, and the switcher
+  renders again at once (`sceneSwitcherThumbnailPass`). E-paper waits for
+  all of them: every render there is a refresh.
+
+An ESP32 shows name cards only. #709 gave it a small RGB565 picture per scene
+on the state partition, and on a reTerminal E1003 (a 10.3" e-paper panel, 23
+scenes) the drawer then took 8 to 14 s to open: each picture was a SPIFFS open
+(up to 1.4 s, a walk of the partition), a stretch onto the grey canvas through
+pixie's float sampler (0.86 s a tile), and a write of seconds after renders.
+The owner's call (2026-11-10): no pictures on an ESP32. The first boot of a
+firmware without them deletes the old `th-*.bin` files once
+(`drop_old_scene_pictures` in `fos_scenes.c`, remembered in NVS as
+`th_swept`).
+
+The preview lists names only.
 
 ## Using it
 
@@ -143,8 +176,9 @@ of PSRAM per tile, or flash writes on every switch.
   two, so pressing NEXT three times moves three tiles whatever the button
   layer made of the taps, and presses made during an e-paper refresh land
   together with their timing, so the next refresh shows where they got to.
-  A long press stays the frame's: on a reTerminal LEFT and RIGHT held are
-  still the previous and the next scene.
+  A long press stays the frame's: on a reTerminal LEFT and RIGHT held walk
+  the scenes, which in the switcher is its pages (`setCurrentScene
+  {direction}` turns the page there).
 - **A keyboard** (Linux): the arrows walk the grid, Page Up and Down turn
   the page, Enter shows the scene, Escape goes back.
 - **Nobody there:** it goes back by itself after a minute on a fast panel and
@@ -171,8 +205,8 @@ bigger with it than without: the module's code 8.6 KB and its strings
 `fos_scenes.c`) 0.8 KB. The first version was 20.8 KB. What keeps it there:
 
 - No new layout code: the JSX layer it draws with is already in the image.
-- The firmware gets the names alone: no keyboard, no pictures, no round
-  panel (`frameosEmbedded`; no ESP32 board is round), integer arithmetic, and
+- The firmware gets no keyboard and no round panel (`frameosEmbedded`; no
+  ESP32 board is round) and no pictures, integer arithmetic, and
   no Nim checks in the module (every index is guarded by the loop or the test
   that reaches it).
 - Class names are appended in place, one call each, and a class that

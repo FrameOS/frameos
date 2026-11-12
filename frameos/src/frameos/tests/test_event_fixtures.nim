@@ -49,13 +49,16 @@ block refused_lists_are_derived:
   # `voiceChat` is the frame's event map's alone (docs/voice-chat.md): a
   # session needs a key held to end on, so no edge can say it — not even the
   # admin API or the system.
-  doAssert refusedEvents(eoSchedule) == @["init", "open", "close", "uploadScenes", "voiceChat"]
-  doAssert refusedEvents(eoHttpAdmin) == @["voiceChat"]
+  # `uiTimer` is the runtime's own (a JSX UI's timer, made by the tick): the
+  # system's alone.
+  doAssert refusedEvents(eoSchedule) == @["init", "open", "close", "uiTimer", "uploadScenes", "voiceChat"]
+  doAssert refusedEvents(eoHttpAdmin) == @["uiTimer", "voiceChat"]
   doAssert refusedEvents(eoSystem) == @["voiceChat"]
   # A scene is refused the device commands, and the lifecycle events — those
-  # are the host's to say, at the moment they are true.
+  # are the host's to say, at the moment they are true — and the runtime's
+  # own `uiTimer`.
   for name in refusedEvents(eoScene):
-    doAssert isDeviceCommand(name) or eventPolicy(name).class == ecLifecycle,
+    doAssert isDeviceCommand(name) or eventPolicy(name).class == ecLifecycle or name == evUiTimer,
       name & " is refused to scenes but is neither a device command nor lifecycle"
 
 # ---------------------------------------------------------------------- log

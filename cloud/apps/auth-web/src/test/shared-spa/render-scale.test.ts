@@ -1,8 +1,7 @@
 // The render scale (frontend/src/utils/renderScale.ts): what a UI from a
 // .tsx/.jsx app is laid out for. The automatic rule is the runtime's
-// (frameos/src/frameos/render_scale.nim): the panel's shorter edge over
-// 600 px, rounded DOWN to a quarter, never below 1, so a scaled layout never
-// has less than 600 px on its shorter edge.
+// (frameos/src/frameos/render_scale.nim): 1, and 2 on a 4K or larger screen
+// on HDMI.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -20,36 +19,40 @@ import type { StateField } from "../../../../../../frontend/src/types";
 
 describe("autoRenderScale", () => {
   it.each([
-    [800, 480, 1],
-    [720, 720, 1],
-    [984, 1304, 1.5],
-    [1080, 1920, 1.75],
-    [1200, 1600, 2],
-    [1404, 1872, 2.25],
-    [1872, 1404, 2.25],
-    [2160, 3840, 3.5],
-  ])("%ix%i is %d×", (width, height, scale) => {
-    expect(autoRenderScale(width, height)).toBe(scale);
+    [800, 480, "waveshare.EPD_3in97", 1],
+    [1200, 1600, "waveshare.EPD_13in3e", 1],
+    [1920, 1080, "framebuffer", 1],
+    [2560, 1440, "framebuffer", 1],
+    [3840, 2160, "framebuffer", 2],
+    [2160, 3840, "framebuffer", 2],
+    [7680, 4320, "framebuffer", 2],
+    [3840, 2160, "web_only", 1],
+  ])("%ix%i on %s is %d×", (width, height, device, scale) => {
+    expect(autoRenderScale(width, height, device)).toBe(scale);
   });
 
-  it("is 1 for a panel of unknown size", () => {
-    expect(autoRenderScale(0, 0)).toBe(1);
-    expect(autoRenderScale(Number.NaN, 480)).toBe(1);
+  it("is 1 for a panel of unknown size or kind", () => {
+    expect(autoRenderScale(0, 0, "framebuffer")).toBe(1);
+    expect(autoRenderScale(Number.NaN, 480, "framebuffer")).toBe(1);
+    expect(autoRenderScale(3840, 2160)).toBe(1);
   });
 });
 
 describe("the Scale selects", () => {
   it("name the automatic scale on this panel, or just Automatic", () => {
-    expect(automaticRenderScaleLabel(1200, 1600)).toBe("Automatic (2× on this panel)");
-    expect(automaticRenderScaleLabel(1404, 1872)).toBe("Automatic (2.25× on this panel)");
+    expect(automaticRenderScaleLabel(3840, 2160, "framebuffer")).toBe("Automatic (2× on this panel)");
+    expect(automaticRenderScaleLabel(1200, 1600, "waveshare.EPD_13in3e")).toBe("Automatic (1× on this panel)");
     expect(automaticRenderScaleLabel(800, 480)).toBe("Automatic (1× on this panel)");
     expect(automaticRenderScaleLabel(undefined, 480)).toBe("Automatic");
     expect(automaticRenderScaleLabel("", "")).toBe("Automatic");
   });
 
   it("offer automatic and the steps for a frame", () => {
-    expect(frameRenderScaleOptions(1200, 1600)).toEqual([
+    expect(frameRenderScaleOptions(3840, 2160, "framebuffer")).toEqual([
       { label: "Automatic (2× on this panel)", value: "0" },
+      { label: "0.25×", value: "0.25" },
+      { label: "0.5×", value: "0.5" },
+      { label: "0.75×", value: "0.75" },
       { label: "1× (as designed)", value: "1" },
       { label: "1.25×", value: "1.25" },
       { label: "1.5×", value: "1.5" },
@@ -59,8 +62,8 @@ describe("the Scale selects", () => {
       { label: "4×", value: "4" },
     ]);
     // A scale set through the API stays selectable as itself.
-    expect(frameRenderScaleOptions(800, 480, 1.75).map((option) => option.value)).toEqual([
-      "0", "1", "1.25", "1.5", "1.75", "2", "2.5", "3", "4",
+    expect(frameRenderScaleOptions(800, 480, "waveshare.EPD_3in97", 1.75).map((option) => option.value)).toEqual([
+      "0", "0.25", "0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.5", "3", "4",
     ]);
     expect(frameRenderScaleSelectValue(undefined)).toBe("0");
     expect(frameRenderScaleSelectValue(0)).toBe("0");

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyAiScenes, blankScene, isBlankStarter, prepareForEditor, type SceneJson } from "./ai-scenes-apply";
+import { applyAiScenes, blankScene, isBlankStarter, prepareForEditor, type SceneJson } from "../../../../../frontend/src/sceneWorkspace/lib/ai-scenes-apply";
 
 const current: SceneJson[] = [
   { id: "a", name: "A" },

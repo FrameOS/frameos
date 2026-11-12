@@ -7,7 +7,9 @@
 //
 // Messages in:
 //   {type: 'init', width, height, timeZone, scenesJson, sceneId, settingsJson, proxyUrl,
-//    fastMode?, saveAssets?, browserAssets?, lanAccess?}
+//    fastMode?, saveAssets?, browserAssets?, lanAccess?, sceneState?}
+//        sceneState: public field values for the scene it starts on, set before the first render
+//        (`sceneStateSeeded` in `ready` says they were; an older bundle leaves that false).
 //        lanAccess: the previewed cloud frame's local network access (docs/lan-access.md); `false` makes the
 //        runtime refuse private hosts the way that frame would. Absent = nothing to copy, nothing refused.
 //   {type: 'render'}                       force a render now
@@ -21,7 +23,7 @@
 //   {type: 'setFastMode', enabled}         lift (or restore) the 1 fps throttle
 //   {type: 'assets', requestId, op, ...}   browser asset folder ops, see handleAssetsRequest
 // Messages out:
-//   {type: 'ready', sceneInfo, browserAssets, runtimeVersion, pointerEvents, inputEvents, gpioEvents}
+//   {type: 'ready', sceneInfo, sceneStateSeeded, browserAssets, runtimeVersion, pointerEvents, inputEvents, gpioEvents}
 //        runtimeVersion: FrameOS version of the bundle (null on older bundles)
 //        pointerEvents: true when this bundle takes pointer input as described above. A bundle without it would hand
 //        the scene raw 0..32767 coordinates and render on every move, so a page must not forward pointers to it.
@@ -597,9 +599,9 @@ function applyRenderScale(scale) {
   }
 }
 
-// Run as an ESP32 (memory.runsAsEmbedded in the runtime): a JS app's
-// interpreter lasts one render, `app.frame.embedded` is true and downloads
-// decode into the canvas. The device picker's ESP32 presets ask for it, and so
+// Run as an ESP32 (memory.runsAsEmbedded in the runtime): `app.frame.embedded`
+// is true, downloads decode into the canvas, and a JS app's interpreter stays
+// between renders while the simulated memory has room, as on an awake ESP32. The device picker's ESP32 presets ask for it, and so
 // does a preview of an ESP32 frame; anything else runs as a Pi.
 function applyEmbedded(enabled) {
   if (!enabled) {
@@ -610,6 +612,18 @@ function applyEmbedded(enabled) {
   } catch (e) {
     // older bundle without the export
     post({ type: 'log', message: 'running as an ESP32 is unavailable in this runtime build' })
+    return
+  }
+  // The canvas the simulated device keeps (565 on a 13.3" colour panel with
+  // 8 MB, luma on a grey one): one for every render, as the frame draws. An
+  // older bundle draws a fresh RGBX canvas, which the ceiling allows for.
+  const bytesPerPixel = deviceLimits && deviceLimits.canvasBytesPerPixel
+  if (bytesPerPixel) {
+    try {
+      call('frameos_wasm_set_canvas_bits_per_pixel', null, ['number'], [bytesPerPixel * 8])
+    } catch (e) {
+      // older bundle without the export
+    }
   }
 }
 
@@ -805,9 +819,28 @@ async function init(msg) {
     }
     lastPostedState = null
     const sceneInfo = JSON.parse(call('frameos_wasm_scene_info', 'string', [], []))
+    // Values the page keeps across a reboot (a Resize, an edit, Restart):
+    // given to the scene before its first render, so that render draws them
+    // rather than the scene's defaults with the page's values one render
+    // later (a second request, for a scene that pays per render).
+    let sceneStateSeeded = false
+    if (msg.sceneState && typeof msg.sceneState === 'object' && Object.keys(msg.sceneState).length > 0) {
+      const target = sceneInfo && sceneInfo.currentSceneId
+      if (target) {
+        try {
+          sceneStateSeeded = call('frameos_wasm_set_scene_state', 'boolean', ['string', 'string'], [
+            target,
+            JSON.stringify(msg.sceneState),
+          ])
+        } catch (e) {
+          // older bundle without the export: the page sends them after ready
+        }
+      }
+    }
     post({
       type: 'ready',
       sceneInfo,
+      sceneStateSeeded,
       browserAssets: browserAssetsInfo(),
       runtimeVersion: runtimeVersion(),
       pointerEvents: true,

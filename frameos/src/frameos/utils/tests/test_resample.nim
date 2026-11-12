@@ -136,13 +136,14 @@ suite "drawRectBilinear":
     # The ESP32 shares the rows between its cores (fos_rows.c), each block
     # starting its own two cached source rows.
     let source = photo(64, 48)
-    for format in [pfRgbx, pfRgb565, pfGray8]:
+    for format in [pfRgbx, pfRgb565, pfGray8, pfGray4]:
       proc canvas(): Image =
         result =
           case format
           of pfRgbx: newImage(53, 41)
           of pfRgb565: newImage565(53, 41)
           of pfGray8: newImageGray8(53, 41)
+          of pfGray4: newImageGray4(53, 41)
         result.ditherStores = format == pfRgb565
       let whole = canvas()
       drawRectBilinear(whole, source, 3.25, 2.5, 40.0, 30.0)

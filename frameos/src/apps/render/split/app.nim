@@ -1,4 +1,5 @@
 import strutils
+import tables
 import pixie
 import options
 import frameos/apps
@@ -108,6 +109,23 @@ proc splitDimensions*(width: int, height: int, appConfig: AppConfig): seq[(int, 
     for col in 0..<columns:
       result[row * columns + col] = (cellWidths[col], cellHeights[row])
 
+proc rendersItsOwnCell(self: App, node: NodeId): bool =
+  ## A scene node in a cell paints its own background, or leaves what the
+  ## canvas holds (frameos/scene_rhythm.nim).
+  if self.scene of InterpretedFrameScene:
+    let found = InterpretedFrameScene(self.scene).nodes.getOrDefault(node)
+    result = not found.isNil and found.nodeType == "scene"
+
+proc payBackground(image: Image, color: Color, x, y, w, h: int) =
+  let
+    x1 = clamp(x, 0, image.width)
+    y1 = clamp(y, 0, image.height)
+    w1 = min(w, image.width - x1)
+    h1 = min(h, image.height - y1)
+  if w1 > 0 and h1 > 0:
+    image.view(x1, y1, w1, h1).fill(color)
+
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 proc render*(self: App, context: ExecutionContext, image: var Image) =
   let
     rows = self.appConfig.rows
@@ -128,14 +146,32 @@ proc render*(self: App, context: ExecutionContext, image: var Image) =
     (marginTop, marginRight {.used.}, marginBottom {.used.}, marginLeft) = extractMargins(self.appConfig.margin)
     (gapHorizontal, gapVertical) = extractGaps(self.appConfig.gap)
 
+  # The background owed goes on the margins, the gaps and the cells nothing
+  # draws in, but not under a panel, whose pixels may be staying.
+  let owed = context.backgroundPending
+  context.backgroundPending = false
+  var above = 0
+
   # Loop through each cell defined by rows and columns
   var cellY = marginTop
   for row in 0..<rows:
+    let top = cellY.toInt
+    if owed: image.payBackground(context.backgroundColor, 0, above, image.width, top - above)
     var cellX = marginLeft
+    var before = 0
     for column in 0..<columns:
       let (cellWidth, cellHeight) = cellDims[row * columns + column]
-      let renderer: NodeId = if row >= 0 and row < renderFunctions.len and column >= 0 and column < renderFunctions[
-          row].len and renderFunctions[row][column] == 0: renderFunction else: renderFunctions[row][column]
+      let renderer: NodeId = if row < renderFunctions.len and column < renderFunctions[row].len and
+          renderFunctions[row][column] != 0: renderFunctions[row][column] else: renderFunction
+      if owed:
+        let left = cellX.toInt
+        image.payBackground(context.backgroundColor, before, top, left - before, cellHeight)
+        if renderer == 0 or not self.rendersItsOwnCell(renderer):
+          image.payBackground(context.backgroundColor, left, top, cellWidth, cellHeight)
+        before = left + cellWidth
+        if column == columns - 1:
+          image.payBackground(context.backgroundColor, before, top, image.width - before, cellHeight)
+          above = top + cellHeight
       if renderer != 0:
         # Cells render at cell size, not canvas size: the child sees a
         # cellWidth x cellHeight context and everything downstream (JS apps,
@@ -186,6 +222,8 @@ proc render*(self: App, context: ExecutionContext, image: var Image) =
       cellX += cellWidth.toFloat + gapHorizontal
       if column == columns - 1:
         cellY += cellHeight.toFloat + gapVertical
+  if owed: image.payBackground(context.backgroundColor, 0, above, image.width, image.height - above)
+{.pop.}
 
 proc run*(self: App, context: ExecutionContext) =
   render(self, context, context.image)

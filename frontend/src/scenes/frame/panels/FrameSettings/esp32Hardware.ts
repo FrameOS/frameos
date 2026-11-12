@@ -138,6 +138,18 @@ export const ESP32_TRMNL_OG_PIN_LAYOUT: Esp32PinLayout = {
   pwr: -1,
 }
 
+// Seeed XIAO ePaper Display Boards. Mirrors EMBEDDED_SEEED_XIAO_EE_PINS.
+export const ESP32_SEEED_XIAO_EE_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 38,
+  dc: 10,
+  cs: 44,
+  cs2: -1,
+  busy: 4,
+  sck: 7,
+  mosi: 9,
+  pwr: 43,
+}
+
 export const ESP32_XIAO_EPAPER_DRIVER_BOARD_PIN_LAYOUT: Esp32PinLayout = {
   rst: 38,
   dc: 10,
@@ -371,6 +383,8 @@ export interface Esp32HardwarePresetConfig {
    * copy below is a spread, so they survive into device_config.pins. */
   pins: Esp32PinLayout & Partial<InkyFrameExtraPins>
   sdCardAssets?: Esp32SdCardAssets
+  /** A carrier board for many panels: `device` is only the default, and picking another keeps the preset. */
+  panelSelectable?: boolean
 }
 
 // Mirrors EMBEDDED_HARDWARE_PRESETS in backend/app/tasks/embedded_firmware.py
@@ -535,6 +549,48 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
       maxFrequencyKHz: 20000,
       mountPath: '/srv/assets',
     },
+  },
+  seeed_xiao_ee02: {
+    label: 'Seeed XIAO ePaper EE02 (13.3" color ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_13in3e',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: { ...ESP32_SEEED_XIAO_EE_PIN_LAYOUT, cs2: 41 },
+  },
+  seeed_xiao_ee03: {
+    label: 'Seeed XIAO ePaper EE03 (10.3" grayscale ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_10in3',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: { ...ESP32_SEEED_XIAO_EE_PIN_LAYOUT, dc: 8 },
+  },
+  seeed_xiao_ee04: {
+    label: 'Seeed XIAO ePaper EE04 (24/50-pin panels, ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in5_V2',
+    panelSelectable: true,
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: ESP32_SEEED_XIAO_EE_PIN_LAYOUT,
+  },
+  seeed_xiao_ee05: {
+    label: 'Seeed XIAO ePaper EE05 (24-pin panels, ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in5_V2',
+    panelSelectable: true,
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: ESP32_SEEED_XIAO_EE_PIN_LAYOUT,
+  },
+  seeed_xiao_epaper_7in5: {
+    label: 'Seeed XIAO 7.5" ePaper Panel (ESP32-C3)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: { rst: 2, dc: 5, cs: 3, cs2: -1, busy: 4, sck: 8, mosi: 10, pwr: -1 },
   },
   elecrow_crowpanel_5in79: {
     label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',

@@ -1,10 +1,11 @@
-import std/[strutils, unittest]
+import std/[json, monotimes, os, sequtils, strutils, times, unittest]
 import pixie
 import pixie/fileformats/svg
 import frameos/utils/font # installs the typeface resolver text uses
 import frameos/ui/tailwind
 import frameos/ui/layout
 import frameos/ui/keyboard
+import frameos/ui/events
 
 # The UI layout: Tailwind classes read, boxes placed the way a browser places
 # them for the subset it supports, and the SVG that comes out drawn by pixie.
@@ -196,10 +197,42 @@ suite "ui layout":
   test "inline elements flow with the text, items in a row":
     let svg = layoutUi(el("div", "text-black",
       txt("Hi "), el("b", "text-red-500", txt("there")), txt("!")), 400, 100)
-    var fills: seq[string]
+    # Text is drawn a glyph at a time (emitGlyphs): the runs, by colour.
+    var runs: seq[string]
+    var red, struck: int
+    var last: SvgNode
     for node in svg.children:
-      if node.tag == "path": fills.add node.attr("fill")
-    check fills == @["#000000", "#ff0000".replace("ff0000", "ef4444"), "#000000"]
+      if node.tag == "path":
+        let fill = node.attr("fill")
+        if runs.len == 0 or runs[^1] != fill: runs.add fill
+        if fill == "#ef4444": inc red
+        # <b>: each glyph filled twice, the second a little to the right
+        # (no bold face on an ESP32).
+        if not last.isNil and last.path == node.path and node.offset.x > last.offset.x: inc struck
+        last = node
+    check runs == @["#000000", "#ef4444", "#000000"]
+    check red == 10 and struck == 5 # "there", twice
+
+  test "a translucent box over a flat opaque one is drawn as the colour it makes":
+    let ui = el("div", "bg-slate-900 p-4", el("div", "w-20 h-20 rounded-xl bg-white/10"),
+      el("div", "absolute top-0 left-0 w-10 h-10 bg-white/10"))
+    let svg = layoutUi(ui, 200, 200)
+    var fills, opacities: seq[string]
+    for node in svg.children:
+      fills.add node.attr("fill")
+      opacities.add node.attr("fill-opacity")
+    # The page, the in-flow card pre-blended (opaque), the absolute one as it was.
+    check fills.len == 3
+    check fills[1] != "#ffffff" and opacities[1] == ""
+    check fills[2] == "#ffffff" and opacities[2] != ""
+    # And it draws what the blend drew, within a step of rounding.
+    let
+      got = newImage(parseSvg(svg, 200, 200))
+      slate = parseHtmlColor("#0f172a").rgbx
+      want = [slate.r.float32 * 0.9 + 25.5, slate.g.float32 * 0.9 + 25.5, slate.b.float32 * 0.9 + 25.5]
+    check abs(got[40, 40].r.float32 - want[0]) <= 1.5
+    check abs(got[40, 40].g.float32 - want[1]) <= 1.5
+    check abs(got[40, 40].b.float32 - want[2]) <= 1.5
 
   test "text around a value keeps its spaces":
     proc drawn(children: varargs[SvgNode]): Image =
@@ -245,10 +278,12 @@ suite "ui layout":
       second = layoutUi(panel(true), 200, 120, UiInput(), regions, memo)
       a = first.paths
       b = second.paths
-    check a.len == 3 and b.len == 3
-    check b[0] != a[0]                # the count: set again
-    check b[1] == a[1] and b[2] == a[2] # the labels: the same nodes
-    check b[1].attr("stroke").len > 0   # bold drawn as its outline still
+    # A glyph a node, spaces none: the count ("0 of 2 on" -> "1 of 2 on", 6
+    # glyphs), Lamp twice (bold, 8), Heating (7).
+    check a.len == 21 and b.len == 21
+    check b[0] != a[0]                    # the count: set again
+    for i in 6 ..< 21: check b[i] == a[i] # the labels: the same nodes
+    check b[7].path == b[6].path and b[7].offset.x > b[6].offset.x # bold's second strike, kept too
     # What the memo hands back draws what a layout without it draws.
     let
       got = newImage(parseSvg(second, 200, 120))
@@ -293,7 +328,7 @@ suite "ui layout":
     var kept, fresh: int
     for node in flipped.children:
       if node in again.children: inc kept else: inc fresh
-    check fresh > 0 and fresh < 6 and kept > 6
+    check fresh > 0 and kept > fresh
     check samePicture(flipped, layoutUi(panel([true, true, false]), 200, 200))
     # A box above them moves the cards down: drawn where they are now.
     let moved = layoutUi(panel([true, true, false], extra = true), 200, 200, UiInput(), regions, memo)
@@ -459,6 +494,68 @@ suite "fields, clipping and scrolling":
     discard layout.layoutUi(el("div", "", secret), 240, 60, state, regions, memo)
     check memo.fieldText(regions[0].key) == "abc"
 
+  test "a textarea: Up and Down walk its lines, and it scrolls like a box":
+    # Three lines, 24 px each (text-base), in a box two lines tall.
+    let area = input("textarea", "w-[200px] h-[40px] text-black bg-white", {"value": "ab\ncd\nef"})
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    discard layout.layoutUi(el("div", "bg-white", area), 240, 60, state, regions)
+    check regions.len == 1 and regions[0].field == 2
+    check regions[0].scrollY > 0 and regions[0].scrollY < 40 # 72 px of lines, 40 shown
+    let key = regions[0].key
+    # Focused with the caret before the d (byte 4, line 1): a line up is the
+    # same column on line 0 (after the a); up again is the start.
+    state.focus = key + 1
+    state.text = "ab\ncd\nef"
+    state.caret = 4
+    state.lineStep = -1
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-white", area), 240, 60, state, regions)
+    check state.caret == 1 and state.lineStep == 0 and state.goal
+    state.lineStep = -1
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-white", area), 240, 60, state, regions)
+    check state.caret == 0
+    # Down keeps the column it set out from: line 1 after the c, line 2
+    # after the e, then the end.
+    for expected in [4, 7, 8]:
+      state.lineStep = 1
+      regions.setLen(0)
+      discard layout.layoutUi(el("div", "bg-white", area), 240, 60, state, regions)
+      check state.caret == expected
+    # The caret on the last line scrolled the box to show it ...
+    check state.scrolled(key)[1] > 0
+    # ... and a scroll by hand stays: a layout nothing asked to reveal keeps
+    # the caret out of sight, a line step brings it back.
+    state.scrollTo(key, 0, 0)
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-white", area), 240, 60, state, regions)
+    check state.scrolled(key)[1] == 0
+    state.lineStep = -1
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-white", area), 240, 60, state, regions)
+    check state.caret == 4 and state.scrolled(key)[1] > 0 # line 1 under the end: after the c
+    # Let go of the keyboard, it keeps where it was scrolled to (an input
+    # shows its text from the start again), and draws its bar.
+    state.focus = 0
+    state.scrollTo(key, 0, 20)
+    regions.setLen(0)
+    let svg = layout.layoutUi(el("div", "bg-white", area), 240, 60, state, regions)
+    check state.scrolled(key)[1] == 20 and regions[0].scrollY > 0
+    var bars = 0
+    for node in svg.children:
+      if node.tag == "path": inc bars
+    check bars == 1
+    let line = input("input", "w-[40px] h-[30px] text-black bg-white", {"value": "Hello there"})
+    state = UiInput()
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-white", line), 240, 60, state, regions)
+    state.scrollTo(regions[0].key, 30, 0)
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-white", line), 240, 60, state, regions)
+    check state.scrolled(regions[0].key)[0] == 0 and regions[0].scrollY == 0
+
   test "the on-screen keyboard: under the UI, its keys regions":
     let field = input("input", "w-full h-[30px] bg-white", {"value": ""})
     var
@@ -487,3 +584,586 @@ suite "fields, clipping and scrolling":
     regions.setLen(0)
     discard layout.layoutUi(el("div", "bg-slate-900"), 480, 480, state, regions)
     check state.focus == 0 and not state.keyboard
+
+suite "a held key's accents":
+  # docs/jsx-ui.md "Fields and the keyboard": a key held shows its accented
+  # forms above it, the one nearest the finger's x lit; the finger slides
+  # along (at any height near the row) and lifts, or goes far and taps.
+  test "the table: which keys have forms, and their capitals by arithmetic":
+    check accentCount(ord('a')) == 8 and accentCount(ord('e')) == 7 and accentCount(ord('y')) == 1
+    check accentCount(ord('b')) == 0 and accentCount(ord(' ')) == 0 and accentCount(ord(kShift)) == 0
+    check accentCount(ord('$')) == 4 and accentCount(ord('"')) == 5 and accentCount(ord('0')) == 1
+    check accentText(ord('a'), 0, 0) == "à" and accentText(ord('a'), 4, 0) == "æ" and accentText(ord('a'), 7, 0) == "ā"
+    check accentText(ord('a'), 8, 0) == "" and accentText(ord('b'), 0, 0) == ""
+    # Latin-1 (æ, ø, ÿ), Latin Extended-A at an even capital (ā, œ, š) and
+    # at an odd one (ń, ł, ž); ß and a symbol have no capital.
+    check accentText(ord('a'), 4, 1) == "Æ" and accentText(ord('o'), 5, 2) == "Ø" and accentText(ord('y'), 0, 1) == "Ÿ"
+    check accentText(ord('a'), 7, 1) == "Ā" and accentText(ord('o'), 4, 1) == "Œ" and accentText(ord('s'), 2, 1) == "Š"
+    check accentText(ord('n'), 1, 1) == "Ń" and accentText(ord('l'), 0, 1) == "Ł" and accentText(ord('z'), 0, 1) == "Ž"
+    check accentText(ord('s'), 0, 1) == "ß" and accentText(ord('$'), 0, 1) == "€" and accentText(ord('-'), 1, 1) == "—"
+    check accentText(ord('i'), 5, 1) == "Ì" and accentText(ord('u'), 4, 1) == "Ū" and accentText(ord('c'), 1, 1) == "Ć"
+
+  proc keyRegion(regions: seq[UiRegion], code: int): UiRegion =
+    for r in regions:
+      if r.handlers[ueClick] - 1 == KeyBase + code: return r
+    doAssert false, "no key " & $code
+
+  proc accentRegions(regions: seq[UiRegion]): seq[UiRegion] =
+    for r in regions:
+      if r.handlers[ueClick] - 1 >= AccentBase and r.handlers[ueClick] - 1 < OptionBase: result.add r
+
+  proc withKeyboard(width, height: int, state: var UiInput, regions: var seq[UiRegion], memo: UiMemo = nil,
+      value = ""): SvgNode =
+    let field = input("input", "w-full h-[30px] bg-white", {"value": value})
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-slate-900", field), width, height, state, regions, memo)
+    if state.focus == 0:
+      state.focus = regions[0].key + 1
+      state.keyboard = true
+    regions.setLen(0)
+    layout.layoutUi(el("div", "bg-slate-900", field), width, height, state, regions, memo)
+
+  test "the row sits above the held key, its forms keys of the key's size":
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    discard withKeyboard(480, 480, state, regions)
+    check accentRegions(regions).len == 0
+    let e = keyRegion(regions, ord('u'))
+    # Keys with forms take a long press, the others do not.
+    check e.handlers[ueLongPress] - 1 == KeyBase + ord('u')
+    check keyRegion(regions, ord('b')).handlers[ueLongPress] - 1 == KeyBase + ord('b') # its symbol, ':'
+    check keyRegion(regions, ord(',')).handlers[ueLongPress] == 0
+    check keyRegion(regions, ord(kShift)).handlers[ueLongPress] == 0
+    # Backspace takes one too: held, it erases again and again.
+    check keyRegion(regions, ord(kBackspace)).handlers[ueLongPress] - 1 == KeyBase + ord(kBackspace)
+    state.accents = ord('u')
+    discard withKeyboard(480, 480, state, regions)
+    let forms = accentRegions(regions)
+    check forms.len == 6 # 7, then û ü ù ú ū
+    for i, f in forms:
+      check f.handlers[ueClick] - 1 == AccentBase + i
+      check abs(f.w - e.w) < 1 and abs(f.h - e.h) < 1
+      check f.y + f.h < e.y # above the key ...
+      check f.x >= 0 and f.x + f.w <= 480 # ... on the screen
+    check forms[1].x > forms[0].x
+    # A letter's row starts right over the key where the screen has room (w:
+    # 2, alone), its symbol where the finger is.
+    let w = keyRegion(regions, ord('w'))
+    state.accents = ord('w')
+    discard withKeyboard(480, 480, state, regions)
+    let two = accentRegions(regions)
+    check two.len == 1 and abs(two[0].x + two[0].w / 2 - (w.x + w.w / 2)) < 2
+    # Any other row is centred on its key, as far as the screen allows.
+    state.page = kpSymbols
+    discard withKeyboard(480, 480, state, regions)
+    let dollar = keyRegion(regions, ord('$'))
+    state.accents = ord('$')
+    discard withKeyboard(480, 480, state, regions)
+    let money = accentRegions(regions)
+    check money.len == 4
+    check abs((money[0].x + money[^1].x + money[^1].w) / 2 - (dollar.x + dollar.w / 2)) < 2
+    state.accents = 0
+    state.page = kpLetters
+    let svg = withKeyboard(480, 480, state, regions)
+    # The held key is drawn lit: light where it was dark.
+    state.accents = ord('u')
+    let held = withKeyboard(480, 480, state, regions)
+    let image = newImage(parseSvg(held, 480, 480))
+    let c = image.color(int(e.x + 3), int(e.y + e.h - 3))
+    check c.r > 200 and c.g > 200
+    discard svg
+    # The key still there (the keyboard is not replaced by the row).
+    check keyRegion(regions, ord('q')).w > 0
+
+  test "at the edge the row stays on the screen, under shift it shows capitals, on a round panel inside the circle":
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    discard withKeyboard(480, 480, state, regions)
+    state.accents = ord('a') # the first key of its row
+    state.shift = 1
+    discard withKeyboard(480, 480, state, regions)
+    var forms = accentRegions(regions)
+    # The symbol over a, the row on the screen.
+    check forms.len == 9 and forms[0].x >= 4 and forms[^1].x + forms[^1].w <= 476
+    # The row's keys read as capitals (the layout outlines the text, so ask
+    # the tree it was built from).
+    var texts: seq[string]
+    for key in accentTree(ord('a'), 1, 40, 40, 4, false, kpLetters).children:
+      texts.add key.children[0].text
+    check texts == @["@", "À", "Á", "Â", "Ä", "Æ", "Ã", "Å", "Ā"] # a symbol has no capital
+    # A 240 px round panel: the row stays inside the circle (RoundInset in
+    # from the rim), where the screen's corners are not.
+    state = UiInput()
+    state.round = true
+    regions.setLen(0)
+    discard withKeyboard(240, 240, state, regions)
+    let a = keyRegion(regions, ord('a'))
+    state.accents = ord('a')
+    discard withKeyboard(240, 240, state, regions)
+    forms = accentRegions(regions)
+    check forms.len == 9 and forms[0].w <= a.w
+    for f in [forms[0], forms[^1]]:
+      for (x, y) in [(f.x, f.y), (f.x + f.w, f.y), (f.x, f.y + f.h), (f.x + f.w, f.y + f.h)]:
+        check (x - 120) * (x - 120) + (y - 120) * (y - 120) <= 108'f32 * 108
+    # The page turned: the key is gone, and so is the row.
+    state.page = kpNumbers
+    discard withKeyboard(240, 240, state, regions)
+    check state.accents == 0 and accentRegions(regions).len == 0
+
+  test "a letter's symbol lights first, and the finger's slide walks the row":
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    discard withKeyboard(480, 480, state, regions)
+    let e = keyRegion(regions, ord('e'))
+    state.accents = ord('e')
+    state.accentX = e.x + e.w / 2
+    state.accentFrom = state.accentX
+    let svg = withKeyboard(480, 480, state, regions)
+    let forms = accentRegions(regions)
+    # Held still: the symbol, 3.
+    check forms.len == 8 and state.accentLit == 0
+    let image = newImage(parseSvg(svg, 480, 480))
+    let lit = image.color(int(forms[0].x + 3), int(forms[0].y + 3))
+    let dim = image.color(int(forms[^1].x + 3), int(forms[^1].y + 3))
+    check lit.r > 200 and dim.r < 128
+    # Two forms' width to the right: é.
+    state.accentX += 2 * (forms[1].x - forms[0].x)
+    discard withKeyboard(480, 480, state, regions)
+    check state.accentLit == 2
+    # Far to the left: the first; far to the right: the last.
+    state.accentX = 0
+    discard withKeyboard(480, 480, state, regions)
+    check state.accentLit == 0
+    state.accentX = 479
+    discard withKeyboard(480, 480, state, regions)
+    check state.accentLit == forms.len - 1
+    # At the right edge (p, o) the row is pushed left: still the symbol first.
+    let o = keyRegion(regions, ord('o'))
+    state.accents = ord('o')
+    state.accentX = o.x + o.w / 2
+    state.accentFrom = state.accentX
+    discard withKeyboard(480, 480, state, regions)
+    check state.accentLit == 0
+    # No finger near it: none.
+    state.accentX = -1
+    discard withKeyboard(480, 480, state, regions)
+    check state.accentLit == -1
+    # A row with no symbol (the symbols page's $) lights by the finger's x.
+    state.page = kpSymbols
+    state.accents = 0
+    discard withKeyboard(480, 480, state, regions)
+    let dollar = keyRegion(regions, ord('$'))
+    state.accents = ord('$')
+    state.accentX = dollar.x + dollar.w / 2
+    discard withKeyboard(480, 480, state, regions)
+    check state.accentLit in [1, 2] # the middle of four
+
+  test "the letters carry their symbols, SwiftKey's":
+    const L = kpLetters
+    check hintOf(ord('q'), L) == "1" and hintOf(ord('p'), L) == "0" and hintOf(ord('a'), L) == "@"
+    check hintOf(ord('l'), L) == ")" and hintOf(ord('z'), L) == "_" and hintOf(ord('c'), L) == "\"" and hintOf(ord('m'), L) == "/"
+    check hintOf(ord('1'), L) == "" and hintOf(ord(','), L) == "" and hintOf(ord(kShift), L) == ""
+    check formCount(ord('a'), L) == 9 and formCount(ord('b'), L) == 1 and formCount(ord(','), L) == 0
+    check formCount(ord('$'), kpSymbols) == 4
+    check formText(ord('a'), 0, 1, L) == "@" and formText(ord('a'), 1, 1, L) == "À"
+    check formText(ord('$'), 0, 0, kpSymbols) == "€" and formText(ord('b'), 1, 0, L) == ""
+    # The letters page's full stop holds ! and ?, which that page has no keys
+    # for, then its …; its corner shows the !. The symbols page has ! and ?
+    # keys, and the number pad's full stop is a decimal point: there it holds
+    # the … alone.
+    check hintOf(ord('.'), L) == "!" and formCount(ord('.'), L) == 3
+    check formText(ord('.'), 0, 1, L) == "!" and formText(ord('.'), 1, 1, L) == "?"
+    check formText(ord('.'), 2, 0, L) == "…" and formText(ord('.'), 3, 0, L) == ""
+    check hintOf(ord('.'), kpSymbols) == "" and hintOf(ord('.'), kpNumbers) == ""
+    check formCount(ord('.'), kpNumbers) == 1 and formText(ord('.'), 0, 0, kpNumbers) == "…"
+    # Drawn small in the key's corner: a text node in the key's top right.
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    let svg = withKeyboard(480, 480, state, regions)
+    let w = keyRegion(regions, ord('w'))
+    let image = newImage(parseSvg(svg, 480, 480))
+    var corner, opposite = 0
+    for y in int(w.y) + 1 ..< int(w.y + w.h / 4):
+      for x in int(w.x + w.w / 2) ..< int(w.x + w.w) - 1:
+        if image.color(x, y).r > 110: inc corner
+      for x in int(w.x) + 1 ..< int(w.x + w.w / 2):
+        if image.color(x, y).r > 110: inc opposite
+    checkpoint "corner " & $corner & ", opposite " & $opposite
+    check corner > 5 and opposite == 0
+
+  test "held, slid along and lifted; held, lifted far and tapped; tapped away":
+    let target = uiTarget("scene", 7)
+    target.input.paper = false
+    target.call = proc(handler: int, name: string, event: JsonNode, hit: UiHit) = discard
+    proc relayout(): SvgNode =
+      # The field shows what was typed, as an app's onChange would make it.
+      withKeyboard(480, 480, target.input, target.regions, target.memo, target.input.text)
+    discard relayout()
+    proc at(r: UiRegion, event: string, pointer = 1, buttons = 0): bool =
+      dispatchUiEvent("scene", event, %*{"x": r.x + r.w / 2, "y": r.y + r.h / 2, "pointerId": pointer,
+        "pointerType": "touch", "buttons": buttons})
+    check uiListens("scene", "longPress")
+    check not uiListens("scene", "pointerMove")
+    # Hold e: the row comes up while the finger is down, and no tap follows.
+    let e = keyRegion(target.regions, ord('e'))
+    check at(e, "pointerDown", buttons = 1)
+    check at(e, "longPress")
+    check target.input.accents == ord('e')
+    check uiListens("scene", "pointerMove")
+    discard relayout()
+    var forms = accentRegions(target.regions)
+    check forms.len == 8
+    # Held still, its symbol lights (3).
+    check target.input.accentLit == 0
+    # Slid sideways, on the key's own row and not up onto the forms: the
+    # one the slide reaches lights; lifted there, typed.
+    proc atXY(x, y: float32, event: string, pointer = 1, buttons = 0): bool =
+      dispatchUiEvent("scene", event, %*{"x": x, "y": y, "pointerId": pointer,
+        "pointerType": "touch", "buttons": buttons})
+    let y = e.y + e.h / 2
+    check atXY(forms[2].x + forms[2].w / 2, y, "pointerMove", buttons = 1)
+    check target.input.accentX == forms[2].x + forms[2].w / 2
+    discard relayout()
+    check target.input.accentLit == 2
+    check atXY(forms[2].x + forms[2].w / 2 + 2, y, "pointerUp")
+    check target.input.text == "é" and target.input.accents == 0
+    discard relayout()
+    check accentRegions(target.regions).len == 0
+    # Hold a, lift on it: its symbol is typed (@). Hold it again and
+    # slide far below the row: nothing is lit, and lifted there the row
+    # stays; a tap on a form types it.
+    var a = keyRegion(target.regions, ord('a'))
+    check at(a, "pointerDown", buttons = 1)
+    check at(a, "longPress")
+    discard relayout()
+    check at(a, "pointerUp")
+    check target.input.text == "é@" and target.input.accents == 0
+    target.input.text = "é"
+    target.input.caret = target.input.text.len
+    discard relayout()
+    a = keyRegion(target.regions, ord('a'))
+    check at(a, "pointerDown", buttons = 1)
+    check at(a, "longPress")
+    discard relayout()
+    check atXY(a.x + a.w / 2, 479, "pointerMove", buttons = 1)
+    check target.input.accentX < 0
+    discard relayout()
+    check target.input.accentLit == -1
+    discard atXY(a.x + a.w / 2, 479, "pointerUp")
+    check target.input.accents == ord('a') and target.input.text == "é"
+    discard relayout()
+    forms = accentRegions(target.regions)
+    check at(forms[4], "tap")
+    check target.input.text == "éä" and target.input.accents == 0
+    # Hold o, lift on it, then tap q instead: the row goes and q is typed.
+    discard relayout()
+    let o = keyRegion(target.regions, ord('o'))
+    check at(o, "pointerDown", buttons = 1)
+    check at(o, "longPress")
+    discard atXY(o.x + o.w / 2, 479, "pointerMove", buttons = 1)
+    discard atXY(o.x + o.w / 2, 479, "pointerUp")
+    discard relayout()
+    check accentRegions(target.regions).len == 9
+    check at(keyRegion(target.regions, ord('q')), "tap")
+    check target.input.text == "éäq" and target.input.accents == 0
+    # Hold the full stop, lift on it: its first symbol, !, is typed, and the
+    # row held ? and … next to it. Held again and slid one key along: ?.
+    discard relayout()
+    let stop = keyRegion(target.regions, ord('.'))
+    check at(stop, "pointerDown", buttons = 1)
+    check at(stop, "longPress")
+    discard relayout()
+    let stopForms = accentRegions(target.regions)
+    check stopForms.len == 3
+    check target.input.accentLit == 0
+    check at(stop, "pointerUp")
+    check target.input.text == "éäq!" and target.input.accents == 0
+    discard relayout()
+    check at(stop, "pointerDown", buttons = 1)
+    check at(stop, "longPress")
+    discard relayout()
+    let along = stop.x + stop.w / 2 + (stopForms[1].x - stopForms[0].x)
+    check atXY(along, stop.y + stop.h / 2, "pointerMove", buttons = 1)
+    discard relayout()
+    check target.input.accentLit == 1
+    check atXY(along, stop.y + stop.h / 2, "pointerUp")
+    check target.input.text == "éäq!?" and target.input.accents == 0
+    # Hold the comma: nothing comes up. Hold u, then back: the row goes, the keyboard stays.
+    discard relayout()
+    check not at(keyRegion(target.regions, ord(',')), "longPress")
+    check target.input.accents == 0
+    check at(keyRegion(target.regions, ord('u')), "longPress")
+    check target.input.accents == ord('u')
+    check dismissKeyboard("scene", 7)
+    check target.input.accents == 0 and target.input.keyboard and target.input.focus > 0
+    # On e-paper a slide asks for no refresh, but lifting on a form types it.
+    target.input.paper = true
+    discard relayout()
+    let s = keyRegion(target.regions, ord('s'))
+    check not at(s, "pointerDown", buttons = 1) # no press to show on paper
+    check target.input.pressed.len == 0 and target.input.hovered.len == 0
+    check at(s, "longPress")
+    discard relayout()
+    forms = accentRegions(target.regions)
+    check not at(forms[1], "pointerMove", buttons = 1)
+    check at(forms[1], "pointerUp") # # ß ś š
+    check target.input.text == "éäq!?ß"
+    forgetUiTarget("scene", 7)
+
+suite "the keyboard in time":
+  # docs/jsx-ui.md "Fields and the keyboard": a key just typed stays lit a
+  # moment once a render shows it; backspace held erases until the finger
+  # lifts; the space bar dragged walks the caret.
+  proc keyRegion(regions: seq[UiRegion], code: int): UiRegion =
+    for r in regions:
+      if r.handlers[ueClick] - 1 == KeyBase + code: return r
+    doAssert false, "no key " & $code
+
+  proc setup(id: string, text: string): UiTarget =
+    result = uiTarget(id, 3)
+    let target = result
+    target.input.paper = false
+    target.call = proc(handler: int, name: string, event: JsonNode, hit: UiHit) = discard
+    let field = input("input", "w-full h-[30px] bg-white", {"value": text})
+    discard layout.layoutUi(el("div", "bg-slate-900", field), 480, 480, target.input, target.regions, target.memo)
+    target.input.focus = target.regions[0].key + 1
+    target.input.keyboard = true
+    target.input.text = text
+    target.input.caret = text.len
+
+  proc relayout(target: UiTarget) =
+    let field = input("input", "w-full h-[30px] bg-white", {"value": target.input.text})
+    target.regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-slate-900", field), 480, 480, target.input, target.regions, target.memo)
+
+  proc at(id: string, r: UiRegion, event: string, dx = 0'f32, dy = 0'f32, pointer = 1): bool =
+    dispatchUiEvent(id, event, %*{"x": r.x + r.w / 2 + dx, "y": r.y + r.h / 2 + dy, "pointerId": pointer,
+      "pointerType": "touch", "buttons": (if event in ["pointerUp", "tap"]: 0 else: 1)})
+
+  test "a key just typed stays lit a moment after a render shows it":
+    let id = "timed-flash"
+    let target = setup(id, "")
+    target.relayout()
+    let k = keyRegion(target.regions, ord('k'))
+    check not uiTimersPending()
+    check at(id, k, "tap")
+    check target.input.text == "k" and target.input.flash == ord('k')
+    check uiTimersPending() and uiListens(id, "uiTimer")
+    # Nothing is due before a render has shown it.
+    var now = getMonoTime()
+    check not uiTimerDue(id, now + initDuration(seconds = 5))
+    target.relayout()
+    check target.input.flashDrawn
+    # Shown: from now, its time runs.
+    check not uiTimerDue(id, now)
+    check not uiTimerDue(id, now + initDuration(milliseconds = 100))
+    check uiTimerDue(id, now + initDuration(milliseconds = 400))
+    # Another scene's timers are not this one's.
+    check not uiTimerDue("another-scene", now + initDuration(milliseconds = 400))
+    # The scene hears `uiTimer`, and the light goes out.
+    sleep(300)
+    check dispatchUiEvent(id, "uiTimer", newJObject())
+    check target.input.flash == 0 and not uiTimersPending()
+    # E-paper: no light to put out.
+    target.input.paper = true
+    target.relayout()
+    check at(id, keyRegion(target.regions, ord('j')), "tap")
+    check target.input.text == "kj" and target.input.flash == 0
+    forgetUiTarget(id, 3)
+
+  test "the key just typed is drawn as it was while pressed":
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    let field = input("input", "w-full h-[30px] bg-white", {"value": ""})
+    discard layout.layoutUi(el("div", "bg-slate-900", field), 480, 480, state, regions)
+    state.focus = regions[0].key + 1
+    state.keyboard = true
+    regions.setLen(0)
+    var image = newImage(parseSvg(layout.layoutUi(el("div", "bg-slate-900", field), 480, 480, state, regions), 480, 480))
+    let k = keyRegion(regions, ord('k'))
+    let before = image.color(int(k.x + 3), int(k.y + 3))
+    state.flash = ord('k')
+    regions.setLen(0)
+    image = newImage(parseSvg(layout.layoutUi(el("div", "bg-slate-900", field), 480, 480, state, regions), 480, 480))
+    let after = image.color(int(k.x + 3), int(k.y + 3))
+    check after.r.int > before.r.int + 40 # zinc-400 where it was zinc-600
+    check state.flashDrawn
+
+  test "backspace held erases until the finger lifts":
+    let id = "timed-repeat"
+    let target = setup(id, "hello world")
+    target.relayout()
+    let bs = keyRegion(target.regions, ord(kBackspace))
+    check at(id, bs, "pointerDown")
+    check at(id, bs, "longPress")
+    check target.input.text == "hello worl" # one at the long press
+    check uiTimersPending()
+    var now = getMonoTime()
+    check not uiTimerDue(id, now)
+    check uiTimerDue(id, now + initDuration(milliseconds = 150))
+    sleep(120)
+    check dispatchUiEvent(id, "uiTimer", newJObject())
+    check target.input.text == "hello wor"
+    sleep(120)
+    check dispatchUiEvent(id, "uiTimer", newJObject())
+    check target.input.text == "hello wo"
+    # Lifted: no more, and no tap after a long press.
+    discard at(id, bs, "pointerUp")
+    target.relayout()
+    sleep(120)
+    discard dispatchUiEvent(id, "uiTimer", newJObject())
+    check target.input.text == "hello wo"
+    # A scene no longer showing lets its held key go.
+    check at(id, bs, "pointerDown", pointer = 2)
+    check at(id, bs, "longPress", pointer = 2)
+    check target.input.text == "hello w"
+    discard uiTimerDue("another-scene", getMonoTime())
+    sleep(120)
+    discard dispatchUiEvent(id, "uiTimer", newJObject())
+    check target.input.text == "hello w"
+    forgetUiTarget(id, 3)
+
+  test "the space bar dragged walks the caret, and types no space":
+    let id = "space-drag"
+    let target = setup(id, "abcdef")
+    target.relayout()
+    let space = keyRegion(target.regions, ord(' '))
+    check uiListens(id, "pointerDown")
+    check not uiListens(id, "pointerMove")
+    check at(id, space, "pointerDown")
+    check uiListens(id, "pointerMove")
+    # Within the slop: nothing yet.
+    check not at(id, space, "pointerMove", dx = -2)
+    check target.input.caret == 6
+    # Left, three steps of the bar's step (0.45 of its height).
+    let step = space.h * 0.45
+    check at(id, space, "pointerMove", dx = -3.2 * step)
+    check target.input.caret == 3
+    # Back right one.
+    check at(id, space, "pointerMove", dx = -2.2 * step)
+    check target.input.caret == 4
+    discard at(id, space, "pointerUp", dx = -2.2 * step)
+    # Its tap is swallowed: no space.
+    discard at(id, space, "tap", dx = -2.2 * step)
+    check target.input.text == "abcdef" and target.input.caret == 4
+    # A plain tap on it still types a space, where the caret is.
+    target.relayout()
+    check at(id, space, "pointerDown")
+    discard at(id, space, "pointerUp")
+    check at(id, space, "tap")
+    check target.input.text == "abcd ef"
+    # Up in an <input>: to its start.
+    target.relayout()
+    check at(id, space, "pointerDown")
+    check at(id, space, "pointerMove", dy = -1.5 * space.h)
+    check target.input.caret == 0
+    discard at(id, space, "pointerUp", dy = -1.5 * space.h)
+    forgetUiTarget(id, 3)
+
+suite "a <select>":
+  proc options(count: int): seq[SvgNode] =
+    for i in 0 ..< count:
+      let option = el("option", "", txt("Network " & $i))
+      option.attrs.add(("value", "n" & $i))
+      result.add option
+
+  proc select(y, count: int, value = "n0"): SvgNode =
+    ## A select 40 px tall, `y` from the top of a 480 x 480 page.
+    let box = el("select", "absolute left-[20px] w-[300px] h-[40px] top-[" & $y & "px] bg-zinc-800", options(count))
+    box.attrs.add(("value", value))
+    box.attrs.add(("on-change", "7"))
+    el("div", "w-full h-full bg-black text-white", box)
+
+  proc listOf(root: SvgNode, input: var UiInput): (UiRegion, seq[UiRegion]) =
+    ## The list's box and its rows, as the layout placed them.
+    var regions: seq[UiRegion]
+    discard layout.layoutUi(root, 480, 480, input, regions)
+    result[1] = regions.filterIt(it.handlers[ueClick] > OptionBase)
+    for r in regions:
+      if r.scrollY > 0:
+        result[0] = r
+
+  proc opened(y, count: int, value = "n0"): (float32, float32, float32, seq[UiRegion]) =
+    ## Opened on the select at `y`: the top and the bottom of what the rows
+    ## cover, how far the list can scroll, and the rows.
+    var input: UiInput
+    var regions: seq[UiRegion]
+    let root = select(y, count, value)
+    discard layout.layoutUi(root, 480, 480, input, regions)
+    let key = regions.filterIt(it.field == 4)[0].key
+    input.open = key + 1
+    input.fresh = true
+    let (box, rows) = root.listOf(input)
+    var top = 1e9'f32
+    var bottom = -1e9'f32
+    for r in rows:
+      top = min(top, r.visible[1])
+      bottom = max(bottom, r.visible[3])
+    (top, bottom, box.scrollY, rows)
+
+  test "closed, it shows what it holds and has a region of its own":
+    var input: UiInput
+    var regions: seq[UiRegion]
+    let svg = layout.layoutUi(select(100, 3, "n1"), 480, 480, input, regions)
+    check regions.anyIt(it.field == 4 and it.handlers[ueChange] == 8)
+    check svg.children.len > 0
+
+  test "a short list opens below, all of it, with nothing to scroll":
+    let (top, bottom, scroll, rows) = opened(100, 3)
+    check rows.len == 3
+    check top >= 140
+    check bottom <= 280
+    check scroll == 0
+
+  test "near the bottom it opens above":
+    let (top, bottom, _, rows) = opened(420, 3)
+    check rows.len == 3
+    check bottom <= 420
+    check top >= 8
+
+  test "a long list stays on the screen and scrolls":
+    let (top, bottom, scroll, _) = opened(100, 60)
+    check top >= 140
+    check bottom <= 472
+    check scroll > 0
+    # And above, the same.
+    let (above, ending, scrollUp, _) = opened(400, 60)
+    check above >= 8
+    check ending <= 400
+    check scrollUp > 0
+
+  test "it opens with what it holds in sight":
+    let (top, bottom, _, rows) = opened(100, 60, "n40")
+    let shown = rows.filterIt(it.handlers[ueClick] == OptionBase + 40 + 1)
+    check shown.len == 1
+    check shown[0].visible[1] >= top
+    check shown[0].visible[3] <= bottom
+
+  test "on a very small screen it still fits":
+    var input: UiInput
+    var regions: seq[UiRegion]
+    let box = el("select", "absolute left-[0px] top-[30px] w-[100px] h-[40px]", options(9))
+    let root = el("div", "w-full h-full", box)
+    discard layout.layoutUi(root, 100, 100, input, regions)
+    input.open = regions.filterIt(it.field == 4)[0].key + 1
+    regions.setLen(0)
+    discard layout.layoutUi(root, 100, 100, input, regions)
+    for r in regions.filterIt(it.handlers[ueClick] > OptionBase):
+      check r.visible[1] >= 8
+      check r.visible[3] <= 92
+
+  test "with no options there is nothing to open":
+    var input: UiInput
+    var regions: seq[UiRegion]
+    let root = select(100, 0)
+    discard layout.layoutUi(root, 480, 480, input, regions)
+    input.open = regions.filterIt(it.field == 4)[0].key + 1
+    regions.setLen(0)
+    discard layout.layoutUi(root, 480, 480, input, regions)
+    check input.open == 0
+    check regions.anyIt(it.field == 4)

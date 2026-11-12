@@ -17,10 +17,8 @@
 ##   (so a control panel or frameos.setState can change it), else
 ## - the scene's `settings.renderScale`, else
 ## - the frame's (frame.json `renderScale`, the control planes'
-##   `render_scale`), where 0 is automatic: the panel's shorter edge over
-##   600 px, rounded down to a quarter, never below 1 (800x480 and 720x720
-##   are 1, 1200x1600 is 2). Rounded down, so a scaled layout always has at
-##   least 600 px on its shorter edge.
+##   `render_scale`), where 0 is automatic: 1, and 2 on a 4K or larger screen
+##   on HDMI.
 ##
 ## docs/jsx-ui.md "Scale" is the spec. The same automatic rule lives in
 ## `frontend/src/utils/renderScale.ts`; keep the two in step.
@@ -31,16 +29,14 @@ import frameos/refresh_interval
 
 const
   RenderScaleRole* = "renderScale"
-  ## The shorter edge that automatic scaling treats as 1x.
-  AutoRenderScaleEdge* = 600
+  HdmiDevice = "framebuffer"
+  ## The shorter edge of a 4K screen: on HDMI, from here up, automatic is 2x.
+  Hdmi2xEdge = 2160
   MaxRenderScale* = 4.0
 
-proc autoRenderScale*(width, height: int): float =
-  ## The automatic scale for a panel: its shorter edge over 600 px, rounded
-  ## down to a quarter, at least 1.
-  # In whole quarters, as integers: a double is a library call on an ESP32-S3.
-  let quarters = max(4, min(width, height) * 4 div AutoRenderScaleEdge)
-  quarters.float / 4.0
+proc autoRenderScale*(width, height: int, device: string): float =
+  ## The automatic scale: 1, and 2 on a 4K or larger screen on HDMI.
+  if device == HdmiDevice and min(width, height) >= Hdmi2xEdge: 2.0 else: 1.0
 
 proc usableScale(scale: float): float {.inline.} =
   if scale > 0.0 and scale <= MaxRenderScale: scale else: 0.0
@@ -65,7 +61,7 @@ proc frameRenderScale*(config: FrameConfig): float {.inline.} =
   if config.isNil:
     return 1.0
   let own = usableScale(config.renderScale)
-  if own > 0.0: own else: autoRenderScale(config.width, config.height)
+  if own > 0.0: own else: autoRenderScale(config.width, config.height, config.device)
 
 proc sceneRenderScale*(scene: FrameScene): float {.inline.} =
   ## The scene's own override: its role field's state, else its setting. 0 =

@@ -1,11 +1,19 @@
 """
 Home Assistant sync service.
 
-Shares FrameOS frames with Home Assistant: every non-archived frame becomes an
-MQTT-discovered device (image entity with the latest render, status/scene/last
-seen sensors), a hub sensor reports the frame count and names, and every
-meaningful frame event is forwarded to the HA event bus as `frameos_event` and
-to the frame's MQTT event topic.
+Shares FrameOS frames with Home Assistant, both ways (docs/home-assistant.md):
+
+- every non-archived frame is an MQTT-discovered device: the latest render as
+  an image, status / scene / last-seen sensors (the scene sensor carrying the
+  showing scene's field values as attributes), a scene select, a display
+  switch and refresh image / re-render / next / previous / restart / reboot
+  buttons (app/ha/discovery.py);
+- what Home Assistant sets on those entities, and free-form commands from
+  automations (a scene with parameters, any event the frame's own API
+  takes), come back over MQTT and go to the frame the way the editor's own
+  buttons do (app/ha/commands.py → the frame event route's dispatcher);
+- every meaningful frame event is forwarded to the HA event bus as
+  `frameos_event` and to the frame's MQTT event topic.
 
 Runs as a single asyncio task inside the arq worker process (the add-on runs
 two uvicorns plus the worker; the worker is the one singleton). It reacts to
@@ -17,6 +25,8 @@ channel with what actually happened (broker used, frames shared, or the error).
 """
 
 import asyncio
+import contextlib
+import hashlib
 import json
 from typing import Any, Optional
 
@@ -26,7 +36,7 @@ from redis.asyncio import from_url as create_redis
 from app.config import config
 from app.database import SessionLocal
 from app.ha import HA_SYNC_CHANNEL, HA_SYNC_REQUEST_KEY
-from app.ha import discovery
+from app.ha import commands, discovery, state
 from app.ha.client import MqttConfig, RestConfig, fire_ha_event, resolve_mqtt_config, resolve_rest_config
 from app.redis import get_shared_redis
 from app.utils.events_contract_gen import SCENE_CHANGED_LOG_EVENTS
@@ -36,6 +46,9 @@ BROADCAST_CHANNEL = "broadcast_channel"
 SCENE_CHANGE_EVENTS = SCENE_CHANGED_LOG_EVENTS
 # Renders can double-fire (new_scene_image + frame_rendered); skip repeats.
 IMAGE_PUBLISH_MIN_INTERVAL = 2.0
+# A burst of state-change log lines (a setCurrentScene is three) is one
+# re-read of the showing scene's state for the scene sensor's attributes.
+FIELDS_REFRESH_DELAY = 1.0
 
 
 def partition_projects_by_broker(
@@ -75,6 +88,9 @@ class HomeAssistantSync:
         self._last_image_publish: dict[int, float] = {}
         self._sync_request: Optional[dict] = None  # pending "sync now" API request awaiting a reply
         self._synced_counts: dict[int, int] = {}  # project_id -> frames shared in the last full sync
+        self._discovery_signatures: dict[int, str] = {}  # frame_id -> hash of the last discovery publish
+        self._fields_refreshes: dict[int, asyncio.Task] = {}  # frame_id -> debounced scene fields publish
+        self._command_tasks: set[asyncio.Task] = set()
 
     # ---- lifecycle ----------------------------------------------------------
 
@@ -110,6 +126,7 @@ class HomeAssistantSync:
                     if (rest := resolve_rest_config(ha_settings)) is not None
                 }
                 self._synced_counts = {}
+                self._discovery_signatures = {}
 
                 mqtt_config = None
                 if self._enabled:
@@ -155,10 +172,11 @@ class HomeAssistantSync:
                             connected = True
                             print(f"🟢 Home Assistant sync: connected to MQTT broker at {mqtt_config.host}:{mqtt_config.port}")
                             try:
+                                await mqtt.subscribe([(topic, 1) for topic in discovery.frame_command_subscriptions()])
                                 await self._publish(discovery.AVAILABILITY_TOPIC, "online", retain=True)
                                 await self._full_sync()
                                 await self._reply_to_sync_request(mqtt_config)
-                                await self._listen(pubsub)
+                                await self._serve(pubsub, mqtt)
                             finally:
                                 try:
                                     await self._publish(discovery.AVAILABILITY_TOPIC, "offline", retain=True)
@@ -195,10 +213,30 @@ class HomeAssistantSync:
                     await self._listen(pubsub)
             finally:
                 self._http = None
+                self._cancel_background_tasks()
                 try:
                     await redis_sub.close()
                 except Exception:
                     pass
+
+    async def _serve(self, pubsub, mqtt):
+        """Both directions at once: Redis broadcasts out, MQTT commands in.
+        Ends when the Redis side asks for a reload (settings changed, sync
+        now) or either side fails."""
+        redis_task = asyncio.create_task(self._listen(pubsub))
+        mqtt_task = asyncio.create_task(self._listen_mqtt(mqtt))
+        try:
+            done, pending = await asyncio.wait({redis_task, mqtt_task}, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+            for task in done:
+                task.result()
+        finally:
+            for task in (redis_task, mqtt_task):
+                if not task.done():
+                    task.cancel()
 
     async def _listen(self, pubsub):
         async for message in pubsub.listen():
@@ -221,6 +259,27 @@ class HomeAssistantSync:
             data = parsed.get("data")
             if isinstance(data, dict):
                 await self._handle_broadcast(parsed.get("event"), data)
+
+    async def _listen_mqtt(self, mqtt):
+        async for message in mqtt.messages:
+            topic = message.topic
+            topic_text = str(getattr(topic, "value", topic))
+            self._spawn_command(topic_text, message.payload)
+
+    def _spawn_command(self, topic: str, payload: Any) -> asyncio.Task:
+        # A command may wait on the frame (a Pi over HTTP, an ESP32's ack):
+        # run it beside the loops so the next message is not behind it.
+        task = asyncio.create_task(self._handle_command(topic, payload))
+        self._command_tasks.add(task)
+        task.add_done_callback(self._command_tasks.discard)
+        return task
+
+    def _cancel_background_tasks(self):
+        for task in list(self._command_tasks) + list(self._fields_refreshes.values()):
+            if not task.done():
+                task.cancel()
+        self._command_tasks.clear()
+        self._fields_refreshes.clear()
 
     # ---- sync-now request/reply ----------------------------------------------
 
@@ -256,6 +315,79 @@ class HomeAssistantSync:
         except Exception as e:
             print(f"🔴 Home Assistant sync: failed to answer sync request: {e}")
 
+    # ---- commands from Home Assistant -------------------------------------------
+
+    async def _handle_command(self, topic_text: str, payload: Any) -> Optional[commands.Action]:
+        topic = commands.parse_topic(topic_text)
+        if topic is None or topic.project_id not in self._enabled:
+            return None
+        frame = self._load_frame_dict(topic.frame_id)
+        if not frame or frame.get("archived") or frame.get("project_id") != topic.project_id:
+            return None
+        active = await self._active_scene_id(topic.frame_id)
+        action = commands.resolve_command(topic, payload, frame, active)
+        await self._execute(frame, action)
+        return action
+
+    async def _execute(self, frame: dict, action: commands.Action) -> None:
+        from app.models.frame import Frame
+        from app.models.log import new_log
+
+        frame_id, project_id = int(frame["id"]), int(frame["project_id"])
+        redis = get_shared_redis()
+        db = SessionLocal()
+        try:
+            row = db.get(Frame, frame_id)
+            if row is None:
+                return
+            if action.kind == "error":
+                await new_log(db, redis, frame_id, "stderr", f"Home Assistant: {action.message}")
+                return
+            await new_log(db, redis, frame_id, "stdinfo", f"Home Assistant asked for {action.summary}")
+            try:
+                if action.kind in ("restart", "reboot"):
+                    from app.api.frames import _begin_control_progress_for
+                    from app.tasks import reboot_frame, restart_frame
+
+                    await _begin_control_progress_for(db, redis, row, action.kind)
+                    await (restart_frame if action.kind == "restart" else reboot_frame)(frame_id, redis)
+                    return
+                if action.kind == "refresh_image":
+                    # What the panel shows, pulled again (a frame that pushes
+                    # its image answers from the cache) and published whether
+                    # or not a render just was: the press is the throttle.
+                    await self._fetch_image(db, redis, row)
+                    await self._publish_frame_image(project_id, frame_id, throttle=False)
+                    return
+                await self._dispatch(db, redis, row, action.event or "", action.payload)
+            except Exception as error:
+                detail = getattr(error, "detail", None) or str(error)
+                await new_log(db, redis, frame_id, "stderr", f"Home Assistant's {action.summary} failed: {detail}")
+                return
+            if action.event in ("turnOn", "turnOff"):
+                # The frame logs event:turnOn/turnOff itself when it takes
+                # it; until then, say what was asked so the switch settles.
+                await state.set_display_power(redis, frame_id, action.event == "turnOn")
+                await self._publish_state(frame)
+            if action.event in ("setCurrentScene", "setSceneState"):
+                await self._publish_state(frame)
+                self._schedule_fields_refresh(project_id, frame_id)
+        finally:
+            db.close()
+
+    async def _dispatch(self, db, redis, frame, event: str, payload: dict) -> Any:
+        """The frame event route's dispatcher; a seam for tests."""
+        from app.api.frames import dispatch_frame_event
+
+        return await dispatch_frame_event(db, redis, frame, event, payload)
+
+    async def _fetch_image(self, db, redis, frame) -> None:
+        """The image route's pull of what the panel shows, into the frame's
+        image cache (a failure is logged on the frame there); a seam for tests."""
+        from app.api.frames import current_frame_image
+
+        await current_frame_image(db, redis, frame)
+
     # ---- event handling ------------------------------------------------------
 
     async def _handle_broadcast(self, event: Optional[str], data: dict):
@@ -278,21 +410,16 @@ class HomeAssistantSync:
                 "archived": bool(frame.get("archived")),
             }
             if frame.get("archived"):
-                await self._publish_messages(discovery.frame_removal_messages(project_id, frame_id))
+                await self._remove_frame(project_id, frame_id)
             else:
-                await self._publish_messages(discovery.frame_discovery_messages(frame))
-                await self._publish_json(
-                    discovery.frame_state_topic(project_id, frame_id),
-                    discovery.frame_state_payload(frame, await self._active_scene_id(frame_id)),
-                    retain=True,
-                )
+                await self._publish_frame(frame)
             await self._publish_summary(project_id)
         elif event == "delete_frame":
             project_id, frame_id = data.get("project_id"), data.get("id")
             if project_id not in self._enabled or frame_id is None:
                 return
             self._frames.pop(frame_id, None)
-            await self._publish_messages(discovery.frame_removal_messages(project_id, frame_id))
+            await self._remove_frame(project_id, frame_id)
             await self._publish_summary(project_id)
         elif event in ("new_scene_image", "frame_rendered"):
             frame_id = data.get("frameId")
@@ -330,16 +457,21 @@ class HomeAssistantSync:
         if rest and self._http is not None:
             await fire_ha_event(self._http, rest, discovery.HA_EVENT_TYPE, payload)
 
+        # The frame saying what its panel did: the display switch's truth.
+        display_changed = event in state.DISPLAY_LOG_EVENTS and await state.note_display_log(
+            get_shared_redis(), frame_id, event
+        )
         # Scene changes only touch Redis (no update_frame broadcast), so refresh
         # the frame's state topic here to keep the scene sensor current.
-        if event in SCENE_CHANGE_EVENTS:
+        if display_changed or event in SCENE_CHANGE_EVENTS:
             frame = self._load_frame_dict(frame_id)
             if frame and not frame.get("archived"):
-                await self._publish_json(
-                    discovery.frame_state_topic(project_id, frame_id),
-                    discovery.frame_state_payload(frame, await self._active_scene_id(frame_id)),
-                    retain=True,
-                )
+                await self._publish_state(frame)
+        # The scene or its state changed on the frame (a button, a schedule,
+        # the editor): the scene sensor's attributes re-read the showing
+        # scene's values, once the burst of lines is over.
+        if event in state.FIELDS_LOG_EVENTS or event in SCENE_CHANGE_EVENTS:
+            self._schedule_fields_refresh(project_id, frame_id)
 
     # ---- sync ----------------------------------------------------------------
 
@@ -364,17 +496,93 @@ class HomeAssistantSync:
                 retain=True,
             )
             for frame in active:
-                await self._publish_messages(discovery.frame_discovery_messages(frame))
-                await self._publish_json(
-                    discovery.frame_state_topic(project_id, frame["id"]),
-                    discovery.frame_state_payload(frame, await self._active_scene_id(frame["id"])),
-                    retain=True,
-                )
+                await self._publish_frame(frame, force=True)
                 await self._publish_frame_image(project_id, frame["id"], throttle=False)
             for frame in frames:
                 if frame.get("archived"):
-                    await self._publish_messages(discovery.frame_removal_messages(project_id, frame["id"]))
+                    await self._remove_frame(project_id, frame["id"])
             print(f"🟢 Home Assistant sync: shared {len(active)} frame(s) for project {project_id}")
+
+    async def _publish_frame(self, frame: dict, force: bool = False):
+        """Discovery (when it changed, or `force`), state, and a scene fields
+        refresh when the scenes changed (a renamed field, a new default)."""
+        project_id, frame_id = int(frame["project_id"]), int(frame["id"])
+        messages = discovery.frame_discovery_messages(frame)
+        signature = hashlib.sha1(json.dumps(messages, sort_keys=True, default=str).encode()).hexdigest()
+        changed = force or self._discovery_signatures.get(frame_id) != signature
+        if changed:
+            await self._publish_messages(messages)
+            self._discovery_signatures[frame_id] = signature
+        await self._publish_state(frame)
+        if changed:
+            self._schedule_fields_refresh(project_id, frame_id)
+
+    async def _remove_frame(self, project_id: int, frame_id: int):
+        await self._publish_messages(discovery.frame_removal_messages(project_id, frame_id))
+        for topic in (
+            discovery.frame_state_topic(project_id, frame_id),
+            discovery.frame_fields_topic(project_id, frame_id),
+            discovery.frame_image_topic(project_id, frame_id),
+        ):
+            await self._publish(topic, None, retain=True)
+        self._discovery_signatures.pop(frame_id, None)
+
+    async def _publish_state(self, frame: dict):
+        project_id, frame_id = int(frame["project_id"]), int(frame["id"])
+        await self._publish_json(
+            discovery.frame_state_topic(project_id, frame_id),
+            discovery.frame_state_payload(
+                frame,
+                await self._active_scene_id(frame_id),
+                await state.get_display_power(get_shared_redis(), frame_id),
+            ),
+            retain=True,
+        )
+
+    def _schedule_fields_refresh(self, project_id: int, frame_id: int, delay: float = FIELDS_REFRESH_DELAY):
+        previous = self._fields_refreshes.pop(frame_id, None)
+        if previous is not None and not previous.done():
+            previous.cancel()
+
+        async def refresh():
+            try:
+                await asyncio.sleep(delay)
+                frame = self._load_frame_dict(frame_id)
+                if frame and not frame.get("archived"):
+                    await self._publish_fields(frame, live=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                print(f"🔴 Home Assistant sync: failed to publish scene fields for frame {frame_id}: {e}")
+
+        task = asyncio.create_task(refresh())
+        self._fields_refreshes[frame_id] = task
+
+        def forget(done: asyncio.Task) -> None:
+            if self._fields_refreshes.get(frame_id) is done:
+                self._fields_refreshes.pop(frame_id, None)
+
+        task.add_done_callback(forget)
+
+    async def _publish_fields(self, frame: dict, live: bool = True):
+        """The fields topic: the showing scene's public field values, the
+        scene sensor's attributes."""
+        from app.models.frame import Frame
+
+        project_id, frame_id = int(frame["project_id"]), int(frame["id"])
+        redis = get_shared_redis()
+        active = await self._active_scene_id(frame_id)
+        db = SessionLocal()
+        try:
+            row = db.get(Frame, frame_id)
+            states = await state.frame_scene_states(redis, row, live=live) if row is not None else {}
+        finally:
+            db.close()
+        await self._publish_json(
+            discovery.frame_fields_topic(project_id, frame_id),
+            discovery.scene_fields_payload(frame, active, states.get(active or "")),
+            retain=True,
+        )
 
     async def _publish_summary(self, project_id: int):
         active = [frame for frame in self._load_project_frames(project_id) if not frame.get("archived")]
@@ -394,6 +602,7 @@ class HomeAssistantSync:
         if image is None:
             return
         self._last_image_publish[frame_id] = now
+        image = await asyncio.get_running_loop().run_in_executor(None, discovery.fit_image, image)
         await self._publish(discovery.frame_image_topic(project_id, frame_id), image, retain=True)
 
     # ---- MQTT helpers ----------------------------------------------------------

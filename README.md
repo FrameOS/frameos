@@ -80,6 +80,7 @@ ESP32-S3. Waveshare's ready-made frames work out of the box:
 And panels to build into a frame of your own:
 
 - [13.3" (E)](https://frameos.net/devices/waveshare-epd-13in3e) - Spectra 6 color ([buy](https://www.waveshare.com/13.3inch-e-paper-hat-plus-e.htm?sku=29355&aff_id=79380))
+- 9.7" (E) - Spectra 6 color, 1120x784 ([buy](https://www.waveshare.com/9.7inch-e-paper-e.htm?sku=35923&aff_id=79380))
 - [7.3" (E)](https://frameos.net/devices/waveshare-epd-7in3e) - Spectra 6 color ([buy](https://www.waveshare.com/7.3inch-e-paper-hat-e.htm?sku=27875&aff_id=79380))
 - [4" (E)](https://frameos.net/devices/waveshare-epd-4in0e) - Spectra 6 color ([buy](https://www.waveshare.com/4inch-e-paper-hat-plus-e.htm?sku=27367&aff_id=79380))
 - [7.5"](https://frameos.net/devices/waveshare-7.5inch-800x480-epaper) - black/white ([buy](https://www.waveshare.com/7.5inch-e-Paper-HAT.htm?aff_id=79380))
@@ -195,6 +196,41 @@ docker run -d -p 8989:8989 \
     -e SECRET_KEY="$SECRET_KEY" \
     -e TMPDIR=/tmp/frameos-cross \
     frameos
+```
+
+### Home Assistant
+
+Run the backend as the [Home Assistant add-on](https://github.com/FrameOS/frameos-home-assistant-addon)
+or point a standalone one at Home Assistant under **Settings → Home Assistant**:
+every frame becomes a device with its live image, status and scene sensors (the
+scene's settings as attributes), a scene selector, a display switch and refresh
+/ next / previous / restart / reboot buttons, and frame events reach the event
+bus as `frameos_event`. Automations show a scene with parameters through one
+MQTT command. `docs/home-assistant.md` has the entities, the MQTT topics
+and the command format for automations.
+
+### HTTPS for frames
+
+Frames talk to the backend on port 8989 (logs, assets, scene state). To serve
+that port over TLS without a reverse proxy, hand the container a certificate
+and key with `FRAMEOS_SSL_CERTFILE` / `FRAMEOS_SSL_KEYFILE` (for example a
+`/certs` mount). A configured certificate that cannot be read stops the
+container with the reason in the log. New frames are then prefilled with an
+`https://` server address; existing frames need their **Server scheme** set to
+https in frame settings and a deploy. Frames verify the certificate against the
+public CA bundle (Let's Encrypt works, a self-signed one does not), so the
+frames must reach the backend by the name on the certificate. The Home
+Assistant add-on has the same switch as its `ssl` / `certfile` / `keyfile`
+options.
+
+```bash
+docker run -d -p 8989:8989 \
+    -v ./db:/app/db \
+    -v /etc/letsencrypt/live/frames.example.com:/certs:ro \
+    -e FRAMEOS_SSL_CERTFILE=/certs/fullchain.pem \
+    -e FRAMEOS_SSL_KEYFILE=/certs/privkey.pem \
+    -e SECRET_KEY="$SECRET_KEY" \
+    frameos/frameos
 ```
 
 ### Database

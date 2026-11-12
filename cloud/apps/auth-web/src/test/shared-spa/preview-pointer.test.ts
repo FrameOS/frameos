@@ -152,6 +152,47 @@ describe("preview pointer input, package and frontend", () => {
     ]);
   });
 
+  it("never leaves a scene holding a press the page let go of", () => {
+    // The editor's preview dragged a list, let go off the canvas and came
+    // back: the scene was still dragging (2026-11-07). Each way a release can
+    // go missing ends the press, from either page.
+    const lost = (attach: typeof packagePointer.attachPointerInput): Sent => {
+      const sent: Sent = [];
+      const canvas = new FakeCanvas();
+      const into = (name: string, payload: Record<string, unknown>) => sent.push([name, payload]);
+      let detach = attach(canvas as unknown as HTMLCanvasElement, into, { inputV2: () => true });
+      // Released where the page never heard it: the next move holds nothing.
+      canvas.dispatchEvent(pointer("pointerdown", { button: 0, buttons: 1, clientX: 290, clientY: 260 }));
+      canvas.dispatchEvent(pointer("pointermove", { buttons: 0, clientX: 300, clientY: 260 }));
+      // The capture lost mid-drag (the canvas hidden or replaced).
+      canvas.dispatchEvent(pointer("pointerdown", { button: 0, buttons: 1, clientX: 290, clientY: 260 }));
+      canvas.dispatchEvent(pointer("lostpointercapture", {}));
+      // Its release after a pointerup is no second one.
+      canvas.dispatchEvent(pointer("pointerdown", { button: 0, buttons: 1, clientX: 290, clientY: 260 }));
+      canvas.dispatchEvent(pointer("pointerup", { button: 0, clientX: 290, clientY: 260 }));
+      canvas.dispatchEvent(pointer("lostpointercapture", {}));
+      // Detached with a finger down: it lets go.
+      canvas.dispatchEvent(pointer("pointerdown", { button: 0, buttons: 1, clientX: 100, clientY: 200, pointerId: 5, pointerType: "touch" }));
+      detach();
+      detach = attach(canvas as unknown as HTMLCanvasElement, into, { inputV2: () => true });
+      detach();
+      return sent.filter(([name]) => name !== "pointerMove");
+    };
+    const fromPackage = lost(packagePointer.attachPointerInput);
+    expect(lost(frontendPointer.attachPointerInput)).toEqual(fromPackage);
+    const mouse = { pointerId: 0, pointerType: "mouse" };
+    expect(fromPackage).toEqual([
+      ["pointerDown", { x: 16384, y: 16384, ...mouse, buttons: 1, button: 0 }],
+      ["pointerUp", { x: 17039, y: 16384, ...mouse, buttons: 0, button: 0 }],
+      ["pointerDown", { x: 16384, y: 16384, ...mouse, buttons: 1, button: 0 }],
+      ["pointerCancel", { x: 16384, y: 16384, ...mouse }],
+      ["pointerDown", { x: 16384, y: 16384, ...mouse, buttons: 1, button: 0 }],
+      ["pointerUp", { x: 16384, y: 16384, ...mouse, buttons: 0, button: 0 }],
+      ["pointerDown", { x: 3932, y: 9830, pointerId: 5, pointerType: "touch", buttons: 1, button: 0 }],
+      ["pointerCancel", { x: 3932, y: 9830, pointerId: 5, pointerType: "touch" }],
+    ]);
+  });
+
   it("sends a bundle from before input v2 the old mouse events", () => {
     const fromPackage = run(packagePointer.attachPointerInput, false);
     expect(run(frontendPointer.attachPointerInput, false)).toEqual(fromPackage);

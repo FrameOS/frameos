@@ -8,6 +8,7 @@ import {
   cloudSceneStub,
   cloudSceneUpdateVersion,
   missingSettingsGroups,
+  pendingCloudSceneUpdates,
   scenesFromStoreSceneJson,
 } from "../../../../../../frontend/src/utils/cloudFrameScenes";
 
@@ -103,6 +104,29 @@ describe("cloud frame scene hydration helpers", () => {
     expect(cloudSceneUpdateVersion({ scene_id: "s1", latest_version: 5 })).toBeNull();
     // The server knows the account can no longer install it (pulled / private).
     expect(cloudSceneUpdateVersion({ scene_id: "s1", assigned_version: 3, latest_version: 5, update_available: false })).toBeNull();
+  });
+
+  it("lists each store scene with an update once, in scene order, named after its first scene", () => {
+    expect(
+      pendingCloudSceneUpdates({
+        scenes: [
+          { id: "rt-1", name: "Clock" },
+          { id: "rt-2", name: "Clock, seconds" },
+          { id: "rt-3", name: "Weather" },
+          { id: "rt-4", name: "" },
+        ],
+        cloud_scene_sources: {
+          "rt-1": { scene_id: "pack", held_version: 2, update_version: 3 },
+          "rt-2": { scene_id: "pack", held_version: 2, update_version: 3 },
+          "rt-3": { scene_id: "weather", held_version: 7 },
+          "rt-4": { scene_id: "unnamed", held_version: 1, update_version: 4 },
+        },
+      }),
+    ).toEqual([
+      { storeSceneId: "pack", name: "Clock", version: 3 },
+      { storeSceneId: "unnamed", name: "Untitled scene", version: 4 },
+    ]);
+    expect(pendingCloudSceneUpdates({ scenes: [{ id: "rt-1", name: "Clock" }] })).toEqual([]);
   });
 
   // sanitizeFrameForStore lights the Active badge via exactly this mapping:

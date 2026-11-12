@@ -31,6 +31,7 @@ export default tseslint.config(
       "**/src/test/shared-spa/cloud-scene-deploy.test.ts",
       // Same exclusion, same reason: renders the whole deploy drawer.
       "**/src/test/shared-spa/cloud-deploy-dialog.test.tsx",
+      "**/src/test/shared-spa/scene-update-deploy.test.ts",
       // Same exclusion, same reason: renders the signed-out store front.
       "**/src/test/shared-spa/public-store-front.test.tsx",
       // Same exclusion, same reason: mounts EmbeddedWebFlasher.
@@ -61,6 +62,7 @@ export default tseslint.config(
       // Same exclusion, same reason: builds every logic the embedded editor
       // mounts; workspaceLogic reaches the legacy workspace components.
       "**/src/test/shared-spa/embedded-editor-logics.test.ts",
+      "**/src/test/shared-spa/embedded-editor-file-tree-logic.test.ts",
       "**/src/test/shared-spa/scene-state-logic.test.ts",
       // Same exclusion, same reason: frameStatusGroups's import graph
       // reaches decorators/frame.tsx and the legacy components.
@@ -68,6 +70,7 @@ export default tseslint.config(
       "**/src/test/shared-spa/frame-checkin.test.ts",
       "**/src/test/shared-spa/frame-firmware-update.test.ts",
       "**/src/test/shared-spa/deploy-progress.test.tsx",
+      "**/src/test/shared-spa/frame-status-fixtures.test.ts",
       "**/src/test/shared-spa/frame-image-sleep-badge.test.tsx",
       "**/src/test/shared-spa/frame-admin-ai-drawer.test.tsx",
       "**/src/test/shared-spa/ai-chat-drawer-url.test.tsx",
@@ -131,6 +134,8 @@ export default tseslint.config(
       "**/src/test/shared-spa/scene-update-banner.test.tsx",
       // Mounts buttonMapLogic (→ frameLogic); out of the tsconfig too.
       "**/src/test/shared-spa/button-map-modal.test.tsx",
+      // Same exclusion, same reason: mounts sceneLayoutLogic (→ frameLogic).
+      "**/src/test/shared-spa/scene-layout-picker.test.tsx",
       // Mounts templatesLogic (→ frameLogic); out of the tsconfig too.
       "**/src/test/shared-spa/template-install-feedback.test.ts",
       // Mounts eventsLogic (→ frameLogic); out of the tsconfig too.
@@ -141,6 +146,8 @@ export default tseslint.config(
       "**/src/test/shared-spa/lan-access.test.tsx",
       // Imports the home page's logics (→ decorators/frame.tsx); out of the tsconfig too.
       "**/src/test/shared-spa/home-page.test.ts",
+      // Mounts scenesLogic (→ frameLogic, framesModel); out of the tsconfig too.
+      "**/src/test/shared-spa/scene-preview-plane-first.test.ts",
     ],
   },
   js.configs.recommended,

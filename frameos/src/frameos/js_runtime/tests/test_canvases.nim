@@ -399,3 +399,31 @@ suite "putPixels":
     check c.format == pfRgb565
     check c[5, 7] == black and c[10, 7] == rgb565ToRgbx(rgbxToRgb565(red))
     check frame[10 + 5, 10 + 12] == rgb565ToRgbx(rgbxToRgb565(green))
+
+  test "a sixteen-grey canvas (an e-paper's) is dithered where each pixel lands":
+    # pixie's storeGray4 picks each pixel's level by its place in the 4x4
+    # ordered matrix: the palette's fast path, and a clipped square's rows
+    # (no row a copy of the one above), store what a pixel-by-pixel write would.
+    for (mode, boxes) in [
+        ("palette", @[(4, 6, 9, 11, black), (9, 6, 14, 11, red), (4, 11, 9, 16, green)]),
+        ("clip", @[(96, 0, 100, 7, parseHtmlColor("#123456").rgbx)])]:
+      let ui = pixelUi(mode, "gray4-" & mode)
+      discard ui.render(newImageGray4(W, H))
+      check ui.scene.state{"ok"}.getBool() == true
+      let c = ui.canvasOf()
+      check c.format == pfGray4
+      let expected = newImageGray4(c.width, c.height)
+      for y in 0 ..< c.height:
+        for x in 0 ..< c.width:
+          var color = white
+          for (x0, y0, x1, y1, fill) in boxes:
+            if x in x0 ..< x1 and y in y0 ..< y1:
+              color = fill
+          expected.setPixel(expected.dataIndex(x, y), color)
+      var wrong = 0
+      for y in 0 ..< c.height:
+        for x in 0 ..< c.width:
+          if gray4Level(c.data8, c.dataIndex(x, y)) != gray4Level(expected.data8, expected.dataIndex(x, y)):
+            inc wrong
+      checkpoint mode
+      check wrong == 0

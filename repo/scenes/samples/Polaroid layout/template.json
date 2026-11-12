@@ -1,0 +1,10 @@
+{
+  "name": "Polaroid layout",
+  "description": "A print with a wide white border: the scene is the photo, and its name is written along the bottom.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.5"
+}

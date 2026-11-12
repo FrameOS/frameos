@@ -109,6 +109,10 @@ export interface PreviewRuntimeInfo {
    * `FrameOSPreview.buttonDown`). False sends the older bundle one `button`
    * per press, on the release. */
   gpioEvents: boolean
+  /** Whether the `sceneState` option reached the scene before its first
+   * render. False for a bundle from before it, or with nothing to seed: a
+   * page that has values to keep sends them with `setSceneState`. */
+  sceneStateSeeded: boolean
 }
 
 /** How the runtime's /srv/assets is backed, sent with the worker's `ready` message. */

@@ -270,6 +270,23 @@ suite "cloud hub session over a live socket":
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
       lanAccessStates(false) > offBefore)
 
+  test "a rotation and scale set on the frame reach the provider in hello and as a state":
+    # The settings panel's frame page persists them and reloads; the hub's
+    # copy follows the generation, and the provider's mirror the report.
+    withLock stubLock:
+      check recorded.hello{"hardware"}{"rotate"}.getInt(-1) == 0
+      check recorded.hello{"hardware"}{"renderScale"}.getFloat(-1) == 0
+    withLiveConfigLock:
+      frameConfig.rotate = 90
+      frameConfig.renderScale = 1.5
+    noteFrameConfigChanged()
+    check waitUntil(10.0, proc(): bool {.gcsafe.} =
+      for state in repliesOfType("state"):
+        if state{"hardware"}{"rotate"}.getInt(-1) == 90 and
+            state{"hardware"}{"renderScale"}.getFloat(-1) == 1.5:
+          return true
+      false)
+
   test "an oversized inbound message drops the session instead of allocating":
     # ws 0.5.0 would happily assemble whatever length the provider claims; the
     # client caps inbound messages at 4 MiB, closes and reconnects instead.

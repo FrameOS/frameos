@@ -29,6 +29,8 @@ import frameos/utils/image
 import frameos/utils/time
 import frameos/scenes
 import frameos/scene_switcher_linux
+from system/sceneSwitcher/scene import isBuiltInScene
+from frameos/scene_rhythm import rhythmCanvasGeneration, rhythmAwaited
 import frameos/boot_guard
 import frameos/runtime_diagnostics
 from frameos/upgrade import UpgradeLogWatcher, initUpgradeLogWatcher, poll
@@ -80,11 +82,64 @@ proc pushToPanel(image: Image, rotation: int, markSwitch = -1) =
     noteDriverRendered()
 
 proc beginSceneLoading(self: RunnerThread) =
-  ## The scene shown is going away and the next one is being built: on a
-  ## fast panel the loading mark shows if that takes a while
-  ## (frameos/loading_mark). Called before the new scene's init, which is
-  ## part of the wait.
+  ## A new picture is on its way, from a switch or a render: on a fast panel
+  ## the loading mark shows if it takes a while (frameos/loading_mark). A
+  ## switch calls this before the new scene's init, which is part of the wait.
   discard beginLoadingMark(self.frameConfig.device, self.frameConfig.rotate, self.frameConfig.flip)
+
+# -------- The runner's wake
+# Both loops below sleep in slices and used to notice an event or a render
+# request only when a slice ended. A producer on another thread triggers the
+# AsyncEvent channels.nim made (wakeRunner), the dispatcher on this thread
+# calls wakeRenderLoop, and either ends every sleepOrWake in progress.
+var
+  runnerWakeInstalled {.threadvar.}: bool
+  runnerWakeWaiters {.threadvar.}: seq[Future[void]]
+  runnerWakePending {.threadvar.}: bool
+
+proc wakeRenderLoop*() =
+  ## Ends the loops' sleeps now; a wake with nobody asleep ends the next one.
+  if runnerWakeWaiters.len == 0:
+    runnerWakePending = true
+    return
+  let waiters = runnerWakeWaiters
+  runnerWakeWaiters.setLen(0)
+  for waiter in waiters:
+    if not waiter.finished:
+      waiter.complete()
+
+proc consumeRunnerWake() =
+  ## The loop is about to look at the channels: a wake from before this
+  ## point is answered by that look. One that comes after it still ends
+  ## the next sleep (runnerWakePending).
+  runnerWakePending = false
+
+proc ensureRunnerWake() =
+  if runnerWakeInstalled:
+    return
+  runnerWakeInstalled = true
+  let event = initRunnerWake()
+  addEvent(event, proc (fd: AsyncFD): bool =
+    wakeRenderLoop()
+    false) # stays registered
+
+proc sleepOrWake(ms: int): Future[void] {.async.} =
+  ## sleepAsync(ms), ended early by wakeRunner (another thread queued an event
+  ## or an input) or wakeRenderLoop (this thread asked for a render).
+  ensureRunnerWake()
+  if runnerWakePending:
+    runnerWakePending = false
+    return
+  let waiter = newFuture[void]("runner.sleepOrWake")
+  runnerWakeWaiters.add waiter
+  await waiter or sleepAsync(max(ms, 1))
+  if not waiter.finished:
+    # The slice ended first: forget the waiter, or idle hours would pile
+    # them up until the next wake.
+    let at = runnerWakeWaiters.find(waiter)
+    if at >= 0:
+      runnerWakeWaiters.del(at)
+    waiter.complete()
 
 # How frequently we announce a new render via websockets
 const SERVER_RENDER_DELAY_SECONDS = 1.0
@@ -415,6 +470,9 @@ proc dispatchOpen(self: RunnerThread, exportedScene: ExportedScene, scene: Frame
   self.sceneEvents.deliverLifecycle(scene, "open", %*{"sceneId": scene.id.string})
 
 proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.} =
+  # pixie's coverage cache for this thread's fills (paths.nim): a Pi has the
+  # memory for a UI's every label and box.
+  coverageCacheBudget = 8 * 1024 * 1024
   self.logger.log(%*{"event": "render:startLoop"})
   var timer = getMonoTime()
   var driverTimer = getMonoTime()
@@ -432,8 +490,6 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
     try:
       timer = getMonoTime()
       self.isRendering = true
-      # The newest scene switch: this pass's frame lands it (the loading mark).
-      let markSwitch = loadingMarkSwitches()
       # Re-enable scene render logs once the fast-render pause window elapses,
       # regardless of which render path this iteration takes. Otherwise switching
       # to a slow scene after a fast burst (when the block below is skipped) would
@@ -458,6 +514,13 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         continue
       if sceneId != self.currentSceneId:
         self.currentSceneId = sceneId
+      # This pass's frame ends the loading mark, whoever began it. The pass
+      # counts as a wait of its own, except when nobody is waiting for it: a
+      # scene the frame's clock redraws every few seconds or faster would
+      # blink the mark on every tick a little over the delay.
+      if currentScene.isNil or currentScene.id != sceneId or rhythmAwaited(currentScene):
+        self.beginSceneLoading()
+      let markSwitch = loadingMarkSwitches()
       if lastSceneId != sceneId:
         sceneChangedThisCycle = true
         var sceneInitialized = true
@@ -510,23 +573,12 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       # one on disk has gone stale. Writing it only once per scene — which is
       # what "not sceneImageExists" alone did — left the workspace showing a
       # frame's boot render for as long as it stayed on one scene, which is
-      # forever for most frames.
-      if sceneChangedThisCycle or sceneImageIsStale(self.frameConfig.assetsPath, currentScene.id):
-        try:
-          let savedImage = saveLastSceneImagePng(self.frameConfig.assetsPath, currentScene.id)
-          noteSceneImageSaved()
-          self.logger.log(%*{
-            "event": "render:sceneImage:saved",
-            "sceneId": currentScene.id.string,
-            "publicSceneId": savedImage.sceneId,
-            "bytes": savedImage.size,
-          })
-        except Exception as e:
-          self.logSignal(%*{
-            "event": "render:sceneImage:error",
-            "sceneId": currentScene.id.string,
-            "error": e.msg,
-          })
+      # forever for most frames. Written once the panel has the picture
+      # (below): the PNG encode is most of a second on a Pi Zero, and it
+      # held every switch back by that. Never for a built-in scene (the
+      # switcher, the settings): no list shows one.
+      let saveSnapshot = not isBuiltInScene(currentScene.id.string) and
+        (sceneChangedThisCycle or sceneImageIsStale(self.frameConfig.assetsPath, currentScene.id))
       clearBootCrashCount()
       successfulSceneRenders += 1
       if interval < 1:
@@ -600,6 +652,24 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         if driverRetryImage.isNil:
           reclaimRenderMemory()
         clearNextRenderSeconds()
+      if saveSnapshot:
+        try:
+          let savedImage = saveLastSceneImagePng(self.frameConfig.assetsPath, currentScene.id)
+          noteSceneImageSaved()
+          # The switcher's picture of it, from the pixels in hand: no decode.
+          noteSceneSnapshot(self.frameConfig.assetsPath, currentScene.id.string, getLastImageCopy())
+          self.logger.log(%*{
+            "event": "render:sceneImage:saved",
+            "sceneId": currentScene.id.string,
+            "publicSceneId": savedImage.sceneId,
+            "bytes": savedImage.size,
+          })
+        except Exception as e:
+          self.logSignal(%*{
+            "event": "render:sceneImage:error",
+            "sceneId": currentScene.id.string,
+            "error": e.msg,
+          })
       markRuntimeDone()
 
       if interval < 1 or (nextSleep > 0 and nextSleep < interval):
@@ -733,8 +803,11 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
           self.presentCursor()
         let nextSleepMs = min(remainingSleepMs,
           if self.sceneEvents.inputState.cursorVisible: CURSOR_SLEEP_SLICE_MS else: RENDER_SLEEP_SLICE_MS)
-        await sleepAsync(nextSleepMs)
-        remainingSleepMs -= nextSleepMs
+        # Ended early by an event or a render request: only the time that
+        # passed comes off the wait, so the interval keeps its schedule.
+        let sleptFrom = getMonoTime()
+        await sleepOrWake(nextSleepMs.int)
+        remainingSleepMs -= min(nextSleepMs, float((getMonoTime() - sleptFrom).inMilliseconds))
       if not driverRetryImage.isNil:
         # The next pass renders its own frame; do not carry this one into it.
         driverRetryImage = nil
@@ -743,6 +816,9 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       # Never let one escaped exception kill the render thread (and with it
       # the whole process under systemd). Log, reset state, and back off.
       self.isRendering = false
+      # No frame is coming to end the loading mark this pass began.
+      withLoadingMarkAway(loadingMarkSwitches()):
+        discard
       try:
         self.logSignal(%*{"event": "render:error:loop", "error": $e.msg, "stacktrace": e.getStackTrace()})
       except Exception:
@@ -886,6 +962,7 @@ proc runtimeCommand(self: RunnerThread, command: RuntimeCommand, payload: JsonNo
     self.configureLinkCodeOverlay()
     self.forceSceneReload = true
     self.triggerRenderNext = true
+    wakeRenderLoop()
     self.announceNextRender = true
   of rcRestart:
     self.logger.log(%*{"event": "restart", "message": "Restarting FrameOS runtime"})
@@ -916,13 +993,14 @@ proc runtimeCommand(self: RunnerThread, command: RuntimeCommand, payload: JsonNo
     self.currentSceneId = mainSceneId.get()
     self.forceSceneReload = true
     self.triggerRenderNext = true
+    wakeRenderLoop()
 
 proc sceneEvents*(self: RunnerThread): EventLoop =
   ## This runner's dispatcher, made on first use. Owned by the runner thread:
   ## every other thread reaches it through `eventChannel`.
   if self.eventLoop.isNil:
     self.eventLoop = newEventLoop(EventHost(
-      requestRender: proc () = self.triggerRenderNext = true,
+      requestRender: proc () = (self.triggerRenderNext = true; wakeRenderLoop()),
       selectScene: proc (payload: JsonNode): bool = self.selectScene(payload),
       displayPower: proc (on: bool) =
         if on: drivers.turnOn() else: drivers.turnOff(),
@@ -949,6 +1027,16 @@ proc sceneEvents*(self: RunnerThread): EventLoop =
 
 const MessageLoopYieldEvery = DefaultDrainBudget
 
+proc canvasGenerationForRhythm(canvas: Image): int64 {.nimcall, raises: [].} =
+  ## A frame-wide colour correction rewrites the canvas after every render: a
+  ## kept panel would be corrected again. Asked of the panel canvas alone.
+  {.cast(raises: []).}:
+    if frameColorSettings.global.hasAdjustments():
+      return -1
+  panelCanvasGeneration(canvas)
+
+rhythmCanvasGeneration = canvasGenerationForRhythm
+
 proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.async.} =
   var waitTime = 10
   var iterations = 0
@@ -968,6 +1056,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
     inc iterations
     if self.stopMessageLoop or (maxIterations > 0 and iterations > maxIterations):
       break
+    consumeRunnerWake()
     # Everything the other threads sent goes into the dispatcher's queue, which
     # is where the contract's coalescing happens: touch drags queue hundreds of
     # moves while a render blocks this loop, and replaying each one is
@@ -1008,8 +1097,11 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
     if self.triggerRenderNext and not self.isRendering:
       await sleepAsync(1)
     else:
-      await sleepAsync(waitTime)
-      if waitTime < 200:
+      await sleepOrWake(waitTime)
+      if uiTimersPending():
+        # A key's light to put out, a held key to type again: on time.
+        waitTime = min(waitTime, 20)
+      elif waitTime < 200:
         waitTime += 5
 
 proc createRunnerThread*(args: (FrameConfig, Logger, Option[SceneId])) =

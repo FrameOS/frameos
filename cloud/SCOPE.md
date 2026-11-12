@@ -10,13 +10,14 @@ authorization (`client_kind` "backend"/"frame"), revocation/self-unlink/
 inventory/grants/token rotation, the `auth:login` login handoff, config
 backups (`/api/backends/backups`, 8 MB per blob / 500 per account), the
 scene store, the cloud-managed frames control plane + `apps/frame-hub`
-(design: `docs/cloud-frames.md`), optional 2FA plus re-authentication for
+(design: `docs/cloud-frames.md`), virtual frames (no hardware: the hub
+renders them, a paid-plan entitlement), optional 2FA plus re-authentication for
 sensitive actions and the audit trail (`docs/auth.md`), Postgres-backed rate
 limiting (`rate_limit_buckets`), hand-written SQL migrations, cross-repo
 E2E (`scripts/e2e-frameos.sh`), and the accounting module — a double-entry
 ledger in `packages/ledger`, AI metering (shadow mode), the per-account AI
-switch and daily cap, plans and subscriptions with self-serve purchase
-behind `FRAMEOS_CLOUD_PLANS_SELF_SERVE`, and `/admin/billing`
+switch and daily cap, plans and subscriptions, paid plans sold through
+Stripe (`docs/billing.md`), and `/admin/billing`
 (`docs/accounting-todo.md`, which also holds the billing todo).
 
 Keep out until there is a concrete product design (scope names for these
@@ -25,8 +26,6 @@ endpoints exist):
 
 - Cloud organizations, projects, memberships, and invitations.
 - Hosted backend lifecycle.
-- A payment provider integration: parked until there are users to invoice
-  (2026-09-03), then `docs/accounting-todo.md` §8.15 (legal entity, VAT)
-  and §8.7 (provider — Stripe or a merchant-of-record) get answered first;
-  storage and asset backup billing (config backups have fixed caps only).
+- Charging for metered AI usage, and storage and asset backup billing
+  (config backups have fixed caps only).
 - Placeholder service packages or UI packages.

@@ -58,8 +58,9 @@ export function BetaCopy() {
       </p>
       <ul>
         <li>
-          <strong>It is free while in beta.</strong> Limits (frames, storage,
-          logs) exist so one account cannot crowd out the rest; they may change.
+          <strong>The Free plan costs nothing.</strong> Limits (frames,
+          storage, logs) exist so one account cannot crowd out the rest, and a
+          paid plan raises them.
         </li>
         <li>
           <strong>Your data stays yours.</strong> Scenes, backups and frame

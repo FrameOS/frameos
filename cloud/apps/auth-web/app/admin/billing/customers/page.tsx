@@ -8,10 +8,11 @@ import {
   listPlans,
   readAccountPlan,
 } from "@frameos-cloud/ledger";
-import { desc, eq, isNotNull } from "drizzle-orm";
+import { desc, eq, isNotNull, sql } from "drizzle-orm";
 import { AdminNav } from "../../../../src/components/AdminNav";
 import { AppShell } from "../../../../src/components/AppShell";
 import { BillingNav } from "../../../../src/components/BillingNav";
+import { BillingPlanSyncButton } from "../../../../src/components/BillingPlanSyncButton";
 import { SortableTable } from "../../../../src/components/SortableTable";
 import {
   CustomerAiSwitch,
@@ -51,8 +52,23 @@ export default async function AdminBillingCustomersPage({ searchParams }: PagePr
   await requireSuperadmin("/admin/billing/customers");
   const params = searchParams ? await searchParams : {};
   const raw = Array.isArray(params.account) ? params.account[0] : params.account;
-  const accountId = isAccountUuid(raw?.trim()) ? raw!.trim().toLowerCase() : null;
   const db = createDb();
+  // A uuid, or the email an account signs in with: a fresh account (App
+  // Review's demo, a partner) has no books yet to be listed below.
+  const wanted = raw?.trim() ?? "";
+  // (The guard runs on its own expression: on `wanted` it would narrow the
+  // email branch to never.)
+  const accountId = isAccountUuid(raw?.trim())
+    ? wanted.toLowerCase()
+    : wanted.includes("@")
+      ? ((
+          await db
+            .select({ id: accounts.id })
+            .from(accounts)
+            .where(eq(sql`lower(${accounts.primaryEmail})`, wanted.toLowerCase()))
+            .limit(1)
+        )[0]?.id ?? null)
+      : null;
 
   // Everyone with books, so the page is usable without knowing a uuid.
   const known = await db
@@ -104,11 +120,11 @@ export default async function AdminBillingCustomersPage({ searchParams }: PagePr
       <section className="section-block">
         <form action="/admin/billing/customers" className="inline-actions" method="get">
           <input
-            aria-label="Account uuid"
+            aria-label="Account uuid or email"
             className="input"
-            defaultValue={accountId ?? ""}
+            defaultValue={accountId ?? wanted}
             name="account"
-            placeholder="Account uuid"
+            placeholder="Account uuid or email"
           />
           <button className="button" type="submit">
             Show
@@ -129,6 +145,9 @@ export default async function AdminBillingCustomersPage({ searchParams }: PagePr
               );
             })}
           </p>
+        ) : null}
+        {wanted && !accountId ? (
+          <p className="copy error">No account has the uuid or email {wanted}.</p>
         ) : null}
       </section>
 
@@ -201,6 +220,7 @@ export default async function AdminBillingCustomersPage({ searchParams }: PagePr
               <p className="section-description">
                 On the <strong>{plan?.plan.name ?? "Free"}</strong> plan
                 {plan?.subscribed ? "" : " (no subscription row — the default)"}
+                {plan?.granted ? ", given for free" : ""}
                 {plan?.nextPlanCode ? `, moving to ${plan.nextPlanCode} at the rollover` : ""}
                 {plan?.cancelAt ? `, ends ${formatDateTime(plan.cancelAt)}` : ""}.
                 Both actions below are audited with the reason given;{" "}
@@ -211,6 +231,13 @@ export default async function AdminBillingCustomersPage({ searchParams }: PagePr
               </p>
               <section className="card">
                 <h3>Plan</h3>
+                <p className="copy">
+                  The paid stops of the catalog need their rows here before an
+                  account can be moved onto one; Sync plans writes them.
+                </p>
+                <div className="filter-bar">
+                  <BillingPlanSyncButton />
+                </div>
                 <CustomerPlanForm
                   accountId={accountId}
                   currentCode={plan?.plan.code ?? "payg"}

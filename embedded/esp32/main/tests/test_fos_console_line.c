@@ -72,6 +72,12 @@ static void test_plain_lines(void)
     /* CR ends a line too; CRLF gives the command and then an empty line. */
     r = feed(&line, "render\r\n");
     CHECK(strcmp(r.lines, "render") == 0 && r.ready == 2, "got \"%s\" (%d lines)", r.lines, r.ready);
+
+    /* `cr` says a line ended on CR, so a payload command knows its LF may
+     * still be on the wire (fos_console.c usb_api_ready); an LF ending clears it. */
+    CHECK(fos_console_line_feed(&line, 'x') == FOS_CONSOLE_LINE_NONE, "x is no line");
+    CHECK(fos_console_line_feed(&line, '\r') == FOS_CONSOLE_LINE_READY && line.cr, "CR ended it");
+    CHECK(fos_console_line_feed(&line, '\n') == FOS_CONSOLE_LINE_READY && !line.cr, "LF ended the next");
 }
 
 static void test_backspace(void)

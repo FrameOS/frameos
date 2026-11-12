@@ -166,6 +166,26 @@ export function cloudFrameSupportsRenderScale(frameosVersion: string | null | un
   return cloudFrameSupportsSettingsFrom(renderScaleCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/** Firmware from here on takes `frame_settings_on_screen`. */
+export const frameSettingsOnScreenCloudFrameSettingsMinVersion = '2026.11.5'
+
+/**
+ * `frame_settings_on_screen` (frame.json `frameSettingsOnScreen`): whether the
+ * settings on the frame's own screen offer the frame page behind the gear
+ * (docs/scene-settings.md "The frame page"). Both profiles learned it in the
+ * same release. Callers gate on cloudFrameSupportsFrameSettingsOnScreen.
+ */
+export const frameSettingsOnScreenCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(
+  frameSettingsOnScreenCloudFrameSettingsMinVersion
+).filter((key) => key === 'frame_settings_on_screen')
+export const esp32FrameSettingsOnScreenCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
+  frameSettingsOnScreenCloudFrameSettingsMinVersion
+).filter((key) => key === 'frame_settings_on_screen')
+
+export function cloudFrameSupportsFrameSettingsOnScreen(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(frameSettingsOnScreenCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 /**
  * The events a rule may `emit`: the contract's, those the `eventMap` origin
  * is allowed to say (docs/events-contract.json `origins`), the same list the
@@ -261,6 +281,30 @@ export const esp32BuzzerCloudFrameSettingsMinVersion = '2026.10.12'
 export const esp32BuzzerCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
   esp32BuzzerCloudFrameSettingsMinVersion
 )
+
+/** 2026.11.7: the chip's clock (`cpu_mode`), read at boot. */
+export const esp32CpuModeCloudFrameSettingsMinVersion = '2026.11.7'
+
+export function cloudFrameSupportsEsp32CpuMode(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32CpuModeCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+/**
+ * 2026.11.7: where the scenes run (`render_mode`, docs/server-rendering.md).
+ * Applied live; `remote` counts against the plan's cloud-rendered frames.
+ */
+export const esp32RenderModeCloudFrameSettingsMinVersion = '2026.11.7'
+
+export function cloudFrameSupportsEsp32RenderMode(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32RenderModeCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+/** 2026.11.6: the click of a press on the glass (`touch_beep`). */
+export const esp32TouchBeepCloudFrameSettingsMinVersion = '2026.11.6'
+
+export function cloudFrameSupportsEsp32TouchBeep(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32TouchBeepCloudFrameSettingsMinVersion, frameosVersion)
+}
 
 export function cloudFrameSupportsEsp32Buzzer(frameosVersion: string | null | undefined): boolean {
   return cloudFrameSupportsSettingsFrom(esp32BuzzerCloudFrameSettingsMinVersion, frameosVersion)
@@ -393,6 +437,8 @@ export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.f
     ...esp32EventMapCloudFrameSettingKeys,
     ...renderScaleCloudFrameSettingKeys,
     ...esp32RenderScaleCloudFrameSettingKeys,
+    ...frameSettingsOnScreenCloudFrameSettingKeys,
+    ...esp32FrameSettingsOnScreenCloudFrameSettingKeys,
     ...esp32PowerSettingKeys,
   ])
 )
@@ -493,11 +539,13 @@ export const numericCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = [
   'interval',
   'rotate',
   'wake_check_seconds',
+  'awake_after_input_seconds',
   'battery_pin',
   'battery_divider',
   'battery_enable_pin',
   'buzzer_pin',
   'buzzer_tone_hz',
+  'touch_beep',
   'mic_clk_pin',
   'mic_data_pin',
   'mic_pwr_pin',

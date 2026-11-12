@@ -42,6 +42,21 @@ void fos_events_init(void);
 fos_event_result_t fos_events_dispatch(fos_event_origin_t origin, const char *name,
                                        const char *payload_json);
 
+/* A frame rendered on its control plane (fos_client_renders_locally false)
+ * runs no scene here: what a scene would have heard from the frame's own
+ * producers (`driver`, `schedule`, `http:write`, `http:admin`) is relayed to
+ * the plane with the next render pull instead (fos_client_relay_event,
+ * docs/server-rendering.md "Keys, touch and the schedule"), and the firmware's
+ * own events (`render`, the device commands) are carried out as always.
+ *
+ * The control plane's own verbs (fos_cloud.c: a cloud verb, or a backend
+ * command, which comes as `http:admin` like the frame's HTTP API) go through
+ * this one instead: in remote mode what they say is the plane's already, so a
+ * scene event only asks for the pull and is never sent back. Otherwise it is
+ * fos_events_dispatch. */
+fos_event_result_t fos_events_dispatch_from_plane(fos_event_origin_t origin, const char *name,
+                                                  const char *payload_json);
+
 /* A scene event kept for the render task. A scene's handlers are JS, and the
  * first event compiles the scene's app: QuickJS's parser needs the render
  * task's 40 KB stack, and run on the 8 KB HTTP task it overflowed into the

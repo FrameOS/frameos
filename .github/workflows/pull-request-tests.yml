@@ -165,10 +165,9 @@ jobs:
       # that the .o came from that .c. One shared directory that overlapping
       # runs copied into and out of paired one build's .c with another's .o
       # (shard 1 linked a stale object on three runs in a row, 2026-10-18), so
-      # tools/ci_nimcache.sh keeps the cache as snapshots written once and
-      # never changed: a save hardlinks what is unchanged and swaps a symlink,
-      # a restore copies the one snapshot it resolved. Both stay best effort:
-      # a warm-cache miss is never worth a red job.
+      # tools/ci_nimcache.sh keeps the cache as one archive per shard, which a
+      # save replaces in one rename and a restore unpacks whole. Both stay best
+      # effort: a warm-cache miss is never worth a red job.
       - name: Restore nimcache
         run: bash frameos/tools/ci_nimcache.sh restore ${{ matrix.shard }}
 
@@ -179,6 +178,15 @@ jobs:
         run: |
           cd frameos
           bash ./tools/run_test_shard.sh ${{ matrix.shard }}
+
+      # pixie's own suite (frameos/pixie, the fork in the tree since 2026-11-07):
+      # its image comparisons are what says a changed fill or stroke still
+      # draws the same pixels. One shard; a few minutes of compiles.
+      - name: pixie tests
+        if: ${{ matrix.shard == 2 }}
+        run: |
+          cd frameos
+          make test-pixie
 
       # Not after a cancel: a gcc killed mid-write leaves a truncated .o newer
       # than its .c, which the next run would link.
@@ -218,6 +226,41 @@ jobs:
             -d:frameosEmbedded \
             --nimcache:/tmp/frameos-esp32-nimcache \
             src/embedded/embedded_main.nim
+
+  esp32-kitchen-sink:
+    # The biggest thing a UI does on an ESP32, in the memory one has: the wasm
+    # build of this commit's runtime, its heap capped to an 8 MB SenseCAP
+    # Indicator's, played through as a person would (a layout, its pages, forty
+    # brush strokes). Emscripten is too slow for the Nim shards.
+    name: Kitchen sink in an ESP32's memory
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: 2.2.4
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build the wasm runtime
+        run: |
+          set -euo pipefail
+          (cd frameos && nimble install -d -y && ./tools/build_wasm.sh --out "$RUNNER_TEMP/frameos-wasm")
+
+      - name: Play the Kitchen sink in 8 MB
+        run: node frameos/tools/esp32_kitchen_sink.mjs "$RUNNER_TEMP/frameos-wasm"
 
   visual-regression:
     name: Visual Regression Tests (${{ matrix.shard }}/2)
@@ -1130,11 +1173,7 @@ jobs:
         run: make -C embedded/pico/tests
 
       - name: Install pico toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi \
-            libstdc++-arm-none-eabi-newlib
+        uses: ./.github/actions/pico-toolchain
 
       - name: Cache pico-sdk
         id: pico-sdk-cache

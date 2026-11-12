@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # stdlib ---------------------------------------------------------------------
 import asyncio
+from dataclasses import dataclass, field as dataclass_field
 import base64
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
@@ -55,7 +56,6 @@ from app.models.frame import (
     Frame,
     compact_timezone_updater,
     get_frame_json,
-    split_server_address,
     new_frame,
     delete_frame,
     normalize_error_behavior,
@@ -99,6 +99,7 @@ from app.schemas.frames import (
 )
 from app.api.auth import get_current_user_from_request
 from app.config import config
+from app.utils.server_address import split_address as split_typed_address
 from app.utils.network import (
     TargetBlocked,
     assert_target_allowed,
@@ -131,6 +132,7 @@ from app.utils.embedded_commands import (
     queue_embedded_command,
 )
 from app.utils.events_contract_gen import CLOUD_EVENT_ROUTE_VERBS, CONTRACT_EVENTS
+from app.utils.scene_layouts import bad_layouts_message
 from app.utils.frame_commands import (
     cancel_frame_command,
     frame_is_asleep,
@@ -539,23 +541,18 @@ def _serialize_datetime(value: Optional[datetime]) -> Optional[str]:
     return value.replace(tzinfo=timezone.utc).isoformat()
 
 
-def _require_valid_device_server_host(server_host: Any, *, split_address: bool) -> None:
+def _require_valid_device_server_host(server_host: Any) -> None:
     """400 unless `server_host` names a host a device may be told to dial —
-    app.utils.network.device_server_host_error. On create and import the
-    value is the typed address ("host", "host:port", "scheme://host:port")
-    that new_frame splits; on update it is the bare host column, stored
-    verbatim as frame.json serverHost, so a port or scheme in it is refused
-    rather than shipped. An empty value ("no backend controls this frame")
-    passes; `localhost` stays allowed here (single-machine development)."""
-    text = str(server_host or "").strip()
-    if not text:
+    app.utils.network.device_server_host_error. The value is the typed
+    address ("host", "host:port", "scheme://host:port"); what it says about
+    the scheme and port goes to `server_scheme` / `server_port`
+    (split_typed_address, docs/server-address-fixtures.json) and only the
+    bare host is checked and stored. An empty value ("no backend controls
+    this frame") passes; `localhost` stays allowed here (single-machine
+    development)."""
+    host = split_typed_address(server_host).host
+    if not host:
         return
-    host = text
-    if split_address:
-        try:
-            host, _port, _scheme = split_server_address(text)
-        except ValueError:
-            host = text
     error = device_server_host_error(host)
     if error:
         raise HTTPException(
@@ -869,6 +866,10 @@ def _validate_upload_scenes_payload(
     if scene_id and scene_id not in scene_ids:
         _bad_request("uploadScenes sceneId must reference one of the uploaded scenes")
 
+    bad_layouts = bad_layouts_message(scenes)
+    if bad_layouts:
+        _bad_request(bad_layouts)
+
     for scene in scenes:
         nodes = scene.get("nodes") or []
         if not isinstance(nodes, list):
@@ -990,7 +991,7 @@ async def _forward_frame_request(
         return _bytes_or_json(cached)
 
     if json_body is None:
-        status, body, headers = await _fetch_frame_http_bytes(
+        status, got_body, got_headers = await _fetch_frame_http_bytes(
             frame,
             redis,
             path=path,
@@ -998,11 +999,11 @@ async def _forward_frame_request(
         )
         if status == 200:
             if cache_key:
-                await redis.set(cache_key, body, ex=cache_ttl)
-            payload = _bytes_or_json(body)
-            if headers.get("content-type", "").startswith("application/json") or not isinstance(payload, bytes):
+                await redis.set(cache_key, got_body, ex=cache_ttl)
+            payload = _bytes_or_json(got_body)
+            if got_headers.get("content-type", "").startswith("application/json") or not isinstance(payload, bytes):
                 return payload
-            return _decode_bytes(body)
+            return _decode_bytes(got_body)
 
         if cache_key and (cached := await redis.get(cache_key)):
             return _bytes_or_json(cached)
@@ -1051,7 +1052,10 @@ async def _forward_frame_request(
 
 
 async def _load_frame_states(redis: Redis, frame: Frame) -> dict[str, Any]:
-    if is_virtual_frame(frame):
+    # A frame rendered here keeps its scene and its states on the backend,
+    # as a virtual frame does (docs/server-rendering.md): its own runtime's
+    # are left from before.
+    if is_virtual_frame(frame) or is_thin_client_frame(frame):
         from .virtual_frame import virtual_frame_states_payload
 
         return _normalise_frame_states_payload(
@@ -1080,7 +1084,7 @@ async def _refresh_frame_states_cache(
         frame = db.get(Frame, frame_id)
         if frame is None:
             return
-        if is_queued_embedded_frame(frame) and frame_is_asleep(frame):
+        if is_queued_embedded_frame(frame) and frame_is_asleep(frame) and not is_thin_client_frame(frame):
             # Asleep by its own forecast: nothing answers, and the cache holds
             # what the frame reported on its last pull (embedded_commands.py).
             completed = True
@@ -1354,7 +1358,9 @@ async def api_frame_get_state(
     id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
 ):
     frame = _project_frame(db, id) or _not_found()
-    if is_virtual_frame(frame):
+    # A virtual frame and a frame the backend renders for answer from the
+    # backend's own store: the board's runtime holds what is left from before.
+    if is_virtual_frame(frame) or is_thin_client_frame(frame):
         from .virtual_frame import virtual_frame_states_payload
 
         payload = await virtual_frame_states_payload(redis, frame)
@@ -1379,9 +1385,10 @@ async def api_frame_get_states(
     redis: Redis = Depends(get_redis),
 ):
     frame = _project_frame(db, id) or _not_found()
-    # Virtual frames answer from the backend's own state store — nothing to
-    # poll, so no cache/background-refresh dance.
-    if is_virtual_frame(frame):
+    # Virtual frames and frames the backend renders for answer from the
+    # backend's own state store — nothing to poll, so no cache/background-
+    # refresh dance.
+    if is_virtual_frame(frame) or is_thin_client_frame(frame):
         state_record = await _load_frame_states(redis, frame)
         return {
             **state_record,
@@ -1454,7 +1461,7 @@ async def api_frame_get_uploaded_scenes(
         path="/getUploadedScenes",
         cache_key=_frame_uploaded_scenes_cache_key(frame.id),
     )
-    if isinstance(payload, dict) and payload.get("sceneId"):
+    if isinstance(payload, dict) and payload.get("sceneId") and not is_thin_client_frame(frame):
         await redis.set(f"frame:{frame.id}:active_scene", payload["sceneId"])
     return payload
 
@@ -1620,6 +1627,17 @@ async def api_frame_event(
         if request.headers.get("content-type") == "application/json"
         else request.body()
     )
+    return await dispatch_frame_event(db, redis, frame, event, body)
+
+
+async def dispatch_frame_event(db: Session, redis: Redis, frame: Frame, event: str, body: Any) -> Any:
+    """Hand a scene event or command to a frame the way its kind takes it: a
+    virtual frame renders it here, a thin client has it stored for its next
+    pull, an ESP32 gets it queued, a Pi is told over its HTTP API. The route
+    above is one caller; the Home Assistant sync (app/ha) is the other, so a
+    switch flipped in Home Assistant goes exactly where the editor's button
+    goes. Raises HTTPException as the route would; needs no request or
+    project context."""
     scenes = None
     if event == "uploadScenes":
         scenes, body = _normalize_upload_scenes_payload(body)
@@ -1739,9 +1757,15 @@ async def api_frame_event(
         and not is_queued_embedded_frame(frame)
     )
     try:
-        await _forward_frame_request(
-            frame, redis, path=f"/event/{event}", method="POST", json_body=body
-        )
+        if thin_push:
+            # What it is asked is a render: the switch, the state, the
+            # previewed scenes and the event stay here, where its scenes run
+            # (docs/server-rendering.md "Nothing to keep on the board").
+            await _forward_frame_request(frame, redis, path="/event/render", method="POST", json_body={})
+        else:
+            await _forward_frame_request(
+                frame, redis, path=f"/event/{event}", method="POST", json_body=body
+            )
         if event in {"setCurrentScene", "setSceneState", "uploadScenes"}:
             scene_id = body.get("sceneId") if isinstance(body, dict) else None
             await _mark_frame_states_cache_stale(
@@ -1754,11 +1778,11 @@ async def api_frame_event(
         detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
         if thin_push:
             await log(
-                db, redis, id, "stdinfo",
+                db, redis, int(frame.id), "stdinfo",
                 f"The frame did not answer {event} ({detail}); it shows the change on its next render",
             )
             return {"status": "queued", "applied": False, "command": None}
-        await log(db, redis, id, "stderr", f"Error on frame event {event}: {detail}")
+        await log(db, redis, int(frame.id), "stderr", f"Error on frame event {event}: {detail}")
         raise exc
 
 
@@ -2761,7 +2785,12 @@ async def api_embedded_device_image(
     except Exception as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=f"Not an image: {exc}")
 
-    if scene_id:
+    if is_thin_client_frame(frame):
+        # A frame the backend renders for: the scene it names is its idle
+        # runtime's, left from before; the picture is the backend's last
+        # pull, and so is its scene (docs/server-rendering.md).
+        scene_id = await _active_scene_id_from_cache(redis, frame.id) or None
+    elif scene_id:
         # The frame says which scene drew this image, as on a pull.
         await redis.set(f"frame:{frame.id}:active_scene", scene_id)
     await redis.set(_frame_image_pushed_key(frame.id), b"1", ex=FRAME_IMAGE_PUSHED_TTL_SECONDS)
@@ -2785,38 +2814,12 @@ async def api_frame_get_image(
     )
 
     cache_key = _frame_image_cache_key(frame.id)
-    path = "/image"
 
     # Virtual frames have no device to fetch from: render server-side (the
     # same wasm path their public URLs use) instead of proxying to a
     # nonexistent host.
     if is_virtual_frame(frame):
-        # Serve the cached image; render only when there is none. Rendering
-        # on every poll made the preview flash "rendering" continuously —
-        # fresh frames come from deploy/activate/render events, which
-        # publish straight into this cache.
-        cached = await _get_cached_frame_image(redis, cache_key)
-        if cached is None:
-            from .virtual_frame import render_virtual_frame_png
-
-            try:
-                cached = await render_virtual_frame_png(db, redis, frame)
-            except RenderQueueFull as exc:
-                raise HTTPException(
-                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                    detail="Render queue is full, retry later",
-                    headers={"Retry-After": str(exc.retry_after)},
-                )
-            active_scene = await _active_scene_id_from_cache(redis, frame.id)
-            await _store_frame_image(
-                db, redis, frame, cached,
-                scene_id=active_scene or None, publish_rendered=False,
-            )
-        return Response(
-            content=cached,
-            media_type="image/png",
-            headers=await read_frame_sync_hint_headers(redis, frame.id),
-        )
+        return await _frame_image_response(frame, await current_frame_image(db, redis, frame))
 
     if request.method == "HEAD":
         headers = await read_frame_sync_hint_headers(redis, frame.id)
@@ -2842,34 +2845,91 @@ async def api_frame_get_image(
         else:
             return await _frame_image_placeholder_response(frame)
 
+    return await _frame_image_response(frame, await current_frame_image(db, redis, frame))
+
+
+async def _frame_image_response(frame: Frame, result: "FrameImageResult") -> Response:
+    if result.image is not None:
+        return Response(content=result.image, media_type="image/png", headers=result.headers)
+    if result.retry_after is not None:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=result.error,
+            headers={"Retry-After": str(result.retry_after)},
+        )
+    if result.error is not None:
+        return await _frame_image_error_response(frame, result.error, result.error_status)
+    return await _frame_image_placeholder_response(frame)
+
+
+@dataclass
+class FrameImageResult:
+    """What a frame's panel shows, as `current_frame_image` found it.
+
+    `image` is the picture (fresh from the device, or the cache when the
+    device could not be asked); `headers` the sync hint headers a response
+    carries. Without an image, `error` says why the pull failed (already
+    logged on the frame), `error_status` with what status, `retry_after`
+    that a virtual frame's render queue was full; all None means there is
+    nothing to show yet, not even a cache."""
+
+    image: bytes | None = None
+    headers: dict[str, str] = dataclass_field(default_factory=dict)
+    error: str | None = None
+    error_status: int | None = None
+    retry_after: int | None = None
+
+
+async def current_frame_image(db: Session, redis: Redis, frame: Frame) -> FrameImageResult:
+    """The image the frame's panel shows right now, without touching the
+    scene: what `GET …/image` serves and what Home Assistant's "Refresh
+    image" publishes. A virtual frame is rendered when nothing is cached, a
+    frame that pushes its image answers from the cache, and any other is
+    asked for `/image` (one pull at a time per frame across workers; a
+    caller that finds one running waits for its result). What is fetched is
+    stored as the frame's image, so every reader of the cache sees it."""
+    cache_key = _frame_image_cache_key(frame.id)
+
+    if is_virtual_frame(frame):
+        # Serve the cached image; render only when there is none. Rendering
+        # on every poll made the preview flash "rendering" continuously —
+        # fresh frames come from deploy/activate/render events, which
+        # publish straight into this cache.
+        cached = await _get_cached_frame_image(redis, cache_key)
+        if cached is None:
+            from .virtual_frame import render_virtual_frame_png
+
+            try:
+                cached = await render_virtual_frame_png(db, redis, frame)
+            except RenderQueueFull as exc:
+                return FrameImageResult(error="Render queue is full, retry later", retry_after=exc.retry_after)
+            active_scene = await _active_scene_id_from_cache(redis, frame.id)
+            await _store_frame_image(
+                db, redis, frame, cached,
+                scene_id=active_scene or None, publish_rendered=False,
+            )
+        return FrameImageResult(image=cached, headers=await read_frame_sync_hint_headers(redis, frame.id))
+
     # A frame that pushes its image has already put what the panel shows in
     # the cache. Pulling would only fail: it sleeps between renders, and has
     # no mDNS name to be found by.
     if await redis.get(_frame_image_pushed_key(frame.id)):
         pushed = await _get_cached_frame_image(redis, cache_key)
         if pushed:
-            return Response(
-                content=pushed,
-                media_type="image/png",
-                headers=await read_frame_sync_hint_headers(redis, frame.id),
-            )
+            return FrameImageResult(image=pushed, headers=await read_frame_sync_hint_headers(redis, frame.id))
 
-    frame_image_lock = _get_frame_image_lock(id)
+    frame_image_lock = _get_frame_image_lock(frame.id)
     waited_for_lock = frame_image_lock.locked()
     if waited_for_lock:
         cached = await _wait_for_cached_frame_image(redis, cache_key)
         if cached:
-            return Response(
-                content=cached,
-                media_type="image/png",
-                headers=await read_frame_sync_hint_headers(redis, frame.id),
-            )
-        return await _frame_image_placeholder_response(frame)
+            return FrameImageResult(image=cached, headers=await read_frame_sync_hint_headers(redis, frame.id))
+        return FrameImageResult()
 
     async with frame_image_lock:
         cached = await _get_cached_frame_image(redis, cache_key)
-        refresh_lock_key = _frame_image_refresh_lock_key(id)
-        refresh_lock_token = f"{config.INSTANCE_ID}:{time.time()}:{id}"
+        refresh_lock_key = _frame_image_refresh_lock_key(frame.id)
+        refresh_lock_token = f"{config.INSTANCE_ID}:{time.time()}:{frame.id}"
         refresh_lock_acquired = await redis.set(
             refresh_lock_key,
             refresh_lock_token,
@@ -2879,84 +2939,53 @@ async def api_frame_get_image(
         if not refresh_lock_acquired:
             cached = await _wait_for_cached_frame_image(redis, cache_key)
             if cached:
-                return Response(
-                    content=cached,
-                    media_type="image/png",
-                    headers=await read_frame_sync_hint_headers(redis, frame.id),
-                )
-            return await _frame_image_placeholder_response(frame)
+                return FrameImageResult(image=cached, headers=await read_frame_sync_hint_headers(redis, frame.id))
+            return FrameImageResult()
 
         async def log_fetch_error(detail: str) -> None:
             # A frame that was never deployed has no image to fetch yet, so
             # the failure is expected and stays out of its log.
             if frame.status == "uninitialized" and not frame.last_successful_deploy:
                 return
-            await log(db, redis, id, "stderr", f"Error fetching image from frame {id}: {detail}")
+            await log(db, redis, frame.id, "stderr", f"Error fetching image from frame {frame.id}: {detail}")
+
+        async def cached_or_error(logged: str, shown: str, status: int) -> FrameImageResult:
+            """The cache when there is one; else the failure, logged on the
+            frame as `logged` and returned as `shown`."""
+            if cached:
+                return FrameImageResult(image=cached, headers=await read_frame_sync_hint_headers(redis, frame.id))
+            await log_fetch_error(logged)
+            return FrameImageResult(error=shown, error_status=status)
 
         # Use shared semaphore and client
-        status = 0
-        body = b""
         try:
-            status, body, headers = await _fetch_frame_http_bytes(
-                frame, redis, path=path
+            status, body, headers = await _fetch_frame_http_bytes(frame, redis, path="/image")
+            if status != 200:
+                return await cached_or_error(f"{status} {body.decode(errors='ignore')}", "Unable to fetch image", status)
+
+            body = await asyncio.get_running_loop().run_in_executor(
+                None, _coerce_frame_image_to_png, body, headers
             )
-
-            if status == 200:
-                body = await asyncio.get_running_loop().run_in_executor(
-                    None, _coerce_frame_image_to_png, body, headers
-                )
-                scene_id = headers.get("x-scene-id")
-                if scene_id:
-                    # The frame says which scene drew this image.
-                    await redis.set(f"frame:{id}:active_scene", scene_id)
-                else:
-                    scene_id = await _active_scene_id_from_cache(redis, id) or None
-                await _store_frame_image(db, redis, frame, body, scene_id=scene_id, publish_rendered=False)
-                response_headers = await store_frame_sync_hint_headers(redis, frame.id, headers)
-
-                return Response(content=body, media_type="image/png", headers=response_headers)
+            scene_id = headers.get("x-scene-id")
+            if scene_id and not is_thin_client_frame(frame):
+                # The frame says which scene drew this image (one the backend
+                # renders for names its idle runtime's: the backend decides).
+                await redis.set(f"frame:{frame.id}:active_scene", scene_id)
             else:
-                if cached:
-                    return Response(
-                        content=cached,
-                        media_type="image/png",
-                        headers=await read_frame_sync_hint_headers(redis, frame.id),
-                    )
-                await log_fetch_error(f"{status} {body.decode(errors='ignore')}")
-                return await _frame_image_error_response(frame, "Unable to fetch image", status)
-
+                scene_id = await _active_scene_id_from_cache(redis, frame.id) or None
+            await _store_frame_image(db, redis, frame, body, scene_id=scene_id, publish_rendered=False)
+            response_headers = await store_frame_sync_hint_headers(redis, frame.id, headers)
+            return FrameImageResult(image=body, headers=response_headers)
         except httpx.ReadTimeout:
-            if cached:
-                return Response(
-                    content=cached,
-                    media_type="image/png",
-                    headers=await read_frame_sync_hint_headers(redis, frame.id),
-                )
-            await log_fetch_error("request timeout")
-            return await _frame_image_error_response(frame, "Request Timeout", HTTPStatus.REQUEST_TIMEOUT)
+            return await cached_or_error("request timeout", "Request Timeout", HTTPStatus.REQUEST_TIMEOUT)
         except HTTPException as exc:
-            if cached:
-                return Response(
-                    content=cached,
-                    media_type="image/png",
-                    headers=await read_frame_sync_hint_headers(redis, frame.id),
-                )
-            await log_fetch_error(f"{exc.status_code}: {exc.detail}")
-            return await _frame_image_error_response(frame, str(exc.detail), exc.status_code)
+            return await cached_or_error(f"{exc.status_code}: {exc.detail}", str(exc.detail), exc.status_code)
         except Exception as e:
-            if cached:
-                return Response(
-                    content=cached,
-                    media_type="image/png",
-                    headers=await read_frame_sync_hint_headers(redis, frame.id),
-                )
-            await log_fetch_error(str(e))
-            return await _frame_image_error_response(frame, str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
+            return await cached_or_error(str(e), str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
         finally:
             if refresh_lock_acquired:
                 with contextlib.suppress(Exception):
                     await _release_frame_image_refresh_lock(redis, refresh_lock_key, refresh_lock_token)
-
 
 # A frame's screenshot: a full-size PNG of a large panel is a few MB; the
 # body used to be read unbounded.
@@ -4679,6 +4708,9 @@ async def api_frame_update_endpoint(
             raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
     # Templates, imports and chat-built scenes arrive without an execution
     # mode; stamp it here so nothing downstream has to guess.
+    bad_layouts = bad_layouts_message(update_data.get("scenes"))
+    if bad_layouts:
+        _bad_request(bad_layouts)
     normalize_scenes_execution(update_data.get("scenes"))
     # An editor tab or a saved draft from before the upgrade still holds the
     # retired Nim keyword (data/immich); store it as the JS app it became.
@@ -4688,16 +4720,23 @@ async def api_frame_update_endpoint(
 
     if "server_host" in update_data:
         # Handed to the device as frame.json serverHost on the next deploy or
-        # sync; an empty value is the documented "no backend" state.
-        server_host_text = str(update_data["server_host"] or "").strip()
-        update_data["server_host"] = server_host_text
-        if server_host_text:
-            _require_valid_device_server_host(server_host_text, split_address=False)
+        # sync, so only the bare host is stored: a scheme or port typed into
+        # the field ("https://host:8443") moves to its own column and wins
+        # over the form's sibling fields. An empty value is the documented
+        # "no backend" state.
+        _require_valid_device_server_host(update_data["server_host"])
+        typed = split_typed_address(update_data["server_host"])
+        update_data["server_host"] = typed.host
+        if typed.port is not None:
+            update_data["server_port"] = typed.port
+        if typed.said_scheme:
+            update_data["server_scheme"] = typed.scheme
 
     old_mode = frame.mode
     old_device = frame.device
     previous_sd_image = (frame.buildroot or {}).get("sdImage") if isinstance(frame.buildroot, dict) else None
     previous_embedded_boot = (frame.embedded or {}).get("lastBoot") if isinstance(frame.embedded, dict) else None
+    previous_embedded_storage = (frame.embedded or {}).get("storage") if isinstance(frame.embedded, dict) else None
     previous_agent = frame.agent
     for field, value in update_data.items():
         setattr(frame, field, value)
@@ -4729,6 +4768,11 @@ async def api_frame_update_endpoint(
             embedded["lastBoot"] = previous_embedded_boot
         else:
             embedded.pop("lastBoot", None)
+        # And embedded.storage, what the board said its state partition holds.
+        if previous_embedded_storage is not None:
+            embedded["storage"] = previous_embedded_storage
+        else:
+            embedded.pop("storage", None)
         frame.embedded = embedded
 
     if "timezone" in update_data:
@@ -4836,7 +4880,7 @@ async def api_frame_new(
                 data.network.get("wifiPassword"), (settings.get("defaults") or {}).get("wifiPassword")
             ),
         }
-    _require_valid_device_server_host(data.server_host, split_address=True)
+    _require_valid_device_server_host(data.server_host)
     try:
         if data.mode == "buildroot":
             normalize_buildroot_platform(data.platform)
@@ -4853,6 +4897,8 @@ async def api_frame_new(
             data.device,
             data.interval,
             project_id=project_id,
+            server_port=data.server_port,
+            server_scheme=data.server_scheme,
         )
         if data.device_config is not None:
             frame.device_config = dict(data.device_config)
@@ -5025,7 +5071,7 @@ async def api_frame_import(
     except ValidationError as exc:
         raise RequestValidationError(exc.errors())
 
-    _require_valid_device_server_host(data.get("server_host"), split_address=True)
+    _require_valid_device_server_host(data.get("server_host"))
     try:
         frame = await new_frame(
             db,
@@ -5036,6 +5082,8 @@ async def api_frame_import(
             data.get("device"),
             data.get("interval"),
             project_id=current_project_id(),
+            server_port=data.get("server_port"),
+            server_scheme=data.get("server_scheme"),
         )
 
         for key, value in importable.items():

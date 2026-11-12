@@ -6,11 +6,14 @@ export function AuthCard({
   eyebrow,
   title,
   copy,
+  inApp = false,
 }: Readonly<{
   children: React.ReactNode;
   eyebrow: string;
   title: string;
   copy?: string;
+  /** Shown in the iOS app's sign-in sheet: no price list (LegalFooter). */
+  inApp?: boolean;
 }>) {
   return (
     <main className="page center-page">
@@ -30,7 +33,7 @@ export function AuthCard({
           {children}
         </div>
       </section>
-      <LegalFooter />
+      <LegalFooter hidePricing={inApp} />
     </main>
   );
 }

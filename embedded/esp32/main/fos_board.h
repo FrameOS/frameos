@@ -2,6 +2,7 @@
 #define FOS_BOARD_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 /* What chip and board this firmware is actually running on.
  *
@@ -45,7 +46,7 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset);
  * stored-config default when NVS has no `event_map` key. Keep in step with
  * `eventMap` in EMBEDDED_HARDWARE_PRESETS (backend/app/tasks/embedded_firmware.py)
  * and the SPA's preset table. */
-const char *fos_board_event_map(const char *hardware_preset);
+void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len);
 
 /* The board's PDM microphone for a hardware preset key: clock, data and the
  * power-enable GPIO (-1 each when the preset names a board without one, or no
@@ -72,6 +73,13 @@ bool fos_board_led(const char *hardware_preset, int *pin, int *type);
  * SY6974B charger on 39/40; the E1003 and E1004 have all three on 19/20
  * (the E1004's 39/40 is the J2 header). fos_i2c.c probes what is there. */
 const char *fos_board_i2c_buses(const char *hardware_preset);
+
+/* Which real-time clock answers at I2C 0x51 on the board: "pcf85063" on the
+ * Waveshare PhotoPainter, "pcf8563" for every other preset and for no preset
+ * at all (the reTerminal E-series and Sticky, a custom `i2c_buses` board).
+ * The two share the address but not the register map (fos_rtc.c), and
+ * nothing either chip answers tells them apart without writing to it. */
+const char *fos_board_rtc_chip(const char *hardware_preset);
 
 /* The board's TF socket as the `assets_sd_pins` spec, "" for a board with no
  * usable one. The reTerminal E-series share the panel's SPI bus (SCK7/MOSI9)
