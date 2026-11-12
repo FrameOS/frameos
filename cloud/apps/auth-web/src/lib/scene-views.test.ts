@@ -5,7 +5,7 @@ import {
   sceneEditorHashFor,
   sceneEditorPanelsForHash,
   type SceneEditorPanels,
-} from "./scene-views";
+} from "../../../../../frontend/src/sceneWorkspace/lib/scene-views";
 
 function panels(open: Partial<SceneEditorPanels>): SceneEditorPanels {
   return { ai: false, editor: false, preview: false, ...open };

@@ -21,11 +21,7 @@ import {
 } from '@heroicons/react/24/outline'
 
 import { DropdownMenu } from '../../components/DropdownMenu'
-import { Modal } from '../../components/Modal'
 import { Spinner } from '../../components/Spinner'
-import { Switch } from '../../components/Switch'
-import { TextArea } from '../../components/TextArea'
-import { TextInput } from '../../components/TextInput'
 import type { RepositoryType, TemplateType } from '../../types'
 import { urls } from '../../urls'
 import { isCloudMode } from '../../utils/cloudMode'
@@ -680,88 +676,15 @@ function DriveSceneMenu({
   )
 }
 
-// A local saved scene's name and description.
-function EditLocalSceneModal(): JSX.Element | null {
-  const { editTemplateForm, savingTemplate, editTemplateError } = useValues(scenesLibraryLogic)
-  const { closeEditTemplate, setEditTemplateValues, saveEditTemplate } = useActions(scenesLibraryLogic)
-  if (!editTemplateForm) {
-    return null
-  }
-  const canSave = editTemplateForm.name.trim().length > 0 && !savingTemplate
-  return (
-    <Modal open onClose={closeEditTemplate} title="Edit scene">
-      <form
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (canSave) {
-            saveEditTemplate()
-          }
-        }}
-        className="space-y-4 p-5"
-      >
-        <label className="block">
-          <span className="frameos-muted mb-2 block text-sm font-semibold">Name</span>
-          <TextInput
-            autoFocus
-            value={editTemplateForm.name}
-            onChange={(name: string) => setEditTemplateValues({ name })}
-          />
-        </label>
-        <label className="block">
-          <span className="frameos-muted mb-2 block text-sm font-semibold">Description</span>
-          <TextArea
-            rows={4}
-            value={editTemplateForm.description}
-            onChange={(description: string) => setEditTemplateValues({ description })}
-          />
-        </label>
-        {editTemplateForm.hasScenes ? (
-          <div>
-            <Switch
-              label="Use as layout"
-              value={editTemplateForm.isLayout}
-              disabled={!editTemplateForm.isLayout && !!editTemplateForm.layoutProblem}
-              onChange={(isLayout: boolean) => setEditTemplateValues({ isLayout })}
-            />
-            <p className="frameos-muted mt-1 text-xs">
-              {editTemplateForm.layoutProblem ??
-                'A layout wraps other scenes, a clock bar above them for example. Off, it is a normal scene.'}
-            </p>
-          </div>
-        ) : null}
-        {editTemplateError ? <p className="text-sm text-red-600">{editTemplateError}</p> : null}
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={closeEditTemplate}
-            className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={!canSave}
-            className="frameos-primary-action flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {savingTemplate ? <Spinner className="h-4 w-4" color="white" /> : null}
-            Save
-          </button>
-        </div>
-      </form>
-    </Modal>
-  )
-}
-
 function LocalScenesPage(): JSX.Element {
   const { localPageTemplates, templates, templatesLoading, search } = useValues(scenesLibraryLogic)
-  const { exportTemplate, removeTemplate, openEditTemplate } = useActions(scenesLibraryLogic)
+  const { exportTemplate, removeTemplate } = useActions(scenesLibraryLogic)
   return (
     <>
       <PageHeader
         title={scenesLibraryPageLabel('local')}
-        description="Scenes saved on this backend. Install one on a frame, or download it as a zip."
+        description="Scenes saved on this backend. Edit one, install it on a frame, or download it as a zip."
       />
-      <EditLocalSceneModal />
       <div className="space-y-8">
         <StoreActionCards />
         {templatesLoading && templates.length === 0 ? (
@@ -782,9 +705,17 @@ function LocalScenesPage(): JSX.Element {
                 key={template.id ?? template.name}
                 template={template}
                 showAuthor={false}
+                appHref={template.id ? urls.localScene(template.id) : undefined}
                 actions={
                   template.id ? (
                     <>
+                      <A
+                        href={urls.localScene(template.id)}
+                        className="frameos-form-control inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-xs font-semibold transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                      >
+                        <PencilSquareIcon className="h-3.5 w-3.5" />
+                        Edit
+                      </A>
                       <InstallButton template={template} repository={null} />
                       <DropdownMenu
                         buttonTitle="More"
@@ -792,11 +723,6 @@ function LocalScenesPage(): JSX.Element {
                         buttonColor="none"
                         className={moreMenuClassName}
                         items={[
-                          {
-                            label: 'Edit',
-                            icon: <PencilSquareIcon className="h-4 w-4" />,
-                            onClick: () => openEditTemplate(template),
-                          },
                           {
                             label: 'Download .zip',
                             icon: <ArrowDownTrayIcon className="h-4 w-4" />,

@@ -26,9 +26,28 @@ export interface FrameOSEditorOptions {
    * one); shown in the editor's Scene settings panel.
    */
   description?: string
+  /**
+   * The template's listing, the file tree's template.json. With one the
+   * editor opens on template.json and edits it; without, it is read only.
+   */
+  template?: FrameOSEditorTemplate
+  /** The template.json fields the host keeps; the form edits those alone
+   * (default: all but `name`). */
+  templateFields?: ('name' | 'description' | 'category' | 'frameosVersion' | 'tags')[]
   /** Fires (debounced) after every edit with the full scenes array. */
   onScenesChanged?: (scenes: Record<string, unknown>[]) => void
+  /** Fires after every edit to template.json, with the whole template. */
+  onTemplateChanged?: (template: FrameOSEditorTemplate) => void
   onReady?: () => void
+}
+
+export interface FrameOSEditorTemplate {
+  name: string
+  description: string | null
+  category: string | null
+  tags: string[]
+  /** The oldest FrameOS that runs the template's scenes (e.g. "2026.11.3"). */
+  frameosVersion: string | null
 }
 
 export interface FrameOSEditorHandle {

@@ -202,22 +202,20 @@ const cloudVisualCases: CloudVisualCase[] = [
   {
     id: 'workspace-save-to-private-cloud',
     title: 'Save to cloud (private) modal',
-    path: '/scenes/1/scene-dashboard',
+    // The scene's "…" menu on the frame page (the scene editor has none).
+    path: '/frames/1',
     viewports: ['full'],
     variants: [
       {
         id: 'modal',
         mock: (page) => mockCloudStoreApi(page),
         prepare: async (page) => {
-          const sceneRow = page
-            .locator('div.group')
-            .filter({ has: page.getByRole('button', { name: /Dashboard/ }) })
-            .first()
-          await sceneRow.scrollIntoViewIfNeeded()
-          await sceneRow.hover()
-          // The scene dropdown trigger is the row's only other button; its
-          // ellipsis icon carries no accessible name.
-          await sceneRow.locator('button').last().click()
+          const sceneTile = page.locator('[data-workspace-scene-tile="scene-dashboard"]').first()
+          await sceneTile.scrollIntoViewIfNeeded()
+          await sceneTile.hover()
+          // The tile's last button is its dropdown trigger; its ellipsis icon
+          // carries no accessible name.
+          await sceneTile.locator('button').last().click()
           await page.getByRole('menuitem', { name: 'Save to cloud (private)' }).click()
           await page.getByRole('heading', { name: 'Save to cloud (private)' }).first().waitFor()
           await page.getByText('Visibility').first().waitFor()

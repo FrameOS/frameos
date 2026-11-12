@@ -7,7 +7,7 @@ import {
   isReauthRequired,
   redirectToReauthIfRequired,
   takePendingReauthAction,
-} from "../lib/reauth-client";
+} from "../../../../../frontend/src/sceneWorkspace/lib/reauth-client";
 
 // Confirm (pending → active) or revoke a cloud-managed frame. Revoking cuts
 // the link: the device sees 401 on its next connect and demotes itself to

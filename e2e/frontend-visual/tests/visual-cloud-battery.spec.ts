@@ -16,8 +16,8 @@ import {
  *
  *   - in the /frames fleet list the glyph + number is one invisible button
  *     with a padded hit area (no dead whitespace between the two);
- *   - in the sidebar of /frames/<id> and /frames/<id>/scenes/<sceneId> it is
- *     a bordered control beside the frame selector, the same on both pages;
+ *   - in the sidebar of /frames/<id> it is a bordered control beside the
+ *     frame selector (a scene's page is the scene editor, with no sidebar);
  *   - the frame dashboard's header metric chip opens the popup too;
  *   - clicking anywhere on it opens the popup — never the metrics page —
  *     with the charge, voltage, wake cadence, the two-week history chart
@@ -255,28 +255,6 @@ test.describe('cloud battery indicator @e2e', () => {
       expectNoCloudFrontendErrors(readErrors)
     })
   }
-
-  test('scene page: the same control in the same place', async ({ page }) => {
-    const readErrors = attachFrontendErrorCollector(page)
-    await page.setViewportSize({ width: 1440, height: 1000 })
-    await prepareCloudPage(page, 'light')
-    await serveBatteryWorkspace(page)
-
-    await page.goto(`${CLOUD_ORIGIN}/frames/${BATTERY_FRAME_ID}/scenes/${RUNTIME_SCENE_ID}`, {
-      waitUntil: 'domcontentloaded',
-    })
-    const selector = page.getByTestId('frame-sidebar-selector')
-    await expect(selector).toBeVisible()
-    const button = selector.getByTestId('battery-button')
-    await expect(button).toHaveAttribute('data-battery-variant', 'panel')
-    await expect(button.getByTestId('battery-indicator')).toHaveAttribute('data-battery-percent', latestPercent)
-    await settleForScreenshot(page)
-    await expect(selector).toHaveScreenshot('cloud-battery-scene-sidebar--light.png')
-
-    await openBatteryPopover(page, button)
-    expect(new URL(page.url()).pathname).toBe(`/frames/${BATTERY_FRAME_ID}/scenes/${RUNTIME_SCENE_ID}`)
-    expectNoCloudFrontendErrors(readErrors)
-  })
 
   test('frame dashboard: the header chip opens the popup too', async ({ page }) => {
     const readErrors = attachFrontendErrorCollector(page)

@@ -5,6 +5,9 @@ import { PostHogProvider } from "../src/components/PostHogProvider";
 import { ThemeToggle } from "../src/components/ThemeToggle";
 import { getSessionCookieDomain } from "../src/lib/env";
 import "./globals.css";
+// The scene workspace (editor · AI · preview), shared with a backend's SPA;
+// after globals.css, as its rules were (they override the primitives).
+import "../../../../frontend/src/sceneWorkspace/sceneWorkspace.css";
 
 export const metadata: Metadata = {
   // Pages set their own title (their visible heading, verbatim — no site

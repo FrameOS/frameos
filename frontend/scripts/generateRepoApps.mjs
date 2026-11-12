@@ -108,7 +108,7 @@ async function writeFileAtomic(filePath, contents) {
 // file by file, in a module of their own: the store's live preview holds a
 // scene back until it is started when the scene's own app code reads a key,
 // and an app carrying exactly this code is FrameOS's own, not the scene's
-// (cloud/apps/auth-web/src/lib/preview-settings.ts). The full module above is
+// (frontend/src/sceneWorkspace/lib/preview-settings.ts). The full module above is
 // too big for that page.
 function renderKeyedModule({ configs, sources }) {
   const keyed = Object.fromEntries(

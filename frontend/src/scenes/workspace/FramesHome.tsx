@@ -1647,7 +1647,6 @@ function SceneControlPanelContent({
                 frameId={frame.id}
                 sceneId={sceneId}
                 scene={scene}
-                showEditButton={false}
                 isUndeployed={sceneIsUndeployed}
                 isUnsaved={sceneIsUnsaved}
                 actionsContainer={actionsFooter}

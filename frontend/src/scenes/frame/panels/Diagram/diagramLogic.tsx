@@ -105,14 +105,6 @@ export interface NewNodePicker {
   nodeId: string
 }
 
-export type DiagramNodeTreeItemKind = 'root' | 'flow' | 'data' | 'connected' | 'disconnected'
-
-export interface DiagramNodeTreeItem {
-  node: DiagramNode
-  depth: number
-  kind: DiagramNodeTreeItemKind
-}
-
 export type CodeNodeLanguage = 'js' | 'nim'
 
 // One history model for everything the scene editor edits: the graph
@@ -702,197 +694,6 @@ const removeAutoArrangeMarker = (settings?: FrameSceneSettings): FrameSceneSetti
   return Object.keys(rest).length > 0 ? rest : undefined
 }
 
-function nodeSortLabel(node: DiagramNode): string {
-  const data = node.data
-  if (data && 'name' in data && data.name) {
-    return data.name
-  }
-  if (data && 'keyword' in data && data.keyword) {
-    return data.keyword
-  }
-  return node.id
-}
-
-function nodePositionCompare(first: DiagramNode, second: DiagramNode): number {
-  const firstY = first.position?.y ?? 0
-  const secondY = second.position?.y ?? 0
-  if (firstY !== secondY) {
-    return firstY - secondY
-  }
-  const firstX = first.position?.x ?? 0
-  const secondX = second.position?.x ?? 0
-  if (firstX !== secondX) {
-    return firstX - secondX
-  }
-  return nodeSortLabel(first).localeCompare(nodeSortLabel(second))
-}
-
-function eventRootCompare(first: DiagramNode, second: DiagramNode): number {
-  const firstKeyword = first.data && 'keyword' in first.data ? first.data.keyword : ''
-  const secondKeyword = second.data && 'keyword' in second.data ? second.data.keyword : ''
-  const firstRank = firstKeyword === 'render' ? 0 : firstKeyword === 'init' ? 1 : 2
-  const secondRank = secondKeyword === 'render' ? 0 : secondKeyword === 'init' ? 1 : 2
-  return firstRank - secondRank || nodePositionCompare(first, second)
-}
-
-function edgeHandleSortValue(handle?: string | null): string {
-  if (!handle) {
-    return ''
-  }
-  if (handle === 'next' || handle === 'prev') {
-    return `00/${handle}`
-  }
-  if (handle.startsWith('fieldInput/')) {
-    return `10/${handle.substring('fieldInput/'.length)}`
-  }
-  if (handle.startsWith('codeField/')) {
-    return `11/${handle.substring('codeField/'.length)}`
-  }
-  if (handle.startsWith('field/')) {
-    return `20/${handle.substring('field/'.length)}`
-  }
-  return `30/${handle}`
-}
-
-function isFlowEdge(edge: DiagramEdge): boolean {
-  return edge.sourceHandle === 'next' || edge.targetHandle === 'prev'
-}
-
-function isFlowLikeNode(node: DiagramNode): boolean {
-  return (
-    node.type === 'event' ||
-    node.type === 'app' ||
-    node.type === 'source' ||
-    node.type === 'dispatch' ||
-    node.type === 'scene'
-  )
-}
-
-function sortEdgesByTarget(edges: DiagramEdge[], nodesById: Record<string, DiagramNode>): DiagramEdge[] {
-  return edges.toSorted((first, second) => {
-    const handleCompare = edgeHandleSortValue(first.targetHandle).localeCompare(
-      edgeHandleSortValue(second.targetHandle)
-    )
-    if (handleCompare !== 0) {
-      return handleCompare
-    }
-    const firstSource = nodesById[first.source]
-    const secondSource = nodesById[second.source]
-    return firstSource && secondSource
-      ? nodePositionCompare(firstSource, secondSource)
-      : first.source.localeCompare(second.source)
-  })
-}
-
-function sortEdgesBySource(edges: DiagramEdge[], nodesById: Record<string, DiagramNode>): DiagramEdge[] {
-  return edges.toSorted((first, second) => {
-    const handleCompare = edgeHandleSortValue(first.sourceHandle).localeCompare(
-      edgeHandleSortValue(second.sourceHandle)
-    )
-    if (handleCompare !== 0) {
-      return handleCompare
-    }
-    const firstTarget = nodesById[first.target]
-    const secondTarget = nodesById[second.target]
-    return firstTarget && secondTarget
-      ? nodePositionCompare(firstTarget, secondTarget)
-      : first.target.localeCompare(second.target)
-  })
-}
-
-export function buildDiagramNodeTreeItems(nodes: DiagramNode[], edges: DiagramEdge[]): DiagramNodeTreeItem[] {
-  const nodesById = Object.fromEntries(nodes.map((node) => [node.id, node]))
-  const connectedNodeIds = new Set<string>()
-  const incomingFlowEdges: Record<string, DiagramEdge[]> = {}
-  const outgoingFlowEdges: Record<string, DiagramEdge[]> = {}
-  const incomingDataEdges: Record<string, DiagramEdge[]> = {}
-
-  for (const edge of edges) {
-    if (!nodesById[edge.source] || !nodesById[edge.target]) {
-      continue
-    }
-    connectedNodeIds.add(edge.source)
-    connectedNodeIds.add(edge.target)
-    if (isFlowEdge(edge)) {
-      outgoingFlowEdges[edge.source] = [...(outgoingFlowEdges[edge.source] ?? []), edge]
-      incomingFlowEdges[edge.target] = [...(incomingFlowEdges[edge.target] ?? []), edge]
-    } else {
-      incomingDataEdges[edge.target] = [...(incomingDataEdges[edge.target] ?? []), edge]
-    }
-  }
-
-  const items: DiagramNodeTreeItem[] = []
-  const visitedNodeIds = new Set<string>()
-
-  const appendNode = (node: DiagramNode, depth: number, kind: DiagramNodeTreeItemKind): boolean => {
-    if (visitedNodeIds.has(node.id)) {
-      return false
-    }
-    visitedNodeIds.add(node.id)
-    items.push({ node, depth: Math.min(depth, 5), kind })
-    return true
-  }
-
-  const appendDataDependencies = (nodeId: string, depth: number) => {
-    for (const edge of sortEdgesByTarget(incomingDataEdges[nodeId] ?? [], nodesById)) {
-      const sourceNode = nodesById[edge.source]
-      if (!sourceNode || visitedNodeIds.has(sourceNode.id)) {
-        continue
-      }
-      appendNode(sourceNode, depth, 'data')
-      appendDataDependencies(sourceNode.id, depth + 1)
-    }
-  }
-
-  const appendFlowBranch = (node: DiagramNode, depth: number, kind: DiagramNodeTreeItemKind) => {
-    if (!appendNode(node, depth, kind)) {
-      return
-    }
-    appendDataDependencies(node.id, depth + 1)
-    for (const edge of sortEdgesBySource(outgoingFlowEdges[node.id] ?? [], nodesById)) {
-      const targetNode = nodesById[edge.target]
-      if (targetNode) {
-        appendFlowBranch(targetNode, kind === 'root' ? depth + 1 : depth, 'flow')
-      }
-    }
-  }
-
-  const rootEvents = nodes
-    .filter((node) => node.type === 'event' && connectedNodeIds.has(node.id) && !incomingFlowEdges[node.id]?.length)
-    .toSorted(eventRootCompare)
-  for (const node of rootEvents) {
-    appendFlowBranch(node, 0, 'root')
-  }
-
-  const flowRoots = nodes
-    .filter(
-      (node) =>
-        !visitedNodeIds.has(node.id) &&
-        isFlowLikeNode(node) &&
-        connectedNodeIds.has(node.id) &&
-        !incomingFlowEdges[node.id]?.length
-    )
-    .toSorted(nodePositionCompare)
-  for (const node of flowRoots) {
-    appendFlowBranch(node, 0, 'flow')
-  }
-
-  const connectedLeftovers = nodes
-    .filter((node) => !visitedNodeIds.has(node.id) && connectedNodeIds.has(node.id))
-    .toSorted(nodePositionCompare)
-  for (const node of connectedLeftovers) {
-    appendNode(node, 0, 'connected')
-    appendDataDependencies(node.id, 1)
-  }
-
-  const disconnectedNodes = nodes.filter((node) => !visitedNodeIds.has(node.id)).toSorted(nodePositionCompare)
-  for (const node of disconnectedNodes) {
-    appendNode(node, 0, 'disconnected')
-  }
-
-  return items
-}
-
 // Generated by kea-typegen. Update if you're an agent, ignore if you're human.
 export interface diagramLogicValues {
   apps: Record<string, AppConfig> // appsModel
@@ -912,7 +713,6 @@ export interface diagramLogicValues {
   hasChanges: boolean
   history: DiagramHistoryState
   isCompiledScene: boolean
-  nodeTreeItems: DiagramNodeTreeItem[]
   nodes: DiagramNode[]
   nodesById: Record<string, DiagramNode>
   nodesWithStyle: DiagramNode[]
@@ -1113,7 +913,6 @@ export interface diagramLogicMeta {
       originalFrame: FrameType
     ) => boolean
     nodesWithStyle: (nodes: DiagramNode[]) => DiagramNode[]
-    nodeTreeItems: (nodes: DiagramNode[], edges: DiagramEdge[]) => DiagramNodeTreeItem[]
     sceneOptions: (editingFrame: Partial<FrameType>) => Option[]
     runtimeNodeErrorsByNodeId: (
       logs: LogType[],
@@ -1396,11 +1195,6 @@ export const diagramLogic = kea<diagramLogicType>([
       },
     ],
     nodesWithStyle: [(s) => [s.nodes], (nodes: DiagramNode[]): DiagramNode[] => nodes.map(renderNodeWithStyle)],
-    nodeTreeItems: [
-      (s) => [s.nodes, s.edges],
-      (nodes: DiagramNode[], edges: DiagramEdge[]): DiagramNodeTreeItem[] => buildDiagramNodeTreeItems(nodes, edges),
-      { resultEqualityCheck: equal },
-    ],
     sceneOptions: [
       (s) => [s.editingFrame],
       (frame: diagramLogicValues['editingFrame']): Option[] => [

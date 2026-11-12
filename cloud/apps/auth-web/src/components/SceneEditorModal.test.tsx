@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { useEffect, useRef, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sceneDraftKey, writeSceneDraft } from "../lib/scene-draft";
-import { singlePanelFor } from "../lib/scene-views";
+import { singlePanelFor } from "../../../../../frontend/src/sceneWorkspace/lib/scene-views";
 import {
   PANELS_STORAGE_KEY,
   SceneEditorModal,
@@ -121,7 +121,7 @@ type PanelProps = {
   initialMemoryDevice?: string | undefined;
   rememberSettings?: boolean | undefined;
 };
-vi.mock("./SceneLivePreview", () => ({
+vi.mock("../../../../../frontend/src/sceneWorkspace/SceneLivePreview", () => ({
   SceneLivePreviewPanel: (props: PanelProps) => (
     <div
       data-device={props.initialDevice ?? ""}
@@ -144,7 +144,7 @@ type AiPanelProps = {
   height: number;
   onScenes: (event: { type: "scenes"; tool: "modify_scene"; title?: string; scenes: unknown[] }) => unknown;
 };
-vi.mock("./SceneAiPanel", () => ({
+vi.mock("../../../../../frontend/src/sceneWorkspace/SceneAiPanel", () => ({
   SceneAiPanel: (props: AiPanelProps) => (
     <div data-prompt={props.initialPrompt ?? ""} data-size={`${props.width}x${props.height}`} data-testid="ai-panel">
       <button

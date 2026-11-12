@@ -10,7 +10,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { accountSettings, type createDb } from "@frameos-cloud/db";
 import { reportError } from "./log";
-import { previewSettingsGroups } from "./preview-settings";
+import { previewSettingsGroups } from "../../../../../frontend/src/sceneWorkspace/lib/preview-settings";
 import { decryptSecret, encryptSecret } from "./secrets";
 import { isMaskedSettingValue, maskSettingValue } from "./setting-mask";
 

@@ -319,7 +319,7 @@ JSON; they are re-sealed in place the first time they are read.
 **Narrowed by what the owner granted, not by what the scenes declare.** A
 scene's apps declare the groups they want (`settings` in `config.json`,
 derived the same way the live preview derives them —
-`src/lib/preview-settings.ts`), but a published scene is anyone's code, so
+`frontend/src/sceneWorkspace/lib/preview-settings.ts`), but a published scene is anyone's code, so
 that declaration is a *request*. The 2026-09 security review found the old
 model — ship every declared group — let a store scene decide for itself
 which of the account's keys it received. Now each assignment

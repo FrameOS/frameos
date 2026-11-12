@@ -14,12 +14,19 @@ import {
 
 export const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+// `--editor`: the embedded editor bundle (dist-editor/) alone. With `--dev` it
+// rebuilds on every change — `pnpm dev`'s editor pane: a backend's local
+// scenes page runs that bundle in an iframe (served at /frameos-editor/).
+const editorOnly = process.argv.includes('--editor')
+
 await import('./scripts/generateRepoApps.mjs')
 await import('./scripts/generateBuiltinApps.mjs')
 
-startDevServer(__dirname)
-copyPublicFolder(path.resolve(__dirname, 'public'), path.resolve(__dirname, 'dist'))
-writeIndexHtml()
+if (!editorOnly) {
+  startDevServer(__dirname)
+  copyPublicFolder(path.resolve(__dirname, 'public'), path.resolve(__dirname, 'dist'))
+  writeIndexHtml()
+}
 
 const common = {
   absWorkingDir: __dirname,
@@ -169,8 +176,7 @@ function writeEditorHtml(outputs = {}) {
   )
 }
 
-await buildInParallel(
-  [
+const configs = [
     {
       name: 'FrameOS Frontend',
       globalName: 'frameOSApp',
@@ -223,7 +229,10 @@ await buildInParallel(
       extraPlugins: [embedAliasPlugin, reactExternalPlugin],
       ...common,
     },
-  ],
+  ]
+
+await buildInParallel(
+  editorOnly ? configs.filter((config) => config.name === 'FrameOS Embedded Editor') : configs,
   {
     async onBuildComplete(config, buildResponse) {
       if (!buildResponse) {

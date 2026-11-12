@@ -14,7 +14,7 @@ import {
   TrashIcon,
 } from '@heroicons/react/24/outline'
 
-import type { FrameScene } from '../types'
+import type { FrameId, FrameScene } from '../types'
 import { editAppLogic } from '../scenes/frame/panels/EditApp/editAppLogic'
 import { javascriptAppSourceFiles } from '../utils/sceneApps'
 import {
@@ -110,7 +110,7 @@ function AppFolderFiles({
   activeApp,
   onOpenFile,
 }: {
-  frameId: number
+  frameId: FrameId
   sceneId: string
   entry: SceneAppEntry
   depth: number
@@ -182,7 +182,7 @@ function AppFolderFiles({
 }
 
 export interface SceneFileTreeProps {
-  frameId: number
+  frameId: FrameId
   scenes: FrameScene[]
   /** The scene the editor shows (its diagram, or the scene of the app open). */
   selectedSceneId: string | null
@@ -190,6 +190,8 @@ export interface SceneFileTreeProps {
   /** The shell's surface colour: the tree lies over the file when the
    * editor is narrow, and must not be see-through there. */
   surfaceClassName?: string
+  /** List template.json first (default). A frame's scenes have no template. */
+  showTemplate?: boolean
 }
 
 /** A narrow editor draws the tree over the file (see the nav's classes):
@@ -211,6 +213,7 @@ export function SceneFileTree({
   selectedSceneId,
   onSelectScene,
   surfaceClassName,
+  showTemplate = true,
 }: SceneFileTreeProps): JSX.Element {
   const logic = sceneFileTreeLogic({ frameId })
   const { shownSelection, isExpanded } = useValues(logic)
@@ -218,7 +221,7 @@ export function SceneFileTree({
 
   return (
     <nav
-      aria-label="Template files"
+      aria-label={showTemplate ? 'Template files' : 'Scene files'}
       className={clsx(
         'scene-file-tree frameos-divider absolute inset-y-0 left-0 z-[70] flex w-60 max-w-[85%] shrink-0 flex-col border-r shadow-2xl',
         '@2xl:static @2xl:z-auto @2xl:max-w-none @2xl:shadow-none',
@@ -241,18 +244,20 @@ export function SceneFileTree({
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
-        <TreeRow
-          depth={0}
-          active={shownSelection.kind === 'template'}
-          icon={<DocumentTextIcon className="h-4 w-4 text-amber-500" />}
-          label="template.json"
-          title="The template's name, description, category and tags"
-          onClick={(event) => {
-            selectTemplate()
-            closeIfOverlay(event, () => setTreeOpen(false))
-          }}
-          testId="scene-file-template"
-        />
+        {showTemplate ? (
+          <TreeRow
+            depth={0}
+            active={shownSelection.kind === 'template'}
+            icon={<DocumentTextIcon className="h-4 w-4 text-amber-500" />}
+            label="template.json"
+            title="The template's name, description, category and tags"
+            onClick={(event) => {
+              selectTemplate()
+              closeIfOverlay(event, () => setTreeOpen(false))
+            }}
+            testId="scene-file-template"
+          />
+        ) : null}
         {scenes.map((scene) => {
           const apps = sceneAppEntries(scene)
           const sceneKey = sceneTreeKey(scene.id)

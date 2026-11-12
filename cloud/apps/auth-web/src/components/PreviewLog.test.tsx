@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PreviewLog } from "./PreviewLog";
+import { PreviewLog } from "../../../../../frontend/src/sceneWorkspace/PreviewLog";
 
 // Virtuoso measures its scroller and rows; jsdom has no layout, so the list
 // becomes a plain map over the data (the row rendering is what is tested).

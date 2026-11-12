@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatLogTimestamp, parsePreviewLogLine } from "./preview-log";
+import { formatLogTimestamp, parsePreviewLogLine } from "../../../../../frontend/src/sceneWorkspace/lib/preview-log";
 
 // Lines captured from the wasm runtime in the scene editor's Preview panel
 // (analog clock face, 2026-08-25).

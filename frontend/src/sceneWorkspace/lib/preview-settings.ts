@@ -11,7 +11,7 @@
 // forwarded). Keys SAVED on the account settings page persist server-side
 // (account_settings) and seed the preview automatically.
 
-import { keyedRepoAppSources } from "../../../../../frontend/src/generated/keyedRepoApps";
+import { keyedRepoAppSources } from "../../generated/keyedRepoApps";
 
 export type PreviewSettingsField = {
   label: string;

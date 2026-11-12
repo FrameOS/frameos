@@ -1,5 +1,7 @@
 import { MakeLogicType, actions, kea, reducers, path, key, props, connect, listeners, selectors } from 'kea'
 import { forms } from 'kea-forms'
+import { router } from 'kea-router'
+import { urls } from '../../../../urls'
 
 import { FrameScene, RepositoryType, TemplateForm, TemplateType, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
@@ -308,15 +310,6 @@ export interface templatesLogicActions {
     repository: RepositoryType
     template: TemplateType
   }
-  installTemplate: (
-    template: Partial<TemplateType>,
-    openDrawer?: boolean,
-    activate?: boolean
-  ) => {
-    activate: boolean
-    openDrawer: boolean
-    template: Partial<TemplateType>
-  }
   editLocalTemplate: (template: TemplateType) => {
     template: TemplateType
   }
@@ -331,6 +324,15 @@ export interface templatesLogicActions {
   }
   hideUploadTemplate: () => {
     value: true
+  }
+  installTemplate: (
+    template: Partial<TemplateType>,
+    openDrawer?: boolean,
+    activate?: boolean
+  ) => {
+    activate: boolean
+    openDrawer: boolean
+    template: Partial<TemplateType>
   }
   remoteInstallFinished: (installId: string) => {
     installId: string
@@ -718,105 +720,85 @@ export const templatesLogic = kea<templatesLogicType>([
         name: !templateForm.name ? 'Name is required' : null,
       }),
       submit: async (formValues) => {
-        if (formValues.id) {
-          // update
-          const request = {
-            name: formValues.name,
-            description: formValues.description,
-          }
-          const response = await apiFetch(`/api/templates/${formValues.id}`, {
-            method: 'PATCH',
-            body: JSON.stringify(request),
-            headers: {
-              'Content-Type': 'application/json',
-            },
-          })
-          if (!response.ok) {
-            throw new Error('Failed to update template')
-          }
-          actions.updateTemplate(await response.json())
-        } else {
-          // create
-          const target = values.modalTarget
-          const exportScenes = formValues.exportScenes ?? []
-          // The preview image should show one of the scenes being saved: use
-          // the frame's snapshot only when the active scene is included,
-          // otherwise the first selected scene's cached snapshot.
-          const activeSceneId = values.frame?.active_scene_id
-          const imageSceneId = activeSceneId && exportScenes.includes(activeSceneId) ? undefined : exportScenes[0]
-          // Never ship a `secret: true` field value in a template or a store zip,
-          // nor this install's button map (docs/events.md "Event map"): the
-          // map is the installed copy's, another frame has other buttons.
-          const exportedScenes = (values.frameForm.scenes || [])
-            .filter((scene) => exportScenes.includes(scene.id))
-            // Saved the way a save leaves them: each JS app's permissions
-            // filled from its code (utils/sceneAccess.ts).
-            .map((scene) =>
-              withAppPermissions(stripSecretFieldValues(withoutSceneLayout(withoutSceneEventMap(scene)), values.apps))
-            )
+        const target = values.modalTarget
+        const exportScenes = formValues.exportScenes ?? []
+        // The preview image should show one of the scenes being saved: use
+        // the frame's snapshot only when the active scene is included,
+        // otherwise the first selected scene's cached snapshot.
+        const activeSceneId = values.frame?.active_scene_id
+        const imageSceneId = activeSceneId && exportScenes.includes(activeSceneId) ? undefined : exportScenes[0]
+        // Never ship a `secret: true` field value in a template or a store zip,
+        // nor this install's button map (docs/events.md "Event map"): the
+        // map is the installed copy's, another frame has other buttons.
+        const exportedScenes = (values.frameForm.scenes || [])
+          .filter((scene) => exportScenes.includes(scene.id))
+          // Saved the way a save leaves them: each JS app's permissions
+          // filled from its code (utils/sceneAccess.ts).
+          .map((scene) =>
+            withAppPermissions(stripSecretFieldValues(withoutSceneLayout(withoutSceneEventMap(scene)), values.apps))
+          )
 
-          if (target === 'cloud') {
-            const response = await apiFetch('/api/cloud/store/publish', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                name: formValues.name,
-                description: formValues.description,
-                scenes: exportedScenes,
-                from_frame_id: props.frameId,
-                ...(imageSceneId ? { image_scene_id: imageSceneId } : {}),
-                ...(formValues.visibility === 'private' || formValues.visibility === 'public'
-                  ? { visibility: formValues.visibility }
-                  : {}),
-              }),
-            })
-            if (!response.ok) {
-              let detail = `unexpected status ${response.status}`
-              try {
-                detail = (await response.json())?.detail ?? detail
-              } catch {
-                // keep fallback detail
-              }
-              window.alert(`Could not save to your private cloud: ${detail}`)
-              throw new Error('Failed to save to private cloud scenes')
-            }
-            const payload = await response.json()
-            const scene = payload?.scene
-            cloudDriveLogic.findMounted()?.actions.loadDrive()
-            actions.hideModal()
-            actions.resetTemplateForm()
-            if (
-              scene?.url &&
-              window.confirm(
-                `Saved "${formValues.name}" to your private cloud scenes (v${scene?.version ?? '?'}). Open it?`
-              )
-            ) {
-              window.open(scene.url, '_blank', 'noopener')
-            }
-            return
-          }
-
-          const request: TemplateType & Record<string, any> = {
-            name: formValues.name,
-            description: formValues.description,
-            scenes: exportedScenes,
-            from_frame_id: props.frameId,
-            ...(imageSceneId ? { image_scene_id: imageSceneId } : {}),
-            format: target === 'zip' ? 'zip' : 'json',
-          }
-          const response = await apiFetch('/api/templates', {
+        if (target === 'cloud') {
+          const response = await apiFetch('/api/cloud/store/publish', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(request),
+            body: JSON.stringify({
+              name: formValues.name,
+              description: formValues.description,
+              scenes: exportedScenes,
+              from_frame_id: props.frameId,
+              ...(imageSceneId ? { image_scene_id: imageSceneId } : {}),
+              ...(formValues.visibility === 'private' || formValues.visibility === 'public'
+                ? { visibility: formValues.visibility }
+                : {}),
+            }),
           })
           if (!response.ok) {
-            throw new Error('Failed to create template')
+            let detail = `unexpected status ${response.status}`
+            try {
+              detail = (await response.json())?.detail ?? detail
+            } catch {
+              // keep fallback detail
+            }
+            window.alert(`Could not save to your private cloud: ${detail}`)
+            throw new Error('Failed to save to private cloud scenes')
           }
-          if (target === 'zip') {
-            downloadBlob(await response.blob(), `${formValues.name}.zip`)
-          } else {
-            actions.updateTemplate(await response.json())
+          const payload = await response.json()
+          const scene = payload?.scene
+          cloudDriveLogic.findMounted()?.actions.loadDrive()
+          actions.hideModal()
+          actions.resetTemplateForm()
+          if (
+            scene?.url &&
+            window.confirm(
+              `Saved "${formValues.name}" to your private cloud scenes (v${scene?.version ?? '?'}). Open it?`
+            )
+          ) {
+            window.open(scene.url, '_blank', 'noopener')
           }
+          return
+        }
+
+        const request: TemplateType & Record<string, any> = {
+          name: formValues.name,
+          description: formValues.description,
+          scenes: exportedScenes,
+          from_frame_id: props.frameId,
+          ...(imageSceneId ? { image_scene_id: imageSceneId } : {}),
+          format: target === 'zip' ? 'zip' : 'json',
+        }
+        const response = await apiFetch('/api/templates', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to create template')
+        }
+        if (target === 'zip') {
+          downloadBlob(await response.blob(), `${formValues.name}.zip`)
+        } else {
+          actions.updateTemplate(await response.json())
         }
         actions.hideModal()
         actions.resetTemplateForm()
@@ -927,7 +909,6 @@ export const templatesLogic = kea<templatesLogicType>([
         saveAsZip: () => true,
         saveAsTemplate: () => true,
         saveAsCloudTemplate: () => true,
-        editLocalTemplate: () => true,
         hideModal: () => false,
       },
     ],
@@ -937,7 +918,6 @@ export const templatesLogic = kea<templatesLogicType>([
         saveAsZip: () => 'zip',
         saveAsTemplate: () => 'localTemplate',
         saveAsCloudTemplate: () => 'cloud',
-        editLocalTemplate: () => 'localTemplate',
       },
     ],
     templateForm: {
@@ -957,11 +937,6 @@ export const templatesLogic = kea<templatesLogicType>([
         // '' = keep current visibility (new scenes start private)
         visibility: '',
         ...template,
-      }),
-      editLocalTemplate: (_, { template }) => ({
-        id: template.id,
-        name: template.name,
-        description: template.description,
       }),
     },
     showingUploadTemplate: [
@@ -1156,6 +1131,12 @@ export const templatesLogic = kea<templatesLogicType>([
     ],
   }),
   listeners(({ actions, props, values }) => ({
+    // A saved scene is edited in the scene editor, its own page.
+    editLocalTemplate: ({ template }) => {
+      if (template.id) {
+        router.actions.push(urls.localScene(template.id))
+      }
+    },
     // "Upload scene" in the Add scene drawer: a template .zip or a scenes
     // .json picked from disk. Parsed in the browser (utils/sceneUpload) so the
     // same button works on the backend, on-device and cloud control planes —
@@ -1241,8 +1222,8 @@ export const templatesLogic = kea<templatesLogicType>([
             title: accessFlags.includes('shell')
               ? 'These scenes run shell commands'
               : accessFlags.some((flag) => !flag.startsWith('key:'))
-              ? 'These scenes use files on the frame'
-              : 'These scenes use your API keys',
+                ? 'These scenes use files on the frame'
+                : 'These scenes use your API keys',
             message:
               `What the scenes at this URL do on the frame: ${accessFlags
                 .map((flag) => sceneAccessFlagLabel(flag))
@@ -1390,8 +1371,8 @@ export const templatesLogic = kea<templatesLogicType>([
               detail: alreadyAssigned
                 ? 'Already on the frame: pushed again at its newest version'
                 : activateId
-                ? 'Installed and pushed. The frame shows it as soon as it syncs.'
-                : 'Installed and pushed to the frame',
+                  ? 'Installed and pushed. The frame shows it as soon as it syncs.'
+                  : 'Installed and pushed to the frame',
             })
             // The server now owns this scene; rehydrate frame.scenes from the
             // assignment list (force skips the poll throttle) so the tiles

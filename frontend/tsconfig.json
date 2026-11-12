@@ -15,6 +15,10 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
+    // The SPA bundles the frameos-wasm package from its source (the scene
+    // workspace's preview, frontend/src/sceneWorkspace): no build of the
+    // package has to run first. The cloud's auth-web resolves the built one.
+    "paths": { "frameos-wasm": ["../frameos/wasm/src/index.ts"] },
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }],

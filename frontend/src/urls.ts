@@ -92,6 +92,14 @@ export const urls = {
   /** The old address of the store front, kept as an alias of the library;
    * the scenes host's root is the store front too. */
   store: () => '/store',
+  /** A backend's saved scene (a template, the local scenes page) in the
+   * scene editor. Four segments, so no /scenes/:frameId/:sceneId reads it
+   * as a frame named "local". `:templateId` is the router pattern. */
+  localScene: (templateId: string) =>
+    getRouteBasePath() +
+    '/scenes/local/' +
+    (templateId.startsWith(':') ? templateId : encodeURIComponent(templateId)) +
+    '/edit',
   /** The scenes library (the store, the private scenes): the scenes page
    * without a frame, with the page in the query so the frame routes stay
    * what they are. The store is the bare page. Signed out on the cloud the

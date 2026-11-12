@@ -2,7 +2,7 @@
 
 import { ImagePlus, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
-import { ImageLightbox } from "./ImageLightbox";
+import { ImageLightbox } from "../../../../../frontend/src/sceneWorkspace/ImageLightbox";
 import { ownerActionErrorMessage } from "./ownerActionError";
 
 // The scene's images (the Info panel): the version's ordered image set as

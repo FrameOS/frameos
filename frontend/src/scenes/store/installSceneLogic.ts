@@ -200,13 +200,14 @@ export const installSceneLogic = kea<installSceneLogicType>([
         if (target.kind === 'ai') {
           // The assistant builds a new scene on the frame (its build_scene
           // adds it to the frame's scene list and focuses it), so the chat
-          // is the frame's, in the frame's scenes workspace. A route change
-          // closes every drawer, so the drawer opens after the push.
+          // is the frame's, in the frame page's chat drawer (a scene's page
+          // is the scene editor, whose AI is a column of its own). A route
+          // change closes every drawer, so the drawer opens after the push.
           const frameId = frameIds[0]
           const chat = chatLogic({ frameId })
           chat.mount()
           actions.closeInstall()
-          router.actions.push(urls.scenes(frameId))
+          router.actions.push(urls.frame(frameId))
           workspaceLogic.actions.openChatDrawer(frameId, null, null)
           chat.actions.startNewChatWithMessage(target.prompt)
           return

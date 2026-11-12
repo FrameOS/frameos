@@ -3,7 +3,7 @@
 // can change a scene's code and watch it render, without leaving the page.
 // next.config.ts lets the pages below frame it, and nothing else; every other
 // page of the store keeps `frame-ancestors 'none'`.
-import { previewDeviceFor } from "./preview-devices";
+import { previewDeviceFor } from "../../../../../frontend/src/sceneWorkspace/lib/preview-devices";
 
 /** The pages allowed to frame an embed: CSP frame-ancestors sources. */
 export const storeEmbedAncestors: readonly string[] = ["https://frameos.net", "https://www.frameos.net"];

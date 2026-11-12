@@ -839,6 +839,9 @@ importers:
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
+      frameos-wasm:
+        specifier: workspace:*
+        version: link:../frameos/wasm
       fuse.js:
         specifier: ^7.0.0
         version: 7.1.0
@@ -860,6 +863,9 @@ importers:
       kea-subscriptions:
         specifier: ^3.0.1
         version: 3.0.1(kea@3.1.7(react@19.2.8))
+      lucide-react:
+        specifier: ^1.28.0
+        version: 1.28.0(react@19.2.8)
       messg:
         specifier: ^2.2.2
         version: 2.2.2

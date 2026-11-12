@@ -7,7 +7,7 @@ import {
   parsePreviewLogLine,
   type PreviewLogEntry,
   type PreviewLogLine,
-} from "../lib/preview-log";
+} from "./lib/preview-log";
 import { useDragHeight } from "./useDragHeight";
 
 type PreviewLogProps = {

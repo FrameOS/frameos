@@ -54,6 +54,7 @@ import { DeployToFrameIcon, FrameChangeStatusIcon } from './FrameChangeStatusIco
 import { FrameLocalDeployMenu } from './FrameLocalDeployMenu'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
+import { ScenePreviewRow } from './ScenePreviewRow'
 import {
   FRAMEOS_TEMPLATE_DRAG_TYPE,
   getFrameosSceneDragData,
@@ -951,6 +952,7 @@ function FrameScenesBlock({
         ) : null}
       </div>
       {storageLabel ? <div className="frameos-muted mb-2 text-xs text-slate-500">{storageLabel}</div> : null}
+      <ScenePreviewRow frame={frame} />
       {sceneOverviewEntries.length > 0 ? (
         <div className="flex flex-wrap gap-4">
           {sceneOverviewEntries.map(({ scene, key, nested }) => {

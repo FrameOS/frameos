@@ -9,6 +9,7 @@
 // or the turn is gone, does it throw an AiChatTransportError.
 
 import type { AiInstallProposal } from "./ai-install-proposal";
+import { sceneWorkspaceHost } from "./host";
 
 export type AiScenesTool = "build_scene" | "modify_scene";
 
@@ -72,6 +73,8 @@ export type AiChatRequest = {
    * render_scene looks at the scene the same way. */
   renderSize?: { width: number; height: number } | undefined;
   timeZone?: string | undefined;
+  /** A backend's frame the chat is about (its frame context and tools). */
+  frameId?: number | string | undefined;
 };
 
 // A non-2xx answer before the stream started: `code` is the server's
@@ -219,7 +222,8 @@ export type StreamAiChatOptions = {
   signal?: AbortSignal | undefined;
   onEvent: (event: AiChatEvent) => void | Promise<void>;
   endpoint?: string;
-  resumeEndpoint?: string;
+  /** null: the plane cannot resume a turn (the self-hosted backend). */
+  resumeEndpoint?: string | null;
   /** Consecutive unreachable resumes tolerated (see DEFAULT_RESUME_ATTEMPTS). */
   resumeAttempts?: number;
   /** Total time after the turn started during which resumes are tried. */
@@ -245,9 +249,9 @@ export async function streamAiChat(
   {
     signal,
     onEvent,
-    endpoint = "/api/ai/chat",
-    resumeEndpoint = "/api/ai/chat/turns",
-    resumeAttempts = DEFAULT_RESUME_ATTEMPTS,
+    endpoint = sceneWorkspaceHost().aiChatUrl,
+    resumeEndpoint = sceneWorkspaceHost().aiChatTurnsUrl,
+    resumeAttempts = resumeEndpoint === null ? 0 : DEFAULT_RESUME_ATTEMPTS,
     resumeBudgetMs = DEFAULT_RESUME_BUDGET_MS,
     onResume,
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -275,7 +279,7 @@ export async function streamAiChat(
     await onEvent(event);
   };
 
-  const response = await fetch(endpoint, {
+  const response = await sceneWorkspaceHost().fetch(endpoint, {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST",
@@ -337,7 +341,7 @@ export async function streamAiChat(
     await sleep(resumeDelayMs(consecutiveFailures));
     let resumed: Response;
     try {
-      resumed = await fetch(`${resumeEndpoint}/${encodeURIComponent(turnId)}?after=${received}`, {
+      resumed = await sceneWorkspaceHost().fetch(`${resumeEndpoint}/${encodeURIComponent(turnId)}?after=${received}`, {
         ...(signal ? { signal } : {}),
       });
     } catch (error) {
@@ -381,10 +385,13 @@ export async function streamAiChat(
 /** Ask the server to stop a running turn (the Stop button). Best-effort. */
 export async function stopAiChatTurn(
   turnId: string,
-  { endpoint = "/api/ai/chat/turns" }: { endpoint?: string } = {},
+  { endpoint = sceneWorkspaceHost().aiChatTurnsUrl }: { endpoint?: string | null } = {},
 ): Promise<void> {
+  if (endpoint === null) {
+    return;
+  }
   try {
-    await fetch(`${endpoint}/${encodeURIComponent(turnId)}`, { method: "DELETE" });
+    await sceneWorkspaceHost().fetch(`${endpoint}/${encodeURIComponent(turnId)}`, { method: "DELETE" });
   } catch {
     // The turn will hit its own ceiling; nothing more to do from here.
   }

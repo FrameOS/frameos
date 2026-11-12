@@ -7,6 +7,10 @@ procs:
     shell: pnpm --dir frontend run dev:vite
   kea:
     shell: pnpm --dir frontend run dev:kea
+  # The embedded editor bundle (frontend/dist-editor), rebuilt on change: a
+  # backend's local scenes page runs it in an iframe at /frameos-editor/.
+  editor:
+    shell: pnpm --dir frontend run dev:editor
   redis:
     shell: pnpm run dev:redis
   postgres:

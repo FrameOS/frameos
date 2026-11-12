@@ -84,6 +84,9 @@ export interface EmbeddedSceneEditorProps {
   onTemplateChanged?: ((changes: Partial<SceneTemplateMetadata>) => void) | undefined
   /** The choices the template's Category field offers. */
   templateCategories?: TemplateCategoryOption[] | undefined
+  /** The template.json fields the host keeps and the form edits (default:
+   * all but `name`, which the store renames on its scene page). */
+  templateFields?: ('name' | 'description' | 'category' | 'frameosVersion' | 'tags')[] | undefined
   /** template.json's Form view in place of the built-in form: the host's own
    * view of the template (the FrameOS store shows its scene page there). */
   templateContent?: ReactNode | undefined
