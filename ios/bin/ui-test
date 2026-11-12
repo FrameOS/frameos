@@ -15,12 +15,17 @@
 # the newest iPhone Pro, ios/bin/simulator); the app is uninstalled first, so
 # each run starts signed out.
 #
-# The simulator boots while the app and the tests build (a fresh one takes
-# minutes), then the tests run on what was built. The two halves alone, as
-# CI runs them (a failed build is its own red step there):
+# The app and the tests are built once (build-for-testing) and the tests run
+# on that build. The two halves alone, as CI runs them (a failed build is its
+# own red step there):
 #
 #   ios/bin/ui-test --build-only          # build-for-testing, logs in DerivedData/
 #   ios/bin/ui-test --without-building    # the tests on that build
+#
+# Run whole, the simulator boots while the app builds. The halves do not
+# overlap the boot: on CI's three-core macOS VM a first boot is minutes of
+# CPU, not of waiting, and everything beside it ran slower by more than the
+# boot took (swift test 25 s → 418 s, 2026-11-12).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -31,7 +36,11 @@ case "${1:-}" in
   --without-building) build=0; shift ;;
 esac
 
-udid="$(bin/simulator --boot)"
+if [[ $build == 1 && $run == 1 ]]; then
+  udid="$(bin/simulator --boot)"
+else
+  udid="$(bin/simulator)"
+fi
 mkdir -p DerivedData
 # TEST_RUNNER_ variables reach the test process without the prefix.
 xcodebuild_tests() {
@@ -57,14 +66,14 @@ xcodebuild_tests() {
 if [[ $build == 1 ]]; then
   command -v xcodegen >/dev/null || { echo "Install XcodeGen first: brew install xcodegen" >&2; exit 1; }
   xcodegen generate --quiet
-  echo "Simulator $udid: booting while the app and the UI tests build"
+  if [[ $run == 1 ]]; then echo "Simulator $udid: booting while the app and the UI tests build"; fi
   xcodebuild_tests build-for-testing "$@" 2>&1 | tee DerivedData/ui-test-build.log |
     grep -E "error:|warning:|\*\* TEST BUILD (SUCCEEDED|FAILED)" || true
   grep -q "\*\* TEST BUILD SUCCEEDED \*\*" DerivedData/ui-test-build.log || exit 1
 fi
 [[ $run == 1 ]] || exit 0
 
-echo "Simulator $udid: waiting for the boot"
+echo "Simulator $udid: booting (bootstatus -b boots it if nothing has yet)"
 xcrun simctl bootstatus "$udid" -b >/dev/null
 xcrun simctl uninstall "$udid" net.frameos.app 2>/dev/null || true
 if [[ -n "${FRAMEOS_UITEST_BACKEND:-}${FRAMEOS_UITEST_CLOUD:-}" ]]; then

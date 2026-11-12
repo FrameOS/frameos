@@ -50,13 +50,6 @@ jobs:
           xcodebuild -version
           swift --version
 
-      # A fresh runner's simulator takes minutes to boot the first time
-      # (3m18s on 2026-11-11, more than the build and the tests together).
-      # Start it now: it boots while the FrameOSKit tests and the build run,
-      # and ios/bin/ui-test waits for it before the tests.
-      - name: Start the simulator booting
-        run: ios/bin/simulator --boot
-
       - name: FrameOSKit tests (the shared corpora)
         run: swift test --package-path ios/FrameOSKit
 
@@ -75,6 +68,10 @@ jobs:
       # the sign-in screen works, the cloud first and the backend below. The
       # tour of the whole app needs a backend and is skipped here; run it
       # with ios/bin/test-backend + ios/bin/ui-test (ios/README.md).
+      #
+      # The simulator boots here, not earlier beside the build: a first boot
+      # on this three-core VM is minutes of CPU, and overlapping it slowed the
+      # steps beside it by more than it saved (swift test 25 s -> 418 s).
       - name: UI tests on a simulator
         timeout-minutes: 20
         run: ios/bin/ui-test --without-building
