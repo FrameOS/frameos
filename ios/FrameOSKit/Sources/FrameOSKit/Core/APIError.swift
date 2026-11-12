@@ -43,6 +43,9 @@ public struct APIError: Error, LocalizedError, Sendable, Equatable {
         }
         if message.isEmpty, let text = body?["message"]?.stringValueIfString { message = text }
         if code.isEmpty, status == 401 { code = "login_required" }
+        if message.isEmpty, code == "cloud_rendered_frame_quota_exceeded" {
+            message = APIError.cloudRenderedQuotaWords(max: body?["max_cloud_rendered_frames"]?.intValue ?? 0)
+        }
         if message.isEmpty { message = APIError.words(for: code, status: status) }
         var retryAfter = body?["retry_after"]?.doubleValue
         if retryAfter == nil, let header = headers["Retry-After"] as? String ?? headers["retry-after"] as? String {
@@ -60,6 +63,14 @@ public struct APIError: Error, LocalizedError, Sendable, Equatable {
         }
         if message.isEmpty { message = HTTPURLResponse.localizedString(forStatusCode: status).capitalized }
         return APIError(status: status, code: code, message: message, body: body, retryAfter: retryAfter)
+    }
+
+    /// The plan's cloud-rendered frames are all in use: a virtual frame, or
+    /// "Render scenes: On FrameOS Cloud" (the SPA's cloudFrameApi.ts words).
+    static func cloudRenderedQuotaWords(max: Int) -> String {
+        max > 0
+            ? "Your plan renders \(max) frame\(max == 1 ? "" : "s") on FrameOS Cloud, and all of them are in use. Free one up or move to a larger plan."
+            : "Your plan has no frames rendered on FrameOS Cloud. A paid plan includes them."
     }
 
     /// Plain words for the cloud's codes a person meets in the app.

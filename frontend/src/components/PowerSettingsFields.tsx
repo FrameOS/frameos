@@ -334,9 +334,9 @@ function RenderScenesField({
             On the server, {choice.serverName} runs this frame&apos;s scenes and sends it the finished picture. The
             frame only wakes, downloads the picture and refreshes the screen: no scene code, no image decoding and no
             data fetching on the frame, so a battery lasts longer. When nothing changed, the frame skips the download
-            and the refresh. A sleeping frame&apos;s next picture is drawn just before it wakes. {choice.reach} Not yet:
-            the frame&apos;s keys, touch and schedule do not switch scenes while it renders on the server; switch
-            scenes from the workspace instead. The frame changes over at its next render.
+            and the refresh. A sleeping frame&apos;s next picture is drawn just before it wakes. {choice.reach} The
+            frame&apos;s keys, touch and schedule keep working: what they do goes to {choice.serverName} with the next
+            download, so a press answers in a second or three. The frame changes over at its next render.
           </>
         )
       }
@@ -352,7 +352,7 @@ function RenderScenesField({
         />
         {remote ? (
           <p className="frameos-muted text-xs">
-            Keys, touch and the frame&apos;s schedule do not switch scenes while it renders on the server.
+            A press or a tap reaches the scene with the frame&apos;s next download, so it answers in a second or three.
             {choice.note ? <> {choice.note}</> : null}
           </p>
         ) : null}

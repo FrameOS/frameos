@@ -137,7 +137,11 @@ export function FrameBatteryPopover({
                     className="frameos-tooltip-panel z-50 w-[22.5rem] max-w-[calc(100vw-1rem)] rounded-xl p-3.5 text-left text-xs focus:outline-none"
                     data-testid="battery-popover"
                   >
-                    {open ? <BatteryPanel frame={frame} percent={percent} /> : null}
+                    {({ close }) =>
+                      // A link inside goes somewhere else in the workspace: the panel
+                      // closes with it instead of staying over the page it opened.
+                      open ? <BatteryPanel frame={frame} percent={percent} onNavigate={() => close()} /> : <></>
+                    }
                   </Popover.Panel>
                 </Transition>,
                 portalTarget
@@ -168,7 +172,15 @@ function formatDrain(perDay: number): string {
   return `${perDay.toFixed(2)}% / day`
 }
 
-function BatteryPanel({ frame, percent }: { frame: FrameType; percent: number }): JSX.Element {
+function BatteryPanel({
+  frame,
+  percent,
+  onNavigate,
+}: {
+  frame: FrameType
+  percent: number
+  onNavigate: () => void
+}): JSX.Element {
   const logic = frameBatteryLogic({ frameId: frame.id })
   const { sortedBatteryHistory, batteryHistoryLoading, batteryHistoryLoadedAt, selectedCycleSeconds } = useValues(logic)
   const { ensureBatteryHistory, setSelectedCycleSeconds } = useActions(logic)
@@ -235,16 +247,27 @@ function BatteryPanel({ frame, percent }: { frame: FrameType; percent: number })
         onSelectCycle={(cycle) => setSelectedCycleSeconds(cycle === observedCycle ? null : cycle)}
       />
 
-      <ServerRenderOffer frame={frame} analysis={analysis} cycleSeconds={selectedCycle} now={now} />
+      <ServerRenderOffer
+        frame={frame}
+        analysis={analysis}
+        cycleSeconds={selectedCycle}
+        now={now}
+        onNavigate={onNavigate}
+      />
 
       <div className="frameos-muted flex items-center justify-between gap-2 border-t border-slate-500/15 pt-2 text-[11px]">
         <A
           href={urls.frame(frame.id, 'metrics') + metricCardHash('batteryPercent')}
           className="font-semibold underline-offset-2 hover:underline"
+          onClick={onNavigate}
         >
           Open metrics
         </A>
-        <A href={powerSettingsUrl(frame)} className="font-semibold underline-offset-2 hover:underline">
+        <A
+          href={powerSettingsUrl(frame)}
+          className="font-semibold underline-offset-2 hover:underline"
+          onClick={onNavigate}
+        >
           Power settings
         </A>
       </div>
@@ -534,11 +557,13 @@ function ServerRenderOffer({
   analysis,
   cycleSeconds,
   now,
+  onNavigate,
 }: {
   frame: FrameType
   analysis: BatteryAnalysis
   cycleSeconds: number
   now: number
+  onNavigate: () => void
 }): JSX.Element | null {
   const mode = workspaceMode()
   if (mode === 'frameAdmin') {
@@ -576,6 +601,7 @@ function ServerRenderOffer({
         href={powerSettingsUrl(frame)}
         className="mt-1 inline-block text-[11px] font-semibold text-blue-500 underline-offset-2 hover:underline"
         data-testid="battery-server-render-link"
+        onClick={onNavigate}
       >
         Render on the server
       </A>

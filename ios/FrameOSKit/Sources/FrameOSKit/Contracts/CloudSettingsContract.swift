@@ -52,6 +52,11 @@ public struct CloudSettingsContract: Decodable, Sendable {
         return result
     }
 
+    /// The firmware version a profile's key needs (`since`), or nil when ungated.
+    public func since(_ key: String, profile: String) -> String? {
+        profiles[profile]?[key]?.since
+    }
+
     public func restarts(_ key: String, frame: Frame) -> Bool {
         profiles[Self.profile(for: frame)]?[key]?.restart == true
     }
