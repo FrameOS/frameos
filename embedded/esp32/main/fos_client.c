@@ -1214,17 +1214,44 @@ typedef struct {
     fos_render_pull_outcome_t outcome;
     char etag[FOS_RENDER_PULL_ETAG_LEN]; /* the answer's ETag, "" when none fit */
     char code[48];                       /* a refusal's `error` */
+    char scene[128];                     /* X-FrameOS-Scene: what the plane drew, "" when not said */
 } remote_pull_t;
+
+/* The scene the plane drew last (X-FrameOS-Scene): what the render lines of a
+ * frame rendered on the server name, never its own idle runtime's scene. */
+static char s_remote_scene[128] = "";
 
 static bool panel_overlay_pending(void);
 
+static int hex_digit(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    c = (char)(c | 0x20);
+    return c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+}
+
 static esp_err_t remote_pull_header(esp_http_client_event_t *evt)
 {
-    if (evt->event_id == HTTP_EVENT_ON_HEADER && evt->header_key && evt->header_value &&
-        strcasecmp(evt->header_key, "ETag") == 0) {
-        remote_pull_t *pull = (remote_pull_t *)evt->user_data;
+    if (evt->event_id != HTTP_EVENT_ON_HEADER || !evt->header_key || !evt->header_value) return ESP_OK;
+    remote_pull_t *pull = (remote_pull_t *)evt->user_data;
+    if (strcasecmp(evt->header_key, "ETag") == 0) {
         /* Checked before it is kept (fos_render_pull_remember). */
         if (strlcpy(pull->etag, evt->header_value, sizeof(pull->etag)) >= sizeof(pull->etag)) pull->etag[0] = '\0';
+    } else if (strcasecmp(evt->header_key, "X-FrameOS-Scene") == 0) {
+        /* Percent-encoded on the wire (a built-in scene's id has a '/'). */
+        const char *in = evt->header_value;
+        size_t used = 0;
+        while (*in && used + 1 < sizeof(pull->scene)) {
+            int hi = in[0] == '%' ? hex_digit(in[1]) : -1;
+            int lo = hi >= 0 ? hex_digit(in[2]) : -1;
+            if (lo >= 0 && (hi << 4 | lo) >= 0x20) {
+                pull->scene[used++] = (char)(hi << 4 | lo);
+                in += 3;
+            } else {
+                pull->scene[used++] = *in++;
+            }
+        }
+        pull->scene[*in ? 0 : used] = '\0';
     }
     return ESP_OK;
 }
@@ -1561,6 +1588,10 @@ static void push_image_state(const char *scene_id, const fos_display_state_t *st
 {
     fos_config_t *config = fos_config();
     if (!config->backend_url[0] || config->frame_id == 0 || !config->api_key[0]) return;
+    /* Rendered on the server: the backend drew this picture and keeps it, so
+     * sending it back is a megabyte of Wi-Fi for nothing (and its scene id
+     * would be this board's idle runtime's). */
+    if (!renders_locally(config)) return;
     if (!fos_display_present()) return;
     bool lcd = fos_display_is_lcd();
     if (!lcd && !state_valid) return;
@@ -2204,7 +2235,13 @@ static esp_err_t render_once(bool quiet)
         scene_id[0] = '\0';
         scene_name[0] = '\0';
     } else {
-        current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+        if (local_render) {
+            current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+        } else {
+            /* Rendered on the server: the plane's scene, not the idle runtime's. */
+            strlcpy(scene_id, s_remote_scene, sizeof(scene_id));
+            scene_name[0] = '\0';
+        }
         log_render_event("render:scene", scene_id, scene_name, "rendering", "start",
                          mode, fos_display_present() ? "pending" : "none", "",
                          render_attempt, 0, width, height, format, buf_len, ESP_OK);
@@ -2245,6 +2282,13 @@ static esp_err_t render_once(bool quiet)
             ESP_LOGW(TAG, "local render requested but nim runtime unavailable; trying remote");
         }
         err = fetch_remote_bitmap(buf, buf_len, &pull);
+        if (pull.scene[0]) {
+            strlcpy(s_remote_scene, pull.scene, sizeof(s_remote_scene));
+            if (!quiet) {
+                strlcpy(scene_id, pull.scene, sizeof(scene_id));
+                scene_name[0] = '\0';
+            }
+        }
         if (pull.outcome == FOS_RENDER_PULL_REFUSED) {
             /* What was held for the plane goes: it will not take it. */
             relay_lock();
