@@ -31,7 +31,7 @@ the `.xcodeproj`.
 | `project.yml` | the XcodeGen spec |
 | `FrameOSUITests/` | the UI tests: the sign-in screen, and a tour of the whole app against a backend |
 | `project.yml` | the XcodeGen spec |
-| `bin/` | `open`, `test`, `check-ui`, `ui-test`, `test-backend` |
+| `bin/` | `open`, `test`, `check-ui`, `ui-test`, `simulator` (the one the UI tests use), `test-backend` |
 
 ## Tests
 
@@ -74,7 +74,10 @@ FRAMEOS_UITEST_CLOUD=http://localhost:3000 FRAMEOS_UITEST_CLOUD_EMAIL=… FRAMEO
 CI's **iOS app** job (`.github/workflows/ios.yml`) runs FrameOSKit's tests,
 builds the app for the simulator and runs the UI tests without a backend
 (the sign-in screen), on every change under `ios/` and to the corpora and
-contracts it reads.
+contracts it reads. A fresh runner's simulator takes minutes to boot the first
+time, so the job starts it booting before anything else (`bin/simulator
+--boot`) and builds once, for testing (`bin/ui-test --build-only`), while it
+boots; `bin/ui-test --without-building` then runs the tests on that build.
 
 ## Signing in
 
