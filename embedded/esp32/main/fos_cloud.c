@@ -520,6 +520,10 @@ static void add_hardware_json(cJSON *parent)
     /* The clock setting and the clock it gave (main.c, at boot). */
     cJSON_AddStringToObject(hw, "cpuMode", fos_config_cpu_mode_name(config->cpu_mode));
     cJSON_AddNumberToObject(hw, "cpuMhz", (double)(esp_clk_cpu_freq() / 1000000));
+    /* Where the scenes run (docs/server-rendering.md): this board's runtime,
+     * when it has one that fits the panel, or the cloud's. */
+    cJSON_AddBoolToObject(hw, "localRenderSupported", fos_client_local_render_capable());
+    cJSON_AddStringToObject(hw, "renderMode", fos_client_render_mode_name());
     /* The status LED the buzzer's notes light (fos_led.c; -1 = none) and how
      * it is lit, the preset's when no push set them. */
     cJSON_AddNumberToObject(hw, "ledPin", config->led_pin);
@@ -2208,7 +2212,8 @@ static void select_pushed_scene(const char *scene_id, const cJSON *state, fos_ev
         printed = cJSON_PrintUnformatted(payload);
     }
     cJSON_Delete(payload);
-    if (printed == NULL || fos_events_dispatch(origin, FOS_EVENT_SET_CURRENT_SCENE, printed) != FOS_EVENT_DONE) {
+    if (printed == NULL ||
+        fos_events_dispatch_from_plane(origin, FOS_EVENT_SET_CURRENT_SCENE, printed) != FOS_EVENT_DONE) {
         fos_scenes_select(scene_id); /* the switch, at least */
     }
     cJSON_free(printed);
@@ -2724,6 +2729,17 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     if (debug != NULL) {
         config->debug_logging = cJSON_IsTrue(debug);
     }
+    /* Where the scenes run (docs/server-rendering.md): `remote` hands them to
+     * the cloud, which answers this frame's render pulls. Live: the next
+     * pass pulls, or renders, the other way. A board without a runtime
+     * stays remote whatever it is told. */
+    const cJSON *render_mode = cJSON_GetObjectItem(settings, "render_mode");
+    bool render_mode_said = cJSON_IsString(render_mode);
+    if (render_mode_said) {
+        config->render_mode = strcmp(render_mode->valuestring, "remote") == 0 || !fos_client_local_render_capable()
+                                  ? FOS_RENDER_REMOTE
+                                  : FOS_RENDER_LOCAL;
+    }
     /* Per-request HTTP body ceiling: handed to frameos_nim_init once at boot
      * (main.c), so a change takes the same deferred reboot as rotate. Same
      * floor as the local admin API; the ceiling is the Pi runtime's default
@@ -2793,6 +2809,9 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         frameos_nim_log_hook(line);
     }
     ws_ack(id, true, NULL);
+    /* Said again or changed, a refusal the cloud gave before is forgotten:
+     * it is the one that just answered for this frame. */
+    if (render_mode_said) fos_client_render_mode_changed();
     if (restart_for_init && !battery_changed && !rotate_changed) {
         ESP_LOGW(TAG, "ws: boot-time setting changed (http ceiling %lu, %u buttons, cpu %s); restarting",
                  (unsigned long)config->max_http_response_bytes, (unsigned)config->gpio_button_count,
@@ -2835,10 +2854,12 @@ static void ws_ack_unparseable(const char *data, size_t len)
  *
  * `render`, `set_current_scene`, `reboot` / `restart_runtime` and
  * `scene_event` are scene events said by the provider: each goes through
- * fos_events_dispatch with the `cloud` origin, the one routing function the
- * HTTP route, the schedule, the console and the buttons use, so what the
- * provider may say is the contract's answer (docs/events-contract.json) and
- * not a list kept here. The verbs keep their own ack tokens. */
+ * the one routing function the HTTP route, the schedule, the console and the
+ * buttons use (fos_events_dispatch_from_plane: the same, except that a frame
+ * rendered on the server does not relay what its plane said back to it), so
+ * what the provider may say is the contract's answer
+ * (docs/events-contract.json) and not a list kept here. The verbs keep their
+ * own ack tokens. */
 
 /* A verb with no payload of its own: render, reboot, restart_runtime. Acked
  * BEFORE the dispatch — a restart does not come back to send one, and the
@@ -2851,7 +2872,7 @@ static void ws_handle_event_verb(const char *event, const cJSON *id, fos_event_o
         return;
     }
     ws_ack(id, true, NULL);
-    fos_events_dispatch(origin, event, NULL);
+    fos_events_dispatch_from_plane(origin, event, NULL);
 }
 
 /* `set_current_scene {scene_id, state?}` → setCurrentScene {sceneId, state?},
@@ -2880,7 +2901,7 @@ static void ws_handle_set_current_scene(const cJSON *root, const cJSON *id, fos_
         ws_ack(id, false, "no_memory");
         return;
     }
-    fos_event_result_t result = fos_events_dispatch(origin, FOS_EVENT_SET_CURRENT_SCENE, printed);
+    fos_event_result_t result = fos_events_dispatch_from_plane(origin, FOS_EVENT_SET_CURRENT_SCENE, printed);
     cJSON_free(printed);
     if (result == FOS_EVENT_DONE) {
         ws_ack(id, true, NULL);
@@ -2924,7 +2945,7 @@ static void ws_handle_scene_event(const cJSON *root, const cJSON *id, fos_event_
         ws_ack(id, false, "no_memory");
         return;
     }
-    fos_event_result_t result = fos_events_dispatch(origin, name, printed);
+    fos_event_result_t result = fos_events_dispatch_from_plane(origin, name, printed);
     if (printed != NULL) cJSON_free(printed);
     switch (result) {
         case FOS_EVENT_BUSY:

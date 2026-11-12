@@ -6,10 +6,12 @@ token (same scheme as ``/api/log``). Device endpoints:
 - ``GET /api/frames/{id}/embedded/render`` — the thin-client bitmap in the
   panel's wire format. When the frame has scenes and the wasm scene runtime
   is available (node + the emscripten bundle, see
-  ``app/utils/embedded_render.py``), the active scene renders server-side —
-  sandboxed inside wasm, no outbound network. Otherwise (or on any render
-  failure) a diagnostic card is served so the device always gets a frame.
-  Boards with PSRAM normally render on-device via the Nim runtime instead.
+  ``app/utils/embedded_render.py``), the active scene renders server-side,
+  sandboxed inside wasm, its HTTP going through the harness's guarded fetch
+  (``scene_network_policy``). Otherwise (or on any render failure) a
+  diagnostic card is served so the device always gets a frame. A board with
+  PSRAM renders on-device unless it is set to render on the server
+  (``device_config.renderMode``, docs/server-rendering.md).
 - ``GET /api/frames/{id}/embedded/ota/manifest?platform=…`` — the latest
   FrameOS release's OTA manifest for the device's flash layout, relayed from
   the GitHub release (version, size, minisign signature, download URL); the
@@ -30,15 +32,21 @@ token (same scheme as ``/api/log``). Device endpoints:
 
 Wire format for /render ("FOSB"): magic ``FOSB``, version u8 (1), pixel
 format u8 (see ``fos_pixel_format_t``), width u16le, height u16le, reserved
-u16, then the packed payload bytes for that format.
+u16, then the packed payload bytes for that format. The response carries an
+``ETag`` (the first 32 hex digits of the body's sha256) and answers a pull
+whose ``If-None-Match`` names it with 304: the panel already shows it
+(docs/server-rendering.md "The render pull").
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
 import struct
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
 
@@ -61,7 +69,22 @@ from app.models.frame import (
 from app.models.settings import get_settings_dict
 from app.redis import get_redis
 from app.utils.embedded_render import RenderQueueFull, render_scene_rgba_and_state
-from app.utils.frame_commands import previewed_scenes
+from app.utils.events_contract_gen import BUILT_IN_SCENE_IDS
+from app.utils.frame_commands import pending_command_types, previewed_scenes
+from app.utils.server_render import (
+    PRERENDER_MAX_SKEW_SECONDS,
+    bump_render_revision,
+    epoch_ms,
+    etag_matches,
+    fosb_etag,
+    keep_prerender,
+    prerender_as_of,
+    prerender_usable,
+    remember_render_ms,
+    render_fingerprint,
+    render_revision,
+    take_prerender,
+)
 from app.api.firmware_release import latest_release_ota_manifest, stream_latest_release_ota_image
 from app.tasks.embedded_firmware import (
     EMBEDDED_IMAGE_FORMAT_BIN,
@@ -260,7 +283,7 @@ def render_embedded_diagnostic_bitmap(frame: Frame, width: int, height: int, pix
     return pack_image_for_panel(embedded_diagnostic_image(frame, width, height), pixel_format)
 
 
-def embedded_diagnostic_image(frame: Frame, width: int, height: int):
+def embedded_diagnostic_image(frame: Frame | _PanelFrame, width: int, height: int):
     """The diagnostic card as a PIL RGB image (also used by virtual frames)."""
     from PIL import Image, ImageDraw
 
@@ -290,8 +313,73 @@ def embedded_diagnostic_image(frame: Frame, width: int, height: int):
     return image
 
 
-def pack_image_for_panel(image, pixel_format: int) -> bytes:
-    """Pack an RGB(A) PIL image into the panel's FOSB payload format."""
+# The stock tables of the palette panels, by `fos_pixel_format_t`: the Nim
+# runtime's saturated4ColorPalette / saturated7ColorPalette /
+# spectra6ColorPalette (frameos/src/frameos/utils/dither.nim), which
+# test_server_rendering pins these against.
+STOCK_PANEL_PALETTES: dict[int, list[tuple[int, int, int]]] = {
+    FOS_PIXEL_2BPP_BWYR: BWYR_PALETTE,
+    FOS_PIXEL_4BPP_7COLOR: SEVEN_COLOR_PALETTE,
+    FOS_PIXEL_4BPP_SPECTRA6: SPECTRA6_PALETTE,
+}
+_HEX_COLOR = re.compile(r"^#?([0-9a-fA-F]{6})$")
+
+
+def palette_colors(value: object) -> list[tuple[int, int, int]]:
+    """A colour list as RGB triples: frame.json's `palette` ({"colors":
+    ["#rrggbb", …]}) or the list alone. One unreadable colour empties it, as
+    the runtimes' parsers do (fos_nim_set_palette_impl)."""
+    if isinstance(value, dict):
+        value = value.get("colors")
+    if not isinstance(value, list):
+        return []
+    colors: list[tuple[int, int, int]] = []
+    for entry in value:
+        match = _HEX_COLOR.match(entry.strip()) if isinstance(entry, str) else None
+        if match is None:
+            return []
+        digits = match.group(1)
+        colors.append((int(digits[0:2], 16), int(digits[2:4], 16), int(digits[4:6], 16)))
+    return colors
+
+
+def fit_palette_override(
+    override: list[tuple[int, int, int]], default: list[tuple[int, int, int]]
+) -> list[tuple[int, int, int]]:
+    """``fitPaletteOverride`` (frameos/utils/dither.nim): ``override`` when it
+    names as many colours as ``default``, or one fewer on Spectra 6, whose
+    hole at index 4 is put back; anything else is ``default``."""
+    if not override:
+        return default
+    if len(override) == len(default):
+        return list(override)
+    if len(default) == len(override) + 1 and len(default) > 4 and default[4][0] >= 999:
+        return [*override[:4], default[4], *override[4:]]
+    return default
+
+
+def panel_palette(
+    pixel_format: int, frame_palette: object = None, photo_palette: object = None
+) -> list[tuple[int, int, int]] | None:
+    """The colours a palette panel is dithered to, as the device's packer
+    picks them (``activePalette(framePalette(stock))`` in embedded_main.nim,
+    docs/server-rendering.md "Packing"): a photo's own dither palette from
+    the render, else the frame's `palette`, each fitted onto the stock
+    table. None for a format without a palette."""
+    stock = STOCK_PANEL_PALETTES.get(int(pixel_format))
+    if stock is None:
+        return None
+    return fit_palette_override(palette_colors(photo_palette), fit_palette_override(palette_colors(frame_palette), stock))
+
+
+def pack_image_for_panel(image, pixel_format: int, palette: list[tuple[int, int, int]] | None = None) -> bytes:
+    """Pack an RGB(A) PIL image into the panel's FOSB payload format.
+    ``palette`` replaces a palette panel's stock colours (panel_palette):
+    what each pixel is dithered to, never which index it is written as."""
+    if pixel_format in STOCK_PANEL_PALETTES:
+        stock = STOCK_PANEL_PALETTES[pixel_format]
+        colors = palette if palette is not None and len(palette) == len(stock) else stock
+        return _pack_palette(image, colors, 2 if pixel_format == FOS_PIXEL_2BPP_BWYR else 4)
     if pixel_format == FOS_PIXEL_1BPP:
         return _pack_1bpp(image)
     if pixel_format == FOS_PIXEL_DUAL_1BPP_RED:
@@ -300,12 +388,6 @@ def pack_image_for_panel(image, pixel_format: int) -> bytes:
         return _pack_dual_1bpp(image, (255, 255, 0))
     if pixel_format == FOS_PIXEL_2BPP_GRAY:
         return _pack_2bpp_gray(image)
-    if pixel_format == FOS_PIXEL_2BPP_BWYR:
-        return _pack_palette(image, BWYR_PALETTE, 2)
-    if pixel_format == FOS_PIXEL_4BPP_7COLOR:
-        return _pack_palette(image, SEVEN_COLOR_PALETTE, 4)
-    if pixel_format == FOS_PIXEL_4BPP_SPECTRA6:
-        return _pack_palette(image, SPECTRA6_PALETTE, 4)
     if pixel_format == FOS_PIXEL_4BPP_GRAY:
         return _pack_4bpp_gray(image)
     if pixel_format == FOS_PIXEL_RGB565:
@@ -389,12 +471,13 @@ async def _thin_client_preview(redis, frame: Frame) -> dict | None:
 
 
 async def _thin_client_scenes(
-    db: Session, redis, frame: Frame, scene_states: dict
+    db: Session, redis, frame: Frame, scene_states: dict, device_scene: str | None = None
 ) -> tuple[list | None, str | None, dict]:
     """The scenes a thin client's render runs (None: the saved ones), the
     scene it shows (None: the default) and the states it is seeded with. A
     preview, pushed (the Pico) or queued (an ESP32-C3), runs in place of the
-    saved scenes."""
+    saved scenes. ``device_scene`` is the scene the board's own runtime is
+    on, from its pull (an ESP32-S3 rendered on the server)."""
     preview = await _thin_client_preview(redis, frame)
     if preview is not None:
         scenes = preview["scenes"]
@@ -406,13 +489,46 @@ async def _thin_client_scenes(
             scene_states = {**scene_states, scene_id: {**scene_states.get(scene_id, {}), **state}}
         return scenes, scene_id, scene_states
     queued = previewed_scenes(db, frame)
-    return queued, await _active_scene_id(redis, frame, queued), scene_states
+    return queued, await _scene_to_draw(db, redis, frame, queued, device_scene), scene_states
 
 
-async def _active_scene_id(redis, frame: Frame, scenes: list | None = None) -> str | None:
+async def _scene_to_draw(
+    db: Session, redis, frame: Frame, scenes: list | None, device_scene: str | None
+) -> str | None:
+    """docs/server-rendering.md "Which scene": a switch the backend queued
+    that the board has not taken yet is the backend's to make; otherwise the
+    board's own runtime says which scene it is on (a key, the schedule, a
+    switch it already took), when that is one of the frame's scenes; then
+    the backend's active scene, then the default. The board's word becomes
+    the backend's active scene, so a picture drawn ahead of its next wake
+    shows the same scene."""
+    if device_scene:
+        source = scenes if scenes is not None else (frame.scenes or [])
+        known = {scene.get("id") for scene in source if isinstance(scene, dict)}
+        if device_scene in known and "set_current_scene" not in pending_command_types(db, frame):
+            if redis is not None:
+                key = f"frame:{frame.id}:active_scene"
+                try:
+                    current = await redis.get(key)
+                    if isinstance(current, bytes):
+                        current = current.decode("utf-8", errors="replace")
+                    if current != device_scene:
+                        await redis.set(key, device_scene)
+                except Exception:
+                    pass
+            return device_scene
+    return await _active_scene_id(redis, frame, scenes, built_in=True)
+
+
+async def _active_scene_id(
+    redis, frame: Frame, scenes: list | None = None, *, built_in: bool = False
+) -> str | None:
     """The workspace-activated scene, when one is cached and is one of
     `scenes` (default: the saved ones); None lets the wasm runtime fall back
-    to the scene marked default (same choice the device runtime makes)."""
+    to the scene marked default (same choice the device runtime makes).
+    ``built_in``: the scene switcher or the scene settings count too, which
+    the render pull of a frame rendered here keeps while the frame is awake
+    (docs/server-rendering.md "Keys, touch and the schedule")."""
     if redis is None:
         return None
     try:
@@ -430,14 +546,88 @@ async def _active_scene_id(redis, frame: Frame, scenes: list | None = None) -> s
     # scene (bench-c3, 2026-09-05). A stale id is the same as no id.
     source = scenes if scenes is not None else (frame.scenes or [])
     known = {scene.get("id") for scene in source if isinstance(scene, dict)}
+    if built_in and value in BUILT_IN_SCENE_IDS:
+        return value
     return value if value in known else None
 
 
-# A thin client's button edges since its last pull: a few per press, and a
-# board that was mashed is still a handful (frameos/relayed_input.nim takes 32).
+async def _keep_rendered_scene(redis, frame: Frame, plan: "_ThinClientPlan", rendered_state: dict | None) -> None:
+    """The scene the render ended on is the frame's now: a relayed key, a
+    tap or a schedule entry may have switched it (its own `setCurrentScene`,
+    the event map's previous / next, the scene switcher), and the next pull
+    must draw that one (docs/server-rendering.md "Keys, touch and the
+    schedule"). A built-in scene is kept too, until the frame sleeps
+    (leave_built_in_scene)."""
+    if redis is None or not isinstance(rendered_state, dict):
+        return
+    scene_id = rendered_state.get("sceneId")
+    if not isinstance(scene_id, str) or not scene_id:
+        return
+    source = plan.scenes_override if plan.scenes_override is not None else (frame.scenes or [])
+    known = {scene.get("id") for scene in source if isinstance(scene, dict)}
+    if scene_id not in known and scene_id not in BUILT_IN_SCENE_IDS:
+        return
+    key = f"frame:{frame.id}:active_scene"
+    try:
+        current = await redis.get(key)
+        if isinstance(current, bytes):
+            current = current.decode("utf-8", errors="replace")
+        if current != scene_id:
+            await redis.set(key, scene_id)
+    except Exception:
+        # A scene that could not be remembered must not cost the device its frame.
+        pass
+
+
+async def leave_built_in_scene(redis, frame: Frame) -> None:
+    """A frame rendered here that is going to sleep while the scene switcher
+    or the scene settings show goes back to the scene they were opened from
+    (their `state.from`), as its own runtime would: a device never keeps a
+    built-in scene through a sleep. Before the picture for the wake is drawn
+    (models/log.py). The built-in scene's kept state goes too."""
+    from app.tasks.embedded_firmware import is_thin_client_frame
+    from .virtual_frame import get_virtual_scene_states, replace_virtual_scene_states
+
+    if redis is None or not is_thin_client_frame(frame):
+        return
+    key = f"frame:{frame.id}:active_scene"
+    try:
+        current = await redis.get(key)
+    except Exception:
+        return
+    if isinstance(current, bytes):
+        current = current.decode("utf-8", errors="replace")
+    if current not in BUILT_IN_SCENE_IDS:
+        return
+    try:
+        states = await get_virtual_scene_states(redis, frame)
+    except Exception:
+        states = {}
+    kept = states.pop(current, None)
+    opener = kept.get("from") if isinstance(kept, dict) else None
+    known = {scene.get("id") for scene in (frame.scenes or []) if isinstance(scene, dict)}
+    try:
+        if isinstance(opener, str) and opener in known:
+            await redis.set(key, opener)
+        else:
+            await redis.delete(key)
+        if kept is not None:
+            await replace_virtual_scene_states(redis, frame, states)
+    except Exception:
+        pass
+
+
+# What a thin client's scene would have heard since its last pull: a few
+# edges or events per press, and a board that was mashed is still a handful
+# (frameos/relayed_input.nim takes 32, edges and events together).
 MAX_DEVICE_INPUT_BYTES = 16 * 1024
 MAX_DEVICE_INPUT_EDGES = 32
+MAX_DEVICE_EVENT_NAME = 64
 _DEVICE_INPUT_LABEL = re.compile(r"^[A-Za-z0-9_.-]{1,16}$")
+# The producers a board has besides its control plane (relayed_input.nim
+# RelayedOrigins): what the plane sent it is the plane's already, and the
+# console (`system`) stays on the board.
+RELAYED_EVENT_ORIGINS = frozenset({"driver", "schedule", "http:write", "http:admin"})
 
 
 def _json_int(value: object) -> bool:
@@ -445,17 +635,28 @@ def _json_int(value: object) -> bool:
 
 
 def embedded_device_input(body: object) -> dict:
-    """The button edges a thin client sent with its render pull, as the wasm
-    runtime takes them (frameos/relayed_input.nim): ``{"nowMs": <the board's
-    clock>, "edges": [{"label", "action": "down" | "up", "atMs", "pin"?,
-    "wake"?}]}``, oldest first. A body of another shape is a 400; an edge
-    that says nothing usable is dropped, and past MAX_DEVICE_INPUT_EDGES the
-    rest are."""
-    if not isinstance(body, dict) or not _json_int(body.get("nowMs")) or not isinstance(body.get("edges"), list):
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Expected {nowMs, edges}")
+    """What a thin client sent with its render pull, as the wasm runtime takes
+    it (frameos/relayed_input.nim; docs/server-rendering.md "Keys, touch and
+    the schedule"): ``{"nowMs": <the board's clock>, "edges": [{"label",
+    "action": "down" | "up", "atMs", "pin"?, "wake"?, "claimed"?}],
+    "events": [{"origin", "name", "payload"}]}``, oldest first, at least one
+    of the lists. The Pico sends its button edges; an ESP32 rendered on the
+    server what its producers would have handed its own scene, each with its
+    origin. A body of another shape is a 400; an edge or event that says
+    nothing usable (an origin the board does not have, a payload that is
+    not an object) is dropped, and past MAX_DEVICE_INPUT_EDGES, both lists
+    together, the rest are. ``events`` is in the result only when it holds
+    one."""
+    if not isinstance(body, dict) or not _json_int(body.get("nowMs")):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Expected {nowMs, edges} or {nowMs, events}")
+    raw_edges, raw_events = body.get("edges"), body.get("events")
+    if (raw_edges is None and raw_events is None) or (
+        raw_edges is not None and not isinstance(raw_edges, list)
+    ) or (raw_events is not None and not isinstance(raw_events, list)):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Expected {nowMs, edges} or {nowMs, events}")
     now_ms = int(body["nowMs"])
     edges: list[dict] = []
-    for edge in body["edges"]:
+    for edge in raw_edges or []:
         if len(edges) >= MAX_DEVICE_INPUT_EDGES:
             break
         if not isinstance(edge, dict):
@@ -472,8 +673,32 @@ def embedded_device_input(body: object) -> dict:
             kept["pin"] = edge["pin"]
         if edge.get("wake") is True:
             kept["wake"] = True
+        if edge.get("claimed") is True:
+            kept["claimed"] = True
         edges.append(kept)
-    return {"nowMs": now_ms, "edges": edges}
+    events: list[dict] = []
+    for event in raw_events or []:
+        if len(edges) + len(events) >= MAX_DEVICE_INPUT_EDGES:
+            break
+        if not isinstance(event, dict):
+            continue
+        origin, name, payload = event.get("origin"), event.get("name"), event.get("payload", {})
+        if origin not in RELAYED_EVENT_ORIGINS:
+            continue
+        if not isinstance(name, str) or not 0 < len(name) <= MAX_DEVICE_EVENT_NAME:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        events.append({"origin": origin, "name": name, "payload": payload})
+    result: dict = {"nowMs": now_ms, "edges": edges}
+    if events:
+        result["events"] = events
+    return result
+
+
+def device_input_says_anything(device_input: dict | None) -> bool:
+    """Whether a relayed input carries an edge or an event to deliver."""
+    return bool(device_input and (device_input.get("edges") or device_input.get("events")))
 
 
 # Scene events sent to a thin client wait for its next render pull; a board
@@ -495,6 +720,17 @@ async def hold_thin_client_event(redis, frame: Frame, name: str, payload: object
     record = {"name": name, "payload": payload if isinstance(payload, dict) else {}, "origin": origin}
     await redis.rpush(key, json.dumps(record, separators=(",", ":")))
     await redis.ltrim(key, -MAX_THIN_CLIENT_EVENTS, -1)
+    # A picture drawn ahead of the board's wake did not hear it.
+    await bump_render_revision(redis, int(frame.id))
+
+
+async def _held_thin_client_event_count(redis, frame: Frame) -> int:
+    if redis is None:
+        return 0
+    try:
+        return int(await redis.llen(_thin_client_events_key(int(frame.id))))
+    except Exception:
+        return 0
 
 
 async def _take_thin_client_events(redis, frame: Frame) -> list[dict]:
@@ -557,24 +793,42 @@ async def _log_scene_heard(db: Session, redis, frame: Frame, scene_logs: list[st
         await new_log(db, redis, int(frame.id), "webhook", line)
 
 
+# The board's word for which scene it is on (docs/server-rendering.md "Which
+# scene"): a scene id as the runtime keeps it.
+MAX_DEVICE_SCENE_CHARS = 256
+
+
+def _device_scene(scene: str | None) -> str | None:
+    if not isinstance(scene, str):
+        return None
+    scene = scene.strip()
+    return scene if 0 < len(scene) <= MAX_DEVICE_SCENE_CHARS else None
+
+
 @api_public.get("/frames/{id:int}/embedded/render")
 async def api_embedded_device_render(
     id: int,
+    scene: str | None = Query(None),
     db: Session = Depends(get_db),
     redis=Depends(get_redis),
     authorization: str = Header(None),
+    if_none_match: str | None = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
-    return await _embedded_render_response(db, redis, frame)
+    return await _embedded_render_response(
+        db, redis, frame, device_scene=_device_scene(scene), if_none_match=if_none_match
+    )
 
 
 @api_public.post("/frames/{id:int}/embedded/render")
 async def api_embedded_device_render_with_input(
     id: int,
     request: Request,
+    scene: str | None = Query(None),
     db: Session = Depends(get_db),
     redis=Depends(get_redis),
     authorization: str = Header(None),
+    if_none_match: str | None = Header(None),
 ):
     """The pull of a thin client whose buttons were pressed since the last
     one: the same frame, with the presses delivered to the scene first, as
@@ -587,49 +841,210 @@ async def api_embedded_device_render_with_input(
         body = json.loads(raw or b"null")
     except ValueError:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid JSON")
-    return await _embedded_render_response(db, redis, frame, embedded_device_input(body))
+    return await _embedded_render_response(
+        db,
+        redis,
+        frame,
+        embedded_device_input(body),
+        device_scene=_device_scene(scene),
+        if_none_match=if_none_match,
+    )
 
 
-async def _embedded_render_response(db: Session, redis, frame: Frame, device_input: dict | None = None) -> Response:
-    width, height = embedded_render_dimensions(frame)
-    scene_width, scene_height = embedded_scene_dimensions(frame, width, height)
-    pixel_format = embedded_pixel_format_for_panel(embedded_panel_for_frame(frame))
+@dataclass
+class _ThinClientPlan:
+    """What one picture of a thin client is drawn from: the panel, the
+    scenes (None: the saved ones), the scene shown (None: the default), the
+    stored states it is seeded with and the service settings. The
+    fingerprint names all of it but the states (docs/server-rendering.md)."""
 
-    # Thin-client scene render: the frame's scenes run inside the wasm scene
-    # runtime (QuickJS sandboxed in wasm, no outbound network) in a bounded
-    # Node subprocess. Any failure — no scenes, no node/wasm toolchain, scene
-    # error, timeout — falls back to the diagnostic bitmap below, so the
-    # device always gets a valid frame.
-    #
+    width: int
+    height: int
+    scene_width: int
+    scene_height: int
+    pixel_format: int
+    scenes_override: list | None
+    scene_id: str | None
+    scene_states: dict
+    settings: dict
+    frame_json: dict
+    fingerprint: str
+
+
+def thin_client_frame_json(frame: Frame, pixel_format: int) -> dict:
+    """What else of frame.json the frame's own runtime keeps, for its render
+    here (frameos_wasm_set_frame): its event map (only when the backend holds
+    one, as `/embedded/settings` sends it), its palette and colours, its
+    buttons, its panel's format and its rotation."""
+    colors = getattr(frame, "colors", None)
+    frame_json: dict = {
+        "palette": [f"#{r:02x}{g:02x}{b:02x}" for r, g, b in palette_colors(getattr(frame, "palette", None))],
+        "colors": colors if isinstance(colors, dict) else {},
+        "pixelFormat": int(pixel_format),
+        "rotate": int(getattr(frame, "rotate", 0) or 0) % 360,
+    }
+    event_map = getattr(frame, "event_map", None)
+    if isinstance(event_map, list):
+        frame_json["eventMap"] = normalize_event_map(event_map)
+    buttons = getattr(frame, "gpio_buttons", None)
+    if isinstance(buttons, list):
+        frame_json["gpioButtons"] = [dict(button) for button in buttons if isinstance(button, dict)]
+    return frame_json
+
+
+async def _thin_client_plan(db: Session, redis, frame: Frame, device_scene: str | None = None) -> _ThinClientPlan:
     # A thin client keeps no scene state — every pass is a fresh wasm process
     # — so the backend is the memory, exactly as for virtual frames and in
     # the same redis store: seed the renderer with it, keep what comes back.
     # Without this a slideshow never advances. (Imported here: virtual_frame
     # imports this module.)
-    from .virtual_frame import get_virtual_scene_states, store_rendered_scene_state
+    from .virtual_frame import get_virtual_scene_states
 
-    packed: bytes | None = None
+    width, height = embedded_render_dimensions(frame)
+    scene_width, scene_height = embedded_scene_dimensions(frame, width, height)
+    pixel_format = embedded_pixel_format_for_panel(embedded_panel_for_frame(frame))
     try:
         scene_states = await get_virtual_scene_states(redis, frame)
     except Exception:
         # Same tolerance as _active_scene_id: no redis, no memory, still a frame.
         scene_states = {}
-    scenes_override, scene_id, scene_states = await _thin_client_scenes(db, redis, frame, scene_states)
-    relayed = device_input if device_input and device_input["edges"] else None
-    control_events = await _take_thin_client_events(redis, frame)
+    scenes_override, scene_id, scene_states = await _thin_client_scenes(
+        db, redis, frame, scene_states, device_scene
+    )
+    settings = embedded_settings_payload(db, frame)
+    frame_json = thin_client_frame_json(frame, pixel_format)
+    fingerprint = render_fingerprint(
+        scenes_override if scenes_override is not None else (frame.scenes or []),
+        # The packer's palette and the render's event map and colours are
+        # what the picture was drawn from too.
+        {"settings": settings, "frame": frame_json},
+        scene_id,
+        width,
+        height,
+        pixel_format,
+        int(frame.rotate or 0),
+    )
+    return _ThinClientPlan(
+        width=width,
+        height=height,
+        scene_width=scene_width,
+        scene_height=scene_height,
+        pixel_format=pixel_format,
+        scenes_override=scenes_override,
+        scene_id=scene_id,
+        scene_states=scene_states,
+        settings=settings,
+        frame_json=frame_json,
+        fingerprint=fingerprint,
+    )
+
+
+async def _keep_rendered_state(redis, frame: Frame, rendered_state: dict | None) -> None:
+    """Store the state a render ended with, under the scene the renderer says
+    it showed. A render whose state seeding failed (old wasm bundle without
+    the set_scene_state export) reads back bare scene defaults, which must
+    not clobber the store."""
+    from .virtual_frame import store_rendered_scene_state
+
+    if not isinstance(rendered_state, dict):
+        return
+    state = rendered_state.get("state")
+    if isinstance(state, dict) and rendered_state.get("seeded", True):
+        try:
+            await store_rendered_scene_state(redis, frame, rendered_state.get("sceneId"), state)
+        except Exception:
+            # A state that could not be saved must not cost the device its frame.
+            pass
+
+
+@dataclass(frozen=True)
+class _PanelFrame:
+    """What packing reads of a frame (the diagnostic card's name and id, the
+    rotation, the palette), read on the event loop: the packing runs on a
+    worker thread, where an ORM row expired by a commit would lazy-load on
+    the request's session from the wrong thread."""
+
+    id: int
+    name: str | None
+    rotate: int
+    palette: object
+
+    @classmethod
+    def of(cls, frame: Frame) -> "_PanelFrame":
+        return cls(int(frame.id), frame.name, int(frame.rotate or 0), getattr(frame, "palette", None))
+
+
+async def _fosb_off_the_loop(
+    frame: Frame, plan: _ThinClientPlan, rgba: bytes | None, photo_palette: list[str] | None = None
+) -> bytes:
+    """_fosb_from_rgba on a worker thread. Dithering a 13.3" Spectra 6 panel
+    is ~0.2 s of CPU, which on the event loop stalls every other request and
+    every device's pull meanwhile (Pillow lets go of the GIL in its convert,
+    and the Python part is preempted). The cloud packs in its render worker
+    for the same reason (docs/server-rendering.md "Packing")."""
+    return await asyncio.to_thread(_fosb_from_rgba, _PanelFrame.of(frame), plan, rgba, photo_palette)
+
+
+def _fosb_from_rgba(
+    frame: Frame | _PanelFrame,
+    plan: _ThinClientPlan,
+    rgba: bytes | None,
+    photo_palette: list[str] | None = None,
+) -> bytes:
+    """The panel's bitmap: the render turned and packed, or, without one, the
+    diagnostic card, drawn upright for the viewer and turned like a scene.
+    Dithered to the colours the device's own packer would use
+    (panel_palette): ``photo_palette`` is the render's photo palette."""
+    from PIL import Image
+
+    if rgba is not None:
+        image = Image.frombytes("RGBA", (plan.scene_width, plan.scene_height), rgba).convert("RGB")
+    else:
+        image = embedded_diagnostic_image(frame, plan.scene_width, plan.scene_height)
+    palette = panel_palette(
+        plan.pixel_format, getattr(frame, "palette", None), photo_palette if rgba is not None else None
+    )
+    packed = pack_image_for_panel(rotate_for_panel(image, frame.rotate), plan.pixel_format, palette)
+    expected = embedded_buffer_size(plan.width, plan.height, plan.pixel_format)
+    if len(packed) != expected:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail=f"packed buffer {len(packed)} != expected {expected}")
+    return fosb_payload(plan.width, plan.height, plan.pixel_format, packed)
+
+
+async def _render_thin_client_now(
+    db: Session,
+    redis,
+    frame: Frame,
+    plan: _ThinClientPlan,
+    *,
+    control_events: list[dict],
+    relayed: dict | None,
+) -> bytes:
+    """One render for the pull, the held events and the board's presses
+    heard first.
+
+    The frame's scenes run inside the wasm scene runtime (QuickJS sandboxed in
+    wasm) in a bounded Node subprocess. Any failure — no scenes, no node/wasm
+    toolchain, scene error, timeout — falls back to the diagnostic bitmap, so
+    the device always gets a valid frame."""
     scene_logs: list[str] = []
+    photo_palette: list[str] = []
+    started = time.monotonic()
     try:
         rgba, rendered_state, _saved_assets = await render_scene_rgba_and_state(
             frame,
-            scene_width,
-            scene_height,
-            scene_id=scene_id,
-            settings=embedded_settings_payload(db, frame),
-            scenes_override=scenes_override,
-            scene_states=scene_states,
+            plan.scene_width,
+            plan.scene_height,
+            scene_id=plan.scene_id,
+            settings=plan.settings,
+            scenes_override=plan.scenes_override,
+            scene_states=plan.scene_states,
             control_events=control_events or None,
             device_input=relayed,
             scene_logs=scene_logs,
+            frame_json=plan.frame_json,
+            render_palette=photo_palette,
         )
     except RenderQueueFull as exc:
         await _give_back_thin_client_events(redis, frame, control_events)
@@ -642,40 +1057,129 @@ async def _embedded_render_response(db: Session, redis, frame: Frame, device_inp
             detail="Render queue is full, retry later",
             headers={"Retry-After": str(exc.retry_after)},
         )
-    # Stored under the scene the renderer says it showed. A render whose
-    # state seeding failed (old wasm bundle without the set_scene_state
-    # export) reads back bare scene defaults, which must not clobber the store.
-    state = rendered_state.get("state") if rendered_state is not None else None
-    if rendered_state is not None and isinstance(state, dict) and rendered_state.get("seeded", True):
-        try:
-            await store_rendered_scene_state(redis, frame, rendered_state.get("sceneId"), state)
-        except Exception:
-            # A state that could not be saved must not cost the device its frame.
-            pass
+    if rgba is not None:
+        # What the next pre-render's lead is worked out from.
+        await remember_render_ms(redis, int(frame.id), int((time.monotonic() - started) * 1000))
+    await _keep_rendered_state(redis, frame, rendered_state)
+    if rgba is not None and rendered_state is not None and rendered_state.get("seeded", True):
+        await _keep_rendered_scene(redis, frame, plan, rendered_state)
     if relayed or control_events:
         try:
             await _log_scene_heard(db, redis, frame, scene_logs)
         except Exception:
             # Nor may a log line that could not be written.
             pass
-    if rgba is not None:
-        from PIL import Image
+    return await _fosb_off_the_loop(frame, plan, rgba, photo_palette)
 
-        image = Image.frombytes("RGBA", (scene_width, scene_height), rgba).convert("RGB")
-        packed = pack_image_for_panel(rotate_for_panel(image, frame.rotate), pixel_format)
 
-    if packed is None:
-        # Drawn upright for the viewer too, then turned like a scene.
-        packed = pack_image_for_panel(
-            rotate_for_panel(embedded_diagnostic_image(frame, scene_width, scene_height), frame.rotate),
-            pixel_format,
+async def _embedded_render_response(
+    db: Session,
+    redis,
+    frame: Frame,
+    device_input: dict | None = None,
+    *,
+    device_scene: str | None = None,
+    if_none_match: str | None = None,
+) -> Response:
+    """The render pull (docs/server-rendering.md "The render pull"): the
+    picture drawn ahead of the board's wake when it is still the one to show,
+    else a render now; 304 when the board already shows it."""
+    plan = await _thin_client_plan(db, redis, frame, device_scene)
+    relayed = device_input if device_input_says_anything(device_input) else None
+    # Taken whether it is used or not: a kept picture is used once, and one
+    # that does not fit this pull will not fit a later one either.
+    kept = await take_prerender(redis, int(frame.id))
+    control_events = await _take_thin_client_events(redis, frame)
+    body: bytes | None = None
+    if kept is not None and relayed is None and not control_events:
+        record, kept_body = kept
+        if prerender_usable(
+            record,
+            fingerprint=plan.fingerprint,
+            revision=await render_revision(redis, int(frame.id)),
+            now_ms=int(time.time() * 1000),
+        ):
+            body = kept_body
+            # Its state is the scene's now: committed when shown, not drawn.
+            await _keep_rendered_state(redis, frame, record.get("state"))
+    if body is None:
+        body = await _render_thin_client_now(
+            db, redis, frame, plan, control_events=control_events, relayed=relayed
         )
-    expected = embedded_buffer_size(width, height, pixel_format)
-    if len(packed) != expected:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                            detail=f"packed buffer {len(packed)} != expected {expected}")
-    return Response(content=fosb_payload(width, height, pixel_format, packed),
-                    media_type="application/octet-stream")
+    etag = fosb_etag(body)
+    headers = {"ETag": etag, "Cache-Control": "no-store"}
+    if etag_matches(if_none_match, etag):
+        return Response(status_code=HTTPStatus.NOT_MODIFIED, headers=headers)
+    return Response(content=body, media_type="application/octet-stream", headers=headers)
+
+
+async def prerender_thin_client(db: Session, redis, frame: Frame, as_of_ms: int) -> bool:
+    """Draw a sleeping thin client's next picture ahead of its wake, as of
+    ``as_of_ms`` (docs/server-rendering.md "Deep sleep"), and keep it for the
+    pull at the wake. False when nothing was kept: not a thin client, awake
+    already, an event waiting (the pull must hear it), the wake past, a
+    render that failed, or the scene changed while it drew."""
+    from app.tasks.embedded_firmware import is_thin_client_frame
+
+    if not is_thin_client_frame(frame):
+        return False
+    if time.time() * 1000 - as_of_ms > PRERENDER_MAX_SKEW_SECONDS * 1000:
+        return False
+    as_of = prerender_as_of(frame)
+    if as_of is None or abs(epoch_ms(as_of) - as_of_ms) > 1000:
+        return False
+    if await _held_thin_client_event_count(redis, frame) > 0:
+        return False
+    revision = await render_revision(redis, int(frame.id))
+    plan = await _thin_client_plan(db, redis, frame)
+    photo_palette: list[str] = []
+    started = time.monotonic()
+    try:
+        rgba, rendered_state, _saved_assets = await render_scene_rgba_and_state(
+            frame,
+            plan.scene_width,
+            plan.scene_height,
+            scene_id=plan.scene_id,
+            settings=plan.settings,
+            scenes_override=plan.scenes_override,
+            scene_states=plan.scene_states,
+            now_ms=as_of_ms,
+            frame_json=plan.frame_json,
+            render_palette=photo_palette,
+        )
+    except RenderQueueFull:
+        return False
+    if rgba is None:
+        # The pull at the wake renders (and falls back to the card) itself.
+        return False
+    await remember_render_ms(redis, int(frame.id), int((time.monotonic() - started) * 1000))
+    body = await _fosb_off_the_loop(frame, plan, rgba, photo_palette)
+    # Still asleep for the same wake, and nothing written or held meanwhile?
+    # The frame row is read again outside the transaction the plan read in.
+    db.rollback()
+    fresh = db.get(Frame, int(frame.id), populate_existing=True)
+    as_of = prerender_as_of(fresh) if fresh is not None else None
+    if as_of is None or abs(epoch_ms(as_of) - as_of_ms) > 1000:
+        return False
+    if await render_revision(redis, int(frame.id)) != revision:
+        return False
+    if await _held_thin_client_event_count(redis, frame) > 0:
+        return False
+    await keep_prerender(
+        redis,
+        int(frame.id),
+        {
+            "asOfMs": int(as_of_ms),
+            "sceneId": plan.scene_id,
+            "revision": revision,
+            "fingerprint": plan.fingerprint,
+            "state": rendered_state,
+            "etag": fosb_etag(body),
+        },
+        body,
+        int(as_of_ms),
+    )
+    return True
 
 
 def embedded_scenes_payload(db: Session, frame: Frame) -> bytes:
@@ -969,6 +1473,12 @@ def embedded_frame_settings(frame: Frame) -> dict:
         # compact JSON on the device and applied live, no restart. Older
         # firmware ignores the key.
         "colors": frame.colors or {},
+        # frame.json's `palette` ({colors, name?, colorNames?}): the colours
+        # this panel really shows, which the device's packer dithers to
+        # (fos_settings.c keeps the colour list alone, applied live). {} hands
+        # the panel back its own table. The cloud sends it through
+        # set_settings; until 2026-11-12 this pull never did.
+        "palette": frame.palette if isinstance(frame.palette, dict) else {},
         # IANA zone name plus that zone's tzdata slice (app.utils.tz_slice,
         # ~1.5 KB): firmware from 2026.8.34 loads the slice into chrono and
         # keeps its own clock, QuickJS Date and the schedule in the zone

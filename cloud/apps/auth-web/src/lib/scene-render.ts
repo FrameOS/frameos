@@ -6,6 +6,7 @@ import { deflate } from "node:zlib";
 import { zlibSync } from "fflate";
 import { describeOutOfMemory, type DeviceLimits } from "frameos-wasm";
 import { logWarn } from "./log";
+import { panelPackerSource } from "./panel-pack";
 import { addressIsPrivateSource } from "./private-address";
 
 // Headless scene rendering on the server: the same frameos-wasm bundle the
@@ -32,6 +33,15 @@ export type SceneRenderOptions = {
    */
   deviceLimits?: DeviceLimits | null | undefined;
   /**
+   * What a frame rendered on the server relayed with its pull
+   * (docs/server-rendering.md "Keys, touch and the schedule"): its key
+   * edges and the events its own producers would have handed its scene,
+   * each from its origin, every `atMs` on the board's clock. Delivered after
+   * `events` and before the render (`frameos_wasm_device_input`), so the
+   * dispatcher's origin rules, event maps and press timing decide.
+   */
+  deviceInput?: RelayedDeviceInput | undefined;
+  /**
    * Compress the PNG on the thread pool instead of this thread. For a caller
    * whose event loop holds live sockets (the frame hub rendering a virtual
    * frame): a full-HD frame is a few hundred milliseconds of deflate.
@@ -45,6 +55,33 @@ export type SceneRenderOptions = {
    */
   events?: { name: string; origin: string; payload?: unknown }[] | undefined;
   height: number;
+  /**
+   * The time the scene should believe it is, epoch ms: a picture drawn
+   * ahead of a sleeping frame's wake shows the minute it wakes into
+   * (docs/server-rendering.md). Shifts `Date.now` inside the worker, which is
+   * the wasm runtime's only clock; the scene's HTTP (a child process each)
+   * keeps the real one. Omitted renders at the real time.
+   */
+  nowMs?: number | undefined;
+  /**
+   * Pack the picture for a panel in the worker, where the pixels are, and
+   * hand back the FOSB (`fosb` in the result) instead of the pixels: on a
+   * 13.3" Spectra 6 panel the dither is a hundred milliseconds that would
+   * otherwise be the event loop's (docs/server-rendering.md "Packing"). The
+   * panel's native size, `fos_pixel_format_t` and rotation, and the frame's
+   * `palette` colour list; the photo palette is the render's own. The
+   * worker builds its packer from panel-pack.ts's text; when it cannot, the
+   * result carries the RGBA instead, as `rawRgba` does, with `packError`.
+   * Implies no PNG.
+   */
+  pack?: RenderPanelPack | undefined;
+  /**
+   * Hand back the raw RGBA (`rgba` in the result) and skip the PNG: a panel
+   * is packed from the pixels (panel-pack.ts), and a full-size deflate it
+   * never reads is a few hundred milliseconds of the event loop. `png` is
+   * then empty.
+   */
+  rawRgba?: boolean | undefined;
   /**
    * The frame's own render scale (its `render_scale` setting, docs/jsx-ui.md
    * "Scale"): what a UI from a .tsx/.jsx app is laid out for. Omitted, null
@@ -68,6 +105,17 @@ export type SceneRenderOptions = {
   scenes: unknown[];
   /** Frame settings the runtime reads (service keys etc.). */
   settings?: Record<string, unknown> | undefined;
+  /**
+   * The frame's own configuration the device's runtime is handed besides
+   * its scenes (docs/server-rendering.md "Packing", "Keys, touch and the
+   * schedule"): its event map (frame.json `eventMap`, the rules that run
+   * whatever scene shows), its `palette` colour list and its `colors` block,
+   * so the dispatcher and the automatic fit decide as on the device.
+   * Omitted keys leave the runtime's defaults. Its panel too, for a render
+   * for hardware: the format the fit aims at, the rotation a touch is turned
+   * by.
+   */
+  frame?: RenderFrameConfig | undefined;
   /** Give up after this long, worker included; default 30 s. */
   timeoutMs?: number | undefined;
   /** IANA zone the simulated frame lives in; default UTC. */
@@ -77,13 +125,63 @@ export type SceneRenderOptions = {
   width: number;
 };
 
+/** A relayed pull's input, as the device sent it (server-render.ts readDeviceInput). */
+export type RelayedDeviceInput = {
+  edges: Record<string, unknown>[];
+  events: { name: string; origin: string; payload: Record<string, unknown> }[];
+  nowMs: number;
+};
+
+/** SceneRenderOptions.pack. */
+export type RenderPanelPack = {
+  format: number;
+  height: number;
+  /** The frame's `palette` colours, `["#rrggbb", …]` (panel-pack.ts panelPalette). */
+  palette?: unknown;
+  rotate: number;
+  width: number;
+};
+
+/**
+ * SceneRenderOptions.frame: what `frameos_wasm_set_frame` takes (every key
+ * optional). `pixelFormat` is the panel's `fos_pixel_format_t`, which the
+ * automatic fit aims at; `rotate` the frame's, by which a relayed touch's
+ * panel position becomes the scene's point.
+ */
+export type RenderFrameConfig = {
+  colors?: unknown;
+  eventMap?: unknown;
+  palette?: unknown;
+  pixelFormat?: number;
+  rotate?: number;
+};
+
 export type SceneRenderResult = {
   errors: string[];
+  /** The panel's FOSB, packed in the worker, when the render asked for `pack` (and `rgba` is then absent). */
+  fosb?: Buffer;
   height: number;
   logs: string[];
+  /** Why a render that asked for `pack` came back with the RGBA instead. */
+  packError?: string;
+  /**
+   * The photo palette the render drew with last (a colour profile's
+   * `palette`, `["#rrggbb", …]`), which the panel's packer dithers to
+   * (panel-pack.ts panelPalette). Absent when there was none, or the
+   * runtime predates the report.
+   */
+  palette?: string[];
+  /** Empty when the render asked for `rawRgba`. */
   png: Buffer;
   renderMs: number;
-  /** The selected scene's state after the render (what it changed). */
+  /** The pixels, when the render asked for `rawRgba`. */
+  rgba?: Uint8Array;
+  /**
+   * The scene the render ended on: the selected one, or the one an event
+   * switched to. Absent when the runtime could not say.
+   */
+  sceneId?: string;
+  /** The state of the scene the render ended on (what it changed). */
   state: unknown;
   /** PNG of the small copy, when `thumbnailMaxDimension` asked for one. */
   thumbnail?: Buffer;
@@ -299,11 +397,16 @@ export async function renderScenes(
 
 type WorkerResult =
   | {
+      // The RGBA, or the FOSB when `packed`.
       buffer: ArrayBuffer;
       height: number;
       logs: string[];
       ok: true;
+      packError?: string;
+      packed?: boolean;
+      palette: string[] | null;
       renderMs: number;
+      sceneId: string;
       state: unknown;
       width: number;
     }
@@ -323,10 +426,15 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
       resourceLimits: { maxOldGenerationSizeMb: 512 },
       workerData: {
         assetsDir: wasmAssetsDir(),
+        deviceInputJson: options.deviceInput ? JSON.stringify(options.deviceInput) : "",
         deviceLimits: options.deviceLimits ?? null,
         eventsJson: JSON.stringify(options.events ?? []),
+        frameJson: JSON.stringify(options.frame ?? {}),
         height: options.height,
         maxLogs: maxCollectedLogs,
+        nowMs: typeof options.nowMs === "number" && Number.isFinite(options.nowMs) ? options.nowMs : null,
+        pack: options.pack ?? null,
+        packerSource: options.pack ? panelPackerSource : "",
         renderScale: options.renderScale && options.renderScale > 0 ? options.renderScale : 0,
         sceneId: options.sceneId ?? "",
         scenesJson: JSON.stringify(options.scenes),
@@ -379,7 +487,40 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
               result.logs,
             ),
           );
+        const reported = {
+          ...(result.palette && result.palette.length > 0 ? { palette: result.palette } : {}),
+          ...(result.sceneId ? { sceneId: result.sceneId } : {}),
+        };
+        if (result.packed) {
+          resolve({
+            errors: result.logs.filter(isRenderErrorLine),
+            fosb: Buffer.from(result.buffer),
+            height: result.height,
+            logs: result.logs,
+            png: Buffer.alloc(0),
+            renderMs: result.renderMs,
+            ...reported,
+            state: result.state,
+            width: result.width,
+          });
+          return;
+        }
         const rgba = new Uint8Array(result.buffer);
+        if (options.rawRgba || options.pack) {
+          resolve({
+            errors: result.logs.filter(isRenderErrorLine),
+            height: result.height,
+            logs: result.logs,
+            ...(result.packError ? { packError: result.packError } : {}),
+            png: Buffer.alloc(0),
+            renderMs: result.renderMs,
+            rgba,
+            ...reported,
+            state: result.state,
+            width: result.width,
+          });
+          return;
+        }
         const done = (png: Buffer) => {
           const small =
             options.thumbnailMaxDimension && options.thumbnailMaxDimension > 0
@@ -391,6 +532,7 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
             logs: result.logs,
             png,
             renderMs: result.renderMs,
+            ...reported,
             state: result.state,
             ...(small ? { thumbnail: encodePng(small.rgba, small.width, small.height) } : {}),
             width: result.width,
@@ -649,6 +791,16 @@ globalThis.XMLHttpRequest = SyncXMLHttpRequest;
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
+// A render "as of" another time (SceneRenderOptions.nowMs): the runtime reads
+// the wall clock through Date.now (emscripten_date_now), so moving that moves
+// the scene's clock and nothing outside this worker. Set before the module
+// loads; the clock still runs from there.
+if (typeof workerData.nowMs === "number") {
+  const realNow = Date.now.bind(Date);
+  const offset = workerData.nowMs - realNow();
+  Date.now = () => realNow() + offset;
+}
+
 async function main() {
   const wasmBinary = readFileSync(join(workerData.assetsDir, "frameos.wasm"));
   const { default: createFrameOS } = await import(
@@ -717,6 +869,19 @@ async function main() {
       pushLog("render scale unavailable in this runtime build: " + error);
     }
   }
+  // The frame's own configuration (SceneRenderOptions.frame): its event map,
+  // palette, colours, panel format and rotation, as the device's runtime
+  // keeps them; before the scenes load. An old bundle predates the export
+  // and renders without them.
+  if (workerData.frameJson && workerData.frameJson !== "{}") {
+    try {
+      if (!call("frameos_wasm_set_frame", "boolean", ["string"], [workerData.frameJson])) {
+        pushLog(JSON.stringify({ event: "render:frameConfig", error: lastError() }));
+      }
+    } catch (error) {
+      pushLog("frame configuration unavailable in this runtime build: " + error);
+    }
+  }
   const memoryStat = (name) => {
     try {
       return call(name, "number", [], []);
@@ -774,6 +939,21 @@ async function main() {
     }
   }
 
+  // What the frame relayed with its pull (SceneRenderOptions.deviceInput),
+  // after the plane's own held events: its key edges and its producers'
+  // events, each from its origin, through the one dispatcher. An old bundle
+  // predates the export: the pull then only re-renders.
+  if (workerData.deviceInputJson) {
+    try {
+      const delivered = call("frameos_wasm_device_input", "number", ["string"], [workerData.deviceInputJson]);
+      if (delivered < 0) {
+        pushLog(JSON.stringify({ event: "event:refused", name: "deviceInput", reason: lastError() }));
+      }
+    } catch (error) {
+      pushLog("device input unavailable in this runtime build: " + error);
+    }
+  }
+
   // 3: an allocation was refused under the device ceiling. The longjmp out
   // of it leaks what the render held, as on a device (which then restarts),
   // so that is the answer and nothing renders after it.
@@ -826,15 +1006,62 @@ async function main() {
   if (!ptr || !len || len !== width * height * 4) {
     return fail("unexpected frame buffer: " + lastError());
   }
-  const buffer = Module.HEAPU8.buffer.slice(ptr, ptr + len);
   let state = null;
   try {
     state = JSON.parse(call("frameos_wasm_scene_state", "string", [], []));
   } catch {
     state = null;
   }
+  // The scene the render ended on: an event may have switched it.
+  let sceneId = "";
+  try {
+    const info = JSON.parse(call("frameos_wasm_scene_info", "string", [], []));
+    sceneId = info && typeof info.currentSceneId === "string" ? info.currentSceneId : "";
+  } catch {
+    sceneId = "";
+  }
+  // The photo palette it drew with last, which the panel is dithered to.
+  let palette = null;
+  try {
+    const reported = JSON.parse(call("frameos_wasm_render_palette", "string", [], []));
+    palette = Array.isArray(reported) ? reported.filter((color) => typeof color === "string") : null;
+  } catch {
+    palette = null;
+  }
+  // Packed for the panel here, where the pixels are (SceneRenderOptions.pack):
+  // the packer is panel-pack.ts's own, built from its text, and only the
+  // FOSB crosses to the main thread. Anything that goes wrong hands the
+  // pixels over instead, and the main thread packs them as it always did.
+  let packError = "";
+  if (workerData.pack) {
+    try {
+      // __name is the one helper a compiler is known to put into the text:
+      // esbuild's keepNames (tsx, the hub's dev runner) wraps functions to
+      // keep their names. Names do not matter here, so it hands the function
+      // back. Anything else the text needs is a ReferenceError, and the
+      // pixels go to the main thread.
+      const packer = new Function("__name", "return (" + workerData.packerSource + ")")((fn) => fn)();
+      const pack = workerData.pack;
+      const pixels = new Uint8Array(Module.HEAPU8.buffer, ptr, len);
+      const fosb = packer.panelFosb(
+        pixels,
+        { width, height },
+        { format: pack.format, height: pack.height, rotate: pack.rotate, width: pack.width },
+        packer.panelPalette(pack.format, { frame: pack.palette, photo: palette }),
+      );
+      const body = fosb.byteOffset === 0 && fosb.byteLength === fosb.buffer.byteLength ? fosb.buffer : fosb.slice().buffer;
+      parentPort.postMessage(
+        { ok: true, packed: true, buffer: body, width, height, logs, palette, renderMs: Date.now() - started, sceneId, state },
+        [body],
+      );
+      return;
+    } catch (error) {
+      packError = String((error && error.stack) || error).slice(0, 2000);
+    }
+  }
+  const buffer = Module.HEAPU8.buffer.slice(ptr, ptr + len);
   parentPort.postMessage(
-    { ok: true, buffer, width, height, logs, renderMs: Date.now() - started, state },
+    { ok: true, buffer, width, height, logs, palette, renderMs: Date.now() - started, sceneId, state, ...(packError ? { packError } : {}) },
     [buffer],
   );
 }

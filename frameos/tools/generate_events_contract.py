@@ -971,6 +971,11 @@ def gen_py(doc):
     out = [f'"""{BANNER}"""', "", f"EVENTS_CONTRACT_VERSION = {int(doc['version'])}", ""]
     out.append(f"# What a layout's scene node names for the scene it wraps: no scene of the frame.")
     out.append(f"SCENE_YIELD_ID = {json.dumps(doc['scenes']['yield'])}")
+    out.append("# The scenes built into every runtime (the scene switcher, the scene")
+    out.append("# settings): in no scene list, never persisted by a device.")
+    out.append(f"SCENE_SWITCHER_ID = {json.dumps(doc['scenes']['switcher'])}")
+    out.append(f"SCENE_SETTINGS_ID = {json.dumps(doc['scenes']['settings'])}")
+    out.append("BUILT_IN_SCENE_IDS: frozenset[str] = frozenset({SCENE_SWITCHER_ID, SCENE_SETTINGS_ID})")
     out.append("")
     out.append("# origin -> contract events it may not emit. `http:write` is the frame access")
     out.append("# key: what it is refused needs an admin session or the serverApiKey instead.")

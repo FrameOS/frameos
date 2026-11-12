@@ -1,0 +1,45 @@
+{
+  "$comment": "Where an ESP32's scenes run (docs/server-rendering.md), as the settings read it: the SPA's frontend/src/utils/renderOnServer.ts (frameCanRenderItself, cloudFrameRenderMode, backendFrameRenderMode) and the backend Power section's board rule (embeddedPowerProfileFor in frameSettingsSurface.ts, isThinClientEmbeddedPlatform in devices.ts), and the iOS app's port (ios/FrameOSKit/Sources/FrameOSKit/Contracts/RenderOnServer.swift). Both replay this file: cloud/apps/auth-web/src/test/shared-spa/render-on-server-fixtures.test.ts and RenderOnServerFixtureTests.swift. `backendBoards[].powerProfile` is the Power section's profile (null: none, a virtual frame), `offersRenderOnServer` whether its 'Render scenes' row is drawn (an ESP32 profile and not a thin client).",
+  "canRenderItself": [
+    { "hardware": null, "expect": true },
+    { "hardware": {}, "expect": true },
+    { "hardware": { "platform": "esp32-s3" }, "expect": true },
+    { "hardware": { "platform": "ESP32-S3" }, "expect": true },
+    { "hardware": { "platform": "esp32" }, "expect": true },
+    { "hardware": { "platform": "esp32-c3" }, "expect": false },
+    { "hardware": { "platform": "ESP32-C3" }, "expect": false },
+    { "hardware": { "platform": "pico-2w" }, "expect": false },
+    { "hardware": { "platform": "virtual" }, "expect": false },
+    { "hardware": { "platform": "esp32-s3", "localRenderSupported": false }, "expect": false },
+    { "hardware": { "platform": "esp32-s3", "localRenderSupported": true }, "expect": true },
+    { "hardware": { "platform": 3 }, "expect": true }
+  ],
+  "cloudRenderMode": [
+    { "frame": { "render_mode": "remote", "hardware": { "renderMode": "local" } }, "expect": "remote" },
+    { "frame": { "render_mode": "local", "hardware": { "renderMode": "remote" } }, "expect": "local" },
+    { "frame": { "hardware": { "renderMode": "remote" } }, "expect": "remote" },
+    { "frame": { "render_mode": "cloud", "hardware": { "renderMode": "remote" } }, "expect": "remote" },
+    { "frame": { "render_mode": "Thin-Client" }, "expect": "remote" },
+    { "frame": { "render_mode": "On_Device" }, "expect": "local" },
+    { "frame": {}, "expect": "local" },
+    { "frame": { "render_mode": 1 }, "expect": "local" }
+  ],
+  "backendRenderMode": [
+    { "frame": { "device_config": { "renderMode": "remote" } }, "expect": "remote" },
+    { "frame": { "device_config": { "render_mode": "remote" } }, "expect": "remote" },
+    { "frame": { "device_config": { "renderMode": "backend" } }, "expect": "remote" },
+    { "frame": { "device_config": { "renderMode": "local" }, "embedded": { "renderMode": "remote" } }, "expect": "local" },
+    { "frame": { "device_config": {}, "embedded": { "renderMode": "remote" } }, "expect": "remote" },
+    { "frame": { "device_config": { "renderMode": "sideways" }, "embedded": { "render_mode": "remote" } }, "expect": "remote" },
+    { "frame": { "device_config": { "renderMode": null, "render_mode": "remote" } }, "expect": "remote" },
+    { "frame": {}, "expect": "local" }
+  ],
+  "backendBoards": [
+    { "platform": null, "powerProfile": "esp32", "offersRenderOnServer": true },
+    { "platform": "esp32-s3", "powerProfile": "esp32", "offersRenderOnServer": true },
+    { "platform": "esp32-c3", "powerProfile": "esp32", "offersRenderOnServer": false },
+    { "platform": "pico-w", "powerProfile": "pico", "offersRenderOnServer": false },
+    { "platform": "pico-2w", "powerProfile": "pico", "offersRenderOnServer": false },
+    { "platform": "virtual", "powerProfile": null, "offersRenderOnServer": false }
+  ]
+}

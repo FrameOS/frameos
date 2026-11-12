@@ -4,6 +4,7 @@ import { inflateSync } from "node:zlib";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import { esp32DeviceLimits } from "frameos-wasm";
+import { fosbHeaderBytes, panelFosb, panelPalette } from "./panel-pack";
 import {
   acquireRenderSlot,
   downscaleRgba,
@@ -262,6 +263,31 @@ describe.skipIf(!rendererAvailable())("renderScenes", () => {
     expect(result.thumbnail?.readUInt32BE(20)).toBe(40);
     expect(result.state).toMatchObject({ text: "from an event" });
     expect(result.logs.some((line) => line.includes("event:refused"))).toBe(true);
+  }, 60_000);
+
+  // What a pull for a panel asks for (server-render.ts): the picture packed
+  // in the worker from panel-pack.ts's own text, only the FOSB coming back,
+  // byte for byte what the main thread would have packed.
+  it("packs the picture for a panel in its worker", async () => {
+    const scenes = [
+      {
+        edges: [],
+        fields: [],
+        id: "s1",
+        name: "Blue",
+        nodes: [{ data: { keyword: "render" }, id: "e1", position: { x: 0, y: 0 }, type: "event" }],
+        settings: { backgroundColor: "#4a6fa5", execution: "interpreted" },
+      },
+    ];
+    const palette = ["#101010", "#f0f0f0", "#e0d000", "#c00000", "#2040c0", "#20a040"];
+    const panel = { format: 7 as const, height: 160, rotate: 90, width: 120 };
+    const pixels = await renderScenes({ height: 120, rawRgba: true, scenes, width: 160 });
+    const packed = await renderScenes({ height: 120, pack: { ...panel, palette }, rawRgba: true, scenes, width: 160 });
+    expect(packed.packError).toBeUndefined();
+    expect(packed.rgba).toBeUndefined();
+    expect(packed.fosb?.length).toBe(fosbHeaderBytes + 60 * 160);
+    const expected = panelFosb(pixels.rgba!, { height: 120, width: 160 }, panel, panelPalette(7, { frame: palette }));
+    expect(packed.fosb?.equals(expected)).toBe(true);
   }, 60_000);
 
   it("fails a render that does not fit the device's memory as render_out_of_memory", async () => {

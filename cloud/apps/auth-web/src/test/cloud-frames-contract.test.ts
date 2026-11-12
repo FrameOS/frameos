@@ -106,8 +106,9 @@ describe("settings parity between the device planes", () => {
     // `touch_beep` (2026.11.6): the click of a press on an ESP32's e-paper
     // glass; no Pi frame has an e-paper touch panel with a buzzer. 18 with
     // `cpu_mode` (2026.11.7): the chip's clock, set at boot; a Pi's is the
-    // kernel governor's.
-    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(18);
+    // kernel governor's. 19 with `render_mode` (2026.11.7): where the scenes
+    // run (docs/server-rendering.md); a Pi always renders on its own runtime.
+    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(19);
   });
 });
 

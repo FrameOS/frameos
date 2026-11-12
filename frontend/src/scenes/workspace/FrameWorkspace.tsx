@@ -322,7 +322,11 @@ function frameSettingsSectionsForFrame(
   return allFrameSettingsSections.filter((section) => frameSettingsSectionIsAllowed(mode, section.id, frame))
 }
 
-const linkableFrameSettingsSections = new Set(['frame-settings-agent', 'frame-settings-lan-access'])
+const linkableFrameSettingsSections = new Set([
+  'frame-settings-agent',
+  'frame-settings-lan-access',
+  'frame-settings-power',
+])
 
 function frameSettingsSectionFromHash(hash: string): string | null {
   const sectionId = hash.replace(/^#/, '')

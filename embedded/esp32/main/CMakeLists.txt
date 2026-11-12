@@ -29,6 +29,8 @@ idf_component_register(
         "fos_animation.c"
         "fos_boot_scene.c"
         "fos_client.c"
+        "fos_render_pull.c"
+        "fos_render_relay.c"
         "fos_cloud.c"
         "fos_url_guard.c"
         "fos_cloud_contract.c"

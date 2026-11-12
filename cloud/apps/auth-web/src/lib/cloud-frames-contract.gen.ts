@@ -915,6 +915,20 @@ export const cloudFramesContract = {
         }
       }
     },
+    "render_mode": {
+      "rule": {
+        "type": "string",
+        "enum": [
+          "local",
+          "remote"
+        ]
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.11.7"
+        }
+      }
+    },
     "mic_clk_pin": {
       "rule": {
         "type": "int",

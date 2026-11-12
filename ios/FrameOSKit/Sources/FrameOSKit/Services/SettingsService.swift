@@ -109,6 +109,56 @@ public struct ScheduleEvent: Identifiable, Hashable, Sendable {
                                       "Sunday", "Weekdays", "Weekends"]
 }
 
+/// "Render scenes" as the settings offer it on one frame (the SPA's
+/// RenderOnServerChoice, PowerSettingsFields.tsx). The words are the SPA's.
+public struct RenderOnServerChoice: Sendable, Equatable {
+    public var serverName: String
+    /// What the scenes reach once they run there.
+    public var reach: String
+    /// Why it cannot be chosen yet (firmware too old), or nil.
+    public var disabledReason: String?
+    /// What choosing it costs, said under it once it is chosen.
+    public var note: String?
+
+    public init(serverName: String, reach: String, disabledReason: String? = nil, note: String? = nil) {
+        self.serverName = serverName
+        self.reach = reach
+        self.disabledReason = disabledReason
+        self.note = note
+    }
+
+    public var remoteLabel: String { "On \(serverName)" }
+
+    public var explanation: String {
+        "On the server, \(serverName) runs this frame's scenes and sends it the finished picture. The frame only wakes, "
+            + "downloads the picture and refreshes the screen: no scene code, no image decoding and no data fetching on "
+            + "the frame, so a battery lasts longer. When nothing changed, the frame skips the download and the refresh. "
+            + "A sleeping frame's next picture is drawn just before it wakes. \(reach) The frame changes over at its next render."
+    }
+}
+
+/// "Processor speed" as the settings offer it (PowerSettingsFields.tsx).
+public struct CpuModeChoice: Sendable, Equatable {
+    public var disabledReason: String?
+    /// What the frame says it runs at now (cloud `hardware.cpuMhz`).
+    public var reportedMhz: Int?
+
+    public static let options: [(value: String, label: String)] = [
+        ("auto", "Automatic (default)"),
+        ("battery", "Battery: 160 MHz"),
+        ("performance", "Performance: 240 MHz"),
+    ]
+
+    public static let explanation = "Battery runs the chip at 160 MHz, performance at 240 MHz. Performance renders about "
+        + "a third faster, but the chip also waits out the screen refresh at the higher speed, about 20 seconds on a "
+        + "reTerminal E1002. On a battery e-paper frame that costs roughly 5 to 10% of battery life. Automatic is battery "
+        + "on e-paper and performance on LCD and touch screens. Saving a change reboots the frame."
+
+    public static func == (lhs: CpuModeChoice, rhs: CpuModeChoice) -> Bool {
+        lhs.disabledReason == rhs.disabledReason && lhs.reportedMhz == rhs.reportedMhz
+    }
+}
+
 extension FrameOSService {
     /// The settings the app edits for this frame, by wire name. On the cloud
     /// it is what the contract lets this frame's profile and firmware take;
@@ -143,9 +193,112 @@ extension FrameOSService {
                                                body: .json(["settings": .object(changes)]))
             return ActionOutcome.from(answer, queuedMessage: "Saved. The frame takes the settings when it next checks in.")
         case .backend:
-            try await client.call("POST", Self.framePath(frame.id), body: .json(.object(changes)))
+            // Where the scenes run and the processor speed live in an
+            // ESP32's device_config, which the board reads on its next
+            // settings poll (the SPA's setEmbeddedPowerSettings): no deploy
+            // for those alone.
+            var body = changes
+            var config = frame.deviceConfig
+            var deviceConfigChanged = false
+            for (key, camel) in Self.deviceConfigSettings {
+                guard let value = body.removeValue(forKey: key) else { continue }
+                // The snake_case twin is what a USB provisioning writes; the
+                // device would keep reading a stale copy it checks first.
+                config.removeValue(forKey: key)
+                config[camel] = value
+                deviceConfigChanged = true
+            }
+            let deploys = !body.isEmpty
+            if deviceConfigChanged { body["device_config"] = .object(config) }
+            try await client.call("POST", Self.framePath(frame.id), body: .json(.object(body)))
+            if !deploys {
+                return ActionOutcome(kind: .done, message: "Saved. The frame takes it on its next settings poll.")
+            }
             return try await deploy(frame)
         }
+    }
+
+    /// Settings the app edits by their cloud name that a backend keeps in an
+    /// ESP32's device_config, under the camelCase name.
+    static let deviceConfigSettings: [(String, String)] = [("render_mode", "renderMode"), ("cpu_mode", "cpuMode")]
+
+    // MARK: where the scenes run, and the processor speed (Settings, Power)
+
+    /// "Render scenes" for this frame (the SPA's RenderScenesField, offered
+    /// where frameSettingsContext.tsx offers it), or nil where it is not:
+    /// on the cloud an ESP32 that can render itself (a C3 is rendered by the
+    /// cloud anyway), gated on the firmware that takes `render_mode`; on a
+    /// backend an embedded ESP32 that is not a thin client.
+    public func renderOnServerChoice(_ frame: Frame) -> RenderOnServerChoice? {
+        switch kind {
+        case .cloud:
+            guard CloudSettingsContract.profile(for: frame) == "esp32",
+                  RenderOnServer.canRenderItself(hardware: frame.raw["hardware"]?.objectValue)
+            else { return nil }
+            let contract = CloudSettingsContract.shared
+            let supported = contract.keys(for: frame).contains("render_mode")
+            let since = contract.since("render_mode", profile: "esp32") ?? ""
+            return RenderOnServerChoice(
+                serverName: "FrameOS Cloud",
+                reach: "Scenes then fetch their data from FrameOS Cloud, which reaches public addresses only, not your network.",
+                disabledReason: supported ? nil : "Rendering on the server needs FrameOS \(since) or newer on the frame.",
+                note: "Counts as one of your plan's cloud-rendered frames (Settings, Usage), and its refresh interval cannot go below the plan's minimum."
+            )
+        case .backend:
+            guard frame.mode == "embedded", RenderOnServer.backendOffers(platform: embeddedPlatform(frame)) else { return nil }
+            return RenderOnServerChoice(
+                serverName: "the backend",
+                reach: "Scenes then fetch their data from the backend, so they reach what it reaches: your network, a VPN."
+            )
+        }
+    }
+
+    /// Where the frame's scenes run now: the owner's setting, else (cloud)
+    /// what the device reports running with.
+    public func renderMode(_ frame: Frame) -> RenderMode {
+        switch kind {
+        case .cloud:
+            return RenderOnServer.cloudMode(renderMode: frame["render_mode"], hardware: frame.raw["hardware"]?.objectValue)
+        case .backend:
+            return RenderOnServer.backendMode(deviceConfig: frame["device_config"], embedded: frame["embedded"])
+        }
+    }
+
+    /// "Processor speed" for this frame (the SPA's field next to "Render
+    /// scenes"), or nil: every cloud ESP32, gated on the firmware that takes
+    /// `cpu_mode`; on a backend an embedded board with the ESP32 power
+    /// profile.
+    public func cpuModeChoice(_ frame: Frame) -> CpuModeChoice? {
+        switch kind {
+        case .cloud:
+            guard CloudSettingsContract.profile(for: frame) == "esp32" else { return nil }
+            let contract = CloudSettingsContract.shared
+            let since = contract.since("cpu_mode", profile: "esp32") ?? ""
+            return CpuModeChoice(
+                disabledReason: contract.keys(for: frame).contains("cpu_mode")
+                    ? nil : "The processor speed needs FrameOS \(since) or newer on the frame.",
+                reportedMhz: frame.hardware["cpuMhz"]?.intValue
+            )
+        case .backend:
+            guard frame.mode == "embedded", RenderOnServer.backendPowerProfile(platform: embeddedPlatform(frame)) == "esp32"
+            else { return nil }
+            return CpuModeChoice(disabledReason: nil, reportedMhz: nil)
+        }
+    }
+
+    /// The processor speed the frame is set to (cloud: else what it reports), `auto` by default.
+    public func cpuMode(_ frame: Frame) -> String {
+        let value: JSONValue?
+        switch kind {
+        case .cloud: value = frame["cpu_mode"].nonNull ?? frame.hardware["cpuMode"]
+        case .backend: value = frame.deviceConfig["cpuMode"].nonNull ?? frame.deviceConfig["cpu_mode"]
+        }
+        let mode = value?.stringValueIfString ?? "auto"
+        return CpuModeChoice.options.contains { $0.value == mode } ? mode : "auto"
+    }
+
+    func embeddedPlatform(_ frame: Frame) -> String? {
+        frame["embedded"]?["platform"]?.stringValueIfString
     }
 
     public func schedule(_ frame: Frame) -> (events: [ScheduleEvent], disabled: Bool) {

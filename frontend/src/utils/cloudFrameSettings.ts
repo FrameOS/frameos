@@ -289,6 +289,16 @@ export function cloudFrameSupportsEsp32CpuMode(frameosVersion: string | null | u
   return cloudFrameSupportsSettingsFrom(esp32CpuModeCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/**
+ * 2026.11.7: where the scenes run (`render_mode`, docs/server-rendering.md).
+ * Applied live; `remote` counts against the plan's cloud-rendered frames.
+ */
+export const esp32RenderModeCloudFrameSettingsMinVersion = '2026.11.7'
+
+export function cloudFrameSupportsEsp32RenderMode(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32RenderModeCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 /** 2026.11.6: the click of a press on the glass (`touch_beep`). */
 export const esp32TouchBeepCloudFrameSettingsMinVersion = '2026.11.6'
 

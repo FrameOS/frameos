@@ -120,6 +120,43 @@ struct FrameSettingsView: View {
                     }
                 }
 
+                let sleepSection = keys.contains("deep_sleep") || keys.contains("deep_sleep_on_battery")
+                if let choice = service.renderOnServerChoice(frame) {
+                    let mode = renderModeBinding(frame, service)
+                    Section {
+                        Picker("Render scenes", selection: mode) {
+                            Text("On the frame (default)").tag(RenderMode.local)
+                            Text(choice.remoteLabel).tag(RenderMode.remote)
+                        }
+                        .disabled(choice.disabledReason != nil)
+                    } header: {
+                        if !sleepSection { Text("Power") }
+                    } footer: {
+                        if let reason = choice.disabledReason {
+                            Text(reason)
+                        } else if mode.wrappedValue == .remote, let note = choice.note {
+                            Text(choice.explanation + "\n\n" + note)
+                        } else {
+                            Text(choice.explanation)
+                        }
+                    }
+                }
+                if let cpu = service.cpuModeChoice(frame) {
+                    Section {
+                        Picker("Processor speed", selection: cpuModeBinding(frame, service)) {
+                            ForEach(CpuModeChoice.options, id: \.value) { Text($0.label).tag($0.value) }
+                        }
+                        .disabled(cpu.disabledReason != nil)
+                        if let mhz = cpu.reportedMhz {
+                            Text("Running at \(mhz) MHz now.").font(.callout).foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        if !sleepSection && service.renderOnServerChoice(frame) == nil { Text("Power") }
+                    } footer: {
+                        Text(cpu.disabledReason ?? CpuModeChoice.explanation)
+                    }
+                }
+
                 if app.current?.kind == .cloud {
                     Section {
                         NavigationLink {
@@ -191,6 +228,18 @@ struct FrameSettingsView: View {
 
     func boolBinding(_ key: String, _ frame: Frame, fallback: Bool) -> Binding<Bool> {
         Binding { current(key, frame)?.boolValue ?? fallback } set: { edits[key] = .bool($0) }
+    }
+
+    /// Edited under the cloud's name; a backend keeps it in device_config
+    /// (SettingsService.saveSettings moves it there).
+    func renderModeBinding(_ frame: Frame, _ service: FrameOSService) -> Binding<RenderMode> {
+        Binding { RenderOnServer.normalize(edits["render_mode"]) ?? service.renderMode(frame) } set: {
+            edits["render_mode"] = .string($0.rawValue)
+        }
+    }
+
+    func cpuModeBinding(_ frame: Frame, _ service: FrameOSService) -> Binding<String> {
+        Binding { edits["cpu_mode"]?.stringValue ?? service.cpuMode(frame) } set: { edits["cpu_mode"] = .string($0) }
     }
 }
 

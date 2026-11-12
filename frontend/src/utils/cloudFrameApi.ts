@@ -26,6 +26,8 @@ import {
   cloudFrameSupportsEsp32TouchBeep,
   esp32CpuModeCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32CpuMode,
+  esp32RenderModeCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32RenderMode,
   esp32VoiceChatCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32VoiceChat,
   esp32LedCloudFrameSettingsMinVersion,
@@ -85,6 +87,8 @@ export {
   esp32TouchBeepCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32CpuMode,
   esp32CpuModeCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32RenderMode,
+  esp32RenderModeCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32VoiceChat,
   esp32VoiceChatCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Led,
@@ -155,14 +159,28 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
       error?: string
       min_frameos_version?: string
       min_interval?: number
+      max_cloud_rendered_frames?: number
     }
     if (detail.error === 'interval_below_plan_floor') {
-      // A frame the cloud draws (a virtual frame) has a floor under its
-      // interval: renders are what it costs.
+      // A frame the cloud draws (a virtual frame, a C3, an S3 set to render
+      // on the server) has a floor under its interval: renders are what it
+      // costs.
       throw new Error(
         `A frame FrameOS Cloud draws refreshes at most every ${
           detail.min_interval ?? 300
         } seconds. Set the refresh interval to that or more.`
+      )
+    }
+    if (detail.error === 'cloud_rendered_frame_quota_exceeded') {
+      // "Render scenes: On FrameOS Cloud" (docs/server-rendering.md) takes
+      // one of the plan's cloud-rendered frames.
+      const max = detail.max_cloud_rendered_frames ?? 0
+      throw new Error(
+        max > 0
+          ? `Your plan renders ${max} frame${
+              max === 1 ? '' : 's'
+            } on FrameOS Cloud, and all of them are in use. Free one up or move to a larger plan.`
+          : 'Your plan has no frames rendered on FrameOS Cloud. A paid plan includes them.'
       )
     }
     if (detail.error === 'settings_need_newer_firmware') {

@@ -331,6 +331,32 @@ proc ensureScene*(host: SingleSceneHost): bool =
   host.lifecycle("open", %*{"sceneId": sceneId.string})
   true
 
+proc reopenBuiltIn*(host: SingleSceneHost, state: JsonNode): bool =
+  ## The current built-in scene (the switcher, the settings) opened again as
+  ## it was left, on a host whose memory is its control plane's: the wasm
+  ## runtime rendering for a frame, a fresh process per pull
+  ## (docs/server-rendering.md, "Keys, touch and the schedule"). The switch
+  ## that opened it is replayed with the state it kept (what it was opened
+  ## from, the layout, the settings' fields), then the rest of that state
+  ## (the highlight, the page, the form's values) is put back over what
+  ## opening it set. No device host calls this: a device never keeps a
+  ## built-in scene. False when the current scene is not a built-in one, is
+  ## resident already, or `state` is not an object.
+  if host.sceneId.isNone or not isBuiltInScene(host.sceneId.get().string) or not host.scene.isNil:
+    return false
+  if state.isNil or state.kind != JObject:
+    return false
+  let sceneId = host.sceneId.get().string
+  host.pendingSwitchId = sceneId
+  host.pendingSwitchPayload = %*{"sceneId": sceneId, "state": copy(state)}
+  if not host.ensureScene() or host.scene.isNil:
+    return false
+  if host.scene.state.isNil or host.scene.state.kind != JObject:
+    host.scene.state = newJObject()
+  for key, value in state:
+    host.scene.state[key] = copy(value)
+  true
+
 # -------------------------------------------------------------- dispatcher
 
 proc selectFromEvent(host: SingleSceneHost, payload: JsonNode): bool =

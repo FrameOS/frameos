@@ -16,6 +16,8 @@ import {
   formatCycle,
   formatRemaining,
   nearestCycleOption,
+  SERVER_RENDER_MIN_GAIN,
+  serverRenderForecast,
   type BatteryAnalysis,
   type BatteryForecast,
   type BatterySample,
@@ -23,7 +25,9 @@ import {
 import { formatFrameRelativeTime } from '../../decorators/frame'
 import { metricCardHash } from '../frame/panels/Metrics/metricsLogic'
 import { urls } from '../../urls'
+import { frameCouldRenderOnServer } from '../../utils/renderOnServer'
 import { frameBatteryLogic } from './frameBatteryLogic'
+import { workspaceMode } from './workspaceSurfaces'
 
 /**
  * The battery popup: everything the cloud knows about a frame's cell —
@@ -133,7 +137,11 @@ export function FrameBatteryPopover({
                     className="frameos-tooltip-panel z-50 w-[22.5rem] max-w-[calc(100vw-1rem)] rounded-xl p-3.5 text-left text-xs focus:outline-none"
                     data-testid="battery-popover"
                   >
-                    {open ? <BatteryPanel frame={frame} percent={percent} /> : null}
+                    {({ close }) =>
+                      // A link inside goes somewhere else in the workspace: the panel
+                      // closes with it instead of staying over the page it opened.
+                      open ? <BatteryPanel frame={frame} percent={percent} onNavigate={() => close()} /> : <></>
+                    }
                   </Popover.Panel>
                 </Transition>,
                 portalTarget
@@ -164,7 +172,15 @@ function formatDrain(perDay: number): string {
   return `${perDay.toFixed(2)}% / day`
 }
 
-function BatteryPanel({ frame, percent }: { frame: FrameType; percent: number }): JSX.Element {
+function BatteryPanel({
+  frame,
+  percent,
+  onNavigate,
+}: {
+  frame: FrameType
+  percent: number
+  onNavigate: () => void
+}): JSX.Element {
   const logic = frameBatteryLogic({ frameId: frame.id })
   const { sortedBatteryHistory, batteryHistoryLoading, batteryHistoryLoadedAt, selectedCycleSeconds } = useValues(logic)
   const { ensureBatteryHistory, setSelectedCycleSeconds } = useActions(logic)
@@ -231,14 +247,27 @@ function BatteryPanel({ frame, percent }: { frame: FrameType; percent: number })
         onSelectCycle={(cycle) => setSelectedCycleSeconds(cycle === observedCycle ? null : cycle)}
       />
 
+      <ServerRenderOffer
+        frame={frame}
+        analysis={analysis}
+        cycleSeconds={selectedCycle}
+        now={now}
+        onNavigate={onNavigate}
+      />
+
       <div className="frameos-muted flex items-center justify-between gap-2 border-t border-slate-500/15 pt-2 text-[11px]">
         <A
           href={urls.frame(frame.id, 'metrics') + metricCardHash('batteryPercent')}
           className="font-semibold underline-offset-2 hover:underline"
+          onClick={onNavigate}
         >
           Open metrics
         </A>
-        <A href={urls.frame(frame.id, 'settings')} className="font-semibold underline-offset-2 hover:underline">
+        <A
+          href={powerSettingsUrl(frame)}
+          className="font-semibold underline-offset-2 hover:underline"
+          onClick={onNavigate}
+        >
           Power settings
         </A>
       </div>
@@ -505,6 +534,78 @@ function BatteryChart({
       ) : null}
       {latest ? <circle cx={x(latest.t)} cy={y(latest.percent)} r="2.5" fill={toneFill[tone]} /> : null}
     </svg>
+  )
+}
+
+function powerSettingsUrl(frame: FrameType): string {
+  return `${urls.frame(frame.id, 'settings')}#frame-settings-power`
+}
+
+/** "12 days", "5 hours": a forecast's length without the "about". */
+function formatExtra(hours: number): string {
+  return formatRemaining(hours).replace(/^about /, '')
+}
+
+/**
+ * How long the battery would last if the frame's control plane drew its
+ * pictures, shown when the frame renders its scenes itself, deep-sleeps and
+ * would gain at least SERVER_RENDER_MIN_GAIN (utils/batteryForecast.ts
+ * serverRenderForecast). The link opens Power, where "Render scenes" is.
+ */
+function ServerRenderOffer({
+  frame,
+  analysis,
+  cycleSeconds,
+  now,
+  onNavigate,
+}: {
+  frame: FrameType
+  analysis: BatteryAnalysis
+  cycleSeconds: number
+  now: number
+  onNavigate: () => void
+}): JSX.Element | null {
+  const mode = workspaceMode()
+  if (mode === 'frameAdmin') {
+    return null
+  }
+  if (!frameCouldRenderOnServer(frame, mode)) {
+    return null
+  }
+  const offer = serverRenderForecast(analysis, cycleSeconds, now)
+  if (!offer || offer.gain < SERVER_RENDER_MIN_GAIN) {
+    return null
+  }
+  const serverName = mode === 'cloud' ? 'FrameOS Cloud' : 'the backend'
+  const extraHours = offer.server.hoursRemaining - offer.current.hoursRemaining
+  return (
+    <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 px-3 py-2" data-testid="battery-server-render">
+      <div className="flex items-center justify-between gap-2 text-[11px]">
+        <span>
+          Rendered on <span className="font-semibold">{serverName}</span>
+        </span>
+        <span className="font-semibold tabular-nums" style={{ color: '#3b82f6' }}>
+          {formatRemaining(offer.server.hoursRemaining)}
+          {extraHours >= 1 ? (
+            <span className="frameos-muted font-medium"> · {formatExtra(extraHours)} more</span>
+          ) : null}
+        </span>
+      </div>
+      <div className="frameos-muted mt-1 text-[10px]">
+        The scene takes about {Math.round(offer.sceneSeconds)} s of every wake on the frame. If {serverName} drew the
+        picture, the frame would only download it: about {Math.round(offer.serverAwakeSeconds)} s awake per wake instead
+        of {Math.round(offer.awakeSeconds)} s.
+        {mode === 'cloud' ? " It counts as one of your plan's cloud-rendered frames." : null}
+      </div>
+      <A
+        href={powerSettingsUrl(frame)}
+        className="mt-1 inline-block text-[11px] font-semibold text-blue-500 underline-offset-2 hover:underline"
+        data-testid="battery-server-render-link"
+        onClick={onNavigate}
+      >
+        Render on the server
+      </A>
+    </div>
   )
 }
 

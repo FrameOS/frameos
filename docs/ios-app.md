@@ -29,6 +29,7 @@ follow turns a test red, on the side that did not follow.
 | Layout starters | `frontend/src/generated/layoutStarters.ts` | `Generated/LayoutStarters.json`, the same script writes both (`frontend/scripts/generateLayoutStarters.mjs`) | `LayoutTests` checks it against `repo/scenes/samples` |
 | What scenes wear (`layout: {sceneId, state?}`), one for every scene | `frontend/src/utils/sceneLayouts.ts` | `Contracts/LayoutStarters.swift` (`SceneLayouts`) | `LayoutTests`; `LayoutRoundTrip` on both planes |
 | A typed backend address | `docs/server-address-fixtures.json` | `Contracts/ServerAddress.swift` | the same corpus (its fourth runner) |
+| Where "Render scenes" is offered, and what it shows | `frontend/src/utils/renderOnServer.ts` | `Contracts/RenderOnServer.swift` | `docs/render-on-server-fixtures.json` |
 | The words for queued commands | `commandLabels` in `framePendingCommandsLogic.ts` | `PendingCommand.labels` | `PendingCommandLabelTests` reads the SPA's file |
 | Installing scenes and albums on a backend (fresh ids, references rewritten) | the backend's `duplicate_scenes` and its MCP tools | `frame_scene_install`, `photo_album_install` over `POST /api/mcp` | the backend's own tests: the app adds no copy |
 

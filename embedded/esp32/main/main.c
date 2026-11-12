@@ -495,6 +495,12 @@ void app_main(void)
         }
     }
 
+    /* Whether this board can run its scenes itself: what hardware.renderMode
+     * and localRenderSupported report, and the floor under a plane's
+     * render_mode (docs/server-rendering.md). Before any network, so the
+     * cloud's enrollment already reads it. */
+    fos_client_set_local_render_capable(local_render_ok && frameos_nim_available());
+
     /* The renderer's scene canvas, claimed now for the same reason the thin-
      * client framebuffer was above: it is the one multi-MB contiguous PSRAM
      * run the device needs, and before Wi-Fi/TLS there is always one. */

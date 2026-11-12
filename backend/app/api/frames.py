@@ -1052,7 +1052,10 @@ async def _forward_frame_request(
 
 
 async def _load_frame_states(redis: Redis, frame: Frame) -> dict[str, Any]:
-    if is_virtual_frame(frame):
+    # A frame rendered here keeps its scene and its states on the backend,
+    # as a virtual frame does (docs/server-rendering.md): its own runtime's
+    # are left from before.
+    if is_virtual_frame(frame) or is_thin_client_frame(frame):
         from .virtual_frame import virtual_frame_states_payload
 
         return _normalise_frame_states_payload(
@@ -1081,7 +1084,7 @@ async def _refresh_frame_states_cache(
         frame = db.get(Frame, frame_id)
         if frame is None:
             return
-        if is_queued_embedded_frame(frame) and frame_is_asleep(frame):
+        if is_queued_embedded_frame(frame) and frame_is_asleep(frame) and not is_thin_client_frame(frame):
             # Asleep by its own forecast: nothing answers, and the cache holds
             # what the frame reported on its last pull (embedded_commands.py).
             completed = True

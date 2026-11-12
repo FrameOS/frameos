@@ -332,6 +332,12 @@
       "profiles": {"esp32": {"since": "2026.11.7", "restart": true}},
       "parity": {"only": "esp32", "why": "The ESP32's CPU clock switch (rtc_clk_cpu_freq_set_config at boot, main.c); a Pi's clock is the kernel governor's, which FrameOS does not set."}
     },
+    "render_mode": {
+      "$comment": "Where the frame's scenes run: `local` on the frame's own runtime (the default wherever the board has one), `remote` on the frame's control plane, which renders the scene in the wasm runtime and hands the frame the finished picture in its panel's format at every render pull (`GET .../embedded/render`, docs/server-rendering.md). A battery frame then spends its wake on Wi-Fi, one download and the panel refresh instead of the scene's own work, and the plane draws a sleeping frame's next picture before it wakes. On the cloud a frame set to `remote` counts against the plan's cloud-rendered frames and the refresh floor that comes with them. Applied live: the next render pass pulls. A PSRAM-less board (ESP32-C3) is always remote whatever this says. Reported as hardware.renderMode.",
+      "rule": {"type": "string", "enum": ["local", "remote"]},
+      "profiles": {"esp32": {"since": "2026.11.7"}},
+      "parity": {"only": "esp32", "why": "A Pi always renders on its own runtime; the thin-client pull (fos_client.c fetch_remote_bitmap) is the ESP32 firmware's."}
+    },
     "mic_clk_pin": {
       "$comment": "The PDM microphone's clock GPIO (reTerminal E1001/E1002: 42; the E1004 has no microphone, and a PDM mic on its J2 header is the pins named here), with mic_data_pin and mic_pwr_pin; -1 = no microphone. The firmware opens the microphone at every voice session (docs/voice-chat.md, fos_mic.c), so the three apply live; no stored value leaves the board preset's own. Same reserved-pin refusal as battery_pin. Reported as hardware.micClkPin.",
       "rule": {"type": "int", "min": -1, "max": 48},

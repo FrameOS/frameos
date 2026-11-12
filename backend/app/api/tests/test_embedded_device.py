@@ -1197,6 +1197,9 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'deepSleep': True,
         'wakeSchedule': False,
     }
+    # The colours this panel really shows, which the device's packer dithers to.
+    measured = {'name': 'Measured', 'colors': ['#1a1a1a', '#f0f0e8', '#e6c619', '#b0251c', '#2a4f9e', '#3b6e3b']}
+    frame.palette = measured
     db.add(frame)
     db.commit()
 
@@ -1237,6 +1240,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'renderScale': 1.5,
         'frameSettingsOnScreen': True,
         'colors': {},
+        'palette': measured,
         'maxHttpResponseBytes': 4 * 1024 * 1024,
         'adminAuth': expected_admin_auth,
         'tls': expected_tls,
@@ -1247,6 +1251,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
     # scale is automatic (0), the firmware works it out from its panel
     frame.scaling_mode = None
     frame.render_scale = 0
+    frame.palette = None
     frame.device_config = {
         key: value
         for key, value in (frame.device_config or {}).items()
@@ -1270,6 +1275,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'renderScale': 0.0,
         'frameSettingsOnScreen': True,
         'colors': {},
+        'palette': {},  # the panel's own table
         'maxHttpResponseBytes': 4 * 1024 * 1024,
         'adminAuth': expected_admin_auth,
         'tls': expected_tls,

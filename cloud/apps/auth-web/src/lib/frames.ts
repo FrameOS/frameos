@@ -18,8 +18,11 @@ import {
   linkedClients,
   storeScenes,
   storeSceneVersions,
+  virtualFrames,
 } from "@frameos-cloud/db";
 import { linkedClientScopes } from "./backend-auth";
+import { frameIsCloudRendered } from "./cloud-rendered";
+import { holdServerRenderVerb } from "./server-render-state";
 import {
   deleteBlobIfUnreferenced,
   frameCacheNamespace,
@@ -512,6 +515,12 @@ export const esp32TouchBeepFrameSettingKeys = new Set(
 export const esp32CpuModeFrameSettingsMinVersion = "2026.11.7";
 export const esp32CpuModeFrameSettingKeys = new Set(
   contractSettingKeysSince("esp32", esp32CpuModeFrameSettingsMinVersion),
+);
+// 2026.11.7 too: `render_mode`, where the scenes run (docs/server-rendering.md).
+// Live: the next render pass pulls its picture from the cloud, or renders.
+export const esp32RenderModeFrameSettingsMinVersion = "2026.11.7";
+export const esp32RenderModeFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("esp32", esp32RenderModeFrameSettingsMinVersion)].filter((key) => key === "render_mode"),
 );
 
 // An IANA zone name as the device console and fos_tz accept it
@@ -1030,10 +1039,37 @@ export async function enqueueFrameCommand(
   let expiresAt: Date | null = null;
   const now = new Date();
   const [row] = await db
-    .select({ hardware: frames.hardware, nextWakeAt: frames.nextWakeAt })
+    .select({ hardware: frames.hardware, nextWakeAt: frames.nextWakeAt, settings: frames.settings })
     .from(frames)
     .where(eq(frames.id, input.frameId))
     .limit(1);
+  // A hardware frame the cloud renders for (docs/server-rendering.md "State
+  // and events"): the plane is its scenes' memory, so what a verb says to the
+  // scene is kept here before the device hears of it, and a scene event waits
+  // for the pull that runs it while the device is only asked to pull. A
+  // virtual frame's device (the hub's) keeps its own.
+  if (row && frameIsCloudRendered(row) && !(await frameIsVirtual(db, input.frameId))) {
+    const held = await holdServerRenderVerb(db, input.frameId, input.type, input.payload);
+    if (held.type === "refused") {
+      // A frame that cannot render must not collect events forever: the
+      // command is answered as the virtual device answers it, never queued.
+      const [refused] = await db
+        .insert(frameCommands)
+        .values({
+          createdByAccountId: input.createdByAccountId ?? null,
+          error: held.error,
+          frameId: input.frameId,
+          payload: input.payload ?? null,
+          status: "failed",
+          type: input.type,
+        })
+        .returning();
+      return refused;
+    }
+    if (held.type === "render_instead") {
+      input = { ...input, payload: {}, type: "render" };
+    }
+  }
   if (input.ttlMs) {
     expiresAt = new Date(
       now.getTime() +
@@ -1113,6 +1149,15 @@ export async function enqueueFrameCommand(
     sql`select pg_notify(${frameCommandsNotifyChannel}, ${input.frameId})`,
   );
   return command;
+}
+
+async function frameIsVirtual(db: FramesDatabase, frameId: string): Promise<boolean> {
+  const [virtual] = await db
+    .select({ frameId: virtualFrames.frameId })
+    .from(virtualFrames)
+    .where(eq(virtualFrames.frameId, frameId))
+    .limit(1);
+  return virtual !== undefined;
 }
 
 /** The release a notify_update_available payload names, when it names one. */

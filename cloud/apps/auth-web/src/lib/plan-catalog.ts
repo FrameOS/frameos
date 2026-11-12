@@ -37,9 +37,9 @@ export const plannedFeatures: readonly PlanFeature[] = ["share_frames", "sso"];
 
 /**
  * Limits that count something not built yet (sharing). `cloud_rendered_frames`
- * left this list with virtual frames (docs/cloud-frames.md "Virtual frames");
- * the thin clients the same number will also cover still cannot link, which
- * the limit's own label says.
+ * left this list with virtual frames (docs/cloud-frames.md "Virtual frames")
+ * and covers the hardware the cloud renders for too (an ESP32-C3, a board
+ * set to render on the server: docs/server-rendering.md).
  */
 export const plannedLimits: readonly PlanLimitKey[] = ["people"];
 

@@ -478,6 +478,14 @@ render, and the backend writes what the scene heard into the frame's log. The
 Inky Frame's five buttons have no GPIO of their own (a shift register reads
 them): they are pin `-1`, labelled `A` to `E`.
 
+An ESP32 rendered on the server (`render_mode: remote`,
+`docs/server-rendering.md` "Keys, touch and the schedule") relays more than
+edges: whatever its producers would have handed its own scene, each with its
+origin (`driver`, `schedule`, `http:write`, `http:admin`), as `{"nowMs",
+"events": [{origin, name, payload}]}`. The same export delivers them, every
+payload's `atMs` moved the same way, each from its own origin, so the
+allow-list and the event maps decide as they would have on the board.
+
 What a control plane sends a thin client for its scene (a custom event, a
 `button` said over HTTP: what the contract's `cloud` column carries as
 `scene_event`) waits the same way: the backend holds it, asks the board to
