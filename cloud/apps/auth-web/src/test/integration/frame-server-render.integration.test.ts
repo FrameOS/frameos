@@ -3,7 +3,7 @@
 // check, with the wasm runtime stood in for by a renderer that paints a
 // solid colour and reports what it was asked.
 import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { zipSync } from "fflate";
 import { NextRequest } from "next/server";
 import {
@@ -736,6 +736,27 @@ describe("the switch", () => {
     // Back to the frame's own runtime is always free.
     expect((await pushSettings(frame.id, { render_mode: "local" })).status).toBe(200);
     expect(await countCloudRenderedFramesForAccount(db, accountId)).toBe(0);
+  });
+
+  it("sends the scenes again behind it, both ways, so the board drops them or gets them back", async () => {
+    // docs/server-rendering.md "Nothing to keep on the board": the hub sends
+    // a board the cloud renders for the empty scene, decided as each push
+    // goes, so the switch is followed by a push for it to decide on.
+    const accountId = await signIn();
+    await subscribe(accountId, 1);
+    const { frame } = await createFrame(accountId, { interval: 900 });
+    await db.update(frames).set({ assignedChecksum: "assigned" }).where(eq(frames.id, frame.id));
+    const commands = async () =>
+      (await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.id)).orderBy(asc(frameCommands.createdAt))).map(
+        (row) => row.type,
+      );
+
+    expect((await pushSettings(frame.id, { render_mode: "remote" })).status).toBe(200);
+    expect(await commands()).toEqual(["set_settings", "set_scenes"]);
+    expect((await pushSettings(frame.id, { interval: 1200 })).status).toBe(200);
+    expect(await commands()).toEqual(["set_settings", "set_scenes", "set_settings"]);
+    expect((await pushSettings(frame.id, { render_mode: "local" })).status).toBe(200);
+    expect((await commands()).slice(-2)).toEqual(["set_settings", "set_scenes"]);
   });
 
   it("holds the frame to the plan's refresh floor", async () => {

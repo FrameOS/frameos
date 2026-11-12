@@ -42,6 +42,7 @@ import { derivedSigningKey } from "../../../../auth-web/src/lib/keys";
 import { hashSecret } from "../../../../auth-web/src/lib/secrets";
 import { cachedAssetFile } from "../../../../auth-web/src/lib/frame-asset-cache";
 import { frameOwningBackend } from "../../../../auth-web/src/lib/frame-backend-owner";
+import { serverRenderedBoardScene } from "../../../../auth-web/src/lib/cloud-rendered";
 import {
   maxAssetStreamsPerSession,
   maxPayloadBytes,
@@ -698,6 +699,50 @@ describe("scenes_patch", () => {
     expect(full.scene_hashes).toBeUndefined();
     await settle(device, frameId, first?.id, "set-1");
   }
+
+  it("sends a board the cloud renders for the empty scene, and its scenes whole once it renders itself", async () => {
+    // docs/server-rendering.md "Nothing to keep on the board".
+    const { frame, privateKey, token } = await createFrameFixture();
+    await db.update(frames).set({ settings: { render_mode: "remote" } }).where(eq(frames.id, frame.id));
+    const device = await openDevice(token);
+    await handshake(device, privateKey, esp32);
+
+    const secret = { ...sceneA, fields: [{ access: "public", name: "token", type: "string", value: "field-secret" }] };
+    const push = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-1", scene_id: "a", scenes: [secret, sceneB], state: { token: "state-secret" } },
+      type: "set_scenes",
+    });
+    const sent = await device.next((msg) => msg.id === push?.id, "the push");
+    expect(sent).toEqual({
+      checksum: "set-1",
+      id: push?.id,
+      scene_id: "a",
+      scenes: [serverRenderedBoardScene],
+      type: "set_scenes",
+    });
+    await settle(device, frame.id, push?.id, "set-1");
+    const switched = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { scene_id: "b", state: { token: "state-secret" } },
+      type: "set_current_scene",
+    });
+    const switchSent = await device.next((msg) => msg.id === switched?.id, "the switch");
+    expect(switchSent).toEqual({ id: switched?.id, scene_id: "b", type: "set_current_scene" });
+
+    // Rendering itself again: the board holds the empty scene under set-1,
+    // so the next push of set-1 is the whole list, never a patch against it.
+    await db.update(frames).set({ settings: { render_mode: "local" } }).where(eq(frames.id, frame.id));
+    const back = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-1", scenes: [secret, sceneB] },
+      type: "set_scenes",
+    });
+    const whole = await device.next((msg) => msg.id === back?.id, "the scenes, whole");
+    expect(whole.type).toBe("set_scenes");
+    expect(whole.scenes).toEqual([secret, sceneB]);
+    device.ws.close();
+  });
 
   it("sends a push that changes one scene as only that scene", async () => {
     const { frame, privateKey, token } = await createFrameFixture();
