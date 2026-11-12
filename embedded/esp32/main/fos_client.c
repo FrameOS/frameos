@@ -1201,14 +1201,15 @@ static bool relay_unsent(void)
     return s_relay_unsent && s_relay.count > 0;
 }
 
-/* A key still being timed, or a report waiting in a queue (a finger on the
- * glass keeps its gesture in the touch queue until it lifts,
- * process_input_events): what the relay holds is not decided yet. A press
- * split across two pulls would be two halves in two fresh runtimes on the
- * plane, neither of them a press. */
+/* A key still being timed, a report waiting in a queue, or a finger on the
+ * glass (it keeps its gesture in the touch queue until it lifts,
+ * process_input_events, and one that landed while the queue was being taken
+ * has a press in the relay and its lift still to come): what the relay holds
+ * is not decided yet. A press split across two pulls would be two halves in
+ * two fresh runtimes on the plane, neither of them a press. */
 static bool remote_input_undecided(void)
 {
-    return fos_buttons_busy() || input_queued();
+    return fos_buttons_busy() || input_queued() || fos_touch_finger_down();
 }
 
 /* ------------------------------------------------------------ remote mode */

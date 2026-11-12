@@ -404,6 +404,13 @@ static void touch_task(void *arg)
             s_last_raw_y = p->y;
             seen |= (uint8_t)(1u << p->id);
             if ((s_down_mask & (1u << p->id)) == 0) {
+                /* On the glass before its press is queued: a frame rendered
+                 * on the server sends what the queue holds once no finger is
+                 * down (fos_client.c), and a press it took alone, its lift in
+                 * the next pull, was two halves on the plane, no tap
+                 * (reTerminal E1003, 2026-11-12: Start opened one time in
+                 * several). */
+                s_down_mask |= (uint8_t)(1u << p->id);
                 /* Where the finger landed first, then that it did, as the
                  * Linux evdev translator does (translate.nim flushSlots):
                  * a scene that follows the pointer by its moves (the Touch
@@ -417,13 +424,16 @@ static void touch_task(void *arg)
             s_last_x[p->id] = wx;
             s_last_y[p->id] = wy;
         }
-        /* Off the glass before the lift is queued: a frame rendered on the
-         * server drains the queue once no finger is down (fos_client.c). */
+        /* Off the glass only once the lift is queued (the same reason as
+         * above): whoever sees no finger down sees the gesture whole. The
+         * render task is woken again then, since the lift's own wake came
+         * while the finger still counted as down. */
         uint8_t lifted = s_down_mask & (uint8_t)~seen;
-        s_down_mask = seen;
         for (int id = 0; id < FOS_TOUCH_POINTS_MAX; id++) {
             if (lifted & (1u << id)) enqueue(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
         }
+        s_down_mask = seen;
+        if (lifted) fos_client_wake_for_events();
     }
 }
 
