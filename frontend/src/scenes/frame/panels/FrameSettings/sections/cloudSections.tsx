@@ -369,6 +369,7 @@ export function CloudEsp32Sections(): JSX.Element | null {
     setCloudPowerSettings,
     cloudBatteryEnablePinDisabledReason,
     cloudCpuModeDisabledReason,
+    cloudRenderOnServer,
     cloudEsp32ExtendedSettingsSupported,
   } = useFrameSettings()
   const renders = useFrameSettingsSectionRenders('cloud-esp32-power')
@@ -387,6 +388,7 @@ export function CloudEsp32Sections(): JSX.Element | null {
           batteryEnablePinDisabledReason={cloudBatteryEnablePinDisabledReason}
           cpuModeDisabledReason={cloudCpuModeDisabledReason}
           reportedCpuMhz={frame.hardware?.cpuMhz ?? undefined}
+          renderOnServer={cloudRenderOnServer}
           footnote="Power settings need a FrameOS firmware from 2026.8.21 on — older firmware refuses the whole settings push. Update the frame first if saving fails."
         />
       </SectionBody>

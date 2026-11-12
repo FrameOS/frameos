@@ -419,6 +419,23 @@
   run the AI evals above. Keep it free of Nim: the cloud prompt is tested for
   that.
 
+## Rendering on the server: `docs/server-rendering.md`
+
+- An ESP32 with its own runtime can hand its scenes to its control plane
+  (`render_mode: remote`; a backend's `device_config.renderMode`, "Render
+  scenes" in Power). The plane renders in the wasm runtime, packs the panel
+  bitmap (`pack_image_for_panel`, the cloud's port `panel-pack.ts`) and serves
+  it at `GET …/embedded/render` with an ETag; the device sends its scene id
+  and panel and gets a 304 when nothing changed. A C3 is always this.
+- The plane is the memory (scene state, held events), but the scene the
+  device names wins unless a switch the plane sent is still pending. On the
+  cloud a frame set to remote is a cloud-rendered frame (quota + floor,
+  `frameIsCloudRendered`). A sleeping frame's next picture is drawn before
+  it wakes, with the scene's clock set to the wake (`nowMs`), and used once
+  if nothing changed: keep that rule on both planes.
+- The battery popover's offer reads `renderSceneMs` from the metrics
+  (`serverRenderForecast` in `utils/batteryForecast.ts`).
+
 ## Scenes inside scenes: `docs/scene-rhythm.md`
 
 - A scene drawn through a scene node (a split's panel) renders on its own

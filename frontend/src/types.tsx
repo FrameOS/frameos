@@ -85,6 +85,10 @@ export interface ScenePreviewInfo {
 /** The ESP32's clock (the contract's `cpu_mode`): auto is 240 MHz on an LCD or touch panel, else 160. */
 export type CpuMode = 'auto' | 'battery' | 'performance'
 
+/** Where an ESP32's scenes run (the contract's `render_mode`, docs/server-rendering.md):
+ * on the frame's own runtime, or on its control plane, which hands it the finished picture. */
+export type RenderMode = 'local' | 'remote'
+
 export interface FrameType {
   id: FrameId
   project_id: number
@@ -161,6 +165,10 @@ export interface FrameType {
     /** ESP32 only: the clock setting (`cpu_mode`) and the clock it gave, in MHz (2026.11.7+). */
     cpuMode?: CpuMode | null
     cpuMhz?: number | null
+    /** ESP32 only: where its scenes run now (`render_mode`, 2026.11.7+); a board
+     * without a runtime of its own (`localRenderSupported: false`) is always remote. */
+    renderMode?: RenderMode | null
+    localRenderSupported?: boolean | null
     /** ESP32 only: the status LED that follows the buzzer's notes (fos_led.c),
      * -1 = none, and how it is lit (2026.10.20+). */
     ledPin?: number | null
@@ -368,7 +376,11 @@ export interface FrameType {
     /** How that LED is lit: gpio (high; the reTerminal E1004), gpio_inverted (low; the E1001/E1002), ws2812 (one pixel). */
     ledType?: 'gpio' | 'gpio_inverted' | 'ws2812'
     led_type?: 'gpio' | 'gpio_inverted' | 'ws2812'
+    /** Where the scenes run (docs/server-rendering.md): `remote` hands them to
+     * the backend, which renders each picture. The other spellings are old
+     * aliases the backend still reads (embedded_render_mode_for_frame). */
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
+    render_mode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
     hardwarePreset?: FrameEmbeddedHardwarePreset
     /** Virtual frames only: how the backend quantizes the rendered image.
      * Mirrors VIRTUAL_COLOR_MODES in backend/app/api/virtual_frame.py. */
@@ -446,6 +458,8 @@ export interface FrameType {
   touch_beep?: boolean
   /** ESP32: the chip's clock, 160 MHz (battery) or 240 (performance); unset = auto. */
   cpu_mode?: CpuMode
+  /** ESP32: where its scenes run (docs/server-rendering.md); unset = on the frame. */
+  render_mode?: RenderMode
   /** ESP32: the PDM microphone's clock, data and power GPIO; -1 = none. */
   mic_clk_pin?: number
   mic_data_pin?: number

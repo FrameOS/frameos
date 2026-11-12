@@ -49,6 +49,8 @@ import {
   cloudFrameSupportsEsp32TouchBeep,
   esp32CpuModeCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32CpuMode,
+  esp32RenderModeCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32RenderMode,
   cloudFrameSupportsEsp32Led,
   esp32BuzzerCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Buzzer,
@@ -357,7 +359,8 @@ describe("cloud settings push", () => {
   });
 
   it("gates the processor speed on its floor, a power key no older push carries", () => {
-    expect([...esp32CpuModeFrameSettingKeys]).toEqual(["cpu_mode"]);
+    // `render_mode` (docs/server-rendering.md) shares the floor.
+    expect([...esp32CpuModeFrameSettingKeys].sort()).toEqual(["cpu_mode", "render_mode"]);
     expect(esp32CpuModeCloudFrameSettingsMinVersion).toBe(esp32CpuModeFrameSettingsMinVersion);
     expect(cloudFrameSupportsEsp32CpuMode("2026.11.6")).toBe(false);
     expect(cloudFrameSupportsEsp32CpuMode("2026.11.7")).toBe(true);
@@ -365,6 +368,17 @@ describe("cloud settings push", () => {
     expect(esp32CloudFrameSettingKeysForVersion("2026.11.6")).not.toContain("cpu_mode");
     expect(esp32CloudFrameSettingKeysForVersion("2026.11.7")).toContain("cpu_mode");
     expect(esp32OnlySettableKeys.has("cpu_mode")).toBe(true);
+  });
+
+  it("gates where the scenes run on the same floor, an ESP32-only key", () => {
+    expect(esp32RenderModeCloudFrameSettingsMinVersion).toBe("2026.11.7");
+    expect(cloudFrameSupportsEsp32RenderMode("2026.11.6")).toBe(false);
+    expect(cloudFrameSupportsEsp32RenderMode("2026.11.7")).toBe(true);
+    expect((esp32PowerSettingKeys as readonly string[]).includes("render_mode")).toBe(true);
+    expect(esp32CloudFrameSettingKeysForVersion("2026.11.6")).not.toContain("render_mode");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.11.7")).toContain("render_mode");
+    expect(esp32OnlySettableKeys.has("render_mode")).toBe(true);
+    expect(cloudFrameSettingsPayload({ render_mode: "remote" }, ["render_mode"])).toEqual({ render_mode: "remote" });
   });
 
   it("gates the ESP32 status LED on the voice chat floor, as its own list", () => {

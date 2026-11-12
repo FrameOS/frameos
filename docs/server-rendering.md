@@ -8,10 +8,19 @@ and stops doing the scene's work: no JavaScript, no image decodes, no TLS
 handshakes to the scene's data sources. A battery frame's wake becomes Wi-Fi,
 one HTTPS request and the panel refresh.
 
-It also means the scene runs where the plane is: a scene that calls a service
-only the backend's network reaches (a VPN, a host on the backend's LAN when
-the frame allows local network access) works on a frame that could not reach
-it itself.
+It also means the scene runs where the plane is, and fetches from there:
+
+- **On a self-hosted backend** a scene reaches what the backend reaches: its
+  LAN and a VPN it is on (private ranges, `100.64.0.0/10` included), as a
+  backend frame's own runtime could (`docs/lan-access.md`: backend frames
+  have no block). What is the backend host's own and never the frame's
+  network stays refused: loopback, link-local and the metadata address,
+  unless the frame's `network.allowLocalNetworkAccess` is on; set to `false`
+  it refuses private ranges too. A virtual frame keeps its opt-in rule.
+- **On FrameOS Cloud** a scene reaches public addresses only: the cloud's
+  renderer refuses every private one, whatever the frame's local network
+  access says (that switch is about the frame's own network, which the cloud
+  is not on).
 
 This is the thin-client mode a PSRAM-less board (ESP32-C3) has always run in,
 offered as a choice to a board that has its own runtime (every ESP32-S3).

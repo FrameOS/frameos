@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import type { ReactNode } from 'react'
 
-import type { CpuMode } from '../types'
+import type { CpuMode, RenderMode } from '../types'
 
 import { Label } from './Label'
 import { NumberTextInput } from './NumberTextInput'
@@ -43,6 +43,24 @@ export interface PowerSettingsValues {
   batteryEnablePin: number | undefined
   /** The chip's clock; undefined = auto (240 MHz on an LCD or touch panel, else 160). */
   cpuMode?: CpuMode | undefined
+  /** Where the scenes run (docs/server-rendering.md); undefined = on the frame. */
+  renderMode?: RenderMode | undefined
+}
+
+/**
+ * "Render scenes": whether this frame may hand its scenes to its control
+ * plane. Only for a board with a runtime of its own (an ESP32-S3); a board
+ * without one is rendered by the plane whatever the setting says.
+ */
+export interface RenderOnServerChoice {
+  /** The plane, as the select names it: "FrameOS Cloud", "the backend". */
+  serverName: string
+  /** Why it cannot be set here (cloud: firmware before 2026.11.7). */
+  disabledReason?: string
+  /** What a scene can reach from there, one sentence for the tooltip. */
+  reach: string
+  /** What it costs on this plane, shown under the select while it is on. */
+  note?: ReactNode
 }
 
 export interface PowerSettingsFieldsProps {
@@ -70,6 +88,8 @@ export interface PowerSettingsFieldsProps {
   cpuModeDisabledReason?: string
   /** The clock the frame reports running at, in MHz (cloud only). */
   reportedCpuMhz?: number | undefined
+  /** Offer "Render scenes"; omitted on a board that cannot render itself. */
+  renderOnServer?: RenderOnServerChoice
   className?: string
 }
 
@@ -106,6 +126,7 @@ export function PowerSettingsFields({
   batteryEnablePinDisabledReason,
   cpuModeDisabledReason,
   reportedCpuMhz,
+  renderOnServer,
   className,
 }: PowerSettingsFieldsProps): JSX.Element {
   const wakeCheckValue = String(value.wakeCheckSeconds ?? 0)
@@ -219,6 +240,7 @@ export function PowerSettingsFields({
           />
         </PowerField>
       ) : null}
+      {renderOnServer ? <RenderScenesField choice={renderOnServer} value={value} onChange={onChange} /> : null}
       <PowerField
         label="Processor speed"
         tooltip={
@@ -290,6 +312,46 @@ export function PowerSettingsFields({
       </PowerField>
       {footnote ? <p className="frameos-muted text-sm">{footnote}</p> : null}
     </div>
+  )
+}
+
+function RenderScenesField({
+  choice,
+  value,
+  onChange,
+}: {
+  choice: RenderOnServerChoice
+  value: PowerSettingsValues
+  onChange: (patch: Partial<PowerSettingsValues>) => void
+}): JSX.Element {
+  const remote = value.renderMode === 'remote'
+  return (
+    <PowerField
+      label="Render scenes"
+      tooltip={
+        choice.disabledReason ?? (
+          <>
+            On the server, {choice.serverName} runs this frame&apos;s scenes and sends it the finished picture. The
+            frame only wakes, downloads the picture and refreshes the screen: no scene code, no image decoding and no
+            data fetching on the frame, so a battery lasts longer. When nothing changed, the frame skips the download
+            and the refresh. A sleeping frame&apos;s next picture is drawn just before it wakes. Buttons and the
+            schedule still switch scenes. {choice.reach} The frame changes over at its next render.
+          </>
+        )
+      }
+    >
+      <fieldset disabled={choice.disabledReason !== undefined} className="min-w-0 space-y-1">
+        <Select
+          value={remote ? 'remote' : 'local'}
+          onChange={(mode) => onChange({ renderMode: mode === 'remote' ? 'remote' : 'local' })}
+          options={[
+            { value: 'local', label: 'On the frame (default)' },
+            { value: 'remote', label: `On ${choice.serverName}` },
+          ]}
+        />
+        {remote && choice.note ? <p className="frameos-muted text-xs">{choice.note}</p> : null}
+      </fieldset>
+    </PowerField>
   )
 }
 

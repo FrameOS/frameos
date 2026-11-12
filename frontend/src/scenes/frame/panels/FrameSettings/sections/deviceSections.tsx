@@ -531,8 +531,13 @@ export function VirtualFrameSection(): JSX.Element | null {
  * implements (deep sleep), same storage, same two routes to the board.
  */
 export function EmbeddedPowerSection(): JSX.Element | null {
-  const { showEmbeddedPowerSection, embeddedPowerProfile, embeddedPowerSettings, setEmbeddedPowerSettings } =
-    useFrameSettings()
+  const {
+    showEmbeddedPowerSection,
+    embeddedPowerProfile,
+    embeddedPowerSettings,
+    setEmbeddedPowerSettings,
+    embeddedRenderOnServer,
+  } = useFrameSettings()
   if (!showEmbeddedPowerSection) {
     return null
   }
@@ -546,6 +551,7 @@ export function EmbeddedPowerSection(): JSX.Element | null {
           profile={embeddedPowerProfile ?? 'esp32'}
           value={embeddedPowerSettings}
           onChange={setEmbeddedPowerSettings}
+          renderOnServer={embeddedRenderOnServer}
           footnote={
             embeddedPowerProfile === 'pico'
               ? 'This reaches the board on its next settings poll and is sent over USB when a board is provisioned.'
