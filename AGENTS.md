@@ -425,10 +425,11 @@
   (`render_mode: remote`; a backend's `device_config.renderMode`, "Render
   scenes" in Power). The plane renders in the wasm runtime, packs the panel
   bitmap (`pack_image_for_panel`, the cloud's port `panel-pack.ts`) and serves
-  it at `GET …/embedded/render` with an ETag; the device sends its scene id
-  and panel and gets a 304 when nothing changed. A C3 is always this.
-- The plane is the memory (scene state, held events), but the scene the
-  device names wins unless a switch the plane sent is still pending. On the
+  it at `GET …/embedded/render` with an ETag; the device sends its panel
+  and gets a 304 when nothing changed. A C3 is always this.
+- The plane is the memory (scene state, held events, the scene shown); in
+  remote mode the firmware runs no scene work, so keys, touch and the
+  device's schedule do not switch scenes yet ("Not yet" in the doc). On the
   cloud a frame set to remote is a cloud-rendered frame (quota + floor,
   `frameIsCloudRendered`). A sleeping frame's next picture is drawn before
   it wakes, with the scene's clock set to the wake (`nowMs`), and used once

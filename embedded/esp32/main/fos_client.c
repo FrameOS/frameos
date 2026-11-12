@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -44,6 +45,7 @@
 #include "fos_ota.h"
 #include "fos_panel_draw.h"
 #include "fos_power.h"
+#include "fos_render_pull.h"
 #include "fos_scenes.h"
 #include "fos_scene_state.h"
 #include "fos_schedule.h"
@@ -145,6 +147,26 @@ RTC_DATA_ATTR static time_t s_next_render_due;
  * from switching deep sleep off or parking the frame for six hours. */
 RTC_DATA_ATTR static fos_power_state_t s_power_state;
 
+/* Rendering on the server (docs/server-rendering.md, fos_render_pull.h). The
+ * picture the last pull put on the panel, so a wake asks for it with
+ * If-None-Match and an unchanged picture costs no download and no refresh.
+ * A deep sleep keeps it; a reset forgets it (the stored display hash still
+ * skips the refresh then). */
+RTC_DATA_ATTR static fos_render_pull_shown_t s_pull_shown;
+/* The cloud refused to render for this frame (403): a board with a runtime
+ * renders itself until then (wall-clock seconds), and the refusal's code,
+ * logged once per change. */
+RTC_DATA_ATTR static uint32_t s_pull_refused_until;
+RTC_DATA_ATTR static char s_pull_refused_code[48];
+/* Whether this board can run its scenes (main.c, at boot). */
+static bool s_local_render_capable = false;
+/* Something other than a render drew the panel (fos_client_note_panel_drawn). */
+static bool s_panel_drawn_elsewhere = false;
+/* How long the last good pass took to produce its picture: the scene on
+ * this frame, or the pull. Metrics `renderSceneMs`; the battery forecast's
+ * estimate of what rendering on the server would save. */
+static int64_t s_last_scene_ms = 0;
+
 /* FrameOS embedded bitmap wire format ("FOSB"):
  * magic[4] ver(u8) format(u8) width(u16le) height(u16le) reserved(u16le),
  * then the packed payload bytes for the current FOS_PIXEL_* format. */
@@ -212,6 +234,41 @@ size_t fos_client_task_stack_free(void)
 int64_t fos_client_last_render_ms(void) { return s_last_render_ms; }
 bool fos_client_last_refresh_skipped(void) { return s_last_refresh_skipped; }
 
+/* ------------------------------------------------- rendering on the server */
+
+void fos_client_set_local_render_capable(bool capable) { s_local_render_capable = capable; }
+bool fos_client_local_render_capable(void) { return s_local_render_capable; }
+
+const char *fos_client_render_mode_name(void)
+{
+    return (s_local_render_capable && fos_config()->render_mode == FOS_RENDER_LOCAL) ? "local" : "remote";
+}
+
+void fos_client_render_mode_changed(void)
+{
+    __atomic_store_n(&s_pull_refused_until, 0u, __ATOMIC_RELAXED);
+    fos_client_render_now();
+}
+
+void fos_client_note_panel_drawn(void)
+{
+    __atomic_store_n(&s_panel_drawn_elsewhere, true, __ATOMIC_RELAXED);
+}
+
+/* Whether this pass runs the scene here: the frame's own setting, or the
+ * cloud refused to render for it and this board can (docs/server-rendering.md).
+ * Everything that only a local render needs — the scene store's apply, the
+ * scene events, keys and touch, the schedule, animation — asks this. A
+ * board whose runtime never started (a panel too large for its PSRAM) never
+ * renders here, whatever a plane's settings push says. */
+static bool renders_locally(const fos_config_t *config)
+{
+    if (!frameos_nim_available() || !s_local_render_capable) return false;
+    if (config->render_mode == FOS_RENDER_LOCAL) return true;
+    return fos_render_pull_refused_now((int64_t)__atomic_load_n(&s_pull_refused_until, __ATOMIC_RELAXED),
+                                       (int64_t)time(NULL));
+}
+
 /* ------------------------------------------------------------- metrics */
 
 /* One sample per render pass, kept in a small ring for GET /metrics and the
@@ -274,7 +331,7 @@ static const char *wake_cause_name(void)
 
 static void log_metrics_sample(void)
 {
-    char json[720];
+    char json[768];
     int battery_pct = -1, battery_mv = 0, battery_raw_mv = 0;
     if (fos_battery_present()) {
         fos_battery_read(&battery_raw_mv, &battery_pct);
@@ -306,7 +363,7 @@ static void log_metrics_sample(void)
         "\"freeHeapMallocKB\":%u,\"largestHeapMallocBlockKB\":%u,"
         "\"freePsramKB\":%u,\"largestPsramBlockKB\":%u,"
         "\"renderStackFreeBytes\":%u,\"cloudStackFreeBytes\":%u,"
-        "\"wifiRssi\":%d,\"renders\":%lu,\"renderLastMs\":%lld,"
+        "\"wifiRssi\":%d,\"renders\":%lu,\"renderLastMs\":%lld,\"renderSceneMs\":%lld,"
         "\"loadedScenes\":%d,\"httpConnectRetries\":%lu",
         wake_cause_name(),
         (long long)(esp_timer_get_time() / 1000000),
@@ -331,6 +388,9 @@ static void log_metrics_sample(void)
         (unsigned)uxTaskGetStackHighWaterMark(NULL),
         (unsigned)fos_cloud_task_stack_free(),
         fos_wifi_rssi(), (unsigned long)s_render_count, s_last_render_ms,
+        /* The picture alone (the scene here, or the pull), without the
+         * refresh: what rendering on the server would take off a wake. */
+        s_last_scene_ms,
         fos_scenes_loaded(),
         (unsigned long)(fos_http_connect_retries() + fos_nim_http_connect_retries()));
     /* The charger's word, where the board has one: USB in or not, charging
@@ -499,19 +559,6 @@ static bool display_state_matches(const fos_display_state_t *a, const fos_displa
         a->len == b->len &&
         strncmp(a->panel, b->panel, sizeof(a->panel)) == 0 &&
         memcmp(a->sha256, b->sha256, FOS_DISPLAY_HASH_LEN) == 0;
-}
-
-static uint8_t white_fill_for_format(fos_pixel_format_t format)
-{
-    switch (format) {
-        case FOS_PIXEL_2BPP_BWYR:
-            return 0x55; /* palette index 1 (white) */
-        case FOS_PIXEL_4BPP_7COLOR:
-        case FOS_PIXEL_4BPP_SPECTRA6:
-            return 0x11; /* palette index 1 (white) */
-        default:
-            return 0xFF;
-    }
 }
 
 /* The stored hash is an e-paper fact: the glass keeps the picture through
@@ -984,6 +1031,16 @@ static void store_snapshot(const uint8_t *buf, size_t len, int width, int height
     free(old);
 }
 
+/* Whether the preview holds a picture now (its own copy or a borrowed one). */
+static bool snapshot_held(void)
+{
+    if (!s_snapshot_lock) return false;
+    xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
+    bool held = s_last_frame != NULL && s_last_frame_len > 0;
+    xSemaphoreGive(s_snapshot_lock);
+    return held;
+}
+
 bool fos_client_snapshot_info(int *width, int *height, fos_pixel_format_t *format,
                               size_t *len, uint32_t *render_count, int64_t *render_ms)
 {
@@ -1064,43 +1121,135 @@ bool fos_client_render_pending(void)
 
 /* ------------------------------------------------------------ remote mode */
 
-static esp_err_t fetch_remote_bitmap(uint8_t *buf, size_t buf_len)
+/* One pull of the frame's picture from its control plane
+ * (docs/server-rendering.md "The render pull"). */
+typedef struct {
+    int source;                          /* FOS_RENDER_PULL_*; NONE: nowhere to pull from */
+    int status;                          /* the HTTP status; 0 when no answer came */
+    fos_render_pull_outcome_t outcome;
+    char etag[FOS_RENDER_PULL_ETAG_LEN]; /* the answer's ETag, "" when none was usable */
+    char code[48];                       /* a refusal's `error` */
+} remote_pull_t;
+
+static bool panel_overlay_pending(void);
+
+static esp_err_t remote_pull_header(esp_http_client_event_t *evt)
 {
-    fos_config_t *config = fos_config();
-    if (!config->backend_url[0] || config->frame_id == 0) {
-        ESP_LOGW(TAG, "remote render: backend not configured");
+    if (evt->event_id == HTTP_EVENT_ON_HEADER && evt->header_key && evt->header_value &&
+        strcasecmp(evt->header_key, "ETag") == 0) {
+        remote_pull_t *pull = (remote_pull_t *)evt->user_data;
+        fos_render_pull_etag_keep(evt->header_value, pull->etag, sizeof(pull->etag));
+    }
+    return ESP_OK;
+}
+
+/* Where the picture comes from, with the URL and the Authorization for it: a
+ * backend set here, else the cloud this frame is enrolled with — the order
+ * of the settings pull (fos_settings.c select_source).
+ *
+ * No `scene`: in remote mode this firmware runs no scene choice of its own
+ * (the store's apply, keys, touch and the schedule all wait on a local render,
+ * renders_locally), so its runtime holds no scene, or one left from before a
+ * switch to remote that the plane has moved on from since. The plane's own
+ * choice is the one to draw. */
+static int remote_pull_target(char *url, size_t url_len, char *auth, size_t auth_len,
+                              int width, int height, int format)
+{
+    const fos_config_t *config = fos_config();
+    if (config->backend_url[0] && config->frame_id != 0) {
+        char frame[16];
+        snprintf(frame, sizeof(frame), "%lu", (unsigned long)config->frame_id);
+        if (!fos_render_pull_url(url, url_len, config->backend_url, frame, width, height, format,
+                                 config->rotate, NULL)) {
+            return FOS_RENDER_PULL_NONE;
+        }
+        snprintf(auth, auth_len, "Bearer %s", config->api_key);
+        return FOS_RENDER_PULL_BACKEND;
+    }
+    char base[FOS_URL_LEN];
+    char frame_id[64];
+    if (fos_cloud_api_access(base, sizeof(base), frame_id, sizeof(frame_id), auth, auth_len) &&
+        fos_render_pull_url(url, url_len, base, frame_id, width, height, format, config->rotate, NULL)) {
+        return FOS_RENDER_PULL_CLOUD;
+    }
+    return FOS_RENDER_PULL_NONE;
+}
+
+/* Pull the picture into `buf`. ESP_OK with outcome PICTURE: `buf` holds it.
+ * ESP_OK with outcome UNCHANGED: the panel shows it already (304), `buf` is
+ * untouched. Anything else is an error, a refusal (outcome REFUSED, the
+ * cloud's 403) among them. `buf` is not cleared first: until a picture
+ * arrives it still holds what it held, which a 304 may want back
+ * (render_once). */
+static esp_err_t fetch_remote_bitmap(uint8_t *buf, size_t buf_len, remote_pull_t *pull)
+{
+    memset(pull, 0, sizeof(*pull));
+    pull->outcome = FOS_RENDER_PULL_FAILED;
+    int width = fos_display_present() ? fos_display_width() : 800;
+    int height = fos_display_present() ? fos_display_height() : 480;
+    int want_format = fos_display_present() ? (int)fos_display_format() : FOS_PIXEL_1BPP;
+
+    char url[FOS_URL_LEN + 192];
+    char auth[FOS_CLOUD_TOKEN_LEN + 16];
+    pull->source = remote_pull_target(url, sizeof(url), auth, sizeof(auth), width, height, want_format);
+    if (pull->source == FOS_RENDER_PULL_NONE) {
+        ESP_LOGW(TAG, "remote render: no backend configured and not enrolled with a cloud");
         return ESP_ERR_INVALID_STATE;
     }
     if (fos_wifi_state() != FOS_WIFI_CONNECTED) {
         return ESP_ERR_INVALID_STATE;
     }
-
-    char url[FOS_URL_LEN + 64];
-    snprintf(url, sizeof(url), "%s/api/frames/%lu/embedded/render",
-             config->backend_url, (unsigned long)config->frame_id);
-    char auth[FOS_STR_LEN + 16];
-    snprintf(auth, sizeof(auth), "Bearer %s", config->api_key);
+    /* The picture the panel shows, by the hash of what it shows: an
+     * unchanged one comes back as a 304, no download and no refresh. */
+    load_display_state();
+    const char *if_none_match = fos_render_pull_if_none_match(
+        &s_pull_shown, pull->source, s_display_state_valid ? s_display_state.sha256 : NULL,
+        panel_overlay_pending());
 
     esp_http_client_config_t http_config = {
         .url = url,
         .timeout_ms = 60000,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .buffer_size = 4096,
+        .event_handler = remote_pull_header,
+        .user_data = pull,
     };
     esp_http_client_handle_t client = esp_http_client_init(&http_config);
     if (!client) return ESP_FAIL;
     esp_http_client_set_header(client, "Authorization", auth);
+    if (if_none_match) esp_http_client_set_header(client, "If-None-Match", if_none_match);
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "remote render: connect failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "remote render: connect failed: %s", fos_http_err_name(err));
         esp_http_client_cleanup(client);
         return err;
     }
     int64_t content_length = esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
+    pull->status = status;
+    pull->outcome = fos_render_pull_outcome(status, pull->source);
+    if (pull->outcome == FOS_RENDER_PULL_UNCHANGED) {
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        ESP_LOGI(TAG, "remote render: unchanged (304), the panel keeps its picture");
+        return ESP_OK;
+    }
+    if (pull->outcome == FOS_RENDER_PULL_REFUSED) {
+        char body[192];
+        int read = esp_http_client_read(client, body, sizeof(body) - 1);
+        body[read > 0 ? read : 0] = '\0';
+        fos_render_pull_error_code(body, pull->code, sizeof(pull->code));
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        ESP_LOGW(TAG, "remote render: the cloud does not render for this frame (%s)",
+                 pull->code[0] ? pull->code : "403");
+        return ESP_FAIL;
+    }
     if (status != 200) {
-        ESP_LOGE(TAG, "remote render: HTTP %d from %s", status, url);
+        /* The host only: the query names the scene's panel, nothing secret,
+         * but a log line has no use for it. */
+        ESP_LOGE(TAG, "remote render: HTTP %d", status);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
         return ESP_FAIL;
@@ -1112,21 +1261,22 @@ static esp_err_t fetch_remote_bitmap(uint8_t *buf, size_t buf_len)
         ESP_LOGE(TAG, "remote render: bad header (read=%d)", read);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
+        pull->outcome = FOS_RENDER_PULL_FAILED;
         return ESP_FAIL;
     }
-    int width = header[6] | (header[7] << 8);
-    int height = header[8] | (header[9] << 8);
+    int got_width = header[6] | (header[7] << 8);
+    int got_height = header[8] | (header[9] << 8);
     size_t expected = fos_display_present()
         ? fos_display_buffer_size()
-        : (((size_t)width + 7u) / 8u) * (size_t)height;
-    int want_format = fos_display_present() ? (int)fos_display_format() : FOS_PIXEL_1BPP;
+        : (((size_t)got_width + 7u) / 8u) * (size_t)got_height;
     bool dims_ok = !fos_display_present()
-        || (width == fos_display_width() && height == fos_display_height());
+        || (got_width == fos_display_width() && got_height == fos_display_height());
     if (header[5] != want_format || expected != buf_len || !dims_ok) {
         ESP_LOGE(TAG, "remote render: format mismatch (%dx%d fmt=%d, want %u bytes, have %u)",
-                 width, height, header[5], (unsigned)expected, (unsigned)buf_len);
+                 got_width, got_height, header[5], (unsigned)expected, (unsigned)buf_len);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
+        pull->outcome = FOS_RENDER_PULL_FAILED;
         return ESP_FAIL;
     }
 
@@ -1140,11 +1290,41 @@ static esp_err_t fetch_remote_bitmap(uint8_t *buf, size_t buf_len)
     esp_http_client_cleanup(client);
     if (received != buf_len) {
         ESP_LOGE(TAG, "remote render: short read %u/%u", (unsigned)received, (unsigned)buf_len);
+        pull->outcome = FOS_RENDER_PULL_FAILED;
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG, "remote render: fetched %u bytes (%dx%d, content-length %lld)",
-             (unsigned)received, width, height, content_length);
+    ESP_LOGI(TAG, "remote render: fetched %u bytes (%dx%d, content-length %lld) from the %s",
+             (unsigned)received, got_width, got_height, content_length,
+             pull->source == FOS_RENDER_PULL_CLOUD ? "cloud" : "backend");
     return ESP_OK;
+}
+
+/* The cloud refused to render for this frame: a board with its own runtime
+ * renders itself for the next hour, then asks again (docs/server-rendering.md
+ * "The switch"). Said once per change, not on every pass. */
+static void note_pull_refused(const remote_pull_t *pull)
+{
+    int64_t now = (int64_t)time(NULL);
+    uint32_t until = now > 1000000000 ? (uint32_t)(now + FOS_RENDER_PULL_REFUSED_RETRY_S) : 0;
+    __atomic_store_n(&s_pull_refused_until, until, __ATOMIC_RELAXED);
+    const char *code = pull->code[0] ? pull->code : "forbidden";
+    if (strcmp(code, s_pull_refused_code) == 0) return;
+    strlcpy(s_pull_refused_code, code, sizeof(s_pull_refused_code));
+    char line[200];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"render:remote_refused\",\"source\":\"esp32\",\"reason\":\"%s\","
+             "\"fallback\":\"local\",\"retrySeconds\":%d}",
+             code, FOS_RENDER_PULL_REFUSED_RETRY_S);
+    frameos_nim_log_hook(line);
+}
+
+/* A picture came from the plane again after a refusal. */
+static void note_pull_accepted(void)
+{
+    if (s_pull_refused_code[0] == '\0') return;
+    s_pull_refused_code[0] = '\0';
+    __atomic_store_n(&s_pull_refused_until, 0u, __ATOMIC_RELAXED);
+    frameos_nim_log_hook("{\"event\":\"render:remote_refused\",\"source\":\"esp32\",\"status\":\"ended\"}");
 }
 
 /* ------------------------------------------------------------ image push */
@@ -1536,7 +1716,7 @@ static void link_hand_back(const fos_config_t *config)
     /* A scene payload it downloaded is taken too: the sleep waits for the
      * store task to write it (fos_scenes_store_wait, before the sleep). */
     pass_scenes_sync();
-    if (pass_commands_sync() && config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
+    if (pass_commands_sync() && renders_locally(config)) {
         fos_scenes_apply_pending_selection();
     }
 }
@@ -1550,7 +1730,7 @@ static void link_hand_back(const fos_config_t *config)
  * are here already, and run now: the backend marked them sent. */
 static bool serve_link(const fos_config_t *config)
 {
-    bool nim = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
+    bool nim = renders_locally(config);
     if (!input_hold_on()) {
         pass_scenes_sync();
         pass_settings_sync();
@@ -1904,11 +2084,18 @@ static esp_err_t render_once(bool quiet)
     fos_pixel_format_t format = fos_display_present() ? fos_display_format() : FOS_PIXEL_1BPP;
     size_t buf_len = fos_display_present() ? fos_display_buffer_size()
                                            : (((size_t)width + 7u) / 8u) * (size_t)height;
-    bool local_render = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
+    bool local_render = renders_locally(config);
     const char *mode = local_render ? "local" : "remote";
     uint32_t render_attempt = s_render_count + 1;
     char scene_id[128];
     char scene_name[128];
+    /* Something else drew the panel since (the portal's screen, a console
+     * display_test): its stored hash, and the ETag that rides on it, no
+     * longer describe the glass. */
+    if (__atomic_exchange_n(&s_panel_drawn_elsewhere, false, __ATOMIC_RELAXED)) {
+        forget_display_state();
+        fos_render_pull_forget(&s_pull_shown);
+    }
     if (quiet) {
         scene_id[0] = '\0';
         scene_name[0] = '\0';
@@ -1921,10 +2108,55 @@ static esp_err_t render_once(bool quiet)
     }
 
     uint8_t *buf = NULL;
-    esp_err_t err;
+    esp_err_t err = ESP_OK;
     /* An LCD's back frame buffer, drawn in place: no pack, no copy, and the
      * blit below is a buffer switch (fos_display_render_target). */
     bool in_panel = false;
+    /* Rendered on the server (docs/server-rendering.md): the pull first. A
+     * 304 leaves the panel as it is; the cloud's refusal hands this pass to
+     * the runtime here, when there is one. */
+    remote_pull_t pull = {0};
+    bool pulled_unchanged = false;
+    if (!local_render) {
+        buf = fos_framebuffer_acquire(buf_len);
+        if (!buf) {
+            /* Free bytes alone never explained this failure — a C3 with 120 KB
+             * free and a largest block of 16 KB cannot hold 96000 contiguous
+             * bytes. Print what actually decides it. */
+            ESP_LOGE(TAG, "out of memory for %u byte framebuffer "
+                          "(internal free=%u largest=%u, psram total=%u, reserved=%u)",
+                     (unsigned)buf_len,
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                     (unsigned)heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
+                     (unsigned)fos_framebuffer_reserved_bytes());
+            log_render_event("render:error", scene_id, scene_name, "error", "allocate",
+                             mode, "none", "out-of-memory", render_attempt,
+                             (esp_timer_get_time() - start) / 1000, width, height,
+                             format, buf_len, ESP_ERR_NO_MEM);
+            frameos_nim_flush_logs();
+            return ESP_ERR_NO_MEM;
+        }
+        if (config->render_mode == FOS_RENDER_LOCAL) {
+            ESP_LOGW(TAG, "local render requested but nim runtime unavailable; trying remote");
+        }
+        err = fetch_remote_bitmap(buf, buf_len, &pull);
+        if (pull.outcome == FOS_RENDER_PULL_REFUSED && s_local_render_capable && frameos_nim_available()) {
+            note_pull_refused(&pull);
+            fos_framebuffer_release(buf);
+            buf = NULL;
+            /* The scene store and a queued switch wait on a local render
+             * (renders_locally): this pass is one now, so they go first. */
+            fos_scenes_apply_pending();
+            fos_scenes_apply_pending_selection();
+            local_render = true;
+            mode = "local";
+            err = ESP_OK;
+        } else if (err == ESP_OK && pull.outcome == FOS_RENDER_PULL_UNCHANGED) {
+            pulled_unchanged = true;
+        }
+        if (err == ESP_OK && !local_render) note_pull_accepted();
+    }
     if (local_render) {
         if (fos_scenes_loaded() == 0) {
             push_status_info();
@@ -1956,31 +2188,6 @@ static esp_err_t render_once(bool quiet)
             err = frameos_nim_render_alloc(&buf, &buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
         }
         if (err != ESP_OK) ESP_LOGE(TAG, "nim render failed");
-    } else {
-        buf = fos_framebuffer_acquire(buf_len);
-        if (!buf) {
-            /* Free bytes alone never explained this failure — a C3 with 120 KB
-             * free and a largest block of 16 KB cannot hold 96000 contiguous
-             * bytes. Print what actually decides it. */
-            ESP_LOGE(TAG, "out of memory for %u byte framebuffer "
-                          "(internal free=%u largest=%u, psram total=%u, reserved=%u)",
-                     (unsigned)buf_len,
-                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-                     (unsigned)heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
-                     (unsigned)fos_framebuffer_reserved_bytes());
-            log_render_event("render:error", scene_id, scene_name, "error", "allocate",
-                             mode, "none", "out-of-memory", render_attempt,
-                             (esp_timer_get_time() - start) / 1000, width, height,
-                             format, buf_len, ESP_ERR_NO_MEM);
-            frameos_nim_flush_logs();
-            return ESP_ERR_NO_MEM;
-        }
-        memset(buf, white_fill_for_format(format), buf_len);
-        if (config->render_mode == FOS_RENDER_LOCAL) {
-            ESP_LOGW(TAG, "local render requested but nim runtime unavailable; trying remote");
-        }
-        err = fetch_remote_bitmap(buf, buf_len);
     }
 
     int64_t framebuffer_ms = (esp_timer_get_time() - start) / 1000;
@@ -2003,9 +2210,11 @@ static esp_err_t render_once(bool quiet)
      * takes seconds. An LCD shows a frame by switching a buffer, so there is
      * nothing to skip, and hashing 460 KB cost a frame of its own; the
      * backend push hashes what it sends (push_image_to_backend). */
+    /* A 304 brought no picture: `buf` holds whatever it held, and the panel
+     * keeps the one it shows. */
     fos_display_state_t rendered_state;
-    bool rendered_state_valid = err == ESP_OK && fos_display_present() && !fos_display_is_lcd() &&
-        display_state_for_buffer(buf, buf_len, width, height, format, &rendered_state);
+    bool rendered_state_valid = err == ESP_OK && !pulled_unchanged && fos_display_present() &&
+        !fos_display_is_lcd() && display_state_for_buffer(buf, buf_len, width, height, format, &rendered_state);
     bool skipped_refresh = false;
     bool snapshot_stored = false;
     const char *refresh = fos_display_present() ? "pending" : "none";
@@ -2015,7 +2224,7 @@ static esp_err_t render_once(bool quiet)
      * taken before it goes on. */
     lan_overlay_t lan_overlay = {0};
     notice_overlay_t notice = {0};
-    if (err == ESP_OK && fos_display_present()) {
+    if (err == ESP_OK && !pulled_unchanged && fos_display_present()) {
         if (in_panel && panel_overlay_pending()) {
             store_snapshot(buf, buf_len, width, height, format, s_render_count + 1,
                            (esp_timer_get_time() - start) / 1000, false);
@@ -2030,14 +2239,16 @@ static esp_err_t render_once(bool quiet)
     bool overlay_drawn = lan_overlay.drawn || notice.drawn;
     if (err == ESP_OK && fos_display_present()) {
         load_display_state();
-        if (!overlay_drawn && rendered_state_valid && s_display_state_valid &&
-            display_state_matches(&rendered_state, &s_display_state)) {
+        if (pulled_unchanged || (!overlay_drawn && rendered_state_valid && s_display_state_valid &&
+                                 display_state_matches(&rendered_state, &s_display_state))) {
             skipped_refresh = true;
             s_last_refresh_skipped = true;
             refresh = "skipped";
             char sha_hex[FOS_DISPLAY_HASH_LEN * 2 + 1];
-            sha256_hex(rendered_state.sha256, sha_hex);
-            ESP_LOGI(TAG, "display refresh skipped: packed image unchanged (%.*s)", 12, sha_hex);
+            sha256_hex(pulled_unchanged ? s_display_state.sha256 : rendered_state.sha256, sha_hex);
+            ESP_LOGI(TAG, "display refresh skipped: %s (%.*s)",
+                     pulled_unchanged ? "the plane's picture is unchanged (304)" : "packed image unchanged",
+                     12, sha_hex);
             if (!quiet) {
                 log_render_event("render:device", scene_id, scene_name, "skipped",
                                  "display", mode, refresh, "unchanged",
@@ -2100,6 +2311,16 @@ static esp_err_t render_once(bool quiet)
     }
     lan_overlay_end(&lan_overlay); /* already out on every path; never into the snapshot */
     notice_overlay_end(&notice);
+    /* The ETag rides on the picture the panel took, by the hash of its
+     * bytes (an e-paper fact: an LCD keeps no display hash): kept once the
+     * glass shows exactly what this pull delivered, with no overlay over it.
+     * Nothing else needs forgetting it: the pull sends it only while the
+     * panel's hash is that one (fos_render_pull_if_none_match). */
+    if (!local_render && err == ESP_OK && pull.outcome == FOS_RENDER_PULL_PICTURE && pull.etag[0] &&
+        rendered_state_valid && s_display_state_valid &&
+        display_state_matches(&rendered_state, &s_display_state)) {
+        fos_render_pull_remember(&s_pull_shown, pull.source, pull.etag, rendered_state.sha256);
+    }
     if (err == ESP_OK) {
         if (skipped_refresh && rendered_state_valid) {
             s_display_state = rendered_state;
@@ -2107,9 +2328,22 @@ static esp_err_t render_once(bool quiet)
         }
         s_render_count++;
         s_last_render_ms = (esp_timer_get_time() - start) / 1000;
+        s_last_scene_ms = framebuffer_ms;
         /* A render without the notice took it off the panel. */
         if (!notice.drawn && !skipped_refresh) s_notice_shown_us = 0;
-        if (!snapshot_stored) {
+        if (pulled_unchanged) {
+            /* No new bytes. The preview keeps the picture when the buffer still
+             * holds it (the reservation, lent to this pull and not written:
+             * its bytes are the last picture's until someone writes them). */
+            if (!snapshot_held() && fos_framebuffer_is_reserved(buf)) {
+                fos_display_state_t held;
+                if (display_state_for_buffer(buf, buf_len, width, height, format, &held) &&
+                    s_display_state_valid && display_state_matches(&held, &s_display_state)) {
+                    store_snapshot(buf, buf_len, width, height, format, s_render_count, s_last_render_ms,
+                                   false);
+                }
+            }
+        } else if (!snapshot_stored) {
             store_snapshot(buf, buf_len, width, height, format, s_render_count, s_last_render_ms,
                            in_panel);
         }
@@ -2296,7 +2530,7 @@ static void log_render_skipped(const char *reason, int battery_pct)
     fos_pixel_format_t format = fos_display_present() ? fos_display_format() : FOS_PIXEL_1BPP;
     size_t buf_len = fos_display_present() ? fos_display_buffer_size()
                                            : (((size_t)width + 7u) / 8u) * (size_t)height;
-    bool local_render = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
+    bool local_render = renders_locally(config);
     const char *mode = local_render ? "local" : "remote";
     char scene_id[128];
     char scene_name[128];
@@ -2498,7 +2732,7 @@ static void run_held_network(const fos_config_t *config)
     if (input_takes_over()) return;
     fos_settings_sync(false);
     if (input_takes_over()) return;
-    if (fos_commands_sync() && config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
+    if (fos_commands_sync() && renders_locally(config)) {
         fos_scenes_apply_pending_selection();
     }
     if (input_takes_over()) return;
@@ -2530,7 +2764,7 @@ static void animation_wait(fos_config_t *config, int64_t wait_us)
             ? xEventGroupWaitBits(s_events, signals | FRAME_DUE_BIT, pdTRUE, pdFALSE,
                                   pdMS_TO_TICKS(armed ? 1000 : 100))
             : xEventGroupClearBits(s_events, signals); /* the bits before the clear */
-        bool nim = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
+        bool nim = renders_locally(config);
         /* A nudge is pulled here whatever the link task does: somebody just
          * asked for something, and the voice relay's release expects what it
          * queued in the very next render. */
@@ -2645,7 +2879,7 @@ static void client_task(void *arg)
          * old scene while the socket came up, then rendered again. */
         bool cloud_socket_waited_out = false;
         if (s_render_attempts == 0 && !s_render_paused_for_memory &&
-            config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available() &&
+            renders_locally(config) &&
             fos_cloud_state() == FOS_CLOUD_ENROLLED &&
             fos_wifi_state() == FOS_WIFI_CONNECTED) {
             int64_t wait_start = esp_timer_get_time();
@@ -2665,7 +2899,7 @@ static void client_task(void *arg)
         /* Interpreted scenes: pick up backend changes and any payload
          * pushed over HTTP/console since the last pass. Both touch the Nim
          * runtime, so they only ever run here on the render task. */
-        if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
+        if (renders_locally(config)) {
             if (housekeeping && !pulls_after_render && !held_for_input) pass_scenes_sync();
             fos_scenes_apply_pending();
             /* Scene events from HTTP, the cloud or the console since the last
@@ -2686,6 +2920,10 @@ static void client_task(void *arg)
              * renders once and goes back to deep sleep, which loses the
              * queue. */
             fos_scenes_apply_pending_selection();
+        } else if (fos_events_deferred_pending()) {
+            /* Rendered on the server: the plane holds the scene's state and
+             * events (docs/server-rendering.md), nothing here hears them. */
+            fos_events_discard_deferred();
         }
 
         /* The once-a-second work while animating starts here and ends with
@@ -2699,8 +2937,7 @@ static void client_task(void *arg)
                  * this frame slept (a scene switch, a state, a render, an update) —
                  * before the render, so a switch lands in THIS pass's render instead
                  * of costing a second panel refresh. */
-                if (pass_commands_sync() && config->render_mode == FOS_RENDER_LOCAL &&
-                    frameos_nim_available()) {
+                if (pass_commands_sync() && renders_locally(config)) {
                     fos_scenes_apply_pending_selection();
                 }
             }
@@ -2925,8 +3162,7 @@ static void client_task(void *arg)
              * they bring is applied now and rendered by the next pass. */
             pass_scenes_sync();
             pass_settings_sync();
-            if (pass_commands_sync() && config->render_mode == FOS_RENDER_LOCAL &&
-                frameos_nim_available()) {
+            if (pass_commands_sync() && renders_locally(config)) {
                 fos_scenes_apply_pending_selection();
             }
         }
@@ -2964,7 +3200,7 @@ static void client_task(void *arg)
         /* A scene that asks for frames faster than once a second, on an LCD:
          * paced in microseconds from here, the whole-second sleep below
          * skipped (fos_animation.h). */
-        bool animate = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available() &&
+        bool animate = renders_locally(config) &&
                        !battery_critical && !s_render_paused_for_memory &&
                        fos_animation_wanted(scene_interval, fos_display_is_lcd(), deep_sleep_now);
         if (fos_animation_update(&s_anim, animate, scene_interval, esp_timer_get_time())) {
@@ -3020,8 +3256,7 @@ static void client_task(void *arg)
          * quickly until something is resident; an empty pass costs no panel
          * refresh. Deep-sleep frames are exempt: their wake IS a fresh boot,
          * and short-cycling them would drain the battery. */
-        if (!deep_sleep_now && config->render_mode == FOS_RENDER_LOCAL &&
-            frameos_nim_available() && fos_scenes_loaded() == 0 &&
+        if (!deep_sleep_now && renders_locally(config) && fos_scenes_loaded() == 0 &&
             fos_scenes_state_mounted() && sleep_s > 10) {
             ESP_LOGW(TAG, "no scene loaded yet; retrying in 10 s instead of %lu s",
                      (unsigned long)sleep_s);
@@ -3047,7 +3282,7 @@ static void client_task(void *arg)
          * now would lose it (the tap's window is 350 ms; a held key is let
          * go within seconds, and 10 s caps a stuck one). Wait it out,
          * ticking, and render if the scene asked. */
-        if (deep_sleep_now && config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available() &&
+        if (deep_sleep_now && renders_locally(config) &&
             fos_buttons_busy()) {
             int64_t settle_start_us = esp_timer_get_time();
             while (fos_buttons_busy() && esp_timer_get_time() - settle_start_us < 10 * 1000000LL) {
@@ -3071,10 +3306,9 @@ static void client_task(void *arg)
             }
         }
         uint32_t keep_awake_s = keep_awake_remaining_seconds();
-        bool button_pending = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available() &&
+        bool button_pending = renders_locally(config) &&
                               (fos_buttons_pending() || fos_touch_pending());
-        if (deep_sleep_now && fos_display_present() && config->render_mode == FOS_RENDER_LOCAL &&
-            frameos_nim_available() && !render_held() &&
+        if (deep_sleep_now && fos_display_present() && renders_locally(config) && !render_held() &&
             (fos_scenes_work_pending() || fos_events_deferred_pending() || button_pending)) {
             /* A scene payload or a scene switch arrived while this pass was
              * rendering (the cloud delivers them the moment the session is
@@ -3255,7 +3489,7 @@ static void client_task(void *arg)
                     LINK_BIT,
                 pdTRUE, pdFALSE,
                 fos_wake_slice_ticks(slice_until_us - esp_timer_get_time(), max_slice, portTICK_PERIOD_MS));
-            bool nim = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
+            bool nim = renders_locally(config);
             /* Somebody wants a render. Decided below: now, or — while a voice
              * session holds the panel — when it releases, in one pass. */
             bool want_render = (bits & RENDER_NOW_BIT) != 0;

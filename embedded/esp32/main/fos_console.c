@@ -1355,6 +1355,7 @@ static int cmd_display_test(int argc, char **argv)
            mode, fos_display_selected_panel(), width, height, (int)format, (unsigned)len);
     esp_err_t err = fos_display_blit(buf, len);
     fos_framebuffer_release(buf);
+    fos_client_note_panel_drawn(); /* the next render refreshes over it */
     printf("display_test: %s (%d)\n", err == ESP_OK ? "ESP_OK" : esp_err_to_name(err), (int)err);
     return err == ESP_OK ? 0 : 1;
 }

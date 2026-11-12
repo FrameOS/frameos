@@ -483,6 +483,9 @@ static bool apply_frame_settings(const cJSON *frame)
         if (config->render_mode != mode) {
             config->render_mode = mode;
             changed = true;
+            /* The next pass renders the other way, now rather than an
+             * interval from now (docs/server-rendering.md). */
+            fos_client_render_mode_changed();
         }
     }
 

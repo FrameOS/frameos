@@ -26,6 +26,12 @@ This is the thin-client mode a PSRAM-less board (ESP32-C3) has always run in,
 offered as a choice to a board that has its own runtime (every ESP32-S3).
 Neither plane builds firmware for it: the switch is a setting.
 
+What the frame stops doing with its scenes, it stops doing entirely: in
+remote mode the firmware runs no scene work (no scene store apply, no event
+dispatch, no schedule), so its keys, its touch glass and its own schedule do
+not switch scenes yet (see "Not yet"). Scenes are switched from a control
+plane: the workspace, the MCP tools, the voice chat, Home Assistant.
+
 ## The switch
 
 | | Self-hosted backend | FrameOS Cloud |
@@ -58,8 +64,10 @@ If-None-Match: "…"
 - **Who**: the backend's frame API key (`server_api_key`), or the cloud
   device's access token (`authenticateFrameDevice`). `{id}` is the backend's
   frame number or the cloud's frame uuid.
-- **`scene`**: the scene the device's own runtime is on (absent on a board
-  without one). See "Which scene" below.
+- **`scene`**: the scene the device's own runtime is on. Both planes read it
+  (see "Which scene" below), but no firmware sends it yet: a frame in remote
+  mode runs no scene of its own, so its runtime's scene would be a stale one
+  and would undo the plane's switches.
 - **`width`, `height`, `format`, `rotate`**: the panel's native size, its
   `fos_pixel_format_t` and the frame's rotation. The cloud draws to them and
   refuses a pull without the first three (`400 invalid_panel`); the backend
@@ -87,7 +95,8 @@ pull, `embedded_device_input`); an ESP32 pulls with `GET`.
    `set_current_scene` still pending on the frame's command queue): the
    plane's choice. The device has not heard it.
 2. Otherwise the device's `scene`, when it names one of the frame's scenes:
-   a key, a touch, the schedule or a switch the device already took.
+   a key, a touch, the schedule or a switch the device already took (for
+   when the firmware sends it; today it does not).
 3. Otherwise the plane's own active scene, then the frame's default scene.
 
 The plane keeps the scene it drew as its active scene.
@@ -151,8 +160,17 @@ that is at least 10% longer.
 
 - The plane's packer dithers to the stock palette of the panel, not the
   frame's own `palette` setting.
-- A scene listening to the board's keys (`button`) does not hear them on an
-  ESP32 rendered on the server: the GET pull carries the scene id, not the
-  key edges. The frame's event map (previous / next scene, the switcher)
-  still works, since it is a scene switch.
+- Keys, touch and the frame's schedule. In remote mode the firmware drops
+  the events it would hand its scene (`event:discarded`), so neither a scene
+  listening to `button` nor the frame's event map (previous / next scene,
+  the switcher, the settings) nor a scheduled switch reaches the plane. The
+  way there is the Pico's: post the key edges and the schedule's events with
+  the pull (`POST …/embedded/render`, `embedded_device_input`) and let the
+  plane's dispatcher run them, the plane then keeping the scene the render
+  ended on.
+- The ETag is an e-paper fact: an LCD keeps no hash of its panel, so it
+  downloads every picture.
+- A board that refused once (the cloud's `403`) renders itself for an hour
+  before it asks again (`FOS_RENDER_PULL_REFUSED_RETRY_S`), and at once after
+  a new `render_mode` push.
 - The cloud has no frame assets for a scene drawn on the server.

@@ -119,3 +119,20 @@ bool fos_client_render_in_flight(void);
  * Wi-Fi signal in dBm, 0 when not connected. Cheap enough to ask per render. */
 int fos_client_battery_percent(void);
 int fos_client_wifi_rssi(void);
+
+/* Rendering on the server (docs/server-rendering.md). Whether this board can
+ * run its scenes itself: the runtime is compiled in and the panel fits the
+ * module's PSRAM. main.c says so once, at boot, before any network. */
+void fos_client_set_local_render_capable(bool capable);
+bool fos_client_local_render_capable(void);
+/* "local" or "remote": where this frame's scenes run by its setting (a board
+ * without a runtime is always remote), as hardware.renderMode reports it. */
+const char *fos_client_render_mode_name(void);
+/* A plane changed the frame's render mode: a refusal it gave before is
+ * forgotten and the next pass renders the new way, now. Any task. */
+void fos_client_render_mode_changed(void);
+/* Something other than a render drew the panel (the portal's screen, a
+ * console display_test): what the panel shows is no longer the last render,
+ * so the next one refreshes and asks the plane for its picture whole. Any
+ * task; the render task acts on it. */
+void fos_client_note_panel_drawn(void);

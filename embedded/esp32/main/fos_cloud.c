@@ -520,6 +520,10 @@ static void add_hardware_json(cJSON *parent)
     /* The clock setting and the clock it gave (main.c, at boot). */
     cJSON_AddStringToObject(hw, "cpuMode", fos_config_cpu_mode_name(config->cpu_mode));
     cJSON_AddNumberToObject(hw, "cpuMhz", (double)(esp_clk_cpu_freq() / 1000000));
+    /* Where the scenes run (docs/server-rendering.md): this board's runtime,
+     * when it has one that fits the panel, or the cloud's. */
+    cJSON_AddBoolToObject(hw, "localRenderSupported", fos_client_local_render_capable());
+    cJSON_AddStringToObject(hw, "renderMode", fos_client_render_mode_name());
     /* The status LED the buzzer's notes light (fos_led.c; -1 = none) and how
      * it is lit, the preset's when no push set them. */
     cJSON_AddNumberToObject(hw, "ledPin", config->led_pin);
@@ -2724,6 +2728,17 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     if (debug != NULL) {
         config->debug_logging = cJSON_IsTrue(debug);
     }
+    /* Where the scenes run (docs/server-rendering.md): `remote` hands them to
+     * the cloud, which answers this frame's render pulls. Live: the next
+     * pass pulls, or renders, the other way. A board without a runtime
+     * stays remote whatever it is told. */
+    const cJSON *render_mode = cJSON_GetObjectItem(settings, "render_mode");
+    bool render_mode_said = cJSON_IsString(render_mode);
+    if (render_mode_said) {
+        config->render_mode = strcmp(render_mode->valuestring, "remote") == 0 || !fos_client_local_render_capable()
+                                  ? FOS_RENDER_REMOTE
+                                  : FOS_RENDER_LOCAL;
+    }
     /* Per-request HTTP body ceiling: handed to frameos_nim_init once at boot
      * (main.c), so a change takes the same deferred reboot as rotate. Same
      * floor as the local admin API; the ceiling is the Pi runtime's default
@@ -2793,6 +2808,9 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         frameos_nim_log_hook(line);
     }
     ws_ack(id, true, NULL);
+    /* Said again or changed, a refusal the cloud gave before is forgotten:
+     * it is the one that just answered for this frame. */
+    if (render_mode_said) fos_client_render_mode_changed();
     if (restart_for_init && !battery_changed && !rotate_changed) {
         ESP_LOGW(TAG, "ws: boot-time setting changed (http ceiling %lu, %u buttons, cpu %s); restarting",
                  (unsigned long)config->max_http_response_bytes, (unsigned)config->gpio_button_count,

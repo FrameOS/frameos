@@ -54,3 +54,7 @@ fos_event_result_t fos_events_dispatch(fos_event_origin_t origin, const char *na
 bool fos_events_defer(fos_event_origin_t origin, const char *name, const char *payload_json);
 bool fos_events_deferred_pending(void);
 bool fos_events_deliver_deferred(void);
+/* A frame rendered on the server runs no scene here: what waited for it is
+ * the plane's to hear (docs/server-rendering.md "State and events"), and is
+ * let go, so the bounded queue does not fill. Logged with how many. */
+void fos_events_discard_deferred(void);

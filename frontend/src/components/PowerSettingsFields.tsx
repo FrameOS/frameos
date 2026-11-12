@@ -334,8 +334,9 @@ function RenderScenesField({
             On the server, {choice.serverName} runs this frame&apos;s scenes and sends it the finished picture. The
             frame only wakes, downloads the picture and refreshes the screen: no scene code, no image decoding and no
             data fetching on the frame, so a battery lasts longer. When nothing changed, the frame skips the download
-            and the refresh. A sleeping frame&apos;s next picture is drawn just before it wakes. Buttons and the
-            schedule still switch scenes. {choice.reach} The frame changes over at its next render.
+            and the refresh. A sleeping frame&apos;s next picture is drawn just before it wakes. {choice.reach} Not yet:
+            the frame&apos;s keys, touch and schedule do not switch scenes while it renders on the server; switch
+            scenes from the workspace instead. The frame changes over at its next render.
           </>
         )
       }
@@ -349,7 +350,12 @@ function RenderScenesField({
             { value: 'remote', label: `On ${choice.serverName}` },
           ]}
         />
-        {remote && choice.note ? <p className="frameos-muted text-xs">{choice.note}</p> : null}
+        {remote ? (
+          <p className="frameos-muted text-xs">
+            Keys, touch and the frame&apos;s schedule do not switch scenes while it renders on the server.
+            {choice.note ? <> {choice.note}</> : null}
+          </p>
+        ) : null}
       </fieldset>
     </PowerField>
   )

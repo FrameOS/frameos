@@ -4,7 +4,8 @@ FrameOS for ESP32-S3 microcontrollers. The firmware provisions Wi-Fi over a
 captive portal or the serial console, renders scenes **on-device** with the Nim
 runtime (pixie in PSRAM), drives Waveshare SPI e-ink panels through the same
 vendor drivers the Raspberry Pi build uses, and can alternatively run as a thin
-client fetching backend-rendered bitmaps.
+client fetching bitmaps its backend or the cloud rendered ("Rendering on the
+server" below).
 
 Reference hardware: ESP32-S3 module with 8MB flash and 8MB+ octal PSRAM.
 The default 8MB profile supports OTA updates with two 3520K app slots and a
@@ -26,6 +27,7 @@ main/                     boot orchestration + platform modules
   setup_page.html         the setup page (GET /), gzipped at build time by tools/gzip_setup_page.py;
                           its values come from GET /api/setup
   fos_client.c            render loop: Nim local render or thin-client fetch → blit
+  fos_render_pull.c       the thin-client pull's URL, ETag and answers: backend or cloud (host-tested)
   fos_ota.c               signed release OTA (manifest + streaming verify) when an OTA partition exists
   fos_cloud.c             cloud-managed frames: claim-token enrollment + management WS
   fos_url_guard.c         provider URL rules: local-host exception for plain http/ws, ws_url
@@ -100,7 +102,7 @@ main/tests/               host tests for the IDF-free modules (plain `cc`, no ID
                           twin: the C3 thin client links the stub, and only a release builds
                           it); the contract
                           walker, JSON guard, sscanf, upload limits, assets-path, URL guard, minisig,
-                          config-parse, schedule catch-up and console-line tests run in the ESP32 job of
+                          config-parse, schedule catch-up, console-line and render-pull tests run in the ESP32 job of
                           .github/workflows/e2e-docker.yml. Nothing else runs them, so a new
                           host test is not a test until it is wired into one of the two.
 ```
@@ -531,7 +533,7 @@ frameos> status
 frameos> wifi MySSID MyPassword          # saves and reboots
 frameos> set panel EPD_7in5_V2
 frameos> set pins rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1
-frameos> set render_mode local           # or: remote (thin client)
+frameos> set render_mode local           # or: remote (rendered on the server)
 frameos> set deep_sleep 1                # battery mode: deep sleep between refreshes
 frameos> set wake_schedule 1             # align wake to wall-clock interval boundaries
 frameos> set battery_pin 2               # ADC1 GPIO tapping VBAT (-1 = none)
@@ -1291,6 +1293,79 @@ its J2 header UART — so its preset sets none; a PDM microphone on J2 works
 with `set mic_pins clk=42,data=41,pwr=-1`. Console: `mic [seconds]` records
 and prints the peak and mean level (a flat 0 is a microphone that is not wired or
 not powered), `status` shows the pins and the switch.
+
+## Rendering on the server
+
+`render_mode remote` hands the frame's scenes to its control plane
+(`docs/server-rendering.md` is the spec): the plane runs the scene in its wasm
+runtime and the frame pulls the finished picture, packed in its panel's
+format, at every render pass (`fetch_remote_bitmap` in `fos_client.c`, the
+rules in `fos_render_pull.c`). A board without a runtime that fits its panel
+(every ESP32-C3, an S3 whose panel outgrows its PSRAM) is always remote; on an
+S3 it is the owner's choice: "Render scenes" under Power, `renderMode` in the
+backend's settings pull, `render_mode` on the cloud's `set_settings` (firmware
+2026.11.7+), `set render_mode remote` on the console. It applies live: the
+next pass pulls, and a change asks for that pass now. The cloud's `hardware`
+reports `renderMode` (`local` / `remote`, what the frame runs by its setting)
+and `localRenderSupported` (whether it could run its scenes itself).
+
+**The pull.** `GET {plane}/api/frames/{id}/embedded/render?width=&height=&format=&rotate=`:
+a backend set on the frame (`backend_url`, its API key), else the cloud it is
+enrolled with (`fos_cloud_api_access`: the provider URL, the frame's uuid,
+its access token) — the order of the settings pull. The query is the panel
+the picture is for (native size, `fos_pixel_format_t`, rotation); the backend
+reads its own copy of the frame, the cloud draws to what it is told. No
+`scene`: a frame in remote mode runs no scene choice of its own (below), so
+the plane's active scene is the one drawn. The FOSB answer is checked against
+the panel (size, format, length) before it goes up, as before.
+
+**Unchanged pictures cost nothing.** A 200 carries an ETag. Once the panel
+took that picture, the ETag is kept in RTC memory beside the hash of the
+packed bytes it delivered (`fos_render_pull_shown_t`), so it survives a deep
+sleep, and the next pull sends it as `If-None-Match` while the panel's stored
+display hash still equals it — whoever drew those bytes, the ETag names them.
+An e-paper fact, like the hash: an LCD keeps none, so it always downloads.
+Anything else on the glass (a local render, an overlay, a refresh that
+failed, the portal's screen or a console `display_test`, which now say so
+through `fos_client_note_panel_drawn`) and it is not sent. A **304** downloads
+nothing and refreshes nothing: the pass logs `render:device` `skipped` /
+`unchanged` like an unchanged local render and counts as a good render. The
+panel buffer is no longer cleared before the pull, so on a frame that stays
+awake the preview snapshot is put back from the reservation after a 304 when
+its bytes still hash to the picture shown. A reset forgets the ETag (RTC
+memory); the stored display hash still skips the refresh then.
+
+**The cloud says no.** A cloud answers `403` when it does not render for the
+frame (`not_server_rendered`: the plane's setting is not remote;
+`cloud_rendered_frame_quota_exceeded`: the plan's cloud-rendered frames are
+used up). A board with its own runtime then renders that pass itself, after
+applying the scene store and any queued switch, and keeps rendering itself for
+an hour (`FOS_RENDER_PULL_REFUSED_RETRY_S`, wall clock in RTC memory, so a
+deep sleeper does not pay a refused handshake every wake) before it asks
+again; any `render_mode` from the cloud clears it at once. Logged once per
+change: `render:remote_refused` with the reason, and `status: ended` when a
+picture comes again. A backend never refuses (it serves its diagnostic card),
+and a C3 has nothing to fall back to: it logs `render:error` and keeps its
+picture.
+
+**What a remote frame does not run.** Everything that only a local render
+needs waits on one test, `renders_locally` in `fos_client.c` (the frame's
+setting, or a refusal on a board that can): the scene store's apply and the
+backend scenes pull, the scene events (those that arrive are let go,
+`event:discarded`, since the plane holds the scene's state and events), keys
+and touch, the schedule, animation, the first pass's wait for the cloud's
+queued commands. That keeps a wake to Wi-Fi, the cloud link, one request and
+the refresh. It also means a remote frame's keys do not switch scenes (the
+event map runs in the Nim dispatcher, which needs the scene list applied) and
+its own schedule does not run: the plane's scene choice is the only one.
+The Nim runtime itself still starts at boot where it fits, so a refusal or a
+switch back to local renders without a restart.
+
+**`renderSceneMs`.** Every metrics sample carries how long the last good pass
+took to produce its picture, without the panel refresh: the scene on the
+frame, or the pull (a 304's included). Next to `renderLastMs` (the whole pass)
+it is what the battery popover reads to say what rendering on the server
+would take off a wake.
 
 ## Scene storage and memory (2026.8.13)
 

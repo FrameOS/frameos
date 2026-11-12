@@ -454,6 +454,18 @@ static void test_scene_events(void)
     CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "button", "{}") == FOS_EVENT_BUSY);
     CHECK(strstr(n.log, "event:dropped") != NULL);
 
+    /* Rendered on the server (docs/server-rendering.md): the plane hears the
+     * scene's events, so what waited here is let go, said once, and the
+     * queue takes events again. */
+    CHECK(fos_events_deferred_pending());
+    n.logs = 0;
+    fos_events_discard_deferred();
+    CHECK(!fos_events_deferred_pending() && n.nim_sends == 0 && n.logs == 1);
+    CHECK(strstr(n.log, "event:discarded") != NULL && strstr(n.log, "\"count\":16") != NULL);
+    fos_events_discard_deferred();
+    CHECK(n.logs == 1);
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "button", "{}") == FOS_EVENT_DONE);
+
     /* The firmware's own part answers from any task, as before. */
     reset();
     n.on_render_task = false;

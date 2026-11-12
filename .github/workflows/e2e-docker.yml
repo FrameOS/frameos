@@ -334,6 +334,11 @@ jobs:
                 embedded/esp32/main/fos_touch.c embedded/esp32/main/tests/test_fos_touch.c \
                 -o /tmp/test_fos_touch
               /tmp/test_fos_touch
+              # The render pull of a frame rendered on the server (docs/server-rendering.md), pure.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/fos_render_pull.c embedded/esp32/main/tests/test_fos_render_pull.c \
+                -o /tmp/test_fos_render_pull
+              /tmp/test_fos_render_pull
               ccache --show-stats || true
             '
           # The container writes as root; actions/cache runs as the runner user.

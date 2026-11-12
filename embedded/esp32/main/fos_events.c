@@ -406,6 +406,33 @@ bool fos_events_deliver_deferred(void)
     return delivered_any;
 }
 
+void fos_events_discard_deferred(void)
+{
+    size_t dropped = 0;
+    while (true) {
+        deferred_event_t event;
+        bool have = false;
+        portENTER_CRITICAL(&s_deferred_lock);
+        if (s_deferred_count > 0) {
+            event = s_deferred[0];
+            memmove(&s_deferred[0], &s_deferred[1], (s_deferred_count - 1) * sizeof(s_deferred[0]));
+            s_deferred_count--;
+            have = true;
+        }
+        portEXIT_CRITICAL(&s_deferred_lock);
+        if (!have) break;
+        free(event.payload);
+        dropped++;
+    }
+    if (dropped == 0) return;
+    char line[160];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"event:discarded\",\"source\":\"esp32\",\"count\":%u,"
+             "\"reason\":\"rendered on the server\"}",
+             (unsigned)dropped);
+    frameos_nim_log_hook(line);
+}
+
 /* ---------------------------------------------------------------- dispatch */
 
 fos_event_result_t fos_events_dispatch(fos_event_origin_t origin, const char *name,

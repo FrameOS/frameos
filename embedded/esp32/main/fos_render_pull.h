@@ -1,0 +1,75 @@
+/*
+ * The render pull of a frame rendered on its control plane
+ * (docs/server-rendering.md "The render pull"): the URL it asks, the ETag it
+ * keeps across a deep sleep, and what an answer means. IDF-free and
+ * host-tested (tests/test_fos_render_pull.c); fos_client.c does the HTTP.
+ */
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+/* Where a pull goes. An ETag names one plane's picture: kept per source. */
+enum {
+    FOS_RENDER_PULL_NONE = 0,
+    FOS_RENDER_PULL_BACKEND = 1,
+    FOS_RENDER_PULL_CLOUD = 2,
+};
+
+typedef enum {
+    FOS_RENDER_PULL_PICTURE,   /* 200: a FOSB bitmap follows */
+    FOS_RENDER_PULL_UNCHANGED, /* 304: the panel shows it already */
+    FOS_RENDER_PULL_REFUSED,   /* 403 from the cloud: it does not render for this frame */
+    FOS_RENDER_PULL_FAILED,    /* anything else, the connect included */
+} fos_render_pull_outcome_t;
+
+/* An answer's status, read for the source that gave it. Only the cloud
+ * refuses (`not_server_rendered`, a plan over its cloud-rendered frames); a
+ * backend's 403 is as much a failure as its 500. */
+fos_render_pull_outcome_t fos_render_pull_outcome(int http_status, int source);
+
+/* `{base}/api/frames/{frame}/embedded/render?width=W&height=H&format=F&rotate=R`
+ * with `&scene=…` (percent-encoded) when `scene` names one. Trailing
+ * slashes of `base` are dropped. False when it does not fit `out`. */
+bool fos_render_pull_url(char *out, size_t out_len, const char *base, const char *frame,
+                         int width, int height, int format, int rotate, const char *scene);
+
+#define FOS_RENDER_PULL_ETAG_LEN 72
+#define FOS_RENDER_PULL_SHA_LEN 32
+
+/* A response's ETag as it may go back in If-None-Match: surrounding blanks
+ * trimmed, printable ASCII only, short enough to keep. False (and `out`
+ * empty) otherwise. */
+bool fos_render_pull_etag_keep(const char *header_value, char *out, size_t out_len);
+
+/* The picture the last pull put on the panel. Lives in RTC memory, so a
+ * deep-sleeping frame wakes knowing what its panel shows. */
+typedef struct {
+    char etag[FOS_RENDER_PULL_ETAG_LEN];
+    uint8_t sha256[FOS_RENDER_PULL_SHA_LEN]; /* the packed picture that ETag delivered */
+    uint8_t source;                          /* FOS_RENDER_PULL_BACKEND / _CLOUD */
+    bool valid;
+} fos_render_pull_shown_t;
+
+void fos_render_pull_remember(fos_render_pull_shown_t *kept, int source, const char *etag,
+                              const uint8_t sha256[FOS_RENDER_PULL_SHA_LEN]);
+void fos_render_pull_forget(fos_render_pull_shown_t *kept);
+
+/* The ETag to send, or NULL. Only while the panel still shows the picture it
+ * came with (`shown_sha`: the hash of what the panel shows, NULL when that is
+ * not known), from the same plane, and nothing is about to be drawn over it
+ * (`overlay_pending`: a 304 leaves no picture to draw it on). A hash that
+ * matches is all it takes, whoever drew it: the ETag names those bytes. */
+const char *fos_render_pull_if_none_match(const fos_render_pull_shown_t *kept, int source,
+                                          const uint8_t *shown_sha, bool overlay_pending);
+
+/* The `error` of a JSON error body (`{"error":"not_server_rendered",…}`),
+ * for the log line; "" when there is none. Plain [a-z0-9_] codes only. */
+void fos_render_pull_error_code(const char *body, char *out, size_t out_len);
+
+/* The plane refused this frame (FOS_RENDER_PULL_REFUSED): a board with its
+ * own runtime renders itself until `refused_until` (wall-clock seconds) and
+ * then asks again. A clock that is not set yet (before 2001) asks at once. */
+#define FOS_RENDER_PULL_REFUSED_RETRY_S 3600
+bool fos_render_pull_refused_now(int64_t refused_until_s, int64_t now_s);
