@@ -108,8 +108,6 @@ const loginErrorMessages: Record<string, string> = {
     "Google has not verified that email address, so it cannot sign in here. Verify it with Google first, or sign up with a password.",
   google_unavailable: "Google sign-in is not configured for this environment yet.",
   link_expired: "The sign-in took too long to confirm. Start again.",
-  use_apple: "This email already signs in with Apple. Use Continue with Apple instead.",
-  use_google: "This email already signs in with Google. Use Continue with Google instead.",
   invalid_state:
     "The sign-in attempt expired or did not match this browser session. Try again.",
   provider_unavailable:

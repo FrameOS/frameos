@@ -26,15 +26,18 @@ struct SignInView: View {
                 if let error = model.error {
                     Section { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
                 }
-                Section {
-                    AsyncButton {
-                        await model.submit(app: app)
-                    } label: {
-                        Text(submitTitle).frame(maxWidth: .infinity).fontWeight(.semibold)
+                if model.step != .cloudLink || model.link?.hasPassword == true {
+                    Section {
+                        AsyncButton {
+                            await model.submit(app: app)
+                        } label: {
+                            Text(submitTitle).frame(maxWidth: .infinity).fontWeight(.semibold)
+                        }
+                        .disabled(!model.canSubmit)
                     }
-                    .disabled(!model.canSubmit)
                 }
                 if model.step == .cloud { webSignIn }
+                if model.step == .cloudLink { linkOnWeb }
                 alternatives
             }
             .navigationTitle(isSheet ? "Add account" : "")
@@ -107,14 +110,44 @@ struct SignInView: View {
         }
     }
 
+    /// The account Apple matched: its password when it has one, the cloud's
+    /// sentence either way (`linkOnWeb` below is the other way to prove it).
     @ViewBuilder var linkFields: some View {
-        Section {
-            SecureField("Password", text: $model.password).passwordInput()
-                .onSubmit { Task { await model.submit(app: app) } }
-        } header: {
-            Text("Connect Sign in with Apple")
-        } footer: {
-            Text(model.link?.message ?? "")
+        if model.link?.hasPassword ?? true {
+            Section {
+                SecureField("Password", text: $model.password).passwordInput()
+                    .onSubmit { Task { await model.submit(app: app) } }
+            } header: {
+                Text("Connect Sign in with Apple")
+            } footer: {
+                Text(model.link?.message ?? "")
+            }
+        } else {
+            Section {
+                Text(model.link?.message ?? "")
+            } header: {
+                Text("Connect Sign in with Apple")
+            }
+        }
+    }
+
+    /// Signing in to the matched account on the web (Google, a passkey) and
+    /// connecting Apple to it right after (`SignInModel.linkOnWeb`).
+    @ViewBuilder var linkOnWeb: some View {
+        if let link = model.link, !link.hasPassword || link.otherWays != nil {
+            Section {
+                AsyncButton {
+                    await model.linkOnWeb(app: app) { try await WebSignIn.open(webAuthenticationSession, $0) }
+                } label: {
+                    Label(link.otherWays.map { "Sign in with \($0)" } ?? "Sign in on the web",
+                          systemImage: "person.badge.key")
+                        .frame(maxWidth: .infinity)
+                }
+            } footer: {
+                Text(link.hasPassword
+                    ? "Or sign in to the account that way once. Apple is connected right after."
+                    : "Opens the FrameOS Cloud sign-in page. Apple is connected right after you sign in.")
+            }
         }
     }
 

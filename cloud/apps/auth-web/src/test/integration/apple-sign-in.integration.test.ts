@@ -6,6 +6,7 @@ import {
   createDb,
   createPasswordAccount,
   ensurePasswordIdentityForAccount,
+  linkIdentityToAccount,
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -21,11 +22,12 @@ import {
   revokeAccountAppleTokens,
 } from "../../lib/apple-sign-in";
 import { hashPassword } from "../../lib/passwords";
-import { pendingLinkCookieName } from "../../lib/provider-link";
+import { resolveProviderSignIn } from "../../lib/provider-account";
+import { linkConfirmMethods, pendingLinkCookieName } from "../../lib/provider-link";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
-import { reauthMethods } from "../../lib/recent-auth";
+import { liveSessionByToken, reauthMethods } from "../../lib/recent-auth";
 import { encryptSecret } from "../../lib/secrets";
-import { sessionCookieName } from "../../lib/session";
+import { createSession, sessionCookieName } from "../../lib/session";
 import { pendingSignInCookieName } from "../../lib/two-factor";
 import { startAppleFake, type AppleFake } from "../apple-fake";
 
@@ -229,24 +231,150 @@ describe("Sign in with Apple from the app", () => {
     expect(again.status).toBe(200);
   });
 
-  it("points an address that signs in with Google at Google instead of making a second account", async () => {
+  it("connects Apple to an account without a password once it is signed in to another way", async () => {
     const email = `google-first-${counter}@example.com`;
-    await upsertAccountFromIdentity(db, {
+    const googleSubject = `google-${counter}`;
+    const google = await upsertAccountFromIdentity(db, {
       email,
       emailVerified: true,
       providerIssuer: "https://accounts.google.com",
       providerKey: "google",
-      providerSubject: `google-${counter}`,
+      providerSubject: googleSubject,
     });
     const who = { ...person({ email }), isPrivateEmail: false };
     const response = await appleNative(postJson("/api/auth/apple/native", await nativeBody(who)));
     expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ error: "use_google" });
+    expect(await response.json()).toMatchObject({
+      detail: `A FrameOS Cloud account with ${email} already exists. Sign in to it once with Google to connect Sign in with Apple to it.`,
+      email,
+      error: "link_required",
+      methods: { passkey: false, password: false, providers: ["google"] },
+      other_ways: "Google",
+    });
+    expect(await appleIdentity(who.sub)).toBeUndefined();
+    const pending = `${pendingLinkCookieName}=${setCookie(response, pendingLinkCookieName)}`;
+
+    // Nothing proves the account yet: the answer lists the ways to.
+    const bare = await link(postJson("/api/auth/link", {}, pending));
+    expect(bare.status).toBe(400);
+    expect(await bare.json()).toMatchObject({
+      error: "confirm_required",
+      methods: { password: false, providers: ["google"] },
+    });
+
+    const session = (accountId: string, subject: string, authenticatedAt?: Date) =>
+      createSession(
+        db,
+        { accountId, providerIssuer: "https://accounts.google.com", providerSubject: subject },
+        { authenticatedAt },
+      );
+
+    // Signed in to some other account: no proof of this one.
+    const stranger = await upsertAccountFromIdentity(db, {
+      email: `stranger-${counter}@example.com`,
+      emailVerified: true,
+      providerIssuer: "https://accounts.google.com",
+      providerKey: "google",
+      providerSubject: `stranger-${counter}`,
+    });
+    const elsewhere = await link(
+      postJson(
+        "/api/auth/link",
+        {},
+        `${pending}; ${sessionCookieName}=${await session(stranger.accountId, `stranger-${counter}`)}`,
+      ),
+    );
+    expect(elsewhere.status).toBe(409);
+    expect(await elsewhere.json()).toMatchObject({ error: "wrong_account" });
+
+    // This account's session, but its sign-in is an hour old.
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const stale = await link(
+      postJson(
+        "/api/auth/link",
+        {},
+        `${pending}; ${sessionCookieName}=${await session(google.accountId, googleSubject, hourAgo)}`,
+      ),
+    );
+    expect(stale.status).toBe(403);
+    expect(await stale.json()).toMatchObject({ error: "reauth_required" });
     expect(await appleIdentity(who.sub)).toBeUndefined();
 
-    // And signup will not plant a password on an Apple-first account.
+    // Signed in with Google just now. The account has a second factor, which
+    // that sign-in already passed: none is asked again.
+    await db.insert(accountTotp).values({
+      accountId: google.accountId,
+      confirmedAt: new Date(),
+      encryptedSecret: encryptSecret("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"),
+    });
+    const fresh = await session(google.accountId, googleSubject);
+    const linked = await link(
+      postJson("/api/auth/link", {}, `${pending}; ${sessionCookieName}=${fresh}`),
+    );
+    expect(linked.status).toBe(200);
+    expect(await linked.json()).toMatchObject({ ok: true });
+    expect(setCookie(linked, sessionCookieName)).toBeTruthy();
+    expect(setCookie(linked, pendingLinkCookieName)).toBe("");
+    const identity = await appleIdentity(who.sub);
+    expect(identity).toMatchObject({ accountId: google.accountId, providerKey: "apple" });
+    expect(openAppleToken(identity!.providerTokenEncrypted!).clientId).toBe(bundleId);
+    // The session that proved it goes, with every other one.
+    expect(await liveSessionByToken(db, fresh)).toBeUndefined();
+
+    // From here on Apple opens the account, second factor and all.
+    const again = await appleNative(postJson("/api/auth/apple/native", await nativeBody(who)));
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ second_factor_required: true });
+  });
+
+  it("keeps the password as a password account's way to confirm, and says what else works", async () => {
+    const email = `owner-and-google-${counter}@example.com`;
+    const account = await createPasswordAccount(db, {
+      email,
+      passwordHash: await hashPassword("a long enough password"),
+    });
+    await ensurePasswordIdentityForAccount(db, account.accountId);
+    await linkIdentityToAccount(db, {
+      accountId: account.accountId,
+      email,
+      emailVerified: true,
+      providerIssuer: "https://accounts.google.com",
+      providerKey: "google",
+      providerSubject: `google-owner-${counter}`,
+    });
+    const who = { ...person({ email }), isPrivateEmail: false };
+    const response = await appleNative(postJson("/api/auth/apple/native", await nativeBody(who)));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      detail: `A FrameOS Cloud account with ${email} already exists. Enter its password, or sign in to it with Google, to connect Sign in with Apple to it.`,
+      methods: { passkey: false, password: true, providers: ["google"] },
+    });
+  });
+
+  it("sends Google on an Apple-first address to the same confirmation, and refuses a password signup on it", async () => {
     const appleFirst = person({ email: `apple-first-${counter}@example.com` });
     expect((await appleNative(postJson("/api/auth/apple/native", await nativeBody(appleFirst)))).status).toBe(200);
+    const identity = await appleIdentity(appleFirst.sub);
+
+    // The web's Google callback asks resolveProviderSignIn too.
+    expect(
+      await resolveProviderSignIn(db, "google", "https://accounts.google.com", {
+        email: appleFirst.email,
+        email_verified: true,
+        sub: `google-for-apple-${counter}`,
+      }),
+    ).toEqual({
+      accountId: identity!.accountId,
+      email: appleFirst.email,
+      status: "requires_link_confirmation",
+    });
+    expect(await linkConfirmMethods(db, identity!.accountId, "google")).toEqual({
+      passkey: false,
+      password: false,
+      providers: ["apple"],
+    });
+
+    // And signup will not plant a password on an Apple-first account.
     const taken = await signup(
       postJson("/api/auth/signup", { email: appleFirst.email, password: "a long enough password" }),
     );

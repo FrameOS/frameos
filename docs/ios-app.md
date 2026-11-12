@@ -65,7 +65,7 @@ way the SPA does, and the comment there names the SPA file.
 | --- | --- | --- |
 | Sign in | `POST /api/login` (form), then a year-long API token (`POST /api/user/api_tokens`, revoked at sign-out) | `POST /api/auth/login`, `POST /api/auth/second-factor/code`; the session cookie; `Origin` on every write |
 | Google, passkeys (the web's sign-in) | (none: a backend signs in with its own password) | the system sign-in sheet on `GET /api/auth/app/authorize` (PKCE), then `POST /api/auth/app/token {code, code_verifier}`: a session of the app's own (`cloud/docs/auth.md` "Signing in to the app") |
-| Sign in with Apple | (none: cloud only, like Google) | the system's Apple sheet, then `POST /api/auth/apple/native {identity_token, authorization_code, nonce}`; `409 link_required` asks for the matched account's password (`POST /api/auth/link`) (`cloud/docs/auth.md` "Sign in with Apple") |
+| Sign in with Apple | (none: cloud only, like Google) | the system's Apple sheet, then `POST /api/auth/apple/native {identity_token, authorization_code, nonce}`; `409 link_required {methods, other_ways}` proves the matched account once: its password (`POST /api/auth/link {password}`), or a sign-in to it in the system sign-in sheet (`/api/auth/app/authorize?reauth=1`, the code traded on the client holding the pending cookie) and then `POST /api/auth/link {}` (`cloud/docs/auth.md` "Account Merging") |
 | Sign out | `DELETE /api/user/api_tokens/{id}`, `POST /api/logout` | `POST /api/auth/logout` |
 | Frames | `GET /api/frames`, `GET /api/frames/{id}` | the same |
 | Live updates | `/ws` (the `frameos_session` cookie from the login) | `/api/frames/updates` on the hub (the session cookie) |

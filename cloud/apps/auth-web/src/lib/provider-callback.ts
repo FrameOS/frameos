@@ -64,16 +64,17 @@ export async function finishProviderWebSignIn(
   const toLogin = (error: string) =>
     finish(redirect(`/login?error=${encodeURIComponent(error)}`));
 
-  // Merge rules live in resolveProviderSignIn: an existing verified password
-  // account links only after its password is proved on /login/link; an
-  // unverified one requires a password reset first so a squatter's password
-  // cannot ride along into this account.
+  // Merge rules live in resolveProviderSignIn: an existing account (a
+  // verified password account, or one that signs in through the other
+  // provider) links only after the visitor proves it on /login/link; an
+  // unverified password account requires a password reset first so a
+  // squatter's password cannot ride along into this account.
   const resolution = await resolveProviderSignIn(db, providerKey, issuer, claims);
 
   if (resolution.status === "requires_link_confirmation") {
     // The verified claims are parked in a signed, short-lived cookie; the
-    // link route re-reads them once the password checks out. Nothing is
-    // written to the account until then.
+    // link route re-reads them once the account is proved (its password, or
+    // a fresh sign-in to it). Nothing is written to the account until then.
     const response = redirect("/login/link");
     response.cookies.set(
       pendingLinkCookieName,
@@ -101,10 +102,6 @@ export async function finishProviderWebSignIn(
 
   if (resolution.status === "email_unverified" || resolution.status === "email_missing") {
     return toLogin(providerSignInError(providerKey, resolution.status));
-  }
-
-  if (resolution.status === "other_provider") {
-    return toLogin(`use_${resolution.providerKey}`);
   }
 
   const accountId = resolution.accountId;

@@ -106,6 +106,37 @@ export async function sessionAuthenticatedAt(
   return row?.authenticatedAt;
 }
 
+// The live session a session token names (not revoked, inside both its idle
+// and absolute deadlines): whose it is and when it last proved the
+// credentials. For a route that takes a recent session of one particular
+// account as proof (POST /api/auth/link) and reads the cookie off its
+// request.
+export async function liveSessionByToken(
+  db: ReturnType<typeof createDb>,
+  token: string | undefined,
+  now = new Date(),
+) {
+  if (!token) {
+    return undefined;
+  }
+  const [row] = await db
+    .select({
+      accountId: sessions.accountId,
+      authenticatedAt: sessions.authenticatedAt,
+    })
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.tokenHash, hashSecret(token)),
+        isNull(sessions.revokedAt),
+        gt(sessions.expiresAt, now),
+        gt(sessions.absoluteExpiresAt, now),
+      ),
+    )
+    .limit(1);
+  return row;
+}
+
 export function isRecent(
   authenticatedAt: Date | undefined,
   maxAgeSeconds: number = recentAuthMaxAgeSeconds,

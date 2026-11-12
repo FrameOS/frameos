@@ -23,19 +23,45 @@ extension AuthService {
         case signedIn(Account, APIClient)
         /// The account has a second factor: ask for the code, then `cloudSecondFactor`.
         case secondFactor(PendingCloudSignIn)
-        /// A FrameOS Cloud account with a password already has this address:
-        /// ask for that password, then `cloudLink`.
+        /// A FrameOS Cloud account already has this address: prove it once,
+        /// with its password (`cloudLink`) or by signing in to it on the web
+        /// (`cloudLinkOnWeb`).
         case linkRequired(PendingLink)
     }
 
-    /// An Apple sign-in waiting for the password of the account it matched.
+    /// An Apple sign-in waiting for proof of the account it matched.
     /// The client holds the short-lived `frameos_link_pending` cookie.
     public struct PendingLink: @unchecked Sendable {
         public let email: String
         /// The cloud's sentence for it.
         public let message: String
+        /// The account has a password the app can ask for. A cloud from
+        /// before `methods` linked with a password only.
+        public let hasPassword: Bool
+        /// "Google or a passkey": the account's other ways in, which the
+        /// web's sign-in sheet offers. Nil when it has none.
+        public let otherWays: String?
         let account: Account
         let client: APIClient
+
+        init(email: String, message: String, hasPassword: Bool = true, otherWays: String? = nil,
+             account: Account, client: APIClient)
+        {
+            self.email = email
+            self.message = message
+            self.hasPassword = hasPassword
+            self.otherWays = otherWays
+            self.account = account
+            self.client = client
+        }
+
+        /// The `409 link_required` answer's `methods` and `other_ways`.
+        init(answer: JSONValue?, message: String, account: Account, client: APIClient) {
+            let other = answer?["other_ways"]?.stringValue
+            self.init(email: account.email, message: message,
+                      hasPassword: answer?["methods"]?["password"]?.boolValue ?? true,
+                      otherWays: other?.isEmpty == false ? other : nil, account: account, client: client)
+        }
     }
 
     /// `POST /api/auth/apple/native`.
@@ -55,10 +81,9 @@ extension AuthService {
         do {
             answer = try await client.call("POST", "/api/auth/apple/native", body: .json(.object(body)))
         } catch let failure as APIError where failure.code == "link_required" {
-            let email = failure.body?["email"]?.stringValue ?? ""
             var account = draft
-            account.email = email
-            return .linkRequired(PendingLink(email: email, message: failure.message, account: account, client: client))
+            account.email = failure.body?["email"]?.stringValue ?? ""
+            return .linkRequired(PendingLink(answer: failure.body, message: failure.message, account: account, client: client))
         }
         if answer["second_factor_required"]?.boolValue == true {
             return .secondFactor(PendingCloudSignIn(account: draft, client: client))
@@ -76,5 +101,29 @@ extension AuthService {
             return .secondFactor(PendingCloudSignIn(account: pending.account, client: pending.client))
         }
         return .signedIn(try await finishCloud(pending.account, pending.client), pending.client)
+    }
+
+    /// Connects the Apple ID after signing in to the matched account through
+    /// the web's sign-in sheet: `request` (made with `reauth`, so the proof is
+    /// fresh) came back with `callback`. The code is traded on the pending
+    /// link's own client, so the new session and the pending-link cookie go
+    /// out together, and `POST /api/auth/link` with no password takes that
+    /// session as the proof. The session already passed any second factor.
+    public static func cloudLinkOnWeb(_ pending: PendingLink, request: CloudWebSignIn,
+                                      callback: URL) async throws -> (Account, APIClient)
+    {
+        let code = try request.code(from: callback)
+        let answer = try await pending.client.call("POST", "/api/auth/app/token", body: .json([
+            "code": .string(code), "code_verifier": .string(request.verifier),
+        ]))
+        do {
+            _ = try await pending.client.call("POST", "/api/auth/link", body: .json(.object([:])))
+        } catch let failure as APIError where failure.code == "wrong_account" {
+            await endCloudSession(pending.client)
+            let email = answer["email"]?.stringValue ?? "another account"
+            throw APIError(status: failure.status, code: failure.code,
+                           message: "That browser is signed in as \(email). Sign in there as \(pending.email), then try again.")
+        }
+        return (try await finishCloud(pending.account, pending.client), pending.client)
     }
 }
