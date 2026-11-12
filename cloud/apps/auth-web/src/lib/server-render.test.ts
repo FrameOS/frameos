@@ -9,6 +9,7 @@ import {
   deviceInputHasAny,
   ifNoneMatchHas,
   lastPictureUsable,
+  maxKeptStateBytes,
   maxNextRenderSeconds,
   parseServerRenderPanel,
   planeLastState,
@@ -20,6 +21,7 @@ import {
   serverNextRenderSeconds,
   serverRenderEtag,
   serverRenderPanelKey,
+  storedKeptState,
 } from "./server-render";
 
 const eventsContract = JSON.parse(
@@ -346,5 +348,39 @@ describe("when the next picture is due (docs/server-rendering.md)", () => {
   it("takes the plan's floor for cloud-rendered frames by default", () => {
     expect(serverNextRenderSeconds({ refreshInterval: 1 })).toBeGreaterThanOrEqual(1);
     expect(serverNextRenderSeconds({ refreshInterval: 1 })).toBe(serverNextRenderSeconds({ refreshInterval: 0.5 }));
+  });
+});
+
+describe("what a render process keeps for the next pull (docs/server-rendering.md \"State and events\")", () => {
+  const typing = JSON.stringify({
+    apps: [{ memory: { draft: '{"name":"abc"}' }, nodeId: 4, sceneId: "form" }],
+    targets: [{ caret: 3, focus: 2, keyboard: true, nodeId: 4, sceneId: "form", text: "abc" }],
+  });
+
+  it("is stored as the runtime wrote it, for the next pull", () => {
+    expect(storedKeptState(typing)).toBe(typing);
+  });
+
+  it("leaves the stored one when the render said nothing", () => {
+    expect(storedKeptState(undefined)).toBeUndefined();
+    expect(storedKeptState(null)).toBeUndefined();
+  });
+
+  it("is nothing when nothing lasts, or it is not a JSON object", () => {
+    expect(storedKeptState("{}")).toBeNull();
+    expect(storedKeptState("[1]")).toBeNull();
+    expect(storedKeptState("{")).toBeNull();
+    expect(storedKeptState("")).toBeNull();
+  });
+
+  it("is dropped past 512 KiB, an ESP32's budget for one node's remembered values", () => {
+    expect(maxKeptStateBytes).toBe(512 * 1024);
+    const atCap = JSON.stringify({ pad: "x".repeat(maxKeptStateBytes - 10) });
+    expect(Buffer.byteLength(atCap)).toBe(maxKeptStateBytes);
+    expect(storedKeptState(atCap)).toBe(atCap);
+    // Bytes, not characters.
+    const over = JSON.stringify({ pad: "é".repeat(maxKeptStateBytes / 2) });
+    expect(over.length).toBeLessThan(maxKeptStateBytes + 20);
+    expect(storedKeptState(over)).toBeNull();
   });
 });

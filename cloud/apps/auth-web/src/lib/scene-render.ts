@@ -122,6 +122,17 @@ export type SceneRenderOptions = {
   timeZone?: string | undefined;
   /** Seed per-scene state: { [sceneId]: state }. */
   states?: Record<string, unknown> | undefined;
+  /**
+   * What the frame's last render process kept for the next one (`keptState`
+   * in that render's result), handed back as it was: its UIs' focus, caret,
+   * open on-screen keyboard and scrolls, and its apps' `frameos.remember`
+   * values (docs/server-rendering.md "State and events"). Restored after the
+   * scene is selected and its state seeded, before any event or relayed
+   * input, so a tap meets the keyboard the last picture showed and an app
+   * recalls what it remembered. An old bundle predates the export and starts
+   * without it.
+   */
+  keptState?: string | undefined;
   width: number;
 };
 
@@ -185,6 +196,14 @@ export type SceneRenderResult = {
   state: unknown;
   /** PNG of the small copy, when `thumbnailMaxDimension` asked for one. */
   thumbnail?: Buffer;
+  /**
+   * What the process keeps that no scene state does, after the last pass:
+   * its UIs' input and its apps' remembered values (`frameos_wasm_kept_state`,
+   * an opaque JSON object, `{}` when nothing lasts), for
+   * SceneRenderOptions.keptState of the next render. Absent when the runtime
+   * predates the report.
+   */
+  keptState?: string;
   /**
    * When the scene wants its next render, in seconds: this render's own
    * `nextSleep` (logic/nextSleepDuration), absent when it set none, and the
@@ -419,6 +438,7 @@ type WorkerResult =
       renderMs: number;
       sceneId: string;
       state: unknown;
+      keptState: string | null;
       width: number;
     }
   | {
@@ -453,6 +473,7 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
         settleMs,
         statesJson: JSON.stringify(options.states ?? {}),
         timeZone: options.timeZone || "UTC",
+        keptStateJson: typeof options.keptState === "string" ? options.keptState : "",
         width: options.width,
       },
     });
@@ -507,6 +528,7 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
             ? { refreshInterval: result.refreshInterval }
             : {}),
           ...(result.sceneId ? { sceneId: result.sceneId } : {}),
+          ...(typeof result.keptState === "string" ? { keptState: result.keptState } : {}),
         };
         if (result.packed) {
           resolve({
@@ -929,6 +951,20 @@ async function main() {
       break;
     }
   }
+  // What the last render's process kept (SceneRenderOptions.keptState): the
+  // UIs' focus, caret, open keyboard and scrolls and the apps' remembered
+  // values, before anything is heard, so the input's pre-render draws the
+  // keyboard the last picture showed. An old bundle predates the export and
+  // starts without it.
+  if (workerData.keptStateJson) {
+    try {
+      if (!call("frameos_wasm_set_kept_state", "boolean", ["string"], [workerData.keptStateJson])) {
+        pushLog(JSON.stringify({ event: "render:keptState", error: lastError() }));
+      }
+    } catch (error) {
+      pushLog("Kept state unavailable in this runtime build: " + error);
+    }
+  }
 
   // What a control plane sent the scene since its last render. An old bundle
   // predates the export: the event then only re-renders.
@@ -1058,6 +1094,15 @@ async function main() {
   };
   const nextSleep = reportedSeconds("frameos_wasm_next_sleep");
   const refreshInterval = reportedSeconds("frameos_wasm_scene_interval");
+  // What the process keeps after the last pass, for the next render's
+  // keptState. A runtime without the export says nothing.
+  let keptState = null;
+  try {
+    const reported = call("frameos_wasm_kept_state", "string", [], []);
+    keptState = typeof reported === "string" ? reported : null;
+  } catch {
+    keptState = null;
+  }
   // Packed for the panel here, where the pixels are (SceneRenderOptions.pack):
   // the packer is panel-pack.ts's own, built from its text, and only the
   // FOSB crosses to the main thread. Anything that goes wrong hands the
@@ -1081,7 +1126,7 @@ async function main() {
       );
       const body = fosb.byteOffset === 0 && fosb.byteLength === fosb.buffer.byteLength ? fosb.buffer : fosb.slice().buffer;
       parentPort.postMessage(
-        { ok: true, packed: true, buffer: body, width, height, logs, nextSleep, palette, refreshInterval, renderMs: Date.now() - started, sceneId, state },
+        { ok: true, packed: true, buffer: body, width, height, logs, nextSleep, palette, refreshInterval, renderMs: Date.now() - started, sceneId, state, keptState },
         [body],
       );
       return;
@@ -1091,7 +1136,7 @@ async function main() {
   }
   const buffer = Module.HEAPU8.buffer.slice(ptr, ptr + len);
   parentPort.postMessage(
-    { ok: true, buffer, width, height, logs, nextSleep, palette, refreshInterval, renderMs: Date.now() - started, sceneId, state, ...(packError ? { packError } : {}) },
+    { ok: true, buffer, width, height, logs, nextSleep, palette, refreshInterval, renderMs: Date.now() - started, sceneId, state, keptState, ...(packError ? { packError } : {}) },
     [buffer],
   );
 }

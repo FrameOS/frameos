@@ -614,6 +614,73 @@ describe("keys, touch and the schedule", () => {
     expect(await leaveBuiltInSceneForSleep(db, frame.id)).toBe(false);
   });
 
+  it("keep what the render process kept between two pulls, and forget it when the frame sleeps", async () => {
+    const accountId = await signIn();
+    await subscribe(accountId, 1);
+    const { frame, token } = await createFrame(accountId);
+    expect((await pull(frame.id, token, panel)).status).toBe(200);
+    expect(renders[0]?.keptState).toBeUndefined();
+
+    // A tap focuses a field: the keyboard opens, the app remembers its
+    // draft, and the plane keeps both.
+    const typing = JSON.stringify({
+      apps: [{ memory: { draft: '{"name":"ab"}' }, nodeId: 4, sceneId: "clock" }],
+      targets: [{ focus: 2, keyboard: true, nodeId: 4, sceneId: "clock", text: "ab" }],
+    });
+    reports = { keptState: typing };
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    expect((await renderRow(frame.id))?.keptState).toBe(typing);
+
+    // The tap on a key meets it; a runtime that says nothing leaves it.
+    reports = {};
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    expect(renders.at(-1)?.keptState).toBe(typing);
+    expect((await renderRow(frame.id))?.keptState).toBe(typing);
+
+    // A timed pull past the floor hands it over too.
+    await db
+      .update(frameServerRenders)
+      .set({ renderedAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(frameServerRenders.frameId, frame.id));
+    expect((await pull(frame.id, token, panel)).status).toBe(200);
+    expect(renders.at(-1)?.keptState).toBe(typing);
+
+    // Nothing lasting is nothing kept; past 512 KiB is dropped.
+    reports = { keptState: "{}" };
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    expect((await renderRow(frame.id))?.keptState).toBeNull();
+    reports = { keptState: JSON.stringify({ text: "x".repeat(513 * 1024) }) };
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    expect((await renderRow(frame.id))?.keptState).toBeNull();
+    const count = renders.length;
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    expect(renders).toHaveLength(count + 1);
+    expect(renders.at(-1)?.keptState).toBeUndefined();
+
+    // The picture drawn for a wake starts from none, and the sleep forgets
+    // it: a picture that showed the keyboard is not handed out again.
+    reports = { keptState: typing };
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    reports = {};
+    expect(await prerenderFrame(db, frame.id, { asOf: new Date(Date.now() + 30_000), render: standIn })).toBe("kept");
+    expect(renders.at(-1)?.keptState).toBeUndefined();
+    expect((await renderRow(frame.id))?.keptState).toBe(typing);
+    const before = (await renderRow(frame.id))!.revision;
+    expect(await leaveBuiltInSceneForSleep(db, frame.id)).toBe(false);
+    const row = await renderRow(frame.id);
+    expect(row?.keptState).toBeNull();
+    expect(row?.revision).toBe(before + 1);
+    // Inside the floor, yet drawn again: the kept picture had the keyboard.
+    const drawnBefore = renders.length;
+    expect((await pull(frame.id, token, panel)).status).toBe(200);
+    expect(renders).toHaveLength(drawnBefore + 1);
+    expect(renders.at(-1)?.keptState).toBeUndefined();
+    // Nothing to forget: nothing moves.
+    const settled = (await renderRow(frame.id))!.revision;
+    expect(await leaveBuiltInSceneForSleep(db, frame.id)).toBe(false);
+    expect((await renderRow(frame.id))?.revision).toBe(settled);
+  });
+
   it("render with the frame's event map, palette and panel, and dither to its palette", async () => {
     const accountId = await signIn();
     await subscribe(accountId, 1);
