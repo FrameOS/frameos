@@ -454,6 +454,12 @@
   packer, `panel-pack.ts` and `embedded_main.nim` together.
 - The battery popover's offer reads `renderSceneMs` from the metrics
   (`serverRenderForecast` in `utils/batteryForecast.ts`).
+- A board rendered on the server is sent nothing a scene holds ("Nothing
+  to keep on the board"): one empty scene for its scenes (`docs/server-rendered-board-scene.json`),
+  no account keys, verbs without their state or payload, decided when it is
+  sent (the hub's `messageForServerRenderedBoard`, the backend's
+  `frame_command_wire`). A new way to put scene content on a board checks
+  `planeKeepsSceneState` / `is_thin_client_frame` first.
 
 ## Scenes inside scenes: `docs/scene-rhythm.md`
 

@@ -1,0 +1,11 @@
+{
+  "$comment": "The one scene a board rendered on its control plane holds in place of its scenes (docs/server-rendering.md \"Nothing to keep on the board\"). Both planes send exactly this: the backend's SERVER_RENDERED_BOARD_SCENE (backend/app/utils/server_render.py, test_server_rendering.py) and the cloud's serverRenderedBoardScene (cloud/apps/auth-web/src/lib/cloud-rendered.ts, cloud-rendered.test.ts).",
+  "scene": {
+    "id": "rendered-on-server",
+    "name": "Rendered on the server",
+    "nodes": [],
+    "edges": [],
+    "fields": [],
+    "settings": { "execution": "interpreted" }
+  }
+}

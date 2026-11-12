@@ -92,3 +92,35 @@ export function frameCouldRenderOnServer(
   }
   return backendFrameRenderMode(frame) === 'local'
 }
+
+/**
+ * Whether the frame's plane runs its scenes now: a board without a runtime,
+ * or an ESP32 set to render on the server. Such a board is sent none of its
+ * scenes and none of the account's keys (docs/server-rendering.md "Nothing to
+ * keep on the board"), so nothing offers to copy them onto it either. A
+ * virtual frame is not one: it has no board.
+ */
+export function frameRendersOnServer(
+  frame: Fields<'mode' | 'hardware' | 'render_mode' | 'device_config' | 'embedded'>,
+  plane: 'cloud' | 'backend'
+): boolean {
+  if (plane === 'cloud') {
+    const platform = (frame.hardware?.platform ?? '').toLowerCase()
+    if (platform.startsWith('virtual')) {
+      return false
+    }
+    // The owner's setting alone, as the cloud reads it (cloud-rendered.ts
+    // settingsRenderOnServer): a board's own word is not what it is sent by.
+    return !frameCanRenderItself(frame.hardware) || normalizeRenderMode(frame.render_mode) === 'remote'
+  }
+  if (frame.mode !== 'embedded') {
+    return false
+  }
+  const platform = (frame.embedded?.platform ?? 'esp32-s3').toLowerCase()
+  if (platform.startsWith('virtual')) {
+    return false
+  }
+  return (
+    thinPlatformPrefixes.some((prefix) => platform.startsWith(prefix)) || backendFrameRenderMode(frame) === 'remote'
+  )
+}

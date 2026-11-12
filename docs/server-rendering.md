@@ -54,6 +54,50 @@ under the floor (`interval_below_plan_floor`). A device that is remote by its
 own console but not on the plane is refused at the pull
 (`not_server_rendered`) and, having a runtime, renders that pass itself.
 
+## Nothing to keep on the board
+
+A board rendered on the server runs no scene, so the plane sends it nothing
+a scene holds: no scenes (their field values, an app's settings, a photo
+album's share link), no scene state, no account API keys. They stay on the
+plane, which renders with them.
+
+- **Scenes.** The board holds one empty scene in their place,
+  `docs/server-rendered-board-scene.json` (backend
+  `SERVER_RENDERED_BOARD_SCENE` in `utils/server_render.py`, cloud
+  `serverRenderedBoardScene` in `cloud-rendered.ts`). One and not none: the
+  board's scene store always keeps a scene, and a set of one replaces what it
+  had, deleting each dropped scene's kept state at once
+  (`fos_scene_store_apply_set`, `forget_dropped_scene`); the old scene files
+  go at the next boot's sweep. The backend serves it at `/embedded/scenes`
+  (a preview too), so the ETag a deploy is acked by is its own. The hub sends
+  every `set_scenes` and `scenes_patch` to such a board as a whole
+  `set_scenes` of it, under the push's own checksum and scene to show
+  (`messageForServerRenderedBoard`), decided as the command goes; the row's
+  `scene_hashes` are dropped then, so a board that renders itself again is
+  sent its scenes whole, never a patch against the empty one.
+- **State and events.** A switch goes without its `state` and a scene event
+  without its `payload`: the plane holds them before the queue (backend
+  `frames.py`, cloud `holdServerRenderVerb`), and the board, hearing either
+  from its plane, only pulls (`dispatch_remote`). A board without the command
+  queue (the Pico) is sent `/event/render` and an empty body.
+- **API keys.** The backend's `/embedded/settings` carries no service-settings
+  group; the cloud's `/service-settings` lists the granted groups with none
+  filled in. A group left out is deleted from the board and from its NVS
+  cache (`fos_settings.c`), so a board switched over lets go of the keys it
+  held. The plane's own render still gets them (`embedded_settings_payload`,
+  `server-render.ts` `serviceSettings`).
+- **The switch, both ways.** A backend board's next pulls bring the change
+  (both ETags move). The cloud's settings route queues the assigned scenes
+  again behind the settings push and nudges the key pull
+  (`refresh_service_settings`), when the frame was ever assigned scenes:
+  what a frame never assigned any holds may be its own, not imported yet.
+- **Over USB.** The workspace does not offer to copy scenes onto such a board
+  ("Scenes over USB", the firmware update's "Also deploy scenes & settings";
+  `frameRendersOnServer` in `utils/renderOnServer.ts`).
+
+What the board keeps is its own: Wi-Fi, its plane's URL and bearer, its admin
+login and HTTPS key, its settings and schedule.
+
 ## The render pull
 
 ```http

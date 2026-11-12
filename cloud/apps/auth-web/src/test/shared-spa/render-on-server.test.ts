@@ -7,6 +7,7 @@ import {
   cloudFrameRenderMode,
   frameCanRenderItself,
   frameCouldRenderOnServer,
+  frameRendersOnServer,
   normalizeRenderMode,
 } from "../../../../../../frontend/src/utils/renderOnServer";
 
@@ -83,5 +84,28 @@ describe("frameCouldRenderOnServer", () => {
       false,
     );
     expect(frameCouldRenderOnServer({ mode: "rpios" }, "backend")).toBe(false);
+  });
+});
+
+describe("frameRendersOnServer", () => {
+  it("cloud: a board without a runtime, or one the owner set to remote; never a virtual frame", () => {
+    expect(frameRendersOnServer({ hardware: { platform: "esp32-s3" }, render_mode: "remote" }, "cloud")).toBe(true);
+    expect(frameRendersOnServer({ hardware: { platform: "esp32-s3" }, render_mode: "local" }, "cloud")).toBe(false);
+    expect(frameRendersOnServer({ hardware: { platform: "esp32-c3" } }, "cloud")).toBe(true);
+    expect(frameRendersOnServer({ hardware: { platform: "virtual" } }, "cloud")).toBe(false);
+    // What the board says is not what the cloud sends it by.
+    expect(frameRendersOnServer({ hardware: { platform: "esp32-s3", renderMode: "remote" } }, "cloud")).toBe(false);
+  });
+
+  it("backend: an embedded thin board, or an S3 set to remote", () => {
+    expect(
+      frameRendersOnServer({ mode: "embedded", embedded: { platform: "esp32-s3" } as never, device_config: { renderMode: "remote" } }, "backend"),
+    ).toBe(true);
+    expect(
+      frameRendersOnServer({ mode: "embedded", embedded: { platform: "esp32-s3" } as never, device_config: {} }, "backend"),
+    ).toBe(false);
+    expect(frameRendersOnServer({ mode: "embedded", embedded: { platform: "esp32-c3" } as never }, "backend")).toBe(true);
+    expect(frameRendersOnServer({ mode: "embedded", embedded: { platform: "virtual" } as never }, "backend")).toBe(false);
+    expect(frameRendersOnServer({ mode: "rpios", device_config: { renderMode: "remote" } }, "backend")).toBe(false);
   });
 });

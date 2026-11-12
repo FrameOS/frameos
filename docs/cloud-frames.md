@@ -790,6 +790,10 @@ Response `200`:
   not in `settings` is one the frame needs and the account has not set; the
   device may surface that ("this frame needs an Unsplash key") but must not
   invent a value for it.
+- A board the cloud renders for (`planeKeepsSceneState`) gets `groups` and an
+  empty `settings`: its scenes run on the cloud, which renders with the keys,
+  and the board deletes the copies it held (`docs/server-rendering.md`
+  "Nothing to keep on the board").
 
 **A scene's own declaration is a request, not a grant.** A published scene
 is anyone's code, and the `settings` list in its bundled `config.json` says
