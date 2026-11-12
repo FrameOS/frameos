@@ -3,7 +3,8 @@
 <!--
   The app's privacy manifest (docs/ios-app-store.md "Privacy"). No tracking,
   no third-party SDKs. What FrameOS Cloud stores for the app to work: the
-  account's email, the photos uploaded, and the scenes and AI chats made.
+  account's email, the name Apple or Google gives at sign-in, the photos
+  uploaded, and the scenes and AI chats made.
   A self-hosted backend's data stays on that backend. The one API with a
   required reason is UserDefaults: the app's own list of accounts and two
   view preferences (CA92.1).
@@ -19,6 +20,18 @@
 		<dict>
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeEmailAddress</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeName</string>
 			<key>NSPrivacyCollectedDataTypeLinked</key>
 			<true/>
 			<key>NSPrivacyCollectedDataTypeTracking</key>

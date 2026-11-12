@@ -14,7 +14,7 @@ Review, and where it stands against the App Review Guidelines.
 | 1.2 User-generated content | Report objectionable content, act on reports, contact details | Store scenes: "Report this scene" (`POST /api/store/scenes/{id}/report`, the cloud's report queue); the store's moderation and `/admin/reports`; the support address on every cloud page |
 | 3.1.1 / 3.1.3(f) In-app purchase | A free companion to a paid web service may skip in-app purchase only with no purchasing and no calls to buy outside the app | No plan, pricing or billing links in the app (the plan is shown, not sold); the cloud's sign-in pages inside the app's sheet leave out "Pricing" (`AuthCard inApp`) |
 | 2.1 App completeness | Works for the reviewer | Needs a demo account, below |
-| 2.5.1 / Privacy manifest | `PrivacyInfo.xcprivacy` declares required-reason APIs and collected data | `ios/FrameOS/PrivacyInfo.xcprivacy`: UserDefaults (CA92.1); email, photos, other user content, for app functionality; no tracking |
+| 2.5.1 / Privacy manifest | `PrivacyInfo.xcprivacy` declares required-reason APIs and collected data | `ios/FrameOS/PrivacyInfo.xcprivacy`: UserDefaults (CA92.1); email, name (from Apple or Google sign-in), photos, other user content, for app functionality; no tracking |
 | App Transport Security | Justify arbitrary loads | A self-hosted backend is often plain http on the owner's own network or hostname; the cloud is https. Say so in the review notes |
 | Export compliance | Declare encryption | `ITSAppUsesNonExemptEncryption: false` (HTTPS only), so uploads skip the question |
 | 4.2 Minimum functionality | More than a website | Native screens for frames, scenes, photos, assets, logs, AI |
@@ -30,17 +30,22 @@ automatic signing switched it on with the first export that carried the
 entitlement), and `ios/bin/release` keeps the entitlement through its
 unsigned archive (an ad hoc signature carries it to the export).
 
-Before App Review, FrameOS Cloud needs its Apple setup (`cloud/docs/auth.md`
-"Sign in with Apple", steps 2 to 4): a Services ID for the web, a Sign in
-with Apple key (`APPLE_TEAM_ID`, `APPLE_SIGN_IN_KEY_ID`,
+FrameOS Cloud's Apple setup (`cloud/docs/auth.md` "Sign in with Apple",
+steps 2 to 4) is done and live since 2026-11-12: the Services ID for the
+web, the Sign in with Apple key (`APPLE_TEAM_ID`, `APPLE_SIGN_IN_KEY_ID`,
 `APPLE_SIGN_IN_PRIVATE_KEY`, `APPLE_SERVICES_ID` on the server), and the
-mail domain registered for Apple's private relay. Without the key the app's
-button answers "Sign in with Apple is not set up on this FrameOS Cloud".
+mail domain registered for Apple's private relay; TestFlight build
+202611120152 signed in with it. Without the key the app's button answers
+"Sign in with Apple is not set up on this FrameOS Cloud".
 
 ## Before the first upload (yours)
 
 1. The Apple Developer Program membership the app is published under (the
-   seller's name shows on the store).
+   seller's name shows on the store). The seller is **Raaven BV**: the
+   membership (team `UG8G36W2HB`) was an individual one, and its change to
+   an organization was asked of Apple on 2026-11-12. Submit after it is
+   through, or the store lists a person as the seller and, in the EU, shows
+   their own address as the trader's.
 2. In App Store Connect → Apps → New App: name **FrameOS**, the bundle id
    `net.frameos.app` (register it under Certificates, Identifiers & Profiles
    if it is not offered), a SKU.
@@ -92,8 +97,10 @@ the destination, then Run.
   `https://cloud.frameos.net/legal/privacy`.
 - **Age rating**: answer yes to user-generated content (store scenes).
 - **App Privacy** (App Store Connect's labels, matching the manifest):
-  Contact Info → Email Address; User Content → Photos or Videos, Other User
-  Content. All linked to the user, for App Functionality, none for tracking.
+  Contact Info → Name, Email Address; User Content → Photos or Videos, Other
+  User Content. All linked to the user, for App Functionality, none for
+  tracking. The name is the one Apple or Google gives at sign-in (the
+  account's display name).
 - **Screenshots**: 6.9-inch iPhone and 13-inch iPad. `ios/bin/ui-test` writes
   every screen to `ios/ui-test-shots/`: run the tour on "iPhone 18 Pro Max"
   and "iPad Pro 13-inch (M5)" (`FRAMEOS_UITEST_DEVICE`) against a backend with
