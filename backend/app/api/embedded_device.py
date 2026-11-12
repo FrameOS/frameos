@@ -45,6 +45,7 @@ import hashlib
 import io
 import json
 import logging
+import math
 import re
 import struct
 import time
@@ -1040,12 +1041,60 @@ def _fosb_from_rgba(
 @dataclass
 class _Drawn:
     """A picture for the pull: the panel bitmap, the scene it shows (None:
-    the diagnostic card, or a scene the renderer did not name) and the RGBA
-    it was packed from (None for the card), for the workspace's copy."""
+    the diagnostic card, or a scene the renderer did not name), the RGBA it
+    was packed from (None for the card), for the workspace's copy, and when
+    the scene wants its next picture (next_render_seconds; None: no opinion)."""
 
     body: bytes
     scene_id: str | None
     rgba: bytes | None
+    next_render: int | None = None
+
+
+# docs/server-rendering.md "When the next picture is due": the seconds a
+# scene asks for, within reason. Under the floor a second-by-second clock
+# would be a render and a download every second; the ceiling is the board's
+# own (fos_pass_interval_seconds).
+NEXT_RENDER_MIN_SECONDS = 10
+NEXT_RENDER_MAX_SECONDS = 7 * 24 * 3600
+# The header a render pull's answer says it in (the cloud's route sends the
+# same).
+SERVER_RENDER_NEXT_RENDER_HEADER = "X-FrameOS-Next-Render"
+
+
+def next_render_seconds(rendered_state: dict | None) -> int | None:
+    """When the scene a render drew wants its next picture, from the
+    render's report (embedded_wasm_render.mjs): this render's `nextSleep`
+    when it set one (>= 0), else the scene's `refreshInterval` (> 0), within
+    [NEXT_RENDER_MIN_SECONDS, NEXT_RENDER_MAX_SECONDS]. None when the scene
+    has no opinion (or the bundle reports neither): the board keeps the
+    frame's interval."""
+    if not isinstance(rendered_state, dict):
+        return None
+
+    def number(key: str) -> float | None:
+        value = rendered_state.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value) if math.isfinite(value) else None
+
+    next_sleep = number("nextSleep")
+    interval = number("refreshInterval")
+    if next_sleep is not None and next_sleep >= 0:
+        seconds = next_sleep
+    elif interval is not None and interval > 0:
+        seconds = interval
+    else:
+        return None
+    return int(min(max(round(seconds), NEXT_RENDER_MIN_SECONDS), NEXT_RENDER_MAX_SECONDS))
+
+
+def _kept_next_render(record: dict) -> int | None:
+    """A kept picture's own next render; a record from before had none."""
+    value = record.get("nextRender")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return min(max(value, NEXT_RENDER_MIN_SECONDS), NEXT_RENDER_MAX_SECONDS)
 
 
 async def _render_thin_client_now(
@@ -1106,7 +1155,10 @@ async def _render_thin_client_now(
             # Nor may a log line that could not be written.
             pass
     body = await _fosb_off_the_loop(frame, plan, rgba, photo_palette)
-    return _Drawn(body, _drawn_scene(plan, rendered_state) if rgba is not None else None, rgba)
+    if rgba is None:
+        # The diagnostic card: no scene, so no opinion on the next picture.
+        return _Drawn(body, None, None)
+    return _Drawn(body, _drawn_scene(plan, rendered_state), rgba, next_render_seconds(rendered_state))
 
 
 async def _embedded_render_response(
@@ -1137,7 +1189,12 @@ async def _embedded_render_response(
             now_ms=int(time.time() * 1000),
         ):
             scene_id = kept.record.get("sceneId")
-            drawn = _Drawn(kept.body, scene_id if isinstance(scene_id, str) and scene_id else None, None)
+            drawn = _Drawn(
+                kept.body,
+                scene_id if isinstance(scene_id, str) and scene_id else None,
+                None,
+                _kept_next_render(kept.record),
+            )
             preview = kept.preview
             # Its state is the scene's now: committed when shown, not drawn.
             await _keep_rendered_state(redis, frame, kept.record.get("state"))
@@ -1151,6 +1208,11 @@ async def _embedded_render_response(
         # The scene the picture shows, as the cloud's route says it: the
         # board names it in its logs, its own runtime knowing none.
         headers[SERVER_RENDER_SCENE_HEADER] = quote(drawn.scene_id, safe="-_.!~*'()")
+    if drawn.next_render is not None:
+        # When the scene wants its next picture: the board wakes for it
+        # instead of on the frame's interval (docs/server-rendering.md "When
+        # the next picture is due"). On a 304 too: it is this picture's.
+        headers[SERVER_RENDER_NEXT_RENDER_HEADER] = str(drawn.next_render)
     if etag_matches(if_none_match, etag):
         return Response(status_code=HTTPStatus.NOT_MODIFIED, headers=headers)
     keep = None
@@ -1296,6 +1358,9 @@ async def prerender_thin_client(db: Session, redis, frame: Frame, as_of_ms: int)
             "fingerprint": plan.fingerprint,
             "state": rendered_state,
             "etag": fosb_etag(body),
+            # When the scene wants the picture after this one, answered by
+            # the pull that takes it.
+            "nextRender": next_render_seconds(rendered_state),
         },
         body,
         int(as_of_ms),

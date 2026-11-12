@@ -14,7 +14,8 @@
 // statesJson ({sceneId: stateObject}) seeds backend-persisted scene state;
 // after a successful render the post-render state is reported on stderr as
 // one `__FRAMEOS_SCENE_STATE__{"sceneId":...,"state":...}` line, which the
-// Python caller parses. frameAssetsRoot is a host directory whose files are
+// Python caller parses (with `palette`, `nextSleep` and `refreshInterval`
+// from bundles that report them). frameAssetsRoot is a host directory whose files are
 // preloaded into the wasm MEMFS under /srv/assets, so scene apps that read
 // frame assets (photo folders etc.) see them like on-device files.
 // saveAssetsJson carries the frame's saveAssets config into the runtime;
@@ -688,11 +689,24 @@ try {
   } catch {
     palette = undefined
   }
+  // When the scene wants its next picture (docs/server-rendering.md "When
+  // the next picture is due"): this render's nextSleep (-1: it set none) and
+  // the scene's refresh interval (0: none), from bundles that have them.
+  const timing = {}
+  for (const [key, name] of [['nextSleep', 'frameos_wasm_next_sleep'], ['refreshInterval', 'frameos_wasm_scene_interval']]) {
+    try {
+      const value = call(name, 'number', [], [])
+      if (Number.isFinite(value)) timing[key] = value
+    } catch {
+      // An older bundle: the scene's wish does not reach the board.
+    }
+  }
   process.stderr.write('__FRAMEOS_SCENE_STATE__' + JSON.stringify({
     sceneId: info.currentSceneId || request.sceneId || '',
     state,
     seeded: stateSeeded,
     ...(Array.isArray(palette) ? { palette } : {}),
+    ...timing,
   }) + '\n')
 } catch (error) {
   process.stderr.write(`embedded_wasm_render: state readback failed: ${error}\n`)

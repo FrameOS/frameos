@@ -644,3 +644,76 @@ async def test_a_relayed_tap_on_a_switcher_tile_shows_that_scene_in_the_real_run
     assert result.rgba is not None, result.error
     assert result.state["sceneId"] == "photos"
     assert result.rgba[:4] == bytes((0, 0, 0, 255))
+
+
+@pytest.mark.asyncio
+async def test_a_render_reports_when_the_scene_wants_its_next_picture(monkeypatch, tmp_path):
+    """The harness reports this render's `nextSleep` and the scene's
+    `refreshInterval` with the state (docs/server-rendering.md "When the next
+    picture is due"); the render pull reads them from it."""
+    from types import SimpleNamespace
+
+    from app.utils import embedded_render
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self, _request):
+            marker = '{"sceneId":"s","state":{},"seeded":true,"nextSleep":-1,"refreshInterval":60}'
+            return b"\x00" * 16, f"{_STATE_MARKER}{marker}\n".encode()
+
+    async def fake_exec(*_args, **_kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(embedded_render.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(embedded_render.shutil, "which", lambda _name: "/usr/bin/node")
+    monkeypatch.setattr(embedded_render, "wasm_assets_dir", lambda: tmp_path)
+    monkeypatch.setattr(embedded_render, "RENDER_HARNESS", Path(embedded_render.__file__))
+    monkeypatch.setattr(embedded_render, "_render_semaphore", asyncio.Semaphore(embedded_render.RENDER_CONCURRENCY))
+    monkeypatch.setattr(embedded_render, "_render_waiters", 0)
+
+    frame = SimpleNamespace(id=1, name="f", timezone=None, network={}, scenes=[{"id": "s", "nodes": [], "edges": []}])
+    _rgba, state, _assets = await embedded_render.render_scene_rgba_and_state(frame, 2, 2)  # type: ignore[arg-type]
+    assert state == {"sceneId": "s", "state": {}, "seeded": True, "nextSleep": -1, "refreshInterval": 60}
+
+    harness = (Path(embedded_render.__file__).parents[2] / "tools" / "embedded_wasm_render.mjs").read_text()
+    assert "frameos_wasm_next_sleep" in harness and "frameos_wasm_scene_interval" in harness
+
+
+def _renderer_reports_scene_timing() -> bool:
+    from app.utils.embedded_render import thin_client_renderer_available, wasm_assets_dir
+
+    assets = wasm_assets_dir()
+    script = (assets / "frameos.js").read_text(errors="replace") if assets is not None else ""
+    return thin_client_renderer_available() and "frameos_wasm_scene_interval" in script and "frameos_wasm_next_sleep" in script
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_reports_scene_timing(), reason="no wasm bundle with the timing exports")
+async def test_the_real_runtime_reports_the_scenes_interval():
+    """Through the harness and the wasm runtime: a scene whose setting asks
+    for a picture a minute reports 60, and no nextSleep of its own."""
+    from types import SimpleNamespace
+    from typing import Any
+
+    from app.utils.embedded_render import render_scene
+
+    scene = {
+        "id": "minute",
+        "name": "Minute",
+        "default": True,
+        "settings": {"execution": "interpreted", "refreshInterval": 60},
+        "fields": [],
+        "nodes": [
+            {"id": "render", "type": "event", "position": {"x": 0, "y": 0}, "data": {"keyword": "render"}},
+            {"id": "color", "type": "app", "position": {"x": 0, "y": 0},
+             "data": {"keyword": "render/color", "config": {"color": "#ffffff"}}},
+        ],
+        "edges": [{"id": "e1", "source": "render", "sourceHandle": "next", "target": "color", "targetHandle": "prev"}],
+    }
+    frame: Any = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=[scene])
+    result = await render_scene(frame, 16, 16)
+    assert result.rgba is not None, result.error
+    assert result.state is not None
+    assert result.state["refreshInterval"] == 60
+    assert result.state["nextSleep"] == -1

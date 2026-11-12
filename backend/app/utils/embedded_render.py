@@ -298,6 +298,10 @@ async def render_scene(
             out_of_memory=_parse_marker(stderr_text, _OUT_OF_MEMORY_MARKER),
             scene_logs=scene_logs,
         )
+    # The state report also says when the scene wants its next picture
+    # (`nextSleep`, -1 when the render set none; `refreshInterval`, 0 when
+    # the scene has none): kept in it for the render pull
+    # (embedded_device.next_render_seconds).
     state = _parse_marker(stderr_text, _STATE_MARKER)
     palette = state.pop("palette", None) if isinstance(state, dict) else None
     return SceneRender(

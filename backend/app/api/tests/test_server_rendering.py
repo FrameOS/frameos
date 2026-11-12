@@ -1236,3 +1236,125 @@ async def test_a_frame_without_a_map_or_buttons_of_its_own_renders_with_its_pres
     db.commit()
     await no_auth_client.get(url, headers=auth(frame))
     assert calls[-1]['frame_json']['eventMap'] == []
+
+
+# ------------------------------------------------- when the next picture is due
+
+
+def test_the_next_render_is_next_sleep_else_the_interval_within_reason():
+    """docs/server-rendering.md "When the next picture is due": this render's
+    nextSleep beats the scene's interval; never under 10 s, never over 7
+    days; a scene with no opinion has none."""
+    from app.api.embedded_device import (
+        NEXT_RENDER_MAX_SECONDS,
+        NEXT_RENDER_MIN_SECONDS,
+        SERVER_RENDER_NEXT_RENDER_HEADER,
+        next_render_seconds,
+    )
+
+    assert (NEXT_RENDER_MIN_SECONDS, NEXT_RENDER_MAX_SECONDS) == (10, 7 * 24 * 3600)
+    assert SERVER_RENDER_NEXT_RENDER_HEADER == 'X-FrameOS-Next-Render'
+    assert next_render_seconds({'nextSleep': 42, 'refreshInterval': 60}) == 42
+    assert next_render_seconds({'nextSleep': -1, 'refreshInterval': 60}) == 60
+    assert next_render_seconds({'refreshInterval': 59.6}) == 60
+    # Within reason: a second-by-second clock, a nextSleep of 0, a layout's 0.9999 s.
+    assert next_render_seconds({'nextSleep': -1, 'refreshInterval': 1}) == 10
+    assert next_render_seconds({'nextSleep': 0, 'refreshInterval': 3600}) == 10
+    assert next_render_seconds({'refreshInterval': 0.9999}) == 10
+    assert next_render_seconds({'nextSleep': 30 * 86400}) == 7 * 24 * 3600
+    # No opinion, or nothing readable.
+    assert next_render_seconds({'nextSleep': -1, 'refreshInterval': 0}) is None
+    assert next_render_seconds({'sceneId': 'clock', 'state': {}}) is None
+    assert next_render_seconds(None) is None
+    assert next_render_seconds({'nextSleep': True, 'refreshInterval': float('nan')}) is None
+    assert next_render_seconds({'nextSleep': '30', 'refreshInterval': '60'}) is None
+
+
+@pytest.mark.asyncio
+async def test_the_pull_says_when_the_scene_wants_its_next_picture(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    """On the picture and on the 304 for it: the board wakes for it instead
+    of on the frame's interval."""
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    monkeypatch.setattr(
+        'app.api.embedded_device.render_scene_rgba_and_state',
+        recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'nextSleep': -1, 'refreshInterval': 60}),
+    )
+    url = f'/api/frames/{frame.id}/embedded/render'
+    first = await no_auth_client.get(url, headers=auth(frame))
+    assert first.status_code == 200
+    assert first.headers['x-frameos-next-render'] == '60'
+    same = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': first.headers['etag']})
+    assert same.status_code == 304
+    assert same.headers['x-frameos-next-render'] == '60'
+
+    # The render's own nextSleep beats the interval.
+    monkeypatch.setattr(
+        'app.api.embedded_device.render_scene_rgba_and_state',
+        recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'nextSleep': 900, 'refreshInterval': 60}),
+    )
+    slept = await no_auth_client.get(url, headers=auth(frame))
+    assert slept.headers['x-frameos-next-render'] == '900'
+
+    # A scene with no opinion (or a bundle that says nothing): no header, the
+    # board keeps the frame's interval.
+    monkeypatch.setattr(
+        'app.api.embedded_device.render_scene_rgba_and_state',
+        recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'nextSleep': -1, 'refreshInterval': 0}),
+    )
+    silent = await no_auth_client.get(url, headers=auth(frame))
+    assert silent.status_code == 200
+    assert 'x-frameos-next-render' not in silent.headers
+
+
+@pytest.mark.asyncio
+async def test_the_diagnostic_card_says_nothing_about_the_next_picture(async_client, no_auth_client, db, redis, monkeypatch):
+    frame = await device_frame(async_client, db)  # no scenes: the card
+
+    def card(_frame, width, height):
+        return Image.new('RGB', (width, height), (255, 255, 255))
+
+    monkeypatch.setattr('app.api.embedded_device.embedded_diagnostic_image', card)
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 200
+    assert 'x-frameos-next-render' not in response.headers
+
+
+@pytest.mark.asyncio
+async def test_a_picture_drawn_before_the_wake_answers_with_its_own_next_render(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    """A kept picture keeps the scene's wish from when it was drawn; a record
+    from before the field has none."""
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    url = f'/api/frames/{frame.id}/embedded/render'
+
+    as_of_ms = asleep_until(db, frame, 30)
+    monkeypatch.setattr(
+        'app.api.embedded_device.render_scene_rgba_and_state',
+        recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'nextSleep': 120, 'refreshInterval': 60}),
+    )
+    assert await prerender_thin_client(db, redis, frame, as_of_ms) is True
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', refusing_render)
+    kept = await no_auth_client.get(url, params={'scene': 'clock'}, headers=auth(frame))
+    assert kept.status_code == 200, kept.text
+    assert kept.headers['x-frameos-next-render'] == '120'
+
+    # A record kept by a backend from before the field.
+    as_of_ms = asleep_until(db, frame, 30)
+    monkeypatch.setattr(
+        'app.api.embedded_device.render_scene_rgba_and_state',
+        recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'nextSleep': 120, 'refreshInterval': 60}),
+    )
+    assert await prerender_thin_client(db, redis, frame, as_of_ms) is True
+    meta_key = server_render._prerender_meta_key(int(frame.id))
+    record = json.loads(await redis.get(meta_key))
+    del record['nextRender']
+    await redis.set(meta_key, json.dumps(record))
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', refusing_render)
+    old = await no_auth_client.get(url, params={'scene': 'clock'}, headers=auth(frame))
+    assert old.status_code == 200, old.text
+    assert 'x-frameos-next-render' not in old.headers
