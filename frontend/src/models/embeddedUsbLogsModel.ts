@@ -1348,6 +1348,7 @@ export type EmbeddedUsbConfigKey =
   | 'buzzer_pin'
   | 'buzzer_tone_hz'
   | 'touch_beep'
+  | 'cpu_mode'
   | 'mic_pins'
   | 'led_pin'
   | 'led_type'

@@ -163,6 +163,10 @@ export const cloudFramesContractSettings = {
     "touch_beep": {
       "since": "2026.11.6"
     },
+    "cpu_mode": {
+      "since": "2026.11.7",
+      "restart": true
+    },
     "mic_clk_pin": {
       "since": "2026.10.20"
     },

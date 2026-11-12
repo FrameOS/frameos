@@ -1107,6 +1107,32 @@ a map) and the cloud's `set_settings` carries `gpio_buttons`; the device
 rebinds its buttons with a restart. Before that, a provisioned board's map
 could only be changed over the console.
 
+### Processor speed
+
+The generic image boots every board at 160 MHz. `cpu_mode` decides whether
+`main.c` moves it to 240 at boot: `battery` keeps 160, `performance` goes to
+240, and `auto` (the default) goes to 240 on an RGB LCD or once a touch panel
+answers, and stays at 160 on any other board. Set it with `set cpu_mode
+battery|performance|auto` (next boot), "Processor speed" under the frame's
+Power settings (`cpuMode` on the backend's settings pull, `cpu_mode` on the
+cloud's `set_settings`, firmware 2026.11.7+; the device reboots to take it).
+The console's `status` and the cloud's `hardware` (`cpuMode`, `cpuMhz`) say
+what the chip runs at.
+
+Why battery is the default on e-paper, the reTerminal E1002 being the case
+that decided it: a wake is mostly waiting, not computing. The Spectra 6
+refresh takes about 20 s, and Wi-Fi, the cloud round trips and the settle
+before sleep add more, while the render and dither are a few seconds of real
+work. The S3 idles through those waits at whatever clock it runs, and idling
+at 240 MHz draws roughly 5 mA more than at 160 (the datasheet's modem-sleep
+figures, about 33 against 28 mA with both cores waiting). At 240 the render
+work itself is about a third shorter and costs a little less energy, which
+wins back part of it. Put together, an estimate, not a measurement: a frame
+that deep-sleeps and refreshes every 15 minutes loses roughly 5 to 10% of its
+battery life at 240, and one that stays awake on battery more, closer to
+15%. An LCD or a touch panel is a screen someone is looking at, where a
+third off every render matters more, so `auto` gives those 240.
+
 ### Button beep
 
 A press the button task registers clicks the board's buzzer (`fos_buzzer.c`,

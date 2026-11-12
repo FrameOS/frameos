@@ -351,7 +351,8 @@ static int cmd_status(int argc, char **argv)
                fos_codec_has_mic() ? "es7210 microphone" : (fos_codec_has_speaker() ? "" : "no chip answered"), codec);
     }
     fos_touch_print_status();
-    printf("cpu:         %lu MHz\n", (unsigned long)(esp_clk_cpu_freq() / 1000000));
+    printf("cpu:         %lu MHz (cpu_mode %s)\n", (unsigned long)(esp_clk_cpu_freq() / 1000000),
+           fos_config_cpu_mode_name(config->cpu_mode));
     printf("nim:         %s\n", frameos_nim_info());
     printf("renders:     %lu (last %lld ms)\n",
            (unsigned long)fos_client_render_count(), fos_client_last_render_ms());
@@ -540,7 +541,7 @@ static int cmd_set(int argc, char **argv)
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|awake_input|wake_schedule|"
                "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|touch_beep|mic_pins|voice_chat|"
-               "led_pin|led_type|i2c_buses|touch_pins|codec_pins|"
+               "cpu_mode|led_pin|led_type|i2c_buses|touch_pins|codec_pins|"
                "pins|gpio_buttons|ap_psk> "
                "<value...>\n");
         return 1;
@@ -1035,6 +1036,15 @@ static int cmd_set(int argc, char **argv)
          * new LED (fos_led.c). */
         else if (strcmp(key, "buzzer_pin") == 0) config->buzzer_pin = (int8_t)pin;
         else config->led_pin = (int8_t)pin;
+    }
+    else if (strcmp(key, "cpu_mode") == 0) {
+        uint8_t mode;
+        if (!fos_config_parse_cpu_mode(value, &mode)) {
+            printf("cpu_mode must be auto, battery or performance\n");
+            return 1;
+        }
+        config->cpu_mode = mode;
+        printf("cpu_mode saved; takes effect at the next boot\n");
     }
     else if (strcmp(key, "led_type") == 0) {
         uint8_t type;

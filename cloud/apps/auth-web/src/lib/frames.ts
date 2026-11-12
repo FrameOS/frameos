@@ -507,6 +507,12 @@ export const esp32TouchBeepFrameSettingsMinVersion = "2026.11.6";
 export const esp32TouchBeepFrameSettingKeys = new Set(
   contractSettingKeysSince("esp32", esp32TouchBeepFrameSettingsMinVersion),
 );
+// 2026.11.7: `cpu_mode`, the chip's clock (160 MHz battery, 240 performance,
+// auto by the board). Read at boot: the device reboots to take it.
+export const esp32CpuModeFrameSettingsMinVersion = "2026.11.7";
+export const esp32CpuModeFrameSettingKeys = new Set(
+  contractSettingKeysSince("esp32", esp32CpuModeFrameSettingsMinVersion),
+);
 
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata

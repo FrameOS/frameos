@@ -502,6 +502,9 @@ EMBEDDED_SEEED_RETERMINAL_E10XX_I2C = {"i2cBuses": "sda=19,scl=20;sda=39,scl=40"
 EMBEDDED_SEEED_RETERMINAL_E1004_I2C = {"i2cBuses": "sda=19,scl=20"}
 # The contract's `led_type` enum (docs/cloud-frames-contract.json).
 EMBEDDED_LED_TYPES = ("gpio", "gpio_inverted", "ws2812")
+# The contract's `cpu_mode` enum: the chip's clock, set at boot (main.c).
+# Unset = auto, 160 MHz on e-paper and 240 on an LCD or a touch panel.
+EMBEDDED_CPU_MODES = ("auto", "battery", "performance")
 EMBEDDED_SEEED_RETERMINAL_E10XX_LED = {
     "ledPin": 6,
     "ledType": "gpio_inverted",
@@ -2038,6 +2041,9 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     touch_beep = _embedded_device_config_value(frame, "touchBeep", "touch_beep")
     if isinstance(touch_beep, bool):
         settings.append(_provisioning_setting("touch_beep", 1 if touch_beep else 0))
+    cpu_mode = _embedded_device_config_value(frame, "cpuMode", "cpu_mode")
+    if isinstance(cpu_mode, str) and cpu_mode in EMBEDDED_CPU_MODES:
+        settings.append(_provisioning_setting("cpu_mode", cpu_mode))
     wake_check_seconds = _embedded_device_config_value(frame, "wakeCheckSeconds", "wake_check_seconds")
     if isinstance(wake_check_seconds, int) and not isinstance(wake_check_seconds, bool):
         settings.append(_provisioning_setting("wake_check", max(0, wake_check_seconds)))

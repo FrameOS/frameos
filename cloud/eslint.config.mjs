@@ -31,6 +31,7 @@ export default tseslint.config(
       "**/src/test/shared-spa/cloud-scene-deploy.test.ts",
       // Same exclusion, same reason: renders the whole deploy drawer.
       "**/src/test/shared-spa/cloud-deploy-dialog.test.tsx",
+      "**/src/test/shared-spa/scene-update-deploy.test.ts",
       // Same exclusion, same reason: renders the signed-out store front.
       "**/src/test/shared-spa/public-store-front.test.tsx",
       // Same exclusion, same reason: mounts EmbeddedWebFlasher.

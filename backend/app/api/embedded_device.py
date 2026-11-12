@@ -865,6 +865,7 @@ def embedded_frame_settings(frame: Frame) -> dict:
     changed nothing on a provisioned board.
     """
     from app.tasks.embedded_firmware import (
+        EMBEDDED_CPU_MODES,
         EMBEDDED_LED_TYPES,
         EMBEDDED_RENDER_REMOTE,
         embedded_device_config,
@@ -900,6 +901,8 @@ def embedded_frame_settings(frame: Frame) -> dict:
             # PDM microphone's pins (-1 = none; unset = the board's own).
             ("voiceChat", ("voiceChat", "voice_chat"), "bool"),
             ("touchBeep", ("touchBeep", "touch_beep"), "bool"),
+            # The chip's clock (main.c, at boot: the device restarts for it).
+            ("cpuMode", ("cpuMode", "cpu_mode"), "cpu_mode"),
             ("micClkPin", ("micClkPin", "mic_clk_pin"), "int"),
             ("micDataPin", ("micDataPin", "mic_data_pin"), "int"),
             ("micPwrPin", ("micPwrPin", "mic_pwr_pin"), "int"),
@@ -919,6 +922,9 @@ def embedded_frame_settings(frame: Frame) -> dict:
                     extra[out_key] = float(value)
                     break
                 if kind == "led_type" and isinstance(value, str) and value in EMBEDDED_LED_TYPES:
+                    extra[out_key] = value
+                    break
+                if kind == "cpu_mode" and isinstance(value, str) and value in EMBEDDED_CPU_MODES:
                     extra[out_key] = value
                     break
         return extra
