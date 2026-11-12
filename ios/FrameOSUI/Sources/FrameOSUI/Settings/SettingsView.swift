@@ -83,6 +83,7 @@ struct SettingsView: View {
                 }
             }
             .groupedList()
+            .readableWidth()
             .navigationTitle("Settings")
             .task(id: app.current?.id) {
                 summary = try? await app.service?.accountSummary()
@@ -140,6 +141,7 @@ struct ServiceKeysView: View {
             }
         }
         .overlay { if loading && settings.isEmpty { ProgressView() } }
+        .readableWidth()
         .navigationTitle("API keys")
         .inlineTitle()
         .task { await load() }

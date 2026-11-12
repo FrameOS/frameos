@@ -198,6 +198,7 @@ struct FrameSettingsView: View {
                     Text("Wiring, drivers, the network and the rest are in the web workspace.")
                 }
             }
+            .readableWidth()
             .navigationTitle("Settings")
             .inlineTitle()
         }
@@ -301,6 +302,7 @@ struct ScheduleView: View {
                 .disabled(!changed)
             }
         }
+        .readableWidth()
         .navigationTitle("Schedule")
         .inlineTitle()
         .onAppear {
@@ -431,6 +433,7 @@ struct ButtonMapView: View {
                 .disabled(!changed)
             }
         }
+        .readableWidth()
         .navigationTitle("Button actions")
         .inlineTitle()
         .onAppear {
@@ -540,6 +543,7 @@ struct VoicePermissionsView: View {
                 Text("Hold the frame's voice key and talk: these decide what the AI may do there.")
             }
         }
+        .readableWidth()
         .navigationTitle("Voice chat")
         .inlineTitle()
         .onAppear {
@@ -620,6 +624,7 @@ struct LanAccessView: View {
                     }
                 }
             }
+            .readableWidth()
             .navigationTitle("Local network access")
             .inlineTitle()
         }

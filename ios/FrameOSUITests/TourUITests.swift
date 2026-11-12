@@ -142,6 +142,15 @@ final class TourUITests: XCTestCase {
         waitForText(app, "Add scene")
         sleep(2)
         snapshot(app, "\(prefix)12 frame")
+        // An iPad on its side: the picture beside the list (docs/ios-app.md
+        // "On an iPad").
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            sleep(2)
+            snapshot(app, "\(prefix)12l frame, landscape")
+            XCUIDevice.shared.orientation = .portrait
+            sleep(2)
+        }
 
         // A scene from the catalog, installed and shown.
         if !button(app, containing: scene).exists {

@@ -133,6 +133,9 @@ struct ChatView: View {
                         }
                     }
                     .padding()
+                    // One column of messages on an iPad, not lines across the screen.
+                    .frame(maxWidth: ReadableWidth.chat)
+                    .frame(maxWidth: .infinity)
                 }
                 .onChange(of: model.messages.last?.content) { _, _ in
                     if let last = model.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
@@ -141,6 +144,7 @@ struct ChatView: View {
             Divider()
             if !sharingAllowed {
                 AISharingConsent(plane: app.current?.kind ?? .cloud) { sharingAllowed = true }
+                    .frame(maxWidth: ReadableWidth.chat)
             } else {
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(generating ? "Describe a scene" : "Message", text: $model.draft, axis: .vertical)
@@ -158,6 +162,7 @@ struct ChatView: View {
                 }
             }
             .padding(10)
+            .frame(maxWidth: ReadableWidth.chat)
             }
         }
         .navigationTitle(generating ? "Generate scene" : frameId.flatMap { app.frame($0)?.displayName } ?? "AI")
@@ -178,7 +183,7 @@ struct GenerateSceneLabel: View {
                 Text("Open AI chat for this frame").font(.caption).foregroundStyle(.secondary)
             }
         } icon: {
-            Image(systemName: "sparkles")
+            Image(systemName: "sparkles").foregroundStyle(.tint)
         }
     }
 }
@@ -274,6 +279,7 @@ struct ChatListView: View {
                     if chats.isEmpty && !loading { Text("No conversations yet.").foregroundStyle(.secondary) }
                 }
             }
+            .readableWidth()
             .navigationTitle("AI")
             .task { await load() }
             .refreshable { await load() }

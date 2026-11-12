@@ -117,6 +117,35 @@ Deliberately, so a phone does not grow a second editor:
 
 Settings → "Open the web workspace" goes there.
 
+## On an iPad
+
+One app for both, laid out by the width a screen gets
+(`ios/FrameOSUI/Sources/FrameOSUI/Common/Layout.swift`), never by asking
+what the device is: an iPad's Split View or sheet is a phone's width, and a
+large phone on its side is an iPad's.
+
+- **Pictures** (a frame's, a scene's) go in a `FittedBox`: the box takes the
+  width it is offered, the picture fits inside at its panel's shape, and a
+  page caps the height. A portrait panel drawn at an iPad's full width was
+  twice the screen's height. A grid gives every card one box shape (the
+  frames' widest panel, 4:3 to 16:9), so a row of cards is one height.
+- **Lists and forms** are `.readableWidth()`: rows at most 720 points wide,
+  in the middle (the sign-in screen 540, the AI chat's messages 760). Logs
+  keep the full width for their long lines.
+- **From 700 points** (`ReadableWidth.wide`) the store is a grid of covers
+  and the photo tiles are larger; the Add scene sheet is the larger "page"
+  sheet where iOS has one.
+- **The frame page** puts the picture, its status and the actions beside
+  the list when it is wider than tall and at least 900 points (an iPad in
+  landscape); in one column the picture is at most 55% of the page's height.
+- A photo opens over the whole screen.
+- A sheet's one action stays on screen: an iPad's sheet is shorter than a
+  phone's, and the store's install sheet had its Install button below the
+  bottom (now pinned to it, the cover at most 220 points tall).
+
+After changing a screen's layout, run the tour on an iPad too
+(`FRAMEOS_UITEST_DEVICE="iPad Pro 13-inch (M5)"`, `ios/README.md`).
+
 ## Words
 
 The app uses the verbs of `docs/ui-vocabulary.md`: a scene is **installed**

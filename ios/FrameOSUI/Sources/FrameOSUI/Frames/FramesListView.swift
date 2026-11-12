@@ -14,6 +14,14 @@ struct FramesListView: View {
         return FrameGroups.byStatus(matching)
     }
 
+    /// One shape for every card's picture, so a row of cards is one height
+    /// (a portrait panel made its card twice as tall as the others, and the
+    /// row around it a hole): the widest panel's, between 4:3 and 16:9. A
+    /// narrower panel sits in it at its own shape.
+    var cardAspect: Double {
+        min(max(app.frames.map(\.aspectRatio).max() ?? 4.0 / 3.0, 4.0 / 3.0), 16.0 / 9.0)
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -37,15 +45,16 @@ struct FramesListView: View {
                             }
                         }
                     }
+                    .readableWidth()
                     .searchable(text: $search, prompt: "Search frames")
                 } else {
                     ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16)], alignment: .leading, spacing: 16) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
                             ForEach(groups) { group in
                                 Section {
                                     ForEach(group.frames) { frame in
                                         NavigationLink(value: frame.id) {
-                                            FrameCard(frame: frame)
+                                            FrameCard(frame: frame, pictureAspect: cardAspect)
                                         }
                                         .buttonStyle(.plain)
                                     }
@@ -95,8 +104,10 @@ struct FrameRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            FrameImageView(frame: frame)
-                .frame(width: 72)
+            // One box for every row: a portrait panel's picture at the
+            // row's width was a row three times as tall.
+            FrameImageView(frame: frame, boxAspect: 4.0 / 3.0, cornerRadius: 6)
+                .frame(width: 72, height: 54)
             VStack(alignment: .leading, spacing: 3) {
                 Text(frame.displayName).font(.body.weight(.medium)).lineLimit(1)
                 FrameStatusLine(frame: frame)
@@ -109,10 +120,12 @@ struct FrameRow: View {
 /// One frame on the list: its picture, name and what it is doing.
 struct FrameCard: View {
     let frame: Frame
+    /// The picture's box, the same for every card (`FramesListView.cardAspect`).
+    var pictureAspect: Double? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            FrameImageView(frame: frame)
+            FrameImageView(frame: frame, boxAspect: pictureAspect)
             VStack(alignment: .leading, spacing: 4) {
                 Text(frame.displayName).font(.headline).lineLimit(1)
                 FrameStatusLine(frame: frame)

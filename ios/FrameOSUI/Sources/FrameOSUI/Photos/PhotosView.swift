@@ -89,6 +89,11 @@ struct PhotoFolderView: View {
     @State private var sharing: PhotoEntry?
     @State private var deleting: PhotoEntry?
     @State private var viewing: PhotoEntry?
+    /// Larger tiles on an iPad: a phone's 104-point photos made nine
+    /// columns of stamps there.
+    @State private var width: CGFloat = 0
+
+    var wide: Bool { width >= ReadableWidth.wide }
 
     init(path: String) {
         self.path = path
@@ -106,6 +111,7 @@ struct PhotoFolderView: View {
         ScrollView {
             content.padding()
         }
+        .measureWidth($width)
         .overlay { if model.loading && model.entries.isEmpty { ProgressView() } }
         .navigationTitle(path.isEmpty ? "Photos" : (path.split(separator: "/").last.map(String.init) ?? path))
         .task { await model.load(app) }
@@ -155,7 +161,8 @@ struct PhotoFolderView: View {
     var albumsGrid: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Albums").font(.headline)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: wide ? 190 : 150), spacing: wide ? 16 : 12, alignment: .top)],
+                      spacing: wide ? 16 : 12) {
                 ForEach(folders) { folder in
                     NavigationLink {
                         PhotoFolderView(path: folder.path)
@@ -172,7 +179,7 @@ struct PhotoFolderView: View {
     var photosGrid: some View {
         VStack(alignment: .leading, spacing: 8) {
             if !folders.isEmpty { Text("Photos").font(.headline) }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 4)], spacing: 4) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: wide ? 150 : 104), spacing: 4)], spacing: 4) {
                 ForEach(photos) { photo in
                     Button { viewing = photo } label: {
                         PhotoThumb(entry: photo).aspectRatio(1, contentMode: .fill)
@@ -257,7 +264,9 @@ struct PhotoFolderView: View {
             .sheet(item: $sharing) { entry in
                 ShareLinksSheet(path: entry.path)
             }
-            .sheet(item: $viewing) { entry in
+            // The whole screen: an iPad's sheet showed the photo as a small
+            // card with black bars above and below it.
+            .fullScreenSheet(item: $viewing) { entry in
                 PhotoViewer(entry: entry) { await model.load(app) }
             }
     }
