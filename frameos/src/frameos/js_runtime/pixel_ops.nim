@@ -21,6 +21,12 @@ template blitLoop(T: typedesc) =
   ## `shadow` (the cells this canvas holds already, kept up to date here) a
   ## row and a cell that did not change are not written: a cold cell costs no
   ## trip over the PSRAM bus. An index past the palette leaves the canvas.
+  ##
+  ## A row of cells is written once, into its first pixel row, and the span
+  ## that changed is copied into the rows below it: a cell's rows are all
+  ## alike, and one copy of a row is a fraction of `size` passes over it
+  ## (8 px cells at 480x480 on an ESP32: 21 ms of a frame). Not when a cell
+  ## in the row is left as it was: its rows below need not match the first.
   var
     top = -1
     bottom = -1
@@ -32,16 +38,38 @@ template blitLoop(T: typedesc) =
     if top < 0:
       top = sy
     bottom = sy
-    for k in 0 ..< size:
-      let row = cast[ptr UncheckedArray[T]](addr first[(sy * size + k) * stride])
-      var at = 0
-      for sx in 0 ..< width:
-        let index = src[sx].int
-        if index < count and (old.isNil or src[sx] != old[sx]):
-          let color = colors[index]
-          for d in 0 ..< size:
-            row[at + d] = color
-        at += size
+    let firstRow = cast[ptr UncheckedArray[T]](addr first[sy * size * stride])
+    var
+      at = 0
+      lo = -1
+      hi = -1
+      kept = false
+    for sx in 0 ..< width:
+      let index = src[sx].int
+      if index >= count:
+        kept = true
+      elif old.isNil or src[sx] != old[sx]:
+        let color = colors[index]
+        for d in 0 ..< size:
+          firstRow[at + d] = color
+        if lo < 0:
+          lo = at
+        hi = at + size
+      at += size
+    if lo >= 0:
+      if not kept:
+        for k in 1 ..< size:
+          let row = cast[ptr UncheckedArray[T]](addr first[(sy * size + k) * stride])
+          copyMem(addr row[lo], addr firstRow[lo], (hi - lo) * sizeof(T))
+      else:
+        for k in 1 ..< size:
+          let row = cast[ptr UncheckedArray[T]](addr first[(sy * size + k) * stride])
+          at = 0
+          for sx in 0 ..< width:
+            let index = src[sx].int
+            if index < count and (old.isNil or src[sx] != old[sx]):
+              copyMem(addr row[at], addr firstRow[at], size * sizeof(T))
+            at += size
     if not old.isNil:
       copyMem(old, src, width)
   result = (top, bottom)

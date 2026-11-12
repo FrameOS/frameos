@@ -29,18 +29,32 @@ measures, and its **Quality** field picks the cell size: automatic (4 px, 8 on
 an ESP32), 8, 4 or 2 px. The rule stays in JS on purpose: a native Doom spread
 in every runtime (`frameos.fire`, tried and taken out again) was one scene's
 inner loop as a core API, and the interpreter's cost is what the yardstick is
-for. On the SenseCAP Indicator the JS spread took 156 ms a frame at 4 px
-(14,400 cells, ~11 µs a cell), which is why an ESP32 defaults to 8 px, a
-quarter of the cells. Measured on the way there:
+for. Measured on the SenseCAP Indicator (480x480, the panel's 16 KB
+instruction cache, no counter), by the firmware's `render:animation` line:
 
-| Step | Frame | fps |
+| Step | 8 px cells (3,600) | 4 px cells (14,400) |
 | --- | --- | --- |
-| 4 px cells: the spread in JS (156 ms), `putPixels` through `setPixel`'s per-pixel dither (237 ms), the canvas copied to the panel (42 ms) | 450 ms | 2.2 |
-| The palette packed once and only changed cells written (12 ms), `frameos.pixels` so no canvas to copy and no JSX to lay out, the spread native for this measurement (2 ms) | 31 ms | 32 |
-| The same frame with the spread in JS again at 4 px, by those numbers | ~185 ms | ~5, estimated |
-| 8 px cells, the ESP32 default: a quarter of the cells to spread | ~70 ms | ~14, estimated |
+| The first JS spread: an LCG through `Math.imul` per cell, module variables in the loop | 10.9 fps | 5.4 fps |
+| Locals and xorshift: no global lookup or call per cell, and no seed above 2^31 turning into a float | 11.9 fps | |
+| One flat pass over the cells, the random numbers from a table | 15.0 fps | |
+| The changed span of a row of cells copied into its other rows, not stored pixel by pixel (the blit is PSRAM-bound: 21 to 18 ms) | 15.8 fps | |
+| No branch (a `Uint8ClampedArray` keeps a cold cell at 0), and cooling that follows the grid, so the black sky above the flames does not change and is not written | 20.5 fps | 8.5 fps |
+| The pass starts at the first warm row | 26.0 fps | 13.3 fps |
 
-The two estimated rows are still to be measured on the board.
+What is left at 8 px (with `set debug 1`): ~13 ms of spread, ~10 ms of blit
+and ~13 ms of the scene around them; the panel scans out at ~42 Hz (PCLK
+12 MHz), which no scene passes. A call from JS into the runtime costs
+~125 µs on this board (instruction-cache misses: 45 µs with a 32 KB cache,
+which bought Hellfire 8% and cost 16 KB of internal RAM, so no), and an
+`app.config` read through its Proxy ~0.3 ms: an app reads its config once a
+render, never in a loop.
+
+Two things the first version got wrong on the way: the pass ran from the
+bottom up, so each row read what the row below had just written and heat
+crossed the whole panel in one step (noise, not Doom's rising flames), and
+Doom's cooling of half a heat unit a row burns ~72 rows high, so a 60-row grid
+was a wall of fire. The pass now runs from the top down and the cooling
+follows the grid: the flames stand ~40% of the way up at any cell size.
 
 ## Where an ESP32 frame goes
 

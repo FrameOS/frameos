@@ -341,9 +341,13 @@ pixel, each source pixel a `pixelSize` square. Simulate at the canvas's size
 over `pixelSize` and hand the buffer over as it is, every frame. When that
 raster is the whole picture, `return frameos.pixels(cells, { width, height,
 pixelSize, palette })` from `get()` instead: no canvas and no JSX, written
-straight into an LCD's buffer. The simulation itself is the app's JS: on an
-ESP32 budget ~11 µs a cell a step, and offer a coarser `pixelSize` there
-(`app.frame.embedded`).
+straight into an LCD's buffer. The simulation itself is the app's JS, and on
+an ESP32 every bytecode counts (~0.25 µs each): keep the per-cell loop to
+locals and typed arrays, take random numbers from a table rather than a call,
+skip rows that cannot change, read `app.config` once per render (each read
+crosses into the runtime), and offer a coarser `pixelSize` there
+(`app.frame.embedded`). The Hellfire sample runs 26 fps at 8 px on a 480x480
+ESP32 panel.
 
 **Assets and permissions.** Asset paths are relative to the frame's assets
 folder (`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos,

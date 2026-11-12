@@ -231,8 +231,8 @@ suite "Hellfire":
     check not same(c, newFire("tests/hellfire-plain-2", 480, 480).render(config))
 
   test "the automatic cell size is 4 px, and 8 on an ESP32":
-    # The spread is the app's JS, ~11 us a cell on an ESP32: a quarter of the
-    # cells there. An asked-for size wins on both.
+    # The spread is the app's JS: on an ESP32, 8 px cells run at twice the
+    # frame rate of 4 px ones. An asked-for size wins on both.
     let config = %*{"pixelSize": "0", "seed": "3", "wind": "1"}
     let host = newFire("tests/hellfire-auto-host", 64, 64).render(config)
     check same(host, newFire("tests/hellfire-four", 64, 64).render(%*{"pixelSize": "4", "seed": "3", "wind": "1"}))
@@ -262,6 +262,23 @@ suite "Hellfire":
     for x in 0 ..< 64:
       if not dark(frame[x, 216]): inc lit
     check lit > 0
+
+  test "the flames stand under half the panel at every cell size":
+    # Doom's cooling burns ~72 rows up: a 60-row grid (8 px on a 480 px panel,
+    # the ESP32's) was a wall of fire. The cooling follows the grid now.
+    for size in ["8", "4", "2"]:
+      let fire = newFire("tests/hellfire-height-" & size, 480, 480)
+      var frame: Image
+      for i in 0 ..< 4:
+        frame = fire.render(%*{"pixelSize": size, "seed": "9", "wind": "1"})
+      var litTop, litLow = 0
+      for x in 0 ..< 480:
+        for y in 0 ..< 120:
+          if not dark(frame[x, y]): inc litTop
+        if not dark(frame[x, 330]): inc litLow
+      checkpoint "pixelSize " & size & ": lit in the top quarter " & $litTop & ", at 30% up " & $litLow
+      check litTop == 0
+      check litLow > 100
 
   test "the same seed is the same fire; another seed another; a render moves it":
     let a = newFire("tests/hellfire-a", 64, 64)
