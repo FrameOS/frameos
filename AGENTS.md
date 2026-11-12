@@ -23,7 +23,8 @@
   `docs/frame-status-fixtures.json` (`decorators/frame.tsx`),
   `scene-form-fixtures.json` (`refreshInterval.ts`, `showIf.ts`),
   `button-map-fixtures.json` (`frameEventMap.ts`), `api-path-fixtures.json`
-  (`projectApi.ts`), `server-address-fixtures.json`. Change the SPA
+  (`projectApi.ts`), `server-address-fixtures.json`,
+  `render-on-server-fixtures.json` (`renderOnServer.ts`). Change the SPA
   function, its Swift port and the corpus together; the SPA's runners are
   `cloud/apps/auth-web/src/test/shared-spa/*-fixtures.test.ts`.
 - A backend's scene and album installs are its own MCP tools
@@ -428,12 +429,21 @@
   it at `GET …/embedded/render` with an ETag; the device sends its panel
   and gets a 304 when nothing changed. A C3 is always this.
 - The plane is the memory (scene state, held events, the scene shown); in
-  remote mode the firmware runs no scene work, so keys, touch and the
-  device's schedule do not switch scenes yet ("Not yet" in the doc). On the
-  cloud a frame set to remote is a cloud-rendered frame (quota + floor,
-  `frameIsCloudRendered`). A sleeping frame's next picture is drawn before
-  it wakes, with the scene's clock set to the wake (`nowMs`), and used once
-  if nothing changed: keep that rule on both planes.
+  remote mode the firmware runs no scene work. What its keys, touch, schedule
+  and HTTP API would have handed its scene, `fos_events_dispatch` relays
+  instead (`fos_render_relay.c`), and the next pull is a `POST` carrying it;
+  the plane runs it through the one dispatcher in the same render
+  (`frameos_wasm_device_input`, `relayed_input.nim`) and keeps the scene the
+  render ended on. A new producer on the ESP32 goes through
+  `fos_events_dispatch` and is relayed for free; never a second relay path.
+  On the cloud a frame set to remote is a cloud-rendered frame (quota +
+  floor, `frameIsCloudRendered`). A sleeping frame's next picture is drawn
+  before it wakes, with the scene's clock set to the wake (`nowMs`), and
+  used once if nothing changed: keep that rule on both planes.
+- The plane dithers to the palette the device's packer would
+  (`activePalette(framePalette(stock))`: a photo's own palette, the frame's
+  `palette`, the stock table); a change to that rule changes the backend's
+  packer, `panel-pack.ts` and `embedded_main.nim` together.
 - The battery popover's offer reads `renderSceneMs` from the metrics
   (`serverRenderForecast` in `utils/batteryForecast.ts`).
 

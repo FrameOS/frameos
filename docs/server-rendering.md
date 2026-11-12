@@ -27,10 +27,11 @@ offered as a choice to a board that has its own runtime (every ESP32-S3).
 Neither plane builds firmware for it: the switch is a setting.
 
 What the frame stops doing with its scenes, it stops doing entirely: in
-remote mode the firmware runs no scene work (no scene store apply, no event
-dispatch, no schedule), so its keys, its touch glass and its own schedule do
-not switch scenes yet (see "Not yet"). Scenes are switched from a control
-plane: the workspace, the MCP tools, the voice chat, Home Assistant.
+remote mode the firmware runs no scene work (no scene store apply, no
+dispatcher). What its keys, its touch glass, its own schedule and its own
+HTTP API would have told its scene goes to the plane with the next pull
+instead, and the plane's dispatcher runs it (see "Keys, touch and the
+schedule").
 
 ## The switch
 
@@ -61,6 +62,9 @@ Authorization: Bearer …
 If-None-Match: "…"
 ```
 
+or, when the frame has input for its scene, the same with `POST` and that
+input as a JSON body (see "Keys, touch and the schedule").
+
 - **Who**: the backend's frame API key (`server_api_key`), or the cloud
   device's access token (`authenticateFrameDevice`). `{id}` is the backend's
   frame number or the cloud's frame uuid.
@@ -86,20 +90,114 @@ If-None-Match: "…"
   `renderer_busy` (with `Retry-After`) or `502 render_failed {error}`; the
   device keeps the picture it shows and logs `render:error`.
 
-The backend also takes `POST` with the board's button edges (the Pico's
-pull, `embedded_device_input`); an ESP32 pulls with `GET`.
+### Keys, touch and the schedule
+
+A frame rendered on the server keeps its producers: the button task, the
+touch glass, the schedule and its own HTTP API (`/event/<name>`). In remote
+mode `fos_events_dispatch` (`fos_events.c`, the one C edge they all go
+through) does what it always did with what is the firmware's own (`render`
+asks for a pull; `reload`, `restart`, `reboot`, `uploadScenes`; the voice
+key, which the button task claims before any dispatcher), and **relays**
+everything it would have handed its scene: input (`gpio` edges with
+`claimed` and `wake`, `pointerDown` / `pointerMove` / `pointerUp`),
+`setCurrentScene` (with or without a `direction`), `setSceneState`, custom
+events, `button` said over HTTP, `turnOn` / `turnOff`. Relayed from these
+origins only: `driver`, `schedule`, `http:write`, `http:admin`. What came
+from the plane itself (`cloud`, a backend command) is the plane's already
+and only asks for the pull (it reaches the firmware through
+`fos_events_dispatch_from_plane`, which never relays); the console's
+`system` stays on the frame (`event:unsupported`). `turnOn`, `turnOff` and
+`toggleScreen` are both: the board's backlight is the device's, so it acts
+on them, and the scene may listen for them, so they are relayed too.
+
+The relay (`fos_render_relay.c`, pure, host-tested) holds them in order,
+each as the dispatcher would have been handed it: origin, name and payload,
+the payload's `atMs` on the board's monotonic clock as the button task and
+the touch driver stamp it. Consecutive events of one name whose contract
+says `coalesce: latest` (a moving finger) keep the newest. At most 32 events
+and 16 KiB of body; past that the oldest go, logged `event:dropped`.
+
+The frame sends them **once the input is decided**: no key down, no tap
+inside its double-press window (`fos_button_timing.c`, the rule the Pico
+sends by), no finger on the glass; a pull due anyway waits for that too (at
+most 10 s), so a press never goes in two halves. Then the next pull is a
+`POST` (`Content-Type: application/json`) with
+
+```json
+{"nowMs": 81234, "events": [
+  {"origin": "driver", "name": "gpio", "payload": {"pin": 3, "label": "RIGHT", "level": 0, "action": "down", "atMs": 80410}},
+  {"origin": "driver", "name": "gpio", "payload": {"pin": 3, "label": "RIGHT", "level": 1, "action": "up", "atMs": 81020}},
+  {"origin": "schedule", "name": "setCurrentScene", "payload": {"sceneId": "news"}}
+]}
+```
+
+`nowMs` is the board's clock when it sent them; `pointerMove` carries no
+`atMs` (the touch driver stamps the down and the up). A schedule entry or
+an HTTP event asks for the pull at once; a pull that is due anyway takes
+whatever is waiting. A battery frame does not go to sleep while the relay
+holds anything (`sleep:held`, reason `input`), within bounds: not on a
+critical battery, and after three failed pulls or five holds in a row it
+sleeps and the input is lost with its RAM. The key that woke it (`wake:
+true`) is relayed with the first pull of the wake. The relay is emptied by
+a `200` or a `304`, and by a `400` or `413` (a body the plane cannot read
+would otherwise be sent for ever); after a network error, a `503` or a
+`429` the same events go with the next pull. (A plane that ran them and
+whose answer was lost runs them twice; a press is not worth a delivery
+protocol.) A board the cloud refuses (`403`) and that can render hands the
+held input to its own scene in the pass it renders itself; a C3 drops it
+(`event:dropped`, reason `refused`). Each pull that carried input logs one
+`render:relay` line: the count, the status and whether the input was
+`delivered`, `dropped` or `kept`.
+
+The Pico sends its button edges the older way, `{"nowMs", "edges": [{label,
+action, atMs, pin?, wake?}]}` (`embedded_device_input`), and both planes
+keep taking it. A body may carry both; `edges` are delivered first.
+
+**On the plane** the input goes into the same render, before it draws:
+`frameos_wasm_device_input` (`frameos/relayed_input.nim`) moves every
+`atMs` onto the runtime's own clock, as far before its now as it was before
+the board's `nowMs`, and sends each event from its origin through the one
+dispatcher (`event_loop.nim`), whose origin allow-list, event maps (the
+frame's `event_map` and the installed scene's, which both planes hand the
+render) and `press` / `doublePress` / `longPress` timing decide what comes of
+it, exactly as on the board. Before the scenes load, both planes hand the
+runtime what the board's own runtime holds (`frameos_wasm_set_frame`:
+`eventMap`, `palette`, `colors`, the panel's `pixelFormat` and `rotate`, and
+the backend's `gpioButtons`), so a relayed tap lands where it was on a
+rotated frame and the automatic fit aims at the panel's colours. An event whose origin is not one of the four is
+not delivered. The scene's log lines about what it heard go to the frame's
+log, as for the Pico.
+
+**The plane keeps the scene the render ended on** as its active scene, with
+that scene's state: a `setCurrentScene` or a `previous` / `next` from the
+event map is a switch on the plane. The scene switcher and the scene
+settings (`system/sceneSwitcher`, `system/sceneSettings`) are kept too, so a
+tap on a tile in the next pull lands in the switcher it opened; they are
+kept only while the frame is awake, as on the board, which never persists
+them: when the frame says it is going to sleep, the plane goes back to the
+scene they were opened from (`state.from`) before it draws the picture for
+the wake. The frame page behind the gear has nothing to show on a plane (its
+facts are the device's): with no host behind it the gear is not offered.
+
+The plane's record is also what the workspace shows: the scene showing and
+its state come from the plane's store (the backend's `_load_frame_states`,
+the cloud's `frames.last_state` written at each committed render), never
+from what the device reports of its own idle runtime.
+
+A pull with input never takes a picture drawn ahead of a wake.
 
 ### Which scene
 
 1. A scene switch the plane sent and the device has not taken yet (a
    `set_current_scene` still pending on the frame's command queue): the
    plane's choice. The device has not heard it.
-2. Otherwise the device's `scene`, when it names one of the frame's scenes:
-   a key, a touch, the schedule or a switch the device already took (for
-   when the firmware sends it; today it does not).
-3. Otherwise the plane's own active scene, then the frame's default scene.
+2. Otherwise the device's `scene`, when it names one of the frame's scenes
+   (the firmware does not send it: a frame in remote mode runs no scene of
+   its own, and its keys and schedule reach the plane as input instead).
+3. Otherwise the plane's own active scene (a built-in scene included, see
+   below), then the frame's default scene.
 
-The plane keeps the scene it drew as its active scene.
+The plane keeps the scene the render ended on as its active scene.
 
 ### State and events
 
@@ -120,6 +218,26 @@ backend's thin-client renderer always has (`pack_image_for_panel` in
 the panel's palette, greys from luma 0.21 / 0.72 / 0.07, Spectra 6's unused
 index 4 skipped. A frame hung at 90 or 270 degrees renders on the swapped
 canvas and is turned clockwise by its rotation into the panel's orientation.
+
+The palette it dithers against is the one the device's own packer would
+use (`activePalette(framePalette(stock))` in `embedded_main.nim`):
+
+1. A photo's own dither palette (its colour profile's `palette`,
+   `docs/asset-color-profiles.md`), when the scene drew one last in this
+   render. The runtime reports it (`frameos_wasm_render_palette`, `[]` when
+   none), and it is fitted like the device fits it.
+2. Otherwise the frame's `palette` setting (its colour list: the colours
+   this panel really shows, measured), fitted onto the stock table
+   (`fitPaletteOverride` in `utils/dither.nim`: as many colours as the
+   table, or one fewer for Spectra 6, whose hole at index 4 is put back;
+   any other length is ignored).
+3. Otherwise the panel's stock palette.
+
+Only the palette formats have one (`BWYR`, 7-colour, Spectra 6); the
+colours change what each pixel is dithered to, never which index it is
+written as. The render itself is told the frame's `palette` and `colors`
+the way the device's runtime is, so the automatic fit of drawn images aims
+at the same colours.
 
 ## Deep sleep: the picture is drawn before the wake
 
@@ -158,19 +276,21 @@ that is at least 10% longer.
 
 ## Not yet
 
-- The plane's packer dithers to the stock palette of the panel, not the
-  frame's own `palette` setting.
-- Keys, touch and the frame's schedule. In remote mode the firmware drops
-  the events it would hand its scene (`event:discarded`), so neither a scene
-  listening to `button` nor the frame's event map (previous / next scene,
-  the switcher, the settings) nor a scheduled switch reaches the plane. The
-  way there is the Pico's: post the key edges and the schedule's events with
-  the pull (`POST …/embedded/render`, `embedded_device_input`) and let the
-  plane's dispatcher run them, the plane then keeping the scene the render
-  ended on.
+- One render keeps one scene's state: if the input switched scenes, the
+  scene it left loses what it changed in that same render.
+- A tap answers in a pull's time (a second or three on e-paper; on an LCD
+  it shows), since the scene runs on the plane: no animation, no
+  `hover:` / `active:` light while the finger is down.
 - The ETag is an e-paper fact: an LCD keeps no hash of its panel, so it
   downloads every picture.
 - A board that refused once (the cloud's `403`) renders itself for an hour
   before it asks again (`FOS_RENDER_PULL_REFUSED_RETRY_S`), and at once after
   a new `render_mode` push.
-- The cloud has no frame assets for a scene drawn on the server.
+- Frame assets. A scene drawn on a plane cannot read the device's assets
+  (its SD card, its flash): neither plane hands the render any for a
+  hardware frame. A photo album works (its share link is an address the
+  plane can fetch). The way there: while a frame renders on the server, its
+  plane keeps the frame's assets (the backend's virtual-frame store; on the
+  cloud an object store with a size limit, the sweep and account erasure),
+  the Assets panel and the asset tools write there, and the render mounts
+  them as a virtual frame's are.
