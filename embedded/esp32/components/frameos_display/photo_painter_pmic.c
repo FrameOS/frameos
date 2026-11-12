@@ -17,6 +17,11 @@ esp_err_t fos_photo_painter_enable_epd_power(void *(*lend_bus)(int sda, int scl)
     return ESP_ERR_NOT_SUPPORTED;
 }
 
+esp_err_t fos_photo_painter_disable_epd_power(void)
+{
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
 #else
 
 #include "driver/gpio.h"
@@ -169,6 +174,18 @@ esp_err_t fos_photo_painter_enable_epd_power(void *(*lend_bus)(int sda, int scl)
              ldo_on_before, ldo_on_after, ldo_on_readback,
              input_before, input_after, input_readback);
     return ESP_OK;
+}
+
+/* The panel keeps its picture unpowered, and a frame that deep-sleeps with
+ * EPD_VCC on feeds the controller through the whole sleep: the PMIC holds
+ * its rails, the ESP32's sleep does not reach them. */
+esp_err_t fos_photo_painter_disable_epd_power(void)
+{
+    if (!s_ready) return ESP_ERR_INVALID_STATE;
+    uint8_t ldo_on = 0;
+    ESP_RETURN_ON_ERROR(pmic_read_u8(AXP2101_REG_LDO_ONOFF_CTRL0, &ldo_on), TAG, "read LDO enable");
+    if ((ldo_on & (1u << AXP2101_ALDO4_ENABLE_BIT)) == 0) return ESP_OK;
+    return pmic_write_u8(AXP2101_REG_LDO_ONOFF_CTRL0, (uint8_t)(ldo_on & ~(1u << AXP2101_ALDO4_ENABLE_BIT)));
 }
 
 #endif /* CONFIG_IDF_TARGET_ESP32S3 */

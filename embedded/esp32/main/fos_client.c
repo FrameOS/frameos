@@ -34,6 +34,7 @@
 #include "fos_buzzer.h"
 #include "fos_touch.h"
 #include "fos_charger.h"
+#include "fos_codec.h"
 #include "fos_rtc.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
@@ -138,6 +139,12 @@ _Static_assert((RENDER_NOW_BIT + INPUT_EVENTS_BIT + COMMANDS_BIT + RELEASE_BIT +
  * esp_deep_sleep came first. Observed on a v2026.8.40 E1004: not one battery
  * sample in 20 hours of deep-sleep cycles. */
 #define FOS_SLEEP_LOG_DRAIN_MS 2500
+
+/* A deep-sleeping frame's wake this close to the render renders instead of
+ * sleeping again, and a render wake sleeps 1/64 long (1.6%, past the timer's
+ * ~1% fast drift), by at most this much. */
+#define FOS_SLEEP_EARLY_WAKE_SEC 60
+#define FOS_SLEEP_MAX_STRETCH_SEC 300
 
 /* When a deep-sleeping frame wakes only to check for commands
  * (wake_check_seconds), the scheduled render survives the reboot here; the
@@ -2719,8 +2726,29 @@ static bool s_loud_next = false;
 /* The pass about to start renders because the scene asked (SCENE_RENDER_BIT)
  * and nothing else did: a frame of a burst (fos_animation.h). */
 static bool s_scene_render = false;
+/* Right before esp_deep_sleep: the chips the firmware powered up at boot and
+ * the PMIC keeps powered through the ESP32's sleep go dark — the
+ * PhotoPainter's panel supply, its audio codec and microphone ADC (bias and
+ * all), the speaker amplifier held off. Every step is undone by the next
+ * boot's normal init.
+ * On the PhotoPainter (schematic): DCDC1 is VCC3V3 for the ESP32, TF card,
+ * clock and sensor; ALDO4 is EPD_VCC, the panel and its booster, cut here;
+ * ALDO3 is Audio_VCC, the ES8311 / ES7210 and microphones — powered down by
+ * register rather than cut, as their I2C pins share the always-on bus and an
+ * unpowered chip would be fed through them; the NS4150B amplifier sits on
+ * VSYS with its CTRL (GPIO7) pulled down, held low besides. */
+static void deep_sleep_power_down(void)
+{
+    fos_codec_sleep();
+    esp_err_t err = fos_display_prepare_deep_sleep();
+    if (err != ESP_OK && err != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "deep sleep: panel supply stayed on: %s", esp_err_to_name(err));
+    }
+}
+
 /* The pass-start power decision, kept between the once-a-second passes that
  * make it while animating. */
+
 static bool s_pass_battery_critical = false;
 static bool s_pass_deep_sleep = false;
 static int s_pass_battery_pct = -1;
@@ -3220,8 +3248,12 @@ static void client_task(void *arg)
         if (lan_access_panel_changed()) {
             force_render = true;
         }
+        /* A wake up to a minute early renders: the deep-sleep timer runs
+         * fast (about 1%: a two-hour sleep lands 60-90 s early), and the
+         * check-in pass that skipped it cost a second boot and Wi-Fi join
+         * every cycle. */
         bool checkin_pass = deep_sleep_now && !force_render && clock_ok &&
-                            s_next_render_due > wall_now + 2 &&
+                            s_next_render_due > wall_now + FOS_SLEEP_EARLY_WAKE_SEC &&
                             /* a due date past the longest allowed interval is
                              * garbage (clock jump, stale RTC) — render */
                             s_next_render_due < wall_now + 7 * 86400 + 3600;
@@ -3532,6 +3564,13 @@ static void client_task(void *arg)
                 chunk = config->wake_check_sec;
             }
             bool wake_check = chunk < sleep_s;
+            /* A render wake sleeps a little long, so a fast timer still
+             * wakes after the render is due. */
+            if (!wake_check) {
+                uint32_t stretch = chunk / 64;
+                if (stretch > FOS_SLEEP_MAX_STRETCH_SEC) stretch = FOS_SLEEP_MAX_STRETCH_SEC;
+                chunk += stretch;
+            }
             ESP_LOGI(TAG, "deep sleeping for %lu s%s%s", (unsigned long)chunk,
                      config->wake_schedule ? " (wake-on-schedule)" : "",
                      wake_check ? " (wake-check)" : "");
@@ -3586,6 +3625,10 @@ static void client_task(void *arg)
             /* A scene payload the store task is still writing goes to flash
              * first: the next boot loads what is on flash. */
             fos_scenes_store_wait(30000);
+            /* What the sleep does not need goes dark too. Last, after the
+             * logs are on the wire and the panel is parked — nothing renders
+             * or sounds after this. */
+            deep_sleep_power_down();
             esp_deep_sleep((uint64_t)chunk * 1000000ULL);
         }
         if (deep_sleep_now && fos_display_present() && keep_awake_s > 0) {

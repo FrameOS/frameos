@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "driver/gpio.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -28,6 +29,8 @@ void EPD_13IN3E_SetVariant(int variant) __attribute__((weak));
 static const fos_panel_entry_t *s_panel = NULL;
 static bool s_module_ready = false;
 static void *(*s_lend_i2c_bus)(int sda, int scl) = NULL;
+static bool s_photo_painter = false;
+static int8_t s_panel_pins[7] = {-1, -1, -1, -1, -1, -1, -1};
 
 /* What a panel with a partial waveform shows, byte for byte: every picture
  * that reaches the glass goes through fos_display_blit or fos_display_update
@@ -142,6 +145,7 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
     }
 
     bool photo_painter = is_photo_painter_hardware(config);
+    s_photo_painter = photo_painter;
     if (EPD_7IN3E_SetPhotoPainterMode) {
         EPD_7IN3E_SetPhotoPainterMode(photo_painter ? 1 : 0);
     }
@@ -172,6 +176,9 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
     for (size_t i = 0; i < FOS_PANEL_PARTIAL_COUNT; i++) {
         if (strcmp(fos_panel_partial_table[i].name, entry->name) == 0) s_partial = &fos_panel_partial_table[i];
     }
+    const int8_t panel_pins[] = {config->rst, config->dc, config->cs, config->cs2,
+                                 config->busy, config->sck, config->mosi};
+    memcpy(s_panel_pins, panel_pins, sizeof(s_panel_pins));
     if (entry->bus == FOS_PANEL_BUS_SPI_READ) {
         DEV_SetReadPin(config->dc);
         DEV_SetSpiClock(FOS_IT8951_SPI_HZ);
@@ -230,6 +237,28 @@ int fos_display_bus(void)
 bool fos_display_is_lcd(void)
 {
     return s_panel && s_panel->bus == FOS_PANEL_BUS_RGB;
+}
+
+esp_err_t fos_display_prepare_deep_sleep(void)
+{
+    if (!s_photo_painter) return ESP_ERR_NOT_SUPPORTED;
+    /* The panel's lines let go first: a driven-high CS or RST would feed the
+     * controller through its I/O protection once its supply is off. */
+    DEV_SPI_Acquire();
+    for (size_t i = 0; i < sizeof(s_panel_pins) / sizeof(s_panel_pins[0]); i++) {
+        if (s_panel_pins[i] < 0) continue;
+        gpio_config_t io = {
+            .pin_bit_mask = 1ULL << s_panel_pins[i],
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        gpio_config(&io);
+    }
+    esp_err_t err = fos_photo_painter_disable_epd_power();
+    DEV_SPI_Release();
+    return err;
 }
 
 esp_err_t fos_display_power(bool on)
