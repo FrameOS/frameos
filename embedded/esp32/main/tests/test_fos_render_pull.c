@@ -128,6 +128,22 @@ static void test_refused_now(void)
     CHECK(!fos_render_pull_refused_now(now + 60, 1000), "no clock: ask again");
 }
 
+static void test_next_render_seconds(void)
+{
+    CHECK(fos_render_pull_next_render_seconds("60") == 60, "a minute");
+    CHECK(fos_render_pull_next_render_seconds(" 300 ") == 300, "spaces around it");
+    CHECK(fos_render_pull_next_render_seconds(NULL) == 0, "no header");
+    CHECK(fos_render_pull_next_render_seconds("") == 0, "empty");
+    CHECK(fos_render_pull_next_render_seconds("abc") == 0, "not a number");
+    CHECK(fos_render_pull_next_render_seconds("60s") == 0, "a unit is not ours");
+    CHECK(fos_render_pull_next_render_seconds("-5") == 0, "negative");
+    CHECK(fos_render_pull_next_render_seconds("1.5") == 0, "whole seconds only");
+    CHECK(fos_render_pull_next_render_seconds("0") == 0, "zero means none");
+    CHECK(fos_render_pull_next_render_seconds("604800") == 604800, "a week");
+    CHECK(fos_render_pull_next_render_seconds("604801") == FOS_RENDER_PULL_NEXT_RENDER_MAX_S, "past a week: a week");
+    CHECK(fos_render_pull_next_render_seconds("99999999999999") == FOS_RENDER_PULL_NEXT_RENDER_MAX_S, "no overflow");
+}
+
 int main(void)
 {
     test_outcome();
@@ -135,6 +151,7 @@ int main(void)
     test_remember();
     test_if_none_match();
     test_refused_now();
+    test_next_render_seconds();
     if (g_failures) {
         printf("%d of %d checks failed\n", g_failures, g_checks);
         return 1;

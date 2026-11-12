@@ -436,6 +436,10 @@
   (`frameos_wasm_device_input`, `relayed_input.nim`) and keeps the scene the
   render ended on. A new producer on the ESP32 goes through
   `fos_events_dispatch` and is relayed for free; never a second relay path.
+  The scene still decides when it renders next: the plane answers every pull
+  with `X-FrameOS-Next-Render` (its `nextSleep`, else its `refreshInterval`,
+  held to 10 s on a backend and the plan's floor on the cloud) and the board
+  wakes by it.
   On the cloud a frame set to remote is a cloud-rendered frame (quota +
   floor, `frameIsCloudRendered`). A sleeping frame's next picture is drawn
   before it wakes, with the scene's clock set to the wake (`nowMs`), and

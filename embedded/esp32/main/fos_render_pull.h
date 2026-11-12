@@ -88,3 +88,24 @@ static inline bool fos_render_pull_refused_now(int64_t refused_until_s, int64_t 
 {
     return refused_until_s > 0 && now_s >= 1000000000 && now_s < refused_until_s;
 }
+
+/* X-FrameOS-Next-Render: when the scene the plane drew wants its next picture,
+ * in whole seconds (docs/server-rendering.md "When the next picture is due").
+ * The planes clamp it; here only digits count, held to 1 s .. 7 days. 0: no
+ * header, or nothing usable in it (the frame's interval then). */
+#define FOS_RENDER_PULL_NEXT_RENDER_MAX_S (7u * 86400u)
+static inline uint32_t fos_render_pull_next_render_seconds(const char *value)
+{
+    if (value == NULL) return 0;
+    while (*value == ' ') value++;
+    uint32_t seconds = 0;
+    const char *p = value;
+    for (; *p >= '0' && *p <= '9'; p++) {
+        if (seconds > FOS_RENDER_PULL_NEXT_RENDER_MAX_S) break;
+        seconds = seconds * 10u + (uint32_t)(*p - '0');
+    }
+    while (*p == ' ') p++;
+    if (p == value || (*p != '\0' && (*p < '0' || *p > '9'))) return 0;
+    if (seconds > FOS_RENDER_PULL_NEXT_RENDER_MAX_S) return FOS_RENDER_PULL_NEXT_RENDER_MAX_S;
+    return seconds;
+}

@@ -1222,7 +1222,13 @@ typedef struct {
     char etag[FOS_RENDER_PULL_ETAG_LEN]; /* the answer's ETag, "" when none fit */
     char code[48];                       /* a refusal's `error` */
     char scene[128];                     /* X-FrameOS-Scene: what the plane drew, "" when not said */
+    uint32_t next_render_s;              /* X-FrameOS-Next-Render; 0 when not said */
 } remote_pull_t;
+
+/* When the scene the plane drew last wants its next picture (seconds, 0: it
+ * has no opinion, or no pull answered): what a frame rendered on the server
+ * wakes by, where its own runtime's interval would go. */
+static uint32_t s_remote_next_render_s = 0;
 
 /* The scene the plane drew last (X-FrameOS-Scene): what the render lines of a
  * frame rendered on the server name, never its own idle runtime's scene. */
@@ -1244,6 +1250,8 @@ static esp_err_t remote_pull_header(esp_http_client_event_t *evt)
     if (strcasecmp(evt->header_key, "ETag") == 0) {
         /* Checked before it is kept (fos_render_pull_remember). */
         if (strlcpy(pull->etag, evt->header_value, sizeof(pull->etag)) >= sizeof(pull->etag)) pull->etag[0] = '\0';
+    } else if (strcasecmp(evt->header_key, "X-FrameOS-Next-Render") == 0) {
+        pull->next_render_s = fos_render_pull_next_render_seconds(evt->header_value);
     } else if (strcasecmp(evt->header_key, "X-FrameOS-Scene") == 0) {
         /* Percent-encoded on the wire (a built-in scene's id has a '/'). */
         const char *in = evt->header_value;
@@ -2289,6 +2297,9 @@ static esp_err_t render_once(bool quiet)
             ESP_LOGW(TAG, "local render requested but nim runtime unavailable; trying remote");
         }
         err = fetch_remote_bitmap(buf, buf_len, &pull);
+        /* The scene's next picture, as the plane said for this answer (a 304
+         * too); none when nothing answered: the frame's interval then. */
+        s_remote_next_render_s = pull.status == 200 || pull.status == 304 ? pull.next_render_s : 0;
         if (pull.scene[0]) {
             strlcpy(s_remote_scene, pull.scene, sizeof(s_remote_scene));
             if (!quiet) {
@@ -3399,9 +3410,12 @@ static void client_task(void *arg)
          * value must not park the frame for months. */
         /* Rendered on the server, the runtime here holds no scene (or one
          * left from before, whose interval is not the drawn scene's): the
-         * frame's interval, as on a board with no runtime at all. */
+         * plane says when the scene it drew wants its next picture
+         * (X-FrameOS-Next-Render, its nextSleep folded in), else the frame's
+         * interval, as on a board with no runtime at all. */
         bool own_scene = renders_locally(config);
-        double scene_interval = own_scene ? fos_scene_interval_snap(frameos_nim_scene_interval()) : 0.0;
+        double scene_interval = own_scene ? fos_scene_interval_snap(frameos_nim_scene_interval())
+                                          : (double)s_remote_next_render_s;
         uint32_t interval = fos_pass_interval_seconds(scene_interval, config->interval_sec);
         /* A per-render override from logic/nextSleepDuration beats both
          * intervals, like context.nextSleep on the Pi runner. Only valid
