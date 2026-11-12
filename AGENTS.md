@@ -429,7 +429,11 @@
   it at `GET …/embedded/render` with an ETag; the device sends its panel
   and gets a 304 when nothing changed. A C3 is always this.
 - The plane is the memory (scene state, held events, the scene shown); in
-  remote mode the firmware runs no scene work. What its keys, touch, schedule
+  remote mode the firmware runs no scene work. What a board keeps in RAM
+  beyond that (a UI's focus, keyboard and scrolls, the apps' `remember`
+  values) goes out and back with every pull (`frameos_wasm_kept_state`,
+  "Kept between pulls"; each pull is a new process) and is dropped at a
+  sleep: a new per-process thing a scene relies on joins it. What its keys, touch, schedule
   and HTTP API would have handed its scene, `fos_events_dispatch` relays
   instead (`fos_render_relay.c`), and the next pull is a `POST` carrying it;
   the plane runs it through the one dispatcher in the same render

@@ -237,6 +237,34 @@ before the device hears of it. A `scene_event` waits on the plane and runs in
 the scene at the next pull, and the device is sent `render` in its place
 (backend `hold_thin_client_event`, cloud `frame_server_renders.pending_events`).
 
+### Kept between pulls
+
+A board keeps more than scene state in its memory between renders, and the
+plane draws every pull in a new process, so the runtime hands the rest out
+after the pull's last render (`frameos_wasm_kept_state`) and takes it back
+before the next pull draws or hears anything (`frameos_wasm_set_kept_state`,
+once the scene is open and before the drawing that comes ahead of a tap):
+
+- `targets`: what a JSX UI holds (`UiTarget.input`, `ui/events.nim`): the
+  field with the focus, its caret and text, the keyboard and its page and
+  shift, a list's scroll, an open select. Not a pointer's passing marks
+  (hover, a press, a key's flash), nor a UI the pull did not draw.
+- `apps`: each JS app's `frameos.remember` values (`JsAppRuntime.memory`),
+  by scene and node, for the apps the pull built. A board keeps them until
+  the scene unloads; a scene left and opened again in one pull starts empty,
+  as it would there.
+
+`{}` when nothing is kept. The plane keeps it per frame next to the scene
+state, opaque (backend: Redis `frame:{id}:kept_state`; cloud:
+`frame_server_renders.kept_state`), at most 512 KiB (an ESP32's
+`remember` budget for one node), and forgets it when the frame says it is
+going to sleep, as the board's RAM would. Module variables are not kept: an
+app must not count on them past one render on a board either (the scene
+guide's "Where an app keeps its values").
+Without the UI part the pull that carried a tap on a key drew the form with
+no keyboard, and the tap landed on the form under it: the keyboard opened
+and every key closed it (E1003, 2026-11-12).
+
 ### Packing
 
 The plane packs the runtime's RGBA into the panel's format exactly as the
