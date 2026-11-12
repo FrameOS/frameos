@@ -1757,9 +1757,15 @@ async def dispatch_frame_event(db: Session, redis: Redis, frame: Frame, event: s
         and not is_queued_embedded_frame(frame)
     )
     try:
-        await _forward_frame_request(
-            frame, redis, path=f"/event/{event}", method="POST", json_body=body
-        )
+        if thin_push:
+            # What it is asked is a render: the switch, the state, the
+            # previewed scenes and the event stay here, where its scenes run
+            # (docs/server-rendering.md "Nothing to keep on the board").
+            await _forward_frame_request(frame, redis, path="/event/render", method="POST", json_body={})
+        else:
+            await _forward_frame_request(
+                frame, redis, path=f"/event/{event}", method="POST", json_body=body
+            )
         if event in {"setCurrentScene", "setSceneState", "uploadScenes"}:
             scene_id = body.get("sceneId") if isinstance(body, dict) else None
             await _mark_frame_states_cache_stale(

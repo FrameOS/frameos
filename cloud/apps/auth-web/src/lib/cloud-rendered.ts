@@ -81,3 +81,50 @@ export const cloudRenderedMinIntervalSeconds = (() => {
   }
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : 300;
 })();
+
+// What a board the cloud renders for holds in place of its scenes
+// (docs/server-rendering.md "Nothing to keep on the board"): one scene with
+// nothing in it. Its scenes run here, and what they hold (field values, an
+// app's settings, a photo album's share link) never goes to the board. One
+// and not none: the board's scene store always keeps a scene, and a set of
+// one replaces what it had, each scene's kept state with it. The backend
+// sends the same one (server_render.py SERVER_RENDERED_BOARD_SCENE); the
+// corpus is docs/server-rendered-board-scene.json.
+export const serverRenderedBoardScene = Object.freeze({
+  edges: [],
+  fields: [],
+  id: "rendered-on-server",
+  name: "Rendered on the server",
+  nodes: [],
+  settings: { execution: "interpreted" },
+});
+
+/**
+ * A queued command as a board the cloud renders for receives it
+ * (planeKeepsSceneState), from the message it would otherwise get. The board
+ * runs no scene: a scene set becomes the empty scene, whole (never a patch
+ * against what it holds), a switch loses its state and a scene event its
+ * payload, which the plane holds already (holdServerRenderVerb) and the board
+ * would only pull on. The checksum and the scene to show stay: the push is
+ * acked and shown as before. Everything else goes as it is.
+ */
+export function messageForServerRenderedBoard(message: Record<string, unknown>): Record<string, unknown> {
+  const type = message.type;
+  if (type === "set_scenes" || type === "scenes_patch") {
+    return {
+      id: message.id,
+      type: "set_scenes",
+      ...(typeof message.checksum === "string" ? { checksum: message.checksum } : {}),
+      ...(typeof message.scene_id === "string" && message.scene_id ? { scene_id: message.scene_id } : {}),
+      scenes: [serverRenderedBoardScene],
+    };
+  }
+  if (type === "set_current_scene") {
+    const { state: _state, ...rest } = message;
+    return rest;
+  }
+  if (type === "scene_event") {
+    return { ...message, payload: {} };
+  }
+  return message;
+}

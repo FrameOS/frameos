@@ -418,10 +418,22 @@ def _wire_payload(command: FrameCommand) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if not str(key).startswith("_")}
 
 
-def frame_command_wire(command: FrameCommand) -> dict[str, Any]:
+def frame_command_wire(command: FrameCommand, *, rendered_on_server: bool = False) -> dict[str, Any]:
     """The verb as the device receives it: `{id, type, ...payload}`, the
-    cloud socket's command frame."""
-    return {**_wire_payload(command), "id": command.id, "type": command.type}
+    cloud socket's command frame.
+
+    A board rendered here (`rendered_on_server`) runs no scene: a switch or a
+    scene event only makes it pull, and the backend holds the switch's state
+    and the event already (frames.py, before the queue). So neither goes to
+    the board (docs/server-rendering.md "Nothing to keep on the board"): a
+    scene's state can hold a key typed into a field."""
+    payload = _wire_payload(command)
+    if rendered_on_server:
+        if command.type == "set_current_scene":
+            payload.pop("state", None)
+        elif command.type == "scene_event":
+            payload["payload"] = {}
+    return {**payload, "id": command.id, "type": command.type}
 
 
 def _iso(value: datetime | None) -> str | None:

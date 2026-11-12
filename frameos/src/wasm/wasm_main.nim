@@ -18,7 +18,8 @@ import frameos/single_scene_host
 import system/sceneSwitcher/scene as sceneSwitcher
 import frameos/relayed_input
 from frameos/input_state import initInputState
-from frameos/ui/events as uiEvents import uiTimersPending
+from frameos/ui/events as uiEvents import uiTimersPending, lastingUiInput, restoreLastingUiInput
+from frameos/js_runtime/app_runtime import keepAppMemoryAcrossProcesses, keptAppMemory, restoreKeptAppMemory
 import frameos/interpreter
 import frameos/planner
 import frameos/utils/image as frameos_image
@@ -65,6 +66,11 @@ var
   # for a frame it renders for: opened again as it was left, from its
   # seeded state, before anything uses it (restoreBuiltIn).
   builtInToRestore = ""
+  # What the UIs on the glass kept when the plane's last process drew them
+  # (frameos_wasm_set_kept_state): put back once the scene is open, before
+  # anything lays them out or takes a tap (restoreAsLeft).
+  uiStateToRestore: JsonNode
+  keptStateBuffer: string
   renderPaletteBuffer: string
   # Running as an ESP32, every render draws into one canvas kept for the
   # runtime's life, in the format that frame keeps it in (embedded_runtime
@@ -182,6 +188,18 @@ proc restoreBuiltIn() =
   if not host.reopenBuiltIn(stored):
     log("built-in scene " & sceneId & " could not be opened again as it was left")
 
+proc restoreAsLeft() =
+  ## Everything a plane hands back of the last process before the first event
+  ## or render uses it: the built-in scene showing (restoreBuiltIn), then the
+  ## UIs' input (frameos_wasm_set_kept_state). After the built-in scene: opening
+  ## the settings starts its form afresh (forgetUiTarget), which would throw
+  ## away the field the keyboard was typing into.
+  restoreBuiltIn()
+  if not uiStateToRestore.isNil:
+    let state = uiStateToRestore
+    uiStateToRestore = nil
+    discard restoreLastingUiInput(state)
+
 # ------------------------------------------------------------------- setup
 
 proc JS_SetTimezoneOffsetFunc(fn: proc (time: int64): cint {.cdecl.}) {.importc, header: "quickjs/quickjs.h".}
@@ -209,6 +227,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
   try:
     host.dropScene()
     resetInterpretedScenes()
+    keepAppMemoryAcrossProcesses()
     setSimulatedEmbedded(false)
     host.sceneId = none(SceneId)
     defaultSceneId = none(SceneId)
@@ -517,6 +536,47 @@ proc frameos_wasm_render_palette(): cstring {.exportc, cdecl.} =
   renderPaletteBuffer = $colors
   renderPaletteBuffer.cstring
 
+proc frameos_wasm_set_kept_state(stateJson: cstring): bool {.exportc, cdecl.} =
+  ## What the frame's last render process kept for the next one
+  ## (frameos_wasm_kept_state, from the plane's previous process;
+  ## docs/server-rendering.md, "Kept between pulls"). `targets`: the UIs on
+  ## the glass, a field's keyboard, its text and caret, an open <select>, how
+  ## far a list scrolled, put back before the next event or render, after the
+  ## scene is open (restoreAsLeft). Without it a tap on the keyboard lands on
+  ## the form under it: the pull carrying the tap draws the UI first, in a
+  ## process that never saw the keyboard come up. `apps`: what each app kept
+  ## with `frameos.remember`, put back on that app now or when it is built
+  ## (app_runtime `restoreKeptAppMemory`).
+  try:
+    let state = parseJson($stateJson)
+    if state.kind != JObject:
+      setLastError("kept state is not an object")
+      return false
+    uiStateToRestore = state
+    discard restoreKeptAppMemory(state{"apps"})
+    true
+  except Exception as e:
+    setLastError("setKeptState failed: " & e.msg)
+    false
+
+proc frameos_wasm_kept_state(): cstring {.exportc, cdecl.} =
+  ## What this process keeps for the next picture, after the last render:
+  ## `{"targets": [{sceneId, nodeId, focus?, caret?, text?, keyboard?, page?,
+  ## shift?, open?, scrolls?}], "apps": [{sceneId, nodeId, memory: {key:
+  ## <JSON text>}}]}`, the UIs' lasting input (ui/events.nim
+  ## `lastingUiInput`) and the apps' remembered values (app_runtime
+  ## `keptAppMemory`), each key left out when empty: `{}` when nothing is
+  ## kept. A plane hands it to the next process (frameos_wasm_set_kept_state).
+  try:
+    var kept = lastingUiInput()
+    let apps = keptAppMemory()
+    if apps.len > 0:
+      kept["apps"] = apps
+    keptStateBuffer = $kept
+  except Exception:
+    keptStateBuffer = "{}"
+  keptStateBuffer.cstring
+
 proc frameos_wasm_select_scene(sceneId: cstring): bool {.exportc, cdecl.} =
   try:
     result = selectSceneById($sceneId)
@@ -547,7 +607,7 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
   renderedThisProcess = true
   try:
     refreshDecodeBudget()
-    restoreBuiltIn()
+    restoreAsLeft()
     if not host.ensureScene():
       setLastError("no scene selected")
       return 2
@@ -649,7 +709,7 @@ proc frameos_wasm_event(eventName: cstring, payloadJson: cstring): bool {.export
     # the contract's (docs/events-contract.json).
     if eventPolicy($eventName).device notin {edPointer, edKeyboard}:
       jsEventHook(eventName, ($payload).cstring)
-    restoreBuiltIn()
+    restoreAsLeft()
     host.send(eoPreview, $eventName, payload)
   except Exception as e:
     setLastError("event " & $eventName & " failed: " & e.msg)
@@ -668,7 +728,7 @@ proc frameos_wasm_device_input(inputJson: cstring): cint {.exportc, cdecl.} =
   ## the input was unreadable.
   try:
     let events = relayedEvents(parseJson($inputJson), getMonoTime().ticks div 1_000_000)
-    restoreBuiltIn()
+    restoreAsLeft()
     # A tap lands on what the glass shows: a UI's clickable regions and its
     # handlers are the last render's (ui/events.nim), and a plane renders in
     # a fresh process that has drawn nothing yet. So a pull carrying pointer
@@ -707,7 +767,7 @@ proc frameos_wasm_control_event(origin: cstring, eventName: cstring, payloadJson
         %*{}
       else:
         parseJson($payloadJson)
-    restoreBuiltIn()
+    restoreAsLeft()
     host.send(source, $eventName, payload)
   except Exception as e:
     setLastError("control event " & $eventName & " failed: " & e.msg)
@@ -718,7 +778,7 @@ proc frameos_wasm_tick(): bool {.exportc, cdecl.} =
   ## a button is held or a button press waits for a possible second one, so a
   ## long press is delivered while the finger is still down, as on a frame. True when it made an event; ask frameos_wasm_render_requested.
   try:
-    restoreBuiltIn()
+    restoreAsLeft()
     host.tick()
   except Exception as e:
     setLastError("tick failed: " & e.msg)

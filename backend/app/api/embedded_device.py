@@ -45,6 +45,7 @@ import hashlib
 import io
 import json
 import logging
+import math
 import re
 import struct
 import time
@@ -77,6 +78,7 @@ from app.utils.events_contract_gen import BUILT_IN_SCENE_IDS
 from app.utils.frame_commands import pending_command_types, previewed_scenes
 from app.utils.server_render import (
     PRERENDER_MAX_SKEW_SECONDS,
+    SERVER_RENDERED_BOARD_SCENE,
     bump_render_revision,
     epoch_ms,
     etag_matches,
@@ -583,17 +585,79 @@ async def _keep_rendered_scene(redis, frame: Frame, plan: "_ThinClientPlan", ren
         pass
 
 
+# What the last render process of a frame rendered here kept for the next
+# (frameos_wasm_kept_state): its UIs' input (the field with the keyboard, its
+# text, how far a list scrolled) and what each app kept with
+# frameos.remember, as the runtime wrote it. Past this it is not kept, and the
+# UIs and apps start afresh: an ESP32's own budget for one node's remembered
+# values.
+MAX_KEPT_STATE_BYTES = 512 * 1024
+
+
+def _thin_client_kept_state_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:kept_state"
+
+
+def _thin_client_kept_state_keys(frame_id: int) -> tuple[str, str]:
+    """The key, and the one the first version of this kept the UIs alone
+    under, dropped with it on a box that ran that version."""
+    return _thin_client_kept_state_key(frame_id), f"frame:{frame_id}:ui_state"
+
+
+async def _thin_client_kept_state(redis, frame: Frame) -> str | None:
+    """What the frame's last render process kept, for the next render
+    (docs/server-rendering.md "Kept between pulls"); None when nothing."""
+    if redis is None:
+        return None
+    try:
+        raw = await redis.get(_thin_client_kept_state_key(int(frame.id)))
+    except Exception:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    return raw if isinstance(raw, str) and raw else None
+
+
+async def _keep_kept_state(redis, frame: Frame, rendered_state: dict | None) -> None:
+    """What this render keeps for the next pull: the keyboard a tap brought up
+    must still be there when the tap on one of its keys arrives, which the
+    next process otherwise never saw, and an app's remembered values must
+    outlast the process as they outlast an interpreter on a board. Opaque
+    here, as the runtime wrote it; "{}" (nothing kept) or one too big drops
+    it. A render whose bundle reports none leaves it be."""
+    if redis is None or not isinstance(rendered_state, dict):
+        return
+    kept_state = rendered_state.get("keptState")
+    if not isinstance(kept_state, str):
+        return
+    try:
+        if kept_state.strip() in ("", "{}") or len(kept_state.encode("utf-8")) > MAX_KEPT_STATE_BYTES:
+            await redis.delete(*_thin_client_kept_state_keys(int(frame.id)))
+        else:
+            await redis.set(_thin_client_kept_state_key(int(frame.id)), kept_state)
+    except Exception:
+        # What could not be kept must not cost the device its frame.
+        pass
+
+
 async def leave_built_in_scene(redis, frame: Frame) -> None:
     """A frame rendered here that is going to sleep while the scene switcher
     or the scene settings show goes back to the scene they were opened from
     (their `state.from`), as its own runtime would: a device never keeps a
     built-in scene through a sleep. Before the picture for the wake is drawn
-    (models/log.py). The built-in scene's kept state goes too."""
+    (models/log.py). The built-in scene's kept state goes too, and so does
+    what the frame's last render process kept (a field's keyboard, a list's
+    scroll, the apps' remembered values): a board loses its memory in a deep
+    sleep."""
     from app.tasks.embedded_firmware import is_thin_client_frame
     from .virtual_frame import get_virtual_scene_states, replace_virtual_scene_states
 
     if redis is None or not is_thin_client_frame(frame):
         return
+    try:
+        await redis.delete(*_thin_client_kept_state_keys(int(frame.id)))
+    except Exception:
+        pass
     key = f"frame:{frame.id}:active_scene"
     try:
         current = await redis.get(key)
@@ -1040,12 +1104,60 @@ def _fosb_from_rgba(
 @dataclass
 class _Drawn:
     """A picture for the pull: the panel bitmap, the scene it shows (None:
-    the diagnostic card, or a scene the renderer did not name) and the RGBA
-    it was packed from (None for the card), for the workspace's copy."""
+    the diagnostic card, or a scene the renderer did not name), the RGBA it
+    was packed from (None for the card), for the workspace's copy, and when
+    the scene wants its next picture (next_render_seconds; None: no opinion)."""
 
     body: bytes
     scene_id: str | None
     rgba: bytes | None
+    next_render: int | None = None
+
+
+# docs/server-rendering.md "When the next picture is due": the seconds a
+# scene asks for, within reason. Under the floor a second-by-second clock
+# would be a render and a download every second; the ceiling is the board's
+# own (fos_pass_interval_seconds).
+NEXT_RENDER_MIN_SECONDS = 10
+NEXT_RENDER_MAX_SECONDS = 7 * 24 * 3600
+# The header a render pull's answer says it in (the cloud's route sends the
+# same).
+SERVER_RENDER_NEXT_RENDER_HEADER = "X-FrameOS-Next-Render"
+
+
+def next_render_seconds(rendered_state: dict | None) -> int | None:
+    """When the scene a render drew wants its next picture, from the
+    render's report (embedded_wasm_render.mjs): this render's `nextSleep`
+    when it set one (>= 0), else the scene's `refreshInterval` (> 0), within
+    [NEXT_RENDER_MIN_SECONDS, NEXT_RENDER_MAX_SECONDS]. None when the scene
+    has no opinion (or the bundle reports neither): the board keeps the
+    frame's interval."""
+    if not isinstance(rendered_state, dict):
+        return None
+
+    def number(key: str) -> float | None:
+        value = rendered_state.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value) if math.isfinite(value) else None
+
+    next_sleep = number("nextSleep")
+    interval = number("refreshInterval")
+    if next_sleep is not None and next_sleep >= 0:
+        seconds = next_sleep
+    elif interval is not None and interval > 0:
+        seconds = interval
+    else:
+        return None
+    return int(min(max(round(seconds), NEXT_RENDER_MIN_SECONDS), NEXT_RENDER_MAX_SECONDS))
+
+
+def _kept_next_render(record: dict) -> int | None:
+    """A kept picture's own next render; a record from before had none."""
+    value = record.get("nextRender")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return min(max(value, NEXT_RENDER_MIN_SECONDS), NEXT_RENDER_MAX_SECONDS)
 
 
 async def _render_thin_client_now(
@@ -1066,6 +1178,7 @@ async def _render_thin_client_now(
     the device always gets a valid frame."""
     scene_logs: list[str] = []
     photo_palette: list[str] = []
+    kept_state = await _thin_client_kept_state(redis, frame)
     started = time.monotonic()
     try:
         rgba, rendered_state, _saved_assets = await render_scene_rgba_and_state(
@@ -1081,6 +1194,7 @@ async def _render_thin_client_now(
             scene_logs=scene_logs,
             frame_json=plan.frame_json,
             render_palette=photo_palette,
+            kept_state=kept_state,
         )
     except RenderQueueFull as exc:
         await _give_back_thin_client_events(redis, frame, control_events)
@@ -1099,6 +1213,8 @@ async def _render_thin_client_now(
     await _keep_rendered_state(redis, frame, rendered_state)
     if rgba is not None and rendered_state is not None and rendered_state.get("seeded", True):
         await _keep_rendered_scene(redis, frame, plan, rendered_state)
+    if rgba is not None:
+        await _keep_kept_state(redis, frame, rendered_state)
     if relayed or control_events:
         try:
             await _log_scene_heard(db, redis, frame, scene_logs)
@@ -1106,7 +1222,10 @@ async def _render_thin_client_now(
             # Nor may a log line that could not be written.
             pass
     body = await _fosb_off_the_loop(frame, plan, rgba, photo_palette)
-    return _Drawn(body, _drawn_scene(plan, rendered_state) if rgba is not None else None, rgba)
+    if rgba is None:
+        # The diagnostic card: no scene, so no opinion on the next picture.
+        return _Drawn(body, None, None)
+    return _Drawn(body, _drawn_scene(plan, rendered_state), rgba, next_render_seconds(rendered_state))
 
 
 async def _embedded_render_response(
@@ -1137,7 +1256,12 @@ async def _embedded_render_response(
             now_ms=int(time.time() * 1000),
         ):
             scene_id = kept.record.get("sceneId")
-            drawn = _Drawn(kept.body, scene_id if isinstance(scene_id, str) and scene_id else None, None)
+            drawn = _Drawn(
+                kept.body,
+                scene_id if isinstance(scene_id, str) and scene_id else None,
+                None,
+                _kept_next_render(kept.record),
+            )
             preview = kept.preview
             # Its state is the scene's now: committed when shown, not drawn.
             await _keep_rendered_state(redis, frame, kept.record.get("state"))
@@ -1151,6 +1275,11 @@ async def _embedded_render_response(
         # The scene the picture shows, as the cloud's route says it: the
         # board names it in its logs, its own runtime knowing none.
         headers[SERVER_RENDER_SCENE_HEADER] = quote(drawn.scene_id, safe="-_.!~*'()")
+    if drawn.next_render is not None:
+        # When the scene wants its next picture: the board wakes for it
+        # instead of on the frame's interval (docs/server-rendering.md "When
+        # the next picture is due"). On a 304 too: it is this picture's.
+        headers[SERVER_RENDER_NEXT_RENDER_HEADER] = str(drawn.next_render)
     if etag_matches(if_none_match, etag):
         return Response(status_code=HTTPStatus.NOT_MODIFIED, headers=headers)
     keep = None
@@ -1296,6 +1425,9 @@ async def prerender_thin_client(db: Session, redis, frame: Frame, as_of_ms: int)
             "fingerprint": plan.fingerprint,
             "state": rendered_state,
             "etag": fosb_etag(body),
+            # When the scene wants the picture after this one, answered by
+            # the pull that takes it.
+            "nextRender": next_render_seconds(rendered_state),
         },
         body,
         int(as_of_ms),
@@ -1318,7 +1450,16 @@ def embedded_scenes_payload(db: Session, frame: Frame) -> bytes:
     (utils/retired_apps.py). The payload — and so the ETag — follows the
     version the board reported at boot, which is what moves it onto the
     JavaScript app on its first pull after the OTA that removed the Nim one.
+
+    A board rendered here gets one empty scene instead
+    (SERVER_RENDERED_BOARD_SCENE, docs/server-rendering.md "Nothing to keep on
+    the board"): its scenes, the preview's too, run on this backend, and what
+    they hold stays here. The ETag follows, so a deploy is acked as before.
     """
+    from app.tasks.embedded_firmware import is_thin_client_frame
+
+    if is_thin_client_frame(frame):
+        return json.dumps([SERVER_RENDERED_BOARD_SCENE], separators=(",", ":"), sort_keys=True).encode("utf-8")
     source = previewed_scenes(db, frame)
     if source is None:
         source = frame.scenes or []
@@ -1458,9 +1599,17 @@ def embedded_scenes_etag(db: Session, frame: Frame) -> str:
 
 
 def embedded_settings_document(db: Session, frame: Frame) -> tuple[bytes, str]:
-    """The `/embedded/settings` body and its ETag, the way the route serves it."""
+    """The `/embedded/settings` body and its ETag, the way the route serves it.
+
+    A board rendered here gets none of the service-settings groups (the
+    account's API keys): its scenes run on this backend, which renders with
+    them (`embedded_settings_payload`). Absent, a group is deleted from the
+    board and from its NVS cache (fos_settings.c), so a board switched to
+    render on the server lets go of the keys it held."""
+    from app.tasks.embedded_firmware import is_thin_client_frame
+
     payload_dict = {
-        **embedded_settings_payload(db, frame),
+        **({} if is_thin_client_frame(frame) else embedded_settings_payload(db, frame)),
         "frame": embedded_frame_settings(frame),
         # The scene schedule ({"events": [...]}) — the device evaluates it
         # on-device (fos_schedule.c), same event model as the Pi scheduler.

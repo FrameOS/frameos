@@ -124,6 +124,98 @@ proc forgetUiTarget*(sceneId: string, nodeId: int, owner: pointer = nil) =
         (owner.isNil or targets[i].owner.isNil or targets[i].owner == owner):
       targets.delete(i)
 
+when not defined(frameosEmbedded):
+  const
+    MaxKeptText = 8192
+    MaxKeptScrolls = 64
+
+  proc lastingUiInput*(): JsonNode =
+    ## What every UI on the glass keeps between pictures — the field with the
+    ## keyboard, its caret and text, the keyboard's page and shift, the open
+    ## <select>, how far each box is scrolled — for a host that draws each
+    ## picture in a fresh process: the wasm runtime a control plane renders a
+    ## frame with (docs/server-rendering.md, "Kept between pulls"), which
+    ## hands it back with the next pull (`restoreLastingUiInput`). What the
+    ## pointer is doing this moment (hover, press, a key's light, its
+    ## accents, a caret yet to be placed) is not kept: the pull that carried
+    ## it is over. A UI this process did not draw (no regions) is not on the
+    ## glass any more and is left out. `{}` when nothing is kept. Not in the
+    ## firmware: a device keeps its UIs in its own memory.
+    var kept = newJArray()
+    for target in targets:
+      if target.regions.len == 0:
+        continue
+      let i = target.input
+      var scrolls = newJArray()
+      for (key, x, y) in i.scrolls:
+        if (x != 0 or y != 0) and scrolls.len < MaxKeptScrolls:
+          scrolls.add %*[newJInt(key), newJFloat(x.float), newJFloat(y.float)]
+      if i.focus <= 0 and i.open <= 0 and scrolls.len == 0:
+        continue
+      var entry = newJObject()
+      entry["sceneId"] = newJString(target.sceneId)
+      entry["nodeId"] = newJInt(target.nodeId)
+      if i.focus > 0:
+        entry["focus"] = newJInt(i.focus)
+        entry["caret"] = newJInt(i.caret)
+        entry["text"] = newJString(i.text)
+        entry["keyboard"] = newJBool(i.keyboard)
+        entry["page"] = newJInt(ord(i.page))
+        entry["shift"] = newJInt(i.shift)
+      if i.open > 0:
+        entry["open"] = newJInt(i.open)
+      if scrolls.len > 0:
+        entry["scrolls"] = scrolls
+      kept.add entry
+    result = newJObject()
+    if kept.len > 0:
+      result["targets"] = kept
+
+  proc restoreLastingUiInput*(state: JsonNode): int =
+    ## What `lastingUiInput` kept, put back on the UIs it names before
+    ## anything lays them out, as if this process had drawn the pictures
+    ## before it. How many UIs it put back; anything malformed is skipped.
+    if state.isNil or state.kind != JObject:
+      return 0
+    let entries = state{"targets"}
+    if entries.isNil or entries.kind != JArray:
+      return 0
+    for entry in entries:
+      if result >= MaxTargets:
+        break
+      if entry.kind != JObject:
+        continue
+      let
+        sceneId = entry{"sceneId"}.getStr()
+        nodeId = entry{"nodeId"}
+      if sceneId.len == 0 or nodeId.isNil or nodeId.kind != JInt:
+        continue
+      let target = uiTarget(sceneId, nodeId.getInt())
+      template i: untyped = target.input
+      i.focus = max(entry{"focus"}.getInt(), 0)
+      if i.focus > 0:
+        i.text = entry{"text"}.getStr()
+        if i.text.len > MaxKeptText:
+          i.text.setLen(MaxKeptText)
+        i.caret = clamp(entry{"caret"}.getInt(i.text.len), 0, i.text.len)
+        i.keyboard = entry{"keyboard"}.getBool()
+        i.page = KeyboardPage(clamp(entry{"page"}.getInt(), ord(low(KeyboardPage)), ord(high(KeyboardPage))))
+        i.shift = clamp(entry{"shift"}.getInt(), 0, 2)
+      else:
+        i.text = ""
+        i.caret = 0
+        i.keyboard = false
+      i.open = max(entry{"open"}.getInt(), 0)
+      i.scrolls.setLen(0)
+      let scrolls = entry{"scrolls"}
+      if not scrolls.isNil and scrolls.kind == JArray:
+        for scroll in scrolls:
+          if i.scrolls.len >= MaxKeptScrolls:
+            break
+          if scroll.kind == JArray and scroll.len == 3 and scroll[0].kind == JInt:
+            i.scrolls.add (scroll[0].getInt(), scroll[1].getFloat().float32, scroll[2].getFloat().float32)
+      inc result
+
 proc uiSceneEvent*(sceneId: string) =
   ## Anything but the pointer happened to the scene (a state change, a
   ## button, a scheduled event): its UIs' next render runs get() again.

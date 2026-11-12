@@ -429,13 +429,21 @@
   it at `GET …/embedded/render` with an ETag; the device sends its panel
   and gets a 304 when nothing changed. A C3 is always this.
 - The plane is the memory (scene state, held events, the scene shown); in
-  remote mode the firmware runs no scene work. What its keys, touch, schedule
+  remote mode the firmware runs no scene work. What a board keeps in RAM
+  beyond that (a UI's focus, keyboard and scrolls, the apps' `remember`
+  values) goes out and back with every pull (`frameos_wasm_kept_state`,
+  "Kept between pulls"; each pull is a new process) and is dropped at a
+  sleep: a new per-process thing a scene relies on joins it. What its keys, touch, schedule
   and HTTP API would have handed its scene, `fos_events_dispatch` relays
   instead (`fos_render_relay.c`), and the next pull is a `POST` carrying it;
   the plane runs it through the one dispatcher in the same render
   (`frameos_wasm_device_input`, `relayed_input.nim`) and keeps the scene the
   render ended on. A new producer on the ESP32 goes through
   `fos_events_dispatch` and is relayed for free; never a second relay path.
+  The scene still decides when it renders next: the plane answers every pull
+  with `X-FrameOS-Next-Render` (its `nextSleep`, else its `refreshInterval`,
+  held to 10 s on a backend and the plan's floor on the cloud) and the board
+  wakes by it.
   On the cloud a frame set to remote is a cloud-rendered frame (quota +
   floor, `frameIsCloudRendered`). A sleeping frame's next picture is drawn
   before it wakes, with the scene's clock set to the wake (`nowMs`), and
@@ -446,6 +454,12 @@
   packer, `panel-pack.ts` and `embedded_main.nim` together.
 - The battery popover's offer reads `renderSceneMs` from the metrics
   (`serverRenderForecast` in `utils/batteryForecast.ts`).
+- A board rendered on the server is sent nothing a scene holds ("Nothing
+  to keep on the board"): one empty scene for its scenes (`docs/server-rendered-board-scene.json`),
+  no account keys, verbs without their state or payload, decided when it is
+  sent (the hub's `messageForServerRenderedBoard`, the backend's
+  `frame_command_wire`). A new way to put scene content on a board checks
+  `planeKeepsSceneState` / `is_thin_client_frame` first.
 
 ## Scenes inside scenes: `docs/scene-rhythm.md`
 

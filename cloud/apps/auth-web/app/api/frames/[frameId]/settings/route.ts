@@ -4,13 +4,17 @@ import { recordAuditEvent } from '../../../../../src/lib/audit'
 import { NextRequest, NextResponse } from 'next/server'
 import { csrfResponse } from '../../../../../src/lib/csrf'
 import { jsonError, readJsonObject, requireDatabase } from '../../../../../src/lib/device-flow'
+import { planeKeepsSceneState } from '../../../../../src/lib/cloud-rendered'
+import { logWarn } from '../../../../../src/lib/log'
 import {
   enqueueFrameSettingsPush,
+  enqueueServiceSettingsRefreshIfScoped,
   frameForAccount,
   frameHardwareIsEsp32,
   frameSettingsRefusal,
   mergeFrameSettings,
   readFrameSettings,
+  redeployAssignedScenesToFrame,
   validateFrameSettings,
 } from '../../../../../src/lib/frames'
 import { rateLimitResponse } from '../../../../../src/lib/rate-limit'
@@ -166,6 +170,26 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // Builds the device payload (an ESP32 gets its tzdata slice next to the
     // zone name) and supersedes any undelivered set_settings first.
     command = await enqueueFrameSettingsPush(db, frame, settings, { createdByAccountId: session.accountId })
+  }
+
+  // A board that starts or stops rendering on the server
+  // (docs/server-rendering.md "Nothing to keep on the board"): its scenes go
+  // again, behind the settings, as the empty scene or as themselves (the hub
+  // decides when they go, from the setting written above), and it pulls its
+  // keys again, to drop them or get them back. A frame never assigned scenes
+  // is sent none: what it holds may be its own, not imported yet.
+  const renderedHereAfter = planeKeepsSceneState({ hardware: frame.hardware, settings: mergedSettings ?? frame.settings })
+  if (planeKeepsSceneState(frame) !== renderedHereAfter) {
+    if (frame.assignedChecksum) {
+      const scenes = await redeployAssignedScenesToFrame(db, {
+        accountId: session.accountId,
+        frame: { ...frame, settings: mergedSettings ?? frame.settings },
+      })
+      if (!scenes.ok) {
+        logWarn('frames.render_mode_scenes_push_failed', { error: scenes.error, frameId: frame.id })
+      }
+    }
+    await enqueueServiceSettingsRefreshIfScoped(db, frame.id)
   }
 
   await recordAuditEvent(db, {

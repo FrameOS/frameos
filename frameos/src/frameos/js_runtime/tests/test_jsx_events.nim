@@ -462,6 +462,49 @@ suite "jsx fields":
     image = ui.render()
     check image[2, 236] != rgbx(0x18, 0x18, 0x1b, 255)
 
+  test "what a UI keeps outlives the process that drew it, as a plane renders every pull afresh":
+    forgetTypedKeys()
+    let id = "tests/jsx-kept"
+    let ui = newUi(form, id, 320, 240)
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(160, 20, "touch"))
+    discard ui.render()
+    proc keptFor(state: JsonNode, sceneId: string): JsonNode =
+      for entry in state{"targets"}.getElems():
+        if entry{"sceneId"}.getStr() == sceneId:
+          return entry
+    let kept = lastingUiInput()
+    let entry = kept.keptFor(id)
+    check not entry.isNil
+    check entry{"nodeId"}.getInt() == 1 and entry{"keyboard"}.getBool() and entry{"focus"}.getInt() > 0
+    check entry{"text"}.getStr() == "Ann" and entry{"caret"}.getInt() == 3
+    for momentary in ["hovered", "pressed", "flash", "accents", "place", "reveal", "fresh"]:
+      check not entry.hasKey(momentary)
+    # The next pull: a new process, the scene and its app new, no target.
+    forgetUiTarget(id, 1)
+    check uiTarget(id, 1, create = false).isNil
+    let again = newUi(form, id, 320, 240)
+    check restoreLastingUiInput(parseJson($kept)) >= 1
+    let image = again.render()
+    check image[2, 236] == rgbx(0x18, 0x18, 0x1b, 255) # the keyboard, still up
+    check dispatchUiEvent(id, "tap", keyAt(id, ord('x')))
+    check again.scene.state{"name"}.getStr() == "Annx"
+    discard again.render()
+    check lastingUiInput().keptFor(id){"text"}.getStr() == "Annx"
+    # A UI this process did not draw is not on the glass: not kept.
+    check restoreLastingUiInput(%*{"targets": [{"sceneId": "tests/jsx-gone", "nodeId": 1, "focus": 1,
+      "keyboard": true, "text": "x"}]}) == 1
+    check lastingUiInput().keptFor("tests/jsx-gone").isNil
+    forgetUiTarget("tests/jsx-gone", 1)
+    # Enter puts the keyboard away: nothing of this UI's is kept then.
+    check dispatchUiEvent(id, "tap", keyAt(id, ord(kEnter)))
+    discard again.render()
+    check lastingUiInput().keptFor(id).isNil
+    # What is not one is skipped, never a crash.
+    check restoreLastingUiInput(%*{"targets": [1, {"nodeId": 1}, {"sceneId": "s", "nodeId": "1"}]}) == 0
+    check restoreLastingUiInput(%*[]) == 0
+    check restoreLastingUiInput(nil) == 0
+
   test "the caret goes where the tap landed; a tap elsewhere ends the edit":
     forgetTypedKeys()
     let id = "tests/jsx-caret"

@@ -839,6 +839,94 @@ async def test_a_switcher_opened_from_nothing_it_knows_leaves_no_scene_at_the_sl
     assert await redis.get(f'frame:{local.id}:active_scene') == SWITCHER.encode()
 
 
+KEPT = ('{"targets":[{"sceneId":"clock","nodeId":1,"focus":1,"caret":0,"text":"","keyboard":true,"page":0,"shift":0}],'
+        '"apps":[{"sceneId":"clock","nodeId":2,"memory":{"count":"3"}}]}')
+
+
+@pytest.mark.asyncio
+async def test_what_the_process_kept_is_handed_to_the_next_pull_and_dropped_at_the_sleep(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    """docs/server-rendering.md "Kept between pulls": the keyboard a tap
+    brought up is still up when the tap on one of its keys arrives, and an
+    app's remembered values are still there, though each pull renders in a
+    new process. The plane keeps what the runtime wrote, hands it to the next
+    render, and forgets it when the frame sleeps."""
+    frame = await server_rendered_frame(async_client, db)
+    key = f'frame:{frame.id}:kept_state'
+    first_version_key = f'frame:{frame.id}:ui_state'
+    url = f'/api/frames/{frame.id}/embedded/render'
+    calls: list = []
+
+    def renders(kept_state):
+        state = {'sceneId': 'clock', 'state': {}}
+        if kept_state is not None:
+            state['keptState'] = kept_state
+        monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', recording_renderer(calls, state=state))
+
+    renders(KEPT)
+    tap = {'nowMs': 9_000, 'events': [relayed('driver', 'pointerDown', {'x': 10, 'y': 20, 'pointerId': 1, 'atMs': 8_000}),
+                                      relayed('driver', 'pointerUp', {'x': 10, 'y': 20, 'pointerId': 1, 'atMs': 8_050})]}
+    assert (await no_auth_client.post(url, json=tap, headers=auth(frame))).status_code == 200
+    assert calls[-1].get('kept_state') is None
+    assert await redis.get(key) == KEPT.encode()
+
+    typed = KEPT.replace('"text":""', '"text":"q"')
+    renders(typed)
+    assert (await no_auth_client.post(url, json=tap, headers=auth(frame))).status_code == 200
+    assert calls[-1]['kept_state'] == KEPT
+    assert await redis.get(key) == typed.encode()
+
+    # A bundle without the export says nothing of what it keeps: what was kept stays.
+    renders(None)
+    await no_auth_client.get(url, headers=auth(frame))
+    assert calls[-1]['kept_state'] == typed
+    assert await redis.get(key) == typed.encode()
+
+    # A render that failed (the diagnostic card) leaves it too.
+    async def failing(frame_arg, width, height, **kwargs):
+        calls.append(kwargs)
+        return None, None, None
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', failing)
+    await no_auth_client.get(url, headers=auth(frame))
+    assert await redis.get(key) == typed.encode()
+
+    # Nothing kept, or more than a node's remember budget on a board: gone,
+    # and so is the key the first version kept the UIs alone under.
+    await redis.set(first_version_key, '{"targets":[]}')
+    renders('{}')
+    await no_auth_client.get(url, headers=auth(frame))
+    assert await redis.get(key) is None
+    assert await redis.get(first_version_key) is None
+    from app.api.embedded_device import MAX_KEPT_STATE_BYTES
+
+    renders('{"apps":[{"sceneId":"clock","nodeId":2,"memory":{"list":"\\"' + 'x' * MAX_KEPT_STATE_BYTES + '\\""}}]}')
+    await no_auth_client.get(url, headers=auth(frame))
+    assert await redis.get(key) is None
+
+    # A board loses its memory in a deep sleep: its UIs and apps start afresh,
+    # and the picture drawn ahead of the wake is drawn without them.
+    renders(KEPT)
+    await no_auth_client.post(url, json=tap, headers=auth(frame))
+    assert await redis.get(key) == KEPT.encode()
+
+    async def fake_enqueue(function, **kwargs):
+        return object()
+
+    monkeypatch.setattr(redis, 'enqueue_job', fake_enqueue, raising=False)
+    await redis.set(first_version_key, '{"targets":[]}')
+    await process_log(db, redis, frame, {'event': 'sleep', 'wakeInSeconds': 900})
+    assert await redis.get(key) is None
+    assert await redis.get(first_version_key) is None
+    db.refresh(frame)
+    calls.clear()
+    as_of = server_render.prerender_as_of(frame)
+    assert as_of is not None
+    assert await prerender_thin_client(db, redis, frame, epoch_ms(as_of)) is True
+    assert calls and calls[-1].get('kept_state') is None
+
+
 @pytest.mark.asyncio
 async def test_the_boards_own_word_on_its_scene_does_not_undo_the_planes(
     async_client, no_auth_client, db, redis, monkeypatch
@@ -1236,3 +1324,254 @@ async def test_a_frame_without_a_map_or_buttons_of_its_own_renders_with_its_pres
     db.commit()
     await no_auth_client.get(url, headers=auth(frame))
     assert calls[-1]['frame_json']['eventMap'] == []
+
+
+# ------------------------------------------------- when the next picture is due
+
+
+def test_the_next_render_is_next_sleep_else_the_interval_within_reason():
+    """docs/server-rendering.md "When the next picture is due": this render's
+    nextSleep beats the scene's interval; never under 10 s, never over 7
+    days; a scene with no opinion has none."""
+    from app.api.embedded_device import (
+        NEXT_RENDER_MAX_SECONDS,
+        NEXT_RENDER_MIN_SECONDS,
+        SERVER_RENDER_NEXT_RENDER_HEADER,
+        next_render_seconds,
+    )
+
+    assert (NEXT_RENDER_MIN_SECONDS, NEXT_RENDER_MAX_SECONDS) == (10, 7 * 24 * 3600)
+    assert SERVER_RENDER_NEXT_RENDER_HEADER == 'X-FrameOS-Next-Render'
+    assert next_render_seconds({'nextSleep': 42, 'refreshInterval': 60}) == 42
+    assert next_render_seconds({'nextSleep': -1, 'refreshInterval': 60}) == 60
+    assert next_render_seconds({'refreshInterval': 59.6}) == 60
+    # Within reason: a second-by-second clock, a nextSleep of 0, a layout's 0.9999 s.
+    assert next_render_seconds({'nextSleep': -1, 'refreshInterval': 1}) == 10
+    assert next_render_seconds({'nextSleep': 0, 'refreshInterval': 3600}) == 10
+    assert next_render_seconds({'refreshInterval': 0.9999}) == 10
+    assert next_render_seconds({'nextSleep': 30 * 86400}) == 7 * 24 * 3600
+    # No opinion, or nothing readable.
+    assert next_render_seconds({'nextSleep': -1, 'refreshInterval': 0}) is None
+    assert next_render_seconds({'sceneId': 'clock', 'state': {}}) is None
+    assert next_render_seconds(None) is None
+    assert next_render_seconds({'nextSleep': True, 'refreshInterval': float('nan')}) is None
+    assert next_render_seconds({'nextSleep': '30', 'refreshInterval': '60'}) is None
+
+
+@pytest.mark.asyncio
+async def test_the_pull_says_when_the_scene_wants_its_next_picture(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    """On the picture and on the 304 for it: the board wakes for it instead
+    of on the frame's interval."""
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    monkeypatch.setattr(
+        'app.api.embedded_device.render_scene_rgba_and_state',
+        recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'nextSleep': -1, 'refreshInterval': 60}),
+    )
+    url = f'/api/frames/{frame.id}/embedded/render'
+    first = await no_auth_client.get(url, headers=auth(frame))
+    assert first.status_code == 200
+    assert first.headers['x-frameos-next-render'] == '60'
+    same = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': first.headers['etag']})
+    assert same.status_code == 304
+    assert same.headers['x-frameos-next-render'] == '60'
+
+    # The render's own nextSleep beats the interval.
+    monkeypatch.setattr(
+        'app.api.embedded_device.render_scene_rgba_and_state',
+        recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'nextSleep': 900, 'refreshInterval': 60}),
+    )
+    slept = await no_auth_client.get(url, headers=auth(frame))
+    assert slept.headers['x-frameos-next-render'] == '900'
+
+    # A scene with no opinion (or a bundle that says nothing): no header, the
+    # board keeps the frame's interval.
+    monkeypatch.setattr(
+        'app.api.embedded_device.render_scene_rgba_and_state',
+        recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'nextSleep': -1, 'refreshInterval': 0}),
+    )
+    silent = await no_auth_client.get(url, headers=auth(frame))
+    assert silent.status_code == 200
+    assert 'x-frameos-next-render' not in silent.headers
+
+
+@pytest.mark.asyncio
+async def test_the_diagnostic_card_says_nothing_about_the_next_picture(async_client, no_auth_client, db, redis, monkeypatch):
+    frame = await device_frame(async_client, db)  # no scenes: the card
+
+    def card(_frame, width, height):
+        return Image.new('RGB', (width, height), (255, 255, 255))
+
+    monkeypatch.setattr('app.api.embedded_device.embedded_diagnostic_image', card)
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 200
+    assert 'x-frameos-next-render' not in response.headers
+
+
+@pytest.mark.asyncio
+async def test_a_picture_drawn_before_the_wake_answers_with_its_own_next_render(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    """A kept picture keeps the scene's wish from when it was drawn; a record
+    from before the field has none."""
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    url = f'/api/frames/{frame.id}/embedded/render'
+
+    as_of_ms = asleep_until(db, frame, 30)
+    monkeypatch.setattr(
+        'app.api.embedded_device.render_scene_rgba_and_state',
+        recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'nextSleep': 120, 'refreshInterval': 60}),
+    )
+    assert await prerender_thin_client(db, redis, frame, as_of_ms) is True
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', refusing_render)
+    kept = await no_auth_client.get(url, params={'scene': 'clock'}, headers=auth(frame))
+    assert kept.status_code == 200, kept.text
+    assert kept.headers['x-frameos-next-render'] == '120'
+
+    # A record kept by a backend from before the field.
+    as_of_ms = asleep_until(db, frame, 30)
+    monkeypatch.setattr(
+        'app.api.embedded_device.render_scene_rgba_and_state',
+        recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'nextSleep': 120, 'refreshInterval': 60}),
+    )
+    assert await prerender_thin_client(db, redis, frame, as_of_ms) is True
+    meta_key = server_render._prerender_meta_key(int(frame.id))
+    record = json.loads(await redis.get(meta_key))
+    del record['nextRender']
+    await redis.set(meta_key, json.dumps(record))
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', refusing_render)
+    old = await no_auth_client.get(url, params={'scene': 'clock'}, headers=auth(frame))
+    assert old.status_code == 200, old.text
+    assert 'x-frameos-next-render' not in old.headers
+
+
+# ------------------------------------------------------- nothing on the board
+
+
+SECRET_SCENES = [
+    {
+        'id': 'immich',
+        'name': 'Album',
+        'nodes': [
+            {'id': 'a', 'type': 'app', 'data': {'keyword': 'data/openaiImage'}},
+            {'id': 'b', 'type': 'app', 'data': {'keyword': 'image/photoAlbum', 'config': {'url': 'https://h/shared/pk_secretlink'}}},
+        ],
+        'edges': [],
+        'fields': [{'name': 'token', 'type': 'string', 'value': 'field-secret', 'access': 'public'}],
+    },
+]
+
+
+@pytest.mark.asyncio
+async def test_a_board_rendered_here_holds_one_empty_scene_and_no_keys(async_client, no_auth_client, db):
+    """docs/server-rendering.md "Nothing to keep on the board": its scenes and
+    the account's keys stay here, where they run."""
+    from app.api.embedded_device import embedded_settings_payload
+    from app.models.settings import Settings
+    from app.utils.server_render import SERVER_RENDERED_BOARD_SCENE
+
+    frame = await server_rendered_frame(async_client, db)
+    frame.scenes = SECRET_SCENES
+    db.add_all([frame, Settings(project_id=frame.project_id, key='openAI', value={'apiKey': 'sk-account'})])
+    db.commit()
+
+    scenes = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes', headers=auth(frame))
+    settings = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+
+    assert scenes.status_code == 200, scenes.text
+    assert scenes.json() == [SERVER_RENDERED_BOARD_SCENE]
+    assert settings.status_code == 200, settings.text
+    assert set(settings.json()) == {'frame', 'schedule'}
+    assert settings.json()['frame']['renderMode'] == 'remote'
+    for secret in ('sk-account', 'pk_secretlink', 'field-secret'):
+        assert secret not in scenes.text and secret not in settings.text
+    # The render here is still given them.
+    assert embedded_settings_payload(db, frame) == {'openAI': {'apiKey': 'sk-account'}}
+
+    # Back to rendering itself: the scenes and the key come back.
+    frame.device_config = {**frame.device_config, 'renderMode': 'local'}
+    db.add(frame)
+    db.commit()
+    scenes = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes', headers=auth(frame))
+    settings = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert [scene['id'] for scene in scenes.json()] == ['immich']
+    assert settings.json()['openAI'] == {'apiKey': 'sk-account'}
+
+
+@pytest.mark.asyncio
+async def test_a_preview_stays_here_too(async_client, no_auth_client, db, redis):
+    """"Preview on frame" on a board rendered here: the render runs the
+    preview, the board still holds the empty scene."""
+    from app.utils.embedded_commands import queue_embedded_scene_preview
+    from app.utils.server_render import SERVER_RENDERED_BOARD_SCENE
+
+    frame = await server_rendered_frame(async_client, db)
+    await queue_embedded_scene_preview(db, redis, frame, SECRET_SCENES, 'immich')
+    db.commit()
+
+    scenes = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes', headers=auth(frame))
+    assert scenes.json() == [SERVER_RENDERED_BOARD_SCENE]
+
+
+@pytest.mark.asyncio
+async def test_a_deploy_is_acked_when_the_board_holds_the_empty_scene(async_client, no_auth_client, db):
+    """The ETag is the empty scene's, so the queue's deploy bookkeeping holds."""
+    from app.models.frame_command import FrameCommand
+
+    frame = await server_rendered_frame(async_client, db)
+    command = enqueue_frame_command(db, frame, 'set_scenes', {})
+    db.commit()
+
+    scenes = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes', headers=auth(frame))
+    pulled = await no_auth_client.post(
+        f'/api/frames/{frame.id}/embedded/commands',
+        json={'scenes_checksum': scenes.headers['etag']},
+        headers=auth(frame),
+    )
+    assert pulled.status_code == 200, pulled.text
+    db.expire_all()
+    assert db.get(FrameCommand, command.id).status == 'acked'
+
+
+@pytest.mark.asyncio
+async def test_a_switch_or_a_state_reaches_the_board_without_the_state(async_client, no_auth_client, db, redis):
+    """The backend holds them before the queue; the board only pulls on
+    them. A frame that renders itself still gets them whole."""
+    frame = await server_rendered_frame(async_client, db)
+    with_state = {'scene_id': 'clock', 'state': {'label': 'field-secret'}}
+    event = {'name': 'setSceneState', 'payload': {'state': {'label': 'field-secret'}}}
+    enqueue_frame_command(db, frame, 'set_current_scene', with_state)
+    enqueue_frame_command(db, frame, 'scene_event', event)
+    db.commit()
+
+    pulled = await no_auth_client.post(f'/api/frames/{frame.id}/embedded/commands', json={}, headers=auth(frame))
+    assert pulled.status_code == 200, pulled.text
+    commands = pulled.json()['commands']
+    assert [(c['type'], c.get('scene_id'), c.get('state'), c.get('payload')) for c in commands] == [
+        ('set_current_scene', 'clock', None, None),
+        ('scene_event', None, None, {}),
+    ]
+    assert 'field-secret' not in pulled.text
+
+    frame.device_config = {**frame.device_config, 'renderMode': 'local'}
+    db.add(frame)
+    enqueue_frame_command(db, frame, 'set_current_scene', with_state)
+    enqueue_frame_command(db, frame, 'scene_event', event)
+    db.commit()
+    pulled = await no_auth_client.post(f'/api/frames/{frame.id}/embedded/commands', json={}, headers=auth(frame))
+    commands = pulled.json()['commands']
+    assert commands[0]['state'] == {'label': 'field-secret'}
+    assert commands[1]['payload'] == event['payload']
+
+
+def test_the_empty_scene_is_the_corpus():
+    """Both planes send the same one (docs/server-rendered-board-scene.json)."""
+    from pathlib import Path
+
+    from app.utils.server_render import SERVER_RENDERED_BOARD_SCENE
+
+    corpus = Path(__file__).resolve().parents[4] / 'docs' / 'server-rendered-board-scene.json'
+    assert json.loads(corpus.read_text())['scene'] == SERVER_RENDERED_BOARD_SCENE

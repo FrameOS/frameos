@@ -1349,6 +1349,17 @@ awake the preview snapshot is put back from the reservation after a 304 when
 its bytes still hash to the picture shown. A reset forgets the ETag (RTC
 memory); the stored display hash still skips the refresh then.
 
+**When the next picture is due.** The scene runs on the plane, so the
+plane says when it wants its next picture: `X-FrameOS-Next-Render: <seconds>`
+on the 200 and the 304 (its `nextSleep`, else its `refreshInterval`; at least
+10 s on a backend and the plan's floor on the cloud, at most 7 days;
+`fos_render_pull_next_render_seconds`). The board takes it where its own
+runtime's interval would go, so its next pass, its deep sleep and the
+`nextRenderAt` it reports follow the scene; with no header (a scene with no
+opinion, a pull nobody answered) the frame's interval. The idle runtime's
+own interval and `nextSleep` are never read in remote mode: they belong to a
+scene left from before.
+
 **The cloud says no.** A cloud answers `403` when it does not render for the
 frame (`not_server_rendered`: the plane's setting is not remote;
 `cloud_rendered_frame_quota_exceeded`: the plan's cloud-rendered frames are

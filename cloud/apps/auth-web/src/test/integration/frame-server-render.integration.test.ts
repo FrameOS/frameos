@@ -3,7 +3,7 @@
 // check, with the wasm runtime stood in for by a renderer that paints a
 // solid colour and reports what it was asked.
 import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { zipSync } from "fflate";
 import { NextRequest } from "next/server";
 import {
@@ -28,6 +28,7 @@ import {
   frameManagedScope,
   frameTelemetryLogsScope,
 } from "../../lib/frames";
+import { cloudRenderedMinIntervalSeconds } from "../../lib/cloud-rendered";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import type { SceneRenderOptions, SceneRenderResult } from "../../lib/scene-render";
 import { hashSecret } from "../../lib/secrets";
@@ -413,6 +414,65 @@ describe("the render pull", () => {
     expect(row?.states).toEqual({ clock: { count: 2 } });
   });
 
+  it("says when the scene wants its next picture, on every answer for the picture", async () => {
+    const accountId = await signIn();
+    await subscribe(accountId, 1);
+    const { frame, token } = await createFrame(accountId);
+
+    // The scene's own interval, held to the plan's floor.
+    reports = { refreshInterval: 900 };
+    const first = await pull(frame.id, token, panel);
+    expect(first.status).toBe(200);
+    expect(first.headers.get("x-frameos-next-render")).toBe("900");
+    expect((await renderRow(frame.id))?.pictureNextRenderSeconds).toBe(900);
+    const etag = first.headers.get("etag")!;
+    // A 304 and a reused picture answer for the picture they stand for.
+    const unchanged = await pull(frame.id, token, panel, { "if-none-match": etag });
+    expect(unchanged.status).toBe(304);
+    expect(unchanged.headers.get("x-frameos-next-render")).toBe("900");
+    expect(unchanged.headers.get("x-frameos-scene")).toBe("clock");
+    const reused = await pull(frame.id, token, panel);
+    expect(reused.status).toBe(200);
+    expect(renders).toHaveLength(1);
+    expect(reused.headers.get("x-frameos-next-render")).toBe("900");
+
+    // A picture drawn before a wake keeps its own: here the render's nextSleep.
+    reports = { nextSleep: 3600, refreshInterval: 900 };
+    shade = 255;
+    expect(await prerenderFrame(db, frame.id, { asOf: new Date(Date.now() + 30_000), render: standIn })).toBe("kept");
+    expect((await renderRow(frame.id))?.prerenderNextRenderSeconds).toBe(3600);
+    await db
+      .update(frameServerRenders)
+      .set({ renderedAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(frameServerRenders.frameId, frame.id));
+    const woke = await pull(frame.id, token, panel);
+    expect(woke.status).toBe(200);
+    expect(renders).toHaveLength(2);
+    expect(woke.headers.get("x-frameos-next-render")).toBe("3600");
+    const taken = await renderRow(frame.id);
+    expect(taken?.prerenderNextRenderSeconds).toBeNull();
+    expect(taken?.pictureNextRenderSeconds).toBe(3600);
+
+    // A clock that wants every second waits the plan's floor; a scene with
+    // no opinion says nothing, and the board keeps the frame's interval.
+    await db
+      .update(frameServerRenders)
+      .set({ renderedAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(frameServerRenders.frameId, frame.id));
+    reports = { refreshInterval: 1 };
+    const fast = await pull(frame.id, token, panel);
+    expect(fast.headers.get("x-frameos-next-render")).toBe(String(cloudRenderedMinIntervalSeconds));
+    await db
+      .update(frameServerRenders)
+      .set({ renderedAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(frameServerRenders.frameId, frame.id));
+    reports = {};
+    const silent = await pull(frame.id, token, panel);
+    expect(silent.status).toBe(200);
+    expect(silent.headers.get("x-frameos-next-render")).toBeNull();
+    expect((await renderRow(frame.id))?.pictureNextRenderSeconds).toBeNull();
+  });
+
   it("keeps no pre-render past a change, and draws none while an event waits", async () => {
     const accountId = await signIn();
     await subscribe(accountId, 1);
@@ -554,6 +614,73 @@ describe("keys, touch and the schedule", () => {
     expect(await leaveBuiltInSceneForSleep(db, frame.id)).toBe(false);
   });
 
+  it("keep what the render process kept between two pulls, and forget it when the frame sleeps", async () => {
+    const accountId = await signIn();
+    await subscribe(accountId, 1);
+    const { frame, token } = await createFrame(accountId);
+    expect((await pull(frame.id, token, panel)).status).toBe(200);
+    expect(renders[0]?.keptState).toBeUndefined();
+
+    // A tap focuses a field: the keyboard opens, the app remembers its
+    // draft, and the plane keeps both.
+    const typing = JSON.stringify({
+      apps: [{ memory: { draft: '{"name":"ab"}' }, nodeId: 4, sceneId: "clock" }],
+      targets: [{ focus: 2, keyboard: true, nodeId: 4, sceneId: "clock", text: "ab" }],
+    });
+    reports = { keptState: typing };
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    expect((await renderRow(frame.id))?.keptState).toBe(typing);
+
+    // The tap on a key meets it; a runtime that says nothing leaves it.
+    reports = {};
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    expect(renders.at(-1)?.keptState).toBe(typing);
+    expect((await renderRow(frame.id))?.keptState).toBe(typing);
+
+    // A timed pull past the floor hands it over too.
+    await db
+      .update(frameServerRenders)
+      .set({ renderedAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(frameServerRenders.frameId, frame.id));
+    expect((await pull(frame.id, token, panel)).status).toBe(200);
+    expect(renders.at(-1)?.keptState).toBe(typing);
+
+    // Nothing lasting is nothing kept; past 512 KiB is dropped.
+    reports = { keptState: "{}" };
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    expect((await renderRow(frame.id))?.keptState).toBeNull();
+    reports = { keptState: JSON.stringify({ text: "x".repeat(513 * 1024) }) };
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    expect((await renderRow(frame.id))?.keptState).toBeNull();
+    const count = renders.length;
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    expect(renders).toHaveLength(count + 1);
+    expect(renders.at(-1)?.keptState).toBeUndefined();
+
+    // The picture drawn for a wake starts from none, and the sleep forgets
+    // it: a picture that showed the keyboard is not handed out again.
+    reports = { keptState: typing };
+    expect((await pullWithInput(frame.id, token, panel, JSON.stringify(press))).status).toBe(200);
+    reports = {};
+    expect(await prerenderFrame(db, frame.id, { asOf: new Date(Date.now() + 30_000), render: standIn })).toBe("kept");
+    expect(renders.at(-1)?.keptState).toBeUndefined();
+    expect((await renderRow(frame.id))?.keptState).toBe(typing);
+    const before = (await renderRow(frame.id))!.revision;
+    expect(await leaveBuiltInSceneForSleep(db, frame.id)).toBe(false);
+    const row = await renderRow(frame.id);
+    expect(row?.keptState).toBeNull();
+    expect(row?.revision).toBe(before + 1);
+    // Inside the floor, yet drawn again: the kept picture had the keyboard.
+    const drawnBefore = renders.length;
+    expect((await pull(frame.id, token, panel)).status).toBe(200);
+    expect(renders).toHaveLength(drawnBefore + 1);
+    expect(renders.at(-1)?.keptState).toBeUndefined();
+    // Nothing to forget: nothing moves.
+    const settled = (await renderRow(frame.id))!.revision;
+    expect(await leaveBuiltInSceneForSleep(db, frame.id)).toBe(false);
+    expect((await renderRow(frame.id))?.revision).toBe(settled);
+  });
+
   it("render with the frame's event map, palette and panel, and dither to its palette", async () => {
     const accountId = await signIn();
     await subscribe(accountId, 1);
@@ -609,6 +736,27 @@ describe("the switch", () => {
     // Back to the frame's own runtime is always free.
     expect((await pushSettings(frame.id, { render_mode: "local" })).status).toBe(200);
     expect(await countCloudRenderedFramesForAccount(db, accountId)).toBe(0);
+  });
+
+  it("sends the scenes again behind it, both ways, so the board drops them or gets them back", async () => {
+    // docs/server-rendering.md "Nothing to keep on the board": the hub sends
+    // a board the cloud renders for the empty scene, decided as each push
+    // goes, so the switch is followed by a push for it to decide on.
+    const accountId = await signIn();
+    await subscribe(accountId, 1);
+    const { frame } = await createFrame(accountId, { interval: 900 });
+    await db.update(frames).set({ assignedChecksum: "assigned" }).where(eq(frames.id, frame.id));
+    const commands = async () =>
+      (await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.id)).orderBy(asc(frameCommands.createdAt))).map(
+        (row) => row.type,
+      );
+
+    expect((await pushSettings(frame.id, { render_mode: "remote" })).status).toBe(200);
+    expect(await commands()).toEqual(["set_settings", "set_scenes"]);
+    expect((await pushSettings(frame.id, { interval: 1200 })).status).toBe(200);
+    expect(await commands()).toEqual(["set_settings", "set_scenes", "set_settings"]);
+    expect((await pushSettings(frame.id, { render_mode: "local" })).status).toBe(200);
+    expect((await commands()).slice(-2)).toEqual(["set_settings", "set_scenes"]);
   });
 
   it("holds the frame to the plan's refresh floor", async () => {

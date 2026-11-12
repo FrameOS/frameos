@@ -109,6 +109,7 @@ import {
 } from './EmbeddedUsbFirmwareUpdate'
 import { registeredFramePanel } from './addFramePanelRegistry'
 import { pushScenesOverUsb, pushedScenesMessage } from './embeddedUsbScenePush'
+import { frameRendersOnServer } from '../../utils/renderOnServer'
 import { EmbeddedUsbConnect } from './EmbeddedUsbConnect'
 import { EmbeddedUsbConnectionButton } from './embeddedFlashShared'
 import { PicoFirmwareCard } from './PicoFirmwareCard'
@@ -3345,6 +3346,22 @@ function CloudUsbScenesPushCard({ frame }: { frame: FrameType }): JSX.Element {
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const scenes = frameForm?.scenes ?? frame.scenes ?? []
+
+  // The cloud runs this frame's scenes and sends the board none of them
+  // (docs/server-rendering.md "Nothing to keep on the board"): nothing to copy.
+  if (frameRendersOnServer(frame, 'cloud')) {
+    return (
+      <section className="space-y-2">
+        <DrawerHeading>Scenes over USB</DrawerHeading>
+        <div className="frame-tool-card rounded-[22px] p-4">
+          <div className="frame-tool-muted text-sm leading-5">
+            This frame's scenes run on the cloud, which sends the board only the pictures. The board holds no scenes and
+            no API keys, so there is nothing to copy onto it.
+          </div>
+        </div>
+      </section>
+    )
+  }
 
   const pushScenes = async (): Promise<void> => {
     setBusy(true)

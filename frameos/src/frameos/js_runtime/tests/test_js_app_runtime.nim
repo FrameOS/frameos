@@ -1115,6 +1115,54 @@ suite "js app runtime":
     check not third["tooBig"].getBool()
     check runtime.memory["big"] == "\"x\""
 
+  test "what an app remembers goes to the next process with a plane's kept state":
+    # docs/server-rendering.md "Kept between pulls": a plane draws every pull
+    # in a new process, and hands the last one's remembered values over.
+    keepAppMemoryAcrossProcesses()
+    let config = testConfig()
+    let scene = FrameScene(id: "tests/js-app-kept-memory".SceneId, frameConfig: config, state: %*{},
+      logger: testLogger(config))
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let sources = %*{
+      "app.ts": """export function get() {
+          const count = (frameos.recall("count") ?? 0) + 1
+          frameos.remember("count", count)
+          return { count }
+        }""",
+      "config.json": $(%*{"name": "Counter", "category": "data", "output": [{"name": "out", "type": "json"}]})
+    }
+    proc build(nodeId: int): AppRoot =
+      initDynamicJsApp("counter", DiagramNode(id: nodeId.NodeId, nodeType: "app",
+        data: %*{"keyword": "counter", "config": {}}), scene, sources)
+
+    let first = build(41)
+    let quiet = build(42)
+    check first.getDynamicJsApp(context).asJson()["count"].getInt() == 1
+    check first.getDynamicJsApp(context).asJson()["count"].getInt() == 2
+    let kept = keptAppMemory()
+    check kept == %*[{"sceneId": "tests/js-app-kept-memory", "nodeId": 41, "memory": {"count": "2"}}]
+    releaseJsAppRuntime(first)
+    releaseJsAppRuntime(quiet)
+    check keptAppMemory().len == 0
+
+    # The next process: parked until the app is built, then used once.
+    check restoreKeptAppMemory(%*[kept[0], {"sceneId": "", "nodeId": 41}, "nonsense",
+      {"sceneId": "tests/js-app-kept-memory", "nodeId": 43,
+       "memory": {"big": "\"" & "x".repeat(JsAppMemoryMaxBytes) & "\""}}]) == 2
+    let again = build(41)
+    check again.getDynamicJsApp(context).asJson()["count"].getInt() == 3
+    let tooBig = build(43)
+    check DynamicJsApp(tooBig).runtime.memory.len == 0
+    releaseJsAppRuntime(again)
+    let reentered = build(41)
+    check reentered.getDynamicJsApp(context).asJson()["count"].getInt() == 1
+
+    # Applied at once to an app that is already live.
+    check restoreKeptAppMemory(%*[{"sceneId": "tests/js-app-kept-memory", "nodeId": 41, "memory": {"count": "9"}}]) == 1
+    check reentered.getDynamicJsApp(context).asJson()["count"].getInt() == 10
+    releaseJsAppRuntime(reentered)
+    releaseJsAppRuntime(tooBig)
+
   proc fetchWithColors(nodeId: int, colorsJs: string, scalingMode = ""): (Value, ExecutionContext, Image) =
     ## One fetchImage of the 5x3 (20, 120, 220) photo with `colorsJs` spliced
     ## into the options ("" leaves the key out). With `scalingMode`, a 6x4

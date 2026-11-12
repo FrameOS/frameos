@@ -1382,6 +1382,15 @@ export const frameServerRenders = pgTable("frame_server_renders", {
   renderedAt: timestamp("rendered_at", { withTimezone: true }),
   renderMs: integer("render_ms"),
   renderError: text("render_error"),
+  // When the scene wants the picture after this one, in seconds from the
+  // pull, held to the plan's floor (migration 0079); null: no opinion.
+  pictureNextRenderSeconds: integer("picture_next_render_seconds"),
+  // What the frame's render process keeps between two pulls that no scene
+  // state holds (migration 0080): its UIs' focus, caret, open keyboard and
+  // scrolls, its apps' `frameos.remember` values. The runtime's own JSON
+  // (frameos_wasm_kept_state), handed to the next render of a pull as it
+  // was; null when nothing lasts, and after a sleep.
+  keptState: text("kept_state"),
   // A picture drawn before a sleeping frame's wake, as of `prerender_as_of`;
   // taken once by the pull at the wake if nothing changed since.
   prerender: bytea("prerender"),
@@ -1392,6 +1401,7 @@ export const frameServerRenders = pgTable("frame_server_renders", {
   prerenderAsOf: timestamp("prerender_as_of", { withTimezone: true }),
   prerenderState: jsonb("prerender_state"),
   prerenderMs: integer("prerender_ms"),
+  prerenderNextRenderSeconds: integer("prerender_next_render_seconds"),
   ...timestamps,
 });
 

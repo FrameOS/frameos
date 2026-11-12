@@ -54,6 +54,50 @@ under the floor (`interval_below_plan_floor`). A device that is remote by its
 own console but not on the plane is refused at the pull
 (`not_server_rendered`) and, having a runtime, renders that pass itself.
 
+## Nothing to keep on the board
+
+A board rendered on the server runs no scene, so the plane sends it nothing
+a scene holds: no scenes (their field values, an app's settings, a photo
+album's share link), no scene state, no account API keys. They stay on the
+plane, which renders with them.
+
+- **Scenes.** The board holds one empty scene in their place,
+  `docs/server-rendered-board-scene.json` (backend
+  `SERVER_RENDERED_BOARD_SCENE` in `utils/server_render.py`, cloud
+  `serverRenderedBoardScene` in `cloud-rendered.ts`). One and not none: the
+  board's scene store always keeps a scene, and a set of one replaces what it
+  had, deleting each dropped scene's kept state at once
+  (`fos_scene_store_apply_set`, `forget_dropped_scene`); the old scene files
+  go at the next boot's sweep. The backend serves it at `/embedded/scenes`
+  (a preview too), so the ETag a deploy is acked by is its own. The hub sends
+  every `set_scenes` and `scenes_patch` to such a board as a whole
+  `set_scenes` of it, under the push's own checksum and scene to show
+  (`messageForServerRenderedBoard`), decided as the command goes; the row's
+  `scene_hashes` are dropped then, so a board that renders itself again is
+  sent its scenes whole, never a patch against the empty one.
+- **State and events.** A switch goes without its `state` and a scene event
+  without its `payload`: the plane holds them before the queue (backend
+  `frames.py`, cloud `holdServerRenderVerb`), and the board, hearing either
+  from its plane, only pulls (`dispatch_remote`). A board without the command
+  queue (the Pico) is sent `/event/render` and an empty body.
+- **API keys.** The backend's `/embedded/settings` carries no service-settings
+  group; the cloud's `/service-settings` lists the granted groups with none
+  filled in. A group left out is deleted from the board and from its NVS
+  cache (`fos_settings.c`), so a board switched over lets go of the keys it
+  held. The plane's own render still gets them (`embedded_settings_payload`,
+  `server-render.ts` `serviceSettings`).
+- **The switch, both ways.** A backend board's next pulls bring the change
+  (both ETags move). The cloud's settings route queues the assigned scenes
+  again behind the settings push and nudges the key pull
+  (`refresh_service_settings`), when the frame was ever assigned scenes:
+  what a frame never assigned any holds may be its own, not imported yet.
+- **Over USB.** The workspace does not offer to copy scenes onto such a board
+  ("Scenes over USB", the firmware update's "Also deploy scenes & settings";
+  `frameRendersOnServer` in `utils/renderOnServer.ts`).
+
+What the board keeps is its own: Wi-Fi, its plane's URL and bearer, its admin
+login and HTTPS key, its settings and schedule.
+
 ## The render pull
 
 ```http
@@ -81,8 +125,10 @@ input as a JSON body (see "Keys, touch and the schedule").
   dropped whenever anything else draws the panel.
 - **200**: the FOSB bitmap (`FOSB`, version 1, format, width u16le, height
   u16le, reserved u16, then the packed panel bytes), `ETag: "<first 32 hex of
-  sha256(body)>"`, `Cache-Control: no-store`, and `X-FrameOS-Scene: <the
-  scene drawn, URI-encoded>` (on a 304 too), so the device can name it.
+  sha256(body)>"`, `Cache-Control: no-store`, `X-FrameOS-Scene: <the
+  scene drawn, URI-encoded>` (on a 304 too), so the device can name it, and
+  `X-FrameOS-Next-Render: <seconds>` when the scene said when it wants its
+  next picture (on a 304 too; see "When the next picture is due").
 - **304**: the picture is the one the panel shows. No body; the device
   leaves the panel alone and logs `render:device skipped unchanged`.
 - **Errors**: the backend answers a diagnostic card instead of failing. The
@@ -235,6 +281,34 @@ before the device hears of it. A `scene_event` waits on the plane and runs in
 the scene at the next pull, and the device is sent `render` in its place
 (backend `hold_thin_client_event`, cloud `frame_server_renders.pending_events`).
 
+### Kept between pulls
+
+A board keeps more than scene state in its memory between renders, and the
+plane draws every pull in a new process, so the runtime hands the rest out
+after the pull's last render (`frameos_wasm_kept_state`) and takes it back
+before the next pull draws or hears anything (`frameos_wasm_set_kept_state`,
+once the scene is open and before the drawing that comes ahead of a tap):
+
+- `targets`: what a JSX UI holds (`UiTarget.input`, `ui/events.nim`): the
+  field with the focus, its caret and text, the keyboard and its page and
+  shift, a list's scroll, an open select. Not a pointer's passing marks
+  (hover, a press, a key's flash), nor a UI the pull did not draw.
+- `apps`: each JS app's `frameos.remember` values (`JsAppRuntime.memory`),
+  by scene and node, for the apps the pull built. A board keeps them until
+  the scene unloads; a scene left and opened again in one pull starts empty,
+  as it would there.
+
+`{}` when nothing is kept. The plane keeps it per frame next to the scene
+state, opaque (backend: Redis `frame:{id}:kept_state`; cloud:
+`frame_server_renders.kept_state`), at most 512 KiB (an ESP32's
+`remember` budget for one node), and forgets it when the frame says it is
+going to sleep, as the board's RAM would. Module variables are not kept: an
+app must not count on them past one render on a board either (the scene
+guide's "Where an app keeps its values").
+Without the UI part the pull that carried a tap on a key drew the form with
+no keyboard, and the tap landed on the form under it: the keyboard opened
+and every key closed it (E1003, 2026-11-12).
+
 ### Packing
 
 The plane packs the runtime's RGBA into the panel's format exactly as the
@@ -276,6 +350,35 @@ colours change what each pixel is dithered to, never which index it is
 written as. The render itself is told the frame's `palette` and `colors`
 the way the device's runtime is, so the automatic fit of drawn images aims
 at the same colours.
+
+## When the next picture is due
+
+A scene decides when it renders next, on the board as on a Pi: its
+`refreshInterval` (the scene's setting, a state field with the role
+`refreshInterval`, a layout's, a built-in scene's idle time) and, for one
+render, `nextSleep` (`logic/nextSleepDuration`), which beats the interval.
+The frame's own interval is only the fallback for a scene with no opinion.
+On a frame rendered on the server the scene runs on the plane, so the plane
+tells the board:
+
+- After every render the plane reads both from the runtime
+  (`frameos_wasm_next_sleep`, -1 when the render set none, then
+  `frameos_wasm_scene_interval`, 0 when the scene has none) and keeps the
+  answer with the picture: `nextSleep` when set, else the interval, else
+  nothing.
+- Every pull answer for that picture carries it as `X-FrameOS-Next-Render:
+  <whole seconds>`: the 200, a 304, a picture reused or kept from before a
+  wake (each keeps its own). No header: the scene has no opinion.
+- Within reason: never under **10 s** on a backend (a second-by-second clock
+  would be a render and a download every second), never under the plan's
+  floor for cloud-rendered frames on the cloud
+  (`cloudRenderedMinIntervalSeconds`, 300 s, the floor the frame's own
+  interval has there), never over **7 days**.
+- The board takes it where its own runtime's interval would go
+  (`fos_pass_interval_seconds` in `fos_client.c`): its next pass, its deep
+  sleep and the `nextRenderAt` it tells the plane, so the picture drawn
+  before the wake is drawn for the time the scene asked. A pull with no
+  answer (no network, an error) leaves the frame's interval.
 
 ## Deep sleep: the picture is drawn before the wake
 
@@ -319,13 +422,6 @@ that is at least 10% longer.
 - A tap answers in a pull's time (a second or three on e-paper; on an LCD
   it shows), since the scene runs on the plane: no animation, no
   `hover:` / `active:` light while the finger is down.
-- A frame rendered on the server wakes on the frame's interval, as a board
-  with no runtime always has: a scene's own `refreshInterval` and its
-  `nextSleep` do not reach it (a clock that wants every minute gets the
-  frame's five). The way there: the plane sends them with the pull (both
-  planes' renderers would report `frameos_wasm_scene_interval` /
-  `frameos_wasm_next_sleep`, the cloud's held to its floor) and the board
-  takes its next wake from it.
 - A press sent through the backend's event route to a frame it renders
   (`POST …/event/pointerDown`, a tap in the workspace) is forwarded to the
   board's own HTTP API, not held on the plane like a custom event, so its

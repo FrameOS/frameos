@@ -294,6 +294,33 @@ describe("service-settings delivery to a cloud-managed frame", () => {
     });
   });
 
+  it("serves a board the cloud renders for no key, and the keys again once it renders itself", async () => {
+    // docs/server-rendering.md "Nothing to keep on the board": the render
+    // here has the keys; the board runs no scene. Its groups stay listed, so
+    // it deletes the copies it held.
+    const frame = await activeFrame();
+    const scene = await createStoreScene(frame.accountId, "data/unsplash");
+    await assignScene(frame.frame_id, scene.id);
+    await saveSettings({ unsplash: { accessKey: unsplashKey } });
+    await db
+      .update(frames)
+      .set({ hardware: { platform: "esp32-s3" }, settings: { render_mode: "remote" } })
+      .where(eq(frames.id, frame.frame_id));
+
+    const remote = await pull(frame.frame_id, frame.access_token);
+    expect(remote.status).toBe(200);
+    const body = await remote.text();
+    expect(JSON.parse(body)).toEqual({ groups: ["unsplash"], settings: {} });
+    expect(body).not.toContain(unsplashKey);
+
+    await db.update(frames).set({ settings: { render_mode: "local" } }).where(eq(frames.id, frame.frame_id));
+    const local = await pull(frame.frame_id, frame.access_token);
+    await expect(local.json()).resolves.toEqual({
+      groups: ["unsplash"],
+      settings: { unsplash: { accessKey: unsplashKey } },
+    });
+  });
+
   it("serves nothing for a scene the owner did not grant, even though it declares a group", async () => {
     const frame = await activeFrame();
     const scene = await createStoreScene(frame.accountId, "data/unsplash");

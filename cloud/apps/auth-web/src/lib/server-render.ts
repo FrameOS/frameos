@@ -9,7 +9,7 @@
 // Shared by auth-web (the pull) and the frame hub (the pre-render), so it
 // imports nothing from Next.
 import { createHash } from "node:crypto";
-import { and, eq, inArray, isNull, or, sql, gt } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or, sql, gt } from "drizzle-orm";
 import { frameCommands, frameServerRenders, frames, linkedClients, type createDb } from "@frameos-cloud/db";
 import { revealedServiceSettings } from "./account-settings";
 import { linkedClientScopes } from "./backend-auth";
@@ -86,6 +86,35 @@ const maxBuiltInStateBytes = 32 * 1024;
 
 export function isBuiltInSceneId(id: unknown): id is string {
   return typeof id === "string" && builtInSceneIds.includes(id);
+}
+
+// What a frame's render process keeps between two pulls that no scene state
+// holds, at most (JSON bytes): its UIs' text, caret, open keyboard and
+// scrolls, and its apps' `frameos.remember` values. An ESP32's budget for
+// one node's remembered values.
+export const maxKeptStateBytes = 512 * 1024;
+
+/**
+ * The kept state a render reported (SceneRenderResult.keptState) as the
+ * plane stores it for the next pull (docs/server-rendering.md "State and
+ * events"): undefined when the render said nothing (a runtime without the
+ * report: the stored one stays), null when nothing lasts (`{}`), when it is
+ * not a JSON object, or past maxKeptStateBytes; else the runtime's own text,
+ * as it was.
+ */
+export function storedKeptState(reported: unknown): string | null | undefined {
+  if (typeof reported !== "string") {
+    return undefined;
+  }
+  if (Buffer.byteLength(reported, "utf8") > maxKeptStateBytes) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(reported);
+    return isRecord(parsed) && Object.keys(parsed).length > 0 ? reported : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +337,35 @@ export function prerenderLeadMs(lastRenderMs: number | null | undefined): number
  * that is not a layout counts, and, for the plane's own, a built-in scene
  * (the switcher, the scene settings) a render ended on.
  */
+/** The longest a scene may ask the board to wait for its next picture. */
+export const maxNextRenderSeconds = 7 * 86400;
+
+/**
+ * When the scene wants its next picture, in seconds from the pull that hands
+ * this one out (docs/server-rendering.md "When the next picture is due"): the
+ * render's own `nextSleep` when it set one, else the scene's
+ * `refreshInterval`, held between `floorSeconds` (the plan's floor for
+ * cloud-rendered frames, the floor the frame's own interval has) and seven
+ * days. Null when the scene has no opinion: the board keeps the frame's
+ * interval.
+ */
+export function serverNextRenderSeconds(
+  report: { nextSleep?: number | null | undefined; refreshInterval?: number | null | undefined },
+  floorSeconds: number = cloudRenderedMinIntervalSeconds,
+): number | null {
+  const { nextSleep, refreshInterval } = report;
+  const wanted =
+    typeof nextSleep === "number" && Number.isFinite(nextSleep) && nextSleep >= 0
+      ? nextSleep
+      : typeof refreshInterval === "number" && Number.isFinite(refreshInterval) && refreshInterval > 0
+        ? refreshInterval
+        : null;
+  if (wanted === null) {
+    return null;
+  }
+  return Math.min(maxNextRenderSeconds, Math.max(Math.ceil(floorSeconds), Math.round(wanted)));
+}
+
 export function chooseServerRenderScene(input: {
   activeScene: string | null | undefined;
   deviceScene: string | null | undefined;
@@ -515,9 +573,12 @@ function heldEvents(row: RenderRow): { name: string; origin: string; payload?: u
 type Drawn = {
   body: Buffer;
   etag: string;
+  nextRenderSeconds: number | null;
   renderMs: number;
   scene: string;
   states: Record<string, Record<string, unknown>>;
+  /** storedKeptState of what the render reported: undefined leaves the stored one. */
+  keptState: string | null | undefined;
 };
 
 type DrawFailure = { code: string; message: string; retryAfterSeconds?: number };
@@ -547,6 +608,8 @@ async function draw(
     pendingSwitch: boolean;
     render?: ServerRenderer | undefined;
     withEvents: boolean;
+    /** Hand the render the state the last one kept: a pull's, never a picture for a wake. */
+    withKeptState: boolean;
   },
 ): Promise<{ checksum: string; drawn: Drawn; logs: string[] } | { failure: DrawFailure; logs?: string[] }> {
   const loaded = await frameScenes(db, frame.id);
@@ -586,6 +649,7 @@ async function draw(
       settings: await serviceSettings(db, frame, linkedClient),
       states,
       ...(typeof settings.timezone === "string" ? { timeZone: settings.timezone } : {}),
+      ...(input.withKeptState && row.keptState ? { keptState: row.keptState } : {}),
       width: canvas.width,
     });
   } catch (error) {
@@ -640,9 +704,25 @@ async function draw(
     result.state,
   );
   const after = rendered !== undefined ? { ...states, [ended]: rendered } : states;
+  const keptState = storedKeptState(result.keptState);
+  if (
+    keptState === null &&
+    typeof result.keptState === "string" &&
+    Buffer.byteLength(result.keptState, "utf8") > maxKeptStateBytes
+  ) {
+    logWarn("server_render.kept_state_too_large", { bytes: Buffer.byteLength(result.keptState, "utf8"), frameId: frame.id });
+  }
   return {
     checksum,
-    drawn: { body, etag: serverRenderEtag(body), renderMs: result.renderMs, scene: ended, states: after },
+    drawn: {
+      body,
+      etag: serverRenderEtag(body),
+      nextRenderSeconds: serverNextRenderSeconds(result),
+      renderMs: result.renderMs,
+      scene: ended,
+      states: after,
+      keptState,
+    },
     logs: result.logs,
   };
 }
@@ -709,8 +789,16 @@ function sceneLogPayloads(logs: readonly string[] | undefined, heard = false): u
 }
 
 export type ServerRenderPull =
-  | { etag: string; status: 304 }
-  | { body: Buffer; etag: string; from: "picture" | "prerender" | "render"; scene: string; status: 200 }
+  | { etag: string; nextRenderSeconds: number | null; scene: string; status: 304 }
+  | {
+      body: Buffer;
+      etag: string;
+      from: "picture" | "prerender" | "render";
+      /** When the scene wants the picture after this one (serverNextRenderSeconds); null: no opinion. */
+      nextRenderSeconds: number | null;
+      scene: string;
+      status: 200;
+    }
   | { error: string; message: string; retryAfterSeconds?: number; status: 409 | 429 | 502 | 503 };
 
 /**
@@ -748,8 +836,16 @@ export async function pullServerRender(
   const pendingSwitch = await hasPendingSceneSwitch(db, frameId, now);
   const candidate = candidateServerRenderScene({ activeScene: row.activeScene, deviceScene, pendingSwitch });
 
-  const answer = (body: Buffer, etag: string, from: "picture" | "prerender" | "render", scene: string): ServerRenderPull =>
-    ifNoneMatchHas(input.ifNoneMatch, etag) ? { etag, status: 304 } : { body, etag, from, scene, status: 200 };
+  const answer = (
+    body: Buffer,
+    etag: string,
+    from: "picture" | "prerender" | "render",
+    scene: string,
+    nextRenderSeconds: number | null,
+  ): ServerRenderPull =>
+    ifNoneMatchHas(input.ifNoneMatch, etag)
+      ? { etag, nextRenderSeconds, scene, status: 304 }
+      : { body, etag, from, nextRenderSeconds, scene, status: 200 };
 
   // The last picture again: nothing it depends on moved, and the plan's
   // floor has not passed since it was drawn. Never for a pull with input:
@@ -760,7 +856,7 @@ export async function pullServerRender(
     row.picture &&
     row.pictureEtag
   ) {
-    return answer(row.picture, row.pictureEtag, "picture", row.pictureScene as string);
+    return answer(row.picture, row.pictureEtag, "picture", row.pictureScene as string, row.pictureNextRenderSeconds);
   }
 
   // The picture drawn before this wake: taken once, its state committed now.
@@ -773,6 +869,7 @@ export async function pullServerRender(
         pendingStates: {},
         picture: row.prerender,
         pictureEtag: row.prerenderEtag,
+        pictureNextRenderSeconds: row.prerenderNextRenderSeconds,
         picturePanel: row.prerenderPanel,
         pictureRevision: row.revision,
         pictureScene: row.prerenderScene,
@@ -781,6 +878,7 @@ export async function pullServerRender(
         prerenderAsOf: null,
         prerenderEtag: null,
         prerenderMs: null,
+        prerenderNextRenderSeconds: null,
         prerenderPanel: null,
         prerenderRevision: null,
         prerenderScene: null,
@@ -789,6 +887,8 @@ export async function pullServerRender(
         renderMs: row.prerenderMs,
         renderedAt: now,
         ...(isRecord(row.prerenderState) ? { states: row.prerenderState } : {}),
+        // Drawn from none: what a sleep left is the runtime's fresh process.
+        keptState: null,
         updatedAt: now,
       })
       .where(and(eq(frameServerRenders.frameId, frameId), eq(frameServerRenders.revision, row.revision)))
@@ -800,7 +900,13 @@ export async function pullServerRender(
         row.prerenderScene,
         isRecord(row.prerenderState) ? statesRecord(row.prerenderState) : statesRecord(row.states),
       );
-      return answer(row.prerender, row.prerenderEtag, "prerender", row.prerenderScene as string);
+      return answer(
+        row.prerender,
+        row.prerenderEtag,
+        "prerender",
+        row.prerenderScene as string,
+        row.prerenderNextRenderSeconds,
+      );
     }
   }
 
@@ -816,6 +922,7 @@ export async function pullServerRender(
     pendingSwitch,
     render: input.render,
     withEvents: true,
+    withKeptState: true,
   });
   if ("failure" in outcome) {
     const { failure } = outcome;
@@ -845,12 +952,16 @@ export async function pullServerRender(
     activeScene: drawn.scene,
     picture: drawn.body,
     pictureEtag: drawn.etag,
+    pictureNextRenderSeconds: drawn.nextRenderSeconds,
     picturePanel: panelKey,
     pictureScene: drawn.scene,
     pictureScenesChecksum: checksum,
     renderError: null,
     renderMs: drawn.renderMs,
     renderedAt: now,
+    // What the process kept goes with the picture that shows it, whatever
+    // becomes of the state: the input it heard is not heard again.
+    ...(drawn.keptState !== undefined ? { keptState: drawn.keptState } : {}),
     updatedAt: now,
   };
   // Its state, and the events and verb state it used up, only if no verb
@@ -896,7 +1007,7 @@ export async function pullServerRender(
     },
     ...sceneLogPayloads(outcome.logs, !!deviceInput || heldEvents(row).length > 0),
   ]);
-  return answer(drawn.body, drawn.etag, "render", drawn.scene);
+  return answer(drawn.body, drawn.etag, "render", drawn.scene, drawn.nextRenderSeconds);
 }
 
 // A kept pre-render's columns, emptied.
@@ -905,6 +1016,7 @@ const noPrerender = {
   prerenderAsOf: null,
   prerenderEtag: null,
   prerenderMs: null,
+  prerenderNextRenderSeconds: null,
   prerenderPanel: null,
   prerenderRevision: null,
   prerenderScene: null,
@@ -915,10 +1027,17 @@ const noPrerender = {
  * A frame going to sleep leaves a built-in scene (the switcher, the scene
  * settings) for the scene it was opened from (its state's `from`), as the
  * device's own runtime does, which never keeps one past a sleep
- * (docs/server-rendering.md "Keys, touch and the schedule"). Called before
- * the picture for the wake is drawn. True when it went back.
+ * (docs/server-rendering.md "Keys, touch and the schedule"). What its render
+ * process kept goes too (a focused field, an open keyboard, the apps'
+ * remembered values: "State and events"), as a board's RAM does, and a
+ * picture that showed it is no longer the frame's. Called before the
+ * picture for the wake is drawn. True when it left a built-in scene.
  */
 export async function leaveBuiltInSceneForSleep(db: Database, frameId: string): Promise<boolean> {
+  await db
+    .update(frameServerRenders)
+    .set({ revision: sql`${frameServerRenders.revision} + 1`, keptState: null, updatedAt: new Date() })
+    .where(and(eq(frameServerRenders.frameId, frameId), isNotNull(frameServerRenders.keptState)));
   const [row] = await db
     .select({ activeScene: frameServerRenders.activeScene, states: frameServerRenders.states })
     .from(frameServerRenders)
@@ -994,6 +1113,7 @@ export async function prerenderFrame(
     pendingSwitch: await hasPendingSceneSwitch(db, frameId, new Date()),
     render: input.render,
     withEvents: false,
+    withKeptState: false,
   });
   if ("failure" in outcome) {
     logWarn("server_render.prerender_failed", { code: outcome.failure.code, frameId });
@@ -1006,6 +1126,7 @@ export async function prerenderFrame(
       prerenderAsOf: input.asOf,
       prerenderEtag: outcome.drawn.etag,
       prerenderMs: outcome.drawn.renderMs,
+      prerenderNextRenderSeconds: outcome.drawn.nextRenderSeconds,
       prerenderPanel: row.picturePanel,
       prerenderRevision: row.revision,
       prerenderScene: outcome.drawn.scene,

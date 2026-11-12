@@ -1626,6 +1626,108 @@ type
     events*: JsonNode ## config.json `events`: what its onEvent hears ("*": all of it)
     byteIterFields: seq[string] ## config.json fields with the `byteIter` capability
 
+when not defined(frameosEmbedded):
+  # What a control plane carries from one render process to the next
+  # (docs/server-rendering.md, "Kept between pulls"): each live app's
+  # `frameos.remember` values. A board keeps them until the scene unloads or
+  # the chip sleeps; a plane draws every pull in a new process and hands them
+  # over (wasm_main's frameos_wasm_kept_state). Off until that runtime turns
+  # it on (`keepAppMemoryAcrossProcesses`): a Pi keeps its apps in one
+  # process and needs no list of them. Not in the firmware.
+  type ParkedAppMemory = tuple[sceneId: string, nodeId: int, memory: JsonNode]
+  var
+    appMemoryTracked {.threadvar.}: bool
+    liveDynamicJsApps {.threadvar.}: seq[DynamicJsApp]
+    parkedAppMemory {.threadvar.}: seq[ParkedAppMemory]
+
+  proc keepAppMemoryAcrossProcesses*() =
+    ## Track the live apps from now on, so their remembered values can be
+    ## handed out (`keptAppMemory`) and put back (`restoreKeptAppMemory`).
+    appMemoryTracked = true
+
+  proc appSceneId(app: DynamicJsApp): string =
+    if app.scene.isNil: "" else: app.scene.id.string
+
+  proc applyKeptMemory(app: DynamicJsApp, memory: JsonNode) =
+    ## Put back what an app of the last process remembered: its whole memory,
+    ## as `remember` would have left it. Skipped when it is over the node's
+    ## limit; a malformed key or value is left out.
+    if app.runtime.isNil or memory.isNil or memory.kind != JObject:
+      return
+    var kept = initTable[string, string]()
+    var bytes = 0
+    for key, value in memory:
+      if key.len == 0 or value.kind != JString:
+        continue
+      let text = value.getStr()
+      if text.len == 0 or text == "null":
+        continue
+      kept[key] = text
+      bytes += key.len + text.len
+    if bytes > JsAppMemoryMaxBytes:
+      return
+    app.runtime.memory = kept
+    app.runtime.memoryBytes = bytes
+
+  proc takeParkedMemory(app: DynamicJsApp) =
+    ## A parked entry for this app is applied and gone: each is used once, so
+    ## a scene left and entered again in one process starts empty, as on a
+    ## board.
+    let sceneId = app.appSceneId()
+    for i in 0 ..< parkedAppMemory.len:
+      if parkedAppMemory[i].sceneId == sceneId and parkedAppMemory[i].nodeId == app.nodeId.int:
+        let memory = parkedAppMemory[i].memory
+        parkedAppMemory.delete(i)
+        app.applyKeptMemory(memory)
+        return
+
+  proc trackDynamicJsApp(app: DynamicJsApp) =
+    if not appMemoryTracked:
+      return
+    liveDynamicJsApps.add app
+    app.takeParkedMemory()
+
+  proc untrackDynamicJsApp(app: DynamicJsApp) =
+    let i = liveDynamicJsApps.find(app)
+    if i >= 0:
+      liveDynamicJsApps.delete(i)
+
+  proc keptAppMemory*(): JsonNode =
+    ## Every live app's remembered values, for the next process:
+    ## `[{sceneId, nodeId, memory: {key: <the JSON text remember kept>}}]`,
+    ## an app with nothing remembered left out. A layout's apps and a
+    ## `<Scene>`'s are live apps too.
+    result = newJArray()
+    for app in liveDynamicJsApps:
+      if app.runtime.isNil or app.runtime.memory.len == 0:
+        continue
+      var memory = newJObject()
+      for key, value in app.runtime.memory:
+        memory[key] = newJString(value)
+      result.add %*{"sceneId": app.appSceneId(), "nodeId": app.nodeId.int, "memory": memory}
+
+  proc restoreKeptAppMemory*(entries: JsonNode): int =
+    ## What `keptAppMemory` handed out in the last process: applied to a live
+    ## app it names at once, else parked until that app is built
+    ## (initDynamicJsApp). How many entries it took; malformed ones are
+    ## skipped, and so is an entry over the node's `remember` limit.
+    parkedAppMemory.setLen(0)
+    if entries.isNil or entries.kind != JArray:
+      return 0
+    for entry in entries:
+      if entry.kind != JObject:
+        continue
+      let
+        sceneId = entry{"sceneId"}.getStr()
+        nodeId = entry{"nodeId"}
+        memory = entry{"memory"}
+      if sceneId.len == 0 or nodeId.isNil or nodeId.kind != JInt or memory.isNil or memory.kind != JObject:
+        continue
+      parkedAppMemory.add (sceneId: sceneId, nodeId: nodeId.getInt(), memory: memory)
+      inc result
+    for app in liveDynamicJsApps:
+      app.takeParkedMemory()
+
 proc appFile(runtime: JsAppRuntime, name: string): string =
   ## Contents of one of the app's files, "" when absent.
   if runtime.sources.isNil or runtime.sources.kind != JObject:
@@ -2123,7 +2225,7 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
       let capabilities = if field.kind == JObject: field{"capabilities"} else: nil
       if not capabilities.isNil and capabilities.kind == JObject and capabilities.hasKey("byteIter"):
         byteIterFields.add(field{"name"}.getStr(""))
-  return DynamicJsApp(
+  let app = DynamicJsApp(
     nodeId: node.id,
     nodeName: node.data{"name"}.getStr(keyword),
     appKeyword: keyword,
@@ -2134,6 +2236,9 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
     events: config{"events"},
     byteIterFields: byteIterFields
   )
+  when not defined(frameosEmbedded):
+    app.trackDynamicJsApp()
+  return app
 
 proc isDynamicJsApp*(app: AppRoot): bool =
   app of DynamicJsApp
@@ -2151,6 +2256,8 @@ proc releaseJsAppRuntime*(app: AppRoot) =
   ## itself after about seven.
   if not (app of DynamicJsApp):
     return
+  when not defined(frameosEmbedded):
+    untrackDynamicJsApp(DynamicJsApp(app))
   if not app.scene.isNil:
     forgetUiTarget(app.scene.id.string, app.nodeId.int, cast[pointer](app))
   let runtime = DynamicJsApp(app).runtime

@@ -36,6 +36,8 @@ async function standIn(options: SceneRenderOptions): Promise<SceneRenderResult> 
     height: options.height,
     logs: [],
     png: Buffer.alloc(0),
+    // The scene wants its next picture in half an hour (docs/server-rendering.md).
+    refreshInterval: 1800,
     renderMs: 5,
     rgba: new Uint8Array(options.width * options.height * 4).fill(255),
     state: { count: 7 },
@@ -209,6 +211,8 @@ describe("a sleeping frame the cloud renders for", () => {
     expect(row?.prerenderScene).toBe("clock");
     expect(row?.prerenderAsOf?.getTime()).toBe(renderAt * 1000);
     expect(row?.prerenderState).toEqual({ clock: { count: 7 } });
+    // When the scene wants the picture after it, for the pull that takes it.
+    expect(row?.prerenderNextRenderSeconds).toBe(1800);
     expect(row?.prerender?.subarray(0, 4).toString("latin1")).toBe("FOSB");
     // Kept, not committed: the pull at the wake does that.
     expect(row?.states).toEqual({});
@@ -219,7 +223,16 @@ describe("a sleeping frame the cloud renders for", () => {
     const { frame, privateKey, token } = await createFrame({ render_mode: "remote" });
     await db
       .update(frameServerRenders)
-      .set({ activeScene: "system/sceneSwitcher", states: { "system/sceneSwitcher": { from: "clock" } } })
+      .set({
+        activeScene: "system/sceneSwitcher",
+        states: { "system/sceneSwitcher": { from: "clock" } },
+        // An open keyboard and an app's remembered value, which a device's
+        // sleep forgets too.
+        keptState: JSON.stringify({
+          apps: [{ memory: { draft: "1" }, nodeId: 1, sceneId: "clock" }],
+          targets: [{ focus: 1, keyboard: true, nodeId: 1, sceneId: "clock", text: "" }],
+        }),
+      })
       .where(eq(frameServerRenders.frameId, frame.id));
     const renderAt = Math.floor(Date.now() / 1000) + 2;
     await sleepFor(hub.port, token, privateKey, 2, renderAt);
@@ -227,9 +240,11 @@ describe("a sleeping frame the cloud renders for", () => {
     const outcome = await waitFor(() => outcomes.find((entry) => entry.frameId === frame.id), "pre-render");
     expect(outcome.outcome).toBe("kept");
     expect(renders[0]).toMatchObject({ frame: { pixelFormat: 1, rotate: 0 }, sceneId: "clock" });
+    expect(renders[0]?.keptState).toBeUndefined();
     const [row] = await db.select().from(frameServerRenders).where(eq(frameServerRenders.frameId, frame.id));
     expect(row?.activeScene).toBe("clock");
     expect(row?.states).toEqual({});
+    expect(row?.keptState).toBeNull();
     expect(row?.prerenderScene).toBe("clock");
   });
 

@@ -7,6 +7,8 @@ import { Checkbox } from '../../components/Checkbox'
 import { Spinner } from '../../components/Spinner'
 import { frameLogic } from '../frame/frameLogic'
 import { pushScenesOverUsb, pushedScenesMessage } from './embeddedUsbScenePush'
+import { frameRendersOnServer } from '../../utils/renderOnServer'
+import { workspaceMode } from './workspaceSurfaces'
 import {
   embeddedUsbLogStreamSessionPort,
   prepareSerialPortReconnect,
@@ -258,6 +260,10 @@ export function EmbeddedUsbFirmwareUpdate({
   // cable to update it.
   const [alsoPushScenes, setAlsoPushScenes] = useState(true)
   const scenes = frameForm?.scenes ?? frame.scenes ?? []
+  // A board its plane renders for is sent none of its scenes
+  // (docs/server-rendering.md "Nothing to keep on the board"): no tick.
+  const plane = workspaceMode()
+  const offerScenes = plane === 'frameAdmin' || !frameRendersOnServer(frame, plane)
 
   const webSerialSupported = isWebSerialSupported()
   const busy = phase === 'connecting' || phase === 'preparing' || phase === 'flashing'
@@ -431,7 +437,7 @@ export function EmbeddedUsbFirmwareUpdate({
           // usb_api is only up once waitForUsbApiReadyAfterFlash returns. A
           // failure here is reported as its own thing — the firmware update
           // itself already succeeded and must not be reported as failed.
-          if (alsoPushScenes && scenes.length > 0) {
+          if (offerScenes && alsoPushScenes && scenes.length > 0) {
             setFlashMessage(`Pushing ${scenes.length} scene${scenes.length === 1 ? '' : 's'} over USB.`)
             try {
               await pushScenesOverUsb(frame.id, scenes)
@@ -471,17 +477,19 @@ export function EmbeddedUsbFirmwareUpdate({
 
   return (
     <div className="space-y-2">
-      <Checkbox
-        label="Also deploy scenes & settings"
-        value={alsoPushScenes}
-        onChange={setAlsoPushScenes}
-        disabled={busy || scenes.length === 0}
-        title={
-          scenes.length === 0
-            ? 'This frame has no scenes to push'
-            : 'After the board reboots on the new firmware, send it the workspace’s current scenes over the same cable. Settings still arrive when the frame next connects.'
-        }
-      />
+      {offerScenes ? (
+        <Checkbox
+          label="Also deploy scenes & settings"
+          value={alsoPushScenes}
+          onChange={setAlsoPushScenes}
+          disabled={busy || scenes.length === 0}
+          title={
+            scenes.length === 0
+              ? 'This frame has no scenes to push'
+              : 'After the board reboots on the new firmware, send it the workspace’s current scenes over the same cable. Settings still arrive when the frame next connects.'
+          }
+        />
+      ) : null}
       {/* Its own block under the tick, at a width that fits every label:
           the checkbox is inline, so an inline button shared its line and
           hopped to the next one each time "Updating 7%" grew a digit. */}

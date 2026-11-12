@@ -89,6 +89,7 @@ import { frameOwningBackend } from "../../auth-web/src/lib/frame-backend-owner";
 import {
   cloudRenderedMinIntervalSeconds,
   frameIsCloudRendered,
+  messageForServerRenderedBoard,
   planeKeepsSceneState,
 } from "../../auth-web/src/lib/cloud-rendered";
 import {
@@ -868,6 +869,11 @@ export async function startFrameHub(
     }
   }
 
+  // The verbs that carry a scene's content: scenes, a switch's state, an
+  // event's payload. What a board rendered on the server is sent of them is
+  // messageForServerRenderedBoard's.
+  const boardContentVerbs = new Set(["set_scenes", "set_current_scene", "scene_event"]);
+
   // What a queued command goes out as: the row's own message, except that a
   // set_scenes to an ESP32 whose current set is known goes as the difference
   // from it (scenes_patch, lib/scenes-patch.ts). No reason not to is a reason
@@ -876,6 +882,27 @@ export async function startFrameHub(
     session: DeviceSession,
     command: { id: string; type: string; payload: unknown },
   ): Promise<Record<string, unknown>> {
+    // A board the cloud renders for is sent nothing of its scenes
+    // (docs/server-rendering.md "Nothing to keep on the board"), decided
+    // when the command goes, so a push queued before the switch is covered.
+    if (boardContentVerbs.has(command.type)) {
+      const [frame] = await db
+        .select({ hardware: frames.hardware, settings: frames.settings })
+        .from(frames)
+        .where(eq(frames.id, session.frame.id))
+        .limit(1);
+      if (frame && planeKeepsSceneState(frame)) {
+        if (command.type === "set_scenes") {
+          // The board will hold the empty scene under this push's checksum:
+          // the push is no base for a patch once it renders itself again.
+          await db
+            .update(frameCommands)
+            .set({ payload: sql`${frameCommands.payload} - 'scene_hashes'` })
+            .where(eq(frameCommands.id, command.id));
+        }
+        return messageForServerRenderedBoard(commandMessage(command));
+      }
+    }
     if (command.type === "set_scenes" && isRecord(command.payload) && command.payload.no_patch !== true) {
       const [frame] = await db
         .select({
