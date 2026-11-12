@@ -40,6 +40,23 @@ PRERENDER_LEAD_EXTRA_SECONDS = 10
 PRERENDER_KEEP_AFTER_SECONDS = 300
 PRERENDER_JOB = "prerender_thin_client"
 
+# What a board rendered here holds in place of its scenes (docs/server-
+# rendering.md "Nothing to keep on the board"): one scene with nothing in it.
+# The scenes run here, and what they hold (field values, an app's settings,
+# a photo album's share link) never goes to the board. One and not none: the
+# board's scene store always keeps a scene, and a set of one replaces what it
+# had, each scene's kept state with it. The cloud sends the same one
+# (cloud-rendered.ts serverRenderedBoardScene); the corpus is
+# docs/server-rendered-board-scene.json.
+SERVER_RENDERED_BOARD_SCENE: dict[str, Any] = {
+    "id": "rendered-on-server",
+    "name": "Rendered on the server",
+    "nodes": [],
+    "edges": [],
+    "fields": [],
+    "settings": {"execution": "interpreted"},
+}
+
 
 def _revision_key(frame_id: int) -> str:
     return f"frame:{frame_id}:render_revision"

@@ -250,8 +250,11 @@ async def api_embedded_device_commands(
         await _fold_deploy_progress_command(db, redis, frame, command)
         await _record_deploy_if_settled(db, redis, frame, command)
     await _clear_sleep_forecast(db, redis, frame)
+    from app.tasks.embedded_firmware import is_thin_client_frame
+
+    rendered_on_server = is_thin_client_frame(frame)
     return {
-        "commands": [frame_command_wire(command) for command in handed],
+        "commands": [frame_command_wire(command, rendered_on_server=rendered_on_server) for command in handed],
         "pending": pending_command_count(db, frame, now),
         # A deploy is waiting and the device does not hold it: pull the
         # scenes and settings now, whatever the device's own sync rules say

@@ -435,6 +435,9 @@ async def test_scene_state_event_reaches_the_store_before_the_thin_client(async_
 
     async def forward(frame_arg, redis_arg, **kwargs):
         stored_when_forwarded.append((kwargs['path'], await redis.get(_states_key(frame))))
+        # Asked to render, and told nothing of the state (docs/server-
+        # rendering.md "Nothing to keep on the board").
+        assert kwargs['json_body'] == {}
         return 'OK'
 
     with patch('app.api.frames._forward_frame_request', side_effect=forward):
@@ -444,7 +447,7 @@ async def test_scene_state_event_reaches_the_store_before_the_thin_client(async_
             headers={'content-type': 'application/json'})
 
     assert response.status_code == 200, response.text
-    assert [path for path, _ in stored_when_forwarded] == ['/event/setSceneState']
+    assert [path for path, _ in stored_when_forwarded] == ['/event/render']
     assert json.loads(stored_when_forwarded[0][1]) == {'slides': {'index': 5}}
 
 
@@ -489,6 +492,7 @@ async def test_scene_switch_event_for_a_pico_is_pushed_after_the_store_moves(asy
             await redis.get(f'frame:{frame.id}:active_scene'),
             await redis.get(_states_key(frame)),
         ))
+        assert kwargs['json_body'] == {}
         return 'OK'
 
     with patch('app.api.frames._forward_frame_request', side_effect=forward):
@@ -500,7 +504,7 @@ async def test_scene_switch_event_for_a_pico_is_pushed_after_the_store_moves(asy
     assert response.status_code == 200, response.text
     assert len(seen_when_forwarded) == 1
     path, active, states = seen_when_forwarded[0]
-    assert path == '/event/setCurrentScene'
+    assert path == '/event/render'
     assert active in (b'other', 'other')
     assert json.loads(states) == {'other': {'index': 4}}
     assert db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id).count() == 0
@@ -525,6 +529,9 @@ async def test_preview_on_a_pico_is_what_its_render_pull_runs_until_a_switch(
             headers={'content-type': 'application/json'})
         assert response.status_code == 200, response.text
         forward.assert_awaited_once()
+        # The previewed scenes stay here; the board is asked to render.
+        assert forward.await_args.kwargs['path'] == '/event/render'
+        assert forward.await_args.kwargs['json_body'] == {}
 
     calls: list = []
     monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', scene_renderer(calls))
@@ -667,7 +674,9 @@ async def test_a_custom_event_for_a_pico_waits_for_its_next_pull(
         response = await async_client.post(
             f'/api/frames/{frame.id}/event/wiggle', json={'times': 3}, headers={'content-type': 'application/json'})
         assert response.status_code == 200, response.text
-        assert forward.await_args.kwargs['path'] == '/event/wiggle'
+        # Held here; the board is asked to render, and pulls it.
+        assert forward.await_args.kwargs['path'] == '/event/render'
+        assert forward.await_args.kwargs['json_body'] == {}
         # Said over HTTP, `button` is a scene event too.
         response = await async_client.post(
             f'/api/frames/{frame.id}/event/button', json={'label': 'A'}, headers={'content-type': 'application/json'})

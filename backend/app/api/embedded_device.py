@@ -78,6 +78,7 @@ from app.utils.events_contract_gen import BUILT_IN_SCENE_IDS
 from app.utils.frame_commands import pending_command_types, previewed_scenes
 from app.utils.server_render import (
     PRERENDER_MAX_SKEW_SECONDS,
+    SERVER_RENDERED_BOARD_SCENE,
     bump_render_revision,
     epoch_ms,
     etag_matches,
@@ -1449,7 +1450,16 @@ def embedded_scenes_payload(db: Session, frame: Frame) -> bytes:
     (utils/retired_apps.py). The payload — and so the ETag — follows the
     version the board reported at boot, which is what moves it onto the
     JavaScript app on its first pull after the OTA that removed the Nim one.
+
+    A board rendered here gets one empty scene instead
+    (SERVER_RENDERED_BOARD_SCENE, docs/server-rendering.md "Nothing to keep on
+    the board"): its scenes, the preview's too, run on this backend, and what
+    they hold stays here. The ETag follows, so a deploy is acked as before.
     """
+    from app.tasks.embedded_firmware import is_thin_client_frame
+
+    if is_thin_client_frame(frame):
+        return json.dumps([SERVER_RENDERED_BOARD_SCENE], separators=(",", ":"), sort_keys=True).encode("utf-8")
     source = previewed_scenes(db, frame)
     if source is None:
         source = frame.scenes or []
@@ -1589,9 +1599,17 @@ def embedded_scenes_etag(db: Session, frame: Frame) -> str:
 
 
 def embedded_settings_document(db: Session, frame: Frame) -> tuple[bytes, str]:
-    """The `/embedded/settings` body and its ETag, the way the route serves it."""
+    """The `/embedded/settings` body and its ETag, the way the route serves it.
+
+    A board rendered here gets none of the service-settings groups (the
+    account's API keys): its scenes run on this backend, which renders with
+    them (`embedded_settings_payload`). Absent, a group is deleted from the
+    board and from its NVS cache (fos_settings.c), so a board switched to
+    render on the server lets go of the keys it held."""
+    from app.tasks.embedded_firmware import is_thin_client_frame
+
     payload_dict = {
-        **embedded_settings_payload(db, frame),
+        **({} if is_thin_client_frame(frame) else embedded_settings_payload(db, frame)),
         "frame": embedded_frame_settings(frame),
         # The scene schedule ({"events": [...]}) — the device evaluates it
         # on-device (fos_schedule.c), same event model as the Pi scheduler.

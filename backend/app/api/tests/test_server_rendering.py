@@ -1446,3 +1446,132 @@ async def test_a_picture_drawn_before_the_wake_answers_with_its_own_next_render(
     old = await no_auth_client.get(url, params={'scene': 'clock'}, headers=auth(frame))
     assert old.status_code == 200, old.text
     assert 'x-frameos-next-render' not in old.headers
+
+
+# ------------------------------------------------------- nothing on the board
+
+
+SECRET_SCENES = [
+    {
+        'id': 'immich',
+        'name': 'Album',
+        'nodes': [
+            {'id': 'a', 'type': 'app', 'data': {'keyword': 'data/openaiImage'}},
+            {'id': 'b', 'type': 'app', 'data': {'keyword': 'image/photoAlbum', 'config': {'url': 'https://h/shared/pk_secretlink'}}},
+        ],
+        'edges': [],
+        'fields': [{'name': 'token', 'type': 'string', 'value': 'field-secret', 'access': 'public'}],
+    },
+]
+
+
+@pytest.mark.asyncio
+async def test_a_board_rendered_here_holds_one_empty_scene_and_no_keys(async_client, no_auth_client, db):
+    """docs/server-rendering.md "Nothing to keep on the board": its scenes and
+    the account's keys stay here, where they run."""
+    from app.api.embedded_device import embedded_settings_payload
+    from app.models.settings import Settings
+    from app.utils.server_render import SERVER_RENDERED_BOARD_SCENE
+
+    frame = await server_rendered_frame(async_client, db)
+    frame.scenes = SECRET_SCENES
+    db.add_all([frame, Settings(project_id=frame.project_id, key='openAI', value={'apiKey': 'sk-account'})])
+    db.commit()
+
+    scenes = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes', headers=auth(frame))
+    settings = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+
+    assert scenes.status_code == 200, scenes.text
+    assert scenes.json() == [SERVER_RENDERED_BOARD_SCENE]
+    assert settings.status_code == 200, settings.text
+    assert set(settings.json()) == {'frame', 'schedule'}
+    assert settings.json()['frame']['renderMode'] == 'remote'
+    for secret in ('sk-account', 'pk_secretlink', 'field-secret'):
+        assert secret not in scenes.text and secret not in settings.text
+    # The render here is still given them.
+    assert embedded_settings_payload(db, frame) == {'openAI': {'apiKey': 'sk-account'}}
+
+    # Back to rendering itself: the scenes and the key come back.
+    frame.device_config = {**frame.device_config, 'renderMode': 'local'}
+    db.add(frame)
+    db.commit()
+    scenes = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes', headers=auth(frame))
+    settings = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert [scene['id'] for scene in scenes.json()] == ['immich']
+    assert settings.json()['openAI'] == {'apiKey': 'sk-account'}
+
+
+@pytest.mark.asyncio
+async def test_a_preview_stays_here_too(async_client, no_auth_client, db, redis):
+    """"Preview on frame" on a board rendered here: the render runs the
+    preview, the board still holds the empty scene."""
+    from app.utils.embedded_commands import queue_embedded_scene_preview
+    from app.utils.server_render import SERVER_RENDERED_BOARD_SCENE
+
+    frame = await server_rendered_frame(async_client, db)
+    await queue_embedded_scene_preview(db, redis, frame, SECRET_SCENES, 'immich')
+    db.commit()
+
+    scenes = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes', headers=auth(frame))
+    assert scenes.json() == [SERVER_RENDERED_BOARD_SCENE]
+
+
+@pytest.mark.asyncio
+async def test_a_deploy_is_acked_when_the_board_holds_the_empty_scene(async_client, no_auth_client, db):
+    """The ETag is the empty scene's, so the queue's deploy bookkeeping holds."""
+    from app.models.frame_command import FrameCommand
+
+    frame = await server_rendered_frame(async_client, db)
+    command = enqueue_frame_command(db, frame, 'set_scenes', {})
+    db.commit()
+
+    scenes = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes', headers=auth(frame))
+    pulled = await no_auth_client.post(
+        f'/api/frames/{frame.id}/embedded/commands',
+        json={'scenes_checksum': scenes.headers['etag']},
+        headers=auth(frame),
+    )
+    assert pulled.status_code == 200, pulled.text
+    db.expire_all()
+    assert db.get(FrameCommand, command.id).status == 'acked'
+
+
+@pytest.mark.asyncio
+async def test_a_switch_or_a_state_reaches_the_board_without_the_state(async_client, no_auth_client, db, redis):
+    """The backend holds them before the queue; the board only pulls on
+    them. A frame that renders itself still gets them whole."""
+    frame = await server_rendered_frame(async_client, db)
+    with_state = {'scene_id': 'clock', 'state': {'label': 'field-secret'}}
+    event = {'name': 'setSceneState', 'payload': {'state': {'label': 'field-secret'}}}
+    enqueue_frame_command(db, frame, 'set_current_scene', with_state)
+    enqueue_frame_command(db, frame, 'scene_event', event)
+    db.commit()
+
+    pulled = await no_auth_client.post(f'/api/frames/{frame.id}/embedded/commands', json={}, headers=auth(frame))
+    assert pulled.status_code == 200, pulled.text
+    commands = pulled.json()['commands']
+    assert [(c['type'], c.get('scene_id'), c.get('state'), c.get('payload')) for c in commands] == [
+        ('set_current_scene', 'clock', None, None),
+        ('scene_event', None, None, {}),
+    ]
+    assert 'field-secret' not in pulled.text
+
+    frame.device_config = {**frame.device_config, 'renderMode': 'local'}
+    db.add(frame)
+    enqueue_frame_command(db, frame, 'set_current_scene', with_state)
+    enqueue_frame_command(db, frame, 'scene_event', event)
+    db.commit()
+    pulled = await no_auth_client.post(f'/api/frames/{frame.id}/embedded/commands', json={}, headers=auth(frame))
+    commands = pulled.json()['commands']
+    assert commands[0]['state'] == {'label': 'field-secret'}
+    assert commands[1]['payload'] == event['payload']
+
+
+def test_the_empty_scene_is_the_corpus():
+    """Both planes send the same one (docs/server-rendered-board-scene.json)."""
+    from pathlib import Path
+
+    from app.utils.server_render import SERVER_RENDERED_BOARD_SCENE
+
+    corpus = Path(__file__).resolve().parents[4] / 'docs' / 'server-rendered-board-scene.json'
+    assert json.loads(corpus.read_text())['scene'] == SERVER_RENDERED_BOARD_SCENE
