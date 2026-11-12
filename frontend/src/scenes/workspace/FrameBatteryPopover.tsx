@@ -11,6 +11,7 @@ import type { FrameType } from '../../types'
 import {
   analyzeBattery,
   batteryForecast,
+  batteryPowerStatus,
   CADENCE_WINDOW_WAKES,
   forecastCycleOptions,
   formatCycle,
@@ -18,6 +19,7 @@ import {
   nearestCycleOption,
   type BatteryAnalysis,
   type BatteryForecast,
+  type BatteryPowerStatus,
   type BatterySample,
 } from '../../utils/batteryForecast'
 import { formatFrameRelativeTime } from '../../decorators/frame'
@@ -53,8 +55,16 @@ const toneFill: Record<BatteryTone, string> = {
   critical: '#ef4444',
 }
 
-const toneLabel: Record<BatteryTone, string> = {
+const powerStatusLabel: Record<Exclude<BatteryPowerStatus, null>, string> = {
+  charging: 'Charging',
+  usb: 'On USB',
   full: 'Full',
+  'plugged-in': 'Plugged in',
+}
+
+// On the cell: "Full" is for a charger that says so (powerStatusLabel), never a guess from the level.
+const toneLabel: Record<BatteryTone, string> = {
+  full: 'Good',
   ok: 'Good',
   low: 'Getting low',
   critical: 'Charge soon',
@@ -189,7 +199,8 @@ function BatteryPanel({ frame, percent }: { frame: FrameType; percent: number })
   const selectedForecast =
     selectedCycle === observedCycle ? currentForecast : batteryForecast(analysis, selectedCycle, now)
   const loading = batteryHistoryLoading && batteryHistoryLoadedAt === null
-  const pluggedIn = latest?.onBattery === false
+  const powerStatus = batteryPowerStatus(latest)
+  const pluggedIn = powerStatus !== null
 
   return (
     <div className="flex flex-col gap-3" data-battery-tone={tone}>
@@ -198,8 +209,13 @@ function BatteryPanel({ frame, percent }: { frame: FrameType; percent: number })
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-semibold leading-none tabular-nums">{shownPercent}%</span>
-            <span className="text-[11px] font-semibold" style={{ color: toneFill[tone] }}>
-              {pluggedIn ? 'Plugged in' : toneLabel[tone]}
+            <span
+              className="text-[11px] font-semibold"
+              style={{ color: toneFill[tone] }}
+              data-testid="battery-status"
+              data-battery-power={powerStatus ?? 'battery'}
+            >
+              {powerStatus ? powerStatusLabel[powerStatus] : toneLabel[tone]}
             </span>
           </div>
           <div className="frameos-muted mt-1 truncate text-[11px]">

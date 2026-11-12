@@ -75,6 +75,9 @@ export interface BatterySample {
   uptimeSeconds: number | null
   renders: number | null
   wakeCause: string | null
+  /** The charger's word (boards with one): USB in, and charging; null when the sample did not say. */
+  usbPower: boolean | null
+  charging: boolean | null
 }
 
 export interface DischargeSegment {
@@ -151,6 +154,8 @@ export function batterySamplesFromMetrics(metrics: MetricsType[]): { samples: Ba
       continue
     }
     const onBattery = metric.metrics?.onBattery
+    const usbPower = metric.metrics?.usbPower
+    const charging = metric.metrics?.charging
     samples.push({
       t: metricTime(metric),
       percent: Math.max(0, Math.min(100, percent)),
@@ -159,6 +164,8 @@ export function batterySamplesFromMetrics(metrics: MetricsType[]): { samples: Ba
       uptimeSeconds: finiteOrNull(metric.metrics?.uptimeSeconds),
       renders: finiteOrNull(metric.metrics?.renders),
       wakeCause: typeof metric.metrics?.wakeCause === 'string' ? metric.metrics.wakeCause : null,
+      usbPower: typeof usbPower === 'boolean' ? usbPower : null,
+      charging: typeof charging === 'boolean' ? charging : null,
     })
   }
   return { samples, misreadCount }
@@ -317,15 +324,74 @@ export function batteryCadence(samples: BatterySample[]): BatteryCadence {
   return { cycleSeconds: median(gaps), awakeSeconds: median(uptimes) }
 }
 
-/** Whether the frame's settings put it to sleep between wakes. */
-export function frameDeepSleeps(
-  frame: Pick<FrameType, 'deep_sleep' | 'deep_sleep_on_battery'>,
-  onBattery: boolean | null
-): boolean {
-  if (frame.deep_sleep === true) {
+export type BatteryFrameSettings = Pick<FrameType, 'deep_sleep' | 'deep_sleep_on_battery' | 'device_config'>
+
+/**
+ * Whether the frame's settings put it to sleep between wakes: "always", or
+ * "when on battery" while it is. A cloud frame carries the power keys at the
+ * top level; a backend-managed one in `device_config`, in either spelling.
+ */
+export function frameDeepSleeps(frame: BatteryFrameSettings, onBattery: boolean | null): boolean {
+  const config = (frame.device_config ?? {}) as Record<string, unknown>
+  const deepSleep = frame.deep_sleep ?? config.deepSleep ?? config.deep_sleep
+  const deepSleepOnBattery = frame.deep_sleep_on_battery ?? config.deepSleepOnBattery ?? config.deep_sleep_on_battery
+  if (deepSleep === true) {
     return true
   }
-  return frame.deep_sleep_on_battery === true && onBattery !== false
+  return deepSleepOnBattery === true && onBattery !== false
+}
+
+/** Boots that came out of deep sleep (fos_client.c wake_cause_name). */
+const DEEP_SLEEP_WAKE_CAUSES = new Set(['timer', 'button', 'deep_sleep'])
+
+/**
+ * Whether the samples show the frame deep-sleeping, whatever its settings
+ * say: its newest boot woke from deep sleep, or it boots over and over and
+ * spends under half of each cycle up. A frame that stays awake is one long
+ * wake whose uptime climbs with the clock, and shows neither.
+ */
+export function samplesShowDeepSleep(samples: BatterySample[], cadence: BatteryCadence): boolean {
+  const wakes = batteryWakes(samples)
+  const latestWake = wakes[wakes.length - 1]
+  const wakeCause = latestWake?.samples[0]?.wakeCause
+  if (wakeCause && DEEP_SLEEP_WAKE_CAUSES.has(wakeCause)) {
+    return true
+  }
+  const { cycleSeconds, awakeSeconds } = cadence
+  return (
+    wakes.length >= 3 &&
+    cycleSeconds !== null &&
+    awakeSeconds !== null &&
+    awakeSeconds < cycleSeconds / 2 &&
+    (latestWake?.awakeSeconds ?? 0) < cycleSeconds
+  )
+}
+
+/**
+ * What the newest reading says about the power source, for the popup's
+ * status word: charging, on USB, full on USB, or on the cell (null). "Full"
+ * is only ever said on external power — a cell at 94% off USB is draining.
+ */
+export type BatteryPowerStatus = 'charging' | 'usb' | 'full' | 'plugged-in' | null
+
+/** At or above this a cell on USB that has stopped charging is full. */
+const FULL_PERCENT = 98
+
+export function batteryPowerStatus(sample: BatterySample | null): BatteryPowerStatus {
+  if (!sample) {
+    return null
+  }
+  if (sample.charging === true) {
+    return 'charging'
+  }
+  if (sample.usbPower === true) {
+    return sample.percent >= FULL_PERCENT ? 'full' : 'usb'
+  }
+  if (sample.usbPower === null && sample.onBattery === false) {
+    // No charger to ask, but the frame says it is not running off the cell.
+    return 'plugged-in'
+  }
+  return null
 }
 
 /**
@@ -375,14 +441,13 @@ export function batteryForecast(analysis: BatteryAnalysis, cycleSeconds: number,
 }
 
 /** Everything the battery popup shows, from the metrics history and the frame's settings. */
-export function analyzeBattery(
-  metrics: MetricsType[],
-  frame: Pick<FrameType, 'deep_sleep' | 'deep_sleep_on_battery'>
-): BatteryAnalysis {
+export function analyzeBattery(metrics: MetricsType[], frame: BatteryFrameSettings): BatteryAnalysis {
   const { samples, misreadCount } = batterySamplesFromMetrics(metrics)
   const latest = samples[samples.length - 1] ?? null
   const cadence = batteryCadence(samples)
-  const deepSleep = frameDeepSleeps(frame, latest?.onBattery ?? null)
+  // What the frame does beats what it was told: a setting can be stale, or
+  // live somewhere this view does not read.
+  const deepSleep = samplesShowDeepSleep(samples, cadence) || frameDeepSleeps(frame, latest?.onBattery ?? null)
   const base: BatteryAnalysis = {
     latest,
     samples,
