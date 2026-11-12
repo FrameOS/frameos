@@ -476,6 +476,9 @@ struct InstallSheet: View {
             return outcome
         }
         if succeeded {
+            // The new scene's picture (on a backend, the cover the install
+            // copied): a row that drew the placeholder first loads it again.
+            app.imageVersions[frame.id, default: 0] += 1
             await app.reloadFrame(frame.id)
             dismiss()
             onInstalled()

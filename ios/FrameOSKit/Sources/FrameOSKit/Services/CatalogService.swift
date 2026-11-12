@@ -148,10 +148,10 @@ extension FrameOSService {
             }
             return ActionOutcome(kind: .queued, message: message)
         case .backendTemplate(let templateId):
-            return try await backendInstall(frame, ["template_id": .string(templateId)], activate: activate)
+            return try await backendInstall(frame, ["template_id": .string(templateId)], activate: activate, cover: item.image)
         case .backendRepository(let template, let repositoryURL):
             if let scenes = template["scenes"], let list = scenes.arrayValue, !list.isEmpty {
-                return try await backendInstall(frame, ["scenes": scenes, "name": .string(item.name)], activate: activate)
+                return try await backendInstall(frame, ["scenes": scenes, "name": .string(item.name)], activate: activate, cover: item.image)
             }
             if let scenesURL = template["scenesUrl"]?.stringValue, !scenesURL.isEmpty {
                 let resolved = Self.resolveRepositoryURL(scenesURL, repositoryURL)
@@ -166,20 +166,21 @@ extension FrameOSService {
                 } else {
                     scenes = try await client.get(resolved)
                 }
-                return try await backendInstall(frame, ["scenes": scenes, "name": .string(item.name)], activate: activate)
+                return try await backendInstall(frame, ["scenes": scenes, "name": .string(item.name)], activate: activate, cover: item.image)
             }
             if let zip = template["zip"]?.stringValue, !zip.isEmpty {
                 // The backend fetches the zip itself (SSRF-guarded) and reads it.
                 let scenes = try await client.call("POST", "/api/templates", body: .json([
                     "format": "scenes", "url": .string(Self.resolveRepositoryURL(zip, repositoryURL)),
                 ]))
-                return try await backendInstall(frame, ["scenes": scenes, "name": .string(item.name)], activate: activate)
+                return try await backendInstall(frame, ["scenes": scenes, "name": .string(item.name)], activate: activate, cover: item.image)
             }
             throw APIError(status: 0, message: "This catalog entry has no scenes to install.")
         }
     }
 
-    func backendInstall(_ frame: Frame, _ source: [String: JSONValue], activate: Bool) async throws -> ActionOutcome {
+    /// `cover`: the catalog entry's picture, copied to the new scenes.
+    func backendInstall(_ frame: Frame, _ source: [String: JSONValue], activate: Bool, cover: String? = nil) async throws -> ActionOutcome {
         var arguments = source
         // As on the cloud: a store scene is granted the keys it declares
         // (the tool grants only what the scenes declare among these).
@@ -192,7 +193,75 @@ extension FrameOSService {
         arguments["deploy"] = "fast"
         if let projectId = account.projectId { arguments["project_id"] = .number(Double(projectId)) }
         if let scenes = arguments["scenes"], scenes.arrayValue?.count != 1 { arguments["name"] = nil }
-        _ = try await client.mcpTool("frame_scene_install", arguments: arguments)
-        return ActionOutcome(kind: .done, message: activate ? "Installed. The frame shows it after the deploy." : "Installed and deploying.")
+        let answer = try await client.mcpTool("frame_scene_install", arguments: arguments)
+        var message = activate ? "Installed. The frame shows it after the deploy." : "Installed and deploying."
+        let installed = answer["installed"]?.arrayValue?.compactMap { $0["id"]?.stringValue } ?? []
+        if !(await copyCover(cover, to: installed, on: frame)) {
+            message += " Its picture could not be copied, so the scene shows one after the frame draws it."
+        }
+        return ActionOutcome(kind: .done, message: message)
+    }
+
+    /// Where a new scene's picture comes from (the SPA's `templateImageSource`).
+    enum CoverSource: Equatable {
+        /// `POST …/scene_images/{id}/copy` with this body: the backend copies it.
+        case copy([String: JSONValue])
+        /// A picture at this path on the backend: fetched, then posted as the scene's.
+        case upload(String)
+    }
+
+    /// A catalog entry's `image` as a cover source; `nil` when it has none.
+    static func coverSource(_ image: String?) -> CoverSource? {
+        guard let image, !image.isEmpty else { return nil }
+        // An absolute URL (a store cover) is copied only if a repository of
+        // the project lists it; a bundled repository's cover is read off disk.
+        if image.hasPrefix("http://") || image.hasPrefix("https://")
+            || image.wholeMatch(of: #/\/api\/repositories\/system\/[^\/]+\/templates\/[^\/]+\/image/#) != nil {
+            return .copy(["url": .string(image)])
+        }
+        if let saved = image.wholeMatch(of: #/\/api\/(?:projects\/\d+\/)?templates\/([^\/]+)\/image/#) {
+            return .copy(["template_id": .string(String(saved.1))])
+        }
+        return image.hasPrefix("/") ? .upload(image) : nil
+    }
+
+    /// The scenes that get the cover: not one another new scene draws as a
+    /// panel (a scene node naming it), the SPA's `getScenesWithoutParents`.
+    static func coverTargets(_ ids: [String], frameScenes: [JSONValue]) -> [String] {
+        guard ids.count > 1 else { return ids }
+        let added = frameScenes.filter { ids.contains($0["id"]?.stringValue ?? "") }
+        let drawn = Set(added.flatMap { scene in
+            (scene["nodes"]?.arrayValue ?? []).compactMap { node in
+                node["type"]?.stringValue == "scene" ? node["data"]?["keyword"]?.stringValue : nil
+            }
+        })
+        return ids.filter { !drawn.contains($0) }
+    }
+
+    /// On a backend a scene shows a placeholder until the frame first draws
+    /// it, so the new scenes get the catalog entry's picture (the SPA's
+    /// `saveTemplateSceneImages`). The cloud serves a store scene's cover
+    /// itself. False when the picture could not be copied.
+    func copyCover(_ image: String?, to sceneIds: [String], on frame: Frame) async -> Bool {
+        guard kind == .backend, let source = Self.coverSource(image), !sceneIds.isEmpty else { return true }
+        let scenes = (try? await self.frame(frame.id))?["scenes"]?.arrayValue ?? []
+        do {
+            var upload: (data: Data, type: String)?
+            if case .upload(let path) = source {
+                let (data, response) = try await client.bytes(path)
+                upload = (data, response.value(forHTTPHeaderField: "Content-Type") ?? "image/png")
+            }
+            for sceneId in Self.coverTargets(sceneIds, frameScenes: scenes) {
+                let path = Self.framePath(frame.id, "/scene_images/\(ApiPaths.encodePath(sceneId))")
+                if case .copy(let body) = source {
+                    _ = try await client.call("POST", path + "/copy", body: .json(.object(body)))
+                } else if let upload {
+                    _ = try await client.call("POST", path, body: .data(upload.data, contentType: upload.type))
+                }
+            }
+            return true
+        } catch {
+            return false
+        }
     }
 }

@@ -60,13 +60,19 @@ struct BackendIntegrationTests {
             "fields": [["name": "title", "type": "string", "access": "public", "value": "Hi"]],
             "settings": ["execution": "interpreted"],
         ]
-        _ = try await service.backendInstall(frame, ["scenes": [scene], "name": "Hello"], activate: false)
+        let cover = "/api/repositories/system/samples/templates/Analog clock face/image"
+        _ = try await service.backendInstall(frame, ["scenes": [scene], "name": "Hello"], activate: false, cover: cover)
         frame = try await service.frame(frameId)
         let installed = try await service.installedScenes(frame)
         #expect(installed.count == 1)
         #expect(installed.first?.name == "Hello")
         #expect(installed.first?.id != "ios-test-scene", "ids are made fresh")
         #expect(installed.first?.fields.map(\.name) == ["title", "refreshInterval"])
+        // Its picture is the catalog cover until the frame draws it, not the
+        // backend's placeholder (which it serves with no-store).
+        let picturePath = FrameOSService.framePath(frameId, "/scene_images/\(ApiPaths.encodePath(try #require(installed.first?.id)))")
+        let (_, picture) = try await client.bytes(picturePath)
+        #expect(picture.value(forHTTPHeaderField: "Cache-Control") == "private, max-age=86400")
 
         // A store scene is granted the keys it declares, as on the cloud.
         let storeScene: JSONValue = [
