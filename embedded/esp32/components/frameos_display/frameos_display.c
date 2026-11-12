@@ -239,28 +239,6 @@ bool fos_display_is_lcd(void)
     return s_panel && s_panel->bus == FOS_PANEL_BUS_RGB;
 }
 
-esp_err_t fos_display_prepare_deep_sleep(void)
-{
-    if (!s_photo_painter) return ESP_ERR_NOT_SUPPORTED;
-    /* The panel's lines let go first: a driven-high CS or RST would feed the
-     * controller through its I/O protection once its supply is off. */
-    DEV_SPI_Acquire();
-    for (size_t i = 0; i < sizeof(s_panel_pins) / sizeof(s_panel_pins[0]); i++) {
-        if (s_panel_pins[i] < 0) continue;
-        gpio_config_t io = {
-            .pin_bit_mask = 1ULL << s_panel_pins[i],
-            .mode = GPIO_MODE_INPUT,
-            .pull_up_en = GPIO_PULLUP_DISABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE,
-        };
-        gpio_config(&io);
-    }
-    esp_err_t err = fos_photo_painter_disable_epd_power();
-    DEV_SPI_Release();
-    return err;
-}
-
 esp_err_t fos_display_power(bool on)
 {
     if (!fos_display_is_lcd()) return ESP_ERR_NOT_SUPPORTED;
@@ -661,6 +639,31 @@ void fos_display_park(void)
     s_panel->sleep();
     DEV_SPI_Release();
     s_panel_awake = false;
+}
+
+esp_err_t fos_display_prepare_deep_sleep(void)
+{
+    if (!s_photo_painter) return ESP_ERR_NOT_SUPPORTED;
+    /* Never under a waveform: a refresh still running finishes first, or its
+     * supply goes with the high voltage on. */
+    refresh_wait();
+    /* The panel's lines let go first: a driven-high CS or RST would feed the
+     * controller through its I/O protection once its supply is off. */
+    DEV_SPI_Acquire();
+    for (size_t i = 0; i < sizeof(s_panel_pins) / sizeof(s_panel_pins[0]); i++) {
+        if (s_panel_pins[i] < 0) continue;
+        gpio_config_t io = {
+            .pin_bit_mask = 1ULL << s_panel_pins[i],
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        gpio_config(&io);
+    }
+    esp_err_t err = fos_photo_painter_disable_epd_power();
+    DEV_SPI_Release();
+    return err;
 }
 
 void fos_display_park_if_idle(int64_t now_us)
