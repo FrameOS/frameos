@@ -1,0 +1,264 @@
+[
+  {
+    "id": "64a15e71-cc27-467b-a69b-c4c28bb77017",
+    "name": "Pixel toys",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 0.02,
+      "backgroundColor": "#000000"
+    },
+    "fields": [
+      {
+        "name": "effect",
+        "type": "select",
+        "label": "Effect",
+        "options": [
+          {
+            "value": "fireworks",
+            "label": "Fireworks"
+          },
+          {
+            "value": "fountain",
+            "label": "Fountain"
+          },
+          {
+            "value": "starfield",
+            "label": "Starfield"
+          },
+          {
+            "value": "blobs",
+            "label": "Blobs"
+          },
+          {
+            "value": "plasma",
+            "label": "Plasma"
+          },
+          {
+            "value": "life",
+            "label": "Life"
+          }
+        ],
+        "value": "fireworks",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "quality",
+        "type": "select",
+        "label": "Quality",
+        "options": [
+          {
+            "value": "0",
+            "label": "Automatic (by the effect and the device)"
+          },
+          {
+            "value": "8",
+            "label": "Low (8 px cells)"
+          },
+          {
+            "value": "4",
+            "label": "Medium (4 px cells)"
+          },
+          {
+            "value": "2",
+            "label": "High (2 px cells)"
+          }
+        ],
+        "value": "0",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "showFps",
+        "type": "boolean",
+        "label": "FPS counter",
+        "value": "false",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "pixelToys": {
+        "origin": "pixelToys",
+        "name": "Pixel toys",
+        "category": "data",
+        "description": "Fireworks, a fountain, a starfield, blobs, a plasma and Life, each computed cell by cell in JS and written into the frame with frameos.pixels.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "effect",
+            "type": "select",
+            "options": [
+              "fireworks",
+              "fountain",
+              "starfield",
+              "blobs",
+              "plasma",
+              "life"
+            ],
+            "value": "fireworks",
+            "required": true,
+            "label": "Effect"
+          },
+          {
+            "name": "pixelSize",
+            "type": "integer",
+            "value": "0",
+            "required": true,
+            "label": "Pixel size",
+            "hint": "Each cell is a square this many pixels wide. 0 picks for the effect and the device: finer where the effect is cheap, coarser on an ESP32."
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "value": "0",
+            "label": "Seed",
+            "hint": "0 for a different show every time; any other number for the same one."
+          },
+          {
+            "name": "showFps",
+            "type": "boolean",
+            "value": "false",
+            "label": "FPS counter",
+            "hint": "Draws the frame rate in a corner: renders a second, as the panel gets them."
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "app.tsx": "// Pixel toys: effects that compute every cell of the frame in JS and hand the\n// cells to frameos.pixels, one palette byte each, written straight into the\n// panel (no canvas, no SVG, no markup). Each effect is a module: fireworks\n// and a fountain (particles with trails), a starfield, blobs (metaballs), a\n// plasma and Life. The grid is the frame over pixelSize; each effect picks\n// its own when asked for 0, coarser on an ESP32, where its JS runs slower.\nimport { setSeed } from './random'\nimport { counterIn, counterOut, counterReset } from './counter'\nimport { fireworks } from './fireworks'\nimport { fountain } from './fountain'\nimport { starfield } from './starfield'\nimport { blobs } from './blobs'\nimport { plasma } from './plasma'\nimport { life } from './life'\n\nconst EFFECTS: Record<string, any> = { fireworks, fountain, starfield, blobs, plasma, life }\n\n// What outlives a render while the interpreter does. An ESP32 short of\n// memory drops the interpreter, and the effect starts again.\nlet effect: any = null\nlet name = ''\nlet cols = 0\nlet rows = 0\nlet cells: any = null\nlet embedded: boolean | null = null\n\nexport function get(app, context) {\n  counterOut() // the frame before this one has been written\n  const config = app.config\n  const which = EFFECTS[config.effect] ? config.effect : 'fireworks'\n  const chosen = EFFECTS[which]\n  if (embedded === null) embedded = app.frame.embedded === true\n  const asked = Math.round(Number(config.pixelSize) || 0)\n  const pixelSize = asked >= 1 ? Math.min(32, asked) : embedded ? chosen.embeddedSize : chosen.hostSize\n  const width = Math.max(pixelSize, context.imageWidth || app.frame.width)\n  const height = Math.max(pixelSize, context.imageHeight || app.frame.height)\n  const w = Math.floor(width / pixelSize)\n  const h = Math.floor(height / pixelSize)\n  if (which !== name || w !== cols || h !== rows) {\n    name = which\n    effect = chosen\n    cols = w\n    rows = h\n    const given = Math.round(Number(config.seed) || 0)\n    setSeed(given > 0 ? given : Date.now() ^ (Math.random() * 0x7fffffff))\n    cells = effect.init(w, h)\n  }\n  effect.step(cells)\n  const askedFps = config.showFps\n  if (askedFps === true || askedFps === 'true') {\n    counterIn(cells, cols, rows, effect.textColor, effect.boxColor ?? 0, Math.ceil(4 / pixelSize))\n  } else {\n    counterReset()\n  }\n  return frameos.pixels(cells, { width: cols, height: rows, pixelSize, palette: effect.palette })\n}\n",
+          "config.json": "{\n  \"name\": \"Pixel toys\",\n  \"category\": \"data\",\n  \"description\": \"Fireworks, a fountain, a starfield, blobs, a plasma and Life, each computed cell by cell in JS and written into the frame with frameos.pixels.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    { \"name\": \"effect\", \"type\": \"select\", \"options\": [\"fireworks\", \"fountain\", \"starfield\", \"blobs\", \"plasma\", \"life\"], \"value\": \"fireworks\", \"required\": true, \"label\": \"Effect\" },\n    { \"name\": \"pixelSize\", \"type\": \"integer\", \"value\": \"0\", \"required\": true, \"label\": \"Pixel size\", \"hint\": \"Each cell is a square this many pixels wide. 0 picks for the effect and the device: finer where the effect is cheap, coarser on an ESP32.\" },\n    { \"name\": \"seed\", \"type\": \"integer\", \"value\": \"0\", \"label\": \"Seed\", \"hint\": \"0 for a different show every time; any other number for the same one.\" },\n    { \"name\": \"showFps\", \"type\": \"boolean\", \"value\": \"false\", \"label\": \"FPS counter\", \"hint\": \"Draws the frame rate in a corner: renders a second, as the panel gets them.\" }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }]\n}\n",
+          "random.ts": "// One xorshift32 for every effect, so a seed is the same picture on every\n// frame type. It stays a small integer in QuickJS (no float, no call to\n// Math.random in a loop).\nlet s = 1\n\nexport function setSeed(seed: number) {\n  s = seed | 0 || 1\n}\n\n/** A 32-bit integer. */\nexport function nextInt(): number {\n  s ^= s << 13\n  s ^= s >>> 17\n  s ^= s << 5\n  return s\n}\n\n/** A number in [0, 1). */\nexport function random(): number {\n  return (nextInt() >>> 0) / 4294967296\n}\n\n/** A number in [lo, hi). */\nexport function between(lo: number, hi: number): number {\n  return lo + random() * (hi - lo)\n}\n",
+          "colors.ts": "// Palettes as 0xRRGGBB numbers, built once when an effect starts.\n\nexport function rgb(r: number, g: number, b: number): number {\n  const c = (v: number) => Math.max(0, Math.min(255, Math.round(v)))\n  return (c(r) << 16) | (c(g) << 8) | c(b)\n}\n\n/** A hue (0..1), saturation and value (0..1) as 0xRRGGBB. */\nexport function hsv(h: number, s: number, v: number): number {\n  const i = Math.floor(h * 6)\n  const f = h * 6 - i\n  const p = v * (1 - s)\n  const q = v * (1 - f * s)\n  const t = v * (1 - (1 - f) * s)\n  const k = ((i % 6) + 6) % 6\n  const [r, g, b] = [[v, t, p], [q, v, p], [p, v, t], [p, q, v], [t, p, v], [v, p, q]][k]\n  return rgb(r * 255, g * 255, b * 255)\n}\n\n/** Stops [at (0..1), 0xRRGGBB] blended into `count` colors. */\nexport function gradient(count: number, stops: [number, number][]): number[] {\n  const out: number[] = []\n  for (let i = 0; i < count; i++) {\n    const at = count === 1 ? 0 : i / (count - 1)\n    let k = 0\n    while (k < stops.length - 2 && at > stops[k + 1][0]) k++\n    const [a0, c0] = stops[k]\n    const [a1, c1] = stops[k + 1]\n    const f = a1 === a0 ? 0 : Math.max(0, Math.min(1, (at - a0) / (a1 - a0)))\n    const mix = (shift: number) => ((c0 >> shift) & 255) * (1 - f) + ((c1 >> shift) & 255) * f\n    out.push(rgb(mix(16), mix(8), mix(0)))\n  }\n  return out\n}\n",
+          "counter.ts": "// The FPS counter: the renders a second the panel really gets (simulation,\n// blit and pacing included), in a 3x5 font written into the cells for the\n// blit and taken out again before the next step, so it neither slows what it\n// measures nor feeds the effect.\nconst GLYPHS: Record<string, number> = {\n  0: 0x7b6f, 1: 0x2c97, 2: 0x73e7, 3: 0x73cf, 4: 0x5bc9, 5: 0x79cf, 6: 0x79ef, 7: 0x7249, 8: 0x7bef, 9: 0x7bcf,\n  '-': 0x01c0, F: 0x79e4, P: 0x7be4, S: 0x79cf,\n}\n\nlet fps: number | null = null\nlet frames = 0\nlet windowStart = 0\nlet label: Uint8Array | null = null\nlet under: Uint8Array | null = null\nlet key = ''\nlet width = 0\nlet height = 0\nlet scale = 1\nlet held: { cells: ArrayLike<number> & { set: any; subarray: any }; cols: number } | null = null\n\nfunction count(): number | null {\n  const now = Date.now()\n  if (!windowStart) windowStart = now\n  frames++\n  const elapsed = now - windowStart\n  if (elapsed >= 1000) {\n    fps = Math.round((frames * 1000) / elapsed)\n    frames = 0\n    windowStart = now\n  }\n  return fps\n}\n\n/** Puts back what the label covered: before the effect's next step. */\nexport function counterOut() {\n  if (!held || !under) return\n  const { cells, cols } = held\n  for (let y = 0; y < height; y++) cells.set(under.subarray(y * width, (y + 1) * width), (y + scale) * cols + scale)\n  held = null\n}\n\n/** Forgets the count while the counter is off. */\nexport function counterReset() {\n  frames = 0\n  windowStart = 0\n}\n\n/** The label into the top-left corner of the cells, `text` and `box` palette indices. */\nexport function counterIn(cells: any, cols: number, rows: number, text: number, box: number, size: number) {\n  const rate = count()\n  const value = (rate === null ? '--' : rate) + ' FPS'\n  const k = value + ':' + size + ':' + text + ':' + box\n  if (k !== key) {\n    key = k\n    scale = size\n    width = (value.length * 4 + 1) * size\n    height = 7 * size\n    label = new Uint8Array(width * height).fill(box)\n    under = new Uint8Array(width * height)\n    for (let g = 0; g < value.length; g++) {\n      const bits = GLYPHS[value[g]] || 0\n      for (let i = 0; i < 15; i++) {\n        if (!(bits & (1 << (14 - i)))) continue\n        const left = (g * 4 + 1 + (i % 3)) * size\n        const top = (1 + Math.floor(i / 3)) * size\n        for (let y = 0; y < size; y++) label.fill(text, (top + y) * width + left, (top + y) * width + left + size)\n      }\n    }\n  }\n  if (width + scale > cols || height + scale > rows || !label || !under) return\n  for (let y = 0; y < height; y++) {\n    const at = (y + scale) * cols + scale\n    under.set(cells.subarray(at, at + width), y * width)\n    cells.set(label.subarray(y * width, (y + 1) * width), at)\n  }\n  held = { cells, cols }\n}\n",
+          "particles.ts": "// A fixed pool of particles in typed arrays: position, velocity, life and\n// hue, in cell units. A dead one is replaced by the last, so the live ones\n// are always the first `count`.\nexport class Particles {\n  x: Float32Array\n  y: Float32Array\n  vx: Float32Array\n  vy: Float32Array\n  life: Float32Array\n  hue: Uint8Array\n  kind: Uint8Array\n  count = 0\n  max: number\n\n  constructor(max: number) {\n    this.max = max\n    this.x = new Float32Array(max)\n    this.y = new Float32Array(max)\n    this.vx = new Float32Array(max)\n    this.vy = new Float32Array(max)\n    this.life = new Float32Array(max)\n    this.hue = new Uint8Array(max)\n    this.kind = new Uint8Array(max)\n  }\n\n  add(x: number, y: number, vx: number, vy: number, life: number, hue: number, kind = 0): boolean {\n    if (this.count >= this.max) return false\n    const i = this.count++\n    this.x[i] = x\n    this.y[i] = y\n    this.vx[i] = vx\n    this.vy[i] = vy\n    this.life[i] = life\n    this.hue[i] = hue\n    this.kind[i] = kind\n    return true\n  }\n\n  remove(i: number) {\n    const last = --this.count\n    this.x[i] = this.x[last]\n    this.y[i] = this.y[last]\n    this.vx[i] = this.vx[last]\n    this.vy[i] = this.vy[last]\n    this.life[i] = this.life[last]\n    this.hue[i] = this.hue[last]\n    this.kind[i] = this.kind[last]\n  }\n}\n",
+          "trails.ts": "// Glowing dots that fade: a palette of 8 hues x 32 levels (index = hue * 32 +\n// level, level 0 black), and a pass that dims every lit cell one step a frame\n// through a table. The pass skips every row nothing was drawn in for 32\n// frames, so the black sky costs nothing.\nimport { hsv } from './colors'\n\nexport const LEVELS = 32\nexport const HUES = 8\n\nexport function trailPalette(): number[] {\n  const out: number[] = []\n  for (let hue = 0; hue < HUES; hue++) {\n    for (let level = 0; level < LEVELS; level++) {\n      const v = Math.pow(level / (LEVELS - 1), 1.6)\n      // The brightest levels whiten, as a spark's core does.\n      const s = level > LEVELS - 6 ? 0.85 - (level - (LEVELS - 6)) * 0.15 : 0.85\n      out.push(level === 0 ? 0 : hsv(hue / HUES, s, v))\n    }\n  }\n  return out\n}\n\nexport class Trails {\n  cols: number\n  rows: number\n  fade: Uint8Array\n  live: Uint8Array\n\n  constructor(cols: number, rows: number, step: number) {\n    this.cols = cols\n    this.rows = rows\n    this.fade = new Uint8Array(256)\n    for (let i = 0; i < 256; i++) {\n      const level = i & (LEVELS - 1)\n      this.fade[i] = level > step ? i - step : 0\n    }\n    this.live = new Uint8Array(rows)\n  }\n\n  /** A dot at cell (x, y), `hue` 0..7, `level` 1..31; nothing off the grid. */\n  plot(cells: Uint8ClampedArray, x: number, y: number, hue: number, level: number) {\n    x |= 0\n    y |= 0\n    if (x < 0 || y < 0 || x >= this.cols || y >= this.rows) return\n    const at = y * this.cols + x\n    const value = hue * LEVELS + level\n    if ((cells[at] & (LEVELS - 1)) < level) cells[at] = value\n    this.live[y] = LEVELS\n  }\n\n  /** Every lit cell one step darker; rows with nothing lit are not read. */\n  dim(cells: Uint8ClampedArray) {\n    const F = this.fade\n    const live = this.live\n    const w = this.cols\n    for (let y = 0; y < this.rows; y++) {\n      if (live[y] === 0) continue\n      live[y]--\n      for (let i = y * w, end = i + w; i < end; i++) cells[i] = F[cells[i]]\n    }\n  }\n}\n",
+          "fireworks.ts": "// Fireworks: rockets climb from the bottom, burst at the top of their arc\n// into a ring of sparks of one hue, and the sparks fall and fade, leaving\n// trails. Everything is in cell units, so the show fits any grid.\nimport { between, random } from './random'\nimport { Particles } from './particles'\nimport { LEVELS, HUES, Trails, trailPalette } from './trails'\n\nconst ROCKET = 1\nconst SPARK = 0\n\nlet parts: Particles\nlet trails: Trails\nlet cols = 0\nlet rows = 0\nlet frame = 0\n\nfunction launch() {\n  const x = between(cols * 0.15, cols * 0.85)\n  // High enough to burst in the top third: v^2 = 2 g h.\n  const climb = between(rows * 0.45, rows * 0.8)\n  const g = rows * 0.0016\n  parts.add(x, rows - 1, between(-0.15, 0.15) * cols * 0.01, -Math.sqrt(2 * g * climb), 1, (random() * HUES) | 0, ROCKET)\n}\n\nfunction burst(x: number, y: number, hue: number) {\n  const n = 30 + ((random() * 40) | 0)\n  const speed = rows * between(0.012, 0.02)\n  for (let k = 0; k < n; k++) {\n    const a = (k / n) * Math.PI * 2 + random() * 0.2\n    const v = speed * between(0.6, 1)\n    parts.add(x, y, Math.cos(a) * v, Math.sin(a) * v, between(35, 60), random() < 0.15 ? (hue + 1) % HUES : hue)\n  }\n}\n\nexport const fireworks = {\n  palette: trailPalette(),\n  textColor: 7 * LEVELS + LEVELS - 1,\n  embeddedSize: 4,\n  hostSize: 2,\n\n  init(w: number, h: number): Uint8ClampedArray {\n    cols = w\n    rows = h\n    frame = 0\n    parts = new Particles(900)\n    trails = new Trails(w, h, 1)\n    for (let i = 0; i < 3; i++) launch()\n    return new Uint8ClampedArray(w * h)\n  },\n\n  step(cells: Uint8ClampedArray) {\n    trails.dim(cells)\n    frame++\n    if (random() < 0.045 || parts.count === 0) launch()\n    const g = rows * 0.0016\n    const P = parts\n    for (let i = P.count - 1; i >= 0; i--) {\n      let vy = P.vy[i] + g\n      const x = P.x[i] + P.vx[i]\n      const y = P.y[i] + vy\n      if (P.kind[i] === ROCKET) {\n        if (vy >= 0) {\n          burst(x, y, P.hue[i])\n          P.remove(i)\n          continue\n        }\n        trails.plot(cells, x, y, 1, 18 + ((random() * 10) | 0))\n      } else {\n        P.vx[i] *= 0.985\n        vy *= 0.985\n        const life = P.life[i] - 1\n        if (life <= 0 || y >= rows) {\n          P.remove(i)\n          continue\n        }\n        P.life[i] = life\n        // Bright while young, then dimmer; a spark twinkles as it dies.\n        const level = life > 20 ? LEVELS - 1 : life < 8 && random() < 0.4 ? 4 : 10 + life\n        trails.plot(cells, x, y, P.hue[i], level)\n      }\n      P.x[i] = x\n      P.y[i] = y\n      P.vy[i] = vy\n    }\n  },\n}\n",
+          "fountain.ts": "// A fountain: droplets thrown up from the bottom, falling back and bouncing\n// off the floor, the color drifting through the rainbow as the stream plays.\nimport { between, random } from './random'\nimport { Particles } from './particles'\nimport { LEVELS, HUES, Trails, trailPalette } from './trails'\n\nlet parts: Particles\nlet trails: Trails\nlet cols = 0\nlet rows = 0\nlet frame = 0\n\nexport const fountain = {\n  palette: trailPalette(),\n  textColor: 7 * LEVELS + LEVELS - 1,\n  embeddedSize: 4,\n  hostSize: 2,\n\n  init(w: number, h: number): Uint8ClampedArray {\n    cols = w\n    rows = h\n    frame = 0\n    parts = new Particles(700)\n    trails = new Trails(w, h, 3)\n    return new Uint8ClampedArray(w * h)\n  },\n\n  step(cells: Uint8ClampedArray) {\n    trails.dim(cells)\n    frame++\n    const g = rows * 0.0012\n    // The jet sways, and its color walks the hues.\n    const sway = Math.sin(frame * 0.02) * 0.35\n    const hue = ((frame / 90) | 0) % HUES\n    const up = Math.sqrt(2 * g * rows * 0.75)\n    for (let k = 0; k < 6; k++) {\n      parts.add(cols / 2 + between(-0.5, 0.5), rows - 1, (sway + between(-0.25, 0.25)) * up * 0.35,\n        -up * between(0.85, 1), between(150, 260), random() < 0.1 ? (hue + 1) % HUES : hue)\n    }\n    const P = parts\n    const floor = rows - 1\n    for (let i = P.count - 1; i >= 0; i--) {\n      let vx = P.vx[i]\n      let vy = P.vy[i] + g\n      let x = P.x[i] + vx\n      let y = P.y[i] + vy\n      const life = P.life[i] - 1\n      if (life <= 0 || x < 0 || x >= cols) {\n        P.remove(i)\n        continue\n      }\n      if (y >= floor) {\n        // A bounce loses most of the fall; a slow drop settles and goes.\n        y = floor\n        vy = -vy * 0.45\n        vx *= 0.8\n        if (vy > -g * 4) {\n          P.remove(i)\n          continue\n        }\n      }\n      P.x[i] = x\n      P.y[i] = y\n      P.vx[i] = vx\n      P.vy[i] = vy\n      P.life[i] = life\n      trails.plot(cells, x, y, P.hue[i], vy < 0 ? LEVELS - 1 : LEVELS - 4)\n    }\n  },\n}\n",
+          "starfield.ts": "// A starfield: stars come at you out of the middle of the panel, brighter\n// and longer as they near, each drawn as a streak from where it was. What a\n// frame drew is remembered and cleared before the next.\nimport { between, random } from './random'\nimport { gradient } from './colors'\n\nconst N = 170\nlet x: Float32Array\nlet y: Float32Array\nlet z: Float32Array\nlet drawn: Int32Array\nlet drawnCount = 0\nlet cols = 0\nlet rows = 0\n\nfunction respawn(i: number, far: boolean) {\n  x[i] = between(-1, 1)\n  y[i] = between(-1, 1)\n  z[i] = far ? between(0.85, 1) : between(0.1, 1)\n}\n\nexport const starfield = {\n  palette: gradient(32, [[0, 0x000000], [0.35, 0x202c55], [0.75, 0xb8c8ff], [1, 0xffffff]]),\n  textColor: 31,\n  embeddedSize: 4,\n  hostSize: 2,\n\n  init(w: number, h: number): Uint8ClampedArray {\n    cols = w\n    rows = h\n    x = new Float32Array(N)\n    y = new Float32Array(N)\n    z = new Float32Array(N)\n    drawn = new Int32Array(N * 12)\n    drawnCount = 0\n    for (let i = 0; i < N; i++) respawn(i, false)\n    return new Uint8ClampedArray(w * h)\n  },\n\n  step(cells: Uint8ClampedArray) {\n    for (let k = 0; k < drawnCount; k++) cells[drawn[k]] = 0\n    drawnCount = 0\n    const cx = cols / 2\n    const cy = rows / 2\n    const scale = Math.min(cols, rows) * 0.5\n    for (let i = 0; i < N; i++) {\n      const z0 = z[i]\n      const z1 = z0 - 0.012\n      if (z1 <= 0.02) {\n        respawn(i, true)\n        continue\n      }\n      z[i] = z1\n      const x0 = cx + (x[i] / z0) * scale\n      const y0 = cy + (y[i] / z0) * scale\n      const x1 = cx + (x[i] / z1) * scale\n      const y1 = cy + (y[i] / z1) * scale\n      if (x1 < 0 || y1 < 0 || x1 >= cols || y1 >= rows) {\n        respawn(i, true)\n        continue\n      }\n      const level = Math.min(31, ((1 - z1) * 34) | 0)\n      const steps = Math.min(10, Math.max(1, Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) | 0))\n      for (let s = 0; s <= steps; s++) {\n        const f = s / steps\n        const px = (x0 + (x1 - x0) * f) | 0\n        const py = (y0 + (y1 - y0) * f) | 0\n        if (px < 0 || py < 0 || px >= cols || py >= rows) continue\n        const at = py * cols + px\n        // The head brightest, the tail fading behind it.\n        const v = (level * (0.35 + 0.65 * f)) | 0\n        if (cells[at] < v) cells[at] = v\n        drawn[drawnCount++] = at\n      }\n    }\n  },\n}\n",
+          "blobs.ts": "// Blobs: a lava lamp of metaballs. Each blob adds its falloff to the cells\n// within its radius (a table by squared distance, so no root or division per\n// cell), the cells clamp at 255, and the palette draws the surface where the\n// sum crosses the middle: a glow outside, a bright rim, a hot core inside.\nimport { between } from './random'\nimport { gradient } from './colors'\n\nconst K = 6\nlet cols = 0\nlet rows = 0\nlet frame = 0\nlet radius = 0\nlet r2 = 0\nlet fall: Uint8Array\nconst fx = new Float32Array(K)\nconst fy = new Float32Array(K)\nconst px = new Float32Array(K)\nconst py = new Float32Array(K)\n\nexport const blobs = {\n  palette: gradient(256, [\n    [0, 0x05020f], [0.3, 0x1c0838], [0.46, 0x5a1580], [0.5, 0xffd2ef], [0.53, 0xff3c8c],\n    [0.75, 0xff7a2a], [1, 0xffe27a],\n  ]),\n  textColor: 255,\n  embeddedSize: 8,\n  hostSize: 4,\n\n  init(w: number, h: number): Uint8ClampedArray {\n    cols = w\n    rows = h\n    frame = 0\n    radius = Math.max(3, Math.min(w, h) * 0.2)\n    r2 = Math.ceil(radius * radius)\n    fall = new Uint8Array(r2 + 2) // two zeros past the edge, for rounding\n    for (let d = 0; d < r2; d++) {\n      const t = 1 - d / r2\n      fall[d] = Math.min(255, Math.round(512 * t * t))\n    }\n    for (let k = 0; k < K; k++) {\n      fx[k] = between(0.006, 0.016)\n      fy[k] = between(0.006, 0.016)\n      px[k] = between(0, Math.PI * 2)\n      py[k] = between(0, Math.PI * 2)\n    }\n    return new Uint8ClampedArray(w * h)\n  },\n\n  step(cells: Uint8ClampedArray) {\n    frame++\n    cells.fill(0)\n    const F = fall\n    const w = cols\n    for (let k = 0; k < K; k++) {\n      const bx = w * (0.5 + 0.36 * Math.sin(frame * fx[k] + px[k]))\n      const by = rows * (0.5 + 0.36 * Math.sin(frame * fy[k] + py[k]))\n      const y0 = Math.max(0, Math.ceil(by - radius))\n      const y1 = Math.min(rows - 1, Math.floor(by + radius))\n      for (let y = y0; y <= y1; y++) {\n        const dy = y - by\n        const dy2 = dy * dy\n        const span = Math.sqrt(Math.max(0, r2 - dy2))\n        const x0 = Math.max(0, Math.ceil(bx - span))\n        const x1 = Math.min(w - 1, Math.floor(bx + span))\n        let j = y * w + x0\n        for (let x = x0; x <= x1; x++, j++) {\n          const dx = x - bx\n          cells[j] += F[(dy2 + dx * dx) | 0]\n        }\n      }\n    }\n  },\n}\n",
+          "plasma.ts": "// Plasma: three waves summed per cell, from tables made once a frame (a row's\n// part, a column's, a diagonal's), so a cell is two reads and two adds. The\n// cells are a Uint8Array, so the sum wraps round the palette by itself.\nimport { random } from './random'\n\nlet cols = 0\nlet rows = 0\nlet frame = 0\nlet a: Uint8Array\nlet b: Uint8Array\nlet c: Uint8Array\nconst SIN = new Uint8Array(256)\nfor (let i = 0; i < 256; i++) SIN[i] = Math.round(127.5 + 127.5 * Math.sin((i / 256) * Math.PI * 2))\nlet k1 = 0\nlet k2 = 0\nlet k3 = 0\n\nfunction cosinePalette(): number[] {\n  const out: number[] = []\n  for (let i = 0; i < 256; i++) {\n    const t = i / 256\n    const ch = (d: number) => Math.round(255 * (0.5 + 0.5 * Math.cos(Math.PI * 2 * (t + d))))\n    out.push((ch(0) << 16) | (ch(0.33) << 8) | ch(0.67))\n  }\n  return out\n}\n\nconst PALETTE = cosinePalette()\nconst luma = (c: number) => ((c >> 16) & 255) * 77 + ((c >> 8) & 255) * 150 + (c & 255) * 29\nconst brightest = PALETTE.reduce((best, c, i) => (luma(c) > luma(PALETTE[best]) ? i : best), 0)\nconst darkest = PALETTE.reduce((best, c, i) => (luma(c) < luma(PALETTE[best]) ? i : best), 0)\n\nexport const plasma = {\n  palette: PALETTE,\n  textColor: brightest,\n  boxColor: darkest,\n  embeddedSize: 8,\n  hostSize: 4,\n\n  init(w: number, h: number): Uint8Array {\n    cols = w\n    rows = h\n    frame = 0\n    a = new Uint8Array(w)\n    b = new Uint8Array(h)\n    c = new Uint8Array(w + h)\n    // The waves' lengths follow the grid, so the picture is the same at any\n    // cell size; the seed picks their mix.\n    k1 = 256 / w * (1 + random())\n    k2 = 256 / h * (1 + random())\n    k3 = 128 / (w + h) * (1 + random() * 2)\n    return new Uint8Array(w * h)\n  },\n\n  step(cells: Uint8Array) {\n    frame++\n    const t = frame\n    for (let x = 0; x < cols; x++) a[x] = (SIN[(x * k1 + t * 2) & 255] + SIN[(x * k1 * 0.5 - t) & 255]) >> 2\n    for (let y = 0; y < rows; y++) b[y] = (SIN[(y * k2 - t * 3) & 255] + SIN[(y * k2 * 0.7 + t * 2) & 255]) >> 2\n    for (let d = 0; d < cols + rows; d++) c[d] = SIN[(d * k3 + t * 4) & 255] >> 1\n    const A = a\n    const C = c\n    const w = cols\n    let j = 0\n    for (let y = 0; y < rows; y++) {\n      const by = b[y] + t\n      for (let x = 0; x < w; x++) cells[j++] = A[x] + by + C[x + y]\n    }\n  },\n}\n",
+          "life.ts": "// Conway's Life on a torus, a cell lit white when it is born and fading\n// through teal after it dies. Counted with sliding column sums: three reads a\n// cell, not eight. A board that has gone quiet gets a few R-pentominoes.\nimport { random } from './random'\nimport { gradient } from './colors'\n\nlet cols = 0\nlet rows = 0\nlet wide = 0\nlet now: Uint8Array\nlet next: Uint8Array\nlet quiet = 0\nlet lastPopulation = -1\nconst RULE = new Uint8Array(32) // (alive << 4) | neighbours -> alive\nRULE[3] = 1\nRULE[16 + 2] = 1\nRULE[16 + 3] = 1\n\nfunction set(x: number, y: number) {\n  x = ((x % cols) + cols) % cols\n  y = ((y % rows) + rows) % rows\n  now[(y + 1) * wide + x + 1] = 1\n}\n\nfunction sprinkle(count: number) {\n  for (let k = 0; k < count; k++) {\n    const x = (random() * cols) | 0\n    const y = (random() * rows) | 0\n    set(x + 1, y)\n    set(x + 2, y)\n    set(x, y + 1)\n    set(x + 1, y + 1)\n    set(x + 1, y + 2)\n  }\n}\n\nexport const life = {\n  palette: gradient(256, [[0, 0x000000], [0.4, 0x061b33], [0.85, 0x139c95], [0.99, 0x63f2c8], [1, 0xf4fff9]]),\n  textColor: 255,\n  embeddedSize: 8,\n  hostSize: 4,\n\n  init(w: number, h: number): Uint8ClampedArray {\n    cols = w\n    rows = h\n    wide = w + 2\n    now = new Uint8Array(wide * (h + 2))\n    next = new Uint8Array(wide * (h + 2))\n    for (let y = 0; y < h; y++)\n      for (let x = 0; x < w; x++) if (random() < 0.28) now[(y + 1) * wide + x + 1] = 1\n    quiet = 0\n    lastPopulation = -1\n    return new Uint8ClampedArray(w * h)\n  },\n\n  step(cells: Uint8ClampedArray) {\n    const W = wide\n    const a = now\n    const b = next\n    // Wrap: the padding rows and columns are copies of the far edges.\n    a.copyWithin(0, rows * W, rows * W + W)\n    a.copyWithin((rows + 1) * W, W, 2 * W)\n    for (let y = 0; y < rows + 2; y++) {\n      a[y * W] = a[y * W + cols]\n      a[y * W + cols + 1] = a[y * W + 1]\n    }\n    let population = 0\n    let j = 0\n    for (let y = 1; y <= rows; y++) {\n      const up = (y - 1) * W\n      const mid = y * W\n      const dn = (y + 1) * W\n      let c0 = a[up] + a[mid] + a[dn]\n      let c1 = a[up + 1] + a[mid + 1] + a[dn + 1]\n      for (let x = 1; x <= cols; x++, j++) {\n        const c2 = a[up + x + 1] + a[mid + x + 1] + a[dn + x + 1]\n        const alive = a[mid + x]\n        const live = RULE[(alive << 4) | (c0 + c1 + c2 - alive)]\n        b[mid + x] = live\n        population += live\n        cells[j] = live ? 255 : cells[j] - 9\n        c0 = c1\n        c1 = c2\n      }\n    }\n    now = b\n    next = a\n    quiet = Math.abs(population - lastPopulation) <= 2 ? quiet + 1 : 0\n    lastPopulation = population\n    if (quiet > 40 || population < cols * rows * 0.02) {\n      sprinkle(3)\n      quiet = 0\n    }\n  },\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "toys",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": 200
+        },
+        "data": {
+          "keyword": "pixelToys",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      },
+      {
+        "id": "effect",
+        "type": "state",
+        "position": {
+          "x": -300,
+          "y": 100
+        },
+        "data": {
+          "keyword": "effect"
+        }
+      },
+      {
+        "id": "quality",
+        "type": "state",
+        "position": {
+          "x": -300,
+          "y": 200
+        },
+        "data": {
+          "keyword": "quality"
+        }
+      },
+      {
+        "id": "showFps",
+        "type": "state",
+        "position": {
+          "x": -300,
+          "y": 300
+        },
+        "data": {
+          "keyword": "showFps"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "toys-image",
+        "type": "codeNodeEdge",
+        "source": "toys",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      },
+      {
+        "id": "effect-toys",
+        "type": "codeNodeEdge",
+        "source": "effect",
+        "target": "toys",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/effect"
+      },
+      {
+        "id": "quality-toys",
+        "type": "codeNodeEdge",
+        "source": "quality",
+        "target": "toys",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/pixelSize"
+      },
+      {
+        "id": "showFps-toys",
+        "type": "codeNodeEdge",
+        "source": "showFps",
+        "target": "toys",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/showFps"
+      }
+    ]
+  }
+]

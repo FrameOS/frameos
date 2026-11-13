@@ -56,6 +56,45 @@ Doom's cooling of half a heat unit a row burns ~72 rows high, so a 60-row grid
 was a wall of fire. The pass now runs from the top down and the cooling
 follows the grid: the flames stand ~40% of the way up at any cell size.
 
+The **Pixel toys** sample (`repo/scenes/samples/Pixel toys`) is six more of
+the kind, each a module of one app: fireworks and a fountain (particles in
+typed arrays, trails dimmed through a table, only in the span of each row
+something was drawn in, half the rows a frame), a starfield, blobs
+(metaballs: each adds a falloff from a table by squared distance to the cells
+in its radius, and a `Uint8ClampedArray` clamps the sum), a plasma (a row's,
+a column's and a diagonal's wave from tables made once a frame, wrapping in a
+`Uint8Array`) and Life (32 cells to an integer, the neighbours counted by
+bit-sliced adders, the picture drawn only where something lived lately). On
+the SenseCAP Indicator, by the `render:animation` line:
+
+| Effect | Automatic cells | fps | Other cells | fps |
+| --- | --- | --- | --- | --- |
+| Fireworks | 4 px | 18.7 | 8 px | 25.6 |
+| Fountain | 4 px | 14.4 | 8 px | 17.9 |
+| Starfield | 4 px | 17.1 | 8 px | 17.7 |
+| Blobs | 8 px | 15.3 | 4 px | 6.7 |
+| Plasma | 8 px | 16.6 | 4 px | 8.0 |
+| Life | 8 px | 18.8 | 4 px | 7.4 |
+
+What the first versions spent and the rewrite took out, in a frame's `step`:
+the fireworks' fade over every row (30 of 34 ms), a `trails.plot` call and a
+property lookup per particle (the fountain's other 36 ms), and Life at ~60
+bytecodes a cell (66 ms; bit-sliced it went from 10 to 19 fps).
+
+Without a palette `frameos.pixels` takes RGBA, and the cost of that, and of
+going to every pixel, measured with a plasma on the same board:
+
+| Cells | Palette: JS + write | RGBA: JS + write |
+| --- | --- | --- |
+| 4 px (14,400) | 91 + 21 ms | 112 + 27 ms |
+| 1 px (230,400) | 1,294 + 78 ms | 1,606 + 143 ms |
+
+The JS is the cost; the write is PSRAM. A panel buffer keeps a copy of a
+frame's cells (what lets it write only those that changed) up to 256 KB: a
+whole panel of RGBA cells is 921 KB, three buffers most of the free PSRAM, and
+a seq cut to a smaller frame kept its capacity, so an RGBA frame at 1 px once
+left 2.7 MB behind and every interpreter after it was discarded for memory.
+
 ## Where an ESP32 frame goes
 
 Measured on the SenseCAP Indicator D1S (ESP32-S3 at 240 MHz, 8 MB octal PSRAM

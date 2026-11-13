@@ -341,13 +341,15 @@ pixel, each source pixel a `pixelSize` square. Simulate at the canvas's size
 over `pixelSize` and hand the buffer over as it is, every frame. When that
 raster is the whole picture, `return frameos.pixels(cells, { width, height,
 pixelSize, palette })` from `get()` instead: no canvas and no JSX, written
-straight into an LCD's buffer. The simulation itself is the app's JS, and on
-an ESP32 every bytecode counts (~0.25 µs each): keep the per-cell loop to
-locals and typed arrays, take random numbers from a table rather than a call,
-skip rows that cannot change, read `app.config` once per render (each read
-crosses into the runtime), and offer a coarser `pixelSize` there
-(`app.frame.embedded`). The Hellfire sample runs 26 fps at 8 px on a 480x480
-ESP32 panel.
+straight into an LCD's buffer. Without `palette` the cells are RGBA, four bytes
+each (a `Uint32Array` of `0xff000000 | b << 16 | g << 8 | r`); a palette byte
+is cheaper. The simulation itself is the app's JS, and on an ESP32 every
+bytecode counts (~0.25 µs each): keep per-cell and per-particle loops to
+locals and typed arrays (no `Math.*`, method or property lookups inside
+them), take random numbers from a table rather than a call, skip rows that
+cannot change, read `app.config` once per render (each read crosses into the
+runtime), and offer a coarser `pixelSize` there (`app.frame.embedded`). The
+Hellfire and Pixel toys samples run 14 to 26 fps on a 480x480 ESP32 panel.
 
 **Assets and permissions.** Asset paths are relative to the frame's assets
 folder (`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos,
@@ -1119,13 +1121,14 @@ declare const frameos: {
     options?: { x?: number; y?: number; width?: number; height?: number; pixelSize?: number; palette?: (string | number)[] }
   ): boolean;
   /**
-   * A whole frame of palette cells, to return from get() (FrameOS 2026.11.7+): written straight into an LCD's
-   * buffer, with no canvas and no JSX, each cell a pixelSize square. An index past the palette, or a grid that stops
-   * short of the frame, shows the scene's background.
+   * A whole frame of cells, to return from get() (FrameOS 2026.11.7+): written straight into an LCD's buffer, with
+   * no canvas and no JSX, each cell a pixelSize square. With palette a cell is one index into it; without, four
+   * bytes of RGBA (an ImageData's layout; in a Uint32Array, 0xAABBGGRR). An index past the palette, alpha 0, or a
+   * grid that stops short of the frame shows the scene's background.
    */
   pixels(
-    cells: Uint8Array | Uint8ClampedArray | ArrayBuffer,
-    options: { width?: number; height?: number; pixelSize?: number; palette: (string | number)[] }
+    cells: Uint8Array | Uint8ClampedArray | Uint32Array | ArrayBuffer,
+    options: { width?: number; height?: number; pixelSize?: number; palette?: (string | number)[] }
   ): unknown;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
