@@ -83,6 +83,7 @@ type PixelFrame* = object
   buffer: pointer
   generation: uint32
   width*, height*, size*: int
+  rgba*: bool ## four bytes a cell, no palette
   palette*: seq[ColorRGBX]
   cells*: seq[uint8]
 
@@ -97,6 +98,11 @@ var
 when defined(testing):
   var svgFramePixelsForTest* = 0
     ## Pixels the last renderSvgFrame repainted (test_svg_frames.nim).
+
+  proc heldPixelFrameBytesForTest*(): int =
+    ## The memory the kept pixel frames hold (test_hellfire_scene.nim).
+    for frame in heldPixelFrames:
+      result += frame.cells.capacity
 
 proc beginPanelFrame*(buffer: pointer, generation: uint32) =
   ## A render into the panel buffer `buffer` begins; `generation` counts the

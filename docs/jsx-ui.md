@@ -335,16 +335,30 @@ export function get(app) {
   enter a string, and a palette frame that fills the canvas writes and notes
   only the cells that differ from the last one.
 - **`return frameos.pixels(cells, { width, height, pixelSize, palette })`** is
-  a whole frame of palette cells with no canvas: from `get()`, written straight
-  into the panel's buffer when the node feeds a `render/image` of the frame's
-  size, so nothing is copied and no JSX is laid out. It is what to use when a
-  raster is the whole picture. It covers what is under it unless an index is
-  past the palette or the grid stops short of the frame (the scene's background
-  shows there). Each panel buffer remembers its cells, so only the ones that
-  changed are written. A grid larger than the frame is a picture of its own
-  for the next node to scale. What fills the cells is the app's own JS (the
-  runtime has no simulation of its own); the Hellfire sample scene
-  (`repo/scenes/samples/Hellfire`) is the yardstick for both calls.
+  a whole frame of cells with no canvas: from `get()`, written straight into
+  the panel's buffer when the node feeds a `render/image` of the frame's size,
+  so nothing is copied and no JSX is laid out. It is what to use when a raster
+  is the whole picture. With `palette` a cell is one index into it (the
+  cheapest: a byte a cell to compute, compare and pack); without one a cell is
+  four bytes of RGBA, an ImageData's layout (in a `Uint32Array`,
+  `0xff000000 | b << 16 | g << 8 | r`), so an app never sees whether the
+  panel stores 565, grey or sixteen greys. It covers what is under it unless
+  an index is past the palette, a cell's alpha is 0 or the grid stops short of
+  the frame (the scene's background shows there). Each panel buffer remembers
+  its cells, up to 256 KB of them, so only the ones that changed are written.
+  A grid larger than the frame is a picture of its own for the next node to
+  scale. What fills the cells is the app's own JS (the runtime has no
+  simulation of its own); the Hellfire and Pixel toys sample scenes
+  (`repo/scenes/samples/`) are the yardsticks.
+- **This is as close to the panel's pixels as JS gets**, on purpose. The app
+  owns the typed array and the runtime reads it in place; what is between them
+  and the panel is the packing for its format and the cells that changed. On
+  an ESP32 the interpreter is the cost, not that: a whole 480x480 frame of
+  cells at `pixelSize` 1 takes 1.3 s (palette) to 1.6 s (RGBA) of JS, and
+  80 to 140 ms to write. A view of the panel's own buffer would save the
+  second and none of the first, and hand the app the panel's format, which
+  buffer of three it is drawing into, and its rotation. Fewer, larger cells
+  are the lever: see docs/realtime-rendering.md.
 - **A frame repaints what was drawn**, not the canvas and not the rest of the
   UI.
   - Each draw is noted with its box (`utils/canvas_log.nim`), and each frame

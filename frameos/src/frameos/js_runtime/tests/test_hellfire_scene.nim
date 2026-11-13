@@ -170,6 +170,123 @@ suite "frameos.pixels":
     check picture.width == 100 and picture.height == 60
     check picture[50, 20].r == 255 and picture[50, 2].r == 0
 
+# Without a palette a cell is four bytes of RGBA, an ImageData's layout: here
+# a Uint32Array, 0xAABBGGRR on a little-endian host (every FrameOS host).
+const rgbaFrames = """
+export function get(app) {
+  const cols = 20, rows = 12
+  const px = new Uint32Array(cols * rows).fill(0xff000000)
+  if (Number(app.config.step) >= 1) px.fill(0xff0000ff, 4 * cols, 6 * cols)
+  if (app.config.hole) px[0] = 0
+  px[3 * cols + 7] = 0xff336699
+  const options = { width: cols, height: rows, pixelSize: 5 }
+  if (app.config.indexed) return frameos.pixels(new Uint8Array(cols * rows), { ...options, palette: ['#000000'] })
+  if (app.config.short) return frameos.pixels(new Uint8Array(cols * rows), options)
+  if (app.config.unaligned) {
+    const bytes = new Uint8Array(px.byteLength + 1)
+    bytes.set(new Uint8Array(px.buffer), 1)
+    return frameos.pixels(bytes.subarray(1), options)
+  }
+  return frameos.pixels(px, options)
+}
+"""
+
+suite "frameos.pixels without a palette":
+  const
+    black = rgb565ToRgbx(rgbxToRgb565(rgbx(0, 0, 0, 255)))
+    red = rgb565ToRgbx(rgbxToRgb565(rgbx(255, 0, 0, 255)))
+    green = rgb565ToRgbx(rgbxToRgb565(rgbx(0, 255, 0, 255)))
+    poked = rgb565ToRgbx(rgbxToRgb565(rgbx(0, 0, 255, 255)))
+    odd = rgbx(0x99, 0x66, 0x33, 255) # the one cell at (7, 3)
+
+  proc newRgbaFire(id: string): Fire =
+    result = newFire(id, 100, 60)
+    result.runtime = newJsAppRuntime(category = "data", outputType = "image", source = rgbaFrames,
+      sourceName = "app.tsx")
+
+  test "RGBA cells are pixels in whatever the panel stores, and covering it owe no background":
+    forgetPanelFrames()
+    let fire = newRgbaFire("tests/rgba-565")
+    let target = newImage565(100, 60)
+    target.fill(rgbx(9, 9, 9, 255))
+    let (image, owed) = fire.intoPanel(target, %*{"step": 1})
+    check cast[pointer](image) == cast[pointer](target)
+    check not owed
+    check target[50, 19] == black and target[50, 20] == red and target[50, 29] == red and target[50, 30] == black
+    check target[37, 17] == rgb565ToRgbx(rgbxToRgb565(odd))
+    # Every format a panel or canvas comes in stores what pixie's own setPixel would.
+    for (name, made) in [("rgbx", newImage(100, 60)), ("gray8", newImageGray8(100, 60)),
+        ("gray4", newImageGray4(100, 60))]:
+      forgetPanelFrames()
+      let other = newRgbaFire("tests/rgba-" & name)
+      discard other.intoPanel(made, %*{"step": 1})
+      let expected = newImageLike(made, 100, 60)
+      for y in 0 ..< 60:
+        for x in 0 ..< 100:
+          let color = if x div 5 == 7 and y div 5 == 3: odd elif y div 5 in 4 .. 5: rgbx(255, 0, 0, 255)
+            else: rgbx(0, 0, 0, 255)
+          expected.setPixel(expected.dataIndex(x, y), color)
+      var wrong = 0
+      for y in 0 ..< 60:
+        for x in 0 ..< 100:
+          if made[x, y] != expected[x, y]: inc wrong
+      checkpoint name
+      check wrong == 0
+
+  test "alpha 0 shows what is under it, and the background is paid":
+    forgetPanelFrames()
+    let fire = newRgbaFire("tests/rgba-hole")
+    let target = newImage565(100, 60)
+    let (_, owed) = fire.intoPanel(target, %*{"hole": true})
+    check not owed
+    check target[2, 2] == green and target[50, 30] == black
+
+  test "a buffer writes only the cells that differ, and an indexed frame in between forgets them":
+    forgetPanelFrames()
+    let fire = newRgbaFire("tests/rgba-shadow")
+    let target = newImage565(100, 60)
+    discard fire.intoPanel(target, %*{"step": 0})
+    target[50, 2] = rgbx(0, 0, 255, 255)
+    discard fire.intoPanel(target, %*{"step": 0})
+    check target[50, 2] == poked # the same cells: not one written
+    discard fire.intoPanel(target, %*{"step": 1})
+    check target[50, 2] == poked and target[50, 20] == red
+    discard fire.intoPanel(target, %*{"indexed": true}) # palette cells: another record
+    check target[50, 2] == black and target[50, 20] == black
+    target[50, 2] = rgbx(0, 0, 255, 255)
+    discard fire.intoPanel(target, %*{"step": 0})
+    check target[50, 2] == black
+
+  test "a buffer keeps no more than the frame it holds, and nothing for a frame past the cap":
+    forgetPanelFrames()
+    const sized = """
+export function get(app) {
+  const n = Number(app.config.n)
+  const options = { width: n, height: n, pixelSize: 1 }
+  if (app.config.indexed) return frameos.pixels(new Uint8Array(n * n), { ...options, palette: ['#000000'] })
+  return frameos.pixels(new Uint32Array(n * n).fill(0xff000000), options)
+}
+"""
+    var fire = newFire("tests/rgba-memory", 300, 300)
+    fire.runtime = newJsAppRuntime(category = "data", outputType = "image", source = sized, sourceName = "app.tsx")
+    let target = newImage565(300, 300)
+    discard fire.intoPanel(target, %*{"n": 240}) # 230 KB of RGBA: kept
+    check heldPixelFrameBytesForTest() >= 240 * 240 * 4
+    discard fire.intoPanel(target, %*{"n": 20, "indexed": true}) # 400 bytes: and only those
+    check heldPixelFrameBytesForTest() < 4096
+    discard fire.intoPanel(target, %*{"n": 300}) # 360 KB: past the cap, not kept
+    check heldPixelFrameBytesForTest() == 0
+
+  test "bytes at any offset, and too few of them refused":
+    forgetPanelFrames()
+    let fire = newRgbaFire("tests/rgba-unaligned")
+    let target = newImage565(100, 60)
+    discard fire.intoPanel(target, %*{"step": 1, "unaligned": true})
+    check target[50, 20] == red and target[37, 17] == rgb565ToRgbx(rgbxToRgb565(odd))
+    let short = newRgbaFire("tests/rgba-short")
+    expect ValueError: # refused: no picture comes back
+      discard short.render(%*{"short": true})
+
 suite "Hellfire":
   test "the e2e fixture is the sample's app, seeded":
     let fixtureApp = fixture["apps"]["hellfire"]
