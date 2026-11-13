@@ -6,6 +6,11 @@
 ## unpack their arguments and call in. What an app simulates (a fire's spread,
 ## a plasma, an automaton) is the app's own JS: the runtime knows pixels, not
 ## rules.
+##
+## RGB565 only: an LCD's canvas, where a frame is a race. Any other format
+## (e-paper's greys and colors, a Pi's RGBX) goes a pixel at a time through
+## pixie's setPixel (app_runtime's writeCellsSlow), at no cost a refresh of
+## seconds or a Pi would notice, and in a fraction of these loops' flash.
 
 type Cells* = ptr UncheckedArray[uint8]
 
@@ -79,60 +84,6 @@ proc blitCells16*(first: ptr UncheckedArray[uint16]; stride: int; cells, shadow:
   ## An RGB565 canvas. The rows that changed, as (first, last); -1 for none.
   blitLoop(uint16)
 
-proc blitCells32*(first: ptr UncheckedArray[uint32]; stride: int; cells, shadow: Cells;
-    width, height, size: int; colors: ptr UncheckedArray[uint32]; count: int): tuple[top, bottom: int] {.raises: [].} =
-  ## An RGBX canvas.
-  blitLoop(uint32)
-
-proc blitCells8*(first: ptr UncheckedArray[uint8]; stride: int; cells, shadow: Cells;
-    width, height, size: int; colors: ptr UncheckedArray[uint8]; count: int): tuple[top, bottom: int] {.raises: [].} =
-  ## A grey canvas.
-  blitLoop(uint8)
-
-proc blitCells4*(data: ptr UncheckedArray[uint8]; firstIndex, stride: int; cells, shadow: Cells;
-    width, height, size: int; levels: ptr UncheckedArray[uint8]; count: int): tuple[top, bottom: int] {.raises: [].} =
-  ## A sixteen-grey canvas, two pixels a byte from the pixel index
-  ## `firstIndex`. Every store is dithered by its place in the buffer (pixie's
-  ## `storeGray4`), so `levels` holds sixteen per palette entry, one for each
-  ## cell of the 4x4 ordered matrix, and no row is a copy of another.
-  var
-    top = -1
-    bottom = -1
-  let
-    row0 = firstIndex div stride
-    col0 = firstIndex mod stride
-  for sy in 0 ..< height:
-    let src = cast[Cells](addr cells[sy * width])
-    let old = if shadow.isNil: nil else: cast[Cells](addr shadow[sy * width])
-    if not old.isNil and equalMem(src, old, width):
-      continue
-    if top < 0:
-      top = sy
-    bottom = sy
-    for k in 0 ..< size:
-      let
-        y = sy * size + k
-        rowIndex = firstIndex + y * stride
-        bayerRow = ((row0 + y) and 3) * 4
-      var x = 0
-      for sx in 0 ..< width:
-        let index = src[sx].int
-        if index < count and (old.isNil or src[sx] != old[sx]):
-          let table = index * 16 + bayerRow
-          for d in 0 ..< size:
-            let
-              at = rowIndex + x + d
-              level = levels[table + ((col0 + x + d) and 3)]
-              b = at shr 1
-            if (at and 1) == 0:
-              data[b] = (data[b] and 0x0F) or (level shl 4)
-            else:
-              data[b] = (data[b] and 0xF0) or level
-        x += size
-    if not old.isNil:
-      copyMem(old, src, width)
-  result = (top, bottom)
-
 # Cells of RGBA, four bytes each (a canvas ImageData's layout): what
 # `frameos.pixels` takes without a palette. The bytes are a typed array's, at
 # any offset, so they are read a byte at a time: an unaligned word load is an
@@ -202,72 +153,7 @@ template pack565(r, g, b: uint8): uint16 =
   uint16((((r.uint32 * 249 + 1014) shr 11) shl 11) or (((g.uint32 * 253 + 505) shr 10) shl 5) or
     ((b.uint32 * 249 + 1014) shr 11))
 
-template packRgbx(r, g, b: uint8): uint32 =
-  # An opaque ColorRGBX as the word it is in memory: r, g, b, 255.
-  r.uint32 or (g.uint32 shl 8) or (b.uint32 shl 16) or 0xff000000'u32
-
-template luma8(r, g, b: uint8): uint8 =
-  # pixie's rgbxToGray8: BT.601 weights in 256ths, rounded.
-  uint8((r.uint32 * 77 + g.uint32 * 150 + b.uint32 * 29 + 128) shr 8)
-
 proc blitRgba16*(first: ptr UncheckedArray[uint16]; stride: int; cells, shadow: Cells;
     width, height, size: int): tuple[top, bottom: int] {.raises: [].} =
   ## RGBA cells into an RGB565 canvas. The rows that changed; -1 for none.
   rgbaLoop(uint16, pack565)
-
-proc blitRgba32*(first: ptr UncheckedArray[uint32]; stride: int; cells, shadow: Cells;
-    width, height, size: int): tuple[top, bottom: int] {.raises: [].} =
-  ## RGBA cells into an RGBX canvas.
-  rgbaLoop(uint32, packRgbx)
-
-proc blitRgba8*(first: ptr UncheckedArray[uint8]; stride: int; cells, shadow: Cells;
-    width, height, size: int): tuple[top, bottom: int] {.raises: [].} =
-  ## RGBA cells into a grey canvas.
-  rgbaLoop(uint8, luma8)
-
-const Bayer4x4 = [0'u8, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]
-  ## pixie's OrderedThresholds4x4.
-
-proc blitRgba4*(data: ptr UncheckedArray[uint8]; firstIndex, stride: int; cells, shadow: Cells;
-    width, height, size: int): tuple[top, bottom: int] {.raises: [].} =
-  ## RGBA cells into a sixteen-grey canvas, each pixel dithered by its place
-  ## in the buffer as pixie's storeGray4 does (grayLevel16Ordered).
-  var
-    top = -1
-    bottom = -1
-  let
-    rowBytes = width * 4
-    row0 = firstIndex div stride
-    col0 = firstIndex mod stride
-  for sy in 0 ..< height:
-    let src = cast[Cells](addr cells[sy * rowBytes])
-    let old = if shadow.isNil: nil else: cast[Cells](addr shadow[sy * rowBytes])
-    if not old.isNil and equalMem(src, old, rowBytes):
-      continue
-    if top < 0:
-      top = sy
-    bottom = sy
-    for k in 0 ..< size:
-      let
-        y = sy * size + k
-        rowIndex = firstIndex + y * stride
-        bayerRow = ((row0 + y) and 3) * 4
-      var x = 0
-      for sx in 0 ..< width:
-        let c = sx * 4
-        if src[c + 3] != 0 and (old.isNil or not sameCell(src, old, c)):
-          let luma = luma8(src[c], src[c + 1], src[c + 2]).uint32
-          for d in 0 ..< size:
-            let
-              at = rowIndex + x + d
-              value = luma * 15 + Bayer4x4[bayerRow + ((col0 + x + d) and 3)].uint32 * 16 + 8
-              level = uint8(((value + 1) * 257) shr 16)
-              b = at shr 1
-            if (at and 1) == 0:
-              data[b] = (data[b] and 0x0F) or (level shl 4)
-            else:
-              data[b] = (data[b] and 0xF0) or level
-        x += size
-    if not old.isNil:
-      copyMem(old, src, rowBytes)
-  result = (top, bottom)

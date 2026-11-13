@@ -347,7 +347,17 @@ export function get(app) {
   the frame (the scene's background shows there). Each panel buffer remembers
   its cells, up to 256 KB of them, so only the ones that changed are written.
   A grid larger than the frame is a picture of its own for the next node to
-  scale. What fills the cells is the app's own JS (the runtime has no
+  scale. A palette can be a `Uint32Array` of `0xRRGGBB`, read in place, so
+  handing a 256-color one over every frame costs nothing.
+- **`return frameos.pixels([layer, ...], { pixelSize })`** paints layers in
+  order, each `{ cells, x, y, width, height, pixelSize, palette }` with `x`
+  and `y` in pixels: tiles side by side, a bar under a picture, a label over
+  it, each with its own cells, size and palette, and what a layer leaves
+  (an index past its palette, alpha 0) shows what is under it. That is how a
+  frame embeds components: Pixel toys' "all at once" is nine effects, each a
+  `make(cols, rows)` that returns its cells, palette and `step()`, laid out as
+  a grid of layers, and its controls are one more. A frame of layers keeps no
+  copy of its cells; one frame of the whole panel writes only what changed. What fills the cells is the app's own JS (the runtime has no
   simulation of its own); the Hellfire and Pixel toys sample scenes
   (`repo/scenes/samples/`) are the yardsticks.
 - **This is as close to the panel's pixels as JS gets**, on purpose. The app

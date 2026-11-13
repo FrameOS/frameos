@@ -287,6 +287,57 @@ export function get(app) {
     expect ValueError: # refused: no picture comes back
       discard short.render(%*{"short": true})
 
+# Layers: `frameos.pixels([layer, ...])`, each its own cells, palette, place
+# and cell size, painted in order.
+const layerFrames = """
+export function get(app) {
+  const left = new Uint8Array(10 * 12).fill(1)
+  const right = new Uint8Array(5 * 6).fill(1)
+  const over = new Uint8Array(4 * 4).fill(9) // past its palette: see-through
+  over[5] = 0
+  const layers = [
+    { cells: left, x: 0, y: 0, width: 10, height: 12, palette: ['#000000', '#ff0000'] },
+    { cells: right, x: 50, y: 0, width: 5, height: 6, pixelSize: 10, palette: new Uint32Array([0, 0x00ff00]) },
+    { cells: over, x: 0, y: 0, width: 4, height: 4, palette: ['#0000ff'] },
+  ]
+  if (app.config.narrow) layers[1].width = 4
+  if (app.config.outside) layers.push({ cells: right, x: 90, y: 0, width: 5, height: 6, pixelSize: 10, palette: ['#fff'] })
+  return frameos.pixels(layers, { pixelSize: 5 })
+}
+"""
+
+suite "frameos.pixels layers":
+  const
+    red = rgb565ToRgbx(rgbxToRgb565(rgbx(255, 0, 0, 255)))
+    green = rgb565ToRgbx(rgbxToRgb565(rgbx(0, 255, 0, 255)))
+    blue = rgb565ToRgbx(rgbxToRgb565(rgbx(0, 0, 255, 255)))
+    owedGray = rgb565ToRgbx(rgbxToRgb565(rgbx(40, 40, 40, 255)))
+
+  proc newLayerFire(id: string): Fire =
+    result = newFire(id, 100, 60)
+    result.runtime = newJsAppRuntime(category = "data", outputType = "image", source = layerFrames,
+      sourceName = "app.tsx")
+
+  test "each layer in its rectangle, at its cell size, with its palette, later ones on top":
+    forgetPanelFrames()
+    let fire = newLayerFire("tests/layers")
+    let target = newImage565(100, 60)
+    let (image, owed) = fire.intoPanel(target, %*{}, background = rgba(40, 40, 40, 255).color)
+    check cast[pointer](image) == cast[pointer](target)
+    check not owed
+    check target[30, 30] == red # the left tile, 5 px cells
+    check target[75, 30] == green # the right one, 10 px cells, a Uint32Array palette
+    check target[7, 7] == blue # the overlay's one opaque cell, (1, 1) at 5 px
+    check target[2, 2] == red # the rest of it is see-through
+
+  test "what the layers leave uncovered shows the background, and a layer outside the frame is refused":
+    forgetPanelFrames()
+    let fire = newLayerFire("tests/layers-narrow")
+    let target = newImage565(100, 60)
+    discard fire.intoPanel(target, %*{"narrow": true, "outside": true}, background = rgba(40, 40, 40, 255).color)
+    check target[95, 30] == owedGray # the column the narrowed tile leaves
+    check target[75, 30] == green # drawn though a layer after it was refused
+
 suite "Hellfire":
   test "the e2e fixture is the sample's app, seeded":
     let fixtureApp = fixture["apps"]["hellfire"]

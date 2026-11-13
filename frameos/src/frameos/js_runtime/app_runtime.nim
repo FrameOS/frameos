@@ -2078,53 +2078,82 @@ proc jsOptionInt(ctx: ptr JSContext, options: JSValueConst, name: cstring, defau
   let number = toNimFloat(ctx, value)
   if number != number or abs(number) > 1e9: default else: number.int
 
-proc writePaletteCells(image: Image, cells, known: Cells; x0, y0, width, height, ps: int;
-    palette: seq[ColorRGBX]): tuple[top, bottom: int] =
-  ## The palette packed once for the image's format, the cells written; with
-  ## `known`, the ones it already holds are not. The rows that changed.
-  let first = image.pixelAddr(image.dataIndex(x0, y0))
-  case image.format
-  of pfRgb565:
+proc writeCellsSlow(image: Image, cells, known: Cells; x0, y0, width, height, ps: int;
+    palette: seq[ColorRGBX]; rgba: bool): tuple[top, bottom: int] =
+  ## Cells into any image a pixel at a time through pixie's setPixel, so every
+  ## format stores what it always does (sixteen greys dithered by place, a
+  ## dithered 565 canvas its own pattern), each square clipped to the image.
+  result = (-1, -1)
+  let bpc = if rgba: 4 else: 1
+  for sy in 0 ..< height:
+    let src = cast[Cells](addr cells[sy * width * bpc])
+    let old = if known.isNil: nil else: cast[Cells](addr known[sy * width * bpc])
+    if not old.isNil and equalMem(src, old, width * bpc):
+      continue
+    if result.top < 0:
+      result.top = sy
+    result.bottom = sy
+    let
+      top = max(y0 + sy * ps, 0)
+      bottom = min(y0 + sy * ps + ps, image.height)
+    for sx in 0 ..< width:
+      let c = sx * bpc
+      if not old.isNil and equalMem(addr src[c], addr old[c], bpc):
+        continue
+      var color: ColorRGBX
+      if rgba:
+        if src[c + 3] == 0:
+          continue
+        color = rgbx(src[c], src[c + 1], src[c + 2], 255)
+      elif src[c].int < palette.len:
+        color = palette[src[c]]
+      else:
+        continue
+      for y in top ..< bottom:
+        for x in max(x0 + sx * ps, 0) ..< min(x0 + sx * ps + ps, image.width):
+          image.setPixel(image.dataIndex(x, y), color)
+    if not old.isNil:
+      copyMem(old, src, width * bpc)
+
+proc writeCells(image: Image, cells, known: Cells; x0, y0, width, height, ps: int;
+    palette: seq[ColorRGBX]; rgba: bool): tuple[top, bottom: int] =
+  ## Cells, palette indices or RGBA (four bytes each), written as `ps` squares
+  ## at (x0, y0); with `known` (the cells the image holds, kept up to date) only
+  ## those that differ. The rows that changed. An RGB565 image with the grid
+  ## inside it, an LCD's, takes pixel_ops' -O2 loops with the palette packed
+  ## once; anything else goes a pixel at a time, which e-paper and a Pi never
+  ## notice and the firmware's flash does.
+  if not rgba and palette.len == 0:
+    return (-1, -1)
+  if image.format == pfRgb565 and x0 >= 0 and y0 >= 0 and x0 + width * ps <= image.width and
+      y0 + height * ps <= image.height:
+    let first = cast[ptr UncheckedArray[uint16]](image.pixelAddr(image.dataIndex(x0, y0)))
+    if rgba:
+      return blitRgba16(first, image.stride, cells, known, width, height, ps)
     var colors = newSeq[uint16](palette.len)
     for i, color in palette:
       colors[i] = rgbxToRgb565(color)
-    result = blitCells16(cast[ptr UncheckedArray[uint16]](first), image.stride, cells, known, width, height, ps,
+    return blitCells16(first, image.stride, cells, known, width, height, ps,
       cast[ptr UncheckedArray[uint16]](addr colors[0]), colors.len)
-  of pfRgbx:
-    result = blitCells32(cast[ptr UncheckedArray[uint32]](first), image.stride, cells, known, width, height, ps,
-      cast[ptr UncheckedArray[uint32]](unsafeAddr palette[0]), palette.len)
-  of pfGray8:
-    var colors = newSeq[uint8](palette.len)
-    for i, color in palette:
-      colors[i] = rgbxToGray8(color)
-    result = blitCells8(cast[ptr UncheckedArray[uint8]](first), image.stride, cells, known, width, height, ps,
-      cast[ptr UncheckedArray[uint8]](addr colors[0]), colors.len)
-  of pfGray4:
-    var levels = newSeq[uint8](palette.len * 16)
-    for i, color in palette:
-      let luma = rgbxToGray8(color)
-      for t in 0 ..< 16:
-        levels[i * 16 + t] = grayLevel16Ordered(luma, OrderedThresholds4x4[t])
-    result = blitCells4(image.data8, image.dataIndex(x0, y0), image.stride, cells, known, width, height, ps,
-      cast[ptr UncheckedArray[uint8]](addr levels[0]), palette.len)
+  writeCellsSlow(image, cells, known, x0, y0, width, height, ps, palette, rgba)
 
-proc writeRgbaCells(image: Image, cells, known: Cells; x0, y0, width, height, ps: int): tuple[top, bottom: int] =
-  ## RGBA cells (four bytes each) packed for the image's format as they are
-  ## written; with `known`, the ones it already holds are not.
-  let first = image.pixelAddr(image.dataIndex(x0, y0))
-  case image.format
-  of pfRgb565:
-    blitRgba16(cast[ptr UncheckedArray[uint16]](first), image.stride, cells, known, width, height, ps)
-  of pfRgbx:
-    blitRgba32(cast[ptr UncheckedArray[uint32]](first), image.stride, cells, known, width, height, ps)
-  of pfGray8:
-    blitRgba8(cast[ptr UncheckedArray[uint8]](first), image.stride, cells, known, width, height, ps)
-  of pfGray4:
-    blitRgba4(image.data8, image.dataIndex(x0, y0), image.stride, cells, known, width, height, ps)
+proc jsHasPalette(ctx: ptr JSContext, value: JSValueConst): bool =
+  ## An array of colors, or a typed array of them (0xRRGGBB, four bytes each).
+  JS_IsArray(ctx, value) != 0 or not jsBytes(ctx, value).data.isNil
 
 proc jsPalette(ctx: ptr JSContext, owner: AppRoot, value: JSValueConst, palette: var seq[ColorRGBX]): bool =
-  ## A palette off a JS array: CSS colors or 0xRRGGBB numbers, 256 at most.
+  ## A palette off a JS array of CSS colors or 0xRRGGBB numbers, or off a
+  ## Uint32Array of 0xRRGGBB read in place (an app that hands a palette over
+  ## every frame, per layer, need not have it parsed each time). 256 at most.
   ## No JSON: an animation hands one over every frame.
+  if JS_IsArray(ctx, value) == 0:
+    let (bytes, byteLen) = jsBytes(ctx, value)
+    if bytes.isNil or byteLen div 4 > 256:
+      frameos_apps.logError(owner, "frameos.pixels: a palette holds 256 colors at most")
+      return false
+    for i in 0 ..< byteLen div 4:
+      palette.add rgbx(bytes[i * 4 + 2], bytes[i * 4 + 1], bytes[i * 4], 255)
+    return true
   let colors = jsOptionInt(ctx, value, "length", 0)
   if colors > 256:
     frameos_apps.logError(owner, "frameos.putPixels: a palette holds 256 colors at most")
@@ -2169,7 +2198,7 @@ proc putPaletteCells(runtime: JsAppRuntime, canvasId: int, image: Image, cells: 
       s.size = ps
       s.palette = palette
       s.cells.setLen(width * height)
-  let rows = writePaletteCells(image, cells, known, x0, y0, width, height, ps, palette)
+  let rows = writeCells(image, cells, known, x0, y0, width, height, ps, palette, false)
   if rows.top >= 0:
     log.drew(rect(x0.float32, (y0 + rows.top * ps).float32, (width * ps).float32,
       ((rows.bottom - rows.top + 1) * ps).float32))
@@ -2208,25 +2237,20 @@ proc jsCanvasPutPixels(ctx: ptr JSContext, id: JSValue, pixels: JSValue, options
     width = jsOptionInt(ctx, options, "width", (image.width - x0) div ps)
     height = jsOptionInt(ctx, options, "height", (image.height - y0) div ps)
     paletteValue = JS_GetPropertyStr(ctx, options, "palette")
-    paletted = JS_IsArray(ctx, paletteValue) != 0
+    paletted = jsHasPalette(ctx, paletteValue)
     bytesPerSource = if paletted: 1 else: 4
   defer: JS_FreeValue(ctx, paletteValue)
-  if width <= 0 or height <= 0:
-    frameos_apps.logError(e.owner, "frameos.putPixels needs a width and a height")
-    return nimBoolToJS(ctx, false)
-  if width.int64 * height.int64 * bytesPerSource.int64 > byteLen.int64:
-    frameos_apps.logError(e.owner, "frameos.putPixels: " & $width & "x" & $height &
-      (if paletted: " indices need " else: " RGBA pixels need ") & $(width * height * bytesPerSource) &
-      " bytes, got " & $byteLen)
+  # Constant messages: the numbers in them were a kilobyte of firmware.
+  if width <= 0 or height <= 0 or width.int64 * height.int64 * bytesPerSource.int64 > byteLen.int64:
+    frameos_apps.logError(e.owner, "frameos.putPixels: no width and height, or fewer bytes than they need")
     return nimBoolToJS(ctx, false)
   var palette: seq[ColorRGBX]
-  if paletted:
-    if not jsPalette(ctx, e.owner, paletteValue, palette):
-      return nimBoolToJS(ctx, false)
-    if x0 >= 0 and y0 >= 0 and width.int64 * ps.int64 <= (image.width - x0).int64 and
-        height.int64 * ps.int64 <= (image.height - y0).int64:
-      putPaletteCells(e.runtime, canvasId, image, bytes, x0, y0, width, height, ps, palette)
-      return nimBoolToJS(ctx, true)
+  if paletted and not jsPalette(ctx, e.owner, paletteValue, palette):
+    return nimBoolToJS(ctx, false)
+  if paletted and x0 >= 0 and y0 >= 0 and width.int64 * ps.int64 <= (image.width - x0).int64 and
+      height.int64 * ps.int64 <= (image.height - y0).int64:
+    putPaletteCells(e.runtime, canvasId, image, bytes, x0, y0, width, height, ps, palette)
+    return nimBoolToJS(ctx, true)
   let
     x1 = max(x0, 0)
     y1 = max(y0, 0)
@@ -2234,46 +2258,7 @@ proc jsCanvasPutPixels(ctx: ptr JSContext, id: JSValue, pixels: JSValue, options
     y2 = min(y0 + height * ps, image.height)
   if x2 <= x1 or y2 <= y1:
     return nimBoolToJS(ctx, true) # all of it outside: nothing to note
-  # A square's rows below its first are copies of it, unless a pixel was
-  # left as it was (each row keeps its own) or every store is dithered by its
-  # place (each row has its own pattern: a dithered 565 canvas, sixteen greys).
-  let rowsCopy = not image.ditherStores and image.format != pfGray4
-  for sy in 0 ..< height:
-    let top = y0 + sy * ps
-    if top >= image.height or top + ps <= 0:
-      continue
-    var
-      firstRow = -1
-      whole = true
-    for k in 0 ..< ps:
-      let dy = top + k
-      if dy < 0 or dy >= image.height:
-        continue
-      if firstRow >= 0 and whole and rowsCopy:
-        copyMem(image.pixelAddr(image.dataIndex(x1, dy)), image.pixelAddr(image.dataIndex(x1, firstRow)),
-          (x2 - x1) * image.bytesPerPixel)
-        continue
-      for sx in 0 ..< width:
-        let left = x0 + sx * ps
-        if left >= image.width or left + ps <= 0:
-          continue
-        var color: ColorRGBX
-        if paletted:
-          let index = bytes[sy * width + sx].int
-          if index >= palette.len:
-            whole = false
-            continue
-          color = palette[index]
-        else:
-          let at = (sy * width + sx) * 4
-          if bytes[at + 3] == 0:
-            whole = false
-            continue
-          color = rgbx(bytes[at], bytes[at + 1], bytes[at + 2], 255)
-        for dx in max(left, 0) ..< min(left + ps, image.width):
-          image.setPixel(image.dataIndex(dx, dy), color)
-      if firstRow < 0:
-        firstRow = dy
+  discard writeCells(image, bytes, nil, x0, y0, width, height, ps, palette, not paletted)
   registerCanvas(image).drew(rect(x1.float32, y1.float32, (x2 - x1).float32, (y2 - y1).float32))
   nimBoolToJS(ctx, true)
 
@@ -3347,6 +3332,43 @@ proc svgImageSpecFromJs(ctx: ptr JSContext, payload: JSValueConst): JsonNode =
     return nil
   result["svg"] = %toNimString(ctx, svg)
 
+type PixelLayer = object
+  cells: Cells
+  rgba: bool ## four bytes a cell, no palette
+  palette: seq[ColorRGBX]
+  x, y, width, height, ps: int
+
+proc readPixelLayer(ctx: ptr JSContext, owner: AppRoot, holder, cellsValue, paletteValue: JSValueConst;
+    defaultPs, frameWidth, frameHeight: int; layer: var PixelLayer): bool =
+  ## A frame or layer of cells off its JS values: the cells read in place, the
+  ## palette, where it goes and how big its cells are. False, logged, for one
+  ## that cannot be drawn.
+  let (cells, byteLen) = jsBytes(ctx, cellsValue)
+  layer.cells = cells
+  layer.rgba = not jsHasPalette(ctx, paletteValue)
+  layer.ps = clamp(jsOptionInt(ctx, holder, "pixelSize", defaultPs), 1, 64)
+  layer.x = jsOptionInt(ctx, holder, "x", 0)
+  layer.y = jsOptionInt(ctx, holder, "y", 0)
+  layer.width = jsOptionInt(ctx, holder, "width", (frameWidth - layer.x) div layer.ps)
+  layer.height = jsOptionInt(ctx, holder, "height", (frameHeight - layer.y) div layer.ps)
+  if cells.isNil or (not layer.rgba and (not jsPalette(ctx, owner, paletteValue, layer.palette) or
+      layer.palette.len == 0)):
+    frameos_apps.logError(owner, "frameos.pixels needs a typed array of cells (and a palette, or RGBA)")
+    return false
+  let need = layer.width.int64 * layer.height.int64 * (if layer.rgba: 4 else: 1)
+  if layer.width <= 0 or layer.height <= 0 or need > byteLen.int64 or layer.width.int64 * layer.ps > 4096 or
+      layer.height.int64 * layer.ps > 4096:
+    frameos_apps.logError(owner, "frameos.pixels: fewer bytes than width x height cells need, or over 4096 pixels a side")
+    return false
+  true
+
+proc covers(layer: PixelLayer, target: Image): bool =
+  ## Opaque over every pixel of the target: what it owes is waived.
+  layer.x == 0 and layer.y == 0 and layer.width * layer.ps == target.width and
+    layer.height * layer.ps == target.height and
+    (if layer.rgba: allOpaque(layer.cells, layer.width * layer.height)
+     else: maxCell(layer.cells, layer.width * layer.height).int < layer.palette.len)
+
 const MaxPixelFrameBytes = 256 * 1024
   ## The largest frame of cells a panel buffer keeps a copy of (imageFromPixels).
 
@@ -3359,8 +3381,14 @@ proc imageFromPixels(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
   ## `palette`, or without one four bytes of RGBA (an ImageData's layout), so
   ## an app never sees how the panel stores a pixel. A frame that covers the
   ## target waives the background it owes, and each panel buffer remembers its
-  ## cells, so only the ones that differ cross the PSRAM bus. Anywhere else (no
-  ## offer, another size) it is a picture of its own, like any other image.
+  ## cells, so only the ones that differ cross the PSRAM bus. A grid larger
+  ## than the frame is a picture of its own, for the next node to scale.
+  ##
+  ## `frameos.pixels([layer, ...], {pixelSize})`: layers, each `{cells, x, y,
+  ## width, height, pixelSize, palette}` (x and y in pixels) inside the frame,
+  ## painted in order: tiles side by side, a bar under a picture, a counter
+  ## over it. An index past a layer's palette, or alpha 0, shows what is under
+  ## it. A frame of layers keeps no copy of its cells: each is written whole.
   let ctx = runtime.js.context
   let kind = JS_GetPropertyStr(ctx, payload, "__frameosType")
   defer: JS_FreeValue(ctx, kind)
@@ -3371,35 +3399,18 @@ proc imageFromPixels(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
     cellsValue = JS_GetPropertyStr(ctx, payload, "cells")
     options = JS_GetPropertyStr(ctx, payload, "options")
     paletteValue = JS_GetPropertyStr(ctx, options, "palette")
+    frameWidth = defaultImageWidth(owner, context, %*{})
+    frameHeight = defaultImageHeight(owner, context, %*{})
+    layered = JS_IsArray(ctx, cellsValue) != 0
   defer:
     JS_FreeValue(ctx, paletteValue)
     JS_FreeValue(ctx, options)
     JS_FreeValue(ctx, cellsValue)
-  let (cells, byteLen) = jsBytes(ctx, cellsValue)
-  if cells.isNil:
-    frameos_apps.logError(owner, "frameos.pixels needs a typed array of cells (a Uint8Array with a palette, " &
-      "or RGBA without one)")
+  var single: PixelLayer
+  if not layered and not readPixelLayer(ctx, owner, options, cellsValue, paletteValue, 1, frameWidth,
+      frameHeight, single):
     return
-  let rgba = JS_IsArray(ctx, paletteValue) == 0
-  var palette: seq[ColorRGBX]
-  if not rgba and (not jsPalette(ctx, owner, paletteValue, palette) or palette.len == 0):
-    return
-  let
-    frameWidth = defaultImageWidth(owner, context, %*{})
-    frameHeight = defaultImageHeight(owner, context, %*{})
-    ps = clamp(jsOptionInt(ctx, options, "pixelSize", 1), 1, 64)
-    width = jsOptionInt(ctx, options, "width", frameWidth div ps)
-    height = jsOptionInt(ctx, options, "height", frameHeight div ps)
-    bytesPerCell = if rgba: 4 else: 1
-  if width <= 0 or height <= 0 or width.int64 * height.int64 * bytesPerCell > byteLen.int64 or
-      width.int64 * ps.int64 > 4096 or height.int64 * ps.int64 > 4096:
-    frameos_apps.logError(owner, "frameos.pixels: " & $width & "x" & $height &
-      (if rgba: " RGBA cells need " else: " cells need ") & $(width.int64 * height.int64 * bytesPerCell) &
-      " bytes (and 4096 pixels a side at most), got " & $byteLen)
-    return
-  # A grid larger than the frame (an app sizing itself by the logical frame on
-  # a scaled render) is a picture of its own, for the node after it to scale.
-  let fits = width * ps <= frameWidth and height * ps <= frameHeight
+  let fits = layered or (single.width * single.ps <= frameWidth and single.height * single.ps <= frameHeight)
   var target: Image = nil
   let (offeredWidth, offeredHeight) = owner.offeredDecodeTargetSize(context)
   if fits and offeredWidth == frameWidth and offeredHeight == frameHeight:
@@ -3407,40 +3418,66 @@ proc imageFromPixels(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
   if target.isNil:
     let
       like = pictureFormatLike(context)
-      pictureWidth = if fits: frameWidth else: width * ps
-      pictureHeight = if fits: frameHeight else: height * ps
+      pictureWidth = if fits: frameWidth else: single.width * single.ps
+      pictureHeight = if fits: frameHeight else: single.height * single.ps
     target = if like.isNil: newImage(pictureWidth, pictureHeight) else: newImageLike(like, pictureWidth, pictureHeight)
+  result.image = target
   var owed = takeOwedBackground(context, target)
-  let covers = width * ps == target.width and height * ps == target.height and
-    (if rgba: allOpaque(cells, width * height) else: maxCell(cells, width * height).int < palette.len)
   var (panel, frame) = takePanelPixelFrame(target, context.wholeFrame)
-  var known: Cells = nil
-  let byteCount = width * height * bytesPerCell
-  # A buffer remembers a frame's cells up to MaxPixelFrameBytes: a whole
-  # 480x480 panel of RGBA (pixelSize 1) is 921 KB a buffer, three buffers
-  # most of an ESP32's free PSRAM, and an animation that fine changes nearly
-  # every cell anyway; reading and writing the copy was half its blit.
+  if layered:
+    let defaultPs = clamp(jsOptionInt(ctx, options, "pixelSize", 1), 1, 64)
+    for i in 0 ..< jsOptionInt(ctx, cellsValue, "length", 0):
+      let
+        value = JS_GetPropertyUint32(ctx, cellsValue, i.uint32)
+        layerCells = JS_GetPropertyStr(ctx, value, "cells")
+        layerPalette = JS_GetPropertyStr(ctx, value, "palette")
+      try:
+        var layer: PixelLayer
+        if not readPixelLayer(ctx, owner, value, layerCells, layerPalette, defaultPs, frameWidth, frameHeight,
+            layer):
+          continue
+        if layer.x < 0 or layer.y < 0 or layer.x + layer.width * layer.ps > target.width or
+            layer.y + layer.height * layer.ps > target.height:
+          frameos_apps.logError(owner, "frameos.pixels: a layer is not inside the frame")
+          continue
+        if owed.isSome:
+          if not layer.covers(target):
+            payBackground(target, owed.get())
+          owed = none(Color)
+        discard writeCells(target, layer.cells, nil, layer.x, layer.y, layer.width, layer.height, layer.ps,
+          layer.palette, layer.rgba)
+      finally:
+        JS_FreeValue(ctx, layerPalette)
+        JS_FreeValue(ctx, layerCells)
+        JS_FreeValue(ctx, value)
+    if owed.isSome:
+      payBackground(target, owed.get())
+    return
+  # One frame: the panel buffer keeps a copy of its cells, so the next frame
+  # into that buffer writes only those that differ; up to MaxPixelFrameBytes,
+  # since a whole 480x480 panel of RGBA cells is 921 KB a buffer, three
+  # buffers most of an ESP32's free PSRAM, and a frame that fine changes
+  # nearly every cell anyway.
+  let byteCount = single.width * single.height * (if single.rgba: 4 else: 1)
   if byteCount > MaxPixelFrameBytes:
     panel = false
-  if owed.isSome and not covers:
+  var known: Cells = nil
+  if owed.isSome and not single.covers(target):
     payBackground(target, owed.get())
-  elif panel and frame.width == width and frame.height == height and frame.size == ps and
-      frame.rgba == rgba and frame.palette == palette and frame.cells.len == byteCount:
+  elif panel and frame.width == single.width and frame.height == single.height and frame.size == single.ps and
+      frame.rgba == single.rgba and frame.palette == single.palette and frame.cells.len == byteCount:
     known = cast[Cells](addr frame.cells[0])
-  if rgba:
-    discard writeRgbaCells(target, cells, known, 0, 0, width, height, ps)
-  else:
-    discard writePaletteCells(target, cells, known, 0, 0, width, height, ps, palette)
+  discard writeCells(target, single.cells, known, 0, 0, single.width, single.height, single.ps, single.palette,
+    single.rgba)
   if panel:
     if known.isNil:
       # A new record, not the old one cut to size: a seq keeps its capacity
       # when it shrinks, so a buffer that once held a whole panel of RGBA
       # cells held its 921 KB through every smaller frame after it.
-      frame = PixelFrame(width: width, height: height, size: ps, rgba: rgba, palette: palette,
-        cells: newSeqUninit[uint8](byteCount))
-      copyMem(addr frame.cells[0], cells, byteCount)
+      frame = PixelFrame(width: single.width, height: single.height, size: single.ps, rgba: single.rgba,
+        palette: single.palette, cells: newSeqUninit[uint8](byteCount))
+      copyMem(addr frame.cells[0], single.cells, byteCount)
     keepPanelPixelFrame(move frame)
-  result.image = target
 
 proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, payload: JSValueConst, expectedType: string): Value =
   let ctx = runtime.js.context
