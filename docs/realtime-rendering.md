@@ -17,6 +17,105 @@ full-screen 480x480 SVG every frame — a background `<rect>`, the logo's five
 paths twice (the shadow at `opacity="0.32"`) — and returns
 `frameos.svg(svg, {width, height})`. `refreshInterval` 0.0333.
 
+The second yardstick is the sample scene **Hellfire**
+(`repo/scenes/samples/Hellfire`): the Doom fire, a byte of heat per cell, its
+spread rule in the app's own JS and the cells returned in the **8-bit palette
+mode** (below), which writes the ones that changed straight into the panel's
+buffer. No SVG, JSX or canvas is involved, so what it measures is the
+interpreter's loop and the raw pixel path. It reads its own number off the panel: its **FPS counter**
+field draws the renders a second the panel gets (simulation, blit and pacing
+included) in a corner, in the fire's own cells so that it does not slow what it
+measures, and its **Quality** field picks the cell size: automatic (4 px, 8 on
+an ESP32), 8, 4 or 2 px. The rule stays in JS on purpose: a native Doom spread
+in every runtime (`frameos.fire`, tried and taken out again) was one scene's
+inner loop as a core API, and the interpreter's cost is what the yardstick is
+for. Measured on the SenseCAP Indicator (480x480, the panel's 16 KB
+instruction cache, no counter), by the firmware's `render:animation` line:
+
+| Step | 8 px cells (3,600) | 4 px cells (14,400) |
+| --- | --- | --- |
+| The first JS spread: an LCG through `Math.imul` per cell, module variables in the loop | 10.9 fps | 5.4 fps |
+| Locals and xorshift: no global lookup or call per cell, and no seed above 2^31 turning into a float | 11.9 fps | |
+| One flat pass over the cells, the random numbers from a table | 15.0 fps | |
+| The changed span of a row of cells copied into its other rows, not stored pixel by pixel (the blit is PSRAM-bound: 21 to 18 ms) | 15.8 fps | |
+| No branch (a `Uint8ClampedArray` keeps a cold cell at 0), and cooling that follows the grid, so the black sky above the flames does not change and is not written | 20.5 fps | 8.5 fps |
+| The pass starts at the first warm row | 26.0 fps | 13.3 fps |
+
+What is left at 8 px (with `set debug 1`): ~13 ms of spread, ~10 ms of blit
+and ~13 ms of the scene around them; the panel scans out at ~42 Hz (PCLK
+12 MHz), which no scene passes. A call from JS into the runtime costs
+~125 µs on this board (instruction-cache misses: 45 µs with a 32 KB cache,
+which bought Hellfire 8% and cost 16 KB of internal RAM, so no), and an
+`app.config` read through its Proxy ~0.3 ms: an app reads its config once a
+render, never in a loop.
+
+Two things the first version got wrong on the way: the pass ran from the
+bottom up, so each row read what the row below had just written and heat
+crossed the whole panel in one step (noise, not Doom's rising flames), and
+Doom's cooling of half a heat unit a row burns ~72 rows high, so a 60-row grid
+was a wall of fire. The pass now runs from the top down and the cooling
+follows the grid: the flames stand ~40% of the way up at any cell size.
+
+### The 8-bit palette mode
+
+`return frameos.pixels(cells, palette, { width, height, pixelSize })` from a JS
+app's `get()` (`imageFromPixels` in `js_runtime/app_runtime.nim`): a byte a
+cell, an index into up to 256 colors, every cell a `pixelSize` square. It is
+the one raster an app hands the runtime itself, and it is kept to the
+smallest shape that does the job, for the firmware's flash: no RGBA, no
+layers, no writes into a canvas (all three were built and taken out again).
+
+- It is written straight into the target the planner offers, the panel's own
+  buffer on an LCD, and a grid that covers it waives the background it owes.
+- Each panel buffer keeps a copy of the cells and the 256 colors it was drawn
+  with (`PixelFrame` in `utils/svg_frames.nim`, up to 256 KB of cells), so the
+  next frame into that buffer writes only the cells whose index changed or
+  whose color did. Any other render into the buffer, or a firmware write,
+  means every cell is written next time.
+- An RGB565 buffer takes `js_runtime/pixel_ops.nim` (compiled at `-O2` on the
+  ESP32, the palette packed once a frame); every other format goes a pixel at
+  a time through pixie's `setPixel`, which e-paper and a Pi never notice.
+
+So an app can animate two ways. It can change cells, as Hellfire and the
+**Pixel toys** do (`repo/scenes/samples/Pixel toys`, each effect a component of
+one app: fire in three colors, fireworks, a fountain, a waterfall, a starfield,
+Matrix rain, ripples, blobs, a plasma and Life; a swipe for the next). Or it can
+change only the palette, as 8-bit games did: the **Color cycling** sample
+(`repo/scenes/samples/Color cycling`) draws each of its six scenes once, with
+ranges of colors laid out the way things move (down the waterfall, out from
+where a drop lands, up a flame, along an aurora), and from then on rotates
+those ranges by the clock. A frame of it is a palette of 256 colors worked out
+in JS and the cells of the colors that moved; the cells that hold still, most
+of the picture, are never written again.
+
+The Pixel toys on the SenseCAP Indicator, by the `render:animation` line:
+
+| Effect | Automatic cells | fps | Other cells | fps |
+| --- | --- | --- | --- | --- |
+| Fire | 8 px | 23.4 | | |
+| Fireworks | 4 px | 18.7 | 8 px | 25.6 |
+| Fountain | 4 px | 14.4 | 8 px | 17.9 |
+| Waterfall | 4 px | 13.2 | | |
+| Starfield | 4 px | 17.1 | 8 px | 17.7 |
+| Matrix rain | 4 px | 15.2 | | |
+| Ripples | 8 px | 12.6 | | |
+| Blobs | 8 px | 15.3 | 4 px | 6.7 |
+| Plasma | 8 px | 16.6 | 4 px | 8.0 |
+| Life | 8 px | 18.8 | 4 px | 7.4 |
+
+What the first versions spent and the rewrite took out, in a frame's `step`:
+the fireworks' fade over every row (30 of 34 ms), a `trails.plot` call and a
+property lookup per particle (the fountain's other 36 ms), and Life at ~60
+bytecodes a cell (66 ms; bit-sliced it went from 10 to 19 fps).
+
+A whole 480x480 frame at one pixel a cell, a plasma on the same board, is
+1,294 ms of JS and 78 ms of writing: the interpreter is the cost, and fewer,
+larger cells (or a palette that moves instead of the cells) are the lever. A
+panel buffer's copy of a frame's cells is a new record each time, never the
+old one cut to size: a seq keeps its capacity when it shrinks, and once held
+2.7 MB across the three LCD buffers, so that every interpreter after it was
+discarded for memory.
+
 ## Where an ESP32 frame goes
 
 Measured on the SenseCAP Indicator D1S (ESP32-S3 at 240 MHz, 8 MB octal PSRAM
@@ -139,9 +238,13 @@ not deep-sleep, animates:
   runs while a frame slower than the panel never waits.
 
 Every line the firmware logs is also printed on UART0 at 115200 baud
-(11.5 KB/s, a 2 KB transmit buffer): the ~2.2 KB of lines a fully logged pass
-prints cap a loop at about 5 fps on their own. That is why the quiet frames
-matter, not only for the logs' readers.
+(11.5 KB/s), so the ~2.2 KB of lines a fully logged pass prints take ~190 ms on
+the wire. The task that logs does not wait for them: they go into a 16 KB PSRAM
+ring that a low-priority task on core 0 prints (`fos_log_ring.c`). Printed in
+place, they stalled a running animation's periodic logged frame that long once
+every ten seconds, a stutter in Hellfire's 30 ms frames. A ring that fills drops
+the newest lines, so the quiet frames still matter, not only for the logs'
+readers.
 
 ### The panel's buffer is the canvas (an RGB565 LCD)
 

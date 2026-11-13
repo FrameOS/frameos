@@ -335,6 +335,30 @@ whose box is half the width around the line (a miter join's is wider). It
 lasts as long as the interpreter: when `canvas.fresh` is true, draw the
 record you keep in `frameos.remember` into it again.
 
+**8-bit palette mode.** A picture the app works out cell by cell (a fire, a
+plasma, pixel art) is returned from `get()` as `frameos.pixels(cells, palette,
+{ width, height, pixelSize })` (FrameOS 2026.11.8+): `cells` a `Uint8Array` (or
+`Uint8ClampedArray`) of `width` x `height` bytes, rows top to bottom, each an
+index into `palette`, up to 256 `0xRRGGBB` numbers (an Array or a
+`Uint32Array`), every cell a `pixelSize` square; `width` and `height` default to
+the frame's size over `pixelSize`, and an index past the palette is black. It
+goes straight into the panel's buffer, no canvas and no JSX, and only the cells
+whose index or color changed since the last frame are written. So there are two
+ways to animate. Change cells: simulate at the frame's size over `pixelSize` and
+hand the same array over every frame. Or change only the palette, as 8-bit
+games did: draw the picture once with ranges of colors laid out the way things
+move (down a waterfall, out from where a drop lands, up a flame) and rotate each
+range every frame, worked out from `Date.now()` so it keeps its pace at any
+frame rate; a frame then costs a palette, and only the cycling cells are
+written. The cells live as long as the interpreter: keep them in a module
+variable and make them again when it is gone. On an ESP32 every bytecode counts
+(~0.25 µs each): keep per-cell and per-particle loops to locals and typed arrays
+(no `Math.*`, method or property lookups inside them), take random numbers from
+a table rather than a call, skip rows that cannot change, read `app.config` once
+per render (each read crosses into the runtime), and offer a coarser
+`pixelSize` there (`app.frame.embedded`). The Hellfire, Pixel toys and Color
+cycling samples are worked examples.
+
 **Assets and permissions.** Asset paths are relative to the frame's assets
 folder (`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos,
 fonts, what other scenes saved. What an app may do there is its own
@@ -1027,6 +1051,10 @@ interface FrameOSContext {
   [key: string]: any;
 }
 
+/** An 8-bit palette frame's cells: one byte each, an index into its palette. */
+type FrameOSPixelCells = Uint8Array | Uint8ClampedArray;
+/** Up to 256 colors as 0xRRGGBB numbers. */
+type FrameOSPalette = number[] | Uint32Array;
 declare const frameos: {
   image(spec?: FrameOSImageSpec): FrameOSImageSpec & { __frameosType: "image" };
   /** SVG markup that came from elsewhere (a download, an asset) as an image. A drawing the app makes is JSX returned from a .tsx app's get(), never markup built as a string. */
@@ -1093,6 +1121,14 @@ declare const frameos: {
   draw(canvas: FrameOSCanvasRef, content: FrameOSElement | string): boolean;
   /** Fills a canvas with color (white by default). */
   clear(canvas: FrameOSCanvasRef, color?: string): boolean;
+  /**
+   * The 8-bit palette mode, to return from get() (FrameOS 2026.11.8+): width x height cells, a byte each, rows top to
+   * bottom, each an index into palette (up to 256 0xRRGGBB colors; past its end, black) drawn as a pixelSize square.
+   * Written straight into the panel's buffer with no canvas and no JSX, rewriting only the cells whose index or color
+   * changed since the last frame: animate the cells, or only the palette (color cycling). width and height default to
+   * the frame's size over pixelSize.
+   */
+  pixels(cells: FrameOSPixelCells, palette: FrameOSPalette, options?: { width?: number; height?: number; pixelSize?: number }): unknown;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;

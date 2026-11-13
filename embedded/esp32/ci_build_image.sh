@@ -226,7 +226,7 @@ require_line "^CONFIG_IDF_TARGET=\"$IDF_TARGET_NAME\"\$" "$SDKCONFIG_PATH"
 require_line "^CONFIG_ESPTOOLPY_FLASHSIZE=\"$FLASH_SIZE\"\$" "$SDKCONFIG_PATH"
 require_line "^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"$PARTITION_TABLE\"\$" "$SDKCONFIG_PATH"
 
-# pixie's raster modules and frameos/utils/resample compile at -O2
+# pixie's raster modules, frameos/utils/resample and js_runtime/pixel_ops compile at -O2
 # (components/frameos_nim/CMakeLists.txt FRAMEOS_NIM_HOT_MODULES, matched by
 # the generated C file's name). A name the list does not match is silently -Os:
 # the list once held only the ROT13'd names nixpkgs' Nim writes, and every
@@ -246,6 +246,7 @@ hot = {
     "pixie/rgb565": ("@spixie@srgb565.nim.c", "@fcvkvr@feto565.nim.c"),
     "pixie/common": ("@spixie@scommon.nim.c", "@fcvkvr@fpbzzba.nim.c"),
     "frameos/utils/resample": ("@sframeos@sutils@sresample.nim.c", "@fsenzrbf@fhgvyf@ferfnzcyr.nim.c"),
+    "frameos/js_runtime/pixel_ops": ("@sframeos@sjs_runtime@spixel_ops.nim.c", "@fsenzrbf@fwf_ehagvzr@fcvkry_bcf.nim.c"),
 }
 problems = []
 for module, names in hot.items():

@@ -646,6 +646,14 @@
   firmware builds RGB565 alone, with no flip, round panel or log line
   (`Only565`, `Flips`, `RoundPanels`, for flash): an option added later is
   the Pi's unless the ESP32 needs it, and the PR says what it cost there.
+- **The 8-bit palette mode** (`frameos.pixels(cells, palette, options)`,
+  `imageFromPixels` in `app_runtime.nim`, docs/realtime-rendering.md): a byte
+  a cell into up to 256 colors, written into the panel buffer, which keeps the
+  cells and colors it holds (`PixelFrame`) so only cells whose index or color
+  changed are written, a cycled palette included. It is the one raster API, kept
+  small for flash: RGBA cells, layers and writes into a canvas were built and
+  taken out (#666). Bring one back only with a scene that needs it and the
+  firmware-size comment's number.
 - **A pixel loop can use both cores** (`components/frameos_nim/fos_rows.c`):
   `fos_rows_run` hands a job's rows out in blocks to the render task and a
   helper on the other core (resample.nim's draw is the first job). The job

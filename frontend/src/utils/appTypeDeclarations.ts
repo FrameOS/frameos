@@ -237,6 +237,10 @@ interface FrameOSContext {
 ${appContextMembers}  [key: string]: any;
 }
 
+/** An 8-bit palette frame's cells: one byte each, an index into its palette. */
+type FrameOSPixelCells = Uint8Array | Uint8ClampedArray;
+/** Up to 256 colors as 0xRRGGBB numbers. */
+type FrameOSPalette = number[] | Uint32Array;
 declare const frameos: {
   image(spec?: FrameOSImageSpec): FrameOSImageSpec & { __frameosType: "image" };
   /** SVG markup that came from elsewhere (a download, an asset) as an image. A drawing the app makes is JSX returned from a .tsx app's get(), never markup built as a string. */
@@ -303,6 +307,14 @@ declare const frameos: {
   draw(canvas: FrameOSCanvasRef, content: FrameOSElement | string): boolean;
   /** Fills a canvas with color (white by default). */
   clear(canvas: FrameOSCanvasRef, color?: string): boolean;
+  /**
+   * The 8-bit palette mode, to return from get() (FrameOS 2026.11.8+): width x height cells, a byte each, rows top to
+   * bottom, each an index into palette (up to 256 0xRRGGBB colors; past its end, black) drawn as a pixelSize square.
+   * Written straight into the panel's buffer with no canvas and no JSX, rewriting only the cells whose index or color
+   * changed since the last frame: animate the cells, or only the palette (color cycling). width and height default to
+   * the frame's size over pixelSize.
+   */
+  pixels(cells: FrameOSPixelCells, palette: FrameOSPalette, options?: { width?: number; height?: number; pixelSize?: number }): unknown;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;

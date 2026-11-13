@@ -23,6 +23,7 @@ import frameos/utils/canvas_log
 import frameos/utils/paths
 import frameos/utils/system
 import frameos/js_runtime/burrito
+import frameos/js_runtime/pixel_ops
 import frameos/js_runtime/jsx_native
 import frameos/render_probe
 import frameos/js_runtime/jsx
@@ -2344,6 +2345,7 @@ const appJsPrelude* = compactJs("""
     draw: (canvas, content) => jsCanvasDraw(Number((canvas && canvas.id) || 0),
       (content && typeof content === "object") ? content : String(content || "")) === true,
     clear: (canvas, color) => jsCanvasClear(Number((canvas && canvas.id) || 0), String(color || "")) === true,
+    pixels: (cells, palette, options) => ({ __frameosType: "pixels", cells, palette, options: options || {} }),
     listAssets: (dir) => __frameosAsset("list", dir) || [],
     assetExists: (path) => __frameosAsset("exists", path) === true,
     assetSize: (path) => __frameosAsset("size", path) ?? -1,
@@ -3123,6 +3125,144 @@ proc svgImageSpecFromJs(ctx: ptr JSContext, payload: JSValueConst): JsonNode =
     return nil
   result["svg"] = %toNimString(ctx, svg)
 
+proc jsOptionInt(ctx: ptr JSContext, options: JSValueConst, name: cstring, default: int): int =
+  ## A whole number off an options object; `default` for anything else.
+  let value = JS_GetPropertyStr(ctx, options, name)
+  defer: JS_FreeValue(ctx, value)
+  if JS_IsException(value) != 0:
+    JS_FreeValue(ctx, JS_GetException(ctx))
+    return default
+  if not jsIsNumber(value):
+    return default
+  let number = toNimFloat(ctx, value)
+  if number != number or abs(number) > 1e9: default else: number.int
+
+proc readPalette(ctx: ptr JSContext, value: JSValueConst, palette: var PixelPalette): int =
+  ## A palette of 0xRRGGBB numbers, an Array or a Uint32Array, into all 256
+  ## entries: past its end, black. How many colors it had (256 at most: no
+  ## cell can name another). Read off the object, no JSON: an app that cycles
+  ## its colors hands a new palette over every frame.
+  result = min(jsOptionInt(ctx, value, "length", 0), 256)
+  for i in 0 ..< 256:
+    var v: int32 = 0
+    if i < result:
+      let entry = JS_GetPropertyUint32(ctx, value, i.uint32)
+      if jsIsNumber(entry):
+        discard JS_ToInt32(ctx, addr v, entry)
+      JS_FreeValue(ctx, entry)
+    palette[i] = rgbx(uint8((v shr 16) and 255), uint8((v shr 8) and 255), uint8(v and 255), 255)
+
+proc writeCells(image: Image, cells, known: Cells; width, height, ps: int; palette: PixelPalette;
+    recolored: ptr Recolored; anyRecolored: bool) =
+  ## Cells as `ps` squares of their palette's colors from the image's corner;
+  ## with `known` (the cells the image holds) only those whose index or color
+  ## changed. An RGB565 image (an LCD's) takes pixel_ops' -O2 loop with the
+  ## palette packed once; anything else goes a pixel at a time through pixie's
+  ## setPixel, so every format stores what it always does (sixteen greys
+  ## dithered by place), which e-paper and a Pi never notice and the
+  ## firmware's flash does.
+  if image.format == pfRgb565:
+    var colors: Palette565
+    for i in 0 ..< 256:
+      colors[i] = rgbxToRgb565(palette[i])
+    blitCells16(cast[ptr UncheckedArray[uint16]](image.pixelAddr(0)), image.stride, cells, known, width,
+      height, ps, addr colors, recolored, anyRecolored)
+    return
+  for sy in 0 ..< height:
+    let src = cast[Cells](addr cells[sy * width])
+    let old = if known.isNil: nil else: cast[Cells](addr known[sy * width])
+    if not old.isNil and not anyRecolored and equalMem(src, old, width):
+      continue
+    for sx in 0 ..< width:
+      let index = src[sx]
+      if old.isNil or index != old[sx] or recolored[index]:
+        for y in sy * ps ..< sy * ps + ps:
+          for x in sx * ps ..< sx * ps + ps:
+            image.setPixel(image.dataIndex(x, y), palette[index])
+
+const MaxPixelFrameBytes = 256 * 1024
+  ## The largest frame of cells a panel buffer keeps a copy of: three buffers
+  ## of a 480x480 panel at one pixel a cell are 691 KB of PSRAM already.
+
+proc imageFromPixels(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
+    payload: JSValueConst): tuple[isPixels: bool, image: Image] =
+  ## `return frameos.pixels(cells, palette, {width, height, pixelSize})`, the
+  ## 8-bit palette mode: a frame of cells, each one byte, an index into a
+  ## palette of up to 256 0xRRGGBB colors, every cell a `pixelSize` square
+  ## (`width` x `height` cells, the frame over `pixelSize` by default). It is
+  ## written straight into the target the planner offered (the panel's own
+  ## buffer on an LCD), with no canvas to copy from and no JSX to lay out, and
+  ## an app never sees how the panel stores a pixel. A grid that covers the
+  ## target waives the background it owes; one that stops short pays it. Each
+  ## panel buffer remembers its cells and palette, so only the cells whose
+  ## index or color changed cross the PSRAM bus: an app that animates by
+  ## cycling its palette writes only the cells of the colors that moved. A
+  ## grid larger than the frame is a picture of its own, for the next node to
+  ## scale.
+  let ctx = runtime.js.context
+  let kind = JS_GetPropertyStr(ctx, payload, "__frameosType")
+  defer: JS_FreeValue(ctx, kind)
+  if not jsIsString(kind) or toNimString(ctx, kind) != "pixels":
+    return (false, nil)
+  result.isPixels = true
+  let
+    cellsValue = JS_GetPropertyStr(ctx, payload, "cells")
+    paletteValue = JS_GetPropertyStr(ctx, payload, "palette")
+    options = JS_GetPropertyStr(ctx, payload, "options")
+  defer:
+    JS_FreeValue(ctx, options)
+    JS_FreeValue(ctx, paletteValue)
+    JS_FreeValue(ctx, cellsValue)
+  let
+    frameWidth = defaultImageWidth(owner, context, %*{})
+    frameHeight = defaultImageHeight(owner, context, %*{})
+    ps = clamp(jsOptionInt(ctx, options, "pixelSize", 1), 1, 64)
+    width = jsOptionInt(ctx, options, "width", frameWidth div ps)
+    height = jsOptionInt(ctx, options, "height", frameHeight div ps)
+    (cells, byteLen) = jsBytes(ctx, cellsValue)
+  var palette: PixelPalette
+  # One constant message: the numbers in one were a kilobyte of firmware.
+  if cells.isNil or readPalette(ctx, paletteValue, palette) == 0 or width <= 0 or height <= 0 or
+      width.int64 * height.int64 > byteLen.int64 or width * ps > 4096 or height * ps > 4096:
+    frameos_apps.logError(owner, "frameos.pixels(cells, palette, options) needs a typed array of width x height cells and a palette")
+    return
+  let fits = width * ps <= frameWidth and height * ps <= frameHeight
+  var target: Image = nil
+  let (offeredWidth, offeredHeight) = owner.offeredDecodeTargetSize(context)
+  if fits and offeredWidth == frameWidth and offeredHeight == frameHeight:
+    target = owner.takeDecodeTarget(context, deferBackground = true).image
+  if target.isNil:
+    let
+      like = pictureFormatLike(context)
+      pictureWidth = if fits: frameWidth else: width * ps
+      pictureHeight = if fits: frameHeight else: height * ps
+    target = if like.isNil: newImage(pictureWidth, pictureHeight) else: newImageLike(like, pictureWidth, pictureHeight)
+  result.image = target
+  let owed = takeOwedBackground(context, target)
+  var (panel, frame) = takePanelPixelFrame(target, context.wholeFrame)
+  let count = width * height
+  var
+    known: Cells = nil
+    recolored: Recolored
+    anyRecolored = false
+  if owed.isSome and (width * ps != target.width or height * ps != target.height):
+    payBackground(target, owed.get())
+  elif panel and frame.width == width and frame.height == height and frame.size == ps and frame.cells.len == count:
+    known = cast[Cells](addr frame.cells[0])
+    for i in 0 ..< 256:
+      if frame.palette[i] != palette[i]:
+        recolored[i] = true
+        anyRecolored = true
+  writeCells(target, cells, known, width, height, ps, palette, addr recolored, anyRecolored)
+  if panel and count <= MaxPixelFrameBytes:
+    if known.isNil:
+      # A new record, never the old one cut to size: a seq keeps its capacity
+      # when it shrinks.
+      frame = PixelFrame(width: width, height: height, size: ps, cells: newSeqUninit[uint8](count))
+    copyMem(addr frame.cells[0], cells, count)
+    frame.palette = palette
+    keepPanelPixelFrame(move frame)
+
 proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, payload: JSValueConst, expectedType: string): Value =
   let ctx = runtime.js.context
 
@@ -3140,6 +3280,11 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
       probe(phWalk):
         runtime.lastJsx = jsxNode(ctx, payload, addr runtime.images, addr runtime.jsxMemo)
       return VImage(runtime.imageFromJsx(owner, context, runtime.lastJsx))
+    let pixels = runtime.imageFromPixels(owner, context, payload)
+    if pixels.isPixels:
+      if pixels.image.isNil:
+        return valueFromJsonByType(newJNull(), expectedType)
+      return VImage(pixels.image)
 
   if expectedType == "image" or jsIsObject(payload) or JS_IsArray(ctx, payload) != 0:
     let svgSpec = svgImageSpecFromJs(ctx, payload)

@@ -33,6 +33,11 @@
 ## every record goes when the buffers stop showing what they were showing
 ## (`forgetPanelFrames`, called on a scene switch and when something draws over
 ## the canvas).
+##
+## A `frameos.pixels` frame (js_runtime/app_runtime.nim) keeps a record of the
+## same kind per buffer, the cells and palette it wrote (`PixelFrame`): off the
+## shelf when a render begins, back only after a pixel frame, so the next one
+## into that buffer writes only the cells whose index or color differs.
 
 import std/options
 import pixie
@@ -72,9 +77,35 @@ var
     ## one it does not know (embedded_runtime: fos_display_buffer_generation).
     ## Unset, a buffer without its own record is drawn whole.
 
+type
+  PixelPalette* = array[256, ColorRGBX]
+    ## An 8-bit palette frame's colors, every index a cell can hold.
+  PixelFrame* = object
+    ## What a `frameos.pixels` frame left in a panel buffer: its cells and
+    ## their colors, so the next frame into that buffer writes only the cells
+    ## whose index or color differs.
+    buffer: pointer
+    generation: uint32
+    width*, height*, size*: int
+    palette*: PixelPalette
+    cells*: seq[uint8]
+
+const MaxHeldPixelFrames = 4
+  ## An LCD has three buffers; a panel change forgets them all anyway.
+
+var
+  heldPixelFrames: seq[PixelFrame]
+  panelPixelFrame: PixelFrame
+  panelHasPixelFrame: bool
+
 when defined(testing):
   var svgFramePixelsForTest* = 0
     ## Pixels the last renderSvgFrame repainted (test_svg_frames.nim).
+
+  proc heldPixelFrameBytesForTest*(): int =
+    ## The memory the kept pixel frames hold (test_hellfire_scene.nim).
+    for frame in heldPixelFrames:
+      result += frame.cells.capacity
 
 proc beginPanelFrame*(buffer: pointer, generation: uint32) =
   ## A render into the panel buffer `buffer` begins; `generation` counts the
@@ -87,11 +118,23 @@ proc beginPanelFrame*(buffer: pointer, generation: uint32) =
       panelHeld = some(heldFrames[i])
       heldFrames.delete(i)
       break
+  # Off the list like the SVG above: whatever draws this render, only a pixel
+  # frame puts it back, so a settings panel or another scene in between means
+  # the next pixel frame writes every cell.
+  panelHasPixelFrame = false
+  for i in 0 ..< heldPixelFrames.len:
+    if heldPixelFrames[i].buffer == buffer:
+      panelPixelFrame = move heldPixelFrames[i]
+      panelHasPixelFrame = true
+      heldPixelFrames.delete(i)
+      break
 
 proc endPanelFrame*() =
   panelBuffer = nil
   panelHeld = none(HeldFrame)
   regionHeld = none(HeldFrame)
+  panelHasPixelFrame = false
+  panelPixelFrame = PixelFrame()
 
 proc regionRecord(view: Image): int =
   ## This rectangle's record for the panel's current buffer, -1 for none.
@@ -113,6 +156,29 @@ proc takePanelRegion*(view: Image) =
   if i >= 0:
     regionHeld = some(heldFrames[i])
     heldFrames.delete(i)
+
+proc takePanelPixelFrame*(target: Image, wholeFrame: bool): tuple[panel: bool, frame: PixelFrame] =
+  ## For a frame of cells going into `target`: `panel` when it is the buffer
+  ## this render began on and nothing else draws in it, and then the cells it
+  ## holds, if the firmware has not written into it since (else `frame` is
+  ## empty and every cell gets written).
+  if panelBuffer.isNil or target.isNil or target.isView or not wholeFrame or
+      target.bufferPointer != panelBuffer:
+    return
+  result.panel = true
+  if panelHasPixelFrame and panelPixelFrame.generation == panelGeneration:
+    result.frame = move panelPixelFrame
+  panelHasPixelFrame = false
+
+proc keepPanelPixelFrame*(frame: sink PixelFrame) =
+  ## What the panel buffer of this render holds now.
+  if panelBuffer.isNil:
+    return
+  heldPixelFrames.add frame
+  heldPixelFrames[^1].buffer = panelBuffer
+  heldPixelFrames[^1].generation = panelGeneration
+  if heldPixelFrames.len > MaxHeldPixelFrames:
+    heldPixelFrames.delete(0)
 
 proc area(rects: seq[tuple[x, y, w, h: int]]): int =
   for r in rects:
@@ -211,6 +277,7 @@ proc canvasRects(base: HeldFrame, parsed: Svg, target: Image): seq[tuple[x, y, w
 proc forgetPanelFrames*() =
   ## Nothing a buffer held is known any more (a panel or size change).
   heldFrames.setLen(0)
+  heldPixelFrames.setLen(0)
   endPanelFrame()
 
 proc forgetPanelRegions*() =
