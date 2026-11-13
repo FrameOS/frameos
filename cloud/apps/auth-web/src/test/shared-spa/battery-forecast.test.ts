@@ -7,6 +7,7 @@ import {
   analyzeBattery,
   batteryCadence,
   batteryForecast,
+  batteryPowerStatus,
   batterySamplesFromMetrics,
   batteryWakes,
   CADENCE_WINDOW_WAKES,
@@ -14,8 +15,9 @@ import {
   forecastCycleOptions,
   formatCycle,
   formatRemaining,
-  nearestCycleOption,
   frameDeepSleeps,
+  nearestCycleOption,
+  samplesShowDeepSleep,
   scaledDrainPerHour,
   sceneSecondsPerWake,
   SERVER_PULL_SECONDS,
@@ -356,7 +358,13 @@ describe("analyzeBattery + batteryForecast", () => {
     expect(short.confidence).toBe("rough");
     expect(short.drainPerDay).not.toBeNull();
 
-    const awake = analyzeBattery(discharge(96, 900, 90, 8), {
+    // One boot that never ends: the uptime climbs with the clock.
+    const neverSleeps = Array.from({ length: 96 }, (_, index) =>
+      atUptime(start, 900 * (index + 1), Math.round(90 - (8 * index * 900) / 86400), {
+        wakeCause: "power_on",
+      }),
+    );
+    const awake = analyzeBattery(neverSleeps, {
       deep_sleep: false,
       deep_sleep_on_battery: false,
     });
@@ -366,6 +374,97 @@ describe("analyzeBattery + batteryForecast", () => {
       batteryForecast(awake, 900, now)!.hoursRemaining,
       5,
     );
+  });
+});
+
+describe("deep sleep", () => {
+  const settingsOff = { deep_sleep: false, deep_sleep_on_battery: false };
+
+  it("counts every deep-sleep mode, in the cloud's keys and in device_config", () => {
+    expect(frameDeepSleeps({ deep_sleep: true }, false)).toBe(true);
+    expect(frameDeepSleeps({ deep_sleep_on_battery: true }, true)).toBe(true);
+    expect(frameDeepSleeps({ deep_sleep_on_battery: true }, null)).toBe(true);
+    // "Deep sleep when on battery" on USB stays awake.
+    expect(frameDeepSleeps({ deep_sleep_on_battery: true }, false)).toBe(false);
+    // A backend-managed frame keeps the power mode in device_config.
+    expect(frameDeepSleeps({ device_config: { deepSleepOnBattery: true } }, true)).toBe(true);
+    expect(frameDeepSleeps({ device_config: { deep_sleep_on_battery: true } }, true)).toBe(true);
+    expect(frameDeepSleeps({ device_config: { deepSleep: true } }, false)).toBe(true);
+    expect(frameDeepSleeps({ device_config: {} }, true)).toBe(false);
+    expect(frameDeepSleeps({}, true)).toBe(false);
+  });
+
+  it("believes the frame's wakes over its settings", () => {
+    // A backend frame on "Deep sleep when on battery" whose mode this view
+    // could not read: it still woke from the timer, ~53 s up per 15 minutes.
+    const metrics = wakingEvery(96, 900, start, 90).map((m, index) => ({
+      ...m,
+      metrics: { ...m.metrics, uptimeSeconds: index % 2 ? 53 : 21 },
+    }));
+    const analysis = analyzeBattery(metrics, settingsOff);
+    expect(analysis.deepSleep).toBe(true);
+  });
+
+  it("reads deep sleep off the cadence when the wake cause is missing", () => {
+    const metrics = wakingEvery(12, 900, start, 90).map((m) => ({
+      ...m,
+      metrics: { ...m.metrics, wakeCause: undefined },
+    }));
+    const { samples } = batterySamplesFromMetrics(metrics);
+    expect(samplesShowDeepSleep(samples, batteryCadence(samples))).toBe(true);
+  });
+
+  it("does not see deep sleep in a frame that stays up", () => {
+    const metrics = Array.from({ length: 20 }, (_, index) =>
+      atUptime(start, 300 * (index + 1), 90, { wakeCause: "power_on" }),
+    );
+    const { samples } = batterySamplesFromMetrics(metrics);
+    expect(samplesShowDeepSleep(samples, batteryCadence(samples))).toBe(false);
+    expect(analyzeBattery(metrics, settingsOff).deepSleep).toBe(false);
+  });
+});
+
+describe("batteryPowerStatus", () => {
+  function latestOf(extra: Record<string, unknown>, percent = 94) {
+    const { samples } = batterySamplesFromMetrics([sample(0, 900, percent, extra)]);
+    return samples[0]!;
+  }
+
+  it("carries the charger's usbPower and charging through", () => {
+    expect(latestOf({ usbPower: true, charging: true })).toMatchObject({
+      usbPower: true,
+      charging: true,
+    });
+    expect(latestOf({})).toMatchObject({ usbPower: null, charging: null });
+  });
+
+  it("says charging when the charger is", () => {
+    // The power event the PhotoPainter logs on USB.
+    expect(
+      batteryPowerStatus(latestOf({ onBattery: false, usbPower: true, charging: true }, 100)),
+    ).toBe("charging");
+    expect(
+      batteryPowerStatus(latestOf({ onBattery: false, usbPower: true, charging: true }, 60)),
+    ).toBe("charging");
+  });
+
+  it("says on USB when powered but not charging, and full only on USB near 100%", () => {
+    expect(
+      batteryPowerStatus(latestOf({ onBattery: false, usbPower: true, charging: false }, 80)),
+    ).toBe("usb");
+    expect(
+      batteryPowerStatus(latestOf({ onBattery: false, usbPower: true, charging: false }, 99)),
+    ).toBe("full");
+  });
+
+  it("never calls a cell full off USB", () => {
+    expect(batteryPowerStatus(latestOf({ onBattery: true, usbPower: false, charging: false }))).toBeNull();
+    expect(batteryPowerStatus(latestOf({ onBattery: true }, 100))).toBeNull();
+  });
+
+  it("falls back to plugged in on a board without a charger", () => {
+    expect(batteryPowerStatus(latestOf({ onBattery: false }))).toBe("plugged-in");
+    expect(batteryPowerStatus(null)).toBeNull();
   });
 });
 
@@ -436,8 +535,15 @@ describe("rendering on the server (docs/server-rendering.md)", () => {
   it("offers nothing when the numbers cannot say", () => {
     const metrics = withSceneMs(discharge(4 * 96, 900, 96, 4), 40_000);
     const now = Date.parse(metrics[metrics.length - 1]!.timestamp);
-    // Awake anyway: the scene's seconds change nothing.
-    const awake = analyzeBattery(metrics, { deep_sleep: false, deep_sleep_on_battery: false });
+    // Awake anyway (one boot that never ends): the scene's seconds change nothing.
+    const neverSleeps = Array.from({ length: 4 * 96 }, (_, index) =>
+      atUptime(start, 900 * (index + 1), Math.round(96 - (4 * index * 900) / 86400), {
+        wakeCause: "power_on",
+        renderSceneMs: 40_000,
+      }),
+    );
+    const awake = analyzeBattery(neverSleeps, { deep_sleep: false, deep_sleep_on_battery: false });
+    expect(awake.deepSleep).toBe(false);
     expect(serverRenderForecast(awake, 900, now)).toBeNull();
     // A scene quicker than the pull itself.
     const quick = analyzeBattery(withSceneMs(discharge(4 * 96, 900, 96, 4), 2_000), deepSleepFrame);

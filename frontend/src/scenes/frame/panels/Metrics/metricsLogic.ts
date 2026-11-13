@@ -895,6 +895,23 @@ export function latestBatteryPercentFromMetrics(metrics: MetricsType[]): number 
   return null
 }
 
+/**
+ * The battery glyph's charge: the newest reading in the preview window, or
+ * else the newest the frame ever sent. A deep-sleeping frame may wake hourly,
+ * daily or weekly, so an empty window says nothing about its battery — only
+ * that it has not checked in lately. `newest` is a handful of the newest
+ * samples fetched without a time limit, oldest first; misreads are dropped
+ * from it the same way the window drops them.
+ */
+export function latestBatteryPercentWithFallback(recent: MetricsType[], newest: MetricsType[]): number | null {
+  return (
+    latestBatteryPercentFromMetrics(recent) ??
+    latestBatteryPercentFromMetrics(
+      withoutBatteryMisreads([...newest].sort((a, b) => metricTimestamp(a) - metricTimestamp(b))).metrics
+    )
+  )
+}
+
 export function latestMetricSummariesByCategoryFromMetrics(metrics: MetricsType[]): Record<string, string> {
   const loadSummary = getLatestLoadSummary(metrics)
   const memoryUsageSummary = getLatestUsageSummary(metrics, 'memoryUsage')

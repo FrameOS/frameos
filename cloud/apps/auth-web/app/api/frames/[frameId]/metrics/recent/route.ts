@@ -19,7 +19,9 @@ export const runtime = "nodejs";
 // Incremental catch-up (?since=<timestamp>) — the contract the shared SPA's
 // metricsLogic speaks on websocket reconnect, matching the backend's
 // /metrics/recent: samples with timestamp >= since, newest maxMetricsPerFrame
-// of them, chronological. Inclusive on purpose; the SPA dedupes on timestamp.
+// of them (or ?limit= of them, when fewer), chronological. Inclusive on
+// purpose; the SPA dedupes on timestamp. ?limit= without ?since= is how the
+// SPA asks for a frame's last few readings however long ago it sent them.
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string }> },
@@ -49,6 +51,11 @@ export async function GET(
   const sinceRaw = request.nextUrl.searchParams.get("since");
   const sinceMs = sinceRaw === null ? Number.NaN : Date.parse(sinceRaw);
   const since = Number.isFinite(sinceMs) ? new Date(sinceMs) : undefined;
+  const limitRaw = Number(request.nextUrl.searchParams.get("limit"));
+  const limit =
+    Number.isInteger(limitRaw) && limitRaw >= 1
+      ? Math.min(limitRaw, maxMetricsPerFrame)
+      : maxMetricsPerFrame;
 
   // Newest first so the limit keeps the most recent samples, then reversed
   // into chronological order — the backend's exact recipe.
@@ -62,7 +69,7 @@ export async function GET(
       ),
     )
     .orderBy(desc(frameMetrics.id))
-    .limit(maxMetricsPerFrame);
+    .limit(limit);
   rows.reverse();
 
   return NextResponse.json({
