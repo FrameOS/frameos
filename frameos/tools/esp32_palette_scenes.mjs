@@ -1,16 +1,16 @@
 #!/usr/bin/env node
-// The Pixel toys and Hellfire samples in the memory of an ESP32-S3 with 8 MB of
-// PSRAM (the SenseCAP Indicator): the wasm build of the runtime with its heap
-// capped to what that board has (docs/device-limits-fixtures.json). Every
-// effect, one at a time and all at once, with the controls and without, a few
-// dozen frames each, and a swipe and the controls' buttons. It fails on a
-// render that runs out of memory or returns an error, a scene error or a
-// discarded interpreter, an effect that stops moving, memory that keeps
-// growing, frames that get slower as an effect runs, a frame far past any
-// budget, and a swipe or a button that does not change the effect.
+// The 8-bit palette samples (Pixel toys, Hellfire and Color cycling) in the
+// memory of an ESP32-S3 with 8 MB of PSRAM (the SenseCAP Indicator): the wasm
+// build of the runtime with its heap capped to what that board has
+// (docs/device-limits-fixtures.json). Every effect and every scene, a few
+// dozen frames each, the FPS counters, and swipes. It fails on a render that
+// runs out of memory or returns an error, a scene error or a discarded
+// interpreter, a picture that stops moving, memory that keeps growing, frames
+// that get slower as they run, a frame far past any budget, and a swipe that
+// does not change the effect.
 //
 //   frameos/tools/build_wasm.sh --out DIR
-//   node frameos/tools/esp32_pixel_toys.mjs DIR
+//   node frameos/tools/esp32_palette_scenes.mjs DIR
 import { readFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -52,7 +52,7 @@ const call = (name, ret, types, args) => Module.ccall(name, ret, types, args)
 const lastError = () => call('frameos_wasm_last_error', 'string', [], [])
 
 if (!call('frameos_wasm_init', 'boolean', ['number', 'number', 'string', 'string', 'string'],
-  [WIDTH, HEIGHT, 'pixel toys check', 'UTC', '{}'])) {
+  [WIDTH, HEIGHT, 'palette scenes check', 'UTC', '{}'])) {
   fail(`init: ${lastError()}`)
 }
 call('frameos_wasm_set_memory_limit', null, ['number', 'number'], [limits.memoryBytes, 0])
@@ -61,7 +61,11 @@ call('frameos_wasm_set_canvas_bits_per_pixel', null, ['number'], [limits.canvasB
 
 const [toys] = await readJson('repo', 'scenes', 'samples', 'Pixel toys', 'scenes.json')
 const [hellfire] = await readJson('repo', 'scenes', 'samples', 'Hellfire', 'scenes.json')
-if (call('frameos_wasm_load_scenes', 'number', ['string'], [JSON.stringify([toys, hellfire])]) < 2) {
+const [cycling] = await readJson('repo', 'scenes', 'samples', 'Color cycling', 'scenes.json')
+// A tenth of a second of cycling a render, so every frame moves however fast
+// this host renders.
+cycling.nodes.find((node) => node.id === 'cycling').data.config.msPerRender = '100'
+if (call('frameos_wasm_load_scenes', 'number', ['string'], [JSON.stringify([toys, hellfire, cycling])]) < 3) {
   fail(`load scenes: ${lastError()}`)
 }
 
@@ -78,7 +82,7 @@ const changedPixels = (a, b) => {
   return changed
 }
 const memoryUsed = () => call('frameos_wasm_memory_used', 'number', [], [])
-const effectNow = () => JSON.parse(call('frameos_wasm_scene_state', 'string', [], []) || '{}').effect
+const stateNow = () => JSON.parse(call('frameos_wasm_scene_state', 'string', [], []) || '{}')
 
 let renders = 0
 function render(step) {
@@ -131,25 +135,30 @@ const pointer = (event, x, y, buttons) => {
 
 const effects = toys.fields.find((field) => field.name === 'effect').options.map((option) => option.value)
 for (const effect of effects) {
-  play(`${effect}`, toys.id, { effect, quality: '0', controls: false, showFps: false })
+  play(`${effect}`, toys.id, { effect, quality: '0', showFps: false })
 }
-play('all, 8 px, controls, fps', toys.id, { effect: 'all', quality: '8', controls: true, showFps: true })
-play('fire, controls', toys.id, { effect: 'fire', quality: '0', controls: true, showFps: false })
+play('fire, 4 px, fps', toys.id, { effect: 'fire', quality: '4', showFps: true })
 play('Hellfire', hellfire.id, { quality: '0', showFps: true })
+const scenes = cycling.fields.find((field) => field.name === 'scene').options.map((option) => option.value)
+for (const scene of scenes) {
+  play(`color cycling: ${scene}`, cycling.id, { scene, quality: '0' })
+}
 
-// A swipe to the left is the next effect; the controls' ">" too.
-play('swipes', toys.id, { effect: 'all', quality: '0', controls: true, showFps: false })
-pointer('pointerDown', 360, 200, 1)
-pointer('pointerMove', 240, 200, 1)
-pointer('pointerUp', 120, 200, 0)
-call('frameos_wasm_tick', 'boolean', [], [])
+// A swipe to the left is the next effect, and the next scene.
+const swipeLeft = () => {
+  pointer('pointerDown', 360, 200, 1)
+  pointer('pointerMove', 240, 200, 1)
+  pointer('pointerUp', 120, 200, 0)
+  call('frameos_wasm_tick', 'boolean', [], [])
+}
+play('swipes', toys.id, { effect: effects[0], quality: '0', showFps: false })
+swipeLeft()
 render('after the swipe')
-if (effectNow() !== effects[1]) fail(`a swipe left from "all" showed ${effectNow()}, not ${effects[1]}`)
-pointer('pointerDown', 20, HEIGHT - 12, 1)
-pointer('pointerUp', 20, HEIGHT - 12, 0)
-call('frameos_wasm_tick', 'boolean', [], [])
-render('after "<"')
-if (effectNow() !== effects[0]) fail(`"<" from ${effects[1]} showed ${effectNow()}, not ${effects[0]}`)
+if (stateNow().effect !== effects[1]) fail(`a swipe left from ${effects[0]} showed ${stateNow().effect}, not ${effects[1]}`)
+play('color cycling swipes', cycling.id, { scene: scenes[0], quality: '0' })
+swipeLeft()
+render('after the swipe')
+if (stateNow().scene !== scenes[1]) fail(`a swipe left from ${scenes[0]} showed ${stateNow().scene}, not ${scenes[1]}`)
 
 const peak = call('frameos_wasm_memory_peak', 'number', [], [])
 console.log(report.join('\n'))

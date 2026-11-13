@@ -237,20 +237,10 @@ interface FrameOSContext {
 ${appContextMembers}  [key: string]: any;
 }
 
-/** Cells for frameos.pixels and putPixels: palette indices, or RGBA bytes. */
-type FrameOSPixelCells = Uint8Array | Uint8ClampedArray | Uint32Array | ArrayBuffer;
-/** CSS colors or 0xRRGGBB numbers, 256 at most; a Uint32Array of 0xRRGGBB is read in place. */
-type FrameOSPalette = (string | number)[] | Uint32Array;
-/** One layer of a frameos.pixels frame: x and y in pixels, the rest as frameos.pixels takes them. */
-interface FrameOSPixelLayer {
-  cells: FrameOSPixelCells;
-  x?: number;
-  y?: number;
-  width?: number;
-  height?: number;
-  pixelSize?: number;
-  palette?: FrameOSPalette;
-}
+/** An 8-bit palette frame's cells: one byte each, an index into its palette. */
+type FrameOSPixelCells = Uint8Array | Uint8ClampedArray;
+/** Up to 256 colors as 0xRRGGBB numbers. */
+type FrameOSPalette = number[] | Uint32Array;
 declare const frameos: {
   image(spec?: FrameOSImageSpec): FrameOSImageSpec & { __frameosType: "image" };
   /** SVG markup that came from elsewhere (a download, an asset) as an image. A drawing the app makes is JSX returned from a .tsx app's get(), never markup built as a string. */
@@ -318,28 +308,13 @@ declare const frameos: {
   /** Fills a canvas with color (white by default). */
   clear(canvas: FrameOSCanvasRef, color?: string): boolean;
   /**
-   * Writes pixels straight into a canvas (FrameOS 2026.11.7+): RGBA bytes, four per pixel, rows top to bottom; with
-   * palette (CSS colors or 0xRRGGBB numbers, 256 at most) one index per pixel. Each source pixel is a pixelSize
-   * square, the grid width x height source pixels (the canvas over pixelSize by default) at x, y. Alpha 0, or an
-   * index past the palette, leaves the pixel as it was; what falls outside the canvas is clipped.
+   * The 8-bit palette mode, to return from get() (FrameOS 2026.11.8+): width x height cells, a byte each, rows top to
+   * bottom, each an index into palette (up to 256 0xRRGGBB colors; past its end, black) drawn as a pixelSize square.
+   * Written straight into the panel's buffer with no canvas and no JSX, rewriting only the cells whose index or color
+   * changed since the last frame: animate the cells, or only the palette (color cycling). width and height default to
+   * the frame's size over pixelSize.
    */
-  putPixels(
-    canvas: FrameOSCanvasRef,
-    pixels: FrameOSPixelCells,
-    options?: { x?: number; y?: number; width?: number; height?: number; pixelSize?: number; palette?: FrameOSPalette }
-  ): boolean;
-  /**
-   * A whole frame of cells, to return from get() (FrameOS 2026.11.7+): written straight into an LCD's buffer, with
-   * no canvas and no JSX, each cell a pixelSize square. With palette (an array of colors, or a Uint32Array of
-   * 0xRRGGBB read in place) a cell is one index into it; without, four bytes of RGBA (an ImageData's layout; in a
-   * Uint32Array, 0xAABBGGRR). An index past the palette, alpha 0, or a grid that stops short of the frame shows
-   * the scene's background. An array of layers instead of cells paints each in order, at its x and y in pixels,
-   * with its own cells, size and palette: tiles side by side, a bar under a picture, a label over it.
-   */
-  pixels(
-    cells: FrameOSPixelCells | FrameOSPixelLayer[],
-    options?: { width?: number; height?: number; pixelSize?: number; palette?: FrameOSPalette }
-  ): unknown;
+  pixels(cells: FrameOSPixelCells, palette: FrameOSPalette, options?: { width?: number; height?: number; pixelSize?: number }): unknown;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;

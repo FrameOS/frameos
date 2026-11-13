@@ -1,10 +1,10 @@
 {
   "name": "Pixel toys",
-  "description": "Fireworks, a fountain, a starfield, blobs, a plasma and Life, each computed cell by cell in JS and written straight into the frame with frameos.pixels. Pick the effect, the cell size and an FPS counter in the scene's settings. For LCD and HDMI frames that render many times a second.",
+  "description": "Fire, fireworks, a fountain, a waterfall, a starfield, Matrix rain, ripples, blobs, a plasma and Life, each computed cell by cell in JS and written straight into the frame in the 8-bit palette mode. Swipe for the next one; pick the effect, the cell size and an FPS counter in the scene's settings. For LCD and HDMI frames that render many times a second.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 1280,
   "imageHeight": 720,
   "scenes": "./scenes.json",
-  "frameosVersion": "2026.11.7"
+  "frameosVersion": "2026.11.8"
 }

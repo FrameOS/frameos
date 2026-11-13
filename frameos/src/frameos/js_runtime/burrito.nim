@@ -855,28 +855,22 @@ proc jsIsBigInt*(ctx: ptr JSContext, val: JSValueConst): bool =
 
 proc jsBytes*(ctx: ptr JSContext, val: JSValueConst): tuple[data: ptr UncheckedArray[uint8], len: int] =
   ## The bytes a typed array (a Uint8Array, a Uint8ClampedArray, any other
-  ## view) or an ArrayBuffer holds, in place: valid while `val` is, and
-  ## never past the view. `(nil, 0)` for any other value, with no exception
-  ## left pending.
+  ## view) holds, in place: valid while `val` is, and never past the view.
+  ## `(nil, 0)` for any other value, with no exception left pending.
   var offset, length, perElement: csize_t
   let buffer = JS_GetTypedArrayBuffer(ctx, val, addr offset, addr length, addr perElement)
-  if JS_IsException(buffer) == 0:
-    var size: csize_t
-    let base = JS_GetArrayBuffer(ctx, addr size, buffer)
-    JS_FreeValue(ctx, buffer)
-    if base == nil:
-      JS_FreeValue(ctx, JS_GetException(ctx)) # detached
-      return (nil, 0)
-    if offset.int + length.int > size.int:
-      return (nil, 0)
-    return (cast[ptr UncheckedArray[uint8]](addr base[offset.int]), length.int)
-  JS_FreeValue(ctx, JS_GetException(ctx)) # not a typed array; an ArrayBuffer itself, maybe
-  var size: csize_t
-  let base = JS_GetArrayBuffer(ctx, addr size, val)
-  if base == nil:
+  if JS_IsException(buffer) != 0:
     JS_FreeValue(ctx, JS_GetException(ctx))
     return (nil, 0)
-  (base, size.int)
+  var size: csize_t
+  let base = JS_GetArrayBuffer(ctx, addr size, buffer)
+  JS_FreeValue(ctx, buffer)
+  if base == nil:
+    JS_FreeValue(ctx, JS_GetException(ctx)) # detached
+    return (nil, 0)
+  if offset.int + length.int > size.int:
+    return (nil, 0)
+  (cast[ptr UncheckedArray[uint8]](addr base[offset.int]), length.int)
 
 # Conversion from Nim types to JSValue
 proc nimStringToJS*(ctx: ptr JSContext, str: string): JSValue =

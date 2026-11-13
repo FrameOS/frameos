@@ -1,0 +1,10 @@
+{
+  "name": "Color cycling",
+  "description": "Six cozy pixel-art scenes, a waterfall at dusk, a harbor at sunset, a rainy village, a snowy cabin, the northern lights and a campfire, animated only by cycling their palettes: each is drawn once, a byte a cell, and then only the colors move, so even an ESP32 animates them smoothly. Swipe for the next scene.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.8"
+}

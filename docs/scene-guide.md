@@ -334,25 +334,30 @@ stroke: give strokes `strokeLinecap="round"` and `strokeLinejoin="round"`,
 whose box is half the width around the line (a miter join's is wider). It
 lasts as long as the interpreter: when `canvas.fresh` is true, draw the
 record you keep in `frameos.remember` into it again.
-A raster the app computes itself (a fire, a plasma, a sprite) goes in with
-`frameos.putPixels(canvas, bytes, { width, height, pixelSize, palette })`
-(FrameOS 2026.11.7+): a `Uint8Array` of RGBA, or with `palette` one index per
-pixel, each source pixel a `pixelSize` square. Simulate at the canvas's size
-over `pixelSize` and hand the buffer over as it is, every frame. When that
-raster is the whole picture, `return frameos.pixels(cells, { width, height,
-pixelSize, palette })` from `get()` instead: no canvas and no JSX, written
-straight into an LCD's buffer. Without `palette` the cells are RGBA, four bytes
-each (a `Uint32Array` of `0xff000000 | b << 16 | g << 8 | r`); a palette byte
-is cheaper, and a palette may be a `Uint32Array` of `0xRRGGBB`. An array of
-layers, `frameos.pixels([{ cells, x, y, width, height, pixelSize, palette },
-...])`, paints each in order at its place in pixels: tiles, a bar of buttons
-under a picture, a label over it. The simulation itself is the app's JS, and on an ESP32 every
-bytecode counts (~0.25 µs each): keep per-cell and per-particle loops to
-locals and typed arrays (no `Math.*`, method or property lookups inside
-them), take random numbers from a table rather than a call, skip rows that
-cannot change, read `app.config` once per render (each read crosses into the
-runtime), and offer a coarser `pixelSize` there (`app.frame.embedded`). The
-Hellfire and Pixel toys samples run 14 to 26 fps on a 480x480 ESP32 panel.
+
+**8-bit palette mode.** A picture the app works out cell by cell (a fire, a
+plasma, pixel art) is returned from `get()` as `frameos.pixels(cells, palette,
+{ width, height, pixelSize })` (FrameOS 2026.11.8+): `cells` a `Uint8Array` (or
+`Uint8ClampedArray`) of `width` x `height` bytes, rows top to bottom, each an
+index into `palette`, up to 256 `0xRRGGBB` numbers (an Array or a
+`Uint32Array`), every cell a `pixelSize` square; `width` and `height` default to
+the frame's size over `pixelSize`, and an index past the palette is black. It
+goes straight into the panel's buffer, no canvas and no JSX, and only the cells
+whose index or color changed since the last frame are written. So there are two
+ways to animate. Change cells: simulate at the frame's size over `pixelSize` and
+hand the same array over every frame. Or change only the palette, as 8-bit
+games did: draw the picture once with ranges of colors laid out the way things
+move (down a waterfall, out from where a drop lands, up a flame) and rotate each
+range every frame, worked out from `Date.now()` so it keeps its pace at any
+frame rate; a frame then costs a palette, and only the cycling cells are
+written. The cells live as long as the interpreter: keep them in a module
+variable and make them again when it is gone. On an ESP32 every bytecode counts
+(~0.25 µs each): keep per-cell and per-particle loops to locals and typed arrays
+(no `Math.*`, method or property lookups inside them), take random numbers from
+a table rather than a call, skip rows that cannot change, read `app.config` once
+per render (each read crosses into the runtime), and offer a coarser
+`pixelSize` there (`app.frame.embedded`). The Hellfire, Pixel toys and Color
+cycling samples are worked examples.
 
 **Assets and permissions.** Asset paths are relative to the frame's assets
 folder (`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos,
@@ -1046,20 +1051,10 @@ interface FrameOSContext {
   [key: string]: any;
 }
 
-/** Cells for frameos.pixels and putPixels: palette indices, or RGBA bytes. */
-type FrameOSPixelCells = Uint8Array | Uint8ClampedArray | Uint32Array | ArrayBuffer;
-/** CSS colors or 0xRRGGBB numbers, 256 at most; a Uint32Array of 0xRRGGBB is read in place. */
-type FrameOSPalette = (string | number)[] | Uint32Array;
-/** One layer of a frameos.pixels frame: x and y in pixels, the rest as frameos.pixels takes them. */
-interface FrameOSPixelLayer {
-  cells: FrameOSPixelCells;
-  x?: number;
-  y?: number;
-  width?: number;
-  height?: number;
-  pixelSize?: number;
-  palette?: FrameOSPalette;
-}
+/** An 8-bit palette frame's cells: one byte each, an index into its palette. */
+type FrameOSPixelCells = Uint8Array | Uint8ClampedArray;
+/** Up to 256 colors as 0xRRGGBB numbers. */
+type FrameOSPalette = number[] | Uint32Array;
 declare const frameos: {
   image(spec?: FrameOSImageSpec): FrameOSImageSpec & { __frameosType: "image" };
   /** SVG markup that came from elsewhere (a download, an asset) as an image. A drawing the app makes is JSX returned from a .tsx app's get(), never markup built as a string. */
@@ -1127,28 +1122,13 @@ declare const frameos: {
   /** Fills a canvas with color (white by default). */
   clear(canvas: FrameOSCanvasRef, color?: string): boolean;
   /**
-   * Writes pixels straight into a canvas (FrameOS 2026.11.7+): RGBA bytes, four per pixel, rows top to bottom; with
-   * palette (CSS colors or 0xRRGGBB numbers, 256 at most) one index per pixel. Each source pixel is a pixelSize
-   * square, the grid width x height source pixels (the canvas over pixelSize by default) at x, y. Alpha 0, or an
-   * index past the palette, leaves the pixel as it was; what falls outside the canvas is clipped.
+   * The 8-bit palette mode, to return from get() (FrameOS 2026.11.8+): width x height cells, a byte each, rows top to
+   * bottom, each an index into palette (up to 256 0xRRGGBB colors; past its end, black) drawn as a pixelSize square.
+   * Written straight into the panel's buffer with no canvas and no JSX, rewriting only the cells whose index or color
+   * changed since the last frame: animate the cells, or only the palette (color cycling). width and height default to
+   * the frame's size over pixelSize.
    */
-  putPixels(
-    canvas: FrameOSCanvasRef,
-    pixels: FrameOSPixelCells,
-    options?: { x?: number; y?: number; width?: number; height?: number; pixelSize?: number; palette?: FrameOSPalette }
-  ): boolean;
-  /**
-   * A whole frame of cells, to return from get() (FrameOS 2026.11.7+): written straight into an LCD's buffer, with
-   * no canvas and no JSX, each cell a pixelSize square. With palette (an array of colors, or a Uint32Array of
-   * 0xRRGGBB read in place) a cell is one index into it; without, four bytes of RGBA (an ImageData's layout; in a
-   * Uint32Array, 0xAABBGGRR). An index past the palette, alpha 0, or a grid that stops short of the frame shows
-   * the scene's background. An array of layers instead of cells paints each in order, at its x and y in pixels,
-   * with its own cells, size and palette: tiles side by side, a bar under a picture, a label over it.
-   */
-  pixels(
-    cells: FrameOSPixelCells | FrameOSPixelLayer[],
-    options?: { width?: number; height?: number; pixelSize?: number; palette?: FrameOSPalette }
-  ): unknown;
+  pixels(cells: FrameOSPixelCells, palette: FrameOSPalette, options?: { width?: number; height?: number; pixelSize?: number }): unknown;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;

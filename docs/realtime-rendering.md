@@ -19,10 +19,10 @@ paths twice (the shadow at `opacity="0.32"`) — and returns
 
 The second yardstick is the sample scene **Hellfire**
 (`repo/scenes/samples/Hellfire`): the Doom fire, a byte of heat per cell, its
-spread rule in the app's own JS and the cells returned as `frameos.pixels`,
-which writes the ones that changed straight into the panel's buffer. No SVG,
-JSX or canvas is involved, so what it measures is the interpreter's loop and
-the raw pixel path. It reads its own number off the panel: its **FPS counter**
+spread rule in the app's own JS and the cells returned in the **8-bit palette
+mode** (below), which writes the ones that changed straight into the panel's
+buffer. No SVG, JSX or canvas is involved, so what it measures is the
+interpreter's loop and the raw pixel path. It reads its own number off the panel: its **FPS counter**
 field draws the renders a second the panel gets (simulation, blit and pacing
 included) in a corner, in the fire's own cells so that it does not slow what it
 measures, and its **Quality** field picks the cell size: automatic (4 px, 8 on
@@ -56,24 +56,42 @@ Doom's cooling of half a heat unit a row burns ~72 rows high, so a 60-row grid
 was a wall of fire. The pass now runs from the top down and the cooling
 follows the grid: the flames stand ~40% of the way up at any cell size.
 
-The **Pixel toys** sample (`repo/scenes/samples/Pixel toys`) is the rest of
-the kind, each effect a component of one app (`make(cols, rows)` gives its
-cells, palette and `step()`): fire (Hellfire's spread) in three colors,
-fireworks, a fountain and a waterfall (particles in typed arrays, trails dimmed
-through a table only in the span of each row something was drawn in, half the
-rows a frame), a starfield, Matrix rain (the 3x5 font), ripples (the two-buffer
-wave; a tap drops a stone), blobs (metaballs: a falloff from a table by squared
-distance to the cells in each radius, a `Uint8ClampedArray` clamping the sum),
-a plasma (a row's, a column's and a diagonal's wave from tables made once a
-frame, wrapping in a `Uint8Array`) and Life (32 cells to an integer, the
-neighbours counted by bit-sliced adders, the picture drawn only where something
-lived lately). "All at once" is nine of them as a grid of `frameos.pixels`
-layers, the controls one more layer; a swipe steps through them and a tap on a
-tile opens it. On the SenseCAP Indicator, by the `render:animation` line:
+### The 8-bit palette mode
+
+`return frameos.pixels(cells, palette, { width, height, pixelSize })` from a JS
+app's `get()` (`imageFromPixels` in `js_runtime/app_runtime.nim`): a byte a
+cell, an index into up to 256 colors, every cell a `pixelSize` square. It is
+the one raster an app hands the runtime itself, and it is kept to the
+smallest shape that does the job, for the firmware's flash: no RGBA, no
+layers, no writes into a canvas (all three were built and taken out again).
+
+- It is written straight into the target the planner offers, the panel's own
+  buffer on an LCD, and a grid that covers it waives the background it owes.
+- Each panel buffer keeps a copy of the cells and the 256 colors it was drawn
+  with (`PixelFrame` in `utils/svg_frames.nim`, up to 256 KB of cells), so the
+  next frame into that buffer writes only the cells whose index changed or
+  whose color did. Any other render into the buffer, or a firmware write,
+  means every cell is written next time.
+- An RGB565 buffer takes `js_runtime/pixel_ops.nim` (compiled at `-O2` on the
+  ESP32, the palette packed once a frame); every other format goes a pixel at
+  a time through pixie's `setPixel`, which e-paper and a Pi never notice.
+
+So an app can animate two ways. It can change cells, as Hellfire and the
+**Pixel toys** do (`repo/scenes/samples/Pixel toys`, each effect a component of
+one app: fire in three colors, fireworks, a fountain, a waterfall, a starfield,
+Matrix rain, ripples, blobs, a plasma and Life; a swipe for the next). Or it can
+change only the palette, as 8-bit games did: the **Color cycling** sample
+(`repo/scenes/samples/Color cycling`) draws each of its six scenes once, with
+ranges of colors laid out the way things move (down the waterfall, out from
+where a drop lands, up a flame, along an aurora), and from then on rotates
+those ranges by the clock. A frame of it is a palette of 256 colors worked out
+in JS and the cells of the colors that moved; the cells that hold still, most
+of the picture, are never written again.
+
+The Pixel toys on the SenseCAP Indicator, by the `render:animation` line:
 
 | Effect | Automatic cells | fps | Other cells | fps |
 | --- | --- | --- | --- | --- |
-| All at once (3x3) | 4 px | 6.5 | 8 px | 9.8 |
 | Fire | 8 px | 23.4 | | |
 | Fireworks | 4 px | 18.7 | 8 px | 25.6 |
 | Fountain | 4 px | 14.4 | 8 px | 17.9 |
@@ -85,27 +103,18 @@ tile opens it. On the SenseCAP Indicator, by the `render:animation` line:
 | Plasma | 8 px | 16.6 | 4 px | 8.0 |
 | Life | 8 px | 18.8 | 4 px | 7.4 |
 
-With the controls or a counter over tiles, a frame is layers and keeps no copy
-of its cells: fire with its controls bar runs 14.2 fps against 23.4 alone.
-
 What the first versions spent and the rewrite took out, in a frame's `step`:
 the fireworks' fade over every row (30 of 34 ms), a `trails.plot` call and a
 property lookup per particle (the fountain's other 36 ms), and Life at ~60
 bytecodes a cell (66 ms; bit-sliced it went from 10 to 19 fps).
 
-Without a palette `frameos.pixels` takes RGBA, and the cost of that, and of
-going to every pixel, measured with a plasma on the same board:
-
-| Cells | Palette: JS + write | RGBA: JS + write |
-| --- | --- | --- |
-| 4 px (14,400) | 91 + 21 ms | 112 + 27 ms |
-| 1 px (230,400) | 1,294 + 78 ms | 1,606 + 143 ms |
-
-The JS is the cost; the write is PSRAM. A panel buffer keeps a copy of a
-frame's cells (what lets it write only those that changed) up to 256 KB: a
-whole panel of RGBA cells is 921 KB, three buffers most of the free PSRAM, and
-a seq cut to a smaller frame kept its capacity, so an RGBA frame at 1 px once
-left 2.7 MB behind and every interpreter after it was discarded for memory.
+A whole 480x480 frame at one pixel a cell, a plasma on the same board, is
+1,294 ms of JS and 78 ms of writing: the interpreter is the cost, and fewer,
+larger cells (or a palette that moves instead of the cells) are the lever. A
+panel buffer's copy of a frame's cells is a new record each time, never the
+old one cut to size: a seq keeps its capacity when it shrinks, and once held
+2.7 MB across the three LCD buffers, so that every interpreter after it was
+discarded for memory.
 
 ## Where an ESP32 frame goes
 

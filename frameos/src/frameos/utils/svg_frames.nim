@@ -35,9 +35,9 @@
 ## the canvas).
 ##
 ## A `frameos.pixels` frame (js_runtime/app_runtime.nim) keeps a record of the
-## same kind per buffer, the cells it wrote (`PixelFrame`): off the shelf when
-## a render begins, back only after a pixel frame, so the next one into that
-## buffer writes only the cells that differ.
+## same kind per buffer, the cells and palette it wrote (`PixelFrame`): off the
+## shelf when a render begins, back only after a pixel frame, so the next one
+## into that buffer writes only the cells whose index or color differs.
 
 import std/options
 import pixie
@@ -77,15 +77,18 @@ var
     ## one it does not know (embedded_runtime: fos_display_buffer_generation).
     ## Unset, a buffer without its own record is drawn whole.
 
-type PixelFrame* = object
-  ## What a `frameos.pixels` frame left in a panel buffer: the cells it wrote,
-  ## so the next frame into that buffer writes only the ones that differ.
-  buffer: pointer
-  generation: uint32
-  width*, height*, size*: int
-  rgba*: bool ## four bytes a cell, no palette
-  palette*: seq[ColorRGBX]
-  cells*: seq[uint8]
+type
+  PixelPalette* = array[256, ColorRGBX]
+    ## An 8-bit palette frame's colors, every index a cell can hold.
+  PixelFrame* = object
+    ## What a `frameos.pixels` frame left in a panel buffer: its cells and
+    ## their colors, so the next frame into that buffer writes only the cells
+    ## whose index or color differs.
+    buffer: pointer
+    generation: uint32
+    width*, height*, size*: int
+    palette*: PixelPalette
+    cells*: seq[uint8]
 
 const MaxHeldPixelFrames = 4
   ## An LCD has three buffers; a panel change forgets them all anyway.

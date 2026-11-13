@@ -65,29 +65,6 @@ proc changedSince*(log: CanvasLog, version: int): tuple[known: bool, boxes: seq[
   for draw in log.draws:
     if draw.version > version and draw.box.w > 0 and draw.box.h > 0:
       result.boxes.add draw.box
-  # Boxes that cost no more as one are one: an animation notes nearly the same
-  # box every frame, and an LCD's buffer is three frames behind, so apart they
-  # repainted the same pixels three times over. A stroke's segments, which
-  # hardly meet, stay apart.
-  var i = 0
-  while i < result.boxes.len:
-    var joinedAny = false
-    var j = i + 1
-    while j < result.boxes.len:
-      let
-        a = result.boxes[i]
-        b = result.boxes[j]
-        joined = join(a, b)
-      if joined.w * joined.h <= a.w * a.h + b.w * b.h:
-        result.boxes[i] = joined
-        result.boxes.delete(j)
-        joinedAny = true
-      else:
-        inc j
-    if joinedAny:
-      i = 0
-    else:
-      inc i
   while result.boxes.len > MaxChangedBoxes:
     var
       best = float32.high
