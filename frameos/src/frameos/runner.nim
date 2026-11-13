@@ -12,6 +12,7 @@ import frameos/device_setup
 import frameos/event_log
 import frameos/event_loop
 import frameos/interpreter
+from frameos/js_runtime/app_runtime import pumpJsBackground, nextJsBackgroundMs
 import frameos/display_detect
 import frameos/panel_canvas
 import frameos/driver_render_hint
@@ -1075,6 +1076,11 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
     # Time passing for what is held: a long press, a button's repeats, the
     # cursor hiding. Cheap when nothing is.
     discard events.tick()
+    # Background JavaScript (docs/background-js.md): the fetches answered and
+    # the sleeps over let their apps' code run on, to its next await. Never
+    # inside a render: both loops share this thread.
+    if pumpJsBackground() > 0:
+      waitTime = 1
 
     # One burst. Both loops share one thread, and a scene whose event handler
     # re-dispatches keeps the queue non-empty forever — so the dispatcher hands
@@ -1097,7 +1103,9 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
     if self.triggerRenderNext and not self.isRendering:
       await sleepAsync(1)
     else:
-      await sleepOrWake(waitTime)
+      # A worker's answer wakes the loop (js_io.nim); a sleep ending does not.
+      let sleepEnds = nextJsBackgroundMs()
+      await sleepOrWake(if sleepEnds >= 0: min(waitTime, max(sleepEnds, 1)) else: waitTime)
       if uiTimersPending():
         # A key's light to put out, a held key to type again: on time.
         waitTime = min(waitTime, 20)
