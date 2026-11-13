@@ -3078,6 +3078,12 @@ proc holesOf(owner: AppRoot, context: ExecutionContext, target: UiTarget,
     h.bottom = placed(h.y + h.h, regionScale, requestedHeight).int32
     if h.right <= h.left or h.bottom <= h.top:
       h.clean = false
+    when not defined(frameosEmbedded):
+      # Past the canvas's edge (a window dragged half off a desktop): clamped,
+      # the scene would be squeezed into what shows. A picture is cut instead.
+      if round((h.x + h.w) * regionScale).int > requestedWidth or
+          round((h.y + h.h) * regionScale).int > requestedHeight:
+        h.clean = false
 
 proc noteHoles(scene: FrameScene, holes: UiHoles) =
   ## Holes that moved, came or went leave nothing the canvas can be trusted

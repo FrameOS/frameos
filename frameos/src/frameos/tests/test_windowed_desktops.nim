@@ -172,6 +172,24 @@ suite "the Windows 98 desktop":
       for slot in current.wornLayout.slots: children.add slot.child
       children)
 
+  test "a window behind that is sized runs at its new size, its old picture not stretched":
+    let red = hosted["tests/red"]
+    discard pass()
+    let before = red.rhythm.scheduledPass
+    discard pass()
+    # Not due on its own: a ten-minute interval.
+    check red.rhythm.scheduledPass == before
+    proc setMax(on: bool) =
+      let wins = desk().state["wins"]
+      for w in wins:
+        if w{"id"}.getStr() == "tests/red": w["max"] = %on
+      desk().state["wins"] = wins
+    setMax(false)
+    discard pass()
+    check red.rhythm.scheduledPass != before
+    setMax(true)
+    discard pass()
+
   test "a window dragged by its title bar follows the pointer":
     let g = winOf("tests/green")
     let (x0, y0) = (g{"x"}.getInt(), g{"y"}.getInt())
@@ -235,6 +253,28 @@ suite "the Windows 98 desktop":
     let image = pass()
     shot(image, "8-closed")
     check problems.len == 0
+
+  test "a window dragged half off the desktop is cut at the edge, not squeezed into what shows":
+    let g = winOf("tests/green")
+    let (x, y, w) = (g{"x"}.getInt(), g{"y"}.getInt(), g{"w"}.getInt())
+    discard send("pointerDown", at(x + 60, y + 14))
+    discard send("pointerMove", at(W - 100, y + 14))
+    discard send("pointerUp", at(W - 100, y + 14, %*{"buttons": 0}))
+    let off = winOf("tests/green"){"x"}.getInt()
+    check off + w > W
+    discard pass()
+    for slot in desk().slots:
+      if slot.child == hosted["tests/green"]:
+        check not slot.hole
+        # The scene keeps its window's width: it starts at the window's left
+        # edge, and what lies past the panel is cut.
+        check slot.x.int >= off and slot.x.int < off + 10
+    # Back where it was, for the tests after.
+    discard send("pointerDown", at(W - 100, y + 14))
+    discard send("pointerMove", at(x + 60, y + 14))
+    discard send("pointerUp", at(x + 60, y + 14, %*{"buttons": 0}))
+    check winOf("tests/green"){"x"}.getInt() == x
+    discard pass()
 
   test "a window sized from its corner grows with the pointer":
     let g = winOf("tests/green")

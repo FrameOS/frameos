@@ -774,11 +774,16 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
     drawIntoHole(owner, child, context.image, x.int, y.int, width, height, context, addSlot = true)
     return context.image
   owner.slots.add(SceneSlot(child: child, x: x, y: y, visible: visible))
-  let due = rhythmEmbedDue(child)
+  var due = rhythmEmbedDue(child)
   let like {.cursor.} = if context.hasImage: context.image else: nil
   let format = if like.isNil: pfRgbx else: like.format
   var image = r.embedImage
   let fits = not image.isNil and image.width == width and image.height == height and image.format == format
+  when not defined(frameosEmbedded):
+    # A new size (a window sized or snapped): what its apps made last is the
+    # wrong shape, and a repaint would stretch it. It runs.
+    if not fits and not image.isNil:
+      due = true
   if fits and not due:
     return image
   if not fits:
