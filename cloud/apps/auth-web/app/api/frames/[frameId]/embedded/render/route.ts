@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
+import { fosbReadsV2, fosbV2, fosbVersionHeader, pressMapHeader } from "../../../../../../src/lib/fosb";
 import { authenticateFrameDevice } from "../../../../../../src/lib/frame-device-auth";
 import {
   checkIdentityRateLimit,
@@ -27,8 +28,14 @@ export const runtime = "nodejs";
 //
 //   GET /api/frames/{id}/embedded/render?scene=&width=&height=&format=&rotate=
 //   If-None-Match: "<etag of the picture the panel shows>"
-//   -> 200 FOSB (the packed panel bytes), ETag, Cache-Control: no-store
+//   X-FrameOS-Fosb: 2 (a board that reads FOSB version 2)
+//   -> 200 FOSB (the packed panel bytes), ETag, Cache-Control: no-store;
+//      version 2 deflated, and only what changed since the picture the
+//      If-None-Match names when it is the one drawn last
+//      (docs/server-rendering.md "Only what changed")
 //   -> 304 when the panel already shows it
+//   Both with X-FrameOS-Press: where a press on the picture does something
+//   ("The click").
 //
 //   POST, the same, when the frame has input for its scene: its key edges
 //   and what its own producers (keys, touch, schedule, HTTP API) would have
@@ -179,15 +186,19 @@ async function pull(
       ETag: `"${pulled.etag}"`,
       "X-FrameOS-Scene": encodeURIComponent(pulled.scene),
       ...(pulled.nextRenderSeconds !== null ? { "X-FrameOS-Next-Render": String(pulled.nextRenderSeconds) } : {}),
+      ...(pulled.pressMap ? { [pressMapHeader]: pulled.pressMap } : {}),
     };
     if (pulled.status === 304) {
       return new NextResponse(null, { headers: { ...headers, ...about }, status: 304 });
     }
-    return new NextResponse(new Uint8Array(pulled.body), {
+    // A board that reads version 2 gets it deflated, and as what changed
+    // since the picture it shows when that is the one drawn last.
+    const body = fosbReadsV2(request.headers.get(fosbVersionHeader)) ? await fosbV2(pulled.body, pulled.base) : pulled.body;
+    return new NextResponse(new Uint8Array(body), {
       headers: {
         ...headers,
         ...about,
-        "Content-Length": String(pulled.body.length),
+        "Content-Length": String(body.length),
         "Content-Type": "application/octet-stream",
       },
       status: 200,

@@ -26,6 +26,7 @@ import frameos/utils/image as frameos_image
 import frameos/utils/memory
 import frameos/utils/dither
 import frameos/utils/asset_colors
+from frameos/panel_shape import boardPanelFormat
 import frameos/js_runtime/runtime as jsRuntime
 import frameos/js_runtime/app_tests
 import lib/tz
@@ -72,6 +73,10 @@ var
   uiStateToRestore: JsonNode
   keptStateBuffer: string
   renderPaletteBuffer: string
+  pressMapBuffer: string
+  # The board's rotation (frameos_wasm_set_frame): what turns the scene's
+  # canvas back into its panel for the press map.
+  boardRotate = 0
   # Running as an ESP32, every render draws into one canvas kept for the
   # runtime's life, in the format that frame keeps it in (embedded_runtime
   # `renderCanvas`): RGB565 on a 13.3" colour panel with 8 MB of PSRAM, luma
@@ -236,6 +241,8 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     lastImage = nil
     dropDeviceCanvas()
     deviceCanvasBitsPerPixel = 32
+    boardPanelFormat = 0
+    boardRotate = 0
     pendingSceneStates = initTable[string, JsonNode]()
     builtInToRestore = ""
     clearRenderPaletteOverride()
@@ -452,7 +459,9 @@ proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
   ## config; `palette` and `colors` are what the ESP32's settings hand its
   ## runtime (fos_nim_set_palette_impl / _colors_impl), and `pixelFormat` the
   ## panel, so the automatic fit of drawn images aims at the colours the
-  ## panel shows, as embedded_main's render does; `rotate` is the frame's,
+  ## panel shows, as embedded_main's render does, and a scene hears what the
+  ## board's runtime says of it (`app.frame.color` and `paper`, the switcher's
+  ## and the settings' look: panel_shape.boardPanelFormat); `rotate` is the frame's,
   ## for the relayed pointers' panel positions.
   try:
     if frameConfig.isNil:
@@ -497,6 +506,7 @@ proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
     let rotateNode = node{"rotate"}
     if not rotateNode.isNil and rotateNode.kind == JInt and rotateNode.getInt() in [0, 90, 180, 270]:
       rotate = rotateNode.getInt()
+      boardRotate = rotate
       rebuildInput = true
     if rebuildInput:
       # The dispatcher's input state copies the buttons' roles when it is
@@ -516,6 +526,9 @@ proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
       host.events.inputState.keyboardAt = keyboardAt
     let format = node{"pixelFormat"}
     if not format.isNil and format.kind == JInt:
+      # What the board's own runtime says of its panel: `app.frame.color` and
+      # `paper`, the switcher's and the settings' look (panel_shape.nim).
+      boardPanelFormat = max(format.getInt(), 0)
       let stock = panelTable(format.getInt())
       setAssetColorsPanelPalette(if stock.len == 0: stock
         else: fitPaletteOverride(frameConfig.palette.colors, stock))
@@ -576,6 +589,58 @@ proc frameos_wasm_kept_state(): cstring {.exportc, cdecl.} =
   except Exception:
     keptStateBuffer = "{}"
   keptStateBuffer.cstring
+
+const
+  PressMapMaxEntries = 64
+    ## A press map past this is cut short: a press beyond it is not clicked
+    ## at, nothing worse (docs/server-rendering.md "The click").
+
+proc frameos_wasm_press_map(): cstring {.exportc, cdecl.} =
+  ## Where a press on the board's glass does something, after the last render
+  ## (interpreter.pressMap): `x0,y0,x1,y1` in the board's panel pixels (the
+  ## picture turned by the frame's rotation, as the board's glass is), `;`
+  ## between entries, a leading `!` on one where a press is not taken. The
+  ## first entry a press lands in answers and a press in none is not taken:
+  ## `""` when nothing takes one. A plane hands it to the board as
+  ## `X-FrameOS-Press`, and the board clicks at a press it takes before it
+  ## asks the plane anything (docs/server-rendering.md "The click").
+  pressMapBuffer = ""
+  try:
+    if host.scene.isNil or frameConfig.isNil:
+      return pressMapBuffer.cstring
+    let
+      canvasW = frameConfig.width
+      canvasH = frameConfig.height
+      turned = boardRotate in [90, 270]
+      panelW = if turned: canvasH else: canvasW
+      panelH = if turned: canvasW else: canvasH
+    var entries = 0
+    for entry in pressMap(host.scene, canvasW, canvasH):
+      if entries == PressMapMaxEntries:
+        break
+      let
+        x0 = clamp(floor(entry.box[0]).int, 0, canvasW)
+        y0 = clamp(floor(entry.box[1]).int, 0, canvasH)
+        x1 = clamp(ceil(entry.box[2]).int, 0, canvasW)
+        y1 = clamp(ceil(entry.box[3]).int, 0, canvasH)
+      if x1 <= x0 or y1 <= y0:
+        continue
+      # The scene's canvas back onto the panel: utils/image panelToScenePoint
+      # the other way round.
+      let (px0, py0, px1, py1) = case boardRotate
+        of 90: (panelW - y1, x0, panelW - y0, x1)
+        of 180: (panelW - x1, panelH - y1, panelW - x0, panelH - y0)
+        of 270: (y0, panelH - x1, y1, panelH - x0)
+        else: (x0, y0, x1, y1)
+      if entries > 0:
+        pressMapBuffer.add ';'
+      if not entry.taken:
+        pressMapBuffer.add '!'
+      pressMapBuffer.add &"{px0},{py0},{px1},{py1}"
+      entries += 1
+  except Exception:
+    pressMapBuffer = ""
+  pressMapBuffer.cstring
 
 proc frameos_wasm_select_scene(sceneId: cstring): bool {.exportc, cdecl.} =
   try:

@@ -450,16 +450,27 @@ static fos_event_result_t dispatch_remote(fos_event_origin_t origin, const char 
         log_event_line("event:unsupported", origin, name, "not on this host");
         return FOS_EVENT_FAILED;
     }
+    /* A pointer pressed over HTTP is open before its down is in the relay:
+     * the render task, in a pass already, must not find the down without
+     * the press that keeps it waiting for the lift. */
+    bool http = (origin & (FOS_ORIGIN_HTTP_WRITE | FOS_ORIGIN_HTTP_ADMIN)) != 0;
+    bool pressing = strcmp(name, FOS_EVENT_POINTER_DOWN) == 0 || strcmp(name, FOS_EVENT_POINTER_MOVE) == 0;
+    if (http && pressing) fos_client_http_press(true);
     if (!fos_client_relay_event(fos_event_origin_name(origin), name, payload)) {
+        if (http && pressing) fos_client_http_press(false);
         /* A payload that is not one JSON object, or bigger than a pull may
          * carry: the producer hears it (an HTTP 400, a console error). */
         log_event_line("event:dropped", origin, name, "not relayable");
         return FOS_EVENT_FAILED;
     }
     /* A key or a finger goes once the gesture is decided (the render task
-     * waits out a double-press window, a hold, a finger on the glass); a
-     * schedule entry or an HTTP event is somebody asking now. */
-    if (origin == FOS_ORIGIN_DRIVER) {
+     * waits out a double-press window, a hold, a finger on the glass), and so
+     * does a pointer pressed over HTTP, until its lift; a schedule entry or
+     * another HTTP event is somebody asking now. */
+    if (http && (strcmp(name, FOS_EVENT_POINTER_UP) == 0 || strcmp(name, FOS_EVENT_POINTER_CANCEL) == 0)) {
+        fos_client_http_press(false);
+    }
+    if (origin == FOS_ORIGIN_DRIVER || (http && pressing)) {
         fos_client_wake_for_events();
     } else {
         fos_client_render_now();

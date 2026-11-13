@@ -205,6 +205,13 @@ export type SceneRenderResult = {
    */
   keptState?: string;
   /**
+   * Where a press on the picture does something, in the panel's pixels
+   * (`frameos_wasm_press_map`; docs/server-rendering.md "The click"): what a
+   * board rendered on the server clicks by before it asks. Absent when
+   * nothing takes a press, or the runtime predates the report.
+   */
+  pressMap?: string;
+  /**
    * When the scene wants its next render, in seconds: this render's own
    * `nextSleep` (logic/nextSleepDuration), absent when it set none, and the
    * scene's `refreshInterval`, absent when it has none. Absent too when the
@@ -439,6 +446,7 @@ type WorkerResult =
       sceneId: string;
       state: unknown;
       keptState: string | null;
+      pressMap: string | null;
       width: number;
     }
   | {
@@ -529,6 +537,7 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
             : {}),
           ...(result.sceneId ? { sceneId: result.sceneId } : {}),
           ...(typeof result.keptState === "string" ? { keptState: result.keptState } : {}),
+          ...(typeof result.pressMap === "string" && result.pressMap.length > 0 ? { pressMap: result.pressMap } : {}),
         };
         if (result.packed) {
           resolve({
@@ -1103,6 +1112,16 @@ async function main() {
   } catch {
     keptState = null;
   }
+  // Where a press on the picture does something, in the panel's pixels
+  // (docs/server-rendering.md "The click"). A runtime without the export
+  // says nothing.
+  let pressMap = null;
+  try {
+    const reported = call("frameos_wasm_press_map", "string", [], []);
+    pressMap = typeof reported === "string" ? reported : null;
+  } catch {
+    pressMap = null;
+  }
   // Packed for the panel here, where the pixels are (SceneRenderOptions.pack):
   // the packer is panel-pack.ts's own, built from its text, and only the
   // FOSB crosses to the main thread. Anything that goes wrong hands the
@@ -1126,7 +1145,7 @@ async function main() {
       );
       const body = fosb.byteOffset === 0 && fosb.byteLength === fosb.buffer.byteLength ? fosb.buffer : fosb.slice().buffer;
       parentPort.postMessage(
-        { ok: true, packed: true, buffer: body, width, height, logs, nextSleep, palette, refreshInterval, renderMs: Date.now() - started, sceneId, state, keptState },
+        { ok: true, packed: true, buffer: body, width, height, logs, nextSleep, palette, refreshInterval, renderMs: Date.now() - started, sceneId, state, keptState, pressMap },
         [body],
       );
       return;
@@ -1136,7 +1155,7 @@ async function main() {
   }
   const buffer = Module.HEAPU8.buffer.slice(ptr, ptr + len);
   parentPort.postMessage(
-    { ok: true, buffer, width, height, logs, nextSleep, palette, refreshInterval, renderMs: Date.now() - started, sceneId, state, keptState, ...(packError ? { packError } : {}) },
+    { ok: true, buffer, width, height, logs, nextSleep, palette, refreshInterval, renderMs: Date.now() - started, sceneId, state, keptState, pressMap, ...(packError ? { packError } : {}) },
     [buffer],
   );
 }

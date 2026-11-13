@@ -83,12 +83,16 @@ from app.utils.server_render import (
     epoch_ms,
     etag_matches,
     fosb_etag,
+    fosb_reads_v2,
+    fosb_v2,
     keep_prerender,
+    keep_delta_base,
     prerender_as_of,
     prerender_usable,
     remember_render_ms,
     render_fingerprint,
     render_revision,
+    delta_base,
     take_prerender,
 )
 from app.api.firmware_release import latest_release_ota_manifest, stream_latest_release_ota_image
@@ -195,67 +199,73 @@ def _dithered_gray_levels(image, levels: int) -> bytes:
     return _dithered_indices(luma, [(round(i * 255 / (levels - 1)),) * 3 for i in range(levels)])
 
 
+def _shift_table(shift: int, mask: int = 0xFF) -> bytes:
+    return bytes(((value & mask) << shift) & 0xFF for value in range(256))
+
+
+def _or_bytes(parts: list[bytes]) -> bytes:
+    """The bytes of equal-length ``parts`` ORed together, in C: one big
+    integer each (a per-pixel loop was a quarter second of every pull of a
+    10.3" panel, 2026-11-13)."""
+    combined = 0
+    for part in parts:
+        combined |= int.from_bytes(part, "big")
+    return combined.to_bytes(len(parts[0]), "big")
+
+
+def _pack_bits(values: bytes, width: int, height: int, bits: int, pad: int = 0) -> bytes:
+    """One value per pixel (row-major, ``width`` x ``height``) packed
+    ``8 // bits`` to a byte, the leftmost pixel in the high bits, each row
+    starting on a byte, a row's last byte filled with ``pad``: the panel
+    formats' layout (FOSB)."""
+    per = 8 // bits
+    mask = (1 << bits) - 1
+    row_pixels = (width + per - 1) // per * per
+    if row_pixels != width:
+        padded = bytearray([pad & mask]) * (row_pixels * height)
+        for y in range(height):
+            padded[y * row_pixels:y * row_pixels + width] = values[y * width:(y + 1) * width]
+        values = bytes(padded)
+    return _or_bytes([
+        values[i::per].translate(_shift_table(bits * (per - 1 - i), mask)) for i in range(per)
+    ])
+
+
 def _pack_1bpp(image) -> bytes:
-    row = (image.width + 7) // 8
-    out = bytearray(row * image.height)
-    levels = _dithered_gray_levels(image, 2)
-    for y in range(image.height):
-        base = y * image.width
-        for x in range(image.width):
-            if levels[base + x]:
-                out[y * row + (x >> 3)] |= 0x80 >> (x & 7)
-    return bytes(out)
+    return _pack_bits(_dithered_gray_levels(image, 2), image.width, image.height, 1)
 
 
 def _pack_dual_1bpp(image, accent: tuple[int, int, int]) -> bytes:
-    row = (image.width + 7) // 8
-    black = bytearray([0xFF] * (row * image.height))
-    color = bytearray([0xFF] * (row * image.height))
+    # Two planes, a bit cleared (ink) where the pixel is black on the first
+    # and the accent on the second; white and the rows' padding left set.
     indices = _dithered_indices(image, [(0, 0, 0), accent, (255, 255, 255)])
-    for y in range(image.height):
-        base = y * image.width
-        for x in range(image.width):
-            index = indices[base + x]
-            if index > 1:
-                continue
-            plane = black if index == 0 else color
-            plane[y * row + (x >> 3)] &= ~(0x80 >> (x & 7))
-    return bytes(black + color)
+    black = indices.translate(bytes(0 if value == 0 else 1 for value in range(256)))
+    color = indices.translate(bytes(0 if value == 1 else 1 for value in range(256)))
+    return (_pack_bits(black, image.width, image.height, 1, pad=1)
+            + _pack_bits(color, image.width, image.height, 1, pad=1))
 
 
 def _pack_2bpp_gray(image) -> bytes:
-    row = (image.width + 3) // 4
-    out = bytearray(row * image.height)
-    levels = _dithered_gray_levels(image, 4)
-    for y in range(image.height):
-        base = y * image.width
-        for x in range(image.width):
-            out[y * row + (x >> 2)] |= (levels[base + x] & 0x03) << (6 - ((x & 3) * 2))
-    return bytes(out)
+    return _pack_bits(_dithered_gray_levels(image, 4), image.width, image.height, 2)
 
 
 def _pack_4bpp_gray(image) -> bytes:
-    row = (image.width + 1) // 2
-    out = bytearray(row * image.height)
-    levels = _dithered_gray_levels(image, 16)
-    for y in range(image.height):
-        base = y * image.width
-        for x in range(image.width):
-            out[y * row + (x >> 1)] |= (levels[base + x] & 0x0F) << (4 if (x & 1) == 0 else 0)
-    return bytes(out)
+    return _pack_bits(_dithered_gray_levels(image, 16), image.width, image.height, 4)
 
 
 def _pack_rgb565(image) -> bytes:
     """One little-endian 5/6/5 word per pixel, the LCD's own format; plain
     rounding (the device's packer jitters the rounding, embedded_main.nim)."""
-    rgb = image.convert("RGB")
-    out = bytearray(rgb.width * rgb.height * 2)
-    i = 0
-    for r, g, b in rgb.getdata():
-        word = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
-        out[i] = word & 0xFF
-        out[i + 1] = word >> 8
-        i += 2
+    r, g, b = (band.tobytes() for band in image.convert("RGB").split())
+    # word = r5 << 11 | g6 << 5 | b5: the low byte is g's low three bits and
+    # b's five, the high byte r's five and g's high three.
+    low = _or_bytes([g.translate(bytes(((v >> 2) & 0x07) << 5 for v in range(256))),
+                     b.translate(bytes(v >> 3 for v in range(256)))])
+    high = _or_bytes([r.translate(bytes(v & 0xF8 for v in range(256))),
+                      g.translate(bytes(v >> 5 for v in range(256)))])
+    out = bytearray(len(low) * 2)
+    out[0::2] = low
+    out[1::2] = high
     return bytes(out)
 
 
@@ -265,18 +275,8 @@ def _pack_palette(image, palette: list[tuple[int, int, int]], bits: int) -> byte
     entries = [(index, rgb) for index, rgb in enumerate(palette) if max(rgb) <= 255]
     wire = bytes(index for index, _ in entries)
     indices = _dithered_indices(image, [rgb for _, rgb in entries])
-    divider = 4 if bits == 2 else 2
-    row = (image.width + divider - 1) // divider
-    out = bytearray(row * image.height)
-    for y in range(image.height):
-        base = y * image.width
-        for x in range(image.width):
-            index = wire[indices[base + x]]
-            if bits == 2:
-                out[y * row + (x >> 2)] |= (index & 0x03) << (6 - ((x & 3) * 2))
-            else:
-                out[y * row + (x >> 1)] |= (index & 0x0F) << (4 if (x & 1) == 0 else 0)
-    return bytes(out)
+    table = bytes(wire[value] if value < len(wire) else 0 for value in range(256))
+    return _pack_bits(indices.translate(table), image.width, image.height, bits)
 
 
 def render_embedded_diagnostic_bitmap(frame: Frame, width: int, height: int, pixel_format: int) -> bytes:
@@ -881,10 +881,16 @@ async def api_embedded_device_render(
     redis=Depends(get_redis),
     authorization: str = Header(None),
     if_none_match: str | None = Header(None),
+    x_frameos_fosb: str | None = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
     return await _embedded_render_response(
-        db, redis, frame, device_scene=_device_scene(scene), if_none_match=if_none_match
+        db,
+        redis,
+        frame,
+        device_scene=_device_scene(scene),
+        if_none_match=if_none_match,
+        fosb_v2_ok=fosb_reads_v2(x_frameos_fosb),
     )
 
 
@@ -897,6 +903,7 @@ async def api_embedded_device_render_with_input(
     redis=Depends(get_redis),
     authorization: str = Header(None),
     if_none_match: str | None = Header(None),
+    x_frameos_fosb: str | None = Header(None),
 ):
     """The pull of a thin client whose buttons were pressed since the last
     one: the same frame, with the presses delivered to the scene first, as
@@ -916,6 +923,7 @@ async def api_embedded_device_render_with_input(
         embedded_device_input(body),
         device_scene=_device_scene(scene),
         if_none_match=if_none_match,
+        fosb_v2_ok=fosb_reads_v2(x_frameos_fosb),
     )
 
 
@@ -1105,13 +1113,16 @@ def _fosb_from_rgba(
 class _Drawn:
     """A picture for the pull: the panel bitmap, the scene it shows (None:
     the diagnostic card, or a scene the renderer did not name), the RGBA it
-    was packed from (None for the card), for the workspace's copy, and when
-    the scene wants its next picture (next_render_seconds; None: no opinion)."""
+    was packed from (None for the card), for the workspace's copy, when the
+    scene wants its next picture (next_render_seconds; None: no opinion) and
+    where a press on it does something (press_map_of; None: nowhere, or not
+    said)."""
 
     body: bytes
     scene_id: str | None
     rgba: bytes | None
     next_render: int | None = None
+    press_map: str | None = None
 
 
 # docs/server-rendering.md "When the next picture is due": the seconds a
@@ -1150,6 +1161,23 @@ def next_render_seconds(rendered_state: dict | None) -> int | None:
     else:
         return None
     return int(min(max(round(seconds), NEXT_RENDER_MIN_SECONDS), NEXT_RENDER_MAX_SECONDS))
+
+
+# docs/server-rendering.md "The click": where a press on the picture does
+# something, in the panel's pixels (frameos_wasm_press_map), so the board
+# clicks at a press it takes before it asks for anything. On a 304 too.
+SERVER_RENDER_PRESS_HEADER = "X-FrameOS-Press"
+MAX_PRESS_MAP_CHARS = 4096
+_PRESS_MAP_CHARS = re.compile(r"^[0-9,;!]+$")
+
+
+def press_map_of(rendered_state: dict | None) -> str | None:
+    """The press map a render reported, as the header carries it; None when
+    nothing takes a press, or the bundle says nothing, or it is not one."""
+    value = rendered_state.get("pressMap") if isinstance(rendered_state, dict) else None
+    if not isinstance(value, str) or not value or len(value) > MAX_PRESS_MAP_CHARS:
+        return None
+    return value if _PRESS_MAP_CHARS.match(value) else None
 
 
 def _kept_next_render(record: dict) -> int | None:
@@ -1225,7 +1253,13 @@ async def _render_thin_client_now(
     if rgba is None:
         # The diagnostic card: no scene, so no opinion on the next picture.
         return _Drawn(body, None, None)
-    return _Drawn(body, _drawn_scene(plan, rendered_state), rgba, next_render_seconds(rendered_state))
+    return _Drawn(
+        body,
+        _drawn_scene(plan, rendered_state),
+        rgba,
+        next_render_seconds(rendered_state),
+        press_map_of(rendered_state),
+    )
 
 
 async def _embedded_render_response(
@@ -1236,10 +1270,13 @@ async def _embedded_render_response(
     *,
     device_scene: str | None = None,
     if_none_match: str | None = None,
+    fosb_v2_ok: bool = False,
 ) -> Response:
     """The render pull (docs/server-rendering.md "The render pull"): the
     picture drawn ahead of the board's wake when it is still the one to show,
-    else a render now; 304 when the board already shows it."""
+    else a render now; 304 when the board already shows it. A board that
+    reads FOSB version 2 gets it deflated, and as what changed when it shows
+    the picture served last ("Only what changed")."""
     plan = await _thin_client_plan(db, redis, frame, device_scene)
     relayed = device_input if device_input_says_anything(device_input) else None
     # Taken whether it is used or not: a kept picture is used once, and one
@@ -1261,6 +1298,7 @@ async def _embedded_render_response(
                 scene_id if isinstance(scene_id, str) and scene_id else None,
                 None,
                 _kept_next_render(kept.record),
+                press_map_of(kept.record),
             )
             preview = kept.preview
             # Its state is the scene's now: committed when shown, not drawn.
@@ -1280,13 +1318,22 @@ async def _embedded_render_response(
         # instead of on the frame's interval (docs/server-rendering.md "When
         # the next picture is due"). On a 304 too: it is this picture's.
         headers[SERVER_RENDER_NEXT_RENDER_HEADER] = str(drawn.next_render)
+    if drawn.press_map:
+        headers[SERVER_RENDER_PRESS_HEADER] = drawn.press_map
     if etag_matches(if_none_match, etag):
         return Response(status_code=HTTPStatus.NOT_MODIFIED, headers=headers)
+    content = drawn.body
+    if fosb_v2_ok:
+        # Against the picture the board shows, when it is the one served last.
+        base = await delta_base(redis, int(frame.id), if_none_match)
+        content = await asyncio.to_thread(fosb_v2, drawn.body, base)
+    # Before the answer: a tap right after it is a delta against this one.
+    await keep_delta_base(redis, int(frame.id), etag, drawn.body)
     keep = None
     if drawn.scene_id and (preview is not None or drawn.rgba is not None):
         # After the answer has gone: the board is waiting for its picture.
         keep = BackgroundTask(_store_served_picture, int(frame.id), drawn.scene_id, plan, png=preview, rgba=drawn.rgba)
-    return Response(content=drawn.body, media_type="application/octet-stream", headers=headers, background=keep)
+    return Response(content=content, media_type="application/octet-stream", headers=headers, background=keep)
 
 
 # The header a render pull's answer names the scene it shows in (the cloud's
@@ -1428,6 +1475,8 @@ async def prerender_thin_client(db: Session, redis, frame: Frame, as_of_ms: int)
             # When the scene wants the picture after this one, answered by
             # the pull that takes it.
             "nextRender": next_render_seconds(rendered_state),
+            # Where a press on it does something (X-FrameOS-Press).
+            "pressMap": press_map_of(rendered_state),
         },
         body,
         int(as_of_ms),

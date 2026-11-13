@@ -722,6 +722,26 @@ proc uiTakesPressAt*(sceneId: string; x, y: float32): bool =
           if handler > 0:
             return true
 
+proc uiPressRects*(sceneId: string; into: var seq[array[4, float32]]) =
+  ## Where a press lands on something a UI of the scene does something with
+  ## (uiTakesPressAt's regions), in the scene's pixels: x0, y0, x1, y1. What
+  ## a control plane hands a board with its picture (interpreter.pressMap),
+  ## so the board can click at the press without asking.
+  for target in targets:
+    if target.sceneId != sceneId:
+      continue
+    let scale = if target.scale > 0: target.scale else: 1'f32
+    for r in target.regions:
+      var takes = r.field > 0 or r.scrolls
+      if not takes:
+        for handler in r.handlers:
+          if handler > 0:
+            takes = true
+            break
+      if takes and r.visible[2] > r.visible[0] and r.visible[3] > r.visible[1]:
+        into.add [target.offsetX + r.visible[0] * scale, target.offsetY + r.visible[1] * scale,
+                  target.offsetX + r.visible[2] * scale, target.offsetY + r.visible[3] * scale]
+
 proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
   ## Hands a pointer event, or a key for a field, to the scene's UIs. True
   ## when the frame should render again: a handler ran (whatever it changed,

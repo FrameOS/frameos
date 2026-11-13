@@ -27,6 +27,7 @@ import std/[json, math, options, os, strutils]
 import pixie
 
 import ./dither
+import ../panel_shape
 
 
 const
@@ -266,9 +267,19 @@ proc panelShowsColor*(device: string, canvasFormat: PixelFormat): bool =
   ## in high contrast. An ESP32 (and the preview running as one) says by its
   ## canvas: an LCD's RGB565 and a color e-paper's RGBX, where every grey
   ## and black-and-white panel draws in pixie's grey surfaces. A Pi says by
-  ## its device: anything that is not e-paper, or e-paper with a palette.
+  ## its device: anything that is not e-paper, or e-paper with a palette. A
+  ## control plane drawing for a board says what the board's runtime would
+  ## (panel_shape.boardPanelFormat): no color on a grey or black-and-white
+  ## panel.
+  when defined(frameosWasm):
+    if boardPanelFormat > 0:
+      return boardPanelFormat notin PanelFormatsGrey
   if canvasFormat == pfRgb565:
     return true
+  # A grey canvas shows no color anywhere: the preview running as a grey
+  # ESP32 draws in one, as that board does.
+  if canvasFormat in {pfGray8, pfGray4}:
+    return false
   when defined(frameosEmbedded):
     canvasFormat == pfRgbx
   else:

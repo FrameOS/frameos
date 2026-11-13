@@ -104,6 +104,7 @@ login and HTTPS key, its settings and schedule.
 GET {plane}/api/frames/{id}/embedded/render?scene=…&width=…&height=…&format=…&rotate=…
 Authorization: Bearer …
 If-None-Match: "…"
+X-FrameOS-Fosb: 2
 ```
 
 or, when the frame has input for its scene, the same with `POST` and that
@@ -123,12 +124,20 @@ input as a JSON body (see "Keys, touch and the schedule").
 - **`If-None-Match`**: the ETag of the picture the panel shows now, from the
   pull that put it there. Kept in RTC memory, so it survives a deep sleep;
   dropped whenever anything else draws the panel.
+- **`X-FrameOS-Fosb: 2`**: the board reads FOSB version 2, the picture
+  deflated and as what changed since the picture it shows (see "Only what
+  changed"). Sent by a board with PSRAM that can spare the inflater's 48 KiB
+  there (never from a C3's internal heap, which its TLS lives on); without
+  it the answer is version 1, as before.
 - **200**: the FOSB bitmap (`FOSB`, version 1, format, width u16le, height
   u16le, reserved u16, then the packed panel bytes), `ETag: "<first 32 hex of
   sha256(body)>"`, `Cache-Control: no-store`, `X-FrameOS-Scene: <the
   scene drawn, URI-encoded>` (on a 304 too), so the device can name it, and
   `X-FrameOS-Next-Render: <seconds>` when the scene said when it wants its
-  next picture (on a 304 too; see "When the next picture is due").
+  next picture (on a 304 too; see "When the next picture is due"), and
+  `X-FrameOS-Press: <entries>` where a press on the picture does something
+  (on a 304 too; see "The click"). The ETag is the version 1 body's, however
+  the picture travels.
 - **304**: the picture is the one the panel shows. No body; the device
   leaves the panel alone and logs `render:device skipped unchanged`.
 - **Errors**: the backend answers a diagnostic card instead of failing. The
@@ -136,6 +145,92 @@ input as a JSON body (see "Keys, touch and the schedule").
   cloud_rendered_frame_quota_exceeded`, `503 renderer_unavailable` /
   `renderer_busy` (with `Retry-After`) or `502 render_failed {error}`; the
   device keeps the picture it shows and logs `render:error`.
+
+### Only what changed
+
+A 10.3" grey panel's picture is 1.3 MB packed, and a tap changes a key, a
+field, a list: at Wi-Fi speeds on an ESP32 the download was most of a tap's
+three to five seconds (the E1003, 2026-11-13). A board that says
+`X-FrameOS-Fosb: 2` (an ESP32-S3; a C3's pictures are 48 KB and its heap is
+its TLS's) gets FOSB version 2:
+
+```
+"FOSB" | 2 | format | width u16le | height u16le | flags u16le | sha256 (32) | payload
+```
+
+- `flags` bit 1 (`2`): the payload is raw deflate (every version 2 answer
+  is, today). Bit 0 (`1`): the payload is a delta, not the picture.
+- The sha256 is the packed picture's, all of it: the board checks what its
+  panel buffer holds after writing the payload against it.
+- The payload, inflated, is the packed picture, or for a delta its changed
+  runs, each a u32le offset into the packed picture, a u32le length and that
+  many bytes, until the end.
+
+**Which picture a delta is against.** The one the pull's If-None-Match
+names, when it is the one this plane served last (the backend keeps it per
+frame in Redis, `frame:{id}:delta_base`, eight days; the cloud's is
+`frame_server_renders.picture`), of the same panel. Anything else gets the
+picture whole. The planes compare the packed pictures in blocks of 64
+bytes and send each run of changed blocks whole (`fosb_delta_runs`,
+`fosbDeltaRuns`): bounded work on any picture, and the unchanged bytes a
+block carries cost little deflated. A delta no smaller than the picture is
+sent as the picture. `docs/fosb-fixtures.json` pins the two planes' rule.
+
+**On the board** (`fos_render_pull.c`, host-tested) the payload is inflated
+by the ROM's inflater (tinfl: no flash) through a 32 KiB window and written
+straight into the panel buffer, a run at a time, which is the picture the
+panel shows, so a delta touches only the bytes that changed. Then the hash:
+a buffer that was not the base (lent out and drawn over since) does not
+match, and the board asks for the picture again, whole and without input
+(`render:pull` `status: mismatch`); a buffer written into and not checked is
+never named in If-None-Match. The checked hash is the display state's, so
+the panel's own unchanged-picture check costs nothing more. Each pull with a
+picture logs one `render:pull` line: delta or whole, the runs, the bytes on
+the wire, and where the time went (`waitMs` to the answer, `bodyMs` for the
+body, `hashMs`).
+
+On the E1003 a tap that brought the keyboard up was 46 KB on the wire
+instead of 1.3 MB, a key typed 3 KB, a whole picture 80 KB; the pull went
+from 3.5–4 s to 0.3–0.6 s.
+
+### The click
+
+A frame that runs its scene clicks the buzzer when a finger lands on
+something the scene does something with (`frameos_nim_press_taken`), the
+moment it lands. Rendered on the server the board has no scene to ask, and
+its render task is in a pull or a refresh for a second at a time. So the
+plane sends, with every picture, where a press on it is taken: the
+runtime's press map (`frameos_wasm_press_map`, `interpreter.pressMap`, the
+same walk as `pressTakenAt`: a layout first, a slot answering alone for its
+part, then the UI's regions that take a press: a field, a box that scrolls,
+an element with a handler, the whole canvas for a scene that listens for
+presses itself), turned onto the panel by the frame's rotation:
+
+```http
+X-FrameOS-Press: 12,174,1428,1269;!12,90,1860,1269;1635,21,1701,75
+```
+
+`x0,y0,x1,y1` in the panel's pixels, `;` between entries, `!` before one
+where a press is not taken (a scene inside a layout's hole answers alone for
+it). The first entry a press lands in answers; a press in none is not
+taken; at most 64 entries, a press past the cut is not clicked at. The board
+keeps the map of the picture it shows (`fos_client_remote_press_taken`) and
+its touch task clicks at the press and its lift on its own, before the
+render task hears of it (`fos_touch.c` `remote_click`), as `touch_beep` and
+e-paper allow. No header: nothing takes a press, or a plane from before it
+said: no click. The cloud keeps the map with the picture
+(`picture_press_map`, `prerender_press_map`), the backend in the kept
+picture's record.
+
+### The panel the scene hears
+
+The plane's canvas is RGBX and its runtime's device `wasm`, which a scene
+would read as a colour LCD. `frameos_wasm_set_frame`'s `pixelFormat` makes
+the runtime answer for the board's panel instead
+(`panel_shape.boardPanelFormat`): `app.frame.color` is false on a black and
+white or grey panel (a scene's "auto" draws in high contrast there),
+`app.frame.paper` true on anything but an LCD, and the scene switcher and
+the scene settings take e-paper's look, as the board's own runtime would.
 
 ### Keys, touch and the schedule
 
@@ -424,9 +519,11 @@ that is at least 10% longer.
   `hover:` / `active:` light while the finger is down.
 - A press sent through the backend's event route to a frame it renders
   (`POST …/event/pointerDown`, a tap in the workspace) is forwarded to the
-  board's own HTTP API, not held on the plane like a custom event, so its
-  down and its up can go with two pulls and make no tap. A tap on the glass
-  is one gesture, sent once the finger lifts.
+  board's own HTTP API, not held on the plane like a custom event. The board
+  holds a pointer pressed over HTTP until its lift (`fos_client_http_press`,
+  ten seconds at most), as it holds a finger on the glass, so the down and
+  the up go in one pull; each request is a TLS handshake on the board's own
+  HTTPS server, which can take seconds while the render task is busy.
 - The ETag is an e-paper fact: an LCD keeps no hash of its panel, so it
   downloads every picture.
 - A board that refused once (the cloud's `403`) renders itself for an hour

@@ -845,3 +845,92 @@ async def test_the_real_runtime_reports_the_scenes_interval():
     assert result.state is not None
     assert result.state["refreshInterval"] == 60
     assert result.state["nextSleep"] == -1
+
+
+def _renderer_reports_press_map() -> bool:
+    from app.utils.embedded_render import wasm_assets_dir
+
+    assets = wasm_assets_dir()
+    return (
+        _renderer_takes_relayed_events()
+        and assets is not None
+        and "frameos_wasm_press_map" in (assets / "frameos.js").read_text(errors="replace")
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_reports_press_map(), reason="no wasm bundle with frameos_wasm_press_map")
+async def test_the_real_runtime_says_where_a_press_does_something():
+    """The UI's right half has an onClick: that half, in the panel's pixels,
+    turned with the frame (docs/server-rendering.md "The click")."""
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=[TAP_UI_SCENE])
+    upright = await render_scene(frame, 80, 60, frame_json={"pixelFormat": 1, "rotate": 0})
+    assert upright.rgba is not None, upright.error
+    assert upright.state["pressMap"] == "40,0,80,60"
+
+    # Hung at 90 degrees the scene draws 80x60 on a 60x80 panel: panel (x, y)
+    # is the scene's (y, 59 - x).
+    turned = await render_scene(frame, 80, 60, frame_json={"pixelFormat": 1, "rotate": 90})
+    assert turned.state["pressMap"] == "0,40,60,80"
+
+    nothing = await render_scene(SimpleNamespace(**{**vars(frame), "scenes": [FIELD_UI_SCENE]}), 80, 60)
+    # A field takes a press: the box at the top, the full width.
+    assert nothing.state["pressMap"].startswith("0,0,80,")
+
+
+PANEL_UI_SOURCE = """
+export function get(app) {
+  return (
+    <div className="flex w-full h-full">
+      <div className={`w-1/2 h-full ${app.frame.color === false ? 'bg-white' : 'bg-black'}`} />
+      <div className={`w-1/2 h-full ${app.frame.paper ? 'bg-white' : 'bg-black'}`} />
+    </div>
+  )
+}
+"""
+
+PANEL_UI_SCENE = {
+    **TAP_UI_SCENE,
+    "id": "panel-ui",
+    "name": "Panel UI",
+    "apps": {"jsxUi": {
+        **TAP_UI_SCENE["apps"]["jsxUi"],  # type: ignore[index]
+        "sources": {**TAP_UI_SCENE["apps"]["jsxUi"]["sources"], "app.tsx": PANEL_UI_SOURCE},  # type: ignore[index]
+    }},
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_reports_press_map(), reason="no wasm bundle with frameos_wasm_press_map")
+async def test_a_scene_drawn_for_a_board_hears_what_its_panel_is():
+    """`app.frame.color` and `paper` as the board's own runtime says them: a
+    grey e-paper shows no color (a scene's "auto" draws in high contrast), an
+    LCD is no paper. Without the panel the plane's own canvas answered: every
+    board a color LCD."""
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=[PANEL_UI_SCENE])
+    width, height = 40, 20
+
+    def halves(rgba: bytes) -> tuple[str, str]:
+        # Light or dark: a palette panel's automatic fit moves black and white
+        # onto the inks it measured.
+        def tone(at: int) -> str:
+            return "white" if rgba[at] > 128 else "black"
+        return tone(0), tone((width - 1) * 4)
+
+    white, black = "white", "black"
+    grey_paper = await render_scene(frame, width, height, frame_json={"pixelFormat": 8})  # the E1003
+    assert halves(grey_paper.rgba) == (white, white)
+    spectra = await render_scene(frame, width, height, frame_json={"pixelFormat": 7})
+    assert halves(spectra.rgba) == (black, white)
+    lcd = await render_scene(frame, width, height, frame_json={"pixelFormat": 9})
+    assert halves(lcd.rgba) == (black, black)
+    unsaid = await render_scene(frame, width, height)
+    assert halves(unsaid.rgba) == (black, black)

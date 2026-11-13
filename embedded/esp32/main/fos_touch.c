@@ -240,6 +240,23 @@ static void touch_feedback(const fos_touch_event_t *event)
     else if (beep == FOS_TOUCH_BEEP_UP) fos_buzzer_click_up();
 }
 
+/* The same click for a frame rendered on the server, from the touch task the
+ * moment the finger lands or lifts: the render task is in a pull or a panel
+ * refresh for a second or more at a time there, and the picture's own press
+ * map (its plane's, fos_client_remote_press_taken) says without asking
+ * anyone whether the press is taken. A frame that runs its scene here leaves
+ * it to touch_feedback, after the runtime's answer. */
+static void remote_click(uint8_t kind, uint8_t id, uint16_t wx, uint16_t wy)
+{
+    static uint8_t held = 0, beeped = 0;
+    int taken = kind == FOS_TOUCH_DOWN ? fos_client_remote_press_taken(wx, wy) : 0;
+    fos_touch_beep_t beep = fos_touch_beep_step(kind, id, taken > 0, &held, &beeped);
+    if (!fos_config()->touch_beep || fos_display_is_lcd()) return;
+    if (beep == FOS_TOUCH_BEEP_DOWN) fos_buzzer_click_down();
+    else if (beep == FOS_TOUCH_BEEP_SECOND_DOWN) fos_buzzer_double_down();
+    else if (beep == FOS_TOUCH_BEEP_UP) fos_buzzer_click_up();
+}
+
 bool fos_touch_process_events(void)
 {
     fos_touch_event_t event;
@@ -418,6 +435,7 @@ static void touch_task(void *arg)
                  * finger dragged. */
                 enqueue(FOS_TOUCH_MOVE, p->id, wx, wy);
                 enqueue(FOS_TOUCH_DOWN, p->id, wx, wy);
+                remote_click(FOS_TOUCH_DOWN, p->id, wx, wy);
             } else if (wx != s_last_x[p->id] || wy != s_last_y[p->id]) {
                 enqueue(FOS_TOUCH_MOVE, p->id, wx, wy);
             }
@@ -430,7 +448,10 @@ static void touch_task(void *arg)
          * while the finger still counted as down. */
         uint8_t lifted = s_down_mask & (uint8_t)~seen;
         for (int id = 0; id < FOS_TOUCH_POINTS_MAX; id++) {
-            if (lifted & (1u << id)) enqueue(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
+            if (lifted & (1u << id)) {
+                enqueue(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
+                remote_click(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
+            }
         }
         s_down_mask = seen;
         if (lifted) fos_client_wake_for_events();

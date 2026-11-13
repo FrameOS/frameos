@@ -733,6 +733,16 @@ try {
       keptState = undefined
     }
   }
+  // Where a press on the board's glass does something in this picture
+  // (docs/server-rendering.md "The click"), in the panel's pixels.
+  let pressMap
+  if (typeof Module._frameos_wasm_press_map === 'function') {
+    try {
+      pressMap = call('frameos_wasm_press_map', 'string', [], [])
+    } catch {
+      pressMap = undefined
+    }
+  }
   process.stderr.write('__FRAMEOS_SCENE_STATE__' + JSON.stringify({
     sceneId: info.currentSceneId || request.sceneId || '',
     state,
@@ -740,6 +750,7 @@ try {
     ...(Array.isArray(palette) ? { palette } : {}),
     ...timing,
     ...(typeof keptState === 'string' ? { keptState } : {}),
+    ...(typeof pressMap === 'string' ? { pressMap } : {}),
   }) + '\n')
 } catch (error) {
   process.stderr.write(`embedded_wasm_render: state readback failed: ${error}\n`)

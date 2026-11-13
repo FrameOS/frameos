@@ -2,7 +2,8 @@
 // a real Postgres, the real device route, the real verbs and the real plan
 // check, with the wasm runtime stood in for by a renderer that paints a
 // solid colour and reports what it was asked.
-import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
+import { inflateRawSync } from "node:zlib";
 import { asc, eq, sql } from "drizzle-orm";
 import { zipSync } from "fflate";
 import { NextRequest } from "next/server";
@@ -795,5 +796,104 @@ describe("the switch", () => {
       error: "cloud_rendered_frame_quota_exceeded",
       max_cloud_rendered_frames: 1,
     });
+  });
+});
+
+describe("only what changed, and the click", () => {
+  // A picture, then the same with four rows gone black: what a tap on a
+  // field does to a form.
+  let band = false;
+  function banded(options: SceneRenderOptions): Promise<SceneRenderResult> {
+    renders.push(options);
+    const rgba = new Uint8Array(options.width * options.height * 4).fill(255);
+    if (band) {
+      rgba.fill(0, options.width * 4 * 100, options.width * 4 * 104);
+    }
+    return Promise.resolve({
+      errors: [],
+      height: options.height,
+      logs: [],
+      png: Buffer.alloc(0),
+      pressMap: "10,20,110,70;!0,0,200,100",
+      renderMs: 5,
+      rgba,
+      state: {},
+      width: options.width,
+    });
+  }
+
+  const tap = {
+    events: [
+      { name: "pointerDown", origin: "driver", payload: { atMs: 900, button: 0, buttons: 1, pointerId: 1, pointerType: "touch", x: 10, y: 10 } },
+      { name: "pointerUp", origin: "driver", payload: { atMs: 980, button: 0, buttons: 0, pointerId: 1, pointerType: "touch", x: 10, y: 10 } },
+    ],
+    nowMs: 2_000,
+  };
+
+  it("sends a board that reads version 2 its picture deflated, then what changed since", async () => {
+    band = false;
+    setServerRendererForTests(banded);
+    const accountId = await signIn();
+    await subscribe(accountId, 1);
+    const { frame, token } = await createFrame(accountId);
+    const v2 = { "x-frameos-fosb": "2" };
+
+    const first = await pull(frame.id, token, panel, v2);
+    expect(first.status).toBe(200);
+    const whole = Buffer.from(await first.arrayBuffer());
+    expect(whole.subarray(0, 5).toString("latin1")).toBe("FOSB\u0002");
+    expect(whole.readUInt16LE(10)).toBe(2);
+    const picture = inflateRawSync(whole.subarray(44));
+    expect(picture.length).toBe(48_000);
+    expect(createHash("sha256").update(picture).digest()).toEqual(whole.subarray(12, 44));
+    // The ETag names the picture, whatever its encoding.
+    const etag = first.headers.get("etag")!;
+    const v1 = Buffer.concat([Buffer.from("FOSB\u0001", "latin1"), whole.subarray(5, 10), Buffer.alloc(2), picture]);
+    expect(etag).toBe(`"${createHash("sha256").update(v1).digest("hex").slice(0, 32)}"`);
+
+    // A tap: the rows that changed, against the picture the board shows.
+    band = true;
+    const tapped = await pullWithInput(frame.id, token, panel, JSON.stringify(tap), { ...v2, "if-none-match": etag });
+    expect(tapped.status).toBe(200);
+    const delta = Buffer.from(await tapped.arrayBuffer());
+    expect(delta.readUInt16LE(10)).toBe(3);
+    expect(delta.length).toBeLessThan(whole.length);
+    const payload = inflateRawSync(delta.subarray(44));
+    const after = Buffer.from(picture);
+    for (let at = 0; at < payload.length; ) {
+      const offset = payload.readUInt32LE(at);
+      const length = payload.readUInt32LE(at + 4);
+      payload.copy(after, offset, at + 8, at + 8 + length);
+      at += 8 + length;
+    }
+    expect(createHash("sha256").update(after).digest()).toEqual(delta.subarray(12, 44));
+    expect([...after.subarray(100 * 100, 100 * 100 + 4)]).toEqual([0, 0, 0, 0]);
+
+    // A board that shows something else gets it whole; one that does not
+    // say it reads version 2, version 1 as ever.
+    const stranger = await pull(frame.id, token, panel, { ...v2, "if-none-match": '"0123456789abcdef0123456789abcdef"' });
+    expect(Buffer.from(await stranger.arrayBuffer()).readUInt16LE(10)).toBe(2);
+    const old = await pull(frame.id, token, panel);
+    const oldBody = Buffer.from(await old.arrayBuffer());
+    expect(oldBody[4]).toBe(1);
+    expect(oldBody.subarray(12)).toEqual(after);
+  });
+
+  it("says where a press does something, on the picture and on its 304", async () => {
+    band = false;
+    setServerRendererForTests(banded);
+    const accountId = await signIn();
+    await subscribe(accountId, 1);
+    const { frame, token } = await createFrame(accountId);
+    const first = await pull(frame.id, token, panel);
+    expect(first.headers.get("x-frameos-press")).toBe("10,20,110,70;!0,0,200,100");
+    expect((await renderRow(frame.id))?.picturePressMap).toBe("10,20,110,70;!0,0,200,100");
+    const same = await pull(frame.id, token, panel, { "if-none-match": first.headers.get("etag")! });
+    expect(same.status).toBe(304);
+    expect(same.headers.get("x-frameos-press")).toBe("10,20,110,70;!0,0,200,100");
+
+    // Drawn before a wake: its own, taken with it.
+    expect(await prerenderFrame(db, frame.id, { asOf: new Date(Date.now() + 30_000), render: banded })).toBe("kept");
+    expect((await renderRow(frame.id))?.prerenderPressMap).toBe("10,20,110,70;!0,0,200,100");
   });
 });

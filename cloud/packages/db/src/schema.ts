@@ -1391,6 +1391,11 @@ export const frameServerRenders = pgTable("frame_server_renders", {
   // (frameos_wasm_kept_state), handed to the next render of a pull as it
   // was; null when nothing lasts, and after a sleep.
   keptState: text("kept_state"),
+  // Where a press on the picture does something, in the panel's pixels
+  // (frameos_wasm_press_map, migration 0081): the board clicks at a press it
+  // takes before it asks (docs/server-rendering.md "The click"). Null:
+  // nowhere, or a runtime that did not say.
+  picturePressMap: text("picture_press_map"),
   // A picture drawn before a sleeping frame's wake, as of `prerender_as_of`;
   // taken once by the pull at the wake if nothing changed since.
   prerender: bytea("prerender"),
@@ -1402,6 +1407,7 @@ export const frameServerRenders = pgTable("frame_server_renders", {
   prerenderState: jsonb("prerender_state"),
   prerenderMs: integer("prerender_ms"),
   prerenderNextRenderSeconds: integer("prerender_next_render_seconds"),
+  prerenderPressMap: text("prerender_press_map"),
   ...timestamps,
 });
 
