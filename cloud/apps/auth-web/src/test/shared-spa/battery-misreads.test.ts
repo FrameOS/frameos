@@ -13,6 +13,7 @@ import {
   metricCardElementId,
   metricCardFromHash,
   metricCardHash,
+  latestBatteryPercentWithFallback,
 } from "../../../../../../frontend/src/scenes/frame/panels/Metrics/metricsLogic";
 import type { MetricsType } from "../../../../../../frontend/src/types";
 
@@ -175,5 +176,34 @@ describe("metric card deep links", () => {
     expect(metricCardElementId("batteryPercent")).toBe(
       "frame-metric-batteryPercent",
     );
+  });
+});
+
+// The glyph beside a frame reads the last hour of metrics; a deep-sleeping
+// frame may wake hourly, daily or weekly, so with nothing in the hour it
+// falls back to the newest readings the frame ever sent.
+describe("latestBatteryPercentWithFallback", () => {
+  // series() spaces samples five minutes apart from `start`; a week-old
+  // wake is just as good, the age never matters.
+  const newest = series([3800, 3900, 3980]);
+
+  it("prefers the window when it has a reading", () => {
+    expect(latestBatteryPercentWithFallback(series([3500]), newest)).toBe(42);
+  });
+
+  it("falls back to the newest readings when the window is empty", () => {
+    expect(latestBatteryPercentWithFallback([], newest)).toBe(82);
+    expect(latestBatteryPercentWithFallback([], [...newest].reverse())).toBe(82);
+  });
+
+  it("drops a misread at the end of the newest readings", () => {
+    expect(
+      latestBatteryPercentWithFallback([], series([3980, 3980, 3978, 3980, 1580])),
+    ).toBe(82);
+  });
+
+  it("has nothing for a frame that never reported a charge", () => {
+    expect(latestBatteryPercentWithFallback([], [])).toBeNull();
+    expect(latestBatteryPercentWithFallback([], [sample(0, { load: 0.2 })])).toBeNull();
   });
 });

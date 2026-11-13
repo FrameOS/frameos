@@ -240,6 +240,33 @@ describe("GET /api/frames/{id}/metrics/recent", () => {
       expect((await response.json()).metrics).toHaveLength(1);
     }
   });
+
+  it("keeps the newest ?limit= samples, however old, chronologically", async () => {
+    // A frame that wakes once a week: its last readings are days old, and
+    // the battery glyph still needs them.
+    const { frame } = await activeFrame();
+    const stamps = [
+      "2026-07-01T10:00:00.000Z",
+      "2026-07-08T10:00:00.000Z",
+      "2026-07-15T10:00:00.000Z",
+    ];
+    for (const [index, stamp] of stamps.entries()) {
+      await storeFrameMetrics(db, frame.id, { seq: index }, new Date(stamp));
+    }
+    const seqs = async (query: string) => {
+      const response = await getFrameMetricsRecent(
+        getRequest(`/api/frames/${frame.id}/metrics/recent${query}`),
+        metricsParams(frame.id),
+      );
+      return (await response.json()).metrics.map(
+        (row: { metrics: { seq: number } }) => row.metrics.seq,
+      );
+    };
+    expect(await seqs("?limit=2")).toEqual([1, 2]);
+    // Nonsense falls back to the retention cap: everything.
+    expect(await seqs("?limit=0")).toEqual([0, 1, 2]);
+    expect(await seqs("?limit=abc")).toEqual([0, 1, 2]);
+  });
 });
 
 describe("reboot markers", () => {
