@@ -298,6 +298,12 @@ translation is flattened once.
   `common`) compile at `-O2` on the ESP32 (+36 KB of flash): the logo's
   raster went from 31 to 26 ms. The XML and string modules gained nothing at
   `-O2` and stay `-Os`.
+- QuickJS's interpreter loop (`JS_CallInternal`), its small-block allocator
+  and its cycle collector compile at `-O2`, the rest of `quickjs.c` at
+  `-Os` (+8 KB; `components/frameos_quickjs/CMakeLists.txt` adds the
+  attributes to a copy of the vendored file): bytecode ~25% faster, small
+  objects ~30%, a scene's typed-array loops 14-16%. All of `quickjs.c` at
+  `-O2` cost +166 KB for a few percent more.
 - The 565 and grey coverage stores write a fully covered pixel of an opaque
   fill packed, without unpacking, blending and packing it.
 
