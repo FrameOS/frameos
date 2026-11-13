@@ -25,9 +25,38 @@ elseif(NOT QUICKJS_VERSION STREQUAL QUICKJS_PIN)
     message(FATAL_ERROR "frameos_quickjs: ${QUICKJS_DIR} holds QuickJS ${QUICKJS_VERSION}, frameos.nimble pins ${QUICKJS_PIN}: remove it and run `nimble build_quickjs` in frameos/")
 endif()
 
+# The interpreter loop, the small-block allocator and the cycle collector at
+# -O2, the rest of quickjs.c at the image's -Os, for +8 KB of flash. On the
+# SenseCAP Indicator (2026-11-13): 100k iterations of an integer loop 244 to
+# 184 ms, 10k small objects made 309 to 218 ms, a method call 8.4 to 6.7 us,
+# a typed array's loops 14-16% faster. All of quickjs.c at -O2 was +166 KB
+# for a few percent more; -O1 +98 KB. quickjs.c is vendored as quickts
+# releases it, so the attributes go into a copy made here, and a signature
+# this does not find fails the build (a quickts bump that renamed one would
+# otherwise lose the speed without a word).
+file(READ "${QUICKJS_DIR}/quickjs.c" FOS_QJS_SOURCE)
+set(FOS_QJS_HOT
+    "static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,"
+    "static void *__js_malloc(JSMallocContext *s, size_t size)"
+    "static void __js_free(JSMallocContext *s, void *ptr)"
+    "static void gc_decref(JSRuntime *rt)"
+    "static void gc_scan(JSRuntime *rt)"
+    "static void gc_free_cycles(JSRuntime *rt)")
+foreach(signature IN LISTS FOS_QJS_HOT)
+    string(FIND "${FOS_QJS_SOURCE}" "${signature}" found)
+    if(found EQUAL -1)
+        message(FATAL_ERROR "frameos_quickjs: \"${signature}\" is not in ${QUICKJS_DIR}/quickjs.c: update FOS_QJS_HOT")
+    endif()
+    string(REPLACE "${signature}" "__attribute__((optimize(\"O2\"))) ${signature}" FOS_QJS_SOURCE "${FOS_QJS_SOURCE}")
+endforeach()
+set(FOS_QJS_HOT_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/quickjs_hot.c")
+file(WRITE "${FOS_QJS_HOT_SOURCE}.new" "${FOS_QJS_SOURCE}")
+execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different "${FOS_QJS_HOT_SOURCE}.new" "${FOS_QJS_HOT_SOURCE}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${QUICKJS_DIR}/quickjs.c")
+
 idf_component_register(
     SRCS
-        "${QUICKJS_DIR}/quickjs.c"
+        "${FOS_QJS_HOT_SOURCE}"
         "${QUICKJS_DIR}/dtoa.c"
         "${QUICKJS_DIR}/libregexp.c"
         "${QUICKJS_DIR}/libunicode.c"
