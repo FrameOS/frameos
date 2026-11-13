@@ -158,8 +158,9 @@ its TLS's) gets FOSB version 2:
 "FOSB" | 2 | format | width u16le | height u16le | flags u16le | sha256 (32) | payload
 ```
 
-- `flags` bit 1 (`2`): the payload is raw deflate (every version 2 answer
-  is, today). Bit 0 (`1`): the payload is a delta, not the picture.
+- `flags` bit 1 (`2`): the payload is raw deflate; every version 2 answer
+  sets it (the board refuses one that does not). Bit 0 (`1`): the payload is
+  a delta, not the picture.
 - The sha256 is the packed picture's, all of it: the board checks what its
   panel buffer holds after writing the payload against it.
 - The payload, inflated, is the packed picture, or for a delta its changed
@@ -180,14 +181,13 @@ sent as the picture. `docs/fosb-fixtures.json` pins the two planes' rule.
 by the ROM's inflater (tinfl: no flash) through a 32 KiB window and written
 straight into the panel buffer, a run at a time, which is the picture the
 panel shows, so a delta touches only the bytes that changed. Then the hash:
-a buffer that was not the base (lent out and drawn over since) does not
-match, and the board asks for the picture again, whole and without input
+a buffer that was not the base (lent out and drawn over since, or a delta
+over no picture at all) does not match, and the board asks for the picture again, whole and without input
 (`render:pull` `status: mismatch`); a buffer written into and not checked is
 never named in If-None-Match. The checked hash is the display state's, so
-the panel's own unchanged-picture check costs nothing more. Each pull with a
+the panel's own unchanged-picture check costs nothing more. Each version 2
 picture logs one `render:pull` line: delta or whole, the runs, the bytes on
-the wire, and where the time went (`waitMs` to the answer, `bodyMs` for the
-body, `hashMs`).
+the wire and the pull's milliseconds.
 
 On the E1003 a tap that brought the keyboard up was 46 KB on the wire
 instead of 1.3 MB, a key typed 3 KB, a whole picture 80 KB; the pull went

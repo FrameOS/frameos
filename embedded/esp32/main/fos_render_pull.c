@@ -41,9 +41,9 @@ bool fos_fosb_header(const uint8_t bytes[FOS_FOSB_HEADER_LEN], fos_fosb_header_t
     out->format = bytes[5];
     out->width = (uint16_t)(bytes[6] | (bytes[7] << 8));
     out->height = (uint16_t)(bytes[8] | (bytes[9] << 8));
-    /* Reserved in version 1, whatever it holds. */
+    /* Reserved in version 1, whatever it holds; version 2 is deflated. */
     out->flags = out->version == 2 ? (uint16_t)(bytes[10] | (bytes[11] << 8)) : 0;
-    return (out->flags & (uint16_t)~(FOS_FOSB_DELTA | FOS_FOSB_DEFLATE)) == 0;
+    return out->version == 1 || (out->flags & ~FOS_FOSB_DELTA) == FOS_FOSB_DEFLATE;
 }
 
 void fos_fosb_writer_begin(fos_fosb_writer_t *w, uint8_t *buf, size_t len, bool delta)
@@ -128,7 +128,6 @@ int fos_press_map_parse(const char *header, fos_press_rect_t *out, int max)
 {
     if (header == NULL) return -1;
     const char *p = header;
-    while (*p == ' ') p++;
     int count = 0;
     while (*p) {
         fos_press_rect_t rect;
@@ -138,7 +137,6 @@ int fos_press_map_parse(const char *header, fos_press_rect_t *out, int max)
             !read_number(&p, &rect.x1) || *p++ != ',' || !read_number(&p, &rect.y1)) {
             return -1;
         }
-        while (*p == ' ') p++;
         if (*p == ';') {
             p++;
         } else if (*p != '\0') {

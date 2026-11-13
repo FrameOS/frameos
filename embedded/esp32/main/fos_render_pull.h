@@ -134,7 +134,8 @@ typedef struct {
 } fos_fosb_header_t;
 
 /* The first FOS_FOSB_HEADER_LEN bytes of an answer. False when they are not
- * a FOSB header of a version this reads, or a flag it does not know is set. */
+ * a FOSB header of a version this reads, or a version 2 one that is not
+ * deflated or sets a flag this does not know. */
 bool fos_fosb_header(const uint8_t bytes[FOS_FOSB_HEADER_LEN], fos_fosb_header_t *out);
 
 /* What a version 2 payload, inflated, writes into the panel buffer, fed in

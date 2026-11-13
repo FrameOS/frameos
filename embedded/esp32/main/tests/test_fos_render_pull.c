@@ -157,7 +157,11 @@ static void test_fosb_header(void)
     CHECK(h.version == 2 && h.width == 800 && h.height == 480, "its size");
     CHECK(h.flags == (FOS_FOSB_DELTA | FOS_FOSB_DEFLATE), "a deflated delta");
 
-    const uint8_t unknown_flag[FOS_FOSB_HEADER_LEN] = {'F', 'O', 'S', 'B', 2, 1, 0x20, 0x03, 0xe0, 0x01, 4, 0};
+    const uint8_t whole[FOS_FOSB_HEADER_LEN] = {'F', 'O', 'S', 'B', 2, 1, 0x20, 0x03, 0xe0, 0x01, 2, 0};
+    CHECK(fos_fosb_header(whole, &h) && h.flags == FOS_FOSB_DEFLATE, "the picture whole, deflated");
+    const uint8_t raw[FOS_FOSB_HEADER_LEN] = {'F', 'O', 'S', 'B', 2, 1, 0x20, 0x03, 0xe0, 0x01, 1, 0};
+    CHECK(!fos_fosb_header(raw, &h), "version 2 is always deflated");
+    const uint8_t unknown_flag[FOS_FOSB_HEADER_LEN] = {'F', 'O', 'S', 'B', 2, 1, 0x20, 0x03, 0xe0, 0x01, 6, 0};
     CHECK(!fos_fosb_header(unknown_flag, &h), "a flag this does not know");
     const uint8_t v3[FOS_FOSB_HEADER_LEN] = {'F', 'O', 'S', 'B', 3, 1, 0x20, 0x03, 0xe0, 0x01, 0, 0};
     CHECK(!fos_fosb_header(v3, &h), "a version this does not read");
@@ -268,7 +272,7 @@ static void test_press_map(void)
     CHECK(!fos_press_map_takes(map, 0, 10, 20), "an empty map takes nothing");
 
     CHECK(fos_press_map_parse("", map, FOS_PRESS_MAP_MAX) == 0, "nothing");
-    CHECK(fos_press_map_parse(" 1,2,3,4 ", map, FOS_PRESS_MAP_MAX) == 1, "spaces around it");
+    CHECK(fos_press_map_parse(" 1,2,3,4", map, FOS_PRESS_MAP_MAX) == -1, "no spaces: the planes send none");
     CHECK(fos_press_map_parse("5,5,5,9", map, FOS_PRESS_MAP_MAX) == 0, "an empty rectangle is left out");
     CHECK(fos_press_map_parse(NULL, map, FOS_PRESS_MAP_MAX) == -1, "no header");
     CHECK(fos_press_map_parse("1,2,3", map, FOS_PRESS_MAP_MAX) == -1, "three numbers");

@@ -228,16 +228,20 @@ bool fos_touch_finger_down(void)
  * its moment to answer. Asked before the event runs, of what the last render
  * drew. The render task's, so a press during a panel update is heard when
  * that ends. */
+static void play_beep(fos_touch_beep_t beep)
+{
+    if (!fos_config()->touch_beep || fos_display_is_lcd()) return;
+    if (beep == FOS_TOUCH_BEEP_DOWN) fos_buzzer_click_down();
+    else if (beep == FOS_TOUCH_BEEP_SECOND_DOWN) fos_buzzer_double_down();
+    else if (beep == FOS_TOUCH_BEEP_UP) fos_buzzer_click_up();
+}
+
 static void touch_feedback(const fos_touch_event_t *event)
 {
     static uint8_t held = 0, beeped = 0;
     if (event->kind == FOS_TOUCH_MOVE) return;
     bool captured = event->kind == FOS_TOUCH_DOWN && frameos_nim_press_taken(event->x, event->y);
-    fos_touch_beep_t beep = fos_touch_beep_step(event->kind, event->id, captured, &held, &beeped);
-    if (!fos_config()->touch_beep || fos_display_is_lcd()) return;
-    if (beep == FOS_TOUCH_BEEP_DOWN) fos_buzzer_click_down();
-    else if (beep == FOS_TOUCH_BEEP_SECOND_DOWN) fos_buzzer_double_down();
-    else if (beep == FOS_TOUCH_BEEP_UP) fos_buzzer_click_up();
+    play_beep(fos_touch_beep_step(event->kind, event->id, captured, &held, &beeped));
 }
 
 /* The same click for a frame rendered on the server, from the touch task the
@@ -250,11 +254,7 @@ static void remote_click(uint8_t kind, uint8_t id, uint16_t wx, uint16_t wy)
 {
     static uint8_t held = 0, beeped = 0;
     int taken = kind == FOS_TOUCH_DOWN ? fos_client_remote_press_taken(wx, wy) : 0;
-    fos_touch_beep_t beep = fos_touch_beep_step(kind, id, taken > 0, &held, &beeped);
-    if (!fos_config()->touch_beep || fos_display_is_lcd()) return;
-    if (beep == FOS_TOUCH_BEEP_DOWN) fos_buzzer_click_down();
-    else if (beep == FOS_TOUCH_BEEP_SECOND_DOWN) fos_buzzer_double_down();
-    else if (beep == FOS_TOUCH_BEEP_UP) fos_buzzer_click_up();
+    play_beep(fos_touch_beep_step(kind, id, taken > 0, &held, &beeped));
 }
 
 bool fos_touch_process_events(void)
