@@ -25,6 +25,7 @@ import {
   readServiceSettingGroups,
   storeFrameLogs,
 } from "./frames";
+import { pressMapOf } from "./fosb";
 import { logError, logWarn } from "./log";
 import {
   fosbHeaderBytes,
@@ -574,6 +575,8 @@ type Drawn = {
   body: Buffer;
   etag: string;
   nextRenderSeconds: number | null;
+  /** Where a press on it does something (pressMapOf); null: nowhere, or not said. */
+  pressMap: string | null;
   renderMs: number;
   scene: string;
   states: Record<string, Record<string, unknown>>;
@@ -718,6 +721,7 @@ async function draw(
       body,
       etag: serverRenderEtag(body),
       nextRenderSeconds: serverNextRenderSeconds(result),
+      pressMap: pressMapOf(result.pressMap),
       renderMs: result.renderMs,
       scene: ended,
       states: after,
@@ -789,13 +793,21 @@ function sceneLogPayloads(logs: readonly string[] | undefined, heard = false): u
 }
 
 export type ServerRenderPull =
-  | { etag: string; nextRenderSeconds: number | null; scene: string; status: 304 }
+  | { etag: string; nextRenderSeconds: number | null; pressMap: string | null; scene: string; status: 304 }
   | {
+      /**
+       * The picture the device says it shows (its If-None-Match), when it is
+       * the one this plane drew last: what a FOSB version 2 answer is a delta
+       * against (docs/server-rendering.md "Only what changed").
+       */
+      base: Buffer | null;
       body: Buffer;
       etag: string;
       from: "picture" | "prerender" | "render";
       /** When the scene wants the picture after this one (serverNextRenderSeconds); null: no opinion. */
       nextRenderSeconds: number | null;
+      /** Where a press on it does something (docs/server-rendering.md "The click"); null: nowhere. */
+      pressMap: string | null;
       scene: string;
       status: 200;
     }
@@ -836,16 +848,20 @@ export async function pullServerRender(
   const pendingSwitch = await hasPendingSceneSwitch(db, frameId, now);
   const candidate = candidateServerRenderScene({ activeScene: row.activeScene, deviceScene, pendingSwitch });
 
+  // The picture the device shows, when it is the one drawn last: what a
+  // version 2 answer sends the change from.
+  const base = row.picture && row.pictureEtag && ifNoneMatchHas(input.ifNoneMatch, row.pictureEtag) ? row.picture : null;
   const answer = (
     body: Buffer,
     etag: string,
     from: "picture" | "prerender" | "render",
     scene: string,
     nextRenderSeconds: number | null,
+    pressMap: string | null,
   ): ServerRenderPull =>
     ifNoneMatchHas(input.ifNoneMatch, etag)
-      ? { etag, nextRenderSeconds, scene, status: 304 }
-      : { body, etag, from, nextRenderSeconds, scene, status: 200 };
+      ? { etag, nextRenderSeconds, pressMap, scene, status: 304 }
+      : { base, body, etag, from, nextRenderSeconds, pressMap, scene, status: 200 };
 
   // The last picture again: nothing it depends on moved, and the plan's
   // floor has not passed since it was drawn. Never for a pull with input:
@@ -856,7 +872,14 @@ export async function pullServerRender(
     row.picture &&
     row.pictureEtag
   ) {
-    return answer(row.picture, row.pictureEtag, "picture", row.pictureScene as string, row.pictureNextRenderSeconds);
+    return answer(
+      row.picture,
+      row.pictureEtag,
+      "picture",
+      row.pictureScene as string,
+      row.pictureNextRenderSeconds,
+      pressMapOf(row.picturePressMap),
+    );
   }
 
   // The picture drawn before this wake: taken once, its state committed now.
@@ -871,6 +894,7 @@ export async function pullServerRender(
         pictureEtag: row.prerenderEtag,
         pictureNextRenderSeconds: row.prerenderNextRenderSeconds,
         picturePanel: row.prerenderPanel,
+        picturePressMap: row.prerenderPressMap,
         pictureRevision: row.revision,
         pictureScene: row.prerenderScene,
         pictureScenesChecksum: row.pictureScenesChecksum,
@@ -880,6 +904,7 @@ export async function pullServerRender(
         prerenderMs: null,
         prerenderNextRenderSeconds: null,
         prerenderPanel: null,
+        prerenderPressMap: null,
         prerenderRevision: null,
         prerenderScene: null,
         prerenderState: null,
@@ -906,6 +931,7 @@ export async function pullServerRender(
         "prerender",
         row.prerenderScene as string,
         row.prerenderNextRenderSeconds,
+        pressMapOf(row.prerenderPressMap),
       );
     }
   }
@@ -954,6 +980,7 @@ export async function pullServerRender(
     pictureEtag: drawn.etag,
     pictureNextRenderSeconds: drawn.nextRenderSeconds,
     picturePanel: panelKey,
+    picturePressMap: drawn.pressMap,
     pictureScene: drawn.scene,
     pictureScenesChecksum: checksum,
     renderError: null,
@@ -1007,7 +1034,7 @@ export async function pullServerRender(
     },
     ...sceneLogPayloads(outcome.logs, !!deviceInput || heldEvents(row).length > 0),
   ]);
-  return answer(drawn.body, drawn.etag, "render", drawn.scene, drawn.nextRenderSeconds);
+  return answer(drawn.body, drawn.etag, "render", drawn.scene, drawn.nextRenderSeconds, drawn.pressMap);
 }
 
 // A kept pre-render's columns, emptied.
@@ -1018,6 +1045,7 @@ const noPrerender = {
   prerenderMs: null,
   prerenderNextRenderSeconds: null,
   prerenderPanel: null,
+  prerenderPressMap: null,
   prerenderRevision: null,
   prerenderScene: null,
   prerenderState: null,
@@ -1128,6 +1156,7 @@ export async function prerenderFrame(
       prerenderMs: outcome.drawn.renderMs,
       prerenderNextRenderSeconds: outcome.drawn.nextRenderSeconds,
       prerenderPanel: row.picturePanel,
+      prerenderPressMap: outcome.drawn.pressMap,
       prerenderRevision: row.revision,
       prerenderScene: outcome.drawn.scene,
       prerenderState: outcome.drawn.states,

@@ -20,6 +20,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import struct
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -96,6 +98,78 @@ def etag_matches(if_none_match: str | None, etag: str) -> bool:
         if candidate.removeprefix("W/") == wanted:
             return True
     return False
+
+
+# docs/server-rendering.md "Only what changed": a board that reads FOSB
+# version 2 says so with this request header, and is sent its picture
+# deflated and, when it shows the picture this plane sent it last, as the
+# blocks that changed since. The cloud's port is server-render.ts
+# `fosbAnswer`; docs/fosb-fixtures.json pins the two.
+FOSB_VERSION_HEADER = "X-FrameOS-Fosb"
+FOSB_HEADER_LEN = 12
+FOSB_V2_HEADER_LEN = 44
+FOSB_FLAG_DELTA = 1
+FOSB_FLAG_DEFLATE = 2
+# What a delta compares: the packed picture in blocks of this many bytes, a
+# run of changed blocks sent whole. Bounded work on any picture (a byte-wise
+# diff of a dithered photo is a run every few bytes), and the unchanged
+# bytes a block carries along cost little once deflated.
+FOSB_DELTA_BLOCK = 64
+FOSB_DEFLATE_LEVEL = 6
+
+
+def fosb_reads_v2(header: str | None) -> bool:
+    """Whether a pull's FOSB_VERSION_HEADER says the board reads version 2."""
+    try:
+        return header is not None and int(header.strip()) >= 2
+    except ValueError:
+        return False
+
+
+def fosb_delta_runs(base: bytes, packed: bytes) -> list[tuple[int, int]]:
+    """Where ``packed`` differs from ``base`` (two packed pictures of one
+    panel), as (offset, length) runs of whole FOSB_DELTA_BLOCK blocks, the
+    last one cut at the end; adjacent changed blocks make one run."""
+    runs: list[tuple[int, int]] = []
+    size = len(packed)
+    start = -1
+    for offset in range(0, size, FOSB_DELTA_BLOCK):
+        end = min(offset + FOSB_DELTA_BLOCK, size)
+        changed = base[offset:end] != packed[offset:end]
+        if changed and start < 0:
+            start = offset
+        elif not changed and start >= 0:
+            runs.append((start, offset - start))
+            start = -1
+    if start >= 0:
+        runs.append((start, size - start))
+    return runs
+
+
+def fosb_v2(body: bytes, base: bytes | None = None) -> bytes:
+    """A FOSB version 1 ``body`` (the 12-byte header, then the packed
+    picture) as version 2: the same header with version 2 and its flags, the
+    packed picture's sha256, then the payload, raw deflate. The payload is
+    the picture whole, or, against ``base`` (the version 1 body of the
+    picture the board shows, the same panel), its changed runs: each a u32le
+    offset, a u32le length and that many bytes. Whole when a delta would not
+    be smaller."""
+    header, packed = body[:FOSB_HEADER_LEN], body[FOSB_HEADER_LEN:]
+    flags = FOSB_FLAG_DEFLATE
+    payload = packed
+    if base is not None and len(base) == len(body) and base[:FOSB_HEADER_LEN] == header:
+        runs = fosb_delta_runs(base[FOSB_HEADER_LEN:], packed)
+        if sum(8 + length for _, length in runs) < len(packed):
+            payload = b"".join(
+                struct.pack("<II", offset, length) + packed[offset:offset + length] for offset, length in runs
+            )
+            flags |= FOSB_FLAG_DELTA
+    deflate = zlib.compressobj(FOSB_DEFLATE_LEVEL, zlib.DEFLATED, -15)
+    compressed = deflate.compress(payload) + deflate.flush()
+    return (
+        header[:4] + bytes((2,)) + header[5:10] + struct.pack("<H", flags)
+        + hashlib.sha256(packed).digest() + compressed
+    )
 
 
 def render_fingerprint(
@@ -268,6 +342,51 @@ async def take_prerender(redis, frame_id: int) -> KeptPicture | None:
     if not isinstance(record, dict):
         return None
     return KeptPicture(record, bytes(body), bytes(preview) if preview else None)
+
+
+# The last picture a pull answered with: what the next pull's delta is made
+# against when the board says it shows it still (docs/server-rendering.md
+# "Only what changed"). Kept a little longer than the longest sleep a scene
+# may ask for (embedded_device.NEXT_RENDER_MAX_SECONDS).
+DELTA_BASE_KEEP_SECONDS = 8 * 24 * 3600
+
+
+def _delta_base_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:delta_base"
+
+
+def _delta_base_etag_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:delta_base:etag"
+
+
+async def keep_delta_base(redis, frame_id: int, etag: str, body: bytes) -> None:
+    """Keep the version 1 body a pull answered with, under its ETag."""
+    if redis is None:
+        return
+    try:
+        async with redis.pipeline(transaction=True) as pipe:
+            pipe.set(_delta_base_key(int(frame_id)), body, ex=DELTA_BASE_KEEP_SECONDS)
+            pipe.set(_delta_base_etag_key(int(frame_id)), etag, ex=DELTA_BASE_KEEP_SECONDS)
+            await pipe.execute()
+    except Exception:
+        # The next pull then sends its picture whole.
+        pass
+
+
+async def delta_base(redis, frame_id: int, if_none_match: str | None) -> bytes | None:
+    """The version 1 body of the picture the board says it shows (its
+    If-None-Match), when it is the one this plane served last; None
+    otherwise."""
+    if redis is None or not if_none_match:
+        return None
+    try:
+        etag, body = await redis.mget(_delta_base_etag_key(int(frame_id)), _delta_base_key(int(frame_id)))
+    except Exception:
+        return None
+    if not etag or not body:
+        return None
+    etag = etag.decode() if isinstance(etag, bytes) else str(etag)
+    return bytes(body) if etag_matches(if_none_match, etag) and if_none_match.strip() != "*" else None
 
 
 def prerender_usable(record: dict, *, fingerprint: str, revision: int, now_ms: int) -> bool:

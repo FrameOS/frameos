@@ -67,6 +67,8 @@ static struct {
     char relayed[1024]; /* every relayed event, "origin name payload" a line */
     int display_power_calls;
     int display_power;
+    int http_presses; /* fos_client_http_press(true) calls */
+    int http_lifts;   /* fos_client_http_press(false) calls */
 } n;
 
 static void reset(void)
@@ -100,6 +102,12 @@ bool fos_client_relay_event(const char *origin, const char *name, const char *pa
     snprintf(n.relayed + used, sizeof(n.relayed) - used, "%s %s %s\n", origin, name,
              payload_json ? payload_json : "(null)");
     return n.relay_result;
+}
+
+void fos_client_http_press(bool down)
+{
+    if (down) n.http_presses++;
+    else n.http_lifts++;
 }
 
 void fos_client_set_display_power(int on)
@@ -536,6 +544,26 @@ static void test_rendered_on_the_server(void)
                  "http:write setCurrentScene {\"direction\":\"next\"}\n"
                  "http:admin setSceneState {\"state\":{\"a\":1}}\n"
                  "schedule myEvent {}\n") == 0);
+
+    /* A pointer pressed over HTTP (the workspace's tap, forwarded) is a
+     * gesture like a finger's: its down and a move wait for the lift, which
+     * asks for the pull, so the plane hears the press whole. */
+    reset();
+    n.remote = true;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_ADMIN, "pointerDown", "{\"x\":1,\"y\":2}") == FOS_EVENT_DONE);
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_ADMIN, "pointerMove", "{\"x\":3,\"y\":2}") == FOS_EVENT_DONE);
+    CHECK(n.relays == 2 && n.wakes == 2 && n.renders == 0 && n.http_presses == 2 && n.http_lifts == 0);
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_ADMIN, "pointerUp", "{\"x\":3,\"y\":2}") == FOS_EVENT_DONE);
+    CHECK(n.relays == 3 && n.renders == 1 && n.http_lifts == 1);
+    reset();
+    n.remote = true;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "pointerCancel", "{}") == FOS_EVENT_DONE);
+    CHECK(n.http_lifts == 1 && n.renders == 1);
+    /* The glass's own presses are the touch queue's to time. */
+    reset();
+    n.remote = true;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_DRIVER, "pointerUp", "{}") == FOS_EVENT_DONE);
+    CHECK(n.http_presses == 0 && n.http_lifts == 0 && n.wakes == 1 && n.renders == 0);
 
     /* The allow-list still decides first: a key may not say setSceneState. */
     reset();

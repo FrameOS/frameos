@@ -2,11 +2,15 @@
 backend: the render pull's ETag, which scene it draws, and the picture drawn
 before a sleeping frame wakes."""
 
+import hashlib
 import json
 import os
 import shutil
+import struct
 import time
+import zlib
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -23,7 +27,10 @@ from app.utils.server_render import (
     PRERENDER_MAX_SKEW_SECONDS,
     epoch_ms,
     etag_matches,
+    fosb_delta_runs,
     fosb_etag,
+    fosb_reads_v2,
+    fosb_v2,
     prerender_lead_seconds,
     prerender_usable,
 )
@@ -1575,3 +1582,134 @@ def test_the_empty_scene_is_the_corpus():
 
     corpus = Path(__file__).resolve().parents[4] / 'docs' / 'server-rendered-board-scene.json'
     assert json.loads(corpus.read_text())['scene'] == SERVER_RENDERED_BOARD_SCENE
+
+
+# ------------------------------------------------- only what changed
+
+FOSB_FIXTURES = Path(__file__).resolve().parents[4] / 'docs' / 'fosb-fixtures.json'
+
+
+def _inflate(body: bytes) -> bytes:
+    """A version 2 body's payload, as the board's ROM inflater reads it."""
+    return zlib.decompress(body[44:], -15)
+
+
+def _apply(payload: bytes, base_packed: bytes, delta: bool) -> bytes:
+    """What the board writes into its panel buffer (fos_fosb_writer_feed)."""
+    if not delta:
+        return payload
+    out = bytearray(base_packed)
+    at = 0
+    while at < len(payload):
+        offset, length = struct.unpack_from('<II', payload, at)
+        out[offset:offset + length] = payload[at + 8:at + 8 + length]
+        at += 8 + length
+    return bytes(out)
+
+
+def test_the_fosb_corpus():
+    """Both planes make the same deltas (docs/fosb-fixtures.json; the cloud's
+    fosb.test.ts replays the same cases)."""
+    corpus = json.loads(FOSB_FIXTURES.read_text())
+    assert corpus['block'] == server_render.FOSB_DELTA_BLOCK
+    for case in corpus['cases']:
+        body = bytes.fromhex(case['body'])
+        base = bytes.fromhex(case['base']) if case['base'] is not None else None
+        if case['runs'] is not None:
+            assert [list(run) for run in fosb_delta_runs(base[12:], body[12:])] == case['runs'], case['name']
+        answer = fosb_v2(body, base)
+        assert answer[:4] == b'FOSB' and answer[4] == 2, case['name']
+        assert answer[5:10] == body[5:10], case['name']
+        flags = struct.unpack_from('<H', answer, 10)[0]
+        assert flags == (server_render.FOSB_FLAG_DEFLATE | (server_render.FOSB_FLAG_DELTA if case['delta'] else 0))
+        assert answer[12:44].hex() == case['sha256']
+        payload = _inflate(answer)
+        assert payload.hex() == case['payload'], case['name']
+        assert _apply(payload, (base or body)[12:], case['delta']) == body[12:], case['name']
+
+
+def test_a_board_that_reads_version_2_says_so_with_a_number():
+    assert fosb_reads_v2('2') and fosb_reads_v2(' 3 ')
+    assert not fosb_reads_v2(None) and not fosb_reads_v2('1') and not fosb_reads_v2('yes')
+
+
+def changing_renderer(width_hint: int, state=None):
+    """One picture, then the same with one band of rows changed: what a tap
+    on a field does to a form."""
+    calls = {'n': 0}
+
+    async def fake_render(frame_arg, width, height, **kwargs):
+        calls['n'] += 1
+        pixels = bytearray(bytes((255, 255, 255, 255)) * (width * height))
+        if calls['n'] > 1:
+            for y in range(height // 4, height // 4 + 4):
+                pixels[y * width * 4:(y + 1) * width * 4] = bytes((0, 0, 0, 255)) * width
+        return bytes(pixels), state, None
+
+    return fake_render
+
+
+@pytest.mark.asyncio
+async def test_a_board_that_reads_version_2_gets_what_changed_since_its_picture(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    frame = await server_rendered_frame(async_client, db)
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', changing_renderer(0))
+    url = f'/api/frames/{frame.id}/embedded/render'
+    v2 = {**auth(frame), 'X-FrameOS-Fosb': '2'}
+
+    # Its first picture, whole and deflated.
+    first = await no_auth_client.get(url, headers=v2)
+    assert first.status_code == 200, first.text
+    assert first.content[4] == 2
+    assert struct.unpack_from('<H', first.content, 10)[0] == server_render.FOSB_FLAG_DEFLATE
+    picture = _inflate(first.content)
+    assert hashlib.sha256(picture).digest() == first.content[12:44]
+    # The ETag names the picture, whatever the encoding: the version 1 body's.
+    etag = first.headers['etag']
+    assert etag == fosb_etag(first.content[:4] + bytes((1,)) + first.content[5:10] + b'\0\0' + picture)
+
+    # The next, against it: the rows that changed, and the board's buffer
+    # becomes the new picture.
+    second = await no_auth_client.get(url, headers={**v2, 'If-None-Match': etag})
+    assert second.status_code == 200
+    flags = struct.unpack_from('<H', second.content, 10)[0]
+    assert flags == server_render.FOSB_FLAG_DEFLATE | server_render.FOSB_FLAG_DELTA
+    assert len(second.content) < len(first.content)
+    after = _apply(_inflate(second.content), picture, True)
+    assert hashlib.sha256(after).digest() == second.content[12:44]
+    assert second.headers['etag'] == fosb_etag(first.content[:4] + bytes((1,)) + first.content[5:10] + b'\0\0' + after)
+
+    # A board that shows something else gets the picture whole.
+    other = await no_auth_client.get(url, headers={**v2, 'If-None-Match': '"0123456789abcdef0123456789abcdef"'})
+    assert struct.unpack_from('<H', other.content, 10)[0] == server_render.FOSB_FLAG_DEFLATE
+    # And one that does not say it reads version 2, version 1 as ever.
+    old = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': etag})
+    assert old.content[4] == 1 and old.content[12:] == after
+
+
+@pytest.mark.asyncio
+async def test_the_pull_says_where_a_press_does_something(async_client, no_auth_client, db, redis, monkeypatch):
+    """On the picture and on its 304: the board clicks at a press it takes
+    before it asks (docs/server-rendering.md "The click")."""
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    monkeypatch.setattr(
+        'app.api.embedded_device.render_scene_rgba_and_state',
+        recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'pressMap': '10,20,110,70;!0,0,200,100'}),
+    )
+    url = f'/api/frames/{frame.id}/embedded/render'
+    first = await no_auth_client.get(url, headers=auth(frame))
+    assert first.headers['x-frameos-press'] == '10,20,110,70;!0,0,200,100'
+    same = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': first.headers['etag']})
+    assert same.status_code == 304
+    assert same.headers['x-frameos-press'] == '10,20,110,70;!0,0,200,100'
+
+    # Nothing takes a press, or the bundle says nothing, or it is not a map.
+    for press_map in ('', None, '1,2,3,4\r\nX-Injected: 1', 'a,b,c,d'):
+        monkeypatch.setattr(
+            'app.api.embedded_device.render_scene_rgba_and_state',
+            recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'pressMap': press_map}),
+        )
+        quiet = await no_auth_client.get(url, headers=auth(frame))
+        assert 'x-frameos-press' not in quiet.headers, press_map

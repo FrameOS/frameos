@@ -25,6 +25,8 @@
 #include "esp_sleep.h"
 #include "esp_timer.h"
 #include "mbedtls/sha256.h"
+/* The ROM's inflater (tinfl), for a FOSB version 2 picture. */
+#include "miniz.h"
 
 #include "fos_animation.h"
 #include "fos_backend_http.h"
@@ -544,8 +546,11 @@ static esp_err_t sha256_buffer(const uint8_t *buf, size_t len, uint8_t out[FOS_D
     return rc == 0 ? ESP_OK : ESP_FAIL;
 }
 
-static bool display_state_for_buffer(const uint8_t *buf, size_t len, int width, int height,
-                                     fos_pixel_format_t format, fos_display_state_t *state)
+/* `sha256`: the buffer's, when it is known already (a pull checked it); NULL
+ * to work it out. */
+static bool display_state_for_buffer_sha(const uint8_t *buf, size_t len, int width, int height,
+                                         fos_pixel_format_t format, const uint8_t *sha256,
+                                         fos_display_state_t *state)
 {
     memset(state, 0, sizeof(*state));
     state->magic = FOS_DISPLAY_STATE_MAGIC;
@@ -554,11 +559,21 @@ static bool display_state_for_buffer(const uint8_t *buf, size_t len, int width, 
     state->format = (uint8_t)format;
     state->len = (uint32_t)len;
     strlcpy(state->panel, fos_display_selected_panel(), sizeof(state->panel));
+    if (sha256) {
+        memcpy(state->sha256, sha256, FOS_DISPLAY_HASH_LEN);
+        return true;
+    }
     if (sha256_buffer(buf, len, state->sha256) != ESP_OK) {
         memset(state, 0, sizeof(*state));
         return false;
     }
     return true;
+}
+
+static bool display_state_for_buffer(const uint8_t *buf, size_t len, int width, int height,
+                                     fos_pixel_format_t format, fos_display_state_t *state)
+{
+    return display_state_for_buffer_sha(buf, len, width, height, format, NULL, state);
 }
 
 static bool display_state_matches(const fos_display_state_t *a, const fos_display_state_t *b)
@@ -1201,6 +1216,29 @@ static bool relay_unsent(void)
     return s_relay_unsent && s_relay.count > 0;
 }
 
+/* A pointer pressed through the frame's HTTP API (the workspace's tap on a
+ * backend frame, which forwards it here) and not lifted yet: when, in
+ * microseconds, 0 for none. Its down and its up go to the plane in one pull,
+ * as a finger's do, or the plane makes no tap of them (two halves in two
+ * fresh runtimes). Bounded by the settle wait like any undecided input. */
+static int64_t s_http_press_since = 0;
+
+/* A press came over HTTP since the render task last looked: someone using
+ * the frame, as a tap on the glass is (the input hold, remote_input_pass). */
+static bool s_http_press_seen = false;
+
+void fos_client_http_press(bool down)
+{
+    __atomic_store_n(&s_http_press_since, down ? esp_timer_get_time() : 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_http_press_seen, true, __ATOMIC_RELAXED);
+}
+
+static bool http_press_open(void)
+{
+    int64_t since = __atomic_load_n(&s_http_press_since, __ATOMIC_RELAXED);
+    return since != 0 && esp_timer_get_time() - since < FOS_RELAY_SETTLE_MAX_US;
+}
+
 /* A key still being timed, a report waiting in a queue, or a finger on the
  * glass (it keeps its gesture in the touch queue until it lifts,
  * process_input_events, and one that landed while the queue was being taken
@@ -1209,7 +1247,7 @@ static bool relay_unsent(void)
  * two fresh runtimes on the plane, neither of them a press. */
 static bool remote_input_undecided(void)
 {
-    return fos_buttons_busy() || input_queued() || fos_touch_finger_down();
+    return fos_buttons_busy() || input_queued() || fos_touch_finger_down() || http_press_open();
 }
 
 /* ------------------------------------------------------------ remote mode */
@@ -1224,7 +1262,50 @@ typedef struct {
     char code[48];                       /* a refusal's `error` */
     char scene[128];                     /* X-FrameOS-Scene: what the plane drew, "" when not said */
     uint32_t next_render_s;              /* X-FrameOS-Next-Render; 0 when not said */
+    /* X-FrameOS-Press: where a press on this picture does something
+     * (docs/server-rendering.md "The click"); 0 entries when nowhere, or
+     * when the plane did not say (one from before it did). */
+    fos_press_rect_t press[FOS_PRESS_MAP_MAX];
+    int press_count;
+    /* A FOSB version 2 answer: the packed picture's sha256, checked against
+     * the buffer once written (`sha_checked`), and whether it came as what
+     * changed (`delta`, with its runs and its bytes on the wire). */
+    bool v2, delta, sha_checked, sha_mismatch;
+    uint8_t sha256[FOS_RENDER_PULL_SHA_LEN];
+    uint32_t runs;
+    size_t wire_bytes;
 } remote_pull_t;
+
+/* Where a press on the picture the panel shows does something, as its plane
+ * said (X-FrameOS-Press): the touch task clicks at a press it takes the
+ * moment the finger lands, before the plane hears of it. Written by the
+ * render task with each answer, read by the touch task: the count is
+ * published after the entries, and no lock. A press read during an update
+ * clicks or not by a half-written map, nothing worse: the count never
+ * passes the array. */
+static fos_press_rect_t s_press_map[FOS_PRESS_MAP_MAX];
+static int s_press_count = 0;
+
+static void press_map_keep(const remote_pull_t *pull)
+{
+    int count = pull->press_count > 0 ? pull->press_count : 0;
+    __atomic_store_n(&s_press_count, 0, __ATOMIC_RELEASE);
+    memcpy(s_press_map, pull->press, (size_t)count * sizeof(s_press_map[0]));
+    __atomic_store_n(&s_press_count, count, __ATOMIC_RELEASE);
+}
+
+int fos_client_remote_press_taken(int wire_x, int wire_y)
+{
+    if (renders_locally(fos_config()) || !fos_display_present()) return -1;
+    /* The glass's wire position as the panel's pixel, as the plane reads it
+     * (utils/image.nim pointerToScenePoint). */
+    int width = fos_display_width(), height = fos_display_height();
+    int x = width * wire_x / FOS_TOUCH_WIRE_MAX;
+    int y = height * wire_y / FOS_TOUCH_WIRE_MAX;
+    if (x >= width) x = width - 1;
+    if (y >= height) y = height - 1;
+    return fos_press_map_takes(s_press_map, __atomic_load_n(&s_press_count, __ATOMIC_ACQUIRE), x, y) ? 1 : 0;
+}
 
 /* When the scene the plane drew last wants its next picture (seconds, 0: it
  * has no opinion, or no pull answered): what a frame rendered on the server
@@ -1253,6 +1334,9 @@ static esp_err_t remote_pull_header(esp_http_client_event_t *evt)
         if (strlcpy(pull->etag, evt->header_value, sizeof(pull->etag)) >= sizeof(pull->etag)) pull->etag[0] = '\0';
     } else if (strcasecmp(evt->header_key, "X-FrameOS-Next-Render") == 0) {
         pull->next_render_s = fos_render_pull_next_render_seconds(evt->header_value);
+    } else if (strcasecmp(evt->header_key, FOS_PRESS_HEADER) == 0) {
+        int count = fos_press_map_parse(evt->header_value, pull->press, FOS_PRESS_MAP_MAX);
+        pull->press_count = count > 0 ? count : 0;
     } else if (strcasecmp(evt->header_key, "X-FrameOS-Scene") == 0) {
         /* Percent-encoded on the wire (a built-in scene's id has a '/'). */
         const char *in = evt->header_value;
@@ -1295,10 +1379,71 @@ static int remote_pull_target(char *url, size_t url_len, char *auth, size_t auth
                ? source : FOS_RENDER_PULL_NONE;
 }
 
-/* One request of a pull, `body` (the relay's, NULL for none) as a POST. See
- * fetch_remote_bitmap. */
+/* A FOSB version 2 answer's inflater (ROM tinfl; docs/server-rendering.md
+ * "Only what changed"): its state, the 32 KiB window a deflate stream refers
+ * back into, and what comes off the wire. Made for each pull, and version 2
+ * is asked for only then: a board that cannot spare it (a C3 with a
+ * fragmented heap) pulls version 1, the picture whole and as it is. */
+#define PULL_WIRE_CHUNK 4096
+typedef struct {
+    tinfl_decompressor state;
+    uint8_t window[TINFL_LZ_DICT_SIZE];
+    uint8_t wire[PULL_WIRE_CHUNK];
+} pull_inflater_t;
+
+/* `n` bytes of the answer, however they come. */
+static bool read_answer(esp_http_client_handle_t client, uint8_t *into, size_t n)
+{
+    size_t got = 0;
+    while (got < n) {
+        int r = esp_http_client_read(client, (char *)into + got, (int)(n - got));
+        if (r <= 0) return false;
+        got += (size_t)r;
+    }
+    return true;
+}
+
+/* A version 2 payload (always deflated, fos_fosb_header) into `writer`,
+ * inflated through `inflater`. False when the answer ends early, does not
+ * inflate or does not fit the picture. */
+static bool read_fosb_payload(esp_http_client_handle_t client, pull_inflater_t *inflater,
+                              fos_fosb_writer_t *writer, size_t *wire_bytes)
+{
+    uint8_t *chunk = inflater->wire;
+    tinfl_init(&inflater->state);
+    size_t window_at = 0, in_at = 0, in_len = 0;
+    bool more = true;
+    for (;;) {
+        if (in_at == in_len && more) {
+            int r = esp_http_client_read(client, (char *)chunk, PULL_WIRE_CHUNK);
+            if (r <= 0) {
+                more = false;
+                r = 0;
+            }
+            in_at = 0;
+            in_len = (size_t)r;
+            *wire_bytes += (size_t)r;
+        }
+        size_t in_size = in_len - in_at;
+        size_t out_size = TINFL_LZ_DICT_SIZE - window_at;
+        tinfl_status status = tinfl_decompress(&inflater->state, chunk + in_at, &in_size, inflater->window,
+                                               inflater->window + window_at, &out_size,
+                                               more ? TINFL_FLAG_HAS_MORE_INPUT : 0);
+        in_at += in_size;
+        if (out_size && !fos_fosb_writer_feed(writer, inflater->window + window_at, out_size)) return false;
+        window_at = (window_at + out_size) & (TINFL_LZ_DICT_SIZE - 1);
+        if (status == TINFL_STATUS_DONE) return fos_fosb_writer_done(writer);
+        if (status < 0) return false;
+        /* It wants more and there is no more: the answer ended early. */
+        if (status == TINFL_STATUS_NEEDS_MORE_INPUT && !more && in_at == in_len) return false;
+    }
+}
+
+/* One request of a pull, `body` (the relay's, NULL for none) as a POST, and
+ * without the If-None-Match when `whole` (a delta that did not check out).
+ * See fetch_remote_bitmap. */
 static esp_err_t pull_remote_bitmap(uint8_t *buf, size_t buf_len, remote_pull_t *pull, const char *body,
-                                    size_t body_len)
+                                    size_t body_len, bool whole)
 {
     int width = fos_display_present() ? fos_display_width() : 800;
     int height = fos_display_present() ? fos_display_height() : 480;
@@ -1317,9 +1462,16 @@ static esp_err_t pull_remote_bitmap(uint8_t *buf, size_t buf_len, remote_pull_t 
     /* The picture the panel shows, by the hash of what it shows: an
      * unchanged one comes back as a 304, no download and no refresh. */
     load_display_state();
-    const char *if_none_match = fos_render_pull_if_none_match(
+    const char *if_none_match = whole ? NULL : fos_render_pull_if_none_match(
         &s_pull_shown, pull->source, s_display_state_valid ? s_display_state.sha256 : NULL,
         panel_overlay_pending());
+    /* Version 2 when the inflater fits in PSRAM: deflated, and as what
+     * changed since the picture If-None-Match names, which this buffer holds
+     * (the hash checks it once written). Not from a C3's internal heap, which
+     * the TLS handshake to the cloud lives on; its pictures are 48 KB. */
+    pull_inflater_t *inflater = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0
+        ? heap_caps_malloc(sizeof(pull_inflater_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+        : NULL;
 
     esp_http_client_config_t http_config = {
         .url = url,
@@ -1330,9 +1482,13 @@ static esp_err_t pull_remote_bitmap(uint8_t *buf, size_t buf_len, remote_pull_t 
         .user_data = pull,
     };
     esp_http_client_handle_t client = esp_http_client_init(&http_config);
-    if (!client) return ESP_FAIL;
+    if (!client) {
+        free(inflater);
+        return ESP_FAIL;
+    }
     esp_http_client_set_header(client, "Authorization", auth);
     if (if_none_match) esp_http_client_set_header(client, "If-None-Match", if_none_match);
+    if (inflater) esp_http_client_set_header(client, FOS_FOSB_VERSION_HEADER, "2");
     /* What a scene here would have heard (the relay): the same pull, as a
      * POST carrying it. */
     if (body) {
@@ -1344,6 +1500,7 @@ static esp_err_t pull_remote_bitmap(uint8_t *buf, size_t buf_len, remote_pull_t 
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "pull: connect %s", fos_http_err_name(err));
         esp_http_client_cleanup(client);
+        free(inflater);
         return err;
     }
     err = ESP_FAIL;
@@ -1373,36 +1530,68 @@ static esp_err_t pull_remote_bitmap(uint8_t *buf, size_t buf_len, remote_pull_t 
     }
 
     pull->outcome = FOS_RENDER_PULL_FAILED;
-    uint8_t header[FOSB_HEADER_LEN];
-    int read = esp_http_client_read(client, (char *)header, sizeof(header));
-    int got_width = header[6] | (header[7] << 8);
-    int got_height = header[8] | (header[9] << 8);
+    uint8_t raw[FOS_FOSB_V2_HEADER_LEN];
+    fos_fosb_header_t header = {0};
+    bool header_ok = read_answer(client, raw, FOS_FOSB_HEADER_LEN) && fos_fosb_header(raw, &header) &&
+                     (header.version == 1 ||
+                      (inflater && read_answer(client, raw + FOS_FOSB_HEADER_LEN,
+                                               FOS_FOSB_V2_HEADER_LEN - FOS_FOSB_HEADER_LEN)));
     size_t expected = fos_display_present()
         ? fos_display_buffer_size()
-        : (((size_t)got_width + 7u) / 8u) * (size_t)got_height;
+        : (((size_t)header.width + 7u) / 8u) * (size_t)header.height;
     bool dims_ok = !fos_display_present()
-        || (got_width == fos_display_width() && got_height == fos_display_height());
-    if (read != FOSB_HEADER_LEN || memcmp(header, "FOSB\x01", 5) != 0 || header[5] != want_format ||
-        expected != buf_len || !dims_ok) {
-        ESP_LOGE(TAG, "pull: not this panel's (%d, %dx%d fmt %d)", read, got_width, got_height, header[5]);
+        || (header.width == fos_display_width() && header.height == fos_display_height());
+    if (!header_ok || header.format != want_format || expected != buf_len || !dims_ok) {
+        ESP_LOGE(TAG, "pull: not this panel's (v%d, %dx%d fmt %d)", header.version, header.width, header.height,
+                 header.format);
         goto done;
     }
 
-    size_t received = 0;
-    while (received < buf_len) {
-        int r = esp_http_client_read(client, (char *)buf + received, buf_len - received);
-        if (r <= 0) break;
-        received += r;
-    }
-    if (received != buf_len) {
-        ESP_LOGE(TAG, "pull: short %u/%u", (unsigned)received, (unsigned)buf_len);
-        goto done;
+    if (header.version == 1) {
+        size_t received = 0;
+        while (received < buf_len) {
+            int r = esp_http_client_read(client, (char *)buf + received, buf_len - received);
+            if (r <= 0) break;
+            received += r;
+        }
+        pull->wire_bytes = received;
+        if (received != buf_len) {
+            ESP_LOGE(TAG, "pull: short %u/%u", (unsigned)received, (unsigned)buf_len);
+            goto done;
+        }
+    } else {
+        pull->v2 = true;
+        pull->delta = (header.flags & FOS_FOSB_DELTA) != 0;
+        memcpy(pull->sha256, raw + FOS_FOSB_HEADER_LEN, FOS_RENDER_PULL_SHA_LEN);
+        fos_fosb_writer_t writer;
+        fos_fosb_writer_begin(&writer, buf, buf_len, pull->delta);
+        bool read_ok = read_fosb_payload(client, inflater, &writer, &pull->wire_bytes);
+        pull->runs = writer.runs;
+        /* Written into, the buffer holds the picture the ETag names no
+         * longer, until the hash says it holds the new one. */
+        if (writer.written > 0 || writer.runs > 0) fos_render_pull_forget(&s_pull_shown);
+        if (!read_ok) {
+            ESP_LOGE(TAG, "pull: picture unreadable");
+            goto done;
+        }
+        /* The plane's hash of the picture against what the buffer holds now:
+         * a delta written over anything but the picture it was made against
+         * (a buffer lent out and drawn over since, or none named) does not
+         * match. */
+        uint8_t got[FOS_RENDER_PULL_SHA_LEN];
+        pull->sha_checked = sha256_buffer(buf, buf_len, got) == ESP_OK &&
+                            memcmp(got, pull->sha256, FOS_RENDER_PULL_SHA_LEN) == 0;
+        if (!pull->sha_checked) {
+            pull->sha_mismatch = true;
+            goto done;
+        }
     }
     pull->outcome = FOS_RENDER_PULL_PICTURE;
     err = ESP_OK;
 done:
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
+    free(inflater);
     return err;
 }
 
@@ -1428,10 +1617,33 @@ static esp_err_t fetch_remote_bitmap(uint8_t *buf, size_t buf_len, remote_pull_t
     unsigned events = s_relay.in_flight;
     if (body) s_relay_unsent = false;
     relay_unlock();
-    esp_err_t err = pull_remote_bitmap(buf, buf_len, pull, body, body_len);
+    int64_t pull_start = esp_timer_get_time();
+    esp_err_t err = pull_remote_bitmap(buf, buf_len, pull, body, body_len, false);
+    /* What a 200 or 304 answered: the plane heard the input either way. */
+    int status = pull->status;
+    for (int again = 0; again < 2; again++) {
+        /* What came over the wire for a version 2 picture (`ok`), or a delta
+         * over a buffer that no longer held the picture it was made against
+         * (`mismatch`): then the picture again, whole, carrying no input
+         * (it went with the first). */
+        if (!pull->sha_mismatch && !(pull->outcome == FOS_RENDER_PULL_PICTURE && pull->v2)) break;
+        char line[160];
+        snprintf(line, sizeof(line),
+                 "{\"event\":\"render:pull\",\"source\":\"esp32\",\"status\":\"%s\",\"delta\":%d,\"runs\":%u,"
+                 "\"wireBytes\":%u,\"ms\":%lld}",
+                 pull->sha_mismatch ? "mismatch" : "ok", pull->delta, (unsigned)pull->runs,
+                 (unsigned)pull->wire_bytes, (long long)((esp_timer_get_time() - pull_start) / 1000));
+        frameos_nim_log_hook(line);
+        if (!pull->sha_mismatch || again) break;
+        memset(pull, 0, sizeof(*pull));
+        err = pull_remote_bitmap(buf, buf_len, pull, NULL, 0, true);
+    }
+    if (pull->outcome == FOS_RENDER_PULL_PICTURE || pull->outcome == FOS_RENDER_PULL_UNCHANGED) {
+        /* Where a press on what the panel shows next does something. */
+        press_map_keep(pull);
+    }
     if (body) {
         free(body);
-        int status = pull->status;
         bool answered = status == 200 || status == 304 || status == 400 || status == 413;
         relay_lock();
         if (answered) {
@@ -2388,8 +2600,11 @@ static esp_err_t render_once(bool quiet)
     /* A 304 brought no picture: `buf` holds whatever it held, and the panel
      * keeps the one it shows. */
     fos_display_state_t rendered_state;
+    /* A version 2 pull checked the buffer against the plane's hash already. */
     bool rendered_state_valid = err == ESP_OK && !pulled_unchanged && fos_display_present() &&
-        !fos_display_is_lcd() && display_state_for_buffer(buf, buf_len, width, height, format, &rendered_state);
+        !fos_display_is_lcd() &&
+        display_state_for_buffer_sha(buf, buf_len, width, height, format,
+                                     !local_render && pull.sha_checked ? pull.sha256 : NULL, &rendered_state);
     bool skipped_refresh = false;
     bool snapshot_stored = false;
     const char *refresh = fos_display_present() ? "pending" : "none";
@@ -3000,6 +3215,12 @@ static void remote_input_pass(void)
 {
     fos_events_deliver_deferred();
     process_input_events();
+    /* A press over HTTP holds the slow chores back and takes the fast
+     * waveform, as the glass's own does (process_input_events). */
+    if (__atomic_exchange_n(&s_http_press_seen, false, __ATOMIC_RELAXED) && hold_applies()) {
+        note_input_awake();
+        fos_input_hold_note(&s_input_hold, s_last_input_us);
+    }
     fos_schedule_tick();
     if (s_relay.count == 0) return;
     int64_t start = esp_timer_get_time();

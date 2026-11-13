@@ -500,6 +500,26 @@ suite "layouts":
     check pressTakenAt(content, 5, 35)
     check not pressTakenAt(content, 5, 5)
 
+  test "the press map answers as pressTakenAt does, everywhere at once":
+    # What a control plane hands a board with its picture (the click before
+    # the pull, docs/server-rendering.md "The click"): the first entry a
+    # point lands in answers, a point in none is not taken.
+    for name in ["tests/inTaskbar", "tests/counter"]:
+      let scene = newScene(name)
+      let image = pass(scene)
+      let map = pressMap(scene, image.width, image.height)
+      check map.len > 0
+      check map[^1].taken
+      for y in countup(0, image.height - 1, 3):
+        for x in countup(0, image.width - 1, 3):
+          var taken = false
+          for entry in map:
+            if x.float32 >= entry.box[0] and y.float32 >= entry.box[1] and
+                x.float32 < entry.box[2] and y.float32 < entry.box[3]:
+              taken = entry.taken
+              break
+          check taken == pressTakenAt(scene, x, y)
+
 suite "a canvas that stays":
   var generation = 0'i64
   setup:
