@@ -27,8 +27,8 @@ or a saved scene is edited, the cloud refuses a store version
 to the AI. The runtime does not check: a layout with no yield shows no content.
 
 **Starters.** Every repo sample whose scene is a layout (`Top bar`, `Bottom bar`,
-`Side rail`, `Windows 98`, `macOS`, `BeOS`, `Polaroid`, `Front page`, `Terminal`,
-`Gallery wall` in `repo/scenes/samples`) is also one click away on both planes
+`Side rail`, `Windows 98`, `Tiling`, `macOS`, `BeOS`, `Polaroid`, `Front page`,
+`Terminal`, `Gallery wall` in `repo/scenes/samples`) is also one click away on both planes
 (`frontend/scripts/generateLayoutStarters.mjs`): "New layout" in the frame's
 Layouts group, "Add layout" at the end of the Add scene drawer while it has none,
 and "Add a layout" in its Settings under Layouts. The iOS app offers the same
@@ -125,13 +125,57 @@ From then on, one host loop and one scene:
   painted after it that lands on it, a box that scrolls around it, a second
   `<yield />`, or a UI whose render is more than the one app. It still shows,
   composited, at that cost. A UI holding a picture runs on every pass.
-- **No floating chrome yet:** a layout tiles the panel, and something drawn
-  over its yield makes it a picture.
+- **Floating chrome is a picture:** something drawn over a yield or a `<Scene>`
+  makes it one while it is there. On a Pi, an element there that listens for a
+  pointer event takes it (a menu, the window in front): see "Windows".
 - A layout's JS app can hear the frame's events: `events` in its `config.json`
   and an `onEvent` (`docs/events.md` "Apps that subscribe").
 
 Inside a JSX `<Scene>` or a panel, the keyboard-on-the-screen's flash and held
 backspace (`uiTimer`) only reach the frame's own scene, not a nested one.
+
+## Windows
+
+On a frame that runs its scenes side by side (a Raspberry Pi), a layout can be
+a desktop: every scene opened in a window or a tile of its own, all of them
+running, one with the focus. The samples `Windows 98` (overlapping windows moved
+and sized with the mouse, a taskbar of what is open, a Start menu, full screen
+with F11) and `Tiling` (the scene with the focus large, the others in a column)
+are two. Everywhere else they draw the one scene, as before.
+
+The runtime gives a layout three things and keeps no windows of its own:
+
+- **`app.frame.scenes`**, the frame's scenes (`{id, name}`, layouts left out, in
+  its order), only on a host that runs them side by side: a layout tests for it.
+  **`app.frame.sceneId`** is the id of the scene it wraps.
+- **A `<Scene id>` in the layout around the frame's scene is that scene itself**,
+  the runner's own instance (`hostSceneFor`, runner.nim), not a copy: it runs on
+  its own `refreshInterval` in its window, and it is the same one, state and all,
+  when it comes forward. The scene with the focus is the frame's scene and goes
+  in the `<yield />`; a layout brings another forward with
+  `frameos.dispatch('setCurrentScene', {sceneId})`, so the focus is what the
+  scene list, next/previous, the API, the control planes and the voice chat
+  already move. A scene twice, or the wrapped one as a `<Scene>`, draws once.
+  Its props do not set its state, as they do a copy's: a window shows the scene
+  as it is. A scene in a window wears no layout of its own. Keys go to the scene
+  with the focus, then to the layout.
+- **One layout instance goes along from scene to scene** (`carryLayout`, the
+  ESP32's parked layout): what it keeps in `frameos.setState` (which windows are
+  open, where, which is minimized) outlives the switch. It is gone at a restart:
+  the scene shown then opens alone.
+
+And the pointer: anything the layout draws over a scene that listens for an
+event takes that event there (`uiOverScene`, `UiRegion.scene` marks where each
+scene is in paint order), and a press it took stays with it until it lifts. So a
+transparent box with an `onPointerDown` over a window behind brings it forward
+without the scene hearing the press, a title bar drags its window over the
+others, and a menu over the yield is the menu's. A transparent box costs nothing;
+anything with a background, a border or a picture over a scene makes that scene
+a picture while it is there, so windows behind the one in front are composited,
+and tiles that do not overlap all stay holes.
+
+The cost is the Pi's alone: all of it is out of the ESP32's build (`when not
+defined(frameosEmbedded)`), whose layouts wrap one scene.
 
 ## Control planes
 

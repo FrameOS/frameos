@@ -566,6 +566,16 @@
   A rectangle of the panel keeps its own damage record in `svg_frames.nim`
   (`takePanelRegion`): a new way to write a rectangle's pixels without a render
   of it takes that record too.
+- **Windows** (`docs/scene-layouts.md` "Windows"; the `Windows 98` and `Tiling`
+  samples): on a Pi a layout can run the frame's scenes side by side. The
+  runtime adds three things and no window manager: `app.frame.scenes` /
+  `sceneId`, a layout's `<Scene id>` resolving to the runner's own instance
+  (`hostSceneFor`), and one layout instance carried across switches
+  (`carryLayout`); the focus is the frame's current scene. UI drawn over a
+  scene takes the pointer there (`uiOverScene`, `UiRegion.scene`). Windows,
+  positions and z-order are the layout's own state. All of it is behind
+  `when not defined(frameosEmbedded)`: the ESP32's generated C must not change
+  (diff the `--compileOnly` output of `embedded_main.nim` against main).
 
 ## JSX from JS apps: `docs/jsx-ui.md`
 

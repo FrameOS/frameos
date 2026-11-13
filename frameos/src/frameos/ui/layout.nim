@@ -50,6 +50,12 @@ type
     hover*, active*, group*: bool
     field*: uint8                    ## 1 an <input>, 2 a <textarea>, 3 a number input, 4 a <select>
     scrollX*, scrollY*: float32      ## how far a box can scroll each way; 0: not that way
+    when not defined(frameosEmbedded):
+      scene*: bool
+        ## Not an element but a `<Scene>` or `<yield />`, where it is in paint
+        ## order: whatever is in a region after it is drawn over the scene and
+        ## takes the pointer there (ui/events.uiOverScene). Not on an ESP32,
+        ## whose layouts tile the panel and run one scene at a time.
     # Plain values only: regions are copied by the dozen on every layout
     # and every event (a field's text is `fieldText`).
 
@@ -1623,6 +1629,10 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
       if embedded:
         node.attrs.add(("scene-id", n.src.attr("id")))
         node.attrs.add(("scene-props", n.src.attr("props")))
+        when not defined(frameosEmbedded):
+          # Where it is in paint order, for the pointer (UiRegion.scene).
+          regions.add UiRegion(x: cx, y: cy, w: cw, h: ch, visible: [cx, cy, cx + cw, cy + ch], key: -1,
+            scene: true)
       if op < 1:
         node.attrs.add(("opacity", num(op)))
       drawn.add node

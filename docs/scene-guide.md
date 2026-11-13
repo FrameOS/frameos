@@ -626,6 +626,15 @@ export function get(app) {
   panel, start `get` with `if (app.frame.systemScene) return <yield />`.
 - A layout on its own has nothing to wrap, so its `<yield />` is an empty area in
   a render. That is correct, not a blank to fix.
+- On a frame that runs scenes side by side (a Raspberry Pi), `app.frame.scenes`
+  lists its scenes (`{id, name}`) and `app.frame.sceneId` is the one wrapped.
+  There a layout's `<Scene id={...} />` is that scene itself, running in its own
+  rectangle beside the wrapped one, so a layout can be a desktop of windows or
+  tiles. Keep the scene with the focus in `<yield />`, bring another forward with
+  `frameos.dispatch('setCurrentScene', {sceneId})`, and keep which are open in
+  `frameos.setState`. Anything with a handler drawn over a `<Scene>` takes the
+  pointer there. Where `app.frame.scenes` is undefined (an ESP32, the preview),
+  draw the one scene.
 - A layout is in no scene list and is never shown by itself. It goes on a scene
   under that scene's picture, or for all of them in the frame's Settings under
   Layouts. Tell the person that once it is built.
@@ -1000,6 +1009,14 @@ interface FrameOSApp {
     /** The Wi-Fi signal in dBm, about -50 strong and -85 weak, on an ESP32 frame that is connected. Undefined
      * elsewhere, so check before drawing it (FrameOS 2026.11.5+; undefined before). */
     wifiRssi?: number;
+    /** The id of the scene showing; a layout's app gets the id of the scene it wraps, the one its <yield />
+     * shows. Not on an ESP32 (FrameOS 2026.11.8+; undefined before). */
+    sceneId?: string;
+    /** The frame's scenes, { id, name } in its scene list's order, layouts left out, on a frame that runs
+     * scenes side by side (a Raspberry Pi). There a layout's <Scene id> is that scene itself, running in
+     * its window while another has the focus, so a layout can be a desktop of windows. Undefined where one
+     * scene runs at a time (an ESP32, the preview) (FrameOS 2026.11.8+; undefined before). */
+    scenes?: { id: string; name: string }[];
   };
   initialized?: boolean;
   log(...args: any[]): void;

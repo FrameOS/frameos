@@ -738,6 +738,31 @@ when not defined(frameosEmbedded):
 
 # ------------------------------------------------------------------ dispatch
 
+when not defined(frameosEmbedded):
+  proc uiOverScene*(sceneId, event: string; x, y: float32; pointer: int): bool =
+    ## Whether a pointer event at (x, y), in the scene's pixels, over a
+    ## `<Scene>` or `<yield />` it embeds, is its UI's instead: an element
+    ## drawn over the scene there that wants the event (a menu, a window on
+    ## top, a pane that takes a press to bring its window forward), or a UI
+    ## holding this pointer's press. Otherwise the scene under it has it
+    ## (interpreter.routePointer).
+    for target in targets:
+      if target.sceneId != sceneId:
+        continue
+      if target.captureOf(pointer) >= 0:
+        return true
+      let
+        scale = if target.scale > 0: target.scale else: 1'f32
+        lx = (x - target.offsetX) / scale
+        ly = (y - target.offsetY) / scale
+      for i in countdown(target.regions.high, 0):
+        template r: untyped = target.regions[i]
+        if r.inside(lx, ly):
+          if r.scene:
+            break
+          if r.wants(event):
+            return true
+
 proc uiTakesPressAt*(sceneId: string; x, y: float32): bool =
   ## Whether a press at (x, y), in the scene's pixels, lands on something a UI
   ## of the scene does something with: an element with a handler, a field, a

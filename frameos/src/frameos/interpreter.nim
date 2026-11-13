@@ -633,6 +633,11 @@ proc routePointer(self: InterpretedFrameScene, context: ExecutionContext): bool 
     elif x >= s.visible[0] and y >= s.visible[1] and x < s.visible[2] and y < s.visible[3]:
       slot = i
       break
+  when not defined(frameosEmbedded):
+    # Something of the UI's drawn over the scene there (a menu, the window
+    # on top) is what the pointer is on.
+    if slot >= 0 and not held and uiOverScene(self.id.string, event, x, y, pid):
+      return false
   if event == "pointerDown" and slot >= 0:
     self.capturedChild = self.slots[slot].child
     self.capturedPointer = pid
@@ -677,6 +682,45 @@ proc parseEmbedProps(props: string): JsonNode =
     if result.hasKey(key):
       result.delete(key)
 
+when not defined(frameosEmbedded):
+  var hostSceneFor* {.threadvar.}: proc(sceneId: SceneId): FrameScene {.closure, gcsafe.}
+    ## A host that keeps every scene it has run (runner.nim): its instance of
+    ## a scene, made if need be. With it, a `<Scene id>` in the layout around
+    ## the frame's scene is that scene itself, not a copy of its own, so the
+    ## scenes of a frame run side by side in its windows and each is the same
+    ## one when it comes forward as the frame's scene (docs/scene-layouts.md
+    ## "Windows").
+
+when not defined(frameosEmbedded):
+  proc windowedBy(owner: FrameScene, sceneId: string, child: var FrameScene): bool =
+    ## Whether `<Scene id>` in `owner` is the host's own scene (`hostSceneFor`):
+    ## then `child` is that, or nil when it cannot show there (the scene the
+    ## layout wraps, which is its `<yield />`, or one drawn already this pass).
+    if hostSceneFor.isNil or yieldScene.isNil or owner != yieldScene.wornLayout or
+        sceneId == SceneSwitcherId or sceneId == SceneSettingsId:
+      return false
+    result = true
+    child = nil
+    if sceneId == yieldScene.id.string or sceneId == owner.id.string:
+      return
+    let found = hostSceneFor(SceneId(sceneId))
+    if found.isNil:
+      owner.logScene("scene:embed:unknown", "embedded", sceneId)
+      return
+    for slot in owner.slots:
+      if slot.child == found:
+        return
+    if not found.wornLayout.isNil:
+      # A scene in a window wears no layout of its own; the one it wore as
+      # the frame's scene may be this very one, moved on (runner.nim).
+      if found.wornLayout != owner:
+        dropLayout(found.wornLayout)
+      found.wornLayout = nil
+    child = found
+else:
+  template windowedBy(owner: FrameScene, sceneId: string, child: var FrameScene): bool = false
+    ## An ESP32 runs one scene at a time: a `<Scene>` is always a copy.
+
 proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId, props: string,
     x, y: float32, visible: array[4, float32], width, height: int, asHole: bool, context: ExecutionContext): Image =
   ## A `<Scene id>` or `<yield />` in a UI. `asHole`: drawn straight into the
@@ -688,11 +732,17 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
     return nil
   let parent {.cursor.} = InterpretedFrameScene(owner)
   let yielded = sceneId == SceneYieldId
-  var child: FrameScene
+  var
+    child: FrameScene
+    asItIs = yielded # the scene itself, not a copy: props do not set its state
   if yielded:
     child = yieldScene
     if child.isNil or child == owner:
       return nil
+  elif windowedBy(owner, sceneId, child):
+    if child.isNil:
+      return nil
+    asItIs = true
   else:
     if sceneId == owner.id.string:
       return nil
@@ -709,7 +759,7 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
   if child.rhythm.isNil:
     child.rhythm = SceneRhythm()
   let r {.cursor.} = child.rhythm
-  if props != r.embedProps and not yielded:
+  if props != r.embedProps and not asItIs:
     # Before the schedule decides: a change of state makes the scene due.
     r.embedProps = props
     if child.state.kind == JObject:
@@ -767,6 +817,13 @@ proc yieldReady(owner: FrameScene): bool =
   not yieldScene.isNil and yieldScene != owner
 
 embeddedYieldReady = yieldReady
+
+when not defined(frameosEmbedded):
+  proc wrappedSceneId(owner: FrameScene): string =
+    if not yieldScene.isNil and owner == yieldScene.wornLayout: yieldScene.id.string
+    else: owner.id.string
+
+  layoutWrappedSceneId = wrappedSceneId
 
 {.pop.}
 
@@ -1681,6 +1738,9 @@ proc pressTakenIn(scene: FrameScene; x, y: float32; wearer: FrameScene; depth: i
   for i in countdown(scene.slots.high, 0):
     template s: untyped = scene.slots[i]
     if x >= s.visible[0] and y >= s.visible[1] and x < s.visible[2] and y < s.visible[3]:
+      when not defined(frameosEmbedded):
+        if uiOverScene(scene.id.string, "pointerDown", x, y, -1):
+          break
       return pressTakenIn(s.child, x - s.x.float32, y - s.y.float32, wearer, depth + 1)
   uiTakesPressAt(scene.id.string, x, y)
 

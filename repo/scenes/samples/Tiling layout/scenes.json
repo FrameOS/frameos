@@ -1,0 +1,116 @@
+[
+  {
+    "id": "layout-tiling",
+    "name": "Tiling",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 1,
+      "backgroundColor": "#0f172a",
+      "isLayout": true
+    },
+    "fields": [
+      {
+        "name": "barColor",
+        "type": "color",
+        "label": "Bar color",
+        "value": "#0f172a",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "textColor",
+        "type": "color",
+        "label": "Text color",
+        "value": "#e2e8f0",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "accent",
+        "type": "color",
+        "label": "Focus color",
+        "value": "#2563eb",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "tiling": {
+        "name": "Tiling",
+        "category": "data",
+        "description": "Every scene opened tiled on the desktop and running at once: the one with the focus large on the left, the others in a column beside it. On a Raspberry Pi; elsewhere a bar above the scene.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Tiling\",\n  \"category\": \"data\",\n  \"description\": \"Every scene opened tiled on the desktop and running at once: the one with the focus large on the left, the others in a column beside it. On a Raspberry Pi; elsewhere a bar above the scene.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n",
+          "app.tsx": "// A tiling desktop: the scene with the focus large on the left, every other scene\n// opened in a column beside it, all of them running at once, none over another\n// (so each is drawn straight into its part of the panel, at its own pace). A press\n// on a tile brings it to the left; its cross closes it; the corners give it the whole desktop\n// until pressed again. The bar's + lists the frame's scenes to open.\n//\n// On a frame that runs one scene at a time (an ESP32, the preview: no\n// app.frame.scenes), it is a bar above the scene.\nconst pad = (n) => String(n).padStart(2, '0')\nconst on = (value) => value === true || value === 'true'\n\n// Drawn, not typed: a font need not have these.\nconst Glyph = ({ d, color }) => (\n  <svg viewBox=\"0 0 10 10\" className=\"w-[1.8vh] h-[1.8vh] min-w-[8px] min-h-[8px]\">\n    <path fill=\"none\" stroke={color} strokeWidth=\"1.4\" d={d} />\n  </svg>\n)\nconst CLOSE = 'M1.5 1.5L8.5 8.5M8.5 1.5L1.5 8.5'\nconst GROW = 'M1 4V1H4M6 1H9V4M9 6V9H6M4 9H1V6'\nconst SHRINK = 'M4 1V4H1M9 4H6V1M6 9V6H9M1 6H4V9'\n\nconst openOf = (app) => (Array.isArray(app.state.open) ? app.state.open : [])\n\nconst Bar = ({ app, children }) => {\n  const now = new Date()\n  return (\n    <div className={`flex items-center h-[5vh] min-h-[22px] gap-[1vh] px-[1vh] bg-[${app.state.barColor}] text-[${app.state.textColor}] text-[2.6vh]`}>\n      {children}\n      <span className=\"font-semibold\">{`${pad(now.getHours())}:${pad(now.getMinutes())}`}</span>\n    </div>\n  )\n}\n\nexport function get(app) {\n  frameos.setNextSleep(60 - new Date().getSeconds())\n  const accent = app.state.accent\n  const current = app.frame.sceneId\n  if (!Array.isArray(app.frame.scenes) || app.frame.systemScene) {\n    return (\n      <div className=\"flex flex-col w-full h-full bg-black\">\n        <Bar app={app}>\n          <span className=\"flex-1 truncate\">{app.frame.sceneName}</span>\n        </Bar>\n        <yield />\n      </div>\n    )\n  }\n  const names = {}\n  for (const scene of app.frame.scenes) names[scene.id] = scene.name || scene.id\n  if (current && !names[current]) names[current] = app.frame.sceneName || current\n\n  // The scene brought forward, however it was, is open; what was open stays.\n  const saved = openOf(app)\n  const open = saved.filter((id) => names[id])\n  let changed = open.length !== saved.length\n  if (current && !open.includes(current) && app.state.gone !== current) {\n    open.push(current)\n    changed = true\n  }\n  if (app.state.gone && app.state.gone !== current) frameos.setState('gone', null)\n  if (changed) frameos.setState('open', open)\n\n  const focus = (id) => {\n    frameos.setState('adding', false)\n    if (id !== current) frameos.dispatch('setCurrentScene', { sceneId: id })\n    else if (app.state.gone === id) frameos.setState('gone', null)\n  }\n  const close = (id) => {\n    const rest = openOf(app).filter((other) => other !== id)\n    frameos.setState('open', rest)\n    if (id === current) {\n      frameos.setState('gone', id)\n      frameos.setState('zoomed', false)\n      if (rest.length) frameos.dispatch('setCurrentScene', { sceneId: rest[rest.length - 1] })\n    }\n  }\n  const zoomed = on(app.state.zoomed) && open.includes(current)\n  const adding = on(app.state.adding)\n\n  const Tile = ({ id, main }) => (\n    <div className={`flex flex-col flex-1 min-h-0 min-w-0 border-[0.3vh] ${main ? `border-[${accent}]` : 'border-[#334155]'}`}>\n      <div className={`flex items-center h-[3.6vh] min-h-[16px] gap-[1vh] px-[1vh] text-[2.2vh] ${main ? `bg-[${accent}] text-white` : 'bg-[#1e293b] text-[#94a3b8]'}`}>\n        <span className=\"flex-1 truncate\">{names[id]}</span>\n        {main ? (\n          <span className=\"px-[0.6vh]\" onClick={() => frameos.setState('zoomed', !zoomed)}>\n            <Glyph d={zoomed ? SHRINK : GROW} color=\"#ffffff\" />\n          </span>\n        ) : null}\n        <span className=\"px-[0.6vh]\" onClick={() => close(id)}>\n          <Glyph d={CLOSE} color={main ? '#ffffff' : '#94a3b8'} />\n        </span>\n      </div>\n      <div className=\"relative flex flex-col flex-1 min-h-0\">\n        {main ? <yield /> : <Scene id={id} />}\n        {main ? null : <div className=\"absolute inset-0\" onPointerDown={() => focus(id)} onClick={() => {}} />}\n      </div>\n    </div>\n  )\n\n  const others = open.filter((id) => id !== current)\n  const main = open.includes(current)\n  const closed = app.frame.scenes.filter((scene) => !open.includes(scene.id))\n  return (\n    <div className=\"relative flex flex-col w-full h-full bg-[#0f172a]\">\n      <Bar app={app}>\n        <span className={`px-[1vh] font-bold ${adding ? 'bg-white/20' : ''}`} onClick={() => frameos.setState('adding', !adding)}>\n          +\n        </span>\n        <div className=\"flex flex-1 min-w-0 gap-[1vh]\">\n          {open.map((id) => (\n            <span className={`px-[1vh] truncate ${id === current ? `bg-[${accent}] text-white` : 'opacity-70'}`} onClick={() => focus(id)}>\n              {names[id]}\n            </span>\n          ))}\n        </div>\n      </Bar>\n      {zoomed || !others.length ? (\n        main ? <Tile id={current} main /> : <div className=\"flex-1\" />\n      ) : (\n        <div className=\"flex flex-1 min-h-0\">\n          {main ? (\n            <div className={`flex w-[${others.length ? 60 : 100}%] min-w-0`}>\n              <Tile id={current} main />\n            </div>\n          ) : null}\n          <div className=\"flex flex-col flex-1 min-w-0\">\n            {others.map((id) => (\n              <Tile id={id} />\n            ))}\n          </div>\n        </div>\n      )}\n      {adding ? (\n        <div className=\"absolute left-[1vh] top-[5vh] flex flex-col min-w-[30vw] bg-[#1e293b] text-white text-[2.6vh] border-[0.3vh] border-[#334155]\">\n          {closed.length ? (\n            closed.map((scene) => (\n              <span className=\"px-[1.5vh] py-[1vh] hover:bg-[#334155]\" onClick={() => focus(scene.id)}>\n                {scene.name || scene.id}\n              </span>\n            ))\n          ) : (\n            <span className=\"px-[1.5vh] py-[1vh] opacity-60\">Every scene is open</span>\n          )}\n        </div>\n      ) : null}\n    </div>\n  )\n}\n"
+        },
+        "origin": "tiling"
+      }
+    },
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "chrome",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "tiling",
+          "config": {}
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-to-draw",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "chrome-to-draw",
+        "type": "codeNodeEdge",
+        "source": "chrome",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  }
+]

@@ -203,7 +203,10 @@ so in a block give it a height.
 It runs on its own `refreshInterval`: a pass that finds it not due leaves its
 pixels alone and the scene does not run (`docs/scene-rhythm.md`), and the frame's
 next wake comes forward to when it is due. When only it is due the UI around it
-sits out. A tap on it is the scene's, in its own coordinates. One drawn as a
+sits out. A tap on it is the scene's, in its own coordinates, unless the UI drew
+something over it there that listens for that event (a menu, a window on top, a
+pane that takes a press): then it is that element's, and a press it took stays
+with it until it lifts (on a Pi; an ESP32's layouts tile the panel). One drawn as a
 picture counts against the same budget as a panel's copy (a quarter of free
 render memory, at most 1 MiB on an ESP32); a device that cannot keep it runs the
 scene again each render. An LCD repaints what the scene changed.
