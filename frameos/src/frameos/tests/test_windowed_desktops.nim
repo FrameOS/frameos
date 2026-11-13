@@ -236,6 +236,90 @@ suite "the Windows 98 desktop":
     shot(image, "8-closed")
     check problems.len == 0
 
+  test "a window sized from its corner grows with the pointer":
+    let g = winOf("tests/green")
+    let (x, y, w, h) = (g{"x"}.getInt(), g{"y"}.getInt(), g{"w"}.getInt(), g{"h"}.getInt())
+    discard send("pointerDown", at(x + w - 3, y + h - 3))
+    discard send("pointerMove", at(x + w + 30, y + h + 20))
+    discard send("pointerUp", at(x + w + 30, y + h + 20, %*{"buttons": 0}))
+    let sized = winOf("tests/green")
+    check sized{"x"}.getInt() == x
+    check sized{"w"}.getInt() == w + 33
+    check sized{"h"}.getInt() == h + 23
+
+  test "let go at a side, a window takes that half, and dragged away it has its own size back":
+    let g = winOf("tests/green")
+    let (x, y, w) = (g{"x"}.getInt(), g{"y"}.getInt(), g{"w"}.getInt())
+    discard send("pointerDown", at(x + 60, y + 14))
+    discard send("pointerMove", at(1, y + 100))
+    # Where it would go, drawn while it is held there.
+    let held = pass()
+    shot(held, "9-snapping")
+    check held.color(1, 200) == colored("#404040")
+    discard send("pointerUp", at(1, y + 100, %*{"buttons": 0}))
+    check winOf("tests/green"){"snap"}.getStr() == "l"
+    let half = pass()
+    shot(half, "10-half")
+    check half.color(20, 200) == colored("#00ff00")
+    check half.color(W div 2 - 10, 200) == colored("#00ff00")
+    check half.color(W div 2 + 20, 200) == colored("#008080")
+    # Out of the half by its title bar: its own width again, under the pointer.
+    discard send("pointerDown", at(100, 12))
+    discard send("pointerMove", at(300, 100))
+    discard send("pointerUp", at(300, 100, %*{"buttons": 0}))
+    let freed = winOf("tests/green")
+    check freed{"snap"}.kind == JNull
+    check freed{"w"}.getInt() == w
+    check freed{"x"}.getInt() > 100
+    check problems.len == 0
+
+  test "a double click on a desktop icon opens its scene":
+    discard pass()
+    # Blue is the third icon in the column at the top left.
+    let (ix, iy) = (48, 8 + 2 * 72 + 20)
+    discard send("tap", at(ix, iy))
+    check desk().state{"picked"}.getStr() == "tests/blue"
+    # Its name on the selection's blue.
+    let picked = pass()
+    var blue = false
+    for y in 8 + 2 * 72 + 36 ..< 8 + 3 * 72:
+      for x in 8 ..< 88:
+        blue = blue or picked.color(x, y) == colored("#000080")
+    check blue
+    let sent = send("doubleTap", at(ix, iy))
+    check "setCurrentScene" in sent
+    check current.id.string == "tests/blue"
+    let image = pass()
+    shot(image, "11-icon-opened")
+    check wins().len == 2
+    check problems.len == 0
+
+  test "Alt+Tab goes back and forth between two windows, and Alt+F4 closes the one in front":
+    proc key(name: string, alt = true): seq[string] =
+      send("keyDown", %*{"key": name, "code": name, "repeat": false, "shift": false, "ctrl": false,
+        "alt": alt, "meta": false})
+    discard key("Tab")
+    check current.id.string == "tests/green"
+    discard pass()
+    discard key("Tab")
+    check current.id.string == "tests/blue"
+    discard pass()
+    discard key("F4")
+    check current.id.string == "tests/green"
+    check winOf("tests/blue").isNil
+
+  test "let go at the top, a window fills the desktop":
+    discard pass()
+    let g = winOf("tests/green")
+    let (x, y) = (g{"x"}.getInt(), g{"y"}.getInt())
+    discard send("pointerDown", at(x + 60, y + 14))
+    discard send("pointerMove", at(x + 60, 1))
+    discard send("pointerUp", at(x + 60, 1, %*{"buttons": 0}))
+    check winOf("tests/green"){"max"}.getBool()
+    let image = pass()
+    shot(image, "12-max")
+    check image.color(W - 10, H div 2) == colored("#00ff00")
+
 suite "the tiling desktop":
   setup:
     windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =

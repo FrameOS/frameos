@@ -139,8 +139,9 @@ backspace (`uiTimer`) only reach the frame's own scene, not a nested one.
 On a frame that runs its scenes side by side (a Raspberry Pi), a layout can be
 a desktop: every scene opened in a window or a tile of its own, all of them
 running, one with the focus. The samples `Windows 98` (overlapping windows moved
-and sized with the mouse, a taskbar of what is open, a Start menu, full screen
-with F11) and `Tiling` (the scene with the focus large, the others in a column)
+and sized with the mouse, snapped to a half or the whole desktop at its edges,
+a taskbar of what is open, a Start menu and desktop icons, Alt+Tab and Alt+F4,
+full screen with F11) and `Tiling` (the scene with the focus large, the others in a column)
 are two. Everywhere else they draw the one scene, as before.
 
 The runtime gives a layout three things and keeps no windows of its own:
