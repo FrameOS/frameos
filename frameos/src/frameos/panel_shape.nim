@@ -35,10 +35,31 @@ proc chordHalf*(radius, dy: int): int =
   ## either way a row there may reach.
   if abs(dy) >= radius: 0 else: int(floor(sqrt(float(radius * radius - dy * dy))))
 
+const
+  PanelFormatRgb565* = 9
+    ## frameos_display.h's FOS_PIXEL_RGB565: an LCD.
+  PanelFormatsGrey* = {1, 4, 8}
+    ## frameos_display.h's FOS_PIXEL_1BPP, _2BPP_GRAY and _4BPP_GRAY: the
+    ## panels that show no color.
+
+when defined(frameosWasm):
+  var boardPanelFormat* = 0
+    ## A control plane drawing for a board (docs/server-rendering.md): the
+    ## board's panel as frameos_display.h numbers it, from
+    ## `frameos_wasm_set_frame`'s `pixelFormat`. The plane's canvas is RGBX
+    ## and its device "wasm", so without it every board was a colour LCD to
+    ## its scenes: `app.frame.color` true on a grey E1003 (a scene's "auto"
+    ## chose its colours) and the switcher and settings in the LCD's look.
+    ## 0: the panel is the runtime's own.
+
 proc panelIsPaper*(device: string, rgb565Canvas: bool): bool =
   ## Whether a press would cost a refresh to show (e-paper, a monochrome
   ## OLED): any panel that is not an LCD. An ESP32's LCD canvas is its RGB565
-  ## buffer and any other is e-paper or an OLED; a Pi says by its device.
+  ## buffer and any other is e-paper or an OLED; a Pi says by its device; a
+  ## control plane by the board's panel.
+  when defined(frameosWasm):
+    if boardPanelFormat > 0:
+      return boardPanelFormat != PanelFormatRgb565
   if rgb565Canvas:
     return false
   when defined(frameosEmbedded):

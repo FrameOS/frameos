@@ -452,6 +452,16 @@
   (`activePalette(framePalette(stock))`: a photo's own palette, the frame's
   `palette`, the stock table); a change to that rule changes the backend's
   packer, `panel-pack.ts` and `embedded_main.nim` together.
+- A board that says `X-FrameOS-Fosb: 2` gets FOSB version 2: deflated, and
+  only the 64-byte blocks that changed since the picture its If-None-Match
+  names (`fosb_v2` in `server_render.py`, the cloud's `fosb.ts`, pinned by
+  `docs/fosb-fixtures.json`; the board checks the result by its sha256 and
+  asks again whole). Every answer also says where a press on its picture is
+  taken (`X-FrameOS-Press`, the runtime's `frameos_wasm_press_map`), and the
+  board clicks from its touch task at once. And the runtime is told the
+  board's panel (`set_frame`'s `pixelFormat` → `panel_shape.boardPanelFormat`):
+  `app.frame.color` / `paper` and the built-in scenes' look are the board's,
+  never the plane's RGBX canvas.
 - The battery popover's offer reads `renderSceneMs` from the metrics
   (`serverRenderForecast` in `utils/batteryForecast.ts`).
 - A board rendered on the server is sent nothing a scene holds ("Nothing
@@ -889,7 +899,7 @@
 - Built as an ESM React app with TypeScript; kea manages state and type generation (`kea-typegen`).
 - Build pipeline orchestrated by `build.mjs` using esbuild, with Tailwind/PostCSS for styling and optional bundle analysis via `vite-bundle-visualizer`.
 - Development: `pnpm install` followed by `pnpm --dir frontend run dev` (spawns kea typegen watch and esbuild dev build concurrently).
-- Repo-level local development runner: `pnpm dev` starts `mprocs` (`mprocs.yaml` is the process list). Panes that autostart: `backend` (FastAPI, `DEBUG=1`), `worker` (ARQ), `vite` and `kea` (the main frontend's dev server and its typegen watcher), `editor` (the embedded editor bundle `frontend/dist-editor`, rebuilt on change for the local scenes page's iframe), `redis`, `postgres` (the Flox-provided Postgres on port 55432, via `cloud/scripts/db-run.sh`) and `wasm` — which runs `frameos/tools/build_wasm.sh`, a Nim → emscripten build of the interpreted-scene runtime for the browser preview, on every `pnpm dev`. Panes that do not autostart (select them in mprocs): `frameos` (`make` in `frameos/`, the native runtime), `cloud` (the FrameOS Cloud Next.js dev server; it first runs `cloud/scripts/db-setup.sh` to apply migrations), `cloud-hub` (the frame hub, `pnpm run dev:hub` in `cloud/`), `backend-docker` (`scripts/backend-docker.sh`, which persists a generated Docker `SECRET_KEY` in the gitignored `.env.docker.local`) and `migrate` (alembic upgrade for the backend). There is no pane for the on-frame admin frontend; run `pnpm dev:frame-frontend` (its watcher in `frameos/frontend`) by hand when working on it.
+- Repo-level local development runner: `pnpm dev` starts `mprocs` (`mprocs.yaml` is the process list). Panes that autostart: `backend` (FastAPI, `DEBUG=1`), `worker` (ARQ), `vite` and `kea` (the main frontend's dev server and its typegen watcher), `editor` (the embedded editor bundle `frontend/dist-editor`, rebuilt on change for the local scenes page's iframe), `redis`, `postgres` (the Flox-provided Postgres on port 55432, via `cloud/scripts/db-run.sh`) and `wasm` — which runs `frameos/tools/build_wasm_watch.sh`: `build_wasm.sh` (a Nim → emscripten build of the interpreted-scene runtime, for the browser preview and for every frame the backend renders: thin clients, boards set to render on the server, virtual frames) on every `pnpm dev`, and again whenever the runtime's sources change, so a merge does not leave the backend drawing with an older runtime. Panes that do not autostart (select them in mprocs): `frameos` (`make` in `frameos/`, the native runtime), `cloud` (the FrameOS Cloud Next.js dev server; it first runs `cloud/scripts/db-setup.sh` to apply migrations), `cloud-hub` (the frame hub, `pnpm run dev:hub` in `cloud/`), `backend-docker` (`scripts/backend-docker.sh`, which persists a generated Docker `SECRET_KEY` in the gitignored `.env.docker.local`) and `migrate` (alembic upgrade for the backend). There is no pane for the on-frame admin frontend; run `pnpm dev:frame-frontend` (its watcher in `frameos/frontend`) by hand when working on it.
 - Production build: `pnpm --dir frontend run build` which chains kea codegen, schema generation (`ts-json-schema-generator`), TypeScript type-checking, and final bundling to `dist/`. 【F:frontend/package.json†L6-L66】
 - The published `frameos-editor` package has its own `editor` component hash/version in `versions.json`; `project-folders.json` includes shared frontend sources so frontend-only editor changes receive a new npm version during release.
 - Output folder is consumed by the backend’s static file mounts; ensure `frontend/dist` exists (e.g., via `pnpm --dir frontend run build`) before running the Python app outside of test mode. 【F:backend/app/fastapi.py†L38-L86】

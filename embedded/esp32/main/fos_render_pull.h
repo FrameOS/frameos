@@ -109,3 +109,76 @@ static inline uint32_t fos_render_pull_next_render_seconds(const char *value)
     if (seconds > FOS_RENDER_PULL_NEXT_RENDER_MAX_S) return FOS_RENDER_PULL_NEXT_RENDER_MAX_S;
     return seconds;
 }
+
+/* ------------------------------------------------- FOSB version 2 */
+
+/* docs/server-rendering.md "Only what changed". A pull that says
+ * `X-FrameOS-Fosb: 2` may be answered in FOSB version 2: the version 1
+ * header with version 2 and a flags word in the reserved u16, the packed
+ * picture's sha256, then the payload, raw deflate when FOS_FOSB_DEFLATE is
+ * set. The payload is the picture whole, or with FOS_FOSB_DELTA the runs
+ * that changed since the picture the pull named in If-None-Match: each a
+ * u32le offset into the packed picture, a u32le length and that many bytes.
+ * A plane that does not know version 2 answers version 1 as before. */
+#define FOS_FOSB_HEADER_LEN 12
+#define FOS_FOSB_V2_HEADER_LEN 44
+#define FOS_FOSB_DELTA 1u
+#define FOS_FOSB_DEFLATE 2u
+#define FOS_FOSB_VERSION_HEADER "X-FrameOS-Fosb"
+
+typedef struct {
+    uint8_t version; /* 1 or 2 */
+    uint8_t format;
+    uint16_t width, height;
+    uint16_t flags; /* version 2: FOS_FOSB_DELTA | FOS_FOSB_DEFLATE; 0 in version 1 */
+} fos_fosb_header_t;
+
+/* The first FOS_FOSB_HEADER_LEN bytes of an answer. False when they are not
+ * a FOSB header of a version this reads, or a version 2 one that is not
+ * deflated or sets a flag this does not know. */
+bool fos_fosb_header(const uint8_t bytes[FOS_FOSB_HEADER_LEN], fos_fosb_header_t *out);
+
+/* What a version 2 payload, inflated, writes into the panel buffer, fed in
+ * pieces as they come: the picture from its first byte, or the runs over
+ * the picture the buffer holds. A run past the buffer, or a payload that
+ * stops inside a run or (whole) short of the picture, is malformed. */
+typedef struct {
+    uint8_t *buf;
+    size_t len;
+    bool delta;
+    bool failed;
+    size_t written;    /* whole: bytes written so far */
+    uint8_t head[8];   /* delta: the run header being read */
+    uint8_t head_used;
+    uint32_t at;       /* delta: where the run being read writes next */
+    uint32_t left;     /* delta: its bytes still to come */
+    uint32_t runs;     /* delta: runs read, for the log */
+} fos_fosb_writer_t;
+
+void fos_fosb_writer_begin(fos_fosb_writer_t *w, uint8_t *buf, size_t len, bool delta);
+/* False once the payload is malformed (and from then on). */
+bool fos_fosb_writer_feed(fos_fosb_writer_t *w, const uint8_t *data, size_t n);
+/* Whether the payload ended where a payload may end. */
+bool fos_fosb_writer_done(const fos_fosb_writer_t *w);
+
+/* ------------------------------------------------------ the press map */
+
+/* docs/server-rendering.md "The click": where a press on the picture does
+ * something, as the plane said it with the picture (X-FrameOS-Press):
+ * `x0,y0,x1,y1` in the panel's pixels, `;` between entries, a leading `!`
+ * on one where a press is not taken. The first entry a press lands in
+ * answers; a press in none is not taken. */
+#define FOS_PRESS_MAP_MAX 64
+#define FOS_PRESS_HEADER "X-FrameOS-Press"
+
+typedef struct {
+    uint16_t x0, y0, x1, y1; /* x1, y1 past the last pixel */
+    bool taken;
+} fos_press_rect_t;
+
+/* The entries of `header` into `out` (at most `max`, the rest dropped: a
+ * press there is not clicked at). -1 when it is not a press map. */
+int fos_press_map_parse(const char *header, fos_press_rect_t *out, int max);
+
+/* Whether a press at panel pixel (x, y) is taken. */
+bool fos_press_map_takes(const fos_press_rect_t *map, int count, int x, int y);

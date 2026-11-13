@@ -2066,6 +2066,64 @@ proc pressTakenAt*(scene: FrameScene; x, y: int): bool =
   ## be a swipe.
   pressTakenIn(scene, x.float32, y.float32, nil, 0)
 
+type PressRect* = object
+  ## One entry of a press map: x0, y0, x1, y1 in the scene's pixels, and
+  ## whether a press there is taken. The first entry a press lands in answers.
+  box*: array[4, float32]
+  taken*: bool
+
+proc clipped(box, clip: array[4, float32]): array[4, float32] =
+  [max(box[0], clip[0]), max(box[1], clip[1]), min(box[2], clip[2]), min(box[3], clip[3])]
+
+proc nonEmpty(box: array[4, float32]): bool = box[2] > box[0] and box[3] > box[1]
+
+proc pressMapIn(scene: FrameScene; dx, dy: float32; clip: array[4, float32]; wearer: FrameScene;
+                depth: int; into: var seq[PressRect]) =
+  ## pressTakenIn as a list: the layout first, a slot answering alone for its
+  ## part (its child's entries, then the slot itself as untaken), then the
+  ## scene's own UI.
+  if scene.isNil or depth > 8 or not clip.nonEmpty:
+    return
+  if scene != wearer and not scene.wornLayout.isNil:
+    pressMapIn(scene.wornLayout, dx, dy, clip, scene, depth + 1, into)
+    return
+  if scene of InterpretedFrameScene and InterpretedFrameScene(scene).takesPresses():
+    into.add PressRect(box: clip, taken: true)
+    return
+  for i in countdown(scene.slots.high, 0):
+    template s: untyped = scene.slots[i]
+    let zone = clipped([dx + s.visible[0], dy + s.visible[1], dx + s.visible[2], dy + s.visible[3]], clip)
+    if zone.nonEmpty:
+      pressMapIn(s.child, dx + s.x.float32, dy + s.y.float32, zone, wearer, depth + 1, into)
+      into.add PressRect(box: zone, taken: false)
+  var regions: seq[array[4, float32]]
+  uiPressRects(scene.id.string, regions)
+  for region in regions:
+    let box = clipped([dx + region[0], dy + region[1], dx + region[2], dy + region[3]], clip)
+    if box.nonEmpty:
+      into.add PressRect(box: box, taken: true)
+
+proc pressMap*(scene: FrameScene; width, height: int): seq[PressRect] =
+  ## pressTakenAt for the whole canvas at once, of what the last render drew:
+  ## where a press does something, as a control plane hands it to a board
+  ## with the picture (docs/server-rendering.md "The click"). An entry inside
+  ## a taken one before it, or after one that covers the canvas, says nothing
+  ## and is left out.
+  var all: seq[PressRect]
+  pressMapIn(scene, 0, 0, [0'f32, 0, width.float32, height.float32], nil, 0, all)
+  for entry in all:
+    var said = true
+    for earlier in result:
+      if earlier.box[0] <= entry.box[0] and earlier.box[1] <= entry.box[1] and
+          earlier.box[2] >= entry.box[2] and earlier.box[3] >= entry.box[3]:
+        said = false
+        break
+    if said:
+      result.add entry
+  # A press that lands in nothing is not taken: untaken entries at the end say nothing.
+  while result.len > 0 and not result[^1].taken:
+    result.setLen(result.len - 1)
+
 proc runEventApps(scene: InterpretedFrameScene, context: ExecutionContext) =
   ## The onEvent of the JS apps that subscribed to this event. One that returns
   ## true is drawn again, as a run of a JSX handler is.

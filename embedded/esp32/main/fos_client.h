@@ -141,6 +141,17 @@ bool fos_client_renders_locally(void);
  * pull itself: fos_events.c wakes the render task, which sends what is held
  * once the input is decided. False when it was not held. Any task. */
 bool fos_client_relay_event(const char *origin, const char *name, const char *payload_json);
+/* Rendered on the server: whether a press at this wire position (0..32767
+ * over the panel, fos_touch_wire) lands on something the picture showing
+ * does something with, by the press map its plane sent with it
+ * (docs/server-rendering.md "The click"): 1 taken, 0 not, -1 when the scene
+ * runs here (the runtime answers, frameos_nim_press_taken). Any task. */
+int fos_client_remote_press_taken(int wire_x, int wire_y);
+/* Rendered on the server: a pointer pressed (true) or lifted through the
+ * frame's HTTP API. While one is pressed the relay waits for its lift, as it
+ * waits for a finger on the glass, so the plane hears the press whole. Any
+ * task. */
+void fos_client_http_press(bool down);
 /* turnOn (1), turnOff (0), toggleScreen (-1) for a frame whose dispatcher is
  * not here (rendered on the server): the backlight is the board's. Any task. */
 void fos_client_set_display_power(int on);
