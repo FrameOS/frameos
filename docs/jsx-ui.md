@@ -160,6 +160,7 @@ shows no select pays only the code.
 | `br` | A line break. |
 | `input`, `textarea` | A field to type into ([Fields and the keyboard](#fields-and-the-keyboard)). |
 | `select`, `option` | A select box ([Select boxes](#select-boxes)). |
+| `Scene`, `yield` | Another scene, as a picture ([Scenes inside a UI](#scenes-inside-a-ui)). |
 | anything else | A box: `div`, `p`, `h1`, `section`, `layout`, ... No tag has a default style (Tailwind's preflight). |
 
 Text is any string or number child; `null`, `undefined`, `true` and `false`
@@ -189,6 +190,27 @@ In an `<svg>`, React's camelCase attribute names are read as SVG's
 `style={{ fill: "red" }}` becomes a style attribute; `<image href={ref}>`
 takes an image ref like `img`.
 
+### Scenes inside a UI
+
+`<Scene id="clock" city="Oslo" />` draws another scene of the frame where the
+element lands; its other props are that scene's state (`count={3}` stays a
+number). `<yield />` is where a layout's content goes (`docs/scene-layouts.md`).
+Both are holes in the canvas the scene draws straight into, not pictures, unless
+something asks them to be one (opacity, something painted over it, a box that
+scrolls around it). With no size of its own it takes the room left (`flex-1`),
+so in a block give it a height.
+
+It runs on its own `refreshInterval`: a pass that finds it not due leaves its
+pixels alone and the scene does not run (`docs/scene-rhythm.md`), and the frame's
+next wake comes forward to when it is due. When only it is due the UI around it
+sits out. A tap on it is the scene's, in its own coordinates. One drawn as a
+picture counts against the same budget as a panel's copy (a quarter of free
+render memory, at most 1 MiB on an ESP32); a device that cannot keep it runs the
+scene again each render. An LCD repaints what the scene changed.
+
+A scene cannot hold itself, and nesting stops eight deep. A `<Scene>` inside a
+root `<svg>` draws nothing: it needs the layout to know its size.
+
 ### Photos that stay
 
 `frameos.fetchImage`'s image lasts one render: the runtime lets it go when
@@ -215,6 +237,16 @@ export function get(app) {
   size it is decoded at, in the canvas's pixel format: an ESP32 holds a
   480x480 photo in 450 KB of RGB565, and drawing it is a copy. A host decodes
   at the picture's own size.
+- **Only with room for it** (`keptPictureTarget` in `app_runtime.nim`): short
+  of memory the app's older kept pictures go first (their refs then draw
+  nothing, and the app fetches again), then the photo is decoded at its own
+  resolution when that is less than the size asked and more than half of it
+  (smaller, it would be more than twice blown up on the panel); with no
+  room at all `fetchImage` answers an `error` and no `image`. The size the
+  photo has comes from the start of the download (`downloadImageWithDataSizedBy`),
+  so the gallery's random photo is the one decoded. On a reTerminal E1003
+  (8 MB, 1872x1404) a kept full-window photo is 1.09 MB; an unchecked one
+  next to two others aborted the render and restarted the firmware.
 - **A kept picture is never the consumer's target.** A UI draws the canvas
   whole and the photo is one of its elements, so the photo decodes into an
   image of its own.
@@ -230,6 +262,24 @@ export function get(app) {
   - An interpreter without pictures needs 2 MB after a decode
     (`utils/memory.nim`).
 
+### A picture at another size
+
+An `<img>` drawn larger or smaller than its picture (any picture: a kept one,
+a fetch of the render's own, a canvas) is stretched into its box by
+`drawResampled` (pixie `images.nim`, from `drawSvgImage` in `svg.nim`) when
+the layout only scales and moves it, which is all a layout does. Fixed point:
+a table of source pixels and weights per axis, each source row resampled
+across once, and the opacity in the weights. Larger than the picture it is
+bilinear with the edge pixels held, smaller every target pixel is the average
+of the source it covers, and a target pixel is drawn when its centre is in
+the box. Nothing the size of the picture is allocated: the general draw (for a
+turned or mirrored picture, and `image-rendering="pixelated"`) doubles or
+halves the whole picture into a copy to scale it more than twice, copies it
+again for an opacity, and samples each pixel through floats (11 µs a pixel on
+an ESP32-S3, 40 s for a reTerminal E1003's 1848x1179 window). On a laptop a
+2400x1600 photo into that window went from 45 to 12 ms, and a 3x enlargement
+from 42 to 4 ms.
+
 ### Canvases
 
 A picture the app draws into, kept between renders, for a paint page or a
@@ -241,8 +291,8 @@ export function get(app) {
   canvas = frameos.canvas('paint', 448, 276, '#f1f5f9')
   if (canvas.fresh) replay(canvas) // made just now: draw the record into it again
   return (
-    <div onPointerMove={(e) => frameos.draw(canvas, <line x1={last.x} y1={last.y} x2={e.localX}
-      y2={e.localY} stroke="#0f172a" strokeWidth={6} strokeLinecap="round" />)}>
+    <div onPointerMove={(e) => e.buttons && frameos.draw(canvas, <line x1={last.x} y1={last.y}
+      x2={e.localX} y2={e.localY} stroke="#0f172a" strokeWidth={6} strokeLinecap="round" />)}>
       <img className="w-[448px] h-[276px]" src={canvas} />
     </div>
   )
@@ -292,6 +342,11 @@ export function get(app) {
 - **It is in the canvas's pixel format**, as kept photos are: on an ESP32,
   RGB565 (a 448x276 canvas is 242 KB), and drawn 1:1 by `<img>` at its own
   size.
+- **`imageRendering="pixelated"`** on an `<image>` draws a scaled RGB565
+  canvas as its nearest pixels: blocky, with no copy and a few ms a frame on
+  an ESP32 (2026.11.5+), where a smooth scale takes ~600 ms at 480x480. For a
+  picture that follows fingers and is drawn again when they lift, as the Map
+  scene's pinch is.
 
 ## Layout
 
@@ -337,10 +392,13 @@ Map scene's lines) fetches a quarter of the data.
 - **Which scale.** A field with `role: "renderScale"` whose state holds a
   number, else the scene's `settings.renderScale`, else the frame's
   (frame.json `renderScale`, the control planes' `render_scale`). The
-  frame's 0 is automatic: the panel's shorter edge over 600 px, rounded down
-  to a quarter, never below 1 (800x480 and 720x720 are 1, 1200x1600 is 2,
-  1872x1404 is 2.25), so a scaled layout keeps at least 600 px on its
-  shorter edge.
+  frame's 0 is automatic: 1, and 2 on a 4K or larger screen on HDMI (the
+  `framebuffer` device, a shorter edge of 2160 px or more). Anything else is
+  the owner's to set.
+  A scale below 1 (0.25, 0.5 and 0.75 are offered) works the other way: the
+  layout gets more room than the panel has and everything is drawn smaller.
+  The built-in scenes (the switcher, the settings panel) follow the frame's
+  scale between 0.75 and a 320 px layout (docs/scene-settings.md).
   Out-of-range values (above 4) are ignored.
 - **What a scaled app sees.** `context.imageWidth` / `imageHeight`,
   `targetWidth` / `targetHeight` and `app.frame.width` / `height`, divided by
@@ -439,13 +497,17 @@ export const get = () => (
   its box or not, and no other element hears them. `localX` / `localY` stay
   from its corner, so they go negative or past its width: a slider clamps
   them. `localX / width` is how far along it the finger is, so a slider
-  needs no width of its own and works on any frame. A move with no press goes to the element under it. A drag renders at
+  needs no width of its own and works on any frame. A move with no press goes to the element under it,
+  as in a browser, with `buttons` 0: a mouse or a pen passing over (a finger is over nothing
+  until it presses). `buttons` is the mask of what is held (`1 << button`), so a slider or a
+  paint brush that follows the pointer acts only while it is set. A drag renders at
   the frame's render rate, with the newest position (the ESP32 coalesces a
   finger's moves while a render runs).
 
   ```tsx
   const setLevel = (e) => { level = Math.max(0, Math.min(100, Math.round((e.localX / e.width) * 100))) }
-  <div className="h-8 rounded-full bg-white/10" onPointerDown={setLevel} onPointerMove={setLevel}>
+  <div className="h-8 rounded-full bg-white/10" onPointerDown={setLevel}
+    onPointerMove={(e) => { if (e.buttons) setLevel(e) }}>
     <div className={`h-8 w-[${level}%] rounded-full bg-sky-500`} />
   </div>
   ```
@@ -458,8 +520,11 @@ export const get = () => (
   lifts is over nothing, so on a touch screen `hover:` lasts for the press.
 - **Renders cost what they cost on the panel.** On an LCD, a HyperPixel or
   the browser preview a click answers at once; on e-paper it answers in a
-  refresh, and `hover:` / `active:` are a refresh each: keep them for
-  screens that redraw in a blink.
+  refresh, so e-paper draws no `hover:` or `active:` at all (a press asked
+  for a refresh of its own, and the tap's render waited behind it:
+  `ui/events.nim`). Every handler is a render, so an app
+  that follows a finger checks `app.frame.paper` (2026.11.5+) and takes the
+  whole drag as one `onSwipe` there, as the Map scene does.
 - **Where the events come from**: the dispatcher's pointer events and
   gestures (`docs/events.md` "Input"), on every host: a Pi's touch screen or
   mouse, the touch glass of an ESP32 LCD board (the SenseCAP Indicator, the
@@ -526,24 +591,49 @@ export function get(app) {
   keys types instead of changing the scene. A key is typed where the finger
   lifts, however it rolled on the way, and a tap between the keys or in the
   keyboard's margin at the very edge is the nearest key, as on a phone.
-- **A key held shows its accents**, as on a phone: after the dispatcher's
+- **A key just typed stays lit** for a moment (250 ms from the first render
+  that shows it) in its pressed color, so a quick tap that the panel never
+  showed pressed still says which key it was. Not on e-paper.
+- **A key held shows its symbol and accents**, as on a phone: after the dispatcher's
   long press (`gestures.longPressMs`, delivered while the finger is still
   down on every host that ticks: the Pi, the ESP32 awake, the preview) the
   key lights and its accented forms come up in a row of keys above it —
   `a` gives `à á â ä æ ã å ā`, `e` `è é ê ë ē ė ę`, and so on for `c i l n
   o s u y z`, with `$ - " ' . ? ! 0 %` giving `€ £ ¥`, dashes, curly quotes,
   `…`, `¿ ¡ ° ‰` (`ui/keyboard.nim` `Accents`); under shift the letters are
-  capitals. The finger slides onto one and lifts to type it (the one under
-  it lights on an LCD), or lifts on the key and taps one. Lifted or tapped
-  anywhere else, the row goes away and the tap does what it does (a key
-  types); the frame's `back` closes the row first and keeps the keyboard.
+  capitals. Every letter also holds a symbol, after SwiftKey: the digits
+  over `q`–`p`, `@ # & * - + = ( )` over `a`–`l`, `_ $ " ' : ; /` over
+  `z`–`m` (`ui/keyboard.nim` `Hints`), and the letters page's full stop holds
+  `!` and `?`, which that page has no keys for (on the symbols page and the
+  number pad `.` holds its `…` alone). The first symbol is drawn small and dim in the
+  key's top right corner. It is the first form of the key's row, which starts right
+  over the key (pushed left at the screen's edge) with the symbol lit: hold a
+  letter and lift, and its symbol is typed. Sliding sideways moves the light
+  along the row by how far the finger went (`UiInput.accentFrom`), at any
+  height from above the row to a couple of rows below it (no need to go up
+  onto the row); a row without a symbol (`$` on the symbols page) is
+  centred on its key and lights the form nearest the finger's x. Lifting
+  types the lit one. Slid far away from the row, nothing is lit, and lifted
+  there the row stays up for a tap on one. Lifted or tapped anywhere else,
+  the row goes away and the tap does what it does (a key types); the
+  frame's `back` closes the row first and keeps the keyboard.
   The row is centred on the key as far as the screen, or a round panel's
   circle, allows, and goes under the key when there is no room above. Keys
-  without accents have no hold.
+  with neither a symbol nor accents have no hold, but for backspace:
+- **Backspace held erases** one character at the long press, then one every
+  100 ms, every 50 ms after a dozen, until the finger lifts. On e-paper it
+  erases once: a refresh a character is seconds.
+- **The space bar dragged moves the caret**, as on a phone: once the finger
+  has moved more than a tap's slop, every 0.45 of the bar's height sideways
+  is one character left or right, and every bar's height up or down a line
+  in a `<textarea>` (the start or the end of an `<input>`), each an arrow
+  key to `onKeyDown`. Its release types no space.
 - **A real keyboard** (a Pi's, the computer's over the preview) types into
   the field instead: once a key has been typed on one, fields get no
   keyboard on the screen. Left and right, Home, End, Backspace and Delete
-  move and erase.
+  move and erase; Up and Down move a line in a `<textarea>` (keeping the
+  column they set out from, to the start or the end off its first or last
+  line) and go to the start or the end of an `<input>`.
 - **`onKeyDown`** hears every key typed into the field, before it applies:
   `e.key` is the character, or `Enter`, `Backspace`, ... (and the rest of
   the `keyDown` payload from a real keyboard). It cannot stop the key.
@@ -552,7 +642,11 @@ export function get(app) {
   text's color.
 - **Styles**: a field is a box like any other (no default style), whose
   text is one line (`<input>`, scrolled sideways to keep the caret in sight)
-  or wraps (`<textarea>`, scrolled down to it). The caret is the text's
+  or wraps (`<textarea>`, scrolled down to it). A `<textarea>` with more
+  text than fits scrolls like a box with `overflow-y-auto` ([Scrolling](#scrolling-and-clipping)):
+  a finger drags it, a wheel scrolls it, a bar says where in it you are,
+  and it keeps its place when it lets go of the keyboard; an edit or a key
+  brings the caret back into sight. The caret is the text's
   color. `focus:` classes apply while it has the keyboard.
 - **A field without `value`** shows what is typed while it has the keyboard
   and forgets it after: always give it one.
@@ -568,7 +662,14 @@ tree with Tailwind classes. A key with accents carries an `on-long-press`
 handler of its own number; the hold sets `UiInput.accents` to the key, the
 layout draws the row from where it placed that key (`accentPopup`, its
 forms handlers from `AccentBase`), and the holding pointer's moves and
-release are the row's until it lifts (`UiTarget.holdPointer`).
+release are the row's until it lifts (`UiTarget.holdPointer`, the finger's
+x in `UiInput.accentX`, the lit form in `accentLit`). What happens with
+time — a typed key's light going out (`UiInput.flash`), backspace held —
+is the dispatcher's tick asking `uiTimerDue` and sending the scene showing
+`uiTimer` (docs/events-contract.json: the runtime's own, `internal`, no
+scene listens for it), which `dispatchUiEvent` turns into the next erase or
+a render. A host that ticks only while input is held (the preview) also
+ticks while `uiTimersPending`; the Pi's message loop wakes every 20 ms then.
 
 ## Select boxes
 

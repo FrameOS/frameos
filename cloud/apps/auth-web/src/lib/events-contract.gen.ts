@@ -2,8 +2,11 @@
 
 export const customEventMaxNameLength = 63;
 
+/** What a layout's scene node names for the scene it wraps: no scene of the frame. */
+export const sceneYieldId = "system/yield";
+
 /** Every built-in event name. Any other name is a custom scene event. */
-export const contractEventNames: readonly string[] = ["init", "render", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "edgeSwipe", "wheel", "turnOn", "turnOff", "toggleScreen", "gpio", "button", "setSceneState", "setCurrentScene", "sceneSwitcher", "sceneSettings", "back", "forward", "metrics", "reload", "restart", "reboot", "uploadScenes", "voiceChat"];
+export const contractEventNames: readonly string[] = ["init", "render", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "edgeSwipe", "wheel", "turnOn", "turnOff", "toggleScreen", "gpio", "button", "setSceneState", "setCurrentScene", "sceneSwitcher", "sceneSettings", "back", "forward", "metrics", "reload", "restart", "reboot", "uploadScenes", "voiceChat"];
 
 export type CloudEventRoute = {
   verb: string;
@@ -66,4 +69,4 @@ export const cloudCustomEventRoute: CloudEventRoute = {
 export const customEventDeclarableOrigins: readonly string[] = ["schedule", "cloud"];
 
 /** Contract events a schedule entry may not fire: the device refuses them. */
-export const scheduleRefusedEvents: readonly string[] = ["init", "open", "close", "uploadScenes", "voiceChat"];
+export const scheduleRefusedEvents: readonly string[] = ["init", "open", "close", "uiTimer", "uploadScenes", "voiceChat"];

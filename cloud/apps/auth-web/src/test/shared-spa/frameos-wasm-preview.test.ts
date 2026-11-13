@@ -90,11 +90,18 @@ describe("FrameOSPreview init", () => {
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,
+      sceneStateSeeded: false,
       version: null,
     });
     expect(preview.assetsInfo).toEqual(browserAssets);
     expect(preview.currentSceneId).toBe("scene-1");
-    expect(preview.runtimeInfo).toEqual({ gpioEvents: false, inputEvents: false, pointerEvents: false, version: null });
+    expect(preview.runtimeInfo).toEqual({
+      gpioEvents: false,
+      inputEvents: false,
+      pointerEvents: false,
+      sceneStateSeeded: false,
+      version: null,
+    });
   });
 
   it("names the runtime version the worker reports", () => {
@@ -105,12 +112,14 @@ describe("FrameOSPreview init", () => {
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,
+      sceneStateSeeded: false,
       version: "2026.9.2",
     });
     expect(preview.runtimeInfo).toEqual({
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,
+      sceneStateSeeded: false,
       version: "2026.9.2",
     });
   });

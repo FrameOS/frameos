@@ -36,6 +36,9 @@
     // whole deploy drawer. Vitest still runs it; only tsc leaves it out.
     // (frontend/ typechecks these components itself with its own config.)
     "src/test/shared-spa/cloud-deploy-dialog.test.tsx",
+    // Same story: mounts sceneUpdatesLogic and frameLogic for the deploy
+    // drawer's scene updates. Vitest still runs it; only tsc leaves it out.
+    "src/test/shared-spa/scene-update-deploy.test.ts",
     // Same story: renders the signed-out store front, whose import graph
     // reaches repositoriesModel and the legacy workspace components.
     // Vitest still runs it; only tsc leaves it out.
@@ -83,6 +86,8 @@
     // (FrameConnectionDot's bare JSX namespace). Vitest still runs it; only
     // tsc leaves it out.
     "src/test/shared-spa/embedded-editor-logics.test.ts",
+    // Same: mounts the file tree's logic over the same shim.
+    "src/test/shared-spa/embedded-editor-file-tree-logic.test.ts",
     // Same shim, same import graph (frameLogic → the legacy workspace).
     "src/test/shared-spa/scene-state-logic.test.ts",
     // Same story: imports frameLogic for the service-keys change detail.
@@ -102,6 +107,8 @@
     // Same story: the deploy-progress bar reads decorators/frame.tsx (bare
     // JSX namespace). Vitest still runs it; only tsc leaves it out.
     "src/test/shared-spa/deploy-progress.test.tsx",
+    // Same story: docs/frame-status-fixtures.json replays decorators/frame.tsx.
+    "src/test/shared-spa/frame-status-fixtures.test.ts",
     // Same story: mounts FrameImage, whose sleep badge reads decorators/frame.tsx.
     "src/test/shared-spa/frame-image-sleep-badge.test.tsx",
     // Same story: renders the workspace chat drawer from FrameosShell.
@@ -187,6 +194,8 @@
     // Mounts buttonMapLogic (→ frameLogic, framesModel) and renders the
     // "Map buttons" dialog, same reason.
     "src/test/shared-spa/button-map-modal.test.tsx",
+    // Mounts sceneLayoutLogic (→ frameLogic, framesModel), same reason.
+    "src/test/shared-spa/scene-layout-picker.test.tsx",
     // Mounts templatesLogic (→ frameLogic), same reason.
     "src/test/shared-spa/template-install-feedback.test.ts",
     // Mounts eventsLogic (→ frameLogic), same reason.
@@ -197,6 +206,8 @@
     "src/test/shared-spa/lan-access.test.tsx",
     // Imports the home page's logics (→ decorators/frame.tsx, framesModel),
     // same reason.
-    "src/test/shared-spa/home-page.test.ts"
+    "src/test/shared-spa/home-page.test.ts",
+    // Mounts scenesLogic (→ frameLogic, framesModel), same reason.
+    "src/test/shared-spa/scene-preview-plane-first.test.ts"
   ]
 }

@@ -2,10 +2,27 @@
   {
     "id": "dc37aeba-fd8a-4d86-b883-c08d311eefdf",
     "name": "iCal agenda",
-    "settings": { "backgroundColor": "#ffffff", "refreshInterval": 60, "execution": "interpreted" },
+    "settings": {
+      "backgroundColor": "#ffffff",
+      "refreshInterval": 60,
+      "execution": "interpreted"
+    },
     "fields": [
-      { "access": "public", "label": "iCal URL", "name": "iCalURL", "persist": "disk", "type": "string" },
-      { "access": "private", "label": "Events", "name": "events", "persist": "memory", "type": "json", "value": "[]" },
+      {
+        "access": "public",
+        "label": "iCal URL",
+        "name": "iCalURL",
+        "persist": "disk",
+        "type": "string"
+      },
+      {
+        "access": "private",
+        "label": "Events",
+        "name": "events",
+        "persist": "memory",
+        "type": "json",
+        "value": "[]"
+      },
       {
         "access": "public",
         "label": "Font size",
@@ -22,7 +39,13 @@
         "type": "float",
         "value": "28"
       },
-      { "name": "font", "label": "Font", "type": "font", "persist": "disk", "access": "public" },
+      {
+        "name": "font",
+        "label": "Font",
+        "type": "font",
+        "persist": "disk",
+        "access": "public"
+      },
       {
         "name": "seconds",
         "role": "refreshInterval",
@@ -35,64 +58,116 @@
     ],
     "nodes": [
       {
-        "data": { "keyword": "render" },
+        "data": {
+          "keyword": "render"
+        },
         "dragging": false,
         "height": 134,
         "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
-        "position": { "x": 102.0918627233498, "y": 190.35147067720533 },
-        "positionAbsolute": { "x": 102.0918627233498, "y": 190.35147067720533 },
+        "position": {
+          "x": 102.0918627233498,
+          "y": 190.35147067720533
+        },
+        "positionAbsolute": {
+          "x": 102.0918627233498,
+          "y": 190.35147067720533
+        },
         "selected": false,
         "type": "event",
         "width": 237
       },
       {
-        "data": { "config": { "stateKey": "events" }, "keyword": "logic/setAsState" },
+        "data": {
+          "config": {
+            "stateKey": "events"
+          },
+          "keyword": "logic/setAsState"
+        },
         "dragging": false,
         "height": 162,
         "id": "7928bf65-7161-43be-8bf1-c49302596be6",
-        "position": { "x": 576.4732449503583, "y": 192.12116727025415 },
-        "positionAbsolute": { "x": 576.4732449503583, "y": 192.12116727025415 },
+        "position": {
+          "x": 576.4732449503583,
+          "y": 192.12116727025415
+        },
+        "positionAbsolute": {
+          "x": 576.4732449503583,
+          "y": 192.12116727025415
+        },
         "selected": false,
         "type": "app",
         "width": 354
       },
       {
         "data": {
-          "cache": { "enabled": true, "inputEnabled": true },
-          "config": { "addLocation": "false", "addTimezone": "true", "addUrl": "false", "exportCount": "40" },
-          "keyword": "data/icalJson"
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true
+          },
+          "config": {
+            "addLocation": "false",
+            "addTimezone": "true",
+            "addUrl": "false",
+            "exportCount": "40"
+          },
+          "keyword": "icalJson"
         },
         "dragging": false,
         "height": 364,
         "id": "e93b204c-aa3f-4397-a3f7-2a6f1f648fb9",
-        "position": { "x": 378.0528238265531, "y": -283.39450307959305 },
-        "positionAbsolute": { "x": 378.0528238265531, "y": -283.39450307959305 },
+        "position": {
+          "x": 378.0528238265531,
+          "y": -283.39450307959305
+        },
+        "positionAbsolute": {
+          "x": 378.0528238265531,
+          "y": -283.39450307959305
+        },
         "selected": false,
         "type": "app",
         "width": 531
       },
       {
         "data": {
-          "cache": { "duration": "900", "durationEnabled": true, "enabled": false, "inputEnabled": true },
+          "cache": {
+            "duration": "900",
+            "durationEnabled": true,
+            "enabled": false,
+            "inputEnabled": true
+          },
           "config": {},
           "keyword": "data/downloadUrl"
         },
         "dragging": false,
         "height": 112,
         "id": "f6fb98f6-3c04-49d2-8f5e-7bcfebe1239c",
-        "position": { "x": 343.06783318636593, "y": -466.13660175931227 },
-        "positionAbsolute": { "x": 343.06783318636593, "y": -466.13660175931227 },
+        "position": {
+          "x": 343.06783318636593,
+          "y": -466.13660175931227
+        },
+        "positionAbsolute": {
+          "x": 343.06783318636593,
+          "y": -466.13660175931227
+        },
         "selected": false,
         "type": "app",
         "width": 227
       },
       {
-        "data": { "keyword": "iCalURL" },
+        "data": {
+          "keyword": "iCalURL"
+        },
         "dragging": false,
         "height": 48,
         "id": "c8948803-4338-466b-b85f-b6d6459f8de1",
-        "position": { "x": 313.1066507283249, "y": -547.4776323795462 },
-        "positionAbsolute": { "x": 313.1066507283249, "y": -547.4776323795462 },
+        "position": {
+          "x": 313.1066507283249,
+          "y": -547.4776323795462
+        },
+        "positionAbsolute": {
+          "x": 313.1066507283249,
+          "y": -547.4776323795462
+        },
         "selected": false,
         "type": "state",
         "width": 172
@@ -113,92 +188,161 @@
         "dragging": false,
         "height": 414,
         "id": "e9c69dfd-f257-4287-bf8d-eb7649cc34d8",
-        "position": { "x": 1293.9415152857314, "y": 98.4250772641658 },
-        "positionAbsolute": { "x": 1293.9415152857314, "y": 98.4250772641658 },
+        "position": {
+          "x": 1293.9415152857314,
+          "y": 98.4250772641658
+        },
+        "positionAbsolute": {
+          "x": 1293.9415152857314,
+          "y": 98.4250772641658
+        },
         "selected": false,
         "type": "app",
         "width": 372
       },
       {
         "data": {
-          "config": { "baseFontSize": "20", "textColor": "#000000", "titleColor": "#000000", "titleFontSize": "28" },
+          "config": {
+            "baseFontSize": "20",
+            "textColor": "#000000",
+            "titleColor": "#000000",
+            "titleFontSize": "28"
+          },
           "keyword": "eventsToAgenda"
         },
         "dragging": false,
         "height": 282,
         "id": "261ac021-20e0-4699-9147-541a762c013a",
-        "position": { "x": 1251.7101941794317, "y": -255.11189516677453 },
-        "positionAbsolute": { "x": 1251.7101941794317, "y": -255.11189516677453 },
+        "position": {
+          "x": 1251.7101941794317,
+          "y": -255.11189516677453
+        },
+        "positionAbsolute": {
+          "x": 1251.7101941794317,
+          "y": -255.11189516677453
+        },
         "resizing": false,
         "selected": false,
-        "style": { "height": 282, "width": 309 },
+        "style": {
+          "height": 282,
+          "width": 309
+        },
         "type": "app",
         "width": 309
       },
       {
-        "data": { "keyword": "events" },
+        "data": {
+          "keyword": "events"
+        },
         "dragging": false,
         "height": 48,
         "id": "66ac0d50-8342-4e11-b594-d27e46f80cfc",
-        "position": { "x": 1210.7033031429971, "y": -332.7392074186162 },
-        "positionAbsolute": { "x": 1210.7033031429971, "y": -332.7392074186162 },
+        "position": {
+          "x": 1210.7033031429971,
+          "y": -332.7392074186162
+        },
+        "positionAbsolute": {
+          "x": 1210.7033031429971,
+          "y": -332.7392074186162
+        },
         "selected": false,
         "type": "state",
         "width": 145
       },
       {
-        "data": { "keyword": "fontSize" },
+        "data": {
+          "keyword": "fontSize"
+        },
         "dragging": false,
         "height": 48,
         "id": "e34e1f24-6a38-48e9-90db-de4242f277f9",
-        "position": { "x": 1170.6056451099698, "y": -404.8341679992418 },
-        "positionAbsolute": { "x": 1170.6056451099698, "y": -404.8341679992418 },
+        "position": {
+          "x": 1170.6056451099698,
+          "y": -404.8341679992418
+        },
+        "positionAbsolute": {
+          "x": 1170.6056451099698,
+          "y": -404.8341679992418
+        },
         "selected": false,
         "type": "state",
         "width": 170
       },
       {
-        "data": { "keyword": "titleFontSize" },
+        "data": {
+          "keyword": "titleFontSize"
+        },
         "dragging": false,
         "height": 48,
         "id": "9e1961fd-6516-4ada-b5eb-6d68182f8772",
-        "position": { "x": 1131.8474632402952, "y": -475.58258624041605 },
-        "positionAbsolute": { "x": 1131.8474632402952, "y": -475.58258624041605 },
+        "position": {
+          "x": 1131.8474632402952,
+          "y": -475.58258624041605
+        },
+        "positionAbsolute": {
+          "x": 1131.8474632402952,
+          "y": -475.58258624041605
+        },
         "selected": false,
         "type": "state",
         "width": 209
       },
       {
         "id": "2e47fecc-3ed0-4490-808d-a682774db538",
-        "position": { "x": 1149.900392055103, "y": 286.91752260293157 },
-        "data": { "keyword": "font" },
+        "position": {
+          "x": 1149.900392055103,
+          "y": 286.91752260293157
+        },
+        "data": {
+          "keyword": "font"
+        },
         "type": "state",
         "width": 128,
         "height": 48,
         "selected": false,
-        "positionAbsolute": { "x": 1149.900392055103, "y": 286.91752260293157 },
+        "positionAbsolute": {
+          "x": 1149.900392055103,
+          "y": 286.91752260293157
+        },
         "dragging": false
       },
       {
         "id": "62b9c554-a307-4165-9b08-1eda2ef0951b",
-        "position": { "x": 1757.1950246133658, "y": 60.32932089545125 },
-        "data": { "keyword": "logic/nextSleepDuration", "config": {} },
+        "position": {
+          "x": 1757.1950246133658,
+          "y": 60.32932089545125
+        },
+        "data": {
+          "keyword": "logic/nextSleepDuration",
+          "config": {}
+        },
         "type": "app",
         "width": 289,
         "height": 78,
         "selected": false,
-        "positionAbsolute": { "x": 1757.1950246133658, "y": 60.32932089545125 },
+        "positionAbsolute": {
+          "x": 1757.1950246133658,
+          "y": 60.32932089545125
+        },
         "dragging": false
       },
       {
         "id": "8ac9e5e7-4ce2-477a-b001-0c67b9153b40",
-        "position": { "x": 1704.0096190897905, "y": -10.584553135983015 },
-        "data": { "keyword": "seconds" },
+        "position": {
+          "x": 1704.0096190897905,
+          "y": -10.584553135983015
+        },
+        "data": {
+          "keyword": "seconds"
+        },
         "type": "state",
         "width": 328,
         "height": 48,
         "selected": false,
-        "positionAbsolute": { "x": 1704.0096190897905, "y": -10.584553135983015 },
+        "positionAbsolute": {
+          "x": 1704.0096190897905,
+          "y": -10.584553135983015
+        },
         "dragging": false
       }
     ],
@@ -307,12 +451,47 @@
         "category": "data",
         "version": "1.0.0",
         "fields": [
-          { "name": "events", "type": "json", "required": true, "label": "Events" },
-          { "name": "baseFontSize", "type": "float", "value": "24", "required": true, "label": "Base font size" },
-          { "name": "titleFontSize", "type": "float", "value": "48", "required": true, "label": "Title font size" },
-          { "name": "titleColor", "type": "color", "value": "#FFFFFF", "required": true, "label": "Day title color" },
-          { "name": "textColor", "type": "color", "value": "#FFFFFF", "required": true, "label": "Base text color" },
-          { "name": "timeColor", "type": "color", "value": "#FF0000", "required": true, "label": "Time color" },
+          {
+            "name": "events",
+            "type": "json",
+            "required": true,
+            "label": "Events"
+          },
+          {
+            "name": "baseFontSize",
+            "type": "float",
+            "value": "24",
+            "required": true,
+            "label": "Base font size"
+          },
+          {
+            "name": "titleFontSize",
+            "type": "float",
+            "value": "48",
+            "required": true,
+            "label": "Title font size"
+          },
+          {
+            "name": "titleColor",
+            "type": "color",
+            "value": "#FFFFFF",
+            "required": true,
+            "label": "Day title color"
+          },
+          {
+            "name": "textColor",
+            "type": "color",
+            "value": "#FFFFFF",
+            "required": true,
+            "label": "Base text color"
+          },
+          {
+            "name": "timeColor",
+            "type": "color",
+            "value": "#FF0000",
+            "required": true,
+            "label": "Time color"
+          },
           {
             "name": "startWithToday",
             "type": "boolean",
@@ -321,12 +500,112 @@
             "label": "Always start with today's date"
           }
         ],
-        "output": [{ "name": "result", "type": "string" }],
+        "output": [
+          {
+            "name": "result",
+            "type": "string"
+          }
+        ],
         "origin": "repo/apps/text/eventsToAgenda",
         "sources": {
           "app.test.ts": "import { get } from './app'\n\nconst config = {\n  baseFontSize: 24,\n  titleFontSize: 48,\n  textColor: '#445566',\n  timeColor: '#778899',\n  titleColor: '#112233',\n  startWithToday: false,\n}\n\nfunction agenda(events: unknown, extra: Record<string, unknown> = {}, timeZone = 'UTC') {\n  return get(makeApp({ config: { ...config, ...extra, events }, frame: { timeZone } })) as string\n}\n\n// The clock at noon UTC on `day` for the length of `run`.\nfunction onDay<T>(day: string, run: () => T): T {\n  const real = Date.now\n  Date.now = () => Date.parse(`${day}T12:00:00Z`)\n  try {\n    return run()\n  } finally {\n    Date.now = real\n  }\n}\n\ndescribe('eventsToAgenda', () => {\n  it('formats and sorts events across days', () => {\n    const output = agenda([\n      { summary: 'Holiday', startTime: '2024-12-25', endTime: '2024-12-25' },\n      { summary: 'Breakfast', startTime: '2024-12-24T08:00:00', endTime: '2024-12-24T09:00:00' },\n    ])\n    expect(output).toBe(\n      '\\n^(48,#112233)Tuesday, December 24\\n^(24,#445566)\\n' +\n        '^(24,#778899)08:00 - 09:00  ^(24,#445566)Breakfast\\n' +\n        '\\n^(48,#112233)Wednesday, December 25\\n^(24,#445566)\\n' +\n        '^(24,#778899)All day  ^(24,#445566)Holiday\\n',\n    )\n  })\n\n  it('shows until text for multi-day events', () => {\n    const output = agenda([{ summary: 'Conference', startTime: '2024-12-25', endTime: '2024-12-27' }])\n    expect(output).toContain('^(48,#112233)Wednesday, December 25')\n    expect(output).toContain('^(24,#778899)Until Friday, December 27  ^(24,#445566)Conference')\n  })\n\n  it('shows an ongoing multi-day event under today when starting with today', () => {\n    const output = onDay('2024-12-26', () =>\n      agenda([{ summary: 'Retreat', startTime: '2024-12-23', endTime: '2024-12-27' }], { startWithToday: true }),\n    )\n    expect(output).not.toContain('No events today')\n    expect(output.split('^(48,#112233)Thursday, December 26').length).toBe(2)\n    expect(output).toContain('^(24,#778899)Until Friday, December 27  ^(24,#445566)Retreat')\n  })\n\n  it('says when today has nothing before the days that do', () => {\n    const output = onDay('2024-12-26', () =>\n      agenda([{ summary: 'Dinner', startTime: '2024-12-28T19:00:00', endTime: '2024-12-28T21:00:00' }], {\n        startWithToday: true,\n      }),\n    )\n    expect(output).toBe(\n      '^(48,#112233)Thursday, December 26\\n^(24,#445566)\\nNo events today\\n' +\n        '\\n^(48,#112233)Saturday, December 28\\n^(24,#445566)\\n' +\n        '^(24,#778899)19:00 - 21:00  ^(24,#445566)Dinner\\n',\n    )\n  })\n\n  it('titles today over \"No events found\" without events', () => {\n    for (const events of [[], null, undefined, 'nope']) {\n      expect(onDay('2024-12-26', () => agenda(events))).toBe(\n        '^(48,#112233)Thursday, December 26\\n^(24,#445566)\\nNo events found\\n',\n      )\n    }\n  })\n\n  it('writes a font size without trailing zeros', () => {\n    const output = agenda([{ summary: 'A', startTime: '2024-12-25', endTime: '2024-12-25' }], {\n      baseFontSize: 24.5,\n      titleFontSize: 0.1 + 0.2,\n    })\n    expect(output).toContain('^(0.3,#112233)Wednesday, December 25')\n    expect(output).toContain('^(24.5,#778899)All day')\n  })\n\n  it('fails the node on a date it cannot read', () => {\n    expect(() => agenda([{ summary: 'A', startTime: 'soon', endTime: 'later' }])).toThrow('Invalid date: soon')\n  })\n})\n",
           "app.ts": "// Events to Agenda: calendar events (as the iCal JSON app gives them) as an\n// agenda in basic-caret text, a day title over each day's events.\nconst WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nconst MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September',\n  'October', 'November', 'December']\n\nconst str = (value) => (typeof value === 'string' ? value : '')\n\n// A font size as caret text writes it: 24, 24.5, never 24.000000.\nconst size = (value) => String(Number((Number(value) || 0).toFixed(6)))\n\n// \"Tuesday, December 24\" for \"2024-12-24\": the date as written, in no zone.\nfunction dayTitle(day) {\n  const match = /^(\\d{4})-(\\d{2})-(\\d{2})/.exec(day)\n  if (!match) throw new Error(`Invalid date: ${day}`)\n  const [year, month, date] = [Number(match[1]), Number(match[2]), Number(match[3])]\n  const weekday = new Date(Date.UTC(year, month - 1, date)).getUTCDay()\n  return `${WEEKDAYS[weekday]}, ${MONTHS[month - 1]} ${date}`\n}\n\n// Today as YYYY-MM-DD in `zone`. JavaScript's clock is in the frame's zone,\n// as the Nim runtime's is, and knows no other, so a calendar in a third zone\n// gets the frame's day: the two differ only between their midnights.\nfunction today(zone) {\n  const now = new Date(Date.now())\n  const utc = zone === 'UTC' || zone === 'Etc/UTC' || zone === 'GMT'\n  const parts = utc\n    ? [now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate()]\n    : [now.getFullYear(), now.getMonth() + 1, now.getDate()]\n  return parts.map((part, i) => String(part).padStart(i === 0 ? 4 : 2, '0')).join('-')\n}\n\nexport function get(app) {\n  const c = app.config\n  const title = `^(${size(c.titleFontSize)},${c.titleColor})`\n  const normal = `^(${size(c.baseFontSize)},${c.textColor})`\n  const time = `^(${size(c.baseFontSize)},${c.timeColor})`\n  const events = c.events\n  const noEvents = !Array.isArray(events) || events.length === 0\n  // The first event that names its zone, else the frame's.\n  const zone = (noEvents ? '' : str(events.find((event) => str(event?.timezone))?.timezone)) ||\n    app.frame.timeZone || 'UTC'\n  const h1 = (text) => `${title}${text}\\n${normal}\\n`\n\n  let result = ''\n  let currentDay = ''\n  if (c.startWithToday || noEvents) {\n    currentDay = today(zone)\n    result += h1(dayTitle(currentDay))\n  }\n  if (noEvents) return result + 'No events found\\n'\n\n  const sorted = [...events].sort((a, b) => {\n    const x = str(a?.startTime)\n    const y = str(b?.startTime)\n    return x < y ? -1 : x > y ? 1 : 0\n  })\n  let hasAny = false\n  for (const event of sorted) {\n    const summary = str(event?.summary)\n    const startDay = str(event?.startTime)\n    const endDay = str(event?.endTime)\n    const withTime = startDay.includes('T')\n    const startDate = startDay.split('T')[0]\n    const endDate = endDay.split('T')[0]\n    let displayDay = startDate\n    // A day that is on now shows under today.\n    if (c.startWithToday && currentDay && startDate <= currentDay && currentDay <= endDate) displayDay = currentDay\n\n    if (displayDay !== currentDay) {\n      if (!hasAny && c.startWithToday) result += 'No events today\\n'\n      result += '\\n' + h1(dayTitle(displayDay))\n      currentDay = displayDay\n    }\n    hasAny = true\n\n    if (withTime) {\n      const startTime = startDay.split('T')[1].slice(0, 5)\n      const endTime = endDay.includes('T') ? endDay.split('T')[1].slice(0, 5) : ''\n      result += `${time}${startTime} - ${endTime}  ${normal}${summary}\\n`\n    } else if (startDay === currentDay && endDay === currentDay) {\n      result += `${time}All day  ${normal}${summary}\\n`\n    } else {\n      result += `${time}Until ${dayTitle(endDay)}  ${normal}${summary}\\n`\n    }\n  }\n  return result\n}\n",
           "config.json": "{\n  \"name\": \"Events to Agenda\",\n  \"description\": \"Convert events to a basic-caret formatted agenda string\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"events\",\n      \"type\": \"json\",\n      \"required\": true,\n      \"label\": \"Events\"\n    },\n    {\n      \"name\": \"baseFontSize\",\n      \"type\": \"float\",\n      \"value\": \"24\",\n      \"required\": true,\n      \"label\": \"Base font size\"\n    },\n    {\n      \"name\": \"titleFontSize\",\n      \"type\": \"float\",\n      \"value\": \"48\",\n      \"required\": true,\n      \"label\": \"Title font size\"\n    },\n    {\n      \"name\": \"titleColor\",\n      \"type\": \"color\",\n      \"value\": \"#FFFFFF\",\n      \"required\": true,\n      \"label\": \"Day title color\"\n    },\n    {\n      \"name\": \"textColor\",\n      \"type\": \"color\",\n      \"value\": \"#FFFFFF\",\n      \"required\": true,\n      \"label\": \"Base text color\"\n    },\n    {\n      \"name\": \"timeColor\",\n      \"type\": \"color\",\n      \"value\": \"#FF0000\",\n      \"required\": true,\n      \"label\": \"Time color\"\n    },\n    {\n      \"name\": \"startWithToday\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"required\": true,\n      \"label\": \"Always start with today's date\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"result\",\n      \"type\": \"string\"\n    }\n  ]\n}\n"
+        }
+      },
+      "icalJson": {
+        "name": "iCal to Events JSON",
+        "description": "Convert an iCal file into a JSON event list",
+        "category": "data",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "ical",
+            "type": "string",
+            "required": true,
+            "label": "iCal file contents",
+            "capabilities": {
+              "byteIter": {}
+            }
+          },
+          {
+            "name": "exportFrom",
+            "type": "string",
+            "value": "",
+            "placeholder": "now",
+            "required": false,
+            "label": "Export events from (YYYY-MM-DD)"
+          },
+          {
+            "name": "exportUntil",
+            "type": "string",
+            "value": "",
+            "placeholder": "1 year later",
+            "required": false,
+            "label": "Export events until (YYYY-MM-DD)"
+          },
+          {
+            "name": "exportCount",
+            "type": "integer",
+            "value": "50",
+            "placeholder": "50",
+            "required": false,
+            "label": "Maximum number of events to export"
+          },
+          {
+            "name": "search",
+            "type": "string",
+            "value": "",
+            "placeholder": "",
+            "required": false,
+            "label": "Filter events by keyword"
+          },
+          {
+            "name": "addLocation",
+            "type": "boolean",
+            "value": "true",
+            "required": false,
+            "label": "Add 'location' to the result JSON"
+          },
+          {
+            "name": "addUrl",
+            "type": "boolean",
+            "value": "true",
+            "required": false,
+            "label": "Add 'url' to the result JSON"
+          },
+          {
+            "name": "addDescription",
+            "type": "boolean",
+            "value": "false",
+            "required": false,
+            "label": "Add 'description' to the result JSON"
+          },
+          {
+            "name": "addTimezone",
+            "type": "boolean",
+            "value": "false",
+            "required": false,
+            "label": "Add 'timezone' to the result JSON"
+          },
+          {
+            "markdown": "[{ summary, startTime, endTime, location, url, description, timezone }]"
+          }
+        ],
+        "output": [
+          {
+            "name": "events",
+            "type": "json"
+          }
+        ],
+        "cache": {
+          "enabled": true,
+          "inputEnabled": true
+        },
+        "origin": "repo/apps/json/icalJson",
+        "sources": {
+          "app.ts": "// An iCal feed into the events inside a window. A port of the built-in\n// data/icalJson (retired 2026.11.6): the same fields, the same results.\n//\n// A feed can be many MB on a frame with a few MB to spare, so nothing here\n// holds it. openLines hands over the lines this app asks for and reads past\n// the rest natively (a calendar's attendees and folded descriptions never\n// become strings), and an event that cannot reach the window is dropped the\n// moment it ends. What stays is the window's events and the recurring series\n// that can still land in it.\n\nconst DAY = 86400\nconst MARGIN = 2 * DAY // more than any UTC offset: the cheap wall-clock test before the exact one\nconst MAX_RESULTS = 100000\nconst CANCELLED = 3\n\n// Windows zone names as Outlook and Exchange write them, lower-cased.\nconst WINDOWS_ZONES =\n  \"|dateline standard time=Etc/GMT+12|utc-11=Etc/GMT+11|aleutian standard time=America/Adak|hawaiian st\" +\n  \"andard time=Pacific/Honolulu|marquesas standard time=Pacific/Marquesas|alaskan standard time=America\" +\n  \"/Anchorage|utc-09=Etc/GMT+9|pacific standard time (mexico)=America/Tijuana|pacific standard time=Ame\" +\n  \"rica/Los_Angeles|us mountain standard time=America/Phoenix|mountain standard time (mexico)=America/C\" +\n  \"hihuahua|mountain standard time=America/Denver|yukon standard time=America/Whitehorse|central americ\" +\n  \"a standard time=America/Guatemala|central standard time=America/Chicago|central standard time (mexic\" +\n  \"o)=America/Mexico_City|canada central standard time=America/Regina|sa pacific standard time=America/\" +\n  \"Bogota|eastern standard time (mexico)=America/Cancun|eastern standard time=America/New_York|us easte\" +\n  \"rn standard time=America/Indiana/Indianapolis|haiti standard time=America/Port-au-Prince|cuba standa\" +\n  \"rd time=America/Havana|turks and caicos standard time=America/Grand_Turk|venezuela standard time=Ame\" +\n  \"rica/Caracas|paraguay standard time=America/Asuncion|atlantic standard time=America/Halifax|central \" +\n  \"brazilian standard time=America/Cuiaba|sa western standard time=America/La_Paz|pacific sa standard t\" +\n  \"ime=America/Santiago|newfoundland standard time=America/St_Johns|tocantins standard time=America/Ara\" +\n  \"guaina|e. south america standard time=America/Sao_Paulo|sa eastern standard time=America/Cayenne|arg\" +\n  \"entina standard time=America/Buenos_Aires|greenland standard time=America/Nuuk|montevideo standard t\" +\n  \"ime=America/Montevideo|magallanes standard time=America/Punta_Arenas|saint pierre standard time=Amer\" +\n  \"ica/Miquelon|bahia standard time=America/Bahia|utc-02=Etc/GMT+2|azores standard time=Atlantic/Azores\" +\n  \"|cape verde standard time=Atlantic/Cape_Verde|gmt standard time=Europe/London|greenwich standard tim\" +\n  \"e=Atlantic/Reykjavik|morocco standard time=Africa/Casablanca|gmt daylight time=Europe/London|w. euro\" +\n  \"pe standard time=Europe/Berlin|central europe standard time=Europe/Warsaw|romance standard time=Euro\" +\n  \"pe/Paris|central european standard time=Europe/Warsaw|w. central africa standard time=Africa/Lagos|n\" +\n  \"amibia standard time=Africa/Windhoek|gtb standard time=Europe/Bucharest|middle east standard time=As\" +\n  \"ia/Beirut|egypt standard time=Africa/Cairo|e. europe standard time=Europe/Chisinau|syria standard ti\" +\n  \"me=Asia/Damascus|west bank standard time=Asia/Hebron|south africa standard time=Africa/Johannesburg|\" +\n  \"fle standard time=Europe/Kyiv|israel standard time=Asia/Jerusalem|kaliningrad standard time=Europe/K\" +\n  \"aliningrad|sudan standard time=Africa/Khartoum|libya standard time=Africa/Tripoli|turkey standard ti\" +\n  \"me=Europe/Istanbul|arabic standard time=Asia/Baghdad|arabian standard time=Asia/Dubai|belarus standa\" +\n  \"rd time=Europe/Minsk|russian standard time=Europe/Moscow|volgograd standard time=Europe/Volgograd|sa\" +\n  \"ratov standard time=Europe/Saratov|georgian standard time=Asia/Tbilisi|azerbaijan standard time=Asia\" +\n  \"/Baku|mauritius standard time=Indian/Mauritius|caucasus standard time=Asia/Yerevan|afghanistan stand\" +\n  \"ard time=Asia/Kabul|west asia standard time=Asia/Tashkent|ekaterinburg standard time=Asia/Yekaterinb\" +\n  \"urg|pakistan standard time=Asia/Karachi|india standard time=Asia/Kolkata|sri lanka standard time=Asi\" +\n  \"a/Colombo|nepal standard time=Asia/Kathmandu|central asia standard time=Asia/Almaty|bangladesh stand\" +\n  \"ard time=Asia/Dhaka|myanmar standard time=Asia/Yangon|se asia standard time=Asia/Bangkok|north asia \" +\n  \"standard time=Asia/Novosibirsk|china standard time=Asia/Shanghai|north asia east standard time=Asia/\" +\n  \"Irkutsk|singapore standard time=Asia/Singapore|taipei standard time=Asia/Taipei|w. australia standar\" +\n  \"d time=Australia/Perth|korea standard time=Asia/Seoul|tokyo standard time=Asia/Tokyo|yakutsk standar\" +\n  \"d time=Asia/Yakutsk|cen. australia standard time=Australia/Adelaide|aus central standard time=Austra\" +\n  \"lia/Darwin|aus eastern standard time=Australia/Sydney|w. pacific standard time=Pacific/Port_Moresby|\" +\n  \"tonga standard time=Pacific/Tongatapu|lord howe standard time=Australia/Lord_Howe|tokelau standard t\" +\n  \"ime=Pacific/Fakaofo|fiji standard time=Pacific/Fiji|new zealand standard time=Pacific/Auckland|utc+1\" +\n  \"2=Etc/GMT-12|utc+13=Etc/GMT-13|samoa standard time=Pacific/Apia|line islands standard time=Pacific/K\" +\n  \"iritimati|chatham islands standard time=Pacific/Chatham|argentina daylight time=America/Buenos_Aires\" +\n  \"|greenwich daylight time=Atlantic/Reykjavik|w. europe daylight time=Europe/Berlin|central europe day\" +\n  \"light time=Europe/Warsaw|romance daylight time=Europe/Paris|central european daylight time=Europe/Wa\" +\n  \"rsaw|fle daylight time=Europe/Kyiv|turkey daylight time=Europe/Istanbul|russian daylight time=Europe\" +\n  \"/Moscow|caucasus daylight time=Asia/Yerevan|aus eastern daylight time=Australia/Sydney|cen. australi\" +\n  \"a daylight time=Australia/Adelaide|aus central daylight time=Australia/Darwin|tasmania standard time\" +\n  \"=Australia/Hobart|e. australia standard time=Australia/Brisbane|central pacific standard time=Pacifi\" +\n  \"c/Guadalcanal|vladivostok standard time=Asia/Vladivostok|sakhalin standard time=Asia/Sakhalin|magada\" +\n  \"n standard time=Asia/Magadan|kamchatka standard time=Asia/Kamchatka|utc+14=Etc/GMT-14|iran standard \" +\n  \"time=Asia/Tehran|azerbaijan daylight time=Asia/Baku|bangladesh daylight time=Asia/Dhaka|central asia\" +\n  \" daylight time=Asia/Almaty|china daylight time=Asia/Shanghai|korea daylight time=Asia/Seoul|tokyo da\" +\n  \"ylight time=Asia/Tokyo|newfoundland daylight time=America/St_Johns|\"\n\nconst zones = new Map()\n\nfunction zoneInfo(name) {\n  let info = zones.get(name)\n  if (!info) {\n    info = { name: normalizeZoneName(name), changes: null, last: 0 }\n    zones.set(name, info)\n  }\n  return info\n}\n\nfunction normalizeZoneName(raw) {\n  const trimmed = String(raw).trim()\n  if (!trimmed) return ''\n  const lower = trimmed.toLowerCase()\n  const at = WINDOWS_ZONES.indexOf('|' + lower + '=')\n  if (at >= 0) {\n    const from = at + lower.length + 2\n    return WINDOWS_ZONES.slice(from, WINDOWS_ZONES.indexOf('|', from))\n  }\n  const upper = trimmed.toUpperCase()\n  if (upper === 'UTC' || upper === 'GMT') return 'Etc/UTC'\n  if (trimmed.startsWith('UTC') && trimmed.length > 3 && (trimmed[3] === '+' || trimmed[3] === '-')) {\n    const [h, m = '0'] = trimmed.slice(4).split(':')\n    const hour = strictInt(h, true)\n    const minute = strictInt(m, true)\n    if (hour === null || minute === null) return trimmed\n    if (minute === 0) {\n      const offset = trimmed[3] === '+' ? -hour : hour\n      return 'Etc/GMT' + (offset >= 0 ? '+' + offset : offset)\n    }\n  }\n  return frameos.timeZone(trimmed).name\n}\n\nexport function normalizeTimeZone(raw) {\n  return zoneInfo(raw).name\n}\n\n// Seconds east of UTC at `t`: the transition table, fetched once per zone.\nfunction offsetAt(info, t) {\n  if (info.changes === null) info.changes = info.name ? frameos.timeZone(info.name).changes : []\n  const c = info.changes\n  const n = c.length / 2\n  if (n === 0) return 0\n  let i = info.last\n  if (!(c[2 * i] <= t && (i === n - 1 || c[2 * i + 2] > t))) {\n    let lo = 0\n    let hi = n - 1\n    while (lo < hi) {\n      const mid = (lo + hi + 1) >> 1\n      if (c[2 * mid] <= t) lo = mid\n      else hi = mid - 1\n    }\n    i = lo\n    info.last = i\n  }\n  return c[2 * i + 1]\n}\n\nfunction wallToTs(wall, info) {\n  return info.name ? wall - offsetAt(info, wall) : wall\n}\n\nfunction daysFromCivil(y, m, d) {\n  y += Math.floor((m - 1) / 12)\n  m = (((m - 1) % 12) + 12) % 12 + 1\n  if (m <= 2) y -= 1\n  const era = Math.floor(y / 400)\n  const yoe = y - era * 400\n  const doy = Math.floor((153 * ((m + 9) % 12) + 2) / 5) + d - 1\n  return era * 146097 + yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy - 719468\n}\n\nfunction civilFromDays(days) {\n  const z = days + 719468\n  const era = Math.floor(z / 146097)\n  const doe = z - era * 146097\n  const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365)\n  const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100))\n  const mp = Math.floor((5 * doy + 2) / 153)\n  const m = mp < 10 ? mp + 3 : mp - 9\n  return [yoe + era * 400 + (m <= 2 ? 1 : 0), m, doy - Math.floor((153 * mp + 2) / 5) + 1]\n}\n\nconst weekdayOf = (days) => (((days + 3) % 7) + 7) % 7 // Monday is 0\n\nfunction leap(y) {\n  return y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0)\n}\n\nfunction monthLength(y, m) {\n  return m === 2 ? (leap(y) ? 29 : 28) : m === 4 || m === 6 || m === 9 || m === 11 ? 30 : 31\n}\n\n// Digits at s[from..from+count), or NaN.\nfunction digits(s, from, count) {\n  let v = 0\n  for (let i = from; i < from + count; i++) {\n    const c = s.charCodeAt(i) - 48\n    if (!(c >= 0 && c <= 9)) return NaN\n    v = v * 10 + c\n  }\n  return v\n}\n\nfunction strictInt(text, quiet) {\n  if (/^[+-]?[0-9]+$/.test(text)) return parseInt(text, 10)\n  if (quiet) return null\n  throw new Error('Invalid integer: ' + text)\n}\n\n// The wall-clock seconds of an iCal date or date-time: NaN when it is neither.\nfunction wallOf(text) {\n  if (text.length === 8) {\n    return daysFromCivil(digits(text, 0, 4), digits(text, 4, 2), digits(text, 6, 2)) * DAY\n  }\n  if ((text.length !== 15 && text.length !== 16) || text[8] !== 'T' || (text.length === 16 && text[15] !== 'Z')) return NaN\n  return daysFromCivil(digits(text, 0, 4), digits(text, 4, 2), digits(text, 6, 2)) * DAY +\n    digits(text, 9, 2) * 3600 + digits(text, 11, 2) * 60 + digits(text, 13, 2)\n}\n\n// The date-time part of a property value, past any parameters.\nfunction dateTimeText(value) {\n  const semi = value.indexOf(';')\n  if (semi >= 0) return value.split(';')[1]\n  const colon = value.indexOf(':')\n  return colon >= 0 ? value.split(':')[1] : value\n}\n\n\nexport function parseICalDateTime(text, zone) {\n  const part = dateTimeText(text)\n  const wall = wallOf(part)\n  if (wall !== wall) throw new Error('Failed to parse datetime string: ' + text)\n  if (part.length === 16) return wall // Z: already UTC\n  const info = zoneInfo(zone)\n  return wallToTs(wall, info)\n}\n\nexport function unescape(line) {\n  if (line.indexOf('\\\\') < 0) return line\n  let out = ''\n  for (let i = 0; i < line.length; i++) {\n    if (line[i] !== '\\\\') {\n      out += line[i]\n      continue\n    }\n    i++\n    if (i >= line.length) return out + '\\\\'\n    const c = line[i]\n    out += c === 'n' || c === 'N' ? '\\n' : c === 't' || c === 'T' ? '\\t' : c === 'r' || c === 'R' ? '\\r' : c\n  }\n  return out\n}\n\nexport function parseICalDuration(value) {\n  let s = value.trim()\n  let sign = 1\n  if (s[0] === '+') s = s.slice(1)\n  else if (s[0] === '-') {\n    sign = -1\n    s = s.slice(1)\n  }\n  if (s[0] !== 'P') throw new Error('Invalid DURATION: ' + value)\n  let total = 0\n  let num = ''\n  for (let i = 1; i < s.length; i++) {\n    const c = s[i]\n    if (c === 'T') continue\n    if (c >= '0' && c <= '9') {\n      num += c\n      continue\n    }\n    if (!num) throw new Error('Invalid DURATION: ' + value)\n    const unit = { W: 604800, D: DAY, H: 3600, M: 60, S: 1 }[c]\n    if (!unit) throw new Error('Invalid DURATION unit in: ' + value)\n    total += parseInt(num, 10) * unit\n    num = ''\n  }\n  if (num) throw new Error('Trailing number in DURATION: ' + value)\n  return sign * total\n}\n\nconst WEEKDAYS = { MO: 0, TU: 1, WE: 2, TH: 3, FR: 4, SA: 5, SU: 6 }\nconst FREQS = { DAILY: 'daily', WEEKLY: 'weekly', MONTHLY: 'monthly', YEARLY: 'yearly' }\n\nconst intList = (text, into) => {\n  for (const part of text.split(',')) into.push(strictInt(part))\n}\n\nexport function parseRRule(value, event, calendarZone) {\n  const rule = { freq: 'daily', interval: 0, byDay: [], byMonth: [], byMonthDay: [], byYearDay: [], byWeekNo: [], until: 0, count: 0, weekStart: -1 }\n  for (const part of value.split(';')) {\n    const pair = part.split('=')\n    if (pair.length !== 2) continue\n    const v = pair[1]\n    switch (pair[0]) {\n      case 'FREQ':\n        rule.freq = FREQS[v]\n        if (!rule.freq) throw new Error('Unknown RRULE freq: ' + v)\n        break\n      case 'INTERVAL': rule.interval = strictInt(v); break\n      case 'COUNT': rule.count = strictInt(v); break\n      case 'UNTIL': rule.until = parseICalDateTime(v, calendarZone); break\n      case 'BYSECOND': case 'BYMINUTE': case 'BYHOUR': case 'BYSETPOS':\n        throw new Error(pair[0] + ' is not supported')\n      case 'BYDAY':\n        for (const day of v.split(',')) {\n          if (day.length < 2) continue\n          const name = day.slice(-2).toUpperCase()\n          const num = day.length > 2 ? strictInt(day.slice(0, -2)) : 0\n          if (name in WEEKDAYS) rule.byDay.push([WEEKDAYS[name], num])\n        }\n        break\n      case 'BYMONTHDAY': intList(v, rule.byMonthDay); break\n      case 'BYYEARDAY': intList(v, rule.byYearDay); break\n      case 'BYWEEKNO': intList(v, rule.byWeekNo); break\n      case 'BYMONTH': intList(v, rule.byMonth); break\n      case 'WKST': if (v.toUpperCase() in WEEKDAYS) rule.weekStart = WEEKDAYS[v.toUpperCase()]; break\n    }\n  }\n  if (rule.interval === 0) rule.interval = 1\n  if ((rule.freq === 'monthly' || rule.freq === 'yearly') && rule.byMonth.length && !rule.byDay.length && !rule.byMonthDay.length && !rule.byYearDay.length) {\n    // The day comes from DTSTART when no BYxxx names one.\n    const zone = zoneInfo(event.timeZone)\n    rule.byMonthDay.push(civilFromDays(Math.floor((event.startTs + offsetAt(zone, event.startTs)) / DAY))[2])\n  }\n  return rule\n}\n\nfunction zoneParam(value) {\n  return normalizeTimeZone(value.split(':')[0].split('=')[1])\n}\n\nfunction parseDateValue(value, event, cal) {\n  const zone = event.timeZone === '' ? cal.timeZone : event.timeZone\n  return parseICalDateTime(value.indexOf('VALUE=DATE') >= 0 ? value.slice(value.lastIndexOf(':') + 1) : value, zone)\n}\n\nconst LINES_ALWAYS = ['BEGIN:VEVENT', 'END:VEVENT', 'BEGIN:VALARM', 'END:VALARM', 'BEGIN:VCALENDAR', 'END:VCALENDAR', 'X-WR-TIMEZONE', 'UID', 'TZID', 'DTSTART', 'DTEND', 'DURATION', 'DTSTAMP', 'RECURRENCE-ID', 'RRULE', 'EXDATE', 'SUMMARY', 'STATUS', 'LAST-MODIFIED', 'SEQUENCE', 'http']\n\nconst NEEDLE = { RRULE: '\\nRRULE', DTSTART: '\\nDTSTART', DTEND: '\\nDTEND', DURATION: '\\nDURATION', RID: '\\nRECURRENCE-ID' }\n\n// The value of a property in a block (its parameters included), undefined when\n// the block has none. `needle` is the name after a newline, `name` the same\n// without it for the block's first line.\nfunction rawValue(block, name, needle) {\n  let at = block.startsWith(name) ? 0 : block.indexOf(needle)\n  if (at < 0) return undefined\n  if (at > 0) at += 1\n  const sep = at + name.length\n  const c = block[sep]\n  if (c !== ':' && c !== ';') return undefined\n  const end = block.indexOf('\\n', sep)\n  return end < 0 ? block.slice(sep + 1) : block.slice(sep + 1, end)\n}\n\nconst hasProperty = (block, name, needle) => block.startsWith(name) || block.indexOf(needle) >= 0\n\n// A date value's YYYYMMDD: the strings compare as the dates do.\nfunction dateKey(value) {\n  const at = value.lastIndexOf(':') + 1\n  return value.slice(at, at + 8)\n}\n\nfunction keyOfDays(days) {\n  const [y, m, d] = civilFromDays(days)\n  return String(y * 10000 + m * 100 + d)\n}\n\n// Is this event plainly outside the window? Read off two or three lines as\n// text, no time zone and no parsing, because most of a feed that goes back\n// years is exactly that, and it is the one thing the loop below must do cheaply.\nfunction quickReject(block, o) {\n  if (!o.keepFrom) return false\n  const dtstart = rawValue(block, 'DTSTART', NEEDLE.DTSTART)\n  if (dtstart === undefined) return false\n  const start = dateKey(dtstart)\n  const dtend = rawValue(block, 'DTEND', NEEDLE.DTEND)\n  const end = dtend !== undefined ? dateKey(dtend) : hasProperty(block, 'DURATION', NEEDLE.DURATION) ? '' : start\n  if (!((start.length === 8 && start > o.untilKey) || (end.length === 8 && end < o.fromKey))) return false\n  if (hasProperty(block, 'RRULE', NEEDLE.RRULE)) return false\n  const rid = rawValue(block, 'RECURRENCE-ID', NEEDLE.RID)\n  if (rid === undefined) return true\n  // An override only touches what happens inside the window: the instance it\n  // replaces (at its RECURRENCE-ID) or where it moved to (checked just above).\n  if (/THISANDFUTURE/i.test(rid)) return false\n  const original = rid.slice(rid.indexOf(':') + 1, rid.indexOf(':') + 9)\n  return original.length === 8 && (original < o.fromKey || original > o.untilKey)\n}\n\nfunction fieldsOf(block) {\n  const fields = {}\n  let inAlarm = false\n  for (const line of block.split('\\n')) {\n    if (line.startsWith('BEGIN:VALARM')) inAlarm = true\n    else if (line.startsWith('END:VALARM')) inAlarm = false\n    else if (!inAlarm) {\n      let at = line.indexOf(':')\n      if (at < 0) continue\n      const semi = line.indexOf(';')\n      if (semi >= 0 && semi < at) at = semi\n      const key = line.slice(0, at)\n      if (key === 'EXDATE') (fields.EXDATE ?? (fields.EXDATE = [])).push(line.slice(at + 1))\n      else if (fields[key] === undefined) fields[key] = line.slice(at + 1)\n    }\n  }\n  return fields\n}\n\n// One event's lines, into an event. Throws on anything malformed, which\n// skips that event and no other.\nfunction finishEvent(f, cal, o) {\n  const keeping = o.keepFrom > 0\n  const rid = f['RECURRENCE-ID']\n  const rrule = f.RRULE\n\n  const event = {\n    uid: f.UID ?? '', timeZone: cal.timeZone, startTs: 0, endTs: 0, fullDay: false, rrules: [], exDates: [],\n    recurrenceId: rid ?? '', summary: '', description: '', location: '', url: '', status: 0, sequence: 0, dtStamp: 0, lastModified: 0,\n  }\n  if (f.TZID !== undefined) event.timeZone = normalizeTimeZone(f.TZID)\n  if (f.DTSTART !== undefined) {\n    const v = f.DTSTART\n    if (v.startsWith('TZID=')) event.timeZone = zoneParam(v)\n    event.startTs = parseDateValue(v, event, cal)\n    event.fullDay = v.indexOf('VALUE=DATE') >= 0 || v.length === 8\n  }\n  if (f.DTEND !== undefined) {\n    const v = f.DTEND\n    if (v.startsWith('TZID=')) event.timeZone = zoneParam(v)\n    event.endTs = parseDateValue(v, event, cal)\n    event.fullDay = v.indexOf('VALUE=DATE') >= 0 || v.length === 8\n  }\n  if (f.DURATION !== undefined) event.endTs = event.startTs + parseICalDuration(f.DURATION)\n  if (f.DTSTAMP !== undefined) event.dtStamp = parseICalDateTime(f.DTSTAMP, 'UTC')\n\n  if (rrule !== undefined) {\n    const rule = parseRRule(rrule, event, cal.timeZone)\n    event.rrules.push(rule)\n    if (keeping && !rid) {\n      // A series over before the window, or not begun by its end. An expired\n      // one cannot end another either: reconcile only pairs equal rules.\n      if (rule.until && rule.until + Math.max(0, event.endTs - event.startTs) < o.keepFrom) return\n      if (event.startTs > o.keepUntil) return\n    }\n  }\n  if (f.EXDATE) {\n    for (const raw of f.EXDATE) {\n      let zone = ''\n      let dates = raw\n      const colon = raw.indexOf(':')\n      if (colon !== -1) {\n        for (const p of raw.slice(0, colon).split(';')) {\n          if (p.startsWith('TZID=')) zone = normalizeTimeZone(p.slice(5))\n        }\n        dates = raw.slice(colon + 1)\n      }\n      const use = zone || cal.masterTz.get(event.uid) || event.timeZone || cal.timeZone\n      for (const token of dates.split(',')) event.exDates.push(parseICalDateTime(token, use))\n    }\n  }\n  if (f.SUMMARY !== undefined) event.summary = unescape(f.SUMMARY)\n  if (f.DESCRIPTION !== undefined) event.description = unescape(f.DESCRIPTION)\n  if (f.LOCATION !== undefined) event.location = unescape(f.LOCATION)\n  if (f.URL !== undefined) event.url = unescape(f.URL)\n  if (f.STATUS !== undefined) {\n    const s = f.STATUS.toUpperCase()\n    event.status = s === 'TENTATIVE' ? 1 : s === 'CONFIRMED' ? 2 : s === 'CANCELLED' ? CANCELLED : 0\n  }\n  if (f['LAST-MODIFIED'] !== undefined) event.lastModified = parseICalDateTime(f['LAST-MODIFIED'], 'UTC')\n  if (f.SEQUENCE !== undefined) event.sequence = strictInt(f.SEQUENCE, true) ?? 0\n\n  if (!rid && event.uid) cal.masterTz.set(event.uid, event.timeZone)\n  if (keeping) {\n    if (event.rrules.length === 0 && !rid) {\n      const eventEnd = event.endTs > 0 ? event.endTs : event.startTs\n      if (eventEnd < o.keepFrom || event.startTs > o.keepUntil) return\n    }\n    if (o.search && event.summary.indexOf(o.search) < 0) return\n    if (event.status === CANCELLED && !rid) return\n  }\n  cal.events.push(event)\n}\n\n// parseICalendar(source, timeZone, { keepFrom, keepUntil, search, want }):\n// `source` is a stream a byteIter field arrived as, or a string. Without\n// `keepFrom` nothing is dropped early (the tests read every event).\nexport function parseICalendar(source, timeZone, options) {\n  const o = { keepFrom: 0, keepUntil: 0, search: '', want: [], ...options }\n  if (o.keepFrom) {\n    o.fromKey = keyOfDays(Math.floor((o.keepFrom - MARGIN) / DAY))\n    o.untilKey = keyOfDays(Math.floor((o.keepUntil + MARGIN) / DAY))\n  }\n  const cal = { events: [], timeZone: normalizeTimeZone(timeZone || ''), masterTz: new Map(), staleCutoff: new Map(), problem: '', skipped: 0 }\n  const lines = frameos.openLines(source, { unfold: true, trim: true, only: [...LINES_ALWAYS, ...o.want, ...(o.keepFrom ? [] : ['LOCATION', 'URL', 'DESCRIPTION'])] })\n  if (!lines) {\n    cal.problem = 'No iCal data provided.'\n    return cal\n  }\n  let first = true\n  let inCalendar = false\n  let line\n  while ((line = frameos.nextLine(lines)) !== null) {\n    if (first) {\n      first = false\n      if (line.startsWith('http')) {\n        cal.problem = 'Pass in iCal data as a string, not a URL.'\n        return cal\n      }\n    }\n    if (line.startsWith('BEGIN:VEVENT')) {\n      const block = frameos.nextBlock(lines, 'END:VEVENT')\n      if (block === null) break\n      if (quickReject(block, o)) continue\n      try {\n        finishEvent(fieldsOf(block), cal, o)\n      } catch (e) {\n        cal.skipped++\n      }\n    } else if (line.startsWith('BEGIN:VCALENDAR')) inCalendar = true\n    else if (line.startsWith('END:VCALENDAR')) inCalendar = false\n    else if (inCalendar && line.startsWith('X-WR-TIMEZONE')) {\n      const colon = line.indexOf(':')\n      const semi = line.indexOf(';')\n      if (colon >= 0) cal.timeZone = normalizeTimeZone(unescape(line.slice((semi >= 0 && semi < colon ? semi : colon) + 1)))\n    }\n  }\n  frameos.streamClose(lines)\n  if (first) cal.problem = 'No iCal data provided.'\n  cal.events.sort((a, b) => a.startTs - b.startTs)\n  reconcileRecurringSeries(cal)\n  return cal\n}\n\nconst freshness = (e) => [e.sequence, e.lastModified, e.dtStamp, e.startTs]\n\nfunction compareFreshness(a, b) {\n  const x = freshness(a)\n  const y = freshness(b)\n  for (let i = 0; i < 4; i++) if (x[i] !== y[i]) return x[i] - y[i]\n  return 0\n}\n\nconst ruleKey = (r) => [r.freq, r.interval, r.byDay.join('/'), r.byMonth, r.byMonthDay, r.byYearDay, r.byWeekNo, r.until, r.count, r.weekStart].join('|')\n\n// Two masters that are the same series under different UIDs: the older one\n// ends where the newer one begins.\nfunction reconcileRecurringSeries(cal) {\n  const groups = new Map()\n  for (const e of cal.events) {\n    if (e.status === CANCELLED || e.rrules.length === 0 || e.recurrenceId) continue\n    const key = e.summary + '|' + e.fullDay + '|' + (e.endTs - e.startTs) + '|' + ruleKey(e.rrules[0])\n    if (!groups.has(key)) groups.set(key, [])\n    groups.get(key).push(e)\n  }\n  for (const group of groups.values()) {\n    if (group.length < 2) continue\n    for (const older of group) {\n      for (const newer of group) {\n        if (older === newer || older.uid === newer.uid) continue\n        const fresher = compareFreshness(newer, older)\n        if ((older.startTs < newer.startTs && fresher >= 0) || (older.startTs === newer.startTs && fresher > 0)) {\n          const cut = cal.staleCutoff.get(older.uid)\n          if (cut === undefined || newer.startTs < cut) cal.staleCutoff.set(older.uid, newer.startTs)\n        }\n      }\n    }\n  }\n}\n\nfunction hasThisAndFuture(value) {\n  const i = value.indexOf(':')\n  if (i === -1) return false\n  return value.slice(0, i).split(';').some((p) => {\n    const up = p.toUpperCase()\n    return up.startsWith('RANGE=') && up.slice(6).split('=')[0] === 'THISANDFUTURE'\n  })\n}\n\nfunction ridParts(value) {\n  let zone = ''\n  let date = value\n  const colon = value.indexOf(':')\n  if (colon !== -1) {\n    date = value.slice(colon + 1)\n    for (const p of value.slice(0, colon).split(';')) {\n      if (p.startsWith('TZID=')) zone = normalizeTimeZone(p.slice(5))\n    }\n  }\n  return [zone, date]\n}\n\nfunction ridTimestamp(cal, event) {\n  const [zoneParam, date] = ridParts(event.recurrenceId)\n  const zone = zoneParam || cal.masterTz.get(event.uid) || event.timeZone || cal.timeZone\n  return parseICalDateTime(date, zone)\n}\n\nfunction weekStartOf(rule) {\n  return rule.weekStart === -1 ? 0 : rule.weekStart\n}\n\nfunction simpleNext(wall, rule) {\n  const tod = ((wall % DAY) + DAY) % DAY\n  switch (rule.freq) {\n    case 'daily': return wall + rule.interval * DAY\n    case 'weekly': return wall + 7 * rule.interval * DAY\n    case 'monthly': {\n      const [y, m, d] = civilFromDays(Math.floor(wall / DAY))\n      return daysFromCivil(y, m + rule.interval, d) * DAY + tod\n    }\n    default: {\n      const [y, m, d] = civilFromDays(Math.floor(wall / DAY))\n      return daysFromCivil(y + rule.interval, m, d) * DAY + tod\n    }\n  }\n}\n\nfunction intervalEnd(wall, rule, zone) {\n  const days = Math.floor(wall / DAY)\n  let next\n  if (rule.freq === 'daily') next = days + 1\n  else if (rule.freq === 'weekly') {\n    const start = weekStartOf(rule)\n    const wd = weekdayOf(days)\n    next = days + (start > wd ? start - wd : 7 - wd + start)\n  } else {\n    const [y, m] = civilFromDays(days)\n    next = rule.freq === 'monthly' ? daysFromCivil(y, m + 1, 1) : daysFromCivil(y + 1, 1, 1)\n  }\n  return wallToTs(next * DAY, zone)\n}\n\nfunction nextIntervalStart(wall, rule) {\n  const days = Math.floor(wall / DAY)\n  const tod = wall - days * DAY\n  if (rule.freq === 'daily') return (days + rule.interval) * DAY + tod\n  if (rule.freq === 'weekly') {\n    const start = weekStartOf(rule)\n    const wd = weekdayOf(days)\n    return (days + 7 * (rule.interval - 1) + (start > wd ? start - wd : 7 - wd + start)) * DAY + tod\n  }\n  const [y, m] = civilFromDays(days)\n  return (rule.freq === 'monthly' ? daysFromCivil(y, m + rule.interval, 1) : daysFromCivil(y + rule.interval, 1, 1)) * DAY + tod\n}\n\nfunction nthWeekdayMatches(days, y, m, d, wd, num, rule) {\n  if (rule.freq !== 'monthly' && rule.freq !== 'yearly') {\n    // Weekly and daily rules never walk the period: the walk starts and stays on the 1st.\n    return d === 1\n  }\n  if (weekdayOf(days) !== wd) return false\n  let day\n  let count = 0\n  if (num > 0) {\n    day = rule.freq === 'yearly' ? daysFromCivil(y, 1, 1) : days - d + 1\n    const stop = rule.freq === 'yearly' ? daysFromCivil(y + 1, 1, 1) : days - d + 1 + monthLength(y, m)\n    while (day < stop) {\n      if (weekdayOf(day) === wd && ++count === num) break\n      day++\n    }\n  } else {\n    day = rule.freq === 'yearly' ? daysFromCivil(y, 12, 31) : days - d + monthLength(y, m)\n    const stop = rule.freq === 'yearly' ? daysFromCivil(y, 1, 1) : days - d + 1\n    while (day >= stop) {\n      if (weekdayOf(day) === wd && ++count === -num) break\n      day--\n    }\n  }\n  return day === days\n}\n\nfunction matchesRule(days, rule) {\n  if (rule.byDay.length === 1 && rule.byDay[0][1] === 0 && !rule.byMonth.length && !rule.byMonthDay.length && !rule.byYearDay.length) {\n    return weekdayOf(days) === rule.byDay[0][0]\n  }\n  const [y, m, d] = civilFromDays(days)\n  if (rule.byDay.length) {\n    let found = false\n    for (const [wd, num] of rule.byDay) {\n      if (num === 0 ? weekdayOf(days) === wd : nthWeekdayMatches(days, y, m, d, wd, num, rule)) {\n        found = true\n        break\n      }\n    }\n    if (!found) return false\n  }\n  if (rule.byMonth.length && !rule.byMonth.includes(m)) return false\n  if (rule.byMonthDay.length && !rule.byMonthDay.some((n) => (n > 0 ? n === d : d === monthLength(y, m) + n + 1))) return false\n  if (rule.byYearDay.length && !rule.byYearDay.includes(days - daysFromCivil(y, 1, 1) + 1)) return false\n  return true\n}\n\n// Whole intervals ahead, so a series from 2019 does not walk to today. Only\n// without COUNT, which has to be spent from DTSTART.\nfunction skipAhead(wall, rule, startTs, duration, simple) {\n  const target = startTs - Math.max(0, duration) - 3 * DAY\n  if (wall >= target) return wall\n  if (rule.freq === 'daily' || rule.freq === 'weekly') {\n    const period = rule.interval * (rule.freq === 'weekly' ? 7 : 1) * DAY\n    return wall + Math.floor((target - wall) / period) * period\n  }\n  const months = rule.interval * (rule.freq === 'yearly' ? 12 : 1)\n  const days = Math.floor(wall / DAY)\n  const [y, m, d] = civilFromDays(days)\n  if (simple && d > 28) return wall // a month with no such day rolls over, and the walk has to see that\n  const [ty, tm] = civilFromDays(Math.floor(target / DAY))\n  const steps = Math.floor(((ty - y) * 12 + tm - m - 1) / months)\n  return steps > 0 ? daysFromCivil(y, m + steps * months, d) * DAY + (wall - days * DAY) : wall\n}\n\nfunction applyRule(state, cal, startTs, endTs, event, rule) {\n  const zone = zoneInfo(event.timeZone === '' ? cal.timeZone : event.timeZone)\n  const duration = event.endTs - event.startTs\n  let ts = event.startTs\n  let wall = ts + (zone.name ? offsetAt(zone, ts) : 0)\n  let newEnd = event.endTs\n  let counter = 0\n  let first = true\n  const until = rule.until\n  const count = rule.count\n  const ex = event.exDates\n  const simple = !rule.byDay.length && !rule.byMonth.length && !rule.byMonthDay.length && !rule.byYearDay.length && !rule.byWeekNo.length\n  while ((until === 0 || ts <= until) && (count === 0 || counter < count) && ts <= endTs) {\n    let next\n    if (simple) {\n      next = simpleNext(wall, rule)\n      if (!ex.includes(ts)) {\n        counter++\n        if (newEnd >= startTs) addMatched(state, cal, ts, event)\n      }\n    } else {\n      next = nextIntervalStart(wall, rule)\n      const end = intervalEnd(wall, rule, zone)\n      while ((until === 0 || ts <= until) && (count === 0 || counter < count) && ts < end && ts < endTs) {\n        if (matchesRule(Math.floor(wall / DAY), rule) && !ex.includes(ts)) {\n          counter++\n          if (newEnd >= startTs) addMatched(state, cal, ts, event)\n        }\n        wall += DAY\n        ts = wallToTs(wall, zone)\n        newEnd = ts + duration\n      }\n    }\n    wall = next\n    if (first) {\n      first = false\n      if (count === 0) wall = skipAhead(wall, rule, startTs, duration, simple)\n    }\n    ts = wallToTs(wall, zone)\n    newEnd = ts + duration\n  }\n}\n\nconst KEY_SPAN = 4e10\n\nfunction keyFor(state, uid, ts) {\n  let id = state.uids.get(uid)\n  if (id === undefined) {\n    id = state.uids.size + 1\n    state.uids.set(uid, id)\n  }\n  return id * KEY_SPAN + Math.trunc(ts)\n}\n\nfunction addMatched(state, cal, ts, event) {\n  if (state.result.length > MAX_RESULTS) throw new Error('Too many events in calendar.')\n  if (!event.recurrenceId && event.rrules.length) {\n    const cut = cal.staleCutoff.get(event.uid)\n    if (cut !== undefined && ts >= cut) return\n  }\n  if (event.recurrenceId) {\n    const ridTs = ridTimestamp(cal, event)\n    if (event.rrules.length || hasThisAndFuture(event.recurrenceId)) {\n      const cut = state.split.get(event.uid)\n      if (cut === undefined || ridTs < cut) state.split.set(event.uid, ridTs)\n      state.provided.set(keyFor(state, event.uid, ts), [ts, event])\n    } else {\n      state.provided.set(keyFor(state, event.uid, ridTs), [ts, event])\n    }\n  } else if (event.rrules.length) {\n    if (event.status !== CANCELLED) state.generated.set(keyFor(state, event.uid, ts), [ts, event])\n  } else if (event.status !== CANCELLED) {\n    state.result.push([ts, event])\n  }\n}\n\nfunction resolveCollisions(state) {\n  const winners = new Map()\n  for (const pair of state.result) {\n    const [ts, event] = pair\n    const key = event.summary + '|' + Math.trunc(ts) + '|' + Math.trunc(event.endTs - event.startTs)\n    const current = winners.get(key)\n    const preferred = !current || compareFreshness(event, current[1]) > 0 ? event : current[1]\n    if (preferred.uid === event.uid && preferred.startTs === event.startTs && preferred.endTs === event.endTs) winners.set(key, pair)\n  }\n  state.result = [...winners.values()]\n}\n\nexport function getEvents(cal, startTs, endTs, search = '', maxCount = 1000) {\n  const state = { result: [], provided: new Map(), generated: new Map(), split: new Map(), uids: new Map() }\n  for (const event of cal.events) {\n    if (search && event.summary.indexOf(search) < 0) continue\n    if (event.status === CANCELLED && !event.recurrenceId) continue\n    for (const rule of event.rrules) applyRule(state, cal, startTs, endTs, event, rule)\n    if (event.rrules.length === 0 && event.startTs <= endTs && event.endTs >= startTs) addMatched(state, cal, event.startTs, event)\n    if (event.recurrenceId) {\n      const ridTs = ridTimestamp(cal, event)\n      if (ridTs <= endTs && ridTs >= startTs) addMatched(state, cal, event.startTs === 0 ? ridTs : event.startTs, event)\n    }\n  }\n\n  // A THISANDFUTURE split ends the parent at the split, and keeps as many of\n  // the child's instances as it took from the parent.\n  const removed = new Map()\n  for (const [uid, cutoff] of state.split) {\n    for (const [key, [ts, ev]] of state.generated) {\n      if (ev.uid === uid && !ev.recurrenceId && ts >= cutoff) {\n        state.generated.delete(key)\n        removed.set(uid, (removed.get(uid) ?? 0) + 1)\n      }\n    }\n  }\n  for (const [uid, count] of removed) {\n    const cutoff = state.split.get(uid)\n    const children = []\n    for (const [key, [ts, ev]] of state.provided) {\n      if (ev.uid === uid && ts >= cutoff && (ev.rrules.length || hasThisAndFuture(ev.recurrenceId))) children.push([ts, key])\n    }\n    children.sort((a, b) => a[0] - b[0])\n    for (let i = count; i < children.length; i++) state.provided.delete(children[i][1])\n  }\n\n  for (const [key, pair] of state.provided) {\n    state.generated.delete(key)\n    if (pair[1].status !== CANCELLED) state.result.push(pair)\n  }\n  for (const pair of state.generated.values()) state.result.push(pair)\n\n  resolveCollisions(state)\n  state.result.sort((a, b) => a[0] - b[0] || (a[1].summary < b[1].summary ? -1 : a[1].summary > b[1].summary ? 1 : 0))\n  return maxCount > 0 && state.result.length > maxCount ? state.result.slice(0, maxCount) : state.result\n}\n\nconst pad = (n, width) => String(n).padStart(width, '0')\n\nfunction formatTs(ts, zone, dateOnly) {\n  const wall = Math.floor(ts + (zone.name ? offsetAt(zone, ts) : 0))\n  const days = Math.floor(wall / DAY)\n  const [y, m, d] = civilFromDays(days)\n  const date = pad(y, 4) + '-' + pad(m, 2) + '-' + pad(d, 2)\n  if (dateOnly) return date\n  const s = wall - days * DAY\n  return date + 'T' + pad(Math.floor(s / 3600), 2) + ':' + pad(Math.floor(s / 60) % 60, 2) + ':' + pad(s % 60, 2)\n}\n\n// \"this week\", \"next month\", or a plain date (which reads as UTC midnight).\nexport function parsePeriodBoundary(value, zoneName, isStart, now) {\n  const s = value.trim().toLowerCase()\n  const parts = s.split(/\\s+/)\n  if (parts.length === 2 && ['this', 'last', 'next'].includes(parts[0]) && ['day', 'week', 'month', 'year'].includes(parts[1])) {\n    const zone = zoneInfo(zoneName)\n    const offset = zone.name ? offsetAt(zone, now) : 0\n    let days = Math.floor((now + offset) / DAY)\n    const step = parts[0] === 'last' ? -1 : parts[0] === 'next' ? 1 : 0\n    let [y, m, d] = civilFromDays(days)\n    if (parts[1] === 'day') days += step\n    else if (parts[1] === 'week') days += 7 * step\n    else if (parts[1] === 'month') days = daysFromCivil(y, m + step, d)\n    else days = daysFromCivil(y + step, m, d)\n    ;[y, m, d] = civilFromDays(days)\n    const extra = isStart ? 0 : 1\n    let result\n    if (parts[1] === 'day') result = days + extra\n    else if (parts[1] === 'week') result = days - weekdayOf(days) + 7 * extra\n    else if (parts[1] === 'month') result = daysFromCivil(y, m + extra, 1)\n    else result = daysFromCivil(y + extra, 1, 1)\n    return result * DAY - offset\n  }\n  const match = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(value)\n  if (!match) throw new Error('Could not read the date \"' + value + '\": use YYYY-MM-DD, or this/last/next day, week, month or year')\n  return daysFromCivil(Number(match[1]), Number(match[2]), Number(match[3])) * DAY\n}\n\nconst flag = (v, fallback) => (v === undefined || v === null || v === '' ? fallback : typeof v === 'string' ? v.trim().toLowerCase() === 'true' : Boolean(v))\n\nexport function get(app) {\n  const config = app.config\n  if (config.ical === undefined || config.ical === null || config.ical === '') {\n    app.logError('No iCal data provided.')\n    return []\n  }\n  const timeZone = app.frame.timeZone || 'UTC'\n  const now = Date.now() / 1000\n  const startTs = config.exportFrom ? parsePeriodBoundary(config.exportFrom, timeZone, true, now) : now\n  const endTs = config.exportUntil ? parsePeriodBoundary(config.exportUntil, timeZone, false, now) : now + 366 * DAY\n  const addLocation = flag(config.addLocation, true)\n  const addUrl = flag(config.addUrl, true)\n  const addDescription = flag(config.addDescription, false)\n  const addTimezone = flag(config.addTimezone, false)\n  const count = Number(config.exportCount ?? 50) || 0\n  const search = config.search || ''\n  let cal\n  try {\n    cal = parseICalendar(config.ical, timeZone, {\n      keepFrom: startTs,\n      keepUntil: endTs,\n      search,\n      want: [...(addLocation ? ['LOCATION'] : []), ...(addUrl ? ['URL'] : []), ...(addDescription ? ['DESCRIPTION'] : [])],\n    })\n  } catch (e) {\n    app.logError('Error parsing iCal: ' + (e && e.message ? e.message : e))\n    return []\n  }\n  if (cal.problem) {\n    app.logError(cal.problem)\n    return []\n  }\n  const zone = zoneInfo(cal.timeZone)\n  const reply = []\n  for (const [time, event] of getEvents(cal, startTs, endTs, search, count)) {\n    const span = event.endTs - event.startTs\n    const end = time + span - (event.fullDay ? 0.001 : 0) + (event.fullDay && event.startTs === event.endTs ? DAY : 0)\n    const out = { summary: event.summary, startTime: formatTs(time, zone, event.fullDay), endTime: formatTs(end, zone, event.fullDay) }\n    if (event.location && addLocation) out.location = event.location\n    if (event.url && addUrl) out.url = event.url\n    if (event.description && addDescription) out.description = event.description\n    if (addTimezone) out.timezone = event.timeZone || cal.timeZone\n    reply.push(out)\n  }\n  app.log({ event: 'reply', eventsInRange: reply.length, ...(cal.skipped ? { skipped: cal.skipped } : {}) })\n  return reply\n}\n",
+          "config.json": "{\n  \"name\": \"iCal to Events JSON\",\n  \"description\": \"Convert an iCal file into a JSON event list\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"ical\",\n      \"type\": \"string\",\n      \"required\": true,\n      \"label\": \"iCal file contents\",\n      \"capabilities\": { \"byteIter\": {} }\n    },\n    {\n      \"name\": \"exportFrom\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"placeholder\": \"now\",\n      \"required\": false,\n      \"label\": \"Export events from (YYYY-MM-DD)\"\n    },\n    {\n      \"name\": \"exportUntil\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"placeholder\": \"1 year later\",\n      \"required\": false,\n      \"label\": \"Export events until (YYYY-MM-DD)\"\n    },\n    {\n      \"name\": \"exportCount\",\n      \"type\": \"integer\",\n      \"value\": \"50\",\n      \"placeholder\": \"50\",\n      \"required\": false,\n      \"label\": \"Maximum number of events to export\"\n    },\n    {\n      \"name\": \"search\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"placeholder\": \"\",\n      \"required\": false,\n      \"label\": \"Filter events by keyword\"\n    },\n    {\n      \"name\": \"addLocation\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"required\": false,\n      \"label\": \"Add 'location' to the result JSON\"\n    },\n    {\n      \"name\": \"addUrl\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"required\": false,\n      \"label\": \"Add 'url' to the result JSON\"\n    },\n    {\n      \"name\": \"addDescription\",\n      \"type\": \"boolean\",\n      \"value\": \"false\",\n      \"required\": false,\n      \"label\": \"Add 'description' to the result JSON\"\n    },\n    {\n      \"name\": \"addTimezone\",\n      \"type\": \"boolean\",\n      \"value\": \"false\",\n      \"required\": false,\n      \"label\": \"Add 'timezone' to the result JSON\"\n    },\n    {\n      \"markdown\": \"[{ summary, startTime, endTime, location, url, description, timezone }]\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"events\",\n      \"type\": \"json\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true\n  }\n}\n"
         }
       }
     }

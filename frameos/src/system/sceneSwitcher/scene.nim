@@ -33,6 +33,8 @@ import frameos/types
 import frameos/channels
 import frameos/events_gen
 import frameos/panel_shape
+import frameos/render_scale
+import frameos/scene_rhythm
 import frameos/ui/layout
 import frameos/ui/events
 import frameos/ui/tree
@@ -51,7 +53,11 @@ type
     ## The frame's scenes in its scene list's order, with their names.
   SwitcherThumbnail* = proc (frameConfig: FrameConfig, sceneId: string,
       width, height: int): Image {.nimcall, gcsafe.}
-    ## A scene's last picture, `width` x `height` exactly, or nil.
+    ## A scene's last picture, `width` x `height` or smaller in that shape
+    ## (it is stretched to the tile), or nil.
+  SwitcherThumbnailPass* = proc (start: bool): bool {.nimcall, gcsafe.}
+    ## Around a render's pictures: `start` before the first, then after the
+    ## last, whether one was left out for time (and another render is due).
 
   SwitcherGrid* = object
     ## Where the tiles go: `perPage` of them, `cols` across, from (x0, y0).
@@ -66,6 +72,7 @@ type
   SceneSwitcherScene* = ref object of FrameScene
     entries*: seq[SwitcherEntry] ## what the last render or key listed
     paper*: bool ## drawn for e-paper last time (paperPanel)
+    roomW, roomH, unit: int ## what the last render laid out in (tree): 0 before one
 
 const
   SwitcherNode = 1 ## the ui/events target its tiles live in
@@ -81,6 +88,7 @@ const
 var
   sceneSwitcherListing*: SwitcherListing
   sceneSwitcherThumbnail*: SwitcherThumbnail
+  sceneSwitcherThumbnailPass*: SwitcherThumbnailPass
   # What the last hit test ran: a tile's index, Close (the tile count), an
   # arrow (count + 1, + 2), or -1. Read by runEvent once the hit test is
   # done, so the handler holds nothing of the scene's.
@@ -124,6 +132,20 @@ proc canvasSize(frameConfig: FrameConfig): (int, int) =
   if frameConfig.rotate == 90 or frameConfig.rotate == 270: (frameConfig.height, frameConfig.width)
   else: (frameConfig.width, frameConfig.height)
 
+proc uiScale*(frameConfig: FrameConfig, width, height: int): float =
+  ## The frame's render scale (render_scale.nim) for a built-in scene's UI,
+  ## the switcher's and the settings', kept where they stay usable: no
+  ## smaller than 3/4 and laid out on no less than 320 px, so the settings
+  ## that set it can always set it back.
+  clamp(frameRenderScale(frameConfig), 0.75, max(1.0, min(width, height).float / 320.0))
+
+proc uiRoom*(frameConfig: FrameConfig, width, height: int): (int, int) =
+  ## What a built-in UI is laid out on: the canvas over its scale. Its
+  ## sizes come from the canvas (its `unit`), so at 1.5 everything is half
+  ## as large again with less room, as a scaled JSX scene is.
+  let scale = uiScale(frameConfig, width, height)
+  (scaledLength(width, scale), scaledLength(height, scale))
+
 proc ensureCanvas*(self: FrameScene, context: ExecutionContext) =
   ## The canvas a built-in scene draws into: the host's, else one the size of
   ## the frame as it is turned.
@@ -134,14 +156,20 @@ proc ensureCanvas*(self: FrameScene, context: ExecutionContext) =
 
 proc permille(v, p: int): int {.inline.} = (v * p + 500) div 1000
 
-proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false): SwitcherGrid =
-  ## The tile grid for `count` scenes on a `width` x `height` canvas: every
-  ## scene on one page while the tiles stay big enough to read, else as many
-  ## per page as fit. Among the grids that hold them all, the one whose
-  ## pictures (at the canvas's own aspect) or name cards come out largest.
+proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false, unit = 0): SwitcherGrid =
+  ## The tile grid for `count` scenes on a `width` x `height` canvas: the
+  ## densest one whose tiles stay big enough to read, whatever the count, so
+  ## a tile is the same size with three scenes as with thirty and fewer
+  ## scenes fill fewer of its slots (the owner's rule, 2026-11-10: tiles that
+  ## grew to fill the page looked odd, and on an ESP32 each picture's pixels
+  ## are what the switcher's render costs). Among grids as dense, the one
+  ## whose pictures (at the canvas's own aspect) or name cards come out
+  ## largest. More scenes than a page holds page.
   ## On a round panel the grid is the square inscribed in the circle that
   ## stays `RoundInset` in from the rim, so no tile has a corner off the glass.
-  let unit = min(width, height)
+  ## `unit`: what the sizes are a share of (the panel's shorter edge, for a
+  ## UI laid out at its render scale); the canvas's shorter edge without it.
+  let unit = if unit > 0: unit else: min(width, height)
   result.pad = clamp(permille(unit, 35), 4, 24)
   result.gap = clamp(permille(unit, 25), 3, 16)
   result.headerH = clamp(permille(unit, 110), 18, 64)
@@ -167,7 +195,7 @@ proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false): 
     minH = min(clamp(permille(unit, 150), 36, 160), gh)
   var
     best = -1.0
-    bestFits = false
+    bestCapacity = 0
   for cols in 1 .. MaxCols:
     for rows in 1 .. MaxRows:
       let
@@ -176,7 +204,6 @@ proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false): 
       if tw < minW or th < minH:
         continue
       let capacity = cols * rows
-      let fits = capacity >= max(count, 1)
       # A card with a name: as large as it gets, not much taller than wide.
       var quality = float(min(tw, th * 11 div 5) * min(th, tw * 6 div 5))
       when not defined(frameosEmbedded):
@@ -187,12 +214,9 @@ proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false): 
             titleH = clamp(th.float * 0.2, 14, 44)
             pw = min(tw.float * 0.9, max(th.float - titleH, 1) * 0.9 * aspect)
           quality = pw * pw / aspect
-      # A grid that holds them all beats one that pages; among those that
-      # page, the one that holds the most.
-      let score = if fits: quality else: capacity.float
-      if (fits and not bestFits) or (fits == bestFits and score > best):
-        best = score
-        bestFits = fits
+      if capacity > bestCapacity or (capacity == bestCapacity and quality > best):
+        best = quality
+        bestCapacity = capacity
         result.cols = cols
         result.rows = rows
         result.tileW = tw
@@ -211,16 +235,24 @@ proc isRound*(frameConfig: FrameConfig): bool =
   when defined(frameosEmbedded): false
   else: not frameConfig.isNil and panelIsRound(frameConfig.device)
 
-proc grid(self: SceneSwitcherScene, width, height: int): SwitcherGrid =
+proc grid(self: SceneSwitcherScene, width, height: int, unit = 0): SwitcherGrid =
   when defined(frameosEmbedded):
-    switcherGrid(self.entries.len, width, height, false)
+    switcherGrid(self.entries.len, width, height, false, unit = unit)
   else:
     switcherGrid(self.entries.len, width, height, not sceneSwitcherThumbnail.isNil,
-      round = isRound(self.frameConfig))
+      round = isRound(self.frameConfig), unit = unit)
 
 proc grid(self: SceneSwitcherScene): SwitcherGrid =
+  ## The grid the last render drew: at the UI's scale (uiRoom), in the room
+  ## it had. Inside a layout that is the hole the layout left, not the panel:
+  ## measured on the whole panel, a page held more tiles than the drawn one,
+  ## so a page turn lit a tile of the page after and the last pages could not
+  ## be reached (the reTerminal E1003 in a Windows 98 window, 2026-11-10).
+  if self.roomW > 0 and self.roomH > 0:
+    return self.grid(self.roomW, self.roomH, self.unit)
   let (width, height) = canvasSize(self.frameConfig)
-  self.grid(width, height)
+  let (roomW, roomH) = uiRoom(self.frameConfig, width, height)
+  self.grid(roomW, roomH, min(width, height))
 
 proc indexOf(self: SceneSwitcherScene, sceneId: string): int =
   for i in 0 ..< self.entries.len:
@@ -257,12 +289,23 @@ proc highlight(self: SceneSwitcherScene, index: int) =
   self.state.put("highlight", newJString(self.entries[i].id))
   self.state.put("page", newJInt(i div max(self.grid().perPage, 1)))
 
-proc turnPage(self: SceneSwitcherScene, delta: int) =
-  ## Another page (wrapping around), its first tile highlighted.
+proc turnPage(self: SceneSwitcherScene, delta: int): bool {.discardable.} =
+  ## Another page (wrapping around), its first tile highlighted. False when
+  ## there is only the one.
   let grid = self.grid()
   if grid.pages > 1:
     let page = ((self.state{"page"}.getInt(0) + delta) mod grid.pages + grid.pages) mod grid.pages
     self.highlight(page * grid.perPage)
+    result = true
+
+proc showTurnedPage() =
+  ## A tap or a swipe changes nothing the dispatcher watches for them (the
+  ## contract's `tap` and `swipe` render `never`, unlike a key's or `back`'s
+  ## `if-state-changed`), so the page they turned is asked for here. Without
+  ## it the next page showed only when something else rendered: on the
+  ## reTerminal E1003 a tap on the arrow did nothing until the panel happened
+  ## to refresh (2026-11-10).
+  sendEvent(evRender, newJObject(), eoScene)
 
 proc choose(self: SceneSwitcherScene, index: int) =
   ## Show the scene at `index`.
@@ -408,37 +451,38 @@ proc titleRow(look: TileLook, index, size: int, height = 0): SvgNode =
     else: d.add " bg-black"
     result.children.add el("div", d)
 
-when not defined(frameosEmbedded):
-  proc pictureTile(self: SceneSwitcherScene, tile: SvgNode, look: TileLook, index: int,
-      grid: SwitcherGrid, title: string) =
-    ## A tile's picture and the title under it: the scene's last snapshot,
-    ## where the host keeps one (Linux), or its number in the picture's place.
-    let
-      titleH = clamp(int(round(grid.tileH.float * 0.2)), 14, 44)
-      pw = max(grid.tileW - 2 * look.border - 2 * look.inner, 1)
-      ph = max(grid.tileH - 2 * look.border - 2 * look.inner - titleH, 1)
-      size = clamp(int(round(min(titleH.float * 0.62, grid.tileW.float * 0.13))), 10, 28)
-    var picture: Image
-    try:
-      picture = sceneSwitcherThumbnail(self.frameConfig, self.entries[index].id, pw, ph)
-    except Exception:
-      picture = nil
-    var c = "shrink-0"
-    c.px("rounded", max(look.radius - look.inner, 2))
-    c.px("w", pw)
-    c.px("h", ph)
-    if not picture.isNil:
-      tile.children.add SvgNode(tag: "img", image: picture, attrs: @[("class", c)])
-    else:
-      # No picture yet (a scene not shown since the card was made).
-      c.add " flex items-center justify-center font-bold"
-      c.add(if not look.paper: " bg-zinc-700" elif look.lit: " border-2 border-white" else: " border-2 border-black")
-      c.px("text", clamp(ph div 3, 12, 64))
-      c.mute(look)
-      tile.children.add el("div", c, txt($(index + 1)))
-    let row = look.titleRow(index, size, titleH)
-    row.children.add el("span", if look.paper: "truncate font-bold" else: "truncate", txt(title))
-    tile.children.add row
+proc pictureTile(self: SceneSwitcherScene, tile: SvgNode, look: TileLook, index: int,
+    grid: SwitcherGrid, title: string): bool =
+  ## A tile's picture and the title under it: the scene's last snapshot,
+  ## where the host keeps one, else its number in the picture's place. Linux
+  ## only: an ESP32's tiles are name cards (see `tile`).
+  let
+    titleH = clamp(permille(grid.tileH, 200), 14, 44)
+    pw = max(grid.tileW - 2 * look.border - 2 * look.inner, 1)
+    ph = max(grid.tileH - 2 * look.border - 2 * look.inner - titleH, 1)
+    size = clamp(min(permille(titleH, 620), permille(grid.tileW, 130)), 10, 28)
+  var picture: Image
+  try:
+    picture = sceneSwitcherThumbnail(self.frameConfig, self.entries[index].id, pw, ph)
+  except Exception:
+    picture = nil
+  var c = "shrink-0"
+  c.px("rounded", max(look.radius - look.inner, 2))
+  c.px("w", pw)
+  c.px("h", ph)
+  if not picture.isNil:
+    tile.children.add SvgNode(tag: "img", image: picture, attrs: @[("class", c)])
+  else:
+    # No picture yet (a scene not shown since the card was made).
+    c.add " flex items-center justify-center font-bold"
+    c.add(if not look.paper: " bg-zinc-700" elif look.lit: " border-2 border-white" else: " border-2 border-black")
+    c.px("text", clamp(ph div 3, 12, 64))
+    c.mute(look)
+    tile.children.add el("div", c, txt($(index + 1)))
+  let row = look.titleRow(index, size, titleH)
+  row.children.add el("span", if look.paper: "truncate font-bold" else: "truncate", txt(title))
+  tile.children.add row
+  true
 
 proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: SwitcherGrid,
     button: string): SvgNode =
@@ -463,11 +507,13 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: Swit
   var title = self.entries[index].name
   if title.len == 0:
     title = self.entries[index].id
+  # An ESP32 shows names only: loading, scaling and drawing a picture per tile
+  # made the drawer take seconds to open on a 10" e-paper panel (the owner's
+  # call, 2026-11-10), and writing them cost seconds of flash after renders.
+  # The preview keeps no picture of a scene it is not showing either.
   when not defined(frameosEmbedded):
-    if not sceneSwitcherThumbnail.isNil:
-      self.pictureTile(result, look, index, grid, title)
+    if not sceneSwitcherThumbnail.isNil and self.pictureTile(result, look, index, grid, title):
       return
-  # Names only: an ESP32 keeps no picture of a scene it is not showing.
   let size = clamp(min(permille(grid.tileH, 180), permille(grid.tileW, 140)), 12, 40)
   result.children.add look.titleRow(index, size)
   var name = "grow flex items-center justify-center text-center font-bold line-clamp-3"
@@ -559,13 +605,17 @@ when not defined(frameosEmbedded):
       root.children.add left
       root.children.add right
 
-proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool): SvgNode =
+proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0): SvgNode =
   ## The switcher as a UI tree: the header (its title, the page and its
   ## arrows, Close), or on a round panel the same around the circle, and one
   ## page of tiles, each where switcherGrid put it. The outermost element
   ## fills the canvas by itself (ui/layout.nim), its children placed on it.
+  ## `unit`: what its sizes are a share of (uiRoom).
+  self.roomW = width
+  self.roomH = height
+  self.unit = unit
   let
-    grid = self.grid(width, height)
+    grid = self.grid(width, height, unit)
     page = clamp(self.state{"page"}.getInt(0), 0, grid.pages - 1)
     lit = self.highlighted()
     size = clamp(grid.headerH * 45 div 100, 12, 32)
@@ -612,16 +662,21 @@ proc background*(paper: bool): Color =
   if paper: PaperWhite else: Zinc950
 
 proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, paper: bool,
-    call: UiHandlerCall, idle: float): bool =
+    call: UiHandlerCall, idle: float, roomW, roomH: int): bool =
   ## A built-in scene's render (the switcher's, the settings'): `tree` laid
-  ## out and drawn into `image`, and its regions left with `call` for the
-  ## pointer. True once nobody has touched it for `idle` seconds, when the
-  ## scene goes back; until then the next render is due when that time is up.
+  ## out on `roomW` x `roomH` (uiRoom), drawn stretched to fill `image` as
+  ## vectors, and its regions left with `call` for the pointer, which is
+  ## divided by the same scale. True once nobody has touched it for `idle`
+  ## seconds, when the scene goes back; until then the next render is due
+  ## when that time is up.
+  # Not a pass of the scene_rhythm: the panel the scene underneath left in
+  # these buffers is gone, and a panel of it that is not due must not stay.
+  rhythmForgetCanvases()
   let target = uiTarget(sceneId, 1)
   target.input.paper = paper
   target.input.round = isRound(self.frameConfig)
   var regions: seq[UiRegion]
-  let svg = layoutUi(tree, image.width, image.height, target.input, regions, target.memo)
+  let svg = layoutUi(tree, roomW, roomH, target.input, regions, target.memo)
   let bg = background(paper)
   var owed = some(bg)
   if not renderSvgFrame(svg, image, owed, wholeFrame = true, reuse = true):
@@ -631,12 +686,15 @@ proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, pap
   target.regions = move(regions)
   target.offsetX = 0
   target.offsetY = 0
+  target.scale = image.width.float32 / max(roomW, 1).float32
   target.call = call
   let
     now = epochTime()
     since = now - self.state{"touchedAt"}.getFloat(now)
   result = since >= idle
   self.refreshInterval = if result: idle else: max(idle - since, 1.0)
+  # What a layout around it goes by (refresh_interval.ownRefreshInterval).
+  self.refreshIntervalDefault = self.refreshInterval
 
 proc onTap(handler: int, name: string, event: JsonNode, hit: UiHit) {.raises: [].} =
   ## The tiles' one handler, run by the hit test (ui/events.nim): what it
@@ -655,9 +713,24 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
   # flashing for nothing. `pointer` hands it taps alone, which leave the
   # target's input (what is hovered, what is pressed) empty. Back by itself
   # once nobody has touched it for a while.
-  if self.drawUi(SceneSwitcherId, self.tree(image.width, image.height, self.paper), image, self.paper,
-      onTap, idleSeconds(self.paper)):
+  var more = false
+  when not defined(frameosEmbedded):
+    # Pictures that would have kept the panel waiting come in the next
+    # render (the Linux host's decode budget, scene_switcher_linux.nim). Not
+    # on e-paper, where each render is a refresh: it waits for all of them.
+    let pass = if self.paper: nil else: sceneSwitcherThumbnailPass
+    if not pass.isNil:
+      try: discard pass(true) except Exception: discard
+  let (roomW, roomH) = uiRoom(self.frameConfig, image.width, image.height)
+  let tree = self.tree(roomW, roomH, self.paper, min(image.width, image.height))
+  when not defined(frameosEmbedded):
+    if not pass.isNil:
+      try: more = pass(false) except Exception: more = false
+  if self.drawUi(SceneSwitcherId, tree, image, self.paper, onTap, idleSeconds(self.paper), roomW, roomH):
     leave()
+  elif more:
+    rhythmMarkDue(self)
+    sendEvent(evRender, newJObject(), eoScene)
 
 # ------------------------------------------------------------ the scene
 
@@ -675,14 +748,14 @@ proc pointer(self: SceneSwitcherScene, event: string, payload: JsonNode) =
     # or the page in the state). A tap on nothing is nothing.
     if tapped < count: self.choose(tapped)
     elif tapped == count: leave()
-    else: self.turnPage(if tapped == count + 1: -1 else: 1)
+    elif self.turnPage(if tapped == count + 1: -1 else: 1): showTurnedPage()
     tapped = -1
     self.touch()
   elif changed and not tap:
     # What is pressed moved: an LCD shows it.
     sendEvent(evRender, newJObject(), eoScene)
 
-proc runSwitcher(self: FrameScene, context: ExecutionContext) =
+proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   ## What raises here is reported by the caller, as for any scene: the
   ## dispatcher's `event:error`, the render pass's own. The payload is read
   ## with `{}` alone, which answers a nil or a non-object payload with nil.
@@ -691,9 +764,10 @@ proc runSwitcher(self: FrameScene, context: ExecutionContext) =
   case context.event
   of "setCurrentScene":
     # What the dispatcher says it was opened from (event_loop.nim).
-    let opener = payload{"state", "from"}
-    if not opener.isNil:
-      self.state.put("from", opener)
+    for key in ["from", "layout"]:
+      let value = payload{"state", key}
+      if not value.isNil:
+        self.state.put(key, value)
   of "open":
     self.opened()
   of "close":
@@ -714,7 +788,7 @@ proc runSwitcher(self: FrameScene, context: ExecutionContext) =
     # Across the tiles, as on a phone: the next page or the one before.
     let direction = payload{"direction"}.getStr()
     if direction == "left" or direction == "right":
-      self.turnPage(if direction == "left": 1 else: -1)
+      if self.turnPage(if direction == "left": 1 else: -1): showTurnedPage()
       self.touch()
   else:
     when not defined(frameosEmbedded):
@@ -725,6 +799,10 @@ proc runSwitcher(self: FrameScene, context: ExecutionContext) =
     # nothing of: it has no position).
     self.pointer(context.event, payload)
 
+proc runSwitcher(self: FrameScene, context: ExecutionContext) =
+  if builtInRunner.isNil or not builtInRunner(self, context):
+    switcherOwnRun(self, context)
+
 proc renderSwitcher(self: FrameScene, context: ExecutionContext): Image =
   self.ensureCanvas(context)
   runSwitcher(self, context)
@@ -734,8 +812,8 @@ proc initSwitcher(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, pe
   ## Nothing persisted to start from: the switcher keeps no state file.
   # Until the first render says (an ESP32's LCD is known by its canvas).
   let paper = paperPanel(frameConfig)
-  SceneSwitcherScene(id: sceneId, frameConfig: frameConfig, logger: logger, state: newJObject(),
-    refreshInterval: idleSeconds(paper), backgroundColor: background(paper), paper: paper)
+  SceneSwitcherScene(id: sceneId, frameConfig: frameConfig, logger: logger, state: newJObject(), ownRun: switcherOwnRun,
+    shownName: "Scene switcher", refreshInterval: idleSeconds(paper), backgroundColor: background(paper), paper: paper)
 
 var exportedScene* = ExportedInterpretedScene(
   name: "Scene switcher",

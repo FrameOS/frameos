@@ -6,7 +6,7 @@ from app.utils.ai_scene import _build_ai_posthog_properties, _new_ai_span_id, _o
 from app.utils.scene_guide_gen import SCENE_GUIDE_SECTIONS
 
 # The scene guide's sections about writing an app (docs/scene-guide.md).
-APP_GUIDE_SECTION_IDS = ("js-apps", "images-svg-and-text", "layout-and-color", "small-frames", "js-api-reference")
+APP_GUIDE_SECTION_IDS = ("js-apps", "drawing-with-jsx", "images-svg-and-text", "layout-and-color", "small-frames", "js-api-reference")
 _app_sections = {section["id"]: section["text"] for section in SCENE_GUIDE_SECTIONS}
 assert all(section_id in _app_sections for section_id in APP_GUIDE_SECTION_IDS), "a scene guide section was renamed"
 APP_GUIDE = "\n\n".join(_app_sections[section_id] for section_id in APP_GUIDE_SECTION_IDS)

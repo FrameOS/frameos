@@ -12,14 +12,31 @@ SPA draws it. Vocabulary: `docs/ui-vocabulary.md` ("Preview", "Install",
 A preview is a `set_scenes` push that is not an assignment or a deploy. On
 the self-hosted backend it is a `set_scenes` row carrying `_preview`
 (`app/utils/embedded_commands.py` `queue_embedded_scene_preview`): the
-device's `/embedded/scenes` pull serves the preview's scenes in place of the
-saved ones while that row is the newest scene set the frame was sent
+device's `/embedded/scenes` pull serves the saved scenes with the preview's
+in them while that row is the newest scene set the frame was sent
 (`frame_commands.previewed_scenes`), and the device's settings pull carries
 what the previewed scenes' apps declare (`embedded_device.
 embedded_settings_payload`), so a previewed Unsplash scene gets the key. On
-the cloud it is the event route's `uploadScenes`: a checksummed `set_scenes`
-the hub delivers over the socket, deliberately not an assignment
+the cloud it is the event route's `uploadScenes` (and the voice chat's
+`show_image`): a checksummed `set_scenes` the hub delivers over the socket,
+deliberately not an assignment
 (`app/api/frames/[frameId]/event/[eventName]/route.ts`).
+
+**A preview keeps the frame's list.** What the frame is sent is its saved
+(backend) or assigned (cloud) list with the preview's scenes in it: a
+preview scene in place of the listed scene of its id (an edited scene
+previewed), the others after the list (backend `previewed_scenes`, cloud
+`lib/scene-preview-list.ts` `sceneListWithPreview`, the SPA's copy in
+`utils/scenePreviewPayload.ts` for USB). Sent alone, the preview's scenes
+replaced the frame's whole set, so on an ESP32 (which is sent what changed,
+`embedded/esp32/README.md` "Scene storage") a preview removed every other
+scene, and the Install or Discard after it, or an Activate while it stood,
+sent them all back. Now the preview's patch puts the previewed scene alone,
+Install has nothing or one scene to send (the frame holds the scene
+already), Discard removes one, and Activate switches to a scene the frame
+still holds (on the cloud, whose frame row then holds another set than the
+assigned one, the re-push of the assigned list carries the preview along and
+is a patch of no scenes).
 
 ## A preview rides along
 
@@ -50,7 +67,7 @@ Two things end a preview:
 A new preview replaces the old one: there is one preview per frame, the
 newest. A carried preview is served by the backend as the saved list plus the
 carried scenes the list does not hold (`previewed_scenes`); the editor's own
-preview bundle is served as it is.
+preview bundle is served as the saved list with the bundle in it (above).
 
 The device holds whatever scene set it was sent last. On an ESP32 two rules
 make that true for a push from the backend (both found on an E1002,
@@ -97,7 +114,7 @@ Both planes report `scene_preview` on the frame (`GET /api/frames`,
 
 while a preview is the newest scene push, `null` otherwise (backend
 `frame_commands.scene_preview_info`, cloud `frames.ts scenePreviewsByFrame`).
-The scene list (`frontend/src/scenes/workspace/SceneWorkspace.tsx`) draws a
+The frame page's scene list (`frontend/src/scenes/workspace/ScenePreviewRow.tsx`) draws a
 dashed **preview** row above the saved scenes: the name, where it came from,
 "active" when the device reports showing it, and two actions:
 
@@ -116,10 +133,31 @@ dashed **preview** row above the saved scenes: the name, where it came from,
   for good. The row never offers a plain "push the list": a push alone
   carries the preview along, so it would change nothing.
 
+## Over USB
+
+"Preview on frame" goes to the control plane first, as Activate does
+(`scenesLogic.previewScene`): the plane records the preview and pushes it.
+It used to go over USB first on an ESP32 on the browser's cable, and the
+plane never heard of the preview: no preview row, no Install, and the
+plane's next push took the scene away without a word. Over USB now only
+
+- when the plane cannot be reached: the SPA sends what a plane would (the
+  frame's list with the preview in it), and the task says the plane does not
+  know about the preview, so its next push replaces it;
+- as well as the plane, on a cloud frame that is offline to the hub: the
+  push waits on the hub for the reconnect (and then changes nothing), and the
+  panel shows the preview now.
+
 ## Tests
 
 - backend: `app/api/tests/test_embedded_commands.py` (the preview rows, the
-  spent bundles, `scene_preview` and its route);
+  spent bundles, `scene_preview` and its route, the saved list in a preview's
+  pull), `test_embedded_device.py`
+  (`test_a_preview_patches_in_one_scene_and_keeps_the_list`);
 - cloud: `src/test/integration/frame-assets.integration.test.ts` (the
   `preview` metadata on the push, `scenePreviewsByFrame`,
-  `scenePreviewScene`, the spent bundle after a newer push).
+  `scenePreviewScene`, the spent bundle after a newer push),
+  `frames.integration.test.ts` (the assigned scenes in a preview's push),
+  `src/test/scene-preview-list.test.ts`;
+- SPA: `shared-spa/scene-preview-plane-first.test.ts` (the plane first, USB
+  only as the fallback, with the list).

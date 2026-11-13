@@ -40,6 +40,7 @@ import {
   MetricsIntervalField,
   PaletteField,
   RenderScaleField,
+  FrameSettingsOnScreenField,
   SaveAssetsField,
   TimezoneUpdaterFields,
 } from '../fields/sharedFields'
@@ -136,6 +137,7 @@ export function CloudBaseSettingsSection(): JSX.Element {
           </>
         )}
         <RenderScaleField />
+        <FrameSettingsOnScreenField />
         {esp32 ? (
           <fieldset disabled={!cloudEsp32TimeZoneSupported} className="min-w-0">
             <Field
@@ -366,6 +368,8 @@ export function CloudEsp32Sections(): JSX.Element | null {
     cloudPowerSettings,
     setCloudPowerSettings,
     cloudBatteryEnablePinDisabledReason,
+    cloudCpuModeDisabledReason,
+    cloudRenderOnServer,
     cloudEsp32ExtendedSettingsSupported,
   } = useFrameSettings()
   const renders = useFrameSettingsSectionRenders('cloud-esp32-power')
@@ -382,6 +386,9 @@ export function CloudEsp32Sections(): JSX.Element | null {
           value={cloudPowerSettings}
           onChange={setCloudPowerSettings}
           batteryEnablePinDisabledReason={cloudBatteryEnablePinDisabledReason}
+          cpuModeDisabledReason={cloudCpuModeDisabledReason}
+          reportedCpuMhz={frame.hardware?.cpuMhz ?? undefined}
+          renderOnServer={cloudRenderOnServer}
           footnote="Power settings need a FrameOS firmware from 2026.8.21 on — older firmware refuses the whole settings push. Update the frame first if saving fails."
         />
       </SectionBody>

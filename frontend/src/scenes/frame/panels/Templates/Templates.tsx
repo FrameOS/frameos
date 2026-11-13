@@ -104,12 +104,12 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
   const cloudMode = isCloudMode()
   const showStore = section !== 'saved'
   const showSaved = section !== 'store'
-  const { applyTemplate } = useActions(frameLogic)
   const { frameId, mode, frameForm } = useValues(frameLogic)
   const { apps } = useValues(appsModel)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
   const {
     applyRemoteToFrame,
+    installTemplate,
     editLocalTemplate,
     saveRemoteAsLocal,
     showRemoteTemplate,
@@ -261,6 +261,9 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
           saveRemoteAsLocal={!inFrameAdminMode ? (template) => saveRemoteAsLocal(repository, template) : undefined}
           applyTemplate={(template) => {
             applyRemoteToFrame(repository, template, openInstalledSceneDrawer)
+          }}
+          installAndActivate={(template) => {
+            applyRemoteToFrame(repository, template, openInstalledSceneDrawer, true)
           }}
           installedTemplatesByName={installedTemplatesByName}
           installing={Boolean(installingTemplateIds[favouriteId])}
@@ -495,8 +498,9 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
                       exportTemplate={exportTemplate}
                       removeTemplate={removeTemplate}
                       applyTemplate={(template: TemplateType) => {
-                        applyTemplate(template, openInstalledSceneDrawer)
+                        installTemplate(template, openInstalledSceneDrawer)
                       }}
+                      installAndActivate={(template: TemplateType) => installTemplate(template, false, true)}
                       editTemplate={editLocalTemplate}
                       installedTemplatesByName={installedTemplatesByName}
                       templateDragData={compatibility.supported ? { template } : undefined}

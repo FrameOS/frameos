@@ -53,11 +53,42 @@ int fos_touch_wire(int value, int max)
     return (int)(((long)value * FOS_TOUCH_WIRE_MAX) / (max - 1));
 }
 
+int fos_touch_move_slot(const fos_touch_event_t *queue, size_t capacity, size_t head, size_t count, uint8_t id)
+{
+    for (size_t i = count; i-- > 0;) {
+        size_t slot = (head + i) % capacity;
+        if (queue[slot].id == id) return queue[slot].kind == FOS_TOUCH_MOVE ? (int)slot : -1;
+    }
+    return -1;
+}
+
 bool fos_touch_axes_swapped(int touch_x_max, int touch_y_max, int panel_width, int panel_height)
 {
     if (touch_x_max <= 0 || touch_y_max <= 0 || panel_width <= 0 || panel_height <= 0) return false;
     if (touch_x_max == touch_y_max || panel_width == panel_height) return false;
     return (touch_x_max > touch_y_max) != (panel_width > panel_height);
+}
+
+fos_touch_beep_t fos_touch_beep_step(uint8_t kind, uint8_t id, bool captured, uint8_t *held, uint8_t *beeped)
+{
+    uint8_t bit = (uint8_t)(1u << id);
+    if (kind == FOS_TOUCH_DOWN) {
+        bool another = (*held & (uint8_t)~bit) != 0;
+        *held |= bit;
+        if (!captured) {
+            *beeped &= (uint8_t)~bit;
+            return FOS_TOUCH_BEEP_NONE;
+        }
+        *beeped |= bit;
+        return another ? FOS_TOUCH_BEEP_SECOND_DOWN : FOS_TOUCH_BEEP_DOWN;
+    }
+    if (kind == FOS_TOUCH_UP) {
+        *held &= (uint8_t)~bit;
+        if ((*beeped & bit) == 0) return FOS_TOUCH_BEEP_NONE;
+        *beeped &= (uint8_t)~bit;
+        return FOS_TOUCH_BEEP_UP;
+    }
+    return FOS_TOUCH_BEEP_NONE;
 }
 
 #ifdef ESP_PLATFORM
@@ -75,6 +106,7 @@ bool fos_touch_axes_swapped(int touch_x_max, int touch_y_max, int panel_width, i
 #endif
 
 #include "fos_board.h"
+#include "fos_buzzer.h"
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_events.h"
@@ -86,29 +118,27 @@ bool fos_touch_axes_swapped(int touch_x_max, int touch_y_max, int panel_width, i
 static const char *TAG = "fos_touch";
 
 #define TOUCH_I2C_HZ 400000
+/* What the GT911 gets on every firmware known to run the reTerminal Sticky's
+ * panel: the bus has only the chip's weak pull-ups behind it. */
+#define TOUCH_GT911_I2C_HZ 100000
 #define TOUCH_I2C_TIMEOUT_MS 50
+/* The panel's supply switch to a controller that answers (Seeed's demos). */
+#define TOUCH_POWER_SETTLE_MS 250
 /* While a finger is down the controller pulses INT per report (~100 Hz);
  * a poll at this rate catches a release whose pulse was missed. Idle, the
  * task sleeps until the line moves. */
-#define TOUCH_POLL_HELD_MS 20
+#define TOUCH_POLL_HELD_MS 10
 #define TOUCH_POLL_IDLE_MS 2000
 /* Without an interrupt line (the SenseCAP Indicator's FT6336U: its INT is on
  * the IO expander, unwired) the task polls: a tap is 80 ms or longer, so
- * every 30 ms catches it. One two-byte read at 400 kHz, ~0.1 ms. */
+ * every 30 ms catches it while no finger is down; once one is, every 10 ms
+ * (TOUCH_POLL_HELD_MS), so a drag's moves and the release arrive 5 ms late
+ * on average, not 10. A 10 ms idle poll cost an animating scene about a
+ * frame a second on the SenseCAP Indicator (2026-11-07). */
 #define TOUCH_POLL_NO_IRQ_MS 30
 /* Edges a render can sit on. A move coalesces into the newest move of the
  * same finger, so this is mostly downs and ups: 64 is plenty. */
 #define TOUCH_QUEUE_LEN 64
-
-typedef enum { TOUCH_DOWN = 0, TOUCH_MOVE = 1, TOUCH_UP = 2 } touch_kind_t;
-
-typedef struct {
-    uint8_t kind;
-    uint8_t id;
-    uint16_t x; /* wire units */
-    uint16_t y;
-    int64_t at_ms; /* esp_timer, when the controller reported it */
-} touch_event_t;
 
 typedef enum { CTRL_GT911 = 0, CTRL_FT6X36 = 1 } controller_t;
 static const char *const k_controller_names[] = {"gt911", "ft6x36"};
@@ -129,7 +159,7 @@ static bool s_swap = false;
 static int s_mirror = 0; /* FOS_BOARD_TOUCH_MIRROR_*, after the swap */
 static SemaphoreHandle_t s_irq = NULL;
 static portMUX_TYPE s_queue_lock = portMUX_INITIALIZER_UNLOCKED;
-static touch_event_t s_queue[TOUCH_QUEUE_LEN];
+static fos_touch_event_t s_queue[TOUCH_QUEUE_LEN];
 static uint8_t s_head = 0, s_count = 0;
 static uint32_t s_dropped = 0;
 /* What is down, by track id, and where it last was (wire units). */
@@ -140,16 +170,16 @@ static bool s_woke = false;
 
 /* ------------------------------------------------------------- the queue */
 
-static void enqueue(touch_kind_t kind, uint8_t id, uint16_t x, uint16_t y)
+static void enqueue(uint8_t kind, uint8_t id, uint16_t x, uint16_t y)
 {
     int64_t at_ms = esp_timer_get_time() / 1000;
     portENTER_CRITICAL(&s_queue_lock);
-    if (kind == TOUCH_MOVE && s_count > 0) {
-        touch_event_t *tail = &s_queue[(s_head + s_count - 1) % TOUCH_QUEUE_LEN];
-        if (tail->kind == TOUCH_MOVE && tail->id == id) {
-            tail->x = x;
-            tail->y = y;
-            tail->at_ms = at_ms;
+    if (kind == FOS_TOUCH_MOVE) {
+        int merge = fos_touch_move_slot(s_queue, TOUCH_QUEUE_LEN, s_head, s_count, id);
+        if (merge >= 0) {
+            s_queue[merge].x = x;
+            s_queue[merge].y = y;
+            s_queue[merge].at_ms = at_ms;
             portEXIT_CRITICAL(&s_queue_lock);
             return;
         }
@@ -159,7 +189,7 @@ static void enqueue(touch_kind_t kind, uint8_t id, uint16_t x, uint16_t y)
         portEXIT_CRITICAL(&s_queue_lock);
         return;
     }
-    touch_event_t *slot = &s_queue[(s_head + s_count) % TOUCH_QUEUE_LEN];
+    fos_touch_event_t *slot = &s_queue[(s_head + s_count) % TOUCH_QUEUE_LEN];
     slot->kind = (uint8_t)kind;
     slot->id = id;
     slot->x = x;
@@ -170,7 +200,7 @@ static void enqueue(touch_kind_t kind, uint8_t id, uint16_t x, uint16_t y)
     fos_client_wake_for_events();
 }
 
-static bool dequeue(touch_event_t *out)
+static bool dequeue(fos_touch_event_t *out)
 {
     portENTER_CRITICAL(&s_queue_lock);
     if (s_count == 0) {
@@ -189,12 +219,55 @@ bool fos_touch_pending(void)
     return s_count > 0;
 }
 
+bool fos_touch_finger_down(void)
+{
+    return s_down_mask != 0;
+}
+
+/* The click of a press something takes, on e-paper, where the picture takes
+ * its moment to answer. Asked before the event runs, of what the last render
+ * drew. The render task's, so a press during a panel update is heard when
+ * that ends. */
+static void play_beep(fos_touch_beep_t beep)
+{
+    if (!fos_config()->touch_beep || fos_display_is_lcd()) return;
+    if (beep == FOS_TOUCH_BEEP_DOWN) fos_buzzer_click_down();
+    else if (beep == FOS_TOUCH_BEEP_SECOND_DOWN) fos_buzzer_double_down();
+    else if (beep == FOS_TOUCH_BEEP_UP) fos_buzzer_click_up();
+}
+
+static void touch_feedback(const fos_touch_event_t *event)
+{
+    static uint8_t held = 0, beeped = 0;
+    if (event->kind == FOS_TOUCH_MOVE) return;
+    bool captured = event->kind == FOS_TOUCH_DOWN && frameos_nim_press_taken(event->x, event->y);
+    play_beep(fos_touch_beep_step(event->kind, event->id, captured, &held, &beeped));
+}
+
+/* The same click for a frame rendered on the server, from the touch task the
+ * moment the finger lands or lifts: the render task is in a pull or a panel
+ * refresh for a second or more at a time there, and the picture's own press
+ * map (its plane's, fos_client_remote_press_taken) says without asking
+ * anyone whether the press is taken. A frame that runs its scene here leaves
+ * it to touch_feedback, after the runtime's answer. */
+static void remote_click(uint8_t kind, uint8_t id, uint16_t wx, uint16_t wy)
+{
+    static uint8_t held = 0, beeped = 0;
+    int taken = kind == FOS_TOUCH_DOWN ? fos_client_remote_press_taken(wx, wy) : 0;
+    play_beep(fos_touch_beep_step(kind, id, taken > 0, &held, &beeped));
+}
+
 bool fos_touch_process_events(void)
 {
-    touch_event_t event;
+    fos_touch_event_t event;
     bool any = false;
     static const char *const names[] = {FOS_EVENT_POINTER_DOWN, FOS_EVENT_POINTER_MOVE, FOS_EVENT_POINTER_UP};
-    while (dequeue(&event)) {
+    /* What is queued now and no more: what arrives while these run waits for
+     * the next pass, after a frame. A JS handler takes ~14 ms on an ESP32-S3
+     * and two fingers report every 10 ms, so draining until empty held the
+     * render off for seconds (305 moves, 4.3 s between frames, 2026-11-08). */
+    uint8_t budget = s_count;
+    while (budget-- > 0 && dequeue(&event)) {
         char payload[160];
         /* The wire position, the finger (pointer ids from 1: 0 is the one
          * mouse cursor), `touch`, and for a down or an up the primary
@@ -202,18 +275,19 @@ bool fos_touch_process_events(void)
          * (`atMs`, the clock the Nim side reads): the queue is drained
          * between renders, and a tap is timed by its own two reports, not
          * by when they were delivered (docs/events.md "Pointer"). */
-        if (event.kind == TOUCH_MOVE) {
+        if (event.kind == FOS_TOUCH_MOVE) {
             snprintf(payload, sizeof(payload),
                      "{\"x\":%u,\"y\":%u,\"pointerId\":%u,\"pointerType\":\"touch\",\"buttons\":1}",
                      event.x, event.y, event.id + 1);
         } else {
             snprintf(payload, sizeof(payload),
                      "{\"x\":%u,\"y\":%u,\"pointerId\":%u,\"pointerType\":\"touch\",\"button\":0,\"buttons\":%d,\"atMs\":%lld}",
-                     event.x, event.y, event.id + 1, event.kind == TOUCH_DOWN ? 1 : 0, (long long)event.at_ms);
+                     event.x, event.y, event.id + 1, event.kind == FOS_TOUCH_DOWN ? 1 : 0, (long long)event.at_ms);
         }
         /* `driver`: the glass talking. This is the render task, so the
          * runtime lock is free; fos_events.c asks for the render when a
          * gesture changed state. */
+        touch_feedback(&event);
         fos_events_dispatch(FOS_ORIGIN_DRIVER, names[event.kind], payload);
         any = true;
     }
@@ -249,15 +323,12 @@ static void IRAM_ATTR on_irq(void *arg)
 }
 
 /* The GT911's address is chosen by the level of INT while RST rises: low
- * for 0x5d (0xBA/0xBB), high for 0x14 (0x28/0x29). Drive it low, then let
- * it go: the controller owns the line from here. */
+ * for 0x5d (0xBA/0xBB), high for 0x14 (0x28/0x29). INT then stays low for
+ * Goodix's 50 ms sync before it is let go: the controller owns the line from
+ * there. The bus has to be up first, so SDA and SCL are not floating while
+ * the controller starts. */
 static void reset_controller(const fos_touch_pins_t *pins)
 {
-    if (pins->en >= 0) {
-        gpio_set_direction((gpio_num_t)pins->en, GPIO_MODE_OUTPUT);
-        gpio_set_level((gpio_num_t)pins->en, 1);
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
     if (pins->irq >= 0) {
         gpio_set_direction((gpio_num_t)pins->irq, GPIO_MODE_OUTPUT);
         gpio_set_level((gpio_num_t)pins->irq, 0);
@@ -265,18 +336,19 @@ static void reset_controller(const fos_touch_pins_t *pins)
     if (pins->rst >= 0) {
         gpio_set_direction((gpio_num_t)pins->rst, GPIO_MODE_OUTPUT);
         gpio_set_level((gpio_num_t)pins->rst, 0);
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(20));
         gpio_set_level((gpio_num_t)pins->rst, 1);
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
     if (pins->irq >= 0) {
+        vTaskDelay(pdMS_TO_TICKS(50));
         gpio_set_direction((gpio_num_t)pins->irq, GPIO_MODE_INPUT);
         gpio_set_pull_mode((gpio_num_t)pins->irq, GPIO_FLOATING);
     }
-    vTaskDelay(pdMS_TO_TICKS(60));
+    vTaskDelay(pdMS_TO_TICKS(80));
 }
 
-static bool attach(uint8_t addr)
+static bool attach(uint8_t addr, uint32_t hz)
 {
     if (s_dev) {
         i2c_master_bus_rm_device(s_dev);
@@ -285,14 +357,14 @@ static bool attach(uint8_t addr)
     i2c_device_config_t dev_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = addr,
-        .scl_speed_hz = TOUCH_I2C_HZ,
+        .scl_speed_hz = hz,
     };
     return i2c_master_bus_add_device(s_bus, &dev_config, &s_dev) == ESP_OK;
 }
 
 static bool probe_gt911(uint8_t addr)
 {
-    if (!attach(addr)) return false;
+    if (!attach(addr, TOUCH_GT911_I2C_HZ)) return false;
     uint8_t id[4] = {0};
     if (reg_read(FOS_TOUCH_REG_PRODUCT_ID, id, sizeof(id)) != ESP_OK) return false;
     /* "911" from a GT911; a GT9xx cousin still speaks the same report. */
@@ -301,7 +373,7 @@ static bool probe_gt911(uint8_t addr)
 
 static bool probe_ft(uint8_t addr)
 {
-    if (!attach(addr)) return false;
+    if (!attach(addr, TOUCH_I2C_HZ)) return false;
     /* Any FocalTech answers its touch-count register; an empty address does not. */
     uint8_t count = 0;
     return ft_read(FOS_TOUCH_FT_REG_TOUCHES, &count, 1) == ESP_OK;
@@ -318,7 +390,9 @@ static int read_points(fos_touch_point_t *points)
     uint8_t report[FOS_TOUCH_REPORT_BYTES];
     if (reg_read(FOS_TOUCH_REG_STATUS, report, sizeof(report)) != ESP_OK) return -1;
     int count = fos_touch_decode(report, sizeof(report), points, FOS_TOUCH_POINTS_MAX);
-    if (count >= 0) reg_write_byte(FOS_TOUCH_REG_STATUS, 0);
+    /* Every ready report is cleared, one that does not decode too: left set,
+     * the controller sends no other. */
+    if (report[0] & FOS_TOUCH_STATUS_READY) reg_write_byte(FOS_TOUCH_REG_STATUS, 0);
     return count;
 }
 
@@ -347,24 +421,40 @@ static void touch_task(void *arg)
             s_last_raw_y = p->y;
             seen |= (uint8_t)(1u << p->id);
             if ((s_down_mask & (1u << p->id)) == 0) {
+                /* On the glass before its press is queued: a frame rendered
+                 * on the server sends what the queue holds once no finger is
+                 * down (fos_client.c), and a press it took alone, its lift in
+                 * the next pull, was two halves on the plane, no tap
+                 * (reTerminal E1003, 2026-11-12: Start opened one time in
+                 * several). */
+                s_down_mask |= (uint8_t)(1u << p->id);
                 /* Where the finger landed first, then that it did, as the
                  * Linux evdev translator does (translate.nim flushSlots):
                  * a scene that follows the pointer by its moves (the Touch
                  * test's `mouseMove`) sees a tap where it was, not only a
                  * finger dragged. */
-                enqueue(TOUCH_MOVE, p->id, wx, wy);
-                enqueue(TOUCH_DOWN, p->id, wx, wy);
+                enqueue(FOS_TOUCH_MOVE, p->id, wx, wy);
+                enqueue(FOS_TOUCH_DOWN, p->id, wx, wy);
+                remote_click(FOS_TOUCH_DOWN, p->id, wx, wy);
             } else if (wx != s_last_x[p->id] || wy != s_last_y[p->id]) {
-                enqueue(TOUCH_MOVE, p->id, wx, wy);
+                enqueue(FOS_TOUCH_MOVE, p->id, wx, wy);
             }
             s_last_x[p->id] = wx;
             s_last_y[p->id] = wy;
         }
+        /* Off the glass only once the lift is queued (the same reason as
+         * above): whoever sees no finger down sees the gesture whole. The
+         * render task is woken again then, since the lift's own wake came
+         * while the finger still counted as down. */
         uint8_t lifted = s_down_mask & (uint8_t)~seen;
         for (int id = 0; id < FOS_TOUCH_POINTS_MAX; id++) {
-            if (lifted & (1u << id)) enqueue(TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
+            if (lifted & (1u << id)) {
+                enqueue(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
+                remote_click(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
+            }
         }
         s_down_mask = seen;
+        if (lifted) fos_client_wake_for_events();
     }
 }
 
@@ -398,7 +488,12 @@ esp_err_t fos_touch_start(void)
      * same two GPIOs twice. Its pins are then the display's business. */
     void *shared = NULL;
     bool share = fos_display_shared_i2c_bus(pins->sda, pins->scl, &shared) == ESP_OK && shared;
-    const int candidates[] = {share ? -1 : pins->sda, share ? -1 : pins->scl, pins->irq, pins->rst, pins->en};
+    /* A controller on a bus fos_i2c.c already runs (the reTerminal E1003's, on
+     * the clock's 19/20) joins it too: a second bus on the same pins would
+     * take them from the first, and its pins are that bus's, already claimed. */
+    i2c_master_bus_handle_t lent = share ? NULL : fos_i2c_lend_bus(pins->sda, pins->scl);
+    bool joined = share || lent;
+    const int candidates[] = {joined ? -1 : pins->sda, joined ? -1 : pins->scl, pins->irq, pins->rst, pins->en};
     for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
         const char *why = candidates[i] >= 0 ? fos_config_gpio_pin_reserved(candidates[i]) : NULL;
         if (why) {
@@ -406,11 +501,14 @@ esp_err_t fos_touch_start(void)
             return ESP_ERR_INVALID_ARG;
         }
     }
-    reset_controller(pins);
-    /* A controller on a bus fos_i2c.c already runs (the reTerminal E1003's,
-     * on the clock's 19/20) joins it too: a second bus on the same pins would
-     * take them from the first. */
-    s_bus = share ? (i2c_master_bus_handle_t)shared : fos_i2c_lend_bus(pins->sda, pins->scl);
+    /* Power before the bus: with the bus started first on a panel whose supply
+     * had dropped, every probe timed out (a Sticky after a reset, 2026-11-09). */
+    if (pins->en >= 0) {
+        gpio_set_direction((gpio_num_t)pins->en, GPIO_MODE_OUTPUT);
+        gpio_set_level((gpio_num_t)pins->en, 1);
+        vTaskDelay(pdMS_TO_TICKS(TOUCH_POWER_SETTLE_MS));
+    }
+    s_bus = share ? (i2c_master_bus_handle_t)shared : lent;
     s_bus_owned = false;
     if (!s_bus) {
         i2c_master_bus_config_t bus_config = {
@@ -431,19 +529,24 @@ esp_err_t fos_touch_start(void)
     }
     s_polled = pins->irq < 0;
     /* Who answers: the Goodix addresses first (its id register says so),
-     * then the FocalTech ones. */
+     * then the FocalTech ones. A controller with a reset line gets three
+     * resets to answer, as in Seeed's demos. */
     static const uint8_t gt_addresses[] = {0x5d, 0x14};
     static const uint8_t ft_addresses[] = {0x48, 0x38};
-    for (size_t i = 0; i < sizeof(gt_addresses) && s_addr == 0; i++) {
-        if (i2c_master_probe(s_bus, gt_addresses[i], TOUCH_I2C_TIMEOUT_MS) == ESP_OK && probe_gt911(gt_addresses[i])) {
-            s_addr = gt_addresses[i];
-            s_controller = CTRL_GT911;
+    int attempts = pins->rst >= 0 ? 3 : 1;
+    for (int attempt = 0; attempt < attempts && s_addr == 0; attempt++) {
+        reset_controller(pins);
+        for (size_t i = 0; i < sizeof(gt_addresses) && s_addr == 0; i++) {
+            if (i2c_master_probe(s_bus, gt_addresses[i], TOUCH_I2C_TIMEOUT_MS) == ESP_OK && probe_gt911(gt_addresses[i])) {
+                s_addr = gt_addresses[i];
+                s_controller = CTRL_GT911;
+            }
         }
-    }
-    for (size_t i = 0; i < sizeof(ft_addresses) && s_addr == 0; i++) {
-        if (i2c_master_probe(s_bus, ft_addresses[i], TOUCH_I2C_TIMEOUT_MS) == ESP_OK && probe_ft(ft_addresses[i])) {
-            s_addr = ft_addresses[i];
-            s_controller = CTRL_FT6X36;
+        for (size_t i = 0; i < sizeof(ft_addresses) && s_addr == 0; i++) {
+            if (i2c_master_probe(s_bus, ft_addresses[i], TOUCH_I2C_TIMEOUT_MS) == ESP_OK && probe_ft(ft_addresses[i])) {
+                s_addr = ft_addresses[i];
+                s_controller = CTRL_FT6X36;
+            }
         }
     }
     if (s_addr == 0) {
@@ -456,6 +559,8 @@ esp_err_t fos_touch_start(void)
         s_x_max = range[0] | (range[1] << 8);
         s_y_max = range[2] | (range[3] << 8);
     }
+    /* A report left over from before the reset would hold the next one back. */
+    if (s_controller == CTRL_GT911) reg_write_byte(FOS_TOUCH_REG_STATUS, 0);
     /* A controller with no configured range reports in the panel's. */
     if (s_x_max <= 1 || s_y_max <= 1 || s_x_max > 4096 || s_y_max > 4096) {
         s_x_max = fos_display_width();

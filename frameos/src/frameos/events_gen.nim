@@ -13,6 +13,7 @@ type
     eoCloud = "cloud"
     eoSystem = "system"
     eoEventMap = "eventMap"
+    eoPanel = "panel"
   EventClass* = enum
     ecLifecycle = "lifecycle"
     ecInput = "input"
@@ -54,6 +55,7 @@ type
     endsRuntime*: bool ## the runtime does not survive it (a schedule must remember it fired)
     synthesized*: bool ## made by the dispatcher out of other events (a tap, a textInput)
     aliasOfIndex*: int ## the contract index of the event this one is an old name for, -1 for none
+    heardByAll*: bool ## a JS app whose config.json `events` holds "*" hears it
     linux*, esp32*, wasm*: bool
 
 const
@@ -62,11 +64,14 @@ const
   CustomEventMaxNameLength* = 63
   ## How the dispatcher makes gestures out of pointerDown / pointerUp (docs/events.md).
   GestureTapSlopPx* = 16
-  GestureTapMs* = 1000
+  GestureTapMs* = 500
   GestureDoubleTapMs* = 350
-  GestureLongPressMs* = 1000
+  GestureLongPressMs* = 500
   GestureSwipeMinPx* = 48
   GestureEdgePx* = 24
+  ## The way out of a layout that cannot be used (docs/scene-layouts.md "Safe mode").
+  GestureSafeModePulls* = 10
+  GestureSafeModeGapMs* = 5000
   ## A GPIO button: a short press waits `ButtonDoublePressMs` for a second down; a hold is a `longPress` at every whole `ButtonLongPressMs`.
   ButtonDoublePressMs* = 350
   ButtonLongPressMs* = 1000
@@ -80,6 +85,8 @@ const
   SceneSwitcherId* = "system/sceneSwitcher"
   ## The built-in scene `sceneSettings` shows (docs/scene-settings.md).
   SceneSettingsId* = "system/sceneSettings"
+  ## The scene a layout's <yield /> stands for (docs/scene-layouts.md).
+  SceneYieldId* = "system/yield"
   ## Origins a scene opts into per custom event (`origins` on its declaration).
   CustomEventDeclarableOrigins*: set[EventOrigin] = {eoSchedule, eoCloud}
 
@@ -94,6 +101,7 @@ const
   evPointerDown* = "pointerDown"
   evPointerUp* = "pointerUp"
   evPointerCancel* = "pointerCancel"
+  evUiTimer* = "uiTimer"
   evMouseMove* = "mouseMove"
   evMouseDown* = "mouseDown"
   evMouseUp* = "mouseUp"
@@ -121,7 +129,7 @@ const
   evUploadScenes* = "uploadScenes"
   evVoiceChat* = "voiceChat"
 
-  ContractEventNames*: array[37, string] = [
+  ContractEventNames*: array[38, string] = [
     evInit,
     evRender,
     evOpen,
@@ -133,6 +141,7 @@ const
     evPointerDown,
     evPointerUp,
     evPointerCancel,
+    evUiTimer,
     evMouseMove,
     evMouseDown,
     evMouseUp,
@@ -161,7 +170,7 @@ const
     evVoiceChat,
   ]
 
-  ContractEventPolicies*: array[37, EventPolicy] = [
+  ContractEventPolicies*: array[38, EventPolicy] = [
     EventPolicy( # init
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
@@ -170,7 +179,7 @@ const
       linux: true, esp32: true, wasm: true),
     EventPolicy( # render
       class: ecLifecycle, device: edNone, listen: true, dispatch: true,
-      origins: {eoSystem, eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoEventMap},
+      origins: {eoSystem, eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoEventMap, eoPanel},
       renderAfter: raAlways, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
@@ -179,24 +188,28 @@ const
       origins: {eoSystem, eoHttpAdmin},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # close
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
       renderAfter: raNever, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # keyDown
       class: ecInput, device: edKeyboard, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elNameOnly,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: false, wasm: true),
     EventPolicy( # keyUp
       class: ecInput, device: edKeyboard, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elNameOnly,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: false, wasm: true),
     EventPolicy( # textInput
       class: ecInput, device: edKeyboard, listen: true, dispatch: false,
@@ -204,6 +217,7 @@ const
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elNameOnly,
       synthesized: true,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: false, wasm: true),
     EventPolicy( # pointerMove
       class: ecInput, device: edPointer, listen: true, dispatch: false,
@@ -216,17 +230,26 @@ const
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # pointerUp
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # pointerCancel
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
+      aliasOfIndex: -1,
+      heardByAll: true,
+      linux: true, esp32: true, wasm: true),
+    EventPolicy( # uiTimer
+      class: ecInput, device: edPointer, listen: false, dispatch: false,
+      origins: {eoSystem},
+      renderAfter: raNever, coalesceLatest: true, log: elNone,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # mouseMove
@@ -253,6 +276,7 @@ const
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       synthesized: true,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # doubleTap
       class: ecInput, device: edPointer, listen: true, dispatch: false,
@@ -260,6 +284,7 @@ const
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       synthesized: true,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # longPress
       class: ecInput, device: edPointer, listen: true, dispatch: false,
@@ -267,6 +292,7 @@ const
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       synthesized: true,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # swipe
       class: ecInput, device: edPointer, listen: true, dispatch: false,
@@ -274,6 +300,7 @@ const
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       synthesized: true,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # edgeSwipe
       class: ecInput, device: edPointer, listen: true, dispatch: false,
@@ -281,24 +308,28 @@ const
       renderAfter: raNever, coalesceLatest: false, log: elFull,
       synthesized: true,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # wheel
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: false, wasm: true),
     EventPolicy( # turnOn
       class: ecSceneCommand, device: edNone, listen: true, dispatch: true,
       origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # turnOff
       class: ecSceneCommand, device: edNone, listen: true, dispatch: true,
       origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # toggleScreen
       class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
@@ -311,12 +342,14 @@ const
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # button
       class: ecInput, device: edButton, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # setSceneState
       class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
@@ -347,12 +380,14 @@ const
       origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # forward
       class: ecSceneCommand, device: edNone, listen: true, dispatch: false,
       origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
+      heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # metrics
       class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
@@ -368,14 +403,14 @@ const
       linux: true, esp32: true, wasm: false),
     EventPolicy( # restart
       class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
-      origins: {eoSchedule, eoHttpAdmin, eoCloud, eoSystem},
+      origins: {eoSchedule, eoHttpAdmin, eoCloud, eoSystem, eoPanel},
       renderAfter: raNever, coalesceLatest: false, log: elFull,
       endsRuntime: true,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: false),
     EventPolicy( # reboot
       class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
-      origins: {eoSchedule, eoHttpAdmin, eoCloud, eoSystem},
+      origins: {eoSchedule, eoHttpAdmin, eoCloud, eoSystem, eoPanel},
       renderAfter: raNever, coalesceLatest: false, log: elFull,
       endsRuntime: true,
       aliasOfIndex: -1,
@@ -398,7 +433,7 @@ const
     class: ecCustom, device: edNone, listen: true, dispatch: true,
     origins: {eoDriver, eoPreview, eoScene, eoHttpWrite, eoHttpAdmin, eoSystem},
     renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
-    aliasOfIndex: -1,
+    aliasOfIndex: -1, heardByAll: true,
     linux: true, esp32: true, wasm: true)
 
   SceneChangedLogEvents*: array[3, string] = ["render:scene", "render:sceneChange", "event:setCurrentScene"]
@@ -419,32 +454,33 @@ proc contractEventIndex*(name: string): int =
   of evPointerDown: 8
   of evPointerUp: 9
   of evPointerCancel: 10
-  of evMouseMove: 11
-  of evMouseDown: 12
-  of evMouseUp: 13
-  of evTap: 14
-  of evDoubleTap: 15
-  of evLongPress: 16
-  of evSwipe: 17
-  of evEdgeSwipe: 18
-  of evWheel: 19
-  of evTurnOn: 20
-  of evTurnOff: 21
-  of evToggleScreen: 22
-  of evGpio: 23
-  of evButton: 24
-  of evSetSceneState: 25
-  of evSetCurrentScene: 26
-  of evSceneSwitcher: 27
-  of evSceneSettings: 28
-  of evBack: 29
-  of evForward: 30
-  of evMetrics: 31
-  of evReload: 32
-  of evRestart: 33
-  of evReboot: 34
-  of evUploadScenes: 35
-  of evVoiceChat: 36
+  of evUiTimer: 11
+  of evMouseMove: 12
+  of evMouseDown: 13
+  of evMouseUp: 14
+  of evTap: 15
+  of evDoubleTap: 16
+  of evLongPress: 17
+  of evSwipe: 18
+  of evEdgeSwipe: 19
+  of evWheel: 20
+  of evTurnOn: 21
+  of evTurnOff: 22
+  of evToggleScreen: 23
+  of evGpio: 24
+  of evButton: 25
+  of evSetSceneState: 26
+  of evSetCurrentScene: 27
+  of evSceneSwitcher: 28
+  of evSceneSettings: 29
+  of evBack: 30
+  of evForward: 31
+  of evMetrics: 32
+  of evReload: 33
+  of evRestart: 34
+  of evReboot: 35
+  of evUploadScenes: 36
+  of evVoiceChat: 37
   else: -1
 
 proc eventAliasCount*(name: string): int =

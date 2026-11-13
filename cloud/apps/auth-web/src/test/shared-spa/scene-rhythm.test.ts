@@ -1,11 +1,13 @@
 // What the editor can say about how often a scene renders before a deploy: on
 // a frame every scene inside a split renders when IT is due, so a split's
-// panels each get a line like "every 10 min". A split's own interval is the
-// fastest it renders, and it waits longer when no panel is due by then.
+// panels each get a line like "every 10 min". A split renders when its first
+// panel is due; on e-paper or deep sleep its own interval is also the fastest
+// it renders (framePacedByInterval).
 import { describe, expect, it } from "vitest";
 import {
   describeRhythmSeconds,
   describeSceneRhythm,
+  framePacedByInterval,
   sceneFollowsChildren,
   sceneRhythm,
   splitPanelRhythm,
@@ -67,15 +69,40 @@ describe("sceneRhythm", () => {
     expect(sceneRhythm(clock, { refreshInterval: 5 })).toEqual({ seconds: 5, source: "interval" });
   });
 
-  it("lets a split wait for its first panel, never renders it faster than its own interval", () => {
+  it("renders a split when its first panel is due on a real-time display", () => {
     expect(sceneFollowsChildren(split)).toBe(true);
     expect(sceneFollowsChildren(photo)).toBe(false);
     expect(sceneRhythm(split, {}, [clock, photo, split])).toEqual({ seconds: 0.2, source: "children" });
     expect(sceneRhythm(split, {}, [photo, split])).toEqual({ seconds: 120, source: "children" });
     // A split whose panels are all missing keeps its own interval.
     expect(sceneRhythm(split, {}, [split])).toEqual({ seconds: 0.04, source: "interval" });
-    // On 300 s, a 0.2 s clock does not make it render faster.
-    expect(sceneRhythm(slowSplit, {}, [clock, photo])).toEqual({ seconds: 300, source: "interval" });
+    // Left on 300 s, a 0.2 s clock still sets the pace: nothing holds it back.
+    expect(sceneRhythm(slowSplit, {}, [clock, photo])).toEqual({ seconds: 0.2, source: "children" });
+  });
+
+  it("keeps a split's own interval as the floor where a render is a refresh or a wake", () => {
+    expect(sceneRhythm(slowSplit, {}, [clock, photo], 300, true)).toEqual({ seconds: 300, source: "interval" });
+    expect(sceneRhythm(split, {}, [photo, split], 300, true)).toEqual({ seconds: 120, source: "children" });
+  });
+
+  it("lets a layout's panels wake the scene wearing it, on a real-time display only", () => {
+    const bar = { ...clock, id: "bar", settings: { refreshInterval: 1, isLayout: true } } as unknown as FrameScene;
+    const wearing = { ...photo, layout: { sceneId: "bar" } } as unknown as FrameScene;
+    expect(sceneRhythm(wearing, {}, [wearing, bar])).toEqual({ seconds: 1, source: "children" });
+    expect(sceneRhythm(wearing, {}, [wearing, bar], 300, true)).toEqual({ seconds: 600, source: "interval" });
+    // A layout no longer on the frame paces nothing.
+    expect(sceneRhythm(wearing, {}, [wearing])).toEqual({ seconds: 600, source: "interval" });
+  });
+
+  it("knows which frames are held back by their interval", () => {
+    const device = (name: string, extra = {}) => ({ device: name, ...extra }) as never;
+    expect(framePacedByInterval(device("framebuffer"))).toBe(false);
+    expect(framePacedByInterval(device("waveshare.EPD_7in5_V2"))).toBe(true);
+    expect(framePacedByInterval(device("pimoroni.inky_impression_7"))).toBe(true);
+    expect(framePacedByInterval(device("embedded", { hardware: { pixelFormat: 9 } }))).toBe(false);
+    expect(framePacedByInterval(device("embedded", { hardware: { pixelFormat: 6 } }))).toBe(true);
+    expect(framePacedByInterval(device("embedded", { hardware: { pixelFormat: 9 }, deep_sleep: true }))).toBe(true);
+    expect(framePacedByInterval(null)).toBe(false);
   });
 
   it("describes it the way a person would", () => {
@@ -90,13 +117,17 @@ describe("sceneRhythm", () => {
 
   it("describes a split panel from its options and the split's interval", () => {
     expect(splitPanelRhythm(photo, { secondsBetweenImages: 1800 }, [photo], 300, 300)).toBe("every 30 min");
-    expect(splitPanelRhythm(clock, {}, [clock], 300, 300)).toBe("every 5 min (the split's interval)");
+    expect(splitPanelRhythm(clock, {}, [clock], 300, 300)).toBe("5 times a second");
+    expect(splitPanelRhythm(clock, {}, [clock], 300, 300, true)).toBe("every 5 min (the split's interval)");
     expect(splitPanelRhythm(null, {}, [photo], 300, 300)).toBeNull();
   });
 
   it("explains a split's interval, and nothing else's", () => {
     expect(splitSceneRhythmHint(split, [clock, photo, split], 300)).toBe(
-      "Each panel renders on its own schedule, at most this often. With these panels: 5 times a second (its fastest panel)."
+      "Each panel renders on its own schedule, and the frame wakes when the first one is due. With these panels: 5 times a second (its fastest panel)."
+    );
+    expect(splitSceneRhythmHint(slowSplit, [clock, photo], 300, true)).toBe(
+      "Each panel renders on its own schedule, at most this often. With these panels: every 5 min."
     );
     expect(splitSceneRhythmHint(photo, [photo], 300)).toBeNull();
     expect(splitSceneRhythmHint(null, [], 300)).toBeNull();

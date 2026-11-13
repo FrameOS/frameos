@@ -80,10 +80,12 @@ export default function TermsPage() {
         checkout where it applies.
       </p>
       <p className="copy">
-        Payments are taken by a payment provider, named at checkout. It
-        handles your card and sends your receipt; we never see your card
-        details. {entity.name} is the seller and answers for the service under
-        these terms.
+        Payments are taken by Stripe (Stripe Payments Europe, Limited,
+        Ireland). It handles your card and sends your receipt and invoice; we
+        never see your card details. {entity.name} is the seller, issues the
+        invoice and answers for the service under these terms. A business in
+        the EU outside Belgium that gives its VAT number at checkout is
+        invoiced without VAT under the reverse charge.
       </p>
       <p className="copy">
         You can change plan from your account. A larger plan starts at once and

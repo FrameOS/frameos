@@ -187,12 +187,14 @@ async def test_a_preview_is_pulled_like_a_deploy_and_holds_until_the_next_one(as
     assert response.status_code == 200, response.text
     preview_row_id = response.json()['command']['id']
 
-    # The wake's scenes pull gets the preview, not the saved scenes.
+    # The wake's scenes pull gets the saved scenes with the preview after
+    # them: the frame keeps its list (an Activate of a saved scene finds it),
+    # and an ESP32's patch carries the previewed scene alone.
     pulled = await no_auth_client.get(
         f'/api/frames/{frame.id}/embedded/scenes', headers={**headers, 'If-None-Match': saved_etag}
     )
     assert pulled.status_code == 200
-    assert pulled.json() == [preview]
+    assert pulled.json() == [*saved.json(), preview]
     preview_etag = pulled.headers['etag']
     assert preview_etag != saved_etag
 
@@ -221,15 +223,14 @@ async def test_a_preview_is_pulled_like_a_deploy_and_holds_until_the_next_one(as
     assert again.status_code == 304
 
     # A deploy is a newer scene set, and it carries the preview along: the
-    # saved scenes with the previewed one after them (the frame keeps showing
-    # the id it holds). Discard, and the saved scenes alone are served again.
+    # saved scenes with the previewed one after them, the set the frame holds
+    # already, so it has nothing to pull. Discard, and the saved scenes alone
+    # are served again: one scene less.
     enqueue_frame_command(db, frame, 'set_scenes', {'_deploy': {'id': 'd1', 'snapshot': {}}}, detail='1 scene')
     deployed = await no_auth_client.get(
         f'/api/frames/{frame.id}/embedded/scenes', headers={**headers, 'If-None-Match': preview_etag}
     )
-    assert deployed.status_code == 200
-    assert deployed.headers['etag'] not in (saved_etag, preview_etag)
-    assert deployed.json() == [*saved.json(), preview]
+    assert deployed.status_code == 304
     assert (await async_client.delete(f'/api/frames/{frame.id}/scene_preview')).status_code == 200
     discarded = await no_auth_client.get(
         f'/api/frames/{frame.id}/embedded/scenes', headers={**headers, 'If-None-Match': preview_etag}
@@ -512,6 +513,42 @@ async def test_set_next_scene_queues_the_switch_behind_the_deploy(async_client, 
     assert row.type == 'set_current_scene' and row.payload == {'scene_id': 'clock', 'state': {'size': 5}}
 
 
+@pytest.mark.asyncio
+async def test_a_switch_to_a_scene_the_frame_has_not_pulled_comes_with_a_sync(async_client, no_auth_client, db):
+    """"Push & activate" saves the scene and queues the switch while its deploy
+    job is still queueing the rows, so the switch can be handed over before
+    any deploy row exists. The pull says `sync` all the same when the frame's
+    scenes are behind what the backend serves: the device pulls (the changed
+    scenes alone, `?patch=1`) before it runs the switch (fos_commands.c)."""
+    frame = await _embedded_frame(async_client, db)
+    current = embedded_scenes_etag(db, frame)
+
+    def pull(scenes_etag):
+        return no_auth_client.post(
+            f'/api/frames/{frame.id}/embedded/commands',
+            json={'scenes_etag': scenes_etag},
+            headers=_device_headers(frame),
+        )
+
+    enqueue_frame_command(db, frame, 'set_current_scene', {'scene_id': 'clock'}, detail='Clock')
+    db.commit()
+    body = (await pull('"older"')).json()
+    assert [command['type'] for command in body['commands']] == ['set_current_scene']
+    assert body['sync'] is True
+
+    # Behind but no switch: the frame's own poll is enough.
+    assert (await pull('"older"')).json()['sync'] is False
+    # A switch to a frame that holds what is served: nothing to pull.
+    enqueue_frame_command(db, frame, 'set_current_scene', {'scene_id': 'clock'}, detail='Clock')
+    db.commit()
+    assert (await pull(current)).json()['sync'] is False
+    # A store the frame was handed locally (USB, its own HTTP API) waits for
+    # a deploy, as it always has.
+    enqueue_frame_command(db, frame, 'set_current_scene', {'scene_id': 'clock'}, detail='Clock')
+    db.commit()
+    assert (await pull('local')).json()['sync'] is False
+
+
 # ----------------------------------------------------------- sleep forecast
 
 @pytest.mark.asyncio
@@ -582,3 +619,95 @@ async def test_firmware_before_the_queue_is_still_pushed_to(async_client, db):
     frame.embedded = {**frame.embedded, 'lastBoot': {'frameosVersion': 'v2026.10.5+abc'}}
     db.commit()
     assert embedded_frame_pulls_commands(frame)
+
+
+@pytest.mark.asyncio
+async def test_the_address_in_a_pull_moves_the_host_only_from_where_it_came(async_client, no_auth_client, db):
+    frame = await _embedded_frame(async_client, db)
+    frame.frame_host = "192.168.1.5"
+    db.commit()
+    # The claim is not where the request came from: the host stays, and
+    # nothing else the body says (a network's name) lands anywhere.
+    response = await no_auth_client.post(
+        f"/api/frames/{frame.id}/embedded/commands",
+        headers=_device_headers(frame),
+        json={"ip": "192.168.7.9", "wifiSsid": "Cafe"},
+    )
+    assert response.status_code == 200
+    db.expire_all()
+    frame = db.get(Frame, frame.id)
+    assert frame.frame_host == "192.168.1.5"
+    assert "Cafe" not in str(frame.embedded)
+
+    with patch("app.api.embedded_commands.client_ip_for_request", return_value="192.168.7.9"):
+        response = await no_auth_client.post(
+            f"/api/frames/{frame.id}/embedded/commands",
+            headers=_device_headers(frame),
+            json={"ip": "192.168.7.9"},
+        )
+    assert response.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).frame_host == "192.168.7.9"
+
+
+@pytest.mark.asyncio
+async def test_the_device_reports_what_its_state_partition_holds(async_client, no_auth_client, db):
+    frame = await _embedded_frame(async_client, db)
+    storage = {"stateTotalBytes": 957314, "stateUsedBytes": 412000, "scenesBytes": 312000, "sceneCount": 18}
+
+    response = await no_auth_client.post(
+        f"/api/frames/{frame.id}/embedded/commands",
+        headers=_device_headers(frame),
+        json={"storage": {**storage, "secret": "ignored", "stateUsedBytes": 412000}},
+    )
+    assert response.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).embedded["storage"] == storage
+
+    # Only the numbers it reports, never anything else.
+    response = await no_auth_client.post(
+        f"/api/frames/{frame.id}/embedded/commands",
+        headers=_device_headers(frame),
+        json={"storage": {"stateUsedBytes": "lots"}},
+    )
+    assert response.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).embedded["storage"] == storage
+
+    # Each scene's footprint by id, numbers only.
+    sizes = {"clock": 4769, "visited-world-map": 89824}
+    response = await no_auth_client.post(
+        f"/api/frames/{frame.id}/embedded/commands",
+        headers=_device_headers(frame),
+        json={"storage": {**storage, "sceneBytes": {**sizes, "bad": "big", "": 3, "neg": -1}}},
+    )
+    assert response.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).embedded["storage"] == {**storage, "sceneBytes": sizes}
+
+
+# ------------------------------------------------- the frame page's changes
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_the_frame_page_rotation_and_scale_land_on_the_row_and_baseline(_pub, async_client, db, redis):
+    frame = await _embedded_frame(async_client, db)
+    frame.rotate = 0
+    frame.render_scale = 0
+    frame.last_successful_deploy = {"rotate": 0, "render_scale": 0, "interval": 300}
+    db.commit()
+    await process_log(db, redis, frame, {
+        'event': 'settings:frame', 'source': 'esp32', 'origin': 'panel', 'changes': 'rotate,renderScale',
+        'rotate': 90, 'renderScale': 1.5,
+    })
+    db.refresh(frame)
+    assert frame.rotate == 90 and frame.render_scale == 1.5
+    # The drawer has nothing to deploy for them: the frame already has them.
+    assert frame.last_successful_deploy == {"rotate": 90, "render_scale": 1.5, "interval": 300}
+
+    # Only the page speaks for the person at the frame, and only in range.
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'scene', 'rotate': 180})
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'panel', 'rotate': 45,
+                                         'renderScale': 9})
+    db.refresh(frame)
+    assert frame.rotate == 90 and frame.render_scale == 1.5

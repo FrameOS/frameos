@@ -61,6 +61,29 @@ export async function completeFirstFactor(
   return { kind: "session", token };
 }
 
+// A sign-in whose proof is a recent session of the same account (POST
+// /api/auth/link after the visitor signed in to it another way): that
+// session already passed the second factor, so none is asked again, and the
+// new session keeps its proof time, so it is never fresher than the one it
+// replaces.
+export async function continueProvenSignIn(
+  db: ReturnType<typeof createDb>,
+  input: {
+    auditMetadata?: Record<string, unknown> | undefined;
+    authenticatedAt: Date;
+    method: PendingSignIn["method"];
+    profile: SessionProfile & { accountId: string };
+  },
+) {
+  await recordSignedIn(db, input.profile, {
+    ...input.auditMetadata,
+    method: input.method,
+  });
+  return createSession(db, input.profile, {
+    authenticatedAt: input.authenticatedAt,
+  });
+}
+
 // Second factor satisfied: the session the first step withheld. The pending
 // token is spent here, so a second presentation of the same cookie — even
 // with another valid code — gets nothing; `undefined` means it was already

@@ -28,6 +28,14 @@ bool frameos_nim_reserve_canvas(size_t len);
 /* The reserved block, claiming (or growing) it on demand. NULL on failure. */
 void *frameos_nim_canvas_buffer(size_t len);
 size_t frameos_nim_canvas_reserved(void);
+/* The scene canvas IS this buffer (a sixteen-grey panel's packed picture,
+ * main.c): reserved once, never freed, nothing else reserved for it. */
+void frameos_nim_share_canvas(void *buffer, size_t len);
+bool frameos_nim_canvas_shared(void);
+void *frameos_nim_shared_canvas_buffer(void);
+/* Something other than a render drew over the canvas (the shared panel
+ * buffer lent to a status screen): the next render draws it whole. */
+void frameos_nim_canvas_forget(void);
 /* One-time init: panel dimensions + the backend credentials the runtime's own
  * uploads use. Safe to call when unavailable (returns false). Allocates the
  * Nim heap (PSRAM via malloc). */
@@ -41,6 +49,11 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format);
  * scene image is created. The caller owns `*buf` and must free it with free().
  * This lowers peak PSRAM on large panels. */
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format);
+/* The picture the last render drew, packed again without running the scene:
+ * what a panel settles from once nobody is tapping (fos_display_settle_due).
+ * -1 when the last render did not leave one. As frameos_nim_render_alloc,
+ * the caller owns `*buf`. */
+int frameos_nim_repack_alloc(uint8_t **buf, size_t *len, int pixel_format);
 /* Render the current scene into the panel's own buffer — an LCD's back frame
  * buffer (fos_display_render_target), shown afterwards with a buffer switch
  * and no copy. Where the scene canvas can be that buffer (a 565 panel,
@@ -140,6 +153,11 @@ int frameos_nim_load_scene(const char *scene_json);
  * those whose own interval has not come round (frameos/scene_rhythm.nim).
  * Call on the render task, right before the render. */
 void frameos_nim_request_fresh_pass(void);
+/* Someone is tapping (the input hold): a UI's chrome due only because its
+ * time came waits (scene_rhythm.nim rhythmInteractive). Told before a render. */
+void frameos_nim_set_interactive(bool on);
+/* A chrome waited for the tapping to stop: render once. Asking clears it. */
+bool frameos_nim_chrome_owed(void);
 /* Install the service settings the settings poll just fetched
  * (docs/cloud-frames.md, "Service settings"). `json` is the `settings` OBJECT
  * — group → field → value — for the six cloud-owned groups (frameOS, github,
@@ -189,11 +207,17 @@ void frameos_nim_set_time_zone(const char *time_zone);
  * and keep UTC — or the slice does not hold the zone. */
 bool frameos_nim_load_tz_data(const char *slice_json, const char *time_zone, char *rule_out, size_t rule_len);
 double frameos_nim_scene_interval(void);
+/* Whether somebody waits for the next pass, so it may show the loading mark:
+ * not an animation or a clock, and with a layout only a pass that runs the
+ * scene itself (scene_rhythm.nim, rhythmAwaited). */
+bool frameos_nim_scene_awaited(void);
 /* Sleep override from the scene's last render (logic/nextSleepDuration);
  * negative = no override. Consult only right after a successful render. */
 double frameos_nim_next_sleep(void);
 /* True once when a scene event requested a redraw (clears the flag). */
 bool frameos_nim_render_requested(void);
+/* Whether something on the frame takes a press at this glass position (0..32767). */
+bool frameos_nim_press_taken(int wire_x, int wire_y);
 /* Time passing for the dispatcher's input state (a held button is a
  * `longPress` at every whole second, a short press whose double-press window
  * closed a `press`): true when it made an event, in which case the
@@ -245,6 +269,9 @@ void frameos_nim_set_log_tap(void (*tap)(const char *line, uint32_t seq));
 void frameos_nim_set_log_upload_enabled(bool enabled);
 /* Send queued Nim/runtime logs to the FrameOS backend, if enabled. */
 void frameos_nim_flush_logs(void);
+/* One batch of the same queue, each its own HTTP round trip. True when
+ * another may follow. */
+bool frameos_nim_flush_log_batch(void);
 
 /* Outbound HTTP(S) for the Nim side (apps, frameos.fetchText in JS apps):
  * esp_http_client + cert bundle. Returns a malloc'd body (caller frees with

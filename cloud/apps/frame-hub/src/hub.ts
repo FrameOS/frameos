@@ -21,7 +21,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
-import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import postgres from "postgres";
 import { WebSocket, WebSocketServer } from "ws";
 import {
@@ -42,6 +42,7 @@ import {
   enqueueFrameCommand,
   frameCommandsNotifyChannel,
   frameForLinkedClient,
+  frameHardwareIsEsp32,
   frameImageAssetPath,
   framePreviewIsWatched,
   frameTelemetryLogsScope,
@@ -51,6 +52,7 @@ import {
   maxAssetFileBytes,
   parseAssetEntries,
   redeployAssignedScenesToFrame,
+  settingsWithReported,
   spentCommandPayload,
   storeFrameAssetFile,
   supersedePendingCommands,
@@ -81,8 +83,22 @@ import {
 import { previewWatchGraceMs } from "../../auth-web/src/lib/frame-sleep";
 import { keywordsRuntimeLacks } from "../../auth-web/src/lib/retired-apps";
 import { safeLocalOrigin } from "../../auth-web/src/lib/local-origin";
+import { buildScenesPatchMessage, patchLeavesPanel, scenesPatchMinVersion } from "../../auth-web/src/lib/scenes-patch";
+import { frameosVersionSatisfies } from "../../auth-web/src/lib/store-versions";
 import { frameOwningBackend } from "../../auth-web/src/lib/frame-backend-owner";
-import { cloudRenderedMinIntervalSeconds } from "../../auth-web/src/lib/cloud-rendered";
+import {
+  cloudRenderedMinIntervalSeconds,
+  frameIsCloudRendered,
+  messageForServerRenderedBoard,
+  planeKeepsSceneState,
+} from "../../auth-web/src/lib/cloud-rendered";
+import {
+  lastServerRenderMs,
+  leaveBuiltInSceneForSleep,
+  prerenderFrame,
+  prerenderLeadMs,
+  type PrerenderOutcome,
+} from "../../auth-web/src/lib/server-render";
 import { renderScenes, rendererVersion } from "../../auth-web/src/lib/scene-render";
 import {
   virtualFrameDefaultIntervalSeconds,
@@ -97,6 +113,7 @@ import {
   getMaxConnections,
   isAllowedBrowserOrigin,
 } from "./env";
+import { raiseAlert } from "./alerts";
 import { errorField, logError, logInfo, logWarn } from "./log";
 import { createGuardedInterval } from "./periodic";
 import {
@@ -321,6 +338,13 @@ interface DeviceSession {
   // for a shutdown to wait on.
   disconnecting: Promise<void> | undefined;
   drainQueued: boolean;
+  // set_scenes rows that went out as a scenes_patch and are waiting for the
+  // device's answer: a refusal sends the row again as the whole list.
+  patchedCommands: Set<string>;
+  // Those of them that leave the panel as it was (no scene to show, the scene
+  // showing not among the scenes put): the device renders nothing for them,
+  // so their scene_ack ends the deploy's bar (`scene_ack:unshown`).
+  unshownPatches: Set<string>;
   draining: boolean;
   frame: FrameRow;
   hello: Record<string, unknown> | undefined;
@@ -371,6 +395,12 @@ export interface FrameHubOptions {
   // What renders a virtual frame's scenes. Production uses the wasm runtime
   // (auth-web's scene-render.ts); tests hand in a stand-in.
   virtualRender?: VirtualRender;
+  // When a sleeping frame the cloud renders for gets its next picture drawn,
+  // relative to its wake (docs/server-rendering.md "Deep sleep"). Production
+  // uses prerenderLeadMs from the last render; tests shorten it.
+  prerenderLeadMs?: (lastRenderMs: number | null) => number;
+  // Called with every pre-render's outcome (tests wait on it).
+  onPrerender?: (frameId: string, outcome: PrerenderOutcome) => void;
   // Test seam: called with the text of every statement this hub's pool
   // sends, so a test can count what one sweep costs. Gives the hub its own
   // (uncached) pool; production leaves it unset.
@@ -415,6 +445,11 @@ export async function startFrameHub(
   const virtualMinIntervalSeconds =
     options.virtualMinIntervalSeconds ?? cloudRenderedMinIntervalSeconds;
   const virtualRender = createVirtualRenderQueue(options.virtualRender ?? renderScenes);
+  const leadFor = options.prerenderLeadMs ?? prerenderLeadMs;
+  // One timer per sleeping frame the cloud renders for: its next picture,
+  // drawn before it wakes. A restart forgets them; the pull renders then.
+  const prerenderTimers = new Map<string, NodeJS.Timeout>();
+  const prerendersInFlight = new Set<Promise<void>>();
 
   let closed = false;
   const deviceSessions = new Map<string, DeviceSession>();
@@ -793,7 +828,7 @@ export async function startFrameHub(
           // device closes → reconnect → redeliverSentCommands requeues it →
           // send again, forever, with every other command behind it stuck.
           // Fail the row instead, where the owner can see it.
-          const message = JSON.stringify(commandMessage(command));
+          const message = JSON.stringify(await outgoingCommandMessage(session, command));
           const messageBytes = Buffer.byteLength(message, "utf8");
           if (messageBytes > maxPayloadBytes) {
             logWarn("command.payload_too_large", {
@@ -832,6 +867,90 @@ export async function startFrameHub(
     } finally {
       session.draining = false;
     }
+  }
+
+  // The verbs that carry a scene's content: scenes, a switch's state, an
+  // event's payload. What a board rendered on the server is sent of them is
+  // messageForServerRenderedBoard's.
+  const boardContentVerbs = new Set(["set_scenes", "set_current_scene", "scene_event"]);
+
+  // What a queued command goes out as: the row's own message, except that a
+  // set_scenes to an ESP32 whose current set is known goes as the difference
+  // from it (scenes_patch, lib/scenes-patch.ts). No reason not to is a reason
+  // to send the whole list: a patch is only ever a saving.
+  async function outgoingCommandMessage(
+    session: DeviceSession,
+    command: { id: string; type: string; payload: unknown },
+  ): Promise<Record<string, unknown>> {
+    // A board the cloud renders for is sent nothing of its scenes
+    // (docs/server-rendering.md "Nothing to keep on the board"), decided
+    // when the command goes, so a push queued before the switch is covered.
+    if (boardContentVerbs.has(command.type)) {
+      const [frame] = await db
+        .select({ hardware: frames.hardware, settings: frames.settings })
+        .from(frames)
+        .where(eq(frames.id, session.frame.id))
+        .limit(1);
+      if (frame && planeKeepsSceneState(frame)) {
+        if (command.type === "set_scenes") {
+          // The board will hold the empty scene under this push's checksum:
+          // the push is no base for a patch once it renders itself again.
+          await db
+            .update(frameCommands)
+            .set({ payload: sql`${frameCommands.payload} - 'scene_hashes'` })
+            .where(eq(frameCommands.id, command.id));
+        }
+        return messageForServerRenderedBoard(commandMessage(command));
+      }
+    }
+    if (command.type === "set_scenes" && isRecord(command.payload) && command.payload.no_patch !== true) {
+      const [frame] = await db
+        .select({
+          frameosVersion: frames.frameosVersion,
+          hardware: frames.hardware,
+          lastState: frames.lastState,
+          scenesChecksum: frames.scenesChecksum,
+        })
+        .from(frames)
+        .where(eq(frames.id, session.frame.id))
+        .limit(1);
+      if (
+        frame?.scenesChecksum &&
+        frameHardwareIsEsp32(frame) &&
+        frame.frameosVersion &&
+        frameosVersionSatisfies(scenesPatchMinVersion, frame.frameosVersion)
+      ) {
+        const [held] = await db
+          .select({ payload: frameCommands.payload })
+          .from(frameCommands)
+          .where(
+            and(
+              eq(frameCommands.frameId, session.frame.id),
+              eq(frameCommands.type, "set_scenes"),
+              eq(frameCommands.status, "acked"),
+              sql`${frameCommands.payload} ->> 'checksum' = ${frame.scenesChecksum}`,
+            ),
+          )
+          .orderBy(desc(frameCommands.createdAt))
+          .limit(1);
+        const hashes = isRecord(held?.payload) ? held.payload.scene_hashes : undefined;
+        if (isRecord(hashes)) {
+          const patch = buildScenesPatchMessage(command, {
+            checksum: frame.scenesChecksum,
+            hashes: hashes as Record<string, string>,
+          });
+          if (patch) {
+            session.patchedCommands.add(command.id);
+            const showing = isRecord(frame.lastState) ? frame.lastState.active_scene : undefined;
+            if (patchLeavesPanel(patch, showing)) {
+              session.unshownPatches.add(command.id);
+            }
+            return patch;
+          }
+        }
+      }
+    }
+    return commandMessage(command);
   }
 
   // Revocation kick: revokeFrame() in auth-web marks the linked client and
@@ -1003,9 +1122,10 @@ export async function startFrameHub(
 
     const hello = session.hello ?? {};
     const now = new Date();
-    const helloState = isRecord(hello.states)
-      ? stateWithActiveScene(hello.states, hello.active_scene)
-      : undefined;
+    const helloState =
+      isRecord(hello.states) && (await deviceReportsItsScene(frameId, hello.hardware))
+        ? stateWithActiveScene(hello.states, hello.active_scene)
+        : undefined;
     // An unconfirmed frame (see isConfirmedFrame) gets its connectivity and
     // its own hardware facts recorded — the confirm page shows both — and
     // nothing else: no state, no scene checksum, no store resync, no audit
@@ -1060,6 +1180,9 @@ export async function startFrameHub(
           : {}),
       })
       .where(eq(frames.id, frameId));
+    if (confirmed) {
+      await followReportedSettings(frameId, hello.hardware);
+    }
     // The device is back: a deploy, update or restart waiting for its
     // bootup moves on to the first render (the hello is the `bootup` signal
     // of docs/deploy-progress-contract.json). Before the confirmed gate on
@@ -1484,6 +1607,33 @@ export async function startFrameHub(
       return;
     }
     const ok = msg.ok === true;
+    // Sent again as the whole list, it renders after all.
+    if (!ok) session.unshownPatches.delete(commandId);
+    // A patch the frame refused (its set is not the one the patch was worked
+    // out from, or it does not know the verb): the same row, as the whole list.
+    if (session.patchedCommands.delete(commandId) && !ok) {
+      await db
+        .update(frameCommands)
+        .set({
+          payload: sql`coalesce(${frameCommands.payload}, '{}'::jsonb) || '{"no_patch":true}'::jsonb`,
+          sentAt: null,
+          status: "pending",
+        })
+        .where(
+          and(
+            eq(frameCommands.id, commandId),
+            eq(frameCommands.frameId, session.frame.id),
+            inArray(frameCommands.status, ["pending", "sent"]),
+          ),
+        );
+      logInfo("command.scenes_patch_refused", {
+        commandId,
+        error: typeof msg.error === "string" ? msg.error.slice(0, 128) : undefined,
+        frameId: session.frame.id,
+      });
+      await drainCommands(session);
+      return;
+    }
     // A failed set_scenes deliberately leaves frames.assigned_checksum as is:
     // desired != acked keeps the frame showing out-of-sync in the UI.
     const [command] = await db
@@ -1545,6 +1695,29 @@ export async function startFrameHub(
     return false;
   }
 
+  // Whether the scene the device says it shows (and its states) is its own
+  // to say. Not for hardware the cloud renders for: its scenes run on the
+  // plane, which writes last_state when a render commits (server-render.ts),
+  // and the device's report is the runtime it is not running
+  // (docs/server-rendering.md). Read fresh: a settings push may have
+  // switched the frame since the socket opened. `reported` is hardware the
+  // message itself carries (a hello's). The hub's own virtual device is the
+  // runtime of its frame, so its word stands.
+  async function deviceReportsItsScene(frameId: string, reported?: unknown): Promise<boolean> {
+    if (virtualDevices.has(frameId)) {
+      return true;
+    }
+    const [row] = await db
+      .select({ hardware: frames.hardware, settings: frames.settings })
+      .from(frames)
+      .where(eq(frames.id, frameId))
+      .limit(1);
+    if (!row) {
+      return true;
+    }
+    return !planeKeepsSceneState({ hardware: isRecord(reported) ? reported : row.hardware, settings: row.settings });
+  }
+
   // Promote the last assignment push's per-scene ledger to "deployed" the
   // moment the device reports the matching set checksum. Any other reported
   // checksum — an ad-hoc preview push, a stale set — leaves the ledger
@@ -1579,7 +1752,7 @@ export async function startFrameHub(
     // scene id gets everywhere else (256 chars, as in auth-web's
     // set_current_scene validation).
     const activeScene =
-      typeof msg.active_scene === "string"
+      typeof msg.active_scene === "string" && (await deviceReportsItsScene(session.frame.id))
         ? msg.active_scene.slice(0, maxSceneIdChars)
         : undefined;
     const now = new Date();
@@ -1604,7 +1777,7 @@ export async function startFrameHub(
       .returning({ assignedChecksum: frames.assignedChecksum });
     await broadcastFrameUpdate(session.frame.id);
     if (checksum !== undefined) {
-      await foldSceneAckIntoDeployProgress(session.frame.id, checksum);
+      await foldSceneAckIntoDeployProgress(session, checksum);
     }
     // The device confirming the ASSIGNED set (not a preview push, not a
     // stale set) is the cloud's deploy-succeeded moment — the counterpart of
@@ -1622,10 +1795,13 @@ export async function startFrameHub(
   // The device says a scene set is live. It ends the `loading` stage of the
   // deploy's bar only when it is the set THAT deploy pushed: the record's id
   // is the set_scenes command that started it, and a preview push or a late
-  // ack of an older set must not move a newer push's bar.
-  async function foldSceneAckIntoDeployProgress(frameId: string, checksum: string) {
+  // ack of an older set must not move a newer push's bar. A patch that left
+  // the panel as it was renders nothing: its ack is the end of the bar, which
+  // otherwise waited at "rendering" until it went stale.
+  async function foldSceneAckIntoDeployProgress(session: DeviceSession, checksum: string) {
+    const frameId = session.frame.id;
     const [row] = await db
-      .select({ payload: frameCommands.payload })
+      .select({ id: frameCommands.id, payload: frameCommands.payload })
       .from(frameCommands)
       .innerJoin(frames, eq(frames.id, frameCommands.frameId))
       .where(
@@ -1640,9 +1816,38 @@ export async function startFrameHub(
     if (pushed !== checksum) {
       return;
     }
-    await moveDeployProgress(frameId, (record) =>
-      foldDeployProgress(record, "scene_ack", { now: new Date() }),
-    );
+    const signal = row && session.unshownPatches.delete(row.id) ? "scene_ack:unshown" : "scene_ack";
+    await moveDeployProgress(frameId, (record) => foldDeployProgress(record, signal, { now: new Date() }));
+  }
+
+  // What the frame reports it has (hello and `state` `hardware`: its
+  // rotation and render scale, changed on its own screen or not) becomes the
+  // settings mirror's, unless a push is still on its way to it: then the
+  // frame is about to change, and what it says now is the old value. Read
+  // from the row, not the session: a `state` follows a hello that changed it.
+  async function followReportedSettings(frameId: string, hardware: unknown) {
+    if (!isRecord(hardware)) {
+      return;
+    }
+    const [row] = await db.select({ settings: frames.settings }).from(frames).where(eq(frames.id, frameId));
+    const next = settingsWithReported(row?.settings, hardware);
+    if (!next) {
+      return;
+    }
+    const [waiting] = await db
+      .select({ id: frameCommands.id })
+      .from(frameCommands)
+      .where(
+        and(
+          eq(frameCommands.frameId, frameId),
+          eq(frameCommands.type, "set_settings"),
+          inArray(frameCommands.status, ["pending", "sent"]),
+        ),
+      )
+      .limit(1);
+    if (!waiting) {
+      await db.update(frames).set({ settings: next }).where(eq(frames.id, frameId));
+    }
   }
 
   async function handleState(
@@ -1659,6 +1864,7 @@ export async function startFrameHub(
     const lastState = isRecord(rest.states)
       ? stateWithActiveScene(rest.states, rest.active_scene)
       : rest;
+    const ownScene = await deviceReportsItsScene(session.frame.id, rest.hardware);
     const checksum = acceptChecksum(session.frame.id, rest.scenes_checksum);
     const now = new Date();
     await db
@@ -1666,7 +1872,7 @@ export async function startFrameHub(
       .set({
         lastSeenAt: now,
         updatedAt: now,
-        ...(acceptState(session.frame.id, lastState) ? { lastState } : {}),
+        ...(ownScene && acceptState(session.frame.id, lastState) ? { lastState } : {}),
         ...(typeof rest.frameos_version === "string"
           ? { frameosVersion: rest.frameos_version.slice(0, 64) }
           : {}),
@@ -1686,6 +1892,7 @@ export async function startFrameHub(
           : {}),
       })
       .where(eq(frames.id, session.frame.id));
+    await followReportedSettings(session.frame.id, rest.hardware);
     await broadcastFrameUpdate(session.frame.id);
   }
 
@@ -1763,10 +1970,70 @@ export async function startFrameHub(
       reason,
       wakeInSeconds,
     });
+    // Never in the way of the drop below: a pre-render that cannot be
+    // planned is a pull that renders.
+    try {
+      await schedulePrerender(session.frame.id, nextRenderAt ?? nextWakeAt, now);
+    } catch (error) {
+      logError("server_render.prerender_schedule_failed", { error: errorField(error), frameId: session.frame.id });
+    }
     // terminate, not close: there is nobody left to answer a close handshake.
     // The close event marks the frame disconnected and broadcasts the row
     // (now carrying next_wake_at) to the browsers.
     session.ws.terminate();
+  }
+
+  // A frame the cloud renders for, going to sleep: draw the picture it will
+  // pull at its wake ahead of time, with the scene's clock at the wake's
+  // render time, so the wake is a download and not a render
+  // (docs/server-rendering.md "Deep sleep"). Started `lead` before it, from
+  // how long this frame's renders take; a wake sooner than that, at once.
+  async function schedulePrerender(frameId: string, asOf: Date, now: Date) {
+    const existing = prerenderTimers.get(frameId);
+    if (existing) {
+      clearTimeout(existing);
+      prerenderTimers.delete(frameId);
+    }
+    const [row] = await db
+      .select({ hardware: frames.hardware, settings: frames.settings })
+      .from(frames)
+      .where(eq(frames.id, frameId))
+      .limit(1);
+    if (!row || !frameIsCloudRendered(row)) {
+      return;
+    }
+    // The switcher or the scene settings a key or a tap opened end with the
+    // wake, as on a device, which keeps neither past a sleep: the picture for
+    // the wake is the scene they were opened from.
+    await leaveBuiltInSceneForSleep(db, frameId);
+    if (asOf.getTime() <= now.getTime() || closed) {
+      return;
+    }
+    // A wake sooner than the lead is drawn at once, as the backend does: the
+    // pull at the wake takes it if it is done by then and renders if not.
+    const lead = leadFor(await lastServerRenderMs(db, frameId));
+    const delay = Math.max(0, asOf.getTime() - lead - now.getTime());
+    const timer = setTimeout(() => {
+      prerenderTimers.delete(frameId);
+      if (closed) {
+        return;
+      }
+      const run = prerenderFrame(db, frameId, { asOf, render: virtualRender })
+        .then((outcome) => {
+          logInfo("server_render.prerender", { frameId, outcome });
+          options.onPrerender?.(frameId, outcome);
+        })
+        .catch((error: unknown) => {
+          logError("server_render.prerender_failed", { error: errorField(error), frameId });
+          options.onPrerender?.(frameId, "failed");
+        })
+        .finally(() => {
+          prerendersInFlight.delete(run);
+        });
+      prerendersInFlight.add(run);
+    }, delay);
+    timer.unref();
+    prerenderTimers.set(frameId, timer);
   }
 
   // "I wrote a fresh snapshot of the scene I am showing." The device says
@@ -2341,6 +2608,8 @@ export async function startFrameHub(
       disconnectHandled: false,
       disconnecting: undefined,
       drainQueued: false,
+      patchedCommands: new Set(),
+      unshownPatches: new Set(),
       draining: false,
       frame,
       handling: Promise.resolve(),
@@ -2391,10 +2660,7 @@ export async function startFrameHub(
       // that order too.
       session.handling = session.handling.then(() =>
         handleDeviceMessage(session, data).catch((error: unknown) => {
-          logError("device.message_failed", {
-            error: errorField(error),
-            frameId: frame.id,
-          });
+          reportDeviceMessageFailure(frame.id, error);
         }),
       );
     });
@@ -2436,6 +2702,18 @@ export async function startFrameHub(
   // reads `closed` after its queries), but a session it already made must be
   // in the shutdown's list.
   const virtualAttaches = new Set<Promise<void>>();
+
+  // Both kinds of device, socket and virtual. Most often an asset the hub
+  // could not cache, which leaves the frame's preview stale.
+  function reportDeviceMessageFailure(frameId: string, error: unknown) {
+    const reason = errorField(error);
+    logError("device.message_failed", { error: reason, frameId });
+    raiseAlert("hub_device_message_failed", "The frame hub could not handle a message from a frame.", {
+      frameId,
+      reason,
+    });
+  }
+
   function attachVirtualDevice(frameId: string, options?: { render?: boolean }) {
     const attach = attachVirtualDeviceNow(frameId, options).finally(() => {
       virtualAttaches.delete(attach);
@@ -2474,10 +2752,7 @@ export async function startFrameHub(
         deliver: (message) => {
           session.handling = session.handling.then(() =>
             dispatchDeviceMessage(session, message).catch((error: unknown) => {
-              logError("device.message_failed", {
-                error: errorField(error),
-                frameId,
-              });
+              reportDeviceMessageFailure(frameId, error);
             }),
           );
         },
@@ -2557,6 +2832,8 @@ export async function startFrameHub(
         disconnectHandled: false,
         disconnecting: undefined,
         drainQueued: false,
+        patchedCommands: new Set(),
+        unshownPatches: new Set(),
         draining: false,
         frame: row.frame,
         handling: Promise.resolve(),
@@ -3127,6 +3404,12 @@ export async function startFrameHub(
     heartbeat.stop();
     sweep.stop();
     virtualTick.stop();
+    for (const timer of prerenderTimers.values()) {
+      clearTimeout(timer);
+    }
+    prerenderTimers.clear();
+    // A pre-render's queries must not land on whatever comes after the hub.
+    await Promise.all([...prerendersInFlight]);
     // Attaches in flight (see attachVirtualDevice): a session one made is in
     // the list below only once it is done.
     await Promise.all([...virtualAttaches].map((attach) => attach.catch(() => undefined)));

@@ -126,19 +126,19 @@ async def test_a_spoken_scene_switch_is_transcribed_answered_and_queued(async_cl
     assert heard["calls"][0]["api_key"] == "sk-test"
 
     # The model saw the voice prompt, the frame's context, and ONLY the voice
-    # tools the owner's switches allow: a frame's token must not drive the
-    # account's MCP tools, and putting new scenes on the frame (show_image) is
-    # off until the owner opts in.
+    # tools the owner's switches allow (all four on by default): a frame's
+    # token must not drive the account's MCP tools.
     first = openai.requests[0]
     assert first["instructions"] == build_voice_system_prompt()
     assert [tool["name"] for tool in first["tools"]] == [
-        "list_scenes", "activate_scene", "set_scene_state", "render_now", "rotate_frame", "list_albums", "show_album",
+        "list_scenes", "activate_scene", "set_scene_state", "render_now", "show_image", "create_scene", "change_scene",
+        "rotate_frame", "list_albums", "show_album",
     ]
     context = first["input"][0]["content"][0]["text"]
     assert "Calendar (cal-2)" in context and "ESP32 Frame" in context
     assert "spoke this into the frame's microphone" in context
     assert "- Voice chat may: change the frame's settings (rotate_frame); use the installed scenes" in context
-    assert "- Voice chat may not: put new scenes on the frame (show_image, create_scene, change_scene)" in context
+    assert "- Voice chat may not: nothing is switched off" in context
     # No Unsplash or OpenAI image key in this project: the model is told so.
     assert "- Picture sources for show_image: none" in context
     assert first["input"][-1]["content"][0]["text"] == "switch to the calendar please"
@@ -443,15 +443,16 @@ def test_voice_permissions_default_and_gate_each_tool():
     from app.utils.voice_chat import VOICE_TOOL_PERMISSIONS, VoicePermissions
 
     defaults = VoicePermissions.from_device_config(None)
-    assert defaults.as_dict() == {"change_settings": True, "use_scenes": True, "create_scenes": False, "use_albums": True}
+    assert defaults.as_dict() == {"change_settings": True, "use_scenes": True, "create_scenes": True, "use_albums": True}
     # Every tool but the listing answers to a switch, and the table names real tools.
     names = {tool["name"] for tool in VOICE_TOOL_DEFINITIONS}
     assert set(VOICE_TOOL_PERMISSIONS) == names - {"list_scenes"}
-    assert defaults.allows("list_scenes") and defaults.allows("activate_scene") and not defaults.allows("show_image")
+    assert defaults.allows("list_scenes") and defaults.allows("activate_scene") and defaults.allows("show_image")
     # A non-bool is ignored, not believed.
-    assert VoicePermissions.from_device_config({"voiceUseScenes": "no", "voice_create_scenes": True}).as_dict() == {
-        "change_settings": True, "use_scenes": True, "create_scenes": True, "use_albums": True,
+    assert VoicePermissions.from_device_config({"voiceUseScenes": "no", "voice_create_scenes": False}).as_dict() == {
+        "change_settings": True, "use_scenes": True, "create_scenes": False, "use_albums": True,
     }
+    assert not VoicePermissions.from_device_config({"voiceCreateScenes": False}).allows("show_image")
     assert not VoicePermissions.from_device_config({"voice_use_albums": False}).allows("show_album")
 
 
@@ -536,10 +537,11 @@ async def test_show_album_installs_the_album_scene_on_the_frame(async_client, no
     response = await no_auth_client.post(url(frame2, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame2), **PCM_HEADERS})
     assert response.status_code == 200, response.text
     assert [tool["name"] for tool in openai3.requests[0]["tools"]] == [
-        "list_scenes", "activate_scene", "set_scene_state", "render_now", "rotate_frame",
+        "list_scenes", "activate_scene", "set_scene_state", "render_now", "show_image", "create_scene", "change_scene",
+        "rotate_frame",
     ]
     context = openai3.requests[0]["input"][0]["content"][0]["text"]
-    assert "- Voice chat may not: put new scenes on the frame (show_image, create_scene, change_scene); play the photo albums: list them, show one on the frame (list_albums, show_album)" in context
+    assert "- Voice chat may not: play the photo albums: list them, show one on the frame (list_albums, show_album)" in context
     assert json.loads(tool_outputs(openai3.requests[1])["c1"])["error"] == "not_allowed"
 
 
@@ -923,3 +925,13 @@ def test_the_voice_tools_match_the_cloud():
         assert f'{tool}: "{switch}"' in cloud, tool
     for switch, value in DEFAULT_VOICE_PERMISSIONS.items():
         assert f"{switch}: {'true' if value else 'false'}" in cloud, switch
+
+
+def test_a_voice_turn_leaves_layouts_out():
+    # docs/scene-layouts.md: a layout wraps scenes, nobody switches to it.
+    from app.utils.voice_chat import voice_scenes
+
+    clock = {"id": "clock", "name": "Clock"}
+    bar = {"id": "bar", "name": "Bar", "settings": {"isLayout": True}}
+    assert voice_scenes([clock, bar, "junk", {"name": "no id"}]) == [clock]
+    assert voice_scenes(None) == []

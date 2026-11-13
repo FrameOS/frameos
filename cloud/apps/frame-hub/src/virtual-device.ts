@@ -52,6 +52,7 @@ import {
   storableSceneState,
   virtualFrameSize,
 } from "../../auth-web/src/lib/virtual-frames";
+import { raiseAlert } from "./alerts";
 import { errorField, logError, logWarn } from "./log";
 import { isRecord } from "./protocol";
 
@@ -599,6 +600,10 @@ export class VirtualDevice {
             await this.renderOnce();
           } catch (error) {
             logError("virtual.render_failed", { error: errorField(error), frameId: this.frameId });
+            raiseAlert("hub_render_failed", "A virtual frame's render failed in the frame hub.", {
+              frameId: this.frameId,
+              reason: errorField(error),
+            });
           }
         }
       } finally {
@@ -676,22 +681,10 @@ export class VirtualDevice {
     } catch (error) {
       const code = error instanceof SceneRenderError ? error.code : "render_failed";
       const message = error instanceof Error ? error.message : String(error);
-      // rendered_at moves on a failure too: the interval paces the retries,
-      // or a scene that cannot render would be tried on every tick.
-      await this.db
-        .update(virtualFrames)
-        .set({
-          renderError: `${code}: ${message}`.slice(0, 512),
-          renderMs: Date.now() - startedAt,
-          renderedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(virtualFrames.frameId, this.frameId));
       if (error instanceof SceneRenderError) {
         lines.push(...error.logs.map(logLinePayload));
       }
-      lines.push({ code, error: message, event: "render:error", sceneId: active });
-      this.sendLogs(lines);
+      await this.recordRenderFailure(active, startedAt, code, message, lines);
       return;
     }
     if (this.closed) {
@@ -699,27 +692,26 @@ export class VirtualDevice {
     }
 
     const version = createHash("sha256").update(result.png).digest("hex").slice(0, 32);
-    await storeFrameAssetFile(this.db, this.frameId, {
-      content: result.png,
-      contentType: "image/png",
-      path: frameImageAssetPath,
-      thumb: false,
-    });
-    // What hardware writes under its assets directory on every render: the
-    // scene's snapshot, which the workspace's scene tiles show.
-    const snapshotPath = sceneSnapshotAssetPath(active);
-    await storeFrameAssetFile(this.db, this.frameId, {
-      content: result.png,
-      contentType: "image/png",
-      path: snapshotPath,
-      thumb: false,
-    });
-    await storeFrameAssetFile(this.db, this.frameId, {
-      content: result.thumbnail ?? result.png,
-      contentType: "image/png",
-      path: snapshotPath,
-      thumb: true,
-    });
+    try {
+      await this.storePicture(active, result);
+    } catch (error) {
+      // The scene drew and the object store refused the picture. The owner
+      // reads that on the row, in words that name no bucket or key; the
+      // journal keeps the reason.
+      logError("virtual.store_failed", { error: errorField(error), frameId: this.frameId });
+      raiseAlert("hub_store_failed", "The frame hub could not save a rendered picture.", {
+        frameId: this.frameId,
+        reason: errorField(error),
+      });
+      await this.recordRenderFailure(
+        active,
+        startedAt,
+        "store_failed",
+        "The picture could not be saved. It will be tried again at the next render.",
+        lines,
+      );
+      return;
+    }
 
     const rendered = isRecord(result.state) ? storableSceneState(scene, result.state) : undefined;
     const keepState = rendered !== undefined && revision === this.stateRevision;
@@ -755,6 +747,53 @@ export class VirtualDevice {
     // The image is already the frame's image; the announcement is what ends
     // a deploy's bar and tells an open workspace to look again.
     this.send({ active_scene: active, image: "image_get", type: "render" });
+  }
+
+  // A render that left no picture. rendered_at moves on a failure too: the
+  // interval paces the retries, or a scene that cannot render would be tried
+  // on every tick.
+  private async recordRenderFailure(
+    active: string,
+    startedAt: number,
+    code: string,
+    message: string,
+    lines: unknown[],
+  ) {
+    await this.db
+      .update(virtualFrames)
+      .set({
+        renderError: `${code}: ${message}`.slice(0, 512),
+        renderMs: Date.now() - startedAt,
+        renderedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(virtualFrames.frameId, this.frameId));
+    lines.push({ code, error: message, event: "render:error", sceneId: active });
+    this.sendLogs(lines);
+  }
+
+  // The frame's image, and what hardware writes under its assets directory on
+  // every render: the scene's snapshot, which the workspace's scene tiles show.
+  private async storePicture(active: string, result: SceneRenderResult) {
+    await storeFrameAssetFile(this.db, this.frameId, {
+      content: result.png,
+      contentType: "image/png",
+      path: frameImageAssetPath,
+      thumb: false,
+    });
+    const snapshotPath = sceneSnapshotAssetPath(active);
+    await storeFrameAssetFile(this.db, this.frameId, {
+      content: result.png,
+      contentType: "image/png",
+      path: snapshotPath,
+      thumb: false,
+    });
+    await storeFrameAssetFile(this.db, this.frameId, {
+      content: result.thumbnail ?? result.png,
+      contentType: "image/png",
+      path: snapshotPath,
+      thumb: true,
+    });
   }
 
   private sendLogs(lines: unknown[]) {

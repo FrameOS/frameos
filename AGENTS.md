@@ -8,28 +8,56 @@
 - There are TWO control planes for frames: the self-hosted backend (`backend/` + `frontend/`) and FrameOS Cloud (`cloud/` + `cloud-frontend/`). **Any frame-facing feature or fix must land on both, or explicitly note why it's one-sided** — unless the task says otherwise. When you touch frame panels, frame APIs, device verbs, or provisioning/flashing, check the other control plane before calling the work done. Neither plane builds ESP32 firmware: both flash the signed generic release image, provision over the USB console, and offer the release OTA (`docs/todo.md`, `embedded/esp32/README.md`).
 - The frame workspace UI is SHARED code (`frontend/src`), wrapped for cloud by `cloud-frontend/`. A fix that "doesn't show on cloud" is usually NOT a fork — check the `workspaceSurfaces` gating (`frontend/src/scenes/workspace/`) and remember the cloud serves a PREBUILT bundle: auth-web's predev rebuilds it via turbo (`scripts/build-frames-app.mjs`), but a long-running `pnpm dev` session keeps serving the bundle from its start.
 
-## Cloud tests before you commit (`verify` is the gate)
+## The iOS app: `docs/ios-app.md`
 
-- **Before committing anything under `cloud/`, `cloud-frontend/` OR
-  `frontend/src` — including a test file under
-  `cloud/apps/auth-web/src/test/shared-spa/` — run `pnpm verify` from
-  `cloud/` and read its summary.** This is the single most common way a PR
-  goes red: the cloud CI job is failing "all the time" because people run
-  one vitest file, or the frontend's `tsc`, and call it done. `verify` runs
-  lint + **typecheck** + test + build for every cloud package, and the
-  auth-web typecheck covers the shared-spa test files themselves (a fixture
-  that vitest happily executed failed `tsc` in CI on 2026-09-12, PR #485)
-  and the whole shared SPA the cloud bundle is built from. Running the
-  frontend's own `tsc` does NOT cover it: the cloud has its own tsconfig
-  and build. Takes a few minutes; do it once at the end, not never.
+- `ios/` is a native SwiftUI client of BOTH planes (`FrameOSKit`: the
+  transport, the contract readers, one service per workspace area;
+  `FrameOSUI`: the screens). It calls the routes the SPA calls, through
+  `APIClient` (its `apiFetch`: project scoping on a backend, `Origin` on the
+  cloud), and never gets a route of its own. A change to a frame-facing
+  route or payload checks `ios/FrameOSKit/Sources/FrameOSKit/Services/` too.
+- What the SPA decides in shared code the app never hand-copies: it is
+  generated (`generate_deploy_progress_contract.py` and
+  `generate_cloud_contract.py` write Swift tables, under the backend suite's
+  `--check`) or pinned by a corpus both replay —
+  `docs/frame-status-fixtures.json` (`decorators/frame.tsx`),
+  `scene-form-fixtures.json` (`refreshInterval.ts`, `showIf.ts`),
+  `button-map-fixtures.json` (`frameEventMap.ts`), `api-path-fixtures.json`
+  (`projectApi.ts`), `server-address-fixtures.json`,
+  `render-on-server-fixtures.json` (`renderOnServer.ts`). Change the SPA
+  function, its Swift port and the corpus together; the SPA's runners are
+  `cloud/apps/auth-web/src/test/shared-spa/*-fixtures.test.ts`.
+- A backend's scene and album installs are its own MCP tools
+  (`frame_scene_install`, `photo_album_install`): keep their arguments.
+- `ios/bin/test` and `ios/bin/check-ui` run without Xcode; the **iOS app**
+  workflow (`.github/workflows/ios.yml`) builds for the simulator.
+
+## Tests: CI is the gate, and you watch it
+
+- **You do not have to finish every local suite before opening a PR.** CI runs
+  them all anyway and is often faster than a laptop. Run what is quick and
+  covers what you touched, open the PR, then **watch CI to the end** (`gh pr
+  checks <n> --watch`) and fix what it reports. The work is done when CI is
+  green, not when the PR is open: a PR nobody watched is how the cloud job came
+  to be failing "all the time". This holds for every suite, the Nim shards and
+  the firmware image included.
+- **What to run first under `cloud/`, `cloud-frontend/` OR `frontend/src`** —
+  including a test file under `cloud/apps/auth-web/src/test/shared-spa/` — is
+  `pnpm verify` from `cloud/` when it is quicker than a CI round trip, reading
+  its summary. One vitest file, or the frontend's `tsc`, is not the same check:
+  `verify` runs lint + **typecheck** + test + build for every cloud package, and
+  the auth-web typecheck covers the shared-spa test files themselves (a fixture
+  that vitest happily executed failed `tsc` in CI on 2026-09-12, PR #485) and
+  the whole shared SPA the cloud bundle is built from. The frontend's own `tsc`
+  does NOT cover it: the cloud has its own tsconfig and build.
 - The cloud CI job named **`verify`** (`.github/workflows/cloud-ci.yml`) runs
   `turbo run lint typecheck test build --filter='@frameos-cloud/*' --filter=@frameos/cloud-frontend` and then
   THREE integration suites against a real Postgres: `@frameos-cloud/auth-web`,
   `@frameos-cloud/frame-hub` and `@frameos-cloud/ledger` (the accounting
   kernel — the module whose own todo records a shipped billing bypass, so do
-  not skip it). Run the same four locally from `cloud/` before pushing — a
-  green `pnpm test` alone proves little, because the integration suites are
-  where the interesting failures live (`pnpm verify` is the first line):
+  not skip it). A green `pnpm test` alone proves little, because the integration
+  suites are where the interesting failures live. To run them locally, from
+  `cloud/`:
 
   ```
   pnpm verify
@@ -76,6 +104,9 @@
   `events_contract_gen.py`, the cloud's `events-contract.gen.ts`): an event the
   cloud should be able to send needs a `cloud.verb` in the contract, not a new
   `case` alone.
+- A scene's own code sends events through one door, `dispatchFromScene`
+  (`js_runtime/app_runtime.nim`): the `dispatch` node and `frameos.dispatch`.
+  It owns the origin check, the render-during-render guard and the budget.
 - **One dispatcher, `frameos/src/frameos/event_loop.nim`, for Linux, the ESP32
   and the wasm preview.** It owns the queue, the origin allow-list, the
   command/event split and the render rule (`renderAfter`); a host supplies an
@@ -104,6 +135,9 @@
   `pointerDown` / `pointerMove` / `pointerUp` on the wire and the render task
   delivers them) and the old-name aliases with them, not the keyboard half. `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
   evdev translator's `test_translate.nim` are where a rule gets its test.
+  A JS app subscribes in its `config.json` (`events`, `"*"` per the contract's
+  `heardByAll`) and hears through `onEvent`: `eventApps` beside `eventListeners`,
+  so `sceneListensTo` stays a question no JavaScript answers.
 
 - **Two event maps, one rule shape** (`docs/events.md` "Event map";
   `event_map.nim`, applied by `event_loop.nim` on every host). The
@@ -113,7 +147,7 @@
   a rule with `emit` replaces the press (origin `eventMap`), the scene never
   hears it; every reTerminal preset ships LEFT/RIGHT held = previous/next
   scene, the E1001/E1002/E1003 (microphone) REFRESH held = `voiceChat`,
-  and the E1003 and the SenseCAP Indicator the edge swipes
+  and the E1003, the Sticky and the SenseCAP Indicator the edge swipes
   (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset table:
   keep the three alike). A Linux frame never given a map runs its device's:
   every HyperPixel's left/right edge swipe is `back`/`forward` (the scene's
@@ -145,6 +179,9 @@
   scene's last snapshot (`sceneSwitcherThumbnail`,
   `frameos/scene_switcher_linux.nim`); fast panels get a dark grid, e-paper
   black on white with the keys walking an inverted highlight.
+- Both built-in scenes are drawn in the layout of the scene they were opened
+  from (`state.layout` from the dispatcher, `ownRun` / `builtInRunner` into
+  `interpreter.runEvent`; `docs/scene-layouts.md`). A new one goes the same way.
 - It is never persisted on any host (no `scene.json`, no ESP32 `last_scene`
   or `pending_scene`, no state file) and is in no scene list: test with
   `isBuiltInScene`. `single_scene_host` runs every scene through its export
@@ -167,6 +204,22 @@
 - Bound to a swipe down from the top in every touch preset (`TOUCH_EDGE_SWIPES`
   and its two copies, `device_event_map.nim`): keep the presets alike. Both
   built-in scenes go through `isBuiltInScene`; a third goes the same way.
+- A gear left of Save opens the **frame page** (doc section "The frame page"):
+  Wi-Fi, rotation, scale, Render again / Restart FrameOS / Reboot. The page is
+  built in the scene from FACTS a host hands over through three hooks
+  (`frameSettingsRead` / `Apply` / `Action`): the ESP32's
+  `main/fos_frame_settings.c` (via `embedded_runtime.nim`) and the Pi's
+  `frameos/frame_settings_linux.nim` (portal Wi-Fi code on its own thread).
+  Words go in the scene, never in a host. Its buttons send the contract's
+  device commands from the origin `panel`. A touch LCD ESP32 (`touch_setup` in
+  `main.c`) boots without waiting for Wi-Fi and never opens the hotspot: the
+  page is where it joins. **No plane is ever told the Wi-Fi network** (a
+  backend learns the address alone); rotation and scale set there are ADOPTED
+  by the plane: the cloud mirror follows `hardware.rotate` / `renderScale`,
+  a backend the `settings:frame` log line (`frame_settings_adopt.py`). The
+  plane can turn the page off (`frame_settings_on_screen`); the device keeps
+  the last word (a Pi's `frameos-settings-unlock` file on the boot partition,
+  an ESP32's `set settings_unlock 1`).
 
 ## Scene previews on a frame: `docs/scene-previews.md`
 
@@ -184,6 +237,41 @@
   spends `scenes` on ack); the preview's name, source and shown scene outlive
   the bundle. A new pusher sets `source` and goes through the same two
   routes, never a store of its own.
+
+## One scene at a time on the ESP32: `embedded/esp32/README.md` "Scene storage"
+
+- The firmware keeps one file per scene (`main/fos_scene_store.c`, pure, host
+  test `test_fos_scene_store.c`), and a scene can be read, added, replaced or
+  removed alone over USB (`usb_api scene-*`), HTTP (`/api/frames/<id>/scenes`)
+  and from a control plane. `scene-list` / `GET .../scenes` / `hardware.storage`
+  / `embedded.storage` report what the partition holds (`stateUsedBytes` of
+  `stateTotalBytes`, `scenesBytes`, each scene's footprint in `sceneBytes`,
+  all in SPIFFS's page units: `fos_spiffs_footprint.c`), and each scene's `bytes`.
+- A changed scene goes to a NEW slot and the index is switched: the render
+  task's copy (`s_slots`) stays valid until it re-reads the index and sweeps.
+  A reader that is not the render task reads the index on flash under the store
+  lock. Never overwrite a slot in place, never unlink one from another task.
+  A whole payload is split by the same `fos_scene_store_apply` (`replace_all`),
+  so what the index keeps of a scene (`isLayout`, the `default` mark) is decided
+  in one place, `make_entry`.
+- Both planes send only what changed when they can, and always fall back to
+  the whole list: the cloud's `scenes_patch` (the hub decides at send time from
+  the row's `scene_hashes`, `lib/scenes-patch.ts`; the queue row stays
+  `set_scenes`), a backend's `/embedded/scenes?patch=1` (what it last served
+  per frame, in Redis). A device refuses a patch that is not against the set it
+  holds (`base_mismatch`), and the plane sends the whole list.
+- "Push & activate" and "Install & activate" are ONE push of that scene: the
+  SPA reads back only the assignments that own it (`only` in
+  `cloudFrameScenesSave.ts`) and posts `scene_id` + `state` with the list (the
+  queued `set_scenes` carries them, never a second command); on a backend the
+  switch rides the queue behind a forced pull that still asks for a patch. The
+  device writes a change that activates its scene unpaced (`s_store_urgent`).
+- A SPIFFS lookup by name (stat/open/remove/rename) is ~0.5 s on the 32 MB
+  boards' 24 MB `/state`: the store knows its slot files after the boot sweep,
+  writes slots straight to their names and the index as a kept copy then in
+  place. Remove the index and slots ONLY through the store
+  (`fos_scene_store_remove_index` / `_remove_slots`; a wipe calls
+  `fos_scene_store_forget`), and never add a stat to a per-change path.
 
 ## Voice chat: `docs/voice-chat.md` is the contract
 
@@ -207,8 +295,8 @@
   age and actions (`voice_history_for_model` / `voiceHistoryForModel`), so a
   follow-up has the scene the previous sentence built to refer to. **What the voice
   chat may do** is the owner's four switches per frame (change settings /
-  use installed scenes / create new scenes / access photo albums — the third
-  off by default and the home of `show_image`; the fourth gates
+  use installed scenes / create new scenes / access photo albums — all four
+  on by default, the third the home of `show_image`; the fourth gates
   `list_albums` and `show_album`, the voice turn's `photo_album_install`):
   plane-side policy, never a firmware key (backend `device_config`
   `voiceChangeSettings` / `voiceUseScenes` / `voiceCreateScenes` /
@@ -332,6 +420,57 @@
   run the AI evals above. Keep it free of Nim: the cloud prompt is tested for
   that.
 
+## Rendering on the server: `docs/server-rendering.md`
+
+- An ESP32 with its own runtime can hand its scenes to its control plane
+  (`render_mode: remote`; a backend's `device_config.renderMode`, "Render
+  scenes" in Power). The plane renders in the wasm runtime, packs the panel
+  bitmap (`pack_image_for_panel`, the cloud's port `panel-pack.ts`) and serves
+  it at `GET …/embedded/render` with an ETag; the device sends its panel
+  and gets a 304 when nothing changed. A C3 is always this.
+- The plane is the memory (scene state, held events, the scene shown); in
+  remote mode the firmware runs no scene work. What a board keeps in RAM
+  beyond that (a UI's focus, keyboard and scrolls, the apps' `remember`
+  values) goes out and back with every pull (`frameos_wasm_kept_state`,
+  "Kept between pulls"; each pull is a new process) and is dropped at a
+  sleep: a new per-process thing a scene relies on joins it. What its keys, touch, schedule
+  and HTTP API would have handed its scene, `fos_events_dispatch` relays
+  instead (`fos_render_relay.c`), and the next pull is a `POST` carrying it;
+  the plane runs it through the one dispatcher in the same render
+  (`frameos_wasm_device_input`, `relayed_input.nim`) and keeps the scene the
+  render ended on. A new producer on the ESP32 goes through
+  `fos_events_dispatch` and is relayed for free; never a second relay path.
+  The scene still decides when it renders next: the plane answers every pull
+  with `X-FrameOS-Next-Render` (its `nextSleep`, else its `refreshInterval`,
+  held to 10 s on a backend and the plan's floor on the cloud) and the board
+  wakes by it.
+  On the cloud a frame set to remote is a cloud-rendered frame (quota +
+  floor, `frameIsCloudRendered`). A sleeping frame's next picture is drawn
+  before it wakes, with the scene's clock set to the wake (`nowMs`), and
+  used once if nothing changed: keep that rule on both planes.
+- The plane dithers to the palette the device's packer would
+  (`activePalette(framePalette(stock))`: a photo's own palette, the frame's
+  `palette`, the stock table); a change to that rule changes the backend's
+  packer, `panel-pack.ts` and `embedded_main.nim` together.
+- A board that says `X-FrameOS-Fosb: 2` gets FOSB version 2: deflated, and
+  only the 64-byte blocks that changed since the picture its If-None-Match
+  names (`fosb_v2` in `server_render.py`, the cloud's `fosb.ts`, pinned by
+  `docs/fosb-fixtures.json`; the board checks the result by its sha256 and
+  asks again whole). Every answer also says where a press on its picture is
+  taken (`X-FrameOS-Press`, the runtime's `frameos_wasm_press_map`), and the
+  board clicks from its touch task at once. And the runtime is told the
+  board's panel (`set_frame`'s `pixelFormat` → `panel_shape.boardPanelFormat`):
+  `app.frame.color` / `paper` and the built-in scenes' look are the board's,
+  never the plane's RGBX canvas.
+- The battery popover's offer reads `renderSceneMs` from the metrics
+  (`serverRenderForecast` in `utils/batteryForecast.ts`).
+- A board rendered on the server is sent nothing a scene holds ("Nothing
+  to keep on the board"): one empty scene for its scenes (`docs/server-rendered-board-scene.json`),
+  no account keys, verbs without their state or payload, decided when it is
+  sent (the hub's `messageForServerRenderedBoard`, the backend's
+  `frame_command_wire`). A new way to put scene content on a board checks
+  `planeKeepsSceneState` / `is_thin_client_frame` first.
+
 ## Scenes inside scenes: `docs/scene-rhythm.md`
 
 - A scene drawn through a scene node (a split's panel) renders on its own
@@ -340,11 +479,41 @@
   the ESP32 and the preview). Copies are capped at a quarter of free render
   memory (1 MiB at most on an ESP32); without one the panel runs again with
   `FrameScene.repainting` set, which is the hook for exact repaints (#555).
-- A generated split's own interval is the fastest it renders, and it waits
-  longer when no panel is due. A `render` from outside the scene (API, cloud,
+- On an LCD or HDMI a generated split wakes for its first panel, its own
+  interval no floor; on e-paper and a deep sleeper the interval is the fastest
+  it renders. A panel that is not due and that a canvas still holds is not
+  touched at all (`rdKeep`, `rhythmCanvasGeneration`; a new writer into a kept
+  canvas that is not a render bumps that count or calls `rhythmForgetCanvases`). A `render` from outside the scene (API, cloud,
   schedule, button, console, preview) redraws every panel: `event_loop.nim`
   on Linux and in the preview, `fos_events.c` on the ESP32. Keep the two
   rules alike.
+
+## Layouts and `<Scene>`: `docs/scene-layouts.md`
+
+- A layout is one JSX app (`settings.isLayout`, in no scene list) with a
+  `<yield />` (`scenes.yield` in the events contract) where the wrapped scene
+  goes. `sceneLayoutProblem` and `scene_layout_problem` are the rule, pinned by
+  `docs/scene-layout-fixtures.json`; both planes refuse anything else on save. What wraps a scene is the install's,
+  like its button map: `layout: {sceneId, state}` beside `eventMap`, on the
+  backend's `frame.scenes` entry and the cloud's `layouts` assignment column.
+- The host keeps one scene. `interpreter.runEvent` enters the layout on a render
+  pass and for pointer events (`routePointer`, which also gives a split's panels
+  and `<Scene>`s their taps, in their own coordinates); yield goes through
+  `runSceneNodeRender`. The frame's next wake is `syncRefreshInterval`'s, never a
+  host's. Anything added to a layout pass goes in `interpreter.nim`, not in a host.
+- `<Scene id>` and `<yield />` are holes in the canvas wherever they can be
+  (`seekHoles` in `ui/layout.nim`, `holesOf` in `app_runtime.nim`; a slot with
+  `hole` set): `renderSvgAround` draws the chrome, each scene goes through
+  `runSceneNodeRender` into a view of the canvas, and a pass the UI has nothing
+  to do in never enters it (`renderChrome`, `rhythmVisitChrome`, its own
+  `chromeDueAt`). One that cannot be a hole (opacity, something painted over it,
+  a scroller) is a raster image in the UI's SVG tree (`ukImage` +
+  `fillSceneImages`), its picture under the panel copy budget
+  (`SceneRhythm.embedImage`). A scene's `<Scene>` children live in `sceneNodes`
+  under negative keys.
+  A rectangle of the panel keeps its own damage record in `svg_frames.nim`
+  (`takePanelRegion`): a new way to write a rectangle's pixels without a render
+  of it takes that record too.
 
 ## JSX from JS apps: `docs/jsx-ui.md`
 
@@ -367,7 +536,7 @@
   laid out at that size, and pixie stretches the root to the full target as
   vectors. The scale is a `role: "renderScale"` field's state, else the
   scene's `settings.renderScale`, else the frame's `render_scale` (0 =
-  automatic: shorter edge / 600 rounded down to a quarter, at least 1; the SPA's copy
+  automatic: 1, and 2 on a 4K or larger screen on HDMI; the SPA's copy
   is `utils/renderScale.ts`). Never scale by rasterizing small and
   stretching: pass the smaller size to the layout and the full one to pixie.
 - Flash is the budget: the layer cost +37.3 KB on the ESP32-S3 image. A new
@@ -389,8 +558,14 @@
   line also goes out on the 115200-baud console.
 - **The canvas is the panel where it can be.** An RGB565 LCD's canvas is its
   back frame buffer (`fos_display_render_target`, `frameos_nim_render_panel`:
-  nothing packed, the blit a buffer switch); a grey or black-and-white panel
-  draws in pixie's luma surface. The canvas rule has five copies
+  nothing packed, the blit a buffer switch); a sixteen-grey panel draws in
+  pixie's `pfGray4`, half a byte a pixel in the panel buffer's own layout, every
+  store dithered through the 4x4 ordered matrix (a new row copy in pixie uses
+  `copyPixelRow`, and never copies a row down into a dithered gradient) and,
+  unrotated on the ESP32, in the reserved panel buffer itself
+  (`frameos_nim_share_canvas`: a new borrower of `fos_framebuffer_acquire`
+  draws over the canvas and is counted for it), and any
+  other grey or black-and-white panel in pixie's luma surface. The canvas rule has five copies
   (`frameos_display.h` lists them, `docs/device-limits-fixtures.json` pins
   two): change them together. A Pi with a 16 bpp RGB565 framebuffer (a
   HyperPixel 4.0) gets the same idea: one kept `pfRgb565` canvas
@@ -412,21 +587,62 @@
   budget measures it only when a decode asks
   (`setDecodeContiguousBudgetProvider`).
 - A frame that stays awake keeps its scene's JS interpreters between renders
-  (`settleIdleJsAppRuntimes`), and a whole-frame SVG on an LCD repaints only
+  (`settleIdleJsAppRuntimes`; one holding a UI's handlers goes only when an
+  allocation failed, and any discard is logged and, if it cost taps, shown on
+  the panel: `reportInterpreterDiscards`), and a whole-frame SVG on an LCD repaints only
   pixie's damage box (`utils/svg_frames.nim`, keyed on the firmware's write
   count per buffer): a new writer into an LCD buffer that is not a render in
   place calls `fos_display_mark_written`.
+- **Partial refresh on e-paper** (doc section of that name): a panel in
+  `PARTIAL_PANELS` updates through `fos_display_update`, which keeps the exact
+  picture on the glass, and `panel_damage.nim` dithers only the runs of the
+  canvas that changed (a whole-frame Floyd-Steinberg would move every grey
+  pixel below a change). A new way to put pixels on the glass goes through
+  `fos_display_blit` or `fos_display_update`, or the copy goes stale; the
+  panel stays awake between updates, so the chip's deep sleep parks it first
+  (`fos_display_park`). The IT8951 (the reTerminal E1003) keeps the picture
+  itself: `it8951.c` hashes tiles of the packed buffer and the table's
+  `changed` / `clean` / `owed` replace the copy, because 1.25 MiB more does
+  not fit an 8 MB board. Only GC16 (greys) and DU (pure black and white) draw
+  on its waveform file: while someone taps, and for pictures coming quickly
+  (`fos_pictures_fast`: an animation, a clock's seconds), it is one DU over
+  all that changed, greys as a halftone, and GC16 once they stop
+  (`fos_display_settle_due`).
+  While someone taps, slow chores wait (`input_hold_on()` in `fos_client.c`, the
+  rule in `fos_animation.c`): the render task drains the touch queue, so a new
+  network call or flash write on it goes behind the hold too, and a full refresh
+  that only clears ghosts waits for the idle frame. Better still, a chore leaves
+  the render task: scene state is written by `scene_state_writer_task`
+  (`main.c`), a frame that stays awake does its backend round trips (logs,
+  picture push, pulls) on `backend_link_task` in `fos_client.c`, which applies
+  nothing: a new pull hands its result to the render task the same way (and
+  `link_hand_back` runs it before a deep sleep); a backend scene set is
+  downloaded there, parsed on the render task and written by the scene
+  store's own task (`store_task` in `fos_scenes.c`, paced around renders and
+  taps: a flash write stalls both cores), and an
+  e-paper driver starts its refresh and waits for it only before
+  the panel's next use (`finish_waveforms`, `EPD_3in97_WaitPending`). A full
+  refresh of any other SPI panel runs on the display's own task
+  (`refresh_task` in `frameos_display.c`, the picture copied, the newest one
+  next, `fos_refresh_queue.c`): a new panel entry point calls `refresh_wait`
+  first (`test_esp32_refresh_queue.py` reads every bus taker for it), and a timed
+  render waits while `fos_display_refreshing()`. A touch
+  board runs at 240 MHz like an LCD (`cpu_240` in `main.c`).
 - **A slow scene switch shows the loading mark** (`frameos/loading_mark.nim`,
   one drawing for both runtimes; doc section "A switch that takes a while"):
   after 200 ms without the new scene's first frame, a thread (Pi,
   `loading_mark_panel.nim`, straight into /dev/fb0) or a core-0 task (ESP32,
   `lcd_loading.c` + `lcd_st7701s_rgb.c`) draws it over the picture showing,
   and the next frame put on the panel ends it. A host's switch begins it
-  (runner.nim `beginSceneLoading`, fos_scenes.c at apply), never the
-  dispatcher. The mark writes behind the driver, so on a Pi every push to the
+  (runner.nim `beginSceneLoading`, fos_scenes.c at apply), and so does every
+  render pass somebody waits for (`rhythmAwaited`: a scene whose own interval
+  is 5 s or more, on a pass that runs it, so a slow refresh shows it with nothing
+  asking and a clock bar ticking every second does not), never the dispatcher. The mark writes behind the driver, so on a Pi every push to the
   driver goes through `withLoadingMarkAway`, and on the ESP32 every present
   runs `present_back` (which puts it away): a new push or present path keeps
   that, or the driver's row diff and the damage repaint go wrong. The
+  firmware's e-paper has no mark: a load someone at the frame asked for chirps
+  quietly on the buzzer instead (`fos_client_loading_begin`). The
   firmware builds RGB565 alone, with no flip, round panel or log line
   (`Only565`, `Flips`, `RoundPanels`, for flash): an option added later is
   the Pi's unless the ESP32 needs it, and the PR says what it cost there.
@@ -435,6 +651,19 @@
   helper on the other core (resample.nim's draw is the first job). The job
   runs on a task the Nim runtime knows nothing about: plain values and
   pointers only, no ref, no allocation, no log, nothing that raises.
+
+## Big text in a JS app: `frameos.openLines`
+
+- A JS app's field with `"capabilities": { "byteIter": {} }` gets a spooled body
+  as a stream instead of a string (`setDynamicJsAppField`, kept on the runtime
+  in `spoolFields`), and `frameos.openLines` / `nextLine` / `nextBlock` read it
+  in one window (`frameos/utils/line_reader.nim`; the stream API gets it too).
+  The filters run natively on purpose: `only` drops a line before it is a JS
+  string, because the JS heap and the 20 s interpreter budget are what limit a
+  long feed on an ESP32. `repo/apps/json/icalJson` is the worked example; a
+  new reader option is a `LineOptions` field and the declarations in
+  `appTypeDeclarations.ts`. A reader lives for the call that opened it, and a
+  temp file stays on the card while a reader holds its spool.
 
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 
@@ -448,8 +677,9 @@
   steps; run `python3 frameos/tools/generate_retired_apps.py` after touching
   the contract or a replacement's files (`test_retired_apps.py` checks it).
 - A port must behave like the Nim app on an ESP32 too: a deep-sleeping one
-  (and the editor's preview) tears every idle JS interpreter down after each
-  render, and one that stays awake does when memory runs short, so state that
+  tears every idle JS interpreter down after each render, and one that stays
+  awake (and the editor's preview running as one, which a tapped scene needs)
+  does when memory runs short, so state that
   outlives a render goes through `frameos.remember` / `recall`, not module
   variables; a
   throw in `get()` fails the node like a raising Nim app (defaulted args, no
@@ -598,13 +828,20 @@
 
 ## Paid plans: `cloud/docs/billing.md`
 
-- Cloud-only by nature. The provider-neutral half is built (plan catalog,
-  plan cards, `provider_*` tables, the ledger's provider-billed periods);
-  **no payment provider is wired up**. Stripe is the plan; a Creem adapter
-  was built, run against Creem's test mode and removed on 2026-11-07 after
-  Creem's review demanded its moderation API on prompts that reach the
-  on-device image app. Don't bring a merchant of record back without
-  reading that history in the doc.
+- Cloud-only by nature. Sold through **Stripe** (`src/lib/stripe.ts` the
+  API, `src/lib/billing-provider.ts` the mapping). Stripe is not a merchant
+  of record: Raaven BV sells, Stripe Tax adds the VAT, and the ledger books
+  it as owed (`liability:sales_tax`) and Stripe's fee as a cost
+  (`expense:psp_fees`, converted from the euro balance at Stripe's rate). A
+  Creem adapter was built and removed on 2026-11-07 after Creem's review
+  demanded its moderation API on prompts that reach the on-device image
+  app; don't bring a merchant of record back without reading that history.
+- **A webhook is a nudge**: every subscription, invoice, refund and dispute
+  it names is read back in the pinned API version (`stripeApiVersion`),
+  never taken from the payload, which is rendered in the endpoint's version.
+  A Stripe call goes through `stripe.ts`; the integration suite's stand-in
+  (`src/test/stripe-fake.ts`, a real HTTP server) refuses parameters it
+  does not know, so a new call or parameter needs it taught there too.
 - **A plan lists only what exists.** The catalog
   (`cloud/apps/auth-web/src/lib/plan-catalog.ts`) names unbuilt features and
   limits in `plannedFeatures` / `plannedLimits`: the plan cards mark them
@@ -613,12 +850,21 @@
   price list is frameos.net/pricing (`content/docs/pricing.mdx` in
   `frameos-docs`, numbers repeated by hand); the cloud's `/pricing` only
   redirects, to the usage page when signed in.
-- **An account's plan changes only on what the provider says**, through
-  one idempotent function per adapter; the ledger side is
+- **An account's plan changes only on what Stripe says**, through
+  `applySubscription`, which is idempotent; the ledger side is
   `packages/ledger/src/provider-subscriptions.ts`, where the provider owns
   the clock and the nightly cycle skips `subscriptions.provider` rows.
-  Test-mode payments never post to the ledger. The doc lists what an
-  adapter must do.
+  Changes are worked out from the plan paid for, never Stripe's current
+  price. Test-mode payments never post to the ledger. Every change of plan
+  is a `cloud plan …` PostHog event (`plan-notifications.ts`, posted to the
+  Discord reports channel by the "Cloud plans" workflow), sent by the write
+  that made the change (a payment applied, a status moved by
+  compare-and-set), never from a before-and-after read: the checkout
+  return and the webhooks race. A change to the flow
+  is run against Stripe's test mode before it ships (the doc's checklist
+  and its last results). Live mode sells to superadmins only until
+  `STRIPE_CHECKOUT_OPEN=1` (`checkoutOpenTo`): a real payment is made and
+  refunded first.
 
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】
@@ -626,6 +872,7 @@
 - `frameos/` – Nim-based runtime for devices, containing system drivers, Nim app definitions, and assets compiled into the on-device application. Nim apps live in `src/apps`; repo-provided JavaScript app templates live outside the runtime under `repo/apps/<folder>/<app>`, the folder naming what the app returns (`image`, `text`, `json`, `logic`). Entry point `src/frameos.nim` is a small CLI (see "Device runtime" below); `make build` writes the binary to the gitignored `frameos/build/frameos`.
 - `e2e/` – The end-to-end suites: the scene-renderer snapshot harness (`e2e/run`, `e2e/snapshots`), the Playwright frontend suite (`e2e/frontend-visual`, incl. the cloud `/frames` specs) and the opt-in real-SSH deploy test (`e2e/deploy`). `e2e/README.md` describes each, how CI runs them and which snapshots CI commits itself.
 - `embedded/` – The ESP32 firmware (`embedded/esp32`, ESP-IDF + the Nim runtime compiled to C) and the Pico W / Pico 2 W thin client (`embedded/pico`, pico-sdk C; Pimoroni Inky Frames). Neither control plane builds firmware: both flash signed release images (a Pico's is a `.uf2` dragged onto the BOOTSEL drive, then provisioned over the same `usb_api` console as an ESP32). The Pico is a thin client by hardware — its PSRAM cannot be memory-mapped — so the self-hosted backend renders for it and it has no cloud link until the hub renders for thin clients; that one-sidedness is deliberate (`embedded/pico/README.md`). The IDF-free ESP32 modules have host tests (`embedded/esp32/main/tests`, see that README's Layout); the Pico's SDK-free modules have theirs in `embedded/pico/tests` (`make -C embedded/pico/tests`).
+- `ios/` – The native iOS app (SwiftUI) for both control planes; `docs/ios-app.md` is how it stays in step with the SPA, `ios/README.md` how to build it.
 - `cloud/` – FrameOS Cloud: the hosted service (Next.js + Drizzle/Postgres) behind `cloud.frameos.net` and `scenes.frameos.net` (legacy `account.frameos.net` redirects) — accounts, device/backend linking, and the scene store. Part of the monorepo's single pnpm workspace (one root lockfile, Turborepo builds); run pnpm commands from `cloud/`, see `cloud/README.md` and `cloud/docs/cloud-frames.md`. CI runs via `.github/workflows/cloud-ci.yml`.
 - Supporting files at the root include the Docker configuration (`Dockerfile`, `docker-compose.yml`, `docker-entrypoint.sh`), the install/setup scripts under `scripts/`, and the version metadata (`versions.json`, `project-folders.json`, `buildroot-images.json`, `cross-toolchain-images.json`) for packaging and deployment. There is no Procfile any more.
 
@@ -652,11 +899,12 @@
 - Built as an ESM React app with TypeScript; kea manages state and type generation (`kea-typegen`).
 - Build pipeline orchestrated by `build.mjs` using esbuild, with Tailwind/PostCSS for styling and optional bundle analysis via `vite-bundle-visualizer`.
 - Development: `pnpm install` followed by `pnpm --dir frontend run dev` (spawns kea typegen watch and esbuild dev build concurrently).
-- Repo-level local development runner: `pnpm dev` starts `mprocs` (`mprocs.yaml` is the process list). Panes that autostart: `backend` (FastAPI, `DEBUG=1`), `worker` (ARQ), `vite` and `kea` (the main frontend's dev server and its typegen watcher), `redis`, `postgres` (the Flox-provided Postgres on port 55432, via `cloud/scripts/db-run.sh`) and `wasm` — which runs `frameos/tools/build_wasm.sh`, a Nim → emscripten build of the interpreted-scene runtime for the browser preview, on every `pnpm dev`. Panes that do not autostart (select them in mprocs): `frameos` (`make` in `frameos/`, the native runtime), `cloud` (the FrameOS Cloud Next.js dev server; it first runs `cloud/scripts/db-setup.sh` to apply migrations), `cloud-hub` (the frame hub, `pnpm run dev:hub` in `cloud/`), `backend-docker` (`scripts/backend-docker.sh`, which persists a generated Docker `SECRET_KEY` in the gitignored `.env.docker.local`) and `migrate` (alembic upgrade for the backend). There is no pane for the on-frame admin frontend; run `pnpm dev:frame-frontend` (its watcher in `frameos/frontend`) by hand when working on it.
+- Repo-level local development runner: `pnpm dev` starts `mprocs` (`mprocs.yaml` is the process list). Panes that autostart: `backend` (FastAPI, `DEBUG=1`), `worker` (ARQ), `vite` and `kea` (the main frontend's dev server and its typegen watcher), `editor` (the embedded editor bundle `frontend/dist-editor`, rebuilt on change for the local scenes page's iframe), `redis`, `postgres` (the Flox-provided Postgres on port 55432, via `cloud/scripts/db-run.sh`) and `wasm` — which runs `frameos/tools/build_wasm_watch.sh`: `build_wasm.sh` (a Nim → emscripten build of the interpreted-scene runtime, for the browser preview and for every frame the backend renders: thin clients, boards set to render on the server, virtual frames) on every `pnpm dev`, and again whenever the runtime's sources change, so a merge does not leave the backend drawing with an older runtime. Panes that do not autostart (select them in mprocs): `frameos` (`make` in `frameos/`, the native runtime), `cloud` (the FrameOS Cloud Next.js dev server; it first runs `cloud/scripts/db-setup.sh` to apply migrations), `cloud-hub` (the frame hub, `pnpm run dev:hub` in `cloud/`), `backend-docker` (`scripts/backend-docker.sh`, which persists a generated Docker `SECRET_KEY` in the gitignored `.env.docker.local`) and `migrate` (alembic upgrade for the backend). There is no pane for the on-frame admin frontend; run `pnpm dev:frame-frontend` (its watcher in `frameos/frontend`) by hand when working on it.
 - Production build: `pnpm --dir frontend run build` which chains kea codegen, schema generation (`ts-json-schema-generator`), TypeScript type-checking, and final bundling to `dist/`. 【F:frontend/package.json†L6-L66】
 - The published `frameos-editor` package has its own `editor` component hash/version in `versions.json`; `project-folders.json` includes shared frontend sources so frontend-only editor changes receive a new npm version during release.
 - Output folder is consumed by the backend’s static file mounts; ensure `frontend/dist` exists (e.g., via `pnpm --dir frontend run build`) before running the Python app outside of test mode. 【F:backend/app/fastapi.py†L38-L86】
 - UI copy follows `docs/ui-vocabulary.md`: scenes are **pushed**, settings and FrameOS **deployed**, a show-for-now is a **preview**, a scene going on the list is **installed**. `frame-vocabulary.test.ts` (cloud shared-spa) scans `frontend/src` for the banned words; a new verb goes in the doc first.
+- **One scene workspace, both planes: `frontend/src/sceneWorkspace/`.** The scene store's page (scenes.frameos.net/s/…): the bar (Back, Editor · AI · Preview, the name, the actions), the panels as resizable columns, the AI assistant (`SceneAiPanel`), the live preview (`SceneLivePreview`) and their libs. It lives in the shared frontend, moved there from `cloud/apps/auth-web` (which imports it back; `SceneEditorModal.tsx` keeps what is the store's: versions, install, fork, save). What differs per plane is passed in or set once: the editor column (`Editor`: the store's `frameos-editor/react`, a frame's `FrameSceneEditorColumn` over the real `frameLogic`, a saved scene's editor bundle in an iframe; each is `SceneEditorBody`, the file tree on the left), the bar's actions, and the routes (`lib/host.ts`: fetch, AI chat, settings, preview proxy, analytics). Its CSS is `sceneWorkspace.css` (the cloud's layout imports it after `globals.css`); the SPA adds `sceneWorkspaceSpa.css`, the cloud's palette and primitives scoped under `.frameos-scene-workspace`. A frame's scene page (`/scenes/:frameId/:sceneId`, `SceneEditorPage`, on both planes) is that workspace over one scene: Save and Save & push, no versions, no Install. A backend's saved scene (`/scenes/local/<id>/edit`, `LocalSceneEditor`) too, its editor column the editor bundle `frontend/dist-editor` served by the backend at `/frameos-editor/` (in dev `pnpm dev`'s `editor` pane rebuilds it on change, `node build.mjs --dev --editor`, and Vite proxies the path), saved with `PATCH /api/templates/<id>` (`name`, `description`, `scenes`; layouts checked as on every save). **Every way into editing a scene opens one of these three pages**: a frame scene's Edit (tile menu, drawer, the frames home, the Installed library, the chat's links, an install, a new blank scene), a saved scene's tile and Edit (the library, the home page, the Add scene drawer), a store scene's page. Do not add another editor surface or a modal that edits a scene's graph. The workspace's preview imports `frameos-wasm`; the SPA builds (frontend, cloud-frontend, the on-frame admin) take it from `frameos/wasm/src` through `paths` in their tsconfig (and an alias in `frontend/vite.config.ts`), so no package build runs first; auth-web resolves the built package. A change to the workspace is a change to both planes: run the cloud's tests (`SceneEditorModal.test.tsx`, `SceneAiPanel.test.tsx`, `SceneLivePreview.test.tsx`) as well as the SPA's checks.
 - ALWAYS prefer writing frontend business logic in kea logic files over using effects like `useState` or `useEffect`.
 - This includes small functions and callbacks inside components. Prefer to keep as much code as possible in logic files, treating React as a templating layer.
 - When adding a frame model key that is tracked for deploy changes in `frontend/src/scenes/frame/frameLogic.ts`, also add a marker to `FRAME_KEY_INTRODUCED_FRAMEOS_VERSION`. For unreleased work, use the next patch after the current `versions.json` FrameOS base version.
@@ -695,6 +943,7 @@
   the runtime's own on the runtime's thread and a `portalRequestConfig` /
   `requestFrameConfig()` anywhere else, and a thread it spawns gets values.
 - `frameos/src` houses the on-device runtime written in Nim with asyncdispatch (`frameos/frameos` and `frameos/build` are untracked build outputs, not sources).
+- **pixie is in the tree** (`frameos/pixie`, a squashed subtree of the FrameOS fork since 2026-11-07; `config.nims` puts its `src/` on the path, `FRAMEOS_PIXIE_PATH` points at another checkout). A change to the rasterizer, the SVG reader or the codecs is an ordinary change here: run `make test-pixie` (its own image tests) next to the FrameOS tests. Interactive render performance is `docs/perf-todo.md`; the device's `set debug 1` puts a per-phase split on every render line (`frameos/render_probe.nim`).
 - Entry point `src/frameos.nim` is the runtime's CLI, not a bare `waitFor startFrameOS()`: `start` (the default, also for any unrecognised `--flag`) runs `startFrameOS()` in a retry loop with the boot guard; `version` / `--version` / `-v` prints the compiled version and exits — it used to fall through to `start` and boot a second runtime next to the service, which is how release 9.2 shipped a 9.1 runtime, so keep that branch first; `check` verifies the binary starts; `setup` (`--with-setup=/boot/frameos-setup.json[.gz]`, `--reboot-if-required`) runs first-boot device setup; `driver-setup` and `set-display` (`--device`, `--width`, `--height`, `--rotate`, `--vcom`, `--upload-url`) patch and apply the display; `upgrade` (`--dry-run`, `--no-reboot`) pulls the latest GitHub release; `privileged-worker` is the root side of the privileged door on Buildroot frames; `help` lists them. Drivers, system integrations, and Nim app implementations live in nested directories (`src/apps`, `src/drivers`, `src/system`, `src/frameos`); JavaScript example app sources/configs live under `repo/apps/<folder>/<app>`.
 - JavaScript repo apps under `repo/apps/<image|text|json|logic>/<app>` are catalog templates for custom code apps; a scene copies one into its own `apps` map, with `origin` naming the template (until 2026.10.13 they all sat under `repo/apps/code`, and readers match an old origin by the app's name). Do not generate or commit Nim wrappers inside `repo/apps`; compiled scenes that use them copy their sources into generated `src/apps/sceneapp_*` folders during build/deploy.
 - `frameos/Makefile` is the build entry: `make build` (app loaders → driver sources → shared driver libraries → assets → `nim c src/frameos.nim` into `build/frameos`), `make run`, `make test` (`nimble test`), `make test-shard SHARD=n` (what CI's "FrameOS Nim Tests" shards run, via `tools/run_test_shard.sh`), `make cross-<target>` / `make release-<target>` / `make release-all` (`backend/bin/cross`, the Docker cross-toolchain builds). `frameos.nimble` holds the dependencies and the `build_quickjs` task; `nimble build` itself can crash the compiler on macOS, so prefer `make build` / `nim c` directly. `nimble.lock` is the truth for package versions (bump a pin in `frameos.nimble` with it); the gitignored `nimble.paths` is `nimble setup`'s copy of it, `config.nims` refuses one older than the lock, and `python3 tools/nimble_paths.py` refreshes it (the Makefile, `build_wasm.sh` and the ESP32's `build_nim.sh` run it first).

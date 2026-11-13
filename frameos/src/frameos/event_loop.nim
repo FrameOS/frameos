@@ -33,10 +33,12 @@ import ./driver_abi
 import ./input_state
 import ./event_map
 import ./scene_rhythm
+from ./ui/events as uiEvents import uiTimerDue, uiTimersPending
 
 export events
 export input_state.InputState, input_state.cursorVisible, input_state.takeCursorDirty,
   input_state.pointersDown, input_state.buttonsHeld, input_state.buttonsBusy
+export uiTimersPending
 
 const
   DefaultLaneCapacity* = 256
@@ -100,6 +102,9 @@ type
     main: Deque[EventEnvelope]
     input: Deque[EventEnvelope]
     nextSeq: uint64
+    # Pulls down from the top edge in a row: the way out of a bad layout.
+    pulls: int
+    lastPull: int64 ## monotonic ticks, nanoseconds
     draining: bool
     renderWanted: bool
     # The render rule's one exception. `if-state-changed` exists so that what a
@@ -321,6 +326,11 @@ proc refused(loop: EventLoop, envelope: EventEnvelope, reason: string, sceneId =
   loop.log(entry)
   false
 
+when defined(testing):
+  proc backdatePullsForTest*(loop: EventLoop, ms: int) =
+    ## As if the last pull were `ms` longer ago.
+    loop.lastPull -= ms.int64 * 1_000_000
+
 proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): bool =
   var payload = envelope.payload
   if not loop.frameMapped(envelope.origin, envelope.name, payload):
@@ -350,20 +360,27 @@ proc sceneOrderOf(loop: EventLoop): seq[SceneId] =
 proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
   ## `setCurrentScene`: by `sceneId`, or by `direction` through the host's
   ## scene order (`next` / `prev` of the scene showing, wrapping around; the
-  ## list's first or last when nothing is). While the scene switcher shows,
-  ## the scene it was opened from is the one a direction walks from. False
-  ## when nothing could switch: a direction the contract does not know, or a
-  ## frame with no scene list.
+  ## list's first or last when nothing is). While the scene switcher shows, a
+  ## direction turns its page instead (`forward` / `back` to it): the swipe
+  ## or the key that walks the scenes walks the tiles there. While the scene
+  ## settings show, the scene they were opened from is the one a direction
+  ## walks from. False when nothing could switch: a direction the contract
+  ## does not know, or a frame with no scene list.
   var payload = envelope.payload
   if payload{"sceneId"}.getStr().len == 0:
     let direction = payload{"direction"}.getStr()
     if direction.len > 0:
       if direction notin SceneDirections:
         return loop.refused(envelope, "direction")
+      let current = loop.host.sceneFor(none(SceneId))
+      if not current.isNil and current.id.string == SceneSwitcherId:
+        var heard = envelope
+        heard.name = if direction == "next": evForward else: evBack
+        heard.payload = newJObject()
+        return loop.deliver(heard, eventPolicy(heard.name))
       let order = loop.sceneOrderOf()
       if order.len == 0:
         return loop.refused(envelope, "noSceneOrder")
-      let current = loop.host.sceneFor(none(SceneId))
       let opener = switcherOpener(current)
       var index = if opener.len > 0: order.find(SceneId(opener))
         elif current.isNil: -1
@@ -383,7 +400,7 @@ proc put(node: JsonNode, key: string, value: JsonNode) =
   ## inline `[]=` brings into every caller.
   node.fields[key] = value
 
-proc settingsOf(scene: FrameScene, state: JsonNode) =
+proc settingsOf*(scene: FrameScene, state: JsonNode) =
   ## What the settings panel shows of `scene`: its public fields (`fields`)
   ## and their values now (`values`), read before the switch, which on a
   ## host that holds one scene lets the scene go.
@@ -429,11 +446,44 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
   let current = loop.host.sceneFor(none(SceneId))
   let payload = newJObject()
   var next = sceneId
-  if not current.isBuiltIn:
+  # From the settings straight to the scene list when asked (a taskbar's Start):
+  # the scene behind stays behind, and the layout goes on as it was.
+  let swap = sceneId == SceneSwitcherId and current.isBuiltIn and current.id.string == SceneSettingsId and
+    envelope.payload{"swap"}.getBool()
+  # `{page: "safe"}` (safe mode): the frame page with no layout around it,
+  # opened or not already. The scene it came from, and its layout, stay as they
+  # are, so closing it unsaved changes nothing.
+  let safe = envelope.payload{"page"}.getStr() == "safe"
+  if swap:
     let state = newJObject()
-    state.put("from", newJString(if current.isNil: "" else: current.id.string))
+    state.put("from", newJString(current.state{"from"}.getStr()))
+    let worn = current.state{"layout"}
+    if not worn.isNil:
+      state.put("layout", copy(worn))
+    payload.put("state", state)
+  elif not current.isBuiltIn or safe:
+    let state = newJObject()
+    state.put("from", newJString(if current.isNil: "" elif current.isBuiltIn: current.state{"from"}.getStr() else: current.id.string))
+    # It is drawn in the layout of the scene it was opened from.
+    if safe:
+      state.put("noLayout", newJBool(true))
+    elif current of InterpretedFrameScene and InterpretedFrameScene(current).layoutSceneId.string.len > 0:
+      let worn = newJObject()
+      worn.put("sceneId", newJString(InterpretedFrameScene(current).layoutSceneId.string))
+      # The layout is made afresh around the built-in scene: what it has open
+      # goes with it, by name, for a taskbar to keep showing.
+      let layoutState =
+        if InterpretedFrameScene(current).layoutState.isNil: newJObject()
+        else: copy(InterpretedFrameScene(current).layoutState)
+      layoutState.put("openedOver", newJString(current.shownName))
+      worn.put("state", layoutState)
+      state.put("layout", worn)
     if sceneId == SceneSettingsId:
-      current.settingsOf(state)
+      if not current.isBuiltIn:
+        current.settingsOf(state)
+      # `{page: "frame"}`: straight to the frame's own page, if it has one.
+      if safe or envelope.payload{"page"}.getStr() == "frame":
+        state.put("opened", newJString("frame"))
     payload.put("state", state)
   else:
     next = current.state{"from"}.getStr()
@@ -441,7 +491,16 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
       let order = loop.sceneOrderOf()
       if order.len > 0:
         next = order[0].string
-  if next.len == 0:
+  if safe and not current.isNil and current.id.string == sceneId:
+    # Already up (the pull before this one opened it): no switch to make.
+    loop.runOnScene(current, evSetCurrentScene, payload, eventPolicy(evSetCurrentScene), envelope.fromRender)
+    result = true
+  elif next.len == 0 and current.isBuiltIn:
+    # Nothing to go back to (an ESP32 given no scene yet, which opened the
+    # settings from its status screen): the host lets the built-in scene go.
+    payload.put("sceneId", newJString(""))
+    result = loop.host.selectScene(payload)
+  elif next.len == 0:
     result = loop.refused(envelope, "noSceneOrder")
   else:
     payload.put("sceneId", newJString(next))
@@ -475,6 +534,26 @@ proc pointerIdOf(delivery: InputDelivery): int =
     return -1
   delivery.payload["pointerId"].getInt(-1)
 
+proc notePull(loop: EventLoop, delivery: InputDelivery): bool =
+  ## Safe mode (docs/scene-layouts.md): true when this pull is the last of
+  ## them, and is the way in and nothing else. Counted before any event map, so
+  ## a frame whose map or layout is the problem still hears it. Nothing is
+  ## changed here: the panel it opens has no layout around it until it closes.
+  if delivery.name != evEdgeSwipe or delivery.payload.isNil or delivery.payload{"edge"}.getStr() != "top":
+    return false
+  let now = getMonoTime().ticks
+  if loop.pulls > 0 and now - loop.lastPull > GestureSafeModeGapMs * 1_000_000:
+    loop.pulls = 0
+  loop.lastPull = now
+  inc loop.pulls
+  if loop.pulls >= GestureSafeModePulls:
+    loop.pulls = 0
+    loop.log(%*{"event": "layout:safeMode"})
+    let open = newJObject()
+    open.put("page", newJString("safe"))
+    loop.enqueue(eoSystem, evSceneSettings, open)
+    result = true
+
 proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDelivery, fromRender: bool): bool =
   ## An input event to the scene: under its name, and under each old name it
   ## has (`mouseMove` for `pointerMove`), each only when the scene listens.
@@ -483,6 +562,8 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
   if eventIsLogged(delivery.name):
     loop.log(withEventPayload(%*{"event": "event:" & delivery.name, "origin": $delivery.origin},
       delivery.name, delivery.payload))
+  if loop.notePull(delivery):
+    return true
   var payload = delivery.payload
   # The frame's event map first, scene or no scene: a long press of LEFT is
   # the previous scene, and the scene never hears that press.
@@ -628,10 +709,22 @@ proc drain*(loop: EventLoop, budget = DefaultDrainBudget): int =
 proc tick*(loop: EventLoop, now = getMonoTime()): int =
   ## Time passing for the input state: a held pointer becomes a `longPress`,
   ## a held button one at every whole second, a short button press whose
-  ## double-press window closed a `press`, an idle cursor hides. What it makes
-  ## is queued (input lane) for the drain that follows; returns how many.
+  ## double-press window closed a `press`, an idle cursor hides. And for the
+  ## showing scene's UI (ui/events.nim): a `uiTimer` when a key's light is to
+  ## go out or a held key types again. What it makes is queued (input lane)
+  ## for the drain that follows; returns how many.
   var made: seq[InputDelivery]
   loop.inputState.tick(now, made)
+  if uiTimersPending():
+    let current = loop.host.sceneFor(none(SceneId))
+    if not current.isNil and uiTimerDue(current.id.string, now):
+      var queued = false
+      for envelope in loop.input:
+        if envelope.name == evUiTimer:
+          queued = true
+          break
+      if not queued:
+        made.add(InputDelivery(name: evUiTimer, payload: newJObject(), origin: eoSystem))
   for delivery in made:
     if loop.input.len >= loop.laneCapacity:
       inc loop.dropped

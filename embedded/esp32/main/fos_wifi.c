@@ -1,5 +1,6 @@
 #include "fos_wifi.h"
 
+#include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
 
@@ -18,6 +19,7 @@
 #include "lwip/sockets.h"
 
 #include "fos_config.h"
+#include "fos_mem.h"
 #include "fos_rtc.h"
 #include "esp_timer.h"
 
@@ -39,6 +41,23 @@ static bool s_time_synced = false;
 static volatile bool s_time_awaited = true;
 static void (*s_late_time_hook)(void) = NULL;
 static bool s_scan_only = false;
+/* Joined in the background (fos_wifi_start_background): the boot never
+ * waited, so there is no failure to report to it, and the station keeps
+ * trying every WIFI_STA_RETRY_INTERVAL_MS once its quick retries are spent. */
+static bool s_keep_trying = false;
+static bool s_sta_started = false;
+/* Why the station last failed to join while connecting (WIFI_REASON_*), 0
+ * once it joins: the frame settings say "can't find" or "wrong password". */
+static uint8_t s_join_reason = 0;
+static void (*s_change_hook)(void) = NULL;
+static fos_wifi_online_cb s_online_cb = NULL;
+/* The scan the frame settings run (fos_wifi_scan_start). */
+static volatile bool s_scanning = false;
+static bool s_scanned = false;
+static int64_t s_scanned_at_us = 0;
+static fos_wifi_network_t *s_networks = NULL; /* FOS_WIFI_SCAN_MAX, from the first scan */
+static int s_network_count = 0;
+static portMUX_TYPE s_networks_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_portal_active = false;
 static bool s_portal_sta_retry = false;
 /* While the portal is up, the station side retries the stored network in
@@ -206,6 +225,19 @@ static void apply_power_save_policy(void)
 
 static void portal_exit_task(void *arg);
 
+static void changed(void)
+{
+    if (s_change_hook) s_change_hook();
+}
+
+static void online_task(void *arg)
+{
+    (void)arg;
+    fos_wifi_online_cb cb = s_online_cb;
+    if (cb) cb();
+    vTaskDelete(NULL);
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
@@ -217,11 +249,18 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
         uint8_t reason = event ? event->reason : 0;
         s_ip[0] = '\0';
         bool portal_retry = s_portal_active && s_portal_sta_retry && !s_scan_only;
-        if (s_state == FOS_WIFI_CONNECTING && s_retries++ < WIFI_MAX_RETRIES) {
+        if (s_state == FOS_WIFI_CONNECTING && !s_scan_only && reason != s_join_reason) {
+            s_join_reason = reason;
+            changed();
+        }
+        if (s_state == FOS_WIFI_CONNECTING && s_scan_only) {
+            /* A scan took the station off its network: the scanner joins
+             * again when it is done, and a retry here would race it. */
+        } else if (s_state == FOS_WIFI_CONNECTING && s_retries++ < WIFI_MAX_RETRIES) {
             ESP_LOGW(TAG, "disconnected reason=%u (%s), retry %d/%d",
                      (unsigned)reason, disconnect_reason_name(reason), s_retries, WIFI_MAX_RETRIES);
             esp_wifi_connect();
-        } else if (portal_retry || (s_state == FOS_WIFI_CONNECTING && s_down_since_ms != 0)) {
+        } else if (portal_retry || (s_state == FOS_WIFI_CONNECTING && (s_down_since_ms != 0 || s_keep_trying))) {
             if (portal_retry) {
                 s_state = FOS_WIFI_PORTAL;
                 strlcpy(s_ip, "192.168.4.1", sizeof(s_ip));
@@ -251,6 +290,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
                 s_state = s_portal_active ? FOS_WIFI_PORTAL : FOS_WIFI_CONNECTING;
                 s_retries = 0;
                 esp_wifi_connect();
+                changed();
             }
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
@@ -262,8 +302,16 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
             s_last_down_ms = esp_log_timestamp() - s_down_since_ms;
             s_down_since_ms = 0;
         }
+        s_join_reason = 0;
         ESP_LOGI(TAG, "got ip %s", s_ip);
         xEventGroupSetBits(s_events, WIFI_CONNECTED_BIT);
+        changed();
+        /* What follows an address (httpd, SNTP, the boot's online steps)
+         * wants a real stack, not the event task's. */
+        if (s_online_cb && !s_portal_active &&
+            xTaskCreate(online_task, "fos_online", 6144, NULL, 5, NULL) != pdPASS) {
+            ESP_LOGW(TAG, "online task failed to start");
+        }
         if (s_portal_active) {
             /* The stored network answered after all: the open AP has no job
              * left and must not stay in radio range as a second front door.
@@ -305,54 +353,225 @@ esp_err_t fos_wifi_init(void)
     return ESP_OK;
 }
 
-esp_err_t fos_wifi_connect(uint32_t timeout_ms)
+/* The station's configuration from the stored credentials. */
+static void station_config(wifi_config_t *wifi_config)
+{
+    fos_config_t *config = fos_config();
+    memset(wifi_config, 0, sizeof(*wifi_config));
+    strlcpy((char *)wifi_config->sta.ssid, config->wifi_ssid, sizeof(wifi_config->sta.ssid));
+    strlcpy((char *)wifi_config->sta.password, config->wifi_pass, sizeof(wifi_config->sta.password));
+    /* WPA2 at the least: a WPA/WPA2 mixed AP still offers WPA2 and WPA3 sits
+     * above the threshold, so both join; a WPA1-only (TKIP) network is
+     * refused and logs no_ap_found_in_authmode_threshold. */
+    wifi_config->sta.threshold.authmode = config->wifi_pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+    wifi_config->sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+    /* Mesh networks broadcast the SSID from several nodes; the default fast
+     * scan joins the first one heard, which can be a distant node that then
+     * drops the link with low-ack disconnects (reason 34). Scan everything
+     * and join the strongest BSSID instead. */
+    wifi_config->sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    wifi_config->sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+}
+
+static void ensure_sta_netif(void)
+{
+    if (!s_sta_netif) {
+        s_sta_netif = esp_netif_create_default_wifi_sta();
+        apply_hostname(s_sta_netif);
+    }
+}
+
+/* The station on to the stored network: started the first time, moved
+ * over (off the old network, on to the new) after that. */
+static esp_err_t station_begin(void)
 {
     fos_config_t *config = fos_config();
     if (!config->wifi_ssid[0]) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (!s_sta_netif) {
-        s_sta_netif = esp_netif_create_default_wifi_sta();
-        apply_hostname(s_sta_netif);
-    }
-
-    wifi_config_t wifi_config = {0};
-    strlcpy((char *)wifi_config.sta.ssid, config->wifi_ssid, sizeof(wifi_config.sta.ssid));
-    strlcpy((char *)wifi_config.sta.password, config->wifi_pass, sizeof(wifi_config.sta.password));
-    /* WPA2 at the least: a WPA/WPA2 mixed AP still offers WPA2 and WPA3 sits
-     * above the threshold, so both join; a WPA1-only (TKIP) network is
-     * refused and logs no_ap_found_in_authmode_threshold. */
-    wifi_config.sta.threshold.authmode = config->wifi_pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
-    wifi_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
-    /* Mesh networks broadcast the SSID from several nodes; the default fast
-     * scan joins the first one heard, which can be a distant node that then
-     * drops the link with low-ack disconnects (reason 34). Scan everything
-     * and join the strongest BSSID instead. */
-    wifi_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
-    wifi_config.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
-
+    ensure_sta_netif();
+    wifi_config_t wifi_config;
+    station_config(&wifi_config);
+    if (s_sta_retry_timer) esp_timer_stop(s_sta_retry_timer);
     s_state = FOS_WIFI_CONNECTING;
     s_retries = 0;
+    s_join_reason = 0;
     s_portal_active = false;
     s_portal_sta_retry = false;
     s_down_since_ms = 0;
-    if (s_sta_retry_timer) esp_timer_stop(s_sta_retry_timer);
     xEventGroupClearBits(s_events, WIFI_CONNECTED_BIT | WIFI_FAILED_BIT);
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    apply_station_bandwidth();
-    ESP_ERROR_CHECK(esp_wifi_start());
-    apply_power_save_policy();
+    esp_err_t err;
+    if (s_sta_started) {
+        /* The disconnect this causes is a retry with the new credentials. */
+        esp_wifi_disconnect();
+        err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+        if (err == ESP_OK) err = esp_wifi_connect();
+    } else {
+        err = esp_wifi_set_mode(WIFI_MODE_STA);
+        if (err == ESP_OK) err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+        if (err == ESP_OK) {
+            apply_station_bandwidth();
+            err = esp_wifi_start(); /* STA_START joins */
+        }
+        if (err == ESP_OK) {
+            s_sta_started = true;
+            apply_power_save_policy();
+        }
+    }
     ESP_LOGI(TAG, "connecting to \"%s\"", config->wifi_ssid);
+    changed();
+    return err;
+}
 
+esp_err_t fos_wifi_connect(uint32_t timeout_ms)
+{
+    esp_err_t err = station_begin();
+    if (err != ESP_OK) return err;
     EventBits_t bits = xEventGroupWaitBits(s_events, WIFI_CONNECTED_BIT | WIFI_FAILED_BIT,
                                            pdFALSE, pdFALSE, pdMS_TO_TICKS(timeout_ms));
     if (bits & WIFI_CONNECTED_BIT) {
         return ESP_OK;
     }
     s_state = FOS_WIFI_OFFLINE;
-    ESP_LOGW(TAG, "failed to connect to \"%s\"", config->wifi_ssid);
+    ESP_LOGW(TAG, "failed to connect to \"%s\"", fos_config()->wifi_ssid);
     return ESP_FAIL;
+}
+
+esp_err_t fos_wifi_start_background(void)
+{
+    s_keep_trying = true;
+    return station_begin();
+}
+
+void fos_wifi_set_change_hook(void (*hook)(void)) { s_change_hook = hook; }
+void fos_wifi_set_online_cb(fos_wifi_online_cb cb) { s_online_cb = cb; }
+uint8_t fos_wifi_join_reason(void) { return s_join_reason; }
+
+bool fos_wifi_join_reason_not_found(uint8_t reason)
+{
+    return reason == WIFI_REASON_NO_AP_FOUND || reason == WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY ||
+           reason == WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD ||
+           reason == WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD;
+}
+
+bool fos_wifi_join_reason_auth(uint8_t reason)
+{
+    return reason == WIFI_REASON_AUTH_FAIL || reason == WIFI_REASON_HANDSHAKE_TIMEOUT ||
+           reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT || reason == WIFI_REASON_802_1X_AUTH_FAILED;
+}
+
+/* --- the scan the frame settings run --- */
+
+static void scan_task(void *arg)
+{
+    (void)arg;
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    esp_err_t err = esp_wifi_get_mode(&mode);
+    bool joined = s_state == FOS_WIFI_CONNECTED;
+    /* A station that is trying to join cannot scan ("STA is connecting"):
+     * take it off for the scan and back on after, retries held meanwhile. A
+     * joined one scans where it is, between its beacons. */
+    s_scan_only = true;
+    if (err == ESP_OK && mode == WIFI_MODE_AP) {
+        err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    } else if (err == ESP_OK && !s_sta_started && !s_portal_active) {
+        /* No network stored yet: the radio was never started. */
+        ensure_sta_netif();
+        err = esp_wifi_set_mode(WIFI_MODE_STA);
+        if (err == ESP_OK) err = esp_wifi_start();
+        if (err == ESP_OK) s_sta_started = true;
+    }
+    if (err == ESP_OK && !joined) {
+        esp_wifi_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    wifi_scan_config_t scan_config = { .show_hidden = false };
+    if (err == ESP_OK) err = esp_wifi_scan_start(&scan_config, true);
+    s_scan_only = false;
+    uint16_t total = 0;
+    wifi_ap_record_t *records = NULL;
+    uint16_t count = 0;
+    if (err == ESP_OK) {
+        esp_wifi_scan_get_ap_num(&total);
+        /* A name can have many access points: more records than names kept. */
+        count = total > FOS_WIFI_SCAN_MAX * 2 ? FOS_WIFI_SCAN_MAX * 2 : total;
+        records = fos_big_malloc((count ? count : 1) * sizeof(*records));
+        if (records == NULL) {
+            esp_wifi_clear_ap_list();
+            err = ESP_ERR_NO_MEM;
+        } else {
+            err = esp_wifi_scan_get_ap_records(&count, records);
+        }
+    }
+    /* Back on to the network, the one it left for the scan or one it lost
+     * during it (scan_only held that reconnect too). */
+    if (fos_config()->wifi_ssid[0] && s_state != FOS_WIFI_CONNECTED && !s_portal_active) {
+        s_state = FOS_WIFI_CONNECTING;
+        s_retries = 0;
+        esp_wifi_connect();
+    }
+    fos_wifi_network_t *found = err == ESP_OK ? fos_big_malloc(FOS_WIFI_SCAN_MAX * sizeof(*found)) : NULL;
+    if (err == ESP_OK && found == NULL) err = ESP_ERR_NO_MEM;
+    if (err == ESP_OK) {
+        int n = 0;
+        /* One option per name, nameless ones left out. The driver hands the
+         * records over strongest first, so a name's first record is its best
+         * and the first names are the ones to keep; the kept ones are then
+         * put by name, the order a list of them is read in. */
+        for (uint16_t i = 0; i < count && n < FOS_WIFI_SCAN_MAX; i++) {
+            const char *ssid = (const char *)records[i].ssid;
+            bool seen = !ssid[0];
+            for (int j = 0; j < n && !seen; j++) seen = strcmp(found[j].ssid, ssid) == 0;
+            if (seen) continue;
+            strlcpy(found[n].ssid, ssid, sizeof(found[n].ssid));
+            found[n].rssi = records[i].rssi;
+            n++;
+        }
+        fos_wifi_networks_sort(found, n);
+        taskENTER_CRITICAL(&s_networks_lock);
+        fos_wifi_network_t *old = s_networks;
+        s_networks = found;
+        s_network_count = n;
+        taskEXIT_CRITICAL(&s_networks_lock);
+        free(old);
+        s_scanned = true;
+        s_scanned_at_us = esp_timer_get_time();
+        ESP_LOGI(TAG, "scan: %u access points, %d networks", (unsigned)total, n);
+    } else {
+        ESP_LOGW(TAG, "scan failed: %s", esp_err_to_name(err));
+    }
+    free(records);
+    s_scanning = false;
+    changed();
+    vTaskDelete(NULL);
+}
+
+esp_err_t fos_wifi_scan_start(void)
+{
+    if (s_scanning) return ESP_OK;
+    s_scanning = true;
+    changed();
+    if (xTaskCreate(scan_task, "fos_scan", 4096, NULL, 4, NULL) != pdPASS) {
+        s_scanning = false;
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+bool fos_wifi_scanning(void) { return s_scanning; }
+
+int64_t fos_wifi_scan_age_us(void)
+{
+    return s_scanned ? esp_timer_get_time() - s_scanned_at_us : -1;
+}
+
+int fos_wifi_scan_results(fos_wifi_network_t *out, int max)
+{
+    taskENTER_CRITICAL(&s_networks_lock);
+    int n = s_network_count < max ? s_network_count : max;
+    if (n > 0) memcpy(out, s_networks, sizeof(out[0]) * (size_t)n);
+    taskEXIT_CRITICAL(&s_networks_lock);
+    return n;
 }
 
 /* --- captive portal DNS hijack: answer every A query with our AP address --- */

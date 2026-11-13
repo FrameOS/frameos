@@ -57,7 +57,7 @@ export const accountPages: readonly AccountPage[] = [
     key: 'usage',
     label: 'Usage',
     title: 'Usage',
-    description: 'Storage, frames and AI usage against the limits of your plan.',
+    description: 'Your plan and its invoices, and what you use of it: frames, storage and AI.',
   },
   {
     key: 'backups',

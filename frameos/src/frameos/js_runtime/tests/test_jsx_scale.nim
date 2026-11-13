@@ -78,6 +78,56 @@ suite "jsx render scale":
     discard ui.render(newImage(400, 200))
     check ui.scene.state["seen"]["taps"].getInt() == 1
 
+  test "below 1 the UI gets more room, is drawn smaller, and the pointer reaches all of it":
+    # At 0.5 a 400x200 canvas is an 800x400 UI: a full-width slider pressed
+    # near the canvas's right edge is pressed near its own right end.
+    let ui = newUi("""
+let pressed = null
+export function get(app, context) {
+  frameos.setState('seen', { frameWidth: app.frame.width, pressed })
+  return (
+    <div className="bg-white w-full h-full">
+      <div className="w-[100px] h-[50px] bg-red-500" />
+      <div className="w-full h-[40px] bg-black" onPointerDown={(e) => { pressed = [e.localX, e.width] }} />
+    </div>
+  )
+}
+""", "tests/jsx-scale-half", renderScale = 0.5)
+    let image = ui.render(newImage(400, 200)).asImage()
+    check ui.scene.state["seen"]["frameWidth"].getInt() == 800
+    # The 100x50 box covers 50x25 canvas pixels.
+    check image[45, 20] == red
+    check image[55, 20] == white
+    check dispatchUiEvent("tests/jsx-scale-half", "pointerDown", %*{"x": 390, "y": 35, "pointerId": 0,
+      "pointerType": "touch", "buttons": 1})
+    discard ui.render(newImage(400, 200))
+    let pressed = ui.scene.state["seen"]["pressed"]
+    check pressed.kind == JArray
+    if pressed.kind == JArray:
+      check pressed[1].getFloat() == 800
+      check abs(pressed[0].getFloat() - 780) < 2
+
+  test "below 1 a list that scrolls shows all of its width":
+    # A box that scrolls is a nested <svg> viewport (ui/layout.nim): at 0.5 it
+    # is 800 layout pixels wide in a 400 pixel canvas, and what it holds past
+    # the canvas's own width in layout pixels shows.
+    let ui = newUi("""
+export function get(app, context) {
+  return (
+    <div className="bg-white w-full h-full overflow-y-auto">
+      <div className="w-full h-[1000px] flex">
+        <div className="w-[600px] h-[50px]" />
+        <div className="w-[100px] h-[50px] bg-red-500" />
+      </div>
+    </div>
+  )
+}
+""", "tests/jsx-scale-scroll", renderScale = 0.5)
+    let image = ui.render(newImage(400, 200)).asImage()
+    # Layout x 600..700 is canvas x 300..350.
+    check image[325, 10] == red
+    check image[280, 10] == white
+
   test "a plain .js app keeps the panel's pixels and reads the scale":
     let ui = newUi("""
       export function get(app, context) {
@@ -90,6 +140,67 @@ suite "jsx render scale":
     check seen["imageWidth"].getInt() == 400
     check seen["frameWidth"].getInt() == 400
     check seen["scale"].getFloat() == 2.0
+
+  test "app.frame.paper says a change costs the panel a refresh":
+    const source = """
+      export function get(app) {
+        frameos.setState('paper', app.frame.paper)
+        return { ok: true }
+      }
+    """
+    proc paper(device: string, canvas: Image, producer = false): bool =
+      let ui = newUi(source, "tests/paper", sourceName = "app.js", outputType = "json")
+      ui.owner.frameConfig.device = device
+      let context = ExecutionContext(scene: ui.scene, event: "render", payload: %*{},
+        hasImage: not producer, image: (if producer: nil else: canvas), loopIndex: 0, loopKey: ".", nextSleep: -1)
+      if producer:
+        context.decodeTargetImage = canvas
+      discard ui.runtime.get(ui.owner, %*{}, context)
+      ui.scene.state["paper"].getBool()
+    check paper("waveshare.EPD_7in5_V2", newImage(400, 200))
+    check paper("pimoroni.inky_impression", newImage(400, 200))
+    check not paper("framebuffer", newImage(400, 200))
+    # An LCD's RGB565 canvas, drawn on or fed to the node that draws on it.
+    check not paper("waveshare.EPD_7in5_V2", newImage565(400, 200))
+    check not paper("waveshare.EPD_7in5_V2", newImage565(400, 200), producer = true)
+
+  test "app.frame.color says whether the panel shows colors":
+    const source = """
+      export function get(app) {
+        frameos.setState('color', app.frame.color)
+        return { ok: true }
+      }
+    """
+    proc color(device: string, canvas: Image): bool =
+      let ui = newUi(source, "tests/color", sourceName = "app.js", outputType = "json")
+      ui.owner.frameConfig.device = device
+      let context = ExecutionContext(scene: ui.scene, event: "render", payload: %*{},
+        hasImage: true, image: canvas, loopIndex: 0, loopKey: ".", nextSleep: -1)
+      discard ui.runtime.get(ui.owner, %*{}, context)
+      ui.scene.state["color"].getBool()
+    # Black and white, greys: no color, so the real-time scenes' "auto"
+    # draws in high contrast.
+    check not color("waveshare.EPD_7in5_V2", newImage(400, 200))
+    check not color("waveshare.EPD_10in3", newImage(400, 200))
+    # Color e-paper (Spectra 6, seven inks, four), an HDMI screen, an LCD.
+    check color("waveshare.EPD_13in3e", newImage(400, 200))
+    check color("pimoroni.inky_impression_7_3", newImage(400, 200))
+    check color("waveshare.EPD_2in13g", newImage(400, 200))
+    check color("framebuffer", newImage(400, 200))
+    check color("waveshare.EPD_7in5_V2", newImage565(400, 200))
+
+  test "app.frame says nothing of a battery or Wi-Fi where the host cannot tell":
+    const source = """
+      export function get(app) {
+        frameos.setState('quiet', app.frame.batteryPercent === undefined && app.frame.wifiRssi === undefined)
+        return { ok: true }
+      }
+    """
+    let ui = newUi(source, "tests/device-facts", sourceName = "app.js", outputType = "json")
+    let context = ExecutionContext(scene: ui.scene, event: "render", payload: %*{},
+      hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    discard ui.runtime.get(ui.owner, %*{}, context)
+    check ui.scene.state["quiet"].getBool()
 
   test "the scene's own scale wins over the frame's, and its role field over its setting":
     let ui = newUi(box, "tests/jsx-scale-scene")

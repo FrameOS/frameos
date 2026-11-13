@@ -1,0 +1,115 @@
+<!DOCTYPE html><html><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>FrameOS setup</title>
+<!-- The ESP32's setup page (GET /), gzipped at build time (main/CMakeLists.txt)
+     and served as it is. The values come from GET /api/setup; the form stays
+     disabled until they are in, so a failed fetch never posts blank fields. -->
+<style>body{font-family:system-ui,sans-serif;max-width:34rem;margin:2rem auto;padding:0 1rem}
+label{display:block;margin:.8rem 0 .2rem;font-weight:600}
+input,select{width:100%;padding:.5rem;box-sizing:border-box;font-size:1rem}
+button{margin-top:1.2rem;padding:.6rem 1.4rem;font-size:1rem}
+fieldset{border:0;margin:0;padding:0;min-width:0}
+.row{display:flex;gap:.7rem;flex-wrap:wrap}.row>*{flex:1 1 10rem}
+.preview,.panel{margin:1.6rem 0;padding-top:1rem;border-top:1px solid #ddd}
+.preview img{display:block;max-width:100%;height:auto;border:1px solid #ddd;background:#fff}
+.muted{color:#666;font-size:.9rem}
+.warn{background:#fff8dc;border:1px solid #e5c25a;padding:.7rem;margin:.9rem 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.6rem}
+.metric{background:#f6f6f6;border:1px solid #ddd;padding:.5rem}.metric b{display:block}
+code{background:#eee;padding:0 .3rem}</style></head><body>
+<h1>FrameOS</h1><p>Configure this frame. It reboots and connects after saving.</p>
+<section class='preview'><h2>Preview</h2>
+<p class='muted'>Last successful render from this device.</p>
+<img id='preview' alt='No rendered preview yet'>
+<div class='row'><button type='button' onclick='renderNow()'>Render now</button>
+<button type='button' onclick='refreshPreview()'>Refresh preview</button></div>
+</section>
+<section class='panel'><h2>Scenes</h2>
+<select id='scene_select'></select>
+<div class='row'><button type='button' onclick='showScene()'>Show scene</button>
+<button type='button' onclick='syncScenes()'>Sync from backend</button></div>
+<p id='scene_status' class='muted'></p>
+</section>
+<section class='panel'><h2>Board</h2><div id='board_metrics' class='grid'></div>
+</section>
+<form method='POST' action='/api/setup'><fieldset id='setup' disabled>
+<p id='setup_status' class='muted'>Loading the current settings…</p>
+<label for='ssid'>Wi-Fi network</label><input id='ssid' name='ssid' type='text' required>
+<label for='pass'>Wi-Fi password</label><input id='pass' name='pass' type='password' autocomplete='new-password'>
+<label for='backend'>Backend URL</label><input id='backend' name='backend' type='text' placeholder='https://backend.example.com'>
+<label for='tls_enable'>HTTPS API</label><select id='tls_enable' name='tls_enable'>
+<option value='1'>Enabled (using backend-provisioned certificate)</option><option value='0'>Disabled</option></select>
+<label for='tls_port'>HTTPS port</label><input id='tls_port' name='tls_port' type='number' min='1' max='65535'>
+<p id='tls_missing' class='muted' hidden>HTTPS is enabled but no certificate is stored. Generate TLS material in the backend and flash a frame-specific build.</p>
+<label for='api_key'>Frame API key</label><input id='api_key' name='api_key' type='password' autocomplete='off' placeholder='Leave blank to keep current key'>
+<p id='admin_warn' class='warn' hidden>Set an admin username and password before joining normal Wi-Fi. Without them, setup and control routes stay locked outside hotspot mode.</p>
+<label for='admin_auth'>Setup/control protection</label><select id='admin_auth' name='admin_auth'>
+<option value='1'>Enabled with admin username/password</option><option value='0'>Disabled (locked outside hotspot unless backend token is used)</option></select>
+<label for='admin_user'>Admin username</label><input id='admin_user' name='admin_user' type='text' autocomplete='username'>
+<label for='admin_pass'>Admin password</label><input id='admin_pass' name='admin_pass' type='password' autocomplete='new-password' placeholder='Leave blank to keep current password'>
+<label for='frame_id'>Frame ID</label><input id='frame_id' name='frame_id' type='number' min='0'>
+<label for='panel'>Panel</label><select id='panel' name='panel'></select>
+<div id='render_mode_row' hidden><label for='render_mode'>Render mode</label><select id='render_mode' name='render_mode' disabled>
+<option value='0'>On device (Nim runtime)</option><option value='1'>Thin client (backend renders)</option></select></div>
+<label for='server_send_logs'>Backend logs</label><select id='server_send_logs' name='server_send_logs'>
+<option value='1'>Send render/runtime logs</option><option value='0'>Serial only</option></select>
+<label for='interval'>Refresh interval (seconds)</label><input id='interval' name='interval' type='number' min='5'>
+<label for='pins'>Pins</label><input id='pins' name='pins' type='text' placeholder='rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1'>
+<label for='assets_path'>Assets path</label><input id='assets_path' name='assets_path' type='text' placeholder='/srv/assets'>
+<label for='assets_sd_enable'>SD card assets</label><select id='assets_sd_enable' name='assets_sd_enable'>
+<option value='1'>Enabled (mount FAT32 card at assets path)</option><option value='0'>Disabled</option></select>
+<label for='assets_sd_pins'>SD card pins</label><input id='assets_sd_pins' name='assets_sd_pins' type='text' placeholder='cs=38,sck=39,miso=40,mosi=41'>
+<label for='assets_sd_freq'>SD max frequency (kHz)</label><input id='assets_sd_freq' name='assets_sd_freq' type='number' min='400' max='40000'>
+<label for='assets_sd_autoformat'>Format blank SD cards</label><select id='assets_sd_autoformat' name='assets_sd_autoformat'>
+<option value='1'>Yes, if the card is provably empty</option><option value='0'>Never format without asking</option></select>
+<button type='submit'>Save and reboot</button></fieldset></form>
+<p class='muted'><a href='/status'>Status JSON</a> | <a href='/api/scenes'>Scenes JSON</a> | <a href='/state'>Scene state JSON</a> | <a href='/image'>Open frame image</a></p>
+<script>
+const $=id=>document.getElementById(id);
+async function loadSetup(){
+const c=await (await fetch('/api/setup')).json();
+for(const [id,v] of Object.entries({ssid:c.ssid,backend:c.backend,tls_port:c.tlsPort,admin_user:c.adminUser||'admin',
+frame_id:c.frameId,interval:c.interval,pins:c.pins,assets_path:c.assetsPath,assets_sd_pins:c.sdPins,assets_sd_freq:c.sdFreq}))$(id).value=v;
+for(const [id,on] of Object.entries({tls_enable:c.tlsEnable,admin_auth:c.adminAuth,server_send_logs:c.sendLogs,
+assets_sd_enable:c.sdEnable,assets_sd_autoformat:c.sdAutoformat,render_mode:c.renderMode}))$(id).value=on?'1':'0';
+/* "Leave blank to keep current" is only true when there is a current password:
+   with none stored, the blank kept an empty password and the join failed. */
+$('pass').placeholder=c.wifiPassSaved?'Leave blank to keep current password':'No password saved: enter it (blank = open network)';
+$('tls_missing').hidden=!c.tlsMissing;
+/* Shown as advice, not pre-selected: a pre-selected "Enabled" refused a
+   Wi-Fi-only save until the person invented an admin login. */
+$('admin_warn').hidden=c.adminAuthConfigured;
+/* Thin-client rendering is for boards without the Nim runtime; a field left
+   out of the form keeps its value in the POST handler. */
+if(c.renderModeChoice){$('render_mode_row').hidden=false;$('render_mode').disabled=false;}
+const sel=$('panel'),add=(v,t,on)=>{const o=document.createElement('option');o.value=v;o.textContent=t;o.selected=on;sel.appendChild(o);};
+const none=!c.panel||c.panel==='none';let seen=none;add('none','None (headless)',none);
+for(const [name,w,h,f] of c.panels){const on=name===c.panel;seen=seen||on;add(name,`Waveshare ${name} (${w}x${h}, format ${f})`,on);}
+if(!seen)add(c.panel,`${c.panel} (not compiled into this firmware)`,true);
+$('setup_status').hidden=true;$('setup').disabled=false;}
+async function loadStatus(){const res=await fetch('/status');const s=await res.json();
+const scenes=s.scenes&&s.scenes.scenes?s.scenes.scenes:[];const sel=$('scene_select');
+sel.innerHTML='';for(const scene of scenes){const o=document.createElement('option');o.value=scene.id;
+o.textContent=scene.name||scene.id;if(scene.id===(s.scenes&&s.scenes.currentSceneId))o.selected=true;sel.appendChild(o);}
+$('scene_status').textContent=scenes.length?`Loaded ${s.scenes.loaded} scene(s); current: ${s.scenes.currentSceneName||s.scenes.currentSceneId||'none'}`:'No scenes loaded yet';
+const b=s.board||{},m=s.memory||{},st=s.storage||{};
+const fl=st.otaSlots?`${st.otaSlots}x ${Math.round((st.otaSlotBytes||0)/1024)}K OTA + ${Math.round((st.stateBytes||0)/1024)}K state`:
+`${Math.round((st.factorySlotBytes||0)/1024)}K app + ${Math.round((st.stateBytes||0)/1024)}K state (no OTA)`;
+const metric=(k,v)=>{const d=document.createElement('div');d.className='metric';const t=document.createElement('b');t.textContent=k;d.append(t,String(v));return d;};
+$('board_metrics').replaceChildren(metric('Board',b.target||'ESP32-S3'),
+metric('Flash',`${Math.round((st.flashBytes||0)/1024)}K: ${fl}`),
+metric('PSRAM',`${Math.round((m.psramFree||0)/1024)}K free / ${Math.round((m.psramTotal||0)/1024)}K`),
+metric('Wi-Fi',`${s.wifi?s.wifi.rssi:'?'} dBm`),
+metric('Assets',s.assets&&s.assets.sdMounted?'SD mounted':(s.assets&&s.assets.sdEnabled?'SD unavailable':'SD off')),
+...(s.assets&&s.assets.sdError?[metric('SD error',s.assets.sdError)]:[]));
+const img=$('preview');if(s.render&&s.render.previewReady&&!img.getAttribute('src'))refreshPreview();}
+function refreshPreview(){$('preview').src='/image?t='+Date.now();}
+function renderNow(){fetch('/reload',{method:'POST'}).then(()=>{let n=0;
+const t=setInterval(()=>{refreshPreview();if(++n>=12)clearInterval(t);},2500);});}
+function syncScenes(){fetch('/api/action/scenes_sync',{method:'POST'}).then(()=>setTimeout(loadStatus,1500));}
+function showScene(){const id=$('scene_select').value;if(!id)return;
+fetch('/api/action/scene',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'scene_id='+encodeURIComponent(id)})
+.then(()=>{loadStatus();renderNow();});}
+loadSetup().catch(()=>{$('setup_status').textContent='Could not load the current settings: reload the page to try again.';});
+loadStatus().catch(()=>{});
+</script></body></html>

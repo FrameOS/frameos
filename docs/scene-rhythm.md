@@ -17,27 +17,36 @@ runtime side; this is what it does.
 - **Every pass still starts at the top scene.** When it reaches a scene node
   whose scene is not due, the node puts back the pixels that scene drew last
   time and the scene does not run: no fetch, no decode, no JS.
-- **The frame's pace does not change:** it wakes on the top scene's interval,
-  as before, on the Pi, the ESP32 and the preview alike. No host learned
-  anything new about sleeping.
-- **A split's own interval is the fastest it renders.** A scene with
-  `settings.splitScreenLayout` (made by the split drawer) draws nothing that
-  changes with time, so it also waits until its first panel is due when that
-  is later (`refreshFollowsChildren` / `followInterval`, applied by
-  `syncRefreshInterval`); before its first render it takes its panels'
-  shortest interval. A 24 fps clock beside a photo wants the split on full
-  speed (0.04 s): the clock ticks, the photo stays put. Left on the frame's
-  default (300 s), the same split refreshes every five minutes, as it always
-  did, which is what an e-ink panel or a battery ESP32 needs: a panel scene
-  that defaults to 24 fps never makes such a frame refresh 24 times a second.
-  The editor puts how often the split renders with these panels under its
-  interval, and each panel's options say when that panel renders.
+- **The next wake is worked out.** At the end of every pass the frame's
+  `refreshInterval` becomes the time until the first thing on it is due
+  (`refreshFollowsChildren` / `followInterval`, `syncRefreshInterval`), on the
+  Pi, the ESP32 and the preview alike.
+- **On a real-time display (LCD, HDMI) a generated split waits for its first
+  panel, whatever its own interval says.** A split of a real-time clock, a
+  once-a-second clock and an hourly weather panel wakes at the clock's pace and
+  nothing else runs but what is due. A scene with `settings.splitScreenLayout`
+  draws nothing that changes with time, so its own interval has nothing to do.
+- **A layout's `<yield />` that is a hole has the same schedule, without a
+  node.** The content runs when it is due, straight into its rectangle, and the
+  chrome around it has a due time of its own: `rhythmVisitChrome` either leaves
+  it alone (`rdKeep`), copies it out of the frame buffer that holds it around
+  the hole (`rdRestore`), or runs the layout (`docs/scene-layouts.md`).
+- **On e-paper and on a deep sleeper the split's own interval stays the fastest
+  it renders.** A panel's refresh costs 40 seconds or a battery wake, so a panel
+  that defaults to 24 fps must not make the frame refresh back to back. Set the
+  split to 60 s and a real-time panel gets every refresh, 60 s apart, while the
+  hourly one stays put. `panelIsPaper` decides, and the ESP32 says when it
+  sleeps deep (`rhythmHoldFloor`).
+- **A `<Scene>` in a UI and a layout bring the next wake forward** without being
+  a split: the scene around them still keeps its own interval as its latest.
 - **Any other scene keeps its own interval.** A scene node inside a hand-built
   scene renders at most as often as that scene does.
 
 A scene counts as due a little early: a tenth of its wait, at least 2 ms, at
-most a minute, plus 1.5 s on the ESP32, whose render task sleeps in whole
-seconds. Wakes land a hair off the due time, and a scene that just missed one
+most a minute, plus 1.5 s on an ESP32 whose next pass is a second or more
+away, because its render task then sleeps in whole seconds. (Below a second
+the frame animates, paced in microseconds, and the extra would make a
+once-a-second panel due on every frame.) Wakes land a hair off the due time, and a scene that just missed one
 would otherwise wait a whole extra tick. So with a 15-minute panel and an
 hourly one, the hourly one runs on the tick that lands on its hour.
 
@@ -61,6 +70,29 @@ hourly one, the hourly one runs on the tick that lands on its hour.
 - **A different top scene.** Switching scenes or a redeploy draws everything,
   and drops what the previous top scene kept.
 
+## Not drawing at all
+
+The best picture to keep is the one already on the canvas. A canvas that lasts
+between renders, under a parent that draws nothing but its panels (a generated
+split, all the way up), needs nothing for a panel that is not due: the node
+returns (`rdKeep`), and the split paints the background on its gaps and empty
+cells only, never under a panel.
+
+- **The canvas is trusted by asking:** `rhythmCanvasGeneration` counts writes
+  that were not the render's own. The Pi's kept RGB565 canvas and an ESP32's
+  panel buffers and scene canvas answer; a Pi's fresh RGBA canvas and the
+  preview say -1 and take the copies below. A frame-wide colour correction
+  answers -1 too: it would correct a kept panel twice.
+- **An ESP32 LCD draws its frame buffers in turn**, so the one it is about to
+  draw may be a frame or two behind. A panel that ran since is put back from the
+  buffer that has it (`otherCanvasHolding`), a few milliseconds and no memory.
+
+So a 13.3" 1600x1200 board with three panels on 8 MB keeps all of them, where
+the copies below would refuse. Nothing is copied at all on such a canvas.
+
+A hand-built scene can draw over a panel, so its panels take the copy path even
+on a canvas that lasts.
+
 ## Keeping pictures: capped by memory
 
 A scene that ran is copied out of the canvas right after it drew (its
@@ -79,9 +111,9 @@ place on the canvas; a cell its last due run did not draw (the layout changed)
 loses its copy. Passes that reused or repainted something log one
 `render:rhythm` line with how many of each (not on the ESP32).
 
-In practice: a Pi keeps every slow panel. An ESP32 with an 800x480 panel keeps
-small panels. A 13.3" 1600x1200 board keeps none of its big panels (a half of
-that canvas is 1.9 MB in RGB565). A deep-sleeping ESP32 keeps nothing across a
+In practice, for what is left (a canvas that cannot be trusted, a hand-built
+parent): a Pi keeps every slow panel. An ESP32 with an 800x480 panel keeps
+small panels; on a 13.3" board the big ones are refused. A deep-sleeping ESP32 keeps nothing across a
 sleep: every wake is a fresh boot, and its first pass runs everything.
 
 ## Repaints, and where #555 comes in

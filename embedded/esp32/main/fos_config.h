@@ -134,6 +134,14 @@ typedef enum {
     FOS_LED_WS2812 = 2,        /* one addressable RGB pixel, data on the pin */
 } fos_led_type_t;
 
+/* The chip's clock (the contract's `cpu_mode`, main.c applies it at boot):
+ * 160 MHz saves battery, 240 MHz renders about a third faster. */
+typedef enum {
+    FOS_CPU_AUTO = 0,        /* 240 on an RGB LCD or a touch panel, else 160 */
+    FOS_CPU_BATTERY = 1,     /* 160 MHz */
+    FOS_CPU_PERFORMANCE = 2, /* 240 MHz */
+} fos_cpu_mode_t;
+
 /* The board's I2C peripheral buses (fos_i2c.c): the firmware probes each for
  * the chips it knows (a PCF8563 clock, a SHT4x climate sensor, a SY6974B
  * charger) and uses what answers. The reTerminal E1001/E1002 carry two
@@ -210,6 +218,18 @@ typedef struct {
      * not in the backend settings poll, not in the local HTTP API — because a
      * provider that could flip its own leash would not have one. */
     bool allow_local_network;
+    /* frame.json `frameSettingsOnScreen` (the contract's
+     * `frame_settings_on_screen`): the settings on the frame's own screen
+     * offer the frame page behind the gear (docs/scene-settings.md "The frame
+     * page"). NVS `fs_on_screen` (u8), absent = on. Set by the backend
+     * settings poll, the cloud set_settings and the console. */
+    bool frame_settings_on_screen;
+    /* The device's own override of the above: on, the frame page is offered
+     * whatever the control plane says, so a frame whose Wi-Fi broke behind a
+     * locked page is not locked out (a Pi's is a file on its boot partition).
+     * NVS `settings_unlock` (u8), absent = off; the USB console alone sets
+     * it, no plane does. */
+    bool settings_unlock;
     bool tls_enable;               /* serve the frame HTTP API over HTTPS too */
     uint16_t tls_port;             /* HTTPS port, default mirrors Pi Caddy proxy */
     char tls_server_cert[FOS_TLS_PEM_LEN];
@@ -230,6 +250,8 @@ typedef struct {
     bool wake_schedule;            /* align deep-sleep wake to wall-clock interval boundaries */
     uint32_t wake_check_sec;       /* while deep sleeping, wake at least this often to check the
                                     * control plane for commands (0 = only wake to render) */
+    uint32_t awake_after_input_sec; /* a press or a tap keeps a deep-sleeping frame up this long,
+                                     * so the next one finds it awake (0 = sleep as soon as it can) */
     int8_t battery_pin;            /* ADC1 GPIO for battery voltage, -1 = none */
     float battery_divider;         /* Vbat = Vpin * divider (default 2.0) */
     int8_t battery_enable_pin;     /* GPIO driven high to enable the battery
@@ -258,6 +280,10 @@ typedef struct {
                                     * talks to the AI chat (docs/voice-chat.md);
                                     * off keeps the microphone shut whatever
                                     * the map says. Default on. */
+    bool touch_beep;               /* e-paper: a click when something takes a
+                                    * press on the glass, and when it lifts.
+                                    * Default on. */
+    uint8_t cpu_mode;              /* fos_cpu_mode_t, read at boot */
     size_t gpio_button_count;
     fos_gpio_button_t gpio_buttons[FOS_GPIO_BUTTONS_MAX];
     fos_pins_t pins;
@@ -272,6 +298,9 @@ esp_err_t fos_config_save(void);
 esp_err_t fos_config_nvs_stats(size_t *used_entries, size_t *free_entries, size_t *total_entries);
 esp_err_t fos_config_erase(void);
 bool fos_config_wifi_ready(void);
+/* Is the frame page of the settings on the screen offered: the control
+ * plane's `frame_settings_on_screen`, or the console's `settings_unlock`. */
+bool fos_config_frame_page_offered(void);
 /* Normalize a rotation onto the four the renderer supports. Any equivalent
  * angle is accepted (mod 360, negatives included); anything that is not a
  * right angle is refused. Every writer of `rotate` — the USB console, the
@@ -314,6 +343,12 @@ void fos_config_format_i2c_buses(const fos_i2c_bus_t *buses, uint8_t count, char
 /* `gpio` | `gpio_inverted` | `ws2812` (the contract's `led_type` enum). */
 bool fos_config_parse_led_type(const char *name, uint8_t *type);
 const char *fos_config_led_type_name(uint8_t type);
+/* `auto` | `battery` | `performance` (the contract's `cpu_mode` enum). */
+bool fos_config_parse_cpu_mode(const char *name, uint8_t *mode);
+const char *fos_config_cpu_mode_name(uint8_t mode);
+/* The clock `mode` runs the chip at, in MHz: auto picks 240 for a board
+ * whose screen is watched (an RGB LCD, a touch panel) and 160 otherwise. */
+int fos_config_cpu_mhz(uint8_t mode, bool lcd, bool touch);
 /* Pins the firmware refuses to hand to a button, the battery ADC read or the
  * divider's enable switch: outside the chip's GPIO range, an SPI flash /
  * PSRAM pad (an input pull-up or an output level on one of those wedges the

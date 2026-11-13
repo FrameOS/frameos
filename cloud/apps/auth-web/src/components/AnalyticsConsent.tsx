@@ -29,6 +29,13 @@ export function AnalyticsConsentBanner({
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    // Framed, the store is the embed on frameos.net's front page
+    // (src/lib/store-embed.ts; nothing else may frame it): a banner across
+    // someone else's page is not ours to put there. A visitor who never
+    // answered is not captured.
+    if (window.self !== window.top) {
+      return;
+    }
     setChoice(readConsentFromDocument());
     setReady(true);
     const onChange = () => setChoice(readConsentFromDocument());

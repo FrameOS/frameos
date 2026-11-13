@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 
 from app.models.frame import Frame
-from app.utils.device_limits import describe_out_of_memory, esp32_device_limits, frame_render_device
+from app.utils.device_limits import (
+    describe_out_of_memory,
+    esp32_canvas_rotation,
+    esp32_device_limits,
+    frame_render_device,
+)
 
 FIXTURES = json.loads((Path(__file__).resolve().parents[4] / "docs" / "device-limits-fixtures.json").read_text())
 
@@ -13,11 +18,47 @@ FIXTURES = json.loads((Path(__file__).resolve().parents[4] / "docs" / "device-li
 def test_ceiling_matches_the_preview_package(case):
     # The same numbers esp32DeviceLimits gives in frameos/wasm/src/devices.ts
     # (device-limits.test.ts replays this file there).
-    limits = esp32_device_limits(case["width"], case["height"], case["psramBytes"], case.get("pixelFormat"))
+    limits = esp32_device_limits(
+        case["width"], case["height"], case["psramBytes"], case.get("pixelFormat"), case.get("rotate")
+    )
     assert limits["memoryBytes"] == case["memoryBytes"]
     assert limits["previewOverheadBytes"] == case["previewOverheadBytes"]
+    assert limits["canvasBytesPerPixel"] == case["canvasBytesPerPixel"]
     assert limits["memoryReserveBytes"] == 0
     assert limits["embedded"] is True
+
+
+@pytest.mark.parametrize(
+    "case", FIXTURES["canvasRotation"]["cases"], ids=lambda case: f"{case['rotate']}@{case['firmwareVersion']}"
+)
+def test_canvas_rotation_matches_the_preview_package(case):
+    assert esp32_canvas_rotation(case["rotate"], case["firmwareVersion"]) == case["expected"]
+
+
+def test_an_e1003_whose_firmware_shares_the_panel_buffer_has_one_buffer_more():
+    """Unturned, on firmware that draws in the panel buffer, the E1003 renders
+    in 1.31 MB more than one that keeps a canvas and a packed buffer apart:
+    a turned one, one on older firmware, one that never said."""
+    def e1003(rotate, version):
+        embedded = {"hardwarePreset": "seeed_reterminal_e1003"}
+        if version:
+            embedded["lastBoot"] = {"frameosVersion": version}
+        return Frame(id=5, mode="embedded", device="waveshare.EPD_10in3", rotate=rotate, embedded=embedded)
+
+    shared = frame_render_device(e1003(0, "2026.11.6"))
+    assert shared is not None and shared.rotate == 0
+    assert shared.limits(1872, 1404)["memoryBytes"] == 16_539_040
+    for rotate, version in ((90, "2026.11.6"), (0, "2026.11.5"), (0, None)):
+        device = frame_render_device(e1003(rotate, version))
+        assert device is not None
+        assert device.limits(1872, 1404)["memoryBytes"] == 15_224_896, (rotate, version)
+    # A rotation the row never set is the device's default, 0.
+    assert frame_render_device(e1003(None, "2026.12.0")).rotate == 0
+    # The deploy baseline's version when no boot has been heard.
+    baseline = Frame(id=6, mode="embedded", device="waveshare.EPD_10in3", rotate=0,
+                     embedded={"hardwarePreset": "seeed_reterminal_e1003"},
+                     last_successful_deploy={"frameos_version": "2026.11.7"})
+    assert frame_render_device(baseline).rotate == 0
 
 
 def test_an_esp32_that_renders_on_the_device_renders_in_its_psram():
@@ -30,12 +71,12 @@ def test_an_esp32_that_renders_on_the_device_renders_in_its_psram():
     sixteen = Frame(id=2, mode="embedded", embedded={"platform": "esp32-s3", "psramMB": 16})
     assert frame_render_device(sixteen).label == "ESP32 with 16 MB PSRAM"
 
-    # The E1003's sixteen greys: its canvas is luma, so the frame has 2.5 MB
-    # more to render in than a 565 canvas would leave it.
+    # The E1003's sixteen greys: its canvas is 4-bit, so the frame has 1.3 MB
+    # more to render in than a luma canvas would leave it.
     e1003 = Frame(id=3, mode="embedded", device="waveshare.EPD_10in3", embedded={"hardwarePreset": "seeed_reterminal_e1003"})
     device = frame_render_device(e1003)
     assert device is not None and device.pixel_format == 8
-    assert device.limits(1872, 1404)["memoryBytes"] == 13_910_752
+    assert device.limits(1872, 1404)["memoryBytes"] == 15_224_896
     assert frame_render_device(e1004).pixel_format == 7
 
     # The SenseCAP Indicator's LCD: a 565 canvas that is its own frame buffer,

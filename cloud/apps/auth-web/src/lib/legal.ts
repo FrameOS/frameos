@@ -98,9 +98,9 @@ export type Processor = {
 // in step with that — it is the promise the privacy policy makes, and a
 // processor added in code but not here is a straightforward GDPR breach.
 //
-// The payment provider for paid plans goes in here when one is wired up
-// (as a processor, or named on the privacy page as a controller if it is a
-// merchant of record). The privacy page's "Paying for a plan" says so.
+// Stripe takes the payments for paid plans (docs/billing.md). It is listed
+// as optional: it only ever hears of someone who buys a plan, which the
+// privacy page's "Paying for a plan" says, with Stripe's own controller role.
 export const processors: Processor[] = [
   {
     data: "Everything you store: account, frames, scenes, uploaded files, backups.",
@@ -124,6 +124,14 @@ export const processors: Processor[] = [
     privacyUrl: "https://postmarkapp.com/eu-privacy",
     purpose:
       "Sending account email: address verification and password resets.",
+  },
+  {
+    data: "Your email address, name, billing address, VAT number and card, the plan you buy and an identifier for your account.",
+    location: "Ireland (EU) and the United States",
+    name: "Stripe Payments Europe, Limited",
+    optional: true,
+    privacyUrl: "https://stripe.com/privacy",
+    purpose: "Taking payments for paid plans, the invoices and receipts, and working out the VAT. Only if you buy a plan.",
   },
   {
     data: "Your IP address and a challenge token. No account data.",
@@ -150,5 +158,14 @@ export const processors: Processor[] = [
     privacyUrl: "https://policies.google.com/privacy",
     purpose:
       "Sign-in with Google — only if you choose that button instead of a password.",
+  },
+  {
+    data: "Your Apple ID's identifier for FrameOS, your email address (or the private relay address Apple makes for you), and your name the first time.",
+    location: "United States",
+    name: "Apple",
+    optional: true,
+    privacyUrl: "https://www.apple.com/legal/privacy/",
+    purpose:
+      "Sign in with Apple, only if you choose that button instead of a password.",
   },
 ];

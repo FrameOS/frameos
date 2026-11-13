@@ -56,6 +56,7 @@ Status legend:
 | Current public state | `GET /api/frames/:id/state` | Full, proxied/cached from frame | Full | Full | Same `{ sceneId, state }` shape. |
 | All public states | `GET /api/frames/:id/states` | Full, proxied/cached from frame | Full | Full | Same `{ sceneId, states }` shape. |
 | Uploaded scenes readback | `GET /api/frames/:id/uploaded_scenes` | Full, proxied/cached | Full | Full | Same `{ scenes: [...] }` shape. |
+| One scene at a time | `GET /api/frames/:id/scenes`, `GET /api/frames/:id/scenes/:sceneId`, `POST /api/frames/:id/scenes`, `POST /api/frames/:id/scenes/delete?id=` | N/A | N/A | Full (`embedded/esp32/README.md` "One scene at a time"): list with sizes and storage, read one, add or replace one, remove one | ESP32 only: its store is one file per scene. A Pi keeps one `scenes.json.gz`. |
 | Hot scene upload | `POST /api/frames/:id/upload_scenes` | Full, forwards to frame `/uploadScenes` | Full, sends local `uploadScenes` event | Full alias, stores uploaded scene payload | Canonical route is snake_case; camelCase `/uploadScenes` remains legacy. |
 | Generic frame event | `POST /api/frames/:id/event/:event` | Full, forwards to frame | Full | Full | Canonical command path. Payload is event-specific JSON. |
 | Generic body event | `POST /api/frames/:id/event` | N/A | Full local admin helper | N/A | Keep as Pi admin helper only; new shared UI should use `/event/:event`. |
@@ -141,6 +142,16 @@ This file is hand-maintained; when a route family moves, regenerate the Pi
 and ESP32 columns from the route registrations (`server/routes/*.nim`,
 `fos_http.c`) rather than editing cells one at a time — the four-plane drift
 found in the 2026-09 review was all in hand-edited cells.
+
+## Clients: the SPA and the iOS app
+
+The shared SPA is not the only client of this table. The iOS app (`ios/`,
+`docs/ios-app.md`) calls the same canonical routes on the backend and on
+FrameOS Cloud through its own `apiFetch` (`APIClient`: the same project
+scoping, pinned to `isProjectScopedApiPath` by
+`docs/api-path-fixtures.json`). A route that moves, or a cell that changes
+from Full to N/A, is a change for both clients: `docs/ios-app.md` "Every
+action and its route" is the app's column of this table.
 
 ## Canonical Payloads
 

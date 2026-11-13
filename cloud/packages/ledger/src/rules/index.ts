@@ -2,6 +2,8 @@ import type { PostingRuleRegistry } from "../types";
 import { aiUsageEventType, aiUsageRule } from "./ai-usage";
 import { manualJournalEventType, manualJournalRule } from "./manual-journal";
 import {
+  paymentFeeEventType,
+  paymentFeeRule,
   paymentReceivedEventType,
   paymentReceivedRule,
   paymentRefundedEventType,
@@ -28,6 +30,7 @@ import {
 export const postingRules: PostingRuleRegistry = {
   [aiUsageEventType]: aiUsageRule,
   [manualJournalEventType]: manualJournalRule,
+  [paymentFeeEventType]: paymentFeeRule,
   [paymentReceivedEventType]: paymentReceivedRule,
   [paymentRefundedEventType]: paymentRefundedRule,
   [reclassificationEventType]: reclassificationRule,
@@ -40,6 +43,8 @@ export const postingRules: PostingRuleRegistry = {
 export { aiUsageEventType, aiUsageRule } from "./ai-usage";
 export { manualJournalEventType, manualJournalRule } from "./manual-journal";
 export {
+  paymentFeeEventType,
+  paymentFeeRule,
   paymentReceivedEventType,
   paymentReceivedRule,
   paymentRefundedEventType,

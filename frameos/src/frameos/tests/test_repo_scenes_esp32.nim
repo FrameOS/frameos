@@ -19,7 +19,9 @@ const SamplesDir = "../repo/scenes/samples"
 # Apps that reach the network with default scene state (bare names)
 let networkApps = toHashSet([
   "downloadUrl", "downloadImage", "wikicommons",
-  "frameOSGallery", "weather", "beRecycle"
+  "frameOSGallery", "weather", "beRecycle",
+  # the Chess puzzle sample's own JS app: Lichess's daily puzzle by default
+  "lichessPuzzlePanel"
 ])
 # Apps that need host-only child processes; excluded from embedded builds
 let hostOnlyApps = toHashSet([

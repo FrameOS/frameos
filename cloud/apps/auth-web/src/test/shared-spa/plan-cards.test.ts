@@ -73,7 +73,16 @@ describe("what a plan card's button does", () => {
     photoBytes: 250 * megabytes,
     privateSceneBytes: 100 * megabytes,
   };
-  const buyable = new Set(["private-2", "private-5", "private-9", "private-29"]);
+  const buyable = new Set([
+    "private-2",
+    "private-5",
+    "private-9",
+    "private-29",
+    "business-49",
+    "business-99",
+    "business-199",
+    "business-499",
+  ]);
   const billing = (subscription: PlanBilling["subscription"] = null): PlanBilling => ({
     checkout: true,
     manage: subscription !== null,
@@ -91,10 +100,17 @@ describe("what a plan card's button does", () => {
     });
   const kinds = (cards: ReturnType<typeof planCardsFor>) => cards.map((card) => card.action.kind);
 
-  it("sends a free account to checkout for Private and to support for Business", () => {
+  it("sends a free account to checkout for Private and for Business", () => {
     const cards = planCardsFor(planCatalog(free, "payg", buyable), {}, "support@example.com", billing());
-    expect(kinds(cards)).toEqual(["current", "checkout", "contact"]);
+    expect(kinds(cards)).toEqual(["current", "checkout", "checkout"]);
     expect(cards[1]!.contactHref).toBeNull();
+    expect(cards[2]!.contactHref).toBeNull();
+  });
+
+  it("asks support for a stop that has no price at the provider yet", () => {
+    const privateOnly = new Set(["private-2", "private-5", "private-9", "private-29"]);
+    const cards = planCardsFor(planCatalog(free, "payg", privateOnly), {}, "support@example.com", billing());
+    expect(kinds(cards)).toEqual(["current", "checkout", "contact"]);
     expect(cards[2]!.contactHref).toContain("mailto:support@example.com");
   });
 
@@ -112,7 +128,9 @@ describe("what a plan card's button does", () => {
     const paid = planCatalog(free, "private-5", buyable);
     // The slider opens on the account's stop.
     const onPlan = planCardsFor(paid, {}, null, paying());
-    expect(kinds(onPlan)).toEqual(["cancel", "current", "contact"]);
+    // Business is a larger plan on the same subscription.
+    expect(kinds(onPlan)).toEqual(["cancel", "current", "switch"]);
+    expect(onPlan[2]!.action).toEqual({ dearer: true, kind: "switch" });
     expect(onPlan[1]!.stop.code).toBe("private-5");
 
     const larger = planCardsFor(paid, { private: 2 }, null, paying())[1]!;

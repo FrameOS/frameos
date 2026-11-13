@@ -4,6 +4,7 @@ import ../event_loop
 import ../events
 import ../input_state
 import ../interpreter
+import ../layout_choice
 import ../types
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
@@ -88,6 +89,13 @@ proc newRecordingHost(sceneId: SceneId, logs: ref seq[JsonNode]): RecordingHost 
     requestRender: proc () = host.trace.add("render"),
     selectScene: proc (payload: JsonNode): bool =
       let next = payload{"sceneId"}.getStr().SceneId
+      if next.string.len == 0 and isBuiltInScene(host.current.string):
+        # A built-in scene let go with nothing to go back to: no scene, as
+        # single_scene_host.nim does on an ESP32 given none yet.
+        host.trace.add("select none")
+        host.loop.deliverLifecycle(host.sceneInstance(host.current), "close", %*{})
+        host.current = SceneId("")
+        return true
       if not getInterpretedScenes().hasKey(next) and not getUploadedInterpretedScenes().hasKey(next) and
           not isBuiltInScene(next.string):
         host.trace.add("select " & next.string & " failed")
@@ -95,7 +103,8 @@ proc newRecordingHost(sceneId: SceneId, logs: ref seq[JsonNode]): RecordingHost 
       if next == host.current:
         return false
       host.trace.add("select " & next.string)
-      host.loop.deliverLifecycle(host.sceneInstance(host.current), "close", %*{})
+      if host.current.string.len > 0:
+        host.loop.deliverLifecycle(host.sceneInstance(host.current), "close", %*{})
       host.current = next
       # The switch's `state`, before "open", as runner.nim and
       # single_scene_host.nim hand it over.
@@ -106,7 +115,9 @@ proc newRecordingHost(sceneId: SceneId, logs: ref seq[JsonNode]): RecordingHost 
     displayPower: proc (on: bool) = host.trace.add("power " & (if on: "on" else: "off")),
     runtimeCommand: proc (command: RuntimeCommand, payload: JsonNode) = host.trace.add("command " & $command),
     sceneFor: proc (target: Option[SceneId]): FrameScene =
-      host.sceneInstance(if target.isSome: target.get() else: host.current),
+      let sceneId = if target.isSome: target.get() else: host.current
+      # A case with no scene (`"scene": ""`): a frame given none yet.
+      if sceneId.string.len == 0: nil else: host.sceneInstance(sceneId),
     runScene: proc (scene: FrameScene, event: string, payload: JsonNode) =
       let line = "run " & sceneName(scene) & " " & event
       let pinned = line & " " & $payload
@@ -148,13 +159,15 @@ block dispatcher:
   for c in fixtures["dispatcher"]["cases"]:
     let name = c["name"].getStr()
     let logs = new(seq[JsonNode])
+    chooseLayout("") # safe mode's case writes the frame's own choice
     let host = newRecordingHost(c["scene"].getStr().SceneId, logs)
     for scene in c["scenes"]:
       host.order.add(scene["id"].getStr().SceneId)
     caseOrder = host.order
     # The frame's own event map (frame.json `eventMap`), when the case has one.
     host.config.eventMap = c{"frameEventMap"}
-    discard host.sceneInstance(host.current)
+    if host.current.string.len > 0:
+      discard host.sceneInstance(host.current)
     discard host.loop.drain() # what `init` dispatched is not this case's subject
     for index, step in c["steps"].getElems():
       let where = name & ", step " & $(index + 1)

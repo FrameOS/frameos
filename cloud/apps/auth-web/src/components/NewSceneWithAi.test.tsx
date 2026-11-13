@@ -43,8 +43,8 @@ function StubEditor(props: StubEditorProps) {
   return <div data-testid="editor" />;
 }
 vi.mock("next/dynamic", () => ({ default: () => StubEditor }));
-vi.mock("./SceneLivePreview", () => ({ SceneLivePreviewPanel: () => null }));
-vi.mock("./SceneAiPanel", () => ({
+vi.mock("../../../../../frontend/src/sceneWorkspace/SceneLivePreview", () => ({ SceneLivePreviewPanel: () => null }));
+vi.mock("../../../../../frontend/src/sceneWorkspace/SceneAiPanel", () => ({
   SceneAiPanel: (props: { initialPrompt?: string; initialChat?: { chatId: string } }) => (
     <div
       data-chat={props.initialChat?.chatId ?? ""}

@@ -256,8 +256,9 @@ doAssert count("fetched 200") == 1, $logLines
 doAssert count("deadline") == 0, $logLines
 jsHttpRequestHook = nil
 
-proc renderValuesThrice() =
+proc renderValuesThrice(keep = false) =
   let valuesHost = SingleSceneHost(frameConfig: config, logger: abortLogger)
+  valuesHost.keepJsRuntimes = keep
   valuesHost.requestSelect = proc (sceneId: string): bool = true
   valuesHost.start()
   valuesHost.makeCurrent(valuesSceneId.SceneId)
@@ -273,6 +274,14 @@ renderValuesThrice()
 for kept in 1..3:
   doAssert count("module 1 init 1 kept " & $kept) == 1,
     "as an ESP32: a fresh module and init() per render, remember carries over: " & $logLines
+
+# An ESP32 that stays awake, and the preview running as one (wasm_main
+# `frameos_wasm_set_embedded`): the interpreter stays while there is room, so
+# an interactive scene's module state and handlers outlive a render.
+renderValuesThrice(keep = true)
+for n in 1..3:
+  doAssert count("module " & $n & " init 1 kept " & $n) == 1,
+    "as an awake ESP32: one module and one init() while there is room: " & $logLines
 
 setSimulatedEmbedded(false)
 renderValuesThrice()
@@ -342,6 +351,11 @@ block scene_switcher_on_one_scene:
   let drawn = switchHost.renderScene(ExecutionContext(scene: switchHost.scene, event: "render",
     payload: %*{}, image: canvas, hasImage: true, loopIndex: 0, loopKey: "."))
   doAssert not drawn.isNil and SceneSwitcherScene(switchHost.scene).paper, "a luma canvas is e-paper"
+  let sixteen = newImageGray4(320, 240) # the E1003's
+  let drawnInFour = switchHost.renderScene(ExecutionContext(scene: switchHost.scene, event: "render",
+    payload: %*{}, image: sixteen, hasImage: true, loopIndex: 0, loopKey: "."))
+  doAssert not drawnInFour.isNil and SceneSwitcherScene(switchHost.scene).paper, "a 4-bit canvas is e-paper"
+  doAssert not sixteen.isOneColor, "the switcher drew nothing into the 4-bit canvas"
   # A key with the role `next`, then OK: the scene after the one it came from.
   doAssert switchHost.send(eoHttpWrite, "button", %*{"label": "RIGHT", "role": "next", "action": "press"})
   doAssert switchHost.scene.state{"highlight"}.getStr() == order[1].string
@@ -366,4 +380,160 @@ block scene_switcher_on_one_scene:
   doAssert switchHost.scene.isNil or switchHost.sceneId.get() == order[0]
   switchHost.dropScene()
   sceneSwitcherListing = nil
+
+# An ESP32 given no scene yet opens the settings from its status screen (the
+# Wi-Fi is set there, docs/scene-settings.md "The frame tab"); closing them
+# goes back to no scene, the status screen, and asks the firmware for nothing.
+block scene_settings_with_no_scene:
+  let noneConfig = FrameConfig(width: 320, height: 240, rotate: 0, scalingMode: "cover",
+    device: "embedded", debug: false, saveAssets: %*false)
+  let noneHost = SingleSceneHost(frameConfig: noneConfig, logger: logger)
+  var picked: seq[string]
+  noneHost.requestSelect = proc (sceneId: string): bool =
+    picked.add(sceneId)
+    noneHost.makeCurrent(SceneId(sceneId))
+    true
+  noneHost.sceneOrder = proc (): seq[SceneId] = @[]
+  noneHost.start()
+  localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
+    {.cast(gcsafe).}:
+      noneHost.queue(origin, event, payload, scene)
+  doAssert noneHost.sceneId.isNone and not noneHost.ensureScene()
+  doAssert noneHost.send(eoEventMap, "sceneSettings", %*{})
+  doAssert picked == @[SceneSettingsId], $picked
+  doAssert noneHost.ensureScene() and noneHost.scene.state{"from"}.getStr() == ""
+  doAssert noneHost.send(eoEventMap, "sceneSettings", %*{})
+  doAssert picked == @[SceneSettingsId], "the way back is the host's own: " & $picked
+  doAssert noneHost.sceneId.isNone and noneHost.scene.isNil and noneHost.renderRequested
+  # Not a way out of a scene: an empty id for one that is not built in is refused.
+  noneHost.makeCurrent(SceneId("fixtures/dispatcher/switchFrom"))
+  doAssert not noneHost.send(eoScene, "setCurrentScene", %*{"sceneId": ""})
+  doAssert noneHost.sceneId.get().string == "fixtures/dispatcher/switchFrom"
+  noneHost.dropScene()
+  localEventSink = nil
+
+# A control plane rendering for a frame (the wasm runtime, a fresh process per
+# pull, docs/server-rendering.md) opens the switcher a key opened again where
+# it left it: the switch replayed with what it was opened from, then the
+# highlight put back over what opening it set.
+block switcher_opened_again_as_it_was_left:
+  let againConfig = FrameConfig(width: 320, height: 240, rotate: 0, scalingMode: "cover",
+    device: "embedded", debug: false, saveAssets: %*false)
+  let order = @["fixtures/dispatcher/switchFrom".SceneId, "fixtures/dispatcher/switchTo".SceneId]
+  let againHost = SingleSceneHost(frameConfig: againConfig, logger: logger)
+  againHost.requestSelect = proc (sceneId: string): bool =
+    againHost.makeCurrent(SceneId(sceneId))
+    true
+  againHost.sceneOrder = proc (): seq[SceneId] = order
+  againHost.start()
+  sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+    @[SwitcherEntry(id: "fixtures/dispatcher/switchFrom", name: "From"),
+      SwitcherEntry(id: "fixtures/dispatcher/switchTo", name: "To")]
+  localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
+    {.cast(gcsafe).}:
+      againHost.queue(origin, event, payload, scene)
+  let kept = %*{"from": order[0].string, "highlight": order[1].string, "page": 0}
+  doAssert not againHost.reopenBuiltIn(kept), "no scene is current"
+  againHost.makeCurrent(order[0])
+  doAssert not againHost.reopenBuiltIn(kept), "not a built-in scene"
+  againHost.makeCurrent(SceneId(SceneSwitcherId))
+  doAssert not againHost.reopenBuiltIn(%*[]), "a state that is not an object"
+  doAssert againHost.reopenBuiltIn(kept)
+  doAssert againHost.scene of SceneSwitcherScene
+  doAssert againHost.scene.state{"from"}.getStr() == order[0].string
+  doAssert againHost.scene.state{"highlight"}.getStr() == order[1].string, $againHost.scene.state
+  doAssert not againHost.reopenBuiltIn(kept), "resident already"
+  # OK picks the tile it left highlighted.
+  doAssert againHost.send(eoHttpWrite, "button", %*{"label": "OK", "role": "primary", "action": "press"})
+  doAssert againHost.sceneId.get() == order[1]
+  againHost.dropScene()
+  sceneSwitcherListing = nil
+  localEventSink = nil
 echo "ok"
+
+# ------------------------------------------- the scene a switcher covers
+#
+# Opening the scene switcher over a scene keeps that scene (while there is
+# room), and the way back makes the same instance current again: no second
+# init, no rebuild from its JSON. The way to somewhere else lets it go.
+block:
+  let coverHost = SingleSceneHost(frameConfig: config, logger: logger)
+  coverHost.requestSelect = proc (sceneId: string): bool = true
+  coverHost.start()
+  let fromId = "fixtures/dispatcher/switchFrom".SceneId
+  coverHost.makeCurrent(fromId)
+  doAssert coverHost.ensureScene()
+  let first = coverHost.scene
+  coverHost.makeCurrent("system/sceneSwitcher".SceneId)
+  doAssert coverHost.ensureScene()
+  doAssert coverHost.scene != first, "the switcher is resident while it shows"
+  coverHost.makeCurrent(fromId)
+  doAssert coverHost.ensureScene()
+  doAssert coverHost.scene == first, "back to the covered scene: the same instance"
+  # Covered again, and the way back leads elsewhere: the covered one goes.
+  coverHost.makeCurrent("system/sceneSwitcher".SceneId)
+  doAssert coverHost.ensureScene()
+  coverHost.makeCurrent("fixtures/dispatcher/switchTo".SceneId)
+  doAssert coverHost.ensureScene()
+  doAssert coverHost.scene != first
+  coverHost.makeCurrent(fromId)
+  doAssert coverHost.ensureScene()
+  doAssert coverHost.scene != first, "switchTo was shown in between: switchFrom is built again"
+  # On an ESP32 the switch waits for the scene to be read from flash, and the
+  # scene left behind must not outlive the switch: its teardown, later, took the
+  # layout's taps with it.
+  coverHost.makeCurrent("system/sceneSwitcher".SceneId)
+  doAssert coverHost.ensureScene()
+  doAssert not coverHost.covered.isNil
+  coverHost.makeCurrent("fixtures/dispatcher/switchTo".SceneId, drop = false)
+  doAssert coverHost.covered.isNil, "the way back led elsewhere"
+  echo "covered scene ok"
+
+# ------------------------------------------- the layout kept between scenes
+#
+# The host holds one scene, so a switch dropped the layout the old scene wore
+# and the next scene read, parsed and started it again: 1.2 s of every switch
+# on a reTerminal E1003 (2026-11-10). The layout the dropped scene wore is kept
+# for the next scene that wears it; new scenes from the plane let it go.
+block:
+  let layoutJsx = "export function get(app) { return <div className=\"flex flex-col w-full h-full bg-[#008080]\"><yield /><div className=\"h-[8px] bg-[#c0c0c0]\" /></div> }"
+  proc jsxLayout(): JsonNode =
+    %*{"id": "tests/keptLayout", "name": "Kept layout", "settings": {"execution": "interpreted",
+      "refreshInterval": 60, "backgroundColor": "#000000", "isLayout": true}, "fields": [],
+      "apps": {"ui": {"name": "ui", "category": "data", "version": "1.0.0", "fields": [],
+        "output": [{"name": "image", "type": "image"}],
+        "sources": {"app.tsx": layoutJsx, "config.json": "{\"name\": \"ui\", \"output\": [{\"name\": \"image\", \"type\": \"image\"}], \"fields\": []}"}}},
+      "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+        {"id": "2", "type": "app", "data": {"keyword": "ui", "config": {}}},
+        {"id": "3", "type": "app", "data": {"keyword": "render/image", "config": {"placement": "stretch"}}}],
+      "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
+        {"id": "2", "source": "2", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/image"}]}
+  proc wearing(id, color: string): JsonNode =
+    %*{"id": id, "name": id, "settings": {"execution": "interpreted", "refreshInterval": 300,
+      "backgroundColor": "#000000"}, "fields": [], "apps": {},
+      "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+        {"id": "2", "type": "app", "data": {"keyword": "render/color", "config": {"color": color}}}],
+      "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "2", "targetHandle": "prev"}],
+      "layout": {"sceneId": "tests/keptLayout", "state": {}}}
+  replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs(
+    $(%*[jsxLayout(), wearing("tests/wearsA", "#ff0000"), wearing("tests/wearsB", "#0000ff")]))))
+  let keepHost = SingleSceneHost(frameConfig: FrameConfig(width: 40, height: 40, rotate: 0,
+    scalingMode: "cover", debug: false, saveAssets: %*false), logger: logger)
+  keepHost.requestSelect = proc (sceneId: string): bool = true
+  keepHost.start()
+  proc show(id: string): FrameScene =
+    keepHost.makeCurrent(id.SceneId)
+    doAssert keepHost.ensureScene()
+    discard keepHost.renderScene(ExecutionContext(scene: keepHost.scene, event: "render",
+      payload: %*{}, image: newImage(40, 40), hasImage: true, loopIndex: 0, loopKey: "."))
+    doAssert not keepHost.scene.wornLayout.isNil, id & " wears the layout"
+    keepHost.scene.wornLayout
+  let first = show("tests/wearsA")
+  let second = show("tests/wearsB")
+  doAssert second == first, "the next scene wearing the layout gets the same instance"
+  doAssert show("tests/wearsA") == first, "and back again"
+  # New scenes from the plane may hold a changed layout: it is made afresh.
+  keepHost.dropScene()
+  dropParkedLayout()
+  doAssert show("tests/wearsB") != first, "after the scenes were replaced, a new instance"
+  echo "kept layout ok"

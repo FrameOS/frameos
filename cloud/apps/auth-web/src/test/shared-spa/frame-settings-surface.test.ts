@@ -119,7 +119,7 @@ describe("what each surface may render", () => {
     const rendered = frameSettingsSections
       .filter((section) => frameSettingsSectionRenders(section.key, "cloudVirtual"))
       .map((section) => section.key);
-    expect(rendered).toEqual(["cloud-base", "cloud-service-settings", "cloud-telemetry", "cloud-virtual"]);
+    expect(rendered).toEqual(["cloud-base", "cloud-service-settings", "layouts", "cloud-telemetry", "cloud-virtual"]);
     // The cloud's section is the cloud's alone; the backend keeps its own
     // under the same heading.
     expect(frameSettingsSectionRenders("cloud-virtual", "cloudLinux")).toBe(false);

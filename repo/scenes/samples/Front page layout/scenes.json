@@ -1,0 +1,116 @@
+[
+  {
+    "id": "layout-front-page",
+    "name": "Front page",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#f5f0e1",
+      "isLayout": true
+    },
+    "fields": [
+      {
+        "name": "masthead",
+        "type": "string",
+        "label": "Masthead",
+        "value": "The Daily Frame",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "paperColor",
+        "type": "color",
+        "label": "Paper color",
+        "value": "#f5f0e1",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "inkColor",
+        "type": "color",
+        "label": "Ink color",
+        "value": "#161616",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "frontPage": {
+        "name": "Front page",
+        "category": "data",
+        "description": "A newspaper masthead above each scene, with the date and the name of the scene under the title.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Front page\",\n  \"category\": \"data\",\n  \"description\": \"A newspaper masthead above each scene, with the date and the name of the scene under the title.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n",
+          "app.tsx": "// A newspaper's masthead above the scene it wraps: the paper's name, then a\n// ruled line with today's date and the name of the scene.\nconst DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nconst MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']\n\nexport function get(app) {\n  const { masthead, paperColor, inkColor } = app.state\n  const now = new Date()\n  const today = `${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`\n  return (\n    <div className={`flex flex-col w-full h-full px-[3vw] bg-[${paperColor}] text-[${inkColor}]`}>\n      <div className=\"flex items-center justify-center h-[13vh] text-[9vh] font-bold truncate\">{masthead}</div>\n      <div className={`flex items-center h-[5.5vh] gap-[2vw] text-[2.8vh] border-t-2 border-b-2 border-[${inkColor}]`}>\n        <span className=\"flex-1 truncate\">{today}</span>\n        <span className=\"font-bold uppercase truncate\">{app.frame.sceneName || ''}</span>\n      </div>\n      <div className=\"flex flex-col flex-1 min-h-0 py-[2vh]\">\n        <yield />\n      </div>\n    </div>\n  )\n}\n"
+        },
+        "origin": "frontPage"
+      }
+    },
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "chrome",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "frontPage",
+          "config": {}
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-to-draw",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "chrome-to-draw",
+        "type": "codeNodeEdge",
+        "source": "chrome",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  }
+]

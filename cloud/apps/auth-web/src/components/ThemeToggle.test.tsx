@@ -124,3 +124,36 @@ describe("ThemeToggle", () => {
     expect(links[0]?.getAttribute("href")).toBe("/logo-light-mono.svg");
   });
 });
+
+describe("ThemeToggle in the store's embed", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("wears the framing page's theme, follows its messages, and leaves the visitor's own alone", async () => {
+    stubMatchMedia(false);
+    vi.spyOn(window, "top", "get").mockReturnValue({} as Window);
+    document.cookie = "frameos_theme=light; Path=/";
+    window.history.replaceState(null, "", "/s/kitchen-sink?embed=1&theme=dark");
+
+    render(<ThemeToggle />);
+    expect(document.documentElement.classList.contains("theme-dark")).toBe(true);
+
+    // The parent page switches: the embed follows.
+    window.dispatchEvent(
+      new MessageEvent("message", { data: { theme: "light", type: "frameos-store:theme" }, source: window.parent }),
+    );
+    expect(document.documentElement.classList.contains("theme-dark")).toBe(false);
+    // Anything else is not listened to.
+    window.dispatchEvent(new MessageEvent("message", { data: { theme: "dark", type: "something-else" }, source: window.parent }));
+    expect(document.documentElement.classList.contains("theme-dark")).toBe(false);
+
+    // The visitor's own choice is untouched, and a refocus does not undo the frame's.
+    window.dispatchEvent(new MessageEvent("message", { data: { theme: "dark", type: "frameos-store:theme" }, source: window.parent }));
+    window.dispatchEvent(new Event("focus"));
+    expect(document.documentElement.classList.contains("theme-dark")).toBe(true);
+    expect(document.cookie).toContain("frameos_theme=light");
+    expect(window.localStorage.getItem("frameos-cloud-theme")).toBeNull();
+  });
+});

@@ -132,6 +132,7 @@ from app.utils.embedded_commands import (
     queue_embedded_command,
 )
 from app.utils.events_contract_gen import CLOUD_EVENT_ROUTE_VERBS, CONTRACT_EVENTS
+from app.utils.scene_layouts import bad_layouts_message
 from app.utils.frame_commands import (
     cancel_frame_command,
     frame_is_asleep,
@@ -865,6 +866,10 @@ def _validate_upload_scenes_payload(
     if scene_id and scene_id not in scene_ids:
         _bad_request("uploadScenes sceneId must reference one of the uploaded scenes")
 
+    bad_layouts = bad_layouts_message(scenes)
+    if bad_layouts:
+        _bad_request(bad_layouts)
+
     for scene in scenes:
         nodes = scene.get("nodes") or []
         if not isinstance(nodes, list):
@@ -1047,7 +1052,10 @@ async def _forward_frame_request(
 
 
 async def _load_frame_states(redis: Redis, frame: Frame) -> dict[str, Any]:
-    if is_virtual_frame(frame):
+    # A frame rendered here keeps its scene and its states on the backend,
+    # as a virtual frame does (docs/server-rendering.md): its own runtime's
+    # are left from before.
+    if is_virtual_frame(frame) or is_thin_client_frame(frame):
         from .virtual_frame import virtual_frame_states_payload
 
         return _normalise_frame_states_payload(
@@ -1076,7 +1084,7 @@ async def _refresh_frame_states_cache(
         frame = db.get(Frame, frame_id)
         if frame is None:
             return
-        if is_queued_embedded_frame(frame) and frame_is_asleep(frame):
+        if is_queued_embedded_frame(frame) and frame_is_asleep(frame) and not is_thin_client_frame(frame):
             # Asleep by its own forecast: nothing answers, and the cache holds
             # what the frame reported on its last pull (embedded_commands.py).
             completed = True
@@ -1350,7 +1358,9 @@ async def api_frame_get_state(
     id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
 ):
     frame = _project_frame(db, id) or _not_found()
-    if is_virtual_frame(frame):
+    # A virtual frame and a frame the backend renders for answer from the
+    # backend's own store: the board's runtime holds what is left from before.
+    if is_virtual_frame(frame) or is_thin_client_frame(frame):
         from .virtual_frame import virtual_frame_states_payload
 
         payload = await virtual_frame_states_payload(redis, frame)
@@ -1375,9 +1385,10 @@ async def api_frame_get_states(
     redis: Redis = Depends(get_redis),
 ):
     frame = _project_frame(db, id) or _not_found()
-    # Virtual frames answer from the backend's own state store — nothing to
-    # poll, so no cache/background-refresh dance.
-    if is_virtual_frame(frame):
+    # Virtual frames and frames the backend renders for answer from the
+    # backend's own state store — nothing to poll, so no cache/background-
+    # refresh dance.
+    if is_virtual_frame(frame) or is_thin_client_frame(frame):
         state_record = await _load_frame_states(redis, frame)
         return {
             **state_record,
@@ -1450,7 +1461,7 @@ async def api_frame_get_uploaded_scenes(
         path="/getUploadedScenes",
         cache_key=_frame_uploaded_scenes_cache_key(frame.id),
     )
-    if isinstance(payload, dict) and payload.get("sceneId"):
+    if isinstance(payload, dict) and payload.get("sceneId") and not is_thin_client_frame(frame):
         await redis.set(f"frame:{frame.id}:active_scene", payload["sceneId"])
     return payload
 
@@ -1746,9 +1757,15 @@ async def dispatch_frame_event(db: Session, redis: Redis, frame: Frame, event: s
         and not is_queued_embedded_frame(frame)
     )
     try:
-        await _forward_frame_request(
-            frame, redis, path=f"/event/{event}", method="POST", json_body=body
-        )
+        if thin_push:
+            # What it is asked is a render: the switch, the state, the
+            # previewed scenes and the event stay here, where its scenes run
+            # (docs/server-rendering.md "Nothing to keep on the board").
+            await _forward_frame_request(frame, redis, path="/event/render", method="POST", json_body={})
+        else:
+            await _forward_frame_request(
+                frame, redis, path=f"/event/{event}", method="POST", json_body=body
+            )
         if event in {"setCurrentScene", "setSceneState", "uploadScenes"}:
             scene_id = body.get("sceneId") if isinstance(body, dict) else None
             await _mark_frame_states_cache_stale(
@@ -2768,7 +2785,12 @@ async def api_embedded_device_image(
     except Exception as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=f"Not an image: {exc}")
 
-    if scene_id:
+    if is_thin_client_frame(frame):
+        # A frame the backend renders for: the scene it names is its idle
+        # runtime's, left from before; the picture is the backend's last
+        # pull, and so is its scene (docs/server-rendering.md).
+        scene_id = await _active_scene_id_from_cache(redis, frame.id) or None
+    elif scene_id:
         # The frame says which scene drew this image, as on a pull.
         await redis.set(f"frame:{frame.id}:active_scene", scene_id)
     await redis.set(_frame_image_pushed_key(frame.id), b"1", ex=FRAME_IMAGE_PUSHED_TTL_SECONDS)
@@ -2945,8 +2967,9 @@ async def current_frame_image(db: Session, redis: Redis, frame: Frame) -> FrameI
                 None, _coerce_frame_image_to_png, body, headers
             )
             scene_id = headers.get("x-scene-id")
-            if scene_id:
-                # The frame says which scene drew this image.
+            if scene_id and not is_thin_client_frame(frame):
+                # The frame says which scene drew this image (one the backend
+                # renders for names its idle runtime's: the backend decides).
                 await redis.set(f"frame:{frame.id}:active_scene", scene_id)
             else:
                 scene_id = await _active_scene_id_from_cache(redis, frame.id) or None
@@ -4685,6 +4708,9 @@ async def api_frame_update_endpoint(
             raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
     # Templates, imports and chat-built scenes arrive without an execution
     # mode; stamp it here so nothing downstream has to guess.
+    bad_layouts = bad_layouts_message(update_data.get("scenes"))
+    if bad_layouts:
+        _bad_request(bad_layouts)
     normalize_scenes_execution(update_data.get("scenes"))
     # An editor tab or a saved draft from before the upgrade still holds the
     # retired Nim keyword (data/immich); store it as the JS app it became.
@@ -4710,6 +4736,7 @@ async def api_frame_update_endpoint(
     old_device = frame.device
     previous_sd_image = (frame.buildroot or {}).get("sdImage") if isinstance(frame.buildroot, dict) else None
     previous_embedded_boot = (frame.embedded or {}).get("lastBoot") if isinstance(frame.embedded, dict) else None
+    previous_embedded_storage = (frame.embedded or {}).get("storage") if isinstance(frame.embedded, dict) else None
     previous_agent = frame.agent
     for field, value in update_data.items():
         setattr(frame, field, value)
@@ -4741,6 +4768,11 @@ async def api_frame_update_endpoint(
             embedded["lastBoot"] = previous_embedded_boot
         else:
             embedded.pop("lastBoot", None)
+        # And embedded.storage, what the board said its state partition holds.
+        if previous_embedded_storage is not None:
+            embedded["storage"] = previous_embedded_storage
+        else:
+            embedded.pop("storage", None)
         frame.embedded = embedded
 
     if "timezone" in update_data:

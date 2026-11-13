@@ -153,6 +153,7 @@ else:
   import options
   import times
   import std/atomics
+  import asyncdispatch
   import frameos/ids
   import frameos/driver_abi
   import frameos/types
@@ -195,6 +196,31 @@ else:
   proc isolatedPayload(payload: JsonNode): JsonNode =
     if payload.isNil: nil else: copy(payload)
 
+  # The runner's wake. Its two loops (the message loop and the render loop,
+  # one asyncdispatch thread) used to sleep in slices — 1 to 200 ms growing
+  # while idle, and 100 ms between renders — and look at the channels when a
+  # slice ended, so a tap on a Pi waited up to 300 ms before its event was
+  # read and every handler-triggered render of a long-interval scene waited
+  # up to 100 ms more: a JSX UI was capped near 10 Hz by the loop on a Pi 5
+  # that draws its frame in 8 ms (2026-11-07). A producer triggers this event
+  # after queueing, and the loops' sleeps end on it (runner.nim). The event
+  # is a pointer the dispatcher thread made, triggered from any thread
+  # (asyncdispatch's trigger is thread-safe); it carries no ref.
+  var runnerWakeEvent: AsyncEvent
+  var runnerWakeReady: Atomic[bool]
+
+  proc initRunnerWake*(): AsyncEvent =
+    ## On the runner thread, once: the event its loops wait on.
+    runnerWakeEvent = newAsyncEvent()
+    runnerWakeReady.store(true)
+    runnerWakeEvent
+
+  proc wakeRunner*() {.gcsafe.} =
+    ## Something is in a channel for the runner: end its sleep now.
+    if runnerWakeReady.load():
+      {.cast(gcsafe).}:
+        runnerWakeEvent.trigger()
+
   # The runner thread owns the dispatcher, so what is sent ON it — a scene's
   # dispatch node, mostly — goes straight into the dispatcher's queue: no copy,
   # no channel slot, and the dispatcher sees it arrive while the run that sent
@@ -210,7 +236,9 @@ else:
       localEventSink(scene, event, payload, origin)
       return true
     result = eventChannel.trySend((scene, event, (if owned: payload else: isolatedPayload(payload)), origin))
-    if not result:
+    if result:
+      wakeRunner()
+    else:
       atomicInc(eventsDroppedCounter)
 
   # Send an event to the current scene
@@ -242,7 +270,9 @@ else:
   inputChannel.open(1000)
 
   proc sendInputEvent*(event: DriverInputEvent) {.gcsafe.} =
-    if not inputChannel.trySend(event):
+    if inputChannel.trySend(event):
+      wakeRunner()
+    else:
       atomicInc(eventsDroppedCounter)
 
   # Log

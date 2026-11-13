@@ -55,7 +55,8 @@
         "package.json",
         "tsconfig.json",
         "../auth-web/src/lib/**",
-        "../../packages/db/src/**"
+        "../../packages/db/src/**",
+        "../../../frontend/src/**"
       ],
       "outputs": ["dist/**"]
     },
@@ -103,8 +104,16 @@
     "@frameos-cloud/auth-web#typecheck": {
       "dependsOn": ["^build", "@frameos-cloud/auth-web#build"]
     },
+    "@frameos-cloud/frame-hub#typecheck": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "../auth-web/src/**", "../../../frontend/src/**"]
+    },
     "test": {
       "dependsOn": ["^build"]
+    },
+    "@frameos-cloud/frame-hub#test": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "../auth-web/src/**", "../../../frontend/src/**"]
     }
   }
 }

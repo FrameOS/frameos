@@ -146,6 +146,7 @@ event. A new origin starts with nothing.
 | `cloud` | FrameOS Cloud, through a hub verb (`cloud.verb` names it) |
 | `system` | The runtime itself |
 | `eventMap` | The frame's or an installed scene's [event map](#event-map-what-a-button-does) replacing an event it matched: the owner's configuration, never a key or a request itself |
+| `panel` | The frame page of the settings on the frame's own screen ([scene-settings.md](scene-settings.md#the-frame-page)): a person at the frame pressing Render again, Restart FrameOS or Reboot. Only those three |
 
 The allow-list is asked by the dispatcher, of every envelope, whatever its
 origin. An edge that can answer sooner asks the same question for a better
@@ -306,14 +307,24 @@ contract's `gestures` numbers, so every host agrees: `tap {x, y, pointerId,
 pointerType}` — down and up within `tapSlopPx` and `tapMs`; `doubleTap` — a
 second tap within `doubleTapMs` of the first, in the same place (the first
 tap is delivered too); `longPress {…, durationMs}` — held `longPressMs`
-(a second, as a button's: a hold is as long on the glass as on a key, and
-`tapMs` is the same second, so a press that did not move is one or the other)
+(half a second, as on a phone: the keyboard's accents come up then; a key's
+long press stays a second, `buttons.longPressMs`; `tapMs` is the same half
+second, so a press that did not move is one or the other)
 without moving, delivered while it is still held where the host ticks the
 dispatcher (the Linux runner and the preview do; the ESP32 asleep in a render
 does not, and delivers it on release), and then no `tap`; `swipe {direction,
 x, y, startX, startY, …}` — down and up at least `swipeMinPx` apart, in one of
 `left` / `right` / `up` / `down`. Gestures render `if-state-changed`, like a
 button; the raw pointer events never do.
+
+**A UI's timer, `uiTimer`.** The runtime's own (`internal` in the contract:
+from `system` alone, neither listened for nor dispatched by a scene). The
+dispatcher's tick sends it to the scene showing when one of its JSX UIs has
+a timer due (`ui/events.nim` `uiTimerDue`): the keyboard on the screen's
+light on a key just typed going out, backspace held erasing again
+([jsx-ui.md](jsx-ui.md) "Fields and the keyboard"). Its UI handles it and
+asks for the render; a host that ticks only while input is held ticks while
+one is pending too (`uiTimersPending`).
 
 **Edge swipes.** A touch or pen press within `gestures.edgePx` of an edge of
 the screen (on a screen at least four of those across) is held back from the
@@ -326,7 +337,7 @@ startY, …}` (`edge` where it began, `direction` the way it went) and the
 frame's: the scene hears no `pointerDown`, `pointerMove`, `pointerUp` or
 gesture of that touch, so the slider it began on stays where it was, and
 the frame's event map can make it something of the frame's whatever the
-scene draws (the SenseCAP Indicator's and the reTerminal E1003's presets: in
+scene draws (the SenseCAP Indicator's, the reTerminal E1003's and the Sticky's presets: in
 from the left edge `back`, from the right `forward`, up from the bottom the
 scene switcher, down from the top the scene's settings). Lifted, held
 for a `longPress`, or moved along the edge instead, it is the scene's after
@@ -431,7 +442,8 @@ happens: a click on `down`, a lower one on every `up`, and a higher click
 for the second `down` of a `doublePress`. While a key is held a short falling pair sounds at every whole
 second, counting the hold out loud; the scene's `longPress` still comes once,
 with the `up`. A `press` adds no sound: its clicks were the down and the up
-(`embedded/esp32/README.md`, "Button beep").
+(`embedded/esp32/README.md`, "Button beep"). On e-paper a press on the glass
+that something takes clicks the same way, unless the frame's `touch_beep` is off.
 
 `atMs` is when the driver saw the edge, in milliseconds on the frame's
 monotonic clock (the one the dispatcher's tick reads: `CLOCK_MONOTONIC` on
@@ -465,6 +477,14 @@ so the same `press`, `doublePress` and `longPress` come out of them before the
 render, and the backend writes what the scene heard into the frame's log. The
 Inky Frame's five buttons have no GPIO of their own (a shift register reads
 them): they are pin `-1`, labelled `A` to `E`.
+
+An ESP32 rendered on the server (`render_mode: remote`,
+`docs/server-rendering.md` "Keys, touch and the schedule") relays more than
+edges: whatever its producers would have handed its own scene, each with its
+origin (`driver`, `schedule`, `http:write`, `http:admin`), as `{"nowMs",
+"events": [{origin, name, payload}]}`. The same export delivers them, every
+payload's `atMs` moved the same way, each from its own origin, so the
+allow-list and the event maps decide as they would have on the board.
 
 What a control plane sends a thin client for its scene (a custom event, a
 `button` said over HTTP: what the contract's `cloud` column carries as
@@ -563,6 +583,8 @@ which the snapshot harness drives with their `e2eEvents`).
   for hardware that is not there.
 - **`aliasOf`** — an old name of another event; **`synthesized`** — made by
   the dispatcher out of other events (a tap, a textInput). See [Input](#input).
+- **`wildcard`** — `false` keeps a listenable event out of an app's `"*"` (the
+  app's own `init` and `render`). See [Apps that subscribe](#apps-that-subscribe).
 - **`schedule`** — the Schedule panel offers the event, under this label.
   `endsRuntime`: the runtime does not survive it, so the scheduler persists
   the minute it fired in, or it would fire again after the restart.
@@ -577,6 +599,50 @@ dropped. `render` dispatched while handling `render` is ignored
 event never empties the queue, so one drain delivers at most 32 events and
 hands back with the rest still queued: the render loop (or the host's one task)
 gets its turn, and nothing is dropped.
+
+### Apps that subscribe
+
+A JS app hears events without an event node by naming them in its
+`config.json`, and exporting `onEvent`:
+
+```json
+{ "name": "Status bar", "category": "data", "events": ["button", "myEvent"] }
+```
+
+```tsx
+export function onEvent(app, context) {
+  if (context.event === "button") frameos.setState("presses", (app.state.presses || 0) + 1)
+  return true // draw this scene again
+}
+```
+
+- Names are contract events or the scene's custom events. `"*"` is every event
+  a scene can listen for, except what comes at the rate of a moving finger
+  (`coalesce: latest`: `pointerMove`, its old name `mouseMove`, `uiTimer`), an
+  old name for another event (`aliasOf`), and the app's own `init` and `render`
+  (`wildcard: false`). A name written next to `"*"` is heard as well, once:
+  `["*", "pointerMove"]` asks for the motion too. `render` and `init` as names
+  are ignored: those are `get()` and `init()`.
+- It is a declaration because the dispatcher asks whether anyone listens before
+  it builds an input event's payload, on every motion report, and no JavaScript
+  runs for that (`interpreter.sceneListensTo`, `EventHost.sceneListens`).
+- `onEvent(app, context)` has what `get` has; `context.event` is the name and
+  `context.payload` what it carries. Returning `true` asks for a render of the
+  app's own scene, as a JSX handler's run does, even when its interval says
+  otherwise. The contract's `renderAfter` applies either way.
+- A layout's app gets keys, buttons and custom events after the scene it wraps,
+  and pointer events first, in the layout's coordinates (`docs/scene-layouts.md`).
+- A frame older than 2026.11 ignores `events`. Nothing else differs.
+
+### Apps that send
+
+`frameos.dispatch(event, payload)` is the `dispatch` node for code: from a JSX
+handler, `onEvent` or `run`. It goes through the node's own door
+(`dispatchFromScene` in `js_runtime/app_runtime.nim`), so the origin is `scene`
+and the same three things stop it: a `render` asked for during a render, an event
+the contract's `origins` do not give a scene (`reboot`, `uploadScenes`), and the
+run's dispatch budget. Each is logged as `interpreter:dispatch:ignored`. The
+payload is the event's own shape: `setSceneState` takes `{state: {...}}`.
 
 ### Event map: what a button does
 

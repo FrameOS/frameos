@@ -309,7 +309,7 @@ def test_embedded_panel_matrix_includes_new_panels():
     # and Spectra 6.
     for panel in ("EPD_7in5_V2", "EPD_7in5", "EPD_5in83", "EPD_4in2_V2",
                   "EPD_2in9_V2", "EPD_2in66", "EPD_2in13_V4", "EPD_1in54_V2",
-                  "EPD_7in3e", "EPD_4in0e", "EPD_13in3e", "EPD_7in3f",
+                  "EPD_7in3e", "EPD_4in0e", "EPD_13in3e", "EPD_9in7e", "EPD_7in3f",
                   "EPD_5in65f", "EPD_7in3g", "EPD_10in2b"):
         assert panel in EMBEDDED_SUPPORTED_PANELS
         assert embedded_panel_for_frame(Frame(device=f"waveshare.{panel}")) == panel
@@ -341,9 +341,9 @@ def test_embedded_render_canvas_bytes_per_pixel():
     # A grey or black-and-white panel draws in luma whatever fits: a quarter
     # of the bytes in every pass (and the reTerminal E1003 fits at all: 2.5 MB
     # where 565 was 5.0). A colour one past RGBX stays 565.
-    assert embedded_render_canvas_bytes_per_pixel(1872, 1404, 8 * mb, FOS_PIXEL_4BPP_GRAY) == 1
+    assert embedded_render_canvas_bytes_per_pixel(1872, 1404, 8 * mb, FOS_PIXEL_4BPP_GRAY) == 0.5
     assert embedded_render_canvas_bytes_per_pixel(1872, 1404, 8 * mb, FOS_PIXEL_4BPP_SPECTRA6) == 2
-    assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb, FOS_PIXEL_4BPP_GRAY) == 1
+    assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb, FOS_PIXEL_4BPP_GRAY) == 0.5
     assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb, FOS_PIXEL_1BPP) == 1
     assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb, FOS_PIXEL_2BPP_GRAY) == 1
     assert embedded_render_canvas_bytes_per_pixel(1200, 1600, 8 * mb, FOS_PIXEL_1BPP) == 1
@@ -510,6 +510,12 @@ def test_embedded_hardware_preset_for_waveshare_13in3e6():
     frame.render_scale = 2
     assert _provisioned(embedded_provisioning_plan(frame))["render_scale"] == "2"
     frame.render_scale = None
+    # The chip's clock: unset is the board's own rule and is not sent.
+    assert "cpu_mode" not in settings
+    frame.device_config = {**frame.device_config, "cpuMode": "performance"}
+    assert _provisioned(embedded_provisioning_plan(frame))["cpu_mode"] == "performance"
+    frame.device_config = {**frame.device_config, "cpuMode": "turbo"}
+    assert "cpu_mode" not in _provisioned(embedded_provisioning_plan(frame))
 
 
 def test_embedded_hardware_preset_for_waveshare_photopainter():
@@ -738,7 +744,15 @@ def test_embedded_hardware_preset_for_seeed_reterminal_sticky():
     # The AI/Power key and the two arrows; UP/DOWN held walk the scenes, AI
     # held talks (docs/voice-chat.md).
     assert embedded_gpio_buttons_for_frame(frame) == [(4, "AI"), (5, "UP"), (6, "DOWN")]
-    assert [rule["emit"] for rule in frame.event_map] == ["setCurrentScene", "setCurrentScene", "voiceChat"]
+    assert [rule["emit"] for rule in frame.event_map] == [
+        "setCurrentScene",
+        "setCurrentScene",
+        "voiceChat",
+        "forward",
+        "back",
+        "sceneSwitcher",
+        "sceneSettings",
+    ]
     assert frame.event_map[2]["match"] == {"label": "AI", "action": "longPress"}
     # The 4 kHz electromagnetic buzzer on GPIO48, at its own pitch.
     assert frame.device_config["buzzerPin"] == 48
@@ -1112,6 +1126,44 @@ def test_embedded_hardware_preset_for_trmnl_diy_kits():
         assert frame.device_config["batteryPin"] == 1
         assert frame.device_config["batteryDivider"] == 2.0
         assert frame.device_config["batteryEnablePin"] == 6
+
+
+def test_embedded_hardware_presets_for_seeed_xiao_epaper_boards():
+    base = {"rst": 38, "dc": 10, "cs": 44, "cs2": -1, "busy": 4, "sck": 7, "mosi": 9, "pwr": 43}
+    for preset, panel, pins, key3, battery_enable in (
+        ("seeed_xiao_ee02", "EPD_13in3e", {**base, "cs2": 41}, 5, 6),
+        ("seeed_xiao_ee03", "EPD_10in3", {**base, "dc": 8}, 5, 6),
+        ("seeed_xiao_ee04", "EPD_7in5_V2", base, 5, 6),
+        ("seeed_xiao_ee05", "EPD_7in5_V2", base, 8, 39),
+    ):
+        frame = Frame(id=9, embedded={"hardwarePreset": preset})
+        ensure_embedded_frame_defaults(frame)
+        assert embedded_panel_for_frame(frame) == panel
+        assert embedded_platform_for_frame(frame) == "esp32-s3"
+        assert embedded_flash_size_for_frame(frame) == "16MB"
+        assert embedded_pins_for_frame(frame) == pins
+        assert {"pin": key3, "label": "KEY3"} in frame.gpio_buttons
+        assert frame.device_config["batteryPin"] == 1
+        assert frame.device_config["batteryEnablePin"] == battery_enable
+        check_embedded_panel_fits_memory(frame)
+
+
+def test_carrier_board_preset_keeps_the_panel_the_frame_names():
+    frame = Frame(id=9, device="waveshare.EPD_7in3e", embedded={"hardwarePreset": "seeed_xiao_ee04"})
+    ensure_embedded_frame_defaults(frame)
+    assert frame.device == "waveshare.EPD_7in3e"
+    assert embedded_panel_for_frame(frame) == "EPD_7in3e"
+    assert frame.device_config["pins"]["pwr"] == 43
+
+    # Not a panel the firmware drives: the board's default.
+    frame = Frame(id=9, device="web_only", embedded={"hardwarePreset": "seeed_xiao_ee05"})
+    ensure_embedded_frame_defaults(frame)
+    assert frame.device == "waveshare.EPD_7in5_V2"
+
+    # Every other board's preset still is the whole hardware.
+    frame = Frame(id=9, device="waveshare.EPD_7in3e", embedded={"hardwarePreset": "seeed_reterminal_e1004"})
+    ensure_embedded_frame_defaults(frame)
+    assert frame.device == "waveshare.EPD_13in3e"
 
 
 _FOS_CONSOLE_C = Path(__file__).resolve().parents[4] / "embedded" / "esp32" / "main" / "fos_console.c"

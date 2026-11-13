@@ -552,6 +552,28 @@ export async function mockCloudBackupsApi(
   return calls
 }
 
+/** The scene workspace (a frame's scene page) with its Editor column
+ * showing: a tab on a narrow page (one panel at a time), a toggle on a wide
+ * one. `alone` also closes the AI and Preview columns (Preview is open by
+ * default), so the diagram has the page's width. */
+export async function showSceneWorkspaceEditor(page: Page, { alone = false }: { alone?: boolean } = {}): Promise<void> {
+  const toggles = page.locator('.editor-modal__panels button')
+  await toggles.first().waitFor()
+  for (const name of ['Editor', 'AI', 'Preview']) {
+    const toggle = toggles.filter({ hasText: new RegExp(`^${name}$`) }).first()
+    if ((await toggle.count()) === 0) {
+      continue
+    }
+    const selected = await toggle.getAttribute('aria-selected')
+    const on = selected !== null ? selected === 'true' : (await toggle.getAttribute('aria-pressed')) === 'true'
+    const wanted = name === 'Editor' ? true : selected !== null ? on : on && !alone
+    if (on !== wanted && (selected === null || wanted)) {
+      await toggle.click()
+    }
+  }
+  await page.locator('.scene-diagram-utility-buttons').first().waitFor()
+}
+
 export async function login(page: Page): Promise<void> {
   const response = await page.request.post('/api/login', {
     form: {

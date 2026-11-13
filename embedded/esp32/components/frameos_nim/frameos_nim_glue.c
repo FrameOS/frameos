@@ -2,6 +2,7 @@
  * Owns NimMain() (one-shot Nim module init), the log hook, and the
  * outbound-HTTP hook the Nim http_client HAL calls into. */
 #include "frameos_nim.h"
+#include "fos_log_ring.h"
 #include "fos_heap_walk.h"
 #include "fos_qjs_glue.h"
 
@@ -57,6 +58,7 @@ extern void fos_nim_set_quiet_impl(int quiet);
 extern void fos_nim_set_keep_js_impl(int keep);
 extern size_t fos_nim_js_runtime_bytes_impl(void);
 extern int fos_nim_render_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
+extern int fos_nim_repack_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
 extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
 extern const char *fos_nim_info_impl(void);
 extern const char *fos_nim_scene_info_json_impl(void);
@@ -66,6 +68,9 @@ extern int fos_nim_load_scenes_impl(const char *json);
 extern int fos_nim_set_scene_catalog_impl(const char *index_json);
 extern int fos_nim_load_scene_impl(const char *scene_json);
 extern void fos_nim_request_fresh_pass_impl(void);
+extern void fos_nim_set_interactive_impl(int on);
+extern void fos_nim_canvas_forget_impl(void);
+extern int fos_nim_chrome_owed_impl(void);
 extern void fos_nim_apply_service_settings_impl(const char *json);
 extern void fos_nim_set_debug_impl(int enabled);
 extern void fos_nim_set_fusion_impl(int enabled);
@@ -78,8 +83,10 @@ extern void fos_nim_set_status_info_impl(const char *info_json);
 extern void fos_nim_set_time_zone_impl(const char *time_zone);
 extern const char *fos_nim_load_tz_data_impl(const char *slice_json, const char *time_zone);
 extern double fos_nim_scene_interval_impl(void);
+extern bool fos_nim_scene_awaited_impl(void);
 extern double fos_nim_next_sleep_impl(void);
 extern bool fos_nim_render_requested_impl(void);
+extern bool fos_nim_press_taken_impl(int wire_x, int wire_y);
 extern bool fos_nim_tick_impl(void);
 extern int fos_nim_recover_oom_abort_impl(size_t *js_bytes, int *http_released);
 /* `origin` is the event's FOS_ORIGIN_* bit (main/fos_events_gen.h): who said
@@ -96,8 +103,12 @@ static bool s_log_upload_enabled = false;
 
 #define FOS_NIM_LOG_MAX_LINE 1536
 #define FOS_NIM_LOG_MAX_PENDING 128
-#define FOS_NIM_LOG_BATCH_MAX 8
-#define FOS_NIM_LOG_BODY_MAX (8 * 1024)
+/* Lines per POST. A one-second clock logs about eight lines a second, and a
+ * backend on a laptop answers a POST in one to two seconds: eight to a batch
+ * fell behind and dropped half of them (reTerminal Sticky, 2026-11-10). The
+ * body holds the batch at the longest lines (32 x 1536), PSRAM, for the POST. */
+#define FOS_NIM_LOG_BATCH_MAX 32
+#define FOS_NIM_LOG_BODY_MAX (64 * 1024)
 /* A backend that is up accepts the connection in milliseconds, so the
  * connect gets a short timeout; the request and its reply keep the long one.
  * A frame whose self-hosted backend runs on a laptop spent 10 s on every
@@ -161,11 +172,38 @@ static void nim_lock_give(void)
  * newImage565Over and reuses it every render (embedded_runtime.nim). */
 static void *s_canvas = NULL;
 static size_t s_canvas_len = 0;
+static bool s_canvas_shared = false;
+
+void frameos_nim_share_canvas(void *buffer, size_t len)
+{
+    /* A sixteen-grey panel's packed picture is the 4-bit canvas byte for byte
+     * (dither.nim packGray4Canvas): one block serves as both, the panel-sized
+     * buffer main.c reserved, and the 1.31 MB a reTerminal E1003 held twice
+     * goes back to the renders (2026-11-10). Never freed here. */
+    if (buffer == NULL || len == 0 || s_canvas != NULL) return;
+    s_canvas = buffer;
+    s_canvas_len = len;
+    s_canvas_shared = true;
+    ESP_LOGI("fos_nim", "canvas: the panel buffer, %u KB", (unsigned)(len / 1024));
+}
+
+bool frameos_nim_canvas_shared(void)
+{
+    return s_canvas_shared;
+}
+
+void *frameos_nim_shared_canvas_buffer(void)
+{
+    return s_canvas_shared ? s_canvas : NULL;
+}
 
 bool frameos_nim_reserve_canvas(size_t len)
 {
     if (len == 0) return false;
     if (s_canvas != NULL && s_canvas_len >= len) return true;
+    /* The shared block cannot grow; a canvas that does not fit it comes from
+     * the heap (embedded_runtime.renderCanvas). */
+    if (s_canvas_shared) return false;
     void *next = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (next == NULL) {
         ESP_LOGW("fos_nim", "canvas: could not reserve %u KB of PSRAM (largest free block %u KB)",
@@ -526,8 +564,11 @@ bool fos_nim_emergency_reserve_used(void)
 static jmp_buf s_nim_oom_jmp;
 static volatile bool s_nim_oom_jmp_armed = false;
 
+static size_t s_nim_oom_request = 0; /* for the memory:oomAbort line */
+
 void fos_nim_fatal_oom(size_t size)
 {
+    s_nim_oom_request = size;
     ESP_LOGE("fos_nim", "unrecoverable allocation failure (%u bytes, internal=%u largest=%u, psram=%u largest=%u)",
              (unsigned)size,
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -613,11 +654,11 @@ static void nim_oom_abort_note(const char *what)
     char line[420];
     snprintf(line, sizeof(line),
              "{\"event\":\"memory:oomAbort\",\"source\":\"esp32\","
-             "\"where\":\"%s\",\"streak\":%u,\"freePsram\":%u,"
+             "\"where\":\"%s\",\"requestBytes\":%u,\"streak\":%u,\"freePsram\":%u,"
              "\"largestPsramBlock\":%u,\"baselinePsram\":%u,"
              "\"jsDropped\":%d,\"jsDroppedBytes\":%u,\"httpReleased\":%d,"
              "\"status\":\"%s\"}",
-             what, s_nim_oom_abort_streak, (unsigned)free_psram, (unsigned)largest,
+             what, (unsigned)s_nim_oom_request, s_nim_oom_abort_streak, (unsigned)free_psram, (unsigned)largest,
              (unsigned)s_psram_free_baseline, js_dropped, (unsigned)js_bytes, http_released,
              restart ? "restarting" : "leaked");
     frameos_nim_log_hook(line);
@@ -794,6 +835,28 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
     return result;
 }
 
+int frameos_nim_repack_alloc(uint8_t **buf, size_t *len, int pixel_format)
+{
+    if (!s_nim_ready || !buf || !len) return -1;
+    if (!nim_lock_take()) return -1;
+    int result;
+    s_pending_render_buffer = NULL;
+    if (setjmp(s_nim_oom_jmp) == 0) {
+        s_nim_oom_jmp_armed = true;
+        result = fos_nim_repack_alloc_impl(buf, len, pixel_format);
+    } else {
+        nim_oom_abort_note("repack");
+        if (s_pending_render_buffer != NULL) render_buffer_dispose(s_pending_render_buffer);
+        *buf = NULL;
+        *len = 0;
+        result = -1;
+    }
+    s_pending_render_buffer = NULL;
+    s_nim_oom_jmp_armed = false;
+    nim_lock_give();
+    return result;
+}
+
 int frameos_nim_render_1bpp(uint8_t *buf, size_t len)
 {
     return frameos_nim_render(buf, len, 1);
@@ -910,6 +973,31 @@ int frameos_nim_load_scene(const char *scene_json)
     return result;
 }
 
+void frameos_nim_set_interactive(bool on)
+{
+    if (!s_nim_ready) return;
+    if (!nim_lock_take()) return;
+    fos_nim_set_interactive_impl(on ? 1 : 0);
+    nim_lock_give();
+}
+
+void frameos_nim_canvas_forget(void)
+{
+    if (!s_nim_ready) return;
+    if (!nim_lock_take()) return;
+    fos_nim_canvas_forget_impl();
+    nim_lock_give();
+}
+
+bool frameos_nim_chrome_owed(void)
+{
+    if (!s_nim_ready) return false;
+    if (!nim_lock_take()) return false;
+    bool owed = fos_nim_chrome_owed_impl() != 0;
+    nim_lock_give();
+    return owed;
+}
+
 void frameos_nim_request_fresh_pass(void)
 {
     if (!s_nim_ready) return;
@@ -1013,6 +1101,15 @@ double frameos_nim_scene_interval(void)
     return interval;
 }
 
+bool frameos_nim_scene_awaited(void)
+{
+    if (!s_nim_ready) return true;
+    if (!nim_lock_take()) return true;
+    bool awaited = fos_nim_scene_awaited_impl();
+    nim_lock_give();
+    return awaited;
+}
+
 double frameos_nim_next_sleep(void)
 {
     if (!s_nim_ready) return -1;
@@ -1020,6 +1117,15 @@ double frameos_nim_next_sleep(void)
     double next_sleep = fos_nim_next_sleep_impl();
     nim_lock_give();
     return next_sleep;
+}
+
+bool frameos_nim_press_taken(int wire_x, int wire_y)
+{
+    if (!s_nim_ready) return false;
+    if (!nim_lock_take()) return false;
+    bool taken = fos_nim_press_taken_impl(wire_x, wire_y);
+    nim_lock_give();
+    return taken;
 }
 
 bool frameos_nim_render_requested(void)
@@ -1228,8 +1334,13 @@ void frameos_nim_log_hook(const char *msg)
      * session lacks telemetry:logs, or when there is no network at all, so it
      * has to carry these unconditionally. Interleaving with a usb_api base64
      * payload is expected and handled: the browser drops non-base64 lines,
-     * verifies the declared length and retries the transfer. */
-    printf("%s\n", msg ? msg : "");
+     * verifies the declared length and retries the transfer.
+     *
+     * Through the log ring (fos_log_ring.c), not a printf here: a printf
+     * blocked the logging task — the render task, on an LCD board — for
+     * 30 ms per 380-character line at 115200 baud, a third of an isolated
+     * tap (docs/perf-todo.md, 2026-11-07). */
+    fos_log_ring_puts(msg ? msg : "");
     queue_log_line(msg);
     uint32_t seq = ring_log_line(msg);
     /* The tap runs on whatever task logged; the cloud client's tap only
@@ -1489,60 +1600,61 @@ static esp_err_t post_log_body(const char *body, size_t body_len)
     return ESP_OK;
 }
 
-void frameos_nim_flush_logs(void)
+bool frameos_nim_flush_log_batch(void)
 {
     if (!s_log_upload_enabled || s_backend_url[0] == '\0' || s_backend_auth[0] == '\0') {
-        return;
+        return false;
     }
     if (!log_upload_heap_ready()) {
-        return;
+        return false;
+    }
+    size_t count = 0;
+    size_t dropped = 0;
+    fos_nim_log_node_t *batch = pop_log_batch(&count, &dropped);
+    if (batch == NULL && dropped == 0) {
+        return false;
     }
 
-    while (true) {
-        if (!log_upload_heap_ready()) {
-            break;
-        }
-        size_t count = 0;
-        size_t dropped = 0;
-        fos_nim_log_node_t *batch = pop_log_batch(&count, &dropped);
-        if (batch == NULL && dropped == 0) {
-            break;
-        }
+    json_buf_t body = {0};
+    bool ok = json_buf_append(&body, "{\"logs\":[");
+    bool first = true;
+    if (ok && dropped > 0) {
+        char dropped_json[128];
+        snprintf(dropped_json, sizeof(dropped_json),
+                 "{\"event\":\"log:dropped\",\"source\":\"esp32\",\"count\":%lu}",
+                 (unsigned long)dropped);
+        ok = json_buf_append(&body, dropped_json);
+        first = false;
+    }
+    for (fos_nim_log_node_t *node = batch; ok && node != NULL; node = node->next) {
+        if (!first) ok = json_buf_append_char(&body, ',');
+        if (ok) ok = append_log_payload(&body, node->line);
+        first = false;
+    }
+    if (ok) ok = json_buf_append(&body, "]}");
 
-        json_buf_t body = {0};
-        bool ok = json_buf_append(&body, "{\"logs\":[");
-        bool first = true;
-        if (ok && dropped > 0) {
-            char dropped_json[128];
-            snprintf(dropped_json, sizeof(dropped_json),
-                     "{\"event\":\"log:dropped\",\"source\":\"esp32\",\"count\":%lu}",
-                     (unsigned long)dropped);
-            ok = json_buf_append(&body, dropped_json);
-            first = false;
-        }
-        for (fos_nim_log_node_t *node = batch; ok && node != NULL; node = node->next) {
-            if (!first) ok = json_buf_append_char(&body, ',');
-            if (ok) ok = append_log_payload(&body, node->line);
-            first = false;
-        }
-        if (ok) ok = json_buf_append(&body, "]}");
+    esp_err_t err = ESP_ERR_INVALID_SIZE;
+    if (ok) {
+        err = post_log_body(body.data, body.len);
+    } else {
+        ESP_LOGW("fos_nim_log", "dropping log batch: JSON body too large or out of memory");
+    }
+    json_buf_free(&body);
+    if (ok && err != ESP_OK && err != ESP_ERR_INVALID_RESPONSE &&
+        err != ESP_ERR_INVALID_STATE && err != ESP_ERR_INVALID_SIZE) {
+        uint32_t wait_ms = requeue_log_batch(batch, count, dropped);
+        ESP_LOGW("fos_nim_log", "backend did not answer (%s); holding %u log lines, next try in %u s",
+                 esp_err_to_name(err), (unsigned)count, (unsigned)(wait_ms / 1000));
+        return false;
+    }
+    if (err == ESP_OK || err == ESP_ERR_INVALID_RESPONSE) note_log_post_answered();
+    free_log_nodes(batch);
+    return true;
+}
 
-        esp_err_t err = ESP_ERR_INVALID_SIZE;
-        if (ok) {
-            err = post_log_body(body.data, body.len);
-        } else {
-            ESP_LOGW("fos_nim_log", "dropping log batch: JSON body too large or out of memory");
-        }
-        json_buf_free(&body);
-        if (ok && err != ESP_OK && err != ESP_ERR_INVALID_RESPONSE &&
-            err != ESP_ERR_INVALID_STATE && err != ESP_ERR_INVALID_SIZE) {
-            uint32_t wait_ms = requeue_log_batch(batch, count, dropped);
-            ESP_LOGW("fos_nim_log", "backend did not answer (%s); holding %u log lines, next try in %u s",
-                     esp_err_to_name(err), (unsigned)count, (unsigned)(wait_ms / 1000));
-            break;
-        }
-        if (err == ESP_OK || err == ESP_ERR_INVALID_RESPONSE) note_log_post_answered();
-        free_log_nodes(batch);
+void frameos_nim_flush_logs(void)
+{
+    while (frameos_nim_flush_log_batch()) {
     }
 }
 

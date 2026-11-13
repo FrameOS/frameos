@@ -3,11 +3,10 @@
 Status: the ledger, AI metering (**live** — every turn is measured, priced
 and posted to the customer's receivable), the admin/ops surfaces, the
 account's own usage view with its AI switch, the daily cap, and plans with
-their subscription lifecycle are built, and so is the provider-neutral half
-of collecting for plans ([`billing.md`](billing.md)). **No payment provider
-is wired up** (Stripe is the plan, 2026-11-07), so a paid plan is activated
-by an operator and nothing collects metered AI: no invoice is cut for usage
-and no turn is billable. The open work is §7; §9 is the
+their subscription lifecycle are built, and so is collecting for plans
+through **Stripe** ([`billing.md`](billing.md), 2026-11-07), with the VAT
+it adds booked as owed and its fees as a cost. Nothing collects metered AI
+yet: no invoice is cut for usage and no turn is billable. The open work is §7; §9 is the
 2026-09-01 review and what its fixes did, kept because the code cites its
 item numbers.
 
@@ -96,13 +95,14 @@ cannot disagree with the meters above them.
 Higher stops buy capacity, never features; Business picks up where Private
 ends, with the same rules and its own features on top.
 
-- **Private is meant for checkout, Business for support.** A self-serve
-  group (`selfServe` in the catalog) gets its `billing_plans` rows
-  (`private-9`, the stop's limits as entitlements) from "Sync plans" on
+- **Private and Business are both bought at checkout** (Business since
+  2026-11-07, with single sign-on marked planned). A self-serve group
+  (`selfServe` in the catalog) gets its `billing_plans` rows (`private-9`,
+  `business-49`, the stop's limits as entitlements) from "Sync plans" on
   `/admin/billing/customers`; a provider adapter adds its products to that
-  step ([`billing.md`](billing.md)). Until one exists every paid card says
+  step ([`billing.md`](billing.md)). Without one every paid card says
   "Contact support to activate" and an operator uses the operator plan
-  route. Business stays that way until single sign-on exists.
+  route.
 - **Photo storage is a plan number now** (`photo_bytes`, optional on a row).
   Free's is `FRAMEOS_CLOUD_MAX_PHOTO_MB`, 250 MB by default (was 1 GB); an
   unverified account stays capped at `FRAMEOS_CLOUD_MAX_UNVERIFIED_PHOTO_MB`
@@ -175,10 +175,18 @@ above came to in code:
 - Not metered: there is still no per-frame attribution (§8.9), so a render
   posts nothing to the ledger. The plan's number is the whole price.
 
-Still open: the thin clients the entitlement was first meant for. An
-ESP32-C3 or a Pico cannot link to the cloud at all (no hub client in either
-firmware, `docs/convergence-todo.md` §3), so the plan's line says "virtual
-frames" and nothing about boards.
+**Built, 2026-11: hardware the cloud renders for** (`docs/server-rendering.md`,
+`docs/cloud-frames.md` "Hardware the cloud renders for"). An ESP32-C3, and
+any ESP32 whose owner sets `render_mode: "remote"`, pulls its picture from
+the cloud (firmware 2026.11.7 on). Such a frame counts in both pools: it is
+hardware (`frames`) the cloud draws for (`cloud_rendered_frames`, the count
+reads `frames.settings->>'render_mode'`). The switch is the count check
+(the settings route, behind the same account lock as virtual frames), the
+floor holds on every later push, and a pull reuses the last picture inside
+the floor unless something changed. Same as virtual frames: not metered.
+
+Still open: the Pico, which cannot link to the cloud at all (no hub client in
+its firmware, `docs/convergence-todo.md` §3).
 
 Direction comes from Airbnb's "Tracking the money" post
 (medium.com/airbnb-engineering/tracking-the-money-scaling-financial-reporting-at-airbnb-6d742b80f040).
@@ -1231,23 +1239,32 @@ plan cards' buy/switch/cancel actions, the legal pages and the public price
 list. A Creem adapter was built and run against Creem's test mode, then
 removed on 2026-11-07: Creem's review demanded its moderation API on every
 prompt that reaches the on-device image app, which is not ours to police.
-**The provider is Stripe** (decided 2026-11-07, not started): Stripe Tax
-collects VAT and we remit it (§8.15 is ours again), and Stripe exposes its
-fee per charge, so `psp_fee` can post with each payment.
+**The Stripe adapter: built 2026-11-07** ([`billing.md`](billing.md),
+migration 0075) and run end to end against Stripe's test mode. Stripe Tax
+adds the VAT and we remit it: `payment.received` / `payment.refunded` v2
+carry a `taxMicros` leg to `liability:sales_tax` when
+`provider_payments.tax_remitted_by = 'us'`. Each charge's fee posts as
+`payment.fee` (`Dr expense:psp_fees / Cr asset:psp:main`) from its balance
+transaction, converted from the euro balance at Stripe's own rate; a lost
+dispute posts as a refund plus its fee.
 
 **Metered AI: still open**, and still paused until there are users to
 invoice. A hosted checkout sells a subscription; charging a month of usage
 in arrears needs a stored payment method (§3.2), which Stripe has.
 
-- [ ] The Stripe adapter: `billing.md` "What a provider adapter has to do".
+- [x] The Stripe adapter (2026-11-07).
 - [ ] Decide how metered AI is collected, then: `source: "platform"` in
       `resolveAiCredentials` (the thing that makes a turn billable, still
       gated by §5.1 and §5.3; the scene converter stays an absorbed
       surface), the month-close run, and dunning.
-- [ ] `psp_fee` per payment, from the charge's balance transaction.
+- [x] `psp_fee` per payment, from the charge's balance transaction.
+- [ ] The payout reconciliation: what Stripe paid out against
+      `asset:psp:main` (conversion differences, Stripe Billing's and Stripe
+      Tax's monthly fees, which come on Stripe's own invoice).
 - [ ] `receivable_writeoff` and `promo_grant` against the receivable
       (§3.4), for the receivables an operator-set plan or metered AI leave.
-- [ ] Disputes: record them in `provider_events`; nothing acts on them.
+- [x] Disputes: recorded, an alert on opening; a lost one is booked as a
+      refund, and the dispute fee as a cost.
 - [ ] A yearly price (§0.1).
 
 ### Phase 6 — later, enabled by the above, not designed in detail here
@@ -1443,9 +1460,13 @@ question that will be asked again.
     - **B2B reverse charge.** A customer with a valid VAT number in
       another member state is invoiced net with the reverse-charge
       wording; needs a VAT-number field and a VIES check.
-    Until these are answered 3b's invoice has no header, and the recipes
-    in §3.2 have no tax leg. Parked with §8.7 (2026-09-03) until there are
-    users to invoice; decide then, and write the answers into this item.
+    For plans these are answered by Stripe (2026-11-07): Stripe Tax places
+    the buyer by the billing address checkout collects, applies OSS once it
+    is registered, and takes a VAT number at checkout for the reverse
+    charge (Stripe validates its format; VIES is not checked); Stripe issues
+    the invoice in Raaven BV's name, and the payment recipes have the tax
+    leg. Still open for metered AI's own invoice, if it is ever cut outside
+    Stripe.
 
 ---
 

@@ -160,7 +160,7 @@ function SidebarLoadingPlaceholder(): JSX.Element {
 function MainLoadingPlaceholder({ mode }: { mode: WorkspaceMode }): JSX.Element {
   if (mode === 'scenes') {
     return (
-      <div className="scene-editor-canvas scene-editor-canvas-full h-screen min-h-screen overflow-hidden">
+      <div className="scene-editor-canvas h-screen min-h-screen overflow-hidden">
         <div className="h-full w-full bg-white/35" />
       </div>
     )

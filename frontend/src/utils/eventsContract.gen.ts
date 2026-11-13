@@ -9,8 +9,10 @@ export const CUSTOM_EVENT_MAX_NAME_LENGTH = 63
 export const SCENE_SWITCHER_ID = 'system/sceneSwitcher'
 /** The built-in scene `sceneSettings` shows (docs/scene-settings.md). */
 export const SCENE_SETTINGS_ID = 'system/sceneSettings'
+/** What a layout's scene node names for the scene it wraps (docs/scene-layouts.md). */
+export const SCENE_YIELD_ID = 'system/yield'
 
-export type EventOrigin = 'driver' | 'preview' | 'scene' | 'schedule' | 'http:write' | 'http:admin' | 'cloud' | 'system' | 'eventMap'
+export type EventOrigin = 'driver' | 'preview' | 'scene' | 'schedule' | 'http:write' | 'http:admin' | 'cloud' | 'system' | 'eventMap' | 'panel'
 export type EventClass = 'lifecycle' | 'input' | 'scene-command' | 'device-command'
 export type EventDevice = 'keyboard' | 'pointer' | 'button'
 export type EventRenderAfter = 'never' | 'always' | 'if-state-changed'
@@ -28,6 +30,7 @@ export type ContractEventName =
   | 'pointerDown'
   | 'pointerUp'
   | 'pointerCancel'
+  | 'uiTimer'
   | 'mouseMove'
   | 'mouseDown'
   | 'mouseUp'
@@ -117,7 +120,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "http:write",
       "http:admin",
       "cloud",
-      "eventMap"
+      "eventMap",
+      "panel"
     ],
     "renderAfter": "always",
     "coalesce": "none",
@@ -333,6 +337,24 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "wasm": true
     },
     "since": "2026.9.23"
+  },
+  "uiTimer": {
+    "class": "input",
+    "device": "pointer",
+    "listen": false,
+    "dispatch": false,
+    "origins": [
+      "system"
+    ],
+    "renderAfter": "never",
+    "coalesce": "latest",
+    "log": "none",
+    "hosts": {
+      "linux": true,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.11.5"
   },
   "mouseMove": {
     "class": "input",
@@ -890,7 +912,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "schedule",
       "http:admin",
       "cloud",
-      "system"
+      "system",
+      "panel"
     ],
     "renderAfter": "never",
     "coalesce": "none",
@@ -919,7 +942,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "schedule",
       "http:admin",
       "cloud",
-      "system"
+      "system",
+      "panel"
     ],
     "renderAfter": "never",
     "coalesce": "none",
@@ -1138,9 +1162,9 @@ interface FrameOSEventPayloads {
   /** Switch the frame to another scene: the one \`sceneId\` names, or with \`direction\` the \`next\` / \`prev\` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). An optional \`state\` object is applied to that scene's public state. */
   setCurrentScene: { sceneId?: string; direction?: string; state?: any };
   /** Show the scene switcher (\`scenes.switcher\`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. While it or the scene settings show, go back to the scene they were opened from instead. The frame's event map binds it to a swipe in from the bottom edge on a touch screen. */
-  sceneSwitcher: Record<string, never>;
+  sceneSwitcher: { swap?: boolean };
   /** Show the scene's settings (\`scenes.settings\`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen. */
-  sceneSettings: Record<string, never>;
+  sceneSettings: { page?: string };
   /** Go back, as a phone's back gesture does: what that is is the scene's (the photo or the page before; the scene switcher turns its page back, the scene settings close unsaved), and a scene that does not listen for it stays as it is. It never switches the scene. The frame's event map binds it to a swipe in from the left edge on a touch screen. */
   back: Record<string, never>;
   /** Go forward, the other way from \`back\`: the next photo or page (the scene switcher turns its page on). It never switches the scene. The frame's event map binds it to a swipe in from the right edge on a touch screen. */

@@ -27,6 +27,31 @@ function scene(overrides: Partial<JsonObject> = {}): JsonObject {
   };
 }
 
+// A scene drawing with one scene-local data app, `dial`, into render/image.
+function withDrawingApp(sources: Record<string, string>, origin?: string): JsonObject {
+  return scene({
+    apps: {
+      dial: {
+        category: "data",
+        fields: [],
+        name: "Dial",
+        output: [{ name: "image", type: "image" }],
+        sources: { ...sources, "config.json": "{}" },
+        ...(origin ? { origin } : {}),
+      },
+    },
+    edges: [
+      { id: "e1", source: "ev", sourceHandle: "next", target: "img", targetHandle: "prev", type: "appNodeEdge" },
+      { id: "e2", source: "dial", sourceHandle: "fieldOutput", target: "img", targetHandle: "fieldInput/image", type: "codeNodeEdge" },
+    ],
+    nodes: [
+      { data: { keyword: "render" }, id: "ev", type: "event" },
+      { data: { config: {}, keyword: "render/image" }, id: "img", type: "app" },
+      { data: { config: {}, keyword: "dial" }, id: "dial", type: "app" },
+    ],
+  });
+}
+
 function messages(scenes: JsonObject[]) {
   const result = lintScenes(scenes);
   return {
@@ -36,6 +61,10 @@ function messages(scenes: JsonObject[]) {
 }
 
 describe("lintScenes", () => {
+  it("refuses a layout that is not one JSX app with a yield", () => {
+    expect(messages([scene({ settings: { isLayout: true } })]).errors.join("\n")).toContain("cannot be a layout");
+  });
+
   it("accepts a minimal render chain", () => {
     expect(messages([scene()])).toEqual({ errors: [], warnings: [] });
   });
@@ -672,7 +701,39 @@ describe("lintScenes", () => {
         ],
       }),
     ]);
-    expect(warnings).toEqual([expect.stringContaining("hard-coded viewBox (800x600)")]);
+    expect(warnings).toEqual([
+      expect.stringContaining("Code node builds SVG markup as a string"),
+      expect.stringContaining("hard-coded viewBox (800x600)"),
+    ]);
+  });
+
+  it("reads no markup in comments: a JSX app that says <svg> in a comment is not refused", () => {
+    const commented = withDrawingApp({
+      "app.tsx":
+        "// Returns an <svg> sized to the canvas.\n/* The <svg> root carries a viewBox. */\nexport function get(app, context) {\n  const w = context.imageWidth\n  return <svg viewBox={`0 0 ${w} ${w}`} width={w} height={w} />\n}",
+    });
+    expect(messages([commented])).toEqual({ errors: [], warnings: [] });
+    // Real markup is still read, URL-bearing lines included.
+    const markup = withDrawingApp({
+      "app.ts": "// Fetches from https://example.com\nexport function get() { return frameos.svg('<svg><rect/></svg>') }",
+    });
+    expect(messages([markup]).errors).toEqual([expect.stringContaining("SVG root needs a viewBox attribute")]);
+  });
+
+  it("steers SVG markup built as a string to JSX, and leaves JSX and catalog templates alone", () => {
+    const withDrawing = withDrawingApp;
+    const markup = "export function get(app, context) {\n  const w = context.imageWidth\n  return frameos.svg(`<svg viewBox=\"0 0 ${w} ${w}\"><circle r=\"4\"/></svg>`)\n}";
+    expect(messages([withDrawing({ "app.ts": markup })]).warnings).toEqual([
+      expect.stringContaining('Scene app "dial" (app.ts) builds SVG markup as a string. Draw it with a scene-local app.tsx'),
+    ]);
+    // frameos.svg() in a .tsx is still markup built as a string.
+    expect(messages([withDrawing({ "app.tsx": markup })]).warnings).toEqual([
+      expect.stringContaining('Scene app "dial" (app.tsx) builds SVG markup as a string'),
+    ]);
+    const jsx =
+      "export function get(app, context) {\n  const w = context.imageWidth\n  return (\n    <svg viewBox={`0 0 ${w} ${w}`} width={w} height={w}>\n      <circle cx={w / 2} cy={w / 2} r={w / 4} fill=\"#111827\" />\n    </svg>\n  )\n}";
+    expect(messages([withDrawing({ "app.tsx": jsx })])).toEqual({ errors: [], warnings: [] });
+    expect(messages([withDrawing({ "app.ts": markup }, "repo/apps/image/chart")]).warnings).toEqual([]);
   });
 
   it("rejects code nodes that redeclare one of their arguments", () => {

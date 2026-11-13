@@ -85,13 +85,14 @@ function sceneLocalAppNodes(scenes: unknown[]): { keyword: string; sources: Json
   return found;
 }
 
-// frameos.svg(...) is the JS app route, a literal <svg the code node one.
+// <svg JSX in an app.tsx is the route the guide prescribes; frameos.svg(...)
+// in a JS app and a literal <svg in a code node are the older string routes.
 const SVG_SOURCE = /frameos\.svg\s*\(|<svg[\s>]/;
 
-// How the scene draws SVG, or null. There are three routes and a request for
-// "an SVG clock" is met by any of them: the render/svg app (fed by a code
-// node), the jsSvg repo template, or a scene-local JS app returning
-// frameos.svg(...) into render/image — which is what the prompt prescribes.
+// How the scene draws SVG, or null. A request for "an SVG clock" is met by
+// any route: the render/svg app (fed by a code node), the jsSvg repo
+// template, or a scene-local JS app into render/image — returning <svg> JSX
+// from app.tsx, which is what the scene guide prescribes, or frameos.svg(...).
 function svgRoute(scenes: unknown[]): string | null {
   const keywords = appKeywordsUsed(scenes);
   const app = ["render/svg", "repo/apps/text/jsSvg", "jsSvg"].find((keyword) => keywords.includes(keyword));

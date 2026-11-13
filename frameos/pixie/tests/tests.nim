@@ -1,0 +1,25 @@
+import
+  test_base64,
+  test_bmp,
+  test_contexts,
+  test_fonts,
+  test_gif,
+  test_images,
+  test_images_draw,
+  test_jpeg,
+  test_paints,
+  test_paint_strips,
+  test_paths,
+  test_png,
+  test_ppm,
+  test_qoi,
+  test_rgb565,
+  test_webp,
+  test_svg,
+  test_svg_covers,
+  test_svg_damage,
+  test_svg_nodes,
+  test_svg_xml,
+  xrays
+
+writeReport()

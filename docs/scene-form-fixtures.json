@@ -1,0 +1,968 @@
+{
+  "description": "What a scene's settings form draws, read the same way by every client that draws one: the shared SPA (frontend/src/utils/refreshInterval.ts sceneStateFields: the scene's fields plus the implicit 'Refresh interval (seconds)' field; frontend/src/utils/showIf.ts visiblePublicStateFields: the public fields whose showIf passes against the defaults overlaid with `values`, later maps winning) and the iOS app (ios/FrameOSKit/Sources/FrameOSKit/Contracts/SceneFields.swift, SceneForm.stateFields / visiblePublicFields). `expect.fields` is every state field (name, label, type, value, access, role), `expect.visible` the names the form shows, in order. Replayed by cloud/apps/auth-web/src/test/shared-spa/scene-form-fixtures.test.ts and ios/FrameOSKit/Tests/FrameOSKitTests/SceneFormFixtureTests.swift; the runtime's own copy of the refresh-interval rule is frameos/src/frameos/refresh_interval.nim.",
+  "cases": [
+    {
+      "name": "no fields: the implicit refresh interval from settings",
+      "scene": {
+        "id": "a",
+        "settings": {
+          "refreshInterval": 60
+        }
+      },
+      "values": [],
+      "expect": {
+        "fields": [
+          {
+            "name": "refreshInterval",
+            "label": "Refresh interval (seconds)",
+            "type": "float",
+            "value": "60",
+            "access": "public",
+            "role": "refreshInterval"
+          }
+        ],
+        "visible": [
+          "refreshInterval"
+        ]
+      }
+    },
+    {
+      "name": "no fields, no settings: 300 seconds",
+      "scene": {
+        "id": "a"
+      },
+      "values": [],
+      "expect": {
+        "fields": [
+          {
+            "name": "refreshInterval",
+            "label": "Refresh interval (seconds)",
+            "type": "float",
+            "value": "300",
+            "access": "public",
+            "role": "refreshInterval"
+          }
+        ],
+        "visible": [
+          "refreshInterval"
+        ]
+      }
+    },
+    {
+      "name": "a numeric refreshInterval field takes the role",
+      "scene": {
+        "id": "a",
+        "fields": [
+          {
+            "name": "city",
+            "type": "string",
+            "access": "public",
+            "value": "Tallinn"
+          },
+          {
+            "name": "refreshInterval",
+            "type": "integer",
+            "access": "public",
+            "value": "120"
+          }
+        ]
+      },
+      "values": [],
+      "expect": {
+        "fields": [
+          {
+            "name": "city",
+            "label": null,
+            "type": "string",
+            "value": "Tallinn",
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "refreshInterval",
+            "label": null,
+            "type": "integer",
+            "value": "120",
+            "access": "public",
+            "role": "refreshInterval"
+          }
+        ],
+        "visible": [
+          "city",
+          "refreshInterval"
+        ]
+      }
+    },
+    {
+      "name": "a role beats the name",
+      "scene": {
+        "id": "a",
+        "fields": [
+          {
+            "name": "every",
+            "type": "float",
+            "access": "public",
+            "role": "refreshInterval",
+            "value": "30"
+          },
+          {
+            "name": "refreshInterval",
+            "type": "float",
+            "access": "public"
+          }
+        ]
+      },
+      "values": [],
+      "expect": {
+        "fields": [
+          {
+            "name": "every",
+            "label": null,
+            "type": "float",
+            "value": "30",
+            "access": "public",
+            "role": "refreshInterval"
+          },
+          {
+            "name": "refreshInterval",
+            "label": null,
+            "type": "float",
+            "value": null,
+            "access": "public",
+            "role": null
+          }
+        ],
+        "visible": [
+          "every",
+          "refreshInterval"
+        ]
+      }
+    },
+    {
+      "name": "a refreshInterval of another type: no implicit field",
+      "scene": {
+        "id": "a",
+        "fields": [
+          {
+            "name": "refreshInterval",
+            "type": "string",
+            "access": "public",
+            "value": "fast"
+          }
+        ]
+      },
+      "values": [],
+      "expect": {
+        "fields": [
+          {
+            "name": "refreshInterval",
+            "label": null,
+            "type": "string",
+            "value": "fast",
+            "access": "public",
+            "role": null
+          }
+        ],
+        "visible": [
+          "refreshInterval"
+        ]
+      }
+    },
+    {
+      "name": "a private refresh interval stays private",
+      "scene": {
+        "id": "a",
+        "settings": {
+          "refreshInterval": "45"
+        },
+        "fields": [
+          {
+            "name": "refreshInterval",
+            "type": "float",
+            "access": "private",
+            "value": "45"
+          }
+        ]
+      },
+      "values": [],
+      "expect": {
+        "fields": [
+          {
+            "name": "refreshInterval",
+            "label": null,
+            "type": "float",
+            "value": "45",
+            "access": "private",
+            "role": "refreshInterval"
+          }
+        ],
+        "visible": []
+      }
+    },
+    {
+      "name": "private fields are not drawn",
+      "scene": {
+        "id": "a",
+        "fields": [
+          {
+            "name": "token",
+            "type": "string",
+            "access": "private"
+          },
+          {
+            "name": "title",
+            "type": "string",
+            "access": "public",
+            "value": "Hi"
+          }
+        ]
+      },
+      "values": [],
+      "expect": {
+        "fields": [
+          {
+            "name": "token",
+            "label": null,
+            "type": "string",
+            "value": null,
+            "access": "private",
+            "role": null
+          },
+          {
+            "name": "title",
+            "label": null,
+            "type": "string",
+            "value": "Hi",
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "refreshInterval",
+            "label": "Refresh interval (seconds)",
+            "type": "float",
+            "value": "300",
+            "access": "public",
+            "role": "refreshInterval"
+          }
+        ],
+        "visible": [
+          "title",
+          "refreshInterval"
+        ]
+      }
+    },
+    {
+      "name": "showIf eq on a select, default value",
+      "scene": {
+        "id": "a",
+        "fields": [
+          {
+            "name": "mode",
+            "type": "select",
+            "options": [
+              "clock",
+              "photo"
+            ],
+            "access": "public",
+            "value": "clock"
+          },
+          {
+            "name": "album",
+            "type": "string",
+            "access": "public",
+            "showIf": [
+              {
+                "field": "mode",
+                "operator": "eq",
+                "value": "photo"
+              }
+            ]
+          },
+          {
+            "name": "format",
+            "type": "string",
+            "access": "public",
+            "showIf": [
+              {
+                "field": "mode",
+                "operator": "eq",
+                "value": "clock"
+              }
+            ]
+          }
+        ]
+      },
+      "values": [],
+      "expect": {
+        "fields": [
+          {
+            "name": "mode",
+            "label": null,
+            "type": "select",
+            "value": "clock",
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "album",
+            "label": null,
+            "type": "string",
+            "value": null,
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "format",
+            "label": null,
+            "type": "string",
+            "value": null,
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "refreshInterval",
+            "label": "Refresh interval (seconds)",
+            "type": "float",
+            "value": "300",
+            "access": "public",
+            "role": "refreshInterval"
+          }
+        ],
+        "visible": [
+          "mode",
+          "format",
+          "refreshInterval"
+        ]
+      }
+    },
+    {
+      "name": "showIf follows the current values",
+      "scene": {
+        "id": "a",
+        "fields": [
+          {
+            "name": "mode",
+            "type": "select",
+            "options": [
+              "clock",
+              "photo"
+            ],
+            "access": "public",
+            "value": "clock"
+          },
+          {
+            "name": "album",
+            "type": "string",
+            "access": "public",
+            "showIf": [
+              {
+                "field": "mode",
+                "operator": "eq",
+                "value": "photo"
+              }
+            ]
+          }
+        ]
+      },
+      "values": [
+        {
+          "mode": "photo"
+        }
+      ],
+      "expect": {
+        "fields": [
+          {
+            "name": "mode",
+            "label": null,
+            "type": "select",
+            "value": "clock",
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "album",
+            "label": null,
+            "type": "string",
+            "value": null,
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "refreshInterval",
+            "label": "Refresh interval (seconds)",
+            "type": "float",
+            "value": "300",
+            "access": "public",
+            "role": "refreshInterval"
+          }
+        ],
+        "visible": [
+          "mode",
+          "album",
+          "refreshInterval"
+        ]
+      }
+    },
+    {
+      "name": "showIf on a boolean given as a string",
+      "scene": {
+        "id": "a",
+        "fields": [
+          {
+            "name": "dark",
+            "type": "boolean",
+            "access": "public",
+            "value": "false"
+          },
+          {
+            "name": "accent",
+            "type": "color",
+            "access": "public",
+            "showIf": [
+              {
+                "field": "dark"
+              }
+            ]
+          }
+        ]
+      },
+      "values": [
+        {
+          "dark": "true"
+        }
+      ],
+      "expect": {
+        "fields": [
+          {
+            "name": "dark",
+            "label": null,
+            "type": "boolean",
+            "value": "false",
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "accent",
+            "label": null,
+            "type": "color",
+            "value": null,
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "refreshInterval",
+            "label": "Refresh interval (seconds)",
+            "type": "float",
+            "value": "300",
+            "access": "public",
+            "role": "refreshInterval"
+          }
+        ],
+        "visible": [
+          "dark",
+          "accent",
+          "refreshInterval"
+        ]
+      }
+    },
+    {
+      "name": "showIf gt on an integer typed as text",
+      "scene": {
+        "id": "a",
+        "fields": [
+          {
+            "name": "count",
+            "type": "integer",
+            "access": "public",
+            "value": "3"
+          },
+          {
+            "name": "spacing",
+            "type": "float",
+            "access": "public",
+            "showIf": [
+              {
+                "field": "count",
+                "operator": "gt",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "name": "single",
+            "type": "string",
+            "access": "public",
+            "showIf": [
+              {
+                "field": "count",
+                "operator": "lte",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "values": [
+        {
+          "count": "5px"
+        }
+      ],
+      "expect": {
+        "fields": [
+          {
+            "name": "count",
+            "label": null,
+            "type": "integer",
+            "value": "3",
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "spacing",
+            "label": null,
+            "type": "float",
+            "value": null,
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "single",
+            "label": null,
+            "type": "string",
+            "value": null,
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "refreshInterval",
+            "label": "Refresh interval (seconds)",
+            "type": "float",
+            "value": "300",
+            "access": "public",
+            "role": "refreshInterval"
+          }
+        ],
+        "visible": [
+          "count",
+          "spacing",
+          "refreshInterval"
+        ]
+      }
+    },
+    {
+      "name": "and blocks and OR-ed conditions",
+      "scene": {
+        "id": "a",
+        "fields": [
+          {
+            "name": "a",
+            "type": "boolean",
+            "access": "public",
+            "value": "true"
+          },
+          {
+            "name": "b",
+            "type": "string",
+            "access": "public",
+            "value": ""
+          },
+          {
+            "name": "both",
+            "type": "string",
+            "access": "public",
+            "showIf": [
+              {
+                "and": [
+                  {
+                    "field": "a"
+                  },
+                  {
+                    "field": "b",
+                    "operator": "notEmpty"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "either",
+            "type": "string",
+            "access": "public",
+            "showIf": [
+              {
+                "field": "b",
+                "operator": "notEmpty"
+              },
+              {
+                "field": "a",
+                "operator": "eq",
+                "value": true
+              }
+            ]
+          },
+          {
+            "name": "emptyB",
+            "type": "string",
+            "access": "public",
+            "showIf": [
+              {
+                "field": "b",
+                "operator": "empty"
+              }
+            ]
+          }
+        ]
+      },
+      "values": [],
+      "expect": {
+        "fields": [
+          {
+            "name": "a",
+            "label": null,
+            "type": "boolean",
+            "value": "true",
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "b",
+            "label": null,
+            "type": "string",
+            "value": "",
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "both",
+            "label": null,
+            "type": "string",
+            "value": null,
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "either",
+            "label": null,
+            "type": "string",
+            "value": null,
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "emptyB",
+            "label": null,
+            "type": "string",
+            "value": null,
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "refreshInterval",
+            "label": "Refresh interval (seconds)",
+            "type": "float",
+            "value": "300",
+            "access": "public",
+            "role": "refreshInterval"
+          }
+        ],
+        "visible": [
+          "a",
+          "b",
+          "either",
+          "emptyB",
+          "refreshInterval"
+        ]
+      }
+    },
+    {
+      "name": "in and notIn",
+      "scene": {
+        "id": "a",
+        "fields": [
+          {
+            "name": "unit",
+            "type": "select",
+            "access": "public",
+            "value": "c",
+            "options": [
+              "c",
+              "f",
+              "k"
+            ]
+          },
+          {
+            "name": "metric",
+            "type": "string",
+            "access": "public",
+            "showIf": [
+              {
+                "field": "unit",
+                "operator": "in",
+                "value": [
+                  "c",
+                  "k"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "imperial",
+            "type": "string",
+            "access": "public",
+            "showIf": [
+              {
+                "field": "unit",
+                "operator": "notIn",
+                "value": [
+                  "c",
+                  "k"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "values": [
+        {
+          "unit": "f"
+        },
+        {}
+      ],
+      "expect": {
+        "fields": [
+          {
+            "name": "unit",
+            "label": null,
+            "type": "select",
+            "value": "c",
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "metric",
+            "label": null,
+            "type": "string",
+            "value": null,
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "imperial",
+            "label": null,
+            "type": "string",
+            "value": null,
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "refreshInterval",
+            "label": "Refresh interval (seconds)",
+            "type": "float",
+            "value": "300",
+            "access": "public",
+            "role": "refreshInterval"
+          }
+        ],
+        "visible": [
+          "unit",
+          "imperial",
+          "refreshInterval"
+        ]
+      }
+    },
+    {
+      "name": "later value maps win",
+      "scene": {
+        "id": "a",
+        "fields": [
+          {
+            "name": "mode",
+            "type": "string",
+            "access": "public",
+            "value": "x"
+          },
+          {
+            "name": "onlyY",
+            "type": "string",
+            "access": "public",
+            "showIf": [
+              {
+                "field": "mode",
+                "operator": "eq",
+                "value": "y"
+              }
+            ]
+          }
+        ]
+      },
+      "values": [
+        {
+          "mode": "z"
+        },
+        {
+          "mode": "y"
+        }
+      ],
+      "expect": {
+        "fields": [
+          {
+            "name": "mode",
+            "label": null,
+            "type": "string",
+            "value": "x",
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "onlyY",
+            "label": null,
+            "type": "string",
+            "value": null,
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "refreshInterval",
+            "label": "Refresh interval (seconds)",
+            "type": "float",
+            "value": "300",
+            "access": "public",
+            "role": "refreshInterval"
+          }
+        ],
+        "visible": [
+          "mode",
+          "onlyY",
+          "refreshInterval"
+        ]
+      }
+    },
+    {
+      "name": "a condition without a field reads the field itself",
+      "scene": {
+        "id": "a",
+        "fields": [
+          {
+            "name": "note",
+            "type": "string",
+            "access": "public",
+            "value": "",
+            "showIf": [
+              {
+                "operator": "notEmpty"
+              }
+            ]
+          },
+          {
+            "name": "other",
+            "type": "string",
+            "access": "public",
+            "value": "x",
+            "showIf": [
+              {
+                "operator": "notEmpty"
+              }
+            ]
+          }
+        ]
+      },
+      "values": [],
+      "expect": {
+        "fields": [
+          {
+            "name": "note",
+            "label": null,
+            "type": "string",
+            "value": "",
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "other",
+            "label": null,
+            "type": "string",
+            "value": "x",
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "refreshInterval",
+            "label": "Refresh interval (seconds)",
+            "type": "float",
+            "value": "300",
+            "access": "public",
+            "role": "refreshInterval"
+          }
+        ],
+        "visible": [
+          "other",
+          "refreshInterval"
+        ]
+      }
+    },
+    {
+      "name": "float values coerce for ne",
+      "scene": {
+        "id": "a",
+        "fields": [
+          {
+            "name": "zoom",
+            "type": "float",
+            "access": "public",
+            "value": "1.0"
+          },
+          {
+            "name": "zoomed",
+            "type": "string",
+            "access": "public",
+            "showIf": [
+              {
+                "field": "zoom",
+                "operator": "ne",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "values": [
+        {
+          "zoom": "1.5"
+        }
+      ],
+      "expect": {
+        "fields": [
+          {
+            "name": "zoom",
+            "label": null,
+            "type": "float",
+            "value": "1.0",
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "zoomed",
+            "label": null,
+            "type": "string",
+            "value": null,
+            "access": "public",
+            "role": null
+          },
+          {
+            "name": "refreshInterval",
+            "label": "Refresh interval (seconds)",
+            "type": "float",
+            "value": "300",
+            "access": "public",
+            "role": "refreshInterval"
+          }
+        ],
+        "visible": [
+          "zoom",
+          "zoomed",
+          "refreshInterval"
+        ]
+      }
+    }
+  ]
+}

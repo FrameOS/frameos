@@ -102,7 +102,7 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     nav: [],
     navNote: 'The first thing the cloud panel renders, so a link to it scrolls nowhere.',
     conditions:
-      'A virtual frame gets name, interval, scale and time zone only: rotation, scaling mode and debug logging are a panel\'s and a device\'s.',
+      "A virtual frame gets name, interval, scale and time zone only: rotation, scaling mode and debug logging are a panel's and a device's.",
   },
   {
     key: 'cloud-defaults',
@@ -193,6 +193,14 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     surfaces: ['backend', 'frameAdmin'],
     conditions:
       'Renders only when a store scene is installed; the nav link is gated the same way (storeSceneOnlyFrameSettingsSections).',
+  },
+  {
+    key: 'layouts',
+    title: 'Layouts',
+    anchor: 'frame-settings-layouts',
+    surfaces: ['backend', 'frameAdmin', 'cloudLinux', 'cloudEsp32', 'cloudVirtual'],
+    conditions:
+      "Which layout each scene wears; saved with the form as the scenes' `layout`, so every surface that saves scenes has it.",
   },
   {
     key: 'cloud-telemetry',
@@ -391,7 +399,7 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     anchor: 'frame-settings-button-actions',
     surfaces: ['backend', 'frameAdmin', 'cloudLinux', 'cloudEsp32'],
     conditions:
-      "The frame's event map (docs/events.md \"Event map\"): what a press does whatever scene shows. A cloud frame needs 2026.10.20 or newer on either profile, older ones render disabled with a note; one that reported its board preset's map and was never pushed one shows it read-only until Edit actions. The actions on offer follow the frame (frameActionKindsFor): Display on / off only where the driver powers the panel (displayPowerDevices), Voice chat only on a frame with a microphone and then for a long press alone.",
+      'The frame\'s event map (docs/events.md "Event map"): what a press does whatever scene shows. A cloud frame needs 2026.10.20 or newer on either profile, older ones render disabled with a note; one that reported its board preset\'s map and was never pushed one shows it read-only until Edit actions. The actions on offer follow the frame (frameActionKindsFor): Display on / off only where the driver powers the panel (displayPowerDevices), Voice chat only on a frame with a microphone and then for a long press alone.',
   },
   {
     key: 'input',

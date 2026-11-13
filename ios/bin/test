@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Runs the FrameOSKit tests (the contract and fixture runners, the client).
+# With Xcode it is plain `swift test`; with only the Command Line Tools the
+# test bundle needs the Testing framework's folders on its rpath.
+set -euo pipefail
+cd "$(dirname "$0")/../FrameOSKit"
+developer_dir="$(xcode-select -p 2>/dev/null || true)"
+if [[ "$developer_dir" == *CommandLineTools* ]]; then
+  # The Testing macros' plugin is not always found by an incremental build
+  # under the Command Line Tools: name it.
+  plugin="$developer_dir/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib"
+  extra=()
+  if [[ -f "$plugin" ]]; then
+    extra=(-Xswiftc -load-plugin-library -Xswiftc "$plugin")
+  fi
+  exec swift test "${extra[@]}" \
+    -Xlinker -rpath -Xlinker "$developer_dir/Library/Developer/Frameworks" \
+    -Xlinker -rpath -Xlinker "$developer_dir/Library/Developer/usr/lib" "$@"
+fi
+exec swift test "$@"

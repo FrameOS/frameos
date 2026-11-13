@@ -12,8 +12,12 @@ import {
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
 import { hasPhotoShareLink } from "../../../../../../src/lib/photos/share-links-in-scenes";
-import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import {
+  identityRateLimitResponse,
+  rateLimitResponse,
+} from "../../../../../../src/lib/rate-limit";
 import { withRetiredAppsReplaced } from "../../../../../../src/lib/retired-apps";
+import { readSession } from "../../../../../../src/lib/session";
 import { withStoreSceneOrigin } from "../../../../../../src/lib/scene-origin";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
 import { photoLinkRefusal } from "../../../../../../src/lib/store-photo-links";
@@ -29,11 +33,29 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // pulled 410 for everyone but the owner's and moderators' own sessions;
 // `?version=N` picks a version (yanked ones included), the default is the
 // newest non-yanked one.
+//
+// Signed in (a web session or a personal API token), a caller spends their
+// account's budget, not their address's. The frames workspace reads one of
+// these per installed scene version on every load (20 frames of 20 scenes is
+// up to 400), and the MCP tools and the AI chat read them too, all from the
+// owner's one address: a per-address 240 ran out after a few workspace
+// reloads, and the store page opened next said "Could not load the scene
+// (429)". Anyone else is limited per address, as before.
+const scenesJsonWindowMs = 15 * 60 * 1000;
+const scenesJsonAccountLimit = 1200;
+const scenesJsonAddressLimit = 240;
+
 async function handleGet(request: NextRequest, context: RouteContext) {
-  const limited = await rateLimitResponse(request, "store:scenes-json", {
-    limit: 240,
-    windowMs: 15 * 60 * 1000,
-  });
+  const session = await readSession();
+  const limited = session?.accountId
+    ? await identityRateLimitResponse(session.accountId, "store:scenes-json", {
+        limit: scenesJsonAccountLimit,
+        windowMs: scenesJsonWindowMs,
+      })
+    : await rateLimitResponse(request, "store:scenes-json", {
+        limit: scenesJsonAddressLimit,
+        windowMs: scenesJsonWindowMs,
+      });
   if (limited) {
     return limited;
   }

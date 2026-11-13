@@ -116,11 +116,11 @@ proc error*(self: App, context: ExecutionContext, message: string,
     # allocate a second full-size image on memory-tight devices.
     renderErrorInto(target, target.width, target.height, message)
     return target
-  return renderError(
-    if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
-    if context.hasImage: context.image.height else: self.frameConfig.renderHeight(),
-    message
-  )
+  # No target taken (a consumer that pans or zooms the photo): on a device,
+  # still the canvas. A full-size RGBX error frame was 8.7 MB on a reTerminal
+  # E1003's 1848x1179 window, an allocation that aborted the render
+  # (2026-11-10).
+  self.renderErrorForContext(context, message)
 
 proc init*(self: App) =
   let folder = if self.appConfig.path == "": self.frameConfig.assetsPath else: self.appConfig.path

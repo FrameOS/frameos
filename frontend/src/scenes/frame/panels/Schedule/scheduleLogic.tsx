@@ -1,3 +1,4 @@
+import { scenesWithoutLayouts } from '../../../../utils/sceneLayouts'
 import { MakeLogicType, actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -209,7 +210,7 @@ export const scheduleLogic = kea<scheduleLogicType>([
     sortedScenes: [
       (s) => [s.scenes],
       (scenes: scheduleLogicValues['scenes']) =>
-        [...(scenes ?? [])].toSorted((a, b) => (a.name || a.id).localeCompare(b.name || b.id)),
+        scenesWithoutLayouts(scenes).toSorted((a, b) => (a.name || a.id).localeCompare(b.name || b.id)),
     ],
     customEventGroups: [
       (s) => [s.sortedScenes],

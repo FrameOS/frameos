@@ -1,7 +1,7 @@
 import {
   createDb,
   findAccountByPasswordEmail,
-  findVerifiedGoogleAccountByEmail,
+  findVerifiedSocialAccountByEmail,
   normalizeEmail,
   passwordResetTokens,
 } from "@frameos-cloud/db";
@@ -78,12 +78,12 @@ export async function POST(request: NextRequest) {
 
   assertDatabaseUrlConfigured();
   const db = createDb();
-  // The reset flow also serves Google-first accounts adding their first
-  // password: completing it creates a verified password identity.
+  // The reset flow also serves Google- and Apple-first accounts adding their
+  // first password: completing it creates a verified password identity.
   const passwordAccount = await findAccountByPasswordEmail(db, email);
   const accountId =
     passwordAccount?.id ??
-    (await findVerifiedGoogleAccountByEmail(db, email))?.accountId;
+    (await findVerifiedSocialAccountByEmail(db, email))?.accountId;
 
   // Whether or not the email resolves to an account, respond identically so
   // the endpoint cannot be used to enumerate registered addresses.

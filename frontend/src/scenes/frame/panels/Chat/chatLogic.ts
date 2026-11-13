@@ -27,7 +27,7 @@ import {
   type CloudAiChatEvent,
   type CloudAiInstallProposal,
 } from '../../../../utils/cloudAiChat'
-import { installCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
+import { addCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
 import { renderSceneCheck } from '../../../../utils/wasmSceneRenderCheck'
 import { assignSceneImages } from '../../../../utils/sceneImages'
 import { frameRenderDevice } from '../../../../utils/frameRenderDevice'
@@ -1229,12 +1229,10 @@ export const chatLogic = kea<chatLogicType>([
       const { proposal } = card
       actions.setProposalStatus(chatId, messageId, proposalId, { state: 'approving' })
       try {
-        await installCloudFrameStoreScene(
-          proposal.frame.id,
-          proposal.scene.id,
-          proposal.scene.version,
-          proposal.declared_settings_groups
-        )
+        await addCloudFrameStoreScene(proposal.frame.id, proposal.scene.id, {
+          sceneVersion: proposal.scene.version,
+          settingsGroups: proposal.declared_settings_groups,
+        })
         actions.setProposalStatus(chatId, messageId, proposalId, {
           state: 'installed',
           queued: !proposal.frame.connected,

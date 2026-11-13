@@ -54,6 +54,11 @@ const
     ## exactly as it was, with room to spare, and answers before the pause
     ## reads as one. Pinned to the C copy in lcd_loading.h by
     ## test_esp32_lcd_loading.py.
+  LoadingMarkMinIntervalSeconds* = 5
+    ## A render pass begins the mark only when the scene's interval is at
+    ## least this: a frame whose own clock redraws it more often (a layout's
+    ## clock bar, a ticking clock) would blink the mark on every tick, and
+    ## nobody is waiting for those. Pinned like the delay.
   LoadingMarkFrameMs* = 50
     ## How often a showing mark is drawn again: 20 frames a second, the LCD
     ## boot splash's rate.

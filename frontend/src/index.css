@@ -490,6 +490,13 @@ html[data-frameos-theme='dark'] .frameos-spinner,
     var(--frameos-page-bg);
 }
 
+/* A shell inside a page that has its own (the scene editor under a frame
+   scene page's bar): its backdrop fills that box, not the viewport, so it
+   never paints over the page around it. */
+.frameos-app-shell--contained::before {
+  position: absolute;
+}
+
 .frameos-app-shell.frameos-theme-dark {
   color: #e5e7eb;
 }
@@ -2582,11 +2589,6 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
 
 .scene-workspace-main.workspace-main-with-right-panel {
   padding-right: calc(430px + 1.25rem);
-}
-
-.scene-editor-canvas.scene-editor-canvas-full {
-  height: 100vh;
-  min-height: 100vh;
 }
 
 .scene-diagram-corner-toolbar,

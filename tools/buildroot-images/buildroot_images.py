@@ -341,6 +341,7 @@ class ReleaseImageFrame:
     max_http_response_bytes: int = DEFAULT_MAX_HTTP_RESPONSE_BYTES
     scaling_mode: str = "contain"
     render_scale: float = 0.0
+    frame_settings_on_screen: bool = True
     rotate: int = 0
     flip: str | None = None
     background_color: str | None = None

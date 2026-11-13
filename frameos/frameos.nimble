@@ -16,7 +16,14 @@ bin           = @["frameos"]
 requires "chrono >= 0.3.1"
 requires "checksums >= 0.2.1"
 requires "nim >= 2.2.4"
-requires "https://github.com/FrameOS/pixie#930bee304df0bfd73849f73a64c4d5c20ef2e3c5"
+# pixie is in the tree (frameos/pixie, config.nims puts it on the path); these
+# are its dependencies, pinned here so nimble.lock keeps carrying them.
+requires "vmath >= 3.0.0"
+requires "chroma >= 1.0.0"
+requires "flatty >= 0.3.4"
+requires "nimsimd >= 1.3.2"
+requires "bumpy >= 1.1.3"
+requires "crunchy >= 0.1.11"
 # FrameOS/mummy: upstream mummy plus TLS listeners (OpenSSL inside the epoll
 # loop), listeners added/removed while serving, and Request.secure. HTTPS on
 # Linux frames terminates here; see docs/native-https.md.

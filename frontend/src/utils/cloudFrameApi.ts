@@ -1,4 +1,4 @@
-import type { EventMapRule, FrameScene, FrameSchedule, FrameType } from '../types'
+import type { EventMapRule, FrameScene, FrameSchedule, FrameType, SceneLayoutRef } from '../types'
 import { apiFetch } from './apiFetch'
 import type { CloudDeviceScenes, CloudDeviceScenesImportResult } from './cloudDeviceScenes'
 import type { CloudFrameSceneRow } from './cloudFrameScenes'
@@ -22,6 +22,12 @@ import {
   cloudFrameSupportsEsp32BatteryEnablePin,
   esp32BuzzerCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Buzzer,
+  esp32TouchBeepCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32TouchBeep,
+  esp32CpuModeCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32CpuMode,
+  esp32RenderModeCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32RenderMode,
   esp32VoiceChatCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32VoiceChat,
   esp32LedCloudFrameSettingsMinVersion,
@@ -77,6 +83,12 @@ export {
   esp32BatteryEnablePinCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Buzzer,
   esp32BuzzerCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32TouchBeep,
+  esp32TouchBeepCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32CpuMode,
+  esp32CpuModeCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32RenderMode,
+  esp32RenderModeCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32VoiceChat,
   esp32VoiceChatCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Led,
@@ -147,14 +159,28 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
       error?: string
       min_frameos_version?: string
       min_interval?: number
+      max_cloud_rendered_frames?: number
     }
     if (detail.error === 'interval_below_plan_floor') {
-      // A frame the cloud draws (a virtual frame) has a floor under its
-      // interval: renders are what it costs.
+      // A frame the cloud draws (a virtual frame, a C3, an S3 set to render
+      // on the server) has a floor under its interval: renders are what it
+      // costs.
       throw new Error(
         `A frame FrameOS Cloud draws refreshes at most every ${
           detail.min_interval ?? 300
         } seconds. Set the refresh interval to that or more.`
+      )
+    }
+    if (detail.error === 'cloud_rendered_frame_quota_exceeded') {
+      // "Render scenes: On FrameOS Cloud" (docs/server-rendering.md) takes
+      // one of the plan's cloud-rendered frames.
+      const max = detail.max_cloud_rendered_frames ?? 0
+      throw new Error(
+        max > 0
+          ? `Your plan renders ${max} frame${
+              max === 1 ? '' : 's'
+            } on FrameOS Cloud, and all of them are in use. Free one up or move to a larger plan.`
+          : 'Your plan has no frames rendered on FrameOS Cloud. A paid plan includes them.'
       )
     }
     if (detail.error === 'settings_need_newer_firmware') {
@@ -290,35 +316,10 @@ export function cloudSceneDeployErrorMessage(code: string | null | undefined, st
       return 'This scene is no longer available in the store'
     case 'scene_version_missing':
       return 'The store has no published version of this scene to update to'
+    case 'frame_update_required':
+      return 'This scene needs a newer FrameOS than the frame runs. Update FrameOS on the frame first'
     default:
       return code ? `Failed to push the scenes (${code})` : `Failed to push the scenes (HTTP ${status})`
-  }
-}
-
-/**
- * Push the workspace's current scene list to a cloud-managed frame. This IS
- * the cloud's deploy: durable and checksummed, applied when the device syncs
- * (battery frames spend most of their life asleep). Pass `sceneId` to keep or
- * set the active scene; without it the runtime activates the first scene.
- * Throws with a toast-ready message on the shim's size/count/state 4xxs.
- */
-export async function deployCloudFrameScenes(
-  frameId: FrameId,
-  scenes: readonly Partial<FrameScene>[],
-  options: { sceneId?: string; state?: Record<string, any> } = {}
-): Promise<void> {
-  const response = await apiFetch(`/api/frames/${frameId}/event/uploadScenes`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      scenes,
-      ...(options.sceneId ? { sceneId: options.sceneId } : {}),
-      ...(options.state ? { state: options.state } : {}),
-    }),
-  })
-  if (!response.ok) {
-    const detail = (await response.json().catch(() => ({}))) as { error?: string }
-    throw new Error(cloudSceneDeployErrorMessage(detail.error, response.status))
   }
 }
 
@@ -375,12 +376,14 @@ export async function dismissCloudFrameDeviceScenes(frameId: FrameId): Promise<v
  * Replace a cloud frame's assignment list outright and push it to the device
  * (POST /api/frames/{id}/scenes enqueues the checksummed set_scenes). Pass
  * `activeSceneId` (a RUNTIME scene id) to keep the current scene on screen —
- * the device otherwise activates the first scene of the payload.
+ * the device otherwise activates the first scene of the payload. `state`:
+ * public field values that scene opens with, in the same push.
  */
 export async function setCloudFrameScenes(
   frameId: FrameId,
   scenes: readonly CloudSceneAssignmentInput[],
-  activeSceneId?: string
+  activeSceneId?: string,
+  state?: Record<string, any>
 ): Promise<void> {
   const response = await apiFetch(`/api/frames/${frameId}/scenes`, {
     method: 'POST',
@@ -388,6 +391,7 @@ export async function setCloudFrameScenes(
     body: JSON.stringify({
       scenes: scenes.map(cloudSceneAssignmentEntry),
       ...(activeSceneId ? { scene_id: activeSceneId } : {}),
+      ...(activeSceneId && state && Object.keys(state).length ? { state } : {}),
     }),
   })
   await assertOk(response, 'Failed to update the frame scene list')
@@ -411,6 +415,8 @@ export interface CloudSceneAssignmentInput {
    * clears them. The workspace save posts the current maps every time.
    */
   event_maps?: Record<string, EventMapRule[]> | null | undefined
+  /** The layout each runtime scene wears (docs/scene-layouts.md), the same way: omitted keeps, null clears. */
+  layouts?: Record<string, SceneLayoutRef> | null | undefined
   /**
    * Move this UNPINNED scene to the store's newest version on this push.
    * Without it a scene the frame already has is pushed again at the version
@@ -427,7 +433,46 @@ function cloudSceneAssignmentEntry(scene: CloudSceneAssignmentInput): Record<str
     ...(scene.latest ? { latest: true } : {}),
     ...(scene.settings_groups ? { settings_groups: scene.settings_groups } : {}),
     ...(scene.event_maps !== undefined ? { event_maps: scene.event_maps } : {}),
+    ...(scene.layouts !== undefined ? { layouts: scene.layouts } : {}),
   }
+}
+
+/**
+ * Install a store scene on a cloud frame: POST /api/frames/{id}/scenes/add,
+ * which merges it into the frame's assignments on the server (no
+ * read-modify-write here) and pushes the set. Installing is asking for the
+ * newest version, also on a re-install; `sceneVersion` pins one instead.
+ * `settingsGroups` is the grant (the service keys its apps declare, as the
+ * owner saw them choosing it); `layouts` the layout each of its runtime scenes
+ * wears; `activate` shows it in the same push ("Install & activate").
+ */
+export async function addCloudFrameStoreScene(
+  frameId: FrameId,
+  sceneId: string,
+  options: {
+    sceneVersion?: number | null
+    settingsGroups?: readonly string[]
+    layouts?: Record<string, SceneLayoutRef>
+    activate?: boolean
+  } = {}
+): Promise<{ alreadyAssigned: boolean }> {
+  const response = await apiFetch(`/api/frames/${frameId}/scenes/add`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      scene_id: sceneId,
+      ...(options.sceneVersion ? { scene_version: options.sceneVersion } : {}),
+      ...(options.settingsGroups ? { settings_groups: [...options.settingsGroups] } : {}),
+      ...(options.layouts && Object.keys(options.layouts).length > 0 ? { layouts: options.layouts } : {}),
+      ...(options.activate ? { activate: true } : {}),
+    }),
+  })
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => ({}))) as { error?: string; detail?: string }
+    throw new Error(detail.detail || cloudSceneDeployErrorMessage(detail.error, response.status))
+  }
+  const body = (await response.json().catch(() => ({}))) as { already_assigned?: boolean }
+  return { alreadyAssigned: body.already_assigned === true }
 }
 
 /**
@@ -477,54 +522,6 @@ export async function grantCloudFrameSceneSettingsGroups(
     })),
     activeSceneId
   )
-}
-
-/**
- * Install (or re-pin) one store scene on a cloud frame, granting it the given
- * service-settings groups — what the chat's Install card does when the user
- * approves an AI proposal. Read-modify-write like assignCloudFrameStoreScene:
- * the endpoint replaces the whole list. `settingsGroups` are the group NAMES
- * the scene declares (unsplash, openAI, …); the server stores them on the
- * assignment as the grant.
- */
-export async function installCloudFrameStoreScene(
-  frameId: FrameId,
-  sceneId: string,
-  sceneVersion: number | null,
-  settingsGroups: string[]
-): Promise<void> {
-  const existing = await listCloudFrameScenes(frameId)
-  const entry = cloudSceneAssignmentEntry({
-    scene_id: sceneId,
-    scene_version: sceneVersion,
-    // Installing IS asking for the newest version, also on a re-install.
-    latest: true,
-    settings_groups: settingsGroups,
-  })
-  // Other rows keep their pin, the version the frame holds and their grant;
-  // the proposed scene takes the grant the card showed, in its current slot
-  // when it is already assigned.
-  const scenes = existing.map((scene) =>
-    scene.scene_id === sceneId
-      ? entry
-      : cloudSceneAssignmentEntry({
-          scene_id: scene.scene_id,
-          scene_version: scene.scene_version ?? null,
-          settings_groups: scene.granted_settings_groups,
-        })
-  )
-  if (!existing.some((scene) => scene.scene_id === sceneId)) {
-    scenes.push(entry)
-  }
-  const response = await apiFetch(`/api/frames/${frameId}/scenes`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenes }),
-  })
-  if (!response.ok) {
-    const detail = (await response.json().catch(() => ({}))) as { error?: string; detail?: string }
-    throw new Error(detail.detail || cloudSceneDeployErrorMessage(detail.error, response.status))
-  }
 }
 
 /** POST /api/frames/{frameId}/scenes/update. */
@@ -671,47 +668,3 @@ export async function updateCloudAccountSceneContent(
   return typeof data.scene?.version === 'number' ? data.scene.version : undefined
 }
 
-/**
- * Assign a store scene to a cloud-managed frame. This is the cloud's actual
- * scene contract: POST /api/frames/{id}/scenes takes the full ordered list of
- * STORE scene ids, persists it server-side and enqueues a set_scenes push to
- * the device — nothing here rides the settings allowlist. Read-modify-write
- * because the endpoint replaces the whole list. Returns false when the scene
- * was already assigned (nothing sent).
- */
-export async function assignCloudFrameStoreScene(
-  frameId: FrameId,
-  sceneId: string,
-  /**
-   * The service-settings groups to grant the new scene — the groups its apps
-   * declare, as the owner saw them when choosing it. Without this the scene
-   * is served no keys (cloud/docs/cloud-frames.md, "Service settings").
-   */
-  settingsGroups: readonly string[] = []
-): Promise<boolean> {
-  const existing = await listCloudFrameScenes(frameId)
-  if (existing.some((scene) => scene.scene_id === sceneId)) {
-    return false
-  }
-  const response = await apiFetch(`/api/frames/${frameId}/scenes`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      scenes: [
-        // Existing rows keep their grant explicitly (a row from before the
-        // grant existed becomes explicit on this save, as the docs promise).
-        ...existing.map((scene) =>
-          cloudSceneAssignmentEntry({
-            scene_id: scene.scene_id,
-            // null/undefined = unpinned: stays at the version the frame holds.
-            scene_version: scene.scene_version ?? null,
-            settings_groups: scene.granted_settings_groups ?? [],
-          })
-        ),
-        cloudSceneAssignmentEntry({ scene_id: sceneId, settings_groups: [...settingsGroups] }),
-      ],
-    }),
-  })
-  await assertOk(response, 'Failed to add the scene to the frame')
-  return true
-}

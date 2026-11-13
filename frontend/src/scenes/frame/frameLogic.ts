@@ -41,6 +41,7 @@ import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
 import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
+import { withActiveLayoutOnNewScenes } from '../../utils/sceneLayouts'
 import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
 import { convertSceneWithFeedback, requestSceneConversion } from '../../utils/sceneConvert'
@@ -56,7 +57,7 @@ import {
   numericCloudFrameSettingKeys,
 } from '../../utils/cloudFrameSettings'
 import { persistAndPushCloudFrameScenes, type CloudScenePersistOptions } from '../../utils/cloudFrameScenesSave'
-import { clearCloudSceneJsonCache } from '../../models/framesModel'
+import { clearCloudSceneJsonCache, rehydrateCloudFrameScenes } from '../../models/framesModel'
 import { appsModel } from '../../models/appsModel'
 import { collectSecretSettingsFromScenes, settingsDetails } from './panels/secretSettings'
 import { withAppPermissions } from '../../utils/sceneAccess'
@@ -404,8 +405,8 @@ export function pendingFrameosUpgrade(
   const details = isCloudManagedFrame(frame)
     ? cloudUndeployedChangeDetails(frame, latestPublishedRelease)
     : isInFrameAdminMode()
-      ? []
-      : deployChangeDetails(deployedFrameBaseline(frame), frame, frame.mode || 'rpios')
+    ? []
+    : deployChangeDetails(deployedFrameBaseline(frame), frame, frame.mode || 'rpios')
   const upgrade = details.find((change) => change.frameosVersionChange?.kind === 'upgrade')?.frameosVersionChange
   return upgrade?.previousVersion ? upgrade : null
 }
@@ -440,6 +441,7 @@ export const FRAME_KEYS: (keyof FrameType)[] = [
   'max_http_response_bytes',
   'scaling_mode',
   'render_scale',
+  'frame_settings_on_screen',
   'rotate',
   'flip',
   'background_color',
@@ -491,7 +493,12 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   colors: '2026.10.2',
   event_map: '2026.10.20',
   voice_chat: '2026.10.20',
+  touch_beep: '2026.11.6',
+  cpu_mode: '2026.11.7',
+  render_mode: '2026.11.7',
+  awake_after_input_seconds: '2026.11.6',
   render_scale: '2026.10.22',
+  frame_settings_on_screen: '2026.11.5',
 }
 
 // These fields are edited through text inputs, so frameForm may hold strings like
@@ -567,6 +574,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   max_http_response_bytes: 'HTTP response size limit',
   scaling_mode: 'Scaling mode',
   render_scale: 'Scale',
+  frame_settings_on_screen: 'Frame settings on the screen',
   rotate: 'Rotation',
   flip: 'Flip',
   background_color: 'Background color',
@@ -585,12 +593,16 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   deep_sleep: 'Deep sleep between renders',
   deep_sleep_on_battery: 'Deep sleep on battery',
   wake_check_seconds: 'Wake-up check interval',
+  awake_after_input_seconds: 'Stay awake after a press or tap',
   battery_pin: 'Battery sense GPIO',
   battery_divider: 'Battery voltage divider',
   battery_enable_pin: 'Battery enable GPIO',
   buzzer_pin: 'Button beep GPIO',
   buzzer_tone_hz: 'Button beep tone',
   voice_chat: 'Voice chat',
+  touch_beep: 'Touch beep',
+  cpu_mode: 'Processor speed',
+  render_mode: 'Render scenes',
   mic_clk_pin: 'Microphone clock GPIO',
   mic_data_pin: 'Microphone data GPIO',
   mic_pwr_pin: 'Microphone power GPIO',
@@ -637,6 +649,7 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'max_http_response_bytes',
   'scaling_mode',
   'render_scale',
+  'frame_settings_on_screen',
   'rotate',
   'flip',
   'background_color',
@@ -966,7 +979,7 @@ function withServiceKeyFingerprints(
   const fingerprints = frame?.settings_fingerprints
   return fingerprints && !frameForm?.settings_fingerprints
     ? { ...(frameForm ?? {}), settings_fingerprints: fingerprints }
-    : (frameForm ?? {})
+    : frameForm ?? {}
 }
 
 export function serviceKeysChangeDetail(
@@ -1160,11 +1173,12 @@ function normalizeBuildrootForComparison(value: unknown): Record<string, unknown
  * rewritten from every bootup line, and `layout` is computed on every read.
  * Compared whole, a sleeping ESP32 put "Embedded settings" in the pending
  * changes after every wake, the deploy's own boot included (frame 70,
- * 2026-10-13: only `lastBoot.at` differed).
+ * 2026-10-13: only `lastBoot.at` differed). `storage` is what the state
+ * partition holds at the frame's last check-in, reported the same way.
  */
 function normalizeEmbeddedForComparison(value: unknown): Record<string, unknown> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-  const { lastBoot: _lastBoot, layout: _layout, firmware: _firmware, ...rest } = source
+  const { lastBoot: _lastBoot, layout: _layout, firmware: _firmware, storage: _storage, ...rest } = source
   return rest
 }
 
@@ -2392,8 +2406,8 @@ export interface frameLogicActions {
   restartRemote: (transport?: RemoteTaskTransport) => {
     transport: RemoteTaskTransport
   }
-  saveAndDeployFrame: () => {
-    value: true
+  saveAndDeployFrame: (options?: { updateStoreSceneIds?: string[] }) => {
+    updateStoreSceneIds: string[]
   }
   saveAndFastDeployFrame: () => {
     value: true
@@ -2406,9 +2420,11 @@ export interface frameLogicActions {
   }
   saveScenes: (
     sceneIds: string[],
-    activeSceneId?: string | null
+    activeSceneId?: string | null,
+    activeState?: Record<string, any> | null
   ) => {
     activeSceneId: string | null
+    activeState: Record<string, any> | null
     sceneIds: string[]
   }
   sceneConversionFinished: (
@@ -2626,11 +2642,17 @@ export const frameLogic = kea<frameLogicType>([
     sceneConversionFinished: (sceneId: string, ok: boolean) => ({ sceneId, ok }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Partial<NodeData>) => ({ sceneId, nodeId, nodeData }),
     saveFrame: true,
-    saveScenes: (sceneIds: string[], activeSceneId?: string | null) => ({
+    saveScenes: (sceneIds: string[], activeSceneId?: string | null, activeState?: Record<string, any> | null) => ({
       sceneIds,
       activeSceneId: activeSceneId ?? null,
+      activeState: activeState ?? null,
     }),
-    saveAndDeployFrame: true,
+    // `updateStoreSceneIds`: on the cloud, the store scenes this deploy moves
+    // to their newest version (the drawer's ticked "Scene updates"); none
+    // when omitted. A backend's updates are in the form before it deploys.
+    saveAndDeployFrame: (options?: { updateStoreSceneIds?: string[] }) => ({
+      updateStoreSceneIds: options?.updateStoreSceneIds ?? [],
+    }),
     saveAndFastDeployFrame: true,
     saveAndFullDeployFrame: true,
     renderFrame: true,
@@ -3399,10 +3421,8 @@ export const frameLogic = kea<frameLogicType>([
         isFrameAdminMode
           ? []
           : lastDeploy
-            ? sortDeployChangeDetails(
-                deployChangeDetails(lastDeploy, withServiceKeyFingerprints(frameForm, frame), mode)
-              )
-            : firstDeployChangeDetails(frameForm, mode),
+          ? sortDeployChangeDetails(deployChangeDetails(lastDeploy, withServiceKeyFingerprints(frameForm, frame), mode))
+          : firstDeployChangeDetails(frameForm, mode),
     ],
     undeployedSummaryItems: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.requiresRecompilation, s.isFrameAdminMode],
@@ -3578,7 +3598,11 @@ export const frameLogic = kea<frameLogicType>([
           template,
         }))
         .filter(({ scenes }) => scenes.length > 0)
-      const newScenes = sceneGroups.flatMap(({ scenes }) => scenes)
+      // A frame with an active layout (docs/scene-layouts.md) has it on what joins.
+      const newScenes = withActiveLayoutOnNewScenes(
+        oldScenes,
+        sceneGroups.flatMap(({ scenes }) => scenes)
+      )
       if (!newScenes.length) {
         return
       }
@@ -3637,7 +3661,7 @@ export const frameLogic = kea<frameLogicType>([
       await asyncActions.submitFrameFormRequest(values.frameForm as FrameType)
       return !values.frameFormSaveError
     }
-    const cloudSaveAndDeploy = async (): Promise<void> => {
+    const cloudSaveAndDeploy = async (updateStoreSceneIds: readonly string[] = []): Promise<void> => {
       try {
         const normalized = normalizeFrameForSubmit(values.frameForm)
         await pushCloudFrameSettings(props.frameId, normalized)
@@ -3655,7 +3679,13 @@ export const frameLogic = kea<frameLogicType>([
       }
       const scenes = values.frameForm?.scenes ?? values.frame?.scenes ?? []
       if (!scenes.length) {
-        framesModel.actions.deployFrame(props.frameId, false)
+        // The settings went out; there is no scene to push.
+        reportTaskOutcome('success', {
+          frameId: props.frameId,
+          kind: 'deploy',
+          title: 'Deploying settings',
+          detail: 'Settings deployed. The frame has no scenes to push.',
+        })
         return
       }
       longRunningTasksModel.actions.startTask({
@@ -3664,17 +3694,32 @@ export const frameLogic = kea<frameLogicType>([
         title: 'Deploying scenes & settings',
         detail: 'Saving scenes to your cloud account',
       })
+      const formAtDeploy = values.frameForm
       try {
-        const outcome = await persistAndPushCloudFrameScenes(
-          props.frameId,
-          scenes,
-          values.frame?.active_scene_id,
-          cloudScenePersistOptions(props.frameId, values.frameForm ?? values.frame ?? {})
-        )
-        for (const storeSceneId of outcome.changedStoreSceneIds) {
+        // The deploy drawer names the scenes with a newer version it takes
+        // along; they move in this same push.
+        const outcome = await persistAndPushCloudFrameScenes(props.frameId, scenes, values.frame?.active_scene_id, {
+          ...cloudScenePersistOptions(props.frameId, values.frameForm ?? values.frame ?? {}),
+          updateStoreSceneIds,
+        })
+        for (const storeSceneId of [...outcome.changedStoreSceneIds, ...Object.keys(outcome.updatedToLatest)]) {
           clearCloudSceneJsonCache(storeSceneId)
         }
-        framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
+        const updatedCount = Object.keys(outcome.updatedToLatest).length
+        if (updatedCount > 0) {
+          // Wait for the new versions to hydrate, then give the form them: it
+          // still holds the old ones, and a later save would publish those
+          // again. Everything else in it was just saved.
+          await Promise.race([
+            rehydrateCloudFrameScenes(props.frameId),
+            new Promise<void>((resolve) => window.setTimeout(resolve, 20_000)),
+          ])
+          if (values.frameForm === formAtDeploy && values.frame) {
+            actions.resetFrameForm(sanitizeFrame(values.frame) as FrameType)
+          }
+        } else {
+          framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
+        }
         framesModel.actions.loadFrame(props.frameId)
         longRunningTasksModel.actions.finishTask({
           frameId: props.frameId,
@@ -3688,20 +3733,23 @@ export const frameLogic = kea<frameLogicType>([
             // library (that IS the storage for cloud frames), mentioned so
             // the library entries this creates are not a mystery.
             'Also saved to your cloud scenes',
+            ...(updatedCount > 0
+              ? [`Updated ${updatedCount} scene${updatedCount === 1 ? '' : 's'} to the latest version`]
+              : []),
             ...outcome.notes,
           ].join('. '),
         })
       } catch (error) {
-        // Persistence failed (rate limit, moderation, offline store…) — the
-        // ad-hoc push still deploys the edited scenes to the device, it just
-        // cannot save them; deployFrame reports its own outcome.
+        // Saving the scenes failed (a rate limit, moderation, the store
+        // offline): nothing was pushed, and the edits stay in the form for
+        // another try. Never an ad-hoc push of the form instead: the cloud
+        // records that as a preview of the whole list, outside the ledger.
         const message = error instanceof Error ? error.message : String(error)
         longRunningTasksModel.actions.taskFailed({
           frameId: props.frameId,
           kind: 'deploy',
-          detail: `Could not save the scenes to your cloud account (${message}) — pushing them straight to the frame instead`,
+          detail: `Could not save the scenes to your cloud account, so nothing was pushed: ${message}`,
         })
-        framesModel.actions.deployFrame(props.frameId, false)
       }
     }
 
@@ -3739,9 +3787,9 @@ export const frameLogic = kea<frameLogicType>([
             : error?.message || 'Failed to save the frame'
         reportTaskOutcome('error', { frameId: props.frameId, kind: 'save', title: 'Saving frame', detail })
       },
-      saveAndDeployFrame: async () => {
+      saveAndDeployFrame: async ({ updateStoreSceneIds }) => {
         if (isCloudMode()) {
-          await cloudSaveAndDeploy()
+          await cloudSaveAndDeploy(updateStoreSceneIds)
           return
         }
         // No transport rewriting here: the backend resolves "auto" against the
@@ -3836,7 +3884,7 @@ export const frameLogic = kea<frameLogicType>([
       },
       createBlankScene: async ({ name, openEditor, openDrawer }) => {
         const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
-        const scene = buildBlankScene(frameForm, name)
+        const [scene] = withActiveLayoutOnNewScenes(frameForm.scenes, [buildBlankScene(frameForm, name)])
         actions.setFrameFormValues({ scenes: [...(frameForm.scenes ?? []), scene] })
         if (openEditor) {
           router.actions.push(urls.scenes(props.frameId, scene.id))
@@ -3844,7 +3892,7 @@ export const frameLogic = kea<frameLogicType>([
           openSceneControlDrawer(props.frameId, scene.id)
         }
       },
-      saveScenes: async ({ sceneIds, activeSceneId }) => {
+      saveScenes: async ({ sceneIds, activeSceneId, activeState }) => {
         // The scene drawer's push (utils/scenePush.ts): the saved frame with
         // these scenes' edited versions in it, and nothing else. Every other
         // unsaved edit stays in the form: the `frame` subscription resets it
@@ -3862,11 +3910,18 @@ export const frameLogic = kea<frameLogicType>([
           // uploadScenes shim: the assignment ledger records this push, so
           // the scene counts as on the frame from now on. No settings push:
           // it is not diffed, and the frame would apply every key again.
+          // Only these scenes are read back and compared: every other
+          // assignment goes out as it is, and the frame gets a patch of what
+          // changed. Field values for the scene it shows ride the same push.
           const outcome = await persistAndPushCloudFrameScenes(
             props.frameId,
             scenes,
             activeSceneId ?? savedFrame.active_scene_id,
-            cloudScenePersistOptions(props.frameId, savedFrame)
+            {
+              ...cloudScenePersistOptions(props.frameId, savedFrame),
+              only: sceneIds,
+              ...(activeSceneId && activeState && Object.keys(activeState).length ? { activeState } : {}),
+            }
           )
           for (const storeSceneId of outcome.changedStoreSceneIds) {
             clearCloudSceneJsonCache(storeSceneId)

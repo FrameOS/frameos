@@ -88,6 +88,11 @@ proc notePanelCanvasWritten*() =
   ## recorded, so the next render draws whole.
   generation += 1
 
+proc panelCanvasGeneration*(image: Image): int64 {.nimcall, raises: [].} =
+  ## scene_rhythm's question: what has written into this kept canvas that was
+  ## not a render? -1 for an RGBA canvas, made anew for every render.
+  if image.isPanelCanvas: generation.int64 else: -1
+
 proc beginPanelCanvasFrame*(image: Image) =
   if image.isPanelCanvas:
     beginPanelFrame(image.bufferPointer, generation)

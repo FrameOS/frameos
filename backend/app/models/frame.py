@@ -450,6 +450,11 @@ class Frame(Base):
     # a panel this many times smaller, drawn sharp at full size. 0 = automatic
     # from the panel's size (app/utils/render_scale.py).
     render_scale = mapped_column(Double, nullable=False, default=0)
+    # frame.json `frameSettingsOnScreen`: the settings panel on the frame's
+    # own screen offers the frame page behind its gear (Wi-Fi, rotation,
+    # scale, Restart, Reboot; docs/scene-settings.md "The frame page"). Off
+    # leaves the scene's form; an unlock on the device wins over it.
+    frame_settings_on_screen = mapped_column(Boolean, nullable=False, default=True)
     rotate = mapped_column(Integer, nullable=True)
     flip = mapped_column(String(32), nullable=True)
     log_to_file = mapped_column(Text, nullable=True)
@@ -560,6 +565,7 @@ class Frame(Base):
             'max_http_response_bytes': self.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
             'scaling_mode': self.scaling_mode,
             'render_scale': normalize_render_scale(self.render_scale),
+            'frame_settings_on_screen': self.frame_settings_on_screen is not False,
             'rotate': self.rotate,
             'flip': self.flip,
             'background_color': self.background_color,
@@ -755,6 +761,7 @@ async def new_frame(
         apps=[],
         scaling_mode="contain",
         render_scale=0,
+        frame_settings_on_screen=True,
         rotate=0,
         device=device or "web_only",
         timezone=None,
@@ -927,6 +934,48 @@ def cached_app_configs() -> dict[str, dict]:
     return _APP_CONFIGS_CACHE["configs"]
 
 
+def scene_is_from_store(scene: Any) -> bool:
+    """A scene read from the public store (origin.storeSceneId, stamped by the
+    cloud on every scenes.json and zip it serves): it gets only the service
+    keys the owner granted on the frame (``service_setting_groups``)."""
+    origin = scene.get('origin') if isinstance(scene, dict) else None
+    return isinstance(origin, dict) and bool(origin.get('storeSceneId'))
+
+
+def scene_declared_setting_groups(scene: Any, app_configs: dict) -> set[str]:
+    """The service settings groups a scene's apps declare (`settings` in each
+    app's config.json; a built-in or retired keyword's from its config). The
+    walk the deploy ships keys by, and the MCP install grants by."""
+    declared: set[str] = set()
+    if not isinstance(scene, dict):
+        return declared
+    scene_apps = scene.get('apps', {}) if isinstance(scene.get('apps', {}), dict) else {}
+    for node in scene.get('nodes', []) or []:
+        if not isinstance(node, dict) or node.get('type', None) != 'app':
+            continue
+        data = node.get('data', {}) or {}
+        sources = data.get('sources', None)
+        keyword = data.get('keyword', None)
+        scene_app = scene_apps.get(keyword)
+        if not sources and isinstance(scene_app, dict):
+            sources = scene_app.get('sources', None)
+        if sources and len(sources) > 0:
+            try:
+                config = json.loads(sources.get('config.json', '{}'))
+                for key in config.get('settings', []):
+                    declared.add(key)
+            except:  # noqa: E722
+                pass
+        elif keyword:
+            # A retired Nim keyword (utils/retired_apps.py) still
+            # declares what its JS replacement does.
+            app_config = app_configs.get(keyword, None) or retired_app_config(keyword)
+            if app_config:
+                for key in app_config.get('settings', []):
+                    declared.add(key)
+    return declared
+
+
 def shipped_frame_settings(frame: "Frame", all_settings: dict, app_configs: Optional[dict] = None) -> dict:
     """The service settings groups frame.json carries for this frame, by
     provenance: what the owner's scenes declare, plus what store-origin
@@ -949,34 +998,11 @@ def shipped_frame_settings(frame: "Frame", all_settings: dict, app_configs: Opti
     }
     app_configs = app_configs if app_configs is not None else get_app_configs()
     for scene in list(frame.scenes):
-        origin = scene.get('origin') if isinstance(scene, dict) else None
-        scene_from_store = isinstance(origin, dict) and bool(origin.get('storeSceneId'))
-        declared_here = store_scene_setting_keys if scene_from_store else setting_keys
-        for node in scene.get('nodes', []):
-            if node.get('type', None) == 'app':
-                sources = node.get('data', {}).get('sources', None)
-                keyword = node.get('data', {}).get('keyword', None)
-                scene_app = scene.get('apps', {}).get(keyword) if isinstance(scene.get('apps', {}), dict) else None
-                if not sources and isinstance(scene_app, dict):
-                    sources = scene_app.get('sources', None)
-                if sources and len(sources) > 0:
-                    try:
-                        config = sources.get('config.json', '{}')
-                        config = json.loads(config)
-                        settings = config.get('settings', [])
-                        for key in settings:
-                            declared_here.add(key)
-                    except:  # noqa: E722
-                        pass
-                else:
-                    if keyword:
-                        # A retired Nim keyword (utils/retired_apps.py) still
-                        # declares what its JS replacement does.
-                        app_config = app_configs.get(keyword, None) or retired_app_config(keyword)
-                        if app_config:
-                            settings = app_config.get('settings', [])
-                            for key in settings:
-                                declared_here.add(key)
+        declared = scene_declared_setting_groups(scene, app_configs)
+        if scene_is_from_store(scene):
+            store_scene_setting_keys |= declared
+        else:
+            setting_keys |= declared
 
     for key in store_scene_setting_keys:
         if key in granted_to_store_scenes:
@@ -1063,6 +1089,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "scalingMode": frame.scaling_mode or "contain",
         # 0 = automatic from the panel's size; a scene's own setting wins.
         "renderScale": normalize_render_scale(frame.render_scale),
+        "frameSettingsOnScreen": frame.frame_settings_on_screen is not False,
         "rotate": frame.rotate or 0,
         "flip": frame.flip,
         "logToFile": frame.log_to_file,

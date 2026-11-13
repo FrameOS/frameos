@@ -237,10 +237,9 @@ def test_byte_iter_ports_convert_at_the_compiled_scene_boundary(tmp_path):
 def test_shipped_byte_iter_apps_stay_declared():
     """The declaration is what keeps the two codegens agreeing, so pin it.
 
-    `icalJson.ical` is generated as a Spool by the app loader; `downloadUrl`'s
-    output is one. If either declaration is dropped, the app loader and the
-    scene codegen disagree about the type and compiled scenes break — which no
-    unit test would otherwise notice.
+    `downloadUrl`'s output is a Spool, and the iCal app's `ical` field says it
+    can take one. If either declaration is dropped, a multi-MB feed is held
+    whole again, which no other test would notice.
     """
     import json
     from pathlib import Path
@@ -248,7 +247,8 @@ def test_shipped_byte_iter_apps_stay_declared():
 
     apps = Path(__file__).resolve().parents[4] / "frameos" / "src" / "apps"
 
-    ical = json.loads((apps / "data" / "icalJson" / "config.json").read_text())
+    repo = Path(__file__).resolve().parents[4] / "repo" / "apps"
+    ical = json.loads((repo / "json" / "icalJson" / "config.json").read_text())
     ical_field = next(f for f in ical["fields"] if f.get("name") == "ical")
     assert declares_byte_iter(ical_field), "icalJson.ical must declare byteIter"
 

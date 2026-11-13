@@ -86,7 +86,9 @@ export const maxFramesPerAccount = (() => {
 export {
   cloudRenderedMinIntervalSeconds,
   cloudRenderedPlatformPrefixes,
+  frameIsCloudRendered,
   hardwareIsCloudRendered,
+  settingsRenderOnServer,
 } from "./cloud-rendered";
 
 export const maxPrivateSceneBytesPerAccount = megabyteLimitFromEnv(
@@ -419,6 +421,9 @@ export async function countCloudRenderedFramesForAccount(
         or(
           sql`${frames.hardware} ->> 'localRenderSupported' = 'false'`,
           ...cloudRenderedPlatformPrefixes.map((prefix) => sql`${platform} like ${prefix + "%"}`),
+          // A board with a runtime set to render on the server
+          // (settingsRenderOnServer, docs/server-rendering.md).
+          sql`${frames.settings} ->> 'render_mode' = 'remote'`,
         ),
       ),
     );

@@ -25,6 +25,13 @@
           "description": "Description for this app",
           "type": "string"
         },
+        "events": {
+          "description": "The events a JS app's onEvent hears, without an event node: contract names, the scene's custom events, or \"*\" (docs/events.md \"Apps that subscribe\"; FrameOS 2026.11+).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "fields": {
           "description": "Fields for app in diagram editor",
           "items": {
@@ -335,6 +342,13 @@
     "InputPortCapabilities": {
       "additionalProperties": false,
       "properties": {
+        "byteIter": {
+          "additionalProperties": {
+            "not": {}
+          },
+          "description": "Consumes the string a window at a time: the value can be bigger than memory. A JS app reads it with frameos.openLines.",
+          "type": "object"
+        },
         "providesTarget": {
           "$ref": "#/definitions/ProvidesTargetCapability",
           "description": "This input can hand its producer an image to write into"

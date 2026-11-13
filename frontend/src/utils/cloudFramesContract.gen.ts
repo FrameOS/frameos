@@ -23,6 +23,9 @@ export const cloudFramesContractSettings = {
     "render_scale": {
       "since": "2026.10.22"
     },
+    "frame_settings_on_screen": {
+      "since": "2026.11.5"
+    },
     "timezone": {
       "since": null
     },
@@ -94,6 +97,9 @@ export const cloudFramesContractSettings = {
     "render_scale": {
       "since": "2026.10.22"
     },
+    "frame_settings_on_screen": {
+      "since": "2026.11.5"
+    },
     "timezone": {
       "since": "2026.8.34"
     },
@@ -127,6 +133,9 @@ export const cloudFramesContractSettings = {
     "deep_sleep_on_battery": {
       "since": null
     },
+    "awake_after_input_seconds": {
+      "since": "2026.11.6"
+    },
     "wake_check_seconds": {
       "since": null
     },
@@ -150,6 +159,16 @@ export const cloudFramesContractSettings = {
     },
     "voice_chat": {
       "since": "2026.10.20"
+    },
+    "touch_beep": {
+      "since": "2026.11.6"
+    },
+    "cpu_mode": {
+      "since": "2026.11.7",
+      "restart": true
+    },
+    "render_mode": {
+      "since": "2026.11.7"
     },
     "mic_clk_pin": {
       "since": "2026.10.20"

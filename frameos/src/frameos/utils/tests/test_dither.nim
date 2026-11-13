@@ -195,6 +195,97 @@ suite "row-streamed dither equals the in-place reference":
           fromRgbx[y * w + x] = level
         check fromGrey == fromRgbx
 
+suite "a 4-bit canvas packed for the panel":
+  proc numbered(width, height: int): Image =
+    result = newImageGray4(width, height)
+    for y in 0 ..< height:
+      for x in 0 ..< width:
+        let v = uint8(((x + y * 3) mod 16) * 17)
+        result[x, y] = rgba(v, v, v, 255)
+
+  test "unrotated it is the canvas's bytes":
+    let image = numbered(8, 4)
+    var buf = newSeq[uint8](16)
+    check packGray4Canvas(image, cast[ptr UncheckedArray[uint8]](buf[0].addr), 8, 4, 0)
+    for y in 0 ..< 4:
+      for x in 0 ..< 8:
+        check gray4Level(cast[ptr UncheckedArray[uint8]](buf[0].addr), y * 8 + x).int ==
+          image.unsafe[x, y].r.int div 17
+
+  test "a canvas that is the panel buffer is packed already":
+    # An unrotated ESP32 sixteen-grey panel draws in its panel buffer
+    # (frameos_nim_share_canvas), and the pack is handed that buffer: it
+    # leaves the bytes as they are, which are what packing the same picture
+    # into a buffer of its own gives. Odd widths too, whose rows end in half
+    # a byte.
+    for (width, height) in [(8, 4), (7, 5), (33, 9)]:
+      var shared = newSeq[uint8](((width + 1) div 2) * height)
+      let canvas = newImageGray4Over(width, height, shared[0].addr)
+      for y in 0 ..< height:
+        for x in 0 ..< width:
+          let v = uint8(((x * 5 + y * 3) mod 16) * 17)
+          canvas[x, y] = rgba(v, v, v, 255)
+      let drawn = shared
+      var own = newSeq[uint8](shared.len)
+      check packGray4Canvas(canvas, cast[ptr UncheckedArray[uint8]](own[0].addr),
+        width, height, 0)
+      check packGray4Canvas(canvas, cast[ptr UncheckedArray[uint8]](shared[0].addr),
+        width, height, 0)
+      check shared == drawn
+      check own == drawn
+      for y in 0 ..< height:
+        for x in 0 ..< width:
+          check gray4Level(cast[ptr UncheckedArray[uint8]](shared[0].addr),
+            y * ((width + 1) and not 1) + x).int == canvas.unsafe[x, y].r.int div 17
+
+  test "turned, each pixel lands where the panel shows it":
+    # The canvas of a 90 or 270 degree frame has the panel's sides swapped.
+    for rotate in [90, 180, 270]:
+      let
+        (canvasW, canvasH) = if rotate == 180: (40, 36) else: (36, 40)
+        (panelW, panelH) = (40, 36)
+        image = numbered(canvasW, canvasH)
+      var buf = newSeq[uint8](((panelW + 1) div 2) * panelH)
+      let wire = cast[ptr UncheckedArray[uint8]](buf[0].addr)
+      check packGray4Canvas(image, wire, panelW, panelH, rotate)
+      for y in 0 ..< canvasH:
+        for x in 0 ..< canvasW:
+          let (px, py) =
+            case rotate
+            of 90: (canvasH - 1 - y, x)
+            of 180: (canvasW - 1 - x, canvasH - 1 - y)
+            else: (y, canvasW - 1 - x)
+          check gray4Level(wire, py * panelW + px).int == image.unsafe[x, y].r.int div 17
+
+  test "a view or another size is not this path":
+    var buf = newSeq[uint8](64)
+    let wire = cast[ptr UncheckedArray[uint8]](buf[0].addr)
+    check not packGray4Canvas(numbered(8, 8).view(0, 0, 4, 4), wire, 8, 8, 0)
+    check not packGray4Canvas(numbered(4, 4), wire, 8, 8, 0)
+    check not packGray4Canvas(newImageGray8(8, 8), wire, 8, 8, 0)
+
+suite "ordered sixteen greys":
+  test "the sixteen exact levels are flat, black and white among them":
+    for level in 0 .. 15:
+      for threshold in OrderedThresholds4x4:
+        check grayLevel16Ordered(uint8(level * 17), threshold) == level.uint8
+
+  test "every grey averages out to itself over the matrix":
+    for gray in 0 .. 255:
+      var total = 0
+      for threshold in OrderedThresholds4x4:
+        let level = grayLevel16Ordered(gray.uint8, threshold).int
+        check level in 0 .. 15
+        total += level
+      check abs(total.float / 16.0 - gray.float * 15.0 / 255.0) <= 0.5
+
+  test "the thresholds are each used once":
+    var seen: array[16, bool]
+    for threshold in OrderedThresholds4x4:
+      seen[threshold.int] = true
+    for wasSeen in seen:
+      check wasSeen
+
 suite "render palette override":
   test "activePalette is the default until a matching override is set":
     clearRenderPaletteOverride()

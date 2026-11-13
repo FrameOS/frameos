@@ -101,6 +101,28 @@ const boardChoices = [
     platform: genericPlatform,
   },
   {
+    label: 'Seeed XIAO ePaper EE02 (13.3" color ESP32-S3)',
+    value: 'hw:seeed_xiao_ee02',
+    platform: genericPlatform,
+  },
+  {
+    label: 'Seeed XIAO ePaper EE03 (10.3" grayscale ESP32-S3)',
+    value: 'hw:seeed_xiao_ee03',
+    platform: genericPlatform,
+  },
+  {
+    label: 'Seeed XIAO ePaper EE04 (24/50-pin panels, ESP32-S3)',
+    value: 'hw:seeed_xiao_ee04',
+    platform: genericPlatform,
+    takesAnyPanel: true,
+  },
+  {
+    label: 'Seeed XIAO ePaper EE05 (24-pin panels, ESP32-S3)',
+    value: 'hw:seeed_xiao_ee05',
+    platform: genericPlatform,
+    takesAnyPanel: true,
+  },
+  {
     label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
     value: 'hw:elecrow_crowpanel_5in79',
     platform: genericPlatform,
@@ -661,6 +683,9 @@ export function Esp32CloudFlasher({
   // display init on a panel other than the one compiled in).
   const [panelSelectable, setPanelSelectable] = useState(false)
   const [panelChoice, setPanelChoice] = useState('')
+  // A carrier board (EE04/EE05): the panel plugged into it, applied with
+  // `set panel` after the board's `set hardware`.
+  const [carrierPanel, setCarrierPanel] = useState('')
   // Optional GPIO override, like the backend frame settings: applied after
   // the hardware/panel choice, so it wins over a preset's wiring.
   const [pinsSpec, setPinsSpec] = useState('')
@@ -694,8 +719,9 @@ export function Esp32CloudFlasher({
   const provisionCommand = panelChoice.startsWith('hw:') ? 'hardware' : 'panel'
   // Which firmware asset the chosen hardware needs. Bare panels are wired to
   // a XIAO ESP32-S3; board bundles carry their chip in boardChoices.
-  const firmwarePlatform =
-    boardChoices.find((choice) => choice.value === panelChoice)?.platform ?? genericPlatform
+  const chosenBoard = boardChoices.find((choice) => choice.value === panelChoice)
+  const firmwarePlatform = chosenBoard?.platform ?? genericPlatform
+  const needsCarrierPanel = Boolean(chosenBoard && 'takesAnyPanel' in chosenBoard)
 
   // The handoff to the freshly enrolled frame: once provisioning is done the
   // board reboots and enrolls on its own schedule, so watch the frames list
@@ -797,6 +823,11 @@ export function Esp32CloudFlasher({
     }
     if (panelSelectable && !panelChoice) {
       setError('Pick the frame hardware first — your board, or the e-paper panel wired to your ESP32.')
+      setPhase('error')
+      return
+    }
+    if (panelSelectable && needsCarrierPanel && !carrierPanel) {
+      setError('Pick the e-paper panel plugged into your board.')
       setPhase('error')
       return
     }
@@ -997,6 +1028,15 @@ export function Esp32CloudFlasher({
           text: `set ${provisionCommand} ${quoteConsoleArgument(provisionKey)}`,
         })
       }
+      if (panelSelectable && needsCarrierPanel && carrierPanel) {
+        // After `set hardware`, which sets the board's default panel.
+        commands.push({
+          display: `set panel ${carrierPanel}`,
+          expect: consolePrompt,
+          required: true,
+          text: `set panel ${quoteConsoleArgument(carrierPanel)}`,
+        })
+      }
       if (panelSelectable && pinsSpec.trim()) {
         // After the hardware/panel command on purpose: a preset applies its
         // own wiring, and an explicit override must win.
@@ -1145,6 +1185,24 @@ export function Esp32CloudFlasher({
                 ))}
               </optgroup>
             </select>
+            {needsCarrierPanel ? (
+              <select
+                aria-label="Panel on this board"
+                className={controlClassName}
+                disabled={busy}
+                onChange={(event) => setCarrierPanel(event.target.value)}
+                value={carrierPanel}
+              >
+                <option disabled value="">
+                  Choose the panel plugged into your board…
+                </option>
+                {esp32Panels.map((panel) => (
+                  <option key={panel.key} value={panel.key}>
+                    {panel.label}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             <input
               aria-label="GPIO pins (optional)"
               className={controlClassName}

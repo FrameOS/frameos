@@ -19,6 +19,9 @@ import {
   nearestCycleOption,
   samplesShowDeepSleep,
   scaledDrainPerHour,
+  sceneSecondsPerWake,
+  SERVER_PULL_SECONDS,
+  serverRenderForecast,
   SLEEP_RATIO,
 } from "../../../../../../frontend/src/utils/batteryForecast";
 import type { MetricsType } from "../../../../../../frontend/src/types";
@@ -486,5 +489,90 @@ describe("slider helpers", () => {
     expect(formatRemaining(24 * 40)).toBe("about 40 days");
     expect(formatRemaining(24 * 120)).toBe("about 4 months");
     expect(formatRemaining(24 * 400)).toBe("over a year");
+  });
+});
+
+/** The same discharge with every sample saying how long its wake's scene took. */
+function withSceneMs(metrics: MetricsType[], renderSceneMs: number): MetricsType[] {
+  return metrics.map((metric) => ({ ...metric, metrics: { ...metric.metrics, renderSceneMs } }));
+}
+
+describe("rendering on the server (docs/server-rendering.md)", () => {
+  it("reads the scene's share of a wake off the newest wakes", () => {
+    const old = withSceneMs(discharge(20, 900, 96, 4), 50_000);
+    const recent = withSceneMs(discharge(CADENCE_WINDOW_WAKES, 900, 90, 4), 20_000).map((metric, index) => ({
+      ...metric,
+      timestamp: new Date(start + (20 + index) * 900 * 1000).toISOString(),
+    }));
+    const { samples } = batterySamplesFromMetrics([...old, ...recent]);
+    expect(sceneSecondsPerWake(samples)).toBe(20);
+    expect(sceneSecondsPerWake(batterySamplesFromMetrics(discharge(20, 900, 96, 4)).samples)).toBeNull();
+  });
+
+  it("forecasts the wake without the scene, plus the pull", () => {
+    // 63 s awake every 15 minutes, 40 of them the scene.
+    const metrics = withSceneMs(discharge(4 * 96, 900, 96, 4), 40_000);
+    const analysis = analyzeBattery(metrics, deepSleepFrame);
+    const now = Date.parse(metrics[metrics.length - 1]!.timestamp);
+    expect(analysis.sceneSeconds).toBe(40);
+
+    const offer = serverRenderForecast(analysis, 900, now)!;
+    expect(offer).not.toBeNull();
+    expect(offer.awakeSeconds).toBe(63);
+    expect(offer.serverAwakeSeconds).toBe(63 - 40 + SERVER_PULL_SECONDS);
+    expect(offer.current.hoursRemaining).toBeCloseTo(batteryForecast(analysis, 900, now)!.hoursRemaining, 5);
+    // The awake share drops from 63/900 to 26/900; the sleep floor stays.
+    const share = (awake: number) => awake / 900 + (1 - awake / 900) * SLEEP_RATIO;
+    expect(offer.gain).toBeCloseTo(share(63) / share(26) - 1, 3);
+    expect(offer.server.hoursRemaining).toBeGreaterThan(offer.current.hoursRemaining * 2);
+
+    // At a slower cadence the same seconds are a smaller share of the day.
+    const hourly = serverRenderForecast(analysis, 3600, now)!;
+    expect(hourly.gain).toBeLessThan(offer.gain);
+    expect(hourly.gain).toBeGreaterThan(0);
+  });
+
+  it("offers nothing when the numbers cannot say", () => {
+    const metrics = withSceneMs(discharge(4 * 96, 900, 96, 4), 40_000);
+    const now = Date.parse(metrics[metrics.length - 1]!.timestamp);
+    // Awake anyway (one boot that never ends): the scene's seconds change nothing.
+    const neverSleeps = Array.from({ length: 4 * 96 }, (_, index) =>
+      atUptime(start, 900 * (index + 1), Math.round(96 - (4 * index * 900) / 86400), {
+        wakeCause: "power_on",
+        renderSceneMs: 40_000,
+      }),
+    );
+    const awake = analyzeBattery(neverSleeps, { deep_sleep: false, deep_sleep_on_battery: false });
+    expect(awake.deepSleep).toBe(false);
+    expect(serverRenderForecast(awake, 900, now)).toBeNull();
+    // A scene quicker than the pull itself.
+    const quick = analyzeBattery(withSceneMs(discharge(4 * 96, 900, 96, 4), 2_000), deepSleepFrame);
+    expect(serverRenderForecast(quick, 900, now)).toBeNull();
+    // A scene longer than the whole wake is a misreading, not a saving.
+    const odd = analyzeBattery(withSceneMs(discharge(4 * 96, 900, 96, 4), 90_000), deepSleepFrame);
+    expect(serverRenderForecast(odd, 900, now)).toBeNull();
+    // Firmware that never reported it.
+    const silent = analyzeBattery(discharge(4 * 96, 900, 96, 4), deepSleepFrame);
+    expect(serverRenderForecast(silent, 900, now)).toBeNull();
+  });
+
+  it("forecasts wakes of another length at the same cadence", () => {
+    const observed = 4 / 24;
+    expect(scaledDrainPerHour(observed, 900, 63, 900, true)).toBeCloseTo(observed, 10);
+    const shorter = scaledDrainPerHour(observed, 900, 63, 900, true, 21);
+    expect(shorter).toBeLessThan(observed / 2);
+    expect(scaledDrainPerHour(observed, 900, 63, 900, false, 21)).toBe(observed);
+  });
+});
+
+describe("frameDeepSleeps", () => {
+  it("reads a backend frame's device_config as well as the cloud's keys", () => {
+    expect(frameDeepSleeps({ deep_sleep: true }, null)).toBe(true);
+    expect(frameDeepSleeps({ device_config: { deepSleep: true } }, null)).toBe(true);
+    expect(frameDeepSleeps({ device_config: { deep_sleep_on_battery: true } }, true)).toBe(true);
+    expect(frameDeepSleeps({ device_config: { deepSleepOnBattery: true } }, false)).toBe(false);
+    // The cloud's own key wins over a stale device_config.
+    expect(frameDeepSleeps({ deep_sleep: false, device_config: { deepSleep: true } }, null)).toBe(false);
+    expect(frameDeepSleeps({}, null)).toBe(false);
   });
 });

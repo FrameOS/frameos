@@ -10,14 +10,14 @@ this page does not list, add it here first.*
 
 | Verb | Means | Where you see it |
 | --- | --- | --- |
-| **Install** | Put something where it was not yet: a scene onto a frame's scene list, or FrameOS onto a host. | "Install on frame", "Install all starred scenes", "Approve and install" (chat), "Install over SSH", "Install with a script", "Installation mode", "Install precompiled binaries", the overview's "3 scenes installed" |
+| **Install** | Put something where it was not yet: a scene onto a frame's scene list, or FrameOS onto a host. | "Install on frame", "Install & activate" (installed, pushed and shown now, in one push of that scene), "Install all starred scenes", "Approve and install" (chat), "Install over SSH", "Install with a script", "Installation mode", "Install precompiled binaries", the overview's "3 scenes installed" |
 | **Push** | Send scenes to the frame, and nothing else. From the scene drawer: the scene and the connected scenes it draws or switches to that have changes (`frontend/src/utils/scenePush.ts`), saved first on the backend; every other unsaved edit stays unsaved. Elsewhere: the frame's scene list (a cloud frame's `set_scenes`, a board over USB). | "Push to frame", "Push & activate", "Save & push" (scene drawer), "Push scenes over USB", the pending-command row "Push scenes", the cloud progress bar's "Push scenes", "Installed and pushed" (chat), the scene list's "not pushed" tag |
 | **Deploy** | Send the frame's settings to the device, with its saved scenes, and FrameOS itself when that is deployed too. Settings and FrameOS are only ever deployed, never pushed. | The drawer heading, the sidebar button, "Deploy scenes & settings" / "Deploy FrameOS, scenes & settings" (Pi), "Deploy scenes & settings" / "Deploy new firmware" / "Deploy both" (backend ESP32), "Deploy scenes & settings" (cloud OTA), the pending-command row "Deploy settings", "Deploy Remote" |
 | **Preview** | Show a scene for now without saving or pushing it, on the frame or in the browser. | "Preview" (the scene drawer: in the browser, with the drawer's values), "Preview on frame" / "Preview in browser" (the editor) |
 | **Discard** | Let go of something that was never saved: the preview a frame shows, which no list holds. Always behind a confirmation, since there is no getting it back. | "Discard" on the scene list's preview row (`docs/scene-previews.md`) |
 | **Update** | Replace something already there with its newer version. | "Update FrameOS" (Pi release, both control planes), "Update firmware" (ESP32 OTA and USB), "Update scene" (a newer version in the repository or store), "Update timezone data" |
 | **Sync** | Reconcile changes made on the device itself (its admin panel) with the workspace. Two-way, so it is not a deploy. | The sidebar button and drawer title while the frame reports local changes, "Sync changes detected" |
-| **Activate** | Show a scene on the frame now. On the active scene the same action is **Apply** (it re-sends the state fields). A scene with changes is pushed as it is activated: the scene drawer's one main button puts the scene on the frame as it stands, saved or not. | "Activate", "Push & activate" / "Push to frame", "Apply", "Save & activate" (on the device), "Activate scene" (the status screen) |
+| **Activate** | Show a scene on the frame now. On the active scene the same action is **Apply** (it re-sends the state fields). A scene with changes is pushed as it is activated: the scene drawer's one main button puts the scene on the frame as it stands, saved or not. On a layout: draw it around every scene, and push what changed; **Deactivate** takes it off them all. | "Activate", "Deactivate" (a layout's drawer), "Push & activate" / "Push to frame", "Install & activate", "Apply", "Save & activate" (on the device), "Activate scene" (the status screen) |
 
 Not user-facing, ever: **upgrade** (the device runtime's name for its
 release swap) and **redeploy**. "Reinstall" is allowed for a scene already
@@ -43,3 +43,6 @@ that ("Installed; the push lands when the frame reconnects").
   vocabulary") opens the self-hosted deploy drawer from the sidebar's Deploy
   button; `visual-cloud-frames-workspace.spec.ts` does the same for a cloud
   Pi frame. Both fail on any "upgrade" wording inside the drawer.
+- The iOS app (`ios/`, `docs/ios-app.md` "Words") uses the same verbs; its
+  pending-command labels are the SPA's table, read from
+  `framePendingCommandsLogic.ts` by `PendingCommandLabelTests`.

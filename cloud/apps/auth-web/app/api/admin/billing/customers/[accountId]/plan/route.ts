@@ -2,6 +2,8 @@ import { eq } from "drizzle-orm";
 import { accounts, subscriptions } from "@frameos-cloud/db";
 import {
   cancelAccountPlan,
+  grantAccountPlan,
+  grantedPlanProvider,
   LedgerError,
   readAccountPlan,
   readPlan,
@@ -47,6 +49,12 @@ type RouteContext = { params: Promise<{ accountId: string }> };
 // (they owe for the period already charged and keep it), or `immediately`
 // for the dunning case. Neither refunds on its own — §3.6's refund is a
 // separate, deliberate act on the journal page.
+//
+// `grant: true` gives the plan without a payment instead (`grantAccountPlan`):
+// nothing is charged or booked, and `until` (a date, the last day the plan
+// runs, or an ISO instant) ends it; without it the grant runs until an
+// operator changes it or the account buys a plan. The way onto a plan for
+// App Review's demo account, a partner or a friend.
 export async function PUT(request: NextRequest, context: RouteContext) {
   const csrf = csrfResponse(request);
   if (csrf) {
@@ -87,6 +95,13 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     });
   }
   const immediately = body.immediately === true;
+  const grant = body.grant === true;
+  const until = grant ? parseUntil(body.until) : null;
+  if (until === "invalid") {
+    return jsonError("invalid_request", 400, {
+      detail: "until must be a date (2026-12-31) or an ISO time",
+    });
+  }
 
   // The account must exist: a subscription row for a uuid nobody has is a
   // receivable nobody will ever pay, and the ledger would not notice.
@@ -102,6 +117,11 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   if (!target) {
     return jsonError("unknown_plan", 404);
   }
+  if (grant && target.priceMicros === 0n) {
+    return jsonError("invalid_request", 400, {
+      detail: "Only a paid plan can be given. Move the account to Free without a grant.",
+    });
+  }
 
   const before = await readAccountPlan(db, accountId);
   const [ours] = await db
@@ -109,13 +129,20 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     .from(subscriptions)
     .where(eq(subscriptions.accountId, accountId))
     .limit(1);
-  if (before.subscribed && ours?.provider && ours.status !== "canceled") {
+  if (
+    before.subscribed &&
+    ours?.provider &&
+    ours.provider !== grantedPlanProvider &&
+    ours.status !== "canceled"
+  ) {
     return jsonError("billed_by_provider", 409, {
       detail: `This account pays for its plan through ${ours.provider}. Change or cancel the subscription in the provider's dashboard; the account follows it.`,
     });
   }
   try {
-    if (target.priceMicros === 0n) {
+    if (grant) {
+      await grantAccountPlan(db, accountId, target.code, { until });
+    } else if (target.priceMicros === 0n) {
       await cancelAccountPlan(db, accountId, { immediately });
     } else {
       await setAccountPlan(db, accountId, target.code);
@@ -136,11 +163,14 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       kind: "superadmin",
       providerSubject: session?.providerSubject,
     },
-    eventType:
-      target.priceMicros === 0n ? "admin.plan_canceled" : "admin.plan_changed",
+    eventType: grant
+      ? "admin.plan_granted"
+      : target.priceMicros === 0n
+        ? "admin.plan_canceled"
+        : "admin.plan_changed",
     metadata: {
       from: before.subscribed ? before.plan.code : null,
-      immediately,
+      ...(grant ? { until: until?.toISOString() ?? null } : { immediately }),
       plan: target.code,
       reason,
     },
@@ -150,10 +180,29 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   return NextResponse.json(
     {
       cancel_at: after.cancelAt?.toISOString() ?? null,
+      granted: after.granted,
       next_plan_code: after.nextPlanCode,
       plan: { code: after.plan.code, name: after.plan.name },
       subscribed: after.subscribed,
     },
     { headers: { "cache-control": "no-store" } },
   );
+}
+
+// The grant's end. A bare date is the last day the plan runs, so it ends at
+// the start of the next day (UTC); anything else must parse as a time.
+// Absent or empty: no end.
+function parseUntil(value: unknown): Date | null | "invalid" {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  if (typeof value !== "string") {
+    return "invalid";
+  }
+  const text = value.trim();
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  const at = day
+    ? new Date(Date.UTC(Number(day[1]), Number(day[2]) - 1, Number(day[3]) + 1))
+    : new Date(text);
+  return Number.isNaN(at.getTime()) ? "invalid" : at;
 }

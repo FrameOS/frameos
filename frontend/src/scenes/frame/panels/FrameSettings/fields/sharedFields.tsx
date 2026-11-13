@@ -304,7 +304,7 @@ function ButtonBeepField(): JSX.Element | null {
   if (!buttonBeep) {
     return null
   }
-  const { pin, toneHz, reportedPin, reportedToneHz, disabledReason } = buttonBeep
+  const { pin, toneHz, reportedPin, reportedToneHz, disabledReason, touchBeep, touchBeepDisabledReason } = buttonBeep
   const pinPlaceholder =
     reportedPin === undefined
       ? 'Board default, -1 = off'
@@ -361,6 +361,24 @@ function ButtonBeepField(): JSX.Element | null {
           />
         </div>
       </div>
+      <fieldset disabled={touchBeepDisabledReason !== undefined} className="min-w-0 space-y-1 @md:flex @md:gap-2">
+        <Label className="@md:w-1/3">
+          Touch beep
+          <Tooltip
+            title={
+              touchBeepDisabledReason ??
+              'On e-paper, a click when something on the screen takes a press (a button, a field, a scene that listens) and when it lifts, and a different click for a second finger. The picture takes a moment to answer, the click does not. While what you asked for loads, the buzzer chirps quietly.'
+            }
+          />
+        </Label>
+        <div className="w-full">
+          <Switch
+            value={touchBeep}
+            onChange={(next) => setButtonBeep({ touchBeep: next })}
+            label={touchBeep ? 'On: a press something takes clicks' : 'Off: the glass is silent'}
+          />
+        </div>
+      </fieldset>
     </fieldset>
   )
 }
@@ -561,8 +579,7 @@ function VoiceChatField(): JSX.Element | null {
  * thing a spoken request can change. A switch that is off takes its tools out
  * of the AI's hands for the next sentence (the plane builds the turn's tools
  * from these, nothing is sent to the device), and the AI says so when asked.
- * Settings, the installed scenes and the photo albums are on by default; new
- * scenes on the frame are opted into. Drawn wherever the voice chat switch is.
+ * All four are on by default. Drawn wherever the voice chat switch is.
  */
 const VOICE_PERMISSION_ROWS: {
   key: 'change_settings' | 'use_scenes' | 'create_scenes' | 'use_albums'
@@ -684,6 +701,35 @@ export function RenderScaleField(): JSX.Element {
             options={renderScaleOptions}
           />
         )}
+      </Field>
+    </fieldset>
+  )
+}
+
+/**
+ * `frame_settings_on_screen` (frame.json `frameSettingsOnScreen`): whether the
+ * settings on the frame's own screen offer the frame page behind the gear.
+ * Unset is on. Disabled with the reason on a cloud frame whose firmware
+ * predates the key.
+ */
+export function FrameSettingsOnScreenField(): JSX.Element | null {
+  const { showFrameSettingsOnScreen, frameSettingsOnScreenDisabledReason } = useFrameSettings()
+  if (!showFrameSettingsOnScreen) {
+    return null
+  }
+  return (
+    <fieldset disabled={!!frameSettingsOnScreenDisabledReason} className="min-w-0">
+      <Field
+        name="frame_settings_on_screen"
+        label="Frame settings on the screen"
+        tooltip="The gear in the settings you open on the frame itself (swipe down from the top). It lets anyone at the frame change its Wi-Fi, rotation and scale, render it again, restart FrameOS or reboot it. Off, the frame shows the scene's settings only. A file named frameos-settings-unlock on the boot partition (Raspberry Pi) or the USB console command set settings_unlock 1 (ESP32) turns it back on, whatever this says."
+        hint={
+          frameSettingsOnScreenDisabledReason ? (
+            <span className="frameos-muted">{frameSettingsOnScreenDisabledReason}</span>
+          ) : undefined
+        }
+      >
+        {({ value, onChange }) => <Switch value={value !== false} onChange={onChange} />}
       </Field>
     </fieldset>
   )

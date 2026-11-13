@@ -24,6 +24,9 @@ export default async function AdminUsersPage({
   const users: AdminUser[] = rows.map((row) => ({
     ...row,
     createdAt: row.createdAt.toISOString(),
+    paidPlan: row.paidPlan
+      ? { ...row.paidPlan, cancelAt: row.paidPlan.cancelAt?.toISOString() ?? null }
+      : null,
   }));
 
   return (
@@ -32,7 +35,8 @@ export default async function AdminUsersPage({
       <div className="content-header">
         <div>
           <p className="copy">
-            Every account, newest first. Backends, frames and scenes read
+            Every account, newest first. A paying account carries its plan
+            next to its name. Backends, frames and scenes read
             &quot;active / total&quot;; hover a number for the breakdown.
           </p>
         </div>

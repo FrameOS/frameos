@@ -186,6 +186,154 @@ static void test_bursts(void)
     CHECK(!fos_animation_burst_end(&a, 310 * S, &st, &owed), "and nothing ends");
 }
 
+static void test_input_hold(void)
+{
+    fos_input_hold_t h = {0};
+    CHECK(!fos_input_hold_engaged(&h), "no hold before any input");
+    CHECK(!fos_input_hold_release(&h, 100 * S), "nothing to release");
+
+    fos_input_hold_note(&h, 100 * S);
+    CHECK(fos_input_hold_engaged(&h), "a tap holds the network back");
+    CHECK(!fos_input_hold_release(&h, 109 * S), "still inside the quiet window");
+    fos_input_hold_note(&h, 109 * S);
+    CHECK(!fos_input_hold_release(&h, 118 * S), "another tap extends it");
+    CHECK(fos_input_hold_release(&h, 119 * S), "released ten quiet seconds after the last tap");
+    CHECK(!fos_input_hold_engaged(&h), "and over");
+    CHECK(!fos_input_hold_release(&h, 120 * S), "released once");
+
+    /* Tapping without a pause: the cap lets the held work through, and the
+     * next tap starts a new hold. */
+    for (int64_t t = 200; t < 260; t++) {
+        fos_input_hold_note(&h, t * S);
+        CHECK(!fos_input_hold_release(&h, t * S), "held at %lld s", (long long)t);
+    }
+    fos_input_hold_note(&h, 260 * S);
+    CHECK(fos_input_hold_release(&h, 260 * S), "a minute is the most it holds");
+    fos_input_hold_note(&h, 261 * S);
+    CHECK(fos_input_hold_engaged(&h), "a new hold");
+    CHECK(!fos_input_hold_release(&h, 262 * S), "with its own minute");
+}
+
+static void test_loading_taps(void)
+{
+    CHECK(fos_loading_taps_wanted(false, true, false, 100 * S, 105 * S), "someone just asked");
+    CHECK(!fos_loading_taps_wanted(false, true, false, 0, 105 * S), "nobody has touched it");
+    CHECK(!fos_loading_taps_wanted(false, true, false, 100 * S, 110 * S), "a schedule, ten seconds after a tap");
+    CHECK(!fos_loading_taps_wanted(true, true, false, 100 * S, 105 * S), "an LCD draws its mark");
+    CHECK(!fos_loading_taps_wanted(false, false, false, 100 * S, 105 * S), "the owner turned the sounds off");
+    CHECK(!fos_loading_taps_wanted(false, true, true, 100 * S, 105 * S), "a voice session has the buzzer");
+}
+
+static void test_who_the_input_hold_is_for(void)
+{
+    /* The SenseCAP Indicator: an LCD with a touch screen and no partial
+     * refresh. A settings pull between taps held each one 2.5 to 3.5 s. */
+    CHECK(fos_input_hold_applies(false, true, false), "a touch LCD");
+    /* The E1002 and the PhotoPainter: keys, a full-refresh panel. */
+    CHECK(fos_input_hold_applies(false, false, true), "a board with keys");
+    CHECK(fos_input_hold_applies(true, false, false), "a partial-refresh panel");
+    CHECK(fos_input_hold_applies(true, true, true), "the Sticky and the E1003: all three");
+    CHECK(!fos_input_hold_applies(false, false, false), "nobody can tap a bare panel");
+}
+
+static void test_quick_pictures_go_up_fast(void)
+{
+    const int64_t s = 1000000;
+    /* The Kitchen sink's Motion page asks for 0.05 s: fast from its first
+     * frame, however long the frame before it took to go up. */
+    CHECK(fos_pictures_fast(0.05, 0, 100 * s), "an animation, its first frame");
+    CHECK(fos_pictures_fast(0.05, 10 * s, 100 * s), "an animation after a long refresh");
+    /* A clock's second hand. */
+    CHECK(fos_pictures_fast(1.0, 0, 100 * s), "a scene that asks every second");
+    CHECK(!fos_pictures_fast(2.5, 0, 100 * s), "2.5 s is the settle's own wait: not quick");
+    CHECK(!fos_pictures_fast(60.0, 0, 100 * s), "a minute's scene, alone");
+    CHECK(!fos_pictures_fast(0.0, 0, 100 * s), "a scene with no interval, alone");
+    /* Pictures somebody else asked for, close together (an editor's slider):
+     * fast while they keep coming, slow again after a pause. */
+    CHECK(fos_pictures_fast(60.0, 99 * s, 100 * s), "a second after the last picture");
+    CHECK(fos_pictures_fast(0.0, 98 * s, 100 * s - 1), "just under 2.5 s after it");
+    CHECK(!fos_pictures_fast(60.0, 97 * s, 100 * s), "3 s after it");
+    CHECK(!fos_pictures_fast(60.0, 0, 1 * s), "no picture yet");
+}
+
+static void test_the_picture_push_gives_way(void)
+{
+    /* On the render task: each thing that wants it back stops the push. */
+    CHECK(fos_image_push_yields(false, true, false, false), "a tap or a key");
+    CHECK(fos_image_push_yields(false, false, true, false), "an event from HTTP, the cloud or the console");
+    CHECK(fos_image_push_yields(false, false, false, true), "a render asked for");
+    CHECK(!fos_image_push_yields(false, false, false, false), "nothing waits: the push goes on");
+    /* On the backend link task nobody waits for it: it never stops there,
+     * or a frame tapped every few seconds would never push a picture. */
+    CHECK(!fos_image_push_yields(true, true, true, true), "the link task pushes on");
+}
+
+static void test_the_backend_link(void)
+{
+    CHECK(fos_backend_link_on(true, false, 1), "a frame that stays awake");
+    CHECK(fos_backend_link_on(true, false, 500), "and goes on doing so");
+    /* A boot's first pass: its render waits for the commands and scenes the
+     * sleep held, so they are pulled on the render task first. */
+    CHECK(!fos_backend_link_on(true, false, 0), "not on a boot's first pass");
+    /* A frame about to deep-sleep: whatever is pulled must run before it
+     * goes, and the link task would not get its turn. */
+    CHECK(!fos_backend_link_on(true, true, 7), "not before a deep sleep");
+    CHECK(!fos_backend_link_on(false, false, 7), "not without the task");
+}
+
+static void test_a_timed_render_waits_for_the_glass(void)
+{
+    /* The E1002's color refresh is 28.7 s on the display's own task. */
+    CHECK(fos_idle_wait_goes_on(10 * S, 60 * S, false), "inside the interval");
+    CHECK(!fos_idle_wait_goes_on(60 * S, 60 * S, false), "the interval is over");
+    CHECK(fos_idle_wait_goes_on(61 * S, 60 * S, true), "over, but the glass still refreshes");
+    CHECK(!fos_idle_wait_goes_on(89 * S, 60 * S, false), "the refresh ended: render");
+}
+
+static void test_a_layouts_second_is_a_second(void)
+{
+    /* A 1 s clock in a layout: the layout's wait is the clock's due time
+     * minus the pass's start, a hair either side of a second. Read as "under
+     * one", it was no opinion, and the frame's 300 s: the Sticky's clock
+     * stood still for five minutes now and then (2026-11-10). */
+    CHECK(fos_scene_interval_snap(0.99996) == 1.0, "0.99996 s is a second");
+    CHECK(fos_scene_interval_snap(1.00004) == 1.0, "and so is 1.00004 s");
+    CHECK(fos_scene_interval_snap(59.995) == 60.0, "a minute's clock too");
+    CHECK(fos_pass_interval_seconds(fos_scene_interval_snap(0.99996), 300) == 1,
+          "the scene's second, never the frame's 300 s");
+    /* An animation on an LCD stays one (below a second, not near it), and a
+     * second's clock does not start one now and then. */
+    CHECK(fos_scene_interval_snap(0.5) == 0.5, "half a second is half a second");
+    CHECK(fos_scene_interval_snap(0.05) == 0.05, "20 fps stays 20 fps");
+    CHECK(fos_animation_wanted(0.5, true, false), "an animation");
+    CHECK(!fos_animation_wanted(fos_scene_interval_snap(0.9999), true, false),
+          "a layout's second does not animate an LCD");
+    CHECK(fos_scene_interval_snap(1.5) == 1.5, "a second and a half is not snapped");
+    CHECK(fos_scene_interval_snap(299.013) == 299.013, "nor is a wait well between seconds");
+    /* No opinion: the frame's interval. */
+    CHECK(fos_scene_interval_snap(0.0) == 0.0, "zero: none");
+    CHECK(fos_scene_interval_snap(-3.0) == 0.0, "negative: none");
+    CHECK(fos_scene_interval_snap(0.0 / 0.0) == 0.0, "NaN: none");
+    CHECK(fos_pass_interval_seconds(0.0, 300) == 300, "no opinion: the frame's");
+    CHECK(fos_pass_interval_seconds(0.0, 0) == 300, "and 300 s without one");
+    CHECK(fos_pass_interval_seconds(0.0, 60) == 60, "the frame's own");
+    /* Under a second on e-paper: the loop's shortest, a second, not 300 s. */
+    CHECK(fos_pass_interval_seconds(0.25, 300) == 1, "a quarter second: one second");
+    CHECK(fos_pass_interval_seconds(5.0, 300) == 5, "five seconds");
+    CHECK(fos_pass_interval_seconds(1.9, 300) == 1, "whole seconds, rounded down as before");
+    CHECK(fos_pass_interval_seconds(30.0 * 86400.0, 300) == 7 * 86400, "a month: a week");
+}
+
+static void test_an_animation_is_pictured_once(void)
+{
+    /* Each push on an LCD hashes, copies and uploads 460 KB: the frames
+     * around it took up to 115 ms instead of 75. */
+    CHECK(fos_animation_push_wanted(true, false), "an animation's first picture goes");
+    CHECK(!fos_animation_push_wanted(true, true), "then no more while it runs");
+    CHECK(fos_animation_push_wanted(false, true), "a scene that is not animating pushes as before");
+    CHECK(fos_animation_push_wanted(false, false), "and so does a new one");
+}
+
 int main(void)
 {
     test_wanted();
@@ -194,6 +342,15 @@ int main(void)
     test_pacing();
     test_logging_cadence();
     test_bursts();
+    test_input_hold();
+    test_loading_taps();
+    test_who_the_input_hold_is_for();
+    test_quick_pictures_go_up_fast();
+    test_the_picture_push_gives_way();
+    test_the_backend_link();
+    test_a_timed_render_waits_for_the_glass();
+    test_a_layouts_second_is_a_second();
+    test_an_animation_is_pictured_once();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

@@ -113,8 +113,10 @@ function parseHardware(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
+  // The frame hub's maxHardwareBytes (frame-hub protocol.ts): the same report
+  // refreshed on hello. 8 KB, with an ESP32's per-scene sizes in storage.
   const serialized = JSON.stringify(value);
-  if (serialized.length > 4096) {
+  if (serialized.length > 8 * 1024) {
     return null;
   }
   return value as Record<string, unknown>;

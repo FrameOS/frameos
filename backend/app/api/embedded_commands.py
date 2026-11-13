@@ -46,6 +46,8 @@ from app.redis import get_redis
 from app.utils.deploy_progress import fold as fold_deploy_progress
 from app.utils.deploy_progress import fold_command as fold_deploy_progress_command
 from app.utils.embedded_commands import command_label
+from app.utils.embedded_report import follow_device_address, reported_address
+from app.utils.request_ip import client_ip_for_request
 from app.utils.frame_commands import (
     ack_frame_command,
     ack_pull_backed_commands,
@@ -91,9 +93,16 @@ def _str_field(body: dict[str, Any], key: str) -> str | None:
 
 async def _remember_device_state(redis: Redis, frame: Frame, body: dict[str, Any]) -> None:
     """What the device says it shows, into the states cache the workspace
-    reads (frames.py `/states`), marked fresh: the device just said so."""
+    reads (frames.py `/states`), marked fresh: the device just said so. Not
+    for a frame rendered here: what its own runtime holds is left from
+    before, the backend is its memory (docs/server-rendering.md), and its
+    word would undo the scene a relayed key switched to."""
+    from app.tasks.embedded_firmware import is_thin_client_frame
+
     from .frames import _frame_states_cache_key, _write_frame_states_cache
 
+    if is_thin_client_frame(frame):
+        return
     active_scene = _str_field(body, "active_scene")
     states = body.get("states")
     if active_scene:
@@ -108,6 +117,37 @@ async def _remember_device_state(redis: Redis, frame: Frame, body: dict[str, Any
         states = {active_scene: states}
     record = {"sceneId": active_scene or "", "states": states}
     await _write_frame_states_cache(redis, _frame_states_cache_key(frame.id), record, fetched_at=time.time())
+
+
+async def _remember_device_storage(db: Session, redis: Redis, frame: Frame, body: dict[str, Any]) -> None:
+    """What /state holds, kept on the row (embedded.storage) for the workspace.
+    Written only when it changed: this route runs once per render pass."""
+    reported = body.get("storage")
+    if not isinstance(reported, dict):
+        return
+    storage: dict[str, Any] = {
+        key: int(reported[key])
+        for key in ("stateTotalBytes", "stateUsedBytes", "scenesBytes", "sceneCount")
+        if isinstance(reported.get(key), (int, float)) and reported[key] >= 0
+    }
+    # Each scene's footprint on the partition, by scene id (the pages its file
+    # takes, in the units of stateUsedBytes: fos_spiffs_footprint.c). Bounded:
+    # a board holds 32 scenes at most.
+    sizes = reported.get("sceneBytes")
+    if isinstance(sizes, dict):
+        kept = {
+            key: int(value)
+            for key, value in list(sizes.items())[:64]
+            if isinstance(key, str) and 0 < len(key) <= 128 and isinstance(value, (int, float)) and value >= 0
+        }
+        if kept:
+            storage["sceneBytes"] = kept
+    embedded = dict(frame.embedded or {})
+    if not storage or embedded.get("storage") == storage:
+        return
+    embedded["storage"] = storage
+    frame.embedded = embedded
+    await update_frame(db, redis, frame)
 
 
 async def _clear_sleep_forecast(db: Session, redis: Redis, frame: Frame) -> None:
@@ -175,31 +215,52 @@ async def api_embedded_device_commands(
     now = utcnow()
 
     await _remember_device_state(redis, frame, body)
+    await _remember_device_storage(db, redis, frame, body)
+    # A frame that joined another network on its own screen says where it
+    # is now. Strict, as for a bootup: this can move frame_host (api/log.py).
+    if follow_device_address(frame, reported_address(body), client_ip_for_request(request, strict=True)):
+        await update_frame(db, redis, frame)
 
     # The cloud hello's name for it, and the older name this route first had.
     scenes_etag = _str_field(body, "scenes_checksum") or _str_field(body, "scenes_etag")
     settings_etag = _str_field(body, "settings_etag")
+    scenes_current = None if scenes_etag is None else scenes_etag == embedded_scenes_etag(db, frame)
     acked = ack_pull_backed_commands(
         db,
         frame,
-        scenes_current=None if scenes_etag is None else scenes_etag == embedded_scenes_etag(db, frame),
+        scenes_current=scenes_current,
         settings_current=None if settings_etag is None else settings_etag == embedded_settings_etag(db, frame),
         now=now,
     )
     handed = drain_frame_commands(db, frame, now)
+    # A switch to a scene saved since the frame's last pull ("Push & activate"
+    # queues the switch while its deploy job is still queueing the rows) names
+    # a scene the frame does not hold yet: it pulls first, and the pull is the
+    # changed scenes alone (`?patch=1` with its ETag). Never over a store the
+    # frame was handed locally (USB, its own HTTP API): that one waits for a
+    # deploy.
+    switch_behind = (
+        scenes_current is False
+        and scenes_etag != "local"
+        and any(command.type == "set_current_scene" for command in handed)
+    )
     db.commit()
     for command in acked:
         await _note_outcome(db, redis, frame, command)
         await _fold_deploy_progress_command(db, redis, frame, command)
         await _record_deploy_if_settled(db, redis, frame, command)
     await _clear_sleep_forecast(db, redis, frame)
+    from app.tasks.embedded_firmware import is_thin_client_frame
+
+    rendered_on_server = is_thin_client_frame(frame)
     return {
-        "commands": [frame_command_wire(command) for command in handed],
+        "commands": [frame_command_wire(command, rendered_on_server=rendered_on_server) for command in handed],
         "pending": pending_command_count(db, frame, now),
         # A deploy is waiting and the device does not hold it: pull the
         # scenes and settings now, whatever the device's own sync rules say
         # (a USB-pushed scene store skips the backend pull until a deploy).
-        "sync": deploy_rows_pending(db, frame, now),
+        # The device pulls before it runs the commands (fos_commands.c).
+        "sync": deploy_rows_pending(db, frame, now) or switch_behind,
     }
 
 

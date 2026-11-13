@@ -194,7 +194,7 @@ proc startMarkThread() =
   markStarted = true
   initLock(markLock)
   markState.shownMs = -1
-  markWake.open()
+  markWake.open(1) # one wake pending is all a render pass needs
   createThread(markThread, markThreadMain)
 
 proc loadingMarkDevice*(device: string): bool =
@@ -244,7 +244,7 @@ proc beginLoadingMarkOn*(panel: MarkPanel): int =
   withLock markLock:
     {.cast(gcsafe).}:
       result = markBegin(markState, panel, monoMs())
-  markWake.send(1)
+  discard markWake.trySend(1)
 
 when defined(testing):
   var loadingMarkTestPanel*: MarkPanel

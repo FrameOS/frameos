@@ -1,6 +1,10 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createPatchedFetcher } from "next/dist/server/lib/patch-fetch";
+import { Agent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   blobNamespaces,
@@ -332,6 +336,37 @@ describe("the S3 driver's requests", () => {
     expect(requests[0]!.auth).toContain("/auto/s3/aws4_request");
   });
 
+  it("retries an upload the store was too busy for, the whole file each time", async () => {
+    process.env.R2_CLOUD_ENDPOINT = "https://accountid.r2.cloudflarestorage.com";
+    process.env.R2_CLOUD_ACCESS_KEY_ID = "key";
+    process.env.R2_CLOUD_SECRET_ACCESS_KEY = "secret";
+    resetObjectStoreForTests();
+    const path = join(root, "retry.bin");
+    const body = Buffer.alloc(70_000, 3);
+    await writeFile(path, body);
+
+    const statuses = [503, 429, 200];
+    const sent: number[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push((await new Request(input, init).arrayBuffer()).byteLength);
+      return new Response(null, { status: statuses.shift() ?? 500 });
+    }) as typeof fetch;
+    try {
+      await objectStore().put("photos/x/y", { path, size: body.length }, "image/jpeg");
+      expect(sent).toEqual([body.length, body.length, body.length]);
+
+      statuses.push(503, 503, 503, 200);
+      sent.length = 0;
+      await expect(objectStore().put("photos/x/y", body, "image/jpeg")).rejects.toThrow(
+        /Object store PUT photos\/x\/y failed: 503/,
+      );
+      expect(sent).toHaveLength(3);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   it("reports a missing object as undefined and a failure as a throw", async () => {
     process.env.R2_CLOUD_ENDPOINT = "https://accountid.r2.cloudflarestorage.com";
     process.env.R2_CLOUD_ACCESS_KEY_ID = "key";
@@ -354,6 +389,96 @@ describe("the S3 driver's requests", () => {
       globalThis.fetch = realFetch;
     }
   });
+});
+
+describe("the S3 driver on a real socket", () => {
+  // The requests above stop at a stubbed fetch, so they cannot see what fetch
+  // itself refuses. npm undici, loaded before a process's first fetch (the
+  // frame hub did, through ssrf.ts), becomes the dispatcher behind the global
+  // fetch, and it refused every buffer upload carrying a hand-set
+  // content-length: "fetch failed", before a byte left the process. Dev and CI
+  // use the filesystem driver, so only this shows it. Here fetch has already
+  // run, so the dispatcher is installed by hand.
+  //
+  // Inside a route handler there is a second fetch in the way: Next 16's own
+  // (next/dist/server/lib/patch-fetch.js), which rebuilds a Request it is
+  // handed from `request.body`, a stream with no length. A buffer PUT that
+  // reached it as a Request went out chunked, and R2 answered 411
+  // MissingContentLength to store saves and photo uploads (2026-11-10). A work
+  // store is all Next needs to take that path, so the uploads run both ways.
+  type Received = { body: Buffer; contentLength: string | undefined };
+
+  function fetchAsInsideARoute(): () => void {
+    const realFetch = globalThis.fetch;
+    const workStore = { page: "/api/test/route", route: "/api/test" };
+    globalThis.fetch = createPatchedFetcher(realFetch, {
+      workAsyncStorage: { getStore: () => workStore },
+      workUnitAsyncStorage: { getStore: () => undefined },
+    } as unknown as Parameters<typeof createPatchedFetcher>[1]) as typeof fetch;
+    return () => {
+      globalThis.fetch = realFetch;
+    };
+  }
+
+  async function withBucket(
+    insideARoute: boolean,
+    run: (received: Received[]) => Promise<void>,
+  ) {
+    const dispatcher = getGlobalDispatcher();
+    setGlobalDispatcher(new Agent());
+    const restoreFetch = insideARoute ? fetchAsInsideARoute() : () => {};
+    const received: Received[] = [];
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        received.push({ body: Buffer.concat(chunks), contentLength: request.headers["content-length"] });
+        response.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    process.env.R2_CLOUD_ENDPOINT = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    process.env.R2_CLOUD_ACCESS_KEY_ID = "key";
+    process.env.R2_CLOUD_SECRET_ACCESS_KEY = "secret";
+    resetObjectStoreForTests();
+    try {
+      await run(received);
+    } finally {
+      restoreFetch();
+      setGlobalDispatcher(dispatcher);
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+
+  for (const [where, insideARoute] of [
+    ["in a plain process (the frame hub)", false],
+    ["inside a Next route (auth-web)", true],
+  ] as const) {
+    describe(where, () => {
+      it("uploads a buffer, its length set by fetch", async () => {
+        await withBucket(insideARoute, async (received) => {
+          const body = Buffer.alloc(204_800, 7);
+          await objectStore().put("frames/x/cache/abc", body, "image/png");
+          expect(received).toHaveLength(1);
+          expect(received[0]!.contentLength).toBe(String(body.length));
+          expect(received[0]!.body.equals(body)).toBe(true);
+        });
+      });
+
+      it("uploads a file from disk with its length", async () => {
+        await withBucket(insideARoute, async (received) => {
+          const path = join(root, "upload.bin");
+          const body = Buffer.alloc(204_800, 9);
+          await writeFile(path, body);
+          await objectStore().put("photos/x/y", { path, size: body.length }, "image/png");
+          expect(received).toHaveLength(1);
+          expect(received[0]!.contentLength).toBe(String(body.length));
+          expect(received[0]!.body.equals(body)).toBe(true);
+        });
+      });
+    });
+  }
 });
 
 describe("the /admin live check", () => {

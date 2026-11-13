@@ -3,8 +3,8 @@ column and cloud settings key).
 
 A UI from a .tsx or .jsx app is laid out for a panel this many times smaller
 and drawn sharp at full size, so a scene made for an 800x480 screen fills a
-1600x1200 one. 0 is automatic: the runtime takes the panel's shorter edge over
-600 px in quarter steps, at least 1 (``frameos/src/frameos/render_scale.nim``,
+1600x1200 one. 0 is automatic: 1, and 2 on a 4K or larger screen on HDMI
+(``frameos/src/frameos/render_scale.nim``,
 ``frontend/src/utils/renderScale.ts``). A scene's own ``settings.renderScale``
 or a field with ``role: "renderScale"`` wins over it on the device.
 

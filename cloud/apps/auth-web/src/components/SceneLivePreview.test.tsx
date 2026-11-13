@@ -9,7 +9,7 @@ import {
   normalizeHexColor,
   NOTICE_HIDE_MS,
   SceneLivePreviewPanel,
-} from "./SceneLivePreview";
+} from "../../../../../frontend/src/sceneWorkspace/SceneLivePreview";
 
 type PreviewMemoryUsage = {
   limitBytes: number;
@@ -129,6 +129,45 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
+describe("SceneLivePreviewPanel embedded", () => {
+  it("starts on the device and board it is given, ignoring and keeping this browser's settings", async () => {
+    window.localStorage.setItem("frameos.preview.device", "esp32_16mb");
+    window.localStorage.setItem("frameos.preview.panel", "spectra6");
+    render(
+      <SceneLivePreviewPanel
+        height={480}
+        initialDevice="sensecap-indicator"
+        initialMemoryDevice="esp32"
+        rememberSettings={false}
+        sceneId="scene-1"
+        scenes={[clockScene]}
+        width={480}
+      />,
+    );
+    await waitFor(() => expect(previews).toHaveLength(1));
+    // Booted once, straight into the board's ceiling and the LCD's full colour.
+    const options = previews[0]!.options as unknown as {
+      deviceLimits: unknown;
+      panelPalette: string | null;
+      width: number;
+      height: number;
+    };
+    expect(options).toMatchObject({ height: 480, panelPalette: null, width: 480 });
+    expect(options.deviceLimits).not.toBeNull();
+    expect((screen.getByLabelText("Device") as HTMLSelectElement).value).toBe("sensecap-indicator");
+    expect((screen.getByLabelText("Memory limit") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Device to simulate") as HTMLSelectElement).value).toBe("esp32");
+
+    // A change here is not written over what the store's own pages remember.
+    act(() => {
+      fireEvent.click(screen.getByLabelText("Memory limit"));
+    });
+    await waitFor(() => expect(previews).toHaveLength(2));
+    expect(window.localStorage.getItem("frameos.preview.device")).toBe("esp32_16mb");
+    expect(window.localStorage.getItem("frameos.preview.panel")).toBe("spectra6");
+  });
+});
+
 describe("SceneLivePreviewPanel memory limit", () => {
   it("is off by default, and the device picker waits behind its checkbox", async () => {
     render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
@@ -186,6 +225,35 @@ describe("SceneLivePreviewPanel memory limit", () => {
     // 9.98 MB of preview peak is 5.9 MB on the frame, under its 6.1 MB — the
     // numbers its own logs would show, not the preview's inflated ones.
     expect(screen.getByText(/peak 5.9 MB of 6.1 MB$/)).toBeTruthy();
+  });
+
+  it("drops an out-of-memory notice when the runtime reboots at another size", async () => {
+    render(<SceneLivePreviewPanel height={1600} sceneId="scene-1" scenes={[clockScene]} width={1200} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    act(() => {
+      fireEvent.click(screen.getByLabelText("Memory limit"));
+    });
+    await waitFor(() => expect(previews).toHaveLength(2));
+    // The 8 MB board draws a 13.3" panel's canvas in RGB565, and says so.
+    expect(previews[1]!.options.deviceLimits!.canvasBytesPerPixel).toBe(2);
+
+    act(() =>
+      previews[1]!.options.onOutOfMemory!({
+        limitBytes: 10_220_032,
+        peakBytes: 10_000_000,
+        refusedBytes: 7_680_000,
+        usedBytes: 7_700_000,
+      })
+    );
+    expect(screen.getByText(/Out of memory on the simulated device/)).toBeTruthy();
+
+    // A smaller size is a new runtime with a clean heap: the notice was the
+    // last one's (it used to stay up over a clock that rendered fine).
+    fireEvent.change(screen.getByLabelText("Resolution"), { target: { value: "800" } });
+    fireEvent.change(screen.getByLabelText("Viewport height"), { target: { value: "480" } });
+    fireEvent.click(screen.getByRole("button", { name: "Resize" }));
+    await waitFor(() => expect(previews).toHaveLength(3));
+    expect(screen.queryByText(/Out of memory on the simulated device/)).toBeNull();
   });
 });
 
@@ -472,6 +540,49 @@ describe("SceneLivePreviewPanel viewport", () => {
     expect((screen.getByRole("button", { name: "Resize" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("keeps the applied values in the form while a rotate reboots the runtime, and boots it with them", async () => {
+    render(<SceneLivePreviewPanel height={600} sceneId="scene-1" scenes={[clockScene]} width={800} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    act(() =>
+      previews[0]!.options.onReady!({
+        currentSceneId: "scene-runtime-1",
+        scenes: [{ id: "scene-runtime-1", name: "Clock", refreshInterval: 60 }],
+      }),
+    );
+    fireEvent.change(screen.getByLabelText("Clock style"), { target: { value: "minimal" } });
+    fireEvent.click(screen.getByRole("button", { name: /Apply & render/ }));
+    // The runtime takes them: the form's edit is confirmed and dropped.
+    act(() =>
+      previews[0]!.options.onState!({
+        accent: "#d98a5a",
+        refreshInterval: 300,
+        showDate: true,
+        style: "minimal",
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Rotate" }));
+    await waitFor(() => expect(previews).toHaveLength(2));
+    // While the new runtime boots, the form shows what it is being given,
+    // not the scene's defaults.
+    expect((screen.getByLabelText("Clock style") as HTMLSelectElement).value).toBe("minimal");
+    // It gets them before its first render…
+    expect((previews[1]!.options as unknown as { sceneState: unknown }).sceneState).toMatchObject({
+      style: "minimal",
+    });
+    // …so a bundle that took them is not sent them again (a second render,
+    // and a second request for a scene that pays per render).
+    act(() =>
+      (previews[1]!.options.onReady as unknown as (info: unknown, assets: unknown, runtime: unknown) => void)(
+        { currentSceneId: "scene-runtime-1", scenes: [{ id: "scene-runtime-1", name: "Clock", refreshInterval: 60 }] },
+        null,
+        { gpioEvents: true, inputEvents: true, pointerEvents: true, sceneStateSeeded: true, version: "2026.11.5" },
+      ),
+    );
+    expect(previews[1]!.setSceneState).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("Clock style") as HTMLSelectElement).value).toBe("minimal");
+  });
+
   it("puts the preview on a device from the Device menu: its size, this orientation, its inks", async () => {
     render(<SceneLivePreviewPanel height={800} sceneId="scene-1" scenes={[clockScene]} width={480} />);
     await waitFor(() => expect(previews).toHaveLength(1));
@@ -539,6 +650,106 @@ describe("SceneLivePreviewPanel source", () => {
     expect(scenesJsonUrls()).toEqual([]);
     expect(screen.queryByRole("combobox", { name: "Preview source" })).toBeNull();
     expect(screen.queryByText("Source")).toBeNull();
+  });
+});
+
+describe("SceneLivePreviewPanel layout", () => {
+  type RunScene = { id: string; layout?: { sceneId: string; state?: Record<string, unknown> }; settings?: { isLayout?: boolean } };
+  const ranScenes = (index: number) => previews[index]!.options.scenes as RunScene[];
+
+  it("wraps the scene in a layout starter picked from the Layout select, and takes it off again", async () => {
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    // Nothing worn until asked for: the store's scenes carry no layout.
+    const select = (await screen.findByLabelText("Layout")) as HTMLSelectElement;
+    expect(select.value).toBe("");
+    const names = [...select.options].map((option) => option.textContent);
+    expect(names[0]).toBe("No layout");
+    expect(names).toContain("Windows 98");
+    expect(names).toContain("Top bar");
+
+    fireEvent.change(select, { target: { value: "layout-windows-98" } });
+    // A different scene set: the runtime boots again, the starter beside the scene.
+    await waitFor(() => expect(previews).toHaveLength(2));
+    const scenes = ranScenes(1);
+    expect(scenes.map((scene) => scene.id)).toEqual(["scene-runtime-1", "layout-windows-98"]);
+    expect(scenes[0]!.layout).toEqual({ sceneId: "layout-windows-98" });
+    expect(scenes[1]!.settings?.isLayout).toBe(true);
+    expect(select.value).toBe("layout-windows-98");
+
+    // The starter is no scene to switch to.
+    act(() =>
+      previews[1]!.options.onReady!({
+        currentSceneId: "scene-runtime-1",
+        scenes: [
+          { id: "scene-runtime-1", name: "Clock", refreshInterval: 60 },
+          { id: "layout-windows-98", name: "Windows 98", refreshInterval: 1 },
+        ],
+      }),
+    );
+    expect(screen.queryByRole("combobox", { name: "Scene" })).toBeNull();
+
+    fireEvent.change(select, { target: { value: "" } });
+    await waitFor(() => expect(previews).toHaveLength(3));
+    expect(ranScenes(2).map((scene) => scene.id)).toEqual(["scene-runtime-1"]);
+    expect(ranScenes(2)[0]!.layout).toBeUndefined();
+  });
+
+  it("starts on the layout a frame's scene wears, lists the frame's own before the starters, and can take it off", async () => {
+    const frameLayout = {
+      fields: [],
+      id: "frame-chrome",
+      name: "Windows 98",
+      nodes: [],
+      settings: { isLayout: true },
+    };
+    const worn = { ...clockScene, layout: { sceneId: "frame-chrome", state: { twentyFourHour: true } } };
+    const scenes = [worn, frameLayout];
+    render(<SceneLivePreviewPanel editorSceneId="scene-runtime-1" sceneId={null} scenes={scenes} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    // Run as the frame holds them.
+    expect(previews[0]!.options.scenes).toBe(scenes);
+    const select = (await screen.findByLabelText("Layout")) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBeGreaterThan(2));
+    expect(select.value).toBe("frame-chrome");
+    const values = [...select.options].map((option) => option.value);
+    // The frame's "Windows 98" stands for the starter of that name.
+    expect(values.slice(0, 2)).toEqual(["", "frame-chrome"]);
+    expect(values).not.toContain("layout-windows-98");
+    expect(values).toContain("layout-top-bar");
+
+    fireEvent.change(select, { target: { value: "layout-top-bar" } });
+    await waitFor(() => expect(previews).toHaveLength(2));
+    expect(ranScenes(1).map((scene) => scene.id)).toEqual([
+      "scene-runtime-1",
+      "frame-chrome",
+      "layout-top-bar",
+    ]);
+    expect(ranScenes(1)[0]!.layout).toEqual({ sceneId: "layout-top-bar" });
+    // A layout wears none.
+    expect(ranScenes(1)[1]!.layout).toBeUndefined();
+
+    // Back on the frame's own: the settings the scene gave it come along.
+    fireEvent.change(select, { target: { value: "frame-chrome" } });
+    await waitFor(() => expect(previews).toHaveLength(3));
+    expect(ranScenes(2).map((scene) => scene.id)).toEqual(["scene-runtime-1", "frame-chrome"]);
+    expect(ranScenes(2)[0]!.layout).toEqual({ sceneId: "frame-chrome", state: { twentyFourHour: true } });
+  });
+
+  it("has nothing to offer while the scene shown is a layout itself", async () => {
+    const layout = { fields: [], id: "my-chrome", name: "My chrome", nodes: [], settings: { isLayout: true } };
+    render(<SceneLivePreviewPanel editorSceneId="my-chrome" sceneId="scene-1" scenes={[layout]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    act(() =>
+      previews[0]!.options.onReady!({
+        currentSceneId: "my-chrome",
+        scenes: [{ id: "my-chrome", name: "My chrome", refreshInterval: 1 }],
+      }),
+    );
+    // The starters load with the panel; still no select.
+    await screen.findByText(/Runs in your browser/);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByLabelText("Layout")).toBeNull();
   });
 });
 
@@ -640,6 +851,8 @@ describe("SceneLivePreviewPanel editor reloads", () => {
         ],
       }),
     );
+    // Asked for from the start; a bundle that started elsewhere is moved.
+    expect((previews[0]!.options as unknown as { sceneId?: string }).sceneId).toBe("second");
     expect(previews[0]!.selectScene).toHaveBeenCalledWith("second");
     const sceneSelect = screen.getByRole("combobox", { name: "Scene" }) as HTMLSelectElement;
     expect(sceneSelect.value).toBe("second");

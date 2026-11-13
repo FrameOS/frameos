@@ -40,6 +40,10 @@ static size_t g_baseline = 0; /* live bytes when the limit was set */
 static size_t g_peak = 0;     /* high-water live bytes since the limit was set */
 static size_t g_failed = 0;   /* size of the allocation that could not be served */
 static size_t g_reserve = 0;  /* margin availableRenderBytes keeps below the ceiling */
+/* Bytes charged that no allocation holds: what a device-format canvas (565,
+ * luma) saves against the RGBX canvas the ceiling was worked out for
+ * (src/wasm/wasm_main.nim previewCanvas), so the ceiling means the same. */
+static size_t g_held = 0;
 
 static jmp_buf g_oom_jmp;
 static int g_guard_armed = 0;
@@ -49,7 +53,7 @@ static int g_guard_armed = 0;
  * init that a frame keeps in flash, not in its render budget. */
 static size_t charged(void)
 {
-    return g_live > g_baseline ? g_live - g_baseline : 0;
+    return (g_live > g_baseline ? g_live - g_baseline : 0) + g_held;
 }
 
 static int would_exceed(size_t freed, size_t wanted)
@@ -134,6 +138,12 @@ void frameos_wasm_set_memory_limit(unsigned int bytes, unsigned int reserve)
     g_baseline = g_live;
     g_peak = 0;
     g_failed = 0;
+}
+
+void fos_wasm_memory_set_held(size_t bytes)
+{
+    g_held = bytes;
+    note_live();
 }
 
 /* What the render pipeline is told it may still use: the headroom under the

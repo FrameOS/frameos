@@ -68,6 +68,7 @@ from app.utils.voice_chat import (
     VoiceTurnResult,
     image_sources_for_settings,
     transcribe_and_answer,
+    voice_scenes,
     voice_chat_id,
     voice_frame_context,
     voice_history_for_model,
@@ -186,7 +187,7 @@ async def api_embedded_device_voice(
     chat = _voice_chat(db, frame)
     history = _history(db, chat, now)
     scene_names = [
-        str(scene.get("name")) for scene in (frame.scenes or []) if isinstance(scene, dict) and scene.get("name")
+        str(scene.get("name")) for scene in voice_scenes(frame.scenes) if scene.get("name")
     ]
 
     async def queue_command(command_type: str, payload: dict[str, Any]) -> dict[str, Any]:

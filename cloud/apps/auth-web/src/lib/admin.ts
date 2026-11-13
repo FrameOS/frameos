@@ -6,12 +6,14 @@ import {
   ilike,
   inArray,
   isNull,
+  ne,
   or,
   sql,
 } from "drizzle-orm";
 import {
   accountIdentities,
   accounts,
+  billingPlans,
   clientBackups,
   connectedBackends,
   createDb,
@@ -23,6 +25,7 @@ import {
   sessions,
   storeSceneReports,
   storeScenes,
+  subscriptions,
   backupRuns,
 } from "@frameos-cloud/db";
 import { NextResponse } from "next/server";
@@ -126,6 +129,17 @@ export type AdminUserRow = {
   frames: ActiveTotal & { connected: number };
   isSuperadmin: boolean;
   backends: ActiveTotal;
+  /** The paid plan the account is on now; null on the free plan. */
+  paidPlan: {
+    /** Set while a cancellation runs to the end of the period paid for. */
+    cancelAt: Date | null;
+    code: string;
+    name: string;
+    /** Micros of USD, as a string: bigint does not cross into the client. */
+    priceMicros: string;
+    /** Who bills it (stripe); null for a plan an operator set by hand. */
+    provider: string | null;
+  } | null;
   primaryEmail: string | null;
   storeScenes: { public: number; total: number };
 };
@@ -373,6 +387,30 @@ export async function listAccountsForAdmin(
     )
     .groupBy(sessions.accountId);
 
+  // The paid plan each account is on now, by readAccountPlan's rule: a
+  // cancelled row, or one whose cancel_at has passed before the nightly job
+  // tidied it, is no plan.
+  const now = new Date();
+  const paidPlans = await db
+    .select({
+      accountId: subscriptions.accountId,
+      cancelAt: subscriptions.cancelAt,
+      code: billingPlans.code,
+      name: billingPlans.name,
+      priceMicros: billingPlans.priceMicros,
+      provider: subscriptions.provider,
+    })
+    .from(subscriptions)
+    .innerJoin(billingPlans, eq(billingPlans.code, subscriptions.planCode))
+    .where(
+      and(
+        inArray(subscriptions.accountId, accountIds),
+        ne(subscriptions.status, "canceled"),
+        or(isNull(subscriptions.cancelAt), gt(subscriptions.cancelAt, now)),
+        gt(billingPlans.priceMicros, 0n),
+      ),
+    );
+
   const identityMap = new Map<string, AdminUserRow["identities"]>();
   for (const identity of identities) {
     const list = identityMap.get(identity.accountId) ?? [];
@@ -398,6 +436,12 @@ export async function listAccountsForAdmin(
   const frameMap = new Map(
     frameCounts.map((row) => [row.accountId, row]),
   );
+  const paidPlanMap = new Map(
+    paidPlans.map(({ accountId, priceMicros, ...plan }) => [
+      accountId,
+      { ...plan, priceMicros: priceMicros.toString() },
+    ]),
+  );
 
   return rows.map((row) => {
     const backends = backendMap.get(row.id);
@@ -421,6 +465,7 @@ export async function listAccountsForAdmin(
       id: row.id,
       identities: identityMap.get(row.id) ?? [],
       isSuperadmin: row.isSuperadmin,
+      paidPlan: paidPlanMap.get(row.id) ?? null,
       primaryEmail: row.primaryEmail,
       storeScenes: {
         public: scenes?.public ?? 0,

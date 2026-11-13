@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revealedServiceSettings } from "../../../../../src/lib/account-settings";
 import { linkedClientHasScope } from "../../../../../src/lib/backend-auth";
+import { planeKeepsSceneState } from "../../../../../src/lib/cloud-rendered";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import { authenticateFrameDevice } from "../../../../../src/lib/frame-device-auth";
 import {
@@ -114,9 +115,13 @@ export async function GET(
     }
   }
 
+  // A board the cloud renders for runs no scene, so it holds no key
+  // (docs/server-rendering.md "Nothing to keep on the board"); the render
+  // here is given them (server-render.ts). Its granted groups still listed
+  // and none filled in, the board deletes the copies it held (fos_settings.c).
   const payload = buildServiceSettingsPayload(
     groups,
-    await revealedServiceSettings(db, auth.frame.accountId),
+    planeKeepsSceneState(auth.frame) ? {} : await revealedServiceSettings(db, auth.frame.accountId),
   );
   const { body, etag } = serviceSettingsResponseBody(payload);
 

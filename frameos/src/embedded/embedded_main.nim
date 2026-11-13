@@ -23,6 +23,8 @@ import frameos/utils/dither
 from frameos/utils/http_client import releaseStrandedHttp
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
+import frameos/utils/panel_damage
+import frameos/render_probe
 
 # `log` comes from embedded_runtime (same frameos_nim_log_hook C hook).
 
@@ -51,11 +53,7 @@ proc sceneHeight(): int {.inline.} =
 # second full-frame image is never allocated (rotating 1200x1600 RGBA
 # out-of-place costs 7.7MB, which OOMs the 16MB-PSRAM boards mid-pack).
 proc panelCoords(x, y, srcW, srcH: int): tuple[px, py: int] {.inline.} =
-  case frameRotate
-  of 90: (srcH - 1 - y, x)
-  of 180: (srcW - 1 - x, srcH - 1 - y)
-  of 270: (y, srcW - 1 - x)
-  else: (x, y)
+  panelPoint(x, y, srcW, srcH, frameRotate)
 
 # --------------------------------------------------------- out-of-memory
 # The patched allocator (src/embedded/patched_malloc.nim via config.nims)
@@ -187,6 +185,66 @@ proc packImageGray(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int; ma
       buf[outIndex] = buf[outIndex] or ((level.uint8 and 0x0F'u8) shl (if (px mod 2) == 0: 4 else: 0))
   true
 
+type Gray16Job = object
+  pixels, buf: ptr UncheckedArray[uint8]
+  width, rowBytes: int
+
+proc runGrayRows(fn: proc (ctx: pointer; worker, first, last: int32) {.cdecl.}; ctx: pointer; rows, blockRows: int32)
+  {.importc: "fos_rows_run", cdecl.}
+
+proc packGray16Rows(ctx: pointer; worker, first, last: int32) {.cdecl, hotLoop.} =
+  ## On both cores (fos_rows.c): plain pointers, nothing that allocates or raises.
+  let job = cast[ptr Gray16Job](ctx)
+  let
+    pixels = job.pixels
+    buf = job.buf
+    width = job.width
+  for y in first.int ..< last.int:
+    let
+      row = y * width
+      cell = (y and 3) * 4
+    var at = y * job.rowBytes
+    for byteIndex in 0 ..< width div 2:
+      let
+        x = byteIndex * 2
+        left = grayLevel16Ordered(pixels[row + x], OrderedThresholds4x4[cell + (x and 3)])
+        right = grayLevel16Ordered(pixels[row + x + 1], OrderedThresholds4x4[cell + ((x + 1) and 3)])
+      buf[at] = (left shl 4) or right
+      inc at
+    if (width and 1) != 0:
+      buf[at] = grayLevel16Ordered(pixels[row + width - 1], OrderedThresholds4x4[cell + ((width - 1) and 3)]) shl 4
+
+proc packImageGray16(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): bool {.hotLoop.} =
+  ## The 4-bit grey panels: ordered sixteen greys (grayLevel16Ordered), the
+  ## left pixel in the high nibble.
+  let
+    width = image.width
+    height = image.height
+    rowBytes = (frameWidth + 1) div 2
+  if rowBytes * frameHeight != bufLen:
+    log(&"pack gray: buffer mismatch, want {rowBytes * frameHeight} bytes, got {bufLen}")
+    return false
+  if packGray4Canvas(image, buf, frameWidth, frameHeight, frameRotate):
+    return true
+  if image.format == pfGray8 and not image.isView and frameRotate == 0 and
+      width == frameWidth and height == frameHeight:
+    var job = Gray16Job(
+      pixels: cast[ptr UncheckedArray[uint8]](image.bufferPointer), buf: buf, width: width, rowBytes: rowBytes)
+    runGrayRows(packGray16Rows, job.addr, height.int32, 32)
+    return true
+  for i in 0 ..< bufLen:
+    buf[i] = 0
+  for y in 0 ..< height:
+    for x in 0 ..< width:
+      let
+        pixel = image.unsafe[x, y]
+        luma = (pixel.r.uint32 * 77 + pixel.g.uint32 * 150 + pixel.b.uint32 * 29) shr 8
+        level = grayLevel16Ordered(luma.uint8, OrderedThresholds4x4[(y and 3) * 4 + (x and 3)])
+        (px, py) = panelCoords(x, y, width, height)
+        at = py * rowBytes + px div 2
+      buf[at] = buf[at] or (level shl (if (px and 1) == 0: 4 else: 0))
+  true
+
 proc packImageDual1bpp(
     image: Image;
     buf: ptr UncheckedArray[uint8];
@@ -295,6 +353,35 @@ proc packImageRgb565(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int):
           b = (if bv < 0: 0 elif bv > 255: 255 else: bv) shr 3
         dst[index] = (r.uint16 shl 11) or (g.uint16 shl 5) or b.uint16
     return true
+  if image.format == pfRgb565 and width * height == frameWidth * frameHeight:
+    # A rotated LCD's canvas (the panel's buffer is the canvas only
+    # unrotated, embedded_runtime.nim panelCanvas): its words are the panel's
+    # already, dithered as they were stored; only their places turn. The
+    # general loop below read each back as RGBX, mapped it and dithered it
+    # again: 787 ms a frame at 480x480 on the SenseCAP Indicator. In 32 x 32
+    # tiles: a quarter turn writes down the panel's columns, and row by row
+    # every word was a cache line of PSRAM of its own (320 ms); a tile's rows
+    # and columns are a few KB that stay cached.
+    let
+      src = cast[ptr UncheckedArray[uint16]](image.bufferPointer)
+      dst = cast[ptr UncheckedArray[uint16]](buf)
+    const Tile = 32
+    for ty in countup(0, height - 1, Tile):
+      for tx in countup(0, width - 1, Tile):
+        for y in ty ..< min(ty + Tile, height):
+          # panelCoords at (tx, y), then a step per x.
+          var (index, step) =
+            case frameRotate
+            of 90: (tx * frameWidth + height - 1 - y, frameWidth)
+            of 180: ((height - 1 - y) * frameWidth + width - 1 - tx, -1)
+            of 270: ((width - 1 - tx) * frameWidth + y, -frameWidth)
+            else: (y * frameWidth + tx, 1)
+          var i = y * width + tx
+          for x in tx ..< min(tx + Tile, width):
+            dst[index] = src[i]
+            index += step
+            inc i
+    return true
   template clip(value: int): int =
     (if value < 0: 0 elif value > 255: 255 else: value)
   for y in 0 ..< height:
@@ -348,7 +435,97 @@ proc renderFrameImage(): tuple[image: Image, source: string] =
     # The frame-wide colour correction, once on the finished canvas.
     applyGlobalColorCorrection(interpreted.get())
     return (interpreted.get(), "interpreted scene \"" & currentSceneName() & "\"")
+  rhythmForgetCanvases()
   (renderDemoInto(renderCanvas(), frameName, renderCount + 1), "status screen")
+
+proc renderKeptFrameImage(): tuple[image: Image, source: string] =
+  ## renderFrameImage for a canvas that is packed afterwards: a panel with a
+  ## partial waveform keeps the SVG damage records an LCD's buffer has.
+  let kept = beginKeptCanvasFrame()
+  try:
+    renderFrameImage()
+  finally:
+    if kept:
+      endKeptCanvasFrame()
+
+# A panel with a partial waveform: the canvas as it was last packed and what
+# that packed to, so that only what changed is dithered (utils/panel_damage).
+var
+  packedErrors: ptr UncheckedArray[int32]
+  packedRuns: ptr UncheckedArray[ChangedRun]
+  packedPicture: ptr UncheckedArray[uint8]
+  packedCanvas: ptr UncheckedArray[uint8]
+  packedWidth, packedHeight, packedRotate: int
+  packedKnown = false
+  packedAllocTried = false
+
+proc allocPsram(len: csize_t): pointer {.importc: "fos_display_alloc_psram", cdecl.}
+
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
+
+proc packCanvas1bpp(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): bool =
+  let
+    width = image.width
+    height = image.height
+    rowBytes = (frameWidth + 7) div 8
+  if not panelHasPartialWaveform() or image.format != pfGray8 or image.isView or
+      width * height != frameWidth * frameHeight or rowBytes * frameHeight != bufLen:
+    return packImage1bpp(image, buf, bufLen)
+  if not packedAllocTried:
+    # One block, kept: the errors of two rows of the longer edge (a frame can
+    # be rotated later), the runs, the packed picture and the canvas.
+    packedAllocTried = true
+    let
+      errorBytes = 2 * (max(width, height) + 2) * sizeof(int32)
+      runBytes = MaxRuns * sizeof(ChangedRun)
+      base = cast[int](allocPsram(csize_t(errorBytes + runBytes + bufLen + width * height)))
+    if base != 0:
+      packedErrors = cast[ptr UncheckedArray[int32]](base)
+      packedRuns = cast[ptr UncheckedArray[ChangedRun]](base + errorBytes)
+      packedPicture = cast[ptr UncheckedArray[uint8]](base + errorBytes + runBytes)
+      packedCanvas = cast[ptr UncheckedArray[uint8]](base + errorBytes + runBytes + bufLen)
+  if packedErrors.isNil:
+    return packImage1bpp(image, buf, bufLen)
+  let pixels = cast[ptr UncheckedArray[uint8]](image.bufferPointer)
+  if packedKnown and packedWidth == width and packedHeight == height and packedRotate == frameRotate:
+    var count = 0
+    if changedRuns(pixels, packedCanvas, width, height, packedRuns, count) * 2 < width * height:
+      copyMem(buf, packedPicture, bufLen)
+      packRuns1bpp(pixels, width, height, buf, rowBytes, toOpenArray(packedRuns, 0, count - 1), frameRotate, packedErrors)
+      for i in 0 ..< count:
+        let
+          run = packedRuns[i]
+          at = run.y.int * width + run.left.int
+        copyMem(packedCanvas[at].addr, pixels[at].addr, int(run.right - run.left))
+      copyMem(packedPicture, buf, bufLen)
+      return true
+  # The whole frame: the runs' integer dither over every row, the arithmetic a
+  # partial update uses on its runs, so a switch and the taps after it put
+  # down the same pixels. The float packImage1bpp, through pixie's accessor
+  # and a rotation call per pixel, took 1.6 to 2.3 s for the Sticky's 800x480
+  # on every scene switch (2026-11-10).
+  var rows = newSeq[ChangedRun](height)
+  for y in 0 ..< height:
+    rows[y] = (y.uint16, 0'u16, width.uint16)
+  if frameRotate == 0:
+    packRuns1bpp(pixels, width, height, buf, rowBytes, rows, 0, packedErrors)
+  else:
+    # Turned: dithered upright first, then turned onto the panel in its own
+    # order (rotateBits1bpp), so neither pass jumps a row at every pixel.
+    let naturalRow = (width + 7) div 8
+    var natural = newSeq[uint8](naturalRow * height)
+    let upright = cast[ptr UncheckedArray[uint8]](natural[0].addr)
+    packRuns1bpp(pixels, width, height, upright, naturalRow, rows, 0, packedErrors)
+    rotateBits1bpp(upright, width, height, buf, rowBytes, frameRotate)
+  copyMem(packedCanvas, pixels, width * height)
+  copyMem(packedPicture, buf, bufLen)
+  packedWidth = width
+  packedHeight = height
+  packedRotate = frameRotate
+  packedKnown = true
+  true
+
+{.pop.}
 
 proc packImageForFormat(
     image: Image;
@@ -358,7 +535,7 @@ proc packImageForFormat(
   ): bool =
   case pixelFormat:
   of 1:
-    packImage1bpp(image, buf, bufLen)
+    packCanvas1bpp(image, buf, bufLen)
   of 2:
     packImageDual1bpp(image, buf, bufLen, true)
   of 3:
@@ -372,7 +549,7 @@ proc packImageForFormat(
   of 7:
     packImagePalette(image, buf, bufLen, activePalette(framePalette(spectra6ColorPalette)))
   of 8:
-    packImageGray(image, buf, bufLen, 15)
+    packImageGray16(image, buf, bufLen)
   of 9:
     packImageRgb565(image, buf, bufLen)
   else:
@@ -395,6 +572,9 @@ proc packedLenForFormat(width, height, pixelFormat: int): int =
     width * height * 2
   else:
     0
+
+var lastPackedFromCanvas = false
+  ## The last render left its picture on the scene canvas, as it is.
 
 proc renderBufferAlloc(len: csize_t): pointer {.importc: "frameos_nim_alloc_render_buffer".}
 proc renderBufferFree(p: pointer) {.importc: "frameos_nim_free_render_buffer".}
@@ -422,6 +602,11 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
     when defined(memProbe): memProbe("INIT after armEmergencyReserve")
     initRuntime(frameWidth, frameHeight, frameName, maxHttpResponseBytes.int, frameRotate)
     when defined(memProbe): memProbe("INIT after initRuntime")
+    # pixie keeps the coverage of shared paths (a kept label, a shared icon,
+    # a share()d box) up to this many bytes of PSRAM and draws them as masks:
+    # the geometry of a UI's unchanged elements was most of a repaint
+    # (docs/perf-todo.md). Let go with the rest when render memory is short.
+    coverageCacheBudget = 256 * 1024
     initScene()
     when defined(memProbe): memProbe("INIT after initScene")
     log(&"nim runtime initialized: {frameWidth}x{frameHeight} rotate={frameRotate} " &
@@ -482,6 +667,21 @@ proc fos_nim_set_scene_catalog_impl(indexJson: cstring): cint {.exportc, cdecl.}
     log("setSceneCatalog failed: " & e.msg)
     result = 0
 
+proc fos_nim_set_interactive_impl(on: cint) {.exportc, cdecl.} =
+  ## Someone is tapping (fos_client.c's input hold), told before each render.
+  rhythmInteractive = on != 0
+
+proc fos_nim_chrome_owed_impl(): cint {.exportc, cdecl.} =
+  ## A UI's chrome waited for the tapping to stop: render it now.
+  (if rhythmChromeOwed(): 1 else: 0).cint
+
+proc sharedCanvasBuffer(): pointer {.importc: "frameos_nim_shared_canvas_buffer", cdecl.}
+
+proc fos_nim_canvas_forget_impl() {.exportc, cdecl.} =
+  ## The canvas, shared with the panel buffer, was drawn over by something
+  ## that is not a render (frameos_nim_canvas_forget).
+  rhythmForgetCanvases()
+
 proc fos_nim_request_fresh_pass_impl() {.exportc, cdecl.} =
   ## Somebody asked for this render (a cloud or HTTP render verb, the console,
   ## a button, the schedule): every embedded scene runs, due or not.
@@ -521,6 +721,7 @@ proc renderErrorFallback(
     # the allocation an OOM-aborted render could not afford.
     let image = renderCanvas()
     image.renderErrorInto(image.width, image.height, message)
+    rhythmForgetCanvases()
     if not renderCanvasIsPanel(image) and not packImageForFormat(image, buf, bufLen, pixelFormat):
       return 1
     GC_fullCollect()
@@ -546,6 +747,10 @@ proc fos_nim_render_impl(
     # decode lets kept interpreters go (utils/memory.refreshDecodeBudget).
     refreshDecodeBudget(forDecode = false)
     setAssetColorsPanelPalette(panelPaletteForFormat(pixelFormat.int))
+    # `set debug 1`: the render line below carries where this frame went
+    # (frameos/render_probe.nim), the measurement docs/perf-todo.md is paced by.
+    probeOn = debugEnabled()
+    let cacheAtStart = probeBegin()
     let start = getMonoTime()
     let rendered = renderFrameImage()
     var image = rendered.image
@@ -565,9 +770,11 @@ proc fos_nim_render_impl(
     inc renderCount
     lastRenderMs = ((packed - start).inMilliseconds).int
     if not quietRenders:
+      let phases = probeLine(cacheAtStart)
       log(&"render #{renderCount} ({source}, fmt={pixelFormat}): render {(renderedAt - start).inMilliseconds} ms, " &
           (if inPlace: &"in place, collect {(packed - renderedAt).inMilliseconds} ms"
-           else: &"dither+pack {(packed - renderedAt).inMilliseconds} ms"))
+           else: &"dither+pack {(packed - renderedAt).inMilliseconds} ms") &
+          (if phases.len > 0: " [" & phases & "]" else: ""))
     recoverEmergencyReserve("render")
     # Many interpreted scene graphs dispatch "render" while responding to the
     # render event itself. On embedded that should not immediately replay the
@@ -600,6 +807,7 @@ proc renderErrorFallbackAlloc(
       return 1
     let image = renderCanvas()
     image.renderErrorInto(image.width, image.height, message)
+    rhythmForgetCanvases()
     if not packImageForFormat(image, cast[ptr UncheckedArray[uint8]](raw), packedLen, pixelFormat):
       renderBufferFree(raw)
       return 1
@@ -614,6 +822,35 @@ proc renderErrorFallbackAlloc(
     GC_fullCollect()
     1
 
+proc fos_nim_repack_alloc_impl(
+    outBuf: var pointer;
+    outLen: var csize_t;
+    pixelFormat: cint
+  ): cint {.exportc, cdecl.} =
+  ## The canvas packed again without running the scene: a panel that drew a
+  ## tapped area roughly settles from it (frameos_nim_repack_alloc).
+  outBuf = nil
+  outLen = 0
+  try:
+    if not lastPackedFromCanvas:
+      return 1
+    let canvas = renderCanvas()
+    let packedLen = packedLenForFormat(canvas.width, canvas.height, pixelFormat.int)
+    if packedLen <= 0:
+      return 1
+    let raw = renderBufferAlloc(packedLen.csize_t)
+    if raw == nil:
+      return 1
+    if not packImageForFormat(canvas, cast[ptr UncheckedArray[uint8]](raw), packedLen, pixelFormat.int):
+      renderBufferFree(raw)
+      return 1
+    outBuf = raw
+    outLen = packedLen.csize_t
+    result = 0
+  except Exception as e:
+    log("repack failed: " & e.msg)
+    result = 1
+
 proc fos_nim_render_alloc_impl(
     outBuf: var pointer;
     outLen: var csize_t;
@@ -627,18 +864,42 @@ proc fos_nim_render_alloc_impl(
     # decode lets kept interpreters go (utils/memory.refreshDecodeBudget).
     refreshDecodeBudget(forDecode = false)
     setAssetColorsPanelPalette(panelPaletteForFormat(pixelFormat.int))
+    # Where the canvas is the panel buffer (a sixteen-grey panel, main.c
+    # frameos_nim_share_canvas) the buffer is borrowed before the scene draws
+    # there: nothing else writes it meanwhile, and a snapshot of the last
+    # picture in it lets go (fos_client.c snapshot_before_lend).
+    let
+      sharedCanvas = sharedCanvasBuffer()
+      canvas = renderCanvas()
+      drawsInPanel = sharedCanvas != nil and not canvas.isNil and canvas.bufferPointer == sharedCanvas
+    if drawsInPanel:
+      let borrowed = renderBufferAlloc(
+        packedLenForFormat(canvas.width, canvas.height, pixelFormat.int).csize_t)
+      if borrowed != sharedCanvas:
+        # Lent to something else (a console display_test): it would draw
+        # where the scene draws. The next pass tries again.
+        if borrowed != nil:
+          renderBufferFree(borrowed)
+        log("render skipped: the panel buffer, which is the canvas, is in use")
+        return 1
+      outBuf = borrowed # the error paths below hand it back
     let start = getMonoTime()
-    let rendered = renderFrameImage()
+    let rendered = renderKeptFrameImage()
     var image = rendered.image
     let source = rendered.source
     let renderedAt = getMonoTime()
+    lastPackedFromCanvas = cast[pointer](image) == cast[pointer](canvas)
     let packedLen = packedLenForFormat(image.width, image.height, pixelFormat.int)
     if packedLen <= 0:
       log(&"pack: unsupported pixel format {pixelFormat}")
       image = nil
+      if outBuf != nil:
+        renderBufferFree(outBuf)
+        outBuf = nil
       GC_fullCollect()
       return 1
-    let raw = renderBufferAlloc(packedLen.csize_t)
+    let raw = if outBuf != nil: outBuf else: renderBufferAlloc(packedLen.csize_t)
+    outBuf = raw # the error paths below hand it back
     if raw == nil:
       log(&"render failed: out of memory for {packedLen} byte packed framebuffer")
       image = nil
@@ -647,9 +908,13 @@ proc fos_nim_render_alloc_impl(
     let packedBuf = cast[ptr UncheckedArray[uint8]](raw)
     if not packImageForFormat(image, packedBuf, packedLen, pixelFormat.int):
       renderBufferFree(raw)
+      outBuf = nil
       image = nil
       GC_fullCollect()
       return 1
+    if drawsInPanel and not lastPackedFromCanvas:
+      # Another image was packed over the canvas's own bytes.
+      rhythmForgetCanvases()
     image = nil
     GC_fullCollect()
     let packed = getMonoTime()
@@ -717,6 +982,12 @@ proc fos_nim_recover_oom_abort_impl(jsBytes: ptr csize_t; httpReleased: ptr cint
   except Defect, CatchableError:
     -1
 
+proc fos_nim_scene_awaited_impl(): bool {.exportc, cdecl.} =
+  try:
+    sceneAwaited()
+  except Defect, CatchableError:
+    true
+
 proc fos_nim_scene_interval_impl(): cdouble {.exportc, cdecl.} =
   ## Refresh interval requested by the active interpreted scene, in seconds;
   ## 0 means "no opinion" (firmware falls back to its configured interval).
@@ -745,6 +1016,13 @@ proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
   ## True once when a scene event (e.g. dispatched "render") asked for a
   ## redraw; clears the flag.
   takeRenderRequested()
+
+proc fos_nim_press_taken_impl(wireX, wireY: cint): bool {.exportc, cdecl.} =
+  ## Whether something on the frame takes a press at this position on the glass.
+  try:
+    pressTaken(wireX.int, wireY.int)
+  except Exception:
+    false
 
 proc fos_nim_tick_impl(): bool {.exportc, cdecl.} =
   ## Time passing for the dispatcher's input state (frameos/input_state.nim):

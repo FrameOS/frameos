@@ -6,6 +6,7 @@ import {
   accounts,
   auditEvents,
   createDb,
+  rateLimitBuckets,
   storeSceneReports,
   storeScenes,
   upsertAccountFromIdentity,
@@ -801,5 +802,40 @@ describe("publish limits", () => {
     // Re-publishing an existing scene is not throttled by the daily cap.
     const republish = await publish(accessToken, { name: "Scene 0" });
     expect(republish.status).toBe(200);
+  });
+});
+
+describe("scenes.json limits", () => {
+  // The workspace reads one per installed scene on every load, from the
+  // owner's address: a spent address budget must not stop a signed-in owner
+  // (the store page said "Could not load the scene (429)").
+  it("charges a signed-in reader's account, an anonymous one the address", async () => {
+    const { accessToken, accountId } = await linkClient(publishScopes);
+    const sessionToken = cookieJar.get(sessionCookieName)!;
+    const saved = await publish(accessToken);
+    const scene = (await readJson(saved)).scene as { id: string };
+    const fromHome = { "x-forwarded-for": "203.0.113.7" };
+    const read = () =>
+      getScenesJson(
+        request(`/api/store/scenes/${scene.id}/scenes.json`, "GET", { headers: fromHome }),
+        ctx({ sceneId: scene.id }),
+      );
+    const spend = (key: string, count: number) =>
+      db
+        .insert(rateLimitBuckets)
+        .values({ count, key, resetAt: sql`now() + interval '15 minutes'` })
+        .onConflictDoUpdate({ set: { count }, target: rateLimitBuckets.key });
+
+    await spend("store:scenes-json:203.0.113.7", 240);
+    expect((await read()).status).toBe(200);
+
+    cookieJar.clear();
+    const anonymous = await read();
+    expect(anonymous.status).toBe(429);
+    expect((await readJson(anonymous)).error).toBe("rate_limited");
+
+    cookieJar.set(sessionCookieName, sessionToken);
+    await spend(`store:scenes-json:identity:${accountId}`, 1200);
+    expect((await read()).status).toBe(429);
   });
 });

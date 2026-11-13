@@ -1,6 +1,6 @@
 // The frameos-wasm runtime runs in a Web Worker and must be served
 // same-origin: install it into public/frameos-wasm (gitignored) before
-// dev/build. See src/components/SceneLivePreview.tsx.
+// dev/build. See frontend/src/sceneWorkspace/SceneLivePreview.tsx.
 //
 // Where it comes from is lib/wasm-runtime.mjs's business: by default the
 // signed, version-pinned bundle from the FrameOS release (so the preview

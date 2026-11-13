@@ -1,0 +1,10 @@
+{
+  "name": "Big typographic clock",
+  "description": "Huge numerals filling the panel, date beneath. Works best on fast-refresh black and white panels (per-minute).",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.0"
+}

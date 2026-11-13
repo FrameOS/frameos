@@ -21,6 +21,10 @@ bool frameos_nim_scene_state_save(const char *scene_id, const char *json) { (voi
 bool frameos_nim_reserve_canvas(size_t len) { (void)len; return false; }
 void *frameos_nim_canvas_buffer(size_t len) { (void)len; return NULL; }
 size_t frameos_nim_canvas_reserved(void) { return 0; }
+void frameos_nim_share_canvas(void *buffer, size_t len) { (void)buffer; (void)len; }
+bool frameos_nim_canvas_shared(void) { return false; }
+void *frameos_nim_shared_canvas_buffer(void) { return NULL; }
+void frameos_nim_canvas_forget(void) {}
 bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t max_http_response_bytes, const char *backend_url,
                       const char *api_key, bool server_send_logs, int rotate)
@@ -39,6 +43,17 @@ void frameos_nim_apply_service_settings(const char *json) { (void)json; }
 int frameos_nim_set_scene_catalog(const char *index_json) { (void)index_json; return 0; }
 int frameos_nim_load_scene(const char *scene_json) { (void)scene_json; return 0; }
 void frameos_nim_request_fresh_pass(void) {}
+void frameos_nim_set_interactive(bool on) { (void)on; }
+bool frameos_nim_chrome_owed(void) { return false; }
+
+int frameos_nim_repack_alloc(uint8_t **buf, size_t *len, int pixel_format)
+{
+    (void)pixel_format;
+    if (buf) *buf = NULL;
+    if (len) *len = 0;
+    return -1;
+}
+
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
 {
     (void)pixel_format;
@@ -94,8 +109,15 @@ bool frameos_nim_load_tz_data(const char *slice_json, const char *time_zone, cha
     return false;
 }
 double frameos_nim_scene_interval(void) { return 0; }
+bool frameos_nim_scene_awaited(void) { return true; }
 double frameos_nim_next_sleep(void) { return -1; }
 bool frameos_nim_render_requested(void) { return false; }
+bool frameos_nim_press_taken(int wire_x, int wire_y)
+{
+    (void)wire_x;
+    (void)wire_y;
+    return false;
+}
 bool frameos_nim_tick(void) { return false; }
 bool frameos_nim_send_event(uint32_t origin, const char *event, const char *payload_json)
 {
@@ -118,6 +140,7 @@ size_t frameos_nim_log_recent(frameos_log_entry_t *out, size_t max)
 void frameos_nim_set_log_tap(void (*tap)(const char *line, uint32_t seq)) { (void)tap; }
 void frameos_nim_set_log_upload_enabled(bool enabled) { (void)enabled; }
 void frameos_nim_flush_logs(void) {}
+bool frameos_nim_flush_log_batch(void) { return false; }
 uint8_t *fos_nim_http_request(const char *method, const char *url,
                               const void *body, size_t body_len,
                               const char *headers, size_t headers_len,

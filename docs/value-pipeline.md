@@ -66,10 +66,10 @@ schema; `frameos/app_capabilities.nim` holds the types.
 | Protocol | Declared on | Meaning | Used by |
 |---|---|---|---|
 | `materialized` | — | whole value returned (the floor) | everything |
-| `intoTarget(fit)` | output port | producer writes into a caller-supplied `Image` with the requested fit | the 8 former whitelist producers, `render/calendar`, `render/gradient`, `render/color` |
+| `intoTarget(fit)` | output port | producer writes into a caller-supplied `Image` with the requested fit | the 8 former whitelist producers, `render/gradient`, `render/color`; a JS app's `frameos.svg()` renders into an offered target too (the chart, the calendar) |
 | `providesTarget` | input port | consumer offers a target to whatever feeds this input | `render/image` |
 | `forwardsTarget` | output port | transformer passes the target request upstream and mutates in place | `render/opacity`, `data/rotateImage` at 180° |
-| `byteIter` | input port | consumes a string as a bounded-window `Spool` | `icalJson` |
+| `byteIter` | input port | consumes a string as a bounded-window `Spool`; a JS app's field gets it as a stream to read with `frameos.openLines` | the `icalJson` JS app |
 | `forwardsBounds` | output port | passes the consumer's useful-resolution bounds upstream, transformed (swap for 90/270 rotations, replace for resizes) | `data/rotateImage`, `data/resizeImage` |
 | `rowStream` | — | reserved for phase 3 (gated; see "What remains") | — |
 
@@ -170,7 +170,8 @@ plan is not the claim; now one log field says which you have.
 
 ### The image side
 
-- The whitelist block is deleted; the 8 producers + `render/calendar` declare
+- The whitelist block is deleted; the 8 producers + `render/calendar` (since
+  retired for the calendar JS app, whose SVG takes the same target) declare
   `intoTarget`, `render/image` declares `providesTarget`, and the planner
   wires every edge. Two tiers above the floor: the live canvas (uncached
   producer decodes straight into it) and a canvas-sized owned scratch
@@ -240,14 +241,15 @@ plan is not the claim; now one log field says which you have.
   PSRAM-chunked bodies past the threshold. Redirect hops and error bodies
   still materialize — they are about to become a Location read or an error
   message.
-- **The fold honours the asymmetry twice.** `icalJson` folds the spool a line
-  at a time (CRLF, LF and bare CR alike), and applies its export window
-  *during* the fold: one-off events outside it are dropped as they are
-  parsed, while recurring masters and RECURRENCE-ID overrides are kept
-  regardless of their own dates. A multi-year subscribed feed keeps the
-  window's events resident, not its history — the first hardware run proved
-  the raw bytes could cross the edge for 8KB while ~3.5MB of parsed VEvents
-  OOM-aborted the render anyway.
+- **The fold honours the asymmetry twice.** The `icalJson` JS app folds the
+  spool through `frameos.openLines` (CRLF, LF and bare CR alike; a line nobody
+  asked for never becomes a JS string, `utils/line_reader.nim`), and drops an
+  event outside its export window as soon as the event ends, its dates read
+  as text: one-off events, overrides of instances outside the window and
+  series that ended before it. A multi-year subscribed feed keeps the window's
+  events resident, not its history — the first hardware run proved the raw
+  bytes could cross the edge for 8KB while ~3.5MB of parsed VEvents OOM-aborted
+  the render anyway.
 - Deliberately **not** built, with the reasoning recorded: folding the ICS as
   the socket delivers it, with no spool file. The parse never needs the file,
   but the file is not there for the parse — it makes the edge a re-readable
@@ -333,6 +335,21 @@ memory limit's ESP32 boards, a preview of an ESP32 frame) takes the device's
 1600×1200 frame (Flights Above Me: a JS app's JSX into `render/image`) was
 always handed a 7.68 MB scratch and the preview ran out of memory where the
 E1004 upgrades to the live canvas and renders.
+
+It also draws the way the device does (`src/wasm/wasm_main.nim`
+`previewCanvas`): one canvas for every render, kept between them, in the
+format the board keeps it in (`DeviceLimits.canvasBytesPerPixel`, handed to
+`frameos_wasm_set_canvas_bits_per_pixel`: RGB565 for a 13.3" colour panel
+on 8 MB, 4-bit on a sixteen-grey panel, luma on another grey one, RGBX where
+two of it fit). The bytes a 565 or
+luma canvas saves against RGBX stay charged (`fos_wasm_memory_set_held`), so
+`memoryBytes` and `previewOverheadBytes` read the same with a bundle from
+before it, which draws RGBX. A producer's error frame goes into that canvas
+too (`runsAsEmbedded`, as on the device). Through 2026.11.4 the preview made a
+fresh RGBX canvas every render while the page held the last one, so at
+1200×1600 under 8 MB even a blank scene's second render was refused 7.3 MB,
+and a scene whose app failed was refused its error frame: out-of-memory
+reports the frame never has.
 
 What a hit costs: one canvas-sized allocation for the length of the consumer's
 draw (freed with the render), against a re-download, a decode and its
@@ -635,8 +652,9 @@ down.
 
 ## Non-goals
 
-- Streaming through JS/QuickJS code nodes. Opaque forever until proven
-  necessary.
+- Streaming through JS/QuickJS code nodes. A JS *app* that declares `byteIter`
+  reads a spool a line at a time (`frameos.openLines`); a code node's value
+  stays a whole string.
 - Editor-visible pipeline configuration of any kind.
 - Host-side streaming decode. (Its old precondition — a quality-preserving
   scaler — exists; what gates it now is a shipped scene that needs it.)

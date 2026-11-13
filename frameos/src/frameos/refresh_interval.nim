@@ -115,28 +115,38 @@ proc resolveRefreshInterval*(fields: seq[StateField], settingsSeconds: float): R
     result.implicit = true
 
 proc ownRefreshInterval*(scene: FrameScene): float =
-  ## The interval the scene's own state holds, before a generated split
-  ## stretches it to its first panel's due time.
+  ## The interval the scene's own state holds, before its embedded scenes or
+  ## its layout move it.
   if scene.isNil:
     return 0.0
   if scene.refreshIntervalKey.len == 0:
-    return (if scene.refreshFollowsChildren: scene.refreshIntervalDefault else: scene.refreshInterval)
+    return (if scene.refreshFollowsChildren or scene.layoutPaced: scene.refreshIntervalDefault
+            else: scene.refreshInterval)
   refreshIntervalFromState(scene.state, scene.refreshIntervalKey, scene.refreshIntervalDefault)
+
+proc contentInterval*(scene: FrameScene): float =
+  ## How long the scene itself may wait, its layout aside. A generated split
+  ## draws nothing that changes with time: it waits for its first panel, and
+  ## its own interval only holds it back on a display that cannot show frames
+  ## back to back. A JSX `<Scene>` brings the scene forward instead: the rest
+  ## of the UI still has its own interval (scene_rhythm.nim).
+  let own = ownRefreshInterval(scene)
+  if scene.refreshFollowsChildren and scene.followInterval >= 0:
+    if scene.holdsIntervalFloor: max(own, scene.followInterval) else: scene.followInterval
+  elif scene.embedPaced:
+    min(own, scene.followInterval)
+  else:
+    own
 
 proc syncRefreshInterval*(scene: FrameScene) =
   ## `FrameScene.refreshInterval` is what every host's render loop reads; the
-  ## scene's state is where it is set. Copy one into the other.
-  ##
-  ## A generated split draws nothing that changes with time, so it waits
-  ## longer when none of its panels is due by then: its interval is the time
-  ## until its first panel is due, as its last render left it, but never less
-  ## than its own (scene_rhythm.nim).
+  ## scene's state, its embedded scenes and its layout are where it comes from.
   if scene.isNil:
     return
-  if scene.refreshFollowsChildren and scene.followInterval >= 0:
-    scene.refreshInterval = max(ownRefreshInterval(scene), scene.followInterval)
-    return
-  if scene.refreshIntervalKey.len == 0:
-    return
-  scene.refreshInterval = refreshIntervalFromState(
-    scene.state, scene.refreshIntervalKey, scene.refreshIntervalDefault)
+  if scene.layoutPaced:
+    scene.refreshInterval = scene.layoutInterval
+  elif scene.refreshFollowsChildren and scene.followInterval >= 0 or scene.embedPaced:
+    scene.refreshInterval = contentInterval(scene)
+  elif scene.refreshIntervalKey.len > 0:
+    scene.refreshInterval = refreshIntervalFromState(
+      scene.state, scene.refreshIntervalKey, scene.refreshIntervalDefault)

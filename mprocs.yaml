@@ -7,12 +7,20 @@ procs:
     shell: pnpm --dir frontend run dev:vite
   kea:
     shell: pnpm --dir frontend run dev:kea
+  # The embedded editor bundle (frontend/dist-editor), rebuilt on change: a
+  # backend's local scenes page runs it in an iframe at /frameos-editor/.
+  editor:
+    shell: pnpm --dir frontend run dev:editor
   redis:
     shell: pnpm run dev:redis
   postgres:
     shell: pnpm run dev:postgres
+  # The wasm runtime the backend renders thin clients, server-rendered boards
+  # and virtual frames with (frontend/public/frameos-wasm), rebuilt whenever
+  # the runtime's sources change, so a merge does not leave the backend
+  # drawing with the runtime from before it.
   wasm:
-    shell: bash frameos/tools/build_wasm.sh
+    shell: bash frameos/tools/build_wasm_watch.sh
     autostart: true
   frameos:
     shell: cd frameos && make

@@ -27,6 +27,7 @@ import std/[json, math, options, os, strutils]
 import pixie
 
 import ./dither
+import ../panel_shape
 
 
 const
@@ -52,7 +53,7 @@ type
     luminance*, r*, g*, b*: float
   HueRange* = object
     ## A hue rotation in degrees (-180 .. 180), then a saturation scale and
-    ## a luminance shift (-100 .. 100) for the colours near one hue centre.
+    ## a luminance shift (-100 .. 100) for the colors near one hue centre.
     hue*, saturation*, luminance*: float
   AssetColorProfile* = object
     exposure*: float   ## stops, -3 .. 3
@@ -237,7 +238,7 @@ proc panelPaletteForDevice*(device: string, custom: seq[(int, int, int)] = @[]):
   ## two-colour ones, full-colour displays — where the fit stays off unless
   ## asked for. Mirrors `panelPaletteKindForDevice` in devicePalette.ts.
   let name = device.toLowerAscii()
-  let spectra = name.endsWith("e") and (name.contains("13in3e") or name.contains("7in3e") or
+  let spectra = name.endsWith("e") and (name.contains("13in3e") or name.contains("9in7e") or name.contains("7in3e") or
       name.contains("4in0e") or name.contains("photopainter")) or
     name.contains("inky_impression_4_2025") or name.contains("inky_impression_4_spectra6") or
     name.contains("inky_impression_7_2025") or name.contains("inky_impression_13") or
@@ -259,10 +260,38 @@ proc panelPaletteForDevice*(device: string, custom: seq[(int, int, int)] = @[]):
     return saturated4ColorPalette
   @[]
 
+proc panelShowsColor*(device: string, canvasFormat: PixelFormat): bool =
+  ## Whether the panel shows colors (an LCD, a four-, six- or seven-ink
+  ## e-paper), as a scene asks through `app.frame.color`: false on a
+  ## black-and-white or grey panel, where the real-time scenes' "auto" draws
+  ## in high contrast. An ESP32 (and the preview running as one) says by its
+  ## canvas: an LCD's RGB565 and a color e-paper's RGBX, where every grey
+  ## and black-and-white panel draws in pixie's grey surfaces. A Pi says by
+  ## its device: anything that is not e-paper, or e-paper with a palette. A
+  ## control plane drawing for a board says what the board's runtime would
+  ## (panel_shape.boardPanelFormat): no color on a grey or black-and-white
+  ## panel.
+  when defined(frameosWasm):
+    if boardPanelFormat > 0:
+      return boardPanelFormat notin PanelFormatsGrey
+  if canvasFormat == pfRgb565:
+    return true
+  # A grey canvas shows no color anywhere: the preview running as a grey
+  # ESP32 draws in one, as that board does.
+  if canvasFormat in {pfGray8, pfGray4}:
+    return false
+  when defined(frameosEmbedded):
+    canvasFormat == pfRgbx
+  else:
+    let name = device.toLowerAscii()
+    let paper = name == "embedded" or name.startsWith("waveshare.") or name.startsWith("inky") or
+      name.startsWith("pimoroni.inky")
+    not paper or panelPaletteForDevice(device).len >= 4
+
 # ------------------------------------------------------- frame colour rules
 #
 # frame.json's `colors` block: `{"autoFit": "default" | "on" | "off",
-# "global": {<the sidecar's colours object>}}`. The automatic fit runs on
+# "global": {<the sidecar's colors object>}}`. The automatic fit runs on
 # every image drawn onto the canvas (apps/render/image, the JS runtime) and
 # maps the photo's range onto the panel palette's; `default` means on when
 # the panel has a palette. The global correction runs once on the finished
@@ -569,7 +598,7 @@ proc applyAssetColors*(image: Image, profile: AssetColorProfile,
     x0 = 0, y0 = 0, width = -1, height = -1) =
   ## Adjusts every pixel of `image` — or of one rectangle of it, for an image
   ## decoded straight into the render canvas that only owns the fitted part —
-  ## in place. Alpha is kept; the colours are taken as straight (a photo has
+  ## in place. Alpha is kept; the colors are taken as straight (a photo has
   ## no transparency to speak of).
   if image.isNil or image.width <= 0 or image.height <= 0 or not profile.hasAdjustments():
     return

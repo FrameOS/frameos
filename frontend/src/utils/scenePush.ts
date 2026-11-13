@@ -24,6 +24,22 @@ export function referencedSceneIds(scene: FrameScene): string[] {
     }
   }
 
+  // What the runtime pulls in by id without a node saying so: the layout the
+  // scene is wrapped in, and the `<Scene id="...">` tags of its JSX.
+  if (scene.layout?.sceneId) {
+    sceneIds.add(scene.layout.sceneId)
+  }
+  for (const app of Object.values(scene.apps ?? {}) as { sources?: Record<string, unknown> }[]) {
+    for (const [name, source] of Object.entries(app?.sources ?? {})) {
+      if (typeof source === 'string' && /\.[jt]sx$/.test(name)) {
+        for (const match of source.matchAll(/<Scene\b[^>]*?\bid=(?:"([^"]+)"|'([^']+)'|\{"([^"]+)"\})/g)) {
+          sceneIds.add(match[1] ?? match[2] ?? match[3] ?? '')
+        }
+      }
+    }
+  }
+  sceneIds.delete('')
+
   return Array.from(sceneIds)
 }
 
@@ -88,14 +104,18 @@ export function scenePushActionCopy({
   active,
   connected,
   saves,
+  noun = 'scene',
 }: {
   active: boolean
   connected: number
   saves: boolean
+  /** A layout is never shown on its own, so pushing one activates nothing. */
+  noun?: 'scene' | 'layout'
 }): { label: string; description: string } {
-  const what = connected ? `this scene and ${connected} connected scene${connected === 1 ? '' : 's'}` : 'this scene'
+  const staysPut = active || noun === 'layout'
+  const what = connected ? `this ${noun} and ${connected} connected scene${connected === 1 ? '' : 's'}` : `this ${noun}`
   return {
-    label: active ? 'Push to frame' : 'Push & activate',
-    description: `${saves ? 'Save and push' : 'Push'} ${what} to the frame${active ? '' : ', then show it'}`,
+    label: staysPut ? 'Push to frame' : 'Push & activate',
+    description: `${saves ? 'Save and push' : 'Push'} ${what} to the frame${staysPut ? '' : ', then show it'}`,
   }
 }

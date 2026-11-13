@@ -2,8 +2,8 @@
 
 import { ShieldCheck, ShieldOff, Trash2, Unplug } from "lucide-react";
 import { useState } from "react";
-import { formatBytes, formatDate } from "../lib/format";
-import { redirectToReauthIfRequired } from "../lib/reauth-client";
+import { formatBytes, formatDate, formatMicrosUsd } from "../lib/format";
+import { redirectToReauthIfRequired } from "../../../../../frontend/src/sceneWorkspace/lib/reauth-client";
 import { Ratio } from "./Ratio";
 import { RowMenu } from "./RowMenu";
 import { SortableTable } from "./SortableTable";
@@ -23,6 +23,14 @@ export type AdminUser = {
     emailVerified: boolean;
   }[];
   isSuperadmin: boolean;
+  /** The paid plan the account is on now; null on the free plan. */
+  paidPlan: {
+    cancelAt: string | null;
+    code: string;
+    name: string;
+    priceMicros: string;
+    provider: string | null;
+  } | null;
   primaryEmail: string | null;
   storeScenes: { public: number; total: number };
 };
@@ -151,7 +159,15 @@ export function AdminUsersTable({
             return {
               cells: [
                 <>
-                  <div>{user.displayName ?? "—"}</div>
+                  <div>
+                    {user.displayName ?? "—"}
+                    {user.paidPlan ? (
+                      <>
+                        {" "}
+                        <PaidPlanPill plan={user.paidPlan} />
+                      </>
+                    ) : null}
+                  </div>
                   <div className="copy">{user.primaryEmail ?? "no email"}</div>
                 </>,
                 user.identities.length > 0 ? (
@@ -230,6 +246,31 @@ export function AdminUsersTable({
         />
       )}
     </>
+  );
+}
+
+// A paying account's plan, next to its name. Amber while a cancellation runs
+// out; the title says who bills it and when it ends.
+function PaidPlanPill({ plan }: { plan: NonNullable<AdminUser["paidPlan"]> }) {
+  const ends = plan.cancelAt ? formatDate(new Date(plan.cancelAt)) : null;
+  const billedBy =
+    plan.provider === "grant"
+      ? "Given for free by an operator"
+      : plan.provider
+        ? `Paid through ${plan.provider === "stripe" ? "Stripe" : plan.provider}`
+        : "Set by an operator";
+  return (
+    <span
+      className={ends ? "pill pill-warning" : "pill pill-ok"}
+      title={
+        ends
+          ? `${billedBy}. ${plan.provider === "grant" ? "Ends" : "Cancelled, ends"} ${ends}.`
+          : `${billedBy}.`
+      }
+    >
+      {plan.name} {formatMicrosUsd(plan.priceMicros)}
+      {ends ? ` · ends ${ends}` : null}
+    </span>
   );
 }
 

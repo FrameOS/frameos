@@ -148,7 +148,8 @@ export const subscriptionRefundRule: PostingRule = {
     const { accountId, amountMicros, metadata } = amountAndAccount(event);
     return [
       {
-        description: "Unearned subscription returned to the customer's balance",
+        // The customer reads this line on their statement.
+        description: "Unused plan time credited back",
         entryType: "subscription_refund_to_receivable",
         metadata,
         occurredAt: event.occurredAt,
@@ -168,5 +169,6 @@ export const subscriptionRefundRule: PostingRule = {
     ];
   },
   name: "subscription_refund",
-  version: 1,
+  // v2: plain words for the statement.
+  version: 2,
 };

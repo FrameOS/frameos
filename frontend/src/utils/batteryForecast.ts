@@ -59,6 +59,14 @@ const GOOD_FIT_SAMPLES = 24
 export const MAX_FORECAST_HOURS = 24 * 365
 /** Awake time per wake when the samples never said (a typical ESP32 wake). */
 const DEFAULT_AWAKE_SECONDS = 60
+/**
+ * What a wake spends getting a picture its control plane already drew
+ * (docs/server-rendering.md): one HTTPS request and the download, or a 304
+ * when nothing changed. It replaces the scene's own time on the frame.
+ */
+export const SERVER_PULL_SECONDS = 3
+/** Rendering on the server is offered when the battery would last this much longer. */
+export const SERVER_RENDER_MIN_GAIN = 0.1
 
 /** Wake cadences the forecast slider offers, in seconds. */
 export const FORECAST_CYCLE_OPTIONS: readonly number[] = [
@@ -78,6 +86,8 @@ export interface BatterySample {
   /** The charger's word (boards with one): USB in, and charging; null when the sample did not say. */
   usbPower: boolean | null
   charging: boolean | null
+  /** How long the last pass took to make its picture (the scene, or the pull), in ms; firmware 2026.11.7+. */
+  renderSceneMs: number | null
 }
 
 export interface DischargeSegment {
@@ -124,6 +134,8 @@ export interface BatteryAnalysis {
   /** The discharge the frame is in now: since its last charge. */
   segment: DischargeSegment | null
   cadence: BatteryCadence
+  /** Seconds of each recent wake the frame spent making its picture; null when it never said. */
+  sceneSeconds: number | null
   /** Whether the frame deep-sleeps between wakes (the cadence model applies). */
   deepSleep: boolean
   /** Observed drain on the current segment, points per day; null without a fit. */
@@ -166,6 +178,7 @@ export function batterySamplesFromMetrics(metrics: MetricsType[]): { samples: Ba
       wakeCause: typeof metric.metrics?.wakeCause === 'string' ? metric.metrics.wakeCause : null,
       usbPower: typeof usbPower === 'boolean' ? usbPower : null,
       charging: typeof charging === 'boolean' ? charging : null,
+      renderSceneMs: finiteOrNull(metric.metrics?.renderSceneMs),
     })
   }
   return { samples, misreadCount }
@@ -324,21 +337,39 @@ export function batteryCadence(samples: BatterySample[]): BatteryCadence {
   return { cycleSeconds: median(gaps), awakeSeconds: median(uptimes) }
 }
 
-export type BatteryFrameSettings = Pick<FrameType, 'deep_sleep' | 'deep_sleep_on_battery' | 'device_config'>
+/**
+ * The seconds a recent wake spent making its picture: the median of the
+ * `renderSceneMs` the last CADENCE_WINDOW_WAKES wakes reported (every sample
+ * of a wake repeats its last render's). Null when none said.
+ */
+export function sceneSecondsPerWake(samples: BatterySample[]): number | null {
+  const recent = batteryWakes(samples).slice(-CADENCE_WINDOW_WAKES)
+  const values: number[] = []
+  for (const wake of recent) {
+    const last = [...wake.samples].reverse().find((sample) => sample.renderSceneMs !== null && sample.renderSceneMs > 0)
+    if (last?.renderSceneMs) {
+      values.push(last.renderSceneMs / 1000)
+    }
+  }
+  return median(values)
+}
 
 /**
- * Whether the frame's settings put it to sleep between wakes: "always", or
- * "when on battery" while it is. A cloud frame carries the power keys at the
- * top level; a backend-managed one in `device_config`, in either spelling.
+ * Whether the frame's settings put it to sleep between wakes: the cloud's
+ * top-level keys, or a backend frame's device_config (either spelling, as
+ * the backend reads them).
  */
-export function frameDeepSleeps(frame: BatteryFrameSettings, onBattery: boolean | null): boolean {
-  const config = (frame.device_config ?? {}) as Record<string, unknown>
-  const deepSleep = frame.deep_sleep ?? config.deepSleep ?? config.deep_sleep
-  const deepSleepOnBattery = frame.deep_sleep_on_battery ?? config.deepSleepOnBattery ?? config.deep_sleep_on_battery
-  if (deepSleep === true) {
+export function frameDeepSleeps(
+  frame: Pick<FrameType, 'deep_sleep' | 'deep_sleep_on_battery'> & Partial<Pick<FrameType, 'device_config'>>,
+  onBattery: boolean | null
+): boolean {
+  const config = frame.device_config ?? {}
+  const always = frame.deep_sleep ?? config.deepSleep ?? config.deep_sleep
+  const onBatteryOnly = frame.deep_sleep_on_battery ?? config.deepSleepOnBattery ?? config.deep_sleep_on_battery
+  if (always === true) {
     return true
   }
-  return deepSleepOnBattery === true && onBattery !== false
+  return onBatteryOnly === true && onBattery !== false
 }
 
 /** Boots that came out of deep sleep (fos_client.c wake_cause_name). */
@@ -405,26 +436,43 @@ export function scaledDrainPerHour(
   observedCycleSeconds: number,
   awakeSeconds: number,
   cycleSeconds: number,
-  deepSleep: boolean
+  deepSleep: boolean,
+  /** The awake time per wake to forecast with (rendering on the server); defaults to the observed one. */
+  nextAwakeSeconds: number = awakeSeconds
 ): number {
   if (!deepSleep || observedCycleSeconds <= 0 || cycleSeconds <= 0) {
     return observedDrainPerHour
   }
   const awake = Math.min(1, awakeSeconds / observedCycleSeconds)
   const k = observedDrainPerHour / (awake + (1 - awake) * SLEEP_RATIO)
-  const nextAwake = Math.min(1, awakeSeconds / cycleSeconds)
+  const nextAwake = Math.min(1, nextAwakeSeconds / cycleSeconds)
   return k * (nextAwake + (1 - nextAwake) * SLEEP_RATIO)
 }
 
-/** The forecast at a wake cadence, or null when the analysis has no fit. */
-export function batteryForecast(analysis: BatteryAnalysis, cycleSeconds: number, now: number): BatteryForecast | null {
+/**
+ * The forecast at a wake cadence, or null when the analysis has no fit.
+ * `awakeSeconds` forecasts wakes of another length than the observed ones.
+ */
+export function batteryForecast(
+  analysis: BatteryAnalysis,
+  cycleSeconds: number,
+  now: number,
+  { awakeSeconds: nextAwakeSeconds }: { awakeSeconds?: number } = {}
+): BatteryForecast | null {
   const { latest, segment, cadence, drainPerDay, deepSleep } = analysis
   if (!latest || !segment || drainPerDay === null || drainPerDay <= 0) {
     return null
   }
   const observedCycle = cadence.cycleSeconds ?? cycleSeconds
   const awakeSeconds = cadence.awakeSeconds ?? DEFAULT_AWAKE_SECONDS
-  const drainPerHour = scaledDrainPerHour(drainPerDay / 24, observedCycle, awakeSeconds, cycleSeconds, deepSleep)
+  const drainPerHour = scaledDrainPerHour(
+    drainPerDay / 24,
+    observedCycle,
+    awakeSeconds,
+    cycleSeconds,
+    deepSleep,
+    nextAwakeSeconds ?? awakeSeconds
+  )
   if (drainPerHour <= 0) {
     return null
   }
@@ -440,8 +488,61 @@ export function batteryForecast(analysis: BatteryAnalysis, cycleSeconds: number,
   }
 }
 
+export interface ServerRenderForecast {
+  /** Seconds awake per wake now, and rendered on the server. */
+  awakeSeconds: number
+  serverAwakeSeconds: number
+  /** Seconds of each wake the scene takes on the frame now. */
+  sceneSeconds: number
+  /** The battery at this cadence now, and rendered on the server. */
+  current: BatteryForecast
+  server: BatteryForecast
+  /** How much longer it would last: server / current - 1. */
+  gain: number
+}
+
+/**
+ * How long the battery would last at `cycleSeconds` if the frame's control
+ * plane drew its pictures (docs/server-rendering.md "Battery"): each wake
+ * loses the time the frame spends on the scene (`renderSceneMs`) and gains
+ * SERVER_PULL_SECONDS for the download, and the cadence model does the rest.
+ * Null when the frame does not deep-sleep (it is awake anyway), when it
+ * never reported its scene time, or when the numbers do not add up.
+ */
+export function serverRenderForecast(
+  analysis: BatteryAnalysis,
+  cycleSeconds: number,
+  now: number
+): ServerRenderForecast | null {
+  const { deepSleep, sceneSeconds, cadence } = analysis
+  if (!deepSleep || sceneSeconds === null || sceneSeconds <= SERVER_PULL_SECONDS) {
+    return null
+  }
+  const awakeSeconds = cadence.awakeSeconds ?? DEFAULT_AWAKE_SECONDS
+  if (sceneSeconds >= awakeSeconds) {
+    return null
+  }
+  const serverAwakeSeconds = awakeSeconds - sceneSeconds + SERVER_PULL_SECONDS
+  const current = batteryForecast(analysis, cycleSeconds, now)
+  const server = batteryForecast(analysis, cycleSeconds, now, { awakeSeconds: serverAwakeSeconds })
+  if (!current || !server || current.hoursRemaining <= 0) {
+    return null
+  }
+  return {
+    awakeSeconds,
+    serverAwakeSeconds,
+    sceneSeconds,
+    current,
+    server,
+    gain: server.hoursRemaining / current.hoursRemaining - 1,
+  }
+}
+
 /** Everything the battery popup shows, from the metrics history and the frame's settings. */
-export function analyzeBattery(metrics: MetricsType[], frame: BatteryFrameSettings): BatteryAnalysis {
+export function analyzeBattery(
+  metrics: MetricsType[],
+  frame: Pick<FrameType, 'deep_sleep' | 'deep_sleep_on_battery'> & Partial<Pick<FrameType, 'device_config'>>
+): BatteryAnalysis {
   const { samples, misreadCount } = batterySamplesFromMetrics(metrics)
   const latest = samples[samples.length - 1] ?? null
   const cadence = batteryCadence(samples)
@@ -454,6 +555,7 @@ export function analyzeBattery(metrics: MetricsType[], frame: BatteryFrameSettin
     misreadCount,
     segment: null,
     cadence,
+    sceneSeconds: sceneSecondsPerWake(samples),
     deepSleep,
     drainPerDay: null,
     confidence: 'none',

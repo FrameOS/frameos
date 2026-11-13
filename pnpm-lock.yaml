@@ -322,6 +322,9 @@ importers:
       sharp:
         specifier: '>=0.35.0'
         version: 0.35.3(@types/node@25.9.5)
+      stripe:
+        specifier: 23.0.1
+        version: 23.0.1(@types/node@25.9.5)
       undici:
         specifier: 7.29.0
         version: 7.29.0
@@ -836,6 +839,9 @@ importers:
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
+      frameos-wasm:
+        specifier: workspace:*
+        version: link:../frameos/wasm
       fuse.js:
         specifier: ^7.0.0
         version: 7.1.0
@@ -857,6 +863,9 @@ importers:
       kea-subscriptions:
         specifier: ^3.0.1
         version: 3.0.1(kea@3.1.7(react@19.2.8))
+      lucide-react:
+        specifier: ^1.28.0
+        version: 1.28.0(react@19.2.8)
       messg:
         specifier: ^2.2.2
         version: 2.2.2
@@ -5848,6 +5857,15 @@ packages:
   strip-json-comments@3.1.1:
     resolution: {integrity: sha512-6fPc+R4ihwqP6N/aIv2f1gMH8lOVtWQHoqC4yK6oSDVVocumAsfCqjkXnqiYMhmMwS/mEHLp7Vehlt3ql6lEig==}
     engines: {node: '>=8'}
+
+  stripe@23.0.1:
+    resolution: {integrity: sha512-VFLs9IAzSZ8GIm6/vqhjqOL0fbYrSNYCpgZ3LS3YkSi/i5RnyMpu/Hf9YxPTOCYwc3mZKU3IJvuvKffQH2NLMg==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@types/node': '>=20'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
 
   style-to-js@1.1.21:
     resolution: {integrity: sha512-RjQetxJrrUJLQPHbLku6U/ocGtzyjbJMP9lCNK7Ag0CNh690nSH8woqWH9u16nMjYBAok+i7JO1NP2pOy8IsPQ==}
@@ -11783,6 +11801,10 @@ snapshots:
       ansi-regex: 5.0.1
 
   strip-json-comments@3.1.1: {}
+
+  stripe@23.0.1(@types/node@25.9.5):
+    optionalDependencies:
+      '@types/node': 25.9.5
 
   style-to-js@1.1.21:
     dependencies:

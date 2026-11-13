@@ -10,6 +10,7 @@
 import std/[json, locks, options, sequtils, strformat, tables]
 import pixie
 
+import frameos/render_probe
 import frameos/types
 import frameos/utils/asset_colors
 from frameos/render_scale import MaxRenderScale
@@ -17,7 +18,10 @@ import lib/tz
 import std/times
 import frameos/channels
 import frameos/single_scene_host
+import frameos/scene_rhythm
+import frameos/layout_choice
 import system/sceneSwitcher/scene as sceneSwitcher
+import system/sceneSettings/scene as sceneSettings
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
 import frameos/values
@@ -25,6 +29,7 @@ import frameos/planner
 import frameos/js_runtime/runtime as jsRuntime
 import frameos/js_runtime/app_runtime
 import frameos/utils/svg_frames
+from frameos/utils/image import pointerToScenePoint
 # The loading mark's C entry points (fos_nim_loading_mark_*_impl), drawn by
 # the RGB LCD's own task while a scene switch loads (lcd_st7701s_rgb.c).
 import frameos/loading_mark
@@ -50,7 +55,6 @@ proc sceneStateLoad(sceneId: cstring): cstring {.importc: "frameos_nim_scene_sta
   ## JSON this side frees, or nil.
 proc sceneStateSave(sceneId: cstring, json: cstring): bool {.importc: "frameos_nim_scene_state_save", cdecl.}
 proc cFree(p: pointer) {.importc: "free", header: "<stdlib.h>", cdecl.}
-
 proc log*(msg: string) =
   espLog(msg.cstring)
 
@@ -64,6 +68,7 @@ var
   # The legacy single-payload path's scene order (the lazy path's is the
   # catalog), for `setCurrentScene {direction}`.
   loadedSceneOrder: seq[SceneId]
+  layoutCatalog: seq[LayoutEntry]
   # The scene's lifetime, its lifecycle events and the dispatcher's EventHost:
   # shared with the wasm preview (frameos/single_scene_host). Allocated here so
   # the status procs below can be asked before initRuntime.
@@ -211,6 +216,10 @@ proc residentSceneState(persistable: bool): JsonNode =
         (not persistable or worthPersistingState(declaredFields, key, scene.state[key])):
       result[key] = scene.state[key]
 
+proc readLayoutState(id: string): JsonNode {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    result = loadPersistedSceneState(id)
+
 proc persistableSceneState(): JsonNode =
   ## The resident scene's keys worth a file.
   residentSceneState(persistable = true)
@@ -234,6 +243,13 @@ proc mergePersistedSceneState(sceneId: string, state: JsonNode) =
   for key, value in state:
     current[key] = value
   saveSceneState(sceneId, current)
+
+proc writeLayoutState(id: string, state: JsonNode) {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    mergePersistedSceneState(id, state)
+
+layoutStateRead = readLayoutState
+layoutStateWrite = writeLayoutState
 
 proc sceneStateJson*(): string =
   ## The current scene's public state: what `/state`, the cloud hello and the
@@ -451,7 +467,9 @@ var quietRenders* = false
 proc fos_nim_set_keep_js_impl(keep: cint) {.exportc, cdecl.} =
   ## The firmware's say on keeping the scene's JS interpreters between
   ## renders (single_scene_host.keepJsRuntimes): yes on a frame that does not
-  ## deep-sleep, while there is room.
+  ## deep-sleep, while there is room. A deep sleeper also keeps its split's
+  ## own interval as the fastest it wakes.
+  rhythmHoldFloor = keep == 0
   host.keepJsRuntimes = keep != 0
 
 proc fos_nim_js_runtime_bytes_impl(): csize_t {.exportc, cdecl.} =
@@ -464,6 +482,11 @@ proc fos_nim_set_quiet_impl(quiet: cint) {.exportc, cdecl.} =
   quietRenders = quiet != 0
   if not logger.isNil:
     logger.enabled = not quietRenders
+
+proc debugEnabled*(): bool =
+  ## The frame's `debug` setting (`set debug 1` on the console): the per-node
+  ## profile lines, and the render line's per-phase probe (render_probe.nim).
+  frameConfig.debug
 
 proc fos_nim_set_debug_impl(enabled: cint) {.exportc, cdecl.} =
   ## Turns the interpreter's per-node memory profile on and off at runtime
@@ -596,17 +619,23 @@ proc loadScenes*(payload: string): int =
     return 0
 
   # Tear down the old scene before swapping the registry so its QuickJS
-  # context and app instances are reclaimed.
+  # context and app instances are reclaimed; the layout it wore may be one of
+  # the new scenes, changed.
   host.dropScene()
+  dropParkedLayout()
   when defined(memProbe): memProbe("  loadScene: old scene dropped")
 
   replaceInterpretedScenesCache(newScenes)
   when defined(memProbe): memProbe("  loadScene: scenes cache replaced")
   scenesLoadedCount = newScenes.len
   loadedSceneOrder = @[]
+  layoutCatalog.setLen(0)
   for input in inputs:
     if newScenes.hasKey(input.id):
-      loadedSceneOrder.add(input.id)
+      if newScenes[input.id].isLayout:
+        layoutCatalog.add LayoutEntry(id: input.id.string, name: newScenes[input.id].name)
+      else:
+        loadedSceneOrder.add(input.id)
 
   # Keep the current scene across updates when it still exists; otherwise
   # fall back to the first scene in the payload.
@@ -626,7 +655,9 @@ proc setSceneCatalog*(indexJson: string): int =
   ##
   ## This is what makes lazy loading possible: the frame can list, schedule
   ## and switch scenes knowing only this, and pays for a scene's nodes and
-  ## JavaScript only while it is the active one.
+  ## JavaScript only while it is the active one. A new list may hold a changed
+  ## layout: the one kept between switches goes.
+  dropParkedLayout()
   var parsed: JsonNode
   try:
     parsed = parseJson(indexJson)
@@ -637,12 +668,18 @@ proc setSceneCatalog*(indexJson: string): int =
     log("setSceneCatalog: index is not an object")
     return 0
   var entries: seq[SceneCatalogEntry] = @[]
+  var layouts: seq[LayoutEntry] = @[]
   let scenesNode = parsed{"scenes"}
   if not scenesNode.isNil and scenesNode.kind == JArray:
     for item in scenesNode.items:
       if item.kind != JObject:
         continue
       let id = item{"id"}.getStr()
+      if id.len > 0 and item{"isLayout"}.getBool(false):
+        # Read off flash by id when a scene names it, and in no list but the
+        # frame page's.
+        layouts.add LayoutEntry(id: id, name: item{"name"}.getStr())
+        continue
       if id.len == 0:
         continue
       entries.add(SceneCatalogEntry(
@@ -651,6 +688,7 @@ proc setSceneCatalog*(indexJson: string): int =
         refreshInterval: item{"refreshInterval"}.getFloat(0.0),
       ))
   sceneCatalog = entries
+  layoutCatalog = layouts
   if entries.len == 0:
     log("setSceneCatalog: no scenes in index")
     return 0
@@ -746,12 +784,47 @@ proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
 
 sceneSwitcherListing = switcherListing
 
+proc embeddedLayouts(): seq[LayoutEntry] {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    layoutCatalog
+
+layoutListing = embeddedLayouts
+
+# The settings panel's frame page, behind its gear (docs/scene-settings.md
+# "The frame page"): the facts it shows and what it sets (Wi-Fi, rotation,
+# scale), from main/fos_frame_settings.c. Every call comes from the scene, on
+# the render task.
+proc fos_frame_settings_json(): cstring {.importc, cdecl.}
+proc fos_frame_settings_apply(json: cstring) {.importc, cdecl.}
+proc fos_frame_settings_action(action: cstring) {.importc, cdecl.}
+
+proc frameSettingsJson(): JsonNode {.nimcall, gcsafe, raises: [].} =
+  let raw = fos_frame_settings_json()
+  if raw.isNil:
+    return nil
+  try:
+    result = parseJson($raw)
+  except Exception:
+    result = nil
+  cFree(raw)
+
+proc frameSettingsSet(values: JsonNode) {.nimcall, gcsafe, raises: [].} =
+  fos_frame_settings_apply(($values).cstring)
+
+proc frameSettingsDo(action: string) {.nimcall, gcsafe, raises: [].} =
+  fos_frame_settings_action(action.cstring)
+
+sceneSettings.frameSettingsRead = frameSettingsJson
+sceneSettings.frameSettingsApply = frameSettingsSet
+sceneSettings.frameSettingsAction = frameSettingsDo
+
 proc selectScene*(sceneIdText: string): bool =
   when defined(memProbe): memProbe("  >>> selectScene " & sceneIdText)
   let sceneId = SceneId(sceneIdText)
   if isBuiltInScene(sceneIdText):
     # The scene switcher (fos_scenes.c applies it without a slot): the scene
-    # it covers goes, its parsed payload stays in the cache for the way back.
+    # it covers is kept while render memory allows (single_scene_host's
+    # `covered`), and its parsed payload stays in the cache for the way back.
     # Asked again while it shows (a reconnect re-announcing it), it keeps
     # what it was opened from. fos_scenes.c logs the switch.
     if host.sceneId != some(sceneId):
@@ -800,15 +873,18 @@ proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
 # One scene canvas for the device's uptime, not one per render.
 #
 # Two decisions live here. The format, decided per board by the firmware
-# (`fos_render_canvas_bytes_per_pixel`, components/frameos_display), panel
-# first: pixie's 8-bit luma surface for a greyscale or black-and-white panel
-# and its 16-bit RGB 5/6/5 surface for an RGB565 LCD, whatever the PSRAM;
+# (`fos_render_canvas_bits_per_pixel`, components/frameos_display), panel
+# first: pixie's sixteen-grey surface for a 4-bit grey panel, its 8-bit luma
+# surface for a four-grey or black-and-white panel (whose error diffusion
+# wants the 256 levels) and its 16-bit RGB 5/6/5 surface for an RGB565 LCD,
+# whatever the PSRAM;
 # for a colour e-paper panel RGBX when a full canvas takes at most half the
 # module's PSRAM, else 565. A grey canvas loses nothing a grey panel shows —
 # blending is per channel, so the luma of a composite is the composite of
 # the lumas — and every pass over it (a fill, a blend, the dither) moves a
-# quarter of the bytes; the 1872x1404 sixteen-grey reTerminal E1003 needs it
-# to fit at all (2.5 MiB where 565 was 5.0). An LCD's 565 canvas is its own
+# quarter of the bytes. The 1872x1404 sixteen-grey reTerminal E1003's is
+# 1.3 MiB (2.5 in luma, 5.0 in 565): its stores are dithered as the pack did,
+# and the level a store leaves is the level on the glass. An LCD's 565 canvas is its own
 # back frame buffer (panelCanvas below): drawn in place, nothing to pack or
 # copy. The 800x480 colour boards and a 1200x1600 panel on a 16 MB module
 # render in full colour; 1200x1600 Spectra 6 on an 8 MB module needs 565 —
@@ -820,7 +896,7 @@ proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
 # weather scene. So a 565 canvas stores with pixie's per-pixel dither
 # (`ditherStores`), which brings the gradient back at no memory cost, and
 # RGBX is used wherever it fits. `-d:frameosCanvasRgbx` / `-d:frameosCanvas565`
-# / `-d:frameosCanvasGray8` force a format for A/B measurement; the Pi runtime and the wasm preview are
+# / `-d:frameosCanvasGray8` / `-d:frameosCanvasGray4` force a format for A/B measurement; the Pi runtime and the wasm preview are
 # untouched either way and keep full RGBA.
 #
 # The lifetime: the memory comes from one PSRAM block the firmware claims at
@@ -833,7 +909,7 @@ proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
 # cache never stores the live canvas), so reusing it is safe.
 
 proc canvasBuffer(len: csize_t): pointer {.importc: "frameos_nim_canvas_buffer", cdecl.}
-proc canvasBytesPerPixel(): csize_t {.importc: "fos_display_canvas_bytes_per_pixel", cdecl.}
+proc canvasBitsPerPixel(): csize_t {.importc: "fos_display_canvas_bits_per_pixel", cdecl.}
 
 var sceneCanvas: Image
 
@@ -841,10 +917,13 @@ var sceneCanvas: Image
 # (fos_nim_render_panel_impl: an LCD's back frame buffer). A canvas in the
 # panel's format and orientation IS that buffer: the scene draws straight
 # into what the panel scans next, and there is nothing to pack or copy. The
-# LCD has two such buffers, used in turn; their wrappers are kept.
+# LCD has up to three such buffers (LCD_FBS), used in turn; their wrappers are
+# kept. A wrapper that fell out of this list reads as a canvas nobody can vouch
+# for (canvasGenerationForRhythm), so every buffer needs a slot: with two slots
+# for three buffers a layout's panel was run again on every tick of its chrome.
 var panelTarget: pointer
 var panelTargetBytes: int
-var panelCanvases: array[2, Image]
+var panelCanvases: array[3, Image]
 var nextPanelCanvas = 0
 
 proc displayBufferGeneration(buffer: pointer): int64 {.importc: "fos_display_buffer_generation", cdecl.}
@@ -869,10 +948,12 @@ proc sceneCanvasFormat*(): PixelFormat =
   when defined(frameosCanvasRgbx): pfRgbx
   elif defined(frameosCanvas565): pfRgb565
   elif defined(frameosCanvasGray8): pfGray8
+  elif defined(frameosCanvasGray4): pfGray4
   else:
-    case canvasBytesPerPixel()
-    of 4: pfRgbx
-    of 1: pfGray8
+    case canvasBitsPerPixel()
+    of 32: pfRgbx
+    of 8: pfGray8
+    of 4: pfGray4
     else: pfRgb565
 
 proc sceneCanvasWidth*(): int =
@@ -900,7 +981,7 @@ proc panelCanvas(width, height: int, format: PixelFormat): Image =
   # so a gradient on the glass does not step every eight levels.
   result.ditherStores = true
   panelCanvases[nextPanelCanvas] = result
-  nextPanelCanvas = 1 - nextPanelCanvas
+  nextPanelCanvas = (nextPanelCanvas + 1) mod panelCanvases.len
 
 proc renderCanvasIsPanel*(image: Image): bool =
   ## Whether `image` is the panel buffer handed in for this render: drawn
@@ -921,17 +1002,19 @@ proc renderCanvas*(): Image =
   if not sceneCanvas.isNil and sceneCanvas.width == width and
       sceneCanvas.height == height and sceneCanvas.format == format:
     return sceneCanvas
-  let bytesPerPixel =
+  let canvasBytes =
     case format
-    of pfRgb565: 2
-    of pfGray8: 1
-    of pfRgbx: 4
-  let buffer = canvasBuffer(csize_t(width * height * bytesPerPixel))
+    of pfRgb565: width * height * 2
+    of pfGray8: width * height
+    of pfGray4: ((width + 1) div 2) * height
+    of pfRgbx: width * height * 4
+  let buffer = canvasBuffer(csize_t(canvasBytes))
   if buffer != nil:
     sceneCanvas =
       case format
       of pfRgb565: newImage565Over(width, height, buffer)
       of pfGray8: newImageGray8Over(width, height, buffer)
+      of pfGray4: newImageGray4Over(width, height, buffer)
       of pfRgbx: newImageOver(width, height, buffer)
   else:
     # No firmware block (a host build, or the reservation failed): the Nim
@@ -941,6 +1024,7 @@ proc renderCanvas*(): Image =
       case format
       of pfRgb565: newImage565(width, height)
       of pfGray8: newImageGray8(width, height)
+      of pfGray4: newImageGray4(width, height)
       of pfRgbx: newImage(width, height)
   if format == pfRgb565:
     sceneCanvas.ditherStores = true
@@ -948,9 +1032,54 @@ proc renderCanvas*(): Image =
     case format
     of pfRgb565: "rgb565 (dithered stores)"
     of pfGray8: "gray8"
+    of pfGray4: "gray4 (dithered stores)"
     of pfRgbx: "rgbx"
   log(&"canvas: {width}x{height} {described}")
   sceneCanvas
+
+proc panelHasPartialWaveform*(): bool {.importc: "fos_display_supports_partial", cdecl.}
+
+proc beginKeptCanvasFrame*(): bool =
+  ## A render on a panel with a partial waveform: the kept canvas holds the
+  ## last frame as an LCD's buffer does, so an SVG repaints only its damage
+  ## (utils/svg_frames.nim). What else writes into it says so through
+  ## rhythmForgetCanvases. A frame-wide color correction is applied to the
+  ## finished canvas, and pixels left in place would take it twice.
+  if panelHasPartialWaveform() and not frameColorSettings.global.hasAdjustments():
+    beginPanelFrame(renderCanvas().bufferPointer, 0)
+    result = true
+
+proc endKeptCanvasFrame*() =
+  endPanelFrame()
+
+proc pressTaken*(wireX, wireY: int): bool =
+  ## A position on the glass (0..PointerAxisMax) as the showing scene's pixel,
+  ## and whether something there takes a press.
+  if host.scene.isNil or frameConfig.isNil:
+    return false
+  let at = pointerToScenePoint(wireX, wireY, frameConfig.width, frameConfig.height, frameConfig.rotate,
+    frameConfig.flip)
+  pressTakenAt(host.scene, at.x, at.y)
+
+proc canvasGenerationForRhythm(canvas: Image): int64 {.nimcall, raises: [].} =
+  ## What wrote into this kept canvas since it was drawn (scene_rhythm.nim): a
+  ## panel buffer's count from the firmware, nothing on the scene canvas but
+  ## what `rhythmForgetCanvases` hears of; -1 when a frame-wide colour
+  ## correction would apply to a kept panel a second time.
+  {.cast(raises: []).}:
+    if frameColorSettings.global.hasAdjustments():
+      return -1
+  if canvas.isNil:
+    -1
+  elif canvas == sceneCanvas:
+    0
+  elif not panelBufferGeneration.isNil and canvas in panelCanvases:
+    # This buffer or the one the rhythm is asking about (its neighbour).
+    panelBufferGeneration(canvas.bufferPointer)
+  else:
+    -1
+
+rhythmCanvasGeneration = canvasGenerationForRhythm
 
 proc sceneRefreshSeconds*(): float =
   if not host.scene.isNil and host.scene.refreshInterval > 0:
@@ -958,6 +1087,10 @@ proc sceneRefreshSeconds*(): float =
   if not host.exported.isNil and host.exported.refreshInterval > 0:
     return host.exported.refreshInterval
   0.0
+
+proc sceneAwaited*(): bool =
+  ## May the next pass show the loading mark (scene_rhythm.nim)?
+  rhythmAwaited(host.scene)
 
 var lastNextSleep: float = -1
 
@@ -987,8 +1120,11 @@ proc renderCurrentScene*(): Option[Image] =
   )
   # renderScene hands the JS apps' interpreters back before it returns, so the
   # packing and display work below see the memory.
-  let image = host.renderScene(context)
-  persistSceneState()
+  var image: Image
+  probe(phScene):
+    image = host.renderScene(context)
+  probe(phPersist):
+    persistSceneState()
   when defined(memProbe): memProbe("  renderCurrentScene: idle js runtimes released")
   if image.isNil:
     log("render returned no image")

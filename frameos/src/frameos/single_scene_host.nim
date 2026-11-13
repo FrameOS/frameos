@@ -14,7 +14,7 @@
 ## The Linux runner holds many scenes on a thread of its own and is its own
 ## host (frameos/runner.nim).
 
-import std/[json, options, tables]
+import std/[json, monotimes, options, tables, times]
 import pixie
 import ./event_loop
 import ./interpreter
@@ -25,6 +25,12 @@ import ./utils/dither
 import ./utils/memory
 import ./js_runtime/app_runtime
 import ./js_runtime/run_budget
+import ./render_probe
+import ./ui/layout
+import ./ui/tree
+from ./utils/image import renderSvgIntoTarget
+from ./utils/svg_frames import forgetPanelFrames
+import pixie/fileformats/svg
 import ./js_runtime/runtime as jsRuntime
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
@@ -43,12 +49,26 @@ type
       ## settings, system/sceneSettings/scene.nim), which draws itself
       ## through the same three procs.
     sceneId*: Option[SceneId]             ## the current scene, resident or not
+    covered*: FrameScene
+      ## The scene the scene switcher or the scene settings opened over, kept
+      ## while there is room, and current again without its init when the
+      ## way back leads to it: its JS interpreters, memo and laid-out tree
+      ## are still there (they go on their own when memory is short, as any
+      ## idle interpreter does). Closing the switcher rebuilt the scene from
+      ## its JSON on an ESP32, ~250 ms of the SenseCAP Indicator's way back
+      ## (2026-11-07). A Pi keeps every scene it showed; this keeps one.
+    coveredExported: ExportedInterpretedScene
+    coveredId: Option[SceneId]
     renderRequested*: bool
+    discardNoticeUntil: int64
+      ## A notice on the panel until then (monotonic ns): a scene lost its
+      ## interpreter, and the tap that needed it did nothing
+      ## (reportInterpreterDiscards).
     keepJsRuntimes*: bool
       ## Keep the scene's idle JS interpreters between renders while there is
       ## room (settleIdleJsAppRuntimes): an ESP32 that does not deep-sleep.
-      ## The preview leaves it off and releases them, as a deep-sleeping
-      ## frame must, so an app leaning on module state shows it there.
+      ## The preview sets it while it runs as an ESP32 (wasm_main
+      ## `frameos_wasm_set_embedded`): an awake frame's, the one you tap.
     events*: EventLoop
     # The payload of a `setCurrentScene` that carried `state`, held until that
     # scene is the resident one.
@@ -88,16 +108,44 @@ proc takeRenderRequested*(host: SingleSceneHost): bool =
 
 # ----------------------------------------------------------------- lifetime
 
+var parkedLayout: FrameScene
+  ## The layout of the scene dropped last, kept for the next scene that wears
+  ## it (interpreter.nim takeParkedLayout): one at a time.
+
+proc cleanupScene*(scene: FrameScene)
+
+proc dropParkedLayout*() =
+  ## New scenes arrived (the layout may be one of them, changed), or memory
+  ## is short: the kept layout goes.
+  if not parkedLayout.isNil:
+    let layout = parkedLayout
+    parkedLayout = nil
+    cleanupScene(layout)
+
+proc takeParked(layoutId: string): FrameScene {.nimcall.} =
+  if not parkedLayout.isNil and parkedLayout.id.string == layoutId:
+    result = parkedLayout
+    parkedLayout = nil
+
+takeParkedLayout = takeParked
+
 proc cleanupScene*(scene: FrameScene) =
   ## Break ORC cycles and close the scene's QuickJS context before dropping
   ## the last reference (mirrors scenes.nim cleanupSceneRuntime, which lives
-  ## outside these builds).
+  ## outside these builds). The layout it wore is kept for the next scene.
+  if not scene.isNil and not scene.wornLayout.isNil:
+    let layout = scene.wornLayout
+    scene.wornLayout = nil
+    if layout != parkedLayout:
+      dropParkedLayout()
+      parkedLayout = layout
   if scene.isNil or not (scene of InterpretedFrameScene):
     return
   when defined(memProbe): memProbe("  cleanupScene: entry")
   let interpreted = InterpretedFrameScene(scene)
   for _, childScene in interpreted.sceneNodes:
     cleanupScene(childScene)
+  rhythmReleaseScene(scene)
   interpreted.execNode = nil
   interpreted.getDataNode = nil
   # Before the apps are dropped: each JS app node owns a QuickJS runtime with
@@ -115,6 +163,7 @@ proc cleanupScene*(scene: FrameScene) =
   interpreted.sceneExportByNodeId = initTable[NodeId, ExportedScene]()
   interpreted.nextNodeIds = initTable[NodeId, NodeId]()
   interpreted.eventListeners = initTable[string, seq[NodeId]]()
+  interpreted.eventApps = @[]
   interpreted.nodes = initTable[NodeId, DiagramNode]()
   interpreted.edges = @[]
   interpreted.cacheValues = initTable[NodeId, Value]()
@@ -140,6 +189,7 @@ proc recoverAbortedRun*(host: SingleSceneHost): tuple[jsDropped, jsBytes: int] =
   ## the bytes they still hold. What the aborted run allocated stays leaked;
   ## the glue decides whether that warrants a restart.
   resetRunBudgets()
+  dropParkedLayout()
   if not host.events.isNil:
     host.events.resetAfterAbort()
   clearRunNodeStacks(host.scene)
@@ -154,6 +204,22 @@ proc dropScene*(host: SingleSceneHost) =
     cleanupScene(host.scene)
     host.scene = nil
     host.exported = nil
+
+proc dropCovered*(host: SingleSceneHost) =
+  ## Let go of the scene a built-in scene opened over.
+  if not host.covered.isNil:
+    cleanupScene(host.covered)
+  host.covered = nil
+  host.coveredExported = nil
+  host.coveredId = none(SceneId)
+
+proc roomToCover(): bool =
+  ## Keep a covered scene down to the headroom idle interpreters are kept to
+  ## between renders that decode nothing (utils/memory KeepInterpretersBytes;
+  ## a host without a ceiling answers 0: room). A decode that finds memory
+  ## short releases the interpreters first, as for any kept scene.
+  let headroom = availableRenderHeadroomBytes()
+  headroom <= 0 or headroom >= KeepInterpretersBytes
 
 proc runOn(host: SingleSceneHost, scene: FrameScene, event: string, payload: JsonNode) =
   ## One run of the resident scene, through its export: the interpreter's for
@@ -186,7 +252,24 @@ proc makeCurrent*(host: SingleSceneHost, sceneId: SceneId, drop = true) =
     clearRenderPaletteOverride()
     clearGradedImages()
   if drop:
-    host.dropScene()
+    let
+      leaving = host.sceneId
+      opensOver = isBuiltInScene(sceneId.string) and leaving.isSome and
+        not isBuiltInScene(leaving.get().string) and not host.scene.isNil
+    if opensOver and roomToCover():
+      host.dropCovered()
+      host.covered = host.scene
+      host.coveredExported = host.exported
+      host.coveredId = leaving
+      host.scene = nil
+      host.exported = nil
+    else:
+      host.dropScene()
+  # The way back led somewhere else. Also when the old instance stays until the
+  # firmware has read the new one from flash: left for later, it went when
+  # memory ran short, in the middle of the next scene.
+  if host.coveredId.isSome and host.coveredId.get() != sceneId and not isBuiltInScene(sceneId.string):
+    host.dropCovered()
   host.sceneId = some(sceneId)
   host.renderRequested = true
 
@@ -198,6 +281,24 @@ proc ensureScene*(host: SingleSceneHost): bool =
   if host.sceneId.isNone:
     return false
   let sceneId = host.sceneId.get()
+  if host.coveredId == some(sceneId) and not host.covered.isNil:
+    # Back from the switcher or the settings to the scene they covered: the
+    # same instance, told it is current again. A switch that carried state
+    # applies it as it would to a fresh one.
+    host.scene = host.covered
+    host.exported = host.coveredExported
+    host.covered = nil
+    host.coveredExported = nil
+    host.coveredId = none(SceneId)
+    if host.pendingSwitchId == sceneId.string and not host.pendingSwitchPayload.isNil:
+      try:
+        host.runNow("setCurrentScene", host.pendingSwitchPayload)
+      except Exception as e:
+        host.say("setCurrentScene state failed: " & e.msg)
+    host.pendingSwitchId = ""
+    host.pendingSwitchPayload = nil
+    host.lifecycle("open", %*{"sceneId": sceneId.string})
+    return true
   let builtIn = isBuiltInScene(sceneId.string)
   if builtIn:
     # The scene switcher or the scene settings: drawn by the runtime,
@@ -230,13 +331,48 @@ proc ensureScene*(host: SingleSceneHost): bool =
   host.lifecycle("open", %*{"sceneId": sceneId.string})
   true
 
+proc reopenBuiltIn*(host: SingleSceneHost, state: JsonNode): bool =
+  ## The current built-in scene (the switcher, the settings) opened again as
+  ## it was left, on a host whose memory is its control plane's: the wasm
+  ## runtime rendering for a frame, a fresh process per pull
+  ## (docs/server-rendering.md, "Keys, touch and the schedule"). The switch
+  ## that opened it is replayed with the state it kept (what it was opened
+  ## from, the layout, the settings' fields), then the rest of that state
+  ## (the highlight, the page, the form's values) is put back over what
+  ## opening it set. No device host calls this: a device never keeps a
+  ## built-in scene. False when the current scene is not a built-in one, is
+  ## resident already, or `state` is not an object.
+  if host.sceneId.isNone or not isBuiltInScene(host.sceneId.get().string) or not host.scene.isNil:
+    return false
+  if state.isNil or state.kind != JObject:
+    return false
+  let sceneId = host.sceneId.get().string
+  host.pendingSwitchId = sceneId
+  host.pendingSwitchPayload = %*{"sceneId": sceneId, "state": copy(state)}
+  if not host.ensureScene() or host.scene.isNil:
+    return false
+  if host.scene.state.isNil or host.scene.state.kind != JObject:
+    host.scene.state = newJObject()
+  for key, value in state:
+    host.scene.state[key] = copy(value)
+  true
+
 # -------------------------------------------------------------- dispatcher
 
 proc selectFromEvent(host: SingleSceneHost, payload: JsonNode): bool =
   ## `setCurrentScene`, as the dispatcher hands it over.
   let nextId = payload{"sceneId"}.getStr()
   if nextId.len == 0:
-    return false
+    # A built-in scene closing with no scene to go back to (event_loop.nim
+    # builtInScene; an ESP32 given none yet): back to no scene, the status
+    # screen. Nothing for the firmware to load or persist.
+    if host.sceneId.isNone or not isBuiltInScene(host.sceneId.get().string):
+      return false
+    host.lifecycle("close", %*{})
+    host.dropScene()
+    host.sceneId = none(SceneId)
+    host.renderRequested = true
+    return true
   if host.sceneId.isSome and host.sceneId.get().string == nextId:
     # The scene already showing: `state` is applied, nothing switches.
     if not hasStatePayload(payload) or host.scene.isNil:
@@ -322,6 +458,49 @@ proc queue*(host: SingleSceneHost, origin: EventOrigin, event: string, payload: 
   if not host.events.isNil:
     host.events.enqueue(origin, event, payload, target)
 
+const
+  DiscardNoticeNanos = 6_000_000_000'i64
+  DiscardNoticeText = "Low memory: this scene was reloaded. Please tap again."
+
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
+
+proc drawDiscardNotice(image: Image) =
+  ## A strip along the bottom of the picture. Drawn with the JSX layout, as
+  ## the built-in scenes are: no fonts or text code of its own.
+  let height = clamp(image.height div 12, 28, 64)
+  var classes = "flex items-center justify-center w-full h-full bg-black text-white"
+  classes.px("text", height div 2 - 2)
+  try:
+    let strip = image.view(0, image.height - height, image.width, height)
+    discard renderSvgIntoTarget(layoutUi(el("div", classes, SvgNode(text: DiscardNoticeText)), image.width, height), strip)
+  except CatchableError:
+    discard # a notice is not worth a render
+  # Nothing about what these buffers hold can be trusted now: the next pass
+  # draws everything, the strip's pixels included.
+  rhythmForgetCanvases()
+  forgetPanelFrames()
+
+proc reportInterpreterDiscards*(host: SingleSceneHost, context: ExecutionContext, image: Image) =
+  ## What became of the JS interpreters this render: a scene whose interpreter
+  ## goes keeps its picture and stops answering, and without this nobody would
+  ## know why. The frame's log says each one, and when it cost a UI its tap
+  ## handlers the panel says so too.
+  let now = getMonoTime().ticks
+  let discarded = takeInterpreterDiscards()
+  if discarded.count > 0:
+    if discarded.heldHandlers:
+      host.discardNoticeUntil = now + DiscardNoticeNanos
+    host.logger.log(%*{"event": "js:interpreterDiscarded", "sceneId": discarded.sceneId,
+      "reason": discarded.reason, "count": discarded.count, "freeBytes": availableRenderHeadroomBytes()})
+  if now < host.discardNoticeUntil and not image.isNil:
+    drawDiscardNotice(image)
+    # The pass that takes the notice away.
+    let left = (host.discardNoticeUntil - now).float / 1e9
+    if context.nextSleep < 0 or context.nextSleep > left:
+      context.nextSleep = left
+
+{.pop.}
+
 proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   ## One render pass of the resident scene, then whatever it (and an `init` or
   ## `open` before it) dispatched: delivered now that the run is over. A
@@ -334,15 +513,22 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   # ESP32's touch queue, the preview worker's messages), so ticking to now
   # made a tap held across a 750 ms render a `longPress`, and the release
   # no tap. The platform ticks once it has delivered what it queued.
+  let settleStart = getMonoTime()
   discard host.events.drain()
   # The scene is done with its JS apps until the next render. On a
   # deep-sleeping ESP32 that is a fresh boot away, and the next decode wants
   # the memory: they go. An ESP32 that stays awake keeps them while there is
   # room (keepJsRuntimes), and the next render skips building them again;
   # they still go for a decode, an image or a fill that finds memory short
-  # (utils/memory.nim). The preview releases them while it runs as an ESP32,
-  # so that an app keeping values in module variables misbehaves in the
-  # editor rather than only on a sleeping frame; otherwise it keeps them, as
-  # a Pi does.
+  # (utils/memory.nim). The preview keeps them as an awake ESP32 does while
+  # it runs as one (under its simulated memory limit), and as a Pi does
+  # otherwise.
   if runsAsEmbedded():
     discard settleIdleJsAppRuntimes(host.keepJsRuntimes)
+    # A covered scene holds more than its interpreters (its nodes' images):
+    # it goes when render memory is short, or on a frame that keeps nothing.
+    if not host.covered.isNil and (not host.keepJsRuntimes or not roomToCover()):
+      host.dropCovered()
+    host.reportInterpreterDiscards(context, result)
+  if probeOn:
+    probeAdd(phSettle, (getMonoTime() - settleStart).inNanoseconds)

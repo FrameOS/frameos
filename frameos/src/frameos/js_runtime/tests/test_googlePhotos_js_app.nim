@@ -184,9 +184,22 @@ proc teardown(h: Harness) =
   releaseJsAppRuntime(h.owner)
   doAssert not h.runtime.ready
 
-proc render(h: Harness, config: JsonNode, width = 200, height = 120, hasImage = true): Value =
+proc render(h: Harness, config: JsonNode, width = 200, height = 120, hasImage = true,
+    target: tuple[width, height: int, fit: string] = (0, 0, "")): Value =
+  ## `target` is what the interpreter addresses to this node when a
+  ## render/image node draws its output: a decode target with that node's
+  ## placement, or with no fit, only the bounds (an edge that cannot fuse).
   let context = ExecutionContext(scene: h.scene, event: "render", payload: %*{}, hasImage: hasImage,
     image: (if hasImage: newImage(width, height) else: nil), loopIndex: 0, loopKey: ".", nextSleep: -1)
+  if target.width > 0 and target.fit.len > 0:
+    context.decodeTargetWidth = target.width
+    context.decodeTargetHeight = target.height
+    context.decodeTargetScalingMode = target.fit
+    context.decodeTargetNodeId = h.owner.nodeId
+  elif target.width > 0:
+    context.decodeBoundsWidth = target.width
+    context.decodeBoundsHeight = target.height
+    context.decodeBoundsNodeId = h.owner.nodeId
   h.runtime.get(h.owner, withDefaults(config), context)
 
 proc failure(h: Harness, config: JsonNode, width = 200, height = 120, hasImage = true): string =
@@ -261,6 +274,9 @@ suite "Google Photos code app":
     check probe(%*{"fn": "sized", "base": baseA, "width": 800, "height": 480, "fitMode": "cover"})["url"].getStr() ==
       baseA & "=w800-h480-c"
     check probe(%*{"fn": "sized", "base": baseA, "width": 800, "height": 480, "fitMode": "contain"})["url"].getStr() ==
+      baseA & "=w800-h480-no"
+    # Only cover crops: any other placement draws the whole photo.
+    check probe(%*{"fn": "sized", "base": baseA, "width": 800, "height": 480, "fitMode": "center"})["url"].getStr() ==
       baseA & "=w800-h480-no"
 
   test "wrapIndex wraps the sequential counter":
@@ -355,6 +371,21 @@ suite "Google Photos code app":
     check rotated.render(%*{"shareUrl": shareUrl, "mode": "sequential"}, width = 120, height = 200).isPhoto()
     check imageRequests[^1] == sized(baseA, 120, 200)
     check not appSource.contains("rotate")
+
+  test "the image node's placement picks the photo, whatever fitMode says (issue #695)":
+    # fitMode contain under a cover placement asked for a small whole photo,
+    # which render/image then blew up and cropped: the setting did nothing.
+    let h = newHarness()
+    check h.render(%*{"shareUrl": shareUrl, "mode": "sequential", "fitMode": "cover"},
+      target = (390, 230, "contain")).isPhoto()
+    check imageRequests[^1] == sized(baseA, 390, 230, "-no")
+    check h.render(%*{"shareUrl": shareUrl, "mode": "sequential", "fitMode": "contain"},
+      target = (390, 230, "cover")).isPhoto()
+    check imageRequests[^1] == sized(baseB, 390, 230)
+    # Bounds without a placement (an edge that cannot fuse): fitMode decides.
+    check h.render(%*{"shareUrl": shareUrl, "mode": "sequential", "fitMode": "contain"},
+      target = (390, 230, "")).isPhoto()
+    check imageRequests[^1] == sized(baseC, 390, 230, "-no")
 
   test "missing share url fails the node without fetching":
     let h = newHarness(nodeId = 4)

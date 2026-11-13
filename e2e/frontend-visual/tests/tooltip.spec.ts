@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { addTemporaryWeatherNode, login } from './visual-helpers'
+import { addTemporaryWeatherNode, login, showSceneWorkspaceEditor } from './visual-helpers'
 
 // Regression tests for the shared Tooltip popover (the "i" icons):
 // - it must stay open after clicking the icon
@@ -19,6 +19,8 @@ test('output example tooltip stays open and follows the diagram', async ({ page 
 
 async function runTooltipChecks(page: import('@playwright/test').Page): Promise<void> {
   await page.goto('/scenes/1/scene-gradient', { waitUntil: 'domcontentloaded' })
+  // The diagram alone, so the pan below stays on it (Preview is a column).
+  await showSceneWorkspaceEditor(page, { alone: true })
 
   const infoButton = page.locator('[aria-label="Example output"]').first()
   await infoButton.waitFor({ state: 'visible' })
@@ -46,7 +48,7 @@ async function runTooltipChecks(page: import('@playwright/test').Page): Promise<
   await expect(panel).toBeHidden()
 
   // 2. Pan the diagram, reopen: the tooltip must follow the button's new position.
-  // Pan to the right so the node stays clear of the fixed workspace sidebar.
+  // Pan to the right so the node stays clear of the file tree.
   const pane = page.locator('.react-flow__pane')
   const paneBox = (await pane.boundingBox())!
   const startX = paneBox.x + 480

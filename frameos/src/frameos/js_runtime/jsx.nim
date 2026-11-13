@@ -11,6 +11,7 @@ import std/tables
 import pixie
 import pixie/fileformats/svg
 import frameos/js_runtime/burrito
+import frameos/events_gen
 
 proc JS_AtomToCString(ctx: ptr JSContext, atom: JSAtom): cstring {.importc, header: "quickjs/quickjs.h".}
 
@@ -20,6 +21,7 @@ const
   keepCamel = ["viewBox", "gradientUnits", "gradientTransform", "preserveAspectRatio"]
   MaxNodes = 20_000
   MaxDepth = 64
+  SceneYieldTag = SceneYieldId
 
 {.push raises: [].}
 
@@ -36,6 +38,8 @@ type
     ## are the same, and its nodes are taken back without reading it.
     kept: seq[JsxKept]
     nextId: int
+    sawScene*: bool ## a `<Scene>` or `<yield />` has been read: its UI's layout is searched for them
+    handlers*: int ## the handlers (onClick, ...) of the last UI read: they live in its interpreter
 
   JsxReader = object
     ctx: ptr JSContext
@@ -45,6 +49,7 @@ type
     handlerCount: int
     previous: JSValue  # the last render's, for the handlers of kept nodes
     memo: ptr JsxMemo
+    keptCursor: int  # where in memo.kept the next memo()'d element is looked for
 
 proc attrName(name: string): string =
   if name == "className":
@@ -123,18 +128,32 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
     if jsIsNumber(mark):
       memoId = ctx.int32Of(mark)
     JS_FreeValue(ctx, mark)
+  var keptAt = -1
   if memoId > 0:
-    for kept in r.memo.kept.mitems:
-      # Taken back where its handlers have the numbers they had: copied
-      # from the last render's list into this one's at those numbers.
-      if kept.id == memoId and kept.firstHandler == r.handlerCount:
-        for h in kept.firstHandler ..< kept.firstHandler + kept.handlers:
-          discard JS_SetPropertyUint32(ctx, r.handlers, h.uint32, JS_GetPropertyUint32(ctx, r.previous, h.uint32))
-        r.handlerCount += kept.handlers
-        r.nodes += kept.nodes
-        kept.used = true
-        into.add kept.node
-        return
+    # From where the last one was found: a tree's memo()'d elements come
+    # back in the order they were kept, so a list of a hundred rows finds
+    # each at the cursor (a scan of the kept entries from the start for each
+    # was quadratic in the list), and a row put in or taken out costs one
+    # pass over the gap. A Table here was 600 B of the ESP32's flash.
+    let n = r.memo.kept.len
+    for step in 0 ..< n:
+      let i = (r.keptCursor + step) mod n
+      if r.memo.kept[i].id == memoId:
+        keptAt = i
+        r.keptCursor = i + 1
+        break
+  if keptAt >= 0:
+    # Taken back where its handlers have the numbers they had: copied
+    # from the last render's list into this one's at those numbers.
+    template kept: untyped = r.memo.kept[keptAt]
+    if kept.firstHandler == r.handlerCount:
+      for h in kept.firstHandler ..< kept.firstHandler + kept.handlers:
+        discard JS_SetPropertyUint32(ctx, r.handlers, h.uint32, JS_GetPropertyUint32(ctx, r.previous, h.uint32))
+      r.handlerCount += kept.handlers
+      r.nodes += kept.nodes
+      kept.used = true
+      into.add kept.node
+      return
   let
     firstHandler = r.handlerCount
     firstNode = r.nodes
@@ -142,6 +161,24 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
   if not ctx.stringProp(v, "type", node.tag):
     return
   let props = ctx.prop(v, "props")
+  if node.tag == "Scene" or node.tag == "yield":
+    # A scene's props are its state, typed as JS gave them (`count={3}` is 3):
+    # they are the scene's to read, not attributes of an element.
+    if not r.memo.isNil:
+      r.memo.sawScene = true
+    var id = ""
+    var json = "{}"
+    if jsIsObject(props):
+      discard ctx.stringProp(props, "id", id)
+      let text = JS_JSONStringify(ctx, props, jsUndefined(ctx), jsUndefined(ctx))
+      if jsIsString(text):
+        json = toNimString(ctx, text)
+      JS_FreeValue(ctx, text)
+    JS_FreeValue(ctx, props)
+    node.attrs = @[("id", if node.tag == "yield": SceneYieldTag else: id), ("props", json)]
+    node.tag = "Scene"
+    into.add node
+    return
   var
     tab: ptr UncheckedArray[JSPropertyEnum]
     count: uint32
@@ -194,6 +231,8 @@ proc jsxNode*(ctx: ptr JSContext, v: JSValueConst, images: ptr Table[int, Image]
     for kept in memo.kept.mitems:
       kept.used = false
   reader.addNodes(v, nodes, 0)
+  if not memo.isNil and not drawing:
+    memo.handlers = reader.handlerCount
   if not memo.isNil:
     # What this render's tree no longer holds is let go.
     var i = 0

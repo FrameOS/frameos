@@ -9,7 +9,7 @@ set -eu
 # wins; the pin is only the fallback for running this script straight from
 # the repo. Keep the marker comment: the route refuses to serve the script
 # without it.
-FRAMEOS_RELEASE_VERSION_DEFAULT="2026.11.2" # __FRAMEOS_RELEASE_VERSION_DEFAULT__
+FRAMEOS_RELEASE_VERSION_DEFAULT="2026.11.7" # __FRAMEOS_RELEASE_VERSION_DEFAULT__
 FRAMEOS_RELEASE_VERSION="${FRAMEOS_RELEASE_VERSION:-$FRAMEOS_RELEASE_VERSION_DEFAULT}"
 FRAMEOS_RELEASE_BASE_URL="${FRAMEOS_RELEASE_BASE_URL:-https://github.com/FrameOS/frameos/releases/download/}"
 # The FrameOS release signing key (minisign Ed25519, as an RFC 8410 SPKI so
@@ -673,6 +673,7 @@ waveshare.EPD_7in5b_V2:800x480
 waveshare.EPD_7in5b_V2_old:800x480
 waveshare.EPD_7in5bc:640x384
 waveshare.EPD_7in5c:640x384
+waveshare.EPD_9in7e:1120x784
 web_only:800x480
 framebuffer:800x480
 http.upload:800x480

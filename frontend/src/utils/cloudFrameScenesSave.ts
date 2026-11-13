@@ -1,5 +1,5 @@
-import type { CloudSceneSource, EventMapRule, FrameScene } from '../types'
-import { cloudSceneHeldVersion, type CloudFrameSceneRow } from './cloudFrameScenes'
+import type { CloudSceneSource, EventMapRule, FrameScene, SceneLayoutRef } from '../types'
+import { cloudSceneHeldVersion, cloudSceneUpdateVersion, type CloudFrameSceneRow } from './cloudFrameScenes'
 import {
   cloudDeployActiveSceneId,
   createCloudAccountScene,
@@ -68,6 +68,8 @@ export interface CloudScenePersistOutcome {
   changedStoreSceneIds: string[]
   /** Human-readable notes for non-fatal fallbacks (shown in the deploy toast). */
   notes: string[]
+  /** Store scene id → the newer version `updateStoreSceneIds` moved it to. */
+  updatedToLatest: Record<string, number>
 }
 
 export interface CloudScenePersistOptions {
@@ -93,6 +95,24 @@ export interface CloudScenePersistOptions {
    * (cloud/docs/cloud-frames.md, "Service settings").
    */
   settingsGroupsForNewScene?: (scenes: readonly FrameScene[]) => string[]
+  /**
+   * Push only these runtime scenes (the scene drawer's push): an assignment
+   * that owns none of them (by `sources`) goes out as it is, its scenes.json
+   * never read. Reading every assignment back, one request each, was most of
+   * a push's time on a frame with twenty scenes. A scene here that `sources`
+   * does not place (new in the workspace, or a tile that never hydrated) takes
+   * the whole read, so nothing is ever created twice.
+   */
+  only?: readonly string[]
+  /** Public field values for the scene the push activates, in the same push. */
+  activeState?: Record<string, any>
+  /**
+   * Store scenes to move to their newer installable version in this push,
+   * when the owner did not edit them (a pin is re-pinned there): the deploy
+   * drawer's ticked "Scene updates". Without it a save moves only what it
+   * edited.
+   */
+  updateStoreSceneIds?: readonly string[]
 }
 
 interface AssignmentPlan {
@@ -104,6 +124,8 @@ interface AssignmentPlan {
   settings_groups?: string[] | undefined
   /** The install's button maps by runtime scene id; omitted = keep, null = none. */
   event_maps?: Record<string, EventMapRule[]> | null | undefined
+  /** The layout each runtime scene wears, the same way. */
+  layouts?: Record<string, SceneLayoutRef> | null | undefined
 }
 
 // The button maps the form holds for one pack's runtime scenes: what this
@@ -127,10 +149,42 @@ function formEventMaps(
   return row?.event_maps && Object.keys(row.event_maps).length > 0 ? null : undefined
 }
 
+// The layouts, the same way (docs/scene-layouts.md).
+function formLayouts(
+  formScenes: readonly Partial<FrameScene>[],
+  row?: Pick<CloudFrameSceneRow, 'layouts'>
+): Record<string, SceneLayoutRef> | null | undefined {
+  const layouts: Record<string, SceneLayoutRef> = {}
+  for (const scene of formScenes) {
+    if (scene?.id && scene.layout?.sceneId) {
+      layouts[scene.id] = scene.layout
+    }
+  }
+  if (Object.keys(layouts).length > 0) {
+    return layouts
+  }
+  return row?.layouts && Object.keys(row.layouts).length > 0 ? null : undefined
+}
+
 // Every save re-posts each kept assignment's grant explicitly, so a row
 // from before grants existed becomes explicit on the owner's first save.
 function keptGrant(row: CloudFrameSceneRow): string[] | undefined {
   return row.granted_settings_groups ?? undefined
+}
+
+// The version a kept (unedited) assignment goes out at: the one it has, or,
+// when the push takes updates along, the newer one (recorded in `updated`).
+function keptVersion(
+  row: CloudFrameSceneRow,
+  updateStoreSceneIds: readonly string[] | undefined,
+  updated: Record<string, number>
+): Pick<AssignmentPlan, 'scene_version' | 'latest'> {
+  const update = updateStoreSceneIds?.includes(row.scene_id) ? cloudSceneUpdateVersion(row) : null
+  if (update === null) {
+    return { scene_version: row.scene_version ?? null }
+  }
+  updated[row.scene_id] = update
+  return row.scene_version ? { scene_version: update } : { scene_version: null, latest: true }
 }
 
 function sceneName(scene: Partial<FrameScene>): string {
@@ -156,16 +210,21 @@ function rawSceneUnchanged(stored: FrameScene, form: FrameScene): boolean {
 
 /**
  * The scene without the install's bookkeeping: `origin` (where it came from)
- * and `eventMap` (the owner's button map, docs/events.md "Event map"). Both
- * belong to the installed copy and never to a published version: an
+ * `eventMap` (the owner's button map, docs/events.md "Event map") and
+ * `layout` (the layout it wears, docs/scene-layouts.md). All three belong to the installed copy and never to a published version: an
  * `eventMap` inside scene content would be an edit on every save and would
  * remap every other install of the scene.
  */
 export function withoutSceneOrigin<T extends Partial<FrameScene>>(scene: T): T {
-  if (!scene || (!('origin' in scene) && !('eventMap' in scene))) {
+  if (!scene || (!('origin' in scene) && !('eventMap' in scene) && !('layout' in scene))) {
     return scene
   }
-  const { origin: _origin, eventMap: _eventMap, ...rest } = scene as T & { origin?: unknown; eventMap?: unknown }
+  const {
+    origin: _origin,
+    eventMap: _eventMap,
+    layout: _layout,
+    ...rest
+  } = scene as T & { origin?: unknown; eventMap?: unknown; layout?: unknown }
   return rest as T
 }
 
@@ -219,10 +278,34 @@ async function persistAndPushCloudFrameScenesNow(
 
   const changedStoreSceneIds: string[] = []
   const notes: string[] = []
+  const updatedToLatest: Record<string, number> = {}
   const assignments: AssignmentPlan[] = []
   const claimedRuntimeIds = new Set<string>()
 
+  // The store scenes that own the pushed runtime scenes, when every one of
+  // them is placed; null = read every assignment (a full save).
+  const only = options.only ? new Set(options.only) : null
+  const pushedRows =
+    only && [...only].every((id) => sources[id]?.scene_id)
+      ? new Set([...only].map((id) => sources[id]!.scene_id))
+      : null
+
   for (const row of rows) {
+    if (only && pushedRows && !pushedRows.has(row.scene_id)) {
+      // Not part of this push: as it is (omitted maps and layouts = kept),
+      // and its runtime scenes stay claimed.
+      assignments.push({
+        scene_id: row.scene_id,
+        scene_version: row.scene_version ?? null,
+        settings_groups: keptGrant(row),
+      })
+      for (const [runtimeId, source] of Object.entries(sources)) {
+        if (source?.scene_id === row.scene_id) {
+          claimedRuntimeIds.add(runtimeId)
+        }
+      }
+      continue
+    }
     // The version the workspace hydrated the form from — what the frame was
     // sent — not the store's latest. Comparing the form against a NEWER
     // version read every scene with a pending update as edited: an owned one
@@ -236,7 +319,7 @@ async function persistAndPushCloudFrameScenesNow(
       // store id), or they would be created again as new private scenes.
       assignments.push({
         scene_id: row.scene_id,
-        scene_version: row.scene_version ?? null,
+        ...keptVersion(row, options.updateStoreSceneIds, updatedToLatest),
         settings_groups: keptGrant(row),
       })
       if (formById.has(row.scene_id)) {
@@ -274,12 +357,17 @@ async function persistAndPushCloudFrameScenesNow(
       presentIds.map((id) => formById.get(id)!),
       row
     )
+    const layouts = formLayouts(
+      presentIds.map((id) => formById.get(id)!),
+      row
+    )
     if (!edited) {
       assignments.push({
         scene_id: row.scene_id,
-        scene_version: row.scene_version ?? null,
+        ...keptVersion(row, options.updateStoreSceneIds, updatedToLatest),
         settings_groups: keptGrant(row),
         event_maps,
+        layouts,
       })
       continue
     }
@@ -292,10 +380,11 @@ async function persistAndPushCloudFrameScenesNow(
         // A pinned assignment follows the edit it just made; an unpinned one
         // is moved to the latest (which now IS the edit) — the only scene of
         // this push that moves, the rest stay at the version the frame holds.
-        scene_version: row.scene_version ? (version ?? null) : null,
+        scene_version: row.scene_version ? version ?? null : null,
         latest: true,
         settings_groups: keptGrant(row),
         event_maps,
+        layouts,
       })
     } catch (error) {
       // Not ours to edit (public install), name clash, moderation… — fork the
@@ -310,6 +399,7 @@ async function persistAndPushCloudFrameScenesNow(
           scene_id: newSceneId,
           settings_groups: keptGrant(row) ?? grantForNew(updated),
           event_maps,
+          layouts,
         })
         notes.push(`Saved the edited "${name}" as a new private cloud scene`)
       } catch (forkError) {
@@ -320,6 +410,7 @@ async function persistAndPushCloudFrameScenesNow(
           scene_version: row.scene_version ?? null,
           settings_groups: keptGrant(row),
           event_maps,
+          layouts,
         })
       }
     }
@@ -330,6 +421,10 @@ async function persistAndPushCloudFrameScenesNow(
   // cloud scene, in form order.
   for (const scene of formScenes) {
     if (!scene?.id || claimedRuntimeIds.has(scene.id)) {
+      continue
+    }
+    if (only && !only.has(scene.id)) {
+      // Another unsaved scene in the form: not this push's to create.
       continue
     }
     const name = sceneName(scene)
@@ -344,9 +439,16 @@ async function persistAndPushCloudFrameScenesNow(
       scene_id: newSceneId,
       settings_groups: grantForNew([scene]),
       event_maps: formEventMaps([scene]),
+      layouts: formLayouts([scene]),
     })
   }
 
-  await setCloudFrameScenes(frameId, assignments, cloudDeployActiveSceneId(activeSceneId, formScenes) ?? undefined)
-  return { changedStoreSceneIds, notes }
+  const pushActiveSceneId = cloudDeployActiveSceneId(activeSceneId, formScenes) ?? undefined
+  await setCloudFrameScenes(
+    frameId,
+    assignments,
+    pushActiveSceneId,
+    pushActiveSceneId ? options.activeState : undefined
+  )
+  return { changedStoreSceneIds, notes, updatedToLatest }
 }

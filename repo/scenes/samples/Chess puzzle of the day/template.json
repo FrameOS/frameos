@@ -1,0 +1,10 @@
+{
+  "name": "Chess puzzle of the day",
+  "description": "A fresh tactic every day from Lichess, with the board drawn as crisp SVG. Solve it yourself; the solution appears on the next refresh or at the press of a button.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.0"
+}

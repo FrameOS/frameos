@@ -33,63 +33,9 @@ suite "spool tiers":
     check s.materialize() == "hello world"
     removeFile(path)
 
-  test "both tiers iterate lines identically, across window boundaries":
-    # Deliberately larger than the window, with lines that straddle it: the
-    # partial-line carry is the part that goes wrong if it goes wrong.
-    var body = ""
-    for i in 0 ..< 500:
-      body.add("LINE" & $i & ":" & repeat('x', i mod 37) & "\r\n")
-    let path = writeFixture("lines.txt", body)
-
-    var fromMemory: seq[string] = @[]
-    for line in newMemorySpool(body).lines():
-      fromMemory.add(line)
-    var fromFile: seq[string] = @[]
-    for line in newFileSpool(path, body.len, owned = false).lines(windowBytes = 64):
-      fromFile.add(line)
-
-    check fromMemory.len == 500
-    check fromMemory == fromFile
-    check fromMemory[0] == "LINE0:"
-    check fromMemory[499].startsWith("LINE499:")
-    removeFile(path)
-
-  test "a trailing line without a newline is still yielded":
-    var lines: seq[string] = @[]
-    for line in newMemorySpool("a\nb\nc").lines():
-      lines.add(line)
-    check lines == @["a", "b", "c"]
-
-  test "bare-CR and mixed terminators split like splitLines did":
-    # Consumers folded over strutils.splitLines before the spool existed, and
-    # that accepts \n, \r\n and a lone \r. A classic-Mac ICS feed must not
-    # collapse into one giant line.
-    let body = "a\rb\r\nc\nd\r\re"
-    var fromMemory: seq[string] = @[]
-    for line in newMemorySpool(body).lines():
-      fromMemory.add(line)
-    check fromMemory == @["a", "b", "c", "d", "", "e"]
-    let path = writeFixture("cr.txt", body)
-    var fromFile: seq[string] = @[]
-    for line in newFileSpool(path, body.len, owned = false).lines(windowBytes = 2):
-      fromFile.add(line)
-    check fromFile == fromMemory
-    removeFile(path)
-
-  test "a CRLF split across a window boundary is one terminator":
-    # Window sized so the \r lands as the last byte of a window and the \n
-    # opens the next one; the pair must not read as two line breaks.
-    let body = "ab\r\ncd"
-    let path = writeFixture("crlf.txt", body)
-    var fromFile: seq[string] = @[]
-    for line in newFileSpool(path, body.len, owned = false).lines(windowBytes = 3):
-      fromFile.add(line)
-    check fromFile == @["ab", "cd"]
-    removeFile(path)
-
   test "an in-memory spool yields bounded windows, not the whole body":
-    # `lines` accumulates windows; if the memory tier yielded the body whole,
-    # parsing would hold two copies of a document the tier exists to bound.
+    # A consumer accumulates windows; if the memory tier yielded the body
+    # whole, it would hold two copies of a document the tier exists to bound.
     var biggest = 0
     for window in newMemorySpool(repeat('m', 5000)).windows(windowBytes = 512):
       biggest = max(biggest, window.len)

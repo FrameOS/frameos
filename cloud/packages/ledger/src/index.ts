@@ -21,6 +21,7 @@ export {
 export {
   accountMarginBasisPoints,
   fallbackPaygPlan,
+  grantedPlanProvider,
   listPlans,
   paygPlanCode,
   readAccountMargin,
@@ -31,15 +32,18 @@ export {
   type PlanEntitlements,
 } from "./plans";
 export {
+  applyProviderFee,
   applyProviderPayment,
   applyProviderRefund,
   noteProviderNextPlan,
   setProviderSubscriptionState,
+  type ProviderFeeInput,
   type ProviderMode,
   type ProviderPaymentInput,
   type ProviderPaymentResult,
   type ProviderRefundInput,
   type ProviderSubscriptionState,
+  type TaxRemitter,
 } from "./provider-subscriptions";
 export {
   accruePeriod,
@@ -50,6 +54,7 @@ export {
   closeOutSubscriptionForDeletedAccount,
   deferredMicros,
   earnedToDateMicros,
+  grantAccountPlan,
   recognizePeriod,
   refundUnearnedPeriod,
   runSubscriptionCycle,
@@ -152,6 +157,9 @@ export {
   aiUsageRule,
   manualJournalEventType,
   manualJournalRule,
+  paymentFeeEventType,
+  paymentReceivedEventType,
+  paymentRefundedEventType,
   postingRules,
   reclassificationEventType,
   reclassificationRule,

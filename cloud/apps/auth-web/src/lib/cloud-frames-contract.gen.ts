@@ -93,6 +93,19 @@ export const cloudFramesContract = {
         }
       }
     },
+    "frame_settings_on_screen": {
+      "rule": {
+        "type": "bool"
+      },
+      "profiles": {
+        "linux": {
+          "since": "2026.11.5"
+        },
+        "esp32": {
+          "since": "2026.11.5"
+        }
+      }
+    },
     "timezone": {
       "rule": {
         "type": "string",
@@ -779,6 +792,18 @@ export const cloudFramesContract = {
         }
       }
     },
+    "awake_after_input_seconds": {
+      "rule": {
+        "type": "int",
+        "min": 0,
+        "max": 3600
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.11.6"
+        }
+      }
+    },
     "wake_check_seconds": {
       "rule": {
         "type": "int",
@@ -864,6 +889,46 @@ export const cloudFramesContract = {
         }
       }
     },
+    "touch_beep": {
+      "rule": {
+        "type": "bool"
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.11.6"
+        }
+      }
+    },
+    "cpu_mode": {
+      "rule": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "battery",
+          "performance"
+        ]
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.11.7",
+          "restart": true
+        }
+      }
+    },
+    "render_mode": {
+      "rule": {
+        "type": "string",
+        "enum": [
+          "local",
+          "remote"
+        ]
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.11.7"
+        }
+      }
+    },
     "mic_clk_pin": {
       "rule": {
         "type": "int",
@@ -941,6 +1006,14 @@ export const cloudFramesContract = {
       "content": true,
       "profiles": [
         "linux",
+        "esp32"
+      ]
+    },
+    {
+      "type": "scenes_patch",
+      "scope": null,
+      "content": true,
+      "profiles": [
         "esp32"
       ]
     },
@@ -1171,6 +1244,12 @@ export const cloudFramesContract = {
       "invalid_settings",
       "setting_not_allowed",
       "persist_failed"
+    ],
+    "scenes_patch": [
+      "invalid_patch",
+      "base_mismatch",
+      "no_room",
+      "patch_refused"
     ],
     "lan_access_challenge": [
       "no_panel",

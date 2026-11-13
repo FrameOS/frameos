@@ -226,7 +226,8 @@
   const notMocked = (name) => () => {
     throw new Error("frameos." + name + " is not mocked in this test: call mock." + name + "(impl) first");
   };
-  const pureNames = ["image", "svg", "node", "scene", "color"];
+  // What reads only what the test hands it, or a value that is the same everywhere: real, unless a test mocks it.
+  const pureNames = ["image", "svg", "node", "scene", "color", "openLines", "nextLine", "nextBlock", "streamClose", "timeZone"];
   const logs = [];
   const record = (level) => (...args) => {
     const text = args.map((a) => (typeof a === "string" ? a : show(a))).join(" ");

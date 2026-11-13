@@ -8,7 +8,10 @@ import {
   accountPrivateObjectKeys,
   deleteErasedObjects,
 } from "../../../../../src/lib/account-erasure";
+import { revokeAccountAppleTokens } from "../../../../../src/lib/apple-sign-in";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
+import { cancelForErasure } from "../../../../../src/lib/billing-provider";
+import { stripeSetup } from "../../../../../src/lib/stripe";
 import { NextRequest, NextResponse } from "next/server";
 import {
   getSuperadminContext,
@@ -114,10 +117,25 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
   assertDatabaseUrlConfigured();
   const db = createDb();
+  // A paid plan ends at Stripe first, or its card would keep
+  // being charged for an account that no longer exists.
+  try {
+    await cancelForErasure(db, stripeSetup(), accountId);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        detail: error instanceof Error ? error.message : "The paid plan could not be cancelled.",
+        error: "subscription_cancel_failed",
+      },
+      { status: 502 },
+    );
+  }
   // Books first (cloud/docs/accounting-todo.md §9.2 item 4): a subscription
   // in progress returns its unearned remainder to the receivable and ends,
   // so deleting the account cannot strand deferred revenue.
   await closeOutSubscriptionForDeletedAccount(db, accountId);
+  // Apple's tokens are revoked as on a self-delete (src/lib/apple-sign-in.ts).
+  await revokeAccountAppleTokens(db, accountId);
   // The account's photos and frame snapshots leave the bucket with it
   // (src/lib/account-erasure.ts).
   const objectKeys = await accountPrivateObjectKeys(db, accountId);

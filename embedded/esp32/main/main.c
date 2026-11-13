@@ -4,6 +4,9 @@
  * Boot: NVS config → display select → Wi-Fi (STA, or captive-portal
  * provisioning when unconfigured) → SNTP → HTTP server + render loop
  * (Nim runtime on-device, or thin client fetching backend bitmaps) → OTA.
+ * A touch LCD (the SenseCAP Indicator) does not wait for Wi-Fi and has no
+ * portal: it joins in the background and is set up on its own screen
+ * (the settings panel's Frame tab, fos_frame_settings.c).
  *
  * The serial console (USB) is always available: `help` for commands,
  * `wifi <ssid> [pass]` provisions a frame without the portal.
@@ -46,6 +49,7 @@
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_console.h"
+#include "fos_frame_settings.h"
 #include "fos_framebuffer.h"
 #include "fos_http.h"
 #include "fos_ota.h"
@@ -58,10 +62,12 @@
 #include "fos_mem.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
+#include "lcd_splash.h"
 #if CONFIG_IDF_TARGET_ESP32S3
 #include "soc/rtc.h"
 #endif
 #include "frameos_nim.h"
+#include "fos_log_ring.h"
 
 static const char *TAG = "frameos";
 
@@ -158,6 +164,7 @@ static void action_render_now(void)
 #define SCENE_STATE_LCD_WRITE_DELAY_MS (10 * 60 * 1000)
 
 static SemaphoreHandle_t s_scene_state_mutex = NULL;
+static SemaphoreHandle_t s_scene_state_flush_mutex = NULL;
 
 static uint32_t scene_state_now_ms(void)
 {
@@ -174,6 +181,37 @@ static void scene_state_unlock(void)
     xSemaphoreGive(s_scene_state_mutex);
 }
 
+static void scene_state_flush_lock(void)
+{
+    xSemaphoreTake(s_scene_state_flush_mutex, portMAX_DELAY);
+}
+
+static void scene_state_flush_unlock(void)
+{
+    xSemaphoreGive(s_scene_state_flush_mutex);
+}
+
+/* Writes the scene state that has waited its delay, on a task of its own: a
+ * SPIFFS write is 0.7 s on the reTerminal E1003 and 3 s on the Sticky
+ * (2026-11-10), and on the render task, which also drains the touch queue,
+ * it held a tap that long. Not while someone taps: a write still stalls a
+ * scene load waiting on the same partition. */
+static void scene_state_writer_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (!fos_client_input_held()) fos_scene_state_flush(fos_scene_state_crowded());
+    }
+}
+
+static void log_ring_flush_on_restart(void)
+{
+    /* esp_restart: the lines explaining why go out before the reset. A
+     * panic never gets here; those are lost with the ring. */
+    fos_log_ring_flush(500);
+}
+
 static void scene_state_flush_on_restart(void)
 {
     fos_scene_state_flush(true);
@@ -182,36 +220,103 @@ static void scene_state_flush_on_restart(void)
 static void scene_state_write_behind(void)
 {
     s_scene_state_mutex = xSemaphoreCreateMutex();
-    if (s_scene_state_mutex == NULL) return; /* writes through, as before */
+    s_scene_state_flush_mutex = xSemaphoreCreateMutex();
+    if (s_scene_state_mutex == NULL || s_scene_state_flush_mutex == NULL) return; /* writes through, as before */
     const fos_scene_state_write_behind_t behind = {
         .delay_ms = fos_display_is_lcd() ? SCENE_STATE_LCD_WRITE_DELAY_MS : SCENE_STATE_WRITE_DELAY_MS,
         .now_ms = scene_state_now_ms,
         .lock = scene_state_lock,
         .unlock = scene_state_unlock,
+        .flush_lock = scene_state_flush_lock,
+        .flush_unlock = scene_state_flush_unlock,
     };
     fos_scene_state_set_write_behind(&behind);
+    xTaskCreatePinnedToCore(scene_state_writer_task, "state_wr", 4096, NULL, tskIDLE_PRIORITY + 1, NULL, 0);
     esp_register_shutdown_handler(scene_state_flush_on_restart);
+}
+
+/* The CPU at 240 MHz. On the S3 both clocks divide the same 480 MHz PLL,
+ * so the PSRAM and flash clocks do not move; the switch is the one ESP-IDF's
+ * power management makes, core voltage first. */
+static void cpu_240(const char *why)
+{
+#if CONFIG_IDF_TARGET_ESP32S3
+    rtc_cpu_freq_config_t cpu;
+    if (rtc_clk_cpu_freq_mhz_to_config(240, &cpu)) {
+        rtc_clk_cpu_freq_set_config(&cpu);
+        printf("cpu: 240 MHz (%s)\n", why);
+    }
+#else
+    (void)why;
+#endif
+}
+
+/* The generic image boots at 160 MHz. `cpu_mode` (the frame's "Processor
+ * speed") decides whether this board goes to 240: auto does for a screen
+ * someone watches, an RGB LCD or a touch panel, and leaves an e-paper frame
+ * at 160. There a render is a few seconds of work and the refresh a long
+ * wait (about 20 s on a reTerminal E1002), and the chip idles through the
+ * wait at whatever clock it runs (README "Processor speed"). */
+static void cpu_for_mode(const fos_config_t *config, bool touch)
+{
+    bool lcd = fos_display_is_lcd();
+    if (fos_config_cpu_mhz(config->cpu_mode, lcd, touch) != 240) return;
+    cpu_240(config->cpu_mode == FOS_CPU_PERFORMANCE ? "performance" : lcd ? "RGB LCD" : "touch");
 }
 
 static void log_bootup_event(bool online);
 
+/* A sixteen-grey panel's packed picture is the 4-bit canvas byte for byte
+ * when nothing turns it (dither.nim packGray4Canvas): the buffer reserved for
+ * the panel serves as the canvas too, and the 1.31 MB a reTerminal E1003
+ * held twice of its 8 MB goes back to the renders (2026-11-10). A turned
+ * frame packs with a turn, so it keeps a canvas of its own; changing the
+ * rotation restarts the firmware. */
+static bool canvas_is_panel_picture(const fos_config_t *config)
+{
+    return fos_display_format() == FOS_PIXEL_4BPP_GRAY && fos_display_canvas_bits_per_pixel() == 4 &&
+           config->rotate == 0 && fos_display_canvas_bytes() == fos_display_buffer_size() &&
+           fos_framebuffer_reserved_bytes() == fos_display_buffer_size();
+}
+
 /* The stored Wi-Fi came back while the provisioning portal was serving.
  * fos_wifi has already dropped the open AP; bring the rest up the way the
  * online boot path does, and replace the portal status screen. */
+/* What a boot that waited for Wi-Fi did before its first render, for one
+ * that got it later. Not marking the image valid here: that happens after
+ * the first successful render (fos_client.c) — "reached Wi-Fi" said nothing
+ * about whether the Nim runtime or the scene survive. */
+static void online_steps(uint32_t sntp_timeout_ms)
+{
+    fos_wifi_sync_time(sntp_timeout_ms);
+    frameos_nim_set_log_upload_enabled(true);
+    log_bootup_event(true);
+    fos_ota_start_periodic_task(24);
+    fos_client_render_now();
+}
+
 static void on_portal_exit(void)
 {
     ESP_LOGI(TAG, "Wi-Fi recovered; leaving the provisioning portal");
     s_blink_period_ms = 2000;
     fos_http_stop();
     fos_http_start(false);
-    fos_wifi_sync_time(SNTP_TIMEOUT_MS);
-    /* Not marking the image valid here: that happens after the first
-     * successful render (fos_client.c) — "reached Wi-Fi" said nothing about
-     * whether the Nim runtime or the scene survive. */
-    frameos_nim_set_log_upload_enabled(true);
-    log_bootup_event(true);
-    fos_ota_start_periodic_task(24);
-    fos_client_render_now();
+    online_steps(SNTP_TIMEOUT_MS);
+}
+
+/* A touch LCD's boot went on without Wi-Fi (app_main, touch_setup): the
+ * steps an online boot takes before its first render, run the first time the
+ * station gets an address. Later addresses (a lost link back) need none. */
+static bool s_online_steps_done = false;
+
+static void on_wifi_online(void)
+{
+    if (__atomic_exchange_n(&s_online_steps_done, true, __ATOMIC_SEQ_CST)) return;
+    ESP_LOGI(TAG, "Wi-Fi up after boot (%s)", fos_wifi_ip());
+    if (fos_ota_boot_request_pending()) fos_ota_request_check();
+    /* An LCD renders without the clock and again when it comes. */
+    fos_wifi_set_late_time_hook(action_render_now);
+    online_steps(0);
 }
 
 static void log_bootup_event(bool online)
@@ -301,27 +406,19 @@ void app_main(void)
         .mosi = config->pins.mosi, .pwr = config->pins.pwr,
     };
     BOOTMEM("after-config");
+    /* An LCD's boot mark is drawn the way up the frame's pictures are. */
+    fos_lcd_splash_set_rotation(config->rotate);
     fos_display_set_i2c_lender(lend_i2c_bus);
     if (fos_display_init(&display_config) != ESP_OK) {
         ESP_LOGW(TAG, "display init failed, continuing headless");
     }
     fos_display_set_temperature_hook(panel_temperature);
 
-    /* An RGB LCD board renders at 240 MHz. The generic image boots every
-     * board at 160 for the battery frames; an LCD is lit and mains-powered
-     * anyway, and its renders are watched (the SenseCAP Indicator's took
-     * ~3.8 s at 160, 2026-10-25). On the S3 both clocks divide the same
-     * 480 MHz PLL, so the PSRAM and flash clocks do not move; the switch is
-     * the one ESP-IDF's power management makes, core voltage first. */
-#if CONFIG_IDF_TARGET_ESP32S3
-    if (fos_display_is_lcd()) {
-        rtc_cpu_freq_config_t cpu;
-        if (rtc_clk_cpu_freq_mhz_to_config(240, &cpu)) {
-            rtc_clk_cpu_freq_set_config(&cpu);
-            printf("cpu: 240 MHz (RGB LCD)\n");
-        }
-    }
-#endif
+    /* An RGB LCD board renders at 240 MHz unless its cpu_mode says battery:
+     * an LCD is lit and mains-powered anyway, and its renders are watched
+     * (the SenseCAP Indicator's took ~3.8 s at 160, 2026-10-25). A touch
+     * board goes to 240 too, below, once its controller answers. */
+    if (fos_display_is_lcd() || config->cpu_mode == FOS_CPU_PERFORMANCE) cpu_for_mode(config, false);
 
     /* Not where the pin is wired to something else (heartbeat_pin_free), nor
      * on an RGB LCD, whose pixel clock is GPIO21 (the SenseCAP Indicator):
@@ -340,7 +437,7 @@ void app_main(void)
         /* The Nim renderer packs into the same reservation (fos_framebuffer.h).
          * The hooks take/return the buffer through the acquire/release pair
          * that fos_client.c already uses to hand it back after the blit. */
-        frameos_nim_set_render_buffer_hooks((void *(*)(size_t))fos_framebuffer_acquire,
+        frameos_nim_set_render_buffer_hooks((void *(*)(size_t))fos_framebuffer_acquire_render,
                                             (void (*)(void *))fos_framebuffer_release);
         /* An RGB LCD's refill interrupt shares core 1 with the render task;
          * a realloc copying under the heap's spinlock held it off for 1-2 ms
@@ -359,6 +456,12 @@ void app_main(void)
     if (fos_touch_start() == ESP_ERR_NOT_FOUND && config->touch_pins.sda >= 0) {
         ESP_LOGW(TAG, "touch panel configured but not found");
     }
+    /* Someone touching the glass is waiting for every frame: a touch e-paper
+     * board renders at 240 MHz as an LCD does. A third off each render's
+     * CPU time on the reTerminal E1003 and the Sticky, whose renders took
+     * 1.5 to 5 s at 160 (2026-11-10); a battery pays for it only while awake,
+     * and a render that ends sooner sleeps sooner. */
+    if (fos_touch_present() && !fos_display_is_lcd() && config->cpu_mode == FOS_CPU_AUTO) cpu_for_mode(config, true);
     if (fos_assets_sd_mount(config) != ESP_OK) {
         ESP_LOGW(TAG, "SD assets unavailable, continuing without %s: %s",
                  config->assets_path[0] ? config->assets_path : "/srv/assets",
@@ -392,11 +495,21 @@ void app_main(void)
         }
     }
 
+    /* Whether this board can run its scenes itself: what hardware.renderMode
+     * and localRenderSupported report, and the floor under a plane's
+     * render_mode (docs/server-rendering.md). Before any network, so the
+     * cloud's enrollment already reads it. */
+    fos_client_set_local_render_capable(local_render_ok && frameos_nim_available());
+
     /* The renderer's scene canvas, claimed now for the same reason the thin-
      * client framebuffer was above: it is the one multi-MB contiguous PSRAM
      * run the device needs, and before Wi-Fi/TLS there is always one. */
     if (local_render_ok && frameos_nim_available() && fos_display_present()) {
-        frameos_nim_reserve_canvas(fos_display_canvas_bytes());
+        if (canvas_is_panel_picture(config)) {
+            frameos_nim_share_canvas(fos_framebuffer_reserved_buffer(), fos_framebuffer_reserved_bytes());
+        } else {
+            frameos_nim_reserve_canvas(fos_display_canvas_bytes());
+        }
     }
 
     BOOTMEM("after-sd");
@@ -409,8 +522,20 @@ void app_main(void)
     scene_state_write_behind();
     frameos_nim_set_scene_state_hooks(fos_scene_state_load, fos_scene_state_save);
 
+    /* A touch LCD is set up on its own screen, so it neither waits for
+     * Wi-Fi nor opens a hotspot: the settings panel (a swipe down from the
+     * top) has the network, and the frame joins it in the background. */
+    bool touch_setup = fos_touch_present() && fos_display_is_lcd();
+    fos_frame_settings_init();
     bool online = false;
-    if (fos_config_wifi_ready()) {
+    if (touch_setup) {
+        if (fos_config_wifi_ready()) {
+            esp_err_t err = fos_wifi_start_background();
+            if (err != ESP_OK) ESP_LOGW(TAG, "Wi-Fi failed to start: %s", esp_err_to_name(err));
+        } else {
+            ESP_LOGI(TAG, "no Wi-Fi configured; set it up from the screen (swipe down from the top)");
+        }
+    } else if (fos_config_wifi_ready()) {
         fos_display_boot_status(FOS_LCD_SPLASH_WIFI);
         online = fos_wifi_connect(WIFI_CONNECT_TIMEOUT_MS) == ESP_OK;
         if (!online) {
@@ -453,7 +578,7 @@ void app_main(void)
      * rescue and whether rendering should stay paused this time. */
     /* The portal draws its own screen; a frame online is on its way to the
      * first render. */
-    fos_display_boot_status(online ? FOS_LCD_SPLASH_STARTING : FOS_LCD_SPLASH_NO_STATUS);
+    fos_display_boot_status(online || touch_setup ? FOS_LCD_SPLASH_STARTING : FOS_LCD_SPLASH_NO_STATUS);
     BOOTMEM("after-wifi");
     FOS_MEM_LOG_MILESTONE(TAG, "after-wifi");
     fos_client_render_recovery_boot();
@@ -559,6 +684,10 @@ void app_main(void)
 
     BOOTMEM("after-spill");
     fos_console_start();
+    /* Log lines leave the logging task here on: a printf on the render task
+     * was a third of an isolated tap on an LCD board (fos_log_ring.h). */
+    fos_log_ring_start();
+    esp_register_shutdown_handler(log_ring_flush_on_restart);
 
     /* Cloud-managed frames (docs/cloud-frames.md): idles until cloud_url and
      * a claim token are provisioned (USB `set`, flasher) and Wi-Fi is up,
@@ -572,7 +701,21 @@ void app_main(void)
      * fos_cloud_start: the enrolled state it gates on is loaded there. */
     fos_settings_boot_apply_cache();
 
-    if (online) {
+    if (touch_setup) {
+        /* The station may already have its address: then the online steps
+         * ran (or run) from fos_wifi's task, and the rest is the same either
+         * way. The HTTP server answers once there is a network to answer on. */
+        if (config->assets_sd.enabled) fos_assets_sd_log_status();
+        if (fos_rtc_present()) fos_rtc_log_status();
+        frameos_nim_set_log_upload_enabled(false);
+        fos_http_start(false);
+        if (!fos_config_wifi_ready()) fos_ota_mark_boot_valid();
+        /* Now that the runtime is up (its init resets the log upload): an
+         * address from here on runs the online steps, and one that came
+         * during the boot runs them now. */
+        fos_wifi_set_online_cb(on_wifi_online);
+        if (fos_wifi_state() == FOS_WIFI_CONNECTED) on_wifi_online();
+    } else if (online) {
         frameos_nim_set_log_upload_enabled(true);
         if (config->assets_sd.enabled) fos_assets_sd_log_status();
         if (fos_rtc_present()) fos_rtc_log_status();

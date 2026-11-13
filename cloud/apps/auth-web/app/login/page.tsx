@@ -1,12 +1,13 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { isAppSignInReturn } from "../../src/lib/app-sign-in";
 import { AuthCard } from "../../src/components/AuthCard";
 import { LoginForm } from "../../src/components/LoginForm";
 import {
   authCookieNames,
   safeAuthReturnPath,
 } from "../../src/lib/auth-cookies";
-import { getFramesUrl, hasGoogleOAuth } from "../../src/lib/env";
+import { getFramesUrl, hasAppleWebSignIn, hasGoogleOAuth } from "../../src/lib/env";
 import { readSession } from "../../src/lib/session";
 
 export const metadata = { title: "Sign in" };
@@ -37,20 +38,23 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     }
   }
 
-  // A Google sign-in that matched an unverified password account: the user
-  // must prove they own the email (via password reset) before the accounts
-  // may be linked. The email travels in a short-lived cookie, not the URL.
-  if (error === "verify_before_google_link") {
+  // A Google or Apple sign-in that matched an unverified password account:
+  // the user must prove they own the email (via password reset) before the
+  // accounts may be linked. The email travels in a short-lived cookie, not
+  // the URL.
+  const linkProvider = verifyBeforeLinkProvider(error);
+  if (linkProvider) {
     const cookieStore = await cookies();
     const mergeEmail = cookieStore.get(authCookieNames.mergeEmail)?.value;
 
     return (
       <AuthCard
+        inApp={isAppSignInReturn(returnTo)}
         copy={`A FrameOS Cloud account already exists for ${
           mergeEmail ?? "this email"
-        }, but its address was never verified. To keep that account safe, reset its password first — the emailed link proves the address is yours — then sign in with Google and confirm that password once to connect the two.`}
+        }, but its address was never verified. To keep that account safe, reset its password first: the emailed link proves the address is yours. Then sign in with ${linkProvider} and confirm that password once to connect the two.`}
         eyebrow="Almost there"
-        title="One quick step before linking Google"
+        title={`One quick step before linking ${linkProvider}`}
       >
         <div className="actions">
           <a className="button button-primary" href="/reset">
@@ -66,6 +70,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <AuthCard
+      inApp={isAppSignInReturn(returnTo)}
       copy={
         status
           ? statusMessage(status)
@@ -75,7 +80,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       eyebrow="Sign in"
       title="FrameOS Cloud"
     >
-      <LoginForm googleEnabled={hasGoogleOAuth()} returnTo={returnTo} />
+      <LoginForm
+        appleEnabled={hasAppleWebSignIn()}
+        googleEnabled={hasGoogleOAuth()}
+        returnTo={returnTo}
+      />
     </AuthCard>
   );
 }
@@ -86,10 +95,19 @@ function readParam(value: string | string[] | undefined) {
 
 const loginErrorMessages: Record<string, string> = {
   access_denied: "Google sign-in was canceled. Try again when you are ready.",
+  apple_cancelled: "Sign in with Apple was canceled. Try again when you are ready.",
+  apple_email_missing:
+    "Apple did not share an email address, and an account needs one. Remove FrameOS under your Apple ID's Sign in with Apple settings, then try again and share an address.",
+  apple_email_unverified:
+    "Apple has not verified that email address, so it cannot sign in here.",
+  apple_failed: "Sign in with Apple did not go through. Try again in a moment, or use your password.",
+  apple_unavailable: "Sign in with Apple is not configured for this environment yet.",
+  google_email_missing:
+    "Google did not share an email address, and an account needs one.",
   google_email_unverified:
     "Google has not verified that email address, so it cannot sign in here. Verify it with Google first, or sign up with a password.",
-  google_link_expired: "The Google sign-in took too long to confirm. Start again.",
   google_unavailable: "Google sign-in is not configured for this environment yet.",
+  link_expired: "The sign-in took too long to confirm. Start again.",
   invalid_state:
     "The sign-in attempt expired or did not match this browser session. Try again.",
   provider_unavailable:
@@ -98,10 +116,20 @@ const loginErrorMessages: Record<string, string> = {
     "The two-factor step timed out. Sign in again to get a fresh one.",
 };
 
+// verify_before_<provider>_link has its own card rather than a line of copy.
+function verifyBeforeLinkProvider(error: string | undefined) {
+  if (error === "verify_before_google_link") {
+    return "Google";
+  }
+  if (error === "verify_before_apple_link") {
+    return "Apple";
+  }
+  return undefined;
+}
+
 function isKnownLoginError(error: string) {
-  // verify_before_google_link has its own card rather than a line of copy.
   return (
-    error === "verify_before_google_link" ||
+    verifyBeforeLinkProvider(error) !== undefined ||
     Object.hasOwn(loginErrorMessages, error)
   );
 }

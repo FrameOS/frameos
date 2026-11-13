@@ -45,6 +45,135 @@ scene, a schedule, the HTTP API with the frame access key or an admin
 session, the preview and the runtime. Not a driver (a key is bound through
 the event map), and not the cloud, which has no verb for it.
 
+## The frame page
+
+A gear left of Save opens the frame's own settings: **Frame settings**, where
+Cancel becomes Back and the gear stays lit. Back, the gear again, a key with
+the role `back` and the frame's `back` (once any keyboard is away) go back to
+the scene's form with its edits kept; the swipe that opened the panel closes
+it from either page. `sceneSettings {page: "frame"}` (the tray of the Windows 98
+layout) opens straight on the frame page, and there Back goes to the scene. The page
+has a refresh button on the Wi-Fi network's line and a Layout select with a gear for
+that layout's fields (`docs/scene-layouts.md` "On the frame"). Without
+it the panel opens on the scene's form, off Wi-Fi or on a
+scene without fields too, and on the frame page only when no scene is showing
+(an ESP32 with nothing installed opens it from its status screen).
+
+The page is built in the scene (`frameos/src/system/sceneSettings/scene.nim`)
+from facts the host hands over, so every host shows the same words. Three
+hooks in the scene module, set by the host's runtime:
+
+| Hook | What |
+|---|---|
+| `frameSettingsRead` | on every render: nil when the host offers no page (the preview, a round panel) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
+| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clock` |
+| `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate` |
+
+| Host | Where | Wi-Fi | Rotation and scale | Restart |
+|---|---|---|---|---|
+| ESP32 | `main/fos_frame_settings.c`, through `embedded_runtime.nim` | the station's (`fos_wifi.c`); 64 names by name, case ignored | NVS; the scale live, a rotation restarts | is a reboot: the page shows Reboot alone |
+| Linux | `frameos/frame_settings_linux.nim`, installed by `frameos.nim` | the portal's code (NetworkManager or wpa_supplicant), on a thread of its own; a frame on its hotspot lets it go for the join and raises it again on a failure | `persistFrameApiUpdate`, then a reload or a restart, as a cloud push | Restart FrameOS |
+
+What the page holds, top to bottom:
+
+- **A card**: Wi-Fi (connected to what, can't find it, wrong password?,
+  connecting, the setup hotspot), signal, address, the battery on a frame
+  that has one, what the last Save could not do, who manages the frame, the
+  version.
+- **Wi-Fi network**: a select box of the networks in range, the saved one first
+  when it is not among them, and "Other network…" for a hidden one (an input
+  to type its name). "Scan for networks" sits right under it; a scan runs when
+  the page opens off Wi-Fi (an ESP32) or on a scan older than 30 s (Linux).
+- **Password**: never shown. On an ESP32 an empty one keeps the saved
+  password for the same network and means an open network for another; a
+  Linux runtime holds no password (NetworkManager or the supplicant does), so
+  there an empty one is an open network.
+- **Rotation**, with a line under it on an LCD: any rotation but 0° adds a
+  noticeable delay to every frame of an animated scene. A turned panel cannot
+  be drawn on directly, so each frame is copied to its place (30 ms at
+  480x480 on an ESP32, `packImageRgb565`); on e-paper the frame is packed
+  anyway.
+- **Scale**: Automatic (with what that is on this panel), then the steps of
+  `RENDER_SCALE_STEPS` from 0.25x that leave a layout of at least 320 px on
+  the panel's shorter edge (up to 1.5x at 480 px), and a scale set elsewhere
+  as it is. Below 1 everything is drawn smaller. The scale is the frame's: a
+  scene with its own (`settings.renderScale`, a `renderScale` field) keeps
+  it. The settings panel and the scene switcher follow it too (below).
+- **Date and time** (an ESP32): the frame's clock in its own time zone, as
+  YYYY-MM-DD HH:MM. Saved to the system clock and the board's battery clock
+  where it has one. A frame that reaches the internet goes back to network time
+  at its next sync, which the page says. One field and no `strftime`, which
+  alone brings 12 KB of libc into the image.
+- **Update** (an ESP32 with a control plane): the page asks the plane whether a
+  release exists when it opens on Wi-Fi, at most hourly, and on **Check for
+  updates** (`fos_ota_check_start`: the same manifest and signature checks as
+  an install, nothing downloaded). **Install update** asks for a second tap and
+  takes the same path as the plane's own update (`fos_ota_request_for_control_plane`).
+  A frame with no plane shows neither.
+- **Render again**, **Restart FrameOS** (where the host lists it) and
+  **Reboot**. Restart and Reboot ask for a second tap ("Tap again", red);
+  anything else in between asks again. They send the
+  contract's device commands from the origin `panel`
+  (`docs/events-contract.json`), so every host runs the restart and reboot it
+  runs for a schedule.
+
+Save is lit only while there is something to save, on either page, and goes
+quiet once it is pressed: that is how the page says it took it. On the frame
+page it hands the host what was edited, and the host applies what differs
+from what it has; the page stays up, and a join, a drop or a scan result draws
+it again (the ESP32 while `fos_scenes_settings_shown`, a Linux frame between
+`open` and `close`). A rotation restarts the frame on an ESP32. A new scale is
+drawn at once, this page included (the ESP32 hands it to the runtime every
+pass; a Linux frame sets it in the live config instead of reloading, which
+would rebuild every scene, this page among them).
+
+**At the frame's scale.** The settings panel and the scene switcher are laid
+out at the frame's render scale as a scene is, sized from the panel
+(sceneSwitcher's `uiScale` / `uiRoom`): at 1.5 everything is half as large
+again with less room, and the pointer is divided back. They stop at 0.75 and
+at a layout of 320 px, whatever the scale, so the page that sets it can always
+set it back.
+
+**Turned off by the control plane.** The frame's `frame_settings_on_screen`
+(frame.json `frameSettingsOnScreen`, on unless the owner turns it off in the
+frame's settings, on both planes) decides whether the gear shows. Off, the panel
+is the scene's form alone; the scene's settings themselves go with the swipe's
+event map rule ("Button actions"). So that a frame whose Wi-Fi broke while it
+was off can still be fixed at the frame, the device has the last word:
+
+- a Pi: a file named `frameos-settings-unlock` on the boot partition (`/boot` or
+  `/boot/firmware`), while it is there (`frame_settings_lock.nim`);
+- an ESP32: `set settings_unlock 1` on the USB console, until `set
+  settings_unlock 0`.
+
+### What a control plane learns
+
+- **Wi-Fi: nothing.** A network set here is the device's alone, as the
+  console's and the setup portal's are. Neither plane is told the network's
+  name and no password leaves the frame. A backend learns the address alone,
+  from an ESP32's commands pull (`ip`), so it can follow a frame that joined
+  another network without a reboot: `frame_host` moves under the bootup's rule
+  (the claim must be the address the request came from, a hostname stays;
+  `backend/app/utils/embedded_report.py`).
+- **Rotation and scale: the plane adopts them**, so the next deploy keeps what
+  the person at the frame chose:
+  - The cloud's settings mirror follows `hardware.rotate` and
+    `hardware.renderScale` in every hello and `state`, unless a `set_settings`
+    is still on its way (`settingsWithReported` in `frames.ts`, the hub's
+    `followReportedSettings`). An ESP32 sends a `state` after a scale change
+    (`fos_cloud_request_state`); a Pi's hub client sends one when its config's
+    rotation or scale moved.
+  - A backend takes them from the frame's log line `{"event":
+    "settings:frame", "origin": "panel", "rotate": 90, "renderScale": 1.5}`
+    onto the row and the deploy baseline, so the drawer offers nothing to
+    deploy for them (`backend/app/utils/frame_settings_adopt.py`).
+- **Flashing an ESP32 again** erases its network, and the browser flasher sends
+  the plane's stored one (the backend's Network settings).
+
+**Flash** on the ESP32-S3: the PR that made the page says what it cost. The
+host writes its facts as text, not with cJSON, and the page's words live once,
+in the scene: keep it that lean.
+
 ## Saving
 
 **Save** is `setCurrentScene {sceneId: from, state: values}`, from the

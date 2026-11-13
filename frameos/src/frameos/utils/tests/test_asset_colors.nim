@@ -183,6 +183,7 @@ suite "the frame's automatic fit":
 
   test "the panel palette follows the device name":
     check panelPaletteForDevice("waveshare.EPD_13in3e").len == 6
+    check panelPaletteForDevice("waveshare.EPD_9in7e").len == 6
     check panelPaletteForDevice("pimoroni.inky_impression_7_2025").len == 6
     check panelPaletteForDevice("pimoroni.inky_impression_7").len == 6
     check panelPaletteForDevice("pimoroni.inky_impression_7_3") == saturated7ColorPalette
@@ -295,3 +296,12 @@ suite "the frame's automatic fit":
     check drawnImageRect(800, 480, 100, 50, "bottom-right") == (700, 430, 100, 50)
     check drawnImageRect(800, 480, 800, 480, "cover", 100, 0) == (100, 0, 700, 480)
     check drawnImageRect(800, 480, 100, 50, "top-left", 900, 0) == (0, 0, 0, 0)
+
+  test "whether the panel shows colors, by its canvas, then its device":
+    # A scene's "auto" draws in high contrast where it does not (app.frame.color).
+    check panelShowsColor("wasm", pfRgb565)
+    check panelShowsColor("wasm", pfRgbx)
+    check not panelShowsColor("wasm", pfGray8)
+    check not panelShowsColor("waveshare.EPD_7in3e", pfGray4)
+    check not panelShowsColor("waveshare.EPD_10in3", pfRgbx)
+    check panelShowsColor("waveshare.EPD_7in3e", pfRgbx)

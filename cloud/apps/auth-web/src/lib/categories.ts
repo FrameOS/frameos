@@ -68,6 +68,13 @@ export const storeCategories: StoreCategory[] = [
     hint: "animates continuously, re-rendering every second or faster (bouncing logos, moving clock hands, particle or physics animations, live visualisations); built for fast HDMI/LCD panels rather than e-ink",
   },
   {
+    slug: "layouts",
+    title: "Layouts",
+    description:
+      "Title bars, status lines and picture frames drawn around whatever scene is showing.",
+    hint: "a layout: a scene that draws chrome around the other scenes on the frame through a yield, rather than showing anything of its own",
+  },
+  {
     slug: "utilities",
     title: "Tools & utilities",
     description:

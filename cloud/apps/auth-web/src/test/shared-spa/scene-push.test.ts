@@ -60,6 +60,13 @@ describe("scenePush", () => {
     ]);
   });
 
+  it("does not offer to activate a layout, which never shows on its own", () => {
+    expect(scenePushActionCopy({ active: false, connected: 0, saves: true, noun: "layout" })).toEqual({
+      label: "Push to frame",
+      description: "Save and push this layout to the frame",
+    });
+  });
+
   it("names the drawer's main action for what it does", () => {
     expect(scenePushActionCopy({ active: false, connected: 0, saves: true })).toEqual({
       label: "Push & activate",
@@ -69,5 +76,15 @@ describe("scenePush", () => {
       label: "Push to frame",
       description: "Push this scene and 2 connected scenes to the frame",
     });
+  });
+
+  it("takes a scene's layout and the scenes its JSX names along", () => {
+    const wrapped = {
+      ...scene("page"),
+      layout: { sceneId: "bar" },
+      apps: { ui: { sources: { "app.tsx": 'export function get() { return <Scene id="clock" city="Oslo" /> }' } } },
+    } as unknown as FrameScene;
+    const bar = scene("bar");
+    expect(connectedSceneIds("page", [wrapped, bar, scene("clock"), scene("other")])).toEqual(["page", "bar", "clock"]);
   });
 });

@@ -41,6 +41,31 @@ echo "generating FrameOS app loaders"
 FRAMEOS_ROOT_DIR="$FRAMEOS_DIR" python3 "$FRAMEOS_DIR/tools/makeapploaders.py"
 
 cd "$FRAMEOS_DIR"
+
+# The JS preludes as bytecode built into the image (src/assets/prelude_bytecode.nim,
+# docs/perf-todo.md): a host build of the same QuickJS compiles them once here
+# instead of the device compiling ~8 KB of JavaScript at every interpreter
+# start. The tool links quickjs/libquickjs.a, the host library beside the
+# sources the firmware compiles; their VERSION is one file.
+echo "compiling the JS preludes to bytecode"
+# A host QuickJS from the same sources the firmware compiles, without
+# quickjs-libc (the tool needs none of it), so the tool links whatever libc
+# this host has: the prebuilt quickjs/libquickjs.a was built elsewhere and
+# did not link in the CI image (glibc's __isoc23_strtol, 2026-11-07).
+HOST_QJS="build/quickjs-host"
+mkdir -p "$HOST_QJS"
+QJS_VERSION="$(tr -d '[:space:]' < quickjs/VERSION)"
+for src in quickjs libregexp libunicode cutils dtoa; do
+    if [[ ! -f "$HOST_QJS/$src.o" || quickjs/$src.c -nt "$HOST_QJS/$src.o" ]]; then
+        gcc -O2 -D_GNU_SOURCE -DCONFIG_VERSION="\"$QJS_VERSION\"" -Iquickjs -c "quickjs/$src.c" -o "$HOST_QJS/$src.o"
+    fi
+done
+rm -f "$HOST_QJS/libquickjs.a"
+ar rcs "$HOST_QJS/libquickjs.a" "$HOST_QJS"/*.o
+nim c --hints:off -d:release -d:frameosQuickjsNoLibc -d:frameosQuickjsLib="$HOST_QJS/libquickjs.a" \
+    -o:build/prelude_bytecode tools/prelude_bytecode.nim
+./build/prelude_bytecode
+
 # -d:pixieNoPpm drops pixie's Netpbm (P3/P6) codec, ~7.4 KB of an image that
 # runs at 93% of its OTA slot. No frame is ever handed a .ppm: the format has
 # no place in a web fetch, a scene asset or an upload, and every other decoder
@@ -60,6 +85,7 @@ nim c \
     -d:useMalloc \
     -d:noSignalHandler \
     -d:frameosEmbedded \
+    -d:frameosPreludeBytecode \
     -d:pixieNoPpm \
     --nimcache:"$NIMCACHE" \
     src/embedded/embedded_main.nim

@@ -12,16 +12,21 @@
 ## equal-column grids; `absolute` places a child against its parent's padding
 ## box. Text is set with pixie's typesetter and drawn as its outlines.
 
-import std/[math, strutils, unicode]
+import std/[hashes, math, strutils, tables, unicode]
 import pixie
 import pixie/fileformats/svg
+import frameos/events_gen
 import frameos/ui/tailwind
 import frameos/ui/keyboard
 import frameos/ui/tree
+import frameos/render_probe
 when not defined(frameosEmbedded):
   import frameos/panel_shape
 
 export keyboard.KeyboardPage
+
+const MaxHoles* = 8
+  ## Past this many a `<Scene>` is a picture, as one that cannot be a hole is.
 
 type
   UiKind = enum
@@ -63,10 +68,18 @@ type
     page*: KeyboardPage  ## which keys it shows ...
     shift*: int          ## ... letters in capitals: 1 the next one, 2 all of them
     accents*: int        ## the key whose accents show above it (its byte); 0 for none
+    accentX*: float32    ## ... the x of the finger that holds it: the accent nearest lights, < 0 none
+    accentFrom*: float32 ## ... and where it held: a letter's row lights by how far it went from there
+    accentLit*: int      ## ... which one the last layout lit, -1 for none
+    flash*: int          ## a key just typed (its byte), drawn lit for a moment after the press; 0 none
+    flashDrawn*: bool    ## ... and a layout has drawn it so
     reveal*: bool        ## scroll the focused field into view at the next layout
     paper*: bool         ## e-paper: the keyboard shows no press
     round*: bool         ## a round panel's whole canvas: the keyboard stays inside its circle
     scrolls*: seq[(int, float32, float32)] ## how far each box that scrolled is, by key
+    lineStep*: int       ## a key moved the caret a line up (-1) or down (1): the next layout knows the lines ...
+    goalX*: float32      ## ... and keeps the x it set out from across the lines it walks, while `goal`
+    goal*: bool
     open*: int           ## the <select> whose list is up: its key + 1; 0 for none
     fresh*: bool         ## it just opened: the next layout scrolls to what it holds
 
@@ -77,6 +90,18 @@ type
     drawnAt: array[3, float32] ## x, y, opacity `drawn` was emitted for
     drawn: seq[SvgNode]  ## its outlines as emitted there, paths shared
 
+  UiHole* = object
+    ## A `<Scene>` or `<yield />` (seekHoles), in the UI's pixels, and in the
+    ## canvas's (left to bottom, for whoever knows the scale).
+    clean*: bool
+    x*, y*, w*, h*: float32
+    left*, top*, right*, bottom*: int32
+
+  UiHoles* = object
+    count*: int
+    firstYield: int ## its place + 1
+    items*: array[MaxHoles, UiHole]
+
   UiMemo* = ref object
     ## What the last layout of a UI set in type, for the next one (one per
     ## UI, ui/events.nim's target). Text whose runs, style and box did not
@@ -85,6 +110,10 @@ type
     ## their bounds and their flattened shapes (paths.share), so an
     ## unchanged label costs a repaint nothing.
     last, kept: seq[TextMemo]
+    older: seq[TextMemo]
+      ## What the layout before the last used and the last did not: a toggle
+      ## goes back and forth between two texts ("0 of 2 on", "1 of 2 on"),
+      ## and each was typeset again on every tap (~5 ms on an ESP32).
     gen: int             ## this layout's number: a node's `memo` holds for it only
     root: UiNode         ## the last layout's tree, taken back where it did not change
     rootW, rootH: float32
@@ -139,6 +168,7 @@ type
     emitted: seq[SvgNode]
     emittedRegions: seq[UiRegion]
     emittedAt: array[7, float32]
+    emittedOver: ColorRGBA  ## the backdrop its emit pre-blended against
     emittedFor: (int, float32, float32)
     emittedGradients: (int, int)
     # What the pointer can do to it (UiRegion).
@@ -362,6 +392,57 @@ proc selectRow(n: SvgNode): SvgNode =
     shown.children = n.children[held].children
   SvgNode(tag: "div", attrs: n.attrs, children: @[shown, icon("M6 9l6 6 6-6", false, 0)])
 
+# What a class string said, for the same string, states, image size and
+# inherited text: the box and the text it left. A UI's elements repeat a few
+# class strings, and a toggle rebuilt a dozen nodes whose classes were read
+# again from the characters each time (~4 ms of a tap on an ESP32).
+type
+  ClassFlags = object
+    ## What build() asks of a class string besides its box: its pointer
+    ## classes, hover:, active: and group.
+    pointer, hover, active, group: bool
+  ClassRead = object
+    classes: string
+    states: set[UiState]
+    w, h: float32
+    textIn, textOut: Text
+    box: Box
+  ClassFlagsRead = object
+    classes: string
+    flags: ClassFlags
+
+# On the heap, made on first use: a global array is the ESP32's internal
+# .bss (--threads:off makes a threadvar a global), and these were 47 KB of
+# the 80 KB of internal RAM a frame has.
+var
+  classReads {.threadvar.}: seq[ClassRead]
+  classFlagReads {.threadvar.}: seq[ClassFlagsRead]
+
+proc readClasses(box: var Box, text: var Text, classes: string, w, h: float32, states: set[UiState]) =
+  if classReads.len == 0:
+    classReads = newSeq[ClassRead](128)
+  let slot = (hash(classes) !& hash(cast[uint8](states))).int and classReads.high
+  template c: untyped = classReads[slot]
+  if c.classes.len > 0 and c.classes == classes and c.states == states and c.w == w and c.h == h and
+      c.textIn == text:
+    box = c.box
+    text = c.textOut
+    return
+  let textIn = text
+  box.applyClasses(text, classes, w, h, states)
+  classReads[slot] = ClassRead(classes: classes, states: states, w: w, h: h, textIn: textIn,
+    textOut: text, box: box)
+
+proc classFlags(classes: string): ClassFlags =
+  if classFlagReads.len == 0:
+    classFlagReads = newSeq[ClassFlagsRead](128)
+  let slot = hash(classes).int and classFlagReads.high
+  if classFlagReads[slot].classes.len > 0 and classFlagReads[slot].classes == classes:
+    return classFlagReads[slot].flags
+  result = ClassFlags(pointer: classes.pointerClasses, hover: classes.variant("hover"),
+    active: classes.variant("active"), group: classes.hasClass("group"))
+  classFlagReads[slot] = ClassFlagsRead(classes: classes, flags: result)
+
 proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
     key: int, input: UiInput, groupHover: bool, prev: UiNode): UiNode =
   ## `n` as a node to lay out. `prev`, the node the last layout built at this
@@ -389,11 +470,12 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
   result.src = n
   result.inherited = inherited
   result.inGroup = groupHover
-  result.pointer = classes.pointerClasses
+  let flags = classFlags(classes)
+  result.pointer = flags.pointer
   result.key = key
-  result.hover = classes.variant("hover")
-  result.active = classes.variant("active")
-  result.group = classes.hasClass("group")
+  result.hover = flags.hover
+  result.active = flags.active
+  result.group = flags.group
   for event in UiEvent:
     var id: float32
     # onInput is a field's onChange by another name, as in React.
@@ -406,7 +488,7 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
   if result.active and key in input.pressed: states.incl usActive
   if key == input.focus - 1: states.incl usFocus
   result.states = states
-  result.box.applyClasses(result.text, classes, rootW, rootH, states)
+  result.box.readClasses(result.text, classes, rootW, rootH, states)
   if result.box.overflowX != ovVisible or result.box.overflowY != ovVisible:
     result.pointer = true # a scroll builds it again (samePointer)
     result.scrollAt = input.scrolled(key)
@@ -414,6 +496,15 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
   let childGroup = groupHover or (result.group and key in input.hovered)
   if n.tag == "img" or n.tag == "svg":
     result.kind = if n.tag == "img": ukImage else: ukSvg
+    return
+  if n.tag == "Scene":
+    # A picture whose size comes from the room it gets (flex-1 unless it
+    # says): the scene runs once the layout knows it (app_runtime.nim).
+    result.kind = ukImage
+    if result.box.grow == 0 and result.box.w.kind == lkAuto and result.box.h.kind == lkAuto:
+      result.box.grow = 1
+      result.box.shrink = 1
+      result.box.basis = Len(kind: lkPct, v: 0)
     return
   if n.tag == "input" or n.tag == "textarea":
     result.buildField(n, text, classes, rootW, rootH, input)
@@ -444,10 +535,15 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
       let childKey = key * 31 + i + 1
       var before: UiNode
       if not prev.isNil:
-        for c in prev.children:
-          if c.kind != ukText and c.key == childKey:
-            before = c
-            break
+        # The same place first: a list that kept its order is one probe per
+        # child, not a scan of every earlier child (quadratic in a long list).
+        if i < prev.children.len and prev.children[i].kind != ukText and prev.children[i].key == childKey:
+          before = prev.children[i]
+        else:
+          for c in prev.children:
+            if c.kind != ukText and c.key == childKey:
+              before = c
+              break
       let built = child.build(result.text, rootW, rootH, depth + 1, childKey, input, childGroup, before)
       if built.pointer:
         result.pointer = true
@@ -543,6 +639,7 @@ var
   memo {.threadvar.}: UiMemo ## the layout's, while layoutUi runs
   ui {.threadvar.}: ptr UiInput ## and the input it was asked for
   focusSeen {.threadvar.}: bool ## the focused field was laid out
+  revealCaret {.threadvar.}: bool ## and is scrolled to show its caret (an edit, a key, a tap)
 
 template scrollOf(key: int): (float32, float32) = ui[].scrolled(key)
 template setScroll(key: int, x, y: float32) = ui[].scrollTo(key, x, y)
@@ -571,11 +668,24 @@ proc recall(key: string): int =
       memo.kept.add move(memo.last[i])
       memo.last.del(i)
       return memo.kept.high
+  for i in 0 ..< memo.older.len:
+    if memo.older[i].key == key:
+      memo.kept.add move(memo.older[i])
+      memo.older.del(i)
+      return memo.kept.high
   -1
+
+proc arrangeUncached(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement
 
 proc arrange(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement =
   ## The text set into `width`, wrapped unless `whitespace-nowrap`, and cut
   ## with an ellipsis after `lines` lines (truncate, line-clamp-N).
+  if not n.arrangement.isNil and n.arrangedW == width and n.arrangedAlign == align:
+    return n.arrangement
+  probe(phText):
+    result = n.arrangeUncached(width, align)
+
+proc arrangeUncached(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement =
   if not n.arrangement.isNil and n.arrangedW == width and n.arrangedAlign == align:
     return n.arrangement
   var key: string
@@ -1053,6 +1163,63 @@ proc paint(node: SvgNode, c: ColorRGBA, opacity: float32, attr = "fill") =
 proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradients: var int,
     regions: var seq[UiRegion]) {.raises: [].}
 
+# What an in-flow box is painted over while the emit is inside it: its
+# parent's background when that is one flat opaque colour (a = 255), else
+# nothing known (a = 0). A translucent background over it (a card's
+# bg-white/10) is drawn as the opaque colour the blend makes: on a 565 or
+# grey panel a translucent fill unpacks, blends and packs every pixel, and
+# the "off" card of the home panel rastered 28 ms slower than the "on" one
+# on an ESP32 for that alone (2026-11-07). Absolute children may lie over
+# anything, so they are painted over nothing known.
+var emitBackdrop {.threadvar.}: ColorRGBA
+
+proc overBackdrop(c: ColorRGBA, opacity: float32): tuple[color: ColorRGBA, opacity: float32] =
+  ## `c` at `opacity`, as the colour it makes over the backdrop.
+  let a = c.a.float32 / 255 * opacity
+  if emitBackdrop.a != 255 or a >= 1 or a <= 0:
+    return (c, opacity)
+  template mix(f, g: uint8): uint8 =
+    uint8(clamp(round(f.float32 * a + g.float32 * (1 - a)), 0, 255))
+  (rgba(mix(c.r, emitBackdrop.r), mix(c.g, emitBackdrop.g), mix(c.b, emitBackdrop.b), 255), 1'f32)
+
+# A box's rounded outline and its border ring, one shared path per size,
+# radii and border widths, at the origin, placed by SvgNode.offset: a card
+# that changes only its colour (a toggle) draws the same path, which pixie
+# then fills from its kept coverage (paths.nim). A box with a gradient keeps
+# a path of its own, where the gradient's coordinates are.
+type ShapeKey = array[10, int32]
+  ## The key of the shared paths below, boxes and glyphs alike: one Table
+  ## type, one copy of its code in the firmware.
+
+var boxShapes {.threadvar.}: Table[ShapeKey, Path]
+
+const BoxShapesMax = 256
+
+proc boxShape(w, h: float32, r: array[4, float32], bw: array[4, float32], ring: bool): Path =
+  var key: ShapeKey
+  key[0] = int32(w * 4)
+  key[1] = int32(h * 4)
+  for i in 0 .. 3:
+    key[2 + i] = int32(r[i] * 4)
+    key[6 + i] = if ring: int32(bw[i] * 4) + 1 else: 0
+  if boxShapes.hasKey(key):
+    return boxShapes.getOrDefault(key)
+  if boxShapes.len >= BoxShapesMax:
+    boxShapes.clear()
+  result = newPath()
+  result.roundedRect(0, 0, w, h, r[0], r[1], r[2], r[3])
+  if ring:
+    let
+      iw = w - bw[1] - bw[3]
+      ih = h - bw[0] - bw[2]
+    if iw > 0 and ih > 0:
+      result.roundedRect(bw[3], bw[0], iw, ih,
+        max(r[0] - max(bw[3], bw[0]), 0), max(r[1] - max(bw[1], bw[0]), 0),
+        max(r[2] - max(bw[1], bw[2]), 0), max(r[3] - max(bw[3], bw[2]), 0),
+        clockwise = false)
+  result.share() # never changed again: bounds, flattened shapes, coverage kept
+  boxShapes[key] = result
+
 proc emitPaint(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode], gradients: var int) =
   ## The box's background and border.
   template b: untyped = n.box
@@ -1091,29 +1258,26 @@ proc emitPaint(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode],
       node = SvgNode(tag: "rect")
       for v in [("x", x), ("y", y), ("width", w), ("height", h)]:
         node.attrs.add((v[0], num(v[1])))
-    else:
+    elif fill.len > 0:
       node = SvgNode(tag: "path", path: newPath())
       node.path.roundedRect(x, y, w, h, r[0], r[1], r[2], r[3])
+      node.path.share() # never changed again: bounds and flattened shapes kept
+    else:
+      node = SvgNode(tag: "path", path: boxShape(w, h, r, bw = [0'f32, 0, 0, 0], ring = false),
+        offset: vec2(x, y))
     if fill.len > 0:
       node.attrs.add(("fill", "url(#" & fill & ")"))
       if opacity < 1:
         node.attrs.add(("opacity", num(opacity)))
     else:
-      node.paint(b.bg, opacity)
+      let (bg, bgOpacity) = overBackdrop(b.bg, opacity)
+      node.paint(bg, bgOpacity)
     drawn.add node
   let bw = b.border
   if bw != [0'f32, 0, 0, 0] and b.borderColor.a > 0:
     # The ring between the box and its inside, one fill whatever the widths.
-    let node = SvgNode(tag: "path", path: newPath(), attrs: @[("fill-rule", "evenodd")])
-    node.path.roundedRect(x, y, w, h, r[0], r[1], r[2], r[3])
-    let
-      iw = w - bw[1] - bw[3]
-      ih = h - bw[0] - bw[2]
-    if iw > 0 and ih > 0:
-      node.path.roundedRect(x + bw[3], y + bw[0], iw, ih,
-        max(r[0] - max(bw[3], bw[0]), 0), max(r[1] - max(bw[1], bw[0]), 0),
-        max(r[2] - max(bw[1], bw[2]), 0), max(r[3] - max(bw[3], bw[2]), 0),
-        clockwise = false)
+    let node = SvgNode(tag: "path", path: boxShape(w, h, r, bw, ring = true),
+      offset: vec2(x, y), attrs: @[("fill-rule", "evenodd")])
     node.paint(b.borderColor, opacity)
     drawn.add node
 
@@ -1166,6 +1330,91 @@ proc emitSvg(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode]) =
   group.children = n.src.children
   drawn.add group.recolored(n.text.color.hex)
 
+# -------- Glyph runs
+#
+# Text is drawn a glyph at a time: each glyph one shared path per typeface,
+# rune and size (kept here), placed with the node's `offset` at a quarter
+# pixel. pixie keeps the coverage of a shared path at each subpixel offset
+# (paths.nim, the coverage cache), so a letter drawn again — in another
+# label, in the next render, in a changed card's new text — is a mask
+# blended into the panel, not an outline flattened and scanned. A run's
+# path, new for every new text, was most of a toggled card's raster on an
+# ESP32 (docs/perf-todo.md). Glyphs sit up to an eighth of a pixel from
+# where the typesetter put them.
+
+var glyphPaths {.threadvar.}: Table[ShapeKey, Path]
+
+# A glyph's path keeps its flattened shapes too (a shared path's), a few KB
+# for a large size: an ESP32 holds a UI's worth, a host more.
+const GlyphPathsMax = when defined(frameosEmbedded): 256 else: 1024
+
+proc quarter(v: float32): float32 {.inline.} =
+  round(v * 4) / 4
+
+proc glyphPath(font: Font, rune: Rune): Path =
+  ## The rune's outline at the font's size, at the origin, shared; nil for
+  ## a glyph that draws nothing.
+  let face = cast[uint64](font.typeface)
+  var key: ShapeKey
+  key[0] = cast[int32](uint32(face and 0xffff_ffff'u64))
+  key[1] = cast[int32](uint32(face shr 32))
+  key[2] = rune.int32
+  key[3] = int32(font.size * 64)
+  if glyphPaths.hasKey(key):
+    return glyphPaths.getOrDefault(key)
+  if glyphPaths.len >= GlyphPathsMax:
+    glyphPaths.clear()
+  var path: Path
+  try:
+    let typeface = font.typeface.fallbackTypeface(rune)
+    if typeface.isNil or not typeface.hasColorGlyph(rune):
+      path = font.typeface.getGlyphPath(rune)
+      path.transform(scale(vec2(font.scale)))
+      path.share()
+      let b = path.localBounds()
+      if b.w <= 0 or b.h <= 0:
+        path = nil
+  except PixieError:
+    path = nil
+  glyphPaths[key] = path
+  path
+
+proc emitGlyphs(arrangement: Arrangement, n: UiNode, x, y, opacity: float32,
+    drawn: var seq[SvgNode]): bool =
+  ## The arrangement as glyph runs; false when it has what glyphs cannot
+  ## carry (an underline, a strikethrough), for the path per span instead.
+  for font in arrangement.fonts:
+    if font.underline or font.strikethrough:
+      return false
+  for spanIndex, (start, stop) in arrangement.spans:
+    let
+      font = arrangement.fonts[spanIndex]
+      color = font.paint.color.rgba
+      bold = font in n.bold
+      strike = quarter(font.size / 24)
+    for i in start .. stop:
+      let rune = arrangement.runes[i]
+      if rune.isWhiteSpace:
+        continue
+      let path = glyphPath(font, rune)
+      if path.isNil:
+        continue
+      let
+        at = arrangement.positions[i]
+        offset = vec2(quarter(at.x + x), quarter(at.y + y))
+        node = SvgNode(tag: "path", path: path, offset: offset)
+      node.paint(color, opacity)
+      drawn.add node
+      if bold:
+        # No bold face to draw it in (an ESP32 has one): the same outline
+        # filled again a little to the right, the double strike of a
+        # typewriter. (It was a round-joined stroke of the outline, a circle
+        # per join: over half the raster of a toggled card, 2026-11-07.)
+        let second = SvgNode(tag: "path", path: path, offset: offset + vec2(strike, 0))
+        second.paint(color, opacity)
+        drawn.add second
+  true
+
 proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
   let arrangement = n.arrange(w, n.text.align)
   if arrangement.runes.len == 0:
@@ -1178,11 +1427,6 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
       drawn.add node
     return
   let first = drawn.len
-  var paths: seq[Path]
-  try:
-    paths = arrangement.computePaths()
-  except PixieError:
-    return
   # arrange() sets text a pixel wider than its box, to wrap where it was
   # measured: centered or right-aligned lines come back by what it added.
   let shift =
@@ -1190,17 +1434,28 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
     of CenterAlign: -0.5'f32
     of RightAlign: -1
     else: 0
+  var paths: seq[Path]
+  if not arrangement.emitGlyphs(n, x + shift, y, opacity, drawn):
+    try:
+      paths = arrangement.computePaths()
+    except PixieError:
+      return
   for i, path in paths:
     let font = arrangement.fonts[i]
     path.transform(translate(vec2(x + shift, y)))
     let node = SvgNode(tag: "path", path: path)
     node.paint(font.paint.color.rgba, opacity)
-    if font in n.bold:
-      # No bold face to draw it in (an ESP32 has one): the outline, thickened.
-      node.paint(font.paint.color.rgba, 1, "stroke")
-      node.attrs.add(("stroke-width", num(font.size / 24)))
-      node.attrs.add(("stroke-linejoin", "round"))
     drawn.add node
+    if font in n.bold:
+      # No bold face to draw it in (an ESP32 has one): the same outline filled
+      # again a little to the right, the double strike of a typewriter. It
+      # was a round-joined stroke of the outline; pixie built a circle per
+      # join, 303 for an 11-glyph label, and that one label was over half
+      # the raster of a toggled home-panel card (2026-11-07). The second fill
+      # shares the path, so its flattened shapes are flattened once.
+      let strike = SvgNode(tag: "path", path: path, offset: vec2(font.size / 24, 0))
+      strike.paint(font.paint.color.rgba, opacity)
+      drawn.add strike
   if remembered:
     template entry: untyped = memo.kept[n.memo]
     entry.drawnAt = at
@@ -1246,13 +1501,42 @@ proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32): array[4, fl
     return
   if ui.place:
     ui.place = false
+    ui.goal = false
     ui.caret = n.value.runeOffset(arrangement.caretAt(ui.placeX - (tx - x) + sx, ui.placeY - (ty - y) + sy))
   ui.caret = clamp(ui.caret, 0, n.value.len)
-  let
+  var
     i = min(n.value.toOpenArray(0, ui.caret - 1).runeLen, arrangement.runes.len)
     r = arrangement.selectionRects[min(i, arrangement.runes.high)]
-    cw = max(1'f32, round(t.text.size / 16))
+  when not defined(frameosEmbedded):
+    if ui.lineStep != 0:
+      # A line up or down (ArrowUp / ArrowDown on a keyboard): the nearest
+      # edge on that line to the x the caret set out from, kept across the
+      # lines it walks; off the first line the start, off the last the end.
+      var line = arrangement.lines.high
+      for l, span in arrangement.lines:
+        if i <= span[1]:
+          line = l
+          break
+      if not ui.goal:
+        ui.goal = true
+        ui.goalX = if i < arrangement.runes.len: r.x else: r.x + r.w
+      let to = line + ui.lineStep
+      ui.lineStep = 0
+      let rune =
+        if to < 0: 0
+        elif to > arrangement.lines.high: arrangement.runes.len
+        else:
+          let row = arrangement.selectionRects[arrangement.lines[to][0]]
+          arrangement.caretAt(ui.goalX, row.y + row.h / 2)
+      ui.caret = clamp(n.value.runeOffset(rune), 0, n.value.len)
+      i = min(n.value.toOpenArray(0, ui.caret - 1).runeLen, arrangement.runes.len)
+      r = arrangement.selectionRects[min(i, arrangement.runes.high)]
+  let cw = max(1'f32, round(t.text.size / 16))
   result = [tx + (if i < arrangement.runes.len: r.x else: r.x + r.w), ty + r.y, cw, r.h]
+  if not revealCaret:
+    # Scrolled by a finger or the wheel: the caret may be out of sight, as
+    # in a browser, until the next edit or key brings it back.
+    return
   # In sight: inside the content box, the caret's width to spare.
   let
     left = x + b.border[3] + b.pad[3]
@@ -1292,8 +1576,9 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     if n.field > 0 and n.key == ui.focus - 1 and n.children.len > 0:
       focusSeen = true
       caret = n.emitField(x, y, w, h, sx, sy)
-    elif n.field > 0:
-      # A field that lets go of the keyboard shows its text from the start.
+    elif n.field > 0 and n.field != 2:
+      # A field that lets go of the keyboard shows its text from the start;
+      # a <textarea> stays where it was scrolled to, like any box.
       sx = 0
       sy = 0
     setScroll(n.key, sx, sy)
@@ -1301,7 +1586,8 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
   let
     at = [x, y, w, h, op, sx, sy]
     call = (n.lastFix, n.lastW, n.lastH)
-  if n.kind == ukBox and n.emittedAt == at and n.emittedFor == call and n.emittedGradients[0] == gradients:
+  if n.kind == ukBox and n.emittedAt == at and n.emittedFor == call and n.emittedGradients[0] == gradients and
+      n.emittedOver == emitBackdrop:
     # Taken back unchanged (build), laid out by the same call and placed
     # where it was: what it emitted then, the same nodes for pixie to keep.
     for node in n.emitted:
@@ -1314,7 +1600,9 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     first = drawn.len
     firstRegion = regions.len
     firstGradient = gradients
-    scrolls = b.overflowX == ovScroll and n.maxX > 0 or b.overflowY == ovScroll and n.maxY > 0
+    # A <textarea> scrolls its text like a box with overflow-y-auto.
+    scrollsY = b.overflowY == ovScroll or n.field == 2
+    scrolls = b.overflowX == ovScroll and n.maxX > 0 or scrollsY and n.maxY > 0
   n.emitPaint(x, y, w, h, op, drawn, gradients)
   if n.hover or n.active or n.group or n.handlers != default(array[UiEvent, int]) or
       n.field > 0 or scrolls:
@@ -1322,15 +1610,19 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     regions.add UiRegion(x: x, y: y, w: w, h: h, visible: [x, y, x + w, y + h], key: n.key,
       handlers: n.handlers, hover: n.hover, active: n.active, group: n.group, field: n.field,
       scrollX: (if b.overflowX == ovScroll: n.maxX else: 0),
-      scrollY: (if b.overflowY == ovScroll: n.maxY else: 0))
+      scrollY: (if scrollsY: n.maxY else: 0))
   case n.kind
   of ukText:
     n.emitText(cx, cy, cw, op, drawn)
   of ukImage:
-    if not n.src.image.isNil and cw > 0 and ch > 0:
+    let embedded = n.src.tag == "Scene"
+    if (embedded or not n.src.image.isNil) and cw > 0 and ch > 0:
       let node = SvgNode(tag: "image", image: n.src.image, attrs: @[("x", num(cx)),
         ("y", num(cy)), ("width", num(cw)), ("height", num(ch)),
         ("preserveAspectRatio", ["none", "xMidYMid meet", "xMidYMid slice"][ord(b.fit)])])
+      if embedded:
+        node.attrs.add(("scene-id", n.src.attr("id")))
+        node.attrs.add(("scene-props", n.src.attr("props")))
       if op < 1:
         node.attrs.add(("opacity", num(op)))
       drawn.add node
@@ -1352,11 +1644,26 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
         return
       view = SvgNode(tag: "svg", attrs: @[("x", num(vx)), ("y", num(vy)), ("width", num(vw)),
         ("height", num(vh)), ("viewBox", nums([vx + sx, vy + sy, vw, vh]))])
+    let outer = emitBackdrop
     for pass in [false, true]:
+      # What the children are painted over (overBackdrop): this box's own
+      # background when it leaves one flat opaque colour, the one it was
+      # painted over when it has none, nothing known under absolute ones.
+      emitBackdrop =
+        if pass: rgba(0, 0, 0, 0)
+        elif b.gradient > 0 or b.bg.a == 0 and op < 1: rgba(0, 0, 0, 0)
+        elif b.bg.a == 0: outer
+        else:
+          let saved = emitBackdrop
+          emitBackdrop = outer
+          let (bg, bgOpacity) = overBackdrop(b.bg, op)
+          emitBackdrop = saved
+          if bg.a == 255 and bgOpacity >= 1: bg else: rgba(0, 0, 0, 0)
       for c in n.children:
         if c.box.absolute == pass:
           if clips: c.emit(x, y, op, view.children, gradients, regions)
           else: c.emit(x, y, op, drawn, gradients, regions)
+    emitBackdrop = outer
     if clips:
       if caret[2] > 0:
         let bar = SvgNode(tag: "rect", attrs: @[("x", num(caret[0])), ("y", num(caret[1])),
@@ -1376,17 +1683,19 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
           regions[k] = r
           inc k
       regions.setLen(k)
-      if b.overflowY == ovScroll and n.maxY > 0:
+      if scrollsY and n.maxY > 0:
         # Where in what it holds it shows: a thin bar at its right edge.
         let
           barH = max(vh * vh / (vh + n.maxY), min(vh, 16))
           bar = SvgNode(tag: "path", path: newPath())
         bar.path.roundedRect(vx + vw - 5, vy + (vh - barH) * sy / n.maxY, 3, barH, 1.5, 1.5, 1.5, 1.5)
+        bar.path.share()
         bar.paint(n.text.color, op * 0.35)
         drawn.add bar
     n.emitted = drawn[first .. ^1]
     n.emittedRegions = regions[firstRegion .. ^1]
     n.emittedAt = at
+    n.emittedOver = emitBackdrop
     n.emittedFor = call
     n.emittedGradients = (firstGradient, gradients - firstGradient)
 
@@ -1515,7 +1824,9 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
   ## and under it when there is no room above. It goes on top of everything;
   ## the keyboard stays there to touch (a tap on it puts the row away and
   ## types, ui/events.nim). False for a key without accents.
-  let count = accentCount(input.accents)
+  let
+    count = formCount(input.accents, input.page)
+    hinted = hintOf(input.accents, input.page).len > 0
   if count == 0:
     return false
   let
@@ -1542,11 +1853,25 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
     # not fit between `lo` and `hi`.
     keyW = max(min(int(r.w), (hi - lo - 4 - (count + 1) * gap) div count), 8)
     popW = count * keyW + (count + 1) * gap + 4
-  let shown = accentTree(input.accents, input.shift, keyW, keyH, gap, input.paper)
+    # A letter's row starts with its symbol right over the key; any other
+    # row is centred on it.
+    x = clamp(int(r.x + r.w / 2) - (if hinted: 2 + gap + keyW div 2 else: popW div 2), lo, max(hi - popW, lo))
+    first = float32(x + 2 + gap) + float32(keyW) / 2 # the first form's middle
+  # The accent under the finger's x, as near as it gets: a finger that slides
+  # sideways off the key it holds needs to go no higher than the row. On a
+  # letter's row, by how far the finger went from where it held (`accentFrom`):
+  # the symbol is lit until it moves, wherever the screen's edge put the row.
+  input.accentLit = -1
+  if input.accentX >= 0:
+    # As ui/events.nim's `accentNear`.
+    let at = if hinted: input.accentX - input.accentFrom + first else: input.accentX
+    input.accentLit = clamp(int(round((at - first) / float32(keyW + gap))), 0, count - 1)
+  let shown = accentTree(input.accents, input.shift, keyW, keyH, gap, input.paper, input.page,
+    input.accentLit)
     .build(initText(), width.float32, height.float32, 0, AccentKey, input, false,
       if memo.isNil: nil else: memo.accents)
   shown.size = shown.layout(popW.float32, popH.float32, true, true)
-  shown.x = float32(clamp(int(r.x + r.w / 2) - popW div 2, lo, max(hi - popW, lo)))
+  shown.x = float32(x)
   shown.y = float32(y)
   shown.emit(0, 0, 1, drawn, gradients, regions)
   if not memo.isNil:
@@ -1575,18 +1900,22 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     inc memo.gen
     if memo.rootW == w and memo.rootH == h:
       before = memo.root
-  let top = root.build(initText(), w, h, 0, 0, input, false, before)
-  var
-    rw = top.box.w.resolve(w)
-    rh = top.box.h.resolve(h)
-  if rw < 0: rw = w
-  if rh < 0: rh = h
-  top.size = top.layout(rw, rh, true, true)
-  top.x = max(top.box.margin[3].resolve(w), 0)
-  top.y = max(top.box.margin[0].resolve(h), 0)
+  var top: UiNode
+  probe(phLayout):
+    probe(phBuild):
+      top = root.build(initText(), w, h, 0, 0, input, false, before)
+    var
+      rw = top.box.w.resolve(w)
+      rh = top.box.h.resolve(h)
+    if rw < 0: rw = w
+    if rh < 0: rh = h
+    top.size = top.layout(rw, rh, true, true)
+    top.x = max(top.box.margin[3].resolve(w), 0)
+    top.y = max(top.box.margin[0].resolve(h), 0)
   if input.reveal and input.focus > 0:
     var r: array[4, float32]
     discard top.reveal(input.focus - 1, r)
+  revealCaret = input.reveal or input.place or input.lineStep != 0
   input.reveal = false
   result = SvgNode(tag: "svg", attrs: @[("width", $width), ("height", $height)])
   if kb > 0 and top.box.bg.a == 255 and top.box.gradient == 0:
@@ -1596,7 +1925,9 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     page.paint(top.box.bg, 1)
     result.children.add page
   var gradients = 0
-  top.emit(0, 0, 1, result.children, gradients, regions)
+  emitBackdrop = rgba(0, 0, 0, 0) # the root is painted over whatever the scene drew
+  probe(phEmit):
+    top.emit(0, 0, 1, result.children, gradients, regions)
   if input.open > 0:
     var shown = false
     let anchor = top.fieldIn(input.open - 1)
@@ -1609,11 +1940,13 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
       input.open = 0
   if kb > 0:
     let keys = keyboardTree(width, kb, input.page, input.shift, input.paper, input.round, kbTop,
-      height, input.accents).build(initText(), w, kb.float32, 0, KeyboardKey, input, false,
+      height, input.accents, input.flash).build(initText(), w, kb.float32, 0, KeyboardKey, input, false,
       if memo.isNil: nil else: memo.keyboard)
     keys.size = keys.layout(w, kb.float32, true, true)
     keys.y = h
     keys.emit(0, 0, 1, result.children, gradients, regions)
+    if input.flash > 0:
+      input.flashDrawn = true
     if not memo.isNil:
       memo.keyboard = keys
     if input.accents > 0:
@@ -1629,12 +1962,18 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
         input.accents = 0
   else:
     input.accents = 0
+  if input.accents == 0:
+    input.accentLit = -1
   if input.focus > 0 and not focusSeen:
     # The field is gone: nothing has the keyboard.
     input.focus = 0
     input.keyboard = false
   if not memo.isNil:
-    memo.last = move(memo.kept) # what this layout did not use is let go
+    # What this layout did not use waits one more layout, then is let go.
+    memo.older = move(memo.last)
+    if memo.older.len > 64:
+      memo.older.setLen(64)
+    memo.last = move(memo.kept)
     memo.root = top
     memo.rootW = w
     memo.rootH = h
@@ -1646,5 +1985,68 @@ proc layoutUi*(root: SvgNode, width, height: int): SvgNode =
     regions: seq[UiRegion]
     input: UiInput
   layoutUi(root, width, height, input, regions)
+
+proc seekHoles(n: UiNode, ox, oy, opacity: float32, scrolled, yieldReady: bool, holes: var UiHoles) =
+  ## In paint order, as `emit` walks: each `<Scene>` and `<yield />`, then
+  ## whether anything painted after it lands on it.
+  template b: untyped = n.box
+  let op = opacity * b.opacity
+  if b.display == diNone or op <= 0:
+    return
+  let
+    x = round(ox + n.x)
+    y = round(oy + n.y)
+    w = round(ox + n.x + n.size.x) - x
+    h = round(oy + n.y + n.size.y) - y
+  if n.kind != ukBox or b.bg.a > 0 or b.gradient > 0 or b.border[0] + b.border[1] + b.border[2] + b.border[3] > 0:
+    for i in 0 ..< holes.count:
+      template hole: untyped = holes.items[i]
+      if x < hole.x + hole.w and x + w > hole.x and y < hole.y + hole.h and y + h > hole.y:
+        hole.clean = false
+  if n.kind == ukImage and n.src.tag == "Scene":
+    let
+      yields = n.src.attr("id") == SceneYieldId
+      cw = w - b.padX
+      ch = h - b.padY
+    if cw <= 0 or ch <= 0 or holes.count == MaxHoles or (yields and not yieldReady):
+      return
+    if yields:
+      if holes.firstYield > 0:
+        # The same scene in two places is drawn as pictures.
+        holes.items[holes.firstYield - 1].clean = false
+        return
+      holes.firstYield = holes.count + 1
+    holes.items[holes.count] = UiHole(x: x + b.pad[3] + b.border[3], y: y + b.pad[0] + b.border[0], w: cw, h: ch,
+      clean: op >= 1 and not scrolled and n.x >= 0 and n.y >= 0)
+    inc holes.count
+    return
+  if n.kind != ukBox:
+    return
+  # A box that clips and has nothing out of sight clips nothing.
+  let moves = scrolled or (b.overflowX != ovVisible or b.overflowY != ovVisible) and (n.maxX > 0 or n.maxY > 0)
+  for pass in [false, true]:
+    for c in n.children:
+      if c.box.absolute == pass:
+        c.seekHoles(x, y, op, moves, yieldReady, holes)
+
+proc seekHoles*(memo: UiMemo, input: UiInput, yieldReady: bool): UiHoles =
+  ## Where the embedded scenes of the UI just laid out sit, in its own pixels,
+  ## and which can be holes: fully opaque, nothing painted over them, not in
+  ## anything that scrolls, and for `<yield />` only one and a scene to wrap. A
+  ## popup or a held key's accents can land on any, so a UI showing one is drawn
+  ## the slow way until it goes.
+  if memo.isNil or memo.root.isNil:
+    return
+  memo.root.seekHoles(0, 0, 1, false, yieldReady, result)
+  if input.open > 0 or input.accents > 0:
+    for i in 0 ..< result.count:
+      result.items[i].clean = false
+
+proc indexAt*(holes: UiHoles, x, y: float32): int =
+  ## The clean hole at this place in the UI, -1 for none.
+  for i in 0 ..< holes.count:
+    if holes.items[i].clean and abs(holes.items[i].x - x) < 0.5 and abs(holes.items[i].y - y) < 0.5:
+      return i
+  -1
 
 {.pop.}

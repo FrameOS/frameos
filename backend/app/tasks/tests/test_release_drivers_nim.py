@@ -120,7 +120,7 @@ def test_release_waveshare_variant_setup_lives_in_generated_driver():
 def test_waveshare_epaper_drivers_are_c_with_nim_bindings():
     # Every ePaper panel is the vendor/FrameOS C driver compiled through its
     # c2nim binding; the generated driver wires the shared DEV_Config HAL.
-    for variant_key in ("EPD_7in3e", "EPD_4in0e", "EPD_4in01f", "EPD_13in3e"):
+    for variant_key in ("EPD_7in3e", "EPD_4in0e", "EPD_4in01f", "EPD_13in3e", "EPD_9in7e"):
         binding = (
             Path(__file__).resolve().parents[4]
             / "frameos" / "src" / "drivers" / "waveshare" / "ePaper" / f"{variant_key}.nim"

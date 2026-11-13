@@ -333,6 +333,7 @@ describe("the esp32 cloud device profile", () => {
     // Button actions (the frame's event map, 2026.10.20) renders on every
     // surface from the shared list below the cloud blocks.
     const esp32Sections = [
+      "frame-settings-layouts",
       "frame-settings-power",
       "frame-settings-palette",
       "frame-settings-colors",
@@ -776,7 +777,7 @@ describe("the Add scene drawer's action stack", () => {
   // surfaces have is easier to explain than one that is missing.
   it("offers every add-scene action on the on-device panel", () => {
     expect(addSceneActionIsAllowed("frameAdmin", "generate")).toBe(true);
-    for (const action of ["blank", "splitScreen", "upload", "starred"] as const) {
+    for (const action of ["blank", "splitScreen", "layout", "upload", "starred"] as const) {
       expect(addSceneActionIsAllowed("frameAdmin", action)).toBe(true);
     }
   });
@@ -836,11 +837,11 @@ describe("virtual frames on the cloud", () => {
     expect(frameMenuActionIsAllowed("cloud", "updateFirmware", piFrame)).toBe(true);
   });
 
-  it("links the two settings sections it has headings for", () => {
+  it("links the settings sections it has headings for", () => {
     const linked = allowedFrameSettingsSections.cloud.filter((section) =>
       frameSettingsSectionIsAllowed("cloud", section, virtualFrame),
     );
-    expect([...linked].sort()).toEqual(["frame-settings-telemetry", "frame-settings-virtual"]);
+    expect([...linked].sort()).toEqual(["frame-settings-layouts", "frame-settings-telemetry", "frame-settings-virtual"]);
   });
 
   it("links the Virtual frame section on the backend for a virtual frame alone", () => {

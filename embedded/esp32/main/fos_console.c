@@ -101,6 +101,11 @@ typedef enum {
 /* The channel whose command is executing right now (commands run on the
  * console task, one at a time), so usb_api payload reads follow it. */
 static fos_console_channel_t s_active_channel = FOS_CONSOLE_CHANNEL_NONE;
+/* The command running ended on CR (a terminal's or a script's "\r\n"), and
+ * the first byte read after it, when usb_api_ready read one that was not the
+ * LF it looked for (-1: none). */
+static bool s_line_cr = false;
+static int s_payload_first = -1;
 
 /* Up to len bytes from one channel, waiting at most ticks for the first;
  * returns the count, 0 on timeout, -1 for a channel this build lacks. */
@@ -251,6 +256,11 @@ static int cmd_status(int argc, char **argv)
     printf("scaling_mode: %s\n", config->scaling_mode);
     printf("render_scale: %g%s\n", config->render_scale_milli / 1000.0,
            config->render_scale_milli == 0 ? " (automatic)" : "");
+    /* The frame page behind the gear of the settings on the screen; the
+     * unlock is this console's own, no plane sets it. */
+    printf("frame_page:  %s (frame_settings_on_screen=%d settings_unlock=%d)\n",
+           fos_config_frame_page_offered() ? "offered" : "off", config->frame_settings_on_screen ? 1 : 0,
+           config->settings_unlock ? 1 : 0);
     printf("time_zone:   %s\n", config->time_zone[0] ? config->time_zone : "(UTC)");
     printf("tz_data:     %s\n", !config->time_zone[0] ? "UTC0"
                                   : fos_tz_slice_missing() ? "(no slice yet; fetched from tz.frameos.net when online)"
@@ -341,7 +351,8 @@ static int cmd_status(int argc, char **argv)
                fos_codec_has_mic() ? "es7210 microphone" : (fos_codec_has_speaker() ? "" : "no chip answered"), codec);
     }
     fos_touch_print_status();
-    printf("cpu:         %lu MHz\n", (unsigned long)(esp_clk_cpu_freq() / 1000000));
+    printf("cpu:         %lu MHz (cpu_mode %s)\n", (unsigned long)(esp_clk_cpu_freq() / 1000000),
+           fos_config_cpu_mode_name(config->cpu_mode));
     printf("nim:         %s\n", frameos_nim_info());
     printf("renders:     %lu (last %lld ms)\n",
            (unsigned long)fos_client_render_count(), fos_client_last_render_ms());
@@ -522,14 +533,15 @@ static int cmd_set(int argc, char **argv)
 {
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
-               "hostname|cloud_wsurl|hardware|panel|render_mode|rotate|scaling_mode|render_scale|time_zone|"
+               "hostname|cloud_wsurl|hardware|panel|render_mode|rotate|scaling_mode|render_scale|"
+               "frame_settings_on_screen|settings_unlock|time_zone|"
                "interval|max_http_response_bytes|spill_force|debug|fusion|server_send_logs|"
                "allow_local_network|admin_auth|admin_user|admin_pass|tls_enable|tls_port|"
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
-               "deep_sleep|deep_sleep_on_battery|wake_check|wake_schedule|"
-               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|mic_pins|voice_chat|"
-               "led_pin|led_type|i2c_buses|touch_pins|codec_pins|"
+               "deep_sleep|deep_sleep_on_battery|wake_check|awake_input|wake_schedule|"
+               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|touch_beep|mic_pins|voice_chat|"
+               "cpu_mode|led_pin|led_type|i2c_buses|touch_pins|codec_pins|"
                "pins|gpio_buttons|ap_psk> "
                "<value...>\n");
         return 1;
@@ -775,6 +787,36 @@ static int cmd_set(int argc, char **argv)
                * wake every 15 min for cloud commands (renders still follow the
                * scene's own interval). On USB power it stays connected. */
               1, 900 },
+            /* Seeed XIAO ePaper Display Boards (a XIAO ESP32-S3 Plus on the
+             * board; Seeed's schematics and Seeed_GFX2): panel power GPIO43,
+             * VBAT ÷2 on GPIO1. The EE02 is the E1004's T133A01 and the EE03
+             * the E1003's ED103TC2 + IT8951 (answering on MISO GPIO8, the dc
+             * slot), with the tuning chosen by these names in the display
+             * component; the EE03's SHT40 comes from fos_board. The EE04 and
+             * EE05 take many 24-pin panels: a `set panel` after this one
+             * picks another. The EE05 differs: KEY3 GPIO8, battery switch
+             * GPIO39. */
+            { "seeed_xiao_ee02", "EPD_13in3e",
+              "rst=38,dc=10,cs=44,cs2=41,busy=4,sck=7,mosi=9,pwr=43",
+              "2:KEY1\n3:KEY2\n5:KEY3",
+              1, 2.0f, 6, 0, 0 },
+            { "seeed_xiao_ee03", "EPD_10in3",
+              "rst=38,dc=8,cs=44,cs2=-1,busy=4,sck=7,mosi=9,pwr=43",
+              "2:KEY1\n3:KEY2\n5:KEY3",
+              1, 2.0f, 6, 0, 0 },
+            { "seeed_xiao_ee04", "EPD_7in5_V2",
+              "rst=38,dc=10,cs=44,cs2=-1,busy=4,sck=7,mosi=9,pwr=43",
+              "2:KEY1\n3:KEY2\n5:KEY3",
+              1, 2.0f, 6, 0, 0 },
+            { "seeed_xiao_ee05", "EPD_7in5_V2",
+              "rst=38,dc=10,cs=44,cs2=-1,busy=4,sck=7,mosi=9,pwr=43",
+              "2:KEY1\n3:KEY2\n8:KEY3",
+              1, 2.0f, 39, 0, 0 },
+            /* Seeed XIAO 7.5" ePaper Panel (a XIAO ESP32-C3: thin client). */
+            { "seeed_xiao_epaper_7in5", "EPD_7in5_V2",
+              "rst=2,dc=5,cs=3,cs2=-1,busy=4,sck=8,mosi=10,pwr=-1",
+              "9:BOOT",
+              -1, 2.0f, -1, 0, 0 },
             /* Elecrow CrowPanel 5.79" (ESP32-S3-WROOM-1-N8R8). */
             { "elecrow_crowpanel_5in79", "EPD_5in79",
               "rst=47,dc=46,cs=45,cs2=-1,busy=48,sck=12,mosi=11,pwr=-1",
@@ -812,7 +854,7 @@ static int cmd_set(int argc, char **argv)
             }
             /* What the board's buttons do whatever scene shows (a reTerminal's
              * arrows held walk the scenes); a control plane's push replaces it. */
-            strlcpy(config->event_map, fos_board_event_map(presets[i].name), sizeof(config->event_map));
+            fos_board_event_map(presets[i].name, config->event_map, sizeof(config->event_map));
 
             /* The board's microphone, or none: a preset switch from an E1002
              * to an E1004 must not leave a PDM clock on the E1004's panel
@@ -925,6 +967,15 @@ static int cmd_set(int argc, char **argv)
      * no restart. */
     else if (strcmp(key, "allow_local_network") == 0)
         config->allow_local_network = atoi(value) != 0;
+    /* The frame page of the settings on the screen, as a control plane sets
+     * it; the next push from one sets it again. */
+    else if (strcmp(key, "frame_settings_on_screen") == 0)
+        config->frame_settings_on_screen = atoi(value) != 0;
+    /* 1: the frame page is offered whatever the control plane says, until
+     * set back to 0 here. The way back in for a frame whose page was turned
+     * off and whose Wi-Fi then broke (a Pi's is a file on its boot partition). */
+    else if (strcmp(key, "settings_unlock") == 0)
+        config->settings_unlock = atoi(value) != 0;
     else if (strcmp(key, "assets_path") == 0) {
         if (!fos_assets_mount_point_valid(value)) {
             printf("bad assets_path, want an absolute mount point of at most %d bytes "
@@ -957,11 +1008,23 @@ static int cmd_set(int argc, char **argv)
         if (seconds > 0 && seconds < 60) seconds = 60;
         config->wake_check_sec = seconds;
     }
+    /* Seconds a press or a tap keeps a deep-sleeping frame awake (0 = none). */
+    else if (strcmp(key, "awake_input") == 0) {
+        uint32_t seconds = strtoul(value, NULL, 10);
+        config->awake_after_input_sec = seconds > 3600 ? 3600 : seconds;
+    }
     else if (strcmp(key, "wake_schedule") == 0) config->wake_schedule = atoi(value) != 0;
     else if (strcmp(key, "battery_pin") == 0 || strcmp(key, "battery_enable_pin") == 0 ||
              strcmp(key, "buzzer_pin") == 0 || strcmp(key, "led_pin") == 0) {
         int pin = atoi(value);
-        const char *why = pin >= 0 ? fos_config_gpio_pin_reserved(pin) : NULL;
+        int held = strcmp(key, "battery_pin") == 0          ? config->battery_pin
+                   : strcmp(key, "battery_enable_pin") == 0 ? config->battery_enable_pin
+                   : strcmp(key, "buzzer_pin") == 0         ? config->buzzer_pin
+                                                            : config->led_pin;
+        /* The pin this key already holds is claimed by its own driver: asking
+         * for it again is no conflict (a provisioning plan replayed on a
+         * running frame: GPIO45, the reTerminal's buzzer, was refused). */
+        const char *why = pin >= 0 && pin != held ? fos_config_gpio_pin_reserved(pin) : NULL;
         if (why != NULL) {
             printf("refusing %s GPIO %d: %s\n", key, pin, why);
             return 1;
@@ -973,6 +1036,15 @@ static int cmd_set(int argc, char **argv)
          * new LED (fos_led.c). */
         else if (strcmp(key, "buzzer_pin") == 0) config->buzzer_pin = (int8_t)pin;
         else config->led_pin = (int8_t)pin;
+    }
+    else if (strcmp(key, "cpu_mode") == 0) {
+        uint8_t mode;
+        if (!fos_config_parse_cpu_mode(value, &mode)) {
+            printf("cpu_mode must be auto, battery or performance\n");
+            return 1;
+        }
+        config->cpu_mode = mode;
+        printf("cpu_mode saved; takes effect at the next boot\n");
     }
     else if (strcmp(key, "led_type") == 0) {
         uint8_t type;
@@ -1049,6 +1121,7 @@ static int cmd_set(int argc, char **argv)
         printf("%s saved; takes effect at the next boot\n", key);
     }
     else if (strcmp(key, "voice_chat") == 0) config->voice_chat = atoi(value) != 0;
+    else if (strcmp(key, "touch_beep") == 0) config->touch_beep = atoi(value) != 0;
     else if (strcmp(key, "battery_divider") == 0) config->battery_divider = (float)atof(value);
     else if (strcmp(key, "pins") == 0) {
         if (fos_config_parse_pins(value, &config->pins) != ESP_OK) {
@@ -1282,6 +1355,7 @@ static int cmd_display_test(int argc, char **argv)
            mode, fos_display_selected_panel(), width, height, (int)format, (unsigned)len);
     esp_err_t err = fos_display_blit(buf, len);
     fos_framebuffer_release(buf);
+    fos_client_note_panel_drawn(); /* the next render refreshes over it */
     printf("display_test: %s (%d)\n", err == ESP_OK ? "ESP_OK" : esp_err_to_name(err), (int)err);
     return err == ESP_OK ? 0 : 1;
 }
@@ -1320,26 +1394,6 @@ static int cmd_sd(int argc, char **argv)
     return err == ESP_OK ? 0 : 1;
 }
 
-/* Two OTA paths exist and a board only ever has one of them: the backend one
- * (manifest under backend_url, authenticated with the frame api_key, applied
- * by the early updater after a reboot) and the cloud one (device-authed
- * manifest + minisign verification, fos_ota_request_cloud_update). An enrolled
- * cloud frame has no backend_url/api_key at all, so sending it down the
- * backend path could only ever answer ESP_ERR_INVALID_STATE — which read like
- * "OTA is broken" rather than "wrong path". Pick by what this board is. */
-static esp_err_t ota_request_for_control_plane(const char **plane_out)
-{
-    const fos_config_t *config = fos_config();
-    bool backend_ready = config->backend_url[0] && config->frame_id != 0 && config->api_key[0];
-    if (!backend_ready && fos_cloud_frame_id()[0]) {
-        if (plane_out) *plane_out = "cloud";
-        fos_ota_request_cloud_update();
-        return ESP_OK;
-    }
-    if (plane_out) *plane_out = "backend";
-    return fos_ota_request_check();
-}
-
 static int cmd_ota(int argc, char **argv)
 {
     const char *plane = "backend";
@@ -1352,7 +1406,7 @@ static int cmd_ota(int argc, char **argv)
         printf("usage: ota [downgrade]\n");
         return 1;
     }
-    esp_err_t err = ota_request_for_control_plane(&plane);
+    esp_err_t err = fos_ota_request_for_control_plane(&plane);
     /* CONFIG_ESP_ERR_TO_NAME_LOOKUP is off (flash budget), so every code —
      * ESP_OK included — would print as "UNKNOWN ERROR" here. */
     if (err == ESP_OK) {
@@ -1411,6 +1465,19 @@ static void usb_api_error(const char *name, esp_err_t err, const char *message)
 
 static void usb_api_ready(const char *name)
 {
+    /* A command sent "...\r\n" ran at the CR (fos_console_line.h), and its LF
+     * is still on the wire: read as the payload's first byte, it pushed the
+     * payload's last byte out of the read. An upload lost its closing `}`
+     * that way and was stored as it came (2026-11-08). Drained here, before
+     * READY, so it cannot be payload: the host sends none before READY. */
+    s_payload_first = -1;
+    if (s_line_cr) {
+        s_line_cr = false;
+        uint8_t ch;
+        if (console_channel_read(s_active_channel, &ch, 1, pdMS_TO_TICKS(5)) == 1 && ch != '\n') {
+            s_payload_first = ch; /* a host that did not wait: its first byte */
+        }
+    }
     printf("%s %s\n", USB_API_READY, name);
     fflush(stdout);
 }
@@ -1448,6 +1515,11 @@ static bool usb_api_read_exact_locked(uint8_t *buf, size_t len, TickType_t timeo
     size_t off = 0;
     TickType_t start = xTaskGetTickCount();
     if (bytes_read) *bytes_read = 0;
+    if (s_payload_first >= 0 && len > 0) {
+        buf[off++] = (uint8_t)s_payload_first;
+        if (bytes_read) *bytes_read = off;
+    }
+    s_payload_first = -1;
     while (off < len) {
         /* The payload follows the command on the same channel. */
         size_t remaining = len - off;
@@ -1540,7 +1612,7 @@ static void usb_api_payload_base64(const char *name, const uint8_t *data, size_t
 static int cmd_usb_api(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene|scene-payload|ota|scene-state|logs|set|wifi|wifi-scan|restart|factory-reset|list-assets|remount-sd|format-sd> ...\n");
+        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene-list|scene-get|scene-put|scene-delete|scene|scene-payload|ota|scene-state|logs|set|wifi|wifi-scan|restart|factory-reset|list-assets|remount-sd|format-sd> ...\n");
         return 1;
     }
 
@@ -1598,7 +1670,7 @@ static int cmd_usb_api(int argc, char **argv)
     }
 
     if (strcmp(subcommand, "ota") == 0) {
-        esp_err_t err = ota_request_for_control_plane(NULL);
+        esp_err_t err = fos_ota_request_for_control_plane(NULL);
         if (err == ESP_OK) {
             usb_api_ok(subcommand);
             return 0;
@@ -1813,7 +1885,11 @@ static int cmd_usb_api(int argc, char **argv)
         return 0;
     }
 
-    if (strcmp(subcommand, "upload-scenes") == 0) {
+    /* upload-scenes <len>: the whole set. scene-put <len> [activate]: one
+     * scene added or replaced, the rest of the frame's scenes not read,
+     * written or sent; rendered only when it shows (activate shows it). */
+    bool scene_put = strcmp(subcommand, "scene-put") == 0;
+    if (scene_put || strcmp(subcommand, "upload-scenes") == 0) {
         if (argc < 3) {
             usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "missing byte length");
             return 1;
@@ -1837,15 +1913,49 @@ static int cmd_usb_api(int argc, char **argv)
             return 1;
         }
         body[len] = '\0';
-        esp_err_t err = fos_http_store_uploaded_scenes_payload((const char *)body, len);
+        char scene_id[FOS_USB_API_MAX_SCENE_ID];
+        bool activate = scene_put && argc >= 4 && strcmp(argv[3], "activate") == 0;
+        /* Shown at once: written as fast as flash goes, not paced around renders. */
+        esp_err_t err = scene_put ? fos_scenes_put((const char *)body, len, FOS_SCENES_SOURCE_LOCAL, activate,
+                                                   scene_id, sizeof(scene_id))
+                                  : fos_http_store_uploaded_scenes_payload((const char *)body, len);
         free(body);
         if (err != ESP_OK) {
             const char *detail = fos_scenes_last_error();
             usb_api_error(subcommand, err, (detail && detail[0]) ? detail : "scene upload failed");
             return 1;
         }
-        fos_client_render_now();
+        if (activate) fos_scenes_select(scene_id);
+        if (activate || !scene_put) fos_client_render_now();
         usb_api_ok(subcommand);
+        return 0;
+    }
+
+    /* scene-list, scene-get <id>, scene-delete <id>: one scene at a time. */
+    bool scene_get = strcmp(subcommand, "scene-get") == 0;
+    bool scene_delete = strcmp(subcommand, "scene-delete") == 0;
+    if (scene_get || scene_delete || strcmp(subcommand, "scene-list") == 0) {
+        if ((scene_get || scene_delete) && argc < 3) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "missing scene id");
+            return 1;
+        }
+        if (scene_delete) {
+            esp_err_t err = fos_scenes_delete(argv[2], FOS_SCENES_SOURCE_LOCAL);
+            if (err != ESP_OK) {
+                usb_api_error(subcommand, err, fos_scenes_last_error());
+                return 1;
+            }
+            usb_api_ok(subcommand);
+            return 0;
+        }
+        size_t len = 0;
+        char *json = scene_get ? fos_scenes_get_json(argv[2], &len) : fos_scenes_list_json();
+        if (!json) {
+            usb_api_error(subcommand, ESP_ERR_NOT_FOUND, "no such scene");
+            return 1;
+        }
+        usb_api_payload_text(subcommand, json);
+        free(json);
         return 0;
     }
 
@@ -2174,7 +2284,9 @@ static void console_feed_byte(console_line_state_t *state, uint8_t ch)
     switch (fos_console_line_feed(&state->assembler, ch)) {
         case FOS_CONSOLE_LINE_READY:
             s_active_channel = state->channel;
+            s_line_cr = state->assembler.cr;
             run_console_line(state->line);
+            s_line_cr = false;
             s_active_channel = FOS_CONSOLE_CHANNEL_NONE;
             console_prompt();
             break;

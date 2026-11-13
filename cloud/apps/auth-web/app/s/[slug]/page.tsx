@@ -22,6 +22,7 @@ import {
   getFramesUrl,
   getScenesBaseUrl,
   getStorePath,
+  getStoreUrl,
   hasDatabaseUrl,
 } from "../../../src/lib/env";
 import { formatDate, formatDateTime } from "../../../src/lib/format";
@@ -36,13 +37,25 @@ import {
   socialDescription,
 } from "../../../src/lib/social-description";
 import { listingForVersion } from "../../../src/lib/store-listing";
+import { previewDeviceFor } from "../../../../../../frontend/src/sceneWorkspace/lib/preview-devices";
+import { storeEmbedFor } from "../../../src/lib/store-embed";
 import { imageSetForVersion, imageSetForVersionId } from "../../../src/lib/store-images";
 
 export const dynamic = "force-dynamic";
 
 type ScenePageProps = {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ version?: string; share?: string }>;
+  searchParams: Promise<{
+    version?: string;
+    share?: string;
+    // ?embed=1: the workspace alone, for frameos.net's front page
+    // (src/lib/store-embed.ts), with the file, device and memory limit
+    // it opens on.
+    embed?: string;
+    file?: string;
+    device?: string;
+    memory?: string;
+  }>;
 };
 
 // Discord paints a link embed's left edge in the page's theme-color; the
@@ -138,7 +151,9 @@ export default async function ScenePage({
   searchParams,
 }: ScenePageProps) {
   const { slug } = await params;
-  const { version: versionParam, share: shareParam } = await searchParams;
+  const query = await searchParams;
+  const { version: versionParam, share: shareParam } = query;
+  const embed = storeEmbedFor(query);
   if (!hasDatabaseUrl()) {
     redirect("/");
   }
@@ -317,6 +332,43 @@ export default async function ScenePage({
 
   // Everything the workspace's Info panel shows, as plain JSON (the
   // workspace is a client component).
+  // Embedded on another page: the workspace alone, for a public scene only
+  // (next.config.ts lets frameos.net frame `?embed=1`). Nothing is saved or
+  // spent in the frame: Sign in, Fork, Install and the AI open this page in
+  // the whole window, with the visitor's edits.
+  if (embed) {
+    if (isPrivate || scene.status !== "active" || pinnedVersion) {
+      notFound();
+    }
+    const device = previewDeviceFor(embed.device);
+    return (
+      <main className="content ph-no-capture">
+        <SceneEditorModal
+          canFork={false}
+          canPreview
+          canRemix
+          canSave={false}
+          description={shownListing.description}
+          downloadUrl={downloadHref}
+          embed={{ ...embed, pageUrl, storeUrl: getStoreUrl() }}
+          height={device?.height ?? latestImages[0]?.height ?? null}
+          loginUrl={new URL("/login", getCloudBaseUrl()).toString()}
+          sceneId={scene.id}
+          signedIn={Boolean(session?.accountId)}
+          // The bar's version list (each opens on the scene's page), and what
+          // a draft taken there is based on, as on the page itself.
+          versions={versions.map((version) => ({
+            createdAt: version.createdAt.toISOString(),
+            message: version.message,
+            version: version.version,
+            yankedAt: version.yankedAt ? version.yankedAt.toISOString() : null,
+          }))}
+          width={device?.width ?? latestImages[0]?.width ?? null}
+        />
+      </main>
+    );
+  }
+
   const info: SceneInfoData = {
     framesUrl,
     images: latestImages.map((image) => image.sha256),

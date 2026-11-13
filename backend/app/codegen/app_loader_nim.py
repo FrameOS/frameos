@@ -647,7 +647,7 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
     # Scalar fields are described once, in data, and read/written by the two
     # shared procs in frameos/app_config.nim. Only the field types that need
     # real code — images, raw JSON, seqs, spools — still get their own lines.
-    raise_unknown = 'raise newException(ValueError, "Unknown field: " & field)'
+    raise_unknown = "raiseUnknownField(field)"
     if spec_lines:
         spec_block = "const configFields = [{0}{1}{0}]{0}{0}".format(
             newline, newline.join(spec_lines)
@@ -685,20 +685,13 @@ import ./app as app_module
     node: DiagramNode,
     scene: FrameScene,
 ): AppRoot =
-  let params = node.data["config"]
-  if params.kind != JObject:
-    raise newException(Exception, "Invalid config format")
+  let params = loaderParams(node)
   {config_binding} config = app_module.AppConfig(
 {newline.join(app_config_lines)}
   )
 {apply_params}
-  result = app_module.App(
-    appConfig: config,
-    nodeName: node.data{{"name"}}.getStr(),
-    nodeId: node.id,
-    scene: scene,
-    frameConfig: scene.frameConfig,
-  )
+  result = app_module.App(appConfig: config)
+  initAppRoot(result, node, scene)
 {init_call}
 
 proc setField*(self: AppRoot, field: string, value: Value) =

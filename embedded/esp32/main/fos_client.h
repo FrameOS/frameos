@@ -26,6 +26,9 @@ void fos_client_render_recovery_boot(void);
 bool fos_client_render_paused(void);
 void fos_client_clear_render_pause(void);
 void fos_client_render_now(void);
+/* Someone is tapping or pressing (the input hold, fos_animation.h): slow
+ * chores on any task wait. */
+bool fos_client_input_held(void);
 /* Render now because somebody asked (a render verb, the console, a button,
  * the schedule): unlike fos_client_render_now, the scenes inside a split all
  * run, also those whose own interval has not come round. */
@@ -95,10 +98,65 @@ esp_err_t fos_client_snapshot_copy(uint8_t *out, size_t out_len, int *width, int
 bool fos_client_snapshot_acquire(uint32_t timeout_ms, const uint8_t **buf, int *width,
                                  int *height, fos_pixel_format_t *format, size_t *len);
 void fos_client_snapshot_release(void);
+/* Which render the snapshot is, between acquire and release: a stream that
+ * lets go between rows checks it is still reading the same picture. */
+uint32_t fos_client_snapshot_render_count_locked(void);
 /* True while a render is still owed: this boot's first pass has not finished,
  * or a render signal is queued. An image_get arriving now waits for it
  * instead of answering "no image" seconds before there is one. */
 bool fos_client_render_pending(void);
+/* A load starts, on the render task, with when it was asked for (a FreeRTOS
+ * tick): the LCD's loading mark, or e-paper's quiet taps when someone at the
+ * frame asked (fos_loading_taps_wanted). `end` for one that shows no picture
+ * and after every render. */
+void fos_client_loading_begin(uint32_t since_tick);
+void fos_client_loading_end(void);
 /* True while a render pass is rendering (fetches, scene, dither, panel
  * refresh); the OTA waits it out before it downloads (fos_ota.c). */
 bool fos_client_render_in_flight(void);
+/* What a scene (app.frame) and the frame page are told: the battery's charge
+ * 0..100 as the last metrics sample believed it, -1 without a battery; the
+ * Wi-Fi signal in dBm, 0 when not connected. Cheap enough to ask per render. */
+int fos_client_battery_percent(void);
+int fos_client_wifi_rssi(void);
+
+/* Rendering on the server (docs/server-rendering.md). Whether this board can
+ * run its scenes itself: the runtime is compiled in and the panel fits the
+ * module's PSRAM. main.c says so once, at boot, before any network. */
+void fos_client_set_local_render_capable(bool capable);
+bool fos_client_local_render_capable(void);
+/* "local" or "remote": where this frame's scenes run by its setting (a board
+ * without a runtime is always remote), as hardware.renderMode reports it. */
+const char *fos_client_render_mode_name(void);
+/* A plane changed the frame's render mode: a refusal it gave before is
+ * forgotten and the next pass renders the new way, now. Any task. */
+void fos_client_render_mode_changed(void);
+/* Whether this pass runs the scene here (the frame's setting, a board able
+ * to, and no refusal from the plane in force), else its plane renders it.
+ * Any task. */
+bool fos_client_renders_locally(void);
+/* Rendered on the server: hold one event a scene here would have heard for
+ * the next render pull (fos_render_relay.h, docs/server-rendering.md "Keys,
+ * touch and the schedule"), `origin` as the contract names it. Asks for no
+ * pull itself: fos_events.c wakes the render task, which sends what is held
+ * once the input is decided. False when it was not held. Any task. */
+bool fos_client_relay_event(const char *origin, const char *name, const char *payload_json);
+/* Rendered on the server: whether a press at this wire position (0..32767
+ * over the panel, fos_touch_wire) lands on something the picture showing
+ * does something with, by the press map its plane sent with it
+ * (docs/server-rendering.md "The click"): 1 taken, 0 not, -1 when the scene
+ * runs here (the runtime answers, frameos_nim_press_taken). Any task. */
+int fos_client_remote_press_taken(int wire_x, int wire_y);
+/* Rendered on the server: a pointer pressed (true) or lifted through the
+ * frame's HTTP API. While one is pressed the relay waits for its lift, as it
+ * waits for a finger on the glass, so the plane hears the press whole. Any
+ * task. */
+void fos_client_http_press(bool down);
+/* turnOn (1), turnOff (0), toggleScreen (-1) for a frame whose dispatcher is
+ * not here (rendered on the server): the backlight is the board's. Any task. */
+void fos_client_set_display_power(int on);
+/* Something other than a render drew the panel (the portal's screen, a
+ * console display_test): what the panel shows is no longer the last render,
+ * so the next one refreshes and asks the plane for its picture whole. Any
+ * task; the render task acts on it. */
+void fos_client_note_panel_drawn(void);

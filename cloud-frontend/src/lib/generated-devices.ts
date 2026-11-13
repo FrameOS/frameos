@@ -713,6 +713,12 @@ export const piDeviceGroups: DeviceGroup[] = [
         "height": 528
       },
       {
+        "value": "waveshare.EPD_9in7e",
+        "label": "Waveshare 9.7\" (E) 1120x784 Spectra 6 Color",
+        "width": 1120,
+        "height": 784
+      },
+      {
         "value": "waveshare.EPD_10in2b",
         "label": "Waveshare 10.2\" (B) 960x640 Black/White/Red",
         "width": 960,
@@ -1107,6 +1113,10 @@ export const esp32Panels: { key: string; label: string }[] = [
   {
     "key": "EPD_7in5b_HD",
     "label": "Waveshare 7.5\" (B HD) 880x528 Black/White/Red"
+  },
+  {
+    "key": "EPD_9in7e",
+    "label": "Waveshare 9.7\" (E) 1120x784 Spectra 6 Color"
   },
   {
     "key": "EPD_10in2b",

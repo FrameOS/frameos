@@ -54,6 +54,15 @@ block test_a_wire_position_becomes_a_scene_pixel_on_every_pointer_event:
   doAssert output.names == @[evPointerDown]
   doAssert output[0].payload["x"].getInt() == 399 and output[0].payload["button"].getInt() == 0
   doAssert output[0].payload["buttons"].getInt() == 1
+  # A move says what is held: a slider in a JSX UI follows the pointer only
+  # while it is set (docs/jsx-ui.md "Events"); a hover is 0, as above.
+  output.setLen(0)
+  state.applyDriverInput(abs(17, PointerWireMax div 4, PointerWireMax div 2), eoDriver, at(20), output)
+  doAssert output.names == @[evPointerMove] and output[0].payload["buttons"].getInt() == 1
+  output.setLen(0)
+  state.applyDriverInput(up(17, 0), eoDriver, at(30), output)
+  state.applyDriverInput(abs(17, PointerWireMax div 3, PointerWireMax div 2), eoDriver, at(40), output)
+  doAssert output[^1].name == evPointerMove and output[^1].payload["buttons"].getInt() == 0
 
 block test_the_position_follows_rotation:
   # A 480x800 panel rotated 90: the scene is 800x480, and the top-right of
@@ -440,13 +449,12 @@ block test_a_stamped_touch_is_timed_by_its_stamps:
     "pointerType": "touch", "button": 0, "buttons": 0, "atMs": base + 6200}, eoDriver, at(7000), output)
   doAssert output.names == @[evPointerDown, evPointerUp, evLongPress]
   doAssert output[2].payload["durationMs"].getInt() == 1200
-  # Held 700 ms: under a second, a tap, as a key's press is (`tapMs` is
-  # `longPressMs`, the buttons' second).
+  # Held 400 ms: under half a second, a tap (`tapMs` is `longPressMs`).
   output.setLen(0)
   discard state.applyNamedInput(evPointerDown, %*{"x": 8000, "y": 8000, "pointerId": 1,
     "pointerType": "touch", "button": 0, "buttons": 1, "atMs": base + 8000}, eoDriver, at(9000), output)
   discard state.applyNamedInput(evPointerUp, %*{"x": 8000, "y": 8000, "pointerId": 1,
-    "pointerType": "touch", "button": 0, "buttons": 0, "atMs": base + 8700}, eoDriver, at(9000), output)
+    "pointerType": "touch", "button": 0, "buttons": 0, "atMs": base + 8400}, eoDriver, at(9000), output)
   doAssert output.names == @[evPointerDown, evPointerUp, evTap]
 
 block test_a_press_at_an_edge_is_the_frames_swipe_or_the_scenes_press:

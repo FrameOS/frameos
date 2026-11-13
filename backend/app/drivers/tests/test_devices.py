@@ -13,6 +13,7 @@ from app.drivers.devices import (
 from app.drivers.waveshare import (
     BOOT_CONFIG_LINES_BY_VARIANT,
     BOOT_CONFIG_SPI_VARIANTS,
+    convert_waveshare_source,
     get_variant_keys_for,
 )
 
@@ -221,3 +222,18 @@ def test_boot_config_spi_variants_enable_spi0_without_kernel_chip_selects():
             "dtoverlay=spi0-0cs",
             "#dtparam=spi=on",
         ]
+
+
+def test_waveshare_9in7e_is_a_spectra6_panel_on_the_generic_spi_hat():
+    # The 9.7" (E) HAT+ (EL097TF1) is one controller behind one chip select,
+    # 4 bits a pixel with the Spectra 6 indexes, cleared to white.
+    variant = convert_waveshare_source("EPD_9in7e")
+    assert (variant.width, variant.height) == (1120, 784)
+    assert variant.color_option == "SpectraSixColor"
+    assert variant.init_function == "EPD_9IN7E_Init"
+    assert variant.display_function == "EPD_9IN7E_Display"
+    assert variant.clear_function == "EPD_9IN7E_Clear"
+    assert variant.clear_args == "1.uint8"
+    assert variant.sleep_function == "EPD_9IN7E_Sleep"
+    assert "EPD_9in7e" not in BOOT_CONFIG_SPI_VARIANTS
+    assert device_dimensions("waveshare.EPD_9in7e") == (1120, 784)

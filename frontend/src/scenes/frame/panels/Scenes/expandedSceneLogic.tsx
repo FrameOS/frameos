@@ -1,13 +1,10 @@
 import { MakeLogicType, actions, connect, kea, key, listeners, path, props, selectors } from 'kea'
 
 import { forms } from 'kea-forms'
-import { apiFetch } from '../../../../utils/apiFetch'
 import { FrameScene, FrameType, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
-import { ACTIVATION_QUEUED_DETAIL, activationWasQueued, activationWasRedeploy, controlLogic } from './controlLogic'
-import { isCloudMode } from '../../../../utils/cloudMode'
+import { controlLogic } from './controlLogic'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
-import { socketLogic } from '../../../socketLogic'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
 import { booleanFieldValue } from '../../../../utils/booleanField'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
@@ -169,14 +166,6 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
     stateChanges: {
       defaults: {} as Record<string, any>,
       submit: async (formValues) => {
-        longRunningTasksModel.actions.startTask({
-          frameId: props.frameId,
-          kind: 'activate',
-          sceneId: props.sceneId,
-          title: 'Activating scene',
-          detail: values.scene?.name || props.sceneId,
-        })
-        controlLogic({ frameId: props.frameId }).actions.sceneActivationStarted(props.sceneId)
         const state: Record<string, any> = {}
         // Only submit fields the user can currently see, matching the
         // on-frame control page: hidden fields keep their current values
@@ -185,59 +174,23 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
           values.states[props.sceneId] ?? {},
           formValues
         )
-        try {
-          for (const field of fields) {
-            if (field.name in formValues && field.access === 'public') {
-              if (field.type === 'boolean') {
-                // "false" in the form used to fall through to a `true` default.
-                state[field.name] = booleanFieldValue(formValues[field.name] ?? field.value)
-              } else if (field.type === 'integer') {
-                state[field.name] = parseInt(formValues[field.name] ?? field.value)
-              } else if (field.type === 'float') {
-                state[field.name] = parseFloat(formValues[field.name] ?? field.value)
-              } else {
-                state[field.name] = formValues[field.name] ?? field.value
-              }
+        for (const field of fields) {
+          if (field.name in formValues && field.access === 'public') {
+            if (field.type === 'boolean') {
+              // "false" in the form used to fall through to a `true` default.
+              state[field.name] = booleanFieldValue(formValues[field.name] ?? field.value)
+            } else if (field.type === 'integer') {
+              state[field.name] = parseInt(formValues[field.name] ?? field.value)
+            } else if (field.type === 'float') {
+              state[field.name] = parseFloat(formValues[field.name] ?? field.value)
+            } else {
+              state[field.name] = formValues[field.name] ?? field.value
             }
           }
-          const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sceneId: props.sceneId, state }),
-          })
-          if (!response.ok) {
-            throw new Error('Failed to send scene activation event')
-          }
-          const body = await response.text()
-          const redeployed = activationWasRedeploy(body)
-          const queued = activationWasQueued(body)
-          controlLogic({ frameId: props.frameId }).actions.currentSceneChanged(props.sceneId)
-          socketLogic.actions.updateFrame({ id: props.frameId, active_scene_id: props.sceneId } as FrameType)
-          const name = values.scene?.name || props.sceneId
-          longRunningTasksModel.actions.finishTask({
-            frameId: props.frameId,
-            kind: 'activate',
-            sceneId: props.sceneId,
-            status: 'success',
-            detail: redeployed
-              ? `${name}: pushed, the frame shows it as soon as it syncs`
-              : queued
-              ? `${name}: ${ACTIVATION_QUEUED_DETAIL}`
-              : name,
-          })
-          if (isCloudMode() || queued) {
-            controlLogic({ frameId: props.frameId }).actions.sceneActivationSettled(props.sceneId)
-          }
-        } catch (error) {
-          controlLogic({ frameId: props.frameId }).actions.sceneActivationSettled(props.sceneId)
-          longRunningTasksModel.actions.taskFailed({
-            frameId: props.frameId,
-            kind: 'activate',
-            sceneId: props.sceneId,
-            detail: error instanceof Error ? error.message : 'Failed to activate scene',
-          })
-          throw error
         }
+        // The one activation (controlLogic): the task, the button's wait,
+        // the plane first and USB only when it cannot be reached.
+        await controlLogic({ frameId: props.frameId }).asyncActions.setCurrentScene(props.sceneId, state)
       },
     },
   })),

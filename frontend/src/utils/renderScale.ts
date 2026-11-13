@@ -12,8 +12,8 @@ import type { StateField } from '../types'
  *   a control panel can change it), else
  * - the scene's `settings.renderScale`, else
  * - the frame's (`render_scale` on both control planes, frame.json
- *   `renderScale`), where 0 is automatic: the panel's shorter edge over
- *   600 px, rounded down to a quarter, never below 1.
+ *   `renderScale`), where 0 is automatic: 1, and 2 on a 4K or larger screen
+ *   on HDMI.
  *
  * The runtime applies the same rules (`frameos/src/frameos/render_scale.nim`);
  * keep the two in step. docs/jsx-ui.md "Scale" is the spec.
@@ -22,23 +22,21 @@ import type { StateField } from '../types'
 export const RENDER_SCALE_ROLE = 'renderScale'
 export const RENDER_SCALE_LABEL = 'Scale'
 export const MAX_RENDER_SCALE = 4
-/** The shorter edge that automatic scaling treats as 1×. */
-export const AUTO_RENDER_SCALE_EDGE = 600
+const HDMI_DEVICE = 'framebuffer'
+/** The shorter edge of a 4K screen: on HDMI, from here up, automatic is 2×. */
+const HDMI_2X_EDGE = 2160
 /** The scales the settings offer; any other number up to 4 still works. */
-export const RENDER_SCALE_STEPS: readonly number[] = [1, 1.25, 1.5, 2, 2.5, 3, 4]
+/** Below 1 a layout gets more room than the panel has: everything drawn smaller. */
+export const RENDER_SCALE_STEPS: readonly number[] = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4]
 
 export const RENDER_SCALE_HELP =
   'Scenes built with JSX are laid out for a screen this many times smaller and drawn sharp at full size, so a ' +
   'scene made for a small screen fills a big one.'
 export const SCENE_RENDER_SCALE_HELP = "Overrides the frame's scale for this scene."
 
-/** The automatic scale for a panel: its shorter edge over 600 px, rounded down to a quarter, at least 1. */
-export function autoRenderScale(width: number, height: number): number {
-  const edge = Math.min(width, height)
-  if (!Number.isFinite(edge) || edge <= 0) {
-    return 1
-  }
-  return Math.max(1, Math.floor((edge / AUTO_RENDER_SCALE_EDGE) * 4) / 4)
+/** The automatic scale: 1, and 2 on a 4K or larger screen on HDMI. */
+export function autoRenderScale(width: number, height: number, device?: string | null): number {
+  return device === HDMI_DEVICE && Math.min(width, height) >= HDMI_2X_EDGE ? 2 : 1
 }
 
 /** A scale in (0, 4], or 0 for anything else (0 itself means "not set"). Lenient: forms hold numbers as strings. */
@@ -64,11 +62,11 @@ function knownSize(value: unknown): number | null {
 }
 
 /** "Automatic (2× on this panel)", or just "Automatic" when the panel's size is unknown. */
-export function automaticRenderScaleLabel(width: unknown, height: unknown): string {
+export function automaticRenderScaleLabel(width: unknown, height: unknown, device?: string | null): string {
   const w = knownSize(width)
   const h = knownSize(height)
   return w !== null && h !== null
-    ? `Automatic (${formatRenderScale(autoRenderScale(w, h))} on this panel)`
+    ? `Automatic (${formatRenderScale(autoRenderScale(w, h, device))} on this panel)`
     : 'Automatic'
 }
 
@@ -92,8 +90,13 @@ function stepOptions(current: unknown): RenderScaleOption[] {
 }
 
 /** The frame's Scale select: Automatic (value "0") and the steps. */
-export function frameRenderScaleOptions(width: unknown, height: unknown, current?: unknown): RenderScaleOption[] {
-  return [{ value: '0', label: automaticRenderScaleLabel(width, height) }, ...stepOptions(current)]
+export function frameRenderScaleOptions(
+  width: unknown,
+  height: unknown,
+  device?: string | null,
+  current?: unknown
+): RenderScaleOption[] {
+  return [{ value: '0', label: automaticRenderScaleLabel(width, height, device) }, ...stepOptions(current)]
 }
 
 /** A scene's Scale select: the frame's (value "") and the steps. */

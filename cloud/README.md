@@ -29,10 +29,11 @@ provides:
   from plain language, with every model call metered into a double-entry
   ledger (`packages/ledger`) that bills usage beyond the plan's allowance.
   Design: [`docs/accounting-todo.md`](docs/accounting-todo.md).
-- **Paid plans**: a plan catalog, plan cards on the usage page and the
-  ledger's provider-billed subscriptions (`docs/billing.md`); the payment
-  provider itself (Stripe, planned) is not wired up yet. The public price
-  list is on the product site (frameos.net/pricing). Design and go-live steps: [`docs/billing.md`](docs/billing.md).
+- **Paid plans**: a plan catalog, plan cards on the usage page, checkout,
+  plan changes, invoices and the customer portal through Stripe, with the
+  VAT Stripe Tax adds and Stripe's fees booked in the ledger. The public
+  price list is on the product site (frameos.net/pricing). Design and
+  go-live steps: [`docs/billing.md`](docs/billing.md).
 - **A Nim → JS scene converter** (`packages/scene-convert`) that turns
   compiled-era scenes into interpreted ones, as `POST /api/scenes/convert`,
   the `/nim-converter` page and a CLI.
@@ -163,7 +164,7 @@ pnpm deploy:prod
 
 `pnpm verify` runs the same lint/typecheck/test/build pass as CI's `verify`
 job, cloud-frontend included; CI then adds the three Postgres integration
-suites (`AGENTS.md`, "Cloud tests before you push"). `pnpm deploy:prod` deploys the
+suites (`AGENTS.md`, "Tests: CI is the gate, and you watch it"). `pnpm deploy:prod` deploys the
 pushed HEAD to production; see `docs/deployment.md` for the mechanics and
 rollback procedure.
 

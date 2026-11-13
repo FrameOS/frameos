@@ -435,6 +435,9 @@ async def test_scene_state_event_reaches_the_store_before_the_thin_client(async_
 
     async def forward(frame_arg, redis_arg, **kwargs):
         stored_when_forwarded.append((kwargs['path'], await redis.get(_states_key(frame))))
+        # Asked to render, and told nothing of the state (docs/server-
+        # rendering.md "Nothing to keep on the board").
+        assert kwargs['json_body'] == {}
         return 'OK'
 
     with patch('app.api.frames._forward_frame_request', side_effect=forward):
@@ -444,7 +447,7 @@ async def test_scene_state_event_reaches_the_store_before_the_thin_client(async_
             headers={'content-type': 'application/json'})
 
     assert response.status_code == 200, response.text
-    assert [path for path, _ in stored_when_forwarded] == ['/event/setSceneState']
+    assert [path for path, _ in stored_when_forwarded] == ['/event/render']
     assert json.loads(stored_when_forwarded[0][1]) == {'slides': {'index': 5}}
 
 
@@ -489,6 +492,7 @@ async def test_scene_switch_event_for_a_pico_is_pushed_after_the_store_moves(asy
             await redis.get(f'frame:{frame.id}:active_scene'),
             await redis.get(_states_key(frame)),
         ))
+        assert kwargs['json_body'] == {}
         return 'OK'
 
     with patch('app.api.frames._forward_frame_request', side_effect=forward):
@@ -500,7 +504,7 @@ async def test_scene_switch_event_for_a_pico_is_pushed_after_the_store_moves(asy
     assert response.status_code == 200, response.text
     assert len(seen_when_forwarded) == 1
     path, active, states = seen_when_forwarded[0]
-    assert path == '/event/setCurrentScene'
+    assert path == '/event/render'
     assert active in (b'other', 'other')
     assert json.loads(states) == {'other': {'index': 4}}
     assert db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id).count() == 0
@@ -525,6 +529,9 @@ async def test_preview_on_a_pico_is_what_its_render_pull_runs_until_a_switch(
             headers={'content-type': 'application/json'})
         assert response.status_code == 200, response.text
         forward.assert_awaited_once()
+        # The previewed scenes stay here; the board is asked to render.
+        assert forward.await_args.kwargs['path'] == '/event/render'
+        assert forward.await_args.kwargs['json_body'] == {}
 
     calls: list = []
     monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', scene_renderer(calls))
@@ -667,7 +674,9 @@ async def test_a_custom_event_for_a_pico_waits_for_its_next_pull(
         response = await async_client.post(
             f'/api/frames/{frame.id}/event/wiggle', json={'times': 3}, headers={'content-type': 'application/json'})
         assert response.status_code == 200, response.text
-        assert forward.await_args.kwargs['path'] == '/event/wiggle'
+        # Held here; the board is asked to render, and pulls it.
+        assert forward.await_args.kwargs['path'] == '/event/render'
+        assert forward.await_args.kwargs['json_body'] == {}
         # Said over HTTP, `button` is a scene event too.
         response = await async_client.post(
             f'/api/frames/{frame.id}/event/button', json={'label': 'A'}, headers={'content-type': 'application/json'})
@@ -975,6 +984,104 @@ async def test_scenes_returns_payload_with_etag(async_client, no_auth_client, db
 
 
 @pytest.mark.asyncio
+async def test_scenes_patch_sends_only_what_changed(async_client, no_auth_client, db, redis):
+    frame = await device_frame(async_client, db)
+    scene = {'id': 'a', 'name': 'A', 'nodes': [], 'edges': []}
+    other = {'id': 'b', 'name': 'B', 'nodes': [], 'edges': []}
+    frame.scenes = [scene, other]
+    db.commit()
+    url = f'/api/frames/{frame.id}/embedded/scenes?patch=1'
+
+    # A first pull is the whole list; the backend remembers what it served.
+    first = await no_auth_client.get(url, headers=auth(frame))
+    assert isinstance(first.json(), list)
+    etag = first.headers['etag']
+
+    # One scene changes: only it travels, with the order of the whole set.
+    frame.scenes = [scene, {**other, 'name': 'B2'}]
+    db.commit()
+    response = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': etag})
+    assert response.status_code == 200
+    body = response.json()
+    assert body['patch'] is True
+    assert body['base'] == etag
+    assert body['order'] == ['a', 'b']
+    assert [item['name'] for item in body['put']] == ['B2']
+    new_etag = response.headers['etag']
+    assert new_etag != etag
+
+    # The patched set is what is remembered: removing a scene patches too.
+    frame.scenes = [scene]
+    db.commit()
+    response = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': new_etag})
+    assert response.json() == {'patch': True, 'base': new_etag, 'order': ['a'], 'put': []}
+
+    # Older firmware does not ask; a set this backend did not serve gets it all.
+    plain = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/scenes',
+        headers={**auth(frame), 'If-None-Match': etag})
+    assert isinstance(plain.json(), list)
+    unknown = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': '"nope"'})
+    assert isinstance(unknown.json(), list)
+
+
+@pytest.mark.asyncio
+async def test_a_preview_patches_in_one_scene_and_keeps_the_list(async_client, no_auth_client, db, redis):
+    """The editor's preview goes to an ESP32 as its saved scenes with the
+    previewed one in them: one scene put, the list kept. Served alone, the
+    bundle's patch named only its own scenes, so the frame dropped every other
+    one, and an Activate of a saved scene while the preview stood found
+    nothing. Its Discard takes the one scene out again."""
+    frame = await device_frame(async_client, db)
+    a = {'id': 'a', 'name': 'A', 'nodes': [], 'edges': []}
+    b = {'id': 'b', 'name': 'B', 'nodes': [], 'edges': []}
+    frame.scenes = [a, b]
+    db.commit()
+    url = f'/api/frames/{frame.id}/embedded/scenes?patch=1'
+    first = await no_auth_client.get(url, headers=auth(frame))
+    etag = first.headers['etag']
+
+    preview = {'id': 'p', 'name': 'Preview me', 'nodes': [], 'edges': []}
+    with patch('app.utils.embedded_commands.nudge_embedded_frame', new_callable=AsyncMock, return_value=False):
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/uploadScenes', json={'scenes': [preview], 'sceneId': 'p'}
+        )
+    assert response.status_code == 200, response.text
+    pulled = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': etag})
+    body = pulled.json()
+    assert body['patch'] is True
+    assert body['order'] == ['a', 'b', 'p']
+    assert body['put'] == [preview]
+
+    # An edited saved scene previewed: the edit in its place, nothing else.
+    edited = {**b, 'name': 'B edited'}
+    with patch('app.utils.embedded_commands.nudge_embedded_frame', new_callable=AsyncMock, return_value=False):
+        await async_client.post(f'/api/frames/{frame.id}/event/uploadScenes', json={'scenes': [edited], 'sceneId': 'b'})
+    again = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': pulled.headers['etag']})
+    body = again.json()
+    assert body['order'] == ['a', 'b']
+    assert body['put'] == [edited]
+
+    # Discard: the saved list again, the saved b back in place.
+    assert (await async_client.delete(f'/api/frames/{frame.id}/scene_preview')).status_code == 200
+    discarded = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': again.headers['etag']})
+    assert discarded.json() == {'patch': True, 'base': again.headers['etag'], 'order': ['a', 'b'], 'put': [b]}
+
+
+@pytest.mark.asyncio
+async def test_scenes_patch_never_sends_every_scene_as_one(async_client, no_auth_client, db, redis):
+    frame = await device_frame(async_client, db)
+    frame.scenes = [{'id': 'a', 'name': 'A', 'nodes': [], 'edges': []}]
+    db.commit()
+    url = f'/api/frames/{frame.id}/embedded/scenes?patch=1'
+    first = await no_auth_client.get(url, headers=auth(frame))
+    frame.scenes = [{'id': 'a', 'name': 'A2', 'nodes': [], 'edges': []}]
+    db.commit()
+    response = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': first.headers['etag']})
+    assert isinstance(response.json(), list)
+
+
+@pytest.mark.asyncio
 async def test_settings_returns_scene_required_service_settings(async_client, no_auth_client, db):
     frame = await device_frame(async_client, db)
     frame.scenes = [{
@@ -1099,6 +1206,9 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'deepSleep': True,
         'wakeSchedule': False,
     }
+    # The colours this panel really shows, which the device's packer dithers to.
+    measured = {'name': 'Measured', 'colors': ['#1a1a1a', '#f0f0e8', '#e6c619', '#b0251c', '#2a4f9e', '#3b6e3b']}
+    frame.palette = measured
     db.add(frame)
     db.commit()
 
@@ -1137,7 +1247,9 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'rotate': 0,
         'scalingMode': 'contain',
         'renderScale': 1.5,
+        'frameSettingsOnScreen': True,
         'colors': {},
+        'palette': measured,
         'maxHttpResponseBytes': 4 * 1024 * 1024,
         'adminAuth': expected_admin_auth,
         'tls': expected_tls,
@@ -1148,6 +1260,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
     # scale is automatic (0), the firmware works it out from its panel
     frame.scaling_mode = None
     frame.render_scale = 0
+    frame.palette = None
     frame.device_config = {
         key: value
         for key, value in (frame.device_config or {}).items()
@@ -1169,7 +1282,9 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'rotate': 0,
         'scalingMode': 'cover',
         'renderScale': 0.0,
+        'frameSettingsOnScreen': True,
         'colors': {},
+        'palette': {},  # the panel's own table
         'maxHttpResponseBytes': 4 * 1024 * 1024,
         'adminAuth': expected_admin_auth,
         'tls': expected_tls,
@@ -1276,6 +1391,38 @@ async def test_settings_carry_the_status_led_only_when_set(async_client, no_auth
         f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
     assert response.json()['frame']['ledPin'] == -1
     assert 'ledType' not in response.json()['frame']
+
+
+@pytest.mark.asyncio
+async def test_settings_carry_the_cpu_mode_only_when_set(async_client, no_auth_client, db):
+    """The chip's clock (cpu_mode) is present-only: unset, the board runs its
+    own rule (160 MHz on e-paper, 240 on an LCD or touch panel), and a value
+    travels only as one of the contract's three names."""
+    frame = await device_frame(async_client, db)
+    base_config = {
+        key: value for key, value in (frame.device_config or {}).items() if key not in ('cpuMode', 'cpu_mode')
+    }
+    frame.device_config = base_config
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert 'cpuMode' not in response.json()['frame']
+
+    frame.device_config = {**base_config, 'cpu_mode': 'performance'}
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.json()['frame']['cpuMode'] == 'performance'
+
+    frame.device_config = {**base_config, 'cpuMode': 'turbo'}
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert 'cpuMode' not in response.json()['frame']
 
 
 @pytest.mark.asyncio

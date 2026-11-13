@@ -3,39 +3,18 @@ import {
   exchangeAuthorizationCode,
   verifyOidcIdToken,
 } from "@frameos-cloud/auth-client";
-import { createDb } from "@frameos-cloud/db";
+import { createDb, googleProviderKey } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import {
-  consentCookieName,
-  parseConsent,
-} from "../../../../../src/lib/analytics-consent";
-import {
   authCookieNames,
-  cookieOptions,
   safeAuthReturnPath,
 } from "../../../../../src/lib/auth-cookies";
-import { resolveGoogleSignIn } from "../../../../../src/lib/google-account";
-import {
-  createPendingGoogleLinkToken,
-  pendingGoogleLinkCookieName,
-  pendingGoogleLinkCookieOptions,
-} from "../../../../../src/lib/google-link";
 import {
   getBaseUrl,
   getGoogleCallbackUrl,
   getGoogleOAuthConfig,
 } from "../../../../../src/lib/env";
-import {
-  sessionCookieName,
-  sessionCookieOptions,
-} from "../../../../../src/lib/session";
-import { completeFirstFactor } from "../../../../../src/lib/sign-in";
-import { defaultSignInRedirect } from "../../../../../src/lib/sign-in-redirect";
-import {
-  pendingSignInCookieName,
-  pendingSignInCookieOptions,
-} from "../../../../../src/lib/two-factor";
-import { notifyNewCloudUser } from "../../../../../src/lib/signup-notifications";
+import { finishProviderWebSignIn } from "../../../../../src/lib/provider-callback";
 import { logWarn, reportError } from "../../../../../src/lib/log";
 
 export async function GET(request: NextRequest) {
@@ -102,130 +81,27 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const db = createDb();
-
-  // Merge rules live in resolveGoogleSignIn: an existing verified password
-  // account links only after its password is proved on /login/link-google;
-  // an unverified one requires a password reset first so a squatter's
-  // password cannot ride along into this account.
-  const resolution = await resolveGoogleSignIn(db, discovery.issuer, claims);
-
-  if (resolution.status === "requires_link_confirmation") {
-    // The verified claims are parked in a signed, short-lived cookie; the
-    // link route re-reads them once the password checks out. Nothing is
-    // written to the account until then.
-    const response = NextResponse.redirect(
-      new URL("/login/link-google", getBaseUrl()),
-    );
-    response.cookies.set(
-      pendingGoogleLinkCookieName,
-      await createPendingGoogleLinkToken({
-        accountId: resolution.accountId,
-        email: resolution.email,
+  // The merge rules and every outcome (session, second factor, the password
+  // check before a link, the login page with a reason) are shared with
+  // Apple's callback: src/lib/provider-callback.ts.
+  return finishProviderWebSignIn(
+    request,
+    createDb(),
+    {
+      claims: {
+        email: claims.email,
+        email_verified: claims.email_verified,
         name: claims.name,
-        providerIssuer: discovery.issuer,
-        providerSubject: claims.sub,
-        returnTo,
-      }),
-      pendingGoogleLinkCookieOptions(),
-    );
-    response.cookies.delete(authCookieNames.state);
-    response.cookies.delete(authCookieNames.nonce);
-    response.cookies.delete(authCookieNames.verifier);
-    response.cookies.delete(authCookieNames.returnTo);
-    response.cookies.delete(authCookieNames.mergeEmail);
-    return response;
-  }
-
-  if (resolution.status === "requires_password_reset") {
-    const response = NextResponse.redirect(
-      new URL("/login?error=verify_before_google_link", getBaseUrl()),
-    );
-    response.cookies.set(
-      authCookieNames.mergeEmail,
-      resolution.email,
-      cookieOptions(),
-    );
-    response.cookies.delete(authCookieNames.state);
-    response.cookies.delete(authCookieNames.nonce);
-    response.cookies.delete(authCookieNames.verifier);
-    response.cookies.delete(authCookieNames.returnTo);
-    return response;
-  }
-
-  if (resolution.status === "google_email_unverified") {
-    const response = NextResponse.redirect(
-      new URL("/login?error=google_email_unverified", getBaseUrl()),
-    );
-    response.cookies.delete(authCookieNames.state);
-    response.cookies.delete(authCookieNames.nonce);
-    response.cookies.delete(authCookieNames.verifier);
-    response.cookies.delete(authCookieNames.returnTo);
-    return response;
-  }
-
-  const accountId = resolution.accountId;
-
-  // Only a brand new account (not a login or a link into an existing one)
-  // announces itself. Fire-and-forget: notifyNewCloudUser never throws and
-  // no-ops without its env vars.
-  if (resolution.created) {
-    void notifyNewCloudUser({
-      accountId,
-      analyticsConsent: parseConsent(
-        request.cookies.get(consentCookieName)?.value,
-      ),
-      displayName: claims.name,
-      email: claims.email,
-      provider: "google",
-    });
-  }
-
-  const outcome = await completeFirstFactor(db, {
-    auditMetadata: {
-      email: claims.email,
-      emailVerified: claims.email_verified,
+        sub: claims.sub,
+      },
+      issuer: discovery.issuer,
+      providerKey: googleProviderKey,
+      returnTo,
     },
-    method: "google",
-    profile: {
-      accountId,
-      email: claims.email,
-      emailVerified: claims.email_verified,
-      name: claims.name,
-      providerIssuer: discovery.issuer,
-      providerSubject: claims.sub,
+    (response) => {
+      response.cookies.delete(authCookieNames.state);
+      response.cookies.delete(authCookieNames.nonce);
+      response.cookies.delete(authCookieNames.verifier);
     },
-    returnTo,
-  });
-
-  // Second factor enrolled: park the sign-in in the pending cookie and let
-  // /login/verify finish it. Same cleanup of the OAuth cookies as below.
-  if (outcome.kind === "second_factor") {
-    const response = NextResponse.redirect(
-      new URL("/login/verify", getBaseUrl()),
-    );
-    response.cookies.set(
-      pendingSignInCookieName,
-      outcome.pendingToken,
-      pendingSignInCookieOptions(),
-    );
-    response.cookies.delete(authCookieNames.state);
-    response.cookies.delete(authCookieNames.nonce);
-    response.cookies.delete(authCookieNames.verifier);
-    response.cookies.delete(authCookieNames.returnTo);
-    response.cookies.delete(authCookieNames.mergeEmail);
-    return response;
-  }
-  const sessionToken = outcome.token;
-
-  const response = NextResponse.redirect(
-    new URL(returnTo ?? defaultSignInRedirect, getBaseUrl()),
   );
-  response.cookies.set(sessionCookieName, sessionToken, sessionCookieOptions());
-  response.cookies.delete(authCookieNames.state);
-  response.cookies.delete(authCookieNames.nonce);
-  response.cookies.delete(authCookieNames.verifier);
-  response.cookies.delete(authCookieNames.returnTo);
-  response.cookies.delete(authCookieNames.mergeEmail);
-  return response;
 }

@@ -4,9 +4,10 @@ import type { Check } from "./types";
 
 // The eval header's rule: checks are about the REQUEST, not one
 // implementation. "Analog clock drawn as SVG" used to demand the render/svg
-// app, while the prompt's JS app contract tells the agent to return
+// app, while the prompt's JS app contract told the agent to return
 // frameos.svg(...) from a scene-local app into render/image — so two cases
-// scored 5/5 with the judge and failed (2026-09-20).
+// scored 5/5 with the judge and failed (2026-09-20). The guide now asks for
+// <svg> JSX from an app.tsx; every route still counts.
 
 const event = { data: { keyword: "render" }, id: "e1", type: "event" };
 const renderImage = { data: { config: {}, keyword: "render/image" }, id: "img", type: "app" };
@@ -36,6 +37,18 @@ describe("draws_svg", () => {
     const result = run({ type: "draws_svg" }, [jsAppScene("export function get(app) { return frameos.svg(parts.join('')) }")]);
     expect(result.passed).toBe(true);
     expect(result.detail).toContain("stationClock (app.ts)");
+  });
+
+  it("passes for a scene-local app.tsx returning <svg> JSX", () => {
+    const scene = {
+      apps: {
+        stationClock: {
+          sources: { "app.tsx": "export function get(app) { return <svg viewBox={`0 0 ${app.frame.width} ${app.frame.height}`} /> }", "config.json": "{}" },
+        },
+      },
+      nodes: [event, { data: { config: {}, keyword: "stationClock" }, id: "clock", type: "app" }, renderImage],
+    };
+    expect(run({ type: "draws_svg" }, [scene]).detail).toContain("stationClock (app.tsx)");
   });
 
   it("passes for the render/svg app, the jsSvg template and a code node building <svg", () => {

@@ -1,4 +1,4 @@
-import std/[json, options, tables, sequtils, asyncdispatch, unittest, os, strutils]
+import std/[json, options, tables, sequtils, asyncdispatch, unittest, os, strutils, monotimes, times]
 import pixie
 import ../boot_guard
 import ../config
@@ -14,6 +14,9 @@ import ../loading_mark_panel
 
 type LogStore = ref object
   entries: seq[JsonNode]
+  ## When each entry arrived, for a test that asks WHEN, not how long: a
+  ## duration measured inside the runner shrinks on a loaded machine.
+  at: seq[MonoTime]
 
 type SavedBootGuardState = object
   hadState: bool
@@ -43,6 +46,7 @@ proc testLogger(config: FrameConfig, store: LogStore): Logger =
   logger.log = proc(payload: JsonNode) =
     if logger.enabled:
       store.entries.add(payload)
+      store.at.add(getMonoTime())
   logger.enable = proc() =
     logger.enabled = true
   logger.disable = proc() =
@@ -138,6 +142,26 @@ proc unusedRender(scene: FrameScene, context: ExecutionContext): Image =
 proc fastRender(scene: FrameScene, context: ExecutionContext): Image =
   context.image.fill(scene.backgroundColor)
   context.image
+
+proc markDrawnRender(scene: FrameScene, context: ExecutionContext): Image =
+  ## A render that takes a while: until the loading mark has drawn (five
+  ## seconds at most), so the test does not race the mark thread.
+  sleep(LoadingMarkDelayMs)
+  for _ in 0 ..< 500:
+    if atomicLoadN(markPanelWrites.addr, ATOMIC_SEQ_CST) > 0:
+      break
+    sleep(10)
+  fastRender(scene, context)
+
+var animationFrames = 0
+
+proc lateAnimationRender(scene: FrameScene, context: ExecutionContext): Image =
+  ## The first frame is quick (a scene's first pass counts as any other
+  ## scene's), every one after it well over the mark's delay.
+  inc animationFrames
+  if animationFrames > 1:
+    sleep(LoadingMarkDelayMs + 60)
+  fastRender(scene, context)
 
 proc failingRender(scene: FrameScene, context: ExecutionContext): Image =
   raise newException(IOError, "network request failed")
@@ -240,15 +264,24 @@ suite "runner loop safety":
     requestEarlierRender(0.25)
     # Two cycles: the first sleeps (and is where the callback happens), the
     # second breaks out before sleeping again.
+    let loopStarted = getMonoTime()
     waitFor runnerThread.startRenderLoop(maxCycles = 2)
 
-    # The scene keeps its own schedule — the whole point of the fix. (The
-    # sleep is the interval minus the render that just happened, so it lands
-    # just under a second; what matters is that it is nowhere near the 250 ms
-    # the driver asked for.)
-    for entry in store.entries:
+    # The scene keeps its own schedule — the whole point of the fix. The sleep
+    # is the interval minus however long the pass took, so its length alone
+    # depends on the machine (a loaded CI runner took over 100 ms and failed
+    # "ms > 900"). Where it ENDS does not: logged at `at`, it runs out one
+    # interval after the pass began, which is after `loopStarted`. Sleeping
+    # only the 250 ms the driver asked for would end long before that.
+    var sleeps = 0
+    for i, entry in store.entries:
       if entry{"event"}.getStr() == "render:sleep":
-        check entry{"ms"}.getFloat() > 900.0
+        inc sleeps
+        let loggedAfter = (store.at[i] - loopStarted).inNanoseconds.float / 1e9
+        let sleepEndsAfter = loggedAfter + entry{"ms"}.getFloat() / 1000
+        # The log rounds the sleep to a microsecond.
+        check sleepEndsAfter >= 1.0 - 1e-5
+    check sleeps == 1
     # Exactly one scene render per cycle, not one per driver callback.
     check countEvent(store, "render:done") == 2
     # Consumed, not left standing for the next pass.
@@ -696,14 +729,12 @@ suite "runner loop safety":
       # nothing is test_loading_mark.nim's, on a clock of its own.)
       sendEvent("setCurrentScene", %*{"sceneId": sceneB.string}, eoHttpAdmin)
       check waitUntil(proc(): bool = store.hasEvent("render:loadingMark"))
-      check loadingMarkSwitches() == 1
       check markPanelWrites > 0
       check markPanelBytes == picture
       # Back to a scene with nothing to wait for: it lands its switch too.
       sendEvent("setCurrentScene", %*{"sceneId": sceneC.string}, eoHttpAdmin)
       check waitUntil(proc(): bool = runnerThread.scenes.hasKey(sceneC) and
         runnerThread.currentSceneId == sceneC)
-      check loadingMarkSwitches() == 2
       for entry in store.entries:
         if entry{"event"}.getStr() == "render:loadingMark":
           check entry{"sceneId"}.getStr() == sceneB.string
@@ -715,6 +746,59 @@ suite "runner loop safety":
     finally:
       loadingMarkTestPanel = MarkPanel()
       updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+  proc runOnMarkPanel(scene: SceneId, init: proc (sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
+      persistedState: JsonNode): FrameScene {.gcsafe, nimcall.}, render: proc (scene: FrameScene,
+      context: ExecutionContext): Image {.gcsafe, nimcall.}, cycles: int): LogStore =
+    ## `scene` rendered `cycles` times on a framebuffer with a panel of the
+    ## test's, no switch involved. What it logged.
+    clearEventChannel()
+    for i in 0 ..< markPanelBytes.len:
+      markPanelBytes[i] = uint8(i mod 251)
+    markPanelWrites = 0
+    loadingMarkTestPanel = MarkPanel(io: MarkPanelIo(read: markPanelRead, write: markPanelWrite),
+      lineLength: MarkPanelSide * 4, pixels: RgbMarkPixels,
+      view: MarkView(panelWidth: MarkPanelSide, panelHeight: MarkPanelSide))
+    try:
+      var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+      uploaded[scene] = ExportedInterpretedScene(name: scene.string, publicStateFields: @[],
+        persistedStateKeys: @[], init: init, render: render,
+        runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard)
+      updateUploadedScenes(uploaded)
+      var config = loadConfig()
+      config.device = "framebuffer"
+      config.controlCode = ControlCode(enabled: false, position: "center",
+        qrCodeColor: parseHtmlColor("#000000"), backgroundColor: parseHtmlColor("#ffffff"))
+      result = LogStore(entries: @[])
+      var runnerThread = RunnerThread(frameConfig: config, scenes: initTable[SceneId, FrameScene](),
+        currentSceneId: scene, lastRenderAt: 0.0, sleepFuture: none(Future[void]),
+        isRendering: false, triggerRenderNext: false, logger: testLogger(config, result))
+      let renderLoop = runnerThread.startRenderLoop(maxCycles = cycles)
+      let messageLoop = runnerThread.startMessageLoop(maxIterations = 400)
+      waitFor renderLoop
+      runnerThread.stopMessageLoop = true
+      waitFor messageLoop
+    finally:
+      loadingMarkTestPanel = MarkPanel()
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+  test "a slow render shows the loading mark with no switch and nothing asking":
+    let picture = block:
+      var bytes = markPanelBytes
+      for i in 0 ..< bytes.len:
+        bytes[i] = uint8(i mod 251)
+      bytes
+    let store = runOnMarkPanel("tests/runner/mark-render".SceneId, sixtySecondInit, markDrawnRender, 1)
+    check markPanelWrites > 0
+    check markPanelBytes == picture
+    check store.countEvent("render:loadingMark") == 1
+
+  test "an animation's late frames do not blink the loading mark":
+    animationFrames = 0
+    let store = runOnMarkPanel("tests/runner/mark-animation".SceneId, fastInit, lateAnimationRender, 3)
+    check animationFrames >= 3
+    check markPanelWrites == 0
+    check store.countEvent("render:loadingMark") == 0
 
   test "a key event is logged by name, never with what was typed":
     clearEventChannel()

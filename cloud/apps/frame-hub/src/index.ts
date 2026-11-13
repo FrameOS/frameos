@@ -11,6 +11,7 @@ import { setWasmAssetsDir } from "../../auth-web/src/lib/scene-render";
 import { getHubPort, loadLocalEnv } from "./env";
 import { startFrameHub } from "./hub";
 import { errorField, logError, logInfo } from "./log";
+import { checkObjectStore } from "./object-store-check";
 
 // The runtime bundle ships with auth-web (public/frameos-wasm), a sibling of
 // this app in the checkout and in a release alike. Resolved from the path the
@@ -31,6 +32,11 @@ function locateWasmRuntime(): string | undefined {
 
 async function main() {
   loadLocalEnv();
+  // Ahead of everything else here: past this point the process is a hub, and
+  // a deploy is asking while the real one runs.
+  if (process.argv[2] === "check-object-store") {
+    process.exit((await checkObjectStore()) ? 0 : 1);
+  }
   setWasmAssetsDir(locateWasmRuntime());
   if (!process.env.DATABASE_URL) {
     logError("frame_hub.missing_database_url", {

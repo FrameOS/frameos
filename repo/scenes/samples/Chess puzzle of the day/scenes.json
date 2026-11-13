@@ -1,0 +1,501 @@
+[
+  {
+    "id": "chess-puzzle-of-the-day",
+    "name": "Chess puzzle of the day",
+    "settings": {
+      "refreshInterval": 43200,
+      "backgroundColor": "#11243a",
+      "execution": "interpreted",
+      "renderScale": 1
+    },
+    "fields": [
+      {
+        "name": "puzzleUrl",
+        "type": "string",
+        "label": "Lichess puzzle API URL",
+        "description": "Public Lichess endpoint used for the daily puzzle.",
+        "value": "https://lichess.org/api/puzzle/daily",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "title",
+        "type": "string",
+        "label": "Title",
+        "value": "Chess puzzle of the day",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "accentColor",
+        "type": "color",
+        "label": "Accent colour",
+        "value": "#c08457",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "backgroundTop",
+        "type": "color",
+        "label": "Background top colour",
+        "value": "#11243a",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "backgroundBottom",
+        "type": "color",
+        "label": "Background bottom colour",
+        "value": "#213b45",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "lightSquare",
+        "type": "color",
+        "label": "Light square colour",
+        "value": "#f3ead7",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "darkSquare",
+        "type": "color",
+        "label": "Dark square colour",
+        "value": "#6e7f71",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "showCoordinates",
+        "type": "boolean",
+        "label": "Show board coordinates",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "autoOrient",
+        "type": "boolean",
+        "label": "Put side to move at bottom",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "showThemes",
+        "type": "boolean",
+        "label": "Show puzzle themes",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "lichessPuzzlePanel": {
+        "name": "Lichess daily puzzle panel",
+        "category": "data",
+        "description": "Fetches the public Lichess daily puzzle and renders a responsive SVG chess board. Reconstructs the puzzle position from Lichess PGN when no FEN is provided; the solution is hidden on first render and revealed on the next refresh or button event.",
+        "version": "1.1.0",
+        "fields": [
+          {
+            "name": "puzzleUrl",
+            "label": "Lichess puzzle API URL",
+            "type": "string",
+            "value": "https://lichess.org/api/puzzle/daily"
+          },
+          {
+            "name": "title",
+            "label": "Title",
+            "type": "string",
+            "value": "Chess puzzle of the day"
+          },
+          {
+            "name": "accentColor",
+            "label": "Accent colour",
+            "type": "color",
+            "value": "#c08457"
+          },
+          {
+            "name": "backgroundTop",
+            "label": "Background top colour",
+            "type": "color",
+            "value": "#11243a"
+          },
+          {
+            "name": "backgroundBottom",
+            "label": "Background bottom colour",
+            "type": "color",
+            "value": "#213b45"
+          },
+          {
+            "name": "lightSquare",
+            "label": "Light square colour",
+            "type": "color",
+            "value": "#f3ead7"
+          },
+          {
+            "name": "darkSquare",
+            "label": "Dark square colour",
+            "type": "color",
+            "value": "#6e7f71"
+          },
+          {
+            "name": "showCoordinates",
+            "label": "Show board coordinates",
+            "type": "boolean",
+            "value": "true"
+          },
+          {
+            "name": "autoOrient",
+            "label": "Put side to move at bottom",
+            "type": "boolean",
+            "value": "true"
+          },
+          {
+            "name": "showThemes",
+            "label": "Show puzzle themes",
+            "type": "boolean",
+            "value": "true"
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Lichess daily puzzle panel\",\n  \"category\": \"data\",\n  \"description\": \"Fetches the public Lichess daily puzzle and renders a responsive SVG chess board. Reconstructs the puzzle position from Lichess PGN when no FEN is provided; the solution is hidden on first render and revealed on the next refresh or button event.\",\n  \"version\": \"1.1.0\",\n  \"fields\": [\n    {\n      \"name\": \"puzzleUrl\",\n      \"label\": \"Lichess puzzle API URL\",\n      \"type\": \"string\",\n      \"value\": \"https://lichess.org/api/puzzle/daily\"\n    },\n    {\n      \"name\": \"title\",\n      \"label\": \"Title\",\n      \"type\": \"string\",\n      \"value\": \"Chess puzzle of the day\"\n    },\n    {\n      \"name\": \"accentColor\",\n      \"label\": \"Accent colour\",\n      \"type\": \"color\",\n      \"value\": \"#c08457\"\n    },\n    {\n      \"name\": \"backgroundTop\",\n      \"label\": \"Background top colour\",\n      \"type\": \"color\",\n      \"value\": \"#11243a\"\n    },\n    {\n      \"name\": \"backgroundBottom\",\n      \"label\": \"Background bottom colour\",\n      \"type\": \"color\",\n      \"value\": \"#213b45\"\n    },\n    {\n      \"name\": \"lightSquare\",\n      \"label\": \"Light square colour\",\n      \"type\": \"color\",\n      \"value\": \"#f3ead7\"\n    },\n    {\n      \"name\": \"darkSquare\",\n      \"label\": \"Dark square colour\",\n      \"type\": \"color\",\n      \"value\": \"#6e7f71\"\n    },\n    {\n      \"name\": \"showCoordinates\",\n      \"label\": \"Show board coordinates\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    },\n    {\n      \"name\": \"autoOrient\",\n      \"label\": \"Put side to move at bottom\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    },\n    {\n      \"name\": \"showThemes\",\n      \"label\": \"Show puzzle themes\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "const FILES = 'abcdefgh'\nconst PIECE_NAMES = { p: 'P', n: 'N', b: 'B', r: 'R', q: 'Q', k: 'K' }\nconst START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w'\nconst SAMPLE_PUZZLE = {\n  game: { id: 'sample', fen: '6k1/5ppp/8/8/8/8/5PPP/6K1 w' },\n  puzzle: {\n    id: 'sample-mate-net',\n    rating: 1200,\n    solution: ['g2g4'],\n    themes: ['quietMove', 'endgame', 'advantage'],\n    source: 'sample'\n  },\n  notice: 'Offline sample position shown while the Lichess daily puzzle is unavailable.'\n}\n\nfunction clamp(value, min, max) {\n  return Math.max(min, Math.min(max, value))\n}\n\nfunction boolValue(value, fallback) {\n  if (value === undefined || value === null || value === '') return fallback\n  return value === true || value === 'true'\n}\n\nfunction hex(value, fallback) {\n  const text = String(value || '').trim()\n  return /^#[0-9a-fA-F]{6}$/.test(text) ? text : fallback\n}\n\nfunction moveToText(move) {\n  if (!move || move.length < 4) return ''\n  const promo = move.length > 4 ? '=' + move.charAt(4).toUpperCase() : ''\n  // An en dash between the squares: the frame's fonts have no arrow.\n  return move.substring(0, 2) + '–' + move.substring(2, 4) + promo\n}\n\nfunction titleCaseTheme(theme) {\n  return String(theme || '')\n    .replace(/([a-z])([A-Z])/g, '$1 $2')\n    .replace(/_/g, ' ')\n    .toLowerCase()\n    .replace(/\\b\\w/g, function (m) { return m.toUpperCase() })\n}\n\nfunction cloneBoard(board) {\n  return board.map(function (row) { return row.slice() })\n}\n\nfunction initialBoard() {\n  return [\n    'rnbqkbnr'.split(''),\n    'pppppppp'.split(''),\n    '        '.split(''),\n    '        '.split(''),\n    '        '.split(''),\n    '        '.split(''),\n    'PPPPPPPP'.split(''),\n    'RNBQKBNR'.split('')\n  ]\n}\n\nfunction parseFen(fen) {\n  const parts = String(fen || START_FEN).split(/\\s+/)\n  const rows = (parts[0] || '8/8/8/8/8/8/8/8').split('/')\n  const board = []\n  for (let r = 0; r < 8; r++) {\n    const row = []\n    const text = rows[r] || '8'\n    for (let i = 0; i < text.length; i++) {\n      const ch = text.charAt(i)\n      const empty = parseInt(ch, 10)\n      if (empty > 0) {\n        for (let n = 0; n < empty; n++) row.push('')\n      } else {\n        row.push(ch)\n      }\n    }\n    while (row.length < 8) row.push('')\n    board.push(row.slice(0, 8))\n  }\n  return { board: board, turn: parts[1] === 'b' ? 'b' : 'w' }\n}\n\nfunction boardToFen(board, turn) {\n  const rows = []\n  for (let r = 0; r < 8; r++) {\n    let row = ''\n    let empty = 0\n    for (let c = 0; c < 8; c++) {\n      const piece = board[r][c]\n      if (!piece || piece === ' ') {\n        empty++\n      } else {\n        if (empty) row += String(empty)\n        empty = 0\n        row += piece\n      }\n    }\n    if (empty) row += String(empty)\n    rows.push(row)\n  }\n  return rows.join('/') + ' ' + turn\n}\n\nfunction tokenizePgn(pgn) {\n  let text = String(pgn || '')\n  text = text.replace(/\\[[^\\]]*\\]/g, ' ')\n  text = text.replace(/\\{[^}]*\\}/g, ' ')\n  while (/\\([^()]*\\)/.test(text)) text = text.replace(/\\([^()]*\\)/g, ' ')\n  text = text.replace(/;[^\\n]*/g, ' ')\n  text = text.replace(/\\$\\d+/g, ' ')\n  return text.split(/\\s+/).filter(function (token) {\n    if (!token) return false\n    if (/^(1-0|0-1|1\\/2-1\\/2|\\*)$/.test(token)) return false\n    if (/^\\d+\\.(\\.\\.)?$/.test(token)) return false\n    if (/^\\d+\\.\\.\\./.test(token)) return token.length > token.indexOf('...') + 3\n    if (/^\\d+\\./.test(token)) return token.length > token.indexOf('.') + 1\n    return true\n  }).map(function (token) {\n    return token.replace(/^\\d+\\.\\.\\./, '').replace(/^\\d+\\./, '')\n  }).filter(Boolean)\n}\n\nfunction pathClear(board, fr, fc, tr, tc) {\n  const dr = Math.sign(tr - fr)\n  const dc = Math.sign(tc - fc)\n  let r = fr + dr\n  let c = fc + dc\n  while (r !== tr || c !== tc) {\n    if (board[r][c] && board[r][c] !== ' ') return false\n    r += dr\n    c += dc\n  }\n  return true\n}\n\nfunction canMove(board, piece, fr, fc, tr, tc, capture) {\n  const white = piece === piece.toUpperCase()\n  const kind = piece.toLowerCase()\n  const dr = tr - fr\n  const dc = tc - fc\n  const target = board[tr][tc]\n  if (target && target !== ' ' && (target === target.toUpperCase()) === white) return false\n\n  if (kind === 'p') {\n    const dir = white ? -1 : 1\n    const start = white ? 6 : 1\n    if (capture) return dr === dir && Math.abs(dc) === 1\n    if (dc !== 0) return false\n    if (dr === dir && (!target || target === ' ')) return true\n    if (fr === start && dr === dir * 2 && (!target || target === ' ') && (!board[fr + dir][fc] || board[fr + dir][fc] === ' ')) return true\n    return false\n  }\n  if (kind === 'n') return (Math.abs(dr) === 2 && Math.abs(dc) === 1) || (Math.abs(dr) === 1 && Math.abs(dc) === 2)\n  if (kind === 'b') return Math.abs(dr) === Math.abs(dc) && pathClear(board, fr, fc, tr, tc)\n  if (kind === 'r') return (dr === 0 || dc === 0) && pathClear(board, fr, fc, tr, tc)\n  if (kind === 'q') return ((Math.abs(dr) === Math.abs(dc)) || dr === 0 || dc === 0) && pathClear(board, fr, fc, tr, tc)\n  if (kind === 'k') return Math.max(Math.abs(dr), Math.abs(dc)) === 1\n  return false\n}\n\nfunction applySan(board, turn, rawSan) {\n  let san = String(rawSan || '').trim()\n  san = san.replace(/[!?]+/g, '').replace(/[+#]+$/g, '')\n  if (!san || san === '--') return { board: board, turn: turn, ok: false }\n\n  const white = turn === 'w'\n  const home = white ? 7 : 0\n  if (san === 'O-O' || san === '0-0') {\n    board[home][6] = board[home][4]\n    board[home][4] = ' '\n    board[home][5] = board[home][7]\n    board[home][7] = ' '\n    return { board: board, turn: white ? 'b' : 'w', ok: true }\n  }\n  if (san === 'O-O-O' || san === '0-0-0') {\n    board[home][2] = board[home][4]\n    board[home][4] = ' '\n    board[home][3] = board[home][0]\n    board[home][0] = ' '\n    return { board: board, turn: white ? 'b' : 'w', ok: true }\n  }\n\n  const targetMatch = san.match(/([a-h][1-8])(?:=([QRBN]))?$/)\n  if (!targetMatch) return { board: board, turn: turn, ok: false }\n\n  const targetSquare = targetMatch[1]\n  const promotion = targetMatch[2] || ''\n  const targetIndex = san.indexOf(targetSquare)\n  let prefix = san.substring(0, targetIndex)\n  const capture = prefix.indexOf('x') >= 0\n  prefix = prefix.replace(/x/g, '')\n\n  let pieceKind = 'p'\n  if (/^[KQRBN]/.test(prefix)) {\n    pieceKind = prefix.charAt(0).toLowerCase()\n    prefix = prefix.substring(1)\n  }\n\n  const tc = FILES.indexOf(targetSquare.charAt(0))\n  const tr = 8 - parseInt(targetSquare.charAt(1), 10)\n  const desired = white ? pieceKind.toUpperCase() : pieceKind\n  const candidates = []\n  for (let r = 0; r < 8; r++) {\n    for (let c = 0; c < 8; c++) {\n      if (board[r][c] !== desired) continue\n      if (prefix.length === 2 && (FILES.charAt(c) + (8 - r)) !== prefix) continue\n      if (prefix.length === 1 && /[a-h]/.test(prefix) && FILES.charAt(c) !== prefix) continue\n      if (prefix.length === 1 && /[1-8]/.test(prefix) && String(8 - r) !== prefix) continue\n      if (canMove(board, desired, r, c, tr, tc, capture)) candidates.push({ r: r, c: c })\n    }\n  }\n  if (!candidates.length) return { board: board, turn: turn, ok: false }\n\n  const from = candidates[0]\n  if (pieceKind === 'p' && capture && (!board[tr][tc] || board[tr][tc] === ' ')) {\n    const dir = white ? -1 : 1\n    board[tr - dir][tc] = ' '\n  }\n  board[tr][tc] = promotion ? (white ? promotion : promotion.toLowerCase()) : board[from.r][from.c]\n  board[from.r][from.c] = ' '\n  return { board: board, turn: white ? 'b' : 'w', ok: true }\n}\n\n// The position to solve, replayed from the game. Lichess's `initialPly` is the\n// 0-based index of the last move played before the solver's turn, so the\n// position comes after initialPly + 1 plies. Without one, the whole PGN is\n// replayed: Lichess ends the game's PGN at the puzzle.\nfunction fenFromPgn(pgn, initialPly) {\n  let board = initialBoard()\n  let turn = 'w'\n  const moves = tokenizePgn(pgn)\n  const lastPlyIndex = parseInt(initialPly, 10)\n  const targetPly = isNaN(lastPlyIndex) ? moves.length : Math.max(0, lastPlyIndex + 1)\n  let ply = 0\n  for (let i = 0; i < moves.length && ply < targetPly; i++) {\n    const result = applySan(board, turn, moves[i])\n    if (!result.ok) continue\n    board = result.board\n    turn = result.turn\n    ply++\n  }\n  if (ply === 0 && targetPly > 0) return ''\n  return boardToFen(board, turn)\n}\n\n// The board and the card read the position from `game.fen`. Lichess sends the\n// position to solve, side to move included, as `puzzle.fen`: that wins. Without\n// it a `game.fen` is used as it is, else the position is replayed from the PGN.\nfunction normalizePuzzle(data) {\n  const puzzle = data && data.puzzle ? data : null\n  if (!puzzle || !puzzle.game) return null\n  const puzzleFen = puzzle.puzzle && puzzle.puzzle.fen ? String(puzzle.puzzle.fen) : ''\n  if (!puzzleFen && puzzle.game.fen) return puzzle\n\n  const fen = puzzleFen || fenFromPgn(puzzle.game.pgn, puzzle.puzzle && puzzle.puzzle.initialPly)\n  if (!fen) return null\n  const copy = JSON.parse(JSON.stringify(puzzle))\n  copy.game.fen = fen\n  return copy\n}\n\nfunction squareToPoint(square, boardX, boardY, squareSize, flipped) {\n  const file = FILES.indexOf(square.charAt(0))\n  const rank = parseInt(square.charAt(1), 10)\n  if (file < 0 || rank < 1 || rank > 8) return null\n  const col = flipped ? 7 - file : file\n  const row = flipped ? rank - 1 : 8 - rank\n  return { x: boardX + (col + 0.5) * squareSize, y: boardY + (row + 0.5) * squareSize }\n}\n\nfunction wrapText(text, maxChars, maxLines) {\n  const words = String(text || '').split(/\\s+/).filter(Boolean)\n  const lines = []\n  let line = ''\n  for (let i = 0; i < words.length; i++) {\n    const word = words[i]\n    const next = line ? line + ' ' + word : word\n    if (next.length <= maxChars || !line) {\n      line = next\n    } else {\n      lines.push(line)\n      line = word\n      if (lines.length >= maxLines) break\n    }\n  }\n  if (line && lines.length < maxLines) lines.push(line)\n  if (words.length && lines.length === maxLines) {\n    const used = lines.join(' ').split(/\\s+/).filter(Boolean).length\n    if (used < words.length) lines[maxLines - 1] = lines[maxLines - 1].replace(/[.,;:]*$/, '') + '…'\n  }\n  return lines\n}\n\n// Coordinates and sizes worked out in code go into the drawing with two decimals.\nfunction px(value) {\n  return value.toFixed(2)\n}\n\n// One <text> per line, `lineHeight` apart, the first line's baseline at y.\nfunction TextLines({ lines, x, y, size, color, anchor = 'start', lineHeight, weight }) {\n  const family = weight === 'bold' ? 'PTSans-Bold.ttf' : 'PTSans-Regular.ttf'\n  return lines.map(function (line, i) {\n    return (\n      <text x={px(x)} y={px(y + i * lineHeight)} fontFamily={family} fontSize={px(size)} fill={color} textAnchor={anchor}>\n        {line}\n      </text>\n    )\n  })\n}\n\n// The faint pawn watermark in the corner of the info card.\nfunction PawnIcon({ x, y, size, color, opacity }) {\n  const s = size\n  // A point `dx`, `dy` icon sizes away from the icon's centre, as path data.\n  const at = (dx, dy) => px(x + s * dx) + ' ' + px(y + s * dy)\n  return (\n    <g opacity={opacity}>\n      <circle cx={px(x)} cy={px(y - s * 0.26)} r={px(s * 0.16)} fill={color} />\n      <path d={`M ${at(-0.21, -0.04)} C ${at(-0.18, -0.24)} ${at(0.18, -0.24)} ${at(0.21, -0.04)} L ${at(0.12, 0.22)} L ${at(-0.12, 0.22)} Z`} fill={color} />\n      <rect x={px(x - s * 0.28)} y={px(y + s * 0.22)} width={px(s * 0.56)} height={px(s * 0.1)} rx={px(s * 0.04)} fill={color} />\n      <rect x={px(x - s * 0.38)} y={px(y + s * 0.34)} width={px(s * 0.76)} height={px(s * 0.1)} rx={px(s * 0.05)} fill={color} />\n    </g>\n  )\n}\n\n// Bold Staunton-inspired silhouettes: the crown, cross, mitre and horse head\n// are intentionally much larger than their bases for instant recognition.\n// Drawn on a 100-unit square around 0,0; Piece scales them to the square.\nfunction Silhouette({ kind, stroke }) {\n  if (kind === 'k') {\n    return (\n      <>\n        <path d=\"M-4-37H4v7h7v7H4v8H-4v-8h-7v-7h7z\" />\n        <path d=\"M-12-12H12L16 22H21v7H-21v-7h5z\" />\n        <rect x=\"-23\" y=\"30\" width=\"46\" height=\"7\" rx=\"2\" />\n      </>\n    )\n  }\n  if (kind === 'q') {\n    return (\n      <>\n        <path d=\"M-21-28L-10-10 0-34 10-10 21-28 15 23H22v7H-22v-7h7z\" />\n        <circle cx=\"-21\" cy=\"-28\" r=\"4\" />\n        <circle cx=\"0\" cy=\"-34\" r=\"4\" />\n        <circle cx=\"21\" cy=\"-28\" r=\"4\" />\n        <rect x=\"-24\" y=\"30\" width=\"48\" height=\"7\" rx=\"2\" />\n      </>\n    )\n  }\n  if (kind === 'b') {\n    return (\n      <>\n        <path d=\"M0-38C-22-20-19 2-9 20H9C19 2 22-20 0-38z\" />\n        <path d=\"M-11-20L11-2\" fill=\"none\" stroke={stroke} strokeWidth=\"4\" />\n        <rect x=\"-20\" y=\"21\" width=\"40\" height=\"9\" rx=\"2\" />\n        <rect x=\"-25\" y=\"30\" width=\"50\" height=\"7\" rx=\"2\" />\n      </>\n    )\n  }\n  // The knight.\n  return (\n    <>\n      <path d=\"M-20 23H19L13 4C21-22 6-38-12-29l4 12-10 16z\" />\n      <path d=\"M-7-28L-20-38-16-13\" />\n      <circle cx=\"7\" cy=\"-17\" r=\"3\" fill={stroke} stroke=\"none\" />\n      <rect x=\"-24\" y=\"23\" width=\"48\" height=\"8\" rx=\"2\" />\n    </>\n  )\n}\n\nfunction Piece({ piece, cx, cy, sq }) {\n  const white = piece === piece.toUpperCase()\n  const fill = white ? '#fffaf0' : '#14212a'\n  const stroke = white ? '#26323a' : '#f7ead7'\n  const kind = piece.toLowerCase()\n  const u = sq * 0.1\n  // A point `dx`, `dy` tenths of a square away from the square's centre, as path data.\n  const at = (dx, dy) => px(cx + u * dx) + ' ' + px(cy + u * dy)\n\n  // Every piece's outline is this many pixels wide.\n  const outline = Math.max(0.8, sq * 0.016)\n\n  let shapes\n  if (kind === 'k' || kind === 'q' || kind === 'b' || kind === 'n') {\n    // The scale applies to stroke widths too, so the silhouettes get the\n    // outline divided by it.\n    const scale = sq * 0.01\n    shapes = (\n      <g transform={`translate(${px(cx)} ${px(cy)}) scale(${scale.toFixed(3)})`} strokeWidth={(outline / scale).toFixed(3)}>\n        <Silhouette kind={kind} stroke={stroke} />\n      </g>\n    )\n  } else {\n    // The pawn, the rook, and a plain figure for a letter the FEN should not\n    // hold, each standing on the same base.\n    let figure\n    if (kind === 'p') {\n      figure = (\n        <>\n          <circle cx={px(cx)} cy={px(cy - u * 2.15)} r={px(u * 0.88)} />\n          <path d={`M ${at(-1.35, 2.5)} L ${at(1.35, 2.5)} L ${at(0.85, -1.05)} Q ${at(0, -1.55)} ${at(-0.85, -1.05)} Z`} />\n        </>\n      )\n    } else if (kind === 'r') {\n      figure = (\n        <>\n          <path d={`M ${at(-1.25, 2.45)} L ${at(1.25, 2.45)} L ${at(0.86, -1.5)} L ${at(-0.86, -1.5)} Z`} />\n          <path d={`M ${at(-1.15, -1.5)} L ${at(-1.15, -2.35)} L ${at(-0.52, -2.35)} L ${at(-0.52, -1.88)} L ${at(0.52, -1.88)} L ${at(0.52, -2.35)} L ${at(1.15, -2.35)} L ${at(1.15, -1.5)} Z`} />\n        </>\n      )\n    } else {\n      figure = (\n        <>\n          <path d={`M ${at(-1.3, 2.45)} L ${at(1.3, 2.45)} L ${at(0.92, -0.45)} L ${at(0, -2.85)} L ${at(-0.92, -0.45)} Z`} />\n          <path d={`M ${at(-0.48, -1.65)} L ${at(0.5, -0.6)}`} fill=\"none\" stroke={stroke} strokeWidth={px(Math.max(1.5, sq * 0.03))} />\n        </>\n      )\n    }\n    shapes = (\n      <>\n        {figure}\n        <rect x={px(cx - u * 1.65)} y={px(cy + u * 2.42)} width={px(u * 3.3)} height={px(u * 0.42)} rx={px(u * 0.14)} />\n      </>\n    )\n  }\n\n  return (\n    <g fill={fill} stroke={stroke} strokeWidth={px(outline)} strokeLinejoin=\"round\">\n      {shapes}\n    </g>\n  )\n}\n\nfunction Board({ params, puzzle, revealed }) {\n  const fen = parseFen(puzzle.game && puzzle.game.fen)\n  const flipped = params.autoOrient && fen.turn === 'b'\n  const boardX = params.boardX\n  const boardY = params.boardY\n  const boardSize = params.boardSize\n  const sq = boardSize / 8\n  const firstMove = puzzle.puzzle && puzzle.puzzle.solution ? puzzle.puzzle.solution[0] : ''\n  const from = firstMove ? firstMove.substring(0, 2) : ''\n  const to = firstMove ? firstMove.substring(2, 4) : ''\n  const fromPoint = revealed ? squareToPoint(from, boardX, boardY, sq, flipped) : null\n  const toPoint = revealed ? squareToPoint(to, boardX, boardY, sq, flipped) : null\n\n  // The squares, with the first move's two squares marked once revealed.\n  const squares = []\n  for (let row = 0; row < 8; row++) {\n    for (let col = 0; col < 8; col++) {\n      const file = flipped ? 7 - col : col\n      const rankIndex = flipped ? 7 - row : row\n      const squareName = FILES.charAt(file) + (8 - rankIndex)\n      const fill = (row + col) % 2 === 0 ? params.lightSquare : params.darkSquare\n      const x = boardX + col * sq\n      const y = boardY + row * sq\n      squares.push(<rect x={px(x)} y={px(y)} width={px(sq)} height={px(sq)} fill={fill} />)\n      if (revealed && (squareName === from || squareName === to)) {\n        squares.push(<rect x={px(x + sq * 0.06)} y={px(y + sq * 0.06)} width={px(sq * 0.88)} height={px(sq * 0.88)} fill={params.accent} opacity=\"0.18\" />)\n        squares.push(<rect x={px(x + sq * 0.08)} y={px(y + sq * 0.08)} width={px(sq * 0.84)} height={px(sq * 0.84)} fill=\"none\" stroke={params.accent} strokeWidth={px(Math.max(2, sq * 0.045))} />)\n      }\n    }\n  }\n\n  const coordinates = []\n  if (params.showCoordinates) {\n    const coordSize = clamp(sq * 0.17, 7, 18)\n    for (let i = 0; i < 8; i++) {\n      const fileLabel = flipped ? FILES.charAt(7 - i) : FILES.charAt(i)\n      const rankLabel = flipped ? String(i + 1) : String(8 - i)\n      coordinates.push(\n        <text x={px(boardX + i * sq + sq * 0.08)} y={px(boardY + boardSize - sq * 0.08)} fontFamily=\"PTSans-Bold.ttf\" fontSize={px(coordSize)} fill=\"#19232a\" opacity=\"0.62\">\n          {fileLabel}\n        </text>\n      )\n      coordinates.push(\n        <text x={px(boardX + sq * 0.08)} y={px(boardY + i * sq + coordSize + sq * 0.06)} fontFamily=\"PTSans-Bold.ttf\" fontSize={px(coordSize)} fill=\"#19232a\" opacity=\"0.62\">\n          {rankLabel}\n        </text>\n      )\n    }\n  }\n\n  const pieces = []\n  for (let row = 0; row < 8; row++) {\n    for (let col = 0; col < 8; col++) {\n      const piece = fen.board[row][col]\n      if (!piece) continue\n      const boardCol = flipped ? 7 - col : col\n      const boardRow = flipped ? 7 - row : row\n      const cx = boardX + (boardCol + 0.5) * sq\n      const cy = boardY + (boardRow + 0.5) * sq\n      pieces.push(<Piece piece={piece} cx={cx} cy={cy} sq={sq} />)\n    }\n  }\n\n  // Once revealed, an arrow (with a soft shadow) along the first move.\n  let arrow = null\n  if (fromPoint && toPoint) {\n    const angle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x)\n    const head = sq * 0.18\n    const endX = toPoint.x - Math.cos(angle) * sq * 0.26\n    const endY = toPoint.y - Math.sin(angle) * sq * 0.26\n    const startX = fromPoint.x + Math.cos(angle) * sq * 0.26\n    const startY = fromPoint.y + Math.sin(angle) * sq * 0.26\n    const leftX = endX - Math.cos(angle) * head - Math.cos(angle + Math.PI / 2) * head * 0.72\n    const leftY = endY - Math.sin(angle) * head - Math.sin(angle + Math.PI / 2) * head * 0.72\n    const rightX = endX - Math.cos(angle) * head - Math.cos(angle - Math.PI / 2) * head * 0.72\n    const rightY = endY - Math.sin(angle) * head - Math.sin(angle - Math.PI / 2) * head * 0.72\n    arrow = (\n      <>\n        <line x1={px(startX + sq * 0.02)} y1={px(startY + sq * 0.02)} x2={px(endX + sq * 0.02)} y2={px(endY + sq * 0.02)} stroke=\"#08131b\" strokeWidth={px(Math.max(3, sq * 0.1))} opacity=\"0.22\" />\n        <line x1={px(startX)} y1={px(startY)} x2={px(endX)} y2={px(endY)} stroke={params.accent} strokeWidth={px(Math.max(3, sq * 0.085))} />\n        <polygon points={`${px(endX)},${px(endY)} ${px(leftX)},${px(leftY)} ${px(rightX)},${px(rightY)}`} fill={params.accent} />\n      </>\n    )\n  }\n\n  return (\n    <>\n      {/* Shadow, frame and inner rim around the board */}\n      <rect x={px(boardX - boardSize * 0.045)} y={px(boardY + boardSize * 0.035)} width={px(boardSize * 1.09)} height={px(boardSize * 1.03)} rx={px(sq * 0.28)} fill=\"#05101a\" opacity=\"0.28\" />\n      <rect x={px(boardX - boardSize * 0.032)} y={px(boardY - boardSize * 0.032)} width={px(boardSize * 1.064)} height={px(boardSize * 1.064)} rx={px(sq * 0.22)} fill=\"#0b1621\" />\n      <rect x={px(boardX - boardSize * 0.018)} y={px(boardY - boardSize * 0.018)} width={px(boardSize * 1.036)} height={px(boardSize * 1.036)} rx={px(sq * 0.16)} fill=\"#d8c6a6\" opacity=\"0.28\" />\n      {squares}\n      <rect x={px(boardX)} y={px(boardY)} width={px(boardSize)} height={px(boardSize)} fill=\"none\" stroke=\"#13202a\" strokeWidth={px(Math.max(1.5, sq * 0.026))} />\n      {coordinates}\n      {pieces}\n      {arrow}\n    </>\n  )\n}\n\nfunction InfoCard({ params, puzzle, revealed }) {\n  const x = params.infoX\n  const y = params.infoY\n  const w = params.infoW\n  const h = params.infoH\n  const pad = params.infoPad\n  const puzzleData = puzzle.puzzle || {}\n  const fen = parseFen(puzzle.game && puzzle.game.fen)\n  const side = fen.turn === 'b' ? 'Black' : 'White'\n  const titleSize = clamp(Math.min(w, h) * 0.105, 22, 48)\n  const small = clamp(Math.min(w, h) * 0.052, 12, 22)\n  const body = clamp(Math.min(w, h) * 0.064, 15, 28)\n  let cursor = y + pad\n\n  // The card's text, top to bottom: `cursor` is where the next block starts.\n  const content = []\n\n  const titleLines = wrapText(params.title, Math.max(8, Math.floor((w - pad * 2) / (titleSize * 0.52))), 2)\n  content.push(<TextLines lines={titleLines} x={x + pad} y={cursor + titleSize} size={titleSize} color=\"#14202b\" lineHeight={titleSize * 1.05} weight=\"bold\" />)\n  cursor += titleLines.length * titleSize * 1.05 + small * 0.6\n\n  const meta = []\n  if (puzzleData.rating) meta.push('Rated ' + puzzleData.rating)\n  if (puzzleData.id) meta.push('#' + puzzleData.id)\n  if (puzzle.notice) meta.push('Sample')\n  if (meta.length) {\n    // Wrapped like the rest of the card's text (digits and short words: half\n    // the font size a character), and no line starts or ends with a separator.\n    const metaLines = wrapText(meta.join(' · '), Math.max(10, Math.floor((w - pad * 2) / (small * 0.5))), 2).map(function (line) {\n      return line.replace(/^·\\s*/, '').replace(/\\s*·(…?)$/, '$1')\n    })\n    content.push(<TextLines lines={metaLines} x={x + pad} y={cursor + small} size={small} color=\"#5c665f\" lineHeight={small * 1.2} weight=\"regular\" />)\n    cursor += (metaLines.length - 1) * small * 1.2 + small * 1.7\n  }\n\n  content.push(<line x1={px(x + pad)} y1={px(cursor)} x2={px(x + w - pad)} y2={px(cursor)} stroke=\"#d8cdb9\" strokeWidth=\"1.4\" />)\n  cursor += pad * 0.9\n\n  if (revealed) {\n    const solution = (puzzleData.solution || []).map(moveToText).filter(Boolean)\n    const headline = solution.length ? 'Solution: ' + solution[0] : 'Solution revealed'\n    content.push(<TextLines lines={[headline]} x={x + pad} y={cursor + body} size={body} color={params.accent} lineHeight={body * 1.2} weight=\"bold\" />)\n    cursor += body * 1.65\n    if (solution.length > 1) {\n      const lines = wrapText(solution.join('  '), Math.max(10, Math.floor((w - pad * 2) / (small * 0.55))), 3)\n      content.push(<TextLines lines={lines} x={x + pad} y={cursor + small} size={small} color=\"#26323a\" lineHeight={small * 1.28} weight=\"regular\" />)\n      cursor += lines.length * small * 1.28 + small * 0.6\n    }\n    const noteLines = wrapText('The arrow marks the first move. Calculate the full line, then compare it with the continuation.', Math.max(12, Math.floor((w - pad * 2) / (small * 0.54))), 4)\n    content.push(<TextLines lines={noteLines} x={x + pad} y={cursor + small} size={small} color=\"#5c665f\" lineHeight={small * 1.28} weight=\"regular\" />)\n  } else {\n    const promptLines = wrapText(side + ' to move. Find the strongest continuation.', Math.max(10, Math.floor((w - pad * 2) / (body * 0.54))), 3)\n    content.push(<TextLines lines={promptLines} x={x + pad} y={cursor + body} size={body} color=\"#14202b\" lineHeight={body * 1.22} weight=\"bold\" />)\n    cursor += promptLines.length * body * 1.22 + small\n    const hintLines = wrapText('Press a frame button to reveal or hide the solution.', Math.max(12, Math.floor((w - pad * 2) / (small * 0.54))), 4)\n    content.push(<TextLines lines={hintLines} x={x + pad} y={cursor + small} size={small} color=\"#5c665f\" lineHeight={small * 1.28} weight=\"regular\" />)\n  }\n\n  // The themes sit at the bottom of the card.\n  if (params.showThemes && puzzleData.themes && puzzleData.themes.length) {\n    const themes = puzzleData.themes.slice(0, 4).map(titleCaseTheme).join(' · ')\n    const themeSize = clamp(small * 0.85, 10, 18)\n    const lines = wrapText(themes, Math.max(12, Math.floor((w - pad * 2) / (themeSize * 0.54))), 2)\n    const startY = y + h - pad - (lines.length - 1) * themeSize * 1.2\n    content.push(<TextLines lines={lines} x={x + pad} y={startY} size={themeSize} color=\"#7b6b54\" lineHeight={themeSize * 1.2} weight=\"regular\" />)\n  }\n\n  return (\n    <>\n      {/* Shadow, paper, accent bar, a dot and the pawn watermark */}\n      <rect x={px(x + pad * 0.18)} y={px(y + pad * 0.26)} width={px(w)} height={px(h)} rx={px(pad * 0.68)} fill=\"#05101a\" opacity=\"0.22\" />\n      <rect x={px(x)} y={px(y)} width={px(w)} height={px(h)} rx={px(pad * 0.65)} fill=\"url(#paper)\" />\n      <rect x={px(x)} y={px(y)} width={px(Math.max(4, pad * 0.28))} height={px(h)} rx={px(pad * 0.18)} fill={params.accent} />\n      <circle cx={px(x + w - pad * 0.9)} cy={px(y + pad * 1.05)} r={px(pad * 0.32)} fill={params.accent} opacity=\"0.16\" />\n      <PawnIcon x={x + w - pad * 1.4} y={y + h - pad * 1.35} size={Math.min(w, h) * 0.55} color={params.accent} opacity={0.08} />\n      {content}\n    </>\n  )\n}\n\nfunction renderPuzzle(W, H, config, puzzle, revealed) {\n  const m = Math.min(W, H)\n  const pad = clamp(m * 0.045, 16, 54)\n  const gap = clamp(m * 0.035, 14, 42)\n  const portrait = H > W\n  const params = {\n    title: String(config.title || 'Chess puzzle of the day'),\n    accent: hex(config.accentColor, '#c08457'),\n    lightSquare: hex(config.lightSquare, '#f3ead7'),\n    darkSquare: hex(config.darkSquare, '#6e7f71'),\n    showCoordinates: boolValue(config.showCoordinates, true),\n    autoOrient: boolValue(config.autoOrient, true),\n    showThemes: boolValue(config.showThemes, true)\n  }\n\n  if (portrait) {\n    // Give the board most of the screen width and height; the information card\n    // uses the remaining full-width band below it.\n    params.boardSize = Math.min(W - pad * 2, H * 0.7 - pad - gap)\n    params.boardX = (W - params.boardSize) / 2\n    params.boardY = pad\n    params.infoX = pad\n    params.infoY = params.boardY + params.boardSize + gap\n    params.infoW = W - pad * 2\n    params.infoH = H - params.infoY - pad\n  } else {\n    // Reserve only a readable minimum for the side card, so the board can\n    // grow to nearly the full display height on wide panels.\n    const minInfoWidth = Math.max(m * 0.32, W * 0.21)\n    params.boardSize = Math.min(H - pad * 2, W - pad * 2 - gap - minInfoWidth)\n    params.boardX = pad\n    params.boardY = (H - params.boardSize) / 2\n    params.infoX = params.boardX + params.boardSize + gap\n    params.infoY = pad\n    params.infoW = W - params.infoX - pad\n    params.infoH = H - pad * 2\n  }\n  params.infoPad = clamp(Math.min(params.infoW, params.infoH) * 0.075, 14, 34)\n\n  const bgTop = hex(config.backgroundTop, '#11243a')\n  const bgBottom = hex(config.backgroundBottom, '#213b45')\n  const boardCx = params.boardX + params.boardSize * 0.5\n  const boardCy = params.boardY + params.boardSize * 0.5\n  const glowR = params.boardSize * 0.8\n\n  return (\n    <svg xmlns=\"http://www.w3.org/2000/svg\" width={W} height={H} viewBox={`0 0 ${W} ${H}`}>\n      <defs>\n        <linearGradient id=\"bg\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2=\"0\" y2={H}>\n          <stop offset=\"0\" stopColor={bgTop} />\n          <stop offset=\"1\" stopColor={bgBottom} />\n        </linearGradient>\n        <linearGradient id=\"paper\" gradientUnits=\"userSpaceOnUse\" x1={px(params.infoX)} y1={px(params.infoY)} x2={px(params.infoX + params.infoW)} y2={px(params.infoY + params.infoH)}>\n          <stop offset=\"0\" stopColor=\"#fff7e8\" />\n          <stop offset=\"1\" stopColor=\"#eadcc4\" />\n        </linearGradient>\n        <radialGradient id=\"boardGlow\" gradientUnits=\"userSpaceOnUse\" cx={px(boardCx)} cy={px(boardCy)} r={px(glowR)}>\n          <stop offset=\"0\" stopColor={params.accent} stopOpacity=\"0.34\" />\n          <stop offset=\"0.55\" stopColor={params.accent} stopOpacity=\"0.12\" />\n          <stop offset=\"1\" stopColor={params.accent} stopOpacity=\"0\" />\n        </radialGradient>\n        <radialGradient id=\"cornerGlow\" gradientUnits=\"userSpaceOnUse\" cx={W} cy=\"0\" r={px(m * 0.52)}>\n          <stop offset=\"0\" stopColor=\"#f4dca7\" stopOpacity=\"0.24\" />\n          <stop offset=\"1\" stopColor=\"#f4dca7\" stopOpacity=\"0\" />\n        </radialGradient>\n        <radialGradient id=\"vignette\" gradientUnits=\"userSpaceOnUse\" cx={px(W * 0.5)} cy={px(H * 0.5)} r={px(Math.max(W, H) * 0.74)}>\n          <stop offset=\"0.58\" stopColor=\"#07111b\" stopOpacity=\"0\" />\n          <stop offset=\"1\" stopColor=\"#07111b\" stopOpacity=\"0.38\" />\n        </radialGradient>\n      </defs>\n      <rect x=\"0\" y=\"0\" width={W} height={H} fill=\"url(#bg)\" />\n      <rect x=\"0\" y=\"0\" width={W} height={H} fill=\"url(#cornerGlow)\" />\n      <circle cx={px(boardCx)} cy={px(boardCy)} r={px(glowR)} fill=\"url(#boardGlow)\" />\n      <circle cx={px(W - pad * 1.2)} cy={px(pad * 1.15)} r={px(m * 0.18)} fill={params.accent} opacity=\"0.12\" />\n      <circle cx={px(pad * 0.8)} cy={px(H - pad * 0.6)} r={px(m * 0.22)} fill=\"#ffffff\" opacity=\"0.035\" />\n      <Board params={params} puzzle={puzzle} revealed={revealed} />\n      <InfoCard params={params} puzzle={puzzle} revealed={revealed} />\n      <rect x=\"0\" y=\"0\" width={W} height={H} fill=\"url(#vignette)\" />\n    </svg>\n  )\n}\n\nexport function get(app, context) {\n  const W = context.imageWidth || app.frame.width\n  const H = context.imageHeight || app.frame.height\n  const url = String(app.config.puzzleUrl || '').trim() || 'https://lichess.org/api/puzzle/daily'\n  let puzzle = null\n\n  try {\n    puzzle = normalizePuzzle(frameos.fetchJson(url))\n  } catch (error) {\n    puzzle = null\n  }\n\n  if (!puzzle) {\n    puzzle = SAMPLE_PUZZLE\n  }\n\n  const puzzleId = String((puzzle.puzzle && puzzle.puzzle.id) || (puzzle.game && puzzle.game.id) || (puzzle.game && puzzle.game.fen) || 'daily')\n  const saved = app.state.lichessPuzzleOfTheDay || {}\n  const revealed = saved.puzzleId === puzzleId && saved.revealed === true\n\n  frameos.setState('lichessPuzzleOfTheDay', {\n    puzzleId: puzzleId,\n    seen: true,\n    revealed: revealed,\n    lastEvent: context.event || 'render'\n  })\n\n  return renderPuzzle(W, H, app.config, puzzle, revealed)\n}\n"
+        },
+        "origin": "lichessPuzzlePanel"
+      },
+      "toggleSolution": {
+        "sources": {
+          "app.ts": "export function run(app, context) {\n  const saved = app.state.lichessPuzzleOfTheDay || {}\n  frameos.setState('lichessPuzzleOfTheDay', {\n    puzzleId: saved.puzzleId || '',\n    seen: true,\n    revealed: !saved.revealed,\n    lastEvent: context.event || 'button'\n  })\n  return null\n}\n",
+          "config.json": "{\n  \"name\": \"Toggle chess solution\",\n  \"category\": \"logic\",\n  \"description\": \"Toggles whether the current chess puzzle solution is shown when a frame button is pressed.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [],\n  \"permissions\": []\n}\n"
+        },
+        "origin": "toggleSolution",
+        "name": "Toggle chess solution",
+        "category": "logic",
+        "description": "Toggles whether the current chess puzzle solution is shown when a frame button is pressed.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": []
+      }
+    },
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "data": {
+          "keyword": "render"
+        },
+        "position": {
+          "x": 0,
+          "y": 1
+        }
+      },
+      {
+        "id": "button-event",
+        "type": "event",
+        "data": {
+          "keyword": "button",
+          "config": {
+            "action": "press"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 258
+        }
+      },
+      {
+        "id": "field-puzzle-url",
+        "type": "state",
+        "data": {
+          "keyword": "puzzleUrl",
+          "value": "https://lichess.org/api/puzzle/daily"
+        },
+        "position": {
+          "x": 327,
+          "y": -494
+        }
+      },
+      {
+        "id": "field-title",
+        "type": "state",
+        "data": {
+          "keyword": "title",
+          "value": "Chess puzzle of the day"
+        },
+        "position": {
+          "x": 303,
+          "y": -558
+        }
+      },
+      {
+        "id": "field-accent",
+        "type": "state",
+        "data": {
+          "keyword": "accentColor",
+          "value": "#c08457"
+        },
+        "position": {
+          "x": 279,
+          "y": -622
+        }
+      },
+      {
+        "id": "field-bg-top",
+        "type": "state",
+        "data": {
+          "keyword": "backgroundTop",
+          "value": "#11243a"
+        },
+        "position": {
+          "x": 255,
+          "y": -686
+        }
+      },
+      {
+        "id": "field-bg-bottom",
+        "type": "state",
+        "data": {
+          "keyword": "backgroundBottom",
+          "value": "#213b45"
+        },
+        "position": {
+          "x": 231,
+          "y": -750
+        }
+      },
+      {
+        "id": "field-light",
+        "type": "state",
+        "data": {
+          "keyword": "lightSquare",
+          "value": "#f3ead7"
+        },
+        "position": {
+          "x": 207,
+          "y": -814
+        }
+      },
+      {
+        "id": "field-dark",
+        "type": "state",
+        "data": {
+          "keyword": "darkSquare",
+          "value": "#6e7f71"
+        },
+        "position": {
+          "x": 183,
+          "y": -878
+        }
+      },
+      {
+        "id": "field-coords",
+        "type": "state",
+        "data": {
+          "keyword": "showCoordinates",
+          "value": "true"
+        },
+        "position": {
+          "x": 159,
+          "y": -942
+        }
+      },
+      {
+        "id": "field-orient",
+        "type": "state",
+        "data": {
+          "keyword": "autoOrient",
+          "value": "true"
+        },
+        "position": {
+          "x": 135,
+          "y": -1006
+        }
+      },
+      {
+        "id": "field-themes",
+        "type": "state",
+        "data": {
+          "keyword": "showThemes",
+          "value": "true"
+        },
+        "position": {
+          "x": 111,
+          "y": -1070
+        }
+      },
+      {
+        "id": "puzzle-panel",
+        "type": "app",
+        "data": {
+          "keyword": "lichessPuzzlePanel",
+          "config": {}
+        },
+        "position": {
+          "x": 359,
+          "y": -414
+        }
+      },
+      {
+        "id": "render-image",
+        "type": "app",
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        },
+        "position": {
+          "x": 394,
+          "y": 0
+        }
+      },
+      {
+        "id": "cb0717e5-5349-4051-a112-0e22086f5337",
+        "position": {
+          "x": 815,
+          "y": 307
+        },
+        "data": {
+          "keyword": "render",
+          "config": {}
+        },
+        "type": "dispatch"
+      },
+      {
+        "id": "toggle-solution",
+        "type": "app",
+        "data": {
+          "keyword": "toggleSolution",
+          "config": {}
+        },
+        "position": {
+          "x": 390,
+          "y": 307
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-render-to-image",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "render-image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "edge-panel-to-image",
+        "type": "codeNodeEdge",
+        "source": "puzzle-panel",
+        "target": "render-image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      },
+      {
+        "id": "edge-url",
+        "type": "codeNodeEdge",
+        "source": "field-puzzle-url",
+        "target": "puzzle-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/puzzleUrl"
+      },
+      {
+        "id": "edge-title",
+        "type": "codeNodeEdge",
+        "source": "field-title",
+        "target": "puzzle-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/title"
+      },
+      {
+        "id": "edge-accent",
+        "type": "codeNodeEdge",
+        "source": "field-accent",
+        "target": "puzzle-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/accentColor"
+      },
+      {
+        "id": "edge-bg-top",
+        "type": "codeNodeEdge",
+        "source": "field-bg-top",
+        "target": "puzzle-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/backgroundTop"
+      },
+      {
+        "id": "edge-bg-bottom",
+        "type": "codeNodeEdge",
+        "source": "field-bg-bottom",
+        "target": "puzzle-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/backgroundBottom"
+      },
+      {
+        "id": "edge-light",
+        "type": "codeNodeEdge",
+        "source": "field-light",
+        "target": "puzzle-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/lightSquare"
+      },
+      {
+        "id": "edge-dark",
+        "type": "codeNodeEdge",
+        "source": "field-dark",
+        "target": "puzzle-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/darkSquare"
+      },
+      {
+        "id": "edge-coords",
+        "type": "codeNodeEdge",
+        "source": "field-coords",
+        "target": "puzzle-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/showCoordinates"
+      },
+      {
+        "id": "edge-orient",
+        "type": "codeNodeEdge",
+        "source": "field-orient",
+        "target": "puzzle-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/autoOrient"
+      },
+      {
+        "id": "edge-themes",
+        "type": "codeNodeEdge",
+        "source": "field-themes",
+        "target": "puzzle-panel",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/showThemes"
+      },
+      {
+        "id": "edge-button-to-toggle",
+        "type": "appNodeEdge",
+        "source": "button-event",
+        "target": "toggle-solution",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "edge-toggle-to-render",
+        "type": "appNodeEdge",
+        "source": "toggle-solution",
+        "target": "cb0717e5-5349-4051-a112-0e22086f5337",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      }
+    ],
+    "customEvents": []
+  }
+]

@@ -75,6 +75,25 @@ describe("installing a catalog scene", () => {
     expect(frameLogic({ frameId }).values.frameForm.scenes?.map((scene) => scene.name)).toEqual(["Weather"]);
   });
 
+  it("puts the scene on the frame: saved and pushed, not left in a form nobody has open", async () => {
+    // The Scenes page's Install and a drop on a frame's tile ran this with the
+    // frame's page closed: the scene sat unsaved in its form and never went out.
+    const logic = templatesLogic({ frameId });
+    logic.mount();
+    await waitFor(() => expect(frameLogic({ frameId }).values.frame?.id).toBe(63));
+    templateScenes = Promise.resolve(Response.json([{ id: "t-1", name: "Weather", nodes: [], edges: [] }]));
+    logic.actions.applyRemoteToFrame(repository, template);
+
+    const calls = () => apiFetchMock.mock.calls.map(([input, init]) => ({ url: String(input), init }));
+    await waitFor(() =>
+      expect(calls().some(({ url, init }) => /\/api\/frames\/63\/(fast_)?deploy/.test(url) && init?.method === "POST")).toBe(true),
+    );
+    const save = calls().find(
+      ({ url, init }) => /\/api\/frames\/63$/.test(url) && init?.method && init.method !== "GET" && String(init.body).includes("Weather"),
+    );
+    expect(save).toBeDefined();
+  });
+
   it("reports a download that fails, and lets go of the button", async () => {
     const logic = templatesLogic({ frameId });
     logic.mount();
