@@ -1,8 +1,10 @@
-## The Pixel toys sample scene (repo/scenes/samples/Pixel toys): six effects
-## computed cell by cell in JS and returned as `frameos.pixels`. Run for real
-## through the JS app runtime (its modules imported from the app's sources),
-## this pins that every effect draws and moves, that a seed makes it the same
-## on every frame type, which cell size each picks, and the scene's wiring.
+## The Pixel toys sample scene (repo/scenes/samples/Pixel toys): effects
+## computed cell by cell in JS and returned as `frameos.pixels`, one at a time
+## or all at once as layers, with controls and swipes. Run for real through
+## the JS app runtime (its modules imported from the app's sources), this pins
+## that every effect draws and moves, that a seed makes it the same on every
+## frame type, which cell size each picks, the grid, the controls and what a
+## tap or a swipe does, and the scene's wiring.
 
 import std/[json, monotimes, os, sequtils, strutils, times, unittest]
 import pixie
@@ -15,7 +17,8 @@ import frameos/values
 const
   Repo = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".."
   SamplePath = Repo / "repo" / "scenes" / "samples" / "Pixel toys" / "scenes.json"
-  Effects = ["fireworks", "fountain", "starfield", "blobs", "plasma", "life"]
+  Effects = ["fire", "bluefire", "greenfire", "fireworks", "fountain", "waterfall", "starfield", "matrix",
+    "ripples", "blobs", "plasma", "life"]
 
 let
   sample = parseJson(readFile(SamplePath))[0]
@@ -49,6 +52,11 @@ proc render(toys: Toys, config: JsonNode): Image =
     wholeFrame: false)
   toys.runtime.get(toys.owner, config, context).asImage()
 
+proc event(toys: Toys, config: JsonNode, name: string, payload: JsonNode) =
+  let context = ExecutionContext(scene: toys.scene, event: name, payload: payload,
+    hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+  discard toys.runtime.run(toys.owner, config, context, isEvent = true)
+
 proc same(a, b: Image): bool =
   if a.width != b.width or a.height != b.height:
     return false
@@ -58,32 +66,34 @@ proc same(a, b: Image): bool =
         return false
   true
 
-proc lit(image: Image): int =
-  for y in 0 ..< image.height:
-    for x in 0 ..< image.width:
+proc lit(image: Image, x0 = 0, y0 = 0, x1 = -1, y1 = -1): int =
+  for y in y0 ..< (if y1 < 0: image.height else: y1):
+    for x in x0 ..< (if x1 < 0: image.width else: x1):
       let c = image[x, y]
       if c.r.int + c.g.int + c.b.int > 3 * 0x30: inc result
 
 suite "Pixel toys":
-  test "the effects in the app's options are the effects the scene offers":
+  test "the effects the app offers are the effects the scene offers, all at once first":
     let options = app["fields"][0]["options"].mapIt(it.getStr())
-    check options == @Effects
-    check sample["fields"][0]["options"].mapIt(it["value"].getStr()) == @Effects
-    for effect in Effects:
-      check app["sources"].hasKey(effect & ".ts")
+    check options == @["all"] & @Effects
+    check sample["fields"][0]["options"].mapIt(it["value"].getStr()) == options
+    check sample["fields"][0]["value"].getStr() == "all"
 
-  test "effect, quality and the FPS counter are state fields wired into the app":
+  test "effect, quality, controls and the FPS counter are state fields wired into the app":
     var bound: seq[string]
     for edge in sample["edges"]:
       if edge["type"].getStr() == "codeNodeEdge" and edge["target"].getStr() == "toys":
         bound.add edge["source"].getStr() & " -> " & edge["targetHandle"].getStr()
-    check bound == @["effect -> fieldInput/effect", "quality -> fieldInput/pixelSize", "showFps -> fieldInput/showFps"]
+    check bound == @["effect -> fieldInput/effect", "quality -> fieldInput/pixelSize",
+      "controls -> fieldInput/showControls", "showFps -> fieldInput/showFps"]
     for field in sample["fields"]:
       check field["access"].getStr() == "public" and field["persist"].getStr() == "disk"
     check sample["settings"]["refreshInterval"].getFloat() < 1 # it animates
+    let events = parseJson(app["sources"]["config.json"].getStr())["events"]
+    check events == %*["tap", "swipe"]
 
   test "every effect draws, and moves":
-    for effect in Effects:
+    for effect in @["all"] & @Effects:
       let toys = newToys("tests/toys-draws-" & effect, 240, 160)
       let config = %*{"effect": effect, "pixelSize": "4", "seed": "11"}
       var frames: seq[Image]
@@ -95,7 +105,7 @@ suite "Pixel toys":
       check not same(frames[^1], frames[^2])
 
   test "the same seed is the same show; another seed another":
-    for effect in Effects:
+    for effect in @["all"] & @Effects:
       let
         a = newToys("tests/toys-a-" & effect, 160, 120)
         b = newToys("tests/toys-b-" & effect, 160, 120)
@@ -109,6 +119,22 @@ suite "Pixel toys":
       check same(x, y)
       check not same(x, z)
 
+  test "all at once is a grid of tiles, each an effect, with the background between them":
+    let toys = newToys("tests/toys-grid", 480, 480)
+    var frame: Image
+    for i in 0 ..< 20:
+      frame = toys.render(%*{"effect": "all", "pixelSize": "4", "seed": "5"})
+    # 3x3 slots of 154 px with 4 px gaps, each a 152 px tile in its middle:
+    # something lit in every tile, nothing between them.
+    for row in 0 ..< 3:
+      for col in 0 ..< 3:
+        let x0 = 5 + col * 158
+        let y0 = 5 + row * 158
+        checkpoint "tile " & $col & "," & $row
+        check lit(frame, x0, y0, x0 + 152, y0 + 152) > 100
+    check lit(frame, 157, 0, 163, 480) == 0
+    check lit(frame, 0, 157, 480, 163) == 0
+
   test "the automatic cell size is the effect's, coarser on an ESP32":
     let config = %*{"effect": "blobs", "pixelSize": "0", "seed": "3"}
     let host = newToys("tests/toys-auto-host", 64, 64).render(config)
@@ -118,7 +144,33 @@ suite "Pixel toys":
     let device = newToys("tests/toys-auto-device", 64, 64).render(config)
     check same(device, newToys("tests/toys-eight", 64, 64).render(%*{"effect": "blobs", "pixelSize": "8", "seed": "3"}))
 
-  test "switching the effect starts it, and the counter leaves it as it found it":
+  test "the controls are a bar along the bottom, and the effect stands above it":
+    let toys = newToys("tests/toys-controls", 480, 480)
+    let frame = toys.render(%*{"effect": "plasma", "pixelSize": "4", "seed": "5", "showControls": "true"})
+    check frame[2, 478] == rgbx(0x0b, 0x0e, 0x13, 255) # the bar's ground
+    check lit(frame, 0, 453, 480, 480) > 200 # its buttons and their text
+    check lit(frame, 0, 0, 480, 400) > 10000 # the plasma above it
+
+  test "a swipe and the buttons change the scene's state; a tile opens its effect":
+    let toys = newToys("tests/toys-events", 480, 480)
+    var config = %*{"effect": "fire", "pixelSize": "4", "seed": "5", "showControls": "true"}
+    discard toys.render(config)
+    toys.event(config, "swipe", %*{"direction": "left", "x": 240, "y": 240})
+    check toys.scene.state{"effect"}.getStr() == "bluefire"
+    toys.event(config, "swipe", %*{"direction": "right", "x": 240, "y": 240})
+    check toys.scene.state{"effect"}.getStr() == "all"
+    # The bar: "<" at its left end; "+" after the size, then FPS and ALL.
+    toys.event(config, "tap", %*{"x": 10, "y": 465})
+    check toys.scene.state{"effect"}.getStr() == "all"
+    toys.event(config, "tap", %*{"x": 460, "y": 465})
+    check toys.scene.state{"effect"}.getStr() == "all" # ALL from a single effect
+    # All at once: a tap on the middle tile opens it.
+    config = %*{"effect": "all", "pixelSize": "4", "seed": "5"}
+    discard toys.render(config)
+    toys.event(config, "tap", %*{"x": 240, "y": 240})
+    check toys.scene.state{"effect"}.getStr() == "blobs"
+
+  test "the counter leaves the effect as it found it":
     let
       plain = newToys("tests/toys-plain", 160, 160)
       counted = newToys("tests/toys-counted", 160, 160)
@@ -131,11 +183,9 @@ suite "Pixel toys":
       for y in 40 ..< 160:
         for x in 0 ..< 160:
           check a[x, y] == b[x, y]
-    let switched = plain.render(%*{"effect": "plasma", "pixelSize": "2", "seed": "8"})
-    check lit(switched) > 1000
 
   test "a 480x480 frame of each":
-    for effect in Effects:
+    for effect in @["all"] & @Effects:
       let toys = newToys("tests/toys-time-" & effect, 480, 480)
       let config = %*{"effect": effect, "pixelSize": "4", "seed": "1"}
       for i in 0 ..< 3:

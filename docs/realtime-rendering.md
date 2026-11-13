@@ -56,25 +56,37 @@ Doom's cooling of half a heat unit a row burns ~72 rows high, so a 60-row grid
 was a wall of fire. The pass now runs from the top down and the cooling
 follows the grid: the flames stand ~40% of the way up at any cell size.
 
-The **Pixel toys** sample (`repo/scenes/samples/Pixel toys`) is six more of
-the kind, each a module of one app: fireworks and a fountain (particles in
-typed arrays, trails dimmed through a table, only in the span of each row
-something was drawn in, half the rows a frame), a starfield, blobs
-(metaballs: each adds a falloff from a table by squared distance to the cells
-in its radius, and a `Uint8ClampedArray` clamps the sum), a plasma (a row's,
-a column's and a diagonal's wave from tables made once a frame, wrapping in a
-`Uint8Array`) and Life (32 cells to an integer, the neighbours counted by
-bit-sliced adders, the picture drawn only where something lived lately). On
-the SenseCAP Indicator, by the `render:animation` line:
+The **Pixel toys** sample (`repo/scenes/samples/Pixel toys`) is the rest of
+the kind, each effect a component of one app (`make(cols, rows)` gives its
+cells, palette and `step()`): fire (Hellfire's spread) in three colors,
+fireworks, a fountain and a waterfall (particles in typed arrays, trails dimmed
+through a table only in the span of each row something was drawn in, half the
+rows a frame), a starfield, Matrix rain (the 3x5 font), ripples (the two-buffer
+wave; a tap drops a stone), blobs (metaballs: a falloff from a table by squared
+distance to the cells in each radius, a `Uint8ClampedArray` clamping the sum),
+a plasma (a row's, a column's and a diagonal's wave from tables made once a
+frame, wrapping in a `Uint8Array`) and Life (32 cells to an integer, the
+neighbours counted by bit-sliced adders, the picture drawn only where something
+lived lately). "All at once" is nine of them as a grid of `frameos.pixels`
+layers, the controls one more layer; a swipe steps through them and a tap on a
+tile opens it. On the SenseCAP Indicator, by the `render:animation` line:
 
 | Effect | Automatic cells | fps | Other cells | fps |
 | --- | --- | --- | --- | --- |
+| All at once (3x3) | 4 px | 6.5 | 8 px | 9.8 |
+| Fire | 8 px | 23.4 | | |
 | Fireworks | 4 px | 18.7 | 8 px | 25.6 |
 | Fountain | 4 px | 14.4 | 8 px | 17.9 |
+| Waterfall | 4 px | 13.2 | | |
 | Starfield | 4 px | 17.1 | 8 px | 17.7 |
+| Matrix rain | 4 px | 15.2 | | |
+| Ripples | 8 px | 12.6 | | |
 | Blobs | 8 px | 15.3 | 4 px | 6.7 |
 | Plasma | 8 px | 16.6 | 4 px | 8.0 |
 | Life | 8 px | 18.8 | 4 px | 7.4 |
+
+With the controls or a counter over tiles, a frame is layers and keeps no copy
+of its cells: fire with its controls bar runs 14.2 fps against 23.4 alone.
 
 What the first versions spent and the rewrite took out, in a frame's `step`:
 the fireworks' fade over every row (30 of 34 ms), a `trails.plot` call and a
