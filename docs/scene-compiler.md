@@ -20,13 +20,15 @@ of the nodes that feed it.
 ```js
 "use strict";(__N)=>{let __at=0;
 const console={…}, __S=new Proxy(…state…), __C=new Proxy(…context…), __E={};
+const __F=((__N)=>{
 function __c42(A){const items=A["items"];return((state,args,context)=>(
 items.map(i => i.title)
 ))(__S,A,__C)}
-return(N=>{const{g,r,s,e,p,q,t,j,v,…}=N;
-function i7(){try{s(7,"image",g3())}catch(x){e(0,7,"image",3,x)}}
-function g3(){return g(3,X(3,__x0))}
-function f7(V){const P=p(7);i7();q(7,P);r(7);f8(V)}
+return{__c42}})();
+return(N=>{const{__c42}=__F;const{g,r,s,ei,p,q,t,j,v,…,L}=N;
+function i7(){try{s(7,"image",g3())}catch(x){EI(0,7,"image",3,x)}}
+function g3(){let h;h=g(3);return h}
+function f7(V){const P=p(7);i7();q(7,P);r(7);;f8(V)}
 …
 return{ev(n){…},flow(i){…},data(i){…}}})(__N)}
 ```
@@ -41,8 +43,8 @@ return{ev(n){…},flow(i){…},data(i){…}}})(__N)}
   flow and calls the next node's (only for nodes a flow can reach); an app
   with inputs gets `i<id>()`, which sets its fields from their producers.
 - **Three ways in:** `ev(event)` runs the event's listeners (the filters
-  checked by `N.m`, a listener filtered out that leaves none matched logged
-  by `N.nl`) and says how many ran; `flow(id)` is an app's `execNode`
+  checked by the `m` native; when every listener filtered the event out, the
+  program says so) and says how many ran; `flow(id)` is an app's `execNode`
   (logic/ifElse, render/split, data/newImage); `data(id)` is `getDataNode`.
 - **Decided at compile time:** cycles of a node's own inputs (those nodes
   keep themselves in a set while they work, and a read of one already there

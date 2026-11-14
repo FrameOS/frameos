@@ -735,3 +735,31 @@ behaviour change.
   malloc opaque is now a per-runtime `fos_js_runtime_account_t` (the scene
   budget pointer and the runtime's bytes, kept with `malloc_size`), freed after
   `JS_FreeRuntime`. Host and wasm builds still ask QuickJS.
+
+---
+
+# Scenes as compiled programs (2026-11-14)
+
+*Same recipe, same paths. Main at 17bc7fbc6 builds at 3,223,680 bytes.*
+
+**3,223,680 → 3,215,840 bytes (−7,840).** A scene's graph runs as one
+JavaScript program written by `scene_compiler.nim` (docs/scene-compiler.md)
+instead of being walked by `runNode`.
+
+| | Bytes |
+|---|---:|
+| `interpreter.nim` gone: `runNode` (−22,905), the wiring in `init`, the listener loop, `withCache`, `eventNodeMatchesPayload`, the lazy inline compile | −38,827 |
+| `js_runtime/runtime.nim` gone: the code-node envelope (`callCompiledFn`, `buildEnvelopeFunctionWithMap`, `compileCodeFn`, `envelopeToValue`, the per-scene eviction) | −21,462 |
+| `scene_compiler.nim`: the compiler, its analysis and its generics | +22,586 |
+| `interpreter.nim` added: the natives (`programOp` 6,574), and out of `runNode` as they were: the image hints, the cache lookup and store, the debug profile, the dispatch node; `compileFailure`, `ensureProgram`, the program's entries | +27,257 |
+| string literals (the program's head and glue, 2.4 KB of them) | +1,552 |
+| the rest | +135 |
+
+Moving the walk into JavaScript saves little flash by itself: what `runNode`
+did per node (the image hints, the cache tiers, an error painted into an
+image field) is still Nim, as natives, and the compiler costs about what the
+walk did. What made the difference: the program writes its own log lines
+(the 2 KB of JavaScript around them costs the program's memory, not a
+`%*{…}` per line in flash), and the nested edge tables became one list.
+The compiler itself in JavaScript, shipped as bytecode like the preludes,
+would be the next 8–12 KB (estimated, not built).
