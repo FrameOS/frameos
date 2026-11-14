@@ -51,9 +51,12 @@ jobs:
     name: Build Docker Image
     needs: changes
     if: ${{ (github.event_name != 'pull_request' || github.base_ref == 'main') && needs.changes.outputs.docker == 'true' }}
-    # A 16-core slot of the self-hosted pool (tools/gha-runners/README.md);
-    # pull requests from forks stay on GitHub-hosted runners.
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-16' }}
+    # GitHub's runner, not the pool: the build is mostly single-threaded
+    # steps and registry layer pulls, which GitHub's network does fast, and
+    # with every other per-change job on the pool at once it took 627 s
+    # there against ~320 s here uncached (2026-11-14). GitHub-hosted runners
+    # cost this public repository nothing.
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: read

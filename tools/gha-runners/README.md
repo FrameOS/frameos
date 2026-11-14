@@ -78,7 +78,7 @@ Runners carry labels `self-hosted,monster,epyc-32|epyc-16|epyc-8,linux,x64`
 | slots | label | shape | who uses it |
 | --- | --- | --- | --- |
 | big, big-b..d (4) | epyc-32 | 32 vCPU, 32 G, 120 G disk | Buildroot base images ("all" = 3 legs at once), release SD image |
-| c16-a..aj (36) | epyc-16 (+ epyc-4) | 16 vCPU, 24 G, 80 G disk | every per-change job: 4 Nim shards, pixie, 2 renderer + 4 Playwright shards, backend tests, 2 deploy E2Es, 3 ESP32 legs, the Docker image, Cloud CI's verify + 4 integration legs |
+| c16-a..aj (36) | epyc-16 (+ epyc-4) | 16 vCPU, 24 G, 80 G disk | every per-change job: 4 Nim shards, pixie, 2 renderer + 4 Playwright shards, backend tests, 2 deploy E2Es, 3 ESP32 legs, Cloud CI's verify + 5 integration legs |
 | mid-a..j (10) | epyc-8 | 8 vCPU, 16 G, 60 G disk | 6 cross legs per frameos/** push and per release, the release's ESP32 firmware and amd64 runtime image |
 
 50 slots, 784 vCPU nominal on 96 threads. A wide pull request fans out ~23
