@@ -143,6 +143,35 @@ Watch it with `free -g` (the `shared` column is the VMs) and
 `sar -r -s HH:MM:00 -e HH:MM:00`; the first sign of trouble is
 `kbavail` under ~30 G, the second is `journalctl -k | grep oom-kill`.
 
+## Disk (measured 2026-11-14)
+
+The VMs' disks are thin LVs in `parallaize-lvm`, whose single PV is a loop
+device over one file on the root filesystem
+(`/var/lib/incus/disks/parallaize-lvm.img`, 1.45 T on a 1.8 T `/`). Two
+consequences:
+
+- **The pool and `/` share the disk.** The thin pool passes discards down
+  (`lvs -o discards`: passdown), so deleted VMs punch holes in that file and
+  `/` shows the space as free; new VMs fill the holes again. On 2026-11-14
+  the first runs of the 36 epyc-16 slots, two PR runs at once and an
+  uncompressed 23 GB image tarball took `/` from 539 G free to 0 (the file
+  back to fully allocated). Keep what else lands on `/` small: the image is
+  published zstd-compressed, and the dead nimcache directories were removed.
+  If `/` ever fills while the file has holes, the pool cannot allocate and
+  dm-thin fails writes: `lvchange --discards nopassdown` keeps the file
+  allocated (and `/` stable), moving the pool off the loop file removes the
+  coupling. Check `df -h /` and `ls -ls` of the image file first.
+- **Small-file reads are slow in a guest.** The loop device runs with direct
+  IO (`losetup -l`: DIO 1), so nothing is cached on the host: reading the
+  warm image's 61.5k-file pnpm store cold took 35 s, writing it back 10 s.
+  Buffered loop IO (`losetup --direct-io=off`) was far slower still
+  (minutes; reverted at once) and `io.cache=unsafe` only halves synced
+  writes. What helps is fewer files: one archive per cache
+  (`frameos/tools/ci_nimcache.sh`), links instead of copies (the pnpm store
+  and uv cache sit beside the workspace so container jobs hardlink from
+  them), and a page-cache threshold large enough that a job's hot files stay
+  read (`GHA_TRIM_THRESHOLD_MB`, 4 G on epyc-16).
+
 ## Changing the pool
 
 - Add/remove/resize a slot: edit `slots/`, run `sync-to-host.sh` (or copy and
