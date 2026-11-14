@@ -108,10 +108,12 @@ FINALIZE
 echo "==> publishing"
 incus stop "$BUILD"
 # Replace the alias atomically-ish: publish new, then point the alias at it.
-# Uncompressed: the warm image is ~15 GB used, and gzip of that was the
-# slowest step of a nightly build; the host has the disk.
+# zstd, not the default gzip (minutes on a ~20 GB warm image) and not none:
+# the tarball stays in /var/lib/incus/images on the root filesystem, which
+# also backs the thin pool's loop file, and an uncompressed one was 23 GB of
+# the headroom that file needs (2026-11-14, / reached 100%).
 OLD=$(incus image list "$ALIAS" --format csv -c f 2>/dev/null | head -1 || true)
-incus publish "$BUILD" --alias "$ALIAS" --reuse --compression none \
+incus publish "$BUILD" --alias "$ALIAS" --reuse --compression zstd \
   description="GitHub Actions runner base (Ubuntu 24.04, runner $RUNNER_VERSION, $(date -u +%F))" \
   runner_version="$RUNNER_VERSION"
 if [ -n "$OLD" ]; then
