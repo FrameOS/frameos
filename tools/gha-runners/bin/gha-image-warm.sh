@@ -35,6 +35,9 @@ TC=/opt/hostedtoolcache
 WARM=$TC/frameos-ci
 SRC=/tmp/frameos-warm
 export DEBIAN_FRONTEND=noninteractive
+# incus exec starts in /root, which the runner user cannot read, and uv
+# (among others) looks for its config from the working directory up.
+cd /tmp
 
 as_runner() {
   runuser -u runner -- env HOME=/home/runner USER=runner \
