@@ -92,7 +92,8 @@ def check_runtime_matches(api: str) -> None:
     """The runtime's bridge and the editor's declarations name the same things."""
     runtime = RUNTIME.read_text()
     prelude = set(re.findall(r"^    (\w+): ", block(runtime, "  const frameos = {", "\n  };"), re.M))
-    declared = set(re.findall(r"^  (\w+)\(", block(api, "declare const frameos: {", "\n};"), re.M))
+    # A method, or an object of them (`ops: {`).
+    declared = set(re.findall(r"^  (\w+)(?:\(|: )", block(api, "declare const frameos: {", "\n};"), re.M))
     if prelude != declared:
         fail(
             "the runtime's frameos object and appTypeDeclarations.ts disagree: "

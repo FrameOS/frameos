@@ -260,6 +260,8 @@ proc JS_DeleteProperty*(ctx: ptr JSContext, thisObj: JSValueConst, prop: JSAtom,
 # Array functions
 proc JS_NewArray*(ctx: ptr JSContext): JSValue
 proc JS_IsArray*(ctx: ptr JSContext, val: JSValueConst): cint
+proc JS_GetClassID*(v: JSValueConst): uint32
+proc JS_NewTypedArray*(ctx: ptr JSContext, argc: cint, argv: ptr JSValueConst, arrayType: cint): JSValue
 proc JS_GetArrayBuffer*(ctx: ptr JSContext, psize: ptr csize_t, obj: JSValueConst): ptr UncheckedArray[uint8]
 proc JS_GetTypedArrayBuffer*(ctx: ptr JSContext, obj: JSValueConst, pbyteOffset: ptr csize_t,
     pbyteLength: ptr csize_t, pbytesPerElement: ptr csize_t): JSValue
