@@ -456,9 +456,8 @@ proc arrowButton(size: int, left: bool, button: string): SvgNode =
     s.square(size * 2 div 3)
     chevron.attrs.add(("class", s))
     result.children.add chevron
-  # The layout theme's look for a button (ui/theme.nim), on a Pi.
-  when not defined(frameosEmbedded):
-    result = result.role("button")
+  # The layout theme's look for a button (ui/theme.nim).
+  result = result.role("button")
 
 type TileLook = object
   ## What every tile on the page shares, and the one at hand.
@@ -559,8 +558,7 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: Swit
   var name = "grow flex items-center justify-center text-center font-bold line-clamp-3"
   name.px("text", size)
   result.children.add el("div", name, txt(title))
-  when not defined(frameosEmbedded):
-    result = result.role(if look.lit: "tileLit" else: "tile")
+  result = result.role(if look.lit: "tileLit" else: "tile")
 
 proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: int, paper: bool,
     width, size, small: int, button: string) =

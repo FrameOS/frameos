@@ -25,8 +25,7 @@ import frameos/runtime_diagnostics
 import frameos/scene_rhythm
 import frameos/layout_choice
 import frameos/ui/events as ui_events
-when not defined(frameosEmbedded):
-  from frameos/ui/theme import themeSource
+from frameos/ui/theme import themeSource
 import frameos/utils/canvas_log
 from frameos/utils/svg_frames import takePanelRegion, forgetPanelRegions
 import frameos/events_gen
@@ -468,16 +467,15 @@ proc diagnosticKeyword(node: DiagramNode): string =
 var yieldScene {.threadvar.}: FrameScene
   ## The scene the layout on the way here wraps; nil outside a layout.
 
-when not defined(frameosEmbedded):
-  proc layoutTheme(): JsonNode {.nimcall, gcsafe, raises: [].} =
-    ## The `theme` of the layout around the frame's scene, during its pass:
-    ## what the UIs built in Nim are drawn in (ui/theme.nim; not on an ESP32).
-    {.cast(gcsafe).}:
-      let shown = yieldScene
-      if not shown.isNil and not shown.wornLayout.isNil and not shown.wornLayout.state.isNil and
-          shown.wornLayout.state.kind == JObject:
-        result = shown.wornLayout.state.getOrDefault("theme")
-  themeSource = layoutTheme
+proc layoutTheme(): JsonNode {.nimcall, gcsafe, raises: [].} =
+  ## The `theme` of the layout around the frame's scene, during its pass:
+  ## what the UIs built in Nim are drawn in (ui/theme.nim).
+  {.cast(gcsafe).}:
+    let shown = yieldScene
+    if not shown.isNil and not shown.wornLayout.isNil and not shown.wornLayout.state.isNil and
+        shown.wornLayout.state.kind == JObject:
+      result = shown.wornLayout.state.getOrDefault("theme")
+themeSource = layoutTheme
 
 proc desktopShown(): bool {.nimcall, gcsafe.} =
   ## The frame's scene, during its layout's pass, wears a desktop: a layout

@@ -228,8 +228,7 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
   result = el("div", move c)
   # The layout theme's `keyboard` (ui/theme.nim); its keys `key`, `keyMod` (the
   # keys that do something else) and `keyLit` (shift on, held, just typed).
-  when not defined(frameosEmbedded):
-    if not round: result = result.role("keyboard")
+  if not round: result = result.role("keyboard")
   # A tap between the keys is the keyboard's too: the nearest key (ui/events.nim),
   # and the field keeps the keyboard.
   result.attrs.add(("on-click", $KeyBase))

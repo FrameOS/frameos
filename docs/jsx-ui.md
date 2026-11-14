@@ -835,9 +835,8 @@ role the theme leaves out keeps the element's own look.
 always (a list's innermost). The samples set no theme on
 e-paper, where the pages keep their black on white, except High contrast.
 
-Not on an ESP32: there `role` is the element itself and the pages keep their
-own look, so themes cost the firmware nothing (its generated C is the same with
-and without them). A layout running there sets none (`app.frame.embedded`).
+On an ESP32 too, where a desktop's windows put the pages beside its scenes:
+about 7 KB of flash on the S3 (2026-11-15).
 
 ## Text and fonts
 

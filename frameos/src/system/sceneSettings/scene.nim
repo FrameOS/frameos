@@ -589,8 +589,7 @@ proc gear(look: Look, lit, named: bool): SvgNode =
   else: c.add " bg-zinc-800 active:bg-zinc-600"
   result = el("div", move c, look.icon(GearPath)).on("on-click", HGear)
   result.children.add el("span", "whitespace-nowrap", SvgNode(text: "Frame settings"))
-  when not defined(frameosEmbedded):
-    result = result.role("button")
+  result = result.role("button")
 
 proc fieldBox(look: Look): string =
   result = "w-full rounded-lg"
@@ -623,8 +622,7 @@ proc selectBox(look: Look, field: JsonNode, options: JsonNode, held: string, ind
   let other = field{"other"}.getStr()
   if other.len > 0:
     result.children.add look.optionRow(OtherValue, other, held == OtherValue)
-  when not defined(frameosEmbedded):
-    result = result.role("field")
+  result = result.role("field")
 
 proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = false): SvgNode =
   ## One field: its label and what changes it. `typing`: its select box's
