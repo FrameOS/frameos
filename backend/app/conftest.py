@@ -1,7 +1,31 @@
 import os
+from urllib.parse import urlsplit, urlunsplit
 
 # Ensure TEST=1 before anything else, so we always run in test mode
 os.environ["TEST"] = "1"
+
+
+def _isolate_xdist_worker() -> None:
+    """Under pytest-xdist (`pytest -n N`, what CI runs) every worker is its own
+    process with its own database file and its own Redis database, set here
+    before app.config reads them: the tables are created and dropped around
+    every test and the Redis fixture flushes its database, so two workers
+    sharing either would wipe each other's state mid-test. Worker gwN gets
+    the default (or given) Redis database number plus N, so N workers need
+    that many databases on the server: CI starts redis with --databases 64."""
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "")
+    if not worker.startswith("gw"):
+        return
+    index = int(worker[2:])
+    database_url = os.environ.get("DATABASE_URL") or "sqlite:///migrations/test.db"
+    if database_url.startswith("sqlite:///") and database_url.endswith(".db"):
+        os.environ["DATABASE_URL"] = f"{database_url[:-3]}-{worker}.db"
+    redis = urlsplit(os.environ.get("REDIS_URL") or "redis://localhost:6379/1")
+    base = int(redis.path.strip("/") or 0)
+    os.environ["REDIS_URL"] = urlunsplit(redis._replace(path=f"/{base + index}"))
+
+
+_isolate_xdist_worker()
 
 import json  # noqa: E402
 import pytest  # noqa: E402

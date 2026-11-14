@@ -7,9 +7,11 @@
 # every VM from the `gha-runner-noble` image, and that image carries the
 # runner version it was built with, so staying current is a matter of
 # rebuilding the image — which is what gha-image-refresh.timer runs this
-# script for, weekly. It rebuilds when the latest release differs from the
-# one in the image, or when the image is older than GHA_IMAGE_MAX_AGE_DAYS
-# (30: the base packages and docker move too). `--force` rebuilds anyway.
+# script for, nightly. It rebuilds when the latest release differs from the
+# one in the image, or when the image is older than GHA_IMAGE_MAX_AGE_HOURS
+# (20, so last night's build is due again tonight: the image carries main's
+# dependencies and toolchains, gha-image-warm.sh, so it should track main).
+# `--force` rebuilds anyway.
 #
 # The rebuild never touches the alias the slots launch from until the new
 # image has proven itself: gha-image-build.sh publishes it under a staging
@@ -29,7 +31,7 @@ set -euo pipefail
 POOL=${GHA_POOL:-parallaize-lvm}
 ALIAS=${GHA_IMAGE_ALIAS:-gha-runner-noble}
 STAGING="${ALIAS}-next"
-MAX_AGE_DAYS=${GHA_IMAGE_MAX_AGE_DAYS:-30}
+MAX_AGE_HOURS=${GHA_IMAGE_MAX_AGE_HOURS:-20}
 BIN_DIR=$(cd "$(dirname "$0")" && pwd)
 FORCE=0
 [ "${1:-}" = "--force" ] && FORCE=1
@@ -54,9 +56,9 @@ if [ -z "$current" ]; then
     | sed -n 's/.*runner \([0-9][0-9.]*\).*/\1/p')
 fi
 uploaded=$(jq -r '.[0].uploaded_at // empty | sub("\\.[0-9]+"; "")' <<<"$current_json")
-age_days=""
+age_hours=""
 if [ -n "$uploaded" ]; then
-  age_days=$(( ( $(date -u +%s) - $(date -u -d "$uploaded" +%s) ) / 86400 ))
+  age_hours=$(( ( $(date -u +%s) - $(date -u -d "$uploaded" +%s) ) / 3600 ))
 fi
 
 reason=""
@@ -64,13 +66,13 @@ if [ -z "$current" ]; then
   reason="no $ALIAS image"
 elif [ "$current" != "$latest" ]; then
   reason="runner $current in the image, $latest released"
-elif [ -n "$age_days" ] && [ "$age_days" -ge "$MAX_AGE_DAYS" ]; then
-  reason="image is $age_days days old"
+elif [ -n "$age_hours" ] && [ "$age_hours" -ge "$MAX_AGE_HOURS" ]; then
+  reason="image is $age_hours hours old"
 elif [ "$FORCE" = 1 ]; then
   reason="--force"
 fi
 if [ -z "$reason" ]; then
-  log "up to date: runner $current, image ${age_days:-?} days old"
+  log "up to date: runner $current, image ${age_hours:-?} hours old"
   exit 0
 fi
 log "rebuilding $ALIAS: $reason"
@@ -95,6 +97,8 @@ for _ in $(seq 1 90); do incus exec "$SMOKE" -- true 2>/dev/null && { ok=1; brea
 # filesystem is still being grown when the agent first answers.
 incus exec "$SMOKE" -- bash -c 'for _ in $(seq 1 60); do docker info >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1' \
   || { log "docker did not come up in the smoke VM"; exit 1; }
+incus exec "$SMOKE" -- test -f /opt/hostedtoolcache/frameos-ci/manifest.json \
+  || { log "the smoke VM has no warm tool cache"; exit 1; }
 built=$(incus exec "$SMOKE" -- cat /home/runner/actions-runner/.version | tr -d '[:space:]')
 [ "$built" = "$latest" ] || { log "smoke VM carries runner '$built', expected $latest"; exit 1; }
 incus exec "$SMOKE" -- sudo -u runner /home/runner/actions-runner/bin/Runner.Listener --version >/dev/null \

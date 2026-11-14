@@ -1,7 +1,7 @@
 import { execFile } from 'child_process'
 import { join } from 'path'
 import { promisify } from 'util'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './fixtures'
 import { settleForScreenshot } from './visual-helpers'
 
 /**

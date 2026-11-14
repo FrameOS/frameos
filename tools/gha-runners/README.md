@@ -3,8 +3,8 @@
 This directory is the source of truth for `/srv/gha-runners` on the Hetzner
 host "monster" (EPYC 9454P, 48 cores / 96 threads, 251 GB, Ubuntu 24.04):
 `tools/gha-runners/sync-to-host.sh` copies it there and reloads the pool.
-The workflows pick these runners with the labels `epyc-32`, `epyc-8` and
-`epyc-4` (`runs-on:` in `.github/workflows/*.yml`); fork pull requests stay
+The workflows pick these runners with the labels `epyc-32`, `epyc-16` and
+`epyc-8` (`runs-on:` in `.github/workflows/*.yml`); fork pull requests stay
 on GitHub-hosted runners.
 
 Each enabled *slot* (`slots/<name>.env`) is a `gha-runner@<name>` systemd
@@ -22,23 +22,42 @@ it never enters a VM), then build the image:
 
     sudo bin/gha-image-build.sh
 
-The image is kept current by `gha-image-refresh.timer` (Sunday 03:00 UTC,
+The image is **warm** (`bin/gha-image-warm.sh`, run inside the build VM):
+node 22 and 24 and Python 3.12 in the runner's tool cache
+(`/opt/hostedtoolcache`, `RUNNER_TOOL_CACHE` in the runner's `.env`, mounted
+into container jobs at `/__t`), Nim 2.2.4 in choosenim's layout with main's
+nimble packages, main's pnpm store and the backend's uv wheels under
+`/opt/hostedtoolcache/frameos-ci`, and the container images the workflows
+start (Playwright, postgres, redis, the Dockerfile's base, the deploy E2E's
+SSH target, the ESP32 legs' ESP-IDF toolchain). GitHub's cache answers the
+pool at 11-20 MB/s, so before this every job spent its first minute
+downloading. The workflows' `.github/actions/setup-{nim,node-pnpm,
+backend-python}` find it and skip the GitHub cache; everything still runs
+its own `pnpm install` / `nimble install -d` / `uv pip install` against the
+commit it tests, so a stale image is slower, never wrong.
+
+It is kept current by `gha-image-refresh.timer` (nightly 03:00 UTC,
 installed and enabled by `sync-to-host.sh`): `bin/gha-image-refresh.sh`
 rebuilds when actions/runner has a newer release than the one in the image
 (GitHub refuses jobs to a runner a month behind — the job logs warn first)
-or when the image is 30 days old, under a staging alias, boots a VM from it
-to check the runner version and docker, and only then re-points
-`gha-runner-noble`. New VM launches use it at once; nothing needs a
-restart. `journalctl -u gha-image-refresh` says what it did;
-`sudo bin/gha-image-refresh.sh --force` rebuilds now, and a bare
-`bin/gha-image-build.sh` still works but swaps the live alias untested.
+or when the image is 20 hours old (it carries main's dependencies), under a
+staging alias, boots a VM from it to check the runner version, docker and
+the warm tool cache, and only then re-points `gha-runner-noble`. New VM
+launches use it at once; nothing needs a restart. `journalctl -u
+gha-image-refresh` says what it did; `sudo bin/gha-image-refresh.sh --force`
+rebuilds now, and a bare `bin/gha-image-build.sh` still works but swaps the
+live alias untested. To try a change to the warming itself, build under
+another alias from a pushed branch: `sudo env GHA_IMAGE_ALIAS=gha-runner-noble-test
+FRAMEOS_REPO_REF=<branch> bin/gha-image-build.sh`.
 `/srv/gha-runners/cache` is mounted into every VM at `/mnt/cache` — point
 BR2_DL_DIR / ccache / buildx `type=local` caches there from the workflows.
 It is **read-only unless a slot's `GHA_CACHE_WRITABLE` says otherwise**
 (`bin/gha-slot.sh`): `all` on the epyc-32 slots, which only
 `workflow_dispatch` release builds reach (the Buildroot ccache and downloads
-under `buildroot/`); `nimcache` on the epyc-4 slots, writable over the
-read-only rest, for the Nim test shards; nothing on epyc-8. Incus's
+under `buildroot/`); `nimcache ccache` on the epyc-16 slots, writable over
+the read-only rest, for the Nim test shards' and renderer's nimcache and the
+ESP32 legs' ccache (the workflows save them on pushes to main only, and
+nothing a release ships reads them); nothing on epyc-8. Incus's
 `readonly=true` makes the host-side mount read-only, so root inside the
 guest (the runner has passwordless sudo) cannot remount it writable. A new
 workflow that wants a writable cache gets its own subdirectory on the slots
@@ -51,24 +70,28 @@ small files are what is slow over virtiofs, about 2 ms each: keep a large
 cache here as one file. The older `nimcache/frameos-tests-snapshots` and
 `nimcache/frameos-tests/shard-{1..8}` dirs serve only branches from before
 these changes and can be deleted.
-Runners carry labels `self-hosted,monster,epyc-32|epyc-8|epyc-4,linux,x64`.
+Runners carry labels `self-hosted,monster,epyc-32|epyc-16|epyc-8,linux,x64`
+(the epyc-16 slots also `epyc-4`, for branches cut before they existed).
 
-## Pool (since 2026-09-11)
+## Pool (since 2026-11-14)
 
 | slots | label | shape | who uses it |
 | --- | --- | --- | --- |
 | big, big-b..d (4) | epyc-32 | 32 vCPU, 32 G, 120 G disk | Buildroot base images ("all" = 3 legs at once), release SD image |
-| mid-a..j (10) | epyc-8 | 8 vCPU, 16 G, 60 G disk | 6 cross legs per frameos/** push and per release, ESP32 firmware, Deploy E2E SSH |
-| small-a..ab (28) | epyc-4 | 4 vCPU, 8 G, 40 G disk | the 10 per-PR jobs: 4 Nim shards, 2 pixie visual shards, 4 Playwright shards |
+| c16-a..aj (36) | epyc-16 (+ epyc-4) | 16 vCPU, 24 G, 80 G disk | every per-change job: 4 Nim shards, pixie, 2 renderer + 4 Playwright shards, backend tests, 2 deploy E2Es, 3 ESP32 legs, Cloud CI's verify + 5 integration legs |
+| mid-a..j (10) | epyc-8 | 8 vCPU, 16 G, 60 G disk | 6 cross legs per frameos/** push and per release, the release's ESP32 firmware and amd64 runtime image |
 
-42 slots, 336 vCPU nominal on 96 threads, 512 G nominal memory on 251 G.
-One run of the test workflow fans out 10 epyc-4 + 1 epyc-8 (18 until
-2026-09-20, when the Nim and Playwright matrices went from eight shards to
-four), so two overlapping runs — a pull request next to a push to main — fit
-the 28 small slots at once and a third queues only its tail. With 18, the
-second run waited for the first's whole batch: shards of one run finish
-together. vCPUs are overcommitted on
-purpose (most slots idle most of the time); memory is the budget, and the
+50 slots, 784 vCPU nominal on 96 threads. A wide pull request fans out ~23
+epyc-16 jobs (fewer when `.github/ci/changed_areas.py` skips what it cannot
+affect), so a pull request next to a push to main fits the pool at once.
+
+Why 16 vCPUs: the jobs are compiles and test runners that use every core
+they get. With 28 four-vCPU slots a whole PR run took 11-12 minutes while
+the host averaged ~10% CPU (sar, 2026-11-13 23:45-23:58 UTC) and the busiest
+ten minutes of that week reached 55%. A VM's vCPUs are threads on the host:
+an idle one costs nothing, and under contention the host shares its cores
+anyway, so a bigger shape only ever helps the job that has the host to
+itself. vCPUs are overcommitted on purpose; memory is the budget, and the
 nominal sum is not the real one — read on.
 
 ## Memory model (measured 2026-09-11)
@@ -120,6 +143,35 @@ Watch it with `free -g` (the `shared` column is the VMs) and
 `sar -r -s HH:MM:00 -e HH:MM:00`; the first sign of trouble is
 `kbavail` under ~30 G, the second is `journalctl -k | grep oom-kill`.
 
+## Disk (measured 2026-11-14)
+
+The VMs' disks are thin LVs in `parallaize-lvm`, whose single PV is a loop
+device over one file on the root filesystem
+(`/var/lib/incus/disks/parallaize-lvm.img`, 1.45 T on a 1.8 T `/`). Two
+consequences:
+
+- **The pool and `/` share the disk.** The thin pool passes discards down
+  (`lvs -o discards`: passdown), so deleted VMs punch holes in that file and
+  `/` shows the space as free; new VMs fill the holes again. On 2026-11-14
+  the first runs of the 36 epyc-16 slots, two PR runs at once and an
+  uncompressed 23 GB image tarball took `/` from 539 G free to 0 (the file
+  back to fully allocated). Keep what else lands on `/` small: the image is
+  published zstd-compressed, and the dead nimcache directories were removed.
+  If `/` ever fills while the file has holes, the pool cannot allocate and
+  dm-thin fails writes: `lvchange --discards nopassdown` keeps the file
+  allocated (and `/` stable), moving the pool off the loop file removes the
+  coupling. Check `df -h /` and `ls -ls` of the image file first.
+- **Small-file reads are slow in a guest.** The loop device runs with direct
+  IO (`losetup -l`: DIO 1), so nothing is cached on the host: reading the
+  warm image's 61.5k-file pnpm store cold took 35 s, writing it back 10 s.
+  Buffered loop IO (`losetup --direct-io=off`) was far slower still
+  (minutes; reverted at once) and `io.cache=unsafe` only halves synced
+  writes. What helps is fewer files: one archive per cache
+  (`frameos/tools/ci_nimcache.sh`), links instead of copies (the pnpm store
+  and uv cache sit beside the workspace so container jobs hardlink from
+  them), and a page-cache threshold large enough that a job's hot files stay
+  read (`GHA_TRIM_THRESHOLD_MB`, 4 G on epyc-16).
+
 ## Changing the pool
 
 - Add/remove/resize a slot: edit `slots/`, run `sync-to-host.sh` (or copy and
@@ -127,10 +179,10 @@ Watch it with `free -g` (the `shared` column is the VMs) and
   only when its service starts, so idle slots are restarted for you; busy
   ones are listed — run it again when they are done.
 - Keep the three shapes: the workflows only know the labels.
-- Sizing rules: total epyc-4 ≥ 18 (one PR), epyc-8 ≥ 8 (6 cross legs + a
-  Deploy E2E + the ESP32 job), epyc-32 ≥ 3 (a Buildroot "all"). Before
-  adding, check what the pool's peaks were (`journalctl -u 'gha-runner@*' |
-  grep 'guest peak'`) against `free -g`.
+- Sizing rules: epyc-16 ≥ 23 (one wide PR), epyc-8 ≥ 8 (6 cross legs +
+  the release's ESP32 and runtime jobs), epyc-32 ≥ 3 (a Buildroot "all").
+  Before adding, check what the pool's peaks were (`journalctl -u
+  'gha-runner@*' | grep 'guest peak'`) against `free -g`.
 
 ## Cleanup recipes
 

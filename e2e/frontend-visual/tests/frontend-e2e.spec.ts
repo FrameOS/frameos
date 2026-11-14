@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './fixtures'
 import {
   attachFrontendErrorCollector,
   backendDeployPlan,
@@ -115,6 +115,10 @@ test.describe('backend frontend e2e coverage @e2e', () => {
   })
 
   test('workspace route variants render from the backend fixture', async ({ page }) => {
+    // A sweep of every route in one test: ~30 s alone, ~45 s with three more
+    // workers on the runner, which is the default test timeout. Each route
+    // still has the action and expect timeouts.
+    test.slow()
     const readErrors = await prepareAuthenticatedPage(page)
     const routes = [
       // The root goes on to the home page.
@@ -206,6 +210,8 @@ test.describe('backend frontend e2e coverage @e2e', () => {
   })
 
   test('all frame tool routes render', async ({ page }) => {
+    // Every frame tool in one test, like the route sweep above.
+    test.slow()
     const readErrors = await prepareAuthenticatedPage(page)
 
     for (const tool of frameTools) {

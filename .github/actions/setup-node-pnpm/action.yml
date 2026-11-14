@@ -1,0 +1,53 @@
+name: Set up Node and pnpm
+description: >-
+  Node and the repository's pnpm (packageManager in package.json). On the
+  self-hosted pool Node is already in the runner's tool cache and the pnpm
+  store of main's lockfile comes with the VM image (tools/gha-runners/bin/
+  gha-image-warm.sh): pnpm is pointed at that store, and the GitHub cache,
+  which answers the pool at 11-20 MB/s (30-40 s for the store), is skipped.
+  Elsewhere the store comes from the GitHub cache as before. Either way
+  `pnpm install` fetches what the checkout's lockfile has on top.
+inputs:
+  node-version:
+    description: Passed to actions/setup-node.
+    default: '22'
+  cache:
+    description: "'false' to skip the pnpm store cache off the pool too (jobs that never install)."
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    # The image keeps the store next to the workspace (/home/runner/work, /__w
+    # inside a container job), so the checkout's node_modules can hardlink from
+    # it; images from before that kept it in the tool cache.
+    - name: Look for the warm pnpm store
+      id: warm
+      shell: bash
+      run: |
+        store="$(dirname "$(dirname "$GITHUB_WORKSPACE")")/_frameos-ci/pnpm-store"
+        [ -d "$store" ] || store="${RUNNER_TOOL_CACHE:-/nonexistent}/frameos-ci/pnpm-store"
+        if [ -d "$store" ]; then
+          echo "warm=true" >> "$GITHUB_OUTPUT"
+          echo "npm_config_store_dir=$store" >> "$GITHUB_ENV"
+          echo "pnpm store from the runner image: $store"
+        else
+          echo "warm=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - uses: pnpm/action-setup@v4
+      with:
+        run_install: false
+
+    - name: Set up Node
+      if: steps.warm.outputs.warm == 'true' || inputs.cache != 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Set up Node with the pnpm store cache
+      if: steps.warm.outputs.warm != 'true' && inputs.cache == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+        cache-dependency-path: pnpm-lock.yaml

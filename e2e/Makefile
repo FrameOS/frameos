@@ -3,6 +3,10 @@
 PYTHON ?= $(if $(wildcard ../env/bin/python3),../env/bin/python3,$(if $(wildcard ../.venv/bin/python3),../.venv/bin/python3,python3))
 COMPILATION_MODE ?= static
 E2E_FIXTURE_PORT ?= 54817
+# A nimcache outside ./tmp/frameos (which `snapshots` deletes before every
+# build), so CI can hand one in warm (pull-request-tests.yml, the renderer
+# visual job). Unset: the build's own .nimcache, cold, as before.
+E2E_NIMCACHE ?=
 
 all: nim_scenes snapshots
 
@@ -36,7 +40,7 @@ snapshots:
 	rm -rf "$$tmpdir/src/scenes" && \
 	cp -r ./generated "$$tmpdir/src/scenes" && \
 	cp -r ./generated/scenes.json "$$tmpdir/" && \
-	(cd "$$tmpdir" && make build COMPILATION_MODE="$(COMPILATION_MODE)") && \
+	(cd "$$tmpdir" && make build COMPILATION_MODE="$(COMPILATION_MODE)" $(if $(E2E_NIMCACHE),NIMCACHE="$(E2E_NIMCACHE)")) && \
 	cp "$$tmpdir/build/frameos" ./tmp/frameos-bin && \
 	rm -rf ./tmp/scenes && \
 	rm -rf ./tmp/drivers && \

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # The Nim test shards' warm nimcache on the runner pool's shared /mnt/cache
 # (.github/workflows/pull-request-tests.yml), kept as one archive per shard.
+# Any other build directory that wants the same treatment names its own
+# archive directory and local directory: the renderer snapshots' nimcache and
+# the ESP32 legs' ccache do (FRAMEOS_NIMCACHE_ROOT, FRAMEOS_NIMCACHE_DIR).
 #
 #   ci_nimcache.sh restore <shard>   unpack the shard's archive into frameos/nimcache
 #   ci_nimcache.sh save <shard>      replace the archive with frameos/nimcache
@@ -41,6 +44,9 @@ zstd_window=27
 if [[ "$mode" == restore ]]; then
     if [[ ! -f "$archive" ]]; then
         echo "no nimcache archive for shard $shard yet"
+        # The workflows save on pushes to main, and also when this says the
+        # archive is missing, so a new cache seeds itself on its first run.
+        [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "missing=true" >> "$GITHUB_OUTPUT"
         exit 0
     fi
     mkdir -p "$local_cache"

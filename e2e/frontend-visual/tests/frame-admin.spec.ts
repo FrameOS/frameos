@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'fs'
 import { extname, join, normalize } from 'path'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './fixtures'
 import { attachFrontendErrorCollector, connectedCloudStatus, connectedFrameCloudStatus } from './visual-helpers'
 
 /**

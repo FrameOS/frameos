@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures'
 import { addTemporaryWeatherNode, login } from './visual-helpers'
 
 // App nodes must grow with their content: the weather app's rows (label +

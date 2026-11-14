@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures'
 import { login } from './visual-helpers'
 
 // Shrinking a desktop window into the mobile layout must not pop open the

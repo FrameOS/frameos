@@ -10,6 +10,8 @@
 #                 (or classic `repo` scope) — used ONLY on the host, never
 #                 passed into the VM; the VM only ever sees the JIT config.
 #   CPUS, MEMORY, DISK, LABELS  sizing + runner labels for this slot
+#   GHA_TRIM_THRESHOLD_MB  page cache the guest keeps before dropping it
+#                   (gha-guest-trim.sh; default 2048)
 #   GHA_IMAGE_ALIAS (gha-runner-noble), GHA_POOL (parallaize-lvm)
 #   GHA_CACHE_DIR   host dir shared into every VM at /mnt/cache
 #   GHA_CACHE_WRITABLE  what of it the VM may write: "all", or subdirectories
@@ -107,7 +109,8 @@ while true; do
   # Page-cache trimmer for the VM's lifetime (see the BALLOON_CONF comment);
   # it dies with the VM. Its stats are logged after the job.
   incus file push --mode 0755 "$BIN_DIR/gha-guest-trim.sh" "$VM/usr/local/bin/gha-guest-trim" >/dev/null 2>&1 \
-    && incus exec "$VM" -- /usr/local/bin/gha-guest-trim 2>&1 | sed -u "s/^/[$SLOT:$VM trim] /" &
+    && incus exec "$VM" --env GHA_TRIM_THRESHOLD_MB="${GHA_TRIM_THRESHOLD_MB:-2048}" -- /usr/local/bin/gha-guest-trim 2>&1 \
+       | sed -u "s/^/[$SLOT:$VM trim] /" &
 
   # Run the runner for exactly one job, as the `runner` user via runuser so
   # it gets its real group list (docker!). The JIT config is passed over the

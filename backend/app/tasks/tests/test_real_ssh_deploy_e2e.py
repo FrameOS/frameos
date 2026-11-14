@@ -154,7 +154,11 @@ def _run_docker(args: list[str]) -> str:
     return result.stdout.strip()
 
 
-@pytest.fixture(scope="module")
+# One container per test, not per module: the two tests below deploy into
+# /srv/frameos side by side under pytest-xdist (CI runs this file with -n 2),
+# each into its own target. With FRAMEOS_E2E_DEPLOY_HOST they share the one
+# external host, so run them without -n there.
+@pytest.fixture
 def ssh_target() -> Iterator[SshTarget]:
     external_target = _external_target_from_env()
     if external_target:
@@ -470,15 +474,24 @@ def _log_lines(db, frame: Frame) -> list[str]:
     ]
 
 
-@pytest.mark.asyncio
-async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
-    db,
-    ssh_target: SshTarget,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _say("starting real SSH deploy E2E")
-    redis = NullRedis()
+def _private_nimble_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The deploy runs `nimble assets && nimble setup` on this machine, and
+    nimble rewrites its package database (nimbledata2.json) as it goes: two
+    tests doing that at once under xdist had one read the other's half-written
+    file (CI, 2026-11-14). Each worker gets a copy of the nimble directory;
+    a run without xdist keeps using the real one."""
+    if not os.environ.get("PYTEST_XDIST_WORKER"):
+        return
+    source = Path(os.environ.get("NIMBLE_DIR") or Path.home() / ".nimble")
+    if not source.is_dir():
+        return
+    target = tmp_path / "nimble"
+    shutil.copytree(source, target, symlinks=True)
+    monkeypatch.setenv("NIMBLE_DIR", str(target))
+
+
+def _prepare_deploy_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    _private_nimble_dir(tmp_path, monkeypatch)
     nim_path = find_nim_v2()
     _say(f"using Nim compiler at {nim_path}")
     monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
@@ -492,6 +505,23 @@ async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
     )
     monkeypatch.setenv("FRAMEOS_PRECOMPILED_CACHE_DIR", str(tmp_path / "precompiled-cache"))
     trust_test_key(monkeypatch)
+    return nim_path
+
+
+# The deploy paths in two tests, each with a target of its own, so CI runs the
+# two full compiles (~90 s each) side by side: on the device plus the fast
+# restart, then the backend's cross compile and the precompiled release made
+# from what it deployed.
+@pytest.mark.asyncio
+async def test_real_ssh_compile_on_device_and_fast_deploy(
+    db,
+    ssh_target: SshTarget,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _say("starting real SSH deploy E2E: compile on device, fast deploy")
+    redis = NullRedis()
+    nim_path = _prepare_deploy_environment(tmp_path, monkeypatch)
 
     with _phase("full deploy with compile on device"):
         remote_frame = _frame(
@@ -525,14 +555,32 @@ async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
     assert fast_plan.fast_deploy.action == "restart_service"
     assert remote_frame.last_successful_deploy["https_proxy"]["port"] == 9443
 
+    _say("checking deploy logs for required evidence")
+    logs = "\n".join(_log_lines(db, remote_frame))
+    assert "Generating C sources from Nim sources" in logs
+    assert "Building FrameOS on remote, no cross-compilation" in logs
+    _say("real SSH deploy E2E (compile on device, fast deploy) completed successfully")
+
+
+@pytest.mark.asyncio
+async def test_real_ssh_cross_compiled_and_precompiled_deploy(
+    db,
+    ssh_target: SshTarget,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _say("starting real SSH deploy E2E: cross compile, precompiled")
+    redis = NullRedis()
+    nim_path = _prepare_deploy_environment(tmp_path, monkeypatch)
+
     with _phase("full deploy with backend cross compile"):
-        _set_build_environment_provider(db, remote_frame, "docker")
         cross_frame = _frame(
             db,
             ssh_target,
             name="DeployE2ECross",
             rpios={"compilationMode": COMPILATION_MODE_STATIC},
         )
+        _set_build_environment_provider(db, cross_frame, "docker")
         cross_plan = await _run_full_deploy(
             db,
             redis,
@@ -587,13 +635,7 @@ async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
     assert '"name": "DeployE2EPrecompiled"' in current_frame_json
 
     _say("checking deploy logs for required evidence")
-    all_logs = "\n".join(
-        _log_lines(db, remote_frame)
-        + _log_lines(db, cross_frame)
-        + _log_lines(db, precompiled_frame)
-    )
-    assert "Generating C sources from Nim sources" in all_logs
-    assert "Building FrameOS on remote, no cross-compilation" in all_logs
-    assert "Cross compilation succeeded; skipping remote build" in all_logs
-    assert "Using precompiled FrameOS binary" in all_logs
-    _say("real SSH deploy E2E completed successfully")
+    logs = "\n".join(_log_lines(db, cross_frame) + _log_lines(db, precompiled_frame))
+    assert "Cross compilation succeeded; skipping remote build" in logs
+    assert "Using precompiled FrameOS binary" in logs
+    _say("real SSH deploy E2E (cross compile, precompiled) completed successfully")

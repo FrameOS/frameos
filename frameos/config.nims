@@ -90,3 +90,10 @@ when defined(testing):
   # tens of milliseconds to under a second), the checks are the same (this
   # is still -d:release, not -d:danger), and the warm nimcache is unaffected.
   switch("opt", "none")
+  # How many gcc processes one test's build runs at once. Nim's default is
+  # one per core, and tools/run_test_shard.sh already runs one test per core:
+  # on a 16-core CI slot with a cold nimcache that was 16 x 16 compilers
+  # against a 24 GB cap. The shard runner sets it; unset is Nim's default.
+  let testParallelBuild = getEnv("FRAMEOS_TEST_PARALLEL_BUILD")
+  if testParallelBuild.len > 0:
+    switch("parallelBuild", testParallelBuild)

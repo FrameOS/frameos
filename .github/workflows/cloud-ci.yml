@@ -97,29 +97,20 @@ env:
 jobs:
   verify:
     # A failed release publishes nothing to deploy, so do not spend a full
-    # verify on it. deploy `needs: verify`, so skipping here stops both.
+    # verify on it. deploy needs verify and integration, so skipping both
+    # stops it.
     if: >-
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
+    # A 16-core slot of the self-hosted pool (tools/gha-runners/README.md):
+    # turbo's lint/typecheck/test/build is CPU, and auth-web's 336 test files
+    # alone took two minutes on a 4-core GitHub runner. Pull requests from
+    # forks stay on GitHub's. The turbo cache still comes from (and goes to)
+    # GitHub's cache, which keeps a pull request's entries away from main's:
+    # deploy below replays this job's build into production.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-16' }}
     permissions:
       contents: read
-
-    # Real Postgres for the backend-linking integration tests.
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: frameos_cloud
-          POSTGRES_PASSWORD: frameos_cloud
-          POSTGRES_DB: frameos_cloud_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     # A release run finishes minutes after it pushed the version bump, so a
     # workflow_run event's own `github.sha` is not necessarily the main this
@@ -131,13 +122,11 @@ jobs:
           ref: ${{ github.event_name == 'workflow_run' && 'refs/heads/main' || '' }}
 
       # Reads the pnpm version from the packageManager field in package.json.
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
+      # On the pool the pnpm store comes with the VM image.
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+          node-version: '24'
 
       - uses: actions/cache@v4
         with:
@@ -152,23 +141,127 @@ jobs:
       # prebuild downloads and verifies the release's wasm runtime.
       # cloud-frontend (the frames SPA wrapper auth-web serves) is built by
       # esbuild, which checks no types, so its typecheck task rides along.
-      - run: pnpm exec turbo run lint typecheck test build --filter='@frameos-cloud/*' --filter=@frameos/cloud-frontend
+      # The integration suites are the `integration` job below.
+      - run: pnpm exec turbo run lint typecheck test build --filter='@frameos-cloud/*' --filter=@frameos/cloud-frontend --summarize
+
+      # Keep only what this run used. The cache is restored by prefix and saved
+      # whole, so it carried every artifact of every earlier run: 1.2 GB by
+      # 2026-11, most of a minute to move from the pool. What this run's tasks
+      # hashed to is all that the next run (or deploy's replay of this build)
+      # can hit anyway.
+      - name: Prune the turbo cache to this run
+        run: |
+          python3 - <<'PY'
+          import json
+          import pathlib
+
+          root = pathlib.Path(".turbo")
+          runs = sorted((root / "runs").glob("*.json"), key=lambda p: p.stat().st_mtime)
+          if not runs:
+              raise SystemExit("no turbo run summary; leaving the cache as it is")
+          keep = {task.get("hash") for task in json.loads(runs[-1].read_text()).get("tasks", [])}
+          keep.discard(None)
+          if not keep:
+              raise SystemExit("the run summary names no task hashes; leaving the cache as it is")
+          removed = kept = 0
+          for entry in (root / "cache").iterdir():
+              if entry.name.split(".")[0].split("-")[0] in keep:
+                  kept += 1
+              else:
+                  entry.unlink()
+                  removed += 1
+          for summary in runs:
+              summary.unlink()
+          print(f"turbo cache: kept {kept} files of {len(keep)} tasks, removed {removed}")
+          PY
+          du -sh .turbo
+
+  # The integration suites against a real Postgres, one service container per
+  # leg: auth-web's (the slowest, 47 files that share one database and so run
+  # one after another) in four shards, and the frame hub's with the ledger's
+  # (each creates its own database). Never two copies of one suite against
+  # one database: every leg has a Postgres of its own. Side by side with
+  # verify, which it used to run after.
+  integration:
+    name: integration (${{ matrix.leg }})
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    # auth-web's shards on the pool; the frame hub's suite on GitHub's runner,
+    # as when verify ran it: it drives fake devices over the real command
+    # queue against 10 s waits, and on a pool saturated by other pull
+    # requests' runs two of its tests timed out (2026-11-14), one of them on
+    # a real hub race (a revocation NOTIFY between `connected` and
+    # `readySent` waits for the 30 s sweep).
+    runs-on: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) || !matrix.pool) && 'ubuntu-latest' || 'epyc-16' }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { leg: auth-web 1/4, pool: true }
+          - { leg: auth-web 2/4, pool: true }
+          - { leg: auth-web 3/4, pool: true }
+          - { leg: auth-web 4/4, pool: true }
+          - { leg: frame-hub + ledger, pool: false }
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: frameos_cloud
+          POSTGRES_PASSWORD: frameos_cloud
+          POSTGRES_DB: frameos_cloud_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && 'refs/heads/main' || '' }}
+
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: '24'
+
+      - run: pnpm install --frozen-lockfile
+
+      # What the suites import that turbo built for them in verify: the
+      # frameos-wasm package's dist (scene-render.ts imports it), and
+      # auth-web's generated AI context (its pretest:integration hook, which
+      # the shards below skip by calling vitest themselves for --shard).
+      - name: Build what the suites import
+        run: |
+          pnpm exec turbo run build --filter=frameos-wasm
+          pnpm --filter @frameos-cloud/auth-web exec node scripts/generate-ai-context.mjs
 
       # Backend-linking flow against the Postgres service container.
-      - run: pnpm --filter @frameos-cloud/auth-web test:integration
+      - name: auth-web
+        if: startsWith(matrix.leg, 'auth-web ')
         env:
           TEST_DATABASE_URL: postgres://frameos_cloud:frameos_cloud@127.0.0.1:5432/frameos_cloud_test
+          SHARD: ${{ matrix.leg }}
+        run: pnpm --filter @frameos-cloud/auth-web exec vitest run --config vitest.integration.config.ts --shard="${SHARD#auth-web }"
 
       # Frame hub: device/browser WebSocket protocol against real Postgres
       # (its global-setup creates its own database so the suites can share
       # the service container).
-      - run: pnpm --filter @frameos-cloud/frame-hub test:integration
+      - name: frame-hub
+        if: matrix.leg == 'frame-hub + ledger'
+        run: pnpm --filter @frameos-cloud/frame-hub test:integration
         env:
           TEST_DATABASE_URL: postgres://frameos_cloud:frameos_cloud@127.0.0.1:5432/frameos_cloud_frame_hub_test
 
       # Accounting: the posting kernel, the append-only triggers and the
       # ledger invariants, against real Postgres (same story, own database).
-      - run: pnpm --filter @frameos-cloud/ledger test:integration
+      - name: ledger
+        if: matrix.leg == 'frame-hub + ledger'
+        run: pnpm --filter @frameos-cloud/ledger test:integration
         env:
           TEST_DATABASE_URL: postgres://frameos_cloud:frameos_cloud@127.0.0.1:5432/frameos_cloud_ledger_test
 
@@ -181,7 +274,7 @@ jobs:
   # this (the FRAMEOS_CLOUD_AUTO_DEPLOY variable) and how to roll back.
   deploy:
     name: Deploy to production
-    needs: verify
+    needs: [verify, integration]
     # Two ways in: a merge to main, and a finished release. A release that
     # failed is not a release — deploying the half of it that landed is worse
     # than deploying nothing.
@@ -468,7 +561,7 @@ jobs:
   # This goes to PostHog, whose `cloud ops alert` workflow posts to Discord.
   report-undeployed:
     name: Report a main that was not deployed
-    needs: verify
+    needs: [verify, integration]
     if: >-
       failure() &&
       (github.event_name == 'push' || github.event_name == 'workflow_run')

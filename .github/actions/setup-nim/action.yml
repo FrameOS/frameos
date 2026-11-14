@@ -1,0 +1,78 @@
+name: Set up Nim
+description: >-
+  Nim 2.2.4 on PATH plus the nimble packages of frameos/ and the Remote. On the
+  self-hosted pool both come with the VM image (tools/gha-runners/bin/
+  gha-image-warm.sh), so nothing is fetched; elsewhere the toolchain and the
+  packages come from the GitHub cache, and the toolchain from nim-lang.org
+  only when the cache has never been filled. `nimble install -d` in the
+  checkout still fetches whatever its own lock needs on top.
+inputs:
+  nim-version:
+    description: The Nim release; the warm image carries 2.2.4.
+    default: '2.2.4'
+  github-token:
+    description: For setup-nim-action's release lookups.
+    required: true
+outputs:
+  warm:
+    description: "'true' when the toolchain came with the runner image."
+    value: ${{ steps.warm.outputs.warm }}
+runs:
+  using: composite
+  steps:
+    - name: Look for the warm toolchain
+      id: warm
+      shell: bash
+      env:
+        NIM_VERSION: ${{ inputs.nim-version }}
+      run: |
+        if [ -x "$HOME/.choosenim/toolchains/nim-$NIM_VERSION/bin/nim" ] \
+          && [ -f "${RUNNER_TOOL_CACHE:-/nonexistent}/frameos-ci/manifest.json" ]; then
+          echo "warm=true" >> "$GITHUB_OUTPUT"
+          echo "Nim $NIM_VERSION from the runner image ($(jq -r .commit "$RUNNER_TOOL_CACHE/frameos-ci/manifest.json" | cut -c1-12))"
+        else
+          echo "warm=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    # nim-lang.org drops connections and serves 503s often enough to fail
+    # real runs — one observed window outlasted curl's five retries AND a
+    # spaced second attempt. Cache the installed toolchain: on a hit the
+    # host is never contacted at all; the download (with its one retry
+    # below) only runs when this key has never been populated.
+    - name: Cache Nim toolchain
+      if: steps.warm.outputs.warm != 'true'
+      id: cache_nim_toolchain
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.choosenim
+          ~/.nimble/bin
+        key: ${{ runner.os }}-nim-toolchain-${{ inputs.nim-version }}
+
+    - uses: jiro4989/setup-nim-action@v1
+      if: steps.warm.outputs.warm != 'true' && steps.cache_nim_toolchain.outputs.cache-hit != 'true'
+      id: setup_nim
+      continue-on-error: true
+      with:
+        nim-version: ${{ inputs.nim-version }}
+        repo-token: ${{ inputs.github-token }}
+
+    - name: Retry Nim setup once
+      if: steps.warm.outputs.warm != 'true' && steps.cache_nim_toolchain.outputs.cache-hit != 'true' && steps.setup_nim.outcome == 'failure'
+      uses: jiro4989/setup-nim-action@v1
+      with:
+        nim-version: ${{ inputs.nim-version }}
+        repo-token: ${{ inputs.github-token }}
+
+    - name: Put Nim on PATH
+      shell: bash
+      run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+
+    - name: Cache nimble packages
+      if: steps.warm.outputs.warm != 'true'
+      uses: actions/cache@v4
+      with:
+        path: ~/.nimble/pkgs2
+        key: ${{ runner.os }}-nimble-${{ hashFiles('frameos/nimble.lock', 'frameos/remote/nimble.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-nimble-

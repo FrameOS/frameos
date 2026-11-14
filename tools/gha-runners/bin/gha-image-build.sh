@@ -30,7 +30,8 @@ incus exec "$BUILD" -- env RUNNER_VERSION="$RUNNER_VERSION" DEBIAN_FRONTEND=noni
 set -euxo pipefail
 # Same shape as GitHub's ubuntu images where it matters for our workflows:
 # a `runner` user with passwordless sudo and docker, git/curl/jq, build
-# essentials. Toolchains (node, python, nim) come from setup-* actions.
+# essentials. The toolchains (node, python, nim) are added warm afterwards by
+# gha-image-warm.sh; the workflows' setup-* steps still run and find them.
 apt-get update -q
 apt-get install -yq --no-install-recommends \
   ca-certificates curl wget git git-lfs jq unzip zip zstd xz-utils tar rsync \
@@ -67,27 +68,52 @@ tar xzf runner.tgz && rm runner.tgz
 # against the PEP 668 "externally managed" system Python — workflows written
 # for GitHub-hosted runners assume it (frameos-cross broke without it).
 # ImageOS helps setup-python/setup-ruby pick the right prebuilt binaries.
+# RUNNER_TOOL_CACHE / AGENT_TOOLSDIRECTORY: the warm tool cache
+# (gha-image-warm.sh) lives where GitHub's images keep theirs, so setup-node
+# and setup-python find it, and the runner mounts it into container jobs at
+# /__t as well.
 cat > /home/runner/actions-runner/.env <<'ENV'
 PIP_BREAK_SYSTEM_PACKAGES=1
 ImageOS=ubuntu24
+RUNNER_TOOL_CACHE=/opt/hostedtoolcache
+AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache
 ENV
 chown -R runner:runner /home/runner
 echo "$RUNNER_VERSION" > /home/runner/actions-runner/.version
 
 # Mount point for the host-side persistent cache (see gha-slot.sh).
 mkdir -p /mnt/cache
+PROVISION
+
+# Toolchains, main's dependencies and the container images, so a job starts
+# warm (gha-image-warm.sh says what and why). A failure here fails the build,
+# and gha-image-refresh.sh then keeps the image that is live.
+echo "==> warming"
+incus file push --mode 0755 "$(dirname "$0")/gha-image-warm.sh" "$BUILD/usr/local/sbin/gha-image-warm"
+# FRAMEOS_REPO_REF: which ref's dependencies to warm (main; a branch to try
+# a change to the warming itself under a staging alias).
+incus exec "$BUILD" --env FRAMEOS_REPO_REF="${FRAMEOS_REPO_REF:-main}" -- /usr/local/sbin/gha-image-warm
+
+incus exec "$BUILD" -- bash -s <<'FINALIZE'
+set -euxo pipefail
+rm -f /usr/local/sbin/gha-image-warm
 # Keep the image small and the boot clean.
 cloud-init clean --logs || true
 truncate -s 0 /etc/machine-id
 journalctl --rotate --vacuum-time=1s || true
 rm -rf /tmp/* /var/tmp/* /var/lib/apt/lists/*
-PROVISION
+fstrim -av || true
+FINALIZE
 
 echo "==> publishing"
 incus stop "$BUILD"
 # Replace the alias atomically-ish: publish new, then point the alias at it.
+# zstd, not the default gzip (minutes on a ~20 GB warm image) and not none:
+# the tarball stays in /var/lib/incus/images on the root filesystem, which
+# also backs the thin pool's loop file, and an uncompressed one was 23 GB of
+# the headroom that file needs (2026-11-14, / reached 100%).
 OLD=$(incus image list "$ALIAS" --format csv -c f 2>/dev/null | head -1 || true)
-incus publish "$BUILD" --alias "$ALIAS" --reuse \
+incus publish "$BUILD" --alias "$ALIAS" --reuse --compression zstd \
   description="GitHub Actions runner base (Ubuntu 24.04, runner $RUNNER_VERSION, $(date -u +%F))" \
   runner_version="$RUNNER_VERSION"
 if [ -n "$OLD" ]; then

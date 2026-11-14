@@ -105,6 +105,14 @@ fi
 if ! [[ "$test_jobs" =~ ^[0-9]+$ ]] || (( test_jobs < 1 )); then
   test_jobs=1
 fi
+# Each of those builds would run one gcc per core of its own (Nim's
+# parallelBuild default): with 16 tests at once on a 16-core slot and a cold
+# nimcache, 256 compilers against the VM's 24 GB. Four apiece keeps the cores
+# busy while most tests are in their single-threaded Nim frontend anyway
+# (frameos/config.nims reads this for -d:testing builds).
+if (( test_jobs > 1 )) && [[ -z "${FRAMEOS_TEST_PARALLEL_BUILD:-}" ]]; then
+  export FRAMEOS_TEST_PARALLEL_BUILD=4
+fi
 
 run_testament() {
   local test_file="$1"

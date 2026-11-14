@@ -55,8 +55,8 @@ interpreter around it.
 
 **pixie is in the tree** (`frameos/pixie`, a squashed subtree of
 FrameOS/pixie@930bee30; `config.nims` puts its `src/` on the path,
-`FRAMEOS_PIXIE_PATH` still overrides). `make test-pixie` runs its suite (CI
-shard 2); `test_gray8` / `test_rgb565` failed before the move (one
+`FRAMEOS_PIXIE_PATH` still overrides). `make test-pixie` runs its suite (CI's
+"pixie tests" job, `PIXIE_TEST_JOBS` compiles at a time); `test_gray8` / `test_rgb565` failed before the move (one
 quantisation step on this host) and are skipped with a note.
 
 The firmware loop:
