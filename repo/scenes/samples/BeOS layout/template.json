@@ -1,0 +1,10 @@
+{
+  "name": "BeOS layout",
+  "description": "A yellow-tabbed window on a blue desktop, with the Deskbar in the corner: its menu opens the scene list, the tray with the clock the frame's page, and the list below it the scene and its settings.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.5"
+}

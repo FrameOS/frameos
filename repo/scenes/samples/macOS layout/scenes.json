@@ -1,0 +1,115 @@
+[
+  {
+    "id": "layout-macos",
+    "name": "macOS",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 1,
+      "backgroundColor": "#3b4cc0",
+      "isLayout": true
+    },
+    "fields": [
+      {
+        "name": "showWindow",
+        "type": "boolean",
+        "label": "Show window",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "showDock",
+        "type": "boolean",
+        "label": "Show Dock",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "twentyFourHour",
+        "type": "boolean",
+        "label": "24-hour clock",
+        "value": "false",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "macos": {
+        "name": "macOS",
+        "category": "data",
+        "description": "A menu bar, a window and a Dock around each scene: the menu and the Dock open the scene list and its settings, the traffic lights close, hide or unframe the window, and the clock opens the frame's page.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"macOS\",\n  \"category\": \"data\",\n  \"description\": \"A menu bar, a window and a Dock around each scene: the menu and the Dock open the scene list and its settings, the traffic lights close, hide or unframe the window, and the clock opens the frame's page.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n",
+          "app.tsx": "// A Mac of today around the scene it wraps: a menu bar across the top, the scene\n// in a window, and the Dock below. The mark and the status icons with the clock\n// open the frame's page (a Mac restarts from the mark's menu), Scenes and the\n// Dock's grid the scene list, Settings and the Dock's gear the scene's settings.\n// The traffic lights: red closes the scene to the list, yellow puts the window\n// away and green takes its frame off; the scene's icon in the Dock, or Window,\n// brings either back. Built-in scenes are drawn in the window too.\nconst pad = (n) => String(n).padStart(2, '0')\nconst on = (value) => value === true || value === 'true'\nconst DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']\nconst MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']\n\n// Sizes are pixels, of a desktop's size, twice that on a panel with a short side\n// of 1000 px or more, whose pixels are small, and in proportion on one under 480,\n// which has no room for them. The frame's render scale multiplies on top.\nlet zoom = 1\nlet edge = 1 // a hairline's width\nconst px = (n) => `${Math.round(n * zoom * 10) / 10}px`\n\nfunction clock(now, twentyFour) {\n  const minutes = pad(now.getMinutes())\n  if (twentyFour) return `${pad(now.getHours())}:${minutes}`\n  return `${now.getHours() % 12 || 12}:${minutes} ${now.getHours() < 12 ? 'AM' : 'PM'}`\n}\n\n// Three looks: glass over the wallpaper on a screen; solid on color e-paper, where\n// a see-through bar dithers into noise under its words; black on white on a grey\n// panel, where the colors would all be one grey.\nconst GLASS = {\n  menu: 'bg-white/65 text-[#1d1d1f]',\n  press: 'active:bg-black/10',\n  window: 'bg-[#ececec] border-black/30',\n  title: 'text-[#4a4a4a]',\n  rule: 'bg-[#d0d0d0]',\n  dock: 'bg-white/30 border-white/55',\n  divider: 'bg-black/20',\n  dot: 'bg-[#1d1d1f]',\n  lights: ['#ff5f57', '#febc2e', '#28c840'],\n  rims: ['#e0443e', '#d9a024', '#1fa834'],\n  marks: ['#7a1712', '#8a5300', '#0b6414'],\n  glyphs: 'opacity-0 group-hover:opacity-100',\n  tile: '',\n  lift: true,\n  ruled: false,\n}\nconst PAPER = {\n  ...GLASS,\n  menu: 'bg-white text-black',\n  window: 'bg-white border-black',\n  title: 'text-black',\n  rule: 'bg-black',\n  dock: 'bg-white border-black',\n  divider: 'bg-black',\n  dot: 'bg-black',\n  lift: false,\n}\nconst MONO = {\n  ...PAPER,\n  ruled: true,\n  lights: ['#ffffff', '#ffffff', '#ffffff'],\n  rims: ['#000000', '#000000', '#000000'],\n  marks: ['#000000', '#000000', '#000000'],\n  glyphs: '',\n  tile: 'bg-white border-black',\n}\nlet t = GLASS\n\n// The wallpaper: waves of color under a deep sky, drawn on a 100 x 100 grid and\n// stretched to the panel's size. It is the same element from one render to the next\n// (memo), so it is laid out and drawn once.\nconst Wallpaper = memo(({ mono, w, h }) =>\n  <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio=\"none\" className=\"w-full h-full\">\n    <g transform={`scale(${w / 100} ${h / 100})`}>{mono ? <MonoWaves /> : <Waves />}</g>\n  </svg>\n)\n\nconst MonoWaves = () => (\n    <g>\n      <rect x=\"0\" y=\"0\" width=\"100\" height=\"100\" fill=\"#dcdcdc\" />\n      <path fill=\"#c8c8c8\" d=\"M0 44C18 34 34 50 52 44C70 38 84 30 100 36V100H0Z\" />\n      <path fill=\"#b4b4b4\" d=\"M0 62C16 54 32 68 50 63C68 58 82 50 100 56V100H0Z\" />\n      <path fill=\"#a0a0a0\" d=\"M0 80C20 72 40 84 60 78C78 73 90 70 100 73V100H0Z\" />\n    </g>\n)\n\nconst Waves = () => (\n    <g>\n      <linearGradient id=\"macSky\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"100\">\n        <stop offset=\"0\" stopColor=\"#1a2f7a\" />\n        <stop offset=\"0.45\" stopColor=\"#3a5bd0\" />\n        <stop offset=\"1\" stopColor=\"#6d4bd0\" />\n      </linearGradient>\n      <linearGradient id=\"macWaveA\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"30\" x2=\"100\" y2=\"60\">\n        <stop offset=\"0\" stopColor=\"#3657e0\" />\n        <stop offset=\"1\" stopColor=\"#7b4fe0\" />\n      </linearGradient>\n      <linearGradient id=\"macWaveB\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"50\" x2=\"100\" y2=\"70\">\n        <stop offset=\"0\" stopColor=\"#8a3fd8\" />\n        <stop offset=\"1\" stopColor=\"#d2459f\" />\n      </linearGradient>\n      <linearGradient id=\"macWaveC\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"66\" x2=\"100\" y2=\"86\">\n        <stop offset=\"0\" stopColor=\"#e2508c\" />\n        <stop offset=\"1\" stopColor=\"#f6835a\" />\n      </linearGradient>\n      <linearGradient id=\"macWaveD\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"80\" x2=\"100\" y2=\"100\">\n        <stop offset=\"0\" stopColor=\"#f79a48\" />\n        <stop offset=\"1\" stopColor=\"#fbcf5e\" />\n      </linearGradient>\n      <rect x=\"0\" y=\"0\" width=\"100\" height=\"100\" fill=\"url(#macSky)\" />\n      <path fill=\"url(#macWaveA)\" d=\"M0 40C18 30 34 48 52 41C70 34 84 26 100 33V100H0Z\" />\n      <path fill=\"url(#macWaveB)\" d=\"M0 57C16 48 31 63 49 58C67 53 81 44 100 51V100H0Z\" />\n      <path fill=\"url(#macWaveC)\" d=\"M0 73C20 65 38 79 58 73C76 67 88 63 100 67V100H0Z\" />\n      <path fill=\"url(#macWaveD)\" d=\"M0 88C22 82 44 93 66 87C82 83 92 80 100 82V100H0Z\" />\n    </g>\n)\n\n// The menu bar's icons, in its text color.\nconst Mark = () => (\n  <svg viewBox=\"0 0 46 54\" className={`w-[${px(14)}] h-[${px(16)}]`}>\n    <path fill=\"currentColor\" d=\"M0 0H46V5H5V30H0ZM26 49H41V32H46V54H26Z\" />\n    <rect x=\"7\" y=\"36\" width=\"12\" height=\"11\" rx=\"1.4\" fill=\"currentColor\" />\n    <rect x=\"20\" y=\"24\" width=\"12\" height=\"11\" rx=\"1.4\" fill=\"currentColor\" />\n    <rect x=\"33\" y=\"12\" width=\"12.5\" height=\"11.5\" rx=\"1.4\" fill=\"currentColor\" />\n  </svg>\n)\n\nconst Toggles = () => (\n  <svg viewBox=\"0 0 18 15\" className={`w-[${px(17)}] h-[${px(14)}]`}>\n    <rect x=\"0.6\" y=\"0.6\" width=\"16.8\" height=\"5.8\" rx=\"2.9\" fill=\"none\" stroke=\"currentColor\" strokeWidth=\"1.1\" />\n    <circle cx=\"13.9\" cy=\"3.5\" r=\"1.9\" fill=\"currentColor\" />\n    <rect x=\"0.6\" y=\"8.6\" width=\"16.8\" height=\"5.8\" rx=\"2.9\" fill=\"none\" stroke=\"currentColor\" strokeWidth=\"1.1\" />\n    <circle cx=\"4.1\" cy=\"11.5\" r=\"1.9\" fill=\"currentColor\" />\n  </svg>\n)\n\n// The Wi-Fi fan, its arcs lit by the signal; nothing on a frame that cannot tell.\nfunction Wifi({ rssi }) {\n  if (typeof rssi !== 'number') return null\n  const level = rssi >= -60 ? 3 : rssi >= -72 ? 2 : 1\n  const arc = (lit) => (lit ? 1 : 0.3)\n  return (\n    <svg viewBox=\"0 0 20 15\" className={`w-[${px(18)}] h-[${px(14)}]`}>\n      <circle cx=\"10\" cy=\"12.6\" r=\"1.7\" fill=\"currentColor\" />\n      <path d=\"M6.8 9.5A4.5 4.5 0 0 1 13.2 9.5\" fill=\"none\" stroke=\"currentColor\" strokeOpacity={arc(level >= 1)} strokeWidth=\"1.8\" strokeLinecap=\"round\" />\n      <path d=\"M4 6.6A8.5 8.5 0 0 1 16 6.6\" fill=\"none\" stroke=\"currentColor\" strokeOpacity={arc(level >= 2)} strokeWidth=\"1.8\" strokeLinecap=\"round\" />\n      <path d=\"M1.2 3.8A12.5 12.5 0 0 1 18.8 3.8\" fill=\"none\" stroke=\"currentColor\" strokeOpacity={arc(level >= 3)} strokeWidth=\"1.8\" strokeLinecap=\"round\" />\n    </svg>\n  )\n}\n\nfunction Battery({ percent, mono }) {\n  if (typeof percent !== 'number') return null\n  const low = percent <= 15 && !mono\n  return (\n    <svg viewBox=\"0 0 27 13\" className={`w-[${px(26)}] h-[${px(13)}]`}>\n      <rect x=\"0.6\" y=\"0.6\" width=\"23\" height=\"11.8\" rx=\"3.6\" fill=\"none\" stroke=\"currentColor\" strokeOpacity=\"0.5\" strokeWidth=\"1.2\" />\n      <rect x=\"2.2\" y=\"2.2\" width={Math.max(1.5, (19.8 * Math.min(100, percent)) / 100)} height=\"8.6\" rx=\"2\" fill={low ? '#ff3b30' : 'currentColor'} />\n      <path d=\"M25 4.4C26.2 4.8 26.6 5.6 26.6 6.5C26.6 7.4 26.2 8.2 25 8.6Z\" fill=\"currentColor\" fillOpacity=\"0.5\" />\n    </svg>\n  )\n}\n\n// A word or an icon in the menu bar, lit while pressed.\nconst Menu = ({ className = '', onClick, children }) => (\n  <div\n    className={`flex items-center shrink-0 h-[${px(22)}] gap-[${px(9)}] px-[${px(8)}] rounded-[${px(5)}] whitespace-nowrap ${t.press} ${className}`}\n    onClick={onClick}\n  >\n    {children}\n  </div>\n)\n\n// A traffic light. Its glyph shows while the pointer is over the three of them,\n// and always on a grey panel, where the three are alike.\nconst Light = ({ index, onClick, children }) => (\n  <div className={`flex p-[${px(4)}]`} onClick={onClick}>\n    <svg viewBox=\"0 0 12 12\" className={`w-[${px(12)}] h-[${px(12)}]`}>\n      <circle cx=\"6\" cy=\"6\" r=\"5.6\" fill={t.lights[index]} stroke={t.rims[index]} strokeWidth=\"0.7\" />\n    </svg>\n    <svg viewBox=\"0 0 12 12\" className={`absolute top-[${px(4)}] left-[${px(4)}] w-[${px(12)}] h-[${px(12)}] ${t.glyphs}`}>\n      {children}\n    </svg>\n  </div>\n)\n\n// No shadows to be had: two see-through rings under the window, deeper at the\n// bottom, lift it off the wallpaper. On paper and grey panels its line does that.\nconst Lifted = ({ children }) =>\n  t.lift ? (\n    <div className={`flex flex-col flex-1 min-h-0 rounded-[${px(13)}] bg-black/10 pt-[${px(1)}] px-[${px(1)}] pb-[${px(3)}]`}>\n      <div className={`flex flex-col flex-1 min-h-0 rounded-[${px(12)}] bg-black/10 pb-[${px(1)}]`}>{children}</div>\n    </div>\n  ) : (\n    children\n  )\n\n// The window: rounded corners, a title bar with the lights and the name in the\n// middle, and a strip at the bottom as deep as the corners are round, which keeps\n// the square scene off them.\nconst Window = ({ title, onClose, onMinimize, onZoom, children }) => (\n  <div className={`flex flex-col flex-1 min-h-0 rounded-[${px(11)}] border-[${edge}px] ${t.window}`}>\n    <div className={`flex items-center shrink-0 h-[${px(30)}] px-[${px(8)}]`}>\n      <div className=\"group flex flex-1 basis-0 min-w-0 items-center\">\n        <Light index={0} onClick={onClose}>\n          <path d=\"M3.9 3.9L8.1 8.1M8.1 3.9L3.9 8.1\" stroke={t.marks[0]} strokeWidth=\"1.2\" strokeLinecap=\"round\" />\n        </Light>\n        <Light index={1} onClick={onMinimize}>\n          <path d=\"M3.2 6H8.8\" stroke={t.marks[1]} strokeWidth=\"1.3\" strokeLinecap=\"round\" />\n        </Light>\n        <Light index={2} onClick={onZoom}>\n          <path d=\"M3.5 3.5H7.3L3.5 7.3ZM8.5 8.5H4.7L8.5 4.7Z\" fill={t.marks[2]} />\n        </Light>\n      </div>\n      <span className={`shrink min-w-0 truncate font-semibold ${t.title}`}>{title}</span>\n      <div className=\"flex-1 basis-0\" />\n    </div>\n    <div className={`shrink-0 h-[${edge}px] ${t.rule}`} />\n    <div className=\"flex flex-col flex-1 min-h-0\">{children}</div>\n    <div className={`shrink-0 h-[${px(10)}]`} />\n  </div>\n)\n\n// The Dock's icons: a rounded square each, with a dot under the ones that are open.\nconst Tile = ({ className, children }) => (\n  <div\n    className={`flex items-center justify-center w-[${px(46)}] h-[${px(46)}] rounded-[${px(11)}] ${\n      t.tile ? `border-[${edge}px] ${t.tile}` : className\n    }`}\n  >\n    {children}\n  </div>\n)\n\nconst DockItem = ({ open, onClick, children }) => (\n  <div className={`flex flex-col items-center gap-[${px(3)}] active:opacity-60`} onClick={onClick}>\n    {children}\n    <div className={`w-[${px(4)}] h-[${px(4)}] rounded-full ${open ? t.dot : ''}`} />\n  </div>\n)\n\nconst SCENE_COLORS = ['#ff6b6b', '#ffd166', '#2ec4b6', '#4cc9f0', '#f72585', '#a3e635', '#ffa94d', '#9775fa', '#63e6be']\n\nconst ScenesIcon = ({ mono }) => (\n  <Tile className=\"bg-gradient-to-b from-[#5d6577] to-[#23262f]\">\n    <svg viewBox=\"0 0 30 30\" className={`w-[${px(28)}] h-[${px(28)}]`}>\n      {SCENE_COLORS.map((color, i) => (\n        <rect x={(i % 3) * 11} y={Math.floor(i / 3) * 11} width=\"8\" height=\"8\" rx=\"2.2\" fill={mono ? '#000000' : color} />\n      ))}\n    </svg>\n  </Tile>\n)\n\nconst GEAR =\n  'M29.4 13.2L29.8 9.1L34.2 9.1L34.6 13.2L37.9 13.9L40 10.4L43.9 12.3L42.5 16.1L45.1 18.3L48.6 16L51.3 19.4L48.3 22.3L49.8 25.3L53.8 24.8L54.8 29L50.9 30.3L50.9 33.7L54.8 35L53.8 39.2L49.8 38.7L48.3 41.7L51.3 44.6L48.6 48L45.1 45.7L42.5 47.9L43.9 51.7L40 53.6L37.9 50.1L34.6 50.8L34.2 54.9L29.8 54.9L29.4 50.8L26.1 50.1L24 53.6L20.1 51.7L21.5 47.9L18.9 45.7L15.4 48L12.7 44.6L15.7 41.7L14.2 38.7L10.2 39.2L9.2 35L13.1 33.7L13.1 30.3L9.2 29L10.2 24.8L14.2 25.3L15.7 22.3L12.7 19.4L15.4 16L18.9 18.3L21.5 16.1L20.1 12.3L24 10.4L26.1 13.9ZM41 32A9 9 0 1 0 23 32A9 9 0 1 0 41 32Z'\n\nconst SettingsIcon = ({ mono }) => (\n  <Tile className=\"bg-gradient-to-b from-[#ececf0] to-[#8e8e96]\">\n    <svg viewBox=\"6 6 52 52\" className={`w-[${px(38)}] h-[${px(38)}]`}>\n      <path fill={mono ? '#000000' : '#3a3a3e'} d={GEAR} />\n      <circle cx=\"32\" cy=\"32\" r=\"5\" fill=\"none\" stroke={mono ? '#000000' : '#3a3a3e'} strokeWidth=\"2\" />\n    </svg>\n  </Tile>\n)\n\n// The frame's own page: a picture in a frame.\nconst FrameIcon = ({ mono }) => (\n  <Tile className=\"bg-gradient-to-b from-[#fbfbfd] to-[#d6d6dc]\">\n    <svg viewBox=\"0 0 40 32\" className={`w-[${px(33)}] h-[${px(27)}]`}>\n      <rect x=\"0\" y=\"0\" width=\"40\" height=\"32\" rx=\"1.5\" fill={mono ? '#000000' : '#6b4a33'} />\n      <rect x=\"3\" y=\"3\" width=\"34\" height=\"26\" fill=\"#ffffff\" />\n      <rect x=\"6.5\" y=\"6.5\" width=\"27\" height=\"19\" fill={mono ? '#ffffff' : '#8fd0ff'} stroke={mono ? '#000000' : 'none'} />\n      <circle cx=\"26.5\" cy=\"12\" r=\"2.6\" fill={mono ? '#000000' : '#ffd43b'} />\n      <path d=\"M6.5 25.5V20.5C11 16.5 15 16 19 19.5C22.5 17.5 28 17.5 33.5 21.5V25.5Z\" fill={mono ? '#000000' : '#40c057'} />\n    </svg>\n  </Tile>\n)\n\n// The scene's own icon: its first letter.\nconst SceneIcon = ({ name }) => (\n  <Tile className=\"bg-gradient-to-b from-[#64d2ff] to-[#0a6cff]\">\n    <span className={`font-bold text-[${px(24)}] ${t.tile ? 'text-black' : 'text-white'}`}>\n      {(name.trim()[0] || 'F').toUpperCase()}\n    </span>\n  </Tile>\n)\n\nexport function get(app) {\n  // app.frame's size is the panel's over the render scale, before the frame's rotation.\n  const width = (app.frame.rotate || 0) % 180 !== 0 ? app.frame.height : app.frame.width\n  const height = (app.frame.rotate || 0) % 180 !== 0 ? app.frame.width : app.frame.height\n  const shortSide = Math.min(app.frame.width, app.frame.height) * (app.frame.scale || 1)\n  zoom = shortSide >= 1000 ? 2 : shortSide >= 480 ? 1 : shortSide / 480\n  edge = Math.max(1, Math.round(zoom))\n  const mono = app.frame.color === false\n  t = mono ? MONO : app.frame.paper ? PAPER : GLASS\n  // The date and the Window menu need room: the scene's name gives way first.\n  const roomy = width >= 640 * Math.max(zoom, 1)\n  const now = new Date()\n  // The clock changes on the minute: nothing to draw until then.\n  frameos.setNextSleep(60 - now.getSeconds())\n  const name = app.frame.sceneName || 'FrameOS'\n  const builtIn = app.frame.systemScene === true\n  const settingsOpen = builtIn && name.includes('settings')\n  const frameOpen = settingsOpen && name.startsWith('Frame')\n  const listOpen = builtIn && !settingsOpen\n  // The scene a built-in one opened over keeps its icon in the Dock.\n  const scene = builtIn ? app.state.openedOver || '' : name\n  const title = listOpen ? 'Launchpad' : frameOpen ? 'System Settings' : settingsOpen ? 'Settings' : name\n  const minimized = !builtIn && app.state.minimized === true\n  const zoomed = app.state.zoomed === true\n  const framed = on(app.state.showWindow) && !zoomed\n  const docked = on(app.state.showDock)\n  // A built-in scene's own command, again, goes back to the scene it opened over.\n  const closeBuiltIn = () => frameos.dispatch(settingsOpen ? 'sceneSettings' : 'sceneSwitcher')\n  const openList = () => frameos.dispatch('sceneSwitcher', { swap: true })\n  const openSettings = () => frameos.dispatch('sceneSettings')\n  const openFrame = () => frameos.dispatch('sceneSettings', { page: 'frame' })\n  const toggleZoom = () => frameos.setState('zoomed', !zoomed)\n  const showScene = builtIn\n    ? closeBuiltIn\n    : minimized\n    ? () => frameos.setState('minimized', false)\n    : zoomed\n    ? toggleZoom\n    : () => frameos.setState('minimized', true)\n  return (\n    <div className=\"relative w-full h-full\">\n      <Wallpaper mono={mono} w={Math.round(width)} h={Math.round(height)} />\n      <div className={`absolute inset-0 flex flex-col text-[${px(14)}]`}>\n        <div className={`flex items-center shrink-0 h-[${px(26)}] px-[${px(6)}] ${t.menu} ${t.ruled ? `border-b-[${edge}px] border-black` : ''}`}>\n          <Menu onClick={openFrame}>\n            <Mark />\n          </Menu>\n          <span className={`shrink min-w-0 truncate font-bold px-[${px(8)}]`}>{title}</span>\n          <Menu onClick={openList}>Scenes</Menu>\n          <Menu onClick={openSettings}>Settings</Menu>\n          {roomy ? <Menu onClick={minimized ? showScene : toggleZoom}>Window</Menu> : null}\n          <div className=\"flex-1\" />\n          <Menu onClick={openFrame}>\n            <Toggles />\n            <Wifi rssi={app.frame.wifiRssi} />\n            <Battery percent={app.frame.batteryPercent} mono={mono} />\n            {roomy ? <span>{`${DAYS[now.getDay()]} ${now.getDate()} ${MONTHS[now.getMonth()]}`}</span> : null}\n            <span>{clock(now, on(app.state.twentyFourHour))}</span>\n          </Menu>\n        </div>\n        {minimized ? (\n          <div className=\"flex-1\" />\n        ) : framed ? (\n          <div className={`flex flex-col flex-1 min-h-0 px-[${px(18)}] pt-[${px(12)}] ${docked ? `pb-[${px(6)}]` : `pb-[${px(18)}]`}`}>\n            <Lifted>\n              <Window\n                title={title}\n                onClose={builtIn ? closeBuiltIn : () => frameos.dispatch('sceneSwitcher')}\n                onMinimize={builtIn ? closeBuiltIn : () => frameos.setState('minimized', true)}\n                onZoom={toggleZoom}\n              >\n                <yield />\n              </Window>\n            </Lifted>\n          </div>\n        ) : (\n          <yield />\n        )}\n        {docked ? (\n          <div className={`flex items-end self-center shrink-0 gap-[${px(7)}] mt-[${px(2)}] mb-[${px(5)}] px-[${px(7)}] pt-[${px(6)}] pb-[${px(3)}] rounded-[${px(18)}] border-[${edge}px] ${t.dock}`}>\n            <DockItem open={listOpen} onClick={openList}>\n              <ScenesIcon mono={mono} />\n            </DockItem>\n            <DockItem open={settingsOpen && !frameOpen} onClick={openSettings}>\n              <SettingsIcon mono={mono} />\n            </DockItem>\n            <DockItem open={frameOpen} onClick={openFrame}>\n              <FrameIcon mono={mono} />\n            </DockItem>\n            {scene ? <div className={`self-stretch w-[${edge}px] mx-[${px(2)}] mb-[${px(7)}] ${t.divider}`} /> : null}\n            {scene ? (\n              <DockItem open={true} onClick={showScene}>\n                <SceneIcon name={scene} />\n              </DockItem>\n            ) : null}\n          </div>\n        ) : null}\n      </div>\n    </div>\n  )\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "chrome",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "macos",
+          "config": {}
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-to-draw",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "chrome-to-draw",
+        "type": "codeNodeEdge",
+        "source": "chrome",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  }
+]
