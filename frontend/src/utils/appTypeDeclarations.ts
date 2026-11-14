@@ -237,6 +237,16 @@ interface FrameOSContext {
 ${appContextMembers}  [key: string]: any;
 }
 
+/** The typed arrays frameos.ops takes. */
+type FrameOSTypedArray =
+  | Uint8Array
+  | Uint8ClampedArray
+  | Int8Array
+  | Int16Array
+  | Uint16Array
+  | Int32Array
+  | Uint32Array
+  | Float32Array;
 /** An 8-bit palette frame's cells: one byte each, an index into its palette. */
 type FrameOSPixelCells = Uint8Array | Uint8ClampedArray;
 /** Up to 256 colors as 0xRRGGBB numbers. */
@@ -315,6 +325,26 @@ declare const frameos: {
    * the frame's size over pixelSize.
    */
   pixels(cells: FrameOSPixelCells, palette: FrameOSPalette, options?: { width?: number; height?: number; pixelSize?: number }): unknown;
+  /**
+   * Whole typed arrays at a time, at native speed (FrameOS 2026.11.8+): a per-cell pass in one call instead of a
+   * loop of bytecodes. Each element is read and stored by its array's kind (Uint8Clamped clamps, other integers
+   * wrap, Float32 is a float, a number b is a Float32 too); BigInt, Float16 and Float64 arrays are refused (false).
+   * start and end are elements. Check for it (if (frameos.ops)) to run on older FrameOS too.
+   */
+  ops: {
+    /** dst[i] = table[src[i]]: a fade, a palette remap. An index past the table leaves dst[i] as it is. */
+    map(dst: FrameOSTypedArray, src: FrameOSTypedArray, table: FrameOSTypedArray, start?: number, end?: number): boolean;
+    /** dst[i] = a[i] + b[i], or + b when b is a number. */
+    add(dst: FrameOSTypedArray, a: FrameOSTypedArray, b: FrameOSTypedArray | number, start?: number, end?: number): boolean;
+    sub(dst: FrameOSTypedArray, a: FrameOSTypedArray, b: FrameOSTypedArray | number, start?: number, end?: number): boolean;
+    mul(dst: FrameOSTypedArray, a: FrameOSTypedArray, b: FrameOSTypedArray | number, start?: number, end?: number): boolean;
+    /**
+     * A 3x3 integer kernel (9 weights, row by row) over a grid width wide, shifted right by shift; the edges are left
+     * as they are, so a dst whose edges must hold still holds nothing else (write other values to another array).
+     * dst can be src only when the centre alone weighs: it reads cells it has written.
+     */
+    convolve(dst: FrameOSTypedArray, src: FrameOSTypedArray, width: number, kernel: number[], shift?: number): boolean;
+  };
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;

@@ -247,6 +247,7 @@ hot = {
     "pixie/common": ("@spixie@scommon.nim.c", "@fcvkvr@fpbzzba.nim.c"),
     "frameos/utils/resample": ("@sframeos@sutils@sresample.nim.c", "@fsenzrbf@fhgvyf@ferfnzcyr.nim.c"),
     "frameos/js_runtime/pixel_ops": ("@sframeos@sjs_runtime@spixel_ops.nim.c", "@fsenzrbf@fwf_ehagvzr@fcvkry_bcf.nim.c"),
+    "frameos/js_runtime/typed_ops": ("@sframeos@sjs_runtime@styped_ops.nim.c", "@fsenzrbf@fwf_ehagvzr@fglcrq_bcf.nim.c"),
 }
 problems = []
 for module, names in hot.items():

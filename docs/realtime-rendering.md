@@ -116,6 +116,25 @@ old one cut to size: a seq keeps its capacity when it shrinks, and once held
 2.7 MB across the three LCD buffers, so that every interpreter after it was
 discarded for memory.
 
+### Whole typed arrays: `frameos.ops`
+
+`frameos.ops` (`js_runtime/typed_ops.nim`, `-O2` on the ESP32) is the loops
+such scenes are made of, over whole typed arrays: `map` through a table, `add` /
+`sub` / `mul` by an array or a number, `convolve` with a 3x3 integer kernel.
+Nothing in it is one effect's: what a scene simulates stays its own JS, and a
+pass that is one of these is a call instead of a few bytecodes a cell. On the
+SenseCAP Indicator, a 120x120 grid:
+
+| Pass | JS | `frameos.ops` |
+| --- | --- | --- |
+| A byte table over the cells | 58.5 ms | 1.4 ms |
+| A wave's neighbour sum (four taps) | 109 ms | 5.0 ms |
+| 1k particles: gravity, then position by velocity | 11.1 ms | 1.3 ms |
+
+A scene keeps its JS loop for an older runtime (`if (frameos.ops)`).
+`convolve` leaves a grid's edges as they are, so an array whose edges must
+stay put holds nothing else.
+
 ## Where an ESP32 frame goes
 
 Measured on the SenseCAP Indicator D1S (ESP32-S3 at 240 MHz, 8 MB octal PSRAM

@@ -24,6 +24,7 @@ import frameos/utils/paths
 import frameos/utils/system
 import frameos/js_runtime/burrito
 import frameos/js_runtime/pixel_ops
+import frameos/js_runtime/typed_ops
 import frameos/js_runtime/jsx_native
 import frameos/render_probe
 import frameos/js_runtime/jsx
@@ -2058,6 +2059,90 @@ proc jsCanvasClear(ctx: ptr JSContext, id: JSValue, color: JSValue): JSValue {.n
     frameos_apps.logError(e.owner, "frameos.clear failed: " & err.msg)
     return nimBoolToJS(ctx, false)
 
+var typedArrayFirstClass = 0'u32
+  ## The class id of a Uint8ClampedArray, the first typed array class: one
+  ## less it is an ArrayKind (QuickJS keeps them in JSTypedArrayEnum's order).
+
+proc jsElements(ctx: ptr JSContext, value: JSValueConst, elements: var Elements): bool =
+  ## A typed array in place, by kind.
+  if typedArrayFirstClass == 0:
+    var zero = JS_NewInt32(ctx, 0)
+    let probe = JS_NewTypedArray(ctx, 1, addr zero, 0)
+    typedArrayFirstClass = JS_GetClassID(probe)
+    JS_FreeValue(ctx, probe)
+  let (bytes, byteLen) = jsBytes(ctx, value)
+  if bytes.isNil:
+    return false
+  let offset = JS_GetClassID(value).int - typedArrayFirstClass.int
+  let kind = if offset >= 0 and offset <= ord(high(ArrayKind)): ArrayKind(offset) else: akUint8
+  if not kind.supported:
+    return false
+  let size = case kind
+    of akInt16, akUint16: 2
+    of akInt32, akUint32, akFloat32: 4
+    else: 1
+  elements = Elements(data: bytes, length: byteLen div size, kind: kind)
+  true
+
+proc jsArgInt(ctx: ptr JSContext, value: JSValueConst, default: int): int =
+  ## A whole number argument; `default` for anything else (NaN, a string).
+  if not jsIsNumber(value):
+    return default
+  let number = toNimFloat(ctx, value)
+  if number != number or abs(number) > 1e9: default else: number.int
+
+proc jsTypedOps(ctx: ptr JSContext, args: seq[JSValue]): JSValue {.nimcall.} =
+  ## `frameos.ops`: map, add, sub, mul and convolve over whole typed arrays
+  ## (typed_ops.nim). False, logged, for arrays it cannot take or a range
+  ## past their ends.
+  let e = env(ctx)
+  template refuse(): untyped =
+    if e != nil:
+      frameos_apps.logError(e.owner, "frameos.ops: arrays it cannot take (BigInt, Float16, Float64) or a range past their end")
+    return nimBoolToJS(ctx, false)
+  if args.len < 6:
+    refuse()
+  let op = jsArgInt(ctx, args[0], -1)
+  var dst, a: Elements
+  if not jsElements(ctx, args[1], dst) or not jsElements(ctx, args[2], a):
+    refuse()
+  if op == 4:
+    let width = jsArgInt(ctx, args[3], 0)
+    var kernel: array[9, int32]
+    for k in 0 ..< 9:
+      let v = JS_GetPropertyUint32(ctx, args[4], k.uint32)
+      kernel[k] = int32(clamp(jsArgInt(ctx, v, 0), -65536, 65536))
+      JS_FreeValue(ctx, v)
+    let shift = clamp(jsArgInt(ctx, args[5], 0), 0, 31)
+    if width < 3 or a.length < width * 3 or dst.length < a.length:
+      refuse()
+    convolve3x3(dst, a, width, a.length div width, kernel, shift)
+    return nimBoolToJS(ctx, true)
+  let start = max(0, jsArgInt(ctx, args[4], 0))
+  let requested = jsArgInt(ctx, args[5], -1)
+  var finish = if requested < 0: min(dst.length, a.length) else: requested
+  if op == 0:
+    var table: Elements
+    if not jsElements(ctx, args[3], table) or finish > dst.length or finish > a.length:
+      refuse()
+    mapTable(dst, a, table, start, finish)
+    return nimBoolToJS(ctx, true)
+  var b: Operand
+  if jsIsNumber(args[3]):
+    b = Operand(isArray: false, value: float32(toNimFloat(ctx, args[3])))
+  else:
+    b.isArray = true
+    if not jsElements(ctx, args[3], b.elements):
+      refuse()
+    if requested < 0:
+      finish = min(finish, b.elements.length)
+    if finish > b.elements.length:
+      refuse()
+  if finish > dst.length or finish > a.length or op < 1 or op > 3:
+    refuse()
+  arith(Arith(op - 1), dst, a, b, start, finish)
+  nimBoolToJS(ctx, true)
+
 proc clearTransientImages(runtime: JsAppRuntime) =
   for id in runtime.transientImageIds:
     if runtime.images.hasKey(id):
@@ -2346,6 +2431,13 @@ const appJsPrelude* = compactJs("""
       (content && typeof content === "object") ? content : String(content || "")) === true,
     clear: (canvas, color) => jsCanvasClear(Number((canvas && canvas.id) || 0), String(color || "")) === true,
     pixels: (cells, palette, options) => ({ __frameosType: "pixels", cells, palette, options: options || {} }),
+    ops: {
+      map: (dst, src, table, start, end) => jsTypedOps(0, dst, src, table, start ?? 0, end ?? -1) === true,
+      add: (dst, a, b, start, end) => jsTypedOps(1, dst, a, b, start ?? 0, end ?? -1) === true,
+      sub: (dst, a, b, start, end) => jsTypedOps(2, dst, a, b, start ?? 0, end ?? -1) === true,
+      mul: (dst, a, b, start, end) => jsTypedOps(3, dst, a, b, start ?? 0, end ?? -1) === true,
+      convolve: (dst, src, width, kernel, shift) => jsTypedOps(4, dst, src, width, kernel, shift ?? 0) === true,
+    },
     listAssets: (dir) => __frameosAsset("list", dir) || [],
     assetExists: (path) => __frameosAsset("exists", path) === true,
     assetSize: (path) => __frameosAsset("size", path) ?? -1,
@@ -2498,6 +2590,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsCanvas", jsCanvas)
   runtime.js.registerFunction("jsCanvasDraw", jsCanvasDraw)
   runtime.js.registerFunction("jsCanvasClear", jsCanvasClear)
+  runtime.js.registerFunction("jsTypedOps", jsTypedOps)
   runtime.js.registerFunction("jsAssets", jsAssets)
   runtime.js.registerFunction("jsStreams", jsStreams)
   runtime.js.registerFunction("jsOpenLines", jsOpenLines)
