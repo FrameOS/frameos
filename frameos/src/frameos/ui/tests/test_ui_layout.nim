@@ -156,6 +156,17 @@ suite "ui layout":
     check r[2].geom == (16, 80, 168, 16)
     check r[3].geom == (176, 8, 16, 16)
 
+  test "a negative inset places an absolute child, as a browser does":
+    # A badge over a corner (`-top-1 -right-1`), a box hanging off the left
+    # edge (`left-[-40px]`), and one stretched between two negative insets.
+    let r = layoutUi(el("div", "relative w-[200px] h-[100px]",
+      el("div", "absolute -top-1 -right-1 w-4 h-4 bg-red-500"),
+      el("div", "absolute left-[-40px] top-[10px] w-[100px] h-[20px] bg-green-500"),
+      el("div", "absolute left-[-10px] right-[-10px] top-[50px] h-[10px] bg-blue-500")), 200, 100).rects
+    check r[0].geom == (188, -4, 16, 16)
+    check r[1].geom == (-40, 10, 100, 20)
+    check r[2].geom == (-10, 50, 220, 10)
+
   test "a grid sized to its content is as wide as its columns need":
     let r = layoutUi(el("div", "flex items-start",
       el("div", "grid grid-cols-3 gap-2 bg-black",
@@ -1227,6 +1238,25 @@ suite "a <select>":
     for r in regions.filterIt(it.handlers[ueClick] > OptionBase):
       check r.visible[1] >= 8
       check r.visible[3] <= 92
+
+  test "deep in boxes inside each other it has a key a 32-bit build keeps, and opens":
+    # Twelve boxes deep (a theme's bevels in a row of a scrolling page): its key
+    # is 31 times its parent's and more each level, which a 32-bit int (the
+    # browser's wasm, an ESP32, a 32-bit Pi) wrapped to below zero, and an open
+    # select is kept as its key + 1, 0 for none.
+    var root = select(100, 3)
+    for i in 0 ..< 12:
+      root = el("div", "flex flex-1 min-w-0 min-h-0 w-full h-full", root)
+    var input: UiInput
+    var regions: seq[UiRegion]
+    discard layout.layoutUi(root, 480, 480, input, regions)
+    for r in regions:
+      check r.key >= 0 and r.key < (1 shl 30)
+    input.open = regions.filterIt(it.field == 4)[0].key + 1
+    input.fresh = true
+    let (_, rows) = root.listOf(input)
+    check rows.len == 3
+    check input.open > 0
 
   test "with no options there is nothing to open":
     var input: UiInput

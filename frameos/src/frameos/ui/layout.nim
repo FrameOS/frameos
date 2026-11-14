@@ -532,7 +532,11 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
         result.pointer = true
     else:
       run = nil
-      let childKey = key * 31 + i + 1
+      # 30 bits: never negative (an open select, the field with the keyboard and
+      # a scroll are kept as a key + 1, 0 for none), and the same on a 32-bit
+      # build (the browser's wasm, an ESP32, a 32-bit Pi), where `key * 31`
+      # wraps after seven levels, as on a 64-bit one.
+      let childKey = (key * 31 + i + 1) and 0x3fff_ffff
       var before: UiNode
       if not prev.isNil:
         # The same place first: a list that kept its order is one probe per
@@ -1030,21 +1034,28 @@ proc layoutAbsolute(n: UiNode, size: Vec2) =
   for c in n.children:
     if not c.box.absolute or c.box.display == diNone:
       continue
+    # Set or auto by its kind, not its sign: `left-[-40px]` (a window hanging
+    # off the desktop) and `-top-1` (a badge over a corner) are offsets too.
+    template given(l: Len, base: float32): bool = l.kind == lkPx or (l.kind == lkPct and base >= 0)
     let
       inset = c.box.inset
       left = inset[3].resolve(pw)
       right = inset[1].resolve(pw)
       top = inset[0].resolve(ph)
       bottom = inset[2].resolve(ph)
+      hasLeft = given(inset[3], pw)
+      hasRight = given(inset[1], pw)
+      hasTop = given(inset[0], ph)
+      hasBottom = given(inset[2], ph)
     var
       w = c.box.w.resolve(pw)
       h = c.box.h.resolve(ph)
-    if w < 0 and left >= 0 and right >= 0: w = max(pw - left - right, 0)
-    if h < 0 and top >= 0 and bottom >= 0: h = max(ph - top - bottom, 0)
+    if w < 0 and hasLeft and hasRight: w = max(pw - left - right, 0)
+    if h < 0 and hasTop and hasBottom: h = max(ph - top - bottom, 0)
     let s = c.layout(if w >= 0: w else: max(pw, 0), if h >= 0: h else: Unbounded, w >= 0, h >= 0)
     c.size = s
-    c.x = b.border[3] + (if left >= 0: left elif right >= 0: pw - right - s.x else: b.pad[3])
-    c.y = b.border[0] + (if top >= 0: top elif bottom >= 0: ph - bottom - s.y else: b.pad[0])
+    c.x = b.border[3] + (if hasLeft: left elif hasRight: pw - right - s.x else: b.pad[3])
+    c.y = b.border[0] + (if hasTop: top elif hasBottom: ph - bottom - s.y else: b.pad[0])
 
 proc layout(n: UiNode, w, h: float32, fixW, fixH: bool, force = false): Vec2 =
   ## `n`'s border-box size: `w` x `h` where fixed, else the room it may take
