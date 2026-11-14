@@ -90,7 +90,9 @@ PROVISION
 # and gha-image-refresh.sh then keeps the image that is live.
 echo "==> warming"
 incus file push --mode 0755 "$(dirname "$0")/gha-image-warm.sh" "$BUILD/usr/local/sbin/gha-image-warm"
-incus exec "$BUILD" -- /usr/local/sbin/gha-image-warm
+# FRAMEOS_REPO_REF: which ref's dependencies to warm (main; a branch to try
+# a change to the warming itself under a staging alias).
+incus exec "$BUILD" --env FRAMEOS_REPO_REF="${FRAMEOS_REPO_REF:-main}" -- /usr/local/sbin/gha-image-warm
 
 incus exec "$BUILD" -- bash -s <<'FINALIZE'
 set -euxo pipefail

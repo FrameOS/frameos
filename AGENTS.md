@@ -50,12 +50,13 @@
   that vitest happily executed failed `tsc` in CI on 2026-09-12, PR #485) and
   the whole shared SPA the cloud bundle is built from. The frontend's own `tsc`
   does NOT cover it: the cloud has its own tsconfig and build.
-- The cloud CI job named **`verify`** (`.github/workflows/cloud-ci.yml`) runs
-  `turbo run lint typecheck test build --filter='@frameos-cloud/*' --filter=@frameos/cloud-frontend` and then
-  THREE integration suites against a real Postgres: `@frameos-cloud/auth-web`,
+- Cloud CI (`.github/workflows/cloud-ci.yml`) is **`verify`**, which runs
+  `turbo run lint typecheck test build --filter='@frameos-cloud/*' --filter=@frameos/cloud-frontend`, and beside it
+  **`integration`**: THREE integration suites against a real Postgres, one
+  per leg (auth-web's in three shards): `@frameos-cloud/auth-web`,
   `@frameos-cloud/frame-hub` and `@frameos-cloud/ledger` (the accounting
   kernel — the module whose own todo records a shipped billing bypass, so do
-  not skip it). A green `pnpm test` alone proves little, because the integration
+  not skip it). Deploy waits for both. A green `pnpm test` alone proves little, because the integration
   suites are where the interesting failures live. To run them locally, from
   `cloud/`:
 
