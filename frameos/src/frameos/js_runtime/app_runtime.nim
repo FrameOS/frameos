@@ -617,6 +617,15 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
       frameos_apps.logError(e.owner, "JS app httpRequest failed: " & message)
   return nimStringToJS(ctx, $response)
 
+const jsBackgroundOn* = not defined(frameosEmbedded) and not defined(frameosWasm)
+  ## Background JavaScript (docs/background-js.md): a Pi's runner keeps every
+  ## interpreter for its scene's life and has a loop to resume them between
+  ## renders. The firmware and the wasm runtime have neither (yet).
+
+when jsBackgroundOn:
+  proc closeLineStreams(runtime: JsAppRuntime)
+  include frameos/js_runtime/background_js
+
 const DecoderFits = ["cover", "contain", "stretch"]
   ## The placements a decode can honour while it streams into a target. The
   ## planner offers a JS node the consumer's target under EVERY placement
@@ -2582,10 +2591,16 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsGetAppFrame", jsGetAppFrame)
   runtime.js.registerFunction("jsGetAppContext", jsGetAppContext)
   runtime.js.registerFunction("jsGetAppKeys", jsGetAppKeys)
+  when jsBackgroundOn:
+    runtime.js.registerFunction("jsAsyncStart", jsAsyncStart)
   probe(phPrelude):
     evalAppPrelude(runtime.js)
     # The JSX factory in C (jsx_native.nim): every element of a UI's get().
     discard runtime.js.installNativeJsx()
+  when jsBackgroundOn:
+    # A script of its own after the prelude, not in it: the prelude is the
+    # firmware's bytecode too (evalAppPrelude), and the ESP32 has none of this.
+    discard runtime.js.eval(backgroundJsPrelude, "frameos-background.js")
   # The test harness, when this runtime runs an app's tests (app_tests.nim):
   # after the prelude so it can wrap `frameos`, before the module so the
   # module's describe() calls land in it.
@@ -3470,6 +3485,8 @@ proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
     let payload = runtime.invoke(owner, configJson, context, "init")
     JS_FreeValue(runtime.js.context, payload)
   runtime.initialized = true
+  when jsBackgroundOn:
+    runtime.startBackground(owner, configJson)
 
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
   probe(phInit):

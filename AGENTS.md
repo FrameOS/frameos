@@ -687,6 +687,19 @@
   `appTypeDeclarations.ts`. A reader lives for the call that opened it, and a
   temp file stays on the card while a reader holds its spool.
 
+## Background JavaScript: `docs/background-js.md`
+
+- Experimental, Pi only (`jsBackgroundOn` in `js_runtime/app_runtime.nim`): an
+  app's `export async function background(app)` and the promises
+  `frameos.fetch` / `frameos.sleep`. Every interpreter stays on the runner
+  thread; a request goes to `js_runtime/js_io.nim`'s workers as values and its
+  answer comes back the same way, and `pumpJsBackground` in the runner's
+  message loop settles promises between renders, each stretch of code up to
+  its next await bounded (`JsBackgroundSliceMs`). The JS half is a script of
+  its own after the prelude, so the firmware's prelude bytecode and image do
+  not change. Not in the scene guide or `appTypeDeclarations.ts` yet: making
+  it public is those two plus the AI evals.
+
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 
 - A Nim app that gets a repo JavaScript replacement (`data/immich` →
