@@ -150,17 +150,19 @@ device over one file on the root filesystem
 (`/var/lib/incus/disks/parallaize-lvm.img`, 1.45 T on a 1.8 T `/`). Two
 consequences:
 
-- **The pool and `/` share the disk.** The thin pool passes discards down
-  (`lvs -o discards`: passdown), so deleted VMs punch holes in that file and
-  `/` shows the space as free; new VMs fill the holes again. On 2026-11-14
-  the first runs of the 36 epyc-16 slots, two PR runs at once and an
-  uncompressed 23 GB image tarball took `/` from 539 G free to 0 (the file
-  back to fully allocated). Keep what else lands on `/` small: the image is
-  published zstd-compressed, and the dead nimcache directories were removed.
-  If `/` ever fills while the file has holes, the pool cannot allocate and
-  dm-thin fails writes: `lvchange --discards nopassdown` keeps the file
-  allocated (and `/` stable), moving the pool off the loop file removes the
-  coupling. Check `df -h /` and `ls -ls` of the image file first.
+- **The pool and `/` share the disk.** Until 2026-11-14 the thin pool
+  passed discards down to that file (a guest's `fstrim`, the image build's),
+  punching holes that `/` showed as free and that new VMs filled again. That
+  day the first runs of the 36 epyc-16 slots, two PR runs at once and an
+  uncompressed 23 GB image tarball took `/` from 539 G free to 0. Since then
+  the pool is `nopassdown` (`lvs -o discards`; the tpool's `dmsetup table`
+  ends in `no_discard_passdown`): a discard frees the block inside the pool
+  and the file stays fully allocated (1450 G on disk, `ls -ls`), so `/`
+  holds still while VMs come and go. What `/` has left (~70 G) is for
+  everything else on it: the images (published zstd-compressed), the
+  shared caches under `/srv/gha-runners/cache`, docker, the journal. Moving
+  the pool off the loop file would end the coupling; with the file fully
+  allocated it is not needed.
 - **Small-file reads are slow in a guest.** The loop device runs with direct
   IO (`losetup -l`: DIO 1), so nothing is cached on the host: reading the
   warm image's 61.5k-file pnpm store cold took 35 s, writing it back 10 s.

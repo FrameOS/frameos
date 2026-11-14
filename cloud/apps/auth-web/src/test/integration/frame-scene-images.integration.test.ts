@@ -399,7 +399,10 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
   });
   it("404s when every image in the set is transparent", async () => {
     const accountId = await signIn();
-    const frame = await activeFrame(accountId);
+    // Disconnected, so the answer is the covers' alone: toward a connected
+    // frame with no device behind it, every 404 here was the 10 s long poll
+    // for a snapshot that never came (it has its own test below).
+    const frame = await activeFrame(accountId, { connected: false });
     const blankScene = await createStoreScene(accountId, {
       images: [{ bytes: transparentPng(), contentType: "image/png" }],
       name: "Transparent preview",
@@ -416,7 +419,10 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
   });
   it("404s for scene ids no assignment owns, and for scenes with no image at all", async () => {
     const accountId = await signIn();
-    const frame = await activeFrame(accountId);
+    // Disconnected, so the answer is the covers' alone: toward a connected
+    // frame with no device behind it, every 404 here was the 10 s long poll
+    // for a snapshot that never came (it has its own test below).
+    const frame = await activeFrame(accountId, { connected: false });
     const scene = await createStoreScene(accountId, {
       name: "Imageless",
       runtimeSceneIds: ["runtime-bare"],
@@ -550,6 +556,43 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
       path: sceneSnapshotAssetPath("runtime-fetch"),
       thumb: true,
     });
+  });
+
+  it("long-polls a connected frame for the snapshot, and 404s once the device says it has none", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    const scene = await createStoreScene(accountId, {
+      name: "Never rendered",
+      runtimeSceneIds: ["runtime-never"],
+    });
+    await assignScene(frame.id, scene.id);
+
+    const started = Date.now();
+    const answer = getSceneImage(
+      getRequest(`/api/frames/${frame.id}/scene_images/runtime-never`),
+      routeParams(frame.id, "runtime-never"),
+    );
+    // No cover, so the route queues a fetch and waits for it. The device's
+    // answer, as the hub records it: that asset_get failed.
+    let fetch: { id: string } | undefined;
+    while (!fetch && Date.now() - started < 5000) {
+      [fetch] = await db
+        .select({ id: frameCommands.id })
+        .from(frameCommands)
+        .where(eq(frameCommands.frameId, frame.id));
+      if (!fetch) await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(fetch).toBeDefined();
+    await db
+      .update(frameCommands)
+      .set({ error: "not_found", status: "failed" })
+      .where(eq(frameCommands.id, fetch!.id));
+
+    const response = await answer;
+    expect(response.status).toBe(404);
+    expect((await response.json()).error).toBe("no_image");
+    // One poll step after the refusal, not the whole 10 s.
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 
   it("404s fast for an unmapped scene on a disconnected frame, and queues nothing toward it", async () => {

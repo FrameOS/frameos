@@ -359,6 +359,9 @@ jobs:
           # container's HOME.
           nim_bin="$HOME/.choosenim/toolchains/nim-2.2.4/bin"
           test -x "$nim_bin/nim"
+          # ccache keeps its counters in CCACHE_DIR, which the archive carries
+          # from run to run: zeroed first, the stats printed after the build
+          # are this build's (the seed's misses read as a 50% hit rate).
           docker run --rm \
             -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
             -v "$HOME/.nimble:$HOME/.nimble:ro" -v "$HOME/.choosenim:$HOME/.choosenim:ro" \
@@ -372,7 +375,7 @@ jobs:
             -e CCACHE_DIR="$GITHUB_WORKSPACE/.ccache" \
             -e CCACHE_MAXSIZE=2G \
             "$TAG" \
-            bash -lc 'set -euo pipefail; bash embedded/esp32/ci_build_image.sh; ccache --show-stats || true'
+            bash -lc 'set -euo pipefail; ccache --zero-stats >/dev/null || true; bash embedded/esp32/ci_build_image.sh; ccache --show-stats || true'
           if [ -n "$SIZE" ]; then
             cp "embedded/esp32/$BUILD_DIR/firmware-size.json" ".firmware-size/$SIZE.json"
           fi
