@@ -1,6 +1,6 @@
 {
   "name": "Windows 98 layout",
-  "description": "A gray taskbar below each scene: Start opens the scene list, the gear its settings, and the tray with the signal, the battery and the clock the frame's.",
+  "description": "A gray taskbar below each scene: Start opens the scene list, the gear its settings, and the tray with the signal, the battery and the clock the frame's. On a Raspberry Pi it is a desktop: every scene opened is a window, all running at once, moved, sized, maximized or full screen with the mouse.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

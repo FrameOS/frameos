@@ -202,9 +202,12 @@ def load():
         for key in keys:
             if not isinstance(doc[section].get(key), int) or doc[section][key] <= 0:
                 fail(f"{section}.{key}: a positive integer")
-    for key, event in (("switcher", "sceneSwitcher"), ("settings", "sceneSettings")):
+    for key, event in (("switcher", "sceneSwitcher"), ("settings", "sceneSettings"), ("terminal", "terminal")):
         if not re.fullmatch(r"system/[a-zA-Z]+", doc["scenes"].get(key, "")):
             fail(f"scenes.{key}: the built-in scene `{event}` shows, `system/<name>`")
+    window = doc["scenes"].get("settingsWindow", "")
+    if not (window.startswith(doc["scenes"].get("settings", "") + "#") and len(window) == len(doc["scenes"]["settings"]) + 1):
+        fail("scenes.settingsWindow: the settings' id and `#`, a character no scene id has, before the scene's id")
     if not re.fullmatch(r"system/[a-zA-Z]+", doc["scenes"].get("yield", "")):
         fail("scenes.yield: the id a layout's scene node yields through, `system/<name>`")
     if doc["gestures"].get("directions") != ["left", "right", "up", "down"]:
@@ -414,6 +417,10 @@ def gen_nim(doc):
         f"  SceneSwitcherId* = {nim_str(doc['scenes']['switcher'])}",
         "  ## The built-in scene `sceneSettings` shows (docs/scene-settings.md).",
         f"  SceneSettingsId* = {nim_str(doc['scenes']['settings'])}",
+        "  ## Where built-in scenes stay open as windows, a scene's own settings: this and its id.",
+        f"  SceneSettingsWindowPrefix* = {nim_str(doc['scenes']['settingsWindow'])}",
+        "  ## The built-in scene `terminal` shows, off the ESP32 (docs/terminal.md).",
+        f"  SceneTerminalId* = {nim_str(doc['scenes']['terminal'])}",
         "  ## The scene a layout's <yield /> stands for (docs/scene-layouts.md).",
         f"  SceneYieldId* = {nim_str(doc['scenes']['yield'])}",
         "  ## Origins a scene opts into per custom event (`origins` on its declaration).",
@@ -803,6 +810,10 @@ def gen_ts_frontend(doc):
     out.append(f"export const SCENE_SWITCHER_ID = '{doc['scenes']['switcher']}'")
     out.append("/** The built-in scene `sceneSettings` shows (docs/scene-settings.md). */")
     out.append(f"export const SCENE_SETTINGS_ID = '{doc['scenes']['settings']}'")
+    out.append("/** Where built-in scenes stay open as windows, a scene's own settings: this and its id. */")
+    out.append(f"export const SCENE_SETTINGS_WINDOW_PREFIX = '{doc['scenes']['settingsWindow']}'")
+    out.append("/** The built-in scene `terminal` shows, off the ESP32 (docs/terminal.md). */")
+    out.append(f"export const SCENE_TERMINAL_ID = '{doc['scenes']['terminal']}'")
     out.append("/** What a layout's scene node names for the scene it wraps (docs/scene-layouts.md). */")
     out.append(f"export const SCENE_YIELD_ID = '{doc['scenes']['yield']}'")
     out.append("")
@@ -971,11 +982,16 @@ def gen_py(doc):
     out = [f'"""{BANNER}"""', "", f"EVENTS_CONTRACT_VERSION = {int(doc['version'])}", ""]
     out.append(f"# What a layout's scene node names for the scene it wraps: no scene of the frame.")
     out.append(f"SCENE_YIELD_ID = {json.dumps(doc['scenes']['yield'])}")
-    out.append("# The scenes built into every runtime (the scene switcher, the scene")
-    out.append("# settings): in no scene list, never persisted by a device.")
+    out.append("# The scenes built into the runtime (the scene switcher, the scene")
+    out.append("# settings, and off the ESP32 the terminal): in no scene list, never")
+    out.append("# persisted by a device.")
     out.append(f"SCENE_SWITCHER_ID = {json.dumps(doc['scenes']['switcher'])}")
     out.append(f"SCENE_SETTINGS_ID = {json.dumps(doc['scenes']['settings'])}")
-    out.append("BUILT_IN_SCENE_IDS: frozenset[str] = frozenset({SCENE_SWITCHER_ID, SCENE_SETTINGS_ID})")
+    out.append(f"SCENE_TERMINAL_ID = {json.dumps(doc['scenes']['terminal'])}")
+    out.append("# Where built-in scenes stay open as windows (a Pi's desktop), a scene's own")
+    out.append("# settings are this and its id: built in too.")
+    out.append(f"SCENE_SETTINGS_WINDOW_PREFIX = {json.dumps(doc['scenes']['settingsWindow'])}")
+    out.append("BUILT_IN_SCENE_IDS: frozenset[str] = frozenset({SCENE_SWITCHER_ID, SCENE_SETTINGS_ID, SCENE_TERMINAL_ID})")
     out.append("")
     out.append("# origin -> contract events it may not emit. `http:write` is the frame access")
     out.append("# key: what it is refused needs an admin session or the serverApiKey instead.")

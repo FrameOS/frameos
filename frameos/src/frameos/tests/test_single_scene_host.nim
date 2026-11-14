@@ -1,5 +1,7 @@
-import std/[json, monotimes, options, os, strutils]
+import std/[json, monotimes, options, os, strutils, tables]
 import ../channels
+import ../events_gen
+from ../events import settingsWindowId
 import ../interpreter
 import ../single_scene_host
 import ../types
@@ -539,3 +541,55 @@ block:
   dropParkedLayout()
   doAssert show("tests/wearsB") != first, "after the scenes were replaced, a new instance"
   echo "kept layout ok"
+
+# ------------------------------------------------------ windows (the browser)
+#
+# A windowed host (the browser's, wasm_main `frameos_wasm_set_windowed`) runs
+# a frame's scenes side by side, as a Pi does (docs/scene-layouts.md
+# "Windows"): a scene the frame leaves stays, for a layout's window, and is the
+# same one when it comes forward; a built-in scene left for another window
+# stays open as it was.
+block windowed_host_keeps_what_it_leaves:
+  replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($scenes)))
+  let fromId = "fixtures/dispatcher/switchFrom".SceneId
+  let toId = "fixtures/dispatcher/switchTo".SceneId
+  let w = SingleSceneHost(frameConfig: config, logger: logger)
+  w.requestSelect = proc (sceneId: string): bool =
+    w.makeCurrent(sceneId.SceneId)
+    true
+  w.sceneOrder = proc (): seq[SceneId] = @[fromId, toId]
+  w.start()
+  w.setWindowed(true)
+  w.makeCurrent(fromId)
+  doAssert w.ensureScene()
+  let first = w.scene
+  doAssert w.send(eoHttpAdmin, "setCurrentScene", %*{"sceneId": toId.string})
+  doAssert w.ensureScene() and w.scene.id == toId
+  doAssert w.windows.getOrDefault(fromId) == first
+  doAssert hostSceneFor(fromId) == first, "a window shows the scene itself"
+  doAssert w.send(eoHttpAdmin, "setCurrentScene", %*{"sceneId": fromId.string})
+  doAssert w.ensureScene() and w.scene == first, "the same one comes forward"
+  # The settings, left for another window: open there, as they were. Each
+  # scene's are an instance of their own (event_loop.settingsWindows).
+  doAssert w.send(eoHttpAdmin, "sceneSettings", %*{})
+  doAssert w.ensureScene() and w.scene.id.string == settingsWindowId(fromId.string)
+  let panel = w.scene
+  doAssert panel.state{"from"}.getStr() == fromId.string
+  doAssert w.send(eoHttpAdmin, "setCurrentScene", %*{"sceneId": toId.string})
+  doAssert panel.state{"away"}.getBool(), $panel.state
+  doAssert hostSceneFor(settingsWindowId(fromId.string).SceneId) == panel
+  doAssert panel.state{"from"}.getStr() == fromId.string
+  # Opened from the other scene: an instance of its own, the first left open.
+  doAssert w.ensureScene()
+  doAssert w.send(eoHttpAdmin, "sceneSettings", %*{})
+  doAssert w.ensureScene() and w.scene != panel and w.scene.id.string == settingsWindowId(toId.string)
+  doAssert w.scene.state{"from"}.getStr() == toId.string
+  doAssert panel.state{"away"}.getBool() and panel.state{"from"}.getStr() == fromId.string
+  doAssert hostSceneFor(settingsWindowId(fromId.string).SceneId) == panel
+  # The frame page: one window, the plain id, over the scene those are for.
+  doAssert w.send(eoHttpAdmin, "sceneSettings", %*{"page": "frame"})
+  doAssert w.ensureScene() and w.scene.id.string == SceneSettingsId
+  doAssert w.scene.state{"from"}.getStr() == toId.string
+  # Off: one scene at a time again, nothing kept.
+  w.setWindowed(false)
+  doAssert w.windows.len == 0 and hostSceneFor.isNil and not builtInScenesStay

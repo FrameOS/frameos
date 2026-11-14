@@ -345,8 +345,16 @@ proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): boo
   loop.runOnScene(scene, envelope.name, payload, policy, envelope.fromRender)
   true
 
-proc isBuiltIn(scene: FrameScene): bool =
-  not scene.isNil and (scene.id.string == SceneSwitcherId or scene.id.string == SceneSettingsId)
+when defined(frameosEmbedded):
+  proc isBuiltIn(scene: FrameScene): bool =
+    not scene.isNil and (scene.id.string == SceneSwitcherId or scene.id.string == SceneSettingsId)
+else:
+  proc isBuiltIn(scene: FrameScene): bool =
+    ## The switcher, the settings (on a desktop one a scene,
+    ## `settingsWindowId`), and the terminal (docs/terminal.md), which an
+    ## ESP32 has none of: its console is its serial port.
+    not scene.isNil and (scene.id.string == SceneSwitcherId or scene.id.string == SceneTerminalId or
+      isSceneSettings(scene.id.string))
 
 proc switcherOpener(scene: FrameScene): string =
   ## The scene a built-in scene (the switcher, the settings) was opened from,
@@ -435,7 +443,7 @@ proc settingsOf*(scene: FrameScene, state: JsonNode) =
 {.pop.}
 
 proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bool =
-  ## `sceneSwitcher` and `sceneSettings`: the built-in scene, told which scene
+  ## `sceneSwitcher`, `sceneSettings` and `terminal`: the built-in scene, told which scene
   ## it was opened from. While either shows, either command goes back to that
   ## scene (the settings unsaved): the swipe that opened one closes it, and
   ## so does the other edge's. The switcher forgets a scene that left the
@@ -484,6 +492,10 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
       # `{page: "frame"}`: straight to the frame's own page, if it has one.
       if safe or envelope.payload{"page"}.getStr() == "frame":
         state.put("opened", newJString("frame"))
+    when not defined(frameosEmbedded):
+      # The terminal's `scene_state`, where the host keeps no instance to ask.
+      if sceneId == SceneTerminalId and not current.isBuiltIn:
+        current.settingsOf(state)
     payload.put("state", state)
   else:
     next = current.state{"from"}.getStr()
@@ -505,6 +517,60 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
   else:
     payload.put("sceneId", newJString(next))
     result = loop.host.selectScene(payload)
+
+when not defined(frameosEmbedded):
+  proc settingsWindows(loop: EventLoop, envelope: EventEnvelope): bool =
+    ## `sceneSettings` where built-in scenes stay open as windows (a desktop;
+    ## docs/scene-settings.md "In a window"): every scene's settings are an
+    ## instance of their own (`settingsWindowId`), opened from that scene with
+    ## its fields and values, so several stay open side by side, each with its
+    ## edits. The frame page (`{page: "frame"}`) is one window, the plain id,
+    ## opened over the scene in front or over the scene the settings in front
+    ## are for. While a built-in scene is in front, the command goes back from
+    ## it, as `builtInScene` does, but for the frame page asked for over a
+    ## scene's settings.
+    let
+      current = loop.host.sceneFor(none(SceneId))
+      framePage = envelope.payload{"page"}.getStr() == "frame"
+      payload = newJObject()
+    if current.isBuiltIn and not (framePage and isSceneSettings(current.id.string) and
+        current.id.string != SceneSettingsId):
+      var next = current.state{"from"}.getStr()
+      if next.len == 0:
+        let order = loop.sceneOrderOf()
+        if order.len > 0:
+          next = order[0].string
+      payload.put("sceneId", newJString(next))
+      return loop.host.selectScene(payload)
+    let state = newJObject()
+    let opener =
+      if current.isNil: ""
+      elif current.isBuiltIn: current.state{"from"}.getStr()
+      else: current.id.string
+    state.put("from", newJString(opener))
+    if current.isBuiltIn:
+      # The settings of a scene in front: the frame page wears their layout.
+      let worn = current.state{"layout"}
+      if not worn.isNil:
+        state.put("layout", copy(worn))
+    elif current of InterpretedFrameScene and InterpretedFrameScene(current).layoutSceneId.string.len > 0:
+      let worn = newJObject()
+      worn.put("sceneId", newJString(InterpretedFrameScene(current).layoutSceneId.string))
+      let layoutState =
+        if InterpretedFrameScene(current).layoutState.isNil: newJObject()
+        else: copy(InterpretedFrameScene(current).layoutState)
+      layoutState.put("openedOver", newJString(current.shownName))
+      worn.put("state", layoutState)
+      state.put("layout", worn)
+    if not current.isNil and not current.isBuiltIn:
+      current.settingsOf(state)
+    if framePage:
+      state.put("opened", newJString("frame"))
+    payload.put("state", state)
+    # No scene to be the settings of: the one window, on its frame page.
+    payload.put("sceneId", newJString(if framePage or opener.len == 0: SceneSettingsId
+      else: settingsWindowId(opener)))
+    loop.host.selectScene(payload)
 
 proc listens(loop: EventLoop, scene: FrameScene, name: string): bool =
   loop.host.sceneListens.isNil or loop.host.sceneListens(scene, name)
@@ -664,6 +730,14 @@ proc process(loop: EventLoop, envelope: EventEnvelope): bool =
     if result:
       loop.renderWanted = true
   of evSceneSwitcher, evSceneSettings:
+    when not defined(frameosEmbedded):
+      # Where built-in scenes stay open as windows: one a scene, and the frame
+      # page one of its own (`settingsWindows`). Safe mode's page as anywhere.
+      if envelope.name == evSceneSettings and builtInScenesStay and envelope.payload{"page"}.getStr() != "safe":
+        result = loop.settingsWindows(envelope)
+        if result:
+          loop.renderWanted = true
+        return
     result = loop.builtInScene(envelope,
       if envelope.name == evSceneSwitcher: SceneSwitcherId else: SceneSettingsId)
     if result:
@@ -673,6 +747,14 @@ proc process(loop: EventLoop, envelope: EventEnvelope): bool =
   of evToggleScreen:
     result = loop.setDisplay(not loop.displayOn, envelope, policy)
   else:
+    when not defined(frameosEmbedded):
+      # Off the ESP32 alone (docs/terminal.md): a branch of its own, so the
+      # firmware's dispatcher is the one it was.
+      if envelope.name == evTerminal:
+        result = loop.builtInScene(envelope, SceneTerminalId)
+        if result:
+          loop.renderWanted = true
+        return
     result = loop.deliver(envelope, policy)
 
 proc drain*(loop: EventLoop, budget = DefaultDrainBudget): int =

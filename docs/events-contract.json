@@ -484,12 +484,12 @@
       "name": "wheel",
       "class": "input",
       "device": "pointer",
-      "description": "When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right.",
+      "description": "When a mouse wheel is scrolled (not logged). Deltas are wheel notches, and a trackpad's fractions of one; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right.",
       "listen": true,
       "dispatch": false,
       "payload": [
-        {"name": "deltaX", "label": "Delta X", "type": "integer", "required": true, "unit": "wheel-notch", "filter": "more"},
-        {"name": "deltaY", "label": "Delta Y", "type": "integer", "required": true, "unit": "wheel-notch", "filter": "more"},
+        {"name": "deltaX", "label": "Delta X", "type": "float", "required": true, "unit": "wheel-notch", "filter": "more"},
+        {"name": "deltaY", "label": "Delta Y", "type": "float", "required": true, "unit": "wheel-notch", "filter": "more"},
         {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
         {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"}
       ],
@@ -665,6 +665,20 @@
       "since": "2026.10.22"
     },
     {
+      "name": "terminal",
+      "class": "scene-command",
+      "description": "Show the terminal (`scenes.terminal`, docs/terminal.md): the frame's console on its own screen, a line to type the commands an ESP32's serial console takes and the frame's answers under it. While it, the scene switcher or the scene settings show, go back to the scene they were opened from instead. Not on an ESP32, whose console is its serial port.",
+      "listen": false,
+      "dispatch": true,
+      "payload": [],
+      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap"],
+      "renderAfter": "always",
+      "coalesce": "none",
+      "log": "full",
+      "hosts": {"linux": true, "esp32": false, "wasm": true},
+      "since": "2026.11.8"
+    },
+    {
       "name": "back",
       "class": "scene-command",
       "description": "Go back, as a phone's back gesture does: what that is is the scene's (the photo or the page before; the scene switcher turns its page back, the scene settings close unsaved), and a scene that does not listen for it stays as it is. It never switches the scene. The frame's event map binds it to a swipe in from the left edge on a touch screen.",
@@ -789,6 +803,10 @@
     "switcher": "system/sceneSwitcher",
     "$settingsComment": "The scene `sceneSettings` shows: built into every runtime (docs/scene-settings.md), like the switcher in no scene list and never the scene a reboot comes back to. `sceneSettings` hands it `state.from` (the scene it was opened from), `state.fields` (that scene's public fields) and `state.values` (theirs as it opened); Save is a `setCurrentScene` back to `from` with the values as its state.",
     "settings": "system/sceneSettings",
+    "$settingsWindowComment": "Where built-in scenes stay open as windows (a desktop layout on a Raspberry Pi or in the browser; docs/scene-layouts.md \"Windows\"), every scene's settings are an instance of their own: `settingsWindow` followed by the scene's id (`system/sceneSettings#clock`), opened by `sceneSettings` from that scene. The frame page (`sceneSettings {page: \"frame\"}`) is the one window of the plain id there. Everywhere else, the plain id alone.",
+    "settingsWindow": "system/sceneSettings#",
+    "$terminalComment": "The scene `terminal` shows: built into the runtimes that run scenes side by side (a Raspberry Pi, the browser; docs/terminal.md), like the switcher in no scene list and never the scene a reboot comes back to. `terminal` hands it `state.from` (the scene it was opened from) and that scene's public fields and values, as `sceneSettings` does.",
+    "terminal": "system/terminal",
     "$yieldComment": "Not a scene: the id a scene node names to mean \"the scene this layout is wrapped around\" (docs/scene-layouts.md), `<yield />` in JSX. In no scene list; a layout shown on its own has nothing to yield and leaves the panel empty.",
     "yield": "system/yield"
   },

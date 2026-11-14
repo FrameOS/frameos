@@ -27,6 +27,7 @@
 import std/[json, options, tables, times]
 when not defined(frameosEmbedded):
   import std/[math, strutils]
+  from frameos/events import isSceneSettings
 import pixie
 import pixie/fileformats/svg
 import frameos/types
@@ -37,6 +38,7 @@ import frameos/render_scale
 import frameos/scene_rhythm
 import frameos/ui/layout
 import frameos/ui/events
+import frameos/ui/theme
 import frameos/ui/tree
 import frameos/utils/font
 import frameos/utils/image
@@ -98,10 +100,18 @@ proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
   ## `node[key] = value` for an object node, without json's assert.
   node.fields[key] = value
 
-proc isBuiltInScene*(sceneId: string): bool =
-  ## A scene the runtime draws itself, on every host: no slot, no file. The
-  ## switcher and the scene settings (system/sceneSettings/scene.nim).
-  sceneId == SceneSwitcherId or sceneId == SceneSettingsId
+when defined(frameosEmbedded):
+  proc isBuiltInScene*(sceneId: string): bool =
+    ## A scene the runtime draws itself, on every host: no slot, no file. The
+    ## switcher and the scene settings (system/sceneSettings/scene.nim).
+    sceneId == SceneSwitcherId or sceneId == SceneSettingsId
+else:
+  proc isBuiltInScene*(sceneId: string): bool =
+    ## A scene the runtime draws itself: no slot, no file. The switcher, the
+    ## scene settings (system/sceneSettings/scene.nim; on a desktop one a
+    ## scene, `settingsWindowId`) and, off the ESP32, the terminal
+    ## (system/terminal/scene.nim).
+    sceneId == SceneSwitcherId or sceneId == SceneTerminalId or isSceneSettings(sceneId)
 
 # ------------------------------------------------------------------ the model
 
@@ -145,6 +155,36 @@ proc uiRoom*(frameConfig: FrameConfig, width, height: int): (int, int) =
   ## as large again with less room, as a scaled JSX scene is.
   let scale = uiScale(frameConfig, width, height)
   (scaledLength(width, scale), scaledLength(height, scale))
+
+when not defined(frameosEmbedded):
+  const DesktopUnit = 400
+    ## A built-in scene's unit in a desktop's window: its letters a size from
+    ## the desktops' apps (16 px in the settings, 12 in the terminal).
+
+  proc panelUnit*(frameConfig: FrameConfig, image: Image): int =
+    ## The panel's shorter edge, as it is turned (the canvas's without a
+    ## config): what a built-in scene's sizes are a share of in a window on a
+    ## desktop too, so its letters keep the frame's size there and a bigger
+    ## window shows more of it, not more of the same larger.
+    if not frameConfig.isNil:
+      let (w, h) = canvasSize(frameConfig)
+      result = min(w, h)
+    if result <= 0:
+      result = min(image.width, image.height)
+    # In a desktop's window it is one of the desktop's apps, sized as on a
+    # small frame whatever the panel: at the desktops' own zoom, twice that
+    # from a 2160 px short side (1000 on e-paper) at the frame's render scale.
+    if not onDesktop.isNil and onDesktop():
+      let laidOut = result.float / max(frameRenderScale(frameConfig), 0.25)
+      let zoom = if laidOut >= (if paperPanel(frameConfig, image): 1000.0 else: 2160.0): 2 else: 1
+      result = min(result, DesktopUnit * zoom)
+
+template sizeUnit*(self: FrameScene, image: Image): int =
+  ## A built-in scene's `unit` (its `tree`'s `sizeUnit`): the canvas's shorter
+  ## edge on an ESP32, which draws them full screen alone; elsewhere the
+  ## panel's (panelUnit), the same full screen, and the same in a window.
+  when defined(frameosEmbedded): min(image.width, image.height)
+  else: panelUnit(self.frameConfig, image)
 
 proc ensureCanvas*(self: FrameScene, context: ExecutionContext) =
   ## The canvas a built-in scene draws into: the host's, else one the size of
@@ -307,15 +347,25 @@ proc showTurnedPage() =
   ## to refresh (2026-11-10).
   sendEvent(evRender, newJObject(), eoScene)
 
+when not defined(frameosEmbedded):
+  var wentBack {.threadvar.}: bool
+    ## It went back by itself (a scene picked, Close, its timeout), not merely
+    ## lost the focus to a window beside it: its "close" ends it
+    ## (docs/scene-layouts.md "Windows").
+
 proc choose(self: SceneSwitcherScene, index: int) =
   ## Show the scene at `index`.
   if index >= 0 and index < self.entries.len:
     let payload = newJObject()
     payload.put("sceneId", newJString(self.entries[index].id))
+    when not defined(frameosEmbedded):
+      wentBack = true
     sendEvent(evSetCurrentScene, payload, eoScene)
 
 proc leave() =
   ## Back to the scene it was opened from: the dispatcher knows which.
+  when not defined(frameosEmbedded):
+    wentBack = true
   sendEvent(evSceneSwitcher, newJObject(), eoScene)
 
 proc opened(self: SceneSwitcherScene) =
@@ -419,6 +469,9 @@ proc arrowButton(size: int, left: bool, button: string): SvgNode =
     s.square(size * 2 div 3)
     chevron.attrs.add(("class", s))
     result.children.add chevron
+  # The layout theme's look for a button (ui/theme.nim), on a Pi.
+  when not defined(frameosEmbedded):
+    result = result.role("button")
 
 type TileLook = object
   ## What every tile on the page shares, and the one at hand.
@@ -442,14 +495,14 @@ proc titleRow(look: TileLook, index, size: int, height = 0): SvgNode =
   n.mute(look)
   var number: string
   number.addInt(index + 1)
-  result = el("div", c, el("span", n, txt(number)))
+  result = el("div", c, el("span", n, txt(number)).role("muted"))
   if look.showing:
     var d = "shrink-0 rounded-full"
     d.square(max(4, look.unit div 18))
     if not look.paper: d.add " bg-sky-400"
     elif look.lit: d.add " bg-white"
     else: d.add " bg-black"
-    result.children.add el("div", d)
+    result.children.add el("div", d).role("accent")
 
 proc pictureTile(self: SceneSwitcherScene, tile: SvgNode, look: TileLook, index: int,
     grid: SwitcherGrid, title: string): bool =
@@ -478,7 +531,7 @@ proc pictureTile(self: SceneSwitcherScene, tile: SvgNode, look: TileLook, index:
     c.add(if not look.paper: " bg-zinc-700" elif look.lit: " border-2 border-white" else: " border-2 border-black")
     c.px("text", clamp(ph div 3, 12, 64))
     c.mute(look)
-    tile.children.add el("div", c, txt($(index + 1)))
+    tile.children.add el("div", c, txt($(index + 1))).role("field")
   let row = look.titleRow(index, size, titleH)
   row.children.add el("span", if look.paper: "truncate font-bold" else: "truncate", txt(title))
   tile.children.add row
@@ -513,12 +566,14 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: Swit
   # The preview keeps no picture of a scene it is not showing either.
   when not defined(frameosEmbedded):
     if not sceneSwitcherThumbnail.isNil and self.pictureTile(result, look, index, grid, title):
-      return
+      return result.role(if look.lit: "tileLit" else: "tile")
   let size = clamp(min(permille(grid.tileH, 180), permille(grid.tileW, 140)), 12, 40)
   result.children.add look.titleRow(index, size)
   var name = "grow flex items-center justify-center text-center font-bold line-clamp-3"
   name.px("text", size)
   result.children.add el("div", name, txt(title))
+  when not defined(frameosEmbedded):
+    result = result.role(if look.lit: "tileLit" else: "tile")
 
 proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: int, paper: bool,
     width, size, small: int, button: string) =
@@ -545,8 +600,8 @@ proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: i
   c.px("py", max(2, small div 4))
   c.px("text", small)
   c.add button
-  header.children.add el("div", c, txt("Close")).onClick(self.entries.len)
-  root.children.add header
+  header.children.add el("div", c, txt("Close")).role("button").onClick(self.entries.len)
+  root.children.add header.role("bar")
 
 when not defined(frameosEmbedded):
   # No ESP32 board is round (frameos/panel_shape.nim): the firmware
@@ -573,7 +628,7 @@ when not defined(frameosEmbedded):
     if grid.pages > 1:
       c = if paper: "shrink-0" else: "shrink-0 text-zinc-400"
       c.px("text", small)
-      title.children.add el("span", c, txt(pageText(page, grid.pages)))
+      title.children.add el("span", c, txt(pageText(page, grid.pages))).role("muted")
     root.children.add title
     let
       closeTop = grid.y0 + grid.side + grid.gap div 2
@@ -584,7 +639,7 @@ when not defined(frameosEmbedded):
     c.add " flex items-center justify-center rounded-full"
     c.px("text", small)
     c.add button
-    root.children.add el("div", c, txt("Close")).onClick(self.entries.len)
+    root.children.add el("div", c, txt("Close")).role("button").onClick(self.entries.len)
     if grid.pages > 1:
       let room = grid.x0 - (grid.cx - grid.radius) - grid.gap div 2
       var a = min(clamp(grid.radius * 19 div 100, 20, 48), room - 2)
@@ -624,7 +679,7 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
   # E-paper's white and black are the canvas's own (the scene background, and
   # the layout's text color); an LCD's dark page covers every pixel, so a
   # press repaints only what it changed (utils/svg_frames.nim).
-  result = el("div", if paper: "" else: "bg-zinc-950 text-white")
+  result = el("div", if paper: "" else: "bg-zinc-950 text-white").role("page")
   when defined(frameosEmbedded):
     self.header(result, grid, page, paper, width, size, small, button)
   else:
@@ -688,6 +743,13 @@ proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, pap
   target.offsetY = 0
   target.scale = image.width.float32 / max(roomW, 1).float32
   target.call = call
+  when not defined(frameosEmbedded):
+    if self.state{"away"}.getBool():
+      # Left open in a window (docs/scene-layouts.md "Windows"): it waits for
+      # whoever brings it forward again, and draws again when something does.
+      self.refreshInterval = idle
+      self.refreshIntervalDefault = idle
+      return false
   let
     now = epochTime()
     since = now - self.state{"touchedAt"}.getFloat(now)
@@ -722,7 +784,7 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
     if not pass.isNil:
       try: discard pass(true) except Exception: discard
   let (roomW, roomH) = uiRoom(self.frameConfig, image.width, image.height)
-  let tree = self.tree(roomW, roomH, self.paper, min(image.width, image.height))
+  let tree = self.tree(roomW, roomH, self.paper, self.sizeUnit(image))
   when not defined(frameosEmbedded):
     if not pass.isNil:
       try: more = pass(false) except Exception: more = false
@@ -769,11 +831,26 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
       if not value.isNil:
         self.state.put(key, value)
   of "open":
+    when not defined(frameosEmbedded):
+      wentBack = false
+      if self.state.hasKey("away"):
+        self.state.delete("away")
     self.opened()
   of "close":
-    # Opened again by name (a `setCurrentScene` to it), it was opened from
-    # nowhere it knows: no stale scene to go back to.
-    self.forget()
+    when defined(frameosEmbedded):
+      # Opened again by name (a `setCurrentScene` to it), it was opened from
+      # nowhere it knows: no stale scene to go back to.
+      self.forget()
+    else:
+      if wentBack or not builtInScenesStay:
+        # Done: opened again by name, it knows no scene to go back to.
+        wentBack = false
+        self.forget()
+      else:
+        # The focus went to a window beside it (docs/scene-layouts.md
+        # "Windows"): it stays open there, Close still going back where it
+        # was opened from, and does not go back by itself (drawUi).
+        self.state.put("away", newJBool(true))
   of "render":
     if context.hasImage and not context.image.isNil:
       self.draw(context.image)

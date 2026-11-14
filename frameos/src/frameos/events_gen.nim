@@ -85,6 +85,10 @@ const
   SceneSwitcherId* = "system/sceneSwitcher"
   ## The built-in scene `sceneSettings` shows (docs/scene-settings.md).
   SceneSettingsId* = "system/sceneSettings"
+  ## Where built-in scenes stay open as windows, a scene's own settings: this and its id.
+  SceneSettingsWindowPrefix* = "system/sceneSettings#"
+  ## The built-in scene `terminal` shows, off the ESP32 (docs/terminal.md).
+  SceneTerminalId* = "system/terminal"
   ## The scene a layout's <yield /> stands for (docs/scene-layouts.md).
   SceneYieldId* = "system/yield"
   ## Origins a scene opts into per custom event (`origins` on its declaration).
@@ -120,6 +124,7 @@ const
   evSetCurrentScene* = "setCurrentScene"
   evSceneSwitcher* = "sceneSwitcher"
   evSceneSettings* = "sceneSettings"
+  evTerminal* = "terminal"
   evBack* = "back"
   evForward* = "forward"
   evMetrics* = "metrics"
@@ -129,7 +134,7 @@ const
   evUploadScenes* = "uploadScenes"
   evVoiceChat* = "voiceChat"
 
-  ContractEventNames*: array[38, string] = [
+  ContractEventNames*: array[39, string] = [
     evInit,
     evRender,
     evOpen,
@@ -160,6 +165,7 @@ const
     evSetCurrentScene,
     evSceneSwitcher,
     evSceneSettings,
+    evTerminal,
     evBack,
     evForward,
     evMetrics,
@@ -170,7 +176,7 @@ const
     evVoiceChat,
   ]
 
-  ContractEventPolicies*: array[38, EventPolicy] = [
+  ContractEventPolicies*: array[39, EventPolicy] = [
     EventPolicy( # init
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
@@ -375,6 +381,12 @@ const
       renderAfter: raAlways, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
+    EventPolicy( # terminal
+      class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
+      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap},
+      renderAfter: raAlways, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
+      linux: true, esp32: false, wasm: true),
     EventPolicy( # back
       class: ecSceneCommand, device: edNone, listen: true, dispatch: false,
       origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap},
@@ -473,14 +485,15 @@ proc contractEventIndex*(name: string): int =
   of evSetCurrentScene: 27
   of evSceneSwitcher: 28
   of evSceneSettings: 29
-  of evBack: 30
-  of evForward: 31
-  of evMetrics: 32
-  of evReload: 33
-  of evRestart: 34
-  of evReboot: 35
-  of evUploadScenes: 36
-  of evVoiceChat: 37
+  of evTerminal: 30
+  of evBack: 31
+  of evForward: 32
+  of evMetrics: 33
+  of evReload: 34
+  of evRestart: 35
+  of evReboot: 36
+  of evUploadScenes: 37
+  of evVoiceChat: 38
   else: -1
 
 proc eventAliasCount*(name: string): int =

@@ -637,20 +637,20 @@
   },
   {
     "name": "wheel",
-    "description": "When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right.",
+    "description": "When a mouse wheel is scrolled (not logged). Deltas are wheel notches, and a trackpad's fractions of one; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right.",
     "canListen": true,
     "fields": [
       {
         "name": "deltaX",
         "label": "Delta X",
-        "type": "integer",
+        "type": "float",
         "required": true,
         "filter": "more"
       },
       {
         "name": "deltaY",
         "label": "Delta Y",
-        "type": "integer",
+        "type": "float",
         "required": true,
         "filter": "more"
       },
@@ -876,6 +876,12 @@
         "required": false
       }
     ]
+  },
+  {
+    "name": "terminal",
+    "description": "Show the terminal (`scenes.terminal`, docs/terminal.md): the frame's console on its own screen, a line to type the commands an ESP32's serial console takes and the frame's answers under it. While it, the scene switcher or the scene settings show, go back to the scene they were opened from instead. Not on an ESP32, whose console is its serial port.",
+    "canDispatch": true,
+    "fields": []
   },
   {
     "name": "back",

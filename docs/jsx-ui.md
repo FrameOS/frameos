@@ -203,7 +203,11 @@ so in a block give it a height.
 It runs on its own `refreshInterval`: a pass that finds it not due leaves its
 pixels alone and the scene does not run (`docs/scene-rhythm.md`), and the frame's
 next wake comes forward to when it is due. When only it is due the UI around it
-sits out. A tap on it is the scene's, in its own coordinates. One drawn as a
+sits out. A tap on it is the scene's, in its own coordinates, unless the UI drew
+something over it there that listens for that event (a menu, a window on top, a
+pane that takes a press): then it is that element's, and a press it took is its
+own to the end, its tap included (everywhere but an ESP32, whose layouts tile
+the panel). What the UI drew under it hears nothing there. One drawn as a
 picture counts against the same budget as a panel's copy (a quarter of free
 render memory, at most 1 MiB on an ESP32); a device that cannot keep it runs the
 scene again each render. An LCD repaints what the scene changed.
@@ -759,7 +763,11 @@ A box with `overflow-y-auto` (or `-scroll`, `overflow-x-auto`,
   pressed; the swipe that ends the drag is the box's, not a handler's. A
   press on an element that takes it (`onPointerDown`, `onPointerMove`: a
   slider) stays that element's. A wheel scrolls the box under the pointer
-  (48 px a notch). On e-paper the box shows where it got to when the finger
+  (72 px a notch, about three lines; a trackpad's fractions of a notch their
+  share of it), and the box around it once that one is at its end. In a
+  layout it is routed like the pointer: over a scene in a window it scrolls
+  that scene's box in its own coordinates, a window behind's too, without
+  bringing it forward. On e-paper the box shows where it got to when the finger
   lifts.
 - **It needs a height**: a box that scrolls is as tall as its own classes
   or its container make it (`h-*`, `max-h-*`, `flex-1` in a column with a
@@ -784,6 +792,53 @@ y width height viewBox>` of its padding box, whose viewBox the scroll moves
 that is that viewport, and keeps its damage there). Its regions are moved
 by the scroll and cut to the viewport. A scroll repaints the viewport on an
 LCD; what did not change in the tree is still taken back unbuilt.
+
+## Themes
+
+The UIs FrameOS builds in Nim (the scene settings and the frame page, the
+scene switcher, the terminal, the keyboard on the screen) take their look from
+the layout around the frame's scene, so a desktop's settings look like that
+desktop's (`frameos/ui/theme.nim`). A layout gives its theme in its state as
+**`theme`**, an object of roles; the samples set it from their "Look of the
+settings pages" field (`Windows 98`: Windows Standard, `macOS`: Light and Dark,
+`BeOS`, each with High contrast and FrameOS, the built-in look; `Tiling`:
+FrameOS and High contrast):
+
+```js
+frameos.setState('theme', {
+  page: 'bg-[#c0c0c0] text-black',
+  button: ['bg-[#c0c0c0] border-t-1 border-l-1 border-white', 'border-b-1 border-r-1 border-black'],
+})
+```
+
+A role is a string of classes, one box, or a list of them, a box each, one
+inside the other: a bevel is two or three boxes, as a box has one border color.
+The element keeps its place and size (`w-`, `h-`, `shrink-0`, position, the text
+size) on the outermost box, which also takes its presses, and how its content is
+laid out (`flex`, `items-`, `justify-`, padding, gaps) on the innermost; its own
+look (`bg-`, `text-` colors, `border`, `rounded`, font weights, `opacity-`, with
+their `active:`, `focus:` and `placeholder:` forms) gives way to the role's. A
+role the theme leaves out keeps the element's own look.
+
+| Role | What |
+|---|---|
+| `page`, `bar` | the page (its background and text color) and its header's line |
+| `button`, `primary`, `selected` | a button, the one that does it (Save with something to save), one lit while what it opens shows |
+| `field`, `option`, `picked` | a select box or a line to type on, a select box's option, the option it holds |
+| `switch`, `switchOn`, `knob`, `knobOn` | a switch's track and knob, off and on |
+| `muted`, `accent` | quieter text, the switcher's dot for the scene it was opened from |
+| `card` | the frame page's facts |
+| `tile`, `tileLit` | a scene in the switcher, the one the keys are on |
+| `keyboard`, `key`, `keyMod`, `keyLit` | the keyboard on the screen, a key, a key that does something else, one lit (shift, held, just typed) |
+| `terminal`, `prompt` | the terminal's page and its `frameos>` |
+
+`page`, `bar`, `muted`, `accent`, `option`, `picked`, `keyboard`, `terminal` and
+`prompt` are one box always (a list's innermost). The samples set no theme on
+e-paper, where the pages keep their black on white, except High contrast.
+
+Not on an ESP32: there `role` is the element itself and the pages keep their
+own look, so themes cost the firmware nothing (its generated C is the same with
+and without them). A layout running there sets none (`app.frame.embedded`).
 
 ## Text and fonts
 

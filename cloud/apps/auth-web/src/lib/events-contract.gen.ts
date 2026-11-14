@@ -6,7 +6,7 @@ export const customEventMaxNameLength = 63;
 export const sceneYieldId = "system/yield";
 
 /** Every built-in event name. Any other name is a custom scene event. */
-export const contractEventNames: readonly string[] = ["init", "render", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "edgeSwipe", "wheel", "turnOn", "turnOff", "toggleScreen", "gpio", "button", "setSceneState", "setCurrentScene", "sceneSwitcher", "sceneSettings", "back", "forward", "metrics", "reload", "restart", "reboot", "uploadScenes", "voiceChat"];
+export const contractEventNames: readonly string[] = ["init", "render", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "edgeSwipe", "wheel", "turnOn", "turnOff", "toggleScreen", "gpio", "button", "setSceneState", "setCurrentScene", "sceneSwitcher", "sceneSettings", "terminal", "back", "forward", "metrics", "reload", "restart", "reboot", "uploadScenes", "voiceChat"];
 
 export type CloudEventRoute = {
   verb: string;

@@ -1,6 +1,6 @@
 {
   "name": "macOS layout",
-  "description": "A menu bar, a window and a Dock around each scene: the menu and the Dock open the scene list and its settings, the traffic lights close, hide or unframe the window, and the clock opens the frame's page.",
+  "description": "A menu bar, a window and a Dock around each scene: the menu and the Dock open the scene list and its settings, the traffic lights close, hide or unframe the window, and the clock opens the frame's page. On a Raspberry Pi every scene opens in a window of its own, with the frame's scenes in the Dock.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

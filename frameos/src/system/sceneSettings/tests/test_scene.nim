@@ -11,6 +11,7 @@ import frameos/utils/font
 import system/sceneSwitcher/scene as switcher
 import system/sceneSettings/scene as settings
 import frameos/layout_choice
+import frameos/ui/theme
 
 # The scene settings (docs/scene-settings.md): the form it builds of a
 # scene's fields, a text typed on the keyboard on the screen, a switch and
@@ -768,3 +769,28 @@ block the_frame_page_sets_the_clock_and_offers_an_update:
   frameSettingsApply = nil
   frameSettingsAction = nil
   echo "clock and update ok"
+
+block a_layout_theme:
+  # A layout's theme (ui/theme.nim, docs/jsx-ui.md "Themes"): the page in its
+  # colors, Cancel as boxes inside each other that take its press as a whole.
+  themeSource = proc(): JsonNode {.nimcall, gcsafe, raises: [].} =
+    %*{"page": "bg-[#c0c0c0] text-black",
+      "bar": "border-b-1 border-[#808080]",
+      "button": ["bg-[#c0c0c0] border-t-1 border-l-1 border-white", "border-b-1 border-r-1 border-black"],
+      "field": ["border-t-1 border-l-1 border-[#808080]", "bg-white text-black"]}
+  sent.setLen(0)
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {
+    "from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "string", "placeholder": "Where?", "secret": false}],
+    "values": {"city": "Tallinn"}}})
+  let image = scene.draw()
+  if previews.len > 0:
+    image.writeFile(previews / "themed.png")
+  doAssert image[240, 470] == rgbx(192, 192, 192, 255), $image[240, 470]
+  let cancel = regionWith(0)
+  doAssert cancel.w > 40 and cancel.h > 20, $cancel.w & "x" & $cancel.h
+  scene.tap(cancel)
+  doAssert sent.len >= 1 and sent[0][0] == evSceneSettings, $sent
+  themeSource = nil
+  echo "a layout theme ok"

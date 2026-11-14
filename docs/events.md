@@ -118,7 +118,7 @@ spellings never stop working: store scenes are versioned and immutable.
 |---|---|---|
 | `lifecycle` | `init`, `open`, `render`, `close` | The host tells a scene where it is in its life. |
 | `input` | `pointerMove`, `pointerDown`, `pointerUp`, `pointerCancel`, `wheel`, `tap`, `doubleTap`, `longPress`, `swipe`, `keyDown`, `keyUp`, `textInput`, `gpio`, `button` — and the old names `mouseMove`, `mouseDown`, `mouseUp` | Something a person did. `device` says with what: `keyboard`, `pointer`, `button`. See [Input](#input). |
-| `scene-command` | `setSceneState`, `setCurrentScene`, `sceneSwitcher`, `sceneSettings`, `turnOn`, `turnOff`, `toggleScreen` | Asks the host to do something for the scene; a scene may dispatch it. |
+| `scene-command` | `setSceneState`, `setCurrentScene`, `sceneSwitcher`, `sceneSettings`, `terminal`, `turnOn`, `turnOff`, `toggleScreen` | Asks the host to do something for the scene; a scene may dispatch it. |
 | `device-command` | `metrics`, `reload`, `restart`, `reboot`, `uploadScenes` | Asks the runtime to do something to the device. Never delivered to a scene, never offered by the editor. |
 
 ### Lifecycle
@@ -236,7 +236,16 @@ no filter on a field hears every value of it.
   values (`state.fields`, `state.values`), read before the switch. While it
   shows it goes back without saving; its Save is a `setCurrentScene` back
   with the values as `state`. Over the switcher it goes back to the scene
-  as well, and `sceneSwitcher` over it goes back unsaved.
+  as well, and `sceneSwitcher` over it goes back unsaved. Where built-in
+  scenes stay open as windows (a desktop), each scene's settings are an
+  instance of their own, `scenes.settingsWindow` and the scene's id, and
+  `{page: "frame"}` is the one window of the plain id
+  ([scene-settings.md](scene-settings.md) "In a window").
+- `terminal {}` — shows the terminal (`system/terminal`, `scenes.terminal`;
+  [terminal.md](terminal.md)), off the ESP32: as the settings, with
+  `state.from` and that scene's public values. While it, the switcher or the
+  settings show, any of the three goes back. Its commands send what they
+  change from the origin `panel`, like the frame page's buttons.
 - `back {}` and `forward {}` — go back and go forward, as a phone's back
   gesture: delivered to the scene showing, which decides what that is (the
   photo or the page before or after), and never a scene switch; a scene
@@ -290,8 +299,11 @@ keeps an id while it is down (`pointerType`: `mouse`, `touch`, `pen`). Two
 fingers are two pointers. `pointerCancel {x, y, pointerId, pointerType}` is a
 pointer that was down and is lost without a release: the input lane overflowed
 between a down and its up, the device went away, the kernel dropped events. A
-scene holding a drag lets go. `wheel {deltaX, deltaY, x, y}` is in notches;
-`deltaY` is positive scrolling down.
+scene holding a drag lets go. `wheel {deltaX, deltaY, x, y}` is in notches,
+a trackpad's fractions of one included; `deltaY` is positive scrolling down. A
+JSX UI scrolls the box under the pointer about three lines a notch, routed
+through a layout like the pointer (a window behind's box too, without bringing
+it forward), and the box around it when that one is at its end.
 
 **The cursor.** A relative mouse reports motion only, so the dispatcher owns
 its position — in scene pixels, so it moves along the picture's axes on a
@@ -761,6 +773,7 @@ an event means:
 | `close` on `reload` / `uploadScenes` | not sent | not sent | — |
 | The scene switcher (`sceneSwitcher`) | each tile the scene's last snapshot (`scene_images/`) | names only; selected without a slot (`fos_scenes.c`), the frame kept awake its idle time, never `last_scene` | names only |
 | The scene settings (`sceneSettings`) | the scene stays in memory under it | selected without a slot, like the switcher; the scene is let go while it shows, and loads again on the way back (Save's state applied then) | as the ESP32 |
+| The terminal (`terminal`) | the scene stays in memory under it | none: the dispatcher's branch for it is not compiled, and the event reaches the scene, which does not listen for it (its console is the serial port) | as Linux, with the browser's frame page facts |
 
 A frame on firmware older than `cloud.since` does not know `scene_event`: the
 cloud sends it `cloud.before` where the contract has one (`setSceneState` rides

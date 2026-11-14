@@ -1228,6 +1228,25 @@ suite "a <select>":
       check r.visible[1] >= 8
       check r.visible[3] <= 92
 
+  test "deep in boxes inside each other it has a key a 32-bit build keeps, and opens":
+    # Twelve boxes deep (a theme's bevels in a row of a scrolling page): its key
+    # is 31 times its parent's and more each level, which a 32-bit int (the
+    # browser's wasm, an ESP32, a 32-bit Pi) wrapped to below zero, and an open
+    # select is kept as its key + 1, 0 for none.
+    var root = select(100, 3)
+    for i in 0 ..< 12:
+      root = el("div", "flex flex-1 min-w-0 min-h-0 w-full h-full", root)
+    var input: UiInput
+    var regions: seq[UiRegion]
+    discard layout.layoutUi(root, 480, 480, input, regions)
+    for r in regions:
+      check r.key >= 0 and r.key < (1 shl 30)
+    input.open = regions.filterIt(it.field == 4)[0].key + 1
+    input.fresh = true
+    let (_, rows) = root.listOf(input)
+    check rows.len == 3
+    check input.open > 0
+
   test "with no options there is nothing to open":
     var input: UiInput
     var regions: seq[UiRegion]
