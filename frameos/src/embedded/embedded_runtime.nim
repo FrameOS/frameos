@@ -22,6 +22,7 @@ import frameos/scene_rhythm
 import frameos/layout_choice
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
+import frameos/scene_store_hooks
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
 import frameos/values
@@ -817,6 +818,24 @@ proc frameSettingsDo(action: string) {.nimcall, gcsafe, raises: [].} =
 sceneSettings.frameSettingsRead = frameSettingsJson
 sceneSettings.frameSettingsApply = frameSettingsSet
 sceneSettings.frameSettingsAction = frameSettingsDo
+
+# The scene store's host (docs/scene-store.md, frameos/scene_store_hooks.nim):
+# the facts and the work, from main/fos_store.c, which does the work on a task
+# of its own. Every call comes from a JS app, on the render task.
+proc fos_store_json(asker: cstring): cstring {.importc, cdecl.}
+proc fos_store_action(asker, action, args: cstring) {.importc, cdecl.}
+
+proc sceneStoreJson(asker: string): string {.nimcall, gcsafe, raises: [].} =
+  let raw = fos_store_json(asker.cstring)
+  if not raw.isNil:
+    result = $raw
+    cFree(raw)
+
+proc sceneStoreDo(asker, action, args: string) {.nimcall, gcsafe, raises: [].} =
+  fos_store_action(asker.cstring, action.cstring, args.cstring)
+
+sceneStoreRead = sceneStoreJson
+sceneStoreAction = sceneStoreDo
 
 proc selectScene*(sceneIdText: string): bool =
   when defined(memProbe): memProbe("  >>> selectScene " & sceneIdText)

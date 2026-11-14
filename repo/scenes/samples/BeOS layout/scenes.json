@@ -1,0 +1,115 @@
+[
+  {
+    "id": "layout-beos",
+    "name": "BeOS",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 1,
+      "backgroundColor": "#336698",
+      "isLayout": true
+    },
+    "fields": [
+      {
+        "name": "showWindow",
+        "type": "boolean",
+        "label": "Show window",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "showIcons",
+        "type": "boolean",
+        "label": "Show desktop icons",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "twentyFourHour",
+        "type": "boolean",
+        "label": "24-hour clock",
+        "value": "false",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "beos": {
+        "name": "BeOS",
+        "category": "data",
+        "description": "A yellow-tabbed window on a blue desktop, with the Deskbar in the corner: its menu opens the scene list, the tray with the clock the frame's page, and the list below it the scene and its settings.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"BeOS\",\n  \"category\": \"data\",\n  \"description\": \"A yellow-tabbed window on a blue desktop, with the Deskbar in the corner: its menu opens the scene list, the tray with the clock the frame's page, and the list below it the scene and its settings.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n",
+          "app.tsx": "// A desktop from 2000 around the scene it wraps: the scene in a window with a\n// yellow tab, the Deskbar in the top right corner and a few icons under it. The\n// Deskbar's gem opens the scene list, its tray (signal, battery, clock) the frame's\n// page, and below them the running scene puts its window away and brings it back,\n// and Settings opens its settings. The tab's close box closes the scene to the\n// list, its zoom box fills the desktop with the window and back, and a double tap\n// on the tab hides the window. On a narrow panel the Deskbar runs along the top,\n// with no room for the icons. Built-in scenes are drawn in the window too.\nconst pad = (n) => String(n).padStart(2, '0')\nconst on = (value) => value === true || value === 'true'\n\n// Sizes are pixels, of a desktop's size, twice that on a panel with a short side\n// of 1000 px or more, whose pixels are small, and in proportion on one under 480,\n// which has no room for them. The frame's render scale multiplies on top.\nlet zoom = 1\nlet edge = 1 // the bevels' width\nconst px = (n) => `${Math.round(n * zoom * 10) / 10}px`\n\nfunction clock(now, twentyFour) {\n  const minutes = pad(now.getMinutes())\n  if (twentyFour) return `${pad(now.getHours())}:${minutes}`\n  return `${now.getHours() % 12 || 12}:${minutes} ${now.getHours() < 12 ? 'AM' : 'PM'}`\n}\n\n// The colors of the time. On e-paper the light grey is white, as a dithered grey\n// is a field of dots there, and the bevels' shade is black.\nconst R5 = {\n  desk: 'bg-[#336698]',\n  panel: '#d8d8d8',\n  pressed: '#b8b8b8',\n  light: '#ffffff',\n  shade: '#989898',\n  line: '#6c6c6c',\n  tab: '#ffcb00',\n  tabLight: '#fff0a0',\n  tabShade: '#c49600',\n}\nconst PAPER = { ...R5, panel: '#ffffff', pressed: '#ffffff', shade: '#000000', line: '#000000', tabShade: '#000000' }\nconst MONO = { ...R5, desk: 'bg-[#4a4a4a]', line: '#000000', shade: '#7a7a7a' }\nlet c = R5\n\n// A box has one border color, so a bevel is two boxes inside each other: light\n// at the top and the left, shade at the bottom and the right. Pressed, they swap.\nconst Bevel = ({ pressed = false, className = '', inner = '', onClick, children }) => (\n  <div\n    className={`flex border-t-${edge} border-l-${edge} border-[${pressed ? c.shade : c.light}] ${className}`}\n    onClick={onClick}\n  >\n    <div\n      className={`flex flex-1 min-w-0 min-h-0 border-b-${edge} border-r-${edge} border-[${pressed ? c.light : c.shade}] ${\n        pressed ? `bg-[${c.pressed}]` : `bg-[${c.panel}] active:bg-[${c.pressed}]`\n      } ${inner}`}\n    >\n      {children}\n    </div>\n  </div>\n)\n\n// The Deskbar's menu: a cut gem.\nconst Gem = () => (\n  <svg viewBox=\"0 0 24 20\" className={`w-[${px(28)}] h-[${px(23)}]`}>\n    <path d=\"M6 1H18L23 7L12 19L1 7Z\" fill=\"#3a78d8\" />\n    <path d=\"M8 1H16L18 7H6Z\" fill=\"#b4d8ff\" />\n    <path d=\"M6 1H8L6 7H1Z\" fill=\"#78b2f6\" />\n    <path d=\"M16 1H18L23 7H18Z\" fill=\"#2c66c4\" />\n    <path d=\"M1 7H6L12 19Z\" fill=\"#2858ab\" />\n    <path d=\"M6 7H18L12 19Z\" fill=\"#4f92ea\" />\n    <path d=\"M18 7H23L12 19Z\" fill=\"#1c4690\" />\n    <path d=\"M6 1H18L23 7L12 19L1 7Z\" fill=\"none\" stroke=\"#0f2a5e\" strokeWidth=\"0.9\" strokeLinejoin=\"round\" />\n    <path d=\"M19.5 0.5L20.2 2.3L22 3L20.2 3.7L19.5 5.5L18.8 3.7L17 3L18.8 2.3Z\" fill=\"#ffffff\" />\n  </svg>\n)\n\n// The open scene in the Deskbar: a window of its own, yellow tab and all.\nconst SceneGlyph = () => (\n  <svg viewBox=\"0 0 16 16\" className={`w-[${px(16)}] h-[${px(16)}] shrink-0`}>\n    <rect x=\"0.5\" y=\"0.5\" width=\"9\" height=\"4\" fill=\"#ffcb00\" stroke=\"#000000\" />\n    <rect x=\"0.5\" y=\"4.5\" width=\"15\" height=\"11\" fill=\"#d8d8d8\" stroke=\"#000000\" />\n    <rect x=\"2.5\" y=\"6.5\" width=\"11\" height=\"7\" fill=\"#336698\" stroke=\"#6c6c6c\" />\n  </svg>\n)\n\nconst GEAR = 'M7 0.5H9L9.4 2.6L10.9 3.2L12.6 1.9L14.1 3.4L12.8 5.1L13.4 6.6L15.5 7V9L13.4 9.4L12.8 10.9L14.1 12.6L12.6 14.1L10.9 12.8L9.4 13.4L9 15.5H7L6.6 13.4L5.1 12.8L3.4 14.1L1.9 12.6L3.2 10.9L2.6 9.4L0.5 9V7L2.6 6.6L3.2 5.1L1.9 3.4L3.4 1.9L5.1 3.2L6.6 2.6ZM10.5 8A2.5 2.5 0 1 0 5.5 8A2.5 2.5 0 1 0 10.5 8Z'\n\nconst SettingsGlyph = () => (\n  <svg viewBox=\"0 0 16 16\" className={`w-[${px(16)}] h-[${px(16)}] shrink-0`}>\n    <path d={GEAR} fill=\"#9a9a9a\" stroke=\"#000000\" strokeWidth=\"0.8\" strokeLinejoin=\"round\" />\n  </svg>\n)\n\n// Four bars for the Wi-Fi signal and the battery, nothing on a frame that cannot tell.\nfunction Signal({ rssi }) {\n  if (typeof rssi !== 'number') return null\n  const level = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1\n  return (\n    <div className={`flex items-end gap-[${px(1)}] h-[${px(12)}]`}>\n      {[4, 6, 9, 12].map((height, i) => (\n        <div className={`w-[${px(3)}] h-[${px(height)}] ${i < level ? 'bg-black' : `bg-[${c.shade}]`}`} />\n      ))}\n    </div>\n  )\n}\n\nfunction Battery({ percent }) {\n  if (typeof percent !== 'number') return null\n  return (\n    <svg viewBox=\"0 0 10 16\" className={`w-[${px(8)}] h-[${px(13)}]`}>\n      <rect x=\"3\" y=\"0\" width=\"4\" height=\"2\" fill=\"#000000\" />\n      <rect x=\"0.5\" y=\"1.5\" width=\"9\" height=\"14\" fill=\"#ffffff\" stroke=\"#000000\" />\n      <rect x=\"2\" y={3 + (11 * (100 - Math.min(100, percent))) / 100} width=\"6\" height={(11 * Math.min(100, percent)) / 100} fill={percent > 15 ? '#30b030' : '#d02020'} />\n    </svg>\n  )\n}\n\n// A running scene in the Deskbar.\nconst Team = ({ pressed, dim, label, onClick, className = '', children }) => (\n  <Bevel pressed={pressed} className={className} inner={`items-center gap-[${px(6)}] px-[${px(6)}] h-[${px(24)}]`} onClick={onClick}>\n    {children}\n    <span className={`truncate min-w-0 ${dim ? `text-[${c.shade}]` : ''}`}>{label}</span>\n  </Bevel>\n)\n\n// The tray: sunk into the Deskbar, with the signal, the battery and the clock.\nconst Tray = ({ app, now, className = '', onClick }) => (\n  <Bevel className={className} inner={`items-center p-[${px(3)}]`} onClick={onClick}>\n    <div className={`flex flex-1 border-t-${edge} border-l-${edge} border-[${c.shade}]`}>\n      <div className={`flex flex-1 items-center gap-[${px(5)}] h-[${px(18)}] px-[${px(5)}] border-b-${edge} border-r-${edge} border-[${c.light}]`}>\n        <Signal rssi={app.frame.wifiRssi} />\n        <Battery percent={app.frame.batteryPercent} />\n        <div className=\"flex-1\" />\n        <span className=\"whitespace-nowrap\">{clock(now, on(app.state.twentyFourHour))}</span>\n      </div>\n    </div>\n  </Bevel>\n)\n\n// The tab's two boxes, raised a little from the yellow.\nconst CloseBox = ({ onClick }) => (\n  <div className={`flex p-[${px(2)}]`} onClick={onClick}>\n    <svg viewBox=\"0 0 13 13\" className={`w-[${px(13)}] h-[${px(13)}]`}>\n      <linearGradient id=\"beBox\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2=\"13\" y2=\"13\">\n        <stop offset=\"0\" stopColor=\"#fffbe2\" />\n        <stop offset=\"1\" stopColor=\"#f0b400\" />\n      </linearGradient>\n      <rect x=\"0.5\" y=\"0.5\" width=\"12\" height=\"12\" fill=\"url(#beBox)\" stroke={c.tabShade} />\n      <path d=\"M1.5 11V1.5H11\" fill=\"none\" stroke=\"#ffffff\" />\n    </svg>\n  </div>\n)\n\nconst ZoomBox = ({ onClick }) => (\n  <div className={`flex p-[${px(2)}]`} onClick={onClick}>\n    <svg viewBox=\"0 0 13 13\" className={`w-[${px(13)}] h-[${px(13)}]`}>\n      <linearGradient id=\"beZoom\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2=\"13\" y2=\"13\">\n        <stop offset=\"0\" stopColor=\"#fffbe2\" />\n        <stop offset=\"1\" stopColor=\"#f0b400\" />\n      </linearGradient>\n      <rect x=\"3.5\" y=\"3.5\" width=\"9\" height=\"9\" fill=\"url(#beZoom)\" stroke={c.tabShade} />\n      <rect x=\"0.5\" y=\"0.5\" width=\"7\" height=\"7\" fill=\"url(#beZoom)\" stroke={c.tabShade} />\n      <path d=\"M1.5 6V1.5H6\" fill=\"none\" stroke=\"#ffffff\" />\n    </svg>\n  </div>\n)\n\n// The window: a yellow tab as wide as its title on the top left, then a grey\n// frame, lit at the top left and shaded at the bottom right, around the scene.\nconst Window = ({ title, onClose, onZoom, onHide, children }) => (\n  <div className=\"flex flex-col flex-1 min-w-0 min-h-0\">\n    <div className={`flex self-start max-w-full border-t-${edge} border-l-${edge} border-r-${edge} border-[${c.line}]`}>\n      <div className={`flex flex-1 min-w-0 border-t-${edge} border-l-${edge} border-[${c.tabLight}]`}>\n        <div\n          className={`flex flex-1 min-w-0 items-center h-[${px(22)}] gap-[${px(4)}] pl-[${px(2)}] pr-[${px(2)}] border-r-${edge} border-[${c.tabShade}] bg-[${c.tab}]`}\n          onDoubleClick={onHide}\n        >\n          <CloseBox onClick={onClose} />\n          <span className={`font-bold truncate min-w-0 px-[${px(4)}]`}>{title}</span>\n          <ZoomBox onClick={onZoom} />\n        </div>\n      </div>\n    </div>\n    <div className={`flex flex-col flex-1 min-h-0 border-[${edge}px] border-[${c.line}]`}>\n      <div className={`flex flex-col flex-1 min-h-0 border-t-${edge} border-l-${edge} border-[${c.light}]`}>\n        <div className={`flex flex-col flex-1 min-h-0 p-[${px(3)}] border-b-${edge} border-r-${edge} border-[${c.shade}] bg-[${c.panel}]`}>\n          <div className={`flex flex-col flex-1 min-h-0 border-t-${edge} border-l-${edge} border-[${c.shade}]`}>\n            <div className={`flex flex-col flex-1 min-h-0 border-b-${edge} border-r-${edge} border-[${c.light}]`}>{children}</div>\n          </div>\n        </div>\n      </div>\n    </div>\n  </div>\n)\n\n// Tracker's icons, drawn from above and to the side as they were.\nconst DiskIcon = () => (\n  <svg viewBox=\"2 4 28 24\" className={`w-[${px(42)}] h-[${px(36)}]`}>\n    <path d=\"M3 13L16 7L29 13L16 19Z\" fill=\"#ececec\" />\n    <path d=\"M3 13L16 19V26L3 20Z\" fill=\"#b4b4b4\" />\n    <path d=\"M16 19L29 13V20L16 26Z\" fill=\"#8c8c8c\" />\n    <path d=\"M5.5 18.2L13.5 22\" stroke=\"#5a5a5a\" strokeWidth=\"1.2\" />\n    <path d=\"M21 19.2L25 17.3\" stroke=\"#2ee05a\" strokeWidth=\"1.6\" />\n    <path d=\"M3 13L16 7L29 13V20L16 26L3 20ZM3 13L16 19L29 13M16 19V26\" fill=\"none\" stroke=\"#202020\" strokeWidth=\"0.9\" strokeLinejoin=\"round\" />\n  </svg>\n)\n\nconst FolderIcon = ({ children }) => (\n  <svg viewBox=\"2 4 28 24\" className={`w-[${px(42)}] h-[${px(36)}]`}>\n    <path d=\"M3 15L9 12L12 13.4L17 11L29 17L15 24Z\" fill=\"#f6d36a\" />\n    <path d=\"M3 15L15 24V27L3 18Z\" fill=\"#d9a22a\" />\n    <path d=\"M15 24L29 17V20L15 27Z\" fill=\"#b8841a\" />\n    <path d=\"M3 15L9 12L12 13.4L17 11L29 17V20L15 27L3 18ZM3 15L15 24L29 17M15 24V27\" fill=\"none\" stroke=\"#3a2a08\" strokeWidth=\"0.9\" strokeLinejoin=\"round\" />\n    {children}\n  </svg>\n)\n\nconst DesktopIcon = ({ label, onClick, children }) => (\n  <div className={`flex flex-col items-center gap-[${px(2)}] w-[${px(88)}] py-[${px(4)}] active:bg-black/25`} onClick={onClick}>\n    {children}\n    <span className={`text-white text-[${px(13)}] whitespace-nowrap px-[${px(2)}]`}>{label}</span>\n  </div>\n)\n\nexport function get(app) {\n  // app.frame's size is the panel's over the render scale, before the frame's rotation.\n  const turned = (app.frame.rotate || 0) % 180 !== 0\n  const width = turned ? app.frame.height : app.frame.width\n  const shortSide = Math.min(app.frame.width, app.frame.height) * (app.frame.scale || 1)\n  zoom = shortSide >= 1000 ? 2 : shortSide >= 480 ? 1 : shortSide / 480\n  edge = Math.max(1, Math.round(zoom))\n  c = app.frame.color === false ? MONO : app.frame.paper ? PAPER : R5\n  // The Deskbar stands in the corner where there is room beside the window, and\n  // runs along the top where there is not; the icons need the corner's column.\n  const corner = width >= 600 * Math.max(zoom, 1)\n  const now = new Date()\n  // The clock changes on the minute: nothing to draw until then.\n  frameos.setNextSleep(60 - now.getSeconds())\n  const name = app.frame.sceneName || 'FrameOS'\n  const builtIn = app.frame.systemScene === true\n  const settingsOpen = builtIn && name.includes('settings')\n  const listOpen = builtIn && !settingsOpen\n  // The scene a built-in one opened over keeps its place in the Deskbar.\n  const scene = builtIn ? app.state.openedOver || '' : name\n  const title = listOpen ? 'Scenes' : settingsOpen ? (name.startsWith('Frame') ? 'Preferences' : 'Settings') : name\n  const hidden = !builtIn && app.state.hidden === true\n  const zoomed = app.state.zoomed === true\n  const framed = on(app.state.showWindow)\n  // A built-in scene's own command, again, goes back to the scene it opened over.\n  const closeBuiltIn = () => frameos.dispatch(settingsOpen ? 'sceneSettings' : 'sceneSwitcher')\n  const openList = () => frameos.dispatch('sceneSwitcher', { swap: true })\n  const openSettings = () => frameos.dispatch('sceneSettings')\n  const openFrame = () => frameos.dispatch('sceneSettings', { page: 'frame' })\n  const showScene = builtIn ? closeBuiltIn : () => frameos.setState('hidden', !hidden)\n  const content = hidden ? (\n    <div className=\"flex-1\" />\n  ) : framed ? (\n    <div className={`flex flex-col flex-1 min-w-0 min-h-0 ${zoomed ? '' : `p-[${px(12)}]`}`}>\n      <Window\n        title={title}\n        onClose={builtIn ? closeBuiltIn : () => frameos.dispatch('sceneSwitcher')}\n        onZoom={() => frameos.setState('zoomed', !zoomed)}\n        onHide={builtIn ? closeBuiltIn : () => frameos.setState('hidden', true)}\n      >\n        <yield />\n      </Window>\n    </div>\n  ) : (\n    <yield />\n  )\n  const sceneTeam = scene ? (\n    <Team pressed={false} dim={hidden} label={scene} onClick={showScene} className={corner ? '' : 'min-w-0 shrink'}>\n      <SceneGlyph />\n    </Team>\n  ) : null\n  const settingsTeam = (\n    <Team pressed={settingsOpen} label=\"Settings\" onClick={openSettings} className=\"shrink-0\">\n      <SettingsGlyph />\n    </Team>\n  )\n  if (!corner) {\n    return (\n      <div className={`flex flex-col w-full h-full ${c.desk} text-black text-[${px(13)}]`}>\n        <div className={`flex items-stretch shrink-0 border-b-${edge} border-[${c.line}]`}>\n          <Bevel pressed={listOpen} className=\"shrink-0\" inner={`items-center justify-center w-[${px(46)}] h-[${px(28)}]`} onClick={openList}>\n            <Gem />\n          </Bevel>\n          {sceneTeam}\n          {settingsTeam}\n          <div className={`flex-1 bg-[${c.panel}]`} />\n          <Tray app={app} now={now} className=\"shrink-0\" onClick={openFrame} />\n        </div>\n        {content}\n      </div>\n    )\n  }\n  return (\n    <div className={`flex w-full h-full ${c.desk} text-black text-[${px(13)}]`}>\n      {content}\n      <div className={`flex flex-col items-center shrink-0 w-[${px(156)}]`}>\n        <div className={`flex flex-col self-stretch border-l-${edge} border-b-${edge} border-[${c.line}]`}>\n          <Bevel pressed={listOpen} inner={`items-center justify-center h-[${px(32)}]`} onClick={openList}>\n            <Gem />\n          </Bevel>\n          <Tray app={app} now={now} onClick={openFrame} />\n          {sceneTeam}\n          {settingsTeam}\n        </div>\n        {on(app.state.showIcons) ? (\n          <div className={`flex flex-col items-center gap-[${px(8)}] pt-[${px(14)}]`}>\n            <DesktopIcon label=\"Frame\" onClick={openFrame}>\n              <DiskIcon />\n            </DesktopIcon>\n            <DesktopIcon label=\"Scenes\" onClick={openList}>\n              <FolderIcon />\n            </DesktopIcon>\n            <DesktopIcon label=\"Settings\" onClick={openSettings}>\n              <FolderIcon>\n                <path d={GEAR} fill=\"#a8a8a8\" stroke=\"#202020\" strokeWidth=\"0.8\" transform=\"translate(9.5 3.5) scale(0.8)\" />\n              </FolderIcon>\n            </DesktopIcon>\n          </div>\n        ) : null}\n      </div>\n    </div>\n  )\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "chrome",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "beos",
+          "config": {}
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-to-draw",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "chrome-to-draw",
+        "type": "codeNodeEdge",
+        "source": "chrome",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  }
+]

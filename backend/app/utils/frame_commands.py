@@ -31,6 +31,10 @@ from sqlalchemy.orm import Session
 from app.models.frame import Frame
 from app.models.frame_command import FrameCommand
 
+# Who pushed a preview (docs/scene-previews.md): the editor, the voice chat,
+# or the Scene store scene on the frame (docs/scene-store.md).
+PREVIEW_SOURCES = ("editor", "voice", "panel")
+
 # --------------------------------------------------------------------- rules
 
 # Action verbs are short-lived on purpose: a reboot queued on Monday must
@@ -577,7 +581,7 @@ def carried_preview(db: Session, frame: Frame) -> dict[str, Any] | None:
         "scenes": [shown],
         "scene_id": scene_id,
         "name": preview.get("name") or shown.get("name") or scene_id,
-        "source": preview.get("source") if preview.get("source") in ("editor", "voice") else "editor",
+        "source": preview.get("source") if preview.get("source") in PREVIEW_SOURCES else "editor",
         "carried": True,
     }
 
@@ -646,7 +650,7 @@ def scene_preview_info(db: Session, frame: Frame) -> dict[str, Any] | None:
     return {
         "scene_id": scene_id,
         "name": name or "Preview",
-        "source": preview.get("source") if preview.get("source") in ("editor", "voice") else "editor",
+        "source": preview.get("source") if preview.get("source") in PREVIEW_SOURCES else "editor",
         "at": _iso(row.created_at),
     }
 

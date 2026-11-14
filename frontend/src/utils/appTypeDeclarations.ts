@@ -107,6 +107,43 @@ interface FrameOSColorRef {
 }
 interface FrameOSStreamRef { __frameosType: "streamRef"; id?: number; spool?: string; }
 
+/** One scene of the store, as the listing for frames serves it (/api/store/device/scenes). */
+interface FrameOSStoreScene {
+  id: string;
+  name: string;
+  category: string | null;
+  /** The store's newest version. */
+  version: number;
+  by: string;
+  /** The description, cut to a line or two. */
+  about: string;
+  /** The cover as a path on the store's host ("/api/store/scenes/<id>/image?version=N"): prefix the store's url. Null without one. */
+  image: string | null;
+}
+/** What frameos.store() says: the scene store as this frame's host knows it (docs/scene-store.md). */
+interface FrameOSStore {
+  /** The store this frame browses: its cloud provider, else FrameOS Cloud. */
+  url: string;
+  /** This frame's FrameOS: the listing offers only what runs on it. */
+  version: string;
+  /** The action running ("browse", "install", "preview", "update", "remove", "discard"), else "". One at a time. */
+  busy: string;
+  /** The last action's refusal ("offline", "too_many_scenes", "panel_locked", ...), else "". */
+  error: string;
+  /** The last action that worked, else "": "uptodate" for an update with nothing newer. */
+  done: string;
+  /** The query string the listing below answers. */
+  params: string;
+  /** The store's answer to the newest browse that worked: a page of scenes, and the shelves with categories=1. */
+  listing: { page: number; more: boolean; scenes: FrameOSStoreScene[]; categories?: { slug: string; title: string }[] } | null;
+  /** Every scene on the frame that came from the store: its id here, its store scene and the version it is. */
+  installed: { id: string; store: string; v: number }[];
+  /** The store scene this frame previews, until it is installed or discarded. */
+  preview: { store: string; id: string; name: string } | null;
+  /** A scene not from the store may be removed too (a frame with no control plane). */
+  removeAny: boolean;
+}
+
 /**
  * What JSX makes in an app (.tsx): get() can return it as its image. An <svg>
  * is drawn as it is; any other element is a UI laid out with Tailwind classes
@@ -264,6 +301,15 @@ declare const frameos: {
   /** Sends an event as a dispatch node does: render, setCurrentScene, setSceneState, sceneSwitcher, sceneSettings or a
    * custom event of the scene's. An event a scene may not send is logged and dropped (FrameOS 2026.11.5+). */
   dispatch(event: string, payload?: Record<string, any>): void;
+  /** The scene store as this frame knows it (docs/scene-store.md): null where there is no store (the browser
+   * preview, a frame rendered on its control plane, one whose owner turned the settings on its screen off) and
+   * before FrameOS 2026.11.8. Read it every render: what an action did shows up here. */
+  store(): FrameOSStore | null;
+  /** Asks the frame's host: browse {params: "category=photos&page=2&limit=6"} (the listing's query string), preview
+   * {store, name}, install {store, name, show?: false to stay on this scene}, update {store}, remove {store},
+   * discard. It runs off the render and this scene renders again when it is done (see store().busy). False where
+   * there is no host (FrameOS 2026.11.8+). */
+  storeAction(action: "browse" | "preview" | "install" | "update" | "remove" | "discard", args?: Record<string, any>): boolean;
   fetchText(url: string): string;
   fetchJson(url: string): any;
   httpRequest(
@@ -289,7 +335,8 @@ declare const frameos: {
       // The image's color profile (a .frameos.json sidecar's colors object); null = none, clears the last palette.
       colors?: { [key: string]: any } | null;
       // Keep the picture for later renders (a JSX gallery's photo, drawn again without a download) until
-      // frameos.releaseImage(ref) or the interpreter goes; 8 at most. Never the consumer's target.
+      // frameos.releaseImage(ref) or the interpreter goes; 8 at most, or up to 48 small ones (a grid of
+      // thumbnails, no more pixels than eight 480x480 photos). Never the consumer's target.
       keep?: boolean;
       // With keep: the size to decode it at, in the canvas's pixel format (a host decodes at the picture's own size).
       width?: number;
@@ -345,14 +392,21 @@ declare const frameos: {
      */
     convolve(dst: FrameOSTypedArray, src: FrameOSTypedArray, width: number, kernel: number[], shift?: number): boolean;
   };
-  listAssets(dir?: string): string[];
+  /** Every file below dir, as paths in the assets folder; with shallow, the folder's own entries, a folder's
+   * ending in "/" (FrameOS 2026.11.8+). */
+  listAssets(dir?: string, options?: { shallow?: boolean }): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;
   readAsset(path: string, options?: { offset?: number; length?: number }): string | null;
   writeAsset(path: string, base64: string): boolean;
   appendAsset(path: string, base64: string): boolean;
   deleteAsset(path: string): boolean;
-  loadAssetImage(path: string): FrameOSImageRef | null;
+  /** An image file of the assets folder. With width and height it is decoded at that size (a JPEG scaled as it
+   * decodes) and keep holds it for later renders, as fetchImage's options do (FrameOS 2026.11.8+). */
+  loadAssetImage(
+    path: string,
+    options?: { keep?: boolean; width?: number; height?: number; fit?: "cover" | "contain" }
+  ): FrameOSImageRef | null;
   openAssetStream(path: string, mode?: "r" | "w" | "a"): FrameOSStreamRef | null;
   createStream(base64: string): FrameOSStreamRef | null;
   streamRead(stream: FrameOSStreamRef | number, length: number): string | null;

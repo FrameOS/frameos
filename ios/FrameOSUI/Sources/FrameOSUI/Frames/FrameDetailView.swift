@@ -137,7 +137,7 @@ struct FrameDetailView: View {
                 Section {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(preview.name).font(.headline)
-                        Text("Shown for now (\(preview.source == "voice" ? "voice chat" : "preview")). It is on no list: install it to keep it.")
+                        Text("Shown for now (\(preview.source == "voice" ? "voice chat" : preview.source == "panel" ? "the frame's Scene store" : "preview")). It is on no list: install it to keep it.")
                             .font(.footnote).foregroundStyle(.secondary)
                         HStack {
                             AsyncButton { await model.installPreview(app) } label: { Text("Install") }

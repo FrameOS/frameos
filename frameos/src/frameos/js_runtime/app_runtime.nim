@@ -37,6 +37,7 @@ import frameos/scene_rhythm
 import frameos/ui/events
 import frameos/render_scale
 import frameos/panel_shape
+import frameos/scene_store_hooks
 
 type
   JsAssetGrant* = enum
@@ -416,6 +417,26 @@ proc jsDispatch(ctx: ptr JSContext, event: JSValue, payloadJson: JSValue): JSVal
     except CatchableError as error:
       frameos_apps.logError(e.owner, "frameos.dispatch failed: " & error.msg)
   return jsUndefSentinel(ctx)
+
+proc storeAsker(e: JsAppEvalEnv): string =
+  if e == nil or e.owner.scene.isNil: "" else: e.owner.scene.id.string
+
+proc jsStore(ctx: ptr JSContext): JSValue {.nimcall.} =
+  ## `frameos.store()`: the scene store's facts as the host knows them now
+  ## (scene_store_hooks.nim), as JSON text; "" (null in JS) with no host.
+  let e = env(ctx)
+  let read = sceneStoreRead
+  nimStringToJS(ctx, if read.isNil or e == nil: "" else: read(storeAsker(e)))
+
+proc jsStoreAction(ctx: ptr JSContext, action: JSValue, argsJson: JSValue): JSValue {.nimcall.} =
+  ## `frameos.storeAction(action, args)`: the host starts it and redraws the
+  ## scene when it is done; false with no host to ask.
+  let e = env(ctx)
+  let act = sceneStoreAction
+  if act.isNil or e == nil:
+    return nimBoolToJS(ctx, false)
+  act(storeAsker(e), toNimString(ctx, action), toNimString(ctx, argsJson))
+  nimBoolToJS(ctx, true)
 
 proc jsSetNextSleep(ctx: ptr JSContext, seconds: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
@@ -999,9 +1020,12 @@ proc writeAssetFile(e: JsAppEvalEnv, opName: string, pathStr: string,
 
 proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JSValue {.nimcall.} =
   ## Asset management scoped to the frame's assets folder. Ops:
-  ## list (dir -> JSON array of relative paths), exists, size,
-  ## read (options JSON {offset, length} -> base64), write/append (path, base64),
-  ## delete, image (-> imageRef decoded within display bounds).
+  ## list (dir, options JSON {shallow} -> JSON array of relative paths: every
+  ## file below, or with shallow the folder's own entries, a folder's with a
+  ## trailing "/"), exists, size, read (options JSON {offset, length} ->
+  ## base64), write/append (path, base64), delete, image (options JSON {keep,
+  ## width, height, fit} -> imageRef decoded within display bounds, or at that
+  ## size, as fetchImage's are).
   let e = env(ctx)
   if e == nil:
     return jsUndefSentinel(ctx)
@@ -1015,11 +1039,22 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       let root = assetsRoot(e)
       let dir = if pathStr.len == 0: root else: resolveAssetPath(e, pathStr)
       var files: seq[string] = @[]
+      let shallow = toNimString(ctx, data).contains("\"shallow\":true")
       if dir.len > 0 and dirExists(dir):
         # Hidden/OS-junk entries (`.thumbs`, `.frameos`, `._IMG.jpg`,
         # `Thumbs.db`, `@eaDir`, …) never show up in an app's asset listing.
-        for filePath in walkDirRecNoJunk(dir, relative = false):
-          files.add(filePath[(root.len + 1)..^1])
+        if shallow:
+          # One folder's entries, as a browser walks a card a folder at a
+          # time (a recursive walk of a large SD card takes seconds).
+          for kind, entry in walkDir(dir, relative = false):
+            let name = entry.extractFilename
+            if kind in {pcDir, pcLinkToDir} and not isJunkDirName(name):
+              files.add(entry[(root.len + 1)..^1] & "/")
+            elif kind in {pcFile, pcLinkToFile} and not isHiddenOrJunkFile(name):
+              files.add(entry[(root.len + 1)..^1])
+        else:
+          for filePath in walkDirRecNoJunk(dir, relative = false):
+            files.add(filePath[(root.len + 1)..^1])
       files.sort()
       let arr = newJArray()
       for file in files:
@@ -1073,20 +1108,57 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       let full = resolveAssetPath(e, pathStr)
       if full.len == 0 or not fileExists(full):
         return jsNull(ctx)
-      let image = readImageWithDisplayBounds(full)
+      var options = newJObject()
+      try:
+        let optionsStr = toNimString(ctx, data)
+        if optionsStr.len > 0:
+          options = parseJson(optionsStr)
+      except CatchableError:
+        discard
+      let
+        keep = options{"keep"}.getBool(false)
+        sizedWidth = options{"width"}.getInt(0)
+        sizedHeight = options{"height"}.getInt(0)
+      var image: Image
+      if sizedWidth > 0 and sizedHeight > 0:
+        # At the size asked, in the canvas's format, as fetchImage's kept
+        # pictures are: a browser's thumbnail of a 12-megapixel photo is a
+        # scaled JPEG decode, never the photo.
+        let
+          context = e.context
+          like =
+            if not context.isNil and not context.decodeTargetImage.isNil: context.decodeTargetImage
+            elif context.isNil: nil
+            else: context.contextImage()
+          fit = if options{"fit"}.getStr("cover") == "contain": "contain" else: "cover"
+        image =
+          if keep: e.runtime.keptPictureTarget(e.owner, like, sizedWidth, sizedHeight, (0, 0))
+          elif like.isNil: newImage(sizedWidth, sizedHeight)
+          else: newImageLike(like, sizedWidth, sizedHeight)
+        if image.isNil:
+          return jsNull(ctx)
+        if not readImageIntoTarget(full, image, fit):
+          scaleAndDrawImage(image, readImageWithDisplayBounds(full), fit)
+      else:
+        image = readImageWithDisplayBounds(full)
       if image.isNil:
         return jsNull(ctx)
       # The photo's own colour profile, if the Assets panel wrote one
       # (utils/asset_colors) — the same treatment data/localImage gives it.
+      # A kept picture shares its render with others (a grid of them), so it
+      # never sets the frame's dither palette.
       let colorProfile = loadAssetColorProfile(full)
       if colorProfile.isSome:
-        if colorProfile.get().hasPaletteOverride():
-          setRenderPaletteOverride(colorProfile.get().palette)
-        else:
-          clearRenderPaletteOverride()
+        if not keep:
+          if colorProfile.get().hasPaletteOverride():
+            setRenderPaletteOverride(colorProfile.get().palette)
+          else:
+            clearRenderPaletteOverride()
         if colorProfile.get().hasAdjustments():
           applyAssetColors(image, colorProfile.get())
           markImageGraded(image)
+      if keep:
+        return jsonToJS(ctx, e.runtime.storeKeptImageJson(e.owner, image))
       return jsonToJS(ctx, e.runtime.storeTransientImageJson(image))
     else:
       frameos_apps.logError(e.owner, "JS app assets: unknown operation: " & opStr)
@@ -1883,18 +1955,35 @@ proc storeTransientImageJson(runtime: JsAppRuntime, image: Image): JsonNode =
   if result.kind == JObject:
     runtime.transientImageIds.add(result["id"].getInt())
 
-const MaxKeptImages = 8
-  ## Pictures an app may keep at once; the oldest goes for a ninth.
+const
+  MaxKeptImages = 8
+    ## Pictures an app may keep whatever their size; the oldest goes for a ninth,
+  MaxKeptThumbnails = 48
+    ## unless they are small: past eight, an app keeps pictures while they hold
+  KeptThumbnailPixels = 8 * 480 * 480
+    ## no more pixels than eight 480x480 photos, up to 48 of them (a store's or
+    ## an asset browser's grid of covers). Memory still decides first
+    ## (keptPictureTarget).
+
+proc keptPixels(runtime: JsAppRuntime): int =
+  for id in runtime.keptImageIds:
+    let image = runtime.images.getOrDefault(id)
+    if not image.isNil:
+      result += image.width * image.height
 
 proc storeKeptImageJson(runtime: JsAppRuntime, owner: AppRoot, image: Image): JsonNode =
   result = runtime.storeImageJson(image)
   if result.kind == JObject:
     runtime.keptImageIds.add(result["id"].getInt())
-    if runtime.keptImageIds.len > MaxKeptImages:
+    var dropped = 0
+    while runtime.keptImageIds.len > MaxKeptImages and
+        (runtime.keptImageIds.len > MaxKeptThumbnails or runtime.keptPixels() > KeptThumbnailPixels):
       runtime.images.del(runtime.keptImageIds[0])
       runtime.keptImageIds.delete(0)
-      frameos_apps.log(owner, %*{"event": "js:keptImages", "dropped": "oldest",
-        "limit": MaxKeptImages})
+      inc dropped
+    if dropped > 0:
+      frameos_apps.log(owner, %*{"event": "js:keptImages", "dropped": dropped,
+        "limit": runtime.keptImageIds.len})
 
 proc releaseKeptImage(runtime: JsAppRuntime, id: int): bool =
   let at = runtime.keptImageIds.find(id)
@@ -2394,6 +2483,8 @@ const appJsPrelude* = compactJs("""
     error: (...args) => jsAppLog("error", JSON.stringify(args, __jsReplacer)),
     setNextSleep: (seconds) => jsSetNextSleep(Number(seconds || 0)),
     dispatch: (event, payload) => jsDispatch(String(event || ""), JSON.stringify(payload || {}, __jsReplacer)),
+    store: () => JSON.parse(jsStore() || "null"),
+    storeAction: (action, args) => jsStoreAction(String(action || ""), JSON.stringify(args || {}, __jsReplacer)) === true,
     fetchText: (url) => jsFetchText(String(url || "")),
     fetchJson: (url) => JSON.parse(jsFetchText(String(url || "")) || "null"),
     httpRequest: (url, options) => JSON.parse(
@@ -2416,14 +2507,14 @@ const appJsPrelude* = compactJs("""
       mul: (dst, a, b, start, end) => jsTypedOps(3, dst, a, b, start ?? 0, end ?? -1) === true,
       convolve: (dst, src, width, kernel, shift) => jsTypedOps(4, dst, src, width, kernel, shift ?? 0) === true,
     },
-    listAssets: (dir) => __frameosAsset("list", dir) || [],
+    listAssets: (dir, options) => __frameosAsset("list", dir, options ? JSON.stringify(options) : "") || [],
     assetExists: (path) => __frameosAsset("exists", path) === true,
     assetSize: (path) => __frameosAsset("size", path) ?? -1,
     readAsset: (path, options) => __frameosAsset("read", path, options ? JSON.stringify(options) : "") ?? null,
     writeAsset: (path, base64) => __frameosAsset("write", path, String(base64 || "")) === true,
     appendAsset: (path, base64) => __frameosAsset("append", path, String(base64 || "")) === true,
     deleteAsset: (path) => __frameosAsset("delete", path) === true,
-    loadAssetImage: (path) => __frameosAsset("image", path) ?? null,
+    loadAssetImage: (path, options) => __frameosAsset("image", path, options ? JSON.stringify(options) : "") ?? null,
     openAssetStream: (path, mode) => __frameosStream("openAsset", { path: String(path || ""), mode: String(mode || "r") }) ?? null,
     createStream: (base64) => __frameosStream("create", { base64: String(base64 || "") }) ?? null,
     streamRead: (ref, length) => __frameosStream("read", { id: __frameosStreamId(ref), length }) ?? null,
@@ -2558,6 +2649,8 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsAppLog", jsAppLog)
   runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
   runtime.js.registerFunction("jsDispatch", jsDispatch)
+  runtime.js.registerFunction("jsStore", jsStore)
+  runtime.js.registerFunction("jsStoreAction", jsStoreAction)
   runtime.js.registerFunction("jsSetState", jsSetState)
   runtime.js.registerFunction("jsRemember", jsRemember)
   runtime.js.registerFunction("jsRecall", jsRecall)

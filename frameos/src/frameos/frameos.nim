@@ -19,6 +19,7 @@ import frameos/types
 import frameos/utils/memory
 import frameos/portal as netportal
 import frameos/frame_settings_linux
+import frameos/scene_store_linux
 from frameos/upgrade import reconcileInterruptedUpgradeStatus, installedFrameOSVersion
 from frameos/interpreter import interpretedScenesLoadError
 import frameos/cloud/hub_client
@@ -419,4 +420,6 @@ proc startFrameOS*() {.async.} =
   # The settings panel's frame page (system/sceneSettings): Wi-Fi, rotation,
   # scale, restart and reboot from the frame's own screen.
   installFrameSettingsHooks(frameOS)
+  # The scene store's host for JS apps (docs/scene-store.md).
+  installSceneStoreHooks()
   await frameOS.start()

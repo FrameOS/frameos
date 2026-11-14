@@ -17,7 +17,7 @@ import frameos/js_runtime/app_runtime
 
 # Where to store the persisted states
 const SCENE_STATE_JSON_FOLDER = "./state"
-const UPLOADED_SCENES_JSON_PATH = &"{SCENE_STATE_JSON_FOLDER}/uploaded.json"
+const UPLOADED_SCENES_JSON_PATH* = &"{SCENE_STATE_JSON_FOLDER}/uploaded.json"
 # Runtimes before 2026.10.18 registered every uploaded scene as
 # "uploaded/<id>". An uploaded scene is registered under its own id now (one
 # that a deployed scene also has is the uploaded one until it is replaced);
@@ -603,6 +603,12 @@ proc getLastPublicSceneState*(): (SceneId, JsonNode, float) =
       if lastPublicStateUpdates.hasKey(sceneId):
         lastUpdate = lastPublicStateUpdates[sceneId]
     return (sceneId, state, lastUpdate)
+
+proc shownSceneId*(): SceneId =
+  ## The scene on the panel, from any thread.
+  {.gcsafe.}:
+    withLock lastPublicStatesLock:
+      result = lastPublicSceneId
 
 proc getLastPublicState*(): (SceneId, JsonNode, seq[StateField], float) =
   ## Everything handed back is the caller's own: the state is copied under its

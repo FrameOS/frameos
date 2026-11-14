@@ -3,7 +3,9 @@
 *The contract for a scene a frame shows **for now**, without holding it in
 its saved (backend) or assigned (cloud) scene list: the editor's "Preview on
 frame", and anything else that pushes an ad-hoc scene set (the voice chat's
-picture, `docs/voice-chat.md`). Both control planes implement it; the shared
+picture, `docs/voice-chat.md`; a store scene previewed from the Scene store
+scene on the frame, `docs/scene-store.md`, which comes beside the list and is
+reported with the source `panel`). Both control planes implement it; the shared
 SPA draws it. Vocabulary: `docs/ui-vocabulary.md` ("Preview", "Install",
 "Push").*
 

@@ -21,7 +21,9 @@ let networkApps = toHashSet([
   "downloadUrl", "downloadImage", "wikicommons",
   "frameOSGallery", "weather", "beRecycle",
   # the Chess puzzle sample's own JS app: Lichess's daily puzzle by default
-  "lichessPuzzlePanel"
+  "lichessPuzzlePanel",
+  # the Scene store sample's own JS app: the store's listing, with no host
+  "sceneStore"
 ])
 # Apps that need host-only child processes; excluded from embedded builds
 let hostOnlyApps = toHashSet([

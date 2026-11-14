@@ -27,8 +27,8 @@ or a saved scene is edited, the cloud refuses a store version
 to the AI. The runtime does not check: a layout with no yield shows no content.
 
 **Starters.** Every repo sample whose scene is a layout (`Top bar`, `Bottom bar`,
-`Side rail`, `Windows 98`, `Polaroid`, `Front page`, `Terminal`, `Gallery wall` in
-`repo/scenes/samples`) is also one click away on both planes
+`Side rail`, `Windows 98`, `macOS`, `BeOS`, `Polaroid`, `Front page`, `Terminal`,
+`Gallery wall` in `repo/scenes/samples`) is also one click away on both planes
 (`frontend/scripts/generateLayoutStarters.mjs`): "New layout" in the frame's
 Layouts group, "Add layout" at the end of the Add scene drawer while it has none,
 and "Add a layout" in its Settings under Layouts. The iOS app offers the same

@@ -1307,6 +1307,22 @@ with `set mic_pins clk=42,data=41,pwr=-1`. Console: `mic [seconds]` records
 and prints the peak and mean level (a flat 0 is a microphone that is not wired or
 not powered), `status` shows the pins and the switch.
 
+### The scene store's host
+
+The Scene store scene (`docs/scene-store.md`) is a JS app; what it asks of the
+frame goes to `main/fos_store.c` through `frameos.store()` and
+`frameos.storeAction()` (`embedded_runtime.nim`). The host does the work on a
+task it makes for it (8 KB stack, gone when idle), its state in one PSRAM block
+made when an app first asks: the store's listing as it came (the query string
+the app handed over, `valid_params`), a change asked of the frame's plane
+(`POST …/panel/scenes`, a backend first, then
+`fos_client_request_commands_sync`), or, on a frame with no plane, the store's
+`scenes.json` split into one slot file a scene by `main/fos_store_scan.c` (pure
+C, host-tested: no JSON tree of the payload). What came from the store is each
+slot's `origin`, read off the file by its keys and kept by the index's content
+hash. When the work is done the scene that asked is drawn again if it still
+shows (`fos_scenes_showing`).
+
 ## Rendering on the server
 
 `render_mode remote` hands the frame's scenes to its control plane

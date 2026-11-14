@@ -1,0 +1,10 @@
+{
+  "name": "macOS layout",
+  "description": "A menu bar, a window and a Dock around each scene: the menu and the Dock open the scene list and its settings, the traffic lights close, hide or unframe the window, and the clock opens the frame's page.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.5"
+}

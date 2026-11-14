@@ -231,8 +231,12 @@ export function get(app) {
 
 - **`keep: true`** stores the picture with the app's interpreter. Its ref
   stays valid in later renders until `frameos.releaseImage(ref)` (true once,
-  for a kept picture) or until the interpreter goes. An app keeps 8 at most;
-  a ninth lets the oldest go.
+  for a kept picture) or until the interpreter goes. An app keeps 8 at most,
+  and a ninth lets the oldest go, unless they are small: past eight it keeps
+  pictures while they hold no more pixels than eight 480x480 photos, up to
+  48 of them (the Scene store's grid of covers, an asset browser's
+  thumbnails). `frameos.loadAssetImage(path, { keep: true, width, height })`
+  keeps a picture of the assets folder the same way, decoded at that size.
 - **`width` / `height`** (and `fit`, `cover` by default or `contain`) are the
   size it is decoded at, in the canvas's pixel format: an ESP32 holds a
   480x480 photo in 450 KB of RGB565, and drawing it is a copy. A host decodes
