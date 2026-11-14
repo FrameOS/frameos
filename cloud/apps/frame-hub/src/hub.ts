@@ -405,6 +405,10 @@ export interface FrameHubOptions {
   // sends, so a test can count what one sweep costs. Gives the hub its own
   // (uncached) pool; production leaves it unset.
   onQuery?: (query: string) => void;
+  // Test seam: awaited between sending a queued command and writing it
+  // `sent`, with the type it went out as, so a test can land the device's
+  // answer first. Production leaves it unset.
+  beforeMarkSent?: (commandId: string, messageType: string) => Promise<void> | void;
 }
 
 export interface FrameHub {
@@ -828,7 +832,8 @@ export async function startFrameHub(
           // device closes → reconnect → redeliverSentCommands requeues it →
           // send again, forever, with every other command behind it stuck.
           // Fail the row instead, where the owner can see it.
-          const message = JSON.stringify(await outgoingCommandMessage(session, command));
+          const outgoing = await outgoingCommandMessage(session, command);
+          const message = JSON.stringify(outgoing);
           const messageBytes = Buffer.byteLength(message, "utf8");
           if (messageBytes > maxPayloadBytes) {
             logWarn("command.payload_too_large", {
@@ -850,6 +855,12 @@ export async function startFrameHub(
             continue;
           }
           session.ws.send(message);
+          await options.beforeMarkSent?.(command.id, String(outgoing.type));
+          // The device can answer before this write. A refused patch has
+          // then already been put back to pending with no_patch (handleAck),
+          // and marking it sent would strand it: the pass handleAck queued
+          // finds nothing pending, and the whole list waits for a reconnect.
+          // Only that refusal sets no_patch on a row that went out as a patch.
           await db
             .update(frameCommands)
             .set({ sentAt: new Date(), status: "sent" })
@@ -857,6 +868,9 @@ export async function startFrameHub(
               and(
                 eq(frameCommands.id, command.id),
                 eq(frameCommands.status, "pending"),
+                outgoing.type === "scenes_patch"
+                  ? sql`coalesce(${frameCommands.payload} ->> 'no_patch', '') <> 'true'`
+                  : undefined,
               ),
             );
           await moveDeployProgress(session.frame.id, (record) =>

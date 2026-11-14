@@ -120,8 +120,12 @@ jobs:
       # not some other workflow's artifact that happens to share the name),
       # and the tarball carries a signature by the release key (the
       # build-wasm-runtime job signs it; release-assets/firmware-signing.pub
-      # is the committed public half). The run is usually still in progress
-      # when it dispatches this workflow, so its conclusion is not required.
+      # is the committed public half). The run is usually still going when it
+      # dispatches this workflow, so its conclusion is not required, and
+      # "still going" is any status but completed: GitHub reports a running
+      # run as `queued` while one of its jobs waits for a runner (2026.11.7's
+      # publish was refused that way). Only a run that ended badly is refused;
+      # an unfinished one without the artifact fails the download below.
       - name: Download the release's wasm runtime
         if: inputs.runtime_run_id != ''
         env:
@@ -146,8 +150,9 @@ jobs:
             echo "::error::run $RUNTIME_RUN_ID did not run on $GITHUB_REPOSITORY@main ($run_repo@$run_branch)"; exit 1
           fi
           case "$run_status" in
-            in_progress/*|completed/success) ;;
-            *) echo "::error::run $RUNTIME_RUN_ID is $run_status"; exit 1 ;;
+            completed/success) ;;
+            completed/*) echo "::error::run $RUNTIME_RUN_ID is $run_status"; exit 1 ;;
+            *) ;;
           esac
           version=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
           gh run download "$RUNTIME_RUN_ID" --repo "$GITHUB_REPOSITORY" \
