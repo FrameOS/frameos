@@ -5,6 +5,7 @@ import std/[json, strutils, tables, unittest]
 import pixie
 import ../interpreter
 import ../js_runtime/runtime
+import ../utils/memory
 import ../scene_compiler
 import ../types
 import ../values
@@ -157,30 +158,78 @@ suite "scene compiler":
     check image.asImage().width == 8
     check scene.values.len == 0 # the run's handles went with it
 
-  test "a scene with code has a realm of its own; scenes without share one":
-    let store = LogStore()
+  proc isolationCase(store: LogStore): tuple[a, b, c, d: InterpretedFrameScene] =
+    ## Two scenes with code, the first changing its globals and built-ins,
+    ## and two scenes of Nim apps alone, rendered.
     setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
-    let a = started(@[node(1, "code", code("(globalThis.leak = 'a', Array.prototype.polluted = 1, 'set')"))],
+    result.a = started(@[node(1, "code", code("(globalThis.leak = 'a', Array.prototype.polluted = 1, 'set')"))],
       @[], store, "tests/realm-a".SceneId)
-    let b = started(@[node(1, "code", code("typeof leak + ',' + typeof [].polluted"))],
+    result.b = started(@[node(1, "code", code("typeof leak + ',' + typeof [].polluted"))],
       @[], store, "tests/realm-b".SceneId)
-    check a.getDataNode(1.NodeId, ctx(a)).asString() == "set"
+    check result.a.getDataNode(1.NodeId, ctx(result.a)).asString() == "set"
     # What scene a did to its globals and built-ins, scene b never sees.
-    check b.getDataNode(1.NodeId, ctx(b)).asString() == "undefined,undefined"
-    check a.js.context != b.js.context
-    check a.js.runtime == b.js.runtime
-    # Two scenes of Nim apps alone run their programs in one shared context.
+    check result.b.getDataNode(1.NodeId, ctx(result.b)).asString() == "undefined,undefined"
     let flow = @[node(1, "event", %*{"keyword": "render"}),
       node(2, "app", %*{"keyword": "render/color", "config": {}})]
-    let c = started(flow, @[edge(1, "next", 2, "prev")], store, "tests/realm-c".SceneId)
-    let d = started(flow, @[edge(1, "next", 2, "prev")], store, "tests/realm-d".SceneId)
-    discard render(c, ctx(c))
-    discard render(d, ctx(d))
-    check not c.js.context.isNil
-    check c.js.context == d.js.context
-    check c.js.context != a.js.context
-    check c.js.runtime == a.js.runtime
-    for scene in [a, b, c, d]:
+    result.c = started(flow, @[edge(1, "next", 2, "prev")], store, "tests/realm-c".SceneId)
+    result.d = started(flow, @[edge(1, "next", 2, "prev")], store, "tests/realm-d".SceneId)
+    discard render(result.c, ctx(result.c))
+    discard render(result.d, ctx(result.d))
+    # Scenes of Nim apps alone run their programs in one shared context.
+    check not result.c.js.context.isNil
+    check result.c.js.context == result.d.js.context
+
+  proc closeAll(scenes: varargs[InterpretedFrameScene]) =
+    for scene in scenes:
       cleanupSceneJs(scene)
-    check a.js.context == nil
+      check scene.js.context.isNil
     setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+  test "where there is room, a scene with code has a runtime of its own":
+    let store = LogStore()
+    let (a, b, c, d) = isolationCase(store)
+    check a.jsKind == sjRuntime and b.jsKind == sjRuntime
+    check a.js.runtime != b.js.runtime
+    check a.js.runtime != c.js.runtime
+    check c.jsKind == sjShared
+    closeAll(a, b, c, d)
+
+  test "on an 8 MB board, a realm of its own in the runtime the programs share":
+    deviceMemoryBytesOverride = 8 * 1024 * 1024 - 64 * 1024
+    defer: deviceMemoryBytesOverride = 0
+    let store = LogStore()
+    let (a, b, c, d) = isolationCase(store)
+    check a.jsKind == sjRealm and b.jsKind == sjRealm
+    check a.js.context != b.js.context
+    check a.js.runtime == b.js.runtime
+    check a.js.runtime == c.js.runtime
+    check c.js.context != a.js.context
+    closeAll(a, b, c, d)
+
+  test "where there is room, an abort in one scene takes no other with it":
+    let store = LogStore()
+    let (a, b, c, d) = isolationCase(store)
+    let bRuntime = b.js.runtime
+    # An out-of-memory abort jumped out of scene a's program.
+    a.onSceneJsStack:
+      check abandonMidCallSceneJs().count == 1
+    check not a.jsReady
+    check b.programReady and b.js.runtime == bRuntime
+    check c.programReady # the shared runtime was not in the abort
+    check b.getDataNode(1.NodeId, ctx(b)).asString() == "undefined,undefined"
+    # Scene a sets up a runtime again on its next run.
+    check a.getDataNode(1.NodeId, ctx(a)).asString() == "set"
+    closeAll(a, b, c, d)
+
+  test "on an 8 MB board, an abort takes the shared runtime and every scene in it":
+    deviceMemoryBytesOverride = 8 * 1024 * 1024 - 64 * 1024
+    defer: deviceMemoryBytesOverride = 0
+    let store = LogStore()
+    let (a, b, c, d) = isolationCase(store)
+    a.onSceneJsStack:
+      check abandonMidCallSceneJs().count == 1
+    # Each sets itself up again on its next run.
+    check b.getDataNode(1.NodeId, ctx(b)).asString() == "undefined,undefined"
+    discard render(c, ctx(c))
+    check c.programReady
+    closeAll(a, b, c, d)

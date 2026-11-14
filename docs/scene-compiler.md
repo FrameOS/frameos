@@ -89,29 +89,40 @@ A Nim exception a native throws crosses the program as a JavaScript error
 carrying its message and stack; one no JavaScript caught leaves the program
 as itself (a `JsAppError` stays one).
 
-## One runtime, a context per scene with code
+## Where a program runs
 
-All scene programs run in one QuickJS runtime (`js_runtime/runtime.nim`,
-`ensureSceneJs`): one heap, one atom table, one garbage collector, one heap
-budget for programs. A scene with code of its own (a code node, an inline
-input, a cache expression) gets a context of its own in that runtime: a realm
-with its own globals and built-ins, so what one scene's code does to
-`globalThis` or `Array.prototype` no other scene sees. A scene without code
-(a scene of Nim apps, a split's wrapper) runs its program, which the
-compiler wrote and nothing untrusted is in, in the runtime's first context,
-shared.
+A scene with code of its own (a code node, an inline input, a cache
+expression) is kept apart from every other scene (`js_runtime/runtime.nim`,
+`ensureSceneJs`):
+
+- **Where there is room** (a Pi, an ESP32 with more than 8 MB of PSRAM, an
+  ordinary browser preview): in a QuickJS runtime of its own, with its own
+  heap, its scene's heap budget (shared with its JS apps, as before) and its
+  own garbage collector. A scene that runs out of memory, or whose runtime an
+  out-of-memory abort drops, takes no other scene with it, which matters when
+  several render together (a split, a layout, `<Scene>`s).
+- **On an ESP32 with 8 MB of PSRAM or less** (and the preview simulating
+  one): in a context of its own, a realm with its own globals and built-ins,
+  in one runtime the programs share. What its code does to `globalThis` or
+  `Array.prototype` no other scene sees, but the heap, the budget and an
+  out-of-memory abort are shared: after one, every scene in the runtime sets
+  itself up and evaluates its program again on its next run.
+
+A scene without code (a scene of Nim apps, a split's wrapper) runs its
+program, which the compiler wrote and nothing untrusted is in, in that shared
+runtime's first context, in both cases: it costs only its program, and has
+no state to lose if that runtime is replaced.
 
 Measured on a 64-bit host: a runtime with its first context is 155 KB, one
-more context in it 40 KB. On main every scene with code paid the 155 KB (and
-a scene with none paid nothing); here the frame pays the runtime once, a
-scene with code 40 KB more, a scene without only its program (about 8 KB for
-two nodes, 1.7 KB a node beyond).
+more context in it 40 KB, a program about 8 KB for two nodes and 1.7 KB a
+node beyond. `deviceMemoryBytes` (utils/memory.nim) says which case a
+device is: the PSRAM heap's size on an ESP32 (`fos_psram_total_bytes`), the
+simulated ceiling in the preview, 0 (plenty) on a Pi.
 
-The context closes with its scene, and the garbage collector runs right
-after so the next scene gets the memory. When the runtime is replaced (an
-out-of-memory abort) every scene sets its context up and evaluates its program
-again on its next run; frame.json's `js` ceilings are applied to the runtime
-in place. The JS apps keep their own runtimes and their scene's heap budget.
+A scene's runtime or context closes with the scene, and the garbage
+collector runs right after, so the next scene gets the memory.
+frame.json's `js` ceilings are applied to a live runtime in place. The JS
+apps keep their own runtimes.
 
 ## What changed for a scene
 

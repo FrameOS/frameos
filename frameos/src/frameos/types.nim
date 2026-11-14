@@ -652,6 +652,12 @@ type
     field*: string
     inline*: bool
 
+  SceneJsKind* = enum
+    ## Where a scene's program runs (js_runtime/runtime.nim, ensureSceneJs).
+    sjShared,   ## the programs' runtime's first context: a scene without code
+    sjRealm,    ## a context of its own in that runtime (a board with 8 MB or less)
+    sjRuntime   ## a QuickJS runtime of its own
+
   NodeProfile* = object
     ## One node's debug profile while it runs (interpreter.nim, `n0`/`n1`).
     nodeId*: NodeId
@@ -683,7 +689,7 @@ type
     publicStateFields*: seq[StateField]
     js*: QuickJS       ## its context in the programs' runtime (runtime.nim)
     jsReady*: bool
-    jsOwned*: bool     ## a context of its own (it has code), not the shared one
+    jsKind*: SceneJsKind ## the shared context, a realm of its own, or a runtime of its own
     jsGeneration*: int ## which programs' runtime `js` and the program's entries are in
     ## The scene's program (scene_compiler.nim), evaluated into `js` when
     ## `programReady`: its three ways in, `ev`, `flow` and `data`.
