@@ -531,23 +531,27 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      # The bundle the backend serves: the generated app modules, then esbuild.
-      # Not `run build`, whose JSON schema regeneration and `tsc` the
-      # typescript job runs; tsc alone was half a minute of every shard.
-      - name: Build frontend
+      # The three bundles the shard serves, side by side (each is one esbuild
+      # process; one after another they were 50 s): the frontend the backend
+      # serves (its generated app modules first, then esbuild; not `run
+      # build`, whose JSON schema regeneration and `tsc` the typescript job
+      # runs), the on-frame admin (frame-admin.spec.ts serves it through
+      # route interception) and the cloud frontend (visual-cloud-*.spec.ts,
+      # tests/cloud-workspace-fixture.ts); without either of the last two
+      # those tests skip silently. All three regenerate the repo app modules,
+      # which are written atomically with the same content.
+      - name: Build the frontends
         run: |
           pnpm --dir frontend run build:repo-apps
-          pnpm --dir frontend run build:esbuild
-
-      - name: Build on-frame admin frontend
-        # frame-admin.spec.ts serves this bundle through route interception;
-        # without it those browser tests skip silently.
-        run: pnpm --dir frameos/frontend run build
-
-      - name: Build cloud frontend
-        # visual-cloud-*.spec.ts serve this bundle the same way (see
-        # tests/cloud-workspace-fixture.ts); without it they skip silently.
-        run: pnpm --dir cloud-frontend run build
+          pnpm --dir frontend run build:esbuild &
+          frontend=$!
+          pnpm --dir frameos/frontend run build &
+          admin=$!
+          pnpm --dir cloud-frontend run build &
+          cloud=$!
+          wait "$frontend"
+          wait "$admin"
+          wait "$cloud"
 
       - name: Run frontend visual regression tests
         shell: bash
@@ -931,7 +935,11 @@ jobs:
           mkdir -p ../frontend/dist/assets
           mkdir -p ../frontend/dist/img
           mkdir -p ../frontend/dist/static
-          TEST=1 FRAMEOS_E2E_DEPLOY=1 pytest app/tasks/tests/test_real_ssh_deploy_e2e.py -q -s
+          # The two tests (compile on the device; cross compile + precompiled)
+          # side by side, each against its own target container: their two
+          # ~90 s compiles ran one after another. -rA prints each test's
+          # phase log, which xdist would otherwise keep to failures.
+          TEST=1 FRAMEOS_E2E_DEPLOY=1 pytest -n 2 -rA app/tasks/tests/test_real_ssh_deploy_e2e.py -q
 
   runtime-e2e:
     name: Runtime + Buildroot E2E

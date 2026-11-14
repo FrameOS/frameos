@@ -178,7 +178,7 @@ jobs:
 
   # The integration suites against a real Postgres, one service container per
   # leg: auth-web's (the slowest, 47 files that share one database and so run
-  # one after another) in three shards, and the frame hub's with the ledger's
+  # one after another) in four shards, and the frame hub's with the ledger's
   # (each creates its own database). Never two copies of one suite against
   # one database: every leg has a Postgres of its own. Side by side with
   # verify, which it used to run after.
@@ -193,7 +193,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        leg: [auth-web 1/3, auth-web 2/3, auth-web 3/3, frame-hub + ledger]
+        leg: [auth-web 1/4, auth-web 2/4, auth-web 3/4, auth-web 4/4, frame-hub + ledger]
     services:
       postgres:
         image: postgres:17

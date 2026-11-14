@@ -61,11 +61,14 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # Reads the layer cache the release writes for this image
-      # (docker-publish-multi.yml, runtime-amd64): the toolchains, emsdk and
-      # the dependency installs come from it, and only the stages after this
-      # commit's sources are built. Read-only on the package on every event;
-      # a login that gets nothing (a fork) is a cold build, not a failure.
+      # Reads the layer caches of this image: main's (seed_runtime_cache,
+      # every push) first, the release's (docker-publish-multi.yml) when
+      # main's has nothing yet. The toolchains, emsdk and the dependency
+      # installs come from them, and only what this commit changed is built.
+      # The release's alone went stale with every lockfile change on main
+      # between releases (pnpm fetch onward, ~5 minutes a run). Read-only on
+      # the package on every event; a login that gets nothing (a fork) is a
+      # cold build, not a failure.
       - name: Login to GHCR
         uses: docker/login-action@v3
         continue-on-error: true
@@ -77,6 +80,7 @@ jobs:
       - name: Build Docker image
         run: |
           docker build --target runtime -t frameos \
+            --cache-from type=registry,ref=ghcr.io/frameos/frameos-build-cache:runtime-amd64-main \
             --cache-from type=registry,ref=ghcr.io/frameos/frameos-build-cache:runtime-amd64 .
 
       - name: Run Docker container
@@ -158,6 +162,42 @@ jobs:
           load: false
           cache-from: type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci
           cache-to: type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci,mode=max
+
+  # The layer cache the Docker image job above reads first, written on pushes
+  # to main only, for the reason seed_esp32_cache gives: a job a pull request
+  # can reach must not hold `packages: write`. mode=max keeps every stage's
+  # layers, so a pull request rebuilds from its own first change on.
+  seed_runtime_cache:
+    name: Refresh the runtime image layer cache
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the runtime image and export its layers
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          push: false
+          load: false
+          cache-from: |
+            type=registry,ref=ghcr.io/frameos/frameos-build-cache:runtime-amd64-main
+            type=registry,ref=ghcr.io/frameos/frameos-build-cache:runtime-amd64
+          cache-to: type=registry,ref=ghcr.io/frameos/frameos-build-cache:runtime-amd64-main,mode=max
 
   esp32_firmware_image:
     name: ESP32 firmware (${{ matrix.leg }})
