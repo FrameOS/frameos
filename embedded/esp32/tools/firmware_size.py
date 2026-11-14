@@ -177,7 +177,11 @@ def _normalize_nim_path(path: str) -> str:
     # rewrite toolchain locations so names do not change when the Nim
     # install path or a package hash does.
     path = re.sub(r"^(\.\./)+", "", path)
-    path = re.sub(r"^.*?/nim/lib/", "nim/lib/", path)
+    # The stdlib is `lib/` under a directory named `nim` (the Docker image's
+    # /opt/nim, nixpkgs) or `nim-<version>` (choosenim's
+    # ~/.choosenim/toolchains/nim-2.2.4, CI's runner image since #748). A
+    # name that misses this lands in "FrameOS core (Nim)".
+    path = re.sub(r"^(?:.*?/)?nim(?:-\d[^/]*)?/lib/", "nim/lib/", path)
     path = re.sub(r"^.*?\.nimble/pkgs2?/", "pkgs/", path)
     path = re.sub(r"^pkgs/([^/]+?)-[0-9a-f]{40}/", r"pkgs/\1/", path)
     return path
