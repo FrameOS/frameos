@@ -54,7 +54,8 @@ still move it.
 **Safe mode.** A layout can leave a frame unusable, and the settings that would
 take it off are drawn inside it. Ten pulls down from the top edge of a touch
 screen, each within five seconds of the last (`gestures.safeModePulls` and
-`safeModeGapMs` in the events contract), open the frame's settings page with no
+`safeModeGapMs` in the events contract) and with no swipe in from another edge
+between them, open the frame's settings page with no
 layout around it (`sceneSettings {page: "safe"}`). Safe mode changes nothing by
 itself: the layout is only left out of that panel, so Cancel, Back or the idle
 timeout go back to the scene as it was, and anything set there is what Save saves.

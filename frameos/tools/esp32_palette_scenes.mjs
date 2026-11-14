@@ -7,7 +7,7 @@
 // runs out of memory or returns an error, a scene error or a discarded
 // interpreter, a picture that stops moving, memory that keeps growing, frames
 // that get slower as they run, a frame far past any budget, and a swipe that
-// does not change the effect.
+// does not change the effect, and an event the dispatcher fails on.
 //
 //   frameos/tools/build_wasm.sh --out DIR
 //   node frameos/tools/esp32_palette_scenes.mjs DIR
@@ -45,7 +45,7 @@ const Module = await createFrameOS({
   print: () => {},
   printErr: (line) => console.error(`[frameos] ${line}`),
   onFrameosLog: (line) => {
-    if (/js:interpreterDiscarded|jsApp:error|scene:error|outOfMemory/.test(line)) sceneErrors.push(line)
+    if (/js:interpreterDiscarded|jsApp:error|scene:error|event:error|outOfMemory/.test(line)) sceneErrors.push(line)
   },
 })
 const call = (name, ret, types, args) => Module.ccall(name, ret, types, args)
@@ -159,6 +159,17 @@ play('color cycling swipes', cycling.id, { scene: scenes[0], quality: '0' })
 swipeLeft()
 render('after the swipe')
 if (stateNow().scene !== scenes[1]) fail(`a swipe left from ${scenes[0]} showed ${stateNow().scene}, not ${scenes[1]}`)
+
+// Pulls down from the top edge, twice: the second once overflowed a 32-bit
+// int counting toward safe mode (`notePull`), and a pull never reached the
+// frame's event map again. wasm32's int is 32 bits, as an ESP32's is.
+for (let pull = 1; pull <= 2; pull += 1) {
+  pointer('pointerDown', 240, 2, 1)
+  pointer('pointerMove', 240, 80, 1)
+  pointer('pointerUp', 240, 160, 0)
+  call('frameos_wasm_tick', 'boolean', [], [])
+  render(`after pull ${pull} from the top`)
+}
 
 const peak = call('frameos_wasm_memory_peak', 'number', [], [])
 console.log(report.join('\n'))

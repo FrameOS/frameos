@@ -539,10 +539,18 @@ proc notePull(loop: EventLoop, delivery: InputDelivery): bool =
   ## them, and is the way in and nothing else. Counted before any event map, so
   ## a frame whose map or layout is the problem still hears it. Nothing is
   ## changed here: the panel it opens has no layout around it until it closes.
-  if delivery.name != evEdgeSwipe or delivery.payload.isNil or delivery.payload{"edge"}.getStr() != "top":
+  if delivery.name != evEdgeSwipe or delivery.payload.isNil:
+    return false
+  if delivery.payload{"edge"}.getStr() != "top":
+    # A swipe in from another edge is somebody finding their way round (the
+    # settings opened, then closed from the bottom), not a frame they cannot
+    # use: ten such openings in a minute were taking them to safe mode.
+    loop.pulls = 0
     return false
   let now = getMonoTime().ticks
-  if loop.pulls > 0 and now - loop.lastPull > GestureSafeModeGapMs * 1_000_000:
+  # int64 before the multiply: 5 s in nanoseconds is past a 32-bit int (an
+  # ESP32's, wasm32's), and the second pull from the top overflowed there.
+  if loop.pulls > 0 and now - loop.lastPull > GestureSafeModeGapMs.int64 * 1_000_000:
     loop.pulls = 0
   loop.lastPull = now
   inc loop.pulls

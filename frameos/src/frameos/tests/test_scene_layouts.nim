@@ -943,10 +943,6 @@ suite "the layout chosen on the frame":
     for i in 1 .. 8:
       pull()
     check selected.len == 0
-    # Another edge is not a pull, and does not break the count either.
-    loop.enqueue(eoDriver, evEdgeSwipe, %*{"edge": "bottom", "direction": "up"})
-    discard loop.drain()
-    check selected.len == 0
     pull()
     check selected.len == 1
     let state = selected[0]{"state"}
@@ -957,6 +953,15 @@ suite "the layout chosen on the frame":
     check state{"layout"}.isNil
     # What the frame wears is as it was: Cancel has nothing to put back.
     check chosenLayout() == ""
+    # A pull from another edge starts the count again: opening the settings
+    # and closing them from the bottom, quickly, is no frame in trouble.
+    selected.setLen(0)
+    for i in 1 .. 9:
+      pull()
+    loop.enqueue(eoDriver, evEdgeSwipe, %*{"edge": "bottom", "direction": "up"})
+    discard loop.drain()
+    pull()
+    check selected.len == 0
     rhythmClockOverride = 1001.0
     discard pass(scene)
     check not scene.wornLayout.isNil
