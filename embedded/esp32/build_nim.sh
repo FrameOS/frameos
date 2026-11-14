@@ -55,10 +55,23 @@ echo "compiling the JS preludes to bytecode"
 HOST_QJS="build/quickjs-host"
 mkdir -p "$HOST_QJS"
 QJS_VERSION="$(tr -d '[:space:]' < quickjs/VERSION)"
+# Side by side, and through ccache when the caller keeps one (CI's firmware
+# legs set CCACHE_DIR): quickjs.c alone is most of the ~30 s these took one
+# after another in a fresh CI checkout, every leg, every run (2026-11-14).
+host_cc=(gcc)
+if [[ -n "${CCACHE_DIR:-}" ]] && command -v ccache >/dev/null; then
+    host_cc=(ccache gcc)
+fi
+pids=()
 for src in quickjs libregexp libunicode cutils dtoa; do
     if [[ ! -f "$HOST_QJS/$src.o" || quickjs/$src.c -nt "$HOST_QJS/$src.o" ]]; then
-        gcc -O2 -D_GNU_SOURCE -DCONFIG_VERSION="\"$QJS_VERSION\"" -Iquickjs -c "quickjs/$src.c" -o "$HOST_QJS/$src.o"
+        "${host_cc[@]}" -O2 -D_GNU_SOURCE -DCONFIG_VERSION="\"$QJS_VERSION\"" -Iquickjs -c "quickjs/$src.c" -o "$HOST_QJS/$src.o" &
+        pids+=("$!")
     fi
+done
+# (The guarded expansion: an empty array is "unbound" to macOS's bash 3.2.)
+for pid in ${pids[@]+"${pids[@]}"}; do
+    wait "$pid"
 done
 rm -f "$HOST_QJS/libquickjs.a"
 ar rcs "$HOST_QJS/libquickjs.a" "$HOST_QJS"/*.o

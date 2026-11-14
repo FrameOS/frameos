@@ -188,11 +188,11 @@ jobs:
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
     # auth-web's shards on the pool; the frame hub's suite on GitHub's runner,
-    # as when verify ran it: it drives fake devices over the real command
-    # queue against 10 s waits, and on a pool saturated by other pull
-    # requests' runs two of its tests timed out (2026-11-14), one of them on
-    # a real hub race (a revocation NOTIFY between `connected` and
-    # `readySent` waits for the 30 s sweep).
+    # as when verify ran it. It is not what this job waits for (~80 s against
+    # the auth-web shards' 1.5-2.5 min), and it drives fake devices over the
+    # real command queue against 10 s waits: on a pool saturated by other
+    # pull requests' runs, two of its tests timed out on real hub races
+    # (2026-11-14; a refused patch, #756, and a revocation during the hello).
     runs-on: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) || !matrix.pool) && 'ubuntu-latest' || 'epyc-16' }}
     permissions:
       contents: read

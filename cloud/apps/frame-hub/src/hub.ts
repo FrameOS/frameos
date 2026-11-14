@@ -361,6 +361,10 @@ interface DeviceSession {
   // push mid-hello, and draining it before the pending count is taken
   // tells the device "0 pending" while a set_scenes is already in flight.
   readySent: boolean;
+  // A NOTIFY came before `ready` went out. It may say the frame was revoked,
+  // re-keyed or rescoped, which the end of the hello does not look at, so
+  // the hello runs that wake itself once `ready` is out (runDeferredWake).
+  wakeDeferred: boolean;
   scopes: string[];
   // The device announced a deep sleep (handleSleep): the close that follows
   // is the frame going dark on purpose, not a lost connection.
@@ -409,6 +413,13 @@ export interface FrameHubOptions {
   // `sent`, with the type it went out as, so a test can land the device's
   // answer first. Production leaves it unset.
   beforeMarkSent?: (commandId: string, messageType: string) => Promise<void> | void;
+  // Test seam: awaited in a confirmed frame's hello just before `ready` goes
+  // out, so a test can revoke the frame while the row already says connected.
+  // Production leaves it unset.
+  beforeReady?: (frameId: string) => Promise<void> | void;
+  // Test seam: called with the payload of every command-channel NOTIFY as it
+  // reaches this hub. Production leaves it unset.
+  onCommandNotify?: (frameId: string) => void;
 }
 
 export interface FrameHub {
@@ -1095,7 +1106,14 @@ export async function startFrameHub(
 
   // Command wake-up entry point shared by LISTEN/NOTIFY and the sweep.
   async function wakeSession(session: DeviceSession) {
-    if (!session.ready || !session.readySent || session.closed) {
+    if (!session.ready || session.closed) {
+      return;
+    }
+    if (!session.readySent) {
+      // Mid-hello, past the staleness check at its start and possibly past
+      // the write that marks the row connected: dropping this wake left a
+      // frame revoked in that window connected until the next sweep, 30 s.
+      session.wakeDeferred = true;
       return;
     }
     if (await closeIfStale(session, await frameSessionStaleness(session))) {
@@ -1107,6 +1125,17 @@ export async function startFrameHub(
       new Date(Date.now() - redeliverAfterMs),
     );
     await drainCommands(session);
+  }
+
+  // The wake a NOTIFY asked for during the hello, run once `ready` is out.
+  // Returns false when there was none.
+  async function runDeferredWake(session: DeviceSession) {
+    if (!session.wakeDeferred) {
+      return false;
+    }
+    session.wakeDeferred = false;
+    await wakeSession(session);
+    return true;
   }
 
   async function activateDeviceSession(session: DeviceSession) {
@@ -1237,6 +1266,7 @@ export async function startFrameHub(
       }
       session.readySent = true;
       await broadcastFrameUpdate(frameId);
+      await runDeferredWake(session);
       return;
     }
 
@@ -1280,6 +1310,7 @@ export async function startFrameHub(
         ),
       );
     const pendingCount = pendingRow?.count ?? 0;
+    await options.beforeReady?.(frameId);
     if (session.ws.readyState === WebSocket.OPEN) {
       session.ws.send(
         JSON.stringify({
@@ -1322,7 +1353,10 @@ export async function startFrameHub(
         to: reportedVersion,
       });
     }
-    await drainCommands(session);
+    // A deferred wake checks the frame is still ours, then drains.
+    if (!(await runDeferredWake(session))) {
+      await drainCommands(session);
+    }
 
     // The socket closed while the writes above were in flight: run the
     // disconnect bookkeeping this close handler may have raced past.
@@ -2635,6 +2669,7 @@ export async function startFrameHub(
       readySent: false,
       scopes,
       sleeping: false,
+      wakeDeferred: false,
       ws,
     };
 
@@ -2859,6 +2894,7 @@ export async function startFrameHub(
         scopes: linkedClientScopes(row.linkedClient),
         sleeping: false,
         storeResyncRequested: false,
+        wakeDeferred: false,
         ws: socket,
       };
       const hello = await device.hello();
@@ -3205,6 +3241,7 @@ export async function startFrameHub(
     onnotice: () => undefined,
   });
   await listenClient.listen(frameCommandsNotifyChannel, (payload) => {
+    options.onCommandNotify?.(payload);
     const session = payload ? deviceSessions.get(payload) : undefined;
     if (session?.ready) {
       wakeSession(session).catch((error: unknown) =>

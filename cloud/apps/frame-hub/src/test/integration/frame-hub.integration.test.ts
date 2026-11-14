@@ -634,6 +634,39 @@ describe("device socket", () => {
     ).toBe(401);
   });
 
+  it("kicks a device whose frame is revoked while its hello is still being handled", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    let notified: () => void = () => undefined;
+    const notify = new Promise<void>((resolve) => {
+      notified = resolve;
+    });
+    const extra = await startExtraHub({
+      onCommandNotify: (frameId) => {
+        if (frameId === frame.id) notified();
+      },
+      // The row already says connected and `ready` has not gone out: the
+      // revocation lands here, and its NOTIFY reaches the hub before `ready`.
+      beforeReady: async (frameId) => {
+        if (frameId !== frame.id) return;
+        await revokeFrame(db, { id: frame.id, linkedClientId: frame.linkedClientId });
+        await notify;
+      },
+    });
+    const device = await openDevice(token, extra.port);
+    await handshake(device, privateKey);
+
+    // Not the 30 s sweep: the hello runs the wake it held back.
+    const kicked = await Promise.race([
+      device.closed,
+      new Promise<string>((resolve) => setTimeout(() => resolve("still open after 10 s"), 10_000)),
+    ]);
+    expect(kicked).toBe(4401);
+    expect(extra.connectedFrames()).toBe(0);
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.connected).toBe(false);
+    expect(row?.status).toBe("revoked");
+  });
+
   it("supersedes an older socket for the same frame with 4409", async () => {
     const { frame, privateKey, token } = await createFrameFixture();
     const first = await openDevice(token);
