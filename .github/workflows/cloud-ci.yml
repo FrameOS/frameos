@@ -187,13 +187,24 @@ jobs:
     if: >-
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-16' }}
+    # auth-web's shards on the pool; the frame hub's suite on GitHub's runner,
+    # as when verify ran it: it drives fake devices over the real command
+    # queue against 10 s waits, and on a pool saturated by other pull
+    # requests' runs two of its tests timed out (2026-11-14), one of them on
+    # a real hub race (a revocation NOTIFY between `connected` and
+    # `readySent` waits for the 30 s sweep).
+    runs-on: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) || !matrix.pool) && 'ubuntu-latest' || 'epyc-16' }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        leg: [auth-web 1/4, auth-web 2/4, auth-web 3/4, auth-web 4/4, frame-hub + ledger]
+        include:
+          - { leg: auth-web 1/4, pool: true }
+          - { leg: auth-web 2/4, pool: true }
+          - { leg: auth-web 3/4, pool: true }
+          - { leg: auth-web 4/4, pool: true }
+          - { leg: frame-hub + ledger, pool: false }
     services:
       postgres:
         image: postgres:17
