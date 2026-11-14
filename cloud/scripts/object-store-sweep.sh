@@ -106,6 +106,10 @@ SELECT object_key FROM store_scene_images WHERE object_key IS NOT NULL
 UNION
 SELECT object_key FROM store_images
 UNION
+-- A cover's copy for frames (src/lib/store-device-covers.ts): its key is the
+-- cover's plus this suffix, and it lives as long as the cover's row.
+SELECT object_key || '.device.jpg' FROM store_images
+UNION
 SELECT object_key FROM frame_asset_files WHERE object_key IS NOT NULL
 UNION
 -- Photos (docs/photos.md): the file and its thumbnail. Leave

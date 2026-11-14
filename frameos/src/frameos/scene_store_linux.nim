@@ -86,12 +86,13 @@ proc storeBase(): string =
   try: providerUrlFromState(loadCloudLinkState())
   except CatchableError: "https://cloud.frameos.net"
 
-proc get(url: string, maxBytes: int): tuple[body, error: string] =
+proc get(url: string, maxBytes: int, listing = false): tuple[body, error: string] =
   ## The body when it is JSON the store answered with, else an error code for
-  ## the page.
+  ## the page. A 404 is a store scene that is gone, or for the `listing` a
+  ## store older than this frame (as main/fos_store.c reads it).
   try:
     let response = boundedRequestWithHeaders(url, timeoutMs = FetchTimeoutMs, maxBytes = maxBytes, maxRedirects = 2)
-    if response.code == 404: return ("", "invalid_scene")
+    if response.code == 404: return ("", if listing: "store_unavailable" else: "invalid_scene")
     if response.code == 429: return ("", "rate_limited")
     if response.code != 200: return ("", "store_unavailable")
     discard parseJson(response.body)
@@ -121,7 +122,10 @@ proc askPlane(url, token, action, sceneId: string, show: bool): tuple[error, sta
     if response.code != 200:
       var code = answer{"error"}.getStr()
       if code.len == 0:
-        code = if response.code == 429: "rate_limited" else: "store_unavailable"
+        # A 404 with no word of the plane's is a plane from before the route.
+        code = if response.code == 429: "rate_limited"
+               elif response.code == 404: "plane_update_required"
+               else: "store_unavailable"
       return (code, "", "")
     ("", answer{"status"}.getStr(), answer{"scene_id"}.getStr())
   except CatchableError:
@@ -237,7 +241,7 @@ proc work(job: var Job, error, done: var string) =
   of "browse":
     let url = storeBase() & "/api/store/device/scenes?version=" & encodeUrl(installedFrameOSVersion()) &
       (if job.params.len > 0: "&" & job.params else: "")
-    let (body, failed) = get(url, ListingMaxBytes)
+    let (body, failed) = get(url, ListingMaxBytes, listing = true)
     error = failed
     done = ""
     if failed.len == 0:

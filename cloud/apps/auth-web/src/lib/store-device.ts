@@ -2,7 +2,8 @@ import { and, desc, eq, isNotNull, notInArray, sql, type SQL } from "drizzle-orm
 import { accounts, createDb, storeScenes } from "@frameos-cloud/db";
 import { storeCategories } from "./categories";
 import { storeBrowseConditions } from "./store-browse";
-import { sceneHasImageSql } from "./store-listing";
+import { deviceCoverUrls } from "./store-device-covers";
+import { sceneCoverObjectKeySql, sceneHasImageSql } from "./store-listing";
 import type { StoreBrowseFilters } from "./store-filters";
 
 // The store as a frame reads it (docs/scene-store.md): the Scene store scene
@@ -39,6 +40,10 @@ export type StoreDeviceScene = {
   // The cover, as a path on this host (`/api/store/scenes/{id}/image?version=N`):
   // null for a scene without one.
   image: string | null;
+  // The cover as a JPEG of at most 512 px, a URL on the store's CDN: what a
+  // card needs, a tenth of the cover's bytes or less (store-device-covers.ts).
+  // null without a cover, or where the store has no CDN.
+  thumb: string | null;
 };
 
 export type StoreDeviceSceneInfo = StoreDeviceScene & { description: string };
@@ -85,15 +90,18 @@ function clip(text: string | null | undefined, max: number): string {
   return chars.length > max ? `${chars.slice(0, max - 1).join("")}…` : chars.join("");
 }
 
-function deviceScene(row: {
+type DeviceRow = {
   category: string | null;
+  coverKey: string | null;
   description: string | null;
   hasPreview: boolean;
   id: string;
   latestVersion: number;
   name: string;
   publisher: string | null;
-}): StoreDeviceScene {
+};
+
+function deviceScene(row: DeviceRow, thumb: string | null): StoreDeviceScene {
   return {
     about: clip(row.description, maxAboutLength),
     by: clip(row.publisher, maxByLength),
@@ -102,12 +110,19 @@ function deviceScene(row: {
     // Versioned, so a frame that keeps covers keeps them by this path.
     image: row.hasPreview ? `/api/store/scenes/${row.id}/image?version=${row.latestVersion}` : null,
     name: clip(row.name, maxNameLength),
+    thumb,
     version: row.latestVersion,
   };
 }
 
+async function deviceScenes(rows: DeviceRow[]): Promise<StoreDeviceScene[]> {
+  const thumbs = await deviceCoverUrls(rows.map((row) => (row.hasPreview ? row.coverKey : null)));
+  return rows.map((row, index) => deviceScene(row, thumbs[index] ?? null));
+}
+
 const deviceColumns = {
   category: storeScenes.category,
+  coverKey: sceneCoverObjectKeySql,
   description: storeScenes.description,
   hasPreview: sceneHasImageSql,
   id: storeScenes.id,
@@ -140,7 +155,7 @@ export async function listStoreScenesForDevice(
     .offset((page - 1) * size);
   return {
     more: rows.length > size,
-    scenes: rows.slice(0, size).map(deviceScene),
+    scenes: await deviceScenes(rows.slice(0, size)),
   };
 }
 
@@ -159,7 +174,8 @@ export async function storeSceneForDevice(
   if (!row) {
     return null;
   }
-  return { ...deviceScene(row), description: clip(row.description, maxDescriptionLength) };
+  const [scene] = await deviceScenes([row]);
+  return { ...scene!, description: clip(row.description, maxDescriptionLength) };
 }
 
 // The shelves, in the store front's order, as slug and title alone.

@@ -66,11 +66,23 @@ lists for frames at `GET /api/store/device/scenes`: the store front's filters
 (`q`, `category`, `version`: only what runs on this FrameOS), `page`, `limit`
 (the app's grid, 1 to 24), `prefer` (a shelf that goes first), `exclude`
 (shelves left out, comma separated) and `categories=1` for the shelves. Each
-scene is `{id, name, category, version, by, about, image}`: `about` the
-description cut to 140 characters, `image` the cover's path on that host
+scene is `{id, name, category, version, by, about, image, thumb}`: `about`
+the description cut to 140 characters, `image` the cover's path on that host
 (`/api/store/scenes/{id}/image?version=N`, a redirect to the CDN for a public
-scene). Public, cached a minute, readable from any page (the browser preview
-runs the app), limited per address.
+scene), `thumb` the cover as a JPEG of at most 512 px, a URL on the CDN (null
+without one, and on a store with no CDN). Public, cached a minute, readable
+from any page (the browser preview runs the app), limited per address.
+
+A cover is the publisher's picture, often a megabyte of PNG: an ESP32 took 5
+to 7 s to download and decode one for a card 140 px wide, with the panel
+waiting, and 34 s once. The `thumb` is made once per cover, the first time a
+listing names it (`src/lib/store-device-covers.ts`, the photo library's
+thumbnailer), and stored next to the cover with `.device.jpg` after its key,
+which the object-store sweep keeps while the cover's row lives. The frame still
+fetches it from the CDN itself: the store scaling its own pictures, not a
+proxy for a frame's images. The app takes the `thumb` for a picture up to 640
+px wide (cards everywhere, a scene's page on a small screen) and the cover
+itself above that.
 
 The app hands the host the query string (`params`); the host takes only what a
 query holds (`validStoreParams`, `valid_params`) and puts it after the
@@ -87,7 +99,12 @@ the push that follows is how the scene arrives:
 `POST /api/frames/{id}/panel/scenes` `{"action", "scene_id", "show"?}`, with the
 cloud's enrollment token or the backend's `server_api_key` (a backend first, as
 for the voice chat). A Pi does not know its id on the backend and posts to
-`/api/panel/scenes` there; the key says which frame it is.
+`/api/panel/scenes` there; the key says which frame it is. A plane that
+answers 404 with no `error` of its own is older than this route: both hosts
+report `plane_update_required`, and the app says the plane needs a newer
+version (it said the store did not answer, which sent people to the wrong
+place). A store id the app hands over goes into a URL path on the ESP32, so it
+must be a UUID or nothing.
 
 | Action | `scene_id` | What the plane does |
 |---|---|---|
