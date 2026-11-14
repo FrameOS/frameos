@@ -453,7 +453,12 @@ for the two Spectra boards most of the bench work runs on:
   24-bit BMP). The FocalTech FT6336U touch controller
   (0x48) sits on the expander's bus with its interrupt and reset lines on the
   expander, unwired to the chip: `fos_touch.c` joins the display's bus
-  (`fos_display_shared_i2c_bus`) and polls it every 30 ms. The top button is
+  (`fos_display_shared_i2c_bus`) and polls it every 10 ms, from core 0 (the
+  render's is the other). A press away from the edges is reported 20 ms after
+  it lands, where the thumb has rolled to by then (read at once, a key tap
+  "moved" 16 to 106 px and was a drag), or where it began when it slid
+  sideways a tenth of the glass meanwhile: the FT6336U tracks one point and
+  glides it from one thumb to the next (`fos_touch_glided`). The top button is
   GPIO38; held, it walks to the next scene. The glass sits upside down on
   the panel, so the driver mirrors both axes (`fos_board_touch_mirror`), and
   a finger's arrival is a `pointerMove` to where it landed before its

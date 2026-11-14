@@ -171,6 +171,21 @@ static void test_touch_beep(void)
     CHECK(fos_touch_beep_step(FOS_TOUCH_DOWN, 0, true, &held, &beeped) == FOS_TOUCH_BEEP_DOWN, "alone again, the plain click");
 }
 
+static void test_glided(void)
+{
+    /* The SenseCAP Indicator's traces (480 px glass, 2026-11-14): two thumbs
+     * the FT6336U took for one, gliding 64-74 px sideways in the 20 ms
+     * settle, against one thumb rolling up or a little sideways. */
+    CHECK(fos_touch_glided(-74, -5, 480), "189,380 -> 115,375: a second thumb");
+    CHECK(fos_touch_glided(64, -1, 480), "352,415 -> 416,414: a second thumb");
+    CHECK(!fos_touch_glided(0, -13, 480), "284,436 -> 284,423: a roll up");
+    CHECK(!fos_touch_glided(-8, -89, 480), "287,470 -> 279,381: a long roll up");
+    CHECK(!fos_touch_glided(15, 0, 480), "387 -> 402: under a tenth of the glass");
+    CHECK(!fos_touch_glided(50, -30, 480), "as much up as sideways: not a glide");
+    CHECK(fos_touch_glided(48, 0, 480), "a tenth of the glass exactly");
+    CHECK(!fos_touch_glided(48, 0, 0), "no glass size");
+}
+
 int main(void)
 {
     test_touch_beep();
@@ -179,6 +194,7 @@ int main(void)
     test_wire();
     test_axes();
     test_move_slot();
+    test_glided();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
