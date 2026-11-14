@@ -112,6 +112,14 @@ The Pixel toys on the SenseCAP Indicator, automatic cells, by the
 | Plasma | 8 px | 16.8 | |
 | Life | 8 px | 20.1 | |
 
+Starting the scene is the other wait. It took 2.9 s, 2.2 s of it every
+effect's palette built when the app's modules loaded, through helpers with a
+closure, an array and nine `Math.*` calls a color (300 ms for a 256-color
+gradient). Each effect now builds its own when it first starts, with integer
+helpers: 0.6 s. Hellfire warmed its fire up with ~36 steps (the step carries
+heat one row up), 300 ms; one pass going up the rows, each cell taking the
+heat of a cell below it, is the same fire at once: a swipe to it is 0.18 s.
+
 The Color cycling scenes on the same board, at 160x160 cells (3 px), all at the
 scene's own 20 fps (`refreshInterval` 0.05). Two things it needed there: the
 palette's per-frame rotation blends with integers inline (a helper with a
