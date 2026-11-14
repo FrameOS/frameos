@@ -742,7 +742,7 @@ behaviour change.
 
 *Same recipe, same paths. Main at 17bc7fbc6 builds at 3,223,680 bytes.*
 
-**3,223,680 → 3,215,840 bytes (−7,840).** A scene's graph runs as one
+**3,223,680 → 3,215,952 bytes (−7,728).** A scene's graph runs as one
 JavaScript program written by `scene_compiler.nim` (docs/scene-compiler.md)
 instead of being walked by `runNode`.
 
@@ -754,6 +754,7 @@ instead of being walked by `runNode`.
 | `interpreter.nim` added: the natives (`programOp` 6,574), and out of `runNode` as they were: the image hints, the cache lookup and store, the debug profile, the dispatch node; `compileFailure`, `ensureProgram`, the program's entries | +27,257 |
 | string literals (the program's head and glue, 2.4 KB of them) | +1,552 |
 | the rest | +135 |
+| a context per scene with code, in one runtime (`newContextIn`, `closeContext`, `applyLimits`) | +129 |
 
 Moving the walk into JavaScript saves little flash by itself: what `runNode`
 did per node (the image hints, the cache tiers, an error painted into an
