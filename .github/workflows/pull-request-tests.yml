@@ -149,6 +149,7 @@ jobs:
       # save replaces in one rename and a restore unpacks whole. Both stay best
       # effort: a warm-cache miss is never worth a red job.
       - name: Restore nimcache
+        id: restore_nimcache
         run: bash frameos/tools/ci_nimcache.sh restore ${{ matrix.shard }}
 
       # The shard runner compiles+runs one test file per core (FRAMEOS_TEST_JOBS,
@@ -159,14 +160,15 @@ jobs:
           cd frameos
           bash ./tools/run_test_shard.sh ${{ matrix.shard }}
 
-      # Pushes to main only: the archive then always holds main's objects,
-      # which is what every pull request restores and recompiles its own
-      # changes against, and a pull request does not spend 40 s writing a
-      # cache it would only hand to the next unrelated branch. Not after a
-      # cancel: a gcc killed mid-write leaves a truncated .o newer than its
-      # .c, which the next run would link.
+      # Pushes to main only (and a pull request when there is no archive at
+      # all yet): the archive then always holds main's objects, which is what
+      # every pull request restores and recompiles its own changes against,
+      # and a pull request does not spend 40 s writing a cache it would only
+      # hand to the next unrelated branch. Not after a cancel: a gcc killed
+      # mid-write leaves a truncated .o newer than its .c, which the next run
+      # would link.
       - name: Save nimcache
-        if: ${{ !cancelled() && github.event_name == 'push' }}
+        if: ${{ !cancelled() && (github.event_name == 'push' || steps.restore_nimcache.outputs.missing == 'true') }}
         run: bash frameos/tools/ci_nimcache.sh save ${{ matrix.shard }}
 
       # Plain `node --test` suites next to FrameOS code that no JS workspace
@@ -349,6 +351,7 @@ jobs:
       # shard, frameos/tools/ci_nimcache.sh) outside e2e/tmp, which the
       # Makefile deletes before it copies the tree in.
       - name: Restore the renderer's nimcache
+        id: restore_nimcache
         env:
           FRAMEOS_NIMCACHE_ROOT: /mnt/cache/nimcache/e2e-renderer-archives
           FRAMEOS_NIMCACHE_DIR: ${{ github.workspace }}/.tmp/e2e-nimcache
@@ -365,7 +368,7 @@ jobs:
           git diff --name-only -- snapshots
 
       - name: Save the renderer's nimcache
-        if: ${{ !cancelled() && github.event_name == 'push' }}
+        if: ${{ !cancelled() && (github.event_name == 'push' || steps.restore_nimcache.outputs.missing == 'true') }}
         env:
           FRAMEOS_NIMCACHE_ROOT: /mnt/cache/nimcache/e2e-renderer-archives
           FRAMEOS_NIMCACHE_DIR: ${{ github.workspace }}/.tmp/e2e-nimcache
@@ -1009,6 +1012,7 @@ jobs:
       # pushes to main only): a warm one leaves only what this commit changed
       # to compile.
       - name: Restore the runtime's nimcache
+        id: restore_nimcache
         env:
           FRAMEOS_NIMCACHE_ROOT: /mnt/cache/nimcache/runtime-e2e-archives
           FRAMEOS_NIMCACHE_DIR: ${{ github.workspace }}/.tmp/runtime-nimcache
@@ -1025,7 +1029,7 @@ jobs:
           nimble build --nimcache:"$GITHUB_WORKSPACE/.tmp/runtime-nimcache"
 
       - name: Save the runtime's nimcache
-        if: ${{ !cancelled() && github.event_name == 'push' }}
+        if: ${{ !cancelled() && (github.event_name == 'push' || steps.restore_nimcache.outputs.missing == 'true') }}
         env:
           FRAMEOS_NIMCACHE_ROOT: /mnt/cache/nimcache/runtime-e2e-archives
           FRAMEOS_NIMCACHE_DIR: ${{ github.workspace }}/.tmp/runtime-nimcache

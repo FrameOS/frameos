@@ -325,8 +325,10 @@ jobs:
       # ESP-IDF's ccache, one archive per leg in the pool's shared cache
       # (frameos/tools/ci_nimcache.sh, which keeps any directory as one
       # archive). A stale entry only costs misses: ccache hashes the compiler,
-      # flags and source. Written by pushes to main only, like the nimcache.
+      # flags and source. Written by pushes to main only, like the nimcache
+      # (and by the first run that finds no archive at all).
       - name: Restore ccache
+        id: restore_ccache
         env:
           FRAMEOS_NIMCACHE_ROOT: /mnt/cache/ccache/esp32
           FRAMEOS_NIMCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -521,7 +523,7 @@ jobs:
           TESTS
 
       - name: Save ccache
-        if: ${{ !cancelled() && github.event_name == 'push' }}
+        if: ${{ !cancelled() && (github.event_name == 'push' || steps.restore_ccache.outputs.missing == 'true') }}
         env:
           FRAMEOS_NIMCACHE_ROOT: /mnt/cache/ccache/esp32
           FRAMEOS_NIMCACHE_DIR: ${{ github.workspace }}/.ccache

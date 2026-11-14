@@ -44,6 +44,9 @@ zstd_window=27
 if [[ "$mode" == restore ]]; then
     if [[ ! -f "$archive" ]]; then
         echo "no nimcache archive for shard $shard yet"
+        # The workflows save on pushes to main, and also when this says the
+        # archive is missing, so a new cache seeds itself on its first run.
+        [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "missing=true" >> "$GITHUB_OUTPUT"
         exit 0
     fi
     mkdir -p "$local_cache"
