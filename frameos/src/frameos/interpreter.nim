@@ -784,11 +784,10 @@ embeddedYieldReady = yieldReady
 type ProgramOp = enum
   opGet, opRun, opSet, opInputImage, opPre, opPost, opState, opToJs, opFromJs, opZero,
   opDispatch, opChildState, opScene, opCacheKey, opCacheLookup, opCacheStore, opMatch,
-  opNoListener, opBackground, opProfileStart, opProfileEnd, opLog, opLogOutput,
-  opStateRead, opContextRead
+  opBackground, opProfileStart, opProfileEnd, opLog, opLogOutput, opStateRead, opContextRead
 
 const ProgramNativeNames: array[ProgramOp, cstring] = ["g", "r", "s", "ei", "p", "q",
-  "t", "j", "v", "zv", "d", "ss", "sc", "ka", "cq", "cs", "m", "nl", "bg", "n0", "n1",
+  "t", "j", "v", "zv", "d", "ss", "sc", "ka", "cq", "cs", "m", "bg", "n0", "n1",
   "L", "lo", "st", "cx"]
 
 const ProgramFile = "<frameos:scene>"
@@ -1240,19 +1239,6 @@ proc programOp(scene: InterpretedFrameScene, ctx: ptr JSContext, op: ProgramOp, 
         return jsFalse(ctx)
       i += 2
     result = jsTrue(ctx)
-  of opNoListener:
-    # A press that matches nothing says so: a listener filtered on label "A"
-    # and a board whose buttons are BOOT/KEY1 is a dead button otherwise. A
-    # key event's payload stays out of the log (event_log.nim).
-    let expected = jsValueToJson(ctx, a(0))
-    var wanted: seq[string]
-    for item in expected:
-      wanted.add item.getStr()
-    scene.logger.log(withEventPayload(%*{"event": "runEvent:noListenerMatched", "sceneId": scene.id.string,
-      "contextEvent": context.event, "expected": expected,
-      "error": "\"" & context.event & "\" reached the scene but every listener filtered it out" &
-        (if wanted.len > 0: " (nodes want " & wanted.join(", ") & ")" else: "")},
-      context.event, context.payload))
   of opBackground:
     paintPendingBackground(context)
   of opProfileStart:
@@ -1260,14 +1246,17 @@ proc programOp(scene: InterpretedFrameScene, ctx: ptr JSContext, op: ProgramOp, 
   of opProfileEnd:
     scene.profileEnd(id, num(ctx, a(1)) != 0, scene.held(ctx, a(2)), context)
   of opLog:
-    # A line the program wrote: whose scene it is, and what `out of memory`
-    # means here.
-    let entry = jsValueToJson(ctx, a(0))
+    # A line the program wrote: whose scene it is, what `out of memory`
+    # means here, and (second argument) the event's payload where the
+    # event's may be logged.
+    var entry = jsValueToJson(ctx, a(0))
     if entry.kind == JObject:
       entry[if entry.hasKey("parentSceneId"): "parentSceneId" else: "sceneId"] = %scene.id.string
       let message = entry{"message"}
       if not message.isNil and message.kind == JString:
         entry["message"] = %describeJsError(message.getStr())
+      if argc > 1:
+        entry = withEventPayload(entry, context.event, context.payload)
       scene.logger.log(entry)
   of opLogOutput:
     logCodeNodeOutput(FrameScene(scene), id, scene.held(ctx, a(1)))
@@ -1537,12 +1526,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     let th = edge.targetHandle
     let sh = edge.sourceHandle
     if th.startsWith("fieldInput/"):
-      let field = th.split("/")[1]
-      if sh == "fieldOutput" or sh == "stateOutput":
-        scene.appInputsForNodeId.mgetOrPut(edge.target, initTable[string, NodeId]())[field] = edge.source
-        continue
-      if sh.startsWith("code/"):
-        scene.appInlineInputsForNodeId.mgetOrPut(edge.target, initTable[string, string]())[field] = sh.substr(5)
+      let inline = sh.startsWith("code/")
+      if inline or sh == "fieldOutput" or sh == "stateOutput":
+        scene.appInputs.add AppInput(target: edge.target, source: edge.source,
+          field: th.split("/")[1], inline: inline)
         continue
     elif sh.startsWith("field/") and th == "prev":
       scene.setNodeFieldFromEdge(edge)
@@ -1989,8 +1976,7 @@ proc forgetSceneGraph*(scene: InterpretedFrameScene) =
   for _, app in scene.appsByNodeId:
     releaseJsAppRuntime(app)
   scene.appsByNodeId.clear()
-  scene.appInputsForNodeId.clear()
-  scene.appInlineInputsForNodeId.clear()
+  scene.appInputs = @[]
   scene.sceneNodes.clear()
   scene.sceneExportByNodeId.clear()
   scene.eventApps = @[]

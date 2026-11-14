@@ -258,7 +258,7 @@ const ProgramHead = "\"use strict\";(__N)=>{let __at=0;\n" &
 const SnippetLines = 5
   ## The line of the first snippet function's header (its snippet starts on
   ## the next one).
-const GlueHead = "const{g,r,s,ei,p,q,t,j,v,zv,d,ss,sc,ka,cq,cs,m,nl,bg,n0,n1,L,lo}=N,MS=x=>x&&x.message||String(x),ST=x=>x&&(x.nimStack||x.stack)||String(x);\n" &
+const GlueHead = "const{g,r,s,ei,p,q,t,j,v,zv,d,ss,sc,ka,cq,cs,m,bg,n0,n1,L,lo}=N,MS=x=>x&&x.message||String(x),ST=x=>x&&(x.nimStack||x.stack)||String(x);\n" &
   # A location in the program, put back into the snippet it is in.
   "const MAP=t=>String(t).replace(/<frameos:scene>:(\\d+)/g,(w,l)=>{for(const[a,b,n]of SN)if(l>=a&&l<=b)return n+\":\"+(l-a+1);return w});\n" &
   # A snippet's error: logged with its location, and the zero of the type
@@ -271,7 +271,10 @@ const GlueHead = "const{g,r,s,ei,p,q,t,j,v,zv,d,ss,sc,ka,cq,cs,m,nl,bg,n0,n1,L,l
   "const EI=(k,id,f,pr,x)=>{const e={event:[\"interpreter:setField:error\",\"interpreter:setField:error:inlineCode\",\"interpreter:dispatch:setField:error\",0,\"interpreter:setChildState:error\"][k],nodeId:id,input:f,error:MS(x),stacktrace:ST(x)};if(k==4)e.parentSceneId=1;if(k==1)e.code=SC[pr];else e.producer=pr;L(e);if(!k)ei(id,f,e.error)};\n" &
   # A code node's argument whose producer failed: its type's zero.
   "const ZA=(id,a,pr,x,ty)=>{const h=zv(ty,0),e={event:\"interpreter:codeArg:error\",nodeId:id,arg:a,error:MS(x),stacktrace:ST(x),defaulted:true,defaultValue:j(h)};if(pr<0){e.event+=\":inlineCode\";e.code=SC[-1-pr]}else e.producer=pr;L(e);return h};\n" &
-  "const LE=(n,id,x)=>L({event:\"runEventInterpreted:error\",contextEvent:n,nodeId:id,error:MS(x),stacktrace:ST(x)}),NF=i=>L({event:\"interpreter:nodeNotFound\",nodeId:i}),CY=(id,V)=>L({event:\"interpreter:graph:cycle\",startNodeId:V.values().next().value,atNodeId:id}),XC=(id,k,m)=>{L({event:\"interpreter:cacheExpression:error\",nodeId:id,code:SC[k],error:m})};\n"
+  "const LE=(n,id,x)=>L({event:\"runEventInterpreted:error\",contextEvent:n,nodeId:id,error:MS(x),stacktrace:ST(x)}),NF=i=>L({event:\"interpreter:nodeNotFound\",nodeId:i}),CY=(id,V)=>L({event:\"interpreter:graph:cycle\",startNodeId:V.values().next().value,atNodeId:id}),XC=(id,k,m)=>{L({event:\"interpreter:cacheExpression:error\",nodeId:id,code:SC[k],error:m})};\n" &
+  # Every listener filtered the event out: said, with the payload where the
+  # event's may be logged (a key's never is, event_log.nim).
+  "const NL=(n,w)=>L({event:\"runEvent:noListenerMatched\",contextEvent:n,expected:w,error:'\"'+n+'\" reached the scene but every listener filtered it out'+(w.length?\" (nodes want \"+w.join(\", \")+\")\":\"\")},1);\n"
 
 type Emitter = object
   names: seq[string] ## the snippet functions, handed from their scope to the glue's
@@ -404,7 +407,7 @@ proc codeType(node: DiagramNode, key, name: string): string =
 
 proc emitCodeBody(e: var Emitter, g: Graph, node: DiagramNode, id: int, data: bool,
     broken: seq[(NodeId, string)]) =
-  ## A code node's work, its result's handle left in `R`: each argument a
+  ## A code node's work, its result's handle left in `h`: each argument a
   ## handle (one that fails is its type's zero and named in `D`, so the result
   ## is not cached and an error says why), then the node's function on their
   ## values.
@@ -447,17 +450,17 @@ proc emitCodeBody(e: var Emitter, g: Graph, node: DiagramNode, id: int, data: bo
     e.put "const K=cq(#,D?0:1", id
     emitCacheExpression(e, node, id, broken)
     e.add ");if(K>=0)return K;\n"
-  e.put "let R;__at=#;try{R=v(__c#(A(H)),", id
+  e.put "__at=#;try{h=v(__c#(A(H)),", id
   e.addStr outputType
-  e.put ")}catch(x){R=JE(#,", id
+  e.put ")}catch(x){h=JE(#,", id
   e.addSource node
   e.add ",x,"
   e.addStr outputType
   e.add ",D)}\n"
   if cached:
-    e.put "cs(#,R,D?0:1);\n", id
+    e.put "cs(#,h,D?0:1);\n", id
   elif jBoolOr(node.data, "logOutput", false):
-    e.put "lo(#,R);\n", id
+    e.put "lo(#,h);\n", id
 
 proc emitCodeFunction(e: var Emitter, g: Graph, node: DiagramNode, id: int) =
   ## `__c<id>(A)`: the node's code, given its arguments' values by name and
@@ -513,6 +516,32 @@ proc eventFilters(node: DiagramNode): tuple[match: seq[(string, string)], expect
       if not hasConfig:
         result.expected.add("label=" & expected)
 
+proc addNodeThrow(e: var Emitter, kind: string) =
+  ## What running a node that cannot run says, as the interpreter said it.
+  e.addThrow(case kind
+    of "source": "Source nodes are not implemented for interpreted scenes"
+    of "event": "Event nodes not implemented in interpreted scenes yet"
+    else: "Unknown node type: " & kind)
+
+proc wrapStart(e: var Emitter, id: int, cyclic, profile, isData: bool) =
+  ## Around a node's work: on a cycle of its own inputs it keeps itself in
+  ## `W` while it works, and a value read of a node already there is
+  ## refused; with the debug profile on, it is measured.
+  if cyclic:
+    if isData:
+      e.put "if(W.has(#))throw Error(\"Node # depends on itself: its input is produced by a node that is still resolving it (cycle through \"+W.size+\" node(s))\");", id
+    e.put "W.add(#);try{", id
+  if profile:
+    e.put(if isData: "n0(#,1);" else: "n0(#,0);", id)
+
+proc wrapEnd(e: var Emitter, id: int, cyclic, profile, isData: bool) =
+  if profile:
+    e.put(if isData: ";n1(#,1,h);" else: ";n1(#,0,0);", id)
+  if isData:
+    e.add ";return h"
+  if cyclic:
+    e.put "}finally{W.delete(#)}", id
+
 proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = false,
     brokenCache: seq[(NodeId, string)] = @[]): CompiledScene =
   ## The program for a scene. It evaluates to a function of the natives
@@ -539,25 +568,7 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
   for i, node in g.nodes:
     let id = node.id.int
     let kind = node.nodeType
-    # A node on a cycle of its own inputs keeps itself in `W` while it
-    # works, and a data read of a node already there is refused.
-    template guardOpen(isData: bool) =
-      if cyclic[i]:
-        if isData:
-          e.put "if(W.has(#))throw Error(\"Node # depends on itself: its input is produced by a node that is still resolving it (cycle through \"+W.size+\" node(s))\");", id
-        e.put "W.add(#);try{", id
-    template guardClose() =
-      if cyclic[i]:
-        e.put "}finally{W.delete(#)}", id
-    template profileStart(isData: bool) =
-      if profile:
-        e.put(if isData: "n0(#,1);" else: "n0(#,0);", id)
-    template profileEnd(isData: bool, value: string) =
-      if profile:
-        e.put(if isData: "n1(#,1," else: "n1(#,0,", id)
-        e.add value
-        e.add ");"
-
+    let throws = kind notin ["app", "code", "dispatch", "scene", "state"]
     if kind == "code":
       emitCodeFunction(e, g, node, id)
     elif kind == "app" and g.appInputs.hasKey(id):
@@ -572,31 +583,27 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
         e.addInputFailure(0, id, input)
       e.add "}\n"
 
-    # ---- g<id>(): the node's value, a handle
+    # ---- g<id>(): the node's value, a handle in `h`
     e.put "function g#(){", id
     if depths[i] > MaxProducerDepth:
       e.addThrow("Node " & $id & " is nested deeper than " & $MaxProducerDepth &
         " levels of producers; refusing to resolve it")
+    elif throws:
+      e.addNodeThrow(kind)
     else:
-      guardOpen(true)
-      profileStart(true)
+      e.wrapStart(id, cyclic[i], profile, true)
+      e.add "let h;"
       case kind
       of "app":
         if g.appInputs.hasKey(id):
           e.put "i#();", id
-        e.put(if profile: "const h=g(#" else: "return g(#", id)
+        e.put "h=g(#", id
         if readCacheConfig(node.data).enabled:
           emitCacheExpression(e, node, id, brokenCache)
         e.add ")"
-        if profile:
-          e.add ";"
-          profileEnd(true, "h")
-          e.add "return h"
       of "code":
         e.add "\n"
         emitCodeBody(e, g, node, id, true, brokenCache)
-        profileEnd(true, "R")
-        e.add "return R"
       of "dispatch":
         # Its config with its inputs over it: the payload it sends.
         let config = node.data{"config"}
@@ -611,10 +618,7 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
           e.addProducer(input, node)
           e.add ")"
           e.addInputFailure(2, id, input)
-        e.put(if profile: "const h=d(#,Y);" else: "return d(#,Y)", id)
-        if profile:
-          profileEnd(true, "h")
-          e.add "return h"
+        e.put "h=d(#,Y)", id
       of "scene":
         for input in g.ordered(g.appInputs.getOrDefault(id)):
           if needsCatch(4, input): e.add "try{"
@@ -624,24 +628,12 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
           e.addProducer(input, node)
           e.add ")"
           e.addInputFailure(4, id, input)
-        e.put "sc(#);", id
-        profileEnd(true, "0")
-        e.add "return 0"
-      of "state":
-        e.add(if profile: "const h=t(" else: "return t(")
+        e.put "sc(#);h=0", id
+      else: # state
+        e.add "h=t("
         e.addStr node.keyword
         e.add ")"
-        if profile:
-          e.add ";"
-          profileEnd(true, "h")
-          e.add "return h"
-      of "source":
-        e.addThrow("Source nodes are not implemented for interpreted scenes")
-      of "event":
-        e.addThrow("Event nodes not implemented in interpreted scenes yet")
-      else:
-        e.addThrow("Unknown node type: " & kind)
-      guardClose()
+      e.wrapEnd(id, cyclic[i], profile, true)
     e.add "}\n"
 
     # ---- f<id>(V): the node in a flow, then the one after it
@@ -650,37 +642,27 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
     e.put "function f#(V){", id
     if looping[i]:
       e.put "V||=new Set();if(V.has(#))return CY(#,V);V.add(#);", id
-    case kind
-    of "app":
-      guardOpen(false)
-      profileStart(false)
-      e.put "const P=p(#);", id
-      if g.appInputs.hasKey(id):
-        e.put "i#();", id
-      e.put "q(#,P);r(#);", id
-      profileEnd(false, "0")
-      guardClose()
-    of "code":
+    if kind != "app":
+      # Whatever draws first pays the background still owed; an app settles
+      # it in `p` (a planned image edge may waive it).
       e.add "bg();"
-      guardOpen(false)
-      profileStart(false)
-      e.add "\n"
-      emitCodeBody(e, g, node, id, false, brokenCache)
-      profileEnd(false, "0")
-      guardClose()
-    of "dispatch", "scene", "state":
+    if throws:
+      e.addNodeThrow(kind)
+    elif kind in ["dispatch", "scene", "state"]:
       # Their flow is their value, dropped.
-      e.put "bg();g#();", id
-    of "source":
-      e.add "bg();"
-      e.addThrow("Source nodes are not implemented for interpreted scenes")
-    of "event":
-      e.add "bg();"
-      e.addThrow("Event nodes not implemented in interpreted scenes yet")
+      e.put "g#();", id
     else:
-      e.add "bg();"
-      e.addThrow("Unknown node type: " & kind)
-    if g.next.hasKey(id) and kind in ["app", "code", "dispatch", "scene", "state"]:
+      e.wrapStart(id, cyclic[i], profile, false)
+      if kind == "app":
+        e.put "const P=p(#);", id
+        if g.appInputs.hasKey(id):
+          e.put "i#();", id
+        e.put "q(#,P);r(#);", id
+      else:
+        e.add "let h;\n"
+        emitCodeBody(e, g, node, id, false, brokenCache)
+      e.wrapEnd(id, cyclic[i], profile, false)
+    if g.next.hasKey(id) and not throws:
       e.add ";"
       addFlowCall(e, g, g.next[id], true)
     e.add "}\n"
@@ -721,7 +703,7 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
       if filters.match.len > 0: e.add "}"
       e.add "\n"
     if canMiss:
-      e.add "if(!M)nl(["
+      e.add "if(!M)NL(n,["
       for k, x in expected:
         if k > 0: e.add ","
         e.addStr x

@@ -67,14 +67,21 @@ outermost run of the program ends.
 
 `g`/`r`/`s` get, run and set an app (the node cache, keyed by what `s` set,
 is `g`'s); `p`/`q` offer and withdraw the image hints the planner decided
-(decode target, bounds) and pay the background owed; `t` reads a state node;
-`d` a dispatch node; `ss`/`sc` a scene node's state and its run; `cq`/`cs`/`ka`
-a code node's cache; `e`, `z`, `xe`, `le`, `nl`, `nf`, `cy` the error paths
-and their log lines; `n0`/`n1` the debug profile (compiled in when
-`frameConfig.debug` is on, the program made again when it changes). Each
-takes node ids, strings and handles. The interpreter clock stops while a
-native runs (an app may wait on the network); the run's wall-clock deadline
-does not.
+(decode target, bounds) and pay the background owed; `ei` paints a failed
+producer's error into an image field; `t` reads a state node; `d` sends a
+dispatch node's payload; `ss`/`sc` set a scene node's state and run it;
+`cq`/`cs`/`ka` are a code node's cache; `j`/`v` convert, `zv` gives a type's
+zero; `n0`/`n1` are the debug profile (compiled in when `frameConfig.debug`
+is on, the program made again when it changes); `L` writes a log line.
+Each takes node ids, strings and handles. The interpreter clock stops while
+a native runs (an app may wait on the network); the run's wall-clock
+deadline does not.
+
+The log lines (an input that failed, a defaulted argument, a snippet's
+error with its location put back into the snippet, a listener's error, a
+filtered event, a cycle) are built by the program and handed to `L`, which
+adds the scene's id: their text costs the program's memory, not the
+firmware's flash.
 
 A Nim exception a native throws crosses the program as a JavaScript error
 carrying its message and stack; one no JavaScript caught leaves the program
@@ -101,18 +108,23 @@ apps keep their own runtimes and their scene's heap budget.
   logged as `interpreter:codeArg:error:inlineCode`, as a producer that fails
   is; before, it was `null` and an `interpreter:jsError`.
 - A syntax error in a code node or an inline input fails the scene when it
-  starts, naming the node (`interpreter:jsCompileError`), as before. One in a
-  cache expression costs only that node its cache: the program is made again
-  with the expression replaced by `interpreter:cacheExpression:error`.
+  starts, naming the node (`interpreter:jsCompileError`), as before: the
+  snippet the error's line is in, or the one just before it (a snippet that
+  leaves a bracket open fails on the line after it). One in a cache
+  expression costs only that node its cache: the program is made again with
+  the expression left out, and `interpreter:cacheExpression:error` on every
+  run.
 - Error locations name the snippet: `<frameos:code:42>:3:18`, line and column
   in the code as written.
 
 ## Next
 
 - The planner (`planner.nim`) still works on the graph in Nim at scene
-  start; it could decide in the compiler instead, and the edge tables it
-  reads (`appInputsForNodeId`) would go.
-- The scene loader still parses scenes.json with jsony into typed nodes; the
-  compiler only needs the JSON.
+  start (on `scene.appInputs`, the edges into fields); it could decide in the
+  compiler instead.
+- Code node to code node, a value still goes through a Nim `Value` (with the
+  type the producer declares): passing the JavaScript value along where the
+  conversion is the identity would make a scene that hands big JSON between
+  code nodes much faster (as it is, about as fast as before).
 - JS apps could run inside the program's context instead of a runtime each
   (~150 KB of PSRAM per JS app node on an ESP32).

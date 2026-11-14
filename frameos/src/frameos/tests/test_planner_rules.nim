@@ -15,16 +15,12 @@ proc sceneWith(nodes: seq[DiagramNode],
     inputs: openArray[(int, string, int)]): InterpretedFrameScene =
   result = InterpretedFrameScene(
     nodes: initTable[NodeId, DiagramNode](),
-    appInputsForNodeId: initTable[NodeId, Table[string, NodeId]](),
-    appInlineInputsForNodeId: initTable[NodeId, Table[string, string]](),
     imageFusionPlans: initTable[NodeId, ImageFusionPlan]()
   )
   for n in nodes:
     result.nodes[n.id] = n
   for (target, field, source) in inputs:
-    if not result.appInputsForNodeId.hasKey(target.NodeId):
-      result.appInputsForNodeId[target.NodeId] = initTable[string, NodeId]()
-    result.appInputsForNodeId[target.NodeId][field] = source.NodeId
+    result.appInputs.add AppInput(target: target.NodeId, source: source.NodeId, field: field)
 
 proc consumer(id: int, config: JsonNode): DiagramNode =
   node(id, "app", %*{"keyword": "render/image", "config": config})

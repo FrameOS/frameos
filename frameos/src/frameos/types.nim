@@ -646,6 +646,12 @@ type
     ## on every run instead of taking the scene down.
     brokenCache*: seq[(NodeId, string)]
 
+  AppInput* = object
+    ## An edge into a node's field: from another node's value, or inline code.
+    target*, source*: NodeId
+    field*: string
+    inline*: bool
+
   NodeProfile* = object
     ## One node's debug profile while it runs (interpreter.nim, `n0`/`n1`).
     nodeId*: NodeId
@@ -666,8 +672,7 @@ type
     apps*: JsonNode
     eventApps*: seq[NodeId]                                                    # JS app nodes with `events` in their config.json
     appsByNodeId*: Table[NodeId, AppRoot] # mapping from node id to instantiated app for quick lookup
-    appInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # app input name -> connected node id (the planner reads these)
-    appInlineInputsForNodeId*: Table[NodeId, Table[string, string]]            # app input name -> inline code
+    appInputs*: seq[AppInput] # the edges into app, dispatch and scene node fields (the planner reads them)
     sceneNodes*: Table[NodeId, FrameScene]                                     # cache of instantiated child scenes
     layoutSceneId*: SceneId
     layoutState*: JsonNode

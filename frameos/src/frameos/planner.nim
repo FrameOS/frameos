@@ -56,13 +56,13 @@ proc appKeyword(node: DiagramNode): string =
   if node.data.isNil or node.data.kind != JObject: return ""
   node.data{"keyword"}.getStr()
 
-proc isWiredInput(scene: InterpretedFrameScene, nodeId: NodeId, field: string): bool =
-  ## True when a field's value comes from another node or from inline code, in
-  ## which case the planner cannot know it up front.
-  (scene.appInputsForNodeId.hasKey(nodeId) and
-    scene.appInputsForNodeId[nodeId].hasKey(field)) or
-  (scene.appInlineInputsForNodeId.hasKey(nodeId) and
-    scene.appInlineInputsForNodeId[nodeId].hasKey(field))
+proc isWiredInput(scene: InterpretedFrameScene, nodeId: NodeId, field: string, inlineOnly = false): bool =
+  ## True when a field's value comes from another node or from inline code
+  ## (only inline code with `inlineOnly`), in which case the planner cannot
+  ## know it up front.
+  for input in scene.appInputs:
+    if input.target == nodeId and input.field == field and (input.inline or not inlineOnly):
+      return true
 
 proc staticFieldValue(scene: InterpretedFrameScene, node: DiagramNode,
     caps: AppCapabilities, field: string): tuple[known: bool, value: string] =
@@ -146,10 +146,11 @@ proc unsetHolds(scene: InterpretedFrameScene, node: DiagramNode,
 
 proc connectedInput(scene: InterpretedFrameScene, nodeId: NodeId,
     field: string): NodeId =
-  if scene.appInputsForNodeId.hasKey(nodeId) and
-      scene.appInputsForNodeId[nodeId].hasKey(field):
-    return scene.appInputsForNodeId[nodeId][field]
-  NoNodeId
+  ## The node a field is wired from (the last edge into it), or NoNodeId.
+  result = NoNodeId
+  for input in scene.appInputs:
+    if input.target == nodeId and input.field == field and not input.inline:
+      result = input.source
 
 type
   FusionRefusal* = enum
@@ -198,8 +199,7 @@ proc resolveFit(scene: InterpretedFrameScene, node: DiagramNode,
   fitFromNodeId = NoNodeId
   if spec.fitFrom.len == 0:
     return true
-  if scene.appInlineInputsForNodeId.hasKey(node.id) and
-      scene.appInlineInputsForNodeId[node.id].hasKey(spec.fitFrom):
+  if isWiredInput(scene, node.id, spec.fitFrom, inlineOnly = true):
     return false
   let wired = connectedInput(scene, node.id, spec.fitFrom)
   if wired != NoNodeId:
