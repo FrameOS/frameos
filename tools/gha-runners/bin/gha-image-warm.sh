@@ -15,9 +15,18 @@
 #                                     runner mounts it into container jobs at /__t
 #     node/<22.x,24.x>/x64            found by actions/setup-node without a download
 #     Python/3.12.x/x64               found by actions/setup-python (+ uv in it)
-#     frameos-ci/pnpm-store           `pnpm fetch` of main's lockfile
-#     frameos-ci/uv-cache             the backend requirements, as uv's wheels
 #     frameos-ci/manifest.json        what was warmed, from which commit
+#   /home/runner/work/_frameos-ci     next to the workspace, so the runner mounts
+#                                     it into container jobs on the same mount as
+#                                     the checkout (/__w): pnpm and uv hardlink
+#                                     from a cache on the same mount and copy
+#                                     from any other
+#     pnpm-store                      `pnpm fetch` of main's lockfile
+#     uv-cache                        the backend requirements, as uv's wheels
+#   /home/runner/work/frameos/frameos a clean checkout of main where
+#                                     actions/checkout puts the repository, so
+#                                     it fetches the commit it wants on top of
+#                                     main's objects instead of the whole tree
 #   ~runner/.choosenim/toolchains/nim-2.2.4 + ~runner/.nimble/{bin,pkgs2}
 #                                     the layout jiro4989/setup-nim-action leaves,
 #                                     so nimcache paths match GitHub-hosted runs
@@ -33,7 +42,9 @@ REPO_URL=${FRAMEOS_REPO_URL:-https://github.com/FrameOS/frameos.git}
 REPO_REF=${FRAMEOS_REPO_REF:-main}
 TC=/opt/hostedtoolcache
 WARM=$TC/frameos-ci
-SRC=/tmp/frameos-warm
+WORK=/home/runner/work
+NEAR=$WORK/_frameos-ci
+SRC=$WORK/frameos/frameos
 export DEBIAN_FRONTEND=noninteractive
 # incus exec starts in /root, which the runner user cannot read, and uv
 # (among others) looks for its config from the working directory up.
@@ -45,12 +56,15 @@ as_runner() {
 }
 RUNNER_PATH=/home/runner/.nimble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-install -d -o runner -g runner "$TC" "$WARM"
+install -d -o runner -g runner "$TC" "$WARM" "$WORK" "$NEAR" "$WORK/frameos"
 # Anonymous git over HTTP/2 from the pool's address gets 401s from GitHub
 # (the workflows set the same thing first).
 as_runner git config --global http.https://github.com/.version HTTP/1.1
 rm -rf "$SRC"
 as_runner git clone -q --depth 1 --branch "$REPO_REF" "$REPO_URL" "$SRC"
+# The URL actions/checkout gives `origin`: with another one it deletes the
+# directory and clones from scratch.
+as_runner git -C "$SRC" remote set-url origin "${REPO_URL%.git}"
 COMMIT=$(as_runner git -C "$SRC" rev-parse HEAD)
 
 # --- node: the majors the workflows ask for ----------------------------------
@@ -110,14 +124,14 @@ as_runner nim --version | head -1
 PNPM_VERSION=$(jq -r '.packageManager | sub("^pnpm@"; "") | sub("\\+.*$"; "")' "$SRC/package.json")
 as_runner env PATH="$NODE:$RUNNER_PATH" npm install -g -q --prefix /tmp/pnpm-tool "pnpm@$PNPM_VERSION"
 (cd "$SRC" && as_runner env PATH="$NODE:$RUNNER_PATH" /tmp/pnpm-tool/bin/pnpm fetch \
-  --store-dir "$WARM/pnpm-store" >/dev/null)
+  --store-dir "$NEAR/pnpm-store" >/dev/null)
 rm -rf /tmp/pnpm-tool
 
 # --- backend requirements into uv's cache ---------------------------------------
-# Under the tool cache, not ~/.cache/uv: container jobs have another HOME but
-# get the tool cache mounted (setup-backend-python sets UV_CACHE_DIR to it).
+# Next to the workspace, not ~/.cache/uv: container jobs have another HOME but
+# get the work directory mounted (setup-backend-python sets UV_CACHE_DIR).
 as_runner "$PY/uv" venv -q --python "$PY/python" /tmp/warm-venv
-(cd "$SRC/backend" && as_runner env UV_CACHE_DIR="$WARM/uv-cache" "$PY/uv" pip install -q \
+(cd "$SRC/backend" && as_runner env UV_CACHE_DIR="$NEAR/uv-cache" "$PY/uv" pip install -q \
   --python /tmp/warm-venv/bin/python --require-hashes -r requirements.txt)
 rm -rf /tmp/warm-venv
 
@@ -150,5 +164,8 @@ jq -n --arg commit "$COMMIT" --arg date "$(date -u +%FT%TZ)" --arg py "$PY_VERSI
   '{commit: $commit, built: $date, node: $node, python: $py, pnpm: $pnpm, nim: $nim,
     sshTarget: $ssh, esp32Toolchain: $esp32, images: $images}' > "$WARM/manifest.json"
 chown runner:runner "$WARM/manifest.json"
-rm -rf "$SRC"
+# Leave the checkout as actions/checkout would find a clean one: everything
+# the warming put in it (node_modules, nimble.paths, a venv) goes.
+as_runner git -C "$SRC" clean -ffdxq
+as_runner git -C "$SRC" gc -q --prune=now
 cat "$WARM/manifest.json"

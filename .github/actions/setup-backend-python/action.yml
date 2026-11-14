@@ -11,9 +11,11 @@ runs:
       id: warm
       shell: bash
       run: |
-        if [ -d "${RUNNER_TOOL_CACHE:-/nonexistent}/frameos-ci/uv-cache" ]; then
+        cache="$(dirname "$(dirname "$GITHUB_WORKSPACE")")/_frameos-ci/uv-cache"
+        [ -d "$cache" ] || cache="${RUNNER_TOOL_CACHE:-/nonexistent}/frameos-ci/uv-cache"
+        if [ -d "$cache" ]; then
           echo "warm=true" >> "$GITHUB_OUTPUT"
-          echo "UV_CACHE_DIR=$RUNNER_TOOL_CACHE/frameos-ci/uv-cache" >> "$GITHUB_ENV"
+          echo "UV_CACHE_DIR=$cache" >> "$GITHUB_ENV"
         else
           echo "warm=false" >> "$GITHUB_OUTPUT"
         fi

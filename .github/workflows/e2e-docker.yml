@@ -210,22 +210,41 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Cache QuickJS
+      # The firmware compiles QuickJS from source (for the chip, and a host
+      # copy for the prelude bytecode), so not the prebuilt host library
+      # `nimble build_quickjs` installs: the pinned source tarball, checked
+      # against frameos.nimble's sha256, as the image's app-builder stage and
+      # build_quickjs's own fallback fetch it.
+      - name: QuickJS sources
+        run: |
+          version="$(sed -n 's/^ *QuickjsVersion = "\(.*\)"$/\1/p' frameos/frameos.nimble)"
+          sha="$(sed -n 's/^ *QuickjsSha256 = "\(.*\)"$/\1/p' frameos/frameos.nimble)"
+          test -n "$version" && test -n "$sha"
+          curl -fsSL --retry 3 "https://archive.frameos.net/source/vendor/quickjs-$version.tar.xz" -o "$RUNNER_TEMP/quickjs.tar.xz"
+          echo "$sha  $RUNNER_TEMP/quickjs.tar.xz" | sha256sum -c -
+          rm -rf frameos/quickjs
+          tar -xf "$RUNNER_TEMP/quickjs.tar.xz" -C frameos
+          mv "frameos/quickjs-$version" frameos/quickjs
+
+      # Same key as the Nim shards' (the inputs prepare_assets.py fingerprints):
+      # on a hit `nimble assets` finds the frame's compiled assets current.
+      - name: Cache compiled assets
         uses: actions/cache@v4
         with:
-          path: frameos/quickjs
-          key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
+          path: |
+            frameos/assets/compiled
+            frameos/src/assets
+          key: ${{ runner.os }}-frameos-assets-${{ hashFiles('frameos/frontend/**', 'frameos/tools/prepare_assets.py', 'frameos/tools/generate_*.py', 'frontend/src/**', 'frontend/schema/**', 'frontend/public/**', 'frontend/scripts/generateRepoApps.mjs', 'frontend/package.json', 'repo/**', 'package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'versions.json') }}
 
       # What the image's app-builder stage did for the firmware, on the runner:
       # the nimble packages (nimble.paths names them by absolute path, and the
-      # container mounts them at the same one), the compiled assets, QuickJS.
+      # container mounts them at the same one) and the compiled assets.
       - name: Prepare the tree
         run: |
           cd frameos
           nimble install -d
           nimble setup
           nimble assets
-          nimble build_quickjs --silent
 
       # The Dockerfile's esp-idf-toolchain stage, under a tag that hashes its
       # lines (embedded/esp32/ci_toolchain_image.sh). The pool's VM image
@@ -458,7 +477,8 @@ jobs:
             embedded/esp32/main/fos_render_relay.c embedded/esp32/main/fos_json_guard.c \
             embedded/esp32/main/tests/test_fos_render_relay.c \
             -o /tmp/test_fos_render_relay
-          /tmp/test_fos_render_relayTESTS
+          /tmp/test_fos_render_relay
+          TESTS
 
       - name: Save ccache
         if: ${{ !cancelled() && github.event_name == 'push' }}

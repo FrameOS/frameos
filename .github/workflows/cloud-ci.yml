@@ -220,6 +220,15 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # What the suites import that turbo built for them in verify: the
+      # frameos-wasm package's dist (scene-render.ts imports it), and
+      # auth-web's generated AI context (its pretest:integration hook, which
+      # the shards below skip by calling vitest themselves for --shard).
+      - name: Build what the suites import
+        run: |
+          pnpm exec turbo run build --filter=frameos-wasm
+          pnpm --filter @frameos-cloud/auth-web exec node scripts/generate-ai-context.mjs
+
       # Backend-linking flow against the Postgres service container.
       - name: auth-web
         if: startsWith(matrix.leg, 'auth-web ')

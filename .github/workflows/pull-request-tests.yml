@@ -322,14 +322,26 @@ jobs:
           path: frameos/quickjs
           key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
 
+      # Same key as the Nim shards' (the inputs prepare_assets.py fingerprints):
+      # on a hit `nimble assets` finds the frame's compiled assets current.
+      - name: Cache compiled assets
+        uses: actions/cache@v4
+        with:
+          path: |
+            frameos/assets/compiled
+            frameos/src/assets
+          key: ${{ runner.os }}-frameos-assets-${{ hashFiles('frameos/frontend/**', 'frameos/tools/prepare_assets.py', 'frameos/tools/generate_*.py', 'frontend/src/**', 'frontend/schema/**', 'frontend/public/**', 'frontend/scripts/generateRepoApps.mjs', 'frontend/package.json', 'repo/**', 'package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'versions.json') }}
+
       # No `nimble build` here: e2e/Makefile builds its own binary from a copy
       # of frameos/ with this shard's scenes compiled in, and that build is
-      # the one it runs. The one that used to be here was a minute of compile
-      # nobody ran.
+      # the one it runs (the one that used to be here was a minute of compile
+      # nobody ran). What it did that the copy needs is `nimble assets`, its
+      # `before build` hook: the copy has no frontend to build them from.
       - name: FrameOS nim setup
         run: |
           cd frameos
           nimble install -d
+          nimble assets
           nimble setup
           FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
 
@@ -838,6 +850,16 @@ jobs:
           path: frameos/quickjs
           key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
 
+      # Same key as the Nim shards' (the inputs prepare_assets.py fingerprints):
+      # on a hit `nimble assets` finds the frame's compiled assets current.
+      - name: Cache compiled assets
+        uses: actions/cache@v4
+        with:
+          path: |
+            frameos/assets/compiled
+            frameos/src/assets
+          key: ${{ runner.os }}-frameos-assets-${{ hashFiles('frameos/frontend/**', 'frameos/tools/prepare_assets.py', 'frameos/tools/generate_*.py', 'frontend/src/**', 'frontend/schema/**', 'frontend/public/**', 'frontend/scripts/generateRepoApps.mjs', 'frontend/package.json', 'repo/**', 'package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'versions.json') }}
+
       - name: Verify Docker
         run: docker version
 
@@ -957,10 +979,32 @@ jobs:
           path: frameos/quickjs
           key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
 
+      # Same key as the Nim shards' (the inputs prepare_assets.py fingerprints):
+      # on a hit `nimble assets` finds the frame's compiled assets current.
+      - name: Cache compiled assets
+        uses: actions/cache@v4
+        with:
+          path: |
+            frameos/assets/compiled
+            frameos/src/assets
+          key: ${{ runner.os }}-frameos-assets-${{ hashFiles('frameos/frontend/**', 'frameos/tools/prepare_assets.py', 'frameos/tools/generate_*.py', 'frontend/src/**', 'frontend/schema/**', 'frontend/public/**', 'frontend/scripts/generateRepoApps.mjs', 'frontend/package.json', 'repo/**', 'package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'versions.json') }}
+
+      # The pool's VM image registers qemu-user-static's binfmt handlers at
+      # boot (tools/gha-runners/bin/gha-image-build.sh); GitHub's do not.
       - uses: docker/setup-qemu-action@v3
+        if: runner.environment == 'github-hosted'
 
       - name: Verify Docker
         run: docker version
+
+      # The binary's nimcache, one archive like the Nim shards' (written by
+      # pushes to main only): a warm one leaves only what this commit changed
+      # to compile.
+      - name: Restore the runtime's nimcache
+        env:
+          FRAMEOS_NIMCACHE_ROOT: /mnt/cache/nimcache/runtime-e2e-archives
+          FRAMEOS_NIMCACHE_DIR: ${{ github.workspace }}/.tmp/runtime-nimcache
+        run: bash frameos/tools/ci_nimcache.sh restore 1
 
       - name: Build FrameOS
         run: |
@@ -970,7 +1014,14 @@ jobs:
           nimble build_quickjs --silent
           nimble setup
           FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
-          nimble build
+          nimble build --nimcache:"$GITHUB_WORKSPACE/.tmp/runtime-nimcache"
+
+      - name: Save the runtime's nimcache
+        if: ${{ !cancelled() && github.event_name == 'push' }}
+        env:
+          FRAMEOS_NIMCACHE_ROOT: /mnt/cache/nimcache/runtime-e2e-archives
+          FRAMEOS_NIMCACHE_DIR: ${{ github.workspace }}/.tmp/runtime-nimcache
+        run: bash frameos/tools/ci_nimcache.sh save 1
 
       - name: Run runtime render log E2E test
         run: |

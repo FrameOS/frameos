@@ -17,13 +17,15 @@ inputs:
 runs:
   using: composite
   steps:
-    # RUNNER_TOOL_CACHE is /__t inside a container job: the runner mounts the
-    # VM's tool cache there, store included.
+    # The image keeps the store next to the workspace (/home/runner/work, /__w
+    # inside a container job), so the checkout's node_modules can hardlink from
+    # it; images from before that kept it in the tool cache.
     - name: Look for the warm pnpm store
       id: warm
       shell: bash
       run: |
-        store="${RUNNER_TOOL_CACHE:-/nonexistent}/frameos-ci/pnpm-store"
+        store="$(dirname "$(dirname "$GITHUB_WORKSPACE")")/_frameos-ci/pnpm-store"
+        [ -d "$store" ] || store="${RUNNER_TOOL_CACHE:-/nonexistent}/frameos-ci/pnpm-store"
         if [ -d "$store" ]; then
           echo "warm=true" >> "$GITHUB_OUTPUT"
           echo "npm_config_store_dir=$store" >> "$GITHUB_ENV"
