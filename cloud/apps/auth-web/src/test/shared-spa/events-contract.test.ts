@@ -158,9 +158,11 @@ describe("the JavaScript `context`", () => {
     // The keys of a getter's top-level `case`: one `of "a":` or several, `of "a", "b":`.
     const caseKeys = (getter: string): string[] =>
       [...getter.matchAll(/^ {2}of ((?:"\w+", )*"\w+"):/gm)].flatMap((m) => (m[1] ?? "").match(/\w+/g) ?? []);
-    const codeRuntime = repoFile("frameos/src/frameos/js_runtime/runtime.nim");
-    const getter = codeRuntime.slice(codeRuntime.indexOf("proc jsGetContext"), codeRuntime.indexOf("# Chrono proxies"));
-    expect(caseKeys(getter).sort()).toEqual([...codeContextKeys].sort());
+    // A code node's snippet reads it from the compiled scene program's natives
+    // (interpreter.nim `contextValue`, docs/scene-compiler.md).
+    const interpreter = repoFile("frameos/src/frameos/interpreter.nim");
+    const codeGetter = interpreter.slice(interpreter.indexOf("proc contextValue"));
+    expect(caseKeys(codeGetter.slice(0, codeGetter.indexOf("\nproc ", 10))).sort()).toEqual([...codeContextKeys].sort());
     const appRuntime = repoFile("frameos/src/frameos/js_runtime/app_runtime.nim");
     const appGetter = appRuntime.slice(appRuntime.indexOf("proc jsGetAppContext"));
     expect(caseKeys(appGetter.slice(0, appGetter.indexOf("\nproc ", 10))).sort()).toEqual([...appContextKeys].sort());
