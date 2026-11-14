@@ -20,8 +20,19 @@ typedef struct fos_js_heap_budget {
     size_t used_bytes;
 } fos_js_heap_budget_t;
 
-/* fos_js_new_runtime, plus the scene's shared budget (NULL for none). */
-struct JSRuntime *fos_js_new_runtime_budgeted(fos_js_heap_budget_t *budget);
+/* One runtime's account, its malloc state's opaque: the scene budget it draws
+ * on (NULL for none) and the bytes its own allocations hold, kept step for
+ * step with QuickJS's malloc_size so that reading it needs no walk of the
+ * heap (JS_ComputeMemoryUsage, 3.9 KB of flash). Layout matches
+ * JsRuntimeAccount in burrito.nim, which owns it and frees it only after
+ * JS_FreeRuntime (the runtime's last free still reads it). */
+typedef struct fos_js_runtime_account {
+    fos_js_heap_budget_t *budget;
+    size_t bytes;
+} fos_js_runtime_account_t;
+
+/* fos_js_new_runtime, with that account (NULL for none). */
+struct JSRuntime *fos_js_new_runtime_accounted(fos_js_runtime_account_t *account);
 
 // Create a JSRuntime whose allocations go to PSRAM (8-bit capable SPIRAM,
 // falling back to internal RAM when PSRAM is absent), with a memory limit

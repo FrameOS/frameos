@@ -477,6 +477,14 @@ type
     limitBytes*: csize_t
     usedBytes*: csize_t
 
+  JsRuntimeAccount* = object
+    ## One ESP32 runtime's malloc opaque (fos_js_runtime_account_t in
+    ## fos_qjs_glue.h, same layout): the scene budget it draws on and the
+    ## bytes its allocations hold, which the glue's allocator keeps in step
+    ## with QuickJS's malloc_size. Raw memory, freed after JS_FreeRuntime.
+    budget*: ptr JsHeapBudget
+    bytes*: csize_t
+
   # Context data to pass to C callbacks
   BurritoContextData* = object
     functions*: Table[cint, NimFunctionEntry]
@@ -509,6 +517,7 @@ type
     nextFunctionId*: cint
     config*: QuickJSConfig
     guard*: ptr JsExecutionGuard
+    account*: ptr JsRuntimeAccount ## the ESP32's; nil elsewhere
 
   JSException* = object of CatchableError
     jsValue*: JSValue
@@ -1451,16 +1460,21 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
     # Created by the frameos_quickjs IDF component: allocators backed by
     # PSRAM (heap_caps_malloc), a stack limit sized for the render task, and
     # the scene's shared heap budget when the caller has one.
-    proc fos_js_new_runtime_budgeted(budget: pointer): ptr JSRuntime {.importc: "fos_js_new_runtime_budgeted",
+    proc fos_js_new_runtime_accounted(account: pointer): ptr JSRuntime {.importc: "fos_js_new_runtime_accounted",
         header: "fos_qjs_glue.h".}
-    let rt = fos_js_new_runtime_budgeted(cast[pointer](config.heapBudget))
+    let account = cast[ptr JsRuntimeAccount](alloc0(sizeof(JsRuntimeAccount)))
+    account.budget = config.heapBudget
+    let rt = fos_js_new_runtime_accounted(account)
   else:
+    let account: ptr JsRuntimeAccount = nil
     let rt =
       if config.heapBudget != nil:
         JS_NewRuntime2(addr budgetedMallocFuncs, cast[pointer](config.heapBudget))
       else:
         JS_NewRuntime()
   if rt == nil:
+    if account != nil:
+      dealloc(account)
     raise newException(JSException, "Failed to create QuickJS runtime")
   # A function's own source text, kept for toString, which no app reads:
   # about 20 KB of every app interpreter's heap. Line numbers stay (errors
@@ -1477,6 +1491,8 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
   let ctx = JS_NewContext(rt)
   if ctx == nil:
     JS_FreeRuntime(rt)
+    if account != nil:
+      dealloc(account)
     raise newException(JSException, "Failed to create QuickJS context")
 
   let guard = cast[ptr JsExecutionGuard](alloc0(sizeof(JsExecutionGuard)))
@@ -1516,7 +1532,7 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
   JS_SetContextOpaque(ctx, contextData)
 
   result = QuickJS(runtime: rt, context: ctx, contextData: contextData, nextFunctionId: 1, config: config,
-                   guard: guard)
+                   guard: guard, account: account)
 
 proc close*(js: var QuickJS) =
   ## Clean up QuickJS instance with proper sequence to avoid memory issues
@@ -1559,14 +1575,25 @@ proc close*(js: var QuickJS) =
     dealloc(js.guard)
     js.guard = nil
 
+  # After JS_FreeRuntime, whose last free (the runtime's own block) reads it.
+  if js.account != nil:
+    dealloc(js.account)
+    js.account = nil
+
 proc heapBytes*(js: QuickJS): int =
-  ## The bytes this interpreter's heap holds, by QuickJS's own accounting.
-  ## Walks the heap: not for every frame.
+  ## The bytes this interpreter's heap holds, by QuickJS's own accounting
+  ## (malloc_size). The ESP32's account holds the same count; elsewhere it is
+  ## a walk of the heap: not for every frame.
   if js.runtime == nil:
     return 0
-  var usage: JSMemoryUsage
-  JS_ComputeMemoryUsage(js.runtime, addr usage)
-  max(0, usage.malloc_size.int)
+  when defined(frameosEmbedded):
+    if js.account == nil:
+      return 0
+    js.account.bytes.int
+  else:
+    var usage: JSMemoryUsage
+    JS_ComputeMemoryUsage(js.runtime, addr usage)
+    max(0, usage.malloc_size.int)
 
 proc abandon*(js: var QuickJS): int {.discardable.} =
   ## Let go of an interpreter that an out-of-memory abort jumped out of
@@ -1581,9 +1608,7 @@ proc abandon*(js: var QuickJS): int {.discardable.} =
   ## Its bytes come off the scene's heap budget, which they no longer serve.
   if js.runtime == nil:
     return 0
-  var usage: JSMemoryUsage
-  JS_ComputeMemoryUsage(js.runtime, addr usage)
-  result = max(0, usage.malloc_size.int)
+  result = js.heapBytes()
   let budget = js.config.heapBudget
   if budget != nil:
     let held = result.csize_t

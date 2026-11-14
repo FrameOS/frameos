@@ -4,7 +4,8 @@
 // they would all land in scarce internal SRAM. These allocators send every
 // QuickJS allocation to PSRAM explicitly (MALLOC_CAP_SPIRAM), falling back to
 // any 8-bit-capable heap on PSRAM-less boards. Accounting mirrors quickjs.c's
-// js_def_malloc so JS_ComputeMemoryUsage and the malloc limit keep working.
+// js_def_malloc so the malloc limit keeps working, and each runtime's account
+// holds the same byte count (burrito.nim's heapBytes reads it).
 
 #include <assert.h>
 #include <stdbool.h>
@@ -42,13 +43,20 @@ static size_t fos_js_usable_size(const void *ptr)
     return heap_caps_get_allocated_size((void *)ptr);
 }
 
-/* The scene-wide ceiling shared by every runtime of one scene (its context
- * plus one per JS app node), handed in as the malloc state's opaque by
- * fos_js_new_runtime_budgeted. The per-runtime malloc_limit still applies;
- * this stops N runtimes from claiming N × that limit of PSRAM. */
+/* The runtime's account (fos_qjs_glue.h), handed in as the malloc state's
+ * opaque by fos_js_new_runtime_accounted. Its budget is the scene-wide
+ * ceiling shared by every runtime of one scene (its context plus one per JS
+ * app node): the per-runtime malloc_limit still applies; this stops N
+ * runtimes from claiming N × that limit of PSRAM. */
+static inline fos_js_runtime_account_t *fos_js_account(JSMallocState *s)
+{
+    return (fos_js_runtime_account_t *)s->opaque;
+}
+
 static inline fos_js_heap_budget_t *fos_js_budget(JSMallocState *s)
 {
-    return (fos_js_heap_budget_t *)s->opaque;
+    fos_js_runtime_account_t *a = fos_js_account(s);
+    return a != NULL ? a->budget : NULL;
 }
 
 static inline bool fos_js_budget_allows(fos_js_heap_budget_t *b, size_t extra)
@@ -56,15 +64,23 @@ static inline bool fos_js_budget_allows(fos_js_heap_budget_t *b, size_t extra)
     return b == NULL || b->limit_bytes == 0 || b->used_bytes + extra <= b->limit_bytes;
 }
 
-static inline void fos_js_budget_charge(fos_js_heap_budget_t *b, size_t bytes)
+static inline void fos_js_charge(JSMallocState *s, size_t bytes)
 {
-    if (b != NULL) b->used_bytes += bytes;
+    fos_js_runtime_account_t *a = fos_js_account(s);
+    s->malloc_size += bytes;
+    if (a == NULL) return;
+    a->bytes += bytes;
+    if (a->budget != NULL) a->budget->used_bytes += bytes;
 }
 
-static inline void fos_js_budget_release(fos_js_heap_budget_t *b, size_t bytes)
+static inline void fos_js_release(JSMallocState *s, size_t bytes)
 {
-    if (b == NULL) return;
-    b->used_bytes = b->used_bytes > bytes ? b->used_bytes - bytes : 0;
+    fos_js_runtime_account_t *a = fos_js_account(s);
+    s->malloc_size -= bytes;
+    if (a == NULL) return;
+    a->bytes -= bytes; /* in step with malloc_size, which the same calls built */
+    fos_js_heap_budget_t *b = a->budget;
+    if (b != NULL) b->used_bytes = b->used_bytes > bytes ? b->used_bytes - bytes : 0;
 }
 
 static void *fos_js_malloc(JSMallocState *s, size_t size)
@@ -80,9 +96,7 @@ static void *fos_js_malloc(JSMallocState *s, size_t size)
     if (ptr == NULL)
         return NULL;
     s->malloc_count++;
-    size_t charged = fos_js_usable_size(ptr) + FOS_JS_MALLOC_OVERHEAD;
-    s->malloc_size += charged;
-    fos_js_budget_charge(fos_js_budget(s), charged);
+    fos_js_charge(s, fos_js_usable_size(ptr) + FOS_JS_MALLOC_OVERHEAD);
     return ptr;
 }
 
@@ -91,9 +105,7 @@ static void fos_js_free(JSMallocState *s, void *ptr)
     if (ptr == NULL)
         return;
     s->malloc_count--;
-    size_t charged = fos_js_usable_size(ptr) + FOS_JS_MALLOC_OVERHEAD;
-    s->malloc_size -= charged;
-    fos_js_budget_release(fos_js_budget(s), charged);
+    fos_js_release(s, fos_js_usable_size(ptr) + FOS_JS_MALLOC_OVERHEAD);
     heap_caps_free(ptr);
 }
 
@@ -141,11 +153,10 @@ static void *fos_js_realloc(JSMallocState *s, void *ptr, size_t size)
     if (new_ptr == NULL)
         return NULL;
     size_t new_size = fos_js_usable_size(new_ptr);
-    s->malloc_size += new_size - old_size;
     if (new_size >= old_size)
-        fos_js_budget_charge(fos_js_budget(s), new_size - old_size);
+        fos_js_charge(s, new_size - old_size);
     else
-        fos_js_budget_release(fos_js_budget(s), old_size - new_size);
+        fos_js_release(s, old_size - new_size);
     return new_ptr;
 }
 
@@ -156,9 +167,9 @@ static const JSMallocFunctions fos_js_malloc_funcs = {
     .js_malloc_usable_size = fos_js_usable_size,
 };
 
-struct JSRuntime *fos_js_new_runtime_budgeted(fos_js_heap_budget_t *budget)
+struct JSRuntime *fos_js_new_runtime_accounted(fos_js_runtime_account_t *account)
 {
-    JSRuntime *rt = JS_NewRuntime2(&fos_js_malloc_funcs, budget);
+    JSRuntime *rt = JS_NewRuntime2(&fos_js_malloc_funcs, account);
     if (rt == NULL)
         return NULL;
     JS_SetMemoryLimit(rt, FOS_JS_MEMORY_LIMIT);
@@ -168,5 +179,5 @@ struct JSRuntime *fos_js_new_runtime_budgeted(fos_js_heap_budget_t *budget)
 
 struct JSRuntime *fos_js_new_runtime(void)
 {
-    return fos_js_new_runtime_budgeted(NULL);
+    return fos_js_new_runtime_accounted(NULL);
 }

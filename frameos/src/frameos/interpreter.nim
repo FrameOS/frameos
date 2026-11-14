@@ -872,6 +872,41 @@ proc evalCacheExpression(scene: InterpretedFrameScene, context: ExecutionContext
     })
     (false, newJNull())
 
+proc logInputError(self: FrameScene, event: string, nodeId: NodeId, input: string,
+    producer: NodeId, code: string, e: ref Exception, zero: JsonNode = nil,
+    sceneKey = "sceneId", inputKey = "input") {.noinline.} =
+  ## The line runNode writes when one of a node's inputs fails: from a
+  ## producer node, or from inline code when `producer` is NoNodeId, with the
+  ## zero value the input got instead when there is one. One builder for the
+  ## eight such lines: each `%*{…}` at its own site was ~300 B of flash.
+  let line = newJObject()
+  line["event"] = %event
+  line[sceneKey] = %self.id.string
+  line["nodeId"] = %nodeId.int
+  line[inputKey] = %input
+  if producer == NoNodeId:
+    line["code"] = %code
+  else:
+    line["producer"] = %producer.int
+  line["error"] = %e.msg
+  line["stacktrace"] = %e.getStackTrace()
+  if zero != nil:
+    line["defaulted"] = %true
+    line["defaultValue"] = zero
+  self.logger.log(line)
+
+proc logGraphStop(self: FrameScene, event: string, startNodeId, atNodeId: NodeId,
+    limit = 0) {.noinline.} =
+  ## runNode's flow stopped: a hop limit (`limit`) or a node visited twice.
+  let line = newJObject()
+  line["event"] = %event
+  line["sceneId"] = %self.id.string
+  line["startNodeId"] = %startNodeId.int
+  line["atNodeId"] = %atNodeId.int
+  if limit > 0:
+    line["limit"] = %limit
+  self.logger.log(line)
+
 const MaxRunNodeDepth = 64
   ## Producer inputs are resolved by recursion (an app's field wired from a
   ## node wired from a node …), and the cycle check below only covers the
@@ -901,21 +936,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
   while currentNodeId != -1.NodeId:
     inc hops
     if hops > maxHops:
-      self.logger.log(%*{
-        "event": "interpreter:graph:hopLimit",
-        "sceneId": self.id.string,
-        "startNodeId": nodeId.int,
-        "atNodeId": currentNodeId.int,
-        "limit": maxHops
-      })
+      logGraphStop(self, "interpreter:graph:hopLimit", nodeId, currentNodeId, maxHops)
       break
     if visited.hasKey(currentNodeId):
-      self.logger.log(%*{
-        "event": "interpreter:graph:cycle",
-        "sceneId": self.id.string,
-        "startNodeId": nodeId.int,
-        "atNodeId": currentNodeId.int
-      })
+      logGraphStop(self, "interpreter:graph:cycle", nodeId, currentNodeId)
       break
     visited[currentNodeId] = true
 
@@ -1099,15 +1123,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                 builtInputKey[inputName] = valueToKeyJson(vIn)
                 builtAnyInput = true
             except Exception as e:
-              self.logger.log(%*{
-                "event": "interpreter:setField:error",
-                "sceneId": self.id,
-                "nodeId": currentNodeId.int,
-                "input": inputName,
-                "producer": producerNodeId.int,
-                "error": $e.msg,
-                "stacktrace": e.getStackTrace()
-              })
+              logInputError(self, "interpreter:setField:error", currentNodeId, inputName,
+                producerNodeId, "", e)
               # The producer may have consumed the decode target before it
               # failed, which is the exact state mayMutateImageInPlace reads as
               # "the chain fused". It did not — and the substitute image below
@@ -1160,15 +1177,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               builtInputKey[inputName] = valueToKeyJson(vIn)
               builtAnyInput = true
           except Exception as e:
-            self.logger.log(%*{
-              "event": "interpreter:setField:error:inlineCode",
-              "sceneId": self.id,
-              "nodeId": currentNodeId.int,
-              "input": inputName,
-              "code": codeSnippet,
-              "error": $e.msg,
-              "stacktrace": e.getStackTrace()
-            })
+            logInputError(self, "interpreter:setField:error:inlineCode", currentNodeId, inputName,
+              NoNodeId, codeSnippet, e)
 
       if setDecodeTargetHint:
         context.decodeTargetImage = nil
@@ -1237,15 +1247,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               let vIn = runNode(self, producerNodeId, context, asDataNode = true)
               payload[inputName] = valueToJson(vIn)
             except Exception as e:
-              self.logger.log(%*{
-                "event": "interpreter:dispatch:setField:error",
-                "sceneId": self.id,
-                "nodeId": currentNodeId.int,
-                "input": inputName,
-                "producer": producerNodeId.int,
-                "error": $e.msg,
-                "stacktrace": e.getStackTrace()
-              })
+              logInputError(self, "interpreter:dispatch:setField:error", currentNodeId, inputName,
+                producerNodeId, "", e)
 
       if self.appInlineInputsForNodeId.hasKey(currentNodeId):
         let inlineConnected = self.appInlineInputsForNodeId[currentNodeId]
@@ -1257,15 +1260,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                                  inputName)
             payload[inputName] = valueToJson(vIn)
           except Exception as e:
-            self.logger.log(%*{
-              "event": "interpreter:dispatch:setField:error:inlineCode",
-              "sceneId": self.id,
-              "nodeId": currentNodeId.int,
-              "input": inputName,
-              "code": codeSnippet,
-              "error": $e.msg,
-              "stacktrace": e.getStackTrace()
-            })
+            logInputError(self, "interpreter:dispatch:setField:error:inlineCode", currentNodeId, inputName,
+              NoNodeId, codeSnippet, e)
 
       var finalPayload = payload
       if eventName == "setSceneState":
@@ -1355,17 +1351,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               # and `[...undefined]` throws, killing every *other* data source
               # merged in the same expression.
               let zero = zeroValueForCodeArgType(argTypes.getOrDefault(argName, ""))
-              self.logger.log(%*{
-                "event": "interpreter:codeArg:error",
-                "sceneId": self.id,
-                "nodeId": currentNodeId.int,
-                "arg": argName,
-                "producer": producerNodeId.int,
-                "error": $e.msg,
-                "stacktrace": e.getStackTrace(),
-                "defaulted": true,
-                "defaultValue": valueToJson(zero)
-              })
+              logInputError(self, "interpreter:codeArg:error", currentNodeId, argName,
+                producerNodeId, "", e, valueToJson(zero), inputKey = "arg")
               args[argName] = zero
               if not argTypes.hasKey(argName):
                 argTypes[argName] = ""
@@ -1394,17 +1381,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
             # Same reasoning as the connected-producer path above: substitute
             # the zero value so downstream code sees "no data", not `undefined`.
             let zero = zeroValueForCodeArgType(argTypes.getOrDefault(argName, ""))
-            self.logger.log(%*{
-              "event": "interpreter:codeArg:error:inlineCode",
-              "sceneId": self.id,
-              "nodeId": currentNodeId.int,
-              "arg": argName,
-              "code": snippet,
-              "error": $e.msg,
-              "stacktrace": e.getStackTrace(),
-              "defaulted": true,
-              "defaultValue": valueToJson(zero)
-            })
+            logInputError(self, "interpreter:codeArg:error:inlineCode", currentNodeId, argName,
+              NoNodeId, snippet, e, valueToJson(zero), inputKey = "arg")
             args[argName] = zero
             if not argTypes.hasKey(argName):
               argTypes[argName] = ""
@@ -1504,15 +1482,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
             let v = runNode(self, producerNodeId, context, asDataNode = true)
             childScene.state[inputName] = valueToJson(v)
           except Exception as e:
-            self.logger.log(%*{
-              "event": "interpreter:setChildState:error",
-              "parentSceneId": self.id,
-              "nodeId": currentNodeId.int,
-              "input": inputName,
-              "producer": producerNodeId.int,
-              "error": $e.msg,
-              "stacktrace": e.getStackTrace()
-            })
+            logInputError(self, "interpreter:setChildState:error", currentNodeId, inputName,
+              producerNodeId, "", e, sceneKey = "parentSceneId")
 
       if self.appInlineInputsForNodeId.hasKey(currentNodeId):
         let inlineConnected = self.appInlineInputsForNodeId[currentNodeId]
@@ -1524,15 +1495,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                                inputName)
             childScene.state[inputName] = valueToJson(v)
           except Exception as e:
-            self.logger.log(%*{
-              "event": "interpreter:setChildState:error:inlineCode",
-              "parentSceneId": self.id,
-              "nodeId": currentNodeId.int,
-              "input": inputName,
-              "code": codeSnippet,
-              "error": $e.msg,
-              "stacktrace": e.getStackTrace()
-            })
+            logInputError(self, "interpreter:setChildState:error:inlineCode", currentNodeId, inputName,
+              NoNodeId, codeSnippet, e, sceneKey = "parentSceneId")
 
       # Delegate handling of the current event to the child scene.
       exportedChild = self.sceneExportByNodeId[currentNodeId]
@@ -2376,75 +2340,8 @@ proc clearRunNodeStacks*(scene: FrameScene) =
     clearRunNodeStacks(child)
 
 # -------------------------
-# Serialization hooks
+# Writing scene types with jsony (toJson); reading is below
 # -------------------------
-
-proc renameHook*(v: var DiagramNode, fieldName: var string) =
-  if fieldName == "type":
-    fieldName = "nodeType"
-
-proc renameHook*(v: var DiagramEdge, fieldName: var string) =
-  if fieldName == "type":
-    fieldName = "edgeType"
-
-proc renameHook*(v: var StateField, fieldName: var string) =
-  if fieldName == "type":
-    fieldName = "fieldType"
-
-# The id as the scene JSON wrote it, for the node whose `id` was parsed last:
-# postHook below puts it on that node's data as `__frameosSourceNodeId`, the
-# name an error line gives the editor. Set here, read there, on one thread.
-var lastParsedNodeIdSource {.threadvar.}: tuple[source: string, id: NodeId]
-
-proc parseHook*(s: string, i: var int, v: var NodeId) =
-  var str: string
-  parseHook(s, i, str)
-  if nodeMappingTable.hasKey(str):
-    v = nodeMappingTable[str]
-  else:
-    globalNodeCounter += 1
-    nodeMappingTable[str] = NodeId(globalNodeCounter)
-    v = NodeId(globalNodeCounter)
-  lastParsedNodeIdSource = (str, v)
-
-proc postHook*(v: var DiagramNode) =
-  ## The scene used to be parsed into a JsonNode, each node's id copied into
-  ## its data, the tree serialized again and parsed a second time with jsony:
-  ## three passes over every scene on every load, ~35 ms per 6 KB of scene on
-  ## an ESP32 and half a second for the Weather sample, on every wake
-  ## (2026-11-07). The id is written on the way through instead.
-  if lastParsedNodeIdSource.id == v.id and lastParsedNodeIdSource.source.len > 0:
-    if v.data.isNil or v.data.kind != JObject:
-      v.data = newJObject()
-    if not v.data.hasKey("__frameosSourceNodeId"):
-      v.data["__frameosSourceNodeId"] = %lastParsedNodeIdSource.source
-
-type RawStateFieldOption = object
-  value: string
-  label: string
-
-proc parseHook*(s: string, i: var int, v: var StateFieldOption) =
-  ## A select option is stored either as "value" (the value doubles as the
-  ## label) or as {"value": .., "label": ..}. Editors have also shipped numbers
-  ## and half-filled objects, and a scene that fails to parse takes the whole
-  ## frame down, so take whatever is there.
-  eatSpace(s, i)
-  if i < s.len and s[i] == '{':
-    var raw: RawStateFieldOption
-    parseHook(s, i, raw)
-    v = StateFieldOption(value: raw.value, label: if raw.label != "": raw.label else: raw.value)
-  elif i < s.len and s[i] == '"':
-    var tmp: string
-    parseHook(s, i, tmp)
-    v = StateFieldOption(value: tmp, label: tmp)
-  elif i < s.len and s[i] == '[':
-    # Nothing usable, but consume it so the rest of the scene still parses.
-    skipValue(s, i)
-    v = StateFieldOption()
-  else:
-    let symbol = parseSymbol(s, i)
-    let value = if symbol == "null": "" else: symbol
-    v = StateFieldOption(value: value, label: value)
 
 proc dumpHook*(s: var string, v: StateFieldOption) =
   ## Round-trips back to the shape it came in as: a bare string unless it
@@ -2458,42 +2355,215 @@ proc dumpHook*(s: var string, v: StateFieldOption) =
     dumpHook(s, v.label)
     s.add('}')
 
-proc parseHook*(s: string, i: var int, v: var SceneId) =
-  var tmp: string
-  parseHook(s, i, tmp)
-  v = SceneId(tmp)
-
-proc parseHook*(s: string, i: var int, v: var SplitLayoutMarker) =
-  ## The layout itself is the editor's; the runtime only needs to know it is
-  ## there. Skipping it keeps the parsed layout out of a firmware that would
-  ## never read it.
-  eatSpace(s, i)
-  v.present = i < s.len and s[i] == '{'
-  skipValue(s, i)
-
 proc dumpHook*(s: var string, v: SplitLayoutMarker) =
   s.add(if v.present: "{}" else: "null")
-
-proc parseHook*(s: string, i: var int, v: var Color) =
-  var tmp: string
-  parseHook(s, i, tmp)
-  v = parseHtmlColor(tmp)
 
 proc dumpHook*(s: var string, v: Color) =
   s.add('"')
   s.add(toHtmlHex(v))
   s.add('"')
 
-proc jsonNodeIdString(value: JsonNode): string =
-  if value.isNil:
-    return ""
-  case value.kind
-  of JString:
-    return value.getStr()
-  of JInt:
-    return $value.getInt()
+# -------------------------
+# Reading scenes.json
+# -------------------------
+#
+# jsony's untyped pieces (strings, numbers, JsonNode, skipping a value) and a
+# loop per type over the keys. jsony read this JSON straight into the types
+# until 2026-11-14, and its generic typed parse was 27 KB of the ESP32
+# firmware, all for this one call; a tree from std/json walked afterwards was
+# a third the size and three times slower, which a deep sleeper pays on every
+# wake. The loops read the JSON as jsony did: a key names a field by its name
+# or its snake_case form ("type" is the node's, the edge's and the field's
+# kind), the last of a repeated key wins, an absent key leaves the default, a
+# JSON field keeps the value it was given (null included), unknown keys are
+# skipped without being built, and node ids are numbered in the order the
+# document names them. Where jsony refused a value of the wrong type (a number
+# for a name, null for a list) the loops take the default instead: a scene
+# that fails to parse takes the whole frame down. tests/test_scene_reader.nim
+# reads every repo and e2e scene both ways and compares.
+
+proc mapSourceNodeId*(source: string): NodeId =
+  ## The runtime's id for a node id as the scene JSON wrote it: one table for
+  ## every scene loaded, so the same name is the same node across reloads.
+  if nodeMappingTable.hasKey(source):
+    return nodeMappingTable[source]
+  globalNodeCounter += 1
+  result = NodeId(globalNodeCounter)
+  nodeMappingTable[source] = result
+
+proc openValue(s: string, i: var int, open: char): bool =
+  ## At `open` ('{' or '['): consumes it. At anything else (null, a number, the
+  ## other bracket): skips that value, and the field keeps its default.
+  eatSpace(s, i)
+  if i < s.len and s[i] == open:
+    inc i
+    return true
+  skipValue(s, i)
+
+proc expectChar(s: string, i: var int, c: char) =
+  ## jsony's eatChar, which is a template: its message is built once here.
+  eatSpace(s, i)
+  if i < s.len and s[i] == c:
+    inc i
   else:
-    return ""
+    raise newException(jsony.JsonError, "Expected " & c & " at offset " & $i)
+
+proc moreItems(s: string, i: var int, close: char): bool =
+  ## Before the next key or item of the object or list `openValue` opened:
+  ## false at its end, `close` consumed. The end of the text or the other
+  ## bracket raises, so a broken scene can never loop here.
+  eatSpace(s, i)
+  if i < s.len and s[i] == ',':
+    inc i
+    eatSpace(s, i)
+  if i >= s.len or s[i] in {'}', ']'}:
+    expectChar(s, i, close)
+    return false
+  true
+
+proc readKey(s: string, i: var int): string =
+  parseHook(s, i, result)
+  expectChar(s, i, ':')
+
+proc readText(s: string, i: var int): string =
+  ## A string; null and anything else are "" (anything else is skipped).
+  eatSpace(s, i)
+  if i < s.len and s[i] in {'"', 'n'}:
+    parseHook(s, i, result)
+  elif i < s.len and s[i] in {'-', '+', '0'..'9', 't', 'f'}:
+    result = parseSymbol(s, i) # a number or a boolean, as written
+  else:
+    skipValue(s, i)
+
+proc readNumber(s: string, i: var int): float =
+  eatSpace(s, i)
+  if i < s.len and s[i] in {'-', '+', '0'..'9'}:
+    parseHook(s, i, result)
+  else:
+    skipValue(s, i)
+
+proc readFlag(s: string, i: var int): bool =
+  eatSpace(s, i)
+  if i < s.len and s[i] in {'t', 'f'}:
+    parseHook(s, i, result)
+  else:
+    skipValue(s, i)
+
+proc readJson(s: string, i: var int): JsonNode =
+  parseHook(s, i, result)
+
+proc readNode(s: string, i: var int): DiagramNode =
+  result = DiagramNode()
+  var source = ""
+  while moreItems(s, i, '}'):
+    case readKey(s, i)
+    of "id":
+      source = readText(s, i)
+      result.id = mapSourceNodeId(source)
+    of "data": result.data = readJson(s, i)
+    of "type", "nodeType", "node_type": result.nodeType = readText(s, i)
+    else: skipValue(s, i)
+  # The id as the scene wrote it goes on the node's data, as
+  # `__frameosSourceNodeId`: the name an error line gives the editor.
+  if source.len > 0:
+    if result.data.isNil or result.data.kind != JObject:
+      result.data = newJObject()
+    if not result.data.hasKey("__frameosSourceNodeId"):
+      result.data["__frameosSourceNodeId"] = newJString(source)
+
+proc readEdge(s: string, i: var int): DiagramEdge =
+  result = DiagramEdge()
+  while moreItems(s, i, '}'):
+    case readKey(s, i)
+    of "id": result.id = mapSourceNodeId(readText(s, i))
+    of "source": result.source = mapSourceNodeId(readText(s, i))
+    of "target": result.target = mapSourceNodeId(readText(s, i))
+    of "sourceHandle", "source_handle": result.sourceHandle = readText(s, i)
+    of "targetHandle", "target_handle": result.targetHandle = readText(s, i)
+    of "data": result.data = readJson(s, i)
+    of "type", "edgeType", "edge_type": result.edgeType = readText(s, i)
+    else: skipValue(s, i)
+
+proc readOption(s: string, i: var int): StateFieldOption =
+  ## A select option is stored either as "value" (the value doubles as the
+  ## label) or as {"value": .., "label": ..}. Editors have also shipped numbers
+  ## and half-filled objects, and a scene that fails to parse takes the whole
+  ## frame down, so take whatever is there.
+  eatSpace(s, i)
+  if i < s.len and s[i] == '{':
+    inc i
+    while moreItems(s, i, '}'):
+      case readKey(s, i)
+      of "value": result.value = readText(s, i)
+      of "label": result.label = readText(s, i)
+      else: skipValue(s, i)
+  else:
+    result.value = readText(s, i) # a list is nothing usable, and skipped
+  if result.label == "":
+    result.label = result.value
+
+proc readField(s: string, i: var int): StateField =
+  result = StateField()
+  while moreItems(s, i, '}'):
+    case readKey(s, i)
+    of "name": result.name = readText(s, i)
+    of "label": result.label = readText(s, i)
+    of "type", "fieldType", "field_type": result.fieldType = readText(s, i)
+    of "value": result.value = readJson(s, i)
+    of "options":
+      result.options = @[]
+      if openValue(s, i, '['):
+        while moreItems(s, i, ']'):
+          result.options.add(readOption(s, i))
+    of "placeholder": result.placeholder = readText(s, i)
+    of "required": result.required = readFlag(s, i)
+    of "secret": result.secret = readFlag(s, i)
+    of "persist": result.persist = readText(s, i)
+    of "access": result.access = readText(s, i)
+    of "showIf", "show_if": result.showIf = readJson(s, i)
+    of "role": result.role = readText(s, i)
+    else: skipValue(s, i)
+
+proc readSettings(s: string, i: var int): FrameSceneSettings =
+  result = FrameSceneSettings()
+  while moreItems(s, i, '}'):
+    case readKey(s, i)
+    # A color that does not parse refuses the scene, as it always has.
+    of "backgroundColor", "background_color": result.backgroundColor = parseHtmlColor(readText(s, i))
+    of "refreshInterval", "refresh_interval": result.refreshInterval = readNumber(s, i)
+    of "renderScale", "render_scale": result.renderScale = readNumber(s, i)
+    # The split drawer's layout is the editor's; the runtime only asks
+    # whether it is there.
+    of "splitScreenLayout", "split_screen_layout":
+      eatSpace(s, i)
+      result.splitScreenLayout.present = i < s.len and s[i] == '{'
+      skipValue(s, i)
+    of "isLayout", "is_layout": result.isLayout = readFlag(s, i)
+    else: skipValue(s, i)
+
+proc readList[T](s: string, i: var int, read: proc(s: string, i: var int): T {.nimcall.}): seq[T] =
+  ## A list of objects; an item that is not one (null) is skipped.
+  if openValue(s, i, '['):
+    while moreItems(s, i, ']'):
+      if openValue(s, i, '{'):
+        result.add(read(s, i))
+
+proc readScene(s: string, i: var int): FrameSceneInput =
+  result = FrameSceneInput()
+  while moreItems(s, i, '}'):
+    case readKey(s, i)
+    of "id": result.id = readText(s, i).SceneId
+    of "name": result.name = readText(s, i)
+    of "nodes": result.nodes = readList(s, i, readNode)
+    of "edges": result.edges = readList(s, i, readEdge)
+    of "apps": result.apps = readJson(s, i)
+    of "fields": result.fields = readList(s, i, readField)
+    of "settings": result.settings = if openValue(s, i, '{'): readSettings(s, i) else: nil
+    of "origin": result.origin = readJson(s, i)
+    of "customEvents", "custom_events": result.customEvents = readJson(s, i)
+    of "eventMap", "event_map": result.eventMap = readJson(s, i)
+    of "layout": result.layout = readJson(s, i)
+    else: skipValue(s, i)
 
 # -------------------------
 # Scene registry (loader)
@@ -2543,10 +2613,14 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
   )
 
 proc parseInterpretedSceneInputs*(data: string): seq[FrameSceneInput] =
+  ## scenes.json, an array of scenes ("Reading scenes.json" above).
   if data == "":
     return @[]
-  # Each node's source id lands on its data as it is parsed (postHook above).
-  data.fromJson(seq[FrameSceneInput])
+  var i = 0
+  expectChar(data, i, '[') # anything but a list refuses the payload
+  while moreItems(data, i, ']'):
+    if openValue(data, i, '{'):
+      result.add(readScene(data, i))
 
 proc buildInterpretedScenes*(scenes: seq[FrameSceneInput]): Table[SceneId, ExportedInterpretedScene] =
   result = initTable[SceneId, ExportedInterpretedScene]()

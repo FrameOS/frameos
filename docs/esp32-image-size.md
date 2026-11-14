@@ -669,15 +669,69 @@ small-devices section.
   hundred bytes of module literals. A JS port moves no bytes worth having:
   the small ones (ifElse, clock, parseJson, log) are 0.5–1.5 KB each, and as
   JS apps every scene using them would start an interpreter.
-- **jsony for scenes**: `parseInterpretedSceneInputs` instantiates ~25 KB of
-  `parseHook` / `parseObjectInner` for five types. Reading `std/json`'s tree
-  (linked anyway) by hand would be ~5–7 KB: about −18 KB, not measured, and
-  it is the scene loader, so it wants care (rename and post hooks, defaults).
-- **Seq hooks**: `setLen` ×136 (14.1 KB), `add` ×108 (9.2 KB), `shrink` ×91
-  (5.6 KB). One implementation per element size for plain-data element types
-  would take perhaps a third; a `patchFile` of `system/seqs_v2`.
+- jsony for scenes and the seq hooks: done, see "Four cuts after 2026.11.7"
+  below.
 - **The font to the state partition**: −57.9 KB per slot, but it must be there
   before provisioning (the merged image's SPIFFS image) and survive OTA.
-- `%*{…}` log sites (`runNode` alone has 33 and is 29 KB), `appCapabilities` built at run
-  time (~3 KB), the float-32 libm copies (~4 KB; double is soft-float on the
-  S3, so slower), QuickJS's TS/JSX syntax (~7 KB).
+- `appCapabilities` built at run time (~3 KB), the float-32 libm copies
+  (~4 KB; double is soft-float on the S3, so slower), QuickJS's TS/JSX syntax
+  (~7 KB).
+
+---
+
+# Four cuts after 2026.11.7 (2026-11-14)
+
+*`esp32-s3`, 8 MB layout, `EPD_7in5_V2`, native `ci_build_image.sh` builds of
+`git archive` snapshots. Main at 3b9e14ad0 builds at 3,263,488 bytes, within
+0.5 KB of its CI artifact (3,263,984 for cf429a155). The release was
+3,239,408; main had gained 24.6 KB since (#744's QuickJS at -O2 +8.2 KB,
+#666 +7.3 KB, #745 and what landed with it +8.0 KB).*
+
+**3,263,488 → 3,223,680 bytes (−39,808). OTA slot 90.5% → 89.4% full.** No
+behaviour change.
+
+| Cut | Saves |
+|---|---:|
+| The scene loader reads with jsony's untyped pieces, a loop per type | −13,984 |
+| `add` / `setLen` / `shrink` grow through one proc (`patched_seqs_v2.nim`) | −15,744 |
+| runNode's eight input-failure lines and two graph stops, one builder each; the five options parsers in `app_runtime`, one | −5,900 |
+| An ESP32 runtime's bytes kept in its own account, no `JS_ComputeMemoryUsage` | −3,957 |
+
+- **Scene loader** (`interpreter.nim`, "Reading scenes.json"): jsony's generic
+  typed parse of `seq[FrameSceneInput]` was 27 KB, all for this one call
+  (the config's jsony path is not linked on the ESP32). Now each type is a loop
+  over its keys with a `case`, built on jsony's string, number, `JsonNode` and
+  `skipValue` (7.9 KB of jsony remains, the loops are 7.6 KB). It reads as
+  jsony did: snake_case keys, `type` renamed, the last repeated key wins, node
+  ids numbered in document order, `__frameosSourceNodeId` stamped. Where jsony
+  refused a value of the wrong type the loop takes the default. A tree from
+  `std/json` walked afterwards would have dropped jsony altogether (about 8 KB
+  more, not built) but was three times slower to parse on the host (121 ms
+  against 41 ms for the corpus ×10), which a deep sleeper pays on every wake;
+  jsony's own tree, walked, was 1.6× slower. The loops run at jsony's speed
+  (45 ms against 44). `tests/test_scene_reader.nim`
+  keeps the old hooks and reads all 46 repo and 83 e2e scenes both ways,
+  field by field.
+- **Seqs** (`src/embedded/patched_seqs_v2.nim`, `patchFile` in `config.nims`):
+  Nim copies the three into the image per element type, each with its own
+  capacity check, call to grow the block and overflow checks (29.2 KB in 338
+  copies). `fosSeqGrow` / `fosSeqSlot` do the growing for every type; `add`
+  is left with the move into its slot, `setLen` zeroes the new slots when zero
+  bytes are the type's default (references, strings, seqs, numbers, enums: never
+  an object or tuple, which can have field defaults or a type header) and
+  stores `default(T)` per slot otherwise, and `shrink` keeps its reset loop,
+  without index checks. 15.6 KB left. `tests/test_patched_seqs.nim` (with its
+  `.nims`, under AddressSanitizer too) checks defaults, growth at odd sizes and
+  alignments, literal seqs, destructor counts and a churn against an array; the
+  scene reader, event loop, event fixtures and interpreter suites also pass
+  built through the patch. Tuples (57 of the `setLen` copies) could take the
+  zero path too, but `fields` is not visible yet where `system` includes this
+  file.
+- **Log builders**: `runNode` 29.1 KB → 22.9 KB, `logInputError` and
+  `logGraphStop` 1.1 KB; every line has the keys it had, in the same order.
+  The other `%*` sites in `app_runtime` are one shape each: folding them would
+  move code, not remove it.
+- **heapBytes**: it read `malloc_size` by walking the whole heap. The glue's
+  malloc opaque is now a per-runtime `fos_js_runtime_account_t` (the scene
+  budget pointer and the runtime's bytes, kept with `malloc_size`), freed after
+  `JS_FreeRuntime`. Host and wasm builds still ask QuickJS.
