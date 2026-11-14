@@ -114,10 +114,12 @@ suite "scene compiler":
   test "a snippet cannot reach the program's natives":
     let store = LogStore()
     # Scene code is untrusted: a native it kept could be called after its
-    # scene is gone. Neither the glue's names nor the natives object reach it.
+    # scene is gone. Neither the glue's names, the natives object nor the kit
+    # that holds them reach it.
     let scene = started(@[node(1, "code",
-      code("[typeof d, typeof g, typeof N, typeof __N, typeof console.log].join(',')"))], @[], store)
-    check scene.getDataNode(1.NodeId, ctx(scene)).asString() == "undefined,undefined,undefined,undefined,function"
+      code("[typeof d, typeof g, typeof N, typeof __K, typeof T, typeof Z, typeof console.log].join(',')"))], @[], store)
+    check scene.getDataNode(1.NodeId, ctx(scene)).asString() ==
+      "undefined,undefined,undefined,undefined,undefined,undefined,function"
 
   test "a cycle of next edges runs each node once, and says so":
     let store = LogStore()

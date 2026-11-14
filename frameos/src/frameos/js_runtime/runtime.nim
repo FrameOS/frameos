@@ -9,6 +9,7 @@ import frameos/js_runtime/source_map
 import frameos/js_runtime/burrito
 import frameos/js_runtime/jsx_native
 from frameos/utils/memory import deviceMemoryBytes
+from frameos/scene_compiler import ProgramKit
 import lib/tz
 import tables, json, strutils, locks
 import chrono, times
@@ -88,6 +89,9 @@ var glueReady = false
   ## The context the scenes without code share, made when one first needs it.
 var programContexts = 0
   ## The contexts alive in the programs' runtime.
+var programKits: seq[tuple[runtime: ptr JSRuntime, context: ptr JSContext, kit: JSValue]]
+  ## Each program context's kit (scene_compiler.ProgramKit evaluated there
+  ## once, `programKit`): what every program evaluated in it is handed.
 const ProgramsBudgetId = "frameos:scene-programs"
   ## The heap budget the programs share (the JS apps keep their scene's).
 initLock(sceneJsLock)
@@ -534,6 +538,20 @@ proc dropProgram*(scene: InterpretedFrameScene) =
   scene.programReady = false
   reset(scene.programEntries)
 
+proc freeProgramKit(ctx: ptr JSContext) =
+  ## A context's kit (`programKit`), given back before the context goes.
+  for i in countdown(programKits.high, 0):
+    if programKits[i].context == ctx:
+      JS_FreeValue(ctx, programKits[i].kit)
+      programKits.del(i)
+
+proc forgetProgramKits(rt: ptr JSRuntime) =
+  ## The kits of a runtime an out-of-memory abort dropped: forgotten, their
+  ## memory went with it.
+  for i in countdown(programKits.high, 0):
+    if programKits[i].runtime == rt:
+      programKits.del(i)
+
 proc closeSceneJsLocked(scene: InterpretedFrameScene) =
   ## A scene lets go of where its program runs: its own runtime or context
   ## freed, the shared one left. Caller holds sceneJsLock. Reversible: its
@@ -542,6 +560,7 @@ proc closeSceneJsLocked(scene: InterpretedFrameScene) =
   dropProgram(scene)
   if live and scene.jsKind != sjShared:
     clearJsSourceMaps(scene.js.context)
+    freeProgramKit(scene.js.context)
     if scene.jsKind == sjRuntime:
       scene.js.runPendingJobs()
       JS_RunGC(scene.js.runtime)
@@ -558,8 +577,9 @@ proc closeSceneJsLocked(scene: InterpretedFrameScene) =
 
 # The scene context's prelude: the replacer the conversions stringify with,
 # plus sceneJsPrelude. `console`, `state`, `args` and `context` are the
-# program's own (scene_compiler.nim). Loaded as bytecode from the firmware
-# image when tools/prelude_bytecode.nim ran (evalScenePrelude).
+# program's own (scene_compiler.ProgramKit, `programKit`). Loaded as bytecode
+# from the firmware image when tools/prelude_bytecode.nim ran
+# (evalScenePrelude), as is the kit.
 const sceneContextJsPrelude* = compactJs("""
     "use strict";
     const __jsReplacer = (k, v) =>
@@ -584,6 +604,12 @@ when defined(frameosPreludeBytecode):
       " and the tree has " & quickjsVersionInTree & ": rerun tools/prelude_bytecode.nim"
     doAssert scenePreludeSourceChecksum == preludeChecksum(sceneContextJsPrelude),
       "src/assets/prelude_bytecode.nim is stale (sceneContextJsPrelude changed): rerun tools/prelude_bytecode.nim"
+    doAssert programKitSourceChecksum == preludeChecksum(ProgramKit),
+      "src/assets/prelude_bytecode.nim is stale (scene_compiler.ProgramKit changed): rerun tools/prelude_bytecode.nim"
+else:
+  var programKitCompiled: string
+    ## The kit as bytecode, compiled by the first context that needs one and
+    ## read into each after: a read is about a tenth of a parse.
 
 proc evalScenePrelude(js: QuickJS) =
   ## The prelude into a fresh context: the bytecode built into the image when
@@ -594,6 +620,55 @@ proc evalScenePrelude(js: QuickJS) =
     discard js.evalBytecode(scenePreludeBytecode.toOpenArrayByte(0, scenePreludeBytecode.high))
   else:
     discard js.eval(sceneContextJsPrelude)
+
+const ProgramKitFile = "<frameos:kit>"
+
+proc js_free(ctx: ptr JSContext, p: pointer) {.importc: "js_free", header: "quickjs/quickjs.h".}
+
+proc readProgramKit(ctx: ptr JSContext, bytecode: string): JSValue =
+  ## The kit's bytecode run in `ctx`: the function every program there is
+  ## called with.
+  let compiled = JS_ReadObject(ctx, cast[ptr uint8](unsafeAddr bytecode[0]), bytecode.len.csize_t,
+    JS_READ_OBJ_BYTECODE.cint)
+  if JS_IsException(compiled) == 0:
+    result = JS_EvalFunction(ctx, compiled) # takes `compiled`
+    if JS_IsException(result) == 0:
+      return
+  raise newException(JSException, "The scene programs' kit did not load: " & jsExceptionDetails(ctx).message)
+
+proc loadProgramKit(ctx: ptr JSContext): JSValue =
+  ## The bytecode built into the image when there is one, else the source,
+  ## compiled once in this process.
+  when defined(frameosPreludeBytecode):
+    readProgramKit(ctx, programKitBytecode)
+  else:
+    if programKitCompiled.len == 0:
+      let compiled = JS_Eval(ctx, ProgramKit.cstring, ProgramKit.len.csize_t, ProgramKitFile,
+        (JS_EVAL_TYPE_GLOBAL or JS_EVAL_FLAG_COMPILE_ONLY).cint)
+      if JS_IsException(compiled) != 0:
+        raise newException(JSException, "The scene programs' kit did not compile: " & jsExceptionDetails(ctx).message)
+      var size: csize_t
+      let buf = JS_WriteObject(ctx, addr size, compiled, JS_WRITE_OBJ_BYTECODE.cint)
+      JS_FreeValue(ctx, compiled)
+      if buf.isNil:
+        raise newException(JSException, "The scene programs' kit did not serialize")
+      var bytes = newString(size.int)
+      copyMem(addr bytes[0], buf, size.int)
+      js_free(ctx, buf)
+      programKitCompiled = move bytes
+    readProgramKit(ctx, programKitCompiled)
+
+proc programKit*(js: QuickJS): JSValue =
+  ## The kit (scene_compiler.ProgramKit) in the context a scene's program
+  ## runs in, evaluated there the first time a program needs it: the
+  ## program's helpers and the scope its snippets see, which every program
+  ## used to carry and parse. Borrowed: it goes with the context.
+  withLock sceneJsLock:
+    for entry in programKits:
+      if entry.context == js.context:
+        return entry.kit
+    result = loadProgramKit(js.context)
+    programKits.add((js.runtime, js.context, result))
 
 proc setUpSceneContext(js: var QuickJS) =
   ## What every program's context has: the time helpers scene code calls by
@@ -683,6 +758,7 @@ proc abandonMidCallSceneJs*(): tuple[count, bytes: int] =
       continue
     if scene.jsKind == sjRuntime:
       clearJsSourceMaps(scene.js.context)
+      forgetProgramKits(scene.js.runtime)
       result.bytes += scene.js.abandon()
       inc result.count
     else:
@@ -698,6 +774,7 @@ proc abandonMidCallSceneJs*(): tuple[count, bytes: int] =
     clearJsSourceMaps(programJs.context)
     if glueReady:
       clearJsSourceMaps(glueJs.context)
+    forgetProgramKits(programJs.runtime)
     result.bytes += programJs.abandon()
     inc result.count
     programJsReady = false

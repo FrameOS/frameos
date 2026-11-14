@@ -18,19 +18,19 @@ of the nodes that feed it.
 ## The program
 
 ```js
-"use strict";(__N)=>{let __at=0;
-const console={…}, __S=new Proxy(…state…), __C=new Proxy(…context…), __E={};
-const __F=((__N)=>{
+"use strict";(__K)=>{const{console,__S,__C,__E}=__K;
+const __F=((__K)=>{
 function __c42(A){const items=A["items"];return((state,args,context)=>(
 items.map(i => i.title)
 ))(__S,A,__C)}
 return{__c42}})();
-return(N=>{const{__c42}=__F;const{g,r,s,ei,p,q,t,j,v,…,L}=N;
+return __K.glue((N,Z)=>{const{__c42}=__F;
+const{g,r,s,p,q,t,j,v,…,lo}=N,{T,JE,I,X,A,EI,…,NL}=Z;
 function i7(){try{s(7,"image",g3())}catch(x){EI(0,7,"image",3,x)}}
 function g3(){let h;h=g(3);return h}
 function f7(V){const P=p(7);i7();q(7,P);r(7);;f8(V)}
 …
-return{ev(n){…},flow(i){…},data(i){…}}})(__N)}
+return{ev(n){…},flow(i){…},data(i){…}}},[…where each snippet is…],[…their texts…])}
 ```
 
 - **Two scopes.** The outer one is what the scene's own code sees: `state`,
@@ -38,7 +38,19 @@ return{ev(n){…},flow(i){…},data(i){…}}})(__N)}
   snippets as functions (`__c<id>` a code node, `__i<n>` an inline input,
   `__x<n>` a cache expression). The glue is an inner function; its natives
   have one-letter names a snippet cannot reach (a global `d` in a snippet is
-  still a ReferenceError).
+  still a ReferenceError), and the snippets' own `__K` hides the kit.
+- **The kit** (`ProgramKit` in `scene_compiler.nim`): what is the same in
+  every program is not in it. `console`, the `state` and `context` proxies
+  and the glue's helpers (the log lines of a snippet's error, a failed
+  input, a defaulted argument, a cycle, a filtered event; `MAP`, which puts
+  a location back into its snippet) are one function, evaluated once in
+  each context programs run in (`js_runtime/runtime.nim`, `programKit`) and
+  called with each program's natives; the program gets what it returns and
+  hands its glue and its snippet table to `glue`. Parsing those 2.3 KB in
+  every program was most of a small scene's first load (below). The ESP32
+  image carries the kit as bytecode (`tools/prelude_bytecode.nim`, with the
+  preludes); elsewhere the first context that needs it compiles it once and
+  every context reads that bytecode.
 - **Per node:** `g<id>()` returns the node's value; `f<id>(V)` runs it in a
   flow and calls the next node's (only for nodes a flow can reach); an app
   with inputs gets `i<id>()`, which sets its fields from their producers.
@@ -128,6 +140,25 @@ collector runs right after, so the next scene gets the memory.
 frame.json's `js` ceilings are applied to a live runtime in place. The JS
 apps keep their own runtimes.
 
+## The first load
+
+The program is parsed when a scene first starts (and again after its
+runtime is dropped, or the debug profile switched). On a laptop, for the
+49 programs of `repo/scenes/samples` (2026-11-14):
+
+| | three-node layout | Weather (25 nodes) | Touch test (65) | all 49 |
+|---|---:|---:|---:|---:|
+| with the kit in every program | 120 µs | 281 µs | 744 µs | 8.9 ms |
+| with the kit once per context | 31 µs | 158 µs | 549 µs | 3.8 ms |
+
+The kit itself: 7 µs to read from its 3.5 KB of bytecode (93 µs to parse),
+once per context. An ESP32-S3 parses about 550 times slower than the laptop
+(the preludes' 102 ms for 6.4 KB on a SenseCAP Indicator), so a layout's
+first load goes from about 65 ms to about 20 ms there. What is left is the
+scene's own nodes (7–10 µs each on the laptop) and its snippets: a program
+read from bytecode would be a tenth of that again, which a bytecode cache
+of each program, or a plan the kit turns into closures, would give.
+
 ## What changed for a scene
 
 - A code node that runs past the interpreter-time budget ends the run of
@@ -158,3 +189,7 @@ apps keep their own runtimes.
   code nodes much faster (as it is, about as fast as before).
 - JS apps could run inside the program's context instead of a runtime each
   (~150 KB of PSRAM per JS app node on an ESP32).
+- The first load still parses the scene's own nodes (above): a bytecode
+  cache of each program (in memory for a scene switched back to; on flash,
+  authenticated, for a frame that sleeps between renders), or a plan of the
+  nodes the kit turns into closures, would take that to a read.
