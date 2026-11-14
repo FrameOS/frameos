@@ -63,9 +63,11 @@ template onSceneJsStack*(scene: InterpretedFrameScene, body: untyped) =
 #   abort are shared. 40 KB.
 #
 # A scene without code runs its program, which the compiler wrote and nothing
-# untrusted is in, in the shared runtime's first context: a split's wrapper
-# or a scene of Nim apps costs only its program, and has no state to lose
-# when that runtime is replaced. `programJsGeneration` moves when it is (an
+# untrusted is in, in one context of the shared runtime that all of them
+# share: a split's wrapper or a scene of Nim apps costs only its program, and
+# has no state to lose when that runtime is replaced. The context the
+# runtime is made with goes to whichever scene needs one first, so a frame
+# showing one scene pays for one context. `programJsGeneration` moves when it is (an
 # out-of-memory abort), and a scene in it whose `jsGeneration` is older sets
 # itself up again.
 const IsolatedRuntimeMinBytes = 8 * 1024 * 1024
@@ -77,8 +79,15 @@ proc isolatedSceneRuntimes*(): bool =
   memory == 0 or memory > IsolatedRuntimeMinBytes
 
 var programJs: QuickJS
+  ## The programs' runtime. Its `context` is the one it was made with, until
+  ## a scene takes it (then nil).
 var programJsReady = false
 var programJsGeneration = 1
+var glueJs: QuickJS
+var glueReady = false
+  ## The context the scenes without code share, made when one first needs it.
+var programContexts = 0
+  ## The contexts alive in the programs' runtime.
 const ProgramsBudgetId = "frameos:scene-programs"
   ## The heap budget the programs share (the JS apps keep their scene's).
 initLock(sceneJsLock)
@@ -539,6 +548,7 @@ proc closeSceneJsLocked(scene: InterpretedFrameScene) =
       scene.js.close()
     else:
       closeContext(scene.js)
+      dec programContexts
       # What its program and code held, back now and not at some later
       # allocation's GC (on an ESP32 the next scene wants the memory).
       JS_RunGC(programJs.runtime)
@@ -594,6 +604,22 @@ proc setUpSceneContext(js: var QuickJS) =
   evalScenePrelude(js)
   discard js.installNativeJsx()
 
+proc takeProgramContext(): QuickJS =
+  ## A fresh context in the programs' runtime: the one the runtime was made
+  ## with while nobody has it (a frame showing one scene pays for one
+  ## context, as before), else another. Never one a scene had: its globals
+  ## are that scene's.
+  if programJs.context != nil:
+    result = programJs
+    programJs.context = nil
+    programJs.contextData = nil
+  else:
+    result = newContextIn(programJs)
+    setUpSceneContext(result)
+  inc programContexts
+
+proc programContextsForTest*(): int = programContexts
+
 proc ensureSceneJs*(scene: InterpretedFrameScene) =
   ## Where the scene's program runs (see above), set up on first use, its
   ## ceilings following frame.json's `js`.
@@ -617,12 +643,16 @@ proc ensureSceneJs*(scene: InterpretedFrameScene) =
         programJs = newQuickJS(sceneJsConfig(scene.frameConfig, ProgramsBudgetId))
         setUpSceneContext(programJs)
         programJsReady = true
+        glueReady = false
+        programContexts = 0
       if hasCode:
-        scene.js = newContextIn(programJs)
-        setUpSceneContext(scene.js)
+        scene.js = takeProgramContext()
         scene.jsKind = sjRealm
       else:
-        scene.js = programJs
+        if not glueReady:
+          glueJs = takeProgramContext()
+          glueReady = true
+        scene.js = glueJs
         scene.jsKind = sjShared
       scene.jsGeneration = programJsGeneration
     scene.jsReady = true
@@ -666,8 +696,13 @@ proc abandonMidCallSceneJs*(): tuple[count, bytes: int] =
     scene.jsKind = sjShared
   if shared and programJsReady:
     clearJsSourceMaps(programJs.context)
+    if glueReady:
+      clearJsSourceMaps(glueJs.context)
     result.bytes += programJs.abandon()
     inc result.count
     programJsReady = false
+    glueReady = false
+    glueJs = QuickJS()
+    programContexts = 0
     inc programJsGeneration
   sceneJsStack.setLen(0)

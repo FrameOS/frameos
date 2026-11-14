@@ -109,9 +109,13 @@ expression) is kept apart from every other scene (`js_runtime/runtime.nim`,
   itself up and evaluates its program again on its next run.
 
 A scene without code (a scene of Nim apps, a split's wrapper) runs its
-program, which the compiler wrote and nothing untrusted is in, in that shared
-runtime's first context, in both cases: it costs only its program, and has
-no state to lose if that runtime is replaced.
+program, which the compiler wrote and nothing untrusted is in, in one context
+of that shared runtime that all of them share, in both cases: it costs only
+its program, and has no state to lose if that runtime is replaced. The
+context the shared runtime is made with goes to whichever scene needs one
+first, so an 8 MB board showing one scene with code pays for one runtime and
+one context, as it did before; a context a scene had is never handed to
+another.
 
 Measured on a 64-bit host: a runtime with its first context is 155 KB, one
 more context in it 40 KB, a program about 8 KB for two nodes and 1.7 KB a
