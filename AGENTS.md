@@ -41,6 +41,16 @@
   green, not when the PR is open: a PR nobody watched is how the cloud job came
   to be failing "all the time". This holds for every suite, the Nim shards and
   the firmware image included.
+- **A pull request skips the heavy jobs it provably cannot affect**
+  (`.github/ci/changed_areas.py`, the `changes` job of `pull-request-tests.yml`
+  and `e2e-docker.yml`): a cloud-only change runs no Nim shards, an iOS-only
+  one no Playwright. Every path is relevant unless a rule there says why not,
+  so a test that starts reading files of another area (a Nim test reading
+  `backend/`, Playwright reading `cloud/`) must take that area off its
+  irrelevant list in the same change, or it is skipped for exactly the pull
+  requests that break it. Pushes to main run everything. The jobs run on the
+  monster pool's 16-core slots from a warm nightly image
+  (`tools/gha-runners/README.md`); a full pull request is about five minutes.
 - **What to run first under `cloud/`, `cloud-frontend/` OR `frontend/src`** —
   including a test file under `cloud/apps/auth-web/src/test/shared-spa/` — is
   `pnpm verify` from `cloud/` when it is quicker than a CI round trip, reading
