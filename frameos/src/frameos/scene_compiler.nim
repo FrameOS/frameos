@@ -15,8 +15,8 @@
 ## held by the scene, the program passing small integer handles), so an image,
 ## a spooled body or a colour reaches an app exactly as it did. Only a code
 ## node's arguments and result cross into JavaScript values, as they always
-## did. The natives the program calls (`N.g`, `N.s`, …) are
-## js_runtime/scene_program.nim's.
+## did. The natives the program calls (`N.g`, `N.s`, …) are interpreter.nim's
+## (`programOp`), handed to it through the kit (`ProgramKit`).
 ##
 ## Pure: no QuickJS here, so the host tests read what it writes.
 
@@ -245,36 +245,52 @@ proc flowNodes(g: Graph): seq[bool] =
 # sees: `state`, `args` and `context` (handed to every snippet), `console`,
 # and the snippets themselves, as functions named `__c<id>` (a code node),
 # `__i<n>` (an inline input) and `__x<n>` (a cache expression). They are
-# defined in a function whose own `__N` (nothing) hides the natives: scene
-# code is untrusted, and a native it kept could be called after its scene is
-# gone. The glue lives in an inner function with the natives under short
-# names, and writes its own log lines (they cost the program's memory, not
-# the firmware's flash).
+# defined in a function whose own `__K` (nothing) hides the kit and so the
+# natives: scene code is untrusted, and a native it kept could be called
+# after its scene is gone. The glue lives in an inner function with the
+# natives under short names, and writes its own log lines (they cost the
+# program's memory, not the firmware's flash).
+#
+# What is the same in every program is not in it: it is the kit below,
+# evaluated once in each context programs run in (js_runtime/runtime.nim
+# `programKit`, bytecode built into the ESP32's image) and handed to every
+# program evaluated there. Parsing it in each program was most of a small
+# scene's first load: ~105 µs of a three-node scene's 120 µs on a laptop,
+# about 60 ms on an ESP32-S3.
 
-const ProgramHead = "\"use strict\";(__N)=>{let __at=0;\n" &
-  "const __L=(l,a)=>__N.L({event:\"interpreter:jsConsole\",level:l,nodeId:__at,args:a}),console={log:(...a)=>__L(\"log\",a),warn:(...a)=>__L(\"warn\",a),error:(...a)=>__L(\"error\",a)};\n" &
-  "const __S=new Proxy({},{get:(_,k)=>typeof k==\"string\"?__N.st(k):undefined}),__C=new Proxy({},{get:(_,k)=>typeof k==\"string\"?__N.cx(k):undefined}),__E={};\n" &
-  "const __F=((__N)=>{\n"
-const SnippetLines = 5
-  ## The line of the first snippet function's header (its snippet starts on
-  ## the next one).
-const GlueHead = "const{g,r,s,ei,p,q,t,j,v,zv,d,ss,sc,ka,cq,cs,m,bg,n0,n1,L,lo}=N,MS=x=>x&&x.message||String(x),ST=x=>x&&(x.nimStack||x.stack)||String(x);\n" &
+const ProgramKit* = "\"use strict\";(N)=>{const T={a:0},\n" &
+  # `T.a` is the node whose code runs, which a console line names.
+  "__L=(l,a)=>N.L({event:\"interpreter:jsConsole\",level:l,nodeId:T.a,args:a});\n" &
+  # What the snippets see.
+  "return{console:{log:(...a)=>__L(\"log\",a),warn:(...a)=>__L(\"warn\",a),error:(...a)=>__L(\"error\",a)},\n" &
+  "__S:new Proxy({},{get:(_,k)=>typeof k==\"string\"?N.st(k):undefined}),__C:new Proxy({},{get:(_,k)=>typeof k==\"string\"?N.cx(k):undefined}),__E:{},\n" &
+  # The glue `G`, given the natives and its helpers, which read the
+  # program's snippet table (`SN` where each snippet is, `SC` their texts).
+  "glue(G,SN,SC){const{L,zv,v,j,ei}=N,MS=x=>x&&x.message||String(x),ST=x=>x&&(x.nimStack||x.stack)||String(x),\n" &
   # A location in the program, put back into the snippet it is in.
-  "const MAP=t=>String(t).replace(/<frameos:scene>:(\\d+)/g,(w,l)=>{for(const[a,b,n]of SN)if(l>=a&&l<=b)return n+\":\"+(l-a+1);return w});\n" &
+  "MAP=t=>String(t).replace(/<frameos:scene>:(\\d+)/g,(w,l)=>{for(const[a,b,n]of SN)if(l>=a&&l<=b)return n+\":\"+(l-a+1);return w}),\n" &
   # A snippet's error: logged with its location, and the zero of the type
   # its value was to have; `D` names the arguments defaulted on the way.
-  "const JE=(id,sr,x,ty,D)=>{const e={event:\"interpreter:jsError\",nodeId:id,message:MAP(MS(x)),stack:MAP(ST(x))};if(sr)e.sourceNodeId=sr;if(D){const p=[],a=[];for(let i=0;i<D.length;i+=2){const t=MS(D[i+1]);p.push(D[i]+\" failed: \"+(t.length>200?t.slice(0,200)+\"...\":t));a.push({arg:D[i],error:t})}e.message+=\" (defaulted inputs: \"+p.join(\"; \")+\")\";e.defaultedArgs=a}L(e);return zv(ty,1)};\n" &
-  "const I=(id,sr,f)=>{__at=id;try{return v(f(),\"\")}catch(x){return JE(id,sr,x,\"\")}},X=(id,sr,f)=>{__at=id;try{return[f()]}catch(x){JE(id,sr,x,\"\");return[null]}},A=H=>{const a={};for(const k in H)a[k]=j(H[k]);return a};\n" &
+  "JE=(id,sr,x,ty,D)=>{const e={event:\"interpreter:jsError\",nodeId:id,message:MAP(MS(x)),stack:MAP(ST(x))};if(sr)e.sourceNodeId=sr;if(D){const p=[],a=[];for(let i=0;i<D.length;i+=2){const t=MS(D[i+1]);p.push(D[i]+\" failed: \"+(t.length>200?t.slice(0,200)+\"...\":t));a.push({arg:D[i],error:t})}e.message+=\" (defaulted inputs: \"+p.join(\"; \")+\")\";e.defaultedArgs=a}L(e);return zv(ty,1)},\n" &
+  "I=(id,sr,f)=>{T.a=id;try{return v(f(),\"\")}catch(x){return JE(id,sr,x,\"\")}},X=(id,sr,f)=>{T.a=id;try{return[f()]}catch(x){JE(id,sr,x,\"\");return[null]}},A=H=>{const a={};for(const k in H)a[k]=j(H[k]);return a},\n" &
   # An input whose producer failed (kind 0 an app's wired input, 1 inline,
   # 2 a dispatch node's, 4 a scene node's): logged, and an app's image field
   # gets the error painted.
-  "const EI=(k,id,f,pr,x)=>{const e={event:[\"interpreter:setField:error\",\"interpreter:setField:error:inlineCode\",\"interpreter:dispatch:setField:error\",0,\"interpreter:setChildState:error\"][k],nodeId:id,input:f,error:MS(x),stacktrace:ST(x)};if(k==4)e.parentSceneId=1;if(k==1)e.code=SC[pr];else e.producer=pr;L(e);if(!k)ei(id,f,e.error)};\n" &
+  "EI=(k,id,f,pr,x)=>{const e={event:[\"interpreter:setField:error\",\"interpreter:setField:error:inlineCode\",\"interpreter:dispatch:setField:error\",0,\"interpreter:setChildState:error\"][k],nodeId:id,input:f,error:MS(x),stacktrace:ST(x)};if(k==4)e.parentSceneId=1;if(k==1)e.code=SC[pr];else e.producer=pr;L(e);if(!k)ei(id,f,e.error)},\n" &
   # A code node's argument whose producer failed: its type's zero.
-  "const ZA=(id,a,pr,x,ty)=>{const h=zv(ty,0),e={event:\"interpreter:codeArg:error\",nodeId:id,arg:a,error:MS(x),stacktrace:ST(x),defaulted:true,defaultValue:j(h)};if(pr<0){e.event+=\":inlineCode\";e.code=SC[-1-pr]}else e.producer=pr;L(e);return h};\n" &
-  "const LE=(n,id,x)=>L({event:\"runEventInterpreted:error\",contextEvent:n,nodeId:id,error:MS(x),stacktrace:ST(x)}),NF=i=>L({event:\"interpreter:nodeNotFound\",nodeId:i}),CY=(id,V)=>L({event:\"interpreter:graph:cycle\",startNodeId:V.values().next().value,atNodeId:id}),XC=(id,k,m)=>{L({event:\"interpreter:cacheExpression:error\",nodeId:id,code:SC[k],error:m})};\n" &
+  "ZA=(id,a,pr,x,ty)=>{const h=zv(ty,0),e={event:\"interpreter:codeArg:error\",nodeId:id,arg:a,error:MS(x),stacktrace:ST(x),defaulted:true,defaultValue:j(h)};if(pr<0){e.event+=\":inlineCode\";e.code=SC[-1-pr]}else e.producer=pr;L(e);return h},\n" &
+  "LE=(n,id,x)=>L({event:\"runEventInterpreted:error\",contextEvent:n,nodeId:id,error:MS(x),stacktrace:ST(x)}),NF=i=>L({event:\"interpreter:nodeNotFound\",nodeId:i}),CY=(id,V)=>L({event:\"interpreter:graph:cycle\",startNodeId:V.values().next().value,atNodeId:id}),XC=(id,k,m)=>{L({event:\"interpreter:cacheExpression:error\",nodeId:id,code:SC[k],error:m})},\n" &
   # Every listener filtered the event out: said, with the payload where the
   # event's may be logged (a key's never is, event_log.nim).
-  "const NL=(n,w)=>L({event:\"runEvent:noListenerMatched\",contextEvent:n,expected:w,error:'\"'+n+'\" reached the scene but every listener filtered it out'+(w.length?\" (nodes want \"+w.join(\", \")+\")\":\"\")},1);\n"
+  "NL=(n,w)=>L({event:\"runEvent:noListenerMatched\",contextEvent:n,expected:w,error:'\"'+n+'\" reached the scene but every listener filtered it out'+(w.length?\" (nodes want \"+w.join(\", \")+\")\":\"\")},1);\n" &
+  "return G(N,{T,JE,I,X,A,EI,ZA,LE,NF,CY,XC,NL})}}}\n"
+
+const ProgramHead = "\"use strict\";(__K)=>{const{console,__S,__C,__E}=__K;\n" &
+  "const __F=((__K)=>{\n"
+const SnippetLines = 3
+  ## The line of the first snippet function's header (its snippet starts on
+  ## the next one).
+const GlueHead = "const{g,r,s,p,q,t,j,v,d,ss,sc,ka,cq,cs,m,bg,n0,n1,lo}=N,{T,JE,I,X,A,EI,ZA,LE,NF,CY,XC,NL}=Z;\n"
 
 type Emitter = object
   names: seq[string] ## the snippet functions, handed from their scope to the glue's
@@ -423,7 +439,7 @@ proc emitCodeBody(e: var Emitter, g: Graph, node: DiagramNode, id: int, data: bo
       # An inline argument that throws is defaulted like a producer that fails.
       let fn = e.snippetFunction(id, psInline, input.field, input.snippet)
       producer = -e.snippets.len
-      e.put "(__at=#,v(", id
+      e.put "(T.a=#,v(", id
       e.add fn
       e.add "(),\"\"))"
     else:
@@ -450,7 +466,7 @@ proc emitCodeBody(e: var Emitter, g: Graph, node: DiagramNode, id: int, data: bo
     e.put "const K=cq(#,D?0:1", id
     emitCacheExpression(e, node, id, broken)
     e.add ");if(K>=0)return K;\n"
-  e.put "__at=#;try{h=v(__c#(A(H)),", id
+  e.put "T.a=#;try{h=v(__c#(A(H)),", id
   e.addStr outputType
   e.put ")}catch(x){h=JE(#,", id
   e.addSource node
@@ -544,8 +560,9 @@ proc wrapEnd(e: var Emitter, id: int, cyclic, profile, isData: bool) =
 
 proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = false,
     brokenCache: seq[(NodeId, string)] = @[]): CompiledScene =
-  ## The program for a scene. It evaluates to a function of the natives
-  ## (interpreter.nim, `programOp`) returning the scene's three ways in:
+  ## The program for a scene. It evaluates to a function of the kit
+  ## (`ProgramKit` called with interpreter.nim's natives, `programOp`)
+  ## returning the scene's three ways in:
   ## `ev(event)` runs the event's listeners and says how many ran,
   ## `flow(id)` runs the flow from a node (an app's `execNode`) and
   ## `data(id)` gives a node's value (`getDataNode`).
@@ -717,7 +734,7 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
   e.add "}NF(i)},\ndata(i){switch(i){"
   for node in g.nodes:
     e.put "case #:return g#();", node.id.int
-  e.add "}NF(i);return 0}}})(__N)}\n"
+  e.add "}NF(i);return 0}}},"
 
   let renders = listeners.getOrDefault("render")
   if renders.len == 1:
@@ -725,8 +742,9 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
     if first != 0 and first != -1:
       let after = g.next.getOrDefault(first, -1)
       result.wholeFrame = after == 0 or after == -1
-  # The snippets' places and texts, for the glue's error lines.
-  var tables = "const SN=["
+  # The snippets' places and texts, for the kit's error lines: the glue's
+  # last two arguments.
+  var tables = "["
   for k, snippet in e.snippets:
     if k > 0: tables.add ','
     tables.add '['
@@ -737,21 +755,21 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
     escapeJson((if snippet.kind == psCode: "<frameos:code:" & $snippet.nodeId.int & ">"
       else: "<frameos:inline:" & $snippet.nodeId.int & ":" & snippet.name & ">"), tables)
     tables.add ']'
-  tables.add "],SC=["
+  tables.add "],["
   for k, snippet in e.snippets:
     if k > 0: tables.add ','
     escapeJson(snippet.snippet, tables)
-  tables.add "];\n"
+  tables.add "])}\n"
   result.source = ProgramHead
   result.source.add e.snip
   result.source.add "return{"
   result.source.add e.names.join(",")
-  result.source.add "}})();\nreturn(N=>{const{"
+  result.source.add "}})();\nreturn __K.glue((N,Z)=>{const{"
   result.source.add e.names.join(",")
   result.source.add "}=__F;\n"
   result.source.add GlueHead
-  result.source.add tables
   result.source.add e.glue
+  result.source.add tables
   result.snippets = move e.snippets
 
 {.pop.}

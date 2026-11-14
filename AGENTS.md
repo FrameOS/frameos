@@ -112,7 +112,12 @@
   of PSRAM: one scene running out of memory takes no other with it), and in a
   realm of its own in one shared runtime on an 8 MB board
   (`js_runtime/runtime.nim` `ensureSceneJs`); scenes without code share that
-  runtime's first context. The JS apps keep their own runtimes.
+  runtime's first context. The JS apps keep their own runtimes. What every
+  program has in common is not in the program: it is the kit
+  (`ProgramKit`), evaluated once per context (`programKit`; bytecode in the
+  ESP32 image via `tools/prelude_bytecode.nim`) and handed to each program.
+  A helper the glue needs goes there, not into each program's text, which
+  the device parses at every scene start.
 
 ## Scene events: the contract is `docs/events-contract.json`
 

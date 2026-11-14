@@ -42,10 +42,10 @@ FRAMEOS_ROOT_DIR="$FRAMEOS_DIR" python3 "$FRAMEOS_DIR/tools/makeapploaders.py"
 
 cd "$FRAMEOS_DIR"
 
-# The JS preludes as bytecode built into the image (src/assets/prelude_bytecode.nim,
-# docs/perf-todo.md): a host build of the same QuickJS compiles them once here
-# instead of the device compiling ~8 KB of JavaScript at every interpreter
-# start. The tool links quickjs/libquickjs.a, the host library beside the
+# The JS preludes and the scene programs' kit as bytecode built into the image
+# (src/assets/prelude_bytecode.nim, docs/perf-todo.md): a host build of the
+# same QuickJS compiles them once here instead of the device compiling ~10 KB
+# of JavaScript at every interpreter start and scene program. The tool links quickjs/libquickjs.a, the host library beside the
 # sources the firmware compiles; their VERSION is one file.
 echo "compiling the JS preludes to bytecode"
 # A host QuickJS from the same sources the firmware compiles, without

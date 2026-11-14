@@ -1361,14 +1361,22 @@ proc ensureProgram(scene: InterpretedFrameScene) =
     let fn = JS_Eval(ctx, source.cstring, source.len.csize_t, ProgramFile,
       (JS_EVAL_TYPE_GLOBAL or snippetEvalFlags).cint)
     if JS_IsException(fn) == 0:
+      # The context's kit, given the natives, is what the program is called
+      # with (scene_compiler.ProgramKit).
       var address = JS_NewFloat64(ctx, cast[int](cast[pointer](scene)).float64)
       let natives = JS_NewObject(ctx)
       for op in ProgramOp:
         discard JS_SetPropertyStr(ctx, natives, ProgramNativeNames[op],
           JS_NewCFunctionData(ctx, programNative, 2, op.ord.cint, 1, addr address))
       var argv = [natives]
-      let entries = JS_Call(ctx, fn, jsUndefined(ctx), 1, addr argv[0])
+      let kit = JS_Call(ctx, programKit(scene.js), jsUndefined(ctx), 1, addr argv[0])
       JS_FreeValue(ctx, natives)
+      if JS_IsException(kit) != 0:
+        JS_FreeValue(ctx, fn)
+        raise newException(JSException, "Evaluation failed: " & jsExceptionDetails(ctx).message)
+      argv[0] = kit
+      let entries = JS_Call(ctx, fn, jsUndefined(ctx), 1, addr argv[0])
+      JS_FreeValue(ctx, kit)
       JS_FreeValue(ctx, fn)
       if JS_IsException(entries) != 0:
         raise newException(JSException, "Evaluation failed: " & jsExceptionDetails(ctx).message)
