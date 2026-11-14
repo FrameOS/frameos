@@ -16,17 +16,21 @@ import frameos/types
 import frameos/channels
 import frameos/single_scene_host
 import system/sceneSwitcher/scene as sceneSwitcher
+import system/sceneSettings/scene as sceneSettings
 import frameos/relayed_input
 from frameos/input_state import initInputState
 from frameos/ui/events as uiEvents import uiTimersPending, lastingUiInput, restoreLastingUiInput
 from frameos/js_runtime/app_runtime import keepAppMemoryAcrossProcesses, keptAppMemory, restoreKeptAppMemory
 import frameos/interpreter
+from frameos/layout_choice import chooseLayout
 import frameos/planner
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
 import frameos/utils/dither
 import frameos/utils/asset_colors
 from frameos/panel_shape import boardPanelFormat
+from frameos/scene_rhythm import rhythmForgetCanvases
+from frameos/utils/svg_frames import forgetPanelFrames
 import frameos/js_runtime/runtime as jsRuntime
 import frameos/js_runtime/app_tests
 import lib/tz
@@ -93,6 +97,10 @@ var
   # it comes from plain malloc, outside the simulated ceiling.
   rgbaOut: ptr UncheckedArray[ColorRGBX]
   rgbaOutPixels = 0
+  # The frame page (frameos_wasm_set_frame_page) and what its last Save could
+  # not do here.
+  framePage = false
+  framePageNote = ""
 
 proc fosWasmMemorySetHeld(bytes: csize_t) {.
   importc: "fos_wasm_memory_set_held", header: "<fos_wasm_mem.h>", cdecl.}
@@ -286,6 +294,9 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
   ## frameConfig.settings{"openAI"}{"apiKey"} and the like.
   try:
     host.dropScene()
+    # One scene at a time, and no frame page, until the page asks again.
+    host.setWindowed(false)
+    framePage = false
     resetInterpretedScenes()
     keepAppMemoryAcrossProcesses()
     setSimulatedEmbedded(false)
@@ -411,7 +422,9 @@ proc frameos_wasm_load_scenes(payload: cstring): cint {.exportc, cdecl.} =
       setLastError("loadScenes: no scenes survived parsing")
       return 0
 
+    host.carryDesktop()
     host.dropScene()
+    host.dropWindows()
     dropParkedLayout()
     replaceInterpretedScenesCache(newScenes)
     scenesLoadedCount = newScenes.len
@@ -479,6 +492,99 @@ proc frameos_wasm_set_embedded(enabled: bool) {.exportc, cdecl.} =
   ## a Pi; every frameos_wasm_init turns it off.
   setSimulatedEmbedded(enabled)
   host.keepJsRuntimes = enabled
+
+# ------------------------------------------------------------- frame page
+# The frame's own page in the scene settings (docs/scene-settings.md "The frame
+# page") for a page that runs this runtime as a frame of its own, the windowed
+# browser frame: no Wi-Fi, a rotation it cannot take (the browser window is the
+# panel), the scale live, and Restart and Reboot, which the page carries out
+# when it hears them (they reach it as any event the runtime sends out).
+
+proc wasmFrameSettingsRead(): JsonNode {.nimcall, gcsafe, raises: [].} =
+  {.cast(gcsafe).}:
+    try:
+      if not framePage or frameConfig.isNil:
+        return nil
+      result = %*{"rotate": frameConfig.rotate, "renderScale": frameConfig.renderScale,
+        "version": publishedFrameOSVersion(compiledFrameOSVersion()), "actions": ["restart"]}
+      if framePageNote.len > 0:
+        result["note"] = %framePageNote
+    except Exception:
+      result = nil
+
+proc wasmFrameSettingsApply(changes: JsonNode) {.nimcall, gcsafe, raises: [].} =
+  {.cast(gcsafe).}:
+    try:
+      if frameConfig.isNil:
+        return
+      framePageNote = ""
+      let rotate = changes{"rotate"}
+      if not rotate.isNil and rotate.kind == JInt and rotate.getInt() != frameConfig.rotate:
+        framePageNote = "A browser frame does not turn: the window is its panel."
+      let scale = changes{"renderScale"}
+      if not scale.isNil and scale.kind in {JInt, JFloat} and scale.getFloat() >= 0 and scale.getFloat() <= 4 and
+          scale.getFloat() != frameConfig.renderScale:
+        frameConfig.renderScale = scale.getFloat()
+        # For the page's own control, which shows the same scale.
+        jsEventHook("frameSettings", ($(%*{"renderScale": frameConfig.renderScale})).cstring)
+      # Drawn at once, this page included, every window anew.
+      sendEvent("render", newJObject(), eoSystem)
+    except Exception as error:
+      log("frame page: " & error.msg)
+
+proc wasmFrameSettingsAction(action: string) {.nimcall, gcsafe, raises: [].} =
+  ## Nothing to scan for or to watch here.
+  discard
+
+proc frameos_wasm_set_frame_page(enabled: bool) {.exportc, cdecl.} =
+  ## Offer the frame page (the gear in the scene settings, a layout's Control
+  ## Panel), as a page that runs this runtime as a frame of its own does. Off
+  ## by default, as in an editor's preview; every frameos_wasm_init turns it off.
+  framePage = enabled
+  framePageNote = ""
+  sceneSettings.frameSettingsRead = wasmFrameSettingsRead
+  sceneSettings.frameSettingsApply = wasmFrameSettingsApply
+  sceneSettings.frameSettingsAction = wasmFrameSettingsAction
+
+proc frameos_wasm_resize(width, height: cint): bool {.exportc, cdecl.} =
+  ## A new size for the frame, kept running: what every scene and window holds
+  ## stays (a desktop's windows, a form's edits), and the next render draws all
+  ## of it again at the new size. The pointer's wire positions are read against
+  ## it from now on. A page that resizes its frame calls this instead of
+  ## frameos_wasm_init, which starts everything again. False before init.
+  if frameConfig.isNil or width <= 0 or height <= 0:
+    return false
+  frameConfig.width = width.int
+  frameConfig.height = height.int
+  if not host.events.isNil:
+    # As frameos_wasm_set_frame does: what is held lets go, the keyboard stays.
+    let keyboardAt = host.events.inputState.keyboardAt
+    host.events.inputState = initInputState(frameConfig)
+    host.events.inputState.keyboardAt = keyboardAt
+  # Nothing drawn at the old size can be put back.
+  rhythmForgetCanvases()
+  forgetPanelFrames()
+  discard host.send(eoSystem, "render", newJObject())
+  host.renderRequested = true
+  true
+
+proc frameos_wasm_set_windowed(enabled: bool) {.exportc, cdecl.} =
+  ## Run the frame's scenes side by side, as a Pi does (docs/scene-layouts.md
+  ## "Windows"): a layout's `app.frame.scenes` lists the loaded scenes, its
+  ## `<Scene id>` is the runtime's own instance of that scene, running in its
+  ## window, and a scene switched away from keeps running there. Off by
+  ## default, as the preview of one scene; every frameos_wasm_init turns it off.
+  host.setWindowed(enabled)
+  host.renderRequested = true
+
+proc frameos_wasm_choose_layout(layoutId: cstring): bool {.exportc, cdecl.} =
+  ## The layout every scene wears, chosen as the frame's settings page chooses
+  ## it (layout_choice.nim): a layout's id, "none" for none, "" for each
+  ## scene's own. On a desktop the layout chosen opens what the one before it
+  ## had open (docs/scene-layouts.md "Windows").
+  chooseLayout($layoutId)
+  host.renderRequested = true
+  true
 
 proc frameos_wasm_set_canvas_bits_per_pixel(bitsPerPixel: cint) {.exportc, cdecl.} =
   ## The canvas the device keeps, while running as an ESP32 (eight times

@@ -4,6 +4,8 @@ import ../interpreter
 import ../scene_rhythm
 import ../types
 import ../js_runtime/app_runtime
+import ../ui/events as ui_events
+import ../ui/layout as ui_layout
 
 # Windows (docs/scene-layouts.md "Windows"): on a host that keeps every scene
 # it ran (the Pi's runner), a layout's <Scene id> is that host's own scene, so
@@ -49,12 +51,28 @@ export function get(app) {
     <div className="relative w-full h-full bg-white">
       <div className="absolute left-0 top-0 w-[20px] h-[40px] flex"><yield /></div>
       {(app.state.open || []).map((id) => (
-        <div className="absolute left-[20px] top-0 w-[20px] h-[40px] flex"><Scene id={id} marker="layout" /></div>
+        <div className="absolute left-[20px] top-0 w-[20px] h-[40px] flex">
+          {app.state.hearing ? (
+            <Scene id={id} onPointerDown={() => frameos.setState("heard", (app.state.heard || 0) + 1)} />
+          ) : (
+            <Scene id={id} />
+          )}
+        </div>
+      ))}
+      {(app.state.copies || []).map((id) => (
+        <div className="absolute left-[20px] top-0 w-[20px] h-[40px] flex"><Scene id={id} city="Oslo" /></div>
       ))}
       {app.state.cover ? (
         <div className="absolute left-[20px] top-0 w-[20px] h-[10px]"
           onClick={() => frameos.setState("covered", (app.state.covered || 0) + 1)} />
       ) : null}
+      {app.state.pressCover ? (
+        <div className="absolute left-[20px] top-0 w-[20px] h-[40px]"
+          onPointerDown={() => frameos.setState("pressed", (app.state.pressed || 0) + 1)} />
+      ) : null}
+      {(app.state.offLeft || []).map((id) => (
+        <div className="absolute left-[-10px] top-0 w-[20px] h-[40px] flex"><Scene id={id} /></div>
+      ))}
     </div>
   )
 }
@@ -67,17 +85,40 @@ export function get(app) {
 }
 """
 
+# A list taller than its box, which scrolls.
+const scrollerUi = """
+export function get(app) {
+  return (
+    <div className="w-full h-full overflow-y-auto bg-white">
+      {Array.from({ length: 20 }, (_, i) => <div className="h-[10px] bg-black">{String(i)}</div>)}
+    </div>
+  )
+}
+"""
+
 let scenesJson = "[" & [
   jsxScene("tests/desk", deskUi, 300.0, ""","isLayout": true"""),
   panel("tests/blue", "#0000ff", 600.0).withLayout("tests/desk", """{"open": ["tests/yellow"]}"""),
   panel("tests/yellow", "#ffff00", 600.0).withLayout("tests/desk"),
+  panel("tests/copier", "#0000ff", 600.0).withLayout("tests/desk", """{"copies": ["tests/yellow"]}"""),
   panel("tests/twice", "#0000ff", 600.0).withLayout("tests/desk",
     """{"open": ["tests/twice", "tests/yellow", "tests/yellow"]}"""),
   panel("tests/front", "#0000ff", 600.0).withLayout("tests/desk", """{"open": ["tests/counter"]}"""),
   panel("tests/covered", "#0000ff", 600.0).withLayout("tests/desk",
     """{"open": ["tests/counter2"], "cover": true}"""),
+  panel("tests/pressing", "#0000ff", 600.0).withLayout("tests/desk",
+    """{"open": ["tests/counter3"], "pressCover": true}"""),
+  panel("tests/hanging", "#0000ff", 600.0).withLayout("tests/desk", """{"offLeft": ["tests/yellow"]}"""),
+  panel("tests/fast", "#00ff00", 0.05).withLayout("tests/desk"),
+  panel("tests/paced", "#0000ff", 600.0).withLayout("tests/desk", """{"open": ["tests/fast"]}"""),
+  jsxScene("tests/counter3", counterUi, 3000.0).withLayout("tests/desk"),
   jsxScene("tests/counter", counterUi, 3000.0).withLayout("tests/desk"),
   jsxScene("tests/counter2", counterUi, 3000.0).withLayout("tests/desk"),
+  jsxScene("tests/scroller", scrollerUi, 3000.0).withLayout("tests/desk"),
+  jsxScene("tests/counter4", counterUi, 3000.0).withLayout("tests/desk"),
+  panel("tests/hearing", "#0000ff", 600.0).withLayout("tests/desk", """{"open": ["tests/counter4"], "hearing": true}"""),
+  panel("tests/wheeling", "#0000ff", 600.0).withLayout("tests/desk",
+    """{"open": ["tests/scroller"], "pressCover": true}"""),
 ].join(",") & "]"
 
 let parsed = parseInterpretedScenes(scenesJson)
@@ -138,6 +179,20 @@ proc tap(scene: FrameScene, x, y: int) =
 
 proc color(image: Image, x, y: int): ColorRGBX = image.getPixel(image.dataIndex(x, y))
 
+proc wheel(scene: FrameScene, x, y: int, notches: float) =
+  let payload = %*{"x": x, "y": y, "deltaX": 0, "deltaY": notches, "pointerId": 0, "pointerType": "mouse"}
+  runEvent(scene, ExecutionContext(scene: scene, event: "wheel", payload: payload, loopIndex: 0, loopKey: ".",
+    nextSleep: -1))
+
+proc scrolledY(sceneId: string): float32 =
+  ## How far the box that scrolls in a scene's UI is scrolled.
+  let target = uiTarget(sceneId, 2, create = false)
+  if target.isNil:
+    return -1
+  for r in target.regions:
+    if r.scrollY > 0:
+      return target.input.scrolled(r.key)[1]
+
 proc colored(hex: string): ColorRGBX = parseHtmlColor(hex).rgbx
 
 suite "windows":
@@ -158,8 +213,15 @@ suite "windows":
     for slot in blue.wornLayout.slots:
       shown.add slot.child
     check hosted["tests/yellow"] in shown
-    # The scene as it is: a copy's props would be its state, the scene's own is not touched.
-    check hosted["tests/yellow"].state{"marker"}.isNil
+
+  test "a <Scene> given props is a copy those props set, as anywhere":
+    let copier = hostScene("tests/copier")
+    let image = pass(copier)
+    check image.color(30, 20) == colored("#ffff00")
+    let copies = toSeq(InterpretedFrameScene(copier.wornLayout).sceneNodes.values)
+    check copies.len == 1
+    check copies[0].state{"city"}.getStr() == "Oslo"
+    check not hosted.hasKey("tests/yellow") or copies[0] != hosted["tests/yellow"]
 
   test "the scene it wraps and a scene twice are drawn once":
     let twice = hostScene("tests/twice")
@@ -202,6 +264,37 @@ suite "windows":
     rhythmClockOverride = 1000.02
     check pass(covered).color(30, 30) == colored("#22c55e")
 
+  test "a press the layout took over a window keeps its tap from the scene there":
+    let pressing = hostScene("tests/pressing")
+    discard pass(pressing)
+    proc send(event: string) =
+      let payload = %*{"x": 30, "y": 30, "pointerId": 0, "pointerType": "mouse"}
+      runEvent(pressing, ExecutionContext(scene: pressing, event: event, payload: payload, loopIndex: 0,
+        loopKey: ".", nextSleep: -1))
+    send("pointerDown")
+    send("pointerUp")
+    send("tap")
+    check pressing.wornLayout.state{"pressed"}.getInt() == 1
+    rhythmClockOverride = 1000.01
+    check pass(pressing).color(30, 30) == colored("#ef4444") # the counter heard no tap
+
+  test "a window hanging off the left edge is cut there, not squeezed into what shows":
+    let hanging = hostScene("tests/hanging")
+    discard pass(hanging)
+    var found = false
+    for slot in hanging.wornLayout.slots:
+      if slot.child == hosted["tests/yellow"]:
+        found = true
+        check not slot.hole
+    check found
+
+  test "a window paces the frame by its own interval":
+    let paced = hostScene("tests/paced")
+    discard pass(paced)
+    rhythmClockOverride = 1000.01
+    discard pass(paced)
+    check paced.refreshInterval < 1.0
+
   test "the layout goes along from scene to scene with what it keeps":
     let blue = hostScene("tests/blue")
     discard pass(blue)
@@ -218,3 +311,49 @@ suite "windows":
     check image.color(5, 20) == colored("#ffff00")
     check image.color(30, 20) == colored("#ffffff")
     check blue.wornLayout.isNil
+
+  test "the wheel scrolls the box under the pointer, in the scene in front and in a window behind":
+    # In front, in the <yield />: its own box, in its own coordinates.
+    let scroller = hostScene("tests/scroller")
+    discard pass(scroller)
+    check scrolledY("tests/scroller") == 0
+    scroller.wheel(5, 20, 1)
+    check scrolledY("tests/scroller") == 72 # a notch, about three lines
+    scroller.wheel(5, 20, -0.5) # a trackpad's half of a notch
+    check scrolledY("tests/scroller") == 36
+    # In a window behind, under a cover that brings it forward on a press: the
+    # wheel scrolls it there, and the cover hears nothing.
+    let wheeling = switchTo(scroller, "tests/wheeling")
+    discard pass(wheeling)
+    wheeling.wheel(30, 20, 1)
+    check scrolledY("tests/scroller") == 108
+    check wheeling.wornLayout.state{"pressed"}.getInt(0) == 0
+    # Its end reached, the wheel goes to the box around it: here none, nothing.
+    wheeling.wheel(30, 20, 10)
+    check scrolledY("tests/scroller") > 108
+    wheeling.wheel(30, 20, 1)
+    # A wheel over the layout's own white beside nothing scrolls nothing.
+    wheeling.wheel(10, 39, 1)
+    check wheeling.wornLayout.state{"pressed"}.getInt(0) == 0
+
+  test "a handler on a <Scene> is the layout's: it hears the press the scene has, and makes no copy":
+    let hearing = hostScene("tests/hearing")
+    discard pass(hearing)
+    check InterpretedFrameScene(hearing.wornLayout).sceneNodes.len == 0
+    let counter = hosted["tests/counter4"]
+    var image = pass(hearing)
+    check image.color(30, 20) == colored("#ef4444")
+    # One press: the scene in the window has it, and the layout hears it there.
+    for event in ["pointerDown", "pointerUp", "tap"]:
+      runEvent(hearing, ExecutionContext(scene: hearing, event: event,
+        payload: %*{"x": 30, "y": 20, "pointerId": 0, "pointerType": "mouse", "buttons": (if event == "pointerDown": 1 else: 0)},
+        loopIndex: 0, loopKey: ".", nextSleep: -1))
+    check hearing.wornLayout.state{"heard"}.getInt(0) == 1
+    rhythmClockOverride = 1000.5
+    image = pass(hearing)
+    check image.color(30, 20) == colored("#22c55e") # the tap reached its button
+    check counter == hosted["tests/counter4"]
+    # On the scene in front, whose <yield /> has no handler: nothing heard.
+    hearing.tap(10, 39)
+    check hearing.wornLayout.state{"heard"}.getInt(0) == 1
+

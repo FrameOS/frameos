@@ -4,8 +4,9 @@
 
 The FrameOS scene store, browsed and installed from the frame itself, is a
 scene: **Scene store** (`repo/scenes/samples/Scene store`, one JSX app). Install
-it like any other scene, open it from the scene list, and pick a shelf or
-search, page through the scenes, and Preview or Install one. A scene the frame
+it like any other scene, open it from the scene list (on a desktop of windows,
+from the layout's own entry for it: `docs/scene-layouts.md` "Windows"), and
+pick a shelf or search, page through the scenes, and Preview or Install one. A scene the frame
 holds can be opened, updated or deleted there. Leave the store (a preview, the
 scene list) and come back, and it opens on the same spot.
 

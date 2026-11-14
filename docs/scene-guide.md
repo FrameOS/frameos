@@ -622,19 +622,33 @@ export function get(app) {
 - Handlers open the frame's own screens: `frameos.dispatch('sceneSwitcher')` the
   scene list, `frameos.dispatch('sceneSettings')` the settings of the scene
   showing, and `frameos.dispatch('sceneSettings', {page: 'frame'})` the frame's.
+  Where `app.frame.scenes` is there, `frameos.dispatch('terminal')` opens the
+  frame's terminal (the commands of an ESP32's serial console).
 - A layout stays up around those built-in screens too. To give them the whole
   panel, start `get` with `if (app.frame.systemScene) return <yield />`.
 - A layout on its own has nothing to wrap, so its `<yield />` is an empty area in
   a render. That is correct, not a blank to fix.
 - On a frame that runs scenes side by side (a Raspberry Pi), `app.frame.scenes`
   lists its scenes (`{id, name}`) and `app.frame.sceneId` is the one wrapped.
-  There a layout's `<Scene id={...} />` is that scene itself, running in its own
-  rectangle beside the wrapped one, so a layout can be a desktop of windows or
-  tiles. Keep the scene with the focus in `<yield />`, bring another forward with
+  There a layout's `<Scene id={...} />` (no other props: with props it is a copy
+  they set, as anywhere) is that scene itself, running in its own rectangle
+  beside the wrapped one, so a layout can be a desktop of windows or tiles. Keep
+  the scene with the focus in `<yield />`, bring another forward with
   `frameos.dispatch('setCurrentScene', {sceneId})`, and keep which are open in
-  `frameos.setState`. Anything with a handler drawn over a `<Scene>` takes the
-  pointer there. Where `app.frame.scenes` is undefined (an ESP32, the preview),
-  draw the one scene.
+  `frameos.setState`. The frame's settings, scene list and terminal come forward
+  the same way, as `app.frame.sceneId` `system/sceneSettings` (the frame's page)
+  / `system/sceneSettings#<scene id>` (that scene's settings, one a scene) /
+  `system/sceneSwitcher` / `system/terminal` (`app.frame.systemScene` true): give
+  them a window too, and close it when the
+  focus leaves one without your layout moving it (it went back by itself).
+  Anything with a handler drawn over a `<Scene>` takes the pointer there, and a
+  press it took keeps its tap. A handler on the `<Scene>` itself
+  (`<Scene id={id} onPointerDown={() => focus(id)} />`) is the layout's, not a
+  prop (it makes no copy): it runs when a press reaches that scene, which has the
+  press all the same, so one press both works the scene and gives it the focus. A menu drawn over a box that closes it on a press
+  needs an `onPointerDown` of its own (an empty one will do), or the box takes
+  the press. Where `app.frame.scenes` is undefined (an ESP32, an editor's
+  preview), draw the one scene.
 - A layout is in no scene list and is never shown by itself. It goes on a scene
   under that scene's picture, or for all of them in the frame's Settings under
   Layouts. Tell the person that once it is built.
@@ -785,7 +799,7 @@ back gesture), and a key may be bound to them. They never change the scene.
 | `longPress` | yes |  | `x` integer, `y` integer, `durationMs` integer, `pointerId` integer, `pointerType` string | all | A pointer held in one place for `gestures.longPressMs`. |
 | `swipe` | yes |  | `direction` string, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | A press and a release at least `gestures.swipeMinPx` apart, in one of four directions. |
 | `edgeSwipe` | yes |  | `edge` string, `direction` string, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | A finger or a pen that went down within `gestures.edgePx` of an edge of the screen and moved at least `gestures.swipeMinPx` away from it, as on a phone: `edge` is where it started, `direction` the way it went. |
-| `wheel` | yes |  | `deltaX` integer, `deltaY` integer, `x` integer, `y` integer | Pi, preview | When a mouse wheel is scrolled. |
+| `wheel` | yes |  | `deltaX` float, `deltaY` float, `x` integer, `y` integer | Pi, preview | When a mouse wheel is scrolled. |
 | `turnOn` | yes | yes |  | all | Turn the screen on |
 | `turnOff` | yes | yes |  | all | Turn the screen off |
 | `toggleScreen` |  | yes |  | all | Turn the screen off when it is on, and on when it is off. |
@@ -795,6 +809,7 @@ back gesture), and a key may be bound to them. They never change the scene.
 | `setCurrentScene` |  | yes | `sceneId`? scene, `direction`? string, `state`? json | all | Switch the frame to another scene: the one `sceneId` names, or with `direction` the `next` / `prev` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). |
 | `sceneSwitcher` |  | yes | `swap`? boolean | all | Show the scene switcher (`scenes.switcher`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. |
 | `sceneSettings` |  | yes | `page`? string | all | Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. |
+| `terminal` |  | yes |  | Pi, preview | Show the terminal (`scenes.terminal`, docs/terminal.md): the frame's console on its own screen, a line to type the commands an ESP32's serial console takes and the frame's answers under it. |
 | `back` | yes |  |  | all | Go back, as a phone's back gesture does: what that is is the scene's (the photo or the page before; the scene switcher turns its page back, the scene settings close unsaved), and a scene that does not listen for it stays as it is. |
 | `forward` | yes |  |  | all | Go forward, the other way from `back`: the next photo or page (the scene switcher turns its page on). |
 <!-- END GENERATED: events -->
@@ -1064,7 +1079,7 @@ interface FrameOSEventPayloads {
   swipe: { direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
   /** A finger or a pen that went down within `gestures.edgePx` of an edge of the screen and moved at least `gestures.swipeMinPx` away from it, as on a phone: `edge` is where it started, `direction` the way it went. The frame takes that touch: the scene hears no pointerDown, pointerMove or pointerUp of it, so a slider under it stays as it was. A touch there that lifts, holds or moves along the edge instead is the scene's after all, with its pointerDown a little late. Not a mouse. */
   edgeSwipe: { edge: string; direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
-  /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */
+  /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches, and a trackpad's fractions of one; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */
   wheel: { deltaX: number; deltaY: number; x: number; y: number };
   /** Turn the screen on */
   turnOn: Record<string, never>;
@@ -1084,6 +1099,8 @@ interface FrameOSEventPayloads {
   sceneSwitcher: { swap?: boolean };
   /** Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen. */
   sceneSettings: { page?: string };
+  /** Show the terminal (`scenes.terminal`, docs/terminal.md): the frame's console on its own screen, a line to type the commands an ESP32's serial console takes and the frame's answers under it. While it, the scene switcher or the scene settings show, go back to the scene they were opened from instead. Not on an ESP32, whose console is its serial port. */
+  terminal: Record<string, never>;
   /** Go back, as a phone's back gesture does: what that is is the scene's (the photo or the page before; the scene switcher turns its page back, the scene settings close unsaved), and a scene that does not listen for it stays as it is. It never switches the scene. The frame's event map binds it to a swipe in from the left edge on a touch screen. */
   back: Record<string, never>;
   /** Go forward, the other way from `back`: the next photo or page (the scene switcher turns its page on). It never switches the scene. The frame's event map binds it to a swipe in from the right edge on a touch screen. */

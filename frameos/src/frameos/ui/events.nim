@@ -86,7 +86,10 @@ type
     glideAt: MonoTime
 
 const
-  MaxTargets = 16
+  MaxTargets = when defined(frameosEmbedded): 16 else: 64
+    ## The UIs kept live at once, the oldest let go past it. More off an ESP32,
+    ## where every window of a desktop can be a UI (docs/scene-layouts.md
+    ## "Windows") and a UI let go loses its press, hover, field and scroll.
   FlashMs = 250
     ## How long a key just typed stays lit after a render first shows it.
   RepeatFirstMs = 100
@@ -277,6 +280,12 @@ template scrolls(r: UiRegion): bool = r.scrollX > 0 or r.scrollY > 0
 template inside(r: UiRegion, lx, ly: float32): bool =
   ## Under the point, where it shows (a box that scrolls cuts off the rest).
   lx >= r.visible[0] and ly >= r.visible[1] and lx < r.visible[2] and ly < r.visible[3]
+
+when not defined(frameosEmbedded):
+  template overScene(r: UiRegion, lx, ly: float32): bool =
+    ## A `<Scene>` or `<yield />` at the point, in paint order: what the UI
+    ## drew under it is covered there, and hears nothing of the pointer.
+    r.scene and r.inside(lx, ly)
 
 proc wants(r: UiRegion, event: string): bool =
   case event
@@ -728,13 +737,28 @@ when not defined(frameosEmbedded):
     of "Escape": target.blurField()
     else: target.moveCaret(payload{"key"}.getStr())
 
-  proc wheel(target: UiTarget, r: UiRegion, payload: JsonNode) =
-    ## A wheel over a box that scrolls: 48 px a notch.
-    var (sx, sy) = target.input.scrolled(r.key)
-    sx = clamp(sx + payload{"deltaX"}.getFloat() * 48, 0, r.scrollX)
-    sy = clamp(sy + payload{"deltaY"}.getFloat() * 48, 0, r.scrollY)
+  const WheelNotchPx = 72'f32
+    ## A notch of the wheel: about three lines of text, as a browser scrolls.
+    ## A trackpad's fractions of a notch scroll their share of it.
+
+  var wheelScrolled* {.threadvar.}: bool
+    ## A wheel scrolled a box (set, never cleared, here): a layout that handed
+    ## the wheel to the scene under it scrolls its own box under the pointer
+    ## only when the scene's did not move (interpreter.runEventInner).
+
+  proc wheel(target: UiTarget, r: UiRegion, payload: JsonNode): bool =
+    ## A wheel over a box that scrolls. False when the box is at its end that
+    ## way, so the box around it scrolls instead, as in a browser.
+    let (fromX, fromY) = target.input.scrolled(r.key)
+    let
+      sx = clamp(fromX + payload{"deltaX"}.getFloat() * WheelNotchPx, 0, r.scrollX)
+      sy = clamp(fromY + payload{"deltaY"}.getFloat() * WheelNotchPx, 0, r.scrollY)
+    if sx == fromX and sy == fromY:
+      return false
     target.input.scrollTo(r.key, sx, sy)
     target.inputOnly = true
+    wheelScrolled = true
+    true
 
 # ------------------------------------------------------------------ dispatch
 
@@ -749,7 +773,8 @@ when not defined(frameosEmbedded):
     for target in targets:
       if target.sceneId != sceneId:
         continue
-      if target.captureOf(pointer) >= 0:
+      # A press it holds is its own; a new press goes by where it lands.
+      if event != "pointerDown" and target.captureOf(pointer) >= 0:
         return true
       let
         scale = if target.scale > 0: target.scale else: 1'f32
@@ -762,6 +787,44 @@ when not defined(frameosEmbedded):
             break
           if r.wants(event):
             return true
+
+when not defined(frameosEmbedded):
+  proc uiHoldsPointer*(sceneId: string, pointer: int): bool =
+    ## Whether an element of the scene's UI holds this pointer's press (a title
+    ## bar being dragged): its moves and its release are that element's,
+    ## wherever they land.
+    for target in targets:
+      if target.sceneId == sceneId and target.captureOf(pointer) >= 0:
+        return true
+
+  proc uiSceneHandler*(sceneId, event: string, payload: JsonNode): bool =
+    ## A layout's own handler on the `<Scene>` an event reached
+    ## (`<Scene id onPointerDown={...} />`, interpreter.routePointer): the
+    ## topmost scene at the event's point, as it starts (a gesture's start).
+    ## The scene has the event all the same; this is the layout hearing it,
+    ## to give that scene the focus where it is. True when one ran.
+    let kind = handlerKind(event)
+    if kind < 0 or payload.isNil or payload.kind != JObject:
+      return false
+    let
+      x = payload{"startX"}.getFloat(payload{"x"}.getFloat(-1))
+      y = payload{"startY"}.getFloat(payload{"y"}.getFloat(-1))
+    for target in targets:
+      if target.sceneId != sceneId or target.call.isNil:
+        continue
+      let
+        scale = if target.scale > 0: target.scale else: 1'f32
+        lx = (x - target.offsetX) / scale
+        ly = (y - target.offsetY) / scale
+      for i in countdown(target.regions.high, 0):
+        let r = target.regions[i]
+        if r.scene and r.inside(lx, ly):
+          let handler = r.handlers[UiEvent(kind)]
+          if handler == 0:
+            return false
+          target.call(handler - 1, event, payload, [float32(lx - r.x), float32(ly - r.y), r.w, r.h])
+          target.inputOnly = false # whatever the handler changed, get() shows it
+          return true
 
 proc uiTakesPressAt*(sceneId: string; x, y: float32): bool =
   ## Whether a press at (x, y), in the scene's pixels, lands on something a UI
@@ -981,12 +1044,18 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         target.dragged = false
         for i in countdown(target.regions.high, 0):
           let r = target.regions[i]
+          when not defined(frameosEmbedded):
+            if r.overScene(lx, ly):
+              break
           if (r.handlers[uePointerDown] > 0 or r.handlers[uePointerMove] > 0) and r.inside(lx, ly):
             target.captures.add((pointer, r.key))
             break
         if target.captureOf(pointer) < 0:
           for i in countdown(target.regions.high, 0):
             let r = target.regions[i]
+            when not defined(frameosEmbedded):
+              if r.overScene(lx, ly):
+                break
             if r.scrolls and r.inside(lx, ly):
               (target.dragSX, target.dragSY) = target.input.scrolled(r.key)
               target.dragKey = r.key
@@ -998,8 +1067,8 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
     when not defined(frameosEmbedded):
       if event == "wheel" and placed:
         for i in countdown(target.regions.high, 0):
-          if target.regions[i].scrolls and target.regions[i].inside(lx, ly):
-            target.wheel(target.regions[i], payload)
+          if target.regions[i].scrolls and target.regions[i].inside(lx, ly) and
+              target.wheel(target.regions[i], payload):
             result = true
             break
     if kind == ord(ueSwipe) and target.dragged:
@@ -1021,6 +1090,9 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       var hit = -1
       for i in countdown(target.regions.high, 0):
         let r = target.regions[i]
+        when not defined(frameosEmbedded):
+          if r.overScene(lx, ly):
+            break
         if (r.field > 0 or r.handlers[ueClick] > 0) and r.inside(lx, ly):
           hit = i
           break
@@ -1073,6 +1145,9 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
     # key of the on-screen keyboard is the field's to edit, not the app's.
     for i in countdown(target.regions.high, 0):
       let r = target.regions[i]
+      when not defined(frameosEmbedded):
+        if r.overScene(lx, ly):
+          break
       let handler = r.handlers[UiEvent(kind)]
       if handler > 0 and r.inside(lx, ly):
         handled = true

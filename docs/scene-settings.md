@@ -45,6 +45,35 @@ scene, a schedule, the HTTP API with the frame access key or an admin
 session, the preview and the runtime. Not a driver (a key is bound through
 the event map), and not the cloud, which has no verb for it.
 
+**In a window.** On a frame that runs its scenes side by side (a Pi, the
+browser with windows on; `docs/scene-layouts.md` "Windows") the panel is a scene
+like the others: a desktop layout gives it a window of its own over the scene it
+was opened from, sized there like the desktop's apps rather than the whole panel
+(`docs/terminal.md`: the same rule for every built-in scene). There **every
+scene's settings are an instance of their own**,
+`system/sceneSettings#` and the scene's id (the contract's
+`scenes.settingsWindow`; `event_loop.settingsWindows`), so the settings of
+several scenes stay open side by side, each with its own `from`, fields and
+edits, and Save or Cancel in one goes back to its scene and closes only it. The
+frame page is one window, the plain `system/sceneSettings`: `sceneSettings
+{page: "frame"}` opens it over the scene in front, or over the scene whose
+settings are in front, and the gear in a scene's settings brings it forward
+instead of turning that window's page (it has no gear back: the scenes'
+settings have windows of their own). Left for another window, a settings window
+stays open there as it was, its page and its edits kept, and its idle timeout
+waits until it has the focus again; opened from its scene again, it starts
+afresh, and brought forward by its id it is as it was left. Everywhere else (an
+ESP32, a Pi without a desktop, an editor's preview) the settings are the one
+scene they always were. The scene switcher stays one window, and so does the
+terminal ([`terminal.md`](terminal.md)): the frame's console on its screen, the
+same facts and hooks as the frame page behind it. In the Windows 98 sample a
+scene's settings open from the gear button at the left of its window's title bar
+(a window behind comes forward first; open already, they come forward), and the
+frame's from Start's Control Panel and the tray; in macOS from the gear at the
+right of the title bar and the menu bar's Settings, the frame's from System
+Settings in the Dock and the status icons; in BeOS from the gear box on the
+window's tab, the frame's from Preferences and the Deskbar's tray.
+
 ## The frame page
 
 A gear left of Save opens the frame's own settings: **Frame settings**, where

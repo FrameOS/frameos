@@ -87,7 +87,9 @@ wraps (its own, shown on its own), `app.frame.wifiRssi` and
 the built-in screens with `frameos.dispatch('sceneSwitcher')`,
 `frameos.dispatch('sceneSettings')` and `frameos.dispatch('sceneSettings', {page:
 'frame'})` for the frame's own page, which is all the Windows 98 taskbar's Start,
-gear and tray do. A clock that shows no seconds calls
+gear and tray do (on a desktop of windows, a scene's settings open from the gear
+button on its title bar, and `frameos.dispatch('terminal')` opens the terminal,
+`docs/terminal.md`). A clock that shows no seconds calls
 `frameos.setNextSleep` with the seconds left in the minute, and the chrome then
 costs nothing until it changes.
 
@@ -136,13 +138,48 @@ backspace (`uiTimer`) only reach the frame's own scene, not a nested one.
 
 ## Windows
 
-On a frame that runs its scenes side by side (a Raspberry Pi), a layout can be
-a desktop: every scene opened in a window or a tile of its own, all of them
-running, one with the focus. The samples `Windows 98` (overlapping windows moved
-and sized with the mouse, snapped to a half or the whole desktop at its edges,
-a taskbar of what is open, a Start menu and desktop icons, Alt+Tab and Alt+F4,
-full screen with F11) and `Tiling` (the scene with the focus large, the others in a column)
-are two. Everywhere else they draw the one scene, as before.
+On a frame that runs its scenes side by side (a Raspberry Pi, and the browser
+when the page asks for it: `frameos_wasm_set_windowed`, the worker's
+`windowed`), a layout can be a desktop: every scene opened in a window or a tile
+of its own, all of them running, one with the focus. The samples `Windows 98`
+(overlapping windows that open at its "Window size", 800×480 unless set
+otherwise, filling the desktop where that does not fit, and where they were
+when their scene opens again; moved and sized with the mouse, snapped to a half or the
+whole desktop at its edges, a taskbar of what is open, a Start menu and desktop
+icons, Alt+Tab and Alt+F4, full screen with F11, a gear button at the left of a
+scene's title bar for its settings, Start's Control Panel and Terminal) and `Tiling`
+(tiles that keep their places in an arrangement the top bar steps through: the
+first large on the left and the others in a column, the first on top and the
+others in a row, an even grid, columns, rows; the gap between tiles dragged moves
+that split, kept per arrangement; a press anywhere in a tile is its scene's at
+once and gives it the focus, a tile's bar dragged onto another tile, bar or
+picture, swaps the two, a gear on each bar opens that scene's settings as a tile
+of their own, and the top bar's gear the frame's) are two. `macOS` and `BeOS`
+are desktops of overlapping windows the way `Windows 98` is, at the same "Window
+size", moved, sized and snapped the same way, with their own chrome: on `macOS`
+the traffic lights close, put away and zoom a window, a gear at the right of its
+title bar opens its settings, the Dock has the frame's scenes (a dot under the
+ones open), Launchpad, System Settings and Terminal, and the menu bar's Scenes,
+Settings and Window open a scene, the settings of the one in front and the
+windows open (full screen there, or F11); on `BeOS` a window's yellow tab (grey
+behind) has its close, gear and zoom boxes and puts it away on a double click,
+the Deskbar lists the windows open and its gem opens the Be menu (the scenes,
+Preferences, Terminal), and Tracker's icons under it open the frame's own apps.
+The desktop icons of `Windows 98` and `BeOS` are those apps alone, never the
+frame's scenes (the menus have those): the scene list, the scene store and the
+asset browser, the terminal and the frame's settings. The **Scene store** and the
+**Asset browser** (`docs/scene-store.md`) are scenes like any other, found by
+their sample's id (`scene-store`, `asset-browser`) or their name; where the frame
+has them each desktop has entries of its own for them and leaves them out of its
+scene lists: the top of `Windows 98`'s Start, a bag for the store in `Tiling`'s top
+bar, `macOS`'s Dock beside System Settings (and the store in its mark's menu),
+`BeOS`'s Be menu. Everywhere else (an ESP32, an editor's preview) they draw the one
+scene, as before.
+
+A layout also dresses the frame's own pages (the settings, the scene switcher,
+the terminal, the keyboard on the screen) in its look: its state's `theme`
+(`docs/jsx-ui.md` "Themes"). The samples set it from their "Look of the settings
+pages" field, High contrast among the choices.
 
 The runtime gives a layout three things and keeps no windows of its own:
 
@@ -150,33 +187,91 @@ The runtime gives a layout three things and keeps no windows of its own:
   its order), only on a host that runs them side by side: a layout tests for it.
   **`app.frame.sceneId`** is the id of the scene it wraps.
 - **A `<Scene id>` in the layout around the frame's scene is that scene itself**,
-  the runner's own instance (`hostSceneFor`, runner.nim), not a copy: it runs on
-  its own `refreshInterval` in its window, and it is the same one, state and all,
-  when it comes forward. The scene with the focus is the frame's scene and goes
-  in the `<yield />`; a layout brings another forward with
-  `frameos.dispatch('setCurrentScene', {sceneId})`, so the focus is what the
-  scene list, next/previous, the API, the control planes and the voice chat
-  already move. A scene twice, or the wrapped one as a `<Scene>`, draws once.
-  Its props do not set its state, as they do a copy's: a window shows the scene
-  as it is. A scene in a window wears no layout of its own. Keys go to the scene
-  with the focus, then to the layout.
+  the host's own instance (`hostSceneFor`: runner.nim, single_scene_host.nim),
+  not a copy: it runs on its own `refreshInterval` in its window, and it is the
+  same one, state and all, when it comes forward. The scene with the focus is
+  the frame's scene and goes in the `<yield />`; a layout brings another forward
+  with `frameos.dispatch('setCurrentScene', {sceneId})`, so the focus is what
+  the scene list, next/previous, the API, the control planes and the voice chat
+  already move. A scene twice, or the wrapped one as a `<Scene>`, draws once. A
+  scene in a window wears no layout of its own. Keys go to the scene with the
+  focus, then to the layout. A `<Scene>` given props is a copy those props set,
+  as anywhere: `<Scene id="clock" city="Oslo" />` twice is two clocks.
 - **One layout instance goes along from scene to scene** (`carryLayout`, the
-  ESP32's parked layout): what it keeps in `frameos.setState` (which windows are
-  open, where, which is minimized) outlives the switch. It is gone at a restart:
+  ESP32's parked layout), put on at the switch (`wearLayout`), so the release of
+  the press that switched already reaches the new scene through it: what it
+  keeps in `frameos.setState` (which windows are open, where, which is
+  minimized) outlives the switch. A push, a deploy or a reload hands that state
+  to the layout's next instance (`carryLayoutState`); a restart does not, and
   the scene shown then opens alone.
+- **Another layout chosen keeps the scenes open.** A desktop keeps what it has
+  open in its state as **`openScenes`**, scene ids in its order, the one with
+  the focus last. When another layout takes its place (the frame page's Layout,
+  `frameos_wasm_choose_layout` in the browser, a push that dresses the scenes in
+  another), the runtime hands that list to the new layout's fresh instance
+  (`carriedOpen` in `interpreter.nim`, off the ESP32), and a desktop that starts
+  with no windows of its own opens those: the samples cascade them as windows
+  or lay them out as tiles, the frame's own scenes named by what they are. The
+  scenes are the host's, so they run on as they were; only where each window
+  was is the old layout's own.
+
+**The frame's own scenes are windows too.** The scene settings, the scene
+switcher and the terminal (`isBuiltInScene`; the terminal is `docs/terminal.md`)
+open over the scene in front the way any scene comes forward, so a layout gives
+them a window like the others; `app.frame.sceneName` says what one shows ("Scene
+settings", "Frame settings", "Layout settings", "Scene switcher", "Terminal"),
+and `Windows 98` names its windows after it ("Clock Properties", "Control
+Panel"; `macOS` "Clock Settings", "System Settings"; `BeOS` "Clock Settings",
+"Preferences"), with no gear where a scene's window has one. Each
+scene's settings are a scene of their own here, `app.frame.sceneId`
+`system/sceneSettings#<scene id>` (`docs/scene-settings.md` "In a window"), so a
+layout gives each its own window, named after the scene after the `#`; the plain
+`system/sceneSettings` is the frame page, one window. Opening one over another
+built-in scene, a layout brings the scene window on top forward first, so the
+one open stays open in its window. The host keeps a built-in scene the focus leaves
+for another window, as it keeps any scene (`builtInScenesStay`): it stays open
+there with its page and its edits, and does not time out. A `<Scene id>` of one
+is that instance only while it is open so, never a new one: it has nothing to
+show until the dispatcher opens it from a scene, and opened so again it starts
+afresh. It goes back by itself as always (Save, Cancel, a scene picked, its
+timeout while it has the focus), and then it is done: a layout closes its window
+when the focus leaves a built-in scene for a scene without the layout having
+moved it (the samples remember what they brought forward, `asked`). Going back
+always lands on a scene, so one built-in scene leaving the focus to another (a
+scene's settings opening the frame page) stays open.
 
 And the pointer: anything the layout draws over a scene that listens for an
 event takes that event there (`uiOverScene`, `UiRegion.scene` marks where each
-scene is in paint order), and a press it took stays with it until it lifts. So a
-transparent box with an `onPointerDown` over a window behind brings it forward
-without the scene hearing the press, a title bar drags its window over the
-others, and a menu over the yield is the menu's. A transparent box costs nothing;
-anything with a background, a border or a picture over a scene makes that scene
-a picture while it is there, so windows behind the one in front are composited,
-and tiles that do not overlap all stay holes.
+scene is in paint order), and a press it took is its own to the end, its tap,
+double tap, long press and swipe included, and its moves and its release
+too, over any scene (a scene an earlier press left captured included). What the layout drew under a scene
+hears nothing of the pointer there. So a transparent box with an
+`onPointerDown` over a window behind brings it forward without the scene hearing
+the press or its tap, a title bar drags its window over the others, and a menu
+over the yield is the menu's. **A handler on a `<Scene>` itself is the
+layout's** (`<Scene id={id} onPointerDown={() => focus(id)} />`): not a prop of
+the scene (it makes no copy), it runs when an event reaches that scene there,
+as it starts (`uiSceneHandler`, from `routePointer`), and the scene has the
+event all the same. That is how `Tiling` gives a tile the focus on the press its
+button has, where `Windows 98`'s covers keep a first press on a window behind
+for bringing it forward. Not on an ESP32, whose layouts run no windows. A menu over a box that closes it on a press takes
+the press itself (an `onPointerDown`, even an empty one): a press goes to the
+topmost element with a handler for it, and the render it causes before the
+release would take the item away from its click. A transparent box costs
+nothing; anything with a background, a border or a picture over a scene makes
+that scene a picture while it is there, so windows behind the one in front are
+composited, and tiles that do not overlap all stay holes. A window hanging off
+the desktop's edge, any edge, is a picture cut there, not a hole squeezed into
+what shows.
 
-The cost is the Pi's alone: all of it is out of the ESP32's build (`when not
-defined(frameosEmbedded)`), whose layouts wrap one scene.
+Windows pace the frame as a split's panels do: the first one due wakes it,
+except on e-paper and a deep sleeper, where none wakes it sooner than the scene
+it wraps would (the floor). Their pictures count against the same copy budget.
+A scene that cannot start in a window is not tried again until the scenes
+change.
+
+The cost is off the ESP32's build (`when not defined(frameosEmbedded)`), whose
+layouts wrap one scene.
 
 ## Control planes
 

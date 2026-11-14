@@ -5,6 +5,7 @@ import scenes/scenes
 import system/scenes as systemScenesRegistry
 import frameos/layout_choice
 import frameos/channels
+from frameos/events import isSceneSettings, SceneSettingsId
 import frameos/cloud/scene_guard
 import frameos/hal/files as halFiles
 import frameos/types
@@ -169,6 +170,10 @@ proc findExportedScene*(sceneId: SceneId): Option[ExportedScene] =
   withLock sceneRegistryLock:
     if exportedScenes.hasKey(sceneId):
       return some(exportedScenes[sceneId])
+    # A scene's own settings on a desktop (event_loop.settingsWindows): the
+    # settings' export, an instance a scene.
+    if isSceneSettings(sceneId.string) and exportedScenes.hasKey(SceneSettingsId.SceneId):
+      return some(exportedScenes[SceneSettingsId.SceneId])
   none(ExportedScene)
 
 proc cleanupSceneRuntime*(scene: FrameScene) =
@@ -830,7 +835,7 @@ proc updateLastPersistedState*(self: FrameScene) =
       except OSError:
         discard
   self.lastPersistedStateUpdate = epochTime()
-  if not systemScenes.hasKey(self.id):
+  if not systemScenes.hasKey(self.id) and not isSceneSettings(self.id.string):
     # Persist the sceneId to know where to come back to. Do not persist system scenes.
     if lastPersistedSceneId.isNone() or lastPersistedSceneId.get() != self.id:
       persistStateFile(&"{SCENE_STATE_JSON_FOLDER}/scene.json", $(%*{"sceneId": self.id.string}))

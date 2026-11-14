@@ -3079,9 +3079,10 @@ proc holesOf(owner: AppRoot, context: ExecutionContext, target: UiTarget,
     if h.right <= h.left or h.bottom <= h.top:
       h.clean = false
     when not defined(frameosEmbedded):
-      # Past the canvas's edge (a window dragged half off a desktop): clamped,
-      # the scene would be squeezed into what shows. A picture is cut instead.
-      if round((h.x + h.w) * regionScale).int > requestedWidth or
+      # Past the canvas's edge, any of the four (a window dragged half off a
+      # desktop): clamped, the scene would be squeezed into what shows. A
+      # picture is cut instead.
+      if h.x < 0 or h.y < 0 or round((h.x + h.w) * regionScale).int > requestedWidth or
           round((h.y + h.h) * regionScale).int > requestedHeight:
         h.clean = false
 

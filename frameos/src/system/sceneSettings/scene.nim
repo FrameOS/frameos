@@ -37,6 +37,7 @@ from frameos/event_loop import settingsOf
 import frameos/layout_choice
 import frameos/ui/events
 import frameos/ui/keyboard
+import frameos/ui/theme
 import frameos/ui/tree
 import frameos/utils/image
 import frameos/utils/svg_frames
@@ -189,11 +190,28 @@ proc frameAction(action: string) =
   if not frameSettingsAction.isNil:
     frameSettingsAction(action)
 
+template uiId(self: SceneSettingsScene): string =
+  ## Its UI's target (ui/events.nim): one a scene where built-in scenes stay
+  ## open as windows, each instance its own; on an ESP32 the one id.
+  when defined(frameosEmbedded): SceneSettingsId
+  else: self.id.string
+
+when not defined(frameosEmbedded):
+  proc ownWindow(self: SceneSettingsScene): bool =
+    ## A scene's own settings on a desktop (event_loop.settingsWindows): its
+    ## gear brings the frame page's window forward instead of turning its page.
+    builtInScenesStay and self.id.string != SceneSettingsId
+
+  proc panelWindow(self: SceneSettingsScene): bool =
+    ## The frame page's window on a desktop (Control Panel): no gear back to a
+    ## scene's form, whose settings have windows of their own.
+    builtInScenesStay and self.id.string == SceneSettingsId
+
 proc showPage(self: SceneSettingsScene, frame: bool) =
   ## The scene's form or the frame page, its list at the top and no field
   ## with the keyboard. The host hears the frame page come up (a scan, on a
   ## frame that is not on Wi-Fi) and go away (no more redraws for its news).
-  forgetUiTarget(SceneSettingsId, SettingsNode)
+  forgetUiTarget(self.uiId, SettingsNode)
   if self.onFrame() and not frame:
     frameAction("close")
   self.state.put("page", newJString(if frame: "frame" else: "scene"))
@@ -358,9 +376,17 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
 proc opener(self: SceneSettingsScene): string =
   self.state{"from"}.getStr()
 
+when not defined(frameosEmbedded):
+  var wentBack {.threadvar.}: bool
+    ## It went back by itself (Save, Cancel, its timeout), not merely lost the
+    ## focus to a window beside it: its "close" ends it (docs/scene-layouts.md
+    ## "Windows").
+
 proc leave() =
   ## Back to the scene it was opened from, nothing saved: the dispatcher
   ## knows which.
+  when not defined(frameosEmbedded):
+    wentBack = true
   sendEvent(evSceneSettings, newJObject(), eoScene)
 
 proc collect(fields, values: JsonNode): JsonNode =
@@ -381,6 +407,8 @@ proc save(self: SceneSettingsScene) =
   let payload = newJObject()
   payload.put("sceneId", newJString(self.opener()))
   payload.put("state", collect(self.fieldList(), self.valueMap()))
+  when not defined(frameosEmbedded):
+    wentBack = true
   sendEvent(evSetCurrentScene, payload, eoScene)
 
 proc saveFrame(self: SceneSettingsScene, fields: JsonNode) =
@@ -396,7 +424,7 @@ proc saveFrame(self: SceneSettingsScene, fields: JsonNode) =
     chooseLayout(layout.getStr())
     changes.delete("layout")
   if changes.len > 0 and not frameSettingsApply.isNil:
-    forgetUiTarget(SceneSettingsId, SettingsNode)
+    forgetUiTarget(self.uiId, SettingsNode)
     frameSettingsApply(changes)
 
 proc openLayoutPage(self: SceneSettingsScene) =
@@ -406,7 +434,7 @@ proc openLayoutPage(self: SceneSettingsScene) =
   let form = newJObject()
   settingsOf(self.wornLayout, form)
   self.state.put("layoutForm", form)
-  forgetUiTarget(SceneSettingsId, SettingsNode)
+  forgetUiTarget(self.uiId, SettingsNode)
   frameAction("close")
   self.state.put("page", newJString("layout"))
   self.showName("Layout settings")
@@ -470,7 +498,14 @@ proc acting(self: SceneSettingsScene) =
     elif frame: self.saveFrame(fields)
     else: self.save()
   elif handler == HGear:
-    self.showPage(not frame)
+    when defined(frameosEmbedded):
+      self.showPage(not frame)
+    else:
+      if self.ownWindow():
+        # The frame page has a window of its own: it comes forward.
+        sendEvent(evSceneSettings, %*{"page": "frame"}, eoScene)
+      else:
+        self.showPage(not frame)
   elif handler >= HAction:
     self.press(handler - HAction)
   elif handler >= HSelect:
@@ -528,7 +563,7 @@ proc button(look: Look, label: string, handler: int, primary: bool): SvgNode =
   if look.paper: c.add " border-2 border-black"
   elif primary: c.add " bg-sky-600 active:bg-sky-500"
   else: c.add " bg-zinc-800 active:bg-zinc-600"
-  el("div", move c, SvgNode(text: label)).on("on-click", handler)
+  el("div", move c, SvgNode(text: label)).role(if primary: "primary" else: "button").on("on-click", handler)
 
 proc icon(look: Look, path: string): SvgNode =
   # The hole winds against the teeth: the default fill rule cuts it out.
@@ -547,7 +582,7 @@ proc iconButton(look: Look, lit: bool, path: string, handler: int): SvgNode =
   if look.paper: c.add(if lit: " bg-black text-white" else: " border-2 border-black")
   elif lit: c.add " bg-sky-600 active:bg-sky-500"
   else: c.add " bg-zinc-800 active:bg-zinc-600"
-  el("div", move c, look.icon(path)).on("on-click", handler)
+  el("div", move c, look.icon(path)).role(if lit: "selected" else: "button").on("on-click", handler)
 
 proc gear(look: Look, lit, named: bool): SvgNode =
   ## The gear that opens the frame page, lit while it shows, with its name
@@ -562,6 +597,8 @@ proc gear(look: Look, lit, named: bool): SvgNode =
   else: c.add " bg-zinc-800 active:bg-zinc-600"
   result = el("div", move c, look.icon(GearPath)).on("on-click", HGear)
   result.children.add el("span", "whitespace-nowrap", SvgNode(text: "Frame settings"))
+  when not defined(frameosEmbedded):
+    result = result.role("button")
 
 proc fieldBox(look: Look): string =
   result = "w-full rounded-lg"
@@ -574,7 +611,7 @@ proc optionRow(look: Look, value, label: string, picked: bool): SvgNode =
   var c = "rounded-lg"
   if picked: c.add(if look.paper: " bg-black text-white" else: " bg-sky-600")
   elif not look.paper: c.add " active:bg-zinc-600"
-  result = el("option", move c, SvgNode(text: label))
+  result = el("option", move c, SvgNode(text: label)).role(if picked: "picked" else: "option")
   result.attrs.add(("value", value))
 
 proc selectBox(look: Look, field: JsonNode, options: JsonNode, held: string, index: int): SvgNode =
@@ -594,6 +631,8 @@ proc selectBox(look: Look, field: JsonNode, options: JsonNode, held: string, ind
   let other = field{"other"}.getStr()
   if other.len > 0:
     result.children.add look.optionRow(OtherValue, other, held == OtherValue)
+  when not defined(frameosEmbedded):
+    result = result.role("field")
 
 proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = false): SvgNode =
   ## One field: its label and what changes it. `typing`: its select box's
@@ -624,12 +663,13 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = fals
     else: c.add " bg-zinc-700"
     var k = "h-full aspect-square rounded-full"
     k.add(if look.paper and lit: " bg-black" elif look.paper: " border-2 border-black" else: " bg-white")
-    result.children.add el("div", move c, el("div", move k))
+    result.children.add el("div", move c, el("div", move k).role(if lit: "knobOn" else: "knob")).role(
+      if lit: "switchOn" else: "switch")
     return
   c = "text-zinc-400"
   if look.paper: c = ""
   c.px("text", look.size * 4 div 5)
-  result.children.add el("span", move c, SvgNode(text: label))
+  result.children.add el("span", move c, SvgNode(text: label)).role("muted")
   let choices = arrayOf(options)
   if field{"select"}.getBool() or choices.elems.len > 0:
     let box = look.selectBox(field, choices, if typing: OtherValue else: value.text, index)
@@ -656,7 +696,7 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = fals
   input.attrs.add(("placeholder", field{if typing: "otherPlaceholder" else: "placeholder"}.getStr()))
   if field{"secret"}.getBool(): input.attrs.add(("type", "password"))
   elif kind in ["integer", "float"]: input.attrs.add(("type", "number"))
-  result.children.add input.on("on-change", HText + index)
+  result.children.add input.on("on-change", HText + index).role("field")
 
 proc fieldList(self: SceneSettingsScene, look: Look, padX, padY: int): SvgNode =
   ## The fields, one under the other, or a line that says there are none.
@@ -676,7 +716,7 @@ proc fieldList(self: SceneSettingsScene, look: Look, padX, padY: int): SvgNode =
     c = "text-center"
     if not look.paper: c.add " text-zinc-400"
     result.children.add el("div", move c,
-      SvgNode(text: if self.opener().len == 0: "No scene is showing." else: "This scene has no settings."))
+      SvgNode(text: if self.opener().len == 0: "No scene is showing." else: "This scene has no settings.")).role("muted")
 
 proc grey(look: Look): string =
   ## Grey text (plain on e-paper).
@@ -700,7 +740,7 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     else: "flex flex-col gap-1 p-3 rounded-lg bg-zinc-900")
   proc line(card: SvgNode, look: Look, label, text: string) =
     if text.len > 0:
-      let row = el("div", "flex gap-3", el("span", look.grey, SvgNode(text: label)))
+      let row = el("div", "flex gap-3", el("span", look.grey, SvgNode(text: label)).role("muted"))
       row.children.add el("div", "grow min-w-0 flex justify-end",
         el("span", "truncate", SvgNode(text: text)))
       card.children.add row
@@ -723,7 +763,7 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     card.line(look, "Update", info{"updateVersion"}.getStr() & " available")
   elif update >= 0:
     card.line(look, "Update", UpdateWords[update])
-  result.children.add card
+  result.children.add card.role("card")
   let
     fields = self.frameFields(info, autoScale, unit)
     edits = self.objectAt("frameValues")
@@ -742,7 +782,7 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     if note.len > 0:
       var c = look.grey
       c.px("text", look.size * 3 div 4)
-      result.children.add el("div", move c, SvgNode(text: note))
+      result.children.add el("div", move c, SvgNode(text: note)).role("muted")
   c = "flex flex-wrap"
   c.px("gap", look.gap div 2)
   let buttons = el("div", move c)
@@ -825,7 +865,7 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   # E-paper's white and black are the canvas's own; an LCD's dark page covers
   # every pixel, so a key repaints only what it changed.
   if not paper: c.add " bg-zinc-950 text-white"
-  result = el("div", move c)
+  result = el("div", move c).role("page")
   when not defined(frameosEmbedded):
     if round:
       self.roundTree(look, result, width, height, title, min(keyboardTop, height))
@@ -844,12 +884,16 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
     SvgNode(text: if frame: "Frame settings" else: title))
   if not info.isNil and not layoutPage:
     # About 30 of the text's size: the two buttons, the title and the name.
-    header.children.add look.gear(frame, named = not frame and width >= look.size * 30)
+    when defined(frameosEmbedded):
+      header.children.add look.gear(frame, named = not frame and width >= look.size * 30)
+    else:
+      if not self.panelWindow():
+        header.children.add look.gear(frame, named = not frame and width >= look.size * 30)
   # Lit while there is something to save: after a Save it goes quiet, which
   # is how the frame page says it took it.
   let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
   header.children.add look.button("Save", HSave, not edits.isNil and edits.len > 0)
-  result.children.add header
+  result.children.add header.role("bar")
   let body = if frame: self.frameList(look, info, scaleText(autoRenderScale(unit, unit, self.frameConfig.device)), unit)
     else: self.fieldList(look, look.pad, look.pad)
   result.children.add el("div", "flex-1 overflow-y-auto", body)
@@ -879,14 +923,14 @@ proc drawForm*(self: SceneSettingsScene, image: Image) =
   var keyboardTop = high(int)
   if round:
     # The keyboard is up: where it will go (ui/layout.nim asks the same).
-    let target = uiTarget(SceneSettingsId, SettingsNode, create = false)
+    let target = uiTarget(self.uiId, SettingsNode, create = false)
     if not target.isNil and target.input.keyboard and target.input.focus > 0:
       keyboardTop = keyboardBox(roomW, roomH, true)[0]
   let info = if round: nil else: frameInfo()
   if info.isNil and self.onFrame():
     self.showPage(false)
-  if self.drawUi(SceneSettingsId, self.tree(roomW, roomH, self.paper, self.title(), round,
-      keyboardTop, info, min(image.width, image.height)), image, self.paper, onHandler, IdleSeconds,
+  if self.drawUi(self.uiId, self.tree(roomW, roomH, self.paper, self.title(), round,
+      keyboardTop, info, self.sizeUnit(image)), image, self.paper, onHandler, IdleSeconds,
       roomW, roomH):
     leave()
 
@@ -906,6 +950,16 @@ proc back(self: SceneSettingsScene) =
 
 # ------------------------------------------------------------ the scene
 
+when not defined(frameosEmbedded):
+  proc startAfresh(self: SceneSettingsScene) =
+    ## No field with the keyboard, the list at its top, no page and no edits:
+    ## what the dispatcher hands over next is all it knows.
+    if self.onFrame():
+      frameAction("close")
+    forgetUiTarget(self.uiId, SettingsNode)
+    self.state = newJObject()
+    self.showName("Scene settings")
+
 proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   ## What raises here is reported by the caller, as for any scene. The
   ## payload is read with `{}` alone, which answers nil for what is missing.
@@ -913,6 +967,12 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   let payload = context.payload
   case context.event
   of "setCurrentScene":
+    when not defined(frameosEmbedded):
+      # Opened from a scene (the dispatcher always says which, `from`): afresh,
+      # as an ESP32's close leaves it. Brought forward again from a window,
+      # the switch says nothing and it is as it was left, edits and all.
+      if not payload{"state", "from"}.isNil:
+        self.startAfresh()
     # What the dispatcher read off the scene it was opened from.
     for key in ["from", "fields", "values", "opened", "layout", "noLayout"]:
       let value = payload{"state", key}
@@ -926,13 +986,34 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
       self.showPage(true)
   of "open":
     self.touch()
+    when not defined(frameosEmbedded):
+      wentBack = false
+      if self.state{"away"}.getBool():
+        # Brought forward from a window: the host's news for the frame page
+        # again.
+        self.state.delete("away")
+        if self.onFrame():
+          frameAction("open")
   of "close":
-    # Opened again, it starts afresh: no field has the keyboard, the list is
-    # at its top, and it knows no scene until the dispatcher says.
-    if self.onFrame():
-      frameAction("close")
-    forgetUiTarget(SceneSettingsId, SettingsNode)
-    self.state = newJObject()
+    when defined(frameosEmbedded):
+      # Opened again, it starts afresh: no field has the keyboard, the list is
+      # at its top, and it knows no scene until the dispatcher says.
+      if self.onFrame():
+        frameAction("close")
+      forgetUiTarget(SceneSettingsId, SettingsNode)
+      self.state = newJObject()
+    else:
+      if wentBack or not builtInScenesStay:
+        # Done: opened again by name, it knows nothing.
+        wentBack = false
+        self.startAfresh()
+      else:
+        # The focus went to a window beside it (docs/scene-layouts.md
+        # "Windows"): it stays open there as it was, and does not go back by
+        # itself (switcher.drawUi). Opened from a scene again, it starts afresh.
+        if self.onFrame():
+          frameAction("close")
+        self.state.put("away", newJBool(true))
   of "render":
     if context.hasImage and not context.image.isNil:
       self.drawForm(context.image)
@@ -942,7 +1023,7 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   of evBack:
     # The frame's back (a swipe in from the left), as on a phone: the
     # keyboard goes away first, then the frame page, then the form, unsaved.
-    if dismissKeyboard(SceneSettingsId, SettingsNode):
+    if dismissKeyboard(self.uiId, SettingsNode):
       self.touch()
       sendEvent(evRender, newJObject(), eoScene)
     else:
@@ -951,7 +1032,7 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
     # The pointer, and keys for a field (ui/events.nim hit-tests them). E-paper
     # shows no press: what only moves the press waits for a tap.
     acted = -1
-    let changed = dispatchUiEvent(SceneSettingsId, context.event, context.payload)
+    let changed = dispatchUiEvent(self.uiId, context.event, context.payload)
     if acted >= 0:
       self.acting()
     if changed or acted >= 0:

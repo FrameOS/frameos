@@ -247,6 +247,21 @@
   plane can turn the page off (`frame_settings_on_screen`); the device keeps
   the last word (a Pi's `frameos-settings-unlock` file on the boot partition,
   an ESP32's `set settings_unlock 1`).
+- On a desktop (`builtInScenesStay`: a Pi's or the browser's windows) every
+  scene's settings are an instance of their own, `system/sceneSettings#<scene
+  id>` (contract `scenes.settingsWindow`, `event_loop.settingsWindows`), and the
+  plain id is the frame page's one window. A reader of built-in ids asks
+  `isBuiltInScene` / `isSceneSettings`, never `== SceneSettingsId`; the ESP32
+  keeps the one id (the helpers are not compiled there).
+- The third built-in scene is the **terminal** (`docs/terminal.md`,
+  `frameos/src/system/terminal/`), off the ESP32 alone (every use under
+  `when not defined(frameosEmbedded)`): the ESP32 serial console's commands
+  typed on the frame's screen, answered from the frame page's facts and hooks.
+  It is a scene, never an app bridge: no scene's JS reaches its commands. What
+  changes the frame goes where the frame page's buttons go (the hooks, origin
+  `panel`) and is refused when the page is not offered. A command the console
+  gains that a Pi or the browser can answer gets its line in `commands.nim`,
+  in the console's words.
 
 ## Scene previews on a frame: `docs/scene-previews.md`
 
@@ -562,20 +577,30 @@
   a scroller) is a raster image in the UI's SVG tree (`ukImage` +
   `fillSceneImages`), its picture under the panel copy budget
   (`SceneRhythm.embedImage`). A scene's `<Scene>` children live in `sceneNodes`
-  under negative keys.
+  under negative keys. Off the ESP32 an `on*` handler on a `<Scene>` is the layout's
+  (`uiSceneHandler`, run from `routePointer` when the event reaches that scene),
+  never a prop that makes a copy.
   A rectangle of the panel keeps its own damage record in `svg_frames.nim`
   (`takePanelRegion`): a new way to write a rectangle's pixels without a render
   of it takes that record too.
 - **Windows** (`docs/scene-layouts.md` "Windows"; the `Windows 98` and `Tiling`
-  samples): on a Pi a layout can run the frame's scenes side by side. The
-  runtime adds three things and no window manager: `app.frame.scenes` /
-  `sceneId`, a layout's `<Scene id>` resolving to the runner's own instance
-  (`hostSceneFor`), and one layout instance carried across switches
-  (`carryLayout`); the focus is the frame's current scene. UI drawn over a
-  scene takes the pointer there (`uiOverScene`, `UiRegion.scene`). Windows,
-  positions and z-order are the layout's own state. All of it is behind
-  `when not defined(frameosEmbedded)`: the ESP32's generated C must not change
-  (diff the `--compileOnly` output of `embedded_main.nim` against main).
+  samples): on a Pi, and in the browser when the page turns it on
+  (`frameos_wasm_set_windowed`, the windowed `single_scene_host`), a layout can
+  run the frame's scenes side by side. The runtime adds three things and no
+  window manager: `app.frame.scenes` / `sceneId`, a layout's bare `<Scene id>`
+  resolving to the host's own instance (`hostSceneFor`; one with props stays a
+  copy), and one layout instance carried across switches and put on at the
+  switch (`carryLayout`, `wearLayout`; `carryLayoutState` across a push or
+  reload); the focus is the frame's current scene. The built-in scenes are
+  windows too: a host that runs scenes side by side keeps one the focus leaves
+  (`builtInScenesStay`, `away`), and the two hosts keep the same rules, so a
+  change to one host's windows is a change to the other's. UI drawn over a
+  scene takes the pointer there, its tap included (`uiOverScene`,
+  `UiRegion.scene`), and windows pace the frame (`windowsOf` in
+  scene_rhythm.nim). Windows, positions and z-order are the layout's own state.
+  All of it is behind `when not defined(frameosEmbedded)`: the ESP32's
+  generated C must not change (diff the `--compileOnly` output of
+  `embedded_main.nim` against main).
 
 ## JSX from JS apps: `docs/jsx-ui.md`
 

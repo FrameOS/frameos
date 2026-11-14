@@ -34,6 +34,9 @@ import pixie/fileformats/svg
 import ./js_runtime/runtime as jsRuntime
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
+when not defined(frameosEmbedded):
+  import system/terminal/scene as terminal
+  from ./events import isSceneSettings
 when defined(memProbe): import ./utils/memory
 
 export event_loop
@@ -90,6 +93,17 @@ type
     note*: proc (message: string)         ## a line for whoever is watching the console
     initialState*: proc (sceneId: SceneId): JsonNode
       ## Persisted state a scene starts with; nil = none.
+    when not defined(frameosEmbedded):
+      windowed*: bool
+        ## Runs the frame's scenes side by side, as a Pi's runner does
+        ## (docs/scene-layouts.md "Windows"): a scene switched away from is
+        ## kept in `windows`, a layout's `<Scene id>` is that kept scene, and
+        ## the layout goes along from scene to scene. The wasm preview turns
+        ## it on (frameos_wasm_set_windowed); an ESP32 has none of it.
+      windows*: Table[SceneId, FrameScene]
+        ## Every scene that ran and is not the resident one, while windowed.
+      failedWindows: seq[SceneId]
+        ## Scenes that could not start in a window, until the scenes change.
 
 proc say(host: SingleSceneHost, message: string) =
   if not host.note.isNil:
@@ -216,6 +230,111 @@ proc lifecycle*(host: SingleSceneHost, event: string, payload: JsonNode) =
   if not host.events.isNil:
     host.events.deliverLifecycle(host.scene, event, payload)
 
+when not defined(frameosEmbedded):
+  proc keepAsWindow(host: SingleSceneHost) =
+    ## The resident scene is switched away from on a windowed host: it stays,
+    ## in `windows`, and the layout it wore is parked for the next scene
+    ## (runner.nim carryLayout). A built-in scene (the switcher, the
+    ## settings) too, as the runner keeps it: a layout may show it in a
+    ## window of its own, and it is opened afresh from the next scene.
+    if host.scene.isNil:
+      return
+    let scene = host.scene
+    if not scene.wornLayout.isNil:
+      let layout = scene.wornLayout
+      scene.wornLayout = nil
+      if layout != parkedLayout:
+        dropParkedLayout()
+        parkedLayout = layout
+    host.windows[scene.id] = scene
+    host.scene = nil
+    host.exported = nil
+
+  proc takeWindow(host: SingleSceneHost, sceneId: SceneId): bool =
+    ## The kept instance of `sceneId` made the resident one again, when there
+    ## is one. An older copy of the parked layout it still wears goes, so it
+    ## takes the parked one, with what it keeps (runner.nim carryLayout).
+    let kept = host.windows.getOrDefault(sceneId, nil)
+    if kept.isNil:
+      return false
+    host.windows.del(sceneId)
+    host.scene = kept
+    host.exported =
+      if isSceneSettings(sceneId.string): sceneSettings.exportedScene
+      elif sceneId.string == SceneSwitcherId: sceneSwitcher.exportedScene
+      elif sceneId.string == SceneTerminalId: terminal.exportedScene
+      else: getInterpretedScenes().getOrDefault(sceneId, nil)
+    if not kept.wornLayout.isNil and not parkedLayout.isNil and kept.wornLayout != parkedLayout and
+        kept.wornLayout.id == parkedLayout.id:
+      cleanupScene(kept.wornLayout)
+      kept.wornLayout = nil
+    true
+
+  proc dropWindows*(host: SingleSceneHost) =
+    ## Let go of every kept scene: new scenes arrived, or the runtime restarts.
+    for scene in host.windows.values:
+      cleanupScene(scene)
+    host.windows = initTable[SceneId, FrameScene]()
+    host.failedWindows.setLen(0)
+
+  proc carryDesktop*(host: SingleSceneHost) =
+    ## New scenes are coming: what the layout worn or parked kept (its windows,
+    ## where) goes to its next instance (interpreter.carryLayoutState).
+    if host.windowed:
+      carryLayoutState(if not host.scene.isNil and not host.scene.wornLayout.isNil: host.scene else: parkedLayout)
+
+  proc windowScene(host: SingleSceneHost, sceneId: SceneId): FrameScene =
+    ## `hostSceneFor`: this host's instance of a scene, started if it has not
+    ## run; a built-in scene only as it is (runner.nim windowScene).
+    if host.sceneId == some(sceneId) and not host.scene.isNil:
+      return host.scene
+    result = host.windows.getOrDefault(sceneId, nil)
+    if isBuiltInScene(sceneId.string):
+      if not result.isNil and not result.state{"away"}.getBool():
+        result = nil
+      return
+    if not result.isNil:
+      return
+    let scenes = getInterpretedScenes()
+    if not scenes.hasKey(sceneId) or scenes[sceneId].isLayout or sceneId in host.failedWindows:
+      return nil
+    var persisted = if host.initialState.isNil: nil else: host.initialState(sceneId)
+    if persisted.isNil:
+      persisted = %*{}
+    try:
+      host.events.hostRun:
+        result = scenes[sceneId].init(sceneId, host.frameConfig, host.logger, persisted)
+      host.windows[sceneId] = result
+      host.say("scene \"" & scenes[sceneId].name & "\" initialized in a window")
+    except Exception as e:
+      # Once: a window does not try again on every pass until the scenes change.
+      host.failedWindows.add sceneId
+      host.say("scene " & sceneId.string & " could not start in a window: " & e.msg)
+      return nil
+
+  proc setWindowed*(host: SingleSceneHost, enabled: bool) =
+    ## Turn running scenes side by side on or off. On, a layout's
+    ## `app.frame.scenes` lists the frame's scenes and its `<Scene id>` is this
+    ## host's own instance of each (docs/scene-layouts.md "Windows").
+    host.windowed = enabled
+    builtInScenesStay = enabled
+    if enabled:
+      hostSceneFor = proc(sceneId: SceneId): FrameScene {.closure, gcsafe.} =
+        {.cast(gcsafe).}:
+          host.windowScene(sceneId)
+      windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+        {.cast(gcsafe).}:
+          result = newJArray()
+          if not host.sceneOrder.isNil:
+            let scenes = getInterpretedScenes()
+            for sceneId in host.sceneOrder():
+              if scenes.hasKey(sceneId) and not scenes[sceneId].isLayout:
+                result.add %*{"id": sceneId.string, "name": scenes[sceneId].name}
+    else:
+      hostSceneFor = nil
+      windowSceneListing = nil
+      host.dropWindows()
+
 proc makeCurrent*(host: SingleSceneHost, sceneId: SceneId, drop = true) =
   ## The switch itself, once the platform has decided `sceneId` is next: the
   ## scene being left hears "close", and the next render builds the new one.
@@ -226,6 +345,13 @@ proc makeCurrent*(host: SingleSceneHost, sceneId: SceneId, drop = true) =
     # the photos a sidecar graded.
     clearRenderPaletteOverride()
     clearGradedImages()
+  when not defined(frameosEmbedded):
+    if drop and host.windowed:
+      if host.sceneId != some(sceneId):
+        host.keepAsWindow()
+      host.sceneId = some(sceneId)
+      host.renderRequested = true
+      return
   if drop:
     let
       leaving = host.sceneId
@@ -274,12 +400,32 @@ proc ensureScene*(host: SingleSceneHost): bool =
     host.pendingSwitchPayload = nil
     host.lifecycle("open", %*{"sceneId": sceneId.string})
     return true
+  when not defined(frameosEmbedded):
+    if host.windowed and host.takeWindow(sceneId):
+      # The scene it was in a window, or when it was left: the same one,
+      # brought forward. A switch that carried state applies it.
+      if host.pendingSwitchId == sceneId.string and not host.pendingSwitchPayload.isNil:
+        try:
+          host.runNow("setCurrentScene", host.pendingSwitchPayload)
+        except Exception as e:
+          host.say("setCurrentScene state failed: " & e.msg)
+      host.pendingSwitchId = ""
+      host.pendingSwitchPayload = nil
+      wearLayout(host.scene)
+      host.lifecycle("open", %*{"sceneId": sceneId.string})
+      return true
   let builtIn = isBuiltInScene(sceneId.string)
   if builtIn:
     # The scene switcher or the scene settings: drawn by the runtime,
     # nothing to parse, no state of its own to start from.
     host.exported = if sceneId.string == SceneSettingsId: sceneSettings.exportedScene
       else: sceneSwitcher.exportedScene
+    when not defined(frameosEmbedded):
+      if sceneId.string == SceneTerminalId:
+        host.exported = terminal.exportedScene
+      elif isSceneSettings(sceneId.string):
+        # A scene's own settings on a desktop (event_loop.settingsWindows).
+        host.exported = sceneSettings.exportedScene
   else:
     let scenes = getInterpretedScenes()
     if not scenes.hasKey(sceneId):
@@ -303,6 +449,9 @@ proc ensureScene*(host: SingleSceneHost): bool =
       host.say("setCurrentScene state failed: " & e.msg)
   host.pendingSwitchId = ""
   host.pendingSwitchPayload = nil
+  when not defined(frameosEmbedded):
+    if host.windowed:
+      wearLayout(host.scene)
   host.lifecycle("open", %*{"sceneId": sceneId.string})
   true
 
@@ -380,7 +529,18 @@ proc start*(host: SingleSceneHost) =
     sceneFor: proc (target: Option[SceneId]): FrameScene =
       # One resident scene: an event aimed at another one has nowhere to go.
       if target.isSome and (host.sceneId.isNone or target.get() != host.sceneId.get()):
+        when not defined(frameosEmbedded):
+          # Windowed: the scene in its window.
+          if host.windowed:
+            return host.windows.getOrDefault(target.get(), nil)
         return nil
+      when not defined(frameosEmbedded):
+        # Windowed, a switch is only a change of focus, the scene running
+        # already: it is here at once, so what was queued behind the switch (a
+        # layout's two commands, a `sceneSettings` from the scene now in
+        # front) finds it, as on a Pi.
+        if host.windowed and host.scene.isNil:
+          discard host.ensureScene()
       host.scene,
     runScene: proc (scene: FrameScene, event: string, payload: JsonNode) =
       host.runOn(scene, event, payload),

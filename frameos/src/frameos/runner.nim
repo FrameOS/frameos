@@ -1,6 +1,7 @@
 import json, pixie, times, options, asyncdispatch, strformat, strutils, tables
 import std/monotimes
 import std/atomics
+import std/sets
 import apps/render/image/app as render_imageApp
 import apps/render/text/app as render_textApp
 import apps/data/qr/app as data_qrApp
@@ -903,8 +904,11 @@ proc runSceneEvent(self: RunnerThread, scene: FrameScene, event: string, payload
 # itself goes along from scene to scene, so what it keeps (which windows are
 # open, where) outlives a switch, as a parked layout does on an ESP32.
 
-var parkedLayout {.threadvar.}: FrameScene
-  ## The layout the scene left last wore, for the next one that wears it.
+var
+  parkedLayout {.threadvar.}: FrameScene
+    ## The layout the scene left last wore, for the next one that wears it.
+  failedWindows {.threadvar.}: HashSet[SceneId]
+    ## Scenes that could not start in a window, until the scenes change.
 
 proc dropParkedLayout() =
   if not parkedLayout.isNil:
@@ -934,20 +938,36 @@ proc carryLayout(self: RunnerThread, fromId, toId: SceneId) =
     cleanupSceneRuntime(next.wornLayout)
     next.wornLayout = nil
 
+proc carryDesktop(self: RunnerThread) =
+  ## What the layout worn or parked keeps, for its next instance.
+  let shown = self.scenes.getOrDefault(self.currentSceneId, nil)
+  carryLayoutState(if not shown.isNil and not shown.wornLayout.isNil: shown else: parkedLayout)
+
 proc windowScene(self: RunnerThread, sceneId: SceneId): FrameScene =
   ## `hostSceneFor`: the scene this runner holds, started if it has not run.
+  ## A built-in scene only while it is open in a window (`away`, the scene
+  ## modules' "close"): one that went back is done, and none starts here.
   result = self.scenes.getOrDefault(sceneId, nil)
-  if not result.isNil:
+  if isBuiltInScene(sceneId.string):
+    if not result.isNil and not result.state{"away"}.getBool():
+      result = nil
+    return
+  if not result.isNil or sceneId in failedWindows:
     return
   let exportedScene = findExportedScene(sceneId)
   if exportedScene.isNone:
     return nil
+  let exported = exportedScene.get()
+  if exported of ExportedInterpretedScene and ExportedInterpretedScene(exported).isLayout:
+    return nil # a layout is no window
   try:
     self.sceneEvents.hostRun:
-      result = exportedScene.get().init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+      result = exported.init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
     self.scenes[sceneId] = result
-    self.noteSceneInit(exportedScene.get(), sceneId)
+    self.noteSceneInit(exported, sceneId)
   except Exception as e:
+    # Once: a window does not try again on every pass until the scenes change.
+    failedWindows.incl sceneId
     self.logSignal(%*{"event": "render:error:scene:init", "sceneId": sceneId.string, "error": $e.msg})
     return nil
 
@@ -959,6 +979,7 @@ proc windowListing(): JsonNode =
 
 proc installWindowHooks*(self: RunnerThread) =
   takeParkedLayout = takeParked
+  builtInScenesStay = true
   hostSceneFor = proc(sceneId: SceneId): FrameScene {.closure, gcsafe.} =
     {.cast(gcsafe).}:
       self.windowScene(sceneId)
@@ -998,6 +1019,7 @@ proc selectScene(self: RunnerThread, payload: JsonNode): bool =
       scene.updateLastPublicState()
     self.currentSceneId = sceneId
     self.runSceneEvent(self.scenes[sceneId], "setCurrentScene", payload)
+    wearLayout(self.scenes[sceneId])
     return true
   if hasStatePayload(payload):
     if not self.scenes.hasKey(sceneId):
@@ -1026,8 +1048,12 @@ proc runtimeCommand(self: RunnerThread, command: RuntimeCommand, payload: JsonNo
       self.logger.log(%*{"event": "reload:config:error", "error": e.msg, "stacktrace": e.getStackTrace()})
     reloadInterpretedScenes(self.logger)
     applyDeployToUploads()
+    # Every scene is read again, the layouts too: what a desktop kept (its
+    # windows) goes to the next one (interpreter.carryLayoutState).
+    self.carryDesktop()
     cleanupSceneTableRuntime(self.scenes)
     dropParkedLayout()
+    failedWindows.clear()
     self.scenes = initTable[SceneId, FrameScene]()
     self.currentSceneId = getFirstSceneId()
     self.configureControlCode()
@@ -1059,13 +1085,18 @@ proc runtimeCommand(self: RunnerThread, command: RuntimeCommand, payload: JsonNo
     self.beginSceneLoading()
     if payload.hasKey("state") and payload["state"].kind == JObject:
       setPersistedStateFromPayload(mainSceneId.get(), payload["state"])
-    # The layout parked may be one of them, changed; the one worn may show
-    # some of them in its windows, and its next pass draws them anew.
-    dropParkedLayout()
-    let shown = self.scenes.getOrDefault(self.currentSceneId, nil)
-    if not shown.isNil and not shown.wornLayout.isNil:
-      shown.wornLayout.slots.setLen(0)
-      rhythmMarkDue(shown.wornLayout)
+    # The layout goes along to the main scene, as on any switch: the same one
+    # when it is not among the scenes replaced, else what it kept (its
+    # windows) to the next one. Its windows are drawn anew either way.
+    self.carryDesktop()
+    self.carryLayout(self.currentSceneId, mainSceneId.get())
+    if not parkedLayout.isNil:
+      if parkedLayout.id in sceneIds:
+        dropParkedLayout()
+      else:
+        parkedLayout.slots.setLen(0)
+        rhythmMarkDue(parkedLayout)
+    failedWindows.clear()
     for sceneId in sceneIds:
       if self.scenes.hasKey(sceneId):
         cleanupSceneRuntime(self.scenes[sceneId])

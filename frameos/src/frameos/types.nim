@@ -904,3 +904,16 @@ type
     server*: Server
     runner*: RunnerControl
     network*: Network
+
+when not defined(frameosEmbedded):
+  var onDesktop*: proc(): bool {.nimcall, gcsafe.}
+    ## Set by the interpreter: whether what is drawn now is inside a desktop of
+    ## windows, a layout that keeps the scenes it has open (`openScenes`,
+    ## docs/scene-layouts.md "Windows"). A built-in scene there is sized like
+    ## the desktop's apps, not like the whole panel (sceneSwitcher's panelUnit).
+  var builtInScenesStay* {.threadvar.}: bool
+    ## Set by a host that runs a frame's scenes side by side (runner.nim, a
+    ## windowed single_scene_host): a built-in scene the frame leaves for
+    ## another, without going back by itself, stays open as it was, for a
+    ## layout's window (docs/scene-layouts.md "Windows"). Unset, leaving it
+    ## closes it, as on an ESP32.

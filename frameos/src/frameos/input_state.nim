@@ -602,7 +602,8 @@ proc cancelPointers*(state: var InputState, origin: EventOrigin, output: var seq
     state.pointerInputLost = false
 
 when not defined(frameosEmbedded):
-  proc wheel(state: var InputState, deltaX, deltaY: int, origin: EventOrigin, output: var seq[InputDelivery]) =
+  proc wheel(state: var InputState, deltaX, deltaY: float, origin: EventOrigin, output: var seq[InputDelivery]) =
+    ## Notches, and a trackpad's fractions of one.
     let rec = state.pointer(0, "", origin)
     output.add(InputDelivery(name: evWheel, origin: origin,
       payload: %*{"deltaX": deltaX, "deltaY": deltaY, "x": rec.x, "y": rec.y}))
@@ -734,7 +735,7 @@ when not defined(frameosEmbedded):
       else:
         state.pointerCancel(event.pointerId.int, origin, output)
     of dikWheel:
-      state.wheel(event.x.int, event.y.int, origin, output)
+      state.wheel(event.x.float, event.y.float, origin, output)
     of dikKeyDown:
       state.keyFromLinux(event.code.int, true, event.value == 2, origin, output)
     of dikKeyUp:
@@ -783,7 +784,7 @@ proc applyNamedPointerOrKey(state: var InputState, name: string, payload: JsonNo
     else:
       if payload.isInt("x") and payload.isInt("y"):
         discard state.pointerFromPayload(payload, origin)
-      state.wheel(payload{"deltaX"}.getInt(), payload{"deltaY"}.getInt(), origin, output)
+      state.wheel(payload{"deltaX"}.getFloat(), payload{"deltaY"}.getFloat(), origin, output)
   of evTap, evDoubleTap, evLongPress, evSwipe, evEdgeSwipe:
     # Injected, not made here: the position is converted, the rest passes.
     let (id, pointerType) = state.pointerFromPayload(payload, origin)

@@ -9,6 +9,10 @@ export const CUSTOM_EVENT_MAX_NAME_LENGTH = 63
 export const SCENE_SWITCHER_ID = 'system/sceneSwitcher'
 /** The built-in scene `sceneSettings` shows (docs/scene-settings.md). */
 export const SCENE_SETTINGS_ID = 'system/sceneSettings'
+/** Where built-in scenes stay open as windows, a scene's own settings: this and its id. */
+export const SCENE_SETTINGS_WINDOW_PREFIX = 'system/sceneSettings#'
+/** The built-in scene `terminal` shows, off the ESP32 (docs/terminal.md). */
+export const SCENE_TERMINAL_ID = 'system/terminal'
 /** What a layout's scene node names for the scene it wraps (docs/scene-layouts.md). */
 export const SCENE_YIELD_ID = 'system/yield'
 
@@ -49,6 +53,7 @@ export type ContractEventName =
   | 'setCurrentScene'
   | 'sceneSwitcher'
   | 'sceneSettings'
+  | 'terminal'
   | 'back'
   | 'forward'
   | 'metrics'
@@ -816,6 +821,29 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     },
     "since": "2026.10.22"
   },
+  "terminal": {
+    "class": "scene-command",
+    "listen": false,
+    "dispatch": true,
+    "origins": [
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system",
+      "eventMap"
+    ],
+    "renderAfter": "always",
+    "coalesce": "none",
+    "log": "full",
+    "hosts": {
+      "linux": true,
+      "esp32": false,
+      "wasm": true
+    },
+    "since": "2026.11.8"
+  },
   "back": {
     "class": "scene-command",
     "listen": true,
@@ -1145,7 +1173,7 @@ interface FrameOSEventPayloads {
   swipe: { direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
   /** A finger or a pen that went down within \`gestures.edgePx\` of an edge of the screen and moved at least \`gestures.swipeMinPx\` away from it, as on a phone: \`edge\` is where it started, \`direction\` the way it went. The frame takes that touch: the scene hears no pointerDown, pointerMove or pointerUp of it, so a slider under it stays as it was. A touch there that lifts, holds or moves along the edge instead is the scene's after all, with its pointerDown a little late. Not a mouse. */
   edgeSwipe: { edge: string; direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
-  /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */
+  /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches, and a trackpad's fractions of one; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */
   wheel: { deltaX: number; deltaY: number; x: number; y: number };
   /** Turn the screen on */
   turnOn: Record<string, never>;
@@ -1165,6 +1193,8 @@ interface FrameOSEventPayloads {
   sceneSwitcher: { swap?: boolean };
   /** Show the scene's settings (\`scenes.settings\`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen. */
   sceneSettings: { page?: string };
+  /** Show the terminal (\`scenes.terminal\`, docs/terminal.md): the frame's console on its own screen, a line to type the commands an ESP32's serial console takes and the frame's answers under it. While it, the scene switcher or the scene settings show, go back to the scene they were opened from instead. Not on an ESP32, whose console is its serial port. */
+  terminal: Record<string, never>;
   /** Go back, as a phone's back gesture does: what that is is the scene's (the photo or the page before; the scene switcher turns its page back, the scene settings close unsaved), and a scene that does not listen for it stays as it is. It never switches the scene. The frame's event map binds it to a swipe in from the left edge on a touch screen. */
   back: Record<string, never>;
   /** Go forward, the other way from \`back\`: the next photo or page (the scene switcher turns its page on). It never switches the scene. The frame's event map binds it to a swipe in from the right edge on a touch screen. */

@@ -79,3 +79,24 @@ proc eventIsLogged*(name: string): bool =
 proc eventLogsPayload*(name: string): bool =
   eventPolicy(name).log == elFull
 
+
+when not defined(frameosEmbedded):
+  # A scene's own settings window (docs/scene-settings.md "In a window"): where
+  # built-in scenes stay open as windows, each scene's settings are an instance
+  # of their own, `SceneSettingsWindowPrefix` and the scene's id. Not on an
+  # ESP32, where the settings are one scene.
+
+  proc settingsWindowId*(sceneId: string): string =
+    ## The id of `sceneId`'s own settings.
+    SceneSettingsWindowPrefix & sceneId
+
+  proc settingsWindowScene*(id: string): string =
+    ## The scene a settings window is for; "" for any other id.
+    if id.len > SceneSettingsWindowPrefix.len and id[0 ..< SceneSettingsWindowPrefix.len] == SceneSettingsWindowPrefix:
+      id[SceneSettingsWindowPrefix.len .. ^1]
+    else:
+      ""
+
+  proc isSceneSettings*(id: string): bool =
+    ## The settings, as one scene or one scene's own.
+    id == SceneSettingsId or settingsWindowScene(id).len > 0
