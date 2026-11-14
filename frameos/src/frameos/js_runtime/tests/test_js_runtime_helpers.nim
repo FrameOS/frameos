@@ -1,19 +1,22 @@
-import std/[json, sequtils, strutils, unittest]
+import std/[json, sequtils, strutils, tables, unittest]
+import pixie
 
 import frameos/js_runtime/runtime
+import frameos/interpreter
+import frameos/scene_compiler
 import frameos/types
 import frameos/values
 import lib/tz
 
-proc testScene(): InterpretedFrameScene =
-  InterpretedFrameScene(
-    id: "tests/js-runtime".SceneId,
-    logger: Logger(
-      enabled: true,
-      log: proc(payload: JsonNode) = discard payload,
-      enable: proc() = discard,
-      disable: proc() = discard
-    )
+type LogStore = ref object
+  entries: seq[JsonNode]
+
+proc testLogger(store: LogStore): Logger =
+  Logger(
+    enabled: true,
+    log: proc(payload: JsonNode) = store.entries.add(payload),
+    enable: proc() = discard,
+    disable: proc() = discard
   )
 
 proc testContext(scene: FrameScene): ExecutionContext =
@@ -26,141 +29,127 @@ proc testContext(scene: FrameScene): ExecutionContext =
     loopKey: "."
   )
 
+proc codeNode(id: int, code: string, outputType = ""): DiagramNode =
+  DiagramNode(id: id.NodeId, nodeType: "code", data: %*{"codeArgs": [],
+    "codeOutputs": (if outputType.len > 0: %*[{"name": "out", "type": outputType}] else: %*[]),
+    "codeJS": code})
+
+proc codeScene(nodes: seq[DiagramNode], config: FrameConfig, store: LogStore): InterpretedFrameScene =
+  ## A scene of code nodes, started: what a snippet runs in.
+  let sceneId = "tests/js-runtime".SceneId
+  var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+  uploaded[sceneId] = ExportedInterpretedScene(name: "code", backgroundColor: parseHtmlColor("#000000"),
+    refreshInterval: 60.0, publicStateFields: @[], nodes: nodes, edges: @[], apps: %*{})
+  setUploadedInterpretedScenes(uploaded)
+  resetInterpretedScenes()
+  InterpretedFrameScene(interpreter.init(sceneId, config, testLogger(store), %*{}))
+
+proc codeValue(code: string, outputType = ""): Value =
+  let store = LogStore()
+  let scene = codeScene(@[codeNode(1, code, outputType)], FrameConfig(width: 4, height: 3), store)
+  result = scene.getDataNode(1.NodeId, testContext(scene))
+  cleanupSceneJs(scene)
+
 suite "js runtime helper seams":
   test "toJsIdent sanitizes invalid identifiers":
-    check toJsIdentForTest("") == "_"
-    check toJsIdentForTest("alpha_1") == "alpha_1"
-    check toJsIdentForTest("1 bad-name") == "___bad_name"
-    check toJsIdentForTest("$ok") == "$ok"
+    check toJsIdent("") == "_"
+    check toJsIdent("alpha_1") == "alpha_1"
+    check toJsIdent("1 bad-name") == "___bad_name"
+    check toJsIdent("$ok") == "$ok"
 
-  test "jsQuote escapes slash quote and control characters":
-    check jsQuoteForTest("a\"b\\c\n\r") == "a\\\"b\\\\c\\n\\r"
-
-  test "envelopeToValue handles undefined with and without expected type":
-    let asNone = envelopeToValueForTest(%*{"k": "undefined"})
-    check asNone.kind == fkNone
-
-    let undefinedAsInt = envelopeToValueForTest(%*{"k": "undefined"}, "integer")
+  test "a code node's undefined is nothing, or its declared type's zero":
+    check codeValue("undefined").kind == fkNone
+    let undefinedAsInt = codeValue("undefined", "integer")
     check undefinedAsInt.kind == fkInteger
     check undefinedAsInt.asInt() == 0
 
-  test "envelopeToValue infers primitive kinds":
-    let s = envelopeToValueForTest(%*{"k": "string", "v": "x"})
+  test "a code node's result keeps its kind":
+    let s = codeValue("'x'")
     check s.kind == fkString
     check s.asString() == "x"
 
-    let nInt = envelopeToValueForTest(%*{"k": "number", "v": 7})
+    let nInt = codeValue("7")
     check nInt.kind == fkInteger
     check nInt.asInt() == 7
 
-    let nFloat = envelopeToValueForTest(%*{"k": "number", "v": 1.5})
+    let nFloat = codeValue("1.5")
     check nFloat.kind == fkFloat
     check abs(nFloat.asFloat() - 1.5) < 0.0001
 
-    let b = envelopeToValueForTest(%*{"k": "boolean", "v": true})
+    let b = codeValue("true")
     check b.kind == fkBoolean
     check b.asBool()
 
-    let j = envelopeToValueForTest(%*{"k": "array", "v": [1, 2]})
+    let j = codeValue("[1, 2]")
     check j.kind == fkJson
     check j.asJson().len == 2
 
-  test "envelopeToValue bigint keeps in-range integers and overflows to string":
-    let inRange = envelopeToValueForTest(%*{"k": "bigint", "v": {"__bigint": "9223372036854775807"}})
+  test "a bigint keeps an in-range integer":
+    let inRange = codeValue("9223372036854775807n")
     check inRange.kind == fkInteger
     check inRange.asInt() == 9223372036854775807'i64
 
-    let overflow = envelopeToValueForTest(%*{"k": "bigint", "v": {"__bigint": "922337203685477580799"}})
-    check overflow.kind == fkString
-    check overflow.asString() == "922337203685477580799"
-
-  test "expected type coercion overrides envelope kind":
-    let coerced = envelopeToValueForTest(%*{"k": "string", "v": "12"}, "integer")
+  test "the declared output type wins over the result's kind":
+    let coerced = codeValue("'12'", "integer")
     check coerced.kind == fkInteger
     check coerced.asInt() == 12
 
-  test "evalSnippet runs typescript and jsx through quickjs":
-    var scene = testScene()
-    let value = evalSnippet(
-      scene,
-      testContext(scene),
-      1.NodeId,
-      "(({count}: {count: number}) => <result total={count + 1}>{count}</result>)({ count: 2 })"
-    )
+  test "code runs typescript and jsx through quickjs":
+    let value = codeValue(
+      "(({count}: {count: number}) => <result total={count + 1}>{count}</result>)({ count: 2 })")
     check value.kind == fkJson
     let jsonValue = value.asJson()
     check jsonValue["type"].getStr() == "result"
     check jsonValue["props"]["total"].getInt() == 3
     check jsonValue["props"]["children"].getInt() == 2
-    cleanupSceneJs(scene)
-    cleanupCompilerJs()
 
-  test "evalSnippet maps runtime errors to original source lines":
-    var logs: seq[JsonNode] = @[]
-    var scene = testScene()
-    scene.logger.log = proc(payload: JsonNode) =
-      logs.add(payload)
-
-    let value = evalSnippet(
-      scene,
-      testContext(scene),
-      2.NodeId,
-      "(() => {\n  const count: number = 1\n  throw new Error(\"mapped boom\")\n})()"
-    )
-
+  test "runtime errors are put back on the snippet's own lines":
+    let store = LogStore()
+    let scene = codeScene(@[codeNode(2,
+      "(() => {\n  const count: number = 1\n  throw new Error(\"mapped boom\")\n})()")],
+      FrameConfig(width: 4, height: 3), store)
+    let value = scene.getDataNode(2.NodeId, testContext(scene))
     check value.kind == fkNone
-    let errorLogs = logs.filterIt(it{"event"}.getStr() == "interpreter:jsError")
+    let errorLogs = store.entries.filterIt(it{"event"}.getStr() == "interpreter:jsError")
     check errorLogs.len == 1
     check "mapped boom" in errorLogs[0]{"message"}.getStr()
-    check ">:3:18" in errorLogs[0]{"stack"}.getStr()
+    check "<frameos:code:2>:3:" in errorLogs[0]{"stack"}.getStr()
     cleanupSceneJs(scene)
-    cleanupCompilerJs()
 
   test "format renders in the scene's configured time zone":
     # A Word clock scene asks `format(now(), "{hour}")`. It must answer in
     # the frame's zone on every platform — the ESP32 has no /etc/localtime,
     # so the old detectSystemTimeZone() fallback rendered UTC there.
     initTimeZone()
-    var scene = testScene()
-    scene.frameConfig = FrameConfig(timeZone: "Europe/Brussels")
-    # 2026-08-30T08:00:00Z; Brussels is on CEST (UTC+2).
-    let summer = evalSnippet(scene, testContext(scene), 3.NodeId,
-      "format(1788076800, \"{hour/2}:{minute/2}\")")
-    check summer.asString() == "10:00"
-    # 2026-01-15T08:00:00Z; CET (UTC+1) — the DST fold must follow the date.
-    let winter = evalSnippet(scene, testContext(scene), 3.NodeId,
-      "format(1768464000, \"{hour/2}:{minute/2}\")")
-    check winter.asString() == "09:00"
+    let store = LogStore()
+    let scene = codeScene(@[
+      # 2026-08-30T08:00:00Z; Brussels is on CEST (UTC+2).
+      codeNode(3, "format(1788076800, \"{hour/2}:{minute/2}\")", "string"),
+      # 2026-01-15T08:00:00Z; CET (UTC+1) — the DST fold must follow the date.
+      codeNode(4, "format(1768464000, \"{hour/2}:{minute/2}\")", "string")],
+      FrameConfig(width: 4, height: 3, timeZone: "Europe/Brussels"), store)
+    check scene.getDataNode(3.NodeId, testContext(scene)).asString() == "10:00"
+    check scene.getDataNode(4.NodeId, testContext(scene)).asString() == "09:00"
 
     # The ESP32 pushes a changed zone into the same frameConfig every render
     # pass; the running QuickJS context must pick it up without a rebuild.
     scene.frameConfig.timeZone = "America/New_York"
-    let moved = evalSnippet(scene, testContext(scene), 3.NodeId,
-      "format(1788076800, \"{hour/2}:{minute/2}\")")
-    check moved.asString() == "04:00"
+    check scene.getDataNode(3.NodeId, testContext(scene)).asString() == "04:00"
 
     # A zone chrono has no data for renders as UTC rather than failing the
     # node (an ESP32 whose tz slice has not arrived yet).
     scene.frameConfig.timeZone = "Mars/Olympus_Mons"
-    let unknown = evalSnippet(scene, testContext(scene), 3.NodeId,
-      "format(1788076800, \"{hour/2}:{minute/2}\")")
-    check unknown.asString() == "08:00"
+    check scene.getDataNode(3.NodeId, testContext(scene)).asString() == "08:00"
     cleanupSceneJs(scene)
-    cleanupCompilerJs()
 
-  test "format falls back to setJsTimeZone without a frameConfig":
+  test "format falls back to setJsTimeZone when the frame names no zone":
     initTimeZone()
     setJsTimeZone("Asia/Tokyo")
-    var scene = testScene()
-    let tokyo = evalSnippet(scene, testContext(scene), 4.NodeId,
-      "format(1788076800, \"{hour/2}:{minute/2}\")")
-    check tokyo.asString() == "17:00"
+    check codeValue("format(1788076800, \"{hour/2}:{minute/2}\")").asString() == "17:00"
     setJsTimeZone("")
-    cleanupSceneJs(scene)
-    cleanupCompilerJs()
 
   test "cleanupSceneJs closes the quickjs runtime":
-    var scene = testScene()
+    var scene = InterpretedFrameScene(id: "tests/js-runtime".SceneId)
     ensureSceneJs(scene)
     check scene.jsReady
     check scene.js.context != nil

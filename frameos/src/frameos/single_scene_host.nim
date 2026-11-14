@@ -146,32 +146,7 @@ proc cleanupScene*(scene: FrameScene) =
   for _, childScene in interpreted.sceneNodes:
     cleanupScene(childScene)
   rhythmReleaseScene(scene)
-  interpreted.execNode = nil
-  interpreted.getDataNode = nil
-  # Before the apps are dropped: each JS app node owns a QuickJS runtime with
-  # no destructor, and liveJsRuntimes keeps it reachable regardless, so the
-  # scene going away frees none of it.
-  for _, app in interpreted.appsByNodeId:
-    releaseJsAppRuntime(app)
-  when defined(memProbe): memProbe("  cleanupScene: js app runtimes released")
-  interpreted.appsByNodeId = initTable[NodeId, AppRoot]()
-  interpreted.appInputsForNodeId = initTable[NodeId, Table[string, NodeId]]()
-  interpreted.appInlineInputsForNodeId = initTable[NodeId, Table[string, string]]()
-  interpreted.codeInputsForNodeId = initTable[NodeId, Table[string, NodeId]]()
-  interpreted.codeInlineInputsForNodeId = initTable[NodeId, Table[string, string]]()
-  interpreted.sceneNodes = initTable[NodeId, FrameScene]()
-  interpreted.sceneExportByNodeId = initTable[NodeId, ExportedScene]()
-  interpreted.nextNodeIds = initTable[NodeId, NodeId]()
-  interpreted.eventListeners = initTable[string, seq[NodeId]]()
-  interpreted.eventApps = @[]
-  interpreted.nodes = initTable[NodeId, DiagramNode]()
-  interpreted.edges = @[]
-  interpreted.cacheValues = initTable[NodeId, Value]()
-  interpreted.cacheTimes = initTable[NodeId, float]()
-  interpreted.cacheKeys = initTable[NodeId, JsonNode]()
-  interpreted.cacheExprs = initTable[NodeId, JsonNode]()
-  when defined(memProbe): memProbe("  cleanupScene: tables cleared")
-  cleanupSceneJs(interpreted)
+  forgetSceneGraph(interpreted)
   when defined(memProbe): memProbe("  cleanupScene: js closed")
 
 proc recoverAbortedRun*(host: SingleSceneHost): tuple[jsDropped, jsBytes: int] =

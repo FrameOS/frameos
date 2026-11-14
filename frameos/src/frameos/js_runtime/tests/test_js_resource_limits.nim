@@ -6,8 +6,11 @@ import std/[json, monotimes, os, sequtils, strutils, times, unittest]
 import frameos/js_runtime/burrito
 import frameos/js_runtime/run_budget
 import frameos/js_runtime/runtime
+import frameos/interpreter
 import frameos/types
 import frameos/values
+import pixie
+import std/tables
 
 proc testScene(): InterpretedFrameScene =
   InterpretedFrameScene(
@@ -33,6 +36,16 @@ proc testContext(scene: FrameScene): ExecutionContext =
     loopIndex: 0,
     loopKey: "."
   )
+
+proc codeScene(scene: InterpretedFrameScene, code: string): InterpretedFrameScene =
+  ## `scene`'s config and logger, started as a scene with one code node.
+  var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+  uploaded[scene.id] = ExportedInterpretedScene(name: "limits", backgroundColor: parseHtmlColor("#000000"),
+    refreshInterval: 60.0, publicStateFields: @[], apps: %*{}, edges: @[],
+    nodes: @[DiagramNode(id: 1.NodeId, nodeType: "code", data: %*{"codeArgs": [], "codeJS": code})])
+  setUploadedInterpretedScenes(uploaded)
+  resetInterpretedScenes()
+  InterpretedFrameScene(interpreter.init(scene.id, scene.frameConfig, scene.logger, %*{}))
 
 proc sleepingBinding(ctx: ptr JSContext): JSValue {.nimcall.} =
   ## Stands in for fetchText/readAsset: slow, but slow in Nim, not in JS.
@@ -106,23 +119,20 @@ suite "js execution deadline":
     check js.eval("1 + 1") == "2"
 
   test "scene code nodes inherit the deadline":
+    # The interrupt is uncatchable: the run of the scene's program ends with
+    # it, and says which budget it was.
     var logs: seq[JsonNode] = @[]
     var scene = testScene()
     scene.logger.log = proc(payload: JsonNode) =
       logs.add(payload)
-
-    let value = evalSnippet(
-      scene,
-      testContext(scene),
-      1.NodeId,
-      "(() => { while (true) {} })()"
-    )
-
-    check value.kind == fkNone
-    let logged = logs.mapIt($it).join(" ")
-    check logged.contains("time budget")
-    cleanupSceneJs(scene)
-    cleanupCompilerJs()
+    let started = codeScene(scene, "(() => { while (true) {} })()")
+    var raised = ""
+    try:
+      discard started.getDataNode(1.NodeId, testContext(started))
+    except CatchableError as e:
+      raised = e.msg
+    check raised.contains("time budget")
+    cleanupSceneJs(started)
 
 suite "js memory ceiling":
   test "an oversized allocation fails the script, not the process":
@@ -274,16 +284,15 @@ suite "per-scene heap budget":
     var logs: seq[JsonNode] = @[]
     scene.logger.log = proc(payload: JsonNode) =
       logs.add(payload)
-    let value = evalSnippet(
-      scene,
-      testContext(scene),
-      1.NodeId,
-      "(() => { const hog = []; for (;;) hog.push(new Array(10000).fill(1)); })()"
-    )
-    check value.kind == fkNone
-    let logged = logs.mapIt($it).join(" ")
+    let started = codeScene(scene,
+      "(() => { const hog = []; for (;;) hog.push(new Array(10000).fill(1)); })()")
+    var raised = ""
+    try:
+      check started.getDataNode(1.NodeId, testContext(started)).kind == fkNone
+    except CatchableError as e:
+      raised = e.msg
+    let logged = logs.mapIt($it).join(" ") & raised
     check logged.contains("out of memory")
     check logged.contains("heap budget")
-    cleanupSceneJs(scene)
-    cleanupCompilerJs()
+    cleanupSceneJs(started)
     check sceneHeapBudgetUsedBytes("tests/js-limits") == 0

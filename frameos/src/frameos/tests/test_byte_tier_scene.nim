@@ -190,7 +190,7 @@ let icalContext = ExecutionContext(
   scene: scene, event: "data", payload: %*{}, hasImage: false,
   loopIndex: 0, loopKey: ".", nextSleep: 0.0
 )
-let events = runNode(scene, 4.NodeId, icalContext, asDataNode = true).asJson()
+let events = scene.getDataNode(4.NodeId, icalContext).asJson()
 doAssert events.kind == JArray and events.len == 500,
   "expected the export cap of 500 events, got " & $events.len
 

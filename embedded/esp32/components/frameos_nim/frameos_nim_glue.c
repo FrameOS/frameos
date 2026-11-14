@@ -430,6 +430,14 @@ size_t fos_psram_free_bytes(void)
     return heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
+/* The PSRAM heap's whole size: an 8 MB board's reports a little under 8 MiB,
+ * a 16 MB board's twice that (frameos/js_runtime/runtime.nim, which gives a
+ * board with room a QuickJS runtime per scene). */
+size_t fos_psram_total_bytes(void)
+{
+    return heap_caps_get_total_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
 size_t fos_psram_largest_free_block(void)
 {
     return fos_heap_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);

@@ -6,6 +6,7 @@
 
 import json, strutils
 import frameos/values
+import frameos/types
 
 proc jBoolOr*(j: JsonNode, key: string, default: bool): bool =
   if j.isNil or j.kind != JObject or not j.hasKey(key): return default
@@ -28,9 +29,7 @@ proc jFloatOr*(j: JsonNode, key: string, default: float): float =
     except CatchableError: default
   else: default
 
-type NodeCacheConfig* = tuple[
-  enabled, inputEnabled, durationEnabled: bool, durationSec: float,
-  expressionEnabled: bool, expression: string]
+export NodeCacheConfig
 
 proc readCacheConfig*(data: JsonNode): NodeCacheConfig =
   var enabled = false

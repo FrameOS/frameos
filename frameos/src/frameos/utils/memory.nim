@@ -14,6 +14,7 @@ export decodebudget
 when defined(frameosEmbedded):
   proc fos_psram_free_bytes(): csize_t {.importc, cdecl.}
   proc fos_psram_largest_free_block(): csize_t {.importc, cdecl.}
+  proc fos_psram_total_bytes(): csize_t {.importc, cdecl.}
 
   const
     # Keep headroom for the packed framebuffer, preview snapshot and the
@@ -89,6 +90,24 @@ proc runsAsEmbedded*(): bool {.inline.} =
     simulatingEmbedded
   else:
     false
+
+when defined(testing):
+  var deviceMemoryBytesOverride* = 0
+    ## A test's device: its PSRAM, as `deviceMemoryBytes` reports it.
+
+proc deviceMemoryBytes*(): int =
+  ## The memory an ESP32-class device has in all (its PSRAM heap), or 0 for
+  ## a host that has plenty: a Pi, an ordinary browser preview. The preview
+  ## simulating a device answers with its simulated ceiling.
+  when defined(testing):
+    if deviceMemoryBytesOverride != 0:
+      return deviceMemoryBytesOverride
+  when defined(frameosEmbedded):
+    fos_psram_total_bytes().int
+  elif defined(frameosWasm):
+    if runsAsEmbedded(): fosWasmMemoryLimit().int else: 0
+  else:
+    0
 
 when defined(memProbe):
   proc c_printf(fmt: cstring) {.importc: "printf", varargs, cdecl.}

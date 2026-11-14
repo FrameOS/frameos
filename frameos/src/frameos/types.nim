@@ -547,6 +547,7 @@ type
   # Exported data/functions for interpreted scenes, adds some local state that's normally compiled into the scene
   ExportedInterpretedScene* = ref object of ExportedScene
     name*: string
+    compiled*: CompiledScene ## its program, made by the first instance (scene_compiler.nim)
     backgroundColor*: Color
     refreshInterval*: float
     nodes*: seq[DiagramNode]
@@ -614,19 +615,70 @@ type
     ## The installed copy's layout ({sceneId, state}), docs/scene-layouts.md.
     layout*: JsonNode
 
-  # Runtime state while running the scene (for interpreted frames), adds cached nodes/edges
+  # A scene's diagram as one JavaScript program (frameos/scene_compiler.nim),
+  # made once per scene and shared by the scene's instances.
+  ProgramSnippetKind* = enum
+    psCode, psInline, psCache
+
+  ProgramSnippet* = object
+    ## A piece of the scene's own code in the program: where it sits, so an
+    ## error's line can be put back into the snippet, and what it is, so a
+    ## snippet that does not compile can be named.
+    nodeId*: NodeId
+    kind*: ProgramSnippetKind
+    name*: string      ## the field or argument an inline snippet feeds
+    snippet*: string
+    firstLine*: int    ## its first line in the program, 1-based
+    lastLine*: int
+
+  CompiledScene* = ref object
+    source*: string
+    ## The events at least one event node listens for: what `sceneListensTo`
+    ## answers, and the events worth entering the program for.
+    listens*: seq[string]
+    ## One render listener whose flow is one node: that node draws the whole
+    ## frame (ExecutionContext.wholeFrame).
+    wholeFrame*: bool
+    snippets*: seq[ProgramSnippet]
+    ## Compiled with the per-node debug profile (frameConfig.debug).
+    profile*: bool
+    ## Cached nodes whose expression did not compile, and why: they say so
+    ## on every run instead of taking the scene down.
+    brokenCache*: seq[(NodeId, string)]
+
+  AppInput* = object
+    ## An edge into a node's field: from another node's value, or inline code.
+    target*, source*: NodeId
+    field*: string
+    inline*: bool
+
+  SceneJsKind* = enum
+    ## Where a scene's program runs (js_runtime/runtime.nim, ensureSceneJs).
+    sjShared,   ## the programs' runtime's first context: a scene without code
+    sjRealm,    ## a context of its own in that runtime (a board with 8 MB or less)
+    sjRuntime   ## a QuickJS runtime of its own
+
+  NodeProfile* = object
+    ## One node's debug profile while it runs (interpreter.nim, `n0`/`n1`).
+    nodeId*: NodeId
+    startedAt*: float
+    memoryBefore*: tuple[known: bool, bytes: int]
+    keyword*: string
+    fit*: string       ## the fit a producer was offered this pass, "" for none
+    tier*: ImageFusionTier
+    boundsWidth*, boundsHeight*: int
+
+  NodeCacheConfig* = tuple[
+    enabled, inputEnabled, durationEnabled: bool, durationSec: float,
+    expressionEnabled: bool, expression: string]
+
+  # Runtime state while running the scene (for interpreted frames)
   InterpretedFrameScene* = ref object of FrameScene
     nodes*: Table[NodeId, DiagramNode]
-    edges*: seq[DiagramEdge]
     apps*: JsonNode
-    nextNodeIds*: Table[NodeId, NodeId] # mapping from current node id to next node id for quick lookup
-    eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
     eventApps*: seq[NodeId]                                                    # JS app nodes with `events` in their config.json
     appsByNodeId*: Table[NodeId, AppRoot] # mapping from node id to instantiated app for quick lookup
-    appInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from node id to app input name to connected node id
-    appInlineInputsForNodeId*: Table[NodeId, Table[string, string]]            # mapping from node id to app input name to inline code
-    codeInputsForNodeId*: Table[NodeId, Table[string, NodeId]] # mapping from code node id to code arg name to connected node id
-    codeInlineInputsForNodeId*: Table[NodeId, Table[string, string]] # mapping from code node id to code arg name to inline code
+    appInputs*: seq[AppInput] # the edges into app, dispatch and scene node fields (the planner reads them)
     sceneNodes*: Table[NodeId, FrameScene]                                     # cache of instantiated child scenes
     layoutSceneId*: SceneId
     layoutState*: JsonNode
@@ -635,18 +687,33 @@ type
     capturedPointer*: int
     sceneExportByNodeId*: Table[NodeId, ExportedScene]                         # exported metadata for cached child scenes
     publicStateFields*: seq[StateField]
-    js*: QuickJS
+    js*: QuickJS       ## its context in the programs' runtime (runtime.nim)
     jsReady*: bool
-    jsFuncNameByNode*: Table[NodeId, string]                                   # code-node -> function name
-    codeInlineFuncNameByNodeArg*: Table[NodeId, Table[string, string]]         # code-node arg -> function name
-    appInlineFuncNameByNodeArg*: Table[NodeId, Table[string, string]]          # app/scene field inline -> function name
+    jsKind*: SceneJsKind ## the shared context, a realm of its own, or a runtime of its own
+    jsGeneration*: int ## which programs' runtime `js` and the program's entries are in
+    ## The scene's program (scene_compiler.nim), evaluated into `js` when
+    ## `programReady`: its three ways in, `ev`, `flow` and `data`.
+    source*: ExportedInterpretedScene ## what it was started from
+    program*: CompiledScene
+    programReady*: bool
+    programEntries*: array[3, JSValue]
+    ## The context the program runs in right now, and how many runs of it are
+    ## on the stack (an app's execNode runs a flow inside a flow).
+    programCtx*: ExecutionContext
+    programDepth*: int
+    ## What the program's nodes produced in this run, by handle (index + 1;
+    ## 0 is nothing). Emptied when the outermost run ends.
+    values*: seq[Value]
+    cacheConfigs*: Table[NodeId, NodeCacheConfig] # nodes with their cache on
+    cacheInputKeys*: Table[NodeId, JsonNode]      # their inputs this run, for the key
+    cachePending*: Table[NodeId, tuple[key, expr: JsonNode]] # a code node's miss, until its result is stored
+    profiles*: seq[NodeProfile]                   # the nodes being profiled (frameConfig.debug)
     cacheValues*: Table[NodeId, Value]
     cacheTimes*: Table[NodeId, float]
     cacheKeys*: Table[NodeId, JsonNode]
     cacheExprs*: Table[NodeId, JsonNode]
     imageFusionPlans*: Table[NodeId, ImageFusionPlan] # consumer node -> planned image edge
     imageBoundsPlans*: Table[NodeId, ImageBoundsPlan] # consumer node -> bounded unfused edge
-    runNodeStack*: seq[NodeId] # nodes currently inside runNode, outermost first (recursion guard)
 
   # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object

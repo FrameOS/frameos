@@ -1,7 +1,8 @@
-# Line maps for the one piece of generated JavaScript left in FrameOS: the
-# envelope a code node's snippet is wrapped in (runtime.nim,
-# buildEnvelopeFunctionWithMap). App sources go to QuickJS untouched --
-# quickts parses their TypeScript -- so their error locations need no map.
+# Line maps for error locations in generated JavaScript (a snippet compiled
+# alone, interpreter.nim's compileFailure). The scene programs keep each
+# snippet on lines of its own and map their locations themselves
+# (interpreter.programText). App sources go to QuickJS untouched -- quickts
+# parses their TypeScript -- so their error locations need no map.
 import std/[strutils]
 
 type

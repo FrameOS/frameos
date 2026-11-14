@@ -98,6 +98,22 @@
   flight together, so the next failure explains itself instead of printing
   `expected 2 to be 1`.
 
+## A scene runs as a compiled program: `docs/scene-compiler.md`
+
+- `frameos/src/frameos/scene_compiler.nim` turns a scene's nodes and edges
+  into one JavaScript program when the scene first starts (on the device,
+  every host; scenes.json is unchanged). `interpreter.nim` keeps the hosting
+  (layouts, holes, rhythm, pointer routing, press maps) and gives the program
+  its natives (`programOp`): node ids and handles to the scene's `Value`s in,
+  so a value reaches an app exactly as an app made it. A new node type or edge
+  kind is a case in the compiler and, if it needs Nim, a native; never a walk
+  of the graph at run time. A scene with code of its own runs in a QuickJS
+  runtime of its own where there is room (a Pi, an ESP32 with more than 8 MB
+  of PSRAM: one scene running out of memory takes no other with it), and in a
+  realm of its own in one shared runtime on an 8 MB board
+  (`js_runtime/runtime.nim` `ensureSceneJs`); scenes without code share that
+  runtime's first context. The JS apps keep their own runtimes.
+
 ## Scene events: the contract is `docs/events-contract.json`
 
 - Event names, payloads, who may emit what (`origins`, an allow-list), the log

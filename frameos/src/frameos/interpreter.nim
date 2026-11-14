@@ -10,6 +10,8 @@ when defined(testing):
 when defined(memProbe): import frameos/utils/memory
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
+import frameos/js_runtime/burrito
+import frameos/scene_compiler
 import frameos/retired_apps
 import frameos/channels
 import frameos/js_runtime/run_budget
@@ -245,25 +247,6 @@ proc runInterpretedApp(keyword: string, app: AppRoot, context: ExecutionContext)
   else:
     apps.runApp(keyword, app, context)
 
-proc evalInline(scene: InterpretedFrameScene,
-                context: ExecutionContext,
-                nodeId: NodeId,
-                name: string,
-                snippet: string,
-                mapping: var Table[NodeId, Table[string, string]],
-                ensureCompiled: InlineCompileProc,
-                targetField: string): Value =
-  let emptyArgs = initTable[string, Value]()
-  let emptyArgTypes = initTable[string, string]()
-  let emptyOutputs = initTable[string, string]()
-  var fnName = ""
-  if mapping.hasKey(nodeId) and mapping[nodeId].hasKey(name):
-    fnName = mapping[nodeId][name]
-  else:
-    ensureCompiled(scene, nodeId, name, snippet)
-    fnName = mapping[nodeId][name]
-  callCompiledFn(scene, context, nodeId, fnName, emptyArgs, emptyArgTypes, emptyOutputs, targetField)
-
 # -------------------------
 # Cache utilities
 # -------------------------
@@ -300,133 +283,72 @@ proc valueToKeyJson(v: Value): JsonNode =
     # string/text/float/int/bool/node/scene/none
     result = valueToJson(v)
 
-proc withCache(scene: InterpretedFrameScene,
-               nodeId: NodeId,
-               context: ExecutionContext,
-               cacheEnabled, cacheInputEnabled, cacheDurationEnabled: bool, cacheDurationSec: float,
-               builtAnyInput: bool, builtInputKey: JsonNode,
-               cacheExprActive: bool, cacheExprValue: JsonNode,
-               allowStore: bool,
-               extraLog: JsonNode,
-               compute: proc (): Value): Value =
-  ## Generic cache handler shared by app/code data nodes.
+proc cacheLookup(scene: InterpretedFrameScene, nodeId: NodeId, cache: NodeCacheConfig,
+    inputKey, expr: JsonNode, allowStore: bool): tuple[hit: bool, value: Value] =
+  ## The node cache's answer for a node about to compute: the value it holds,
+  ## if it is still good (its duration, its cache expression's value and its
+  ## inputs, each when the node keys on it). `inputKey` is nil when no input
+  ## was built, `expr` when the node has no expression (or it failed).
   ##
-  ## `allowStore = false` still serves an existing cache entry, but refuses to
-  ## write the freshly computed value back. Used when the computation ran on
-  ## degraded inputs (a producer failed and was zero-filled): that result must
-  ## never be pinned in the cache as though it were real data.
-  ##
-  ## `context` is only read by the image disk tier: to refuse snapshotting the
-  ## live canvas on store, and to size the spill cap.
-  if not cacheEnabled:
-    return compute()
-
+  ## `allowStore = false` (the inputs were degraded: a producer failed and was
+  ## zero-filled) still serves an entry; it only keeps the entry from going
+  ## before the replacement is made, which that pass will not store.
   var useCached = scene.cacheValues.hasKey(nodeId)
-
-  if useCached and cacheDurationEnabled:
-    if not scene.cacheTimes.hasKey(nodeId):
-      useCached = false
-    else:
-      let last = scene.cacheTimes[nodeId]
-      if epochTime() > last + cacheDurationSec:
-        useCached = false
-
-  if useCached and cacheExprActive:
-    # Recompute when the cache expression's value changes, like compiled
-    # scenes do
-    if not scene.cacheExprs.hasKey(nodeId):
-      useCached = false
-    elif scene.cacheExprs[nodeId] != cacheExprValue:
-      useCached = false
-
-  if useCached and cacheInputEnabled and builtAnyInput:
-    if not scene.cacheKeys.hasKey(nodeId):
-      useCached = false
-    else:
-      if scene.cacheKeys[nodeId] != builtInputKey:
-        useCached = false
-
+  if useCached and cache.durationEnabled:
+    useCached = scene.cacheTimes.hasKey(nodeId) and
+      epochTime() <= scene.cacheTimes[nodeId] + cache.durationSec
+  if useCached and not expr.isNil:
+    # Recompute when the cache expression's value changes.
+    useCached = scene.cacheExprs.hasKey(nodeId) and scene.cacheExprs[nodeId] == expr
+  if useCached and cache.inputEnabled and not inputKey.isNil and inputKey.len > 0:
+    useCached = scene.cacheKeys.hasKey(nodeId) and scene.cacheKeys[nodeId] == inputKey
   if useCached:
     var served = scene.cacheValues[nodeId]
-    var tier = "memory"
     if served.kind == fkImageSpool:
-      # The disk tier: read the pixels back, whole. Exact by construction —
-      # the file is byte-for-byte the image a memory cache would have held.
+      # The disk tier: read the pixels back, whole, byte for byte the image a
+      # memory cache would have held. An entry that cannot be served (the
+      # file swept, the card pulled, no memory to read it into) IS a miss.
       let img = materializeImageSpool(served.imgSp)
       if img.isNil:
-        # File swept, card pulled, or no memory to read it back into. An entry
-        # that cannot be served IS a miss; drop it (its file goes with it) and
-        # recompute below, which is what an empty cache would have done.
         scene.cacheValues.del(nodeId)
-        useCached = false
       else:
-        served = VImage(img)
-        tier = "storage"
-    if useCached:
-      var payload = %*{
-        "event": "interpreter:cache:hit",
-        "sceneId": scene.id.string,
-        "nodeId": nodeId.int,
-        "tier": tier
-      }
-      if extraLog.kind == JObject:
-        for k in extraLog.keys: payload[k] = extraLog[k]
-      if TRACING:
-        scene.logger.log(payload)
-      return served
-
-  # Miss -> compute and write-back
-  var payload = %*{
-    "event": "interpreter:cache:miss",
-    "sceneId": scene.id.string,
-    "nodeId": nodeId.int
-  }
-  if extraLog.kind == JObject:
-    for k in extraLog.keys: payload[k] = extraLog[k]
-  if TRACING:
-    scene.logger.log(payload)
-
+        return (true, VImage(img))
+    else:
+      return (true, served)
   # A stale image goes before its replacement is made, not after: a
-  # slideshow's last photo held on through the next one's decode, and on the
-  # SenseCAP Indicator the 0.9 MB it pinned was the difference between a
-  # photo and an error frame (2026-10-25). Not on degraded inputs, whose pass
-  # must leave the stored entry for a healthy one to hit.
+  # slideshow's last photo held through the next one's decode was the
+  # difference between a photo and an error frame on the SenseCAP Indicator
+  # (2026-10-25). Not on degraded inputs, whose pass leaves the entry for a
+  # healthy one to hit.
   if allowStore and scene.cacheValues.hasKey(nodeId) and
       scene.cacheValues[nodeId].kind == fkImage:
     scene.cacheValues.del(nodeId)
 
-  let fresh = compute()
-  if not allowStore:
-    # Degraded inputs: return the value for this pass only. Leaving the stored
-    # entry (and its key/time/expression) untouched means a later healthy pass
-    # can still hit it, and a stale-but-real value is never replaced by one
-    # computed from zero-filled data.
-    return fresh
+proc cacheStore(scene: InterpretedFrameScene, nodeId: NodeId, context: ExecutionContext,
+    cache: NodeCacheConfig, inputKey, expr: JsonNode, fresh: Value) =
+  ## A freshly computed value into the node cache. `context` is read by the
+  ## image disk tier only: to refuse snapshotting the live canvas, and to
+  ## size the spill cap.
   var toStore = fresh
   let memoryLimit = cachedImageMemoryLimit()
   if memoryLimit > 0 and fresh.kind == fkImage and not fresh.img.isNil and
       fresh.img.byteSize > memoryLimit and not affordsKeeping(fresh.img, memoryLimit, context):
-    # Never retain a frame-sized image in memory on embedded: pinning a
-    # canvas-sized RGBA buffer (7.7MB at 1200x1600) across renders means the
-    # next render needs a second canvas and OOMs the module — and when the
-    # value aliases the live canvas, a hit would redraw the since-overwritten
-    # canvas onto itself anyway. The disk tier takes what memory refuses:
-    # spill the pixels to storage and cache a file-backed value instead.
-    # When there is nothing to spill to (or the pixels are not the producer's
-    # alone — see trySpillCachedImage), store nothing: re-running the producer
-    # costs a re-download, which is what this cache did before the disk tier.
+    # Never retain a frame-sized image in memory on embedded: the next render
+    # needs a second canvas and runs the module out of memory, and an alias
+    # of the live canvas would redraw the since-overwritten canvas onto
+    # itself. The disk tier takes what memory refuses; with nothing to spill
+    # to, nothing is stored and the producer runs again next time.
     let spool = trySpillCachedImage(scene, nodeId, fresh.img, context)
     if spool.isNil:
-      return fresh
+      return
     toStore = VImageSpool(spool)
   scene.cacheValues[nodeId] = toStore
-  if cacheDurationEnabled:
+  if cache.durationEnabled:
     scene.cacheTimes[nodeId] = epochTime()
-  if cacheExprActive:
-    scene.cacheExprs[nodeId] = cacheExprValue
-  if cacheInputEnabled and builtAnyInput:
-    scene.cacheKeys[nodeId] = builtInputKey
-  fresh
+  if not expr.isNil:
+    scene.cacheExprs[nodeId] = expr
+  if cache.inputEnabled and not inputKey.isNil and inputKey.len > 0:
+    scene.cacheKeys[nodeId] = inputKey
 
 # -------------------------
 # Global registries/state
@@ -849,747 +771,663 @@ embeddedYieldReady = yieldReady
 {.pop.}
 
 # -------------------------
-# Core node runner
+# The scene's program
 # -------------------------
+#
+# A scene runs as the program scene_compiler.nim wrote for its diagram: a
+# function per node, calling the functions of the nodes that feed it. What the
+# program cannot do in JavaScript it asks of the natives below: run and read
+# the apps and set their fields, the node cache, the image hints, the state,
+# the scene nodes, the logs. They take node ids and handles (indexes into
+# `scene.values`), so a value goes from one app to the next as it is.
 
-proc evalCacheExpression(scene: InterpretedFrameScene, context: ExecutionContext,
-    nodeId: NodeId, expression: string): tuple[active: bool, value: JsonNode] =
-  ## Evaluates a cache expression (inline JS for interpreted scenes) so the
-  ## node recomputes when the value changes, mirroring compiled scenes. On
-  ## error the expression is ignored for this render.
+type ProgramOp = enum
+  opGet, opRun, opSet, opInputImage, opPre, opPost, opState, opToJs, opFromJs, opZero,
+  opDispatch, opChildState, opScene, opCacheKey, opCacheLookup, opCacheStore, opMatch,
+  opBackground, opProfileStart, opProfileEnd, opLog, opLogOutput, opStateRead, opContextRead
+
+const ProgramNativeNames: array[ProgramOp, cstring] = ["g", "r", "s", "ei", "p", "q",
+  "t", "j", "v", "zv", "d", "ss", "sc", "ka", "cq", "cs", "m", "bg", "n0", "n1",
+  "L", "lo", "st", "cx"]
+
+const ProgramFile = "<frameos:scene>"
+
+proc sourceNodeIdForLog(scene: InterpretedFrameScene, nodeId: NodeId): string =
+  let node = scene.nodes.getOrDefault(nodeId, nil)
+  if node.isNil or node.data.isNil or node.data.kind != JObject:
+    return ""
+  node.data{"__frameosSourceNodeId"}.getStr()
+
+proc logNodeErrorPayload(scene: InterpretedFrameScene, nodeId: NodeId, payload: JsonNode) =
+  ## An error about a node, with the id the scene JSON gave it: what the
+  ## editor puts the error on.
+  let sourceNodeId = sourceNodeIdForLog(scene, nodeId)
+  if sourceNodeId.len > 0:
+    payload["sourceNodeId"] = %sourceNodeId
+  scene.logger.log(payload)
+
+proc hold(scene: InterpretedFrameScene, ctx: ptr JSContext, v: Value): JSValue =
+  ## A value for the program: its handle.
+  if v.kind == fkNone:
+    return JS_NewInt32(ctx, 0)
+  scene.values.add v
+  JS_NewInt32(ctx, scene.values.len.int32)
+
+proc held(scene: InterpretedFrameScene, ctx: ptr JSContext, h: JSValueConst): Value =
+  var i: int32
+  if JS_ToInt32(ctx, addr i, h) != 0 or i <= 0 or i > scene.values.len:
+    return VNone()
+  scene.values[i - 1]
+
+var passingError: ref Exception
+var passingErrorId: int32
+  ## The last Nim exception a native threw into a program, and its number on
+  ## the JavaScript error: one that no JavaScript caught leaves the program as
+  ## itself (a JsAppError stays one), not as a JSException carrying its text.
+
+proc throwNimError(ctx: ptr JSContext, e: ref Exception): JSValue =
+  ## A Nim exception as a JavaScript error: its message as it was, its stack
+  ## kept for the log line that will name it.
+  discard JS_ThrowInternalError(ctx, "%s", e.msg.cstring)
+  let error = JS_GetException(ctx)
+  inc passingErrorId
+  passingError = e
+  discard JS_SetPropertyStr(ctx, error, "nimStack", nimStringToJS(ctx, e.getStackTrace()))
+  discard JS_SetPropertyStr(ctx, error, "nimError", JS_NewInt32(ctx, passingErrorId))
+  JS_Throw(ctx, error)
+
+proc raiseProgramError(scene: InterpretedFrameScene, ctx: ptr JSContext) =
+  ## What a run of the program threw, as a Nim exception: the native's own
+  ## when it came through untouched, else the JavaScript error (a blown
+  ## budget named as one).
+  let error = JS_GetException(ctx)
+  var id: int32 = 0
+  if jsIsObject(error):
+    let tag = JS_GetPropertyStr(ctx, error, "nimError")
+    discard JS_ToInt32(ctx, addr id, tag)
+    JS_FreeValue(ctx, tag)
+  if id != 0 and id == passingErrorId and not passingError.isNil:
+    JS_FreeValue(ctx, error)
+    let original = passingError
+    passingError = nil
+    raise original
+  discard JS_Throw(ctx, error)
+  raise newException(JSException, jsExceptionDetails(ctx).message)
+
+proc appOf(scene: InterpretedFrameScene, nodeId: NodeId): AppRoot =
+  result = scene.appsByNodeId.getOrDefault(nodeId, nil)
+  if result.isNil:
+    let node = scene.nodes.getOrDefault(nodeId, nil)
+    raise newException(Exception, "App not initialized for node id: " & $nodeId.int &
+      ", keyword: " & (if node.isNil: "" else: diagnosticKeyword(node)))
+
+proc stateFieldType(scene: InterpretedFrameScene, key: string): string =
+  result = "string"
+  if stateFieldTypesByScene.hasKey(scene.id):
+    result = stateFieldTypesByScene[scene.id].getOrDefault(key, "string")
+
+proc stateValue(scene: InterpretedFrameScene, key: string): Value =
+  ## A state node's value: the state, read as its field's type.
+  valueFromJsonByType(if scene.state.hasKey(key): scene.state[key] else: %"",
+    scene.stateFieldType(key))
+
+proc paintInputError(scene: InterpretedFrameScene, app: AppRoot, field, message: string,
+    context: ExecutionContext) =
+  ## A producer failed: if its field takes an image, the consumer gets an
+  ## image with the producer's error on it ("response too large", an HTTP
+  ## error …), not a nil one that would only say "No image provided". A field
+  ## that takes no image rejects it and keeps its default.
+  let keyword = app.appKeyword
   try:
-    let v = evalInline(scene, context, nodeId, "__cacheExpression", expression,
-                       scene.appInlineFuncNameByNodeArg, compileAppInlineFn,
-                       "__cacheExpression")
-    (true, valueToKeyJson(v))
-  except Exception as e:
-    scene.logger.log(%*{
-      "event": "interpreter:cacheExpression:error",
-      "sceneId": scene.id.string,
-      "nodeId": nodeId.int,
-      "code": expression,
-      "error": $e.msg
-    })
-    (false, newJNull())
-
-proc logInputError(self: FrameScene, event: string, nodeId: NodeId, input: string,
-    producer: NodeId, code: string, e: ref Exception, zero: JsonNode = nil,
-    sceneKey = "sceneId", inputKey = "input") {.noinline.} =
-  ## The line runNode writes when one of a node's inputs fails: from a
-  ## producer node, or from inline code when `producer` is NoNodeId, with the
-  ## zero value the input got instead when there is one. One builder for the
-  ## eight such lines: each `%*{…}` at its own site was ~300 B of flash.
-  let line = newJObject()
-  line["event"] = %event
-  line[sceneKey] = %self.id.string
-  line["nodeId"] = %nodeId.int
-  line[inputKey] = %input
-  if producer == NoNodeId:
-    line["code"] = %code
-  else:
-    line["producer"] = %producer.int
-  line["error"] = %e.msg
-  line["stacktrace"] = %e.getStackTrace()
-  if zero != nil:
-    line["defaulted"] = %true
-    line["defaultValue"] = zero
-  self.logger.log(line)
-
-proc logGraphStop(self: FrameScene, event: string, startNodeId, atNodeId: NodeId,
-    limit = 0) {.noinline.} =
-  ## runNode's flow stopped: a hop limit (`limit`) or a node visited twice.
-  let line = newJObject()
-  line["event"] = %event
-  line["sceneId"] = %self.id.string
-  line["startNodeId"] = %startNodeId.int
-  line["atNodeId"] = %atNodeId.int
-  if limit > 0:
-    line["limit"] = %limit
-  self.logger.log(line)
-
-const MaxRunNodeDepth = 64
-  ## Producer inputs are resolved by recursion (an app's field wired from a
-  ## node wired from a node …), and the cycle check below only covers the
-  ## flow edges of ONE runNode call. A node whose input is (transitively) its
-  ## own output recursed until the stack blew — a scene error, not a crash.
-
-proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
-  let self = InterpretedFrameScene(self)
-  var currentNodeId: NodeId = nodeId
-
-  if asDataNode and nodeId in self.runNodeStack:
-    raise newException(Exception,
-      "Node " & $nodeId.int & " depends on itself: its input is produced by a node that is " &
-      "still resolving it (cycle through " & $self.runNodeStack.len & " node(s))")
-  if self.runNodeStack.len >= MaxRunNodeDepth:
-    raise newException(Exception,
-      "Node " & $nodeId.int & " is nested deeper than " & $MaxRunNodeDepth &
-      " levels of producers; refusing to resolve it")
-  self.runNodeStack.add(nodeId)
-  defer: self.runNodeStack.setLen(self.runNodeStack.len - 1)
-
-  # Safety: cycle detection + hop budget
-  var visited = initTable[NodeId, bool]()
-  var hops = 0
-  const maxHops = 1000
-
-  while currentNodeId != -1.NodeId:
-    inc hops
-    if hops > maxHops:
-      logGraphStop(self, "interpreter:graph:hopLimit", nodeId, currentNodeId, maxHops)
-      break
-    if visited.hasKey(currentNodeId):
-      logGraphStop(self, "interpreter:graph:cycle", nodeId, currentNodeId)
-      break
-    visited[currentNodeId] = true
-
-    if not self.nodes.hasKey(currentNodeId):
-      self.logger.log(%*{"event": "interpreter:nodeNotFound", "sceneId": self.id, "nodeId": currentNodeId.int})
-      break
-
-    let currentNode = self.nodes[currentNodeId]
-    let nodeType = currentNode.nodeType
-    when defined(memProbe):
-      memProbe("node " & nodeType & "/" & diagnosticKeyword(currentNode) &
-        " #" & $currentNodeId.int)
-    let debugRuntime = self.frameConfig.debug
-    var checkpointKeyword = ""
-    var profileStartedAt = 0.0
-    var profileMemoryBefore: tuple[known: bool, bytes: int] = (false, 0)
-    # The fit actually handed to a producer this pass, for the profile log.
-    var plannedFit = ""
-    # The tier actually used, which can differ from the planned one.
-    var plannedTier = iftLiveCanvas
-    # The bounds actually offered this pass, for the profile log.
-    var offeredBoundsWidth = 0
-    var offeredBoundsHeight = 0
-    if debugRuntime:
-      checkpointKeyword = diagnosticKeyword(currentNode)
-      markRuntimeCheckpoint("node:start", currentSceneId = self.id.string, contextEvent = context.event,
-        nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword)
-      profileStartedAt = epochTime()
-      profileMemoryBefore = renderMemoryInUse()
-    if TRACING:
-      self.logger.log(%*{"event": "interpreter:runNode", "sceneId": self.id, "nodeId": currentNodeId.int,
-        "nodeType": nodeType})
-    # A node in the flow may draw on the canvas: the background still owed
-    # goes down first. A data node draws there only through a decode target,
-    # which pays it on the way (takeDecodeTarget); the consumer of an image
-    # fusion holds it until its producer has had the chance to waive it, and
-    # pays it after its inputs (below).
-    if not asDataNode and context.backgroundPending and
-        not (nodeType == "app" and (self.imageFusionPlans.hasKey(currentNodeId) or
-          currentNode.data{"keyword"}.getStr() in FlowAppsSettlingBackground)):
-      paintPendingBackground(context)
-    case nodeType:
-    of "app":
-      let keyword = currentNode.data{"keyword"}.getStr()
-      if TRACING:
-        self.logger.log(%*{
-          "event": "interpreter:runApp",
-          "sceneId": self.id, "nodeId": currentNodeId.int, "keyword": keyword
-        })
-      if not self.appsByNodeId.hasKey(currentNodeId):
-        raise newException(Exception,
-          "App not initialized for node id: " & $currentNode.id & ", keyword: " & keyword)
-
-      let app = self.appsByNodeId[currentNodeId]
-
-      # ---- Read per-node cache config ----
-      let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
-           cacheExpressionEnabled, cacheExpression) = readCacheConfig(currentNode.data)
-
-      # ---- Negotiated decode target ----
-      # Whether this node's image input can be produced straight into a target
-      # instead of materialized whole was decided at scene load, from the
-      # capabilities the apps involved declare in their config.json. The graph
-      # shape is static between deploys; what is left here are the facts that
-      # are not — is there a canvas, is one hint already in flight, and what
-      # does a placement wired from a state field say right now.
-      # See frameos/planner.nim and docs/value-pipeline.md.
-      var setDecodeTargetHint = false
-      if not asDataNode and self.imageFusionPlans.hasKey(currentNodeId) and
-          context.hasImage and not context.image.isNil and
-          context.decodeTargetImage.isNil and context.decodeTargetWidth == 0:
-        let plan = self.imageFusionPlans[currentNodeId]
-        var fit = plan.fit
-        if plan.fitFromNodeId != NoNodeId:
-          try:
-            fit = runNode(self, plan.fitFromNodeId, context, asDataNode = true).asString()
-          except CatchableError:
-            fit = ""
-          if fit.len == 0:
-            # Scene JSON only stores explicitly-set values; an empty state
-            # field means the app's config.json default.
-            fit = plan.defaultFit
-        if fit in plan.fits:
-          var tier = plan.tier
-          if tier == iftOwnedScratch and plan.ownedForCache:
-            # The scratch exists so a cached producer never ends up owning the
-            # live canvas. Past the in-memory limit the cache cannot hold the
-            # value, so the scratch is only worth its PSRAM if the disk tier
-            # will take the pixels instead (withCache spills the scratch, and
-            # later renders serve it back from the file). When it will not —
-            # no storage, no headroom — nothing gets stored, nothing aliases
-            # the canvas across renders, and the scratch would be a whole
-            # canvas of PSRAM bought to protect a cache entry that is never
-            # written: decode into the live canvas instead. Every shipped
-            # photo scene caches its producer, so this branch is the common
-            # case, not the exception.
-            let memoryLimit = cachedImageMemoryLimit()
-            let scratchBytes = context.image.width * context.image.height * 4
-            if memoryLimit > 0 and scratchBytes > memoryLimit:
-              let refusal = imageSpillRefusalReason(self.frameConfig, scratchBytes)
-              if refusal.len > 0:
-                tier = iftLiveCanvas
-                self.logger.log(%*{
-                  "event": "interpreter:cache:imageTier",
-                  "sceneId": self.id.string,
-                  "nodeId": plan.producerNodeId.int,
-                  "tier": "liveCanvas",
-                  "reason": refusal
-                })
-          plannedTier = tier
-          case tier
-          of iftLiveCanvas:
-            context.decodeTargetImage = context.image
-            context.decodeTargetScalingMode = fit
-            setDecodeTargetHint = true
-          of iftOwnedScratch:
-            if fit notin plan.excludedFits:
-              # Canvas-sized, allocated by the producer. The consumer then
-              # draws a same-size source, which is a plain draw — identical
-              # output to fitting a native-size image here.
-              context.decodeTargetWidth = context.image.width
-              context.decodeTargetHeight = context.image.height
-              context.decodeTargetScalingMode = fit
-              context.decodeTargetOwned = true
-              setDecodeTargetHint = true
-        if setDecodeTargetHint:
-          plannedFit = fit
-          context.decodeTargetNodeId = plan.producerNodeId
-          context.decodeTargetClaimedBy = 0.NodeId
-          if plan.inPlaceNodeIds.len > 0:
-            context.inPlaceImageNodes = plan.inPlaceNodeIds
-
-      # ---- Requested bounds ----
-      # The consumer's useful resolution for an edge that could not fuse: a
-      # 90/270 rotation or a resize mid-chain, or a refused direct shape. The
-      # terminal producer decodes bounded instead of at native resolution;
-      # everything about the offer mirrors the decode target — addressed,
-      # one-shot, and free if unclaimed.
-      var setDecodeBoundsHint = false
-      if not asDataNode and imageBoundsEnabled and
-          self.imageBoundsPlans.hasKey(currentNodeId) and
-          context.hasImage and not context.image.isNil and
-          not setDecodeTargetHint and
-          context.decodeBoundsNodeId == 0.NodeId:
-        let boundsPlan = self.imageBoundsPlans[currentNodeId]
-        var boundWidth =
-          if boundsPlan.fromCanvas: context.image.width
-          else: boundsPlan.fixedWidth
-        var boundHeight =
-          if boundsPlan.fromCanvas: context.image.height
-          else: boundsPlan.fixedHeight
-        if boundsPlan.swapped:
-          swap(boundWidth, boundHeight)
-        if boundsPlan.scale > 1.0:
-          # A static zoom multiplier (zoomPan): the largest crop the consumer
-          # will ever show needs scale times its own resolution, rounded up —
-          # a bound must never come in under what the draw can use.
-          boundWidth = int(ceil(boundWidth.float * boundsPlan.scale))
-          boundHeight = int(ceil(boundHeight.float * boundsPlan.scale))
-        if boundWidth > 0 and boundHeight > 0:
-          context.decodeBoundsWidth = boundWidth
-          context.decodeBoundsHeight = boundHeight
-          context.decodeBoundsNodeId = boundsPlan.producerNodeId
-          context.decodeBoundsClaimedBy = 0.NodeId
-          setDecodeBoundsHint = true
-          offeredBoundsWidth = boundWidth
-          offeredBoundsHeight = boundHeight
-
-      # ---- Wire inputs AND (if enabled) build an input-key JSON alongside ----
-      var builtInputKey = %*{} # JObject; only meaningful when cacheInputEnabled = true and there are inputs
-      var builtAnyInput = false
-
-      if self.appInputsForNodeId.hasKey(currentNodeId):
-        let connected = self.appInputsForNodeId[currentNodeId]
-        for (inputName, producerNodeId) in connected.pairs:
-          if self.nodes.hasKey(producerNodeId):
-            try:
-              let vIn = runNode(self, producerNodeId, context, asDataNode = true)
-              setInterpretedAppField(keyword, app, inputName, vIn)
-              if cacheEnabled and cacheInputEnabled:
-                builtInputKey[inputName] = valueToKeyJson(vIn)
-                builtAnyInput = true
-            except Exception as e:
-              logInputError(self, "interpreter:setField:error", currentNodeId, inputName,
-                producerNodeId, "", e)
-              # The producer may have consumed the decode target before it
-              # failed, which is the exact state mayMutateImageInPlace reads as
-              # "the chain fused". It did not — and the substitute image below
-              # can be the LIVE CANVAS on embedded builds, which a forwarding
-              # transformer must never mutate in place. Withdraw the clearance.
-              context.inPlaceImageNodes = @[]
-              # If this input takes an image, hand the consumer an image with
-              # the producer's error on it ("response too large", HTTP errors,
-              # …) — a nil image would only render as "No image provided".
-              # Non-image fields reject the value and keep their defaults.
-              try:
-                if runsAsEmbedded():
-                  # Reuse the live canvas for the error frame: allocating a
-                  # second full-frame image next to it OOMs memory-tight
-                  # devices (and the preview running as one). Paint only
-                  # after the field accepted the image, so a non-image field
-                  # mismatch leaves the canvas untouched.
-                  if context.hasImage and not context.image.isNil:
-                    setInterpretedAppField(keyword, app, inputName,
-                      Value(kind: fkImage, img: context.image))
-                    paintPendingBackground(context)
-                    renderErrorInto(context.image, context.image.width,
-                      context.image.height, $e.msg)
-                  else:
-                    setInterpretedAppField(keyword, app, inputName,
-                      Value(kind: fkImage, img: renderError(self.frameConfig.width,
-                        self.frameConfig.height, $e.msg)))
-                else:
-                  let errorWidth =
-                    if context.hasImage and not context.image.isNil: context.image.width
-                    else: self.frameConfig.width
-                  let errorHeight =
-                    if context.hasImage and not context.image.isNil: context.image.height
-                    else: self.frameConfig.height
-                  setInterpretedAppField(keyword, app, inputName,
-                    Value(kind: fkImage, img: renderError(errorWidth, errorHeight, $e.msg)))
-              except Exception:
-                discard # Leave field at default; still proceed.
-
-      if self.appInlineInputsForNodeId.hasKey(currentNodeId):
-        let inlineConnected = self.appInlineInputsForNodeId[currentNodeId]
-        for (inputName, codeSnippet) in inlineConnected.pairs:
-          try:
-            let vIn = evalInline(self, context, currentNodeId,
-                                 inputName, codeSnippet,
-                                 self.appInlineFuncNameByNodeArg, compileAppInlineFn,
-                                 inputName)
-            setInterpretedAppField(keyword, app, inputName, vIn)
-            if cacheEnabled and cacheInputEnabled:
-              builtInputKey[inputName] = valueToKeyJson(vIn)
-              builtAnyInput = true
-          except Exception as e:
-            logInputError(self, "interpreter:setField:error:inlineCode", currentNodeId, inputName,
-              NoNodeId, codeSnippet, e)
-
-      if setDecodeTargetHint:
-        context.decodeTargetImage = nil
-        context.decodeTargetScalingMode = ""
-        context.decodeTargetWidth = 0
-        context.decodeTargetHeight = 0
-        context.decodeTargetNodeId = 0.NodeId
-        context.decodeTargetOwned = false
-        context.inPlaceImageNodes = @[]
-      # Whatever the producer did not settle, this node draws over, unless it
-      # settles the background itself.
-      if not asDataNode and keyword notin FlowAppsSettlingBackground:
+    if runsAsEmbedded():
+      # The live canvas takes the error frame: a second full-frame image next
+      # to it is what runs a memory-tight board (and the preview running as
+      # one) out of memory. Painted only once the field took the image.
+      if context.hasImage and not context.image.isNil:
+        setInterpretedAppField(keyword, app, field, Value(kind: fkImage, img: context.image))
         paintPendingBackground(context)
-      if setDecodeBoundsHint:
-        context.decodeBoundsWidth = 0
-        context.decodeBoundsHeight = 0
-        context.decodeBoundsNodeId = 0.NodeId
-
-      if asDataNode and cacheEnabled:
-        var cacheExprActive = false
-        var cacheExprValue: JsonNode = newJNull()
-        if cacheExpressionEnabled:
-          (cacheExprActive, cacheExprValue) =
-            evalCacheExpression(self, context, currentNodeId, cacheExpression)
-        result = withCache(self, currentNodeId, context,
-                           cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
-                           builtAnyInput, builtInputKey,
-                           cacheExprActive, cacheExprValue,
-                           true,
-                           %*{"keyword": keyword}):
-          (proc (): Value =
-            getInterpretedApp(keyword, app, context)
-          )
+        renderErrorInto(context.image, context.image.width, context.image.height, message)
       else:
-        if asDataNode:
-          result = getInterpretedApp(keyword, app, context)
-        else:
-          runInterpretedApp(keyword, app, context)
-
-    of "source":
-      raise newException(Exception, "Source nodes are not implemented for interpreted scenes")
-    of "dispatch":
-      let eventName = currentNode.data{"keyword"}.getStr()
-      if TRACING:
-        self.logger.log(%*{
-          "event": "interpreter:dispatch:run",
-          "sceneId": self.id,
-          "nodeId": currentNodeId.int,
-          "eventName": eventName
-        })
-
-      var payload =
-        if currentNode.data.hasKey("config") and currentNode.data["config"].kind == JObject:
-          copy(currentNode.data["config"])
-        else:
-          %*{}
-
-      if payload.isNil or payload.kind != JObject:
-        payload = %*{}
-
-      if self.appInputsForNodeId.hasKey(currentNodeId):
-        let connected = self.appInputsForNodeId[currentNodeId]
-        for (inputName, producerNodeId) in connected.pairs:
-          if self.nodes.hasKey(producerNodeId):
-            try:
-              let vIn = runNode(self, producerNodeId, context, asDataNode = true)
-              payload[inputName] = valueToJson(vIn)
-            except Exception as e:
-              logInputError(self, "interpreter:dispatch:setField:error", currentNodeId, inputName,
-                producerNodeId, "", e)
-
-      if self.appInlineInputsForNodeId.hasKey(currentNodeId):
-        let inlineConnected = self.appInlineInputsForNodeId[currentNodeId]
-        for (inputName, codeSnippet) in inlineConnected.pairs:
-          try:
-            let vIn = evalInline(self, context, currentNodeId,
-                                 inputName, codeSnippet,
-                                 self.appInlineFuncNameByNodeArg, compileAppInlineFn,
-                                 inputName)
-            payload[inputName] = valueToJson(vIn)
-          except Exception as e:
-            logInputError(self, "interpreter:dispatch:setField:error:inlineCode", currentNodeId, inputName,
-              NoNodeId, codeSnippet, e)
-
-      var finalPayload = payload
-      if eventName == "setSceneState":
-        var statePayload = %*{}
-        var rootPayload = %*{}
-        var typeMap = initTable[string, string]()
-        if stateFieldTypesByScene.hasKey(self.id):
-          typeMap = stateFieldTypesByScene[self.id]
-        for key in payload.keys:
-          let valueNode = payload[key]
-          if typeMap.hasKey(key):
-            let typedValue = valueFromJsonByType(valueNode, typeMap[key])
-            statePayload[key] = valueToJson(typedValue)
-          else:
-            if key == "render":
-              let typedValue = valueFromJsonByType(valueNode, "boolean")
-              rootPayload[key] = valueToJson(typedValue)
-            else:
-              statePayload[key] = copy(valueNode)
-        if statePayload.len > 0:
-          rootPayload["state"] = statePayload
-        finalPayload = rootPayload
-
-      if TRACING:
-        self.logger.log(%*{
-          "event": "interpreter:dispatch:send",
-          "sceneId": self.id,
-          "nodeId": currentNodeId.int,
-          "eventName": eventName,
-          "payload": finalPayload
-        })
-      dispatchFromScene(self, eventName, finalPayload, currentNodeId.int, context.event)
-      if asDataNode:
-        result = VJson(copy(finalPayload))
-    of "code":
-      # Parse outputs (types and default target)
-      var outputTypes = initTable[string, string]()
-      var defaultOutputName = ""
-      if currentNode.data.hasKey("codeOutputs") and currentNode.data["codeOutputs"].kind == JArray:
-        for outputDef in currentNode.data["codeOutputs"]:
-          if outputDef.kind == JObject:
-            let name = outputDef{"name"}.getStr()
-            let typ = outputDef{"type"}.getStr()
-            if name.len > 0:
-              outputTypes[name] = typ
-              if defaultOutputName.len == 0:
-                defaultOutputName = name
-
-      # Parse arg types
-      var argTypes = initTable[string, string]()
-      if currentNode.data.hasKey("codeArgs") and currentNode.data["codeArgs"].kind == JArray:
-        for argDef in currentNode.data["codeArgs"]:
-          if argDef.kind == JObject:
-            let name = argDef{"name"}.getStr()
-            let typ = argDef{"type"}.getStr()
-            if name.len > 0:
-              argTypes[name] = typ
-
-      # Build args (connected + inline); also build cache input key if enabled
-      var args = initTable[string, Value]()
-      var builtInputKey = %*{}
-      var builtAnyInput = false
-      # Args whose producer raised and were replaced by a zero value. Tracked so
-      # (a) the resulting JS error can name the real culprit and (b) the result
-      # of this pass is kept out of the node cache.
-      var defaultedArgs: seq[DefaultedArg] = @[]
-
-      let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
-           cacheExpressionEnabled, cacheExpression) = readCacheConfig(currentNode.data)
-
-      if self.codeInputsForNodeId.hasKey(currentNodeId):
-        let connectedArgs = self.codeInputsForNodeId[currentNodeId]
-        for (argName, producerNodeId) in connectedArgs.pairs:
-          if self.nodes.hasKey(producerNodeId):
-            try:
-              let vIn = runNode(self, producerNodeId, context, asDataNode = true)
-              args[argName] = vIn
-              if not argTypes.hasKey(argName):
-                argTypes[argName] = ""
-              if cacheEnabled and cacheInputEnabled:
-                builtInputKey[argName] = valueToKeyJson(vIn)
-                builtAnyInput = true
-            except Exception as e:
-              # One flaky producer must not take down the whole node. Hand the
-              # code the zero value of the arg's declared type instead of
-              # leaving the arg unset: an unset arg reaches JS as `undefined`,
-              # and `[...undefined]` throws, killing every *other* data source
-              # merged in the same expression.
-              let zero = zeroValueForCodeArgType(argTypes.getOrDefault(argName, ""))
-              logInputError(self, "interpreter:codeArg:error", currentNodeId, argName,
-                producerNodeId, "", e, valueToJson(zero), inputKey = "arg")
-              args[argName] = zero
-              if not argTypes.hasKey(argName):
-                argTypes[argName] = ""
-              defaultedArgs.add((name: argName, error: $e.msg))
-              # Deliberately NOT added to builtInputKey: a zero value is the
-              # absence of data, not data. Keying on it would either poison a
-              # good cache entry with a degraded result or make "no data" look
-              # like a legitimate input change. The store guard below is what
-              # actually keeps the degraded result out of the cache.
-
-      if self.codeInlineInputsForNodeId.hasKey(currentNodeId):
-        let inlineArgs = self.codeInlineInputsForNodeId[currentNodeId]
-        for (argName, snippet) in inlineArgs.pairs:
-          try:
-            let vIn = evalInline(self, context, currentNodeId,
-                                 argName, snippet,
-                                 self.codeInlineFuncNameByNodeArg, compileCodeInlineFn,
-                                 argName)
-            args[argName] = vIn
-            if not argTypes.hasKey(argName):
-              argTypes[argName] = ""
-            if cacheEnabled and cacheInputEnabled:
-              builtInputKey[argName] = valueToKeyJson(vIn)
-              builtAnyInput = true
-          except Exception as e:
-            # Same reasoning as the connected-producer path above: substitute
-            # the zero value so downstream code sees "no data", not `undefined`.
-            let zero = zeroValueForCodeArgType(argTypes.getOrDefault(argName, ""))
-            logInputError(self, "interpreter:codeArg:error:inlineCode", currentNodeId, argName,
-              NoNodeId, snippet, e, valueToJson(zero), inputKey = "arg")
-            args[argName] = zero
-            if not argTypes.hasKey(argName):
-              argTypes[argName] = ""
-            defaultedArgs.add((name: argName, error: $e.msg))
-            # Not a cache-input contribution; see the connected-arg comment.
-
-      let targetField = if defaultOutputName.len > 0: defaultOutputName else: ""
-
-      # Compute (with optional caching)
-      let computeFresh = proc (): Value =
-        var fnName = getOrCompileCodeFn(self, currentNode)
-        callCompiledFn(self, context, currentNodeId, fnName, args, argTypes, outputTypes, targetField,
-                       defaultedArgs)
-
-      if asDataNode and cacheEnabled:
-        var cacheExprActive = false
-        var cacheExprValue: JsonNode = newJNull()
-        if cacheExpressionEnabled:
-          (cacheExprActive, cacheExprValue) =
-            evalCacheExpression(self, context, currentNodeId, cacheExpression)
-        result = withCache(self, currentNodeId, context,
-                           cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
-                           builtAnyInput, builtInputKey,
-                           cacheExprActive, cacheExprValue,
-                           defaultedArgs.len == 0,
-                           %*{"nodeType": "code"},
-                           computeFresh)
-      else:
-        let fresh = computeFresh()
-        if jBoolOr(currentNode.data, "logOutput", false):
-          logCodeNodeOutput(FrameScene(self), currentNodeId, fresh)
-        if asDataNode:
-          result = fresh
-
-    of "event":
-      raise newException(Exception, "Event nodes not implemented in interpreted scenes yet")
-
-    of "state":
-      let key = currentNode.data{"keyword"}.getStr()
-      var fieldType = "string"
-      if stateFieldTypesByScene.hasKey(self.id):
-        let m = stateFieldTypesByScene[self.id]
-        if m.hasKey(key): fieldType = m[key]
-      let j =
-        if self.state.hasKey(key): self.state[key]
-        else: %*"" # fallback if state missing
-      result = valueFromJsonByType(j, fieldType)
-
-    of "scene":
-      let childSceneId = currentNode.data{"keyword"}.getStr().SceneId
-      if TRACING:
-        self.logger.log(%*{
-          "event": "interpreter:runScene",
-          "sceneId": self.id,
-          "nodeId": currentNodeId.int,
-          "childSceneId": childSceneId.string
-        })
-
-      var exportedChild: ExportedScene
-
-      if self.sceneExportByNodeId.hasKey(currentNodeId):
-        exportedChild = self.sceneExportByNodeId[currentNodeId]
-      else:
-        # An uploaded scene comes before a deployed one with its id, as in
-        # the frame's scene registry (scenes.nim).
-        if uploadedScenes.hasKey(childSceneId):
-          let interpretedExport = uploadedScenes[childSceneId]
-          exportedChild = ExportedScene(interpretedExport)
-        elif loadedScenes.hasKey(childSceneId):
-          let interpretedExport = loadedScenes[childSceneId]
-          exportedChild = ExportedScene(interpretedExport)
-        elif compiledSceneExports.hasKey(childSceneId):
-          exportedChild = compiledSceneExports[childSceneId]
-        else:
-          raise newException(Exception,
-            "Scene node references unknown scene id: " & childSceneId.string)
-        self.sceneExportByNodeId[currentNodeId] = exportedChild
-
-      if not self.sceneNodes.hasKey(currentNodeId):
-        var persisted = %*{}
-        if currentNode.data.hasKey("config") and currentNode.data["config"].kind == JObject:
-          persisted = currentNode.data["config"]
-        # The child's own init fires its "init" event, interpreted or compiled.
-        let child = exportedChild.init(childSceneId, self.frameConfig, self.logger, persisted)
-        self.sceneNodes[currentNodeId] = child
-
-      let childScene = self.sceneNodes[currentNodeId]
-
-      if not self.sceneExportByNodeId.hasKey(currentNodeId):
-        self.sceneExportByNodeId[currentNodeId] = exportedChild
-
-      # Apply dynamic inputs (fieldOutput -> fieldInput/<name>) into child's state before running
-      if self.appInputsForNodeId.hasKey(currentNodeId):
-        let connected = self.appInputsForNodeId[currentNodeId]
-        for (inputName, producerNodeId) in connected.pairs:
-          try:
-            let v = runNode(self, producerNodeId, context, asDataNode = true)
-            childScene.state[inputName] = valueToJson(v)
-          except Exception as e:
-            logInputError(self, "interpreter:setChildState:error", currentNodeId, inputName,
-              producerNodeId, "", e, sceneKey = "parentSceneId")
-
-      if self.appInlineInputsForNodeId.hasKey(currentNodeId):
-        let inlineConnected = self.appInlineInputsForNodeId[currentNodeId]
-        for (inputName, codeSnippet) in inlineConnected.pairs:
-          try:
-            let v = evalInline(self, context, currentNodeId,
-                               inputName, codeSnippet,
-                               self.appInlineFuncNameByNodeArg, compileAppInlineFn,
-                               inputName)
-            childScene.state[inputName] = valueToJson(v)
-          except Exception as e:
-            logInputError(self, "interpreter:setChildState:error:inlineCode", currentNodeId, inputName,
-              NoNodeId, codeSnippet, e, sceneKey = "parentSceneId")
-
-      # Delegate handling of the current event to the child scene.
-      exportedChild = self.sceneExportByNodeId[currentNodeId]
-      if debugRuntime:
-        markRuntimeCheckpoint("scene:delegate", currentSceneId = self.id.string, contextEvent = context.event,
-          nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword,
-          childSceneId = childScene.id.string)
-      if context.event == "render" and context.hasImage and not context.image.isNil:
-        runSceneNodeRender(self, childScene, exportedChild.runEvent, context)
-      else:
-        exportedChild.runEvent(childScene, context)
+        setInterpretedAppField(keyword, app, field, Value(kind: fkImage,
+          img: renderError(scene.frameConfig.width, scene.frameConfig.height, message)))
     else:
-      raise newException(Exception, "Unknown node type: " & nodeType)
+      let width = if context.hasImage and not context.image.isNil: context.image.width
+                  else: scene.frameConfig.width
+      let height = if context.hasImage and not context.image.isNil: context.image.height
+                   else: scene.frameConfig.height
+      setInterpretedAppField(keyword, app, field, Value(kind: fkImage,
+        img: renderError(width, height, message)))
+  except Exception:
+    discard
 
-    if debugRuntime:
-      markRuntimeCheckpoint("node:done", currentSceneId = self.id.string, contextEvent = context.event,
-        nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword)
-      # How big the value on this edge is, and what running the node cost in
-      # heap. Together these say where a render's peak memory actually goes,
-      # per node and per edge — the measurement phase 1's fusion rules are
-      # supposed to be aimed at (docs/value-pipeline.md, phase 0).
-      var profile = %*{
-        "event": "interpreter:node:profile",
-        "sceneId": self.id.string,
-        "nodeId": currentNodeId.int,
-        "nodeType": nodeType,
-        "keyword": checkpointKeyword,
-        "dataNode": asDataNode,
-        "durationMs": (epochTime() - profileStartedAt) * 1000.0
-      }
-      if asDataNode:
-        profile["valueKind"] = %($result.kind)
-        profile["valueBytes"] = %result.approxByteSize()
-        if result.kind == fkImage and not result.img.isNil:
-          profile["valueWidth"] = %result.img.width
-          profile["valueHeight"] = %result.img.height
-        if result.kind == fkSpool:
-          # Which byte-side tier this edge is carrying, so a profile shows a
-          # spooled body as the window it costs and says why.
-          profile["valueTier"] = %(if result.sp.isFileBacked(): "storage" else: "memory")
-          profile["valueTotalBytes"] = %result.sp.len
-      let profileMemoryAfter = renderMemoryInUse()
-      if profileMemoryBefore.known and profileMemoryAfter.known:
-        profile["heapDeltaBytes"] = %(profileMemoryAfter.bytes - profileMemoryBefore.bytes)
-      if self.imageFusionPlans.hasKey(currentNodeId):
-        let plan = self.imageFusionPlans[currentNodeId]
-        # Name the adapter the planner chose, so memory attribution can tell a
-        # canvas that was written in place from one that was drawn onto.
-        profile["fusion"] = %*{
-          "input": plan.inputName,
-          # False when the plan existed but nothing fused this pass — no canvas
-          # on the context, another hint in flight, or a state-wired fit that
-          # resolved outside the plan. `tier` is only meaningful when true.
-          "applied": plannedFit.len > 0,
-          # Applied means the offer was made; claimed means the planned
-          # producer actually took it. A persistent applied-but-unclaimed edge
-          # is a producer allocating its own value while the inventory says
-          # "fused" — the wikicommons failure shape, now one log field.
-          "claimed": plannedFit.len > 0 and
-            context.decodeTargetClaimedBy == plan.producerNodeId,
-          "tier": (if plannedTier == iftLiveCanvas: "liveCanvas" else: "ownedScratch"),
-          "plannedTier": (if plan.tier == iftLiveCanvas: "liveCanvas" else: "ownedScratch"),
-          "producerNodeId": plan.producerNodeId.int,
-          "forwardedThrough": plan.inPlaceNodeIds.len,
-          # The fit the producer was actually asked for. This is the field that
-          # would have caught the XKCD regression on sight: the scene asks for
-          # "contain" and a producer decoding with the frame's scaling mode
-          # would say "cover" right here.
-          "fit": plannedFit
-        }
-      if self.imageBoundsPlans.hasKey(currentNodeId):
-        let boundsPlan = self.imageBoundsPlans[currentNodeId]
-        profile["bounds"] = %*{
-          "input": boundsPlan.inputName,
-          "applied": offeredBoundsWidth > 0,
-          # Same lesson as fusion's claimed-vs-applied: an offer nobody takes
-          # is free, but a producer that quietly ignores it decodes native.
-          "claimed": offeredBoundsWidth > 0 and
-            context.decodeBoundsClaimedBy == boundsPlan.producerNodeId,
-          "producerNodeId": boundsPlan.producerNodeId.int,
-          "width": offeredBoundsWidth,
-          "height": offeredBoundsHeight
-        }
-      self.logger.log(profile)
+proc offerImageHints(scene: InterpretedFrameScene, nodeId: NodeId, keyword: string,
+    context: ExecutionContext): int =
+  ## Before a flow app's inputs: the background it does not settle itself,
+  ## then what its image input may skip materializing (decided at load by
+  ## frameos/planner.nim; what is left here are the facts that are not
+  ## static: is there a canvas, is another hint in flight, what does a
+  ## placement wired from a state field say). Bit 1: a decode target was
+  ## offered; bit 2: bounds were.
+  let plan = scene.imageFusionPlans.getOrDefault(nodeId, nil)
+  if context.backgroundPending and plan.isNil and keyword notin FlowAppsSettlingBackground:
+    paintPendingBackground(context)
+  let profiled = scene.profiles.len > 0 and scene.profiles[^1].nodeId == nodeId
+  if not plan.isNil and context.hasImage and not context.image.isNil and
+      context.decodeTargetImage.isNil and context.decodeTargetWidth == 0:
+    var fit = plan.fit
+    if plan.fitFromNodeId != NoNodeId:
+      try:
+        let state = scene.nodes.getOrDefault(plan.fitFromNodeId, nil)
+        fit = scene.stateValue(state.data{"keyword"}.getStr()).asString()
+      except CatchableError:
+        fit = ""
+      if fit.len == 0:
+        # Scene JSON only stores explicitly set values; an empty state field
+        # means the app's config.json default.
+        fit = plan.defaultFit
+    if fit in plan.fits:
+      var tier = plan.tier
+      if tier == iftOwnedScratch and plan.ownedForCache:
+        # The scratch exists so a cached producer never owns the live canvas.
+        # Past the in-memory limit the cache cannot hold the value, so the
+        # scratch is only worth its PSRAM if the disk tier will take the
+        # pixels; when it will not, nothing is stored and nothing aliases the
+        # canvas across renders, so the producer decodes into the canvas.
+        let memoryLimit = cachedImageMemoryLimit()
+        let scratchBytes = context.image.width * context.image.height * 4
+        if memoryLimit > 0 and scratchBytes > memoryLimit:
+          let refusal = imageSpillRefusalReason(scene.frameConfig, scratchBytes)
+          if refusal.len > 0:
+            tier = iftLiveCanvas
+            scene.logger.log(%*{"event": "interpreter:cache:imageTier", "sceneId": scene.id.string,
+              "nodeId": plan.producerNodeId.int, "tier": "liveCanvas", "reason": refusal})
+      var offered = false
+      if tier == iftLiveCanvas:
+        context.decodeTargetImage = context.image
+        context.decodeTargetScalingMode = fit
+        offered = true
+      elif fit notin plan.excludedFits:
+        # Canvas-sized, allocated by the producer: the consumer then draws a
+        # same-size source, a plain draw.
+        context.decodeTargetWidth = context.image.width
+        context.decodeTargetHeight = context.image.height
+        context.decodeTargetScalingMode = fit
+        context.decodeTargetOwned = true
+        offered = true
+      if offered:
+        result = 1
+        context.decodeTargetNodeId = plan.producerNodeId
+        context.decodeTargetClaimedBy = 0.NodeId
+        if plan.inPlaceNodeIds.len > 0:
+          context.inPlaceImageNodes = plan.inPlaceNodeIds
+        if profiled:
+          scene.profiles[^1].fit = fit
+          scene.profiles[^1].tier = tier
+  # The consumer's useful resolution for an edge that could not fuse (a
+  # 90/270 rotation or a resize mid-chain): the producer decodes bounded
+  # instead of at native resolution.
+  if result == 0 and imageBoundsEnabled and context.hasImage and not context.image.isNil and
+      context.decodeBoundsNodeId == 0.NodeId:
+    let bounds = scene.imageBoundsPlans.getOrDefault(nodeId, nil)
+    if not bounds.isNil:
+      var width = if bounds.fromCanvas: context.image.width else: bounds.fixedWidth
+      var height = if bounds.fromCanvas: context.image.height else: bounds.fixedHeight
+      if bounds.swapped:
+        swap(width, height)
+      if bounds.scale > 1.0:
+        # A static zoom: the largest crop the consumer will show needs scale
+        # times its own resolution, rounded up.
+        width = int(ceil(width.float * bounds.scale))
+        height = int(ceil(height.float * bounds.scale))
+      if width > 0 and height > 0:
+        context.decodeBoundsWidth = width
+        context.decodeBoundsHeight = height
+        context.decodeBoundsNodeId = bounds.producerNodeId
+        context.decodeBoundsClaimedBy = 0.NodeId
+        result = 2
+        if profiled:
+          scene.profiles[^1].boundsWidth = width
+          scene.profiles[^1].boundsHeight = height
 
-    if asDataNode:
-      break
+proc withdrawImageHints(keyword: string, offered: int, context: ExecutionContext) =
+  ## After a flow app's inputs: the hints go, and whatever the producer did
+  ## not settle, the node draws over, unless it settles the background itself.
+  if (offered and 1) != 0:
+    context.decodeTargetImage = nil
+    context.decodeTargetScalingMode = ""
+    context.decodeTargetWidth = 0
+    context.decodeTargetHeight = 0
+    context.decodeTargetNodeId = 0.NodeId
+    context.decodeTargetOwned = false
+    context.inPlaceImageNodes = @[]
+  if keyword notin FlowAppsSettlingBackground:
+    paintPendingBackground(context)
+  if (offered and 2) != 0:
+    context.decodeBoundsWidth = 0
+    context.decodeBoundsHeight = 0
+    context.decodeBoundsNodeId = 0.NodeId
 
-    if self.nextNodeIds.hasKey(currentNodeId):
-      currentNodeId = self.nextNodeIds[currentNodeId]
+proc cacheExpressionKey(scene: InterpretedFrameScene, ctx: ptr JSContext, x: JSValueConst): JsonNode =
+  ## A cache expression's value as the program hands it (`[value]`), as a
+  ## key; nil when the node has none or it did not compile.
+  if JS_IsArray(ctx, x) == 0:
+    return nil
+  let value = JS_GetPropertyUint32(ctx, x, 0)
+  result = valueToKeyJson(jsValueToValue(ctx, value))
+  JS_FreeValue(ctx, value)
+
+proc takeCacheInputKey(scene: InterpretedFrameScene, nodeId: NodeId): JsonNode =
+  result = scene.cacheInputKeys.getOrDefault(nodeId, nil)
+  if not result.isNil:
+    scene.cacheInputKeys.del(nodeId)
+
+proc ensureChildScene(scene: InterpretedFrameScene, nodeId: NodeId): tuple[child: FrameScene, exported: ExportedScene] =
+  ## A scene node's scene, started on first use.
+  result.exported = scene.sceneExportByNodeId.getOrDefault(nodeId, nil)
+  let node = scene.nodes.getOrDefault(nodeId, nil)
+  let childSceneId = (if node.isNil: "" else: node.data{"keyword"}.getStr()).SceneId
+  if result.exported.isNil:
+    result.exported = resolveSceneExport(childSceneId)
+    if result.exported.isNil:
+      raise newException(Exception, "Scene node references unknown scene id: " & childSceneId.string)
+    scene.sceneExportByNodeId[nodeId] = result.exported
+  result.child = scene.sceneNodes.getOrDefault(nodeId, nil)
+  if result.child.isNil:
+    let config = node.data{"config"}
+    result.child = result.exported.init(childSceneId, scene.frameConfig, scene.logger,
+      if not config.isNil and config.kind == JObject: config else: %*{})
+    scene.sceneNodes[nodeId] = result.child
+
+proc runChildScene(scene: InterpretedFrameScene, nodeId: NodeId, context: ExecutionContext) =
+  ## A scene node handling the current event: its scene's turn.
+  let (child, exported) = ensureChildScene(scene, nodeId)
+  if scene.frameConfig.debug:
+    markRuntimeCheckpoint("scene:delegate", currentSceneId = scene.id.string, contextEvent = context.event,
+      nodeId = nodeId.int, nodeType = "scene", keyword = child.id.string, childSceneId = child.id.string)
+  if context.event == "render" and context.hasImage and not context.image.isNil:
+    runSceneNodeRender(scene, child, exported.runEvent, context)
+  else:
+    exported.runEvent(child, context)
+
+proc dispatchNode(scene: InterpretedFrameScene, nodeId: NodeId, payload: JsonNode,
+    context: ExecutionContext): Value =
+  ## A dispatch node: the payload the program made of its config and its
+  ## inputs, the event sent from the scene; the payload is its value.
+  let node = scene.nodes.getOrDefault(nodeId, nil)
+  let eventName = node.data{"keyword"}.getStr()
+  var payload = if payload.kind == JObject: payload else: newJObject()
+  if eventName == "setSceneState":
+    # Typed as the scene's fields are; `render` is the one key that is not
+    # state.
+    var state = newJObject()
+    var root = newJObject()
+    for key, value in payload.pairs:
+      if stateFieldTypesByScene.hasKey(scene.id) and stateFieldTypesByScene[scene.id].hasKey(key):
+        state[key] = valueToJson(valueFromJsonByType(value, stateFieldTypesByScene[scene.id][key]))
+      elif key == "render":
+        root[key] = valueToJson(valueFromJsonByType(value, "boolean"))
+      else:
+        state[key] = copy(value)
+    if state.len > 0:
+      root["state"] = state
+    payload = root
+  dispatchFromScene(scene, eventName, payload, nodeId.int, context.event)
+  VJson(copy(payload))
+
+proc profileStart(scene: InterpretedFrameScene, nodeId: NodeId, asData: bool, context: ExecutionContext) =
+  let node = scene.nodes.getOrDefault(nodeId, nil)
+  let keyword = if node.isNil: "" else: diagnosticKeyword(node)
+  markRuntimeCheckpoint("node:start", currentSceneId = scene.id.string, contextEvent = context.event,
+    nodeId = nodeId.int, nodeType = (if node.isNil: "" else: node.nodeType), keyword = keyword)
+  scene.profiles.add NodeProfile(nodeId: nodeId, startedAt: epochTime(),
+    memoryBefore: renderMemoryInUse(), keyword: keyword)
+
+proc profileEnd(scene: InterpretedFrameScene, nodeId: NodeId, asData: bool, value: Value,
+    context: ExecutionContext) =
+  ## How long the node took, what it cost in heap and how big the value on
+  ## its edge is: where a render's peak memory goes, per node and per edge
+  ## (docs/value-pipeline.md, phase 0).
+  if scene.profiles.len == 0 or scene.profiles[^1].nodeId != nodeId:
+    return
+  let entry = scene.profiles.pop()
+  let node = scene.nodes.getOrDefault(nodeId, nil)
+  let nodeType = if node.isNil: "" else: node.nodeType
+  markRuntimeCheckpoint("node:done", currentSceneId = scene.id.string, contextEvent = context.event,
+    nodeId = nodeId.int, nodeType = nodeType, keyword = entry.keyword)
+  var profile = %*{"event": "interpreter:node:profile", "sceneId": scene.id.string,
+    "nodeId": nodeId.int, "nodeType": nodeType, "keyword": entry.keyword, "dataNode": asData,
+    "durationMs": (epochTime() - entry.startedAt) * 1000.0}
+  if asData:
+    profile["valueKind"] = %($value.kind)
+    profile["valueBytes"] = %value.approxByteSize()
+    if value.kind == fkImage and not value.img.isNil:
+      profile["valueWidth"] = %value.img.width
+      profile["valueHeight"] = %value.img.height
+    if value.kind == fkSpool:
+      profile["valueTier"] = %(if value.sp.isFileBacked(): "storage" else: "memory")
+      profile["valueTotalBytes"] = %value.sp.len
+  let after = renderMemoryInUse()
+  if entry.memoryBefore.known and after.known:
+    profile["heapDeltaBytes"] = %(after.bytes - entry.memoryBefore.bytes)
+  let plan = scene.imageFusionPlans.getOrDefault(nodeId, nil)
+  if not plan.isNil:
+    # Applied: the offer was made. Claimed: the planned producer took it. A
+    # persistent applied-but-unclaimed edge is a producer allocating its own
+    # value while the plan says fused.
+    profile["fusion"] = %*{"input": plan.inputName, "applied": entry.fit.len > 0,
+      "claimed": entry.fit.len > 0 and context.decodeTargetClaimedBy == plan.producerNodeId,
+      "tier": (if entry.tier == iftLiveCanvas: "liveCanvas" else: "ownedScratch"),
+      "plannedTier": (if plan.tier == iftLiveCanvas: "liveCanvas" else: "ownedScratch"),
+      "producerNodeId": plan.producerNodeId.int, "forwardedThrough": plan.inPlaceNodeIds.len,
+      "fit": entry.fit}
+  let bounds = scene.imageBoundsPlans.getOrDefault(nodeId, nil)
+  if not bounds.isNil:
+    profile["bounds"] = %*{"input": bounds.inputName, "applied": entry.boundsWidth > 0,
+      "claimed": entry.boundsWidth > 0 and context.decodeBoundsClaimedBy == bounds.producerNodeId,
+      "producerNodeId": bounds.producerNodeId.int, "width": entry.boundsWidth,
+      "height": entry.boundsHeight}
+  scene.logger.log(profile)
+
+proc contextValue(ctx: ptr JSContext, context: ExecutionContext, key: string): JSValue =
+  ## `context.<key>` in a snippet. The canvas size is this run's (a cell's
+  ## inside render/split); undefined without a canvas.
+  case key
+  of "loopIndex": nimIntToJS(ctx, context.loopIndex.int32)
+  of "loopKey": nimStringToJS(ctx, context.loopKey)
+  of "event": nimStringToJS(ctx, context.event)
+  of "payload": jsonToJS(ctx, context.payload)
+  of "hasImage": nimBoolToJS(ctx, context.hasImage)
+  of "imageWidth", "imageHeight":
+    if context.hasImage and not context.image.isNil:
+      nimIntToJS(ctx, (if key == "imageWidth": context.image.width else: context.image.height).int32)
     else:
-      currentNodeId = -1.NodeId
+      jsUndefined(ctx)
+  else: jsUndefined(ctx)
 
+proc programOp(scene: InterpretedFrameScene, ctx: ptr JSContext, op: ProgramOp, argc: int,
+    argv: ptr UncheckedArray[JSValueConst]): JSValue =
+  ## The natives. Most take a node id first; the log lines are written by the
+  ## program itself (`L`), which costs the program's memory and not flash.
+  let context = scene.programCtx
+  template a(i: int): JSValueConst = (if i < argc: argv[i] else: jsUndefined(ctx))
+  proc num(ctx: ptr JSContext, v: JSValueConst): int {.inline.} =
+    var n: int32
+    discard JS_ToInt32(ctx, addr n, v)
+    n.int
+  let id = num(ctx, a(0)).NodeId
+  result = jsUndefined(ctx)
+  case op
+  of opGet:
+    let app = scene.appOf(id)
+    let cache = scene.cacheConfigs.getOrDefault(id)
+    if not cache.enabled:
+      return scene.hold(ctx, getInterpretedApp(app.appKeyword, app, context))
+    let key = scene.takeCacheInputKey(id)
+    let expr = scene.cacheExpressionKey(ctx, a(1))
+    let found = scene.cacheLookup(id, cache, key, expr, true)
+    if found.hit:
+      return scene.hold(ctx, found.value)
+    let fresh = getInterpretedApp(app.appKeyword, app, context)
+    scene.cacheStore(id, context, cache, key, expr, fresh)
+    result = scene.hold(ctx, fresh)
+  of opRun:
+    let app = scene.appOf(id)
+    scene.cacheInputKeys.del(id)
+    runInterpretedApp(app.appKeyword, app, context)
+  of opSet:
+    let app = scene.appOf(id)
+    let field = toNimString(ctx, a(1))
+    let value = scene.held(ctx, a(2))
+    setInterpretedAppField(app.appKeyword, app, field, value)
+    let cache = scene.cacheConfigs.getOrDefault(id)
+    if cache.enabled and cache.inputEnabled:
+      scene.cacheInputKeys.mgetOrPut(id, newJObject())[field] = valueToKeyJson(value)
+  of opInputImage:
+    # A producer failed. It may have taken the decode target first, the state
+    # mayMutateImageInPlace reads as "the chain fused", and the error image
+    # can be the live canvas: the clearance goes, then the error is painted.
+    context.inPlaceImageNodes = @[]
+    let app = scene.appsByNodeId.getOrDefault(id, nil)
+    if not app.isNil:
+      scene.paintInputError(app, toNimString(ctx, a(1)), toNimString(ctx, a(2)), context)
+  of opPre:
+    result = JS_NewInt32(ctx, scene.offerImageHints(id, scene.appOf(id).appKeyword, context).int32)
+  of opPost:
+    withdrawImageHints(scene.appOf(id).appKeyword, num(ctx, a(1)), context)
+  of opState:
+    result = scene.hold(ctx, scene.stateValue(toNimString(ctx, a(0))))
+  of opToJs:
+    result = valueToJS(ctx, scene.held(ctx, a(0)))
+  of opFromJs:
+    result = scene.hold(ctx, jsValueToValue(ctx, a(0), toNimString(ctx, a(1))))
+  of opZero:
+    # The zero a value of this type gets when it failed: a code node's
+    # argument (spread-safe: "" or [] rather than null), or its result.
+    let kind = toNimString(ctx, a(0))
+    result = scene.hold(ctx, if num(ctx, a(1)) == 0: zeroValueForCodeArgType(kind)
+      elif kind.len == 0: VNone()
+      elif kind == "string": VString("")
+      else: valueFromJsonByType(newJNull(), kind))
+  of opDispatch:
+    result = scene.hold(ctx, scene.dispatchNode(id, jsValueToJson(ctx, a(1)), context))
+  of opChildState:
+    scene.ensureChildScene(id).child.state[toNimString(ctx, a(1))] = valueToJson(scene.held(ctx, a(2)))
+  of opScene:
+    scene.runChildScene(id, context)
+  of opCacheKey:
+    scene.cacheInputKeys.mgetOrPut(id, newJObject())[toNimString(ctx, a(1))] = valueToKeyJson(scene.held(ctx, a(2)))
+  of opCacheLookup:
+    let key = scene.takeCacheInputKey(id)
+    let expr = scene.cacheExpressionKey(ctx, a(2))
+    let found = scene.cacheLookup(id, scene.cacheConfigs.getOrDefault(id), key, expr, num(ctx, a(1)) != 0)
+    if found.hit:
+      return scene.hold(ctx, found.value)
+    scene.cachePending[id] = (key, expr)
+    result = JS_NewInt32(ctx, -1)
+  of opCacheStore:
+    let pending = scene.cachePending.getOrDefault(id)
+    scene.cachePending.del(id)
+    # Computed on degraded inputs (a producer failed and was zero-filled): the
+    # value is this pass's only, never pinned in the cache as real data.
+    if num(ctx, a(2)) != 0:
+      scene.cacheStore(id, context, scene.cacheConfigs.getOrDefault(id), pending.key, pending.expr,
+        scene.held(ctx, a(1)))
+  of opMatch:
+    var i = 0
+    while i + 1 < argc:
+      if not eventPayloadValueMatches(context.payload, toNimString(ctx, a(i)), toNimString(ctx, a(i + 1))):
+        return jsFalse(ctx)
+      i += 2
+    result = jsTrue(ctx)
+  of opBackground:
+    paintPendingBackground(context)
+  of opProfileStart:
+    scene.profileStart(id, num(ctx, a(1)) != 0, context)
+  of opProfileEnd:
+    scene.profileEnd(id, num(ctx, a(1)) != 0, scene.held(ctx, a(2)), context)
+  of opLog:
+    # A line the program wrote: whose scene it is, what `out of memory`
+    # means here, and (second argument) the event's payload where the
+    # event's may be logged.
+    var entry = jsValueToJson(ctx, a(0))
+    if entry.kind == JObject:
+      entry[if entry.hasKey("parentSceneId"): "parentSceneId" else: "sceneId"] = %scene.id.string
+      let message = entry{"message"}
+      if not message.isNil and message.kind == JString:
+        entry["message"] = %describeJsError(message.getStr())
+      if argc > 1:
+        entry = withEventPayload(entry, context.event, context.payload)
+      scene.logger.log(entry)
+  of opLogOutput:
+    logCodeNodeOutput(FrameScene(scene), id, scene.held(ctx, a(1)))
+  of opStateRead:
+    let key = toNimString(ctx, a(0))
+    if scene.state.hasKey(key):
+      result = jsonToJS(ctx, scene.state[key])
+  of opContextRead:
+    if not context.isNil:
+      result = contextValue(ctx, context, toNimString(ctx, a(0)))
+
+proc programNative(ctx: ptr JSContext, thisVal: JSValueConst, argc: cint, argv: ptr JSValueConst,
+    magic: cint, data: ptr JSValue): JSValue {.cdecl.} =
+  ## Every native the program calls. The interpreter clock stops while one
+  ## runs (an app may wait on the network), as for any binding; the run's
+  ## wall-clock deadline does not.
+  var address: float64
+  discard JS_ToFloat64(ctx, addr address, data[])
+  let scene {.cursor.} = cast[InterpretedFrameScene](cast[pointer](address.int))
+  let guard = guardForContext(ctx)
+  enterNativeCall(guard)
+  try:
+    result = programOp(scene, ctx, ProgramOp(magic), argc.int, cast[ptr UncheckedArray[JSValueConst]](argv))
+  except Exception as e:
+    result = throwNimError(ctx, e)
+  leaveNativeCall(guard)
+  if guard != nil and guard.wallTripped:
+    JS_FreeValue(ctx, result)
+    result = JS_ThrowInternalError(ctx, "%s",
+      deadlineTripMessage(max(1, renderDeadlineBudgetMs()), true).cstring)
+    JS_SetUncatchableException(ctx, 1)
+
+proc programProfile(scene: InterpretedFrameScene): bool {.inline.} =
+  scene.frameConfig != nil and scene.frameConfig.debug
+
+proc programFor(scene: InterpretedFrameScene): CompiledScene =
+  ## The scene's program: made by the first instance of the scene and shared
+  ## (a split may draw one scene many times), and made again when the debug
+  ## profile is switched on or off.
+  let profile = scene.programProfile
+  if not scene.program.isNil and scene.program.profile == profile:
+    return scene.program
+  let source = scene.source
+  if source.isNil:
+    return scene.program
+  if source.compiled.isNil or source.compiled.profile != profile:
+    source.compiled = compileScene(source.nodes, source.edges, profile)
+  source.compiled
+
+proc compileFailure(scene: InterpretedFrameScene, message, stack: string): ref Exception =
+  ## The program did not compile: the snippet the error is in (or that left
+  ## something open the line after it) is named. A code node or an inline
+  ## input that does not compile fails the scene, as it always did; a cache
+  ## expression only loses its cache (nil: the program is made again with it
+  ## left out).
+  const at = ProgramFile & ":"
+  var line = 0
+  let found = stack.find(at)
+  if found >= 0:
+    var k = found + at.len
+    while k < stack.len and stack[k] in {'0'..'9'}:
+      line = line * 10 + ord(stack[k]) - ord('0')
+      inc k
+  var culprit = -1
+  for k, snippet in scene.program.snippets:
+    if snippet.firstLine > 0 and snippet.firstLine <= line and line <= snippet.lastLine + 1:
+      culprit = k
+  if culprit >= 0:
+    let snippet = scene.program.snippets[culprit]
+    let error = message & " (line " & $(min(line, snippet.lastLine) - snippet.firstLine + 1) & ")"
+    if snippet.kind == psCache:
+      if not scene.source.isNil:
+        let program = compileScene(scene.source.nodes, scene.source.edges, scene.program.profile,
+          scene.program.brokenCache & @[(snippet.nodeId, error)])
+        scene.program = program
+        scene.source.compiled = program
+        return nil
+    else:
+      scene.logNodeErrorPayload(snippet.nodeId, %*{"event": "interpreter:jsCompileError",
+        "sceneId": scene.id.string, "nodeId": snippet.nodeId.int,
+        "sourceKind": (if snippet.kind == psCode: "code" else: "inline"),
+        "sourceName": snippet.name, "error": error, "snippet": snippet.snippet})
+      return newException(JSException, "Evaluation failed: " & error)
+  # Nothing of the scene's own: the program around it.
+  scene.logger.log(%*{"event": "interpreter:programError", "sceneId": scene.id.string, "error": message})
+  newException(JSException, "Evaluation failed: " & message)
+
+proc ensureProgram(scene: InterpretedFrameScene) =
+  ## The scene's program evaluated into the programs' context, and its ways
+  ## in kept.
+  ensureSceneJs(scene)
+  if scene.programReady and not scene.program.isNil and scene.program.profile == scene.programProfile:
+    return
+  # The debug profile was switched: the same context, another program.
+  dropProgram(scene)
+  scene.program = programFor(scene)
+  let ctx = scene.js.context
+  var attempts = 0
+  while true:
+    inc attempts
+    let source = scene.program.source
+    let fn = JS_Eval(ctx, source.cstring, source.len.csize_t, ProgramFile,
+      (JS_EVAL_TYPE_GLOBAL or snippetEvalFlags).cint)
+    if JS_IsException(fn) == 0:
+      var address = JS_NewFloat64(ctx, cast[int](cast[pointer](scene)).float64)
+      let natives = JS_NewObject(ctx)
+      for op in ProgramOp:
+        discard JS_SetPropertyStr(ctx, natives, ProgramNativeNames[op],
+          JS_NewCFunctionData(ctx, programNative, 2, op.ord.cint, 1, addr address))
+      var argv = [natives]
+      let entries = JS_Call(ctx, fn, jsUndefined(ctx), 1, addr argv[0])
+      JS_FreeValue(ctx, natives)
+      JS_FreeValue(ctx, fn)
+      if JS_IsException(entries) != 0:
+        raise newException(JSException, "Evaluation failed: " & jsExceptionDetails(ctx).message)
+      scene.programEntries[0] = JS_GetPropertyStr(ctx, entries, "ev")
+      scene.programEntries[1] = JS_GetPropertyStr(ctx, entries, "flow")
+      scene.programEntries[2] = JS_GetPropertyStr(ctx, entries, "data")
+      JS_FreeValue(ctx, entries)
+      scene.programReady = true
+      return
+    let details = jsExceptionDetails(ctx)
+    let failure = scene.compileFailure(details.message, details.stack)
+    if not failure.isNil or attempts > 4:
+      raise (if failure.isNil: newException(JSException, "Evaluation failed: " & details.message) else: failure)
+
+template programRun(scene: InterpretedFrameScene, context: ExecutionContext, entry: int,
+    argument: JSValue, onResult: untyped) =
+  ## One entry into the program: the context its natives work in, the
+  ## interpreter-time budget (re-entrant: a flow inside a flow rides on its
+  ## caller's), and the values its run made, dropped when the outermost run
+  ## ends.
+  ensureProgram(scene)
+  let ctx {.inject.} = scene.js.context
+  let savedContext = scene.programCtx
+  scene.programCtx = context
+  inc scene.programDepth
+  var argv = [argument]
+  scene.onSceneJsStack:
+    try:
+      withContextDeadline(ctx):
+        let value {.inject.} = JS_Call(ctx, scene.programEntries[entry], jsUndefined(ctx), 1, addr argv[0])
+        if JS_IsException(value) != 0:
+          scene.raiseProgramError(ctx)
+        try:
+          onResult
+        finally:
+          JS_FreeValue(ctx, value)
+    finally:
+      JS_FreeValue(ctx, argv[0])
+      scene.programCtx = savedContext
+      dec scene.programDepth
+      if scene.programDepth == 0:
+        scene.values.setLen(0)
+
+proc programEvent(scene: InterpretedFrameScene, context: ExecutionContext): int =
+  ## The event's listeners; how many ran.
+  programRun(scene, context, 0, nimStringToJS(scene.js.context, context.event)):
+    var count: int32
+    discard JS_ToInt32(ctx, addr count, value)
+    result = count.int
+
+proc programFlow(scene: InterpretedFrameScene, nodeId: NodeId, context: ExecutionContext) =
+  ## The flow from a node: what an app's `execNode` runs.
+  programRun(scene, context, 1, JS_NewInt32(scene.js.context, nodeId.int32)):
+    discard
+
+proc programData(scene: InterpretedFrameScene, nodeId: NodeId, context: ExecutionContext): Value =
+  ## A node's value: what an app's `getDataNode` reads.
+  programRun(scene, context, 2, JS_NewInt32(scene.js.context, nodeId.int32)):
+    result = scene.held(ctx, value)
 
 # -------------------------
 # Scene wiring helpers
@@ -1620,9 +1458,6 @@ proc setNodeFieldFromEdge*(scene: InterpretedFrameScene, edge: DiagramEdge) =
 
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     persistedState: JsonNode): FrameScene =
-  if TRACING:
-    logger.log(%*{"event": "initInterpreted", "sceneId": sceneId.string})
-
   var exportedScene: ExportedInterpretedScene
   if uploadedScenes.hasKey(sceneId):
     exportedScene = uploadedScenes[sceneId]
@@ -1643,8 +1478,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     renderScaleSetting: exportedScene.renderScaleSetting,
     backgroundColor: exportedScene.backgroundColor,
     state: %*{},
-    nodes: initTable[NodeId, DiagramNode](),
-    edges: @[],
     apps: exportedScene.apps,
     customEventOrigins: exportedScene.customEventOrigins,
     eventMap: exportedScene.eventMap,
@@ -1653,30 +1486,13 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     followInterval: -1,
     layoutSceneId: exportedScene.layoutSceneId,
     layoutState: exportedScene.layoutState,
-    nextNodeIds: initTable[NodeId, NodeId](),
-    appsByNodeId: initTable[NodeId, AppRoot](),
-    eventListeners: initTable[string, seq[NodeId]](),
-    appInputsForNodeId: initTable[NodeId, Table[string, NodeId]](),
-    appInlineInputsForNodeId: initTable[NodeId, Table[string, string]](),
-    codeInputsForNodeId: initTable[NodeId, Table[string, NodeId]](),
-    codeInlineInputsForNodeId: initTable[NodeId, Table[string, string]](),
-    sceneNodes: initTable[NodeId, FrameScene](),
-    sceneExportByNodeId: initTable[NodeId, ExportedScene](),
     publicStateFields: exportedScene.publicStateFields,
-    jsReady: false,
-    jsFuncNameByNode: initTable[NodeId, string](),
-    codeInlineFuncNameByNodeArg: initTable[NodeId, Table[string, string]](),
-    appInlineFuncNameByNodeArg: initTable[NodeId, Table[string, string]](),
-    cacheValues: initTable[NodeId, Value](),
-    cacheTimes: initTable[NodeId, float](),
-    cacheKeys: initTable[NodeId, JsonNode](),
-    cacheExprs: initTable[NodeId, JsonNode](),
-    imageFusionPlans: initTable[NodeId, ImageFusionPlan](),
+    source: exportedScene,
   )
   scene.execNode = proc(nodeId: NodeId, context: ExecutionContext) =
-    discard scene.runNode(nodeId, context)
+    programFlow(scene, nodeId, context)
   scene.getDataNode = proc(nodeId: NodeId, context: ExecutionContext): Value =
-    scene.runNode(nodeId, context, asDataNode = true)
+    programData(scene, nodeId, context)
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       scene.state[key] = persistedState[key]
@@ -1696,221 +1512,86 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
   stateFieldTypesByScene[sceneId] = typeMap
   scene.syncRefreshInterval()
 
-  ## Pass 1: register nodes & event listeners (do not init apps yet)
+  # The nodes, and what the planner and the apps read off the edges: which
+  # node feeds an app's field, and the node a `field/<name>` edge names (into
+  # the app's config, e.g. logic/ifElse's thenNode). The flow itself is the
+  # program's (scene_compiler.nim).
   for node in exportedScene.nodes:
     scene.nodes[node.id] = node
-    if TRACING:
-      scene.logger.log(%*{"event": "initInterpretedNode", "sceneId": scene.id, "nodeType": node.nodeType,
-          "nodeId": node.id.int})
-    if node.nodeType == "event":
-      let eventName = node.data{"keyword"}.getStr()
-      if TRACING:
-        scene.logger.log(%*{"event": "initInterpretedEvent", "sceneId": scene.id, "nodeEvent": eventName,
-            "nodeId": node.id.int})
-      if not scene.eventListeners.hasKey(eventName):
-        scene.eventListeners[eventName] = @[]
-      scene.eventListeners[eventName].add(node.id)
-
-  ## Pass 2: process edges (next/prev, app inputs, and node-field wiring)
+    if node.nodeType in ["app", "code"]:
+      let cache = readCacheConfig(node.data)
+      if cache.enabled:
+        scene.cacheConfigs[node.id] = cache
   for edge in exportedScene.edges:
-    if TRACING:
-      scene.logger.log(%*{"event": "initInterpretedEdge", "sceneId": scene.id, "edgeId": edge.id.int,
-          "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
-          "targetHandle": edge.targetHandle})
-    scene.edges.add(edge)
-    if edge.sourceHandle == "next" and edge.targetHandle == "prev":
-      scene.nextNodeIds[edge.source] = edge.target
-      continue
-    ## value edges (app/code output -> app input)
-
-    if edge.sourceHandle == "fieldOutput" and edge.targetHandle.startsWith("fieldInput/"):
-      let fieldName = edge.targetHandle.split("/")[1]
-      if not scene.appInputsForNodeId.hasKey(edge.target):
-        scene.appInputsForNodeId[edge.target] = initTable[string, NodeId]()
-      scene.appInputsForNodeId[edge.target][fieldName] = edge.source
-      if TRACING:
-        scene.logger.log(%*{"event": "initInterpretedAppInput", "sceneId": scene.id, "appNodeId": edge.target.int,
-            "inputField": fieldName, "connectedNodeId": edge.source.int})
-      continue
-
-    if edge.sourceHandle == "stateOutput" and edge.targetHandle.startsWith("fieldInput/"):
-      let fieldName = edge.targetHandle.split("/")[1]
-      if not scene.appInputsForNodeId.hasKey(edge.target):
-        scene.appInputsForNodeId[edge.target] = initTable[string, NodeId]()
-      scene.appInputsForNodeId[edge.target][fieldName] = edge.source
-      if TRACING:
-        scene.logger.log(%*{"event": "initInterpretedStateInput", "sceneId": scene.id, "appNodeId": edge.target.int,
-            "inputField": fieldName, "connectedNodeId": edge.source.int})
-      continue
-
-    # TODO: these should probably be deprecated
-    if edge.sourceHandle.startsWith("code/") and edge.targetHandle.startsWith("fieldInput/"):
-      let fieldName = edge.targetHandle.split("/")[1]
-      if not scene.appInlineInputsForNodeId.hasKey(edge.target):
-        scene.appInlineInputsForNodeId[edge.target] = initTable[string, string]()
-      scene.appInlineInputsForNodeId[edge.target][fieldName] = edge.sourceHandle.substr("code/".len)
-      if TRACING:
-        scene.logger.log(%*{
-          "event": "initInterpretedInlineInput",
-          "sceneId": scene.id,
-          "appNodeId": edge.target.int,
-          "inputField": fieldName,
-          "code": edge.sourceHandle.substr("code/".len)
-        })
-      continue
-
-    if edge.targetHandle.startsWith("codeField/"):
-      let fieldName = edge.targetHandle.split("/")[1]
-      if edge.sourceHandle == "fieldOutput" or edge.sourceHandle == "stateOutput":
-        if not scene.codeInputsForNodeId.hasKey(edge.target):
-          scene.codeInputsForNodeId[edge.target] = initTable[string, NodeId]()
-        scene.codeInputsForNodeId[edge.target][fieldName] = edge.source
-        if TRACING:
-          scene.logger.log(%*{
-            "event": "initInterpretedCodeInput",
-            "sceneId": scene.id,
-            "codeNodeId": edge.target.int,
-            "arg": fieldName,
-            "connectedNodeId": edge.source.int
-          })
+    let th = edge.targetHandle
+    let sh = edge.sourceHandle
+    if th.startsWith("fieldInput/"):
+      let inline = sh.startsWith("code/")
+      if inline or sh == "fieldOutput" or sh == "stateOutput":
+        scene.appInputs.add AppInput(target: edge.target, source: edge.source,
+          field: th.split("/")[1], inline: inline)
         continue
-      elif edge.sourceHandle.startsWith("code/"):
-        if not scene.codeInlineInputsForNodeId.hasKey(edge.target):
-          scene.codeInlineInputsForNodeId[edge.target] = initTable[string, string]()
-        scene.codeInlineInputsForNodeId[edge.target][fieldName] = edge.sourceHandle.substr("code/".len)
-        if TRACING:
-          scene.logger.log(%*{
-            "event": "initInterpretedCodeInlineInput",
-            "sceneId": scene.id,
-            "codeNodeId": edge.target.int,
-            "arg": fieldName,
-            "code": edge.sourceHandle.substr("code/".len)
-          })
-        continue
-
-    ## node-field edges (app field -> prev of target node)
-    if edge.sourceHandle.startsWith("field/") and edge.targetHandle == "prev":
+    elif sh.startsWith("field/") and th == "prev":
       scene.setNodeFieldFromEdge(edge)
-      if TRACING:
-        scene.logger.log(%*{
-          "event": "initInterpretedAppField",
-          "sceneId": scene.id,
-          "appNodeId": edge.source.int,
-          "fieldPath": edge.sourceHandle.substr("field/".len),
-          "targetNodeId": edge.target.int
-        })
       continue
-
-    if edge.edgeType == "codeNodeEdge":
-      if TRACING:
-        logger.log(%*{"event": "initInterpretedEdge:codeNodeEdge:ignored", "sceneId": scene.id, "edgeId": edge.id.int,
-            "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
-            "targetHandle": edge.targetHandle})
+    if (sh == "next" and th == "prev") or edge.edgeType == "codeNodeEdge" or
+        (th.startsWith("codeField/") and (sh in ["fieldOutput", "stateOutput"] or sh.startsWith("code/"))):
       continue
+    logger.log(%*{"event": "initInterpretedEdge:ignored", "sceneId": scene.id.string, "edgeId": edge.id.int,
+        "source": edge.source.int, "target": edge.target.int, "sourceHandle": sh, "targetHandle": th})
 
-    logger.log(%*{"event": "initInterpretedEdge:ignored", "sceneId": scene.id, "edgeId": edge.id.int,
-        "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
-        "targetHandle": edge.targetHandle})
-
-  ## Precompile functions. The JS context is built on demand, not here:
-  ## compileAppInlineFn/compileCodeFn/evalOneShot each call ensureSceneJs
-  ## themselves, so eagerly building one here only ever cost scenes that turn
-  ## out to have no code nodes and no inline JS at all — a whole QuickJS
-  ## runtime for nothing. That matters most for nested scenes, where the
-  ## purely structural wrapper is the common case and every level used to pay.
-  # Precompile functions for inline app/scene inputs (for all nodes that have them)
-  for nodeId, inlineMap in scene.appInlineInputsForNodeId:
-    for inputName, snippet in inlineMap.pairs:
-      compileAppInlineFn(scene, nodeId, inputName, snippet)
-
-  # Precompile functions for code nodes and their inline args
-  for node in exportedScene.nodes:
-    if node.nodeType == "code":
-      compileCodeFn(scene, node)
-      if scene.codeInlineInputsForNodeId.hasKey(node.id):
-        for argName, snippet in scene.codeInlineInputsForNodeId[node.id].pairs:
-          compileCodeInlineFn(scene, node.id, argName, snippet)
-
-  ## Pass 3: initialize apps AFTER we've wired fields via edges
+  # The apps, after the edges have written what they name into their config.
   for node in exportedScene.nodes:
     if node.nodeType == "app":
       let keyword = node.data{"keyword"}.getStr()
-      if TRACING:
-        scene.logger.log(%*{
-          "event": "initInterpretedApp",
-          "sceneId": scene.id,
-          "nodeType": node.nodeType,
-          "nodeId": node.id.int,
-          "appKeyword": keyword,
-          "configKeys": (if node.data.hasKey("config") and node.data["config"].kind == JObject:
-          node.data["config"].keys.toSeq()
-        else:
-          @[])
-        })
       let app = initInterpretedApp(keyword, node, scene)
       scene.appsByNodeId[node.id] = app
       if app.dynamicJsAppSubscribes():
         scene.eventApps.add(node.id)
-
     elif node.nodeType == "scene":
       let childSceneId = node.data{"keyword"}.getStr().SceneId
-      var exportedChild: ExportedScene
-      var isInterpretedChild = false
-
-      if uploadedScenes.hasKey(childSceneId):
-        let interpretedExport = uploadedScenes[childSceneId]
-        exportedChild = ExportedScene(interpretedExport)
-        isInterpretedChild = true
-      elif loadedScenes.hasKey(childSceneId):
-        let interpretedExport = loadedScenes[childSceneId]
-        exportedChild = ExportedScene(interpretedExport)
-        isInterpretedChild = true
-      elif compiledSceneExports.hasKey(childSceneId):
-        exportedChild = compiledSceneExports[childSceneId]
-      elif not sceneLoader.isNil and sceneLoader(childSceneId) and loadedScenes.hasKey(childSceneId):
-        exportedChild = ExportedScene(loadedScenes[childSceneId])
-        isInterpretedChild = true
-      else:
+      let exportedChild = resolveSceneExport(childSceneId)
+      if exportedChild.isNil:
         raise newException(Exception,
           "Scene node references unknown scene id: " & childSceneId.string)
-
-      # Use node.data.config as the initial state for the child scene (mirrors compiled behavior)
-      var persisted = %*{}
-      if node.data.hasKey("config") and node.data["config"].kind == JObject:
-        persisted = node.data["config"]
-
-      let child = exportedChild.init(childSceneId, frameConfig, logger, persisted)
+      # Its config is the child's initial state; the child's own init fires
+      # its "init" event, interpreted or compiled.
+      let config = node.data{"config"}
+      let child = exportedChild.init(childSceneId, frameConfig, logger,
+        if not config.isNil and config.kind == JObject: config else: %*{})
       scene.sceneNodes[node.id] = child
       scene.sceneExportByNodeId[node.id] = exportedChild
       scene.logger.log(%*{
         "event": "initChildScene",
-        "parentSceneId": scene.id,
+        "parentSceneId": scene.id.string,
         "nodeId": node.id.int,
         "childSceneId": childSceneId.string,
-        "execution": if isInterpretedChild: "interpreted" else: "compiled"
+        "execution": if exportedChild of ExportedInterpretedScene: "interpreted" else: "compiled"
       })
 
-
-  ## Pass 4: negotiate what each image edge may skip materializing. Runs after
-  ## the apps exist, because a node whose behaviour comes from scene JSON (a
-  ## dynamic JS app) is opaque no matter what its keyword declares.
+  # What each image edge may skip materializing, after the apps exist: a
+  # node whose behaviour comes from scene JSON (a dynamic JS app) is opaque
+  # whatever its keyword declares. Then the edges the fusion planner left
+  # materialized get the consumer's useful resolution passed upstream.
   let opaqueCheck: OpaqueCheck = proc (nodeId: NodeId): bool {.closure, gcsafe, raises: [].} =
     scene.appsByNodeId.getOrDefault(nodeId, nil).isDynamicJsApp()
   scene.planImageFusion(opaqueCheck)
-  # Pass 5: the edges the fusion planner left materialized still get the
-  # consumer's useful resolution passed upstream (requestedBounds).
   scene.planImageBounds(opaqueCheck)
 
+  # The program, made once per scene. A scene with code of its own compiles
+  # it now, so a snippet that does not parse fails the scene here, naming
+  # its node; one without needs no JavaScript until it runs.
+  scene.program = programFor(scene)
+  if scene.program.snippets.len > 0:
+    ensureProgram(scene)
+
   logger.log(%*{"event": "initInterpretedDone", "sceneId": sceneId.string, "nodes": scene.nodes.len,
-      "edges": scene.edges.len, "eventListeners": scene.eventListeners.len, "apps": scene.appsByNodeId.len,
-      "imageFusionPlans": scene.imageFusionPlans.len,
+      "edges": exportedScene.edges.len, "eventListeners": scene.program.listens.len,
+      "apps": scene.appsByNodeId.len, "imageFusionPlans": scene.imageFusionPlans.len,
       "imageBoundsPlans": scene.imageBoundsPlans.len})
 
-  # "init" fires here, once per scene instance and after its apps exist, the
-  # way a compiled scene's generated init does it. It used to be the parent's
-  # job and only child scenes had a parent, so a top-level interpreted scene —
-  # the default execution mode, on every host — never heard it.
-  if scene.eventListeners.hasKey("init"):
+  # "init" fires here, once per scene instance and after its apps exist.
+  if "init" in scene.program.listens:
     var initContext = ExecutionContext(scene: scene, event: "init", payload: scene.state,
       hasImage: false, loopIndex: 0, loopKey: ".")
     runEvent(scene, initContext)
@@ -1937,35 +1618,16 @@ proc applyPublicStateFromPayload(scene: InterpretedFrameScene, payload: JsonNode
       if value != scene.state{key}:
         scene.state[key] = value
 
-proc eventNodeMatchesPayload(node: DiagramNode, payload: JsonNode): bool =
-  # Every filter the listener sets must match; a field it leaves empty matches
-  # anything. A `button` listener with no `action` hears every press, double
-  # press and long press: the line's own edges are `gpio` (docs/events.md).
-  var hasLabelFilter = false
-  if not node.data.isNil and node.data.kind == JObject:
-    if node.data.hasKey("config") and node.data["config"].kind == JObject:
-      let config = node.data["config"]
-      for key, value in config.pairs:
-        let expected = eventFilterValue(value)
-        if expected.len > 0:
-          if key == "label":
-            hasLabelFilter = true
-          if not eventPayloadValueMatches(payload, key, expected):
-            return false
-
-    if not hasLabelFilter and node.data.hasKey("label"):
-      let expected = eventFilterValue(node.data["label"])
-      if expected.len > 0 and not eventPayloadValueMatches(payload, "label", expected):
-        return false
-
-  true
-
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
 proc logListenerError(scene: FrameScene, event: string, nodeId: NodeId, e: ref Exception) =
   ## `nodeId` is how the editor puts the error on its node (frameRuntimeErrors.ts).
   scene.logger.log(%*{"event": "runEventInterpreted:error", "sceneId": scene.id,
     "contextEvent": event, "nodeId": nodeId.int, "error": $e.msg, "stacktrace": e.getStackTrace()})
+
+proc listensFor(scene: InterpretedFrameScene, event: string): bool {.inline.} =
+  ## An event node of its own listens for `event`.
+  not scene.program.isNil and event in scene.program.listens
 
 proc appsHear(scene: InterpretedFrameScene, event: string): bool =
   ## A JS app subscribed to `event` by name, or through "*".
@@ -1979,7 +1641,7 @@ proc listensThrough(scene: FrameScene, event: string, wearer: FrameScene): bool 
   if scene.isNil or not (scene of InterpretedFrameScene):
     return true
   let interpreted = InterpretedFrameScene(scene)
-  if interpreted.eventListeners.hasKey(event) or uiListens(scene.id.string, event) or interpreted.appsHear(event):
+  if interpreted.listensFor(event) or uiListens(scene.id.string, event) or interpreted.appsHear(event):
     return true
   # A pointer event is built for a scene that listens, and what it embeds
   # hears it through that scene: its layout, the panels, its `<Scene>`s.
@@ -2004,7 +1666,7 @@ proc sceneKeyboardAt*(sceneId: SceneId, x, y: int): bool =
 proc takesPresses(scene: InterpretedFrameScene): bool =
   ## A listener of its own for what a press becomes.
   for event in ["pointerDown", "pointerUp", "tap", "doubleTap", "longPress"]:
-    if scene.eventListeners.hasKey(event) or scene.appsHear(event):
+    if scene.listensFor(event) or scene.appsHear(event):
       return true
 
 proc pressTakenIn(scene: FrameScene; x, y: float32; wearer: FrameScene; depth: int): bool =
@@ -2144,12 +1806,7 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
     scene.slots.setLen(0)
     # One render listener whose flow is one node: what that node draws is the
     # whole frame.
-    context.wholeFrame = false
-    if scene.eventListeners.hasKey("render") and scene.eventListeners["render"].len == 1:
-      let first = scene.nextNodeIds.getOrDefault(scene.eventListeners["render"][0], -1.NodeId)
-      if first != 0.NodeId and first != -1.NodeId:
-        let after = scene.nextNodeIds.getOrDefault(first, -1.NodeId)
-        context.wholeFrame = after == 0.NodeId or after == -1.NodeId
+    context.wholeFrame = not scene.program.isNil and scene.program.wholeFrame
   of "tap", "doubleTap", "longPress", "swipe", "pointerDown", "pointerUp", "pointerMove", "pointerCancel", "uiTimer":
     # A JSX UI's handlers and hover:/active: classes, its fields and the
     # boxes that scroll (ui/events.nim). A run of a handler, a change in
@@ -2168,49 +1825,14 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
       else:
         uiSceneEvent(self.id.string)
 
-  if scene.eventListeners.hasKey(context.event):
-    # Track filtered-out listeners so a press that matches nothing says so.
-    # A scene whose event node filters on label "A" and a frame whose buttons
-    # are labelled BOOT/KEY1 (board silkscreen, per the ESP32 preset) is a
-    # dead button with no error anywhere: the GPIO fires, the event reaches
-    # the scene, every listener rejects it, and runEvent returns quietly.
-    var listenersFiltered = 0
-    var matched = 0
-    var expectedFilters: seq[string] = @[]
-    for nodeId in scene.eventListeners[context.event]:
-      let nextNode = if scene.nextNodeIds.hasKey(nodeId): scene.nextNodeIds[nodeId] else: -1.NodeId
-      if nextNode != 0.NodeId and nextNode != -1.NodeId:
-        if scene.nodes.hasKey(nodeId) and not eventNodeMatchesPayload(scene.nodes[nodeId], context.payload):
-          listenersFiltered += 1
-          let d = scene.nodes[nodeId].data
-          if not d.isNil and d.kind == JObject:
-            if d.hasKey("config") and d["config"].kind == JObject:
-              for key, value in d["config"].pairs:
-                let expected = eventFilterValue(value)
-                if expected.len > 0: expectedFilters.add(key & "=" & expected)
-            elif d.hasKey("label"):
-              let expected = eventFilterValue(d["label"])
-              if expected.len > 0: expectedFilters.add("label=" & expected)
-          continue
-        try:
-          matched += 1
-          inc eventListenersRun
-          discard scene.runNode(nextNode, context)
-        except Exception as e:
-          self.logListenerError(context.event, nextNode, e)
-      else:
-        listenersFiltered += 1
-    if listenersFiltered > 0 and matched == 0:
-      # A key event's payload stays out of the log (event_log.nim): a listener
-      # filtered on one key would otherwise log every other key pressed.
-      self.logger.log(withEventPayload(%*{
-        "event": "runEvent:noListenerMatched",
-        "sceneId": self.id,
-        "contextEvent": context.event,
-        "expected": expectedFilters,
-        "error": "\"" & context.event & "\" reached the scene but every listener filtered it out" &
-          (if expectedFilters.len > 0: " (nodes want " & expectedFilters.join(", ") & ")" else: "")
-      }, context.event, context.payload))
+  if scene.listensFor(context.event):
+    # The listeners are the program's (a listener filtered out that leaves
+    # none matched says so there). Each catches its own error; what reaches
+    # here is what no JavaScript catch can stop, the run's deadline.
+    try:
+      eventListenersRun += programEvent(scene, context)
+    except Exception as e:
+      self.logListenerError(context.event, 0.NodeId, e)
   scene.runEventApps(context)
   # A render in which nothing drew still shows the background.
   paintPendingBackground(context)
@@ -2327,21 +1949,45 @@ proc render*(self: FrameScene, context: ExecutionContext): Image =
 
 proc clearRunNodeStacks*(scene: FrameScene) =
   ## After an out-of-memory abort (single_scene_host.recoverAbortedRun), for
-  ## the scene and every child scene it holds: runNode pops its stack in a
-  ## `defer`, which the longjmp skipped, and a node left on it read as its
-  ## own producer ("depends on itself") on every later render.
+  ## the scene and every child scene it holds: the runs of its program that
+  ## the longjmp skipped never counted themselves out, and their values and
+  ## profiles were left behind.
   if scene.isNil or not (scene of InterpretedFrameScene):
     return
   let interpreted = InterpretedFrameScene(scene)
-  interpreted.runNodeStack.setLen(0)
+  interpreted.programDepth = 0
+  interpreted.programCtx = nil
+  interpreted.values.setLen(0)
+  interpreted.profiles.setLen(0)
+  interpreted.cacheInputKeys.clear()
   yieldScene = nil # the same abort skipped the layout's `finally`
   clearRunNodeStacks(scene.wornLayout)
   for _, child in interpreted.sceneNodes:
     clearRunNodeStacks(child)
 
-# -------------------------
-# Writing scene types with jsony (toJson); reading is below
-# -------------------------
+proc forgetSceneGraph*(scene: InterpretedFrameScene) =
+  ## A scene that goes lets go of its apps, its values and its program (the
+  ## hosts' teardown, scenes.nim and single_scene_host.nim, after its child
+  ## scenes). Closures go first: they hold the scene, an ORC cycle otherwise.
+  scene.execNode = nil
+  scene.getDataNode = nil
+  # Before the apps are dropped: each JS app node owns a QuickJS runtime
+  # with no destructor, so losing the last reference would leak it outright.
+  for _, app in scene.appsByNodeId:
+    releaseJsAppRuntime(app)
+  scene.appsByNodeId.clear()
+  scene.appInputs = @[]
+  scene.sceneNodes.clear()
+  scene.sceneExportByNodeId.clear()
+  scene.eventApps = @[]
+  scene.nodes.clear()
+  scene.values = @[]
+  scene.cacheValues.clear()
+  scene.cacheTimes.clear()
+  scene.cacheKeys.clear()
+  scene.cacheExprs.clear()
+  scene.cacheInputKeys.clear()
+  cleanupSceneJs(scene)
 
 proc dumpHook*(s: var string, v: StateFieldOption) =
   ## Round-trips back to the shape it came in as: a bare string unless it
