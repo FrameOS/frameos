@@ -664,10 +664,14 @@ clock bar. Nobody is waiting for those, and the mark would blink on every tick
 that ran a little over the delay. With a layout the interval that counts is the
 scene's own, and only on a pass that will run it (`rhythmAwaited`): a slow map
 inside a clock bar shows the mark when the map renders and not when the bar
-ticks. On an ESP32 LCD, neither does a render while someone taps
-(`input_hold_on`): a UI answering a key in 200 to 400 ms flashed the mark on
-most keys (the Form showcase on the SenseCAP Indicator). A switch still
-shows it.
+ticks. A switch still shows it. On an ESP32 LCD a render that answers
+somebody (input, or an event from HTTP, the cloud or the console, handled
+since the last render began) is waited for, an animation's too: a swipe to
+the next Color cycling scene draws for a second or two. Its mark shows at
+500 ms (`FOS_LOADING_ANSWER_EXTRA_MS`), since a UI answering a key in 200 to
+400 ms flashed it at 200 ms on most keys (the Form showcase on the SenseCAP
+Indicator), and no other render shows it while somebody taps
+(`input_hold_on`).
 
 **E-paper has no mark to draw, so it chirps.** When someone at the frame touched
 it or pressed a key in the last ten seconds, a load that has taken 1.5 seconds

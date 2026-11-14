@@ -64,8 +64,8 @@ typedef struct {
 
 /* A switch begins, on a frame turned by `rotation`: the mark goes up if the
  * switch has not landed within the delay counted from `since_ms`, when it
- * was asked for. A switch begun while another still loads keeps the first
- * one's start and its mark. False, and no mark, when the runtime gives no
+ * was asked for. A `since_ms` ahead of now waits that much longer. A switch
+ * begun while another still loads keeps the first one's start and its mark. False, and no mark, when the runtime gives no
  * rect or one `saved` cannot hold. */
 bool fos_lcd_loading_begin(fos_lcd_loading_t *m, int rotation, uint32_t since_ms);
 

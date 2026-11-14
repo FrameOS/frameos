@@ -720,6 +720,14 @@ void fos_client_set_display_power(int on)
  * late, with the ones behind it in one go. */
 static fos_input_hold_t s_input_hold;
 static int64_t s_last_input_us = 0;
+/* How much longer than the usual 200 ms the loading mark waits for a render
+ * that answers somebody: it shows at half a second. */
+#define FOS_LOADING_ANSWER_EXTRA_MS 300
+/* When somebody last asked the scene for something (input handled, or an
+ * event from HTTP, the cloud or the console), and when the last render began:
+ * a render begun after such a thing answers it (the loading mark's rule). */
+static int64_t s_asked_us = 0;
+static int64_t s_render_began_us = 0;
 /* When the last rendered picture went to the panel (fos_pictures_fast). */
 static int64_t s_last_picture_us = 0;
 
@@ -751,6 +759,7 @@ bool fos_client_input_held(void)
 static bool deliver_deferred_events(void)
 {
     bool delivered = fos_events_deliver_deferred();
+    if (delivered) s_asked_us = esp_timer_get_time();
     if (delivered && hold_applies()) fos_input_hold_note(&s_input_hold, esp_timer_get_time());
     return delivered;
 }
@@ -780,6 +789,7 @@ static void process_input_events(void)
 {
     if (input_queued()) {
         note_input_awake();
+        s_asked_us = s_last_input_us;
         if (hold_applies()) fos_input_hold_note(&s_input_hold, s_last_input_us);
     }
     fos_buttons_process_events();
@@ -3604,12 +3614,22 @@ static void client_task(void *arg)
                  * not one nobody is waiting for: an animation would blink it
                  * on every frame a little over the delay, and so would a
                  * scene the frame's own clock redraws every few seconds (a
-                 * layout's clock bar). A switch begins it itself. */
-                /* Nor, on an LCD, one somebody tapping made: a UI answering
-                 * a key in 200 to 400 ms flashed the mark on most of them
-                 * (the SenseCAP Indicator's Form showcase, 2026-11-14). */
-                if (!s_anim.active && frameos_nim_scene_awaited() &&
-                    !(fos_display_is_lcd() && input_hold_on())) {
+                 * layout's clock bar). A switch begins it itself.
+                 * On an LCD a render that answers somebody (input handled
+                 * since the last render began) is waited for, an animation's
+                 * too: a swipe to the next Color cycling scene draws for a
+                 * second or two. Its mark waits FOS_LOADING_ANSWER_EXTRA_MS
+                 * longer, since a UI answering a key in 200 to 400 ms
+                 * flashed it at the usual 200 ms on most keys (the Form
+                 * showcase, 2026-11-14); for the same reason no other render
+                 * shows it while somebody taps. */
+                int64_t began_us = esp_timer_get_time();
+                bool answers = s_asked_us > s_render_began_us;
+                s_render_began_us = began_us;
+                if (fos_display_is_lcd() && answers) {
+                    fos_client_loading_begin(xTaskGetTickCount() + pdMS_TO_TICKS(FOS_LOADING_ANSWER_EXTRA_MS));
+                } else if (!s_anim.active && frameos_nim_scene_awaited() &&
+                           !(fos_display_is_lcd() && input_hold_on())) {
                     fos_client_loading_begin(xTaskGetTickCount());
                 }
                 s_render_in_flight = true;
