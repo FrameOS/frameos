@@ -486,11 +486,13 @@ describe("the /admin live check", () => {
   // work: a wrong endpoint, a missing bucket and a revoked key all look
   // identical to a presence check.
   it("writes, reads back and cleans up a probe object", async () => {
-    const { runLiveChecks } = await import("./system-checks");
-    const checks = await runLiveChecks();
-    const objects = checks.find((check) => check.name === "Object storage (blobs)");
+    // The object store's own check: runLiveChecks also waits on the database,
+    // which a unit run does not have, and took this test past its 5 s on a
+    // busy runner (2026-11-14, which held up a deploy).
+    const { checkObjectStoreLive } = await import("./system-checks");
+    const objects = await checkObjectStoreLive();
 
-    expect(objects).toBeDefined();
+    expect(objects.name).toBe("Object storage (blobs)");
     // The filesystem driver is a warning, not a pass: on a production host it
     // means blobs are landing on local disk where no backup will find them.
     expect(objects!.state).toBe("warning");

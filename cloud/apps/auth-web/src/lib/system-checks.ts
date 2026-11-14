@@ -296,7 +296,7 @@ function checkTurnstileLive(): LiveCheck {
 // delete it.
 const objectStoreProbeKey = "health/object-store-probe";
 
-async function checkObjectStoreLive(): Promise<LiveCheck> {
+export async function checkObjectStoreLive(): Promise<LiveCheck> {
   const store = objectStore();
   const name = "Object storage (blobs)";
   const startedAt = Date.now();

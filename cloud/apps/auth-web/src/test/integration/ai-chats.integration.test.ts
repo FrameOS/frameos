@@ -215,8 +215,21 @@ describe("chat titles and message counts", () => {
     const chatId = crypto.randomUUID();
     const created = await ensureChat(db, accountId, { chatId });
     expect(created?.id).toBe(chatId);
-    const total = maxMessagesPerChat + 3;
-    for (let index = 0; index < total; index += 1) {
+    // The first message goes through appendChatMessage (it names the chat),
+    // the chat is filled to the cap in one insert, and three more go through
+    // appendChatMessage past it: what is measured is the cap. Appending all
+    // 403 one by one was ~1,200 round trips, past the test's 30 s on a busy
+    // runner (2026-11-14, which held up a deploy).
+    await appendChatMessage(db, chatId, { content: "message 0", role: "user" });
+    await db.insert(aiChatMessages).values(
+      Array.from({ length: maxMessagesPerChat - 1 }, (_, offset) => ({
+        chatId,
+        content: `message ${offset + 1}`,
+        role: offset % 2 === 0 ? "assistant" : "user",
+      })),
+    );
+    await db.update(aiChats).set({ messageCount: maxMessagesPerChat }).where(eq(aiChats.id, chatId));
+    for (let index = maxMessagesPerChat; index < maxMessagesPerChat + 3; index += 1) {
       await appendChatMessage(db, chatId, {
         content: `message ${index}`,
         role: index % 2 === 0 ? "user" : "assistant",
@@ -227,6 +240,14 @@ describe("chat titles and message counts", () => {
       .from(aiChatMessages)
       .where(eq(aiChatMessages.chatId, chatId));
     expect(counted?.count).toBe(maxMessagesPerChat);
+    // The newest window is what stays: the three oldest went.
+    const kept = await db
+      .select({ content: aiChatMessages.content })
+      .from(aiChatMessages)
+      .where(eq(aiChatMessages.chatId, chatId))
+      .orderBy(aiChatMessages.id);
+    expect(kept[0]?.content).toBe("message 3");
+    expect(kept.at(-1)?.content).toBe(`message ${maxMessagesPerChat + 2}`);
     expect((await chatRow(chatId))?.messageCount).toBe(maxMessagesPerChat);
     expect((await chatRow(chatId))?.title).toBe("message 0");
   });
