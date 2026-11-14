@@ -27,6 +27,7 @@
 import std/[json, options, tables, times]
 when not defined(frameosEmbedded):
   import std/[math, strutils]
+  from frameos/events import isSceneSettings
 import pixie
 import pixie/fileformats/svg
 import frameos/types
@@ -98,10 +99,17 @@ proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
   ## `node[key] = value` for an object node, without json's assert.
   node.fields[key] = value
 
-proc isBuiltInScene*(sceneId: string): bool =
-  ## A scene the runtime draws itself, on every host: no slot, no file. The
-  ## switcher and the scene settings (system/sceneSettings/scene.nim).
-  sceneId == SceneSwitcherId or sceneId == SceneSettingsId
+when defined(frameosEmbedded):
+  proc isBuiltInScene*(sceneId: string): bool =
+    ## A scene the runtime draws itself, on every host: no slot, no file. The
+    ## switcher and the scene settings (system/sceneSettings/scene.nim).
+    sceneId == SceneSwitcherId or sceneId == SceneSettingsId
+else:
+  proc isBuiltInScene*(sceneId: string): bool =
+    ## A scene the runtime draws itself: no slot, no file. The switcher and the
+    ## scene settings (system/sceneSettings/scene.nim; on a desktop one a
+    ## scene, `settingsWindowId`).
+    sceneId == SceneSwitcherId or isSceneSettings(sceneId)
 
 # ------------------------------------------------------------------ the model
 
@@ -145,6 +153,36 @@ proc uiRoom*(frameConfig: FrameConfig, width, height: int): (int, int) =
   ## as large again with less room, as a scaled JSX scene is.
   let scale = uiScale(frameConfig, width, height)
   (scaledLength(width, scale), scaledLength(height, scale))
+
+when not defined(frameosEmbedded):
+  const DesktopUnit = 400
+    ## A built-in scene's unit in a desktop's window: its letters a size from
+    ## the desktops' apps (16 px in the settings).
+
+  proc panelUnit*(frameConfig: FrameConfig, image: Image): int =
+    ## The panel's shorter edge, as it is turned (the canvas's without a
+    ## config): what a built-in scene's sizes are a share of in a window on a
+    ## desktop too, so its letters keep the frame's size there and a bigger
+    ## window shows more of it, not more of the same larger.
+    if not frameConfig.isNil:
+      let (w, h) = canvasSize(frameConfig)
+      result = min(w, h)
+    if result <= 0:
+      result = min(image.width, image.height)
+    # In a desktop's window it is one of the desktop's apps, sized as on a
+    # small frame whatever the panel: at the desktops' own zoom, twice that
+    # from a 2160 px short side (1000 on e-paper) at the frame's render scale.
+    if not onDesktop.isNil and onDesktop():
+      let laidOut = result.float / max(frameRenderScale(frameConfig), 0.25)
+      let zoom = if laidOut >= (if paperPanel(frameConfig, image): 1000.0 else: 2160.0): 2 else: 1
+      result = min(result, DesktopUnit * zoom)
+
+template sizeUnit*(self: FrameScene, image: Image): int =
+  ## A built-in scene's `unit` (its `tree`'s `sizeUnit`): the canvas's shorter
+  ## edge on an ESP32, which draws them full screen alone; elsewhere the
+  ## panel's (panelUnit), the same full screen, and the same in a window.
+  when defined(frameosEmbedded): min(image.width, image.height)
+  else: panelUnit(self.frameConfig, image)
 
 proc ensureCanvas*(self: FrameScene, context: ExecutionContext) =
   ## The canvas a built-in scene draws into: the host's, else one the size of
@@ -307,15 +345,25 @@ proc showTurnedPage() =
   ## to refresh (2026-11-10).
   sendEvent(evRender, newJObject(), eoScene)
 
+when not defined(frameosEmbedded):
+  var wentBack {.threadvar.}: bool
+    ## It went back by itself (a scene picked, Close, its timeout), not merely
+    ## lost the focus to a window beside it: its "close" ends it
+    ## (docs/scene-layouts.md "Windows").
+
 proc choose(self: SceneSwitcherScene, index: int) =
   ## Show the scene at `index`.
   if index >= 0 and index < self.entries.len:
     let payload = newJObject()
     payload.put("sceneId", newJString(self.entries[index].id))
+    when not defined(frameosEmbedded):
+      wentBack = true
     sendEvent(evSetCurrentScene, payload, eoScene)
 
 proc leave() =
   ## Back to the scene it was opened from: the dispatcher knows which.
+  when not defined(frameosEmbedded):
+    wentBack = true
   sendEvent(evSceneSwitcher, newJObject(), eoScene)
 
 proc opened(self: SceneSwitcherScene) =
@@ -688,6 +736,13 @@ proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, pap
   target.offsetY = 0
   target.scale = image.width.float32 / max(roomW, 1).float32
   target.call = call
+  when not defined(frameosEmbedded):
+    if self.state{"away"}.getBool():
+      # Left open in a window (docs/scene-layouts.md "Windows"): it waits for
+      # whoever brings it forward again, and draws again when something does.
+      self.refreshInterval = idle
+      self.refreshIntervalDefault = idle
+      return false
   let
     now = epochTime()
     since = now - self.state{"touchedAt"}.getFloat(now)
@@ -722,7 +777,7 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
     if not pass.isNil:
       try: discard pass(true) except Exception: discard
   let (roomW, roomH) = uiRoom(self.frameConfig, image.width, image.height)
-  let tree = self.tree(roomW, roomH, self.paper, min(image.width, image.height))
+  let tree = self.tree(roomW, roomH, self.paper, self.sizeUnit(image))
   when not defined(frameosEmbedded):
     if not pass.isNil:
       try: more = pass(false) except Exception: more = false
@@ -769,11 +824,26 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
       if not value.isNil:
         self.state.put(key, value)
   of "open":
+    when not defined(frameosEmbedded):
+      wentBack = false
+      if self.state.hasKey("away"):
+        self.state.delete("away")
     self.opened()
   of "close":
-    # Opened again by name (a `setCurrentScene` to it), it was opened from
-    # nowhere it knows: no stale scene to go back to.
-    self.forget()
+    when defined(frameosEmbedded):
+      # Opened again by name (a `setCurrentScene` to it), it was opened from
+      # nowhere it knows: no stale scene to go back to.
+      self.forget()
+    else:
+      if wentBack or not builtInScenesStay:
+        # Done: opened again by name, it knows no scene to go back to.
+        wentBack = false
+        self.forget()
+      else:
+        # The focus went to a window beside it (docs/scene-layouts.md
+        # "Windows"): it stays open there, Close still going back where it
+        # was opened from, and does not go back by itself (drawUi).
+        self.state.put("away", newJBool(true))
   of "render":
     if context.hasImage and not context.image.isNil:
       self.draw(context.image)

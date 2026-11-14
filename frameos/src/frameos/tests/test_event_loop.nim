@@ -52,11 +52,16 @@ type RecordingHost = ref object
   loop: EventLoop
 
 proc sceneName(scene: FrameScene): string =
-  scene.id.string.rsplit("/", maxsplit = 1)[^1]
+  ## Its id's last part; a scene's own settings window, `sceneSettings#` and
+  ## its scene's.
+  let owner = settingsWindowScene(scene.id.string)
+  if owner.len > 0: "sceneSettings#" & owner.rsplit("/", maxsplit = 1)[^1]
+  else: scene.id.string.rsplit("/", maxsplit = 1)[^1]
 
 proc builtIn(sceneId: string): ExportedInterpretedScene =
   ## The runtime's own scene at `sceneId`, as every host picks it.
-  if sceneId == SceneSettingsId: sceneSettings.exportedScene else: sceneSwitcher.exportedScene
+  if isSceneSettings(sceneId): sceneSettings.exportedScene
+  else: sceneSwitcher.exportedScene
 
 proc sceneInstance(host: RecordingHost, sceneId: SceneId): FrameScene =
   if not host.scenes.hasKey(sceneId):
@@ -166,6 +171,8 @@ block dispatcher:
     caseOrder = host.order
     # The frame's own event map (frame.json `eventMap`), when the case has one.
     host.config.eventMap = c{"frameEventMap"}
+    # A host whose built-in scenes stay open as windows (a desktop layout).
+    builtInScenesStay = c{"windows"}.getBool()
     if host.current.string.len > 0:
       discard host.sceneInstance(host.current)
     discard host.loop.drain() # what `init` dispatched is not this case's subject
@@ -211,6 +218,7 @@ block dispatcher:
             doAssert state{key} == value, where & ": state." & key & " = " & $state{key}
     # Leave nothing queued for the next case's loop to be blamed for.
     localEventSink = nil
+    builtInScenesStay = false
     inc ran
   doAssert ran >= 10
 

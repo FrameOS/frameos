@@ -298,7 +298,9 @@ block a_layout_hole_pages_by_the_grid_it_drew:
   let scene = newSwitcher(config(1872, 1404, "embedded"), opener = "scene-1")
   discard scene.draw(newImageGray8(900, 600))
   let (roomW, roomH) = uiRoom(scene.frameConfig, 900, 600)
-  let drawn = switcherGrid(40, roomW, roomH, thumbnails = false, unit = 600)
+  # Its sizes are the panel's (sizeUnit: a window keeps the frame's letters),
+  # its room the hole's.
+  let drawn = switcherGrid(40, roomW, roomH, thumbnails = false, unit = 1404)
   let whole = switcherGrid(40, uiRoom(scene.frameConfig, 1872, 1404)[0], uiRoom(scene.frameConfig, 1872, 1404)[1],
     thumbnails = false, unit = 1404)
   doAssert drawn.perPage < whole.perPage, $drawn & " " & $whole
@@ -427,6 +429,22 @@ block it_is_a_built_in_scene:
   doAssert paperPanel(config(800, 480, "embedded"), newImageGray8(8, 8)), "an ESP32 e-paper"
   doAssert not paperPanel(config(800, 480, "pimoroni.hyperpixel4"))
   doAssert paperPanel(config(800, 480, "pimoroni.inky_impression_7"))
+
+block desktopUnit:
+  # Full screen a built-in scene's sizes are a share of the panel; in a desktop's
+  # window (a layout keeping `openScenes`) those of a desktop's apps, twice that
+  # on a 4K screen at scale 1.
+  let canvas = newImage(800, 480)
+  let saved = onDesktop
+  onDesktop = nil
+  doAssert panelUnit(config(1316, 902, "web_only"), canvas) == 902
+  onDesktop = proc(): bool {.nimcall, gcsafe.} = true
+  doAssert panelUnit(config(1316, 902, "web_only"), canvas) == 400
+  doAssert panelUnit(config(800, 480, "web_only"), canvas) == 400
+  doAssert panelUnit(config(3840, 2160, "web_only"), canvas) == 800
+  onDesktop = proc(): bool {.nimcall, gcsafe.} = false
+  doAssert panelUnit(config(1316, 902, "web_only"), canvas) == 902
+  onDesktop = saved
 
 localEventSink = nil
 echo "scene switcher: ok"
