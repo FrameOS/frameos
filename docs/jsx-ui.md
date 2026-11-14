@@ -206,8 +206,8 @@ next wake comes forward to when it is due. When only it is due the UI around it
 sits out. A tap on it is the scene's, in its own coordinates, unless the UI drew
 something over it there that listens for that event (a menu, a window on top, a
 pane that takes a press): then it is that element's, and a press it took is its
-own to the end, its tap included (everywhere but an ESP32, whose layouts tile
-the panel). What the UI drew under it hears nothing there. One drawn as a
+own to the end, its tap included. What the UI drew under it hears nothing
+there. One drawn as a
 picture counts against the same budget as a panel's copy (a quarter of free
 render memory, at most 1 MiB on an ESP32); a device that cannot keep it runs the
 scene again each render. An LCD repaints what the scene changed.

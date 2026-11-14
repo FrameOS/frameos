@@ -599,6 +599,10 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
   # way the Linux runtime seeds a scene from ./state/scene-<id>.json.
   host.initialState = proc (sceneId: SceneId): JsonNode = loadPersistedSceneState(sceneId.string)
   host.start()
+  # A desktop layout runs the frame's scenes side by side, as on a Pi, as many
+  # at once as the memory allows (app_runtime.windowLimit,
+  # docs/scene-layouts.md "Windows"); a frame without one keeps one scene.
+  host.setWindowed(true)
 
 # ------------------------------------------------------------------- scenes
 
@@ -621,8 +625,11 @@ proc loadScenes*(payload: string): int =
 
   # Tear down the old scene before swapping the registry so its QuickJS
   # context and app instances are reclaimed; the layout it wore may be one of
-  # the new scenes, changed.
+  # the new scenes, changed. A desktop's windows (where they were) go to the
+  # layout's next instance; the scenes in them go.
+  host.carryDesktop()
   host.dropScene()
+  host.dropWindows()
   dropParkedLayout()
   when defined(memProbe): memProbe("  loadScene: old scene dropped")
 
@@ -657,7 +664,10 @@ proc setSceneCatalog*(indexJson: string): int =
   ## This is what makes lazy loading possible: the frame can list, schedule
   ## and switch scenes knowing only this, and pays for a scene's nodes and
   ## JavaScript only while it is the active one. A new list may hold a changed
-  ## layout: the one kept between switches goes.
+  ## layout: the one kept between switches goes, and so do the scenes running
+  ## in a desktop's windows, which may be changed too.
+  host.carryDesktop()
+  host.dropWindows()
   dropParkedLayout()
   var parsed: JsonNode
   try:
@@ -733,6 +743,23 @@ proc loadScene*(payload: string, alongside = false): bool =
     inc scenesLoadedCount
     log("loadScene: \"" & inputs[0].id.string & "\" resident alongside")
     return true
+  let sceneId = inputs[0].id
+  if host.windowed and (host.windows.len > 0 or not host.scene.isNil and host.keepsInWindow(host.scene.id)):
+    # A desktop (docs/scene-layouts.md "Windows"): the scene in front stays
+    # running in its window, and the one read off flash starts beside it.
+    # What no window runs leaves the cache, as a switch's whole-cache
+    # replacement below would.
+    if not getInterpretedScenes().hasKey(sceneId):
+      addInterpretedSceneToCache(inputs[0])
+    host.switchLoaded(sceneId)
+    for cached in getInterpretedScenes().keys:
+      if cached != sceneId and not host.windows.hasKey(cached):
+        removeInterpretedSceneFromCache(cached)
+    scenesLoadedCount = 1 + host.windows.len
+    if defaultSceneId.isNone:
+      defaultSceneId = some(sceneId)
+    log(&"loadScene: \"{sceneId.string}\" in front, {host.windows.len} more in windows")
+    return true
   let newScenes = buildInterpretedScenes(inputs)
   if newScenes.len == 0:
     log("loadScene: scene did not survive parsing")
@@ -744,7 +771,6 @@ proc loadScene*(payload: string, alongside = false): bool =
   replaceInterpretedScenesCache(newScenes)
   when defined(memProbe): memProbe("  loadScene: scenes cache replaced")
   scenesLoadedCount = newScenes.len
-  let sceneId = inputs[0].id
   host.sceneId = some(sceneId)
   if defaultSceneId.isNone:
     defaultSceneId = some(sceneId)
@@ -868,6 +894,11 @@ proc selectScene*(sceneIdText: string): bool =
   host.makeCurrent(sceneId)
   log("selectScene: " & sceneIdText)
   true
+
+proc sceneRunning*(sceneIdText: string): bool =
+  ## Whether the scene runs in a window of a desktop already: fos_scenes.c
+  ## brings it to the front (selectScene) without reading it off flash.
+  host.windowed and host.windows.hasKey(SceneId(sceneIdText))
 
 proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
   ## Test hook for the value-pipeline differential (docs/value-pipeline.md,

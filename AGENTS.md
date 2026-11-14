@@ -252,12 +252,13 @@
   plane can turn the page off (`frame_settings_on_screen`); the device keeps
   the last word (a Pi's `frameos-settings-unlock` file on the boot partition,
   an ESP32's `set settings_unlock 1`).
-- On a desktop (`builtInScenesStay`: a Pi's or the browser's windows) every
-  scene's settings are an instance of their own, `system/sceneSettings#<scene
-  id>` (contract `scenes.settingsWindow`, `event_loop.settingsWindows`), and the
-  plain id is the frame page's one window. A reader of built-in ids asks
-  `isBuiltInScene` / `isSceneSettings`, never `== SceneSettingsId`; the ESP32
-  keeps the one id (the helpers are not compiled there).
+- On a desktop (`builtInScenesStay`: the windows of a Pi, an ESP32 or the
+  browser) every scene's settings are an instance of their own,
+  `system/sceneSettings#<scene id>` (contract `scenes.settingsWindow`,
+  `event_loop.settingsWindows`), and the plain id is the frame page's one
+  window. A reader of built-in ids asks `isBuiltInScene` / `isSceneSettings`,
+  never `== SceneSettingsId`; the firmware's C reads the prefix too
+  (`FOS_SCENE_SETTINGS_WINDOW_PREFIX`, `is_built_in_scene` in `fos_scenes.c`).
 
 ## Scene previews on a frame: `docs/scene-previews.md`
 
@@ -579,10 +580,11 @@
   A rectangle of the panel keeps its own damage record in `svg_frames.nim`
   (`takePanelRegion`): a new way to write a rectangle's pixels without a render
   of it takes that record too.
-- **Windows** (`docs/scene-layouts.md` "Windows"; the `Windows 98` and `Tiling`
-  samples): on a Pi, and in the browser when the page turns it on
-  (`frameos_wasm_set_windowed`, the windowed `single_scene_host`), a layout can
-  run the frame's scenes side by side. The runtime adds three things and no
+- **Windows** (`docs/scene-layouts.md` "Windows"; the `Windows 98`, `Tiling`,
+  `macOS` and `BeOS` samples): on a Pi, an ESP32 and in the browser when the
+  page turns it on (`frameos_wasm_set_windowed`; the windowed
+  `single_scene_host` is the ESP32's and the browser's), a layout can run the
+  frame's scenes side by side. The runtime adds three things and no
   window manager: `app.frame.scenes` / `sceneId`, a layout's bare `<Scene id>`
   resolving to the host's own instance (`hostSceneFor`; one with props stays a
   copy), and one layout instance carried across switches and put on at the
@@ -594,9 +596,13 @@
   scene takes the pointer there, its tap included (`uiOverScene`,
   `UiRegion.scene`), and windows pace the frame (`windowsOf` in
   scene_rhythm.nim). Windows, positions and z-order are the layout's own state.
-  All of it is behind `when not defined(frameosEmbedded)`: the ESP32's
-  generated C must not change (diff the `--compileOnly` output of
-  `embedded_main.nim` against main).
+  Where memory is short only so many run at once (`app_runtime.windowLimit`, 2
+  on an 8 MB ESP32, 4 above, `app.frame.windows`): the layouts close the one
+  that had the focus longest ago and the host holds to it whatever a layout
+  does (`makeRoom`, `trimWindows`); an ESP32 without a desktop keeps one scene
+  as before (`keepsInWindow`). The wheel stays off the ESP32
+  (`when not defined(frameosEmbedded)`); the rest of it is in the firmware,
+  about 22 KB of flash on the S3 (2026-11-15).
 
 ## JSX from JS apps: `docs/jsx-ui.md`
 

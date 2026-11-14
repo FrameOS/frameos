@@ -192,20 +192,18 @@ proc frameAction(action: string) =
 
 template uiId(self: SceneSettingsScene): string =
   ## Its UI's target (ui/events.nim): one a scene where built-in scenes stay
-  ## open as windows, each instance its own; on an ESP32 the one id.
-  when defined(frameosEmbedded): SceneSettingsId
-  else: self.id.string
+  ## open as windows, each instance its own.
+  self.id.string
 
-when not defined(frameosEmbedded):
-  proc ownWindow(self: SceneSettingsScene): bool =
-    ## A scene's own settings on a desktop (event_loop.settingsWindows): its
-    ## gear brings the frame page's window forward instead of turning its page.
-    builtInScenesStay and self.id.string != SceneSettingsId
+proc ownWindow(self: SceneSettingsScene): bool =
+  ## A scene's own settings on a desktop (event_loop.settingsWindows): its
+  ## gear brings the frame page's window forward instead of turning its page.
+  builtInScenesStay and self.id.string != SceneSettingsId
 
-  proc panelWindow(self: SceneSettingsScene): bool =
-    ## The frame page's window on a desktop (Control Panel): no gear back to a
-    ## scene's form, whose settings have windows of their own.
-    builtInScenesStay and self.id.string == SceneSettingsId
+proc panelWindow(self: SceneSettingsScene): bool =
+  ## The frame page's window on a desktop (Control Panel): no gear back to a
+  ## scene's form, whose settings have windows of their own.
+  builtInScenesStay and self.id.string == SceneSettingsId
 
 proc showPage(self: SceneSettingsScene, frame: bool) =
   ## The scene's form or the frame page, its list at the top and no field
@@ -376,17 +374,15 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
 proc opener(self: SceneSettingsScene): string =
   self.state{"from"}.getStr()
 
-when not defined(frameosEmbedded):
-  var wentBack {.threadvar.}: bool
-    ## It went back by itself (Save, Cancel, its timeout), not merely lost the
-    ## focus to a window beside it: its "close" ends it (docs/scene-layouts.md
-    ## "Windows").
+var wentBack {.threadvar.}: bool
+  ## It went back by itself (Save, Cancel, its timeout), not merely lost the
+  ## focus to a window beside it: its "close" ends it (docs/scene-layouts.md
+  ## "Windows").
 
 proc leave() =
   ## Back to the scene it was opened from, nothing saved: the dispatcher
   ## knows which.
-  when not defined(frameosEmbedded):
-    wentBack = true
+  wentBack = true
   sendEvent(evSceneSettings, newJObject(), eoScene)
 
 proc collect(fields, values: JsonNode): JsonNode =
@@ -407,8 +403,7 @@ proc save(self: SceneSettingsScene) =
   let payload = newJObject()
   payload.put("sceneId", newJString(self.opener()))
   payload.put("state", collect(self.fieldList(), self.valueMap()))
-  when not defined(frameosEmbedded):
-    wentBack = true
+  wentBack = true
   sendEvent(evSetCurrentScene, payload, eoScene)
 
 proc saveFrame(self: SceneSettingsScene, fields: JsonNode) =
@@ -498,14 +493,11 @@ proc acting(self: SceneSettingsScene) =
     elif frame: self.saveFrame(fields)
     else: self.save()
   elif handler == HGear:
-    when defined(frameosEmbedded):
-      self.showPage(not frame)
+    if self.ownWindow():
+      # The frame page has a window of its own: it comes forward.
+      sendEvent(evSceneSettings, %*{"page": "frame"}, eoScene)
     else:
-      if self.ownWindow():
-        # The frame page has a window of its own: it comes forward.
-        sendEvent(evSceneSettings, %*{"page": "frame"}, eoScene)
-      else:
-        self.showPage(not frame)
+      self.showPage(not frame)
   elif handler >= HAction:
     self.press(handler - HAction)
   elif handler >= HSelect:
@@ -884,11 +876,8 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
     SvgNode(text: if frame: "Frame settings" else: title))
   if not info.isNil and not layoutPage:
     # About 30 of the text's size: the two buttons, the title and the name.
-    when defined(frameosEmbedded):
+    if not self.panelWindow():
       header.children.add look.gear(frame, named = not frame and width >= look.size * 30)
-    else:
-      if not self.panelWindow():
-        header.children.add look.gear(frame, named = not frame and width >= look.size * 30)
   # Lit while there is something to save: after a Save it goes quiet, which
   # is how the frame page says it took it.
   let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
@@ -950,15 +939,14 @@ proc back(self: SceneSettingsScene) =
 
 # ------------------------------------------------------------ the scene
 
-when not defined(frameosEmbedded):
-  proc startAfresh(self: SceneSettingsScene) =
-    ## No field with the keyboard, the list at its top, no page and no edits:
-    ## what the dispatcher hands over next is all it knows.
-    if self.onFrame():
-      frameAction("close")
-    forgetUiTarget(self.uiId, SettingsNode)
-    self.state = newJObject()
-    self.showName("Scene settings")
+proc startAfresh(self: SceneSettingsScene) =
+  ## No field with the keyboard, the list at its top, no page and no edits:
+  ## what the dispatcher hands over next is all it knows.
+  if self.onFrame():
+    frameAction("close")
+  forgetUiTarget(self.uiId, SettingsNode)
+  self.state = newJObject()
+  self.showName("Scene settings")
 
 proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   ## What raises here is reported by the caller, as for any scene. The
@@ -967,12 +955,11 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   let payload = context.payload
   case context.event
   of "setCurrentScene":
-    when not defined(frameosEmbedded):
-      # Opened from a scene (the dispatcher always says which, `from`): afresh,
-      # as an ESP32's close leaves it. Brought forward again from a window,
-      # the switch says nothing and it is as it was left, edits and all.
-      if not payload{"state", "from"}.isNil:
-        self.startAfresh()
+    # Opened from a scene (the dispatcher always says which, `from`): afresh,
+    # as an ESP32's close leaves it. Brought forward again from a window,
+    # the switch says nothing and it is as it was left, edits and all.
+    if not payload{"state", "from"}.isNil:
+      self.startAfresh()
     # What the dispatcher read off the scene it was opened from.
     for key in ["from", "fields", "values", "opened", "layout", "noLayout"]:
       let value = payload{"state", key}
@@ -986,34 +973,26 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
       self.showPage(true)
   of "open":
     self.touch()
-    when not defined(frameosEmbedded):
-      wentBack = false
-      if self.state{"away"}.getBool():
-        # Brought forward from a window: the host's news for the frame page
-        # again.
-        self.state.delete("away")
-        if self.onFrame():
-          frameAction("open")
+    wentBack = false
+    if self.state{"away"}.getBool():
+      # Brought forward from a window: the host's news for the frame page
+      # again.
+      self.state.delete("away")
+      if self.onFrame():
+        frameAction("open")
   of "close":
-    when defined(frameosEmbedded):
-      # Opened again, it starts afresh: no field has the keyboard, the list is
-      # at its top, and it knows no scene until the dispatcher says.
+    if wentBack or not builtInScenesStay:
+      # Done: opened again, it starts afresh: no field has the keyboard, the
+      # list is at its top, and it knows no scene until the dispatcher says.
+      wentBack = false
+      self.startAfresh()
+    else:
+      # The focus went to a window beside it (docs/scene-layouts.md
+      # "Windows"): it stays open there as it was, and does not go back by
+      # itself (switcher.drawUi). Opened from a scene again, it starts afresh.
       if self.onFrame():
         frameAction("close")
-      forgetUiTarget(SceneSettingsId, SettingsNode)
-      self.state = newJObject()
-    else:
-      if wentBack or not builtInScenesStay:
-        # Done: opened again by name, it knows nothing.
-        wentBack = false
-        self.startAfresh()
-      else:
-        # The focus went to a window beside it (docs/scene-layouts.md
-        # "Windows"): it stays open there as it was, and does not go back by
-        # itself (switcher.drawUi). Opened from a scene again, it starts afresh.
-        if self.onFrame():
-          frameAction("close")
-        self.state.put("away", newJBool(true))
+      self.state.put("away", newJBool(true))
   of "render":
     if context.hasImage and not context.image.isNil:
       self.drawForm(context.image)
