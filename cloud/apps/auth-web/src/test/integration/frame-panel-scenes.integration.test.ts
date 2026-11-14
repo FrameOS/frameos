@@ -244,8 +244,18 @@ describe("GET /api/store/device/scenes", () => {
     expect(page1.more).toBe(true);
     expect(page1.scenes).toHaveLength(storeDevicePageSize);
     // Short keys, nothing a frame does not draw.
-    expect(Object.keys(page1.scenes[0]!).sort()).toEqual(["about", "by", "category", "id", "image", "name", "version"]);
-    expect(page1.scenes[0]).toMatchObject({ by: "Publisher", category: "weather", image: null, version: 1 });
+    expect(Object.keys(page1.scenes[0]!).sort()).toEqual([
+      "about",
+      "by",
+      "category",
+      "id",
+      "image",
+      "name",
+      "thumb",
+      "version",
+    ]);
+    // No cover here, and no CDN in this test to hand a cover's copy from.
+    expect(page1.scenes[0]).toMatchObject({ by: "Publisher", category: "weather", image: null, thumb: null, version: 1 });
     // A line or two of the description for a card.
     expect(Array.from(page1.scenes[0]!.about as string).length).toBeLessThanOrEqual(140);
     expect(page1.categories.find((category) => category.slug === "weather")).toEqual({

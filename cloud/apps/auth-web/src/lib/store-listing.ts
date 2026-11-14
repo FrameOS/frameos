@@ -193,6 +193,8 @@ const coverColumn = (column: "width" | "height") =>
   sql<number | null>`(select i.${sql.raw(column)} from ${storeSceneVersions} v join ${storeSceneVersionImages} vi on vi.version_id = v.id join ${storeImages} i on i.sha256 = vi.image_sha256 where v.scene_id = ${storeScenes}.id and v.version = ${storeScenes}.latest_version and vi.position = 0)`;
 export const sceneCoverWidthSql = coverColumn("width");
 export const sceneCoverHeightSql = coverColumn("height");
+// The cover's object key, for the copy frames are offered (store-device-covers.ts).
+export const sceneCoverObjectKeySql = sql<string | null>`(select i.object_key from ${storeSceneVersions} v join ${storeSceneVersionImages} vi on vi.version_id = v.id join ${storeImages} i on i.sha256 = vi.image_sha256 where v.scene_id = ${storeScenes}.id and v.version = ${storeScenes}.latest_version and vi.position = 0)`;
 
 /** Drizzle condition: the version row of `scene` numbered `version`. */
 export function versionRowCondition(sceneId: string, version: number) {

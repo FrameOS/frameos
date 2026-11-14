@@ -240,6 +240,18 @@ static bool valid_params(const char *params)
     return true;
 }
 
+/* A store scene's id goes into a URL path: a UUID (as both planes check it)
+ * or nothing. */
+static bool valid_store_id(const char *id)
+{
+    size_t n = strlen(id);
+    if (n != 0 && n != 36) return false;
+    for (const char *c = id; *c; c++) {
+        if (!isxdigit((unsigned char)*c) && *c != '-') return false;
+    }
+    return true;
+}
+
 void fos_store_action(const char *asker, const char *action, const char *args_json)
 {
     if (s_lock == NULL || action == NULL) return;
@@ -260,7 +272,7 @@ void fos_store_action(const char *asker, const char *action, const char *args_js
         /* A preview goes back to the scene it was opened from. */
         snprintf(S->job_from, sizeof(S->job_from), "%s", S->asker);
         S->job_show = !cJSON_IsFalse(cJSON_GetObjectItem(args, "show"));
-        if (strcmp(action, "browse") != 0 || valid_params(S->job_params)) {
+        if (valid_store_id(S->job_store) && (strcmp(action, "browse") != 0 || valid_params(S->job_params))) {
             snprintf(S->busy, sizeof(S->busy), "%s", action);
             S->error[0] = S->done[0] = '\0';
             start_job(action);
@@ -302,7 +314,9 @@ static const char *fetch(const char *url, size_t max, bool json, char **body, si
     esp_err_t err = fos_http_fetch(&req, max, &res);
     const char *error = NULL;
     if (err != ESP_OK || res.status == 0) error = "store_unavailable";
-    else if (res.status == 404) error = "invalid_scene";
+    /* A store scene that is gone; the listing (`json`) missing is a store
+     * older than this frame. */
+    else if (res.status == 404) error = json ? "store_unavailable" : "invalid_scene";
     else if (res.status == 429) error = "rate_limited";
     else if (res.status != 200 || res.body == NULL || res.too_large) error = res.too_large ? "no_room" : "store_unavailable";
     else if (json) {
@@ -365,8 +379,11 @@ static const char *ask_plane(const char *url, const char *auth, bool backend, co
     cJSON *answer = res.body ? cJSON_ParseWithLength(res.body, res.body_len) : NULL;
     if (error == NULL && res.status != 200) {
         const cJSON *code = cJSON_GetObjectItem(answer, "error");
+        /* A 404 with no word of the plane's is a plane from before the route. */
         snprintf(refused, sizeof(refused), "%s", cJSON_IsString(code) ? code->valuestring
-                                                 : res.status == 429 ? "rate_limited" : "store_unavailable");
+                                                 : res.status == 429 ? "rate_limited"
+                                                 : res.status == 404 ? "plane_update_required"
+                                                                     : "store_unavailable");
         error = refused;
     }
     copy_arg(answer, "status", status, status_len);
