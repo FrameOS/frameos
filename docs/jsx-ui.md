@@ -591,6 +591,14 @@ export function get(app) {
   keys types instead of changing the scene. A key is typed where the finger
   lifts, however it rolled on the way, and a tap between the keys or in the
   keyboard's margin at the very edge is the nearest key, as on a phone.
+- **Two thumbs taken for one finger type both keys.** A touch controller
+  that tracks one point (the SenseCAP Indicator's FT6336U) glides it from
+  one thumb to the other when the second lands before the first lifts, and
+  the tap comes only where the second one is. A tap that went down on
+  another character 1.5 keys or more to the side, mostly sideways and
+  within 250 ms, types that key first (`typeGlided` in `ui/events.nim`). A
+  thumb rolling goes up the keys and a finger sliding to choose takes
+  longer: both type where they lift.
 - **A key just typed stays lit** for a moment (250 ms from the first render
   that shows it) in its pressed color, so a quick tap that the panel never
   showed pressed still says which key it was. Not on e-paper.
@@ -606,9 +614,12 @@ export function get(app) {
   `z`–`m` (`ui/keyboard.nim` `Hints`), and the letters page's full stop holds
   `!` and `?`, which that page has no keys for (on the symbols page and the
   number pad `.` holds its `…` alone). The first symbol is drawn small and dim in the
-  key's top right corner. It is the first form of the key's row, which starts right
-  over the key (pushed left at the screen's edge) with the symbol lit: hold a
-  letter and lift, and its symbol is typed. Sliding sideways moves the light
+  key's top right corner. It is the first form of the key's row, always right
+  over the key and lit, the other forms in order away from it toward the side
+  with room: to the right, or for a key in the right half (`o`, `u`) to the
+  left, narrower when a long row needs it, so the finger slides through every
+  form without reaching the screen's edge. Hold a letter and lift, and its
+  symbol is typed. Sliding sideways moves the light
   along the row by how far the finger went (`UiInput.accentFrom`), at any
   height from above the row to a couple of rows below it (no need to go up
   onto the row); a row without a symbol (`$` on the symbols page) is
@@ -624,10 +635,12 @@ export function get(app) {
   100 ms, every 50 ms after a dozen, until the finger lifts. On e-paper it
   erases once: a refresh a character is seconds.
 - **The space bar dragged moves the caret**, as on a phone: once the finger
-  has moved more than a tap's slop, every 0.45 of the bar's height sideways
-  is one character left or right, and every bar's height up or down a line
-  in a `<textarea>` (the start or the end of an `<input>`), each an arrow
-  key to `onKeyDown`. Its release types no space.
+  has moved sideways more than a tap's slop (and more sideways than up or
+  down: a thumb landing low on the bar and rolling up is typing the letter
+  above it), every 0.45 of the bar's height sideways is one character left
+  or right, and every bar's height up or down a line in a `<textarea>` (the
+  start or the end of an `<input>`), each an arrow key to `onKeyDown`. Its
+  release types no space.
 - **A real keyboard** (a Pi's, the computer's over the preview) types into
   the field instead: once a key has been typed on one, fields get no
   keyboard on the screen. Left and right, Home, End, Backspace and Delete

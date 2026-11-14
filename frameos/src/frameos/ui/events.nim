@@ -75,6 +75,15 @@ type
     spaceCols, spaceRows: int
     spaceDragging: bool
     swallowTap: int
+    # The character key a finger went down on (-1: none), where, how wide and
+    # when. Its tap lifting on another character well to the side, quickly,
+    # is two thumbs a touch controller took for one finger, the second
+    # landing before the first lifted: the FT6336U glides its one point from
+    # the first to the second, and the first key was lost (SenseCAP
+    # Indicator, 2026-11-14). Both are typed (`typeGlided`).
+    glidePointer, glideCode: int
+    glideX, glideY, glideW: float32
+    glideAt: MonoTime
 
 const
   MaxTargets = 16
@@ -109,7 +118,7 @@ proc uiTarget*(sceneId: string, nodeId: int, create = true): UiTarget =
     if targets.len >= MaxTargets:
       targets.delete(0)
     result = UiTarget(sceneId: sceneId, nodeId: nodeId, memo: UiMemo(), dragKey: -1, holdPointer: -1,
-      repeatPointer: -1, spacePointer: -1, swallowTap: -1)
+      repeatPointer: -1, spacePointer: -1, swallowTap: -1, glidePointer: -1)
     result.input.accentLit = -1
     targets.add result
 
@@ -552,6 +561,29 @@ proc pressKey(target: UiTarget, code: int) =
     target.keyDown(text)
     target.insert(text)
 
+const
+  GlideKeys = 1.5 ## how many of its key's widths a glide goes sideways at least
+  GlideMs = 250   ## and in how long at most, from the press to the tap
+
+proc isCharacter(code: int): bool =
+  ## A key that types a character other than a space (ui/keyboard.nim).
+  code > ord(' ') and code < AccentBase - KeyBase
+
+proc typeGlided(target: UiTarget, code, pointer: int, lx, ly: float32) =
+  ## The key a tap went down on, typed before `code` (the one it lifts on)
+  ## when the two are characters 1.5 keys or more apart sideways, mostly
+  ## sideways and within 250 ms: two thumbs (`glidePointer`). A finger that
+  ## rolls goes up the keys, and one that slides to choose takes longer:
+  ## either types where it lifts.
+  if target.glidePointer != pointer:
+    return
+  target.glidePointer = -1
+  let dx = abs(lx - target.glideX)
+  if code.isCharacter and code != target.glideCode and dx >= target.glideW * GlideKeys and
+      dx > 2 * abs(ly - target.glideY) and
+      getMonoTime() - target.glideAt <= initDuration(milliseconds = GlideMs):
+    target.pressKey(target.glideCode)
+
 proc holdKey(target: UiTarget, code, pointer: int, lx: float32) =
   ## A key held (`longPress`, while the finger is still down at `lx`): its
   ## accents come up above it, the one nearest the finger's x lit, for that
@@ -651,7 +683,10 @@ proc spaceDrag(target: UiTarget, lx, ly: float32, slop: float32): bool =
     dx = lx - target.spaceX
     dy = ly - target.spaceY
   if not target.spaceDragging:
-    if abs(dx) <= slop and abs(dy) <= slop:
+    # Sideways first: a thumb landing low on the bar and rolling up onto the
+    # letters above is typing one of them, not moving the caret up a line
+    # (which in an <input> is to its start: "banana" came out "ana|b").
+    if abs(dx) <= slop or abs(dx) < abs(dy):
       return false
     target.spaceDragging = true
   let
@@ -903,6 +938,18 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
               target.spaceRows = 0
               target.spaceDragging = false
               break
+          # The character it lands on, for a tap that lifts on another.
+          target.glidePointer = -1
+          for r in target.regions:
+            let code = r.handlers[ueClick] - 1 - KeyBase
+            if code.isCharacter and r.inside(lx, ly):
+              target.glidePointer = pointer
+              target.glideCode = code
+              target.glideX = lx
+              target.glideY = ly
+              target.glideW = r.w
+              target.glideAt = getMonoTime()
+              break
         # The innermost element that takes a press holds the pointer; else
         # the innermost box that scrolls may be dragged.
         target.release(pointer)
@@ -934,6 +981,8 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       # The swipe a drag made scrolled the box: nothing else hears it.
       target.dragged = false
       continue
+    if kind == ord(ueLongPress) and target.glidePointer == pointer:
+      target.glidePointer = -1 # a hold is no tap: the key it went down on is not typed with another
     if kind == ord(ueClick) and target.swallowTap >= 0 and target.swallowTap == pointer:
       # The tap a drag of the space bar made on its release: no space.
       target.swallowTap = -1
@@ -1015,12 +1064,15 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
           # the keyboard either way.
           let code = target.nearestKey(lx, ly)
           if code > 0:
+            target.typeGlided(code, pointer, lx, ly)
             target.pressKey(code)
             result = true
           break
         if handler > KeyBase:
           if kind == ord(ueLongPress): target.holdKey(handler - 1 - KeyBase, pointer, lx)
-          else: target.pressKey(handler - 1 - KeyBase)
+          else:
+            target.typeGlided(handler - 1 - KeyBase, pointer, lx, ly)
+            target.pressKey(handler - 1 - KeyBase)
         else:
           target.call(handler - 1, event, payload, [float32(lx - r.x), float32(ly - r.y), r.w, r.h])
           target.inputOnly = false # whatever the handler changed, get() shows it

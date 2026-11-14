@@ -318,11 +318,11 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
     row.children.add key
 
 proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool, page: KeyboardPage,
-    lit = -1): SvgNode =
+    lit = -1, reversed = false): SvgNode =
   ## The accents of key `code` on `page` as a row of keys, each `keyW` x `keyH` with
   ## `gap` between and around them, in the keyboard's look: number `lit` is
   ## the one nearest the finger, which lifting types. ui/layout.nim puts it
-  ## above the key.
+  ## above the key; `reversed`, the first form is at the row's right end.
   var c = "flex rounded-lg border-2"
   c.px("p", gap)
   c.px("gap", gap)
@@ -330,7 +330,9 @@ proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool, page: KeyboardP
   if paper: c.add " bg-white text-black border-black"
   else: c.add " bg-zinc-800 text-white border-zinc-500"
   result = el("div", move c)
-  for i in 0 ..< formCount(code, page):
+  let count = formCount(code, page)
+  for n in 0 ..< count:
+    let i = if reversed: count - 1 - n else: n
     c = "flex items-center justify-center rounded-md"
     c.px("w", keyW)
     c.px("h", keyH)

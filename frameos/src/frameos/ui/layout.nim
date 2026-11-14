@@ -1849,14 +1849,26 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
       lo = max(lo, width div 2 - half)
       hi = min(hi, width div 2 + half)
   let
-    # Each form a key as wide as the held one, narrower when the row would
-    # not fit between `lo` and `hi`.
-    keyW = max(min(int(r.w), (hi - lo - 4 - (count + 1) * gap) div count), 8)
+    centre = int(r.x + r.w / 2)
+    # A letter's row has its symbol right over the key and the rest in order
+    # away from it, toward the side with room: to the right, or, near the
+    # right edge, to the left, the symbol at the row's right end (a finger on
+    # o slides left through its forms, as on a phone). Its forms narrow until
+    # the row fits that side. Any other row is centred on its key.
+    rightW = (hi - centre - 2 - count * gap).float32 / (count.float32 - 0.5)
+    leftW = (centre - lo - 2 - count * gap).float32 / (count.float32 - 0.5)
+    reversed = hinted and rightW < r.w and leftW > rightW
+    keyW =
+      if hinted: max(min(int(r.w), int(if reversed: leftW else: rightW)), 8)
+      else: max(min(int(r.w), (hi - lo - 4 - (count + 1) * gap) div count), 8)
     popW = count * keyW + (count + 1) * gap + 4
-    # A letter's row starts with its symbol right over the key; any other
-    # row is centred on it.
-    x = clamp(int(r.x + r.w / 2) - (if hinted: 2 + gap + keyW div 2 else: popW div 2), lo, max(hi - popW, lo))
-    first = float32(x + 2 + gap) + float32(keyW) / 2 # the first form's middle
+    lead = 2 + gap + keyW div 2 # from the row's end to the middle of the form there
+    x = clamp(
+      if not hinted: centre - popW div 2
+      elif reversed: centre + lead - popW
+      else: centre - lead, lo, max(hi - popW, lo))
+    # The first form's middle: the symbol's, on a letter's row over the key.
+    first = if reversed: float32(x + popW - lead) else: float32(x + lead)
   # The accent under the finger's x, as near as it gets: a finger that slides
   # sideways off the key it holds needs to go no higher than the row. On a
   # letter's row, by how far the finger went from where it held (`accentFrom`):
@@ -1865,9 +1877,10 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
   if input.accentX >= 0:
     # As ui/events.nim's `accentNear`.
     let at = if hinted: input.accentX - input.accentFrom + first else: input.accentX
-    input.accentLit = clamp(int(round((at - first) / float32(keyW + gap))), 0, count - 1)
+    let steps = (if reversed: first - at else: at - first) / float32(keyW + gap)
+    input.accentLit = clamp(int(round(steps)), 0, count - 1)
   let shown = accentTree(input.accents, input.shift, keyW, keyH, gap, input.paper, input.page,
-    input.accentLit)
+    input.accentLit, reversed)
     .build(initText(), width.float32, height.float32, 0, AccentKey, input, false,
       if memo.isNil: nil else: memo.accents)
   shown.size = shown.layout(popW.float32, popH.float32, true, true)

@@ -1,4 +1,4 @@
-import std/[json, monotimes, os, sequtils, strutils, times, unittest]
+import std/[algorithm, json, monotimes, os, sequtils, strutils, times, unittest]
 import pixie
 import pixie/fileformats/svg
 import frameos/utils/font # installs the typeface resolver text uses
@@ -609,8 +609,10 @@ suite "a held key's accents":
     doAssert false, "no key " & $code
 
   proc accentRegions(regions: seq[UiRegion]): seq[UiRegion] =
+    ## The held key's forms, first to last (a row may run either way).
     for r in regions:
       if r.handlers[ueClick] - 1 >= AccentBase and r.handlers[ueClick] - 1 < OptionBase: result.add r
+    result.sort(proc (a, b: UiRegion): int = cmp(a.handlers[ueClick], b.handlers[ueClick]))
 
   proc withKeyboard(width, height: int, state: var UiInput, regions: var seq[UiRegion], memo: UiMemo = nil,
       value = ""): SvgNode =
@@ -646,7 +648,9 @@ suite "a held key's accents":
       check abs(f.w - e.w) < 1 and abs(f.h - e.h) < 1
       check f.y + f.h < e.y # above the key ...
       check f.x >= 0 and f.x + f.w <= 480 # ... on the screen
-    check forms[1].x > forms[0].x
+    # Its symbol (7) right over the u, the rest running left, where the room is.
+    check abs(forms[0].x + forms[0].w / 2 - (e.x + e.w / 2)) < 2
+    check forms[1].x < forms[0].x
     # A letter's row starts right over the key where the screen has room (w:
     # 2, alone), its symbol where the finger is.
     let w = keyRegion(regions, ord('w'))
@@ -740,13 +744,25 @@ suite "a held key's accents":
     state.accentX = 479
     discard withKeyboard(480, 480, state, regions)
     check state.accentLit == forms.len - 1
-    # At the right edge (p, o) the row is pushed left: still the symbol first.
+    # At the right edge (p, o) the row runs left: its symbol right over the
+    # key, the rest in order toward the room, so the finger slides left
+    # through them all.
     let o = keyRegion(regions, ord('o'))
     state.accents = ord('o')
     state.accentX = o.x + o.w / 2
     state.accentFrom = state.accentX
     discard withKeyboard(480, 480, state, regions)
     check state.accentLit == 0
+    let oForms = accentRegions(regions)
+    check oForms.len == 9
+    check abs(oForms[0].x + oForms[0].w / 2 - (o.x + o.w / 2)) < 2 # 9 over the o
+    check oForms[1].x < oForms[0].x and oForms[^1].x >= 4
+    state.accentX -= 3 * (oForms[0].x - oForms[1].x)
+    discard withKeyboard(480, 480, state, regions)
+    check state.accentLit == 3
+    state.accentX = 0
+    discard withKeyboard(480, 480, state, regions)
+    check state.accentLit == oForms.len - 1
     # No finger near it: none.
     state.accentX = -1
     discard withKeyboard(480, 480, state, regions)
@@ -1057,12 +1073,67 @@ suite "the keyboard in time":
     discard at(id, space, "pointerUp")
     check at(id, space, "tap")
     check target.input.text == "abcd ef"
-    # Up in an <input>: to its start.
+    # A thumb landing low on the bar and rolling up onto the letters is a
+    # key, not the caret: a drag starts sideways ("banana" came out "ana|b").
     target.relayout()
     check at(id, space, "pointerDown")
-    check at(id, space, "pointerMove", dy = -1.5 * space.h)
+    check not at(id, space, "pointerMove", dx = -3, dy = -1.5 * space.h)
+    check target.input.caret == 5
+    discard at(id, space, "pointerUp", dx = -3, dy = -1.5 * space.h)
+    check at(id, space, "tap", dx = -3, dy = -1.5 * space.h)
+    check target.input.text.len == 8 and target.input.text.count(' ') == 1 and target.input.caret == 6
+    # Sideways first, then up in an <input>: to its start.
+    target.relayout()
+    check at(id, space, "pointerDown")
+    check at(id, space, "pointerMove", dx = -1.2 * step)
+    check target.input.caret == 5
+    check at(id, space, "pointerMove", dx = -1.2 * step, dy = -1.5 * space.h)
     check target.input.caret == 0
-    discard at(id, space, "pointerUp", dy = -1.5 * space.h)
+    discard at(id, space, "pointerUp", dx = -1.2 * step, dy = -1.5 * space.h)
+    forgetUiTarget(id, 3)
+
+  test "two thumbs a controller took for one finger type both keys":
+    # The FT6336U glides its one point from the first thumb to the second
+    # when the second lands before the first lifts: the tap comes where the
+    # second is, and the first key is typed with it.
+    let id = "glide"
+    let target = setup(id, "")
+    target.relayout()
+    let
+      a = keyRegion(target.regions, ord('a'))
+      s = keyRegion(target.regions, ord('s'))
+      f = keyRegion(target.regions, ord('f'))
+      x = keyRegion(target.regions, ord('x'))
+      space = keyRegion(target.regions, ord(' '))
+    proc press(down, up: UiRegion, pause = 0) =
+      discard at(id, down, "pointerDown")
+      if pause > 0: sleep(pause)
+      discard at(id, up, "pointerMove")
+      discard at(id, up, "pointerUp")
+      discard at(id, up, "tap")
+      target.relayout()
+    # Three keys sideways, quickly: both, in order.
+    press(a, f)
+    check target.input.text == "af"
+    # One key over: a finger that rolled, the key it lifts on.
+    press(a, s)
+    check target.input.text == "afs"
+    # Up a row: a thumb rolling, the key it lifts on.
+    press(x, s)
+    check target.input.text == "afss"
+    # Slowly: a finger sliding to choose, the key it lifts on.
+    press(f, a, pause = 300)
+    check target.input.text == "afssa"
+    # Onto the space bar sideways: a space alone, never the letter too.
+    discard at(id, a, "pointerDown")
+    discard at(id, space, "pointerUp", dx = -space.w / 2 + 2)
+    discard at(id, space, "tap", dx = -space.w / 2 + 2)
+    check target.input.text == "afssa "
+    target.relayout()
+    # Under shift, the first is the capital and the second is not.
+    target.input.shift = 1
+    press(a, f)
+    check target.input.text == "afssa Af"
     forgetUiTarget(id, 3)
 
 suite "a <select>":
