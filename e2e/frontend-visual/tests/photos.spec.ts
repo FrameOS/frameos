@@ -1,5 +1,6 @@
-import { expect, request as playwrightRequest, test, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, request as playwrightRequest, test, type APIRequestContext, type Page } from './fixtures'
 import { deflateSync } from 'zlib'
+import { workerBaseURL } from './backends'
 import { attachFrontendErrorCollector, currentProjectApiPath, login, prepareStablePage } from './visual-helpers'
 
 // The Photos library against the real backend: the albums live on disk under
@@ -139,7 +140,7 @@ test.describe.serial('@e2e photos library', () => {
   })
 
   test.afterAll(async () => {
-    const baseURL = test.info().project.use.baseURL
+    const baseURL = workerBaseURL(test.info())
     const context: APIRequestContext = await playwrightRequest.newContext({ baseURL })
     try {
       const loginResponse = await context.post('/api/login', {

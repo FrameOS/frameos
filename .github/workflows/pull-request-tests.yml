@@ -21,26 +21,51 @@ permissions:
   contents: read
 
 jobs:
+  # Which of the heavy jobs below this pull request needs, from the files it
+  # changes (.github/ci/changed_areas.py has the rules and why each one is
+  # safe). Pushes run everything. No check is required on this repository, so
+  # a job skipped here is simply absent from the run; one that is not skipped
+  # waits ~10 s for this.
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      runtime: ${{ steps.areas.outputs.runtime }}
+      renderer: ${{ steps.areas.outputs.renderer }}
+      frontend_e2e: ${{ steps.areas.outputs.frontend_e2e }}
+      deploy: ${{ steps.areas.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/ci
+      - name: Classify the changed files
+        id: areas
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: python3 .github/ci/changed_areas.py
+
   nim:
     name: FrameOS Nim Tests (shard ${{ matrix.shard }})
-    # Self-hosted 4-core slots (ephemeral Incus VMs on the monster host; see
-    # tools/gha-runners/README.md): same 4-vcpu shape as ubuntu-latest,
-    # faster cores, and the shards skip the account-wide GitHub-hosted
-    # queue. Pure compute — no browser rendering. The visual-regression jobs
-    # stay on GitHub-hosted runners on purpose: their auto-committed
-    # Playwright/snapshot baselines must keep rendering on the image that
-    # produced them.
+    needs: changes
+    if: needs.changes.outputs.runtime == 'true'
+    # Self-hosted 16-core slots (ephemeral Incus VMs on the monster host; see
+    # tools/gha-runners/README.md), which start with the toolchains and
+    # main's dependencies in the image. The shard runner compiles one test
+    # file per core, so the shard is CPU: on the old 4-core slots the host sat
+    # ~90% idle while a run waited on them (2026-11-14).
     # Pull requests from forks run on GitHub-hosted runners: the self-hosted
-    # VMs share one /mnt/cache (read-only there apart from the Nim shards'
-    # nimcache; tools/gha-runners/README.md), and code nobody has reviewed
+    # VMs share one /mnt/cache (read-only there apart from the nimcache and
+    # ccache archives; tools/gha-runners/README.md), and code nobody has reviewed
     # should not seed it. Same-repo PRs and main keep the pool.
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-4' }}
-    # Four shards, not eight: a shard's fixed cost (VM boot, toolchain, the
-    # nimcache copy) was three quarters of its four minutes, and 18 epyc-4
-    # jobs per run meant two overlapping runs (a PR next to a push to main)
-    # did not fit the 28 slots — the second queued behind the whole first
-    # batch. Four keeps the job under Deploy E2E, the run's long pole.
-    # tools/run_test_shard.sh defaults to the same count.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-16' }}
+    # Four shards: a shard's fixed cost (checkout, assets, the nimcache
+    # unpack) is paid once per shard, and four 16-core shards finish the
+    # suite in about a minute of tests. tools/run_test_shard.sh defaults to
+    # the same count.
     strategy:
       fail-fast: false
       matrix:
@@ -80,59 +105,14 @@ jobs:
             frameos/src/assets
           key: ${{ runner.os }}-frameos-assets-${{ hashFiles('frameos/frontend/**', 'frameos/tools/prepare_assets.py', 'frameos/tools/generate_*.py', 'frontend/src/**', 'frontend/schema/**', 'frontend/public/**', 'frontend/scripts/generateRepoApps.mjs', 'frontend/package.json', 'repo/**', 'package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'versions.json') }}
 
-      - uses: pnpm/action-setup@v4
+      - name: Set up Node and pnpm
         if: steps.cache_assets.outputs.cache-hit != 'true'
-        with:
-          run_install: false
+        uses: ./.github/actions/setup-node-pnpm
 
-      - name: Set up Node
-        if: steps.cache_assets.outputs.cache-hit != 'true'
-        uses: actions/setup-node@v4
+      - name: Set up Nim
+        uses: ./.github/actions/setup-nim
         with:
-          node-version: '22'
-          cache: 'pnpm'
-          cache-dependency-path: pnpm-lock.yaml
-
-      # nim-lang.org drops connections and serves 503s often enough to fail
-      # real runs — one observed window outlasted curl's five retries AND a
-      # spaced second attempt. Cache the installed toolchain: on a hit the
-      # host is never contacted at all; the download (with its one retry
-      # below) only runs when this key has never been populated.
-      - name: Cache Nim toolchain
-        id: cache_nim_toolchain
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.choosenim
-            ~/.nimble/bin
-          key: ${{ runner.os }}-nim-toolchain-2.2.4
-
-      - uses: jiro4989/setup-nim-action@v1
-        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true'
-        id: setup_nim
-        continue-on-error: true
-        with:
-          nim-version: 2.2.4
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Retry Nim setup once
-        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true' && steps.setup_nim.outcome == 'failure'
-        uses: jiro4989/setup-nim-action@v1
-        with:
-          nim-version: 2.2.4
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Add cached Nim to PATH
-        if: steps.cache_nim_toolchain.outputs.cache-hit == 'true'
-        run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
-
-      - name: Cache nimble packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.nimble/pkgs2
-          key: ${{ runner.os }}-nimble-${{ hashFiles('frameos/nimble.lock', 'frameos/remote/nimble.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-nimble-
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache QuickJS
         uses: actions/cache@v4
@@ -179,19 +159,14 @@ jobs:
           cd frameos
           bash ./tools/run_test_shard.sh ${{ matrix.shard }}
 
-      # pixie's own suite (frameos/pixie, the fork in the tree since 2026-11-07):
-      # its image comparisons are what says a changed fill or stroke still
-      # draws the same pixels. One shard; a few minutes of compiles.
-      - name: pixie tests
-        if: ${{ matrix.shard == 2 }}
-        run: |
-          cd frameos
-          make test-pixie
-
-      # Not after a cancel: a gcc killed mid-write leaves a truncated .o newer
-      # than its .c, which the next run would link.
+      # Pushes to main only: the archive then always holds main's objects,
+      # which is what every pull request restores and recompiles its own
+      # changes against, and a pull request does not spend 40 s writing a
+      # cache it would only hand to the next unrelated branch. Not after a
+      # cancel: a gcc killed mid-write leaves a truncated .o newer than its
+      # .c, which the next run would link.
       - name: Save nimcache
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name == 'push' }}
         run: bash frameos/tools/ci_nimcache.sh save ${{ matrix.shard }}
 
       # Plain `node --test` suites next to FrameOS code that no JS workspace
@@ -227,12 +202,43 @@ jobs:
             --nimcache:/tmp/frameos-esp32-nimcache \
             src/embedded/embedded_main.nim
 
+  # pixie's own suite (frameos/pixie, the fork in the tree since 2026-11-07):
+  # its image comparisons are what says a changed fill or stroke still draws
+  # the same pixels. A job of its own, one compile per core: it was 4.5
+  # minutes on the end of Nim shard 2, the run's longest job.
+  pixie:
+    name: pixie tests
+    needs: changes
+    if: needs.changes.outputs.runtime == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-16' }}
+    steps:
+      - name: Use HTTP/1.1 toward github.com
+        run: git config --global http.https://github.com/.version HTTP/1.1
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+
+      - name: Set up Nim
+        uses: ./.github/actions/setup-nim
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: pixie tests
+        run: |
+          cd frameos
+          nimble install -d
+          make test-pixie PIXIE_TEST_JOBS="$(nproc)"
+
   esp32-kitchen-sink:
     # The biggest thing a UI does on an ESP32, in the memory one has: the wasm
     # build of this commit's runtime, its heap capped to an 8 MB SenseCAP
     # Indicator's, played through as a person would (a layout, its pages, forty
     # brush strokes). Emscripten is too slow for the Nim shards.
     name: Kitchen sink in an ESP32's memory
+    needs: changes
+    if: needs.changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -270,14 +276,16 @@ jobs:
 
   visual-regression:
     name: Visual Regression Tests (${{ matrix.shard }}/2)
+    needs: changes
+    if: needs.changes.outputs.renderer == 'true'
     # Pixie renders these snapshots in software from fonts in the repo — no
     # browser, no system fonts — so the host image does not shape the pixels
     # and the job can use the self-hosted pool like the Nim shards.
     # Pull requests from forks run on GitHub-hosted runners: the self-hosted
-    # VMs share one /mnt/cache (read-only there apart from the Nim shards'
-    # nimcache; tools/gha-runners/README.md), and code nobody has reviewed
+    # VMs share one /mnt/cache (read-only there apart from the nimcache and
+    # ccache archives; tools/gha-runners/README.md), and code nobody has reviewed
     # should not seed it. Same-repo PRs and main keep the pool.
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-4' }}
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-16' }}
     permissions:
       contents: read
     strategy:
@@ -297,77 +305,16 @@ jobs:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Set up the backend's Python
+        uses: ./.github/actions/setup-backend-python
+
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Set up Nim
+        uses: ./.github/actions/setup-nim
         with:
-          python-version: '3.12'
-
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install python dependencies
-        run: |
-          cd backend
-          python -m pip install --upgrade uv
-          uv venv
-          uv pip install --require-hashes -r requirements.txt
-
-      - uses: pnpm/action-setup@v4
-        with:
-          run_install: false
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-          cache-dependency-path: pnpm-lock.yaml
-
-      # nim-lang.org drops connections and serves 503s often enough to fail
-      # real runs — one observed window outlasted curl's five retries AND a
-      # spaced second attempt. Cache the installed toolchain: on a hit the
-      # host is never contacted at all; the download (with its one retry
-      # below) only runs when this key has never been populated.
-      - name: Cache Nim toolchain
-        id: cache_nim_toolchain
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.choosenim
-            ~/.nimble/bin
-          key: ${{ runner.os }}-nim-toolchain-2.2.4
-
-      - uses: jiro4989/setup-nim-action@v1
-        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true'
-        id: setup_nim
-        continue-on-error: true
-        with:
-          nim-version: 2.2.4
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Retry Nim setup once
-        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true' && steps.setup_nim.outcome == 'failure'
-        uses: jiro4989/setup-nim-action@v1
-        with:
-          nim-version: 2.2.4
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Add cached Nim to PATH
-        if: steps.cache_nim_toolchain.outputs.cache-hit == 'true'
-        run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
-
-      - name: Cache nimble packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.nimble/pkgs2
-          key: ${{ runner.os }}-nimble-${{ hashFiles('frameos/nimble.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-nimble-
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache QuickJS
         uses: actions/cache@v4
@@ -375,21 +322,42 @@ jobs:
           path: frameos/quickjs
           key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
 
-      - name: FrameOS nim build
+      # No `nimble build` here: e2e/Makefile builds its own binary from a copy
+      # of frameos/ with this shard's scenes compiled in, and that build is
+      # the one it runs. The one that used to be here was a minute of compile
+      # nobody ran.
+      - name: FrameOS nim setup
         run: |
           cd frameos
           nimble install -d
           nimble setup
           FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
-          nimble build
+
+      # The binary's nimcache, kept like the Nim test shards' (one archive per
+      # shard, frameos/tools/ci_nimcache.sh) outside e2e/tmp, which the
+      # Makefile deletes before it copies the tree in.
+      - name: Restore the renderer's nimcache
+        env:
+          FRAMEOS_NIMCACHE_ROOT: /mnt/cache/nimcache/e2e-renderer-archives
+          FRAMEOS_NIMCACHE_DIR: ${{ github.workspace }}/.tmp/e2e-nimcache
+        run: bash frameos/tools/ci_nimcache.sh restore ${{ matrix.shard }}
 
       - name: Visual regression tests
+        env:
+          E2E_NIMCACHE: ${{ github.workspace }}/.tmp/e2e-nimcache
         run: |
           cd e2e
           source ../backend/.venv/bin/activate
           FRAMEOS_E2E_SHARD=${{ matrix.shard }} FRAMEOS_E2E_SHARDS=2 make
           git status --short snapshots
           git diff --name-only -- snapshots
+
+      - name: Save the renderer's nimcache
+        if: ${{ !cancelled() && github.event_name == 'push' }}
+        env:
+          FRAMEOS_NIMCACHE_ROOT: /mnt/cache/nimcache/e2e-renderer-archives
+          FRAMEOS_NIMCACHE_DIR: ${{ github.workspace }}/.tmp/e2e-nimcache
+        run: bash frameos/tools/ci_nimcache.sh save ${{ matrix.shard }}
 
       - name: Collect visual snapshot changes
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
@@ -481,6 +449,8 @@ jobs:
 
   frontend-visual-regression:
     name: Frontend E2E + Visual Regression Tests (${{ matrix.shard }}/4)
+    needs: changes
+    if: needs.changes.outputs.frontend_e2e == 'true'
     # Chromium screenshots depend on the fonts and libraries of the machine
     # that rendered them, which used to pin this job to GitHub's ubuntu-latest
     # image. The official Playwright container (tag = the @playwright/test
@@ -488,18 +458,24 @@ jobs:
     # wherever it runs, so the job can move to the self-hosted pool. Browsers
     # ship in the image, hence no `playwright install` step.
     # Pull requests from forks run on GitHub-hosted runners: the self-hosted
-    # VMs share one /mnt/cache (read-only there apart from the Nim shards'
-    # nimcache; tools/gha-runners/README.md), and code nobody has reviewed
+    # VMs share one /mnt/cache (read-only there apart from the nimcache and
+    # ccache archives; tools/gha-runners/README.md), and code nobody has reviewed
     # should not seed it. Same-repo PRs and main keep the pool.
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-4' }}
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-16' }}
+    # The image is pulled into the runner VM image ahead of time
+    # (tools/gha-runners/bin/gha-image-warm.sh reads this line), so starting
+    # it is seconds, not the minute a 2 GB pull took.
     container:
       image: mcr.microsoft.com/playwright:v1.60.0-noble
     permissions:
       contents: read
-    # Four shards, not eight, for the reason given on the Nim job: container
-    # pull, apt, pip, pnpm and three frontend builds were 270 s of a 400 s
-    # shard, the tests 125 s. The count also lives in the two --shard
-    # arguments, the artifact names and e2e/README.md.
+    # Four shards of four workers, each worker against a backend of its own
+    # (e2e/frontend-visual/tests/backends.ts): with one worker a shard's 70
+    # tests ran one after another for 5 minutes. The shard count also lives
+    # in the two --shard arguments, the artifact names and e2e/README.md.
+    env:
+      FRONTEND_VISUAL_WORKERS: '4'
+      FRONTEND_VISUAL_BACKENDS: '4'
     strategy:
       fail-fast: false
       matrix:
@@ -516,11 +492,6 @@ jobs:
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
 
       # Steps run as root inside the container: no sudo. git is for the
       # snapshot diff steps below; checkout itself falls back to the REST API
@@ -539,37 +510,22 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           redis-server --daemonize yes
 
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+      - name: Set up the backend's Python
+        uses: ./.github/actions/setup-backend-python
 
-      - name: Install python dependencies
-        run: |
-          cd backend
-          python -m pip install --upgrade uv
-          uv venv
-          uv pip install --require-hashes -r requirements.txt
-
-      - uses: pnpm/action-setup@v4
-        with:
-          run_install: false
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-          cache-dependency-path: pnpm-lock.yaml
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # The bundle the backend serves: the generated app modules, then esbuild.
+      # Not `run build`, whose JSON schema regeneration and `tsc` the
+      # typescript job runs; tsc alone was half a minute of every shard.
       - name: Build frontend
-        run: pnpm --dir frontend run build
+        run: |
+          pnpm --dir frontend run build:repo-apps
+          pnpm --dir frontend run build:esbuild
 
       - name: Build on-frame admin frontend
         # frame-admin.spec.ts serves this bundle through route interception;
@@ -587,8 +543,6 @@ jobs:
         env:
           DEBUG: '1'
           SECRET_KEY: frontend-visual-ci-secret
-          DATABASE_URL: sqlite:///${{ github.workspace }}/.tmp/frontend-visual.db
-          REDIS_URL: redis://localhost:6379/15
         run: |
           source backend/.venv/bin/activate
           pnpm exec playwright test -c e2e/frontend-visual/playwright.config.ts --shard=${{ matrix.shard }}/4
@@ -599,8 +553,6 @@ jobs:
         env:
           DEBUG: '1'
           SECRET_KEY: frontend-visual-ci-secret
-          DATABASE_URL: sqlite:///${{ github.workspace }}/.tmp/frontend-visual.db
-          REDIS_URL: redis://localhost:6379/15
         run: |
           source backend/.venv/bin/activate
           pnpm exec playwright test -c e2e/frontend-visual/playwright.config.ts --update-snapshots --shard=${{ matrix.shard }}/4
@@ -696,56 +648,30 @@ jobs:
 
   python:
     name: Backend tests
-    runs-on: ubuntu-latest
+    # The suite runs under pytest-xdist, one worker per core, each with its
+    # own sqlite file and Redis database (backend/app/conftest.py): 16 cores
+    # take it from five and a half minutes in one process to under one.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-16' }}
     steps:
+      - name: Use HTTP/1.1 toward github.com
+        run: git config --global http.https://github.com/.version HTTP/1.1
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      # nim-lang.org drops connections and serves 503s often enough to fail
-      # real runs — one observed window outlasted curl's five retries AND a
-      # spaced second attempt. Cache the installed toolchain: on a hit the
-      # host is never contacted at all; the download (with its one retry
-      # below) only runs when this key has never been populated.
-      - name: Cache Nim toolchain
-        id: cache_nim_toolchain
-        uses: actions/cache@v4
+      - name: Set up Nim
+        uses: ./.github/actions/setup-nim
         with:
-          path: |
-            ~/.choosenim
-            ~/.nimble/bin
-          key: ${{ runner.os }}-nim-toolchain-2.2.4
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: jiro4989/setup-nim-action@v1
-        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true'
-        id: setup_nim
-        continue-on-error: true
-        with:
-          nim-version: 2.2.4
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Retry Nim setup once
-        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true' && steps.setup_nim.outcome == 'failure'
-        uses: jiro4989/setup-nim-action@v1
-        with:
-          nim-version: 2.2.4
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Add cached Nim to PATH
-        if: steps.cache_nim_toolchain.outputs.cache-hit == 'true'
-        run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
-
-      - name: Install redis
-        run: sudo apt-get -y update && sudo apt-get install -y redis-server
+      # One database per xdist worker on one server: 64 of them, not
+      # Redis's default 16. From the image (pre-pulled on the pool), not apt.
+      - name: Start redis
+        run: docker run -d --name redis -p 6379:6379 redis:7-alpine redis-server --databases 64 --save '' --appendonly no
 
       # The editor's JavaScript validation (tools/js_check.nim, built by the
       # backend on first use) links the bundled QuickJS, so the prebuilt
@@ -761,20 +687,8 @@ jobs:
           cd frameos
           nimble build_quickjs --silent
 
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install python dependencies
-        run: |
-          cd backend
-          python -m pip install --upgrade uv
-          uv venv
-          uv pip install --require-hashes -r requirements.txt
+      - name: Set up the backend's Python
+        uses: ./.github/actions/setup-backend-python
 
       # The suite builds its tables from the models; this runs the alembic
       # chain end to end against a throwaway database.
@@ -798,7 +712,7 @@ jobs:
           mkdir -p ../frontend/dist/assets
           mkdir -p ../frontend/dist/img
           mkdir -p ../frontend/dist/static
-          TEST=1 pytest
+          TEST=1 pytest -n auto
 
   backend-lint:
     name: Backend lint and types
@@ -807,28 +721,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
       # The full requirement set, not just ruff+mypy: mypy's verdicts depend
       # on which third-party packages it can see, and backend/mypy-baseline.txt
       # was recorded against all of them.
-      - name: Install python dependencies
-        run: |
-          cd backend
-          python -m pip install --upgrade uv
-          uv venv
-          uv pip install --require-hashes -r requirements.txt
+      - name: Set up the backend's Python
+        uses: ./.github/actions/setup-backend-python
 
       # backend/ruff.toml is the rule set; every violation fails.
       - name: Ruff
@@ -900,15 +797,125 @@ jobs:
       - name: Run setup script container tests
         run: python3 -m unittest scripts.tests.test_frameos_setup -v
 
+  # The deploy E2E tests, in two jobs that run side by side: the SSH deploy
+  # (three deploys of a frame into a disposable SSH container, each compiling
+  # FrameOS its own way) and the rest (the runtime's render log and a real
+  # Buildroot SD image, which need a native build of this commit). One job
+  # ran all of it in a row and was the run's long pole.
+  # Pull requests from forks run on GitHub-hosted runners: the self-hosted
+  # VMs share one /mnt/cache (read-only there apart from the Nim shards'
+  # nimcache; tools/gha-runners/README.md), and code nobody has reviewed
+  # should not seed it. Same-repo PRs and main keep the pool.
   deploy-e2e:
     name: Deploy E2E SSH
-    # Self-hosted 8-core slot: docker + SSH loopback deploy, no rendering.
-    # The redis service container runs via the VM's own docker daemon.
-    # Pull requests from forks run on GitHub-hosted runners: the self-hosted
-    # VMs share one /mnt/cache (read-only there apart from the Nim shards'
-    # nimcache; tools/gha-runners/README.md), and code nobody has reviewed
-    # should not seed it. Same-repo PRs and main keep the pool.
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-8' }}
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-16' }}
+    steps:
+      # Anonymous git over HTTP/2 is throttled by GitHub from the runner
+      # pool's address (the git-upload-pack POST answers 401 while the
+      # advertisement is fine): nimble's fetch-by-commit died on it across a
+      # whole push. HTTP/1.1 from the same host succeeds every time.
+      - name: Use HTTP/1.1 toward github.com
+        run: git config --global http.https://github.com/.version HTTP/1.1
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up the backend's Python
+        uses: ./.github/actions/setup-backend-python
+
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Set up Nim
+        uses: ./.github/actions/setup-nim
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache QuickJS
+        uses: actions/cache@v4
+        with:
+          path: frameos/quickjs
+          key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
+
+      - name: Verify Docker
+        run: docker version
+
+      # The SSH deploy compiles inside its own containers; it needs the
+      # checkout's assets, QuickJS and app loaders, not a build of its own.
+      - name: Prepare FrameOS build inputs
+        run: |
+          cd frameos
+          nimble install -d
+          nimble assets
+          nimble build_quickjs --silent
+          nimble setup
+          FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
+
+      # The test builds a Debian image with a toolchain in it (~54 s). Its tag
+      # is a hash of the build context, so an image by that name can only have
+      # come from exactly these files: the test finds it in the daemon and
+      # skips the build, and an edit to the context changes the tag so both
+      # this and the test rebuild. The pool's VM image carries main's (built by
+      # gha-image-warm.sh), so there the cache below is only read when this
+      # branch changed the context.
+      #
+      # The whole image is cached as one tarball rather than as buildx layers.
+      # With a layer cache every run still paid buildx's export-then-import
+      # round trip into the daemon (~68 s for a 175 MB image, more than the
+      # build it was saving); `docker load` of a cached tar is ~10 s.
+      - name: Compute SSH target image tag
+        id: ssh_target_tag
+        run: |
+          tag="$(python3 backend/app/tasks/tests/deploy_ssh_target/context_tag.py)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if docker image inspect "$tag" > /dev/null 2>&1; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cache SSH target image
+        id: cache_ssh_target
+        if: steps.ssh_target_tag.outputs.present != 'true'
+        uses: actions/cache@v4
+        with:
+          path: .tmp/ssh-target-image.tar
+          key: ${{ runner.os }}-ssh-target-image-${{ steps.ssh_target_tag.outputs.tag }}
+
+      - name: Load cached SSH target image
+        if: steps.ssh_target_tag.outputs.present != 'true' && steps.cache_ssh_target.outputs.cache-hit == 'true'
+        run: docker load -i .tmp/ssh-target-image.tar
+
+      - name: Build SSH target image
+        if: steps.ssh_target_tag.outputs.present != 'true' && steps.cache_ssh_target.outputs.cache-hit != 'true'
+        run: |
+          TAG="${{ steps.ssh_target_tag.outputs.tag }}"
+          echo "SSH target image: $TAG"
+          docker build -t "$TAG" backend/app/tasks/tests/deploy_ssh_target
+          mkdir -p .tmp
+          docker save -o .tmp/ssh-target-image.tar "$TAG"
+
+      - name: Verify SSH target image is present under the tag the test computes
+        run: |
+          TAG="${{ steps.ssh_target_tag.outputs.tag }}"
+          docker image inspect "$TAG" > /dev/null
+          echo "SSH target image present: $TAG"
+
+      - name: Run SSH deploy E2E test
+        run: |
+          cd backend
+          source .venv/bin/activate
+          mkdir -p ../frontend/dist/assets
+          mkdir -p ../frontend/dist/img
+          mkdir -p ../frontend/dist/static
+          TEST=1 FRAMEOS_E2E_DEPLOY=1 pytest app/tasks/tests/test_real_ssh_deploy_e2e.py -q -s
+
+  runtime-e2e:
+    name: Runtime + Buildroot E2E
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-16' }}
     # Redis for the runtime E2E test. A service container comes up during job
     # setup instead of costing an `apt-get update && apt-get install` step
     # (~30 s) inside it; the tests reach it through REDIS_URL, and the runtime
@@ -933,95 +940,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Set up the backend's Python
+        uses: ./.github/actions/setup-backend-python
+
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Set up Nim
+        uses: ./.github/actions/setup-nim
         with:
-          # The daemon's own buildkit. The default docker-container driver
-          # boots a separate buildkit container, and on the ephemeral epyc
-          # VMs that container sometimes never exposes its socket ("dial
-          # unix /run/buildkit/buildkitd.sock: no such file" — main was red
-          # on 2026-09-08 and 2026-09-09 for exactly this). This job builds
-          # one single-platform test image and needs none of that.
-          driver: docker
-      - uses: docker/setup-qemu-action@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      - uses: pnpm/action-setup@v4
-        with:
-          run_install: false
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-          cache-dependency-path: pnpm-lock.yaml
-
-      # nim-lang.org drops connections and serves 503s often enough to fail
-      # real runs — one observed window outlasted curl's five retries AND a
-      # spaced second attempt. Cache the installed toolchain: on a hit the
-      # host is never contacted at all; the download (with its one retry
-      # below) only runs when this key has never been populated.
-      - name: Cache Nim toolchain
-        id: cache_nim_toolchain
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.choosenim
-            ~/.nimble/bin
-          key: ${{ runner.os }}-nim-toolchain-2.2.4
-
-      - uses: jiro4989/setup-nim-action@v1
-        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true'
-        id: setup_nim
-        continue-on-error: true
-        with:
-          nim-version: 2.2.4
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Retry Nim setup once
-        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true' && steps.setup_nim.outcome == 'failure'
-        uses: jiro4989/setup-nim-action@v1
-        with:
-          nim-version: 2.2.4
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Add cached Nim to PATH
-        if: steps.cache_nim_toolchain.outputs.cache-hit == 'true'
-        run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
-
-      - name: Verify Docker
-        run: docker version
-
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install python dependencies
-        run: |
-          cd backend
-          python -m pip install --upgrade uv
-          uv venv
-          uv pip install --require-hashes -r requirements.txt
-
-      # The other two Nim jobs cache these; this one did not, so every run
-      # re-cloned ~15 nimble dependencies and rebuilt QuickJS from scratch —
-      # about 100 s of the step below, on a job that is the slowest in the
-      # workflow. Same keys as the jobs above so all three share the entries.
-      - name: Cache nimble packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.nimble/pkgs2
-          key: ${{ runner.os }}-nimble-${{ hashFiles('frameos/nimble.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-nimble-
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache QuickJS
         uses: actions/cache@v4
@@ -1029,7 +957,12 @@ jobs:
           path: frameos/quickjs
           key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
 
-      - name: Prepare FrameOS build inputs
+      - uses: docker/setup-qemu-action@v3
+
+      - name: Verify Docker
+        run: docker version
+
+      - name: Build FrameOS
         run: |
           cd frameos
           nimble install -d
@@ -1039,59 +972,13 @@ jobs:
           FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
           nimble build
 
-      # The test builds a Debian image with a toolchain in it (~54 s). Its tag
-      # is a hash of the build context, so an image by that name can only have
-      # come from exactly these files: the test finds it in the daemon and
-      # skips the build, and an edit to the context changes the tag so both
-      # this and the test rebuild.
-      #
-      # The whole image is cached as one tarball rather than as buildx layers.
-      # With a layer cache every run still paid buildx's export-then-import
-      # round trip into the daemon (~68 s for a 175 MB image, more than the
-      # build it was saving); `docker load` of a cached tar is ~10 s.
-      - name: Compute SSH target image tag
-        id: ssh_target_tag
-        run: echo "tag=$(python3 backend/app/tasks/tests/deploy_ssh_target/context_tag.py)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache SSH target image
-        id: cache_ssh_target
-        uses: actions/cache@v4
-        with:
-          path: .tmp/ssh-target-image.tar
-          key: ${{ runner.os }}-ssh-target-image-${{ steps.ssh_target_tag.outputs.tag }}
-
-      - name: Load cached SSH target image
-        if: steps.cache_ssh_target.outputs.cache-hit == 'true'
-        run: docker load -i .tmp/ssh-target-image.tar
-
-      - name: Build SSH target image
-        if: steps.cache_ssh_target.outputs.cache-hit != 'true'
-        run: |
-          TAG="${{ steps.ssh_target_tag.outputs.tag }}"
-          echo "SSH target image: $TAG"
-          docker build -t "$TAG" backend/app/tasks/tests/deploy_ssh_target
-          mkdir -p .tmp
-          docker save -o .tmp/ssh-target-image.tar "$TAG"
-
-      - name: Verify SSH target image is present under the tag the test computes
-        run: |
-          TAG="${{ steps.ssh_target_tag.outputs.tag }}"
-          docker image inspect "$TAG" > /dev/null
-          echo "SSH target image present: $TAG"
-
-      - name: Run SSH deploy E2E test
+      - name: Run runtime render log E2E test
         run: |
           cd backend
           source .venv/bin/activate
           mkdir -p ../frontend/dist/assets
           mkdir -p ../frontend/dist/img
           mkdir -p ../frontend/dist/static
-          TEST=1 FRAMEOS_E2E_DEPLOY=1 pytest app/tasks/tests/test_real_ssh_deploy_e2e.py -q -s
-
-      - name: Run runtime render log E2E test
-        run: |
-          cd backend
-          source .venv/bin/activate
           TEST=1 FRAMEOS_E2E_RUNTIME=1 FRAMEOS_RUNTIME_BIN="${{ github.workspace }}/frameos/build/frameos" pytest app/tasks/tests/test_real_frameos_runtime_e2e.py -q -s
 
       - name: Cache Buildroot E2E inputs
@@ -1128,16 +1015,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-        with:
-          run_install: false
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-          cache-dependency-path: pnpm-lock.yaml
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
 
       # builtinApps.ts embeds each app's app_loader.nim, and those are
       # generated and gitignored — without this step a clean checkout has none

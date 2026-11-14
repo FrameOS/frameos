@@ -1,5 +1,5 @@
 [Unit]
-Description=Rebuild the GitHub Actions runner VM image when actions/runner moved on
+Description=Rebuild the GitHub Actions runner VM image (runner release, main's dependencies)
 After=incusd.service network-online.target
 Requires=incusd.service
 Wants=network-online.target
@@ -7,5 +7,5 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/srv/gha-runners/bin/gha-image-refresh.sh
-# A build plus smoke test is ten minutes; anything past an hour is stuck.
-TimeoutStartSec=1h
+# A warm build plus smoke test is about half an hour; past 90 minutes it is stuck.
+TimeoutStartSec=90min

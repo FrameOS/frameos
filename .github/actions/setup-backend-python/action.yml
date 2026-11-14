@@ -1,0 +1,41 @@
+name: Set up the backend's Python
+description: >-
+  Python 3.12 and backend/.venv with backend/requirements.txt installed by uv
+  (hash-checked). On the self-hosted pool Python and uv's wheel cache come
+  with the VM image (tools/gha-runners/bin/gha-image-warm.sh); elsewhere pip's
+  cache comes from the GitHub cache as before.
+runs:
+  using: composite
+  steps:
+    - name: Look for the warm toolchain
+      id: warm
+      shell: bash
+      run: |
+        if [ -d "${RUNNER_TOOL_CACHE:-/nonexistent}/frameos-ci/uv-cache" ]; then
+          echo "warm=true" >> "$GITHUB_OUTPUT"
+          echo "UV_CACHE_DIR=$RUNNER_TOOL_CACHE/frameos-ci/uv-cache" >> "$GITHUB_ENV"
+        else
+          echo "warm=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+
+    - name: Cache pip packages
+      if: steps.warm.outputs.warm != 'true'
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install python dependencies
+      shell: bash
+      run: |
+        cd backend
+        python -m pip install -q --upgrade uv
+        uv venv
+        uv pip install --require-hashes -r requirements.txt

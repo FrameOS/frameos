@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './fixtures'
 import { attachFrontendErrorCollector, settleForScreenshot } from './visual-helpers'
 import {
   bundleAvailable,

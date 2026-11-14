@@ -39,8 +39,40 @@ jobs:
     name: iOS app
     runs-on: macos-15
     timeout-minutes: 40
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
+
+      # The simulator build and the UI tests are seven of the job's nine
+      # minutes on GitHub's three-core macOS VM, and they test the app: a pull
+      # request that changes only a corpus, a contract or the ported SPA logic
+      # (the other paths above) is what FrameOSKit's tests replay, and the
+      # Swift tables generated from a contract are under ios/ themselves.
+      # Pushes, and pull requests that touch ios/ or this file, run it all.
+      - name: Does the app itself change
+        id: app
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files?per_page=100" \
+              --jq '.[] | [.filename, (.previous_filename // empty)] | .[]')"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if grep -qE '^(ios/|\.github/workflows/ios\.yml$)' <<<"$files"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing under ios/ changes: FrameOSKit's tests only."
+          fi
 
       - name: Xcode
         run: |
@@ -54,6 +86,7 @@ jobs:
         run: swift test --package-path ios/FrameOSKit
 
       - name: Install XcodeGen
+        if: steps.app.outputs.changed == 'true'
         run: brew install xcodegen
 
       # The one build: the app and its UI tests for the simulator they run on
@@ -61,6 +94,7 @@ jobs:
       # here was a second compile of the same app, which the test run could
       # not reuse. A compile error fails this step, not the next.
       - name: Build the app and its UI tests for the simulator
+        if: steps.app.outputs.changed == 'true'
         run: ios/bin/ui-test --build-only
 
       # The UI tests (ios/FrameOSUITests) on a simulator: the app starts (no
@@ -73,11 +107,12 @@ jobs:
       # on this three-core VM is minutes of CPU, and overlapping it slowed the
       # steps beside it by more than it saved (swift test 25 s -> 418 s).
       - name: UI tests on a simulator
+        if: steps.app.outputs.changed == 'true'
         timeout-minutes: 20
         run: ios/bin/ui-test --without-building
 
       - name: Upload the screenshots
-        if: always()
+        if: always() && steps.app.outputs.changed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ios-ui-test-screenshots

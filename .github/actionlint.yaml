@@ -7,5 +7,6 @@
 self-hosted-runner:
   labels:
     - epyc-32
+    - epyc-16
     - epyc-8
     - epyc-4

@@ -1,4 +1,4 @@
-import { expect, Page, Route, test } from '@playwright/test'
+import { expect, Page, Route, test } from './fixtures'
 import { backendDeployPlan, cleanupE2EInstallFrames, currentProjectApiPath, login } from './visual-helpers'
 
 interface CreatedFrame {

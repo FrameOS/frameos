@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures'
 import { attachFrontendErrorCollector, login, prepareStablePage, settleForScreenshot } from './visual-helpers'
 import { visualCases, visualThemes, visualViewports } from './visual-cases'
 

@@ -1,11 +1,11 @@
 [Unit]
-Description=Weekly check that the runner VM image is current
+Description=Nightly rebuild of the runner VM image
 
 [Timer]
-# Sunday night UTC, when the pool is idle; a release that forces an update
-# gives a month's notice, so weekly is plenty. Persistent catches up a run
-# the host slept through.
-OnCalendar=Sun *-*-* 03:00:00 UTC
+# Every night, when the pool is idle: the image carries main's dependencies
+# (gha-image-warm.sh), so a day-old image is a day of main that every job
+# fetches on top. Persistent catches up a run the host slept through.
+OnCalendar=*-*-* 03:00:00 UTC
 RandomizedDelaySec=30min
 Persistent=true
 

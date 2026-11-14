@@ -25,19 +25,59 @@ permissions:
   contents: read
 
 jobs:
-  docker_image:
-    name: Build Docker Image
-    if: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
+  # Which of the jobs below this pull request needs (.github/ci/changed_areas.py:
+  # the rules, and why each is safe). Pushes run everything.
+  changes:
+    name: What changed
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
+    outputs:
+      docker: ${{ steps.areas.outputs.docker }}
+      esp32: ${{ steps.areas.outputs.esp32 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/ci
+      - name: Classify the changed files
+        id: areas
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: python3 .github/ci/changed_areas.py
+
+  docker_image:
+    name: Build Docker Image
+    needs: changes
+    if: ${{ (github.event_name != 'pull_request' || github.base_ref == 'main') && needs.changes.outputs.docker == 'true' }}
+    # A 16-core slot of the self-hosted pool (tools/gha-runners/README.md);
+    # pull requests from forks stay on GitHub-hosted runners.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-16' }}
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      # Reads the layer cache the release writes for this image
+      # (docker-publish-multi.yml, runtime-amd64): the toolchains, emsdk and
+      # the dependency installs come from it, and only the stages after this
+      # commit's sources are built. Read-only on the package on every event;
+      # a login that gets nothing (a fork) is a cold build, not a failure.
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        continue-on-error: true
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build Docker image
         run: |
-          docker build --target runtime -t frameos .
+          docker build --target runtime -t frameos \
+            --cache-from type=registry,ref=ghcr.io/frameos/frameos-build-cache:runtime-amd64 .
 
       - name: Run Docker container
         run: |
@@ -120,240 +160,318 @@ jobs:
           cache-to: type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci,mode=max
 
   esp32_firmware_image:
-    name: Build and boot ESP32 firmware image
-    runs-on: ubuntu-latest
+    name: ESP32 firmware (${{ matrix.leg }})
+    needs: changes
+    if: needs.changes.outputs.esp32 == 'true'
+    # A 16-core slot of the self-hosted pool; pull requests from forks stay on
+    # GitHub-hosted runners. Three legs side by side, where one job built the
+    # three images one after another (they share no object file, and a
+    # firmware build is one Nim compile and one IDF build).
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-16' }}
     # Read-only on the package, on every event: this job is reachable from
     # a pull request (see seed_esp32_cache for why that rules out write).
     permissions:
       contents: read
       packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The generic 8 MB image, its size document and the host tests.
+          - leg: esp32-s3
+            platform: esp32-s3
+            build_dir: build-ci
+            qemu: '0'
+            size: esp32-s3
+          # Booted in QEMU.
+          - leg: qemu
+            platform: esp32-s3
+            build_dir: build-ci-qemu
+            qemu: '1'
+            size: ''
+          # The 32MB layout (13.3E6-class boards) — build-validated here
+          # because no release job covers it.
+          - leg: esp32-s3-32mb
+            platform: esp32-s3-32mb
+            build_dir: build-ci-32mb
+            qemu: '0'
+            size: esp32-s3-32mb
     steps:
+      - name: Use HTTP/1.1 toward github.com
+        run: git config --global http.https://github.com/.version HTTP/1.1
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Set up Nim
+        uses: ./.github/actions/setup-nim
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache QuickJS
+        uses: actions/cache@v4
+        with:
+          path: frameos/quickjs
+          key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
+
+      # What the image's app-builder stage did for the firmware, on the runner:
+      # the nimble packages (nimble.paths names them by absolute path, and the
+      # container mounts them at the same one), the compiled assets, QuickJS.
+      - name: Prepare the tree
+        run: |
+          cd frameos
+          nimble install -d
+          nimble setup
+          nimble assets
+          nimble build_quickjs --silent
+
+      # The Dockerfile's esp-idf-toolchain stage, under a tag that hashes its
+      # lines (embedded/esp32/ci_toolchain_image.sh). The pool's VM image
+      # carries main's; otherwise it is built from the esp32-ci registry layer
+      # cache seed_esp32_cache keeps (mode=max, so every stage's layers).
+      - name: Look for the toolchain image
+        id: toolchain
+        run: |
+          tag="$(bash embedded/esp32/ci_toolchain_image.sh)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if docker image inspect "$tag" > /dev/null 2>&1; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "toolchain image $tag is in the runner image"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
 
       # Reads a private package: a same-repo pull request's token can, a
       # fork's read-only token can too once the package is linked to the
       # repository, and a login that gets nothing simply means a cold build.
       - name: Login to GHCR
+        if: steps.toolchain.outputs.present != 'true'
         uses: docker/login-action@v3
+        continue-on-error: true
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The esp32-ci target (ESP-IDF for both chips, QEMU, Nim, the nimble
-      # packages, emsdk, the pnpm store) comes out of the registry layer
-      # cache seed_esp32_cache keeps on GHCR; the release's three esp32-ci
-      # builds read the same tag. The per-commit tail (the source COPYs and
-      # the steps after them) is built here and stored nowhere. A missing or
-      # unreadable cache tag is a warning and a cold build, not a failure.
-      # load: true puts the image into the local Docker daemon for the
-      # `docker run` below.
-      - name: Build ESP32 CI Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: esp32-ci
-          tags: frameos-esp32-ci
-          load: true
-          push: false
-          cache-from: type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci
+      - name: Build the toolchain image
+        if: steps.toolchain.outputs.present != 'true'
+        env:
+          TAG: ${{ steps.toolchain.outputs.tag }}
+        run: |
+          docker build --target esp-idf-toolchain -t "$TAG" \
+            --cache-from type=registry,ref=ghcr.io/frameos/frameos-build-cache:esp32-ci .
 
-      # The step below builds the firmware three times (8 MB, QEMU, 32 MB).
-      # They share a nimcache but not a single object file, and ESP-IDF ships
-      # ccache support that was simply never switched on — so every run
-      # recompiled all of ESP-IDF three times over. The cache is keyed loosely
-      # and restored from any previous run: a stale entry only costs misses,
-      # never correctness, since ccache hashes the compiler, flags and source.
-      - name: Cache ESP-IDF ccache
-        uses: actions/cache@v4
-        with:
-          path: .ccache
-          key: ${{ runner.os }}-esp32-ccache-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-esp32-ccache-
+      # ESP-IDF's ccache, one archive per leg in the pool's shared cache
+      # (frameos/tools/ci_nimcache.sh, which keeps any directory as one
+      # archive). A stale entry only costs misses: ccache hashes the compiler,
+      # flags and source. Written by pushes to main only, like the nimcache.
+      - name: Restore ccache
+        env:
+          FRAMEOS_NIMCACHE_ROOT: /mnt/cache/ccache/esp32
+          FRAMEOS_NIMCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: bash frameos/tools/ci_nimcache.sh restore ${{ matrix.leg }}
 
-      - name: Build and boot ESP32 firmware image
-        timeout-minutes: 60
+      # The checkout, the nimble packages and Nim are mounted at the paths the
+      # runner has them at, so nimble.paths and the toolchain resolve in the
+      # container as they do outside it.
+      - name: Build the firmware
+        timeout-minutes: 30
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          BUILD_DIR: ${{ matrix.build_dir }}
+          QEMU: ${{ matrix.qemu }}
+          SIZE: ${{ matrix.size }}
+          TAG: ${{ steps.toolchain.outputs.tag }}
         run: |
           mkdir -p "$GITHUB_WORKSPACE/.ccache" "$GITHUB_WORKSPACE/.firmware-size"
-          # The esp32-ci image does not carry versions.json (only the
-          # app-builder stage copies it), so the firmware version has to come
-          # from the runner's checkout. ci_build_image.sh refuses to build
-          # without one — a firmware that misreports its version re-flashes
-          # itself on every OTA check (see the guard's comment).
+          # The firmware version comes from the checkout. ci_build_image.sh
+          # refuses to build without one — a firmware that misreports its
+          # version re-flashes itself on every OTA check (see the guard).
           FRAMEOS_VERSION="$(python3 -c 'import json; print(json.load(open("versions.json"))["frameos"].split("+")[0])')"
+          # The real toolchain, not ~/.nimble/bin: on a GitHub-hosted runner
+          # those are choosenim shims that look for ~/.choosenim under the
+          # container's HOME.
+          nim_bin="$HOME/.choosenim/toolchains/nim-2.2.4/bin"
+          test -x "$nim_bin/nim"
           docker run --rm \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            -v "$HOME/.nimble:$HOME/.nimble:ro" -v "$HOME/.choosenim:$HOME/.choosenim:ro" \
+            -e FRAMEOS_NIM_BIN_DIR="$nim_bin" \
             -e FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 \
             -e FRAMEOS_VERSION="$FRAMEOS_VERSION" \
+            -e FRAMEOS_ESP32_PLATFORM="$PLATFORM" \
+            -e FRAMEOS_ESP32_BUILD_DIR="$BUILD_DIR" \
+            -e FRAMEOS_ESP32_QEMU="$QEMU" \
             -e IDF_CCACHE_ENABLE=1 \
-            -e CCACHE_DIR=/ccache \
+            -e CCACHE_DIR="$GITHUB_WORKSPACE/.ccache" \
             -e CCACHE_MAXSIZE=2G \
-            -v "$GITHUB_WORKSPACE/.ccache:/ccache" \
-            -v "$GITHUB_WORKSPACE/.firmware-size:/firmware-size" \
-            -v "$GITHUB_WORKSPACE/docs/cloud-frames-fixtures.json:/fixtures/cloud-frames-fixtures.json:ro" \
-            frameos-esp32-ci \
-            bash -lc '
-              set -euo pipefail
-              bash embedded/esp32/ci_build_image.sh
-              FRAMEOS_ESP32_QEMU=1 FRAMEOS_ESP32_BUILD_DIR=build-ci-qemu \
-                bash embedded/esp32/ci_build_image.sh
-              # The 32MB layout (13.3E6-class boards) — build-validated here
-              # because no release job covers it. Same S3 nimcache, so the
-              # incremental cost is one IDF configure+link.
-              FRAMEOS_ESP32_PLATFORM=esp32-s3-32mb FRAMEOS_ESP32_BUILD_DIR=build-ci-32mb \
-                bash embedded/esp32/ci_build_image.sh
-              cp embedded/esp32/build-ci/firmware-size.json /firmware-size/esp32-s3.json || true
-              cp embedded/esp32/build-ci-32mb/firmware-size.json /firmware-size/esp32-s3-32mb.json || true
-              # The cloud verb contract, as the firmware walks it, against the
-              # conformance corpus the Linux runtime and the cloud also run
-              # (docs/cloud-frames-fixtures.json, mounted: the image carries
-              # no docs/). Host-built: pure cJSON, no IDF.
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                -I"$IDF_PATH/components/json/cJSON" "$IDF_PATH/components/json/cJSON/cJSON.c" \
-                embedded/esp32/main/fos_cloud_contract.c embedded/esp32/main/tests/test_fos_cloud_contract.c \
-                -lm -o /tmp/test_fos_cloud_contract
-              /tmp/test_fos_cloud_contract /fixtures/cloud-frames-fixtures.json
-              # Which keys the event map of a frame makes voice keys
-              # (docs/voice-chat.md): pure cJSON as well. No apostrophes in
-              # here: this whole script is one single-quoted bash -lc string.
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                -I"$IDF_PATH/components/json/cJSON" "$IDF_PATH/components/json/cJSON/cJSON.c" \
-                embedded/esp32/main/fos_voice_binding.c embedded/esp32/main/tests/test_fos_voice_binding.c \
-                -lm -o /tmp/test_fos_voice_binding
-              /tmp/test_fos_voice_binding
-              # The per-scene store on the state partition: pure C and cJSON.
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                -I"$IDF_PATH/components/json/cJSON" "$IDF_PATH/components/json/cJSON/cJSON.c" \
-                embedded/esp32/main/fos_json_guard.c embedded/esp32/main/fos_scene_store.c \
-                embedded/esp32/main/tests/test_fos_scene_store.c \
-                -lm -o /tmp/test_fos_scene_store
-              /tmp/test_fos_scene_store
-              # The SPIFFS garbage collection order and the scene store split,
-              # replayed on the SPIFFS that ESP-IDF ships (fos_spiffs_gc.c, a
-              # 20-scene set pushed over itself on a 1 MB /state). The backend
-              # pytest runner skips it where no IDF checkout is around.
-              mkdir -p /tmp/spiffs_obj
-              for f in spiffs_cache spiffs_check spiffs_gc spiffs_hydrogen spiffs_nucleus; do \
-                cc -std=c11 -O2 -w -Iembedded/esp32/main -Iembedded/esp32/main/tests/spiffs_shim \
-                  -I"$IDF_PATH/components/spiffs/include" -I"$IDF_PATH/components/spiffs/spiffs/src" \
-                  -c "$IDF_PATH/components/spiffs/spiffs/src/$f.c" -o /tmp/spiffs_obj/$f.o || exit 1; done
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main -Iembedded/esp32/main/tests/spiffs_shim \
-                -I"$IDF_PATH/components/spiffs/include" -I"$IDF_PATH/components/spiffs/spiffs/src" \
-                -D__real_SPIFFS_gc=SPIFFS_gc \
-                embedded/esp32/main/fos_spiffs_gc.c embedded/esp32/main/fos_spiffs_footprint.c \
-                embedded/esp32/main/tests/test_fos_spiffs_gc.c /tmp/spiffs_obj/*.o \
-                -o /tmp/test_fos_spiffs_gc
-              /tmp/test_fos_spiffs_gc
-              # The JSON depth pre-scan that guards the 8-10 KB parser tasks.
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/fos_json_guard.c embedded/esp32/main/tests/test_fos_json_guard.c \
-                -o /tmp/test_fos_json_guard
-              /tmp/test_fos_json_guard
-              # sscanf without the floating-point scanf: the cJSON "%lg"
-              # read-back goes to strtod (fos_sscanf.c, the --wrap=sscanf).
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/fos_sscanf.c embedded/esp32/main/tests/test_fos_sscanf.c \
-                -o /tmp/test_fos_sscanf
-              /tmp/test_fos_sscanf
-              # Upload bounds + usb_api payload timeout math (fos_upload_limits.h).
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/tests/test_fos_upload_limits.c \
-                -o /tmp/test_fos_upload_limits
-              /tmp/test_fos_upload_limits
-              # The IDF-free security boundaries, each a plain-C module so it
-              # can be argued about on a laptop (main/tests/*.c carry the same
-              # command lines): the assets-path rule behind every asset verb,
-              # the provider URL / transport / origin rules, the minisign
-              # parser that gates OTA, the setting parsers, and the schedule
-              # catch-up window.
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/fos_assets_path.c embedded/esp32/main/tests/test_fos_assets_path.c \
-                -o /tmp/test_fos_assets_path
-              /tmp/test_fos_assets_path
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/fos_url_guard.c embedded/esp32/main/tests/test_fos_url_guard.c \
-                -o /tmp/test_fos_url_guard
-              /tmp/test_fos_url_guard
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                -Iembedded/esp32/components/monocypher \
-                embedded/esp32/main/fos_minisig.c embedded/esp32/main/tests/test_fos_minisig.c \
-                embedded/esp32/components/monocypher/monocypher.c \
-                embedded/esp32/components/monocypher/monocypher-ed25519.c \
-                -o /tmp/test_fos_minisig
-              /tmp/test_fos_minisig
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                -Iembedded/esp32/main/tests/host_shim \
-                embedded/esp32/main/fos_config_parse.c embedded/esp32/main/tests/test_fos_config_parse.c \
-                -o /tmp/test_fos_config_parse
-              /tmp/test_fos_config_parse
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/tests/test_fos_schedule_catchup.c \
-                -o /tmp/test_fos_schedule_catchup
-              /tmp/test_fos_schedule_catchup
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/tests/test_fos_console_line.c \
-                -o /tmp/test_fos_console_line
-              /tmp/test_fos_console_line
-              # The hold of a voice key (docs/voice-chat.md), pure.
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/fos_voice_hold.c embedded/esp32/main/tests/test_fos_voice_hold.c \
-                -o /tmp/test_fos_voice_hold
-              /tmp/test_fos_voice_hold
-              # Animation mode pacing: a scene below a one-second interval on an LCD, pure.
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/fos_animation.c embedded/esp32/main/tests/test_fos_animation.c \
-                -o /tmp/test_fos_animation
-              /tmp/test_fos_animation
-              # Which scene a frame starts on: never a layout, pure.
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/fos_boot_scene.c embedded/esp32/main/tests/test_fos_boot_scene.c \
-                -o /tmp/test_fos_boot_scene
-              /tmp/test_fos_boot_scene
-              # When an e-paper panel takes a partial update, pure.
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/components/frameos_display/include \
-                embedded/esp32/components/frameos_display/fos_partial_refresh.c embedded/esp32/main/tests/test_fos_partial_refresh.c \
-                -o /tmp/test_fos_partial_refresh
-              /tmp/test_fos_partial_refresh
-              # The charger register decode, the RTC conversions, the fuel gauge decode
-              # and the climate sensor decode, pure.
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/fos_charger.c embedded/esp32/main/fos_rtc.c embedded/esp32/main/fos_gauge.c \
-                embedded/esp32/main/fos_climate.c embedded/esp32/main/tests/test_fos_i2c_devices.c \
-                -o /tmp/test_fos_i2c_devices
-              /tmp/test_fos_i2c_devices
-              # The IT8951 panel rows (the reTerminal E1003, the Waveshare 10.3 inch HAT), pure.
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/components/frameos_display/include \
-                embedded/esp32/components/frameos_display/it8951.c embedded/esp32/main/tests/test_fos_it8951.c \
-                -o /tmp/test_fos_it8951
-              /tmp/test_fos_it8951
-              # The touch panel report decode and wire scaling, pure.
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/fos_touch.c embedded/esp32/main/tests/test_fos_touch.c \
-                -o /tmp/test_fos_touch
-              /tmp/test_fos_touch
-              # The render pull of a frame rendered on the server (docs/server-rendering.md), pure.
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/fos_render_pull.c embedded/esp32/main/tests/test_fos_render_pull.c \
-                -o /tmp/test_fos_render_pull
-              /tmp/test_fos_render_pull
-              # What a frame rendered on the server relays to its plane with the pull, pure.
-              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-                embedded/esp32/main/fos_render_relay.c embedded/esp32/main/fos_json_guard.c \
-                embedded/esp32/main/tests/test_fos_render_relay.c \
-                -o /tmp/test_fos_render_relay
-              /tmp/test_fos_render_relay
-              ccache --show-stats || true
-            '
-          # The container writes as root; actions/cache runs as the runner user.
-          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/.ccache" "$GITHUB_WORKSPACE/.firmware-size"
+            "$TAG" \
+            bash -lc 'set -euo pipefail; bash embedded/esp32/ci_build_image.sh; ccache --show-stats || true'
+          if [ -n "$SIZE" ]; then
+            cp "embedded/esp32/$BUILD_DIR/firmware-size.json" ".firmware-size/$SIZE.json"
+          fi
+          # The container writes as root; the steps after it run as the runner.
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE"
+
+      # The IDF-free modules' host tests (embedded/esp32/main/tests), once.
+      - name: Host tests
+        if: matrix.leg == 'esp32-s3'
+        env:
+          TAG: ${{ steps.toolchain.outputs.tag }}
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" "$TAG" bash -s <<'TESTS'
+          set -euo pipefail
+          # The cloud verb contract, as the firmware walks it, against the
+          # conformance corpus the Linux runtime and the cloud also run
+          # (docs/cloud-frames-fixtures.json). Host-built: pure cJSON, no IDF.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            -I"$IDF_PATH/components/json/cJSON" "$IDF_PATH/components/json/cJSON/cJSON.c" \
+            embedded/esp32/main/fos_cloud_contract.c embedded/esp32/main/tests/test_fos_cloud_contract.c \
+            -lm -o /tmp/test_fos_cloud_contract
+          /tmp/test_fos_cloud_contract docs/cloud-frames-fixtures.json
+          # Which keys the event map of a frame makes voice keys
+          # (docs/voice-chat.md): pure cJSON as well.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            -I"$IDF_PATH/components/json/cJSON" "$IDF_PATH/components/json/cJSON/cJSON.c" \
+            embedded/esp32/main/fos_voice_binding.c embedded/esp32/main/tests/test_fos_voice_binding.c \
+            -lm -o /tmp/test_fos_voice_binding
+          /tmp/test_fos_voice_binding
+          # The per-scene store on the state partition: pure C and cJSON.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            -I"$IDF_PATH/components/json/cJSON" "$IDF_PATH/components/json/cJSON/cJSON.c" \
+            embedded/esp32/main/fos_json_guard.c embedded/esp32/main/fos_scene_store.c \
+            embedded/esp32/main/tests/test_fos_scene_store.c \
+            -lm -o /tmp/test_fos_scene_store
+          /tmp/test_fos_scene_store
+          # The SPIFFS garbage collection order and the scene store split,
+          # replayed on the SPIFFS that ESP-IDF ships (fos_spiffs_gc.c, a
+          # 20-scene set pushed over itself on a 1 MB /state). The backend
+          # pytest runner skips it where no IDF checkout is around.
+          mkdir -p /tmp/spiffs_obj
+          for f in spiffs_cache spiffs_check spiffs_gc spiffs_hydrogen spiffs_nucleus; do \
+            cc -std=c11 -O2 -w -Iembedded/esp32/main -Iembedded/esp32/main/tests/spiffs_shim \
+              -I"$IDF_PATH/components/spiffs/include" -I"$IDF_PATH/components/spiffs/spiffs/src" \
+              -c "$IDF_PATH/components/spiffs/spiffs/src/$f.c" -o /tmp/spiffs_obj/$f.o || exit 1; done
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main -Iembedded/esp32/main/tests/spiffs_shim \
+            -I"$IDF_PATH/components/spiffs/include" -I"$IDF_PATH/components/spiffs/spiffs/src" \
+            -D__real_SPIFFS_gc=SPIFFS_gc \
+            embedded/esp32/main/fos_spiffs_gc.c embedded/esp32/main/fos_spiffs_footprint.c \
+            embedded/esp32/main/tests/test_fos_spiffs_gc.c /tmp/spiffs_obj/*.o \
+            -o /tmp/test_fos_spiffs_gc
+          /tmp/test_fos_spiffs_gc
+          # The JSON depth pre-scan that guards the 8-10 KB parser tasks.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/fos_json_guard.c embedded/esp32/main/tests/test_fos_json_guard.c \
+            -o /tmp/test_fos_json_guard
+          /tmp/test_fos_json_guard
+          # sscanf without the floating-point scanf: the cJSON "%lg"
+          # read-back goes to strtod (fos_sscanf.c, the --wrap=sscanf).
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/fos_sscanf.c embedded/esp32/main/tests/test_fos_sscanf.c \
+            -o /tmp/test_fos_sscanf
+          /tmp/test_fos_sscanf
+          # Upload bounds + usb_api payload timeout math (fos_upload_limits.h).
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/tests/test_fos_upload_limits.c \
+            -o /tmp/test_fos_upload_limits
+          /tmp/test_fos_upload_limits
+          # The IDF-free security boundaries, each a plain-C module so it
+          # can be argued about on a laptop (main/tests/*.c carry the same
+          # command lines): the assets-path rule behind every asset verb,
+          # the provider URL / transport / origin rules, the minisign
+          # parser that gates OTA, the setting parsers, and the schedule
+          # catch-up window.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/fos_assets_path.c embedded/esp32/main/tests/test_fos_assets_path.c \
+            -o /tmp/test_fos_assets_path
+          /tmp/test_fos_assets_path
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/fos_url_guard.c embedded/esp32/main/tests/test_fos_url_guard.c \
+            -o /tmp/test_fos_url_guard
+          /tmp/test_fos_url_guard
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            -Iembedded/esp32/components/monocypher \
+            embedded/esp32/main/fos_minisig.c embedded/esp32/main/tests/test_fos_minisig.c \
+            embedded/esp32/components/monocypher/monocypher.c \
+            embedded/esp32/components/monocypher/monocypher-ed25519.c \
+            -o /tmp/test_fos_minisig
+          /tmp/test_fos_minisig
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            -Iembedded/esp32/main/tests/host_shim \
+            embedded/esp32/main/fos_config_parse.c embedded/esp32/main/tests/test_fos_config_parse.c \
+            -o /tmp/test_fos_config_parse
+          /tmp/test_fos_config_parse
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/tests/test_fos_schedule_catchup.c \
+            -o /tmp/test_fos_schedule_catchup
+          /tmp/test_fos_schedule_catchup
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/tests/test_fos_console_line.c \
+            -o /tmp/test_fos_console_line
+          /tmp/test_fos_console_line
+          # The hold of a voice key (docs/voice-chat.md), pure.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/fos_voice_hold.c embedded/esp32/main/tests/test_fos_voice_hold.c \
+            -o /tmp/test_fos_voice_hold
+          /tmp/test_fos_voice_hold
+          # Animation mode pacing: a scene below a one-second interval on an LCD, pure.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/fos_animation.c embedded/esp32/main/tests/test_fos_animation.c \
+            -o /tmp/test_fos_animation
+          /tmp/test_fos_animation
+          # Which scene a frame starts on: never a layout, pure.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/fos_boot_scene.c embedded/esp32/main/tests/test_fos_boot_scene.c \
+            -o /tmp/test_fos_boot_scene
+          /tmp/test_fos_boot_scene
+          # When an e-paper panel takes a partial update, pure.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/components/frameos_display/include \
+            embedded/esp32/components/frameos_display/fos_partial_refresh.c embedded/esp32/main/tests/test_fos_partial_refresh.c \
+            -o /tmp/test_fos_partial_refresh
+          /tmp/test_fos_partial_refresh
+          # The charger register decode, the RTC conversions, the fuel gauge decode
+          # and the climate sensor decode, pure.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/fos_charger.c embedded/esp32/main/fos_rtc.c embedded/esp32/main/fos_gauge.c \
+            embedded/esp32/main/fos_climate.c embedded/esp32/main/tests/test_fos_i2c_devices.c \
+            -o /tmp/test_fos_i2c_devices
+          /tmp/test_fos_i2c_devices
+          # The IT8951 panel rows (the reTerminal E1003, the Waveshare 10.3 inch HAT), pure.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/components/frameos_display/include \
+            embedded/esp32/components/frameos_display/it8951.c embedded/esp32/main/tests/test_fos_it8951.c \
+            -o /tmp/test_fos_it8951
+          /tmp/test_fos_it8951
+          # The touch panel report decode and wire scaling, pure.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/fos_touch.c embedded/esp32/main/tests/test_fos_touch.c \
+            -o /tmp/test_fos_touch
+          /tmp/test_fos_touch
+          # The render pull of a frame rendered on the server (docs/server-rendering.md), pure.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/fos_render_pull.c embedded/esp32/main/tests/test_fos_render_pull.c \
+            -o /tmp/test_fos_render_pull
+          /tmp/test_fos_render_pull
+          # What a frame rendered on the server relays to its plane with the pull, pure.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/fos_render_relay.c embedded/esp32/main/fos_json_guard.c \
+            embedded/esp32/main/tests/test_fos_render_relay.c \
+            -o /tmp/test_fos_render_relay
+          /tmp/test_fos_render_relayTESTS
+
+      - name: Save ccache
+        if: ${{ !cancelled() && github.event_name == 'push' }}
+        env:
+          FRAMEOS_NIMCACHE_ROOT: /mnt/cache/ccache/esp32
+          FRAMEOS_NIMCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: bash frameos/tools/ci_nimcache.sh save ${{ matrix.leg }}
 
       - name: Upload firmware size documents
+        if: matrix.size != ''
         uses: actions/upload-artifact@v4
         with:
-          name: esp32-firmware-size
+          name: esp32-firmware-size-${{ matrix.leg }}
           path: .firmware-size/*.json
           # The directory starts with a dot; without this the action skips it
           # ("No files were found") and the report job fails on download.
@@ -384,7 +502,8 @@ jobs:
       - name: Download firmware size documents
         uses: actions/download-artifact@v4
         with:
-          name: esp32-firmware-size
+          pattern: esp32-firmware-size-*
+          merge-multiple: true
           path: .firmware-size
 
       - name: Fetch the latest release as the baseline
@@ -461,22 +580,42 @@ jobs:
     runs-on: ubuntu-latest
     permissions: {}
     needs:
+      - changes
       - docker_image
       - esp32_firmware_image
     if: ${{ always() }}
     steps:
       - name: Check parallel jobs
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          DOCKER: ${{ needs.docker_image.result }}
+          DOCKER_NEEDED: ${{ needs.changes.outputs.docker }}
+          ESP32: ${{ needs.esp32_firmware_image.result }}
+          ESP32_NEEDED: ${{ needs.changes.outputs.esp32 }}
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          docker_result="${{ needs.docker_image.result }}"
-          # Skipped by design on a PR stacked on another branch (see docker_image).
-          if [ "$docker_result" = "skipped" ] && [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.base_ref }}" != "main" ]; then
-            docker_result=success
-          fi
-          if [ "$docker_result" != "success" ]; then
-            echo "Docker image job finished with result: ${{ needs.docker_image.result }}"
+          if [ "$CHANGES" != "success" ]; then
+            echo "The change classification finished with result: $CHANGES"
             exit 1
           fi
-          if [ "${{ needs.esp32_firmware_image.result }}" != "success" ]; then
-            echo "ESP32 firmware image job finished with result: ${{ needs.esp32_firmware_image.result }}"
+          docker_result="$DOCKER"
+          # Skipped by design on a PR stacked on another branch (see
+          # docker_image), and when the change touches nothing it builds.
+          if [ "$docker_result" = "skipped" ]; then
+            if { [ "$EVENT" = "pull_request" ] && [ "$BASE_REF" != "main" ]; } || [ "$DOCKER_NEEDED" = "false" ]; then
+              docker_result=success
+            fi
+          fi
+          if [ "$docker_result" != "success" ]; then
+            echo "Docker image job finished with result: $DOCKER"
+            exit 1
+          fi
+          esp32_result="$ESP32"
+          if [ "$esp32_result" = "skipped" ] && [ "$ESP32_NEEDED" = "false" ]; then
+            esp32_result=success
+          fi
+          if [ "$esp32_result" != "success" ]; then
+            echo "ESP32 firmware image job finished with result: $ESP32"
             exit 1
           fi
