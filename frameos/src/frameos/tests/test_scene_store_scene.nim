@@ -186,6 +186,34 @@ suite "the Scene store scene":
     check discarded
     facts["preview"] = newJNull()
 
+  test "the browser preview's host offers Preview, then Show and Discard, never Install":
+    let config = frame(800, 480)
+    let scene = load(config)
+    facts["installed"] = %*[]
+    facts["previewOnly"] = %true
+    let detail = facts["listing"]["scenes"][1]
+    proc tapAll(): seq[string] =
+      asked = @[]
+      for x in countup(420, 780, 20):
+        for y in countup(40, 470, 10):
+          scene.state["spot"] = %*{"page": 1, "detail": detail}
+          scene.tap(x, y)
+      for (_, action, _) in asked:
+        result.add action
+    scene.state["spot"] = %*{"page": 1, "detail": detail}
+    discard draw(scene, config, "preview-only")
+    let before = tapAll()
+    check "preview" in before
+    check "install" notin before
+    facts["preview"] = %*{"store": "00000001-0000-4000-8000-000000000001", "id": "radar", "name": "Rain radar"}
+    scene.state["spot"] = %*{"page": 1, "detail": detail}
+    discard draw(scene, config, "preview-only-shown")
+    let after = tapAll()
+    check "discard" in after
+    check "install" notin after
+    facts["preview"] = newJNull()
+    facts.delete("previewOnly")
+
   test "a square screen gets the shelves as a select and a smaller grid":
     asked = @[]
     problems = @[]

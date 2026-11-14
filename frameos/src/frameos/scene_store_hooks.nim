@@ -20,7 +20,8 @@ type
     ## answer as it came or null, installed: [{id, store, v}] (every scene on
     ## the frame that came from the store: its runtime id, store scene id and
     ## version), preview: {store, id, name} or null, removeAny: a scene not
-    ## from the store may be removed too (a frame with no control plane)}.
+    ## from the store may be removed too (a frame with no control plane),
+    ## previewOnly: the browser preview's host, which installs nothing}.
     ## `asker` is the scene reading: news redraws it while it shows.
   SceneStoreAction* = proc (asker, action, args: string) {.nimcall, gcsafe, raises: [].}
     ## `args` is a JSON object's text. browse {params: the listing's query string}, preview {store, name},

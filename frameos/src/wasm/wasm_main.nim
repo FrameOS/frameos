@@ -31,6 +31,8 @@ import frameos/js_runtime/runtime as jsRuntime
 import frameos/js_runtime/app_tests
 import lib/tz
 import frameos/version
+import frameos/scene_store_preview
+from frameos/utils/http_client import boundedRequestWithHeaders
 
 # ------------------------------------------------------------------ JS hooks
 # Implemented in tools/wasm/frameos_library.js and linked by emcc.
@@ -175,8 +177,61 @@ proc selectSceneById(sceneIdText: string): bool =
     return false
   # A switch the scene made (or the dispatcher) is a fresh opening.
   builtInToRestore = ""
+  # What a frame keeps on disk for the scene being left (its persist:"disk"
+  # fields), kept here for the preview's life: the next opening starts from
+  # it, as on a frame (the Scene store back on the scene it previewed).
+  if host.sceneId.isSome and host.sceneId.get() != sceneId and not host.scene.isNil and
+      not host.exported.isNil and not host.scene.state.isNil and host.scene.state.kind == JObject:
+    let leaving = host.sceneId.get().string
+    var kept = pendingSceneStates.getOrDefault(leaving)
+    if kept.isNil or kept.kind != JObject:
+      kept = newJObject()
+    for key in host.exported.persistedStateKeys:
+      if host.scene.state.hasKey(key):
+        kept[key] = host.scene.state[key]
+    if kept.len > 0:
+      pendingSceneStates[leaving] = kept
   host.makeCurrent(sceneId)
   true
+
+# The scene store's preview host (frameos/scene_store_preview.nim): the
+# browser's preview worker turns it on, and a store scene previewed is loaded
+# beside the scenes the page loaded and shown, at the start of the next pass.
+
+proc storeFetch(url: string): tuple[code: int, body: string] {.nimcall, gcsafe, raises: [].} =
+  {.cast(gcsafe).}:
+    try:
+      let response = boundedRequestWithHeaders(url, timeoutMs = 15_000, maxBytes = 4 * 1024 * 1024)
+      (response.code, response.body)
+    except Exception:
+      (0, "")
+
+proc applyStorePreviewChange() =
+  let change = takeStorePreviewChange()
+  if change.kind == spcNone:
+    return
+  for id in change.dropIds:
+    removeInterpretedSceneFromCache(SceneId(id))
+    loadedSceneOrder.keepItIf(it.string != id)
+  if change.kind == spcShow:
+    for scene in change.scenes:
+      addInterpretedSceneToCache(scene)
+      if scene.settings.isNil or not scene.settings.isLayout:
+        loadedSceneOrder.add(scene.id)
+    discard selectSceneById(change.scenes[0].id.string)
+  elif change.back.len > 0:
+    discard selectSceneById(change.back)
+  host.renderRequested = true
+
+proc frameos_wasm_set_store_preview(storeUrl: cstring): bool {.exportc, cdecl.} =
+  ## The Scene store app may browse and preview the store at `storeUrl` in
+  ## this preview. Only the browser's preview worker calls this.
+  try:
+    enableStorePreview($storeUrl, publishedFrameOSVersion(compiledFrameOSVersion()), storeFetch)
+    result = true
+  except Exception as e:
+    setLastError("store preview failed: " & e.msg)
+    result = false
 
 proc restoreBuiltIn() =
   ## A built-in scene the plane kept for a frame it renders for
@@ -671,6 +726,7 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
   host.renderRequested = false
   renderedThisProcess = true
   try:
+    applyStorePreviewChange()
     refreshDecodeBudget()
     restoreAsLeft()
     if not host.ensureScene():
@@ -843,6 +899,7 @@ proc frameos_wasm_tick(): bool {.exportc, cdecl.} =
   ## a button is held or a button press waits for a possible second one, so a
   ## long press is delivered while the finger is still down, as on a frame. True when it made an event; ask frameos_wasm_render_requested.
   try:
+    applyStorePreviewChange()
     restoreAsLeft()
     host.tick()
   except Exception as e:

@@ -31,6 +31,8 @@
 //        gets one `button` for the whole press.
 //   {type: 'frame', width, height, buffer, renderMs}   buffer: transferred ArrayBuffer (RGBA)
 //   {type: 'state', state}
+//   {type: 'sceneInfo', sceneInfo}           the runtime changed scenes by itself (a scene's setCurrentScene, the
+//                                            switcher, a store preview) or its scene list: same shape as in `ready`
 //   {type: 'log', message}
 //   {type: 'sceneEvent', name, payload}
 //   {type: 'error', message}
@@ -105,6 +107,27 @@ function postState(force) {
     post({ type: 'state', state: JSON.parse(state) })
   } catch (e) {
     // state is informational; ignore
+  }
+}
+
+// The scene showing and the scenes loaded, posted when the runtime changed
+// them itself (the page's own selectScene is known to it already, and posting
+// it again does no harm): the page's scene select and form follow.
+let lastSceneInfoKey = null
+function sceneInfoKey(info) {
+  return (info.currentSceneId || '') + '|' + (info.scenes || []).map((scene) => scene.id).join(',')
+}
+function postSceneInfo() {
+  try {
+    const info = JSON.parse(call('frameos_wasm_scene_info', 'string', [], []))
+    const key = sceneInfoKey(info)
+    if (key === lastSceneInfoKey) {
+      return
+    }
+    lastSceneInfoKey = key
+    post({ type: 'sceneInfo', sceneInfo: info })
+  } catch (e) {
+    // informational, like the state
   }
 }
 
@@ -682,6 +705,7 @@ function renderNow() {
     // Copy out of the wasm heap; the buffer is transferred to the page.
     const buffer = Module.HEAPU8.buffer.slice(ptr, ptr + len)
     post({ type: 'frame', width, height, buffer, renderMs: Date.now() - started }, [buffer])
+    postSceneInfo()
     postState()
     postMemory(0)
   } catch (e) {
@@ -801,6 +825,14 @@ async function init(msg) {
     applyDeviceLimits(msg.deviceLimits)
     applyEmbedded(msg.embedded === true || Boolean(msg.deviceLimits && msg.deviceLimits.embedded))
     applyRenderScale(msg.renderScale)
+    // The Scene store app may browse the store and preview its scenes here
+    // (frameos/scene_store_preview.nim); installing stays a frame's. Only
+    // this worker turns it on: a plane's renders are a fresh runtime each.
+    try {
+      call('frameos_wasm_set_store_preview', 'boolean', ['string'], [msg.storeUrl || 'https://cloud.frameos.net'])
+    } catch (e) {
+      // older bundle without the export: the app browses on its own
+    }
     // Apps may save into the browser folder (a device's saveAssets setting;
     // on by default here — it's the visitor's own browser storage). Pass
     // `saveAssets: false` or a {nodeName: bool} map to mirror a frame.
@@ -819,6 +851,7 @@ async function init(msg) {
     }
     lastPostedState = null
     const sceneInfo = JSON.parse(call('frameos_wasm_scene_info', 'string', [], []))
+    lastSceneInfoKey = sceneInfoKey(sceneInfo)
     // Values the page keeps across a reboot (a Resize, an edit, Restart):
     // given to the scene before its first render, so that render draws them
     // rather than the scene's defaults with the page's values one render
