@@ -27,9 +27,15 @@ for t in tests/test_*.nim; do
   tests+=("$t")
 done
 
+# With several tests at once, each build gets a few gcc processes rather than
+# one per core (Nim's default), or a 16-core runner runs 256 compilers.
+parallel_build=0
+(( jobs > 1 )) && parallel_build=2
+export parallel_build
+
 run_one() {
   local t="$1" log="$2/$(basename "$1" .nim).log"
-  if nim c -d:release --hints:off -r "$t" >"$log" 2>&1; then
+  if nim c -d:release --hints:off --parallelBuild:"$parallel_build" -r "$t" >"$log" 2>&1; then
     echo ok >"$log.status"
   else
     echo failed >"$log.status"
