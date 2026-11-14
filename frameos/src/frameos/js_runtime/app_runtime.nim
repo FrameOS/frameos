@@ -3165,7 +3165,7 @@ proc writeCells(image: Image, cells, known: Cells; width, height, ps: int; palet
     var colors: Palette565
     for i in 0 ..< 256:
       colors[i] = rgbxToRgb565(palette[i])
-    blitCells16(cast[ptr UncheckedArray[uint16]](image.pixelAddr(0)), image.stride, cells, known, width,
+    blitCells16(cast[ptr UncheckedArray[uint16]](image.pixelAddr(image.dataIndex(0, 0))), image.stride, cells, known, width,
       height, ps, addr colors, recolored, anyRecolored)
     return
   for sy in 0 ..< height:
