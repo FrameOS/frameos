@@ -147,6 +147,21 @@ suite "frameos.pixels":
     check other[52, 22] == poked.as565 # index 1, red in both
     check other[37, 17] == black.as565 and other[0, 0] == black.as565 # recolored
 
+  test "in a layout's hole, a view of the panel, it draws where the hole is":
+    # A scene inside a layout renders into a view of the panel's canvas
+    # (docs/scene-layouts.md): Pixel toys in the Windows 98 layout drew at
+    # the panel's corner, over the layout's chrome (2026-11-14).
+    forgetPanelFrames()
+    let app = newApp("tests/pixels-hole")
+    let panel = newImage565(140, 100)
+    panel.fill(poked)
+    let hole = panel.view(20, 30, 100, 60)
+    discard app.intoPanel(hole, %*{"step": 1})
+    check panel[20, 30] == green.as565 and panel[24, 34] == green.as565 and panel[25, 35] == black.as565
+    check panel[70, 50] == red.as565 and panel[70, 59] == red.as565 and panel[70, 60] == black.as565
+    check panel[0, 0] == poked.as565 and panel[19, 30] == poked.as565 and panel[20, 29] == poked.as565
+    check panel[120, 90] == poked.as565 and panel[119, 89] == black.as565
+
   test "and writes them all when anything else may have drawn there":
     forgetPanelFrames()
     let app = newApp("tests/pixels-others")
