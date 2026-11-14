@@ -99,6 +99,11 @@ export function mountFrameOSManager(container: HTMLElement, options: FrameOSMana
       }
       options.onState?.(state)
     },
+    onSceneInfo: (sceneInfo) => {
+      editedValues = {}
+      renderControls()
+      options.onSceneInfo?.(sceneInfo)
+    },
     onLog: (message) => {
       appendLog(message)
       options.onLog?.(message)

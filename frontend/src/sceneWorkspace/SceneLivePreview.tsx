@@ -923,6 +923,16 @@ export function SceneLivePreviewPanel({
             return unconfirmed;
           });
         },
+        onSceneInfo: (info) => {
+          if (cancelled) {
+            return;
+          }
+          // The runtime switched by itself (a scene, the switcher, a store
+          // preview): the select and the form follow it.
+          setSceneInfo(info);
+          setEdits({});
+          setCurrentSceneId(info.currentSceneId || null);
+        },
         onLog: appendLog,
         onSceneEvent: (name, payload) =>
           appendLog(`event: ${name} ${JSON.stringify(payload)}`),
@@ -987,12 +997,13 @@ export function SceneLivePreviewPanel({
     if (!scenes) {
       return undefined;
     }
-    return (
-      scenes.find((scene) => scene.id === currentSceneId) ??
-      scenes.find((scene) => scene.default) ??
-      scenes[0]
-    );
-  }, [scenes, currentSceneId]);
+    const shown = scenes.find((scene) => scene.id === currentSceneId);
+    // One the runtime loaded by itself (a store preview) has no fields here.
+    if (!shown && currentSceneId && sceneInfo?.scenes?.some((scene) => scene.id === currentSceneId)) {
+      return undefined;
+    }
+    return shown ?? scenes.find((scene) => scene.default) ?? scenes[0];
+  }, [scenes, currentSceneId, sceneInfo]);
   const publicFields = useMemo(
     () =>
       // Every scene's last control is its refresh interval, declared or

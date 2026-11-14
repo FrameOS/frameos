@@ -2709,6 +2709,11 @@ proc addInterpretedSceneToCache*(scene: FrameSceneInput) =
   ## through `sceneLoader`.
   loadedScenes[scene.id] = buildInterpretedSceneExport(scene)
 
+proc removeInterpretedSceneFromCache*(sceneId: SceneId) =
+  ## A scene added beside the others going again: the browser preview's store
+  ## preview, discarded (scene_store_preview.nim).
+  loadedScenes.del(sceneId)
+
 proc loadInterpretedScenesForStartup*(): Table[SceneId, ExportedInterpretedScene] =
   ## `loadInterpretedScenesFromDisk` for callers that cannot afford to raise.
   ##

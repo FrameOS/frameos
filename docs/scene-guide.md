@@ -878,6 +878,8 @@ interface FrameOSStore {
   preview: { store: string; id: string; name: string } | null;
   /** A scene not from the store may be removed too (a frame with no control plane). */
   removeAny: boolean;
+  /** The browser preview's host: Preview, Show and Discard only, and "preview_only" for install, update and remove. Absent on a frame. */
+  previewOnly?: boolean;
 }
 
 /**

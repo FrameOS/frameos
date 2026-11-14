@@ -259,8 +259,12 @@
   (`frameos/scene_store_hooks.nim`; `frameos/scene_store_linux.nim` on a worker
   thread, `main/fos_store.c` on its own task), and it draws the scene that
   asked again when it is done, if it still shows. A new action is a host's on
-  both; a word is the app's. A runtime with no host (the preview, a board
-  rendered on its plane) answers null and the app installs nothing.
+  both; a word is the app's. A runtime with no host (a board rendered on its
+  plane, a virtual frame) answers null and the app installs nothing. The
+  browser preview's host previews and installs nothing
+  (`frameos/scene_store_preview.nim`, `previewOnly`): a store scene loads
+  beside the page's scenes, and the page's scene select follows the runtime
+  (the worker's `sceneInfo`).
 - Browsing is the store's listing for frames (`/api/store/device/scenes`, a
   page the size of the app's grid, `prefer` / `exclude` for the Real time
   shelf). A change is asked of the frame's plane (`POST

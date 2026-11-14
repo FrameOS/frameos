@@ -19,6 +19,7 @@ whole screen with a swipe to the next, and a slideshow.
 | What a JS app may ask: `frameos.store()`, `frameos.storeAction()` | `frameos/src/frameos/scene_store_hooks.nim`, bridged in `js_runtime/app_runtime.nim`, declared in `frontend/src/utils/appTypeDeclarations.ts` |
 | The host on a Pi | `frameos/src/frameos/scene_store_linux.nim` (a worker thread) |
 | The host on an ESP32 | `embedded/esp32/main/fos_store.c` (a task of its own), through `frameos/src/embedded/embedded_runtime.nim` |
+| The host in the browser preview (previews only) | `frameos/src/frameos/scene_store_preview.nim`, through `frameos/src/wasm/wasm_main.nim` |
 | The store's listing for frames | `GET /api/store/device/scenes`, `GET /api/store/device/scenes/{id}` (`cloud/apps/auth-web/src/lib/store-device.ts`) |
 | What a frame asks its plane | `POST /api/frames/{id}/panel/scenes`: cloud `src/lib/panel-scenes.ts`, backend `app/api/panel_scenes.py` (also `/api/panel/scenes`) |
 
@@ -38,7 +39,8 @@ frame's credential) and two bridge calls.
   params, listing,       // the newest listing the host brought, and its query string
   installed: [{ id, store, v }], // every scene on the frame from the store
   preview: { store, id, name } | null,
-  removeAny }            // a frame with no plane may delete any scene
+  removeAny,             // a frame with no plane may delete any scene
+  previewOnly? }         // the browser preview's host: Preview, never Install
 ```
 
 `frameos.storeAction(action, args)` asks for work and returns at once:
@@ -52,12 +54,28 @@ nothing new draws nothing: on e-paper a render is a refresh.
 
 The host answers null (`""` from the hook) where there is no store: the owner
 turned the settings on the frame's screen off (`frame_settings_on_screen`,
-which also covers this), and every runtime without a host: the browser
-preview, a board rendered on its control plane (`docs/server-rendering.md`),
-a virtual frame. There the app browses on its own with `frameos.httpRequest`
-and installs nothing ("Previews and installs happen on the frame itself").
-That is one-sided on purpose for now: a plane rendering a frame could be its
-host, and would answer `storeAction` itself.
+which also covers this), and every runtime without a host: a board rendered
+on its control plane (`docs/server-rendering.md`), a virtual frame. There the
+app browses on its own with `frameos.httpRequest` and installs nothing
+("Previews and installs happen on the frame itself"). That is one-sided on
+purpose for now: a plane rendering a frame could be its host, and would answer
+`storeAction` itself.
+
+The browser preview has a host of its own that previews and installs nothing
+(`frameos/scene_store_preview.nim`, turned on by the preview worker through
+`frameos_wasm_set_store_preview`; the store is `storeUrl` in its init message,
+else `https://cloud.frameos.net`). Its facts say `previewOnly: true`: the app
+offers Preview, then Show and Discard, and says installs happen on the frame
+itself. A preview fetches the store scene's `scenes.json`, and at the start of
+the runtime's next pass loads its scenes beside the page's and shows the first
+(the action comes from inside the store's own tap); Discard drops them and
+goes back to the store, as does a second preview's Discard. The page's scene
+select follows the runtime (the worker posts `sceneInfo` when the runtime
+switches by itself), so the store is picked there again, and it opens on the
+scene it previewed: the preview keeps a scene's `persist: "disk"` fields
+across a switch for its life, as a frame keeps them on disk. A plane's renders
+never turn it on: each is a fresh runtime, where a preview would be gone at the
+next one.
 
 ### Browsing
 

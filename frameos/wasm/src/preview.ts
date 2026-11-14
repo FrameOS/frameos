@@ -108,6 +108,9 @@ export interface FrameOSPreviewOptions {
   onReady?: (sceneInfo: SceneInfo, assets: PreviewAssetsInfo | null, runtime: PreviewRuntimeInfo) => void
   onFrame?: (frame: PreviewFrame) => void
   onState?: (state: Record<string, unknown>) => void
+  /** The runtime changed scenes by itself (a scene switched, the scene
+   * switcher, a store preview) or loaded more: what `onReady` reported, now. */
+  onSceneInfo?: (sceneInfo: SceneInfo) => void
   onLog?: (message: string) => void
   onSceneEvent?: (name: string, payload: Record<string, unknown>) => void
   onError?: (message: string) => void
@@ -238,6 +241,15 @@ export class FrameOSPreview {
       case 'state':
         this.state = msg.state ?? {}
         this.options.onState?.(this.state)
+        break
+      case 'sceneInfo':
+        if (msg.sceneInfo) {
+          this.sceneInfo = msg.sceneInfo
+          if (msg.sceneInfo.currentSceneId) {
+            this.currentSceneId = msg.sceneInfo.currentSceneId
+          }
+          this.options.onSceneInfo?.(msg.sceneInfo)
+        }
         break
       case 'log':
         this.options.onLog?.(String(msg.message ?? ''))
