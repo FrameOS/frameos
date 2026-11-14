@@ -189,7 +189,8 @@ proc inlineArgScene(): ExportedInterpretedScene =
       })
     ],
     edges: @[
-      edge(100, 20, "fieldOutput", 41, "codeField/cal")
+      edge(100, 20, "fieldOutput", 41, "codeField/cal"),
+      edge(101, 0, "code/(() => { throw new Error(\"recycle failed\") })()", 41, "codeField/recycle")
     ],
     apps: %*{}
   )
@@ -312,12 +313,8 @@ suite "code node args survive a failing producer":
   test "inline code args are defaulted the same way":
     let sceneId = "tests/code-arg-defaults/inline".SceneId
     withUploadedScene(sceneId, inlineArgScene()) do (store: LogStore, scene: InterpretedFrameScene):
-      # Wire an inline arg after init so it is never precompiled: evaluating it
-      # then raises out of the inline branch, the way a runtime compile failure
-      # would.
-      scene.codeInlineInputsForNodeId[41.NodeId] = initTable[string, string]()
-      scene.codeInlineInputsForNodeId[41.NodeId]["recycle"] = "(() => {"
-
+      # The inline "recycle" throws: it gets its type's zero, as a producer
+      # that fails does, and says so.
       let value = scene.getDataNode(41.NodeId, ctx(scene, "render"))
       check value.asJson().len == 1
 

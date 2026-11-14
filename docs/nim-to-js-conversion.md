@@ -59,8 +59,8 @@ time formatting. Anything outside it throws with the position and the node
 goes to pass 2. The structural fixes that need no model run first, on every
 code node: an argument named `state`, `args`, `context`, `console`,
 `format`, `now`, `parseTs` or `getargor` is renamed (`state` →
-`stateValue`) and its edges rewritten, because the JavaScript envelope silently
-refuses to declare those names (`frameos/src/frameos/js_runtime/runtime.nim`);
+`stateValue`) and its edges rewritten, because the scene's program silently
+refuses to declare those names (`frameos/src/frameos/scene_compiler.nim`);
 an edge into an argument the code uses but `codeArgs` does not declare
 declares it; an edge into a name the code never uses is dropped; `codeArg/`
 handles become `codeField/` (the interpreter reads only the latter); `source`

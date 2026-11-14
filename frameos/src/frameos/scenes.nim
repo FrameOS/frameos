@@ -182,30 +182,7 @@ proc cleanupSceneRuntime*(scene: FrameScene) =
     for _, childScene in interpreted.sceneNodes:
       cleanupSceneRuntime(childScene)
     rhythmReleaseScene(scene)
-    # Break common ORC/ARC cycles before closing the JS runtime.
-    interpreted.execNode = nil
-    interpreted.getDataNode = nil
-    # Before the apps are dropped: each JS app node owns a QuickJS runtime
-    # with no destructor, so losing the last reference leaks it outright.
-    for _, app in interpreted.appsByNodeId:
-      releaseJsAppRuntime(app)
-    interpreted.appsByNodeId = initTable[NodeId, AppRoot]()
-    interpreted.appInputsForNodeId = initTable[NodeId, Table[string, NodeId]]()
-    interpreted.appInlineInputsForNodeId = initTable[NodeId, Table[string, string]]()
-    interpreted.codeInputsForNodeId = initTable[NodeId, Table[string, NodeId]]()
-    interpreted.codeInlineInputsForNodeId = initTable[NodeId, Table[string, string]]()
-    interpreted.sceneNodes = initTable[NodeId, FrameScene]()
-    interpreted.sceneExportByNodeId = initTable[NodeId, ExportedScene]()
-    interpreted.nextNodeIds = initTable[NodeId, NodeId]()
-    interpreted.eventListeners = initTable[string, seq[NodeId]]()
-    interpreted.eventApps = @[]
-    interpreted.nodes = initTable[NodeId, DiagramNode]()
-    interpreted.edges = @[]
-    interpreted.cacheValues = initTable[NodeId, Value]()
-    interpreted.cacheTimes = initTable[NodeId, float]()
-    interpreted.cacheKeys = initTable[NodeId, JsonNode]()
-    interpreted.cacheExprs = initTable[NodeId, JsonNode]()
-    cleanupSceneJs(interpreted)
+    forgetSceneGraph(interpreted)
 
 proc cleanupSceneTableRuntime*(scenes: Table[SceneId, FrameScene]) =
   for _, scene in scenes:

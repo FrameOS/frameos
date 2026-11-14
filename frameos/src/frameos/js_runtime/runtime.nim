@@ -1,31 +1,21 @@
 # frameos/src/frameos/js_runtime/runtime.nim
-# Centralized JavaScript runtime helpers for interpreted scenes.
-# Extracted from interpreter.nim so the JS bridge can be reused anywhere.
+# A scene's own QuickJS context (the one its compiled program runs in,
+# scene_compiler.nim and interpreter.nim), its budgets, and the conversions
+# between Nim values and JavaScript ones that the program and the JS apps use.
 
 import frameos/types
 import frameos/values
 import frameos/js_runtime/source_map
 import frameos/js_runtime/burrito
 import frameos/js_runtime/jsx_native
-when defined(frameosEmbedded): import frameos/utils/memory
 import lib/tz
-import tables, json, strutils, locks, sequtils
+import tables, json, strutils, locks
 import chrono, times
 import pixie
 
 # -------------------------
 # Internal evaluation scope
 # -------------------------
-
-type
-  EvalEnv = ref object
-    scene: InterpretedFrameScene
-    context: ExecutionContext
-    nodeId: NodeId
-    args: Table[string, Value]
-    argTypes: Table[string, string]
-    outputTypes: Table[string, string]
-    targetField: string
 
 type
   LazySourceMap = object
@@ -39,18 +29,15 @@ type
     provider: proc(): SourceLineMap {.closure, gcsafe, raises: [].}
 
 var jsSourceMapsByCtx = initTable[ptr JSContext, Table[string, LazySourceMap]]()
-var currentEvalCtx: ptr JSContext
-var currentEvalEnv: EvalEnv
 var tzName = ""
 var sceneJsLock: Lock
-# Scenes with a JS frame on the stack right now, or a value of theirs in a Nim
-# frame. Freeing one of those contexts would pull it out from under a call in
-# progress, which nested scenes make reachable: a parent's code node can
-# render a child mid-call. After an out-of-memory abort, what is still here is
-# what the abort jumped out of (abandonMidCallSceneJs).
+# Scenes whose program is running right now (the last is the innermost: a
+# scene node runs its scene inside its parent's program). After an
+# out-of-memory abort, what is still here is what the abort jumped out of
+# (abandonMidCallSceneJs).
 var sceneJsStack: seq[InterpretedFrameScene] = @[]
 
-template onSceneJsStack(scene: InterpretedFrameScene, body: untyped) =
+template onSceneJsStack*(scene: InterpretedFrameScene, body: untyped) =
   sceneJsStack.add(scene)
   try:
     body
@@ -58,25 +45,19 @@ template onSceneJsStack(scene: InterpretedFrameScene, body: untyped) =
     if sceneJsStack.len > 0 and sceneJsStack[^1] == scene:
       discard sceneJsStack.pop()
 
-when defined(frameosEmbedded):
-  # Scene-level interpreters, evicted under memory pressure — the same policy
-  # app_runtime applies to JS APP nodes, for the same reason and with the same
-  # safety rule.
-  #
-  # A scene builds one QuickJS (~148 KB of PSRAM) as soon as it has a single
-  # code node or inline expression. Nested scenes each get their own, so a tree
-  # that runs JS at every level multiplies that by its depth, on a board whose
-  # whole render budget is a few megabytes. Purely structural nesting already
-  # costs nothing — interpreter.init stopped building a context for scenes with
-  # no JS at all — but a deep tree that does use JS still needs a ceiling.
-  #
-  # Recompilation is what makes eviction safe: getOrCompileCodeFn and
-  # evalInline both rebuild a missing function on demand, and cleanupSceneJs
-  # clears the name tables so they will. It is not free — rebuilding
-  # re-parses each snippet — so this only fires when headroom is actually
-  # short, and a roomy frame never evicts.
-  var liveSceneJsScenes: seq[InterpretedFrameScene] = @[]
-  const SceneJsEvictHeadroomBytes = 2 * 1024 * 1024
+# One QuickJS context runs every scene's program (scene_compiler.nim). Each
+# program is a closure over natives that carry their own scene, so programs
+# live side by side in it: a frame pays for one context (~150 KB of PSRAM on
+# an ESP32), not one per scene with code in it, and a scene without code of
+# its own (the structural wrapper, the split's panels) costs only its
+# program. `programJsGeneration` moves whenever the context is replaced, and
+# a scene whose `jsGeneration` is older evaluates its program again.
+var programJs: QuickJS
+var programJsReady = false
+var programJsGeneration = 1
+var programJsLimits: tuple[timeoutMs, memoryMb, stackKb: int]
+const ProgramsBudgetId = "frameos:scene-programs"
+  ## The heap budget the programs share (the JS apps keep their scene's).
 initLock(sceneJsLock)
 
 const sceneJsPrelude* = compactJs("""
@@ -137,53 +118,9 @@ globalThis.memo = (component) => {
 };
 """)
 
-# -------------------------
-# Small string/JS helpers
-# -------------------------
-
-proc isJsIdentStart(c: char): bool =
-  result = (c in {'a'..'z', 'A'..'Z', '_', '$'})
-
-proc isJsIdentPart(c: char): bool =
-  result = isJsIdentStart(c) or (c in {'0'..'9'})
-
-proc toJsIdent(name: string): string =
-  if name.len == 0: return "_"
-  var output = newStringOfCap(name.len + 2)
-  var i = 0
-  for ch in name:
-    if i == 0:
-      if not isJsIdentStart(ch): output.add('_')
-      output.add(if isJsIdentStart(ch): ch else: '_')
-    else:
-      output.add(if isJsIdentPart(ch): ch else: '_')
-    inc i
-  result = output
-
-proc jsQuote(s: string): string =
-  result = s
-  result = result.replace("\\", "\\\\").replace("\"", "\\\"")
-  result = result.replace("\n", "\\n").replace("\r", "\\r")
-
-proc normalizeExpressionSnippet(source: string): string =
-  ## The UI has historically saved some expression snippets with a trailing
-  ## comma/semicolon. They are invalid once wrapped as an arrow expression.
-  result = source.strip()
-  while result.len > 0 and result[^1] in {',', ';'}:
-    result.setLen(result.len - 1)
-    result = result.strip()
-
-proc getCodeSnippet(node: DiagramNode): string =
-  ## Prefer codeJS, fall back to code; empty string if none.
-  if node.data.hasKey("codeJS") and node.data["codeJS"].kind == JString:
-    return normalizeExpressionSnippet(node.data["codeJS"].getStr())
-  elif node.data.hasKey("code") and node.data["code"].kind == JString:
-    return node.data["code"].getStr()
-  ""
-
 # Code nodes and inline expressions are TypeScript with JSX, whatever the
-# scene calls them; the bundled QuickJS (quickts) parses both directly, so
-# the only text ever generated is the envelope around a snippet.
+# scene calls them; the bundled QuickJS (quickts) parses both directly, and
+# the scene's program around them with them.
 const snippetEvalFlags* = JS_EVAL_FLAG_TYPESCRIPT or JS_EVAL_FLAG_JSX
 
 proc registerJsSourceMap*(ctx: ptr JSContext, sourceMap: SourceLineMap) =
@@ -224,146 +161,6 @@ proc mapJsErrorText*(ctx: ptr JSContext, text: string): string =
 
 proc mapJsErrorText*(text: string, sourceMap: SourceLineMap): string =
   text.rewriteQuickJsLocations(sourceMap)
-
-proc sourceNodeIdForLog(scene: InterpretedFrameScene, nodeId: NodeId): string =
-  if not scene.nodes.hasKey(nodeId):
-    return ""
-  let node = scene.nodes[nodeId]
-  if node.data.isNil or node.data.kind != JObject:
-    return ""
-  if node.data.hasKey("__frameosSourceNodeId") and node.data["__frameosSourceNodeId"].kind == JString:
-    return node.data["__frameosSourceNodeId"].getStr()
-  ""
-
-proc logNodeErrorPayload(scene: InterpretedFrameScene, nodeId: NodeId, payload: JsonNode) =
-  let sourceNodeId = sourceNodeIdForLog(scene, nodeId)
-  if sourceNodeId.len > 0:
-    payload["sourceNodeId"] = %sourceNodeId
-  scene.logger.log(payload)
-
-proc logCompileError(
-  scene: InterpretedFrameScene,
-  nodeId: NodeId,
-  sourceKind: string,
-  sourceName: string,
-  snippet: string,
-  error: ref CatchableError,
-  sourceMap: SourceLineMap
-) =
-  scene.logNodeErrorPayload(nodeId, %*{
-    "event": "interpreter:jsCompileError",
-    "sceneId": scene.id.string,
-    "nodeId": nodeId.int,
-    "sourceKind": sourceKind,
-    "sourceName": sourceName,
-    "error": error.msg.mapJsErrorText(sourceMap),
-    "stacktrace": error.getStackTrace().mapJsErrorText(sourceMap),
-    "snippet": snippet
-  })
-
-# -------------------------
-# Build JS envelope function
-# -------------------------
-
-proc buildEnvelopeFunctionWithMap(code: string, argNames: seq[string], fnName: string, filename: string): tuple[code: string, sourceMap: SourceLineMap] =
-  ## Create a named function returning a BigInt-safe JSON envelope.
-  var decls = newSeq[string]()
-  for rawName in argNames:
-    let lc = rawName.toLowerAscii
-    if lc in ["state", "args", "context", "console", "getargor",
-          "parsets", "format", "now"]:
-      continue
-    let ident = toJsIdent(rawName)
-    decls.add("const " & ident & " = __args[\"" & jsQuote(rawName) & "\"];")
-
-  var mapLines: seq[int] = @[0]
-  var mapSegments: seq[SourceMapSegment] = @[]
-  template addGeneratedLine(line: string, sourceLine: int = 0) =
-    if result.code.len > 0:
-      result.code.add("\n")
-    result.code.add(line)
-    mapLines.add(sourceLine)
-
-  addGeneratedLine("function " & fnName & "() {")
-  addGeneratedLine("  \"use strict\";")
-  for decl in decls:
-    addGeneratedLine("  " & decl)
-  addGeneratedLine("  try {")
-
-  let sourceLines = code.splitLines()
-  if sourceLines.len == 0:
-    addGeneratedLine("    const __v = ((state, args, context) => ())(__state, __args, __context);")
-  else:
-    for index, line in sourceLines:
-      let sourceLine = index + 1
-      if index == 0 and index == sourceLines.high:
-        let prefix = "    const __v = ((state, args, context) => ("
-        addGeneratedLine(prefix & line & "))(__state, __args, __context);", sourceLine)
-        mapSegments.add(SourceMapSegment(generatedLine: mapLines.len - 1, generatedColumn: prefix.len + 1, sourceLine: sourceLine, sourceColumn: 1))
-      elif index == 0:
-        let prefix = "    const __v = ((state, args, context) => ("
-        addGeneratedLine(prefix & line, sourceLine)
-        mapSegments.add(SourceMapSegment(generatedLine: mapLines.len - 1, generatedColumn: prefix.len + 1, sourceLine: sourceLine, sourceColumn: 1))
-      elif index == sourceLines.high:
-        addGeneratedLine(line & "))(__state, __args, __context);", sourceLine)
-        mapSegments.add(SourceMapSegment(generatedLine: mapLines.len - 1, generatedColumn: 1, sourceLine: sourceLine, sourceColumn: 1))
-      else:
-        addGeneratedLine(line, sourceLine)
-        mapSegments.add(SourceMapSegment(generatedLine: mapLines.len - 1, generatedColumn: 1, sourceLine: sourceLine, sourceColumn: 1))
-  addGeneratedLine("    const __k = (__v === null) ? \"null\" : (Array.isArray(__v) ? \"array\" : typeof __v);")
-  addGeneratedLine("    const json = (typeof __v === 'undefined')")
-  addGeneratedLine("      ? JSON.stringify({ k: __k })")
-  addGeneratedLine("      : JSON.stringify({ k: __k, v: __v }, __jsReplacer);")
-  addGeneratedLine("    return json;")
-  addGeneratedLine("  } catch (e) {")
-  addGeneratedLine("    const msg = (e && e.stack) ? e.stack : String(e);")
-  addGeneratedLine("    return JSON.stringify({ k: \"error\", v: { message: String(e && e.message || e), stack: msg } });")
-  addGeneratedLine("  }")
-  addGeneratedLine("}")
-
-  result.sourceMap = SourceLineMap(
-    generatedName: filename,
-    sourceName: filename,
-    generatedToSourceLine: mapLines,
-    segments: mapSegments
-  )
-
-proc buildEnvelopeFunction(code: string, argNames: seq[string], fnName: string): string =
-  buildEnvelopeFunctionWithMap(code, argNames, fnName, "<frameos>").code
-
-# -------------------------
-# QuickJS bridge utilities
-# -------------------------
-
-proc env(ctx: ptr JSContext): EvalEnv =
-  if currentEvalCtx == ctx: currentEvalEnv else: nil
-
-# Return an object sentinel to represent "undefined" without using JS_UNDEFINED across the C boundary.
-proc jsUndefSentinel(ctx: ptr JSContext): JSValue {.inline.} =
-  let obj = JS_NewObject(ctx)
-  discard JS_SetPropertyStr(ctx, obj, "__frameosUndef", nimBoolToJS(ctx, true))
-  return obj
-
-proc jsLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue {.nimcall.} =
-  ## level: "log" | "warn" | "error"; payloadJson: a JSON string created in JS
-  let lvl = toNimString(ctx, level)
-  let payloadStr = toNimString(ctx, payloadJson)
-  var argsJ: JsonNode
-  try:
-    argsJ = if payloadStr.len > 0: parseJson(payloadStr) else: %* []
-  except CatchableError:
-    argsJ = %* payloadStr
-
-  let e = env(ctx)
-  if e != nil:
-    e.scene.logger.log(%*{
-      "event": "interpreter:jsConsole",
-      "level": lvl,
-      "sceneId": e.scene.id.string,
-      "nodeId": e.nodeId.int,
-      "args": argsJ
-    })
-  return jsUndefSentinel(ctx)
 
 # Convert Nim JsonNode -> JSValue (objects/arrays included).
 proc jsonToJS*(ctx: ptr JSContext, j: JsonNode): JSValue =
@@ -424,53 +221,6 @@ proc valueToJS*(ctx: ptr JSContext, v: Value): JSValue =
   of fkImage, fkImageSpool, fkNone:
     return jsNull(ctx)
 
-proc jsGetState(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
-  let key = toNimString(ctx, k)
-  let e = env(ctx)
-  if e != nil and e.scene.state.hasKey(key):
-    return jsonToJS(ctx, e.scene.state[key])
-  return jsUndefSentinel(ctx)
-
-proc jsGetArg(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
-  let key = toNimString(ctx, k)
-  let e = env(ctx)
-  if e != nil and e.args.hasKey(key):
-    return valueToJS(ctx, e.args[key])
-  return jsUndefSentinel(ctx)
-
-proc jsGetContext(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
-  let key = toNimString(ctx, k)
-  let e = env(ctx)
-  if e == nil: return jsUndefSentinel(ctx)
-  case key
-  of "loopIndex":
-    return nimIntToJS(ctx, e.context.loopIndex.int32)
-  of "loopKey":
-    return nimStringToJS(ctx, e.context.loopKey)
-  of "event":
-    return nimStringToJS(ctx, e.context.event)
-  of "payload":
-    if e.context.payload.isNil:
-      return jsNull(ctx)
-    else:
-      return jsonToJS(ctx, e.context.payload)
-  of "hasImage":
-    return nimBoolToJS(ctx, e.context.hasImage)
-  # The canvas this run draws on, in its own pixels: the whole scene's during a
-  # render, a cell's inside render/split — which is what a code node that lays
-  # something out needs, and the frame's size cannot tell it. Undefined when
-  # the run has no canvas (an event other than "render"), like in an app.
-  of "imageWidth":
-    if e.context.hasImage and not e.context.image.isNil:
-      return nimIntToJS(ctx, e.context.image.width.int32)
-    return jsUndefSentinel(ctx)
-  of "imageHeight":
-    if e.context.hasImage and not e.context.image.isNil:
-      return nimIntToJS(ctx, e.context.image.height.int32)
-    return jsUndefSentinel(ctx)
-  else:
-    return jsUndefSentinel(ctx)
-
 # -------------------------
 # Chrono proxies exposed to JS
 # -------------------------
@@ -502,9 +252,8 @@ proc jsTimeZone(ctx: ptr JSContext): string =
   ## while the Nim-side clock apps (which read frameConfig) were right.
   ## Chrono treats a zone it has no data for as UTC, so a name whose slice
   ## has not arrived yet degrades to what the old code did, never an error.
-  let e = env(ctx)
-  if e != nil and e.scene != nil and e.scene.frameConfig != nil:
-    let configured = e.scene.frameConfig.timeZone.strip()
+  if sceneJsStack.len > 0 and sceneJsStack[^1].frameConfig != nil:
+    let configured = sceneJsStack[^1].frameConfig.timeZone.strip()
     if configured.len > 0:
       return configured
   if tzName.len == 0:
@@ -527,52 +276,6 @@ proc jsChronoNow(ctx: ptr JSContext): JSValue {.nimcall.} =
     return nimFloatToJS(ctx, ts)
   except CatchableError as e:
     raise newException(ValueError, "now failed: " & e.msg)
-
-# -------------------------
-# Envelope <-> Value
-# -------------------------
-
-proc envelopeToValue(env: JsonNode, expectedType: string): Value =
-  if env.isNil or env.kind != JObject:
-    return Value(kind: fkString, s: $env)
-
-  let kind = env{"k"}.getStr()
-  var jval: JsonNode
-
-  if kind == "undefined":
-    if expectedType.len > 0:
-      return valueFromJsonByType(newJNull(), expectedType)
-    return Value(kind: fkNone)
-
-  jval = (if env.hasKey("v"): env["v"] else: newJNull())
-
-  if expectedType.len > 0:
-    return valueFromJsonByType(jval, expectedType)
-
-  case kind
-  of "string":
-    return valueFromJsonByType(jval, "string")
-  of "number":
-    case jval.kind
-    of JInt: return valueFromJsonByType(jval, "integer")
-    of JFloat: return valueFromJsonByType(jval, "float")
-    else: return valueFromJsonByType(%*0, "integer")
-  of "boolean":
-    return valueFromJsonByType(jval, "boolean")
-  of "bigint":
-    var s = ""
-    if jval.kind == JObject and jval.hasKey("__bigint"):
-      s = jval["__bigint"].getStr()
-    # Try to fit into int64; otherwise, return as string
-    try:
-      let maybe = parseBiggestInt(s) # int64 in-range or throws
-      return Value(kind: fkInteger, i: maybe.int64)
-    except CatchableError:
-      return Value(kind: fkString, s: s)
-  of "array", "object", "null":
-    return Value(kind: fkJson, j: jval)
-  else:
-    return Value(kind: fkNone)
 
 proc stringifyJsValue*(ctx: ptr JSContext, val: JSValueConst): string =
   let globalObj = JS_GetGlobalObject(ctx)
@@ -785,63 +488,42 @@ proc sceneJsConfig*(frameConfig: FrameConfig, sceneId: string = ""): QuickJSConf
 # Scene JS context
 # -------------------------
 
+proc dropProgram*(scene: InterpretedFrameScene) =
+  ## The program's ways in, given back (or forgotten, when the context they
+  ## lived in is gone): the program is evaluated again on demand.
+  if scene.programReady and programJsReady and scene.jsGeneration == programJsGeneration:
+    for entry in scene.programEntries:
+      JS_FreeValue(programJs.context, entry)
+  scene.programReady = false
+  reset(scene.programEntries)
+
 proc closeSceneJsLocked(scene: InterpretedFrameScene) =
-  ## Tear down one scene's JS context. Caller holds sceneJsLock.
-  ##
-  ## Reversible by design: the name tables go with the context, and both
-  ## getOrCompileCodeFn and evalInline rebuild a missing function on demand.
-  when defined(frameosEmbedded):
-    let live = liveSceneJsScenes.find(scene)
-    if live >= 0:
-      liveSceneJsScenes.delete(live)
-  if not scene.jsReady:
-    return
-  if scene.js.context != nil and currentEvalCtx == scene.js.context:
-    currentEvalCtx = nil
-    currentEvalEnv = nil
-  if scene.js.context != nil:
-    clearJsSourceMaps(scene.js.context)
-  if scene.js.runtime != nil:
-    scene.js.runPendingJobs()
-    JS_RunGC(scene.js.runtime)
-  scene.js.close()
+  ## A scene lets go of the programs' context. Caller holds sceneJsLock.
+  ## Reversible: its program is evaluated again the next time it runs.
+  dropProgram(scene)
+  scene.js = QuickJS()
   scene.jsReady = false
-  scene.jsFuncNameByNode = initTable[NodeId, string]()
-  scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
-  scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
 
-when defined(frameosEmbedded):
-  proc evictIdleSceneJs(keep: InterpretedFrameScene) =
-    ## Reclaim other scenes' interpreters before building one more, but only
-    ## when headroom is genuinely short: rebuilding re-parses every code node
-    ## in the evicted scene, so a frame with room to spare should never pay
-    ## that. Mirrors evictIdleJsRuntimes in app_runtime.
-    let headroom = availableRenderBytes()
-    if headroom <= 0 or headroom >= SceneJsEvictHeadroomBytes:
-      return
-    # Iterate a copy: closeSceneJsLocked removes entries as it goes.
-    for other in liveSceneJsScenes.toSeq():
-      if other != keep and other.jsReady and not sceneJsStack.contains(other):
-        closeSceneJsLocked(other)
+proc closeProgramJsLocked() =
+  if not programJsReady:
+    return
+  clearJsSourceMaps(programJs.context)
+  programJs.runPendingJobs()
+  JS_RunGC(programJs.runtime)
+  programJs.close()
+  programJsReady = false
+  inc programJsGeneration
 
-# The scene context's prelude: console, the state/args/context Proxies and
-# the code-node envelope helpers, plus sceneJsPrelude. Loaded as bytecode from
-# the firmware image when tools/prelude_bytecode.nim ran (evalScenePrelude).
+# The scene context's prelude: the replacer the conversions stringify with,
+# plus sceneJsPrelude. `console`, `state`, `args` and `context` are the
+# program's own (scene_compiler.nim). Loaded as bytecode from the firmware
+# image when tools/prelude_bytecode.nim ran (evalScenePrelude).
 const sceneContextJsPrelude* = compactJs("""
     "use strict";
     const __jsReplacer = (k, v) =>
       (typeof v === 'bigint') ? { __bigint: v.toString() }
       : (v === undefined ? null : v);
     globalThis.__frameosStringify = (v) => JSON.stringify(v, __jsReplacer);
-    const console = {
-      log: (...a) => jsLog("log", JSON.stringify(a, __jsReplacer)),
-      warn: (...a) => jsLog("warn", JSON.stringify(a, __jsReplacer)),
-      error: (...a) => jsLog("error", JSON.stringify(a, __jsReplacer)),
-    };
-    const __frameosUnwrap = (v) => (v && v.__frameosUndef === true) ? undefined : v;
-    const __state   = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getState(k))   : undefined; } });
-    const __args    = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getArg(k))     : undefined; } });
-    const __context = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getContext(k)) : undefined; } });
     """ & sceneJsPrelude)
 
 
@@ -871,295 +553,41 @@ proc evalScenePrelude(js: QuickJS) =
   else:
     discard js.eval(sceneContextJsPrelude)
 
-proc ensureSceneJs*(scene: InterpretedFrameScene) =
-  withLock sceneJsLock:
-    if scene.jsReady: return
-    when defined(frameosEmbedded):
-      evictIdleSceneJs(scene)
-      if not liveSceneJsScenes.contains(scene):
-        liveSceneJsScenes.add(scene)
-    scene.js = newQuickJS(sceneJsConfig(scene.frameConfig, scene.id.string))
-    # Register bridge functions ONCE per scene/context
-    scene.js.registerFunction("getState", jsGetState)
-    scene.js.registerFunction("getArg", jsGetArg)
-    scene.js.registerFunction("getContext", jsGetContext)
-    scene.js.registerFunction("jsLog", jsLog)
-    scene.js.registerFunction("parseTs", jsChronoParseTs)
-    scene.js.registerFunction("format", jsChronoFormat)
-    scene.js.registerFunction("now", jsChronoNow)
-    evalScenePrelude(scene.js)
-    discard scene.js.installNativeJsx() # the JSX factory in C (jsx_native.nim)
-    # Initialize registries
-    scene.jsFuncNameByNode = initTable[NodeId, string]()
-    scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
-    scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
-    scene.jsReady = true
-
-# -------------------------
-# Code function naming
-# -------------------------
-
-proc uniqueCodeFnName(scene: InterpretedFrameScene, nodeId: NodeId): string =
-  "__frameos_code_" & $(nodeId.int)
-
-proc uniqueCodeInlineFnName(scene: InterpretedFrameScene, nodeId: NodeId, argName: string): string =
-  "__frameos_code_inline_" & $(nodeId.int) & "_" & toJsIdent(argName)
-
-proc uniqueAppInlineFnName(scene: InterpretedFrameScene, nodeId: NodeId, fieldName: string): string =
-  "__frameos_app_inline_" & $(nodeId.int) & "_" & toJsIdent(fieldName)
-
-# -------------------------
-# Compile code & inline snippets
-# -------------------------
-
-type
-  InlineNameProc* = proc (scene: InterpretedFrameScene, nodeId: NodeId, fieldOrArg: string): string
-  InlineCompileProc* = proc (scene: InterpretedFrameScene, nodeId: NodeId, name: string, snippet: string)
-
-proc compileInlineFn(scene: InterpretedFrameScene,
-                     nodeId: NodeId,
-                     name: string,
-                     snippet: string,
-                     mappingRef: var Table[NodeId, Table[string, string]],
-                     nameBuilder: InlineNameProc) =
-  ensureSceneJs(scene)
-  let fnName = nameBuilder(scene, nodeId, name)
-  let filename = "<frameos:inline:" & $nodeId.int & ":" & name & ">"
-  let envelope = buildEnvelopeFunctionWithMap(snippet, @[], fnName, filename)
-  try:
-    withLock sceneJsLock:
-      scene.onSceneJsStack:
-        discard scene.js.eval(envelope.code, filename, snippetEvalFlags)
-      registerJsSourceMap(scene.js.context, envelope.sourceMap)
-  except CatchableError as e:
-    logCompileError(scene, nodeId, "inline", name, snippet, e, envelope.sourceMap)
-    raise
-  if not mappingRef.hasKey(nodeId):
-    mappingRef[nodeId] = initTable[string, string]()
-  mappingRef[nodeId][name] = fnName
-
-proc compileCodeInlineFn*(scene: InterpretedFrameScene, nodeId: NodeId, argName: string, snippet: string) =
-  compileInlineFn(scene, nodeId, argName, snippet, scene.codeInlineFuncNameByNodeArg, uniqueCodeInlineFnName)
-
-proc compileAppInlineFn*(scene: InterpretedFrameScene, nodeId: NodeId, fieldName: string, snippet: string) =
-  compileInlineFn(scene, nodeId, fieldName, snippet, scene.appInlineFuncNameByNodeArg, uniqueAppInlineFnName)
-
-proc compileCodeFn*(scene: InterpretedFrameScene, node: DiagramNode) =
-  ensureSceneJs(scene)
-
-  # Gather code snippet
-  let codeSnippet = getCodeSnippet(node)
-
-  # Compute a *superset* of possible arg names so bare-ident args get local consts.
-  var argNames: seq[string] = @[]
-  if node.data.hasKey("codeArgs") and node.data["codeArgs"].kind == JArray:
-    for argDef in node.data["codeArgs"]:
-      if argDef.kind == JObject:
-        let nm = argDef{"name"}.getStr()
-        if nm.len > 0 and nm notin argNames: argNames.add(nm)
-
-  if scene.codeInputsForNodeId.hasKey(node.id):
-    for k, _ in scene.codeInputsForNodeId[node.id]:
-      if k notin argNames: argNames.add(k)
-
-  if scene.codeInlineInputsForNodeId.hasKey(node.id):
-    for k, _ in scene.codeInlineInputsForNodeId[node.id]:
-      if k notin argNames: argNames.add(k)
-
-  let fnName = uniqueCodeFnName(scene, node.id)
-  let filename = "<frameos:code:" & $node.id.int & ">"
-  let envelope = buildEnvelopeFunctionWithMap(codeSnippet, argNames, fnName, filename)
-  try:
-    withLock sceneJsLock:
-      scene.onSceneJsStack:
-        discard scene.js.eval(envelope.code, filename, snippetEvalFlags)
-      registerJsSourceMap(scene.js.context, envelope.sourceMap)
-  except CatchableError as e:
-    logCompileError(scene, node.id, "code", "codeJS", codeSnippet, e, envelope.sourceMap)
-    raise
-  scene.jsFuncNameByNode[node.id] = fnName
-
-proc getOrCompileCodeFn*(scene: InterpretedFrameScene, node: DiagramNode): string =
-  if scene.jsFuncNameByNode.hasKey(node.id):
-    return scene.jsFuncNameByNode[node.id]
-  compileCodeFn(scene, node)
-  scene.jsFuncNameByNode[node.id]
-
-# -------------------------
-# Call compiled JS function
-# -------------------------
-
-proc callCompiledFn*(scene: InterpretedFrameScene,
-                     context: ExecutionContext,
-                     nodeId: NodeId,
-                     fnName: string,
-                     args: Table[string, Value],
-                     argTypes: Table[string, string],
-                     outputTypes: Table[string, string],
-                     targetField: string,
-                     defaultedArgs: seq[DefaultedArg] = @[]): Value =
-  ## Set EvalEnv for this scene context, call fnName(), parse envelope, coerce.
-  ##
-  ## `defaultedArgs` lists arguments whose producer raised and were replaced by
-  ## a zero value. They are only used to annotate a JS error, so the user reads
-  ## "recycle failed: HTTP 401 …" instead of a bare Symbol.iterator complaint.
-  var expectedType = ""
-  if targetField.len > 0 and outputTypes.hasKey(targetField):
-    expectedType = outputTypes[targetField]
-
-  let e = EvalEnv(
-    scene: scene,
-    context: context,
-    nodeId: nodeId,
-    args: args,
-    argTypes: argTypes,
-    outputTypes: outputTypes,
-    targetField: targetField
-  )
-
-  var envelopeJson = ""
-  withLock sceneJsLock:
-    currentEvalCtx = scene.js.context
-    currentEvalEnv = e
-    sceneJsStack.add(scene)
-    try:
-      envelopeJson = scene.js.eval(fnName & "()")
-    except JSException as err:
-      # Normally the envelope catches the node's own throws and hands back an
-      # error envelope. A blown time budget cannot go that way: QuickJS marks
-      # the interrupt uncatchable, so no JS try/catch — including the
-      # envelope's — ever sees it. Rebuild the envelope here so a runaway node
-      # is logged and defaulted like any other failing node instead of taking
-      # the render down.
-      envelopeJson = $(%*{"k": "error", "v": {"message": err.msg, "stack": err.msg}})
-    finally:
-      if sceneJsStack.len > 0 and sceneJsStack[^1] == scene:
-        discard sceneJsStack.pop()
-      if currentEvalCtx == scene.js.context:
-        currentEvalCtx = nil
-        currentEvalEnv = nil
-
-  var parsed: JsonNode
-  try:
-    parsed = parseJson(envelopeJson)
-  except CatchableError:
-    return Value(kind: fkString, s: envelopeJson)
-
-  let kind = parsed{"k"}.getStr()
-  if kind == "error":
-    # The JS-side envelope caught the error, so QuickJS's text arrives raw;
-    # an `out of memory` here is the scene's shared heap ceiling.
-    var message = describeJsError(mapJsErrorText(scene.js.context, parsed{"v"}{"message"}.getStr()))
-    let stack = mapJsErrorText(scene.js.context, parsed{"v"}{"stack"}.getStr())
-    var errorPayload = %*{
-      "event": "interpreter:jsError",
-      "sceneId": scene.id.string,
-      "nodeId": nodeId.int,
-      "message": message,
-      "stack": stack
-    }
-    if defaultedArgs.len > 0:
-      # Make the failure attributable: the JS message alone ("cannot read
-      # property 'Symbol.iterator' of undefined") hides the real cause, which
-      # is the upstream producer that died.
-      var parts: seq[string] = @[]
-      var details = newJArray()
-      for arg in defaultedArgs:
-        var detail = arg.error
-        if detail.len > 200:
-          detail = detail[0 ..< 200] & "..."
-        parts.add(arg.name & " failed: " & detail)
-        details.add(%*{"arg": arg.name, "error": arg.error})
-      message = message & " (defaulted inputs: " & parts.join("; ") & ")"
-      errorPayload["message"] = %message
-      errorPayload["defaultedArgs"] = details
-    scene.logNodeErrorPayload(nodeId, errorPayload)
-    if expectedType.len > 0:
-      if expectedType == "string": return Value(kind: fkString, s: "")
-      return valueFromJsonByType(newJNull(), expectedType)
-    return Value(kind: fkNone)
-
-  return envelopeToValue(parsed, expectedType)
-
-# -------------------------
-# Inline evaluation helper (generic)
-# -------------------------
-
-proc evalInline*(scene: InterpretedFrameScene,
-                 context: ExecutionContext,
-                 nodeId: NodeId,
-                 name: string,
-                 snippet: string,
-                 mapping: var Table[NodeId, Table[string, string]],
-                 ensureCompiled: InlineCompileProc,
-                 targetField: string): Value =
-  let emptyArgs = initTable[string, Value]()
-  let emptyArgTypes = initTable[string, string]()
-  let emptyOutputs = initTable[string, string]()
-  var fnName = ""
-  if mapping.hasKey(nodeId) and mapping[nodeId].hasKey(name):
-    fnName = mapping[nodeId][name]
+proc jsLimits(frameConfig: FrameConfig): tuple[timeoutMs, memoryMb, stackKb: int] =
+  if frameConfig != nil and frameConfig.js != nil:
+    (frameConfig.js.executionTimeoutMs, frameConfig.js.memoryLimitMb, frameConfig.js.maxStackKb)
   else:
-    ensureCompiled(scene, nodeId, name, snippet)
-    fnName = mapping[nodeId][name]
-  callCompiledFn(scene, context, nodeId, fnName, emptyArgs, emptyArgTypes, emptyOutputs, targetField)
+    (-1, -1, -1)
 
-# -------------------------
-# Public convenience: eval a raw snippet from anywhere
-# -------------------------
-
-var anonCounter = 0
-
-proc evalSnippet*(
-  scene: InterpretedFrameScene,
-  context: ExecutionContext,
-  nodeId: NodeId,
-  code: string,
-  expectedType: string = "",
-  argNames: seq[string] = @[],
-  args: Table[string, Value] = initTable[string, Value](),
-  argTypes: Table[string, string] = initTable[string, string](),
-  outputTypes: Table[string, string] = initTable[string, string]()
-): Value =
-  ## One-shot helper: ensure JS, compile `code` into a unique function, call it, coerce to `expectedType` if given.
-  ensureSceneJs(scene)
-  inc anonCounter
-  let fnName = "__frameos_eval_" & $(nodeId.int) & "_" & $anonCounter
-  let filename = "<frameos:eval:" & $nodeId.int & ":" & $anonCounter & ">"
-  let envelope = buildEnvelopeFunctionWithMap(code, argNames, fnName, filename)
-  try:
-    withLock sceneJsLock:
-      scene.onSceneJsStack:
-        discard scene.js.eval(envelope.code, filename, snippetEvalFlags)
-      registerJsSourceMap(scene.js.context, envelope.sourceMap)
-  except CatchableError as e:
-    logCompileError(scene, nodeId, "eval", fnName, code, e, envelope.sourceMap)
-    raise
-
-  var outs = outputTypes
-  var targetField = ""
-  if expectedType.len > 0:
-    targetField = "__expected"
-    outs[targetField] = expectedType
-
-  callCompiledFn(scene, context, nodeId, fnName, args, argTypes, outs, targetField)
-
-proc toJsIdentForTest*(name: string): string =
-  toJsIdent(name)
-
-proc jsQuoteForTest*(s: string): string =
-  jsQuote(s)
-
-proc envelopeToValueForTest*(env: JsonNode, expectedType: string = ""): Value =
-  envelopeToValue(env, expectedType)
+proc ensureSceneJs*(scene: InterpretedFrameScene) =
+  ## The programs' context, made on first use, and the scene's handle to it.
+  withLock sceneJsLock:
+    let limits = jsLimits(scene.frameConfig)
+    if programJsReady and limits != programJsLimits and sceneJsStack.len == 0:
+      # frame.json's js ceilings changed: a context made with the new ones.
+      closeProgramJsLocked()
+    if not programJsReady:
+      programJs = newQuickJS(sceneJsConfig(scene.frameConfig, ProgramsBudgetId))
+      # The time helpers scene code calls by name.
+      programJs.registerFunction("parseTs", jsChronoParseTs)
+      programJs.registerFunction("format", jsChronoFormat)
+      programJs.registerFunction("now", jsChronoNow)
+      evalScenePrelude(programJs)
+      discard programJs.installNativeJsx() # the JSX factory in C (jsx_native.nim)
+      programJsReady = true
+      programJsLimits = limits
+    if scene.jsReady and scene.jsGeneration == programJsGeneration:
+      return
+    scene.programReady = false # what it had was in a context that is gone
+    reset(scene.programEntries)
+    scene.js = programJs
+    scene.jsReady = true
+    scene.jsGeneration = programJsGeneration
 
 proc sceneJsLockFreeForTest*(): bool =
   result = tryAcquire(sceneJsLock)
   if result:
     release(sceneJsLock)
-
-proc cleanupCompilerJs*() =
-  discard
 
 proc cleanupSceneJs*(scene: InterpretedFrameScene) =
   withLock sceneJsLock:
@@ -1167,30 +595,23 @@ proc cleanupSceneJs*(scene: InterpretedFrameScene) =
 
 proc abandonMidCallSceneJs*(): tuple[count, bytes: int] =
   ## After an out-of-memory abort (single_scene_host.recoverAbortedRun): drop
-  ## the scene interpreters the abort jumped out of, as
-  ## app_runtime.abandonMidCallJsAppRuntimes does for JS apps, and let go of
-  ## sceneJsLock. Every eval holds that lock, so an abort inside one left it
-  ## taken for good and the next code node waited on it forever. The abort
-  ## jumped back into the call that took it, on this same task: tryAcquire
-  ## fails on a lock this task holds (it is not recursive) and takes a free
-  ## one, so either way it is held once here and released once.
+  ## the programs' context if the abort jumped out of a program, as
+  ## app_runtime.abandonMidCallJsAppRuntimes does for JS apps (every scene
+  ## evaluates its program again on its next run), and let go of sceneJsLock
+  ## should the abort have left it taken: tryAcquire fails on a lock this task
+  ## holds (it is not recursive) and takes a free one, so either way it is
+  ## held once here and released once.
   discard tryAcquire(sceneJsLock)
   release(sceneJsLock)
+  if sceneJsStack.len > 0 and programJsReady:
+    clearJsSourceMaps(programJs.context)
+    result.bytes = programJs.abandon()
+    result.count = 1
+    programJsReady = false
+    inc programJsGeneration
   for scene in sceneJsStack:
-    if scene.isNil or not scene.jsReady:
-      continue
-    if scene.js.context != nil:
-      clearJsSourceMaps(scene.js.context)
-    result.bytes += scene.js.abandon()
-    inc result.count
-    scene.jsReady = false
-    scene.jsFuncNameByNode = initTable[NodeId, string]()
-    scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
-    scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
-    when defined(frameosEmbedded):
-      let live = liveSceneJsScenes.find(scene)
-      if live >= 0:
-        liveSceneJsScenes.delete(live)
+    if not scene.isNil:
+      scene.programReady = false # its values went with the runtime
+      reset(scene.programEntries)
+      scene.jsReady = false
   sceneJsStack.setLen(0)
-  currentEvalCtx = nil
-  currentEvalEnv = nil

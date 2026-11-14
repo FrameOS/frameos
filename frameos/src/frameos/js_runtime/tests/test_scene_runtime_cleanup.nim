@@ -114,11 +114,10 @@ suite "scene runtime cleanup":
     cleanupSceneRuntime(scene)
     check runtime.ready == false
 
-  test "a scene with no JS never builds a runtime":
-    # ensureSceneJs is called by compileCodeFn/compileAppInlineFn/evalOneShot,
-    # so init() building one up front only ever charged scenes that have no
-    # code nodes and no inline JS — the common shape for a scene that exists
-    # to nest others.
+  test "a scene with no code of its own builds no runtime when it starts":
+    # Its program needs a context only when it first runs; init() builds one
+    # up front only for a scene with snippets, so that one that does not
+    # compile fails the scene there.
     let config = FrameConfig(width: 4, height: 3, rotate: 0, scalingMode: "cover",
       saveAssets: %*false, assetsPath: "/tmp")
     let logger = testLogger()
@@ -147,13 +146,12 @@ suite "scene runtime cleanup":
 
     setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
 
-  test "a torn-down scene rebuilds its code functions on demand":
+  test "a torn-down scene evaluates its program again on demand":
     # This is the invariant that makes evicting a scene's interpreter safe at
     # all. Under memory pressure an embedded frame drops other scenes' JS
-    # contexts to make room; getOrCompileCodeFn and evalInline then have to
-    # rebuild what they need, from name tables cleanupSceneJs deliberately
-    # cleared. If that stopped holding, eviction would turn into "the code node
-    # silently stops running" — so it is asserted here rather than assumed.
+    # contexts to make room; the program then has to be evaluated again the
+    # next time the scene runs. If that stopped holding, eviction would turn
+    # into "the code node silently stops running", so it is asserted here.
     let config = FrameConfig(width: 4, height: 3, rotate: 0, scalingMode: "cover",
       saveAssets: %*false, assetsPath: "/tmp")
     let logger = testLogger()
@@ -184,7 +182,7 @@ suite "scene runtime cleanup":
     # What eviction does to a scene that is not currently running.
     cleanupSceneJs(scene)
     check scene.jsReady == false
-    check scene.jsFuncNameByNode.len == 0
+    check scene.programReady == false
 
     let after = scene.getDataNode(2.NodeId, context)
     check after.asInt() == 23

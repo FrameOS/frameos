@@ -231,7 +231,9 @@ doAssert renderDeadlineArmedNow(), "the jump left the aborted render's deadline 
 let fromApp = abortHost.recoverAbortedRun()
 doAssert not renderDeadlineArmedNow()
 doAssert dispatchBudgetTotalNow() == 0
-doAssert fromApp.jsDropped == 1, "the app's interpreter was mid-call: " & $fromApp
+# The app's interpreter was mid-call, and so was the scene's own program,
+# which ran the app: both go.
+doAssert fromApp.jsDropped == 2, "the app's and the scene's interpreters were mid-call: " & $fromApp
 doAssert fromApp.jsBytes > 0
 abortIn = ""
 logLines.setLen(0)
@@ -240,10 +242,10 @@ doAssert count("fetched 200") == 1, "the app runs again, on a new interpreter: "
 doAssert count("deadline") == 0, $logLines
 
 # Inside a code node, from an event: the dispatcher was draining and the
-# scene's interpreter held sceneJsLock.
+# scene's program was running. (It holds no lock while it runs, so none is
+# left taken.)
 abortIn = "code"
 doAssert guarded(pressOnce) == 1, "the event jumped out"
-doAssert not sceneJsLockFreeForTest(), "the jump left sceneJsLock taken"
 let fromCode = abortHost.recoverAbortedRun()
 doAssert sceneJsLockFreeForTest(), "or the next code node waits for it forever"
 doAssert fromCode.jsDropped == 1, "the scene's interpreter was mid-call: " & $fromCode
