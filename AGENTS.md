@@ -249,6 +249,27 @@
   the bundle. A new pusher sets `source` and goes through the same two
   routes, never a store of its own.
 
+## The scene store on a frame: `docs/scene-store.md`
+
+- **Scene store** is a scene (`repo/scenes/samples/Scene store`, one JSX app),
+  and so is its sibling **Asset browser**. The app has the words and keeps
+  where it is in a private disk field (`spot`), so it reopens on the same spot
+  after a preview; the host has the facts and does the network off the render
+  task: `frameos.store()` / `frameos.storeAction()`
+  (`frameos/scene_store_hooks.nim`; `frameos/scene_store_linux.nim` on a worker
+  thread, `main/fos_store.c` on its own task), and it draws the scene that
+  asked again when it is done, if it still shows. A new action is a host's on
+  both; a word is the app's. A runtime with no host (the preview, a board
+  rendered on its plane) answers null and the app installs nothing.
+- Browsing is the store's listing for frames (`/api/store/device/scenes`, a
+  page the size of the app's grid, `prefer` / `exclude` for the Real time
+  shelf). A change is asked of the frame's plane (`POST
+  /api/frames/{id}/panel/scenes`, cloud `panel-scenes.ts`, backend
+  `panel_scenes.py`, which a Pi reaches at `/api/panel/scenes`): public store
+  scenes only, no service key ever granted, refused while the settings on the
+  screen are off; `show: false` installs without leaving the store. Only a
+  frame with no plane installs by itself. Keep the two routes alike.
+
 ## One scene at a time on the ESP32: `embedded/esp32/README.md` "Scene storage"
 
 - The firmware keeps one file per scene (`main/fos_scene_store.c`, pure, host

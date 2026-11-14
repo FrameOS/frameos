@@ -1,0 +1,10 @@
+{
+  "name": "Scene store",
+  "description": "The FrameOS scene store on the frame: pick a shelf or search, preview a scene or install it, and open, update or delete the ones the frame has.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.8"
+}

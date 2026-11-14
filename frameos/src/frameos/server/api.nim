@@ -104,7 +104,8 @@ proc activeScenesJsonPath*(): tuple[path: string, compressed: bool] =
     return (path: "./scenes.json", compressed: false)
   (path: "./scenes.json.gz", compressed: true)
 
-proc loadScenePayload(): JsonNode =
+proc loadScenePayload*(): JsonNode =
+  ## The frame's own (deployed) scenes as they are on disk; [] without any.
   var data = ""
   let source = activeScenesJsonPath()
   try:

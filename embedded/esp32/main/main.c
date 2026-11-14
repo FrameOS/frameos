@@ -50,6 +50,7 @@
 #include "fos_config.h"
 #include "fos_console.h"
 #include "fos_frame_settings.h"
+#include "fos_store.h"
 #include "fos_framebuffer.h"
 #include "fos_http.h"
 #include "fos_ota.h"
@@ -527,6 +528,7 @@ void app_main(void)
      * top) has the network, and the frame joins it in the background. */
     bool touch_setup = fos_touch_present() && fos_display_is_lcd();
     fos_frame_settings_init();
+    fos_store_init();
     bool online = false;
     if (touch_setup) {
         if (fos_config_wifi_ready()) {

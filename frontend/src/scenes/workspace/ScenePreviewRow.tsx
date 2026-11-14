@@ -35,6 +35,8 @@ function StandingScenePreviewRow({
       title={
         scenePreview.source === 'voice'
           ? 'A picture the voice chat put on the frame for now. It is not in the scene list, and stays on the frame until it is installed or discarded.'
+          : scenePreview.source === 'panel'
+          ? 'A store scene previewed from the Scene store on the frame. It is not in the scene list, and stays on the frame until it is installed or discarded.'
           : 'A scene previewed on the frame for now. It is not in the scene list, and stays on the frame until it is installed or discarded.'
       }
       data-testid="scene-preview-row"
@@ -55,7 +57,12 @@ function StandingScenePreviewRow({
           {scenePreview.name || 'Preview'}
         </span>
         <span className="frameos-muted mt-0.5 block truncate text-xs text-slate-400">
-          {scenePreview.source === 'voice' ? 'from the voice chat' : 'from the editor'} · not in the list
+          {scenePreview.source === 'voice'
+            ? 'from the voice chat'
+            : scenePreview.source === 'panel'
+            ? "from the frame's Scene store"
+            : 'from the editor'}{' '}
+          · not in the list
         </span>
       </span>
       <Tag

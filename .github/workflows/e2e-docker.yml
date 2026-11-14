@@ -412,6 +412,12 @@ jobs:
             embedded/esp32/main/tests/test_fos_scene_store.c \
             -lm -o /tmp/test_fos_scene_store
           /tmp/test_fos_scene_store
+          # What the scene store on the frame reads off store answers and
+          # stored scenes without a JSON tree (fos_store_scan.c).
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/fos_store_scan.c embedded/esp32/main/tests/test_fos_store_scan.c \
+            -o /tmp/test_fos_store_scan
+          /tmp/test_fos_store_scan
           # The SPIFFS garbage collection order and the scene store split,
           # replayed on the SPIFFS that ESP-IDF ships (fos_spiffs_gc.c, a
           # 20-scene set pushed over itself on a 1 MB /state). The backend

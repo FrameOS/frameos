@@ -39,13 +39,16 @@ proc render(ui: Ui, target: Image = nil): Image =
     decodeTargetImage: target, decodeTargetNodeId: 1.NodeId, decodeTargetScalingMode: "cover")
   ui.runtime.get(ui.owner, %*{}, context).asImage()
 
-proc dataUrl(color: ColorRGBX): string =
-  let image = newImage(8, 8)
+proc dataUrl(color: ColorRGBX, size = 8): string =
+  let image = newImage(size, size)
   image.fill(color)
   "data:image/png;base64," & base64.encode(encodeImage(image, PngFormat))
 
 let
   red = dataUrl(rgbx(255, 0, 0, 255))
+  # A host keeps a picture at its own size: 700x700, nine of them past the
+  # pixels of eight 480x480 photos.
+  bigRed = dataUrl(rgbx(255, 0, 0, 255), 700)
   blue = dataUrl(rgbx(0, 0, 255, 255))
 
 proc gallery(keep: bool): string =
@@ -169,19 +172,35 @@ suite "kept images":
     check ui.scene.state{"second"}.getStr().contains("no room for the picture")
     check ui.scene.state{"firstKept"}.getBool() == false
 
-  test "at most eight are kept; the oldest goes for a ninth":
+  test "eight large pictures are kept; the oldest goes for a ninth":
     let ui = newUi("""
       const refs = []
       export function get() {
-        for (let i = 0; i < 9; i++) refs.push(frameos.fetchImage('REDURL', { keep: true }))
+        for (let i = 0; i < 9; i++) refs.push(frameos.fetchImage('REDURL', { keep: true, width: 700, height: 700 }))
         frameos.setState('first', frameos.releaseImage(refs[0]))
         frameos.setState('second', frameos.releaseImage(refs[1]))
         return <div className="bg-white" />
       }
-    """.replace("REDURL", red), "tests/kept-limit")
+    """.replace("REDURL", bigRed), "tests/kept-limit")
     discard ui.render()
     check ui.scene.state{"first"}.getBool() == false
     check ui.scene.state{"second"}.getBool() == true
+
+  test "small ones are kept past eight, up to 48 (a grid of covers)":
+    let ui = newUi("""
+      const refs = []
+      export function get() {
+        for (let i = 0; i < 49; i++) refs.push(frameos.fetchImage('REDURL', { keep: true, width: 160, height: 120 }))
+        frameos.setState('first', frameos.releaseImage(refs[0]))
+        frameos.setState('second', frameos.releaseImage(refs[1]))
+        frameos.setState('ninth', frameos.releaseImage(refs[8]))
+        return <div className="bg-white" />
+      }
+    """.replace("REDURL", red), "tests/kept-thumbnails")
+    discard ui.render()
+    check ui.scene.state{"first"}.getBool() == false
+    check ui.scene.state{"second"}.getBool() == true
+    check ui.scene.state{"ninth"}.getBool() == true
 
 # What a kept picture with a size decodes into once the start of its download
 # says how big the photo is: utils/image.nim probeSourceTarget feeding

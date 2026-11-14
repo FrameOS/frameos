@@ -1,0 +1,10 @@
+{
+  "name": "Asset browser",
+  "description": "Browse the frame's assets folder: folders and pictures as a grid, a picture on the whole screen with a swipe to the next, and where you were kept for next time.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.8"
+}
