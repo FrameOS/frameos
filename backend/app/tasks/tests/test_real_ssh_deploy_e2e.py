@@ -474,7 +474,24 @@ def _log_lines(db, frame: Frame) -> list[str]:
     ]
 
 
+def _private_nimble_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The deploy runs `nimble assets && nimble setup` on this machine, and
+    nimble rewrites its package database (nimbledata2.json) as it goes: two
+    tests doing that at once under xdist had one read the other's half-written
+    file (CI, 2026-11-14). Each worker gets a copy of the nimble directory;
+    a run without xdist keeps using the real one."""
+    if not os.environ.get("PYTEST_XDIST_WORKER"):
+        return
+    source = Path(os.environ.get("NIMBLE_DIR") or Path.home() / ".nimble")
+    if not source.is_dir():
+        return
+    target = tmp_path / "nimble"
+    shutil.copytree(source, target, symlinks=True)
+    monkeypatch.setenv("NIMBLE_DIR", str(target))
+
+
 def _prepare_deploy_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    _private_nimble_dir(tmp_path, monkeypatch)
     nim_path = find_nim_v2()
     _say(f"using Nim compiler at {nim_path}")
     monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
