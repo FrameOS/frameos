@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The 8-bit palette samples (Pixel toys, Hellfire and Color cycling) in the
+// The 8-bit palette samples (Pixel toys, Hellfire among them, and Color cycling) in the
 // memory of an ESP32-S3 with 8 MB of PSRAM (the SenseCAP Indicator): the wasm
 // build of the runtime with its heap capped to what that board has
 // (docs/device-limits-fixtures.json). Every effect and every scene, a few
@@ -60,12 +60,11 @@ call('frameos_wasm_set_embedded', null, ['boolean'], [true])
 call('frameos_wasm_set_canvas_bits_per_pixel', null, ['number'], [limits.canvasBytesPerPixel * 8])
 
 const [toys] = await readJson('repo', 'scenes', 'samples', 'Pixel toys', 'scenes.json')
-const [hellfire] = await readJson('repo', 'scenes', 'samples', 'Hellfire', 'scenes.json')
 const [cycling] = await readJson('repo', 'scenes', 'samples', 'Color cycling', 'scenes.json')
 // A tenth of a second of cycling a render, so every frame moves however fast
 // this host renders.
 cycling.nodes.find((node) => node.id === 'cycling').data.config.msPerRender = '100'
-if (call('frameos_wasm_load_scenes', 'number', ['string'], [JSON.stringify([toys, hellfire, cycling])]) < 3) {
+if (call('frameos_wasm_load_scenes', 'number', ['string'], [JSON.stringify([toys, cycling])]) < 2) {
   fail(`load scenes: ${lastError()}`)
 }
 
@@ -137,8 +136,7 @@ const effects = toys.fields.find((field) => field.name === 'effect').options.map
 for (const effect of effects) {
   play(`${effect}`, toys.id, { effect, quality: '0', showFps: false })
 }
-play('fire, 4 px, fps', toys.id, { effect: 'fire', quality: '4', showFps: true })
-play('Hellfire', hellfire.id, { quality: '0', showFps: true })
+play('Hellfire, 4 px, fps', toys.id, { effect: 'fire', quality: '4', showFps: true })
 const scenes = cycling.fields.find((field) => field.name === 'scene').options.map((option) => option.value)
 for (const scene of scenes) {
   play(`color cycling: ${scene}`, cycling.id, { scene, quality: '0' })

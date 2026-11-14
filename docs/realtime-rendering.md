@@ -17,16 +17,16 @@ full-screen 480x480 SVG every frame — a background `<rect>`, the logo's five
 paths twice (the shadow at `opacity="0.32"`) — and returns
 `frameos.svg(svg, {width, height})`. `refreshInterval` 0.0333.
 
-The second yardstick is the sample scene **Hellfire**
-(`repo/scenes/samples/Hellfire`): the Doom fire, a byte of heat per cell, its
+The second yardstick is **Hellfire**, the first effect of the Pixel toys sample
+(`repo/scenes/samples/Pixel toys`, `fire.ts`): the Doom fire, a byte of heat per cell, its
 spread rule in the app's own JS and the cells returned in the **8-bit palette
 mode** (below), which writes the ones that changed straight into the panel's
 buffer. No SVG, JSX or canvas is involved, so what it measures is the
-interpreter's loop and the raw pixel path. It reads its own number off the panel: its **FPS counter**
+interpreter's loop and the raw pixel path. It reads its own number off the panel: the scene's **FPS counter**
 field draws the renders a second the panel gets (simulation, blit and pacing
 included) in a corner, in the fire's own cells so that it does not slow what it
 measures, and its **Quality** field picks the cell size: automatic (4 px, 8 on
-an ESP32), 8, 4 or 2 px. The rule stays in JS on purpose: a native Doom spread
+an ESP32), 8, 4 or 2 px. (It was a sample of its own until it joined Pixel toys.) The rule stays in JS on purpose: a native Doom spread
 in every runtime (`frameos.fire`, tried and taken out again) was one scene's
 inner loop as a core API, and the interpreter's cost is what the yardstick is
 for. Measured on the SenseCAP Indicator (480x480, the panel's 16 KB
@@ -76,9 +76,9 @@ layers, no writes into a canvas (all three were built and taken out again).
   ESP32, the palette packed once a frame); every other format goes a pixel at
   a time through pixie's `setPixel`, which e-paper and a Pi never notice.
 
-So an app can animate two ways. It can change cells, as Hellfire and the
-**Pixel toys** do (`repo/scenes/samples/Pixel toys`, each effect a component of
-one app: fire in three colors, fireworks, a fountain, a waterfall, a starfield,
+So an app can animate two ways. It can change cells, as the **Pixel toys** do
+(`repo/scenes/samples/Pixel toys`, each effect a component of one app: Hellfire
+in three palettes, fireworks, a fountain, a waterfall, a starfield,
 Matrix rain, ripples, blobs, a plasma and Life; a swipe for the next). Or it can
 change only the palette, as 8-bit games did: the **Color cycling** sample
 (`repo/scenes/samples/Color cycling`) draws each of its six scenes once, with
@@ -88,20 +88,39 @@ those ranges by the clock. A frame of it is a palette of 256 colors worked out
 in JS and the cells of the colors that moved; the cells that hold still, most
 of the picture, are never written again.
 
-The Pixel toys on the SenseCAP Indicator, by the `render:animation` line:
+The Pixel toys use `frameos.ops` where the runtime has it (the trails' fade
+is one `map` over all the cells, the ripples' wave five passes) and keep their
+JS loop for an older runtime (`if (frameos.ops)`). `convolve` leaves a grid's
+edges as they are, so an array whose edges must stay put holds nothing else:
+the ripples once wrote the heights they show into the array of neighbour
+sums, and the edges grew every frame until bright squares filled the pond.
 
-| Effect | Automatic cells | fps | Other cells | fps |
-| --- | --- | --- | --- | --- |
-| Fire | 8 px | 23.4 | | |
-| Fireworks | 4 px | 18.7 | 8 px | 25.6 |
-| Fountain | 4 px | 14.4 | 8 px | 17.9 |
-| Waterfall | 4 px | 13.2 | | |
-| Starfield | 4 px | 17.1 | 8 px | 17.7 |
-| Matrix rain | 4 px | 15.2 | | |
-| Ripples | 8 px | 12.6 | | |
-| Blobs | 8 px | 15.3 | 4 px | 6.7 |
-| Plasma | 8 px | 16.6 | 4 px | 8.0 |
-| Life | 8 px | 18.8 | 4 px | 7.4 |
+The Pixel toys on the SenseCAP Indicator, automatic cells, by the
+`render:animation` line (2026-11-14, firmware with QuickJS's hot loop at `-O2`,
+#744; "JS only" is the same firmware with the effect's `frameos.ops` path off):
+
+| Effect | Cells | fps | JS only |
+| --- | --- | --- | --- |
+| Hellfire (three palettes) | 8 px | 24.8 to 25.1 | |
+| Fireworks | 4 px | 26.2 | 18.4 |
+| Fountain | 4 px | 18.4 | 14.9 |
+| Waterfall | 4 px | 18.6 | 14.1 |
+| Starfield | 4 px | 17.0 | |
+| Matrix rain | 4 px | 23.8 | 16.3 |
+| Ripples | 8 px | 21.5 | 13.3 |
+| Blobs | 8 px | 15.9 | |
+| Plasma | 8 px | 16.8 | |
+| Life | 8 px | 20.1 | |
+
+The Color cycling scenes on the same board, at 160x160 cells (3 px), all at the
+scene's own 20 fps (`refreshInterval` 0.05). Two things it needed there: the
+palette's per-frame rotation blends with integers inline (a helper with a
+closure and three `Math.round` a color was 37 ms of a 68 ms frame; now 3.6),
+and a scene's first draw keeps to integers, `| 0` and values worked out once
+per row or column, because the S3 has no double-precision FPU and a native
+`Math.*` call from QuickJS costs microseconds a cell. Drawing a scene is still
+1.3 to 2.1 s on a swipe (the loading mark shows), so the app keeps every scene
+it drew, and swiping back to one is a frame (~90 ms).
 
 What the first versions spent and the rewrite took out, in a frame's `step`:
 the fireworks' fade over every row (30 of 34 ms), a `trails.plot` call and a
