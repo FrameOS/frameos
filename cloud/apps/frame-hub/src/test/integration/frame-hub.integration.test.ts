@@ -810,6 +810,51 @@ describe("scenes_patch", () => {
     device.ws.close();
   });
 
+  it("sends the whole list when the refusal lands before the patch is written sent", async () => {
+    // A loaded runner (main CI, 2026-11-14) handled the refusal before the
+    // drain wrote the patch `sent`; that write then stranded the row.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    const extra = await startExtraHub({
+      beforeMarkSent: async (_id, messageType) => {
+        if (messageType !== "scenes_patch" || held) return;
+        held = true;
+        await gate;
+      },
+    });
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token, extra.port);
+    await handshake(device, privateKey, esp32);
+    await pushOne(frame.id, device);
+
+    const changedA = { ...sceneA, name: "A2" };
+    const second = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-2", scenes: [changedA, sceneB] },
+      type: "set_scenes",
+    });
+    const patch = await device.next((msg) => msg.id === second?.id, "the patch");
+    expect(patch.type).toBe("scenes_patch");
+    device.send({ error: "base_mismatch", id: second?.id, ok: false, type: "ack" });
+    await waitFor(async () => {
+      const [row] = await db.select().from(frameCommands).where(eq(frameCommands.id, String(second?.id)));
+      const payload = row?.payload as Record<string, unknown> | undefined;
+      return row?.status === "pending" && payload?.no_patch === true ? row : undefined;
+    }, "the refusal put the row back");
+    release();
+
+    const full = await device.next(
+      (msg) => msg.id === second?.id && msg.type === "set_scenes",
+      "the same row, as the whole list",
+    );
+    expect(full.scenes).toEqual([changedA, sceneB]);
+    await settle(device, frame.id, second?.id, "set-2");
+    device.ws.close();
+  });
+
   it("keeps a Linux frame and firmware before the verb on set_scenes", async () => {
     for (const hello of [
       { frameos_version: "2026.11.6", hardware: { platform: "pi-zero2w" } },
