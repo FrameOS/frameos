@@ -259,8 +259,8 @@ describe("the rules a device or a push carries", () => {
     expect(isEventMapRule("nonsense")).toBe(false);
     // The emits are the contract's: what the eventMap origin may say.
     expect([...eventMapEmits].sort()).toEqual([
-      "back", "forward", "render", "sceneSettings", "sceneSwitcher", "setCurrentScene", "setSceneState", "toggleScreen", "turnOff", "turnOn",
-      "voiceChat",
+      "back", "forward", "render", "sceneSettings", "sceneSwitcher", "setCurrentScene", "setSceneState", "terminal", "toggleScreen",
+      "turnOff", "turnOn", "voiceChat",
     ]);
   });
 
