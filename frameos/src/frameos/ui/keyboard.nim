@@ -36,6 +36,7 @@
 
 import std/unicode
 import pixie/fileformats/svg
+import frameos/ui/theme
 import frameos/ui/tree
 when not defined(frameosEmbedded):
   import frameos/panel_shape
@@ -225,6 +226,10 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
   # without clearing it, and the next `c = ...` in the loop frees what the
   # node holds.
   result = el("div", move c)
+  # The layout theme's `keyboard` (ui/theme.nim); its keys `key`, `keyMod` (the
+  # keys that do something else) and `keyLit` (shift on, held, just typed).
+  when not defined(frameosEmbedded):
+    if not round: result = result.role("keyboard")
   # A tap between the keys is the keyboard's too: the nearest key (ui/events.nim),
   # and the field keeps the keyboard.
   result.attrs.add(("on-click", $KeyBase))
@@ -315,7 +320,7 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
       # Held: its accents (ui/events.nim opens them, ui/layout.nim draws
       # them), or backspace erasing again and again.
       key.attrs.add(("on-long-press", $(KeyBase + code)))
-    row.children.add key
+    row.children.add key.role(if lit or code == flash and not paper: "keyLit" elif code < 32: "keyMod" else: "key")
 
 proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool, page: KeyboardPage,
     lit = -1, reversed = false): SvgNode =
@@ -329,7 +334,7 @@ proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool, page: KeyboardP
   c.px("text", keyTextSize(keyH))
   if paper: c.add " bg-white text-black border-black"
   else: c.add " bg-zinc-800 text-white border-zinc-500"
-  result = el("div", move c)
+  result = el("div", move c).role("keyboard")
   let count = formCount(code, page)
   for n in 0 ..< count:
     let i = if reversed: count - 1 - n else: n
@@ -343,6 +348,6 @@ proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool, page: KeyboardP
     else: c.add " bg-zinc-600"
     let key = el("div", move c, SvgNode(text: formText(code, i, shift, page)))
     key.attrs.add(("on-click", $(AccentBase + i)))
-    result.children.add key
+    result.children.add key.role(if i == lit: "keyLit" else: "key")
 
 {.pop.}

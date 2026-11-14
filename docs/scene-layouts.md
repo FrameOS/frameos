@@ -164,6 +164,11 @@ scene lists: the top of `Windows 98`'s Start, a bag for the store in `Tiling`'s 
 bar. Everywhere else (an ESP32, an editor's preview) they draw the one
 scene, as before.
 
+A layout also dresses the frame's own pages (the settings, the scene switcher,
+the keyboard on the screen) in its look: its state's `theme`
+(`docs/jsx-ui.md` "Themes"). The samples set it from their "Look of the settings
+pages" field, High contrast among the choices.
+
 The runtime gives a layout three things and keeps no windows of its own:
 
 - **`app.frame.scenes`**, the frame's scenes (`{id, name}`, layouts left out, in

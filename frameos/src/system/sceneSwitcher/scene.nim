@@ -38,6 +38,7 @@ import frameos/render_scale
 import frameos/scene_rhythm
 import frameos/ui/layout
 import frameos/ui/events
+import frameos/ui/theme
 import frameos/ui/tree
 import frameos/utils/font
 import frameos/utils/image
@@ -467,6 +468,9 @@ proc arrowButton(size: int, left: bool, button: string): SvgNode =
     s.square(size * 2 div 3)
     chevron.attrs.add(("class", s))
     result.children.add chevron
+  # The layout theme's look for a button (ui/theme.nim), on a Pi.
+  when not defined(frameosEmbedded):
+    result = result.role("button")
 
 type TileLook = object
   ## What every tile on the page shares, and the one at hand.
@@ -490,14 +494,14 @@ proc titleRow(look: TileLook, index, size: int, height = 0): SvgNode =
   n.mute(look)
   var number: string
   number.addInt(index + 1)
-  result = el("div", c, el("span", n, txt(number)))
+  result = el("div", c, el("span", n, txt(number)).role("muted"))
   if look.showing:
     var d = "shrink-0 rounded-full"
     d.square(max(4, look.unit div 18))
     if not look.paper: d.add " bg-sky-400"
     elif look.lit: d.add " bg-white"
     else: d.add " bg-black"
-    result.children.add el("div", d)
+    result.children.add el("div", d).role("accent")
 
 proc pictureTile(self: SceneSwitcherScene, tile: SvgNode, look: TileLook, index: int,
     grid: SwitcherGrid, title: string): bool =
@@ -526,7 +530,7 @@ proc pictureTile(self: SceneSwitcherScene, tile: SvgNode, look: TileLook, index:
     c.add(if not look.paper: " bg-zinc-700" elif look.lit: " border-2 border-white" else: " border-2 border-black")
     c.px("text", clamp(ph div 3, 12, 64))
     c.mute(look)
-    tile.children.add el("div", c, txt($(index + 1)))
+    tile.children.add el("div", c, txt($(index + 1))).role("field")
   let row = look.titleRow(index, size, titleH)
   row.children.add el("span", if look.paper: "truncate font-bold" else: "truncate", txt(title))
   tile.children.add row
@@ -561,12 +565,14 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: Swit
   # The preview keeps no picture of a scene it is not showing either.
   when not defined(frameosEmbedded):
     if not sceneSwitcherThumbnail.isNil and self.pictureTile(result, look, index, grid, title):
-      return
+      return result.role(if look.lit: "tileLit" else: "tile")
   let size = clamp(min(permille(grid.tileH, 180), permille(grid.tileW, 140)), 12, 40)
   result.children.add look.titleRow(index, size)
   var name = "grow flex items-center justify-center text-center font-bold line-clamp-3"
   name.px("text", size)
   result.children.add el("div", name, txt(title))
+  when not defined(frameosEmbedded):
+    result = result.role(if look.lit: "tileLit" else: "tile")
 
 proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: int, paper: bool,
     width, size, small: int, button: string) =
@@ -593,8 +599,8 @@ proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: i
   c.px("py", max(2, small div 4))
   c.px("text", small)
   c.add button
-  header.children.add el("div", c, txt("Close")).onClick(self.entries.len)
-  root.children.add header
+  header.children.add el("div", c, txt("Close")).role("button").onClick(self.entries.len)
+  root.children.add header.role("bar")
 
 when not defined(frameosEmbedded):
   # No ESP32 board is round (frameos/panel_shape.nim): the firmware
@@ -621,7 +627,7 @@ when not defined(frameosEmbedded):
     if grid.pages > 1:
       c = if paper: "shrink-0" else: "shrink-0 text-zinc-400"
       c.px("text", small)
-      title.children.add el("span", c, txt(pageText(page, grid.pages)))
+      title.children.add el("span", c, txt(pageText(page, grid.pages))).role("muted")
     root.children.add title
     let
       closeTop = grid.y0 + grid.side + grid.gap div 2
@@ -632,7 +638,7 @@ when not defined(frameosEmbedded):
     c.add " flex items-center justify-center rounded-full"
     c.px("text", small)
     c.add button
-    root.children.add el("div", c, txt("Close")).onClick(self.entries.len)
+    root.children.add el("div", c, txt("Close")).role("button").onClick(self.entries.len)
     if grid.pages > 1:
       let room = grid.x0 - (grid.cx - grid.radius) - grid.gap div 2
       var a = min(clamp(grid.radius * 19 div 100, 20, 48), room - 2)
@@ -672,7 +678,7 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
   # E-paper's white and black are the canvas's own (the scene background, and
   # the layout's text color); an LCD's dark page covers every pixel, so a
   # press repaints only what it changed (utils/svg_frames.nim).
-  result = el("div", if paper: "" else: "bg-zinc-950 text-white")
+  result = el("div", if paper: "" else: "bg-zinc-950 text-white").role("page")
   when defined(frameosEmbedded):
     self.header(result, grid, page, paper, width, size, small, button)
   else:
