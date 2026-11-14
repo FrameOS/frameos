@@ -681,9 +681,10 @@ type
     capturedPointer*: int
     sceneExportByNodeId*: Table[NodeId, ExportedScene]                         # exported metadata for cached child scenes
     publicStateFields*: seq[StateField]
-    js*: QuickJS       ## the programs' context (runtime.nim), shared by every scene
+    js*: QuickJS       ## its context in the programs' runtime (runtime.nim)
     jsReady*: bool
-    jsGeneration*: int ## which of those contexts `js` and the program's entries are in
+    jsOwned*: bool     ## a context of its own (it has code), not the shared one
+    jsGeneration*: int ## which programs' runtime `js` and the program's entries are in
     ## The scene's program (scene_compiler.nim), evaluated into `js` when
     ## `programReady`: its three ways in, `ev`, `flow` and `data`.
     source*: ExportedInterpretedScene ## what it was started from

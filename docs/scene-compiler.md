@@ -89,16 +89,29 @@ A Nim exception a native throws crosses the program as a JavaScript error
 carrying its message and stack; one no JavaScript caught leaves the program
 as itself (a `JsAppError` stays one).
 
-## One context for every program
+## One runtime, a context per scene with code
 
-All scene programs run in one QuickJS context (`js_runtime/runtime.nim`,
-`ensureSceneJs`): each program is a closure over natives that carry their own
-scene. A frame pays for one context, not one per scene with code; a scene
-without code of its own (a wrapper, a split's panels) costs only its program
-(about 8 KB for a two-node scene on a 64-bit host, 1.7 KB a node beyond).
-When the context is replaced (an out-of-memory abort, new `js` ceilings in
-frame.json) every scene evaluates its program again on its next run. The JS
-apps keep their own runtimes and their scene's heap budget.
+All scene programs run in one QuickJS runtime (`js_runtime/runtime.nim`,
+`ensureSceneJs`): one heap, one atom table, one garbage collector, one heap
+budget for programs. A scene with code of its own (a code node, an inline
+input, a cache expression) gets a context of its own in that runtime: a realm
+with its own globals and built-ins, so what one scene's code does to
+`globalThis` or `Array.prototype` no other scene sees. A scene without code
+(a scene of Nim apps, a split's wrapper) runs its program, which the
+compiler wrote and nothing untrusted is in, in the runtime's first context,
+shared.
+
+Measured on a 64-bit host: a runtime with its first context is 155 KB, one
+more context in it 40 KB. On main every scene with code paid the 155 KB (and
+a scene with none paid nothing); here the frame pays the runtime once, a
+scene with code 40 KB more, a scene without only its program (about 8 KB for
+two nodes, 1.7 KB a node beyond).
+
+The context closes with its scene, and the garbage collector runs right
+after so the next scene gets the memory. When the runtime is replaced (an
+out-of-memory abort) every scene sets its context up and evaluates its program
+again on its next run; frame.json's `js` ceilings are applied to the runtime
+in place. The JS apps keep their own runtimes and their scene's heap budget.
 
 ## What changed for a scene
 

@@ -1580,6 +1580,44 @@ proc close*(js: var QuickJS) =
     dealloc(js.account)
     js.account = nil
 
+proc newContextIn*(js: QuickJS): QuickJS =
+  ## Another context in `js`'s runtime: a realm with globals and built-ins of
+  ## its own (what one scene's code changes there, another's never sees),
+  ## sharing the runtime's heap, budget and interrupt guard. About a quarter
+  ## of a runtime's memory. Closed with `closeContext`, never `close`.
+  let ctx = JS_NewContext(js.runtime)
+  if ctx == nil:
+    raise newException(JSException, "Failed to create QuickJS context")
+  let contextData = cast[ptr BurritoContextData](alloc0(sizeof(BurritoContextData)))
+  contextData.functions = initTable[int32, NimFunctionEntry]()
+  contextData.context = ctx
+  contextData.guard = js.guard
+  JS_SetContextOpaque(ctx, contextData)
+  QuickJS(runtime: js.runtime, context: ctx, contextData: contextData, nextFunctionId: 1,
+    config: js.config, guard: js.guard, account: js.account)
+
+proc closeContext*(js: var QuickJS) =
+  ## A context `newContextIn` made, freed; its runtime stays as it is.
+  if js.context != nil:
+    JS_SetContextOpaque(js.context, nil)
+    JS_FreeContext(js.context)
+  if js.contextData != nil:
+    reset(js.contextData.functions)
+    dealloc(js.contextData)
+  js = QuickJS()
+
+proc applyLimits*(js: var QuickJS, config: QuickJSConfig) =
+  ## A runtime's ceilings changed in place (frame.json's `js`), for a runtime
+  ## that outlives the scenes it was made for. The heap budget is the same
+  ## record whose limit its owner updates.
+  if config.memoryLimitBytes > 0:
+    JS_SetMemoryLimit(js.runtime, config.memoryLimitBytes.csize_t)
+  if config.maxStackSizeBytes > 0:
+    JS_SetMaxStackSize(js.runtime, config.maxStackSizeBytes.csize_t)
+  if js.guard != nil:
+    js.guard.defaultBudgetMs = config.executionTimeoutMs
+  js.config = config
+
 proc heapBytes*(js: QuickJS): int =
   ## The bytes this interpreter's heap holds, by QuickJS's own accounting
   ## (malloc_size). The ESP32's account holds the same count; elsewhere it is

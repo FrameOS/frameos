@@ -4,6 +4,7 @@
 import std/[json, strutils, tables, unittest]
 import pixie
 import ../interpreter
+import ../js_runtime/runtime
 import ../scene_compiler
 import ../types
 import ../values
@@ -24,14 +25,14 @@ proc code(js: string, args: seq[string] = @[], output = "string"): JsonNode =
 type LogStore = ref object
   entries: seq[JsonNode]
 
-proc started(nodes: seq[DiagramNode], edges: seq[DiagramEdge], store: LogStore): InterpretedFrameScene =
-  let sceneId = "tests/scene-compiler".SceneId
-  var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+proc started(nodes: seq[DiagramNode], edges: seq[DiagramEdge], store: LogStore,
+    sceneId = "tests/scene-compiler".SceneId): InterpretedFrameScene =
+  # The scenes started before this one stay; one of the same id is replaced.
+  var uploaded = getUploadedInterpretedScenes()
   uploaded[sceneId] = ExportedInterpretedScene(name: "compiler", backgroundColor: parseHtmlColor("#000000"),
     refreshInterval: 60.0, publicStateFields: @[StateField(name: "name", fieldType: "string", value: %*"Ada")],
     nodes: nodes, edges: edges, apps: %*{})
   setUploadedInterpretedScenes(uploaded)
-  resetInterpretedScenes()
   let config = FrameConfig(width: 8, height: 6, rotate: 0, scalingMode: "cover", saveAssets: %*false)
   let logger = Logger(enabled: true, log: proc(payload: JsonNode) = store.entries.add(payload),
     enable: proc() = discard, disable: proc() = discard)
@@ -155,3 +156,31 @@ suite "scene compiler":
     check image.kind == fkImage
     check image.asImage().width == 8
     check scene.values.len == 0 # the run's handles went with it
+
+  test "a scene with code has a realm of its own; scenes without share one":
+    let store = LogStore()
+    setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
+    let a = started(@[node(1, "code", code("(globalThis.leak = 'a', Array.prototype.polluted = 1, 'set')"))],
+      @[], store, "tests/realm-a".SceneId)
+    let b = started(@[node(1, "code", code("typeof leak + ',' + typeof [].polluted"))],
+      @[], store, "tests/realm-b".SceneId)
+    check a.getDataNode(1.NodeId, ctx(a)).asString() == "set"
+    # What scene a did to its globals and built-ins, scene b never sees.
+    check b.getDataNode(1.NodeId, ctx(b)).asString() == "undefined,undefined"
+    check a.js.context != b.js.context
+    check a.js.runtime == b.js.runtime
+    # Two scenes of Nim apps alone run their programs in one shared context.
+    let flow = @[node(1, "event", %*{"keyword": "render"}),
+      node(2, "app", %*{"keyword": "render/color", "config": {}})]
+    let c = started(flow, @[edge(1, "next", 2, "prev")], store, "tests/realm-c".SceneId)
+    let d = started(flow, @[edge(1, "next", 2, "prev")], store, "tests/realm-d".SceneId)
+    discard render(c, ctx(c))
+    discard render(d, ctx(d))
+    check not c.js.context.isNil
+    check c.js.context == d.js.context
+    check c.js.context != a.js.context
+    check c.js.runtime == a.js.runtime
+    for scene in [a, b, c, d]:
+      cleanupSceneJs(scene)
+    check a.js.context == nil
+    setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())

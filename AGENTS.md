@@ -107,8 +107,10 @@
   its natives (`programOp`): node ids and handles to the scene's `Value`s in,
   so a value reaches an app exactly as an app made it. A new node type or edge
   kind is a case in the compiler and, if it needs Nim, a native; never a walk
-  of the graph at run time. All programs share one QuickJS context
-  (`js_runtime/runtime.nim` `ensureSceneJs`); the JS apps keep their own.
+  of the graph at run time. All programs share one QuickJS runtime
+  (`js_runtime/runtime.nim` `ensureSceneJs`); a scene with code of its own
+  gets a context (realm) of its own in it, so scenes stay isolated, and
+  scenes without share one. The JS apps keep their own runtimes.
 
 ## Scene events: the contract is `docs/events-contract.json`
 
