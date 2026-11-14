@@ -62,8 +62,8 @@ proc intoPanel(c: Cycling, target: Image, config: JsonNode) =
   discard c.runtime.get(c.owner, config, context).asImage()
   endPanelFrame()
 
-proc swipe(c: Cycling, config: JsonNode, direction: string) =
-  let context = ExecutionContext(scene: c.scene, event: "swipe", payload: %*{"direction": direction},
+proc swipe(c: Cycling, config: JsonNode, direction: string, event = "swipe") =
+  let context = ExecutionContext(scene: c.scene, event: event, payload: %*{"direction": direction},
     hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
   discard c.runtime.run(c.owner, config, context, isEvent = true)
 
@@ -90,6 +90,15 @@ proc colors(image: Image): int =
         if seen.len > 40: return seen.len
   seen.len
 
+proc drift(a, b: Image, x0, y0, x1, y1, step: int): int =
+  ## Of the pixels that changed from `a` to `b` in the box, how many more
+  ## moved `step` down than up: positive when what moves falls.
+  for y in max(y0, step) ..< min(y1, a.height - step):
+    for x in x0 ..< x1:
+      if a[x, y] == b[x, y]: continue
+      if b[x, y + step] == a[x, y]: inc result
+      if b[x, y - step] == a[x, y]: dec result
+
 suite "Color cycling":
   test "the scenes the app offers are the scenes the scene offers, wired to its state":
     let options = app["fields"][0]["options"].mapIt(it.getStr())
@@ -103,7 +112,7 @@ suite "Color cycling":
     for field in sample["fields"]:
       check field["access"].getStr() == "public" and field["persist"].getStr() == "disk"
     check sample["settings"]["refreshInterval"].getFloat() < 1 # it animates
-    check parseJson(app["sources"]["config.json"].getStr())["events"] == %*["swipe"]
+    check parseJson(app["sources"]["config.json"].getStr())["events"] == %*["swipe", "back", "forward"]
 
   test "every scene is a picture, and its colors move":
     for scene in Scenes:
@@ -115,6 +124,21 @@ suite "Color cycling":
       check first.width == 240 and first.height == 180
       check colors(first) > 12
       check changed(first, second) > 100
+
+  test "rain, snow and water fall, flames rise":
+    # A range's colors move toward its higher entries; a scene that numbers
+    # a track the other way plays it backwards (rain falling up, once). Each
+    # step is one place of the range that moves there.
+    for (scene, ms, x0, y0, x1, y1, down) in [("rain", "34", 0, 0, 240, 240, true),
+        ("snow", "143", 0, 0, 240, 120, true), ("falls", "50", 100, 110, 140, 170, true),
+        ("campfire", "72", 90, 140, 150, 200, false)]:
+      let c = newCycling("tests/cycling-way-" & scene, 240, 240)
+      let config = %*{"scene": scene, "pixelSize": "2", "seed": "3", "msPerRender": ms}
+      let first = c.render(config)
+      let second = c.render(config)
+      let moved = drift(first, second, x0, y0, x1, y1, 2)
+      checkpoint scene & ": " & $moved & " more pixels went down than up"
+      check (if down: moved > 20 else: moved < -20)
 
   test "the cells stay put: only the cells of colors that moved are written":
     # Into an LCD's buffer: a pixel poked where the colors do not cycle (the
@@ -158,6 +182,11 @@ suite "Color cycling":
     c.swipe(config, "left")
     check c.scene.state{"scene"}.getStr() == "harbor"
     c.swipe(config, "right")
+    check c.scene.state{"scene"}.getStr() == "campfire"
+    # In from an edge: a touch frame's event map makes it forward or back.
+    c.swipe(config, "", "forward")
+    check c.scene.state{"scene"}.getStr() == "harbor"
+    c.swipe(config, "", "back")
     check c.scene.state{"scene"}.getStr() == "campfire"
 
   test "a 480x480 scene, drawn and then cycled":

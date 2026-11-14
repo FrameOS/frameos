@@ -260,6 +260,12 @@ calls, and it calls no other:
   listed in the app's `config.json` as `"events": ["button"]`, or `["*"]` for
   everything but pointer motion. `context.event` is the name and
   `context.payload` what it carries. Return `true` to draw the scene again.
+  An app that pages (the next effect, photo or page) lists `"back"` and
+  `"forward"` with `"swipe"` and takes `forward` as next and `back` as
+  previous: on a touch screen a swipe that starts within 24 px of the left or
+  right edge, where most swipes start, never reaches it as a `swipe`; the
+  frame makes it `back` (in from the left) or `forward` (in from the right).
+  An app that hears only `swipe` ignores most of the swipes made on it.
 - `frameos.dispatch(event, payload)` sends an event as a `dispatch` node does,
   from a JSX handler, `onEvent` or `run`. `frameos.dispatch('sceneSwitcher')`
   opens the scene list and `'sceneSettings'` the settings of the scene showing.
@@ -356,8 +362,11 @@ variable and make them again when it is gone. On an ESP32 every bytecode counts
 (no `Math.*`, method or property lookups inside them), take random numbers from
 a table rather than a call, skip rows that cannot change, read `app.config` once
 per render (each read crosses into the runtime), and offer a coarser
-`pixelSize` there (`app.frame.embedded`). The Hellfire, Pixel toys and Color
-cycling samples are worked examples.
+`pixelSize` there (`app.frame.embedded`). A module's top-level code runs every
+time the interpreter starts, so an app of several effects builds each one's
+tables (palettes, lookup tables) when that effect first runs, not at import:
+built at import, the Pixel toys' palettes were 2.2 s of the scene's start. The
+Pixel toys and Color cycling samples are worked examples.
 
 **Assets and permissions.** Asset paths are relative to the frame's assets
 folder (`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos,

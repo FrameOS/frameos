@@ -136,6 +136,39 @@ export const cases: EvalCase[] = [
       { type: "lint_clean" },
       { type: "render_ok" },
       { type: "render_not_blank" },
+      // A swipe in from the screen's edge reaches a scene as back/forward, never as a swipe.
+      { type: "json_matches", pattern: "(?:\\\\?\")forward(?:\\\\?\")" },
+      { type: "json_matches", pattern: "(?:\\\\?\")back(?:\\\\?\")" },
+      { type: "judge", min: 3 },
+    ],
+    id: "create-swipe-pages",
+    judgeRubric: "One big title card fills the screen: a strong background color and one large word; nothing cut off.",
+    prompt:
+      "For my touch screen frame: five full-screen title cards, each a different bold color with one big word (Hello, Coffee, Plants, Music, Sleep). Swiping left or right shows the next or previous card, going round at the ends.",
+    tags: ["create", "events", "touch"],
+  },
+  {
+    checks: [
+      { type: "delivered", tool: "build_scene" },
+      { type: "lint_clean" },
+      { type: "render_ok" },
+      { type: "render_not_blank" },
+      { type: "json_matches", pattern: "frameos\\.pixels\\(" },
+      { type: "refresh_interval", max: 1 },
+      { type: "judge", min: 3 },
+    ],
+    id: "create-pixel-lava",
+    judgeRubric: "A chunky pixel-art picture of glowing lava or a lava lamp in warm reds and oranges; not blank.",
+    prompt:
+      "An animated pixel-art lava lamp for my LCD frame, chunky pixels, a few frames a second. Use the 8-bit palette mode so it stays fast on an ESP32.",
+    tags: ["create", "code", "animation"],
+  },
+  {
+    checks: [
+      { type: "delivered", tool: "build_scene" },
+      { type: "lint_clean" },
+      { type: "render_ok" },
+      { type: "render_not_blank" },
       { type: "json_matches", pattern: "data/downloadUrl|frameos\\.(?:fetchJson|fetchText|httpRequest)" },
       { type: "public_fields_min", min: 1 },
       { type: "judge", min: 3 },

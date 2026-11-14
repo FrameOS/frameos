@@ -17,12 +17,14 @@ import frameos/values
 const
   Repo = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".."
   SamplePath = Repo / "repo" / "scenes" / "samples" / "Pixel toys" / "scenes.json"
+  FixturePath = Repo / "e2e" / "scenes" / "pixelToys.json"
   Effects = ["fire", "bluefire", "greenfire", "fireworks", "fountain", "waterfall", "starfield", "matrix",
     "ripples", "blobs", "plasma", "life"]
 
 let
   sample = parseJson(readFile(SamplePath))[0]
   app = sample["apps"]["pixelToys"]
+  fixture = parseJson(readFile(FixturePath))
 
 proc testLogger(config: FrameConfig): Logger =
   var logger = Logger(frameConfig: config, enabled: true)
@@ -66,6 +68,9 @@ proc same(a, b: Image): bool =
         return false
   true
 
+proc hot(c: ColorRGBX): bool = c.r.int + c.g.int + c.b.int > 3 * 0xb0
+proc dark(c: ColorRGBX): bool = c.r.int + c.g.int + c.b.int < 3 * 0x10
+
 proc lit(image: Image, x0 = 0, y0 = 0, x1 = -1, y1 = -1): int =
   for y in y0 ..< (if y1 < 0: image.height else: y1):
     for x in x0 ..< (if x1 < 0: image.width else: x1):
@@ -90,7 +95,45 @@ suite "Pixel toys":
       check field["access"].getStr() == "public" and field["persist"].getStr() == "disk"
     check sample["settings"]["refreshInterval"].getFloat() < 1 # it animates
     let events = parseJson(app["sources"]["config.json"].getStr())["events"]
-    check events == %*["tap", "swipe"]
+    check events == %*["tap", "swipe", "back", "forward"]
+
+  test "the e2e fixture is the sample, its Hellfire seeded":
+    check fixture["apps"]["pixelToys"]["sources"] == app["sources"]
+    check fixture["fields"] == sample["fields"]
+    check fixture["fields"][0]["value"].getStr() == "fire"
+    check fixture["nodes"].filterIt(it["id"].getStr() == "toys")[0]["data"]["config"]["seed"].getStr() == "666"
+    check fixture["e2eFrame"] == %*{"width": 480, "height": 480}
+
+  test "Hellfire: hot at the bottom, out at the top, chunky pixels":
+    let frame = newToys("tests/toys-fire-shape", 64, 256).render(%*{"effect": "fire", "pixelSize": "2", "seed": "7"})
+    var hotBottom, outTop = 0
+    for x in 0 ..< 64:
+      if hot(frame[x, 255]): inc hotBottom
+      if dark(frame[x, 0]): inc outTop
+    check hotBottom == 64
+    check outTop == 64
+    check frame[0, 254] == frame[1, 255] # a cell is a square of one color
+    var burning = 0
+    for x in 0 ..< 64:
+      if not dark(frame[x, 216]): inc burning
+    check burning > 0 # not a glowing line: something burns 40 px up
+
+  test "Hellfire stands under half the panel at every cell size":
+    # Doom's cooling burns ~72 rows up: a 60-row grid (8 px on a 480 px
+    # panel, the ESP32's) was a wall of fire. The cooling follows the grid.
+    for size in ["8", "4", "2"]:
+      let toys = newToys("tests/toys-fire-height-" & size, 480, 480)
+      var frame: Image
+      for i in 0 ..< 4:
+        frame = toys.render(%*{"effect": "fire", "pixelSize": size, "seed": "9"})
+      var litTop, litLow = 0
+      for x in 0 ..< 480:
+        for y in 0 ..< 120:
+          if not dark(frame[x, y]): inc litTop
+        if not dark(frame[x, 330]): inc litLow
+      checkpoint "pixelSize " & size & ": lit in the top quarter " & $litTop & ", at 30% up " & $litLow
+      check litTop == 0
+      check litLow > 100
 
   test "every effect draws, and moves":
     for effect in Effects:
@@ -103,6 +146,28 @@ suite "Pixel toys":
       check frames[^1].width == 240 and frames[^1].height == 160
       check lit(frames[^1]) > 200
       check not same(frames[^1], frames[^2])
+
+  test "ripples keep calm water at the edges however long they run":
+    # The frameos.ops path once wrote the shown heights into the array the
+    # neighbours' sum is kept in, whose edges convolve never touches: the
+    # edges grew every frame and filled the pond with bright squares.
+    let toys = newToys("tests/toys-ripples-edges", 240, 240)
+    var frame: Image
+    for i in 0 ..< 300:
+      frame = toys.render(%*{"effect": "ripples", "pixelSize": "4", "seed": "4"})
+    let calm = frame[0, 0]
+    var edge = 0
+    for i in 0 ..< 240:
+      for (x, y) in [(i, 0), (i, 239), (0, i), (239, i)]:
+        if frame[x, y] != calm: inc edge
+    check edge == 0
+    var white = 0
+    for y in 0 ..< 240:
+      for x in 0 ..< 240:
+        let c = frame[x, y]
+        if c.r > 0xe0 and c.g > 0xe0 and c.b > 0xe0: inc white
+    checkpoint $white & " white pixels"
+    check white < 240 * 240 div 20
 
   test "the same seed is the same show; another seed another":
     for effect in Effects:
@@ -135,6 +200,11 @@ suite "Pixel toys":
     toys.event(config, "swipe", %*{"direction": "left", "x": 120, "y": 120})
     check toys.scene.state{"effect"}.getStr() == "bluefire"
     toys.event(config, "swipe", %*{"direction": "right", "x": 120, "y": 120})
+    check toys.scene.state{"effect"}.getStr() == "life"
+    # In from an edge: a touch frame's event map makes it forward or back.
+    toys.event(config, "forward", %*{})
+    check toys.scene.state{"effect"}.getStr() == "bluefire"
+    toys.event(config, "back", %*{})
     check toys.scene.state{"effect"}.getStr() == "life"
     config = %*{"effect": "ripples", "pixelSize": "4", "seed": "5"}
     var before: Image

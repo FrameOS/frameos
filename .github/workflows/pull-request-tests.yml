@@ -262,8 +262,8 @@ jobs:
       - name: Play the Kitchen sink in 8 MB
         run: node frameos/tools/esp32_kitchen_sink.mjs "$RUNNER_TEMP/frameos-wasm"
 
-      # The 8-bit palette samples: every Pixel toys effect, Hellfire and every
-      # Color cycling scene, and swipes: no out-of-memory, error or discarded
+      # The 8-bit palette samples: every Pixel toys effect (Hellfire among them)
+      # and every Color cycling scene, and swipes: no out-of-memory, error or discarded
       # interpreter, nothing that stops moving, grows or slows down as it runs.
       - name: Play the 8-bit palette samples in 8 MB
         run: node frameos/tools/esp32_palette_scenes.mjs "$RUNNER_TEMP/frameos-wasm"
