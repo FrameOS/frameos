@@ -15,9 +15,17 @@ extern "C" {
  * frame from stale lines. On core 1 this runs it on core 0 (esp_ipc), where
  * the same walk takes a quarter of the time and the refill never notices
  * (SenseCAP Indicator: 274 us there, 937 us on core 1 with a late frame).
- * For every walk that recurs: the metrics sample, the animation line, a
- * decode's contiguous budget. */
+ * For every walk that recurs: the metrics sample, the animation line, the
+ * log upload's check, a decode's contiguous budget. */
 size_t fos_heap_largest_free_block(uint32_t caps);
+
+/* The PSRAM's largest free block as the newest walk found it, if that walk is
+ * no older than `max_age_ms`; otherwise a walk now. A PSRAM heap a scene has
+ * fragmented takes 5-7 ms to walk even on core 0, and a task on core 1 that
+ * allocates meanwhile waits for the heap's lock with its interrupts masked:
+ * the refill misses its frame all the same (SenseCAP Indicator, Form
+ * showcase, 2026-11-14). A number only logged takes this. */
+size_t fos_heap_psram_largest_cached(uint32_t max_age_ms);
 
 #ifdef __cplusplus
 }

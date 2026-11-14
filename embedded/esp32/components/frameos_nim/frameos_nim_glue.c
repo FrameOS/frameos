@@ -712,7 +712,9 @@ static bool log_upload_heap_ready(void)
     size_t min_block = tls ? FOS_NIM_LOG_MIN_INTERNAL_BLOCK_TLS
                            : FOS_NIM_LOG_MIN_INTERNAL_BLOCK_PLAIN;
     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    /* Off core 1: every link round asks, and the walk was 0.8 ms there of the
+     * LCD refill's 0.9 ms slack (fos_heap_walk.h). */
+    size_t largest_internal = fos_heap_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (free_internal < min_free || largest_internal < min_block) {
         ESP_LOGD("fos_nim_log", "deferring log upload: internal=%u largest=%u",
                  (unsigned)free_internal, (unsigned)largest_internal);

@@ -423,6 +423,20 @@ measured only when a decode first reads it (pixie's
 memory question asks the free total; the largest block is for a decision
 about one big allocation.
 
+A walk is not only slow for the core that asks. The heap's lock is held
+for all of it, and a task on core 1 that allocates meanwhile waits with its
+interrupts masked, the LCD refill's among them. `fos_heap_largest_free_block`
+walks on core 0, which was enough while a walk took a quarter of a
+millisecond there, but a heap that the Form showcase's interpreters and
+trees have fragmented takes 5–7 ms, and every one cost a frame from stale
+lines. The metrics sample walked after every scene render, so every tap
+flickered: 20–35 lost frames in 40 renders on the SenseCAP Indicator
+(2026-11-14). A number that is only logged takes the newest reading on an
+LCD (`fos_heap_psram_largest_cached`, at most ten minutes old, not renewed
+while someone taps): no lost frames in 1,700 after it. The internal heap's
+walks that run every pass (the metrics sample's, the log upload's check)
+go to core 0 too: 0.8 ms on core 1 was most of the refill's 0.9 ms slack.
+
 ### Three frame buffers
 
 With two, a finished render had to wait for the frame boundary at which the
@@ -650,7 +664,10 @@ clock bar. Nobody is waiting for those, and the mark would blink on every tick
 that ran a little over the delay. With a layout the interval that counts is the
 scene's own, and only on a pass that will run it (`rhythmAwaited`): a slow map
 inside a clock bar shows the mark when the map renders and not when the bar
-ticks. A switch still shows it.
+ticks. On an ESP32 LCD, neither does a render while someone taps
+(`input_hold_on`): a UI answering a key in 200 to 400 ms flashed the mark on
+most keys (the Form showcase on the SenseCAP Indicator). A switch still
+shows it.
 
 **E-paper has no mark to draw, so it chirps.** When someone at the frame touched
 it or pressed a key in the last ten seconds, a load that has taken 1.5 seconds

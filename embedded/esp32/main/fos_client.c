@@ -344,6 +344,20 @@ static const char *wake_cause_name(void)
     }
 }
 
+static bool input_hold_on(void);
+
+/* The PSRAM's largest free block, for the metrics sample and the animation
+ * line. Every scene render samples, and its walk cost an RGB LCD one frame
+ * from stale lines each time: a flicker at every tap (fos_heap_walk.h). On an
+ * LCD the newest reading stands for ten minutes, and while someone taps for
+ * as long as they tap; e-paper has no refill to starve and walks each time. */
+static unsigned psram_largest_kb_for_log(void)
+{
+    size_t largest = !fos_display_is_lcd() ? fos_heap_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+                                           : fos_heap_psram_largest_cached(input_hold_on() ? UINT32_MAX : 600000u);
+    return (unsigned)(largest / 1024);
+}
+
 static void log_metrics_sample(void)
 {
     char json[768];
@@ -386,16 +400,16 @@ static void log_metrics_sample(void)
         /* Internal fragmentation, not just the total: TLS wants a contiguous
          * block, so a frame with 50 KB free in 4 KB pieces still cannot open
          * the cloud link. This is the number that explains such a frame. */
-        (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024),
+        (unsigned)(fos_heap_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024),
         /* The same two numbers as malloc() sees them — without the DMA
          * reserve pool that the plain INTERNAL figures above include but a
          * TLS dial cannot touch (fos_mem.h). A frame whose freeHeapKB looks
          * healthy while this pair is near zero is one dial away from
          * "connection reset by peer". */
         (unsigned)(fos_mem_internal_malloc_free() / 1024),
-        (unsigned)(fos_mem_internal_malloc_largest() / 1024),
+        (unsigned)(fos_heap_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DEFAULT | MALLOC_CAP_8BIT) / 1024),
         (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
-        (unsigned)(fos_heap_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
+        psram_largest_kb_for_log(),
         /* Stack high-water marks, in bytes. This sample runs on the client
          * task itself, so NULL is the render task — the 40 KB
          * CLIENT_TASK_STACK_BYTES that internal RAM pays for whether the
@@ -3070,7 +3084,7 @@ static void log_animation(const char *status, bool logged_frame)
                  (unsigned long)stats.period_ms,
                  (unsigned)(frameos_nim_js_runtime_bytes() / 1024),
                  (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
-                 (unsigned)(fos_heap_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024));
+                 psram_largest_kb_for_log());
     } else if (strcmp(status, "stop") == 0) {
         snprintf(line, sizeof(line),
                  "{\"event\":\"render:animation\",\"source\":\"esp32\",\"status\":\"stop\"}");
@@ -3591,7 +3605,11 @@ static void client_task(void *arg)
                  * on every frame a little over the delay, and so would a
                  * scene the frame's own clock redraws every few seconds (a
                  * layout's clock bar). A switch begins it itself. */
-                if (!s_anim.active && frameos_nim_scene_awaited()) {
+                /* Nor, on an LCD, one somebody tapping made: a UI answering
+                 * a key in 200 to 400 ms flashed the mark on most of them
+                 * (the SenseCAP Indicator's Form showcase, 2026-11-14). */
+                if (!s_anim.active && frameos_nim_scene_awaited() &&
+                    !(fos_display_is_lcd() && input_hold_on())) {
                     fos_client_loading_begin(xTaskGetTickCount());
                 }
                 s_render_in_flight = true;
