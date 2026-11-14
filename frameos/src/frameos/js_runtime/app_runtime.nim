@@ -535,6 +535,16 @@ proc findSnippets*(body, needle: string, length, limit: int): JsonNode =
     result.add(%*body[i ..< utf8Boundary(body, i + max(length, needle.len))])
     i = body.find(needle, i + needle.len)
 
+proc optionsArg(ctx: ptr JSContext, optionsJson: JSValue): JsonNode =
+  ## A bridge call's options, handed over from JS as a JSON string: that
+  ## object, or an empty one when the string is not one.
+  try:
+    result = parseJson(toNimString(ctx, optionsJson))
+  except CatchableError:
+    discard
+  if result.isNil or result.kind != JObject:
+    result = newJObject()
+
 proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## Bounded HTTP request with method/headers/body. Options JSON:
   ## {method, headers: {name: value}, body, bodyBase64, base64 (return body
@@ -548,13 +558,7 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
   var response = %*{"status": 0}
 
   let urlStr = toNimString(ctx, url)
-  var options = %*{}
-  try:
-    options = parseJson(toNimString(ctx, optionsJson))
-  except CatchableError:
-    discard
-  if options.isNil or options.kind != JObject:
-    options = %*{}
+  var options = optionsArg(ctx, optionsJson)
 
   try:
     var body = options{"body"}.getStr("")
@@ -794,13 +798,7 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
     return nimStringToJS(ctx, $response)
 
   let urlStr = toNimString(ctx, url)
-  var options = %*{}
-  try:
-    options = parseJson(toNimString(ctx, optionsJson))
-  except CatchableError:
-    discard
-  if options.isNil or options.kind != JObject:
-    options = %*{}
+  var options = optionsArg(ctx, optionsJson)
 
   try:
     var headers: seq[SimpleHttpHeader] = @[]
@@ -1039,15 +1037,7 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       let full = resolveAssetPath(e, pathStr)
       if full.len == 0 or not fileExists(full):
         return jsNull(ctx)
-      var options = %*{}
-      let optionsStr = toNimString(ctx, data)
-      if optionsStr.len > 0:
-        try:
-          options = parseJson(optionsStr)
-        except CatchableError:
-          discard
-      if options.isNil or options.kind != JObject:
-        options = %*{}
+      let options = optionsArg(ctx, data)
       let fileSize = getFileSize(full)
       let offset = max(0, options{"offset"}.getInt(0))
       let readMax = jsAssetReadMaxBytes(e)
@@ -1179,13 +1169,7 @@ proc jsOpenLines(ctx: ptr JSContext, text: JSValue, optionsJson: JSValue): JSVal
   let e = env(ctx)
   if e == nil:
     return jsUndefSentinel(ctx)
-  var options = %*{}
-  try:
-    options = parseJson(toNimString(ctx, optionsJson))
-  except CatchableError:
-    discard
-  if options.isNil or options.kind != JObject:
-    options = %*{}
+  var options = optionsArg(ctx, optionsJson)
   try:
     let source = options{"source"}
     var reference: JsonNode = nil
@@ -1265,13 +1249,7 @@ proc jsStreams(ctx: ptr JSContext, op: JSValue, optionsJson: JSValue): JSValue {
     return jsUndefSentinel(ctx)
 
   let opStr = toNimString(ctx, op)
-  var options = %*{}
-  try:
-    options = parseJson(toNimString(ctx, optionsJson))
-  except CatchableError:
-    discard
-  if options.isNil or options.kind != JObject:
-    options = %*{}
+  var options = optionsArg(ctx, optionsJson)
 
   try:
     case opStr

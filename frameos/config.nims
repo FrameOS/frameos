@@ -76,6 +76,10 @@ elif defined(frameosEmbedded):
   patchFile("stdlib", "hashcommon", "src/embedded/patched_hashcommon")
   patchFile("stdlib", "tableimpl", "src/embedded/patched_tableimpl")
 
+  # The same for seqs: `add`, `setLen` and `shrink` per element type (338 of
+  # them) share one proc that grows the block.
+  patchFile("stdlib", "seqs_v2", "src/embedded/patched_seqs_v2")
+
   # `$float` (Dragonbox) links a 9.9 KB table of powers of ten; QuickJS's
   # js_dtoa, linked anyway, finds the same shortest digits.
   patchFile("stdlib", "dragonbox", "src/embedded/patched_dragonbox")
