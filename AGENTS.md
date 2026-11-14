@@ -585,7 +585,10 @@
   free total (`availableRenderHeadroomBytes()`, microseconds) and leave the
   largest block to the one big allocation that needs it — pixie's decode
   budget measures it only when a decode asks
-  (`setDecodeContiguousBudgetProvider`).
+  (`setDecodeContiguousBudgetProvider`). On an RGB LCD a walk of a
+  fragmented heap (5–7 ms, even on core 0) costs a frame from stale lines,
+  because core 1 waits for the heap lock with interrupts masked: a number
+  that is only logged takes `fos_heap_psram_largest_cached`.
 - A frame that stays awake keeps its scene's JS interpreters between renders
   (`settleIdleJsAppRuntimes`; one holding a UI's handlers goes only when an
   allocation failed, and any discard is logged and, if it cost taps, shown on

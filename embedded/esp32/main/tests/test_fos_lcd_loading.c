@@ -212,6 +212,19 @@ static void test_the_clock_may_wrap(void)
     fos_lcd_loading_end(&m);
 }
 
+static void test_a_start_ahead_of_now_waits_that_much_longer(void)
+{
+    /* A render answering a tap begins the mark 300 ms ahead (fos_client.c):
+     * it shows at 500 ms, not 200. */
+    fos_lcd_loading_t m = fresh();
+    CHECK(fos_lcd_loading_begin(&m, 0, 1300 * MS), "begins");
+    CHECK(fos_lcd_loading_step(&m, g_fb[0], 1000 * MS) == 500 * MS, "waits 500 ms");
+    CHECK(fos_lcd_loading_step(&m, g_fb[0], 1499 * MS) == 1 * MS && g_draws == 0, "nothing at 499 ms");
+    CHECK(fos_lcd_loading_step(&m, g_fb[0], 1500 * MS) == FOS_LCD_LOADING_FRAME_MS * MS && g_draws == 1 &&
+              g_last_t == 0, "the first frame at 500 ms");
+    fos_lcd_loading_end(&m);
+}
+
 static void test_a_switch_that_never_lands_stops_by_itself(void)
 {
     fos_lcd_loading_t m = fresh();
@@ -233,6 +246,7 @@ int main(void)
     test_a_switch_during_another_keeps_its_start();
     test_a_rect_it_cannot_hold_is_no_mark();
     test_the_clock_may_wrap();
+    test_a_start_ahead_of_now_waits_that_much_longer();
     test_a_switch_that_never_lands_stops_by_itself();
     if (g_failures) {
         printf("%d of %d checks failed\n", g_failures, g_checks);

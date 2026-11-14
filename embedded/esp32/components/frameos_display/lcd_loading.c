@@ -48,7 +48,9 @@ bool fos_lcd_loading_begin(fos_lcd_loading_t *m, int rotation, uint32_t since_ms
 
 int32_t fos_lcd_loading_step(fos_lcd_loading_t *m, uint16_t *scanned, uint32_t now_ms)
 {
-    uint32_t elapsed_ms = now_ms - m->since_ms;
+    /* Signed: a mark begun with `since_ms` ahead of now waits that much
+     * longer than the delay (a render answering a tap, fos_client.c). */
+    int32_t elapsed_ms = (int32_t)(now_ms - m->since_ms);
     if (elapsed_ms >= FOS_LCD_LOADING_MAX_MS) m->active = false;
     if (!m->active) {
         put_back(m);

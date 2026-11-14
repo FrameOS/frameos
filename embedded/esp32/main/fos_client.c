@@ -344,6 +344,20 @@ static const char *wake_cause_name(void)
     }
 }
 
+static bool input_hold_on(void);
+
+/* The PSRAM's largest free block, for the metrics sample and the animation
+ * line. Every scene render samples, and its walk cost an RGB LCD one frame
+ * from stale lines each time: a flicker at every tap (fos_heap_walk.h). On an
+ * LCD the newest reading stands for ten minutes, and while someone taps for
+ * as long as they tap; e-paper has no refill to starve and walks each time. */
+static unsigned psram_largest_kb_for_log(void)
+{
+    size_t largest = !fos_display_is_lcd() ? fos_heap_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+                                           : fos_heap_psram_largest_cached(input_hold_on() ? UINT32_MAX : 600000u);
+    return (unsigned)(largest / 1024);
+}
+
 static void log_metrics_sample(void)
 {
     char json[768];
@@ -386,16 +400,16 @@ static void log_metrics_sample(void)
         /* Internal fragmentation, not just the total: TLS wants a contiguous
          * block, so a frame with 50 KB free in 4 KB pieces still cannot open
          * the cloud link. This is the number that explains such a frame. */
-        (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024),
+        (unsigned)(fos_heap_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024),
         /* The same two numbers as malloc() sees them — without the DMA
          * reserve pool that the plain INTERNAL figures above include but a
          * TLS dial cannot touch (fos_mem.h). A frame whose freeHeapKB looks
          * healthy while this pair is near zero is one dial away from
          * "connection reset by peer". */
         (unsigned)(fos_mem_internal_malloc_free() / 1024),
-        (unsigned)(fos_mem_internal_malloc_largest() / 1024),
+        (unsigned)(fos_heap_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DEFAULT | MALLOC_CAP_8BIT) / 1024),
         (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
-        (unsigned)(fos_heap_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
+        psram_largest_kb_for_log(),
         /* Stack high-water marks, in bytes. This sample runs on the client
          * task itself, so NULL is the render task — the 40 KB
          * CLIENT_TASK_STACK_BYTES that internal RAM pays for whether the
@@ -706,6 +720,14 @@ void fos_client_set_display_power(int on)
  * late, with the ones behind it in one go. */
 static fos_input_hold_t s_input_hold;
 static int64_t s_last_input_us = 0;
+/* How much longer than the usual 200 ms the loading mark waits for a render
+ * that answers somebody: it shows at half a second. */
+#define FOS_LOADING_ANSWER_EXTRA_MS 300
+/* When somebody last asked the scene for something (input handled, or an
+ * event from HTTP, the cloud or the console), and when the last render began:
+ * a render begun after such a thing answers it (the loading mark's rule). */
+static int64_t s_asked_us = 0;
+static int64_t s_render_began_us = 0;
 /* When the last rendered picture went to the panel (fos_pictures_fast). */
 static int64_t s_last_picture_us = 0;
 
@@ -737,6 +759,7 @@ bool fos_client_input_held(void)
 static bool deliver_deferred_events(void)
 {
     bool delivered = fos_events_deliver_deferred();
+    if (delivered) s_asked_us = esp_timer_get_time();
     if (delivered && hold_applies()) fos_input_hold_note(&s_input_hold, esp_timer_get_time());
     return delivered;
 }
@@ -766,6 +789,7 @@ static void process_input_events(void)
 {
     if (input_queued()) {
         note_input_awake();
+        s_asked_us = s_last_input_us;
         if (hold_applies()) fos_input_hold_note(&s_input_hold, s_last_input_us);
     }
     fos_buttons_process_events();
@@ -3070,7 +3094,7 @@ static void log_animation(const char *status, bool logged_frame)
                  (unsigned long)stats.period_ms,
                  (unsigned)(frameos_nim_js_runtime_bytes() / 1024),
                  (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
-                 (unsigned)(fos_heap_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024));
+                 psram_largest_kb_for_log());
     } else if (strcmp(status, "stop") == 0) {
         snprintf(line, sizeof(line),
                  "{\"event\":\"render:animation\",\"source\":\"esp32\",\"status\":\"stop\"}");
@@ -3590,8 +3614,22 @@ static void client_task(void *arg)
                  * not one nobody is waiting for: an animation would blink it
                  * on every frame a little over the delay, and so would a
                  * scene the frame's own clock redraws every few seconds (a
-                 * layout's clock bar). A switch begins it itself. */
-                if (!s_anim.active && frameos_nim_scene_awaited()) {
+                 * layout's clock bar). A switch begins it itself.
+                 * On an LCD a render that answers somebody (input handled
+                 * since the last render began) is waited for, an animation's
+                 * too: a swipe to the next Color cycling scene draws for a
+                 * second or two. Its mark waits FOS_LOADING_ANSWER_EXTRA_MS
+                 * longer, since a UI answering a key in 200 to 400 ms
+                 * flashed it at the usual 200 ms on most keys (the Form
+                 * showcase, 2026-11-14); for the same reason no other render
+                 * shows it while somebody taps. */
+                int64_t began_us = esp_timer_get_time();
+                bool answers = s_asked_us > s_render_began_us;
+                s_render_began_us = began_us;
+                if (fos_display_is_lcd() && answers) {
+                    fos_client_loading_begin(xTaskGetTickCount() + pdMS_TO_TICKS(FOS_LOADING_ANSWER_EXTRA_MS));
+                } else if (!s_anim.active && frameos_nim_scene_awaited() &&
+                           !(fos_display_is_lcd() && input_hold_on())) {
                     fos_client_loading_begin(xTaskGetTickCount());
                 }
                 s_render_in_flight = true;
