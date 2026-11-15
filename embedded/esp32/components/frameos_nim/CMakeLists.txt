@@ -69,7 +69,8 @@ else()
     idf_component_register(
         SRCS "frameos_nim_stub.c" "fos_netguard.c" "fos_version.c" "fos_heap_walk.c" "fos_log_ring.c"
         INCLUDE_DIRS "include"
-        PRIV_REQUIRES lwip
+        # esp_timer: fos_heap_walk.c stamps its cached PSRAM reading.
+        PRIV_REQUIRES lwip esp_timer
     )
     message(STATUS "frameos_nim: no nimcache/, building stub (run build_nim.sh)")
 endif()
