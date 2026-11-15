@@ -18,7 +18,7 @@ from .console import Console
 TOUCH_MODULES = {'seeed_sensecap_indicator_d1', 'seeed_reterminal_sticky', 'seeed_reterminal_e1003',
                  'waveshare_esp32s3_touch_lcd_4', 'hyperpixel'}
 # Seconds a full refresh takes, for timeouts and pacing (a guess for unknown panels).
-PANEL_REFRESH_S = {'EPD_7in3e': 32, 'EPD_10in3': 4, 'EPD_3in97': 4, 'EPD_7in5_V2': 6}
+PANEL_REFRESH_S = {'EPD_7in3e': 32, 'EPD_13in3e': 35, 'EPD_10in3': 4, 'EPD_3in97': 4, 'EPD_7in5_V2': 6}
 
 
 def serial_ports():
