@@ -381,6 +381,11 @@ config.json's `"permissions"` list:
   `appendAsset`, `deleteAsset`, a stream opened with `"w"` or `"a"`).
 - `"files"` and `"shell"` belong to built-in apps: Local Image reads any
   folder, the screenshot and camera apps run processes.
+- `"frame"`: `frameos.frame`, what the frame's own settings page reads and
+  does (its Wi-Fi, rotation and scale, render, restart, reboot), and only
+  while the owner allows the
+  settings on the frame's screen. The Terminal sample is the worked example
+  (docs/terminal.md).
 
 Saving the scene fills a JavaScript app's list from its code, so you rarely
 write it. The frame gives the app exactly that list: with neither `"assets"`
@@ -389,7 +394,8 @@ nor `"assets-write"`, its asset calls live in a folder of its own,
 with no list asks for nothing, and a list written by hand is replaced on the
 next save. A scene asks for what its apps ask for, nothing more, and every
 surface shows it as tags ("reads assets folder", "writes assets folder",
-"reads all files", "runs shell commands", and "uses OpenAI key" for each
+"reads all files", "runs shell commands", "changes frame settings", and
+"uses OpenAI key" for each
 settings namespace an app reads). Installing a scene is the approval of its
 tags, and an update says which ones it adds, so ask for what the app needs
 and no more.
@@ -902,6 +908,35 @@ interface FrameOSStore {
   /** The browser preview's host: Preview, Show and Discard only, and "preview_only" for install, update and remove. Absent on a frame. */
   previewOnly?: boolean;
 }
+/** What frameos.frame("read") says: the facts the frame page shows (docs/scene-settings.md "The frame page"). */
+interface FrameOSFrameFacts {
+  /** Absent where there is no network to set from the frame (the browser preview). */
+  wifi?: {
+    /** "connected", "connecting", "notFound", "auth", "hotspot", "unset" or "off". */
+    state: string;
+    ssid: string;
+    ip?: string;
+    /** The signal in dBm, while connected. */
+    rssi?: number;
+    /** The setup hotspot's name, while it is up. */
+    hotspot?: string;
+    /** The networks in range by name, from the last scan. */
+    networks: string[];
+    scanning: boolean;
+    /** A password is saved. */
+    password: boolean;
+  };
+  rotate: number;
+  renderScale: number;
+  battery?: { percent: number };
+  /** The control plane that manages the frame, when one does. */
+  managedBy?: string;
+  version?: string;
+  /** The device commands this host runs besides render and reboot ("restart" on a Raspberry Pi). */
+  actions: string[];
+  /** What the last apply could not do. */
+  note?: string;
+}
 
 /**
  * What JSX makes in an app (.tsx): get() can return it as its image. An <svg>
@@ -1171,6 +1206,22 @@ declare const frameos: {
    * discard. It runs off the render and this scene renders again when it is done (see store().busy). False where
    * there is no host (FrameOS 2026.11.8+). */
   storeAction(action: "browse" | "preview" | "install" | "update" | "remove" | "discard", args?: Record<string, any>): boolean;
+  /** The frame page's facts and powers (docs/terminal.md), for an app whose config.json permissions include "frame"
+   * (saving the scene adds it when the code calls this; installing the scene is the owner's yes), and only while the
+   * frame's settings are allowed on its screen: it throws otherwise. "read" is what the page shows, null where there is
+   * none (FrameOS 2026.11.8+). */
+  frame(op: "read"): FrameOSFrameFacts | null;
+  /** What the page's Save sets: a network (wifiSsid, with wifiPassword or "" for an open one or the saved one), rotate
+   * (0, 90, 180, 270), renderScale (0 automatic, up to 4), and on an ESP32 the clock ("YYYY-MM-DD HH:MM"). A refusal
+   * shows as note in the next "read". */
+  frame(
+    op: "apply",
+    changes: { wifiSsid?: string; wifiPassword?: string; rotate?: number; renderScale?: number; clock?: string }
+  ): boolean;
+  /** What the page's buttons do: render (every panel drawn again), restart (FrameOS, where actions has it), reboot,
+   * scan for the networks in range (in "read" once wifi.scanning is false), and on an ESP32 checkUpdate and
+   * installUpdate. */
+  frame(op: "action", action: "render" | "restart" | "reboot" | "scan" | "checkUpdate" | "installUpdate"): boolean;
   fetchText(url: string): string;
   fetchJson(url: string): any;
   httpRequest(

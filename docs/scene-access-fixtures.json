@@ -1,5 +1,5 @@
 {
-  "description": "Corpus for frontend/src/utils/sceneAccess.ts: what a scene's apps ask for (config.json \"permissions\" and \"settings\"), the tags every surface shows, what an update changes, and how a save fills a JS app's list (withAppPermissions). docs/scene-guide.md \"Assets\" is the prose. Replayed by cloud/apps/auth-web/src/test/shared-spa/scene-access.test.ts.",
+  "description": "Corpus for frontend/src/utils/sceneAccess.ts: what a scene's apps ask for (config.json \"permissions\" and \"settings\"), the tags every surface shows, what an update changes, and how a save fills a JS app's list (withAppPermissions). docs/scene-guide.md \"Assets\" is the prose. Replayed by cloud/apps/auth-web/src/test/shared-spa/scene-access.test.ts, and the stamps by the backend's frozen migration test (test_app_permissions_migration.py), but for the ones marked afterMigration.",
   "scenes": [
     {
       "name": "an empty scene asks for nothing",
@@ -125,6 +125,16 @@
       "name": "an app no node runs asks for nothing",
       "scene": {"id": "s", "nodes": [], "edges": [], "apps": {"unused": {"sources": {"app.ts": "frameos.deleteAsset('x')"}}}},
       "flags": []
+    },
+    {
+      "name": "an app that calls frameos.frame changes frame settings",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.tsx": "export function get() { const facts = frameos.frame('read', null); return <div>{facts?.wifi?.ssid}</div> }", "config.json": "{\n  \"name\": \"Terminal\",\n  \"permissions\": [\n    \"frame\"\n  ]\n}\n"}}}},
+      "flags": ["frame"]
+    },
+    {
+      "name": "app.frame is the panel, not the frame's settings",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "export function get(app) { return app.frame.width + (frame(1) || 0) }"}}}},
+      "flags": []
     }
   ],
   "sets": [
@@ -198,6 +208,13 @@
       "after": ["nsfw", "shell"],
       "gained": ["shell"],
       "lost": []
+    },
+    {
+      "name": "an update that starts changing the frame's settings gains frame",
+      "before": ["assets"],
+      "after": ["assets", "frame"],
+      "gained": ["frame"],
+      "lost": []
     }
   ],
   "stamps": [
@@ -268,6 +285,13 @@
       "code": "frameos.writeAsset('x', y)",
       "config": "{\n  \"name\": \"Old\"\n}\n",
       "expect": "{\n  \"name\": \"Old\",\n  \"permissions\": [\n    \"assets\",\n    \"assets-write\"\n  ]\n}\n"
+    },
+    {
+      "name": "frameos.frame is asked for after the assets",
+      "afterMigration": true,
+      "code": "frameos.writeAsset('log.txt', b64); frameos . frame ('action', 'render')",
+      "config": null,
+      "expect": "{\n  \"permissions\": [\n    \"assets\",\n    \"assets-write\",\n    \"frame\"\n  ]\n}\n"
     }
   ]
 }

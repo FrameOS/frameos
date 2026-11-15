@@ -37,6 +37,8 @@ from frameos/event_loop import settingsOf
 import frameos/layout_choice
 import frameos/ui/events
 import frameos/ui/keyboard
+import frameos/frame_settings_hooks
+export frame_settings_hooks
 import frameos/ui/theme
 import frameos/ui/tree
 import frameos/utils/image
@@ -50,27 +52,6 @@ type
   SceneSettingsScene* = SceneSwitcherScene
     ## The switcher's own type, its `entries` unused and `paper` the panel's:
     ## one set of destroy and trace hooks in flash for the two built-in scenes.
-
-  # The frame's own page (docs/scene-settings.md "The frame page"), behind
-  # the gear: what the host knows of the frame, read on every render. The
-  # host gives facts and the page has the words, so every host shows the
-  # same page.
-  FrameSettingsRead* = proc(): JsonNode {.nimcall, gcsafe, raises: [].}
-    ## nil when the page is not offered (no host has one, or the frame's
-    ## control plane turned it off). Else {wifi: {state, ssid, hotspot,
-    ## rssi, ip, networks: [name…], scanning, password}, rotate,
-    ## renderScale, battery: {percent}, managedBy, version,
-    ## actions: ["restart"…], note}: `battery` absent without one; `wifi`
-    ## absent, no network to set here; `state` one of connected, connecting,
-    ## notFound, auth, hotspot, unset, off; `password` a password is saved;
-    ## `actions` the device commands this host runs besides render and
-    ## reboot; `note` what the last Save could not do.
-  FrameSettingsApply* = proc(changes: JsonNode) {.nimcall, gcsafe, raises: [].}
-    ## What Save changed: wifiSsid with wifiPassword (empty: the saved one
-    ## for the same network, none for another), rotate, renderScale.
-  FrameSettingsAction* = proc(action: string) {.nimcall, gcsafe, raises: [].}
-    ## "open" when the page comes up, "close" when it goes, "scan" for the
-    ## networks in range.
 
 const
   SettingsNode = 1 ## the ui/events target its form lives in
@@ -115,11 +96,6 @@ const
   WifiStates = ["connected", "hotspot", "notFound", "auth", "connecting", "unset"]
   WifiBefore = ["Connected to ", "Setup hotspot ", "Can't find ", "Wrong password for ", "Connecting to "]
   WifiAfter = ["", "", "", "?", "\xe2\x80\xa6"]
-
-var
-  frameSettingsRead*: FrameSettingsRead
-  frameSettingsApply*: FrameSettingsApply
-  frameSettingsAction*: FrameSettingsAction
 
 var
   # What the last handler did: its number and the text it carried. Read by

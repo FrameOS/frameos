@@ -302,6 +302,20 @@
   screen are off; `show: false` installs without leaving the store. Only a
   frame with no plane installs by itself. Keep the two routes alike.
 
+## The terminal: `docs/terminal.md`
+
+- **Terminal** is a scene (`repo/scenes/samples/Terminal app`, id
+  `terminal-app`, one JSX app), not a built-in: the commands and their words
+  are the app's. It stands on ONE native, `frameos.frame(op, arg)`
+  (`jsFrame` in `js_runtime/app_runtime.nim`): the frame page's hooks
+  (`frameos/frame_settings_hooks.nim`), so it can do what the page can and
+  nothing more. A new power is a hook the frame page has too, never a second
+  door. Flash is the budget: the bridge is about 1.3 KB on the ESP32 image.
+- Only an app whose config.json `permissions` has `"frame"` (detected from
+  `frameos.frame(` on save, `utils/sceneAccess.ts`, a red tag), and only while
+  the frame offers its page. The desktops find it like the store
+  (`appIs('terminal-app', 'terminal')`): keep the four alike.
+
 ## One scene at a time on the ESP32: `embedded/esp32/README.md` "Scene storage"
 
 - The firmware keeps one file per scene (`main/fos_scene_store.c`, pure, host

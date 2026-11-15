@@ -116,7 +116,8 @@ export function sanitizeTagCandidates(value: unknown): string[] {
 // (store_scene_versions.risk_flags): what the scene's apps ask for in their
 // config.json, "shell" (runs shell commands), "files" (reads any file on the
 // frame), "assets" (reads the frame's assets folder), "assets-write" (writes
-// or deletes in it), and "key:<namespace>" for each API key they read. The
+// or deletes in it), "frame" (changes the frame's settings, frameos.frame),
+// and "key:<namespace>" for each API key they read. The
 // SPA computes the same flags for scenes that arrive without a catalog entry,
 // from the same function (frontend/src/utils/sceneAccess.ts, corpus
 // docs/scene-access-fixtures.json). The frame gives each JS app exactly the

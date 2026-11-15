@@ -316,6 +316,13 @@ export function SceneInfoPanel({
           uploaded photos and other scenes&apos; files are. Installing it allows that.
         </p>
       ) : null}
+      {scene.riskFlags.includes("frame") ? (
+        <p className="notice notice-error" role="alert">
+          This scene can change the frame&apos;s Wi-Fi, rotation and scale, restart or reboot it,
+          and run its console commands on an ESP32, as the frame&apos;s settings on its screen can.
+          Installing it allows that.
+        </p>
+      ) : null}
       {keyTitles.length > 0 ? (
         <p className="notice">
           This scene&apos;s apps read these keys from the frame&apos;s settings:{" "}

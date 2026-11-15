@@ -38,6 +38,7 @@ import frameos/ui/events
 import frameos/render_scale
 import frameos/panel_shape
 import frameos/scene_store_hooks
+import frameos/frame_settings_hooks
 
 type
   JsAssetGrant* = enum
@@ -66,6 +67,10 @@ type
     sources*: JsonNode
     settingsKeys*: seq[string]
     assetGrant*: JsAssetGrant
+    frameGrant*: bool
+      ## config.json `permissions` asks for "frame": `frameos.frame`, the frame
+      ## page's facts and powers (docs/terminal.md). Installing the scene is
+      ## the owner's yes to it, as to the asset permissions.
     js*: QuickJS
     ready*: bool
     initialized*: bool
@@ -437,6 +442,40 @@ proc jsStoreAction(ctx: ptr JSContext, action: JSValue, argsJson: JSValue): JSVa
     return nimBoolToJS(ctx, false)
   act(storeAsker(e), toNimString(ctx, action), toNimString(ctx, argsJson))
   nimBoolToJS(ctx, true)
+
+proc jsFrame(ctx: ptr JSContext, op: JSValue, arg: JSValue): JSValue {.nimcall.} =
+  ## `frameos.frame(op, arg)` (docs/terminal.md): the frame page's facts and
+  ## powers, for an app whose permissions ask for "frame", and only while the
+  ## frame offers its page (the control plane's `frame_settings_on_screen`).
+  ## `arg` is JSON text for "apply", the plain string otherwise. JSON text
+  ## back: "" is null, "!" and a reason is what the prelude throws. "action"
+  ## sends what the page's buttons send, from the origin `panel`.
+  let e = env(ctx)
+  var answer = "!this app's permissions do not include frame"
+  if e != nil and e.runtime.frameGrant:
+    let
+      what = toNimString(ctx, op)
+      text = toNimString(ctx, arg)
+      facts = if frameSettingsRead.isNil: nil else: frameSettingsRead()
+    answer = "true"
+    if facts.isNil:
+      answer = if what == "read": "" else: "!settings on the frame's screen are off"
+    elif what == "read":
+      answer = $facts
+    elif what == "action":
+      if text in [evRender, evRestart, evReboot]:
+        sendEvent(text, newJObject(), eoPanel)
+      elif not frameSettingsAction.isNil:
+        frameSettingsAction(text)
+    elif what == "apply":
+      if not frameSettingsApply.isNil:
+        try:
+          frameSettingsApply(parseJson(text))
+        except CatchableError:
+          discard
+    else:
+      answer = "!no such operation: " & what
+  nimStringToJS(ctx, answer)
 
 proc jsSetNextSleep(ctx: ptr JSContext, seconds: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
@@ -2390,17 +2429,22 @@ proc configFromSources(sources: JsonNode): JsonNode =
   except CatchableError:
     return %*{}
 
-proc assetGrantFromConfig*(config: JsonNode): JsAssetGrant =
+proc grantsFromConfig*(config: JsonNode): tuple[assets: JsAssetGrant, frame: bool] =
   ## config.json `permissions`: exactly what the app asks for. No list, or a
-  ## value that is not one, asks for nothing.
-  result = agOwnFolder
+  ## value that is not one, asks for nothing. "frame" is `frameos.frame`.
+  ## One pass for both: a second walk of the list cost 0.5 KB of ESP32 flash.
+  result.assets = agOwnFolder
   let declared = config{"permissions"}
   if not declared.isNil and declared.kind == JArray:
     for item in declared.elems:
       case item.getStr()
-      of "assets-write": result = agReadWrite
-      of "assets", "files": result = max(result, agRead)
+      of "assets-write": result.assets = agReadWrite
+      of "assets", "files": result.assets = max(result.assets, agRead)
+      of "frame": result.frame = true
       else: discard
+
+template assetGrantFromConfig*(config: JsonNode): JsAssetGrant = grantsFromConfig(config).assets
+template frameGrantFromConfig*(config: JsonNode): bool = grantsFromConfig(config).frame
 
 proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, sources: JsonNode): AppRoot =
   let source = jsAppSourceFromSources(sources)
@@ -2415,9 +2459,10 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
     for key in settingsNode.items:
       if key.kind == JString and key.getStr().len > 0:
         settingsKeys.add(key.getStr())
+  let grants = grantsFromConfig(config)
   let runtime = newJsAppRuntime(category, outputType, source, settingsKeys,
-                                jsAppSourceNameFromSources(sources), sources,
-                                assetGrantFromConfig(config))
+                                jsAppSourceNameFromSources(sources), sources, grants.assets)
+  runtime.frameGrant = grants.frame
   var byteIterFields: seq[string] = @[]
   let fields = config{"fields"}
   if not fields.isNil and fields.kind == JArray:
@@ -2532,6 +2577,11 @@ const appJsPrelude* = compactJs("""
     dispatch: (event, payload) => jsDispatch(String(event || ""), JSON.stringify(payload || {}, __jsReplacer)),
     store: () => JSON.parse(jsStore() || "null"),
     storeAction: (action, args) => jsStoreAction(String(action || ""), JSON.stringify(args || {}, __jsReplacer)) === true,
+    frame: (op, arg) => {
+      const r = jsFrame(String(op), op === "apply" ? JSON.stringify(arg || {}, __jsReplacer) : String(arg ?? ""));
+      if (r[0] === "!") throw new Error("frameos.frame: " + r.slice(1));
+      return JSON.parse(r || "null");
+    },
     fetchText: (url) => jsFetchText(String(url || "")),
     fetchJson: (url) => JSON.parse(jsFetchText(String(url || "")) || "null"),
     httpRequest: (url, options) => JSON.parse(
@@ -2698,6 +2748,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsDispatch", jsDispatch)
   runtime.js.registerFunction("jsStore", jsStore)
   runtime.js.registerFunction("jsStoreAction", jsStoreAction)
+  runtime.js.registerFunction("jsFrame", jsFrame)
   runtime.js.registerFunction("jsSetState", jsSetState)
   runtime.js.registerFunction("jsRemember", jsRemember)
   runtime.js.registerFunction("jsRecall", jsRecall)

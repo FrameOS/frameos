@@ -91,7 +91,9 @@ scene without fields too, and on the frame page only when no scene is showing
 
 The page is built in the scene (`frameos/src/system/sceneSettings/scene.nim`)
 from facts the host hands over, so every host shows the same words. Three
-hooks in the scene module, set by the host's runtime:
+hooks (`frameos/src/frameos/frame_settings_hooks.nim`), set by the host's
+runtime; a JS app the owner lets have them reads and uses the same three
+(`frameos.frame`, `docs/terminal.md`):
 
 | Hook | What |
 |---|---|

@@ -1,0 +1,10 @@
+{
+  "name": "Terminal",
+  "description": "A terminal on the frame's screen: type the commands of an ESP32's serial console (status, set, wifi, wifi-scan, render, scenes, restart, reboot) and read the frame's answers.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.8"
+}

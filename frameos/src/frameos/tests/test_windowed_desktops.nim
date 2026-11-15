@@ -75,9 +75,11 @@ setUploadedInterpretedScenes(parseInterpretedScenes($(%*[layout, tiling, macos, 
   panel("tests/ocean", "Ocean", "#0000ff", MacOS),
   panel("tests/be-red", "Red", "#ff0000", BeOS), panel("tests/be-green", "Green", "#00ff00", BeOS),
   panel("tests/be-blue", "Blue", "#0000ff", BeOS),
-  # The scene store, as each desktop finds it: by its name.
+  # The scene store and the terminal, as each desktop finds them: by their names.
   panel("tests/store-98", "Scene store", "#3b82f6"), panel("tests/store-tiling", "Scene store", "#3b82f6", Tiling),
-  panel("tests/store-mac", "Scene store", "#3b82f6", MacOS), panel("tests/store-be", "Scene store", "#3b82f6", BeOS)])))
+  panel("tests/store-mac", "Scene store", "#3b82f6", MacOS), panel("tests/store-be", "Scene store", "#3b82f6", BeOS),
+  panel("tests/term-98", "Terminal", "#111111"), panel("tests/term-tiling", "Terminal", "#111111", Tiling),
+  panel("tests/term-mac", "Terminal", "#111111", MacOS), panel("tests/term-be", "Terminal", "#111111", BeOS)])))
 resetInterpretedScenes()
 
 let config = FrameConfig(name: "desktop", mode: "rpios", device: "framebuffer", width: W, height: H, rotate: 0,
@@ -503,6 +505,28 @@ suite "the Windows 98 desktop":
     check problems.len == 0
     windowSceneListing = listing
 
+  test "the terminal, where the frame has it, is at the top of Start and an icon on the desktop":
+    let listing = windowSceneListing
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/red", "name": "Red"}, {"id": "tests/green", "name": "Green"}, {"id": "tests/blue", "name": "Blue"},
+        {"id": "tests/term-98", "name": "Terminal"}]
+    discard pass()
+    discard click(20, H - 20) # Start
+    shot(pass(), "15-start-terminal")
+    # The terminal, a rule, the three programs (not the terminal), then Full
+    # screen and Control Panel.
+    let menuTop = H - 42 - (30 * (3 + 2 + 1) + 22 + 8)
+    check click(80, menuTop + 6 + 15).filterIt(it != "render") == @["setCurrentScene"]
+    check current.id.string == "tests/term-98"
+    discard pass()
+    check not winOf("tests/term-98").isNil
+    # Down the left, under its window: Programs, the terminal, Control Panel.
+    var icons: seq[array[4, float32]]
+    uiPressRects(Layout, icons)
+    check icons.filterIt(it[0] == 8 and it[2] == 88).mapIt(int(it[1])) == @[8, 8 + 72, 8 + 2 * 72]
+    check problems.len == 0
+    windowSceneListing = listing
+
 proc topBar(): seq[array[4, float32]] =
   ## What takes a press on the tiling desktop's top bar, left to right: its +,
   ## the name of each tile, its gear.
@@ -781,6 +805,19 @@ suite "the tiling desktop":
     check "tests/store-tiling" in desk().state{"open"}.to(seq[string])
     check problems.len == 0
 
+  test "the top bar's prompt opens the terminal as a tile, and the + list leaves it out":
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/sky", "name": "Sky"}, {"id": "tests/grass", "name": "Grass"}, {"id": "tests/sun", "name": "Sun"},
+        {"id": "tests/button", "name": "Button"}, {"id": "tests/term-tiling", "name": "Terminal"}]
+    discard pass()
+    let bar = topBar()
+    # +, the open tiles' names, the prompt, the arrangement, the gear.
+    check acted(clickRect(bar[^3])) == @["setCurrentScene"]
+    check current.id.string == "tests/term-tiling"
+    discard pass()
+    check "tests/term-tiling" in desk().state{"open"}.to(seq[string])
+    check problems.len == 0
+
 
 proc rectsOf(layoutId: string): seq[array[4, float32]] =
   ## Where a press does something on a layout, as uiPressRects has it: x0, y0, x1, y1.
@@ -982,6 +1019,24 @@ suite "the macOS desktop":
     discard key("Escape")
     check problems.len == 0
 
+  test "the terminal sits in the Dock beside System Settings, and in the mark's menu":
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/apple", "name": "Apple"}, {"id": "tests/lime", "name": "Lime"},
+        {"id": "tests/ocean", "name": "Ocean"}, {"id": "tests/term-mac", "name": "Terminal"}]
+    discard pass()
+    let icons = dockIcons()
+    check icons.len == 6 # Launchpad, the three scenes, the terminal, System Settings
+    check acted(clickRect(icons[4])) == @["setCurrentScene"]
+    check current.id.string == "tests/term-mac"
+    shot(pass(), "m6-terminal")
+    check not winOf("tests/term-mac").isNil
+    let bar = menuBar()
+    discard clickRect(bar[0])
+    discard pass()
+    check dropItems(bar[0]).len == 3 # System Settings…, Terminal, Launchpad
+    discard key("Escape")
+    check problems.len == 0
+
 const BarW = 156 ## the BeOS Deskbar in the corner at 800 x 480
 
 proc tabBoxes(win: JsonNode): seq[array[4, float32]] =
@@ -1121,6 +1176,25 @@ suite "the BeOS desktop":
     check current.id.string == "tests/store-be"
     discard pass()
     check not winOf("tests/store-be").isNil
+    check problems.len == 0
+
+  test "the Be menu has the terminal under the frame's scenes, and so do the icons under the Deskbar":
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/be-red", "name": "Red"}, {"id": "tests/be-green", "name": "Green"},
+        {"id": "tests/be-blue", "name": "Blue"}, {"id": "tests/term-be", "name": "Terminal"}]
+    discard pass()
+    discard click(W - BarW div 2, 17)
+    check desk().state{"menu"}.getBool()
+    shot(pass(), "b6-terminal-menu")
+    # The three scenes, a rule, the terminal.
+    check acted(click(W - BarW - 100, 3 + 3 * 24 + 8 + 12)) == @["setCurrentScene"]
+    check current.id.string == "tests/term-be"
+    discard pass()
+    check not winOf("tests/term-be").isNil
+    # Under the Deskbar: the disk, the scene list, the terminal.
+    discard send("tap", at(W - BarW div 2, 155 + 2 * 66 + 20))
+    check desk().state{"picked"}.getStr() == "tests/term-be"
+    discard pass()
     check problems.len == 0
 
 proc openIds(): seq[string] =
