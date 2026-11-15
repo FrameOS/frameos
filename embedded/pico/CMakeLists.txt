@@ -32,6 +32,7 @@ set(FRAMEOS_PICO_PORTABLE_SOURCES
     src/pk_bmp.c
     src/pk_buttons.c
     src/pk_config_keys.c
+    src/pk_console_queue.c
     src/pk_fosb.c
     src/pk_hotspot.c
     src/pk_http_response.c

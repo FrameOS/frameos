@@ -136,6 +136,14 @@ provisioning plan for every embedded board; keys that only mean something with
 an on-device renderer (`rotate`, `scaling_mode`, `assets_sd`, …) are accepted
 and ignored. Rotation is applied by the backend before packing.
 
+The console stays live through a render pass, the 30-second refresh included:
+`status`, `logs` and `render` answer at once, and the pass's log lines come
+out as they happen. A line that would pull the panel's pins, the flash or the
+power from under the driver (`set`, `wifi`, `restart`, `factory-reset`,
+`bootsel`, plain or `usb_api`) waits until the pass ends and then runs, in
+order (`pk_console_queue.c`; four lines at most, a fifth is refused with
+"busy rendering").
+
 ## Battery mode
 
 `deep_sleep` (always) or `deep_sleep_on_battery` (only while VBUS is absent)
@@ -179,6 +187,7 @@ src/pk_http.c           streaming HTTP(S) client        pk_http_response.c*  fra
 src/pk_httpd.c          the device's HTTP server         pk_httpd_parse.c*    requests, auth, forms
 src/pk_wifi.c           station, scan, hotspot, mDNS     pk_hotspot.c*        DHCP, DNS, passphrase
 src/pk_console.c        console + usb_api                pk_args.c*           quoting
+                                                         pk_console_queue.c*  lines held for a pass
 src/pk_config.c         flash config (v2 → v3 migrated)  pk_config_keys.c*    `set`, presets, pins
 src/pk_settings_parse.c* settings pull                   pk_json.c*           JSON walker/escaper
 src/pk_log.c*           log ring + upload batches        pk_state.c*          append-only render state

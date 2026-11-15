@@ -52,6 +52,15 @@ void pk_poll(void)
     }
     pk_leds_tick();
     if (s_input_poll) s_input_poll();
+    // Turn the USB stack from here too, not only from the SDK's background
+    // IRQ: printf hands TinyUSB at most an endpoint's worth and the rest of a
+    // line waits in its FIFO for the next tud_task(), and received bytes only
+    // reach getchar() through one. Seen on an Inky Frame 7.3" Spectra: the
+    // pass's `fetch` and `render:device` lines came out after `render:done`,
+    // and the console answered nothing for the whole 30 s refresh. This is
+    // cheap when there is nothing to send, and never blocks on a host that
+    // does not read (the flush gives up on a busy endpoint).
+    stdio_flush();
     // A console command may itself wait (a Wi-Fi scan, a reboot countdown);
     // only the outermost turn reads the console, so commands never nest.
     if (s_poll_depth == 1) {
