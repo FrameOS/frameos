@@ -176,6 +176,9 @@ void frameos_nim_set_debug(int enabled);
 /* A long render lets its core's other tasks run (frameos_nim_glue.c). */
 void fos_render_breathe(void);
 void fos_render_breathe_reset(void);
+/* What the render canvas needs from the heap (0: the panel buffer or the
+ * reserved block); the OOM restart policy reads it. */
+void frameos_nim_set_canvas_heap_bytes(size_t bytes);
 /* Value-pipeline differential: 0 materializes every image edge. */
 void frameos_nim_set_fusion(int enabled);
 /* Fallback fit for image consumers without their own placement

@@ -209,3 +209,4 @@ int fos_nim_http_stream_read(fos_nim_http_stream *stream, void *buf, size_t len)
 void fos_nim_http_stream_close(fos_nim_http_stream *stream) { (void)stream; }
 void fos_render_breathe(void) {}
 void fos_render_breathe_reset(void) {}
+void frameos_nim_set_canvas_heap_bytes(size_t bytes) { (void)bytes; }
