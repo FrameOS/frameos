@@ -900,8 +900,10 @@ a small change cost what it should:
   seconds. The link task applies nothing: the commands it pulls are handed over
   and run on the render task (the backend marks what it hands out `sent`, so
   a pull is never only a look; `fos_commands_fetch` / `fos_commands_run`), and
-  for settings it asks the status alone and the render task fetches what
-  changed (`fos_settings_changed`). A changed scene set the link task
+  settings that changed it fetches and the render task applies
+  (`fos_settings_fetch` / `fos_settings_apply`: before, the render task fetched
+  them again whole, and a backend that hung held it for the connect timeout).
+  A changed scene set the link task
   downloads itself (`fos_scenes_backend_fetch`); the render task only parses
   it into the runtime (`fos_scenes_take_backend_payload`, 0.3 s for 337 KB),
   once nobody is tapping (`serve_link` skips it under the input hold, and its
@@ -918,9 +920,13 @@ a small change cost what it should:
   upload is split into its per-scene files by the same task, with the same
   pacing, and the render task's apply only reads the new index
   (`store_split_stored`, embedded/esp32/README.md "Scene storage"). A
-  backend's nudge is still pulled on the render task, which the voice relay's
-  release counts on, and so is everything on a frame about to deep-sleep and on
-  a boot's first pass. When the round trips come back to the render task (a
+  nudge to pull the commands (the backend's, a new address, a store action) is
+  the link task's pull while it has the round trips (`serve_commands_nudge`,
+  `fos_commands_nudge_to_link`), ahead of its logs and picture push; only the
+  voice relay's is pulled on the render task
+  (`fos_client_request_commands_pull_here`), since its release counts on the
+  answer in the very next render, and so is everything on a frame about to
+  deep-sleep and on a boot's first pass. When the round trips come back to the render task (a
   deep sleep comes) it waits for the round the link task is in, which runs
   under `s_link_round`, and runs the commands it pulled: they would otherwise
   still be in memory as the chip sleeps (`link_hand_back`). The rules are

@@ -414,9 +414,10 @@ static void handle_reply(const char *body, int status, uint32_t recorded_ms)
     /* A command the chat queued that the backend's nudge did not deliver
      * (the frame is not reachable by address): on the backend plane the frame
      * pulls its commands, so ask for a pull now — the render task takes it
-     * before the release that follows, so it lands in the same render. The
-     * cloud delivers its own over the socket, and a sync costs nothing there. */
-    fos_client_request_commands_sync();
+     * itself (not the backend link task) before the release that follows, so
+     * it lands in the same render. The cloud delivers its own over the
+     * socket, and a sync costs nothing there. */
+    fos_client_request_commands_pull_here();
     fos_client_show_notice(notice);
     if (acted) fos_buzzer_voice_ok();
     else fos_buzzer_voice_said();

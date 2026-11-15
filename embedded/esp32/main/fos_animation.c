@@ -206,6 +206,11 @@ bool fos_backend_link_on(bool link_task, bool deep_sleep_now, uint32_t render_at
     return link_task && !deep_sleep_now && render_attempts > 0;
 }
 
+bool fos_commands_nudge_to_link(bool link_on, bool pull_here)
+{
+    return link_on && !pull_here;
+}
+
 bool fos_idle_wait_goes_on(int64_t now_us, int64_t wait_until_us, bool panel_refreshing)
 {
     return now_us < wait_until_us || panel_refreshing;

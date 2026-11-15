@@ -33,10 +33,15 @@ bool fos_client_input_held(void);
  * the schedule): unlike fos_client_render_now, the scenes inside a split all
  * run, also those whose own interval has not come round. */
 void fos_client_render_fresh(void);
-/* Pull the backend's command queue on the render task as soon as it is idle
- * (the backend's nudge, fos_http.c `/api/action/commands`); the next pass
- * pulls it anyway. See fos_commands.h. */
+/* Pull the backend's command queue as soon as the render task is idle (the
+ * backend's nudge, fos_http.c `/api/action/commands`); the next pass pulls it
+ * anyway. While the backend link task has the round trips it makes the pull
+ * and hands the answer to the render task, which runs it. See fos_commands.h. */
 void fos_client_request_commands_sync(void);
+/* The same, pulled on the render task whatever the link task does, before
+ * anything else the render task serves: for one who needs the answer in the
+ * very next render (the voice relay, whose release follows). */
+void fos_client_request_commands_pull_here(void);
 /* Cut the render task's wait short so queued input (button presses) reaches
  * the scene promptly, WITHOUT asking for a render. */
 void fos_client_wake_for_events(void);
