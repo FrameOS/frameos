@@ -1058,6 +1058,7 @@ esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
         return ESP_ERR_NO_MEM;
     }
     if (sink->begin) sink->begin(ctx, bmp_len);
+    bool superseded = false;
     bool ok = sink->write(ctx, header, 54u + palette_bytes);
     for (int y = out_height - 1; ok && y >= 0; y--) {
         if (own) {
@@ -1078,6 +1079,7 @@ esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
             }
             fos_client_snapshot_release();
             if (!same) {
+                superseded = true;
                 ok = false;
                 break;
             }
@@ -1086,6 +1088,7 @@ esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
     }
     free(row);
     free(own);
+    if (superseded) return ESP_ERR_INVALID_STATE;
     return ok ? ESP_OK : ESP_FAIL;
 }
 
