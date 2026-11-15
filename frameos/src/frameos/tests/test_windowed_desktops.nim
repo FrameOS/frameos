@@ -19,6 +19,8 @@ const
   H = 480
   Layout = "layout-windows-98"
   Tiling = "layout-tiling"
+  MacOS = "layout-macos"
+  BeOS = "layout-beos"
 
 proc panel(id, name, hex: string, layout = Layout): JsonNode =
   %*{"id": id, "name": name, "settings": {"execution": "interpreted", "refreshInterval": 600,
@@ -59,13 +61,22 @@ let layout = parseFile(Samples / "Windows 98 layout" / "scenes.json")[0]
 doAssert layout["id"].getStr() == Layout
 let tiling = parseFile(Samples / "Tiling layout" / "scenes.json")[0]
 doAssert tiling["id"].getStr() == Tiling
-setUploadedInterpretedScenes(parseInterpretedScenes($(%*[layout, tiling,
+let macos = parseFile(Samples / "macOS layout" / "scenes.json")[0]
+doAssert macos["id"].getStr() == MacOS
+let beos = parseFile(Samples / "BeOS layout" / "scenes.json")[0]
+doAssert beos["id"].getStr() == BeOS
+setUploadedInterpretedScenes(parseInterpretedScenes($(%*[layout, tiling, macos, beos,
   panel("tests/red", "Red", "#ff0000"), panel("tests/green", "Green", "#00ff00"),
   panel("tests/blue", "Blue", "#0000ff"),
   panel("tests/sky", "Sky", "#38bdf8", Tiling), panel("tests/grass", "Grass", "#4ade80", Tiling),
   panel("tests/sun", "Sun", "#facc15", Tiling), buttonPanel("tests/button", "Button"),
+  panel("tests/apple", "Apple", "#ff0000", MacOS), panel("tests/lime", "Lime", "#00ff00", MacOS),
+  panel("tests/ocean", "Ocean", "#0000ff", MacOS),
+  panel("tests/be-red", "Red", "#ff0000", BeOS), panel("tests/be-green", "Green", "#00ff00", BeOS),
+  panel("tests/be-blue", "Blue", "#0000ff", BeOS),
   # The scene store, as each desktop finds it: by its name.
-  panel("tests/store-98", "Scene store", "#3b82f6"), panel("tests/store-tiling", "Scene store", "#3b82f6", Tiling)])))
+  panel("tests/store-98", "Scene store", "#3b82f6"), panel("tests/store-tiling", "Scene store", "#3b82f6", Tiling),
+  panel("tests/store-mac", "Scene store", "#3b82f6", MacOS), panel("tests/store-be", "Scene store", "#3b82f6", BeOS)])))
 resetInterpretedScenes()
 
 let config = FrameConfig(name: "desktop", mode: "rpios", device: "framebuffer", width: W, height: H, rotate: 0,
@@ -769,6 +780,348 @@ suite "the tiling desktop":
     check "tests/store-tiling" in desk().state{"open"}.to(seq[string])
     check problems.len == 0
 
+
+proc rectsOf(layoutId: string): seq[array[4, float32]] =
+  ## Where a press does something on a layout, as uiPressRects has it: x0, y0, x1, y1.
+  uiPressRects(layoutId, result)
+
+proc byX(rects: seq[array[4, float32]]): seq[array[4, float32]] =
+  rects.sorted(proc(a, b: array[4, float32]): int = cmp(a[0], b[0]))
+
+proc byY(rects: seq[array[4, float32]]): seq[array[4, float32]] =
+  rects.sorted(proc(a, b: array[4, float32]): int = cmp(a[1], b[1]))
+
+proc key(name: string, alt = false, meta = false): seq[string] =
+  send("keyDown", %*{"key": name, "code": name, "repeat": false, "shift": false, "ctrl": false,
+    "alt": alt, "meta": meta})
+
+proc sceneSize(id: string): (int, int) =
+  ## The size a window's scene is drawn at, from the layout's slot of it.
+  for slot in desk().slots:
+    if slot.child == hosted[id]:
+      return (int(slot.visible[2] - slot.visible[0] + 0.5), int(slot.visible[3] - slot.visible[1] + 0.5))
+
+const
+  MenuH = 26 ## the macOS menu bar at 800 x 480
+  DockH = 71 ## and its Dock, the desktop the 383 px between them
+
+proc dockIcons(): seq[array[4, float32]] =
+  ## The Dock's icons, left to right: Launchpad, the three scenes, System Settings.
+  byX(rectsOf(MacOS).filterIt(it[1] >= float32(H - DockH)))
+
+proc menuBar(): seq[array[4, float32]] =
+  ## The menu bar's titles, left to right: the mark, Scenes, Settings, Window, the status icons.
+  byX(rectsOf(MacOS).filterIt(it[3] <= MenuH.float32 and it[2] - it[0] < 400))
+
+proc dropItems(title: array[4, float32]): seq[array[4, float32]] =
+  ## The items of the menu open under a title, top to bottom.
+  byY(rectsOf(MacOS).filterIt(it[1] >= MenuH.float32 - 2 and it[0] > title[0] and it[0] < title[0] + 20 and
+    it[3] - it[1] < 30 and it[2] - it[0] > 150))
+
+suite "the macOS desktop":
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/apple", "name": "Apple"}, {"id": "tests/lime", "name": "Lime"},
+        {"id": "tests/ocean", "name": "Ocean"}]
+
+  test "the first scene fills the desktop between the menu bar and the Dock":
+    current = hostScene("tests/apple")
+    let image = pass()
+    shot(image, "m1-first")
+    check problems.len == 0
+    check wins().len == 1
+    check winOf("tests/apple"){"max"}.getBool()
+    check image.color(W div 2, H div 2 - 20) == colored("#ff0000")
+    check image.color(W div 2, 10) != colored("#ff0000")
+    check image.color(W div 2, H - 20) != colored("#ff0000")
+    check dockIcons().len == 5 # Launchpad, the three scenes, System Settings
+
+  test "the Dock opens a scene in a window of its own, a dot under each one open":
+    check acted(clickRect(dockIcons()[2])) == @["setCurrentScene"]
+    check current.id.string == "tests/lime"
+    let image = pass()
+    shot(image, "m2-two")
+    check problems.len == 0
+    check wins().len == 2
+    let g = winOf("tests/lime")
+    check not g{"max"}.getBool()
+    let (gx, gy, gw, gh) = (g{"x"}.getInt(), g{"y"}.getInt(), g{"w"}.getInt(), g{"h"}.getInt())
+    check image.color(gx + gw div 2, MenuH + gy + gh div 2) == colored("#00ff00")
+    check image.color(W - 10, 200) == colored("#ff0000")
+    let icons = dockIcons()
+    proc dot(r: array[4, float32]): ColorRGBX = image.color(int((r[0] + r[2]) / 2), int(r[3]) - 2)
+    check dot(icons[1]) == colored("#1d1d1f")
+    check dot(icons[2]) == colored("#1d1d1f")
+    check dot(icons[3]) != colored("#1d1d1f")
+
+  test "a window dragged by its title bar follows the pointer":
+    let g = winOf("tests/lime")
+    let (x0, y0, w) = (g{"x"}.getInt(), g{"y"}.getInt(), g{"w"}.getInt())
+    let (grabX, grabY) = (x0 + w div 2, MenuH + y0 + 16)
+    discard send("pointerDown", at(grabX, grabY))
+    discard send("pointerMove", at(grabX + 40, grabY + 30))
+    discard send("pointerMove", at(grabX + 100, grabY + 50))
+    discard send("pointerUp", at(grabX + 100, grabY + 50, %*{"buttons": 0}))
+    check winOf("tests/lime"){"x"}.getInt() == x0 + 100
+    check winOf("tests/lime"){"y"}.getInt() == y0 + 50
+    check pass().color(x0 + 100 + 30, MenuH + y0 + 50 + 80) == colored("#00ff00")
+
+  test "a press on a window behind brings it forward, and a tap reaches no scene":
+    check "setCurrentScene" in click(W - 10, 200)
+    check current.id.string == "tests/apple"
+    check pass().color(W - 10, 200) == colored("#ff0000")
+
+  test "the yellow light puts the window in front away, and its icon in the Dock brings it back":
+    # Apple fills the desktop: its lights at the top left, yellow the second.
+    discard click(40, MenuH + 17)
+    check winOf("tests/apple"){"min"}.getBool()
+    check current.id.string == "tests/lime"
+    discard pass()
+    check acted(clickRect(dockIcons()[1])) == @["setCurrentScene"]
+    check current.id.string == "tests/apple"
+    check not winOf("tests/apple"){"min"}.getBool()
+    discard pass()
+
+  test "the gear at the right of a scene's title bar opens its settings":
+    settingsFrom = ""
+    check acted(click(W - 23, MenuH + 17)) == @["sceneSettings"]
+    check settingsFrom == "tests/apple"
+    check desk().state{"asked"}.getStr() == "system/sceneSettings#tests/apple"
+    discard pass()
+
+  test "Scenes in the menu bar opens a scene, and Window gives the panel to the window in front":
+    var bar = menuBar()
+    check bar.len == 5
+    discard clickRect(bar[1])
+    check desk().state{"menu"}.getStr() == "scenes"
+    shot(pass(), "m3-scenes-menu")
+    var items = dropItems(bar[1])
+    check items.len == 4 # the three scenes and Launchpad
+    check acted(clickRect(items[2])) == @["setCurrentScene"]
+    check current.id.string == "tests/ocean"
+    check desk().state{"menu"}.kind == JNull
+    discard pass()
+    check wins().len == 3
+    bar = menuBar()
+    discard clickRect(bar[3])
+    check desk().state{"menu"}.getStr() == "window"
+    discard pass()
+    items = dropItems(bar[3])
+    check items.len == 6 # Minimize, Zoom, Enter Full Screen and the three windows
+    discard clickRect(items[2])
+    check desk().state{"full"}.getBool()
+    let full = pass()
+    shot(full, "m4-full")
+    check full.color(W div 2, 4) == colored("#0000ff")
+    check full.color(W div 2, H - 4) == colored("#0000ff")
+    discard key("Escape")
+    check not desk().state{"full"}.getBool()
+    check problems.len == 0
+
+  test "a window opens at the layout's size where that fits, and where it was when it opens again":
+    discard key("w", meta = true) # closes ocean
+    check winOf("tests/ocean").isNil
+    check current.id.string != "tests/ocean"
+    desk().state["windowSize"] = %"400x240"
+    desk().state.delete("boxes")
+    discard pass()
+    check acted(clickRect(dockIcons()[3])) == @["setCurrentScene"]
+    check current.id.string == "tests/ocean"
+    discard pass()
+    let o = winOf("tests/ocean")
+    check not o{"max"}.getBool()
+    check o{"w"}.getInt() == 400 + 4
+    check o{"h"}.getInt() == 240 + 48
+    check sceneSize("tests/ocean") == (400, 240)
+    let (x, y) = (o{"x"}.getInt(), o{"y"}.getInt())
+    discard send("pointerDown", at(x + 200, MenuH + y + 16))
+    discard send("pointerMove", at(x + 230, MenuH + y + 36))
+    discard send("pointerUp", at(x + 230, MenuH + y + 36, %*{"buttons": 0}))
+    discard key("F4", alt = true)
+    check winOf("tests/ocean").isNil
+    discard pass()
+    discard clickRect(dockIcons()[3])
+    discard pass()
+    check winOf("tests/ocean"){"x"}.getInt() == x + 30
+    check winOf("tests/ocean"){"y"}.getInt() == y + 20
+    check problems.len == 0
+
+  test "Alt+Tab goes back and forth between two windows":
+    let before = current.id.string
+    discard key("Tab", alt = true)
+    check current.id.string != before
+    discard pass()
+    discard key("Tab", alt = true)
+    check current.id.string == before
+
+  test "the Dock has System Settings":
+    discard pass()
+    let icons = dockIcons()
+    check acted(clickRect(icons[4])) == @["sceneSettings"]
+    check payloads["sceneSettings"] == %*{"page": "frame"}
+    check desk().state{"asked"}.getStr() == "system/sceneSettings"
+    discard pass()
+    check problems.len == 0
+
+  test "the scene store sits in the Dock beside System Settings, and in the mark's menu":
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/apple", "name": "Apple"}, {"id": "tests/lime", "name": "Lime"},
+        {"id": "tests/ocean", "name": "Ocean"}, {"id": "tests/store-mac", "name": "Scene store"}]
+    discard pass()
+    let icons = dockIcons()
+    check icons.len == 6 # Launchpad, the three scenes, the store, System Settings
+    check acted(clickRect(icons[4])) == @["setCurrentScene"]
+    check current.id.string == "tests/store-mac"
+    shot(pass(), "m5-store")
+    check not winOf("tests/store-mac").isNil
+    let bar = menuBar()
+    discard clickRect(bar[0])
+    discard pass()
+    check dropItems(bar[0]).len == 3 # System Settings…, Scene Store…, Launchpad
+    discard key("Escape")
+    check problems.len == 0
+
+const BarW = 156 ## the BeOS Deskbar in the corner at 800 x 480
+
+proc tabBoxes(win: JsonNode): seq[array[4, float32]] =
+  ## The boxes on a window's tab, left to right: close, the gear (on a scene's), zoom.
+  let (x, y) = (win{"x"}.getInt().float32, win{"y"}.getInt().float32)
+  byX(rectsOf(BeOS).filterIt(it[1] >= y and it[3] <= y + 26 and it[0] >= x and
+    it[2] - it[0] >= 15 and it[2] - it[0] <= 19))
+
+suite "the BeOS desktop":
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/be-red", "name": "Red"}, {"id": "tests/be-green", "name": "Green"},
+        {"id": "tests/be-blue", "name": "Blue"}]
+
+  test "the first scene fills the desktop beside the Deskbar":
+    current = hostScene("tests/be-red")
+    let image = pass()
+    shot(image, "b1-first")
+    check problems.len == 0
+    check wins().len == 1
+    check winOf("tests/be-red"){"max"}.getBool()
+    check image.color(300, 240) == colored("#ff0000")
+    check image.color(W - BarW - 20, H div 2) == colored("#ff0000")
+    check image.color(W - BarW + 6, H - 10) == colored("#336698")
+    # Its row in the Deskbar, under the gem and the tray, pressed in.
+    check image.color(W - BarW + 4, 75) == colored("#b8b8b8")
+
+  test "the icons under the Deskbar are the frame's own apps, and the Be menu opens its scenes":
+    # Under the Deskbar, with room for three of its rows: the disk and the scene
+    # list (no store, no asset browser on this frame).
+    let (ix, iy) = (W - BarW div 2, 155 + 1 * 66 + 20)
+    discard send("tap", at(ix, iy))
+    check desk().state{"picked"}.getStr() == "system/sceneSwitcher"
+    check send("doubleTap", at(ix, iy)).filterIt(it != "render") == @["sceneSwitcher"]
+    check send("doubleTap", at(ix, 155 + 20)).filterIt(it != "render") == @["sceneSettings"]
+    discard pass()
+    # Green, the Be menu's second scene.
+    discard click(W - BarW div 2, 17)
+    discard pass()
+    check "setCurrentScene" in click(W - BarW - 100, 3 + 24 + 12)
+    check current.id.string == "tests/be-green"
+    let image = pass()
+    shot(image, "b2-two")
+    check problems.len == 0
+    check wins().len == 2
+    let g = winOf("tests/be-green")
+    check not g{"max"}.getBool()
+    check image.color(g{"x"}.getInt() + 150, g{"y"}.getInt() + 120) == colored("#00ff00")
+    check image.color(W - BarW - 20, H - 20) == colored("#ff0000")
+
+  test "a window dragged by its tab follows the pointer":
+    let g = winOf("tests/be-green")
+    let (x0, y0) = (g{"x"}.getInt(), g{"y"}.getInt())
+    discard send("pointerDown", at(x0 + 40, y0 + 12))
+    discard send("pointerMove", at(x0 + 80, y0 + 42))
+    discard send("pointerMove", at(x0 + 140, y0 + 62))
+    discard send("pointerUp", at(x0 + 140, y0 + 62, %*{"buttons": 0}))
+    check winOf("tests/be-green"){"x"}.getInt() == x0 + 100
+    check winOf("tests/be-green"){"y"}.getInt() == y0 + 50
+    check pass().color(x0 + 100 + 150, y0 + 50 + 120) == colored("#00ff00")
+
+  test "the gear box on a scene's tab opens its settings, and the zoom box fills the desktop beside the Deskbar":
+    let boxes = tabBoxes(winOf("tests/be-green"))
+    check boxes.len == 3
+    settingsFrom = ""
+    check acted(clickRect(boxes[1])) == @["sceneSettings"]
+    check settingsFrom == "tests/be-green"
+    check desk().state{"asked"}.getStr() == "system/sceneSettings#tests/be-green"
+    discard pass()
+    discard clickRect(boxes[2])
+    check winOf("tests/be-green"){"max"}.getBool()
+    let image = pass()
+    shot(image, "b3-zoomed")
+    check image.color(W - BarW - 20, H div 2) == colored("#00ff00")
+    check image.color(W - BarW + 6, H - 10) == colored("#336698")
+
+  test "a window's row in the Deskbar puts it away while in front, and brings it back":
+    # Red's row, then green's, under the gem and the tray.
+    discard click(W - BarW div 2, 62 + 26 + 13)
+    check winOf("tests/be-green"){"min"}.getBool()
+    check current.id.string == "tests/be-red"
+    discard pass()
+    check acted(click(W - BarW div 2, 62 + 26 + 13)) == @["setCurrentScene"]
+    check current.id.string == "tests/be-green"
+    check not winOf("tests/be-green"){"min"}.getBool()
+    discard pass()
+
+  test "the Be menu opens the frame's scenes and Preferences":
+    proc gem() =
+      discard click(W - BarW div 2, 17)
+      check desk().state{"menu"}.getBool()
+      discard pass()
+    # Left of the Deskbar: the three scenes, a rule, Preferences, Scenes.
+    let mx = W - BarW - 100
+    gem()
+    shot(pass(), "b4-menu")
+    check acted(click(mx, 3 + 2 * 24 + 12)) == @["setCurrentScene"]
+    check current.id.string == "tests/be-blue"
+    discard pass()
+    check wins().len == 3
+    gem()
+    check acted(click(mx, 3 + 3 * 24 + 8 + 12)) == @["sceneSettings"]
+    check payloads["sceneSettings"] == %*{"page": "frame"}
+    check desk().state{"asked"}.getStr() == "system/sceneSettings"
+    discard pass()
+    check problems.len == 0
+
+  test "Alt+W closes the window in front, and a window opens at the layout's size where that fits":
+    discard key("w", alt = true)
+    check winOf("tests/be-blue").isNil
+    check current.id.string != "tests/be-blue"
+    desk().state["windowSize"] = %"400x240"
+    desk().state.delete("boxes")
+    discard pass()
+    discard click(W - BarW div 2, 17)
+    discard pass()
+    check acted(click(W - BarW - 100, 3 + 2 * 24 + 12)) == @["setCurrentScene"]
+    check current.id.string == "tests/be-blue"
+    discard pass()
+    let b = winOf("tests/be-blue")
+    check not b{"max"}.getBool()
+    check b{"w"}.getInt() == 400 + 12
+    check b{"h"}.getInt() == 240 + 36
+    check sceneSize("tests/be-blue") == (400, 240)
+    check problems.len == 0
+
+  test "the Be menu has the scene store under the frame's scenes":
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/be-red", "name": "Red"}, {"id": "tests/be-green", "name": "Green"},
+        {"id": "tests/be-blue", "name": "Blue"}, {"id": "tests/store-be", "name": "Scene store"}]
+    discard pass()
+    discard click(W - BarW div 2, 17)
+    check desk().state{"menu"}.getBool()
+    shot(pass(), "b5-store-menu")
+    # The three scenes, a rule, the store.
+    check acted(click(W - BarW - 100, 3 + 3 * 24 + 8 + 12)) == @["setCurrentScene"]
+    check current.id.string == "tests/store-be"
+    discard pass()
+    check not winOf("tests/store-be").isNil
+    check problems.len == 0
+
 proc openIds(): seq[string] =
   ## What the desktop showing has open: its windows, or its tiles.
   let (wins, open) = (desk().state{"wins"}, desk().state{"open"})
@@ -794,7 +1147,7 @@ suite "another layout chosen on the frame":
     check desk().id.string == Layout
     check desk().state{"openScenes"} == %*["tests/red", "tests/blue", "tests/green"]
     let all = @["tests/blue", "tests/green", "tests/red"]
-    for (layoutId, name) in [(Tiling, "15-to-tiling"), (Layout, "16-back")]:
+    for (layoutId, name) in [(MacOS, "15-to-macos"), (Tiling, "16-to-tiling"), (BeOS, "17-to-beos"), (Layout, "18-back")]:
       chooseLayout(layoutId)
       let image = pass()
       shot(image, name)
@@ -806,9 +1159,11 @@ suite "another layout chosen on the frame":
       for slot in desk().slots: embedded.add slot.child
       check hosted["tests/blue"] in embedded
       check problems.len == 0
-    # Back on Windows 98, green's window is on top.
+    # On macOS the windows cascade in their order, green's on top.
+    chooseLayout(MacOS)
+    discard pass()
     let g = winOf("tests/green")
-    check pass().color(g{"x"}.getInt() + g{"w"}.getInt() div 2, g{"y"}.getInt() + g{"h"}.getInt() div 2) ==
+    check pass().color(g{"x"}.getInt() + g{"w"}.getInt() div 2, MenuH + g{"y"}.getInt() + g{"h"}.getInt() div 2) ==
       colored("#00ff00")
     chooseLayout("")
     discard pass()

@@ -158,15 +158,26 @@ others in a row, an even grid, columns, rows; the gap between tiles dragged move
 that split, kept per arrangement; a press anywhere in a tile is its scene's at
 once and gives it the focus, a tile's bar dragged onto another tile, bar or
 picture, swaps the two, a gear on each bar opens that scene's settings as a tile
-of their own, and the top bar's gear the frame's) are two.
-The desktop icons of `Windows 98` are the frame's own apps alone, never the
+of their own, and the top bar's gear the frame's) are two. `macOS` and `BeOS`
+are desktops of overlapping windows the way `Windows 98` is, at the same "Window
+size", moved, sized and snapped the same way, with their own chrome: on `macOS`
+the traffic lights close, put away and zoom a window, a gear at the right of its
+title bar opens its settings, the Dock has the frame's scenes (a dot under the
+ones open), Launchpad and System Settings, and the menu bar's Scenes,
+Settings and Window open a scene, the settings of the one in front and the
+windows open (full screen there, or F11); on `BeOS` a window's yellow tab (grey
+behind) has its close, gear and zoom boxes and puts it away on a double click,
+the Deskbar lists the windows open and its gem opens the Be menu (the scenes,
+Preferences), and Tracker's icons under it open the frame's own apps.
+The desktop icons of `Windows 98` and `BeOS` are those apps alone, never the
 frame's scenes (the menus have those): the scene list, the scene store, the
 asset browser and the frame's settings. The **Scene store** and the
 **Asset browser** (`docs/scene-store.md`) are scenes like any other, found by
 their sample's id (`scene-store`, `asset-browser`) or their name; where the frame
 has them each desktop has entries of its own for them and leaves them out of its
 scene lists: the top of `Windows 98`'s Start, a bag for the store in `Tiling`'s top
-bar. Everywhere else (an ESP32, an editor's preview) they draw the one
+bar, `macOS`'s Dock beside System Settings (and the store in its mark's menu),
+`BeOS`'s Be menu. Everywhere else (an ESP32, an editor's preview) they draw the one
 scene, as before.
 
 The runtime gives a layout three things and keeps no windows of its own:
@@ -208,7 +219,8 @@ switcher (`isBuiltInScene`) open over the scene in front the way any scene comes
 them a window like the others; `app.frame.sceneName` says what one shows ("Scene
 settings", "Frame settings", "Layout settings", "Scene switcher"),
 and `Windows 98` names its windows after it ("Clock Properties", "Control
-Panel"), with no gear where a scene's window has one. Each
+Panel"; `macOS` "Clock Settings", "System Settings"; `BeOS` "Clock Settings",
+"Preferences"), with no gear where a scene's window has one. Each
 scene's settings are a scene of their own here, `app.frame.sceneId`
 `system/sceneSettings#<scene id>` (`docs/scene-settings.md` "In a window"), so a
 layout gives each its own window, named after the scene after the `#`; the plain
