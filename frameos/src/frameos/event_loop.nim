@@ -436,6 +436,29 @@ proc settingsOf*(scene: FrameScene, state: JsonNode) =
 
 {.pop.}
 
+proc layoutAround(current: FrameScene): JsonNode =
+  ## The layout a built-in scene opened over `current` is drawn in: the one
+  ## `current` wears, made afresh around it with what it has open going along
+  ## by name (`openedOver`), for a taskbar to keep showing. nil without one.
+  if current of InterpretedFrameScene and InterpretedFrameScene(current).layoutSceneId.string.len > 0:
+    result = newJObject()
+    result.put("sceneId", newJString(InterpretedFrameScene(current).layoutSceneId.string))
+    let layoutState =
+      if InterpretedFrameScene(current).layoutState.isNil: newJObject()
+      else: copy(InterpretedFrameScene(current).layoutState)
+    layoutState.put("openedOver", newJString(current.shownName))
+    result.put("state", layoutState)
+
+proc backFrom(loop: EventLoop, current: FrameScene): string =
+  ## Where a built-in scene goes back to: the scene it was opened from, else
+  ## (one opened by name, or one that left the list) the list's first; "" for
+  ## none.
+  result = current.state{"from"}.getStr()
+  if result.len == 0:
+    let order = loop.sceneOrderOf()
+    if order.len > 0:
+      result = order[0].string
+
 proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bool =
   ## `sceneSwitcher` and `sceneSettings`: the built-in scene, told which scene
   ## it was opened from. While either shows, either command goes back to that
@@ -469,17 +492,10 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
     # It is drawn in the layout of the scene it was opened from.
     if safe:
       state.put("noLayout", newJBool(true))
-    elif current of InterpretedFrameScene and InterpretedFrameScene(current).layoutSceneId.string.len > 0:
-      let worn = newJObject()
-      worn.put("sceneId", newJString(InterpretedFrameScene(current).layoutSceneId.string))
-      # The layout is made afresh around the built-in scene: what it has open
-      # goes with it, by name, for a taskbar to keep showing.
-      let layoutState =
-        if InterpretedFrameScene(current).layoutState.isNil: newJObject()
-        else: copy(InterpretedFrameScene(current).layoutState)
-      layoutState.put("openedOver", newJString(current.shownName))
-      worn.put("state", layoutState)
-      state.put("layout", worn)
+    else:
+      let worn = layoutAround(current)
+      if not worn.isNil:
+        state.put("layout", worn)
     if sceneId == SceneSettingsId:
       if not current.isBuiltIn:
         current.settingsOf(state)
@@ -488,11 +504,7 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
         state.put("opened", newJString("frame"))
     payload.put("state", state)
   else:
-    next = current.state{"from"}.getStr()
-    if next.len == 0:
-      let order = loop.sceneOrderOf()
-      if order.len > 0:
-        next = order[0].string
+    next = loop.backFrom(current)
   if safe and not current.isNil and current.id.string == sceneId:
     # Already up (the pull before this one opened it): no switch to make.
     loop.runOnScene(current, evSetCurrentScene, payload, eventPolicy(evSetCurrentScene), envelope.fromRender)
@@ -524,12 +536,7 @@ proc settingsWindows(loop: EventLoop, envelope: EventEnvelope): bool =
     payload = newJObject()
   if current.isBuiltIn and not (framePage and isSceneSettings(current.id.string) and
       current.id.string != SceneSettingsId):
-    var next = current.state{"from"}.getStr()
-    if next.len == 0:
-      let order = loop.sceneOrderOf()
-      if order.len > 0:
-        next = order[0].string
-    payload.put("sceneId", newJString(next))
+    payload.put("sceneId", newJString(loop.backFrom(current)))
     return loop.host.selectScene(payload)
   let state = newJObject()
   let opener =
@@ -542,15 +549,10 @@ proc settingsWindows(loop: EventLoop, envelope: EventEnvelope): bool =
     let worn = current.state{"layout"}
     if not worn.isNil:
       state.put("layout", copy(worn))
-  elif current of InterpretedFrameScene and InterpretedFrameScene(current).layoutSceneId.string.len > 0:
-    let worn = newJObject()
-    worn.put("sceneId", newJString(InterpretedFrameScene(current).layoutSceneId.string))
-    let layoutState =
-      if InterpretedFrameScene(current).layoutState.isNil: newJObject()
-      else: copy(InterpretedFrameScene(current).layoutState)
-    layoutState.put("openedOver", newJString(current.shownName))
-    worn.put("state", layoutState)
-    state.put("layout", worn)
+  else:
+    let worn = layoutAround(current)
+    if not worn.isNil:
+      state.put("layout", worn)
   if not current.isNil and not current.isBuiltIn:
     current.settingsOf(state)
   if framePage:

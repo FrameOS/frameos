@@ -40,6 +40,49 @@ when defined(memProbe): import ./utils/memory
 export event_loop
 
 type
+  WindowList* = object
+    ## The scenes kept for windows, by id: two lists side by side, as there
+    ## are a few at most (app_runtime.windowLimit). A table's generic code, or
+    ## a list of pairs, costs the ESP32 more flash than the lookups ever save;
+    ## lists of ids and of scenes reuse what the firmware has already.
+    ids: seq[SceneId]
+    scenes: seq[FrameScene]
+
+proc len*(w: WindowList): int {.inline.} = w.ids.len
+
+proc hasKey*(w: WindowList, id: SceneId): bool = w.ids.find(id) >= 0
+
+proc getOrDefault*(w: WindowList, id: SceneId, default: FrameScene = nil): FrameScene =
+  let i = w.ids.find(id)
+  if i >= 0: w.scenes[i] else: default
+
+proc `[]=`(w: var WindowList, id: SceneId, scene: FrameScene) =
+  let i = w.ids.find(id)
+  if i >= 0:
+    w.scenes[i] = scene
+  else:
+    w.ids.add id
+    w.scenes.add scene
+
+proc del(w: var WindowList, id: SceneId) =
+  let i = w.ids.find(id)
+  if i >= 0:
+    w.ids.delete(i)
+    w.scenes.delete(i)
+
+proc clear(w: var WindowList) =
+  w.ids.setLen(0)
+  w.scenes.setLen(0)
+
+iterator keys*(w: WindowList): SceneId =
+  for id in w.ids:
+    yield id
+
+iterator values*(w: WindowList): FrameScene =
+  for scene in w.scenes:
+    yield scene
+
+type
   SingleSceneHost* = ref object
     frameConfig*: FrameConfig
     logger*: Logger
@@ -98,7 +141,7 @@ type
       ## the layout goes along from scene to scene. An ESP32 turns it on
       ## (embedded_runtime.nim), the wasm preview when asked
       ## (frameos_wasm_set_windowed).
-    windows*: Table[SceneId, FrameScene]
+    windows*: WindowList
       ## Every scene that ran and is not the resident one, while windowed.
     windowOrder: seq[SceneId]
       ## The frame's own scenes among `windows` (not the built-in ones), the
@@ -228,6 +271,18 @@ proc runOn(host: SingleSceneHost, scene: FrameScene, event: string, payload: Jso
 proc runNow(host: SingleSceneHost, event: string, payload: JsonNode) =
   host.runOn(host.scene, event, payload)
 
+proc applyPendingSwitch(host: SingleSceneHost, sceneId: SceneId) =
+  ## The state the switch to `sceneId` carried, applied to the resident scene
+  ## (public fields only, by its own `setCurrentScene` handling), in the
+  ## order runner.nim keeps: before "open". Then the switch is done.
+  if host.pendingSwitchId == sceneId.string and not host.pendingSwitchPayload.isNil:
+    try:
+      host.runNow("setCurrentScene", host.pendingSwitchPayload)
+    except Exception as e:
+      host.say("setCurrentScene state failed: " & e.msg)
+  host.pendingSwitchId = ""
+  host.pendingSwitchPayload = nil
+
 proc lifecycle*(host: SingleSceneHost, event: string, payload: JsonNode) =
   ## "open" and "close", sent the way runner.nim sends them: "open" when a
   ## scene becomes the current one, "close" when the host switches away from
@@ -286,7 +341,7 @@ proc dropWindows*(host: SingleSceneHost) =
   ## Let go of every kept scene: new scenes arrived, or the runtime restarts.
   for scene in host.windows.values:
     cleanupScene(scene)
-  host.windows = initTable[SceneId, FrameScene]()
+  host.windows.clear()
   host.windowOrder.setLen(0)
   host.failedWindows.setLen(0)
   host.refusedWindows.setLen(0)
@@ -376,6 +431,17 @@ proc makeRoom(host: SingleSceneHost, forced: bool): bool =
         inc i
   over <= 0
 
+proc startScene(host: SingleSceneHost, sceneId: SceneId, exported: ExportedInterpretedScene,
+    persisted: bool): FrameScene =
+  ## A new instance of `sceneId`, started with the state it kept (`persisted`:
+  ## a built-in scene keeps none), in the host's run: the resident scene's
+  ## and a window's alike.
+  var state = if host.initialState.isNil or not persisted: nil else: host.initialState(sceneId)
+  if state.isNil:
+    state = %*{}
+  host.events.hostRun:
+    result = exported.init(sceneId, host.frameConfig, host.logger, state)
+
 proc windowScene(host: SingleSceneHost, sceneId: SceneId): FrameScene =
   ## `hostSceneFor`: this host's instance of a scene, started if it has not
   ## run and there is room for it (makeRoom); a built-in scene only as it is
@@ -406,12 +472,8 @@ proc windowScene(host: SingleSceneHost, sceneId: SceneId): FrameScene =
     scenes = getInterpretedScenes()
     if not scenes.hasKey(sceneId) or scenes[sceneId].isLayout:
       return nil
-  var persisted = if host.initialState.isNil: nil else: host.initialState(sceneId)
-  if persisted.isNil:
-    persisted = %*{}
   try:
-    host.events.hostRun:
-      result = scenes[sceneId].init(sceneId, host.frameConfig, host.logger, persisted)
+    result = host.startScene(sceneId, scenes[sceneId], persisted = true)
     host.windows[sceneId] = result
     host.windowOrder.add sceneId
     host.drawn.add sceneId
@@ -517,25 +579,13 @@ proc ensureScene*(host: SingleSceneHost): bool =
     host.covered = nil
     host.coveredExported = nil
     host.coveredId = none(SceneId)
-    if host.pendingSwitchId == sceneId.string and not host.pendingSwitchPayload.isNil:
-      try:
-        host.runNow("setCurrentScene", host.pendingSwitchPayload)
-      except Exception as e:
-        host.say("setCurrentScene state failed: " & e.msg)
-    host.pendingSwitchId = ""
-    host.pendingSwitchPayload = nil
+    host.applyPendingSwitch(sceneId)
     host.lifecycle("open", %*{"sceneId": sceneId.string})
     return true
   if host.windowed and host.takeWindow(sceneId):
     # The scene it was in a window, or when it was left: the same one,
     # brought forward. A switch that carried state applies it.
-    if host.pendingSwitchId == sceneId.string and not host.pendingSwitchPayload.isNil:
-      try:
-        host.runNow("setCurrentScene", host.pendingSwitchPayload)
-      except Exception as e:
-        host.say("setCurrentScene state failed: " & e.msg)
-    host.pendingSwitchId = ""
-    host.pendingSwitchPayload = nil
+    host.applyPendingSwitch(sceneId)
     wearLayout(host.scene)
     host.lifecycle("open", %*{"sceneId": sceneId.string})
     return true
@@ -557,22 +607,12 @@ proc ensureScene*(host: SingleSceneHost): bool =
     if host.windowed:
       discard host.makeRoom(forced = true)
   when defined(memProbe): memProbe("  SCENE INIT " & sceneId.string)
-  var persisted = if host.initialState.isNil or builtIn: nil else: host.initialState(sceneId)
-  if persisted.isNil:
-    persisted = %*{}
-  host.events.hostRun:
-    host.scene = host.exported.init(sceneId, host.frameConfig, host.logger, persisted)
+  host.scene = host.startScene(sceneId, host.exported, persisted = not builtIn)
   when defined(memProbe): memProbe("  ensureScene: init done")
   host.say("scene \"" & host.sceneName & "\" initialized")
   # The order runner.nim keeps: the switch's state is applied (public fields
   # only, by the scene's own `setCurrentScene` handling), then "open".
-  if host.pendingSwitchId == sceneId.string and not host.pendingSwitchPayload.isNil:
-    try:
-      host.runNow("setCurrentScene", host.pendingSwitchPayload)
-    except Exception as e:
-      host.say("setCurrentScene state failed: " & e.msg)
-  host.pendingSwitchId = ""
-  host.pendingSwitchPayload = nil
+  host.applyPendingSwitch(sceneId)
   if host.windowed:
     wearLayout(host.scene)
   host.lifecycle("open", %*{"sceneId": sceneId.string})
