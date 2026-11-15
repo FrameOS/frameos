@@ -255,15 +255,14 @@ proc get*(self: App, context: ExecutionContext): Image =
 
   if nextImage.isNone:
     try:
-      if boundWidth > 0 and boundHeight > 0:
-        nextImage = some(readImageWithBounds(path, boundWidth, boundHeight))
-      else:
-        let decodeBounds = self.decodeBoundsForContext(context)
-        nextImage = some(readImageWithDisplayBounds(
-          path,
-          maxEdge = decodeBounds.maxEdge,
-          maxPixels = decodeBounds.maxPixels
-        ))
+      let decodeBounds = self.decodeBoundsForContext(context)
+      nextImage = some(readImageWithDisplayBounds(
+        path,
+        maxEdge = decodeBounds.maxEdge,
+        maxPixels = decodeBounds.maxPixels,
+        boundWidth = boundWidth,
+        boundHeight = boundHeight
+      ))
     except CatchableError as e:
       return self.error(context, "An error occurred while loading the image: " & path & "\n" & e.msg, decodeTarget)
 

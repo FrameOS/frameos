@@ -608,9 +608,36 @@ proc ensureFileReadBudget(path: string, fileSize: int64) =
       "K; only " & $(available div 1024) &
       "K of render memory is available")
 
+proc boundedDecodeDims*(srcWidth, srcHeight, boundWidth, boundHeight: int):
+    tuple[width, height: int] =
+  ## The smallest aspect-preserving size that still covers the bounds box —
+  ## enough pixels for any placement into it — and never an upscale. Sources
+  ## already inside the box come back unchanged.
+  result = (srcWidth, srcHeight)
+  if srcWidth <= 0 or srcHeight <= 0 or boundWidth <= 0 or boundHeight <= 0:
+    return
+  if srcWidth <= boundWidth or srcHeight <= boundHeight:
+    # The cover scale would be >= 1 on at least one axis: nothing to shrink
+    # without dropping below the consumer's useful resolution.
+    return
+  if srcWidth.int64 * boundHeight.int64 >= boundWidth.int64 * srcHeight.int64:
+    # Height is the binding axis of the cover scale.
+    result.height = boundHeight
+    result.width = max(1, (
+      (srcWidth.int64 * boundHeight.int64 + srcHeight.int64 - 1) div
+      srcHeight.int64).int)
+  else:
+    result.width = boundWidth
+    result.height = max(1, (
+      (srcHeight.int64 * boundWidth.int64 + srcWidth.int64 - 1) div
+      srcWidth.int64).int)
+
 proc readImageWithDisplayBounds*(path: string,
     maxEdge = DisplayDecodeMaxEdge,
-    maxPixels = DisplayDecodeMaxPixels): Image =
+    maxPixels = DisplayDecodeMaxPixels,
+    boundWidth = 0, boundHeight = 0): Image =
+  ## `boundWidth` x `boundHeight`: a consumer's requestedBounds, which a JPEG
+  ## is streamed down to (boundedDecodeDims); other formats keep the budget.
   refreshDecodeBudget()
   let fileSize = getFileSize(path)
 
@@ -628,6 +655,10 @@ proc readImageWithDisplayBounds*(path: string,
       probed = false
     if probed:
       header = ""
+      if boundWidth > 0 and boundHeight > 0:
+        let bounded = boundedDecodeDims(dimensions.width, dimensions.height,
+          boundWidth, boundHeight)
+        dimensions = ImageDimensions(width: bounded.width, height: bounded.height)
       let target = displayDecodeDimensions(dimensions, maxEdge, maxPixels)
       var file: File
       if not file.open(path):
@@ -1048,30 +1079,6 @@ proc embeddedSizedRemoteImageUrl*(url: string, width, height: int): string =
   else:
     return url
 
-proc boundedDecodeDims*(srcWidth, srcHeight, boundWidth, boundHeight: int):
-    tuple[width, height: int] =
-  ## The smallest aspect-preserving size that still covers the bounds box —
-  ## enough pixels for any placement into it — and never an upscale. Sources
-  ## already inside the box come back unchanged.
-  result = (srcWidth, srcHeight)
-  if srcWidth <= 0 or srcHeight <= 0 or boundWidth <= 0 or boundHeight <= 0:
-    return
-  if srcWidth <= boundWidth or srcHeight <= boundHeight:
-    # The cover scale would be >= 1 on at least one axis: nothing to shrink
-    # without dropping below the consumer's useful resolution.
-    return
-  if srcWidth.int64 * boundHeight.int64 >= boundWidth.int64 * srcHeight.int64:
-    # Height is the binding axis of the cover scale.
-    result.height = boundHeight
-    result.width = max(1, (
-      (srcWidth.int64 * boundHeight.int64 + srcHeight.int64 - 1) div
-      srcHeight.int64).int)
-  else:
-    result.width = boundWidth
-    result.height = max(1, (
-      (srcHeight.int64 * boundWidth.int64 + srcWidth.int64 - 1) div
-      srcWidth.int64).int)
-
 proc decodeImageBounded*(content: string, boundWidth, boundHeight: int): Image =
   ## Decodes with at most the useful resolution for a (boundWidth,
   ## boundHeight) consumer: cover-scaled, aspect-preserved, never upscaled.
@@ -1089,45 +1096,6 @@ proc decodeImageBounded*(content: string, boundWidth, boundHeight: int): Image =
   # rounding); the box-filtered scaled decoders keep it clean.
   discard decodeImageScaledInto(content, image, fitStretch)
   image
-
-proc readImageWithBounds*(path: string, boundWidth, boundHeight: int): Image =
-  ## A file decoded with at most the useful resolution for a (boundWidth,
-  ## boundHeight) consumer — the requestedBounds read of a local file. JPEGs
-  ## stream from disk straight to that size; anything else is read whole and
-  ## decoded bounded. The live decode budget still applies on top.
-  if boundWidth <= 0 or boundHeight <= 0:
-    return readImageWithDisplayBounds(path, maxEdge = 0, maxPixels = 0)
-  refreshDecodeBudget()
-  let fileSize = getFileSize(path)
-  var header = probeImageFileHeader(path)
-  if isJpegHeader(header):
-    var dimensions: ImageDimensions
-    var probed = true
-    try:
-      dimensions = decodeImageDimensions(header)
-    except CatchableError:
-      probed = false
-    if probed:
-      header = ""
-      let bounded = boundedDecodeDims(dimensions.width, dimensions.height,
-        boundWidth, boundHeight)
-      let target = displayDecodeDimensions(bounded.width, bounded.height,
-        maxEdge = 0, maxPixels = 0)
-      var file: File
-      if not file.open(path):
-        raise newException(PixieError, "Cannot open image file: " & path)
-      try:
-        return decodeJpegStreamScaled(
-          fileJpegSource(file), fileSize.int, target.width, target.height,
-          rewind = fileRewind(file))
-      except PixieError:
-        discard
-      finally:
-        file.close()
-  header = ""
-  ensureFileReadBudget(path, fileSize)
-  let data = readFile(path)
-  decodeImageBounded(data, boundWidth, boundHeight)
 
 when defined(frameosEmbedded):
   proc decodeSpilledImageInto(path: string, totalLen: int, target: Image,

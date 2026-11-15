@@ -672,9 +672,6 @@ type
     enabled, inputEnabled, durationEnabled: bool, durationSec: float,
     expressionEnabled: bool, expression: string]
 
-  CacheRefusal* = tuple[time: float, expr, key: JsonNode]
-    ## When and on what key the node cache last declined to keep a value.
-
   # Runtime state while running the scene (for interpreted frames)
   InterpretedFrameScene* = ref object of FrameScene
     nodes*: Table[NodeId, DiagramNode]
@@ -715,7 +712,6 @@ type
     cacheTimes*: Table[NodeId, float]
     cacheKeys*: Table[NodeId, JsonNode]
     cacheExprs*: Table[NodeId, JsonNode]
-    cacheRefused*: Table[NodeId, CacheRefusal]    # a value the cache could not keep, while still current
     imageFusionPlans*: Table[NodeId, ImageFusionPlan] # consumer node -> planned image edge
     imageBoundsPlans*: Table[NodeId, ImageBoundsPlan] # consumer node -> bounded unfused edge
 

@@ -329,16 +329,17 @@ proc cacheLookup(scene: InterpretedFrameScene, nodeId: NodeId, cache: NodeCacheC
   ## `allowStore = false` (the inputs were degraded: a producer failed and was
   ## zero-filled) still serves an entry; it only keeps the entry from going
   ## before the replacement is made, which that pass will not store.
-  var useCached = scene.cacheValues.hasKey(nodeId)
-  if useCached and cache.durationEnabled:
-    useCached = scene.cacheTimes.hasKey(nodeId) and
-      epochTime() <= scene.cacheTimes[nodeId] + cache.durationSec
-  if useCached and not expr.isNil:
+  # Whether what was made last for these keys is still good, held or not:
+  # cacheTimes is written on every make, kept or declined (cacheStore).
+  var current = scene.cacheTimes.hasKey(nodeId)
+  if current and cache.durationEnabled:
+    current = epochTime() <= scene.cacheTimes[nodeId] + cache.durationSec
+  if current and not expr.isNil:
     # Recompute when the cache expression's value changes.
-    useCached = scene.cacheExprs.hasKey(nodeId) and scene.cacheExprs[nodeId] == expr
-  if useCached and cache.inputEnabled and not inputKey.isNil and inputKey.len > 0:
-    useCached = scene.cacheKeys.hasKey(nodeId) and scene.cacheKeys[nodeId] == inputKey
-  if useCached:
+    current = scene.cacheExprs.hasKey(nodeId) and scene.cacheExprs[nodeId] == expr
+  if current and cache.inputEnabled and not inputKey.isNil and inputKey.len > 0:
+    current = scene.cacheKeys.hasKey(nodeId) and scene.cacheKeys[nodeId] == inputKey
+  if current and scene.cacheValues.hasKey(nodeId):
     var served = scene.cacheValues[nodeId]
     if served.kind == fkImageSpool:
       # The disk tier: read the pixels back, whole, byte for byte the image a
@@ -351,18 +352,9 @@ proc cacheLookup(scene: InterpretedFrameScene, nodeId: NodeId, cache: NodeCacheC
         return (true, VImage(img), false)
     else:
       return (true, served, false)
-  if not scene.cacheValues.hasKey(nodeId) and scene.cacheRefused.hasKey(nodeId):
-    # Nothing held because the cache declined the last value: if that value
-    # would still be served, this run makes it again (remakingCachedValue).
-    let refused = scene.cacheRefused[nodeId]
-    var current = true
-    if cache.durationEnabled:
-      current = epochTime() <= refused.time + cache.durationSec
-    if current and not expr.isNil:
-      current = not refused.expr.isNil and refused.expr == expr
-    if current and cache.inputEnabled and not inputKey.isNil and inputKey.len > 0:
-      current = not refused.key.isNil and refused.key == inputKey
-    result.remake = current
+  # Still good but not held (the cache declined it): this run makes the same
+  # value again (remakingCachedValue), it does not step on.
+  result.remake = current and not scene.cacheValues.hasKey(nodeId)
   # A stale image goes before its replacement is made, not after: a
   # slideshow's last photo held through the next one's decode was the
   # difference between a photo and an error frame on the SenseCAP Indicator
@@ -378,6 +370,7 @@ proc cacheStore(scene: InterpretedFrameScene, nodeId: NodeId, context: Execution
   ## image disk tier only: to refuse snapshotting the live canvas, and to
   ## size the spill cap.
   var toStore = fresh
+  var held = true
   let memoryLimit = cachedImageMemoryLimit()
   if memoryLimit > 0 and fresh.kind == fkImage and not fresh.img.isNil and
       fresh.img.byteSize > memoryLimit and not affordsKeeping(fresh.img, memoryLimit, context):
@@ -389,21 +382,19 @@ proc cacheStore(scene: InterpretedFrameScene, nodeId: NodeId, context: Execution
     if not keepsBoundedImage(fresh.img, nodeId, context):
       let spool = trySpillCachedImage(scene, nodeId, fresh.img, context)
       if spool.isNil:
-        # The time a value the cache declined stays current is the time a
-        # kept one would have: what the next miss reads (remakingCachedValue).
-        let refusedAt =
-          if scene.cacheRefused.hasKey(nodeId) and
-              scene.cacheRefused[nodeId].expr == expr and scene.cacheRefused[nodeId].key == inputKey:
-            scene.cacheRefused[nodeId].time
-          else:
-            epochTime()
-        scene.cacheRefused[nodeId] = (time: refusedAt, expr: expr, key: inputKey)
-        return
-      toStore = VImageSpool(spool)
-  scene.cacheRefused.del(nodeId)
-  scene.cacheValues[nodeId] = toStore
-  if cache.durationEnabled:
-    scene.cacheTimes[nodeId] = epochTime()
+        # Nothing held, but the keys are, so the next miss knows it repeats
+        # this value (cacheLookup's remake). A remade value keeps the time
+        # the first one was made: the interval still ends when it would.
+        if context.remakingCachedValue:
+          return
+        held = false
+      else:
+        toStore = VImageSpool(spool)
+  if held:
+    scene.cacheValues[nodeId] = toStore
+  else:
+    scene.cacheValues.del(nodeId) # an older disk-tier entry must not pass for this one
+  scene.cacheTimes[nodeId] = epochTime()
   if not expr.isNil:
     scene.cacheExprs[nodeId] = expr
   if cache.inputEnabled and not inputKey.isNil and inputKey.len > 0:
@@ -1409,9 +1400,9 @@ proc programOp(scene: InterpretedFrameScene, ctx: ptr JSContext, op: ProgramOp, 
     var fresh: Value
     try:
       fresh = getInterpretedApp(app.appKeyword, app, context)
+      scene.cacheStore(id, context, cache, key, expr, fresh)
     finally:
       context.remakingCachedValue = wasRemaking
-    scene.cacheStore(id, context, cache, key, expr, fresh)
     result = scene.hold(ctx, fresh)
   of opRun:
     let app = scene.appOf(id)
@@ -2255,7 +2246,6 @@ proc forgetSceneGraph*(scene: InterpretedFrameScene) =
   scene.cacheTimes.clear()
   scene.cacheKeys.clear()
   scene.cacheExprs.clear()
-  scene.cacheRefused.clear()
   scene.cacheInputKeys.clear()
   cleanupSceneJs(scene)
 

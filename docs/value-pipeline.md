@@ -421,7 +421,8 @@ Pinned by the planner-rule bounds suite and the end-to-end interpreter
 tests; `data/rotateImage`, `data/resizeImage` and `render/zoomPan` declare,
 no app code changed — producers pick bounds up through the shared download
 funnel. `data/localImage` reads files, not downloads, and took none until
-2026-11-15 (`readImageWithBounds`): under a zoomPan it decoded each photo as
+2026-11-15 (`readImageWithDisplayBounds` now streams a JPEG down to
+them): under a zoomPan it decoded each photo as
 large as the memory budget allowed, which the embedded node cache then
 refused to keep, so "Slideshow with motion" decoded a photo every animation
 frame (0.5 fps on the SenseCAP Indicator). A value its producer decoded to
