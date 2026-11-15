@@ -471,7 +471,7 @@ describe("the render pull", () => {
       .where(eq(frameServerRenders.frameId, frame.id));
     const spectra = await pull(frame.id, token, "width=800&height=480&format=7");
     expect(spectra.status).toBe(200);
-    expect(spectra.headers.get("x-frameos-next-render")).toBe(String(Math.max(cloudRenderedMinIntervalSeconds, 180)));
+    expect(spectra.headers.get("x-frameos-next-render")).toBe(String(Math.max(cloudRenderedMinIntervalSeconds, 60)));
     await db
       .update(frameServerRenders)
       .set({ renderedAt: new Date(Date.now() - 3_600_000) })

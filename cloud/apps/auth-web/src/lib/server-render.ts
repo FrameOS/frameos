@@ -349,11 +349,8 @@ export const maxNextRenderSeconds = 7 * 86400;
  * the backend's is PANEL_REFRESH_FLOOR_SECONDS in embedded_device.py).
  */
 export const panelRefreshFloorSeconds: Readonly<Partial<Record<number, number>>> = {
-  2: 60,
-  3: 60,
-  5: 60,
-  6: 180,
-  7: 180,
+  6: 60,
+  7: 60,
 };
 
 /** A next-render answer held to the board's panel floor; null stays null. */

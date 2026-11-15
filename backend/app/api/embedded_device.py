@@ -1139,7 +1139,7 @@ SERVER_RENDER_NEXT_RENDER_HEADER = "X-FrameOS-Next-Render"
 # the pull names (fos_pixel_format_t). docs/panel-refresh-floors.json is the
 # table (test_panel_refresh_floors.py pins this copy to it; the cloud's is
 # panelRefreshFloorSeconds in server-render.ts).
-PANEL_REFRESH_FLOOR_SECONDS: dict[int, int] = {2: 60, 3: 60, 5: 60, 6: 180, 7: 180}
+PANEL_REFRESH_FLOOR_SECONDS: dict[int, int] = {6: 60, 7: 60}
 
 
 def held_to_panel_floor(seconds: int | None, pixel_format: int) -> int | None:

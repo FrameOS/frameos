@@ -1,20 +1,78 @@
 {
   "description": "The shortest X-FrameOS-Next-Render a control plane gives a board it renders for, by the board's panel format (fos_pixel_format_t, embedded/esp32/components/frameos_display/include/frameos_display.h; the format a render pull names is all both planes know of the panel). A colour e-paper panel's full refresh takes 15-30 s and its makers ask for minutes between refreshes, so a scene's 10 s interval must not make it flash nonstop (a Pimoroni Inky Frame 7.3\" Spectra was told 10 s, 2026-11-15). A format not listed has no panel floor; the plane's own floor still holds. Each case: the seconds the scene asked for (`wanted`, null: no opinion), the plane's own floor (`planeFloor`) and the answer (`seconds`). docs/server-rendering.md \"When the next picture is due\". Mirrored by PANEL_REFRESH_FLOOR_SECONDS in backend/app/api/embedded_device.py and panelRefreshFloorSeconds in cloud/apps/auth-web/src/lib/server-render.ts; backend/app/api/tests/test_panel_refresh_floors.py and cloud/apps/auth-web/src/lib/server-render.test.ts read this file.",
   "floors": {
-    "2": { "panel": "black/white/red, two 1-bit planes", "seconds": 60 },
-    "3": { "panel": "black/white/yellow, two 1-bit planes", "seconds": 60 },
-    "5": { "panel": "black/white/yellow/red, 2 bpp", "seconds": 60 },
-    "6": { "panel": "7-colour ACeP (Waveshare 7.3\" F, 5.65\" F, Inky Frame 7.3\" / Impression 7-colour)", "seconds": 180 },
-    "7": { "panel": "Spectra 6 (Waveshare 7.3\" E, 13.3\" E, PhotoPainter, Inky Frame 7.3\" Spectra)", "seconds": 180 }
+    "6": {
+      "panel": "7-colour ACeP (Waveshare 7.3\" F, 5.65\" F, Inky Frame 7.3\" / Impression 7-colour)",
+      "seconds": 60
+    },
+    "7": {
+      "panel": "Spectra 6 (Waveshare 7.3\" E, 13.3\" E, PhotoPainter, Inky Frame 7.3\" Spectra)",
+      "seconds": 60
+    }
   },
   "cases": [
-    { "name": "Spectra 6 with a 10 s clock", "pixelFormat": 7, "planeFloor": 10, "wanted": 10, "seconds": 180 },
-    { "name": "Spectra 6 with an hourly scene keeps the hour", "pixelFormat": 7, "planeFloor": 10, "wanted": 3600, "seconds": 3600 },
-    { "name": "7-colour ACeP with a 60 s scene", "pixelFormat": 6, "planeFloor": 10, "wanted": 60, "seconds": 180 },
-    { "name": "black/white/yellow/red with a 10 s scene", "pixelFormat": 5, "planeFloor": 10, "wanted": 10, "seconds": 60 },
-    { "name": "black and white keeps the plane's floor", "pixelFormat": 1, "planeFloor": 10, "wanted": 10, "seconds": 10 },
-    { "name": "RGB565 LCD keeps what the scene asked", "pixelFormat": 9, "planeFloor": 10, "wanted": 12, "seconds": 12 },
-    { "name": "a plane floor above the panel's wins", "pixelFormat": 7, "planeFloor": 300, "wanted": 10, "seconds": 300 },
-    { "name": "no opinion stays no opinion", "pixelFormat": 7, "planeFloor": 10, "wanted": null, "seconds": null }
+    {
+      "name": "Spectra 6 with a 10 s clock",
+      "pixelFormat": 7,
+      "planeFloor": 10,
+      "wanted": 10,
+      "seconds": 60
+    },
+    {
+      "name": "Spectra 6 with a minute clock keeps the minute",
+      "pixelFormat": 7,
+      "planeFloor": 10,
+      "wanted": 60,
+      "seconds": 60
+    },
+    {
+      "name": "Spectra 6 with an hourly scene keeps the hour",
+      "pixelFormat": 7,
+      "planeFloor": 10,
+      "wanted": 3600,
+      "seconds": 3600
+    },
+    {
+      "name": "7-colour ACeP with a 30 s scene",
+      "pixelFormat": 6,
+      "planeFloor": 10,
+      "wanted": 30,
+      "seconds": 60
+    },
+    {
+      "name": "black/white/yellow/red keeps the plane's floor",
+      "pixelFormat": 5,
+      "planeFloor": 10,
+      "wanted": 10,
+      "seconds": 10
+    },
+    {
+      "name": "black and white keeps the plane's floor",
+      "pixelFormat": 1,
+      "planeFloor": 10,
+      "wanted": 10,
+      "seconds": 10
+    },
+    {
+      "name": "RGB565 LCD keeps what the scene asked",
+      "pixelFormat": 9,
+      "planeFloor": 10,
+      "wanted": 12,
+      "seconds": 12
+    },
+    {
+      "name": "a plane floor above the panel's wins",
+      "pixelFormat": 7,
+      "planeFloor": 300,
+      "wanted": 10,
+      "seconds": 300
+    },
+    {
+      "name": "no opinion stays no opinion",
+      "pixelFormat": 7,
+      "planeFloor": 10,
+      "wanted": null,
+      "seconds": null
+    }
   ]
 }

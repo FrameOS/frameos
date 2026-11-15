@@ -62,8 +62,8 @@ async def test_an_inky_frame_spectra_is_not_told_ten_seconds(async_client, no_au
     url = f"/api/frames/{frame.id}/embedded/render"
     first = await no_auth_client.get(url, headers=auth(frame))
     assert first.status_code == 200, first.text
-    assert NEXT_RENDER_MIN_SECONDS < 180
-    assert first.headers["x-frameos-next-render"] == "180"
+    assert NEXT_RENDER_MIN_SECONDS < 60
+    assert first.headers["x-frameos-next-render"] == "60"
     same = await no_auth_client.get(url, headers={**auth(frame), "If-None-Match": first.headers["etag"]})
     assert same.status_code == 304
-    assert same.headers["x-frameos-next-render"] == "180"
+    assert same.headers["x-frameos-next-render"] == "60"
