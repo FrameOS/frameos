@@ -279,6 +279,14 @@ static void test_the_backend_link(void)
      * goes, and the link task would not get its turn. */
     CHECK(!fos_backend_link_on(true, true, 7), "not before a deep sleep");
     CHECK(!fos_backend_link_on(false, false, 7), "not without the task");
+    /* A nudge goes where the round trips are: a backend that hung held the
+     * render task for the connect timeout on every nudge. */
+    CHECK(fos_commands_nudge_to_link(true, false), "while the link has them, a nudge is its pull");
+    CHECK(!fos_commands_nudge_to_link(false, false), "a frame about to sleep pulls it itself");
+    /* The voice relay asks for the pull and releases the panel right after:
+     * its answer must be in that render. */
+    CHECK(!fos_commands_nudge_to_link(true, true), "a pull wanted in the next render is the render task's");
+    CHECK(!fos_commands_nudge_to_link(false, true), "and so it is without the link");
 }
 
 static void test_a_timed_render_waits_for_the_glass(void)

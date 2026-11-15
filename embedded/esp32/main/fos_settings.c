@@ -1075,37 +1075,30 @@ const char *fos_settings_etag(void)
     return s_etag_source == SETTINGS_SOURCE_BACKEND ? s_etag : "";
 }
 
-bool fos_settings_changed(void)
-{
-    if (s_sync_requested) return true;
-    char url[FOS_URL_LEN + 128];
-    char auth[SETTINGS_AUTH_LEN];
-    settings_source_t source = select_source(url, sizeof(url), auth, sizeof(auth));
-    if (source == SETTINGS_SOURCE_NONE) return false;
-    /* The provider's route keeps its own schedule (fos_settings_sync): due
-     * is reason enough. */
-    if (source == SETTINGS_SOURCE_CLOUD) return esp_timer_get_time() >= s_cloud_next_pull_us;
-    if (fos_wifi_state() != FOS_WIFI_CONNECTED) return false;
-    /* The render task may be writing it: a copy, ended by hand. */
+/* What one fetch of the settings brought back, for fos_settings_apply. */
+struct fos_settings_fetched {
+    settings_source_t source;
+    /* The provider's `403 insufficient_scope`: every cloud-owned group comes
+     * off the device. `root` is NULL then. */
+    bool revoked;
     char etag[SETTINGS_ETAG_LEN];
-    memcpy(etag, s_etag, sizeof(etag));
-    etag[sizeof(etag) - 1] = '\0';
-    if (s_etag_source != source) etag[0] = '\0';
-    fos_http_request_t request = {
-        .url = url,
-        .auth = auth,
-        .if_none_match = etag[0] ? etag : NULL,
-    };
-    fos_http_response_t response;
-    /* The status alone: no body is read. */
-    if (fos_http_fetch(&request, 0, &response) != ESP_OK) return false;
-    fos_http_response_free(&response);
-    return response.status == 200;
+    cJSON *root;
+};
+
+void fos_settings_fetched_free(fos_settings_fetched_t *fetched)
+{
+    if (fetched == NULL) return;
+    cJSON_Delete(fetched->root);
+    free(fetched);
 }
 
-esp_err_t fos_settings_sync(bool force)
+/* The network half of a sync: which source, the conditional GET, the parse.
+ * It applies nothing and writes only the poll's own bookkeeping (the sync
+ * asked for, the provider's next pull), so it may run on the backend link
+ * task; *out gets a body to apply, or NULL (304, not due, a failure). */
+static esp_err_t settings_fetch(bool force, fos_settings_fetched_t **out)
 {
-    fos_config_t *config = fos_config();
+    *out = NULL;
     if (s_sync_requested) {
         force = true;
         s_sync_requested = false;
@@ -1139,17 +1132,17 @@ esp_err_t fos_settings_sync(bool force)
         return ESP_OK;
     }
     log_settings_exit(NULL); /* configured + online: fetch follows */
-    const char *origin = source == SETTINGS_SOURCE_CLOUD ? "cloud" : "backend";
     if (source == SETTINGS_SOURCE_CLOUD) {
         s_cloud_next_pull_us = esp_timer_get_time() + SETTINGS_CLOUD_RETRY_US;
     }
 
     /* An ETag identifies one source's body; replaying it against the other
-     * would earn a 304 and freeze whatever the first source had delivered. */
-    if (source != s_etag_source) {
-        s_etag[0] = '\0';
-        s_etag_source = source;
-    }
+     * would earn a 304 and freeze whatever the first source had delivered.
+     * A copy: the render task may be writing it (fos_settings_apply). */
+    char etag[SETTINGS_ETAG_LEN];
+    memcpy(etag, s_etag, sizeof(etag));
+    etag[sizeof(etag) - 1] = '\0';
+    if (force || source != s_etag_source) etag[0] = '\0';
 
     fos_http_request_t request = {
         .url = url,
@@ -1157,7 +1150,7 @@ esp_err_t fos_settings_sync(bool force)
         /* This body is the account's credentials: no intermediate cache may
          * keep a copy, matching the provider's own Cache-Control: no-store. */
         .no_store = source == SETTINGS_SOURCE_CLOUD,
-        .if_none_match = force ? NULL : s_etag,
+        .if_none_match = etag[0] ? etag : NULL,
     };
     fos_http_response_t response;
     esp_err_t fetch_err = fos_http_fetch(&request, SETTINGS_MAX_BYTES, &response);
@@ -1181,6 +1174,7 @@ esp_err_t fos_settings_sync(bool force)
 
     if (status == 304) {
         /* The copy we hold is the copy the source would send. Keep it. */
+        fos_http_response_free(&response);
         if (source == SETTINGS_SOURCE_CLOUD) {
             s_cloud_next_pull_us = esp_timer_get_time() + SETTINGS_CLOUD_INTERVAL_US;
         }
@@ -1203,13 +1197,11 @@ esp_err_t fos_settings_sync(bool force)
         }
         fos_http_response_free(&response);
         if (revoked) {
-            frameos_nim_apply_service_settings("{}");
-            fos_settings_forget_cache();
-            s_cloud_scope_blocked = true;
-            s_etag[0] = '\0';
-            log_service_settings_event(origin, "revoked", "");
-            ESP_LOGW(TAG, "service settings: provider refused the fetch "
-                          "(insufficient_scope); cloud-owned settings cleared");
+            fos_settings_fetched_t *fetched = calloc(1, sizeof(*fetched));
+            if (fetched == NULL) return ESP_ERR_NO_MEM;
+            fetched->source = source;
+            fetched->revoked = true;
+            *out = fetched;
             return ESP_OK;
         }
         if (status != 404) { /* older backends have no settings route */
@@ -1218,16 +1210,55 @@ esp_err_t fos_settings_sync(bool force)
         return status == 200 ? ESP_ERR_NO_MEM : ESP_FAIL;
     }
 
-    char response_etag[SETTINGS_ETAG_LEN];
-    strlcpy(response_etag, response.etag, sizeof(response_etag));
-    cJSON *root = cJSON_ParseWithLength(response.body, response.body_len);
+    fos_settings_fetched_t *fetched = calloc(1, sizeof(*fetched));
+    if (fetched != NULL) {
+        fetched->source = source;
+        strlcpy(fetched->etag, response.etag, sizeof(fetched->etag));
+        fetched->root = cJSON_ParseWithLength(response.body, response.body_len);
+    }
     memset(response.body, 0, response.body_len); /* the body carries the account's API keys */
     fos_http_response_free(&response);
-    if (root == NULL || !cJSON_IsObject(root)) {
-        cJSON_Delete(root);
+    if (fetched == NULL) return ESP_ERR_NO_MEM;
+    if (fetched->root == NULL || !cJSON_IsObject(fetched->root)) {
+        fos_settings_fetched_free(fetched);
         log_settings_event("error", "unparseable");
         return ESP_FAIL;
     }
+    *out = fetched;
+    return ESP_OK;
+}
+
+fos_settings_fetched_t *fos_settings_fetch(bool force)
+{
+    fos_settings_fetched_t *fetched = NULL;
+    settings_fetch(force, &fetched);
+    return fetched;
+}
+
+esp_err_t fos_settings_apply(fos_settings_fetched_t *fetched)
+{
+    if (fetched == NULL) return ESP_OK;
+    fos_config_t *config = fos_config();
+    settings_source_t source = fetched->source;
+    const char *origin = source == SETTINGS_SOURCE_CLOUD ? "cloud" : "backend";
+    if (source != s_etag_source) {
+        s_etag[0] = '\0';
+        s_etag_source = source;
+    }
+    if (fetched->revoked) {
+        fos_settings_fetched_free(fetched);
+        frameos_nim_apply_service_settings("{}");
+        fos_settings_forget_cache();
+        s_cloud_scope_blocked = true;
+        s_etag[0] = '\0';
+        log_service_settings_event(origin, "revoked", "");
+        ESP_LOGW(TAG, "service settings: provider refused the fetch "
+                      "(insufficient_scope); cloud-owned settings cleared");
+        return ESP_OK;
+    }
+    cJSON *root = fetched->root;
+    char response_etag[SETTINGS_ETAG_LEN];
+    strlcpy(response_etag, fetched->etag, sizeof(response_etag));
 
     /* Service settings first: the six cloud-owned groups this payload carries
      * (see apply_service_settings for the two shapes) go straight to the Nim
@@ -1259,7 +1290,7 @@ esp_err_t fos_settings_sync(bool force)
     } else if (cJSON_IsNull(schedule)) {
         fos_schedule_set_json(NULL, 0);
     }
-    cJSON_Delete(root);
+    fos_settings_fetched_free(fetched);
 
     if (changed) {
         if (fos_config_save() != ESP_OK) {
@@ -1290,4 +1321,12 @@ esp_err_t fos_settings_sync(bool force)
         }
     }
     return ESP_OK;
+}
+
+esp_err_t fos_settings_sync(bool force)
+{
+    fos_settings_fetched_t *fetched = NULL;
+    esp_err_t err = settings_fetch(force, &fetched);
+    if (fetched == NULL) return err;
+    return fos_settings_apply(fetched);
 }

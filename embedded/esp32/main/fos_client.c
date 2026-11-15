@@ -1935,18 +1935,28 @@ static void push_image_to_backend(const char *scene_id)
  * seconds (2026-11-10). What applies their results stays on the render task:
  * the commands this task pulls are handed over and run there (the backend
  * marks what it hands out `sent`, so a pull is never only a look), and a
- * change of scenes or settings it sees is fetched and applied there. A frame
- * that deep-sleeps does all of it on the render task, and so does the first
- * pass of a boot, whose render waits for what the sleep held. */
+ * scene set or settings that changed are downloaded here and only taken in
+ * there. A nudge to pull the commands is this task's pull too
+ * (serve_commands_nudge), but for the voice relay's. A frame that deep-sleeps
+ * does all of it on the render task, and so does the first pass of a boot,
+ * whose render waits for what the sleep held. */
 #define LINK_POLL_US (10 * 1000000LL)
 #define LINK_PERIOD_MS 1000
 #define LINK_TASK_STACK 8192
 #define LINK_NOTIFY_PUSH 1u
+/* A nudge to pull the commands now (serve_commands_nudge), not at the next
+ * poll. */
+#define LINK_NOTIFY_PULL 2u
 static volatile bool s_link_on = false; /* set by the render task, per pass */
-static bool s_link_settings = false;    /* __atomic */
+/* The next COMMANDS_BIT is pulled on the render task whatever the link does
+ * (fos_client_request_commands_pull_here). __atomic. */
+static bool s_commands_here = false;
 static portMUX_TYPE s_link_mux = portMUX_INITIALIZER_UNLOCKED;
 /* Under s_link_mux. */
 static void *s_link_answer = NULL;
+/* Settings the link task fetched (fos_settings_fetch), for the render task
+ * to apply (fos_settings_apply). Under s_link_mux. */
+static fos_settings_fetched_t *s_link_settings = NULL;
 /* A scene payload the link task downloaded (fos_scenes_backend_fetch): the
  * render task only takes it into the runtime, and the scene store's task
  * writes it. */
@@ -1963,9 +1973,38 @@ static bool s_link_state_valid = false;
  * in the mailbox when the chip sleeps, and the backend marked them sent. */
 static SemaphoreHandle_t s_link_round = NULL;
 
-static void link_round(int64_t *next_poll_us)
+/* One commands pull into an empty mailbox: true when an answer is waiting
+ * for the render task. One answer at a time: the next pull waits until this
+ * one has run. */
+static bool link_pull_commands(void)
+{
+    portENTER_CRITICAL(&s_link_mux);
+    bool slot_free = s_link_answer == NULL;
+    portEXIT_CRITICAL(&s_link_mux);
+    if (!slot_free) return false;
+    void *answer = fos_commands_fetch();
+    if (answer == NULL) return false;
+    portENTER_CRITICAL(&s_link_mux);
+    s_link_answer = answer;
+    portEXIT_CRITICAL(&s_link_mux);
+    return true;
+}
+
+/* `pull_owed`: a nudge asked for the commands. Pulled first, before the logs
+ * and the picture push (seconds, at times), and cleared once pulled; while
+ * the last answer has not run the next round tries again. */
+static void link_round(int64_t *next_poll_us, bool *pull_owed)
 {
     if (!s_link_on || fos_wifi_state() != FOS_WIFI_CONNECTED) return;
+    if (*pull_owed) {
+        portENTER_CRITICAL(&s_link_mux);
+        bool slot_free = s_link_answer == NULL;
+        portEXIT_CRITICAL(&s_link_mux);
+        if (slot_free) {
+            *pull_owed = false;
+            if (link_pull_commands() && s_events) xEventGroupSetBits(s_events, LINK_BIT);
+        }
+    }
     frameos_nim_flush_logs();
     char scene_id[sizeof(s_link_scene_id)];
     fos_display_state_t state;
@@ -1987,6 +2026,7 @@ static void link_round(int64_t *next_poll_us)
     bool wake = false;
     portENTER_CRITICAL(&s_link_mux);
     bool payload_free = s_link_payload == NULL;
+    bool settings_free = s_link_settings == NULL;
     portEXIT_CRITICAL(&s_link_mux);
     /* One payload at a time, like the commands: the next download waits until
      * the render task has taken this one. */
@@ -2003,23 +2043,18 @@ static void link_round(int64_t *next_poll_us)
             wake = true;
         }
     }
-    if (fos_settings_changed()) {
-        __atomic_store_n(&s_link_settings, true, __ATOMIC_SEQ_CST);
-        wake = true;
-    }
-    portENTER_CRITICAL(&s_link_mux);
-    bool slot_free = s_link_answer == NULL;
-    portEXIT_CRITICAL(&s_link_mux);
-    /* One answer at a time: the next pull waits until this one has run. */
-    if (slot_free) {
-        void *answer = fos_commands_fetch();
-        if (answer != NULL) {
+    /* Settings that changed are fetched here too (a conditional GET: a 304
+     * while nothing did), and only applied on the render task. */
+    if (settings_free) {
+        fos_settings_fetched_t *settings = fos_settings_fetch(false);
+        if (settings != NULL) {
             portENTER_CRITICAL(&s_link_mux);
-            s_link_answer = answer;
+            s_link_settings = settings;
             portEXIT_CRITICAL(&s_link_mux);
             wake = true;
         }
     }
+    if (link_pull_commands()) wake = true;
     if (wake && s_events) xEventGroupSetBits(s_events, LINK_BIT);
 }
 
@@ -2027,10 +2062,13 @@ static void backend_link_task(void *arg)
 {
     (void)arg;
     int64_t next_poll_us = 0;
+    bool pull_owed = false;
     for (;;) {
-        xTaskNotifyWait(0, UINT32_MAX, NULL, pdMS_TO_TICKS(LINK_PERIOD_MS));
+        uint32_t notified = 0;
+        xTaskNotifyWait(0, UINT32_MAX, &notified, pdMS_TO_TICKS(LINK_PERIOD_MS));
+        if (notified & LINK_NOTIFY_PULL) pull_owed = true;
         xSemaphoreTake(s_link_round, portMAX_DELAY);
-        link_round(&next_poll_us);
+        link_round(&next_poll_us, &pull_owed);
         xSemaphoreGive(s_link_round);
     }
 }
@@ -2076,7 +2114,13 @@ static void pass_scenes_sync(void)
 
 static void pass_settings_sync(void)
 {
-    if (!s_link_on || __atomic_exchange_n(&s_link_settings, false, __ATOMIC_SEQ_CST)) {
+    portENTER_CRITICAL(&s_link_mux);
+    fos_settings_fetched_t *settings = s_link_settings;
+    s_link_settings = NULL;
+    portEXIT_CRITICAL(&s_link_mux);
+    if (settings != NULL) {
+        fos_settings_apply(settings);
+    } else if (!s_link_on) {
         fos_settings_sync(false);
     }
 }
@@ -2086,6 +2130,28 @@ static bool pass_commands_sync(void)
     void *answer = link_take_answer();
     if (answer != NULL) return fos_commands_run(answer);
     return s_link_on ? false : fos_commands_sync();
+}
+
+/* COMMANDS_BIT, on the render task: somebody asked for the commands now.
+ * While the link task has the round trips it pulls them (its answer comes
+ * back by LINK_BIT): pulled here, a backend that hung held renders and taps
+ * for the connect timeout. Pulled here when the link is off, and when the
+ * one asking needs the answer in this task's very next render (the voice
+ * relay, which releases the panel right after). True when commands ran. */
+static bool serve_commands_nudge(void)
+{
+    bool here = __atomic_exchange_n(&s_commands_here, false, __ATOMIC_SEQ_CST);
+    if (fos_commands_nudge_to_link(s_link_on, here) && s_link_task != NULL) {
+        xTaskNotify(s_link_task, LINK_NOTIFY_PULL, eSetBits);
+        return false;
+    }
+    return fos_commands_sync();
+}
+
+void fos_client_request_commands_pull_here(void)
+{
+    __atomic_store_n(&s_commands_here, true, __ATOMIC_SEQ_CST);
+    fos_client_request_commands_sync();
 }
 
 /* The round trips come back to this task (s_link_on just went off: a deep
@@ -2109,12 +2175,13 @@ static void link_hand_back(const fos_config_t *config)
 }
 
 /* What the link task found, served from the idle wait: true when a scene
- * should render for it. A change of scenes or settings is fetched here, on
- * this task, so while someone is at the frame (the input hold) it waits for
- * them to stop, and run_held_network serves it then: fetched now, it held
- * their next tap for the whole round trip (a 2.8 s settings pull behind a
- * console event on the E1003, 2026-11-10). The commands the link task pulled
- * are here already, and run now: the backend marked them sent. */
+ * should render for it. A scene set or settings it downloaded are taken in
+ * here, on this task, and while someone is at the frame (the input hold) that
+ * waits for them to stop, and run_held_network serves it then: a parse and an
+ * apply cost a tap too (a 2.8 s settings pull behind a console event on the
+ * E1003, 2026-11-10, back when the fetch was this task's). The commands the
+ * link task pulled are here already, and run now: the backend marked them
+ * sent. */
 static bool serve_link(const fos_config_t *config)
 {
     bool nim = renders_locally(config);
@@ -3208,10 +3275,10 @@ static void animation_wait(fos_config_t *config, int64_t wait_us)
                                   pdMS_TO_TICKS(armed ? 1000 : 100))
             : xEventGroupClearBits(s_events, signals); /* the bits before the clear */
         bool nim = renders_locally(config);
-        /* A nudge is pulled here whatever the link task does: somebody just
-         * asked for something, and the voice relay's release expects what it
-         * queued in the very next render. */
-        if ((bits & COMMANDS_BIT) && fos_commands_sync() && nim) {
+        /* A nudge: the link task's pull while it has the round trips, this
+         * task's otherwise and for the voice relay, whose release expects
+         * what it queued in the very next render (serve_commands_nudge). */
+        if ((bits & COMMANDS_BIT) && serve_commands_nudge() && nim) {
             fos_scenes_apply_pending_selection();
         }
         if (bits & LINK_BIT) serve_link(config);
@@ -4026,11 +4093,13 @@ static void client_task(void *arg)
             bool scene_asked = (bits & SCENE_RENDER_BIT) != 0;
             if (bits & COMMANDS_BIT) {
                 /* The backend nudged: it just queued something for an awake
-                 * frame. Pull now; whatever the commands asked for (a render,
-                 * a switch) is picked up by the checks below. Before the
-                 * release bit: the voice relay asks for this pull, then
-                 * releases, so the pulled state is in this pass's render. */
-                if (fos_commands_sync() && nim) {
+                 * frame. Pull now (the link task does while it has the round
+                 * trips; what it pulls comes back by LINK_BIT); whatever the
+                 * commands asked for (a render, a switch) is picked up by the
+                 * checks below. Before the release bit: the voice relay asks
+                 * for this pull on this task, then releases, so the pulled
+                 * state is in this pass's render. */
+                if (serve_commands_nudge() && nim) {
                     fos_scenes_apply_pending_selection();
                 }
                 if (fos_client_render_pending()) {

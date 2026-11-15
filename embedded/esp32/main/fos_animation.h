@@ -197,6 +197,14 @@ bool fos_animation_push_wanted(bool animating, bool scene_pushed);
  * what the sleep held). */
 bool fos_backend_link_on(bool link_task, bool deep_sleep_now, uint32_t render_attempts);
 
+/* Whether a nudge to pull the commands (the backend's, a new address, a
+ * store action) is handed to the backend link task rather than pulled on the
+ * render task: while the link has the round trips, a pull there held renders
+ * and taps for its connect timeout when the backend hung. `pull_here`: the
+ * one asking needs the answer in the very next render (the voice relay, which
+ * releases the panel right after) and the render task pulls it itself. */
+bool fos_commands_nudge_to_link(bool link_on, bool pull_here);
+
 /* Whether the idle wait goes on at `now_us`: until `wait_until_us`, and past
  * it while the display's own task still refreshes the glass (a timed render
  * waits for it; one somebody asks for leaves the wait by its bit). */

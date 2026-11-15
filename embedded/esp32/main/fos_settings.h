@@ -25,11 +25,17 @@ esp_err_t fos_settings_sync(bool force);
  * commands pull reports, so the backend can tell a queued settings deploy
  * has been applied (fos_commands.c). */
 const char *fos_settings_etag(void);
-/* Whether fos_settings_sync would fetch other settings now: the backend's
- * conditional GET, its status alone; the provider's route when its schedule
- * says due; a sync asked for. Any task; the render task then syncs
- * (fos_client.c's backend link). */
-bool fos_settings_changed(void);
+/* fos_settings_sync in two halves, for a frame whose backend round trips run
+ * on fos_client.c's backend link task. fos_settings_fetch is the network half
+ * (the conditional GET, the provider's schedule, a sync asked for, the parse)
+ * and applies nothing: any task. It returns what to apply, or NULL when there
+ * is nothing (304, not due, unconfigured, a failure). fos_settings_apply
+ * applies it and frees it: the render task, like fos_settings_sync. */
+typedef struct fos_settings_fetched fos_settings_fetched_t;
+fos_settings_fetched_t *fos_settings_fetch(bool force);
+esp_err_t fos_settings_apply(fos_settings_fetched_t *fetched);
+/* What fos_settings_apply would have freed, unapplied. */
+void fos_settings_fetched_free(fos_settings_fetched_t *fetched);
 /* Which declarative settings differ between two config snapshots, as the
  * wire's snake_case keys with their new values ("deep_sleep_on_battery=false,
  * interval=900"), for the log line that confirms what a settings push or

@@ -59,11 +59,11 @@ def test_the_link_task_only_fetches():
     """It pulls and pushes; applying stays on the render task, where every
     Nim call and scene load runs. A scenes or settings sync, or running the
     commands, on the link task would load scenes beside a render."""
-    body = CLIENT["link_round"]
-    for applies in ("fos_scenes_sync(", "fos_settings_sync(", "fos_commands_run(", "fos_commands_sync(",
-                    "fos_scenes_apply_pending_selection(", "frameos_nim_render"):
+    body = CLIENT["link_round"] + CLIENT["link_pull_commands"]
+    for applies in ("fos_scenes_sync(", "fos_settings_sync(", "fos_settings_apply(", "fos_commands_run(",
+                    "fos_commands_sync(", "fos_scenes_apply_pending_selection(", "frameos_nim_render"):
         assert applies not in body, f"fos_client.c: the backend link task calls {applies}"
-    for fetches in ("fos_scenes_backend_fetch(", "fos_settings_changed()", "fos_commands_fetch()",
+    for fetches in ("fos_scenes_backend_fetch(", "fos_settings_fetch(false)", "fos_commands_fetch()",
                     "push_image_state(", "frameos_nim_flush_logs()"):
         assert fetches in body, f"fos_client.c: the backend link task no longer does {fetches}"
     # Starts nothing unless the render task left the round trips to it.
@@ -75,11 +75,12 @@ def test_one_commands_answer_at_a_time_and_it_always_runs():
     """The backend marks every command it hands out `sent`: a pull is never
     only a look. So the link task pulls only into an empty mailbox, and the
     render task runs an answer it finds whatever the mode."""
-    body = CLIENT["link_round"]
+    body = CLIENT["link_pull_commands"]
     fetch = body.index("fos_commands_fetch()")
-    assert "slot_free" in body[:fetch] and "s_link_answer == NULL" in body, (
+    assert "if (!slot_free) return false;" in body[:fetch] and "s_link_answer == NULL" in body, (
         "fos_client.c: the link task pulls commands over an answer that has not run"
     )
+    assert "fos_commands_fetch()" not in CLIENT["link_round"], "link_round pulls commands around the mailbox"
     sync = CLIENT["pass_commands_sync"]
     take = sync.index("link_take_answer()")
     assert take < sync.index("s_link_on"), "pass_commands_sync must run a pulled answer before asking the mode"
@@ -103,10 +104,10 @@ def test_taking_the_round_trips_back_waits_for_the_one_running():
 
 
 def test_what_changed_waits_while_someone_is_at_the_frame():
-    """The render task fetches a change of scenes or settings itself (the
-    link task only asks whether there is one). While someone taps that waits
-    for them to stop: a fetch there held their next tap for the round trip.
-    The commands are already pulled and run at once."""
+    """The render task applies a change of scenes or settings the link task
+    fetched. While someone taps that waits for them to stop: an apply (or,
+    before, a fetch) there held their next tap. The commands are already
+    pulled and run at once."""
     serve = CLIENT["serve_link"]
     hold = serve.index("if (!input_hold_on()) {")
     guarded = serve[hold : serve.index("}", hold)]
@@ -206,3 +207,45 @@ def test_a_log_batch_keeps_up_with_a_one_second_clock():
     body = re.search(r"#define FOS_NIM_LOG_BODY_MAX \((\d+) \* 1024\)", glue)
     assert batch >= 32
     assert body is not None and int(body.group(1)) >= 64
+
+
+def test_settings_are_fetched_on_the_link_task_and_applied_on_the_render_task():
+    """A settings change the link task saw was fetched again, whole, on the
+    render task (fos_settings_sync in serve_link): a backend that hung held
+    renders and taps for the connect timeout. The link task fetches the body
+    and hands it over like the scenes payload."""
+    settings = _functions(_strip_comments((ESP32_DIR / "main" / "fos_settings.c").read_text()))
+    sync = settings["fos_settings_sync"]
+    assert "settings_fetch(" in sync and "fos_settings_apply(" in sync, "fos_settings_sync is not fetch + apply"
+    fetch = settings["settings_fetch"]
+    for applies in ("apply_service_settings(", "apply_frame_settings(", "frameos_nim_apply_service_settings(",
+                    "fos_config_save(", "fos_schedule_set_json(", "s_etag_source = ", "strlcpy(s_etag,"):
+        assert applies not in fetch, f"fos_settings.c: the fetch half (any task) calls {applies}"
+    assert "fos_settings_changed" not in (ESP32_DIR / "main" / "fos_settings.h").read_text()
+    pass_settings = CLIENT["pass_settings_sync"]
+    assert pass_settings.index("s_link_settings") < pass_settings.index("s_link_on"), (
+        "pass_settings_sync must apply what the link task fetched before asking the mode"
+    )
+    assert "fos_settings_apply(settings)" in pass_settings
+
+
+def test_a_commands_nudge_is_the_link_tasks_pull_while_it_has_the_round_trips():
+    """COMMANDS_BIT (the backend's nudge, a new address, a store action) ran
+    fos_commands_sync on the render task even while the link task had the
+    round trips: with a backend that hung that held renders and taps for the
+    connect timeout. The voice relay alone still pulls on the render task,
+    since its release expects the answer in the very next render."""
+    client = _strip_comments(CLIENT_C.read_text())
+    nudge = CLIENT["serve_commands_nudge"]
+    assert "fos_commands_nudge_to_link(s_link_on, here)" in nudge
+    assert nudge.index("xTaskNotify(s_link_task, LINK_NOTIFY_PULL") < nudge.index("fos_commands_sync()")
+    # Every COMMANDS_BIT the render task serves goes through it.
+    assert "(bits & COMMANDS_BIT) && serve_commands_nudge()" in CLIENT["animation_wait"]
+    assert len(re.findall(r"fos_commands_sync\(\)", client)) == 3, (
+        "fos_client.c: a new render-task commands pull (expected: pass_commands_sync, serve_commands_nudge, "
+        "run_held_network)"
+    )
+    task = CLIENT["backend_link_task"]
+    assert "LINK_NOTIFY_PULL" in task and "&pull_owed" in task
+    voice = (ESP32_DIR / "main" / "fos_voice.c").read_text()
+    assert "fos_client_request_commands_pull_here();" in voice, "the voice relay's pull left the render task"
