@@ -785,6 +785,50 @@ that is that viewport, and keeps its damage there). Its regions are moved
 by the scroll and cut to the viewport. A scroll repaints the viewport on an
 LCD; what did not change in the tree is still taken back unbuilt.
 
+## Themes
+
+The UIs FrameOS builds in Nim (the scene settings and the frame page, the
+scene switcher, the keyboard on the screen) take their look from
+the layout around the frame's scene, so a desktop's settings look like that
+desktop's (`frameos/ui/theme.nim`). A layout gives its theme in its state as
+**`theme`**, an object of roles; the samples set it from their "Look of the
+settings pages" field (`Windows 98`: Windows Standard, `macOS`: Light and Dark,
+`BeOS`, each with High contrast and FrameOS, the built-in look):
+
+```js
+frameos.setState('theme', {
+  page: 'bg-[#c0c0c0] text-black',
+  button: ['bg-[#c0c0c0] border-t-1 border-l-1 border-white', 'border-b-1 border-r-1 border-black'],
+})
+```
+
+A role is a string of classes, one box, or a list of them, a box each, one
+inside the other: a bevel is two or three boxes, as a box has one border color.
+The element keeps its place and size (`w-`, `h-`, `shrink-0`, position, the text
+size) on the outermost box, which also takes its presses, and how its content is
+laid out (`flex`, `items-`, `justify-`, padding, gaps) on the innermost; its own
+look (`bg-`, `text-` colors, `border`, `rounded`, font weights, `opacity-`, with
+their `active:`, `focus:` and `placeholder:` forms) gives way to the role's. A
+role the theme leaves out keeps the element's own look.
+
+| Role | What |
+|---|---|
+| `page`, `bar` | the page (its background and text color) and its header's line |
+| `button`, `primary`, `selected` | a button, the one that does it (Save with something to save), one lit while what it opens shows |
+| `field`, `option`, `picked` | a select box or a line to type on, a select box's option, the option it holds |
+| `switch`, `switchOn`, `knob`, `knobOn` | a switch's track and knob, off and on |
+| `muted`, `accent` | quieter text, the switcher's dot for the scene it was opened from |
+| `card` | the frame page's facts |
+| `tile`, `tileLit` | a scene in the switcher, the one the keys are on |
+| `keyboard`, `key`, `keyMod`, `keyLit` | the keyboard on the screen, a key, a key that does something else, one lit (shift, held, just typed) |
+
+`page`, `bar`, `muted`, `accent`, `option`, `picked` and `keyboard` are one box
+always (a list's innermost). The samples set no theme on
+e-paper, where the pages keep their black on white, except High contrast.
+
+On every host, an ESP32 included: there a layout's theme costs about 7 KB of
+the S3's flash (2026-11-15).
+
 ## Text and fonts
 
 Text is the frame's default face (Ubuntu) unless `font-*` names another. A

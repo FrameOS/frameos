@@ -91,6 +91,11 @@ gear and tray do. A clock that shows no seconds calls
 `frameos.setNextSleep` with the seconds left in the minute, and the chrome then
 costs nothing until it changes.
 
+A layout also dresses the frame's own pages (the settings, the scene switcher,
+the keyboard on the screen) in its look: its state's `theme`
+(`docs/jsx-ui.md` "Themes"). The samples set it from their "Look of the settings
+pages" field, High contrast among the choices.
+
 ## How it works
 
 `layout: {sceneId, state}` sits beside `nodes` on the installed scene. The first
