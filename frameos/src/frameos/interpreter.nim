@@ -4,7 +4,7 @@ import frameos/spool
 from frameos/apps as frameos_apps import spoolDir
 from frameos/utils/image import renderError, renderErrorInto, spillImageToSpool, materializeImageSpool, scaleAndDrawImage
 from frameos/utils/memory import renderMemoryInUse, availableRenderBytes,
-  availableRenderHeadroomBytes, runsAsEmbedded
+  availableRenderHeadroomBytes, runsAsEmbedded, roomForImage
 when defined(testing):
   from frameos/utils/memory import availableRenderBytesOverride
 when defined(memProbe): import frameos/utils/memory
@@ -905,6 +905,24 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
   if not fits:
     if not image.isNil:
       dropEmbedImage(r)
+    # A picture is one buffer the size of its window: on an ESP32 a window
+    # behind another on an 800x480 RGBX canvas asked for 1-1.5 MB, and one
+    # that does not fit is an out-of-memory abort, not an exception (the
+    # reTerminal E1002's macOS and BeOS desktops, 2026-11-15). Asked first;
+    # without the room the window shows nothing this pass, and the scene in
+    # front, the chrome and the frame go on.
+    let bytes = case format
+      of pfRgbx: width * height * 4
+      of pfRgb565: width * height * 2
+      of pfGray8: width * height
+      of pfGray4: ((width + 1) div 2) * height
+    if not roomForImage(bytes):
+      if not r.embedRefused:
+        r.embedRefused = true
+        owner.logger.log(%*{"event": "scene:embed:noMemory", "sceneId": owner.id.string,
+          "embedded": sceneId, "bytes": bytes})
+      return nil
+    r.embedRefused = false
     try:
       image = if like.isNil: newImage(width, height) else: newImageLike(like, width, height)
     except CatchableError:
