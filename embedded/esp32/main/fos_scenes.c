@@ -2058,10 +2058,50 @@ bool fos_scenes_showing(const char *scene_id)
     return scene_id != NULL && scene_id[0] && !s_built_in_shown && strcmp(s_resident_scene_id, scene_id) == 0;
 }
 
+/* The scenes of a combined payload not split into slots yet (firmware before
+ * the per-scene store left one, and the first apply after the update splits
+ * it): their ids, names and sizes, the entries an index would have. Without
+ * it `scene-list` named no scenes on the first boot after an update from
+ * 2026.11.5, while `storage` counted fifteen (reTerminal E1004, 2026-11-15). */
+static cJSON *list_from_combined(void)
+{
+    size_t len = 0;
+    char *json = fos_scenes_json_copy(&len);
+    if (json == NULL) return NULL;
+    cJSON *payload = fos_json_depth_ok(json, len, FOS_JSON_MAX_DEPTH) ? cJSON_ParseWithLength(json, len) : NULL;
+    free(json);
+    if (!cJSON_IsArray(payload)) {
+        cJSON_Delete(payload);
+        return NULL;
+    }
+    cJSON *tree = cJSON_CreateObject();
+    cJSON *list = cJSON_AddArrayToObject(tree, "scenes");
+    const cJSON *scene = NULL;
+    cJSON_ArrayForEach(scene, payload) {
+        const cJSON *id = cJSON_GetObjectItem(scene, "id");
+        if (!cJSON_IsString(id)) continue;
+        cJSON *entry = cJSON_CreateObject();
+        cJSON_AddStringToObject(entry, "id", id->valuestring);
+        const cJSON *name = cJSON_GetObjectItem(scene, "name");
+        if (cJSON_IsString(name)) cJSON_AddStringToObject(entry, "name", name->valuestring);
+        char *printed = cJSON_PrintUnformatted(scene);
+        cJSON_AddNumberToObject(entry, "bytes", printed ? (double)strlen(printed) : 0);
+        free(printed);
+        const cJSON *settings = cJSON_GetObjectItem(scene, "settings");
+        if (cJSON_IsTrue(cJSON_GetObjectItem(settings, "isLayout"))) cJSON_AddTrueToObject(entry, "isLayout");
+        if (cJSON_IsTrue(cJSON_GetObjectItem(scene, "default"))) cJSON_AddTrueToObject(entry, "default");
+        cJSON_AddItemToArray(list, entry);
+    }
+    cJSON_AddBoolToObject(tree, "unsplit", true);
+    cJSON_Delete(payload);
+    return tree;
+}
+
 char *fos_scenes_list_json(void)
 {
     cJSON *tree = fos_scenes_read_index();
-    if (tree == NULL) tree = cJSON_CreateObject(); /* not split: the storage alone */
+    if (tree == NULL) tree = list_from_combined();
+    if (tree == NULL) tree = cJSON_CreateObject(); /* nothing stored: the storage alone */
     fos_scenes_add_storage_json(cJSON_AddObjectToObject(tree, "storage"));
     char *json = cJSON_PrintUnformatted(tree);
     cJSON_Delete(tree);
