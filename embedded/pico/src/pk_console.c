@@ -10,6 +10,7 @@
 #include "pk_args.h"
 #include "pk_config.h"
 #include "pk_config_keys.h"
+#include "pk_console_queue.h"
 #include "pk_display.h"
 #include "pk_json.h"
 #include "pk_log.h"
@@ -21,6 +22,7 @@
 
 #define PK_CONSOLE_LINE_MAX 512
 #define PK_CONSOLE_MAX_ARGS 8
+_Static_assert(PK_CONSOLE_LINE_MAX <= PK_CONSOLE_QUEUE_LINE_MAX, "a console line fits the waiting queue");
 
 #define USB_API_OK "__FRAMEOS_USB_OK__"
 #define USB_API_ERROR "__FRAMEOS_USB_ERROR__"
@@ -32,10 +34,15 @@ static size_t s_line_len = 0;
 static bool s_line_overflow = false;
 static bool s_render_requested = false;
 static uint32_t s_last_activity_ms = 0;
+// Lines that wait for the render pass to let go of the panel (pk_console_queue.h).
+static pk_console_queue_t s_waiting;
 
 void pk_console_print_line(const char *line)
 {
     printf("%s\n", line);
+    // Out now, whole: a line logged right before a panel refresh (the pass's
+    // `render:device`) is read when it happens, not 30 s later.
+    stdio_flush();
 }
 
 bool pk_console_take_render_request(void)
@@ -347,8 +354,32 @@ static void handle_line(char *line)
     stdio_flush();
 }
 
+// A line that would touch the panel's pins, the flash or the power waits
+// while a render pass holds the panel (the refresh waits run this console
+// from inside the pass); everything else is answered at once.
+static void take_line(char *line)
+{
+    if (pk_render_stats()->busy && pk_console_waits_for_panel(line)) {
+        bool usb_api = pk_console_is_usb_api(line);
+        if (!pk_console_queue_push(&s_waiting, line)) {
+            if (usb_api) usb_error("usb_api", "ESP_ERR_INVALID_STATE", "busy rendering, try again");
+            else printf("busy rendering, try again\nframeos> ");
+        } else if (!usb_api) {
+            // The browser's framed dialect gets its one answer when it runs.
+            printf("queued until the panel refresh ends\nframeos> ");
+        }
+        stdio_flush();
+        return;
+    }
+    handle_line(line);
+}
+
 void pk_console_poll(void)
 {
+    if (!pk_render_stats()->busy) {
+        static char waiting[PK_CONSOLE_QUEUE_LINE_MAX];
+        while (pk_console_queue_pop(&s_waiting, waiting, sizeof(waiting))) handle_line(waiting);
+    }
     for (;;) {
         int c = getchar_timeout_us(0);
         if (c == PICO_ERROR_TIMEOUT) break;
@@ -360,7 +391,7 @@ void pk_console_poll(void)
                 s_last_activity_ms = to_ms_since_boot(get_absolute_time());
                 if (s_last_activity_ms == 0) s_last_activity_ms = 1;
                 s_line_len = 0;
-                handle_line(s_line);
+                take_line(s_line);
             }
             s_line_len = 0;
             s_line_overflow = false;

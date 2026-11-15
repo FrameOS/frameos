@@ -17,6 +17,7 @@ PORTABLE = \
 	../src/pk_bmp.c \
 	../src/pk_buttons.c \
 	../src/pk_config_keys.c \
+	../src/pk_console_queue.c \
 	../src/pk_fosb.c \
 	../src/pk_hotspot.c \
 	../src/pk_http_response.c \
@@ -32,6 +33,7 @@ TESTS = \
 	test_pk_bmp \
 	test_pk_buttons \
 	test_pk_config_keys \
+	test_pk_console_queue \
 	test_pk_datetime \
 	test_pk_fosb \
 	test_pk_hotspot \
