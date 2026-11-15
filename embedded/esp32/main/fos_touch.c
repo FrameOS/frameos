@@ -53,6 +53,13 @@ int fos_touch_wire(int value, int max)
     return (int)(((long)value * FOS_TOUCH_WIRE_MAX) / (max - 1));
 }
 
+bool fos_touch_glided(int dx, int dy, int x_max)
+{
+    if (dx < 0) dx = -dx;
+    if (dy < 0) dy = -dy;
+    return x_max > 0 && dx * 10 >= x_max && dx > 2 * dy;
+}
+
 int fos_touch_move_slot(const fos_touch_event_t *queue, size_t capacity, size_t head, size_t count, uint8_t id)
 {
     for (size_t i = count; i-- > 0;) {
@@ -130,12 +137,26 @@ static const char *TAG = "fos_touch";
 #define TOUCH_POLL_HELD_MS 10
 #define TOUCH_POLL_IDLE_MS 2000
 /* Without an interrupt line (the SenseCAP Indicator's FT6336U: its INT is on
- * the IO expander, unwired) the task polls: a tap is 80 ms or longer, so
- * every 30 ms catches it while no finger is down; once one is, every 10 ms
- * (TOUCH_POLL_HELD_MS), so a drag's moves and the release arrive 5 ms late
- * on average, not 10. A 10 ms idle poll cost an animating scene about a
- * frame a second on the SenseCAP Indicator (2026-11-07). */
-#define TOUCH_POLL_NO_IRQ_MS 30
+ * the IO expander, unwired) the task polls, every 10 ms with a finger down or
+ * not. The first report of a touch is where an edge swipe begins: at 30 ms a
+ * quick pull up from the bottom had moved 15 to 30 px before it was read,
+ * past the 24 px edge band (gestures.edgePx), and became a drag on whatever
+ * showed (2026-11-14). A 10 ms idle poll cost an animating scene about a
+ * frame a second (2026-11-07) while the task could run on the render's core;
+ * it is pinned to the other one now (fos_touch_start). */
+#define TOUCH_POLL_NO_IRQ_MS 10
+/* A touch that lands away from the edges is reported once it has been down
+ * this long, or at its lift if that is sooner, at the place it is then. A
+ * thumb lands tip first and rolls toward the hand as it presses: read at once
+ * (10 ms), a key tap on the SenseCAP Indicator "moved" 16 to 106 px and was a
+ * drag, and typing lost most of its keys (2026-11-14). One that slid sideways
+ * meanwhile is a second thumb (fos_touch_glided) and is reported where it
+ * began. One in the edge band is reported at once: where it began decides an
+ * edge swipe. */
+#define TOUCH_SETTLE_MS 20
+/* Wider than the contract's gestures.edgePx (24, in scene pixels), so that no
+ * edge swipe is ever held back. */
+#define TOUCH_EDGE_SOON_PX 32
 /* Edges a render can sit on. A move coalesces into the newest move of the
  * same finger, so this is mostly downs and ups: 64 is plenty. */
 #define TOUCH_QUEUE_LEN 64
@@ -164,6 +185,14 @@ static uint8_t s_head = 0, s_count = 0;
 static uint32_t s_dropped = 0;
 /* What is down, by track id, and where it last was (wire units). */
 static uint8_t s_down_mask = 0;
+/* Fingers on the glass whose press is not reported yet (TOUCH_SETTLE_MS),
+ * and when each was first seen. */
+static uint8_t s_settling_mask = 0;
+static int64_t s_first_seen_ms[FOS_TOUCH_POINTS_MAX];
+/* Where each settling finger was first seen: the glass's pixels and wire. */
+static int16_t s_first_rx[FOS_TOUCH_POINTS_MAX], s_first_ry[FOS_TOUCH_POINTS_MAX];
+static uint16_t s_first_x[FOS_TOUCH_POINTS_MAX], s_first_y[FOS_TOUCH_POINTS_MAX];
+static int16_t s_last_rx[FOS_TOUCH_POINTS_MAX], s_last_ry[FOS_TOUCH_POINTS_MAX];
 static uint16_t s_last_x[FOS_TOUCH_POINTS_MAX], s_last_y[FOS_TOUCH_POINTS_MAX];
 static int s_last_raw_x = -1, s_last_raw_y = -1;
 static bool s_woke = false;
@@ -221,7 +250,9 @@ bool fos_touch_pending(void)
 
 bool fos_touch_finger_down(void)
 {
-    return s_down_mask != 0;
+    /* A finger still settling (TOUCH_SETTLE_MS) is on the glass too: what
+     * waits for no finger down must wait for its press as well. */
+    return (s_down_mask | s_settling_mask) != 0;
 }
 
 /* The click of a press something takes, on e-paper, where the picture takes
@@ -396,15 +427,42 @@ static int read_points(fos_touch_point_t *points)
     return count;
 }
 
+static void report_down(uint8_t id, uint16_t wx, uint16_t wy)
+{
+    /* Where the finger landed first, then that it did, as the Linux evdev
+     * translator does (translate.nim flushSlots): a scene that follows the
+     * pointer by its moves (the Touch test's `mouseMove`) sees a tap where it
+     * was, not only a finger dragged. */
+    enqueue(FOS_TOUCH_MOVE, id, wx, wy);
+    enqueue(FOS_TOUCH_DOWN, id, wx, wy);
+    remote_click(FOS_TOUCH_DOWN, id, wx, wy);
+}
+
+/* A press reported once it settled, where it is then; or, when it glided
+ * sideways meanwhile (fos_touch_glided: a second thumb), where it began and
+ * then a move to where it is. */
+static void report_settled(uint8_t id, int x_max)
+{
+    if (fos_touch_glided(s_last_rx[id] - s_first_rx[id], s_last_ry[id] - s_first_ry[id], x_max)) {
+        report_down(id, s_first_x[id], s_first_y[id]);
+        enqueue(FOS_TOUCH_MOVE, id, s_last_x[id], s_last_y[id]);
+    } else {
+        report_down(id, s_last_x[id], s_last_y[id]);
+    }
+}
+
 static void touch_task(void *arg)
 {
     (void)arg;
     fos_touch_point_t points[FOS_TOUCH_POINTS_MAX];
     while (true) {
-        uint32_t wait_ms = s_down_mask ? TOUCH_POLL_HELD_MS : s_polled ? TOUCH_POLL_NO_IRQ_MS : TOUCH_POLL_IDLE_MS;
+        uint32_t wait_ms = (s_down_mask | s_settling_mask) ? TOUCH_POLL_HELD_MS
+                           : s_polled                      ? TOUCH_POLL_NO_IRQ_MS
+                                                           : TOUCH_POLL_IDLE_MS;
         xSemaphoreTake(s_irq, pdMS_TO_TICKS(wait_ms));
         int count = read_points(points);
         if (count < 0) continue; /* nothing new, or a failed read */
+        int64_t now_ms = esp_timer_get_time() / 1000;
         uint8_t seen = 0;
         for (int i = 0; i < count; i++) {
             fos_touch_point_t *p = &points[i];
@@ -419,29 +477,51 @@ static void touch_task(void *arg)
             uint16_t wy = (uint16_t)fos_touch_wire(ry, y_max);
             s_last_raw_x = p->x;
             s_last_raw_y = p->y;
-            seen |= (uint8_t)(1u << p->id);
-            if ((s_down_mask & (1u << p->id)) == 0) {
-                /* On the glass before its press is queued: a frame rendered
-                 * on the server sends what the queue holds once no finger is
-                 * down (fos_client.c), and a press it took alone, its lift in
-                 * the next pull, was two halves on the plane, no tap
-                 * (reTerminal E1003, 2026-11-12: Start opened one time in
-                 * several). */
-                s_down_mask |= (uint8_t)(1u << p->id);
-                /* Where the finger landed first, then that it did, as the
-                 * Linux evdev translator does (translate.nim flushSlots):
-                 * a scene that follows the pointer by its moves (the Touch
-                 * test's `mouseMove`) sees a tap where it was, not only a
-                 * finger dragged. */
-                enqueue(FOS_TOUCH_MOVE, p->id, wx, wy);
-                enqueue(FOS_TOUCH_DOWN, p->id, wx, wy);
-                remote_click(FOS_TOUCH_DOWN, p->id, wx, wy);
-            } else if (wx != s_last_x[p->id] || wy != s_last_y[p->id]) {
-                enqueue(FOS_TOUCH_MOVE, p->id, wx, wy);
-            }
+            uint8_t bit = (uint8_t)(1u << p->id);
+            seen |= bit;
+            bool was_down = (s_down_mask & bit) != 0;
+            bool moved = wx != s_last_x[p->id] || wy != s_last_y[p->id];
             s_last_x[p->id] = wx;
             s_last_y[p->id] = wy;
+            s_last_rx[p->id] = (int16_t)rx;
+            s_last_ry[p->id] = (int16_t)ry;
+            if (!was_down) {
+                bool near_edge = rx < TOUCH_EDGE_SOON_PX || ry < TOUCH_EDGE_SOON_PX ||
+                                 rx >= x_max - TOUCH_EDGE_SOON_PX || ry >= y_max - TOUCH_EDGE_SOON_PX;
+                bool settling = (s_settling_mask & bit) != 0;
+                if (!settling && !near_edge) {
+                    s_settling_mask |= bit;
+                    s_first_seen_ms[p->id] = now_ms;
+                    s_first_rx[p->id] = (int16_t)rx;
+                    s_first_ry[p->id] = (int16_t)ry;
+                    s_first_x[p->id] = wx;
+                    s_first_y[p->id] = wy;
+                } else if (near_edge || now_ms - s_first_seen_ms[p->id] >= TOUCH_SETTLE_MS) {
+                    /* On the glass before its press is queued: a frame
+                     * rendered on the server sends what the queue holds once
+                     * no finger is down (fos_client.c), and a press it took
+                     * alone, its lift in the next pull, was two halves on the
+                     * plane, no tap (reTerminal E1003, 2026-11-12: Start
+                     * opened one time in several). */
+                    s_settling_mask &= (uint8_t)~bit;
+                    s_down_mask |= bit;
+                    if (settling) report_settled(p->id, x_max);
+                    else report_down(p->id, wx, wy);
+                }
+            } else if (moved) {
+                enqueue(FOS_TOUCH_MOVE, p->id, wx, wy);
+            }
         }
+        /* A tap shorter than TOUCH_SETTLE_MS: its press, where it was last,
+         * then its lift with the rest. */
+        uint8_t quick = s_settling_mask & (uint8_t)~seen;
+        for (int id = 0; id < FOS_TOUCH_POINTS_MAX; id++) {
+            if (quick & (1u << id)) {
+                report_settled((uint8_t)id, s_swap ? s_y_max : s_x_max);
+                s_down_mask |= (uint8_t)(1u << id);
+            }
+        }
+        s_settling_mask &= seen;
         /* Off the glass only once the lift is queued (the same reason as
          * above): whoever sees no finger down sees the gesture whole. The
          * render task is woken again then, since the lift's own wake came
@@ -453,7 +533,7 @@ static void touch_task(void *arg)
                 remote_click(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
             }
         }
-        s_down_mask = seen;
+        s_down_mask &= seen; /* a finger still settling is not down yet */
         if (lifted) fos_client_wake_for_events();
     }
 }
@@ -578,7 +658,14 @@ esp_err_t fos_touch_start(void)
         gpio_isr_handler_add((gpio_num_t)pins->irq, on_irq, NULL);
         gpio_intr_enable((gpio_num_t)pins->irq);
     }
+    /* Core 0: on an RGB LCD core 1 is the render task's and the panel's
+     * refill interrupt's (fos_client.c), and a poll every 10 ms must not
+     * take turns there. */
+#if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
+    if (xTaskCreatePinnedToCore(touch_task, "fos_touch", 3072, NULL, 4, NULL, 0) != pdPASS) return ESP_ERR_NO_MEM;
+#else
     if (xTaskCreate(touch_task, "fos_touch", 3072, NULL, 4, NULL) != pdPASS) return ESP_ERR_NO_MEM;
+#endif
     s_present = true;
     char line[256];
     snprintf(line, sizeof(line),

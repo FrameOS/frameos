@@ -76,6 +76,14 @@ int fos_touch_decode_ft(const uint8_t *report, size_t len, fos_touch_point_t *po
 /* A coordinate in 0..max-1 onto the 0..FOS_TOUCH_WIRE_MAX wire; clamped. Pure. */
 int fos_touch_wire(int value, int max);
 
+/* Whether a press that moved (dx, dy) in the glass's pixels while it settled
+ * slid sideways a tenth of the glass or more, and mostly sideways: a second
+ * thumb landing on a controller that tracks one point (the FT6336U glides it
+ * from the first thumb to the second), not the first thumb rolling (up, at
+ * most a fifth of that sideways). Such a press is reported where it began,
+ * so the key under the first thumb is typed too (ui/events.nim). Pure. */
+bool fos_touch_glided(int dx, int dy, int x_max);
+
 /* Whether the controller's axes run the other way from the panel's: a
  * portrait-mounted glass reporting 480x800 under an 800x480 panel. Pure. */
 bool fos_touch_axes_swapped(int touch_x_max, int touch_y_max, int panel_width, int panel_height);
