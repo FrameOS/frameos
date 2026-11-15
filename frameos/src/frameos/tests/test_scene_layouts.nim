@@ -922,6 +922,24 @@ suite "the layout chosen on the frame":
     discard pass(wears)
     check wears.layoutOf.id.string == "tests/layout"
 
+  test "a chosen layout the frame no longer holds stands down for each scene's own":
+    let saved = layoutListing
+    defer: layoutListing = saved
+    layoutListing = proc (): seq[LayoutEntry] {.nimcall, gcsafe.} =
+      @[LayoutEntry(id: "tests/layout", name: "Layout"), LayoutEntry(id: "tests/uiLayout", name: "UI")]
+    chooseLayout("layout-gone")
+    check layoutFor("tests/layout") == "tests/layout"
+    check layoutFor("") == ""
+    let wears = newScene("tests/content")
+    discard pass(wears)
+    check wears.layoutOf.id.string == "tests/layout"
+    # The choice stays: the layout coming back is worn again.
+    check chosenLayout() == "layout-gone"
+    chooseLayout("tests/uiLayout")
+    check layoutFor("tests/layout") == "tests/uiLayout"
+    chooseLayout(NoLayout)
+    check layoutFor("tests/layout") == ""
+
   test "ten pulls from the top edge open the frame page with no layout, and change nothing":
     var scene = newScene("tests/content")
     discard pass(scene)
