@@ -188,6 +188,12 @@ proc get*(self: App, context: ExecutionContext): Image =
   # including error frames — can reuse that target instead of allocating a
   # second full-size image.
   let (decodeTarget, decodeScalingMode) = self.takeDecodeTarget(context)
+  # Without a target, the consumer's useful resolution (requestedBounds): a
+  # render/zoomPan asks for its largest zoom times the canvas, which the node
+  # cache keeps between frames where a native-resolution decode would not be.
+  let (boundWidth, boundHeight) =
+    if decodeTarget.isNil: self.takeDecodeBounds(context)
+    else: (0, 0)
 
   if self.appConfig.search != self.lastSearch or self.appConfig.path != self.lastPath:
     self.init() # re-init if the query changes
@@ -200,14 +206,23 @@ proc get*(self: App, context: ExecutionContext): Image =
     return self.error(context, &"No images found in the folder: {self.appConfig.path}", decodeTarget)
 
   let folder = if self.appConfig.path == "": self.frameConfig.assetsPath else: self.appConfig.path
-  let currentIndex = self.counter
+  # The node cache could not keep the photo it asked for last time and still
+  # wants that one (an animation over it on a board short of memory): the same
+  # photo again, the counter and its persisted copy untouched. Advancing is
+  # the slideshow's schedule (the node's cache), never the frame rate.
+  let lastIndex =
+    if context.remakingCachedValue and self.lastImage.isSome: self.images.find(self.lastImage.get())
+    else: -1
+  let remaking = lastIndex >= 0
+  let currentIndex = if remaking: lastIndex else: self.counter
   let currentImage = self.images[currentIndex]
   var nextImage: Option[Image] = none(Image)
   let path = joinPath(folder, currentImage)
-  self.log("Loading image: " & path)
-  self.counter = (self.counter + 1) mod len(self.images)
-  if self.appConfig.counterStateKey != "":
-    self.scene.state[self.appConfig.counterStateKey] = %*(self.counter)
+  if not remaking:
+    self.log("Loading image: " & path)
+    self.counter = (self.counter + 1) mod len(self.images)
+    if self.appConfig.counterStateKey != "":
+      self.scene.state[self.appConfig.counterStateKey] = %*(self.counter)
   # A canvas handed over for an into-target decode is a fresh one each
   # render; a mark left on it by an earlier photo must not outlive it.
   unmarkImageGraded(decodeTarget)
@@ -244,7 +259,9 @@ proc get*(self: App, context: ExecutionContext): Image =
       nextImage = some(readImageWithDisplayBounds(
         path,
         maxEdge = decodeBounds.maxEdge,
-        maxPixels = decodeBounds.maxPixels
+        maxPixels = decodeBounds.maxPixels,
+        boundWidth = boundWidth,
+        boundHeight = boundHeight
       ))
     except CatchableError as e:
       return self.error(context, "An error occurred while loading the image: " & path & "\n" & e.msg, decodeTarget)
@@ -255,10 +272,11 @@ proc get*(self: App, context: ExecutionContext): Image =
       applyAssetColors(image, colorProfile.get())
       # Explicit sliders stand; the consumer's automatic fit skips this one.
       markImageGraded(image)
-      self.log("Applied the colour profile: " & sidecarPathFor(path))
+      if not remaking:
+        self.log("Applied the colour profile: " & sidecarPathFor(path))
     except CatchableError as e:
       self.logError("Could not apply the colour profile " & sidecarPathFor(path) & ": " & e.msg)
-  if self.appConfig.metadataStateKey != "":
+  if self.appConfig.metadataStateKey != "" and not remaking:
     var metadata = %*{
       "path": path,
       "filename": currentImage,

@@ -304,6 +304,12 @@ def wait_for_frameos_server(process, port, timeout=15):
 def start_frameos(upload_url, frame_size):
     runtime_config_path = write_runtime_frame_config(upload_url, frame_size)
     env = os.environ.copy()
+    # Each fixture is rendered compiled and interpreted and the two must match.
+    # Only the interpreter offers a consumer's bounds to a decoder
+    # (requestedBounds), and a bounded decode is equivalent, not byte-identical
+    # (docs/value-pipeline.md): off here, as in the pixel-exact Nim A/B
+    # (test_repo_scenes_differential.nim), which has its own classified test.
+    env["FRAMEOS_DISABLE_BOUNDS"] = "1"
     env["FRAMEOS_SCENES_JSON"] = Path('./tmp/scenes.json').resolve().as_posix()
     env["FRAMEOS_CONFIG"] = runtime_config_path.resolve().as_posix()
     # Pin the wall clock (frameos/utils/frame_time.nim): the clock and

@@ -420,7 +420,18 @@ discards whatever multiplier had accumulated below it.
 Pinned by the planner-rule bounds suite and the end-to-end interpreter
 tests; `data/rotateImage`, `data/resizeImage` and `render/zoomPan` declare,
 no app code changed — producers pick bounds up through the shared download
-funnel.
+funnel. `data/localImage` reads files, not downloads, and took none until
+2026-11-15 (`readImageWithDisplayBounds` now streams a JPEG down to
+them): under a zoomPan it decoded each photo as
+large as the memory budget allowed, which the embedded node cache then
+refused to keep, so "Slideshow with motion" decoded a photo every animation
+frame (0.5 fps on the SenseCAP Indicator). A value its producer decoded to
+the bounds it took that pass is now kept in memory past the cache's 1 MB
+limit while 512 KB of render headroom remains (`keepsBoundedImage`: a miss
+would allocate the same pixels again). And a cached producer the cache could
+not keep runs again with `context.remakingCachedValue` set while the value
+it made is still current: localImage then decodes the same photo, leaving
+its counter (and that field's disk write) for the cache's next period.
 
 ### The scaled decoders
 

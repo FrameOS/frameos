@@ -792,6 +792,17 @@ type
     decodeBoundsHeight*: int
     decodeBoundsNodeId*: NodeId
     decodeBoundsClaimedBy*: NodeId
+    # The bounds that producer took (decodeBoundsClaimedBy's), so the node
+    # cache can tell a bounded value from a native-resolution one.
+    decodeBoundsClaimedWidth*: int
+    decodeBoundsClaimedHeight*: int
+    # Set while a cached producer runs again only because the node cache could
+    # not keep what it made last time, and that value is still current (same
+    # expression, inputs and duration): the producer should make the same
+    # value again, not step on. A slideshow (data/localImage) under an
+    # animation would otherwise advance a photo, and write its persisted
+    # counter, every frame.
+    remakingCachedValue*: bool
 
   # One choice of a "select" state field. Scenes store these either as a plain
   # string (value doubles as the label) or as {"value": .., "label": ..}; the

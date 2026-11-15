@@ -275,3 +275,45 @@ suite "data/localImage app":
     let noCanvas = app.get(ExecutionContext(hasImage: false))
     check noCanvas.width == 8
     check noCanvas.height == 6
+
+  test "a run the node cache only repeats decodes the same photo and leaves the counter":
+    let root = uniqueTempDir("frameos-local-image-remake")
+    defer: removeDir(root)
+    writePpm(root / "a.ppm", 255, 0, 0)
+    writePpm(root / "b.ppm", 0, 255, 0)
+
+    let logs = LogStore(items: @[])
+    let scene = FrameScene(state: %*{"counter": 0}, logger: newLogger(logs))
+    let app = App(
+      scene: scene,
+      frameConfig: makeFrameConfig(root),
+      appConfig: AppConfig(path: root, order: "alphabetical",
+        counterStateKey: "counter", metadataStateKey: "meta", search: "")
+    )
+    discard app.get(ExecutionContext(hasImage: false))
+    check scene.state["counter"].getInt() == 1
+    for _ in 0 ..< 3:
+      let again = app.get(ExecutionContext(hasImage: false, remakingCachedValue: true))
+      check again.unsafe[0, 0].r == 255
+      check scene.state["counter"].getInt() == 1
+      check scene.state["meta"]["filename"].getStr() == "a.ppm"
+    discard app.get(ExecutionContext(hasImage: false))
+    check scene.state["meta"]["filename"].getStr() == "b.ppm"
+    check scene.state["counter"].getInt() == 0
+
+  test "bounds offered by the consumer cap the decode":
+    let root = uniqueTempDir("frameos-local-image-bounds")
+    defer: removeDir(root)
+    copyFile("src/frameos/tests/fixtures/large-gradient.jpg", root / "photo.jpg")
+    let scene = FrameScene(state: %*{}, logger: newLogger(LogStore(items: @[])))
+    let app = App(
+      scene: scene,
+      frameConfig: makeFrameConfig(root),
+      appConfig: AppConfig(path: root, order: "alphabetical")
+    )
+    let context = ExecutionContext(hasImage: false, decodeBoundsWidth: 800,
+      decodeBoundsHeight: 480)
+    let image = app.get(context)
+    check image.width == 800
+    check image.height == 520
+    check context.decodeBoundsWidth == 0 # taken, one-shot
