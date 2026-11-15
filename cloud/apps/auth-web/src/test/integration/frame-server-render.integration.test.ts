@@ -463,6 +463,15 @@ describe("the render pull", () => {
     reports = { refreshInterval: 1 };
     const fast = await pull(frame.id, token, panel);
     expect(fast.headers.get("x-frameos-next-render")).toBe(String(cloudRenderedMinIntervalSeconds));
+    // A Spectra 6 panel is never told sooner than its refresh floor
+    // (docs/panel-refresh-floors.json), whatever the plan's floor.
+    await db
+      .update(frameServerRenders)
+      .set({ renderedAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(frameServerRenders.frameId, frame.id));
+    const spectra = await pull(frame.id, token, "width=800&height=480&format=7");
+    expect(spectra.status).toBe(200);
+    expect(spectra.headers.get("x-frameos-next-render")).toBe(String(Math.max(cloudRenderedMinIntervalSeconds, 180)));
     await db
       .update(frameServerRenders)
       .set({ renderedAt: new Date(Date.now() - 3_600_000) })

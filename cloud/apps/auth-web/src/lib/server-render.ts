@@ -342,6 +342,29 @@ export function prerenderLeadMs(lastRenderMs: number | null | undefined): number
 export const maxNextRenderSeconds = 7 * 86400;
 
 /**
+ * A colour e-paper panel's full refresh takes 15-30 s and its makers ask for
+ * minutes between refreshes: the shortest next render a board is told, by
+ * the panel format its pull names (fos_pixel_format_t). The table is
+ * docs/panel-refresh-floors.json (server-render.test.ts pins this copy to it;
+ * the backend's is PANEL_REFRESH_FLOOR_SECONDS in embedded_device.py).
+ */
+export const panelRefreshFloorSeconds: Readonly<Partial<Record<number, number>>> = {
+  2: 60,
+  3: 60,
+  5: 60,
+  6: 180,
+  7: 180,
+};
+
+/** A next-render answer held to the board's panel floor; null stays null. */
+export function heldToPanelFloor(seconds: number | null, pixelFormat: number): number | null {
+  if (seconds === null) {
+    return null;
+  }
+  return Math.min(maxNextRenderSeconds, Math.max(seconds, panelRefreshFloorSeconds[pixelFormat] ?? 0));
+}
+
+/**
  * When the scene wants its next picture, in seconds from the pull that hands
  * this one out (docs/server-rendering.md "When the next picture is due"): the
  * render's own `nextSleep` when it set one, else the scene's

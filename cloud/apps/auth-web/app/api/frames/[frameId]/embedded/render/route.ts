@@ -8,6 +8,7 @@ import {
 } from "../../../../../../src/lib/rate-limit";
 import { reportError } from "../../../../../../src/lib/log";
 import {
+  heldToPanelFloor,
   maxDeviceInputBytes,
   parseServerRenderPanel,
   pullServerRender,
@@ -182,10 +183,12 @@ async function pull(
     // What the picture is and when the scene wants the next one, on a 304 as
     // on a 200: the board names the scene and takes its next wake from them
     // (docs/server-rendering.md "When the next picture is due").
+    // Never sooner than the board's panel can take (docs/panel-refresh-floors.json).
+    const nextRenderSeconds = heldToPanelFloor(pulled.nextRenderSeconds, panel.format);
     const about: Record<string, string> = {
       ETag: `"${pulled.etag}"`,
       "X-FrameOS-Scene": encodeURIComponent(pulled.scene),
-      ...(pulled.nextRenderSeconds !== null ? { "X-FrameOS-Next-Render": String(pulled.nextRenderSeconds) } : {}),
+      ...(nextRenderSeconds !== null ? { "X-FrameOS-Next-Render": String(nextRenderSeconds) } : {}),
       ...(pulled.pressMap ? { [pressMapHeader]: pulled.pressMap } : {}),
     };
     if (pulled.status === 304) {

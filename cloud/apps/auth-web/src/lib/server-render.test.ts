@@ -7,10 +7,12 @@ import {
   candidateServerRenderScene,
   chooseServerRenderScene,
   deviceInputHasAny,
+  heldToPanelFloor,
   ifNoneMatchHas,
   lastPictureUsable,
   maxKeptStateBytes,
   maxNextRenderSeconds,
+  panelRefreshFloorSeconds,
   parseServerRenderPanel,
   planeLastState,
   prerenderLeadMs,
@@ -320,6 +322,29 @@ describe("the frame's reported scene, for hardware the cloud renders for", () =>
     ).toEqual({ active_scene: "clock", clock: { count: 1 } });
     expect(planeLastState(null, { clock: { count: 1 } })).toEqual({ clock: { count: 1 } });
   });
+});
+
+const panelRefreshFloors = JSON.parse(
+  readFileSync(join(__dirname, "../../../../../docs/panel-refresh-floors.json"), "utf8"),
+) as {
+  cases: { name: string; pixelFormat: number; planeFloor: number; seconds: number | null; wanted: number | null }[];
+  floors: Record<string, { seconds: number }>;
+};
+
+describe("a panel's refresh floor (docs/panel-refresh-floors.json)", () => {
+  it("is the contract's table", () => {
+    expect(panelRefreshFloorSeconds).toEqual(
+      Object.fromEntries(Object.entries(panelRefreshFloors.floors).map(([format, entry]) => [Number(format), entry.seconds])),
+    );
+  });
+
+  for (const testCase of panelRefreshFloors.cases) {
+    it(testCase.name, () => {
+      const planed =
+        testCase.wanted === null ? null : serverNextRenderSeconds({ refreshInterval: testCase.wanted }, testCase.planeFloor);
+      expect(heldToPanelFloor(planed, testCase.pixelFormat)).toBe(testCase.seconds);
+    });
+  }
 });
 
 describe("when the next picture is due (docs/server-rendering.md)", () => {

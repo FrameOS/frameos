@@ -1134,6 +1134,22 @@ NEXT_RENDER_MAX_SECONDS = 7 * 24 * 3600
 # The header a render pull's answer says it in (the cloud's route sends the
 # same).
 SERVER_RENDER_NEXT_RENDER_HEADER = "X-FrameOS-Next-Render"
+# A colour e-paper panel's full refresh takes 15-30 s and its makers ask for
+# minutes between refreshes: never told sooner than this, by the panel format
+# the pull names (fos_pixel_format_t). docs/panel-refresh-floors.json is the
+# table (test_panel_refresh_floors.py pins this copy to it; the cloud's is
+# panelRefreshFloorSeconds in server-render.ts).
+PANEL_REFRESH_FLOOR_SECONDS: dict[int, int] = {2: 60, 3: 60, 5: 60, 6: 180, 7: 180}
+
+
+def held_to_panel_floor(seconds: int | None, pixel_format: int) -> int | None:
+    """The next-render answer for a board with this panel: never under the
+    panel's floor (PANEL_REFRESH_FLOOR_SECONDS), nor over the ceiling. None
+    (the scene has no opinion) stays None."""
+    if seconds is None:
+        return None
+    floor = PANEL_REFRESH_FLOOR_SECONDS.get(int(pixel_format), 0)
+    return min(max(seconds, floor), NEXT_RENDER_MAX_SECONDS)
 
 
 def next_render_seconds(rendered_state: dict | None) -> int | None:
@@ -1317,7 +1333,8 @@ async def _embedded_render_response(
         # When the scene wants its next picture: the board wakes for it
         # instead of on the frame's interval (docs/server-rendering.md "When
         # the next picture is due"). On a 304 too: it is this picture's.
-        headers[SERVER_RENDER_NEXT_RENDER_HEADER] = str(drawn.next_render)
+        # Never sooner than its panel can take (docs/panel-refresh-floors.json).
+        headers[SERVER_RENDER_NEXT_RENDER_HEADER] = str(held_to_panel_floor(drawn.next_render, plan.pixel_format))
     if drawn.press_map:
         headers[SERVER_RENDER_PRESS_HEADER] = drawn.press_map
     if etag_matches(if_none_match, etag):
@@ -1522,6 +1539,10 @@ def embedded_scenes_payload(db: Session, frame: Frame) -> bytes:
 # column: losing it costs one whole-set pull (a patch is only ever a saving).
 SERVED_SCENES_KEY = "frame:{}:embedded_served_scenes"
 SERVED_SCENES_TTL_SECONDS = 30 * 24 * 3600
+# The ESP32 scene store's slot files (FOS_SCENE_STORE_SLOTS in
+# embedded/esp32/main/fos_scene_store.h; the cloud's esp32SceneStoreSlots in
+# scenes-patch.ts): test_embedded_scenes_patch_slots.py reads both.
+ESP32_SCENE_STORE_SLOTS = 32
 
 
 def _scene_hash(scene: dict) -> str:
@@ -1554,6 +1575,12 @@ async def _embedded_scenes_patch(redis, frame: Frame, payload: bytes, if_none_ma
     put = [scene for scene in scenes if hashes.get(scene["id"]) != _scene_hash(scene)]
     if len(put) == len(scenes):
         # Every scene changed: the whole list is the same message.
+        return None
+    if len(hashes) + len(put) > ESP32_SCENE_STORE_SLOTS:
+        # A patch is one change: each put goes to a new slot while every
+        # scene the board holds keeps its own until the index switches, so it
+        # would be refused ("no free scene slot") and cost a round trip. The
+        # whole list is written a scene at a time and fits.
         return None
     return json.dumps(
         {"patch": True, "base": if_none_match, "order": ids, "put": put},
