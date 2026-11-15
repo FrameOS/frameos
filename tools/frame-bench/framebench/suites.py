@@ -169,7 +169,10 @@ def suite_scenes(ctx, frame, scene_filter=None):
         if ok and frame['lcd'] and ctx.passive:
             con.drain()
             w = summarize(con.idle(ctx.passive))
-            anim = [a for a in w['animation'] if a.get('status') == 'running']
+            # The first summary after a switch holds the scene's first frame (its
+            # JS compiled, its pictures decoded): judge the steady state after it.
+            running = [a for a in w['animation'] if a.get('status') == 'running']
+            anim = running[1:] if len(running) > 1 else running
             entry['passive'] = {
                 'seconds': ctx.passive,
                 'renders': len(w['done']),
