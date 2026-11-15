@@ -697,10 +697,14 @@ static esp_err_t ota_run_signed(const ota_source_t *src)
         return ESP_ERR_INVALID_STATE;
     }
 
-    /* s_ota_busy is already set by every caller, so the next render pass
-     * yields to this run; a pass already rendering is waited out here. */
-    wait_for_render_idle(src, FOS_OTA_RENDER_WAIT_MAX_MS);
-
+    /* The manifest first, beside the renders: a check that finds nothing to
+     * do (the periodic one, a downgrade refused) used to hold every render
+     * pass off for its whole round trip, and the pass it held dropped the
+     * render it was asked for ("OTA in progress; skipping render cycle":
+     * a console `render` on the reTerminal Sticky never ran, the hardware
+     * bench, 2026-11-15). Only a download yields the render task the link:
+     * busy from here (the caller clears it), a pass already rendering
+     * waited out. */
     ota_manifest_t manifest;
     bool up_to_date = false;
     esp_err_t err = ota_fetch_manifest(src, &manifest, &up_to_date);
@@ -755,6 +759,12 @@ static esp_err_t ota_run_signed(const ota_source_t *src)
     ESP_LOGW(TAG, "ota (%s): %s -> %s from %s", src->plane,
              esp_app_get_description()->version, manifest.version, manifest.download_url);
     ota_log(src, "downloading", manifest.version);
+
+    /* From here the download has the link: the next render pass yields
+     * (fos_client.c), and one already rendering is waited out. The caller
+     * clears busy when this returns. */
+    s_ota_busy = true;
+    wait_for_render_idle(src, FOS_OTA_RENDER_WAIT_MAX_MS);
 
     /* Resumes within itself (fos_ota_download.c); one call is the run's download. */
     err = ota_download_verify(src, manifest.download_url, first_party ? src->auth : NULL,
@@ -846,7 +856,7 @@ esp_err_t fos_ota_check_and_apply(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    s_ota_busy = true;
+    /* Busy only while a download runs (set inside, at the download). */
     esp_err_t err = ota_check_and_apply_locked();
     s_ota_busy = false;
     xSemaphoreGive(lock);
@@ -1103,7 +1113,7 @@ static void cloud_ota_task(void *arg)
             return;
         }
     }
-    s_ota_busy = true;
+    /* Busy only while a download runs (set at the download). */
     esp_err_t err = cloud_ota_run();
     s_ota_busy = false;
     xSemaphoreGive(lock);
