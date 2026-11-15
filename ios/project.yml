@@ -12,7 +12,9 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     # The FrameOS release this app was built next to (versions.json "frameos").
-    MARKETING_VERSION: "2026.11.6"
+    # ios/bin/release takes it from versions.json itself; this copy is for
+    # builds made in Xcode.
+    MARKETING_VERSION: "2026.11.9"
     CURRENT_PROJECT_VERSION: "1"
 packages:
   FrameOSKit:

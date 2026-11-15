@@ -80,8 +80,9 @@ the destination, then Run.
 
 ## Submitting for review
 
-- **Version**: `MARKETING_VERSION` in `ios/project.yml` (the FrameOS release
-  it was built beside, e.g. 2026.11.6).
+- **Version**: the FrameOS release it was built beside, which
+  `ios/bin/release` reads from `versions.json` (`frameos`, e.g. 2026.11.9).
+  `MARKETING_VERSION` in `ios/project.yml` is the copy for Xcode builds.
 - **Category**: Utilities. **Price**: free.
 - **Subtitle**: "Control your smart frames".
 - **Description** (draft): "FrameOS runs e-ink and LCD picture frames that

@@ -11,7 +11,8 @@
 # App Store Connect API, role App Manager); without one, Xcode's own signed-in
 # account is used (Xcode → Settings → Accounts).
 # The build number is the UTC time (yyyymmddHHMM), so every upload is higher
-# than the last; the version is MARKETING_VERSION in project.yml.
+# than the last; the version is the FrameOS release, the base of versions.json's
+# "frameos" entry (2026.11.9+<hash> is 2026.11.9), so it never falls behind.
 # --no-upload archives and exports an .ipa into ios/DerivedData/export only.
 # --unsigned only checks that the device build archives (no team needed).
 set -euo pipefail
@@ -30,6 +31,8 @@ done
 
 xcodegen generate --quiet
 build="$(date -u +%Y%m%d%H%M)"
+version="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["frameos"].split("+")[0])' ../versions.json)"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "versions.json has no frameos version: $version" >&2; exit 1; }
 archive="DerivedData/FrameOS.xcarchive"
 rm -rf "$archive" DerivedData/export
 mkdir -p DerivedData
@@ -47,7 +50,7 @@ fi
 # provisioning profile".
 xcodebuild archive -project FrameOS.xcodeproj -scheme FrameOS -configuration Release \
   -destination "generic/platform=iOS" -archivePath "$archive" \
-  CURRENT_PROJECT_VERSION="$build" CODE_SIGNING_ALLOWED=NO -quiet
+  MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$build" CODE_SIGNING_ALLOWED=NO -quiet
 # The export takes the app's entitlements from its signature, and an unsigned
 # app has none: Sign in with Apple's would be lost. An ad hoc signature
 # carries them over (iOS refuses an ad hoc signature at build time once there
@@ -58,7 +61,7 @@ for nested in "$app"/Frameworks/* "$app"/PlugIns/*; do
 done
 codesign --force --sign - --timestamp=none --entitlements FrameOS/FrameOS.entitlements "$app"
 if [[ $signed == 0 ]]; then
-  echo "Archived (unsigned): ios/$archive, build $build"
+  echo "Archived (unsigned): ios/$archive, $version build $build"
   exit 0
 fi
 
@@ -83,7 +86,7 @@ PLIST
 xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$options" \
   -exportPath DerivedData/export -allowProvisioningUpdates ${auth[@]+"${auth[@]}"}
 if [[ $upload == 1 ]]; then
-  echo "Uploaded build $build. It appears in App Store Connect → TestFlight once processed (a few minutes)."
+  echo "Uploaded $version build $build. It appears in App Store Connect → TestFlight once processed (a few minutes)."
 else
-  echo "Exported: ios/DerivedData/export (build $build)"
+  echo "Exported: ios/DerivedData/export ($version build $build)"
 fi
