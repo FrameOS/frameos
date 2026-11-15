@@ -70,3 +70,27 @@ async def test_unhandled_exception_detail_is_generic_outside_debug(monkeypatch):
     monkeypatch.setattr(config, "DEBUG", True)
     response = await handler(request, exc)
     assert json.loads(response.body) == {"detail": "postgresql://user:hunter2@db.internal/frameos"}
+
+
+@pytest.mark.asyncio
+async def test_client_disconnect_is_not_a_server_error(async_client, monkeypatch):
+    """A frame that hangs up mid-upload gets no traceback and no exception report."""
+    from starlette.requests import ClientDisconnect
+
+    import app.fastapi as fastapi_module
+
+    captured = []
+    monkeypatch.setattr(fastapi_module, "posthog_capture_exception", lambda exc, request=None: captured.append(exc))
+    app = fastapi_module.app
+    assert ClientDisconnect in app.exception_handlers
+
+    async def boom():
+        raise ClientDisconnect()
+
+    app.add_api_route("/api/test-client-disconnect", boom, methods=["POST"])
+    try:
+        response = await async_client.post("/api/test-client-disconnect", content=b"x")
+    finally:
+        app.router.routes = [r for r in app.router.routes if getattr(r, "path", None) != "/api/test-client-disconnect"]
+    assert response.status_code == 400
+    assert captured == []

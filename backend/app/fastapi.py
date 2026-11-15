@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.requests import ClientDisconnect
+from starlette.responses import Response
 from fastapi import FastAPI, Request, Depends
 from app.api.auth import get_current_user
 from app.api import api_open, api_project, api_user, api_public
@@ -187,6 +189,15 @@ if serve_html:
         if os.environ.get("TEST") == "1" or request.url.path.startswith("/api"):
             return await request_validation_exception_handler(request, exc)
         return index_response(request)
+
+    @app.exception_handler(ClientDisconnect)
+    async def client_disconnect_handler(request: Request, exc: ClientDisconnect):
+        # The client hung up while its body streamed in (a frame's image push
+        # cut short by a render, Wi-Fi going, a timeout): nobody is left to
+        # answer, and it is no server error. A registered type is handled by
+        # the exception middleware and not re-raised, so this skips the
+        # traceback and the exception report the catch-all below would make.
+        return Response(status_code=400)
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
