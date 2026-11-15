@@ -626,7 +626,7 @@ export function get(app) {
   panel, start `get` with `if (app.frame.systemScene) return <yield />`.
 - A layout on its own has nothing to wrap, so its `<yield />` is an empty area in
   a render. That is correct, not a blank to fix.
-- On a frame that runs scenes side by side (a Raspberry Pi), `app.frame.scenes`
+- On a frame that runs scenes side by side (a Pi, an ESP32), `app.frame.scenes`
   lists its scenes (`{id, name}`) and `app.frame.sceneId` is the one wrapped.
   There a layout's `<Scene id={...} />` (no other props: with props it is a copy
   they set, as anywhere) is that scene itself, running in its own rectangle
