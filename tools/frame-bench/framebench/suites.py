@@ -228,6 +228,13 @@ def suite_scenes(ctx, frame, scene_filter=None):
             tap(con, frame)
             got = con.idle(4 if frame['lcd'] else 3 + frame.get('refresh_s', 4))
             w = summarize(got)
+            # A render the tap started and has not finished: wait for it, or the
+            # next scene's switch measures it (a 28 s Slideshow render on the E1003).
+            open_renders = {r['n'] for r in w['started']} - {d['n'] for d in w['done']} - {f['n'] for f in w['failed']}
+            if open_renders:
+                _, _, more = wait_render(con, render_timeout(frame))
+                got += more
+                w = summarize(got)
             first = min([d['t'] for d in w['done']] + [b['t'] for b in w['burst']], default=None)
             entry['tap'] = {'first_ms': round((first - t_cmd) * 1000) if first else None,
                             'renders': [d['ms'] for d in w['done']],
