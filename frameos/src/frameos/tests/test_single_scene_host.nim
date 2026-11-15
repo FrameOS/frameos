@@ -593,3 +593,104 @@ block windowed_host_keeps_what_it_leaves:
   # Off: one scene at a time again, nothing kept.
   w.setWindowed(false)
   doAssert w.windows.len == 0 and hostSceneFor.isNil and not builtInScenesStay
+
+# ------------------------------------------- windows where memory is short
+#
+# An ESP32 runs a desktop's windows too, but only so many at once, the one in
+# front included (app_runtime.windowLimit: 2 on an 8 MB board): a scene brought
+# to the front lets the window kept longest ago go, a window asked for past the
+# limit takes the place of one the desktop no longer has open, else stays
+# empty, and without a desktop the frame keeps one scene, as it always did.
+block windows_where_memory_is_short:
+  deviceMemoryBytesOverride = 8 * 1024 * 1024 - 65536
+  doAssert windowLimit() == 2
+  let layoutJsx = "export function get(app) { return <div className=\"flex flex-col w-full h-full\"><yield /></div> }"
+  let layout = %*{"id": "tests/desk", "name": "Desk", "settings": {"execution": "interpreted",
+    "refreshInterval": 60, "backgroundColor": "#000000", "isLayout": true}, "fields": [],
+    "apps": {"ui": {"name": "ui", "category": "data", "version": "1.0.0", "fields": [],
+      "output": [{"name": "image", "type": "image"}],
+      "sources": {"app.tsx": layoutJsx, "config.json": "{\"name\": \"ui\", \"output\": [{\"name\": \"image\", \"type\": \"image\"}], \"fields\": []}"}}},
+    "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+      {"id": "2", "type": "app", "data": {"keyword": "ui", "config": {}}},
+      {"id": "3", "type": "app", "data": {"keyword": "render/image", "config": {"placement": "stretch"}}}],
+    "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
+      {"id": "2", "source": "2", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/image"}]}
+  proc scene(id: string, worn: bool): JsonNode =
+    result = %*{"id": id, "name": id, "settings": {"execution": "interpreted", "refreshInterval": 300,
+      "backgroundColor": "#000000"}, "fields": [], "apps": {},
+      "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+        {"id": "2", "type": "app", "data": {"keyword": "render/color", "config": {"color": "#ff0000"}}}],
+      "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "2", "targetHandle": "prev"}]}
+    if worn:
+      result["layout"] = %*{"sceneId": "tests/desk", "state": {}}
+  let a = "tests/winA".SceneId
+  let b = "tests/winB".SceneId
+  let c = "tests/winC".SceneId
+  let plain = "tests/plain".SceneId
+  replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($(%*[layout,
+    scene(a.string, true), scene(b.string, true), scene(c.string, true), scene(plain.string, false),
+    scene("tests/plainToo", false)]))))
+  let lim = SingleSceneHost(frameConfig: FrameConfig(width: 40, height: 40, rotate: 0,
+    scalingMode: "cover", debug: false, saveAssets: %*false), logger: logger)
+  lim.requestSelect = proc (sceneId: string): bool =
+    lim.makeCurrent(sceneId.SceneId)
+    true
+  lim.sceneOrder = proc (): seq[SceneId] = @[a, b, c, plain, "tests/plainToo".SceneId]
+  lim.start()
+  lim.setWindowed(true)
+  proc render() =
+    discard lim.renderScene(ExecutionContext(scene: lim.scene, event: "render",
+      payload: %*{}, image: newImage(40, 40), hasImage: true, loopIndex: 0, loopKey: "."))
+  proc desk(open: varargs[string]) =
+    ## What the desktop has open, as a layout's keepOpen writes it.
+    let worn = if lim.scene.isNil: nil else: lim.scene.wornLayout
+    doAssert not worn.isNil, "the scene wears the desk"
+    worn.state["openScenes"] = %open
+  proc show(id: SceneId) =
+    doAssert lim.send(eoHttpAdmin, "setCurrentScene", %*{"sceneId": id.string})
+    doAssert lim.ensureScene() and lim.scene.id == id
+
+  # Without a desktop, one scene: the one left goes.
+  lim.makeCurrent(plain)
+  doAssert lim.ensureScene()
+  render()
+  show("tests/plainToo".SceneId)
+  doAssert lim.windows.len == 0, "no desktop keeps the scene left"
+  render()
+  doAssert not builtInScenesStay, "no desktop: the built-in scenes go back as always"
+  doAssert lim.send(eoHttpAdmin, "sceneSettings", %*{})
+  doAssert lim.ensureScene() and lim.scene.id.string == SceneSettingsId, "the one settings, as always"
+
+  # On a desktop the scene left stays in its window.
+  show(a)
+  render()
+  desk(a.string)
+  show(b)
+  doAssert lim.windows.hasKey(a), "the desktop has it open: it stays"
+  render()
+  desk(a.string, b.string)
+  render()
+  doAssert lim.windows.hasKey(a), "open on the desktop, it outlives the pass"
+  doAssert builtInScenesStay, "a desktop: the built-in scenes stay for their windows"
+  # A third window past the limit, with both still open: it does not start.
+  doAssert hostSceneFor(c).isNil, "past the limit, with nothing to let go"
+  doAssert lim.windows.hasKey(a) and not lim.windows.hasKey(c)
+  # The desktop closed A: C takes its place.
+  desk(b.string, c.string)
+  let third = hostSceneFor(c)
+  doAssert not third.isNil and lim.windows.hasKey(c) and not lim.windows.hasKey(a)
+  # Built-in scenes are not counted: B's settings over it, B and C kept.
+  doAssert lim.send(eoHttpAdmin, "sceneSettings", %*{})
+  doAssert lim.ensureScene() and isBuiltInScene(lim.scene.id.string)
+  doAssert lim.windows.hasKey(b) and lim.windows.hasKey(c), "the settings take no scene's place"
+  # A scene brought to the front lets the window kept longest ago go.
+  show(a)
+  doAssert not lim.windows.hasKey(c), "C was kept longest ago"
+  doAssert lim.windows.hasKey(b)
+  # The desktop gone (another layout, none): after the pass, nothing is kept.
+  desk()
+  render()
+  doAssert lim.windows.len == 0, "no desktop, no windows"
+  lim.setWindowed(false)
+  deviceMemoryBytesOverride = 0
+  echo "windows where memory is short ok"

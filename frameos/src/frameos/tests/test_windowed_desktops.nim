@@ -12,6 +12,7 @@ import ../types
 import ../js_runtime/app_runtime
 import ../layout_choice
 from ../ui/events import uiPressRects
+from ../utils/memory import deviceMemoryBytesOverride
 
 const
   Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
@@ -1167,3 +1168,32 @@ suite "another layout chosen on the frame":
       colored("#00ff00")
     chooseLayout("")
     discard pass()
+
+suite "where only two scenes run at once (an ESP32 with 8 MB)":
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/red", "name": "Red"}, {"id": "tests/green", "name": "Green"}, {"id": "tests/blue", "name": "Blue"}]
+
+  test "a third scene opened closes the one that had the focus longest ago, on every desktop":
+    deviceMemoryBytesOverride = 8 * 1024 * 1024 - 65536
+    check windowLimit() == 2
+    for layoutId in [Layout, MacOS, BeOS, Tiling]:
+      # A desktop of its own, nothing carried over from the one before.
+      desk().state["openScenes"] = %*[]
+      chooseLayout(layoutId)
+      discard pass()
+      check desk().id.string == layoutId
+      for id in ["tests/red", "tests/green", "tests/blue"]:
+        discard focusOn(id)
+        discard pass()
+      check openIds() == @["tests/blue", "tests/green"]
+      check desk().state{"openScenes"} == %*["tests/green", "tests/blue"]
+      # Brought back, red closes green, which had the focus longest ago now.
+      discard focusOn("tests/red")
+      discard pass()
+      check openIds() == @["tests/blue", "tests/red"]
+      check problems.len == 0
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+    deviceMemoryBytesOverride = 0

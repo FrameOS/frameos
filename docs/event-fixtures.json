@@ -4789,7 +4789,7 @@
    },
    {
     "name": "on a desktop every scene's settings are a window of their own, and the frame page one more",
-    "why": "Where built-in scenes stay open as windows (`windows`: a desktop layout on a Raspberry Pi or in the browser; docs/scene-settings.md \"In a window\"), `sceneSettings` opens the settings of the scene in front as an instance of their own, `scenes.settingsWindow` and the scene's id, with its fields and values: another scene's settings open beside them and both keep their own `from` and edits. The frame page (`{page: \"frame\"}`) is the one window of the plain id, opened over the scene in front or over the scene the settings in front are for. While a settings window is in front the command goes back to its scene, and a settings window brought forward by name is as it was left.",
+    "why": "Where built-in scenes stay open as windows (`windows`: a desktop layout on a Raspberry Pi, an ESP32 or in the browser; docs/scene-settings.md \"In a window\"), `sceneSettings` opens the settings of the scene in front as an instance of their own, `scenes.settingsWindow` and the scene's id, with its fields and values: another scene's settings open beside them and both keep their own `from` and edits. The frame page (`{page: \"frame\"}`) is the one window of the plain id, opened over the scene in front or over the scene the settings in front are for. While a settings window is in front the command goes back to its scene, and a settings window brought forward by name is as it was left.",
     "windows": true,
     "scenes": [
      {

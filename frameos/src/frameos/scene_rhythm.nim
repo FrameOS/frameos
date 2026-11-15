@@ -197,23 +197,22 @@ proc dropCell(r: SceneRhythm, c: RhythmCell) =
       before = before.next
     before.next = c.next
 
-when not defined(frameosEmbedded):
-  iterator windowsOf(layout: FrameScene): FrameScene =
-    ## The host's own scenes a layout drew in windows on its last pass
-    ## (interpreter.windowedBy, docs/scene-layouts.md "Windows"): its slots that
-    ## are neither the scene it wraps nor a copy of its own.
-    for i in 0 ..< layout.slots.len:
-      let child = layout.slots[i].child
-      if child.isNil or child == layout or child.wornLayout == layout:
-        continue
-      var copy = false
-      if layout of InterpretedFrameScene:
-        for own in InterpretedFrameScene(layout).sceneNodes.values:
-          if own == child:
-            copy = true
-            break
-      if not copy:
-        yield child
+iterator windowsOf(layout: FrameScene): FrameScene =
+  ## The host's own scenes a layout drew in windows on its last pass
+  ## (interpreter.windowedBy, docs/scene-layouts.md "Windows"): its slots that
+  ## are neither the scene it wraps nor a copy of its own.
+  for i in 0 ..< layout.slots.len:
+    let child = layout.slots[i].child
+    if child.isNil or child == layout or child.wornLayout == layout:
+      continue
+    var copy = false
+    if layout of InterpretedFrameScene:
+      for own in InterpretedFrameScene(layout).sceneNodes.values:
+        if own == child:
+          copy = true
+          break
+    if not copy:
+      yield child
 
 proc walkCopies(scene: FrameScene, dropDueBy: float): int =
   ## The bytes still kept for `scene` and the scenes it embeds, after letting
@@ -238,10 +237,9 @@ proc walkCopies(scene: FrameScene, dropDueBy: float): int =
         result += r.embedImage.byteSize
   if not scene.wornLayout.isNil:
     result += walkCopies(scene.wornLayout, dropDueBy)
-    when not defined(frameosEmbedded):
-      # Its windows' pictures count against the same budget.
-      for window in windowsOf(scene.wornLayout):
-        result += walkCopies(window, dropDueBy)
+    # Its windows' pictures count against the same budget.
+    for window in windowsOf(scene.wornLayout):
+      result += walkCopies(window, dropDueBy)
   if scene of InterpretedFrameScene:
     for child in InterpretedFrameScene(scene).sceneNodes.values:
       result += walkCopies(child, dropDueBy)
@@ -450,13 +448,12 @@ proc rhythmLeaveRender*(scene: FrameScene, passStarted: bool) =
         wait = max(wait, contentInterval(scene))
       if not scene.rhythm.isNil and scene.rhythm.visitPass == passId:
         wait = min(wait, scene.rhythm.dueAt - passStart)
-      when not defined(frameosEmbedded):
-        # Its windows, each on its own interval, as a split's panels: the
-        # first one due wakes the frame. Not past the floor.
-        if not passHoldsFloor:
-          for window in windowsOf(layout):
-            if not window.rhythm.isNil and window.rhythm.visitPass == passId:
-              wait = min(wait, window.rhythm.dueAt - passStart)
+      # Its windows, each on its own interval, as a split's panels: the
+      # first one due wakes the frame. Not past the floor.
+      if not passHoldsFloor:
+        for window in windowsOf(layout):
+          if not window.rhythm.isNil and window.rhythm.visitPass == passId:
+            wait = min(wait, window.rhythm.dueAt - passStart)
       scene.layoutInterval = max(ShortestPace, wait)
       scene.layoutPaced = true
     else:

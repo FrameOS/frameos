@@ -88,6 +88,11 @@ bool frameos_nim_set_scene(const char *scene_id)
     (void)scene_id;
     return false;
 }
+bool frameos_nim_scene_running(const char *scene_id)
+{
+    (void)scene_id;
+    return false;
+}
 int frameos_nim_load_scenes(const char *json)
 {
     (void)json;

@@ -465,6 +465,7 @@ proc diagnosticKeyword(node: DiagramNode): string =
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
 var yieldScene {.threadvar.}: FrameScene
+  ## The scene the layout on the way here wraps; nil outside a layout.
 
 proc layoutTheme(): JsonNode {.nimcall, gcsafe, raises: [].} =
   ## The `theme` of the layout around the frame's scene, during its pass:
@@ -476,18 +477,16 @@ proc layoutTheme(): JsonNode {.nimcall, gcsafe, raises: [].} =
       result = shown.wornLayout.state.getOrDefault("theme")
 themeSource = layoutTheme
 
-when not defined(frameosEmbedded):
-  proc desktopShown(): bool {.nimcall, gcsafe.} =
-    ## The frame's scene, during its layout's pass, wears a desktop: a layout
-    ## with scenes open in windows (types.onDesktop).
-    {.cast(gcsafe).}:
-      let shown = yieldScene
-      if shown.isNil or shown.wornLayout.isNil or shown.wornLayout.state.isNil:
-        return false
-      let open = shown.wornLayout.state{"openScenes"}
-      result = not open.isNil and open.kind == JArray and open.len > 0
-  onDesktop = desktopShown
-  ## The scene the layout on the way here wraps; nil outside a layout.
+proc desktopShown(): bool {.nimcall, gcsafe.} =
+  ## The frame's scene, during its layout's pass, wears a desktop: a layout
+  ## with scenes open in windows (types.onDesktop).
+  {.cast(gcsafe).}:
+    let shown = yieldScene
+    if shown.isNil or shown.wornLayout.isNil or shown.wornLayout.state.isNil:
+      return false
+    let open = shown.wornLayout.state{"openScenes"}
+    result = not open.isNil and open.kind == JArray and open.len > 0
+onDesktop = desktopShown
 
 proc runSceneNodeRender(parent: FrameScene, child: FrameScene,
     runChild: proc (self: FrameScene, context: ExecutionContext), context: ExecutionContext,
@@ -560,30 +559,29 @@ var takeParkedLayout*: proc(layoutId: string): FrameScene {.nimcall.}
   ## it skips reading, parsing and starting it again, and keeps its warm caches
   ## (1.2 s of each scene switch on a reTerminal E1003, 2026-11-10).
 
-when not defined(frameosEmbedded):
-  var carried {.threadvar.}: tuple[layoutId: string, state: JsonNode]
-    ## What a desktop kept (its windows, where they are) when its scenes were
-    ## replaced (a push, a deploy, a reload): handed to the next instance of
-    ## that layout, under what the install and the frame set (`startLayout`).
-  var carriedOpen {.threadvar.}: JsonNode
-    ## The scenes a desktop had open (its `openScenes`, docs/scene-layouts.md
-    ## "Windows") when another layout took its place: the frame's layout chosen
-    ## anew, or scenes replaced by ones that wear another. The next layout
-    ## started afresh is handed them, whichever it is, and opens them.
+var carried {.threadvar.}: tuple[layoutId: string, state: JsonNode]
+  ## What a desktop kept (its windows, where they are) when its scenes were
+  ## replaced (a push, a deploy, a reload): handed to the next instance of
+  ## that layout, under what the install and the frame set (`startLayout`).
+var carriedOpen {.threadvar.}: JsonNode
+  ## The scenes a desktop had open (its `openScenes`, docs/scene-layouts.md
+  ## "Windows") when another layout took its place: the frame's layout chosen
+  ## anew, or scenes replaced by ones that wear another. The next layout
+  ## started afresh is handed them, whichever it is, and opens them.
 
-  proc keepOpenScenes(layout: FrameScene) =
-    if not layout.isNil and not layout.state.isNil and layout.state.kind == JObject:
-      let open = layout.state{"openScenes"}
-      if not open.isNil and open.kind == JArray:
-        carriedOpen = copy(open)
+proc keepOpenScenes(layout: FrameScene) =
+  if not layout.isNil and not layout.state.isNil and layout.state.kind == JObject:
+    let open = layout.state{"openScenes"}
+    if not open.isNil and open.kind == JArray:
+      carriedOpen = copy(open)
 
-  proc carryLayoutState*(scene: FrameScene) =
-    ## Before a host drops its scenes: the state of the layout `scene` wears
-    ## (or a parked layout, given as `scene`), for the next one.
-    let layout = if scene.isNil: nil elif scene.wornLayout.isNil: scene else: scene.wornLayout
-    if not layout.isNil and not layout.state.isNil and layout.state.kind == JObject:
-      carried = (layout.id.string, copy(layout.state))
-      keepOpenScenes(layout)
+proc carryLayoutState*(scene: FrameScene) =
+  ## Before a host drops its scenes: the state of the layout `scene` wears
+  ## (or a parked layout, given as `scene`), for the next one.
+  let layout = if scene.isNil: nil elif scene.wornLayout.isNil: scene else: scene.wornLayout
+  if not layout.isNil and not layout.state.isNil and layout.state.kind == JObject:
+    carried = (layout.id.string, copy(layout.state))
+    keepOpenScenes(layout)
 
 proc startLayout(owner: FrameScene, layoutId: string, ownId: string, ownState: JsonNode): FrameScene =
   ## The layout `owner` wears, made: what the install set for it, under what
@@ -599,10 +597,9 @@ proc startLayout(owner: FrameScene, layoutId: string, ownId: string, ownState: J
   if layoutId != owner.id.string and not takeParkedLayout.isNil:
     let parked = takeParkedLayout(layoutId)
     if not parked.isNil:
-      when not defined(frameosEmbedded):
-        if carried.layoutId == layoutId:
-          carried = ("", nil) # the instance itself came along
-        carriedOpen = nil
+      if carried.layoutId == layoutId:
+        carried = ("", nil) # the instance itself came along
+      carriedOpen = nil
       for key, value in wornState().pairs:
         parked.state[key] = value
       parked.shownName = owner.shownName
@@ -614,17 +611,16 @@ proc startLayout(owner: FrameScene, layoutId: string, ownId: string, ownState: J
       let state = wornState()
       result = exported.init(layoutId.SceneId, owner.frameConfig, owner.logger, state)
       result.shownName = owner.shownName
-      when not defined(frameosEmbedded):
-        if carried.layoutId == layoutId and not carried.state.isNil:
-          for key, value in carried.state.pairs:
-            if not state.hasKey(key):
-              result.state[key] = value
-          carried = ("", nil)
-        # Another layout's scenes, for this one to open: its own kept state, a
-        # same layout's carried above, goes first.
-        if not carriedOpen.isNil and result.state.kind == JObject and not result.state.hasKey("openScenes"):
-          result.state["openScenes"] = carriedOpen
-        carriedOpen = nil
+      if carried.layoutId == layoutId and not carried.state.isNil:
+        for key, value in carried.state.pairs:
+          if not state.hasKey(key):
+            result.state[key] = value
+        carried = ("", nil)
+      # Another layout's scenes, for this one to open: its own kept state, a
+      # same layout's carried above, goes first.
+      if not carriedOpen.isNil and result.state.kind == JObject and not result.state.hasKey("openScenes"):
+        result.state["openScenes"] = carriedOpen
+      carriedOpen = nil
       return
     except Exception as error:
       named.add ": "
@@ -637,8 +633,7 @@ proc ensureLayoutScene(self: InterpretedFrameScene): FrameScene =
   let wanted = layoutFor(self.layoutSceneId.string)
   result = self.wornLayout
   if not result.isNil and result.id.string != wanted:
-    when not defined(frameosEmbedded):
-      keepOpenScenes(result)
+    keepOpenScenes(result)
     dropLayout(result)
     self.wornLayout = nil
     result = nil
@@ -658,8 +653,7 @@ proc ensureBuiltInLayout(self: FrameScene): FrameScene =
   # Safe mode's settings panel (event_loop.nim): no layout, whatever is chosen.
   let wanted = if self.state{"noLayout"}.getBool(): "" else: layoutFor(ownId)
   if not self.wornLayout.isNil and self.wornLayout.id.string != wanted:
-    when not defined(frameosEmbedded):
-      keepOpenScenes(self.wornLayout)
+    keepOpenScenes(self.wornLayout)
     dropLayout(self.wornLayout)
     self.wornLayout = nil
   if self.wornLayout.isNil and wanted.len > 0 and self.wornLayoutFailedFor != wanted:
@@ -670,17 +664,16 @@ proc ensureBuiltInLayout(self: FrameScene): FrameScene =
       self.wornLayout.systemScene = true
   self.wornLayout
 
-when not defined(frameosEmbedded):
-  proc wearLayout*(scene: FrameScene) =
-    ## The frame's new scene puts its layout on at the switch, not at its next
-    ## render pass, on a host that runs scenes side by side (runner.nim,
-    ## single_scene_host.nim): what comes before that pass (the release of the
-    ## press that switched, a second Alt+Tab) reaches it through the layout,
-    ## in the layout's place, as everything after does.
-    if scene of InterpretedFrameScene:
-      discard ensureLayoutScene(InterpretedFrameScene(scene))
-    elif not scene.isNil and not scene.ownRun.isNil:
-      discard ensureBuiltInLayout(scene)
+proc wearLayout*(scene: FrameScene) =
+  ## The frame's new scene puts its layout on at the switch, not at its next
+  ## render pass, on a host that runs scenes side by side (runner.nim,
+  ## single_scene_host.nim): what comes before that pass (the release of the
+  ## press that switched, a second Alt+Tab) reaches it through the layout,
+  ## in the layout's place, as everything after does.
+  if scene of InterpretedFrameScene:
+    discard ensureLayoutScene(InterpretedFrameScene(scene))
+  elif not scene.isNil and not scene.ownRun.isNil:
+    discard ensureBuiltInLayout(scene)
 
 proc translatedPayload(payload: JsonNode, slot: SceneSlot): JsonNode =
   result = copy(payload)
@@ -688,10 +681,9 @@ proc translatedPayload(payload: JsonNode, slot: SceneSlot): JsonNode =
     if result.hasKey(key):
       result[key] = %(result[key].getFloat() - (if (i and 1) == 0: slot.x else: slot.y))
 
-when not defined(frameosEmbedded):
-  var uiPresses {.threadvar.}: seq[(string, int)]
-    ## (layout, pointer) for each press a layout's UI took over a scene it
-    ## embeds, until that pointer presses again.
+var uiPresses {.threadvar.}: seq[(string, int)]
+  ## (layout, pointer) for each press a layout's UI took over a scene it
+  ## embeds, until that pointer presses again.
 
 proc routePointer(self: InterpretedFrameScene, context: ExecutionContext): bool =
   ## A pointer event over an embedded scene is that scene's, in its own
@@ -707,14 +699,13 @@ proc routePointer(self: InterpretedFrameScene, context: ExecutionContext): bool 
     y = payload{"startY"}.getFloat(payload{"y"}.getFloat(-1))
     lifted = event == "pointerUp" or event == "pointerCancel"
     held = not self.capturedChild.isNil and self.capturedPointer == pid and (lifted or event == "pointerMove")
-  when not defined(frameosEmbedded):
-    # A press the layout's own UI holds (a bar or a title bar dragged over the
-    # scenes) is its own to the end: the moves and the release over a scene are
-    # never that scene's, even one an earlier press left captured here.
-    if event != "pointerDown" and uiHoldsPointer(self.id.string, pid):
-      if lifted and self.capturedPointer == pid:
-        self.capturedChild = nil
-      return false
+  # A press the layout's own UI holds (a bar or a title bar dragged over the
+  # scenes) is its own to the end: the moves and the release over a scene are
+  # never that scene's, even one an earlier press left captured here.
+  if event != "pointerDown" and uiHoldsPointer(self.id.string, pid):
+    if lifted and self.capturedPointer == pid:
+      self.capturedChild = nil
+    return false
   var slot = -1
   for i in countdown(self.slots.high, 0):
     template s: untyped = self.slots[i]
@@ -725,25 +716,24 @@ proc routePointer(self: InterpretedFrameScene, context: ExecutionContext): bool 
     elif x >= s.visible[0] and y >= s.visible[1] and x < s.visible[2] and y < s.visible[3]:
       slot = i
       break
-  when not defined(frameosEmbedded):
-    # Something of the UI's drawn over the scene there (a menu, the window
-    # on top, a cover that brings a window forward) is what the pointer is on,
-    # and a press it took is its own to the end: its tap, double tap, long
-    # press or swipe too, which the scene under it never hears.
-    if slot >= 0 and not held:
-      let press = (self.id.string, pid)
-      let took = uiPresses.find(press)
-      if event == "pointerDown":
-        if uiOverScene(self.id.string, event, x, y, pid):
-          if took < 0:
-            uiPresses.add press
-          return false
-        if took >= 0:
-          uiPresses.del(took)
-      elif took >= 0 and event in ["tap", "doubleTap", "longPress", "swipe"]:
+  # Something of the UI's drawn over the scene there (a menu, the window
+  # on top, a cover that brings a window forward) is what the pointer is on,
+  # and a press it took is its own to the end: its tap, double tap, long
+  # press or swipe too, which the scene under it never hears.
+  if slot >= 0 and not held:
+    let press = (self.id.string, pid)
+    let took = uiPresses.find(press)
+    if event == "pointerDown":
+      if uiOverScene(self.id.string, event, x, y, pid):
+        if took < 0:
+          uiPresses.add press
         return false
-      elif uiOverScene(self.id.string, event, x, y, pid):
-        return false
+      if took >= 0:
+        uiPresses.del(took)
+    elif took >= 0 and event in ["tap", "doubleTap", "longPress", "swipe"]:
+      return false
+    elif uiOverScene(self.id.string, event, x, y, pid):
+      return false
   if event == "pointerDown" and slot >= 0:
     self.capturedChild = self.slots[slot].child
     self.capturedPointer = pid
@@ -756,13 +746,13 @@ proc routePointer(self: InterpretedFrameScene, context: ExecutionContext): bool 
     payload: translatedPayload(payload, self.slots[slot]), parent: context,
     loopIndex: context.loopIndex, loopKey: context.loopKey, nextSleep: -1)
   runEvent(child, inner)
+  # The layout's own handler on that <Scene> (`onPointerDown`) hears that the
+  # event went in there, as it starts: a tiling layout gives the scene the
+  # focus on the press its button has.
+  if not held and uiSceneHandler(self.id.string, event, payload):
+    rhythmMarkDue(self)
+    sendEvent("render", %*{}, eoScene)
   when not defined(frameosEmbedded):
-    # The layout's own handler on that <Scene> (`onPointerDown`) hears that the
-    # event went in there, as it starts: a tiling layout gives the scene the
-    # focus on the press its button has.
-    if not held and uiSceneHandler(self.id.string, event, payload):
-      rhythmMarkDue(self)
-      sendEvent("render", %*{}, eoScene)
     if event == "wheel" and wheelScrolled:
       # Scrolled in a window behind, or a built-in scene's: drawn anew, due or
       # not (a window behind waits for nobody otherwise).
@@ -805,53 +795,48 @@ proc parseEmbedProps(props: string): JsonNode =
     if result.hasKey(key):
       result.delete(key)
 
-when not defined(frameosEmbedded):
-  var hostSceneFor* {.threadvar.}: proc(sceneId: SceneId): FrameScene {.closure, gcsafe.}
-    ## A host that runs a frame's scenes side by side (runner.nim,
-    ## single_scene_host.nim): its instance of a scene, started if need be,
-    ## and a built-in scene's only while it is open (it has nothing to show
-    ## until the dispatcher opens it from a scene). With it, a `<Scene id>` in
-    ## the layout around the frame's scene is that scene itself, not a copy of
-    ## its own, so the scenes of a frame run side by side in its windows and
-    ## each is the same one when it comes forward as the frame's scene
-    ## (docs/scene-layouts.md "Windows").
+var hostSceneFor* {.threadvar.}: proc(sceneId: SceneId): FrameScene {.closure, gcsafe.}
+  ## A host that runs a frame's scenes side by side (runner.nim,
+  ## single_scene_host.nim): its instance of a scene, started if need be,
+  ## and a built-in scene's only while it is open (it has nothing to show
+  ## until the dispatcher opens it from a scene). With it, a `<Scene id>` in
+  ## the layout around the frame's scene is that scene itself, not a copy of
+  ## its own, so the scenes of a frame run side by side in its windows and
+  ## each is the same one when it comes forward as the frame's scene
+  ## (docs/scene-layouts.md "Windows").
 
-when not defined(frameosEmbedded):
-  proc windowedBy(owner: FrameScene, sceneId, props: string, child: var FrameScene): bool =
-    ## Whether `<Scene id>` in `owner` is the host's own scene (`hostSceneFor`):
-    ## then `child` is that, or nil when it cannot show there (the scene the
-    ## layout wraps, which is its `<yield />`, one drawn already this pass, or
-    ## a built-in scene that is not open). One given props is a copy those
-    ## props set, as anywhere (`<Scene id="clock" city="Oslo" />` twice).
-    if hostSceneFor.isNil or yieldScene.isNil or owner != yieldScene.wornLayout:
+proc windowedBy(owner: FrameScene, sceneId, props: string, child: var FrameScene): bool =
+  ## Whether `<Scene id>` in `owner` is the host's own scene (`hostSceneFor`):
+  ## then `child` is that, or nil when it cannot show there (the scene the
+  ## layout wraps, which is its `<yield />`, one drawn already this pass, or
+  ## a built-in scene that is not open). One given props is a copy those
+  ## props set, as anywhere (`<Scene id="clock" city="Oslo" />` twice).
+  if hostSceneFor.isNil or yieldScene.isNil or owner != yieldScene.wornLayout:
+    return false
+  try:
+    if parseEmbedProps(props).len > 0:
       return false
-    try:
-      if parseEmbedProps(props).len > 0:
-        return false
-    except CatchableError:
-      return false
-    result = true
-    child = nil
-    if sceneId == yieldScene.id.string or sceneId == owner.id.string:
+  except CatchableError:
+    return false
+  result = true
+  child = nil
+  if sceneId == yieldScene.id.string or sceneId == owner.id.string:
+    return
+  let found = hostSceneFor(SceneId(sceneId))
+  if found.isNil:
+    if not sceneId.startsWith("system/"): # a built-in scene that is not open
+      owner.logScene("scene:embed:unknown", "embedded", sceneId)
+    return
+  for slot in owner.slots:
+    if slot.child == found:
       return
-    let found = hostSceneFor(SceneId(sceneId))
-    if found.isNil:
-      if not sceneId.startsWith("system/"): # a built-in scene that is not open
-        owner.logScene("scene:embed:unknown", "embedded", sceneId)
-      return
-    for slot in owner.slots:
-      if slot.child == found:
-        return
-    if not found.wornLayout.isNil:
-      # A scene in a window wears no layout of its own; the one it wore as
-      # the frame's scene may be this very one, moved on (runner.nim).
-      if found.wornLayout != owner:
-        dropLayout(found.wornLayout)
-      found.wornLayout = nil
-    child = found
-else:
-  template windowedBy(owner: FrameScene, sceneId, props: string, child: var FrameScene): bool = false
-    ## An ESP32 runs one scene at a time: a `<Scene>` is always a copy.
+  if not found.wornLayout.isNil:
+    # A scene in a window wears no layout of its own; the one it wore as
+    # the frame's scene may be this very one, moved on (runner.nim).
+    if found.wornLayout != owner:
+      dropLayout(found.wornLayout)
+    found.wornLayout = nil
+  child = found
 
 proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId, props: string,
     x, y: float32, visible: array[4, float32], width, height: int, asHole: bool, context: ExecutionContext): Image =
@@ -911,11 +896,10 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
   let format = if like.isNil: pfRgbx else: like.format
   var image = r.embedImage
   let fits = not image.isNil and image.width == width and image.height == height and image.format == format
-  when not defined(frameosEmbedded):
-    # A new size (a window sized or snapped): what its apps made last is the
-    # wrong shape, and a repaint would stretch it. It runs.
-    if not fits and not image.isNil:
-      due = true
+  # A new size (a window sized or snapped): what its apps made last is the
+  # wrong shape, and a repaint would stretch it. It runs.
+  if not fits and not image.isNil:
+    due = true
   if fits and not due:
     return image
   if not fits:
@@ -955,12 +939,11 @@ proc yieldReady(owner: FrameScene): bool =
 
 embeddedYieldReady = yieldReady
 
-when not defined(frameosEmbedded):
-  proc wrappedSceneId(owner: FrameScene): string =
-    if not yieldScene.isNil and owner == yieldScene.wornLayout: yieldScene.id.string
-    else: owner.id.string
+proc wrappedSceneId(owner: FrameScene): string =
+  if not yieldScene.isNil and owner == yieldScene.wornLayout: yieldScene.id.string
+  else: owner.id.string
 
-  layoutWrappedSceneId = wrappedSceneId
+layoutWrappedSceneId = wrappedSceneId
 
 {.pop.}
 
@@ -1883,9 +1866,8 @@ proc pressTakenIn(scene: FrameScene; x, y: float32; wearer: FrameScene; depth: i
   for i in countdown(scene.slots.high, 0):
     template s: untyped = scene.slots[i]
     if x >= s.visible[0] and y >= s.visible[1] and x < s.visible[2] and y < s.visible[3]:
-      when not defined(frameosEmbedded):
-        if uiOverScene(scene.id.string, "pointerDown", x, y, -1):
-          break
+      if uiOverScene(scene.id.string, "pointerDown", x, y, -1):
+        break
       return pressTakenIn(s.child, x - s.x.float32, y - s.y.float32, wearer, depth + 1)
   uiTakesPressAt(scene.id.string, x, y)
 
@@ -2083,15 +2065,12 @@ proc renderChrome(host: FrameScene, context: ExecutionContext) =
 
 {.pop.}
 
-when defined(frameosEmbedded):
-  template builtInLayout(self: FrameScene, inWindow: bool): FrameScene = ensureBuiltInLayout(self)
-else:
-  proc builtInLayout(self: FrameScene, inWindow: bool): FrameScene =
-    ## The layout a built-in scene wears on this run. In a window (a run
-    ## inside the layout of the frame's scene, drawn or clicked), none, as no
-    ## scene in a window wears one: made there, it would be a second desktop
-    ## inside the window.
-    if inWindow: self.wornLayout else: ensureBuiltInLayout(self)
+proc builtInLayout(self: FrameScene, inWindow: bool): FrameScene =
+  ## The layout a built-in scene wears on this run. In a window (a run
+  ## inside the layout of the frame's scene, drawn or clicked), none, as no
+  ## scene in a window wears one: made there, it would be a second desktop
+  ## inside the window.
+  if inWindow: self.wornLayout else: ensureBuiltInLayout(self)
 
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
   ## Every run of a scene — a render, an event, a child scene's init — enters

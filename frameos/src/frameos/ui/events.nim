@@ -87,9 +87,11 @@ type
 
 const
   MaxTargets = when defined(frameosEmbedded): 16 else: 64
-    ## The UIs kept live at once, the oldest let go past it. More off an ESP32,
-    ## where every window of a desktop can be a UI (docs/scene-layouts.md
-    ## "Windows") and a UI let go loses its press, hover, field and scroll.
+    ## The UIs kept live at once, the oldest let go past it: one let go loses
+    ## its press, hover, field and scroll. More off an ESP32, where a desktop
+    ## may have any number of windows, each one a UI or more
+    ## (docs/scene-layouts.md "Windows"); an ESP32 runs two to four
+    ## (app_runtime.windowLimit).
   FlashMs = 250
     ## How long a key just typed stays lit after a render first shows it.
   RepeatFirstMs = 100
@@ -281,11 +283,10 @@ template inside(r: UiRegion, lx, ly: float32): bool =
   ## Under the point, where it shows (a box that scrolls cuts off the rest).
   lx >= r.visible[0] and ly >= r.visible[1] and lx < r.visible[2] and ly < r.visible[3]
 
-when not defined(frameosEmbedded):
-  template overScene(r: UiRegion, lx, ly: float32): bool =
-    ## A `<Scene>` or `<yield />` at the point, in paint order: what the UI
-    ## drew under it is covered there, and hears nothing of the pointer.
-    r.scene and r.inside(lx, ly)
+template overScene(r: UiRegion, lx, ly: float32): bool =
+  ## A `<Scene>` or `<yield />` at the point, in paint order: what the UI
+  ## drew under it is covered there, and hears nothing of the pointer.
+  r.scene and r.inside(lx, ly)
 
 proc wants(r: UiRegion, event: string): bool =
   case event
@@ -762,69 +763,67 @@ when not defined(frameosEmbedded):
 
 # ------------------------------------------------------------------ dispatch
 
-when not defined(frameosEmbedded):
-  proc uiOverScene*(sceneId, event: string; x, y: float32; pointer: int): bool =
-    ## Whether a pointer event at (x, y), in the scene's pixels, over a
-    ## `<Scene>` or `<yield />` it embeds, is its UI's instead: an element
-    ## drawn over the scene there that wants the event (a menu, a window on
-    ## top, a pane that takes a press to bring its window forward), or a UI
-    ## holding this pointer's press. Otherwise the scene under it has it
-    ## (interpreter.routePointer).
-    for target in targets:
-      if target.sceneId != sceneId:
-        continue
-      # A press it holds is its own; a new press goes by where it lands.
-      if event != "pointerDown" and target.captureOf(pointer) >= 0:
-        return true
-      let
-        scale = if target.scale > 0: target.scale else: 1'f32
-        lx = (x - target.offsetX) / scale
-        ly = (y - target.offsetY) / scale
-      for i in countdown(target.regions.high, 0):
-        template r: untyped = target.regions[i]
-        if r.inside(lx, ly):
-          if r.scene:
-            break
-          if r.wants(event):
-            return true
-
-when not defined(frameosEmbedded):
-  proc uiHoldsPointer*(sceneId: string, pointer: int): bool =
-    ## Whether an element of the scene's UI holds this pointer's press (a title
-    ## bar being dragged): its moves and its release are that element's,
-    ## wherever they land.
-    for target in targets:
-      if target.sceneId == sceneId and target.captureOf(pointer) >= 0:
-        return true
-
-  proc uiSceneHandler*(sceneId, event: string, payload: JsonNode): bool =
-    ## A layout's own handler on the `<Scene>` an event reached
-    ## (`<Scene id onPointerDown={...} />`, interpreter.routePointer): the
-    ## topmost scene at the event's point, as it starts (a gesture's start).
-    ## The scene has the event all the same; this is the layout hearing it,
-    ## to give that scene the focus where it is. True when one ran.
-    let kind = handlerKind(event)
-    if kind < 0 or payload.isNil or payload.kind != JObject:
-      return false
+proc uiOverScene*(sceneId, event: string; x, y: float32; pointer: int): bool =
+  ## Whether a pointer event at (x, y), in the scene's pixels, over a
+  ## `<Scene>` or `<yield />` it embeds, is its UI's instead: an element
+  ## drawn over the scene there that wants the event (a menu, a window on
+  ## top, a pane that takes a press to bring its window forward), or a UI
+  ## holding this pointer's press. Otherwise the scene under it has it
+  ## (interpreter.routePointer).
+  for target in targets:
+    if target.sceneId != sceneId:
+      continue
+    # A press it holds is its own; a new press goes by where it lands.
+    if event != "pointerDown" and target.captureOf(pointer) >= 0:
+      return true
     let
-      x = payload{"startX"}.getFloat(payload{"x"}.getFloat(-1))
-      y = payload{"startY"}.getFloat(payload{"y"}.getFloat(-1))
-    for target in targets:
-      if target.sceneId != sceneId or target.call.isNil:
-        continue
-      let
-        scale = if target.scale > 0: target.scale else: 1'f32
-        lx = (x - target.offsetX) / scale
-        ly = (y - target.offsetY) / scale
-      for i in countdown(target.regions.high, 0):
-        let r = target.regions[i]
-        if r.scene and r.inside(lx, ly):
-          let handler = r.handlers[UiEvent(kind)]
-          if handler == 0:
-            return false
-          target.call(handler - 1, event, payload, [float32(lx - r.x), float32(ly - r.y), r.w, r.h])
-          target.inputOnly = false # whatever the handler changed, get() shows it
+      scale = if target.scale > 0: target.scale else: 1'f32
+      lx = (x - target.offsetX) / scale
+      ly = (y - target.offsetY) / scale
+    for i in countdown(target.regions.high, 0):
+      template r: untyped = target.regions[i]
+      if r.inside(lx, ly):
+        if r.scene:
+          break
+        if r.wants(event):
           return true
+
+proc uiHoldsPointer*(sceneId: string, pointer: int): bool =
+  ## Whether an element of the scene's UI holds this pointer's press (a title
+  ## bar being dragged): its moves and its release are that element's,
+  ## wherever they land.
+  for target in targets:
+    if target.sceneId == sceneId and target.captureOf(pointer) >= 0:
+      return true
+
+proc uiSceneHandler*(sceneId, event: string, payload: JsonNode): bool =
+  ## A layout's own handler on the `<Scene>` an event reached
+  ## (`<Scene id onPointerDown={...} />`, interpreter.routePointer): the
+  ## topmost scene at the event's point, as it starts (a gesture's start).
+  ## The scene has the event all the same; this is the layout hearing it,
+  ## to give that scene the focus where it is. True when one ran.
+  let kind = handlerKind(event)
+  if kind < 0 or payload.isNil or payload.kind != JObject:
+    return false
+  let
+    x = payload{"startX"}.getFloat(payload{"x"}.getFloat(-1))
+    y = payload{"startY"}.getFloat(payload{"y"}.getFloat(-1))
+  for target in targets:
+    if target.sceneId != sceneId or target.call.isNil:
+      continue
+    let
+      scale = if target.scale > 0: target.scale else: 1'f32
+      lx = (x - target.offsetX) / scale
+      ly = (y - target.offsetY) / scale
+    for i in countdown(target.regions.high, 0):
+      let r = target.regions[i]
+      if r.scene and r.inside(lx, ly):
+        let handler = r.handlers[UiEvent(kind)]
+        if handler == 0:
+          return false
+        target.call(handler - 1, event, payload, [float32(lx - r.x), float32(ly - r.y), r.w, r.h])
+        target.inputOnly = false # whatever the handler changed, get() shows it
+        return true
 
 proc uiTakesPressAt*(sceneId: string; x, y: float32): bool =
   ## Whether a press at (x, y), in the scene's pixels, lands on something a UI
@@ -1044,18 +1043,16 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         target.dragged = false
         for i in countdown(target.regions.high, 0):
           let r = target.regions[i]
-          when not defined(frameosEmbedded):
-            if r.overScene(lx, ly):
-              break
+          if r.overScene(lx, ly):
+            break
           if (r.handlers[uePointerDown] > 0 or r.handlers[uePointerMove] > 0) and r.inside(lx, ly):
             target.captures.add((pointer, r.key))
             break
         if target.captureOf(pointer) < 0:
           for i in countdown(target.regions.high, 0):
             let r = target.regions[i]
-            when not defined(frameosEmbedded):
-              if r.overScene(lx, ly):
-                break
+            if r.overScene(lx, ly):
+              break
             if r.scrolls and r.inside(lx, ly):
               (target.dragSX, target.dragSY) = target.input.scrolled(r.key)
               target.dragKey = r.key
@@ -1090,9 +1087,8 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       var hit = -1
       for i in countdown(target.regions.high, 0):
         let r = target.regions[i]
-        when not defined(frameosEmbedded):
-          if r.overScene(lx, ly):
-            break
+        if r.overScene(lx, ly):
+          break
         if (r.field > 0 or r.handlers[ueClick] > 0) and r.inside(lx, ly):
           hit = i
           break
@@ -1145,9 +1141,8 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
     # key of the on-screen keyboard is the field's to edit, not the app's.
     for i in countdown(target.regions.high, 0):
       let r = target.regions[i]
-      when not defined(frameosEmbedded):
-        if r.overScene(lx, ly):
-          break
+      if r.overScene(lx, ly):
+        break
       let handler = r.handlers[UiEvent(kind)]
       if handler > 0 and r.inside(lx, ly):
         handled = true
