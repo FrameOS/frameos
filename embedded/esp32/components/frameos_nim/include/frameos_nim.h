@@ -136,6 +136,10 @@ bool frameos_nim_scene_snapshot_wait(int timeout_ms, const char **info_json,
                                      const char **state_json);
 /* Select an interpreted scene by id; the next render initializes it. */
 bool frameos_nim_set_scene(const char *scene_id);
+/* Whether the scene runs in a window of a desktop layout already
+ * (docs/scene-layouts.md "Windows"): selecting it brings it to the front,
+ * with nothing to read off flash. */
+bool frameos_nim_scene_running(const char *scene_id);
 
 /* Install interpreted scenes from JSON (the backend's scenes.json array
  * format); code nodes run on QuickJS, app nodes on the AOT-compiled standard

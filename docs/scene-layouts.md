@@ -142,8 +142,8 @@ backspace (`uiTimer`) only reach the frame's own scene, not a nested one.
 
 ## Windows
 
-On a frame that runs its scenes side by side (a Raspberry Pi, and the browser
-when the page asks for it: `frameos_wasm_set_windowed`, the worker's
+On a frame that runs its scenes side by side (a Raspberry Pi, an ESP32, and the
+browser when the page asks for it: `frameos_wasm_set_windowed`, the worker's
 `windowed`), a layout can be a desktop: every scene opened in a window or a tile
 of its own, all of them running, one with the focus. The samples `Windows 98`
 (overlapping windows that open at its "Window size", 800×480 unless set
@@ -166,14 +166,15 @@ asset browser and the frame's settings. The **Scene store** and the
 their sample's id (`scene-store`, `asset-browser`) or their name; where the frame
 has them each desktop has entries of its own for them and leaves them out of its
 scene lists: the top of `Windows 98`'s Start, a bag for the store in `Tiling`'s top
-bar. Everywhere else (an ESP32, an editor's preview) they draw the one
+bar. Everywhere else (an editor's preview) they draw the one
 scene, as before.
 
 The runtime gives a layout three things and keeps no windows of its own:
 
 - **`app.frame.scenes`**, the frame's scenes (`{id, name}`, layouts left out, in
   its order), only on a host that runs them side by side: a layout tests for it.
-  **`app.frame.sceneId`** is the id of the scene it wraps.
+  **`app.frame.sceneId`** is the id of the scene it wraps. **`app.frame.windows`**
+  is how many may run at once where that is limited (below).
 - **A `<Scene id>` in the layout around the frame's scene is that scene itself**,
   the host's own instance (`hostSceneFor`: runner.nim, single_scene_host.nim),
   not a copy: it runs on its own `refreshInterval` in its window, and it is the
@@ -197,7 +198,7 @@ The runtime gives a layout three things and keeps no windows of its own:
   the focus last. When another layout takes its place (the frame page's Layout,
   `frameos_wasm_choose_layout` in the browser, a push that dresses the scenes in
   another), the runtime hands that list to the new layout's fresh instance
-  (`carriedOpen` in `interpreter.nim`, off the ESP32), and a desktop that starts
+  (`carriedOpen` in `interpreter.nim`), and a desktop that starts
   with no windows of its own opens those: the samples cascade them as windows
   or lay them out as tiles, the frame's own scenes named by what they are. The
   scenes are the host's, so they run on as they were; only where each window
@@ -240,7 +241,7 @@ the scene (it makes no copy), it runs when an event reaches that scene there,
 as it starts (`uiSceneHandler`, from `routePointer`), and the scene has the
 event all the same. That is how `Tiling` gives a tile the focus on the press its
 button has, where `Windows 98`'s covers keep a first press on a window behind
-for bringing it forward. Not on an ESP32, whose layouts run no windows. A menu over a box that closes it on a press takes
+for bringing it forward. A menu over a box that closes it on a press takes
 the press itself (an `onPointerDown`, even an empty one): a press goes to the
 topmost element with a handler for it, and the render it causes before the
 release would take the item away from its click. A transparent box costs
@@ -256,8 +257,28 @@ it wraps would (the floor). Their pictures count against the same copy budget.
 A scene that cannot start in a window is not tried again until the scenes
 change.
 
-The cost is off the ESP32's build (`when not defined(frameosEmbedded)`), whose
-layouts wrap one scene.
+**An ESP32 runs a few at once.** Each window is a scene running, its program,
+its JS apps' interpreters and its UI, beside the panel's buffers and the scene
+in front, so where memory is short the host lets only so many run at once, the
+one in front included: `app_runtime.windowLimit`, 2 on a board with 8 MB of
+PSRAM, 4 with more (the browser simulating a device too), and no limit on a Pi
+or in an ordinary preview. A layout reads it as `app.frame.windows` and opening
+one more closes the one that had the focus longest ago (the samples: the
+lowest window, `Tiling`'s tile opened longest ago). The host holds to it
+whatever the layout does (`single_scene_host.makeRoom`): a scene brought to the
+front lets the window kept longest ago go, a window asked for past the limit
+first takes the place of one the desktop no longer has open (its `openScenes`)
+and was not drawn in that pass, and otherwise stays empty (said once in the
+log). After each pass the host lets go of a kept window the desktop does not
+have open, every one without a desktop, and a scene the frame leaves stays
+running only while the desktop has it open: an ESP32 without a desktop keeps
+one scene, as before (the scene under the switcher kept while there is room,
+`covered`), and its one settings scene (`builtInScenesStay` follows the
+desktop there, `followDesktop`). The firmware reads a scene off flash only to start it: one running
+in a window comes to the front at once (`frameos_nim_scene_running`, then
+`selectScene`), and the cache keeps only the scenes running. A board rendered
+on its plane (`docs/server-rendering.md`) has no windows yet: the plane's wasm
+renders one scene a pull.
 
 ## Control planes
 

@@ -45,8 +45,8 @@ scene, a schedule, the HTTP API with the frame access key or an admin
 session, the preview and the runtime. Not a driver (a key is bound through
 the event map), and not the cloud, which has no verb for it.
 
-**In a window.** On a frame that runs its scenes side by side (a Pi, the
-browser with windows on; `docs/scene-layouts.md` "Windows") the panel is a scene
+**In a window.** On a frame that runs its scenes side by side (a Pi, an ESP32,
+the browser with windows on; `docs/scene-layouts.md` "Windows") the panel is a scene
 like the others: a desktop layout gives it a window of its own over the scene it
 was opened from, sized there like the desktop's apps rather than the whole panel
 (sceneSwitcher's `panelUnit`: the same rule for every built-in scene). There **every
@@ -62,9 +62,9 @@ instead of turning that window's page (it has no gear back: the scenes'
 settings have windows of their own). Left for another window, a settings window
 stays open there as it was, its page and its edits kept, and its idle timeout
 waits until it has the focus again; opened from its scene again, it starts
-afresh, and brought forward by its id it is as it was left. Everywhere else (an
-ESP32, a Pi without a desktop, an editor's preview) the settings are the one
-scene they always were. The scene switcher stays one window. In the Windows 98 sample a
+afresh, and brought forward by its id it is as it was left. Everywhere else (a
+frame without a desktop, an editor's preview) the settings are the one scene
+they always were. The scene switcher stays one window. In the Windows 98 sample a
 scene's settings open from the gear button at the left of its window's title bar
 (a window behind comes forward first; open already, they come forward), and the
 frame's from Start's Control Panel and the tray.

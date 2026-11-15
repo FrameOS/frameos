@@ -19,6 +19,9 @@
 #define FOS_SCENE_SWITCHER_ID "system/sceneSwitcher"
 /* And the one `sceneSettings` shows, the same way. */
 #define FOS_SCENE_SETTINGS_ID "system/sceneSettings"
+/* On a desktop (a layout of windows), a scene's own settings: this and the
+ * scene's id, built in the same way. */
+#define FOS_SCENE_SETTINGS_WINDOW_PREFIX "system/sceneSettings#"
 
 /* `gpio {action}`: the firmware reports the edges, each with `atMs` (when it saw
  * it); `button {action}` (press, doublePress, longPress) is the Nim dispatcher's

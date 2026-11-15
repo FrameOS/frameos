@@ -120,12 +120,14 @@ static volatile bool s_settings_shown = false;
 #define BUILT_IN_SCENE_AWAKE_MS (5 * 60 * 1000)
 
 /* A scene the runtime draws itself (docs/events-contract.json
- * `scenes.switcher`, `scenes.settings`): no slot on flash, never the scene
- * a reboot or a deep sleep comes back to. */
+ * `scenes.switcher`, `scenes.settings`, and on a desktop a scene's own
+ * settings, `scenes.settingsWindow`): no slot on flash, never the scene a
+ * reboot or a deep sleep comes back to. */
 static bool is_built_in_scene(const char *scene_id)
 {
     return scene_id != NULL &&
-           (strcmp(scene_id, FOS_SCENE_SWITCHER_ID) == 0 || strcmp(scene_id, FOS_SCENE_SETTINGS_ID) == 0);
+           (strcmp(scene_id, FOS_SCENE_SWITCHER_ID) == 0 || strcmp(scene_id, FOS_SCENE_SETTINGS_ID) == 0 ||
+            strncmp(scene_id, FOS_SCENE_SETTINGS_WINDOW_PREFIX, sizeof(FOS_SCENE_SETTINGS_WINDOW_PREFIX) - 1) == 0);
 }
 /* Serializes the store: the USB upload (console task) and the backend sync
  * (fos_client task) share one tmp path, and two concurrent write+rename
@@ -1509,7 +1511,18 @@ bool fos_scenes_apply_pending_selection(void)
      * mark shows if that takes a while, counted from when it was asked for.
      * Before the load below, which is part of the wait. */
     fos_client_loading_begin(asked_at);
-    if (s_slot_count > 0) {
+    if (s_slot_count > 0 && frameos_nim_scene_running(scene_id)) {
+        /* Running in a window of a desktop layout already (docs/scene-layouts.md
+         * "Windows"): brought to the front, nothing read off flash. */
+        if (!frameos_nim_set_scene(scene_id)) {
+            ESP_LOGW(TAG, "scene selection failed: %s", scene_id);
+            log_scene_event("scenes:select", "error", "queued", scene_id,
+                            "apply-failed", 0, 0, 0, ESP_FAIL);
+            fos_client_loading_end();
+            return false;
+        }
+        snprintf(s_resident_scene_id, sizeof(s_resident_scene_id), "%s", scene_id);
+    } else if (s_slot_count > 0) {
         if (!activate_scene_id(scene_id)) {
             ESP_LOGW(TAG, "scene selection failed: %s", scene_id);
             log_scene_event("scenes:select", "error", "queued", scene_id,
