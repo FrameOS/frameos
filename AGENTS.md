@@ -1063,6 +1063,19 @@
 - `frameos/Makefile` is the build entry: `make build` (app loaders → driver sources → shared driver libraries → assets → `nim c src/frameos.nim` into `build/frameos`), `make run`, `make test` (`nimble test`), `make test-shard SHARD=n` (what CI's "FrameOS Nim Tests" shards run, via `tools/run_test_shard.sh`), `make cross-<target>` / `make release-<target>` / `make release-all` (`backend/bin/cross`, the Docker cross-toolchain builds). `frameos.nimble` holds the dependencies and the `build_quickjs` task; `nimble build` itself can crash the compiler on macOS, so prefer `make build` / `nim c` directly. `nimble.lock` is the truth for package versions (bump a pin in `frameos.nimble` with it); the gitignored `nimble.paths` is `nimble setup`'s copy of it, `config.nims` refuses one older than the lock, and `python3 tools/nimble_paths.py` refreshes it (the Makefile, `build_wasm.sh` and the ESP32's `build_nim.sh` run it first).
 - **Nim test cost is compile cost.** Every test file is its own binary and compiles most of the tree (a server or interpreter test is ~6 s of Nim frontend plus 300 C files; the 45 MB `src/assets/repo_scenes.nim` string-literal module is NOT the problem, it compiles in under 2 s). `config.nims` builds `-d:testing` binaries with `--opt:none`, which halves a cold C compile; CI's warm nimcache skips gcc entirely, so what you can still make slower is the frontend (imports) and the run. A test must never wait out a real runtime interval: stub the hook instead (`setMetricsHooksForTest(sleepHook = …)`, the chromium app's `chromiumSettleHook` is already a no-op under `-d:testing`, `RunnerThread.stopMessageLoop` ends `startMessageLoop` instead of letting `maxIterations` run out at 200 ms a pass). Before that, three tests were 140 s of the suite's 240 s of run time (2026-10-11).
 
+## The hardware bench: `.claude/skills/frame-bench/SKILL.md`
+
+- `tools/frame-bench/bench.py` benches every frame on the machine's USB
+  (ESP32 boards and Pico thin clients attached to a local backend): every
+  scene, the desktop layouts with windows open, input, switch storms, a memory
+  soak, a hanging backend, reboots and server rendering. It reports crashes,
+  OOMs, watchdogs, slow paths (an LCD that stops drawing in place, a switch
+  that waits on a backend round trip) and regressions against an earlier run
+  (`--baseline`). Run it after a firmware change that touches rendering,
+  scenes, layouts or the backend link, on the frames attached.
+- It holds every serial port open with pyserial's defaults: a CH340 board
+  resets when DTR and RTS flip one at a time, so never set them by hand.
+
 ## End-to-end tooling
 - `e2e/README.md` is the map of every end-to-end suite: the scene-renderer snapshot harness (`e2e/run`, `makescenes.py`, `makesnapshots.py`, baselines in `e2e/snapshots`; `./run dataGradient` renders one scene), the Playwright frontend + cloud-workspace suite (`e2e/frontend-visual`), the opt-in real-SSH deploy test (`e2e/deploy`) and the Docker/ESP32 image jobs. It also carries the local-run recipes (port overrides, `FRONTEND_VISUAL_MAX_DIFF=1`, why a reused server drifts).
 - CI spends no money: the repository is public, so GitHub-hosted runners and GHCR are free, and the compute-heavy jobs run on the self-hosted pool (`tools/gha-runners/README.md`). Container images build with buildx against registry layer caches under `ghcr.io/frameos/frameos-build-cache` (`esp32-ci`, written by `e2e-docker.yml` on pushes to main and read by every other build of that target; `runtime-<arch>`, per release). A new image build in a workflow reads one of those caches or adds a tag there — never a paid builder (Depot was removed 2026-11), and never QEMU for the runtime image: build each platform natively (epyc-8 / `ubuntu-24.04-arm`) and merge by digest, as `build-runtime-image` + `push-multiarch` do.
