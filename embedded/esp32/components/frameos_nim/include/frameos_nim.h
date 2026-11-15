@@ -173,6 +173,9 @@ void frameos_nim_apply_service_settings(const char *json);
 /* Refresh interval requested by the active scene, seconds; 0 = no opinion. */
 /* Per-node memory profile in the interpreter (console `set debug 1`). */
 void frameos_nim_set_debug(int enabled);
+/* A long render lets its core's other tasks run (frameos_nim_glue.c). */
+void fos_render_breathe(void);
+void fos_render_breathe_reset(void);
 /* Value-pipeline differential: 0 materializes every image edge. */
 void frameos_nim_set_fusion(int enabled);
 /* Fallback fit for image consumers without their own placement

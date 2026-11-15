@@ -117,6 +117,7 @@ proc toGrayscaleFloat*(image: Image, grayscale: var seq[float], multiple: float 
     width = image.width
     height = image.height
   for y in 0..<height:
+    breathe()
     for x in 0..<width:
       let
         index = y * width + x
@@ -161,6 +162,7 @@ proc floydSteinberg*(pixels: var seq[float], width, height: int,
     dx = [1, -1, 0, 1]
 
   for y in 0..<height:
+    breathe()
     for x in 0..<width:
       let index = y * width + x
       let jitter =
@@ -310,6 +312,7 @@ template forEachPaletteDithered*(
         row[rx * 3 + 2] = clip8(row[rx * 3 + 2].int + (eb * weight div 16))
       loadRow(curRow, 0)
       for yy in 0 ..< ditherHeight:
+        breathe()
         let hasNext = yy + 1 < ditherHeight
         if hasNext:
           loadRow(nextRow, yy + 1)
@@ -425,6 +428,7 @@ template forEachGrayDithered*(
       loadRow(curRow, 0)
       let jitterUnit = multiple / 255.0
       for yy in 0 ..< ditherHeight:
+        breathe()
         let hasNext = yy + 1 < ditherHeight
         if hasNext:
           loadRow(nextRow, yy + 1)

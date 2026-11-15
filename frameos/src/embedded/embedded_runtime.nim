@@ -11,6 +11,7 @@ import std/[json, locks, options, sequtils, strformat, tables]
 import pixie
 
 import frameos/render_probe
+from frameos/js_runtime/burrito import scriptBreathe
 import frameos/types
 import frameos/utils/asset_colors
 from frameos/render_scale import MaxRenderScale
@@ -816,6 +817,15 @@ proc embeddedLayouts(): seq[LayoutEntry] {.nimcall, gcsafe.} =
     layoutCatalog
 
 layoutListing = embeddedLayouts
+
+# A long render lets its core's other tasks run (frameos_nim_glue.c): pixie
+# calls this from its row loops, the QuickJS interrupt handler from scripts.
+proc fos_render_breathe() {.importc, cdecl, raises: [].}
+proc fos_render_breathe_reset*() {.importc, cdecl, raises: [].}
+proc embeddedBreathe() {.nimcall, gcsafe, raises: [].} =
+  fos_render_breathe()
+renderBreathe = embeddedBreathe
+scriptBreathe = embeddedBreathe
 
 # The settings panel's frame page, behind its gear (docs/scene-settings.md
 # "The frame page"): the facts it shows and what it sets (Wi-Fi, rotation,

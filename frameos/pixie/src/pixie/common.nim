@@ -1,5 +1,19 @@
 import bumpy, chroma, system/memory, vmath
 
+var renderBreathe*: proc() {.nimcall, gcsafe, raises: [].}
+  ## Called from pixie's long loops (a scanline of a fill, a strip of a masked
+  ## paint, a blit, a resample) so a host whose render must let other work run
+  ## can: on an ESP32 a render of tens of seconds never blocked, and the idle
+  ## task on its core tripped the task watchdog (FrameOS: the hardware bench,
+  ## reTerminal E1003, 2026-11-15). nil everywhere else; set once at start.
+
+template breathe*() =
+  ## One call: nothing unless a host set `renderBreathe`.
+  {.cast(gcsafe).}:
+    let hook = renderBreathe
+    if not hook.isNil:
+      hook()
+
 type
   PixieError* = object of CatchableError ## Raised if an operation fails.
 

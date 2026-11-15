@@ -18,6 +18,8 @@
 ## `render/image`, a photo, the frame-wide colors), and the copy cannot miss a
 ## writer.
 
+from pixie/common import breathe  # a long pack lets its core's idle task run (an ESP32)
+
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
 # The firmware is built for size; these loops run over every pixel of a frame
@@ -50,6 +52,7 @@ proc changedRuns*(current, previous: ptr UncheckedArray[uint8]; width, height: i
   ## to be worth it.
   count = 0
   for y in 0 ..< height:
+    breathe()
     let row = y * width
     if equalMem(current[row].addr, previous[row].addr, width):
       continue
@@ -189,6 +192,7 @@ proc rotateBits1bpp*(natural: ptr UncheckedArray[uint8]; srcW, srcH: int;
     return
   if rotate == 180 and srcW mod 8 == 0 and rowBytes == naturalRow:
     for y in 0 ..< srcH:
+      breathe()
       let src = y * naturalRow
       let dst = (srcH - 1 - y) * rowBytes
       for cb in 0 ..< naturalRow:
