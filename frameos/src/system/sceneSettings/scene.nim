@@ -396,13 +396,24 @@ proc collect(fields, values: JsonNode): JsonNode =
       result.put(name, value)
 
 proc save(self: SceneSettingsScene) =
-  ## Back to the scene, its fields set to the values here.
+  ## Back to the scene, its fields set to the values here. A scene's own
+  ## settings window on a desktop stays instead, as an Apply would: the values
+  ## go to the scene where it runs, in its window (`setSceneState` aimed at
+  ## it), and the window keeps the focus, its Save quiet until the next edit.
   if self.opener().len == 0:
     leave()
     return
+  let values = collect(self.fieldList(), self.valueMap())
+  if self.ownWindow():
+    let payload = newJObject()
+    payload.put("state", values)
+    sendEvent(some(SceneId(self.opener())), evSetSceneState, payload, eoScene)
+    self.formObject("edited").fields.clear()
+    sendEvent(evRender, newJObject(), eoScene)
+    return
   let payload = newJObject()
   payload.put("sceneId", newJString(self.opener()))
-  payload.put("state", collect(self.fieldList(), self.valueMap()))
+  payload.put("state", values)
   wentBack = true
   sendEvent(evSetCurrentScene, payload, eoScene)
 

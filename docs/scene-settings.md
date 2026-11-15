@@ -54,7 +54,10 @@ scene's settings are an instance of their own**,
 `system/sceneSettings#` and the scene's id (the contract's
 `scenes.settingsWindow`; `event_loop.settingsWindows`), so the settings of
 several scenes stay open side by side, each with its own `from`, fields and
-edits, and Save or Cancel in one goes back to its scene and closes only it. The
+edits. Save in one sets its scene's fields where that scene runs, in its window
+(`setSceneState` aimed at it), and the settings window stays open with the
+focus, its Save quiet until the next edit; Cancel goes back to its scene and
+closes only it. The
 frame page is one window, the plain `system/sceneSettings`: `sceneSettings
 {page: "frame"}` opens it over the scene in front, or over the scene whose
 settings are in front, and the gear in a scene's settings brings it forward
@@ -201,7 +204,9 @@ in the scene: keep it that lean.
 ## Saving
 
 **Save** is `setCurrentScene {sceneId: from, state: values}`, from the
-origin `scene`. Every host already applies a switch's `state` to the scene's
+origin `scene`; in a scene's own settings window on a desktop it is
+`setSceneState {state: values}` aimed at that scene instead, and the window
+stays (above). Every host already applies a switch's `state` to the scene's
 public fields (`interpreter.nim` `applyPublicStateFromPayload`): the Linux
 runner to the scene it kept in memory, the ESP32 and the preview once the
 scene is loaded again, before its `open`. A field that persists (`persist:
