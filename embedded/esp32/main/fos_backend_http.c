@@ -102,6 +102,14 @@ static void read_body(esp_http_client_handle_t client, size_t max_body, fos_http
  * peer refused or the route was not there. A connect that spent timeout_ms
  * is not retried, it would only double the wait on an unreachable host. */
 #define FOS_HTTP_FAST_CONNECT_FAIL_US (2 * 1000 * 1000)
+/* A backend that is up accepts a connection in milliseconds (a TLS handshake
+ * in a second or two), so the connect gets a short timeout of its own and the
+ * request and its reply keep the long one, as the log upload does
+ * (frameos_nim_glue.c). With the request's 15-30 s on the connect, a backend
+ * whose host answers ping but whose port is closed or filtered cost ~18 s per
+ * round trip, three to a pass (the hardware bench, 2026-11-15). */
+#define FOS_HTTP_CONNECT_TIMEOUT_MS 5000
+#define FOS_HTTPS_CONNECT_TIMEOUT_MS 10000
 #define FOS_HTTP_CONNECT_RETRY_DELAY_MS 1000
 
 static uint32_t s_connect_retries = 0;
@@ -135,10 +143,14 @@ const char *fos_http_err_name(esp_err_t err)
 esp_err_t fos_http_fetch(const fos_http_request_t *req, size_t max_body, fos_http_response_t *res)
 {
     memset(res, 0, sizeof(*res));
+    int timeout_ms = req->timeout_ms > 0 ? req->timeout_ms : 15000;
+    int connect_timeout_ms = strncmp(req->url, "https://", 8) == 0 ? FOS_HTTPS_CONNECT_TIMEOUT_MS
+                                                                   : FOS_HTTP_CONNECT_TIMEOUT_MS;
+    if (connect_timeout_ms > timeout_ms) connect_timeout_ms = timeout_ms;
     esp_http_client_config_t http_config = {
         .url = req->url,
         .method = req->body ? HTTP_METHOD_POST : HTTP_METHOD_GET,
-        .timeout_ms = req->timeout_ms > 0 ? req->timeout_ms : 15000,
+        .timeout_ms = connect_timeout_ms,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .buffer_size = req->buffer_size > 0 ? req->buffer_size : 2048,
         .event_handler = collect_etag_handler,
@@ -174,6 +186,7 @@ esp_err_t fos_http_fetch(const fos_http_request_t *req, size_t max_body, fos_htt
         esp_http_client_cleanup(client);
         return err;
     }
+    esp_http_client_set_timeout_ms(client, timeout_ms);
     if (body_len > 0 && esp_http_client_write(client, req->body, body_len) != body_len) {
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
