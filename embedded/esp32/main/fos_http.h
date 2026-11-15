@@ -55,7 +55,9 @@ esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene
  * — no copy of the framebuffer, no whole-image buffer — which is what lets
  * an 8 MB board with a 960 KB panel serve a preview at all. ESP_ERR_NOT_FOUND
  * when nothing is rendered; ESP_ERR_TIMEOUT when the snapshot stayed locked
- * (a render packing into it) for `lock_timeout_ms`. */
+ * (a render packing into it) for `lock_timeout_ms`; ESP_ERR_INVALID_STATE when
+ * a newer picture replaced the snapshot mid-stream (the stream stops: its rows
+ * would mix two pictures). */
 typedef struct {
     void (*begin)(void *ctx, size_t total);
     bool (*write)(void *ctx, const uint8_t *data, size_t len);

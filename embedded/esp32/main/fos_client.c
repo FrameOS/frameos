@@ -1734,6 +1734,7 @@ typedef struct {
     esp_http_client_handle_t client;
     size_t used;
     bool failed;
+    bool yielded; /* stopped for the render task (fos_image_push_yields), not failed */
     uint8_t buf[FOS_IMAGE_PUSH_CHUNK];
 } image_push_t;
 
@@ -1776,6 +1777,7 @@ static bool image_push_write(void *ctx, const uint8_t *data, size_t len)
                               fos_events_deferred_pending(),
                               (xEventGroupGetBits(s_events) & (RENDER_NOW_BIT | SCENE_RENDER_BIT | INPUT_EVENTS_BIT)) != 0)) {
         push->failed = true;
+        push->yielded = true;
         s_last_image_push_us = 0;
         return false;
     }
@@ -1906,6 +1908,7 @@ static void push_image_state(const char *scene_id, const fos_display_state_t *st
     }
     esp_http_client_close(push->client);
     esp_http_client_cleanup(push->client);
+    bool push_yielded = push->yielded;
     free(push);
 
     int64_t ms = (esp_timer_get_time() - now_us) / 1000;
@@ -1914,9 +1917,16 @@ static void push_image_state(const char *scene_id, const fos_display_state_t *st
         s_pushed_image_valid = true;
         __atomic_store_n(&s_pushed_scene_key, scene_key(scene_id), __ATOMIC_RELAXED);
         ESP_LOGI(TAG, "image pushed to the backend in %lld ms", ms);
+    } else if (err == ESP_ERR_INVALID_STATE) {
+        /* A newer picture landed while this one streamed: it goes next. Not a
+         * failure (it read as one, "UNKNOWN ERROR, HTTP 0", 44 times in a
+         * bench run on the E1003, whose 1.3 MB picture takes seconds to send). */
+        ESP_LOGI(TAG, "image push stopped after %lld ms: a newer picture goes next", ms);
+    } else if (push_yielded) {
+        ESP_LOGI(TAG, "image push gave way to the render task after %lld ms; it goes again later", ms);
     } else {
         ESP_LOGW(TAG, "image push to the backend failed (%s, HTTP %d, %lld ms)",
-                 esp_err_to_name(err), status, ms);
+                 fos_http_err_name(err), status, ms);
     }
 }
 
