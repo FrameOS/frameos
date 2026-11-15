@@ -32,6 +32,11 @@ type
     bounds: Rect
     maskWaste: int32 # coverage masks of it let go unused, less its hits since
     maskBanUntil: int # no new mask of it before this coverage-cache tick
+    fracs: array[4, int32] # the offset fractions it was last filled at (snapMoving)
+    fracCount: int8 # how many of `fracs` hold one
+    fracNext: int8 # the slot a new fraction replaces when all are full
+    fracMoves: int8 # fills at a fraction not among `fracs` once all four were taken
+    moving: bool # filled at a new fraction again and again: drawn at quarter pixels from then on
 
   SomePath* = Path | string
 
@@ -2748,6 +2753,56 @@ const
     ## hit makes no new one for a while (MaskBanTicks).
   MaskBanTicks = 1024
     ## Fills, a few seconds of an animation: then one more mask is tried.
+  MovingSteps = 4'f32
+    ## A moving path's offsets are snapped to 1/MovingSteps px.
+  MovesToMoving = 8
+    ## Fills at a fraction not among the last four it had before a path
+    ## counts as moving. Not taken back by fills at a known one: a frame
+    ## drawn twice (a whole render beside a damage repaint) would cancel
+    ## every move.
+
+proc snapMoving(path: Path, transform: var Mat3) =
+  ## A shared path filled at a new subpixel offset fill after fill (an
+  ## animation: the JSX DVD bounce lands its logo on a new 1/256 px fraction
+  ## every frame, as `Date.now()` moves it) never meets its kept coverage
+  ## again: the second-sight rule skips every fill, and the logo's six paths
+  ## were rasterized afresh each frame, 19.8 ms of a 63 ms render on a
+  ## SenseCAP Indicator (2026-11-15). Once it is moving, its offset is
+  ## snapped to the nearest quarter pixel (an edge moves 1/8 px at most,
+  ## which nobody sees on something in motion), so its fills come round to
+  ## the same sixteen fractions and are blended from kept masks. A path
+  ## filled where it always is, or at a few places in turn (one icon on
+  ## several cards), keeps its exact fraction: the last four it had are
+  ## remembered. Moving is for good: a path that went back and forth
+  ## between exact and snapped would draw a seam where a damage box cuts it.
+  ## The snap applies to the fresh fill too, so a fill the cache cannot take
+  ## (seen through a small box, a first sight) draws the same pixels.
+  if not path.shared or not transform.isAxisAligned():
+    return
+  let
+    tx = transform[2, 0]
+    ty = transform[2, 1]
+  if not path.moving:
+    let frac = (int32((tx - floor(tx)) * 256) shl 9) or int32((ty - floor(ty)) * 256)
+    var known = false
+    for i in 0 ..< path.fracCount.int:
+      if path.fracs[i] == frac:
+        known = true
+    if known:
+      discard
+    elif path.fracCount.int < path.fracs.len:
+      path.fracs[path.fracCount] = frac
+      inc path.fracCount
+    else:
+      path.fracs[path.fracNext] = frac
+      path.fracNext = int8((path.fracNext.int + 1) mod path.fracs.len)
+      inc path.fracMoves
+      if path.fracMoves >= MovesToMoving:
+        path.moving = true
+    if not path.moving:
+      return
+  transform[2, 0] = round(tx * MovingSteps) / MovingSteps
+  transform[2, 1] = round(ty * MovingSteps) / MovingSteps
 
 proc evictCoverage(needed: int) =
   while coverageMasks.len > 0 and coverageCacheBytes + needed > coverageCacheBudget:
@@ -2959,7 +3014,10 @@ proc fillPath*(
     if paint.color.a > 0 or paint.blendMode == OverwriteBlend:
       var color = paint.color
       color.a *= paint.opacity
+      var transform = transform
       when path is Path:
+        if coverageCacheBudget > 0:
+          path.snapMoving(transform)
         var masked: bool
         pathProbe(ppFillMask):
           masked = image.fillFromCoverageCache(path, color, transform, windingRule, paint.blendMode,
