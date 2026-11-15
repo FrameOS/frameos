@@ -469,6 +469,18 @@ tells the board:
   floor for cloud-rendered frames on the cloud
   (`cloudRenderedMinIntervalSeconds`, 300 s, the floor the frame's own
   interval has there), never over **7 days**.
+- Never sooner than the board's **panel** can take: a colour e-paper
+  panel's full refresh is 15-30 s, so a scene asking for a picture every
+  10 s kept a Spectra 6 panel refreshing nonstop (a Pimoroni Inky Frame 7.3"
+  Spectra, 2026-11-15). By the panel format the pull names (`format`,
+  `fos_pixel_format_t`): **60 s** for Spectra 6 (7) and 7-colour ACeP (6),
+  none for the rest. The table is `docs/panel-refresh-floors.json`, mirrored
+  by `PANEL_REFRESH_FLOOR_SECONDS` (backend `embedded_device.py`) and
+  `panelRefreshFloorSeconds` (cloud `server-render.ts`), each pinned to it by
+  a test; both planes apply it to the header alone (`held_to_panel_floor` /
+  `heldToPanelFloor`), after their own floor. It holds only the interval a
+  scene asks for: a press, a scene switched or a state set by hand still
+  pulls at once.
 - The board takes it where its own runtime's interval would go
   (`fos_pass_interval_seconds` in `fos_client.c`): its next pass, its deep
   sleep and the `nextRenderAt` it tells the plane, so the picture drawn

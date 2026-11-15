@@ -1,6 +1,28 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { buildScenesPatchMessage, patchLeavesPanel, sceneHashes } from "../lib/scenes-patch";
+import { buildScenesPatchMessage, esp32SceneStoreSlots, patchLeavesPanel, sceneHashes } from "../lib/scenes-patch";
+
+describe("scenes_patch and the board's slots", () => {
+  it("counts the firmware's slots", () => {
+    const header = readFileSync(join(__dirname, "../../../../../embedded/esp32/main/fos_scene_store.h"), "utf8");
+    expect(Number(/#define\s+FOS_SCENE_STORE_SLOTS\s+(\d+)/.exec(header)?.[1])).toBe(esp32SceneStoreSlots);
+  });
+
+  it("sends the whole list when the puts and the scenes held would not fit", () => {
+    const held = Array.from({ length: 25 }, (_, i) => ({ id: `s${i}`, name: `S${i}` }));
+    const heldBase = { checksum: "old", hashes: sceneHashes(held) as Record<string, string> };
+    // Every scene but one given a layout: 25 held + 24 put > 32.
+    const laidOut = held.map((scene, i) => (i === 0 ? scene : { ...scene, layout: "frame" }));
+    expect(buildScenesPatchMessage({ id: "c", payload: { checksum: "n", scenes: laidOut } }, heldBase)).toBeNull();
+    // 25 held + 7 put = 32 still fits.
+    const seven = held.map((scene, i) => (i < 18 ? scene : { ...scene, layout: "frame" }));
+    const message = buildScenesPatchMessage({ id: "c", payload: { checksum: "n", scenes: seven } }, heldBase);
+    expect(message).toMatchObject({ type: "scenes_patch" });
+    expect(message?.put).toHaveLength(7);
+  });
+});
 
 const a = { id: "a", name: "A" };
 const b = { id: "b", name: "B" };

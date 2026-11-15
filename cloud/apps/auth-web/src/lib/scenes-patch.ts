@@ -18,6 +18,12 @@ export const scenesPatchMinVersion = "2026.11.6";
 // travel as a set_current_scene behind the push (frame-scenes.ts).
 export const esp32PushedStateMinVersion = "2026.11.6";
 
+// The ESP32 scene store's slot files (FOS_SCENE_STORE_SLOTS in
+// embedded/esp32/main/fos_scene_store.h; the backend's
+// ESP32_SCENE_STORE_SLOTS). scenes-patch.test.ts and the backend's
+// test_embedded_scenes_patch_slots.py read the header.
+export const esp32SceneStoreSlots = 32;
+
 function sceneId(scene: unknown): string | null {
   if (!scene || typeof scene !== "object" || Array.isArray(scene)) {
     return null;
@@ -82,6 +88,13 @@ export function buildScenesPatchMessage(
   const put = scenes.filter((scene) => hashes[sceneId(scene) as string] !== base.hashes[sceneId(scene) as string]);
   // Every scene changed: the whole list is the same message.
   if (put.length === scenes.length) {
+    return null;
+  }
+  // A patch is one change on the board: each put goes to a new slot while
+  // every scene it holds keeps its own until the index switches. One that
+  // cannot fit would be refused ("no free scene slot") and cost a round trip;
+  // the whole list is written a scene at a time and fits.
+  if (Object.keys(base.hashes).length + put.length > esp32SceneStoreSlots) {
     return null;
   }
   return {
