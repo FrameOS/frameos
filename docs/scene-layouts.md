@@ -266,7 +266,13 @@ what shows.
 
 Windows pace the frame as a split's panels do: the first one due wakes it,
 except on e-paper and a deep sleeper, where none wakes it sooner than the scene
-it wraps would (the floor). Their pictures count against the same copy budget.
+it wraps would (the floor). Their pictures count against the same copy budget,
+and a picture is asked for only when the largest free block under the reserve
+holds it (`roomForImage`, idle interpreters without handlers let go first): a
+window behind another on an 800x480 RGBX e-paper canvas is a 1-1.5 MB buffer,
+and on an ESP32 one that does not fit is an out-of-memory abort, then a restart.
+Without the room that window shows nothing that pass (`scene:embed:noMemory`,
+logged once) and the rest of the frame is drawn.
 A scene that cannot start in a window is not tried again until the scenes
 change.
 

@@ -346,6 +346,26 @@ proc refreshDecodeBudgetInto*(forDecode = true) =
     setDecodeBudgetBytes(available)
   refreshDecodeContiguousBudget()
 
+proc roomForImage*(bytes: int): bool =
+  ## Whether one image-sized buffer of `bytes` fits now, before it is asked
+  ## for: on an ESP32 an allocation that does not fit is no exception but an
+  ## out-of-memory abort, and a frame restart once the aborts add up. The
+  ## answer is the largest free block under the reserve (availableRenderBytes),
+  ## so this is for the one big allocation that needs it, never a per-frame
+  ## question. When it does not fit, what a render can rebuild without costing
+  ## a tap goes first (pixie's kept masks, the idle interpreters that hold no
+  ## UI's handlers) and it is asked again. On an ESP32-class runtime 0 is no
+  ## room at all; on a host it is "unknown", which fits.
+  var room = availableRenderBytes()
+  if room <= 0 and not runsAsEmbedded():
+    return true
+  if bytes <= room:
+    return true
+  clearCoverageCache()
+  if not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook(false):
+    room = availableRenderBytes()
+  bytes <= room
+
 proc ensureRenderAllocation*(bytes: int64, what: string) =
   ## Raises a catchable error when an allocation plan clearly exceeds the
   ## memory that is still available for rendering, kept interpreters let go

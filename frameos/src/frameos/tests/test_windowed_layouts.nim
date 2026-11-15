@@ -6,6 +6,7 @@ import ../types
 import ../js_runtime/app_runtime
 import ../ui/events as ui_events
 import ../ui/layout as ui_layout
+import ../utils/memory
 
 # Windows (docs/scene-layouts.md "Windows"): on a host that keeps every scene
 # it ran (the Pi's runner), a layout's <Scene id> is that host's own scene, so
@@ -73,6 +74,9 @@ export function get(app) {
       {(app.state.offLeft || []).map((id) => (
         <div className="absolute left-[-10px] top-0 w-[20px] h-[40px] flex"><Scene id={id} /></div>
       ))}
+      {(app.state.offRight || []).map((id) => (
+        <div className="absolute left-[30px] top-0 w-[20px] h-[40px] flex"><Scene id={id} /></div>
+      ))}
     </div>
   )
 }
@@ -109,6 +113,8 @@ let scenesJson = "[" & [
   panel("tests/pressing", "#0000ff", 600.0).withLayout("tests/desk",
     """{"open": ["tests/counter3"], "pressCover": true}"""),
   panel("tests/hanging", "#0000ff", 600.0).withLayout("tests/desk", """{"offLeft": ["tests/yellow"]}"""),
+  panel("tests/green", "#00ff00", 600.0).withLayout("tests/desk"),
+  panel("tests/tight", "#0000ff", 600.0).withLayout("tests/desk", """{"offRight": ["tests/green"]}"""),
   panel("tests/fast", "#00ff00", 0.05).withLayout("tests/desk"),
   panel("tests/paced", "#0000ff", 600.0).withLayout("tests/desk", """{"open": ["tests/fast"]}"""),
   jsxScene("tests/counter3", counterUi, 3000.0).withLayout("tests/desk"),
@@ -287,6 +293,39 @@ suite "windows":
         found = true
         check not slot.hole
     check found
+
+  test "a window's picture with no room for it is left out, not an out-of-memory abort":
+    # An ESP32 whose largest free block under the reserve is smaller than the
+    # window's picture (20x40 RGBX, 3200 bytes): asking for it anyway is an
+    # abort and, a few of those on, a restart (the reTerminal E1002's macOS
+    # desktop, a 798x340 window behind the one in front). The window shows
+    # nothing, the rest of the frame is drawn, and it is said once.
+    setSimulatedEmbedded(true)
+    availableRenderBytesOverride = 1024
+    defer:
+      availableRenderBytesOverride = 0
+      setSimulatedEmbedded(false)
+    logged.setLen(0)
+    let tight = hostScene("tests/tight")
+    var image = pass(tight)
+    var slotted = false
+    for slot in tight.wornLayout.slots:
+      if slot.child == hosted["tests/green"]:
+        slotted = true
+        check not slot.hole
+    check slotted
+    check image.color(35, 20) == colored("#ffffff")
+    check image.color(5, 20) == colored("#0000ff") # the scene in front, in its hole
+    check hosted["tests/green"].rhythm.embedImage.isNil
+    rhythmClockOverride = 1000.01
+    image = pass(tight)
+    check logged.filterIt(it{"event"}.getStr() == "scene:embed:noMemory").len == 1
+    check logged.filterIt(it{"event"}.getStr() == "scene:embed:noMemory")[0]{"bytes"}.getInt() == 3200
+    # With the room back, the window shows again.
+    availableRenderBytesOverride = 0
+    rhythmClockOverride = 1000.02
+    image = pass(tight)
+    check image.color(35, 20) == colored("#00ff00")
 
   test "a window paces the frame by its own interval":
     let paced = hostScene("tests/paced")

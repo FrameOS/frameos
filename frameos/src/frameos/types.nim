@@ -500,6 +500,7 @@ type
     copyRefused*: bool    ## the last copy did not fit the budget (logged once)
     cells*: RhythmCell    ## each rectangle it drew
     embedImage*: Image    ## a `<Scene>`'s own picture (the UI draws it as an image)
+    embedRefused*: bool   ## its last picture did not fit the largest free block (logged once)
     embedProps*: string   ## the props last written into its state, as JSON
     chromePass*: int      ## a UI with holes: the pass that last drew around them
     chromeDueAt*: float   ## and its own schedule, which its embedded scenes do not move
