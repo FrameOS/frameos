@@ -145,6 +145,35 @@ interface FrameOSStore {
   /** The browser preview's host: Preview, Show and Discard only, and "preview_only" for install, update and remove. Absent on a frame. */
   previewOnly?: boolean;
 }
+/** What frameos.frame("read") says: the facts the frame page shows (docs/scene-settings.md "The frame page"). */
+interface FrameOSFrameFacts {
+  /** Absent where there is no network to set from the frame (the browser preview). */
+  wifi?: {
+    /** "connected", "connecting", "notFound", "auth", "hotspot", "unset" or "off". */
+    state: string;
+    ssid: string;
+    ip?: string;
+    /** The signal in dBm, while connected. */
+    rssi?: number;
+    /** The setup hotspot's name, while it is up. */
+    hotspot?: string;
+    /** The networks in range by name, from the last scan. */
+    networks: string[];
+    scanning: boolean;
+    /** A password is saved. */
+    password: boolean;
+  };
+  rotate: number;
+  renderScale: number;
+  battery?: { percent: number };
+  /** The control plane that manages the frame, when one does. */
+  managedBy?: string;
+  version?: string;
+  /** The device commands this host runs besides render and reboot ("restart" on a Raspberry Pi). */
+  actions: string[];
+  /** What the last apply could not do. */
+  note?: string;
+}
 
 /**
  * What JSX makes in an app (.tsx): get() can return it as its image. An <svg>
@@ -325,6 +354,22 @@ declare const frameos: {
    * discard. It runs off the render and this scene renders again when it is done (see store().busy). False where
    * there is no host (FrameOS 2026.11.8+). */
   storeAction(action: "browse" | "preview" | "install" | "update" | "remove" | "discard", args?: Record<string, any>): boolean;
+  /** The frame page's facts and powers (docs/terminal.md), for an app whose config.json permissions include "frame"
+   * (saving the scene adds it when the code calls this; installing the scene is the owner's yes), and only while the
+   * frame's settings are allowed on its screen: it throws otherwise. "read" is what the page shows, null where there is
+   * none (FrameOS 2026.11.8+). */
+  frame(op: "read"): FrameOSFrameFacts | null;
+  /** What the page's Save sets: a network (wifiSsid, with wifiPassword or "" for an open one or the saved one), rotate
+   * (0, 90, 180, 270), renderScale (0 automatic, up to 4), and on an ESP32 the clock ("YYYY-MM-DD HH:MM"). A refusal
+   * shows as note in the next "read". */
+  frame(
+    op: "apply",
+    changes: { wifiSsid?: string; wifiPassword?: string; rotate?: number; renderScale?: number; clock?: string }
+  ): boolean;
+  /** What the page's buttons do: render (every panel drawn again), restart (FrameOS, where actions has it), reboot,
+   * scan for the networks in range (in "read" once wifi.scanning is false), and on an ESP32 checkUpdate and
+   * installUpdate. */
+  frame(op: "action", action: "render" | "restart" | "reboot" | "scan" | "checkUpdate" | "installUpdate"): boolean;
   fetchText(url: string): string;
   fetchJson(url: string): any;
   httpRequest(
@@ -593,6 +638,7 @@ declare const mock: {
   recall(impl?: (typeof frameos)["recall"]): FrameOSMockFn<(typeof frameos)["recall"]>;
   setNextSleep(impl?: (typeof frameos)["setNextSleep"]): FrameOSMockFn<(typeof frameos)["setNextSleep"]>;
   dispatch(impl?: (typeof frameos)["dispatch"]): FrameOSMockFn<(typeof frameos)["dispatch"]>;
+  frame(impl?: (typeof frameos)["frame"]): FrameOSMockFn<(typeof frameos)["frame"]>;
   listAssets(impl?: (typeof frameos)["listAssets"]): FrameOSMockFn<(typeof frameos)["listAssets"]>;
   assetExists(impl?: (typeof frameos)["assetExists"]): FrameOSMockFn<(typeof frameos)["assetExists"]>;
   assetSize(impl?: (typeof frameos)["assetSize"]): FrameOSMockFn<(typeof frameos)["assetSize"]>;

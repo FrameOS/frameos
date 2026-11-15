@@ -33,7 +33,13 @@ def _scene(code: str, config: str | None) -> dict:
     return {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "apps": {"myApp": {"sources": sources}}}
 
 
-@pytest.mark.parametrize("fixture", CORPUS["stamps"], ids=lambda fixture: fixture["name"])
+# A case marked `afterMigration` is about a permission newer than the
+# migration (`frame`, 2026.11.8): no code stored before it could call for it.
+@pytest.mark.parametrize(
+    "fixture",
+    [fixture for fixture in CORPUS["stamps"] if not fixture.get("afterMigration")],
+    ids=lambda fixture: fixture["name"],
+)
 def test_matches_the_editors_stamp(fixture):
     # The migration is the cloud's read-time stamp (`onlyMissing`): a list
     # already there, right or stale, is left as it is.

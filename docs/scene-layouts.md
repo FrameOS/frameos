@@ -171,14 +171,15 @@ the Deskbar lists the windows open and its gem opens the Be menu (the scenes,
 Preferences), and Tracker's icons under it open the frame's own apps.
 The desktop icons of `Windows 98` and `BeOS` are those apps alone, never the
 frame's scenes (the menus have those): the scene list, the scene store, the
-asset browser and the frame's settings. The **Scene store** and the
-**Asset browser** (`docs/scene-store.md`) are scenes like any other, found by
-their sample's id (`scene-store`, `asset-browser`) or their name; where the frame
+asset browser, the terminal and the frame's settings. The **Scene store**, the
+**Asset browser** (`docs/scene-store.md`) and the **Terminal**
+(`docs/terminal.md`) are scenes like any other, found by their sample's id
+(`scene-store`, `asset-browser`, `terminal-app`) or their name; where the frame
 has them each desktop has entries of its own for them and leaves them out of its
-scene lists: the top of `Windows 98`'s Start, a bag for the store in `Tiling`'s top
-bar, `macOS`'s Dock beside System Settings (and the store in its mark's menu),
-`BeOS`'s Be menu. Everywhere else (an editor's preview) they draw the one
-scene, as before.
+scene lists: the top of `Windows 98`'s Start, a bag for the store and a prompt
+for the terminal in `Tiling`'s top bar, `macOS`'s Dock beside System Settings
+(and the store and the terminal in its mark's menu), `BeOS`'s Be menu. Everywhere
+else (an editor's preview) they draw the one scene, as before.
 
 The runtime gives a layout three things and keeps no windows of its own:
 

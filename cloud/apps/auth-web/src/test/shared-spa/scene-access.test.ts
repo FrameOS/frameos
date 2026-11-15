@@ -46,6 +46,8 @@ interface StampCase {
   code: string;
   config: string | null;
   onlyMissing?: boolean;
+  /** Newer than the backend's frozen 5e2a9c71d4b8 migration, which skips it. */
+  afterMigration?: boolean;
   expect: string | null;
 }
 
@@ -205,6 +207,12 @@ describe("what an update changes", () => {
     const changes = sceneAccessChanges(reader, haiku);
     expect(describeGainedAccess(changes)).toBe("uses OpenAI key");
     expect(accessChangesAreRisky(changes)).toBe(false);
+  });
+
+  it("gaining the frame's settings is a red button", () => {
+    const changes = sceneAccessChanges(reader, app("reader", "frameos.readAsset('x'); frameos.frame('read', null)"));
+    expect(describeGainedAccess(changes)).toBe("changes frame settings");
+    expect(accessChangesAreRisky(changes)).toBe(true);
   });
 
   it("gaining only a read of the assets folder is not a red button", () => {

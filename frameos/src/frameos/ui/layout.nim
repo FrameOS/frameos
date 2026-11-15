@@ -324,6 +324,12 @@ proc samePointer(n: UiNode, input: UiInput, groupHover: bool): bool =
       return false
   true
 
+var
+  memo {.threadvar.}: UiMemo ## the layout's, while layoutUi runs
+  ui {.threadvar.}: ptr UiInput ## and the input it was asked for
+  focusSeen {.threadvar.}: bool ## the focused field was laid out
+  revealCaret {.threadvar.}: bool ## and is scrolled to show its caret (an edit, a key, a tap)
+
 proc buildField(result: UiNode, n: SvgNode, text: Text, classes: string, rootW, rootH: float32,
     input: UiInput) =
   ## An <input> or a <textarea>: a box that clips the one run of text it
@@ -342,8 +348,14 @@ proc buildField(result: UiNode, n: SvgNode, text: Text, classes: string, rootW, 
   for attr in n.attrs:
     if attr[0] == "value":
       controlled = true
-  if result.key == input.focus - 1 and not controlled:
-    result.value = input.text
+  if result.key == input.focus - 1:
+    if not controlled:
+      result.value = input.text
+    elif result.value != input.text and not ui.isNil:
+      # What the app made of the edit is what the next edit starts from, as
+      # in React: a line emptied on Enter (the Terminal), a length kept.
+      ui.text = result.value
+      ui.caret = result.value.len
   var
     style = result.text
     shown = result.value
@@ -642,12 +654,6 @@ proc cutSpans(spans: seq[Span], keep: int): seq[Span] =
     result.add newSpan(span.text[0 ..< i], span.font)
   if result.len > 0:
     result[^1] = newSpan(result[^1].text.strip(leading = false) & "…", result[^1].font)
-
-var
-  memo {.threadvar.}: UiMemo ## the layout's, while layoutUi runs
-  ui {.threadvar.}: ptr UiInput ## and the input it was asked for
-  focusSeen {.threadvar.}: bool ## the focused field was laid out
-  revealCaret {.threadvar.}: bool ## and is scrolled to show its caret (an edit, a key, a tap)
 
 template scrollOf(key: int): (float32, float32) = ui[].scrolled(key)
 template setScroll(key: int, x, y: float32) = ui[].scrollTo(key, x, y)

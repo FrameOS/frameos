@@ -105,10 +105,11 @@ text" below for text a line at a time). Asset
 paths are relative to the frame's assets folder; nothing outside it
 resolves, and a symlink inside it is not a way out. What the app may do
 there is its `config.json` `"permissions"` list: `"assets"` to read,
-`"assets-write"` to also write and delete. Saving the scene fills the list
-from the code (the read calls, and `writeAsset`, `appendAsset`,
-`deleteAsset` or a stream opened with `"w"` or `"a"`), replacing whatever
-it said before. The frame gives the app exactly its list
+`"assets-write"` to also write and delete, and `"frame"` for `frameos.frame`
+(the frame page's facts and powers, `docs/terminal.md`). Saving the scene
+fills the list from the code (the read calls, and `writeAsset`,
+`appendAsset`, `deleteAsset` or a stream opened with `"w"` or `"a"`, and
+`frameos.frame(`), replacing whatever it said before. The frame gives the app exactly its list
 (`frameos/src/frameos/js_runtime/app_runtime.nim`): with neither, the
 asset calls live in the scene's own `scenes/<sceneId>/` folder; with
 `"assets"` alone, writes are refused. An app with no list asks for nothing

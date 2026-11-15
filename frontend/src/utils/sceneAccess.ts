@@ -5,8 +5,9 @@
  * for, nothing more. Code nodes cannot touch files and ask for nothing. The
  * API keys an app reads (its config.json `"settings"`) show the same way.
  * Every surface shows the union as tags ("runs shell commands", "reads all
- * files", "reads assets folder", "writes assets folder", "uses OpenAI key"),
- * and installing a scene that shows them is the approval.
+ * files", "reads assets folder", "writes assets folder", "changes frame
+ * settings", "uses OpenAI key"), and installing a scene that shows them is
+ * the approval.
  *
  * A JavaScript app's list is set from its code whenever the scene is saved
  * (`withAppPermissions`), so it follows the code. The frame gives each JS app
@@ -26,9 +27,13 @@
  * under its stricter tsconfig.
  */
 
-/** What an app may ask for. A write only ever lands inside the assets folder, so "files" covers reading the assets folder but never writing it. */
-export type ScenePermission = 'shell' | 'files' | 'assets' | 'assets-write'
-export const SCENE_PERMISSIONS: readonly ScenePermission[] = ['shell', 'files', 'assets', 'assets-write']
+/**
+ * What an app may ask for. A write only ever lands inside the assets folder, so "files" covers reading the assets folder
+ * but never writing it. "frame" is `frameos.frame`: the frame page's facts and powers (Wi-Fi, rotation, scale, render,
+ * restart, reboot) and an ESP32's serial console, while the frame page is allowed on the screen (docs/terminal.md).
+ */
+export type ScenePermission = 'shell' | 'files' | 'assets' | 'assets-write' | 'frame'
+export const SCENE_PERMISSIONS: readonly ScenePermission[] = ['shell', 'files', 'assets', 'assets-write', 'frame']
 
 /** "Uses your <service> key": a settings namespace an app reads with getSetting. */
 export type SceneKeyFlag = `key:${string}`
@@ -39,6 +44,7 @@ const permissionLabels: Record<ScenePermission, string> = {
   files: 'reads all files',
   assets: 'reads assets folder',
   'assets-write': 'writes assets folder',
+  frame: 'changes frame settings',
 }
 
 const permissionDescriptions: Record<ScenePermission, string> = {
@@ -47,6 +53,8 @@ const permissionDescriptions: Record<ScenePermission, string> = {
   assets: "This scene reads the frame's assets folder: uploaded photos, fonts and what other scenes saved there.",
   'assets-write':
     "This scene writes and deletes files in the frame's assets folder, where your uploaded photos and other scenes' files are.",
+  frame:
+    "This scene can change the frame's Wi-Fi, rotation and scale, restart or reboot it, and run its console commands on an ESP32, as the frame's settings on its screen can.",
 }
 
 /** The services behind the settings namespaces apps declare (secretSettings.ts takes its titles from here). */
@@ -92,7 +100,7 @@ export function sceneAccessFlagDescription(flag: SceneAccessFlag): string {
 
 /** The permissions that reach past the frame's own data: red tags, and a red button when an update gains one. */
 export function sceneAccessFlagIsRisky(flag: SceneAccessFlag): boolean {
-  return flag === 'shell' || flag === 'files' || flag === 'assets-write'
+  return flag === 'shell' || flag === 'files' || flag === 'assets-write' || flag === 'frame'
 }
 
 /**
@@ -133,6 +141,9 @@ const assetReadCallPattern = /\b(listAssets|assetExists|assetSize|readAsset|load
 const assetWriteCallPattern = /\b(writeAsset|appendAsset|deleteAsset)\b/
 const assetStreamPattern = /\bopenAssetStream\b/g
 // A literal stream mode: 'r', "r" or `r` (escaped to \"r\" inside JSON text).
+// `frameos.frame(...)`: the frame page's powers. Named with its object, as a
+// bare `frame` is any word.
+const frameCallPattern = /\bframeos\s*\.\s*frame\s*\(/
 const literalStreamModePattern = /^\\?(["'`])([rwa])\\?\1$/
 
 /**
@@ -237,7 +248,7 @@ interface SourceDetection {
 // replaces the object).
 const detectionCache = new WeakMap<object, SourceDetection>()
 
-/** What an app's own files reach for: asset calls in its JavaScript, process APIs in a legacy Nim app. */
+/** What an app's own files reach for: asset and frame calls in its JavaScript, process APIs in a legacy Nim app. */
 function detectSources(sources: Record<string, string>, cacheKey: object | null): SourceDetection {
   const cached = cacheKey ? detectionCache.get(cacheKey) : undefined
   if (cached) {
@@ -246,6 +257,7 @@ function detectSources(sources: Record<string, string>, cacheKey: object | null)
   let readCall: string | null = null
   let writeCall: string | null = null
   let shell = false
+  let frame = false
   for (const [name, text] of Object.entries(sources)) {
     if (name.endsWith('.nim')) {
       shell = shell || nimShellPattern.test(text)
@@ -254,6 +266,7 @@ function detectSources(sources: Record<string, string>, cacheKey: object | null)
     if (!javascriptSourcePattern.test(name)) {
       continue
     }
+    frame = frame || frameCallPattern.test(text)
     readCall = readCall ?? assetReadCallPattern.exec(text)?.[1] ?? null
     writeCall = writeCall ?? assetWriteCallPattern.exec(text)?.[1] ?? null
     for (const stream of text.matchAll(assetStreamPattern)) {
@@ -279,6 +292,10 @@ function detectSources(sources: Record<string, string>, cacheKey: object | null)
   if (writeCall) {
     found.push('assets-write')
     reasons.push(`calls frameos.${writeCall}`)
+  }
+  if (frame) {
+    found.push('frame')
+    reasons.push('calls frameos.frame')
   }
   const detection = { detected: orderedPermissions(found), reasons }
   if (cacheKey) {
