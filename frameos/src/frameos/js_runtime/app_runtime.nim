@@ -1495,6 +1495,16 @@ when defined(freertos):
   proc fos_client_battery_percent(): cint {.importc, cdecl.}
   proc fos_client_wifi_rssi(): cint {.importc, cdecl.}
 
+when not defined(frameosEmbedded):
+  var
+    layoutWrappedSceneId*: proc(owner: FrameScene): string {.nimcall.}
+      ## Set by the interpreter: the id of the scene a layout wraps, else the
+      ## scene's own (`app.frame.sceneId`).
+    windowSceneListing* {.threadvar.}: proc(): JsonNode {.closure, gcsafe.}
+      ## Set by a host that runs a frame's scenes side by side (runner.nim):
+      ## the scenes a layout can open in windows, `[{id, name}]` in the
+      ## frame's order (`app.frame.scenes`). Unset, a layout shows one scene.
+
 proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
   if e == nil:
@@ -1559,6 +1569,18 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
         return nimIntToJS(ctx, rssi.int32)
     return jsUndefSentinel(ctx)
   else:
+    when not defined(frameosEmbedded):
+      case toNimString(ctx, key)
+      of "sceneId":
+        # A layout's is the id of the scene it wraps, the one its <yield /> shows.
+        if not e.owner.scene.isNil and not layoutWrappedSceneId.isNil:
+          return nimStringToJS(ctx, layoutWrappedSceneId(e.owner.scene))
+      of "scenes":
+        # The scenes a layout can open side by side: not on every host.
+        if not windowSceneListing.isNil:
+          return jsonToJS(ctx, windowSceneListing())
+      else:
+        discard
     return jsUndefSentinel(ctx)
 
 proc jsGetAppContext(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
@@ -1631,6 +1653,10 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale", "paper",
       "color", "sceneName", "systemScene", "batteryPercent", "wifiRssi"]
+    when not defined(frameosEmbedded):
+      keys.add("sceneId")
+      if not windowSceneListing.isNil:
+        keys.add("scenes")
   of "context":
     keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep"]
     if e.context.hasImage and not e.context.image.isNil:
@@ -3052,6 +3078,13 @@ proc holesOf(owner: AppRoot, context: ExecutionContext, target: UiTarget,
     h.bottom = placed(h.y + h.h, regionScale, requestedHeight).int32
     if h.right <= h.left or h.bottom <= h.top:
       h.clean = false
+    when not defined(frameosEmbedded):
+      # Past the canvas's edge, any of the four (a window dragged half off a
+      # desktop): clamped, the scene would be squeezed into what shows. A
+      # picture is cut instead.
+      if h.x < 0 or h.y < 0 or round((h.x + h.w) * regionScale).int > requestedWidth or
+          round((h.y + h.h) * regionScale).int > requestedHeight:
+        h.clean = false
 
 proc noteHoles(scene: FrameScene, holes: UiHoles) =
   ## Holes that moved, came or went leave nothing the canvas can be trusted

@@ -99,11 +99,15 @@ def check_runtime_matches(api: str) -> None:
             "the runtime's frameos object and appTypeDeclarations.ts disagree: "
             f"only in the runtime {sorted(prelude - declared)}, only declared {sorted(declared - prelude)}"
         )
-    frame_keys = re.search(r'of "frame":\s*\n\s*keys = @\[([^\]]*)\]', runtime)
+    frame_keys = re.search(r'of "frame":\s*\n\s*keys = @\[([^\]]*)\]((?:\n(?!  of )[^\n]*)*)', runtime)
     if not frame_keys:
         fail("cannot find the runtime's app.frame keys")
+    # The list, and what is added to it where only some hosts have a key.
     runtime_frame = set(re.findall(r'"(\w+)"', frame_keys.group(1)))
-    declared_frame = set(re.findall(r"(\w+)\??: ", block(api, "  frame: {", "\n  };").split("\n", 1)[1]))
+    runtime_frame |= set(re.findall(r'keys\.add\("(\w+)"\)', frame_keys.group(2)))
+    # A key's own type may be an object ({ id: string }): its members are not keys.
+    frame_block = re.sub(r"\{[^{}\n]*\}", "{}", block(api, "  frame: {", "\n  };").split("\n", 1)[1])
+    declared_frame = set(re.findall(r"(\w+)\??: ", frame_block))
     if runtime_frame != declared_frame:
         fail(
             "the runtime's app.frame keys and appTypeDeclarations.ts disagree: "

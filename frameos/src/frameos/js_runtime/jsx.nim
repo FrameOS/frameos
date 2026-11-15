@@ -174,8 +174,33 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
       if jsIsString(text):
         json = toNimString(ctx, text)
       JS_FreeValue(ctx, text)
+    when not defined(frameosEmbedded):
+      # A handler on a <Scene> (`onPointerDown`) is the layout's, not a prop of
+      # the scene (JSON leaves functions out, so it makes no copy): it runs when
+      # the event reaches the scene there (interpreter.routePointer), so a
+      # layout hears that a press went into one of its scenes.
+      var handlers: seq[(string, string)]
+      if jsIsObject(props):
+        var
+          tab: ptr UncheckedArray[JSPropertyEnum]
+          count: uint32
+        if JS_GetOwnPropertyNames(ctx, addr tab, addr count, props, (JS_GPN_STRING_MASK or JS_GPN_ENUM_ONLY).cint) == 0:
+          for i in 0 ..< count.int:
+            let raw = JS_AtomToCString(ctx, tab[i].atom)
+            let name = $raw
+            JS_FreeCString(ctx, raw)
+            if name.len > 2 and name[0] == 'o' and name[1] == 'n' and name[2] in {'A' .. 'Z'}:
+              let value = JS_GetProperty(ctx, props, tab[i].atom)
+              if JS_IsFunction(ctx, value) != 0:
+                discard JS_SetPropertyUint32(ctx, r.handlers, r.handlerCount.uint32, JS_DupValue(ctx, value))
+                handlers.add((attrName(name), $r.handlerCount))
+                inc r.handlerCount
+              JS_FreeValue(ctx, value)
+          JS_FreePropertyEnum(ctx, tab, count)
     JS_FreeValue(ctx, props)
     node.attrs = @[("id", if node.tag == "yield": SceneYieldTag else: id), ("props", json)]
+    when not defined(frameosEmbedded):
+      node.attrs.add handlers
     node.tag = "Scene"
     into.add node
     return

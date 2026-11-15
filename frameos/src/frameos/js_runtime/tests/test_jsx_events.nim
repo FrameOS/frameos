@@ -623,7 +623,7 @@ suite "jsx textareas":
     # A wheel over the list scrolls the list; the field lets go of the
     # keyboard and keeps its scroll.
     check dispatchUiEvent(id, "wheel", %*{"x": 100, "y": 200, "deltaY": 1, "pointerId": 0, "pointerType": "mouse"})
-    check target.input.scrolled(listKey)[1] == 48
+    check target.input.scrolled(listKey)[1] == 72 # a notch: about three lines
     check dispatchUiEvent(id, "keyDown", %*{"key": "Escape", "code": "Escape"})
     discard ui.render()
     check target.input.focus == 0 and target.input.scrolled(areaKey)[1] > 0
