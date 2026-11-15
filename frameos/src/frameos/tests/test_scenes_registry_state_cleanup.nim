@@ -133,6 +133,17 @@ suite "scene registry and cleanup helpers":
     check allStates.hasKey("keep")
     check not allStates.hasKey("remove")
 
+  test "a scene's own settings window is an export the runner can show":
+    # On a desktop each scene's settings open as `system/sceneSettings#<scene>`
+    # (event_loop.settingsWindows); the runner records the scene it shows, and
+    # until this raised "Scene not exported" on every one of them.
+    let window = "system/sceneSettings#keep".SceneId
+    check hasExportedScene(window)
+    check findExportedScene(window).isSome
+    setLastPublicSceneId(window)
+    check shownSceneId() == window
+    check not hasExportedScene("system/sceneSettings#".SceneId)
+
   test "an older runtime's uploaded state moves to the scene's own file at boot":
     # Before 2026.10.18 an uploaded scene ran as "uploaded/<id>" and kept its
     # state in scene-uploaded_<id>.json.

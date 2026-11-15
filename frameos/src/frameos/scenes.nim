@@ -162,8 +162,11 @@ proc currentExportedScenesGeneration*(): int =
     return exportedScenesGeneration
 
 proc hasExportedScene*(sceneId: SceneId): bool =
+  ## Whether `findExportedScene` finds one: a scene's own settings on a desktop
+  ## (`system/sceneSettings#<scene>`) are an instance of the settings' export.
   withLock sceneRegistryLock:
-    return exportedScenes.hasKey(sceneId)
+    return exportedScenes.hasKey(sceneId) or
+      (isSceneSettings(sceneId.string) and exportedScenes.hasKey(SceneSettingsId.SceneId))
 
 # Snapshot exported scene refs under the registry lock so reload can swap tables safely.
 proc findExportedScene*(sceneId: SceneId): Option[ExportedScene] =
