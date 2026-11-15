@@ -615,6 +615,16 @@ void fos_nim_fatal_oom(size_t size)
 
 static int s_frame_width = 0;
 static int s_frame_height = 0;
+/* What the render canvas needs from the heap, as the runtime made it
+ * (embedded_runtime.nim renderCanvas): 0 when it lives in the panel buffer or
+ * the block reserved at boot, its packed size otherwise. SIZE_MAX until the
+ * first canvas: then a whole RGBX frame is assumed, as before. */
+static size_t s_canvas_heap_bytes = SIZE_MAX;
+
+void frameos_nim_set_canvas_heap_bytes(size_t bytes)
+{
+    s_canvas_heap_bytes = bytes;
+}
 static unsigned s_nim_oom_abort_streak = 0;
 static size_t s_psram_free_baseline = 0;
 
@@ -646,7 +656,14 @@ static void nim_oom_abort_note(const char *what)
     int http_released = 0;
     int js_dropped = fos_nim_recover_oom_abort_impl(&js_bytes, &http_released);
     s_nim_oom_abort_streak++;
-    size_t canvas_bytes = (size_t)s_frame_width * (size_t)s_frame_height * 4u;
+    /* The canvas a render needs, in its own format and only if it comes from
+     * the heap: w x h x 4 regardless was 10.5 MB on the sixteen-grey E1003,
+     * whose 1.3 MB canvas is the panel buffer, so `canvas_impossible` was
+     * always true there and any two aborts in a row restarted the frame (the
+     * hardware bench, 2026-11-15). */
+    size_t canvas_bytes = s_canvas_heap_bytes != SIZE_MAX
+        ? s_canvas_heap_bytes
+        : (size_t)s_frame_width * (size_t)s_frame_height * 4u;
     size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     bool canvas_impossible = canvas_bytes > 0 && largest < canvas_bytes;

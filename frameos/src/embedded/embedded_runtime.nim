@@ -1048,6 +1048,11 @@ proc renderCanvasIsPanel*(image: Image): bool =
   ## there, it is already packed.
   not image.isNil and not panelTarget.isNil and image.bufferPointer == panelTarget
 
+proc frameos_nim_set_canvas_heap_bytes(bytes: csize_t) {.importc, cdecl.}
+
+proc setCanvasHeapBytes(bytes: int) =
+  frameos_nim_set_canvas_heap_bytes(csize_t(max(bytes, 0)))
+
 proc renderCanvas*(): Image =
   ## The canvas the next render draws into, at the scene's (rotated)
   ## dimensions. Made on first use, reused for every render after. The
@@ -1058,6 +1063,7 @@ proc renderCanvas*(): Image =
     format = sceneCanvasFormat()
   let direct = panelCanvas(width, height, format)
   if not direct.isNil:
+    setCanvasHeapBytes(0)
     return direct
   if not sceneCanvas.isNil and sceneCanvas.width == width and
       sceneCanvas.height == height and sceneCanvas.format == format:
@@ -1069,6 +1075,9 @@ proc renderCanvas*(): Image =
     of pfGray4: ((width + 1) div 2) * height
     of pfRgbx: width * height * 4
   let buffer = canvasBuffer(csize_t(canvasBytes))
+  # The OOM restart policy asks whether a canvas could still be made:
+  # nothing to make when it has a reserved block, its own size otherwise.
+  setCanvasHeapBytes(if buffer != nil: 0 else: canvasBytes)
   if buffer != nil:
     sceneCanvas =
       case format
