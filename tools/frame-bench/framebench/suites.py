@@ -338,8 +338,9 @@ def suite_storm(ctx, frame):
                       'internalFree': (st.get('memory') or {}).get('internalFree')}, 'issues': issues}
 
 
-def suite_soak(ctx, frame, rounds=3):
+def suite_soak(ctx, frame, rounds=None):
     """Every scene once per round; memory after each round. A steady fall is a leak."""
+    rounds = rounds or getattr(ctx, 'soak_rounds', 3)
     con = ctx.console(frame)
     scenes = [s for s in scene_list(con) if not s.get('isLayout')]
     if ctx.quick:
