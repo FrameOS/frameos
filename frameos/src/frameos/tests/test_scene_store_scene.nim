@@ -3,7 +3,7 @@
 ## comes back to. The covers are data URLs, so nothing reaches the network.
 ## FRAMEOS_STORE_SHOTS=<dir> writes each picture there.
 
-import std/[base64, json, os, strutils, unittest]
+import std/[base64, json, monotimes, os, strutils, times, unittest]
 import pixie
 import ../channels
 import ../interpreter
@@ -11,6 +11,7 @@ import ../scene_rhythm
 import ../scene_store_hooks
 import ../types
 import ../js_runtime/app_runtime
+import ../js_runtime/js_io
 import ../utils/http_client
 
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
@@ -28,13 +29,28 @@ var
     "params": "", "listing": nil, "installed": [], "preview": nil, "removeAny": false}
   asked: seq[(string, string, JsonNode)]
 
+var networkCovers = false
+  ## Covers as https URLs the request workers answer (jsIoHook), after a
+  ## while, as a CDN does; data URLs otherwise.
+
+let coverPng = block:
+  let image = newImage(80, 60)
+  image.fill(parseHtmlColor("#ef4444").rgbx)
+  image.encodeImage(PngFormat)
+
+jsIoHook = proc(request: JsIoRequest): JsIoResult {.gcsafe, nimcall.} =
+  sleep(150)
+  {.cast(gcsafe).}:
+    JsIoResult(code: 200, body: coverPng)
+
 proc listing(names: openArray[string], more = false, categories = true): JsonNode =
   result = %*{"page": 1, "more": more, "scenes": []}
   for i, name in names:
     result["scenes"].add %*{"id": "0000000" & $i & "-0000-4000-8000-00000000000" & $i, "name": name,
       "category": (if i == 0: "realtime" else: "weather"), "version": 3, "by": "FrameOS",
       "about": name & " on the frame, all day long.",
-      "image": coverUrl(["#ef4444", "#22c55e", "#3b82f6", "#eab308", "#a855f7", "#14b8a6"][i mod 6])}
+      "image": (if networkCovers: "https://cdn.test/cover" & $i & ".png"
+                else: coverUrl(["#ef4444", "#22c55e", "#3b82f6", "#eab308", "#a855f7", "#14b8a6"][i mod 6]))}
   if categories:
     result["categories"] = %*[{"slug": "photos", "title": "Photos"}, {"slug": "weather", "title": "Weather"},
       {"slug": "realtime", "title": "Real time"}, {"slug": "layouts", "title": "Layouts"}]
@@ -114,16 +130,78 @@ suite "the Scene store scene":
 
     facts["params"] = %params
     facts["listing"] = listing(["Bouncing logo", "Rain radar", "Forecast", "Moon", "Tides", "Sunrise"], more = true)
+    # Data URL covers are there at once (frameos.useImage); covers from the
+    # network are the test below.
     let first = draw(scene, config, "page")
-    # Covers come one a pass after the page shows: the first pass draws none.
-    discard draw(scene, config, "cover-1")
-    for i in 0 ..< 6:
-      discard draw(scene, config, "covers")
     # The next page is asked for while nothing else runs.
     check asked[^1][1] == "browse" and "page=2" in asked[^1][2]{"params"}.getStr()
     check problems.len == 0
     if problems.len > 0: echo problems
     check first.width == 800
+
+  test "covers from the network come off the render, all at once, and a tap does not wait for them":
+    asked = @[]
+    problems = @[]
+    networkCovers = true
+    defer: networkCovers = false
+    let config = frame(800, 480)
+    let scene = load(config)
+    facts["params"] = %""
+    facts["listing"] = newJNull()
+    discard draw(scene, config, "net-loading")
+    let params = asked[^1][2]{"params"}.getStr()
+    facts["params"] = %params
+    facts["listing"] = listing(["Bouncing logo", "Rain radar", "Forecast", "Moon", "Tides", "Sunrise"], more = true)
+    while eventChannel.tryRecv()[0]: discard
+    var started = getMonoTime()
+    discard draw(scene, config, "net-placeholders")
+    let placeholderMs = (getMonoTime() - started).inMilliseconds
+    # Six 150 ms downloads: one after the other in the render, this was a
+    # second, and a pass per cover.
+    check placeholderMs < 150
+    check jsIoInFlight() == 6
+    # A tap while they download is answered at once: the first card.
+    started = getMonoTime()
+    scene.tap(300, 150)
+    discard draw(scene, config, "net-detail")
+    check (getMonoTime() - started).inMilliseconds < 150
+    check scene.state{"spot"}{"detail"}{"name"}.getStr() == "Bouncing logo"
+    # Back to the grid; the covers land together and the scene asks to be
+    # drawn again.
+    var spot = scene.state{"spot"}
+    spot["detail"] = newJNull()
+    scene.state["spot"] = spot
+    started = getMonoTime()
+    var rendersAsked = 0
+    while (getMonoTime() - started).inMilliseconds < 3000:
+      discard pumpJsAsync()
+      while true:
+        let (ok, message) = eventChannel.tryRecv()
+        if not ok: break
+        if message[1] == "render": inc rendersAsked
+      if jsAsyncPending() == 0: break
+      sleep(5)
+    check jsAsyncPending() == 0
+    check rendersAsked >= 1
+    check (getMonoTime() - started).inMilliseconds < 1000
+    started = getMonoTime()
+    let withCovers = draw(scene, config, "net-covers")
+    let coversMs = (getMonoTime() - started).inMilliseconds
+    var red = 0
+    for y in 60 ..< 240:
+      for x in 230 ..< 420:
+        let c = withCovers[x, y]
+        if c.r > 200 and c.g < 100 and c.b < 100: inc red
+    check red > 1000
+    # What a render of the page costs once nothing downloads.
+    started = getMonoTime()
+    discard draw(scene, config, "net-again")
+    echo "  placeholders ", placeholderMs, " ms, with covers ", coversMs, " ms, again ",
+      (getMonoTime() - started).inMilliseconds, " ms"
+    check jsIoInFlight() == 0
+    check problems.len == 0
+    if problems.len > 0: echo problems
+    facts["listing"] = listing(["Bouncing logo", "Rain radar", "Forecast", "Moon", "Tides", "Sunrise"], more = true)
 
   test "opens a scene's page, installs it without leaving, and comes back to the same spot":
     asked = @[]

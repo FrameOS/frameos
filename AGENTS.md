@@ -779,18 +779,25 @@
   `appTypeDeclarations.ts`. A reader lives for the call that opened it, and a
   temp file stays on the card while a reader holds its spool.
 
-## Background JavaScript: `docs/background-js.md`
+## Async JavaScript: `docs/async-js.md`
 
-- Experimental, Pi only (`jsBackgroundOn` in `js_runtime/app_runtime.nim`): an
-  app's `export async function background(app)` and the promises
-  `frameos.fetch` / `frameos.sleep`. Every interpreter stays on the runner
-  thread; a request goes to `js_runtime/js_io.nim`'s workers as values and its
-  answer comes back the same way, and `pumpJsBackground` in the runner's
-  message loop settles promises between renders, each stretch of code up to
-  its next await bounded (`JsBackgroundSliceMs`). The JS half is a script of
-  its own after the prelude, so the firmware's prelude bytecode and image do
-  not change. Not in the scene guide or `appTypeDeclarations.ts` yet: making
-  it public is those two plus the AI evals.
+- Experimental, on a Pi and on an ESP32 that stays awake: `fetch` (a
+  `Response`), the timers, `frameos.sleep` / `loadImage` (promises), the hooks
+  `frameos.useImage` / `useFetch` for `get()`, and an app's `export async
+  function background(app)`. Every interpreter stays on the thread that
+  renders; a request goes to the I/O as values (`js_runtime/js_io.nim`: a Pi's
+  four worker threads, an ESP32's on-demand task
+  `components/frameos_nim/fos_js_io.c`, one TLS session at a time) and its
+  answer comes back the same way. `pumpJsAsync` (`js_runtime/js_async.nim`)
+  settles promises between renders: the Pi runner's message loop, the ESP32's
+  `frameos_nim_tick` in the idle wait. A runtime nothing pumps (`asyncPumped`
+  false: wasm, a deep sleeper) answers the same calls blocking, so a scene
+  written with the hooks works everywhere. A slow scene is usually a render
+  waiting on the network: move the wait into a hook or `background()`, never
+  a `setNextSleep` loop around a synchronous `fetchImage` (what froze the
+  Scene store, 2026-11-15). Not in the scene guide or
+  `appTypeDeclarations.ts` yet: making it public is those two plus the AI
+  evals.
 
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 

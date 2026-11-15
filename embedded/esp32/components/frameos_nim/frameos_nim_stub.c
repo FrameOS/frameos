@@ -124,6 +124,7 @@ bool frameos_nim_press_taken(int wire_x, int wire_y)
     return false;
 }
 bool frameos_nim_tick(void) { return false; }
+int frameos_nim_next_async_ms(void) { return -1; }
 bool frameos_nim_send_event(uint32_t origin, const char *event, const char *payload_json)
 {
     (void)origin; (void)event; (void)payload_json;

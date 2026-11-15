@@ -4097,6 +4097,13 @@ static void client_task(void *arg)
              * the tap and its `longPress`es on each second, and only the
              * process_events below delivers them. */
             uint32_t max_slice = fos_buttons_busy() ? 50 : 1000;
+            /* A JS app's timer (docs/async-js.md) is run by the tick below,
+             * on time: the slice ends when it is due. A request's answer
+             * wakes the wait itself (fos_js_io.c). */
+            if (renders_locally(config)) {
+                int async_ms = frameos_nim_next_async_ms();
+                if (async_ms >= 0 && (uint32_t)async_ms < max_slice) max_slice = async_ms > 0 ? (uint32_t)async_ms : 1;
+            }
             /* The interval ran out while the panel still refreshes on the
              * display's task (fos_display_blit): the timed render waits for
              * the glass, in quarter seconds that keep serving keys and

@@ -636,6 +636,49 @@ when defined(frameosEmbedded) or defined(frameosWasm):
         copyMem(addr result[pos], chunk.data, chunk.len)
         pos += chunk.len
 
+  proc httpBufferText*(response: BoundedHttpBufferResponse): string =
+    ## A buffered body as one string (the caller still frees the buffer).
+    bufferChunksToString(response)
+
+  proc encodeHttpHeaders*(headers: seq[SimpleHttpHeader]): string =
+    ## The glue's header block, for a request made on another task
+    ## (js_runtime/js_io.nim).
+    encodeSimpleHeaders(headers)
+
+  when defined(frameosEmbedded):
+    proc adoptHttpChunks*(status: int, rawChunks: pointer, count: csize_t):
+        tuple[response: BoundedHttpBufferResponse, error: string] =
+      ## A chunked body another task downloaded with the glue
+      ## (components/frameos_nim/fos_js_io.c), as boundedRequestBuffer hands one back: freed
+      ## with freeHttpBufferResponse, and released by releaseStrandedHttp if
+      ## an out-of-memory abort skips that. Status 0 is no answer at all: the
+      ## one chunk is the reason, returned as `error` and freed here.
+      let raw = cast[ptr UncheckedArray[FosNimHttpChunk]](rawChunks)
+      if status == 0:
+        if raw != nil:
+          if count > 0 and raw[0].len > 0:
+            result.error = newString(raw[0].len.int)
+            copyMem(addr result.error[0], raw[0].data, raw[0].len.int)
+          fos_nim_http_free_chunks(rawChunks, count)
+        if result.error.len == 0:
+          result.error = "request failed"
+        return
+      result.response.code = status
+      result.response.status = $status
+      if raw == nil:
+        return
+      heldBodyChunks.add((rawChunks, count))
+      result.response.rawChunks = rawChunks
+      result.response.rawChunkCount = count
+      result.response.chunks = newSeq[HttpBodyChunk](count.int)
+      var total = 0
+      for i in 0 ..< count.int:
+        result.response.chunks[i] = HttpBodyChunk(data: raw[i].data, len: raw[i].len.int)
+        total += raw[i].len.int
+      result.response.bodyLen = total
+      if count == 1:
+        result.response.body = raw[0].data
+
   proc boundedGetSpool*(
       url: string,
       timeoutMs = DefaultFetchTimeoutMs,

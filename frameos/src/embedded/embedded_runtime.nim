@@ -473,6 +473,10 @@ proc fos_nim_set_keep_js_impl(keep: cint) {.exportc, cdecl.} =
   ## own interval as the fastest it wakes.
   rhythmHoldFloor = keep == 0
   host.keepJsRuntimes = keep != 0
+  # Async JavaScript (docs/async-js.md) needs interpreters that outlive the
+  # render and an idle wait to pump them in: on a deep sleeper the promises
+  # would go with the boot, so fetch and the hooks block there instead.
+  asyncPumped = keep != 0
 
 proc fos_nim_js_runtime_bytes_impl(): csize_t {.exportc, cdecl.} =
   ## What the live JS app interpreters hold, for the render:animation line.

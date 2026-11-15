@@ -1,4 +1,4 @@
-import std/[algorithm, base64, json, monotimes, options, os, streams, strformat, strutils, tables, times]
+import std/[algorithm, base64, json, monotimes, options, os, sequtils, streams, strformat, strutils, tables, times]
 import frameos/utils/memory
 import pixie
 import pixie/fileformats/svg
@@ -53,6 +53,17 @@ type
     agRead       ## "assets" or "files": read the frame's folder, never change it
     agReadWrite  ## "assets-write": read and write the frame's folder
 
+  HookImageState = enum hsNone, hsLoading, hsReady, hsFailed
+  HookImage = object
+    ## A `frameos.useImage` picture (js_async.nim): loading, kept (`id`, a
+    ## kept picture of the app's; `answer` the JSON the hook returns), or
+    ## failed (asked again after a while).
+    key: string ## the url and the options
+    state: HookImageState
+    at: MonoTime
+    id: int
+    answer: string
+
   JsAppRuntime* = ref object
     category*: string
     outputType*: string
@@ -106,6 +117,8 @@ type
     spoolFields: Table[string, Spool]
     ## The line readers of the call in progress, closed when it returns.
     lineStreamIds: seq[int]
+    ## `frameos.useImage`'s pictures by url and options (js_async.nim).
+    hookImages: seq[HookImage]
 
   JsAppEvalEnv = ref object
     runtime: JsAppRuntime
@@ -170,6 +183,7 @@ proc teardownJsRuntime(runtime: JsAppRuntime) =
   runtime.js.close()
   runtime.ready = false
   runtime.initialized = false
+  runtime.hookImages.setLen(0)
   for canvas in runtime.canvases:
     unregisterCanvas(runtime.images.getOrDefault(canvas.id, nil))
   runtime.images.clear()
@@ -677,15 +691,6 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
       frameos_apps.logError(e.owner, "JS app httpRequest failed: " & message)
   return nimStringToJS(ctx, $response)
 
-const jsBackgroundOn* = not defined(frameosEmbedded) and not defined(frameosWasm)
-  ## Background JavaScript (docs/background-js.md): a Pi's runner keeps every
-  ## interpreter for its scene's life and has a loop to resume them between
-  ## renders. The firmware and the wasm runtime have neither (yet).
-
-when jsBackgroundOn:
-  proc closeLineStreams(runtime: JsAppRuntime)
-  include frameos/js_runtime/background_js
-
 const DecoderFits = ["cover", "contain", "stretch"]
   ## The placements a decode can honour while it streams into a target. The
   ## planner offers a JS node the consumer's target under EVERY placement
@@ -814,6 +819,8 @@ proc keptTargetFor*(runtime: JsAppRuntime, owner: AppRoot, like: Image,
     runtime.keptPictureTarget(owner, like, width, height,
       keptDecodeSize(width, height, sourceWidth, sourceHeight, fit))
 
+proc fetchImageJson(e: JsAppEvalEnv, urlStr: string, options: JsonNode, forceKeep = false): JsonNode
+
 proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## Downloads and decodes an image natively, so the bytes never enter the JS
   ## heap: a JS app gets back an image reference it returns as its output,
@@ -861,14 +868,15 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
   ## the call answers an error (keptPictureTarget). Without them it decodes
   ## at its own size.
   let e = env(ctx)
-  var response = %*{"image": newJNull()}
   if e == nil:
-    response["error"] = %*"no app context"
-    return nimStringToJS(ctx, $response)
+    return nimStringToJS(ctx, """{"image":null,"error":"no app context"}""")
+  nimStringToJS(ctx, $fetchImageJson(e, toNimString(ctx, url), optionsArg(ctx, optionsJson)))
 
-  let urlStr = toNimString(ctx, url)
-  var options = optionsArg(ctx, optionsJson)
-
+proc fetchImageJson(e: JsAppEvalEnv, urlStr: string, options: JsonNode, forceKeep = false): JsonNode =
+  ## fetchImage's work (jsFetchImage above), also for `frameos.useImage` and
+  ## `frameos.loadImage` where they block (js_async.nim): `keep` as the
+  ## option (`forceKeep`). The answer as JSON.
+  var response = %*{"image": newJNull()}
   try:
     var headers: seq[SimpleHttpHeader] = @[]
     let headersNode = options{"headers"}
@@ -893,7 +901,7 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
         setRenderPaletteOverride(colorProfile.get().palette)
       else:
         clearRenderPaletteOverride()
-    let keep = options{"keep"}.getBool(false)
+    let keep = forceKeep or options{"keep"}.getBool(false)
     var downloaded: tuple[image: Image, data: string]
     if keep:
       let
@@ -922,7 +930,7 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
         maxBytes = maxBytes, headers = headers)
     if downloaded.image.isNil:
       response["error"] = %*"the response was not an image this frame can decode"
-      return nimStringToJS(ctx, $response)
+      return response
 
     # A claimed target is the canvas on the ESP32: a mark an earlier image
     # left on it must not outlive that image.
@@ -961,7 +969,10 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
     let message = redactedUrlsIn(err.msg)
     response["error"] = %*message
     frameos_apps.logError(e.owner, "JS app fetchImage failed: " & message)
-  return nimStringToJS(ctx, $response)
+  response
+
+proc closeLineStreams(runtime: JsAppRuntime)
+include frameos/js_runtime/js_async
 
 proc assetsRoot(e: JsAppEvalEnv): string =
   ## The sandbox root for this app's asset calls: the frame-wide assets
@@ -2658,6 +2669,107 @@ const appJsPrelude* = compactJs("""
     log: frameos.log, info: frameos.log, debug: frameos.log, error: frameos.error,
     warn: (...args) => jsAppLog("warn", JSON.stringify(args, __jsReplacer)),
   };
+  // Async (docs/async-js.md, js_async.nim): promises the host settles by id
+  // between renders. Where nothing pumps them (jsAsyncMode() false: the
+  // preview, a board that sleeps) fetch and loadImage block and settle at once.
+  const __waits = new Map();
+  const __wait = (kind, arg, options, resolve, reject) => {
+    const id = jsAsyncStart(kind, arg, options);
+    if (id > 0) __waits.set(id, [resolve, reject]);
+    else reject(new Error(kind + " could not start"));
+    return id;
+  };
+  const __later = (kind, arg, options) => new Promise((ok, no) => __wait(kind, arg, options, ok, no));
+  globalThis.__frameosSettle = (id, text, failed) => {
+    const w = __waits.get(id);
+    if (!w) return;
+    __waits.delete(id);
+    if (failed) w[1](new Error(text));
+    else w[0](text ? JSON.parse(text) : undefined);
+  };
+  const __fetchInit = (init) => JSON.stringify({ method: init.method, headers: init.headers, timeoutMs: init.timeoutMs,
+    body: init.body == null || typeof init.body === "string" ? init.body : JSON.stringify(init.body) }, __jsReplacer);
+  const __response = (url, a) => {
+    if (!a.status) throw new TypeError("fetch failed: " + (a.error || url));
+    const body = a.body ?? "", h = a.headers || {};
+    return { ok: a.status > 199 && a.status < 300, status: a.status, statusText: "", url, redirected: false,
+      headers: { get: (n) => h[String(n).toLowerCase()] ?? null, has: (n) => String(n).toLowerCase() in h,
+        forEach: (f) => Object.keys(h).forEach((k) => f(h[k], k)) },
+      text: async () => body, json: async () => JSON.parse(body) };
+  };
+  globalThis.fetch = (input, init = {}) => {
+    const url = String((input && input.url) || input || ""), o = __fetchInit(init);
+    return jsAsyncMode() ? __later("fetch", url, o).then((a) => __response(url, a))
+      : new Promise((ok) => ok(__response(url, JSON.parse(jsHttpRequest(url, o) || "{}"))));
+  };
+  const __timers = new Map();
+  let __timerSeq = 0;
+  const __timer = (fn, ms, args, every) => {
+    const t = ++__timerSeq, s = String(Math.max(every ? 10 : 0, Number(ms) || 0) / 1000);
+    const arm = () => {
+      const id = __wait("sleep", s, "", () => {
+        if (!__timers.has(t)) return;
+        if (every) arm(); else __timers.delete(t);
+        fn(...args);
+      }, () => __timers.delete(t));
+      if (id) __timers.set(t, id);
+    };
+    arm();
+    return t;
+  };
+  globalThis.setTimeout = (fn, ms, ...args) => __timer(fn, ms, args, false);
+  globalThis.setInterval = (fn, ms, ...args) => __timer(fn, ms, args, true);
+  globalThis.clearTimeout = globalThis.clearInterval = (t) => {
+    const id = __timers.get(t);
+    __timers.delete(t);
+    if (id) { __waits.delete(id); jsAsyncCancel(id); }
+  };
+  frameos.sleep = (seconds) => __later("sleep", String(Number(seconds) || 0), "");
+  frameos.loadImage = (url, options) => {
+    const u = String(url || ""), o = JSON.stringify(options || {}, __jsReplacer);
+    if (jsAsyncMode()) return __later("image", u, o);
+    return new Promise((ok, no) => {
+      const r = frameos.fetchImage(u, { ...options, keep: true });
+      r.image ? ok(r) : no(new Error(r.error || "no image"));
+    });
+  };
+  frameos.useImage = (url, options) => JSON.parse(jsUseImage(String(url || ""), JSON.stringify(options || {}, __jsReplacer)));
+  const __fetched = new Map();
+  frameos.useFetch = (url, init = {}) => {
+    url = String(url || "");
+    const key = url + " " + JSON.stringify(init, __jsReplacer);
+    let s = __fetched.get(key);
+    if (s && (s.loading || !(init.maxAge > 0) || Date.now() - s.at < init.maxAge * 1000)) return s;
+    if (!s) {
+      if (__fetched.size >= 32) __fetched.delete(__fetched.keys().next().value);
+      __fetched.set(key, s = { data: undefined, error: undefined, status: 0, ok: false });
+    }
+    s.loading = true;
+    const take = (r, body) => {
+      s.status = r.status; s.ok = r.ok; s.error = undefined;
+      s.data = init.as === "text" ? body : JSON.parse(body);
+    };
+    const fail = (e) => { s.error = (e && e.message) || String(e); };
+    const end = () => { s.loading = false; s.at = Date.now(); };
+    if (!jsAsyncMode()) {
+      try {
+        const a = JSON.parse(jsHttpRequest(url, __fetchInit(init)) || "{}");
+        take(__response(url, a), a.body ?? "");
+      } catch (e) { fail(e); }
+      end();
+    } else {
+      fetch(url, init).then((r) => r.text().then((b) => take(r, b))).then(undefined, fail)
+        .then(() => { end(); frameos.dispatch("render"); });
+    }
+    return s;
+  };
+  globalThis.__frameosStartBackground = () => {
+    const fn = __frameosExports().background;
+    if (typeof fn !== "function") return false;
+    Promise.resolve().then(() => fn(globalThis.__frameosAppInstance, globalThis.__frameosContext))
+      .then(undefined, (e) => frameos.error("background() failed: " + ((e && e.message) || String(e))));
+    return true;
+  };
   globalThis.__frameosModule = {};
   const exports = globalThis.__frameosModule;
   function __frameosWrapApp(app) {
@@ -2782,16 +2894,14 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsGetAppFrame", jsGetAppFrame)
   runtime.js.registerFunction("jsGetAppContext", jsGetAppContext)
   runtime.js.registerFunction("jsGetAppKeys", jsGetAppKeys)
-  when jsBackgroundOn:
-    runtime.js.registerFunction("jsAsyncStart", jsAsyncStart)
+  runtime.js.registerFunction("jsAsyncStart", jsAsyncStart)
+  runtime.js.registerFunction("jsAsyncCancel", jsAsyncCancel)
+  runtime.js.registerFunction("jsAsyncMode", jsAsyncMode)
+  runtime.js.registerFunction("jsUseImage", jsUseImage)
   probe(phPrelude):
     evalAppPrelude(runtime.js)
     # The JSX factory in C (jsx_native.nim): every element of a UI's get().
     discard runtime.js.installNativeJsx()
-  when jsBackgroundOn:
-    # A script of its own after the prelude, not in it: the prelude is the
-    # firmware's bytecode too (evalAppPrelude), and the ESP32 has none of this.
-    discard runtime.js.eval(backgroundJsPrelude, "frameos-background.js")
   # The test harness, when this runtime runs an app's tests (app_tests.nim):
   # after the prelude so it can wrap `frameos`, before the module so the
   # module's describe() calls land in it.
@@ -3655,6 +3765,11 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
       var invoked: JSValue
       probe(phGet):
         invoked = callGlobalFunction(ctx, "__frameosInvoke", [fnNameValue])
+        # The microtask checkpoint at the end of a call, as a browser has at
+        # the end of a task: the callbacks of promises the call settled run
+        # now, while the bridge still knows whose call it is (a `fetch` that
+        # blocked where nothing pumps, docs/async-js.md, settles at once).
+        runtime.js.runPendingJobs()
       invoked
     finally:
       if jsAppEnvByCtx.hasKey(ctx):
@@ -3718,8 +3833,9 @@ proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
     let payload = runtime.invoke(owner, configJson, context, "init")
     JS_FreeValue(runtime.js.context, payload)
   runtime.initialized = true
-  when jsBackgroundOn:
-    runtime.startBackground(owner, configJson)
+  when jsAsyncOn:
+    if asyncPumped:
+      runtime.startBackground(owner, configJson)
 
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
   probe(phInit):

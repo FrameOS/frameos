@@ -190,10 +190,17 @@ scenes on disk. That is what "on frame" and Update are measured against.
   task and the page fills in when the answer comes (`pending`, then the host's
   render). Pages already seen are kept with `frameos.remember` (sixteen,
   fresh for five minutes, then asked again in the background), the next page
-  is asked for while nothing else runs, and the first pass of a page draws no
-  covers: one cover is decoded a pass after that (`setNextSleep(0.05)`), kept
-  at its card's size (`fetchImage` `keep`, up to 48 small pictures,
-  `docs/jsx-ui.md` "Photos that stay").
+  is asked for while nothing else runs, and the covers come through
+  `frameos.useImage` (`docs/async-js.md`): every card's picture downloads at
+  once off the render (a Pi's request workers, an ESP32's request task), the
+  page draws placeholders meanwhile, and it is drawn again as they land, so a
+  tap is never stuck behind a download. Each is kept at its card's size (up
+  to 48 small pictures, `docs/jsx-ui.md` "Photos that stay"). It loaded one
+  cover a pass inside the render before (`setNextSleep(0.05)`), which held
+  every tap behind a download: two seconds and more a pass on a Pi and on an
+  ESP32 (2026-11-15). A board that sleeps between renders, and the browser
+  preview, have no pump: there `useImage` fetches in the render (the preview
+  one picture a render).
 - **What this frame is** decides what it is offered: a panel that animates puts
   the Real time shelf first (`prefer=realtime` under Featured, the shelf right
   after Featured); e-paper is not offered it (`exclude=realtime`, no shelf),

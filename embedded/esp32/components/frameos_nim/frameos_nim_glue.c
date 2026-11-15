@@ -90,6 +90,7 @@ extern double fos_nim_next_sleep_impl(void);
 extern bool fos_nim_render_requested_impl(void);
 extern bool fos_nim_press_taken_impl(int wire_x, int wire_y);
 extern bool fos_nim_tick_impl(void);
+int fos_nim_next_async_ms_impl(void);
 extern int fos_nim_recover_oom_abort_impl(size_t *js_bytes, int *http_released);
 /* `origin` is the event's FOS_ORIGIN_* bit (main/fos_events_gen.h): who said
  * it, stamped by the producer's entry point and never read from the payload. */
@@ -1201,6 +1202,15 @@ bool frameos_nim_tick(void)
     s_nim_oom_jmp_armed = false;
     nim_lock_give();
     return made;
+}
+
+int frameos_nim_next_async_ms(void)
+{
+    if (!s_nim_ready) return -1;
+    if (!nim_lock_take_for(0)) return -1;
+    int ms = fos_nim_next_async_ms_impl();
+    nim_lock_give();
+    return ms;
 }
 
 bool frameos_nim_send_event_wait(uint32_t origin, const char *event, const char *payload_json,

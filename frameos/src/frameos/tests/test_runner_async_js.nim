@@ -1,4 +1,4 @@
-## Background JavaScript through the Pi's runner (docs/background-js.md): an
+## Async JavaScript through the Pi's runner (docs/async-js.md): an
 ## app's background() keeps running between renders on the runner's own loop,
 ## and when it asks for a render, it gets one, on a scene whose own interval
 ## is ten minutes and with nobody sending anything.
@@ -47,7 +47,7 @@ proc waitUntil(condition: proc(): bool {.closure.}, steps = 400, stepMs = 5): bo
     waitFor sleepAsync(stepMs)
   condition()
 
-suite "background JavaScript on the Pi's runner":
+suite "async JavaScript on the Pi's runner":
   test "background() runs between renders, and its render requests are answered":
     let sceneId = "tests/background/ticker".SceneId
     updateUploadedScenes(parseInterpretedScenes($(%*[ticker(sceneId.string)])))

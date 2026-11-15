@@ -1309,23 +1309,14 @@ when defined(frameosEmbedded):
            "width": target.width, "height": target.height})
     true
 
-  proc downloadImageFromResolvedBuffer(url: string, maxBytes: int, target: Image = nil,
-      headers: seq[SimpleHttpHeader] = @[], fit = fitCover,
-      boundWidth = 0, boundHeight = 0, targetFor: DecodeTargetProc = nil):
-      tuple[image: Image, data: string] =
+  proc decodeBufferedImage*(response: var BoundedHttpBufferResponse, target: Image = nil,
+      fit = fitCover, boundWidth = 0, boundHeight = 0,
+      targetFor: DecodeTargetProc = nil): Image =
+    ## A buffered body decoded, and the buffer freed: the second half of a
+    ## buffered download, and the whole of an answer the async I/O task
+    ## brought (js_runtime/js_async.nim). `targetFor` sizes the target from
+    ## the source's dimensions, as on the streamed path.
     var target = target
-    if boundWidth <= 0 and boundHeight <= 0:
-      if downloadImageStreamingInto(url, maxBytes, target, headers, fit, targetFor):
-        return (target, "")
-      # The socket stays open for the whole decode (30 s for a gallery JPEG
-      # on the E1004), so a Wi-Fi drop in that window cut the body and failed
-      # the picture: the buffered request below went out before the station
-      # was back (frame 70, 2026-10-17..21). Stream it once more instead; the
-      # open waits for the station (frameos_nim_glue.c, http_wait_for_wifi)
-      # within what is left of the render deadline.
-      if lastStreamCut and downloadImageStreamingInto(url, maxBytes, target, headers, fit, targetFor):
-        return (target, "")
-    var response = boundedRequestBuffer(url, maxBytes = maxBytes, headers = headers)
     if target.isNil and not targetFor.isNil and response.code < 400:
       # Sized by the source, as on the streamed path; a spilled body's start
       # is on the card, and the requested size stands for it.
@@ -1357,29 +1348,54 @@ when defined(frameosEmbedded):
       if response.code >= 400:
         raise newException(HttpRequestError, "HTTP " & response.status & httpErrorDetail(response))
       let intoTarget = not target.isNil and target.width > 0 and target.height > 0
+      # Views of the buffer for the closures below (a var parameter cannot be
+      # captured); freed with `response` in the finally.
+      let
+        chunks = response.chunks
+        body = response.body
+        bodyLen = response.bodyLen
       let image =
         if response.spillPath.len > 0:
           decodeSpilledImageInto(response.spillPath, response.bodyLen, target, fit)
-        elif response.chunks.len > 1:
+        elif chunks.len > 1:
           if intoTarget:
             # Budget refusals degrade to a reduced-resolution decode rather
             # than reaching the scene as an error frame.
             decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
-              discard decodeImageChunks(response.chunks, response.bodyLen, dst, fit))
+              discard decodeImageChunks(chunks, bodyLen, dst, fit))
           else:
-            decodeImageChunks(response.chunks, response.bodyLen, target, fit)
+            decodeImageChunks(chunks, bodyLen, target, fit)
         elif intoTarget:
           decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
-            discard decodeImageWithFallback(response.body, response.bodyLen, dst, fit))
+            discard decodeImageWithFallback(body, bodyLen, dst, fit))
         elif not target.isNil:
           decodeImageWithFallback(response.body, response.bodyLen, target, fit)
         elif boundWidth > 0 and boundHeight > 0:
           decodeBodyBounded(response.body, response.bodyLen, boundWidth, boundHeight)
         else:
           decodeImageWithFallback(response.body, response.bodyLen)
-      result = (image, "")
+      result = image
     finally:
       response.freeHttpBufferResponse()
+
+  proc downloadImageFromResolvedBuffer(url: string, maxBytes: int, target: Image = nil,
+      headers: seq[SimpleHttpHeader] = @[], fit = fitCover,
+      boundWidth = 0, boundHeight = 0, targetFor: DecodeTargetProc = nil):
+      tuple[image: Image, data: string] =
+    var target = target
+    if boundWidth <= 0 and boundHeight <= 0:
+      if downloadImageStreamingInto(url, maxBytes, target, headers, fit, targetFor):
+        return (target, "")
+      # The socket stays open for the whole decode (30 s for a gallery JPEG
+      # on the E1004), so a Wi-Fi drop in that window cut the body and failed
+      # the picture: the buffered request below went out before the station
+      # was back (frame 70, 2026-10-17..21). Stream it once more instead; the
+      # open waits for the station (frameos_nim_glue.c, http_wait_for_wifi)
+      # within what is left of the render deadline.
+      if lastStreamCut and downloadImageStreamingInto(url, maxBytes, target, headers, fit, targetFor):
+        return (target, "")
+    var response = boundedRequestBuffer(url, maxBytes = maxBytes, headers = headers)
+    (decodeBufferedImage(response, target, fit, boundWidth, boundHeight, targetFor), "")
 
   proc downloadImageFromBufferBounded(url: string, boundWidth, boundHeight,
       maxBytes: int, headers: seq[SimpleHttpHeader]):
@@ -1472,6 +1488,16 @@ proc downloadImageWithDataBounded*(url: string, boundWidth, boundHeight: int,
       raise newException(IOError, response.status)
     let content = response.body
     (decodeImageBounded(content, boundWidth, boundHeight), content)
+
+when not defined(frameosEmbedded):
+  proc decodeFetchedImage*(content: var string): Image =
+    ## A body a request brought, decoded as a host's download decodes one: an
+    ## SVG at its declared size, anything else at its own resolution (the
+    ## consumer scales). The async I/O's half of fetchImage on a Pi
+    ## (js_runtime/js_async.nim).
+    if looksLikeSvg(content):
+      return decodeImageWithFallback(content)
+    decodeImageWithDisplayBounds(content, maxEdge = 0, maxPixels = 0)
 
 proc downloadImageWithData*(url: string, maxBytes = MaxImageDownloadBytes,
     headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =
