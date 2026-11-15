@@ -421,3 +421,97 @@ block the_chrome_around_a_hole:
   doAssert corner[20, 40] == rgbx(255, 255, 255, 255)
 
 echo "svg frames in rectangles ok"
+
+
+block a_moving_logo_through_three_buffers:
+  # DVD Logo Bounce (the store scene) on a SenseCAP Indicator: a logo of three
+  # paths and its shadow, the same paths, moving at whole-millisecond
+  # fractions of a pixel each frame, through the LCD's three buffers with the
+  # device's coverage budget. pixie draws a moving path at the nearest
+  # quarter pixel (paths.nim snapMoving) to blend it from kept masks, up to
+  # 1/8 px from where damageRects measures it: the pixel of margin its
+  # paintBounds already gives every element takes that in, so no buffer
+  # gathers a trail of faint edge columns left outside the box that should
+  # have taken them away. Every frame comes out as a whole render, and after
+  # warming up the logo's fills come from its masks: the six fills were
+  # 19.8 ms of a 63 ms frame, each rasterized afresh at a new fraction
+  # (2026-11-15).
+  const
+    LW = 480
+    LH = 450
+    DvdPaths = [
+    "M108.605 58.081c1.766-2.129 11.285-13.399 11.285-13.399h35.936c18.197 0 30.922 9.53 28.012 21.776-2.906 12.247-20.248 21.778-38.359 21.778h-24.09l7.227-30.422H145.6l-4.949 20.833h3.812c10.139 0 19.738-3.697 21.756-12.189 1.854-7.798-4.873-12.188-15.791-12.188h-3.984l-16.529.014-39.02 44.041-15.324-43.274s-.112-.276-.254-.649c-.035-.089-.328-.397-.485-.338-.286.106-.24.603-.19.711.125.266.162.367.196.497 1.368 3.34 1.446 8.946.89 11.187-3.031 12.218-20.25 21.778-38.359 21.778h-24.09l7.228-30.422H37.49l-4.949 20.833h3.812c10.138 0 19.682-3.697 21.699-12.189 1.852-7.798-4.817-12.188-15.734-12.188h-3.985l-16.983-.008 2.277-9.58H46.13l29.846-.039v.039h12.289s3.469 10.161 4.545 13.236c5.149 14.707 4.297 15.702 4.297 15.702s-.619-.949 11.498-15.54z",
+    "M8.504 110.273c0-6.496 37.163-11.762 83.001-11.762 45.841 0 83.001 5.266 83.001 11.762 0 6.498-37.16 11.764-83.001 11.764-45.838 0-83.001-5.266-83.001-11.764zm79.997 4.153c10.47 0 18.954-1.754 18.954-3.922 0-2.164-8.484-3.92-18.954-3.92-10.467 0-18.952 1.756-18.952 3.92 0 2.168 8.485 3.922 18.952 3.922z",
+    "M36.536 142.711h.062l5.119-10.32h4.816l-8.93 15.722h-2.622l-8.777-15.722h4.816l5.516 10.32zM61.983 147.707h-4.481v-15.316h4.481v15.316zM74.993 132.391h6.399c6.645 0 11.095 3.311 11.095 7.678 0 4.307-4.573 7.639-11.125 7.639h-6.37v-15.317h.001zm4.479 12.714h.731c5.517 0 7.651-2.031 7.651-5.059 0-3.33-2.562-5.057-7.651-5.057h-.731v10.116zM108.914 134.99v3.371h7.131v2.604h-7.131v4.14h7.406v2.602h-11.886v-15.316h11.886v2.599h-7.406zM127.955 140.027c0-4.287 4.662-8.045 11.367-8.045 6.703 0 11.369 3.758 11.369 8.045 0 4.387-4.666 8.086-11.369 8.086-6.705 0-11.367-3.699-11.367-8.086zm4.633-.119c0 2.312 2.926 5.26 6.734 5.26s6.734-2.947 6.734-5.26c0-2.479-2.803-4.979-6.734-4.979-3.933.001-6.734 2.501-6.734 4.979z",
+    ]
+  proc mark(fill: string): string =
+    result = &"""<g fill="{fill}" fill-rule="evenodd">"""
+    for d in DvdPaths:
+      result.add &"""<path d="{d}"/>"""
+    result.add "</g>"
+  proc place(left, top, scale: float): string =
+    &"translate({left - 8 * scale:.2f} {top - 44 * scale:.2f}) scale({scale:.5f})"
+  proc logoFrame(i: int): string =
+    let
+      logoW = LW * 0.2
+      scale = logoW / 176
+      offsetY = (logoW * 0.62 - 104 * scale) / 2
+      shadow = LH.float * 0.009
+      x = 40.0 + i.float * 5.737
+      y = 60.0 + i.float * 4.191
+    &"""<svg xmlns="http://www.w3.org/2000/svg" width="{LW}" height="{LH}" viewBox="0 0 {LW} {LH}">""" &
+      &"""<rect x="0" y="0" width="{LW}" height="{LH}" fill="#090b14"/>""" &
+      &"""<g transform="{place(x + shadow, y + offsetY + shadow, scale)}" opacity="0.32">{mark("#000000")}</g>""" &
+      &"""<g transform="{place(x, y + offsetY, scale)}">{mark("#55dfff")}</g>""" &
+      # A bar on its own, its straight sides the edges of its damage box: a
+      # sliver of coverage along a whole side if a box missed it, where a
+      # curve's extremum leaves next to none.
+      &"""<g transform="translate({20 + i.float * 3.371:.2f} {300 + i.float * 1.113:.2f})">""" &
+      """<path d="M0 0.3H40.6V10H0Z" fill="#ffffff"/></g>""" &
+      "</svg>"
+  proc differs(a, b: Image): int =
+    ## Pixels further apart than a dithered store and a mask's rounding go.
+    for y in 0 ..< LH:
+      for x in 0 ..< LW:
+        let (p, q) = (a[x, y], b[x, y])
+        if abs(p.r.int - q.r.int) > 9 or abs(p.g.int - q.g.int) > 9 or abs(p.b.int - q.b.int) > 9:
+          inc result
+
+  forgetPanelFrames()
+  coverageCacheBudget = 256 * 1024 # embedded_main.nim's
+  clearCoverageCache()
+  var
+    store: array[3, seq[uint16]]
+    lcd: array[3, Image]
+  for i in 0 .. 2:
+    store[i] = newSeq[uint16](LW * LH)
+    lcd[i] = newImage565Over(LW, LH, addr store[i][0])
+    lcd[i].ditherStores = true
+  var hits, misses, repainted: int
+  for i in 0 ..< 60:
+    let target = lcd[i mod 3]
+    beginPanelFrame(target.bufferPointer, 0)
+    var owed = some(color(0, 0, 0, 1))
+    let (hits0, misses0) = (coverageCacheHits, coverageCacheMisses)
+    svgFramePixelsForTest = -1
+    doAssert renderSvgFrame(logoFrame(i), target, owed, wholeFrame = true)
+    endPanelFrame()
+    if i >= 3:
+      doAssert svgFramePixelsForTest < LW * LH div 10, &"frame {i} repainted {svgFramePixelsForTest} pixels"
+    if i >= 40:
+      hits += coverageCacheHits - hits0
+      misses += coverageCacheMisses - misses0
+      repainted += svgFramePixelsForTest
+    let whole = newImage565(LW, LH)
+    whole.ditherStores = true
+    parseSvg(logoFrame(i), LW, LH).renderInto(whole)
+    let off = differs(target, whole)
+    doAssert off == 0, &"frame {i}: {off} pixels differ from a whole render (a trail)"
+  # Seven fills a frame, twenty frames: blended from masks but for a
+  # few made along the way, and a fill a damage box shows too little of.
+  doAssert hits >= 120, &"the logo is drawn from its masks: {hits} hits, {misses} misses in 20 frames"
+  doAssert coverageCacheUsedBytes() <= 256 * 1024
+  coverageCacheBudget = 0
+  clearCoverageCache()
+  forgetPanelFrames()
+  echo &"a moving logo ok: {repainted div 20} pixels, {hits} mask hits, {misses} misses in 20 frames"

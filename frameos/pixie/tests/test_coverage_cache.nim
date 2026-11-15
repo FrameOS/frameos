@@ -113,7 +113,9 @@ doAssert coverageCacheUsedBytes() == 0, "a 120x60 mask does not fit 3 KB"
 # An animation: a path at fifty fractions over and over (the JSX DVD bounce
 # at `Date.now()`'s whole milliseconds), in a budget of two masks, beside a
 # label drawn where it always is. The second-sight rule alone made a mask
-# for nearly every frame of it, each evicted before its fraction came back.
+# for nearly every frame of it, each evicted before its fraction came back;
+# moving now, it is drawn at quarter pixels (snapMoving), five masks over
+# the pixel it crosses, and nearly every draw is a hit.
 block:
   coverageCacheBudget = 20 * 1024
   clearCoverageCache()
@@ -121,16 +123,66 @@ block:
     canvas = make("rgbx")
     moving = roundedBox()
     label = blob()
-  var churnMisses, labelHits: int
+  var churnMisses, movingHits, labelHits: int
   for round in 0 ..< 4:
     for i in 0 ..< 50:
-      let misses0 = coverageCacheMisses
+      let (misses0, hits0) = (coverageCacheMisses, coverageCacheHits)
       canvas.fillPath(moving, rgba(0, 0, 0, 255), translate(vec2(20 + i.float32 / 50, 10)))
-      if round >= 2: churnMisses += coverageCacheMisses - misses0
-      let hits0 = coverageCacheHits
+      if round >= 2:
+        churnMisses += coverageCacheMisses - misses0
+        movingHits += coverageCacheHits - hits0
+      let hits1 = coverageCacheHits
       canvas.fillPath(label, rgba(0, 0, 255, 255), translate(vec2(150.5, 40.25)))
-      if round >= 2: labelHits += coverageCacheHits - hits0
-  doAssert churnMisses <= 4, "the moving path keeps making masks: " & $churnMisses & " in 100 draws"
+      if round >= 2: labelHits += coverageCacheHits - hits1
+  doAssert churnMisses <= 10, "the moving path keeps making masks: " & $churnMisses & " in 100 draws"
+  doAssert movingHits >= 90, "the moving path is drawn from its masks: " & $movingHits & " hits in 100 draws"
   doAssert labelHits == 100, "the label's mask is hit every draw: " & $labelHits
+
+# Snapping is for paths that move, and only once they have: a path filled
+# where it always is, or at a few places in turn (one icon on several cards),
+# keeps the exact fraction and the pixels a fill without the cache paints.
+block:
+  for places in [1, 3, 4]:
+    coverageCacheBudget = 4 * 1024 * 1024
+    clearCoverageCache()
+    let shape = blob()
+    var canvas: Image
+    for round in 0 ..< 30:
+      canvas = make("565")
+      for k in 0 ..< places:
+        canvas.fillPath(shape, rgba(10, 160, 60, 255), translate(vec2(10.37 + k.float32 * 60.13, 20.61)))
+    coverageCacheBudget = 0
+    let plain = make("565")
+    for k in 0 ..< places:
+      plain.fillPath(shape, rgba(10, 160, 60, 255), translate(vec2(10.37 + k.float32 * 60.13, 20.61)))
+    # A mask's rounding: a few edge pixels a step of 565's channels apart.
+    doAssert maxDiff(canvas, plain) <= 12 and differing(canvas, plain) <= 8 * places,
+      $places & " places: " & $maxDiff(canvas, plain) & ", " & $differing(canvas, plain) & " pixels"
+    # The same pixels to the last one as a fill at the exact fraction,
+    # not at the quarter pixel 10.37 would snap to.
+    let snapped = make("565")
+    for k in 0 ..< places:
+      snapped.fillPath(shape, rgba(10, 160, 60, 255), translate(vec2(round((10.37 + k.float32 * 60.13) * 4) / 4, 20.5)))
+    doAssert differing(canvas, plain) < differing(snapped, plain), $places & " places drawn snapped"
+
+# A moving path's fills, cached or not, are where a fill at the nearest
+# quarter pixel would be: within an eighth of a pixel of the exact one.
+block:
+  coverageCacheBudget = 4 * 1024 * 1024
+  clearCoverageCache()
+  let shape = blob()
+  for i in 0 ..< 40:
+    let canvas = make("rgbx")
+    canvas.fill(rgba(255, 255, 255, 255))
+    let at = vec2(30 + i.float32 * 1.37, 12 + i.float32 * 0.71)
+    canvas.fillPath(shape, rgba(10, 160, 60, 255), translate(at))
+    if i >= 20:
+      coverageCacheBudget = 0
+      let quarter = make("rgbx")
+      quarter.fill(rgba(255, 255, 255, 255))
+      quarter.fillPath(shape, rgba(10, 160, 60, 255),
+        translate(vec2(round(at.x * 4) / 4, round(at.y * 4) / 4)))
+      coverageCacheBudget = 4 * 1024 * 1024
+      doAssert maxDiff(canvas, quarter) <= tolerance("rgbx"), "draw " & $i & ": " & $maxDiff(canvas, quarter)
 coverageCacheBudget = 0
 echo "coverage cache ok"
