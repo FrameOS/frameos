@@ -52,9 +52,25 @@ proc chooseLayout*(layoutId: string) =
   state["active"] = newJString(layoutId)
   saveLayoutState(ChoiceStateId, state)
 
+proc layoutOnFrame(id: string): bool =
+  ## Whether the frame holds this layout: a choice outlives the scenes it was
+  ## made among, and a push can take its layout away.
+  if layoutListing.isNil:
+    return true
+  for entry in layoutListing():
+    if entry.id == id:
+      return true
+  false
+
 proc layoutFor*(own: string): string =
   ## The layout a scene wears, `own` being the one it was given; "" for none.
+  ## A chosen layout the frame no longer holds stands down for each scene's
+  ## own: worn, it was looked up on every pass and every scene drew without
+  ## any (an ESP32 logged `layout:missing` and read flash for it each render;
+  ## the SenseCAP Indicator, the hardware bench, 2026-11-15). The choice is
+  ## kept, so the layout coming back puts it on again.
   let active = chosenLayout()
   if active.len == 0: own
   elif active == NoLayout: ""
+  elif not layoutOnFrame(active): own
   else: active
