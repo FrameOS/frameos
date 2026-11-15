@@ -21,6 +21,12 @@ import {
   objectStore,
   resetObjectStoreForTests,
 } from "./object-store";
+// Imported with the file, not inside a test: loading it pulls in the database
+// client, Stripe, Postmark and the photo scanners, about 0.3 s on a laptop and
+// past a test's 5 s on a loaded CI runner (main, 2026-11-15). Nothing in it
+// reads the environment until a check runs, so the beforeEach below still
+// decides what each check sees.
+import { checkObjectStoreLive, runLiveChecks } from "./system-checks";
 
 let root: string;
 const savedEnv = { ...process.env };
@@ -489,7 +495,6 @@ describe("the /admin live check", () => {
     // The object store's own check: runLiveChecks also waits on the database,
     // which a unit run does not have, and took this test past its 5 s on a
     // busy runner (2026-11-14, which held up a deploy).
-    const { checkObjectStoreLive } = await import("./system-checks");
     const objects = await checkObjectStoreLive();
 
     expect(objects.name).toBe("Object storage (blobs)");
@@ -535,7 +540,6 @@ describe("the /admin live check", () => {
       return bytes ? new Response(new Uint8Array(bytes)) : new Response("", { status: 404 });
     }) as typeof fetch;
     try {
-      const { runLiveChecks } = await import("./system-checks");
       const open = (await runLiveChecks()).find((check) => check.name === "Photos off the public CDN");
       expect(open!.state).toBe("failing");
       expect(open!.detail).toContain("Cloudflare rule");
@@ -561,7 +565,6 @@ describe("the /admin live check", () => {
     globalThis.fetch = (async () =>
       new Response("no such bucket", { status: 403 })) as typeof fetch;
     try {
-      const { runLiveChecks } = await import("./system-checks");
       const checks = await runLiveChecks();
       const objects = checks.find((check) => check.name === "Object storage (blobs)");
       expect(objects!.state).toBe("failing");
