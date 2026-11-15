@@ -134,7 +134,7 @@ def main():
     r.add_argument('--suites', default='default', help=f"comma list of {','.join(SUITES)} (default: per frame kind)")
     r.add_argument('--warm', type=int, default=3)
     r.add_argument('--passive', type=float, default=8.0, help='seconds to watch each scene on an LCD')
-    r.add_argument('--soak-rounds', type=int, default=3, help='rounds of every scene in the soak')
+    r.add_argument('--soak-rounds', type=int, default=5, help='rounds of every scene in the soak')
     r.add_argument('--quick', action='store_true')
     r.add_argument('--rediscover', action='store_true')
     r.add_argument('--host-ip')

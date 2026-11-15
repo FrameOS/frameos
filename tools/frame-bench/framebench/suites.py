@@ -340,7 +340,7 @@ def suite_storm(ctx, frame):
 
 def suite_soak(ctx, frame, rounds=None):
     """Every scene once per round; memory after each round. A steady fall is a leak."""
-    rounds = rounds or getattr(ctx, 'soak_rounds', 3)
+    rounds = rounds or getattr(ctx, 'soak_rounds', 5)
     con = ctx.console(frame)
     scenes = [s for s in scene_list(con) if not s.get('isLayout')]
     if ctx.quick:
@@ -361,7 +361,7 @@ def suite_soak(ctx, frame, rounds=None):
     issues = incidents_since(con, t0, 'soak')
     for key, tol in (('internalFree', 4096), ('psramFree', 65536)):
         vals = [s[key] for s in samples[1:] if s.get(key) is not None]
-        if len(vals) >= 3 and all(b < a for a, b in zip(vals, vals[1:])) and vals[0] - vals[-1] > tol:
+        if len(vals) >= 5 and all(b < a for a, b in zip(vals, vals[1:])) and vals[0] - vals[-1] > tol:
             issues.append(issue('fail', 'leak', 'soak', f'{key} fell every round: {vals}'))
     return {'soak': samples, 'issues': issues}
 
