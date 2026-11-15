@@ -85,6 +85,8 @@ const
   SceneSwitcherId* = "system/sceneSwitcher"
   ## The built-in scene `sceneSettings` shows (docs/scene-settings.md).
   SceneSettingsId* = "system/sceneSettings"
+  ## Where built-in scenes stay open as windows, a scene's own settings: this and its id.
+  SceneSettingsWindowPrefix* = "system/sceneSettings#"
   ## The scene a layout's <yield /> stands for (docs/scene-layouts.md).
   SceneYieldId* = "system/yield"
   ## Origins a scene opts into per custom event (`origins` on its declaration).

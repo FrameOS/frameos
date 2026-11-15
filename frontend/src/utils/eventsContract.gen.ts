@@ -9,6 +9,8 @@ export const CUSTOM_EVENT_MAX_NAME_LENGTH = 63
 export const SCENE_SWITCHER_ID = 'system/sceneSwitcher'
 /** The built-in scene `sceneSettings` shows (docs/scene-settings.md). */
 export const SCENE_SETTINGS_ID = 'system/sceneSettings'
+/** Where built-in scenes stay open as windows, a scene's own settings: this and its id. */
+export const SCENE_SETTINGS_WINDOW_PREFIX = 'system/sceneSettings#'
 /** What a layout's scene node names for the scene it wraps (docs/scene-layouts.md). */
 export const SCENE_YIELD_ID = 'system/yield'
 
@@ -1145,7 +1147,7 @@ interface FrameOSEventPayloads {
   swipe: { direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
   /** A finger or a pen that went down within \`gestures.edgePx\` of an edge of the screen and moved at least \`gestures.swipeMinPx\` away from it, as on a phone: \`edge\` is where it started, \`direction\` the way it went. The frame takes that touch: the scene hears no pointerDown, pointerMove or pointerUp of it, so a slider under it stays as it was. A touch there that lifts, holds or moves along the edge instead is the scene's after all, with its pointerDown a little late. Not a mouse. */
   edgeSwipe: { edge: string; direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
-  /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */
+  /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches, and a trackpad's fractions of one; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */
   wheel: { deltaX: number; deltaY: number; x: number; y: number };
   /** Turn the screen on */
   turnOn: Record<string, never>;

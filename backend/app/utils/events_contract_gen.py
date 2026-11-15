@@ -8,6 +8,9 @@ SCENE_YIELD_ID = "system/yield"
 # settings): in no scene list, never persisted by a device.
 SCENE_SWITCHER_ID = "system/sceneSwitcher"
 SCENE_SETTINGS_ID = "system/sceneSettings"
+# Where built-in scenes stay open as windows (a Pi's desktop), a scene's own
+# settings are this and its id: built in too.
+SCENE_SETTINGS_WINDOW_PREFIX = "system/sceneSettings#"
 BUILT_IN_SCENE_IDS: frozenset[str] = frozenset({SCENE_SWITCHER_ID, SCENE_SETTINGS_ID})
 
 # origin -> contract events it may not emit. `http:write` is the frame access

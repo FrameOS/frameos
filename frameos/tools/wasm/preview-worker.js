@@ -7,7 +7,10 @@
 //
 // Messages in:
 //   {type: 'init', width, height, timeZone, scenesJson, sceneId, settingsJson, proxyUrl,
-//    fastMode?, saveAssets?, browserAssets?, lanAccess?, sceneState?}
+//    fastMode?, saveAssets?, browserAssets?, lanAccess?, sceneState?, renderScale?, windowed?, framePage?}
+//        windowed: run the scenes side by side, as a Pi does (docs/scene-layouts.md "Windows").
+//        framePage: offer the frame's own page in the scene settings (docs/scene-settings.md); its
+//        Restart and Reboot come out as `sceneEvent`s `restart` / `reboot`, a new scale as `frameSettings`.
 //        sceneState: public field values for the scene it starts on, set before the first render
 //        (`sceneStateSeeded` in `ready` says they were; an older bundle leaves that false).
 //        lanAccess: the previewed cloud frame's local network access (docs/lan-access.md); `false` makes the
@@ -21,6 +24,9 @@
 //                                          asks for it.
 //   {type: 'selectScene', sceneId}
 //   {type: 'setFastMode', enabled}         lift (or restore) the 1 fps throttle
+//   {type: 'setRenderScale', scale}        the frame's render scale (0 = automatic), drawn at once
+//   {type: 'resize', width, height}        a new size, everything kept and drawn again (`ready`'s `resize` says
+//                                          the bundle can; otherwise init again)
 //   {type: 'assets', requestId, op, ...}   browser asset folder ops, see handleAssetsRequest
 // Messages out:
 //   {type: 'ready', sceneInfo, sceneStateSeeded, browserAssets, runtimeVersion, pointerEvents, inputEvents, gpioEvents}
@@ -610,8 +616,8 @@ function applyDeviceLimits(limits) {
 
 // The frame's render scale (frame.json renderScale): what a .tsx app's JSX is
 // laid out for. 0 or none is automatic from the preview's size, as on the frame.
-function applyRenderScale(scale) {
-  if (!(typeof scale === 'number' && scale > 0)) {
+function applyRenderScale(scale, force) {
+  if (!force && !(typeof scale === 'number' && scale > 0)) {
     return
   }
   try {
@@ -833,6 +839,26 @@ async function init(msg) {
     } catch (e) {
       // older bundle without the export: the app browses on its own
     }
+    // Run the scenes side by side, as a Pi does (docs/scene-layouts.md
+    // "Windows"): a layout's app.frame.scenes and its <Scene id> windows.
+    if (msg.windowed) {
+      try {
+        call('frameos_wasm_set_windowed', null, ['boolean'], [true])
+      } catch (e) {
+        post({ type: 'log', message: 'windows are unavailable in this runtime build' })
+      }
+    }
+    // The frame's own page in the scene settings (a layout's Control Panel), for
+    // a page that is a frame of its own rather than an editor's preview. Its
+    // Restart and Reboot reach the page as `sceneEvent`s, a new scale as a
+    // `frameSettings` one.
+    if (msg.framePage) {
+      try {
+        call('frameos_wasm_set_frame_page', null, ['boolean'], [true])
+      } catch (e) {
+        post({ type: 'log', message: 'the frame page is unavailable in this runtime build' })
+      }
+    }
     // Apps may save into the browser folder (a device's saveAssets setting;
     // on by default here — it's the visitor's own browser storage). Pass
     // `saveAssets: false` or a {nodeName: bool} map to mirror a frame.
@@ -884,6 +910,7 @@ async function init(msg) {
       // `action: 'down'` / `'up'` is an edge the runtime holds and times into
       // a `button` press, doublePress or longPress, each key by its pin and label.
       gpioEvents: true,
+      resize: typeof Module._frameos_wasm_resize === 'function',
     })
     renderNow()
   } catch (e) {
@@ -995,6 +1022,28 @@ self.onmessage = (ev) => {
       }
       if (Module && !rendering) {
         scheduleNextRender()
+      }
+      break
+    case 'resize':
+      if (Module && typeof Module._frameos_wasm_resize === 'function') {
+        call('frameos_wasm_resize', 'boolean', ['number', 'number'], [msg.width, msg.height])
+        renderNow()
+      }
+      break
+    case 'chooseLayout':
+      // The layout every scene wears, as the frame's settings page chooses it:
+      // the scenes and their windows stay as they are.
+      if (Module && typeof Module._frameos_wasm_choose_layout === 'function') {
+        call('frameos_wasm_choose_layout', 'boolean', ['string'], [String(msg.layoutId || '')])
+        renderNow()
+      }
+      break
+    case 'setRenderScale':
+      // A new render scale (0 = automatic), drawn at once.
+      if (Module) {
+        applyRenderScale(Number(msg.scale) || 0, true)
+        // A `render` from outside redraws every panel and window, laid out anew.
+        dispatchEvent('render', {})
       }
       break
     case 'assets':
