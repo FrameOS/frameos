@@ -37,6 +37,7 @@ from frameos/event_loop import settingsOf
 import frameos/layout_choice
 import frameos/ui/events
 import frameos/ui/keyboard
+import frameos/ui/theme
 import frameos/ui/tree
 import frameos/utils/image
 import frameos/utils/svg_frames
@@ -528,7 +529,7 @@ proc button(look: Look, label: string, handler: int, primary: bool): SvgNode =
   if look.paper: c.add " border-2 border-black"
   elif primary: c.add " bg-sky-600 active:bg-sky-500"
   else: c.add " bg-zinc-800 active:bg-zinc-600"
-  el("div", move c, SvgNode(text: label)).on("on-click", handler)
+  el("div", move c, SvgNode(text: label)).role(if primary: "primary" else: "button").on("on-click", handler)
 
 proc icon(look: Look, path: string): SvgNode =
   # The hole winds against the teeth: the default fill rule cuts it out.
@@ -547,7 +548,7 @@ proc iconButton(look: Look, lit: bool, path: string, handler: int): SvgNode =
   if look.paper: c.add(if lit: " bg-black text-white" else: " border-2 border-black")
   elif lit: c.add " bg-sky-600 active:bg-sky-500"
   else: c.add " bg-zinc-800 active:bg-zinc-600"
-  el("div", move c, look.icon(path)).on("on-click", handler)
+  el("div", move c, look.icon(path)).role(if lit: "selected" else: "button").on("on-click", handler)
 
 proc gear(look: Look, lit, named: bool): SvgNode =
   ## The gear that opens the frame page, lit while it shows, with its name
@@ -562,6 +563,7 @@ proc gear(look: Look, lit, named: bool): SvgNode =
   else: c.add " bg-zinc-800 active:bg-zinc-600"
   result = el("div", move c, look.icon(GearPath)).on("on-click", HGear)
   result.children.add el("span", "whitespace-nowrap", SvgNode(text: "Frame settings"))
+  result = result.role("button")
 
 proc fieldBox(look: Look): string =
   result = "w-full rounded-lg"
@@ -574,7 +576,7 @@ proc optionRow(look: Look, value, label: string, picked: bool): SvgNode =
   var c = "rounded-lg"
   if picked: c.add(if look.paper: " bg-black text-white" else: " bg-sky-600")
   elif not look.paper: c.add " active:bg-zinc-600"
-  result = el("option", move c, SvgNode(text: label))
+  result = el("option", move c, SvgNode(text: label)).role(if picked: "picked" else: "option")
   result.attrs.add(("value", value))
 
 proc selectBox(look: Look, field: JsonNode, options: JsonNode, held: string, index: int): SvgNode =
@@ -594,6 +596,7 @@ proc selectBox(look: Look, field: JsonNode, options: JsonNode, held: string, ind
   let other = field{"other"}.getStr()
   if other.len > 0:
     result.children.add look.optionRow(OtherValue, other, held == OtherValue)
+  result = result.role("field")
 
 proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = false): SvgNode =
   ## One field: its label and what changes it. `typing`: its select box's
@@ -624,12 +627,13 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = fals
     else: c.add " bg-zinc-700"
     var k = "h-full aspect-square rounded-full"
     k.add(if look.paper and lit: " bg-black" elif look.paper: " border-2 border-black" else: " bg-white")
-    result.children.add el("div", move c, el("div", move k))
+    result.children.add el("div", move c, el("div", move k).role(if lit: "knobOn" else: "knob")).role(
+      if lit: "switchOn" else: "switch")
     return
   c = "text-zinc-400"
   if look.paper: c = ""
   c.px("text", look.size * 4 div 5)
-  result.children.add el("span", move c, SvgNode(text: label))
+  result.children.add el("span", move c, SvgNode(text: label)).role("muted")
   let choices = arrayOf(options)
   if field{"select"}.getBool() or choices.elems.len > 0:
     let box = look.selectBox(field, choices, if typing: OtherValue else: value.text, index)
@@ -656,7 +660,7 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = fals
   input.attrs.add(("placeholder", field{if typing: "otherPlaceholder" else: "placeholder"}.getStr()))
   if field{"secret"}.getBool(): input.attrs.add(("type", "password"))
   elif kind in ["integer", "float"]: input.attrs.add(("type", "number"))
-  result.children.add input.on("on-change", HText + index)
+  result.children.add input.on("on-change", HText + index).role("field")
 
 proc fieldList(self: SceneSettingsScene, look: Look, padX, padY: int): SvgNode =
   ## The fields, one under the other, or a line that says there are none.
@@ -676,7 +680,7 @@ proc fieldList(self: SceneSettingsScene, look: Look, padX, padY: int): SvgNode =
     c = "text-center"
     if not look.paper: c.add " text-zinc-400"
     result.children.add el("div", move c,
-      SvgNode(text: if self.opener().len == 0: "No scene is showing." else: "This scene has no settings."))
+      SvgNode(text: if self.opener().len == 0: "No scene is showing." else: "This scene has no settings.")).role("muted")
 
 proc grey(look: Look): string =
   ## Grey text (plain on e-paper).
@@ -700,7 +704,7 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     else: "flex flex-col gap-1 p-3 rounded-lg bg-zinc-900")
   proc line(card: SvgNode, look: Look, label, text: string) =
     if text.len > 0:
-      let row = el("div", "flex gap-3", el("span", look.grey, SvgNode(text: label)))
+      let row = el("div", "flex gap-3", el("span", look.grey, SvgNode(text: label)).role("muted"))
       row.children.add el("div", "grow min-w-0 flex justify-end",
         el("span", "truncate", SvgNode(text: text)))
       card.children.add row
@@ -723,7 +727,7 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     card.line(look, "Update", info{"updateVersion"}.getStr() & " available")
   elif update >= 0:
     card.line(look, "Update", UpdateWords[update])
-  result.children.add card
+  result.children.add card.role("card")
   let
     fields = self.frameFields(info, autoScale, unit)
     edits = self.objectAt("frameValues")
@@ -742,7 +746,7 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     if note.len > 0:
       var c = look.grey
       c.px("text", look.size * 3 div 4)
-      result.children.add el("div", move c, SvgNode(text: note))
+      result.children.add el("div", move c, SvgNode(text: note)).role("muted")
   c = "flex flex-wrap"
   c.px("gap", look.gap div 2)
   let buttons = el("div", move c)
@@ -825,7 +829,7 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   # E-paper's white and black are the canvas's own; an LCD's dark page covers
   # every pixel, so a key repaints only what it changed.
   if not paper: c.add " bg-zinc-950 text-white"
-  result = el("div", move c)
+  result = el("div", move c).role("page")
   when not defined(frameosEmbedded):
     if round:
       self.roundTree(look, result, width, height, title, min(keyboardTop, height))
@@ -849,7 +853,7 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   # is how the frame page says it took it.
   let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
   header.children.add look.button("Save", HSave, not edits.isNil and edits.len > 0)
-  result.children.add header
+  result.children.add header.role("bar")
   let body = if frame: self.frameList(look, info, scaleText(autoRenderScale(unit, unit, self.frameConfig.device)), unit)
     else: self.fieldList(look, look.pad, look.pad)
   result.children.add el("div", "flex-1 overflow-y-auto", body)
