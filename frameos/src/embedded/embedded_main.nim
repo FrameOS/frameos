@@ -126,6 +126,7 @@ proc packImage1bpp(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): b
   # Dither in source scan order (the error kernel follows the rendered
   # image); each output bit lands at its rotated panel position.
   for y in 0 ..< height:
+    breathe()
     for x in 0 ..< width:
       let pixel = image.unsafe[x, y]
       let gray = (pixel.r.float32 * 0.299f + pixel.g.float32 * 0.587f +
@@ -200,6 +201,7 @@ proc packGray16Rows(ctx: pointer; worker, first, last: int32) {.cdecl, hotLoop.}
     buf = job.buf
     width = job.width
   for y in first.int ..< last.int:
+    breathe()
     let
       row = y * width
       cell = (y and 3) * 4
@@ -235,6 +237,7 @@ proc packImageGray16(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int):
   for i in 0 ..< bufLen:
     buf[i] = 0
   for y in 0 ..< height:
+    breathe()
     for x in 0 ..< width:
       let
         pixel = image.unsafe[x, y]
@@ -338,6 +341,7 @@ proc packImageRgb565(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int):
       src = cast[ptr UncheckedArray[ColorRGBX]](image.bufferPointer)
       dst = cast[ptr UncheckedArray[uint16]](buf)
     for y in 0 ..< height:
+      breathe()
       let srcRow = image.dataIndex(0, y)
       let dstRow = y * frameWidth
       for x in 0 ..< width:
@@ -385,6 +389,7 @@ proc packImageRgb565(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int):
   template clip(value: int): int =
     (if value < 0: 0 elif value > 255: 255 else: value)
   for y in 0 ..< height:
+    breathe()
     for x in 0 ..< width:
       let
         p = image.unsafe[x, y]
@@ -506,6 +511,7 @@ proc packCanvas1bpp(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): 
   # on every scene switch (2026-11-10).
   var rows = newSeq[ChangedRun](height)
   for y in 0 ..< height:
+    breathe()
     rows[y] = (y.uint16, 0'u16, width.uint16)
   if frameRotate == 0:
     packRuns1bpp(pixels, width, height, buf, rowBytes, rows, 0, packedErrors)
