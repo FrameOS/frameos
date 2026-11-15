@@ -872,6 +872,11 @@ proc fos_nim_render_alloc_impl(
     refreshDecodeBudget(forDecode = false)
     setAssetColorsPanelPalette(panelPaletteForFormat(pixelFormat.int))
     fos_render_breathe_reset()
+    # `set debug 1`: the per-phase split on this path's render line too (an
+    # e-paper panel, a sixteen-grey one drawing in its buffer), as on the
+    # LCD path above; without it an e-paper render said only its total.
+    probeOn = debugEnabled()
+    let cacheAtStart = probeBegin()
     # Where the canvas is the panel buffer (a sixteen-grey panel, main.c
     # frameos_nim_share_canvas) the buffer is borrowed before the scene draws
     # there: nothing else writes it meanwhile, and a snapshot of the last
@@ -930,8 +935,10 @@ proc fos_nim_render_alloc_impl(
     outLen = packedLen.csize_t
     inc renderCount
     lastRenderMs = ((packed - start).inMilliseconds).int
+    let phases = probeLine(cacheAtStart)
     log(&"render #{renderCount} ({source}, fmt={pixelFormat}): render {(renderedAt - start).inMilliseconds} ms, " &
-        &"dither+pack {(packed - renderedAt).inMilliseconds} ms")
+        &"dither+pack {(packed - renderedAt).inMilliseconds} ms" &
+        (if phases.len > 0: " [" & phases & "]" else: ""))
     recoverEmergencyReserve("render")
     discard takeRenderRequested()
     result = 0
