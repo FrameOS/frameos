@@ -3364,6 +3364,22 @@ static void client_task(void *arg)
             frameos_nim_log_hook(line);
         }
 
+        /* Where this pass's backend round trips run, decided BEFORE the
+         * pulls below make them. It used to be decided only at the end of the
+         * housekeeping, after them, so the pass after a boot's first render
+         * still saw the first pass's "not yet" (render_attempts was 0 then)
+         * and made all three on this task: a scene selected then waited
+         * ~18 s for the scenes pull, its render ~30 s more for the settings
+         * and commands pulls, on a frame whose backend did not answer
+         * (reTerminal Sticky, the hardware bench, 2026-11-15). The deep-sleep
+         * decision is last pass's; the end of the housekeeping decides again
+         * with this pass's and hands the round trips back before a sleep. */
+        if (housekeeping) {
+            bool link_was_on = s_link_on;
+            s_link_on = fos_backend_link_on(s_link_task != NULL, s_pass_deep_sleep, s_render_attempts);
+            if (link_was_on && !s_link_on) link_hand_back(config);
+        }
+
         /* Interpreted scenes: pick up backend changes and any payload
          * pushed over HTTP/console since the last pass. Both touch the Nim
          * runtime, so they only ever run here on the render task. */
