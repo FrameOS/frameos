@@ -98,6 +98,41 @@ proc affordsKeeping(image: Image, memoryLimit: int, context: ExecutionContext): 
   else:
     availableRenderHeadroomBytes() >= memoryLimit
 
+const KeptBoundedImageFloorBytes = 512 * 1024
+  ## Render headroom a bounded image (keepsBoundedImage) must leave, held.
+
+proc keepsBoundedImage(image: Image, nodeId: NodeId, context: ExecutionContext): bool =
+  ## An image its producer decoded to the consumer's bounds this pass
+  ## (`takeDecodeBounds`, the requestedBounds protocol) is kept whatever the
+  ## memory cache's limit. It is the useful resolution and no more (a
+  ## render/zoomPan at 1.45x on a 480x480 panel: 696 px on the short side),
+  ## and a miss would only allocate the same pixels again, with the decode's
+  ## intermediates on top: holding it never raises the render's peak. Not
+  ## keeping it is what ran "Slideshow with motion" at 0.5 fps on the SenseCAP
+  ## Indicator: every 42 ms frame decoded the photo again, 2.2 s each
+  ## (2026-11-15). The floor leaves the frame's other tasks some room; the
+  ## stale photo goes before the next one is decoded (cacheLookup).
+  if context.isNil or nodeId == 0.NodeId or context.decodeBoundsClaimedBy != nodeId:
+    return false
+  let (boundWidth, boundHeight) = (context.decodeBoundsClaimedWidth,
+    context.decodeBoundsClaimedHeight)
+  if boundWidth <= 0 or boundHeight <= 0:
+    return false
+  # Cover-sized at most: one axis within the box (boundedDecodeDims).
+  if image.width > boundWidth and image.height > boundHeight:
+    return false
+  if context.hasImage and not context.image.isNil and
+      image.bufferPointer == context.image.bufferPointer:
+    return false
+  when defined(testing):
+    availableRenderBytesOverride >= KeptBoundedImageFloorBytes
+  else:
+    availableRenderHeadroomBytes() >= KeptBoundedImageFloorBytes
+
+when defined(testing):
+  proc keepsBoundedImageForTest*(image: Image, nodeId: NodeId, context: ExecutionContext): bool =
+    keepsBoundedImage(image, nodeId, context)
+
 var imageSpillDisabled = false
   ## Latched on the first failed spill write, so a full or vanished card is
   ## probed once instead of on every render. Reset when scenes reload.
@@ -285,7 +320,7 @@ proc valueToKeyJson(v: Value): JsonNode =
     result = valueToJson(v)
 
 proc cacheLookup(scene: InterpretedFrameScene, nodeId: NodeId, cache: NodeCacheConfig,
-    inputKey, expr: JsonNode, allowStore: bool): tuple[hit: bool, value: Value] =
+    inputKey, expr: JsonNode, allowStore: bool): tuple[hit: bool, value: Value, remake: bool] =
   ## The node cache's answer for a node about to compute: the value it holds,
   ## if it is still good (its duration, its cache expression's value and its
   ## inputs, each when the node keys on it). `inputKey` is nil when no input
@@ -313,9 +348,21 @@ proc cacheLookup(scene: InterpretedFrameScene, nodeId: NodeId, cache: NodeCacheC
       if img.isNil:
         scene.cacheValues.del(nodeId)
       else:
-        return (true, VImage(img))
+        return (true, VImage(img), false)
     else:
-      return (true, served)
+      return (true, served, false)
+  if not scene.cacheValues.hasKey(nodeId) and scene.cacheRefused.hasKey(nodeId):
+    # Nothing held because the cache declined the last value: if that value
+    # would still be served, this run makes it again (remakingCachedValue).
+    let refused = scene.cacheRefused[nodeId]
+    var current = true
+    if cache.durationEnabled:
+      current = epochTime() <= refused.time + cache.durationSec
+    if current and not expr.isNil:
+      current = not refused.expr.isNil and refused.expr == expr
+    if current and cache.inputEnabled and not inputKey.isNil and inputKey.len > 0:
+      current = not refused.key.isNil and refused.key == inputKey
+    result.remake = current
   # A stale image goes before its replacement is made, not after: a
   # slideshow's last photo held through the next one's decode was the
   # difference between a photo and an error frame on the SenseCAP Indicator
@@ -339,10 +386,21 @@ proc cacheStore(scene: InterpretedFrameScene, nodeId: NodeId, context: Execution
     # of the live canvas would redraw the since-overwritten canvas onto
     # itself. The disk tier takes what memory refuses; with nothing to spill
     # to, nothing is stored and the producer runs again next time.
-    let spool = trySpillCachedImage(scene, nodeId, fresh.img, context)
-    if spool.isNil:
-      return
-    toStore = VImageSpool(spool)
+    if not keepsBoundedImage(fresh.img, nodeId, context):
+      let spool = trySpillCachedImage(scene, nodeId, fresh.img, context)
+      if spool.isNil:
+        # The time a value the cache declined stays current is the time a
+        # kept one would have: what the next miss reads (remakingCachedValue).
+        let refusedAt =
+          if scene.cacheRefused.hasKey(nodeId) and
+              scene.cacheRefused[nodeId].expr == expr and scene.cacheRefused[nodeId].key == inputKey:
+            scene.cacheRefused[nodeId].time
+          else:
+            epochTime()
+        scene.cacheRefused[nodeId] = (time: refusedAt, expr: expr, key: inputKey)
+        return
+      toStore = VImageSpool(spool)
+  scene.cacheRefused.del(nodeId)
   scene.cacheValues[nodeId] = toStore
   if cache.durationEnabled:
     scene.cacheTimes[nodeId] = epochTime()
@@ -1161,6 +1219,8 @@ proc offerImageHints(scene: InterpretedFrameScene, nodeId: NodeId, keyword: stri
         context.decodeBoundsHeight = height
         context.decodeBoundsNodeId = bounds.producerNodeId
         context.decodeBoundsClaimedBy = 0.NodeId
+        context.decodeBoundsClaimedWidth = 0
+        context.decodeBoundsClaimedHeight = 0
         result = 2
         if profiled:
           scene.profiles[^1].boundsWidth = width
@@ -1344,7 +1404,13 @@ proc programOp(scene: InterpretedFrameScene, ctx: ptr JSContext, op: ProgramOp, 
     let found = scene.cacheLookup(id, cache, key, expr, true)
     if found.hit:
       return scene.hold(ctx, found.value)
-    let fresh = getInterpretedApp(app.appKeyword, app, context)
+    let wasRemaking = context.remakingCachedValue
+    context.remakingCachedValue = found.remake
+    var fresh: Value
+    try:
+      fresh = getInterpretedApp(app.appKeyword, app, context)
+    finally:
+      context.remakingCachedValue = wasRemaking
     scene.cacheStore(id, context, cache, key, expr, fresh)
     result = scene.hold(ctx, fresh)
   of opRun:
@@ -2189,6 +2255,7 @@ proc forgetSceneGraph*(scene: InterpretedFrameScene) =
   scene.cacheTimes.clear()
   scene.cacheKeys.clear()
   scene.cacheExprs.clear()
+  scene.cacheRefused.clear()
   scene.cacheInputKeys.clear()
   cleanupSceneJs(scene)
 

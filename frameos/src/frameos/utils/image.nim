@@ -1090,6 +1090,45 @@ proc decodeImageBounded*(content: string, boundWidth, boundHeight: int): Image =
   discard decodeImageScaledInto(content, image, fitStretch)
   image
 
+proc readImageWithBounds*(path: string, boundWidth, boundHeight: int): Image =
+  ## A file decoded with at most the useful resolution for a (boundWidth,
+  ## boundHeight) consumer — the requestedBounds read of a local file. JPEGs
+  ## stream from disk straight to that size; anything else is read whole and
+  ## decoded bounded. The live decode budget still applies on top.
+  if boundWidth <= 0 or boundHeight <= 0:
+    return readImageWithDisplayBounds(path, maxEdge = 0, maxPixels = 0)
+  refreshDecodeBudget()
+  let fileSize = getFileSize(path)
+  var header = probeImageFileHeader(path)
+  if isJpegHeader(header):
+    var dimensions: ImageDimensions
+    var probed = true
+    try:
+      dimensions = decodeImageDimensions(header)
+    except CatchableError:
+      probed = false
+    if probed:
+      header = ""
+      let bounded = boundedDecodeDims(dimensions.width, dimensions.height,
+        boundWidth, boundHeight)
+      let target = displayDecodeDimensions(bounded.width, bounded.height,
+        maxEdge = 0, maxPixels = 0)
+      var file: File
+      if not file.open(path):
+        raise newException(PixieError, "Cannot open image file: " & path)
+      try:
+        return decodeJpegStreamScaled(
+          fileJpegSource(file), fileSize.int, target.width, target.height,
+          rewind = fileRewind(file))
+      except PixieError:
+        discard
+      finally:
+        file.close()
+  header = ""
+  ensureFileReadBudget(path, fileSize)
+  let data = readFile(path)
+  decodeImageBounded(data, boundWidth, boundHeight)
+
 when defined(frameosEmbedded):
   proc decodeSpilledImageInto(path: string, totalLen: int, target: Image,
       fit: ScaledDecodeFit): Image =

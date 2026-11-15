@@ -672,6 +672,9 @@ type
     enabled, inputEnabled, durationEnabled: bool, durationSec: float,
     expressionEnabled: bool, expression: string]
 
+  CacheRefusal* = tuple[time: float, expr, key: JsonNode]
+    ## When and on what key the node cache last declined to keep a value.
+
   # Runtime state while running the scene (for interpreted frames)
   InterpretedFrameScene* = ref object of FrameScene
     nodes*: Table[NodeId, DiagramNode]
@@ -712,6 +715,7 @@ type
     cacheTimes*: Table[NodeId, float]
     cacheKeys*: Table[NodeId, JsonNode]
     cacheExprs*: Table[NodeId, JsonNode]
+    cacheRefused*: Table[NodeId, CacheRefusal]    # a value the cache could not keep, while still current
     imageFusionPlans*: Table[NodeId, ImageFusionPlan] # consumer node -> planned image edge
     imageBoundsPlans*: Table[NodeId, ImageBoundsPlan] # consumer node -> bounded unfused edge
 
@@ -791,6 +795,17 @@ type
     decodeBoundsHeight*: int
     decodeBoundsNodeId*: NodeId
     decodeBoundsClaimedBy*: NodeId
+    # The bounds that producer took (decodeBoundsClaimedBy's), so the node
+    # cache can tell a bounded value from a native-resolution one.
+    decodeBoundsClaimedWidth*: int
+    decodeBoundsClaimedHeight*: int
+    # Set while a cached producer runs again only because the node cache could
+    # not keep what it made last time, and that value is still current (same
+    # expression, inputs and duration): the producer should make the same
+    # value again, not step on. A slideshow (data/localImage) under an
+    # animation would otherwise advance a photo, and write its persisted
+    # counter, every frame.
+    remakingCachedValue*: bool
 
   # One choice of a "select" state field. Scenes store these either as a plain
   # string (value doubles as the label) or as {"value": .., "label": ..}; the

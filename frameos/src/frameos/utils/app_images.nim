@@ -177,6 +177,8 @@ proc takeDecodeBounds*(self: AppRoot, context: ExecutionContext):
   result = (context.decodeBoundsWidth, context.decodeBoundsHeight)
   if not self.isNil:
     context.decodeBoundsClaimedBy = self.nodeId
+  context.decodeBoundsClaimedWidth = result.width
+  context.decodeBoundsClaimedHeight = result.height
   context.decodeBoundsWidth = 0
   context.decodeBoundsHeight = 0
   context.decodeBoundsNodeId = 0.NodeId
