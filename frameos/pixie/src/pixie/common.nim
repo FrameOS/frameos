@@ -376,6 +376,27 @@ proc rgbxToRgb565Dithered*(c: ColorRGBX, index: int): uint16 {.inline, raises: [
     b = pack5(c.b, off5)
   uint16((r shl 11) or (g shl 5) or b)
 
+template greyRowStore*(image: Image, start: int, body: untyped) =
+  ## Inside `body`, `store(luma)` and `backdrop()` address the pixel at `idx`,
+  ## which `body` advances with `step()`, for either grey: a 4-bit store is
+  ## dithered by its place in the row.
+  let
+    data {.inject.} = image.data8
+    four = image.format == pfGray4
+    cell = ((start div image.stride) and 3) * 4
+  var
+    idx {.inject.} = start
+    column = start mod image.stride
+  template store(value: uint8) {.used.} =
+    if four: gray4Put(data, idx, grayLevel16Ordered(value, OrderedThresholds4x4[cell + (column and 3)]))
+    else: data[idx] = value
+  template backdrop(): ColorRGBX {.used.} =
+    (if four: gray4ToRgbx(gray4Level(data, idx)) else: gray8ToRgbx(data[idx]))
+  template step() {.used.} =
+    inc idx
+    inc column
+  body
+
 proc storeGray4*(image: Image, index: int, luma: uint8) {.noinline, raises: [].} =
   ## An 8-bit grey dithered into a `pfGray4` image at a `dataIndex`. A loop
   ## over a row knows its place and calls `grayLevel16Ordered` itself.

@@ -3,7 +3,7 @@
 ## replaced is the picture on the panel, so the first checks draw on both and
 ## compare the 4-bit canvas with the luma canvas put through the same matrix.
 
-import pixie, strformat
+import pixie, pixie/blends, std/math, strformat
 
 proc levelAt(image: Image, x, y: int): int =
   image.unsafe[x, y].r.int div 17
@@ -251,5 +251,114 @@ block whole_image_operations:
   image.blur(1.0)
   for got in image.levels:
     doAssert got in 12 .. 15
+
+block gradient_fills_onto_grey_match_the_paint_image:
+  # A gradient fills a grey canvas from the coverage straight, without the
+  # paint image: the pixels must be the ones the paint image, its mask
+  # multiply and a normal composite give, for any shape, stop alpha and
+  # paint opacity, on both greys, a view among them.
+  proc reference(canvas: Image, path: Path, paint: Paint) =
+    # The paint image's way, over the shape's box as it always was.
+    let
+      bounds = path.computeBounds()
+      x0 = clamp(floor(bounds.x).int - 1, 0, canvas.width)
+      y0 = clamp(floor(bounds.y).int - 1, 0, canvas.height)
+      x1 = clamp(ceil(bounds.x + bounds.w).int + 1, x0, canvas.width)
+      y1 = clamp(ceil(bounds.y + bounds.h).int + 1, y0, canvas.height)
+      whole = x1 - x0 == canvas.width and y1 - y0 == canvas.height
+      mask = newImage(x1 - x0, y1 - y0)
+      fill = newImage(x1 - x0, y1 - y0)
+      opacity = paint.opacity
+    mask.fillPath(path, color(1, 1, 1, 1),
+      if whole: mat3() else: translate(vec2(-x0.float32, -y0.float32)))
+    if opacity != 1:
+      mask.applyOpacity(opacity)
+    paint.opacity = 1
+    fill.fillGradient(paint, vec2(x0.float32, y0.float32),
+      pixels = canvas.width * canvas.height)
+    paint.opacity = opacity
+    for y in 0 ..< y1 - y0:
+      for x in 0 ..< x1 - x0:
+        let source = blendMask(fill.unsafe[x, y], mask.unsafe[x, y])
+        canvas.unsafe[x + x0, y + y0] = blendNormal(canvas.unsafe[x + x0, y + y0], source)
+
+  proc paints(): seq[Paint] =
+    var p = linearPaint(3, 2, 61, 37)
+    p.gradientStops[1].color.a = 0.4
+    result.add p
+    result.add linearPaint(0, 5, 64, 5) # horizontal
+    result.add linearPaint(7, 0, 7, 40) # vertical
+    p = newPaint(RadialGradientPaint)
+    p.gradientHandlePositions = @[vec2(30, 20), vec2(55, 20), vec2(30, 38)]
+    p.gradientStops = @[
+      ColorStop(color: color(1, 0.8, 0.6, 0.9), position: 0),
+      ColorStop(color: color(0.1, 0.2, 0.3, 0), position: 1)]
+    p.opacity = 0.7
+    result.add p
+    p = newPaint(AngularGradientPaint)
+    p.gradientHandlePositions = @[vec2(32, 20), vec2(50, 10), vec2(32, 40)]
+    p.gradientStops = @[
+      ColorStop(color: color(0, 0, 0, 1), position: 0),
+      ColorStop(color: color(1, 1, 1, 1), position: 1)]
+    result.add p
+
+  let shapes = [
+    "M 0 0 h 64 v 41 h -64 z", # the whole canvas
+    "M 3.5 2.25 h 50.5 v 30.75 h -50.5 z", # a box, soft edges
+    "M 32 4 C 52 4 60 30 32 38 C 4 30 12 4 32 4 z M 32 12 L 40 26 L 24 26 z"]
+  for w in [64, 37]:
+    for d in shapes:
+      for i, paint in paints():
+        for gray4 in [false, true]:
+          let
+            got = if gray4: newImageGray4(w, 41) else: newImageGray8(w, 41)
+            want = if gray4: newImageGray4(w, 41) else: newImageGray8(w, 41)
+          got.fill(rgba(90, 90, 90, 255))
+          want.fill(rgba(90, 90, 90, 255))
+          let path = parsePath(d)
+          got.fillPath(path, paint)
+          want.reference(path, paint)
+          for y in 0 ..< 41:
+            for x in 0 ..< w:
+              doAssert got.unsafe[x, y] == want.unsafe[x, y],
+                &"paint {i} gray4={gray4} w={w} {d}: ({x}, {y}) " &
+                &"{got.unsafe[x, y]} != {want.unsafe[x, y]}"
+  # Onto a view: where it sits decides the dither.
+  let
+    owner = newImageGray4(64, 41)
+    refOwner = newImageGray4(64, 41)
+    path = parsePath(shapes[2])
+    paint = paints()[0]
+  owner.fill(rgba(200, 200, 200, 255))
+  refOwner.fill(rgba(200, 200, 200, 255))
+  owner.view(5, 3, 40, 30).fillPath(path, paint)
+  refOwner.view(5, 3, 40, 30).reference(path, paint)
+  doAssert owner.levels == refOwner.levels, "a gradient into a view"
+
+block opaque_rgbx_rows_onto_grey:
+  # An RGBX picture drawn onto grey, normally and overwriting: the row
+  # kernel against the per-pixel accessors.
+  let picture = newImage(23, 9)
+  for y in 0 ..< 9:
+    for x in 0 ..< 23:
+      let a = uint8((x * 37 + y * 11) mod 256)
+      picture.unsafe[x, y] = rgbx(min(a, uint8(x * 9)), min(a, uint8(y * 20)), a div 2, a)
+  for gray4 in [false, true]:
+    for mode in [NormalBlend, OverwriteBlend]:
+      let
+        got = if gray4: newImageGray4(31, 13) else: newImageGray8(31, 13)
+        want = if gray4: newImageGray4(31, 13) else: newImageGray8(31, 13)
+      got.fill(rgba(120, 120, 120, 255))
+      want.fill(rgba(120, 120, 120, 255))
+      got.draw(picture, translate(vec2(5, 3)), mode)
+      for y in 0 ..< 9:
+        for x in 0 ..< 23:
+          let s = picture.unsafe[x, y]
+          want.unsafe[x + 5, y + 3] =
+            if mode == OverwriteBlend: s else: blendNormal(want.unsafe[x + 5, y + 3], s)
+      for y in 0 ..< 13:
+        for x in 0 ..< 31:
+          doAssert got.unsafe[x, y] == want.unsafe[x, y],
+            &"gray4={gray4} {mode}: ({x}, {y})"
 
 echo "test_gray4: ok"

@@ -1,4 +1,4 @@
-import chroma, common, images, simd, vmath
+import chroma, common, images, vmath
 
 when defined(release):
   {.push checks: off.}
@@ -150,196 +150,160 @@ template lutIndex(t: float32, last: int): int =
   ## stop, as `gradientColor` does.
   (if not (t > 0): 0 elif t >= 1: last else: int(t * last.float32 + 0.5'f32))
 
-template fillPerPixel(
-  image: Image, paint: Paint, extent: float32, exact: bool, pixels: int,
-  rowSetup, tAt: untyped
-) =
-  ## Writes every pixel of `image` with the gradient colour at the `t` that
-  ## `tAt` computes for the injected pixel `x`, `y`; `rowSetup` runs once per
-  ## row for whatever `tAt` wants precomputed. Colours come from the table
-  ## when `gradientLutSize` says the fill is large enough to pay for one;
-  ## `tAt` sees which through the injected `throughTable`.
-  let lutSize = gradientLutSize(extent,
-    if pixels >= 0: pixels else: image.width * image.height, exact)
-  if lutSize == 0:
-    let throughTable {.inject.} = false
-    for y {.inject.} in 0 ..< image.height:
-      let rowIndex = image.dataIndex(0, y)
-      rowSetup
-      for x {.inject.} in 0 ..< image.width:
-        image.setPixel(rowIndex + x, paint.gradientColor(tAt))
+type
+  GradientForm = enum
+    gfHorizontal, gfVertical, gfLinear, gfRadial, gfAngular
+
+  GradientRows* = object
+    ## A gradient a span of a row at a time: the colours `fillGradient`
+    ## writes into pixels (x0 ..< x1, y) of an image `width` wide, without
+    ## the image. What a fill only partly covers (a shape filled with a
+    ## gradient straight into a grey canvas) evaluates only what it covers.
+    empty*: bool ## nothing to paint (the paint's opacity is 0)
+    paint: Paint
+    form: GradientForm
+    origin: Vec2
+    lut: seq[ColorRGBX] ## colours at t = i / last, when `throughTable`
+    last: int
+    throughTable: bool
+    row0: seq[ColorRGBX] ## a horizontal gradient's one row of colours
+    at, to, center: Vec2
+    m00, m01, m10, m11, m20, m21, angle: float32
+
+proc toLineSpace(at, to, point: Vec2): float32 {.inline.} =
+  ## Convert position on to where it would fall on a line between at and to.
+  let
+    d = to - at
+    det = d.x * d.x + d.y * d.y
+  (d.y * (point.y - at.y) + d.x * (point.x - at.x)) / det
+
+proc initGradientRows*(
+  paint: Paint, origin: Vec2, exact: bool, pixels, width, height: int
+): GradientRows {.raises: [PixieError].} =
+  ## The rows of `paint` (a gradient) as `fillGradient` would fill them into
+  ## a `width` x `height` image at `origin`; `pixels` decides for the colour
+  ## table (see `gradientLutSize`). Reads the paint's opacity as it is now:
+  ## keep it until the last row is read.
+  var extent: float32
+  case paint.kind:
+  of LinearGradientPaint:
+    if paint.gradientHandlePositions.len != 2:
+      raise newException(PixieError, "Linear gradient requires 2 handles")
+  of RadialGradientPaint:
+    if paint.gradientHandlePositions.len != 3:
+      raise newException(PixieError, "Radial gradient requires 3 handles")
+  of AngularGradientPaint:
+    if paint.gradientHandlePositions.len != 3:
+      raise newException(PixieError, "Angular gradient requires 2 handles")
   else:
-    let
-      lut = paint.gradientLut(lutSize)
-      last = lutSize - 1
-      throughTable {.inject.} = true
-    for y {.inject.} in 0 ..< image.height:
-      let rowIndex = image.dataIndex(0, y)
-      rowSetup
-      for x {.inject.} in 0 ..< image.width:
-        image.setPixel(rowIndex + x, lut[lutIndex(tAt, last)])
-
-proc fillGradientLinear(
-  image: Image, paint: Paint, origin: Vec2, exact: bool, pixels: int
-) =
-  ## Fills a linear gradient. Pixel (x, y) of `image` takes the colour the
-  ## gradient has at `origin + (x, y)`, so a strip of a larger surface can be
-  ## filled with exactly the colours the whole surface would get.
-
-  if paint.gradientHandlePositions.len != 2:
-    raise newException(PixieError, "Linear gradient requires 2 handles")
-
+    raise newException(PixieError, "Paint must be a gradient")
   if paint.gradientStops.len == 0:
     raise newException(PixieError, "Gradient must have at least 1 color stop")
 
   paint.opacity = clamp(paint.opacity, 0, 1)
+  result.paint = paint
+  result.origin = origin
   if paint.opacity == 0:
+    result.empty = true
     return
 
-  proc toLineSpace(at, to, point: Vec2): float32 {.inline.} =
-    ## Convert position on to where it would fall on a line between at and to.
+  case paint.kind:
+  of LinearGradientPaint:
+    result.at = paint.gradientHandlePositions[0]
+    result.to = paint.gradientHandlePositions[1]
+    if result.at.y == result.to.y: # one row of colours, every row alike
+      result.form = gfHorizontal
+      result.row0 = newSeq[ColorRGBX](width)
+      for x in 0 ..< width:
+        result.row0[x] = paint.gradientColor(toLineSpace(
+          result.at, result.to, vec2(x.float32 + origin.x, origin.y)))
+      return
+    if result.at.x == result.to.x: # one colour a row
+      result.form = gfVertical
+      return
+    result.form = gfLinear
+    extent = dist(result.at, result.to)
+  of RadialGradientPaint:
+    # t is the distance from the centre in a space where the edge and skew
+    # handles are one unit away, so the stops sit on ellipses.
     let
-      d = to - at
-      det = d.x * d.x + d.y * d.y
-    (d.y * (point.y - at.y) + d.x * (point.x - at.x)) / det
-
-  let
-    at = paint.gradientHandlePositions[0]
-    to = paint.gradientHandlePositions[1]
-
-  if at.y == to.y: # Horizontal gradient: one row of colours, copied down
-    if image.height > 0:
-      let dithered = image.format == pfGray4
-      var colors = newSeq[ColorRGBX](if dithered: image.width else: 0)
-      for x in 0 ..< image.width:
-        let
-          t = toLineSpace(at, to, vec2(x.float32 + origin.x, origin.y))
-          c = paint.gradientColor(t)
-        image.unsafe[x, 0] = c
-        if dithered: colors[x] = c
-      if dithered:
-        # A 4-bit store is dithered by its row: a copied row would print the
-        # first row's pattern down the image as vertical stripes.
-        for y in 1 ..< image.height:
-          for x in 0 ..< image.width:
-            image.unsafe[x, y] = colors[x]
-      else:
-        let
-          rowBytes = image.width * image.bytesPerPixel
-          first = image.pixelAddr(image.dataIndex(0, 0))
-        for y in 1 ..< image.height:
-          copyMem(image.pixelAddr(image.dataIndex(0, y)), first, rowBytes)
-
-  elif at.x == to.x: # Vertical gradient
-    for y in 0 ..< image.height:
-      let
-        xy = vec2(origin.x, y.float32 + origin.y)
-        t = toLineSpace(at, to, xy)
-        rgbx = paint.gradientColor(t)
-      var x: int
-      when allowSimd:
-        if image.format == pfRgbx:
-          when defined(amd64):
-            let colorVec = mm_set1_epi32(cast[int32](rgbx))
-            for _ in 0 ..< image.width div 4:
-              mm_storeu_si128(image.data[image.dataIndex(x, y)].addr, colorVec)
-              x += 4
-          elif defined(arm64):
-            let colorVec = vmovq_n_u32(cast[uint32](rgbx))
-            for _ in 0 ..< image.width div 4:
-              vst1q_u32(image.data[image.dataIndex(x, y)].addr, colorVec)
-              x += 4
-      for x in x ..< image.width:
-        image.unsafe[x, y] = rgbx
-
-  else:
-    image.fillPerPixel(paint, dist(at, to), exact, pixels):
-      let rowY = y.float32 + origin.y
-    do:
-      toLineSpace(at, to, vec2(x.float32 + origin.x, rowY))
-
-proc fillGradientRadial(
-  image: Image, paint: Paint, origin: Vec2, exact: bool, pixels: int
-) =
-  ## Fills a radial gradient: t is the distance from the centre in a space
-  ## where the edge and skew handles are one unit away, so the stops sit on
-  ## ellipses.
-
-  if paint.gradientHandlePositions.len != 3:
-    raise newException(PixieError, "Radial gradient requires 3 handles")
-
-  if paint.gradientStops.len == 0:
-    raise newException(PixieError, "Gradient must have at least 1 color stop")
-
-  paint.opacity = clamp(paint.opacity, 0, 1)
-  if paint.opacity == 0:
-    return
-
-  let
-    center = paint.gradientHandlePositions[0]
-    edge = paint.gradientHandlePositions[1]
-    skew = paint.gradientHandlePositions[2]
-    distanceX = dist(center, edge)
-    distanceY = dist(center, skew)
-    gradientAngle = normalize(center - edge).angle().fixAngle()
-    mat = (
-      translate(center) *
-      rotate(gradientAngle) *
-      scale(vec2(distanceX, distanceY))
-    ).inverse()
+      center = paint.gradientHandlePositions[0]
+      edge = paint.gradientHandlePositions[1]
+      skew = paint.gradientHandlePositions[2]
+      distanceX = dist(center, edge)
+      distanceY = dist(center, skew)
+      gradientAngle = normalize(center - edge).angle().fixAngle()
+      mat = (
+        translate(center) *
+        rotate(gradientAngle) *
+        scale(vec2(distanceX, distanceY))
+      ).inverse()
     # `mat * xy` spelled out, with the row term hoisted out of the pixel loop.
     # The additions keep vmath's order so t is the value it always was.
-    m00 = mat[0, 0]
-    m01 = mat[0, 1]
-    m10 = mat[1, 0]
-    m11 = mat[1, 1]
-    m20 = mat[2, 0]
-    m21 = mat[2, 1]
-  image.fillPerPixel(paint, max(distanceX, distanceY), exact, pixels):
-    let
-      rowY = y.float32 + origin.y
-      rowX10 = m10 * rowY
-      rowX11 = m11 * rowY
-  do:
-    let
-      px0 = x.float32 + origin.x
-      px = m00 * px0 + rowX10 + m20
-      py = m01 * px0 + rowX11 + m21
-      d2 = px * px + py * py
-    if throughTable: fastSqrt(d2) else: sqrt(d2)
+    result.form = gfRadial
+    result.m00 = mat[0, 0]
+    result.m01 = mat[0, 1]
+    result.m10 = mat[1, 0]
+    result.m11 = mat[1, 1]
+    result.m20 = mat[2, 0]
+    result.m21 = mat[2, 1]
+    extent = max(distanceX, distanceY)
+  else:
+    # TODO: make edge between start and end anti-aliased.
+    result.form = gfAngular
+    result.center = paint.gradientHandlePositions[0]
+    result.angle = normalize(
+      paint.gradientHandlePositions[1] - result.center).angle().fixAngle()
+    # t runs 0..1 around the circle; the outermost pixels of the fill go
+    # round it in about pi * (width + height) steps.
+    extent = PI.float32 * (width + height).float32
 
-proc fillGradientAngular(
-  image: Image, paint: Paint, origin: Vec2, exact: bool, pixels: int
-) =
-  ## Fills an angular gradient.
+  let lutSize = gradientLutSize(extent, pixels, exact)
+  if lutSize > 0:
+    result.lut = paint.gradientLut(lutSize)
+    result.last = lutSize - 1
+    result.throughTable = true
 
-  if paint.gradientHandlePositions.len != 3:
-    raise newException(PixieError, "Angular gradient requires 2 handles")
-
-  if paint.gradientStops.len == 0:
-    raise newException(PixieError, "Gradient must have at least 1 color stop")
-
-  paint.opacity = clamp(paint.opacity, 0, 1)
-  if paint.opacity == 0:
-    return
-
+proc row*(
+  g: GradientRows, y, x0, x1: int, dst: ptr UncheckedArray[ColorRGBX]
+) {.raises: [].} =
+  ## Pixels x0 ..< x1 of row `y` into `dst[0 ..< x1 - x0]`.
   let
-    center = paint.gradientHandlePositions[0]
-    edge = paint.gradientHandlePositions[1]
-    f32PI = PI.float32
-  # TODO: make edge between start and end anti-aliased.
-  let gradientAngle = normalize(edge - center).angle().fixAngle()
-  # t runs 0..1 around the circle; the outermost pixels of the fill go round
-  # it in about pi * (width + height) steps.
-  image.fillPerPixel(
-    paint, f32PI * (image.width + image.height).float32, exact, pixels
-  ):
-    let rowY = y.float32 + origin.y
-  do:
+    origin = g.origin
+    rowY = y.float32 + origin.y
+  template perPixel(tAt: untyped) =
+    if g.throughTable:
+      for x {.inject.} in x0 ..< x1:
+        dst[x - x0] = g.lut[lutIndex(tAt, g.last)]
+    else:
+      for x {.inject.} in x0 ..< x1:
+        dst[x - x0] = g.paint.gradientColor(tAt)
+  case g.form:
+  of gfHorizontal:
+    for x in x0 ..< x1:
+      dst[x - x0] = g.row0[x]
+  of gfVertical:
+    let c = g.paint.gradientColor(toLineSpace(g.at, g.to, vec2(origin.x, rowY)))
+    for i in 0 ..< x1 - x0:
+      dst[i] = c
+  of gfLinear:
+    perPixel(toLineSpace(g.at, g.to, vec2(x.float32 + origin.x, rowY)))
+  of gfRadial:
     let
-      xy = vec2(x.float32 + origin.x, rowY)
-      angle = normalize(xy - center).angle()
-    (angle + gradientAngle + f32PI / 2).fixAngle() / 2 / f32PI + 0.5.float32
+      rowX10 = g.m10 * rowY
+      rowX11 = g.m11 * rowY
+    template radialT(at: int): float32 =
+      let
+        px0 = at.float32 + origin.x
+        px = g.m00 * px0 + rowX10 + g.m20
+        py = g.m01 * px0 + rowX11 + g.m21
+        d2 = px * px + py * py
+      if g.throughTable: fastSqrt(d2) else: sqrt(d2)
+    perPixel(radialT(x))
+  of gfAngular:
+    let f32PI = PI.float32
+    perPixel((normalize(vec2(x.float32 + origin.x, rowY) - g.center).angle() +
+      g.angle + f32PI / 2).fixAngle() / 2 / f32PI + 0.5.float32)
 
 proc fillGradient*(
   image: Image, paint: Paint, origin = vec2(0, 0), exact = false, pixels = -1
@@ -355,15 +319,25 @@ proc fillGradient*(
   ## `pixels`: the size of the whole fill `image` is a strip of, which is
   ## what decides for the table, so that every strip of one fill decides
   ## alike (the image's own size when -1).
-  case paint.kind:
-  of LinearGradientPaint:
-    image.fillGradientLinear(paint, origin, exact, pixels)
-  of RadialGradientPaint:
-    image.fillGradientRadial(paint, origin, exact, pixels)
-  of AngularGradientPaint:
-    image.fillGradientAngular(paint, origin, exact, pixels)
+  let g = initGradientRows(paint, origin, exact,
+    if pixels >= 0: pixels else: image.width * image.height,
+    image.width, image.height)
+  if g.empty or image.width == 0:
+    return
+  if image.format == pfRgbx:
+    for y in 0 ..< image.height:
+      g.row(y, 0, image.width,
+        cast[ptr UncheckedArray[ColorRGBX]](image.data[image.dataIndex(0, y)].addr))
   else:
-    raise newException(PixieError, "Paint must be a gradient")
+    # Through the store of the image's format: a 4-bit one dithers each
+    # row by its place.
+    var colors = newSeq[ColorRGBX](image.width)
+    let line = cast[ptr UncheckedArray[ColorRGBX]](colors[0].addr)
+    for y in 0 ..< image.height:
+      g.row(y, 0, image.width, line)
+      let rowIndex = image.dataIndex(0, y)
+      for x in 0 ..< image.width:
+        image.setPixel(rowIndex + x, colors[x])
 
 when defined(release):
   {.pop.}
