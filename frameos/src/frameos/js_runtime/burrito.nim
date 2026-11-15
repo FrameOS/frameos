@@ -81,7 +81,6 @@
 ##
 
 import std/[tables, macros, json, strutils, os, monotimes, times]
-from pixie/common import breathe
 import frameos/js_runtime/run_budget
 
 # quickjs-libc (the std and os modules, the POSIX event loop, qjsc bytecode
@@ -642,6 +641,12 @@ when not defined(frameosEmbedded):
     js_malloc_usable_size: budgetedUsableSize,
   )
 
+var scriptBreathe*: proc() {.nimcall, gcsafe, raises: [].}
+  ## A host whose long scripts must let other work run sets this (an ESP32:
+  ## the same breath as pixie's renderBreathe); nil elsewhere. Kept here, not
+  ## taken from pixie, so this module builds without pixie (the backend's JS
+  ## validator compiles it alone).
+
 proc burritoInterruptHandler(rt: ptr JSRuntime, opaque: pointer): cint {.cdecl.} =
   ## Runs on the interpreter's own stack every few thousand bytecode steps.
   ## Must not allocate, raise, or re-enter QuickJS.
@@ -655,8 +660,11 @@ proc burritoInterruptHandler(rt: ptr JSRuntime, opaque: pointer): cint {.cdecl.}
   ## gets its own runtime, and therefore its own guard and its own budget — so
   ## the case this gives up on does not currently exist.
   # A long script lets its core's other tasks run, as a long raster does
-  # (pixie's renderBreathe: set on an ESP32, nil elsewhere).
-  breathe()
+  # (scriptBreathe: set on an ESP32, nil elsewhere).
+  {.cast(gcsafe).}:
+    let hook = scriptBreathe
+    if not hook.isNil:
+      hook()
   let guard = cast[ptr JsExecutionGuard](opaque)
   if guard == nil:
     return 0
