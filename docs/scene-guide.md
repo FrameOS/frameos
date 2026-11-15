@@ -626,6 +626,27 @@ export function get(app) {
   panel, start `get` with `if (app.frame.systemScene) return <yield />`.
 - A layout on its own has nothing to wrap, so its `<yield />` is an empty area in
   a render. That is correct, not a blank to fix.
+- On a frame that runs scenes side by side (a Raspberry Pi), `app.frame.scenes`
+  lists its scenes (`{id, name}`) and `app.frame.sceneId` is the one wrapped.
+  There a layout's `<Scene id={...} />` (no other props: with props it is a copy
+  they set, as anywhere) is that scene itself, running in its own rectangle
+  beside the wrapped one, so a layout can be a desktop of windows or tiles. Keep
+  the scene with the focus in `<yield />`, bring another forward with
+  `frameos.dispatch('setCurrentScene', {sceneId})`, and keep which are open in
+  `frameos.setState`. The frame's settings and scene list come forward
+  the same way, as `app.frame.sceneId` `system/sceneSettings` (the frame's page)
+  / `system/sceneSettings#<scene id>` (that scene's settings, one a scene) /
+  `system/sceneSwitcher` (`app.frame.systemScene` true): give
+  them a window too, and close it when the
+  focus leaves one without your layout moving it (it went back by itself).
+  Anything with a handler drawn over a `<Scene>` takes the pointer there, and a
+  press it took keeps its tap. A handler on the `<Scene>` itself
+  (`<Scene id={id} onPointerDown={() => focus(id)} />`) is the layout's, not a
+  prop (it makes no copy): it runs when a press reaches that scene, which has the
+  press all the same, so one press both works the scene and gives it the focus. A menu drawn over a box that closes it on a press
+  needs an `onPointerDown` of its own (an empty one will do), or the box takes
+  the press. Where `app.frame.scenes` is undefined (an ESP32, an editor's
+  preview), draw the one scene.
 - A layout is in no scene list and is never shown by itself. It goes on a scene
   under that scene's picture, or for all of them in the frame's Settings under
   Layouts. Tell the person that once it is built.
@@ -776,7 +797,7 @@ back gesture), and a key may be bound to them. They never change the scene.
 | `longPress` | yes |  | `x` integer, `y` integer, `durationMs` integer, `pointerId` integer, `pointerType` string | all | A pointer held in one place for `gestures.longPressMs`. |
 | `swipe` | yes |  | `direction` string, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | A press and a release at least `gestures.swipeMinPx` apart, in one of four directions. |
 | `edgeSwipe` | yes |  | `edge` string, `direction` string, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | A finger or a pen that went down within `gestures.edgePx` of an edge of the screen and moved at least `gestures.swipeMinPx` away from it, as on a phone: `edge` is where it started, `direction` the way it went. |
-| `wheel` | yes |  | `deltaX` integer, `deltaY` integer, `x` integer, `y` integer | Pi, preview | When a mouse wheel is scrolled. |
+| `wheel` | yes |  | `deltaX` float, `deltaY` float, `x` integer, `y` integer | Pi, preview | When a mouse wheel is scrolled. |
 | `turnOn` | yes | yes |  | all | Turn the screen on |
 | `turnOff` | yes | yes |  | all | Turn the screen off |
 | `toggleScreen` |  | yes |  | all | Turn the screen off when it is on, and on when it is off. |
@@ -1000,6 +1021,19 @@ interface FrameOSApp {
     /** The Wi-Fi signal in dBm, about -50 strong and -85 weak, on an ESP32 frame that is connected. Undefined
      * elsewhere, so check before drawing it (FrameOS 2026.11.5+; undefined before). */
     wifiRssi?: number;
+    /** The id of the scene showing; a layout's app gets the id of the scene it wraps, the one its <yield />
+     * shows (FrameOS 2026.11.8+; undefined before). */
+    sceneId?: string;
+    /** The frame's scenes, { id, name } in its scene list's order, layouts left out, on a frame that runs
+     * scenes side by side (a Raspberry Pi, an ESP32). There a layout's <Scene id> is that scene itself,
+     * running in its window while another has the focus, so a layout can be a desktop of windows. Undefined
+     * where one scene runs at a time (the preview of one scene) (FrameOS 2026.11.8+; undefined before). */
+    scenes?: { id: string; name: string }[];
+    /** How many of those scenes may run at once, the one in front included, where that is limited (2 on an
+     * ESP32 with 8 MB of PSRAM, 4 with more). A desktop opening one more closes the one that had the focus
+     * longest ago. Undefined where there is no limit (a Raspberry Pi) (FrameOS 2026.11.8+; undefined
+     * before). */
+    windows?: number;
   };
   initialized?: boolean;
   log(...args: any[]): void;
@@ -1047,7 +1081,7 @@ interface FrameOSEventPayloads {
   swipe: { direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
   /** A finger or a pen that went down within `gestures.edgePx` of an edge of the screen and moved at least `gestures.swipeMinPx` away from it, as on a phone: `edge` is where it started, `direction` the way it went. The frame takes that touch: the scene hears no pointerDown, pointerMove or pointerUp of it, so a slider under it stays as it was. A touch there that lifts, holds or moves along the edge instead is the scene's after all, with its pointerDown a little late. Not a mouse. */
   edgeSwipe: { edge: string; direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
-  /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */
+  /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches, and a trackpad's fractions of one; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */
   wheel: { deltaX: number; deltaY: number; x: number; y: number };
   /** Turn the screen on */
   turnOn: Record<string, never>;

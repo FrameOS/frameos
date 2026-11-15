@@ -64,6 +64,7 @@ extern const char *fos_nim_info_impl(void);
 extern const char *fos_nim_scene_info_json_impl(void);
 extern const char *fos_nim_scene_state_json_impl(void);
 extern bool fos_nim_set_scene_impl(const char *scene_id);
+extern bool fos_nim_scene_running_impl(const char *scene_id);
 extern int fos_nim_load_scenes_impl(const char *json);
 extern int fos_nim_set_scene_catalog_impl(const char *index_json);
 extern int fos_nim_load_scene_impl(const char *scene_json);
@@ -946,6 +947,15 @@ bool frameos_nim_set_scene(const char *scene_id)
     s_nim_oom_jmp_armed = false;
     nim_lock_give();
     return ok;
+}
+
+bool frameos_nim_scene_running(const char *scene_id)
+{
+    if (!s_nim_ready || scene_id == NULL) return false;
+    if (!nim_lock_take()) return false;
+    bool running = fos_nim_scene_running_impl(scene_id);
+    nim_lock_give();
+    return running;
 }
 
 int frameos_nim_load_scenes(const char *json)

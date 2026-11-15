@@ -12,6 +12,7 @@ import system/sceneSwitcher/scene as switcher
 import system/sceneSettings/scene as settings
 import frameos/layout_choice
 import frameos/ui/theme
+from frameos/events import settingsWindowId
 
 # The scene settings (docs/scene-settings.md): the form it builds of a
 # scene's fields, a text typed on the keyboard on the screen, a switch and
@@ -21,6 +22,7 @@ import frameos/ui/theme
 var
   sent: seq[(string, JsonNode)]
   panelSent: seq[string] # what the frame page's buttons said, origin `panel`
+  sentTo: seq[Option[SceneId]] # the scene each of `sent` was aimed at, none for the one in front
 localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
   {.cast(gcsafe).}:
     if origin == eoPanel:
@@ -29,6 +31,7 @@ localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode,
     else:
       doAssert origin == eoScene, "the panel speaks as a scene"
       sent.add((event, payload))
+      sentTo.add scene
 
 sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
   @[SwitcherEntry(id: "scenes/weather", name: "Weather")]
@@ -794,3 +797,46 @@ block a_layout_theme:
   doAssert sent.len >= 1 and sent[0][0] == evSceneSettings, $sent
   themeSource = nil
   echo "a layout theme ok"
+
+block on_a_desktop_save_keeps_a_scenes_settings_window:
+  # A scene's own settings in a window (event_loop.settingsWindows): Save sets
+  # the scene's fields where it runs, in its window, and the settings stay
+  # open with the focus, their Save quiet until the next edit.
+  builtInScenesStay = true
+  let id = settingsWindowId("scenes/weather")
+  let scene = settings.exportedScene.init(SceneId(id), frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": id, "state": {
+    "from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "string", "placeholder": "Where?", "secret": false}],
+    "values": {"city": "Oslo"}}})
+  scene.send("open", %*{})
+  discard scene.draw()
+  proc windowRegion(handler: int): UiRegion =
+    for r in uiTarget(id, 1, create = false).regions:
+      if r.handlers[ueClick] == handler + 1 or r.handlers[ueChange] == handler + 1:
+        return r
+    raise newException(ValueError, "no region for handler " & $handler)
+  # "s" typed into the city.
+  scene.tap(windowRegion(1000))
+  discard scene.draw()
+  var key: UiRegion
+  for r in uiTarget(id, 1, create = false).regions:
+    if r.handlers[ueClick] == KeyBase + ord('s') + 1: key = r
+  scene.tap(key)
+  discard scene.draw()
+  doAssert scene.state["values"]["city"].getStr() == "Oslos"
+  sent.setLen(0)
+  sentTo.setLen(0)
+  scene.tap(windowRegion(1))
+  doAssert sent.len >= 1 and sent[0][0] == evSetSceneState, $sent
+  doAssert sentTo[0] == some(SceneId("scenes/weather")), $sentTo
+  doAssert sent[0][1] == %*{"state": {"city": "Oslos"}}, $sent[0][1]
+  doAssert evSetCurrentScene notin sent.mapIt(it[0]) and evSceneSettings notin sent.mapIt(it[0]), $sent
+  # Still open: losing the focus now leaves it in its window, as it was.
+  scene.send("close", %*{})
+  doAssert scene.state{"away"}.getBool(), "a window that went nowhere stays open"
+  doAssert scene.state["values"]["city"].getStr() == "Oslos"
+  # Nothing left to save.
+  doAssert scene.state{"edited"}.isNil or scene.state{"edited"}.len == 0, $scene.state{"edited"}
+  builtInScenesStay = false
+  echo "save keeps a window ok"

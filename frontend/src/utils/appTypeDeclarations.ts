@@ -264,6 +264,19 @@ interface FrameOSApp {
     /** The Wi-Fi signal in dBm, about -50 strong and -85 weak, on an ESP32 frame that is connected. Undefined
      * elsewhere, so check before drawing it (FrameOS 2026.11.5+; undefined before). */
     wifiRssi?: number;
+    /** The id of the scene showing; a layout's app gets the id of the scene it wraps, the one its <yield />
+     * shows (FrameOS 2026.11.8+; undefined before). */
+    sceneId?: string;
+    /** The frame's scenes, { id, name } in its scene list's order, layouts left out, on a frame that runs
+     * scenes side by side (a Raspberry Pi, an ESP32). There a layout's <Scene id> is that scene itself,
+     * running in its window while another has the focus, so a layout can be a desktop of windows. Undefined
+     * where one scene runs at a time (the preview of one scene) (FrameOS 2026.11.8+; undefined before). */
+    scenes?: { id: string; name: string }[];
+    /** How many of those scenes may run at once, the one in front included, where that is limited (2 on an
+     * ESP32 with 8 MB of PSRAM, 4 with more). A desktop opening one more closes the one that had the focus
+     * longest ago. Undefined where there is no limit (a Raspberry Pi) (FrameOS 2026.11.8+; undefined
+     * before). */
+    windows?: number;
   };
   initialized?: boolean;
   log(...args: any[]): void;

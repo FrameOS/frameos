@@ -4788,6 +4788,202 @@
     ]
    },
    {
+    "name": "on a desktop every scene's settings are a window of their own, and the frame page one more",
+    "why": "Where built-in scenes stay open as windows (`windows`: a desktop layout on a Raspberry Pi, an ESP32 or in the browser; docs/scene-settings.md \"In a window\"), `sceneSettings` opens the settings of the scene in front as an instance of their own, `scenes.settingsWindow` and the scene's id, with its fields and values: another scene's settings open beside them and both keep their own `from` and edits. The frame page (`{page: \"frame\"}`) is the one window of the plain id, opened over the scene in front or over the scene the settings in front are for. While a settings window is in front the command goes back to its scene, and a settings window brought forward by name is as it was left.",
+    "windows": true,
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/winA",
+      "name": "winA",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       }
+      ],
+      "edges": [],
+      "fields": [
+       {
+        "name": "name",
+        "label": "name",
+        "type": "string",
+        "value": "Ann",
+        "access": "public",
+        "persist": "memory"
+       }
+      ]
+     },
+     {
+      "id": "fixtures/dispatcher/winB",
+      "name": "winB",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       }
+      ],
+      "edges": [],
+      "fields": [
+       {
+        "name": "city",
+        "label": "city",
+        "type": "string",
+        "value": "Oslo",
+        "access": "public",
+        "persist": "memory"
+       }
+      ]
+     }
+    ],
+    "scene": "fixtures/dispatcher/winA",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings"
+       }
+      ],
+      "trace": [
+       "select system/sceneSettings#fixtures/dispatcher/winA",
+       "run winA close",
+       "run sceneSettings#winA setCurrentScene",
+       "run sceneSettings#winA open",
+       "render"
+      ],
+      "current": "system/sceneSettings#fixtures/dispatcher/winA",
+      "state": {
+       "from": "fixtures/dispatcher/winA"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "setCurrentScene",
+        "payload": {
+         "sceneId": "fixtures/dispatcher/winB"
+        }
+       }
+      ],
+      "trace": [
+       "select fixtures/dispatcher/winB",
+       "run sceneSettings#winA close",
+       "run winB open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/winB"
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings"
+       }
+      ],
+      "trace": [
+       "select system/sceneSettings#fixtures/dispatcher/winB",
+       "run winB close",
+       "run sceneSettings#winB setCurrentScene",
+       "run sceneSettings#winB open",
+       "render"
+      ],
+      "current": "system/sceneSettings#fixtures/dispatcher/winB",
+      "state": {
+       "from": "fixtures/dispatcher/winB"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings",
+        "payload": {
+         "page": "frame"
+        }
+       }
+      ],
+      "trace": [
+       "select system/sceneSettings",
+       "run sceneSettings#winB close",
+       "run sceneSettings setCurrentScene",
+       "run sceneSettings open",
+       "render"
+      ],
+      "current": "system/sceneSettings",
+      "state": {
+       "from": "fixtures/dispatcher/winB",
+       "opened": "frame"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings"
+       }
+      ],
+      "trace": [
+       "select fixtures/dispatcher/winB",
+       "run sceneSettings close",
+       "run winB open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/winB"
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "setCurrentScene",
+        "payload": {
+         "sceneId": "system/sceneSettings#fixtures/dispatcher/winA"
+        }
+       }
+      ],
+      "trace": [
+       "select system/sceneSettings#fixtures/dispatcher/winA",
+       "run winB close",
+       "run sceneSettings#winA open",
+       "render"
+      ],
+      "current": "system/sceneSettings#fixtures/dispatcher/winA",
+      "state": {
+       "from": "fixtures/dispatcher/winA"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings"
+       }
+      ],
+      "trace": [
+       "select fixtures/dispatcher/winA",
+       "run sceneSettings#winA close",
+       "run winA open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/winA"
+     }
+    ]
+   },
+   {
     "name": "the scene settings open on a frame with no scene, and close back to none",
     "why": "A frame given no scene yet (an ESP32 showing its status screen) opens the settings too: they are where a touch LCD sets its Wi-Fi (docs/scene-settings.md \"The frame tab\"). `state.from` is empty, and closing them has no scene to go back to and no scene list to fall back on: the host lets the built-in scene go (`setCurrentScene {sceneId: \"\"}`, honoured only while a built-in scene shows), and the frame shows no scene again.",
     "scenes": [],

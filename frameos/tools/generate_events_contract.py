@@ -205,6 +205,9 @@ def load():
     for key, event in (("switcher", "sceneSwitcher"), ("settings", "sceneSettings")):
         if not re.fullmatch(r"system/[a-zA-Z]+", doc["scenes"].get(key, "")):
             fail(f"scenes.{key}: the built-in scene `{event}` shows, `system/<name>`")
+    window = doc["scenes"].get("settingsWindow", "")
+    if not (window.startswith(doc["scenes"].get("settings", "") + "#") and len(window) == len(doc["scenes"]["settings"]) + 1):
+        fail("scenes.settingsWindow: the settings' id and `#`, a character no scene id has, before the scene's id")
     if not re.fullmatch(r"system/[a-zA-Z]+", doc["scenes"].get("yield", "")):
         fail("scenes.yield: the id a layout's scene node yields through, `system/<name>`")
     if doc["gestures"].get("directions") != ["left", "right", "up", "down"]:
@@ -414,6 +417,8 @@ def gen_nim(doc):
         f"  SceneSwitcherId* = {nim_str(doc['scenes']['switcher'])}",
         "  ## The built-in scene `sceneSettings` shows (docs/scene-settings.md).",
         f"  SceneSettingsId* = {nim_str(doc['scenes']['settings'])}",
+        "  ## Where built-in scenes stay open as windows, a scene's own settings: this and its id.",
+        f"  SceneSettingsWindowPrefix* = {nim_str(doc['scenes']['settingsWindow'])}",
         "  ## The scene a layout's <yield /> stands for (docs/scene-layouts.md).",
         f"  SceneYieldId* = {nim_str(doc['scenes']['yield'])}",
         "  ## Origins a scene opts into per custom event (`origins` on its declaration).",
@@ -624,6 +629,9 @@ def gen_c(doc):
         f"#define FOS_SCENE_SWITCHER_ID {c_str(doc['scenes']['switcher'])}",
         "/* And the one `sceneSettings` shows, the same way. */",
         f"#define FOS_SCENE_SETTINGS_ID {c_str(doc['scenes']['settings'])}",
+        "/* On a desktop (a layout of windows), a scene's own settings: this and the",
+        " * scene's id, built in the same way. */",
+        f"#define FOS_SCENE_SETTINGS_WINDOW_PREFIX {c_str(doc['scenes']['settingsWindow'])}",
         "",
         "/* `gpio {action}`: the firmware reports the edges, each with `atMs` (when it saw",
         " * it); `button {action}` (press, doublePress, longPress) is the Nim dispatcher's",
@@ -803,6 +811,8 @@ def gen_ts_frontend(doc):
     out.append(f"export const SCENE_SWITCHER_ID = '{doc['scenes']['switcher']}'")
     out.append("/** The built-in scene `sceneSettings` shows (docs/scene-settings.md). */")
     out.append(f"export const SCENE_SETTINGS_ID = '{doc['scenes']['settings']}'")
+    out.append("/** Where built-in scenes stay open as windows, a scene's own settings: this and its id. */")
+    out.append(f"export const SCENE_SETTINGS_WINDOW_PREFIX = '{doc['scenes']['settingsWindow']}'")
     out.append("/** What a layout's scene node names for the scene it wraps (docs/scene-layouts.md). */")
     out.append(f"export const SCENE_YIELD_ID = '{doc['scenes']['yield']}'")
     out.append("")
@@ -975,6 +985,9 @@ def gen_py(doc):
     out.append("# settings): in no scene list, never persisted by a device.")
     out.append(f"SCENE_SWITCHER_ID = {json.dumps(doc['scenes']['switcher'])}")
     out.append(f"SCENE_SETTINGS_ID = {json.dumps(doc['scenes']['settings'])}")
+    out.append("# Where built-in scenes stay open as windows (a Pi's desktop), a scene's own")
+    out.append("# settings are this and its id: built in too.")
+    out.append(f"SCENE_SETTINGS_WINDOW_PREFIX = {json.dumps(doc['scenes']['settingsWindow'])}")
     out.append("BUILT_IN_SCENE_IDS: frozenset[str] = frozenset({SCENE_SWITCHER_ID, SCENE_SETTINGS_ID})")
     out.append("")
     out.append("# origin -> contract events it may not emit. `http:write` is the frame access")

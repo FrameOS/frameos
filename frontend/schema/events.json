@@ -637,20 +637,20 @@
   },
   {
     "name": "wheel",
-    "description": "When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right.",
+    "description": "When a mouse wheel is scrolled (not logged). Deltas are wheel notches, and a trackpad's fractions of one; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right.",
     "canListen": true,
     "fields": [
       {
         "name": "deltaX",
         "label": "Delta X",
-        "type": "integer",
+        "type": "float",
         "required": true,
         "filter": "more"
       },
       {
         "name": "deltaY",
         "label": "Delta Y",
-        "type": "integer",
+        "type": "float",
         "required": true,
         "filter": "more"
       },

@@ -1076,6 +1076,12 @@ proc fos_nim_set_scene_impl(sceneId: cstring): bool {.exportc, cdecl.} =
     recoverEmergencyReserve("scene switch failure")
     result = false
 
+proc fos_nim_scene_running_impl(sceneId: cstring): bool {.exportc, cdecl.} =
+  try:
+    result = not sceneId.isNil and sceneRunning($sceneId)
+  except Exception:
+    result = false
+
 proc fos_nim_info_impl(): cstring {.exportc, cdecl.} =
   try:
     infoBuffer = &"nim {NimVersion} + pixie + quickjs, {frameWidth}x{frameHeight}, " &

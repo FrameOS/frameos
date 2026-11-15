@@ -203,7 +203,11 @@ so in a block give it a height.
 It runs on its own `refreshInterval`: a pass that finds it not due leaves its
 pixels alone and the scene does not run (`docs/scene-rhythm.md`), and the frame's
 next wake comes forward to when it is due. When only it is due the UI around it
-sits out. A tap on it is the scene's, in its own coordinates. One drawn as a
+sits out. A tap on it is the scene's, in its own coordinates, unless the UI drew
+something over it there that listens for that event (a menu, a window on top, a
+pane that takes a press): then it is that element's, and a press it took is its
+own to the end, its tap included. What the UI drew under it hears nothing
+there. One drawn as a
 picture counts against the same budget as a panel's copy (a quarter of free
 render memory, at most 1 MiB on an ESP32); a device that cannot keep it runs the
 scene again each render. An LCD repaints what the scene changed.
@@ -759,7 +763,11 @@ A box with `overflow-y-auto` (or `-scroll`, `overflow-x-auto`,
   pressed; the swipe that ends the drag is the box's, not a handler's. A
   press on an element that takes it (`onPointerDown`, `onPointerMove`: a
   slider) stays that element's. A wheel scrolls the box under the pointer
-  (48 px a notch). On e-paper the box shows where it got to when the finger
+  (72 px a notch, about three lines; a trackpad's fractions of a notch their
+  share of it), and the box around it once that one is at its end. In a
+  layout it is routed like the pointer: over a scene in a window it scrolls
+  that scene's box in its own coordinates, a window behind's too, without
+  bringing it forward. On e-paper the box shows where it got to when the finger
   lifts.
 - **It needs a height**: a box that scrolls is as tall as its own classes
   or its container make it (`h-*`, `max-h-*`, `flex-1` in a column with a
@@ -793,7 +801,8 @@ the layout around the frame's scene, so a desktop's settings look like that
 desktop's (`frameos/ui/theme.nim`). A layout gives its theme in its state as
 **`theme`**, an object of roles; the samples set it from their "Look of the
 settings pages" field (`Windows 98`: Windows Standard, `macOS`: Light and Dark,
-`BeOS`, each with High contrast and FrameOS, the built-in look):
+`BeOS`, each with High contrast and FrameOS, the built-in look; `Tiling`:
+FrameOS and High contrast):
 
 ```js
 frameos.setState('theme', {

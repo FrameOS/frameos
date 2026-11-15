@@ -1495,6 +1495,32 @@ when defined(freertos):
   proc fos_client_battery_percent(): cint {.importc, cdecl.}
   proc fos_client_wifi_rssi(): cint {.importc, cdecl.}
 
+var
+  layoutWrappedSceneId*: proc(owner: FrameScene): string {.nimcall.}
+    ## Set by the interpreter: the id of the scene a layout wraps, else the
+    ## scene's own (`app.frame.sceneId`).
+  windowSceneListing* {.threadvar.}: proc(): JsonNode {.closure, gcsafe.}
+    ## Set by a host that runs a frame's scenes side by side (runner.nim,
+    ## single_scene_host.nim): the scenes a layout can open in windows,
+    ## `[{id, name}]` in the frame's order (`app.frame.scenes`). Unset, a
+    ## layout shows one scene.
+
+proc windowLimit*(): int =
+  ## How many of the frame's scenes may run as windows at once, the one in
+  ## front included (`app.frame.windows`, docs/scene-layouts.md "Windows"): 0
+  ## where there is no limit (a Pi, the browser preview), 2 on an ESP32 with 8
+  ## MB of PSRAM (the preview simulating one included), 4 with more, 1 with
+  ## less. Each one is a scene running: its program, its JS apps'
+  ## interpreters and its UI, beside the panel's buffers, the layout and what
+  ## the scene in front draws.
+  let memory = deviceMemoryBytes()
+  when not defined(frameosEmbedded):
+    if memory <= 0:
+      return 0
+  if memory > 8 * 1024 * 1024: 4
+  elif memory >= 6 * 1024 * 1024: 2
+  else: 1
+
 proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
   if e == nil:
@@ -1557,6 +1583,22 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
       let rssi = fos_client_wifi_rssi()
       if rssi != 0:
         return nimIntToJS(ctx, rssi.int32)
+    return jsUndefSentinel(ctx)
+  of "sceneId":
+    # A layout's is the id of the scene it wraps, the one its <yield /> shows.
+    if not e.owner.scene.isNil and not layoutWrappedSceneId.isNil:
+      return nimStringToJS(ctx, layoutWrappedSceneId(e.owner.scene))
+    return jsUndefSentinel(ctx)
+  of "scenes":
+    # The scenes a layout can open side by side: not on every host.
+    if not windowSceneListing.isNil:
+      return jsonToJS(ctx, windowSceneListing())
+    return jsUndefSentinel(ctx)
+  of "windows":
+    # How many of them may run at once, where there is a limit (windowLimit).
+    let limit = windowLimit()
+    if not windowSceneListing.isNil and limit > 0:
+      return nimIntToJS(ctx, limit.int32)
     return jsUndefSentinel(ctx)
   else:
     return jsUndefSentinel(ctx)
@@ -1631,6 +1673,11 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale", "paper",
       "color", "sceneName", "systemScene", "batteryPercent", "wifiRssi"]
+    keys.add("sceneId")
+    if not windowSceneListing.isNil:
+      keys.add("scenes")
+      if windowLimit() > 0:
+        keys.add("windows")
   of "context":
     keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep"]
     if e.context.hasImage and not e.context.image.isNil:
@@ -3051,6 +3098,12 @@ proc holesOf(owner: AppRoot, context: ExecutionContext, target: UiTarget,
     h.right = placed(h.x + h.w, regionScale, requestedWidth).int32
     h.bottom = placed(h.y + h.h, regionScale, requestedHeight).int32
     if h.right <= h.left or h.bottom <= h.top:
+      h.clean = false
+    # Past the canvas's edge, any of the four (a window dragged half off a
+    # desktop): clamped, the scene would be squeezed into what shows. A
+    # picture is cut instead.
+    if h.x < 0 or h.y < 0 or round((h.x + h.w) * regionScale).int > requestedWidth or
+        round((h.y + h.h) * regionScale).int > requestedHeight:
       h.clean = false
 
 proc noteHoles(scene: FrameScene, holes: UiHoles) =

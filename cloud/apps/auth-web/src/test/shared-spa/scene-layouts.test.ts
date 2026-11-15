@@ -95,6 +95,7 @@ describe("what can be a layout", () => {
       "macOS",
       "Windows 98",
       "Top bar",
+      "Tiling",
       "Terminal",
       "Side rail",
       "Polaroid",

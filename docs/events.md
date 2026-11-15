@@ -236,7 +236,11 @@ no filter on a field hears every value of it.
   values (`state.fields`, `state.values`), read before the switch. While it
   shows it goes back without saving; its Save is a `setCurrentScene` back
   with the values as `state`. Over the switcher it goes back to the scene
-  as well, and `sceneSwitcher` over it goes back unsaved.
+  as well, and `sceneSwitcher` over it goes back unsaved. Where built-in
+  scenes stay open as windows (a desktop), each scene's settings are an
+  instance of their own, `scenes.settingsWindow` and the scene's id, and
+  `{page: "frame"}` is the one window of the plain id
+  ([scene-settings.md](scene-settings.md) "In a window").
 - `back {}` and `forward {}` — go back and go forward, as a phone's back
   gesture: delivered to the scene showing, which decides what that is (the
   photo or the page before or after), and never a scene switch; a scene
@@ -290,8 +294,11 @@ keeps an id while it is down (`pointerType`: `mouse`, `touch`, `pen`). Two
 fingers are two pointers. `pointerCancel {x, y, pointerId, pointerType}` is a
 pointer that was down and is lost without a release: the input lane overflowed
 between a down and its up, the device went away, the kernel dropped events. A
-scene holding a drag lets go. `wheel {deltaX, deltaY, x, y}` is in notches;
-`deltaY` is positive scrolling down.
+scene holding a drag lets go. `wheel {deltaX, deltaY, x, y}` is in notches,
+a trackpad's fractions of one included; `deltaY` is positive scrolling down. A
+JSX UI scrolls the box under the pointer about three lines a notch, routed
+through a layout like the pointer (a window behind's box too, without bringing
+it forward), and the box around it when that one is at its end.
 
 **The cursor.** A relative mouse reports motion only, so the dispatcher owns
 its position — in scene pixels, so it moves along the picture's axes on a
