@@ -1569,27 +1569,6 @@ proc fillCoverage565(
   let data = image.data16
   image.fillCoverageNarrowBody(rgbx, startX, y, coverages, blendMode, data, rgbxToRgb565, rgb565ToRgbx)
 
-template greyRowStore(image: Image, start: int, body: untyped) =
-  ## Inside `body`, `store(luma)` and `backdrop()` address the pixel at `idx`,
-  ## which `body` advances with `step()`, for either grey: a 4-bit store is
-  ## dithered by its place in the row.
-  let
-    data {.inject.} = image.data8
-    four = image.format == pfGray4
-    cell = ((start div image.stride) and 3) * 4
-  var
-    idx {.inject.} = start
-    column = start mod image.stride
-  template store(value: uint8) {.used.} =
-    if four: gray4Put(data, idx, grayLevel16Ordered(value, OrderedThresholds4x4[cell + (column and 3)]))
-    else: data[idx] = value
-  template backdrop(): ColorRGBX {.used.} =
-    (if four: gray4ToRgbx(gray4Level(data, idx)) else: gray8ToRgbx(data[idx]))
-  template step() {.used.} =
-    inc idx
-    inc column
-  body
-
 proc fillCoverageGrey(
   image: Image, rgbx: ColorRGBX, startX, y: int, coverages: openArray[uint8], blendMode: BlendMode
 ) =
@@ -1599,12 +1578,15 @@ proc fillCoverageGrey(
     luma = rgbxToGray8(rgbx)
     blender = blendMode.blender()
     masking = blendMode == MaskBlend
-    solid = blendMode == OverwriteBlend or (blendMode == NormalBlend and rgbx.a == 255)
+    normal = blendMode == NormalBlend
+    solid = blendMode == OverwriteBlend or (normal and rgbx.a == 255)
   image.greyRowStore(image.dataIndex(startX, y)):
     for i in 0 ..< coverages.len:
       let coverage = coverages[i]
       if coverage == 255 and (solid or masking):
         if solid: store(luma) # a full mask leaves the pixel as it is
+      elif coverage != 0 and normal:
+        store(rgbxToGray8(blendNormal(backdrop(), rgbx * coverage)))
       elif coverage != 0 or masking:
         store(rgbxToGray8(blender(backdrop(), rgbx * coverage)))
       step()
@@ -1781,8 +1763,33 @@ proc fillHits565(
   image.fillHitsNarrowBody(rgbx, startX, y, hits, numHits, windingRule, blendMode, maskClears,
     data, rgbxToRgb565, rgb565ToRgbx, fillUnsafe16)
 
-proc blendSpanGrey(image: Image, rgbx: ColorRGBX, blender: Blender, x, y, len: int) =
-  ## `len` pixels of `rgbx` blended onto a grey row.
+proc blendSpanGrey(image: Image, rgbx: ColorRGBX, blendMode: BlendMode, x, y, len: int) =
+  ## `len` pixels of `rgbx` blended onto a grey row. Blended normally, what
+  ## a pixel becomes depends on its grey alone: a long span looks the
+  ## answers up (sixteen for a 4-bit row, 256 for an 8-bit one).
+  if blendMode == NormalBlend:
+    if image.format == pfGray4 and len > 16:
+      var lumas: array[16, uint8]
+      for level in 0'u8 .. 15'u8:
+        lumas[level] = rgbxToGray8(blendNormal(gray4ToRgbx(level), rgbx))
+      image.greyRowStore(image.dataIndex(x, y)):
+        for _ in 0 ..< len:
+          store(lumas[gray4Level(data, idx)])
+          step()
+    elif image.format == pfGray8 and len > 512:
+      var lumas: array[256, uint8]
+      for luma in 0 .. 255:
+        lumas[luma] = rgbxToGray8(blendNormal(gray8ToRgbx(luma.uint8), rgbx))
+      let data = image.data8
+      for i in image.dataIndex(x, y) ..< image.dataIndex(x, y) + len:
+        data[i] = lumas[data[i]]
+    else:
+      image.greyRowStore(image.dataIndex(x, y)):
+        for _ in 0 ..< len:
+          store(rgbxToGray8(blendNormal(backdrop(), rgbx)))
+          step()
+    return
+  let blender = blendMode.blender()
   image.greyRowStore(image.dataIndex(x, y)):
     for _ in 0 ..< len:
       store(rgbxToGray8(blender(backdrop(), rgbx)))
@@ -1801,20 +1808,18 @@ proc fillHitsGrey(
       if maskClears and start > filledTo:
         image.fillGrey(0, image.dataIndex(filledTo, y), start - filledTo)
       if rgbx.a != 255:
-        image.blendSpanGrey(rgbx, MaskBlend.blender(), start, y, len)
+        image.blendSpanGrey(rgbx, MaskBlend, start, y, len)
       filledTo = start + len
     if maskClears:
       image.clearUnsafe(0, y, startX, y)
       image.clearUnsafe(filledTo, y, image.width, y)
     return
-  let
-    solid = blendMode == OverwriteBlend or (blendMode == NormalBlend and rgbx.a == 255)
-    blender = blendMode.blender()
+  let solid = blendMode == OverwriteBlend or (blendMode == NormalBlend and rgbx.a == 255)
   for (start, len) in hits.walkInteger(numHits, windingRule, y, image.width):
     if solid:
       image.fillGrey(luma, image.dataIndex(start, y), len)
     else:
-      image.blendSpanGrey(rgbx, blender, start, y, len)
+      image.blendSpanGrey(rgbx, blendMode, start, y, len)
 
 proc fillHits(
   image: Image,
@@ -2486,6 +2491,39 @@ proc paintStripRows*(width, height: int): int {.raises: [].} =
     rows = min(rows, contiguous.int64 div rowBytes)
   max(min(height.int64, paintStripMinRows.int64), rows).int
 
+proc paintGradientGrey(
+  image, mask: Image, rows: GradientRows, colors: ptr UncheckedArray[ColorRGBX],
+  x, y: int
+) =
+  ## A gradient blended normally onto grey through a coverage `mask` whose
+  ## top left sits at (x, y): each row painted where the mask covers it, the
+  ## gradient evaluated there alone into `colors` (the mask's width) and
+  ## stored straight into the canvas. The arithmetic is the paint image's,
+  ## its mask multiply's and the normal composite's, so the same pixels.
+  for r in 0 ..< mask.height:
+    let coverage = mask.getUncheckedArray(0, r)
+    var x0 = 0
+    while x0 < mask.width and coverage[x0].a == 0:
+      inc x0
+    if x0 == mask.width:
+      continue
+    var x1 = mask.width
+    while coverage[x1 - 1].a == 0:
+      dec x1
+    rows.row(y + r, x0, x1, colors)
+    image.greyRowStore(image.dataIndex(x + x0, y + r)):
+      for i in x0 ..< x1:
+        let m = coverage[i]
+        if m.a != 0: # uncovered: the composite of nothing, the pixel as it was
+          let source =
+            if m.a == 255: colors[i - x0] # blendMask by a whole mask is the colour
+            else: blendMask(colors[i - x0], m)
+          if source.a == 255:
+            store(rgbxToGray8(source))
+          elif source.a != 0:
+            store(rgbxToGray8(blendNormal(backdrop(), source)))
+        step()
+
 template paintThroughMask(
   image: Image, paint: Paint, transform: Mat3, bounds: Rect, rasterise: untyped
 ) =
@@ -2525,6 +2563,21 @@ template paintThroughMask(
     boxW = boxX1 - boxX0
     stripRows = paintStripRows(max(boxW, 1), max(boxY1 - boxY0, 1))
     savedOpacity = paint.opacity
+    # A gradient blended normally onto grey: no paint image
+    # (`paintGradientGrey`), so half the memory and a third of the passes.
+    greyGradient = image.format >= pfGray8 and paint.blendMode == NormalBlend and
+      paint.kind in {LinearGradientPaint, RadialGradientPaint, AngularGradientPaint}
+  var
+    gradientRows: GradientRows
+    gradientLine: seq[ColorRGBX]
+  if greyGradient and boxW > 0:
+    # The table is chosen as for one pass over the whole image, as before
+    # strips and boxes: every strip of the fill alike, the same colours.
+    paint.opacity = 1
+    gradientRows = initGradientRows(paint, vec2(boxX0.float32, 0),
+      false, image.width * image.height, boxW, boxY1 - boxY0)
+    paint.opacity = savedOpacity
+    gradientLine = newSeq[ColorRGBX](boxW)
   var stripY = boxY0
   while boxW > 0 and stripY < boxY1:
     let
@@ -2534,9 +2587,20 @@ template paintThroughMask(
       stripTransform {.inject.} =
         if wholeImage: transform else: translate(stripOffset) * transform
       mask {.inject.} = newImage(boxW, stripHeight)
-      fill = newImage(boxW, stripHeight)
 
     rasterise
+
+    if greyGradient:
+      if savedOpacity != 1:
+        mask.applyOpacity(savedOpacity)
+      paint.opacity = 1 # the colours `gradientColor` gives, as the paint image had them
+      image.paintGradientGrey(mask, gradientRows,
+        cast[ptr UncheckedArray[ColorRGBX]](gradientLine[0].addr), boxX0, stripY)
+      paint.opacity = savedOpacity
+      stripY += stripHeight
+      continue
+
+    let fill = newImage(boxW, stripHeight)
 
     # Draw the image (maybe tiled) or gradients. Do this with opaque paint and
     # and then apply the paint's opacity to the mask.

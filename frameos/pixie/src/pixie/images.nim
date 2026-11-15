@@ -697,6 +697,20 @@ proc blendSampleLineAny(
   blendMode: BlendMode
 ) =
   ## `blendLineAny` where the source row is already an RGBX scratch line.
+  if a.format >= pfGray8 and blendMode in {OverwriteBlend, NormalBlend}:
+    # Onto grey: each row's place for the dither found once, the stores
+    # inline, an opaque pixel stored as it is and a clear one skipped (a
+    # grey stored again is the grey it was).
+    let overwrite = blendMode == OverwriteBlend
+    a.greyRowStore(a.dataIndex(ax, ay)):
+      for i in 0 ..< len:
+        let c = samples[i]
+        if overwrite or c.a == 255:
+          store(rgbxToGray8(c))
+        elif c.a != 0:
+          store(rgbxToGray8(blendNormal(backdrop(), c)))
+        step()
+    return
   var ai = a.dataIndex(ax, ay)
   case blendMode:
   of OverwriteBlend:
@@ -968,6 +982,12 @@ proc blendRect(a, b: Image, pos: Ivec2, blendMode: BlendMode) =
           (xEnd - xStart) * 2)
       else:
         blendLineAny(a, xStart + px, y + py, b, xStart, y, xEnd - xStart, OverwriteBlend)
+    return
+
+  if a.format >= pfGray8 and b.format == pfRgbx and blendMode in {NormalBlend, OverwriteBlend}:
+    for y in yStart ..< yEnd:
+      blendSampleLineAny(a, xStart + px, y + py, b.getUncheckedArray(xStart, y),
+        xEnd - xStart, blendMode)
     return
 
   if a.format != pfRgbx or b.format != pfRgbx:
