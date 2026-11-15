@@ -2621,3 +2621,33 @@ void fos_nim_http_free(void *ptr)
 {
     free(ptr); /* heap_caps allocations free through the same heap free */
 }
+
+
+/* A render lets the other tasks on its core run (pixie's renderBreathe and
+ * the QuickJS interrupt handler call this, many times a second). The render
+ * task never blocked during a long render: on the reTerminal E1003 a 36 s SVG
+ * render held CPU 1, its idle task never ran, and the task watchdog fired every
+ * 30 s (the hardware bench, 2026-11-15). After a second of render without a
+ * block it blocks for one tick; a render that is over sooner (every frame of an
+ * animation, which blocks between frames anyway) is never touched. Counted
+ * calls first, so most cost one increment. */
+static int64_t s_breathe_since_us = 0;
+static uint32_t s_breathe_calls = 0;
+
+void fos_render_breathe_reset(void)
+{
+    s_breathe_since_us = esp_timer_get_time();
+}
+
+void fos_render_breathe(void)
+{
+    if ((++s_breathe_calls & 31u) != 0) return;
+    int64_t now = esp_timer_get_time();
+    if (s_breathe_since_us == 0) {
+        s_breathe_since_us = now;
+        return;
+    }
+    if (now - s_breathe_since_us < 1000000) return;
+    vTaskDelay(1);
+    s_breathe_since_us = esp_timer_get_time();
+}

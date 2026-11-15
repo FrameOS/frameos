@@ -889,6 +889,7 @@ proc drawResampled*(
   for slot in 0 ..< ringSize:
     ringRow[slot] = high(uint32)
   for yy in y0 ..< y1:
+    breathe()
     let
       i = yy - y0
       count = rows.count[i].int
@@ -952,6 +953,7 @@ proc blendRect(a, b: Image, pos: Ivec2, blendMode: BlendMode) =
   if a.format == pfGray4 and b.format == pfGray4 and blendMode in {NormalBlend, OverwriteBlend}:
     # A 4-bit picture is opaque and dithered already: its levels, as they are.
     for y in yStart ..< yEnd:
+      breathe()
       a.copyPixelRow(a.dataIndex(xStart + px, y + py), b, b.dataIndex(xStart, y), xEnd - xStart)
     return
 
@@ -960,6 +962,7 @@ proc blendRect(a, b: Image, pos: Ivec2, blendMode: BlendMode) =
     # its rows copied as they are (a canvas a frame shows at its own size);
     # onto RGBX, each pixel expanded, with nothing to blend.
     for y in yStart ..< yEnd:
+      breathe()
       if a.format == pfRgb565:
         copyMem(a.rowAddr(xStart + px, y + py), b.rowAddr(xStart, y),
           (xEnd - xStart) * 2)
@@ -973,6 +976,7 @@ proc blendRect(a, b: Image, pos: Ivec2, blendMode: BlendMode) =
     if blendMode == MaskBlend and yStart + py > 0:
       a.zeroRows(0, yStart + py)
     for y in yStart ..< yEnd:
+      breathe()
       if blendMode == MaskBlend:
         if xStart + px > 0:
           a.zeroPixelRow(a.dataIndex(0, y + py), xStart + px)
@@ -986,6 +990,7 @@ proc blendRect(a, b: Image, pos: Ivec2, blendMode: BlendMode) =
   case blendMode:
   of NormalBlend:
     for y in yStart ..< yEnd:
+      breathe()
       blendLineNormal(
         a.getUncheckedArray(xStart + px, y + py),
         b.getUncheckedArray(xStart, y),
@@ -993,6 +998,7 @@ proc blendRect(a, b: Image, pos: Ivec2, blendMode: BlendMode) =
       )
   of OverwriteBlend:
     for y in yStart ..< yEnd:
+      breathe()
       blendLineOverwrite(
         a.getUncheckedArray(xStart + px, y + py),
         b.getUncheckedArray(xStart, y),
@@ -1003,6 +1009,7 @@ proc blendRect(a, b: Image, pos: Ivec2, blendMode: BlendMode) =
     if yStart + py > 0:
       a.zeroRows(0, yStart + py)
     for y in yStart ..< yEnd:
+      breathe()
       if xStart + px > 0:
         zeroMem(a.data[a.dataIndex(0, y + py)].addr, (xStart + px) * 4)
       blendLineMask(
@@ -1020,6 +1027,7 @@ proc blendRect(a, b: Image, pos: Ivec2, blendMode: BlendMode) =
   else:
     let blender = blendMode.blender()
     for y in yStart ..< yEnd:
+      breathe()
       blendLine(
         a.getUncheckedArray(xStart + px, y + py),
         b.getUncheckedArray(xStart, y),
@@ -1062,6 +1070,7 @@ proc drawSmooth(a, b: Image, transform: Mat3, blendMode: BlendMode) =
 
   var sampleLine = newSeq[ColorRGBX](a.width)
   for y in yStart ..< yEnd:
+    breathe()
     # Determine where we should start and stop drawing in the x dimension
     var
       xMin = a.width.float32

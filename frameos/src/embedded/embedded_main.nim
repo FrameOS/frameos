@@ -750,6 +750,7 @@ proc fos_nim_render_impl(
     # `set debug 1`: the render line below carries where this frame went
     # (frameos/render_probe.nim), the measurement docs/perf-todo.md is paced by.
     probeOn = debugEnabled()
+    fos_render_breathe_reset()
     let cacheAtStart = probeBegin()
     let start = getMonoTime()
     let rendered = renderFrameImage()
@@ -864,6 +865,7 @@ proc fos_nim_render_alloc_impl(
     # decode lets kept interpreters go (utils/memory.refreshDecodeBudget).
     refreshDecodeBudget(forDecode = false)
     setAssetColorsPanelPalette(panelPaletteForFormat(pixelFormat.int))
+    fos_render_breathe_reset()
     # Where the canvas is the panel buffer (a sixteen-grey panel, main.c
     # frameos_nim_share_canvas) the buffer is borrowed before the scene draws
     # there: nothing else writes it meanwhile, and a snapshot of the last

@@ -1928,6 +1928,7 @@ proc fillShapes(
 
   var y = startY
   while y < pathHeight:
+    breathe()
     if y >= partitions[partitionIndex].bottom:
       inc partitionIndex
 

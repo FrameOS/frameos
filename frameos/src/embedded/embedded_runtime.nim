@@ -817,6 +817,14 @@ proc embeddedLayouts(): seq[LayoutEntry] {.nimcall, gcsafe.} =
 
 layoutListing = embeddedLayouts
 
+# A long render lets its core's other tasks run (frameos_nim_glue.c): pixie
+# calls this from its row loops, the QuickJS interrupt handler from scripts.
+proc fos_render_breathe() {.importc, cdecl, raises: [].}
+proc fos_render_breathe_reset*() {.importc, cdecl, raises: [].}
+proc embeddedBreathe() {.nimcall, gcsafe, raises: [].} =
+  fos_render_breathe()
+renderBreathe = embeddedBreathe
+
 # The settings panel's frame page, behind its gear (docs/scene-settings.md
 # "The frame page"): the facts it shows and what it sets (Wi-Fi, rotation,
 # scale), from main/fos_frame_settings.c. Every call comes from the scene, on

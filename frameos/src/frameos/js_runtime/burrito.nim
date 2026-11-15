@@ -81,6 +81,7 @@
 ##
 
 import std/[tables, macros, json, strutils, os, monotimes, times]
+from pixie/common import breathe
 import frameos/js_runtime/run_budget
 
 # quickjs-libc (the std and os modules, the POSIX event loop, qjsc bytecode
@@ -653,6 +654,9 @@ proc burritoInterruptHandler(rt: ptr JSRuntime, opaque: pointer): cint {.cdecl.}
   ## fetch. FrameOS never re-enters a context this way — a nested JS app node
   ## gets its own runtime, and therefore its own guard and its own budget — so
   ## the case this gives up on does not currently exist.
+  # A long script lets its core's other tasks run, as a long raster does
+  # (pixie's renderBreathe: set on an ESP32, nil elsewhere).
+  breathe()
   let guard = cast[ptr JsExecutionGuard](opaque)
   if guard == nil:
     return 0
