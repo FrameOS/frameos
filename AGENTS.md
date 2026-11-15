@@ -580,8 +580,9 @@
   A rectangle of the panel keeps its own damage record in `svg_frames.nim`
   (`takePanelRegion`): a new way to write a rectangle's pixels without a render
   of it takes that record too.
-- **Windows** (`docs/scene-layouts.md` "Windows"; the `Windows 98` and `Tiling`
-  samples): on a Pi, an ESP32 and in the browser when the page turns it on (`frameos_wasm_set_windowed`; the windowed
+- **Windows** (`docs/scene-layouts.md` "Windows"; the `Windows 98`, `Tiling`,
+  `macOS` and `BeOS` samples): on a Pi, an ESP32 and in the browser when the
+  page turns it on (`frameos_wasm_set_windowed`; the windowed
   `single_scene_host` is the ESP32's and the browser's), a layout can run the
   frame's scenes side by side. The runtime adds three things and no
   window manager: `app.frame.scenes` / `sceneId`, a layout's bare `<Scene id>`

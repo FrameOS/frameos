@@ -70,7 +70,10 @@ frame without a desktop, an editor's preview) the settings are the one scene
 they always were. The scene switcher stays one window. In the Windows 98 sample a
 scene's settings open from the gear button at the left of its window's title bar
 (a window behind comes forward first; open already, they come forward), and the
-frame's from Start's Control Panel and the tray.
+frame's from Start's Control Panel and the tray; in macOS from the gear at the
+right of the title bar and the menu bar's Settings, the frame's from System
+Settings in the Dock and the status icons; in BeOS from the gear box on the
+window's tab, the frame's from Preferences and the Deskbar's tray.
 
 ## The frame page
 
