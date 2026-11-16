@@ -3,6 +3,7 @@
     "id": "8d03fd19-526a-4e49-9850-0349cc1575a3",
     "name": "Unsplash image",
     "settings": {
+      "category": "photos",
       "backgroundColor": "#000000",
       "refreshInterval": 600,
       "execution": "interpreted",

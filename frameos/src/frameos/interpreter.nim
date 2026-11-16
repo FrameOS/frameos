@@ -27,6 +27,7 @@ import std/monotimes
 import frameos/scene_rhythm
 import frameos/layout_choice
 import frameos/scene_icon
+import frameos/scene_category
 import frameos/ui/events as ui_events
 from frameos/ui/theme import themeSource
 import frameos/utils/canvas_log
@@ -2512,6 +2513,7 @@ proc readSettings(s: string, i: var int): FrameSceneSettings =
     of "windowSize", "window_size": result.windowSize = readText(s, i)
     # One path, checked once here: what is not an icon is none.
     of "icon": result.icon = sceneIconPath(readText(s, i))
+    of "category": result.category = sceneCategory(readText(s, i))
     else: skipValue(s, i)
 
 proc readList[T](s: string, i: var int, read: proc(s: string, i: var int): T {.nimcall.}): seq[T] =
@@ -2568,6 +2570,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     isDesktop: scene.settings != nil and scene.settings.isLayout and scene.settings.desktop,
     windowSize: if scene.settings != nil: scene.settings.windowSize else: "",
     icon: if scene.settings != nil: scene.settings.icon else: "",
+    category: if scene.settings != nil: scene.settings.category else: "",
     layoutSceneId: scene.layout{"sceneId"}.getStr().SceneId,
     layoutState: scene.layout{"state"},
     # Fields without an explicit access default to public for interpreted

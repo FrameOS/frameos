@@ -48,6 +48,7 @@ const deskUi = """
 export function get(app) {
   frameos.setState("seenId", app.frame.sceneId)
   frameos.setState("seenScenes", (app.frame.scenes || []).map((s) => s.id).join(","))
+  frameos.setState("seenCategories", (app.frame.categories || []).slice(0, 3).map((c) => c.id + "=" + c.name).join(","))
   return (
     <div className="relative w-full h-full bg-white">
       <div className="absolute left-0 top-0 w-[20px] h-[40px] flex"><yield /></div>
@@ -256,6 +257,8 @@ suite "windows":
     discard pass(blue)
     check blue.wornLayout.state{"seenId"}.getStr() == "tests/blue"
     check blue.wornLayout.state{"seenScenes"}.getStr() == "tests/blue,tests/yellow"
+    # And the categories to group them by, with their names (docs/scene-categories.json).
+    check blue.wornLayout.state{"seenCategories"}.getStr() == "photos=Photos,art=Art,calendar=Calendars"
 
   test "a tap on a window is that scene's, and it is the same scene when it comes forward":
     let front = hostScene("tests/front")

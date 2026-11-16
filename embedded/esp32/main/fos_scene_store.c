@@ -368,6 +368,9 @@ static bool entry_hash_is(const cJSON *entry, uint32_t hash)
  * itself (scene_icon.nim); the store only keeps a longer value out of the
  * index, which every catalog read parses whole. */
 #define ICON_MAX_LEN 1024
+/* A category is one of the store's slugs (scene_category.nim checks which);
+ * longer than any of them is none. */
+#define CATEGORY_MAX_LEN 16
 
 static bool icon_fits(const char *text)
 {
@@ -409,6 +412,12 @@ static cJSON *make_entry(const cJSON *scene, int slot, size_t bytes, uint32_t ha
         const cJSON *icon = cJSON_GetObjectItem(settings, "icon");
         if (cJSON_IsString(icon) && icon_fits(icon->valuestring)) {
             cJSON_AddStringToObject(entry, "icon", icon->valuestring);
+        }
+        /* Its category: a desktop groups its scene lists by it. */
+        const cJSON *category = cJSON_GetObjectItem(settings, "category");
+        if (cJSON_IsString(category) && category->valuestring[0] &&
+            strlen(category->valuestring) <= CATEGORY_MAX_LEN) {
+            cJSON_AddStringToObject(entry, "category", category->valuestring);
         }
     }
     return entry;

@@ -2,7 +2,7 @@
   {
     "id": "c1d7e9ed-9cd4-4375-b767-ae3b678d935e",
     "name": "Masterpieces",
-    "settings": { "backgroundColor": "#000000", "refreshInterval": 86400, "execution": "interpreted", "windowSize": "800x480" },
+    "settings": { "category": "art", "backgroundColor": "#000000", "refreshInterval": 86400, "execution": "interpreted", "windowSize": "800x480" },
     "fields": [
       {
         "name": "seconds",

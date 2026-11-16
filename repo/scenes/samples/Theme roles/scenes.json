@@ -3,6 +3,7 @@
     "id": "theme-roles",
     "name": "Theme roles",
     "settings": {
+      "category": "demos",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#09090b",

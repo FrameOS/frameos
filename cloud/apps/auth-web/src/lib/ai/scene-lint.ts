@@ -22,6 +22,7 @@ import {
 } from "../../../../../../frontend/src/utils/sceneAccess";
 import { isBrokenLayout, sceneLayoutProblemText } from "../../../../../../frontend/src/utils/sceneLayoutRule";
 import { sceneIconProblem } from "../../../../../../frontend/src/utils/sceneIcon";
+import { sceneCategorySlug, storeCategoryShelves } from "../../../../../../frontend/src/utils/storeCategories";
 
 export type LintLevel = "error" | "warning";
 
@@ -778,6 +779,13 @@ export function lintScene(
   const iconProblem = sceneIconProblem(settings.icon);
   if (iconProblem) {
     push("warning", `settings.icon: ${iconProblem} Frames ignore it and show their own placeholder.`);
+  }
+  // One of the store's slugs (docs/scene-icons.md "Category"); anything else counts as none.
+  if (settings.category !== undefined && settings.category !== "" && sceneCategorySlug(settings.category) === null) {
+    push(
+      "warning",
+      `settings.category ${JSON.stringify(settings.category)} is not a store category, so it counts as none. Use one of ${storeCategoryShelves.map((shelf) => `"${shelf.slug}"`).join(", ")}.`,
+    );
   }
   if (settings.renderScale !== undefined) {
     const scale = settings.renderScale;

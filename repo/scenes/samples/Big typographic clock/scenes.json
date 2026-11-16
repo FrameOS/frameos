@@ -748,6 +748,7 @@
       }
     ],
     "settings": {
+      "category": "utilities",
       "refreshInterval": 60,
       "backgroundColor": "#132238",
       "execution": "interpreted",

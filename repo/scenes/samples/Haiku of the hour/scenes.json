@@ -3,6 +3,7 @@
     "id": "bb3d9f9d-9ccc-4372-b9ca-e35bb04e13ed",
     "name": "Haiku of the hour",
     "settings": {
+      "category": "ai",
       "backgroundColor": "#000000",
       "refreshInterval": 60,
       "execution": "interpreted",

@@ -3,6 +3,7 @@
     "id": "scene-store",
     "name": "Scene store",
     "settings": {
+      "category": "utilities",
       "execution": "interpreted",
       "refreshInterval": 86400,
       "backgroundColor": "#0b0e14",

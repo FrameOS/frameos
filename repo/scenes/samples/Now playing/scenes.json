@@ -3,6 +3,7 @@
     "id": "now-playing",
     "name": "Now playing",
     "settings": {
+      "category": "realtime",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#000000",

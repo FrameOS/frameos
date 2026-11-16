@@ -3,6 +3,7 @@
     "id": "1e9d05df-30e9-44c2-9a24-6de2b5d3127a",
     "name": "Word clock",
     "settings": {
+      "category": "utilities",
       "refreshInterval": 300,
       "backgroundColor": "#101826",
       "execution": "interpreted",

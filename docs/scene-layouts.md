@@ -223,12 +223,14 @@ made smaller with its shape kept where it does not fit the desktop; set to "The
 whole desktop", a desktop still fills it with every scene. A window's place and
 size once moved are the desktop's own, as before. `Tiling` and `Commander` have
 no window sizes.
-**A scene's icon.** `app.frame.scenes` also lists a scene's `icon`, where it
-has one (`settings.icon`, docs/scene-icons.md): one SVG path in a 24 box, for
-a desktop to draw with `fill="currentColor"` on a window's title bar, a task
-button or a menu. Every host lists it from the same place as `windowSize`
-(an ESP32 from its scene index), checked: a value that is not an icon is left
-out, so a layout never has to check it.
+**A scene's icon and category.** `app.frame.scenes` also lists a scene's
+`icon`, where it has one (`settings.icon`, docs/scene-icons.md): one SVG path in
+a 24 box, for a desktop to draw with `fill="currentColor"` on a window's title
+bar, a task button or a menu; and its `category`, one of the store's slugs
+(`settings.category`), to group a scene list by. Every host lists them from the
+same place as `windowSize` (an ESP32 from its scene index), checked: a value
+that is not an icon or a store category is left out, so a layout never has to
+check it.
 **Where a new window opens.** Those five put a new window where it covers the
 least of the windows open: all of it on bare desktop where there is room, the
 highest such spot first, then the leftmost, a small gap from the others and from
