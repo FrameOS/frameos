@@ -616,8 +616,17 @@ FRAMEOS_CLOUD_APP_URL=https://cloud.frameos.net
 # FRAMEOS_ACCOUNT_APP_URL is unset: the account surface shares the cloud
 # origin and getAccountBaseUrl() falls back to it.
 FRAMEOS_SCENES_APP_URL=https://scenes.frameos.net
+FRAMEOS_PLAYGROUND_APP_URL=https://playground.frameos.net
 FRAMEOS_SESSION_COOKIE_DOMAIN=frameos.net
 ```
+
+`playground.frameos.net` is the playground (`docs/playground.md`): the same
+process again, its root rewritten to `/playground`, every other page sent to
+the cloud host. Like the other hostnames it is a proxied Cloudflare record
+for the box and a `server_name` on the nginx server block that includes the
+proxy snippet. Without `FRAMEOS_PLAYGROUND_APP_URL` the playground is
+`https://cloud.frameos.net/playground`. It is no app origin
+(`getAppOrigins`): nobody signs in there.
 
 `FRAMEOS_WEBAUTHN_RP_ID` is unset in production: passkeys default to the cloud
 origin's hostname (`cloud.frameos.net`), which is also where `/login` and
@@ -786,7 +795,8 @@ shares its egress IP with anything else that talks to GitHub.
 After deployment, verify that `https://cloud.frameos.net/` redirects to
 `/frames` (which lands on login when signed out), that
 `https://cloud.frameos.net/scenes` opens “My scenes,” that public scenes stay
-on `scenes.frameos.net`, and that `https://account.frameos.net/` redirects to
+on `scenes.frameos.net`, that `https://playground.frameos.net/` boots the
+Windows 98 desktop, and that `https://account.frameos.net/` redirects to
 `cloud.frameos.net` while `account.frameos.net/api/*` still answers. Signing
 in on cloud must make the scenes site authenticated without another login,
 and the light/dark preference must carry between them.

@@ -940,6 +940,17 @@
   virtual frame and not on the cloud's (yet); the plan gate and the hub
   device exist on the cloud alone.
 
+## The playground: `cloud/docs/playground.md`
+
+- `playground.frameos.net` is a page of auth-web (`app/playground`,
+  `src/lib/playground.ts`, host routing in `src/lib/surfaces.ts`): the
+  release-pinned wasm runtime the size of the window, windowed, with the
+  repo's sample and gallery scenes on the Windows 98 desktop and the Scene
+  store. It ships with every cloud deploy, a release's new runtime included;
+  there is no deploy of its own. A new sample is in it unless it needs a key
+  or a Pi (`excludedTemplates` in `scripts/build-playground-scenes.mjs`).
+  It is no app origin: only the store's preview proxy accepts it.
+
 ## Paid plans: `cloud/docs/billing.md`
 
 - Cloud-only by nature. Sold through **Stripe** (`src/lib/stripe.ts` the

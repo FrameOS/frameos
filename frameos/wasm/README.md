@@ -86,6 +86,28 @@ Nothing is forwarded to a runtime bundle from before pointer input
 and render on every move. `mountFrameOSManager` attaches this for you, and scene event buttons
 skip the three pointer events.
 
+### A frame of its own
+
+```ts
+const preview = createFrameOSPreview({
+  workerUrl, width: innerWidth, height: innerHeight, scenes, canvas,
+  windowed: true, // scenes side by side: a desktop layout's windows
+  framePage: true, // the frame's own page in the scene settings
+  storeUrl: 'https://cloud.frameos.net', // where the Scene store scene browses
+  onReady: () => preview.chooseLayout('layout-windows-98'),
+})
+addEventListener('resize', () => preview.resize(innerWidth, innerHeight))
+```
+
+`windowed` runs the scenes side by side as a Pi does, so a desktop layout
+(Windows 98, Tiling, macOS, BeOS) opens each in a window. `chooseLayout(id)`
+is the layout every scene wears (`"none"` for none, `""` for each scene's
+own), `resize(width, height)` a new size with everything kept
+(`runtimeInfo.resize` says the bundle can), `setRenderScale(scale)` the
+frame's render scale. With `framePage`, the frame page's Restart and Reboot
+arrive as `onSceneEvent` `restart` / `reboot`. FrameOS Cloud's playground
+(`playground.frameos.net`) is this.
+
 ### Render pacing
 
 Renders are throttled to one per second. A scene that asks for more (a 24 fps slideshow with

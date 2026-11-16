@@ -105,6 +105,20 @@ export interface FrameOSPreviewOptions {
    * itself does to a picture before dithering — fit it into the palette's
    * range, apply a colour correction. Display only, like the dither. */
   beforeDither?: BeforeDitherHook | null
+  /** Run the scenes side by side, as a Pi does (docs/scene-layouts.md
+   * "Windows"): a desktop layout's `app.frame.scenes` lists them, its
+   * `<Scene id>` is the runtime's own instance, and a scene switched away
+   * from keeps running in its window. Off (the default) previews one scene. */
+  windowed?: boolean
+  /** Offer the frame's own page in the scene settings (a desktop's Control
+   * Panel), for a page that is a frame of its own rather than an editor's
+   * preview. Its Restart and Reboot arrive as `onSceneEvent` `restart` /
+   * `reboot`, a new render scale as `frameSettings` `{renderScale}`. */
+  framePage?: boolean
+  /** The FrameOS Cloud origin the Scene store scene browses and previews
+   * from; defaults to https://cloud.frameos.net. The listing is fetched from
+   * the worker, so another origin needs CORS or `proxyUrl`. */
+  storeUrl?: string
   onReady?: (sceneInfo: SceneInfo, assets: PreviewAssetsInfo | null, runtime: PreviewRuntimeInfo) => void
   onFrame?: (frame: PreviewFrame) => void
   onState?: (state: Record<string, unknown>) => void
@@ -169,6 +183,7 @@ export class FrameOSPreview {
     inputEvents: false,
     gpioEvents: false,
     sceneStateSeeded: false,
+    resize: false,
   }
   /** Latest public state of the current scene. */
   state: Record<string, unknown> = {}
@@ -210,6 +225,9 @@ export class FrameOSPreview {
       browserAssets: options.browserAssets === undefined ? true : options.browserAssets,
       deviceLimits: options.deviceLimits ?? null,
       renderScale: options.renderScale ?? 0,
+      windowed: options.windowed === true,
+      framePage: options.framePage === true,
+      ...(options.storeUrl ? { storeUrl: options.storeUrl } : {}),
     })
   }
 
@@ -230,6 +248,7 @@ export class FrameOSPreview {
           inputEvents: msg.inputEvents === true,
           gpioEvents: msg.gpioEvents === true,
           sceneStateSeeded: msg.sceneStateSeeded === true,
+          resize: msg.resize === true,
         }
         this.options.onReady?.(msg.sceneInfo, this.assetsInfo, this.runtimeInfo)
         break
@@ -443,6 +462,29 @@ export class FrameOSPreview {
   selectScene(sceneId: string): void {
     this.currentSceneId = sceneId
     this.worker?.postMessage({ type: 'selectScene', sceneId })
+  }
+
+  /**
+   * A new size for the frame, everything kept running (a desktop's windows,
+   * a form's edits) and drawn again at it. Only a bundle that says so
+   * (`runtimeInfo.resize`) can; for another, create the preview again.
+   */
+  resize(width: number, height: number): void {
+    this.worker?.postMessage({ type: 'resize', width, height })
+  }
+
+  /**
+   * The layout every scene wears, as the frame's own settings page chooses
+   * it: a layout scene's id, `"none"` for none, `""` for each scene's own.
+   * On a desktop the one chosen opens what the one before had open.
+   */
+  chooseLayout(layoutId: string): void {
+    this.worker?.postMessage({ type: 'chooseLayout', layoutId })
+  }
+
+  /** The frame's render scale (0 = automatic), drawn again at once. */
+  setRenderScale(scale: number): void {
+    this.worker?.postMessage({ type: 'setRenderScale', scale })
   }
 
   /** Let the scene render as often as it asks (true), or throttle it back

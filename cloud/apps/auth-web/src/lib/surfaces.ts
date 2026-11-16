@@ -2,6 +2,7 @@ import {
   getAccountBaseUrl,
   getAccountPath,
   getCloudBaseUrl,
+  getPlaygroundBaseUrl,
   getScenesBaseUrl,
   myScenesPath,
   nimConverterPath,
@@ -65,6 +66,8 @@ function isApiOrAsset(pathname: string) {
     pathMatchesPrefix(pathname, "/frameos-editor") ||
     pathMatchesPrefix(pathname, "/frameos-wasm") ||
     pathMatchesPrefix(pathname, "/frames-app") ||
+    // The playground's scenes (scripts/build-playground-scenes.mjs).
+    pathMatchesPrefix(pathname, "/playground-assets") ||
     // The standalone frame installer (curl -fsSL {origin}/install.sh | sh),
     // copied from scripts/frameos-setup.sh by copy-install-script.mjs.
     pathname === "/install.sh" ||
@@ -103,14 +106,15 @@ function isLegacyMyScenesPath(pathname: string) {
   return pathname === "/account/scenes";
 }
 
-// Only redirects today; "rewrite" stays in the shape so proxy.ts keeps its
-// branch for the next path that has to be served under another name.
+// The playground's page is app/playground; on its own host it is the root.
+export const playgroundPath = "/playground";
+
 export type SurfaceRoute = {
   destination: URL;
   kind: "redirect" | "rewrite";
 };
 
-// All three hostnames reach one Next.js process. Human pages get canonical
+// All the hostnames reach one Next.js process. Human pages get canonical
 // hosts and clean account paths, while API routes stay available everywhere
 // for existing FrameOS links and clients.
 export function resolveSurfaceRoute(
@@ -120,7 +124,11 @@ export function resolveSurfaceRoute(
   const account = new URL(getAccountBaseUrl());
   const cloud = new URL(getCloudBaseUrl());
   const scenes = new URL(getScenesBaseUrl());
-  if (new Set([account.origin, cloud.origin, scenes.origin]).size === 1) {
+  const playground = new URL(getPlaygroundBaseUrl());
+  if (
+    new Set([account.origin, cloud.origin, scenes.origin, playground.origin])
+      .size === 1
+  ) {
     return undefined;
   }
 
@@ -128,6 +136,24 @@ export function resolveSurfaceRoute(
   const pathname = requestUrl.pathname;
   if (isApiOrAsset(pathname)) {
     return undefined;
+  }
+
+  // The playground host serves the playground at its root and nothing else:
+  // any other page is the cloud's.
+  const playgroundIsOwnHost = playground.origin !== cloud.origin;
+  if (playgroundIsOwnHost && host === playground.host.toLowerCase()) {
+    if (pathname === "/") {
+      const destination = new URL(requestUrl);
+      destination.pathname = playgroundPath;
+      return { destination, kind: "rewrite" };
+    }
+    if (pathname === playgroundPath) {
+      return redirectTo(requestUrl, playground, "/");
+    }
+    return redirectTo(requestUrl, cloud, pathname);
+  }
+  if (playgroundIsOwnHost && pathMatchesPrefix(pathname, playgroundPath)) {
+    return redirectTo(requestUrl, playground, "/");
   }
 
   // The account surface may share the cloud origin (production since

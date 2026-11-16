@@ -78,6 +78,41 @@ describe("FrameOSPreview init", () => {
     });
   });
 
+  it("previews one scene unless asked to be a frame of its own", () => {
+    const { worker } = makePreview();
+    expect(worker.messages[0]).toMatchObject({ framePage: false, windowed: false });
+    expect(worker.messages[0]).not.toHaveProperty("storeUrl");
+  });
+
+  // The playground (docs/playground.md): a desktop of scenes side by side,
+  // the frame page in its Control Panel, the store browsed from its own origin.
+  it("passes windowed, framePage and storeUrl through", () => {
+    const { worker } = makePreview({
+      framePage: true,
+      storeUrl: "https://playground.example",
+      windowed: true,
+    });
+    expect(worker.messages[0]).toMatchObject({
+      framePage: true,
+      storeUrl: "https://playground.example",
+      windowed: true,
+    });
+  });
+
+  it("resizes, chooses a layout and sets the render scale in place", () => {
+    const { preview, worker } = makePreview();
+    worker.reply({ resize: true, type: "ready" });
+    expect(preview.runtimeInfo.resize).toBe(true);
+    preview.resize(1280, 720);
+    preview.chooseLayout("layout-windows-98");
+    preview.setRenderScale(2);
+    expect(worker.messages.slice(1)).toEqual([
+      { height: 720, type: "resize", width: 1280 },
+      { layoutId: "layout-windows-98", type: "chooseLayout" },
+      { scale: 2, type: "setRenderScale" },
+    ]);
+  });
+
   it("reports the folder's backing with ready", () => {
     const onReady = vi.fn();
     const { preview, worker } = makePreview({ onReady });
@@ -90,6 +125,7 @@ describe("FrameOSPreview init", () => {
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,
+      resize: false,
       sceneStateSeeded: false,
       version: null,
     });
@@ -99,6 +135,7 @@ describe("FrameOSPreview init", () => {
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,
+      resize: false,
       sceneStateSeeded: false,
       version: null,
     });
@@ -112,6 +149,7 @@ describe("FrameOSPreview init", () => {
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,
+      resize: false,
       sceneStateSeeded: false,
       version: "2026.9.2",
     });
@@ -119,6 +157,7 @@ describe("FrameOSPreview init", () => {
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,
+      resize: false,
       sceneStateSeeded: false,
       version: "2026.9.2",
     });

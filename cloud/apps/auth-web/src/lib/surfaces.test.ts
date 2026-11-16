@@ -4,6 +4,7 @@ import { resolveSurfaceRoute } from "./surfaces";
 const originalAccountUrl = process.env.FRAMEOS_ACCOUNT_APP_URL;
 const originalCloudUrl = process.env.FRAMEOS_CLOUD_APP_URL;
 const originalScenesUrl = process.env.FRAMEOS_SCENES_APP_URL;
+const originalPlaygroundUrl = process.env.FRAMEOS_PLAYGROUND_APP_URL;
 
 function restore(key: string, value: string | undefined) {
   if (value) {
@@ -17,9 +18,55 @@ afterEach(() => {
   restore("FRAMEOS_ACCOUNT_APP_URL", originalAccountUrl);
   restore("FRAMEOS_CLOUD_APP_URL", originalCloudUrl);
   restore("FRAMEOS_SCENES_APP_URL", originalScenesUrl);
+  restore("FRAMEOS_PLAYGROUND_APP_URL", originalPlaygroundUrl);
 });
 
 describe("surface routing", () => {
+  // cloud/docs/playground.md: its own host in production, /playground on the
+  // cloud origin without one.
+  it("serves the playground at the root of its own host", () => {
+    configureMergedOrigins();
+    process.env.FRAMEOS_PLAYGROUND_APP_URL = "https://playground.frameos.net";
+
+    expectRoute("https://playground.frameos.net/", {
+      kind: "rewrite",
+      url: "https://playground.frameos.net/playground",
+    });
+    expectRoute("https://playground.frameos.net/playground?x=1", {
+      kind: "redirect",
+      url: "https://playground.frameos.net/?x=1",
+    });
+    expectRoute("https://cloud.frameos.net/playground", {
+      kind: "redirect",
+      url: "https://playground.frameos.net/",
+    });
+    // Any other page is the cloud's; its runtime, scenes and the store's API
+    // are served on the playground host as they are.
+    expectRoute("https://playground.frameos.net/login", {
+      kind: "redirect",
+      url: "https://cloud.frameos.net/login",
+    });
+    for (const path of [
+      "/frameos-wasm/preview-worker.js",
+      "/playground-assets/scenes.json",
+      "/api/store/device/scenes",
+      "/api/store/preview-proxy",
+    ]) {
+      expect(
+        resolveSurfaceRoute(new URL(`https://playground.frameos.net${path}`)),
+      ).toBeUndefined();
+    }
+  });
+
+  it("serves the playground on the cloud origin when it has no host", () => {
+    configureMergedOrigins();
+    delete process.env.FRAMEOS_PLAYGROUND_APP_URL;
+
+    expect(
+      resolveSurfaceRoute(new URL("https://cloud.frameos.net/playground")),
+    ).toBeUndefined();
+  });
+
   it("keeps the existing localhost routes when every surface shares one origin", () => {
     process.env.FRAMEOS_CLOUD_APP_URL = "http://localhost:3000";
     delete process.env.FRAMEOS_ACCOUNT_APP_URL;
@@ -376,6 +423,7 @@ function configureSplitOrigins() {
   process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";
   process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
   process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
+  delete process.env.FRAMEOS_PLAYGROUND_APP_URL;
 }
 
 // Production since 2026-08: the account surface shares the cloud origin and
@@ -384,4 +432,5 @@ function configureMergedOrigins() {
   delete process.env.FRAMEOS_ACCOUNT_APP_URL;
   process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
   process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
+  delete process.env.FRAMEOS_PLAYGROUND_APP_URL;
 }
