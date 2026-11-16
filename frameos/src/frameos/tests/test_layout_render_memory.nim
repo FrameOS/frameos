@@ -16,6 +16,7 @@ import ../interpreter
 import ../scene_rhythm
 import ../types
 import ../utils/app_images
+from ../utils/image import decodeOutputMaxPixels, boundedRequestedDimensions
 import ../utils/http_client
 import ../utils/memory
 import ../utils/text
@@ -114,3 +115,104 @@ suite "a layout around a captioned photo on a 13.3\" ESP32":
         if at(x, y).r > 200 and at(x, y).g > 200 and at(x, y).b > 200:
           inc captionPixels
     check captionPixels > 1000
+
+## A Big typographic clock as the bench's reTerminal E1002 had it (an 800x480
+## Spectra-6 panel, an RGBX canvas, 8 MB of PSRAM; 2026-11-16): its app drew
+## its SVG at `app.frame.width` x `app.frame.height` and a `render/image`
+## stretched it. In a Windows 98 window, a hole smaller than the panel, that
+## SVG was rasterized on its own at 800x480 (1.5 MB) and then stretched into
+## the hole: with 1.1 MB free, an out-of-memory abort and a restart. Drawn at
+## the hole's size, it is the same picture with nothing allocated for it.
+const panelClockApp = """
+export function get(app) {
+  const W = app.frame.width
+  const H = app.frame.height
+  return frameos.svg(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">' +
+    '<defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="' + H + '" gradientUnits="userSpaceOnUse">' +
+    '<stop offset="0" stop-color="#132238"/><stop offset="1" stop-color="#2A1E3F"/></linearGradient></defs>' +
+    '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="url(#bg)"/>' +
+    '<rect x="' + (W / 2 - 40) + '" y="' + (H / 2 - 40) + '" width="80" height="80" fill="#D9A441"/></svg>',
+    { width: W, height: H })
+}
+"""
+
+proc panelClockScene(): JsonNode =
+  let config = %*{"name": "panel", "category": "data", "output": [{"name": "image", "type": "image"}], "fields": []}
+  %*{"id": "tests/panel-clock", "name": "Panel clock",
+    "settings": {"execution": "interpreted", "refreshInterval": 60, "backgroundColor": "#000000"},
+    "fields": [], "apps": {"panelClock": {"name": "panel", "category": "data", "version": "1.0.0", "fields": [],
+      "output": [{"name": "image", "type": "image"}], "sources": {"app.ts": panelClockApp, "config.json": $config}}},
+    "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+      {"id": "2", "type": "app", "data": {"keyword": "panelClock", "config": {}}},
+      {"id": "3", "type": "app", "data": {"keyword": "render/image", "config": {"placement": "stretch"}}}],
+    "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
+      {"id": "2", "source": "2", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/image"}]}
+
+suite "a scene that draws at the panel's size, in a window":
+  test "is drawn at the window's size, not rasterized at the panel's and stretched":
+    var scene = panelClockScene()
+    let layout = sample("Windows 98 layout")
+    scene["layout"] = %*{"sceneId": layout["id"]}
+    setUploadedInterpretedScenes(parseInterpretedScenes($(%*[scene, layout])))
+    resetInterpretedScenes()
+    setSimulatedEmbedded(true)
+    availableRenderBytesOverride = 0
+    # The paint strips sized as on the board, whose largest block was 1.1 MB.
+    contiguousBudgetOverride = 256 * 1024
+    rhythmCanvasGeneration = proc(canvas: Image): int64 {.nimcall, raises: [].} = 0
+    rhythmClockOverride = 2000.0
+    let config = FrameConfig(name: "e1002", mode: "embedded", device: "waveshare.EPD_7in3e",
+      width: 800, height: 480, rotate: 0, scalingMode: "cover", debug: false, settings: %*{},
+      saveAssets: %*false, assetsPath: getTempDir() / "frameos-layout-memory-test")
+    var problems: seq[string]
+    var logger = Logger(frameConfig: config, enabled: true)
+    logger.log = proc(payload: JsonNode) =
+      if payload{"event"}.getStr().contains("error"):
+        problems.add($payload)
+    logger.enable = proc() = logger.enabled = true
+    logger.disable = proc() = logger.enabled = false
+
+    let canvas = newImage(800, 480)
+    let frameScene = init("tests/panel-clock".SceneId, config, logger, %*{})
+    let context = ExecutionContext(scene: frameScene, event: "render", payload: %*{}, image: canvas,
+      hasImage: true, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    GC_fullCollect()
+    let heldBefore = getOccupiedMem()
+    fillOccupiedPeak = 0
+    check render(frameScene, context) == canvas
+    let peak = fillOccupiedPeak - heldBefore
+    check problems.len == 0
+    if problems.len > 0:
+      echo problems
+    # An 800x480 RGBX raster is 1.5 MB; the fills into the hole need far less.
+    check peak < 1024 * 1024
+    if peak >= 1024 * 1024:
+      echo "peak above the start of the render: ", peak div 1024, " KB"
+    # The square in the middle of the window, where the stretched picture put it.
+    var found = false
+    for s in frameScene.wornLayout.slots:
+      if s.child == frameScene:
+        found = true
+        check s.hole
+        let midX = int((s.visible[0] + s.visible[2]) / 2)
+        let midY = int((s.visible[1] + s.visible[3]) / 2)
+        let mid = canvas.getPixel(canvas.dataIndex(midX, midY))
+        check mid.r > 200 and mid.g > 140 and mid.b < 100
+    check found
+    setSimulatedEmbedded(false)
+
+  test "a raster with nothing under the reserve on an ESP32 gets the floor, not every pixel it asks for":
+    setSimulatedEmbedded(true)
+    availableRenderBytesOverride = -1
+    check decodeOutputMaxPixels() == 65_536
+    check boundedRequestedDimensions(800, 480)[0] < 800
+    setSimulatedEmbedded(false)
+    check decodeOutputMaxPixels() == 0
+    availableRenderBytesOverride = 0
+
+  test "an SVG asked for at another size is the offer's size when its consumer stretches it":
+    check svgStretchesOnto("stretch", 800, 480, 792, 404)
+    check not svgStretchesOnto("center", 800, 480, 792, 404)
+    check not svgStretchesOnto("cover", 800, 480, 792, 404)
+    check svgStretchesOnto("contain", 800, 480, 400, 240)

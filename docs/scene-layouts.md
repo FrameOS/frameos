@@ -272,7 +272,11 @@ holds it (`roomForImage`, idle interpreters without handlers let go first): a
 window behind another on an 800x480 RGBX e-paper canvas is a 1-1.5 MB buffer,
 and on an ESP32 one that does not fit is an out-of-memory abort, then a restart.
 Without the room that window shows nothing that pass (`scene:embed:noMemory`,
-logged once) and the rest of the frame is drawn.
+logged once) and the rest of the frame is drawn. A scene in a window is told
+the frame's size (`app.frame.width`), not its window's: an SVG it asks for at
+that size and that its `render/image` stretches (or covers or contains at the
+same aspect) is drawn straight into the window at the window's size
+(`svgStretchesOnto`), never rasterized at the panel's size first.
 A scene that cannot start in a window is not tried again until the scenes
 change.
 
