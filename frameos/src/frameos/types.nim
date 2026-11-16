@@ -562,6 +562,7 @@ type
     isDesktop*: bool ## a layout with `settings.desktop`: the frame page lists it apart
     windowSize*: string ## `settings.windowSize`, "WxH": the size it opens at in a desktop's window
     icon*: string ## `settings.icon` as read by scene_icon.nim: one path in 0 0 24 24, "" for none
+    category*: string ## `settings.category` as read by scene_category.nim: its name, "" for none
     layoutSceneId*: SceneId ## the layout this install is wrapped in, "" for none
     layoutState*: JsonNode ## its parameters, as a scene node's config
     renderScaleKey*: string ## see FrameScene.renderScaleKey
@@ -606,6 +607,8 @@ type
     ## Its icon (docs/scene-icons.md): one SVG path in a 0 0 24 24 box, ""
     ## when it has none or what it has is no icon (scene_icon.nim).
     icon*: string
+    ## Its category, by its name ("Photos"; scene_category.nim), "" for none.
+    category*: string
 
   SplitLayoutMarker* = object
     present*: bool

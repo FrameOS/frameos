@@ -119,13 +119,22 @@ export async function preflightStorePublish(
   });
 }
 
-// What the listing says the category is before any model is asked: the
+// What the listing says the category is before any model is asked: the one
+// the scene names itself (its settings.category, a store title), the
 // manifest's, then the row's, then a layouts shelf for a layout (Desktop
 // layouts for a desktop, else Full screen layouts).
 function listingCategory(
-  validated: { isLayout: boolean; isDesktop: boolean; manifestCategory: string | null | undefined },
+  validated: {
+    isLayout: boolean;
+    isDesktop: boolean;
+    manifestCategory: string | null | undefined;
+    sceneCategory: string | undefined;
+  },
   existing: { category: string | null } | undefined,
 ): string | null {
+  if (validated.sceneCategory) {
+    return validated.sceneCategory;
+  }
   const stated =
     validated.manifestCategory !== undefined ? validated.manifestCategory : (existing?.category ?? null);
   return stated ?? (validated.isDesktop ? "desktops" : validated.isLayout ? "layouts" : null);

@@ -6,7 +6,7 @@ import type { FrameScene } from "../../../../../frontend/src/types";
 import { randomBytes } from "node:crypto";
 import { strToU8, unzlibSync, zipSync } from "fflate";
 import { unzipBounded } from "./zip-bounded";
-import { normalizeCategory } from "./categories";
+import { categorySlugForTitle, normalizeCategory } from "./categories";
 import { hasPhotoShareLink } from "./photos/share-links-in-scenes";
 
 // FrameOS store constants and helpers (STORE-TODO). Payloads are the frameos
@@ -442,6 +442,10 @@ export type ValidatedSceneZip = {
   // desktop (`settings.desktop`), else Full screen layouts.
   isLayout: boolean;
   isDesktop: boolean;
+  // The store category the scene names itself: its settings.category, when
+  // that is one of the store's titles (a version written files the scene
+  // under it, store-version-write.ts). Undefined otherwise.
+  sceneCategory: string | undefined;
   manifestDescription: string | undefined;
   manifestName: string | undefined;
   manifestTags: string[] | undefined;
@@ -533,6 +537,9 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
       imageWidth: dimension(record.imageWidth),
       isLayout: isLayoutScene(mainScene(scenes as Pick<FrameScene, "default" | "settings">[])),
       isDesktop: isDesktopLayout(mainScene(scenes as Pick<FrameScene, "default" | "settings">[])),
+      sceneCategory: categorySlugForTitle(
+        mainScene(scenes as Pick<FrameScene, "default" | "settings">[])?.settings?.category,
+      ),
       manifestCategory:
         record.category === undefined ? undefined : normalizeCategory(record.category),
       manifestDescription:

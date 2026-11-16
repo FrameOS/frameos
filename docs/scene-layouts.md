@@ -254,13 +254,13 @@ arrangement, so it has nothing to choose; `Commander` has its two panels.
 98`'s Start, the Scenes menus of `macOS`, `Classic Mac` and `NeXTSTEP`, `BeOS`'s
 Be menu, `Tiling`'s +) scrolls where it is longer than the screen, under a
 finger as under a wheel, and so does `BeOS`'s Deskbar with many windows open.
-The lists go by category: a scene's `settings.category` reaches a layout as
-`category` on its entry of `app.frame.scenes`, and the runtime gives the
-categories it knows, in order, as `app.frame.categories` (`{id, name}`); each
-list has a heading over each category with scenes, under its name, in that
-order, and those with none or one not in it last as Other. Where the runtime
-gives no categories (an older one) or no scene has one, the list is as it
-always was. That is `grouped`, one more function the same text in each of those
+The lists go by category: a scene's `settings.category`, its category by name
+("Photos", "Real time"; docs/scene-icons.md "Category"), reaches a layout as
+`category` on its entry of `app.frame.scenes`, and each list has a heading over
+each category, under that name, the categories by name whatever the case, and
+the scenes with none last as Other. Nothing maps a category: a name of the
+owner's own is a heading like the store's. Where no scene has a category (an
+older runtime lists none), the list is as it always was. That is `grouped`, one more function the same text in each of those
 six layouts. A scene's own icon (`icon` on its entry, one path in a 24 box:
 `docs/scene-icons.md`) is drawn, in the color of the text around it, wherever a
 desktop draws a scene's icon: `Windows 98`'s Start, taskbar and desktop icons,

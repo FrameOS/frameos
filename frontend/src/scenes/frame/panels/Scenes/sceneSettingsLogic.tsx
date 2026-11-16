@@ -17,6 +17,7 @@ import { renderScaleFieldIndex, sceneRenderScaleOptions, type RenderScaleOption 
 import { sceneWindowSizeOptions, type WindowSizeOption } from '../../../../utils/sceneWindowSize'
 import { sceneIconPath, sceneIconProblem } from '../../../../utils/sceneIcon'
 import { svgToSceneIcon } from '../../../../utils/svgToSceneIcon'
+import { sceneCategoryOptions, type SceneCategoryOption } from '../../../../utils/sceneCategory'
 import type { FieldName } from 'kea-forms/lib/types'
 
 export interface SceneSettingsLogicProps {
@@ -44,6 +45,7 @@ export interface ScenePermissionApp {
 export interface sceneSettingsLogicValues {
   frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
+  categoryOptions: SceneCategoryOption[]
   iconPath: string | null
   iconProblem: string | null
   iconUploadError: string | null
@@ -102,6 +104,7 @@ export interface sceneSettingsLogicMeta {
     layoutProblem: (scene: FrameScene | null) => string | null
     renderScaleOptions: (scene: FrameScene | null) => RenderScaleOption[]
     windowSizeOptions: (scene: FrameScene | null) => WindowSizeOption[]
+    categoryOptions: (scene: FrameScene | null) => SceneCategoryOption[]
     iconPath: (scene: FrameScene | null) => string | null
     iconProblem: (scene: FrameScene | null) => string | null
     renderScaleFieldName: (scene: FrameScene | null) => string | null
@@ -226,6 +229,13 @@ export const sceneSettingsLogic = kea<sceneSettingsLogicType>([
       (s) => [s.scene],
       (scene: sceneSettingsLogicValues['scene']): WindowSizeOption[] =>
         sceneWindowSizeOptions(scene?.settings?.windowSize),
+    ],
+    // The Category select: None, the store's category titles for a scene (the
+    // layout ones for a layout), and a name of the scene's own kept as it is.
+    categoryOptions: [
+      (s) => [s.scene],
+      (scene: sceneSettingsLogicValues['scene']): SceneCategoryOption[] =>
+        sceneCategoryOptions(scene?.settings?.category, !!scene?.settings?.isLayout),
     ],
     // The scene's icon as the frame reads it (utils/sceneIcon.ts): null when it
     // has none or what it has is no icon, which iconProblem then explains.

@@ -103,11 +103,15 @@ export async function writeSceneVersion(
     "application/zip",
     { extension: "zip" },
   );
+  // A scene that names one of the store's categories (its settings.category,
+  // by title) is filed under it, so the shelf and the scene agree; otherwise
+  // the listing's category stands.
+  const category = input.validated.sceneCategory ?? input.listing.category;
   const result = await db.transaction(async (tx) => {
     const [version] = await tx
       .insert(storeSceneVersions)
       .values({
-        category: input.listing.category,
+        category,
         contentType: "application/zip",
         description: input.listing.description,
         frameosVersion: input.listing.frameosVersion,
@@ -140,7 +144,7 @@ export async function writeSceneVersion(
     const [updated] = await tx
       .update(storeScenes)
       .set({
-        category: input.listing.category,
+        category,
         description: input.listing.description,
         frameosVersion: input.listing.frameosVersion,
         latestVersion: input.version,

@@ -610,12 +610,15 @@ block windowed_host_keeps_what_it_leaves:
 # (`settings.windowSize`): off the host's own list where it has one (an ESP32's
 # catalog), off the loaded scenes otherwise (the browser).
 block windowed_listing_carries_window_sizes:
-  # And its icon (`settings.icon`, docs/scene-icons.md), where it is one: a
-  # value that is not a path is no icon.
+  # And its icon and category (`settings.icon` / `settings.category`,
+  # docs/scene-icons.md), where they are one: a value that is not a path is
+  # no icon, a category longer than a heading none.
   var sized = parseJson($scenes)
   sized[1]["settings"]["windowSize"] = %"480x480"
   sized[1]["settings"]["icon"] = %" M12 2L2 22h20z "
   sized[0]["settings"]["icon"] = %"<svg/>"
+  sized[1]["settings"]["category"] = %" Real time "
+  sized[0]["settings"]["category"] = %"A category name far longer than a heading"
   replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($sized)))
   let fromId = "fixtures/dispatcher/switchFrom".SceneId
   let toId = "fixtures/dispatcher/switchTo".SceneId
@@ -631,11 +634,15 @@ block windowed_listing_carries_window_sizes:
   doAssert listed[1]{"windowSize"}.getStr() == "480x480", $listed
   doAssert listed[0]{"icon"}.isNil, $listed
   doAssert listed[1]{"icon"}.getStr() == "M12 2L2 22h20z", $listed
+  doAssert listed[0]{"category"}.isNil, $listed
+  doAssert listed[1]{"category"}.getStr() == "Real time", $listed
   sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
-    @[SwitcherEntry(id: "fixtures/dispatcher/switchTo", name: "To", windowSize: "640x480", icon: "M0 0h24v24H0z")]
+    @[SwitcherEntry(id: "fixtures/dispatcher/switchTo", name: "To", windowSize: "640x480", icon: "M0 0h24v24H0z",
+      category: "Weather")]
   listed = windowSceneListing()
   doAssert listed.len == 1 and listed[0]{"windowSize"}.getStr() == "640x480", $listed
   doAssert listed[0]{"icon"}.getStr() == "M0 0h24v24H0z", $listed
+  doAssert listed[0]{"category"}.getStr() == "Weather", $listed
   w.setWindowed(false)
   sceneSwitcherListing = listing
   replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($scenes)))

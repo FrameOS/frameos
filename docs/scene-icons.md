@@ -1,4 +1,4 @@
-# Scene icons
+# Scene icons and categories
 
 A scene can carry a small icon of its own, `settings.icon`, that every list
 which shows the scene without its picture can draw in place of a placeholder:
@@ -37,17 +37,50 @@ warns. The rule is written twice, `frameos/src/frameos/scene_icon.nim`
 `sceneIconProblem`), and `docs/scene-icon-fixtures.json` pins the two together
 (`test_scene_icon.nim`, cloud shared-spa `scene-icon.test.ts`).
 
+## Category
+
+`settings.category` is the scene's category by its name, as people read it:
+`"Photos"`, `"Art & galleries"`, `"Real time"`. People pick it from the store's
+category titles (the Category select in the scene's settings, the store's
+`categories.ts` / the SPA's `storeCategories.ts`): Photos, Art & galleries,
+Calendars & agendas, Weather, AI & generative, Data & dashboards, Fun &
+comics, Real time, Tools & utilities, Demos & examples, and Desktop layouts /
+Full screen layouts for a layout. The scene keeps the name as text and nothing
+maps it to anything: a name of the owner's own is kept, shown as it is in the
+select, and is a category like any other.
+
+- **What a runtime reads**: the text with the spaces, tabs and line breaks at
+  its ends trimmed, 1 to 32 characters, no control character, from a JSON
+  string. Anything else is no category. `frameos/src/frameos/scene_category.nim`
+  and `frontend/src/utils/sceneCategory.ts` (`sceneCategoryName`) are the rule,
+  pinned by `docs/scene-category-fixtures.json`. The cloud's scene lint warns
+  about a name that is none of the store's.
+- **Where it goes**: `category` on the scene's `app.frame.scenes` entry, on
+  every host, as the icon goes (below). The desktop layouts group their lists
+  of scenes by it: one heading per category, the groups by name, and the scenes
+  without one last under Other (`grouped`, docs/scene-layouts.md "Long lists of
+  scenes").
+- **The store**: when a version of a scene is written (published, saved from
+  the store's editor, forked) and its main scene's `settings.category` is one
+  of the store's titles, the listing's category becomes that one
+  (`validateSceneZip`'s `sceneCategory`, `writeSceneVersion`), so the shelf and
+  the scene agree; otherwise the listing's category stands. A store category
+  set by hand is replaced at the next version only when the scene names
+  another of the store's.
+- **No clock category**: the store files its clocks under Tools & utilities,
+  and so do the samples.
+
 ## On the frame
 
-Every host reads `settings.icon` with the scene and lists it, checked, beside
-the scene's name and window size in `app.frame.scenes` (`{id, name,
-windowSize?, icon?}`, one builder: `listingItem` in
-`system/sceneSwitcher/scene.nim`):
+Every host reads `settings.icon` and `settings.category` with the scene and
+lists them, checked, beside the scene's name and window size in
+`app.frame.scenes` (`{id, name, windowSize?, icon?, category?}`, one builder:
+`listingItem` in `system/sceneSwitcher/scene.nim`):
 
-| Host | Where the icon comes from |
+| Host | Where the icon and category come from |
 |---|---|
-| Linux (a Pi) | the deployed or pushed scene (`interpreter.nim` `readSettings`, `scenes.nim` `getSceneIcon`) |
-| ESP32 | its scene index: `fos_scene_store.c` `make_entry` keeps `icon` for a scene that is not a layout when it is 1024 characters or fewer, and `embedded_runtime.nim` checks it when it reads the catalog, so the scene stays on flash |
+| Linux (a Pi) | the deployed or pushed scene (`interpreter.nim` `readSettings`, `scenes.nim` `getSceneIcon` / `getSceneCategory`) |
+| ESP32 | its scene index: `fos_scene_store.c` `make_entry` keeps `icon` (1024 characters or fewer) and `category` (128 bytes or fewer) for a scene that is not a layout, and `embedded_runtime.nim` checks both when it reads the catalog, so the scene stays on flash |
 | browser / wasm (the preview, the plane rendering a board, a virtual frame) | the loaded scenes |
 
 The scene switcher (`docs/scene-switcher.md`) draws it on the tile: above the
@@ -63,7 +96,9 @@ renders its scenes with the wasm runtime, which reads the icon itself.
 The scene's settings (`SceneSettings.tsx`, the one scene workspace, so a
 frame's scene, a saved scene and the store's scene page alike) have an Icon
 area: the icon at 24 px and larger, the path as text, **Upload SVG** and
-**Clear**. Upload reads an `.svg` file and makes one path of it
+**Clear**; and a **Category** select beside it (None, then the store's
+category titles; a layout gets the two layout ones; a name of the scene's own
+is kept and shown as it is). Upload reads an `.svg` file and makes one path of it
 (`utils/svgToSceneIcon.ts`, pure, tested in `svg-to-scene-icon.test.ts`): it
 merges the filled shapes (`path`, `rect`, `circle`, `ellipse`, `polygon`),
 applies transforms and maps the SVG's `viewBox` into the 24 box, turns
