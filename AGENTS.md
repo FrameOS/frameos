@@ -949,7 +949,10 @@
   store. It ships with every cloud deploy, a release's new runtime included;
   there is no deploy of its own. A new sample is in it unless it needs a key
   or a Pi (`excludedTemplates` in `scripts/build-playground-scenes.mjs`).
-  It is no app origin: only the store's preview proxy accepts it.
+  It is no app origin: only the store's preview proxy accepts it. Never
+  return a rewrite from `proxy.ts`: behind nginx Next takes it for another
+  server and sends it back through the routing (the playground root's loop,
+  2026-11-16); mark the request and rewrite in `next.config.ts`.
 
 ## Paid plans: `cloud/docs/billing.md`
 
