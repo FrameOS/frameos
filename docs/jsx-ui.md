@@ -238,7 +238,7 @@ export function get(app) {
   for a kept picture) or until the interpreter goes. An app keeps 8 at most,
   and a ninth lets the oldest go, unless they are small: past eight it keeps
   pictures while they hold no more pixels than eight 480x480 photos, up to
-  48 of them (the Scene store's grid of covers, an asset browser's
+  48 of them (the Scene store's grid of covers, the Files sample's
   thumbnails). `frameos.loadAssetImage(path, { keep: true, width, height })`
   keeps a picture of the assets folder the same way, decoded at that size.
 - **`width` / `height`** (and `fit`, `cover` by default or `contain`) are the
@@ -843,6 +843,40 @@ e-paper, where the pages keep their black on white, except High contrast.
 
 On every host, an ESP32 included: there a layout's theme costs about 7 KB of
 the S3's flash (2026-11-15).
+
+### A JS app in the desktop's look
+
+A JS app takes the same theme by naming what its elements are: **`role`**, one
+of the roles above, on any element (2026.11.10+):
+
+```tsx
+<div role="page" className="flex flex-col bg-slate-900 text-white">
+  <div role="bar" className="flex items-center h-12 px-4">Files</div>
+  <div role="button" className="px-3 py-2 rounded-lg bg-slate-700" onClick={up}>Up</div>
+</div>
+```
+
+Where a layout around the frame's scene gives a theme (a desktop, its windows
+included), the element is dressed as a Nim UI's element of that role is: its
+look gives way to the role's, a list of boxes goes around it, and the
+outermost takes its place and its presses. With no theme, an empty one, or a
+role the theme leaves out, it keeps its own classes, so an app writes its own
+look as it always did and is drawn in it everywhere else. `option` is a row
+that lights while pressed, as a select's option does, and `tile` a square
+picture's box. A memo()'d element keeps the look it was read in until its
+props change.
+
+**`app.frame.theme`** is the theme itself (its roles' class strings, or lists
+of them), undefined with none: for what a role cannot dress, such as an
+`<svg>` drawn in the accent's color or a mask in the page's color. The Files
+sample (`repo/scenes/samples/Files`) does both: its folders take the accent's
+`bg-[#…]`, and its thumbnails' rounded corners, masked in the page's color, are
+square where the theme's tiles are.
+
+How: the JSX walker (`js_runtime/jsx.nim`) reads `role` instead of keeping it
+as an attribute and hands the element to `ui/theme.nim`'s `role`, as the Nim
+UIs do; `themeSource` is the layout's `theme` during its pass
+(`interpreter.layoutTheme`), on the Pi, the ESP32 and in the browser alike.
 
 ## Text and fonts
 

@@ -378,7 +378,8 @@ config.json's `"permissions"` list:
 - `"assets"`: read the assets folder (`listAssets`, `readAsset`,
   `loadAssetImage`, a stream opened with `"r"`, ...).
 - `"assets-write"`: also write and delete in it (`writeAsset`,
-  `appendAsset`, `deleteAsset`, a stream opened with `"w"` or `"a"`).
+  `appendAsset`, `deleteAsset`, `makeAssetFolder`, a stream opened with
+  `"w"` or `"a"`).
 - `"files"` and `"shell"` belong to built-in apps: Local Image reads any
   folder, the screenshot and camera apps run processes.
 - `"frame"`: `frameos.frame`, what the frame's own settings page reads and
@@ -539,6 +540,14 @@ export function get(app, context) {
   `"WxH"` (`"480x480"` for a square music player or clock, `"480x800"` for a
   tall list, `"800x480"` for a wide dashboard): a desktop layout (Windows 98,
   macOS...) opens the scene's window at that size. It changes nothing else.
+- To look like the desktop a scene runs on, give an element its `role`:
+  `role="page"` on the root, `"bar"`, `"button"`, `"primary"`, `"selected"`,
+  `"field"`, `"option"` (a row that lights when pressed), `"muted"`,
+  `"accent"`, `"card"`, `"tile"`. On a desktop with a theme (Windows 98,
+  macOS...) the role's colors, borders and corners replace the element's
+  own; elsewhere it keeps its classes, so write them as usual.
+  `app.frame.theme` is the theme itself, for an SVG's fill. The Files sample
+  is the worked example.
 - Layout: block (stacked), `flex` / `flex-col` with `gap`, `grow`, `flex-1`,
   `justify-*`, `items-*`, `flex-wrap`; `grid grid-cols-N` with `col-span-N`;
   `absolute` with `inset-*` / `top-*` (against the parent). Sizes `w-*`,
@@ -980,6 +989,13 @@ interface FrameOSUiEvent {
 }
 interface FrameOSElementProps {
   className?: string;
+  /**
+   * What the element is, for a desktop's look: "page", "bar", "button", "primary", "selected", "field", "option",
+   * "picked", "muted", "accent", "card", "tile", ... (docs/jsx-ui.md "Themes"). Where a layout around the scene gives a
+   * theme (a desktop's windows), the role's colors, borders and corners take the place of the element's own; with
+   * none, or a role the theme leaves out, it keeps its classes (FrameOS 2026.11.10+; ignored before).
+   */
+  role?: string;
   children?: any;
   src?: FrameOSImageRef | { image: FrameOSImageRef | null } | null;
   /** A tap on the element; the frame renders again after it. */
@@ -1084,6 +1100,10 @@ interface FrameOSApp {
      * longest ago. Undefined where there is no limit (a Raspberry Pi) (FrameOS 2026.11.8+; undefined
      * before). */
     windows?: number;
+    /** The theme of the desktop around the scene, its roles' classes (a string, or a list of boxes one inside the
+     * other), for what a role cannot color, as an SVG's fill in the accent's color. Undefined with no desktop or one in
+     * its own look (FrameOS 2026.11.10+; undefined before). */
+    theme?: Record<string, string | string[]>;
   };
   initialized?: boolean;
   log(...args: any[]): void;
@@ -1329,6 +1349,9 @@ declare const frameos: {
   writeAsset(path: string, base64: string): boolean;
   appendAsset(path: string, base64: string): boolean;
   deleteAsset(path: string): boolean;
+  /** One folder, inside a folder that is there: true when it was made, false when it was there already or refused
+   * (a name starting with a dot, one the listing hides, an app without "assets-write") (FrameOS 2026.11.10+). */
+  makeAssetFolder(path: string): boolean;
   /** An image file of the assets folder. With width and height it is decoded at that size (a JPEG scaled as it
    * decodes) and keep holds it for later renders, as fetchImage's options do (FrameOS 2026.11.8+). */
   loadAssetImage(

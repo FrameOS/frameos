@@ -5,6 +5,7 @@ import frameos/js_runtime/app_runtime
 import frameos/types
 import frameos/values
 import frameos/utils/font # the typeface resolver text uses
+from frameos/ui/theme import themeSource
 
 # JSX returned by a JS app: `<svg>` drawn without markup, and UI trees
 # (`<div className="flex ...">`) laid out and drawn — docs/jsx-ui.md.
@@ -14,6 +15,11 @@ proc testConfig(w = 120, h = 80): FrameConfig =
     saveAssets: %*false, assetsPath: "/tmp")
 
 var logged: seq[JsonNode]
+var given: JsonNode # the theme a test's layout would give
+
+proc givenTheme(): JsonNode {.nimcall, gcsafe, raises: [].} =
+  {.cast(gcsafe).}:
+    result = given
 
 proc testLogger(config: FrameConfig): Logger =
   var logger = Logger(frameConfig: config, enabled: true)
@@ -170,3 +176,52 @@ suite "jsx":
       if ($entry).contains("Unsupported SVG tag: foreignObject"):
         reported = true
     check reported
+
+  test "role takes the desktop's look for it, and the element's own without one":
+    # What a layout's `theme` hands the frame's scene during its pass
+    # (interpreter.layoutTheme): here, straight from the test.
+    themeSource = givenTheme
+    defer: themeSource = nil
+    let source = """
+      export const get = (app) => (
+        <div className="flex flex-col bg-slate-900" role="page">
+          <div className="w-[40px] h-[20px] bg-red-500 rounded" onClick={() => {}} role="button" />
+          <div className="w-[40px] h-[20px] bg-green-500" />
+        </div>
+      )
+    """
+    given = nil
+    var image = render(source)
+    check image[100, 70] == rgbx(0x0f, 0x17, 0x2a, 255) # its own page
+    check image[10, 10] == rgbx(0xef, 0x44, 0x44, 255) # its own button
+    # A theme without the role keeps the element's look.
+    given = %*{"field": "bg-white"}
+    image = render(source)
+    check image[100, 70] == rgbx(0x0f, 0x17, 0x2a, 255)
+    check image[10, 10] == rgbx(0xef, 0x44, 0x44, 255)
+    given = %*{"page": "bg-[#c0c0c0] text-black",
+      "button": ["bg-[#000080] p-[2px]", "bg-[#ffffff]"]}
+    image = render(source)
+    check image[100, 70] == rgbx(0xc0, 0xc0, 0xc0, 255) # the theme's page
+    check image[0, 0] == rgbx(0, 0, 0x80, 255) # the bevel's outer box, in the button's place
+    check image[10, 10] == rgbx(255, 255, 255, 255) # its inner box
+    check image[10, 30] == rgbx(0x22, 0xc5, 0x5e, 255) # no role: as it was
+
+  test "app.frame.theme is the theme, for what classes cannot reach":
+    themeSource = givenTheme
+    defer: themeSource = nil
+    let source = """
+      const fillOf = (theme) => {
+        const m = theme && /bg-\[(#[0-9a-f]{6})\]/.exec(String(theme.accent || ''))
+        return m ? m[1] : '#ff0000'
+      }
+      export const get = (app) => (
+        <svg viewBox="0 0 4 4"><rect width={4} height={4} fill={fillOf(app.frame.theme)} /></svg>
+      )
+    """
+    given = nil
+    check render(source)[10, 10] == rgbx(255, 0, 0, 255)
+    given = %*{} # an empty theme is none
+    check render(source)[10, 10] == rgbx(255, 0, 0, 255)
+    given = %*{"accent": "bg-[#0a64d8]"}
+    check render(source)[10, 10] == rgbx(0x0a, 0x64, 0xd8, 255)

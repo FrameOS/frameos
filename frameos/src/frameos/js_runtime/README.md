@@ -121,8 +121,9 @@ uses QuickJS only to execute the resulting JavaScript.
     override; without the key nothing about colors changes.
   - `listAssets(dir)`, `assetExists(path)`, `assetSize(path)`,
     `readAsset(path, {offset, length}?)`, `writeAsset(path, base64)`,
-    `appendAsset(path, base64)`, `deleteAsset(path)`: asset management scoped
-    to the frame's assets folder. Full-buffer reads are capped on embedded
+    `appendAsset(path, base64)`, `deleteAsset(path)`, `makeAssetFolder(path)`
+    (one folder, in a folder that is there; no hidden or junk names): asset
+    management scoped to the frame's assets folder. Full-buffer reads are capped on embedded
     targets (2MB) — read bigger files in ranged chunks or via streams.
   - `loadAssetImage(path)`: decode an asset image within display bounds
     (memory-aware, streams from disk) and return an image reference.
