@@ -24,6 +24,7 @@ import frameos/layout_choice
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
 import frameos/scene_store_hooks
+import frameos/scene_icon
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
 import frameos/values
@@ -87,6 +88,7 @@ type
     name*: string
     refreshInterval*: float
     windowSize*: string ## `settings.windowSize`: its size in a desktop's window
+    icon*: string ## `settings.icon` (scene_icon.nim): the switcher's tile and `app.frame.scenes`
 
 var sceneCatalog: seq[SceneCatalogEntry] = @[]
   ## Empty on the legacy path (one scenes.json parsed whole), in which case
@@ -748,6 +750,8 @@ proc setSceneCatalog*(indexJson: string): int =
         name: item{"name"}.getStr(),
         refreshInterval: item{"refreshInterval"}.getFloat(0.0),
         windowSize: item{"windowSize"}.getStr(),
+        # The store only checked its length; what is not an icon is none.
+        icon: sceneIconPath(item{"icon"}.getStr()),
       ))
   sceneCatalog = entries
   layoutCatalog = layouts
@@ -853,13 +857,15 @@ proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
   {.cast(gcsafe).}:
     if sceneCatalog.len > 0:
       for entry in sceneCatalog:
-        result.add SwitcherEntry(id: entry.id, name: entry.name, windowSize: entry.windowSize)
+        result.add SwitcherEntry(id: entry.id, name: entry.name, windowSize: entry.windowSize,
+          icon: entry.icon)
     else:
       let scenes = getInterpretedScenes()
       for sceneId in loadedSceneOrder:
         if scenes.hasKey(sceneId):
-          result.add SwitcherEntry(id: sceneId.string, name: scenes[sceneId].name,
-            windowSize: scenes[sceneId].windowSize)
+          let scene = scenes[sceneId]
+          result.add SwitcherEntry(id: sceneId.string, name: scene.name, windowSize: scene.windowSize,
+            icon: scene.icon)
         else:
           result.add SwitcherEntry(id: sceneId.string)
 

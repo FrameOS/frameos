@@ -548,6 +548,20 @@ static bool entry_says(const char *id, const char *key, const char *value)
     return found;
 }
 
+static bool entry_has_key(const char *id, const char *key)
+{
+    cJSON *tree = fos_scene_store_read_index();
+    const cJSON *entry = NULL;
+    bool found = false;
+    cJSON_ArrayForEach(entry, cJSON_GetObjectItem(tree, "scenes")) {
+        if (strcmp(cJSON_GetObjectItem(entry, "id")->valuestring, id) == 0) {
+            found = cJSON_GetObjectItem(entry, key) != NULL;
+        }
+    }
+    cJSON_Delete(tree);
+    return found;
+}
+
 /* A scene's own window size goes in its entry: a desktop opens it at that size
  * without reading the scene off flash. */
 static void test_window_size_in_the_index(void)
@@ -563,6 +577,35 @@ static void test_window_size_in_the_index(void)
     /* A layout has no window of its own. */
     CHECK(put_one("{\"id\":\"desk\",\"settings\":{\"isLayout\":true,\"windowSize\":\"480x480\"}}", &result) == FOS_SCENE_STORE_OK);
     CHECK(entry_says("desk", "windowSize", NULL));
+}
+
+/* Its icon too (docs/scene-icons.md): the switcher draws it and a desktop
+ * lists it without reading the scene off flash. Only a value too long for an
+ * icon stays out; the runtime checks the path. */
+static void test_icon_in_the_index(void)
+{
+    fresh_dir();
+    fos_scene_store_result_t result;
+    CHECK(put_one("{\"id\":\"sun\",\"settings\":{\"icon\":\"M12 2L2 22h20z\"}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("sun", "icon", "M12 2L2 22h20z"));
+    CHECK(put_one("{\"id\":\"blank\",\"settings\":{\"icon\":\" \\n\"}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("blank", "icon", NULL));
+    CHECK(put_one("{\"id\":\"odd\",\"settings\":{\"icon\":24}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("odd", "icon", NULL));
+    /* 1024 characters between a leading space and a trailing newline fit;
+     * one more does not. */
+    char scene[1200], icon[1100];
+    size_t at = (size_t)snprintf(icon, sizeof(icon), " M0 0");
+    while (at < 1 + 1024) at += (size_t)snprintf(icon + at, sizeof(icon) - at, "h1");
+    snprintf(scene, sizeof(scene), "{\"id\":\"full\",\"settings\":{\"icon\":\"%s\\n\"}}", icon);
+    CHECK(put_one(scene, &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_has_key("full", "icon"));
+    snprintf(scene, sizeof(scene), "{\"id\":\"long\",\"settings\":{\"icon\":\"%sz\"}}", icon);
+    CHECK(put_one(scene, &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("long", "icon", NULL));
+    /* A layout is in no list, so it needs none. */
+    CHECK(put_one("{\"id\":\"desk\",\"settings\":{\"isLayout\":true,\"icon\":\"M0 0h24v24H0z\"}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("desk", "icon", NULL));
 }
 
 static void test_layouts_and_the_default(void)
@@ -843,6 +886,7 @@ int main(void)
     test_old_index_without_bytes();
     test_layouts_and_the_default();
     test_window_size_in_the_index();
+    test_icon_in_the_index();
     test_replace_all();
     test_every_2_kb_written_is_paced();
     test_a_set_file_from_its_scenes();

@@ -31,7 +31,7 @@ import frameos/utils/image
 import frameos/utils/time
 import frameos/scenes
 import frameos/scene_switcher_linux
-from system/sceneSwitcher/scene import isBuiltInScene
+from system/sceneSwitcher/scene import isBuiltInScene, listingItem
 from frameos/scene_rhythm import rhythmCanvasGeneration, rhythmAwaited, rhythmMarkDue
 from frameos/js_runtime/app_runtime import windowSceneListing
 import frameos/boot_guard
@@ -976,11 +976,7 @@ proc windowListing(): JsonNode =
   ## `app.frame.scenes`: the frame's scenes a layout can open, in its order.
   result = newJArray()
   for entry in linuxSceneListing():
-    let item = %*{"id": entry.id, "name": entry.name}
-    # Its own window size, where it says one (settings.windowSize).
-    if entry.windowSize.len > 0:
-      item["windowSize"] = %entry.windowSize
-    result.add item
+    result.add listingItem(entry)
 
 proc installWindowHooks*(self: RunnerThread) =
   takeParkedLayout = takeParked

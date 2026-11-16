@@ -221,6 +221,17 @@
   from the ESP32 or the preview, and `fos_scenes.c` applies one without a
   slot. A new built-in scene goes the same way, not into a host.
 
+## Scene icons: `docs/scene-icons.md`
+
+- `settings.icon` is ONE SVG path in a `0 0 24 24` box, filled (nonzero) with
+  the color around it, at most 1024 characters: nothing else. What is not an
+  icon is no icon, never an error. The rule is `scene_icon.nim` and
+  `utils/sceneIcon.ts`, pinned by `docs/scene-icon-fixtures.json`; change the
+  two and the corpus together. Every host lists it in `app.frame.scenes`
+  through `listingItem` (an ESP32 off its scene index, `make_entry`), and the
+  switcher draws it on its tiles. An SVG becomes one path in the editor alone
+  (`utils/svgToSceneIcon.ts`), never on a frame.
+
 ## Scene settings on the frame: `docs/scene-settings.md`
 
 - `system/sceneSettings` (the contract's `scenes.settings`) is the other

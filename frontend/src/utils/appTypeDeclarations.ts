@@ -305,8 +305,10 @@ interface FrameOSApp {
      * running in its window while another has the focus, so a layout can be a desktop of windows. Undefined
      * where one scene runs at a time (the preview of one scene) (FrameOS 2026.11.8+; undefined before).
      * windowSize is a scene's own size for a new window, "WxH" (its settings.windowSize), where it says
-     * one (FrameOS 2026.11.10+). */
-    scenes?: { id: string; name: string; windowSize?: string }[];
+     * one (FrameOS 2026.11.10+). icon is the scene's icon, where it has one (its settings.icon): one SVG
+     * path in a 0 0 24 24 box, drawn as <svg viewBox="0 0 24 24"><path d={icon} fill="currentColor" /></svg>
+     * (FrameOS 2026.11.10+). */
+    scenes?: { id: string; name: string; windowSize?: string; icon?: string }[];
     /** How many of those scenes may run at once, the one in front included, where that is limited (2 on an
      * ESP32 with 8 MB of PSRAM, 4 with more). A desktop opening one more closes the one that had the focus
      * longest ago. Undefined where there is no limit (a Raspberry Pi) (FrameOS 2026.11.8+; undefined

@@ -43,6 +43,8 @@ import { SceneAccessTags } from '../Scenes/SceneAccessTags'
 import { templateAccessFlags } from '../../../../utils/sceneAccess'
 import { LivePreviewModal } from '../Scenes/LivePreviewModal'
 import { CURRENT_FRAMEOS_VERSION } from '../../frameDeployUtils'
+import { templateSceneIcon } from '../../../../utils/sceneIcon'
+import { SceneIcon } from '../../../../components/SceneIcon'
 
 // True when a cloud scene was exported with a newer FrameOS than this install
 // runs — a nudge that upgrading may be needed for it to work as published.
@@ -93,7 +95,16 @@ interface TemplateProps {
  * saves uploaded it before anything was drawn) all show the same quiet
  * "picture" glyph the frames index uses for a scene with no snapshot yet.
  */
-function TemplateThumbnail({ imageUrl, className }: { imageUrl: string | null; className?: string }): JSX.Element {
+function TemplateThumbnail({
+  imageUrl,
+  icon,
+  className,
+}: {
+  imageUrl: string | null
+  /** The scene's own icon, in the glyph's place (docs/scene-icons.md). */
+  icon?: string | null
+  className?: string
+}): JSX.Element {
   const [unusable, setUnusable] = useState(false)
   useEffect(() => setUnusable(false), [imageUrl])
 
@@ -104,7 +115,11 @@ function TemplateThumbnail({ imageUrl, className }: { imageUrl: string | null; c
         className
       )}
     >
-      <PhotoIcon className="h-8 w-8 text-[#3b4757]" aria-hidden="true" />
+      {icon ? (
+        <SceneIcon path={icon} className="h-10 w-10 text-[#5b6b80]" />
+      ) : (
+        <PhotoIcon className="h-8 w-8 text-[#3b4757]" aria-hidden="true" />
+      )}
       {imageUrl && !unusable ? (
         <img
           src={imageUrl}
@@ -275,6 +290,7 @@ export function TemplateRow({
       <div className="flex items-start justify-between gap-2">
         <TemplateThumbnail
           imageUrl={imageUrl}
+          icon={templateSceneIcon(template)}
           className={clsx(templateDragData && canInstall && 'cursor-grab active:cursor-grabbing')}
         />
         <div className="break-inside-avoid space-y-1 w-full">

@@ -52,6 +52,7 @@ import type { FrameScene, FrameType } from '../../types'
 import { InstallSceneModal } from './InstallSceneModal'
 import { storeRepositoryOf } from './storeCatalog'
 import { WorkspaceSceneDropDown } from '../workspace/WorkspaceSceneDropDown'
+import { sceneIconOf } from '../../utils/sceneIcon'
 
 // The scenes library: the pages at the top of the Scenes side panel and
 // what the page area shows for them — the store front as the cloud's own
@@ -762,6 +763,7 @@ function InstalledSceneTile({ frame, scene }: { frame: FrameType; scene: FrameSc
           objectFit="cover"
           className="aspect-[4/3] w-full overflow-hidden bg-slate-800"
           wasmFallback={{ sceneId: scene.id }}
+          placeholderIcon={sceneIconOf(scene)}
         />
         <div className="px-2.5 pr-10 pt-1">
           <h3 className="frameos-strong text-sm font-semibold leading-tight">{scene.name || 'Untitled scene'}</h3>

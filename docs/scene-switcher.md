@@ -79,8 +79,8 @@ scene through its export so the switcher needs nothing else from the host.
 ### What it lists
 
 The host's scene list, in the order `setCurrentScene {direction}` walks it
-(`EventHost.sceneOrder`), with each scene's name, through
-`sceneSwitcherListing`:
+(`EventHost.sceneOrder`), with each scene's name (and its window size and icon,
+docs/scene-icons.md), through `sceneSwitcherListing`:
 
 | Host | List | Names |
 |---|---|---|
@@ -110,6 +110,11 @@ with the page and two arrows in the header.
   gets a dark grid: each tile its picture when the host has one (Linux), its number
   and title under it, the highlighted tile ringed, and a tile lighter while a
   finger is on it (`active:`).
+- **A scene's icon** (`settings.icon`, docs/scene-icons.md) is drawn in the
+  text color: on a name card above the name (the name then cut to one line, or
+  two when it looks long), up to three letters tall where the card has room;
+  on a Pi's picture tile in the picture's place until the scene has a snapshot,
+  where the number was. A tile without one is drawn as before.
 - **E-paper** (an ESP32 that is not an LCD, `waveshare.*`, `inky*`,
   `pimoroni.inky*`) gets black on white, thick borders, the highlighted tile
   inverted, and no press feedback: a refresh to show a finger is down would

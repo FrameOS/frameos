@@ -222,6 +222,12 @@ made smaller with its shape kept where it does not fit the desktop; set to "The
 whole desktop", a desktop still fills it with every scene. A window's place and
 size once moved are the desktop's own, as before. `Tiling` and `Commander` have
 no window sizes.
+**A scene's icon.** `app.frame.scenes` also lists a scene's `icon`, where it
+has one (`settings.icon`, docs/scene-icons.md): one SVG path in a 24 box, for
+a desktop to draw with `fill="currentColor"` on a window's title bar, a task
+button or a menu. Every host lists it from the same place as `windowSize`
+(an ESP32 from its scene index), checked: a value that is not an icon is left
+out, so a layout never has to check it.
 The desktop icons of `Windows 98`, `BeOS` and `Classic Mac` are those apps alone, never the
 frame's scenes (the menus have those): the scene list, the scene store, the
 asset browser, the terminal and the frame's settings. The **Scene store**, the

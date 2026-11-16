@@ -91,6 +91,7 @@ import {
   flatSceneDependencyEntries,
 } from './sceneDependencyGrouping'
 import { sortScenesAlphabetically } from '../../utils/sortScenes'
+import { sceneIconOf } from '../../utils/sceneIcon'
 import { confirmDialog } from '../../utils/confirmDialogLogic'
 
 /** Scene drawer selection for "whatever the frame is showing", used while the active scene is unknown. */
@@ -589,6 +590,7 @@ function FrameSceneTile({
           objectFit="cover"
           className="h-full w-full rounded-none"
           wasmFallback={{ sceneId: scene.id }}
+          placeholderIcon={sceneIconOf(scene)}
         />
       </div>
       <div className="w-full px-3 py-2">

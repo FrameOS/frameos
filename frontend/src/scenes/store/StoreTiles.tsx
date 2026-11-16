@@ -8,19 +8,26 @@ import type { TemplateType } from '../../types'
 import { imageElementIsBlank } from '../../utils/blankImage'
 import { sceneAccessFlagDescription, sceneAccessFlagLabel, templateAccessFlags } from '../../utils/sceneAccess'
 import type { StoreShelfGroup } from './storeCatalog'
+import { templateSceneIcon } from '../../utils/sceneIcon'
+import { SceneIcon } from '../../components/SceneIcon'
 
 // The store's tiles and shelves, as the cloud's store page drew them:
 // small, 4:3. The category is the shelf's heading, not a pill on the tile. Shared by the signed-in library
 // (ScenesLibrary.tsx) and the signed-out store front (PublicStoreFront.tsx).
 
-function TileImage({ imageUrl }: { imageUrl: string | null }): JSX.Element {
+function TileImage({ imageUrl, icon }: { imageUrl: string | null; icon?: string | null }): JSX.Element {
   const [unusable, setUnusable] = useState(false)
   useEffect(() => setUnusable(false), [imageUrl])
   return (
     // Edge to edge at the top of the tile, square at the bottom: the card's
     // own corners round it, nothing frames it.
     <div className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden bg-slate-500/10">
-      <PhotoIcon className="frameos-muted h-8 w-8 opacity-50" aria-hidden="true" />
+      {/* The scene's own icon where it has one (docs/scene-icons.md). */}
+      {icon ? (
+        <SceneIcon path={icon} className="frameos-muted h-10 w-10 opacity-60" />
+      ) : (
+        <PhotoIcon className="frameos-muted h-8 w-8 opacity-50" aria-hidden="true" />
+      )}
       {imageUrl && !unusable ? (
         <img
           src={imageUrl}
@@ -89,7 +96,10 @@ export function SceneTile({
   ].filter(Boolean)
   const body = (
     <>
-      <TileImage imageUrl={typeof template.image === 'string' ? template.image : null} />
+      <TileImage
+        imageUrl={typeof template.image === 'string' ? template.image : null}
+        icon={templateSceneIcon(template)}
+      />
       <div className="flex flex-col gap-2 px-2.5 pt-2">
         <h3 className="frameos-strong text-base font-semibold leading-snug">
           {template.name}

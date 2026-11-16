@@ -446,5 +446,52 @@ block desktopUnit:
   doAssert panelUnit(config(1316, 902, "web_only"), canvas) == 902
   onDesktop = saved
 
+proc noPicture(frameConfig: FrameConfig, sceneId: string, width, height: int): Image {.nimcall, gcsafe.} =
+  nil
+
+proc inkIn(image: Image, grid: SwitcherGrid, slot: int, light = false): int =
+  ## How many of a tile's pixels are dark (light: bright).
+  let x0 = grid.x0 + (slot mod grid.cols) * (grid.tileW + grid.gap)
+  let y0 = grid.y0 + (slot div grid.cols) * (grid.tileH + grid.gap)
+  for y in y0 ..< y0 + grid.tileH:
+    for x in x0 ..< x0 + grid.tileW:
+      if (image[x, y].r < 128) != light:
+        inc result
+
+block a_scene_icon_on_its_tile:
+  # A scene's icon (docs/scene-icons.md) goes above its name on a name card,
+  # and where a Pi has no picture of the scene yet, in the picture's place.
+  const Square = "M0 0h24v24H0z"
+  const House = "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"
+  listed = entries(6)
+  sceneSwitcherThumbnail = nil
+  let paper = config(800, 480, "waveshare.EPD_7in5_V2")
+  let cards = switcherGrid(6, 800, 480, thumbnails = false)
+  let plain = newSwitcher(paper, opener = "scene-2").draw(newImage(800, 480))
+  listed[0].icon = Square
+  listed[3].icon = House
+  let image = newSwitcher(paper, opener = "scene-2").draw(newImage(800, 480))
+  preview("switcher-800x480-eink-icons", oneBit(image))
+  doAssert image.inkIn(cards, 0) > plain.inkIn(cards, 0) + 400, "the square is ink on paper"
+  doAssert image.inkIn(cards, 3) > plain.inkIn(cards, 3)
+  doAssert image.inkIn(cards, 2) == plain.inkIn(cards, 2), "a scene without one is drawn as before"
+  # The highlighted tile is inverted, its icon with it: paper on ink.
+  listed[1].icon = Square
+  let lit = newSwitcher(paper, opener = "scene-2").draw(newImage(800, 480))
+  doAssert lit.inkIn(cards, 1, light = true) > image.inkIn(cards, 1, light = true) + 150
+  # A Pi's LCD: the icon where the picture would be, in the muted text color.
+  sceneSwitcherThumbnail = noPicture
+  let lcd = config(800, 480, "framebuffer")
+  let pictures = switcherGrid(6, 800, 480, thumbnails = true)
+  listed = entries(6)
+  let numbered = newSwitcher(lcd, opener = "scene-2").draw(newImage(800, 480))
+  listed[0].icon = Square
+  listed[4].icon = House
+  let marked = newSwitcher(lcd, opener = "scene-2").draw(newImage(800, 480))
+  preview("switcher-800x480-lcd-icons", marked)
+  doAssert marked.inkIn(pictures, 0, light = true) > numbered.inkIn(pictures, 0, light = true) + 400
+  doAssert marked.inkIn(pictures, 2, light = true) == numbered.inkIn(pictures, 2, light = true)
+  sceneSwitcherThumbnail = nil
+
 localEventSink = nil
 echo "scene switcher: ok"
