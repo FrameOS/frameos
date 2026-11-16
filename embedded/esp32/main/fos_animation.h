@@ -58,6 +58,9 @@ typedef struct {
     uint32_t frames;
     int64_t render_us_sum;
     int64_t render_us_max;
+    /* Of the window, the time scenes took to start (fos_animation_scene_started):
+     * not animation, so not in its frame rate. */
+    int64_t started_us;
     /* A burst, outside animation. */
     int64_t burst_start_us;  /* its first frame started */
     int64_t burst_last_us;   /* its last frame ended; 0 = no burst */
@@ -121,6 +124,17 @@ bool fos_animation_take_stats(fos_animation_t *a, int64_t now_us, bool logged_fr
  * the next one is due a period after this one started — at once when this
  * one took longer than that (no catch-up burst after a slow frame). */
 void fos_animation_frame_done(fos_animation_t *a, int64_t start_us, int64_t end_us);
+
+/* The frame that started at `start_us` was a scene's first, its start: the
+ * runtime compiled its code and drew it for the first time (the Pixel toys
+ * on the SenseCAP Indicator, 0.6 s; a copy that built its palettes as it
+ * loaded, 2.3 s; a Color cycling scene's first picture, 1.7 s). That is the
+ * switch's time, on its own render line, not a frame of the animation: it
+ * counts in neither the window's frames nor its seconds. Counted in, a switch
+ * from one animating scene to another read as one 2.6 s frame among 75 ms ones
+ * and a third off the frame rate (the hardware bench, 2026-11-16). The next
+ * frame is due at once. */
+void fos_animation_scene_started(fos_animation_t *a, int64_t start_us, int64_t end_us);
 
 /* Microseconds until the next frame is due (0: now). 0 outside animation. */
 int64_t fos_animation_wait_us(const fos_animation_t *a, int64_t now_us);

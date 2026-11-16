@@ -22,6 +22,8 @@ import frameos/planner
 import frameos/refresh_interval
 import frameos/render_scale
 import frameos/runtime_diagnostics
+import frameos/render_probe
+import std/monotimes
 import frameos/scene_rhythm
 import frameos/layout_choice
 import frameos/ui/events as ui_events
@@ -1342,6 +1344,13 @@ proc profileStart(scene: InterpretedFrameScene, nodeId: NodeId, asData: bool, co
   let keyword = if node.isNil: "" else: diagnosticKeyword(node)
   markRuntimeCheckpoint("node:start", currentSceneId = scene.id.string, contextEvent = context.event,
     nodeId = nodeId.int, nodeType = (if node.isNil: "" else: node.nodeType), keyword = keyword)
+  # A line nobody will read is not measured: an animation's quiet frames turn
+  # the logger off (the ESP32's setQuiet, the Pi's fast-render pause), and
+  # the profile line was built and dropped for every node of every one of
+  # them: on a host, Pixel toys' pass outside its app went from ~10 to ~60 us
+  # with `debug` on (the bench runs ESP32s with it on).
+  if scene.logger.isNil or not scene.logger.enabled:
+    return
   scene.profiles.add NodeProfile(nodeId: nodeId, startedAt: epochTime(),
     memoryBefore: renderMemoryInUse(), keyword: keyword)
 
@@ -1547,10 +1556,16 @@ proc programNative(ctx: ptr JSContext, thisVal: JSValueConst, argc: cint, argv: 
   let scene {.cursor.} = cast[InterpretedFrameScene](cast[pointer](address.int))
   let guard = guardForContext(ctx)
   enterNativeCall(guard)
+  # An app's get is its own phase (`app`, and inside it `get`); timing it here
+  # too would count it twice.
+  let timed = probeOn and ProgramOp(magic) != opGet
+  let started = if timed: getMonoTime() else: MonoTime()
   try:
     result = programOp(scene, ctx, ProgramOp(magic), argc.int, cast[ptr UncheckedArray[JSValueConst]](argv))
   except Exception as e:
     result = throwNimError(ctx, e)
+  if timed:
+    probeAdd(phNative, (getMonoTime() - started).inNanoseconds)
   leaveNativeCall(guard)
   if guard != nil and guard.wallTripped:
     JS_FreeValue(ctx, result)

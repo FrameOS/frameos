@@ -67,7 +67,7 @@ proc buildScene(): ExportedInterpretedScene =
     apps: %*{}
   )
 
-proc renderWith(debug: bool): seq[JsonNode] =
+proc renderWith(debug: bool, loggerOn = true): seq[JsonNode] =
   let sceneId = "tests/node-profile".SceneId
   var uploaded = initTable[SceneId, ExportedInterpretedScene]()
   uploaded[sceneId] = buildScene()
@@ -76,7 +76,9 @@ proc renderWith(debug: bool): seq[JsonNode] =
 
   logs = @[]
   let config = testConfig(debug)
-  let scene = init(sceneId, config, testLogger(config), %*{})
+  let logger = testLogger(config)
+  let scene = init(sceneId, config, logger, %*{})
+  logger.enabled = loggerOn
   var context = ExecutionContext(
     scene: scene, event: "render", payload: %*{}, hasImage: false,
     loopIndex: 0, loopKey: ".", nextSleep: 0.0
@@ -132,6 +134,15 @@ block every_node_reports_its_value_and_cost:
       doAssert false, "unexpected node in profile: " & $profile
 
   doAssert sawProducer and sawConsumer
+
+block a_quiet_frame_is_not_profiled:
+  # An animation's quiet frames turn the logger off (the ESP32's setQuiet,
+  # the Pi's fast-render pause): every node's line would be built for no one,
+  # on every frame of it (the SenseCAP Indicator's Pixel toys at 13 fps with
+  # `debug` on, the hardware bench, 2026-11-16).
+  doAssert renderWith(debug = true, loggerOn = false).len == 0
+  # And the next frame that logs has its lines again.
+  doAssert renderWith(debug = true, loggerOn = true).len == 2
 
 setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
 contextDownloadHook = nil
