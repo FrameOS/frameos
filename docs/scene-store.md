@@ -95,12 +95,17 @@ lists for frames at `GET /api/store/device/scenes`: the store front's filters
 (`q`, `category`, `version`: only what runs on this FrameOS), `page`, `limit`
 (the app's grid, 1 to 24), `prefer` (a shelf that goes first), `exclude`
 (shelves left out, comma separated) and `categories=1` for the shelves. Each
-scene is `{id, name, category, version, by, about, image, thumb}`: `about`
-the description cut to 140 characters, `image` the cover's path on that host
-(`/api/store/scenes/{id}/image?version=N`, a redirect to the CDN for a public
-scene), `thumb` the cover as a JPEG of at most 512 px, a URL on the CDN (null
-without one, and on a store with no CDN). Public, cached a minute, readable
-from any page (the browser preview runs the app), limited per address.
+scene is `{id, name, category, version, by, about, image, thumb, icon?}`:
+`about` the description cut to 140 characters, `image` the cover's path on
+that host (`/api/store/scenes/{id}/image?version=N`, a redirect to the CDN for
+a public scene), `thumb` the cover as a JPEG of at most 512 px, a URL on the
+CDN (null without one, and on a store with no CDN), `icon` the scene's own
+icon (docs/scene-icons.md), only when it has one. Public, cached a minute,
+readable from any page (the browser preview runs the app), limited per
+address. The app draws the icon in a card's placeholder (in the letter's
+place) until the cover is in, and beside the name on a scene's page; it checks
+the path's characters itself, since a store at another address could send
+anything.
 
 A cover is the publisher's picture, often a megabyte of PNG: an ESP32 took 5
 to 7 s to download and decode one for a card 140 px wide, with the panel

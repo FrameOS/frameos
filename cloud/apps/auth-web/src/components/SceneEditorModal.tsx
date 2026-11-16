@@ -1,6 +1,7 @@
 "use client";
 
 import { sceneLayoutProblemText } from "../../../../../frontend/src/utils/sceneLayoutRule";
+import { sceneIconPath } from "../../../../../frontend/src/utils/sceneIcon";
 import type {
   EmbeddedSceneEditorApi,
   TemplateCategoryOption,
@@ -179,6 +180,13 @@ export type { EmbeddedSceneEditorApi, SceneJson };
 export function sceneLayoutProblemFor(scenes: SceneJson[] | null, sceneId: string | null): string | null {
   const scene = scenes?.find((candidate) => candidate.id === sceneId) ?? scenes?.[0];
   return scene ? sceneLayoutProblemText(scene) : null;
+}
+
+/** The icon the store lists for these scenes (docs/scene-icons.md): the main
+ * scene's, the one marked default or else the first, as publishing reads it. */
+export function listingIconFor(scenes: SceneJson[] | null): string | null {
+  const main = scenes?.find((scene) => Boolean(scene.default)) ?? scenes?.[0];
+  return sceneIconPath((main?.settings as { icon?: unknown } | null | undefined)?.icon);
 }
 
 /** Whether the scene the editor shows is a layout (null: no such scene yet). */
@@ -422,6 +430,9 @@ export function SceneEditorModal({
   // Layout or normal scene, as the Info column shows it; follows the same edits.
   const [sceneIsLayout, setSceneIsLayout] = useState<boolean | null>(null);
   const [sceneLayoutProblem, setSceneLayoutProblem] = useState<string | null>(null);
+  // The icon the Info column shows: the main scene's in the scenes held, so
+  // it follows the draft; undefined until they load (the page's own then).
+  const [sceneIcon, setSceneIcon] = useState<string | null | undefined>(undefined);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   // The editor's latest scenes as state, for the Preview panel; only kept
   // up to date while that panel is open (each update re-renders the page).
@@ -467,6 +478,7 @@ export function SceneEditorModal({
     setSceneName(sceneNameFor(next, selectedSceneIdRef.current));
     setSceneIsLayout(sceneIsLayoutFor(next, selectedSceneIdRef.current));
     setSceneLayoutProblem(sceneLayoutProblemFor(next, selectedSceneIdRef.current));
+    setSceneIcon(next ? listingIconFor(next) : undefined);
     if (panelsRef.current?.preview || next === null) {
       setPreviewScenes(next);
     }
@@ -1338,6 +1350,7 @@ export function SceneEditorModal({
                     }
                   : undefined
               }
+              icon={sceneIcon}
               isLayout={sceneIsLayout ?? undefined}
               layoutProblem={sceneLayoutProblem}
               heading={info.scene.name}

@@ -34,6 +34,7 @@ const info: SceneInfoData = {
     description: "A **station** clock.",
     downloadCount: 12,
     frameosVersion: "2026.8.1",
+    icon: null,
     id: "scene-1",
     latestVersion: 2,
     name: "Clock",
@@ -126,6 +127,22 @@ describe("SceneInfoPanel", () => {
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Versions" })).toBeNull();
     expect(screen.queryByRole("link", { name: "v2" })).toBeNull();
+  });
+
+  it("draws the scene's icon beside the heading and in place of a missing preview", () => {
+    const house = "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z";
+    render(<SceneInfoPanel {...info} heading="Clock" images={[]} scene={{ ...info.scene, icon: house }} />);
+    const heading = screen.getByRole("heading", { name: "Clock" });
+    expect(heading.querySelector("svg path")?.getAttribute("d")).toBe(house);
+    expect(document.querySelector(".scene-gallery .scene-card__placeholder svg path")?.getAttribute("d")).toBe(house);
+    expect(screen.queryByText("No preview")).toBeNull();
+    cleanup();
+
+    // The workspace's scenes win over the page's: an icon cleared in the
+    // draft is gone, and without one the box says so.
+    render(<SceneInfoPanel {...info} heading="Clock" icon={null} images={[]} scene={{ ...info.scene, icon: house }} />);
+    expect(screen.getByRole("heading", { name: "Clock" }).querySelector("svg")).toBeNull();
+    expect(screen.getByText("No preview")).toBeTruthy();
   });
 
   it("keeps the share token on every link of a private scene, and explains it", () => {

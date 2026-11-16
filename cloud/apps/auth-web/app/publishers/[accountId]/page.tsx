@@ -65,6 +65,7 @@ export default async function PublisherPage({
       downloadCount: storeScenes.downloadCount,
       frameosVersion: storeScenes.frameosVersion,
       hasPreview: sceneHasImageSql,
+      icon: storeScenes.icon,
       id: storeScenes.id,
       name: storeScenes.name,
       publisher: accounts.displayName,

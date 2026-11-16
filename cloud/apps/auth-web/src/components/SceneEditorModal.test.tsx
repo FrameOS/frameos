@@ -8,6 +8,7 @@ import {
   PANELS_STORAGE_KEY,
   SceneEditorModal,
   editorViewportForWidthChange,
+  listingIconFor,
   panelColumnTemplate,
 } from "./SceneEditorModal";
 
@@ -285,6 +286,7 @@ const info = {
     description: null,
     downloadCount: 0,
     frameosVersion: null,
+    icon: null,
     id: "scene-1",
     latestVersion: 2,
     name: "Clock",
@@ -1313,6 +1315,22 @@ describe("SceneEditorModal bar", () => {
     } finally {
       length.mockRestore();
     }
+  });
+});
+
+describe("listingIconFor", () => {
+  it("is the icon publishing would list: the main scene's, the default one or else the first", () => {
+    const house = "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z";
+    expect(listingIconFor(null)).toBeNull();
+    expect(listingIconFor([{ id: "a", settings: { icon: house } }])).toBe(house);
+    expect(
+      listingIconFor([
+        { id: "a", settings: { icon: house } },
+        { default: true, id: "b", settings: {} },
+      ]),
+    ).toBeNull();
+    expect(listingIconFor([{ id: "a" }, { default: true, id: "b", settings: { icon: ` ${house}` } }])).toBe(house);
+    expect(listingIconFor([{ id: "a", settings: { icon: "<svg/>" } }])).toBeNull();
   });
 });
 

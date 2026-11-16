@@ -2,6 +2,7 @@ import { sceneRequiresCompilation } from "@frameos-cloud/scene-convert";
 import { sceneAccessFlags } from "../../../../../frontend/src/utils/sceneAccess";
 import { isBrokenLayout } from "../../../../../frontend/src/utils/sceneLayoutRule";
 import { isDesktopLayout, isLayoutScene, mainScene } from "../../../../../frontend/src/utils/sceneLayouts";
+import { sceneIconPath } from "../../../../../frontend/src/utils/sceneIcon";
 import type { FrameScene } from "../../../../../frontend/src/types";
 import { randomBytes } from "node:crypto";
 import { strToU8, unzlibSync, zipSync } from "fflate";
@@ -151,6 +152,26 @@ export function compiledSceneNames(scenes: unknown): string[] {
 
 export const compiledSceneHint =
   "Legacy compiled scenes (Nim code nodes, Nim apps) cannot run on a cloud frame. Convert it to an interpreted scene at /nim-converter (docs/nim-to-js-conversion.md) and publish the result.";
+
+// The icon a store listing shows for a pack (docs/scene-icons.md): its main
+// scene's `settings.icon` (the scene marked default, else the first: the one
+// a pack starts on, as for `isLayout`), through the rule the SPA and the
+// runtime share (frontend/src/utils/sceneIcon.ts). Null when the main scene
+// has none or it is no icon, even when another scene of the pack has one: the
+// listing stands for the scene that installs first.
+export function listingIconOf(scenes: unknown): string | null {
+  if (!Array.isArray(scenes)) {
+    return null;
+  }
+  const isRecord = (value: unknown): value is { default?: unknown; settings?: unknown } =>
+    Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  // mainScene's pick, for scenes nothing has checked yet.
+  const main: unknown = scenes.find((scene) => isRecord(scene) && scene.default) ?? scenes[0];
+  if (!isRecord(main) || !isRecord(main.settings)) {
+    return null;
+  }
+  return sceneIconPath((main.settings as { icon?: unknown }).icon);
+}
 
 export function detectRiskFlags(scenes: unknown): string[] {
   return sceneAccessFlags(scenes);
@@ -442,6 +463,10 @@ export type ValidatedSceneZip = {
   // desktop (`settings.desktop`), else Full screen layouts.
   isLayout: boolean;
   isDesktop: boolean;
+  // The listing's icon (docs/scene-icons.md): the main scene's
+  // `settings.icon` (the scene a pack starts on, as for `isLayout`), through
+  // the SPA's and the runtime's rule; null when it has none or it is no icon.
+  icon: string | null;
   manifestDescription: string | undefined;
   manifestName: string | undefined;
   manifestTags: string[] | undefined;
@@ -523,16 +548,18 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
     return { ok: false, error: "preview_image_fully_transparent" };
   }
 
+  const main = mainScene(scenes as Pick<FrameScene, "default" | "settings">[]);
   return {
     ok: true,
     value: {
       appKeywords: extractAppKeywords(scenes),
       compiledScenes: compiledSceneNames(scenes),
       frameosVersion: normalizeFrameosVersion(record.frameosVersion),
+      icon: listingIconOf(scenes),
       imageHeight: dimension(record.imageHeight),
       imageWidth: dimension(record.imageWidth),
-      isLayout: isLayoutScene(mainScene(scenes as Pick<FrameScene, "default" | "settings">[])),
-      isDesktop: isDesktopLayout(mainScene(scenes as Pick<FrameScene, "default" | "settings">[])),
+      isLayout: isLayoutScene(main),
+      isDesktop: isDesktopLayout(main),
       manifestCategory:
         record.category === undefined ? undefined : normalizeCategory(record.category),
       manifestDescription:
@@ -714,6 +741,7 @@ export function sceneSummary(scene: {
   downloadCount: number;
   featuredAt: Date | null;
   frameosVersion: string | null;
+  icon: string | null;
   id: string;
   latestVersion: number;
   name: string;
@@ -731,6 +759,8 @@ export function sceneSummary(scene: {
     download_count: scene.downloadCount,
     featured: scene.featuredAt !== null,
     frameos_version: scene.frameosVersion,
+    // The latest version's icon (docs/scene-icons.md), null for none.
+    icon: scene.icon,
     id: scene.id,
     latest_version: scene.latestVersion,
     name: scene.name,

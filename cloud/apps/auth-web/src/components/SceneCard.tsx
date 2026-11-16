@@ -7,6 +7,8 @@ import {
   sceneAccessFlagDescription,
   sceneAccessFlagLabel,
 } from "../../../../../frontend/src/utils/sceneAccess";
+import { sceneIconPath } from "../../../../../frontend/src/utils/sceneIcon";
+import { SceneIcon } from "../../../../../frontend/src/components/SceneIcon";
 
 export type SceneCardScene = {
   // Store category slug (categories.ts); shown as a pill when set.
@@ -15,6 +17,9 @@ export type SceneCardScene = {
   downloadCount: number;
   frameosVersion?: string | null;
   hasPreview: boolean;
+  // The scene's own icon (docs/scene-icons.md): beside the name, and in
+  // the picture's place when there is none.
+  icon?: string | null | undefined;
   id: string;
   name: string;
   // Omit (undefined) to leave the publisher out of the meta line — the
@@ -44,6 +49,7 @@ export function SceneCard({
   const category = scene.category
     ? (getStoreCategory(scene.category)?.title ?? scene.category)
     : null;
+  const icon = sceneIconPath(scene.icon);
   const card = (
     <Link className="scene-card" href={`/s/${scene.slug}`}>
       {scene.hasPreview ? (
@@ -55,12 +61,17 @@ export function SceneCard({
           loading="lazy"
           src={`/api/store/scenes/${scene.id}/image`}
         />
+      ) : icon ? (
+        <div aria-hidden className="scene-card__placeholder">
+          <SceneIcon className="scene-icon scene-icon--placeholder" path={icon} />
+        </div>
       ) : (
         <div aria-hidden className="scene-card__placeholder">
           No preview
         </div>
       )}
       <h3>
+        {icon ? <SceneIcon className="scene-icon scene-icon--inline" path={icon} /> : null}
         {scene.name}
         {knownSceneAccessFlags(scene.riskFlags).map((flag) => (
           <span

@@ -18,6 +18,7 @@ import { SceneImageGallery } from "./SceneImageGallery";
 import { SceneMarkdown } from "./SceneMarkdown";
 import { ShareLinkControls } from "./ShareLinkControls";
 import { StoreSceneActions } from "./StoreSceneActions";
+import { SceneIcon } from "../../../../../frontend/src/components/SceneIcon";
 
 /** The listing a version records (and the workspace drafts): plain JSON. */
 export type SceneListingData = {
@@ -44,6 +45,8 @@ export type SceneInfoScene = SceneListingData & {
   pulledReason: string | null;
   riskFlags: string[];
   latestVersion: number;
+  /** The latest version's icon (docs/scene-icons.md), null for none. */
+  icon: string | null;
 };
 
 export type SceneInfoVersion = {
@@ -111,6 +114,9 @@ export type SceneInfoPanelProps = SceneInfoData & {
   isLayout?: boolean | undefined;
   /** Why this scene cannot be a layout, null when it can. */
   layoutProblem?: string | null | undefined;
+  /** The icon to show (the scenes the workspace holds, which follow the
+   * draft); the latest version's when left out. */
+  icon?: string | null | undefined;
 };
 
 // Everything the scene page says about a scene, top to bottom: its name
@@ -133,6 +139,7 @@ export function SceneInfoPanel({
   draft,
   isLayout,
   layoutProblem,
+  icon: shownIcon,
 }: SceneInfoPanelProps) {
   const isPrivate = scene.visibility !== "public";
   const isActive = scene.status === "active";
@@ -140,6 +147,7 @@ export function SceneInfoPanel({
   const editing = draft !== undefined && isOwner && isActive;
   const listing: SceneListingData = draft?.listing ?? shown?.listing ?? scene;
   const images = draft?.images ?? shown?.images ?? latestImages;
+  const icon = shownIcon === undefined ? scene.icon : shownIcon;
 
   // Tags stay in the listing (and the database) but are not shown or
   // edited here any more (2026.10); the category is.
@@ -166,7 +174,12 @@ export function SceneInfoPanel({
   return (
     <div className="scene-info scene-info--panel">
       <header className="scene-info__header">
-        {heading ? <h1 className="scene-info__heading">{heading}</h1> : null}
+        {heading ? (
+          <h1 className="scene-info__heading">
+            {icon ? <SceneIcon className="scene-icon scene-icon--inline" path={icon} /> : null}
+            {heading}
+          </h1>
+        ) : null}
         <p className="copy scene-info__byline">
           by{" "}
           <Link href={`/publishers/${scene.accountId}`}>{scene.publisher ?? "FrameOS user"}</Link>{" "}
@@ -207,6 +220,7 @@ export function SceneInfoPanel({
           it rather than failing ones. */}
       <SceneImageGallery
         canEdit={editing}
+        icon={icon}
         images={images}
         onChange={editing ? draft.onImagesChange : undefined}
         sceneId={scene.id}

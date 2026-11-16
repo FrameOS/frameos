@@ -21,6 +21,7 @@ import { formatDate } from "../../src/lib/format";
 import { readSession } from "../../src/lib/session";
 import { accountIsSuperadmin } from "../../src/lib/superadmin";
 import { sceneHasImageSql } from "../../src/lib/store-listing";
+import { SceneIcon } from "../../../../../frontend/src/components/SceneIcon";
 
 export const metadata = { title: "My scenes" };
 
@@ -89,6 +90,7 @@ export default async function MyScenesPage({
           downloadCount: storeScenes.downloadCount,
           hasPreview: sceneHasImageSql,
           featuredAt: storeScenes.featuredAt,
+          icon: storeScenes.icon,
           id: storeScenes.id,
           latestVersion: storeScenes.latestVersion,
           name: storeScenes.name,
@@ -109,6 +111,7 @@ export default async function MyScenesPage({
     description: scene.description,
     downloadCount: scene.downloadCount,
     hasPreview: scene.hasPreview,
+    icon: scene.icon,
     id: scene.id,
     name: scene.name,
     slug: scene.slug,
@@ -229,12 +232,27 @@ export default async function MyScenesPage({
                               <span
                                 aria-hidden
                                 className="table-thumb table-thumb--empty"
-                              />
+                              >
+                                {scene.icon ? (
+                                  <SceneIcon
+                                    className="scene-icon scene-icon--thumb"
+                                    path={scene.icon}
+                                  />
+                                ) : null}
+                              </span>
                             )}
                           </Link>
                         </td>
                         <td>
-                          <Link href={`/s/${scene.slug}`}>{scene.name}</Link>
+                          <Link href={`/s/${scene.slug}`}>
+                            {scene.icon ? (
+                              <SceneIcon
+                                className="scene-icon scene-icon--inline"
+                                path={scene.icon}
+                              />
+                            ) : null}
+                            {scene.name}
+                          </Link>
                         </td>
                         <td>
                           {scene.tags.length > 0 ? (

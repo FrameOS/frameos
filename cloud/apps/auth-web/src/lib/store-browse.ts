@@ -51,6 +51,8 @@ export type StoreBrowseRow = {
   featuredAt: Date | null;
   frameosVersion: string | null;
   hasPreview: boolean;
+  // The scene's icon (docs/scene-icons.md), null for none.
+  icon: string | null;
   id: string;
   name: string;
   publisher: string | null;
@@ -98,6 +100,7 @@ export async function listStoreScenes(
       featuredAt: storeScenes.featuredAt,
       frameosVersion: storeScenes.frameosVersion,
       hasPreview: sceneHasImageSql,
+      icon: storeScenes.icon,
       id: storeScenes.id,
       name: storeScenes.name,
       publisher: accounts.displayName,
