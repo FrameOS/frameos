@@ -1981,8 +1981,7 @@ static fos_settings_fetched_t *s_link_settings = NULL;
 /* A scene payload the link task downloaded (fos_scenes_backend_fetch): the
  * render task only takes it into the runtime, and the scene store's task
  * writes it. */
-static char *s_link_payload = NULL;
-static size_t s_link_payload_len = 0;
+static fos_scene_set_t *s_link_payload = NULL;
 static char s_link_payload_etag[FOS_SCENES_ETAG_LEN];
 static bool s_link_push_wanted = false;
 static char s_link_scene_id[128];
@@ -2052,13 +2051,11 @@ static void link_round(int64_t *next_poll_us, bool *pull_owed)
     /* One payload at a time, like the commands: the next download waits until
      * the render task has taken this one. */
     if (payload_free) {
-        size_t len = 0;
         char etag[FOS_SCENES_ETAG_LEN];
-        char *body = fos_scenes_backend_fetch(false, &len, etag, sizeof(etag), NULL);
-        if (body != NULL) {
+        fos_scene_set_t *set = fos_scenes_backend_fetch(false, etag, sizeof(etag), NULL);
+        if (set != NULL) {
             portENTER_CRITICAL(&s_link_mux);
-            s_link_payload = body;
-            s_link_payload_len = len;
+            s_link_payload = set;
             memcpy(s_link_payload_etag, etag, sizeof(s_link_payload_etag));
             portEXIT_CRITICAL(&s_link_mux);
             wake = true;
@@ -2121,13 +2118,12 @@ bool fos_client_take_link_payload(void)
 {
     char etag[FOS_SCENES_ETAG_LEN];
     portENTER_CRITICAL(&s_link_mux);
-    char *body = s_link_payload;
-    size_t len = s_link_payload_len;
+    fos_scene_set_t *set = s_link_payload;
     memcpy(etag, s_link_payload_etag, sizeof(etag));
     s_link_payload = NULL;
     portEXIT_CRITICAL(&s_link_mux);
-    if (body == NULL) return false;
-    fos_scenes_take_backend_payload(body, len, etag);
+    if (set == NULL) return false;
+    fos_scenes_take_backend_payload(set, etag);
     return true;
 }
 

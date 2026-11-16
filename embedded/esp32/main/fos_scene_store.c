@@ -171,8 +171,13 @@ char *fos_scene_store_read_file(const char *path, size_t *out_len)
 /* `path` written whole, or not there at all (removed on any failure, errno
  * kept). "wb" truncates a file that is there, so nothing is removed first:
  * each remove is one more lookup by name. */
-static fos_scene_store_err_t write_plain(const char *path, const char *data, size_t len)
+/* `count` parts written one after the other, or with `array` as the JSON
+ * array of them (a set's combined file written from its scenes, never one
+ * block of its size). */
+static fos_scene_store_err_t write_parts(const char *path, const fos_scene_store_put_t *parts, int count, bool array)
 {
+    size_t len = array ? (size_t)(count > 1 ? count + 1 : 2) : 0;
+    for (int i = 0; i < count; i++) len += parts[i].len;
     if (s_hooks.make_room) s_hooks.make_room(len);
     errno = 0;
     FILE *f = fopen(path, "wb");
@@ -182,15 +187,20 @@ static fos_scene_store_err_t write_plain(const char *path, const char *data, siz
         errno = err_no;
         return err_no == ENOSPC ? FOS_SCENE_STORE_ERR_NO_SPACE : FOS_SCENE_STORE_ERR_IO;
     }
-    size_t written = 0;
-    while (written < len) {
-        size_t chunk = len - written > 2048 ? 2048 : len - written;
-        if (s_hooks.pace) s_hooks.pace();
-        size_t wrote = fwrite(data + written, 1, chunk, f);
-        if (wrote == 0) break;
-        written += wrote;
+    bool ok = !array || fputc('[', f) != EOF;
+    for (int i = 0; ok && i < count; i++) {
+        if (array && i > 0 && fputc(',', f) == EOF) ok = false;
+        size_t written = 0;
+        while (ok && written < parts[i].len) {
+            size_t chunk = parts[i].len - written > 2048 ? 2048 : parts[i].len - written;
+            if (s_hooks.pace) s_hooks.pace();
+            size_t wrote = fwrite(parts[i].json + written, 1, chunk, f);
+            if (wrote == 0) ok = false;
+            written += wrote;
+        }
     }
-    bool ok = written == len && !ferror(f);
+    if (ok && array) ok = fputc(']', f) != EOF;
+    if (ferror(f)) ok = false;
     if (fclose(f) != 0) ok = false;
     if (!ok) {
         int err_no = errno ? errno : ENOSPC;
@@ -201,15 +211,34 @@ static fos_scene_store_err_t write_plain(const char *path, const char *data, siz
     return FOS_SCENE_STORE_OK;
 }
 
-fos_scene_store_err_t fos_scene_store_write_file(const char *path, const char *tmp,
-                                                 const char *data, size_t len)
+static fos_scene_store_err_t write_plain(const char *path, const char *data, size_t len)
 {
-    fos_scene_store_err_t written = write_plain(tmp, data, len);
+    fos_scene_store_put_t part = {.json = data, .len = len};
+    return write_parts(path, &part, 1, false);
+}
+
+static fos_scene_store_err_t write_replace(const char *path, const char *tmp, const fos_scene_store_put_t *parts,
+                                           int count, bool array)
+{
+    fos_scene_store_err_t written = write_parts(tmp, parts, count, array);
     if (written != FOS_SCENE_STORE_OK) return written;
     remove(path);
     /* A failed rename keeps the tmp: for the index it is the only copy, and
      * fos_scene_store_recover_index() puts it back at the next boot. */
     return rename(tmp, path) == 0 ? FOS_SCENE_STORE_OK : FOS_SCENE_STORE_ERR_IO;
+}
+
+fos_scene_store_err_t fos_scene_store_write_file(const char *path, const char *tmp,
+                                                 const char *data, size_t len)
+{
+    fos_scene_store_put_t part = {.json = data, .len = len};
+    return write_replace(path, tmp, &part, 1, false);
+}
+
+fos_scene_store_err_t fos_scene_store_write_set(const char *path, const char *tmp,
+                                                const fos_scene_store_put_t *scenes, int count)
+{
+    return write_replace(path, tmp, scenes, count, true);
 }
 
 /* ----------------------------------------------------------- the index */

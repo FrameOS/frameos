@@ -51,13 +51,13 @@ def test_a_split_removes_the_old_slots_before_writing_new_ones():
     and a 20-scene push of 389,616 bytes over itself never split on the
     reTerminal E1002's 1 MB /state (2026-11-10)."""
     text = (MAIN_DIR / "fos_scenes.c").read_text()
-    start = text.index("static esp_err_t split_scenes_locked(")
+    start = text.index("static esp_err_t split_puts_locked(")
     body = text[start : text.index("\n}\n", start)]
-    scan = body.index("scan_array_elements(")
+    scan = body.index("if (count <= 0)")
     first_write = body.index("fos_scene_store_apply(")  # the store writes the slots (replace_all)
     removal = body.find("remove_slots();", scan)
     assert scan < removal < first_write, (
-        "split_scenes_locked must remove the old slots after the payload scanned as an array of scenes "
+        "split_puts_locked must remove the old slots after the payload scanned as an array of scenes "
         "and before the store writes the first new slot"
     )
 
@@ -72,18 +72,18 @@ def test_a_split_that_found_no_room_is_not_tried_again_until_the_next_payload():
     apply = text[text.index("bool fos_scenes_apply_pending(void)") :]
     apply = apply[: apply.index("\n}\n")]
     assert "split_no_room_len() != (uint32_t)len && split_scenes(json, len) == ESP_OK" in apply
-    whole = apply.index("load_into_nim(json, len, \"stored\")")
+    whole = apply.index("load_into_nim(starts, lens,")
     mark = apply.index("set_split_no_room_len((uint32_t)len)")
     assert mark < whole and "if (s_split_out_of_room)" in apply[:mark]
     # Running out of room, not any failure: a cJSON allocation that failed is
     # worth another try at the next boot.
-    split = text[text.index("static esp_err_t split_scenes_locked(") :]
+    split = text[text.index("static esp_err_t split_puts_locked(") :]
     split = split[: split.index("\n}\n")]
     assert "s_split_out_of_room = err == FOS_SCENE_STORE_ERR_NO_SPACE" in split
     assert split.index("s_split_out_of_room = false") < split.index("fos_scene_store_apply(")
     # Every write of the combined file is a new payload and clears the mark.
     # (the store task's under the store lock: fos_scenes_take_backend_payload)
-    writes = [m.start() for m in re.finditer(r"write_file_replace(?:_locked)?\(SCENES_PATH,", text)]
+    writes = [m.start() for m in re.finditer(r"(?:write_file_replace(?:_locked)?|fos_scene_store_write_set)\(SCENES_PATH,", text)]
     assert len(writes) == 2
     for start in writes:
         window = text[start : start + 900]

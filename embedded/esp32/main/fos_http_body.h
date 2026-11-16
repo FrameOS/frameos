@@ -16,6 +16,7 @@ typedef enum {
     FOS_HTTP_BODY_TOO_LARGE, /* over the cap: not read */
     FOS_HTTP_BODY_NO_MEMORY, /* no buffer for it */
     FOS_HTTP_BODY_READ_FAILED, /* the read broke off, or the body was cut short of its length */
+    FOS_HTTP_BODY_INVALID, /* not what the reader takes (fos_scene_pieces.h) */
 } fos_http_body_err_t;
 
 typedef struct {

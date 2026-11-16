@@ -1477,11 +1477,16 @@ a largest PSRAM block of twice the set and four times the set free); without
 it, or when the runtime refuses it, the set goes store-first like a push:
 written by the store task as fast as flash goes, then applied one scene at a
 time (the reTerminal E1004 could not copy a 378 KB set whole, 2026-11-16). A
-backend's `?patch=1` answer is read without a tree of the whole answer
-(`fos_store_object_member`), each scene of its `put` parsed by the store as
-it is written. Every body is read into one buffer of its declared length
-(`fos_http_body.c`, host-tested); a body that never got its buffer logs
-`no-memory`, one that broke off `read-failed`.
+backend's answer, a whole set or a `?patch=1` object, is read in pieces
+(`fos_scene_pieces.c`, host-tested): each scene in a block of its own and the
+rest (`[]`, or the patch with `"put":[]`, the one part parsed as a tree) in a
+small one, so the largest block a set needs is its largest scene, where one
+block of a 378-415 KB answer did not fit beside a photo on the reTerminal
+E1004 (2026-11-16). The runtime, the store's puts and the combined file
+(`fos_scene_store_write_set`) take the scenes as they are. Other bodies are
+read into one buffer of their declared length (`fos_http_body.c`,
+host-tested). A body that never got its buffer logs `no-memory`, one that is
+not a scene answer `invalid`, one that broke off `read-failed`.
 
 **On a frame that has a per-scene store, a whole set goes in as changes to
 it, one scene at a time** (`fos_scene_store_apply_set`, called by

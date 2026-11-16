@@ -178,8 +178,14 @@ two allocations, each fine in total memory and each one block too many:
   out of the firmware's buffer into one Nim string (`$payload`) with 1.5 MB
   free in blocks of 300 KB. `fos_scenes.c` splits it where it lies with the
   store's scanner (`fos_store_split_scenes`) and the runtime copies one scene
-  at a time (`frameos_nim_load_scenes`), so the largest block a set needs is
-  its largest scene's text.
+  at a time (`frameos_nim_load_scenes`). The download held one block of the
+  answer's size too, and a 378-415 KB set or `?patch=1` answer did not get
+  one beside a photo (`no-memory`): a backend's answer is now read in pieces
+  (`fos_scene_pieces.c`), each scene in a block of its own and the rest
+  (`[]`, or the patch with `"put":[]`) in a small one, and every consumer
+  takes the scenes as they are (the runtime, the store's puts, the combined
+  file written from them by `fos_scene_store_write_set`). The largest block
+  a set needs is its largest scene.
 
 The soak's "leak" (130 KB, 585 KB, 1.4 MB over three aborts in five seconds,
 then the restart) was those aborts: each abandons the JS interpreters it

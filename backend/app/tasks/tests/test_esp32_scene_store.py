@@ -153,6 +153,9 @@ def _source(name: str) -> str:
     return re.sub(r"/\*.*?\*/", "", (MAIN_DIR / name).read_text(), flags=re.S)
 
 
+LOAD_BACKEND_SET = 'whole = load_into_nim((const char *const *)set->scenes, set->lens, set->count, len, "backend");'
+
+
 def test_a_whole_set_goes_into_a_per_scene_store_as_changes():
     """A whole set (a cloud push, an upload, a backend pull) written whole
     beside the set it replaced needed room for both: the reTerminal E1002's
@@ -163,8 +166,8 @@ def test_a_whole_set_goes_into_a_per_scene_store_as_changes():
     apply at once, with nothing to split; the backend's keeps the index it
     wrote. Without one, the set is stored whole as before."""
     fns = _functions(_source("fos_scenes.c"))
-    helper = fns["store_set_as_changes_locked"]
-    assert helper.index("if (combined_stored()) return ESP_ERR_NOT_FOUND;") < helper.index(
+    helper = fns["store_puts_as_changes_locked"]
+    assert helper.index("if (combined_stored() || count <= 0) return ESP_ERR_NOT_FOUND;") < helper.index(
         "fos_scene_store_apply_set(")
     assert "forget_dropped_scene" in helper
     push = fns["fos_scenes_set_json_from"]
@@ -176,11 +179,11 @@ def test_a_whole_set_goes_into_a_per_scene_store_as_changes():
     assert "store_split" not in changes, "a set stored as changes has nothing to split"
     backend = fns["store_backend_payload"]
     order = [backend.index(s) for s in (
-        "store_set_as_changes_locked(job->body, job->len, FOS_SCENES_SOURCE_BACKEND)",
-        "if (err == ESP_ERR_NOT_FOUND)", "write_file_replace_locked(SCENES_PATH")]
+        "store_puts_as_changes_locked(puts, set->count, set->bytes, FOS_SCENES_SOURCE_BACKEND)",
+        "if (err == ESP_ERR_NOT_FOUND)", "fos_scene_store_write_set(SCENES_PATH")]
     assert order == sorted(order), "store_backend_payload: as changes, else whole"
     # The index it wrote is the new set's; and a set written store-first was
-    # split from its body, so the index is the new set's then too.
+    # split from its scenes, so the index is the new set's then too.
     assert "if (!as_changes && !job->reload) fos_scene_store_remove_index();" in backend, (
         "the index it wrote is the new set's"
     )
@@ -203,8 +206,8 @@ def test_a_backend_set_renders_at_once():
     Both ways go through fos_scenes_take_backend_payload, which asks."""
     fns = _functions(_source("fos_scenes.c"))
     take = fns["fos_scenes_take_backend_payload"]
-    assert take.index("whole = load_into_nim(body, len, \"backend\");") < take.index(
-        "fos_client_render_now();") < take.index("store_behind(body, len, etag, !whole)")
+    assert take.index(LOAD_BACKEND_SET) < take.index(
+        "fos_client_render_now();") < take.index("store_behind(set, etag, !whole)")
     # A set the runtime has no room for whole (or refuses) goes store-first:
     # the store task marks it pending inside the lock, then asks for the
     # render, which applies it one scene at a time.
@@ -225,28 +228,33 @@ def test_a_set_the_runtime_refuses_is_loaded_from_flash_after_its_write():
     apply pending, which loads what flash holds one scene at a time."""
     functions = _functions(_source("fos_scenes.c"))
     take = functions["fos_scenes_take_backend_payload"]
-    assert "whole = load_into_nim(body, len, \"backend\");" in take
+    assert LOAD_BACKEND_SET in take
     assert ".reload = !whole" in take
     # A refused set dropped for a newer one leaves its reload to that one.
     assert "s_store_next.reload = reload || (dropped != NULL && s_store_next.reload);" in functions["store_behind"]
     store = functions["store_backend_payload"]
     pending = store.index("s_pending = true;")
-    assert store.index("store_set_as_changes_locked(") < pending < store.index("store_unlock();")
+    assert store.index("store_puts_as_changes_locked(") < pending < store.index("store_unlock();")
     assert "bool reload = job->reload;" in store, "whether the write worked or not: flash is what runs"
 
-def test_a_backend_set_is_read_to_its_length_and_its_patch_without_a_tree():
+def test_a_backend_set_is_read_in_pieces_and_its_patch_without_a_tree():
     """The desktop layouts' sets (365-465 KB) never reached two 8 MB boards
     (the hardware bench, 2026-11-16): a declared length was read and then
     grown to the 512 KB cap for an end it did not need (`read-failed`, HTTP
-    200, 0 bytes, with a 480 KB largest block), and a patch of fifteen scenes
-    was parsed as one cJSON tree and refused out of memory. The body read is
-    host-tested (test_fos_http_body.c); the patch is read a key at a time."""
+    200, 0 bytes, with a 480 KB largest block), a patch of fifteen scenes was
+    parsed as one cJSON tree and refused out of memory, and then one block of
+    the answer's size did not fit beside a photo on the E1004 (`no-memory`,
+    1.5 MB free in 300 KB blocks). A backend's scenes are read each into a
+    block of its own (fos_scene_pieces.c, host-tested in
+    test_fos_scene_pieces.c), and only the patch without them is a tree."""
     http = _functions(_source("fos_backend_http.c"))
+    assert "fos_scene_pieces_read(res->content_length" in http["read_body"]
     assert "fos_http_body_read(res->content_length" in http["read_body"]
-    patch = _functions(_source("fos_scenes.c"))["apply_backend_patch"]
-    assert "cJSON_ParseWithLength(body" not in patch
-    assert 'fos_store_object_member(body, len, "put"' in patch
-    assert "fos_store_split_scenes(put_text, put_len" in patch
+    fns = _functions(_source("fos_scenes.c"))
+    assert ".scene_set = pieces," in fns["fos_scenes_backend_fetch"]
+    patch = fns["apply_backend_patch"]
+    assert "cJSON_ParseWithLength(set->rest, set->rest_len)" in patch
+    assert ".puts = set_puts(set, puts)" in patch
 
 
 def test_a_paced_write_gives_way_to_a_render_task_waiting_for_the_store():

@@ -100,18 +100,21 @@ static void body_io_free(void *ctx, void *ptr)
     free(ptr);
 }
 
-static void read_body(esp_http_client_handle_t client, size_t max_body, int alloc_wait_ms,
+static void read_body(esp_http_client_handle_t client, size_t max_body, const fos_http_request_t *req,
                       fos_http_response_t *res)
 {
-    body_io_ctx_t ctx = {.client = client, .alloc_wait_ms = alloc_wait_ms};
+    body_io_ctx_t ctx = {.client = client, .alloc_wait_ms = req->alloc_wait_ms};
     fos_http_body_io_t io = {
         .read = body_io_read, .alloc = body_io_alloc, .realloc = body_io_realloc, .free = body_io_free, .ctx = &ctx,
     };
     fos_http_body_err_t err =
-        fos_http_body_read(res->content_length, max_body, FOS_HTTP_FIRST_CHUNK, &io, &res->body, &res->body_len);
+        req->scene_set ? fos_scene_pieces_read(res->content_length, max_body, &io, req->scene_set)
+                       : fos_http_body_read(res->content_length, max_body, FOS_HTTP_FIRST_CHUNK, &io, &res->body,
+                                            &res->body_len);
     res->too_large = err == FOS_HTTP_BODY_TOO_LARGE;
     res->body_err = err == FOS_HTTP_BODY_OK || err == FOS_HTTP_BODY_TOO_LARGE ? ESP_OK
                     : err == FOS_HTTP_BODY_NO_MEMORY                          ? ESP_ERR_NO_MEM
+                    : err == FOS_HTTP_BODY_INVALID                            ? ESP_ERR_INVALID_RESPONSE
                                                                               : ESP_FAIL;
     if (err == FOS_HTTP_BODY_READ_FAILED) {
         ESP_LOGW(TAG, "body read failed or cut short (%lld bytes declared)", (long long)res->content_length);
@@ -214,8 +217,8 @@ esp_err_t fos_http_fetch(const fos_http_request_t *req, size_t max_body, fos_htt
     }
     res->content_length = esp_http_client_fetch_headers(client);
     res->status = esp_http_client_get_status_code(client);
-    if (max_body > 0 && res->status != 304 && res->status != 204) {
-        read_body(client, max_body, req->alloc_wait_ms, res);
+    if (max_body > 0 && res->status != 304 && res->status != 204 && (req->scene_set == NULL || res->status == 200)) {
+        read_body(client, max_body, req, res);
     }
     esp_http_client_close(client);
     esp_http_client_cleanup(client);

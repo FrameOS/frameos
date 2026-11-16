@@ -45,36 +45,6 @@ int main(void)
     assert(split("[][]", starts, lens, 4) == -1);
     assert(split("", starts, lens, 4) == -1);
 
-    /* One key of an object, without a tree: a backend's scene patch. */
-    const char *value;
-    size_t value_len;
-    const char *patch = " {\"base\":\"\\\"e1\\\"\",\"order\": [\"a\",\"b\"],\"patch\":true,"
-                        "\"put\":[{\"id\":\"a\",\"s\":\"}]\\\"{\"},{\"id\":\"b\",\"put\":1}]} ";
-    assert(fos_store_object_member(patch, strlen(patch), "base", &value, &value_len));
-    assert(value_len == 8 && strncmp(value, "\"\\\"e1\\\"\"", value_len) == 0);
-    assert(fos_store_object_member(patch, strlen(patch), "order", &value, &value_len));
-    assert(value_len == 9 && strncmp(value, "[\"a\",\"b\"]", value_len) == 0);
-    assert(fos_store_object_member(patch, strlen(patch), "patch", &value, &value_len));
-    assert(value_len == 4 && strncmp(value, "true", 4) == 0);
-    assert(fos_store_object_member(patch, strlen(patch), "put", &value, &value_len));
-    assert(value[0] == '[' && value[value_len - 1] == ']');
-    /* The scenes of `put`, each by itself. */
-    assert(fos_store_split_scenes(value, value_len, starts, lens, 4) == 2);
-    assert(strncmp(starts[1], "{\"id\":\"b\",\"put\":1}", lens[1]) == 0);
-    /* A key inside a value is not the object's. */
-    const char *nested = "{\"a\":{\"put\":1}}";
-    assert(!fos_store_object_member(nested, strlen(nested), "put", &value, &value_len));
-    assert(!fos_store_object_member(patch, strlen(patch), "missing", &value, &value_len));
-    /* Cut short, or not an object. */
-    assert(!fos_store_object_member(patch, strlen(patch) - 30, "put", &value, &value_len));
-    const char *array = "[{\"put\":1}]";
-    assert(!fos_store_object_member(array, strlen(array), "put", &value, &value_len));
-    const char *empty = "{\"put\":}";
-    assert(!fos_store_object_member(empty, strlen(empty), "put", &value, &value_len));
-    const char *open = "{\"put\":1";
-    assert(!fos_store_object_member(open, strlen(open), "put", &value, &value_len));
-    assert(!fos_store_object_member(NULL, 0, "put", &value, &value_len));
-
     /* The store's stamp. */
     char store[40];
     int version;

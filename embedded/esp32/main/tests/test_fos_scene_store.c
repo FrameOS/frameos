@@ -653,6 +653,25 @@ static void test_every_2_kb_written_is_paced(void)
     CHECK(s_paced == 0);
 }
 
+static void test_a_set_file_from_its_scenes(void)
+{
+    /* A backend set read in pieces (fos_scene_pieces.h) is written as the
+     * combined file it would have been, without a block of its size. */
+    fresh_dir();
+    char path[160], tmp[160];
+    snprintf(path, sizeof(path), "%s/scenes.json", s_dir);
+    snprintf(tmp, sizeof(tmp), "%s/scenes.tmp", s_dir);
+    fos_scene_store_put_t scenes[] = {{"{\"id\":\"a\"}", 10}, {"{\"id\":\"b\"}", 10}};
+    const char *want[] = {"[]", "[{\"id\":\"a\"}]", "[{\"id\":\"a\"},{\"id\":\"b\"}]"};
+    for (int count = 0; count <= 2; count++) {
+        CHECK(fos_scene_store_write_set(path, tmp, scenes, count) == FOS_SCENE_STORE_OK);
+        size_t len = 0;
+        char *text = fos_scene_store_read_file(path, &len);
+        CHECK(text != NULL && len == strlen(want[count]) && strcmp(text, want[count]) == 0);
+        free(text);
+    }
+}
+
 /* Every file in the directory, in bytes: what /state holds. */
 static long dir_bytes(void)
 {
@@ -826,6 +845,7 @@ int main(void)
     test_window_size_in_the_index();
     test_replace_all();
     test_every_2_kb_written_is_paced();
+    test_a_set_file_from_its_scenes();
     test_a_whole_set_one_scene_at_a_time();
 
     fresh_dir();

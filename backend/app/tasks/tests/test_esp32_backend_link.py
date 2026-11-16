@@ -131,7 +131,7 @@ def test_a_scene_payload_is_written_off_the_render_task():
     waits for the write."""
     scenes = _functions(_strip_comments(SCENES_C.read_text()))
     store = scenes["store_backend_payload"]
-    write = store.index("write_file_replace_locked(SCENES_PATH")
+    write = store.index("fos_scene_store_write_set(SCENES_PATH")
     # Under the store lock like every other writer, paced on e-paper: the
     # store module calls the pace hook before each 2 KB, and it waits on every
     # task but the render task.

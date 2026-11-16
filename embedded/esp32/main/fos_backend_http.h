@@ -16,6 +16,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "fos_scene_pieces.h"
 
 typedef struct {
     const char *url;
@@ -28,6 +29,9 @@ typedef struct {
     /* How long the body's buffer may be waited for when it cannot be had at
      * once (a render holding the PSRAM it needs); 0 = not at all. */
     int alloc_wait_ms;
+    /* Not NULL: a 200's body is read into it, each scene in a block of its
+     * own (fos_scene_pieces.h), and `body` stays NULL. */
+    fos_scene_set_t *scene_set;
 } fos_http_request_t;
 
 typedef struct {
@@ -38,7 +42,8 @@ typedef struct {
     char *body;             /* NUL-terminated; NULL when not read. fos_http_response_free() */
     size_t body_len;
     /* Why a body that came was not read (NULL body, not too_large):
-     * ESP_ERR_NO_MEM, no buffer for it; otherwise the read failed. */
+     * ESP_ERR_NO_MEM, no buffer for it; ESP_ERR_INVALID_RESPONSE, not what
+     * a scene_set takes; otherwise the read failed. */
     esp_err_t body_err;
 } fos_http_response_t;
 
