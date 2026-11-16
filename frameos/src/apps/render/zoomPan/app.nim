@@ -162,8 +162,12 @@ proc renderAt*(self: App, context: ExecutionContext, image: Image, now: float) =
     let sourceImage = self.appConfig.image
     if sourceImage.isNil:
       raise newException(Exception, "No image provided.")
-    if sourceImage == image:
-      # The producer already decoded straight into this canvas.
+    if sourceImage.bufferPointer == image.bufferPointer:
+      # The producer drew straight into this canvas: a decode into it, or on
+      # a device an error frame (renderErrorForContext), which the node cache
+      # then hands back as a new view each pass. Zooming the canvas into
+      # itself drew garbage, at 2.25 s a frame on the SenseCAP Indicator's
+      # 565 canvas (2026-11-15).
       return
     let durationSeconds = if self.appConfig.durationSeconds > 0:
       self.appConfig.durationSeconds else: 60.0
@@ -177,19 +181,11 @@ proc renderAt*(self: App, context: ExecutionContext, image: Image, now: float) =
         self.appConfig.motion, self.appConfig.easing, cycle)
     if sw <= 0 or sh <= 0:
       raise newException(Exception, "Invalid crop rect.")
-    # Sample the source rect straight onto the canvas: pixie's draw()
-    # pre-scales whole-source copies for non-integer zooms, which allocates
-    # multi-MB intermediates every render and fragments ESP32 PSRAM.
-    if sourceImage.format == pfRgbx:
-      drawRectBilinear(image, sourceImage, sx, sy, sw, sh)
-    else:
-      let stepX = sw / image.width.float
-      let stepY = sh / image.height.float
-      for y in 0 ..< image.height:
-        let srcY = (sy + (y.float + 0.5) * stepY - 0.5).float32
-        for x in 0 ..< image.width:
-          let srcX = (sx + (x.float + 0.5) * stepX - 0.5).float32
-          image.unsafe[x, y] = sourceImage.getRgbaSmooth(srcX, srcY)
+    # Sample the source rect straight onto the canvas, whatever either's
+    # format: pixie's draw() pre-scales whole-source copies for non-integer
+    # zooms, which allocates multi-MB intermediates every render and
+    # fragments ESP32 PSRAM, and its float sampler is ~10 µs a pixel there.
+    drawRectBilinear(image, sourceImage, sx, sy, sw, sh)
     if self.appConfig.phaseStateKey != "":
       self.scene.state[self.appConfig.phaseStateKey] = %*(cycles)
   except Exception as e:

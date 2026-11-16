@@ -568,6 +568,15 @@ by frame:
 | RGBX, one core | ~145 ms | ~125 ms |
 | RGBX, both cores | ~115 ms | ~90 ms |
 
+**Any source format.** The draw reads a 565 or grey source too, each
+pixel expanded as its row is interpolated. Only an RGBX photo had the
+fixed-point path at first, and anything else went through the float
+sampler: on the SenseCAP Indicator a slideshow with no photos in its folder
+(2026-11-15) ran at 0.4 fps, 2.25 s in zoomPan, because on a device the
+producer's error frame is drawn into the 565 canvas, the node cache kept that
+alias, and zoomPan zoomed the canvas into itself. A source that shares the
+canvas's pixels is now left as it is.
+
 **Both cores.** The render task shares core 1 with the LCD's refill
 interrupt, and core 0 mostly waits on the network. `fos_rows.c` hands a
 job's rows out in blocks of 32 to the render task and to a helper pinned to

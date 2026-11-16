@@ -154,3 +154,28 @@ suite "drawRectBilinear":
       for y in 0 ..< 41:
         for x in 0 ..< 53:
           check whole.unsafe[x, y] == blocks.unsafe[x, y]
+
+  test "a 565 or a grey source draws as its RGBX expansion":
+    # A producer's picture is not always RGBX: on a device an error frame is
+    # drawn into the 565 canvas, and zoomPan sent anything not RGBX through
+    # pixie's float sampler, 2.25 s a frame (2026-11-15). Each pixel is now
+    # expanded as its row is read.
+    let rgbx = photo(64, 48)
+    let grey4 = newImageGray4(64, 48)
+    for y in 0 ..< 48:
+      for x in 0 ..< 64:
+        grey4.unsafe[x, y] = rgbx.unsafe[x, y]
+    for source in [rgbx.toRgb565Image(), rgbx.toGray8Image(), grey4,
+                   rgbx.toRgb565Image().view(3, 2, 50, 40), grey4.view(3, 1, 55, 41)]:
+      let expanded = source.toRgbxImage()
+      for format in [pfRgbx, pfRgb565]:
+        proc canvas(): Image =
+          result = if format == pfRgbx: newImage(53, 41) else: newImage565(53, 41)
+          result.ditherStores = format == pfRgb565
+        let direct = canvas()
+        drawRectBilinear(direct, source, 3.25, 2.5, 40.0, 30.0)
+        let viaRgbx = canvas()
+        drawRectBilinear(viaRgbx, expanded, 3.25, 2.5, 40.0, 30.0)
+        for y in 0 ..< 41:
+          for x in 0 ..< 53:
+            check direct.unsafe[x, y] == viaRgbx.unsafe[x, y]
