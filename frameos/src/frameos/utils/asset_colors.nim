@@ -28,6 +28,7 @@ import pixie
 
 import ./dither
 import ../panel_shape
+import ../render_probe
 
 
 const
@@ -201,6 +202,62 @@ proc loadAssetColorProfile*(imagePath: string): Option[AssetColorProfile] =
 proc luminance*(r, g, b: float): float {.inline.} =
   LumR * r + LumG * g + LumB * b
 
+# ------------------------------------------------- the per-pixel loops
+#
+# The automatic fit runs over every pixel an image covers, twice (the
+# histogram, then the table), on every render of a palette panel: 1.92 M
+# pixels a pass on a 13.3" Spectra. Written the obvious way — `float`
+# luminance and `round()` per pixel through `unsafe[x, y]` — that was ~6 µs a
+# pixel on an ESP32-S3, whose FPU has no double precision (every `float` op
+# is a soft-float call): ~12.5 s a fit, two fits a render under a layout, and
+# the render task on one core for all of it without letting its idle task run
+# (the task watchdog; the hardware bench, reTerminal E1004, 2026-11-16). So:
+# integers, a row at a time through `getPixel` / `setPixel` (what
+# `unsafe[x, y]` expands to, without the index per pixel), checks off, -O2 on
+# the firmware, and a breath per row. The bins and the stored pixels are the
+# same as before, bit for bit (test_asset_colors.nim compares them).
+
+when defined(frameosEmbedded):
+  {.pragma: fitLoop, codegenDecl: "__attribute__((optimize(\"O2\"))) $# $#$#".}
+else:
+  {.pragma: fitLoop.}
+
+static:
+  # The integer bins below are these weights in hundredths.
+  doAssert LumR == 0.21 and LumG == 0.72 and LumB == 0.07
+
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
+
+proc luminanceBin*(r, g, b: uint8): int {.inline.} =
+  ## `round(luminance(r, g, b))` on 0 .. 255 channels, in integers. The
+  ## weights are whole hundredths, so the sum is exact as `hundredths`; only
+  ## a tie (a sum ending in .50) is decided by the float sum, whose rounding
+  ## error can put it on either side, exactly as before.
+  let hundredths = 21 * r.int + 72 * g.int + 7 * b.int
+  if hundredths mod 100 != 50:
+    (hundredths + 50) div 100
+  else:
+    max(0, min(255, luminance(r.float, g.float, b.float).round().int))
+
+proc fitHistogram(image: Image, xStart, yStart, xEnd, yEnd: int,
+    histogram: var array[256, int]) {.fitLoop.} =
+  for y in yStart ..< yEnd:
+    breathe()
+    let rowStart = image.dataIndex(xStart, y)
+    for index in rowStart ..< rowStart + (xEnd - xStart):
+      let p = image.getPixel(index)
+      inc histogram[luminanceBin(p.r, p.g, p.b)]
+
+proc applyLut(image: Image, lut: array[256, uint8], xStart, yStart, xEnd, yEnd: int) {.fitLoop.} =
+  for y in yStart ..< yEnd:
+    breathe()
+    let rowStart = image.dataIndex(xStart, y)
+    for index in rowStart ..< rowStart + (xEnd - xStart):
+      let p = image.getPixel(index)
+      image.setPixel(index, rgbx(lut[p.r], lut[p.g], lut[p.b], p.a))
+
+{.pop.}
+
 proc paletteRange*(palette: seq[(int, int, int)]): tuple[lo, hi: float] =
   ## The darkest and brightest luminance a palette can show, 0 .. 1.
   if palette.len == 0:
@@ -345,11 +402,7 @@ proc autoEndPoints*(image: Image, x0, y0, width, height: int,
   if xEnd <= xStart or yEnd <= yStart:
     return none(tuple[whites, blacks: float])
   var histogram: array[256, int]
-  for y in yStart ..< yEnd:
-    for x in xStart ..< xEnd:
-      let p = image.unsafe[x, y]
-      let lum = luminance(p.r.float, p.g.float, p.b.float)
-      histogram[max(0, min(255, lum.round().int))] += 1
+  fitHistogram(image, xStart, yStart, xEnd, yEnd, histogram)
   let total = (xEnd - xStart) * (yEnd - yStart)
   let
     loCount = (total.float * 0.005).int
@@ -613,12 +666,10 @@ proc applyAssetColors*(image: Image, profile: AssetColorProfile,
     # Three table lookups per pixel: what makes the fit affordable on every
     # render of a 13.3" panel on an ESP32.
     let lut = linearLut(profile)
-    for y in yStart ..< yEnd:
-      for x in xStart ..< xEnd:
-        let p = image.unsafe[x, y]
-        image.unsafe[x, y] = rgbx(lut[p.r], lut[p.g], lut[p.b], p.a)
+    applyLut(image, lut, xStart, yStart, xEnd, yEnd)
     return
   for y in yStart ..< yEnd:
+    breathe()
     for x in xStart ..< xEnd:
       let p = image.unsafe[x, y]
       let adjusted = adjustPixel(profile, p.r.float / 255.0, p.g.float / 255.0, p.b.float / 255.0)
@@ -642,13 +693,13 @@ proc applyAutoFitToDrawn*(canvas: Image, x0, y0, width, height: int, source: Ima
     return
   if source.isNil and isImageGraded(canvas):
     return
-  let endPoints = autoEndPoints(canvas, x0, y0, width, height, assetColorsPanelPalette)
-  if endPoints.isNone:
-    return
-  var profile = AssetColorProfile()
-  profile.whites = endPoints.get().whites
-  profile.blacks = endPoints.get().blacks
-  applyAssetColors(canvas, profile, x0, y0, width, height)
+  probe(phFit):
+    let endPoints = autoEndPoints(canvas, x0, y0, width, height, assetColorsPanelPalette)
+    if endPoints.isSome:
+      var profile = AssetColorProfile()
+      profile.whites = endPoints.get().whites
+      profile.blacks = endPoints.get().blacks
+      applyAssetColors(canvas, profile, x0, y0, width, height)
 
 proc applyGlobalColorCorrection*(canvas: Image) =
   ## The frame-wide correction, once per render on the finished canvas.
