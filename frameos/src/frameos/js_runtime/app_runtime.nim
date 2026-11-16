@@ -1064,11 +1064,13 @@ const
 proc assetFolderPathOk(relPath: string): bool =
   ## Every segment a folder the listing shows: no dot names, no OS junk
   ## (paths.isJunkDirName), no control characters or backslashes.
-  for ch in relPath:
-    if ch < ' ' or ch == '\127' or ch == '\\':
-      return false
-  for segment in relPath.split('/'):
-    if isJunkDirName(segment):
+  var start = 0
+  for i in 0 .. relPath.len:
+    if i == relPath.len or relPath[i] == '/':
+      if isJunkDirName(relPath.substr(start, i - 1)):
+        return false
+      start = i + 1
+    elif relPath[i] < ' ' or relPath[i] in {'\127', '\\'}:
       return false
   true
 

@@ -804,7 +804,8 @@ LCD; what did not change in the tree is still taken back unbuilt.
 The UIs FrameOS builds in Nim (the scene settings and the frame page, the
 scene switcher, the keyboard on the screen) take their look from
 the layout around the frame's scene, so a desktop's settings look like that
-desktop's (`frameos/ui/theme.nim`). A layout gives its theme in its state as
+desktop's (`frameos/ui/theme.nim`), and so does a JS app that names its
+elements' roles ([below](#a-js-app-in-the-desktops-look)). A layout gives its theme in its state as
 **`theme`**, an object of roles; the samples set it from their "Look of the
 settings pages" field (`Windows 98`: Windows Standard, `macOS`: Light and Dark,
 `BeOS`, `Classic Mac`: Classic, `NeXTSTEP`, `Commander`, each with High contrast
@@ -877,6 +878,8 @@ How: the JSX walker (`js_runtime/jsx.nim`) reads `role` instead of keeping it
 as an attribute and hands the element to `ui/theme.nim`'s `role`, as the Nim
 UIs do; `themeSource` is the layout's `theme` during its pass
 (`interpreter.layoutTheme`), on the Pi, the ESP32 and in the browser alike.
+On the ESP32-S3 image the walker's part is about 0.4 KB and `app.frame.theme`
+0.1 KB of flash (2026-11-16).
 
 ## Text and fonts
 

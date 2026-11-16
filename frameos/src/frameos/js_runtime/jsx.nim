@@ -243,12 +243,13 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
     # role="button": the desktop's look for that role where the layout around
     # the frame's scene gives a theme, as the UIs built in Nim take it
     # (ui/theme.nim, docs/jsx-ui.md "Themes"); its own classes where none does.
-    # theme.role reads the classes off the first attribute.
+    # theme.role reads the classes off the first attribute (swapped there, as
+    # a seq insert was 230 B of the ESP32's flash).
     var at = 0
     while at < node.attrs.len and node.attrs[at][0] != "class": inc at
     if at == node.attrs.len:
-      node.attrs.insert(("class", ""), 0)
-    elif at > 0:
+      node.attrs.add(("class", ""))
+    if at > 0:
       swap(node.attrs[0], node.attrs[at])
     node = node.role(roleName)
   into.add node
