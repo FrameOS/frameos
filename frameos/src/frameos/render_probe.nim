@@ -19,6 +19,9 @@ type RenderPhase* = enum
   phScene = "scene"    ## the interpreter's render of the scene, all of it
   phSettle = "settle"  ## after it: the dispatch drain and the interpreters settled
   phPersist = "persist" ## the scene's state saved when it changed
+  phNative = "native"  ## the scene program's natives (interpreter.programOp) but an app's get:
+                       ## fields, state, image hints, flows; with `scene` less `app` it says
+                       ## whether a pass's own cost is the program's JS or the Nim it calls
   phApp = "app"        ## a JS app node's get, all of it (the phases below inside it)
   phInit = "init"      ## the runtime's init and readiness checks before get()
   phDraw = "draw"      ## the UI's way into the target: parse, damage, raster and what is around them

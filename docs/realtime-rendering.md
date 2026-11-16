@@ -281,7 +281,13 @@ not deep-sleep, animates:
   lines, no scene log lines (`frameos_nim_set_quiet`, the logger off, like
   the Linux runner's fast-render log pause). The first frame of an animation
   always logs in full: it is the `render:done` a deploy waits for
-  (`docs/deploy-progress.md`). A frame that fails logs at once.
+  (`docs/deploy-progress.md`). A frame that fails logs at once. A switch from
+  one animating scene to another is not a frame of the new animation: its
+  first render (the code compiled, the first picture) counts in neither the
+  summary's frames nor its seconds (`fos_animation_scene_started`). Counted
+  in, the Pixel toys' start read as a 2.7 s frame among 78 ms ones and a
+  third off their frame rate (the hardware bench, 2026-11-16); the start is
+  the render line's `prelude` / `compile` / `init` and the switch's time.
 - The render task blocks for one tick a second, so the idle task on its core
   runs while a frame slower than the panel never waits.
 
@@ -1038,7 +1044,13 @@ reTerminal Sticky (Touch test in the Windows 98 layout, 2026-11-09): about
 
 ## Measuring
 
-- `set debug 1` on the console logs a profile line per node per render.
+- `set debug 1` on the console logs a profile line per node per render (not
+  for an animation's quiet frames: the logger is off for those, and building
+  the lines for nobody was most of the scene program's own cost per frame on
+  a host), and puts the per-phase split on the render line
+  (`frameos/render_probe.nim`). `scene` less `app` is a pass's own cost;
+  `native` says how much of it is the Nim the scene program calls (fields,
+  state, the image hints, a Nim app's run) rather than the program's JS.
 - `lcd` prints the scan-out's health (frames, drops, late refills, the worst
   refill) and `lcd pclk <MHz>` retunes the pixel clock live.
 - Whether the bounce buffers are in step is visible from the CPU: the LCD's

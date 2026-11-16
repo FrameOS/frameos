@@ -3674,7 +3674,8 @@ static void client_task(void *arg)
          * the panel shows the previous one, so a check-in wake renders
          * after all — without this the switch stayed invisible until the
          * scheduled render, hours later on a battery frame. */
-        if (fos_scenes_take_switched()) {
+        bool scene_switched = fos_scenes_take_switched();
+        if (scene_switched) {
             force_render = true;
         }
         /* A local network access code to show, or one to take off the panel. */
@@ -3763,7 +3764,13 @@ static void client_task(void *arg)
                  * that showed none (it failed) ends it here. */
                 fos_client_loading_end();
                 rendered = true;
-                fos_animation_frame_done(&s_anim, cycle_start, esp_timer_get_time());
+                /* A switch's first render is the scene starting (its code
+                 * compiled, its first picture), not a frame of the animation. */
+                if (scene_switched) {
+                    fos_animation_scene_started(&s_anim, cycle_start, esp_timer_get_time());
+                } else {
+                    fos_animation_frame_done(&s_anim, cycle_start, esp_timer_get_time());
+                }
                 if (scene_render) {
                     fos_animation_burst_frame_done(&s_anim, frame_start, esp_timer_get_time(), quiet);
                 }

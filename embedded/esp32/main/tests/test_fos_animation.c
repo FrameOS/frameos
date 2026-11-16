@@ -124,6 +124,45 @@ static void test_logging_cadence(void)
     CHECK(stats.frames == 1 && stats.max_ms == 80, "of what ran since: %u / %u", stats.frames, stats.max_ms);
 }
 
+static void test_a_scene_start_is_not_a_frame(void)
+{
+    /* The hardware bench, 2026-11-16, SenseCAP Indicator: from the Kitchen
+     * sink (animating) to the Pixel toys, whose start took 2.7 s; the window
+     * after the switch said 9.2 fps, max 2736 ms, for frames of ~78 ms. */
+    fos_animation_t a;
+    memset(&a, 0, sizeof(a));
+    fos_animation_stats_t stats;
+    int64_t t = 100 * S;
+    fos_animation_update(&a, true, 0.020, t);
+    fos_animation_take_stats(&a, t, true, &stats); /* the first frame logs */
+    fos_animation_frame_done(&a, t, t + 300 * MS);
+    /* The switch's frame logs in full, so the window starts at it. */
+    int64_t loud = t + 2 * S;
+    CHECK(fos_animation_take_stats(&a, loud, true, &stats), "the old scene's frames are summarised");
+    fos_animation_scene_started(&a, loud, loud + 2700 * MS);
+    CHECK(fos_animation_wait_us(&a, loud + 2700 * MS) == 0, "the first frame of it is due at once");
+    int64_t at = loud + 2700 * MS;
+    for (int i = 0; i < 90; i++) {
+        fos_animation_frame_done(&a, at, at + 80 * MS);
+        at += 80 * MS;
+    }
+    CHECK(fos_animation_take_stats(&a, at, true, &stats), "a summary");
+    CHECK(stats.frames == 90, "the animation's frames, not the start: %u", stats.frames);
+    CHECK(stats.max_ms == 80, "the start is not the slowest frame: %u", stats.max_ms);
+    CHECK(stats.avg_ms == 80, "nor in the average: %u", stats.avg_ms);
+    CHECK(stats.window_us == 90 * 80 * MS, "nor in the window: %lld", (long long)stats.window_us);
+    CHECK(stats.fps_x10 == 125, "12.5 fps: %u", stats.fps_x10);
+    /* The window after that one starts clean. */
+    fos_animation_frame_done(&a, at, at + 80 * MS);
+    CHECK(fos_animation_take_stats(&a, at + 80 * MS, true, &stats), "the next summary");
+    CHECK(stats.window_us == 80 * MS && stats.frames == 1, "has no start in it: %lld",
+          (long long)stats.window_us);
+    /* Outside animation a start is nobody's business here. */
+    fos_animation_update(&a, false, 5.0, at + 1 * S);
+    fos_animation_scene_started(&a, at + 1 * S, at + 3 * S);
+    CHECK(a.started_us == 0, "stopped: nothing counted");
+}
+
 static void test_bursts(void)
 {
     /* A finger dragged over a scene that renders on its own render rule:
@@ -349,6 +388,7 @@ int main(void)
     test_housekeeping_once_a_second();
     test_pacing();
     test_logging_cadence();
+    test_a_scene_start_is_not_a_frame();
     test_bursts();
     test_input_hold();
     test_loading_taps();

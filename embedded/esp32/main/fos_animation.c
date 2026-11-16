@@ -79,7 +79,8 @@ bool fos_animation_take_stats(fos_animation_t *a, int64_t now_us, bool logged_fr
 {
     bool any = a->frames > 0 && a->logged_us != 0;
     if (any && out) {
-        int64_t window = now_us - a->logged_us;
+        int64_t window = now_us - a->logged_us - a->started_us;
+        if (window < 0) window = 0;
         out->frames = a->frames;
         out->window_us = window;
         out->fps_x10 = window > 0 ? (uint32_t)(((int64_t)a->frames * 10000000LL + window / 2) / window) : 0;
@@ -90,6 +91,7 @@ bool fos_animation_take_stats(fos_animation_t *a, int64_t now_us, bool logged_fr
     a->frames = 0;
     a->render_us_sum = 0;
     a->render_us_max = 0;
+    a->started_us = 0;
     if (logged_frame) a->logged_us = now_us;
     return any;
 }
@@ -104,6 +106,14 @@ void fos_animation_frame_done(fos_animation_t *a, int64_t start_us, int64_t end_
     if (took > a->render_us_max) a->render_us_max = took;
     a->next_due_us = start_us + a->period_us;
     if (a->next_due_us < end_us) a->next_due_us = end_us;
+}
+
+void fos_animation_scene_started(fos_animation_t *a, int64_t start_us, int64_t end_us)
+{
+    if (!a->active) return;
+    int64_t took = end_us - start_us;
+    if (took > 0 && a->logged_us != 0) a->started_us += took;
+    a->next_due_us = end_us;
 }
 
 int64_t fos_animation_wait_us(const fos_animation_t *a, int64_t now_us)
