@@ -107,10 +107,11 @@ proc activePalette*(default: seq[(int, int, int)]): seq[(int, int, int)] =
   ## The per-photo override fitted onto `default` (see fitPaletteOverride).
   fitPaletteOverride(renderPaletteOverride, default)
 
-proc clip8(value: int): uint8 {.inline.} =
-  if value < 0: return 0
-  elif value > 255: return 255
-  else: return value.uint8
+template clip8(value: int): uint8 =
+  ## A template, not an inline proc: the dither loops are -O2 on the ESP32
+  ## and gcc does not inline an -Os function into them, so as a proc it was
+  ## fifteen calls a pixel (the hardware bench, reTerminal E1004, 2026-11-16).
+  (let v = value; if v < 0: 0'u8 elif v > 255: 255'u8 else: v.uint8)
 
 proc toGrayscaleFloat*(image: Image, grayscale: var seq[float], multiple: float = 1.0) =
   let
@@ -281,10 +282,15 @@ template forEachPaletteDithered*(
         if is565:
           let src = image.data16
           for rx in 0 ..< ditherWidth:
-            let p = rgb565ToRgbx(src[rowStart + rx])
-            row[rx * 3 + 0] = p.r
-            row[rx * 3 + 1] = p.g
-            row[rx * 3 + 2] = p.b
+            # rgb565ToRgbx, written out: a call per pixel otherwise (clip8).
+            let
+              p = src[rowStart + rx].uint32
+              r5 = (p shr 11) and 31
+              g6 = (p shr 5) and 63
+              b5 = p and 31
+            row[rx * 3 + 0] = ((r5 shl 3) or (r5 shr 2)).uint8
+            row[rx * 3 + 1] = ((g6 shl 2) or (g6 shr 4)).uint8
+            row[rx * 3 + 2] = ((b5 shl 3) or (b5 shr 2)).uint8
         elif isGray:
           let src = image.data8
           for rx in 0 ..< ditherWidth:

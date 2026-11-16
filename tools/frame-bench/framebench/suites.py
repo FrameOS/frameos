@@ -529,13 +529,17 @@ def _push_and_wait(ctx, frame, scenes, expect_layout=None, timeout=300):
     t = time.time()
     be.update_frame(fid, {'scenes': scenes})
     be.push(fid)
-    # Taken: `scenes:load ... runtime-loaded` from the backend (a patch or the whole list).
-    _, line, got = con.wait_for(lambda x: ('"scenes:load"' in x and '"origin":"backend"' in x) or
+    # Taken: `scenes:load ... runtime-loaded` from the backend (a patch or the
+    # whole list), or, on a board without the room to take a set whole
+    # (`taken-to-store`, the E1004's desktop sets), from flash once the store
+    # wrote it (`"origin":"stored"`): that one never says backend, and every
+    # such push read as a 300 s timeout (the hardware bench, 2026-11-16).
+    _, line, got = con.wait_for(lambda x: ('"scenes:load"' in x and ('"origin":"backend"' in x or '"origin":"stored"' in x)) or
                                 ('"scenes:sync"' in x and '"status":"error"' in x and 'patch-refused' not in x and 'connect' not in x), timeout)
     if line and '"status":"error"' in line:
         # A second fetch can fail while the first payload is applying (a board
         # short of memory): the push took if a backend load follows.
-        _, ok_line, more_lines = con.wait_for(lambda x: '"scenes:load"' in x and '"origin":"backend"' in x and '"status":"ok"' in x, 20)
+        _, ok_line, more_lines = con.wait_for(lambda x: '"scenes:load"' in x and ('"origin":"backend"' in x or '"origin":"stored"' in x) and '"status":"ok"' in x, 20)
         got += more_lines
         if ok_line:
             line = ok_line

@@ -37,13 +37,16 @@ const
   MaxRuns* = 4096
     ## A picture scattered wider than this is packed whole.
 
-proc panelPoint*(x, y, srcW, srcH, rotate: int): tuple[px, py: int] {.inline.} =
-  ## Where a pixel of the (rotated) canvas lands on the panel.
-  case rotate
-  of 90: (srcH - 1 - y, x)
-  of 180: (srcW - 1 - x, srcH - 1 - y)
-  of 270: (y, srcW - 1 - x)
-  else: (x, y)
+template panelPoint*(x, y, srcW, srcH, rotate: int): tuple[px, py: int] =
+  ## Where a pixel of the (rotated) canvas lands on the panel. A template:
+  ## the per-pixel packers are -O2 on the ESP32, and gcc inlines no -Os
+  ## function into them (dither.clip8).
+  (let (ppx, ppy, ppw, pph) = (x, y, srcW, srcH);
+   case rotate
+   of 90: (px: pph - 1 - ppy, py: ppx)
+   of 180: (px: ppw - 1 - ppx, py: pph - 1 - ppy)
+   of 270: (px: ppy, py: ppw - 1 - ppx)
+   else: (px: ppx, py: ppy))
 
 proc changedRuns*(current, previous: ptr UncheckedArray[uint8]; width, height: int;
     runs: ptr UncheckedArray[ChangedRun]; count: var int): int {.hotLoop.} =

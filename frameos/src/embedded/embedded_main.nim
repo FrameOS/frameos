@@ -54,7 +54,7 @@ proc sceneHeight(): int {.inline.} =
 # to the finished frame — here the packers apply the mapping per pixel so a
 # second full-frame image is never allocated (rotating 1200x1600 RGBA
 # out-of-place costs 7.7MB, which OOMs the 16MB-PSRAM boards mid-pack).
-proc panelCoords(x, y, srcW, srcH: int): tuple[px, py: int] {.inline.} =
+template panelCoords(x, y, srcW, srcH: int): tuple[px, py: int] =
   panelPoint(x, y, srcW, srcH, frameRotate)
 
 # --------------------------------------------------------- out-of-memory
