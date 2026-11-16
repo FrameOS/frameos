@@ -734,6 +734,64 @@ suite "js app runtime":
     check fileExists(assetsDir / "writer.txt")
     check not fileExists(assetsDir / "shared.txt")
 
+  test "makeAssetFolder makes one folder the listing shows, and only with assets-write":
+    let assetsDir = getTempDir() / "frameos-js-asset-mkdir-test"
+    removeDir(assetsDir)
+    createDir(assetsDir / "photos")
+    defer: removeDir(assetsDir)
+
+    let config = testConfig()
+    config.assetsPath = assetsDir
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/mkdir".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 28.NodeId, nodeName: "jsMkdir", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false,
+                                   loopIndex: 0, loopKey: ".", nextSleep: -1)
+    proc run(permissions: JsonNode): JsonNode =
+      let runtime = newJsAppRuntime(
+        category = "data",
+        outputType = "json",
+        source = """export function get(app, context) {
+            return {
+              made: frameos.makeAssetFolder("photos/2026"),
+              again: frameos.makeAssetFolder("photos/2026"),
+              top: frameos.makeAssetFolder("Trips"),
+              listed: frameos.listAssets("photos", { shallow: true }),
+              noParent: frameos.makeAssetFolder("missing/deeper"),
+              hidden: frameos.makeAssetFolder("photos/.cache"),
+              junk: frameos.makeAssetFolder("@eaDir"),
+              climbs: frameos.makeAssetFolder("photos/../../out"),
+              absolute: frameos.makeAssetFolder("/tmp/frameos-mkdir-out"),
+              control: frameos.makeAssetFolder("bad\nname"),
+              empty: frameos.makeAssetFolder(""),
+              none: frameos.makeAssetFolder(),
+            }
+          }""",
+        assetGrant = assetGrantFromConfig(%*{"permissions": permissions})
+      )
+      runtime.get(owner, %*{}, context).asJson()
+
+    # "assets" alone reads the folder and makes nothing.
+    let reader = run(%*["assets"])
+    check not reader["made"].getBool()
+    check not dirExists(assetsDir / "photos" / "2026")
+
+    let writer = run(%*["assets", "assets-write"])
+    check writer["made"].getBool()
+    check not writer["again"].getBool() # there already
+    check writer["top"].getBool()
+    check dirExists(assetsDir / "photos" / "2026") and dirExists(assetsDir / "Trips")
+    check writer["listed"].mapIt(it.getStr()) == @["photos/2026/"]
+    for refused in ["noParent", "hidden", "junk", "climbs", "absolute", "control", "empty", "none"]:
+      checkpoint refused
+      check not writer[refused].getBool()
+    check not dirExists(assetsDir / "missing")
+    check not dirExists(assetsDir / "photos" / ".cache")
+    check not dirExists(assetsDir / "@eaDir")
+    check not dirExists(getTempDir() / "out")
+    check not dirExists("/tmp/frameos-mkdir-out")
+    check not dirExists(assetsDir / "undefined")
+
   test "loads asset images within display bounds":
     let assetsDir = getTempDir() / "frameos-js-asset-image-test"
     removeDir(assetsDir)

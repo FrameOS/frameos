@@ -42,6 +42,11 @@
       "flags": ["assets", "assets-write"]
     },
     {
+      "name": "an app with no list that makes folders writes",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.tsx": "const made = frameos.makeAssetFolder('photos/2026')"}}}},
+      "flags": ["assets", "assets-write"]
+    },
+    {
       "name": "a stream opened to read reads",
       "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "const s = frameos.openAssetStream('big.json', 'r')"}}}},
       "flags": ["assets"]

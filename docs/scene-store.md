@@ -10,9 +10,10 @@ pick a shelf or search, page through the scenes, and Preview or Install one. A s
 holds can be opened, updated or deleted there. Leave the store (a preview, the
 scene list) and come back, and it opens on the same spot.
 
-**Asset browser** (`repo/scenes/samples/Asset browser`) is its sibling for the
-frame's own assets folder: folders and pictures as a grid, a picture on the
-whole screen with a swipe to the next, and a slideshow.
+**Files** (`repo/scenes/samples/Files`, scene id `asset-browser`, its name
+until 2026-11-16) is its sibling for the frame's own assets folder: folders and
+pictures as thumbnails or a list, a picture on the whole screen with a swipe to
+the next, a slideshow, and New folder.
 
 | Piece | Where |
 |---|---|
@@ -215,20 +216,47 @@ scenes on disk. That is what "on frame" and Update are measured against.
 - **Keys alone** (a frame with buttons and no glass) cannot drive it yet: the
   JSX layer has no focus for keys (`docs/ui-todo.md`).
 
-## The Asset browser app
+## The Files app
 
+- Its id stays `asset-browser`, the name it shipped with: the desktops find it
+  by that id, or by its name where a control plane gave a copy another id.
 - `frameos.listAssets(dir, { shallow: true })` lists one folder (folders end in
   `/`), so a large SD card is walked a folder at a time; a runtime before
   2026.11.8 lists every file below and the app reads the folders off the paths.
-- Thumbnails are `frameos.loadAssetImage(path, { keep: true, width, height })`:
-  decoded at the tile's size (a JPEG scaled as it decodes, `readImageIntoTarget`),
-  one a pass after the page shows, all at once on e-paper. A kept picture never
-  sets the frame's dither palette (a photo's sidecar palette): the render shows
-  others.
+- **Thumbnails or a list**, two buttons in its header. Thumbnails are
+  `frameos.loadAssetImage(path, { keep: true, width, height })`: decoded at the
+  tile's size (a JPEG scaled as it decodes, `readImageIntoTarget`), one a pass
+  after the page shows, all at once on e-paper. A kept picture never sets the
+  frame's dither palette (a photo's sidecar palette): the render shows others.
+  The list decodes nothing: a row is an icon, the name, and the kind and size.
+  On an ESP32 a row says the kind alone, as the files may be on the flash,
+  where each size is a lookup by name that takes a good part of a second.
+  Both are a page a screen; a change of view keeps the first entry showing.
+- **New folder** opens a card with a name field (the keyboard on the screen,
+  `docs/jsx-ui.md` "Fields and the keyboard"), Cancel and Create (or Enter).
+  The app says what is wrong with a name (empty, a slash, a dot first, there
+  already) and `frameos.makeAssetFolder(path)` makes it in the folder showing.
+  That is the runtime's own asset call (`js_runtime/app_runtime.nim`, op
+  `mkdir`), so one implementation serves every host through its file system:
+  a Pi's disk, an ESP32's SD card or its flash folders (`fos_assets_flash.c`
+  keeps a hidden `.k` marker in an empty one), the browser's IndexedDB
+  folder. It makes one folder whose parent is there (an ESP32 cannot make the
+  folders above its assets mount), and refuses a name the listing would hide
+  (a dot first, `@eaDir`, `Thumbs.db`, ...), as the device's own write paths
+  refuse dot names. The button shows where the runtime has the call
+  (2026.11.10+). The name being typed is kept with `frameos.remember`.
+- **The desktop's look.** Each element names its role in the theme
+  (`look="page"`, `"bar"`, `"button"`, `"selected"`, `"primary"`, `"field"`,
+  `"option"`, `"tile"`, `"card"`, `"muted"`, `"accent"`), so on Windows 98, macOS, BeOS
+  and the other desktops it is drawn in their theme, and in its own dark (or
+  high contrast) look with none; folders take the theme's accent color through
+  `app.frame.theme` (`docs/jsx-ui.md` "Themes").
 - The picture open is decoded at the screen's size with `fit: "contain"`; a
   swipe goes to the next or the one before, down closes it, a tap hides the
   bars, and the play button turns the folder into a slideshow (ten seconds a
   picture, `setNextSleep`).
-- The spot (folder, page, picture open, playing) is a private disk field, as
-  the store's is. A folder that went away goes back to the top.
-- It asks for `"permissions": ["assets"]` (read only).
+- The spot (folder, page, picture open, playing, the view) is a private disk
+  field, as the store's is. A folder that went away goes back to the top.
+- It asks for `"permissions": ["assets", "assets-write"]`: making a folder is
+  a write, so it shows as "writes assets folder" (until 2026-11-16 it read
+  only).

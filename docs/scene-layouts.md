@@ -244,9 +244,9 @@ scene that had a window before opens where it was, as before. `Tiling` tiles,
 its tiles never over one another and a new one the next place in the
 arrangement, so it has nothing to choose; `Commander` has its two panels.
 The desktop icons of `Windows 98`, `BeOS` and `Classic Mac` are those apps alone, never the
-frame's scenes (the menus have those): the scene list, the scene store, the
-asset browser, the terminal and the frame's settings. The **Scene store**, the
-**Asset browser** (`docs/scene-store.md`) and the **Terminal**
+frame's scenes (the menus have those): the scene list, the scene store,
+Files, the terminal and the frame's settings. The **Scene store**,
+**Files** (`docs/scene-store.md`) and the **Terminal**
 (`docs/terminal.md`) are scenes like any other, found by their sample's id
 (`scene-store`, `asset-browser`, `terminal-app`) or their name; where the frame
 has them each desktop has entries of its own for them and leaves them out of its

@@ -138,7 +138,7 @@ const nimShellPattern =
 // (assetStreamWrites). `fetchImage({saveAsset})` is none of them: that is the
 // frame caching what it downloaded, not the app using the folder.
 const assetReadCallPattern = /\b(listAssets|assetExists|assetSize|readAsset|loadAssetImage)\b/
-const assetWriteCallPattern = /\b(writeAsset|appendAsset|deleteAsset)\b/
+const assetWriteCallPattern = /\b(writeAsset|appendAsset|deleteAsset|makeAssetFolder)\b/
 const assetStreamPattern = /\bopenAssetStream\b/g
 // A literal stream mode: 'r', "r" or `r` (escaped to \"r\" inside JSON text).
 // `frameos.frame(...)`: the frame page's powers. Named with its object, as a
