@@ -3,7 +3,6 @@
     "id": "3bc3bfc2-3070-42a1-a83a-4d4192dde9a1",
     "name": "SD card image",
     "settings": {
-      "category": "photos",
       "backgroundColor": "#000000",
       "refreshInterval": 60,
       "execution": "interpreted",

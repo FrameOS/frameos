@@ -3,7 +3,6 @@
     "id": "analog-clock-face",
     "name": "Analog clock face",
     "settings": {
-      "category": "utilities",
       "refreshInterval": 60,
       "backgroundColor": "#111827",
       "execution": "interpreted",

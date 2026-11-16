@@ -608,23 +608,6 @@ static void test_icon_in_the_index(void)
     CHECK(entry_says("desk", "icon", NULL));
 }
 
-/* And its category (docs/scene-icons.md "Category"), which a desktop groups
- * its scene lists by: kept as it is when it is short enough to be a slug, the
- * runtime checks which. */
-static void test_category_in_the_index(void)
-{
-    fresh_dir();
-    fos_scene_store_result_t result;
-    CHECK(put_one("{\"id\":\"sky\",\"settings\":{\"category\":\"weather\"}}", &result) == FOS_SCENE_STORE_OK);
-    CHECK(entry_says("sky", "category", "weather"));
-    CHECK(put_one("{\"id\":\"long\",\"settings\":{\"category\":\"a category far too long\"}}", &result) == FOS_SCENE_STORE_OK);
-    CHECK(entry_says("long", "category", NULL));
-    CHECK(put_one("{\"id\":\"odd\",\"settings\":{\"category\":7}}", &result) == FOS_SCENE_STORE_OK);
-    CHECK(entry_says("odd", "category", NULL));
-    CHECK(put_one("{\"id\":\"desk\",\"settings\":{\"isLayout\":true,\"category\":\"desktops\"}}", &result) == FOS_SCENE_STORE_OK);
-    CHECK(entry_says("desk", "category", NULL));
-}
-
 static void test_layouts_and_the_default(void)
 {
     fresh_dir();
@@ -904,7 +887,6 @@ int main(void)
     test_layouts_and_the_default();
     test_window_size_in_the_index();
     test_icon_in_the_index();
-    test_category_in_the_index();
     test_replace_all();
     test_every_2_kb_written_is_paced();
     test_a_set_file_from_its_scenes();

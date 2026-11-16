@@ -3,7 +3,6 @@
     "id": "chess-puzzle-of-the-day",
     "name": "Chess puzzle of the day",
     "settings": {
-      "category": "fun",
       "refreshInterval": 43200,
       "backgroundColor": "#11243a",
       "execution": "interpreted",

@@ -30,7 +30,6 @@ import {
   sceneWindowSizeSelectValue,
 } from '../../../../utils/sceneWindowSize'
 import { SCENE_ICON_HELP, sceneIconFromInput } from '../../../../utils/sceneIcon'
-import { SCENE_CATEGORY_HELP, sceneCategoryFromSelect } from '../../../../utils/storeCategories'
 import { SceneIcon } from '../../../../components/SceneIcon'
 
 function SceneLayoutField({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): JSX.Element | null {
@@ -82,7 +81,6 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
     iconPath,
     iconProblem,
     iconUploadError,
-    categoryOptions,
   } = useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
     return <></>
@@ -230,22 +228,6 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                 )}
               </Field>
             )}
-            <Field
-              className={fieldClassName}
-              name="category"
-              label={<SceneSettingsLabel>Category</SceneSettingsLabel>}
-              tooltip={SCENE_CATEGORY_HELP}
-            >
-              {({ value, onChange }) => (
-                <Select
-                  name="category"
-                  className="h-10"
-                  value={typeof value === 'string' ? value : ''}
-                  onChange={(next) => onChange(sceneCategoryFromSelect(next))}
-                  options={categoryOptions}
-                />
-              )}
-            </Field>
             <Field
               className={fieldClassName}
               name="icon"

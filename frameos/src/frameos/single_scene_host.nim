@@ -512,7 +512,7 @@ proc setWindowed*(host: SingleSceneHost, enabled: bool) =
             if scenes.hasKey(sceneId) and not scenes[sceneId].isLayout:
               let scene = scenes[sceneId]
               result.add listingItem(SwitcherEntry(id: sceneId.string, name: scene.name,
-                windowSize: scene.windowSize, icon: scene.icon, category: scene.category))
+                windowSize: scene.windowSize, icon: scene.icon))
   else:
     hostSceneFor = nil
     windowSceneListing = nil

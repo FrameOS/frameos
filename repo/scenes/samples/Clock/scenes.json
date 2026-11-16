@@ -3,7 +3,6 @@
     "id": "clock",
     "name": "Clock",
     "settings": {
-      "category": "utilities",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#0b1020",

@@ -406,7 +406,6 @@
       }
     ],
     "settings": {
-      "category": "fun",
       "backgroundColor": "#ffffff",
       "refreshInterval": 3600,
       "execution": "interpreted",

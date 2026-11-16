@@ -320,14 +320,6 @@ proc getSceneIcon*(sceneId: SceneId): string =
     if interpretedScenes.hasKey(sceneId):
       return interpretedScenes[sceneId].icon
 
-proc getSceneCategory*(sceneId: SceneId): string =
-  ## The scene's category (`settings.category`, a store slug), "" for none.
-  withLock sceneRegistryLock:
-    if uploadedScenes.hasKey(sceneId):
-      return uploadedScenes[sceneId].category
-    if interpretedScenes.hasKey(sceneId):
-      return interpretedScenes[sceneId].category
-
 proc dynamicSceneCount*(): int =
   ## How many interpreted scenes this frame holds (deployed and uploaded; an
   ## uploaded scene with a deployed scene's id is one scene), for the cloud

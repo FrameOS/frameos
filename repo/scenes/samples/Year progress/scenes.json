@@ -3,7 +3,6 @@
     "id": "f38cf9c8-0b57-4ac8-a148-d93db9bb83a8",
     "name": "Year progress / memento mori",
     "settings": {
-      "category": "utilities",
       "refreshInterval": 86400,
       "backgroundColor": "#102033",
       "execution": "interpreted",

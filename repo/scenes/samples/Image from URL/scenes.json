@@ -3,7 +3,6 @@
     "id": "3dce3563-0e60-4a0c-bb8c-5cd9605c7cc0",
     "name": "Image from URL",
     "settings": {
-      "category": "photos",
       "refreshInterval": 86400,
       "backgroundColor": "#000000",
       "execution": "interpreted",

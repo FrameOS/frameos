@@ -371,7 +371,6 @@
       }
     ],
     "settings": {
-      "category": "calendar",
       "refreshInterval": 900,
       "backgroundColor": "#000000",
       "execution": "interpreted",

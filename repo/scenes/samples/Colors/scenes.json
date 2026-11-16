@@ -3,7 +3,6 @@
     "id": "colors",
     "name": "Colors",
     "settings": {
-      "category": "demos",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#18181b",

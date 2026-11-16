@@ -126,7 +126,7 @@ proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
       if scenes.hasKey(sceneId):
         let scene = scenes[sceneId]
         result.add SwitcherEntry(id: sceneId.string, name: scene.name, windowSize: scene.windowSize,
-          icon: scene.icon, category: scene.category)
+          icon: scene.icon)
       else:
         result.add SwitcherEntry(id: sceneId.string)
 

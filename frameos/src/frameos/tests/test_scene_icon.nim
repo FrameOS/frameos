@@ -1,13 +1,11 @@
-## The runtime's runner of docs/scene-icon-fixtures.json and
-## docs/scene-category-fixtures.json: what a scene's `settings.icon` and
-## `settings.category` are (scene_icon.nim, scene_category.nim). The SPA
-## replays the same files (cloud shared-spa scene-icon.test.ts), so the editor
-## and every frame agree on which values are an icon and a category.
+## The runtime's runner of docs/scene-icon-fixtures.json: what a scene's
+## `settings.icon` is (scene_icon.nim). The SPA replays the same file
+## (cloud shared-spa scene-icon.test.ts), so the editor and every frame agree
+## on which values are an icon.
 
 import std/[json, os, strutils, unittest]
 
 import ../scene_icon
-import ../scene_category
 
 const FixturesPath = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "docs" /
   "scene-icon-fixtures.json"
@@ -39,25 +37,3 @@ suite "scene icons (docs/scene-icon-fixtures.json)":
       let expected = if fixture["path"].kind == JString: expand(fixture["path"].getStr()) else: ""
       checkpoint name
       check sceneIconPath(input) == expected
-
-const CategoryFixturesPath = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "docs" /
-  "scene-category-fixtures.json"
-
-suite "scene categories (docs/scene-category-fixtures.json)":
-  let fixtures = parseJson(readFile(CategoryFixturesPath))
-
-  test "the table is docs/scene-categories.json's, and so is app.frame.categories":
-    let contract = parseJson(readFile(currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "docs" /
-      "scene-categories.json"))["categories"]
-    let listed = sceneCategoriesJson()
-    check listed.len == contract.len
-    for i in 0 ..< contract.len:
-      check SceneCategoryIds[i] == contract[i]["id"].getStr()
-      check listed[i] == %*{"id": contract[i]["id"], "name": contract[i]["name"]}
-
-  test "every case":
-    for fixture in fixtures["cases"]:
-      let raw = fixture["category"]
-      let input = if raw.kind == JString: raw.getStr() elif raw.kind == JInt: $raw.getInt() else: ""
-      checkpoint fixture["name"].getStr()
-      check sceneCategory(input) == fixture["slug"].getStr()

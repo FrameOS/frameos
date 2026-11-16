@@ -3,7 +3,6 @@
     "id": "1c1899f7-0e3a-5756-805d-d7b0dae17d67",
     "name": "Ken Burns slideshow",
     "settings": {
-      "category": "photos",
       "refreshInterval": 0.0416,
       "backgroundColor": "#000000",
       "execution": "interpreted",

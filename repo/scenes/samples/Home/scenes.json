@@ -3,7 +3,6 @@
     "id": "home",
     "name": "Home",
     "settings": {
-      "category": "dashboards",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#0f172a",

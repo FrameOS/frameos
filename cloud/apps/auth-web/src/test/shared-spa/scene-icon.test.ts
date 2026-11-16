@@ -1,9 +1,7 @@
 // A scene's icon (frontend/src/utils/sceneIcon.ts, docs/scene-icons.md): one
-// SVG path in a 0 0 24 24 box; and its category, one of the store's slugs
-// (utils/storeCategories.ts). docs/scene-icon-fixtures.json and
-// docs/scene-category-fixtures.json are replayed here and by the runtime
-// (frameos/src/frameos/tests/test_scene_icon.nim), so the editor and every
-// frame agree on what is an icon and a category.
+// SVG path in a 0 0 24 24 box. docs/scene-icon-fixtures.json is replayed here
+// and by the runtime (frameos/src/frameos/tests/test_scene_icon.nim), so the
+// editor and every frame agree on what is an icon.
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -16,13 +14,6 @@ import {
   sceneIconProblem,
   templateSceneIcon,
 } from "../../../../../../frontend/src/utils/sceneIcon";
-import {
-  sceneCategoryFromSelect,
-  sceneCategoryNames,
-  sceneCategoryOptions,
-  sceneCategorySlug,
-  storeCategoryShelves,
-} from "../../../../../../frontend/src/utils/storeCategories";
 
 interface Fixture {
   name: string;
@@ -96,37 +87,5 @@ describe("the editor's side of it", () => {
     expect(templateSceneIcon({ scenes })).toBe("M1 1h1z");
     expect(templateSceneIcon({ scenes: [first] })).toBe("M0 0h1z");
     expect(templateSceneIcon({})).toBeNull();
-  });
-});
-
-const categories = JSON.parse(
-  readFileSync(new URL("../../../../../../docs/scene-category-fixtures.json", import.meta.url), "utf8"),
-) as { cases: { name: string; category: unknown; slug: string | null }[] };
-const contract = JSON.parse(
-  readFileSync(new URL("../../../../../../docs/scene-categories.json", import.meta.url), "utf8"),
-) as { categories: { id: string; title: string; name: string }[] };
-
-describe("scene categories (docs/scene-categories.json, docs/scene-category-fixtures.json)", () => {
-  it("are the contract's, in its order, with its titles and names", () => {
-    expect(storeCategoryShelves).toEqual(contract.categories.map(({ id, title }) => ({ slug: id, title })));
-    expect(Object.entries(sceneCategoryNames)).toEqual(contract.categories.map(({ id, name }) => [id, name]));
-  });
-
-  for (const fixture of categories.cases) {
-    it(fixture.name, () => {
-      expect(sceneCategorySlug(fixture.category)).toBe(fixture.slug);
-    });
-  }
-
-  it("offers a scene the scene categories, a layout the layout ones, and keeps a value of its own", () => {
-    const scene = sceneCategoryOptions(undefined, false).map((option) => option.value);
-    expect(scene[0]).toBe("");
-    expect(scene).toContain("weather");
-    expect(scene).not.toContain("desktops");
-    expect(sceneCategoryOptions(undefined, true).map((option) => option.value)).toEqual(["", "desktops", "layouts"]);
-    const own = sceneCategoryOptions("clocks", false);
-    expect(own[own.length - 1]).toEqual({ value: "clocks", label: "clocks (not a store category)" });
-    expect(sceneCategoryFromSelect("")).toBeUndefined();
-    expect(sceneCategoryFromSelect("art")).toBe("art");
   });
 });
