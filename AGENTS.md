@@ -233,9 +233,9 @@
   (`utils/svgToSceneIcon.ts`), never on a frame.
 - `settings.category` is the category's NAME as text ("Photos", "Real time"),
   picked from the store's titles in the editor and listed as `category` the
-  same way. Nothing on a frame maps it: no ids, no table. A runtime only checks
-  it is a short line (`scene_category.nim`, `utils/sceneCategory.ts`, pinned by
-  `docs/scene-category-fixtures.json`); the desktops group by the text itself
+  same way. Nothing on a frame maps it or checks it: no ids, no table, no rule
+  (an ESP32's scene index only keeps one of 128 bytes or fewer, through the
+  icon's `keep_text`); the desktops trim it and group by the text itself
   (`grouped`), and a store version whose scene names a store title is filed
   under it. A new repo sample names its category.
 

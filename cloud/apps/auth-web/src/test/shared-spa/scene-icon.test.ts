@@ -1,8 +1,8 @@
 // A scene's icon (frontend/src/utils/sceneIcon.ts, docs/scene-icons.md): one
-// SVG path in a 0 0 24 24 box; and its category, a name (utils/sceneCategory.ts).
-// docs/scene-icon-fixtures.json and docs/scene-category-fixtures.json are
-// replayed here and by the runtime (frameos/src/frameos/tests/test_scene_icon.nim),
-// so the editor and every frame agree on what is an icon and a category.
+// SVG path in a 0 0 24 24 box. docs/scene-icon-fixtures.json is replayed here
+// and by the runtime (frameos/src/frameos/tests/test_scene_icon.nim), so the
+// editor and every frame agree on what is an icon. And its category, a name
+// (utils/sceneCategory.ts), which a frame lists as it is.
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -15,12 +15,7 @@ import {
   sceneIconProblem,
   templateSceneIcon,
 } from "../../../../../../frontend/src/utils/sceneIcon";
-import {
-  SCENE_CATEGORY_MAX_LENGTH,
-  sceneCategoryFromSelect,
-  sceneCategoryName,
-  sceneCategoryOptions,
-} from "../../../../../../frontend/src/utils/sceneCategory";
+import { sceneCategoryFromSelect, sceneCategoryOptions } from "../../../../../../frontend/src/utils/sceneCategory";
 
 interface Fixture {
   name: string;
@@ -97,21 +92,7 @@ describe("the editor's side of it", () => {
   });
 });
 
-const categories = JSON.parse(
-  readFileSync(new URL("../../../../../../docs/scene-category-fixtures.json", import.meta.url), "utf8"),
-) as { maxLength: number; cases: { name: string; value: unknown; category: string | null }[] };
-
-describe("scene categories (docs/scene-category-fixtures.json)", () => {
-  it("has the contract's limit", () => {
-    expect(categories.maxLength).toBe(SCENE_CATEGORY_MAX_LENGTH);
-  });
-
-  for (const fixture of categories.cases) {
-    it(fixture.name, () => {
-      expect(sceneCategoryName(fixture.value)).toBe(fixture.category);
-    });
-  }
-
+describe("scene categories", () => {
   it("offers the store's titles, a layout the layout ones, and keeps a name of the scene's own", () => {
     const scene = sceneCategoryOptions(undefined, false).map((option) => option.value);
     expect(scene[0]).toBe("");

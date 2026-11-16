@@ -22,7 +22,7 @@ import {
 } from "../../../../../../frontend/src/utils/sceneAccess";
 import { isBrokenLayout, sceneLayoutProblemText } from "../../../../../../frontend/src/utils/sceneLayoutRule";
 import { sceneIconProblem } from "../../../../../../frontend/src/utils/sceneIcon";
-import { sceneCategoryName, sceneCategoryTitles } from "../../../../../../frontend/src/utils/sceneCategory";
+import { sceneCategoryTitles } from "../../../../../../frontend/src/utils/sceneCategory";
 
 export type LintLevel = "error" | "warning";
 
@@ -781,16 +781,13 @@ export function lintScene(
     push("warning", `settings.icon: ${iconProblem} Frames ignore it and show their own placeholder.`);
   }
   // A name from the store's list (docs/scene-icons.md "Category"); a name of
-  // the owner's own is kept, but one the runtime cannot read is none.
+  // the owner's own is kept, and a frame lists it as it is.
   if (settings.category !== undefined && settings.category !== "") {
     const titles = sceneCategoryTitles(settings.isLayout === true);
-    const name = sceneCategoryName(settings.category);
-    if (name === null) {
-      push("warning", `settings.category must be a name of 32 characters or fewer on one line; frames ignore this one.`);
-    } else if (!titles.includes(name)) {
+    if (typeof settings.category !== "string" || !titles.includes(settings.category.trim())) {
       push(
         "warning",
-        `settings.category "${name}" is none of the store's categories. Use one of ${titles.map((title) => `"${title}"`).join(", ")}.`,
+        `settings.category ${JSON.stringify(settings.category)} is none of the store's categories. Use one of ${titles.map((title) => `"${title}"`).join(", ")}.`,
       );
     }
   }

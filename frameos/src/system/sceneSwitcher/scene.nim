@@ -52,7 +52,7 @@ type
     id*, name*: string
     windowSize*: string ## its own size in a desktop's window, "" for the desktop's (app.frame.scenes)
     icon*: string ## its icon, one path in 0 0 24 24 (scene_icon.nim), "" for none
-    category*: string ## its category by its name (scene_category.nim), "" for none
+    category*: string ## its category by its name ("Photos"), as the scene has it, "" for none
 
   SwitcherListing* = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.}
     ## The frame's scenes in its scene list's order, with their names.
@@ -103,19 +103,21 @@ proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
   ## `node[key] = value` for an object node, without json's assert.
   node.fields[key] = value
 
+proc putText(node: JsonNode, key, text: string, always = false) =
+  ## `node[key] = text`, where there is any text (or `always`).
+  if always or text.len > 0:
+    node.put(key, newJString(text))
+
 proc listingItem*(entry: SwitcherEntry): JsonNode =
   ## The scene as `app.frame.scenes` lists it (docs/scene-layouts.md
   ## "Windows"): `{id, name}`, and its window size, icon and category where
   ## it has them. One builder for every host, so their listings stay alike.
   result = newJObject()
-  result.put("id", newJString(entry.id))
-  result.put("name", newJString(entry.name))
-  if entry.windowSize.len > 0:
-    result.put("windowSize", newJString(entry.windowSize))
-  if entry.icon.len > 0:
-    result.put("icon", newJString(entry.icon))
-  if entry.category.len > 0:
-    result.put("category", newJString(entry.category))
+  result.putText("id", entry.id, always = true)
+  result.putText("name", entry.name, always = true)
+  result.putText("windowSize", entry.windowSize)
+  result.putText("icon", entry.icon)
+  result.putText("category", entry.category)
 
 proc isBuiltInScene*(sceneId: string): bool =
   ## A scene the runtime draws itself: no slot, no file. The switcher and the

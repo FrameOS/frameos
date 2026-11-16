@@ -2,36 +2,15 @@
 // its name as people read it, "Photos" or "Real time", which a desktop layout
 // groups its scene lists by (`category` on each app.frame.scenes entry). It is
 // picked from the store's category titles (utils/storeCategories.ts) and kept
-// as that text: nothing maps it to anything. The runtime reads it with the
-// same rule (frameos/scene_category.nim), and docs/scene-category-fixtures.json
-// pins the two together.
+// as that text: nothing maps it to anything, and a frame lists it as it is.
 
 import { storeCategoryShelves } from './storeCategories'
-
-export const SCENE_CATEGORY_MAX_LENGTH = 32
 
 export const SCENE_CATEGORY_HELP =
   "The scene's category, by its name. A desktop layout groups its list of scenes by it, the store files the scene under it when its name is one of the store's, and a name of your own is kept as it is."
 
 /** The store's categories a layout belongs to; every other one is a scene's. */
 const LAYOUT_CATEGORY_SLUGS = new Set(['desktops', 'layouts'])
-
-/** Trimmed of the spaces, tabs and line breaks at its ends, as the runtime trims it. */
-function trimCategory(text: string): string {
-  return text.replace(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, '')
-}
-
-/** `value` as a category: trimmed, 1 to 32 characters, no control character; else null (no category). */
-export function sceneCategoryName(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-  const name = trimCategory(value)
-  if (!name || [...name].length > SCENE_CATEGORY_MAX_LENGTH || /[\u0000-\u001f\u007f-\u009f]/.test(name)) {
-    return null
-  }
-  return name
-}
 
 export interface SceneCategoryOption {
   value: string

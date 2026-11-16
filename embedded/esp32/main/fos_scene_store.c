@@ -368,9 +368,9 @@ static bool entry_hash_is(const cJSON *entry, uint32_t hash)
  * itself (scene_icon.nim); the store only keeps a longer value out of the
  * index, which every catalog read parses whole. */
 #define ICON_MAX_LEN 1024
-/* A category is a name of 32 characters or fewer (scene_category.nim checks
- * the rest); 4 bytes a character is the most it can take. */
-#define CATEGORY_MAX_LEN (32 * 4)
+/* A category is a name ("Photos", docs/scene-icons.md "Category"), listed as
+ * it is: the store keeps one of a heading's length out of the index. */
+#define CATEGORY_MAX_LEN 128
 
 /* A setting kept in the index: text no longer than `max` bytes once its ends
  * are trimmed, and not empty. */

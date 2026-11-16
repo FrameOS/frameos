@@ -27,7 +27,6 @@ import std/monotimes
 import frameos/scene_rhythm
 import frameos/layout_choice
 import frameos/scene_icon
-import frameos/scene_category
 import frameos/ui/events as ui_events
 from frameos/ui/theme import themeSource
 import frameos/utils/canvas_log
@@ -2513,11 +2512,8 @@ proc readSettings(s: string, i: var int): FrameSceneSettings =
     of "windowSize", "window_size": result.windowSize = readText(s, i)
     # One path, checked once here: what is not an icon is none.
     of "icon": result.icon = sceneIconPath(readText(s, i))
-    # Its name, a short line of text; a number or a list is no category.
-    of "category":
-      eatSpace(s, i)
-      if i < s.len and s[i] == '"': result.category = sceneCategory(readText(s, i))
-      else: skipValue(s, i)
+    # Its name ("Photos"), handed to a desktop as is, like the window size.
+    of "category": result.category = readText(s, i)
     else: skipValue(s, i)
 
 proc readList[T](s: string, i: var int, read: proc(s: string, i: var int): T {.nimcall.}): seq[T] =
@@ -2549,11 +2545,11 @@ proc readScene(s: string, i: var int): FrameSceneInput =
 # -------------------------
 
 proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedScene =
-  let settingsInterval = if scene.settings != nil: scene.settings.refreshInterval else: 0.0
-  let backgroundColor = if scene.settings != nil: scene.settings.backgroundColor else: parseHtmlColor("#000000")
+  # A scene without settings has their defaults, on black.
+  let settings = if scene.settings != nil: scene.settings else: FrameSceneSettings(backgroundColor: color(0, 0, 0))
   # The refresh interval is a state field: the scene's own (by role or by
   # name), where the scene put it, or an implicit public one added last.
-  let refresh = resolveRefreshInterval(scene.fields, settingsInterval)
+  let refresh = resolveRefreshInterval(scene.fields, settings.refreshInterval)
   ExportedInterpretedScene(
     name: scene.name,
     nodes: scene.nodes,
@@ -2568,13 +2564,13 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     # A scene the split drawer generated draws nothing of its own that
     # changes: it waits for its panels, but never renders more often than
     # its own interval (scene_rhythm.nim).
-    refreshFollowsChildren: scene.settings != nil and scene.settings.splitScreenLayout.present,
+    refreshFollowsChildren: settings.splitScreenLayout.present,
     # The install's layout, read here so that nothing else knows its shape.
-    isLayout: scene.settings != nil and scene.settings.isLayout,
-    isDesktop: scene.settings != nil and scene.settings.isLayout and scene.settings.desktop,
-    windowSize: if scene.settings != nil: scene.settings.windowSize else: "",
-    icon: if scene.settings != nil: scene.settings.icon else: "",
-    category: if scene.settings != nil: scene.settings.category else: "",
+    isLayout: settings.isLayout,
+    isDesktop: settings.isLayout and settings.desktop,
+    windowSize: settings.windowSize,
+    icon: settings.icon,
+    category: settings.category,
     layoutSceneId: scene.layout{"sceneId"}.getStr().SceneId,
     layoutState: scene.layout{"state"},
     # Fields without an explicit access default to public for interpreted
@@ -2587,12 +2583,12 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     # Its own render scale, over the frame's: a role field, else the setting.
     renderScaleKey: renderScaleFieldKey(scene.fields),
     # Out of range is ignored where it is read (sceneRenderScale).
-    renderScaleSetting: if scene.settings != nil: scene.settings.renderScale else: 0.0,
+    renderScaleSetting: settings.renderScale,
     init: init,
     render: render,
     runEvent: runEvent,
     refreshInterval: refresh.defaultSeconds,
-    backgroundColor: backgroundColor
+    backgroundColor: settings.backgroundColor
   )
 
 proc parseInterpretedSceneInputs*(data: string): seq[FrameSceneInput] =

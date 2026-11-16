@@ -609,8 +609,8 @@ static void test_icon_in_the_index(void)
 }
 
 /* And its category (docs/scene-icons.md "Category"), the name a desktop
- * groups its scene lists by: kept as it is when it can be one (32 characters,
- * 4 bytes each at most), the runtime checks the rest. */
+ * groups its scene lists by: kept as it is, text of 128 bytes or fewer, and
+ * listed so by the runtime. */
 static void test_category_in_the_index(void)
 {
     fresh_dir();

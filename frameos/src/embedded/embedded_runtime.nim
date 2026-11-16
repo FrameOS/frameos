@@ -25,7 +25,6 @@ import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
 import frameos/scene_store_hooks
 import frameos/scene_icon
-import frameos/scene_category
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
 import frameos/values
@@ -82,24 +81,18 @@ var
   # the status procs below can be asked before initRuntime.
   host = SingleSceneHost()
 
-type
-  SceneCatalogEntry* = object
-    ## One scene the frame CAN run, as listed in /state/scenes/index.json —
-    ## id, display name and refresh interval, and nothing else. The point is
-    ## that this is all the memory a non-active scene costs: its nodes, its
-    ## app configs and (increasingly) its JavaScript stay on flash until the
-    ## scene is selected. A frame with twenty JS-heavy scenes holds one.
-    id*: string
-    name*: string
-    refreshInterval*: float
-    windowSize*: string ## `settings.windowSize`: its size in a desktop's window
-    icon*: string ## `settings.icon` (scene_icon.nim): the switcher's tile and `app.frame.scenes`
-    category*: string ## `settings.category` (scene_category.nim): `app.frame.scenes`
-
-var sceneCatalog: seq[SceneCatalogEntry] = @[]
+var sceneCatalog: seq[SwitcherEntry]
+  ## The scenes the frame CAN run, as listed in /state/scenes/index.json:
+  ## each as the switcher's tile and its `app.frame.scenes` entry (id, name,
+  ## window size, icon, category), and nothing else. The point is that this
+  ## is all the memory a non-active scene costs: its nodes, its app configs
+  ## and (increasingly) its JavaScript stay on flash until the scene is
+  ## selected. A frame with twenty JS-heavy scenes holds one.
   ## Empty on the legacy path (one scenes.json parsed whole), in which case
   ## every listing falls back to the resident cache. Non-empty means the
   ## firmware is feeding scenes one at a time.
+var catalogRefresh: seq[float]
+  ## Each catalog scene's refresh interval, at the same index, for sceneInfoJson.
 
 proc sceneCount*(): int =
   scenesLoadedCount
@@ -122,11 +115,11 @@ proc sceneInfoJson*(): string =
   var sceneItems = newJArray()
   var available = 0
   if sceneCatalog.len > 0:
-    for entry in sceneCatalog:
+    for i, entry in sceneCatalog:
       sceneItems.add(%*{
         "id": entry.id,
         "name": if entry.name.len > 0: entry.name else: entry.id,
-        "refreshInterval": entry.refreshInterval,
+        "refreshInterval": catalogRefresh[i],
       })
     available = sceneCatalog.len
   else:
@@ -714,6 +707,13 @@ proc loadSceneInputs(inputs: seq[FrameSceneInput]): int =
   log(&"loadScenes: {scenesLoadedCount} scene(s) ready, default \"{firstId.get().string}\"")
   scenesLoadedCount
 
+proc catalogHas(sceneIdText: string): bool =
+  sceneCatalog.anyIt(it.id == sceneIdText)
+
+proc textAt(node: JsonNode, key: string): string =
+  ## `node{key}` as text, "" where it is none: one call per read of the index.
+  node{key}.getStr()
+
 proc setSceneCatalog*(indexJson: string): int =
   ## Install the list of scenes available on flash, WITHOUT parsing any of
   ## them. `indexJson` is /state/scenes/index.json:
@@ -737,51 +737,44 @@ proc setSceneCatalog*(indexJson: string): int =
   if parsed.isNil or parsed.kind != JObject:
     log("setSceneCatalog: index is not an object")
     return 0
-  var entries: seq[SceneCatalogEntry] = @[]
+  var entries: seq[SwitcherEntry]
+  var intervals: seq[float]
   var layouts: seq[LayoutEntry] = @[]
   let scenesNode = parsed{"scenes"}
   if not scenesNode.isNil and scenesNode.kind == JArray:
     for item in scenesNode.items:
       if item.kind != JObject:
         continue
-      let id = item{"id"}.getStr()
+      let id = item.textAt("id")
       if id.len > 0 and item{"isLayout"}.getBool(false):
         # Read off flash by id when a scene names it, and in no list but the
         # frame page's.
-        layouts.add LayoutEntry(id: id, name: item{"name"}.getStr(), desktop: item{"desktop"}.getBool(false))
+        layouts.add LayoutEntry(id: id, name: item.textAt("name"), desktop: item{"desktop"}.getBool(false))
         continue
       if id.len == 0:
         continue
-      entries.add(SceneCatalogEntry(
-        id: id,
-        name: item{"name"}.getStr(),
-        refreshInterval: item{"refreshInterval"}.getFloat(0.0),
-        windowSize: item{"windowSize"}.getStr(),
+      entries.add SwitcherEntry(id: id, name: item.textAt("name"), windowSize: item.textAt("windowSize"),
         # The store only checked its length; what is not an icon is none.
-        icon: sceneIconPath(item{"icon"}.getStr()),
-        category: sceneCategory(item{"category"}.getStr()),
-      ))
-  sceneCatalog = entries
+        icon: sceneIconPath(item.textAt("icon")), category: item.textAt("category"))
+      intervals.add item{"refreshInterval"}.getFloat(0.0)
+  sceneCatalog = move(entries)
+  catalogRefresh = move(intervals)
   layoutCatalog = layouts
   forgetMissingLayouts() # a layout missing before may be on flash now
-  if entries.len == 0:
+  if sceneCatalog.len == 0:
     log("setSceneCatalog: no scenes in index")
     return 0
   # The default is what boots when nothing was selected before; fall back to
   # the first entry so an index without one still starts something.
-  let defaultId = parsed{"default"}.getStr()
+  let defaultId = parsed.textAt("default")
   defaultSceneId = some(SceneId(
-    if defaultId.len > 0: defaultId else: entries[0].id))
+    if defaultId.len > 0: defaultId else: sceneCatalog[0].id))
   # A previously selected scene that is no longer on flash must not stick
   # around as the target of the next render.
-  if host.sceneId.isSome and
-      not entries.anyIt(it.id == host.sceneId.get().string):
+  if host.sceneId.isSome and not catalogHas(host.sceneId.get().string):
     host.sceneId = none(SceneId)
-  log(&"setSceneCatalog: {entries.len} scene(s) available, default \"{defaultSceneId.get().string}\"")
-  entries.len
-
-proc catalogHas(sceneIdText: string): bool =
-  sceneCatalog.anyIt(it.id == sceneIdText)
+  log(&"setSceneCatalog: {sceneCatalog.len} scene(s) available, default \"{defaultSceneId.get().string}\"")
+  sceneCatalog.len
 
 proc loadScene*(payload: string, alongside = false): bool =
   when defined(memProbe): memProbe("  >>> loadScene payload=" & $payload.len & "B")
@@ -880,19 +873,10 @@ proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
   ## scenes.json order) on the lazy path, the parsed payload's otherwise —
   ## the same list `setCurrentScene {direction}` walks (host.sceneOrder).
   {.cast(gcsafe).}:
-    if sceneCatalog.len > 0:
-      for entry in sceneCatalog:
-        result.add SwitcherEntry(id: entry.id, name: entry.name, windowSize: entry.windowSize,
-          icon: entry.icon, category: entry.category)
-    else:
-      let scenes = getInterpretedScenes()
-      for sceneId in loadedSceneOrder:
-        if scenes.hasKey(sceneId):
-          let scene = scenes[sceneId]
-          result.add SwitcherEntry(id: sceneId.string, name: scene.name, windowSize: scene.windowSize,
-            icon: scene.icon, category: scene.category)
-        else:
-          result.add SwitcherEntry(id: sceneId.string)
+    if sceneCatalog.len == 0:
+      return loadedSceneListing(loadedSceneOrder)
+    for entry in sceneCatalog:
+      result.add entry
 
 sceneSwitcherListing = switcherListing
 

@@ -487,6 +487,21 @@ proc windowScene(host: SingleSceneHost, sceneId: SceneId): FrameScene =
     host.say("scene " & sceneId.string & " could not start in a window: " & e.msg)
     return nil
 
+proc loadedSceneListing*(order: seq[SceneId]): seq[SwitcherEntry] =
+  ## The switcher's tiles and `app.frame.scenes` off the scenes held whole
+  ## (the browser's payload, an ESP32 without a scene index), in `order`:
+  ## each with its name, window size, icon and category.
+  let scenes = getInterpretedScenes()
+  for sceneId in order:
+    var entry = SwitcherEntry(id: sceneId.string)
+    let scene = scenes.getOrDefault(sceneId, nil)
+    if not scene.isNil:
+      entry.name = scene.name
+      entry.windowSize = scene.windowSize
+      entry.icon = scene.icon
+      entry.category = scene.category
+    result.add entry
+
 proc setWindowed*(host: SingleSceneHost, enabled: bool) =
   ## Turn running scenes side by side on or off. On, a layout's
   ## `app.frame.scenes` lists the frame's scenes and its `<Scene id>` is this
@@ -500,19 +515,12 @@ proc setWindowed*(host: SingleSceneHost, enabled: bool) =
         host.windowScene(sceneId)
     windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
       {.cast(gcsafe).}:
+        # The host's own list, the switcher's: an ESP32's catalog, whose
+        # scenes are on flash until they run, or the browser's payload.
         result = newJArray()
         if not sceneSwitcherListing.isNil:
-          # The host's own list: an ESP32's catalog, whose scenes are on flash
-          # until they run.
           for entry in sceneSwitcherListing():
             result.add listingItem(entry)
-        elif not host.sceneOrder.isNil:
-          let scenes = getInterpretedScenes()
-          for sceneId in host.sceneOrder():
-            if scenes.hasKey(sceneId) and not scenes[sceneId].isLayout:
-              let scene = scenes[sceneId]
-              result.add listingItem(SwitcherEntry(id: sceneId.string, name: scene.name,
-                windowSize: scene.windowSize, icon: scene.icon, category: scene.category))
   else:
     hostSceneFor = nil
     windowSceneListing = nil

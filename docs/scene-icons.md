@@ -49,11 +49,12 @@ Full screen layouts for a layout. The scene keeps the name as text and nothing
 maps it to anything: a name of the owner's own is kept, shown as it is in the
 select, and is a category like any other.
 
-- **What a runtime reads**: the text with the spaces, tabs and line breaks at
-  its ends trimmed, 1 to 32 characters, no control character, from a JSON
-  string. Anything else is no category. `frameos/src/frameos/scene_category.nim`
-  and `frontend/src/utils/sceneCategory.ts` (`sceneCategoryName`) are the rule,
-  pinned by `docs/scene-category-fixtures.json`. The cloud's scene lint warns
+- **What a runtime reads**: nothing it checks. A frame lists the text as the
+  scene has it, read like `settings.windowSize`; the desktops trim it and take
+  `"Other"` for none (`grouped`). An ESP32's scene index keeps a category of 128
+  bytes or fewer, its ends trimmed for the count, as it keeps an icon of 1024
+  (`keep_text` in `fos_scene_store.c`). The editor writes only the store's
+  titles or a name the scene already had, and the cloud's scene lint warns
   about a name that is none of the store's.
 - **Where it goes**: `category` on the scene's `app.frame.scenes` entry, on
   every host, as the icon goes (below). The desktop layouts group their lists
@@ -73,15 +74,15 @@ select, and is a category like any other.
 ## On the frame
 
 Every host reads `settings.icon` and `settings.category` with the scene and
-lists them, checked, beside the scene's name and window size in
-`app.frame.scenes` (`{id, name, windowSize?, icon?, category?}`, one builder:
-`listingItem` in `system/sceneSwitcher/scene.nim`):
+lists them (the icon checked, the category as it is) beside the scene's name
+and window size in `app.frame.scenes` (`{id, name, windowSize?, icon?,
+category?}`, one builder: `listingItem` in `system/sceneSwitcher/scene.nim`):
 
 | Host | Where the icon and category come from |
 |---|---|
-| Linux (a Pi) | the deployed or pushed scene (`interpreter.nim` `readSettings`, `scenes.nim` `getSceneIcon` / `getSceneCategory`) |
-| ESP32 | its scene index: `fos_scene_store.c` `make_entry` keeps `icon` (1024 characters or fewer) and `category` (128 bytes or fewer) for a scene that is not a layout, and `embedded_runtime.nim` checks both when it reads the catalog, so the scene stays on flash |
-| browser / wasm (the preview, the plane rendering a board, a virtual frame) | the loaded scenes |
+| Linux (a Pi) | the deployed or pushed scene (`interpreter.nim` `readSettings`, `scenes.nim` `getSceneListing`) |
+| ESP32 | its scene index: `fos_scene_store.c` `make_entry` keeps `icon` (1024 characters or fewer) and `category` (128 bytes or fewer) for a scene that is not a layout, and `embedded_runtime.nim` checks the icon when it reads the catalog, so the scene stays on flash |
+| browser / wasm (the preview, the plane rendering a board, a virtual frame) | the loaded scenes (`single_scene_host.nim` `loadedSceneListing`, which an ESP32 without a scene index uses too) |
 
 The scene switcher (`docs/scene-switcher.md`) draws it on the tile: above the
 name on a name card (an ESP32, e-paper, the preview), and in the picture's place

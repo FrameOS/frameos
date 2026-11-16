@@ -42,7 +42,7 @@ A scenes file is a JSON array of scenes. Each scene is
   (comics, games), `"Real time"` (animates every second or faster, for a fast
   screen), `"Tools & utilities"` (clocks and practical tools), `"Demos &
   examples"` (a demo or a building block); a layout's is `"Desktop layouts"` or
-  `"Full screen layouts"`. Write the name exactly; 32 characters at most.
+  `"Full screen layouts"`. Write the name exactly.
 - `fields`: the scene's state fields (see [Fields and state](#fields-and-state)).
 - `apps`: JavaScript apps the scene carries with it (see [JS apps](#js-apps)).
 - `customEvents`: events of the scene's own (see [Events](#events)).
