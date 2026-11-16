@@ -227,7 +227,7 @@ const deviceLimitsFixtures = JSON.parse(
     width: number;
   }[];
   canvasRotation: {
-    cases: { rotate: number | null; firmwareVersion: string | null; expected: number | null }[];
+    cases: { rotate: number | null; firmwareVersion: string | null; pixelFormat?: number; expected: number | null }[];
   };
 };
 
