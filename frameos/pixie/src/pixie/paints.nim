@@ -277,8 +277,13 @@ proc row*(
     rowY = y.float32 + origin.y
   template perPixel(tAt: untyped) =
     if g.throughTable:
+      # The table through a plain pointer: a checked seq index a pixel was
+      # a call on an -Os firmware.
+      let
+        lut = cast[ptr UncheckedArray[ColorRGBX]](g.lut[0].unsafeAddr)
+        last = g.last
       for x {.inject.} in x0 ..< x1:
-        dst[x - x0] = g.lut[lutIndex(tAt, g.last)]
+        dst[x - x0] = lut[lutIndex(tAt, last)]
     else:
       for x {.inject.} in x0 ..< x1:
         dst[x - x0] = g.paint.gradientColor(tAt)
