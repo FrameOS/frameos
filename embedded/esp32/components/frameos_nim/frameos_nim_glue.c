@@ -976,15 +976,15 @@ bool frameos_nim_scene_running(const char *scene_id)
     return running;
 }
 
-int frameos_nim_load_scenes(const char *const *scenes, const size_t *lens, int count)
+int frameos_nim_load_scenes(const char *const *scenes, const size_t *lens, int scene_count)
 {
-    if (!s_nim_ready || scenes == NULL || lens == NULL || count <= 0) return 0;
+    if (!s_nim_ready || scenes == NULL || lens == NULL || scene_count <= 0) return 0;
     if (!nim_lock_take()) return 0;
     int count;
     nim_guard_note_free();
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
-        count = fos_nim_load_scenes_impl(scenes, lens, count);
+        count = fos_nim_load_scenes_impl(scenes, lens, scene_count);
     } else {
         nim_oom_abort_note("scene load");
         count = 0;
