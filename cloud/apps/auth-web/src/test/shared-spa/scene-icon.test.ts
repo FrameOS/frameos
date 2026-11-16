@@ -82,12 +82,10 @@ describe("the editor's side of it", () => {
     expect(sceneIconOf({ settings: { icon: " M12 2L2 22h20z" } })).toBe("M12 2L2 22h20z");
     expect(sceneIconOf({ settings: { icon: "nope" } })).toBeNull();
     expect(sceneIconOf(null)).toBeNull();
-    const scenes = [
-      { settings: { icon: "M0 0h1z" } },
-      { default: true, settings: { icon: "M1 1h1z" } },
-    ];
+    const first = { settings: { icon: "M0 0h1z" } };
+    const scenes = [first, { default: true, settings: { icon: "M1 1h1z" } }];
     expect(templateSceneIcon({ scenes })).toBe("M1 1h1z");
-    expect(templateSceneIcon({ scenes: [scenes[0]] })).toBe("M0 0h1z");
+    expect(templateSceneIcon({ scenes: [first] })).toBe("M0 0h1z");
     expect(templateSceneIcon({})).toBeNull();
   });
 });
