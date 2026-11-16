@@ -32,6 +32,7 @@ type RenderPhase* = enum
   phParse = "parse"    ## pixie's parse of the nodes (utils/svg_frames.nim)
   phDamage = "damage"  ## the boxes that changed
   phRaster = "raster"  ## pixie's render into the panel
+  phFit = "fit"        ## the automatic fit of a drawn image into the panel's range (utils/asset_colors)
 
 var probeOn* = false
 

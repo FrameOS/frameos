@@ -122,9 +122,15 @@ solves for the Whites and Blacks that map that range onto the palette's
 
 A linear profile (exposure, end points, contrast — the fit always is) runs
 as one 256-entry lookup table per channel (`linearLut`), three lookups per
-pixel, which is what makes it affordable on every render of a 13.3" panel on
-an ESP32. Nothing is allocated beyond a 1 KB histogram; there is no second
-canvas and no second pass.
+pixel, and the histogram's luminance is integer arithmetic (the weights are
+whole hundredths; only an exact .50 tie asks the float sum), which is what
+makes it affordable on every render of a 13.3" panel on an ESP32: its FPU
+has no double precision, and the float version cost ~12.5 s a fit on a
+reTerminal E1004 (1200x1600, two fits a render under a layout), with the
+render task never letting its core's idle task run (the task watchdog).
+Both loops go a row at a time and breathe (`breathe()`, as pixie's do), and
+the render line's probe shows the fit as `fit`. Nothing is allocated beyond
+a 1 KB histogram; there is no second canvas.
 
 A photo whose sidecar the producer applied is marked (`markImageGraded`, a
 ring of weak pointers cleared on a scene change) and the consumer skips the

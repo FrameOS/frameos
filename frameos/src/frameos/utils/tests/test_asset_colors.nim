@@ -226,6 +226,98 @@ suite "the frame's automatic fit":
     check not profileOf("""{"saturation": 5}""").isLinearProfile()
     check not profileOf("""{"hues": {"red": {"hue": 5}}}""").isLinearProfile()
 
+  test "the integer luminance bin is round() of the float luminance, for every colour":
+    # The fit's histogram (16.7 M colours: every one the bins can see).
+    var mismatches = 0
+    for r in 0 .. 255:
+      for g in 0 .. 255:
+        for b in 0 .. 255:
+          let viaFloat = max(0, min(255, luminance(r.float, g.float, b.float).round().int))
+          if luminanceBin(r.uint8, g.uint8, b.uint8) != viaFloat:
+            inc mismatches
+    check mismatches == 0
+
+  test "the fit stores what the per-pixel float loop stored, on every canvas format":
+    # The loops as they were before they went row by row and integer (one
+    # `unsafe[x, y]` and a float luminance per pixel): the reference.
+    proc referenceFit(image: Image, x0, y0, width, height: int) =
+      var histogram: array[256, int]
+      for y in y0 ..< y0 + height:
+        for x in x0 ..< x0 + width:
+          let p = image.unsafe[x, y]
+          histogram[max(0, min(255, luminance(p.r.float, p.g.float, p.b.float).round().int))] += 1
+      let total = width * height
+      let (loCount, hiCount) = ((total.float * 0.005).int, (total.float * 0.995).int)
+      var (seen, lo, hi, loFound) = (0, 0, 255, false)
+      for level in 0 .. 255:
+        seen += histogram[level]
+        if not loFound and seen > loCount:
+          lo = level
+          loFound = true
+        if seen >= hiCount:
+          hi = level
+          break
+      # Same histogram, same end points: compare those through the public proc.
+      let endPoints = autoEndPoints(image, x0, y0, width, height, assetColorsPanelPalette)
+      check endPoints.isSome == (hi - lo >= 3)
+      if endPoints.isNone:
+        return
+      var profile = AssetColorProfile()
+      profile.whites = endPoints.get().whites
+      profile.blacks = endPoints.get().blacks
+      let lut = linearLut(profile)
+      for y in y0 ..< y0 + height:
+        for x in x0 ..< x0 + width:
+          let p = image.unsafe[x, y]
+          image.unsafe[x, y] = rgbx(lut[p.r], lut[p.g], lut[p.b], p.a)
+
+    proc photoInto(image: Image) =
+      for y in 0 ..< image.height:
+        for x in 0 ..< image.width:
+          image.unsafe[x, y] = rgbx(uint8((x * 37 + y * 11) mod 256), uint8((y * 255) div image.height),
+            uint8((x * y) mod 251), 255)
+
+    proc samePixels(a, b: Image): bool =
+      for y in 0 ..< a.height:
+        for x in 0 ..< a.width:
+          if a.unsafe[x, y] != b.unsafe[x, y]:
+            return false
+      true
+
+    proc makers(): seq[proc(): Image] =
+      result.add(proc(): Image = newImage(61, 37))
+      result.add(proc(): Image =
+        let image = newImage565(61, 37)
+        image.ditherStores = true
+        image)
+      result.add(proc(): Image = newImage565(61, 37))
+      result.add(proc(): Image = newImageGray8(61, 37))
+      result.add(proc(): Image = newImageGray4(61, 37))
+
+    for make in makers():
+      # The whole image, a rectangle of it, and a view of it.
+      let (fast, slow) = (make(), make())
+      photoInto(fast)
+      photoInto(slow)
+      applyAutoFitToDrawn(fast, 0, 0, fast.width, fast.height)
+      referenceFit(slow, 0, 0, slow.width, slow.height)
+      check samePixels(fast, slow)
+
+      let (fastRect, slowRect) = (make(), make())
+      photoInto(fastRect)
+      photoInto(slowRect)
+      applyAutoFitToDrawn(fastRect, 7, 5, 40, 23)
+      referenceFit(slowRect, 7, 5, 40, 23)
+      check samePixels(fastRect, slowRect)
+
+      let (fastBase, slowBase) = (make(), make())
+      photoInto(fastBase)
+      photoInto(slowBase)
+      let (fastView, slowView) = (fastBase.view(9, 3, 30, 20), slowBase.view(9, 3, 30, 20))
+      applyAutoFitToDrawn(fastView, 0, 0, fastView.width, fastView.height)
+      referenceFit(slowView, 0, 0, slowView.width, slowView.height)
+      check samePixels(fastBase, slowBase)
+
   test "a drawn photo is fitted by default on a palette panel and left alone elsewhere":
     let canvas = gradient(16, 16)
     let before = pixelsOf(canvas)
