@@ -125,10 +125,15 @@ And two things changed on the visibility side:
   rung, with the rung, the decode size and the headroom it was planned
   against. A frame whose photos got soft now says why in the cloud log.
 - `memory:oomAbort` (frameos_nim_glue.c) is logged on every abort, with
-  free/largest PSRAM and the post-first-render baseline. When one abort
-  leaves less than `FOS_NIM_OOM_LEAK_RESTART_PERCENT` (50%) of that
-  baseline free, the frame restarts immediately instead of rendering
+  free/largest PSRAM and the post-first-render baseline. When the aborts
+  have leaked more than `FOS_OOM_LEAK_RESTART_PERCENT` (50%) of that
+  baseline, the frame restarts immediately instead of rendering
   degraded until someone power-cycles it. The old streak rules stay.
+  (Since 2026-11-15 the leak is measured — free PSRAM when the aborted call
+  began minus free after the recovery, summed, `leakedPsram` — not read off
+  free memory: a reTerminal E1003 in a switch storm had 1.65 MB of a 4.88 MB
+  baseline free, held by live scenes and fragmented to 328 KB blocks, and
+  one scene load that did not fit restarted it. `fos_oom_policy.h`.)
 
 ## Gradient fills paint in strips (2026-08-24)
 

@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <setjmp.h>
+#include "fos_oom_policy.h"
 #include <string.h>
 #include <limits.h>
 #include <strings.h>
@@ -591,27 +592,18 @@ void fos_nim_fatal_oom(size_t size)
     /* No guard armed: fall through to Nim's raiseOutOfMem (log + reboot). */
 }
 
-/* A longjmp abort skips every Nim destructor on the abandoned stack, so the
- * aborted call's allocations (render canvas, decode buffers, HTTP chunks)
- * leak with their refcounts stuck — no GC pass can ever reclaim them. One
- * abort is survivable; once the leaks eat the contiguous PSRAM a render
- * canvas needs, every future render is doomed and only a reboot recovers
- * the heap. A device that stays "alive" but can never render again is worse
- * than one clean restart. */
-#define FOS_NIM_OOM_ABORT_RESTART_STREAK 4
+/* Whether an abort restarts the frame: fos_oom_policy.h (what leaks, and
+ * why free memory alone does not say). */
+static fos_oom_policy_t s_oom_policy;
+/* Free PSRAM when the guarded call now running began: what an abort of it
+ * lost is this minus what is free after the recovery. The free total is a
+ * counter read, microseconds, not the heap walk the largest block is. */
+static size_t s_free_at_guard = 0;
 
-/* The streak rules above only fire when renders keep failing. A single abort
- * that leaks a big chunk but leaves enough for the decode budget's degrade
- * ladder is worse in practice: every render from then on "succeeds" at half
- * or quarter resolution, the streak resets each time, and the frame shows
- * soft images forever. Seen on a 16 MB 13.3" board: one abort took free
- * PSRAM from 8.6 MB to 4.3 MB (largest block 6 MB -> 1.9 MB) and every
- * photo after it rendered blurry for a day. Leaked memory never comes back,
- * so when one abort has eaten more than this share of what a healthy boot
- * had free, restart right away instead of rendering degraded until the next
- * power cycle. The baseline is taken after the first successful render, the
- * steady state the frame actually lives in. */
-#define FOS_NIM_OOM_LEAK_RESTART_PERCENT 50
+static inline void nim_guard_note_free(void)
+{
+    s_free_at_guard = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
 
 static int s_frame_width = 0;
 static int s_frame_height = 0;
@@ -625,16 +617,15 @@ void frameos_nim_set_canvas_heap_bytes(size_t bytes)
 {
     s_canvas_heap_bytes = bytes;
 }
-static unsigned s_nim_oom_abort_streak = 0;
-static size_t s_psram_free_baseline = 0;
 
 static void nim_note_healthy_render(void)
 {
-    s_nim_oom_abort_streak = 0;
-    if (s_psram_free_baseline == 0) {
-        s_psram_free_baseline = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    bool first = s_oom_policy.baseline == 0;
+    fos_oom_policy_healthy(&s_oom_policy, first
+        ? heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : 0);
+    if (first) {
         ESP_LOGI("fos_nim", "PSRAM baseline after first render: %u bytes free",
-                 (unsigned)s_psram_free_baseline);
+                 (unsigned)s_oom_policy.baseline);
     }
 }
 
@@ -655,7 +646,6 @@ static void nim_oom_abort_note(const char *what)
     size_t js_bytes = 0;
     int http_released = 0;
     int js_dropped = fos_nim_recover_oom_abort_impl(&js_bytes, &http_released);
-    s_nim_oom_abort_streak++;
     /* The canvas a render needs, in its own format and only if it comes from
      * the heap: w x h x 4 regardless was 10.5 MB on the sixteen-grey E1003,
      * whose 1.3 MB canvas is the panel buffer, so `canvas_impossible` was
@@ -666,26 +656,23 @@ static void nim_oom_abort_note(const char *what)
         : (size_t)s_frame_width * (size_t)s_frame_height * 4u;
     size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    bool canvas_impossible = canvas_bytes > 0 && largest < canvas_bytes;
-    bool leaked_too_much = s_psram_free_baseline > 0 &&
-        free_psram < s_psram_free_baseline / 100u * FOS_NIM_OOM_LEAK_RESTART_PERCENT;
-    ESP_LOGE("fos_nim", "%s aborted: out of memory (abort streak %u, PSRAM free %u largest block %u, baseline %u, canvas needs %u)",
-             what, s_nim_oom_abort_streak, (unsigned)free_psram, (unsigned)largest,
-             (unsigned)s_psram_free_baseline, (unsigned)canvas_bytes);
-    bool restart = (s_nim_oom_abort_streak >= 2 && canvas_impossible) ||
-                   s_nim_oom_abort_streak >= FOS_NIM_OOM_ABORT_RESTART_STREAK ||
-                   leaked_too_much;
+    bool restart = fos_oom_policy_abort(&s_oom_policy, s_free_at_guard, free_psram,
+                                        largest, canvas_bytes);
+    ESP_LOGE("fos_nim", "%s aborted: out of memory (abort streak %u, PSRAM free %u largest block %u, baseline %u, leaked %u, canvas needs %u)",
+             what, s_oom_policy.streak, (unsigned)free_psram, (unsigned)largest,
+             (unsigned)s_oom_policy.baseline, (unsigned)s_oom_policy.leaked,
+             (unsigned)canvas_bytes);
     /* The serial line above never reaches the cloud; this one does, so the
      * "render-cycle-failed" it precedes has a cause next to it. */
-    char line[420];
+    char line[448];
     snprintf(line, sizeof(line),
              "{\"event\":\"memory:oomAbort\",\"source\":\"esp32\","
              "\"where\":\"%s\",\"requestBytes\":%u,\"streak\":%u,\"freePsram\":%u,"
-             "\"largestPsramBlock\":%u,\"baselinePsram\":%u,"
+             "\"largestPsramBlock\":%u,\"baselinePsram\":%u,\"leakedPsram\":%u,"
              "\"jsDropped\":%d,\"jsDroppedBytes\":%u,\"httpReleased\":%d,"
              "\"status\":\"%s\"}",
-             what, (unsigned)s_nim_oom_request, s_nim_oom_abort_streak, (unsigned)free_psram, (unsigned)largest,
-             (unsigned)s_psram_free_baseline, js_dropped, (unsigned)js_bytes, http_released,
+             what, (unsigned)s_nim_oom_request, s_oom_policy.streak, (unsigned)free_psram, (unsigned)largest,
+             (unsigned)s_oom_policy.baseline, (unsigned)s_oom_policy.leaked, js_dropped, (unsigned)js_bytes, http_released,
              restart ? "restarting" : "leaked");
     frameos_nim_log_hook(line);
     if (restart) {
@@ -781,6 +768,7 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
     if (!s_nim_ready) return -1;
     if (!nim_lock_take()) return -1;
     int result;
+    nim_guard_note_free();
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         result = fos_nim_render_impl(buf, len, pixel_format);
@@ -799,6 +787,7 @@ int frameos_nim_render_panel(uint8_t *buf, size_t len, int pixel_format, uint32_
     if (!s_nim_ready || !buf) return -1;
     if (!nim_lock_take()) return -1;
     int result;
+    nim_guard_note_free();
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         result = fos_nim_render_panel_impl(buf, len, pixel_format, generation);
@@ -843,6 +832,7 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
     if (!nim_lock_take()) return -1;
     int result;
     s_pending_render_buffer = NULL;
+    nim_guard_note_free();
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         result = fos_nim_render_alloc_impl(buf, len, pixel_format);
@@ -869,6 +859,7 @@ int frameos_nim_repack_alloc(uint8_t **buf, size_t *len, int pixel_format)
     if (!nim_lock_take()) return -1;
     int result;
     s_pending_render_buffer = NULL;
+    nim_guard_note_free();
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         result = fos_nim_repack_alloc_impl(buf, len, pixel_format);
@@ -954,6 +945,7 @@ bool frameos_nim_set_scene(const char *scene_id)
     if (!s_nim_ready || scene_id == NULL) return false;
     if (!nim_lock_take()) return false;
     bool ok;
+    nim_guard_note_free();
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         ok = fos_nim_set_scene_impl(scene_id);
@@ -980,6 +972,7 @@ int frameos_nim_load_scenes(const char *json)
     if (!s_nim_ready || json == NULL) return 0;
     if (!nim_lock_take()) return 0;
     int count;
+    nim_guard_note_free();
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         count = fos_nim_load_scenes_impl(json);
@@ -1005,7 +998,18 @@ int frameos_nim_load_scene(const char *scene_json)
 {
     if (!s_nim_ready || scene_json == NULL) return 0;
     if (!nim_lock_take()) return 0;
-    int result = fos_nim_load_scene_impl(scene_json);
+    /* Guarded like the whole set: unguarded, a scene switch that did not fit
+     * rebooted the frame from Nim's raiseOutOfMem. */
+    int result;
+    nim_guard_note_free();
+    if (setjmp(s_nim_oom_jmp) == 0) {
+        s_nim_oom_jmp_armed = true;
+        result = fos_nim_load_scene_impl(scene_json);
+    } else {
+        nim_oom_abort_note("scene load");
+        result = 0;
+    }
+    s_nim_oom_jmp_armed = false;
     nim_lock_give();
     return result;
 }
@@ -1179,6 +1183,7 @@ bool frameos_nim_tick(void)
     if (!s_nim_ready) return false;
     if (!nim_lock_take_for(0)) return false;
     bool made = false;
+    nim_guard_note_free();
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         made = fos_nim_tick_impl();
@@ -1200,6 +1205,7 @@ bool frameos_nim_send_event_wait(uint32_t origin, const char *event, const char 
         return false;
     }
     bool ok;
+    nim_guard_note_free();
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         ok = fos_nim_send_event_impl((unsigned int)origin, event, payload_json ? payload_json : "{}");
