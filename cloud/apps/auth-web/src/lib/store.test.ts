@@ -318,6 +318,13 @@ describe("validateSceneZip transparency rejection", () => {
     expect(plain.ok).toBe(true);
     expect(plain.ok && plain.value.isLayout).toBe(false);
     expect(plain.ok && plain.value.isDesktop).toBe(false);
+    // A scene that names one of the store's categories by its title is filed
+    // under it; a name of its own is not one of the store's.
+    expect(plain.ok && plain.value.sceneCategory).toBeUndefined();
+    const named = pack([{ id: "a", nodes: [], edges: [], settings: { category: "Real time" } }]);
+    expect(named.ok && named.value.sceneCategory).toBe("realtime");
+    const own = pack([{ id: "a", nodes: [], edges: [], settings: { category: "Clocks" } }]);
+    expect(own.ok && own.value.sceneCategory).toBeUndefined();
   });
 
   it("rejects a zip whose preview is proven fully transparent", () => {

@@ -3,6 +3,7 @@
     "id": "layout-front-page",
     "name": "Front page",
     "settings": {
+      "category": "Full screen layouts",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#f5f0e1",

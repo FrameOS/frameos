@@ -14,7 +14,8 @@ block the_list_is_the_frames_scene_order_with_names:
   let payload = %*{"scenes": [
     {"id": "tests/switcher/b", "name": "Bravo", "settings": {"execution": "interpreted"},
      "nodes": [], "edges": [], "fields": []},
-    {"id": "tests/switcher/a", "name": "Alpha", "settings": {"execution": "interpreted", "icon": "M12 2L2 22h20z"},
+    {"id": "tests/switcher/a", "name": "Alpha", "settings": {"execution": "interpreted", "icon": "M12 2L2 22h20z",
+      "category": "Art & galleries"},
      "nodes": [], "edges": [], "fields": []},
   ]}
   discard updateUploadedScenesFromPayload(payload, persistPayload = false)
@@ -22,8 +23,9 @@ block the_list_is_the_frames_scene_order_with_names:
   doAssert listed.len >= 2, $listed
   # The pushed set's order, not the alphabet's.
   doAssert listed[0] == SwitcherEntry(id: "tests/switcher/b", name: "Bravo"), $listed
-  # With its icon (`settings.icon`, docs/scene-icons.md) where it has one.
-  doAssert listed[1] == SwitcherEntry(id: "tests/switcher/a", name: "Alpha", icon: "M12 2L2 22h20z"), $listed
+  # With its icon and category (docs/scene-icons.md) where it has them.
+  doAssert listed[1] == SwitcherEntry(id: "tests/switcher/a", name: "Alpha", icon: "M12 2L2 22h20z",
+    category: "Art & galleries"), $listed
   for entry in listed:
     doAssert entry.id != SceneSwitcherId and entry.id != "system/index", "no system scene is a tile"
   installSceneSwitcherHooks()

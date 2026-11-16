@@ -121,3 +121,14 @@ export function normalizeCategory(
   }
   return bySlug.has(slug) ? slug : undefined;
 }
+
+// A scene names its category by the store's title ("Photos", "Real time";
+// settings.category, docs/scene-icons.md "Category"). The slug of the store
+// category with that title, or undefined when it is none of them.
+export function categorySlugForTitle(title: unknown): string | undefined {
+  if (typeof title !== "string") {
+    return undefined;
+  }
+  const name = title.trim();
+  return storeCategories.find((category) => category.title === name)?.slug;
+}

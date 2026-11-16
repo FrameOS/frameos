@@ -386,6 +386,7 @@
       }
     ],
     "settings": {
+      "category": "AI & generative",
       "backgroundColor": "#f5f1e6",
       "execution": "interpreted",
       "refreshInterval": 300,

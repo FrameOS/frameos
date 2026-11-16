@@ -302,23 +302,14 @@ proc getSceneDisplayName*(sceneId: SceneId): Option[string] =
         return some(interpreted.name)
     return none(string)
 
-proc getSceneWindowSize*(sceneId: SceneId): string =
-  ## The scene's own window size on a desktop (`settings.windowSize`), "" for
-  ## none: what a desktop's `app.frame.scenes` lists beside its name.
+proc getSceneListing*(sceneId: SceneId): tuple[windowSize, icon, category: string] =
+  ## What `app.frame.scenes` and the scene switcher list beside the scene's
+  ## name (docs/scene-icons.md): its own window size on a desktop
+  ## (`settings.windowSize`), its icon and its category, "" each for none.
   withLock sceneRegistryLock:
-    if uploadedScenes.hasKey(sceneId):
-      return uploadedScenes[sceneId].windowSize
-    if interpretedScenes.hasKey(sceneId):
-      return interpretedScenes[sceneId].windowSize
-
-proc getSceneIcon*(sceneId: SceneId): string =
-  ## The scene's icon (`settings.icon`, docs/scene-icons.md), "" for none:
-  ## what `app.frame.scenes` and the scene switcher show beside its name.
-  withLock sceneRegistryLock:
-    if uploadedScenes.hasKey(sceneId):
-      return uploadedScenes[sceneId].icon
-    if interpretedScenes.hasKey(sceneId):
-      return interpretedScenes[sceneId].icon
+    let scene = uploadedScenes.getOrDefault(sceneId, interpretedScenes.getOrDefault(sceneId, nil))
+    if not scene.isNil:
+      return (scene.windowSize, scene.icon, scene.category)
 
 proc dynamicSceneCount*(): int =
   ## How many interpreted scenes this frame holds (deployed and uploaded; an

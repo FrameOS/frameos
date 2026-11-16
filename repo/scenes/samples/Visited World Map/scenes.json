@@ -3,6 +3,7 @@
     "id": "visited-world-map",
     "name": "Visited World Map",
     "settings": {
+      "category": "Data & dashboards",
       "refreshInterval": 3600,
       "backgroundColor": "#ffffff",
       "execution": "interpreted",

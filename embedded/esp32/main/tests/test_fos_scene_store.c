@@ -608,6 +608,29 @@ static void test_icon_in_the_index(void)
     CHECK(entry_says("desk", "icon", NULL));
 }
 
+/* And its category (docs/scene-icons.md "Category"), the name a desktop
+ * groups its scene lists by: kept as it is, text of 128 bytes or fewer, and
+ * listed so by the runtime. */
+static void test_category_in_the_index(void)
+{
+    fresh_dir();
+    fos_scene_store_result_t result;
+    CHECK(put_one("{\"id\":\"sky\",\"settings\":{\"category\":\"Weather\"}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("sky", "category", "Weather"));
+    CHECK(put_one("{\"id\":\"art\",\"settings\":{\"category\":\"Art & galleries\"}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("art", "category", "Art & galleries"));
+    char scene[300], name[140];
+    memset(name, 'x', 129);
+    name[129] = '\0';
+    snprintf(scene, sizeof(scene), "{\"id\":\"long\",\"settings\":{\"category\":\"%s\"}}", name);
+    CHECK(put_one(scene, &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("long", "category", NULL));
+    CHECK(put_one("{\"id\":\"odd\",\"settings\":{\"category\":7}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("odd", "category", NULL));
+    CHECK(put_one("{\"id\":\"desk\",\"settings\":{\"isLayout\":true,\"category\":\"Desktop layouts\"}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("desk", "category", NULL));
+}
+
 static void test_layouts_and_the_default(void)
 {
     fresh_dir();
@@ -887,6 +910,7 @@ int main(void)
     test_layouts_and_the_default();
     test_window_size_in_the_index();
     test_icon_in_the_index();
+    test_category_in_the_index();
     test_replace_all();
     test_every_2_kb_written_is_paced();
     test_a_set_file_from_its_scenes();

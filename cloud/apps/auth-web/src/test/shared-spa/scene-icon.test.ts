@@ -1,7 +1,8 @@
 // A scene's icon (frontend/src/utils/sceneIcon.ts, docs/scene-icons.md): one
 // SVG path in a 0 0 24 24 box. docs/scene-icon-fixtures.json is replayed here
 // and by the runtime (frameos/src/frameos/tests/test_scene_icon.nim), so the
-// editor and every frame agree on what is an icon.
+// editor and every frame agree on what is an icon. And its category, a name
+// (utils/sceneCategory.ts), which a frame lists as it is.
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -14,6 +15,7 @@ import {
   sceneIconProblem,
   templateSceneIcon,
 } from "../../../../../../frontend/src/utils/sceneIcon";
+import { sceneCategoryFromSelect, sceneCategoryOptions } from "../../../../../../frontend/src/utils/sceneCategory";
 
 interface Fixture {
   name: string;
@@ -97,5 +99,24 @@ describe("the editor's side of it", () => {
     expect(templateSceneIcon({ icon: "M0 0h1z", scenes: [] })).toBe("M0 0h1z");
     expect(templateSceneIcon({ icon: "M0 0h1z", scenes: [{ settings: {} }] })).toBeNull();
     expect(templateSceneIcon({ icon: "M0 0h1z", scenes: [{ settings: { icon: "M1 1h1z" } }] })).toBe("M1 1h1z");
+  });
+});
+
+describe("scene categories", () => {
+  it("offers the store's titles, a layout the layout ones, and keeps a name of the scene's own", () => {
+    const scene = sceneCategoryOptions(undefined, false).map((option) => option.value);
+    expect(scene[0]).toBe("");
+    expect(scene).toContain("Photos");
+    expect(scene).toContain("Real time");
+    expect(scene).not.toContain("Desktop layouts");
+    expect(sceneCategoryOptions(undefined, true).map((option) => option.value)).toEqual([
+      "",
+      "Desktop layouts",
+      "Full screen layouts",
+    ]);
+    const own = sceneCategoryOptions("Clocks", false);
+    expect(own[own.length - 1]).toEqual({ value: "Clocks", label: "Clocks" });
+    expect(sceneCategoryFromSelect("")).toBeUndefined();
+    expect(sceneCategoryFromSelect("Weather")).toBe("Weather");
   });
 });

@@ -3,6 +3,7 @@
     "id": "0b8946dd-82ff-4d52-8180-2b425a1e5a4d",
     "name": "Day agenda",
     "settings": {
+      "category": "Calendars & agendas",
       "execution": "interpreted",
       "refreshInterval": 300,
       "backgroundColor": "#fafaf9",

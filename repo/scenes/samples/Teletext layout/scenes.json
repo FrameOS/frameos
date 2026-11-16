@@ -3,6 +3,7 @@
     "id": "layout-teletext",
     "name": "Teletext",
     "settings": {
+      "category": "Full screen layouts",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#000000",

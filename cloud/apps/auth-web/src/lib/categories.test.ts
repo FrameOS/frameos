@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getStoreCategory, normalizeCategory, storeCategories } from './categories'
+import { categorySlugForTitle, getStoreCategory, normalizeCategory, storeCategories } from './categories'
 import { storeCategoryShelves } from '../../../../../frontend/src/utils/storeCategories'
 
 describe('storeCategories', () => {
@@ -58,5 +58,15 @@ describe('getStoreCategory', () => {
     expect(getStoreCategory('nope')).toBeUndefined()
     expect(getStoreCategory(null)).toBeUndefined()
     expect(getStoreCategory(undefined)).toBeUndefined()
+  })
+})
+
+describe('categorySlugForTitle', () => {
+  it("is the store category a scene names by its title (settings.category)", () => {
+    expect(categorySlugForTitle('Art & galleries')).toBe('art')
+    expect(categorySlugForTitle(' Real time ')).toBe('realtime')
+    expect(categorySlugForTitle('art')).toBeUndefined()
+    expect(categorySlugForTitle('Clocks')).toBeUndefined()
+    expect(categorySlugForTitle(undefined)).toBeUndefined()
   })
 })

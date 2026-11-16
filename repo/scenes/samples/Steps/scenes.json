@@ -3,6 +3,7 @@
     "id": "steps",
     "name": "Steps",
     "settings": {
+      "category": "Data & dashboards",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#18181b",

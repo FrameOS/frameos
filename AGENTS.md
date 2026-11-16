@@ -231,6 +231,13 @@
   through `listingItem` (an ESP32 off its scene index, `make_entry`), and the
   switcher draws it on its tiles. An SVG becomes one path in the editor alone
   (`utils/svgToSceneIcon.ts`), never on a frame.
+- `settings.category` is the category's NAME as text ("Photos", "Real time"),
+  picked from the store's titles in the editor and listed as `category` the
+  same way. Nothing on a frame maps it or checks it: no ids, no table, no rule
+  (an ESP32's scene index only keeps one of 128 bytes or fewer, through the
+  icon's `keep_text`); the desktops trim it and group by the text itself
+  (`grouped`), and a store version whose scene names a store title is filed
+  under it. A new repo sample names its category.
 
 ## Scene settings on the frame: `docs/scene-settings.md`
 
@@ -625,8 +632,8 @@
   scene_rhythm.nim). Windows, positions and z-order are the layout's own state.
   A new window goes where `freeSpot` puts it (bare desktop first, then the least
   overlap), the same text in all five desktops of windows, and a list of scenes
-  goes by category through `grouped` (`category` on each `app.frame.scenes`
-  entry, in `app.frame.categories` order) and draws a scene's own icon through
+  goes by category through `grouped` (the `category` name on each
+  `app.frame.scenes` entry, the groups by name, Other last) and draws a scene's own icon through
   `ownIcon`, each the same text in all six with a list: change any of them in
   every copy
   (`test_windowed_desktops.nim` checks they match).

@@ -1324,6 +1324,9 @@ export interface FrameSceneSettings {
   /** Its icon: one SVG path in a 0 0 24 24 box, filled with the color around it
    * (utils/sceneIcon.ts, docs/scene-icons.md); unset = each list's own placeholder. */
   icon?: string
+  /** Its category by its name, "Photos" or "Real time", picked from the store's titles
+   * (utils/sceneCategory.ts): a desktop layout groups its list of scenes by it. */
+  category?: string
 }
 
 /** The layout an installed scene wears, and the layout's settings for it. */

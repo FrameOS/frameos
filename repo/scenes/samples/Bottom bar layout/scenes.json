@@ -3,6 +3,7 @@
     "id": "layout-bottom-bar",
     "name": "Bottom bar",
     "settings": {
+      "category": "Full screen layouts",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#0f172a",
