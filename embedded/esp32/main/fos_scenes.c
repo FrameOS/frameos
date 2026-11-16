@@ -1214,7 +1214,7 @@ static bool apply_index_change(void)
             fos_display_loading_begin(xTaskGetTickCount(), fos_config()->rotate);
             if (resident_slot >= 0) {
                 ok = load_scene_slot(resident_slot, resident, "stored");
-                if (!ok && before_slot >= 0 && before_slot != resident_slot) {
+                if (!ok && !s_store_changing && before_slot >= 0 && before_slot != resident_slot) {
                     /* A scene the runtime refuses does not take the working
                      * one with it: the old file is still there until the
                      * sweep below. The apply still reports the failure. */
@@ -1252,6 +1252,14 @@ static bool apply_index_change(void)
 bool fos_scenes_apply_pending(void)
 {
     if (!s_pending || !s_mounted) return false;
+    /* A store-first set is being written (s_store_changing): no scene loads
+     * until it is on flash (load_scene_slot), and its write leaves this apply
+     * pending again. Applied now, a patch stored just before it read that
+     * "not now" as the runtime refusing the resident scene, pointed the scene
+     * back at its previous file and kept it there: the reTerminal E1004 wore
+     * the layout of a push four pushes old (`layout:missing` after every
+     * desktop push, the hardware bench, 2026-11-16). */
+    if (s_store_changing) return false;
     /* A combined payload stored since wins over a change made before it. */
     if (s_patch_pending && !combined_stored()) return apply_index_change();
     s_patch_pending = false;
