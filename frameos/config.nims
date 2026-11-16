@@ -90,6 +90,10 @@ elif defined(frameosEmbedded):
   # source text was a literal per site and module (-20.2 KB).
   patchFile("stdlib", "assertions", "src/embedded/patched/assertions")
 
+  # base64's decode builds its error message out of line, not at nine reads.
+  # (The file keeps the module's name: callers write `base64.encode`.)
+  patchFile("stdlib", "base64", "src/embedded/patched/base64")
+
 when defined(testing):
   # Test binaries (testament passes -d:testing) are built without C
   # optimisation. nim.cfg's -d:release means -O3, and for a test that pulls
