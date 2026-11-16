@@ -311,6 +311,10 @@ interface FrameOSApp {
      * calendar, weather, ai, dashboards, fun, realtime, utilities, demos), where it has one (its
      * settings.category), to group a scene list by (FrameOS 2026.11.10+). */
     scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string }[];
+    /** Every scene category in the store's order, { id, name }: id is what a scene's category says, name a
+     * short label for its group or folder ("Photos", "Real time"). Show a category by this name, never a
+     * table of your own (FrameOS 2026.11.10+; undefined before). */
+    categories?: { id: string; name: string }[];
     /** How many of those scenes may run at once, the one in front included, where that is limited (2 on an
      * ESP32 with 8 MB of PSRAM, 4 with more). A desktop opening one more closes the one that had the focus
      * longest ago. Undefined where there is no limit (a Raspberry Pi) (FrameOS 2026.11.8+; undefined

@@ -18,6 +18,7 @@ import {
 } from "../../../../../../frontend/src/utils/sceneIcon";
 import {
   sceneCategoryFromSelect,
+  sceneCategoryNames,
   sceneCategoryOptions,
   sceneCategorySlug,
   storeCategoryShelves,
@@ -100,11 +101,15 @@ describe("the editor's side of it", () => {
 
 const categories = JSON.parse(
   readFileSync(new URL("../../../../../../docs/scene-category-fixtures.json", import.meta.url), "utf8"),
-) as { slugs: string[]; cases: { name: string; category: unknown; slug: string | null }[] };
+) as { cases: { name: string; category: unknown; slug: string | null }[] };
+const contract = JSON.parse(
+  readFileSync(new URL("../../../../../../docs/scene-categories.json", import.meta.url), "utf8"),
+) as { categories: { id: string; title: string; name: string }[] };
 
-describe("scene categories (docs/scene-category-fixtures.json)", () => {
-  it("are the store's slugs, in shelf order", () => {
-    expect(categories.slugs).toEqual(storeCategoryShelves.map((shelf) => shelf.slug));
+describe("scene categories (docs/scene-categories.json, docs/scene-category-fixtures.json)", () => {
+  it("are the contract's, in its order, with its titles and names", () => {
+    expect(storeCategoryShelves).toEqual(contract.categories.map(({ id, title }) => ({ slug: id, title })));
+    expect(Object.entries(sceneCategoryNames)).toEqual(contract.categories.map(({ id, name }) => [id, name]));
   });
 
   for (const fixture of categories.cases) {

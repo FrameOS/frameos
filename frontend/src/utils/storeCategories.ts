@@ -1,18 +1,21 @@
 /**
  * The FrameOS Cloud store's category taxonomy, in shelf order: what the
- * store front shows as its curated shelves, and what the Add scene drawer's
- * Scene store page groups the catalog by.
+ * store front shows as its curated shelves, what the Add scene drawer's
+ * Scene store page groups the catalog by, and what a scene's own
+ * `settings.category` may name.
  *
- * The source of truth (with shelf copy and classifier hints) is
- * cloud/apps/auth-web/src/lib/categories.ts; that package's test suite checks
- * this list against it, so the two cannot drift silently. A scene carries at
- * most one category slug (`template.category` in the repository JSON).
+ * The source of truth is docs/scene-categories.json:
+ * frameos/tools/generate_scene_categories.py writes the region below, the
+ * cloud's categories.ts (with the shelf copy and classifier hints) and the
+ * runtime's table. A scene carries at most one category slug
+ * (`template.category` in the repository JSON).
  */
 export interface StoreCategoryShelf {
   slug: string
   title: string
 }
 
+// BEGIN GENERATED: scene categories (frameos/tools/generate_scene_categories.py, docs/scene-categories.json)
 export const storeCategoryShelves: StoreCategoryShelf[] = [
   { slug: 'photos', title: 'Photos' },
   { slug: 'art', title: 'Art & galleries' },
@@ -27,6 +30,23 @@ export const storeCategoryShelves: StoreCategoryShelf[] = [
   { slug: 'utilities', title: 'Tools & utilities' },
   { slug: 'demos', title: 'Demos & examples' },
 ]
+
+/** Each category's short name: a folder's label, a group of a scene list (`app.frame.categories`). */
+export const sceneCategoryNames: Record<string, string> = {
+  photos: 'Photos',
+  art: 'Art',
+  calendar: 'Calendars',
+  weather: 'Weather',
+  ai: 'AI',
+  dashboards: 'Dashboards',
+  fun: 'Fun',
+  realtime: 'Real time',
+  desktops: 'Desktops',
+  layouts: 'Layouts',
+  utilities: 'Utilities',
+  demos: 'Demos',
+}
+// END GENERATED: scene categories
 
 /** Scenes without a (known) category land on this shelf, after the others. */
 export const OTHER_STORE_CATEGORY: StoreCategoryShelf = { slug: 'other', title: 'Other scenes' }

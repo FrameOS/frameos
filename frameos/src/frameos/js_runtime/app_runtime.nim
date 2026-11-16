@@ -39,6 +39,7 @@ import frameos/render_scale
 import frameos/panel_shape
 import frameos/scene_store_hooks
 import frameos/frame_settings_hooks
+import frameos/scene_category
 
 type
   JsAssetGrant* = enum
@@ -1672,6 +1673,10 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     if not windowSceneListing.isNil and limit > 0:
       return nimIntToJS(ctx, limit.int32)
     return jsUndefSentinel(ctx)
+  of "categories":
+    # Every scene category with its name, on every host: a layout groups
+    # app.frame.scenes by `category` and names a group from this.
+    return jsonToJS(ctx, sceneCategoriesJson())
   else:
     return jsUndefSentinel(ctx)
 
@@ -1746,6 +1751,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
     keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale", "paper",
       "color", "sceneName", "systemScene", "batteryPercent", "wifiRssi"]
     keys.add("sceneId")
+    keys.add("categories")
     if not windowSceneListing.isNil:
       keys.add("scenes")
       if windowLimit() > 0:

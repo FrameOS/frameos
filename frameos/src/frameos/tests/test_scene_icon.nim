@@ -46,11 +46,14 @@ const CategoryFixturesPath = currentSourcePath().parentDir() / ".." / ".." / "..
 suite "scene categories (docs/scene-category-fixtures.json)":
   let fixtures = parseJson(readFile(CategoryFixturesPath))
 
-  test "the slugs are the store's":
-    var slugs: seq[string]
-    for slug in fixtures["slugs"]:
-      slugs.add slug.getStr()
-    check slugs == @SceneCategories
+  test "the table is docs/scene-categories.json's, and so is app.frame.categories":
+    let contract = parseJson(readFile(currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "docs" /
+      "scene-categories.json"))["categories"]
+    let listed = sceneCategoriesJson()
+    check listed.len == contract.len
+    for i in 0 ..< contract.len:
+      check SceneCategoryIds[i] == contract[i]["id"].getStr()
+      check listed[i] == %*{"id": contract[i]["id"], "name": contract[i]["name"]}
 
   test "every case":
     for fixture in fixtures["cases"]:

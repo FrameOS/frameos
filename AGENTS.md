@@ -231,10 +231,15 @@
   through `listingItem` (an ESP32 off its scene index, `make_entry`), and the
   switcher draws it on its tiles. An SVG becomes one path in the editor alone
   (`utils/svgToSceneIcon.ts`), never on a frame.
-- `settings.category` is one of the store's category slugs
-  (`utils/storeCategories.ts`), listed the same way as `category` for the
-  desktops to group by; any other value counts as none (`scene_category.nim`,
-  `docs/scene-category-fixtures.json`). A new repo sample names its category.
+- `settings.category` is one of the store's category slugs, listed the same
+  way as `category` for the desktops to group by; any other value counts as
+  none (`scene_category.nim`, `docs/scene-category-fixtures.json`). The
+  categories are ONE list, `docs/scene-categories.json` (id, title, a short
+  `name`, the store's copy): run `python3 frameos/tools/generate_scene_categories.py`
+  after touching it (the runtime's, the SPA's and the cloud store's tables;
+  the backend suite runs `--check`). Apps get the names as
+  `app.frame.categories` and keep no table of their own. A new repo sample
+  names its category.
 
 ## Scene settings on the frame: `docs/scene-settings.md`
 

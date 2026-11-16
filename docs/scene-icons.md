@@ -40,16 +40,29 @@ warns. The rule is written twice, `frameos/src/frameos/scene_icon.nim`
 ## Category
 
 `settings.category` is one of the store's category slugs, the ones its
-shelves use (`frontend/src/utils/storeCategories.ts`, mirrored by
-`cloud/apps/auth-web/src/lib/categories.ts`): `photos`, `art`, `calendar`,
-`weather`, `ai`, `dashboards`, `fun`, `realtime`, `utilities`, `demos`, and
-`desktops` / `layouts` for a layout. A desktop layout groups its scene lists by
-it (`app.frame.scenes[i].category`). The value is read trimmed and in lower
-case; any other value stays in the scene, counts as none (no `category` in
-`app.frame.scenes`), and the cloud's scene lint warns. The rule is
-`frameos/src/frameos/scene_category.nim` and `sceneCategorySlug` in
-`storeCategories.ts`, pinned by `docs/scene-category-fixtures.json`, whose slug
-list the SPA's test compares with the store's.
+shelves use: `photos`, `art`, `calendar`, `weather`, `ai`, `dashboards`, `fun`,
+`realtime`, `utilities`, `demos`, and `desktops` / `layouts` for a layout. A
+desktop layout groups its scene lists by it (`app.frame.scenes[i].category`).
+The value is read trimmed and in lower case; any other value stays in the
+scene, counts as none (no `category` in `app.frame.scenes`), and the cloud's
+scene lint warns. The rule is `frameos/src/frameos/scene_category.nim` and
+`sceneCategorySlug` in `storeCategories.ts`, pinned by
+`docs/scene-category-fixtures.json`.
+
+**One list, `docs/scene-categories.json`**: each category's `id` (the slug),
+`title` (the store shelf's heading), `name` (a short label for a folder or a
+group: "Photos", "Calendars", "Real time"), and the store's `description` and
+classifier `hint`, in shelf order. `frameos/tools/generate_scene_categories.py`
+writes every copy: the runtime's table (`scene_categories_gen.nim`), the SPA's
+(the generated region of `frontend/src/utils/storeCategories.ts`, which the
+editor's Category select and the store pages read) and the cloud store's (the
+generated region of `cloud/apps/auth-web/src/lib/categories.ts`); the backend
+suite runs its `--check`. A new category goes in the contract, never in a copy.
+
+**Names for apps**: every runtime hands the list out as `app.frame.categories`,
+`[{id, name}]` in that order, all of them (a layout shows the ones its scenes
+use). An app shows a category by that name and keeps no table of its own;
+`app.frame.scenes[i].category` stays the slug.
 
 There is no category for clocks: the store files its clocks under
 `utilities` ("Tools & utilities"), and so do the repo's samples.
