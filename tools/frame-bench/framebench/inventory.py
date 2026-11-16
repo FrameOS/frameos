@@ -26,7 +26,22 @@ def serial_ports():
     return ports
 
 
-def probe_port(port: str, timeout: float = 6.0) -> dict | None:
+def probe_port(port: str, timeout: float = 25.0, deadline: float = 60.0) -> dict | None:
+    """probe_port_now with an overall deadline: a port that hangs in open or
+    close (a co-processor's CDC port that stopped answering, the SenseCAP's
+    RP2040) is skipped instead of stalling the whole discovery."""
+    import threading
+    box = {}
+    th = threading.Thread(target=lambda: box.setdefault('r', probe_port_now(port, timeout)), daemon=True)
+    th.start()
+    th.join(deadline)
+    if th.is_alive():
+        print(f'{port}: no answer within {deadline:.0f} s, skipped')
+        return None
+    return box.get('r')
+
+
+def probe_port_now(port: str, timeout: float = 25.0) -> dict | None:
     try:
         con = Console(port)
     except Exception as exc:
