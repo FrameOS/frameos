@@ -31,6 +31,7 @@ RENDER_MJS = REPO_ROOT / "backend" / "tools" / "embedded_wasm_render.mjs"
 NETWORK_APPS = {
     "downloadImage", "wikicommons", "frameOSGallery", "weather", "beRecycle",
     "unsplash", "immich", "googlePhotos", "openaiImage", "haSensor",
+    "weatherOpenMeteoJS", "birdJournal", "flightRadar",
 }
 HOST_ONLY_APPS = {"chromiumScreenshot", "rstpSnapshot"}
 

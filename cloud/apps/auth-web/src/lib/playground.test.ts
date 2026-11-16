@@ -178,5 +178,8 @@ describe("the playground's scenes", () => {
   it("leave out what needs a key or a Pi", () => {
     expect(excludedTemplates.has("OpenAI image")).toBe(true);
     expect(scenes.some((scene) => scene.id === "9f5a338b-0048-495a-a64f-e3190071ff51")).toBe(false);
+    // Draws its plates with the frame's OpenAI key.
+    expect(excludedTemplates.has("Bird field journal")).toBe(true);
+    expect(scenes.some((scene) => scene.id === "9b7f5b0e-6c3a-4d9e-8a64-2f1c7f0b1d21")).toBe(false);
   });
 });
