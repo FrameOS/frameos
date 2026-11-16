@@ -2831,6 +2831,20 @@ proc colorWithOpacity(spec: JsonNode): Color =
   color.a = opacity.float32
   return color
 
+proc svgStretchesOnto*(fit: string, requestedWidth, requestedHeight, offeredWidth, offeredHeight: int): bool =
+  ## Whether an SVG asked for at one size and drawn by its consumer onto an
+  ## offered target of another is the SVG drawn at the offer's size: the
+  ## consumer stretches it, or covers or contains with it at the offer's own
+  ## aspect. pixie scales an SVG's root to the size it is drawn at, x and y
+  ## each by its own factor, as a stretch does.
+  if requestedWidth <= 0 or requestedHeight <= 0 or offeredWidth <= 0 or offeredHeight <= 0:
+    return false
+  case fit
+  of "stretch": true
+  of "cover", "contain":
+    requestedWidth.int64 * offeredHeight.int64 == offeredWidth.int64 * requestedHeight.int64
+  else: false
+
 proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: SvgNode,
     requestedWidth, requestedHeight: int, reuse = false): Image =
   ## Rasterizes an SVG into the target the planner offered this node, when
@@ -2855,6 +2869,28 @@ proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: SvgNod
   let (offeredWidth, offeredHeight) = owner.offeredDecodeTargetSize(context)
   if svg.isNil or offeredWidth <= 0 or offeredHeight <= 0:
     return nil
+  if (offeredWidth != requestedWidth or offeredHeight != requestedHeight) and
+      svgStretchesOnto(context.decodeTargetScalingMode, requestedWidth, requestedHeight,
+        offeredWidth, offeredHeight):
+    # Asked for at another size, and placed so that the picture is that size
+    # stretched onto the offer: drawn at the offer's size, it is the same
+    # picture (the SVG's root scaled as vectors, sharper even), with nothing
+    # allocated for it. An app that draws at `app.frame.width` in a window or
+    # a split's cell is the case: a Big typographic clock in a Windows 98
+    # window asked for 800x480 RGBX, 1.5 MB, that the reTerminal E1002 did not
+    # have, and aborted out of memory (2026-11-16).
+    let (target, _) = owner.takeDecodeTarget(context, deferBackground = true)
+    if target.isNil:
+      return nil
+    var owed = takeOwedBackground(context, target)
+    var rendered = renderSvgIntoTarget(svg, target, owed)
+    if not rendered and releaseRenderMemory():
+      rendered = renderSvgIntoTarget(svg, target, owed)
+    if not rendered:
+      rendered = renderSvgIntoTargetWithDegrade(svg, target, owed)
+    if owed.isSome:
+      payBackground(target, owed.get())
+    return if rendered: target else: nil
   if offeredWidth != requestedWidth or offeredHeight != requestedHeight:
     # An offer of some other size (a planner that scaled the cell): only a
     # raster of exactly that size can claim it.

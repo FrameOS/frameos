@@ -66,10 +66,15 @@ proc decodeOutputMaxPixels*(): int =
   ## Largest decoded-output pixel count the current memory headroom allows;
   ## 0 = unknown/unlimited. The output takes 4 bytes per pixel and shares
   ## the headroom with decode intermediates and the canvas.
+  ## On an ESP32-class runtime a 0 from availableRenderBytes is nothing left
+  ## under the reserve, not "unknown": the floor then. Read as unlimited, it
+  ## let a JS app's 800x480 SVG ask for 1.5 MB with 1.1 MB free on the
+  ## reTerminal E1002 (2026-11-16), an out-of-memory abort.
+  const FloorPixels = 65_536
   let available = availableRenderBytes()
   if available <= 0:
-    return 0
-  max(65_536, (available div 3) div 4)
+    return if runsAsEmbedded(): FloorPixels else: 0
+  max(FloorPixels, (available div 3) div 4)
 
 proc displayDecodeDimensions*(sourceWidth, sourceHeight: int,
     maxEdge = DisplayDecodeMaxEdge,
