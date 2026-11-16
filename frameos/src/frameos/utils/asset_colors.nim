@@ -216,16 +216,12 @@ proc luminance*(r, g, b: float): float {.inline.} =
 # -Os helpers it called (the 565 expand and pack, the bin, three zeroed
 # temporaries), and a raw read of the same canvas took a twentieth of that
 # (the E1004 again, measured on the device). So each format gets a loop of
-# its own over its buffer, with nothing called per pixel: a 565 pixel's
+# its own over its buffer, with nothing called per pixel (and no -O2 of its
+# own: there is nothing to inline, and it cost flash): a 565 pixel's
 # channels go through 32- and 64-entry tables, and its store through tables
 # of what pixie's own pack (dithered or not) makes of each level, built per
 # fit. A grey canvas keeps the accessors. The bins and the stored pixels are
 # the same as before, bit for bit (test_asset_colors.nim compares them).
-
-when defined(frameosEmbedded):
-  {.pragma: fitLoop, codegenDecl: "__attribute__((optimize(\"O2\"))) $# $#$#".}
-else:
-  {.pragma: fitLoop.}
 
 static:
   # The integer bins below are these weights in hundredths.
@@ -256,7 +252,7 @@ proc luminanceBin*(r, g, b: uint8): int =
   binOf(r.int, g.int, b.int)
 
 proc fitHistogram(image: Image, xStart, yStart, xEnd, yEnd: int,
-    histogram: var array[256, int]) {.fitLoop.} =
+    histogram: var array[256, int]) =
   let width = xEnd - xStart
   for y in yStart ..< yEnd:
     breathe()
@@ -276,7 +272,7 @@ proc fitHistogram(image: Image, xStart, yStart, xEnd, yEnd: int,
         let p = image.getPixel(index)
         inc histogram[binOf(p.r.int, p.g.int, p.b.int)]
 
-proc applyLut(image: Image, lut: array[256, uint8], xStart, yStart, xEnd, yEnd: int) {.fitLoop.} =
+proc applyLut(image: Image, lut: array[256, uint8], xStart, yStart, xEnd, yEnd: int) =
   let width = xEnd - xStart
   case image.format
   of pfRgb565:
