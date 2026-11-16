@@ -113,6 +113,9 @@ export interface PreviewRuntimeInfo {
    * render. False for a bundle from before it, or with nothing to seed: a
    * page that has values to keep sends them with `setSceneState`. */
   sceneStateSeeded: boolean
+  /** Whether the bundle can take a new size without starting over
+   * (`FrameOSPreview.resize`). */
+  resize: boolean
 }
 
 /** How the runtime's /srv/assets is backed, sent with the worker's `ready` message. */

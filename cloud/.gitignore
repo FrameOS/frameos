@@ -16,6 +16,7 @@ coverage/
 *.log
 .DS_Store
 apps/auth-web/public/frameos-wasm/
+apps/auth-web/public/playground-assets/
 apps/auth-web/public/frameos-editor/
 apps/auth-web/public/frames-app/
 # Copied from frameos/assets/copied/fonts by copy-font-assets.mjs — the same

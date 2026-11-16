@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "../../../../src/lib/csrf";
 import { jsonError, readJsonObject } from "../../../../src/lib/device-flow";
+import { getPlaygroundBaseUrl } from "../../../../src/lib/env";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { guardedFetch } from "../../../../src/lib/ssrf";
 import { storeRoute } from "../../../../src/lib/store-cache";
@@ -33,7 +34,12 @@ async function handlePost(request: NextRequest) {
   if (!contentType.toLowerCase().startsWith("application/json")) {
     return jsonError("invalid_content_type", 415);
   }
-  const csrf = csrfResponse(request);
+  // The playground (cloud/docs/playground.md) runs the same preview worker
+  // from its own origin, which is no signed-in surface and so not one of the
+  // app origins csrfResponse knows.
+  const fromPlayground =
+    request.headers.get("origin") === new URL(getPlaygroundBaseUrl()).origin;
+  const csrf = fromPlayground ? undefined : csrfResponse(request);
   if (csrf) {
     return csrf;
   }

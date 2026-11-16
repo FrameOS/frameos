@@ -1941,6 +1941,30 @@ describe("store publish and distribution", () => {
     );
     expect(formPost.status).toBe(415);
 
+    // The playground (cloud/docs/playground.md) runs the same worker from its
+    // own origin, which is no app origin; any other origin is still refused.
+    const previousPlayground = process.env.FRAMEOS_PLAYGROUND_APP_URL;
+    process.env.FRAMEOS_PLAYGROUND_APP_URL = "https://playground.example";
+    try {
+      const fromOrigin = (origin: string) =>
+        previewProxy(
+          request("/api/store/preview-proxy", "POST", {
+            body: { url: "http://127.0.0.1:5432/" },
+            headers: { origin },
+          }),
+        );
+      const playground = await fromOrigin("https://playground.example");
+      expect((await readJson(playground)).error).toBe("host_not_allowed");
+      const elsewhere = await fromOrigin("https://elsewhere.example");
+      expect((await readJson(elsewhere)).error).toBe("invalid_origin");
+    } finally {
+      if (previousPlayground === undefined) {
+        delete process.env.FRAMEOS_PLAYGROUND_APP_URL;
+      } else {
+        process.env.FRAMEOS_PLAYGROUND_APP_URL = previousPlayground;
+      }
+    }
+
     // Loopback, private ranges, and IPv6 loopback are refused.
     for (const url of [
       "http://127.0.0.1:5432/",

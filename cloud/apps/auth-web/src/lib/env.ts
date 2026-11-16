@@ -72,6 +72,18 @@ export function getScenesBaseUrl() {
   return configured ? devLocalUrl(configured) : getCloudBaseUrl();
 }
 
+// The playground (cloud/docs/playground.md): a frame in the browser, a
+// desktop of the repo's scenes. Production serves it at
+// playground.frameos.net; without the setting it is /playground on the
+// cloud origin. Deliberately not one of getAppOrigins(): nobody signs in
+// there, so it is no return-to target, passkey origin or cookie-checked
+// mutation origin. The one route it posts to, the anonymous store preview
+// proxy, accepts it by name.
+export function getPlaygroundBaseUrl() {
+  const configured = optionalEnv("FRAMEOS_PLAYGROUND_APP_URL");
+  return configured ? devLocalUrl(configured) : getCloudBaseUrl();
+}
+
 export function getAppOrigins() {
   return new Set([
     new URL(getAccountBaseUrl()).origin,
