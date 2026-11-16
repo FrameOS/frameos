@@ -18,6 +18,11 @@
 ## slid with the zoom, banding on the glass while the picture moved
 ## (2026-10-26).
 ##
+## The source may be any format. An RGBX one is read as it is; a 565 or grey
+## one (an error frame a producer drew into a 565 canvas, 2026-11-15: the
+## float sampler again, 2.25 s a frame) is expanded a pixel at a time as its
+## rows are interpolated, which is a branch per read and no copy.
+##
 ## On the ESP32 the rows are shared between both cores (fos_rows.c).
 
 import pixie
@@ -90,7 +95,8 @@ type
     ## worker must not touch a ref. The loops read through these locals
     ## because the firmware builds with -fno-strict-aliasing, where a field
     ## of a seq or an Image read in the loop is read again after every store.
-    source: ptr UncheckedArray[uint32]
+    source: pointer
+    sourceFormat: PixelFormat
     sourceOrigin, sourceStride: int
     target: pointer
     targetOrigin, targetStride: int
@@ -103,14 +109,29 @@ type
   RowsProc = proc(ctx: pointer, worker, first, last: int32) {.cdecl, gcsafe, raises: [].}
 
 proc interpolateRow(job: ptr RowJob, row: int, dest: ptr UncheckedArray[uint32]) =
-  let pixels = job.source
   let taps = job.columns
   let start = job.sourceOrigin + job.sourceStride * row
-  for x in 0 ..< job.width:
-    let tap = taps[x]
-    let at = start + tap.first.int
-    let left = pixels[at]
-    dest[x] = if tap.weight == 0: left else: mix(left, pixels[at + tap.step.int], tap.weight)
+  let format = job.sourceFormat
+  template across(read: untyped) =
+    for x in 0 ..< job.width:
+      let tap = taps[x]
+      let at = start + tap.first.int
+      let left = read(at)
+      dest[x] = if tap.weight == 0: left else: mix(left, read(at + tap.step.int), tap.weight)
+  if format == pfRgbx:
+    let pixels = cast[ptr UncheckedArray[uint32]](job.source)
+    template rgbx(i: int): uint32 = pixels[i]
+    across(rgbx)
+  else:
+    # One loop for the other three: they are not what a photo is.
+    let bytes = cast[ptr UncheckedArray[uint8]](job.source)
+    let halves = cast[ptr UncheckedArray[uint16]](job.source)
+    template expanded(i: int): uint32 =
+      cast[uint32](case format
+        of pfRgb565: rgb565ToRgbx(halves[i])
+        of pfGray8: gray8ToRgbx(bytes[i])
+        else: gray4ToRgbx(gray4Level(bytes, i)))
+    across(expanded)
 
 proc storeRow565Dithered(out16: ptr UncheckedArray[uint16], upper, lower: ptr UncheckedArray[uint32],
     width, y: int, weight: uint32) =
@@ -222,10 +243,9 @@ else:
 const BlockRows = 32 ## a worker's share at a time; each block caches its first two source rows afresh
 
 proc drawRectBilinear*(target, source: Image, sx, sy, sw, sh: float) =
-  ## Fills all of `target` with the RGBX source rectangle (sx, sy, sw, sh),
-  ## in source pixels, onto a target of any format; a 565 one dithered when
-  ## it asks for that.
-  doAssert source.format == pfRgbx, "drawRectBilinear reads an RGBX source"
+  ## Fills all of `target` with the source rectangle (sx, sy, sw, sh), in
+  ## source pixels, from a source of any format onto a target of any format;
+  ## a 565 one dithered when it asks for that.
   let width = target.width
   let height = target.height
   if width <= 0 or height <= 0 or source.width <= 0 or source.height <= 0:
@@ -235,9 +255,11 @@ proc drawRectBilinear*(target, source: Image, sx, sy, sw, sh: float) =
   let workers = rowsWorkers()
   var scratch = newSeq[uint32](2 * workers.int * width)
   var job = RowJob(
-    source: cast[ptr UncheckedArray[uint32]](source.data),
+    source: source.bufferPointer,
+    sourceFormat: source.format,
     sourceOrigin: source.origin,
     sourceStride: source.stride,
+    target: target.bufferPointer,
     targetOrigin: target.origin,
     targetStride: target.stride,
     format: target.format,
@@ -246,11 +268,6 @@ proc drawRectBilinear*(target, source: Image, sx, sy, sw, sh: float) =
     columns: cast[ptr UncheckedArray[AxisTap]](columns[0].unsafeAddr),
     rows: cast[ptr UncheckedArray[AxisTap]](rows[0].unsafeAddr),
     scratch: cast[ptr UncheckedArray[uint32]](scratch[0].addr))
-  job.target =
-    case target.format
-    of pfRgbx: cast[pointer](target.data)
-    of pfRgb565: cast[pointer](target.data16)
-    of pfGray8, pfGray4: cast[pointer](target.data8)
   runRows(drawRows, job.addr, height.int32, BlockRows)
 
 {.pop.}
