@@ -3,6 +3,7 @@
     "id": "layout-e-reader",
     "name": "E-reader",
     "settings": {
+      "category": "Full screen layouts",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#ffffff",

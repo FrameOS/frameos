@@ -3,6 +3,7 @@
     "id": "layout-terminal",
     "name": "Terminal",
     "settings": {
+      "category": "Full screen layouts",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#0b0f0c",

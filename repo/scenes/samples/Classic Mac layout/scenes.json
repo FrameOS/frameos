@@ -3,6 +3,7 @@
     "id": "layout-classic-mac",
     "name": "Classic Mac",
     "settings": {
+      "category": "Desktop layouts",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#808080",

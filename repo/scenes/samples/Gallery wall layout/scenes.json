@@ -3,6 +3,7 @@
     "id": "layout-gallery-wall",
     "name": "Gallery wall",
     "settings": {
+      "category": "Full screen layouts",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#d8d2c4",

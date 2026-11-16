@@ -3,6 +3,7 @@
     "id": "to-do",
     "name": "To-do",
     "settings": {
+      "category": "Tools & utilities",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#f1f5f9",

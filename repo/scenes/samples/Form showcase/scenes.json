@@ -3,6 +3,7 @@
     "id": "form-showcase",
     "name": "Form showcase",
     "settings": {
+      "category": "Demos & examples",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#0f172a",

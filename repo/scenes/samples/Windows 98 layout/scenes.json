@@ -3,6 +3,7 @@
     "id": "layout-windows-98",
     "name": "Windows 98",
     "settings": {
+      "category": "Desktop layouts",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#008080",

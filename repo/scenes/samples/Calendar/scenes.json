@@ -371,6 +371,7 @@
       }
     ],
     "settings": {
+      "category": "Calendars & agendas",
       "refreshInterval": 900,
       "backgroundColor": "#000000",
       "execution": "interpreted",

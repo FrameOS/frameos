@@ -3,6 +3,7 @@
     "id": "layout-macos",
     "name": "macOS",
     "settings": {
+      "category": "Desktop layouts",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#3b4cc0",

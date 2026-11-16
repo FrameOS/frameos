@@ -374,6 +374,7 @@
       }
     ],
     "settings": {
+      "category": "Data & dashboards",
       "backgroundColor": "#000000",
       "refreshInterval": 300,
       "execution": "interpreted",

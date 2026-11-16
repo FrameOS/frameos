@@ -3,6 +3,7 @@
     "id": "layout-beos",
     "name": "BeOS",
     "settings": {
+      "category": "Desktop layouts",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#336698",

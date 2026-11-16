@@ -406,6 +406,7 @@
       }
     ],
     "settings": {
+      "category": "Fun & comics",
       "backgroundColor": "#ffffff",
       "refreshInterval": 3600,
       "execution": "interpreted",
