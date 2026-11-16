@@ -2,7 +2,13 @@
   {
     "id": "589b58e1-8dc1-4ab1-979f-71e51509e0aa",
     "name": "Abstract Architecture",
-    "settings": { "backgroundColor": "#000000", "refreshInterval": 86400, "execution": "interpreted", "windowSize": "800x480" },
+    "settings": {
+      "backgroundColor": "#000000",
+      "refreshInterval": 86400,
+      "execution": "interpreted",
+      "windowSize": "800x480",
+      "icon": "M6,21V8A2,2 0 0,1 8,6L16,3V6A2,2 0 0,1 18,8V21H12V16H8V21H6M14,19H16V16H14V19M8,13H10V9H8V13M12,13H16V9H12V13Z"
+    },
     "fields": [
       {
         "name": "seconds",
