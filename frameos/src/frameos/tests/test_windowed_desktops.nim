@@ -2464,11 +2464,38 @@ proc copiesOf(start: string, scenes: openArray[JsonNode]): seq[string] =
     let at = source.find(start)
     result.add (if at < 0: "" else: source[at ..< source.find("\n}\n", at)])
 
+const GroupedStart = "// A list of scenes in groups by their category"
+
+proc probe(source: string): JsonNode =
+  ## The state a JS app with this source leaves after one render.
+  let scene = FrameScene(id: "tests/probe".SceneId, frameConfig: config, state: %*{}, logger: logger())
+  let owner = AppRoot(nodeId: 1.NodeId, nodeName: "probe", scene: scene, frameConfig: config)
+  let runtime = newJsAppRuntime(category = "data", outputType = "image", source = source, sourceName = "app.tsx")
+  discard runtime.get(owner, %*{}, ExecutionContext(scene: scene, event: "render", payload: %*{}, loopIndex: 0,
+    loopKey: ".", nextSleep: -1))
+  scene.state
+
+proc groupedBy(scenes, categories: string): JsonNode =
+  ## What the layouts' `grouped` makes of `scenes` with `categories` (JS literals): [title, ids...] a group.
+  let fn = copiesOf(GroupedStart, [layout])[0] & "\n}\n"
+  probe(fn & "export function get(app) {\n  frameos.setState('out', grouped(" & scenes & ", " & categories &
+    ").map((g) => [g.title].concat(g.scenes.map((s) => s.id))))\n  return <div />\n}\n"){"out"}
+
 suite "a long list of scenes, by category (each desktop's grouped)":
   test "is the same function, word for word, in every desktop with a list of scenes":
-    let copies = copiesOf("// The store's categories", [layout, macos, beos, classicMac, nextstep, tiling])
+    let copies = copiesOf(GroupedStart, [layout, macos, beos, classicMac, nextstep, tiling])
     check copies[0].len > 0
     for text in copies: check text == copies[0]
+
+  test "goes by the runtime's categories, in their order, Other last; without them, the list as it was":
+    let scenes = "[{id: 'a', category: 'fun'}, {id: 'b'}, {id: 'c', category: 'photos'}, {id: 'd', category: ' Fun'}, " &
+      "{id: 'e', category: 'clocks'}]"
+    let categories = "[{id: 'photos', name: 'Photos'}, {id: 'weather', name: 'Weather'}, {id: 'fun', name: 'Fun'}]"
+    check groupedBy(scenes, categories) == %*[["Photos", "c"], ["Fun", "a", "d"], ["Other", "b", "e"]]
+    # An older runtime gives none: one group, no title, the frame's order.
+    check groupedBy(scenes, "undefined") == %*[[nil, "a", "b", "c", "d", "e"]]
+    # No scene in a category the runtime knows: the same.
+    check groupedBy("[{id: 'x'}, {id: 'y', category: 'clocks'}]", categories) == %*[[nil, "x", "y"]]
 
   # Forty scenes, longer than the screen in every list: the sixteen numbered ones
   # take turns at fun, weather, none and photos, so the photos (Scene 3, 7, ...)
@@ -2484,7 +2511,11 @@ suite "a long list of scenes, by category (each desktop's grouped)":
           "tests/nc-blue", "tests/tt-red", "tests/tt-green", "tests/tt-blue"]:
         result.add %*{"id": id, "name": id}
 
-  test "every desktop lists them in groups, the photos first, and the list scrolls under a finger":
+  test "every desktop's list scrolls under a finger, and goes by category where the runtime has them":
+    # The lists go by category only where the runtime gives a layout its
+    # categories (app.frame.categories): then the photos come first.
+    let byCategory = probe("export function get(app) {\n  frameos.setState('cats', Array.isArray(app.frame.categories))\n" &
+      "  return <div />\n}\n"){"cats"}.getBool()
     # Each desktop: how its list of scenes opens, the rows of it (what takes a
     # press, top to bottom), and whether it is still open.
     proc rowsIn(layoutId: string, x0, x1: float32): seq[array[4, float32]] =
@@ -2514,13 +2545,13 @@ suite "a long list of scenes, by category (each desktop's grouped)":
       else: desk().state{"menu"}.getStr() == "scenes"
     for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT, Tiling]:
       # A desktop of its own, one window open.
-      discard focusOn("tests/be-0")
+      discard focusOn("tests/red")
       desk().state["openScenes"] = %*[]
       chooseLayout(layoutId)
       discard pass()
       desk().state["boxes"] = %*{}
       desk().state["wins"] = %*[]
-      if layoutId == Tiling: desk().state["open"] = %*["tests/be-0"]
+      if layoutId == Tiling: desk().state["open"] = %*["tests/red"]
       discard pass()
       check desk().id.string == layoutId
       openList(layoutId)
@@ -2533,18 +2564,19 @@ suite "a long list of scenes, by category (each desktop's grouped)":
       let (x, y) = (int((first[2][0] + first[2][2]) / 2), int((first[2][1] + first[2][3]) / 2))
       var sent = send("pointerDown", at(x, y))
       sent.add send("pointerMove", at(x, y - 40))
-      sent.add send("pointerMove", at(x, y - 160))
-      sent.add send("pointerUp", at(x, y - 160, %*{"buttons": 0}))
+      sent.add send("pointerMove", at(x, y - 170))
+      sent.add send("pointerUp", at(x, y - 170, %*{"buttons": 0}))
       check "setCurrentScene" notin sent
       check isOpen(layoutId)
       discard pass()
-      check rows(layoutId)[1][1] < first[1][1]
-      # Closed and opened again at the top: its first row is the first of the
-      # photos, not the first scene of the frame.
+      # 170 px is no whole number of rows in any of them: every row moved.
+      check rows(layoutId).mapIt(it[1]) != first.mapIt(it[1])
+      # Scrolled back to the top: its first row is the first of the photos
+      # where the list goes by category, else the frame's first scene.
       discard send("wheel", %*{"x": x, "y": y, "deltaX": 0, "deltaY": -40})
       discard pass()
       check acted(clickRect(rows(layoutId)[0])) == @["setCurrentScene"]
-      check current.id.string == "tests/be-3"
+      check current.id.string == (if byCategory: "tests/be-3" else: "tests/be-0")
       discard pass()
       check problems.len == 0
     desk().state["openScenes"] = %*[]
