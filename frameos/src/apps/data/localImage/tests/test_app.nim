@@ -304,6 +304,31 @@ suite "data/localImage app":
     check scene.state["meta"]["filename"].getStr() == "b.ppm"
     check scene.state["counter"].getInt() == 0
 
+  test "a repaint of its scene shows the same photo and leaves the counter":
+    # A scene drawn again before it is due (scene_rhythm's rdRepaint: a window
+    # dragged over a desktop) is no step of the slideshow.
+    let root = uniqueTempDir("frameos-local-image-repaint")
+    defer: removeDir(root)
+    writePpm(root / "a.ppm", 255, 0, 0)
+    writePpm(root / "b.ppm", 0, 255, 0)
+
+    let scene = FrameScene(state: %*{"counter": 0}, logger: newLogger(LogStore(items: @[])))
+    let app = App(
+      scene: scene,
+      frameConfig: makeFrameConfig(root),
+      appConfig: AppConfig(path: root, order: "alphabetical",
+        counterStateKey: "counter", metadataStateKey: "meta", search: "")
+    )
+    discard app.get(ExecutionContext(hasImage: false))
+    scene.repainting = true
+    for _ in 0 ..< 3:
+      let again = app.get(ExecutionContext(hasImage: false))
+      check again.unsafe[0, 0].r == 255
+      check scene.state["counter"].getInt() == 1
+    scene.repainting = false
+    discard app.get(ExecutionContext(hasImage: false))
+    check scene.state["meta"]["filename"].getStr() == "b.ppm"
+
   test "bounds offered by the consumer cap the decode":
     let root = uniqueTempDir("frameos-local-image-bounds")
     defer: removeDir(root)

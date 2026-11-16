@@ -1,0 +1,10 @@
+{
+  "name": "Kitchen sink",
+  "description": "Most of what a JSX UI can do, on one touch screen in five pages: switches, a slider and a stepper; a canvas to paint on with undo; the Lights Out puzzle; balls bouncing on the clock; and every gesture the glass makes. For LCD, HDMI and touch frames that render many times a second.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 480,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.9"
+}

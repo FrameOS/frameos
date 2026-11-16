@@ -1,9 +1,10 @@
 ## The Scene store sample (repo/scenes/samples/Scene store, docs/scene-store.md)
-## on a stubbed host: what it asks the host for, what it draws, and where it
-## comes back to. The covers are data URLs, so nothing reaches the network.
-## FRAMEOS_STORE_SHOTS=<dir> writes each picture there.
+## on a stubbed host: what it fetches, what it asks the host for, what it
+## draws, and where it comes back to. The store and the covers' CDN are the
+## request workers' hook (jsIoHook); the covers are data URLs unless a test
+## asks for network ones. FRAMEOS_STORE_SHOTS=<dir> writes each picture there.
 
-import std/[base64, json, os, strutils, unittest]
+import std/[base64, json, locks, monotimes, os, strutils, times, unittest]
 import pixie
 import ../channels
 import ../interpreter
@@ -11,6 +12,7 @@ import ../scene_rhythm
 import ../scene_store_hooks
 import ../types
 import ../js_runtime/app_runtime
+import ../js_runtime/js_io
 import ../utils/http_client
 
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
@@ -25,8 +27,37 @@ proc coverUrl(color: string): string =
 
 var
   facts = %*{"url": "https://store.test", "version": "2026.11.8", "busy": "", "error": "", "done": "",
-    "params": "", "listing": nil, "installed": [], "preview": nil, "removeAny": false}
+    "installed": [], "preview": nil, "removeAny": false}
   asked: seq[(string, string, JsonNode)]
+
+var networkCovers = false
+  ## Covers as https URLs the request workers answer (jsIoHook), after a
+  ## while, as a CDN does; data URLs otherwise.
+
+let coverPng = block:
+  let image = newImage(80, 60)
+  image.fill(parseHtmlColor("#ef4444").rgbx)
+  image.encodeImage(PngFormat)
+
+var
+  requestsLock: Lock
+  requests: seq[string] ## what the workers were asked, guarded by requestsLock
+  page = "" ## the store's answer to a listing (set before the workers are asked)
+initLock(requestsLock)
+
+jsIoHook = proc(request: JsIoRequest): JsIoResult {.gcsafe, nimcall.} =
+  {.cast(gcsafe).}:
+    withLock requestsLock:
+      requests.add request.url
+    if "/api/store/device/scenes?" in request.url:
+      return JsIoResult(code: 200, body: page)
+    sleep(150)
+    JsIoResult(code: 200, body: coverPng)
+
+proc requested(part: string): seq[string] =
+  withLock requestsLock:
+    for url in requests:
+      if part in url: result.add url
 
 proc listing(names: openArray[string], more = false, categories = true): JsonNode =
   result = %*{"page": 1, "more": more, "scenes": []}
@@ -34,10 +65,14 @@ proc listing(names: openArray[string], more = false, categories = true): JsonNod
     result["scenes"].add %*{"id": "0000000" & $i & "-0000-4000-8000-00000000000" & $i, "name": name,
       "category": (if i == 0: "realtime" else: "weather"), "version": 3, "by": "FrameOS",
       "about": name & " on the frame, all day long.",
-      "image": coverUrl(["#ef4444", "#22c55e", "#3b82f6", "#eab308", "#a855f7", "#14b8a6"][i mod 6])}
+      "image": (if networkCovers: "https://cdn.test/cover" & $i & ".png"
+                else: coverUrl(["#ef4444", "#22c55e", "#3b82f6", "#eab308", "#a855f7", "#14b8a6"][i mod 6]))}
   if categories:
     result["categories"] = %*[{"slug": "photos", "title": "Photos"}, {"slug": "weather", "title": "Weather"},
       {"slug": "realtime", "title": "Real time"}, {"slug": "layouts", "title": "Layouts"}]
+
+let sixScenes = ["Bouncing logo", "Rain radar", "Forecast", "Moon", "Tides", "Sunrise"]
+page = $listing(sixScenes, more = true)
 
 var fetched: seq[string]
 jsHttpRequestHook = proc(url, httpMethod, body: string, headers: seq[SimpleHttpHeader]): tuple[code: int, body: string] =
@@ -97,40 +132,113 @@ suite "the Scene store scene":
     logger.frameConfig = config
     init("scene-store".SceneId, config, logger, %*{})
 
-  test "asks the host for the first page of its grid, and draws it when it comes":
+  proc settle(ms = 3000): int =
+    ## The runner's loop: answers pumped until nothing is pending; the
+    ## renders the scene asked for.
+    let started = getMonoTime()
+    while (getMonoTime() - started).inMilliseconds < ms:
+      discard pumpJsAsync()
+      while true:
+        let (ok, message) = eventChannel.tryRecv()
+        if not ok: break
+        if message[1] == "render": inc result
+      if jsAsyncPending() == 0: break
+      sleep(5)
+
+  proc opened(config: FrameConfig, name: string): FrameScene =
+    ## The store with its first page in.
+    result = load(config)
+    discard draw(result, config, name & "-loading")
+    discard settle()
+    discard draw(result, config, name)
+
+  test "fetches the first page of its grid off the render, and draws it when it comes":
     asked = @[]
     problems = @[]
+    withLock requestsLock: requests = @[]
     let config = frame(800, 480)
     let scene = load(config)
+    let started = getMonoTime()
     discard draw(scene, config, "loading")
-    check asked.len == 1
-    check asked[0][0] == "scene-store" and asked[0][1] == "browse"
-    let params = asked[0][2]{"params"}.getStr()
+    check (getMonoTime() - started).inMilliseconds < 150
+    check asked.len == 0 # nothing of the host
+    check settle() >= 1
+    let pages = requested("/api/store/device/scenes?")
+    check pages.len == 1
     # A fast panel puts the scenes that move first; the shelves come with the
-    # first page; the page is the grid's.
-    check "prefer=realtime" in params and "categories=1" in params and "page=1" in params
-    check "limit=8" in params
-    check validStoreParams(params)
-
-    facts["params"] = %params
-    facts["listing"] = listing(["Bouncing logo", "Rain radar", "Forecast", "Moon", "Tides", "Sunrise"], more = true)
+    # first page; the page is the grid's; the store is the host's.
+    check pages[0].startsWith("https://store.test/") and "version=2026.11.8" in pages[0]
+    check "prefer=realtime" in pages[0] and "categories=1" in pages[0] and "page=1" in pages[0]
+    check "limit=8" in pages[0]
+    # Data URL covers are there at once; covers from the network are the test
+    # below.
     let first = draw(scene, config, "page")
-    # Covers come one a pass after the page shows: the first pass draws none.
-    discard draw(scene, config, "cover-1")
-    for i in 0 ..< 6:
-      discard draw(scene, config, "covers")
     # The next page is asked for while nothing else runs.
-    check asked[^1][1] == "browse" and "page=2" in asked[^1][2]{"params"}.getStr()
+    discard settle()
+    check requested("page=2").len == 1
     check problems.len == 0
     if problems.len > 0: echo problems
     check first.width == 800
+
+  test "covers from the network come off the render, all at once, and a tap does not wait for them":
+    problems = @[]
+    networkCovers = true
+    page = $listing(sixScenes, more = false)
+    defer:
+      networkCovers = false
+      page = $listing(sixScenes, more = true)
+    let config = frame(800, 480)
+    let scene = load(config)
+    discard draw(scene, config, "net-loading")
+    discard settle()
+    withLock requestsLock: requests = @[]
+    var started = getMonoTime()
+    discard draw(scene, config, "net-placeholders")
+    let placeholderMs = (getMonoTime() - started).inMilliseconds
+    # Six 150 ms downloads: one after the other in the render, this was a
+    # second, and a pass per cover.
+    check placeholderMs < 150
+    check jsIoInFlight() == 6
+    # A tap while they download is answered at once: the first card.
+    started = getMonoTime()
+    scene.tap(300, 150)
+    discard draw(scene, config, "net-detail")
+    check (getMonoTime() - started).inMilliseconds < 150
+    check scene.state{"spot"}{"detail"}{"name"}.getStr() == "Bouncing logo"
+    # Back to the grid; the covers land together and the scene asks to be
+    # drawn again.
+    var spot = scene.state{"spot"}
+    spot["detail"] = newJNull()
+    scene.state["spot"] = spot
+    started = getMonoTime()
+    check settle() >= 1
+    check jsAsyncPending() == 0
+    check (getMonoTime() - started).inMilliseconds < 1000
+    started = getMonoTime()
+    let withCovers = draw(scene, config, "net-covers")
+    let coversMs = (getMonoTime() - started).inMilliseconds
+    var red = 0
+    for y in 60 ..< 240:
+      for x in 230 ..< 420:
+        let c = withCovers[x, y]
+        if c.r > 200 and c.g < 100 and c.b < 100: inc red
+    check red > 1000
+    # What a render of the page costs once nothing downloads.
+    started = getMonoTime()
+    discard draw(scene, config, "net-again")
+    echo "  placeholders ", placeholderMs, " ms, with covers ", coversMs, " ms, again ",
+      (getMonoTime() - started).inMilliseconds, " ms"
+    check jsIoInFlight() == 0
+    # Each cover once, and the first one again at the size of its page.
+    check requested("cdn.test").len == 7
+    check problems.len == 0
+    if problems.len > 0: echo problems
 
   test "opens a scene's page, installs it without leaving, and comes back to the same spot":
     asked = @[]
     problems = @[]
     let config = frame(800, 480)
-    var scene = load(config)
-    discard draw(scene, config, "again")
+    var scene = opened(config, "again")
     # The first card: past the 220 px shelves, under the 76 px header.
     scene.tap(300, 150)
     discard draw(scene, config, "detail")
@@ -173,7 +281,7 @@ suite "the Scene store scene":
     facts["installed"] = %*[]
     let id = "00000001-0000-4000-8000-000000000001"
     facts["preview"] = %*{"store": id, "id": "radar", "name": "Rain radar"}
-    scene.state["spot"] = %*{"page": 1, "detail": facts["listing"]["scenes"][1]}
+    scene.state["spot"] = %*{"page": 1, "detail": listing(sixScenes)["scenes"][1]}
     discard draw(scene, config, "preview")
     var discarded = false
     for x in countup(420, 780, 20):
@@ -191,7 +299,7 @@ suite "the Scene store scene":
     let scene = load(config)
     facts["installed"] = %*[]
     facts["previewOnly"] = %true
-    let detail = facts["listing"]["scenes"][1]
+    let detail = listing(sixScenes)["scenes"][1]
     proc tapAll(): seq[string] =
       asked = @[]
       for x in countup(420, 780, 20):
@@ -215,25 +323,28 @@ suite "the Scene store scene":
     facts.delete("previewOnly")
 
   test "a square screen gets the shelves as a select and a smaller grid":
-    asked = @[]
     problems = @[]
+    withLock requestsLock: requests = @[]
     let config = frame(480, 480)
     let scene = load(config)
     scene.state["spot"] = %*{}
     discard draw(scene, config, "square")
-    check asked.len > 0 and "limit=" in asked[^1][2]{"params"}.getStr()
+    discard settle()
+    discard draw(scene, config, "square-page")
+    check requested("limit=").len > 0
     check problems.len == 0
 
   test "e-paper is not offered the scenes that move, and fetches its own page":
-    asked = @[]
     problems = @[]
+    discard settle() # what the last test left
+    withLock requestsLock: requests = @[]
     let config = frame(800, 480, "waveshare.EPD_7in5_V2")
     let scene = load(config)
     scene.state["spot"] = %*{}
     discard draw(scene, config, "paper")
-    # One refresh an answer: no browse through the host (it would draw twice).
-    for (_, action, _) in asked:
-      check action != "browse"
+    # One refresh an answer: the page is fetched in the render, nothing after.
+    check requested("/api/store/").len == 0
+    check jsAsyncPending() == 0
     check fetched.len > 0 and "exclude=realtime" in fetched[^1] and "prefer=realtime" notin fetched[^1]
     check problems.len == 0
 

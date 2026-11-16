@@ -288,10 +288,11 @@
 }
 
 /* The pointer over the canvas is the scene's (mouseMove / mouseDown /
-   mouseUp). A vertical swipe still scrolls the page on a phone; taps and
-   sideways drags reach the scene. */
+   mouseUp). A vertical swipe still scrolls the page on a phone; taps,
+   sideways drags and two fingers (a pinch) reach the scene, never the
+   page's zoom. */
 .live-preview__canvas--interactive {
-  touch-action: pan-y pinch-zoom;
+  touch-action: pan-y;
 }
 
 /* The rendered frame over the whole page (the preview's expand button):

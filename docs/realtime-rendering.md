@@ -79,9 +79,11 @@ layers, no writes into a canvas (all three were built and taken out again).
 So an app can animate two ways. It can change cells, as the **Pixel toys** do
 (`repo/scenes/samples/Pixel toys`, each effect a component of one app: Hellfire
 in three palettes, fireworks, a fountain, a waterfall, a starfield,
-Matrix rain, ripples, blobs, a plasma and Life; a swipe for the next). Or it can
-change only the palette, as 8-bit games did: the **Color cycling** sample
-(`repo/scenes/samples/Color cycling`) draws each of its six scenes once, with
+Matrix rain, ripples, blobs, a plasma and Life; a tap (on the ripples it
+drops a stone), a swipe, Enter, Space or the right arrow for the next, the
+left arrow for the one before). Or it can change only the palette, as 8-bit
+games did: the **Color cycling** sample (`repo/scenes/samples/Color cycling`,
+moved through the same way) draws each of its six scenes once, with
 ranges of colors laid out the way things move (down the waterfall, out from
 where a drop lands, up a flame, along an aurora), and from then on rotates
 those ranges by the clock. A frame of it is a palette of 256 colors worked out

@@ -21,6 +21,7 @@ from frameos/apps import applyServiceSettings
 import frameos/utils/asset_colors
 import frameos/utils/dither
 from frameos/utils/http_client import releaseStrandedHttp
+from frameos/js_runtime/app_runtime import pumpJsAsync, nextJsAsyncMs
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
 import frameos/utils/panel_damage
@@ -1036,16 +1037,36 @@ proc fos_nim_press_taken_impl(wireX, wireY: cint): bool {.exportc, cdecl.} =
 proc fos_nim_tick_impl(): bool {.exportc, cdecl.} =
   ## Time passing for the dispatcher's input state (frameos/input_state.nim):
   ## a held button is a `longPress` at every whole second, a short press whose
-  ## double-press window closed a `press`. True when an event was made and
-  ## delivered.
+  ## double-press window closed a `press`. And for async JavaScript
+  ## (docs/async-js.md): the answers components/frameos_nim/fos_js_io.c brought and the timers
+  ## that are over settle their promises, and the code waiting on them runs
+  ## to its next await; a scene that asks for a render gets one through
+  ## frameos_nim_render_requested. True when something was delivered.
   try:
-    tickInput()
+    result = tickInput()
   except Defect as e:
     log("input tick failed (defect): " & e.msg)
-    false
   except Exception as e:
     log("input tick failed: " & e.msg)
-    false
+  try:
+    if pumpJsAsync() > 0:
+      result = true
+      # What it dispatched (a `render`) is delivered now, not at the next tap.
+      if drainSceneEvents():
+        result = true
+  except Defect as e:
+    log("async pump failed (defect): " & e.msg)
+  except Exception as e:
+    log("async pump failed: " & e.msg)
+
+proc fos_nim_next_async_ms_impl(): cint {.exportc, cdecl.} =
+  ## How long the render task's idle wait may sleep before a JS timer is due
+  ## (0: something is ready now), -1 when none is pending. An answer from the
+  ## request task wakes the wait itself.
+  try:
+    nextJsAsyncMs().cint
+  except Exception:
+    -1.cint
 
 proc fos_nim_scene_info_json_impl(): cstring {.exportc, cdecl.} =
   try:

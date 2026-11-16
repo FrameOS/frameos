@@ -12,7 +12,15 @@ visitor's own browser.
   the work in `src/lib/playground.ts`). `src/lib/surfaces.ts` serves it at the
   root of `FRAMEOS_PLAYGROUND_APP_URL` (production: `playground.frameos.net`)
   and sends every other page on that host to the cloud; without the setting
-  it is `/playground` on the cloud origin, as in `pnpm dev`.
+  it is `/playground` on the cloud origin, as in `pnpm dev`. The root is not
+  a rewrite returned by the proxy: the proxy marks the request
+  (`playgroundRootHeader`) and `next.config.ts` rewrites it inside Next's
+  router (`playgroundRootRewrite`). A rewrite returned by the proxy left the
+  server behind nginx (Next listens on `127.0.0.1` and the proxy only sees
+  `localhost`, so the two origins never match) and came back as a request
+  the routing sent to the root again: a redirect loop. A curl of the dev
+  server does not show it; a production build started with
+  `HOSTNAME=127.0.0.1` does.
 - **The runtime the cloud ships**: `public/frameos-wasm`, the signed release
   bundle pinned in `versions.json` (`scripts/lib/wasm-runtime.mjs`), driven
   through the `frameos-wasm` package. It runs `windowed` (scenes side by side,
@@ -26,7 +34,10 @@ visitor's own browser.
   and `repo/scenes/gallery`, leaving out the samples that need an API key or
   an account in the frame's settings, or a process on a Pi (its
   `excludedTemplates`). `leadingTemplates` is the Start menu's order; the
-  first is the window the desktop opens on.
+  first is the window the desktop opens on. Every real-time and interactive
+  sample is in it (Pixel toys, Color cycling, the Kitchen sink, DVD Logo
+  Bounce, the Keyboard and Touch tests, the Terminal; `playground.test.ts`
+  holds them there): a scene the playground should show is a sample.
 - **The network**: the Scene store browses and previews from the page's own
   origin (`storeUrl`), and a scene's request the browser's CORS refuses goes
   through the store's anonymous preview proxy (`/api/store/preview-proxy`),

@@ -285,7 +285,7 @@
   after a preview; the host has the facts and does the network off the render
   task: `frameos.store()` / `frameos.storeAction()`
   (`frameos/scene_store_hooks.nim`; `frameos/scene_store_linux.nim` on a worker
-  thread, `main/fos_store.c` on its own task), and it draws the scene that
+  thread, `main/fos_store.c` on the request task, `fos_js_io_run`), and it draws the scene that
   asked again when it is done, if it still shows. A new action is a host's on
   both; a word is the app's. A runtime with no host (a board rendered on its
   plane, a virtual frame) answers null and the app installs nothing. The
@@ -293,8 +293,8 @@
   (`frameos/scene_store_preview.nim`, `previewOnly`): a store scene loads
   beside the page's scenes, and the page's scene select follows the runtime
   (the worker's `sceneInfo`).
-- Browsing is the store's listing for frames (`/api/store/device/scenes`, a
-  page the size of the app's grid, `prefer` / `exclude` for the Real time
+- Browsing is the app's own `fetch` of the store's listing for frames
+  (`/api/store/device/scenes`, from the host's `url`; a page the size of the app's grid, `prefer` / `exclude` for the Real time
   shelf). A change is asked of the frame's plane (`POST
   /api/frames/{id}/panel/scenes`, cloud `panel-scenes.ts`, backend
   `panel_scenes.py`, which a Pi reaches at `/api/panel/scenes`): public store
@@ -779,6 +779,33 @@
   `appTypeDeclarations.ts`. A reader lives for the call that opened it, and a
   temp file stays on the card while a reader holds its spool.
 
+## Async JavaScript: `docs/async-js.md`
+
+- Experimental, on a Pi and on an ESP32 that stays awake: `fetch` (a
+  `Response`), the timers, `frameos.sleep` (promises), `frameos.useFetch`
+  for `get()`, an async `init()` that goes on between renders (reading the
+  newest config: `JsAppRuntime.liveConfig`), `AbortController` /
+  `AbortSignal.timeout` for `fetch`, and
+  `<img src="https://…">`, which the runtime fetches at the size laid out
+  (`fillUrlImages`, after the layout) and draws when it is in: where it waits
+  is the runtime's call (e-paper, a deep sleeper and wasm fetch in the
+  render), never an option of the app's. Every interpreter stays on the
+  thread that renders; a request goes to the I/O as values
+  (`js_runtime/js_io.nim`: a Pi's four worker threads, an ESP32's on-demand
+  task `components/frameos_nim/fos_js_io.c`, one TLS session at a time, which
+  also runs the scene store's work: `fos_js_io_run`) and its answer comes
+  back the same way. `pumpJsAsync` (`js_runtime/js_async.nim`) settles
+  promises between renders: the Pi runner's message loop, the ESP32's
+  `frameos_nim_tick` in the idle wait, where answers wait only while a tap is
+  queued or 250 ms old (`fos_client_input_pending`), never the 10 s input
+  hold. A runtime nothing pumps (`asyncPumped` false: wasm, a deep sleeper)
+  answers the same calls blocking, so a scene written this way works
+  everywhere. A slow scene is usually a render waiting on the network: move
+  the wait into `<img src>`, `useFetch` or an async `init()`, never a
+  `setNextSleep` loop around a synchronous `fetchImage` (what froze the Scene
+  store, 2026-11-15). Not in the scene guide or `appTypeDeclarations.ts` yet:
+  making it public is those two plus the AI evals.
+
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 
 - A Nim app that gets a repo JavaScript replacement (`data/immich` →
@@ -949,7 +976,10 @@
   store. It ships with every cloud deploy, a release's new runtime included;
   there is no deploy of its own. A new sample is in it unless it needs a key
   or a Pi (`excludedTemplates` in `scripts/build-playground-scenes.mjs`).
-  It is no app origin: only the store's preview proxy accepts it.
+  It is no app origin: only the store's preview proxy accepts it. Never
+  return a rewrite from `proxy.ts`: behind nginx Next takes it for another
+  server and sends it back through the routing (the playground root's loop,
+  2026-11-16); mark the request and rewrite in `next.config.ts`.
 
 ## Paid plans: `cloud/docs/billing.md`
 

@@ -28,10 +28,17 @@ describe("surface routing", () => {
     configureMergedOrigins();
     process.env.FRAMEOS_PLAYGROUND_APP_URL = "https://playground.frameos.net";
 
-    expectRoute("https://playground.frameos.net/", {
-      kind: "rewrite",
-      url: "https://playground.frameos.net/playground",
-    });
+    expect(
+      resolveSurfaceRoute(new URL("https://playground.frameos.net/")),
+    ).toEqual({ kind: "playgroundRoot" });
+    // The same request as nginx hands it over: Next sees its own listener,
+    // the host is the header's.
+    expect(
+      resolveSurfaceRoute(
+        new URL("https://localhost:3000/"),
+        "playground.frameos.net",
+      ),
+    ).toEqual({ kind: "playgroundRoot" });
     expectRoute("https://playground.frameos.net/playground?x=1", {
       kind: "redirect",
       url: "https://playground.frameos.net/?x=1",
@@ -404,7 +411,9 @@ describe("surface routing", () => {
       "cloud.frameos.net",
     );
     expect(route?.kind).toBe("redirect");
-    expect(route?.destination.toString()).toBe(
+    expect(
+      route?.kind === "redirect" ? route.destination.toString() : undefined,
+    ).toBe(
       "https://account.frameos.net/account/backups",
     );
   });
@@ -412,11 +421,13 @@ describe("surface routing", () => {
 
 function expectRoute(
   source: string,
-  expected: { kind: "redirect" | "rewrite"; url: string },
+  expected: { kind: "redirect"; url: string },
 ) {
   const route = resolveSurfaceRoute(new URL(source));
   expect(route?.kind).toBe(expected.kind);
-  expect(route?.destination.toString()).toBe(expected.url);
+  expect(
+    route?.kind === "redirect" ? route.destination.toString() : undefined,
+  ).toBe(expected.url);
 }
 
 function configureSplitOrigins() {

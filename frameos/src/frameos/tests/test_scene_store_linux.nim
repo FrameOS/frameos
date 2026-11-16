@@ -60,7 +60,7 @@ block the_page_is_offered_and_lists_what_came_from_the_store:
   doAssert not facts.isNil, "frame.json leaves the settings on the screen on"
   doAssert facts{"removeAny"}.getBool(), "a frame with no plane may remove any scene"
   doAssert facts{"url"}.getStr().startsWith("http"), $facts
-  doAssert facts{"listing"}.kind == JNull and facts{"params"}.getStr() == ""
+  doAssert not facts.hasKey("listing") # the app fetches its pages itself
   # The worker reads the origins once something runs.
   act("remove", %*{"id": "nope", "store": ""})
   let after = waitIdle()
@@ -86,12 +86,6 @@ block the_lock_hides_the_page:
   writeFile(dir / "frame.json", $(%*{"name": "Test", "frameSettingsOnScreen": false, "width": 800, "height": 480}))
   noteFrameConfigChanged()
   doAssert read().isNil, "the settings on the screen are off: no store"
-
-block a_browse_takes_a_query_string_and_nothing_else:
-  doAssert validStoreParams("category=photos&page=2&limit=6&prefer=realtime&q=rain%20radar")
-  doAssert not validStoreParams("q=a b")
-  doAssert not validStoreParams("q=x#y")
-  doAssert not validStoreParams("../../api/frames")
 
 removeDir(dir)
 echo "scene store (linux): ok"

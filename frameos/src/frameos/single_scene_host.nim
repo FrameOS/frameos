@@ -749,6 +749,13 @@ proc tick*(host: SingleSceneHost): bool =
   discard host.events.drain()
   true
 
+proc drainQueued*(host: SingleSceneHost): bool =
+  ## What the scene's async code dispatched between renders (a `render` when
+  ## a picture or an answer came, docs/async-js.md): delivered now, by the
+  ## platform's idle loop after the pump. Nothing else sends while it idles,
+  ## so it sat in the queue until the next tap. True when something was.
+  not host.events.isNil and host.events.drain() > 0
+
 proc queue*(host: SingleSceneHost, origin: EventOrigin, event: string, payload: JsonNode,
             target = none(SceneId)) =
   ## What the scene itself sends (channels.embeddedEventHook): queued, never run

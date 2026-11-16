@@ -1636,11 +1636,17 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
   of ukText:
     n.emitText(cx, cy, cw, op, drawn)
   of ukImage:
-    let embedded = n.src.tag == "Scene"
-    if (embedded or not n.src.image.isNil) and cw > 0 and ch > 0:
+    let
+      embedded = n.src.tag == "Scene"
+      url = if embedded or not n.src.image.isNil: "" else: n.src.attr("src")
+    if (embedded or url.len > 0 or not n.src.image.isNil) and cw > 0 and ch > 0:
       let node = SvgNode(tag: "image", image: n.src.image, attrs: @[("x", num(cx)),
         ("y", num(cy)), ("width", num(cw)), ("height", num(ch)),
         ("preserveAspectRatio", ["none", "xMidYMid meet", "xMidYMid slice"][ord(b.fit)])])
+      if url.len > 0:
+        # `<img src="https://…">`: fetched by the app runtime at the size laid
+        # out here (fillUrlImages), nothing drawn until it is in.
+        node.attrs.add(("image-url", url))
       if embedded:
         node.attrs.add(("scene-id", n.src.attr("id")))
         node.attrs.add(("scene-props", n.src.attr("props")))

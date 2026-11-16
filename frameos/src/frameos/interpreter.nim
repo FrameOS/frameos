@@ -951,8 +951,9 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
     if not r.embedImage.isNil:
       dropEmbedImage(r)
     if owner.holesMoved:
-      # The chrome has just painted where it was.
-      rhythmMarkDue(child)
+      # The chrome has just painted where it was: drawn again, but due only
+      # at a new size.
+      rhythmHoleMoved(child, width, height)
     drawIntoHole(owner, child, context.image, x.int, y.int, width, height, context, addSlot = true)
     return context.image
   owner.slots.add(SceneSlot(child: child, x: x, y: y, visible: visible))
@@ -2107,7 +2108,12 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
           rhythmMarkDue(self)
           sendEvent("render", %*{}, eoScene)
       elif context.event in ["keyDown", "textInput"]:
+        # Due, as for a tap: the scene's own `render` asks for no fresh pass,
+        # so a scene drawn into a layout's <yield />, a window or a split
+        # would otherwise put back its last picture until its interval ran
+        # out (the Terminal's typed line showed only after a click).
         if dispatchUiEvent(self.id.string, context.event, context.payload):
+          rhythmMarkDue(self)
           sendEvent("render", %*{}, eoScene)
       else:
         uiSceneEvent(self.id.string)

@@ -9,7 +9,10 @@ import {
   refreshSessionRow,
   sessionCookieMaxAgeSeconds,
 } from "./src/lib/session-refresh";
-import { resolveSurfaceRoute } from "./src/lib/surfaces";
+import {
+  playgroundRootHeader,
+  resolveSurfaceRoute,
+} from "./src/lib/surfaces";
 
 export async function proxy(request: NextRequest) {
   const response = routeSurface(request);
@@ -26,10 +29,7 @@ function routeSurface(request: NextRequest) {
     request.nextUrl,
     request.headers.get("host"),
   );
-  if (!route) {
-    return NextResponse.next();
-  }
-  if (route.kind === "redirect") {
+  if (route?.kind === "redirect") {
     // 307, never 308: which host serves which path is deployment config, and
     // it has changed under browsers before — the cloud root used to redirect
     // to /login, and every browser that cached that permanent redirect kept
@@ -41,17 +41,20 @@ function routeSurface(request: NextRequest) {
     });
   }
 
-  const destination = route.destination;
-  // Nginx terminates TLS and forwards to Next over plain HTTP. Next can
-  // normalize that proxied request as https://localhost:3000; without this
-  // correction an absolute rewrite attempts TLS against the HTTP listener.
-  if (
-    destination.hostname === "localhost" &&
-    destination.protocol === "https:"
-  ) {
-    destination.protocol = "http:";
+  // The playground host's root is rewritten by next.config.ts on this mark
+  // (playgroundRootRewrite in surfaces.ts says why not here). The mark is the
+  // proxy's alone: one a client sent is dropped from every other request.
+  const playgroundRoot = route?.kind === "playgroundRoot";
+  if (!playgroundRoot && !request.headers.has(playgroundRootHeader)) {
+    return NextResponse.next();
   }
-  return NextResponse.rewrite(destination);
+  const headers = new Headers(request.headers);
+  if (playgroundRoot) {
+    headers.set(playgroundRootHeader, "1");
+  } else {
+    headers.delete(playgroundRootHeader);
+  }
+  return NextResponse.next({ request: { headers } });
 }
 
 // Paths that mint or clear the session cookie themselves. Refreshing here

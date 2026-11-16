@@ -334,6 +334,31 @@ proc rhythmMarkDue*(scene: FrameScene) =
     scene.rhythm.dueAt = 0
     scene.rhythm.chromeDueAt = 0
 
+proc rhythmHoleMoved*(scene: FrameScene, width, height: int) =
+  ## The holes of the UI around `scene` moved, came or went (a window dragged,
+  ## sized, opened, closed): the chrome painted where they were, so nothing
+  ## the canvas holds of `scene` can be trusted. Moved at its size, it draws
+  ## again as a repaint, its schedule untouched: a slideshow dragged across a
+  ## desktop keeps its photo, where a due run on every pass of the drag stepped
+  ## through the folder (the SD card image on Windows 98, 2026-11-16). At a new
+  ## size what its apps made last is the wrong shape, and it runs.
+  let r = scene.rhythm
+  if r.isNil:
+    return
+  var sized = not r.cells.isNil
+  var c = r.cells
+  while not c.isNil:
+    if c.width == width and c.height == height:
+      sized = false
+    c = c.next
+  while not r.cells.isNil:
+    r.dropCell(r.cells)
+  # Its own UI's chrome (a scene with holes of its own) moved with it: no
+  # canvas holds it where it is now.
+  r.chromePass = high(int)
+  if sized:
+    rhythmMarkDue(scene)
+
 proc rhythmAwaited*(scene: FrameScene): bool =
   ## May the next pass show the loading mark? Not when the frame's own clock
   ## repeats what it draws within seconds: an animation, a ticking clock. With

@@ -34,6 +34,7 @@ export const leadingTemplates = [
   "Pixel toys",
   "Weather",
   "Color cycling",
+  "Kitchen sink",
   "DVD Logo Bounce",
   "Word clock",
   "Terminal app",

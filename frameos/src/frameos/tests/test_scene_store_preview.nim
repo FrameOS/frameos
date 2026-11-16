@@ -1,5 +1,5 @@
 ## The scene store's host in the browser preview (scene_store_preview.nim),
-## with the store answered by a fake: the facts it hands the app, browsing,
+## with the store answered by a fake: the facts it hands the app,
 ## a preview loaded on the next pass and discarded back to the store, and
 ## installs refused.
 
@@ -42,19 +42,9 @@ suite "the scene store in the browser preview":
     check f["url"].getStr() == Base
     check f["version"].getStr() == "2026.11.8"
     check f["previewOnly"].getBool()
-    check f["listing"].kind == JNull
+    check not f.hasKey("listing") # the app fetches its pages itself
     check f["preview"].kind == JNull
     check f["installed"].len == 0
-
-  test "browses the listing with the query the app hands over":
-    enableStorePreview(Base, "2026.11.8", fakeStore)
-    sceneStoreAction("scene-store", "browse", """{"params":"page=1&limit=6"}""")
-    check asked == @[Base & "/api/store/device/scenes?version=2026.11.8&page=1&limit=6"]
-    check facts()["listing"]["scenes"][0]["name"].getStr() == "Rain radar"
-    check facts()["params"].getStr() == "page=1&limit=6"
-    # Nothing that leaves a query goes out.
-    sceneStoreAction("scene-store", "browse", """{"params":"x#y"}""")
-    check asked.len == 1
 
   test "previews a store scene on the next pass, and discards back to the store":
     enableStorePreview(Base, "2026.11.8", fakeStore)

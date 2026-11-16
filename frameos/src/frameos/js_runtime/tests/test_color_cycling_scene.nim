@@ -67,6 +67,14 @@ proc swipe(c: Cycling, config: JsonNode, direction: string, event = "swipe") =
     hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
   discard c.runtime.run(c.owner, config, context, isEvent = true)
 
+proc send(c: Cycling, config: JsonNode, event: string, payload: JsonNode) =
+  let context = ExecutionContext(scene: c.scene, event: event, payload: payload,
+    hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+  discard c.runtime.run(c.owner, config, context, isEvent = true)
+
+proc key(code: string, repeat = false): JsonNode =
+  %*{"code": code, "key": code, "repeat": repeat, "shift": false, "ctrl": false, "alt": false, "meta": false}
+
 proc same(a, b: Image): bool =
   if a.width != b.width or a.height != b.height:
     return false
@@ -112,7 +120,8 @@ suite "Color cycling":
     for field in sample["fields"]:
       check field["access"].getStr() == "public" and field["persist"].getStr() == "disk"
     check sample["settings"]["refreshInterval"].getFloat() < 1 # it animates
-    check parseJson(app["sources"]["config.json"].getStr())["events"] == %*["swipe", "back", "forward"]
+    check parseJson(app["sources"]["config.json"].getStr())["events"] ==
+      %*["tap", "swipe", "back", "forward", "keyDown"]
 
   test "every scene is a picture, and its colors move":
     for scene in Scenes:
@@ -188,6 +197,27 @@ suite "Color cycling":
     check c.scene.state{"scene"}.getStr() == "harbor"
     c.swipe(config, "", "back")
     check c.scene.state{"scene"}.getStr() == "campfire"
+
+  test "a tap, Enter, Space or the right arrow is the next scene, the left arrow the previous":
+    let c = newCycling("tests/cycling-keys", 120, 120)
+    let config = %*{"scene": "falls", "pixelSize": "4", "seed": "1"}
+    discard c.render(config)
+    c.scene.state["scene"] = %"unmoved"
+    c.send(config, "tap", %*{"x": 60, "y": 60, "pointerId": 0, "pointerType": "mouse"})
+    check c.scene.state{"scene"}.getStr() == "harbor"
+    for (code, scene) in [("Enter", "harbor"), ("NumpadEnter", "harbor"), ("Space", "harbor"),
+        ("ArrowRight", "harbor"), ("ArrowLeft", "campfire")]:
+      c.scene.state["scene"] = %"unmoved"
+      c.send(config, "keyDown", key(code))
+      checkpoint code
+      check c.scene.state{"scene"}.getStr() == scene
+    # A key held down, another key, or a chord does not move it.
+    var chord = key("ArrowRight")
+    chord["ctrl"] = %true
+    c.scene.state["scene"] = %"unmoved"
+    for payload in [key("ArrowRight", repeat = true), key("KeyA"), chord]:
+      c.send(config, "keyDown", payload)
+    check c.scene.state{"scene"}.getStr() == "unmoved"
 
   test "a 480x480 scene, drawn and then cycled":
     for scene in Scenes:

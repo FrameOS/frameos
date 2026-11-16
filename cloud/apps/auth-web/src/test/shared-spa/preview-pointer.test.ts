@@ -193,6 +193,61 @@ describe("preview pointer input, package and frontend", () => {
     ]);
   });
 
+  it("gives a scene both fingers of a pinch, and keeps the page from zooming under them", () => {
+    // Two fingers on a preview of a map scene zoomed the page instead (a
+    // virtual frame's preview, 2026-11-16): the browser took the pinch and
+    // cancelled both pointers. A touch panel reports two pointers; so does
+    // the preview, and the page holds back while more than one is down.
+    const pinch = (attach: typeof packagePointer.attachPointerInput): Sent => {
+      const sent: Sent = [];
+      const canvas = new FakeCanvas();
+      attach(canvas as unknown as HTMLCanvasElement, (name, payload) => sent.push([name, payload]), {
+        inputV2: () => true,
+      });
+      const touch = (type: string, count: number) => {
+        const event = Object.assign(new Event(type, { cancelable: true }), { touches: { length: count } });
+        canvas.dispatchEvent(event);
+        sent.push([`(${type} ${count} prevented)`, { prevented: event.defaultPrevented }]);
+      };
+      const finger = { pointerType: "touch" };
+      touch("touchstart", 1);
+      canvas.dispatchEvent(pointer("pointerdown", { ...finger, pointerId: 7, button: 0, buttons: 1, clientX: 190, clientY: 160 }));
+      touch("touchstart", 2);
+      canvas.dispatchEvent(pointer("pointerdown", { ...finger, pointerId: 8, button: 0, buttons: 1, clientX: 390, clientY: 360 }));
+      touch("touchmove", 2);
+      canvas.dispatchEvent(pointer("pointermove", { ...finger, pointerId: 7, buttons: 1, clientX: 140, clientY: 110 }));
+      canvas.dispatchEvent(pointer("pointermove", { ...finger, pointerId: 8, buttons: 1, clientX: 440, clientY: 410 }));
+      canvas.dispatchEvent(pointer("pointerup", { ...finger, pointerId: 8, button: 0, clientX: 440, clientY: 410 }));
+      touch("touchmove", 1);
+      canvas.dispatchEvent(pointer("pointerup", { ...finger, pointerId: 7, button: 0, clientX: 140, clientY: 110 }));
+      return sent;
+    };
+    const fromPackage = pinch(packagePointer.attachPointerInput);
+    expect(pinch(frontendPointer.attachPointerInput)).toEqual(fromPackage);
+    const a = { pointerId: 7, pointerType: "touch" };
+    const b = { pointerId: 8, pointerType: "touch" };
+    expect(fromPackage).toEqual([
+      // One finger is the page's to scroll (the canvas's `touch-action: pan-y`).
+      ["(touchstart 1 prevented)", { prevented: false }],
+      ["pointerMove", { x: 9830, y: 5461, ...a, buttons: 1 }],
+      ["pointerDown", { x: 9830, y: 5461, ...a, buttons: 1, button: 0 }],
+      // Two are the scene's: a second pointer of its own.
+      ["(touchstart 2 prevented)", { prevented: true }],
+      ["pointerMove", { x: 22937, y: 27306, ...b, buttons: 1 }],
+      ["pointerDown", { x: 22937, y: 27306, ...b, buttons: 1, button: 0 }],
+      ["(touchmove 2 prevented)", { prevented: true }],
+      // Spread apart, each with its own id (one queued move per pointer in
+      // a frame: the second finger's is its release's position).
+      ["pointerMove", { x: 6553, y: 0, ...a, buttons: 1 }],
+      ["pointerMove", { x: 26214, y: 32767, ...b, buttons: 0 }],
+      ["pointerUp", { x: 26214, y: 32767, ...b, buttons: 0, button: 0 }],
+      // One finger left: the page's again.
+      ["(touchmove 1 prevented)", { prevented: false }],
+      ["pointerMove", { x: 6553, y: 0, ...a, buttons: 0 }],
+      ["pointerUp", { x: 6553, y: 0, ...a, buttons: 0, button: 0 }],
+    ]);
+  });
+
   it("sends a bundle from before input v2 the old mouse events", () => {
     const fromPackage = run(packagePointer.attachPointerInput, false);
     expect(run(frontendPointer.attachPointerInput, false)).toEqual(fromPackage);

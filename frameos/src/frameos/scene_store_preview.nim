@@ -1,6 +1,6 @@
 ## The scene store's host in the browser preview (docs/scene-store.md,
 ## frameos/scene_store_hooks.nim): previews only. The Scene store app browses
-## through it and can Preview a store scene in the preview itself, Show it
+## on its own and can Preview a store scene in the preview itself, Show it
 ## again and Discard it; Install, Update and Delete are a frame's
 ## (`previewOnly` in the facts, and `preview_only` if asked anyway).
 ##
@@ -38,8 +38,6 @@ var
   storeBase = ""
   storeVersion = ""
   storeFetch: StorePreviewFetch
-  listing: JsonNode
-  listingParams = ""
   lastError = ""
   lastDone = ""
   previewStore = ""
@@ -64,30 +62,14 @@ proc storePreviewRead*(asker: string): string {.nimcall, gcsafe, raises: [].} =
     try:
       let facts = %*{
         "url": storeBase, "version": storeVersion, "busy": "", "error": lastError, "done": lastDone,
-        "params": listingParams, "installed": newJArray(), "removeAny": false, "previewOnly": true,
+        "installed": newJArray(), "removeAny": false, "previewOnly": true,
       }
-      facts["listing"] = if listing.isNil: newJNull() else: listing
       facts["preview"] =
         if previewIds.len == 0: newJNull()
         else: %*{"store": previewStore, "id": previewIds[0], "name": previewName}
       result = $facts
     except CatchableError:
       result = ""
-
-proc browse(params: string) =
-  if not validStoreParams(params):
-    return
-  let (code, body) = storeFetch(storeBase & "/api/store/device/scenes?version=" & storeVersion &
-    (if params.len > 0: "&" & params else: ""))
-  if code != 200:
-    lastError = if code == 429: "rate_limited" else: "store_unavailable"
-    return
-  let answer = parseJson(body)
-  if answer.kind != JObject or answer{"scenes"}.isNil or answer{"scenes"}.kind != JArray:
-    lastError = "store_unavailable"
-    return
-  listing = answer
-  listingParams = params
 
 proc preview(asker, store, name: string) =
   if not isStoreId(store):
@@ -133,7 +115,6 @@ proc storePreviewAction*(asker, action, args: string) {.nimcall, gcsafe, raises:
     try:
       let given = parseJson(if args.len > 0: args else: "{}")
       case action
-      of "browse": browse(given{"params"}.getStr())
       of "preview": preview(asker, given{"store"}.getStr(), given{"name"}.getStr())
       of "discard": discardPreview()
       of "install", "update", "remove": lastError = "preview_only"
@@ -157,8 +138,6 @@ proc takeStorePreviewChange*(): StorePreviewChange =
 
 proc resetStorePreviewForTests*() =
   storeBase = ""
-  listing = nil
-  listingParams = ""
   lastError = ""
   lastDone = ""
   previewStore = ""

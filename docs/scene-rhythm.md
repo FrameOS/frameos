@@ -120,9 +120,18 @@ sleep: every wake is a fresh boot, and its first pass runs everything.
 
 When a scene is not due and no copy of it exists, it runs anyway, without its
 due time moving: a **repaint**. While it runs, `FrameScene.repainting` is
-true. Today a repaint is an ordinary run, so an app that fetches a random photo
-fetches a new one, and an album moves on. That is a known cost of a device
-that cannot keep the picture, not a bug in the schedule.
+true. Today a repaint is an ordinary run for most apps, so an app that fetches
+a random photo fetches a new one, and an album moves on. That is a known cost
+of a device that cannot keep the picture, not a bug in the schedule. The SD
+card's slideshow (`data/localImage`) reads the flag and shows the photo it
+showed.
+
+A hole whose UI moved its holes (a window dragged, opened or closed on a
+desktop) cannot trust the canvas, where the chrome has just painted: its cells
+are dropped and it repaints (`rhythmHoleMoved`). Only a hole at a new size (a
+window sized) runs as due, because what its apps made last is the wrong shape.
+A due run on every pass of a drag stepped the SD card image through its folder
+(2026-11-16).
 
 The node store (PR #555, `frameos/node_store.nim`) is how a repaint becomes
 exact: a node cache that sees `repainting` should serve what it stored last

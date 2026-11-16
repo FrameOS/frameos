@@ -257,8 +257,9 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
           style={{
             imageRendering: 'pixelated',
             // Taps and sideways drags are the scene's; a vertical swipe still
-            // scrolls the page on a phone.
-            touchAction: 'pan-y pinch-zoom',
+            // scrolls the page on a phone. A pinch is the scene's (two
+            // pointers, utils/previewPointer), never the page's zoom.
+            touchAction: 'pan-y',
             aspectRatio: `${previewDimensions.width} / ${previewDimensions.height}`,
           }}
         />

@@ -29,6 +29,8 @@ void fos_client_render_now(void);
 /* Someone is tapping or pressing (the input hold, fos_animation.h): slow
  * chores on any task wait. */
 bool fos_client_input_held(void);
+/* A tap or a key queued, or one in the last 250 ms (async JS answers wait). */
+bool fos_client_input_pending(void);
 /* Render now because somebody asked (a render verb, the console, a button,
  * the schedule): unlike fos_client_render_now, the scenes inside a split all
  * run, also those whose own interval has not come round. */

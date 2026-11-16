@@ -546,6 +546,11 @@ preview forwards the browser's pointer, wheel and keyboard from the focused
 canvas (`frameos/wasm/src/pointer.ts`, kept twice with
 `frontend/src/utils/previewPointer.ts`); a bundle from before input v2 says so
 (`ready` without `inputEvents`) and gets the old mouse events and no keys.
+Every finger on the canvas is its own pointer, as on a touch panel: the
+canvas's `touch-action` is `pan-y` (one finger's vertical swipe scrolls the
+page) and while two or more touches are down the page holds back their
+default, so a pinch reaches the scene instead of zooming the page (before
+2026-11-16 `pinch-zoom` let the browser take it and cancel both pointers).
 
 **The driver boundary.** The Linux evdev driver sends input as a small C
 struct (`DriverInputEvent`, `frameos/driver_abi.nim`) through a value
