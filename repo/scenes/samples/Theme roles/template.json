@@ -1,0 +1,10 @@
+{
+  "name": "Theme roles",
+  "description": "Every role of a desktop's theme, each with its name: buttons, a field, options, a switch, text, a card, tiles and keys. In a desktop window it shows that desktop's look, full screen FrameOS's own.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.10"
+}

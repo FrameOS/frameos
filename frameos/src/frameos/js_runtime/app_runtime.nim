@@ -40,6 +40,7 @@ import frameos/panel_shape
 import frameos/scene_store_hooks
 import frameos/frame_settings_hooks
 import frameos/scene_category
+from frameos/ui/theme import themeSource
 
 type
   JsAssetGrant* = enum
@@ -1061,6 +1062,19 @@ const
   EmbeddedAssetReadMaxBytes = 2 * 1024 * 1024
   AssetPathRefused = ": invalid asset path, or a write the app's permissions do not include: "
 
+proc assetFolderPathOk(relPath: string): bool =
+  ## Every segment a folder the listing shows: no dot names, no OS junk
+  ## (paths.isJunkDirName), no control characters or backslashes.
+  var start = 0
+  for i in 0 .. relPath.len:
+    if i == relPath.len or relPath[i] == '/':
+      if isJunkDirName(relPath.substr(start, i - 1)):
+        return false
+      start = i + 1
+    elif relPath[i] < ' ' or relPath[i] in {'\127', '\\'}:
+      return false
+  true
+
 proc jsAssetReadMaxBytes(e: JsAppEvalEnv): int =
   ## Full-buffer asset reads triple in RAM (bytes + base64 + JS string), so
   ## embedded targets get a small cap; larger files must use ranged reads.
@@ -1177,6 +1191,16 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
         return nimBoolToJS(ctx, false)
       removeFile(full)
       return nimBoolToJS(ctx, true)
+    of "mkdir":
+      # One folder in a folder that is there: an ESP32's mkdir of a parent
+      # above its assets mount fails, so there is no `-p`. A name the listing
+      # would hide (".cache", "@eaDir") is refused, as the device's own write
+      # paths refuse dot names. False when it was there already.
+      let full = resolveAssetPath(e, pathStr, write = true)
+      if full.len == 0 or not assetFolderPathOk(pathStr):
+        frameos_apps.logError(e.owner, "JS app makeAssetFolder" & AssetPathRefused & pathStr)
+        return nimBoolToJS(ctx, false)
+      return nimBoolToJS(ctx, not existsOrCreateDir(full))
     of "image":
       let full = resolveAssetPath(e, pathStr)
       if full.len == 0 or not fileExists(full):
@@ -1238,7 +1262,7 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       return jsUndefSentinel(ctx)
   except CatchableError as err:
     frameos_apps.logError(e.owner, "JS app assets " & opStr & " failed: " & err.msg)
-    if opStr in ["write", "append", "delete", "exists"]:
+    if opStr in ["write", "append", "delete", "exists", "mkdir"]:
       return nimBoolToJS(ctx, false)
     return jsNull(ctx)
 
@@ -1677,6 +1701,14 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     # Every scene category with its name, on every host: a layout groups
     # app.frame.scenes by `category` and names a group from this.
     return jsonToJS(ctx, sceneCategoriesJson())
+  of "theme":
+    # The theme of the desktop around the frame's scene (ui/theme.nim), for
+    # what an element's `look` cannot reach: an SVG's fill, a mask in the
+    # page's color. None, or an empty one, is the app's own look.
+    let theme = if themeSource.isNil: nil else: themeSource()
+    if not theme.isNil and theme.kind == JObject and theme.len > 0:
+      return jsonToJS(ctx, theme)
+    return jsUndefSentinel(ctx)
   else:
     return jsUndefSentinel(ctx)
 
@@ -1749,7 +1781,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
         keys.add(key)
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale", "paper",
-      "color", "sceneName", "systemScene", "batteryPercent", "wifiRssi"]
+      "color", "sceneName", "systemScene", "batteryPercent", "wifiRssi", "theme"]
     keys.add("sceneId")
     keys.add("categories")
     if not windowSceneListing.isNil:
@@ -2087,7 +2119,7 @@ const
     ## unless they are small: past eight, an app keeps pictures while they hold
   KeptThumbnailPixels = 8 * 480 * 480
     ## no more pixels than eight 480x480 photos, up to 48 of them (a store's or
-    ## an asset browser's grid of covers). Memory still decides first
+    ## the Files sample's thumbnails). Memory still decides first
     ## (keptPictureTarget).
 
 proc keptPixels(runtime: JsAppRuntime): int =
@@ -2650,6 +2682,7 @@ const appJsPrelude* = compactJs("""
     writeAsset: (path, base64) => __frameosAsset("write", path, String(base64 || "")) === true,
     appendAsset: (path, base64) => __frameosAsset("append", path, String(base64 || "")) === true,
     deleteAsset: (path) => __frameosAsset("delete", path) === true,
+    makeAssetFolder: (path) => __frameosAsset("mkdir", String(path || "")) === true,
     loadAssetImage: (path, options) => __frameosAsset("image", path, options ? JSON.stringify(options) : "") ?? null,
     openAssetStream: (path, mode) => __frameosStream("openAsset", { path: String(path || ""), mode: String(mode || "r") }) ?? null,
     createStream: (base64) => __frameosStream("create", { base64: String(base64 || "") }) ?? null,

@@ -158,12 +158,21 @@ describe("the playground's scenes", () => {
       "steps",
       "gallery",
       "tap-counter",
+      "theme-roles",
     ]) {
       expect(ids.has(id), id).toBe(true);
     }
     for (const name of leadingTemplates) {
       expect(excludedTemplates.has(name), name).toBe(false);
     }
+  });
+
+  it("hold Files, under the id the desktops find it by", () => {
+    // Renamed from "Asset browser" on 2026-11-16; its scene id stayed.
+    const files = scenes.find((scene) => scene.id === "asset-browser");
+    expect(files?.name).toBe("Files");
+    expect(leadingTemplates).toContain("Files");
+    expect(leadingTemplates).not.toContain("Asset browser");
   });
 
   it("leave out what needs a key or a Pi", () => {

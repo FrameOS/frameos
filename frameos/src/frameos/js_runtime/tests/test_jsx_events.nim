@@ -563,6 +563,37 @@ suite "jsx fields":
     check not uiListens(id, "keyDown")
     forgetTypedKeys()
 
+  test "Enter is heard once, and what its onKeyDown did is drawn":
+    # A form sent on Enter: on the screen's keyboard and on a real one, the
+    # handler runs once, and the render after it runs get() (letting go of
+    # the field had made it lay the last tree out again).
+    const sent = """
+    let sends = 0
+    export function get(app) {
+      return (
+        <div className={`flex flex-col h-full ${sends ? 'bg-green-500' : 'bg-white'}`}>
+          <input className="h-10 shrink-0 bg-slate-100" value="x"
+            onKeyDown={(e) => { if (e.key === 'Enter') { sends++; frameos.setState('sends', sends) } }} />
+        </div>
+      )
+    }
+    """
+    for typed in [false, true]:
+      forgetTypedKeys()
+      let id = "tests/jsx-enter-" & $typed
+      let ui = newUi(sent, id, 320, 240)
+      discard ui.render()
+      check dispatchUiEvent(id, "tap", at(160, 20, "touch"))
+      discard ui.render()
+      if typed:
+        check dispatchUiEvent(id, "keyDown", %*{"key": "Enter", "code": "Enter"})
+      else:
+        check dispatchUiEvent(id, "tap", keyAt(id, ord(kEnter)))
+      check ui.scene.state{"sends"}.getInt() == 1
+      check uiTarget(id, 1, create = false).input.focus == 0
+      check ui.render()[160, 100] == rgbx(0x22, 0xc5, 0x5e, 255)
+    forgetTypedKeys()
+
   test "a list scrolls under a finger; a tap after it hits what shows":
     let id = "tests/jsx-scroll"
     let ui = newUi(form, id, 320, 240)

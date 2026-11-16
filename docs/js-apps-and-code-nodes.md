@@ -98,7 +98,7 @@ node sends), `frameos.getSetting("namespace", "key")` (only
 namespaces the app's `config.json` declares under `settings`),
 `frameos.remember(key, value)` / `frameos.recall(key)` (see below), the asset
 calls `listAssets`, `assetExists`, `assetSize`, `readAsset`, `writeAsset`,
-`appendAsset`, `deleteAsset`, `loadAssetImage`, and the stream calls
+`appendAsset`, `deleteAsset`, `makeAssetFolder`, `loadAssetImage`, and the stream calls
 `openAssetStream`, `createStream`, `streamRead`, `streamWrite`,
 `streamAtEnd`, `streamRewind`, `streamClose` (base64 in and out; see "Big
 text" below for text a line at a time). Asset
@@ -108,7 +108,7 @@ there is its `config.json` `"permissions"` list: `"assets"` to read,
 `"assets-write"` to also write and delete, and `"frame"` for `frameos.frame`
 (the frame page's facts and powers, `docs/terminal.md`). Saving the scene
 fills the list from the code (the read calls, and `writeAsset`,
-`appendAsset`, `deleteAsset` or a stream opened with `"w"` or `"a"`, and
+`appendAsset`, `deleteAsset`, `makeAssetFolder` or a stream opened with `"w"` or `"a"`, and
 `frameos.frame(`), replacing whatever it said before. The frame gives the app exactly its list
 (`frameos/src/frameos/js_runtime/app_runtime.nim`): with neither, the
 asset calls live in the scene's own `scenes/<sceneId>/` folder; with

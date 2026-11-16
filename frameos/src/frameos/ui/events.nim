@@ -531,14 +531,21 @@ proc erase(target: UiTarget, forward: bool) =
     i.caret = a
     target.changed()
 
-proc enter(target: UiTarget) =
-  ## Enter: a line in a <textarea>; elsewhere the field is done.
-  target.keyDown("Enter")
+proc enter(target: UiTarget, heard = false) =
+  ## Enter: a line in a <textarea>; elsewhere the field is done. `heard`: its
+  ## onKeyDown has had the key already (one typed on a keyboard), and runs once.
+  if not heard:
+    target.keyDown("Enter")
   let r = target.regionOf(target.input.focus - 1)
   if r >= 0 and target.regions[r].field == 2:
     target.insert("\n")
   else:
+    # What onKeyDown did (a form sent on Enter) is drawn by get(): letting go
+    # of the field alone would only lay the last tree out again.
+    let asked = not target.inputOnly
     target.blurField()
+    if asked:
+      target.inputOnly = false
 
 proc flashKey(target: UiTarget, code: int) =
   ## The key just typed stays lit for a moment once a render shows it
@@ -735,7 +742,7 @@ when not defined(frameosEmbedded):
     case payload{"key"}.getStr()
     of "Backspace": target.erase(false)
     of "Delete": target.erase(true)
-    of "Enter": target.enter()
+    of "Enter": target.enter(heard = true)
     of "Escape": target.blurField()
     else: target.moveCaret(payload{"key"}.getStr())
 

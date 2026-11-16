@@ -263,6 +263,8 @@ describe("repo sample scenes", () => {
   it.each([
     ["repo/scenes/samples/SD card image/scenes.json", ["files"]],
     ["repo/scenes/samples/Ken Burns slideshow/scenes.json", ["files"]],
+    // Files reads the assets folder and makes folders in it.
+    ["repo/scenes/samples/Files/scenes.json", ["assets", "assets-write"]],
   ])("%s", (path, flags) => {
     expect(sceneAccessFlags(JSON.parse(repoFile(path)))).toEqual(flags);
   });
