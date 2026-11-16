@@ -221,7 +221,7 @@
   from the ESP32 or the preview, and `fos_scenes.c` applies one without a
   slot. A new built-in scene goes the same way, not into a host.
 
-## Scene icons: `docs/scene-icons.md`
+## Scene icons and categories: `docs/scene-icons.md`
 
 - `settings.icon` is ONE SVG path in a `0 0 24 24` box, filled (nonzero) with
   the color around it, at most 1024 characters: nothing else. What is not an
@@ -231,6 +231,10 @@
   through `listingItem` (an ESP32 off its scene index, `make_entry`), and the
   switcher draws it on its tiles. An SVG becomes one path in the editor alone
   (`utils/svgToSceneIcon.ts`), never on a frame.
+- `settings.category` is one of the store's category slugs
+  (`utils/storeCategories.ts`), listed the same way as `category` for the
+  desktops to group by; any other value counts as none (`scene_category.nim`,
+  `docs/scene-category-fixtures.json`). A new repo sample names its category.
 
 ## Scene settings on the frame: `docs/scene-settings.md`
 

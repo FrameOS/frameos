@@ -1,4 +1,4 @@
-# Scene icons
+# Scene icons and categories
 
 A scene can carry a small icon of its own, `settings.icon`, that every list
 which shows the scene without its picture can draw in place of a placeholder:
@@ -37,17 +37,43 @@ warns. The rule is written twice, `frameos/src/frameos/scene_icon.nim`
 `sceneIconProblem`), and `docs/scene-icon-fixtures.json` pins the two together
 (`test_scene_icon.nim`, cloud shared-spa `scene-icon.test.ts`).
 
+## Category
+
+`settings.category` is one of the store's category slugs, the ones its
+shelves use (`frontend/src/utils/storeCategories.ts`, mirrored by
+`cloud/apps/auth-web/src/lib/categories.ts`): `photos`, `art`, `calendar`,
+`weather`, `ai`, `dashboards`, `fun`, `realtime`, `utilities`, `demos`, and
+`desktops` / `layouts` for a layout. A desktop layout groups its scene lists by
+it (`app.frame.scenes[i].category`). The value is read trimmed and in lower
+case; any other value stays in the scene, counts as none (no `category` in
+`app.frame.scenes`), and the cloud's scene lint warns. The rule is
+`frameos/src/frameos/scene_category.nim` and `sceneCategorySlug` in
+`storeCategories.ts`, pinned by `docs/scene-category-fixtures.json`, whose slug
+list the SPA's test compares with the store's.
+
+There is no category for clocks: the store files its clocks under
+`utilities` ("Tools & utilities"), and so do the repo's samples.
+
+The repo's samples and gallery scenes each name theirs (the playground's
+Start menu groups by it). The store's own category (`store_scenes.category`)
+is not written into a scene installed from it: on the cloud a scene goes to a
+frame from its version's zip, stamped at the push (`withStoreSceneOrigin`), and
+a stamp there would change every installed scene's payload and its per-scene
+checksum (the workspace would mark every cloud frame's scenes as changed), and
+would change again whenever the store's category does. A scene's category is
+its own, set in the editor.
+
 ## On the frame
 
-Every host reads `settings.icon` with the scene and lists it, checked, beside
-the scene's name and window size in `app.frame.scenes` (`{id, name,
-windowSize?, icon?}`, one builder: `listingItem` in
-`system/sceneSwitcher/scene.nim`):
+Every host reads `settings.icon` and `settings.category` with the scene and
+lists them, checked, beside the scene's name and window size in
+`app.frame.scenes` (`{id, name, windowSize?, icon?, category?}`, one builder:
+`listingItem` in `system/sceneSwitcher/scene.nim`):
 
 | Host | Where the icon comes from |
 |---|---|
 | Linux (a Pi) | the deployed or pushed scene (`interpreter.nim` `readSettings`, `scenes.nim` `getSceneIcon`) |
-| ESP32 | its scene index: `fos_scene_store.c` `make_entry` keeps `icon` for a scene that is not a layout when it is 1024 characters or fewer, and `embedded_runtime.nim` checks it when it reads the catalog, so the scene stays on flash |
+| ESP32 | its scene index: `fos_scene_store.c` `make_entry` keeps `icon` (1024 characters or fewer) and `category` (16 or fewer) for a scene that is not a layout, and `embedded_runtime.nim` checks both when it reads the catalog, so the scene stays on flash |
 | browser / wasm (the preview, the plane rendering a board, a virtual frame) | the loaded scenes |
 
 The scene switcher (`docs/scene-switcher.md`) draws it on the tile: above the
@@ -63,7 +89,8 @@ renders its scenes with the wasm runtime, which reads the icon itself.
 The scene's settings (`SceneSettings.tsx`, the one scene workspace, so a
 frame's scene, a saved scene and the store's scene page alike) have an Icon
 area: the icon at 24 px and larger, the path as text, **Upload SVG** and
-**Clear**. Upload reads an `.svg` file and makes one path of it
+**Clear**; and a **Category** select beside it (None, then the store's
+categories by their titles). Upload reads an `.svg` file and makes one path of it
 (`utils/svgToSceneIcon.ts`, pure, tested in `svg-to-scene-icon.test.ts`): it
 merges the filled shapes (`path`, `rect`, `circle`, `ellipse`, `polygon`),
 applies transforms and maps the SVG's `viewBox` into the 24 box, turns

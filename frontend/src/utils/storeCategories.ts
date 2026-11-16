@@ -57,3 +57,52 @@ export function groupByStoreShelf<T extends { category?: string }>(
     .filter((shelf) => groups.has(shelf.slug))
     .map((shelf) => ({ shelf, templates: groups.get(shelf.slug) ?? [] }))
 }
+
+// A scene's own category (`settings.category`, docs/scene-icons.md "Category"):
+// one of the slugs above, which a desktop layout groups its scene lists by
+// (`app.frame.scenes[i].category`). The runtime reads it with the same rule
+// (scene_category.nim), pinned by docs/scene-category-fixtures.json. Any other
+// value stays in the scene and counts as none.
+
+export const SCENE_CATEGORY_HELP =
+  "The store's category for this scene. A desktop layout groups its scene lists by it, and the store files the scene under it."
+
+/** The slugs a layout's own category may be; every other one is a scene's. */
+const LAYOUT_CATEGORY_SLUGS = new Set(['desktops', 'layouts'])
+
+/** `value` as a category slug (trimmed, lower case), or null when the store has no such category. */
+export function sceneCategorySlug(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const slug = value.trim().toLowerCase()
+  return shelfBySlug.has(slug) ? slug : null
+}
+
+export interface SceneCategoryOption {
+  value: string
+  label: string
+}
+
+/** The Category select's choices: None, then the store's categories for a scene (or a layout), and a value of the scene's own the store does not know. */
+export function sceneCategoryOptions(current: unknown, isLayout: boolean): SceneCategoryOption[] {
+  const options: SceneCategoryOption[] = [
+    { value: '', label: 'None' },
+    ...storeCategoryShelves
+      .filter((shelf) => LAYOUT_CATEGORY_SLUGS.has(shelf.slug) === isLayout)
+      .map((shelf) => ({ value: shelf.slug, label: shelf.title })),
+  ]
+  const slug = sceneCategorySlug(current)
+  if (slug && !options.some((option) => option.value === slug)) {
+    options.push({ value: slug, label: storeShelfForCategory(slug).title })
+  } else if (!slug && typeof current === 'string' && current.trim()) {
+    // Kept as it is, and said to be none.
+    options.push({ value: current, label: `${current} (not a store category)` })
+  }
+  return options
+}
+
+/** The select's value as the setting: undefined (the key is dropped) for None. */
+export function sceneCategoryFromSelect(value: string): string | undefined {
+  return value || undefined
+}

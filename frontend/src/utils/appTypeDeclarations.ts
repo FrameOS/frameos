@@ -307,8 +307,10 @@ interface FrameOSApp {
      * windowSize is a scene's own size for a new window, "WxH" (its settings.windowSize), where it says
      * one (FrameOS 2026.11.10+). icon is the scene's icon, where it has one (its settings.icon): one SVG
      * path in a 0 0 24 24 box, drawn as <svg viewBox="0 0 24 24"><path d={icon} fill="currentColor" /></svg>
-     * (FrameOS 2026.11.10+). */
-    scenes?: { id: string; name: string; windowSize?: string; icon?: string }[];
+     * (FrameOS 2026.11.10+). category is the scene's category, one of the store's slugs (photos, art,
+     * calendar, weather, ai, dashboards, fun, realtime, utilities, demos), where it has one (its
+     * settings.category), to group a scene list by (FrameOS 2026.11.10+). */
+    scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string }[];
     /** How many of those scenes may run at once, the one in front included, where that is limited (2 on an
      * ESP32 with 8 MB of PSRAM, 4 with more). A desktop opening one more closes the one that had the focus
      * longest ago. Undefined where there is no limit (a Raspberry Pi) (FrameOS 2026.11.8+; undefined
