@@ -45,9 +45,12 @@ esp_err_t fos_scenes_sync(bool force);
  * render task (fos_client.c). */
 char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size_t etag_len,
                                esp_err_t *out_err);
-/* A payload fetched with fos_scenes_backend_fetch: into the runtime now, and
- * onto flash by the scene store's own task (the combined file, then the etag
- * and the source). Takes `body`. Render task only. */
+/* A payload fetched with fos_scenes_backend_fetch: into the runtime now when
+ * there is room for it whole, and onto flash by the scene store's own task
+ * (as changes or the combined file, then the etag and the source); without
+ * the room, onto flash first and then applied one scene at a time. A patch
+ * (`?patch=1`) is written here, scene by scene. Takes `body`. Render task
+ * only. */
 esp_err_t fos_scenes_take_backend_payload(char *body, size_t len, const char *etag);
 /* The store task still has a payload to write. A deep sleep and a restart wait
  * for it (fos_scenes_store_wait: false when `timeout_ms` ran out first). */

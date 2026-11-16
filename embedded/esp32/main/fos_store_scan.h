@@ -14,6 +14,15 @@
  * but objects in it, unbalanced brackets, an open string). */
 int fos_store_split_scenes(const char *json, size_t len, const char **starts, size_t *lens, int max);
 
+/* The value of one key of a JSON object, by where it starts and how long it
+ * is, without building a tree: what a backend's scene patch is read with
+ * (`base`, `order` and the scenes of `put`, fos_scenes.c), so a patch of
+ * twenty scenes costs no more memory than its text. False when `json` is not
+ * an object, the key is not one of its own (nested objects are not looked
+ * into), or the text is cut short. Keys are compared as written. */
+bool fos_store_object_member(const char *json, size_t len, const char *key, const char **value,
+                             size_t *value_len);
+
 /* The store scene a stored scene came from: the `origin` the store stamps on
  * every scene it serves ({href, storeSceneId, version, sceneId}), found by its
  * keys (no app's `origin` has a storeSceneId). `store` gets the uuid ("" for

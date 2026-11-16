@@ -31,6 +31,7 @@
 #include "fos_scene_store.h"
 #include "fos_slot_cache.h"
 #include "fos_spiffs_footprint.h"
+#include "fos_store_scan.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -55,6 +56,9 @@ static const char *TAG = "fos_scenes";
 #define SCENES_SLOT_MAX FOS_SCENE_STORE_SLOTS
 #define SCENES_SLOT_PATH_LEN 48
 #define SCENES_MAX_BYTES (512 * 1024)
+/* How long a download waits for its body's block (fos_http_request_t
+ * alloc_wait_ms): an e-paper render holds its PSRAM for a few seconds. */
+#define SCENES_BODY_WAIT_MS 8000
 #define ETAG_LEN 80
 _Static_assert(ETAG_LEN == FOS_SCENES_ETAG_LEN, "fos_scenes.h hands out etags of this length");
 #define SCENE_ID_LEN 128
@@ -2086,26 +2090,54 @@ char *fos_scenes_list_json(void)
 
 /* A backend's answer to `?patch=1` when it knows what this frame holds:
  * {"patch":true,"base":"<etag>","order":[...],"put":[...]}. Anything not
- * against the set this frame holds forces the whole payload next pass. */
+ * against the set this frame holds forces the whole payload next pass.
+ *
+ * Read without a tree of the whole answer: `base` and `order` are parsed by
+ * themselves and each scene of `put` by the store as it writes that scene, so
+ * a patch costs its text and its largest scene. As one tree, a 365 KB patch
+ * (fifteen scenes, each with a new desktop layout) did not fit beside the
+ * panel's render on the reTerminal E1004 and was refused out of memory
+ * (patch-refused, the hardware bench, 2026-11-16). */
 static esp_err_t apply_backend_patch(const char *body, size_t len, const char *etag)
 {
     if (!fos_json_depth_ok(body, len, FOS_JSON_MAX_DEPTH)) return ESP_ERR_INVALID_ARG;
-    cJSON *root = cJSON_ParseWithLength(body, len);
-    if (root == NULL) return ESP_ERR_NO_MEM;
+    const char *base_text = NULL, *order_text = NULL, *put_text = NULL;
+    size_t base_len = 0, order_len = 0, put_len = 0;
+    static const char *starts[SCENES_SLOT_MAX + 1];
+    static size_t lens[SCENES_SLOT_MAX + 1];
+    static fos_scene_store_put_t puts[SCENES_SLOT_MAX];
+    int put_count = 0;
+    if (fos_store_object_member(body, len, "put", &put_text, &put_len)) {
+        /* One more than a store holds: a longer list is refused, not cut. */
+        put_count = fos_store_split_scenes(put_text, put_len, starts, lens, SCENES_SLOT_MAX + 1);
+    }
+    if (!fos_store_object_member(body, len, "base", &base_text, &base_len) ||
+        !fos_store_object_member(body, len, "order", &order_text, &order_len) || put_count < 0 ||
+        put_count > SCENES_SLOT_MAX) {
+        s_sync_requested = true;
+        return ESP_ERR_INVALID_ARG;
+    }
+    for (int i = 0; i < put_count; i++) puts[i] = (fos_scene_store_put_t){.json = starts[i], .len = lens[i]};
+    cJSON *base = cJSON_ParseWithLength(base_text, base_len);
+    cJSON *order = cJSON_ParseWithLength(order_text, order_len);
     esp_err_t err;
-    const cJSON *base = cJSON_GetObjectItem(root, "base");
     char held[ETAG_LEN];
     etag_get(held, sizeof(held));
     if (!cJSON_IsString(base) || base->valuestring == NULL || strcmp(base->valuestring, held) != 0) {
         s_sync_requested = true;
-        err = ESP_ERR_INVALID_STATE;
+        err = base == NULL ? ESP_ERR_NO_MEM : ESP_ERR_INVALID_STATE;
+    } else if (!cJSON_IsArray(order)) {
+        s_sync_requested = true;
+        err = order == NULL ? ESP_ERR_NO_MEM : ESP_ERR_INVALID_ARG;
     } else {
         /* On the render task, which never paces itself. */
-        err = fos_scenes_apply_patch(cJSON_GetObjectItem(root, "put"), cJSON_GetObjectItem(root, "order"),
-                                     FOS_SCENES_SOURCE_BACKEND, etag, false);
+        fos_scene_store_change_t change = {.puts = puts, .put_count = put_count, .order = order};
+        fos_scene_store_result_t result;
+        err = apply_store_change(&change, FOS_SCENES_SOURCE_BACKEND, etag, "scenes:patch", false, &result);
         if (err != ESP_OK) s_sync_requested = true;
     }
-    cJSON_Delete(root);
+    cJSON_Delete(base);
+    cJSON_Delete(order);
     return err;
 }
 
@@ -2123,10 +2155,8 @@ typedef struct {
     char *body; /* malloc'd, the job's own; NULL: no job */
     size_t len;
     char etag[ETAG_LEN];
-    /* The runtime refused the payload (out of memory, most often: a whole
-     * set is one string as long as it is): it still runs the set before
-     * while flash gets this one. The apply after the write loads it from
-     * flash, one scene at a time. */
+    /* The runtime did not take it whole (store_first): written as fast as
+     * flash goes, and applied from flash once it is, one scene at a time. */
     bool reload;
 } store_job_t;
 
@@ -2171,62 +2201,116 @@ static void store_pace(void)
 /* The store module's pace hook: every write goes through it, and every writer
  * but the render task waits out renders and taps (the store task, and a
  * producer splitting the payload it stored); the render task never waits for
- * itself. An RGB LCD's write goes as fast as it can, behind "Updating". */
+ * itself. An RGB LCD's write goes as fast as it can, behind "Updating".
+ *
+ * A set the runtime did not take whole (store_job_t `reload`) is not paced
+ * either: the frame shows the set from before until it is on flash, so
+ * nothing is gained by waiting (a paced 465 KB set took two and a half
+ * minutes on the reTerminal E1004, 2026-11-16). Its own flag, not
+ * s_store_urgent: the store lets go of the lock between scenes, and a writer
+ * taking it then clears that one. */
+static volatile bool s_store_job_urgent = false;
+
 static void store_pace_hook(void)
 {
-    if (!s_store_urgent && !fos_client_on_render_task() && !fos_display_is_lcd()) store_pace();
+    if (!s_store_urgent && !(s_store_job_urgent && xTaskGetCurrentTaskHandle() == s_store_task) &&
+        !fos_client_on_render_task() && !fos_display_is_lcd()) {
+        store_pace();
+    }
 }
 
 static void store_backend_payload(const store_job_t *job)
 {
     /* "Updating" on an LCD while flash is written (its refill starves while
      * the cache is off), and so as fast as it goes there: nobody sees the
-     * scene behind it. On e-paper it is paced around renders and taps. */
+     * scene behind it. On e-paper it is paced around renders and taps,
+     * unless the runtime waits for it (`reload`). */
+    if (job->reload) s_store_changing = true; /* before the lock: the render task looks first */
     fos_display_updating_begin();
     store_lock();
+    s_store_job_urgent = job->reload;
     fos_slot_cache_clear(&s_slot_cache);
     /* Paced through the store's hook (store_pace_hook). On a per-scene store,
      * as changes to it: only the scenes that changed are written, one at a
      * time, and the index names the set the runtime runs. */
     esp_err_t err = store_set_as_changes_locked(job->body, job->len, FOS_SCENES_SOURCE_BACKEND);
     bool as_changes = err == ESP_OK;
+    bool split = false;
     if (err == ESP_ERR_NOT_FOUND) {
         err = write_file_replace_locked(SCENES_PATH, SCENES_TMP_PATH, job->body, job->len);
         if (err == ESP_OK) combined_set(true);
+        if (err == ESP_OK && split_no_room_len() != 0) set_split_no_room_len(0);
+        if (err == ESP_OK && job->reload) {
+            /* Split now, from the body in hand, so the apply loads one scene.
+             * A split that fails leaves the combined file for the apply to
+             * load whole, as a producer's does (store_split_stored). */
+            split = split_scenes_locked(job->body, job->len) == ESP_OK;
+            if (!split && s_split_out_of_room) {
+                s_split_out_of_room = false;
+                set_split_no_room_len((uint32_t)job->len);
+            }
+        }
+    } else if (err == ESP_OK && split_no_room_len() != 0) {
+        set_split_no_room_len(0);
     }
-    /* A set the runtime refused: what flash holds now (this set, or the one
-     * before when the write failed) is loaded by the apply, which makes one
-     * scene resident and gives the runtime the catalog. Left as it was, the
-     * runtime ran the set before against a store holding this one: every
-     * scene start read flash for the old set's layout and logged
-     * `layout:missing` until the next push (the reTerminal E1004, the
-     * hardware bench, 2026-11-16). Inside the lock, as the split does. */
-    if (job->reload) s_pending = true;
+    s_store_job_urgent = false;
+    bool reload = job->reload;
+    if (reload) {
+        /* A newer set waits to be written: it is the one to apply (the
+         * runtime may hold it whole already), and this one is not. */
+        portENTER_CRITICAL(&s_store_mux);
+        if (s_store_next.body != NULL) {
+            s_store_next.reload = true;
+            reload = false;
+        }
+        portEXIT_CRITICAL(&s_store_mux);
+    }
+    if (reload) {
+        /* What flash holds now (this set; some of it, each scene whole, when
+         * the write failed part way; the set before when it failed first) is
+         * loaded by the apply, which makes one scene resident and gives the
+         * runtime the catalog. Left as it was, the runtime ran the set before
+         * against a store holding this one: every scene start read flash for
+         * the old set's layout and logged `layout:missing` until the next
+         * push (the reTerminal E1004, the hardware bench, 2026-11-16). Inside
+         * the lock, as a producer's stored set: a one-scene change waiting on
+         * it must see the set waiting for its apply. */
+        s_pending = true;
+        if (err == ESP_OK) s_payload_stored_since_boot = true;
+    }
+    if (job->reload) s_store_changing = false;
     store_unlock();
-    fos_display_updating_end(false);
     if (err == ESP_OK) {
-        if (split_no_room_len() != 0) set_split_no_room_len(0);
         save_etag_file(job->etag);
         persist_scene_source(FOS_SCENES_SOURCE_BACKEND);
-        /* Stored whole: the per-scene index the boot split wrote describes
-         * the PREVIOUS payload (the render task stopped using it when it
-         * took this one); the next boot splits this one again. */
-        if (!as_changes) fos_scene_store_remove_index();
-        log_scene_event("scenes:store", "ok", "backend", "", as_changes ? s_set_summary : "written",
+        /* Stored whole beside a runtime that took it whole: the per-scene
+         * index the boot split wrote describes the PREVIOUS payload (the
+         * render task stopped using it when it took this one); the next boot
+         * splits this one again. */
+        if (!as_changes && !job->reload) fos_scene_store_remove_index();
+        log_scene_event("scenes:store", "ok", "backend", "",
+                        as_changes ? s_set_summary : split ? "written, split" : "written",
                         job->len, 0, 0, ESP_OK);
-        if (job->reload) fos_client_render_now(); /* the apply, and the new set's first picture */
-        return;
+    } else {
+        log_scene_event("scenes:store", "error", "backend", "",
+                        s_last_error[0] ? s_last_error : "store-failed", job->len, 0, 0, err);
     }
-    /* The runtime runs the new set and flash holds the one before. Unless a
-     * newer payload is on its way, the next poll sends the stored etag again:
-     * the backend answers with this set, and it is written then. */
-    log_scene_event("scenes:store", "error", "backend", "",
-                    s_last_error[0] ? s_last_error : "store-failed", job->len, 0, 0, err);
+    if (reload) {
+        /* The apply ends "Updating" (fos_scenes_apply_pending); the new set
+         * renders now, not at the next timed pass. */
+        fos_client_render_now();
+    } else {
+        fos_display_updating_end(false);
+    }
+    if (err == ESP_OK) return;
+    /* The runtime runs the new set (or, store-first, the one before) and flash
+     * holds the one before. Unless a newer payload is on its way, the next
+     * poll sends the stored etag again: the backend answers with this set,
+     * and it is written then. */
     portENTER_CRITICAL(&s_store_mux);
     bool newer = s_store_next.body != NULL;
     portEXIT_CRITICAL(&s_store_mux);
     if (!newer) load_etag();
-    if (job->reload) fos_client_render_now();
 }
 
 /* The whole payload a producer stored (fos_scenes_set_json_from: a cloud
@@ -2328,7 +2412,9 @@ static bool store_behind(char *body, size_t len, const char *etag, bool reload)
     char *dropped = s_store_next.body;
     s_store_next.body = body;
     s_store_next.len = len;
-    s_store_next.reload = reload;
+    /* A store-first set dropped for this one leaves its apply (and the
+     * s_store_changing it raised) to this one. */
+    s_store_next.reload = reload || (dropped != NULL && s_store_next.reload);
     strlcpy(s_store_next.etag, etag ? etag : "", sizeof(s_store_next.etag));
     bool start = !s_store_busy;
     s_store_busy = true;
@@ -2405,6 +2491,9 @@ char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size
             .if_none_match = (fetched || (etag[0] && strcmp(etag, "local") != 0 && (!force || holds_set))) ? etag : NULL,
             .timeout_ms = 30000,
             .buffer_size = 4096,
+            /* Off the render task a render may hold the block for a moment;
+             * on it nothing else is running to give it back. */
+            .alloc_wait_ms = fos_client_on_render_task() ? 0 : SCENES_BODY_WAIT_MS,
         };
         fos_http_response_t response;
         err = fos_http_fetch(&request, SCENES_MAX_BYTES, &response);
@@ -2427,8 +2516,14 @@ char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size
                             0, response.status, ESP_ERR_NO_MEM);
             err = ESP_ERR_NO_MEM;
         } else if (response.body == NULL) {
-            log_scene_event("scenes:sync", "error", "backend", "", "read-failed", 0, 0, response.status, ESP_FAIL);
-            err = ESP_FAIL;
+            /* What the answer said it was, and whether there was no buffer
+             * for it or the read broke off: "read-failed, 0 bytes" said
+             * neither. */
+            err = response.body_err == ESP_ERR_NO_MEM ? ESP_ERR_NO_MEM : ESP_FAIL;
+            log_scene_event("scenes:sync", "error", "backend", "",
+                            err == ESP_ERR_NO_MEM ? "no-memory" : "read-failed",
+                            (size_t)(response.content_length > 0 ? response.content_length : 0), 0,
+                            response.status, err);
         } else {
             body = response.body;
             if (out_len) *out_len = response.body_len;
@@ -2439,6 +2534,24 @@ char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size
     if (s_fetch_lock) xSemaphoreGive(s_fetch_lock);
     if (out_err) *out_err = err;
     return body;
+}
+
+/* Whether the runtime can take a whole backend payload of `len` bytes now
+ * (load_into_nim): the instant switch to a new set. It copies the payload
+ * into one string and parses every scene of it, and holds them all until the
+ * next set: a 420 KB set took 750 KB of PSRAM on the reTerminal E1003, and a
+ * 378 KB one on the E1004 failed its copy with 1.5 MB free whose largest
+ * block was 296 KB, after letting go of the scene it showed (the hardware
+ * bench, 2026-11-16). Without the room, the set goes store-first, as the
+ * cloud's do: written, then applied one scene at a time. Asked once per set
+ * taken, so the walk for the largest block is affordable. */
+#define WHOLE_LOAD_LARGEST_FACTOR 2
+#define WHOLE_LOAD_FREE_FACTOR 4
+static bool runtime_room_for_whole(size_t len)
+{
+    if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) return true;
+    return heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= WHOLE_LOAD_LARGEST_FACTOR * len &&
+           heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= WHOLE_LOAD_FREE_FACTOR * len;
 }
 
 esp_err_t fos_scenes_take_backend_payload(char *body, size_t len, const char *etag)
@@ -2469,30 +2582,47 @@ esp_err_t fos_scenes_take_backend_payload(char *body, size_t len, const char *et
     /* Backend-served payload: declare it before load_into_nim promotes the
      * pending source (persisted with the write: the boot split records it). */
     s_pending_source = FOS_SCENES_SOURCE_BACKEND;
-    /* The index on flash describes the PREVIOUS payload. With it in place a
-     * selection went through the slots: a scene new in this payload was "not
-     * found" (the voice chat's show_image, E1002 2026-10-24: apply-failed with
-     * four scenes live) and a known id reloaded its stale slot file. The
-     * runtime holds the whole new payload from here. The store task writes
-     * it into the per-scene store as changes, the scenes that changed one at
-     * a time (store_set_as_changes_locked); without one, whole, for the next
-     * boot to split (and removes the old index once the payload is on
-     * flash). */
-    s_slot_count = 0;
-    s_resident_scene_id[0] = '\0';
     ESP_LOGI(TAG, "scenes updated from backend (%u bytes, etag %s)", (unsigned)len,
              etag && etag[0] ? etag : "none");
-    log_scene_event("scenes:sync", "updated", "backend", "", "taken", len, 0, 200, ESP_OK);
-    bool loaded = load_into_nim(body, len, "backend");
-    /* The new set on the panel now. Taken from the idle wait (the link
-     * task's download, or a deploy's poke pulling it itself), nothing else
-     * rendered it until the next timed pass: a deploy to the reTerminal E1003
-     * showing Form showcase (hourly) sat at "first render", the Sticky's
-     * showed minutes late (2026-11-10). Inside a pass it costs one render. */
-    fos_client_render_now();
-    if (store_behind(body, len, etag, !loaded)) return ESP_OK;
+    bool whole = runtime_room_for_whole(len);
+    log_scene_event("scenes:sync", "updated", "backend", "", whole ? "taken" : "taken-to-store", len, 0, 200,
+                    ESP_OK);
+    if (whole) {
+        /* The index on flash describes the PREVIOUS payload. With it in place
+         * a selection went through the slots: a scene new in this payload was
+         * "not found" (the voice chat's show_image, E1002 2026-10-24:
+         * apply-failed with four scenes live) and a known id reloaded its
+         * stale slot file. The runtime holds the whole new payload from here.
+         * The store task writes it into the per-scene store as changes, the
+         * scenes that changed one at a time (store_set_as_changes_locked);
+         * without one, whole, for the next boot to split (and removes the old
+         * index once the payload is on flash). */
+        int slots_before = s_slot_count;
+        s_slot_count = 0;
+        s_resident_scene_id[0] = '\0';
+        whole = load_into_nim(body, len, "backend");
+        /* Refused (out of memory, as a 378 KB set was on the E1004): the
+         * slots from before are still on flash, and the set goes store-first. */
+        if (!whole) s_slot_count = slots_before;
+    }
+    if (whole) {
+        /* The new set on the panel now. Taken from the idle wait (the link
+         * task's download, or a deploy's poke pulling it itself), nothing
+         * else rendered it until the next timed pass: a deploy to the
+         * reTerminal E1003 showing Form showcase (hourly) sat at "first
+         * render", the Sticky's showed minutes late (2026-11-10). Inside a
+         * pass it costs one render. */
+        fos_client_render_now();
+    } else {
+        /* Store-first, as a set the cloud pushes: written by the store task,
+         * then applied from flash one scene at a time (store_backend_payload
+         * marks it pending). The set from before keeps the panel until then;
+         * a selection waits for the new one (s_store_changing). */
+        s_store_changing = true;
+    }
+    if (store_behind(body, len, etag, !whole)) return ESP_OK;
     /* No store task: written here, as it always was. */
-    store_job_t job = {.body = body, .len = len, .reload = !loaded};
+    store_job_t job = {.body = body, .len = len, .reload = !whole};
     strlcpy(job.etag, etag ? etag : "", sizeof(job.etag));
     store_backend_payload(&job);
     free(body);
