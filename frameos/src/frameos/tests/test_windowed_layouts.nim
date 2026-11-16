@@ -100,6 +100,18 @@ export function get(app) {
 }
 """
 
+# A line to type into, the box around it red until something is typed.
+const typerUi = """
+let text = ''
+export function get(app) {
+  return (
+    <div className={`w-full h-full flex flex-col ${text ? 'bg-green-500' : 'bg-red-500'}`}>
+      <textarea className="w-full h-[10px]" value={text} onChange={(e) => { text = String(e.target.value) }} />
+    </div>
+  )
+}
+"""
+
 let scenesJson = "[" & [
   jsxScene("tests/desk", deskUi, 300.0, ""","isLayout": true"""),
   panel("tests/blue", "#0000ff", 600.0).withLayout("tests/desk", """{"open": ["tests/yellow"]}"""),
@@ -122,6 +134,7 @@ let scenesJson = "[" & [
   jsxScene("tests/counter2", counterUi, 3000.0).withLayout("tests/desk"),
   jsxScene("tests/scroller", scrollerUi, 3000.0).withLayout("tests/desk"),
   jsxScene("tests/counter4", counterUi, 3000.0).withLayout("tests/desk"),
+  jsxScene("tests/typer", typerUi, 86400.0).withLayout("tests/desk"),
   panel("tests/hearing", "#0000ff", 600.0).withLayout("tests/desk", """{"open": ["tests/counter4"], "hearing": true}"""),
   panel("tests/wheeling", "#0000ff", 600.0).withLayout("tests/desk",
     """{"open": ["tests/scroller"], "pressCover": true}"""),
@@ -396,3 +409,17 @@ suite "windows":
     hearing.tap(10, 39)
     check hearing.wornLayout.state{"heard"}.getInt(0) == 1
 
+  test "a key typed into a field of the scene in front is drawn without a tap after it":
+    # The Terminal's bug: a scene that renders once a day, in a layout's
+    # <yield />, put back its last picture after every key until a tap.
+    let typer = hostScene("tests/typer")
+    check pass(typer).color(5, 30) == colored("#ef4444")
+    typer.tap(5, 2) # focus the field
+    rhythmClockOverride = 1000.01
+    discard pass(typer)
+    rhythmClockOverride = 1000.02
+    discard pass(typer) # nothing asked since: the copy
+    runEvent(typer, ExecutionContext(scene: typer, event: "textInput", payload: %*{"text": "a"},
+      loopIndex: 0, loopKey: ".", nextSleep: -1))
+    rhythmClockOverride = 1000.03
+    check pass(typer).color(5, 30) == colored("#22c55e")
