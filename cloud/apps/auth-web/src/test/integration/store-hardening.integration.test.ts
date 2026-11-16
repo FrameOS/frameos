@@ -803,6 +803,24 @@ describe("publish limits", () => {
     const republish = await publish(accessToken, { name: "Scene 0" });
     expect(republish.status).toBe(200);
   });
+
+  it("caps versions per hour, except for a superadmin", async () => {
+    const { accessToken, accountId } = await linkClient(publishScopes);
+    for (let index = 0; index < 30; index += 1) {
+      const response = await publish(accessToken);
+      expect(response.status, `publish ${index + 1}`).toBe(200);
+    }
+    const overflow = await publish(accessToken);
+    expect(overflow.status).toBe(429);
+    expect((await readJson(overflow)).error).toBe("rate_limited");
+
+    await db
+      .update(accounts)
+      .set({ isSuperadmin: true })
+      .where(eq(accounts.id, accountId));
+    const superadmin = await publish(accessToken);
+    expect(superadmin.status).toBe(200);
+  });
 });
 
 describe("scenes.json limits", () => {

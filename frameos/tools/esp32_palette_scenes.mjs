@@ -3,11 +3,12 @@
 // memory of an ESP32-S3 with 8 MB of PSRAM (the SenseCAP Indicator): the wasm
 // build of the runtime with its heap capped to what that board has
 // (docs/device-limits-fixtures.json). Every effect and every scene, a few
-// dozen frames each, the FPS counters, and swipes. It fails on a render that
-// runs out of memory or returns an error, a scene error or a discarded
-// interpreter, a picture that stops moving, memory that keeps growing, frames
-// that get slower as they run, a frame far past any budget, and a swipe that
-// does not change the effect, and an event the dispatcher fails on.
+// dozen frames each, with their footers and without, swipes and the footer's
+// buttons. It fails on a render that runs out of memory or returns an error, a
+// scene error or a discarded interpreter, a picture that stops moving, memory
+// that keeps growing, frames that get slower as they run, a frame far past any
+// budget, a swipe or a button that does not do what it says, and an event the
+// dispatcher fails on.
 //
 //   frameos/tools/build_wasm.sh --out DIR
 //   node frameos/tools/esp32_palette_scenes.mjs DIR
@@ -105,18 +106,23 @@ function play(name, sceneId, state) {
   let early = 0
   let before = picture()
   let still = 0
+  const changes = []
   for (let i = 0; i < FRAMES; i += 1) {
     times.push(render(`${name}, frame ${i + 1}`))
     if (i === 9) early = memoryUsed()
     const now = picture()
-    if (i > 0 && changedPixels(before, now) === 0) still += 1
+    changes.push(changedPixels(before, now))
+    if (i > 0 && changes[i] === 0) still += 1
     before = now
   }
   // Grown by more than a frame buffer's worth while it ran: something is kept
   // every frame.
   const grown = memoryUsed() - early
   if (grown > WIDTH * HEIGHT * 2) fail(`${name}: memory grew ${grown} bytes between frame 10 and ${FRAMES}`)
-  if (still > FRAMES / 4) fail(`${name}: ${still} of ${FRAMES} frames did not move`)
+  if (still > FRAMES / 4) {
+    fail(`${name}: ${still} of ${FRAMES} frames did not move (pixels changed each frame: ${changes.join(' ')}; ` +
+      `ms: ${times.map((t) => t.toFixed(1)).join(' ')}; state ${JSON.stringify(stateNow())})`)
+  }
   const first = median(times.slice(5, 15))
   const last = median(times.slice(-10))
   if (last > first * 3 + 5) fail(`${name}: frames slowed from ${first.toFixed(1)} to ${last.toFixed(1)} ms`)
@@ -134,13 +140,14 @@ const pointer = (event, x, y, buttons) => {
 
 const effects = toys.fields.find((field) => field.name === 'effect').options.map((option) => option.value)
 for (const effect of effects) {
-  play(`${effect}`, toys.id, { effect, quality: '0', showFps: false })
+  play(`${effect}`, toys.id, { effect, quality: '0', footer: true })
 }
-play('Hellfire, 4 px, fps', toys.id, { effect: 'fire', quality: '4', showFps: true })
+play('Hellfire, 4 px, no footer', toys.id, { effect: 'fire', quality: '4', footer: false })
 const scenes = cycling.fields.find((field) => field.name === 'scene').options.map((option) => option.value)
 for (const scene of scenes) {
-  play(`color cycling: ${scene}`, cycling.id, { scene, quality: '0' })
+  play(`color cycling: ${scene}`, cycling.id, { scene, quality: '0', footer: true })
 }
+play('color cycling, no footer', cycling.id, { scene: scenes[0], quality: '0', footer: false })
 
 // A swipe to the left is the next effect, and the next scene.
 const swipeLeft = () => {
@@ -149,14 +156,33 @@ const swipeLeft = () => {
   pointer('pointerUp', 120, 200, 0)
   call('frameos_wasm_tick', 'boolean', [], [])
 }
-play('swipes', toys.id, { effect: effects[0], quality: '0', showFps: false })
+play('swipes', toys.id, { effect: effects[0], quality: '0', footer: true })
 swipeLeft()
 render('after the swipe')
 if (stateNow().effect !== effects[1]) fail(`a swipe left from ${effects[0]} showed ${stateNow().effect}, not ${effects[1]}`)
-play('color cycling swipes', cycling.id, { scene: scenes[0], quality: '0' })
+play('color cycling swipes', cycling.id, { scene: scenes[0], quality: '0', footer: true })
 swipeLeft()
 render('after the swipe')
 if (stateNow().scene !== scenes[1]) fail(`a swipe left from ${scenes[0]} showed ${stateNow().scene}, not ${scenes[1]}`)
+
+// The footer's buttons, tapped where a 480 px panel draws them: Next, Hide,
+// then a tap along the bottom edge brings the footer back.
+const tap = (x, y) => {
+  pointer('pointerDown', x, y, 1)
+  pointer('pointerUp', x, y, 0)
+  call('frameos_wasm_tick', 'boolean', [], [])
+  render(`after a tap at ${x},${y}`)
+}
+for (const [scene, key, values] of [[toys.id, 'effect', effects], [cycling.id, 'scene', scenes]]) {
+  play(`footer of ${values[0]}`, scene, { [key]: values[0], quality: '0', footer: true })
+  tap(75, 445)
+  if (stateNow()[key] !== values[1]) fail(`Next in the footer of ${values[0]} showed ${stateNow()[key]}, not ${values[1]}`)
+  tap(440, 445)
+  if (stateNow().footer !== false) fail(`Hide in the footer of ${values[1]} left it ${stateNow().footer}`)
+  tap(240, 472)
+  if (stateNow().footer !== true) fail(`a tap along the bottom edge left the footer ${stateNow().footer}`)
+  if (stateNow()[key] !== values[1]) fail(`a tap along the bottom edge also showed ${stateNow()[key]}`)
+}
 
 // Pulls down from the top edge, twice: the second once overflowed a 32-bit
 // int counting toward safe mode (`notePull`), and a pull never reached the

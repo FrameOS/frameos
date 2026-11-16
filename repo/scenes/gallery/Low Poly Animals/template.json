@@ -1,0 +1,10 @@
+{
+  "name": "Low Poly Animals",
+  "description": "Moody low-poly wildlife: capybaras, axolotls, hedgehogs and friends. 1462 images",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 960,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.10.12"
+}

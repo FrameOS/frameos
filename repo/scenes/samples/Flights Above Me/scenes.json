@@ -1,0 +1,386 @@
+[
+  {
+    "id": "3f42d839-7bdd-41df-8091-5fad1e9e759f",
+    "name": "Flights Above Me",
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 1
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "flight-radar",
+        "type": "app",
+        "position": {
+          "x": 355,
+          "y": -248
+        },
+        "data": {
+          "keyword": "flightRadar",
+          "config": {},
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true,
+            "durationEnabled": true,
+            "duration": 300
+          }
+        }
+      },
+      {
+        "id": "render-radar",
+        "type": "app",
+        "position": {
+          "x": 390,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      },
+      {
+        "id": "state-latitude",
+        "type": "state",
+        "position": {
+          "x": 323,
+          "y": -346
+        },
+        "data": {
+          "keyword": "latitude",
+          "value": "51.5074"
+        }
+      },
+      {
+        "id": "state-longitude",
+        "type": "state",
+        "position": {
+          "x": 299,
+          "y": -412
+        },
+        "data": {
+          "keyword": "longitude",
+          "value": "-0.1278"
+        }
+      },
+      {
+        "id": "state-radius",
+        "type": "state",
+        "position": {
+          "x": 275,
+          "y": -478
+        },
+        "data": {
+          "keyword": "radiusKm",
+          "value": "60"
+        }
+      },
+      {
+        "id": "state-theme",
+        "type": "state",
+        "position": {
+          "x": 251,
+          "y": -544
+        },
+        "data": {
+          "keyword": "theme",
+          "value": "midnight"
+        }
+      },
+      {
+        "id": "state-show-info-panel",
+        "type": "state",
+        "position": {
+          "x": 227,
+          "y": -610
+        },
+        "data": {
+          "keyword": "showInfoPanel",
+          "value": "true"
+        }
+      },
+      {
+        "id": "state-map",
+        "type": "state",
+        "position": {
+          "x": 203,
+          "y": -676
+        },
+        "data": {
+          "keyword": "map",
+          "value": "names"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "flow-render-image",
+        "source": "render-event",
+        "target": "render-radar",
+        "sourceHandle": "next",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "flight-to-image",
+        "source": "flight-radar",
+        "target": "render-radar",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "latitude-to-flight",
+        "source": "state-latitude",
+        "target": "flight-radar",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/latitude",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "longitude-to-flight",
+        "source": "state-longitude",
+        "target": "flight-radar",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/longitude",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "radius-to-flight",
+        "source": "state-radius",
+        "target": "flight-radar",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/radiusKm",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "theme-to-flight",
+        "source": "state-theme",
+        "target": "flight-radar",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/theme",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "show-info-panel-to-flight",
+        "source": "state-show-info-panel",
+        "target": "flight-radar",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/showInfoPanel",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "map-to-flight",
+        "source": "state-map",
+        "target": "flight-radar",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/map",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "name": "latitude",
+        "label": "Your latitude",
+        "description": "Set the latitude of the place to watch.",
+        "type": "float",
+        "value": "51.5074",
+        "access": "public",
+        "persist": "disk",
+        "required": true
+      },
+      {
+        "name": "longitude",
+        "label": "Your longitude",
+        "description": "Set the longitude of the place to watch.",
+        "type": "float",
+        "value": "-0.1278",
+        "access": "public",
+        "persist": "disk",
+        "required": true
+      },
+      {
+        "name": "radiusKm",
+        "label": "Radar radius (km)",
+        "description": "Aircraft within this distance are shown.",
+        "type": "float",
+        "value": "60",
+        "access": "public",
+        "persist": "disk",
+        "required": true
+      },
+      {
+        "name": "theme",
+        "label": "Color theme",
+        "description": "Choose the radar and flight-card color palette.",
+        "type": "select",
+        "value": "midnight",
+        "options": [
+          {
+            "value": "midnight",
+            "label": "Midnight radar"
+          },
+          {
+            "value": "ocean",
+            "label": "Ocean blue"
+          },
+          {
+            "value": "forest",
+            "label": "Forest green"
+          },
+          {
+            "value": "sunset",
+            "label": "Sunset"
+          },
+          {
+            "value": "plum",
+            "label": "Plum"
+          },
+          {
+            "value": "paper",
+            "label": "Warm paper"
+          }
+        ],
+        "access": "public",
+        "persist": "disk",
+        "required": true
+      },
+      {
+        "name": "showInfoPanel",
+        "label": "Show flight information panel",
+        "description": "Show nearby-flight cards beside or below the radar. Turn off for a radar-only display, including round panels.",
+        "type": "boolean",
+        "value": "true",
+        "access": "public",
+        "persist": "disk",
+        "required": true
+      },
+      {
+        "name": "map",
+        "label": "Map under the radar",
+        "description": "Draw the area under the radar from OpenStreetMap: the coast and rivers, main roads and highways, borders and town names.",
+        "type": "select",
+        "value": "names",
+        "options": [
+          {
+            "value": "names",
+            "label": "Coast, rivers, roads and town names"
+          },
+          {
+            "value": "lines",
+            "label": "Coast, rivers and roads"
+          },
+          {
+            "value": "off",
+            "label": "No map"
+          }
+        ],
+        "access": "public",
+        "persist": "disk",
+        "required": true
+      },
+      {
+        "name": "refreshInterval",
+        "label": "Refresh interval (seconds)",
+        "description": "How often to refresh aircraft positions and route details.",
+        "type": "float",
+        "value": "900",
+        "access": "public",
+        "persist": "disk",
+        "role": "refreshInterval",
+        "required": true
+      }
+    ],
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 900,
+      "backgroundColor": "#07151a",
+      "autoArrangeOnLoad": true,
+      "windowSize": "800x600",
+      "icon": "M20.56 3.91C21.15 4.5 21.15 5.45 20.56 6.03L16.67 9.92L18.79 19.11L17.38 20.53L13.5 13.1L9.6 17L9.96 19.47L8.89 20.53L7.13 17.35L3.94 15.58L5 14.5L7.5 14.87L11.37 11L3.94 7.09L5.36 5.68L14.55 7.8L18.44 3.91C19 3.33 20 3.33 20.56 3.91Z"
+    },
+    "apps": {
+      "flightRadar": {
+        "name": "Flight radar",
+        "category": "data",
+        "description": "Live aircraft positions around a location over a map of the area, rendered as a compact radar display.",
+        "version": "1.1.0",
+        "fields": [
+          {
+            "name": "latitude",
+            "type": "float",
+            "value": "51.5074",
+            "required": true,
+            "label": "Latitude"
+          },
+          {
+            "name": "longitude",
+            "type": "float",
+            "value": "-0.1278",
+            "required": true,
+            "label": "Longitude"
+          },
+          {
+            "name": "radiusKm",
+            "type": "float",
+            "value": "60",
+            "required": true,
+            "label": "Radar radius (km)"
+          },
+          {
+            "name": "theme",
+            "type": "select",
+            "value": "midnight",
+            "options": [
+              "midnight",
+              "ocean",
+              "forest",
+              "sunset",
+              "plum",
+              "paper"
+            ],
+            "label": "Theme"
+          },
+          {
+            "name": "showInfoPanel",
+            "type": "boolean",
+            "value": "true",
+            "required": true,
+            "label": "Show flight information panel"
+          },
+          {
+            "name": "map",
+            "type": "select",
+            "value": "names",
+            "options": [
+              "names",
+              "lines",
+              "off"
+            ],
+            "label": "Map"
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Flight radar\",\n  \"category\": \"data\",\n  \"description\": \"Live aircraft positions around a location over a map of the area, rendered as a compact radar display.\",\n  \"version\": \"1.1.0\",\n  \"fields\": [\n    {\n      \"name\": \"latitude\",\n      \"type\": \"float\",\n      \"value\": \"51.5074\",\n      \"required\": true,\n      \"label\": \"Latitude\"\n    },\n    {\n      \"name\": \"longitude\",\n      \"type\": \"float\",\n      \"value\": \"-0.1278\",\n      \"required\": true,\n      \"label\": \"Longitude\"\n    },\n    {\n      \"name\": \"radiusKm\",\n      \"type\": \"float\",\n      \"value\": \"60\",\n      \"required\": true,\n      \"label\": \"Radar radius (km)\"\n    },\n    {\n      \"name\": \"theme\",\n      \"type\": \"select\",\n      \"value\": \"midnight\",\n      \"options\": [\n        \"midnight\",\n        \"ocean\",\n        \"forest\",\n        \"sunset\",\n        \"plum\",\n        \"paper\"\n      ],\n      \"label\": \"Theme\"\n    },\n    {\n      \"name\": \"showInfoPanel\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"required\": true,\n      \"label\": \"Show flight information panel\"\n    },\n    {\n      \"name\": \"map\",\n      \"type\": \"select\",\n      \"value\": \"names\",\n      \"options\": [\n        \"names\",\n        \"lines\",\n        \"off\"\n      ],\n      \"label\": \"Map\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "const kmPerDegreeLat = 111.32\nconst earthCircumferenceKm = 40075.016686\nconst round = (value: number) => Math.round(value * 10) / 10\n// Web Mercator's northing of a latitude, the projection the map lines come in.\nconst mercatorY = (latitude: number) => Math.log(Math.tan(Math.PI / 4 + latitude * Math.PI / 360))\n\ntype Theme = {\n  name: string\n  page: string\n  radar: string\n  grid: string\n  text: string\n  muted: string\n  accent: string\n  plane: string\n  planeStroke: string\n  planeLabel: string\n  card: string\n  border: string\n  // The map under the radar: water, its shore and rivers, roads and highways.\n  water: string\n  shore: string\n  road: string\n  highway: string\n}\n\nconst themes: Record<string, Theme> = {\n  midnight: {\n    name: \"Midnight\",\n    page: \"#07151a\",\n    radar: \"#0b2529\",\n    grid: \"#4d877c\",\n    text: \"#e8f5ef\",\n    muted: \"#9bc9bf\",\n    accent: \"#ffdb9e\",\n    plane: \"#ffbd6d\",\n    planeStroke: \"#fff0d2\",\n    planeLabel: \"#fff0d2\",\n    card: \"#0b2529\",\n    border: \"#315d59\",\n    water: \"#031013\",\n    shore: \"#33695f\",\n    road: \"#1e4943\",\n    highway: \"#2e645b\",\n  },\n  ocean: {\n    name: \"Ocean\",\n    page: \"#071a2f\",\n    radar: \"#0c3150\",\n    grid: \"#4e9ac0\",\n    text: \"#e5f4ff\",\n    muted: \"#a9cfe4\",\n    accent: \"#8ce0ff\",\n    plane: \"#ffc66d\",\n    planeStroke: \"#fff4d6\",\n    planeLabel: \"#fff4d6\",\n    card: \"#0c2942\",\n    border: \"#356b8b\",\n    water: \"#041628\",\n    shore: \"#4580aa\",\n    road: \"#1f4e72\",\n    highway: \"#2e6891\",\n  },\n  forest: {\n    name: \"Forest\",\n    page: \"#102116\",\n    radar: \"#183b27\",\n    grid: \"#6eaa76\",\n    text: \"#e9f5e8\",\n    muted: \"#b3d3af\",\n    accent: \"#d9ee8b\",\n    plane: \"#ffc77a\",\n    planeStroke: \"#fff1d7\",\n    planeLabel: \"#fff1d7\",\n    card: \"#173324\",\n    border: \"#467452\",\n    water: \"#081d20\",\n    shore: \"#4b8273\",\n    road: \"#2b5538\",\n    highway: \"#3d6e4a\",\n  },\n  sunset: {\n    name: \"Sunset\",\n    page: \"#2b1520\",\n    radar: \"#4b2531\",\n    grid: \"#ba7180\",\n    text: \"#fff0e9\",\n    muted: \"#e9b9ae\",\n    accent: \"#ffd08a\",\n    plane: \"#ff9f73\",\n    planeStroke: \"#fff0dc\",\n    planeLabel: \"#fff0dc\",\n    card: \"#40202b\",\n    border: \"#89505c\",\n    water: \"#25101c\",\n    shore: \"#8a5768\",\n    road: \"#643546\",\n    highway: \"#7f4757\",\n  },\n  plum: {\n    name: \"Plum\",\n    page: \"#21152f\",\n    radar: \"#39244f\",\n    grid: \"#9476bd\",\n    text: \"#f3edff\",\n    muted: \"#c8b7e2\",\n    accent: \"#f0b7ff\",\n    plane: \"#ffb2c5\",\n    planeStroke: \"#fff0f5\",\n    planeLabel: \"#fff0f5\",\n    card: \"#30203f\",\n    border: \"#71558e\",\n    water: \"#1a0f2b\",\n    shore: \"#6f5598\",\n    road: \"#4d3667\",\n    highway: \"#624a80\",\n  },\n  paper: {\n    name: \"Paper\",\n    page: \"#f4efe3\",\n    radar: \"#e6ddca\",\n    grid: \"#7e796c\",\n    text: \"#27251f\",\n    muted: \"#605d53\",\n    accent: \"#6b4d21\",\n    plane: \"#bb5e2b\",\n    planeStroke: \"#fffaf0\",\n    planeLabel: \"#27251f\",\n    card: \"#fffaf0\",\n    border: \"#b8ae9b\",\n    water: \"#bccfcc\",\n    shore: \"#8aa19c\",\n    road: \"#d3c7ad\",\n    highway: \"#bfae8b\",\n  }\n}\n\ntype MapLines = {\n  water: any[]\n  rivers: any[]\n  roads: any[]\n  borders: any[]\n  towns: any[]\n  attribution: string\n}\n\ntype Aircraft = {\n  callsign: string\n  xKm: number\n  yKm: number\n  distance: number\n  track: number\n  altitudeFt: number | null\n  speedKts: number | null\n  origin?: string\n  destination?: string\n  airline?: string\n  country?: string\n}\n\nfunction toAircraft(row: any[], latitude: number, longitude: number, radiusKm: number): Aircraft | null {\n  const longitudeValue = Number(row[5])\n  const latitudeValue = Number(row[6])\n  if (!Number.isFinite(latitudeValue) || !Number.isFinite(longitudeValue) || row[8]) return null\n  const cosLatitude = Math.cos(latitude * Math.PI / 180)\n  const xKm = (longitudeValue - longitude) * kmPerDegreeLat * cosLatitude\n  const distance = Math.hypot(xKm, (latitudeValue - latitude) * kmPerDegreeLat)\n  if (distance > radiusKm) return null\n  // North of the center in the map's projection, at the center's scale, so planes sit on the map lines.\n  const yKm = (mercatorY(latitudeValue) - mercatorY(latitude)) * earthCircumferenceKm / (2 * Math.PI) * cosLatitude\n  const altitudeM = Number(row[7])\n  const speedMs = Number(row[9])\n  return {\n    callsign: String(row[1] || row[0] || \"Unknown\").trim(),\n    xKm,\n    yKm,\n    distance,\n    track: Number.isFinite(Number(row[10])) ? Number(row[10]) : 0,\n    altitudeFt: Number.isFinite(altitudeM) ? Math.round(altitudeM * 3.28084 / 100) * 100 : null,\n    speedKts: Number.isFinite(speedMs) ? Math.round(speedMs * 1.94384) : null,\n    country: String(row[2] || \"\").trim() || undefined\n  }\n}\n\nfunction routeFor(callsign: string, cache: Record<string, any>, budget: { left: number; changed: boolean }) {\n  const key = callsign.toUpperCase().replace(/\\s+/g, \"\")\n  const saved = cache[key]\n  if (saved && saved.until > Date.now()) return saved.value\n  if (!key || budget.left <= 0) return saved?.value || {}\n  budget.left -= 1\n  let value: Record<string, string> = {}\n  try {\n    const result = frameos.httpRequest(`https://api.adsbdb.com/v0/callsign/${encodeURIComponent(key)}`, { timeoutMs: 4500 })\n    const route = result.status === 200 && result.body ? JSON.parse(result.body)?.response?.flightroute : null\n    const origin = route?.origin?.iata_code || route?.origin?.icao_code\n    const destination = route?.destination?.iata_code || route?.destination?.icao_code\n    const airline = route?.airline?.name || route?.airline?.iata\n    if (origin && destination) value = { origin: String(origin), destination: String(destination), airline: airline ? String(airline) : \"\" }\n  } catch (_) {}\n  cache[key] = { value, until: Date.now() + (Object.keys(value).length ? 14400000 : 3600000) }\n  budget.changed = true\n  return value\n}\n\n// The radar circle's radius in pixels: the same for the map request and the drawing.\nconst radarRadius = (size: number) => size / 2 - size * 0.045\n\n// Lines from maps.frameos.net (OpenStreetMap) for the radar's square, already in its pixels:\n// the zoom puts radiusKm on the radar circle. Null when the service does not answer. The radar\n// needs little of a map: `maxKb` caps the answer and the service drops detail to fit.\nfunction fetchMap(latitude: number, longitude: number, radiusKm: number, size: number, withTowns: boolean, townSize: number, maxKb: number): MapLines | null {\n  const pixelsPerKm = radarRadius(size) / radiusKm\n  const zoom = Math.log2(pixelsPerKm * earthCircumferenceKm * Math.cos(latitude * Math.PI / 180) / 256)\n  // The service picks roads and rivers by the zoom, so a bigger radar would get ever more of them:\n  // ask for what a 480-pixel radar shows, drawn sharper.\n  const detail = Math.max(-3, Math.min(0, Math.round(zoom - Math.log2(size / 480)) - Math.round(zoom)))\n  const query = [\n    `lat=${latitude}`, `lon=${longitude}`, `zoom=${zoom.toFixed(2)}`, `width=${size}`, `height=${size}`, `detail=${detail}`,\n    `layers=water,rivers,roads,boundaries${withTowns ? \",places\" : \"\"}`,\n    \"rivers=river,canal\", \"roads=major_road,highway\", \"boundaries=country,disputed\",\n    withTowns ? `places=locality&labels=24&font=${Math.round(townSize)}` : \"\", \"simplify=1\", `maxkb=${maxKb}`\n  ]\n  const url = `https://maps.frameos.net/v1/lines?${query.filter(Boolean).join(\"&\")}`\n  // The service builds a view it has not cached on the fly and can turn the first try away.\n  for (let attempt = 0; attempt < 2; attempt++) {\n    try {\n      const result = frameos.httpRequest(url, { timeoutMs: 8000 })\n      const layers = result.status === 200 && result.body ? JSON.parse(result.body)?.layers : null\n      if (layers) {\n        return {\n          water: layers.water || [],\n          rivers: layers.rivers || [],\n          roads: layers.roads || [],\n          borders: layers.boundaries || [],\n          towns: layers.places || [],\n          attribution: \"© OpenStreetMap contributors\"\n        }\n      }\n    } catch (_) {}\n  }\n  return null\n}\n\n// A stroked path is outlined whole before any of it is filled: London's roads as one path took\n// 3.5 MB of an ESP32's memory to draw and crashed it, the same roads in 2 KB pieces 0.25 MB.\n// The pieces start where a line starts (the service writes an absolute \"M\" for each), and\n// the lines are opaque, so they draw the same.\nfunction strokePieces(d: string): string[] {\n  const pieces: string[] = []\n  let start = 0\n  while (start < d.length) {\n    let end = Math.min(d.length, start + 2000)\n    if (end < d.length) {\n      const next = d.indexOf(\"M\", end)\n      end = next < 0 ? d.length : next\n    }\n    pieces.push(d.slice(start, end))\n    start = end\n  }\n  return pieces\n}\n\n// Water, rivers, roads and borders inside the radar circle, with the map's credit in the corner.\nfunction MapLinesUnder({ map, size, theme }: { map: MapLines; size: number; theme: Theme }) {\n  const center = size / 2\n  const radius = radarRadius(size)\n  // The lines run a few pixels past the square, and nothing clips an SVG to its viewBox.\n  const margin = Math.max(8, size * 0.02)\n  const line = (d: string, color: string, width: number, dash?: string) => <g>\n    {strokePieces(d).map((piece) => <path d={piece} fill=\"none\" stroke={color} strokeWidth={width} strokeDasharray={dash} strokeLinecap=\"round\" strokeLinejoin=\"round\" />)}\n  </g>\n  return <g>\n    {map.water.map((area) => <path d={area.fill} fill={theme.water} />)}\n    {map.water.map((area) => line(area.stroke, theme.shore, Math.max(0.8, size * 0.0022)))}\n    {map.rivers.map((river) => line(river.d, theme.shore, Math.max(0.8, size * 0.0024)))}\n    {map.roads.filter((road) => road.kind !== \"highway\").map((road) => line(road.d, theme.road, Math.max(0.8, size * 0.0019)))}\n    {map.roads.filter((road) => road.kind === \"highway\").map((road) => line(road.d, theme.highway, Math.max(1.1, size * 0.0032)))}\n    {map.borders.map((border) => line(border.d, theme.muted, Math.max(0.8, size * 0.002), \"6 4\"))}\n    {/* Outside the circle: the page again, over whatever the map drew there. */}\n    <path d={`M${-margin} ${-margin}H${size + margin}V${size + margin}H${-margin}Z M${center - radius} ${center}A${radius} ${radius} 0 1 0 ${center + radius} ${center}A${radius} ${radius} 0 1 0 ${center - radius} ${center}Z`} fill={theme.page} fillRule=\"evenodd\" />\n    <text x={size - 2} y={size - 3} fontFamily=\"Ubuntu\" fontSize={Math.max(9, size * 0.018)} textAnchor=\"end\" fill={theme.muted} fillOpacity=\".8\">{map.attribution}</text>\n  </g>\n}\n\nfunction TownNames({ map, size, theme, townSize }: { map: MapLines; size: number; theme: Theme; townSize: number }) {\n  const center = size / 2\n  const marker = Math.max(5, size * 0.015)\n  // Names the circle would cut, or the marker in the middle would cover, are left out.\n  const towns = map.towns.filter((town) => Math.hypot(town.x - center, town.y - center) < radarRadius(size) - townSize * 1.5\n    && (Math.abs(town.x - center) > town.name.length * townSize * 0.28 + marker || Math.abs(town.y - center) > townSize * 0.6 + marker))\n  return <g>\n    {towns.map((town) => <text x={round(town.x)} y={round(town.y)} fontFamily=\"Ubuntu\" fontSize={townSize} textAnchor=\"middle\" dominantBaseline=\"middle\" fill=\"none\" stroke={theme.radar} strokeWidth={Math.max(2, townSize / 4)} strokeLinejoin=\"round\">{town.name}</text>)}\n    {towns.map((town) => <text x={round(town.x)} y={round(town.y)} fontFamily=\"Ubuntu\" fontSize={townSize} textAnchor=\"middle\" dominantBaseline=\"middle\" fill={theme.muted}>{town.name}</text>)}\n  </g>\n}\n\nfunction Radar({ aircraft, radiusKm, size, theme, map, townSize }: { aircraft: Aircraft[]; radiusKm: number; size: number; theme: Theme; map: MapLines | null; townSize: number }) {\n  const center = size / 2\n  const edge = size * 0.045\n  const radius = radarRadius(size)\n  const scale = radius / radiusKm\n  const planeSize = Math.max(10, size * 0.026)\n  const labelSize = Math.max(12, size * 0.021)\n  const candidates = [[0.72, -0.64], [0.72, 0.7], [-0.72, -0.64], [-0.72, 0.7], [0, -1.02], [0, 1.08], [1.02, 0], [-1.02, 0]]\n  const placed: { x: number; y: number }[] = []\n  const rings = [0.25, 0.5, 0.75, 1]\n  return <svg viewBox={`0 0 ${size} ${size}`} className=\"size-full\" aria-label=\"Aircraft radar\">\n    <circle cx={center} cy={center} r={radius} fill={theme.radar} />\n    {map ? <MapLinesUnder map={map} size={size} theme={theme} /> : null}\n    <circle cx={center} cy={center} r={radius} fill=\"none\" stroke={theme.grid} strokeWidth={Math.max(1, size * 0.003)} />\n    {rings.map((fraction) => <circle key={`ring-${fraction}`} cx={center} cy={center} r={radius * fraction} fill=\"none\" stroke={theme.grid} strokeOpacity=\".52\" strokeWidth={Math.max(1, size * 0.002)} />)}\n    <line x1={center} y1={edge} x2={center} y2={size - edge} stroke={theme.grid} strokeOpacity=\".52\" strokeWidth={Math.max(1, size * 0.002)} />\n    <line x1={edge} y1={center} x2={size - edge} y2={center} stroke={theme.grid} strokeOpacity=\".52\" strokeWidth={Math.max(1, size * 0.002)} />\n    {map ? <TownNames map={map} size={size} theme={theme} townSize={townSize} /> : null}\n    {rings.map((fraction) => {\n      const ringRadius = radius * fraction\n      const angle = -Math.PI / 4\n      const x = center + ringRadius * Math.cos(angle)\n      const y = center + ringRadius * Math.sin(angle)\n      return <text key={`distance-${fraction}`} x={round(x + size * 0.018)} y={round(y - size * 0.012)} fontFamily=\"Ubuntu\" fontSize={Math.max(11, size * 0.024)} fill={theme.muted}>{Math.round(radiusKm * fraction)} km</text>\n    })}\n    <text x={center} y={edge + size * 0.035} fontFamily=\"Ubuntu\" fontSize={Math.max(13, size * 0.034)} textAnchor=\"middle\" fill={theme.muted}>N</text>\n    <circle cx={center} cy={center} r={Math.max(5, size * 0.015)} fill={theme.accent} stroke={theme.text} strokeWidth={Math.max(1, size * 0.003)} />\n    {aircraft.map((plane, index) => {\n      const x = center + plane.xKm * scale\n      const y = center - plane.yKm * scale\n      let chosen = candidates[index % candidates.length]\n      for (const candidate of candidates) {\n        const testX = x + candidate[0] * planeSize\n        const testY = y + candidate[1] * planeSize\n        if (!placed.some((item) => Math.abs(item.x - testX) < labelSize * 4.8 && Math.abs(item.y - testY) < labelSize * 1.5)) {\n          chosen = candidate\n          break\n        }\n      }\n      const labelX = x + chosen[0] * planeSize\n      const labelY = y + chosen[1] * planeSize\n      const anchor = chosen[0] < -0.2 ? \"end\" : chosen[0] > 0.2 ? \"start\" : \"middle\"\n      placed.push({ x: labelX, y: labelY })\n      return <g key={`${plane.callsign}-${index}`}>\n        <g transform={`translate(${round(x)} ${round(y)}) rotate(${round(plane.track)})`}>\n          <path d={`M 0 ${-planeSize * 0.78} L ${planeSize * 0.2} ${-planeSize * 0.13} L ${planeSize * 0.62} ${planeSize * 0.5} L ${planeSize * 0.16} ${planeSize * 0.35} L 0 ${planeSize * 0.75} L ${-planeSize * 0.16} ${planeSize * 0.35} L ${-planeSize * 0.62} ${planeSize * 0.5} L ${-planeSize * 0.2} ${-planeSize * 0.13} Z`} fill={theme.plane} stroke={theme.planeStroke} strokeWidth={Math.max(1, size * 0.0025)} strokeLinejoin=\"round\" />\n        </g>\n        <text x={round(labelX)} y={round(labelY)} fontFamily=\"Ubuntu\" fontSize={labelSize} fontWeight=\"bold\" textAnchor={anchor} dominantBaseline=\"middle\" fill={theme.radar} stroke={theme.radar} strokeWidth={Math.max(3, size * 0.008)} strokeLinejoin=\"round\">{plane.callsign.slice(0, 8)}</text>\n        <text x={round(labelX)} y={round(labelY)} fontFamily=\"Ubuntu\" fontSize={labelSize} fontWeight=\"bold\" textAnchor={anchor} dominantBaseline=\"middle\" fill={theme.planeLabel}>{plane.callsign.slice(0, 8)}</text>\n      </g>\n    })}\n  </svg>\n}\n\nfunction themeUi(theme: Theme) {\n  const palettes: Record<string, { page: string; card: string; border: string; title: string; route: string; detail: string }> = {\n    Midnight: { page: \"bg-[#07151a] text-[#e8f5ef]\", card: \"bg-[#0b2529]\", border: \"border-[#315d59]\", title: \"text-[#ffdb9e]\", route: \"text-[#d8ebe4]\", detail: \"text-[#9bc9bf]\" },\n    Ocean: { page: \"bg-[#071a2f] text-[#e5f4ff]\", card: \"bg-[#0c2942]\", border: \"border-[#356b8b]\", title: \"text-[#8ce0ff]\", route: \"text-[#d8efff]\", detail: \"text-[#a9cfe4]\" },\n    Forest: { page: \"bg-[#102116] text-[#e9f5e8]\", card: \"bg-[#173324]\", border: \"border-[#467452]\", title: \"text-[#d9ee8b]\", route: \"text-[#e0f1de]\", detail: \"text-[#b3d3af]\" },\n    Sunset: { page: \"bg-[#2b1520] text-[#fff0e9]\", card: \"bg-[#40202b]\", border: \"border-[#89505c]\", title: \"text-[#ffd08a]\", route: \"text-[#ffe0d4]\", detail: \"text-[#e9b9ae]\" },\n    Plum: { page: \"bg-[#21152f] text-[#f3edff]\", card: \"bg-[#30203f]\", border: \"border-[#71558e]\", title: \"text-[#f0b7ff]\", route: \"text-[#eadfff]\", detail: \"text-[#c8b7e2]\" },\n    Paper: { page: \"bg-[#f4efe3] text-[#27251f]\", card: \"bg-[#fffaf0]\", border: \"border-[#b8ae9b]\", title: \"text-[#6b4d21]\", route: \"text-[#353128]\", detail: \"text-[#605d53]\" }\n  }\n  return palettes[theme.name] || palettes.Midnight\n}\n\nfunction FlightCard({ plane, theme }: { plane: Aircraft; theme: Theme }) {\n  const route = plane.origin && plane.destination ? `${plane.origin} to ${plane.destination}` : \"Route unavailable\"\n  const routeLine = plane.country ? `${plane.country} · ${route}` : route\n  const detail = `${Math.round(plane.distance)} KM · ${plane.altitudeFt === null ? \"ALT —\" : `${plane.altitudeFt.toLocaleString()} FT`} · ${plane.speedKts === null ? \"SPD —\" : `${plane.speedKts} KT`}`\n  const ui = themeUi(theme)\n  return <div className={`flex min-w-0 flex-col justify-center rounded-xl border px-[1.5vh] py-[1vh] ${ui.card} ${ui.border}`}>\n    <div className={`truncate text-[2.35vh] font-bold ${ui.title}`}>{plane.callsign}{plane.airline ? ` · ${plane.airline}` : \"\"}</div>\n    <div className={`truncate text-[1.8vh] ${ui.route}`}>{routeLine}</div>\n    <div className={`truncate text-[1.5vh] ${ui.detail}`}>{detail}</div>\n  </div>\n}\n\nexport function get(app: any, context: any) {\n  const W = Math.round(context.targetWidth || context.imageWidth || app.frame.width)\n  const H = Math.round(context.targetHeight || context.imageHeight || app.frame.height)\n  const isLandscape = W > H\n  const isUltraWide = isLandscape && W / H > 2.1\n  const isNarrowPortrait = !isLandscape && H / W > 2.1\n  const latitude = Number(app.config.latitude)\n  const longitude = Number(app.config.longitude)\n  const radiusKm = Math.max(5, Math.min(250, Number(app.config.radiusKm) || 60))\n  const theme = themes[String(app.config.theme || \"midnight\")] || themes.midnight\n  const ui = themeUi(theme)\n  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) throw new Error(\"Set a valid latitude and longitude.\")\n  const north = latitude + radiusKm / kmPerDegreeLat\n  const south = latitude - radiusKm / kmPerDegreeLat\n  const lonSpan = radiusKm / (kmPerDegreeLat * Math.max(0.2, Math.cos(latitude * Math.PI / 180)))\n  let rows: any[] = []\n  let failed = false\n  try {\n    rows = frameos.fetchJson(`https://opensky-network.org/api/states/all?lamin=${south}&lomin=${longitude - lonSpan}&lamax=${north}&lomax=${longitude + lonSpan}`)?.states || []\n  } catch (_) {\n    failed = true\n  }\n  const aircraft = rows.map((row) => toAircraft(row, latitude, longitude, radiusKm)).filter(Boolean).sort((a: Aircraft, b: Aircraft) => a.distance - b.distance).slice(0, 35) as Aircraft[]\n  const showInfoPanel = app.config.showInfoPanel !== false && app.config.showInfoPanel !== \"false\"\n  const cache = (frameos.recall(\"routeCache\") || {}) as Record<string, any>\n  const budget = { left: 8, changed: false }\n  const listCount = isUltraWide || isNarrowPortrait ? 10 : isLandscape ? 8 : 4\n  const listColumns = (!isLandscape && W < 560) ? 1 : 2\n  const listed = showInfoPanel ? aircraft.slice(0, listCount).map((plane) => ({ ...plane, ...routeFor(plane.callsign, cache, budget) })) : []\n  if (budget.changed) frameos.remember(\"routeCache\", cache)\n  // Whole pixels: the map lines come in the radar's own pixels.\n  const radarSize = Math.round(showInfoPanel ? (isLandscape ? Math.min(H - H * 0.035, W * 0.675) : Math.min(W - W * 0.035, H * 0.7)) : Math.min(W - W * 0.07, H - H * 0.07))\n  const mapMode = String(app.config.map || \"names\")\n  const townSize = Math.max(10, radarSize * 0.02)\n  // An ESP32 holds its canvas and the scene in a few MB: a smaller map there.\n  const mapMaxKb = app.frame.embedded ? 40 : 120\n  const map = mapMode === \"off\" ? null : fetchMap(latitude, longitude, radiusKm, radarSize, mapMode === \"names\", townSize, mapMaxKb)\n  if (!showInfoPanel) return <div className={`flex h-full w-full items-center justify-center p-[3.5vh] ${ui.page}`}>\n    <div className=\"aspect-square h-full max-h-full w-full max-w-full\"><Radar aircraft={aircraft} radiusKm={radiusKm} size={radarSize} theme={theme} map={map} townSize={townSize} /></div>\n  </div>\n  return <div className={isLandscape ? `flex h-full w-full flex-row p-[1.6vh] ${ui.page}` : `flex h-full w-full flex-col p-[1.6vh] ${ui.page}`}>\n    <section className={isLandscape ? (isUltraWide ? \"flex min-h-0 w-[42%] flex-none items-center justify-center\" : \"flex min-h-0 w-[68%] flex-none items-center justify-center\") : \"flex min-h-0 flex-1 items-center justify-center\"}>\n      <div className=\"aspect-square h-full max-h-full w-full max-w-full\"><Radar aircraft={aircraft} radiusKm={radiusKm} size={radarSize} theme={theme} map={map} townSize={townSize} /></div>\n    </section>\n    <section className={isLandscape ? (isUltraWide ? \"grid w-[58%] shrink-0 grid-cols-2 gap-[.8vh] pl-[1vh]\" : \"grid w-[32%] shrink-0 grid-cols-1 gap-[.8vh] pl-[1vh]\") : `grid shrink-0 gap-[.8vh] pt-[1vh] ${listColumns === 1 ? \"grid-cols-1\" : \"grid-cols-2\"}`}>\n      {listed.map((plane, index) => <FlightCard key={`${plane.callsign}-${index}`} plane={plane} theme={theme} />)}\n      {failed ? <div className=\"col-span-2 text-center text-[1.4vh] text-[#83b9af]\">Live flight feed unavailable — will retry</div> : null}\n    </section>\n  </div>\n}\n"
+        },
+        "origin": "flightRadar"
+      }
+    },
+    "customEvents": []
+  }
+]

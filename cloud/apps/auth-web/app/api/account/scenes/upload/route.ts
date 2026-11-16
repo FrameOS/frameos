@@ -1,15 +1,10 @@
 import { NextRequest } from "next/server";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
-import {
-  identityRateLimitResponse,
-  rateLimitResponse,
-} from "../../../../../src/lib/rate-limit";
+import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
-import {
-  maxPublishesPerHour,
-  maxSceneZipBytes,
-} from "../../../../../src/lib/store";
+import { maxSceneZipBytes } from "../../../../../src/lib/store";
+import { publishRateLimitResponse } from "../../../../../src/lib/store-publish-limit";
 import { publishStoreScene } from "../../../../../src/lib/store-publish";
 
 export const runtime = "nodejs";
@@ -38,11 +33,7 @@ export async function POST(request: NextRequest) {
     return jsonError("login_required", 401);
   }
 
-  const accountLimited = await identityRateLimitResponse(
-    session.accountId,
-    "store:publish",
-    { limit: maxPublishesPerHour, windowMs: 60 * 60 * 1000 },
-  );
+  const accountLimited = await publishRateLimitResponse(session.accountId);
   if (accountLimited) {
     return accountLimited;
   }

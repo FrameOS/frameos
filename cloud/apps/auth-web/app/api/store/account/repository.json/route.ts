@@ -79,6 +79,7 @@ async function handleGet(request: NextRequest) {
       description: storeScenes.description,
       frameosVersion: storeScenes.frameosVersion,
       hasPreview: sceneHasImageSql,
+      icon: storeScenes.icon,
       id: storeScenes.id,
       latestVersion: storeScenes.latestVersion,
       name: storeScenes.name,
@@ -115,6 +116,7 @@ async function handleGet(request: NextRequest) {
         description: scene.description ?? undefined,
         flags: scene.riskFlags.length > 0 ? scene.riskFlags : undefined,
         frameosVersion: scene.frameosVersion ?? undefined,
+        icon: scene.icon ?? undefined,
         id: scene.slug,
         image: scene.hasPreview
           ? absolute(`/api/store/scenes/${scene.id}/image`)

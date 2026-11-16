@@ -17,6 +17,7 @@
     "scene:sync-preview": "node scripts/sync-scene-preview.mjs",
     "scene:report-photo-links": "node scripts/report-photo-links.mjs",
     "scene:backfill-risk-flags": "tsx scripts/backfill-risk-flags.ts",
+    "scene:backfill-icons": "tsx scripts/backfill-scene-icons.ts",
     "settings:reseal-legacy": "tsx scripts/reseal-account-settings.ts",
     "ai:render": "tsx evals/render-scene.ts",
     "start": "next start",

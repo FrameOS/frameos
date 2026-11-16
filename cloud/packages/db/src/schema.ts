@@ -604,6 +604,10 @@ export const storeScenes = pgTable(
     // Minimum compatible FrameOS version of the latest payload (from
     // template.json; exports conservatively stamp their current version).
     frameosVersion: text("frameos_version"),
+    // The latest version's icon (store_scene_versions.icon), the projection
+    // every listing reads: one SVG path in a 24 box, null for none
+    // (docs/scene-icons.md).
+    icon: text("icon"),
     // Which install pushed the most recent version.
     linkedClientId: uuid("linked_client_id").references(
       () => linkedClients.id,
@@ -696,6 +700,10 @@ export const storeSceneVersions = pgTable(
       () => linkedClients.id,
       { onDelete: "set null" },
     ),
+    // The main scene's icon (settings.icon of the default scene, else the
+    // first), read at publish like the risk flags; null for none
+    // (docs/scene-icons.md).
+    icon: text("icon"),
     // Computed at publish from the scenes JSON (see detectRiskFlags).
     riskFlags: text("risk_flags").array().default([]).notNull(),
     sceneId: uuid("scene_id")

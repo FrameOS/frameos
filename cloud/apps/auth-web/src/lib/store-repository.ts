@@ -43,6 +43,7 @@ export async function buildStoreRepository(
       featuredAt: storeScenes.featuredAt,
       frameosVersion: storeScenes.frameosVersion,
       hasPreview: sceneHasImageSql,
+      icon: storeScenes.icon,
       id: storeScenes.id,
       latestVersion: storeScenes.latestVersion,
       name: storeScenes.name,
@@ -96,6 +97,10 @@ export async function buildStoreRepository(
       downloads: scene.downloadCount,
       flags: scene.riskFlags.length > 0 ? scene.riskFlags : undefined,
       frameosVersion: scene.frameosVersion ?? undefined,
+      // The scene's own icon (docs/scene-icons.md): one SVG path in a 24 box,
+      // which the tiles draw where there is no cover. Older frameos installs
+      // ignore extra fields.
+      icon: scene.icon ?? undefined,
       id: scene.slug,
       // ?v pins the preview to the published version, making the image URL
       // immutable — the route answers it with a forever cache-control, so

@@ -3,14 +3,15 @@
 ## (`frameos.pixels`), one at a time, a swipe for the next. Run for real
 ## through the JS app runtime (its modules imported from the app's sources),
 ## this pins that every effect draws and moves, that a seed makes it the same
-## on every frame type, which cell size each picks, what a swipe does, and the
-## scene's wiring.
+## on every frame type, which cell size each picks, what a swipe does, the
+## footer and its buttons, and the scene's wiring.
 
 import std/[json, monotimes, os, sequtils, strutils, times, unittest]
 import pixie
 
 import frameos/js_runtime/app_runtime
 import frameos/utils/memory
+import frameos/utils/svg_frames
 import frameos/types
 import frameos/values
 
@@ -47,17 +48,34 @@ proc newToys(id: string, width, height: int): Toys =
   result.runtime = newJsAppRuntime(category = "data", outputType = "image",
     source = app["sources"]["app.tsx"].getStr(), sourceName = "app.tsx", sources = app["sources"])
 
+proc bare(config: JsonNode): JsonNode =
+  ## The effect alone unless a test asks for the footer: it has tests of its
+  ## own, and its frame rate makes two runs differ once a second has passed.
+  result = config.copy()
+  if not result.hasKey("footer"):
+    result["footer"] = %"false"
+
 proc render(toys: Toys, config: JsonNode): Image =
   let context = ExecutionContext(scene: toys.scene, event: "render", payload: %*{},
     hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1,
     decodeTargetImage: nil, decodeTargetNodeId: 1.NodeId, decodeTargetScalingMode: "stretch",
     wholeFrame: false)
-  toys.runtime.get(toys.owner, config, context).asImage()
+  toys.runtime.get(toys.owner, bare(config), context).asImage()
+
+proc intoPanel(toys: Toys, target: Image, config: JsonNode) =
+  ## One render of an LCD's buffer, the way the ESP32's render does it.
+  let context = ExecutionContext(scene: toys.scene, event: "render", payload: %*{},
+    hasImage: true, image: target, loopIndex: 0, loopKey: ".", nextSleep: -1,
+    decodeTargetImage: target, decodeTargetNodeId: 1.NodeId, decodeTargetScalingMode: "stretch",
+    wholeFrame: true, backgroundPending: true, backgroundColor: rgba(0, 0, 0, 255).color)
+  beginPanelFrame(target.bufferPointer, 1)
+  discard toys.runtime.get(toys.owner, bare(config), context).asImage()
+  endPanelFrame()
 
 proc event(toys: Toys, config: JsonNode, name: string, payload: JsonNode) =
   let context = ExecutionContext(scene: toys.scene, event: name, payload: payload,
     hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
-  discard toys.runtime.run(toys.owner, config, context, isEvent = true)
+  discard toys.runtime.run(toys.owner, bare(config), context, isEvent = true)
 
 proc same(a, b: Image): bool =
   if a.width != b.width or a.height != b.height:
@@ -84,15 +102,17 @@ suite "Pixel toys":
     check sample["fields"][0]["options"].mapIt(it["value"].getStr()) == options
     check sample["fields"][0]["value"].getStr() == "fire"
 
-  test "effect, quality and the FPS counter are state fields wired into the app":
+  test "effect, quality and the footer are state fields wired into the app, the footer on":
     var bound: seq[string]
     for edge in sample["edges"]:
       if edge["type"].getStr() == "codeNodeEdge" and edge["target"].getStr() == "toys":
         bound.add edge["source"].getStr() & " -> " & edge["targetHandle"].getStr()
     check bound == @["effect -> fieldInput/effect", "quality -> fieldInput/pixelSize",
-      "showFps -> fieldInput/showFps"]
+      "footer -> fieldInput/footer"]
     for field in sample["fields"]:
       check field["access"].getStr() == "public" and field["persist"].getStr() == "disk"
+    check sample["fields"].filterIt(it["name"].getStr() == "footer")[0]["value"].getStr() == "true"
+    check app["fields"].filterIt(it["name"].getStr() == "footer")[0]["value"].getStr() == "true"
     check sample["settings"]["refreshInterval"].getFloat() < 1 # it animates
     let events = parseJson(app["sources"]["config.json"].getStr())["events"]
     check events == %*["tap", "swipe", "back", "forward", "keyDown"]
@@ -238,19 +258,97 @@ suite "Pixel toys":
       toys.event(config, "keyDown", payload)
     check toys.scene.state{"effect"}.getStr() == "unmoved"
 
-  test "the counter leaves the effect as it found it":
+  test "the footer: at the bottom, in the effect's colors, over an effect it leaves as it found it":
+    # 480x480 at 4 px cells: a dot of the font is a cell, the bar 9 of them.
     let
-      plain = newToys("tests/toys-plain", 160, 160)
-      counted = newToys("tests/toys-counted", 160, 160)
-      base = %*{"effect": "fireworks", "pixelSize": "2", "seed": "8"}
-      asked = %*{"effect": "fireworks", "pixelSize": "2", "seed": "8", "showFps": "true"}
+      plain = newToys("tests/toys-plain", 480, 480)
+      footed = newToys("tests/toys-footed", 480, 480)
+      base = %*{"effect": "fire", "pixelSize": "4", "seed": "8"}
+      shown = %*{"effect": "fire", "pixelSize": "4", "seed": "8", "footer": "true"}
+      bar = rgbx(0x07, 0x07, 0x07, 255) # the fire's coldest color
+      ink = rgbx(255, 255, 255, 255) # and its hottest
     for i in 0 .. 4:
       let
         a = plain.render(base)
-        b = counted.render(asked)
-      for y in 40 ..< 160:
-        for x in 0 ..< 160:
-          check a[x, y] == b[x, y]
+        b = footed.render(shown)
+      var differ, other, inked = 0
+      for y in 0 ..< 480 - 36:
+        for x in 0 ..< 480:
+          if a[x, y] != b[x, y]: inc differ
+      for y in 480 - 36 ..< 480:
+        for x in 0 ..< 480:
+          let c = b[x, y]
+          if c == ink: inc inked
+          elif c != bar: inc other
+      check differ == 0
+      check other == 0
+      check inked > 3000
+      # Previous: a box of ink with its < cut out of it, in the bar's color.
+      check b[17, 453] == ink and b[25, 453] == bar
+    # Hidden, the bottom rows are the fire's own again, as if the footer had
+    # never been there.
+    check same(plain.render(base), footed.render(base))
+
+  test "the footer's buttons: previous, next and hide; hidden, the bottom edge brings it back":
+    let toys = newToys("tests/toys-footer", 480, 480)
+    var config = %*{"effect": "fire", "pixelSize": "4", "seed": "5", "footer": "true"}
+    discard toys.render(config)
+    proc tap(x, y: int) =
+      toys.event(config, "tap", %*{"x": x, "y": y, "pointerId": 0, "pointerType": "touch"})
+      # The scene's state nodes hand the app its new state, and it renders.
+      for key in ["effect", "footer"]:
+        if toys.scene.state.hasKey(key):
+          config[key] = toys.scene.state[key]
+      discard toys.render(config)
+    tap(20, 460)
+    check toys.scene.state{"effect"}.getStr() == "life" # Previous, round the end
+    tap(56, 460)
+    check toys.scene.state{"effect"}.getStr() == "fire" # Next
+    tap(240, 460)
+    check toys.scene.state{"effect"}.getStr() == "fire" # the bar between does nothing
+    check not toys.scene.state.hasKey("footer")
+    tap(460, 460)
+    check toys.scene.state{"footer"} == %false # Hide
+    tap(240, 200)
+    check toys.scene.state{"effect"}.getStr() == "bluefire" # a tap above is the next effect still
+    tap(240, 470)
+    check toys.scene.state{"footer"} == %true # the bottom edge brings it back
+    check toys.scene.state{"effect"}.getStr() == "bluefire"
+    # On the ripples a tap on the footer is the footer's, not a stone.
+    config = %*{"effect": "ripples", "pixelSize": "4", "seed": "5", "footer": "true"}
+    toys.scene.state["effect"] = %"ripples"
+    discard toys.render(config)
+    tap(56, 460)
+    check toys.scene.state{"effect"}.getStr() == "blobs"
+    # A frame too small for the buttons has no footer, and its taps are the
+    # effect's.
+    let
+      small = newToys("tests/toys-footer-small", 120, 120)
+      tiny = %*{"effect": "fire", "pixelSize": "4", "seed": "5", "footer": "true"}
+    check same(small.render(tiny), newToys("tests/toys-footer-none", 120, 120).render(
+      %*{"effect": "fire", "pixelSize": "4", "seed": "5", "footer": "false"}))
+    small.event(tiny, "tap", %*{"x": 60, "y": 115})
+    check small.scene.state{"effect"}.getStr() == "bluefire"
+
+  test "into an LCD's buffer the footer's cells are written once, not every frame":
+    # A pixel poked into the bar stays through the next frames, which would
+    # put it back if they wrote the bar; the fire above it still moves.
+    forgetPanelFrames()
+    let toys = newToys("tests/toys-panel", 240, 240)
+    let config = %*{"effect": "fire", "pixelSize": "4", "seed": "3", "footer": "true"}
+    let target = newImage565(240, 240)
+    toys.intoPanel(target, config)
+    let before = copy(target)
+    let poked = rgb565ToRgbx(rgbxToRgb565(rgbx(255, 0, 255, 255)))
+    target[120, 237] = poked
+    for i in 0 ..< 3:
+      toys.intoPanel(target, config)
+    check target[120, 237] == poked
+    var moved = 0
+    for y in 0 ..< 240 - 36:
+      for x in 0 ..< 240:
+        if target[x, y] != before[x, y]: inc moved
+    check moved > 100
 
   test "a 480x480 frame of each":
     for effect in Effects:

@@ -87,6 +87,7 @@ export function SceneTile({
   appHref?: string
 }): JSX.Element {
   const href = typeof template.url === 'string' && template.url ? template.url : null
+  const icon = templateSceneIcon(template)
   const flags = templateAccessFlags(template)
   const installs = typeof template.downloads === 'number' && template.downloads > 0 ? template.downloads : null
   const meta = [
@@ -96,12 +97,10 @@ export function SceneTile({
   ].filter(Boolean)
   const body = (
     <>
-      <TileImage
-        imageUrl={typeof template.image === 'string' ? template.image : null}
-        icon={templateSceneIcon(template)}
-      />
+      <TileImage imageUrl={typeof template.image === 'string' ? template.image : null} icon={icon} />
       <div className="flex flex-col gap-2 px-2.5 pt-2">
         <h3 className="frameos-strong text-base font-semibold leading-snug">
+          {icon ? <SceneIcon path={icon} className="mr-1 inline-block h-4 w-4 align-[-2px]" /> : null}
           {template.name}
           {flags.map((flag) => (
             <span

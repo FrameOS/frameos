@@ -84,6 +84,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       createdAt: storeSceneVersions.createdAt,
       description: storeSceneVersions.description,
       frameosVersion: storeSceneVersions.frameosVersion,
+      icon: storeSceneVersions.icon,
       id: storeSceneVersions.id,
       listingRecorded: storeSceneVersions.listingRecorded,
       message: storeSceneVersions.message,
@@ -150,6 +151,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
         return {
           created_at: version.createdAt.toISOString(),
           frameos_version: listing.frameosVersion,
+          // What that version's main scene carries (docs/scene-icons.md).
+          icon: version.icon,
           // A version published before image sets were recorded shows the
           // latest set, as imageSetForVersion does.
           images: version.listingRecorded

@@ -42,6 +42,7 @@ function row(name: string, overrides: Partial<MyScenesRow> = {}): MyScenesRow {
     description: null,
     downloadCount: 3,
     hasPreview: true,
+    icon: null,
     id: `id-${name}`,
     name,
     slug: name.toLowerCase(),
@@ -97,6 +98,29 @@ describe("MyScenesView", () => {
     );
     // The server-rendered filter form sits next to the toggle in both views.
     expect(screen.getByRole("form", { name: "Filters" })).toBeTruthy();
+  });
+
+  it("draws a scene's icon beside its name, and in place of a missing preview", () => {
+    const house = "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z";
+    render(
+      <MyScenesView
+        filters={null}
+        scenes={[
+          row("Home", { hasPreview: false, icon: house }),
+          row("Plain", { hasPreview: false }),
+        ]}
+      >
+        {null}
+      </MyScenesView>,
+    );
+    const home = screen.getByRole("link", { name: /Home/ });
+    const paths = [...home.querySelectorAll("svg path")].map((path) => path.getAttribute("d"));
+    // The placeholder and the name.
+    expect(paths).toEqual([house, house]);
+    expect(home.textContent).not.toContain("No preview");
+    const plain = screen.getByRole("link", { name: /Plain/ });
+    expect(plain.querySelector("svg")).toBeNull();
+    expect(plain.textContent).toContain("No preview");
   });
 
   it("switches to the table on the list button and remembers the choice", () => {

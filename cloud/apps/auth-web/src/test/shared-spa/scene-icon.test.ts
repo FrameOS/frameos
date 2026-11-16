@@ -88,4 +88,14 @@ describe("the editor's side of it", () => {
     expect(templateSceneIcon({ scenes: [first] })).toBe("M0 0h1z");
     expect(templateSceneIcon({})).toBeNull();
   });
+
+  it("reads a store listing's icon when the template carries no scenes", () => {
+    // repository.json lists `icon` (the cloud store reads it from the main
+    // scene at publish); scenes, when a template has them, win.
+    expect(templateSceneIcon({ icon: "M0 0h1z" })).toBe("M0 0h1z");
+    expect(templateSceneIcon({ icon: "<svg/>" })).toBeNull();
+    expect(templateSceneIcon({ icon: "M0 0h1z", scenes: [] })).toBe("M0 0h1z");
+    expect(templateSceneIcon({ icon: "M0 0h1z", scenes: [{ settings: {} }] })).toBeNull();
+    expect(templateSceneIcon({ icon: "M0 0h1z", scenes: [{ settings: { icon: "M1 1h1z" } }] })).toBe("M1 1h1z");
+  });
 });
