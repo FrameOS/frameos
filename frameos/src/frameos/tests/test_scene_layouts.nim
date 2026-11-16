@@ -406,6 +406,40 @@ suite "layouts":
       if entry{"event"}.getStr() == "layout:missing": inc said
     check said == 1
 
+  test "a layout that is not on the frame is looked for once per scene set, not at every scene start":
+    # An ESP32 starts its scene anew at every switch (one scene at a time):
+    # after a push it could not take, every start read flash for the old
+    # set's layout and logged `layout:missing` (the reTerminal E1004, the
+    # hardware bench, 2026-11-16).
+    let resident = getInterpretedScenes()
+    forgetMissingLayouts() # what the test before found missing
+    let savedLoader = sceneLoader
+    defer: sceneLoader = savedLoader
+    var asked {.global.}: seq[string]
+    asked.setLen(0)
+    sceneLoader = proc (sceneId: SceneId): bool {.nimcall.} =
+      asked.add sceneId.string
+      false
+    var said = 0
+    proc start() =
+      let scene = newScene("tests/alone") # a new scene, and a new log
+      check pass(scene).color(5, 35) == colored("#0000ff")
+      for entry in logged:
+        if entry{"event"}.getStr() == "layout:missing": inc said
+    for i in 0 ..< 3:
+      start()
+    check asked == @["tests/nowhere"]
+    check said == 1
+    # Another scene of the same set made resident (an ESP32's switch).
+    replaceInterpretedScenesCache(resident, newSet = false)
+    start()
+    check asked == @["tests/nowhere"]
+    # A new set may hold it: looked for, and said, again.
+    replaceInterpretedScenesCache(resident)
+    start()
+    check asked == @["tests/nowhere", "tests/nowhere"]
+    check said == 2
+
   test "a layout is in no scene order":
     check "tests/layout".SceneId notin sceneOrderSnapshot()
     check "tests/content".SceneId in sceneOrderSnapshot()

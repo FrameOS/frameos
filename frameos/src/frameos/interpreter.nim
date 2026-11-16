@@ -445,6 +445,7 @@ proc interpretedScenesLoadError*(): string =
   lastInterpretedScenesLoadError
 
 proc resetInterpretedScenes*() =
+  forgetMissingLayouts()
   allScenesLoaded = false
   # A card that was full or missing may have been swapped along with the
   # scenes; give the disk tier another chance.
@@ -457,6 +458,7 @@ proc registerCompiledScene*(sceneId: SceneId, exported: ExportedScene) =
   compiledSceneExports[sceneId] = exported
 
 proc setUploadedInterpretedScenes*(scenes: Table[SceneId, ExportedInterpretedScene]) =
+  forgetMissingLayouts()
   uploadedScenes = scenes
 
 proc getUploadedInterpretedScenes*(): Table[SceneId, ExportedInterpretedScene] =
@@ -651,6 +653,8 @@ proc startLayout(owner: FrameScene, layoutId: string, ownId: string, ownState: J
   ## The layout `owner` wears, made: what the install set for it, under what
   ## was set on the frame. One that is not on the frame or cannot start leaves
   ## the scene as it is, and says so.
+  if layoutMissing(layoutId):
+    return nil # looked for since the scenes changed, and said so
   var named = layoutId
   proc wornState(): JsonNode =
     result = if layoutId == ownId and not ownState.isNil: copy(ownState) else: newJObject()
@@ -690,7 +694,8 @@ proc startLayout(owner: FrameScene, layoutId: string, ownId: string, ownState: J
     except Exception as error:
       named.add ": "
       named.add error.msg
-  owner.logScene("layout:missing", "layoutSceneId", named)
+  if noteLayoutMissing(layoutId):
+    owner.logScene("layout:missing", "layoutSceneId", named)
 
 proc ensureLayoutScene(self: InterpretedFrameScene): FrameScene =
   ## The layout this scene is wrapped in, made on the first pass that shows
@@ -2664,7 +2669,11 @@ proc loadInterpretedScenesFromDisk*(): Table[SceneId, ExportedInterpretedScene] 
     # new release unchanged.
     deployedScenesDigest = getMD5(decoded)
 
-proc replaceInterpretedScenesCache*(scenes: Table[SceneId, ExportedInterpretedScene]) =
+proc replaceInterpretedScenesCache*(scenes: Table[SceneId, ExportedInterpretedScene], newSet = true) =
+  ## `newSet`: false for an ESP32 making another scene of the same set
+  ## resident; a layout missing from the set stays missing then.
+  if newSet:
+    forgetMissingLayouts()
   loadedScenes = scenes
   allScenesLoaded = true
   lastInterpretedScenesLoadError = ""

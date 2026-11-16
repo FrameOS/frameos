@@ -737,6 +737,7 @@ proc setSceneCatalog*(indexJson: string): int =
       ))
   sceneCatalog = entries
   layoutCatalog = layouts
+  forgetMissingLayouts() # a layout missing before may be on flash now
   if entries.len == 0:
     log("setSceneCatalog: no scenes in index")
     return 0
@@ -803,7 +804,8 @@ proc loadScene*(payload: string, alongside = false): bool =
     log("loadScene: scene did not survive parsing")
     return false
 
-  replaceInterpretedScenesCache(newScenes)
+  # Another scene of the same set: a layout found missing from it stays so.
+  replaceInterpretedScenesCache(newScenes, newSet = false)
   when defined(memProbe): memProbe("  loadScene: scenes cache replaced")
   scenesLoadedCount = newScenes.len
   host.sceneId = some(sceneId)

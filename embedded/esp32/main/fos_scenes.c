@@ -2123,6 +2123,11 @@ typedef struct {
     char *body; /* malloc'd, the job's own; NULL: no job */
     size_t len;
     char etag[ETAG_LEN];
+    /* The runtime refused the payload (out of memory, most often: a whole
+     * set is one string as long as it is): it still runs the set before
+     * while flash gets this one. The apply after the write loads it from
+     * flash, one scene at a time. */
+    bool reload;
 } store_job_t;
 
 #define STORE_TASK_STACK 6144
@@ -2189,6 +2194,14 @@ static void store_backend_payload(const store_job_t *job)
         err = write_file_replace_locked(SCENES_PATH, SCENES_TMP_PATH, job->body, job->len);
         if (err == ESP_OK) combined_set(true);
     }
+    /* A set the runtime refused: what flash holds now (this set, or the one
+     * before when the write failed) is loaded by the apply, which makes one
+     * scene resident and gives the runtime the catalog. Left as it was, the
+     * runtime ran the set before against a store holding this one: every
+     * scene start read flash for the old set's layout and logged
+     * `layout:missing` until the next push (the reTerminal E1004, the
+     * hardware bench, 2026-11-16). Inside the lock, as the split does. */
+    if (job->reload) s_pending = true;
     store_unlock();
     fos_display_updating_end(false);
     if (err == ESP_OK) {
@@ -2201,6 +2214,7 @@ static void store_backend_payload(const store_job_t *job)
         if (!as_changes) fos_scene_store_remove_index();
         log_scene_event("scenes:store", "ok", "backend", "", as_changes ? s_set_summary : "written",
                         job->len, 0, 0, ESP_OK);
+        if (job->reload) fos_client_render_now(); /* the apply, and the new set's first picture */
         return;
     }
     /* The runtime runs the new set and flash holds the one before. Unless a
@@ -2212,6 +2226,7 @@ static void store_backend_payload(const store_job_t *job)
     bool newer = s_store_next.body != NULL;
     portEXIT_CRITICAL(&s_store_mux);
     if (!newer) load_etag();
+    if (job->reload) fos_client_render_now();
 }
 
 /* The whole payload a producer stored (fos_scenes_set_json_from: a cloud
@@ -2306,13 +2321,14 @@ static bool store_split_behind(void)
 
 /* `body` (malloc'd) to the store task, which frees it; false (and `body`
  * still the caller's) when there is no task. */
-static bool store_behind(char *body, size_t len, const char *etag)
+static bool store_behind(char *body, size_t len, const char *etag, bool reload)
 {
     if (!store_task_ready()) return false;
     portENTER_CRITICAL(&s_store_mux);
     char *dropped = s_store_next.body;
     s_store_next.body = body;
     s_store_next.len = len;
+    s_store_next.reload = reload;
     strlcpy(s_store_next.etag, etag ? etag : "", sizeof(s_store_next.etag));
     bool start = !s_store_busy;
     s_store_busy = true;
@@ -2467,16 +2483,16 @@ esp_err_t fos_scenes_take_backend_payload(char *body, size_t len, const char *et
     ESP_LOGI(TAG, "scenes updated from backend (%u bytes, etag %s)", (unsigned)len,
              etag && etag[0] ? etag : "none");
     log_scene_event("scenes:sync", "updated", "backend", "", "taken", len, 0, 200, ESP_OK);
-    load_into_nim(body, len, "backend");
+    bool loaded = load_into_nim(body, len, "backend");
     /* The new set on the panel now. Taken from the idle wait (the link
      * task's download, or a deploy's poke pulling it itself), nothing else
      * rendered it until the next timed pass: a deploy to the reTerminal E1003
      * showing Form showcase (hourly) sat at "first render", the Sticky's
      * showed minutes late (2026-11-10). Inside a pass it costs one render. */
     fos_client_render_now();
-    if (store_behind(body, len, etag)) return ESP_OK;
+    if (store_behind(body, len, etag, !loaded)) return ESP_OK;
     /* No store task: written here, as it always was. */
-    store_job_t job = {.body = body, .len = len};
+    store_job_t job = {.body = body, .len = len, .reload = !loaded};
     strlcpy(job.etag, etag ? etag : "", sizeof(job.etag));
     store_backend_payload(&job);
     free(body);
