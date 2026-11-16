@@ -1,0 +1,10 @@
+{
+  "name": "Commander layout",
+  "description": "A two-panel file commander in blue and cyan: the scene in one panel with its path at the top, the function keys along the bottom for the frame's page, the scene list, a full view, the scene's settings and the frame's own apps. On a Pi or an ESP32 the other panel runs a second scene at the same time: tap it or press Tab to switch, F5 to swap them.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.5"
+}

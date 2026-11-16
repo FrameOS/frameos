@@ -27,8 +27,9 @@ or a saved scene is edited, the cloud refuses a store version
 to the AI. The runtime does not check: a layout with no yield shows no content.
 
 **Starters.** Every repo sample whose scene is a layout (`Top bar`, `Bottom bar`,
-`Side rail`, `Windows 98`, `Tiling`, `macOS`, `BeOS`, `Polaroid`, `Front page`,
-`Terminal`, `Gallery wall` in `repo/scenes/samples`) is also one click away on both planes
+`Side rail`, `Windows 98`, `Tiling`, `macOS`, `BeOS`, `Classic Mac`, `NeXTSTEP`,
+`Commander`, `Teletext`, `E-reader`, `Polaroid`, `Front page`, `Terminal`,
+`Gallery wall` in `repo/scenes/samples`) is also one click away on both planes
 (`frontend/scripts/generateLayoutStarters.mjs`): "New layout" in the frame's
 Layouts group, "Add layout" at the end of the Add scene drawer while it has none,
 and "Add a layout" in its Settings under Layouts. The iOS app offers the same
@@ -171,7 +172,27 @@ the Deskbar lists the windows open and its gem opens the Be menu (the scenes,
 Preferences), and Tracker's icons under it open the frame's own apps (under
 where the Deskbar reaches now, and on in columns to its left, so a window opened
 never puts the Deskbar over one).
-The desktop icons of `Windows 98` and `BeOS` are those apps alone, never the
+`Classic Mac` and `NeXTSTEP` are two more of those, in black and white and in
+four greys, so they look the same on every panel. On `Classic Mac` the window in
+front has a pinstriped title bar with its close, gear and zoom boxes, and a
+double click rolls a window up to its title bar (WindowShade) and down again; the
+menu bar's mark has About This Frame and the frame's own apps, File opens a
+scene, closes the front window or opens its settings (Get Info), Scenes lists
+them, Special cleans up the windows or goes full screen, and the Application
+menu at its right end hides the front window or the others and lists the
+windows open. On `NeXTSTEP` the main menu is a column at the top left that no
+window goes under (Info, Scenes, Windows, Services for the frame's own apps,
+Hide), the Dock down the right edge has every scene with an ellipsis under those
+not running and a clock tile for the frame's page, and a window put away is a
+miniwindow under the main menu. `Commander` is a desktop of two panels and no
+windows: the scene with the focus in one, a second scene running in the other
+(two at most, which every host can run), a press or Tab giving the other the
+focus, and the function keys along the bottom (F5 swaps the panels, F6 shows the
+next scene, F10 turns the other panel into the Info panel and back, F3 gives the
+panel with the focus the screen). A scene brought forward from anywhere else goes
+into the panel with the focus; chosen in another desktop's place it opens the two
+that desktop had in front, and hands the next desktop those two as halves.
+The desktop icons of `Windows 98`, `BeOS` and `Classic Mac` are those apps alone, never the
 frame's scenes (the menus have those): the scene list, the scene store, the
 asset browser, the terminal and the frame's settings. The **Scene store**, the
 **Asset browser** (`docs/scene-store.md`) and the **Terminal**
@@ -180,8 +201,16 @@ asset browser, the terminal and the frame's settings. The **Scene store**, the
 has them each desktop has entries of its own for them and leaves them out of its
 scene lists: the top of `Windows 98`'s Start, a bag for the store and a prompt
 for the terminal in `Tiling`'s top bar, `macOS`'s mark's menu (the store and
-the terminal; each in the Dock while it has a window), `BeOS`'s Be menu. Everywhere
-else (an editor's preview) they draw the one scene, as before.
+the terminal; each in the Dock while it has a window), `BeOS`'s Be menu,
+`Classic Mac`'s mark's menu and icons, `NeXTSTEP`'s Services and Dock, and
+`Commander`'s F7 to F9. Everywhere else (an editor's preview) they draw the one
+scene, as before.
+
+`Teletext` and `E-reader` are not desktops, but they read `app.frame.scenes`
+where a host has it: Teletext numbers each page by the scene's place in the list
+(P101 the first, P100 the index) and names the scenes its red and green links go
+to, and the E-reader's footer says "Scene 2 of 5". Elsewhere Teletext makes a page
+number from the scene's id and the E-reader shows the date.
 
 The runtime gives a layout three things and keeps no windows of its own:
 
