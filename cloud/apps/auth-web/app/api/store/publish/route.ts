@@ -10,17 +10,14 @@ import {
   readBoundedJsonObject,
   requireDatabase,
 } from "../../../../src/lib/device-flow";
+import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import {
-  identityRateLimitResponse,
-  rateLimitResponse,
-} from "../../../../src/lib/rate-limit";
-import {
-  maxPublishesPerHour,
   maxSceneZipBytes,
   sceneVisibilities,
   storePublishScope,
 } from "../../../../src/lib/store";
 import { publishStoreScene } from "../../../../src/lib/store-publish";
+import { publishRateLimitResponse } from "../../../../src/lib/store-publish-limit";
 import { storeRoute } from "../../../../src/lib/store-cache";
 
 // One base64 scene zip plus its listing fields.
@@ -56,11 +53,7 @@ async function handlePost(request: NextRequest) {
     return jsonError("insufficient_scope", 403);
   }
 
-  const accountLimited = await identityRateLimitResponse(
-    linkedClient.accountId,
-    "store:publish",
-    { limit: maxPublishesPerHour, windowMs: 60 * 60 * 1000 },
-  );
+  const accountLimited = await publishRateLimitResponse(linkedClient.accountId);
   if (accountLimited) {
     return accountLimited;
   }

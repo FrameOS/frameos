@@ -1,0 +1,189 @@
+[
+  {
+    "id": "f43a9cdc-562a-40a5-ba21-61e6c0b6bba4",
+    "name": "Rainbow clock",
+    "nodes": [
+      {
+        "id": "f62ad543-256f-4fef-90a1-76dfd2dc4f2c",
+        "type": "event",
+        "data": {
+          "keyword": "render",
+          "config": {}
+        },
+        "position": {
+          "x": 0,
+          "y": 1
+        }
+      },
+      {
+        "id": "1e28e9d0-55d6-430b-b858-3983d5ff6f99",
+        "type": "app",
+        "data": {
+          "keyword": "rainbowClockJSX",
+          "config": {},
+          "cache": {
+            "enabled": false,
+            "inputEnabled": false,
+            "durationEnabled": false,
+            "duration": 0
+          }
+        },
+        "position": {
+          "x": 355,
+          "y": -310
+        },
+        "style": {
+          "width": 340,
+          "height": 260
+        }
+      },
+      {
+        "id": "16afdb7b-32ba-44bf-9fff-abec3963f38e",
+        "type": "app",
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "offsetX": "0",
+            "offsetY": "0",
+            "blendMode": "normal"
+          }
+        },
+        "position": {
+          "x": 390,
+          "y": 0
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "552ba032-f4eb-4cdd-ad1d-002009910075",
+        "source": "f62ad543-256f-4fef-90a1-76dfd2dc4f2c",
+        "target": "16afdb7b-32ba-44bf-9fff-abec3963f38e",
+        "sourceHandle": "next",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "9cb5002b-23d1-444c-80ac-e653a68a6a53",
+        "source": "1e28e9d0-55d6-430b-b858-3983d5ff6f99",
+        "target": "16afdb7b-32ba-44bf-9fff-abec3963f38e",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "name": "refreshInterval",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "value": "1",
+        "access": "public",
+        "persist": "disk",
+        "role": "refreshInterval"
+      },
+      {
+        "name": "showDigitalClock",
+        "type": "boolean",
+        "label": "Show digital time",
+        "description": "Show the digital time beneath the analog clock.",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "clockFit",
+        "type": "select",
+        "label": "Clock size",
+        "description": "Standard leaves room around the clock; Full screen fills the shortest display dimension.",
+        "value": "standard",
+        "options": [
+          {
+            "value": "standard",
+            "label": "Standard"
+          },
+          {
+            "value": "full",
+            "label": "Full screen"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "showWhiteOutline",
+        "type": "boolean",
+        "label": "Show white outline",
+        "description": "Show the thick white ring around the clock face. When hidden in full-screen mode, the clock expands toward the display edge.",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "rainbowStyle",
+        "type": "select",
+        "label": "Rainbow style",
+        "description": "Choose the rainbow treatment behind the clock.",
+        "value": "prism",
+        "options": [
+          {
+            "value": "none",
+            "label": "No background"
+          },
+          {
+            "value": "prism",
+            "label": "Prism rays"
+          },
+          {
+            "value": "aurora",
+            "label": "Aurora halo"
+          },
+          {
+            "value": "confetti",
+            "label": "Confetti"
+          },
+          {
+            "value": "ribbons",
+            "label": "Flowing ribbons"
+          },
+          {
+            "value": "spectrum",
+            "label": "Spectrum bands"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "settings": {
+      "category": "Tools & utilities",
+      "execution": "interpreted",
+      "refreshInterval": 60,
+      "backgroundColor": "#07111f",
+      "autoArrangeOnLoad": true,
+      "windowSize": "480x480",
+      "icon": "M12,6A11,11 0 0,0 1,17H3C3,12.04 7.04,8 12,8C16.96,8 21,12.04 21,17H23A11,11 0 0,0 12,6M12,10C8.14,10 5,13.14 5,17H7A5,5 0 0,1 12,12A5,5 0 0,1 17,17H19C19,13.14 15.86,10 12,10Z"
+    },
+    "apps": {
+      "rainbowClockJSX": {
+        "name": "Rainbow Clock JSX",
+        "category": "data",
+        "description": "Draws the rainbow analog clock as an ESP32-safe JSX SVG image.",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Rainbow Clock JSX\",\n  \"category\": \"data\",\n  \"description\": \"Draws a configurable rainbow analog clock as an ESP32-safe JSX image.\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}",
+          "app.tsx": "const COLORS = ['#ff2d55', '#ff7a00', '#ffd60a', '#32d74b', '#00c7be', '#0a84ff', '#5e5ce6', '#bf5af2'];\n\nfunction fixed(n: number): number {\n  return Math.round(n * 10) / 10;\n}\n\nexport function get(app: any, context: any) {\n  const W = Math.max(1, Math.round(context.targetWidth || context.imageWidth || app.frame.width || 1200));\n  const H = Math.max(1, Math.round(context.targetHeight || context.imageHeight || app.frame.height || 1600));\n  const cx = W / 2;\n  const cy = H / 2;\n  const S = Math.min(W, H);\n  const full = app.state.clockFit === 'full';\n  const style = app.state.rainbowStyle || 'prism';\n  const showDigital = app.state.showDigitalClock !== false;\n  const showWhiteOutline = app.state.showWhiteOutline !== false;\n  const r = S * (full ? (showWhiteOutline ? 0.455 : 0.49) : (showWhiteOutline ? 0.34 : 0.36));\n  const outer = Math.sqrt(W * W + H * H);\n  const d = new Date();\n  const hr = d.getHours() % 12;\n  const mn = d.getMinutes();\n  const sc = d.getSeconds();\n  const timeText = `${String(d.getHours()).padStart(2, '0')}:${String(mn).padStart(2, '0')}`;\n\n  const hand = (angle: number, length: number, width: number, color: string) => {\n    const a = angle - Math.PI / 2;\n    return <line x1={cx} y1={cy} x2={fixed(cx + Math.cos(a) * length)} y2={fixed(cy + Math.sin(a) * length)} stroke={color} strokeWidth={fixed(width)} strokeLinecap=\"round\" />;\n  };\n\n  const background = style === 'aurora' ? '#071a2a' : style === 'confetti' ? '#180d28' : style === 'ribbons' ? '#10142d' : style === 'spectrum' ? '#171126' : '#07111f';\n\n  return (\n    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>\n      <defs>\n        {COLORS.map((color, i) => {\n          const a = (i / COLORS.length) * Math.PI * 2;\n          return <linearGradient id={`g${i}`} gradientUnits=\"userSpaceOnUse\" x1={cx} y1={cy} x2={fixed(cx + Math.cos(a) * W)} y2={fixed(cy + Math.sin(a) * H)}><stop offset=\"0\" stopColor={color} stopOpacity=\"0.94\" /><stop offset=\"1\" stopColor={COLORS[(i + 1) % COLORS.length]} stopOpacity=\"0.5\" /></linearGradient>;\n        })}\n        <radialGradient id=\"soft\" gradientUnits=\"userSpaceOnUse\" cx={cx} cy={cy} r={fixed(S * 0.72)}><stop offset=\"0\" stopColor=\"#fff7d6\" stopOpacity=\"0.62\" /><stop offset=\"0.42\" stopColor=\"#ffffff\" stopOpacity=\"0.08\" /><stop offset=\"1\" stopColor={background} stopOpacity=\"0.26\" /></radialGradient>\n      </defs>\n      <rect width={W} height={H} fill={background} />\n      {style === 'prism' && Array.from({ length: 48 }, (_, i) => {\n        const a1 = (i / 48) * Math.PI * 2;\n        const a2 = ((i + 1.05) / 48) * Math.PI * 2;\n        return <path d={`M ${fixed(cx)} ${fixed(cy)} L ${fixed(cx + Math.cos(a1) * outer)} ${fixed(cy + Math.sin(a1) * outer)} L ${fixed(cx + Math.cos(a2) * outer)} ${fixed(cy + Math.sin(a2) * outer)} Z`} fill={`url(#g${i % COLORS.length})`} opacity={i % 2 ? 0.46 : 0.68} />;\n      })}\n      {style === 'aurora' && Array.from({ length: 12 }, (_, k) => <circle cx={cx} cy={cy} r={fixed(r * (1.18 + k * 0.16))} fill=\"none\" stroke={COLORS[k % COLORS.length]} strokeWidth={fixed(S * 0.048)} opacity={0.32} />)}\n      {style === 'ribbons' && Array.from({ length: 10 }, (_, i) => {\n        const y = fixed(H * (0.08 + i * 0.095));\n        const bend = fixed(S * (0.12 + (i % 3) * 0.04));\n        return <path d={`M ${fixed(-S * 0.15)} ${y} C ${fixed(W * 0.26)} ${fixed(y - bend)}, ${fixed(W * 0.68)} ${fixed(y + bend)}, ${fixed(W + S * 0.15)} ${y}`} fill=\"none\" stroke={COLORS[i % COLORS.length]} strokeWidth={fixed(S * 0.075)} strokeLinecap=\"round\" opacity=\"0.48\" />;\n      })}\n      {style === 'spectrum' && Array.from({ length: COLORS.length }, (_, i) => {\n        const top = fixed((H / COLORS.length) * i);\n        return <path d={`M 0 ${top} L ${W} ${fixed(top - H * 0.12)} L ${W} ${fixed(top + H / COLORS.length + H * 0.12)} L 0 ${fixed(top + H / COLORS.length)} Z`} fill={COLORS[i]} opacity=\"0.48\" />;\n      })}\n      {style === 'confetti' && Array.from({ length: 90 }, (_, i) => {\n        const a = i * 2.39996;\n        const distance = S * (0.12 + ((i * 37) % 100) / 100 * 0.7);\n        const size = S * (0.012 + (i % 4) * 0.004);\n        return <circle cx={fixed(cx + Math.cos(a) * distance)} cy={fixed(cy + Math.sin(a) * distance)} r={fixed(size)} fill={COLORS[i % COLORS.length]} opacity=\"0.75\" />;\n      })}\n      {style !== 'none' && <rect width={W} height={H} fill=\"url(#soft)\" />}\n      {showWhiteOutline && <circle cx={cx} cy={cy} r={fixed(r * 1.09)} fill=\"#fffaf0\" opacity=\"0.88\" />}\n      <circle cx={cx} cy={cy} r={fixed(r)} fill=\"#101827\" opacity=\"0.93\" />\n      <circle cx={cx} cy={cy} r={fixed(r * 0.89)} fill=\"none\" stroke=\"#ffffff\" strokeWidth={fixed(S * 0.012)} opacity=\"0.18\" />\n      {Array.from({ length: 60 }, (_, i) => {\n        const a = (i / 60) * Math.PI * 2 - Math.PI / 2;\n        const major = i % 5 === 0;\n        const ro = r * 0.93;\n        const ri = r * (major ? 0.78 : 0.84);\n        return <line x1={fixed(cx + Math.cos(a) * ri)} y1={fixed(cy + Math.sin(a) * ri)} x2={fixed(cx + Math.cos(a) * ro)} y2={fixed(cy + Math.sin(a) * ro)} stroke={COLORS[Math.floor((i / 60) * COLORS.length) % COLORS.length]} strokeWidth={fixed(S * (major ? 0.01 : 0.005))} strokeLinecap=\"round\" opacity=\"0.98\" />;\n      })}\n      {Array.from({ length: 12 }, (_, i) => {\n        const n = i + 1;\n        const a = (n / 12) * Math.PI * 2 - Math.PI / 2;\n        return <text x={fixed(cx + Math.cos(a) * r * 0.64)} y={fixed(cy + Math.sin(a) * r * 0.64)} textAnchor=\"middle\" dominantBaseline=\"middle\" fontFamily=\"Ubuntu\" fontSize={fixed(S * 0.052)} fontWeight=\"700\" fill={COLORS[i % COLORS.length]}>{n}</text>;\n      })}\n      {hand(((hr + mn / 60) / 12) * Math.PI * 2, r * 0.42, S * 0.025, '#ffd60a')}\n      {hand(((mn + sc / 60) / 60) * Math.PI * 2, r * 0.62, S * 0.017, '#64d2ff')}\n      {hand((sc / 60) * Math.PI * 2, r * 0.72, S * 0.007, '#ff375f')}\n      <circle cx={cx} cy={cy} r={fixed(S * 0.034)} fill=\"#ffffff\" />\n      <circle cx={cx} cy={cy} r={fixed(S * 0.02)} fill=\"#ff2d55\" />\n      {showDigital && <text x={cx} y={fixed(cy + r * (full ? 0.73 : 1.33))} textAnchor=\"middle\" fontFamily=\"Ubuntu\" fontSize={fixed(S * (full ? 0.042 : 0.055))} fontWeight=\"700\" fill=\"#fffaf0\">{timeText}</text>}\n    </svg>\n  );\n}\n"
+        },
+        "origin": "rainbowClockJSX"
+      }
+    },
+    "customEvents": []
+  }
+]

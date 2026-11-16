@@ -112,14 +112,43 @@ Both planes keep `settings` as a scene carries it: saves, pushes (the ESP32's
 patch path included), templates and store publishes and installs carry the
 icon with the scene, and neither has an allow-list of settings keys.
 
-The store does not show icons yet. Its listings (`/api/store/device/scenes`,
-the browse and repository listings the SPA's tiles read) are built from
-`store_scenes` columns, and the scenes themselves live in each version's zip.
-Showing an icon there takes: reading `mainScene(scenes).settings.icon` when a
-version is published (`validateSceneZip` in `store.ts`, which already reads
-`isLayout` there), keeping it in a `store_scenes` column (a migration, and a
-backfill that unzips each latest version), and adding it to the device
-listing, the browse and repository listings, `TemplateType` and `SceneCard`.
+## In the store
+
+FrameOS Cloud's store is the cloud's alone, so this part has no backend twin.
+A store scene is a pack (a zip's `scenes.json`), and its listing stands for the
+scene the pack starts on: **the listing's icon is the main scene's**, the one
+marked `default`, else the first, as for `isLayout`. Another scene's icon does
+not stand in when the main one has none.
+
+- **Kept per version.** `validateSceneZip` (`store.ts` `listingIconOf`, through
+  `sceneIconPath`) reads it from every zip, which every way a version is
+  published goes through (the editor's Save and the AI, a zip upload, a linked
+  backend's publish, a fork, the MCP's `scene_create` / `scene_update_content`
+  / `scene_version_restore`), and `writeSceneVersion` records it on the
+  version (`store_scene_versions.icon`) and on the row
+  (`store_scenes.icon`, the latest version's, which the listings read).
+  `syncLatestVersion` moves the row's with the latest version, so a yank or
+  unyank shows the icon of the version now served. Migration 0082 added both
+  columns empty: a version from before icons existed has none, and
+  `pnpm --filter @frameos-cloud/auth-web scene:backfill-icons` reads the ones
+  published between the icon's release and the migration from their zips.
+- **Carried** in every listing of a scene: `repository.json` (the public index,
+  each FrameOS version's, and the account's drive index) as `icon`, the
+  store front's `/api/store/browse`, the account's `/api/account/scenes` and
+  `/api/account/scenes/{id}` (each version's too), and so the MCP's
+  `store_browse`, `store_scene_get`, `scenes_list` and `scene_get`. The
+  listing for frames (`/api/store/device/scenes`) has `icon` only for a scene
+  that has one: a frame parses every byte.
+- **Shown** with the SPA's `SceneIcon` (`components/SceneIcon.tsx`): the store
+  and library tiles (`StoreTiles.tsx`, which read a listing's `icon` through
+  `templateSceneIcon`) beside the name and in the cover's place; on the
+  cloud's own pages the cards (`SceneCard`), the My scenes table, and a
+  scene's page (its heading, and the images box when there are none; in the
+  workspace it follows the scenes it holds, so an edited icon shows before
+  Save).
+- **On the frame** the Scene store scene draws it in a card's placeholder
+  until the cover is in, and beside the name on a scene's page
+  (docs/scene-store.md).
 
 ## The repo's scenes
 

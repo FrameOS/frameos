@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   isProvablyFullyTransparentImage,
+  listingIconOf,
   maxVersionMessageLength,
   normalizeVersionMessage,
   compiledSceneNames,
@@ -370,6 +371,61 @@ describe("validateSceneZip photo share links", () => {
     expect(withLink.ok && withLink.value.photoShareLink).toBe(true);
     const without = validateSceneZip(zipWith("https://example.com/photo.jpg"));
     expect(without.ok && without.value.photoShareLink).toBe(false);
+  });
+});
+
+describe("the listing's icon", () => {
+  const house = "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z";
+  const star = "M12 2l3 7h7l-6 5 2 8-6-4-6 4 2-8-6-5h7z";
+  const pack = (scenes: unknown) => {
+    const result = validateSceneZip(
+      Buffer.from(
+        zipSync({
+          "Pack/scenes.json": strToU8(JSON.stringify(scenes)),
+          "Pack/template.json": strToU8(JSON.stringify({ name: "Pack" })),
+        }),
+      ),
+    );
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+    return result.value.icon;
+  };
+  const scene = (id: string, settings: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    edges: [],
+    id,
+    nodes: [],
+    settings,
+    ...extra,
+  });
+
+  it("is the main scene's settings.icon, trimmed, read when a zip is published", () => {
+    expect(pack([scene("a", { icon: ` ${house}\n` })])).toBe(house);
+    expect(pack([scene("a", {})])).toBeNull();
+    expect(pack([{ id: "a", nodes: [] }])).toBeNull();
+  });
+
+  it("stands for the scene a pack starts on: the default one, else the first", () => {
+    expect(pack([scene("a", { icon: house }), scene("b", { icon: star })])).toBe(house);
+    expect(pack([scene("a", { icon: house }), scene("b", { icon: star }, { default: true })])).toBe(star);
+    // Another scene's icon does not stand in for the main one's.
+    expect(pack([scene("a", {}), scene("b", { icon: star })])).toBeNull();
+    expect(pack([scene("a", { icon: house }), scene("b", {}, { default: true })])).toBeNull();
+  });
+
+  it("is no icon when the value is not one (docs/scene-icon-fixtures.json has the rule)", () => {
+    expect(pack([scene("a", { icon: `<svg><path d="${house}"/></svg>` })])).toBeNull();
+    expect(pack([scene("a", { icon: "L1 1z" })])).toBeNull();
+    expect(pack([scene("a", { icon: `M0 0${"h1".repeat(511)}` })])).toBeNull();
+    expect(pack([scene("a", { icon: 42 })])).toBeNull();
+  });
+
+  it("reads scenes nothing has checked yet", () => {
+    expect(listingIconOf(undefined)).toBeNull();
+    expect(listingIconOf({ settings: { icon: house } })).toBeNull();
+    expect(listingIconOf([null, scene("b", { icon: house })])).toBeNull();
+    expect(listingIconOf(["a", scene("b", { icon: house }, { default: true })])).toBe(house);
+    expect(listingIconOf([{ id: "a", settings: "M0 0h1z" }])).toBeNull();
   });
 });
 

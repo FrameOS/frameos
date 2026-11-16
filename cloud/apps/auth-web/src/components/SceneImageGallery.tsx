@@ -3,6 +3,7 @@
 import { ImagePlus, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { ImageLightbox } from "../../../../../frontend/src/sceneWorkspace/ImageLightbox";
+import { SceneIcon } from "../../../../../frontend/src/components/SceneIcon";
 import { ownerActionErrorMessage } from "./ownerActionError";
 
 // The scene's images (the Info panel): the version's ordered image set as
@@ -13,6 +14,7 @@ import { ownerActionErrorMessage } from "./ownerActionError";
 // is published until Save — an image set is part of a version.
 export function SceneImageGallery({
   canEdit,
+  icon,
   images,
   onChange,
   sceneId,
@@ -20,6 +22,9 @@ export function SceneImageGallery({
   share,
 }: {
   canEdit: boolean;
+  /** The scene's own icon (docs/scene-icons.md), drawn where it has no
+   * images; a path that passed sceneIconPath. */
+  icon?: string | null | undefined;
   /** The image digests, in order; the first is the cover. */
   images: string[];
   /** The draft's image list changed (owner editing only). */
@@ -194,6 +199,10 @@ export function SceneImageGallery({
               />
             </>
           ) : null}
+        </div>
+      ) : icon ? (
+        <div aria-hidden className="scene-card__placeholder">
+          <SceneIcon className="scene-icon scene-icon--placeholder" path={icon} />
         </div>
       ) : (
         <div aria-hidden className="scene-card__placeholder">

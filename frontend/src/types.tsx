@@ -810,6 +810,8 @@ export interface TemplateType {
   frameosVersion?: string
   /** Risk flags computed by the cloud store, e.g. 'shell' for scenes that run shell commands. */
   flags?: string[]
+  /** The main scene's icon, one SVG path in a 24 box (FrameOS Cloud store scenes; docs/scene-icons.md). */
+  icon?: string
   /** Store category slug (FrameOS Cloud store scenes); see utils/storeCategories. */
   category?: string
   /** Free-form tags (FrameOS Cloud store scenes). */

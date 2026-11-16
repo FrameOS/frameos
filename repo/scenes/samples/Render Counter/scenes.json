@@ -1,0 +1,241 @@
+[
+  {
+    "id": "25cd3dfa-6fc2-4735-b9ab-ca429ba27dd9",
+    "name": "Render Counter",
+    "nodes": [
+      {
+        "id": "event-render",
+        "type": "event",
+        "data": {
+          "keyword": "render",
+          "config": {}
+        },
+        "position": {
+          "x": 0,
+          "y": 223
+        }
+      },
+      {
+        "id": "state-render-count",
+        "type": "state",
+        "data": {
+          "keyword": "renderCount",
+          "value": "0"
+        },
+        "position": {
+          "x": 347,
+          "y": -171
+        }
+      },
+      {
+        "id": "code-next-count",
+        "type": "code",
+        "data": {
+          "codeJS": "(() => {\n  const raw = renderCount ?? state.renderCount ?? \"0\";\n  const current = parseInt(String(raw), 10);\n  return String((isFinite(current) ? current : 0) + 1);\n})()",
+          "codeArgs": [
+            {
+              "name": "renderCount",
+              "type": "string"
+            }
+          ],
+          "codeOutputs": [
+            {
+              "name": "nextCount",
+              "type": "string"
+            }
+          ],
+          "logOutput": false
+        },
+        "position": {
+          "x": 355,
+          "y": -91
+        },
+        "style": {
+          "width": 340,
+          "height": 260
+        },
+        "width": 340,
+        "height": 260
+      },
+      {
+        "id": "app-save-count",
+        "type": "app",
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "renderCount",
+            "valueString": "",
+            "debugLog": false
+          }
+        },
+        "position": {
+          "x": 390,
+          "y": 208
+        }
+      },
+      {
+        "id": "app-background",
+        "type": "app",
+        "data": {
+          "keyword": "render/color",
+          "config": {
+            "color": "#111827"
+          }
+        },
+        "position": {
+          "x": 940,
+          "y": 252
+        }
+      },
+      {
+        "id": "app-counter-text",
+        "type": "app",
+        "data": {
+          "keyword": "render/text",
+          "config": {
+            "text": "",
+            "richText": "disabled",
+            "position": "center",
+            "vAlign": "middle",
+            "offsetX": "0",
+            "offsetY": "0",
+            "padding": "0",
+            "font": "Ubuntu-Bold.ttf",
+            "fontColor": "#FFFFFF",
+            "fontSize": "200",
+            "borderColor": "#111827",
+            "borderWidth": "0",
+            "overflow": "fit-bounds"
+          }
+        },
+        "position": {
+          "x": 1330,
+          "y": 0
+        }
+      },
+      {
+        "id": "app-next-sleep",
+        "type": "app",
+        "data": {
+          "keyword": "logic/nextSleepDuration",
+          "config": {
+            "duration": "1"
+          }
+        },
+        "position": {
+          "x": 1880,
+          "y": 251
+        }
+      },
+      {
+        "id": "f83e041a-5f92-499a-ab8a-1cb7311aba4e",
+        "position": {
+          "x": 1839.677239709443,
+          "y": 166.81150121065377
+        },
+        "data": {
+          "keyword": "sleep"
+        },
+        "type": "state"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-render-to-save",
+        "type": "appNodeEdge",
+        "source": "event-render",
+        "target": "app-save-count",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "edge-save-to-background",
+        "type": "appNodeEdge",
+        "source": "app-save-count",
+        "target": "app-background",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "edge-background-to-text",
+        "type": "appNodeEdge",
+        "source": "app-background",
+        "target": "app-counter-text",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "edge-text-to-sleep",
+        "type": "appNodeEdge",
+        "source": "app-counter-text",
+        "target": "app-next-sleep",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "edge-state-to-code",
+        "type": "codeNodeEdge",
+        "source": "state-render-count",
+        "target": "code-next-count",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "codeField/renderCount"
+      },
+      {
+        "id": "edge-code-to-save",
+        "type": "codeNodeEdge",
+        "source": "code-next-count",
+        "target": "app-save-count",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/valueString"
+      },
+      {
+        "id": "edge-code-to-text",
+        "type": "codeNodeEdge",
+        "source": "code-next-count",
+        "target": "app-counter-text",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/text"
+      },
+      {
+        "id": "10a49b65-520e-48de-882e-ca942a876d04",
+        "source": "f83e041a-5f92-499a-ab8a-1cb7311aba4e",
+        "sourceHandle": "fieldOutput",
+        "target": "app-next-sleep",
+        "targetHandle": "fieldInput/duration",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "settings": {
+      "category": "Demos & examples",
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#111827",
+      "prompt": "Generate a render counter scene for an 800x480 FrameOS virtual frame. It should display a number that increments by 1 on every render.",
+      "windowSize": "480x480",
+      "icon": "M4,4H20A2,2 0 0,1 22,6V18A2,2 0 0,1 20,20H4A2,2 0 0,1 2,18V6A2,2 0 0,1 4,4M4,6V18H11V6H4M20,18V6H18.76C19,6.54 18.95,7.07 18.95,7.13C18.88,7.8 18.41,8.5 18.24,8.75L15.91,11.3L19.23,11.28L19.24,12.5L14.04,12.47L14,11.47C14,11.47 17.05,8.24 17.2,7.95C17.34,7.67 17.91,6 16.5,6C15.27,6.05 15.41,7.3 15.41,7.3L13.87,7.31C13.87,7.31 13.88,6.65 14.25,6H13V18H15.58L15.57,17.14L16.54,17.13C16.54,17.13 17.45,16.97 17.46,16.08C17.5,15.08 16.65,15.08 16.5,15.08C16.37,15.08 15.43,15.13 15.43,15.95H13.91C13.91,15.95 13.95,13.89 16.5,13.89C19.1,13.89 18.96,15.91 18.96,15.91C18.96,15.91 19,17.16 17.85,17.63L18.37,18H20M8.92,16H7.42V10.2L5.62,10.76V9.53L8.76,8.41H8.92V16Z"
+    },
+    "fields": [
+      {
+        "name": "renderCount",
+        "type": "string",
+        "label": "Render count",
+        "description": "Persistent counter value incremented once per render.",
+        "required": false,
+        "value": "0",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "sleep",
+        "role": "refreshInterval",
+        "label": "Sleep between renders (seconds)",
+        "type": "float",
+        "value": "600",
+        "persist": "disk",
+        "access": "public"
+      }
+    ],
+    "apps": {},
+    "customEvents": []
+  }
+]

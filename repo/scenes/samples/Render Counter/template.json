@@ -1,0 +1,10 @@
+{
+  "name": "Render Counter",
+  "description": "Increment a number on every render. Useful for debugging.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.8.10"
+}

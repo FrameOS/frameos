@@ -40,6 +40,7 @@ import { listingForVersion } from "../../../src/lib/store-listing";
 import { previewDeviceFor } from "../../../../../../frontend/src/sceneWorkspace/lib/preview-devices";
 import { storeEmbedFor } from "../../../src/lib/store-embed";
 import { imageSetForVersion, imageSetForVersionId } from "../../../src/lib/store-images";
+import { SceneIcon } from "../../../../../../frontend/src/components/SceneIcon";
 
 export const dynamic = "force-dynamic";
 
@@ -168,6 +169,7 @@ export default async function ScenePage({
       downloadCount: storeScenes.downloadCount,
       featuredAt: storeScenes.featuredAt,
       frameosVersion: storeScenes.frameosVersion,
+      icon: storeScenes.icon,
       id: storeScenes.id,
       latestVersion: storeScenes.latestVersion,
       name: storeScenes.name,
@@ -248,6 +250,7 @@ export default async function ScenePage({
       createdAt: storeSceneVersions.createdAt,
       description: storeSceneVersions.description,
       frameosVersion: storeSceneVersions.frameosVersion,
+      icon: storeSceneVersions.icon,
       id: storeSceneVersions.id,
       listingRecorded: storeSceneVersions.listingRecorded,
       message: storeSceneVersions.message,
@@ -325,6 +328,8 @@ export default async function ScenePage({
     getScenesBaseUrl(),
   ).toString();
   const shownListing = pinnedVersion ? listingForVersion(pinnedVersion, scene) : scene;
+  // The icon of the version shown: each version records its own.
+  const shownIcon = pinnedVersion ? pinnedVersion.icon : scene.icon;
   const zipUrl = new URL(
     withShare(`/api/store/scenes/${scene.id}/download`),
     getScenesBaseUrl(),
@@ -382,6 +387,7 @@ export default async function ScenePage({
       description: scene.description,
       downloadCount: scene.downloadCount,
       frameosVersion: scene.frameosVersion,
+      icon: scene.icon,
       id: scene.id,
       latestVersion: scene.latestVersion,
       name: scene.name,
@@ -437,7 +443,12 @@ export default async function ScenePage({
           the description and the zip. */}
       <div className="content-header">
         <div>
-          <h1>{scene.name}</h1>
+          <h1>
+            {shownIcon ? (
+              <SceneIcon className="scene-icon scene-icon--inline" path={shownIcon} />
+            ) : null}
+            {scene.name}
+          </h1>
           <p className="copy">
             by{" "}
             <Link href={`/publishers/${scene.accountId}`}>

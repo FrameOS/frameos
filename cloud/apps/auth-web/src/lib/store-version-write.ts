@@ -27,7 +27,9 @@ type Database =
 // editor's Save, a zip upload, a linked backend's push, a fork, the AI's
 // save_scene — ends here, so a version always records the same three
 // things: the zip, the listing it was published with, and its image set,
-// with the scene row projected from it in the same transaction.
+// with the scene row projected from it in the same transaction. What the zip
+// itself says (its risk flags, its icon) is read here from `validated`, so
+// no path can publish a version without it.
 
 /** Make the zip's single cover (image.jpg) the set's position 0 — the
  * interchange format knows one image, and a download must show what the
@@ -115,6 +117,7 @@ export async function writeSceneVersion(
         contentType: "application/zip",
         description: input.listing.description,
         frameosVersion: input.listing.frameosVersion,
+        icon: input.validated.icon,
         listingRecorded: true,
         message: input.message ?? null,
         objectKey: stored.objectKey,
@@ -147,6 +150,7 @@ export async function writeSceneVersion(
         category,
         description: input.listing.description,
         frameosVersion: input.listing.frameosVersion,
+        icon: input.validated.icon,
         latestVersion: input.version,
         riskFlags: input.validated.riskFlags,
         tags: input.listing.tags,
@@ -195,7 +199,9 @@ export async function nextSceneVersion(
  * the one just yanked. A version from before listings were recorded per
  * version (listingRecorded false) has nothing to project and leaves the
  * row's text alone. A moderator's later recategorize lands on the row
- * only, so a yank after it re-derives the category from the version. */
+ * only, so a yank after it re-derives the category from the version. The
+ * icon is read from the zip, not the listing, so it always follows (a
+ * version from before icons existed holds none). */
 export async function syncLatestVersion(
   db: Database,
   sceneId: string,
@@ -218,6 +224,7 @@ export async function syncLatestVersion(
       category: storeSceneVersions.category,
       description: storeSceneVersions.description,
       frameosVersion: storeSceneVersions.frameosVersion,
+      icon: storeSceneVersions.icon,
       listingRecorded: storeSceneVersions.listingRecorded,
       riskFlags: storeSceneVersions.riskFlags,
       tags: storeSceneVersions.tags,
@@ -233,6 +240,7 @@ export async function syncLatestVersion(
   await db
     .update(storeScenes)
     .set({
+      icon: latest?.icon ?? null,
       latestVersion: newest,
       ...(latest?.listingRecorded
         ? {

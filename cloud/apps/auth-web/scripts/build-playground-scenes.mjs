@@ -20,6 +20,7 @@ const target = join(appDir, "public", "playground-assets", "scenes.json");
 // Samples that cannot run in a browser tab nobody configured: they need an
 // API key or an account in the frame's settings, or a process on a Pi.
 export const excludedTemplates = new Set([
+  "Bird field journal",
   "Chromium Screenshot",
   "Google Photos",
   "Haiku of the hour",

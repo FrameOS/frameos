@@ -10,9 +10,9 @@ import type { StoreBrowseFilters } from "./store-filters";
 // on a frame fetches a page of scenes at a time. A frame can be an
 // ESP32 parsing this in JavaScript with the whole scene running next to it,
 // so the answer is small on purpose: a page the size of the app's grid, short
-// keys, a description cut to a line or two, the cover as a path and no tags
-// or counts. The browser's /api/store/browse is the same query with the
-// card's fields.
+// keys, a description cut to a line or two, the cover as a path, the icon only
+// where a scene has one, and no tags or counts. The browser's
+// /api/store/browse is the same query with the card's fields.
 //
 // Only what a frame is offered: public, active, filed under a category (the
 // "Other scenes" shelf is where unverified uploads wait, as for the
@@ -43,6 +43,10 @@ export type StoreDeviceScene = {
   // card needs, a tenth of the cover's bytes or less (store-device-covers.ts).
   // null without a cover, or where the store has no CDN.
   thumb: string | null;
+  // The scene's own icon (docs/scene-icons.md): one SVG path in a 0 0 24 24
+  // box, filled with the text color, which the app draws where there is no
+  // cover. Left out when the scene has none: a frame parses every byte.
+  icon?: string;
 };
 
 export type StoreDeviceSceneInfo = StoreDeviceScene & { description: string };
@@ -94,6 +98,7 @@ type DeviceRow = {
   coverKey: string | null;
   description: string | null;
   hasPreview: boolean;
+  icon: string | null;
   id: string;
   latestVersion: number;
   name: string;
@@ -111,6 +116,7 @@ function deviceScene(row: DeviceRow, thumb: string | null): StoreDeviceScene {
     name: clip(row.name, maxNameLength),
     thumb,
     version: row.latestVersion,
+    ...(row.icon ? { icon: row.icon } : {}),
   };
 }
 
@@ -124,6 +130,7 @@ const deviceColumns = {
   coverKey: sceneCoverObjectKeySql,
   description: storeScenes.description,
   hasPreview: sceneHasImageSql,
+  icon: storeScenes.icon,
   id: storeScenes.id,
   latestVersion: storeScenes.latestVersion,
   name: storeScenes.name,

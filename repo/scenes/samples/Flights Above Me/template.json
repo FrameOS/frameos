@@ -1,0 +1,10 @@
+{
+  "name": "Flights Above Me",
+  "description": "Shows airplanes around you over a map of the area. Flight data from OpenSky Network, map lines from OpenStreetMap via maps.frameos.net.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.10.21"
+}
