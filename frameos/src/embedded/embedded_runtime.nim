@@ -73,6 +73,10 @@ var
   # catalog), for `setCurrentScene {direction}`.
   loadedSceneOrder: seq[SceneId]
   layoutCatalog: seq[LayoutEntry]
+  # Every new catalog off flash is a new set: a scene's definition cached
+  # under an earlier one may have changed (loadScene).
+  catalogGeneration = 0
+  cachedInCatalog: Table[SceneId, int]
   # The scene's lifetime, its lifecycle events and the dispatcher's EventHost:
   # shared with the wasm preview (frameos/single_scene_host). Allocated here so
   # the status procs below can be asked before initRuntime.
@@ -723,6 +727,7 @@ proc setSceneCatalog*(indexJson: string): int =
   host.carryDesktop()
   host.dropWindows()
   dropParkedLayout()
+  inc catalogGeneration
   var parsed: JsonNode
   try:
     parsed = parseJson(indexJson)
@@ -808,12 +813,29 @@ proc loadScene*(payload: string, alongside = false): bool =
     # running in its window, and the one read off flash starts beside it.
     # What no window runs leaves the cache, as a switch's whole-cache
     # replacement below would.
+    #
+    # A definition cached under an earlier set is not this one: the set's
+    # catalog dropped the windows but not the scene in front, and its new
+    # text arriving from flash was ignored, so it kept running its old
+    # version, layout and all (`layout:missing` for the set before's layout
+    # after every desktop push, the SenseCAP Indicator and the reTerminal
+    # E1004, the hardware bench, 2026-11-16).
+    if getInterpretedScenes().hasKey(sceneId) and
+        cachedInCatalog.getOrDefault(sceneId, -1) != catalogGeneration:
+      if not host.scene.isNil and host.scene.id == sceneId:
+        host.dropScene()
+      removeInterpretedSceneFromCache(sceneId)
     if not getInterpretedScenes().hasKey(sceneId):
       addInterpretedSceneToCache(inputs[0])
+      cachedInCatalog[sceneId] = catalogGeneration
     host.switchLoaded(sceneId)
+    var gone: seq[SceneId]
     for cached in getInterpretedScenes().keys:
       if cached != sceneId and not host.windows.hasKey(cached):
-        removeInterpretedSceneFromCache(cached)
+        gone.add cached
+    for cached in gone:
+      removeInterpretedSceneFromCache(cached)
+      cachedInCatalog.del(cached)
     scenesLoadedCount = 1 + host.windows.len
     if defaultSceneId.isNone:
       defaultSceneId = some(sceneId)
