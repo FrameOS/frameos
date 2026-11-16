@@ -84,6 +84,10 @@ elif defined(frameosEmbedded):
   # js_dtoa, linked anyway, finds the same shortest digits.
   patchFile("stdlib", "dragonbox", "src/embedded/patched_dragonbox")
 
+  # A failed assert says where it is, not what it checked: the condition's
+  # source text was a literal per site and module (-20.2 KB).
+  patchFile("stdlib", "assertions", "src/embedded/patched/assertions")
+
 when defined(testing):
   # Test binaries (testament passes -d:testing) are built without C
   # optimisation. nim.cfg's -d:release means -O3, and for a test that pulls
