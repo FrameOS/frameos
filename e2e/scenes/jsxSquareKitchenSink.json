@@ -2,6 +2,7 @@
   "id": "jsxSquareKitchenSink",
   "name": "JSX: Kitchen sink (480x480, touch)",
   "settings": {
+    "category": "demos",
     "execution": "interpreted",
     "refreshInterval": 0.05,
     "backgroundColor": "#0b1020",
