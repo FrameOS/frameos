@@ -39,6 +39,7 @@ type
     kept: seq[JsxKept]
     nextId: int
     sawScene*: bool ## a `<Scene>` or `<yield />` has been read: its UI's layout is searched for them
+    sawUrl*: bool ## an `<img src="https://…">` has been read: its UI's layout is searched for them
     handlers*: int ## the handlers (onClick, ...) of the last UI read: they live in its interpreter
 
   JsxReader = object
@@ -216,6 +217,11 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
         r.addNodes(value, node.children, depth + 1)
       elif name in ["src", "href"] and jsIsObject(value):
         node.image = r.imageOf(value)
+      elif name == "src" and node.tag == "img" and jsIsString(value):
+        # A URL: fetched by the runtime at the size the layout gives it.
+        if not r.memo.isNil:
+          r.memo.sawUrl = true
+        node.attrs.add(("src", toNimString(ctx, value)))
       elif JS_IsFunction(ctx, value) != 0:
         # onClick={() => ...}: kept in the app's context, the node says which.
         if name.len > 2 and name[0] == 'o' and name[1] == 'n' and name[2] in {'A' .. 'Z'}:

@@ -237,6 +237,11 @@ bool frameos_nim_press_taken(int wire_x, int wire_y);
  * render flag may be set. Tries the runtime lock once and does nothing when a
  * render holds it — the hold is reported on release then. */
 bool frameos_nim_tick(void);
+
+/* How long until a JS app's timer is due (docs/async-js.md), in ms: 0 when an
+ * answer is ready now, -1 when nothing waits. The render task's idle wait
+ * sleeps no longer; frameos_nim_tick runs them. */
+int frameos_nim_next_async_ms(void);
 /* Hand one event to the Nim dispatcher (frameos/event_loop.nim), which queues
  * it and drains the queue before this returns. `origin` is who said it: ONE
  * FOS_ORIGIN_* bit of main/fos_events_gen.h (this component cannot include

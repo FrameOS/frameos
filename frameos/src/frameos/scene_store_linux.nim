@@ -3,10 +3,9 @@
 ## `frameos.storeAction()` (frameos/scene_store_hooks.nim; the Scene store
 ## sample scene is that app). The ESP32's twin is embedded/esp32/main/fos_store.c.
 ##
-## - Browsing is the cloud store's listing for frames (/api/store/device/scenes,
-##   with the query string the app hands over), asked of the frame's cloud
-##   provider (cloud/link_state.nim: the linked one, else cloud.frameos.net),
-##   on the worker, so a tap never waits for the network.
+## - Browsing is the app's own: it fetch()es the cloud store's listing for
+##   frames from `url`, the frame's cloud provider (cloud/link_state.nim: the
+##   linked one, else cloud.frameos.net).
 ## - Install, update and remove are asked of the frame's control plane when
 ##   it has one (`POST …/panel/scenes`: the cloud it is managed by, else its
 ##   backend), and so are a cloud frame's preview and discard: the plane holds
@@ -37,7 +36,6 @@ import frameos/utils/http_client
 from frameos/upgrade import installedFrameOSVersion
 
 const
-  ListingMaxBytes = 64 * 1024
   ScenesMaxBytes = 8 * 1024 * 1024
   AnswerMaxBytes = 8 * 1024
   FetchTimeoutMs = 15_000
@@ -45,7 +43,6 @@ const
 type
   Job = object
     action, store, id, name, origin: string
-    params: string ## a browse's query string
     show: bool ## an install's: show it once it is on the frame
     backendUrl, backendKey: string ## the frame's backend, when it has one
 
@@ -56,8 +53,6 @@ type
   StoreFacts = object
     ## What the worker last found, as values.
     busy, error, done: string
-    params: string ## what `listing` answers
-    listing: string ## the store's answer as it came ("" for none)
     previewStore, previewId, previewName, previewFrom: string
     origins: seq[Origin]
     standalone: bool
@@ -86,13 +81,13 @@ proc storeBase(): string =
   try: providerUrlFromState(loadCloudLinkState())
   except CatchableError: "https://cloud.frameos.net"
 
-proc get(url: string, maxBytes: int, listing = false): tuple[body, error: string] =
+proc get(url: string, maxBytes: int): tuple[body, error: string] =
   ## The body when it is JSON the store answered with, else an error code for
-  ## the page. A 404 is a store scene that is gone, or for the `listing` a
-  ## store older than this frame (as main/fos_store.c reads it).
+  ## the page. A 404 is a store scene that is gone (as main/fos_store.c reads
+  ## it).
   try:
     let response = boundedRequestWithHeaders(url, timeoutMs = FetchTimeoutMs, maxBytes = maxBytes, maxRedirects = 2)
-    if response.code == 404: return ("", if listing: "store_unavailable" else: "invalid_scene")
+    if response.code == 404: return ("", "invalid_scene")
     if response.code == 429: return ("", "rate_limited")
     if response.code != 200: return ("", "store_unavailable")
     discard parseJson(response.body)
@@ -238,18 +233,6 @@ proc work(job: var Job, error, done: var string) =
       if origin.id == job.id:
         job.store = origin.store
   case job.action
-  of "browse":
-    let url = storeBase() & "/api/store/device/scenes?version=" & encodeUrl(installedFrameOSVersion()) &
-      (if job.params.len > 0: "&" & job.params else: "")
-    let (body, failed) = get(url, ListingMaxBytes, listing = true)
-    error = failed
-    done = ""
-    if failed.len == 0:
-      # What the listing is for changes with it, so a failed page turn
-      # stays on the page that shows.
-      withLock factsLock:
-        facts.listing = body
-        facts.params = job.params
   of "scan":
     done = ""
   else:
@@ -378,9 +361,8 @@ proc linuxSceneStoreRead*(scene: string): string {.nimcall, gcsafe, raises: [].}
       for origin in f.origins:
         installed.add %*{"id": origin.id, "store": origin.store, "v": origin.version}
       var answer = %*{"url": storeBase(), "version": installedFrameOSVersion(), "busy": f.busy,
-        "error": f.error, "done": f.done, "params": f.params, "installed": installed,
-        "removeAny": cloudPlane().url.len == 0 and backendOf(config).url.len == 0,
-        "listing": (if f.listing.len > 0: parseJson(f.listing) else: newJNull())}
+        "error": f.error, "done": f.done, "installed": installed,
+        "removeAny": cloudPlane().url.len == 0 and backendOf(config).url.len == 0}
       answer["preview"] = if f.previewStore.len > 0:
         %*{"store": f.previewStore, "id": f.previewId, "name": f.previewName} else: newJNull()
       result = $answer
@@ -396,20 +378,15 @@ proc linuxSceneStoreAction*(scene, action, argsText: string) {.nimcall, gcsafe, 
       if args.kind != JObject:
         args = newJObject()
       var job = Job(action: action, store: args{"store"}.getStr(), id: args{"id"}.getStr(),
-        name: args{"name"}.getStr(), origin: scene, params: args{"params"}.getStr(),
-        show: args{"show"}.getBool(true))
+        name: args{"name"}.getStr(), origin: scene, show: args{"show"}.getBool(true))
       (job.backendUrl, job.backendKey) = backendOf(runnerConfig())
       withLock factsLock:
         asker = scene
         # One thing at a time: the app says what is running.
         if facts.busy.len > 0:
           return
-        case action
-        of "browse":
-          if not validStoreParams(job.params):
-            return
-        of "preview", "install", "update", "remove", "discard": discard
-        else: return
+        if action notin ["preview", "install", "update", "remove", "discard"]:
+          return
         facts.busy = job.action
         facts.error = ""
         facts.done = ""

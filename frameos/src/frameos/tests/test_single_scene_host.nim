@@ -59,6 +59,18 @@ discard host.send(eoDriver, "gpio", %*{"pin": 5, "label": "RIGHT", "level": 1, "
 doAssert host.tick(), "the tick delivers the press"
 doAssert selected == @["fixtures/dispatcher/switchTo"], "selected " & $selected
 
+# What the scene's async code dispatches between renders (docs/async-js.md: a
+# picture came, `frameos.dispatch("render")` in a promise's callback) is
+# queued, and nothing sends while the firmware idles: the idle loop drains it
+# after the pump, or it waited for the next tap (the SenseCAP, 2026-11-15).
+discard host.takeRenderRequested()
+host.queue(eoScene, "render", %*{})
+doAssert not host.tick(), "no time-based input: the tick alone delivers nothing"
+doAssert not host.takeRenderRequested(), "still queued"
+doAssert host.drainQueued(), "the idle loop's drain delivers it"
+doAssert host.takeRenderRequested(), "and the render it asked for is wanted"
+doAssert not host.drainQueued(), "nothing left"
+
 # A switch sent before the first render (the backend's set_current_scene,
 # queued for the wake) must not build the scene it is leaving: the dispatcher
 # serves a switch without one, and building it is seconds of work for a scene
