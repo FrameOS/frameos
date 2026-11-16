@@ -176,9 +176,10 @@ two allocations, each fine in total memory and each one block too many:
   reading and have the same fix.
 - **The scene set.** A whole set from the backend (378 KB, 465 KB) was copied
   out of the firmware's buffer into one Nim string (`$payload`) with 1.5 MB
-  free in blocks of 300 KB. `loadScenes(cstring)` reads it in place and copies
-  one scene at a time (`parseInterpretedSceneInputs(data, len)`), so the
-  largest block a set needs is its largest scene's text.
+  free in blocks of 300 KB. `fos_scenes.c` splits it where it lies with the
+  store's scanner (`fos_store_split_scenes`) and the runtime copies one scene
+  at a time (`frameos_nim_load_scenes`), so the largest block a set needs is
+  its largest scene's text.
 
 The soak's "leak" (130 KB, 585 KB, 1.4 MB over three aborts in five seconds,
 then the restart) was those aborts: each abandons the JS interpreters it

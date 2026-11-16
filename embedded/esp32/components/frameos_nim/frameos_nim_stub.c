@@ -93,9 +93,11 @@ bool frameos_nim_scene_running(const char *scene_id)
     (void)scene_id;
     return false;
 }
-int frameos_nim_load_scenes(const char *json)
+int frameos_nim_load_scenes(const char *const *scenes, const size_t *lens, int count)
 {
-    (void)json;
+    (void)scenes;
+    (void)lens;
+    (void)count;
     return 0;
 }
 void frameos_nim_set_debug(int enabled) { (void)enabled; }
