@@ -158,8 +158,8 @@ suite "app.frame.paper and color, in every phase":
     onBoard(7, newImage565(W, H)).expectEverywhere(paper = true, color = true)
 
   test "a panel drawn into a picture of its own hears the frame's panel":
-    # A <Scene> that cannot be a hole gets an RGBX picture of its own on any
-    # board: on an LCD that said paper, on a grey panel color.
+    # Whatever the canvas a scene is drawn into (a <Scene>'s picture of its
+    # own, a split's panel), its pixels end on the frame's glass.
     onBoard(PanelFormatRgb565, newImage(W, H)).expectEverywhere(paper = false, color = true)
     onBoard(8, newImage(W, H)).expectEverywhere(paper = true, color = false)
 
