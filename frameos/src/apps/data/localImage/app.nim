@@ -208,8 +208,12 @@ proc get*(self: App, context: ExecutionContext): Image =
   # wants that one (an animation over it on a board short of memory): the same
   # photo again, the counter and its persisted copy untouched. Advancing is
   # the slideshow's schedule (the node's cache), never the frame rate.
+  # So does a repaint: its scene is drawn again before it is due (a window
+  # moved over a desktop, a panel nothing could keep a copy of), and shows
+  # what it showed.
+  let repainting = not self.scene.isNil and self.scene.repainting
   let lastIndex =
-    if context.remakingCachedValue and self.lastImage.isSome: self.images.find(self.lastImage.get())
+    if (context.remakingCachedValue or repainting) and self.lastImage.isSome: self.images.find(self.lastImage.get())
     else: -1
   let remaking = lastIndex >= 0
   let currentIndex = if remaking: lastIndex else: self.counter
