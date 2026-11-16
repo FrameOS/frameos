@@ -23,7 +23,6 @@
 
 import pixie
 import dither
-from panel_damage import panelPoint
 
 # The firmware is built for size; this loop runs over every pixel of a frame
 # and is compiled at -O2 there, as embedded_main.nim's packers are.
@@ -86,8 +85,19 @@ proc packPalette*(
       buf[i] = 0
 
   image.forEachPaletteDithered(palette, x, y, index):
+    # panelPoint, as two plain ints: its tuple was four zeroed temporaries
+    # a pixel, each a call from this -O2 loop (dither.clip8).
     let
-      (px, py) = panelPoint(x, y, width, height, rotate)
+      px = case rotate
+        of 90: height - 1 - y
+        of 180: width - 1 - x
+        of 270: y
+        else: x
+      py = case rotate
+        of 90: x
+        of 180: height - 1 - y
+        of 270: width - 1 - x
+        else: y
       outputIndex = py * rowBytes + px div pixelsPerByte
       value =
         case bits
