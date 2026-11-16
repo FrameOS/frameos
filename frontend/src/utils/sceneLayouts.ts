@@ -14,6 +14,32 @@ export function isLayoutScene(scene: Pick<FrameScene, 'settings'> | null | undef
   return scene?.settings?.isLayout === true
 }
 
+/** A layout that runs the frame's scenes side by side, in windows or tiles (`settings.desktop`). */
+export function isDesktopLayout(scene: Pick<FrameScene, 'settings'> | null | undefined): boolean {
+  return isLayoutScene(scene) && scene?.settings?.desktop === true
+}
+
+export interface LayoutGroup<T> {
+  kind: 'desktops' | 'fullScreen'
+  /** As the frame's own settings page heads them. */
+  title: string
+  items: T[]
+}
+
+/**
+ * Layouts split as the frame's settings page splits them (layout_choice.nim
+ * `layoutsInOrder`): the desktops, then the layouts around one scene, each in
+ * the order given. A kind with nothing in it is left out, so a list of one kind
+ * is one group, which a list draws without a heading.
+ */
+export function layoutGroups<T>(items: readonly T[], isDesktop: (item: T) => boolean): LayoutGroup<T>[] {
+  const groups: LayoutGroup<T>[] = [
+    { kind: 'desktops', title: 'Desktops', items: items.filter((item) => isDesktop(item)) },
+    { kind: 'fullScreen', title: 'Full screen', items: items.filter((item) => !isDesktop(item)) },
+  ]
+  return groups.filter((group) => group.items.length > 0)
+}
+
 /** `settings` with the scene made a layout or a normal one. A normal scene carries no flag. */
 export function withIsLayout<T extends object>(settings: T | null | undefined, isLayout: boolean): T {
   const { isLayout: _dropped, ...rest } = (settings ?? {}) as T & { isLayout?: boolean }

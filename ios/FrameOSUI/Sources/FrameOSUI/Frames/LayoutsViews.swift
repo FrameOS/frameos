@@ -8,6 +8,30 @@ import SwiftUI
 
 private let differentLayouts = "\u{1}different"
 
+/// A layout picker's choices: under "Desktops" and "Full screen" when the
+/// frame has both kinds (the SPA's LayoutOptions).
+struct LayoutPickerOptions: View {
+    let groups: [LayoutGroup<InstalledScene>]
+
+    var body: some View {
+        if groups.count > 1 {
+            ForEach(groups) { group in
+                Section {
+                    ForEach(group.items) { layout in
+                        Text(layout.name).tag(layout.id)
+                    }
+                } header: {
+                    Text(group.title)
+                }
+            }
+        } else {
+            ForEach(groups.first?.items ?? []) { layout in
+                Text(layout.name).tag(layout.id)
+            }
+        }
+    }
+}
+
 /// Under Scenes on the frame page, when the frame has a layout.
 struct FrameLayoutsSection: View {
     @Environment(AppModel.self) private var app
@@ -27,9 +51,7 @@ struct FrameLayoutsSection: View {
                     Text("Different layouts").tag(differentLayouts)
                 }
                 Text("No layout").tag("")
-                ForEach(model.layouts) { layout in
-                    Text(layout.name).tag(layout.id)
-                }
+                LayoutPickerOptions(groups: model.layoutGroups)
             }
             ForEach(model.layouts) { layout in
                 NavigationLink {
@@ -198,27 +220,33 @@ struct LayoutStartersView: View {
 
     var body: some View {
         List {
-            Section {
-                ForEach(LayoutStarters.all) { starter in
-                    AsyncButton {
-                        await add(starter)
-                        dismiss()
-                    } label: {
-                        HStack(alignment: .top, spacing: 12) {
-                            starterImage(starter)
-                                .frame(width: 96, height: 72)
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(starter.name).font(.body.weight(.medium)).foregroundStyle(.primary)
-                                Text(starter.description).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+            ForEach(LayoutStarters.groups) { group in
+                Section {
+                    ForEach(group.items) { starter in
+                        AsyncButton {
+                            await add(starter)
+                            dismiss()
+                        } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                starterImage(starter)
+                                    .frame(width: 96, height: 72)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(starter.name).font(.body.weight(.medium)).foregroundStyle(.primary)
+                                    Text(starter.description).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                                }
                             }
+                            .contentShape(Rectangle())
                         }
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                } header: {
+                    Text(group.kind == "desktops" ? "Desktop layouts" : "Full screen layouts")
+                } footer: {
+                    if group.id == LayoutStarters.groups.last?.id {
+                        Text("Added to this frame. You can change its settings, or which scenes wear it, afterwards.")
+                    }
                 }
-            } footer: {
-                Text("Added to this frame. You can change its settings, or which scenes wear it, afterwards.")
             }
         }
         .readableWidth()
@@ -255,9 +283,7 @@ struct SceneLayoutSection: View {
                 Task { await model.setLayout(app, for: current, id) }
             }) {
                 Text("No layout").tag("")
-                ForEach(model.layouts) { layout in
-                    Text(layout.name).tag(layout.id)
-                }
+                LayoutPickerOptions(groups: model.layoutGroups)
             }
             if let layout = model.layouts.first(where: { $0.id == wornId }), !layout.fields.isEmpty {
                 NavigationLink {

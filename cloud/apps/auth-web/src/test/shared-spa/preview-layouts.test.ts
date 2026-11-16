@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   loadLayoutStarters,
+  previewLayoutGroups,
   previewLayouts,
   scenesWithPreviewLayout,
   wornPreviewLayout,
@@ -27,6 +28,23 @@ describe("previewLayouts", () => {
     expect(previewLayouts([{ id: "clock" }], starters).map((layout) => layout.id)).toEqual([
       "layout-windows-98",
       "layout-top-bar",
+    ]);
+  });
+
+  it("lists the desktops apart from the full screen layouts, the scenes' own first in each", () => {
+    const desktop = { name: "Tiling", scene: { id: "layout-tiling", nodes: [], settings: { isLayout: true, desktop: true } } };
+    const scenes = [
+      { id: "clock", name: "Clock" },
+      { id: "bar", name: "My bar", settings: { isLayout: true } },
+      { id: "desk", name: "My desk", settings: { isLayout: true, desktop: true } },
+    ];
+    const groups = previewLayoutGroups(previewLayouts(scenes, [...starters, desktop]));
+    expect(groups.map((group) => [group.title, group.items.map((layout) => layout.id)])).toEqual([
+      ["Desktops", ["desk", "layout-tiling"]],
+      ["Full screen", ["bar", "layout-windows-98", "layout-top-bar"]],
+    ]);
+    expect(previewLayoutGroups(previewLayouts([{ id: "clock" }], starters)).map((group) => group.title)).toEqual([
+      "Full screen",
     ]);
   });
 

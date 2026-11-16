@@ -1,6 +1,5 @@
 import { isLayoutScene, layoutScenes, scenesWithoutLayouts } from '../../utils/sceneLayouts'
-import { LAYOUT_STARTERS } from '../../generated/layoutStarters'
-import { frameLayoutsLogic } from '../frame/panels/FrameSettings/frameLayoutsLogic'
+import { LAYOUT_STARTER_GROUPS, frameLayoutsLogic } from '../frame/panels/FrameSettings/frameLayoutsLogic'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
@@ -29,6 +28,7 @@ import {
 import { PlayIcon } from '@heroicons/react/24/solid'
 import { framesModel } from '../../models/framesModel'
 import { DropdownMenu } from '../../components/DropdownMenu'
+import { H6 } from '../../components/H6'
 import { DeployProgressBar } from '../../components/DeployProgressBar'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { AiElsewhereNote } from './AiElsewhereNote'
@@ -818,23 +818,37 @@ function NewLayoutStarters({ frame }: { frame: FrameType }): JSX.Element {
   const { addStarterLayout } = useActions(frameLayoutsLogic({ frameId: frame.id }))
   const { closeTemplateDrawer } = useActions(workspaceLogic)
   return (
-    <div className="mb-4 grid gap-3" data-layout-starter-list>
-      {LAYOUT_STARTERS.map((starter) => (
-        <button
-          key={starter.name}
-          type="button"
-          onClick={() => {
-            addStarterLayout(starter.name)
-            closeTemplateDrawer()
-          }}
-          className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/70 p-3 text-left transition hover:-translate-y-0.5 hover:shadow-lg"
-        >
-          <img src={starter.image} alt="" className="h-[66px] w-[110px] shrink-0 rounded-lg object-cover" />
-          <span className="min-w-0 flex-1">
-            <span className="frameos-strong block truncate text-sm font-semibold">{starter.name}</span>
-            <span className="frameos-muted block text-xs">{starter.description}</span>
-          </span>
-        </button>
+    <div className="mb-4 space-y-5" data-layout-starter-list>
+      {LAYOUT_STARTER_GROUPS.map((group) => (
+        <section key={group.kind} className="space-y-3" data-layout-starter-group={group.kind}>
+          <div>
+            <H6>{group.kind === 'desktops' ? 'Desktop layouts' : 'Full screen layouts'}</H6>
+            <div className="frameos-muted text-xs">
+              {group.kind === 'desktops'
+                ? "Run the frame's scenes side by side, in windows or tiles."
+                : 'Drawn around the one scene that is showing.'}
+            </div>
+          </div>
+          <div className="grid gap-3">
+            {group.items.map((starter) => (
+              <button
+                key={starter.name}
+                type="button"
+                onClick={() => {
+                  addStarterLayout(starter.name)
+                  closeTemplateDrawer()
+                }}
+                className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/70 p-3 text-left transition hover:-translate-y-0.5 hover:shadow-lg"
+              >
+                <img src={starter.image} alt="" className="h-[66px] w-[110px] shrink-0 rounded-lg object-cover" />
+                <span className="min-w-0 flex-1">
+                  <span className="frameos-strong block truncate text-sm font-semibold">{starter.name}</span>
+                  <span className="frameos-muted block text-xs">{starter.description}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
       ))}
     </div>
   )

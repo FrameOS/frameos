@@ -23,9 +23,7 @@ const iosOutputPath = path.resolve(
 )
 
 const starters = []
-for (const entry of (await fs.readdir(samplesRoot, { withFileTypes: true })).sort((a, b) =>
-  a.name < b.name ? 1 : a.name > b.name ? -1 : 0
-)) {
+for (const entry of await fs.readdir(samplesRoot, { withFileTypes: true })) {
   if (!entry.isDirectory()) {
     continue
   }
@@ -42,6 +40,13 @@ for (const entry of (await fs.readdir(samplesRoot, { withFileTypes: true })).sor
     scene: scenes[0],
   })
 }
+// The desktops (`settings.desktop`), then the layouts around one scene, each by
+// name: the order the frame's own settings page lists them in, and the two
+// groups every list of starters shows (sceneLayouts.ts `layoutGroups`).
+const isDesktop = (starter) => starter.scene.settings?.desktop === true
+starters.sort(
+  (a, b) => Number(isDesktop(b)) - Number(isDesktop(a)) || a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })
+)
 
 await fs.writeFile(
   outputPath,

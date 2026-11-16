@@ -1,7 +1,7 @@
 import { sceneRequiresCompilation } from "@frameos-cloud/scene-convert";
 import { sceneAccessFlags } from "../../../../../frontend/src/utils/sceneAccess";
 import { isBrokenLayout } from "../../../../../frontend/src/utils/sceneLayoutRule";
-import { isLayoutScene, mainScene } from "../../../../../frontend/src/utils/sceneLayouts";
+import { isDesktopLayout, isLayoutScene, mainScene } from "../../../../../frontend/src/utils/sceneLayouts";
 import type { FrameScene } from "../../../../../frontend/src/types";
 import { randomBytes } from "node:crypto";
 import { strToU8, unzlibSync, zipSync } from "fflate";
@@ -438,8 +438,10 @@ export type ValidatedSceneZip = {
   // became part of the version). Malformed values read as absent.
   manifestCategory: string | null | undefined;
   // The scene a pack starts on is a layout (docs/scene-layouts.md): it goes on
-  // the Layouts shelf without asking the classifier.
+  // a layouts shelf without asking the classifier, Desktop layouts for a
+  // desktop (`settings.desktop`), else Full screen layouts.
   isLayout: boolean;
+  isDesktop: boolean;
   manifestDescription: string | undefined;
   manifestName: string | undefined;
   manifestTags: string[] | undefined;
@@ -530,6 +532,7 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
       imageHeight: dimension(record.imageHeight),
       imageWidth: dimension(record.imageWidth),
       isLayout: isLayoutScene(mainScene(scenes as Pick<FrameScene, "default" | "settings">[])),
+      isDesktop: isDesktopLayout(mainScene(scenes as Pick<FrameScene, "default" | "settings">[])),
       manifestCategory:
         record.category === undefined ? undefined : normalizeCategory(record.category),
       manifestDescription:

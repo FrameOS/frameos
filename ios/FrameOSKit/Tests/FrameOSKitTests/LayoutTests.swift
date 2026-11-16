@@ -35,6 +35,31 @@ import Testing
         }
     }
 
+    @Test func startersListTheDesktopsApartFromTheFullScreenLayouts() throws {
+        // As the SPA's LAYOUT_STARTER_GROUPS and the frame's settings page:
+        // the desktops (`settings.desktop`), then the rest.
+        #expect(LayoutStarters.groups.map(\.title) == ["Desktops", "Full screen"])
+        let desktops = try #require(LayoutStarters.groups.first).items.map(\.name)
+        #expect(desktops == ["BeOS", "Classic Mac", "Commander", "macOS", "NeXTSTEP", "Tiling", "Windows 98"])
+        for group in LayoutStarters.groups {
+            for starter in group.items {
+                #expect(SceneLayouts.isDesktop(starter.scene) == (group.kind == "desktops"), "\(starter.name)")
+            }
+        }
+    }
+
+    @Test func aDesktopIsALayoutThatSaysSo() {
+        let desktop: JSONValue = ["id": "w98", "settings": ["isLayout": true, "desktop": true]]
+        let bar = scene("bar", isLayout: true)
+        #expect(SceneLayouts.isDesktop(desktop))
+        #expect(!SceneLayouts.isDesktop(bar))
+        #expect(!SceneLayouts.isDesktop(["id": "x", "settings": ["desktop": true]]))
+        let groups = SceneLayouts.groups([bar, desktop]) { SceneLayouts.isDesktop($0) }
+        #expect(groups.map(\.kind) == ["desktops", "fullScreen"])
+        #expect(groups.map { $0.items.compactMap { $0["id"]?.stringValue } } == [["w98"], ["bar"]])
+        #expect(SceneLayouts.groups([bar]) { SceneLayouts.isDesktop($0) }.map(\.kind) == ["fullScreen"])
+    }
+
     @Test func anAddedStarterGetsAFreshIdAndNoBootFlag() throws {
         let starter = try #require(LayoutStarters.all.first)
         let one = LayoutStarters.newScene(from: starter)

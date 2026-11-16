@@ -16,6 +16,20 @@ public struct LayoutStarter: Identifiable, Sendable {
     public var id: String { name }
 }
 
+/// Layouts of one kind under a heading, as the SPA's `layoutGroups`
+/// (frontend/src/utils/sceneLayouts.ts) and the frame's own settings page
+/// head them: "Desktops", "Full screen".
+public struct LayoutGroup<Item>: Identifiable {
+    /// "desktops" or "fullScreen".
+    public let kind: String
+    public let title: String
+    public let items: [Item]
+
+    public var id: String { kind }
+}
+
+extension LayoutGroup: Sendable where Item: Sendable {}
+
 public enum LayoutStarters {
     public static let all: [LayoutStarter] = {
         guard let url = Bundle.module.url(forResource: "LayoutStarters", withExtension: "json"),
@@ -31,6 +45,9 @@ public enum LayoutStarters {
             return LayoutStarter(name: name, description: entry["description"]?.stringValue ?? "", image: image, scene: scene)
         }
     }()
+
+    /// The starters as every list of them shows them: the desktops, then the full screen layouts.
+    public static let groups: [LayoutGroup<LayoutStarter>] = SceneLayouts.groups(all) { SceneLayouts.isDesktop($0.scene) }
 
     /// The starter as a new scene for a frame: a fresh id, so the same
     /// starter can be added twice (the SPA's applyTemplate gives template
@@ -50,6 +67,22 @@ public enum LayoutStarters {
 extension SceneLayouts {
     public static func isLayout(_ scene: JSONValue) -> Bool {
         scene["settings"]?["isLayout"]?.boolValue == true
+    }
+
+    /// A layout that runs the frame's scenes side by side, in windows or
+    /// tiles (`settings.desktop`, isDesktopLayout).
+    public static func isDesktop(_ scene: JSONValue) -> Bool {
+        isLayout(scene) && scene["settings"]?["desktop"]?.boolValue == true
+    }
+
+    /// Layouts split as the frame's settings page splits them (layoutGroups):
+    /// the desktops, then the layouts around one scene, each in the order
+    /// given. A kind with nothing in it is left out.
+    public static func groups<Item>(_ items: [Item], isDesktop: (Item) -> Bool) -> [LayoutGroup<Item>] {
+        [
+            LayoutGroup(kind: "desktops", title: "Desktops", items: items.filter(isDesktop)),
+            LayoutGroup(kind: "fullScreen", title: "Full screen", items: items.filter { !isDesktop($0) }),
+        ].filter { !$0.items.isEmpty }
     }
 
     /// The layout a scene wears, by what the frame still has: one removed

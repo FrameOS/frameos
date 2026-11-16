@@ -6,7 +6,9 @@ import { LAYOUT_STARTERS } from "../../../../../../frontend/src/generated/layout
 import {
   activeFrameLayout,
   currentSceneLayout,
+  isDesktopLayout,
   isLayoutScene,
+  layoutGroups,
   layoutScenes,
   mainScene,
   sceneLayoutProblem,
@@ -92,28 +94,60 @@ describe("what can be a layout", () => {
 
   it("has starters, and every one of them is a layout", () => {
     expect(LAYOUT_STARTERS.map((starter) => starter.name)).toEqual([
-      "macOS",
-      "Windows 98",
-      "Top bar",
-      "Tiling",
-      "Terminal",
-      "Teletext",
-      "Side rail",
-      "Polaroid",
-      "NeXTSTEP",
-      "Gallery wall",
-      "Front page",
-      "E-reader",
-      "Commander",
-      "Classic Mac",
-      "Bottom bar",
       "BeOS",
+      "Classic Mac",
+      "Commander",
+      "macOS",
+      "NeXTSTEP",
+      "Tiling",
+      "Windows 98",
+      "Bottom bar",
+      "E-reader",
+      "Front page",
+      "Gallery wall",
+      "Polaroid",
+      "Side rail",
+      "Teletext",
+      "Terminal",
+      "Top bar",
     ]);
     for (const starter of LAYOUT_STARTERS) {
       expect(isLayoutScene(starter.scene)).toBe(true);
       expect(sceneLayoutProblem(starter.scene)).toBeNull();
       expect(starter.image).toMatch(/^data:image\/jpeg;base64,/);
     }
+  });
+
+  it("lists the desktops apart from the full screen layouts, as the frame's settings page does", () => {
+    const groups = layoutGroups(LAYOUT_STARTERS, (starter) => isDesktopLayout(starter.scene));
+    expect(groups.map((group) => [group.title, group.items.map((starter) => starter.name)])).toEqual([
+      ["Desktops", ["BeOS", "Classic Mac", "Commander", "macOS", "NeXTSTEP", "Tiling", "Windows 98"]],
+      [
+        "Full screen",
+        ["Bottom bar", "E-reader", "Front page", "Gallery wall", "Polaroid", "Side rail", "Teletext", "Terminal", "Top bar"],
+      ],
+    ]);
+  });
+});
+
+describe("desktops and full screen layouts", () => {
+  const desktop = { id: "w98", name: "Windows 98", settings: { isLayout: true, desktop: true } } as unknown as FrameScene;
+
+  it("is a desktop only when a layout says so", () => {
+    expect(isDesktopLayout(desktop)).toBe(true);
+    expect(isDesktopLayout(bar)).toBe(false);
+    expect(isDesktopLayout({ settings: { desktop: true } } as unknown as FrameScene)).toBe(false);
+    expect(isDesktopLayout(null)).toBe(false);
+  });
+
+  it("keeps each kind in the order given, and leaves an empty kind out", () => {
+    const tiles = { id: "tiles", settings: { isLayout: true, desktop: true } } as unknown as FrameScene;
+    expect(layoutGroups([bar, desktop, tiles], isDesktopLayout)).toEqual([
+      { kind: "desktops", title: "Desktops", items: [desktop, tiles] },
+      { kind: "fullScreen", title: "Full screen", items: [bar] },
+    ]);
+    expect(layoutGroups([bar], isDesktopLayout)).toEqual([{ kind: "fullScreen", title: "Full screen", items: [bar] }]);
+    expect(layoutGroups([], isDesktopLayout)).toEqual([]);
   });
 });
 
