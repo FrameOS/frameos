@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// `app.frame.paper` and `color` in the wasm runtime, read in every phase a JS
+// `app.frame.fast`, `paper` and `color` in the wasm runtime, read in every phase a JS
 // app runs (init(), get(), onEvent, a JSX handler, after an await): what the
 // panel is, never the canvas, which only a render has. The browser preview
 // says the browser's (an LCD), and running as an ESP32 a grey board where its
 // canvas is 4 or 8 bits; a plane drawing for a board says that board's panel
 // (`frameos_wasm_set_frame`'s `pixelFormat`). Until 2026-11-16 an event read
 // the plane's RGBX canvas there: color on the grey preview, and on an ESP32
-// paper on an LCD (frameos/src/frameos/tests/test_app_frame_panel.nim).
+// e-paper on an LCD (frameos/src/frameos/tests/test_app_frame_panel.nim).
 //
 //   frameos/tools/build_wasm.sh --out DIR
 //   node frameos/tools/wasm_app_frame_panel.mjs DIR
@@ -28,7 +28,7 @@ const fail = (message) => {
 
 const source = `const seen: Record<string, any> = {}
 function heard(phase: string, app: FrameOSApp) {
-  seen[phase] = { paper: app.frame.paper, color: app.frame.color }
+  seen[phase] = { fast: app.frame.fast, paper: app.frame.paper, color: app.frame.color }
   frameos.setState('seen', seen)
 }
 
@@ -107,11 +107,14 @@ async function check(label, setup, want) {
   for (const phase of PHASES) {
     const got = seen[phase]
     if (!got) fail(`${label}: ${phase} never ran (heard: ${JSON.stringify(seen)})`)
-    if (got.paper !== want.paper || got.color !== want.color) {
-      fail(`${label}: ${phase} read paper ${got.paper}, color ${got.color}; the panel is paper ${want.paper}, color ${want.color}`)
+    // Today fast is paper's opposite on every panel (panel_shape.panelIsFast).
+    const fast = !want.paper
+    if (got.fast !== fast || got.paper !== want.paper || got.color !== want.color) {
+      fail(`${label}: ${phase} read fast ${got.fast}, paper ${got.paper}, color ${got.color}; ` +
+        `the panel is fast ${fast}, paper ${want.paper}, color ${want.color}`)
     }
   }
-  console.log(`ok: ${label}: paper ${want.paper}, color ${want.color} in ${PHASES.join(', ')}`)
+  console.log(`ok: ${label}: fast ${!want.paper}, paper ${want.paper}, color ${want.color} in ${PHASES.join(', ')}`)
 }
 
 const asEsp32 = (bits) => (call) => {

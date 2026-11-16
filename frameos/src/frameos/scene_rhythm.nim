@@ -393,7 +393,7 @@ proc rhythmEnterRender*(scene: FrameScene, canvas: Image): bool =
   freshRequested = false
   passRoot = scene
   passHoldsFloor = rhythmHoldFloor or scene.frameConfig.isNil or (not canvas.isNil and
-    panelIsPaper(scene.frameConfig.device, canvas.format == pfRgb565))
+    not panelIsFast(scene.frameConfig.device, canvas.format == pfRgb565))
   passCanvas = canvas
   passGeneration = if canvas.isNil or rhythmCanvasGeneration.isNil: -1'i64 else: rhythmCanvasGeneration(canvas)
   keepAllowed = scene.refreshFollowsChildren and passGeneration >= 0

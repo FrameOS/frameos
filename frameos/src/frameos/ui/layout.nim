@@ -78,7 +78,8 @@ type
     flash*: int          ## a key just typed (its byte), drawn lit for a moment after the press; 0 none
     flashDrawn*: bool    ## ... and a layout has drawn it so
     reveal*: bool        ## scroll the focused field into view at the next layout
-    paper*: bool         ## e-paper: the keyboard shows no press
+    slow*: bool          ## a change costs a refresh (panel_shape.panelIsFast): no press shows
+    paper*: bool         ## the panel draws in inks: the keyboard's and a select's look
     round*: bool         ## a round panel's whole canvas: the keyboard stays inside its circle
     scrolls*: seq[(int, float32, float32)] ## how far each box that scrolled is, by key
     lineStep*: int       ## a key moved the caret a line up (-1) or down (1): the next layout knows the lines ...

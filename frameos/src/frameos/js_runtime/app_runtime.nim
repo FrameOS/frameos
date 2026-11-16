@@ -1644,11 +1644,17 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     # assets, a few MB of PSRAM. The OpenAI image app asks for a lighter
     # picture there.
     return nimBoolToJS(ctx, runsAsEmbedded())
+  of "fast":
+    # Whether a change shows as soon as it is drawn (panel_shape.panelIsFast):
+    # an app that follows a finger waits for it to lift where it does not.
+    # The frame's panel, never the context's canvas, which onEvent, init()
+    # and an async continuation do not have: on an ESP32 they read e-paper
+    # on an LCD.
+    return nimBoolToJS(ctx, panelIsFast(e.owner.frameConfig.device))
   of "paper":
-    # A panel that shows a change only in a refresh (panel_shape.nim): an app
-    # that follows a finger waits for it to lift there. The frame's panel,
-    # never the context's canvas, which onEvent, init() and an async
-    # continuation do not have: on an ESP32 they read paper on an LCD.
+    # Whether the panel draws in inks (panel_shape.panelIsPaper): how a scene
+    # looks there. Until 2026.11.10 it also said what `fast` says now, and
+    # today the two are opposites on every panel. The panel's, as above.
     return nimBoolToJS(ctx, panelIsPaper(e.owner.frameConfig.device))
   of "color":
     # Whether the panel shows colors (utils/asset_colors.panelShowsColor):
@@ -1773,8 +1779,8 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
       for key in state.keys:
         keys.add(key)
   of "frame":
-    keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale", "paper",
-      "color", "sceneName", "systemScene", "batteryPercent", "wifiRssi", "theme"]
+    keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale", "fast",
+      "paper", "color", "sceneName", "systemScene", "batteryPercent", "wifiRssi", "theme"]
     keys.add("sceneId")
     if not windowSceneListing.isNil:
       keys.add("scenes")
@@ -3432,9 +3438,13 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
     regions: seq[UiRegion]
   let target = uiTarget(sceneId, owner.nodeId.int, create = root.tag != "svg")
   if root.tag != "svg":
-    # E-paper's on-screen keyboard shows no press (ui/keyboard.nim). The
-    # frame's panel, as `app.frame.paper` says it.
-    target.input.paper = panelIsPaper(if owner.frameConfig.isNil: "" else: owner.frameConfig.device)
+    # Where a change costs a refresh no press shows, a drag counts whole and
+    # pictures come in the render (ui/events.nim); on paper the keyboard and
+    # a select take its look (ui/keyboard.nim). The frame's panel, as
+    # `app.frame.fast` and `paper` say it.
+    let device = if owner.frameConfig.isNil: "" else: owner.frameConfig.device
+    target.input.slow = not panelIsFast(device)
+    target.input.paper = panelIsPaper(device)
     when not defined(frameosEmbedded):
       # A UI that is a round panel's whole canvas keeps its keyboard on the glass.
       target.input.round = not owner.frameConfig.isNil and panelIsRound(owner.frameConfig.device) and
@@ -3446,9 +3456,9 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
       frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
       return nil
   # `<img src="https://…">`: each picture at the size it got, here or on its
-  # way (e-paper fetches it now: one refresh with every picture).
+  # way (a slow panel fetches it now: one refresh with every picture).
   if runtime.jsxMemo.sawUrl and root.tag != "svg":
-    runtime.fillUrlImages(owner, context, svg, regionScale, target.input.paper)
+    runtime.fillUrlImages(owner, context, svg, regionScale, target.input.slow)
   # The scenes it embeds, each drawn now that its size is known. The offered
   # target comes after: its corner moves the slots only when it is a cell.
   let firstSlot = if owner.scene.isNil: 0 else: owner.scene.slots.len

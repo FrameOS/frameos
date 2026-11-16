@@ -3,8 +3,9 @@
 ## square: nothing drawn in the corners shows and no finger reaches them. What
 ## the frame draws over a scene by itself (the scene switcher, the loading
 ## mark) stays `insideRound`, and an edge swipe there starts at the rim
-## (input_state.nim `edgeAt`). No ESP32 board is round. And whether a panel
-## is e-paper, where what the frame draws by itself shows no press.
+## (input_state.nim `edgeAt`). No ESP32 board is round. And two things a
+## panel is that scenes and the built-in scenes ask: whether it is fast (a
+## change shows as it is drawn) and whether it is paper (it draws in inks).
 
 import std/[math, strutils]
 
@@ -47,15 +48,17 @@ var boardPanelFormat* = 0
   ## it: an ESP32's own (embedded_main at init, `fos_display_format`), the
   ## board a control plane draws for (`frameos_wasm_set_frame`'s
   ## `pixelFormat`, docs/server-rendering.md) and a grey board the browser
-  ## preview runs as (wasm_main). It answers `app.frame.paper` and `color`
-  ## in every phase: an event, init() and an async continuation have no
+  ## preview runs as (wasm_main). It answers `app.frame.fast`, `paper` and
+  ## `color` in every phase: an event, init() and an async continuation have no
   ## canvas to ask, and an ESP32's RGB565 canvas is an LCD's or a 13.3"
   ## color e-paper's on 8 MB. 0: a Pi says by its device.
 
 proc panelIsPaper*(device: string, rgb565Canvas = false): bool =
-  ## Whether a press would cost a refresh to show (e-paper, a monochrome
-  ## OLED): any panel that is not an LCD. A board says by its panel; a Pi by
-  ## its device. Without either, an ESP32's LCD canvas is its RGB565 buffer.
+  ## Whether the panel draws in inks, as e-paper (and a monochrome OLED)
+  ## does: few colors, greys dithered, nothing faint. How it looks: what a
+  ## change costs is `panelIsFast`. Any panel that is not an LCD. A board
+  ## says by its panel; a Pi by its device. Without either, an ESP32's LCD
+  ## canvas is its RGB565 buffer.
   if boardPanelFormat > 0:
     return boardPanelFormat != PanelFormatRgb565
   if rgb565Canvas:
@@ -65,3 +68,11 @@ proc panelIsPaper*(device: string, rgb565Canvas = false): bool =
   else:
     device == "embedded" or device.startsWith("waveshare.") or device.startsWith("inky") or
       device.startsWith("pimoroni.inky")
+
+proc panelIsFast*(device: string, rgb565Canvas = false): bool =
+  ## Whether a change shows as soon as it is drawn: a press, a finger moving,
+  ## an animation. False where each change costs a refresh, so a scene draws
+  ## less often and a press shows with what it did. Today every panel that is
+  ## not paper; a fast e-paper, once there is one, says true here and stays
+  ## paper. The one place the runtime decides it.
+  not panelIsPaper(device, rgb565Canvas)

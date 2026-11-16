@@ -362,7 +362,7 @@ the bytes. The rule, in every copy (C, Nim, the backend, both device-limits
 ports, `docs/device-limits-fixtures.json`): 4-bit for sixteen greys, luma for
 another grey panel, 565 for an RGB565 LCD, and for a colour e-paper panel RGBX while two of it fit PSRAM,
 565 beyond. So a canvas does not say what the panel is: what a scene hears
-of it (`app.frame.paper` and `color`, the built-in scenes' look, the scene
+of it (`app.frame.fast`, `paper` and `color`, the built-in scenes' look, the scene
 rhythm's floor) is the panel the firmware names at init
 (`panel_shape.boardPanelFormat`, set in `embedded_main.nim`).
 

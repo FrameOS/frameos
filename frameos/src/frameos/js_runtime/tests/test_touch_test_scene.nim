@@ -190,13 +190,13 @@ suite "Touch test":
     check t.event("tap", %*{"x": 200, "y": 60, "pointerId": 1, "pointerType": "touch"})
 
   test "an ESP32 knows its panel in an event, before any render":
-    # app.frame.paper is the board's panel (embedded_main says it at init):
+    # app.frame.fast is the board's panel (embedded_main says it at init):
     # an event has no canvas, and asked one it said e-paper on an LCD.
-    for (format, paper) in [(PanelFormatRgb565, false), (8, true), (7, true)]:
+    for (format, fast) in [(PanelFormatRgb565, true), (8, false), (7, false)]:
       boardPanelFormat = format
       let t = newTouch("tests/touch-esp32-" & $format, "embedded")
-      check t.down(60, 150) == not paper
-      check t.drag() == (if paper: 0 else: 28)
+      check t.down(60, 150) == fast
+      check t.drag() == (if fast: 28 else: 0)
       check t.up(340, 150)
     boardPanelFormat = 0
 

@@ -75,13 +75,14 @@ type
 
   SceneSwitcherScene* = ref object of FrameScene
     entries*: seq[SwitcherEntry] ## what the last render or key listed
-    paper*: bool ## drawn for e-paper last time (paperPanel)
+    paper*: bool ## drawn in e-paper's look last time (paperPanel)
+    slow*: bool ## a press cost a refresh last time (fastPanel): taps alone
     roomW, roomH, unit: int ## what the last render laid out in (tree): 0 before one
 
 const
   SwitcherNode = 1 ## the ui/events target its tiles live in
   IdleSecondsFast* = 60.0
-  IdleSecondsPaper* = 300.0
+  IdleSecondsSlow* = 300.0
   MaxCols = 6
   MaxRows = 6
   # The page arrows, drawn (no font has to have the glyph): one markup, its
@@ -131,19 +132,30 @@ proc listEntries(): seq[SwitcherEntry] =
     result = @[]
 
 proc paperPanel*(frameConfig: FrameConfig, canvas: Image = nil): bool =
-  ## Whether the switcher is drawn for e-paper (black on white, no press
-  ## feedback): any panel that is not an LCD. A board says by its panel
-  ## (panel_shape.boardPanelFormat), a Pi by its device; the canvas only
-  ## where neither has (an ESP32's LCD canvas is its RGB565 buffer).
+  ## Whether the switcher is drawn in e-paper's look (black on white, an
+  ## inverted highlight): a panel that draws in inks (panel_shape.panelIsPaper).
+  ## A board says by its panel (panel_shape.boardPanelFormat), a Pi by its
+  ## device; the canvas only where neither has (an ESP32's LCD canvas is its
+  ## RGB565 buffer).
   let lcd = not canvas.isNil and canvas.format == pfRgb565
   when defined(frameosEmbedded):
     panelIsPaper("", lcd)
   else:
     not frameConfig.isNil and panelIsPaper(frameConfig.device, lcd)
 
-proc idleSeconds*(paper: bool): float =
+proc fastPanel*(frameConfig: FrameConfig, canvas: Image = nil): bool =
+  ## Whether a press shows as it happens (panel_shape.panelIsFast): where it
+  ## does not, the switcher hears taps alone, waits for every thumbnail and
+  ## goes back later. Asked as paperPanel is.
+  let lcd = not canvas.isNil and canvas.format == pfRgb565
+  when defined(frameosEmbedded):
+    panelIsFast("", lcd)
+  else:
+    frameConfig.isNil or panelIsFast(frameConfig.device, lcd)
+
+proc idleSeconds*(slow: bool): float =
   ## How long the switcher waits for a touch or a key before it goes back.
-  if paper: IdleSecondsPaper else: IdleSecondsFast
+  if slow: IdleSecondsSlow else: IdleSecondsFast
 
 proc canvasSize(frameConfig: FrameConfig): (int, int) =
   if frameConfig.rotate == 90 or frameConfig.rotate == 270: (frameConfig.height, frameConfig.width)
@@ -749,7 +761,7 @@ const
 proc background*(paper: bool): Color =
   if paper: PaperWhite else: Zinc950
 
-proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, paper: bool,
+proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, paper, slow: bool,
     call: UiHandlerCall, idle: float, roomW, roomH: int): bool =
   ## A built-in scene's render (the switcher's, the settings'): `tree` laid
   ## out on `roomW` x `roomH` (uiRoom), drawn stretched to fill `image` as
@@ -762,6 +774,7 @@ proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, pap
   rhythmForgetCanvases()
   let target = uiTarget(sceneId, 1)
   target.input.paper = paper
+  target.input.slow = slow
   target.input.round = isRound(self.frameConfig)
   var regions: seq[UiRegion]
   let svg = layoutUi(tree, roomW, roomH, target.input, regions, target.memo)
@@ -803,16 +816,17 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
     # Gone from the list since it opened: Close goes to the list's first.
     self.forget()
   self.paper = paperPanel(self.frameConfig, image)
-  # E-paper shows no press: a refresh to say a finger is down is seconds of
-  # flashing for nothing. `pointer` hands it taps alone, which leave the
+  self.slow = not fastPanel(self.frameConfig, image)
+  # A slow panel shows no press: a refresh to say a finger is down is seconds
+  # of flashing for nothing. `pointer` hands it taps alone, which leave the
   # target's input (what is hovered, what is pressed) empty. Back by itself
   # once nobody has touched it for a while.
   var more = false
   when not defined(frameosEmbedded):
     # Pictures that would have kept the panel waiting come in the next
     # render (the Linux host's decode budget, scene_switcher_linux.nim). Not
-    # on e-paper, where each render is a refresh: it waits for all of them.
-    let pass = if self.paper: nil else: sceneSwitcherThumbnailPass
+    # on a slow panel, where each render is a refresh: it waits for all of them.
+    let pass = if self.slow: nil else: sceneSwitcherThumbnailPass
     if not pass.isNil:
       try: discard pass(true) except Exception: discard
   let (roomW, roomH) = uiRoom(self.frameConfig, image.width, image.height)
@@ -820,7 +834,7 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
   when not defined(frameosEmbedded):
     if not pass.isNil:
       try: more = pass(false) except Exception: more = false
-  if self.drawUi(SceneSwitcherId, tree, image, self.paper, onTap, idleSeconds(self.paper), roomW, roomH):
+  if self.drawUi(SceneSwitcherId, tree, image, self.paper, self.slow, onTap, idleSeconds(self.slow), roomW, roomH):
     leave()
   elif more:
     rhythmMarkDue(self)
@@ -829,10 +843,10 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
 # ------------------------------------------------------------ the scene
 
 proc pointer(self: SceneSwitcherScene, event: string, payload: JsonNode) =
-  ## A pointer event over the tiles (ui/events.nim hit-tests it). E-paper
-  ## hears the tap alone: the rest only moves what is pressed.
+  ## A pointer event over the tiles (ui/events.nim hit-tests it). A slow
+  ## panel hears the tap alone: the rest only moves what is pressed.
   let tap = event == "tap"
-  if not tap and self.paper:
+  if not tap and self.slow:
     return
   tapped = -1
   let changed = dispatchUiEvent(SceneSwitcherId, event, payload)
@@ -916,8 +930,10 @@ proc initSwitcher(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, pe
   ## Nothing persisted to start from: the switcher keeps no state file.
   # The panel's, from the host: there is no canvas yet.
   let paper = paperPanel(frameConfig)
+  let slow = not fastPanel(frameConfig)
   SceneSwitcherScene(id: sceneId, frameConfig: frameConfig, logger: logger, state: newJObject(), ownRun: switcherOwnRun,
-    shownName: "Scene switcher", refreshInterval: idleSeconds(paper), backgroundColor: background(paper), paper: paper)
+    shownName: "Scene switcher", refreshInterval: idleSeconds(slow), backgroundColor: background(paper), paper: paper,
+    slow: slow)
 
 var exportedScene* = ExportedInterpretedScene(
   name: "Scene switcher",

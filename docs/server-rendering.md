@@ -229,7 +229,7 @@ would read as a colour LCD. `frameos_wasm_set_frame`'s `pixelFormat` makes
 the runtime answer for the board's panel instead
 (`panel_shape.boardPanelFormat`): `app.frame.color` is false on a black and
 white or grey panel (a scene's "auto" draws in high contrast there),
-`app.frame.paper` true on anything but an LCD, and the scene switcher and
+`app.frame.fast` false and `paper` true on anything but an LCD, and the scene switcher and
 the scene settings take e-paper's look, as the board's own runtime would:
 an ESP32 sets the same value from its own panel at init (`embedded_main.nim`).
 Every phase of a scene reads it, `init()`, an event, a handler and what runs

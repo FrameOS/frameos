@@ -1,10 +1,10 @@
-## `app.frame.paper` and `app.frame.color` say what the frame's panel is in
+## `app.frame.fast`, `paper` and `color` say what the frame's panel is in
 ## every phase a JS app runs: init(), get(), onEvent, a JSX handler and what
 ## comes after an await. They come from the host (panel_shape.boardPanelFormat
 ## on a board, the device on a Pi), never from the context's canvas, which
-## only a render has: on an ESP32 an event read paper on the SenseCAP's LCD,
+## only a render has: on an ESP32 an event read e-paper on the SenseCAP's LCD,
 ## and in get() a 13.3" color e-paper on 8 MB, whose canvas is RGB565, read
-## like an LCD. A panel drawn into a picture of its own (a `<Scene>` that
+## like an LCD. Today `fast` is `paper`'s opposite on every panel. A panel drawn into a picture of its own (a `<Scene>` that
 ## cannot be a hole, a split's panel) hears the frame's panel too: its pixels
 ## end on the same glass.
 
@@ -45,7 +45,7 @@ let probe = %*{
       "config.json": $(%*{"name": "Panel probe", "category": "data", "fields": [], "events": ["pointerDown"],
         "output": [{"name": "image", "type": "image"}]}),
       "app.tsx": """
-const look = (app: FrameOSApp) => ({ paper: app.frame.paper, color: app.frame.color })
+const look = (app: FrameOSApp) => ({ fast: app.frame.fast, paper: app.frame.paper, color: app.frame.color })
 
 export async function init(app: FrameOSApp) {
   frameos.remember('init', look(app))
@@ -80,13 +80,13 @@ proc config(device: string): FrameConfig =
   FrameConfig(width: W, height: H, rotate: 0, scalingMode: "cover", debug: false, settings: %*{},
     saveAssets: %*false, assetsPath: getTempDir(), device: device)
 
-proc heard(scene: FrameScene): Table[string, (bool, bool)] =
-  ## What each phase remembered: (paper, color).
+proc heard(scene: FrameScene): Table[string, (bool, bool, bool)] =
+  ## What each phase remembered: (fast, paper, color).
   for app in InterpretedFrameScene(scene).appsByNodeId.values:
     if app of DynamicJsApp:
       for phase, text in DynamicJsApp(app).runtime.memory:
         let seen = parseJson(text)
-        result[phase] = (seen{"paper"}.getBool(), seen{"color"}.getBool())
+        result[phase] = (seen{"fast"}.getBool(), seen{"paper"}.getBool(), seen{"color"}.getBool())
 
 proc settle(scene: FrameScene) =
   ## The await in init() goes on, as the runner's loop and the ESP32's idle
@@ -96,13 +96,13 @@ proc settle(scene: FrameScene) =
     discard pumpJsAsync()
     sleep(2)
 
-template expectEverywhere(scene: FrameScene, paper, color: bool) =
+template expectEverywhere(scene: FrameScene, fast, paper, color: bool) =
   # A template: a check fails the test it is in.
   let seen = scene.heard()
   for phase in Phases:
     checkpoint phase & ": " & $seen.getOrDefault(phase)
     check seen.hasKey(phase)
-    check seen.getOrDefault(phase) == (paper, color)
+    check seen.getOrDefault(phase) == (fast, paper, color)
 
 proc onBoard(panelFormat: int, canvas: Image): FrameScene =
   ## An ESP32 (single_scene_host, the device "embedded") whose firmware said
@@ -141,33 +141,33 @@ proc onPi(device: string, canvas: Image): FrameScene =
       loopIndex: 0, loopKey: ".", nextSleep: -1))
   result.settle()
 
-suite "app.frame.paper and color, in every phase":
+suite "app.frame.fast, paper and color, in every phase":
   teardown:
     boardPanelFormat = 0
 
-  test "an ESP32 LCD (the SenseCAP Indicator): no paper, color, in an event too":
-    onBoard(PanelFormatRgb565, newImage565(W, H)).expectEverywhere(paper = false, color = true)
+  test "an ESP32 LCD (the SenseCAP Indicator): fast, color, in an event too":
+    onBoard(PanelFormatRgb565, newImage565(W, H)).expectEverywhere(fast = true, paper = false, color = true)
 
-  test "an ESP32 sixteen-grey e-paper (the reTerminal E1003): paper, no color":
-    onBoard(8, newImageGray4(W, H)).expectEverywhere(paper = true, color = false)
+  test "an ESP32 sixteen-grey e-paper (the reTerminal E1003): slow, paper, no color":
+    onBoard(8, newImageGray4(W, H)).expectEverywhere(fast = false, paper = true, color = false)
 
-  test "an ESP32 color e-paper (Spectra 6, the reTerminal E1002): paper and color":
-    onBoard(7, newImage(W, H)).expectEverywhere(paper = true, color = true)
+  test "an ESP32 color e-paper (Spectra 6, the reTerminal E1002): slow, paper and color":
+    onBoard(7, newImage(W, H)).expectEverywhere(fast = false, paper = true, color = true)
 
   test "a 13.3 inch color e-paper on 8 MB draws in RGB565 and is still e-paper":
-    onBoard(7, newImage565(W, H)).expectEverywhere(paper = true, color = true)
+    onBoard(7, newImage565(W, H)).expectEverywhere(fast = false, paper = true, color = true)
 
   test "a panel drawn into a picture of its own hears the frame's panel":
     # Whatever the canvas a scene is drawn into (a <Scene>'s picture of its
     # own, a split's panel), its pixels end on the frame's glass.
-    onBoard(PanelFormatRgb565, newImage(W, H)).expectEverywhere(paper = false, color = true)
-    onBoard(8, newImage(W, H)).expectEverywhere(paper = true, color = false)
+    onBoard(PanelFormatRgb565, newImage(W, H)).expectEverywhere(fast = true, paper = false, color = true)
+    onBoard(8, newImage(W, H)).expectEverywhere(fast = false, paper = true, color = false)
 
   test "a Pi LCD (a HyperPixel), in its RGB565 canvas":
-    onPi("pimoroni.hyperpixel4", newImage565(W, H)).expectEverywhere(paper = false, color = true)
+    onPi("pimoroni.hyperpixel4", newImage565(W, H)).expectEverywhere(fast = true, paper = false, color = true)
 
   test "a Pi black and white e-paper":
-    onPi("waveshare.EPD_7in5_V2", newImage(W, H)).expectEverywhere(paper = true, color = false)
+    onPi("waveshare.EPD_7in5_V2", newImage(W, H)).expectEverywhere(fast = false, paper = true, color = false)
 
   test "a Pi color e-paper (Spectra 6)":
-    onPi("waveshare.EPD_13in3e", newImage(W, H)).expectEverywhere(paper = true, color = true)
+    onPi("waveshare.EPD_13in3e", newImage(W, H)).expectEverywhere(fast = false, paper = true, color = true)

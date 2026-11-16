@@ -825,6 +825,7 @@ suite "a held key's accents":
   test "held, slid along and lifted; held, lifted far and tapped; tapped away":
     let target = uiTarget("scene", 7)
     target.input.paper = false
+    target.input.slow = false
     target.call = proc(handler: int, name: string, event: JsonNode, hit: UiHit) = discard
     proc relayout(): SvgNode =
       # The field shows what was typed, as an app's onChange would make it.
@@ -927,8 +928,10 @@ suite "a held key's accents":
     check target.input.accents == ord('u')
     check dismissKeyboard("scene", 7)
     check target.input.accents == 0 and target.input.keyboard and target.input.focus > 0
-    # On e-paper a slide asks for no refresh, but lifting on a form types it.
+    # On e-paper (slow, and in its look) a slide asks for no refresh, but
+    # lifting on a form types it.
     target.input.paper = true
+    target.input.slow = true
     discard relayout()
     let s = keyRegion(target.regions, ord('s'))
     check not at(s, "pointerDown", buttons = 1) # no press to show on paper
@@ -954,6 +957,7 @@ suite "the keyboard in time":
     result = uiTarget(id, 3)
     let target = result
     target.input.paper = false
+    target.input.slow = false
     target.call = proc(handler: int, name: string, event: JsonNode, hit: UiHit) = discard
     let field = input("input", "w-full h-[30px] bg-white", {"value": text})
     discard layout.layoutUi(el("div", "bg-slate-900", field), 480, 480, target.input, target.regions, target.memo)
@@ -995,11 +999,18 @@ suite "the keyboard in time":
     sleep(300)
     check dispatchUiEvent(id, "uiTimer", newJObject())
     check target.input.flash == 0 and not uiTimersPending()
-    # E-paper: no light to put out.
+    # E-paper: slow, so no light to put out.
     target.input.paper = true
+    target.input.slow = true
     target.relayout()
     check at(id, keyRegion(target.regions, ord('j')), "tap")
     check target.input.text == "kj" and target.input.flash == 0
+    # A fast e-paper keeps e-paper's look and lights the key as an LCD does:
+    # what a change costs is `slow`, never `paper`.
+    target.input.slow = false
+    target.relayout()
+    check at(id, keyRegion(target.regions, ord('k')), "tap")
+    check target.input.text == "kjk" and target.input.flash == ord('k')
     forgetUiTarget(id, 3)
 
   test "the key just typed is drawn as it was while pressed":
