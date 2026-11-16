@@ -1788,15 +1788,13 @@ suite "the NeXTSTEP desktop":
     # Its title bar, black: the window has the focus.
     check image.color(NextMenuW + 200, 8) == colored("#000000")
     let tiles = nextDock()
-    check tiles.len == 5 # the mark, the three scenes, the clock
+    check tiles.len == 3 # the mark, Alpha, the clock: Bravo and Charlie have not run
     check not image.idle(tiles[1]) # Alpha runs
-    check image.idle(tiles[2]) # Bravo does not
-    check image.idle(tiles[3])
     check nextMenu().len == 4 # Info, Scenes, Windows, Hide: no Services on this frame
     # The scene is a hole in the desktop, drawn straight into the panel.
     check desk().slots.anyIt(it.hole and it.child == current)
 
-  test "Scenes opens a scene in a window of its own, and its tile in the Dock loses the ellipsis":
+  test "Scenes opens a scene in a window of its own, and a tile of its own in the Dock":
     discard clickRect(nextMenu()[1])
     check desk().state{"menu"}.getStr() == "scenes"
     shot(pass(), "n2-scenes")
@@ -1816,9 +1814,9 @@ suite "the NeXTSTEP desktop":
     check image.color(NextMenuW + NextDeskW - 60, 8) == colored("#aaaaaa")
     check image.color(NextMenuW + bx + bw div 2, by + 4) == colored("#000000")
     let tiles = nextDock()
+    check tiles.len == 4 # the mark, Alpha, Bravo, the clock
     check not image.idle(tiles[1])
     check not image.idle(tiles[2])
-    check image.idle(tiles[3])
     # The window in front's scene is a hole (Alpha's, under it, is a picture: Bravo
     # is painted over it).
     check desk().slots.anyIt(it.hole and it.child == current)
@@ -1972,7 +1970,9 @@ suite "the NeXTSTEP desktop":
     discard pass()
     desk().state["asked"] = newJNull()
     check winOf("tests/next-c").isNil
+    # Charlie ran before and was closed: in the Dock, the ellipsis under it.
     tiles = nextDock()
+    check tiles.len == 5
     check pass().idle(tiles[3])
     check acted(clickRect(tiles[3])) == @["setCurrentScene"]
     check current.id.string == "tests/next-c"
@@ -1990,9 +1990,9 @@ suite "the NeXTSTEP desktop":
         {"id": "tests/term-next", "name": "Terminal"}]
     var image = pass()
     check nextMenu().len == 5 # Info, Scenes, Windows, Services, Hide
-    let tiles = nextDock()
-    check tiles.len == 7 # the mark, the three scenes, the store, the terminal, the clock
-    check image.idle(tiles[4])
+    # The mark, the three scenes, the clock: the store and the terminal have not
+    # run, so they are not in the Dock yet.
+    check nextDock().len == 5
     discard clickRect(nextMenu()[1])
     discard pass()
     check nextSubmenu().len == 4 # the three scenes and the scene list: not the store or the terminal
@@ -2455,6 +2455,101 @@ suite "where a new window opens (each desktop's freeSpot)":
       check start >= 0
       copies.add source[start ..< source.find("\n}\n", start)]
     for text in copies: check text == copies[0]
+
+proc copiesOf(start: string, scenes: openArray[JsonNode]): seq[string] =
+  ## A function's text in each scene's app, from its comment to its end.
+  for scene in scenes:
+    var source = ""
+    for _, app in scene["apps"]: source = app["sources"]["app.tsx"].getStr()
+    let at = source.find(start)
+    result.add (if at < 0: "" else: source[at ..< source.find("\n}\n", at)])
+
+suite "a long list of scenes, by category (each desktop's grouped)":
+  test "is the same function, word for word, in every desktop with a list of scenes":
+    let copies = copiesOf("// The store's categories", [layout, macos, beos, classicMac, nextstep, tiling])
+    check copies[0].len > 0
+    for text in copies: check text == copies[0]
+
+  # Forty scenes, longer than the screen in every list: the sixteen numbered ones
+  # take turns at fun, weather, none and photos, so the photos (Scene 3, 7, ...)
+  # come first in a list by category; the rest have none.
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      result = newJArray()
+      for i in 0 ..< 16:
+        result.add %*{"id": "tests/be-" & $i, "name": "Scene " & $i, "category": ["fun", "weather", "", "photos"][i mod 4]}
+      for id in ["tests/red", "tests/green", "tests/blue", "tests/apple", "tests/lime", "tests/ocean", "tests/sky",
+          "tests/grass", "tests/sun", "tests/be-red", "tests/be-green", "tests/be-blue", "tests/cm-red", "tests/cm-green",
+          "tests/cm-blue", "tests/next-a", "tests/next-b", "tests/next-c", "tests/nc-red", "tests/nc-green",
+          "tests/nc-blue", "tests/tt-red", "tests/tt-green", "tests/tt-blue"]:
+        result.add %*{"id": id, "name": id}
+
+  test "every desktop lists them in groups, the photos first, and the list scrolls under a finger":
+    # Each desktop: how its list of scenes opens, the rows of it (what takes a
+    # press, top to bottom), and whether it is still open.
+    proc rowsIn(layoutId: string, x0, x1: float32): seq[array[4, float32]] =
+      byY(rectsOf(layoutId).filterIt(it[0] >= x0 and it[0] <= x1 and it[3] - it[1] >= 20 and
+        it[3] - it[1] <= 34 and it[2] - it[0] > 150))
+    proc openList(layoutId: string) =
+      case layoutId
+      of Layout: discard click(20, H - 20) # Start
+      of MacOS: discard clickRect(menuBar()[1]) # Scenes
+      of BeOS: discard click(W - BarW div 2, 17) # the gem
+      of ClassicMac: discard clickRect(macTitles()[2]) # Scenes
+      of NeXT: discard clickRect(nextMenu()[1]) # Scenes
+      else: discard clickRect(topBar()[0]) # Tiling's +
+    proc rows(layoutId: string): seq[array[4, float32]] =
+      case layoutId
+      of Layout: rowsIn(Layout, 20, 40).filterIt(it[3] <= float32(H - 42))
+      of MacOS: dropItems(menuBar()[1])
+      of BeOS: rowsIn(BeOS, float32(W - BarW - 220), float32(W - BarW - 200))
+      of ClassicMac: macDrop(macTitles()[2])
+      of NeXT: nextSubmenu()
+      else: byY(rectsOf(Tiling).filterIt(it[0] >= 8 and it[0] <= 12 and it[1] >= 24 and it[3] - it[1] < 60 and
+        it[2] - it[0] > 40 and it[2] < 200))
+    proc isOpen(layoutId: string): bool =
+      case layoutId
+      of Layout, BeOS: desk().state{"menu"}.getBool()
+      of Tiling: desk().state{"adding"}.getBool()
+      else: desk().state{"menu"}.getStr() == "scenes"
+    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT, Tiling]:
+      # A desktop of its own, one window open.
+      discard focusOn("tests/be-0")
+      desk().state["openScenes"] = %*[]
+      chooseLayout(layoutId)
+      discard pass()
+      desk().state["boxes"] = %*{}
+      desk().state["wins"] = %*[]
+      if layoutId == Tiling: desk().state["open"] = %*["tests/be-0"]
+      discard pass()
+      check desk().id.string == layoutId
+      openList(layoutId)
+      shot(pass(), "list-" & layoutId.replace("/", "-"))
+      check isOpen(layoutId)
+      let first = rows(layoutId)
+      check first.len > 4
+      check first[^1][3] <= float32(H) # what shows is cut to the screen
+      # Dragged up by a finger: the list follows, and nothing is opened.
+      let (x, y) = (int((first[2][0] + first[2][2]) / 2), int((first[2][1] + first[2][3]) / 2))
+      var sent = send("pointerDown", at(x, y))
+      sent.add send("pointerMove", at(x, y - 40))
+      sent.add send("pointerMove", at(x, y - 160))
+      sent.add send("pointerUp", at(x, y - 160, %*{"buttons": 0}))
+      check "setCurrentScene" notin sent
+      check isOpen(layoutId)
+      discard pass()
+      check rows(layoutId)[1][1] < first[1][1]
+      # Closed and opened again at the top: its first row is the first of the
+      # photos, not the first scene of the frame.
+      discard send("wheel", %*{"x": x, "y": y, "deltaX": 0, "deltaY": -40})
+      discard pass()
+      check acted(clickRect(rows(layoutId)[0])) == @["setCurrentScene"]
+      check current.id.string == "tests/be-3"
+      discard pass()
+      check problems.len == 0
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
 
 suite "where only two scenes run at once (an ESP32 with 8 MB)":
   setup:

@@ -613,8 +613,10 @@
   `UiRegion.scene`), and windows pace the frame (`windowsOf` in
   scene_rhythm.nim). Windows, positions and z-order are the layout's own state.
   A new window goes where `freeSpot` puts it (bare desktop first, then the least
-  overlap), the same text in all five desktops of windows: change it in all five
-  (`test_windowed_desktops.nim` "where a new window opens").
+  overlap), the same text in all five desktops of windows, and a list of scenes
+  goes by category through `grouped` (`category` on each `app.frame.scenes`
+  entry), the same text in all six with a list: change either in every copy
+  (`test_windowed_desktops.nim` checks they match).
   Where memory is short only so many run at once (`app_runtime.windowLimit`, 2
   on an 8 MB ESP32, 4 above, `app.frame.windows`): the layouts close the one
   that had the focus longest ago and the host holds to it whatever a layout
