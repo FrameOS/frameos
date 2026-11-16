@@ -1,5 +1,5 @@
 ## Async JavaScript through the Pi's runner (docs/async-js.md): an
-## app's background() keeps running between renders on the runner's own loop,
+## app's async init() keeps running between renders on the runner's own loop,
 ## and when it asks for a render, it gets one, on a scene whose own interval
 ## is ten minutes and with nobody sending anything.
 
@@ -15,7 +15,7 @@ import ../js_runtime/js_io
 proc ticker(id: string): JsonNode =
   let source = """
     let n = 0
-    export async function background() {
+    export async function init() {
       for (;;) {
         await frameos.sleep(0.03)
         n++
@@ -48,7 +48,7 @@ proc waitUntil(condition: proc(): bool {.closure.}, steps = 400, stepMs = 5): bo
   condition()
 
 suite "async JavaScript on the Pi's runner":
-  test "background() runs between renders, and its render requests are answered":
+  test "an async init() runs between renders, and its render requests are answered":
     let sceneId = "tests/background/ticker".SceneId
     updateUploadedScenes(parseInterpretedScenes($(%*[ticker(sceneId.string)])))
     setUploadedSceneOrder(@[sceneId])

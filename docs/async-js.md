@@ -15,7 +15,7 @@ downloads.
 Three ways in. **`<img src="https://…">`** for pictures: the runtime fetches
 them, at the size they are drawn, off the render. **`frameos.useFetch`** for
 data `get()` draws: what is there now, the rest when it lands. **Promises**
-for code that can wait: `background()`, timers, handlers.
+for code that can wait: an async `init()`, timers, handlers.
 
 ```tsx
 // get() draws what it has; the scene renders again as the rest lands.
@@ -31,12 +31,14 @@ export function get(app) {
 ```
 
 ```tsx
-// Promises: background() keeps working between renders.
+// Promises: an async init() keeps working between renders.
 let forecast = null
 
-export async function background(app) {
+export async function init(app) {
   for (;;) {
-    const r = await fetch(`https://api.example.com/forecast?q=${app.config.city}`)
+    // app.config is read anew each time: a field changed since is seen.
+    const r = await fetch(`https://api.example.com/forecast?q=${app.config.city}`,
+      { signal: AbortSignal.timeout(10_000) })
     if (r.ok) {
       forecast = await r.json()
       frameos.dispatch('render') // this scene again, also in a window or a split
@@ -93,7 +95,8 @@ not by call order, so it may sit in a condition or a loop.
 ### Promises
 
 - **`fetch(url, init)`**: the web's, as far as a frame goes. `init.method`,
-  `headers`, `body` (a string, or an object sent as JSON), plus `timeoutMs`.
+  `headers`, `body` (a string, or an object sent as JSON), `signal`, plus
+  `timeoutMs` (the request's own limit, 15 s by default).
   It resolves with a `Response`: `ok`, `status`, `url`, `headers.get(name)`
   (a Pi's; an ESP32's glue keeps none), `text()`, `json()`. A 404 is an
   answer; a network error rejects with a `TypeError`. The scene's response
@@ -101,11 +104,24 @@ not by call order, so it may sit in a condition or a loop.
 - **`setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`**: as on the
   web (an interval is 10 ms at the least). **`frameos.sleep(seconds)`**: a
   promise, a day at most.
-- **`export async function background(app, context)`**: started when the
-  app's interpreter is (right after `init()`), and runs to its first `await`
-  then. `context.event` is `"background"`. A throw (or a rejection nobody
-  caught) is the app's log line `background() failed: …`. It ends when it
-  returns or when its interpreter goes.
+- **`AbortController`, `AbortSignal`** (`abort()`, `timeout(ms)`,
+  `any([...])`, `aborted`, `reason`, `addEventListener("abort")`): a `fetch`
+  whose signal aborts rejects at once, with the signal's reason (an
+  `AbortError`, or a `TimeoutError` from `AbortSignal.timeout`), and its
+  answer is dropped when it comes. **`queueMicrotask`**, and the whole of
+  `Promise` (`all`, `race`, `allSettled`, `any`, `finally`), async functions
+  and generators are QuickJS's own.
+- **`export async function init(app, context)`**: `init()` runs once per
+  interpreter, before the first `get()` / `run()`; an async one runs to its
+  first `await` then and goes on between renders, as long as the interpreter
+  lives (on an ESP32 one that is dropped for memory starts again with the
+  next one). Async code reads **the newest config**: `app.config` is the
+  node's fields as of the latest call into the app, public state included,
+  so a loop reading it each time sees a field that changed (`app.state` is
+  always the scene's own). To fetch again *when* a field changes, put the
+  field in a `useFetch` url: a new url is a new request. `context.event` is
+  `"async"` while async code runs. A throw (or a rejection nobody caught) is
+  the app's log line `init() failed: …`.
 - **`frameos.dispatch("render")`**: from async code it marks the scene due
   (`rhythmMarkDue`, so a scene in a window or a split runs instead of putting
   back its last picture) and asks for a render.
@@ -133,7 +149,7 @@ computes for a second holds the frame for that second. Await often.
 | Raspberry Pi (the runner) | yes, for every scene it keeps (windows behind, scenes visited before) | async |
 | ESP32 that stays awake (`keepJsRuntimes`), LCD | yes | async |
 | ESP32 that stays awake, e-paper | yes | `useFetch` async, `<img>` in the render |
-| ESP32 that deep-sleeps | `fetch` blocks and settles at once; no timers, no `background()` | in the render |
+| ESP32 that deep-sleeps | `fetch` blocks and settles at once; timers never fire (an async `init()` stops at its first sleep) | in the render |
 | wasm (the editor's preview, a plane's render for a board) | as a deep sleeper | in the render; the preview one `<img>` a render, the next soon |
 
 A runtime nothing pumps has no promise that outlives a render, so it gives
@@ -181,7 +197,7 @@ is only faster where it can be.
 - **The bridge needs to know whose code it is running.** `frameos.setState`,
   `dispatch` and the rest find the app and scene through the environment of
   the call in progress; the pump builds one for each settle (the app, its
-  scene, a context of event `background`), with the same deadline guard as
+  scene, the newest config, a context of event `async`), with the same deadline guard as
   any call, and holds the runtime on the call stack so a decode short of
   memory cannot release the interpreter it decodes for.
 - **An interpreter can go with promises pending** (a scene reload; on an
@@ -229,7 +245,7 @@ a tap that is queued or 250 ms old.
 **What still blocks:** `fetchText`, `fetchJson`, `httpRequest` and
 `fetchImage` in `get()` stay synchronous, as they must: `get()` returns the
 picture. An app moves its waiting into `<img src>`, `useFetch` or
-`background()` and draws what it has.
+an async `init()` and draws what it has.
 
 **Why not a thread per app?** An interpreter must stay on one thread, and so
 must everything it touches through the bridge (the scene, its state, the

@@ -1,6 +1,7 @@
 ## Async JavaScript (docs/async-js.md), included into app_runtime.nim on every
-## runtime: `fetch`, the timers and `frameos.sleep` (promises), an app's
-## `background()` export, and the pictures of `<img src="https://…">`.
+## runtime: `fetch`, the timers and `frameos.sleep` (promises), an async
+## `init()` that goes on between renders, and the pictures of
+## `<img src="https://…">`.
 ##
 ## Every interpreter still lives on the thread that renders and is entered
 ## from it alone. What waits is a promise and an id: a request goes to the I/O
@@ -13,8 +14,8 @@
 ## A runtime nothing pumps (`asyncPumped` false: the wasm preview and a plane's
 ## render for a board, an ESP32 that sleeps between renders) has no promise
 ## that outlives a render: `fetch` is the blocking call it replaces, wrapped in
-## a settled promise, an `<img>` is fetched in the render, and `background()`
-## and the timers never run.
+## a settled promise, an `<img>` is fetched in the render, and the timers
+## never fire (an async `init()` runs to its first wait on one).
 
 const jsAsyncOn* = not defined(frameosWasm)
   ## A transport to make requests on (js_io.nim) and a loop to pump.
@@ -120,7 +121,7 @@ when jsAsyncOn:
     PumpBudgetMs = 40
       ## What one pump spends settling before it lets the loop serve input
       ## (a decode is most of it on an ESP32); the rest waits for the next.
-    AsyncEvent = "background"
+    AsyncEvent = "async"
       ## `context.event` while async code runs.
 
   var
@@ -136,7 +137,10 @@ when jsAsyncOn:
     if jsAsyncSliceMs > 0: jsAsyncSliceMs else: JsAsyncSliceMs
 
   proc asyncEnv(wait: AsyncWait): JsAppEvalEnv =
-    JsAppEvalEnv(runtime: wait.runtime, owner: wait.owner, configJson: wait.configJson,
+    # The newest config, not the one of the call that started the wait: a
+    # loop in init() sees a field the scene changed since.
+    let config = if wait.runtime.liveConfig.isNil: wait.configJson else: wait.runtime.liveConfig
+    JsAppEvalEnv(runtime: wait.runtime, owner: wait.owner, configJson: config,
       context: ExecutionContext(scene: wait.owner.scene, event: AsyncEvent, payload: %*{},
         hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1))
 
@@ -283,8 +287,8 @@ when jsAsyncOn:
     true
 
   proc runAsync(wait: AsyncWait, fnName: string, args: openArray[JSValueConst]): bool =
-    ## Enter an app's interpreter outside a render: settle a promise (or start
-    ## `background()`), then run what that lets run, up to the next await.
+    ## Enter an app's interpreter outside a render: settle a promise, then run
+    ## what that lets run, up to the next await.
     ## False when the interpreter it was waiting in is gone.
     if not wait.alive():
       return false
@@ -309,12 +313,6 @@ when jsAsyncOn:
           jsAppEnvByCtx.del(ctx)
         runtime.closeLineStreams()
     true
-
-  proc startBackground(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
-    ## Once the interpreter is up and init() ran: the app's `background()`, if
-    ## it has one, runs to its first await.
-    discard runAsync(AsyncWait(runtime: runtime, ctx: runtime.js.context, owner: owner,
-      configJson: configJson), "__frameosStartBackground", [])
 
   proc settle(id: int, wait: AsyncWait, json: string, failed: bool): bool =
     let ctx = wait.ctx

@@ -120,6 +120,10 @@ type
     lineStreamIds: seq[int]
     ## `<img src="https://…">`'s pictures by url and size (js_async.nim).
     urlImages: seq[UrlImage]
+    ## The config of the newest call into the app (its node's fields, public
+    ## state included): what `app.config` reads in async code, which runs
+    ## after the call that started it (js_async.nim asyncEnv).
+    liveConfig: JsonNode
 
   JsAppEvalEnv = ref object
     runtime: JsAppRuntime
@@ -2702,10 +2706,52 @@ const appJsPrelude* = compactJs("""
       text: async () => body, json: async () => JSON.parse(body) };
   };
   globalThis.fetch = (input, init = {}) => {
-    const url = String((input && input.url) || input || ""), o = __fetchInit(init);
-    return jsAsyncMode() ? __later("fetch", url, o).then((a) => __response(url, a))
-      : new Promise((ok) => ok(__response(url, JSON.parse(jsHttpRequest(url, o) || "{}"))));
+    const url = String((input && input.url) || input || ""), o = __fetchInit(init), s = init.signal;
+    return new Promise((ok, no) => {
+      if (s && s.aborted) return no(s.reason);
+      if (!jsAsyncMode()) return ok(JSON.parse(jsHttpRequest(url, o) || "{}"));
+      const id = __wait("fetch", url, o, ok, no);
+      // Aborted while in flight: rejected now, its answer dropped when it comes.
+      if (s && id) s.addEventListener("abort", () => { if (__waits.delete(id)) { jsAsyncCancel(id); no(s.reason); } });
+    }).then((a) => __response(url, a));
   };
+  // AbortController and AbortSignal, as far as fetch and timers go:
+  // fetch(url, { signal: AbortSignal.timeout(5000) }) rejects with a
+  // TimeoutError after 5 s, controller.abort() with an AbortError.
+  const __abortError = (name, message) => Object.assign(new Error(message), { name });
+  class AbortSignal {
+    constructor() { this.aborted = false; this.reason = undefined; this.onabort = null; this.__on = []; }
+    addEventListener(type, fn) { if (type === "abort") this.__on.push(fn); }
+    removeEventListener(type, fn) { this.__on = this.__on.filter((f) => f !== fn); }
+    throwIfAborted() { if (this.aborted) throw this.reason; }
+    static abort(reason) { const c = new AbortController(); c.abort(reason); return c.signal; }
+    static timeout(ms) {
+      const c = new AbortController();
+      setTimeout(() => c.abort(__abortError("TimeoutError", "The operation timed out.")), ms);
+      return c.signal;
+    }
+    static any(signals) {
+      const c = new AbortController();
+      for (const s of signals) {
+        if (s.aborted) { c.abort(s.reason); break; }
+        s.addEventListener("abort", () => c.abort(s.reason));
+      }
+      return c.signal;
+    }
+  }
+  class AbortController {
+    constructor() { this.signal = new AbortSignal(); }
+    abort(reason) {
+      const s = this.signal;
+      if (s.aborted) return;
+      s.aborted = true;
+      s.reason = reason === undefined ? __abortError("AbortError", "This operation was aborted") : reason;
+      for (const fn of [...s.__on, s.onabort]) if (typeof fn === "function") fn({ type: "abort", target: s });
+    }
+  }
+  globalThis.queueMicrotask = (fn) => { Promise.resolve().then(fn); };
+  globalThis.AbortSignal = AbortSignal;
+  globalThis.AbortController = AbortController;
   const __timers = new Map();
   let __timerSeq = 0;
   const __timer = (fn, ms, args, every) => {
@@ -2758,13 +2804,6 @@ const appJsPrelude* = compactJs("""
     }
     return s;
   };
-  globalThis.__frameosStartBackground = () => {
-    const fn = __frameosExports().background;
-    if (typeof fn !== "function") return false;
-    Promise.resolve().then(() => fn(globalThis.__frameosAppInstance, globalThis.__frameosContext))
-      .then(undefined, (e) => frameos.error("background() failed: " + ((e && e.message) || String(e))));
-    return true;
-  };
   globalThis.__frameosModule = {};
   const exports = globalThis.__frameosModule;
   function __frameosWrapApp(app) {
@@ -2800,7 +2839,12 @@ const appJsPrelude* = compactJs("""
     const fn = mod && mod[name];
     if (name === "get") globalThis.__frameosRender = (globalThis.__frameosRender | 0) + 1;
     if (typeof fn === "function") {
-      return fn(globalThis.__frameosAppInstance, globalThis.__frameosContext);
+      const r = fn(globalThis.__frameosAppInstance, globalThis.__frameosContext);
+      // An async init() goes on between renders (docs/async-js.md): a throw
+      // in it, or a rejection nobody caught, is the app's log line.
+      if (name === "init" && r && typeof r.then === "function")
+        r.then(undefined, (e) => frameos.error("init() failed: " + ((e && e.message) || String(e))));
+      return r;
     }
     if (name !== "init" && !__frameosMissing[name]) {
       __frameosMissing[name] = true;
@@ -3752,6 +3796,7 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
   defer: JS_FreeValue(ctx, fnNameValue)
 
   jsAppEnvByCtx[ctx] = JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson, context: context)
+  runtime.liveConfig = configJson
   # Callers hold the runtime on jsRuntimeStack (midCall) for as long as they
   # hold the value this returns.
   when defined(memProbe): memProbe("    js invoke " & fnName & " BEFORE")
@@ -3828,9 +3873,6 @@ proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
     let payload = runtime.invoke(owner, configJson, context, "init")
     JS_FreeValue(runtime.js.context, payload)
   runtime.initialized = true
-  when jsAsyncOn:
-    if asyncPumped:
-      runtime.startBackground(owner, configJson)
 
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
   probe(phInit):

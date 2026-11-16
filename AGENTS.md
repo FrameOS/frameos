@@ -783,7 +783,9 @@
 
 - Experimental, on a Pi and on an ESP32 that stays awake: `fetch` (a
   `Response`), the timers, `frameos.sleep` (promises), `frameos.useFetch`
-  for `get()`, an app's `export async function background(app)`, and
+  for `get()`, an async `init()` that goes on between renders (reading the
+  newest config: `JsAppRuntime.liveConfig`), `AbortController` /
+  `AbortSignal.timeout` for `fetch`, and
   `<img src="https://…">`, which the runtime fetches at the size laid out
   (`fillUrlImages`, after the layout) and draws when it is in: where it waits
   is the runtime's call (e-paper, a deep sleeper and wasm fetch in the
@@ -799,7 +801,7 @@
   hold. A runtime nothing pumps (`asyncPumped` false: wasm, a deep sleeper)
   answers the same calls blocking, so a scene written this way works
   everywhere. A slow scene is usually a render waiting on the network: move
-  the wait into `<img src>`, `useFetch` or `background()`, never a
+  the wait into `<img src>`, `useFetch` or an async `init()`, never a
   `setNextSleep` loop around a synchronous `fetchImage` (what froze the Scene
   store, 2026-11-15). Not in the scene guide or `appTypeDeclarations.ts` yet:
   making it public is those two plus the AI evals.

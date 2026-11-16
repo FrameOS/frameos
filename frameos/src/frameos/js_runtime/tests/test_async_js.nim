@@ -1,5 +1,5 @@
 ## Async JavaScript (docs/async-js.md): `fetch`, the timers, `frameos.sleep`,
-## `frameos.useFetch`, an app's `background()` and `<img src="https://…">`. The runner's loop is played here by
+## `frameos.useFetch`, AbortController, an async `init()` and `<img src="https://…">`. The runner's loop is played here by
 ## `pumpJsAsync`; the network by `jsIoHook`, on the workers.
 
 import std/[base64, json, monotimes, os, sequtils, strutils, tables, times, unittest]
@@ -102,10 +102,10 @@ suite "async JavaScript":
     logged = @[]
     discard drainRenders()
 
-  test "background() runs to its first await at the first render, and on after each sleep":
+  test "an async init() runs to its first await at the first render, and on after each sleep":
     let a = app("""
       let ticks = 0
-      export async function background(app) {
+      export async function init(app) {
         while (ticks < 3) {
           ticks++
           frameos.setState("ticks", ticks)
@@ -126,7 +126,7 @@ suite "async JavaScript":
   test "fetch answers a Response, and a render never waits for it":
     let a = app("""
       let weather = "loading"
-      export async function background() {
+      export async function init() {
         const r = await fetch("https://weather.test/now?ms=300", {
           method: "post", headers: { "x-test": "sunny" }, body: { city: "Tartu" } })
         weather = [r.ok, r.status, r.headers.get("x-server"), r.headers.get("nope"), await r.text()].join("|")
@@ -145,7 +145,7 @@ suite "async JavaScript":
   test "response.json(), a 404 is an answer, a network error rejects":
     let a = app("""
       let seen = []
-      export async function background() {
+      export async function init() {
         seen.push((await (await fetch("https://api.test/json")).json()).temp)
         const missing = await fetch("https://api.test/missing")
         seen.push(`${missing.ok}:${missing.status}`)
@@ -162,7 +162,7 @@ suite "async JavaScript":
     for i in 0 ..< 4:
       apps.add app("""
         let got = "-"
-        export async function background() {
+        export async function init() {
           got = await (await fetch("https://slow.test/?ms=300")).text()
         }
         export function get() { return got }
@@ -195,22 +195,22 @@ suite "async JavaScript":
     check "never" notin seen
     check seen.countIt(it == "tick") == 3
 
-  test "a throw in background() is the app's log line":
+  test "a throw in an async init() is the app's log line":
     let a = app("""
-      export async function background() {
+      export async function init() {
         await frameos.sleep(0)
         throw new Error("boom")
       }
       export function get() { return "x" }
     """, "failing")
     discard a.render()
-    check pumpUntil(proc(): bool = logged.anyIt("background() failed: boom" in it))
+    check pumpUntil(proc(): bool = logged.anyIt("init() failed: boom" in it))
 
   test "a stretch without an await is stopped, and the others go on":
     jsAsyncSliceMs = 200
     defer: jsAsyncSliceMs = 0
     let spinner = app("""
-      export async function background() {
+      export async function init() {
         await frameos.sleep(0)
         while (true) {}
       }
@@ -218,21 +218,83 @@ suite "async JavaScript":
     """, "spinner")
     let ticker = app("""
       let n = 0
-      export async function background() { for (;;) { n++; await frameos.sleep(0.01) } }
+      export async function init() { for (;;) { n++; await frameos.sleep(0.01) } }
       export function get() { return String(n) }
     """, "ticker")
     discard spinner.render()
     discard ticker.render()
     let start = getMonoTime()
-    check pumpUntil(proc(): bool = logged.anyIt("without an await" in it or "background() failed" in it))
+    check pumpUntil(proc(): bool = logged.anyIt("without an await" in it or "init() failed" in it))
     check msSince(start) < 1500
     let before = parseInt(ticker.render())
     check pumpUntil(proc(): bool = parseInt(ticker.render()) > before + 2)
     releaseIdleJsAppRuntimes()
 
+  test "Promise.all, race, allSettled and any; then, finally and microtasks":
+    let a = app("""
+      let seen = "-"
+      export async function init() {
+        const text = (u) => fetch(u).then((r) => r.text())
+        const all = await Promise.all([text("https://a.test/?ms=40"), text("https://b.test/?ms=10")])
+        const first = await Promise.race([frameos.sleep(1).then(() => "slow"), text("https://c.test/?ms=5").then(() => "fast")])
+        const settled = await Promise.allSettled([fetch("https://down.test/fail"), text("https://d.test/")])
+        const any = await Promise.any([fetch("https://down.test/fail"), text("https://e.test/").then(() => "any")])
+        let finallyRan = false
+        await fetch("https://f.test/").finally(() => { finallyRan = true })
+        const order = []
+        queueMicrotask(() => order.push("micro"))
+        await null
+        order.push("after")
+        seen = [all.length, first, settled.map((x) => x.status).join("+"), any, finallyRan, order.join(">")].join("|")
+      }
+      export function get() { return seen }
+    """, "combinators")
+    discard a.render()
+    check pumpUntil(proc(): bool = a.render() != "-")
+    check a.render() == "2|fast|rejected+fulfilled|any|true|micro>after"
+
+  test "fetch with AbortSignal.timeout or an AbortController's abort rejects, and its answer is dropped":
+    let a = app("""
+      let seen = []
+      export async function init() {
+        try { await fetch("https://slow.test/?ms=400", { signal: AbortSignal.timeout(30) }) }
+        catch (e) { seen.push(e.name) }
+        const c = new AbortController()
+        const pending = fetch("https://slow.test/?ms=400", { signal: c.signal })
+        c.abort()
+        try { await pending } catch (e) { seen.push(e.name) }
+        try { await fetch("https://x.test/", { signal: AbortSignal.abort() }) } catch (e) { seen.push(e.name) }
+        seen.push((await fetch("https://quick.test/?ms=5", { signal: AbortSignal.timeout(2000) })).status)
+      }
+      export function get() { return seen.join(",") }
+    """, "abort")
+    let start = getMonoTime()
+    discard a.render()
+    check pumpUntil(proc(): bool = a.render().count(',') == 3)
+    check a.render() == "TimeoutError,AbortError,AbortError,200"
+    check msSince(start) < 300 # neither 400 ms answer was waited for
+    check pumpUntil(proc(): bool = jsIoInFlight() == 0)
+    check pumpJsAsync() == 0 # the late answers go nowhere
+
+  test "async code reads the newest config: a field changed after init() started is seen":
+    let a = app("""
+      export async function init(app) {
+        for (;;) {
+          frameos.setState("city", app.config.city)
+          await frameos.sleep(0.01)
+        }
+      }
+      export function get(app) { return app.config.city }
+    """, "liveconfig")
+    check a.runtime.get(a.owner, %*{"city": "Tartu"}, a.context).asString() == "Tartu"
+    check a.owner.scene.state{"city"}.getStr() == "Tartu"
+    check a.runtime.get(a.owner, %*{"city": "Tallinn"}, a.context).asString() == "Tallinn"
+    check pumpUntil(proc(): bool = a.owner.scene.state{"city"}.getStr() == "Tallinn")
+    releaseIdleJsAppRuntimes()
+
   test "an interpreter that goes takes its waits with it":
     let a = app("""
-      export async function background() {
+      export async function init() {
         fetch("https://slow.test/?ms=150")
         await frameos.sleep(0.05)
         frameos.setState("woke", true)
