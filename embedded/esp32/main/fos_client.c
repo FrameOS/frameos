@@ -754,6 +754,16 @@ bool fos_client_input_held(void)
     return input_hold_on();
 }
 
+/* A tap or a key waiting, or one a moment ago (its handler's frame is next):
+ * a JS app's answers (a picture's decode, docs/async-js.md) wait a slice.
+ * Not the input hold, whose 10 s kept a page's pictures off the screen for
+ * as long as somebody kept paging. */
+bool fos_client_input_pending(void)
+{
+    return input_queued() ||
+           (s_last_input_us != 0 && esp_timer_get_time() - s_last_input_us < 250000);
+}
+
 /* An event from HTTP, the cloud or the console is somebody using the frame as
  * much as a tap is (a remote, the editor, Home Assistant): the next one is
  * usually close behind, so it holds the slow chores back the same way. */

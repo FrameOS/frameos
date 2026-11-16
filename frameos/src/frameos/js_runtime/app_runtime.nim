@@ -53,16 +53,17 @@ type
     agRead       ## "assets" or "files": read the frame's folder, never change it
     agReadWrite  ## "assets-write": read and write the frame's folder
 
-  HookImageState = enum hsNone, hsLoading, hsReady, hsFailed
-  HookImage = object
-    ## A `frameos.useImage` picture (js_async.nim): loading, kept (`id`, a
-    ## kept picture of the app's; `answer` the JSON the hook returns), or
-    ## failed (asked again after a while).
-    key: string ## the url and the options
-    state: HookImageState
+  UrlImageState = enum uiLoading, uiReady, uiFailed
+  UrlImage = object
+    ## An `<img src="https://…">`'s picture at one size (js_async.nim):
+    ## loading, kept (`id`, a kept picture of the app's), or failed (asked
+    ## again after a while).
+    url: string
+    width, height: int
+    fit: ScaledDecodeFit
+    state: UrlImageState
     at: MonoTime
     id: int
-    answer: string
 
   JsAppRuntime* = ref object
     category*: string
@@ -117,8 +118,8 @@ type
     spoolFields: Table[string, Spool]
     ## The line readers of the call in progress, closed when it returns.
     lineStreamIds: seq[int]
-    ## `frameos.useImage`'s pictures by url and options (js_async.nim).
-    hookImages: seq[HookImage]
+    ## `<img src="https://…">`'s pictures by url and size (js_async.nim).
+    urlImages: seq[UrlImage]
 
   JsAppEvalEnv = ref object
     runtime: JsAppRuntime
@@ -183,7 +184,7 @@ proc teardownJsRuntime(runtime: JsAppRuntime) =
   runtime.js.close()
   runtime.ready = false
   runtime.initialized = false
-  runtime.hookImages.setLen(0)
+  runtime.urlImages.setLen(0)
   for canvas in runtime.canvases:
     unregisterCanvas(runtime.images.getOrDefault(canvas.id, nil))
   runtime.images.clear()
@@ -873,8 +874,8 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
   nimStringToJS(ctx, $fetchImageJson(e, toNimString(ctx, url), optionsArg(ctx, optionsJson)))
 
 proc fetchImageJson(e: JsAppEvalEnv, urlStr: string, options: JsonNode, forceKeep = false): JsonNode =
-  ## fetchImage's work (jsFetchImage above), also for `frameos.useImage` and
-  ## `frameos.loadImage` where they block (js_async.nim): `keep` as the
+  ## fetchImage's work (jsFetchImage above), also for an `<img src>` fetched
+  ## in the render (js_async.nim urlImage): `keep` as the
   ## option (`forceKeep`). The answer as JSON.
   var response = %*{"image": newJNull()}
   try:
@@ -970,6 +971,9 @@ proc fetchImageJson(e: JsAppEvalEnv, urlStr: string, options: JsonNode, forceKee
     response["error"] = %*message
     frameos_apps.logError(e.owner, "JS app fetchImage failed: " & message)
   response
+
+proc attrFloat(node: SvgNode, name: string): float32 =
+  parseFloat(node.attr(name)).float32
 
 proc closeLineStreams(runtime: JsAppRuntime)
 include frameos/js_runtime/js_async
@@ -2671,7 +2675,7 @@ const appJsPrelude* = compactJs("""
   };
   // Async (docs/async-js.md, js_async.nim): promises the host settles by id
   // between renders. Where nothing pumps them (jsAsyncMode() false: the
-  // preview, a board that sleeps) fetch and loadImage block and settle at once.
+  // preview, a board that sleeps) fetch blocks and settles at once.
   const __waits = new Map();
   const __wait = (kind, arg, options, resolve, reject) => {
     const id = jsAsyncStart(kind, arg, options);
@@ -2725,15 +2729,6 @@ const appJsPrelude* = compactJs("""
     if (id) { __waits.delete(id); jsAsyncCancel(id); }
   };
   frameos.sleep = (seconds) => __later("sleep", String(Number(seconds) || 0), "");
-  frameos.loadImage = (url, options) => {
-    const u = String(url || ""), o = JSON.stringify(options || {}, __jsReplacer);
-    if (jsAsyncMode()) return __later("image", u, o);
-    return new Promise((ok, no) => {
-      const r = frameos.fetchImage(u, { ...options, keep: true });
-      r.image ? ok(r) : no(new Error(r.error || "no image"));
-    });
-  };
-  frameos.useImage = (url, options) => JSON.parse(jsUseImage(String(url || ""), JSON.stringify(options || {}, __jsReplacer)));
   const __fetched = new Map();
   frameos.useFetch = (url, init = {}) => {
     url = String(url || "");
@@ -2897,7 +2892,6 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsAsyncStart", jsAsyncStart)
   runtime.js.registerFunction("jsAsyncCancel", jsAsyncCancel)
   runtime.js.registerFunction("jsAsyncMode", jsAsyncMode)
-  runtime.js.registerFunction("jsUseImage", jsUseImage)
   probe(phPrelude):
     evalAppPrelude(runtime.js)
     # The JSX factory in C (jsx_native.nim): every element of a UI's get().
@@ -3229,9 +3223,6 @@ var embeddedYieldReady*: proc(owner: FrameScene): bool {.nimcall.}
 
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
-proc attrFloat(node: SvgNode, name: string): float32 =
-  parseFloat(node.attr(name)).float32
-
 proc fillSceneImages(owner: AppRoot, context: ExecutionContext, node: SvgNode, scale: float32,
     index: var int, ox, oy: float32, clip: array[4, float32], holes: var UiHoles) =
   ## The layout emitted a `<Scene>` as an `<image>` waiting for its picture
@@ -3374,6 +3365,10 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
     except CatchableError as error:
       frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
       return nil
+  # `<img src="https://…">`: each picture at the size it got, here or on its
+  # way (e-paper fetches it now: one refresh with every picture).
+  if runtime.jsxMemo.sawUrl and root.tag != "svg":
+    runtime.fillUrlImages(owner, context, svg, regionScale, target.input.paper)
   # The scenes it embeds, each drawn now that its size is known. The offered
   # target comes after: its corner moves the slots only when it is a cell.
   let firstSlot = if owner.scene.isNil: 0 else: owner.scene.slots.len

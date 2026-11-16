@@ -1,7 +1,6 @@
 ## Async JavaScript (docs/async-js.md), included into app_runtime.nim on every
-## runtime: `fetch`, the timers, `frameos.sleep` and `frameos.loadImage`
-## (promises), `frameos.useImage` (a hook for get()), and an app's
-## `background()` export.
+## runtime: `fetch`, the timers and `frameos.sleep` (promises), an app's
+## `background()` export, and the pictures of `<img src="https://…">`.
 ##
 ## Every interpreter still lives on the thread that renders and is entered
 ## from it alone. What waits is a promise and an id: a request goes to the I/O
@@ -13,8 +12,8 @@
 ##
 ## A runtime nothing pumps (`asyncPumped` false: the wasm preview and a plane's
 ## render for a board, an ESP32 that sleeps between renders) has no promise
-## that outlives a render: `fetch` and `loadImage` are the blocking calls they
-## replace, wrapped in a settled promise, the hooks block, and `background()`
+## that outlives a render: `fetch` is the blocking call it replaces, wrapped in
+## a settled promise, an `<img>` is fetched in the render, and `background()`
 ## and the timers never run.
 
 const jsAsyncOn* = not defined(frameosWasm)
@@ -30,72 +29,54 @@ proc jsAsyncMode(ctx: ptr JSContext): JSValue {.nimcall.} =
   nimBoolToJS(ctx, jsAsyncOn and asyncPumped)
 
 const
-  HookImageRetryMs = 30_000
-    ## A useImage that failed is asked again after this long.
-  HookImageChurnMs = 10_000
+  UrlImageRetryMs = 30_000
+    ## A picture that failed is asked again after this long.
+  UrlImageChurnMs = 10_000
     ## A picture that lost its memory this soon after it came is not loaded
-    ## again at once: the app asks for more than fits, and each load would
-    ## push out another of its pictures, for ever. It waits HookImageRetryMs.
-  MaxHookImages = 96
-    ## useImage entries one app keeps (the pictures themselves are kept
-    ## pictures, under their own limits).
+    ## again at once: the app shows more than fits, and each load would push
+    ## out another of its pictures, for ever. It waits UrlImageRetryMs.
+  MaxUrlImages = 96
+    ## Entries one app keeps (the pictures themselves are kept pictures,
+    ## under their own limits).
 
-proc hookImageKey(url: string, options: JsonNode): string =
-  url & "\n" & $options
-
-const HookLoading = """{"image":null,"loading":true}"""
-
-proc failedAnswer(error: string): string =
-  ## {image: null, error}, as fetchImage answers a failure.
-  result = """{"image":null,"error":"""
-  escapeJson(error, result)
-  result.add '}'
-
-proc hookImageAnswer(entry: HookImage): string =
-  if entry.state == hsLoading: HookLoading else: entry.answer
-
-proc hookImageUsable(runtime: JsAppRuntime, entry: HookImage): bool =
-  ## A ready entry whose picture is still kept: older kept pictures go when
-  ## memory is short or the app keeps too many, and the hook loads it again.
-  case entry.state
-  of hsReady: runtime.keptImageIds.contains(entry.id)
-  of hsLoading: true
-  of hsFailed: (getMonoTime() - entry.at).inMilliseconds < HookImageRetryMs
-  of hsNone: false
-
-proc findHookImage(runtime: JsAppRuntime, key: string): int =
-  for i, entry in runtime.hookImages:
-    if entry.key == key:
+proc findUrlImage(runtime: JsAppRuntime, url: string, width, height: int, fit: ScaledDecodeFit): int =
+  for i, entry in runtime.urlImages:
+    if entry.width == width and entry.height == height and entry.fit == fit and entry.url == url:
       return i
   -1
 
-proc rememberHookImage(runtime: JsAppRuntime, entry: HookImage) =
-  let at = runtime.findHookImage(entry.key)
+proc rememberUrlImage(runtime: JsAppRuntime, entry: UrlImage) =
+  let at = runtime.findUrlImage(entry.url, entry.width, entry.height, entry.fit)
   if at >= 0:
-    runtime.hookImages[at] = entry
+    runtime.urlImages[at] = entry
     return
-  if runtime.hookImages.len >= MaxHookImages:
+  if runtime.urlImages.len >= MaxUrlImages:
     # The oldest that is not loading.
     var oldest = -1
-    for i, v in runtime.hookImages:
-      if v.state != hsLoading and (oldest < 0 or v.at < runtime.hookImages[oldest].at):
+    for i, v in runtime.urlImages:
+      if v.state != uiLoading and (oldest < 0 or v.at < runtime.urlImages[oldest].at):
         oldest = i
     if oldest >= 0:
-      runtime.hookImages.del(oldest)
-  runtime.hookImages.add entry
+      runtime.urlImages.del(oldest)
+  runtime.urlImages.add entry
 
-proc keptImageEntry(key: string, response: JsonNode): HookImage =
-  ## fetchImage's answer as a hook entry.
-  let image = response{"image"}
-  if image.isNil or image.kind != JObject:
-    return HookImage(key: key, state: hsFailed, at: getMonoTime(),
-      answer: failedAnswer(response{"error"}.getStr("the image could not be loaded")))
-  HookImage(key: key, state: hsReady, at: getMonoTime(), id: image{"id"}.getInt(), answer: $response)
+proc urlImageFailed(owner: AppRoot, url, error: string) =
+  frameos_apps.logError(owner, "<img> " & redactedUrl(url) & ": " & error)
 
-proc likeOf(e: JsAppEvalEnv): Image =
+proc keptUrlImage(runtime: JsAppRuntime, owner: AppRoot, url: string, width, height: int,
+    fit: ScaledDecodeFit, image: Image, error: string): UrlImage =
+  ## A picture that came (kept, as fetchImage's `keep` keeps one), or why not.
+  result = UrlImage(url: url, width: width, height: height, fit: fit, at: getMonoTime(), state: uiFailed)
+  if image.isNil:
+    urlImageFailed(owner, url, error)
+    return
+  unmarkImageGraded(image)
+  result.id = runtime.storeKeptImageJson(owner, image)["id"].getInt()
+  result.state = uiReady
+
+proc likeOf(context: ExecutionContext): Image =
   ## The canvas's pixel format, for a picture decoded later outside the
   ## render (RGB565 on an LCD ESP32: half the bytes of RGBA): a 1x1 of it.
-  let context = e.context
   let like =
     if context.isNil: nil
     elif not context.decodeTargetImage.isNil: context.decodeTargetImage
@@ -105,27 +86,15 @@ proc likeOf(e: JsAppEvalEnv): Image =
   result = newImageLike(like, 1, 1)
   result.ditherStores = like.ditherStores
 
-proc decodeKeptAnswer(runtime: JsAppRuntime, owner: AppRoot, like: Image,
-    options: JsonNode, image: Image): JsonNode =
-  ## A picture decoded for an app, kept, and described as fetchImage
-  ## describes one ({image: ref, width, height}).
-  unmarkImageGraded(image)
-  if options.hasKey("colors"):
-    let profile = fetchImageColorProfile(options["colors"])
-    if profile.isSome and profile.get().hasAdjustments():
-      applyAssetColors(image, profile.get())
-      markImageGraded(image)
-  %*{"image": runtime.storeKeptImageJson(owner, image), "width": image.width, "height": image.height}
-
 when jsAsyncOn:
   import frameos/js_runtime/js_io
 
   type
-    AsyncKind = enum akFetch, akSleep, akImage, akUseImage
+    AsyncKind = enum akFetch, akSleep, akUrlImage
     AsyncWait = object
-      ## A promise an app waits on (or a useImage entry loading): what
-      ## settles it, and who to settle it in. `ctx` is the interpreter that
-      ## asked: one rebuilt since is a new context, and the answer is dropped.
+      ## A promise an app waits on (or an `<img src>` loading): what settles
+      ## it, and who to settle it in. `ctx` is the interpreter that asked: one
+      ## rebuilt since is a new context, and the answer is dropped.
       id: int
       runtime: JsAppRuntime
       ctx: ptr JSContext
@@ -134,8 +103,10 @@ when jsAsyncOn:
       kind: AsyncKind
       options: JsonNode
       dueAt: MonoTime
-      key: string ## akUseImage: the hook entry
-      like: Image ## akImage, akUseImage: the canvas's format (likeOf)
+      url: string ## akUrlImage: the picture, at width x height, fit
+      width, height: int
+      fit: ScaledDecodeFit
+      like: Image ## akUrlImage: the canvas's format (likeOf)
       ready: bool ## answered already (`answer`), settled at the next pump
       answer: string
       failed: bool
@@ -143,7 +114,7 @@ when jsAsyncOn:
   const
     MaxAsyncWaitsPerApp* = 32
       ## Fetches, timers and pictures one app may have pending; one more is
-      ## refused (its promise rejects; a useImage asks again at a later
+      ## refused (its promise rejects; an `<img>` asks again at a later
       ## render, which each answer that lands brings).
     JsAsyncSliceMs* = 2000
     PumpBudgetMs = 40
@@ -199,16 +170,14 @@ when jsAsyncOn:
     result.timeoutMs = clamp(options{"timeoutMs"}.getInt(DefaultFetchTimeoutMs), 1000, JsHttpMaxTimeoutMs)
     result.maxSeconds = max(DefaultFetchMaxSeconds, result.timeoutMs.float / 1000.0 + 30.0)
 
-  proc imageRequest(e: JsAppEvalEnv, url: string, options: JsonNode): JsIoRequest =
+  proc imageRequest(owner: AppRoot, url: string, width, height: int): JsIoRequest =
     ## A picture's download, as fetchImage's keep path asks for it.
     var target = url
     when defined(frameosEmbedded):
-      # A resizing image service is asked for the size the app wants.
-      let (w, h) = (options{"width"}.getInt(0), options{"height"}.getInt(0))
-      if w > 0 and h > 0:
-        target = embeddedSizedRemoteImageUrl(url, w, h)
-    result = JsIoRequest(url: target, httpMethod: "GET", headers: requestHeaders(options),
-      maxBytes: frameos_apps.maxImageResponseBytes(e.owner), timeoutMs: DefaultFetchTimeoutMs,
+      # A resizing image service is asked for the size drawn.
+      target = embeddedSizedRemoteImageUrl(url, width, height)
+    result = JsIoRequest(url: target, httpMethod: "GET",
+      maxBytes: frameos_apps.maxImageResponseBytes(owner), timeoutMs: DefaultFetchTimeoutMs,
       maxSeconds: DefaultFetchMaxSeconds)
 
   proc fetchAnswer(answer: var JsIoResult): string =
@@ -229,39 +198,30 @@ when jsAsyncOn:
     escapeJson(jsIoText(answer), result)
     result.add '}'
 
-  proc decodeAnswer(wait: AsyncWait, answer: var JsIoResult): JsonNode =
-    ## A picture's answer decoded and kept: fetchImage's {image, width,
-    ## height}, or {image: null, error}.
-    if answer.error.len > 0:
-      return %*{"image": newJNull(), "error": redactedUrlsIn(answer.error)}
-    let runtime = wait.runtime
-    try:
-      var image: Image
-      runtime.midCall:
-        # On the stack, so a decode short of memory does not release the
-        # interpreter it decodes for (releaseKeptJsAppRuntimes).
-        when defined(frameosEmbedded):
-          let
-            (w, h) = (wait.options{"width"}.getInt(0), wait.options{"height"}.getInt(0))
-            fit = scaledDecodeFit(wait.options{"fit"}.getStr("cover"))
-          image =
-            if w > 0 and h > 0:
-              decodeBufferedImage(answer.response, nil, fit,
-                targetFor = runtime.keptTargetFor(wait.owner, wait.like, w, h, fit))
-            else:
-              decodeBufferedImage(answer.response)
-        else:
-          if answer.code >= 400:
-            raise newException(IOError, "HTTP " & $answer.code)
-          image = decodeFetchedImage(answer.body)
-        if image.isNil:
-          raise newException(PixieError, "the response was not an image this frame can decode")
-        result = runtime.decodeKeptAnswer(wait.owner, wait.like, wait.options, image)
-    except CatchableError as error:
-      releaseJsIoResult(answer)
-      let message = redactedUrlsIn(error.msg)
-      frameos_apps.logError(wait.owner, "JS app image failed: " & message)
-      result = %*{"image": newJNull(), "error": message}
+  proc decodeAnswer(wait: AsyncWait, answer: var JsIoResult): UrlImage =
+    ## A picture's answer decoded at the size asked and kept, or why not.
+    var image: Image
+    var error = answer.error
+    if error.len == 0:
+      let runtime = wait.runtime
+      try:
+        runtime.midCall:
+          # On the stack, so a decode short of memory does not release the
+          # interpreter it decodes for (releaseKeptJsAppRuntimes).
+          when defined(frameosEmbedded):
+            image = decodeBufferedImage(answer.response, nil, wait.fit,
+              targetFor = runtime.keptTargetFor(wait.owner, wait.like, wait.width, wait.height, wait.fit))
+          else:
+            if answer.code >= 400:
+              raise newException(IOError, "HTTP " & $answer.code)
+            image = decodeFetchedImage(answer.body)
+          if image.isNil:
+            error = "the response was not an image this frame can decode"
+      except CatchableError as e:
+        error = e.msg
+    releaseJsIoResult(answer)
+    wait.runtime.keptUrlImage(wait.owner, wait.url, wait.width, wait.height, wait.fit, image,
+      redactedUrlsIn(error))
 
   proc jsAsyncStart(ctx: ptr JSContext, kind: JSValue, arg: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
     ## The prelude's promises: the id one waits under, 0 when it cannot start
@@ -286,32 +246,14 @@ when jsAsyncOn:
         discard
       wait.kind = akSleep
       wait.dueAt = getMonoTime() + initDuration(milliseconds = int(clamp(seconds, 0.0, 86_400.0) * 1000))
-    of "fetch", "image":
-      let url = toNimString(ctx, arg)
+    of "fetch":
       wait.options = optionsArg(ctx, optionsJson)
-      if kindName == "fetch":
-        wait.kind = akFetch
-        var request = fetchRequest(e, url, wait.options)
-        request.id = id
-        if not submitJsIo(request):
-          wait.ready = true
-          wait.answer = """{"status":0,"error":"too many requests in flight"}"""
-      else:
-        wait.kind = akImage
-        wait.like = likeOf(e)
-        if url.startsWith("data:"):
-          # Nothing to wait for: decoded now, settled at the next pump.
-          let answer = fetchImageJson(e, url, wait.options, forceKeep = true)
-          wait.ready = true
-          wait.failed = answer{"image"}.isNil or answer["image"].kind != JObject
-          wait.answer = if wait.failed: answer{"error"}.getStr("no image") else: $answer
-        else:
-          var request = imageRequest(e, url, wait.options)
-          request.id = id
-          if not submitJsIo(request):
-            wait.ready = true
-            wait.failed = true
-            wait.answer = "too many requests in flight"
+      wait.kind = akFetch
+      var request = fetchRequest(e, toNimString(ctx, arg), wait.options)
+      request.id = id
+      if not submitJsIo(request):
+        wait.ready = true
+        wait.answer = """{"status":0,"error":"too many requests in flight"}"""
     else:
       return nimIntToJS(ctx, 0)
     wait.id = id
@@ -325,18 +267,19 @@ when jsAsyncOn:
     discard popWait(toNimFloat(ctx, id).int, wait)
     jsUndefSentinel(ctx)
 
-  proc startHookImage(e: JsAppEvalEnv, url, key: string, options: JsonNode): bool =
-    ## useImage's download, off the render: false when it cannot start now
-    ## (too many pending: a later render asks again).
-    if e.runtime.pendingFor() >= MaxAsyncWaitsPerApp:
+  proc startUrlImage(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
+      url: string, width, height: int, fit: ScaledDecodeFit): bool =
+    ## An `<img src>`'s download, off the render: false when it cannot start
+    ## now (too many pending: a later render asks again).
+    if runtime.pendingFor() >= MaxAsyncWaitsPerApp:
       return false
     inc nextAsyncId
-    var request = imageRequest(e, url, options)
+    var request = imageRequest(owner, url, width, height)
     request.id = nextAsyncId
     if not submitJsIo(request):
       return false
-    asyncWaits.add AsyncWait(id: nextAsyncId, runtime: e.runtime, ctx: e.runtime.js.context, owner: e.owner,
-      configJson: e.configJson, kind: akUseImage, options: options, key: key, like: likeOf(e))
+    asyncWaits.add AsyncWait(id: nextAsyncId, runtime: runtime, ctx: runtime.js.context, owner: owner,
+      kind: akUrlImage, url: url, width: width, height: height, fit: fit, like: likeOf(context))
     true
 
   proc runAsync(wait: AsyncWait, fnName: string, args: openArray[JSValueConst]): bool =
@@ -387,15 +330,15 @@ when jsAsyncOn:
 
   when defined(frameosEmbedded):
     proc fos_js_io_wake_if_waiting() {.importc, cdecl.}
-    proc fos_client_input_held(): bool {.importc, cdecl.}
-      ## Somebody is tapping (main/fos_client.c): a picture's decode is a
-      ## couple of hundred ms of the render task, so answers wait for the
-      ## hold to end; the idle wait's slices (a second at most) come back.
+    proc fos_client_input_pending(): bool {.importc, cdecl.}
+      ## A tap or a key is queued or just came (main/fos_client.c): it goes
+      ## first, and a picture's decode (a couple of hundred ms of the render
+      ## task) waits for the next pump, a slice later.
 
   proc pumpJsAsync*(): int =
     ## Between renders, on the thread that renders: every answer that came
     ## back and every timer that is over settles its promise, and the code
-    ## waiting on it runs to its next await; a useImage picture is decoded
+    ## waiting on it runs to its next await; an `<img>`'s picture is decoded
     ## and its scene asked to render. How many settled. Spends about
     ## PumpBudgetMs, at least one answer; the rest waits for the next pump.
     let started = getMonoTime()
@@ -405,7 +348,7 @@ when jsAsyncOn:
     # Answers first: each one is a request somebody waits for.
     var answersNow = true
     when defined(frameosEmbedded):
-      answersNow = not fos_client_input_held()
+      answersNow = not fos_client_input_pending()
     while answersNow:
       if result > 0 and overBudget():
         when defined(frameosEmbedded):
@@ -424,14 +367,8 @@ when jsAsyncOn:
       of akFetch:
         if settle(answer.id, wait, fetchAnswer(answer), false):
           inc result
-      of akImage:
-        let decoded = decodeAnswer(wait, answer)
-        let failed = decoded{"image"}.isNil or decoded["image"].kind != JObject
-        if settle(answer.id, wait, if failed: decoded{"error"}.getStr("no image") else: $decoded, failed):
-          inc result
-      of akUseImage:
-        let decoded = decodeAnswer(wait, answer)
-        wait.runtime.rememberHookImage(keptImageEntry(wait.key, decoded))
+      of akUrlImage:
+        wait.runtime.rememberUrlImage(decodeAnswer(wait, answer))
         inc result
         if not wait.owner.scene.isNil and not redraw.anyIt(it.scene == wait.owner.scene):
           redraw.add((wait.owner.scene, wait.owner.nodeId.int))
@@ -489,51 +426,96 @@ else:
 
 when defined(frameosWasm):
   var previewLoadRender {.threadvar.}: pointer
-    ## The render (its context) that already fetched a useImage picture.
+    ## The render (its context) that already fetched an `<img>`'s picture.
 
-proc jsUseImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
-  ## `frameos.useImage(url, options)`: the picture if it is here, else
-  ## {image: null, loading: true} and a download off the render, after which
-  ## the scene renders again. fetchImage's options (`keep` is implied); the
-  ## same url and options are the same picture while the interpreter lives.
-  ## Where nothing pumps, or with `wait: true` (e-paper: one refresh with every
-  ## picture), the picture is fetched now, as fetchImage would.
-  let e = env(ctx)
-  if e == nil:
-    return nimStringToJS(ctx, """{"image":null,"error":"no app context"}""")
-  let urlStr = toNimString(ctx, url)
-  let options = optionsArg(ctx, optionsJson)
-  if urlStr.len == 0:
-    return nimStringToJS(ctx, """{"image":null}""")
-  let key = hookImageKey(urlStr, options)
-  let runtime = e.runtime
-  let at = runtime.findHookImage(key)
-  var known = if at >= 0: runtime.hookImages[at] else: HookImage(key: key)
-  if known.state == hsReady and not runtime.keptImageIds.contains(known.id) and
-      (getMonoTime() - known.at).inMilliseconds < HookImageChurnMs:
-    known = HookImage(key: key, state: hsFailed, at: getMonoTime(),
-      answer: failedAnswer("no room for every picture"))
-    runtime.hookImages[at] = known
-  if runtime.hookImageUsable(known):
-    return nimStringToJS(ctx, hookImageAnswer(known))
-  var blocking = options{"wait"}.getBool(false) or urlStr.startsWith("data:")
-  when jsAsyncOn:
-    blocking = blocking or not asyncPumped
-    if not blocking:
-      if startHookImage(e, urlStr, key, options):
-        runtime.rememberHookImage(HookImage(key: key, state: hsLoading, at: getMonoTime()))
-      return nimStringToJS(ctx, HookLoading)
-  when defined(frameosWasm):
-    # The preview: nothing pumps, and a render that fetched every picture of
-    # a page one after the other would show nothing for seconds. One picture
-    # a render, and the next render soon.
-    if not options{"wait"}.getBool(false) and not urlStr.startsWith("data:"):
-      let render = cast[pointer](e.context)
-      if render == previewLoadRender:
-        if not e.context.isNil and (e.context.nextSleep < 0 or e.context.nextSleep > 0.05):
-          e.context.nextSleep = 0.05
-        return nimStringToJS(ctx, HookLoading)
-      previewLoadRender = render
-  let entry = keptImageEntry(key, fetchImageJson(e, urlStr, options, forceKeep = true))
-  runtime.rememberHookImage(entry)
-  nimStringToJS(ctx, hookImageAnswer(entry))
+proc fitName(fit: ScaledDecodeFit): string =
+  case fit
+  of fitStretch: "stretch"
+  of fitContain: "contain"
+  else: "cover"
+
+proc urlImage(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
+    url: string, width, height: int, fit: ScaledDecodeFit, blocking: bool): Image =
+  ## `<img src="https://…">` at `width` x `height` panel pixels: the picture
+  ## if it is here, else a download (off the render unless `blocking`) and,
+  ## meanwhile, the same url at another size if one is kept (a box that
+  ## changed size), else nothing. Kept pictures: the same url at the same
+  ## size is one picture while the interpreter lives.
+  var at = runtime.findUrlImage(url, width, height, fit)
+  if at >= 0:
+    case runtime.urlImages[at].state
+    of uiReady:
+      let id = runtime.urlImages[at].id
+      if runtime.keptImageIds.contains(id):
+        return runtime.images.getOrDefault(id, nil)
+      if (getMonoTime() - runtime.urlImages[at].at).inMilliseconds < UrlImageChurnMs:
+        runtime.urlImages[at] = UrlImage(url: url, width: width, height: height, fit: fit,
+          state: uiFailed, at: getMonoTime())
+      else:
+        at = -1
+    of uiFailed:
+      if (getMonoTime() - runtime.urlImages[at].at).inMilliseconds >= UrlImageRetryMs:
+        at = -1
+    of uiLoading:
+      discard
+  if at < 0:
+    var now = blocking or url.startsWith("data:")
+    when jsAsyncOn:
+      now = now or not asyncPumped
+      if not now:
+        if startUrlImage(runtime, owner, context, url, width, height, fit):
+          runtime.rememberUrlImage(UrlImage(url: url, width: width, height: height, fit: fit,
+            state: uiLoading, at: getMonoTime()))
+    when defined(frameosWasm):
+      # The preview: nothing pumps, and a render that fetched every picture of
+      # a page one after the other would show nothing for seconds. One picture
+      # a render, and the next render soon.
+      if now and not url.startsWith("data:"):
+        if cast[pointer](context) == previewLoadRender:
+          if not context.isNil and (context.nextSleep < 0 or context.nextSleep > 0.05):
+            context.nextSleep = 0.05
+          now = false
+        else:
+          previewLoadRender = cast[pointer](context)
+    if now:
+      let e = JsAppEvalEnv(runtime: runtime, owner: owner, context: context)
+      let answer = fetchImageJson(e, url, %*{"width": width, "height": height, "fit": fitName(fit)},
+        forceKeep = true)
+      let image = answer{"image"}
+      var entry = UrlImage(url: url, width: width, height: height, fit: fit, state: uiFailed, at: getMonoTime())
+      if not image.isNil and image.kind == JObject:
+        entry.state = uiReady
+        entry.id = image{"id"}.getInt()
+      else:
+        urlImageFailed(owner, url, answer{"error"}.getStr())
+      runtime.rememberUrlImage(entry)
+      if entry.state == uiReady:
+        return runtime.images.getOrDefault(entry.id, nil)
+  # Meanwhile: the same picture at another size.
+  for entry in runtime.urlImages:
+    if entry.state == uiReady and entry.url == url and runtime.keptImageIds.contains(entry.id):
+      return runtime.images.getOrDefault(entry.id, nil)
+
+proc fillUrlImages(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
+    node: SvgNode, scale: float32, blocking: bool) =
+  ## The layout's `<img src="https://…">`s (ui/layout.nim `image-url`), each
+  ## given its picture at the size it was laid out at, in panel pixels;
+  ## nothing drawn where there is none yet.
+  let url = node.attr("image-url")
+  if url.len > 0:
+    let
+      w = max(1, round(node.attrFloat("width") * scale).int)
+      h = max(1, round(node.attrFloat("height") * scale).int)
+      fit = case node.attr("preserveAspectRatio")
+        of "none": fitStretch
+        of "xMidYMid meet": fitContain
+        else: fitCover
+      image = runtime.urlImage(owner, context, url, w, h, fit, blocking)
+      tag = if image.isNil: "g" else: "image"
+    if node.image != image or node.tag != tag:
+      node.image = image
+      node.tag = tag
+      node.forgetParse()
+    return
+  for child in node.children:
+    runtime.fillUrlImages(owner, context, child, scale, blocking)

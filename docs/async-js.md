@@ -3,7 +3,8 @@
 **Status: experimental, on a Pi and on an ESP32 that stays awake.** It is not
 in the scene guide or `appTypeDeclarations.ts` yet, so no AI writes it and the
 editor does not type it; putting it there (and running the AI evals) is what
-makes it public. The Scene store sample is its first user (`useImage`).
+makes it public. The Scene store sample is its first user (`<img src>` and
+`fetch`).
 
 A JS app can wait without holding the frame: a request, a picture, a timer.
 A render never waits for any of it, and a tap is answered while a picture
@@ -11,19 +12,18 @@ downloads.
 
 ## The API
 
-Two ways in. **Hooks** for `get()`, which must return a picture now: they
-answer what is there and fetch the rest off the render, and the scene renders
-again when it lands. **Promises** for code that can wait: `background()`,
-timers, handlers.
+Three ways in. **`<img src="https://…">`** for pictures: the runtime fetches
+them, at the size they are drawn, off the render. **`frameos.useFetch`** for
+data `get()` draws: what is there now, the rest when it lands. **Promises**
+for code that can wait: `background()`, timers, handlers.
 
 ```tsx
-// Hooks: get() draws what it has.
+// get() draws what it has; the scene renders again as the rest lands.
 export function get(app) {
   const forecast = frameos.useFetch(`https://api.example.com/forecast?q=${app.config.city}`, { maxAge: 600 })
-  const photo = frameos.useImage(app.config.photoUrl, { width: 400, height: 300, fit: 'cover' })
   return (
     <div className="flex">
-      {photo.image ? <img src={photo.image} /> : <div className="w-[400px] h-[300px] bg-gray-800" />}
+      <img src={app.config.photoUrl} className="w-[400px] h-[300px] object-cover bg-gray-800" />
       <span>{forecast.data ? `${forecast.data.temp}°` : forecast.error || 'Loading…'}</span>
     </div>
   )
@@ -50,21 +50,34 @@ export function get() {
 }
 ```
 
-### Hooks (for `get()`)
+### `<img src="https://…">`
 
-- **`frameos.useImage(url, options)`** → `{image, width, height}` when the
-  picture is here, `{image: null, loading: true}` while it downloads,
-  `{image: null, error}` when it failed (asked again after 30 s). `options`
-  are `fetchImage`'s: `width` / `height` / `fit` (the size it is decoded at,
-  in the canvas's format, so drawing it is a copy), `headers`, `colors`.
-  Every picture a pass asks for downloads at once; however many land
-  together, the scene renders once more. The picture is a kept picture
-  (`fetchImage` `keep`: 48 small ones, `docs/jsx-ui.md` "Photos that stay"):
-  the same url and options are the same picture while the interpreter lives.
-  `wait: true` fetches it in this render instead (e-paper: one refresh with
-  every picture). A picture that loses its memory within 10 s of coming
-  (the app asks for more than fits) waits 30 s before it is asked again, so
-  two pictures cannot push each other out for ever.
+A URL as an `<img>`'s `src` is a picture the runtime fetches for the app.
+Give the `<img>` its size (`w-[…] h-[…]`, or one of them and `aspect-…`): the
+picture is decoded at exactly the size the layout gives it, in panel pixels
+and the canvas's format, so drawing it is a copy; `object-cover`,
+`object-contain` or the default fill say how it fits. Until it is in, nothing
+is drawn there: the `<img>`'s own background, or what is under it, shows (the
+Scene store puts the scene's initial under each cover).
+
+- **Where it waits is the runtime's call, not the app's.** An LCD, an HDMI
+  screen and a Pi's fetch every picture of a pass at once, off the render,
+  and render the scene once more however many land together. E-paper, a
+  board that deep-sleeps and the editor's preview fetch it in the render
+  (e-paper: one refresh with every picture; the preview one picture a
+  render, the next render soon).
+- The picture is a kept picture (`fetchImage` `keep`: 48 small ones,
+  `docs/jsx-ui.md` "Photos that stay"): the same url at the same size is
+  one picture while the interpreter lives. At a new size (the box changed)
+  the old one stands in until the new one is in.
+- A failure is the app's log line `<img> https://host: why` and is asked
+  again after 30 s; a picture that loses its memory within 10 s of coming
+  (the app shows more than fits) waits 30 s too, so two pictures cannot push
+  each other out for ever. A `data:` URL is decoded at once, everywhere.
+- Not for headers or a color profile: that is `frameos.fetchImage`.
+
+### `frameos.useFetch` (for `get()`)
+
 - **`frameos.useFetch(url, init)`** → `{data, error, loading, status, ok}`.
   `init` is `fetch`'s, plus `as: "text"` (JSON otherwise) and `maxAge`
   (seconds: older than that, it is fetched again while the old `data` still
@@ -74,8 +87,8 @@ export function get() {
 Why these and not React's `useState` / `useEffect`: a module variable already
 is a `useState` that lasts (and `frameos.remember` one that outlives the
 interpreter), a handler already re-renders, and what hooks are really for on
-a frame is data that arrives later. These are keyed by url and options, not
-by call order, so they may sit in a condition or a loop.
+a frame is data that arrives later. `useFetch` is keyed by url and options,
+not by call order, so it may sit in a condition or a loop.
 
 ### Promises
 
@@ -88,8 +101,6 @@ by call order, so they may sit in a condition or a loop.
 - **`setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`**: as on the
   web (an interval is 10 ms at the least). **`frameos.sleep(seconds)`**: a
   promise, a day at most.
-- **`frameos.loadImage(url, options)`**: `fetchImage` with `keep`, as a
-  promise of `{image, width, height}`; rejects when there is no picture.
 - **`export async function background(app, context)`**: started when the
   app's interpreter is (right after `init()`), and runs to its first `await`
   then. `context.event` is `"background"`. A throw (or a rejection nobody
@@ -107,26 +118,27 @@ Limits:
 
 | | |
 |---|---|
-| requests, timers and pictures pending, per app | 32 (one more is refused: its promise rejects; a `useImage` asks again at a later render) |
+| requests, timers and pictures pending, per app | 32 (one more is refused: its promise rejects; an `<img>` asks again at a later render) |
 | one stretch of async code, from an await to the next | 2 s (`JsAsyncSliceMs`): stopped there, logged |
 | requests in flight, the frame over | a Pi 4 (`JsIoWorkers`, the fifth waits); an ESP32 1 at a time, 32 queued |
-| one pump between renders | ~40 ms (`PumpBudgetMs`) and at least one answer; the rest at the next, after input is served |
+| one pump between renders | ~40 ms (`PumpBudgetMs`) and at least one answer; the rest at the next. On an ESP32 answers wait while a tap or key is queued or came in the last 250 ms (`fos_client_input_pending`) |
 
 Async code runs on the thread that renders, between renders: a stretch that
 computes for a second holds the frame for that second. Await often.
 
 ## Where it runs
 
-| Runtime | Promises | Hooks |
+| Runtime | Promises | `useFetch`, `<img src>` |
 |---|---|---|
 | Raspberry Pi (the runner) | yes, for every scene it keeps (windows behind, scenes visited before) | async |
-| ESP32 that stays awake (`keepJsRuntimes`) | yes | async |
-| ESP32 that deep-sleeps | `fetch` / `loadImage` block and settle at once; no timers, no `background()` | block |
-| wasm (the editor's preview, a plane's render for a board) | as a deep sleeper | block; the preview one `useImage` a render, the next soon |
+| ESP32 that stays awake (`keepJsRuntimes`), LCD | yes | async |
+| ESP32 that stays awake, e-paper | yes | `useFetch` async, `<img>` in the render |
+| ESP32 that deep-sleeps | `fetch` blocks and settles at once; no timers, no `background()` | in the render |
+| wasm (the editor's preview, a plane's render for a board) | as a deep sleeper | in the render; the preview one `<img>` a render, the next soon |
 
 A runtime nothing pumps has no promise that outlives a render, so it gives
-the blocking answer instead: a scene written with the hooks works everywhere,
-and is only faster where it can be.
+the blocking answer instead: a scene written this way works everywhere, and
+is only faster where it can be.
 
 ## How it works
 
@@ -139,7 +151,7 @@ and is only faster where it can be.
           ▼      ▼              │                      │
    __frameosSettle(id, json)    └── requests (values) ─┘
    runPendingJobs (≤ 2 s)           submitJsIo(url, method, headers, body…)
-   useImage: decode, keep, one render per scene
+   <img>: decode, keep, one render per scene
 ```
 
 - **Every interpreter stays on the thread that renders.** QuickJS is not
@@ -152,9 +164,9 @@ and is only faster where it can be.
     runner's message loop, which also waits no longer than the next timer
     (`nextJsAsyncMs`).
   - **An ESP32**: one FreeRTOS task (`components/frameos_nim/fos_js_io.c`),
-    made when there is work and gone when there is none, like the scene
-    store's: one TLS session at a time, ~40 KB of internal RAM, which an
-    ESP32-S3 runs short of first. It makes the request with the glue every
+    made when there is work and gone when there is none, which also runs the
+    scene store's work (`main/fos_store.c`, `fos_js_io_run`): one TLS session
+    at a time, ~40 KB of internal RAM, which an ESP32-S3 runs short of first. It makes the request with the glue every
     Nim app uses (`fos_nim_http_request_chunked`: the private-network policy,
     the redirects, the body in PSRAM chunks) and wakes the render task's
     wait (`fos_client_wake_for_events`). The pump is `frameos_nim_tick`,
@@ -181,12 +193,13 @@ and is only faster where it can be.
 `js_io.nim`, the JS half in the app prelude. Tests:
 `js_runtime/tests/test_async_js.nim` (fetch's Response and rejection, timers,
 four apps' requests in flight together, a spinning stretch stopped while the
-others go on, a dropped interpreter dropping its waits, `loadImage`,
-`useImage` with one render for a pass's pictures, `useFetch`, the blocking
-answers where nothing pumps), `tests/test_runner_async_js.nim` (through the
-real runner) and `tests/test_scene_store_scene.nim` (the store's covers from
-the network: the placeholders render in ~10 ms, a tap during the downloads
-is answered at once, six 150 ms covers land together).
+others go on, a dropped interpreter dropping its waits, `<img src>` with one
+render for a pass's pictures and a failure not asked again at once,
+`useFetch`, the blocking answers where nothing pumps),
+`tests/test_runner_async_js.nim` (through the real runner) and
+`tests/test_scene_store_scene.nim` (the store's pages over `fetch` and its
+covers from the network: the placeholders render in ~10 ms, a tap during the
+downloads is answered at once, six 150 ms covers land together).
 
 ## What the investigation found
 
@@ -203,12 +216,20 @@ TLS handshake and a CDN round trip, then a decode), and a tap waited for the
 pass in progress: two seconds and more, with no loading mark (the mark is for
 scene switches and slow scenes, `docs/realtime-rendering.md`), and no way to
 page. The drawing itself is cheap: the page renders in ~11 ms on a desktop,
-covers or not. With `useImage` the covers download together off the render.
+covers or not. As `<img src>`s the covers download together off the render.
+
+On a SenseCAP Indicator (2026-11-15, main's firmware, the Real time shelf from
+a reboot): six renders in a row of 2.1–2.7 s, each `get()` blocking 1.8–2.4 s
+on one cover, the page full after ~17 s. With async JavaScript no render took
+more than 1.4 s and a tap during the downloads was answered in ~0.75 s, but
+the covers came 24 s late, all at once: answers waited for the input hold,
+which lasts 10 s after the last tap or console event. They now wait only for
+a tap that is queued or 250 ms old.
 
 **What still blocks:** `fetchText`, `fetchJson`, `httpRequest` and
 `fetchImage` in `get()` stay synchronous, as they must: `get()` returns the
-picture. An app moves its waiting into a hook or `background()` and draws
-what it has.
+picture. An app moves its waiting into `<img src>`, `useFetch` or
+`background()` and draws what it has.
 
 **Why not a thread per app?** An interpreter must stay on one thread, and so
 must everything it touches through the bridge (the scene, its state, the
@@ -220,9 +241,9 @@ frame, and a bigger change to the runner.
 ## Next
 
 1. Make it public: the declarations in `appTypeDeclarations.ts` (`fetch`,
-   the timers, `frameos.sleep` / `loadImage` / `useImage` / `useFetch`), a
-   section in `docs/scene-guide.md` and `docs/js-apps-and-code-nodes.md`,
-   the AI evals.
+   the timers, `frameos.sleep` / `useFetch`, `<img src>` in the JSX
+   section), a section in `docs/scene-guide.md` and
+   `docs/js-apps-and-code-nodes.md`, the AI evals.
 2. The editor's preview: it could pump between its renders (the browser
    fetches for it) instead of blocking.
 3. A picture's decode on a Pi's worker into plain bytes, made into an

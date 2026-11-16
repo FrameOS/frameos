@@ -7,8 +7,7 @@ import { sceneCoverObjectKeySql, sceneHasImageSql } from "./store-listing";
 import type { StoreBrowseFilters } from "./store-filters";
 
 // The store as a frame reads it (docs/scene-store.md): the Scene store scene
-// on a frame lists a page of scenes at a time, through its host
-// (frameos.storeAction("browse")) or straight from the app. A frame can be an
+// on a frame fetches a page of scenes at a time. A frame can be an
 // ESP32 parsing this in JavaScript with the whole scene running next to it,
 // so the answer is small on purpose: a page the size of the app's grid, short
 // keys, a description cut to a line or two, the cover as a path and no tags

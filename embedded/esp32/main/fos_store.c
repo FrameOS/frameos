@@ -5,14 +5,13 @@
  * sample scene is that app). The app has the words; this file has the facts.
  *
  * The app asks on the render task (embedded_runtime.nim), and nothing here
- * runs there but copying facts out: every request goes to a task of its own,
- * made for the work and gone when it is done, and the scene that asked is
- * drawn again when the work is done, if it still shows (fos_scenes_showing).
+ * runs there but copying facts out: the work runs on the task that makes
+ * every request a scene asks for (components/frameos_nim/fos_js_io.c, one TLS
+ * session at a time), and the scene that asked is drawn again when the work
+ * is done, if it still shows (fos_scenes_showing).
  *
- * - Browsing is the cloud store's listing for frames
- *   (/api/store/device/scenes, with the query string the app hands over),
- *   asked of the cloud this frame knows, else cloud.frameos.net. Its answer
- *   is kept as it came and handed on whole.
+ * - Browsing is the app's own: it fetch()es the cloud store's listing for
+ *   frames from `url` (the cloud this frame knows, else cloud.frameos.net).
  * - Install, update, remove, preview and discard are asked of the frame's
  *   control plane when it has one (`POST …/panel/scenes`, a backend first, as
  *   for the voice chat): the plane holds the scene list, and a scene added
@@ -31,7 +30,6 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "freertos/task.h"
 
 #include "cJSON.h"
 #include "esp_app_desc.h"
@@ -41,6 +39,7 @@
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_js_io.h"
 #include "fos_mem.h"
 #include "fos_scene_store.h"
 #include "fos_scenes.h"
@@ -50,17 +49,14 @@
 static const char *TAG = "fos_store";
 
 #define DEFAULT_STORE_URL "https://cloud.frameos.net"
-#define LISTING_MAX (32 * 1024)
 #define ANSWER_MAX 2048
 /* A store scene's scenes.json: its scenes, each no more than a slot holds. */
 #define SCENES_MAX (2 * FOS_SCENE_STORE_MAX_BYTES)
 #define SPLIT_MAX 8
-#define TASK_STACK 8192
 #define STORE_ID_LEN 40
 #define SCENE_ID_LEN FOS_SCENE_STORE_ID_LEN
 #define WORD_LEN 24
 #define NAME_LEN 96
-#define PARAMS_LEN 400 /* scene_store_hooks.nim validStoreParams */
 
 typedef struct {
     char id[SCENE_ID_LEN];
@@ -77,8 +73,6 @@ typedef struct {
     char busy[WORD_LEN];
     char error[WORD_LEN];
     char done[WORD_LEN];
-    char params[PARAMS_LEN]; /* what `listing` answers */
-    char *listing;           /* the store's answer as it came, or NULL */
     char asker[SCENE_ID_LEN]; /* the scene to draw again on news */
     char preview_store[STORE_ID_LEN]; /* "" when nothing is previewed */
     char preview_id[SCENE_ID_LEN];
@@ -93,7 +87,6 @@ typedef struct {
     char job_id[SCENE_ID_LEN];
     char job_name[NAME_LEN];
     char job_from[SCENE_ID_LEN];
-    char job_params[PARAMS_LEN];
     bool job_show;
 } store_t;
 
@@ -176,8 +169,7 @@ char *fos_store_json(const char *asker)
     /* What came from the store is read again once the scenes changed, off
      * this task. */
     if (S->origins_generation != fos_scenes_store_generation() && !s_running && !S->job[0]) start_job("scan");
-    out_t out = {.cap = 1536 + (S->listing ? strlen(S->listing) : 0) +
-                        (size_t)S->origin_count * (SCENE_ID_LEN + STORE_ID_LEN + 32)};
+    out_t out = {.cap = 1024 + (size_t)S->origin_count * (SCENE_ID_LEN + STORE_ID_LEN + 32)};
     out.buf = fos_big_malloc(out.cap);
     if (out.buf != NULL) {
         out.buf[0] = '\0';
@@ -186,17 +178,14 @@ char *fos_store_json(const char *asker)
         put_pair(&out, "busy", S->busy);
         put_pair(&out, "error", S->error);
         put_pair(&out, "done", S->done);
-        put_pair(&out, "params", S->params);
         char base[FOS_URL_LEN];
         store_base(base, sizeof(base));
         put_pair(&out, "url", base);
         put_pair(&out, "version", esp_app_get_description()->version);
         const fos_config_t *config = fos_config();
-        snprintf(line, sizeof(line), "\"removeAny\":%s,\"listing\":",
+        snprintf(line, sizeof(line), "\"removeAny\":%s,\"installed\":[",
                  config->backend_url[0] || fos_cloud_state() != FOS_CLOUD_NONE ? "false" : "true");
         put(&out, line);
-        put(&out, S->listing ? S->listing : "null");
-        put(&out, ",\"installed\":[");
         for (int i = 0; i < S->origin_count; i++) {
             put(&out, i ? ",{" : "{");
             put_pair(&out, "id", S->origins[i].id);
@@ -229,17 +218,6 @@ static void copy_arg(const cJSON *args, const char *key, char *out, size_t len)
     if (cJSON_IsString(value)) snprintf(out, len, "%s", value->valuestring);
 }
 
-/* A listing's query string as the app may hand it over (the same rule as
- * scene_store_hooks.nim validStoreParams): nothing that leaves a query. */
-static bool valid_params(const char *params)
-{
-    if (strlen(params) >= PARAMS_LEN) return false;
-    for (const char *c = params; *c; c++) {
-        if (!isalnum((unsigned char)*c) && !strchr("-_.~%&=+,", *c)) return false;
-    }
-    return true;
-}
-
 /* A store scene's id goes into a URL path: a UUID (as both planes check it)
  * or nothing. */
 static bool valid_store_id(const char *id)
@@ -256,7 +234,7 @@ void fos_store_action(const char *asker, const char *action, const char *args_js
 {
     if (s_lock == NULL || action == NULL) return;
     cJSON *args = cJSON_Parse(args_json ? args_json : "{}");
-    static const char *const known[] = {"browse", "preview", "install", "update", "remove", "discard"};
+    static const char *const known[] = {"preview", "install", "update", "remove", "discard"};
     bool ok = false;
     for (size_t i = 0; i < sizeof(known) / sizeof(known[0]); i++) ok = ok || strcmp(action, known[i]) == 0;
     lock();
@@ -264,15 +242,14 @@ void fos_store_action(const char *asker, const char *action, const char *args_js
      * came from the store does not count: it runs after.) */
     if (ok && ready() && !S->busy[0]) {
         snprintf(S->asker, sizeof(S->asker), "%s", asker ? asker : "");
-        S->job_store[0] = S->job_id[0] = S->job_name[0] = S->job_params[0] = '\0';
+        S->job_store[0] = S->job_id[0] = S->job_name[0] = '\0';
         copy_arg(args, "store", S->job_store, sizeof(S->job_store));
         copy_arg(args, "id", S->job_id, sizeof(S->job_id));
         copy_arg(args, "name", S->job_name, sizeof(S->job_name));
-        copy_arg(args, "params", S->job_params, sizeof(S->job_params));
         /* A preview goes back to the scene it was opened from. */
         snprintf(S->job_from, sizeof(S->job_from), "%s", S->asker);
         S->job_show = !cJSON_IsFalse(cJSON_GetObjectItem(args, "show"));
-        if (valid_store_id(S->job_store) && (strcmp(action, "browse") != 0 || valid_params(S->job_params))) {
+        if (valid_store_id(S->job_store)) {
             snprintf(S->busy, sizeof(S->busy), "%s", action);
             S->error[0] = S->done[0] = '\0';
             start_job(action);
@@ -303,9 +280,9 @@ static void add_encoded(char *out, size_t len, const char *text)
     out[n] = '\0';
 }
 
-/* GET `url` into `*body` (malloc'd, valid JSON when `json`). An error code
- * for the page, NULL on success. */
-static const char *fetch(const char *url, size_t max, bool json, char **body, size_t *len)
+/* GET `url` into `*body` (malloc'd). An error code for the page, NULL on
+ * success. */
+static const char *fetch(const char *url, size_t max, char **body, size_t *len)
 {
     *body = NULL;
     if (fos_wifi_state() != FOS_WIFI_CONNECTED) return "offline";
@@ -314,16 +291,10 @@ static const char *fetch(const char *url, size_t max, bool json, char **body, si
     esp_err_t err = fos_http_fetch(&req, max, &res);
     const char *error = NULL;
     if (err != ESP_OK || res.status == 0) error = "store_unavailable";
-    /* A store scene that is gone; the listing (`json`) missing is a store
-     * older than this frame. */
-    else if (res.status == 404) error = json ? "store_unavailable" : "invalid_scene";
+    /* A store scene that is gone. */
+    else if (res.status == 404) error = "invalid_scene";
     else if (res.status == 429) error = "rate_limited";
     else if (res.status != 200 || res.body == NULL || res.too_large) error = res.too_large ? "no_room" : "store_unavailable";
-    else if (json) {
-        cJSON *check = cJSON_ParseWithLength(res.body, res.body_len);
-        if (check == NULL) error = "store_unavailable";
-        cJSON_Delete(check);
-    }
     if (error == NULL) {
         *body = res.body;
         if (len != NULL) *len = res.body_len;
@@ -451,7 +422,7 @@ static const char *install_here(const char *store, bool show, char *first, size_
     snprintf(url + strlen(url), sizeof(url) - strlen(url), "/api/store/scenes/%s/scenes.json", store);
     char *body = NULL;
     size_t len = 0;
-    const char *error = fetch(url, SCENES_MAX, false, &body, &len);
+    const char *error = fetch(url, SCENES_MAX, &body, &len);
     const char *starts[SPLIT_MAX];
     size_t lens[SPLIT_MAX];
     int count = error ? 0 : fos_store_split_scenes(body, len, starts, lens, SPLIT_MAX);
@@ -497,7 +468,7 @@ static const char *remove_here(const char *store, const char *id)
 
 static void run(const char *job)
 {
-    char url[FOS_URL_LEN + PARAMS_LEN + 160];
+    char url[FOS_URL_LEN + 160];
     char auth[FOS_STR_LEN + 16];
     const char *error = NULL;
     const char *done = job;
@@ -508,8 +479,6 @@ static void run(const char *job)
     snprintf(name, sizeof(name), "%s", S->job_name);
     snprintf(from, sizeof(from), "%s", S->job_from);
     bool show = S->job_show;
-    char *params = fos_big_malloc(PARAMS_LEN);
-    if (params != NULL) snprintf(params, PARAMS_LEN, "%s", S->job_params);
     if (strcmp(job, "discard") == 0) snprintf(from, sizeof(from), "%s", S->preview_from);
     bool stale = S->origins_generation != fos_scenes_store_generation();
     unlock();
@@ -525,24 +494,7 @@ static void run(const char *job)
         unlock();
     }
 
-    if (strcmp(job, "browse") == 0) {
-        char *body = NULL;
-        store_base(url, sizeof(url));
-        size_t n = strlen(url);
-        snprintf(url + n, sizeof(url) - n, "/api/store/device/scenes?version=%s%s%s", esp_app_get_description()->version,
-                 params && params[0] ? "&" : "", params ? params : "");
-        error = params == NULL ? "no_room" : fetch(url, LISTING_MAX, true, &body, NULL);
-        lock();
-        if (body != NULL) {
-            free(S->listing);
-            S->listing = body;
-            body = NULL;
-            snprintf(S->params, sizeof(S->params), "%s", params);
-        }
-        unlock();
-        free(body);
-        done = "";
-    } else if (strcmp(job, "scan") != 0) {
+    if (strcmp(job, "scan") != 0) {
         bool backend = false, pending = false;
         char status[WORD_LEN] = "", shown[SCENE_ID_LEN] = "";
         if (plane(url, sizeof(url), auth, sizeof(auth), &backend, &pending)) {
@@ -590,12 +542,12 @@ static void run(const char *job)
     }
     snprintf(asker, sizeof(asker), "%s", S->asker);
     unlock();
-    free(params);
     /* A re-read that found what the app shows already draws nothing. */
     if ((!scan || changed) && fos_scenes_showing(asker)) fos_client_render_now();
 }
 
-static void store_task(void *arg)
+/* On the request task (fos_js_io_run): the work asked for, until none is. */
+static void store_job(void *arg)
 {
     (void)arg;
     for (;;) {
@@ -608,7 +560,6 @@ static void store_task(void *arg)
         if (!job[0]) break;
         run(job);
     }
-    vTaskDelete(NULL);
 }
 
 /* Under s_lock. */
@@ -617,8 +568,7 @@ static void start_job(const char *job)
     snprintf(S->job, sizeof(S->job), "%s", job);
     if (s_running) return;
     s_running = true;
-    if (xTaskCreate(store_task, "fos_store", TASK_STACK, NULL, 4, NULL) != pdPASS) {
-        ESP_LOGE(TAG, "no memory for the store task");
+    if (!fos_js_io_run(store_job, NULL)) {
         s_running = false;
         S->job[0] = '\0';
         S->busy[0] = '\0';

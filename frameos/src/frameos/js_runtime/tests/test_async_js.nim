@@ -1,6 +1,5 @@
 ## Async JavaScript (docs/async-js.md): `fetch`, the timers, `frameos.sleep`,
-## `frameos.loadImage`, the hooks (`frameos.useImage`, `frameos.useFetch`) and
-## an app's `background()`. The runner's loop is played here by
+## `frameos.useFetch`, an app's `background()` and `<img src="https://…">`. The runner's loop is played here by
 ## `pumpJsAsync`; the network by `jsIoHook`, on the workers.
 
 import std/[base64, json, monotimes, os, sequtils, strutils, tables, times, unittest]
@@ -68,6 +67,14 @@ proc app(source: string, name = "bg"): TestApp =
   result.context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false,
     loopIndex: 0, loopKey: ".", nextSleep: -1)
   result.runtime = newJsAppRuntime(category = "data", outputType = "text", source = source)
+
+proc ui(source: string, name: string): TestApp =
+  result = app(source, name)
+  result.runtime = newJsAppRuntime(category = "data", outputType = "image", source = source,
+    sourceName = "app.tsx")
+
+proc draw(a: TestApp, config = %*{}): Image =
+  a.runtime.get(a.owner, config, a.context).asImage()
 
 proc render(a: TestApp): string =
   a.runtime.get(a.owner, %*{}, a.context).asString()
@@ -240,59 +247,71 @@ suite "async JavaScript":
     check jsAsyncPending() == 0
     check a.owner.scene.state{"woke"}.isNil
 
-  test "frameos.loadImage settles with a kept picture, or rejects":
-    let a = app("""
-      let seen = "-"
-      export async function background() {
-        const r = await frameos.loadImage("https://img.test/a.png?ms=50", { width: 4, height: 3 })
-        let failed = ""
-        try { await frameos.loadImage("https://img.test/missing") } catch (e) { failed = "rejected" }
-        seen = `${r.image.__frameosType}:${r.width}x${r.height}:${failed}`
-      }
-      export function get() { return seen }
-    """, "loadimage")
-    discard a.render()
-    check pumpUntil(proc(): bool = jsAsyncPending() == 0 and a.render() != "-")
-    # A Pi decodes at the picture's own size (the consumer scales).
-    check a.render() == "imageRef:8x6:rejected"
-
-  test "useImage: loading first, the picture after, one render for the pictures of a pass":
-    let a = app("""
+  test "<img src>: nothing drawn first, the pictures after, one render for a page's pictures":
+    let u = ui("""
       export function get() {
-        const urls = ["https://img.test/1.png?ms=80", "https://img.test/2.png?ms=80", "https://img.test/3.png?ms=80"]
-        return urls.map((u) => {
-          const r = frameos.useImage(u, { width: 4, height: 3 })
-          return r.image ? `${r.width}x${r.height}` : r.loading ? "loading" : "error:" + r.error
-        }).join(",")
+        return (
+          <div className="flex w-[6px] h-[4px] bg-black">
+            <img src="https://img.test/1.png?ms=80" className="w-[2px] h-[4px] object-cover" />
+            <img src="https://img.test/2.png?ms=80" className="w-[2px] h-[4px]" />
+            <img src="https://img.test/3.png?ms=80" className="w-[2px] h-[4px] object-contain" />
+          </div>
+        )
       }
-    """, "useimage")
+    """, "img")
     let start = getMonoTime()
-    check a.render() == "loading,loading,loading"
+    var picture = u.draw()
     check msSince(start) < 60
-    check a.render() == "loading,loading,loading"
+    check picture[0, 0] == rgbx(0, 0, 0, 255)
     check jsIoInFlight() == 3
+    discard u.draw()
+    check jsIoInFlight() == 3 # asked once
     check pumpUntil(proc(): bool = jsAsyncPending() == 0)
-    check a.render() == "8x6,8x6,8x6"
     let renders = drainRenders()
     check renders >= 1
     check renders <= 3
+    picture = u.draw()
+    check picture[0, 0] == rgbx(255, 0, 0, 255)
+    check picture[3, 1] == rgbx(255, 0, 0, 255)
     # Kept: the next render asks nothing of the network.
-    check a.render() == "8x6,8x6,8x6"
+    discard u.draw()
     check jsIoInFlight() == 0
     check jsAsyncPending() == 0
 
-  test "useImage of a failed picture says why, and a data: URL is there at once":
+  test "<img src>: a failure draws nothing and is not asked again at once, a data: URL is there at once":
     let dataUrl = "data:image/png;base64," & encode(pngBytes)
-    let a = app("""
+    let u = ui("""
       export function get(app) {
-        const bad = frameos.useImage("https://img.test/missing")
-        const inline = frameos.useImage(app.config.dataUrl)
-        return `${bad.image ? "image" : bad.loading ? "loading" : "error"}|${inline.image ? inline.width : "none"}`
+        return (
+          <div className="flex w-[6px] h-[4px] bg-black">
+            <img src="https://img.test/missing" className="w-[3px] h-[4px]" />
+            <img src={app.config.dataUrl} className="w-[3px] h-[4px]" />
+          </div>
+        )
       }
-    """, "useimagefail")
-    check a.runtime.get(a.owner, %*{"dataUrl": dataUrl}, a.context).asString() == "loading|8"
+    """, "imgfail")
+    var picture = u.draw(%*{"dataUrl": dataUrl})
+    check picture[0, 0] == rgbx(0, 0, 0, 255)
+    check picture[4, 1] == rgbx(255, 0, 0, 255)
     check pumpUntil(proc(): bool = jsAsyncPending() == 0)
-    check a.runtime.get(a.owner, %*{"dataUrl": dataUrl}, a.context).asString() == "error|8"
+    picture = u.draw(%*{"dataUrl": dataUrl})
+    check picture[0, 0] == rgbx(0, 0, 0, 255)
+    check jsIoInFlight() == 0
+    check logged.anyIt("<img> https://img.test" in it)
+
+  test "where nothing pumps, an <img> is fetched in the render":
+    asyncPumped = false
+    defer: asyncPumped = true
+    let u = ui("""
+      export function get() {
+        return <div className="flex w-[6px] h-[4px] bg-black"><img src="https://img.invalid/a.png" className="w-[6px] h-[4px]" /></div>
+      }
+    """, "imgblocking")
+    discard u.draw()
+    # Asked of the network in the render (img.invalid never answers), not later.
+    check jsAsyncPending() == 0
+    check jsIoInFlight() == 0
+    check logged.anyIt("img.invalid" in it)
 
   test "useFetch: loading first, the data after, and a render asked for":
     let a = app("""
@@ -326,14 +345,14 @@ suite "async JavaScript":
     check jsAsyncPending() == 0
     check jsIoInFlight() == 0
 
-  test "fetch, the timers and loadImage are promises and functions, and get() may start one":
+  test "fetch and the timers are promises and functions, and get() may start one":
     let a = app("""
       export function get() {
         return [frameos.sleep(0) instanceof Promise, fetch("https://x.test/?ms=1") instanceof Promise,
           typeof setTimeout, typeof clearInterval, typeof frameos.useImage].join(":")
       }
     """, "promises")
-    check a.render() == "true:true:function:function:function"
+    check a.render() == "true:true:function:function:undefined"
     check pumpUntil(proc(): bool = jsAsyncPending() == 0)
 
 stopJsIo()

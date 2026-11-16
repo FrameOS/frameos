@@ -1,8 +1,9 @@
 #ifndef FOS_JS_IO_H
 #define FOS_JS_IO_H
 
-/* Async JavaScript's requests, made on a task of their own (fos_js_io.c,
- * docs/async-js.md). Called from the Nim side (js_runtime/js_io.nim) on the
+/* The network work scenes ask for, on one task (fos_js_io.c,
+ * docs/async-js.md): async JavaScript's requests, and jobs (the scene
+ * store's). Called from the Nim side (js_runtime/js_io.nim) on the
  * render task; the answers' chunks are the glue's (frameos_nim.h) and the
  * taker frees them with fos_nim_http_free_chunks. */
 
@@ -13,6 +14,10 @@
  * it (the app is answered at once). The strings and the body are copied. */
 bool fos_js_io_submit(int id, const char *method, const char *url, const char *headers, size_t headers_len,
                       const void *body, size_t body_len, int timeout_ms, size_t max_bytes);
+
+/* Runs `job(arg)` on the task, after what is queued; false when it cannot be
+ * queued or the task cannot start (no internal RAM). */
+bool fos_js_io_run(void (*job)(void *), void *arg);
 
 /* One answer, oldest first: false when none is waiting. Status 0 is no
  * response: the one chunk (or none) is the reason. */

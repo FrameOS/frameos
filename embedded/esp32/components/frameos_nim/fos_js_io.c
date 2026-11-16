@@ -1,8 +1,9 @@
 /*
- * Async JavaScript's requests on an ESP32 (docs/async-js.md): what a JS app's
- * fetch(), frameos.loadImage() and frameos.useImage() ask for, made off the
- * render task, so a render never waits on the network and a tap is answered
- * while a picture downloads.
+ * The frame's one task for network work a scene asked for (docs/async-js.md):
+ * a JS app's fetch() and the pictures of its `<img src="https://…">`, made
+ * off the render task, so a render never waits on the network and a tap is
+ * answered while a picture downloads; and the scene store's work
+ * (main/fos_store.c, fos_js_io_run), so the two never hold two TLS sessions.
  *
  * The render task hands a request over (frameos/js_runtime/js_io.nim,
  * fos_js_io_submit) and takes its answer back between renders
@@ -48,6 +49,8 @@ static const char *TAG = "fos_js_io";
 
 typedef struct {
     int id;
+    void (*job)(void *); /* fos_js_io_run: run this, nothing else */
+    void *job_arg;
     char *method;
     char *url;
     char *headers;
@@ -113,6 +116,10 @@ static void js_io_task(void *arg)
         taskEXIT_CRITICAL(&s_mux);
         if (!have) break;
 
+        if (r.job != NULL) {
+            r.job(r.job_arg);
+            continue;
+        }
         answer_t a = {.id = r.id};
         a.chunks = fos_nim_http_request_chunked(r.method, r.url, r.body, r.body_len, r.headers, r.headers_len,
                                                 r.timeout_ms, r.max_bytes, &a.status, &a.count);
@@ -153,6 +160,18 @@ static bool ensure_queues(void)
     return s_requests != NULL && s_answers != NULL;
 }
 
+/* After s_task_running was set: false (and it cleared) when there is no
+ * internal RAM for the task now. */
+static bool start_task(void)
+{
+    if (xTaskCreate(js_io_task, "fos_js_io", TASK_STACK, NULL, TASK_PRIORITY, NULL) == pdPASS) return true;
+    ESP_LOGE(TAG, "no memory for the request task");
+    taskENTER_CRITICAL(&s_mux);
+    s_task_running = false;
+    taskEXIT_CRITICAL(&s_mux);
+    return false;
+}
+
 bool fos_js_io_submit(int id, const char *method, const char *url, const char *headers, size_t headers_len,
                       const void *body, size_t body_len, int timeout_ms, size_t max_bytes)
 {
@@ -190,36 +209,39 @@ bool fos_js_io_submit(int id, const char *method, const char *url, const char *h
         free_request(&r);
         return false;
     }
-    if (start && xTaskCreate(js_io_task, "fos_js_io", TASK_STACK, NULL, TASK_PRIORITY, NULL) != pdPASS) {
-        /* No internal RAM for a task now: what is queued is refused, so the
-         * apps hear it instead of waiting for ever. */
-        ESP_LOGE(TAG, "no memory for the request task");
+    if (start && !start_task()) {
+        /* No internal RAM for a task now: this one is refused, so the app
+         * hears it instead of waiting for ever (what was queued before runs
+         * at the next start). */
         taskENTER_CRITICAL(&s_mux);
-        s_task_running = false;
-        int dropped = s_request_count;
-        request_t held[QUEUE_LEN]; /* the render task's stack: ~1.3 KB, once */
-        memcpy(held, s_requests, sizeof(request_t) * (size_t)dropped);
-        s_request_count = 0;
-        s_in_flight -= dropped;
+        s_request_count--;
+        s_in_flight--;
         taskEXIT_CRITICAL(&s_mux);
-        bool refused_this = false;
-        for (int i = 0; i < dropped; i++) {
-            if (held[i].id == id) refused_this = true;
-            else {
-                /* An answer with no response, which the app reads as a
-                 * network error. */
-                answer_t a = {.id = held[i].id, .status = 0, .chunks = NULL, .count = 0};
-                taskENTER_CRITICAL(&s_mux);
-                if (s_answer_count < QUEUE_LEN) {
-                    s_answers[s_answer_count++] = a;
-                    s_in_flight++;
-                }
-                taskEXIT_CRITICAL(&s_mux);
-            }
-            free_request(&held[i]);
-        }
-        if (dropped > 1) fos_client_wake_for_events();
-        return !refused_this;
+        free_request(&r);
+        return false;
+    }
+    return true;
+}
+
+bool fos_js_io_run(void (*job)(void *), void *arg)
+{
+    if (job == NULL || !ensure_queues()) return false;
+    bool start = false;
+    bool queued = false;
+    taskENTER_CRITICAL(&s_mux);
+    if (s_request_count < QUEUE_LEN) {
+        s_requests[s_request_count++] = (request_t){.job = job, .job_arg = arg};
+        queued = true;
+        start = !s_task_running;
+        s_task_running = true;
+    }
+    taskEXIT_CRITICAL(&s_mux);
+    if (!queued) return false;
+    if (start && !start_task()) {
+        taskENTER_CRITICAL(&s_mux);
+        s_request_count--;
+        taskEXIT_CRITICAL(&s_mux);
+        return false;
     }
     return true;
 }

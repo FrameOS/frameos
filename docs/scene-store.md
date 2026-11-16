@@ -37,7 +37,6 @@ frame's credential) and two bridge calls.
 ```ts
 { url, version,          // the store this frame browses, and its FrameOS
   busy, error, done,     // the action running, the last one's refusal, the last that worked
-  params, listing,       // the newest listing the host brought, and its query string
   installed: [{ id, store, v }], // every scene on the frame from the store
   preview: { store, id, name } | null,
   removeAny,             // a frame with no plane may delete any scene
@@ -45,19 +44,29 @@ frame's credential) and two bridge calls.
 ```
 
 `frameos.storeAction(action, args)` asks for work and returns at once:
-`browse {params}`, `preview {store, name}`, `install {store, name, show}`,
+`preview {store, name}`, `install {store, name, show}`,
 `update {store}`, `remove {store}`, `discard`. One runs at a time (one asked
 while another runs is dropped: `busy` says what runs). The host does it off
 the render task and renders the scene that asked again when it is done, if
 that scene still shows (the Pi checks `shownSceneId()`, the ESP32
-`fos_scenes_showing`). A re-read of what came from the store that found
+`fos_scenes_showing`). On an ESP32 the work runs on the one task that makes
+every request a scene asks for (`fos_js_io_run`, `docs/async-js.md`), so the
+store and an app's pictures never hold two TLS sessions.
+
+Browsing is the app's: it `fetch`es the listing for frames from `url`
+(`${url}/api/store/device/scenes?version=…&<its query>`), off the render, and
+renders again when the page is in (`docs/async-js.md`). Where a render may
+wait for it (no host, the browser preview, e-paper: one refresh per answer)
+it asks in the render with `frameos.httpRequest`. Until 2026.11.10 the host
+browsed for it (`storeAction("browse")`, `listing`); a store scene from before
+that cannot browse on a newer frame. A re-read of what came from the store that found
 nothing new draws nothing: on e-paper a render is a refresh.
 
 The host answers null (`""` from the hook) where there is no store: the owner
 turned the settings on the frame's screen off (`frame_settings_on_screen`,
 which also covers this), and every runtime without a host: a board rendered
 on its control plane (`docs/server-rendering.md`), a virtual frame. There the
-app browses on its own with `frameos.httpRequest` and installs nothing
+app installs nothing
 ("Previews and installs happen on the frame itself"). That is one-sided on
 purpose for now: a plane rendering a frame could be its host, and would answer
 `storeAction` itself.
@@ -102,11 +111,6 @@ fetches it from the CDN itself: the store scaling its own pictures, not a
 proxy for a frame's images. The app takes the `thumb` for a picture up to 640
 px wide (cards everywhere, a scene's page on a small screen) and the cover
 itself above that.
-
-The app hands the host the query string (`params`); the host takes only what a
-query holds (`validStoreParams`, `valid_params`) and puts it after the
-listing's path on the store it knows, so an app cannot point the host
-anywhere else.
 
 ### Changes go to the plane
 
@@ -186,21 +190,20 @@ scenes on disk. That is what "on frame" and Update are measured against.
   search, the page, the scene open, what it last asked, and the shelves. Every
   render writes it, so the scene that opens after a preview, a reboot or a
   deep sleep draws the same spot before any answer comes back.
-- **Snappy.** A tap answers in the next render: the host fetches off the render
-  task and the page fills in when the answer comes (`pending`, then the host's
-  render). Pages already seen are kept with `frameos.remember` (sixteen,
-  fresh for five minutes, then asked again in the background), the next page
-  is asked for while nothing else runs, and the covers come through
-  `frameos.useImage` (`docs/async-js.md`): every card's picture downloads at
-  once off the render (a Pi's request workers, an ESP32's request task), the
-  page draws placeholders meanwhile, and it is drawn again as they land, so a
-  tap is never stuck behind a download. Each is kept at its card's size (up
-  to 48 small pictures, `docs/jsx-ui.md` "Photos that stay"). It loaded one
-  cover a pass inside the render before (`setNextSleep(0.05)`), which held
-  every tap behind a download: two seconds and more a pass on a Pi and on an
-  ESP32 (2026-11-15). A board that sleeps between renders, and the browser
-  preview, have no pump: there `useImage` fetches in the render (the preview
-  one picture a render).
+- **Snappy.** A tap answers in the next render: the page is `fetch`ed off the
+  render and fills in when the answer comes. Pages already seen are kept with
+  `frameos.remember` (sixteen, fresh for five minutes, then asked again in the
+  background), the next page is asked for while nothing else runs, and the
+  covers are `<img src>`s (`docs/async-js.md`): every card's picture
+  downloads at once off the render (a Pi's request workers, an ESP32's
+  request task), the scene's initial shows meanwhile, and the page is drawn
+  again as they land, so a tap is never stuck behind a download. Each is
+  kept at its card's size (up to 48 small pictures, `docs/jsx-ui.md` "Photos
+  that stay"). It loaded one cover a pass inside the render before
+  (`setNextSleep(0.05)`), which held every tap behind a download: two seconds
+  and more a pass on a Pi and on an ESP32 (2026-11-15). A board that sleeps
+  between renders, e-paper and the browser preview fetch them in the render
+  (the preview one picture a render).
 - **What this frame is** decides what it is offered: a panel that animates puts
   the Real time shelf first (`prefer=realtime` under Featured, the shelf right
   after Featured); e-paper is not offered it (`exclude=realtime`, no shelf),
