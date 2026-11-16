@@ -2107,7 +2107,7 @@ static void *link_take_answer(void)
 
 /* A pass's pulls: on this task, or, while the link task has the round trips,
  * what it found. An answer it pulled is run whatever the mode. */
-static void pass_scenes_sync(void)
+bool fos_client_take_link_payload(void)
 {
     char etag[FOS_SCENES_ETAG_LEN];
     portENTER_CRITICAL(&s_link_mux);
@@ -2116,11 +2116,14 @@ static void pass_scenes_sync(void)
     memcpy(etag, s_link_payload_etag, sizeof(etag));
     s_link_payload = NULL;
     portEXIT_CRITICAL(&s_link_mux);
-    if (body != NULL) {
-        fos_scenes_take_backend_payload(body, len, etag);
-    } else if (!s_link_on) {
-        fos_scenes_sync(false);
-    }
+    if (body == NULL) return false;
+    fos_scenes_take_backend_payload(body, len, etag);
+    return true;
+}
+
+static void pass_scenes_sync(void)
+{
+    if (!fos_client_take_link_payload() && !s_link_on) fos_scenes_sync(false);
 }
 
 static void pass_settings_sync(void)

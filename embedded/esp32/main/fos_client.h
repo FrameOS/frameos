@@ -53,6 +53,9 @@ void fos_client_render_for_scene(void);
 bool fos_client_on_render_task(void);
 /* Keep Wi-Fi/HTTP available briefly after a control request on deep-sleep frames. */
 void fos_client_keep_awake_ms(uint32_t ms);
+/* A scene payload the link task downloaded, taken into the runtime now (the
+ * render task only). False when none was waiting. */
+bool fos_client_take_link_payload(void);
 /* The voice session's hold on the panel (docs/voice-chat.md): from the
  * hold until the answer, no render starts. What arrives meanwhile — the
  * chat's scene switch, then the state for the new scene — is applied as it
