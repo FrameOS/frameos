@@ -908,8 +908,7 @@ proc drawForm*(self: SceneSettingsScene, image: Image) =
   ## One render: laid out, drawn into `image`, and the form left behind for
   ## the pointer and the keyboard; back by itself once nobody has touched it
   ## for a while (the switcher's `drawUi`).
-  self.paper = paperPanel(self.frameConfig, image)
-  self.slow = not fastPanel(self.frameConfig, image)
+  (self.paper, self.slow) = panelLook(self.frameConfig, image)
   let round = isRound(self.frameConfig)
   # At the frame's render scale, as its scenes are (sceneSwitcher's uiRoom).
   let (roomW, roomH) = uiRoom(self.frameConfig, image.width, image.height)
@@ -1034,10 +1033,10 @@ proc renderSettings(self: FrameScene, context: ExecutionContext): Image =
 
 proc initSettings(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
   ## Nothing persisted to start from: what it shows comes with the switch.
-  let paper = paperPanel(frameConfig)
+  let (paper, slow) = panelLook(frameConfig)
   SceneSettingsScene(id: sceneId, frameConfig: frameConfig, logger: logger, state: newJObject(), ownRun: settingsOwnRun,
     shownName: "Scene settings", refreshInterval: IdleSeconds, backgroundColor: background(paper), paper: paper,
-    slow: not fastPanel(frameConfig))
+    slow: slow)
 
 var exportedScene* = ExportedInterpretedScene(
   name: "Scene settings",

@@ -69,10 +69,11 @@ proc panelIsPaper*(device: string, rgb565Canvas = false): bool =
     device == "embedded" or device.startsWith("waveshare.") or device.startsWith("inky") or
       device.startsWith("pimoroni.inky")
 
-proc panelIsFast*(device: string, rgb565Canvas = false): bool =
+template panelIsFast*(device: string, rgb565Canvas = false): bool =
   ## Whether a change shows as soon as it is drawn: a press, a finger moving,
   ## an animation. False where each change costs a refresh, so a scene draws
   ## less often and a press shows with what it did. Today every panel that is
   ## not paper; a fast e-paper, once there is one, says true here and stays
-  ## paper. The one place the runtime decides it.
+  ## paper. The one place the runtime decides it; a template, so it costs no
+  ## function of its own in the firmware.
   not panelIsPaper(device, rgb565Canvas)
