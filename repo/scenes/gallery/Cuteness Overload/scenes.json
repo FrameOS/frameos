@@ -2,7 +2,7 @@
   {
     "id": "ec112504-66b3-4e6d-a6de-f7647244d34e",
     "name": "Cuteness Overload",
-    "settings": { "backgroundColor": "#000000", "refreshInterval": 86400, "execution": "interpreted", "windowSize": "800x480" },
+    "settings": { "category": "art", "backgroundColor": "#000000", "refreshInterval": 86400, "execution": "interpreted", "windowSize": "800x480" },
     "fields": [
       {
         "name": "seconds",

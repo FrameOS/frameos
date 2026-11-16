@@ -3,6 +3,7 @@
     "id": "dvd-logo-bounce",
     "name": "DVD Logo Bounce",
     "settings": {
+      "category": "realtime",
       "execution": "interpreted",
       "refreshInterval": 0.0333333333,
       "backgroundColor": "#090b14",

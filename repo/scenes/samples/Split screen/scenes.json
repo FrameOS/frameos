@@ -91,6 +91,7 @@
       }
     ],
     "settings": {
+      "category": "art",
       "backgroundColor": "#000000",
       "refreshInterval": 3600,
       "execution": "interpreted",
@@ -283,6 +284,7 @@
       }
     ],
     "settings": {
+      "category": "art",
       "backgroundColor": "#000000",
       "refreshInterval": 3600,
       "execution": "interpreted"
@@ -474,6 +476,7 @@
       }
     ],
     "settings": {
+      "category": "demos",
       "backgroundColor": "#000000",
       "refreshInterval": 3600,
       "execution": "interpreted"
@@ -536,6 +539,7 @@
       }
     ],
     "settings": {
+      "category": "demos",
       "backgroundColor": "#000000",
       "refreshInterval": 3600,
       "execution": "interpreted"
@@ -732,6 +736,7 @@
       }
     ],
     "settings": {
+      "category": "demos",
       "refreshInterval": 3600,
       "backgroundColor": "#000000",
       "execution": "interpreted"

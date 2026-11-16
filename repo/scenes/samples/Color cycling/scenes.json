@@ -3,6 +3,7 @@
     "id": "58257360-472f-45ef-9acd-05b4f2b8f067",
     "name": "Color cycling",
     "settings": {
+      "category": "realtime",
       "execution": "interpreted",
       "refreshInterval": 0.05,
       "backgroundColor": "#000000",

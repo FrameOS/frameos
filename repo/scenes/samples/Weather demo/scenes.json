@@ -3,6 +3,7 @@
     "id": "weather-demo",
     "name": "Weather demo",
     "settings": {
+      "category": "weather",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#082f49",

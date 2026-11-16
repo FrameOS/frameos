@@ -2,7 +2,7 @@
   {
     "id": "2e0b2c3b-58d4-4c4e-a5cb-0ca95d2fd2f8",
     "name": "Message board",
-    "settings": { "backgroundColor": "#000000", "refreshInterval": 3600, "execution": "interpreted", "windowSize": "800x480" },
+    "settings": { "category": "utilities", "backgroundColor": "#000000", "refreshInterval": 3600, "execution": "interpreted", "windowSize": "800x480" },
     "fields": [
       {
         "access": "public",

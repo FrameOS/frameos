@@ -1666,6 +1666,7 @@
       }
     ],
     "settings": {
+      "category": "demos",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#ffffff",

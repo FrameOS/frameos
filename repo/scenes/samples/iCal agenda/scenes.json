@@ -3,6 +3,7 @@
     "id": "dc37aeba-fd8a-4d86-b883-c08d311eefdf",
     "name": "iCal agenda",
     "settings": {
+      "category": "calendar",
       "backgroundColor": "#ffffff",
       "refreshInterval": 60,
       "execution": "interpreted",

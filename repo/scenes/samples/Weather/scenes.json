@@ -3,6 +3,7 @@
     "id": "66d900ea-3f43-5652-a19e-4a66988cd902",
     "name": "Weather",
     "settings": {
+      "category": "weather",
       "refreshInterval": 900,
       "backgroundColor": "#000000",
       "execution": "interpreted",
