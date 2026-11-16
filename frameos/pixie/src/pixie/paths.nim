@@ -2530,8 +2530,14 @@ proc paintGradientNarrow(
     if grey:
       image.greyRowStore(image.dataIndex(x + x0, y + r)):
         for i in x0 ..< x1:
-          if coverage[i].a != 0:
-            let s = source(i)
+          let m = coverage[i]
+          if m.a != 0:
+            # `source`, without its if-expression: that was two zeroed
+            # temporaries a pixel, each a call on an -Os firmware (6 s of
+            # the reTerminal E1003's Word clock, 2026-11-16).
+            var s = colors[i - x0]
+            if m.a != 255:
+              s = blendMask(s, m)
             if s.a == 255:
               store(rgbxToGray8(s))
             elif s.a != 0:

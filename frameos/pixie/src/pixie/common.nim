@@ -14,6 +14,12 @@ template breathe*() =
     if not hook.isNil:
       hook()
 
+# Small per-pixel helpers: inlined where a loop calls them even when the
+# caller is compiled for size (the ESP32 firmware is -Os, where gcc called
+# these: a dozen calls a pixel in a gradient filled into a 4-bit grey
+# canvas, 13 s of a 15 s render on the reTerminal E1003, 2026-11-16).
+{.pragma: hotInline, inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".}
+
 type
   PixieError* = object of CatchableError ## Raised if an operation fails.
 
@@ -262,7 +268,7 @@ template isRgb565*(image: Image): bool =
 template isGray8*(image: Image): bool =
   image.format == pfGray8
 
-proc rgbxToGray8*(c: ColorRGBX): uint8 {.inline, raises: [].} =
+proc rgbxToGray8*(c: ColorRGBX): uint8 {.hotInline, raises: [].} =
   ## The luma of a premultiplied RGBX colour: BT.601 weights in 256ths
   ## (77 + 150 + 29 = 256), rounded. Alpha is dropped as for 565: a
   ## translucent pixel lands as the darker grey of its premultiplied RGB.
@@ -276,7 +282,7 @@ proc gray8ToRgbx*(l: uint8): ColorRGBX {.inline, raises: [].} =
 const OrderedThresholds4x4* = [0'u8, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]
   ## A 4x4 Bayer matrix by `(y and 3) * 4 + (x and 3)`.
 
-proc grayLevel16Ordered*(gray, threshold: uint8): uint8 {.inline, raises: [].} =
+proc grayLevel16Ordered*(gray, threshold: uint8): uint8 {.hotInline, raises: [].} =
   ## One of sixteen greys for an 8-bit grey, against its OrderedThresholds4x4
   ## entry. The sixteen exact levels (multiples of 17, black and white among
   ## them) stay flat. Integers: an S3 does double-precision floats in software,
@@ -291,7 +297,7 @@ proc gray4Level*(data: ptr UncheckedArray[uint8], index: int): uint8 {.inline, r
   let packed = data[index shr 1]
   if (index and 1) == 0: packed shr 4 else: packed and 15
 
-proc gray4Put*(data: ptr UncheckedArray[uint8], index: int, level: uint8) {.inline, raises: [].} =
+proc gray4Put*(data: ptr UncheckedArray[uint8], index: int, level: uint8) {.hotInline, raises: [].} =
   ## Stores a level (0..15), leaving the other pixel of its byte alone.
   let at = index shr 1
   if (index and 1) == 0:
