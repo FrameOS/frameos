@@ -29,6 +29,7 @@ idf_component_register(
         "fos_store.c"
         "fos_store_scan.c"
         "fos_http_body.c"
+        "fos_scene_pieces.c"
         "fos_http.c"
         "fos_animation.c"
         "fos_boot_scene.c"

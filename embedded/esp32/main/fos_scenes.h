@@ -15,6 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "fos_scene_pieces.h"
 
 struct cJSON;
 
@@ -39,19 +40,19 @@ esp_err_t fos_scenes_sync(bool force);
 
 #define FOS_SCENES_ETAG_LEN 80
 /* The backend's scenes when they changed since the etag held (or a sync was
- * asked for, or `force`): the body, malloc'd for the caller, its etag in
+ * asked for, or `force`): read in pieces, each scene in a block of its own
+ * (fos_scene_pieces.h), for fos_scenes_take_backend_payload, its etag in
  * `etag_out`; NULL when unchanged or on an error (logged, in `out_err`). Any
  * task: the backend link task fetches with it, so the download is off the
  * render task (fos_client.c). */
-char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size_t etag_len,
-                               esp_err_t *out_err);
+fos_scene_set_t *fos_scenes_backend_fetch(bool force, char *etag_out, size_t etag_len, esp_err_t *out_err);
 /* A payload fetched with fos_scenes_backend_fetch: into the runtime now when
  * there is room for it whole, and onto flash by the scene store's own task
  * (as changes or the combined file, then the etag and the source); without
  * the room, onto flash first and then applied one scene at a time. A patch
- * (`?patch=1`) is written here, scene by scene. Takes `body`. Render task
+ * (`?patch=1`) is written here, scene by scene. Takes `set`. Render task
  * only. */
-esp_err_t fos_scenes_take_backend_payload(char *body, size_t len, const char *etag);
+esp_err_t fos_scenes_take_backend_payload(fos_scene_set_t *set, const char *etag);
 /* The store task still has a payload to write. A deep sleep and a restart wait
  * for it (fos_scenes_store_wait: false when `timeout_ms` ran out first). */
 bool fos_scenes_store_busy(void);

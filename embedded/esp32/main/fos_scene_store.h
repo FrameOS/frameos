@@ -102,6 +102,11 @@ char *fos_scene_store_read_file(const char *path, size_t *out_len);
 fos_scene_store_err_t fos_scene_store_write_file(const char *path, const char *tmp,
                                                  const char *data, size_t len);
 
+/* As fos_scene_store_write_file, a JSON array of `scenes` (a set's combined
+ * file written from scenes read in pieces, fos_scene_pieces.h). */
+fos_scene_store_err_t fos_scene_store_write_set(const char *path, const char *tmp,
+                                                const fos_scene_store_put_t *scenes, int count);
+
 /* Apply one change. On any failure the index and the slots it names are as
  * they were. `on_dropped` is called (after the index is written) for each
  * scene the change removed. */

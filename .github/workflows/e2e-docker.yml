@@ -424,6 +424,12 @@ jobs:
             embedded/esp32/main/fos_http_body.c embedded/esp32/main/tests/test_fos_http_body.c \
             -o /tmp/test_fos_http_body
           /tmp/test_fos_http_body
+          # A backend's scene answer read in pieces, each scene in a block of
+          # its own (fos_scene_pieces.c), at every read size.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/fos_scene_pieces.c embedded/esp32/main/tests/test_fos_scene_pieces.c \
+            -o /tmp/test_fos_scene_pieces
+          /tmp/test_fos_scene_pieces
           # The SPIFFS garbage collection order and the scene store split,
           # replayed on the SPIFFS that ESP-IDF ships (fos_spiffs_gc.c, a
           # 20-scene set pushed over itself on a 1 MB /state). The backend

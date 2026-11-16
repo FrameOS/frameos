@@ -61,6 +61,7 @@ static const char *TAG = "fos_scenes";
 #define SCENES_BODY_WAIT_MS 8000
 #define ETAG_LEN 80
 _Static_assert(ETAG_LEN == FOS_SCENES_ETAG_LEN, "fos_scenes.h hands out etags of this length");
+_Static_assert(FOS_SCENE_PIECES_MAX == SCENES_SLOT_MAX, "a backend set holds no more scenes than the store");
 #define SCENE_ID_LEN 128
 #define SCENE_ERROR_LEN 256
 
@@ -430,15 +431,19 @@ static void make_room(size_t len)
  * fails and keeps it. (It used to delete the old file and write again, and
  * a second failure left neither: a frame rebooted with no scenes.) The store
  * runs make_room() first. */
-static esp_err_t write_file_replace_locked(const char *path, const char *tmp_path,
-                                           const char *data, size_t len)
+static esp_err_t store_write_err(fos_scene_store_err_t err, const char *path, size_t len)
 {
-    fos_scene_store_err_t err = fos_scene_store_write_file(path, tmp_path, data, len);
     if (err == FOS_SCENE_STORE_OK) return ESP_OK;
     int err_no = errno; /* the store keeps it for this */
     set_scene_error("write", path, len, err_no);
     ESP_LOGE(TAG, "%s", s_last_error);
     return scene_err_from_errno(err_no, err == FOS_SCENE_STORE_ERR_NO_SPACE ? ESP_ERR_NO_MEM : ESP_FAIL);
+}
+
+static esp_err_t write_file_replace_locked(const char *path, const char *tmp_path,
+                                           const char *data, size_t len)
+{
+    return store_write_err(fos_scene_store_write_file(path, tmp_path, data, len), path, len);
 }
 
 /* s_etag is what the next conditional GET sends: read by the backend link
@@ -866,10 +871,8 @@ static void set_split_no_room_len(uint32_t len)
  * replays it). On any failure the index is gone and the combined file stays,
  * so the caller loads that whole: a frame never loses its scenes to a failed
  * optimization. A payload that is not an array changes nothing. */
-static esp_err_t split_scenes_locked(const char *json, size_t len)
+static esp_err_t split_puts_locked(const fos_scene_store_put_t *puts, int count, size_t len)
 {
-    static fos_scene_store_put_t puts[SCENES_SLOT_MAX];
-    int count = scan_array_elements(json, len, puts, SCENES_SLOT_MAX);
     if (count <= 0) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -899,6 +902,12 @@ static esp_err_t split_scenes_locked(const char *json, size_t len)
     ESP_LOGI(TAG, "split %d scene(s) into per-scene files (%u bytes total)",
              count, (unsigned)len);
     return ESP_OK;
+}
+
+static esp_err_t split_scenes_locked(const char *json, size_t len)
+{
+    static fos_scene_store_put_t puts[SCENES_SLOT_MAX];
+    return split_puts_locked(puts, scan_array_elements(json, len, puts, SCENES_SLOT_MAX), len);
 }
 
 static esp_err_t split_scenes(const char *json, size_t len)
@@ -1087,7 +1096,11 @@ static bool activate_scene_id(const char *scene_id)
     return load_scene_slot(slot, scene_id, "select");
 }
 
-static bool load_into_nim(const char *json, size_t len, const char *origin)
+/* `count` scenes, each read where it lies by the runtime (frameos_nim_load_scenes):
+ * never a copy of the whole set (a 378 KB set aborted the reTerminal E1004 out
+ * of memory with 1.5 MB free in 300 KB blocks, 2026-11-16). `len`: the set's. */
+static bool load_into_nim(const char *const *scenes, const size_t *lens, int count, size_t len,
+                          const char *origin)
 {
     if (!frameos_nim_available()) {
         ESP_LOGW(TAG, "nim runtime unavailable, scenes not loaded");
@@ -1106,14 +1119,7 @@ static bool load_into_nim(const char *json, size_t len, const char *origin)
      * count and inline JS, so a constant in the UI would be fiction. This
      * gives the control plane a real per-frame number to advise from. */
     size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    /* Split here by the store's scanner, each scene read where it lies by the
-     * runtime: never a copy of the whole set (a 378 KB set aborted the
-     * reTerminal E1004 out of memory with 1.5 MB free in 300 KB blocks,
-     * 2026-11-16). More scenes than a store holds is refused, not cut. */
-    static const char *scene_starts[SCENES_SLOT_MAX + 1];
-    static size_t scene_lens[SCENES_SLOT_MAX + 1];
-    int scene_count = fos_store_split_scenes(json, len, scene_starts, scene_lens, SCENES_SLOT_MAX + 1);
-    int count = scene_count > SCENES_SLOT_MAX ? 0 : frameos_nim_load_scenes(scene_starts, scene_lens, scene_count);
+    count = count > 0 ? frameos_nim_load_scenes(scenes, lens, count) : 0;
     if (count <= 0) {
         ESP_LOGE(TAG, "scene payload rejected by runtime");
         log_scene_event("scenes:load", "error", origin, "", "runtime-rejected",
@@ -1296,7 +1302,11 @@ bool fos_scenes_apply_pending(void)
         }
         int slots_before = s_slot_count;
         s_slot_count = 0;
-        ok = load_into_nim(json, len, "stored");
+        /* More scenes than a store holds is refused, not cut. */
+        static const char *starts[SCENES_SLOT_MAX + 1];
+        static size_t lens[SCENES_SLOT_MAX + 1];
+        int count = fos_store_split_scenes(json, len, starts, lens, SCENES_SLOT_MAX + 1);
+        ok = load_into_nim(starts, lens, count > SCENES_SLOT_MAX ? 0 : count, len, "stored");
         free(json);
         json = NULL;
         if (ok) {
@@ -1871,12 +1881,10 @@ static void forget_dropped_scene(const char *scene_id, void *ctx)
  * wrote all twenty. ESP_ERR_NOT_FOUND, nothing written, when there is no
  * per-scene store to change (a first set, or a whole payload not split yet):
  * the caller stores the set whole. Under the store lock. */
-static esp_err_t store_set_as_changes_locked(const char *json, size_t len, fos_scenes_source_t source)
+static esp_err_t store_puts_as_changes_locked(const fos_scene_store_put_t *puts, int count, size_t len,
+                                              fos_scenes_source_t source)
 {
-    if (combined_stored()) return ESP_ERR_NOT_FOUND;
-    static fos_scene_store_put_t puts[SCENES_SLOT_MAX];
-    int count = scan_array_elements(json, len, puts, SCENES_SLOT_MAX);
-    if (count <= 0) return ESP_ERR_NOT_FOUND;
+    if (combined_stored() || count <= 0) return ESP_ERR_NOT_FOUND;
     fos_scene_store_set_result_t result;
     fos_scene_store_err_t err = fos_scene_store_apply_set(puts, count, scene_source_str((int)source), &result,
                                                           forget_dropped_scene, NULL);
@@ -1891,6 +1899,12 @@ static esp_err_t store_set_as_changes_locked(const char *json, size_t len, fos_s
     ESP_LOGI(TAG, "%d-scene set stored %s (%u bytes)", result.scene_count, s_set_summary,
              (unsigned)result.written_bytes);
     return ESP_OK;
+}
+
+static esp_err_t store_set_as_changes_locked(const char *json, size_t len, fos_scenes_source_t source)
+{
+    static fos_scene_store_put_t puts[SCENES_SLOT_MAX];
+    return store_puts_as_changes_locked(puts, scan_array_elements(json, len, puts, SCENES_SLOT_MAX), len, source);
 }
 
 /* A change somebody waits to see (it activates a scene: "Push & activate", a
@@ -2095,56 +2109,57 @@ char *fos_scenes_list_json(void)
     return json;
 }
 
+/* A backend set read in pieces (fos_scene_pieces.h) as the store's puts,
+ * into the caller's array: the render task's patch and the store task's
+ * write each have their own. */
+static fos_scene_store_put_t *set_puts(const fos_scene_set_t *set, fos_scene_store_put_t *puts)
+{
+    for (int i = 0; i < set->count; i++) puts[i] = (fos_scene_store_put_t){.json = set->scenes[i], .len = set->lens[i]};
+    return puts;
+}
+
+static void scene_set_free(fos_scene_set_t *set)
+{
+    if (set == NULL) return;
+    for (int i = 0; i < set->count; i++) free(set->scenes[i]);
+    free(set->rest);
+    free(set);
+}
+
 /* A backend's answer to `?patch=1` when it knows what this frame holds:
  * {"patch":true,"base":"<etag>","order":[...],"put":[...]}. Anything not
  * against the set this frame holds forces the whole payload next pass.
  *
- * Read without a tree of the whole answer: `base` and `order` are parsed by
- * themselves and each scene of `put` by the store as it writes that scene, so
- * a patch costs its text and its largest scene. As one tree, a 365 KB patch
- * (fifteen scenes, each with a new desktop layout) did not fit beside the
- * panel's render on the reTerminal E1004 and was refused out of memory
- * (patch-refused, the hardware bench, 2026-11-16). */
-static esp_err_t apply_backend_patch(const char *body, size_t len, const char *etag)
+ * Read in pieces: the scenes of `put` each in a block of its own, and `rest`
+ * the patch without them (`"put":[]`), a few KB parsed as a tree. As one
+ * tree, a 365 KB patch (fifteen scenes, each with a new desktop layout) did
+ * not fit beside the panel's render on the reTerminal E1004, and as one
+ * block it did not fit either (patch-refused, no-memory: the hardware bench,
+ * 2026-11-16). */
+static esp_err_t apply_backend_patch(const fos_scene_set_t *set, const char *etag)
 {
-    if (!fos_json_depth_ok(body, len, FOS_JSON_MAX_DEPTH)) return ESP_ERR_INVALID_ARG;
-    const char *base_text = NULL, *order_text = NULL, *put_text = NULL;
-    size_t base_len = 0, order_len = 0, put_len = 0;
-    static const char *starts[SCENES_SLOT_MAX + 1];
-    static size_t lens[SCENES_SLOT_MAX + 1];
-    static fos_scene_store_put_t puts[SCENES_SLOT_MAX];
-    int put_count = 0;
-    if (fos_store_object_member(body, len, "put", &put_text, &put_len)) {
-        /* One more than a store holds: a longer list is refused, not cut. */
-        put_count = fos_store_split_scenes(put_text, put_len, starts, lens, SCENES_SLOT_MAX + 1);
-    }
-    if (!fos_store_object_member(body, len, "base", &base_text, &base_len) ||
-        !fos_store_object_member(body, len, "order", &order_text, &order_len) || put_count < 0 ||
-        put_count > SCENES_SLOT_MAX) {
-        s_sync_requested = true;
-        return ESP_ERR_INVALID_ARG;
-    }
-    for (int i = 0; i < put_count; i++) puts[i] = (fos_scene_store_put_t){.json = starts[i], .len = lens[i]};
-    cJSON *base = cJSON_ParseWithLength(base_text, base_len);
-    cJSON *order = cJSON_ParseWithLength(order_text, order_len);
+    if (!fos_json_depth_ok(set->rest, set->rest_len, FOS_JSON_MAX_DEPTH)) return ESP_ERR_INVALID_ARG;
+    cJSON *patch = cJSON_ParseWithLength(set->rest, set->rest_len);
+    const cJSON *base = cJSON_GetObjectItem(patch, "base");
+    const cJSON *order = cJSON_GetObjectItem(patch, "order");
     esp_err_t err;
     char held[ETAG_LEN];
     etag_get(held, sizeof(held));
     if (!cJSON_IsString(base) || base->valuestring == NULL || strcmp(base->valuestring, held) != 0) {
         s_sync_requested = true;
-        err = base == NULL ? ESP_ERR_NO_MEM : ESP_ERR_INVALID_STATE;
+        err = patch == NULL ? ESP_ERR_NO_MEM : ESP_ERR_INVALID_STATE;
     } else if (!cJSON_IsArray(order)) {
         s_sync_requested = true;
-        err = order == NULL ? ESP_ERR_NO_MEM : ESP_ERR_INVALID_ARG;
+        err = ESP_ERR_INVALID_ARG;
     } else {
         /* On the render task, which never paces itself. */
-        fos_scene_store_change_t change = {.puts = puts, .put_count = put_count, .order = order};
+        static fos_scene_store_put_t puts[FOS_SCENE_PIECES_MAX];
+        fos_scene_store_change_t change = {.puts = set_puts(set, puts), .put_count = set->count, .order = order};
         fos_scene_store_result_t result;
         err = apply_store_change(&change, FOS_SCENES_SOURCE_BACKEND, etag, "scenes:patch", false, &result);
         if (err != ESP_OK) s_sync_requested = true;
     }
-    cJSON_Delete(base);
-    cJSON_Delete(order);
+    cJSON_Delete(patch);
     return err;
 }
 
@@ -2159,8 +2174,7 @@ static esp_err_t apply_backend_patch(const char *body, size_t len, const char *e
  * dropped; a deep sleep and a restart wait for the writes
  * (fos_scenes_store_wait, the shutdown handler). */
 typedef struct {
-    char *body; /* malloc'd, the job's own; NULL: no job */
-    size_t len;
+    fos_scene_set_t *set; /* the job's own (scene_set_free); NULL: no job */
     char etag[ETAG_LEN];
     /* The runtime did not take it whole (store_first): written as fast as
      * flash goes, and applied from flash once it is, one scene at a time. */
@@ -2240,21 +2254,26 @@ static void store_backend_payload(const store_job_t *job)
     /* Paced through the store's hook (store_pace_hook). On a per-scene store,
      * as changes to it: only the scenes that changed are written, one at a
      * time, and the index names the set the runtime runs. */
-    esp_err_t err = store_set_as_changes_locked(job->body, job->len, FOS_SCENES_SOURCE_BACKEND);
+    const fos_scene_set_t *set = job->set;
+    static fos_scene_store_put_t set_scenes[FOS_SCENE_PIECES_MAX];
+    const fos_scene_store_put_t *puts = set_puts(set, set_scenes);
+    esp_err_t err = store_puts_as_changes_locked(puts, set->count, set->bytes, FOS_SCENES_SOURCE_BACKEND);
     bool as_changes = err == ESP_OK;
     bool split = false;
     if (err == ESP_ERR_NOT_FOUND) {
-        err = write_file_replace_locked(SCENES_PATH, SCENES_TMP_PATH, job->body, job->len);
+        /* The combined file, written from the scenes in hand. */
+        err = store_write_err(fos_scene_store_write_set(SCENES_PATH, SCENES_TMP_PATH, puts, set->count), SCENES_PATH,
+                              set->bytes);
         if (err == ESP_OK) combined_set(true);
         if (err == ESP_OK && split_no_room_len() != 0) set_split_no_room_len(0);
         if (err == ESP_OK && job->reload) {
-            /* Split now, from the body in hand, so the apply loads one scene.
+            /* Split now, from the scenes in hand, so the apply loads one.
              * A split that fails leaves the combined file for the apply to
              * load whole, as a producer's does (store_split_stored). */
-            split = split_scenes_locked(job->body, job->len) == ESP_OK;
+            split = split_puts_locked(puts, set->count, set->bytes) == ESP_OK;
             if (!split && s_split_out_of_room) {
                 s_split_out_of_room = false;
-                set_split_no_room_len((uint32_t)job->len);
+                set_split_no_room_len((uint32_t)set->bytes);
             }
         }
     } else if (err == ESP_OK && split_no_room_len() != 0) {
@@ -2266,7 +2285,7 @@ static void store_backend_payload(const store_job_t *job)
         /* A newer set waits to be written: it is the one to apply (the
          * runtime may hold it whole already), and this one is not. */
         portENTER_CRITICAL(&s_store_mux);
-        if (s_store_next.body != NULL) {
+        if (s_store_next.set != NULL) {
             s_store_next.reload = true;
             reload = false;
         }
@@ -2297,10 +2316,10 @@ static void store_backend_payload(const store_job_t *job)
         if (!as_changes && !job->reload) fos_scene_store_remove_index();
         log_scene_event("scenes:store", "ok", "backend", "",
                         as_changes ? s_set_summary : split ? "written, split" : "written",
-                        job->len, 0, 0, ESP_OK);
+                        set->bytes, 0, 0, ESP_OK);
     } else {
         log_scene_event("scenes:store", "error", "backend", "",
-                        s_last_error[0] ? s_last_error : "store-failed", job->len, 0, 0, err);
+                        s_last_error[0] ? s_last_error : "store-failed", set->bytes, 0, 0, err);
     }
     if (reload) {
         /* The apply ends "Updating" (fos_scenes_apply_pending); the new set
@@ -2315,7 +2334,7 @@ static void store_backend_payload(const store_job_t *job)
      * poll sends the stored etag again: the backend answers with this set,
      * and it is written then. */
     portENTER_CRITICAL(&s_store_mux);
-    bool newer = s_store_next.body != NULL;
+    bool newer = s_store_next.set != NULL;
     portEXIT_CRITICAL(&s_store_mux);
     if (!newer) load_etag();
 }
@@ -2363,13 +2382,13 @@ static void store_task(void *arg)
             portENTER_CRITICAL(&s_store_mux);
             store_job_t job = s_store_next;
             s_store_next = (store_job_t){0};
-            bool split = job.body == NULL && s_store_split_wanted;
+            bool split = job.set == NULL && s_store_split_wanted;
             if (split) s_store_split_wanted = false;
-            if (job.body == NULL && !split) s_store_busy = false;
+            if (job.set == NULL && !split) s_store_busy = false;
             portEXIT_CRITICAL(&s_store_mux);
-            if (job.body != NULL) {
+            if (job.set != NULL) {
                 store_backend_payload(&job);
-                free(job.body);
+                scene_set_free(job.set);
             } else if (split) {
                 store_split_stored();
             } else {
@@ -2410,15 +2429,14 @@ static bool store_split_behind(void)
     return true;
 }
 
-/* `body` (malloc'd) to the store task, which frees it; false (and `body`
- * still the caller's) when there is no task. */
-static bool store_behind(char *body, size_t len, const char *etag, bool reload)
+/* `set` to the store task, which frees it; false (and `set` still the
+ * caller's) when there is no task. */
+static bool store_behind(fos_scene_set_t *set, const char *etag, bool reload)
 {
     if (!store_task_ready()) return false;
     portENTER_CRITICAL(&s_store_mux);
-    char *dropped = s_store_next.body;
-    s_store_next.body = body;
-    s_store_next.len = len;
+    fos_scene_set_t *dropped = s_store_next.set;
+    s_store_next.set = set;
     /* A store-first set dropped for this one leaves its apply (and the
      * s_store_changing it raised) to this one. */
     s_store_next.reload = reload || (dropped != NULL && s_store_next.reload);
@@ -2426,7 +2444,7 @@ static bool store_behind(char *body, size_t len, const char *etag, bool reload)
     bool start = !s_store_busy;
     s_store_busy = true;
     portEXIT_CRITICAL(&s_store_mux);
-    free(dropped);
+    scene_set_free(dropped);
     if (start) xTaskNotifyGive(s_store_task);
     return true;
 }
@@ -2450,11 +2468,10 @@ bool fos_scenes_store_busy(void)
     return s_store_busy;
 }
 
-char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size_t etag_len, esp_err_t *out_err)
+fos_scene_set_t *fos_scenes_backend_fetch(bool force, char *etag_out, size_t etag_len, esp_err_t *out_err)
 {
     esp_err_t err = ESP_OK;
-    char *body = NULL;
-    if (out_len) *out_len = 0;
+    fos_scene_set_t *set = NULL;
     if (etag_out && etag_len) etag_out[0] = '\0';
     bool log_unchanged = force;
     /* A poll skips while another fetch runs; a forced sync waits for it. */
@@ -2492,6 +2509,10 @@ char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size
          * download, parse and write. Not when the frame holds no set: then it
          * wants all of it whatever its ETag says. */
         bool holds_set = s_slot_count > 0 || s_loaded > 0;
+        /* Each scene in a block of its own (fos_scene_pieces.h): one block
+         * the size of the answer did not fit beside a photo on the
+         * reTerminal E1004 (no-memory, 378-415 KB, 2026-11-16). */
+        fos_scene_set_t *pieces = calloc(1, sizeof(*pieces));
         fos_http_request_t request = {
             .url = url,
             .auth = auth,
@@ -2501,9 +2522,10 @@ char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size
             /* Off the render task a render may hold the block for a moment;
              * on it nothing else is running to give it back. */
             .alloc_wait_ms = fos_client_on_render_task() ? 0 : SCENES_BODY_WAIT_MS,
+            .scene_set = pieces,
         };
-        fos_http_response_t response;
-        err = fos_http_fetch(&request, SCENES_MAX_BYTES, &response);
+        fos_http_response_t response = {0};
+        err = pieces ? fos_http_fetch(&request, SCENES_MAX_BYTES, &response) : ESP_ERR_NO_MEM;
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "scenes sync: connect failed: %s", esp_err_to_name(err));
             log_scene_event("scenes:sync", "error", "backend", "", "connect-failed", 0, 0, 0, err);
@@ -2514,7 +2536,6 @@ char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size
         } else if (response.status != 200) {
             ESP_LOGW(TAG, "scenes sync: HTTP %d from %s", response.status, url);
             log_scene_event("scenes:sync", "error", "backend", "", "http-error", 0, 0, response.status, ESP_FAIL);
-            fos_http_response_free(&response);
             err = ESP_FAIL;
         } else if (response.too_large) {
             ESP_LOGE(TAG, "scenes sync: payload too large (%lld)", response.content_length);
@@ -2522,30 +2543,33 @@ char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size
                             (size_t)(response.content_length > 0 ? response.content_length : SCENES_MAX_BYTES),
                             0, response.status, ESP_ERR_NO_MEM);
             err = ESP_ERR_NO_MEM;
-        } else if (response.body == NULL) {
+        } else if (response.body_err != ESP_OK) {
             /* What the answer said it was, and whether there was no buffer
-             * for it or the read broke off: "read-failed, 0 bytes" said
-             * neither. */
-            err = response.body_err == ESP_ERR_NO_MEM ? ESP_ERR_NO_MEM : ESP_FAIL;
+             * for a scene of it, it was not a scene answer, or the read
+             * broke off: "read-failed, 0 bytes" said none of it. */
+            err = response.body_err;
             log_scene_event("scenes:sync", "error", "backend", "",
-                            err == ESP_ERR_NO_MEM ? "no-memory" : "read-failed",
+                            err == ESP_ERR_NO_MEM               ? "no-memory"
+                            : err == ESP_ERR_INVALID_RESPONSE ? "invalid"
+                                                              : "read-failed",
                             (size_t)(response.content_length > 0 ? response.content_length : 0), 0,
                             response.status, err);
         } else {
-            body = response.body;
-            if (out_len) *out_len = response.body_len;
+            set = pieces;
+            pieces = NULL;
             if (etag_out && etag_len) strlcpy(etag_out, response.etag, etag_len);
             fetched_set(response.etag);
         }
+        free(pieces); /* read nothing, or kept nothing */
     }
     if (s_fetch_lock) xSemaphoreGive(s_fetch_lock);
     if (out_err) *out_err = err;
-    return body;
+    return set;
 }
 
 /* Whether the runtime can take a whole backend payload of `len` bytes now
- * (load_into_nim): the instant switch to a new set. It copies the payload
- * into one string and parses every scene of it, and holds them all until the
+ * (load_into_nim): the instant switch to a new set. It parses every scene of
+ * it (each copied alone since 2026-11-16), and holds them all until the
  * next set: a 420 KB set took 750 KB of PSRAM on the reTerminal E1003, and a
  * 378 KB one on the E1004 failed its copy with 1.5 MB free whose largest
  * block was 296 KB, after letting go of the scene it showed (the hardware
@@ -2561,24 +2585,25 @@ static bool runtime_room_for_whole(size_t len)
            heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= WHOLE_LOAD_FREE_FACTOR * len;
 }
 
-esp_err_t fos_scenes_take_backend_payload(char *body, size_t len, const char *etag)
+esp_err_t fos_scenes_take_backend_payload(fos_scene_set_t *set, const char *etag)
 {
     fetched_set("");
-    if (body == NULL || len == 0) {
-        free(body);
+    if (set == NULL || set->rest == NULL) {
+        scene_set_free(set);
         return ESP_ERR_INVALID_ARG;
     }
+    size_t len = set->bytes;
     esp_err_t err = mount_state();
     if (err != ESP_OK) {
-        free(body);
+        scene_set_free(set);
         return err;
     }
     /* An object, not the array a whole payload is: only the scenes that
      * changed since the set this frame holds (`?patch=1`). Written here,
-     * scene by scene through the store; a few KB, not a whole set. */
-    if (body[0] == '{') {
-        err = apply_backend_patch(body, len, etag);
-        free(body);
+     * scene by scene through the store. */
+    if (set->rest[0] == '{') {
+        err = apply_backend_patch(set, etag);
+        scene_set_free(set);
         log_scene_event("scenes:sync", err == ESP_OK ? "updated" : "error", "backend", "",
                         err == ESP_OK ? "patched" : "patch-refused", len, 0, 200, err);
         return err;
@@ -2607,7 +2632,7 @@ esp_err_t fos_scenes_take_backend_payload(char *body, size_t len, const char *et
         int slots_before = s_slot_count;
         s_slot_count = 0;
         s_resident_scene_id[0] = '\0';
-        whole = load_into_nim(body, len, "backend");
+        whole = load_into_nim((const char *const *)set->scenes, set->lens, set->count, len, "backend");
         /* Refused (out of memory, as a 378 KB set was on the E1004): the
          * slots from before are still on flash, and the set goes store-first. */
         if (!whole) s_slot_count = slots_before;
@@ -2627,23 +2652,22 @@ esp_err_t fos_scenes_take_backend_payload(char *body, size_t len, const char *et
          * a selection waits for the new one (s_store_changing). */
         s_store_changing = true;
     }
-    if (store_behind(body, len, etag, !whole)) return ESP_OK;
+    if (store_behind(set, etag, !whole)) return ESP_OK;
     /* No store task: written here, as it always was. */
-    store_job_t job = {.body = body, .len = len, .reload = !whole};
+    store_job_t job = {.set = set, .reload = !whole};
     strlcpy(job.etag, etag ? etag : "", sizeof(job.etag));
     store_backend_payload(&job);
-    free(body);
+    scene_set_free(set);
     return ESP_OK;
 }
 
 esp_err_t fos_scenes_sync(bool force)
 {
-    size_t len = 0;
     char etag[ETAG_LEN];
     esp_err_t err = ESP_OK;
-    char *body = fos_scenes_backend_fetch(force, &len, etag, sizeof(etag), &err);
-    if (body == NULL) return err;
-    return fos_scenes_take_backend_payload(body, len, etag);
+    fos_scene_set_t *set = fos_scenes_backend_fetch(force, etag, sizeof(etag), &err);
+    if (set == NULL) return err;
+    return fos_scenes_take_backend_payload(set, etag);
 }
 
 bool fos_scenes_settings_shown(void)
