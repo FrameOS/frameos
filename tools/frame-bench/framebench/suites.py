@@ -630,7 +630,14 @@ def suite_desktop(ctx, frame, layouts=None):
             missing = sorted({(event(x) or {}).get('layoutSceneId') for x in con.history_since(t0) if '"layout:missing"' in x})
             if missing:
                 entry['layout_missing'] = missing
-                if lid not in missing and chosen is None:
+                if lid not in missing and took is None:
+                    # The device did not take this push: the missing layout is
+                    # the set before's, still run against a store that holds
+                    # this one (fos_scenes.c reloads from flash after a refused
+                    # set), not a layout chosen on the frame.
+                    issues.append(issue('fail', 'stale_set', where,
+                                        f'the push was not taken and the frame still wears {missing[0]} from the set before, which flash no longer holds'))
+                elif lid not in missing and chosen is None:
                     chosen = missing[0]
                     issues.append(issue('fail', 'frame_layout_choice', where,
                                         f'the frame wears {missing[0]}, chosen on the frame, over every install: that layout is not on the frame, and each render looks it up again'))

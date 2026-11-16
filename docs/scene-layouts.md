@@ -117,7 +117,9 @@ From then on, one host loop and one scene:
 - A scene shown as a panel of another has no layout of its own: only the scene
   the frame shows is wrapped.
 - A layout that is not on the frame leaves the scene as it is (`layout:missing`,
-  logged once).
+  logged once). It is looked for once per scene set, not at every scene start
+  (`layout_choice.nim` `layoutMissing`; a host's new set calls
+  `forgetMissingLayouts`, an ESP32's switch within one set does not).
 - **A `<yield />` and a `<Scene>` are holes in the canvas** (up to eight in a
   UI). The chrome is drawn around them and each scene straight into its
   rectangle of the canvas, as a split's panel is: no picture of it is made, what

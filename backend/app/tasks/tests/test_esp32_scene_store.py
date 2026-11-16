@@ -199,7 +199,24 @@ def test_a_backend_set_renders_at_once():
     Both ways go through fos_scenes_take_backend_payload, which asks."""
     take = _functions(_source("fos_scenes.c"))["fos_scenes_take_backend_payload"]
     assert take.index("load_into_nim(body, len, \"backend\");") < take.index("fos_client_render_now();") < take.index(
-        "store_behind(body, len, etag)")
+        "store_behind(body, len, etag, !loaded)")
+
+
+def test_a_set_the_runtime_refuses_is_loaded_from_flash_after_its_write():
+    """A whole set taken from the backend that the runtime refused (out of
+    memory) was still written to flash, and the runtime ran the set before
+    against a store holding the new one: every scene start read flash for the
+    old set's layout and logged `layout:missing` until the next push (the
+    reTerminal E1004, the hardware bench, 2026-11-16). The write now leaves an
+    apply pending, which loads what flash holds one scene at a time."""
+    functions = _functions(_source("fos_scenes.c"))
+    take = functions["fos_scenes_take_backend_payload"]
+    assert "bool loaded = load_into_nim(body, len, \"backend\");" in take
+    assert ".reload = !loaded" in take
+    assert "s_store_next.reload = reload;" in functions["store_behind"]
+    store = functions["store_backend_payload"]
+    pending = store.index("if (job->reload) s_pending = true;")
+    assert store.index("store_set_as_changes_locked(") < pending < store.index("store_unlock();")
 
 
 def test_a_paced_write_gives_way_to_a_render_task_waiting_for_the_store():

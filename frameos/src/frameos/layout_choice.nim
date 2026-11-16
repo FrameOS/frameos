@@ -23,6 +23,12 @@ var
   saved {.threadvar.}: JsonNode
   chosen {.threadvar.}: string
   chosenRead {.threadvar.}: bool
+  missing {.threadvar.}: seq[string]
+  missingAt {.threadvar.}: int
+  sceneSetGeneration: int
+    ## Bumped by every new scene set, on whichever thread takes it; each
+    ## thread's `missing` is good for one generation. A plain int: a racy read
+    ## costs one more lookup, never a wrong layout.
 
 proc savedLayoutState*(id: string): JsonNode =
   ## What was set on the frame for this layout; nil for nothing.
@@ -74,3 +80,30 @@ proc layoutFor*(own: string): string =
   elif active == NoLayout: ""
   elif not layoutOnFrame(active): own
   else: active
+
+proc forgetMissingLayouts*() =
+  ## A new scene set: a layout that was missing may be in it. Hosts call this
+  ## where the set changes (a pushed or deployed set, an ESP32's catalog off
+  ## flash), never on a switch between the scenes of one set.
+  inc sceneSetGeneration
+
+proc layoutMissing*(id: string): bool =
+  ## Whether this layout was looked for since the scene set changed and was
+  ## not there: not looked up again, and not logged again, by any scene that
+  ## wears it. Per scene instance was not enough: an ESP32 starts its scene
+  ## anew at every switch, and a set whose push it could not take left every
+  ## scene reading flash for a layout that was gone and logging
+  ## `layout:missing` at each start (the reTerminal E1004, the hardware bench,
+  ## 2026-11-16).
+  if missingAt != sceneSetGeneration:
+    missingAt = sceneSetGeneration
+    missing.setLen(0)
+  id in missing
+
+proc noteLayoutMissing*(id: string): bool =
+  ## Remember that this layout is not on the frame; true the first time, when
+  ## it is to be said.
+  if layoutMissing(id):
+    return false
+  missing.add id
+  true
