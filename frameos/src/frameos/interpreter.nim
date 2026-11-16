@@ -943,8 +943,9 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
     if not r.embedImage.isNil:
       dropEmbedImage(r)
     if owner.holesMoved:
-      # The chrome has just painted where it was.
-      rhythmMarkDue(child)
+      # The chrome has just painted where it was: drawn again, but due only
+      # at a new size.
+      rhythmHoleMoved(child, width, height)
     drawIntoHole(owner, child, context.image, x.int, y.int, width, height, context, addSlot = true)
     return context.image
   owner.slots.add(SceneSlot(child: child, x: x, y: y, visible: visible))

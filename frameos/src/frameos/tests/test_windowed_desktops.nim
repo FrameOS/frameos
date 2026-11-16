@@ -58,6 +58,28 @@ export function get(app) {
     "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
       {"id": "2", "source": "2", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/image"}]}
 
+# The "SD card image" sample, as it is built: a slideshow from a folder, every
+# due run of its scene the next photo.
+let photos = getTempDir() / "frameos-windows98-photos"
+createDir(photos)
+for (name, hex) in [("a.png", "#ff00ff"), ("b.png", "#00ffff"), ("c.png", "#ffff00")]:
+  let photo = newImage(16, 16)
+  photo.fill(parseHtmlColor(hex))
+  photo.writeFile(photos / name)
+
+proc slideshowPanel(id, name: string): JsonNode =
+  %*{"id": id, "name": name, "settings": {"execution": "interpreted", "refreshInterval": 900,
+      "backgroundColor": "#000000"},
+    "fields": [{"name": "counter", "label": "counter", "type": "integer", "value": "0", "persist": "memory",
+      "access": "private"}],
+    "apps": {}, "layout": {"sceneId": Layout},
+    "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+      {"id": "2", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": photos,
+        "order": "alphabetical", "counterStateKey": "counter"}}},
+      {"id": "3", "type": "app", "data": {"keyword": "render/image", "config": {"placement": "stretch"}}}],
+    "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
+      {"id": "2", "source": "2", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/image"}]}
+
 let layout = parseFile(Samples / "Windows 98 layout" / "scenes.json")[0]
 doAssert layout["id"].getStr() == Layout
 let tiling = parseFile(Samples / "Tiling layout" / "scenes.json")[0]
@@ -79,7 +101,8 @@ setUploadedInterpretedScenes(parseInterpretedScenes($(%*[layout, tiling, macos, 
   panel("tests/store-98", "Scene store", "#3b82f6"), panel("tests/store-tiling", "Scene store", "#3b82f6", Tiling),
   panel("tests/store-mac", "Scene store", "#3b82f6", MacOS), panel("tests/store-be", "Scene store", "#3b82f6", BeOS),
   panel("tests/term-98", "Terminal", "#111111"), panel("tests/term-tiling", "Terminal", "#111111", Tiling),
-  panel("tests/term-mac", "Terminal", "#111111", MacOS), panel("tests/term-be", "Terminal", "#111111", BeOS)])))
+  panel("tests/term-mac", "Terminal", "#111111", MacOS), panel("tests/term-be", "Terminal", "#111111", BeOS),
+  slideshowPanel("tests/photo", "SD card image")])))
 resetInterpretedScenes()
 
 let config = FrameConfig(name: "desktop", mode: "rpios", device: "framebuffer", width: W, height: H, rotate: 0,
@@ -1271,3 +1294,56 @@ suite "where only two scenes run at once (an ESP32 with 8 MB)":
     chooseLayout("")
     discard pass()
     deviceMemoryBytesOverride = 0
+
+suite "a slideshow in a window (the SD card image sample)":
+  # Its window dragged across the Windows 98 desktop went from photo to photo on
+  # the bench (2026-11-16): every pass of the drag ran it as if it were due.
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/blue", "name": "Blue"}, {"id": "tests/photo", "name": "SD card image"}]
+
+  test "dragged by its title bar, it keeps its photo, and its slideshow its schedule":
+    desk().state["openScenes"] = %*[]
+    chooseLayout(Layout)
+    discard focusOn("tests/blue")
+    discard pass()
+    discard focusOn("tests/photo")
+    check current.id.string == "tests/photo"
+    let first = pass()
+    let photo = hosted["tests/photo"]
+    let w = winOf("tests/photo")
+    check not w{"max"}.getBool()
+    let (x0, y0, ww, wh) = (w{"x"}.getInt(), w{"y"}.getInt(), w{"w"}.getInt(), w{"h"}.getInt())
+    let shown = first.color(x0 + ww div 2, y0 + wh div 2)
+    check shown in [colored("#ff00ff"), colored("#00ffff"), colored("#ffff00")]
+    var hole = false
+    for slot in desk().slots:
+      hole = hole or slot.hole and slot.child == photo
+    check hole
+    let counter = photo.state{"counter"}.getInt()
+    let scheduled = photo.rhythm.scheduledPass
+    discard pass()
+    check photo.rhythm.scheduledPass == scheduled # not due: fifteen minutes
+    # Drawn after every move, as a frame does while the pointer drags.
+    discard send("pointerDown", at(x0 + 60, y0 + 14))
+    for (dx, dy) in [(10, 5), (40, 30), (70, 40), (100, 50)]:
+      discard send("pointerMove", at(x0 + 60 + dx, y0 + 14 + dy))
+      let image = pass()
+      check winOf("tests/photo"){"x"}.getInt() == x0 + dx
+      check image.color(x0 + dx + ww div 2, y0 + dy + wh div 2) == shown
+      check photo.state{"counter"}.getInt() == counter
+      check photo.rhythm.scheduledPass == scheduled
+    discard send("pointerUp", at(x0 + 160, y0 + 64, %*{"buttons": 0}))
+    check pass().color(x0 + 100 + ww div 2, y0 + 50 + wh div 2) == shown
+    check photo.state{"counter"}.getInt() == counter
+    # Sized, its picture is the wrong shape: it runs, and the slideshow steps on.
+    let sized = winOf("tests/photo")
+    discard send("pointerDown", at(sized{"x"}.getInt() + ww - 3, sized{"y"}.getInt() + wh - 3))
+    discard send("pointerMove", at(sized{"x"}.getInt() + ww + 30, sized{"y"}.getInt() + wh + 20))
+    discard send("pointerUp", at(sized{"x"}.getInt() + ww + 30, sized{"y"}.getInt() + wh + 20, %*{"buttons": 0}))
+    discard pass()
+    check photo.rhythm.scheduledPass != scheduled
+    check problems.len == 0
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
