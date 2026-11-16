@@ -1,8 +1,8 @@
 # The playground: playground.frameos.net
 
 A frame in the browser, the size of the window, for anyone: the repo's scenes
-running side by side on the **Windows 98** desktop, the Scene store, the
-Asset browser and the Terminal on its desktop, and the Control Panel (the
+running side by side on the **Windows 98** desktop, the Scene store,
+Files and the Terminal on its desktop, and the Control Panel (the
 frame's own page). Nothing is installed, nothing is saved anywhere but the
 visitor's own browser.
 

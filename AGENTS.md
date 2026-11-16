@@ -280,7 +280,7 @@
 ## The scene store on a frame: `docs/scene-store.md`
 
 - **Scene store** is a scene (`repo/scenes/samples/Scene store`, one JSX app),
-  and so is its sibling **Asset browser**. The app has the words and keeps
+  and so is its sibling **Files** (id `asset-browser`). The app has the words and keeps
   where it is in a private disk field (`spot`), so it reopens on the same spot
   after a preview; the host has the facts and does the network off the render
   task: `frameos.store()` / `frameos.storeAction()`

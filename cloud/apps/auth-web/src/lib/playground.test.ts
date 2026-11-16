@@ -166,6 +166,14 @@ describe("the playground's scenes", () => {
     }
   });
 
+  it("hold Files, under the id the desktops find it by", () => {
+    // Renamed from "Asset browser" on 2026-11-16; its scene id stayed.
+    const files = scenes.find((scene) => scene.id === "asset-browser");
+    expect(files?.name).toBe("Files");
+    expect(leadingTemplates).toContain("Files");
+    expect(leadingTemplates).not.toContain("Asset browser");
+  });
+
   it("leave out what needs a key or a Pi", () => {
     expect(excludedTemplates.has("OpenAI image")).toBe(true);
     expect(scenes.some((scene) => scene.id === "9f5a338b-0048-495a-a64f-e3190071ff51")).toBe(false);

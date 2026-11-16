@@ -223,9 +223,9 @@ whole desktop", a desktop still fills it with every scene. A window's place and
 size once moved are the desktop's own, as before. `Tiling` and `Commander` have
 no window sizes.
 The desktop icons of `Windows 98`, `BeOS` and `Classic Mac` are those apps alone, never the
-frame's scenes (the menus have those): the scene list, the scene store, the
-asset browser, the terminal and the frame's settings. The **Scene store**, the
-**Asset browser** (`docs/scene-store.md`) and the **Terminal**
+frame's scenes (the menus have those): the scene list, the scene store,
+Files, the terminal and the frame's settings. The **Scene store**,
+**Files** (`docs/scene-store.md`) and the **Terminal**
 (`docs/terminal.md`) are scenes like any other, found by their sample's id
 (`scene-store`, `asset-browser`, `terminal-app`) or their name; where the frame
 has them each desktop has entries of its own for them and leaves them out of its
