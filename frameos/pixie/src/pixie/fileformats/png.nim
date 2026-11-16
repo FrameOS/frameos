@@ -1101,19 +1101,31 @@ proc decodePngScaledInto*(
 # non-contiguous buffers (e.g. an HTTP body downloaded in fixed-size chunks
 # on a device whose fragmented heap has no room for one contiguous copy).
 
-const pngCrcTable = block:
-  var table: array[256, uint32]
-  for i in 0 ..< 256:
-    var c = i.uint32
-    for _ in 0 ..< 8:
-      c = if (c and 1) != 0: 0xEDB88320'u32 xor (c shr 1) else: c shr 1
-    table[i] = c
-  table
+when defined(frameosEmbedded):
+  # The ESP32's ROM has this CRC-32 (zlib's: 0xEDB88320, inverted before and
+  # after), so the device keeps no 1 KB table for it. The ROM inverts the
+  # running value on the way in and out; this one is kept raw.
+  proc esp_rom_crc32_le(crc: uint32, buf: pointer, len: uint32): uint32 {.
+    importc, header: "esp_rom_crc.h".}
 
-proc pngCrcUpdate(crc: uint32, data: openArray[uint8], len: int): uint32 =
-  result = crc
-  for i in 0 ..< len:
-    result = pngCrcTable[(result xor data[i].uint32) and 0xff] xor (result shr 8)
+  proc pngCrcUpdate(crc: uint32, data: openArray[uint8], len: int): uint32 =
+    if len <= 0:
+      return crc
+    not esp_rom_crc32_le(not crc, unsafeAddr data[0], len.uint32)
+else:
+  const pngCrcTable = block:
+    var table: array[256, uint32]
+    for i in 0 ..< 256:
+      var c = i.uint32
+      for _ in 0 ..< 8:
+        c = if (c and 1) != 0: 0xEDB88320'u32 xor (c shr 1) else: c shr 1
+      table[i] = c
+    table
+
+  proc pngCrcUpdate(crc: uint32, data: openArray[uint8], len: int): uint32 =
+    result = crc
+    for i in 0 ..< len:
+      result = pngCrcTable[(result xor data[i].uint32) and 0xff] xor (result shr 8)
 
 type PngSegmentReader = object
   segments: seq[InflateSegment]
