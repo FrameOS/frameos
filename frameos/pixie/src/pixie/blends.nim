@@ -2,6 +2,10 @@
 
 import chroma, common
 
+# See common.nim's hotInline: per-pixel helpers inlined into -Os callers.
+{.pragma: hotInline, inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".}
+
+
 # See https://www.w3.org/TR/compositing-1/
 # See https://www.khronos.org/registry/OpenGL/extensions/KHR/KHR_blend_equation_advanced.txt
 
@@ -38,7 +42,7 @@ proc alphaFix(backdrop, source, mixed: ColorRGBA): ColorRGBA =
   result.b = (b div a div 255).uint8
   result.a = a.uint8
 
-proc blendAlpha*(backdrop, source: uint8): uint8 {.inline.} =
+proc blendAlpha*(backdrop, source: uint8): uint8 {.hotInline.} =
   ## Blends alphas of backdrop, source.
   source + ((backdrop.uint32 * (255 - source)) div 255).uint8
 
@@ -57,7 +61,7 @@ proc hardLight(
   else:
     screen(backdropColor, sourceColor)
 
-proc blendNormal*(backdrop, source: ColorRGBX): ColorRGBX {.inline.} =
+proc blendNormal*(backdrop, source: ColorRGBX): ColorRGBX {.hotInline.} =
   if backdrop.a == 0 or source.a == 255:
     return source
   if source.a == 0:
@@ -224,7 +228,7 @@ proc blendHue*(backdrop, source: ColorRGBX): ColorRGBX =
 proc blendSaturation*(backdrop, source: ColorRGBX): ColorRGBX =
   blendSaturation(backdrop.color, source.color).rgbx
 
-proc blendMask*(backdrop, source: ColorRGBX): ColorRGBX {.inline.} =
+proc blendMask*(backdrop, source: ColorRGBX): ColorRGBX {.hotInline.} =
   let k = source.a.uint32
   result.r = ((backdrop.r * k) div 255).uint8
   result.g = ((backdrop.g * k) div 255).uint8

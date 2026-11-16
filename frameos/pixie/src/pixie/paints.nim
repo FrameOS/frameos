@@ -1,5 +1,9 @@
 import chroma, common, images, vmath
 
+# See common.nim's hotInline: per-pixel helpers inlined into -Os callers.
+{.pragma: hotInline, inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".}
+
+
 when defined(release):
   {.push checks: off.}
 
@@ -128,7 +132,7 @@ proc gradientLut(paint: Paint, size: int): seq[ColorRGBX] =
   for i in 0 ..< size:
     result[i] = paint.gradientColor(i.float32 / last)
 
-proc fastSqrt(x: float32): float32 {.inline.} =
+proc fastSqrt(x: float32): float32 {.hotInline.} =
   ## sqrt to 5e-6 relative, from a reciprocal-square-root seed refined twice.
   ## For the colour-table kernels, whose t is quantised to 1/1024 at best:
   ## where the FPU has no square root (Xtensa) `sqrtf` is a library call of
@@ -287,7 +291,15 @@ proc row*(
     for i in 0 ..< x1 - x0:
       dst[i] = c
   of gfLinear:
-    perPixel(toLineSpace(g.at, g.to, vec2(x.float32 + origin.x, rowY)))
+    # toLineSpace, written out: the row's term once, and no Vec2 per pixel
+    # (each one calls on an -Os firmware). The same operations in the same
+    # order, so the same t.
+    let
+      dx = g.to.x - g.at.x
+      dy = g.to.y - g.at.y
+      det = dx * dx + dy * dy
+      rowTerm = dy * (rowY - g.at.y)
+    perPixel((rowTerm + dx * (x.float32 + origin.x - g.at.x)) / det)
   of gfRadial:
     let
       rowX10 = g.m10 * rowY
