@@ -66,6 +66,8 @@ elif defined(frameosEmbedded):
   # the ROM's.
   patchFile("crunchy", "crc32", "src/embedded/patched_crc32")
   patchFile("zippy", "crc", "src/embedded/patched_zippy_crc")
+  # The same for MD5 (checksums' 3.3 KB Nim copy; the ROM's esp_rom_md5_*).
+  patchFile("checksums", "md5", "src/embedded/patched_md5")
 
   # chroma's 148 CSS color names are a 256-slot compile-time Table, 9.1 KB;
   # the same names packed into one string are about 2 KB.
