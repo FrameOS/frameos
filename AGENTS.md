@@ -615,8 +615,9 @@
   A new window goes where `freeSpot` puts it (bare desktop first, then the least
   overlap), the same text in all five desktops of windows, and a list of scenes
   goes by category through `grouped` (`category` on each `app.frame.scenes`
-  entry, in `app.frame.categories` order), the same text in all six with a
-  list: change either in every copy
+  entry, in `app.frame.categories` order) and draws a scene's own icon through
+  `ownIcon`, each the same text in all six with a list: change any of them in
+  every copy
   (`test_windowed_desktops.nim` checks they match).
   Where memory is short only so many run at once (`app_runtime.windowLimit`, 2
   on an 8 MB ESP32, 4 above, `app.frame.windows`): the layouts close the one

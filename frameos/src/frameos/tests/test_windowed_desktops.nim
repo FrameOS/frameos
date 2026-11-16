@@ -2583,6 +2583,58 @@ suite "a long list of scenes, by category (each desktop's grouped)":
     chooseLayout("")
     discard pass()
 
+suite "a scene's own icon (app.frame.scenes[i].icon)":
+  # Red and Blue have an icon of their own, a square that fills its box; Green
+  # has none.
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/red", "name": "Red", "icon": "M0 0H24V24H0Z"}, {"id": "tests/green", "name": "Green"},
+        {"id": "tests/blue", "name": "Blue", "icon": "M0 0H24V24H0Z"}]
+
+  test "is the same function, word for word, in every desktop that draws its scenes' icons":
+    let copies = copiesOf("// A scene's own icon (`icon` on its entry", [layout, macos, beos, classicMac, nextstep, tiling])
+    check copies[0].len > 0
+    for text in copies: check text == copies[0]
+
+  test "is drawn where a desktop draws a scene's icon, and the desktop's own where a scene has none":
+    proc fresh(layoutId: string) =
+      discard focusOn("tests/green")
+      desk().state["openScenes"] = %*[]
+      chooseLayout(layoutId)
+      discard pass()
+      desk().state["boxes"] = %*{}
+      desk().state["wins"] = %*[]
+      discard pass()
+      check desk().id.string == layoutId
+    # Windows 98's Start: the programs, each with its icon 8 px in from the
+    # row's left, black as the row's text where it is the scene's own, the
+    # window (white inside) where it is not.
+    fresh(Layout)
+    discard click(20, H - 20)
+    let start = pass()
+    let rows = byY(rectsOf(Layout).filterIt(it[0] >= 20 and it[0] <= 40 and it[3] - it[1] >= 20 and
+      it[3] - it[1] <= 34 and it[2] - it[0] > 150 and it[3] <= float32(H - 42)))
+    proc iconMiddle(row: array[4, float32]): (int, int) = (int(row[0]) + 16, int((row[1] + row[3]) / 2))
+    check start.color(iconMiddle(rows[0])[0], iconMiddle(rows[0])[1]) == colored("#000000") # Red
+    check start.color(iconMiddle(rows[1])[0], iconMiddle(rows[1])[1]) == colored("#ffffff") # Green
+    discard click(20, H - 20)
+    # NeXTSTEP's Dock: Red's tile has its icon, white on the dark grey, where
+    # Green's has its letter, which does not reach so far up.
+    fresh(NeXT)
+    discard focusOn("tests/red")
+    let dock = pass()
+    let tiles = nextDock() # the mark, Red, Green, the clock
+    check tiles.len == 4
+    proc offMiddle(tile: array[4, float32]): (int, int) =
+      (int((tile[0] + tile[2]) / 2) - 10, int((tile[1] + tile[3]) / 2) - 10)
+    check dock.color(offMiddle(tiles[1])[0], offMiddle(tiles[1])[1]) == colored("#ffffff")
+    check dock.color(offMiddle(tiles[2])[0], offMiddle(tiles[2])[1]) == colored("#555555")
+    shot(dock, "icons-nextstep")
+    check problems.len == 0
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+
 suite "where only two scenes run at once (an ESP32 with 8 MB)":
   setup:
     windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =

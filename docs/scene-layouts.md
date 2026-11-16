@@ -255,7 +255,14 @@ list has a heading over each category with scenes, under its name, in that
 order, and those with none or one not in it last as Other. Where the runtime
 gives no categories (an older one) or no scene has one, the list is as it
 always was. That is `grouped`, one more function the same text in each of those
-six layouts. Launchpad and the Scenes icons open the
+six layouts. A scene's own icon (`icon` on its entry, one path in a 24 box:
+`docs/scene-icons.md`) is drawn, in the color of the text around it, wherever a
+desktop draws a scene's icon: `Windows 98`'s Start, taskbar and desktop icons,
+the `macOS` Dock and Scenes menu, `BeOS`'s Be menu, Deskbar and Tracker's icons,
+the `Classic Mac` menus and icons, `NeXTSTEP`'s Dock and miniwindows, `Tiling`'s
++. A scene without one gets the desktop's own, as before, and the scene store,
+Files and the terminal keep theirs unless they have one. That is `ownIcon`, the
+same text in the six. `Commander` draws no icons. Launchpad and the Scenes icons open the
 frame's own scene list (the scene switcher, `docs/scene-switcher.md`), which is
 the runtime's, not a layout's.
 The desktop icons of `Windows 98`, `BeOS` and `Classic Mac` are those apps alone, never the
