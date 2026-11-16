@@ -38,6 +38,14 @@ def scene_table(frame_res):
     return '\n'.join(out)
 
 
+def best_warm(scene: dict):
+    warm = scene.get('warm') or []
+    times = [w.get('render_ms') for w in warm if w.get('render_ms') is not None]
+    if not times:
+        times = [w.get('done_ms') for w in warm if w.get('done_ms') is not None]
+    return min(times) if times else None
+
+
 def compare(current: dict, baseline: dict) -> list[dict]:
     """Regressions against an earlier run of the same frames."""
     issues = []
@@ -52,11 +60,14 @@ def compare(current: dict, baseline: dict) -> list[dict]:
             o = old.get(name)
             if not o:
                 continue
-            cm = (r.get('warm_stats') or {}).get('median')
-            om = (o.get('warm_stats') or {}).get('median')
+            # The scene's own work, at its best: the render time where the line has
+            # one (an e-paper `done` adds a partial or a full panel refresh, which
+            # alternate), the fastest of the warm renders (the first after a
+            # switch can rebuild an interpreter the switch let go).
+            cm, om = best_warm(r), best_warm(o)
             if cm and om and cm > om * REGRESS_RATIO and cm - om >= REGRESS_MIN_MS:
                 issues.append({'severity': 'slow', 'kind': 'regression', 'where': f"{f['name']}: scene {name}",
-                               'detail': f'warm median {om} ms -> {cm} ms'})
+                               'detail': f'fastest warm render {om} ms -> {cm} ms'})
             cp = [w.get('in_place') for w in r.get('warm') or []]
             op = [w.get('in_place') for w in o.get('warm') or []]
             if op and all(op) and cp and not all(cp):

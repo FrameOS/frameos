@@ -121,6 +121,7 @@ def suite_scenes(ctx, frame, scene_filter=None):
         con.command('set debug 1', 1.5)
     intervals = {s.get('id'): s.get('refreshInterval') for s in ((st.get('scenes') or {}).get('scenes') or [])}
     scenes = [s for s in scene_list(con) if not s.get('isLayout')]
+    scene_filter = scene_filter or getattr(ctx, 'scene_filter', None)
     if scene_filter:
         scenes = [s for s in scenes if s['id'] in scene_filter or s.get('name') in scene_filter]
     if ctx.quick:
