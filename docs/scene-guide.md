@@ -34,10 +34,13 @@ A scenes file is a JSON array of scenes. Each scene is
   example `"M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"` for a house. Anything else is
   ignored, and the lists keep their own placeholder.
 - `settings.category` (optional): the store's category for the scene, one of
-  `photos`, `art`, `calendar`, `weather`, `ai`, `dashboards`, `fun`,
-  `realtime`, `utilities`, `demos` (`desktops` and `layouts` are for layouts).
-  A desktop layout groups its scene lists by it. Any other value counts as
-  none.
+  `photos` (the owner's photos or a photo service), `art` (a collection of
+  artwork the scene carries), `calendar`, `weather`, `ai` (made by an AI
+  service), `dashboards` (data, charts, stats, news from a service), `fun`
+  (comics, games), `realtime` (animates every second or faster, for a fast
+  screen), `utilities` (clocks and practical tools), `demos` (a demo or a
+  building block); `desktops` and `layouts` are for layouts. A desktop layout
+  groups its scene lists by it. Any other value counts as none.
 - `fields`: the scene's state fields (see [Fields and state](#fields-and-state)).
 - `apps`: JavaScript apps the scene carries with it (see [JS apps](#js-apps)).
 - `customEvents`: events of the scene's own (see [Events](#events)).
